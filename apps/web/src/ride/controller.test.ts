@@ -2301,8 +2301,12 @@ describe('#524 — the ride keeps the process alive while it is active', () => {
  * before the first ride's foreground service starts, and a refusal never stops
  * the ride.
  *
- * One log is shared by both ports so the ORDER is asserted: the question comes
- * before the keep-alive, and nothing at all happens before a ride starts.
+ * One log is shared by both ports so the ORDER is asserted: the keep-alive
+ * comes FIRST and never waits for the question (#531's review — Android only
+ * answers once the app is on screen again, so a keep-alive held behind the
+ * dialog is missing exactly when the screen is off), a `granted` answer
+ * re-starts it so the notification is posted, and nothing at all happens
+ * before a ride starts.
  */
 describe('#526 — the ride asks once whether it may show its notification', () => {
   interface Device {
@@ -2355,7 +2359,7 @@ describe('#526 — the ride asks once whether it may show its notification', () 
     }
   }
 
-  it('asks nothing on opening the app or pairing, only when a ride starts, and before the service', async () => {
+  it('asks nothing on opening the app or pairing, only when a ride starts, and beside the service', async () => {
     const android = device('prompt');
     const rig = benchWith(ports(android));
     await rig.controller.pair('trainer');
@@ -2365,14 +2369,14 @@ describe('#526 — the ride asks once whether it may show its notification', () 
 
     await rig.controller.start();
     await settled();
-    expect(android.log).toEqual(['check', 'ask', 'keep']);
+    expect(android.log).toEqual(['keep', 'check', 'ask', 'keep']);
     expect(rig.controller.getSnapshot().notificationNotice).toBeUndefined();
 
     // A pause and a resume are the same ride: nothing is asked again.
     await rig.controller.pause();
     await rig.controller.resume();
     await settled();
-    expect(android.log).toEqual(['check', 'ask', 'keep']);
+    expect(android.log).toEqual(['keep', 'check', 'ask', 'keep']);
     rig.controller.dispose();
   });
 
@@ -2381,7 +2385,7 @@ describe('#526 — the ride asks once whether it may show its notification', () 
     const rig = benchWith(ports(android));
     await rig.controller.start();
     await settled();
-    expect(android.log).toEqual(['check', 'keep']);
+    expect(android.log).toEqual(['keep', 'check']);
     expect(rig.controller.getSnapshot().notificationNotice).toBeUndefined();
     rig.controller.dispose();
   });
@@ -2392,7 +2396,7 @@ describe('#526 — the ride asks once whether it may show its notification', () 
     await rig.controller.pair('trainer');
     await rig.controller.start();
     await settled();
-    expect(android.log).toEqual(['check', 'ask', 'keep']);
+    expect(android.log).toEqual(['keep', 'check', 'ask']);
     expect(rig.controller.getSnapshot().notificationNotice).toBe(RIDE_NOTIFICATION_REFUSED);
 
     await ride(rig, 5);
@@ -2411,7 +2415,7 @@ describe('#526 — the ride asks once whether it may show its notification', () 
     const next = benchWith(ports(android, 'refuses'));
     await next.controller.start();
     await settled();
-    expect(android.log).toEqual(['check', 'keep']);
+    expect(android.log).toEqual(['keep', 'check']);
     expect(next.controller.getSnapshot().notificationNotice).toBeUndefined();
     next.controller.dispose();
   });
@@ -2421,7 +2425,7 @@ describe('#526 — the ride asks once whether it may show its notification', () 
     const rig = benchWith(ports(android));
     await rig.controller.start();
     await settled();
-    expect(android.log).toEqual(['check', 'keep']);
+    expect(android.log).toEqual(['keep', 'check']);
     expect(rig.controller.getSnapshot().notificationNotice).toBeUndefined();
     rig.controller.dispose();
   });
@@ -2431,12 +2435,12 @@ describe('#526 — the ride asks once whether it may show its notification', () 
     const rig = benchWith(ports(android, 'allows', true));
     await rig.controller.start();
     await settled();
-    expect(android.log).toEqual(['check', 'keep']);
+    expect(android.log).toEqual(['keep', 'check']);
     expect(rig.controller.getSnapshot().phase).toBe('recording');
     rig.controller.dispose();
   });
 
-  it('does not start the service for a ride that stopped while the rider was answering', async () => {
+  it('does not re-start the service for a ride that stopped while the rider was answering', async () => {
     const android = device('prompt');
     let answer: ((state: NotificationPermissionState) => void) | undefined;
     const { keepAlive } = ports(android);
@@ -2459,7 +2463,53 @@ describe('#526 — the ride asks once whether it may show its notification', () 
     await rig.controller.confirmStop();
     answer?.('granted');
     await settled();
-    expect(android.log).toEqual(['sleep']);
+    expect(android.log).toEqual(['keep', 'sleep']);
+    rig.controller.dispose();
+  });
+
+  it('starts the service at once, even when the question is never answered', async () => {
+    // Android delivers the answer only once the app is on screen again: a
+    // dialog left up while the screen times out is a question with no answer.
+    const android = device('prompt');
+    const { keepAlive } = ports(android);
+    const rig = benchWith({
+      keepAlive,
+      notificationPermission: {
+        notificationPermission: () => Promise.resolve(android.state),
+        askForNotificationPermission: () =>
+          new Promise<NotificationPermissionState>(() => undefined),
+      },
+    });
+    await rig.controller.start();
+    await settled();
+    expect(android.log).toEqual(['keep']);
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    rig.controller.dispose();
+  });
+
+  it('says nothing on the stopped screen when the refusal arrives after the stop', async () => {
+    const android = device('prompt');
+    const answers: ((state: NotificationPermissionState) => void)[] = [];
+    const { keepAlive } = ports(android);
+    const rig = benchWith({
+      keepAlive,
+      notificationPermission: {
+        notificationPermission: () => Promise.resolve(android.state),
+        askForNotificationPermission: () =>
+          new Promise((resolve) => {
+            answers.push(resolve);
+          }),
+      },
+    });
+    await rig.controller.start();
+    await settled();
+    await ride(rig, 3);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    answers[0]?.('prompt-with-rationale');
+    await settled();
+    expect(rig.controller.getSnapshot().phase).toBe('stopped');
+    expect(rig.controller.getSnapshot().notificationNotice).toBeUndefined();
     rig.controller.dispose();
   });
 });

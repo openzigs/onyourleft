@@ -216,11 +216,27 @@ as well as [#524](https://github.com/openzigs/onyourleft/issues/524).** From And
 `POST_NOTIFICATIONS` is a runtime permission, and before #526 nothing asked for it: the service ran
 and its notification was never shown, so on the owner's tablet (API 35+) A5 would record a failure
 caused by the missing question rather than by the service. On such a build, pressing **Start
-recording** for the first time raises Android's notifications dialog **before** the notification
-appears — allow it, and the "Recording ride" notification is what A5 then looks for. Refusing it
-must leave the ride recording, with one sentence on the Ride screen saying there will be no
-notification, and a later ride must not ask again. Below API 33 nothing is asked. A result taken on
-a build without #526 says nothing about A5 on API 33+.
+recording** for the first time raises Android's notifications dialog while the service is
+**already** running — allow it, and the "Recording ride" notification appears, which is what A5 then
+looks for. Refusing it must leave the ride recording, with one sentence on the Ride screen saying
+there will be no notification, and a later ride must not ask again. Below API 33 nothing is asked. A
+result taken on a build without #526 says nothing about A5 on API 33+.
+
+Three more observations belong to the same row, and none of them is decidable off the device:
+
+- **Leave the dialog up and let the screen time out** (or press Home). The ride must keep recording
+  with the screen off: `adb shell dumpsys activity services dev.openzigs.onyourleft` lists
+  `RecordingService` as a foreground service while the question is still unanswered. That is
+  #531's review finding — the service is started first and does not wait for the answer, because
+  Android delivers the answer only once the app is on screen again.
+- **Dismiss the dialog** (back pressed, no choice made), finish the ride, and start another. Record
+  whether the second ride asks again. ⚠️ Capacitor 8.5.2's `Bridge.validatePermissions` stores any
+  result that is not a grant as `denied` unless `shouldShowRequestPermissionRationale` is true, so a
+  dismissal reported as a denial may be remembered as `denied` and **never asked about again** — the
+  opposite of what #531's first description claimed. Which one Android 13+ reports for a dismissal
+  is the observation.
+- **Allow it**, and check the notification appears on **this** ride without stopping it: the second
+  start the client sends on `granted` is what posts it.
 
 ⚠️ **A6–A8 are #230's last acceptance criterion and nothing in CI can stand in for them.** The bug
 was found by installing the APK and pressing the button while four gates were green: the scripted

@@ -340,7 +340,7 @@ export interface RideSnapshot {
  * recording, because a rider reading a refusal first reads a lost ride.
  */
 export const RIDE_NOTIFICATION_REFUSED =
-  'Your ride is still recording. Android will not show a “Recording ride” notification while the screen is off, because notifications are not allowed for On Your Left. You can allow them in the app’s settings.';
+  'Your ride is still recording. Android will not show its “Recording ride” notification, because notifications are not allowed for On Your Left. You can allow them in the app’s settings.';
 
 /**
  * What a finished ride needs to become an activity — #14's fourth criterion,
@@ -610,8 +610,8 @@ export function createRideController(options: RideControllerOptions): RideContro
   let notificationNotice: string | undefined;
 
   /**
-   * #526 — ask for `POST_NOTIFICATIONS` at most once, JUST BEFORE the ride's
-   * foreground service is started.
+   * #526 — ask for `POST_NOTIFICATIONS` at most once, BESIDE the first ride's
+   * foreground service, never in front of it.
    *
    * **Why this moment.** Not on cold start, because a rider opening the app to
    * look at last week's ride has no reason to be asked about a notification.
@@ -622,11 +622,15 @@ export function createRideController(options: RideControllerOptions): RideContro
    * — the rider has just pressed Start (or continued a ride), and Android's
    * dialog asks about notifications from an app that is now recording.
    *
-   * **Why before the service rather than beside it.** On API 33+ the service's
-   * notification is posted when it starts; asking first means a rider who says
-   * yes sees it on this ride, rather than on the next. The RECORDING is not
-   * held back: `start` has already begun it, and only the keep-alive waits for
-   * the answer, while the dialog keeps the app in the foreground anyway.
+   * ⚠️ **Why beside the service rather than before it.** Android delivers the
+   * dialog's answer only once the activity is on screen again. A rider who
+   * leaves the dialog up and lets the screen time out, or presses Home, would
+   * otherwise ride with the screen off and NO foreground service — which is
+   * exactly the ride #524 exists for. So the keep-alive is started first and
+   * never waits; the question runs alongside it. When the answer is `granted`
+   * on the same ride, the keep-alive is asked for again: the service's
+   * `onStartCommand` calls `startForeground` on every start, which posts the
+   * notification the first start could not.
    *
    * **Why at most once.** Only a `prompt` is asked about. A refusal leaves
    * Android reporting `prompt-with-rationale` or `denied`, so no later ride
@@ -635,23 +639,39 @@ export function createRideController(options: RideControllerOptions): RideContro
    * the one transition into riding — a pause is not a transition. Below API
    * 33 the plugin answers `granted` and nothing is asked.
    *
-   * ⚠️ **Nothing here can stop a ride.** A rejected call is swallowed and the
-   * keep-alive goes ahead; a refusal is told once, in words, on the ride that
-   * asked. A question Android never answers would hold the keep-alive back
-   * with it — that is the one limit, and a pending dialog is on screen.
+   * ⚠️ **Nothing here can stop a ride, or hold its service back.** A rejected
+   * call is swallowed; a refusal is told once, in words, on the ride that
+   * asked — and only while that same ride is still in progress, so a late
+   * answer after a stop cannot leave a notice on the stopped screen, where
+   * nothing would ever clear it.
    */
-  const askAboutTheNotification = async (port: RideNotificationPermissionPort): Promise<void> => {
+  const askAboutTheNotification = async (
+    port: RideNotificationPermissionPort,
+    keepAlive: RideKeepAlivePort,
+    generation: number,
+  ): Promise<void> => {
+    // Every way out of a ride — a stop, a dispose — is a keep-alive
+    // transition and bumps the generation, so an unchanged one IS "this ride,
+    // still in progress". A disposed or stopped check beside it would be
+    // implied by it, and untestable as a result.
+    const sameRide = (): boolean => generation === keepAliveGeneration;
     try {
       if ((await port.notificationPermission()) !== 'prompt') {
         return;
       }
       const answer = await port.askForNotificationPermission();
-      if (answer !== 'granted' && !disposed && rideInProgress(phase)) {
-        notificationNotice = RIDE_NOTIFICATION_REFUSED;
-        changed();
+      if (!sameRide()) {
+        return;
       }
+      if (answer === 'granted') {
+        // Re-start so the service posts the notification it could not.
+        await keepAlive.keepRideAlive();
+        return;
+      }
+      notificationNotice = RIDE_NOTIFICATION_REFUSED;
+      changed();
     } catch {
-      // Degraded, not lost: the ride records and the service still starts.
+      // Degraded, not lost: the ride records and the service is already started.
     }
   };
 
@@ -664,6 +684,10 @@ export function createRideController(options: RideControllerOptions): RideContro
    *
    * ⚠️ Fire and forget, and a rejection is swallowed: a ride recorded without
    * the service is degraded, not broken. `keep-alive-port.ts` says why.
+   *
+   * ⚠️ **Nothing may be awaited before `keepRideAlive()`** (#531's review). An
+   * async step tied to a dialog or to the activity goes quiet exactly when the
+   * screen is off, which is the one time the service matters.
    */
   const syncKeepAlive = (): void => {
     const wanted = !disposed && rideInProgress(phase);
@@ -679,20 +703,11 @@ export function createRideController(options: RideControllerOptions): RideContro
       keepAlive.letRideSleep().catch(() => undefined);
       return;
     }
+    keepAlive.keepRideAlive().catch(() => undefined);
     const permission = options.notificationPermission;
-    if (permission === undefined) {
-      keepAlive.keepRideAlive().catch(() => undefined);
-      return;
+    if (permission !== undefined) {
+      void askAboutTheNotification(permission, keepAlive, generation);
     }
-    askAboutTheNotification(permission)
-      .then(async () => {
-        // The ride ended while the rider was answering: `letRideSleep` has
-        // already been sent, and a late start would outlive the ride.
-        if (generation === keepAliveGeneration) {
-          await keepAlive.keepRideAlive();
-        }
-      })
-      .catch(() => undefined);
   };
 
   const changed = (): void => {
