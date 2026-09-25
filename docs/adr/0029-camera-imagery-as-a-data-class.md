@@ -726,3 +726,17 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   | There is no camera code | **Stands.** [#382](https://github.com/openzigs/onyourleft/issues/382) and [#383](https://github.com/openzigs/onyourleft/issues/383) own it, and this amendment writes none, adds no permission, no port and no dependency |
   | ⚠️ **New: the EU and UK regulatory read** | [ADR 0030](0030-what-the-app-may-say-about-a-body.md)'s amendment of the same date records the owner's Q2 answer, which makes that read a **gate on camera code**. It is [spike 0008](../spikes/0008-eu-uk-medical-device-read.md), written in the same pull request as this entry, and a spike decides nothing — what clears the gate is the owner reading it |
   | ⚠️ The no-network change itself | **Not started, and named rather than done** — the three artefacts above, in one pull request, with the first byte |
+
+- **2026-09-25** — **D-6's WebRTC row, and D-2's per-ride keep on one path, are superseded by
+  [ADR 0033](0033-side-camera-link.md)** (#527), for the side camera the owner chose in
+  [#386](https://github.com/openzigs/onyourleft/issues/386). The WebRTC row's premise, *"it needs
+  signalling infrastructure, which is a server"*, does not hold when the two devices are in one
+  room: the offer and answer cross by QR code, and no ICE server of any kind is configured. **Every
+  other row of D-6 stands**, the Cloudflare Tunnel rejection included. On the side-camera path, the
+  owner ruled that pictures are *"analysed as they arrive and discarded at once"* and that *"no
+  picture is ever stored on the tablet"*, so **D-2's per-ride keep is not offered there**. D-2's
+  default is unchanged. **D-5 is NOT superseded.** The owner added a sentence beside the quoted
+  bystander sentence for the 30-second camera that keeps filming after the link is lost. D-5's own
+  wording is not edited, and ADR 0033 D-5 argues why this adds to D-5 rather than reversing it.
+  **D-9 and D-10 bind the new path unchanged.** Pictures are stripped at capture on the phone, and
+  no picture reaches a cache on either device.

@@ -3126,7 +3126,10 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   prose. ⚠️ A reviewer who remembers this sentence being unenforced is reading the old file:
   deleting an ADR's `- **Status**: Accepted` line used to leave `check-repo-rules.sh` reporting
   clean at exit 0. Numbers are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
-  **and which are claimed by open issues** before you pick one. **The next free number is 0033.**
+  **and which are claimed by open issues** before you pick one. **The next free number is 0034.**
+  ⚠️ **0033 is [ADR 0033](docs/adr/0033-side-camera-link.md)**, taken by
+  [#527](https://github.com/openzigs/onyourleft/issues/527) for the side-camera link. A reviewer who
+  remembers this sentence offering 0033 is reading the old file.
   ⚠️ **0032 is [ADR 0032](docs/adr/0032-external-data-for-the-game-world.md)**, taken by
   [#248](https://github.com/openzigs/onyourleft/issues/248) — the trainer game's world takes **no**
   external data source. It took 0032 rather than 0029 because **0029, 0030 and 0031 were taken the
@@ -3435,6 +3438,7 @@ top of an issue **supersedes its body**.
 | What the owner actually decided about the camera, and which of the four answers changes a promise | [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) §Amendments, [#495](https://github.com/openzigs/onyourleft/issues/495) |
 | What the no-network promise becomes, the one egress it does not cover, and the three artefacts that move with it | [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) §Amendments §Q1, `apps/web/src/privacy/no-network.test.ts`, [`docs/privacy-policy.md`](docs/privacy-policy.md) |
 | Which one module may send anything off the device, and what goes red for a second | `apps/web/src/camera/analysis-transport.ts`, `apps/web/src/privacy/no-network.test.ts` §`PERMITTED_NETWORK_CALLS`, [#387](https://github.com/openzigs/onyourleft/issues/387) |
+| How the tablet and the tripod phone connect with no server, what a stranger on the same Wi-Fi can and cannot do, and why the no-network gate cannot see WebRTC yet | [ADR 0033](docs/adr/0033-side-camera-link.md) D-1, D-4, D-9, [#532](https://github.com/openzigs/onyourleft/issues/532) |
 | Why the rider's computer must be on their own network by its spelling, and why a hosted model cannot be typed in | `apps/web/src/camera/analysis-endpoint.ts` §`addressSpaceOf`, [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) §Amendments §Q1 |
 | Why a model's answer is never shown yet, and what stops it reaching a trainer | `apps/web/src/camera/useAnalysis.ts`, `apps/web/src/camera/analysis-safety.test.ts`, [`docs/analysis-on-your-own-computer.md`](docs/analysis-on-your-own-computer.md) |
 | Why claiming a fitness benefit makes the measurement rules matter MORE rather than less | [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md) §Amendments, [#495](https://github.com/openzigs/onyourleft/issues/495) |
