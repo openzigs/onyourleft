@@ -97,8 +97,13 @@ that file, not one typed out by hand.
 **The Data Safety answers are `src/android/data-safety.ts`**, written down as
 data rather than left in a screenshot of a console — a form nobody can read from
 the repository is a form nobody can review. Every row is "not collected", which
-is a statement about the product: there is no server (owner decision D6), no
-analytics, and no outbound request in the client at all.
+is a statement about the product: there is no server (owner decision D6) and no
+analytics. ⚠️ **"No outbound request in the client at all" stopped being true
+with [#534](https://github.com/openzigs/onyourleft/issues/534)**: a ride's map
+requests tiles from `tiles.openzigs.com` by default (a rider can turn that off in
+Settings). The Location row stays "not collected" on Play's ephemeral-processing
+exemption, and that holds only while the host keeps nothing — which is why §8
+has a step that re-checks it before every tag.
 
 #95's fifth criterion asks a reviewer to confirm the **merged** manifest supports
 the "no location collection" claim. That is now done twice over:
@@ -234,7 +239,42 @@ adb install -r <the .apk>
 That is the path to #95's definition of done. It needs no tag, creates no
 release, and the artefact is the same file a tag would publish.
 
-**To cut a release:** push a `v*` tag. The same job runs, and the GitHub Release
+### Before every release tag — the tile host keeps nothing
+
+⚠️ **Do this before pushing any `v*` tag, every time.** Two filed statements rest
+on it: the Data Safety **Location** row's `collected: false`
+(`src/android/data-safety.ts`) and the privacy policy's *"the tile server keeps
+no record of the request"* (`docs/privacy-policy.md`). Both are true only while
+nothing retains the map's tile requests for us, and nothing in this repository
+can check that — it is a setting in the Cloudflare account, and a dashboard
+toggle made it false without any gate going red (#535's review).
+
+In the Cloudflare dashboard, for the R2 bucket and the zone serving
+`tiles.openzigs.com`, confirm all three are **off**:
+
+1. **R2 access logging** on the bucket.
+2. **Logpush** — no job whose dataset covers `tiles.openzigs.com` (HTTP
+   requests, R2 access, or any other dataset that carries the request URL or
+   client IP).
+3. **Analytics that retain per-request data** for the host — Web Analytics on
+   the zone, and any Logs or Log Explorer product that stores requests.
+
+Record the date and who checked in the release's notes.
+
+**If any one of them is on**, either turn it off before tagging, or — if it has
+to stay on — do all of these before the tag, not after:
+
+- change the Location row in `src/android/data-safety.ts` to
+  `collected: true` for **approximate location**, with a `why` that says what is
+  retained, for how long and why, and re-file the Data Safety form in Play
+  Console to match;
+- change `docs/privacy-policy.md`: remove *"keeps no record of the request"*
+  and say what is kept, for how long, and who can read it;
+- land both in one pull request, because the policy and the form must agree
+  (§4) and `apps/web/src/privacy/no-network.test.ts` only checks that they name
+  the host, not that what they say about it is true.
+
+**To cut a release:** push a `v*` tag, **after the step above**. The same job runs, and the GitHub Release
 step publishes the APK as a release asset — the AGPL-native distribution path,
 independent of any store (#95's sixth criterion), and the one §5 says is under
 threat. ⚠️ Nobody has done this yet, so the release step itself is the one part

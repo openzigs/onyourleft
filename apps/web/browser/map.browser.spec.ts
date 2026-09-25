@@ -167,16 +167,22 @@ async function mapLoad(page: import('@playwright/test').Page): Promise<MapLoadRe
 /**
  * Wait until the archive has actually been asked for.
  *
- * ⚠️ **Not `waitForLoadState('networkidle')`, and the reason is worth keeping.**
- * There is no archive to serve (#53), so the request 404s — and MapLibre
- * *retries* a failed source. The network therefore never goes idle, and every
- * assertion behind `networkidle` waits out its timeout instead of running. The
- * first version of this file did exactly that: one test passed and four burned
- * sixty seconds each.
+ * ⚠️ **Not `waitForLoadState('networkidle')`, and the reason is NOT the one
+ * this comment used to give.** It said the harness's 404 made MapLibre *retry*
+ * the failed source so the network never went idle, and that the first
+ * version of this file burned sixty seconds a test on it. #535's review
+ * measured MapLibre **6.10.0** and found no such loop: an archive answering
+ * 404 is asked for **once**, raises two `console.error`s and is not asked for
+ * again over ten seconds; a connection dropped mid-request is asked for
+ * **twice** and then left alone. Whatever the first version met was an older
+ * MapLibre, or something else, and the retry claim is withdrawn rather than
+ * kept as folklore.
  *
- * Waiting on the event we actually care about is both faster and stricter: it
- * fails immediately if the request is never made, which is what a broken
- * protocol registration would look like.
+ * The advice still holds, for a reason that does not depend on MapLibre's
+ * retry policy: `networkidle` resolves just as happily over a page that asked
+ * for **nothing**, which is exactly what a broken protocol registration looks
+ * like. Waiting on the request we mean fails at once when it is never made,
+ * and does not wait out an idle window when it is.
  */
 function archiveRequested(
   page: import('@playwright/test').Page,
@@ -603,14 +609,64 @@ test.describe('a ride outside the archive’s coverage — #534', () => {
     // One read of the header and root directory, then nothing: a request per
     // tile would be MapLibre asking outside the bounds, and a count still
     // rising after the paint deadline would be a retry loop.
+    //
+    // ⚠️ No extra sleep, and there used to be a fixed second here. `mapLoad`
+    // resolves only at the page's own paint deadline — nothing paints outside
+    // the bounds — so this count is already taken `CONTROL_DEADLINE_MS` after
+    // the map was created. That window is a BOUND, not a proof: a retry later
+    // than it would not be seen. #535's review measured MapLibre 6.10.0 making
+    // no retry over ten seconds even for a 404, which is what makes three
+    // seconds a reasonable bound rather than a hopeful one.
     const archiveReads = (): number =>
       seen.requests.filter((url) => url.startsWith(BOUNDED_FIXTURE_URL)).length;
-    expect(archiveReads()).toBe(1);
-    await page.waitForTimeout(1000);
-    expect(archiveReads(), 'the archive was asked for again after the map settled').toBe(1);
+    expect(archiveReads(), 'the archive was asked for more than once in the window').toBe(1);
 
     expect(seen.failures).toEqual([]);
     expect(problems).toEqual([]);
+  });
+});
+
+/**
+ * **With map tiles turned off — the owner's decision of 2026-09-25.**
+ *
+ * A Settings switch, on by default (`map/tiles-preference.ts`). Off, the
+ * shipped style names no source at all, and the claim is that the tile host
+ * is then contacted by **nothing** — asserted here from the network, the same
+ * interception #63's criterion 3 uses, because a style with no URL in it says
+ * what is declared and only a real engine says what is requested.
+ *
+ * The page is pointed at the fixture archive the positive case above paints
+ * from, so that case is this one's control: the same URL, tiles on, is asked
+ * for and paints. A `?tiles=off` the style ignored would be asked for here too.
+ */
+test.describe('with map tiles turned off — the owner’s choice of 2026-09-25', () => {
+  test('asks the archive for nothing, and still draws the ride’s line on the background', async ({
+    page,
+  }) => {
+    const seen = watch(page);
+    await page.goto(
+      `/?archive=${encodeURIComponent(FIXTURE_URL)}&tiles=off&paintDeadline=${String(CONTROL_DEADLINE_MS)}`,
+    );
+    // Published at the paint deadline, because no tile can paint: every
+    // request below is counted over that whole window.
+    const load = await mapLoad(page);
+
+    expect(load.frames).toBeGreaterThan(0);
+    expect(load.samples).toContain(load.backgroundColour);
+    expect(
+      load.trackPainted,
+      `the ride's line was not at the frame's centre: read ${load.centreColours.join(', ')}`,
+    ).toBe(true);
+
+    expect(seen.requests.filter((url) => url.startsWith(FIXTURE_URL))).toEqual([]);
+    expect(load.archiveRequests).toEqual([]);
+    const foreign = seen.requests.filter(
+      (url) =>
+        !url.startsWith('blob:') &&
+        !url.startsWith('data:') &&
+        new URL(url).origin !== HARNESS_ORIGIN,
+    );
+    expect(foreign, `requests left the page's origin: ${foreign.join(', ')}`).toEqual([]);
   });
 });
 

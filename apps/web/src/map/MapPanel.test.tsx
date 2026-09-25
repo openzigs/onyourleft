@@ -15,7 +15,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 
-import { OSM_ATTRIBUTION, type BasemapConfig } from './basemap';
+import { OSM_ATTRIBUTION, styleOrigins, type BasemapConfig, type BasemapStyle } from './basemap';
 import { MapPanel } from './MapPanel';
 import { stubMapPort, type StubMapPort } from './testing';
 import { trackGeometry, type TrackGeometry } from './track';
@@ -125,6 +125,41 @@ describe('criterion 4 — the OpenStreetMap attribution is a licence obligation'
     await settle();
     expect(queryAll(document, '.oyl-map')).toHaveLength(1);
     expect(queryAll(document, '.oyl-map__attribution')).toHaveLength(1);
+  });
+});
+
+describe('with map tiles turned off — the owner’s decision of 2026-09-25', () => {
+  it('hands the renderer a style that names no tile source, and still draws the line', async () => {
+    const port = stubMapPort();
+    mounted = await mount(
+      <MapPanel port={port} basemap={BASEMAP} track={aTrack()} tiles={false} />,
+    );
+    await settle();
+    expect(port.created).toHaveLength(1);
+    const style = port.created[0]?.options.style;
+    expect(style?.sources).toEqual({});
+    expect(styleOrigins(style as BasemapStyle)).toEqual([]);
+    // The line is the rider's own and goes on regardless.
+    expect(port.created[0]?.tracks.at(-1)).toBeDefined();
+  });
+
+  it('keeps the OpenStreetMap credit under the map', async () => {
+    mounted = await mount(
+      <MapPanel port={stubMapPort()} basemap={BASEMAP} track={aTrack()} tiles={false} />,
+    );
+    await settle();
+    expect(document.querySelector('.oyl-map__attribution')?.textContent).toBe(
+      '© OpenStreetMap contributors',
+    );
+  });
+
+  it('draws tiles from the configured archive when nobody turned them off', async () => {
+    const port = stubMapPort();
+    mounted = await mount(<MapPanel port={port} basemap={BASEMAP} track={aTrack()} />);
+    await settle();
+    expect(styleOrigins(port.created[0]?.options.style as BasemapStyle)).toEqual([
+      'https://tiles.example.org',
+    ]);
   });
 });
 

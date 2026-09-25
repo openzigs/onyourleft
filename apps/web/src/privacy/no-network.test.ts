@@ -65,6 +65,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 import { basemapOrigin, readBasemapConfig } from '../map/basemap';
@@ -381,6 +382,15 @@ describe('the service worker’s one network call', () => {
  * wrote `tiles.openzigs.com` here would go on passing after the default moved
  * to a host the policy has never named, which is the failure it exists for.
  *
+ * ⚠️ **The declaration is PARSED, not searched** (#535's review). A search of
+ * the whole file was satisfied by the comment above the Location row naming
+ * the host, even with the `why` string — the part that corresponds to what is
+ * filed on Play — no longer naming it. So `data-safety.ts` is parsed with the
+ * TypeScript compiler's own parser and the host is looked for in the Location
+ * row's `why` string alone; a comment is not in the tree that is read. The
+ * policy is still read as a whole file, because prose is the only place a
+ * policy can name a host.
+ *
  * ⚠️ **What it cannot check** is that the words around the host are true. It
  * says the policy and the declaration NAME the host; whether the declaration's
  * answer is right is a filing decision, argued in `data-safety.ts`'s Location
@@ -398,17 +408,76 @@ describe('the default basemap is disclosed — #534', () => {
 
   const host = unset === undefined ? '' : new URL(basemapOrigin(unset)).host;
 
-  it.each([
-    ['docs/privacy-policy.md', join('docs', 'privacy-policy.md')],
-    [
-      'apps/mobile/src/android/data-safety.ts',
-      join('apps', 'mobile', 'src', 'android', 'data-safety.ts'),
-    ],
-  ])('is named in %s', (_label, path) => {
+  it('is named in docs/privacy-policy.md', () => {
     expect(host).not.toBe('');
     expect(
-      readFileSync(join(REPOSITORY_ROOT, path), 'utf8'),
-      `the shipped app requests map tiles from ${host} by default, and ${path} does not say so`,
+      readFileSync(join(REPOSITORY_ROOT, 'docs', 'privacy-policy.md'), 'utf8'),
+      `the shipped app requests map tiles from ${host} by default, and the privacy policy does not say so`,
     ).toContain(host);
   });
+
+  it('is named in the Location row’s `why` in apps/mobile/src/android/data-safety.ts', () => {
+    expect(host).not.toBe('');
+    const path = join(REPOSITORY_ROOT, 'apps', 'mobile', 'src', 'android', 'data-safety.ts');
+    const why = locationWhy(readFileSync(path, 'utf8'));
+    // Found at all, or a renamed field would make this pass over nothing.
+    expect(why, 'no Location row with a string `why` was found in data-safety.ts').toBeDefined();
+    expect(
+      why,
+      `the shipped app requests map tiles from ${host} by default, and the Location answer does not say so`,
+    ).toContain(host);
+  });
+
+  it('is not satisfied by a comment — the parse sees the `why` string and nothing else', () => {
+    // The review's finding, as a fixture: the host in a comment above the row,
+    // and a `why` that does not name it. A whole-file search passes this.
+    const fixture = [
+      'export const DATA_SAFETY_DECLARATION = [',
+      '  {',
+      `    // tiles come from ${host}`,
+      "    dataType: 'Location (approximate or precise)',",
+      '    collected: false,',
+      "    why: 'nothing leaves the device',",
+      '  },',
+      '];',
+    ].join('\n');
+    expect(fixture).toContain(host);
+    expect(locationWhy(fixture)).toBe('nothing leaves the device');
+  });
 });
+
+/**
+ * The `why` string of the declaration's Location row, read from the parsed
+ * source — the object literal whose `dataType` starts with `Location` — or
+ * `undefined` when there is no such row or its `why` is not a plain string.
+ */
+function locationWhy(source: string): string | undefined {
+  const file = ts.createSourceFile('data-safety.ts', source, ts.ScriptTarget.Latest, true);
+  let found: string | undefined;
+  const text = (node: ts.Node | undefined): string | undefined =>
+    node !== undefined && (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
+      ? node.text
+      : undefined;
+  const visit = (node: ts.Node): void => {
+    if (ts.isObjectLiteralExpression(node)) {
+      const property = (name: string): ts.Expression | undefined => {
+        for (const member of node.properties) {
+          if (
+            ts.isPropertyAssignment(member) &&
+            ts.isIdentifier(member.name) &&
+            member.name.text === name
+          ) {
+            return member.initializer;
+          }
+        }
+        return undefined;
+      };
+      if (text(property('dataType'))?.startsWith('Location') === true) {
+        found = text(property('why'));
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return found;
+}

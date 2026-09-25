@@ -98,6 +98,8 @@ import {
 } from '../game/cue-preference';
 import type { UnitsPort } from '../units/store-port';
 import { readRealisticWorldChoice, writeRealisticWorldChoice } from '../game/world-preference';
+import type { BasemapConfig } from '../map/basemap';
+import { readMapTilesChoice, writeMapTilesChoice } from '../map/tiles-preference';
 
 /**
  * What a panel is currently telling the rider, or `undefined` for nothing.
@@ -236,6 +238,13 @@ export interface SettingsViewProps {
    * row: #395 decided the device.
    */
   readonly announcements?: PreferenceStorage | undefined;
+  /**
+   * The basemap this build draws, so the map-tiles panel can name the host a
+   * tile request goes to rather than a host somebody typed beside it —
+   * `undefined` for a build configured with none, which contacts no tile host
+   * whatever the switch says.
+   */
+  readonly basemap?: BasemapConfig | undefined;
 }
 
 export function SettingsView({
@@ -247,6 +256,7 @@ export function SettingsView({
   onRiderMassChange,
   storage,
   announcements,
+  basemap,
 }: SettingsViewProps): JSX.Element {
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
 
@@ -374,6 +384,11 @@ export function SettingsView({
       <SoundsPanel storage={announcements === undefined ? deviceStorage() : announcements} />
 
       <GameWorldPanel storage={announcements === undefined ? deviceStorage() : announcements} />
+
+      <MapTilesPanel
+        storage={announcements === undefined ? deviceStorage() : announcements}
+        basemap={basemap}
+      />
 
       <PersistenceNotice {...(storage === undefined ? {} : { storage })} />
     </>
@@ -632,6 +647,82 @@ function GameWorldPanel({
           Ride in the realistic world
         </label>
       </p>
+      {message === undefined ? null : (
+        <StatusMessage tone={message.tone} live>
+          {message.text}
+        </StatusMessage>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Whether a ride's map draws tiles under the line — the owner's decision of
+ * 2026-09-25 on #534's review: **on by default, with a switch to turn it off**.
+ *
+ * ⚠️ **The one Settings switch here that starts ON**, and the only one that
+ * decides whether this app contacts a host. So the sentence beside it says
+ * exactly what turning it on sends and to whom — the map area around a ride
+ * and the device's IP address, to the host named in the build's own basemap
+ * URL rather than a host typed beside it — and what turning it off keeps: the
+ * line, and the OpenStreetMap credit, which is a licence obligation of the map
+ * panel rather than of the tiles. `map/tiles-preference.ts` is the storage
+ * rule; `map.browser.spec.ts` §"with map tiles turned off" intercepts the
+ * network to show that "off" is no request at all.
+ *
+ * A build configured with no basemap contacts no tile host whatever this
+ * says, so it gets a sentence instead of a switch — absent rather than
+ * disabled, for `design/Button.tsx`'s reason.
+ */
+function MapTilesPanel({
+  storage,
+  basemap,
+}: {
+  readonly storage: PreferenceStorage | undefined;
+  readonly basemap: BasemapConfig | undefined;
+}): JSX.Element {
+  const [drawn, setDrawn] = useState(() => readMapTilesChoice(storage));
+  const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
+  const host = basemap === undefined ? undefined : new URL(basemap.archiveUrl).host;
+  return (
+    <section
+      className="oyl-panel oyl-announce oyl-map-tiles"
+      aria-labelledby="oyl-map-tiles-heading"
+    >
+      <h2 id="oyl-map-tiles-heading">Ride map</h2>
+      {host === undefined ? (
+        <p className="oyl-muted">
+          This build has no map configured, so it never asks a tile server for anything. A ride’s
+          route is drawn on a plain background.
+        </p>
+      ) : (
+        <>
+          <p className="oyl-muted">
+            When this is on, opening a ride that has GPS asks {host} for the map around where you
+            rode. That sends the map area and your device’s IP address to {host}. It sends no ride
+            data, and the tile server keeps no record of the request. When it is off, the app asks{' '}
+            {host} for nothing and draws your route on a plain background.
+          </p>
+          <p>
+            <label className="oyl-announce__switch">
+              <input
+                type="checkbox"
+                checked={drawn}
+                onChange={(event) => {
+                  const next = event.currentTarget.checked;
+                  setDrawn(next);
+                  setMessage(
+                    writeMapTilesChoice(storage, next)
+                      ? { tone: 'success', text: ANNOUNCEMENTS_SAVED }
+                      : { tone: 'warning', text: ANNOUNCEMENTS_NOT_KEPT },
+                  );
+                }}
+              />{' '}
+              Draw map tiles under my rides
+            </label>
+          </p>
+        </>
+      )}
       {message === undefined ? null : (
         <StatusMessage tone={message.tone} live>
           {message.text}

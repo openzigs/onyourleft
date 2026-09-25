@@ -136,6 +136,32 @@ describe('basemapStyle — built here, never fetched', () => {
   });
 });
 
+describe('basemapStyle with map tiles turned off — the owner’s decision of 2026-09-25', () => {
+  it('declares no source at all, so there is no URL for MapLibre to ask for', () => {
+    const style = basemapStyle(
+      { archiveUrl: ARCHIVE, attribution: OSM_ATTRIBUTION },
+      { tiles: false },
+    );
+    expect(style.sources).toEqual({});
+    expect(styleOrigins(style)).toEqual([]);
+  });
+
+  it('keeps the background, so the ride’s line is drawn on something', () => {
+    const style = basemapStyle(
+      { archiveUrl: ARCHIVE, attribution: OSM_ATTRIBUTION },
+      { tiles: false },
+    );
+    expect(style.layers.map((layer) => layer.id)).toEqual(['background']);
+    expect(style.layers.every((layer) => layer.source === undefined)).toBe(true);
+  });
+
+  it('is the full style when tiles are on, or when nobody said', () => {
+    const config = { archiveUrl: ARCHIVE, attribution: OSM_ATTRIBUTION };
+    expect(basemapStyle(config, { tiles: true })).toEqual(basemapStyle(config));
+    expect(styleOrigins(basemapStyle(config))).toEqual(['https://tiles.example.org']);
+  });
+});
+
 describe('styleOrigins — criterion 3, the $950/month guard', () => {
   it('reaches only the published archive’s origin with the default in force — #534', () => {
     const config = readBasemapConfig({});

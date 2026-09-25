@@ -95,11 +95,15 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     // R2 access log, a Logpush job or an analytics product turned on for that
     // host makes the exemption false, and this row becomes
     // `collected: true` for approximate location. Checking the bucket's
-    // configuration needs the Cloudflare account, which no pull request has.
+    // configuration needs the Cloudflare account, which no pull request has —
+    // so `apps/mobile/RELEASE.md` §8 "Before every release tag" is the step
+    // that re-checks it, and says what changes here if one is on. Since the
+    // owner's decision of 2026-09-25 a rider can also turn map tiles off in
+    // Settings, which stops the request altogether.
     dataType: 'Location (approximate or precise)',
     collected: false,
     shared: false,
-    why: 'a recorded ride carries positions and they stay in IndexedDB on the device. The location permissions in the manifest exist only so that a BLE scan works below API 31, which Android required, and they are bounded at API 30 — see locationClaimFaults. Since #534 the ride map requests tiles from tiles.openzigs.com by default, and which tiles are asked for says roughly where the ride was; that request is processed ephemerally by a static file host that keeps nothing this project reads, and is not used to derive a location — see the comment above this row for the condition that keeps this answer true',
+    why: 'a recorded ride carries positions and they stay in IndexedDB on the device. The location permissions in the manifest exist only so that a BLE scan works below API 31, which Android required, and they are bounded at API 30 — see locationClaimFaults. Since #534 the ride map requests tiles from tiles.openzigs.com by default (a rider can turn that off in Settings), and which tiles are asked for says roughly where the ride was; that request is processed ephemerally by a static file host that keeps nothing this project reads, and is not used to derive a location — see the comment above this row for the condition that keeps this answer true',
   },
   {
     dataType: 'Health and fitness — health info',

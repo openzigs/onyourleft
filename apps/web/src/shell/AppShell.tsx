@@ -447,6 +447,7 @@ function viewFor(
           riderMass={riderMass}
           onRiderMassChange={onMassChange}
           {...(props.storage === undefined ? {} : { storage: props.storage })}
+          basemap={props.basemap}
         />
       );
     case 'about':

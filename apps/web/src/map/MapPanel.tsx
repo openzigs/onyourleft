@@ -87,9 +87,25 @@ export interface MapPanelProps {
    * rejects — the untrimmed array would still be one `props` inspection away.
    */
   readonly track?: TrackGeometry | undefined;
+  /**
+   * Whether to draw map tiles under the line — the rider's Settings switch
+   * (`tiles-preference.ts`), on unless they turned it off.
+   *
+   * `false` builds a style with no source (`basemap.ts` §`basemapStyle`), so
+   * the tile host is contacted by nothing and the line is drawn on the plain
+   * background. ⚠️ **The attribution is rendered either way**: it follows
+   * the map panel rather than the tiles, and the owner's decision of
+   * 2026-09-25 keeps it.
+   */
+  readonly tiles?: boolean;
 }
 
-export function MapPanel({ port, basemap, track }: MapPanelProps): JSX.Element | null {
+export function MapPanel({
+  port,
+  basemap,
+  track,
+  tiles = true,
+}: MapPanelProps): JSX.Element | null {
   const container = useRef<HTMLDivElement>(null);
   const view = useRef<MapView | undefined>(undefined);
 
@@ -117,13 +133,15 @@ export function MapPanel({ port, basemap, track }: MapPanelProps): JSX.Element |
     // See that file for why `release()` is not called here.
     port.protocol.ensure();
 
-    const created = port.renderer.create(container.current, { style: basemapStyle(basemap) });
+    const created = port.renderer.create(container.current, {
+      style: basemapStyle(basemap, { tiles }),
+    });
     view.current = created;
     return () => {
       created.destroy();
       view.current = undefined;
     };
-  }, [drawable, port, basemap]);
+  }, [drawable, port, basemap, tiles]);
 
   /**
    * Put the line on it, and put a different line on it when the rider asks.

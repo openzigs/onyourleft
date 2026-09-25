@@ -130,6 +130,16 @@ export const BASEMAP_URL_VARIABLE = 'VITE_BASEMAP_PMTILES_URL';
  * `privacy/no-network.test.ts` §"the default basemap is disclosed" fails when
  * this origin moves and they do not.
  *
+ * ⚠️ **This object must never be deleted or renamed while any shipped build
+ * names it** (#535's review). The URL — dated object name and all — is baked
+ * into every web bundle and every APK, and an installed APK does not update
+ * itself when #53 publishes a newer build. Deleting it would take the map away
+ * from every old client, and quietly: one request, two console errors, no
+ * message to the rider. A newer build is published BESIDE this one under a new
+ * name and this constant moves to it; the old object goes only when no build
+ * still in use can name it. `docs/architecture.md`'s Basemap row says the same
+ * where #53's archive is described.
+ *
  * ⚠️ **Outside that box the map is a line on a plain background.** The archive
  * declares its bounds in its header, `pmtiles`' protocol hands them to
  * MapLibre as the source's `bounds`, and MapLibre asks for no tile outside
@@ -227,8 +237,21 @@ export interface BasemapLayer {
 /** The id the ride's own trace is added under, so the adapter and the tests agree on one string. */
 export const TRACK_SOURCE_ID = 'oyl-track';
 export const TRACK_LAYER_ID = 'oyl-track-line';
+/**
+ * The ride's line colour. Here rather than inline in `maplibre.ts` so the
+ * browser harness can look for the line on the drawing buffer without
+ * importing a second copy of it — the `paletteOf` argument in `harness.ts`.
+ */
+export const TRACK_LINE_COLOUR = '#b5341f';
 /** The vector source the basemap tiles arrive on. */
 export const BASEMAP_SOURCE_ID = 'basemap';
+
+/** The layer that needs no tile, and so the whole of a style with tiles turned off. */
+const BACKGROUND_LAYER: BasemapLayer = {
+  id: 'background',
+  type: 'background',
+  paint: { 'background-color': '#f5f3ef' },
+};
 
 /**
  * The style, built from the configuration.
@@ -245,8 +268,24 @@ export const BASEMAP_SOURCE_ID = 'basemap';
  *
  * No `glyphs` and no `sprite`: see the module note. Both would be third-party
  * origins today, and the criterion above is worth more than labels.
+ *
+ * ⚠️ **`tiles: false` is a style with no source at all** — the background
+ * layer and nothing else — and that is what the rider's Settings switch
+ * (`tiles-preference.ts`, the owner's decision of 2026-09-25) turns into. Not
+ * a source with its layers hidden: a declared source is a URL MapLibre may
+ * fetch, and "off" has to mean the tile host is contacted by nothing.
+ * {@link styleOrigins} over this style is empty, which `basemap.test.ts`
+ * asserts, and `map.browser.spec.ts` intercepts the network to say the same
+ * of a real engine. The ride's own line is added by the adapter, not by this
+ * style, so it is drawn either way.
  */
-export function basemapStyle(config: BasemapConfig): BasemapStyle {
+export function basemapStyle(
+  config: BasemapConfig,
+  options: { readonly tiles?: boolean } = {},
+): BasemapStyle {
+  if (options.tiles === false) {
+    return { version: 8, sources: {}, layers: [BACKGROUND_LAYER] };
+  }
   return {
     version: 8,
     sources: {
@@ -260,7 +299,7 @@ export function basemapStyle(config: BasemapConfig): BasemapStyle {
       },
     },
     layers: [
-      { id: 'background', type: 'background', paint: { 'background-color': '#f5f3ef' } },
+      BACKGROUND_LAYER,
       {
         id: 'earth',
         type: 'fill',
