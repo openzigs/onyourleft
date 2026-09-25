@@ -37,7 +37,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { trimRadius } from '../detail/privacy';
 import { stubActivity, stubDetail, stubLap, type StubDetail } from '../detail/testing';
 import { CHART_POINTS } from '../detail/series';
-import { OSM_ATTRIBUTION, type BasemapConfig } from '../map/basemap';
+import {
+  OSM_ATTRIBUTION,
+  styleOrigins,
+  type BasemapConfig,
+  type BasemapStyle,
+} from '../map/basemap';
+import { MAP_TILES_STORAGE_KEY } from '../map/tiles-preference';
+import type { PreferenceStorage } from '../game/hud/announce-preference';
 import type { MapPort } from '../map/port';
 import {
   coordinatesNowOn,
@@ -80,6 +87,8 @@ interface MapOptions {
   readonly basemap?: BasemapConfig | undefined;
   /** Called each time the view asks for the engine, so a test can count. */
   readonly onLoad?: () => void;
+  /** Where the map-tiles choice is read from. Defaults to jsdom's own storage. */
+  readonly preferences?: PreferenceStorage;
 }
 
 async function open(
@@ -95,7 +104,13 @@ async function open(
           return Promise.resolve(options.map as MapPort);
         };
   const result = await mount(
-    <ActivityDetailView port={port} activityId={id} map={loader} basemap={options.basemap} />,
+    <ActivityDetailView
+      port={port}
+      activityId={id}
+      map={loader}
+      basemap={options.basemap}
+      {...(options.preferences === undefined ? {} : { preferences: options.preferences })}
+    />,
   );
   await settle();
   await settle();
@@ -426,11 +441,39 @@ describe('#63 — the map on the detail screen', () => {
   });
 
   it('says no basemap is configured rather than drawing an empty grid', async () => {
-    // The state of every build today: #53 has not published an archive.
+    // A build told `none`, or given a value that is not an `https:` URL.
+    // Since #534 an unconfigured build defaults to the published archive.
     const port = outdoorRide([]);
     mounted = await open(port, RIDE, { map: stubMapPort(), basemap: undefined });
     expect(document.body.textContent).toContain('No basemap is configured');
     expect(document.querySelector('.oyl-map')).toBeNull();
+  });
+
+  it('asks for no tile when the rider turned map tiles off, and still draws the line and the credit', async () => {
+    // The owner's decision of 2026-09-25: a Settings switch, on by default.
+    const port = outdoorRide([]);
+    const map = stubMapPort();
+    const turnedOff: PreferenceStorage = {
+      getItem: (key) => (key === MAP_TILES_STORAGE_KEY ? 'off' : null),
+      setItem: () => undefined,
+    };
+    mounted = await open(port, RIDE, { map, basemap: BASEMAP, preferences: turnedOff });
+    expect(map.created).toHaveLength(1);
+    expect(styleOrigins(map.created[0]?.options.style as BasemapStyle)).toEqual([]);
+    expect(everyCoordinateHandedTo(map.created[0] as never).length).toBe(300);
+    expect(document.querySelector('.oyl-map__attribution')?.textContent).toBe(
+      '© OpenStreetMap contributors',
+    );
+  });
+
+  it('draws tiles from the configured host for a device that never chose', async () => {
+    const port = outdoorRide([]);
+    const map = stubMapPort();
+    const never: PreferenceStorage = { getItem: () => null, setItem: () => undefined };
+    mounted = await open(port, RIDE, { map, basemap: BASEMAP, preferences: never });
+    expect(styleOrigins(map.created[0]?.options.style as BasemapStyle)).toEqual([
+      'https://tiles.example.org',
+    ]);
   });
 
   it('renders the OpenStreetMap credit whenever it renders a map', async () => {

@@ -45,6 +45,8 @@ import {
 } from '../game/hud/announce-preference';
 import { DEFAULT_CUES, readCuePreference } from '../game/cue-preference';
 import { readRealisticWorldChoice } from '../game/world-preference';
+import { OSM_ATTRIBUTION, readBasemapConfig, type BasemapConfig } from '../map/basemap';
+import { MAP_TILES_STORAGE_KEY, readMapTilesChoice } from '../map/tiles-preference';
 
 const OWNER = athleteId('local');
 
@@ -896,6 +898,118 @@ describe('the game world — #475', () => {
       mounted.container
         .querySelector<HTMLInputElement>('.oyl-world input[type="checkbox"]')
         ?.click();
+      await Promise.resolve();
+    });
+    expect(mounted.container.textContent).toContain(ANNOUNCEMENTS_NOT_KEPT);
+    mounted.unmount();
+  });
+});
+
+describe('the ride map’s tiles — the owner’s decision of 2026-09-25', () => {
+  function disk(): PreferenceStorage {
+    const values = new Map<string, string>();
+    return {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => {
+        values.set(key, value);
+      },
+    };
+  }
+
+  const PUBLISHED = readBasemapConfig({});
+
+  // An explicit parameter rather than a default: a default would turn the
+  // no-map case's `undefined` back into the published archive.
+  async function settings(store: PreferenceStorage, basemap: BasemapConfig | undefined) {
+    return mount(
+      <SettingsView
+        units="metric"
+        onUnitsChange={() => undefined}
+        onRiderMassChange={() => undefined}
+        announcements={store}
+        basemap={basemap}
+      />,
+    );
+  }
+
+  function toggleIn(mounted: { container: HTMLElement }): HTMLInputElement | null {
+    return mounted.container.querySelector<HTMLInputElement>(
+      '.oyl-map-tiles input[type="checkbox"]',
+    );
+  }
+
+  it('is on until the rider turns it off, and keeps the choice on this device', async () => {
+    const store = disk();
+    const mounted = await settings(store, PUBLISHED);
+    const toggle = toggleIn(mounted);
+    expect(toggle?.checked).toBe(true);
+    await act(async () => {
+      toggle?.click();
+      await Promise.resolve();
+    });
+    expect(readMapTilesChoice(store)).toBe(false);
+    expect(mounted.container.textContent).toContain(ANNOUNCEMENTS_SAVED);
+    await act(async () => {
+      toggle?.click();
+      await Promise.resolve();
+    });
+    expect(readMapTilesChoice(store)).toBe(true);
+    mounted.unmount();
+
+    // A fresh screen reads what was kept.
+    const off = disk();
+    off.setItem(MAP_TILES_STORAGE_KEY, 'off');
+    const again = await settings(off, PUBLISHED);
+    expect(toggleIn(again)?.checked).toBe(false);
+    again.unmount();
+  });
+
+  it('says what turning it on sends, and to the host the build actually uses', async () => {
+    const mounted = await settings(disk(), PUBLISHED);
+    const copy = (mounted.container.querySelector('.oyl-map-tiles')?.textContent ?? '').replace(
+      /\s+/g,
+      ' ',
+    );
+    expect(copy).toContain('asks tiles.openzigs.com for the map around where you rode');
+    expect(copy).toContain('sends the map area and your device’s IP address to tiles.openzigs.com');
+    expect(copy).toContain('It sends no ride data');
+    // The no-record promise is made about the host this project runs.
+    expect(copy).toContain('we keep no record of the request');
+    mounted.unmount();
+
+    // A self-hoster's build names its own host, not ours.
+    const theirs = await settings(disk(), {
+      archiveUrl: 'https://maps.example.net/a.pmtiles',
+      attribution: OSM_ATTRIBUTION,
+    });
+    const theirCopy = theirs.container.querySelector('.oyl-map-tiles')?.textContent ?? '';
+    expect(theirCopy).toContain('maps.example.net');
+    expect(theirCopy).not.toContain('tiles.openzigs.com');
+    // …and it is never made about somebody else's server, whose logs this app
+    // cannot vouch for (#535 review).
+    expect(theirCopy).not.toContain('no record');
+    theirs.unmount();
+  });
+
+  it('offers no switch in a build with no map, and says it asks for nothing', async () => {
+    const mounted = await settings(disk(), undefined);
+    expect(toggleIn(mounted)).toBeNull();
+    expect(mounted.container.querySelector('.oyl-map-tiles')?.textContent).toContain(
+      'never asks a tile server for anything',
+    );
+    mounted.unmount();
+  });
+
+  it('says so when the device will not keep it', async () => {
+    const refusing: PreferenceStorage = {
+      getItem: () => null,
+      setItem: () => {
+        throw new DOMException('full', 'QuotaExceededError');
+      },
+    };
+    const mounted = await settings(refusing, PUBLISHED);
+    await act(async () => {
+      toggleIn(mounted)?.click();
       await Promise.resolve();
     });
     expect(mounted.container.textContent).toContain(ANNOUNCEMENTS_NOT_KEPT);

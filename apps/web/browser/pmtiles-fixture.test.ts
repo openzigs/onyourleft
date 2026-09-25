@@ -46,6 +46,7 @@ import {
 } from '../src/map/basemap';
 import {
   buildFixtureArchive,
+  PUBLISHED_ARCHIVE_BOUNDS,
   FIXTURE_MAX_ZOOM,
   FIXTURE_SOURCE_LAYERS,
   fixtureTile,
@@ -247,6 +248,19 @@ describe('the fixture archive', () => {
     expect(header.minLon).toBeCloseTo(-180, 5);
     expect(header.maxLon).toBeCloseTo(180, 5);
     expect(header.maxLat).toBeCloseTo(85.0511287, 5);
+  });
+
+  it('declares only the published archive’s coverage when asked to — #534', async () => {
+    // The bounded fixture differs from the first in its header's box and
+    // nothing else; the browser gate's "outside the coverage" case rests on
+    // the box being the one written here rather than the world.
+    const archive = new PMTiles(new MemorySource(buildFixtureArchive(PUBLISHED_ARCHIVE_BOUNDS)));
+    const header = await archive.getHeader();
+    expect(header.minLon).toBeCloseTo(PUBLISHED_ARCHIVE_BOUNDS.west, 5);
+    expect(header.minLat).toBeCloseTo(PUBLISHED_ARCHIVE_BOUNDS.south, 5);
+    expect(header.maxLon).toBeCloseTo(PUBLISHED_ARCHIVE_BOUNDS.east, 5);
+    expect(header.maxLat).toBeCloseTo(PUBLISHED_ARCHIVE_BOUNDS.north, 5);
+    expect(header.numAddressedTiles).toBe(pyramidTileCount(FIXTURE_MAX_ZOOM));
   });
 
   it('carries its metadata section, and claims no OpenStreetMap data in it', async () => {

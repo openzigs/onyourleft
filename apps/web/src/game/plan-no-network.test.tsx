@@ -7,8 +7,9 @@
  * ## Why this is a criterion rather than an obvious property
  *
  * The thing #285 asks for looks exactly like the thing #63 is blocked on. A map
- * with roads and terrain shading needs tiles, there are none — `#53` has
- * published no archive and `VITE_BASEMAP_PMTILES_URL` is empty — and reaching
+ * with roads and terrain shading needs tiles — there were none when #285 was
+ * written, and since #534 the only ones are the ride-detail map's, from one
+ * host the privacy policy names — and reaching
  * for a third-party tile server is both the obvious way to make this screen
  * prettier and the one change that would make it the first outbound request
  * `apps/web/src` has ever issued. ADR 0009 R5 and `map/basemap.ts`

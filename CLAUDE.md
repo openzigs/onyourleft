@@ -2142,11 +2142,15 @@ frame rate, no thermal behaviour, nothing measured on a phone. That gate was **w
 passed (see the 2026-09-08 amendment on [ADR 0008](docs/adr/0008-mobile-client-architecture.md)),
 and #91's 60-minute measured run on the device floor is still outstanding.
 
-⚠️ **Do not reach for `networkidle`.** The harness server holds no archive at the default path, so that request
-404s and **MapLibre retries a failed source** — the network never goes idle. The first version of
-the spec waited on it and four of five tests burned sixty seconds each before failing. Wait on the
-event you mean (`waitForRequest`), which is both faster and stricter: it fails immediately when the
-request is never made, which is what a broken protocol registration looks like.
+⚠️ **Do not reach for `networkidle` — but not for the reason this paragraph used to give.** It said
+the harness's 404 made **MapLibre retry a failed source** so the network never went idle, and a
+reviewer who remembers that is reading the old file. #535's review measured MapLibre **6.10.0**: an
+archive answering 404 is requested **once**, raises two `console.error`s and is not requested again
+over ten seconds; a connection dropped mid-request is requested **twice** and then left alone. The
+advice stands for a reason that does not depend on any retry policy: `networkidle` resolves just as
+happily over a page that requested **nothing**, which is what a broken protocol registration looks
+like. Wait on the event you mean (`waitForRequest`), which fails immediately when the request is
+never made.
 
 ⚠️ **`renderer.create` does not register the protocol.** `MapPanel.tsx` calls
 `protocol.ensure()` before it creates a map, and the harness has to do the same. Omitting it is
@@ -3408,7 +3412,11 @@ top of an issue **supersedes its body**.
 | Why a GPL dependency may be built with and never shipped by an app | [ADR 0025](docs/adr/0025-app-store-additional-permission.md) D-5, `scripts/check-dependency-licences.mjs` §`storeShipped`, §4g |
 | Why the About screen links to the source, and why that link is a condition rather than a courtesy | `apps/web/src/privacy/policy.ts` §`SOURCE_CODE_URL`, [ADR 0025](docs/adr/0025-app-store-additional-permission.md) D-7 |
 | What a contribution under `apps/` is licensed under, exactly | [`CONTRIBUTING.md`](CONTRIBUTING.md) §"Licensing of contributions", [ADR 0025](docs/adr/0025-app-store-additional-permission.md) D-6 |
-| Where the basemap URL is configured, and why nothing is configured today | `.env.example` §`VITE_BASEMAP_PMTILES_URL`, [#53](https://github.com/openzigs/onyourleft/issues/53) |
+| Where the basemap URL is configured, what a build with nothing set draws, and how to turn the map off | `apps/web/src/map/basemap.ts` §`PUBLISHED_BASEMAP_URL`, `.env.example` §`VITE_BASEMAP_PMTILES_URL`, [#534](https://github.com/openzigs/onyourleft/issues/534) |
+| How a rider turns map tiles off, why that is a style with no source rather than a hidden layer, and what proves "off" contacts nothing | `apps/web/src/map/tiles-preference.ts`, `apps/web/src/map/basemap.ts` §`basemapStyle`, `apps/web/browser/map.browser.spec.ts` §"with map tiles turned off" |
+| Why a published basemap archive must never be deleted while a shipped build names it, and what a release re-checks about its host | `apps/web/src/map/basemap.ts` §`PUBLISHED_BASEMAP_URL`, [`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §8 "Before every release tag" |
+| What a rider outside the basemap's coverage sees, and what proves it is quiet | `apps/web/src/map/MapPanel.tsx` §"A ride outside the archive's coverage", `apps/web/browser/map.browser.spec.ts` §"a ride outside the archive’s coverage" |
+| Why the default tile host is named in the privacy policy, and the condition the Location answer rests on | `apps/web/src/privacy/no-network.test.ts` §"the default basemap is disclosed", `apps/mobile/src/android/data-safety.ts` §Location |
 | Which segment-matching approach was chosen, what it measured, and which of its numbers no longer describe the shipped code | [`docs/spikes/0001-segment-matching.md`](docs/spikes/0001-segment-matching.md) and its 2026-09-08 retirement note |
 | Why a fixed endpoint radius detects nothing above a 1 s recording interval, and why widening it alone makes things worse | `packages/domain/src/segment/segment.ts` §`endpointReachRadius`, §`nearestEndpointSample`, `docs/spikes/0001-segment-matching.md` §1 |
 | Why two paths are resampled before they are compared, and what that assumes | `packages/domain/src/segment/frechet.ts` §`densify` |

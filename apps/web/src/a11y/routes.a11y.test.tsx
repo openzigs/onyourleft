@@ -37,6 +37,7 @@ import { stubSegments } from '../segments/testing';
 import type { MatchPort } from '../segments/match-port';
 import type { SegmentPort } from '../segments/store-port';
 import { AppShell } from '../shell/AppShell';
+import { readBasemapConfig } from '../map/basemap';
 import {
   ALL_ROUTES,
   groupDestination,
@@ -298,6 +299,7 @@ async function open(
       segments={segmentsPort()}
       match={matchPort()}
       camera={cameraController()}
+      basemap={readBasemapConfig({})}
       {...(units === undefined ? {} : { units })}
     />,
   );
@@ -332,6 +334,10 @@ describe('criterion 4 — every route passes the automated audit', () => {
     await open('/settings');
     expect(queryAll(document, 'input[type="radio"]').length).toBeGreaterThan(0);
     expect(document.querySelector('#oyl-rider-mass')).not.toBeNull();
+    // The map-tiles switch (the owner's decision of 2026-09-25) renders only
+    // for a build with a basemap, so `open` hands the shell the published one
+    // and this says the audit had the switch to look at.
+    expect(document.querySelector('.oyl-map-tiles input[type="checkbox"]')).not.toBeNull();
 
     // And the state the loop cannot reach: a refusal, which is a live region
     // beside a labelled input and is where an `aria-describedby` goes dangling.

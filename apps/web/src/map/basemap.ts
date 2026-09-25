@@ -45,9 +45,17 @@
  * documented in `.env.example` — so "it is configuration" is enforced by the
  * repository rather than asserted by this comment.
  *
- * **`undefined` is an ordinary state, not an error.** #53 has not published an
- * archive yet, so a build with nothing configured is the normal case today. The
- * map panel says so in words rather than rendering an empty grey grid.
+ * ⚠️ **Unset now means the published archive, not "no map"** (#534). #53
+ * published one on 2026-09-14 and until #534 no build pointed at it, so every
+ * map screen in the web build and the APK drew nothing. The default is
+ * {@link PUBLISHED_BASEMAP_URL}, a committed constant rather than a committed
+ * `.env.production`, because `.gitignore` ignores `.env.*` and nothing may be
+ * forced past it. The environment still overrides it.
+ *
+ * **`undefined` is still an ordinary state, not an error** — it is what a build
+ * gets when whoever made it set the variable to something that is not an
+ * `https:` URL, `none` being the spelling to use on purpose. The map panel says
+ * so in words rather than rendering an empty grey grid.
  */
 
 /**
@@ -97,6 +105,50 @@ export interface BasemapConfig {
  */
 export const BASEMAP_URL_VARIABLE = 'VITE_BASEMAP_PMTILES_URL';
 
+/**
+ * The archive a build uses when nothing else is configured (#534).
+ *
+ * #53's published US extract: the Protomaps basemap build of 2026-09-14, copied
+ * to storage this project controls (ADR 0010 D-1 — copied, never hotlinked).
+ * Read off the archive's own header on 2026-09-25: PMTiles v3, zoom 0–15,
+ * bounds −125° to −66° longitude and 24° to 50° latitude — the contiguous
+ * United States — and 19 155 814 749 bytes. It answers range requests with
+ * `access-control-allow-origin: *`, which is what lets the APK's origin and a
+ * self-hosted web build read it.
+ *
+ * ⚠️ **Why a default at all, when the URL is configuration (#63 criterion 7).**
+ * Without one, "no manual environment setup" (#534) cannot be met: `release.yml`
+ * builds the APK with no environment of its own, and a committed
+ * `.env.production` is a file `.gitignore` refuses. Configuration still wins —
+ * {@link readBasemapConfig} consults this only when the variable is unset or
+ * blank, so a self-hoster points `VITE_BASEMAP_PMTILES_URL` at their own copy,
+ * and `none` builds a client with no map and no tile request at all.
+ *
+ * ⚠️ **Its host is disclosed, and a test says so.** This is the one host the
+ * shipped app contacts without being asked to, so `docs/privacy-policy.md` and
+ * `apps/mobile/src/android/data-safety.ts` both name it, and
+ * `privacy/no-network.test.ts` §"the default basemap is disclosed" fails when
+ * this origin moves and they do not.
+ *
+ * ⚠️ **This object must never be deleted or renamed while any shipped build
+ * names it** (#535's review). The URL — dated object name and all — is baked
+ * into every web bundle and every APK, and an installed APK does not update
+ * itself when #53 publishes a newer build. Deleting it would take the map away
+ * from every old client, and quietly: one request, two console errors, no
+ * message to the rider. A newer build is published BESIDE this one under a new
+ * name and this constant moves to it; the old object goes only when no build
+ * still in use can name it. `docs/architecture.md`'s Basemap row says the same
+ * where #53's archive is described.
+ *
+ * ⚠️ **Outside that box the map is a line on a plain background.** The archive
+ * declares its bounds in its header, `pmtiles`' protocol hands them to
+ * MapLibre as the source's `bounds`, and MapLibre asks for no tile outside
+ * them — so a ride in London costs one header read and then nothing: no error,
+ * no retry, no spinner. `map.browser.spec.ts` §"a ride outside the archive's
+ * coverage" is the measurement.
+ */
+export const PUBLISHED_BASEMAP_URL = 'https://tiles.openzigs.com/basemap-us-20260914.pmtiles';
+
 /** What `readBasemapConfig` reads. A parameter, so a test needs no bundler. */
 export interface BasemapEnvironment {
   readonly VITE_BASEMAP_PMTILES_URL?: string | undefined;
@@ -105,18 +157,24 @@ export interface BasemapEnvironment {
 /**
  * The configured basemap, or `undefined` when there is none.
  *
- * `undefined` for an unset, empty or unparseable value — all three mean the
- * same thing to a reader (there is no map) and distinguishing them in the UI
- * would be reporting our own configuration error to somebody who cannot fix it.
- * A **non-`https:`** URL is refused too: a `http:` archive would be blocked as
- * mixed content on any real deployment, and failing here says so at start-up
- * rather than as an empty map.
+ * **Unset or blank is {@link PUBLISHED_BASEMAP_URL}** (#534). Blank counts as
+ * unset because `.env.example` carries the variable with an empty value, and a
+ * developer who copies the template as its own header says must not be handed
+ * a build with no map for doing so.
+ *
+ * `undefined` for a value that is set and is not an `https:` URL — `none`, a
+ * typo, a `http:` archive. ⚠️ **Deliberately NOT the default**: somebody who
+ * set the variable meant a particular host, and quietly substituting ours
+ * would send their riders' tile requests somewhere they did not choose. A
+ * **non-`https:`** URL is refused because it would be blocked as mixed content
+ * on any real deployment, and failing here says so at start-up rather than as
+ * an empty map. The panel says "no basemap" in words either way; distinguishing
+ * the causes in the UI would be reporting a build's configuration to somebody
+ * who cannot change it.
  */
 export function readBasemapConfig(environment: BasemapEnvironment): BasemapConfig | undefined {
-  const raw = environment.VITE_BASEMAP_PMTILES_URL?.trim() ?? '';
-  if (raw === '') {
-    return undefined;
-  }
+  const configured = environment.VITE_BASEMAP_PMTILES_URL?.trim() ?? '';
+  const raw = configured === '' ? PUBLISHED_BASEMAP_URL : configured;
   let parsed: URL;
   try {
     parsed = new URL(raw);
@@ -179,8 +237,21 @@ export interface BasemapLayer {
 /** The id the ride's own trace is added under, so the adapter and the tests agree on one string. */
 export const TRACK_SOURCE_ID = 'oyl-track';
 export const TRACK_LAYER_ID = 'oyl-track-line';
+/**
+ * The ride's line colour. Here rather than inline in `maplibre.ts` so the
+ * browser harness can look for the line on the drawing buffer without
+ * importing a second copy of it — the `paletteOf` argument in `harness.ts`.
+ */
+export const TRACK_LINE_COLOUR = '#b5341f';
 /** The vector source the basemap tiles arrive on. */
 export const BASEMAP_SOURCE_ID = 'basemap';
+
+/** The layer that needs no tile, and so the whole of a style with tiles turned off. */
+const BACKGROUND_LAYER: BasemapLayer = {
+  id: 'background',
+  type: 'background',
+  paint: { 'background-color': '#f5f3ef' },
+};
 
 /**
  * The style, built from the configuration.
@@ -197,8 +268,24 @@ export const BASEMAP_SOURCE_ID = 'basemap';
  *
  * No `glyphs` and no `sprite`: see the module note. Both would be third-party
  * origins today, and the criterion above is worth more than labels.
+ *
+ * ⚠️ **`tiles: false` is a style with no source at all** — the background
+ * layer and nothing else — and that is what the rider's Settings switch
+ * (`tiles-preference.ts`, the owner's decision of 2026-09-25) turns into. Not
+ * a source with its layers hidden: a declared source is a URL MapLibre may
+ * fetch, and "off" has to mean the tile host is contacted by nothing.
+ * {@link styleOrigins} over this style is empty, which `basemap.test.ts`
+ * asserts, and `map.browser.spec.ts` intercepts the network to say the same
+ * of a real engine. The ride's own line is added by the adapter, not by this
+ * style, so it is drawn either way.
  */
-export function basemapStyle(config: BasemapConfig): BasemapStyle {
+export function basemapStyle(
+  config: BasemapConfig,
+  options: { readonly tiles?: boolean } = {},
+): BasemapStyle {
+  if (options.tiles === false) {
+    return { version: 8, sources: {}, layers: [BACKGROUND_LAYER] };
+  }
   return {
     version: 8,
     sources: {
@@ -212,7 +299,7 @@ export function basemapStyle(config: BasemapConfig): BasemapStyle {
       },
     },
     layers: [
-      { id: 'background', type: 'background', paint: { 'background-color': '#f5f3ef' } },
+      BACKGROUND_LAYER,
       {
         id: 'earth',
         type: 'fill',

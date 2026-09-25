@@ -11,15 +11,19 @@
  *   render would fetch. `styleOrigins` sees it whether or not anything runs.
  * - **Criterion 7** — the basemap URL is configuration, and the map renders
  *   against a second archive URL with no code change.
+ * - **#534** — and when nothing is configured, a build draws the archive #53
+ *   published rather than nothing, with the origin guard still holding.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   BASEMAP_SOURCE_ID,
   basemapOrigin,
   basemapStyle,
+  browserBasemapConfig,
   OSM_ATTRIBUTION,
+  PUBLISHED_BASEMAP_URL,
   readBasemapConfig,
   styleOrigins,
   type BasemapStyle,
@@ -35,17 +39,36 @@ describe('readBasemapConfig — the URL is configuration', () => {
     expect(config?.attribution).toBe(OSM_ATTRIBUTION);
   });
 
-  it('is undefined when nothing is configured, which is the state of every build today', () => {
-    // #53 has not published an archive. This is the normal case, not an error —
-    // and it is what makes "no basemap" a state the panel has to render rather
-    // than a branch nobody exercises.
-    expect(readBasemapConfig({})).toBeUndefined();
-    expect(readBasemapConfig({ VITE_BASEMAP_PMTILES_URL: '' })).toBeUndefined();
-    expect(readBasemapConfig({ VITE_BASEMAP_PMTILES_URL: '   ' })).toBeUndefined();
+  it('is the archive #53 published when nothing is configured — #534', () => {
+    // Every build made with no environment, the APK's among them. Blank counts
+    // as unset because `.env.example` carries the variable empty, and copying
+    // the template must not cost a developer the map.
+    for (const unset of [{}, { VITE_BASEMAP_PMTILES_URL: '' }, { VITE_BASEMAP_PMTILES_URL: ' ' }]) {
+      const config = readBasemapConfig(unset);
+      expect(config?.archiveUrl).toBe(PUBLISHED_BASEMAP_URL);
+      expect(config?.attribution).toBe(OSM_ATTRIBUTION);
+    }
+  });
+
+  it('defaults to exactly the published object, on our own host', () => {
+    // Pinned as a literal: a default that drifted to a different object, or to
+    // somebody else's host (ADR 0010 D-1 forbids hotlinking), is a change a
+    // reviewer must see in this file as well as in the constant.
+    expect(PUBLISHED_BASEMAP_URL).toBe('https://tiles.openzigs.com/basemap-us-20260914.pmtiles');
+  });
+
+  it('lets the environment override the default', () => {
+    expect(readBasemapConfig({ VITE_BASEMAP_PMTILES_URL: OTHER })?.archiveUrl).toBe(OTHER);
   });
 
   it('is undefined for something that is not a URL, rather than throwing at start-up', () => {
     expect(readBasemapConfig({ VITE_BASEMAP_PMTILES_URL: 'not a url' })).toBeUndefined();
+  });
+
+  it('builds with no map when told `none`, and never falls back to ours', () => {
+    // A value somebody SET names the host they meant. Substituting ours for a
+    // typo would send their riders' tile requests to a host they did not pick.
+    expect(readBasemapConfig({ VITE_BASEMAP_PMTILES_URL: 'none' })).toBeUndefined();
   });
 
   it('refuses a plain-http archive', () => {
@@ -61,6 +84,24 @@ describe('readBasemapConfig — the URL is configuration', () => {
     expect(readBasemapConfig({ VITE_BASEMAP_PMTILES_URL: `  ${ARCHIVE}  ` })?.archiveUrl).toBe(
       ARCHIVE,
     );
+  });
+});
+
+describe('browserBasemapConfig — what a build actually ships', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('draws the published archive from a build with no environment at all — #534', () => {
+    // The real bundler read, not the pure function: this is the path `main.tsx`
+    // hands the map, and it is the one a `release.yml` build takes.
+    vi.stubEnv('VITE_BASEMAP_PMTILES_URL', '');
+    expect(browserBasemapConfig()?.archiveUrl).toBe(PUBLISHED_BASEMAP_URL);
+  });
+
+  it('still takes the environment over the default', () => {
+    vi.stubEnv('VITE_BASEMAP_PMTILES_URL', OTHER);
+    expect(browserBasemapConfig()?.archiveUrl).toBe(OTHER);
   });
 });
 
@@ -95,7 +136,42 @@ describe('basemapStyle — built here, never fetched', () => {
   });
 });
 
+describe('basemapStyle with map tiles turned off — the owner’s decision of 2026-09-25', () => {
+  it('declares no source at all, so there is no URL for MapLibre to ask for', () => {
+    const style = basemapStyle(
+      { archiveUrl: ARCHIVE, attribution: OSM_ATTRIBUTION },
+      { tiles: false },
+    );
+    expect(style.sources).toEqual({});
+    expect(styleOrigins(style)).toEqual([]);
+  });
+
+  it('keeps the background, so the ride’s line is drawn on something', () => {
+    const style = basemapStyle(
+      { archiveUrl: ARCHIVE, attribution: OSM_ATTRIBUTION },
+      { tiles: false },
+    );
+    expect(style.layers.map((layer) => layer.id)).toEqual(['background']);
+    expect(style.layers.every((layer) => layer.source === undefined)).toBe(true);
+  });
+
+  it('is the full style when tiles are on, or when nobody said', () => {
+    const config = { archiveUrl: ARCHIVE, attribution: OSM_ATTRIBUTION };
+    expect(basemapStyle(config, { tiles: true })).toEqual(basemapStyle(config));
+    expect(styleOrigins(basemapStyle(config))).toEqual(['https://tiles.example.org']);
+  });
+});
+
 describe('styleOrigins — criterion 3, the $950/month guard', () => {
+  it('reaches only the published archive’s origin with the default in force — #534', () => {
+    const config = readBasemapConfig({});
+    expect(config).toBeDefined();
+    if (config === undefined) {
+      return;
+    }
+    expect(styleOrigins(basemapStyle(config))).toEqual(['https://tiles.openzigs.com']);
+  });
+
   it('reaches exactly the configured origin and nothing else', () => {
     const config = { archiveUrl: ARCHIVE, attribution: OSM_ATTRIBUTION };
     expect(styleOrigins(basemapStyle(config))).toEqual([basemapOrigin(config)]);

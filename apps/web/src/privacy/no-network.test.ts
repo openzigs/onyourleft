@@ -19,9 +19,13 @@
  * - The **whole-tree** case is the gate.
  *
  * ⚠️ **What it does NOT claim.** It scans the source this project writes, not
- * its dependencies: MapLibre requests map tiles when a basemap is configured,
- * which is the one outbound request the app can make and which the policy
- * discloses rather than omits. And a determined `globalThis['fet' + 'ch']`
+ * its dependencies: MapLibre requests map tiles when a map is on screen, which
+ * is the one outbound request the app makes without being asked to and which
+ * the policy discloses rather than omits. ⚠️ **Since #534 that request goes
+ * somewhere by default** — `map/basemap.ts` §`PUBLISHED_BASEMAP_URL` — so the
+ * disclosure is no longer only prose: §"the default basemap is disclosed" at
+ * the foot of this file fails when that host moves and the policy and the Data
+ * Safety declaration do not move with it. And a determined `globalThis['fet' + 'ch']`
  * would go unseen — this catches the change somebody makes without thinking
  * about the policy, which is the one that actually happens.
  *
@@ -61,8 +65,10 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
+import { basemapOrigin, readBasemapConfig } from '../map/basemap';
 import { stripComments } from '../units/no-inline-units';
 
 const SOURCE_ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -361,3 +367,117 @@ describe('the service worker’s one network call', () => {
     expect(inTheWorker).toBe(1);
   });
 });
+
+/**
+ * **The one host the shipped app contacts without being asked to** (#534).
+ *
+ * Until #534 no build configured a basemap, so the policy could say "no tile
+ * host is configured in this build" and be true. Now every build that is not
+ * told otherwise draws `map/basemap.ts` §`PUBLISHED_BASEMAP_URL`, and a rider
+ * who opens a ride with a GPS track asks that host for tiles covering roughly
+ * where they rode. MapLibre makes the request, so the scan above cannot see
+ * it; this is what ties the disclosure to the constant instead.
+ *
+ * ⚠️ **It reads the host out of the code, never a copy of it.** A test that
+ * wrote `tiles.openzigs.com` here would go on passing after the default moved
+ * to a host the policy has never named, which is the failure it exists for.
+ *
+ * ⚠️ **The declaration is PARSED, not searched** (#535's review). A search of
+ * the whole file was satisfied by the comment above the Location row naming
+ * the host, even with the `why` string — the part that corresponds to what is
+ * filed on Play — no longer naming it. So `data-safety.ts` is parsed with the
+ * TypeScript compiler's own parser and the host is looked for in the Location
+ * row's `why` string alone; a comment is not in the tree that is read. The
+ * policy is still read as a whole file, because prose is the only place a
+ * policy can name a host.
+ *
+ * ⚠️ **What it cannot check** is that the words around the host are true. It
+ * says the policy and the declaration NAME the host; whether the declaration's
+ * answer is right is a filing decision, argued in `data-safety.ts`'s Location
+ * row and made by a person.
+ */
+describe('the default basemap is disclosed — #534', () => {
+  const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
+  const unset = readBasemapConfig({});
+
+  it('exists, so there is a host to disclose', () => {
+    // Without this the two cases below would pass over `undefined` the day the
+    // default was removed, and say nothing about a build that contacts nobody.
+    expect(unset).toBeDefined();
+  });
+
+  const host = unset === undefined ? '' : new URL(basemapOrigin(unset)).host;
+
+  it('is named in docs/privacy-policy.md', () => {
+    expect(host).not.toBe('');
+    expect(
+      readFileSync(join(REPOSITORY_ROOT, 'docs', 'privacy-policy.md'), 'utf8'),
+      `the shipped app requests map tiles from ${host} by default, and the privacy policy does not say so`,
+    ).toContain(host);
+  });
+
+  it('is named in the Location row’s `why` in apps/mobile/src/android/data-safety.ts', () => {
+    expect(host).not.toBe('');
+    const path = join(REPOSITORY_ROOT, 'apps', 'mobile', 'src', 'android', 'data-safety.ts');
+    const why = locationWhy(readFileSync(path, 'utf8'));
+    // Found at all, or a renamed field would make this pass over nothing.
+    expect(why, 'no Location row with a string `why` was found in data-safety.ts').toBeDefined();
+    expect(
+      why,
+      `the shipped app requests map tiles from ${host} by default, and the Location answer does not say so`,
+    ).toContain(host);
+  });
+
+  it('is not satisfied by a comment — the parse sees the `why` string and nothing else', () => {
+    // The review's finding, as a fixture: the host in a comment above the row,
+    // and a `why` that does not name it. A whole-file search passes this.
+    const fixture = [
+      'export const DATA_SAFETY_DECLARATION = [',
+      '  {',
+      `    // tiles come from ${host}`,
+      "    dataType: 'Location (approximate or precise)',",
+      '    collected: false,',
+      "    why: 'nothing leaves the device',",
+      '  },',
+      '];',
+    ].join('\n');
+    expect(fixture).toContain(host);
+    expect(locationWhy(fixture)).toBe('nothing leaves the device');
+  });
+});
+
+/**
+ * The `why` string of the declaration's Location row, read from the parsed
+ * source — the object literal whose `dataType` starts with `Location` — or
+ * `undefined` when there is no such row or its `why` is not a plain string.
+ */
+function locationWhy(source: string): string | undefined {
+  const file = ts.createSourceFile('data-safety.ts', source, ts.ScriptTarget.Latest, true);
+  let found: string | undefined;
+  const text = (node: ts.Node | undefined): string | undefined =>
+    node !== undefined && (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
+      ? node.text
+      : undefined;
+  const visit = (node: ts.Node): void => {
+    if (ts.isObjectLiteralExpression(node)) {
+      const property = (name: string): ts.Expression | undefined => {
+        for (const member of node.properties) {
+          if (
+            ts.isPropertyAssignment(member) &&
+            ts.isIdentifier(member.name) &&
+            member.name.text === name
+          ) {
+            return member.initializer;
+          }
+        }
+        return undefined;
+      };
+      if (text(property('dataType'))?.startsWith('Location') === true) {
+        found = text(property('why'));
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return found;
+}

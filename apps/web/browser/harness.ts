@@ -68,6 +68,7 @@ import {
   basemapStyle,
   BASEMAP_SOURCE_ID,
   OSM_ATTRIBUTION,
+  TRACK_LINE_COLOUR,
   type BasemapConfig,
   type BasemapStyle,
 } from '../src/map/basemap';
@@ -172,6 +173,24 @@ export interface MapLoadResult {
   readonly samples: readonly string[];
   /** Range requests for the archive, from the Resource Timing buffer. */
   readonly archiveRequests: readonly ArchiveRequestTiming[];
+  /**
+   * The ride's own line was on the drawing buffer, read at the frame's centre.
+   *
+   * The harness's track is one straight segment and `fitBounds` centres its
+   * bounding box, so the middle of the frame is the middle of the line. What
+   * the tiles-off case needs: "no tile" and "no map at all" both paint no tile
+   * colour, and only the line tells them apart.
+   *
+   * ⚠️ **Only meaningful on a page that publishes at its deadline.** A page
+   * whose tiles paint publishes on the first frame they do, which can be
+   * before the line's GeoJSON has been parsed — so the tiles-on case does not
+   * assert it, and the tiles-off case, which can never paint a tile, waits the
+   * whole deadline. It found a real defect on its first run: `maplibre.ts`
+   * §`setTrack` dropped a line handed over before the style had loaded.
+   */
+  readonly trackPainted: boolean;
+  /** The distinct colours in that centre box on the last frame read, for a failure message. */
+  readonly centreColours: readonly string[];
 }
 
 declare global {
@@ -377,7 +396,10 @@ function watchForPaint(container: HTMLDivElement, style: BasemapStyle, archive: 
   let frames = 0;
   let samples: string[] = [];
   let canvasSize = '0x0';
+  let trackPainted = false;
+  let centreColours: string[] = [];
   let done = false;
+  const trackColour = parseHex(TRACK_LINE_COLOUR);
 
   const publish = (painted: boolean, at: number | undefined): void => {
     if (done) {
@@ -395,6 +417,8 @@ function watchForPaint(container: HTMLDivElement, style: BasemapStyle, archive: 
       backgroundColour: palette.background,
       samples,
       archiveRequests: archiveTimings(archive),
+      trackPainted,
+      centreColours,
     };
   };
 
@@ -427,6 +451,25 @@ function watchForPaint(container: HTMLDivElement, style: BasemapStyle, archive: 
       }
     }
     samples = read;
+    // The line, in a small box at the centre — see `MapLoadResult.trackPainted`.
+    const box = 9;
+    const left = Math.max(0, Math.round(canvas.width / 2) - (box >> 1));
+    const bottom = Math.max(0, Math.round(canvas.height / 2) - (box >> 1));
+    const centre = new Uint8Array(box * box * 4);
+    gl.readPixels(left, bottom, box, box, gl.RGBA, gl.UNSIGNED_BYTE, centre);
+    const seenHere = new Set<string>();
+    for (let offset = 0; offset < centre.length && trackColour !== undefined; offset += 4) {
+      const pixel = [
+        centre[offset] ?? 0,
+        centre[offset + 1] ?? 0,
+        centre[offset + 2] ?? 0,
+      ] as const;
+      seenHere.add(hex(pixel));
+      if (matches(pixel, trackColour)) {
+        trackPainted = true;
+      }
+    }
+    centreColours = [...seenHere];
     return read.some((sample) => {
       const channels = parseHex(sample);
       return channels !== undefined && palette.basemap.some((target) => matches(channels, target));
@@ -500,6 +543,15 @@ function registerProtocol(): boolean {
   return new URL(window.location.href).searchParams.get('protocol') !== 'off';
 }
 
+/**
+ * Whether to draw map tiles — `?tiles=off` is the rider's Settings switch
+ * turned off (`map/tiles-preference.ts`, the owner's decision of 2026-09-25),
+ * handed to the **real** `basemapStyle` the way `MapPanel.tsx` hands it.
+ */
+function tilesDrawn(): boolean {
+  return new URL(window.location.href).searchParams.get('tiles') !== 'off';
+}
+
 function archiveUrl(): string {
   const configured = new URL(window.location.href).searchParams.get('archive');
   // Same origin as the page by default, so the "zero third-party requests"
@@ -516,7 +568,7 @@ function run(): void {
 
   const archive = archiveUrl();
   const config: BasemapConfig = { archiveUrl: archive, attribution: OSM_ATTRIBUTION };
-  const style = basemapStyle(config);
+  const style = basemapStyle(config, { tiles: tilesDrawn() });
   const errors: string[] = [];
   let created = false;
 

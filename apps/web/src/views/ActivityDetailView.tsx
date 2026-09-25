@@ -69,6 +69,8 @@ import {
 import type { DetailPort } from '../detail/store-port';
 import type { BasemapConfig } from '../map/basemap';
 import { MapPanel } from '../map/MapPanel';
+import { readMapTilesChoice } from '../map/tiles-preference';
+import { deviceStorage, type PreferenceStorage } from '../game/hud/announce-preference';
 import type { MapPort } from '../map/port';
 import { trackGeometry, type TrackGeometry } from '../map/track';
 import { hrefFor, routeById } from '../shell/routes';
@@ -106,8 +108,14 @@ export interface ActivityDetailViewProps {
    * accessibility suite and the view's own tests pass a resolved stub.
    */
   readonly map?: (() => Promise<MapPort>) | undefined;
-  /** Where the basemap is, or `undefined` until #53 publishes an archive. */
+  /** Where the basemap is, or `undefined` for a build configured with none (#534). */
   readonly basemap?: BasemapConfig | undefined;
+  /**
+   * Where the rider's map-tiles choice is kept (`map/tiles-preference.ts`) —
+   * this DEVICE's `localStorage` unless a test hands in a double, the shape
+   * `SettingsView`'s `announcements` prop has.
+   */
+  readonly preferences?: PreferenceStorage | undefined;
 }
 
 type OverviewState =
@@ -136,7 +144,11 @@ export function ActivityDetailView({
   activityId,
   map,
   basemap,
+  preferences,
 }: ActivityDetailViewProps): JSX.Element {
+  // Read once, when the screen opens: the switch is on the Settings screen, so
+  // it cannot change while this one is showing.
+  const [tiles] = useState(() => readMapTilesChoice(preferences ?? deviceStorage()));
   const [state, setState] = useState<OverviewState>({ kind: 'loading' });
   const [enabled, setEnabled] = useState<readonly TraceChannel[]>(DEFAULT_SERIES);
   const [traces, setTraces] = useState<ReadonlyMap<TraceChannel, Trace>>(new Map());
@@ -500,6 +512,7 @@ export function ActivityDetailView({
           <MapPanel
             port={mapPort}
             basemap={basemap}
+            tiles={tiles}
             track={showShared && shared !== undefined ? trackGeometry(shared.segments) : ownTrack}
           />
 

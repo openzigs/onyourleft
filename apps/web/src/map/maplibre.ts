@@ -51,7 +51,7 @@ import {
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { Protocol } from 'pmtiles';
 
-import { TRACK_LAYER_ID, TRACK_SOURCE_ID } from './basemap';
+import { TRACK_LAYER_ID, TRACK_LINE_COLOUR, TRACK_SOURCE_ID } from './basemap';
 import type { MapPort, MapRenderer, MapView, MapViewOptions } from './port';
 import { createProtocolRegistry } from './protocol';
 import type { TrackBounds, TrackFeature } from './track';
@@ -141,7 +141,7 @@ const renderer: MapRenderer = {
             // than as nothing — the same choice `detail/TraceChart.tsx` makes,
             // and `track.ts` explains why a lone fix is kept at all.
             layout: { 'line-cap': 'round', 'line-join': 'round' },
-            paint: { 'line-color': '#b5341f', 'line-width': 3 },
+            paint: { 'line-color': TRACK_LINE_COLOUR, 'line-width': 3 },
           },
         ],
       } as StyleSpecification,
@@ -150,19 +150,51 @@ const renderer: MapRenderer = {
     });
     map.getCanvas().setAttribute('aria-hidden', 'true');
 
+    /**
+     * The line, handed over before the style had loaded, waiting for it.
+     *
+     * ⚠️ **Found by #535's tiles-off browser case, and it is older than that
+     * change.** `MapPanel` calls `setTrack` in the same commit as `create`,
+     * and at that moment MapLibre has not loaded the style it was handed, so
+     * `getSource` answers `undefined` and the line was silently dropped — every
+     * gate stayed green because none of them looked for the line on the
+     * drawing buffer. `harness.ts` §`MapLoadResult.trackPainted` does now, and
+     * applying the line once the style has loaded is what turns it green.
+     *
+     * ⚠️ **`style.load`, not `load`.** In MapLibre 6.10.0 `load` fires only
+     * once every visible tile has loaded or failed, so waiting on it would hold
+     * the rider's own line hostage to the tile host — indefinitely on a hung
+     * request, since the PMTiles protocol sets no timeout. The track source is
+     * part of the style, so `getSource` answers as soon as `style.load` fires.
+     * `undefined` here means nothing is waiting, which is different from a
+     * track of `undefined` waiting to clear the line — hence the wrapper.
+     */
+    let waiting: { readonly track: TrackFeature | undefined } | undefined;
+    const draw = (track: TrackFeature | undefined): boolean => {
+      const source = map.getSource(TRACK_SOURCE_ID);
+      if (source === undefined || !('setData' in source)) {
+        return false;
+      }
+      // `setData` returns a promise in MapLibre v6, resolving when the source
+      // has finished reloading. Nothing here waits on it: the map repaints
+      // itself and there is no next step to sequence, so it is explicitly
+      // discarded rather than left floating for the linter to find. A
+      // rejection surfaces on the map's own `error` event.
+      void (source as GeoJSONSource).setData(
+        sourceDataFor(track) as Parameters<GeoJSONSource['setData']>[0],
+      );
+      return true;
+    };
+    map.once('style.load', () => {
+      if (waiting !== undefined) {
+        draw(waiting.track);
+        waiting = undefined;
+      }
+    });
+
     return {
       setTrack(track: TrackFeature | undefined, bounds: TrackBounds | undefined): void {
-        const source = map.getSource(TRACK_SOURCE_ID);
-        if (source !== undefined && 'setData' in source) {
-          // `setData` returns a promise in MapLibre v6, resolving when the
-          // source has finished reloading. Nothing here waits on it: the map
-          // repaints itself and there is no next step to sequence, so it is
-          // explicitly discarded rather than left floating for the linter to
-          // find. A rejection surfaces on the map's own `error` event.
-          void (source as GeoJSONSource).setData(
-            sourceDataFor(track) as Parameters<GeoJSONSource['setData']>[0],
-          );
-        }
+        waiting = draw(track) ? undefined : { track };
         fit(map, bounds);
       },
       destroy(): void {

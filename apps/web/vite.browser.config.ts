@@ -27,7 +27,12 @@
 
 import { defineConfig, type Plugin } from 'vite';
 
-import { buildFixtureArchive, FIXTURE_ARCHIVE_FILE } from './browser/pmtiles-fixture';
+import {
+  buildFixtureArchive,
+  FIXTURE_ARCHIVE_FILE,
+  FIXTURE_BOUNDED_ARCHIVE_FILE,
+  PUBLISHED_ARCHIVE_BOUNDS,
+} from './browser/pmtiles-fixture';
 
 /**
  * Emit the PMTiles archive the gate renders from (#63).
@@ -52,6 +57,14 @@ function pmtilesFixture(): Plugin {
         type: 'asset',
         fileName: FIXTURE_ARCHIVE_FILE,
         source: buildFixtureArchive(),
+      });
+      // The same tiles declaring only the published archive's coverage, for
+      // the "ride outside the coverage" case (#534). pmtiles-fixture.ts says
+      // why it holds every tile anyway.
+      this.emitFile({
+        type: 'asset',
+        fileName: FIXTURE_BOUNDED_ARCHIVE_FILE,
+        source: buildFixtureArchive(PUBLISHED_ARCHIVE_BOUNDS),
       });
     },
   };
