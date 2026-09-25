@@ -49,7 +49,7 @@ was not run.
 
 | | |
 |---|---|
-| **Tablet** | Google **Pixel Tablet** (`tangorpro`), serial 3822105H80BY3Z, **Android 17** (API 37), build `CP2A.260705.006`, on Wi-Fi at `192.168.68.69/22`, IPv6 link-local only |
+| **Tablet** | Google **Pixel Tablet** (`tangorpro`), **Android 17** (API 37), build `CP2A.260705.006`, on Wi-Fi at `192.168.68.69/22`, IPv6 link-local only |
 | **Chrome on the tablet** | `com.android.chrome` **153.0.8010.52** |
 | **Android System WebView** | `com.google.android.webview` **153.0.8010.36**. UA `…; wv) … Chrome/153.0.8010.36` |
 | **The app** | `dev.openzigs.onyourleft` versionName 1.0, a **debug** build (`DEBUGGABLE`), serving the client at `https://localhost/`. Not reinstalled, not restarted and not navigated (§3.3) |
@@ -145,9 +145,10 @@ a release build has no DevTools socket, and nothing here was measured on one.
 | Pair 3, 600 s | 146 | 138 | 70 / 93 | 28 |
 | Pair 3, `strip` (run twice) | 148, 142 | 119, 128 | **never** (ICE stayed `new` for 30 s, both times) | — |
 
-Gathering host candidates took **about 130–150 ms** on both platforms. D-1's *"host candidates
-gather within milliseconds"* is true in spirit only: it is not the cost that matters, and a person
-holding a phone to a QR code will not notice it.
+**Offers** gathered in **127–148 ms** on both platforms. **Answers** gathered in **2–138 ms**: the
+Mac answerer took 2, 4 and 5 ms in pair 1, and 50–138 ms in pairs 2 and 3. So D-1's *"host
+candidates gather within milliseconds"* holds for pair 1's answers, and the offers took a little over
+a tenth of a second. Either way a person holding a phone to a QR code will not notice it.
 
 ### 4.2 Candidates, and whether they are mDNS names
 
@@ -173,11 +174,23 @@ How to read that:
   but the address is real. **Why is not established.** The likeliest explanation is that this
   Chromium build on Android has no mDNS responder to register a name with, so it falls back to the
   address. That was not read in the source, so it is an explanation, not a finding.
+- ⚠️ **An unconfirmed lead, not verified here.** The review of this spike's pull request suggested
+  that Chromium's `enable_mdns` build flag, which gates both the mDNS responder used to hide a
+  candidate's address and the mDNS host resolver, may be **off on Android**. Nobody has confirmed
+  that in the source: neither the reviewer nor this write-up. Where to read it is Chromium's own
+  code search for the flag ([`enable_mdns`](https://source.chromium.org/search?q=enable_mdns&ss=chromium))
+  and for its GN declaration
+  ([`enable_mdns` in `.gni` files](https://source.chromium.org/search?q=enable_mdns%20file:%5C.gni&ss=chromium)).
+  **If** it is off, that one fact explains both halves of this spike: an Android end never hides
+  its address (above) and never resolves a `.local` name (§4.4). It would also make §6's worry,
+  that a phone on another Android version might hide its address, much less likely, because the
+  behaviour would come from the build rather than from the device. It is a hypothesis for §7.1 to
+  test, and nothing more.
 - **IPv6.** No SDP carried an IPv6 candidate. The LAN has link-local IPv6 only, and no end offered a
   link-local address. `getStats()` on the Android end also listed
   `address: "::"` UDP and `0.0.0.0`/`::` TCP port 9 "host" entries that were **not in the SDP**.
-  They were never used and look like the wildcard sockets' own bookkeeping. #529's D-4 decoder only
-  ever sees the SDP, so they do not reach it.
+  They were never used and look like the wildcard sockets' own bookkeeping. The decoder #529 builds to
+  ADR 0033 D-4 only ever sees the SDP, so they do not reach it.
 
 ### 4.3 The 10-minute streams
 
@@ -192,7 +205,7 @@ The receiver is the offerer (the tablet's role).
 | Duplicated | 0 | 0 | 0 |
 | Gaps over 1 s at the receiver | 0 | 0 | 0 |
 | Payload received | 60.14 MB | 60.21 MB | 60.02 MB |
-| Goodput at the receiver | 802 kbit/s | 803 kbit/s | 801 kbit/s |
+| Goodput at the receiver | 802 kbit/s | 803 kbit/s | 800 kbit/s |
 | Frame rate at the receiver | 5.00/s | 5.00/s | 5.00/s |
 | Sender's peak `bufferedAmount` | 0 | 0 | 0 |
 | Echo RTT on `frames`: min / p50 / p90 / p99 / max (ms) | 0.6 / 1.0 / 1.4 / 1.7 / 2.9 | 21.4 / **41.3** / 49.8 / 94.0 / 198.1 | 23.6 / **47.4** / 55.7 / 118.6 / 161.0 |
@@ -203,13 +216,21 @@ The receiver is the offerer (the tablet's role).
 
 Notes on those numbers:
 
+- **Goodput is the payload received × 8, divided by the stream's 600 s.** So pair 3 is
+  60.02 MB × 8 / 600 s = 800.3 kbit/s, which rounds to 800. An earlier version of this table said
+  **801** for pair 3. That is what the same bytes give over the **599.8 s** between the first frame
+  and the last (2999 intervals of 200 ms), and pairs 1 and 2 round the same way on either base. The
+  difference is inside rounding and carries no finding; it is corrected so the table states one
+  base. No other number in this table changed.
+
 - **The load is trivial for this LAN.** About 0.8 Mbit/s never put a byte into `bufferedAmount`, so
   what #527 asks for (5 frames/s at about 256 px) is far inside what this Wi-Fi carries. This is
   **one quiet evening on one router**. It says nothing about a congested network, a 2.4 GHz band or
   a phone at the far end of a room.
 - **The application-level RTT (~40 ms) is about three times ICE's own (~12 ms)**, and an ICMP ping
-  from the tablet to the Mac took 8 ms. The difference is on the tablet: its JavaScript event loop
-  and Wi-Fi power saving. **Not investigated.** It does not matter for frames that are analysed and
+  from the tablet to the Mac took 8 ms. The difference is **probably** on the tablet, in its
+  JavaScript event loop and Wi-Fi power saving. The ICMP-against-ICE comparison points there, but
+  does not locate it. **Not investigated.** It does not matter for frames that are analysed and
   discarded, and it matters only a little for a `start`/`stop` command.
 - **The one lost frame in pair 2 is what `maxRetransmits: 0` is for.** A frame dropped on the air
   stayed dropped, and nothing queued behind it. 1 in 3000 over 10 minutes is the only loss seen.
@@ -252,7 +273,8 @@ Three more observations narrow it down. None of them is an explanation:
 ## 5. Did anything leave the LAN
 
 **The peer path: no, on every piece of evidence available. But one piece a reader would expect is
-missing: there is no packet capture.** `tcpdump` needs `/dev/bpf*`, which is root-only on this Mac,
+missing: there is no packet capture.** ⚠️ **Every piece of that evidence except `getStats()` is from
+the Mac's side.** The tablet's end rests on its configuration and on `getStats()` alone. `tcpdump` needs `/dev/bpf*`, which is root-only on this Mac,
 and `sudo` needs a password nobody in the loop had. The tablet is not rooted. What there is instead:
 
 1. **Configuration.** `iceServers: []`. With no server configured, an ICE agent has nowhere to send
@@ -279,6 +301,15 @@ background traffic and not the peer path.** They are connected sockets to port 4
 source ports, and a real rider's browser makes them too. But this is exactly the kind of thing a
 reader should not have to take on trust. **A capture on the router, or `tcpdump` with root on either
 end, is still owed** to make #532's third criterion airtight.
+
+⚠️ **One path off the LAN was not considered above, and the link itself may cause it: the failed
+`.local` lookup.** §4.4 shows the Android network service tried to resolve the Mac's `<uuid>.local`
+and got `ERR_NAME_NOT_RESOLVED`. §2 shows the router **answers `.local` names by unicast DNS**
+(`NXDOMAIN` for `MacBook-Pro.local`). If Android's resolver fell back to unicast DNS for that name,
+it asked the router, and the router may have forwarded the query to an upstream resolver outside the
+LAN. Nothing here shows whether it did. The name is a random UUID, so it carries little, but #532's
+criterion is *"no third-party host"*, and in the product this would happen on every pairing where the
+far end offers a name. §7.3's capture covers it.
 
 ---
 
@@ -308,11 +339,31 @@ condition:
 - **D-4's candidate filter has to accept a raw private IPv4 host candidate**, because that is what
   both Android ends offer. It already does. Its `.local` acceptance is still needed for a desktop
   end, and a `.local` candidate from the far end cannot be used by an Android end (§4.4). The
-  pairing screen's *"no usable candidate"* sentence therefore needs a second case: **both ends offered
-  only names**.
-- **Once a page has camera access, desktop Chrome also offers a TCP host candidate** (`tcptype
-  active`, port 9). D-4 says *"host candidates"* without naming a protocol, so #529 should decide
-  whether the encoder omits TCP ones or accepts them.
+  pairing screen therefore needs a second message: **if both ends offered only names and the
+  connection then fails**, it says so in words. That is a message shown **after ICE fails**, not a
+  refusal when the QR code is decoded. Pair 1 opened with names on both ends, so "only names" is not
+  unusable in itself; it fails when the end that must dial is Android (§4.4), and two desktop Chromes
+  each offering a name are predicted to connect (unmeasured across two machines, above).
+- ⚠️ **A desktop-Chrome phone will always offer a TCP host candidate, so #529 must decide how to
+  handle it before the decoder is written.** Once a page has camera access, desktop Chrome offers a
+  `tcp … tcptype active` host candidate (port 9) beside the UDP one (§4.2), and D-1 gives the phone
+  camera access. So this is not an edge case: it is what every desktop-Chrome phone sends. D-1's
+  decoder *"**refuses** anything outside that set"* and D-4 refuses a pairing with *"an address that is
+  not accepted"*, so a decoder that treats a TCP candidate as outside the set would refuse **every**
+  desktop-Chrome phone. The choice is forced: the encoder omits TCP candidates, or the decoder
+  accepts them.
+- **The order of camera access matters, and this spike's control did not follow the tablet's.** The
+  tablet **gathers its offer before its camera opens** to read the answer (D-1). This spike's
+  `camera` control granted permission **before** the connection was created (§3.4). So for a
+  desktop-Chrome tablet the camera-access un-hiding probably does **not** apply to the offer, unless
+  the permission was already granted in an earlier session. D-1's *"the tablet has it while it reads
+  the answer"* covers the answer and not the offer. The phone's order does match: it reads the offer
+  QR code, with the camera, and then answers.
+- **Pair 3 opened under the app's existing permissions.** The app was not reinstalled (§2), and the
+  committed `AndroidManifest.xml` declares no multicast permission (`CHANGE_WIFI_MULTICAST_STATE`
+  does not appear in it). The Android end never used mDNS for WebRTC in any run. For ADR 0033
+  D-10's question, what is measured is only this: **no new permission was needed for pair 3.** It
+  is not a claim about any other device, build or pair.
 - **The TCP candidate and the IPv6 behaviour were seen once each.** A dual-stack LAN with a global
   IPv6 prefix was not available.
 
@@ -333,7 +384,8 @@ The amendment belongs to whoever runs §7.
    condition in its own right.
 3. **A packet capture** on the router or with root on the Mac, filtered for anything not in
    `192.168.68.0/22` and for UDP 3478/19302. It should also capture port 5353, to settle §4.4's
-   open question about which side's mDNS fails.
+   open question about which side's mDNS fails, and **DNS queries (UDP and TCP port 53) for
+   `*.local` names**, to settle whether a failed `.local` lookup leaves the LAN (§5).
 4. **A router with client isolation on** (most have a guest-network switch). It is expected to fail,
    and the failure is the wording the pairing screen owes the rider.
 5. **A release build.** Everything here ran in a debug build because that is what exposes DevTools.
