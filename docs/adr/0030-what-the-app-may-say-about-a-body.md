@@ -648,3 +648,12 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   |---|---|
   | The accuracy this device achieves is unmeasured | **Stands.** [#385](https://github.com/openzigs/onyourleft/issues/385). ⚠️ Unchanged by Q1, and it still cannot make D-3 or D-4 looser — under condition 6 it now cannot even in principle |
   | ⚠️ **New: the EU and UK read** | Spike 0008 exists as of this entry; **the owner's decision on it does not**, and that is what gates [#382](https://github.com/openzigs/onyourleft/issues/382), [#383](https://github.com/openzigs/onyourleft/issues/383), [#384](https://github.com/openzigs/onyourleft/issues/384), [#387](https://github.com/openzigs/onyourleft/issues/387) and [#388](https://github.com/openzigs/onyourleft/issues/388) |
+
+- **2026-09-25** — **D-3's second sentence is superseded by [ADR 0033](0033-side-camera-link.md)
+  D-7** (#527), on the owner's ruling of the same date. Differences are permitted **across sessions
+  when the framing check passed** against the stored reference, as well as within one session. When
+  it did not pass, the report gives within-session differences only and says why. Uncertainty is
+  stated in the same sentence (R8). ⚠️ **D-3's first sentence is untouched: no absolute joint angle,
+  limb angle, torso angle, segment length or body dimension is ever rendered as a number.** D-4,
+  R1, R2, D-6 and D-7 also stand exactly as written. The ruling widens which two observations may
+  be compared. It does not change what may be said about them.

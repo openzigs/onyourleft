@@ -736,3 +736,16 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   true of the browser build and checkable in the browser gate.
   ([#404](https://github.com/openzigs/onyourleft/issues/404), findings issue
   [#391](https://github.com/openzigs/onyourleft/issues/391))
+
+- **2026-09-25** — **Decision F's *"never in the browser"* is superseded for one narrow case, and
+  finding 1's *"there is no such thing as WebRTC with zero servers"* is true only of peers that
+  cannot see each other.** [ADR 0033](0033-side-camera-link.md) (#527) records the owner's ruling
+  in [#386](https://github.com/openzigs/onyourleft/issues/386): the rider's tablet and a phone on a
+  tripod, in one room, connect directly for one session. They exchange the SDP offer and answer
+  **by QR code**, so the out-of-band carrier finding 1 requires is a screen and a camera rather than
+  a server. **Nothing else here is changed.** The enumeration argument that binds decision F is
+  untouched, because two devices of one rider enumerate nothing. *"Never for leaderboards, never for
+  racing"* stands as written, and so does consequence 9 for any mesh, DHT or browser peer **between
+  people**. ⚠️ A reader who takes this entry as reopening peer-to-peer for this product is reading
+  it too widely. It covers one rider's own two devices, paired by sight, for one session, and
+  ADR 0033's header states that scope.
