@@ -36,20 +36,32 @@ Can the tablet run a pose model on the side camera's pictures at about **5 per s
 256 px** ([ADR 0033](../adr/0033-side-camera-link.md) D-3's figures, costed in its D-6) **while the trainer game
 renders**, and is there a model whose weights this repository may ship?
 
+⚠️ **This follows ADR 0033 D-6, which says the analysis runs _during_ the ride** (nothing is shown
+until after it). #385's 2026-09-25 comment asks for the cost _"with the renderer idle (analysis is
+post-ride)"_, and #530's acceptance criterion still reads _"Analysis runs **after the ride**, never
+during it"_. Both predate ADR 0033 ([#533](https://github.com/openzigs/onyourleft/pull/533)), whose
+own table of what it changes in #530 says the during-the-ride ruling replaces that criterion. So the
+budget below is the during-the-ride one. **If #530 is instead built as a post-ride batch**, pictures
+would be processed back to back and the **burst** figures in §4 (29–38 ms for the cheapest models)
+are the ones to budget with, not the paced ones. That would reverse §5.3's advice.
+
 **Yes, on both counts, with one condition.** Every model measured ran at 5 pictures a second beside
 the game with **at most one frame over 20 ms in about 2 400** and a harness p99 of 16.8 ms, **as long as it ran in a Web
 Worker on the CPU**. The same model on the page's main thread missed a vsync 191–203 times in 40 s.
 The cheapest beside the ride was **MediaPipe Pose Landmarker lite on its CPU (XNNPACK/WASM)
-delegate**, at **57.9 ms p50 and 73.6 ms p95** per picture in the stylised world and 65.8 / 80.6 ms
-in the realistic one, and 68.0 / 83.0 ms inside the app's own WebView. **MoveNet Lightning on
-TF.js WASM** came second, at 79.0 / 98.0 ms. Ten minutes beside the game changed neither the
-inference time nor the frames, and the tablet stayed at thermal status 0. MoveNet's
+delegate**. Over the **ten-minute soak** beside the stylised game it read **65.8 ms p50 and 80.9 ms
+p95** per picture (§5.4), and that is the figure to budget with. Its best single 40 s run read 57.9 /
+73.6 ms (§5.1). It read 65.8 / 80.6 ms in the realistic world and 68.0 / 83.0 ms inside the app's own
+WebView. **MoveNet Lightning on TF.js WASM** came second, at 79.0 / 98.0 ms. **Within** the
+ten-minute soak nothing drifted upward after the first minute, in inference time or in frames, and
+the tablet stayed at thermal status 0. Across runs the same configuration differed by about 14 % at
+the p50 (57.9 against 65.8 ms). MoveNet's
 weights licence, which [#328](https://github.com/openzigs/onyourleft/issues/328) left unconfirmed, is
 **Apache 2.0 at Google's own Kaggle model page and in Google's own model card** (§3). BlazePose's
 (MediaPipe's) is Apache 2.0 in its model card. RTMPose's weights have **no licence statement at the
 source** and fail closed.
 
-⚠️ **One number here surprised us, and it matters to #530.** The same inference costs **about three
+⚠️ **One number here surprised us, and it matters to #530.** The same inference costs **2.3 to 2.7
 times as much at 5 per second as it does back to back**: 78–94 ms against 29–38 ms, same model, same
 worker, same picture (§5.3). A model's published frame rate is the wrong input for a 5-per-second
 budget. Measure at the duty cycle you will run.
@@ -67,7 +79,7 @@ budget. Measure at the duty cycle you will run.
 | **Power and heat** | On AC (the dock), battery 100 %. Thermal status **0** before and after every run. `BIG` cluster 25–40 °C |
 | **Page origin** | `http://localhost:8385`, served from the Mac over `adb reverse`. `localhost` is a secure context, so WebGPU was available. Not cross-origin isolated, so every WASM runtime ran **single-threaded**, which is what the shipped app would get today |
 | **Input** | One photograph, **cropped and resized to 256 × 256 JPEG** (26 KB): a man riding a bicycle side-on, _Man riding bicycle (Unsplash).jpg_, Clem Onojeghuo, 2016, **CC0** on [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Man_riding_bicycle_(Unsplash).jpg). Not committed |
-| **Picture rate** | **5 per second** from a `setInterval`. Each tick decodes the JPEG with `createImageBitmap` (as a picture arriving over ADR 0033's link would be decoded) and runs the model. At most one picture in flight. A tick that finds the model busy is counted as dropped. **No tick was dropped in any run** |
+| **Picture rate** | **5 per second** from a `setInterval`. Each tick decodes the JPEG with `createImageBitmap` (as a picture arriving over ADR 0033's link would be decoded) and runs the model. At most one picture in flight. A tick that finds the model busy is counted as dropped. **No tick was dropped in any run**. ⚠️ This is not quite ADR 0033 D-6's rule, which allows one picture **waiting** as well as the one in flight, with a newer arrival replacing the waiting one. The harness kept none waiting. Nothing was dropped, so no figure here would change, but it is not the pipeline #530 will build |
 | **The game** | `apps/web/browser/realistic.html` from `main` at `2433827`, built by `vite.browser.config.ts`: the **product's own renderer** riding the owner's route at 9 m/s with the quality ladder held (`ladder=0`, `panel=0`), stylised world at its top rung (20 draw calls, a 1600 × 2296 drawing buffer, portrait), and the realistic world at its top rung. The pose code was a second module on the same page |
 | **Cooldown** | 30 s between isolated runs, 45 s between runs beside the game |
 
@@ -89,7 +101,7 @@ over a 60 s window that overlaps the paced run.
 | Model | Weights licence, **verbatim**, and where | Runtime and its licence (npm, read 2026-09-25) | Verdict under [ADR 0031](../adr/0031-model-licences-and-the-hosted-model-hole.md) D-2 / `ASSET004` |
 | --- | --- | --- | --- |
 | **MoveNet SinglePose Lightning / Thunder** (Google) | **Kaggle model page, author Google**: every instance, TF.js, TFLite and TF2 included, carries `"licenseName": "Apache 2.0"`, and the model description ends: _"## License — This model follows [*Apache 2.0*](https://www.apache.org/licenses/LICENSE-2.0). If you intend to use it beyond permissible usage, please consult with the model owners ahead of time."_ — read from `https://www.kaggle.com/api/v1/models/google/movenet/get`, the API behind [kaggle.com/models/google/movenet](https://www.kaggle.com/models/google/movenet). **Google's model card** ([PDF](https://storage.googleapis.com/movenet/MoveNet.SinglePose%20Model%20Card.pdf), the one the Kaggle page links): _"Licensed Under Apache License, Version 2.0"_ | `@tensorflow/tfjs-core`, `-converter`, `-backend-wasm`, `-backend-webgl`, `-backend-webgpu` 4.22.0, `@tensorflow-models/pose-detection` 2.1.3: all **Apache-2.0** | **Permissive. Admissible anywhere.** This settles the question #328 left open: the licence is now read at Google's own pages rather than from redistributors |
-| **MediaPipe Pose Landmarker lite / full** (BlazePose GHUM 3D, Google) | **Google's model card** ([PDF](https://storage.googleapis.com/mediapipe-assets/Model%20Card%20BlazePose%20GHUM%203D.pdf), the one [the Pose Landmarker guide](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker) links as its model card, dated _"April, 16, 2021"_): _"LICENSED UNDER Apache License, Version 2.0"_. The `.task` files were fetched from `storage.googleapis.com/mediapipe-models/pose_landmarker/…/float16/latest/`, the URLs that guide gives | `@mediapipe/tasks-vision` **1.0.1**, **Apache-2.0**. The [google-ai-edge/mediapipe](https://github.com/google-ai-edge/mediapipe) repository's `LICENSE` is Apache 2.0 | **Permissive. Admissible anywhere.** ⚠️ The `.task` bundle holds **two** networks (`pose_detector.tflite`, `pose_landmarks_detector.tflite`). The card names BlazePose and GHUM and does not list the detector file by name. A reviewer committing one should decide whether that is enough, which is a narrower question than #328's |
+| **MediaPipe Pose Landmarker lite / full** (BlazePose GHUM 3D, Google) | **Google's model card** ([PDF](https://storage.googleapis.com/mediapipe-assets/Model%20Card%20BlazePose%20GHUM%203D.pdf), the one [the Pose Landmarker guide](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker) links as its model card, dated _"April, 16, 2021"_): _"LICENSED UNDER Apache License, Version 2.0"_. The `.task` files were fetched from `storage.googleapis.com/mediapipe-models/pose_landmarker/…/float16/latest/`, the URLs that guide gives | `@mediapipe/tasks-vision` **1.0.1**, **Apache-2.0**. The [google-ai-edge/mediapipe](https://github.com/google-ai-edge/mediapipe) repository's `LICENSE` is Apache 2.0 | **Permissive. Admissible anywhere.** ⚠️ The `.task` bundle holds **two** networks (`pose_detector.tflite`, `pose_landmarks_detector.tflite`). The card names BlazePose and GHUM and does not list the detector file by name. A reviewer committing one should decide whether that is enough, which is a narrower question than #328's. Evidence found in review, both ways. **Against**: the card describes the **landmark** network only. Its inputs are _"Regions in the video frames where a person has been detected"_, and its sizes (_"Lite (3MB size), Full (6 MB size) and Heavy (26 MB size)"_) match `pose_landmarks_detector.tflite` at 2.82 / 6.44 MB, not the bundle. The build strings embedded in the two networks, `blazepose_ghum_39kp_lite_oss_2021_07_02` and `blazepose_detector_eff_retina_4kp_sparse_…_2021_10_18`, are **both dated after the card's April 16, 2021**, so the card cannot have named these exact bytes. **For**: Google's own legacy index, `google-ai-edge/mediapipe` `docs/solutions/models.md` §Pose, lists the _"Pose detection model"_ (`storage.googleapis.com/mediapipe-assets/pose_detection.tflite`) with the landmark models under one _"Model card"_ link (`mediapipe.page.link/blazepose-mc`). That is first-party evidence that Google files the detector under this card. The standalone file is 2 959 046 bytes against the bundled 2 959 078, so the two are probably one network with different metadata. **That was not verified.** The question stays with whoever commits the file, under `ASSET004` |
 | **RTMPose-t** (OpenMMLab, `rtmpose-t_simcc-body7_pt-body7_420e-256x192`) | **None stated.** The [RTMPose README](https://github.com/open-mmlab/mmpose/tree/main/projects/rtmpose) lists the download and states no licence for the weights. The [mmpose `LICENSE`](https://github.com/open-mmlab/mmpose/blob/main/LICENSE) is Apache 2.0 (_"Copyright 2018-2020 Open-MMLab"_) and is a licence on the repository. The README says the model was _"trained on 7 public datasets"_: AI Challenger, MS COCO, CrowdPose, MPII, sub-JHMDB, Halpe, PoseTrack18. **Their terms were not read here** | `onnxruntime-web` 1.30.0, **MIT** | **Unclear, so it fails closed.** `ASSET004` would need a licence to put in the row, and the source states none for these bytes. Measured anyway, as the only non-Google option that is credible in a browser |
 | **YOLO11 / YOLO26-pose** (Ultralytics) | The [ultralytics `LICENSE`](https://github.com/ultralytics/ultralytics/blob/main/LICENSE) is _"GNU AFFERO GENERAL PUBLIC LICENSE Version 3"_. The README offers an _"Ultralytics Enterprise License"_ as the alternative | — | **Copyleft. Refused** by ADR 0031 D-2 by name (it lists YOLO26 as its AGPL example). **Not measured** |
 
@@ -113,10 +125,20 @@ term either. "Permissible usage" is what Apache 2.0 permits.
 | Pose Landmarker full (`.task`, float16) | **9.40 MB** (detector 2.96 MB + landmarks 6.44 MB) | same |
 | RTMPose-t (ONNX, float32) | **13.35 MB** | `onnxruntime-web`: `ort-wasm-simd-threaded.wasm` **14 MB**, or the WebGPU (`jsep`) build **27 MB** |
 
-SHA-256 of what was fetched, so a later reader can tell whether they are measuring the same bytes:
-MoveNet Lightning TF.js archive `28b9a96d…61765`, Thunder `9ab8399b…7e522`, `pose_landmarker_lite.task`
-`59929e1d…0574a`, `pose_landmarker_full.task` `4eaa5eb7…4ad`, RTMPose-t zip `937003a7…805cb`. ⚠️ The
-MediaPipe URLs end in `latest/`, so the same URL can serve other bytes later.
+SHA-256 of what was fetched, so a later reader can tell whether they are measuring the same bytes.
+After review every file was fetched again on 2026-09-25 and re-hashed, and each matched the bytes
+that were measured. ⚠️ An earlier version of this paragraph abbreviated the digests and misprinted the
+lite `.task`'s as ending `…0574a`. The full digests:
+
+| File | Bytes | SHA-256 |
+| --- | --: | --- |
+| MoveNet Lightning TF.js archive (v4) | 4 333 929 | `28b9a96dde847d2c5dd0d44ddd131d6dfd388b8a014a4535dc31b4059ce61765` |
+| MoveNet Thunder TF.js archive (v4) | 11 599 609 | `9ab8399bc82cd3c5cc0b61ea3b397512b73dde920590ac869872637eff97e522` |
+| `pose_landmarker_lite.task` | 5 777 746 | `59929e1d1ee95287735ddd833b19cf4ac46d29bc7afddbbf6753c459690d574a` |
+| `pose_landmarker_full.task` | 9 398 198 | `4eaa5eb7a98365221087693fcc286334cf0858e2eb6e15b506aa4a7ecdcec4ad` |
+| RTMPose-t ONNX SDK zip | 12 547 710 | `937003a70832d9cc34ea16927f504792f3133e92dda1b9c626236bbbe9e805cb` |
+
+⚠️ The MediaPipe URLs end in `latest/`, so the same URL can serve other bytes later.
 
 ---
 
@@ -146,10 +168,13 @@ With no model, the page's frames were 16.6 / 16.7 / 16.8 ms (p50 / p95 / p99). W
 the **main thread**, 144–151 of the ~150 inferences each cost one or more missed vsyncs, and the
 frame p95 rose to 50–115 ms. The main thread is not where this belongs. §5 moves it off.
 
-⚠️ **TF.js's WebGL backend gets MoveNet wrong on this GPU.** Lightning returned 5 of 17 points and
-Thunder none, on the same picture where the WASM and WebGPU backends returned all 17. It is also the
-slowest backend for both. This looks like a precision problem in the WebGL path on the Mali-G710.
-The cause was not investigated. **Do not use TF.js WebGL for MoveNet on this device.**
+⚠️ **TF.js's WebGL backend returned far fewer confident points for MoveNet on this GPU.** On the one
+test picture Lightning returned 5 of 17 points above the 0.3 confidence threshold, and Thunder 0,
+where the WASM and WebGPU backends returned 17 of 17. That is a count of confident points on one
+picture, not a measured position error. For Lightning, WebGL was also the slowest backend (52.7 ms
+burst against 29.0–29.7). For Thunder it was not: 63.0 ms burst, faster than WASM's 101.9 though
+slower than WebGPU's 52.2. It may be a precision problem in the WebGL path on the Mali-G710. The
+cause was not investigated. **Do not use TF.js WebGL for MoveNet on this device.**
 
 ---
 
@@ -187,9 +212,12 @@ dropped** by the at-most-one-in-flight rule in any row.
 | **Pose Landmarker lite** | **MediaPipe CPU** | **worker** | **65.8 / 80.6** | 16.6 / 16.7 / 16.8 | **0** | 16.6 / 16.7 / 16.8 |
 | MoveNet Lightning | TF.js WASM | worker | 80.1 / 102.0 | 16.6 / 16.7 / 16.8 | 0 | 16.6 / 16.7 / 16.8 |
 
-### 5.3 Why the same model costs three times as much at 5 per second
+### 5.3 Why the same model costs 2.3 to 2.7 times as much at 5 per second
 
-The paced inference times above are two to four times the burst times in §4. To tell what was
+The paced inference times beside the game in §5.1 are about 1.4 to 2.7 times the burst times in §4:
+Lightning WASM 79.0 / 29.0 = 2.7, Pose Landmarker lite 57.9 / 29.1 = 2.0, full 76.2 / 43.7 = 1.7,
+RTMPose-t 67.2 / 45.3 = 1.5, Thunder WebGPU 73.1 / 52.2 = 1.4. The effect is largest for the smallest
+models, which is what a governor clocking down between short bursts of work would produce. To tell what was
 causing it, the same model was run in the same worker on an otherwise idle page, with the decode
 taken out (`reuse`: one bitmap for every picture):
 
@@ -256,8 +284,14 @@ of riding. Milliseconds:
 | _none_ | 4 035 | 12 / 18 / 22 / 23 | 3 / 9 / 15 | 0.07 % |
 
 With a model in a worker the frame p50 was **13 ms**. The two controls read 10 and 12 ms. So the
-model adds **1 to 3 ms at the p50**. At the p90 the two controls themselves differ by 6 ms, which is
-as large as the model's apparent effect, so the p90 does not separate them. One run per row. These
+model **appears** to add 1 to 3 ms at the p50. At the p90 the two controls themselves differ by 6 ms,
+which is as large as the model's apparent effect, so the p90 does not separate them. **Nor does the
+p95**: the second control reads 22 there, the same as both model rows. ⚠️ Read the 1–3 ms with four
+caveats. (1) About 4 036 frames at 60 Hz is about 67 s, so each counter window also holds the page
+load and roughly 27 s outside the 40 s inference window, which dilutes the model's share. (2) The
+controls drifted from 10 to 12 ms between the first run and the last, and a 1–3 ms effect is at the
+level of that drift. (3) There is one run per row. (4) So "1 to 3 ms" is a reading of one sample
+each, not a firm result. These
 frames are the harness's ride. #323 measured a live ride with a trainer and the HUD, and read
 **24 ms** p50. This scene reads 10–12 ms, so the two are not the same load.
 
@@ -282,7 +316,9 @@ What the figures do say:
   app's WebView, and in 36 071 frames over ten minutes. The harness's own p99 did not move. In
   `gfxinfo` terms the frame p50 rose from 10–12 ms to 13 ms. If that 1–3 ms carries over, #323's
   24 ms ride would still be under a 33 ms frame, **but that was not measured on #323's load.** The
-  worker ran on another of the eight cores. What it costs is **one core for ~58–80 ms of every
+  worker presumably ran on another core. No affinity or per-core load was sampled, and the Tensor
+  G2's cores are not alike (2 + 2 + 4), so which cluster it landed on is exactly what §5.3 suspects
+  decides the cost. What it costs is **one core for ~58–80 ms of every
   200 ms**: 29–40 % of one core at the p50, 37–51 % at the p95.
 - **On the main thread, the model cannot fit at all.** 49–57 ms p50 per picture is **2.0–2.4 times
   #323's whole 24 ms frame**, or 3.0–3.4 times a 16.7 ms vsync. Every picture costs the ride two to
@@ -304,8 +340,10 @@ floor has still not been done, so these numbers stack on a budget nobody has cha
 **MediaPipe Pose Landmarker lite, CPU delegate, in a Web Worker.** Of the configurations measured, it
 was:
 
-- the **cheapest per picture beside the ride** in both worlds (57.9 / 73.6 ms stylised, 65.8 / 80.6 ms
-  realistic, p50 / p95), and in the app's own WebView (68.0 / 83.0 ms), steady over ten minutes;
+- the **cheapest per picture beside the ride** in both worlds: 65.8 / 80.9 ms p50 / p95 over the
+  ten-minute soak in the stylised world (57.9 / 73.6 ms in its best 40 s run), 65.8 / 80.6 ms in the
+  realistic world, and 68.0 / 83.0 ms in the app's own WebView, with no upward drift within the
+  soak;
 - one of the configurations that **cost the ride no frames** (with MoveNet Lightning WASM and the
   full model);
 - **Apache 2.0** in Google's own model card (§3);
@@ -313,13 +351,31 @@ was:
   A sagittal ankle angle needs a foot segment. MoveNet stops at the ankle.
 
 What it costs that the runner-up does not: **11 MB of WASM** (3.4 MB gzip) against TF.js's 0.42 MB,
-plus a 5.78 MB model against 4.82 MB, all of which #530 would ship or fetch under
-[ADR 0024](../adr/0024-offline-and-caching-posture.md)'s rules. It also needs a **classic** worker.
-And the two-network `.task` bundle is the licence question §3 leaves for whoever commits it.
+plus a 5.78 MB model against 4.82 MB. The size gap between the two candidates is **mostly the
+runtime, not the model**. It also needs a **classic** worker. And the two-network `.task` bundle is
+the licence question §3 leaves for whoever commits it.
+
+⚠️ **Two consequences #530 has to decide rather than inherit:**
+
+- **The precache.** [ADR 0024](../adr/0024-offline-and-caching-posture.md) D-2 derives the precache
+  from the build's output (`apps/web/tools/precache/precache.ts`), and its only exclusions are
+  `.map`, `sw.js` and `realistic/`. So an 11.0 MB `vision_wasm_internal.wasm` and a 5.78 MB `.task`
+  placed in `dist` would be precached for **every** rider on their first visit, camera or not, with
+  no edit anywhere. ADR 0024 records the whole first visit today as 1 363 395 bytes on the wire.
+  About 3.4 MB of gzipped WASM plus about 5.5 MB of float16 weights, which barely compress, is
+  roughly a seven-fold increase. That is the trade [ADR 0026](../adr/0026-realistic-game-world.md)
+  D-7 made an explicit exclusion for, and #530 has to make it one way or the other on purpose.
+- **The origin.** The runtime and the weights must be served from **the app's own origin**. They must
+  never be fetched from a CDN (MediaPipe's `FilesetResolver.forVisionTasks` is normally pointed at
+  jsDelivr) or from the guide's `storage.googleapis.com/…/latest/` model URLs. Either would be
+  off-device egress under the no-network promise (`apps/web/src/privacy/no-network.test.ts`
+  §`PERMITTED_NETWORK_CALLS`), and a `latest/` URL cannot be pinned (§3). Self-hosting makes the
+  WASM a committed binary or a build output, with its own `ASSETS.toml` / `ASSET001` consequences.
 
 **Runner-up: MoveNet Lightning on TF.js WASM in a worker**: 79.0 / 98.0 ms beside the ride, no
 frames lost, Apache 2.0 at Kaggle and in its card, a much smaller runtime, and 17 points with no
-foot. Not TF.js WebGL, which returned wrong points on this GPU (§4).
+foot. Not TF.js WebGL, which returned 5 and 0 of 17 points above threshold on this GPU where the
+other backends returned 17 (§4).
 
 This is a measurement of cost and licence. **It says nothing about which model resolves a knee angle
 better from the side**, which is the question #385 exists to answer and could not answer today.
