@@ -261,6 +261,14 @@ In the Cloudflare dashboard, for the R2 bucket and the zone serving
 
 Record the date and who checked in the release's notes.
 
+⚠️ **A tag is when this is checked, not the only time it has to be true.** The
+filed answers describe every build already installed, so a logging setting
+switched on between tags makes them false for riders who never update. Treat
+any change to the Cloudflare account's logging, Logpush or analytics settings
+as needing this same check at the time it is made, and re-run it at least once
+a quarter. A public deployment of `apps/web/dist`, if one ever exists, reaches
+the same host and is covered by the same answer without passing through a tag.
+
 **If any one of them is on**, either turn it off before tagging, or — if it has
 to stay on — do all of these before the tag, not after:
 

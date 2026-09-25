@@ -98,7 +98,7 @@ import {
 } from '../game/cue-preference';
 import type { UnitsPort } from '../units/store-port';
 import { readRealisticWorldChoice, writeRealisticWorldChoice } from '../game/world-preference';
-import type { BasemapConfig } from '../map/basemap';
+import { PUBLISHED_BASEMAP_URL, type BasemapConfig } from '../map/basemap';
 import { readMapTilesChoice, writeMapTilesChoice } from '../map/tiles-preference';
 
 /**
@@ -684,6 +684,10 @@ function MapTilesPanel({
   const [drawn, setDrawn] = useState(() => readMapTilesChoice(storage));
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
   const host = basemap === undefined ? undefined : new URL(basemap.archiveUrl).host;
+  // The no-record promise is ours to make only about the host this project
+  // runs (`apps/mobile/RELEASE.md` §8 checks it). A self-hoster's build names
+  // somebody else's server, and this app cannot vouch for its logs.
+  const ours = host !== undefined && host === new URL(PUBLISHED_BASEMAP_URL).host;
   return (
     <section
       className="oyl-panel oyl-announce oyl-map-tiles"
@@ -700,7 +704,7 @@ function MapTilesPanel({
           <p className="oyl-muted">
             When this is on, opening a ride that has GPS asks {host} for the map around where you
             rode. That sends the map area and your device’s IP address to {host}. It sends no ride
-            data, and the tile server keeps no record of the request. When it is off, the app asks{' '}
+            data{ours ? ', and we keep no record of the request' : ''}. When it is off, the app asks{' '}
             {host} for nothing and draws your route on a plain background.
           </p>
           <p>

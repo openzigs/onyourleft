@@ -601,6 +601,9 @@ test.describe('a ride outside the archive’s coverage — #534', () => {
     // The map rendered real frames, and what was on them was the background.
     expect(load.frames).toBeGreaterThan(0);
     expect(load.samples).toContain(load.backgroundColour);
+    // …and the rider's own line, which this title promises. Until #535's review
+    // nothing here looked, and the line was being dropped with tiles ON too.
+    expect(load.trackPainted, 'the ride’s line was not drawn with tiles on').toBe(true);
     expect(
       load.painted,
       `a tile colour reached the screen outside the archive's declared bounds: ${load.samples.join(', ')}`,

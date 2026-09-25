@@ -9,7 +9,7 @@ app's About page and from the Google Play listing, and those two links point at 
 
 **We collect nothing.** There is no account and no analytics. **Your rides stay on your device.** To
 draw a map, the app asks our tile server for the map around where you rode. It sends no ride data,
-and the tile server keeps no record of the request. You can turn map tiles off in Settings. Apart
+and we keep no record of the request, nor have one kept for us. You can turn map tiles off in Settings. Apart
 from that map request, **on its own the app uploads nothing** — not a ride, not a heart rate, not a
 position, not a crash report, not a page view.
 
@@ -96,7 +96,7 @@ Only these, and only when you do them:
   the request but the request itself: no ride data, no account, no cookie and no identifier. But the host
   sees your IP address and which tiles you asked for, and for your own ride that is roughly **where
   you rode** — including inside your privacy zones, because your own view of your own ride is never
-  trimmed. The tile server keeps no record of the request: no access logging, log export or
+  trimmed. We keep no record of the request, nor have one kept for us: no access logging, log export or
   analytics is turned on for that host, and that is checked before every release. Cloudflare, which
   operates the host for us, handles the traffic under its own privacy policy; this project does not
   use it to identify you or to work out where you are. With map tiles off, the app requests nothing
