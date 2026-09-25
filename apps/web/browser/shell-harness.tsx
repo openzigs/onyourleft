@@ -360,6 +360,7 @@ function main(): void {
         Promise.resolve({
           captureFrame: () => Promise.reject(new Error('this harness does not capture')),
           sampleLuminance: () => Promise.reject(new Error('this harness does not sample')),
+          attachCameraPreview: () => () => undefined,
           stopCamera: () => undefined,
           live: true,
         }),

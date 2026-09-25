@@ -28,6 +28,12 @@ import type {
   LuminanceGrid,
 } from './camera-port';
 import { CameraCaptureError } from './camera-port';
+import type {
+  PhoneReport,
+  SideCameraLinkPort,
+  SideLinkCondition,
+  SideLinkEvent,
+} from './side-camera-link-port';
 import { capturedFrame } from './frame';
 import { cameraProblemMessage } from './notice';
 
@@ -133,6 +139,12 @@ export function scriptedCamera(options: ScriptedCameraOptions = {}): ScriptedCam
           samples += 1;
           return Promise.resolve((options.luminance ?? (() => stillRoom()))(index));
         },
+        attachCameraPreview: () => {
+          calls.push('preview');
+          return () => {
+            calls.push('preview-detached');
+          };
+        },
         stopCamera: () => {
           calls.push('stop');
           live = false;
@@ -202,4 +214,92 @@ export function manualSchedule(): ManualSchedule {
       return ticks.size;
     },
   };
+}
+
+/** A clock and two timers a test moves by hand, in milliseconds. */
+export function virtualTime(): {
+  readonly clock: () => number;
+  readonly after: (task: () => void, milliseconds: number) => () => void;
+  readonly every: (task: () => void, milliseconds: number) => () => void;
+  advance(milliseconds: number): void;
+} {
+  let now = 0;
+  interface Timer {
+    due: number;
+    readonly task: () => void;
+    readonly period: number | undefined;
+    cancelled: boolean;
+  }
+  const timers: Timer[] = [];
+  const add = (
+    task: () => void,
+    milliseconds: number,
+    period: number | undefined,
+  ): (() => void) => {
+    const timer: Timer = { due: now + milliseconds, task, period, cancelled: false };
+    timers.push(timer);
+    return () => {
+      timer.cancelled = true;
+    };
+  };
+  return {
+    clock: () => now,
+    after: (task, milliseconds) => add(task, milliseconds, undefined),
+    every: (task, milliseconds) => add(task, milliseconds, milliseconds),
+    advance(milliseconds: number): void {
+      const until = now + milliseconds;
+      for (;;) {
+        const next = timers
+          .filter((timer) => !timer.cancelled && timer.due <= until)
+          .sort((a, b) => a.due - b.due)[0];
+        if (next === undefined) {
+          break;
+        }
+        now = next.due;
+        if (next.period === undefined) {
+          next.cancelled = true;
+        } else {
+          next.due += next.period;
+        }
+        next.task();
+      }
+      now = until;
+    },
+  };
+}
+
+/** A link the test drives, recording what the phone told the tablet. */
+export function scriptedLink(initial: SideLinkCondition = 'connected'): SideCameraLinkPort & {
+  readonly reports: PhoneReport[];
+  ended: number;
+  emit(event: SideLinkEvent): void;
+} {
+  const listeners = new Set<(event: SideLinkEvent) => void>();
+  let condition = initial;
+  const link = {
+    reports: [] as PhoneReport[],
+    ended: 0,
+    sideLinkCondition: () => condition,
+    onSideLinkEvent: (listener: (event: SideLinkEvent) => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    reportToTablet: (report: PhoneReport) => {
+      link.reports.push(report);
+    },
+    endSideLink: () => {
+      link.ended += 1;
+    },
+    emit: (event: SideLinkEvent) => {
+      if (event.kind === 'condition') {
+        condition = event.condition;
+      }
+      for (const listener of [...listeners]) {
+        listener(event);
+      }
+    },
+  };
+  return link;
 }

@@ -33,7 +33,7 @@
 /**
  * The current schema version.
  *
- * **10** since #384. Version 2 added `streamSets` and `streamBlobs`; version 3
+ * **11** since #528. Version 2 added `streamSets` and `streamBlobs`; version 3
  * added `recordingSessions` and `recordingChunks`; version 4 added `deviceKeys`
  * and `activityRecords`; version 5 added `segments`; version 6 added
  * `segmentEfforts` and `matchCheckpoints`; version 7 added `routes`; version 8
@@ -76,10 +76,15 @@
  * version and asserts every row came through **and** that the new store is
  * usable, which is the forward half executed rather than described.
  *
+ * ⚠️ **Version 11 is #528's `framingReferences`, and it is additive for the
+ * same reason.** A new store, no existing shape touched, `SCHEMA_MIGRATIONS`
+ * still empty. Its rollback is the same export → downgrade → re-import: the
+ * account export carries the reference in the manifest (ADR 0004 E).
+ *
  * Bumping this for a change that *does* alter a record's shape means adding a
  * migration pair.
  */
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 
 /**
  * Dexie stores its schema version in IndexedDB multiplied by ten, leaving room
@@ -131,6 +136,12 @@ export const TABLE = {
    * for them.
    */
   cameraFrames: 'cameraFrames',
+  /**
+   * #528: at most one row per athlete — where the rider was in the side
+   * camera's picture the last time the framing check passed. Numbers, never a
+   * picture (ADR 0033 D-7). Keyed by the athlete.
+   */
+  framingReferences: 'framingReferences',
 } as const;
 
 /**
@@ -623,6 +634,22 @@ export const STORES_V10: Readonly<Record<string, string>> = {
   ].join(', '),
 };
 
+/**
+ * Version 11 — #528's framing reference, added beside the fifteen stores that
+ * exist.
+ *
+ * ⚠️ **Keyed on `athleteId` and on nothing else**, so the only question the
+ * table can answer is *"this athlete's reference"* — there is no id to look a
+ * row up by without saying whose it is, and a second put for the same athlete
+ * replaces the first rather than adding a row. That is the owner's *"a stored
+ * reference from the rider's last session"* expressed as a key rather than as
+ * a rule a writer has to remember.
+ */
+export const STORES_V11: Readonly<Record<string, string>> = {
+  // The fifteen stores of versions 1 to 10 are inherited unchanged.
+  [TABLE.framingReferences]: 'athleteId',
+};
+
 export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V1,
   STORES_V2,
@@ -634,4 +661,5 @@ export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V8,
   STORES_V9,
   STORES_V10,
+  STORES_V11,
 ];

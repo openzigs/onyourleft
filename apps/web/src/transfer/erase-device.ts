@@ -116,6 +116,14 @@ export const ERASE_REMOVES: readonly string[] = [
   // added by somebody who remembered, and #35's own criteria already require
   // the enumeration to be derived for exactly that reason.
   'every photograph this device kept from a ride, and everything derived from one',
+  // ⚠️ **#528, by name, although the line above already covers it in
+  // principle.** The side camera's framing reference is where the rider's
+  // knees, hips and shoulders were in the picture last time — numbers, not a
+  // photograph (ADR 0033 D-7), and therefore exactly the kind of "derived"
+  // artefact a rider reading the line above would not think to include. #528's
+  // criterion is that it is named here, and `deleteAthlete`'s cascade is what
+  // makes the line true (`activity-store.erasure.test.ts` derives the table).
+  'where you were in the side camera’s picture last time, which is a set of numbers read off a picture of you',
 ];
 
 /**

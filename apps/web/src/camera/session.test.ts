@@ -256,6 +256,50 @@ describe('capturing', () => {
   });
 });
 
+describe('the live preview — #528', () => {
+  const surface = (): {
+    srcObject: unknown;
+    muted: boolean;
+    playsInline: boolean;
+    play: () => Promise<void>;
+  } => ({
+    srcObject: null,
+    muted: false,
+    playsInline: false,
+    play: async () => Promise.resolve(),
+  });
+
+  it('attaches nothing, and opens nothing, when no camera is running', () => {
+    const camera = scriptedCamera();
+    const { controller } = controllerFor(camera);
+    controller.agree(AGREED);
+    const detach = controller.showPreview(surface());
+    detach();
+    expect(camera.calls).toStrictEqual([]);
+  });
+
+  it('plays the running camera, and detaches on request', async () => {
+    const camera = scriptedCamera();
+    const { controller } = controllerFor(camera);
+    controller.agree(AGREED);
+    await controller.turnOn();
+    const detach = controller.showPreview(surface());
+    expect(camera.calls).toContain('preview');
+    detach();
+    expect(camera.calls).toContain('preview-detached');
+  });
+
+  it('attaches nothing to a camera that has gone out', async () => {
+    const camera = scriptedCamera();
+    const { controller } = controllerFor(camera);
+    controller.agree(AGREED);
+    await controller.turnOn();
+    camera.endTheTrack();
+    controller.showPreview(surface());
+    expect(camera.calls).not.toContain('preview');
+  });
+});
+
 describe('revoking', () => {
   it('stops a running camera, not just the flag', async () => {
     const camera = scriptedCamera();

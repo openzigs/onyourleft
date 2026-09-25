@@ -208,6 +208,38 @@ describe('a running camera', () => {
     expect(session.live).toBe(false);
   });
 
+  it('plays the stream itself into a preview, muted and inline, and lets it go — #528', async () => {
+    const stream = streamOf([track()]);
+    const port = browserCameraPort({
+      devices: devices(async () => Promise.resolve(stream)),
+      grabber: GRABBER,
+      secureContext: true,
+    });
+    const session = await port.startCamera();
+    let played = 0;
+    const surface = {
+      srcObject: null as unknown,
+      muted: false,
+      playsInline: false,
+      play: async () => {
+        played += 1;
+        return Promise.reject(new Error('autoplay refused'));
+      },
+    };
+    const detach = session.attachCameraPreview(surface);
+    // The platform's own stream, not a copy: no pixel passes through here.
+    expect(surface.srcObject).toBe(stream);
+    expect(surface.muted).toBe(true);
+    expect(surface.playsInline).toBe(true);
+    expect(played).toBe(1);
+    detach();
+    expect(surface.srcObject).toBeNull();
+    // Idempotent: a second detach does not clear an element somebody reused.
+    surface.srcObject = 'reused';
+    detach();
+    expect(surface.srcObject).toBe('reused');
+  });
+
   it('refuses to capture after it has been stopped', async () => {
     const port = browserCameraPort({
       devices: devices(async () => Promise.resolve(streamOf([track()]))),

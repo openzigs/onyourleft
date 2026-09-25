@@ -292,6 +292,16 @@ function Camera({ controller }: { readonly controller: CameraController }): JSX.
         </StatusMessage>
       </section>
 
+      {/*
+        #528. The tripod phone's own screen, for the arrangement the owner
+        chose (#386): a link rather than a control, because it is a different
+        page with its own consent, not a setting of this one.
+      */}
+      <p>
+        <a href="#/camera/side">Use this phone as the side camera</a> — on a tripod beside the bike,
+        started and stopped from your tablet.
+      </p>
+
       {agreed ? null : (
         <section aria-labelledby="oyl-camera-agree">
           <h3 id="oyl-camera-agree">Turning it on</h3>

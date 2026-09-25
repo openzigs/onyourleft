@@ -210,6 +210,28 @@ export interface LuminanceGrid {
 }
 
 /**
+ * Where a live preview is shown — #528.
+ *
+ * The slice of a `<video>` element {@link CameraSession.attachCameraPreview}
+ * uses, and nothing more, so this module names no platform type
+ * (`boundary.test.ts`).
+ *
+ * ⚠️ **A preview is not a frame.** Nothing here draws the picture into a
+ * canvas, encodes it or hands it to anything: the platform plays the camera's
+ * own stream into an element on the screen and the pixels never reach this
+ * program's code. ADR 0029 D-11's rule is about a KEPT frame on a screen
+ * somebody could meet by accident; a live preview on the capturing phone,
+ * while the camera's own indicator is showing, is what the owner chose for
+ * framing (#386, ADR 0033 D-7).
+ */
+export interface PreviewSurface {
+  srcObject: unknown;
+  muted: boolean;
+  playsInline: boolean;
+  play(): Promise<void>;
+}
+
+/**
  * A camera that is on.
  *
  * ⚠️ Nothing here is bounded, on purpose, and the reason is
@@ -241,6 +263,16 @@ export interface CameraSession {
    * taken rejects with a {@link CameraCaptureError} from the fixed table.
    */
   sampleLuminance(): Promise<LuminanceGrid>;
+  /**
+   * Play this camera, live, into `surface` — the side camera's framing screen
+   * (#528).
+   *
+   * @returns the detach, which stops the surface playing and holds no
+   * reference to it. Idempotent. Stopping the camera detaches nothing on its
+   * own, because the surface is the caller's element; a stopped camera simply
+   * has nothing left to play.
+   */
+  attachCameraPreview(surface: PreviewSurface): () => void;
   /** Releases the hardware. Idempotent: stopping a stopped session is a no-op. */
   stopCamera(): void;
   /**

@@ -15,6 +15,7 @@ import {
   cameraFrameFor,
   ATHLETE_B,
   createStoreHarness,
+  framingReferenceFor,
   resetFixtureIds,
   rideFor,
   routeFor,
@@ -118,6 +119,13 @@ describe('what the rider is told before they press it', () => {
     expect(text).toContain('everything derived from one');
   });
 
+  it('names the side camera’s framing reference — #528, ADR 0033 D-7', () => {
+    // Numbers read off a picture of the rider, not a picture, so the line
+    // above does not obviously cover it for a rider reading the list before an
+    // irreversible action.
+    expect(ERASE_REMOVES.join(' ')).toContain('side camera');
+  });
+
   it('names the copy on the rider’s own machine, and NOT a hosted one — #387', () => {
     // ADR 0029 D-4 writes two `ERASE_CANNOT_REACH` lines. #387 made the first
     // true — a picture can now be sent to the rider's own computer — and it is
@@ -162,6 +170,8 @@ describe('erasing, against the real store', () => {
       // #384. The most sensitive row the store holds, and the one ADR 0029
       // D-11 makes the erase the only remedy for.
       await store.putCameraFrame(cameraFrameFor(owner));
+      // #528. Numbers read off a picture of the rider, named in ERASE_REMOVES.
+      await store.putFramingReference(framingReferenceFor(owner));
     });
   }
 
@@ -184,6 +194,10 @@ describe('erasing, against the real store', () => {
     // nothing wrote through, which is the only read that can tell.
     const pictures = await harness.read(async (store) => store.listCameraFrames(ATHLETE_A));
     expect(pictures).toStrictEqual([]);
+    // #528: ERASE_REMOVES names the framing reference, and this is what makes
+    // that line true rather than a promise.
+    const reference = await harness.read(async (store) => store.getFramingReference(ATHLETE_A));
+    expect(reference).toBeUndefined();
   });
 
   it('leaves another athlete alone', async () => {

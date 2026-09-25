@@ -47,7 +47,7 @@ import {
   type RecordMigration,
 } from './migrations';
 import { SCHEMA_VERSION, SCHEMA_VERSIONS, STORES_V1, STORES_V2, STORES_V3, TABLE } from './schema';
-import { cameraFrameFor } from './testing';
+import { cameraFrameFor, framingReferenceFor } from './testing';
 import { ensureDeviceSigningKey, webCryptoSha256, webCryptoVerifier } from './web-crypto';
 
 /**
@@ -273,7 +273,9 @@ describe('the production registry', () => {
     //
     // Asserted rather than left implicit: the day a version does change a
     // record's shape, this test is what says the registry must gain an entry.
-    expect(SCHEMA_VERSION).toBe(10);
+    // Version 11 (#528) adds `framingReferences`, the same case again: a new
+    // store, keyed by the athlete, with no rows to migrate.
+    expect(SCHEMA_VERSION).toBe(11);
     expect(SCHEMA_MIGRATIONS).toEqual([]);
   });
 
@@ -620,6 +622,41 @@ describe('version 9 to version 10 — #384’s kept camera frames', () => {
     // Byte for byte across the upgrade, for `assertCameraFrameRoundTrip`'s
     // reason: a length check would pass against a store that re-encoded.
     expect(kept[0]?.bytes).toStrictEqual(frame.bytes);
+    expect(beforeVersion).toBeLessThan(SCHEMA_VERSION * 10);
+  });
+});
+
+describe('version 10 to version 11 — #528’s framing reference', () => {
+  /**
+   * The same claim as every additive version before it: rows written at
+   * version 10 survive the reopen at 11, and the new store is usable on a
+   * database that predates it — answering the only honest thing, *"no
+   * reference yet"*.
+   */
+  it('keeps every version-10 record and makes the reference store usable', async () => {
+    const v10 = new Dexie(databaseName);
+    SCHEMA_VERSIONS.slice(0, 10).forEach((stores, index) => {
+      v10.version(index + 1).stores(stores);
+    });
+    await v10.table(TABLE.athletes).put({ id: 'athlete-a', displayName: 'A', createdAt: 1 });
+    const beforeVersion = v10.backendDB().version;
+    v10.close();
+
+    const store = openActivityStore(databaseName);
+    const owner = athleteId('athlete-a');
+    const athlete = await store.getAthlete(owner);
+    const none = await store.getFramingReference(owner);
+    const reference = framingReferenceFor(owner);
+    await store.putFramingReference(reference);
+    store.close();
+
+    const reopened = openActivityStore(databaseName);
+    const kept = await reopened.getFramingReference(owner);
+    reopened.close();
+
+    expect(athlete?.displayName).toBe('A');
+    expect(none).toBeUndefined();
+    expect(kept?.landmarks).toStrictEqual(reference.landmarks);
     expect(beforeVersion).toBeLessThan(SCHEMA_VERSION * 10);
   });
 });

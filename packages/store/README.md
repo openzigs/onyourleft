@@ -641,6 +641,33 @@ not."* That store's `deleteCameraFrames` returns a **true** count and removes no
 value, the sentence a rider reads and any read through the writing handle all say it worked. Only a
 round trip that discards every connection first notices.
 
+## The side camera's framing reference — #528, decided in [ADR 0033](../../docs/adr/0033-side-camera-link.md) D-7
+
+`framingReferences` is schema version 11: at most one row per athlete, **keyed by the athlete**, so a
+put replaces the reference rather than adding one — the owner's *"a stored reference from the
+rider's last session"* expressed as a key rather than as a rule a writer has to remember.
+
+⚠️ **It is numbers, not a picture.** ADR 0033 D-7 replaced #528's own criterion that *"the stored
+reference is a picture of the rider"*: the reference is the image-plane positions of the landmarks
+the pose model reports, each a share of the picture's width and height, plus the picture's shape.
+There is no byte array on the record and there must never be one — a photographic reference kept
+from session to session would be the *"always keep"* ADR 0029 D-2 refuses. It is still derived from a
+picture of a person, so it goes with `deleteAthlete` (ADR 0029 D-4's *"everything derived from
+one"*), is named in `apps/web/src/transfer/erase-device.ts` §`ERASE_REMOVES`, and travels in the
+account export's manifest (ADR 0004 E).
+
+⚠️ **Nothing writes one in production yet.** The landmarks come from the pose model on the tablet,
+which is [#530](https://github.com/openzigs/onyourleft/issues/530). #528 builds the record, its
+erase and its export first, so the writer lands into rules that already hold.
+
+`firstReferenceStoreFactory` is the fifteenth fake: a put that keeps the row already there. It
+passes every single-session test — the put succeeds, the read returns a well-formed reference for
+the right athlete — and fails the round trip only once there is a previous session to keep, which
+is what `framing-reference-store.test.ts` pairs it with.
+
+A validation error names the field and the constraint and **never the value**: a landmark is where
+somebody's knee was in a photograph of them (ADR 0029 D-8).
+
 ## Not in this package
 
 - **Devices and gear.** Additive object stores in a later schema version.
