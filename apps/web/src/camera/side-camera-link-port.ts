@@ -49,17 +49,17 @@ export type SideLinkCondition = 'connected' | 'lost';
  * One thing the link reports: its condition changing, or a command from the
  * tablet (D-3's tablet → phone column).
  *
- * ⚠️ **`reference` is `unknown` on purpose.** A received message is untrusted
- * input (D-4), and the phone decodes the reference itself —
- * `framing.ts` §`framingReferenceFrom` — rather than trusting that whatever
- * produced this event already did.
+ * ⚠️ **`reference` and `verdict` are `unknown` on purpose.** A received
+ * message is untrusted input (D-4), and the phone decodes both itself —
+ * `framing.ts` §`framingReferenceFrom` and §`framingVerdictFrom` — rather than
+ * trusting that whatever produced this event already did.
  */
 export type SideLinkEvent =
   | { readonly kind: 'condition'; readonly condition: SideLinkCondition }
   | { readonly kind: 'start' }
   | { readonly kind: 'stop' }
   | { readonly kind: 'reference'; readonly reference: unknown }
-  | { readonly kind: 'verdict'; readonly verdict: 'matches' | 'differs' };
+  | { readonly kind: 'verdict'; readonly verdict: unknown };
 
 /** Why the phone stopped filming, as D-3's *"and why it stopped"*. */
 export type SideCameraStopReason =

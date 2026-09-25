@@ -268,6 +268,18 @@ export function framingVerdict(
 }
 
 /**
+ * A verdict received over the link, decoded: `'matches'` or `'differs'`, or
+ * `undefined` for anything else.
+ *
+ * Untrusted input (ADR 0033 D-4), like {@link framingReferenceFrom}. A string
+ * equality rather than `in FRAMING_VERDICT_TEXT`, because `'constructor'` and
+ * `'toString'` are `in` every object.
+ */
+export function framingVerdictFrom(value: unknown): FramingVerdict | undefined {
+  return value === 'matches' || value === 'differs' ? value : undefined;
+}
+
+/**
  * A reference from somewhere this program does not trust, or `undefined` when
  * it is not one.
  *

@@ -51,7 +51,12 @@
  */
 
 import type { CameraProblemKind } from './camera-port';
-import { framingReferenceFrom, type FramingReference, type FramingVerdict } from './framing';
+import {
+  framingReferenceFrom,
+  framingVerdictFrom,
+  type FramingReference,
+  type FramingVerdict,
+} from './framing';
 import type {
   SideCameraLinkPort,
   SideCameraStopReason,
@@ -186,6 +191,12 @@ export class SideCameraSession {
   readonly #unsubscribe: (() => void)[] = [];
 
   #phase: SideCameraPhase = 'off';
+  /**
+   * Set by {@link dispose}. ⚠️ **The phase cannot stand in for it**: a session
+   * disposed while the camera is still turning on is still `off`, so a
+   * "still off?" check after the wait would let it through (#536's review).
+   */
+  #disposed = false;
   #stopReason: SideCameraStopReason | undefined;
   #problem: CameraProblemKind | undefined;
   #condition: SideLinkCondition | undefined;
@@ -260,7 +271,13 @@ export class SideCameraSession {
     // The screen may have gone, or the tablet said stop, while the platform's
     // own prompt was up. A camera that arrives after the session ended is
     // turned straight back off rather than left running under nobody.
-    if (this.#phase !== 'off') {
+    // ⚠️ **Both checks, not one.** The tablet's stop moves the phase to
+    // `stopped`; the screen going away does NOT — `dispose` stops only a
+    // session that is framing or filming, so one disposed mid-prompt is still
+    // `off` here, and without `#disposed` it would go on to `framing` with a
+    // live camera, tell the tablet so, and leave nothing listening to show a
+    // stop control or run the 30-second stop (#536's review).
+    if (this.#disposed || this.#phase !== 'off') {
       this.#camera.turnOff();
       return;
     }
@@ -293,6 +310,7 @@ export class SideCameraSession {
    * countdown or offer the stop control; then every subscription is dropped.
    */
   dispose(): void {
+    this.#disposed = true;
     if (this.#phase === 'framing' || this.#phase === 'filming') {
       this.#stop('rider');
     }
@@ -337,10 +355,18 @@ export class SideCameraSession {
         }
         return;
       }
-      case 'verdict':
-        this.#verdict = event.verdict;
-        this.#announce();
+      case 'verdict': {
+        // Untrusted input too (D-4), under the same rule as the reference: a
+        // value that is not one of the two verdicts is dropped and the one
+        // already held stays. It is a key into `FRAMING_VERDICT_TEXT`, so a
+        // `'constructor'` kept here would render a function's source.
+        const verdict = framingVerdictFrom(event.verdict);
+        if (verdict !== undefined) {
+          this.#verdict = verdict;
+          this.#announce();
+        }
         return;
+      }
     }
   }
 

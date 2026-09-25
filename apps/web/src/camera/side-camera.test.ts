@@ -263,6 +263,27 @@ describe('who can start and stop it', () => {
     expect(session.state().phase).toBe('stopped');
   });
 
+  it('turns the camera back off when the screen goes away during the permission prompt', async () => {
+    // #536's review: disposed while still `off`, then permission granted.
+    // Before the fix the session went on to `framing` with a live camera and
+    // told the tablet so, with nothing left listening to stop it.
+    const camera = scriptedCamera();
+    const controller = new CameraController({
+      port: camera.port,
+      schedule: manualSchedule().schedule,
+    });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    const link = scriptedLink();
+    const session = new SideCameraSession({ camera: controller, link, ...virtualTime() });
+    const on = session.turnOnForFraming();
+    session.dispose();
+    await on;
+    expect(camera.session()?.live).toBe(false);
+    expect(controller.state().live).toBe(false);
+    expect(session.state().phase).not.toBe('framing');
+    expect(link.reports).toStrictEqual([]);
+  });
+
   it('opens no camera the rider has not agreed to', async () => {
     const camera = scriptedCamera();
     const controller = new CameraController({
@@ -317,6 +338,15 @@ describe('the reference and the verdict (D-7)', () => {
     link.emit({ kind: 'reference', reference });
     link.emit({ kind: 'reference', reference: { ...reference, landmarks: 'everything' } });
     expect(session.state().reference?.landmarks).toHaveLength(3);
+  });
+
+  it('drops a verdict that is not one of the two and keeps the one it had', async () => {
+    const { session, link } = await filming();
+    link.emit({ kind: 'verdict', verdict: 'matches' });
+    for (const verdict of ['constructor', 'toString', 'MATCHES', 1, null, undefined, {}]) {
+      link.emit({ kind: 'verdict', verdict });
+      expect(session.state().verdict).toBe('matches');
+    }
   });
 
   it('gives the same state object until something changes', async () => {
