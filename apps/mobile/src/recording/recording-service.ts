@@ -19,10 +19,20 @@
 
 import { registerPlugin } from '@capacitor/core';
 
-/** The two methods `RecordingServicePlugin.java` declares. */
+/**
+ * Capacitor's four permission states, as `PermissionState.java` spells them.
+ * `prompt-with-rationale` is a permission refused once and still askable.
+ */
+export type NotificationPermissionState = 'granted' | 'denied' | 'prompt' | 'prompt-with-rationale';
+
+/** The four methods `RecordingServicePlugin.java` declares. */
 export interface RecordingServicePlugin {
   start(): Promise<void>;
   stop(): Promise<void>;
+  /** #526. Whether the ride's notification may be shown, without asking. */
+  notificationPermission(): Promise<{ state: NotificationPermissionState }>;
+  /** #526. Ask Android for `POST_NOTIFICATIONS`. Below API 33 it asks nothing. */
+  requestNotificationPermission(): Promise<{ state: NotificationPermissionState }>;
 }
 
 /**
@@ -46,5 +56,24 @@ export function recordingServiceKeepAlive(plugin: RecordingServicePlugin): {
   return {
     keepRideAlive: async () => plugin.start(),
     letRideSleep: async () => plugin.stop(),
+  };
+}
+
+/**
+ * The notification permission the ride's service needs to be SEEN — #526.
+ * Answers `apps/web/src/ride/notification-permission-port.ts` by shape, for the
+ * reason the top of this file gives.
+ *
+ * Below API 33 the Java answers `granted` to both calls and shows nothing, so
+ * the web client, which asks only on `prompt`, never asks there. When to ask is
+ * the ride controller's decision, not this layer's.
+ */
+export function recordingServiceNotificationPermission(plugin: RecordingServicePlugin): {
+  notificationPermission(): Promise<NotificationPermissionState>;
+  askForNotificationPermission(): Promise<NotificationPermissionState>;
+} {
+  return {
+    notificationPermission: async () => (await plugin.notificationPermission()).state,
+    askForNotificationPermission: async () => (await plugin.requestNotificationPermission()).state,
   };
 }

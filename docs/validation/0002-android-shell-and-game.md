@@ -211,6 +211,17 @@ The merged manifest was asserted from the build on 2026-09-09 and is **not** re-
 | A7 | ⚠️ **[#230](https://github.com/openzigs/onyourleft/issues/230), the one that says it is fixed.** Grant the permission, press Pair again | The **native device chooser appears**. `adb shell dumpsys window \| grep mCurrentFocus` leaves `MainActivity`; `adb logcat` carries **no** `Bluetooth LE not initialized.` |
 | A8 | Cancel that chooser | On screen: *"no device was chosen"* — and only here. A cancellation is the one failure that may still say so |
 
+⚠️ **Run A5 on a build that contains [#526](https://github.com/openzigs/onyourleft/issues/526)
+as well as [#524](https://github.com/openzigs/onyourleft/issues/524).** From Android 13 (API 33)
+`POST_NOTIFICATIONS` is a runtime permission, and before #526 nothing asked for it: the service ran
+and its notification was never shown, so on the owner's tablet (API 35+) A5 would record a failure
+caused by the missing question rather than by the service. On such a build, pressing **Start
+recording** for the first time raises Android's notifications dialog **before** the notification
+appears — allow it, and the "Recording ride" notification is what A5 then looks for. Refusing it
+must leave the ride recording, with one sentence on the Ride screen saying there will be no
+notification, and a later ride must not ask again. Below API 33 nothing is asked. A result taken on
+a build without #526 says nothing about A5 on API 33+.
+
 ⚠️ **A6–A8 are #230's last acceptance criterion and nothing in CI can stand in for them.** The bug
 was found by installing the APK and pressing the button while four gates were green: the scripted
 plugin double allowed a chooser before `initialize()`, the typecheck saw an implemented method, the

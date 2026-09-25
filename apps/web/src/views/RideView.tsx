@@ -449,6 +449,12 @@ function RideControls({
 
   return (
     <>
+      {snapshot.notificationNotice === undefined ? null : (
+        // #526: set once, on the ride where the rider refused the permission.
+        <StatusMessage tone="info" label="No notification" live>
+          {snapshot.notificationNotice}
+        </StatusMessage>
+      )}
       {snapshot.phase === 'recording' ? (
         <Button
           variant="secondary"

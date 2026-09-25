@@ -31,6 +31,7 @@ import {
   type Mounted,
 } from '../testing/mount';
 
+import { RIDE_NOTIFICATION_REFUSED } from '../ride/controller';
 import { formatDuration } from '../format';
 import { UnitsProvider } from '../units/context';
 import { RideView } from './RideView';
@@ -577,5 +578,24 @@ describe('the screen is three groups, in the order it always was (#422)', () => 
     const everyButton = queryAll(document, 'button');
     expect(everyButton.length).toBeGreaterThan(0);
     expect(everyButton.every((each) => each.closest('.oyl-ride__group') !== null)).toBe(true);
+  });
+});
+
+describe('#526 — a refused notification permission is said in words', () => {
+  it('tells the rider the ride is still recording and why there is no notification', async () => {
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ notificationNotice: RIDE_NOTIFICATION_REFUSED });
+    await show(stub);
+
+    expect(document.body.textContent).toContain(RIDE_NOTIFICATION_REFUSED);
+    // Still a ride with its controls: the refusal stops nothing.
+    buttonNamed('Pause');
+  });
+
+  it('says nothing when nothing was refused', async () => {
+    const stub = stubRideController(ridingSnapshot());
+    await show(stub);
+
+    expect(document.body.textContent).not.toContain('Recording ride” notification');
   });
 });

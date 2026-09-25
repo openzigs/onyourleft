@@ -44,3 +44,39 @@ describe('the recording service cannot take the app down (#524)', () => {
     expect(stopHelper.slice(0, stopHelper.indexOf('}'))).not.toMatch(/startService\(/);
   });
 });
+
+describe('the notification permission is asked through the bridge (#526)', () => {
+  it('declares POST_NOTIFICATIONS on the plugin under the alias it asks for', () => {
+    expect(plugin).toMatch(
+      /@Permission\(\s*strings = \{ Manifest\.permission\.POST_NOTIFICATIONS \},\s*alias = RecordingServicePlugin\.NOTIFICATIONS\s*\)/,
+    );
+    expect(plugin).toMatch(/static final String NOTIFICATIONS = "notifications";/);
+  });
+
+  it('asks through Capacitor, with a permission callback, and never through ActivityCompat', () => {
+    const request = plugin.slice(plugin.indexOf('public void requestNotificationPermission('));
+    expect(request).toMatch(
+      /requestPermissionForAlias\(NOTIFICATIONS, call, "notificationPermissionAnswered"\)/,
+    );
+    expect(plugin).toMatch(
+      /@PermissionCallback\s+private void notificationPermissionAnswered\(PluginCall call\)/,
+    );
+    expect(plugin).not.toMatch(/ActivityCompat\.requestPermissions/);
+  });
+
+  it('asks nothing below API 33, where the permission is granted at install', () => {
+    const request = plugin.slice(plugin.indexOf('public void requestNotificationPermission('));
+    const guard = request.indexOf('Build.VERSION.SDK_INT < NOTIFICATIONS_ARE_A_RUNTIME_PERMISSION');
+    const ask = request.indexOf('requestPermissionForAlias(');
+    expect(plugin).toMatch(/NOTIFICATIONS_ARE_A_RUNTIME_PERMISSION = 33;/);
+    expect(guard).toBeGreaterThan(0);
+    expect(ask).toBeGreaterThan(guard);
+    // The guard returns before the ask.
+    expect(request.slice(guard, ask)).toMatch(/call\.resolve\(notificationAnswer\(\)\);\s*return;/);
+    // And the answer below 33 is granted before Capacitor's state is read.
+    const answer = plugin.slice(plugin.indexOf('private JSObject notificationAnswer()'));
+    expect(answer).toMatch(
+      /SDK_INT < NOTIFICATIONS_ARE_A_RUNTIME_PERMISSION\) \{\s*answer\.put\("state", PermissionState\.GRANTED\.toString\(\)\);\s*return answer;/,
+    );
+  });
+});

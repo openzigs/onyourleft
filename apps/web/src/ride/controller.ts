@@ -107,6 +107,7 @@ import {
 } from './metrics';
 import type { RiderPresence, RiderPresencePort } from './presence-port';
 import type { RideKeepAlivePort } from './keep-alive-port';
+import type { RideNotificationPermissionPort } from './notification-permission-port';
 import { NO_TRAINER_CONTROL, type OpenTrainer, type TrainerConnection } from './trainer';
 import { createWorkoutSession, RELEASE_INCOMPLETE, type WorkoutSession } from '../workout/session';
 import { blockText } from '../workouts/library';
@@ -325,7 +326,21 @@ export interface RideSnapshot {
   readonly pairingError: string | undefined;
   /** How many more devices this transport will connect. */
   readonly connectionsRemaining: number;
+  /**
+   * #526: the rider was asked whether the ride may show a notification, and
+   * said no — {@link RIDE_NOTIFICATION_REFUSED}, for the rest of that ride.
+   * `undefined` otherwise, which is every ride where nothing was asked.
+   */
+  readonly notificationNotice: string | undefined;
 }
+
+/**
+ * What a rider who refused the notification permission is told — once, on
+ * the ride where they were asked (#526). It leads with the ride still
+ * recording, because a rider reading a refusal first reads a lost ride.
+ */
+export const RIDE_NOTIFICATION_REFUSED =
+  'Your ride is still recording. Android will not show a “Recording ride” notification while the screen is off, because notifications are not allowed for On Your Left. You can allow them in the app’s settings.';
 
 /**
  * What a finished ride needs to become an activity — #14's fourth criterion,
@@ -408,6 +423,16 @@ export interface RideControllerOptions {
    * `check:wiring` (§Limits) and in every test here.
    */
   readonly keepAlive?: RideKeepAlivePort | undefined;
+  /**
+   * Whether the keep-alive's notification may be shown, and asking — #526.
+   * Android only, beside {@link keepAlive}; asked about only when that is
+   * present, because it is that service's notification. @see
+   * notification-permission-port.ts and §`askAboutTheNotification`.
+   *
+   * ⚠️ An optional option, so `main.tsx` not passing it is green in
+   * `check:wiring` (§Limits) — the same gap `keepAlive` has.
+   */
+  readonly notificationPermission?: RideNotificationPermissionPort | undefined;
 }
 
 export interface RideController {
@@ -579,6 +604,56 @@ export function createRideController(options: RideControllerOptions): RideContro
 
   /** Whether {@link RideControllerOptions.keepAlive} was last asked to keep. */
   let keptAlive = false;
+  /** Bumped on every keep-alive transition, so a late answer cannot restart a stopped ride's service. */
+  let keepAliveGeneration = 0;
+  /** @see RideSnapshot.notificationNotice */
+  let notificationNotice: string | undefined;
+
+  /**
+   * #526 — ask for `POST_NOTIFICATIONS` at most once, JUST BEFORE the ride's
+   * foreground service is started.
+   *
+   * **Why this moment.** Not on cold start, because a rider opening the app to
+   * look at last week's ride has no reason to be asked about a notification.
+   * Not with the Bluetooth request either: that dialog is raised by the BLE
+   * plugin inside pairing, which this client does not own, and a rider can
+   * record a ride with nothing paired. The first ride that becomes active is
+   * the first moment the notification exists and the question explains itself
+   * — the rider has just pressed Start (or continued a ride), and Android's
+   * dialog asks about notifications from an app that is now recording.
+   *
+   * **Why before the service rather than beside it.** On API 33+ the service's
+   * notification is posted when it starts; asking first means a rider who says
+   * yes sees it on this ride, rather than on the next. The RECORDING is not
+   * held back: `start` has already begun it, and only the keep-alive waits for
+   * the answer, while the dialog keeps the app in the foreground anyway.
+   *
+   * **Why at most once.** Only a `prompt` is asked about. A refusal leaves
+   * Android reporting `prompt-with-rationale` or `denied`, so no later ride
+   * asks again; that state, kept by Capacitor across launches, is what makes
+   * "once" true rather than anything held here. Within a ride it is asked on
+   * the one transition into riding — a pause is not a transition. Below API
+   * 33 the plugin answers `granted` and nothing is asked.
+   *
+   * ⚠️ **Nothing here can stop a ride.** A rejected call is swallowed and the
+   * keep-alive goes ahead; a refusal is told once, in words, on the ride that
+   * asked. A question Android never answers would hold the keep-alive back
+   * with it — that is the one limit, and a pending dialog is on screen.
+   */
+  const askAboutTheNotification = async (port: RideNotificationPermissionPort): Promise<void> => {
+    try {
+      if ((await port.notificationPermission()) !== 'prompt') {
+        return;
+      }
+      const answer = await port.askForNotificationPermission();
+      if (answer !== 'granted' && !disposed && rideInProgress(phase)) {
+        notificationNotice = RIDE_NOTIFICATION_REFUSED;
+        changed();
+      }
+    } catch {
+      // Degraded, not lost: the ride records and the service still starts.
+    }
+  };
 
   /**
    * #524: ask the platform to keep the process alive exactly while a ride is
@@ -596,8 +671,28 @@ export function createRideController(options: RideControllerOptions): RideContro
       return;
     }
     keptAlive = wanted;
-    const call = wanted ? options.keepAlive.keepRideAlive() : options.keepAlive.letRideSleep();
-    call.catch(() => undefined);
+    const generation = ++keepAliveGeneration;
+    const keepAlive = options.keepAlive;
+    if (!wanted) {
+      // #526: told on the ride that asked, and not carried into the next.
+      notificationNotice = undefined;
+      keepAlive.letRideSleep().catch(() => undefined);
+      return;
+    }
+    const permission = options.notificationPermission;
+    if (permission === undefined) {
+      keepAlive.keepRideAlive().catch(() => undefined);
+      return;
+    }
+    askAboutTheNotification(permission)
+      .then(async () => {
+        // The ride ended while the rider was answering: `letRideSleep` has
+        // already been sent, and a late start would outlive the ride.
+        if (generation === keepAliveGeneration) {
+          await keepAlive.keepRideAlive();
+        }
+      })
+      .catch(() => undefined);
   };
 
   const changed = (): void => {
@@ -744,6 +839,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         transport.traits.maxConcurrentConnections -
           [...sensors.values()].filter((entry) => entry.state === 'connected').length,
       ),
+      notificationNotice,
     };
   };
 
