@@ -49,6 +49,10 @@ export type { ThermalPlugin, ThermalReply } from './thermal/thermal';
 export {
   capacitorRecordingServicePlugin,
   recordingServiceKeepAlive,
+  recordingServiceNotificationPermission,
 } from './recording/recording-service';
-export type { RecordingServicePlugin } from './recording/recording-service';
+export type {
+  NotificationPermissionState,
+  RecordingServicePlugin,
+} from './recording/recording-service';
 export type { PermissionAction, PermissionNotice } from './permission/notice';

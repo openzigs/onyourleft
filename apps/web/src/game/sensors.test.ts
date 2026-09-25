@@ -58,6 +58,7 @@ function snapshotWith(states: Partial<Record<string, MetricState>>): RideSnapsho
     leftover: false,
     recoverable: [],
     connectionsRemaining: 3,
+    notificationNotice: undefined,
   };
 }
 
