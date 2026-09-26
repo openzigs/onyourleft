@@ -36,7 +36,12 @@
 export interface ScreenLock {
   /** Releases it. Must be safe to call twice. */
   release(): Promise<void>;
-  /** Whether the lock is actually held. `false` where the platform declined. */
+  /**
+   * Whether the lock is actually held. `false` where the platform declined,
+   * once it is released, and — where the platform says so — while the page is
+   * hidden and before a lock has been taken back. Informational: nothing in
+   * the client decides anything on it.
+   */
   readonly held: boolean;
 }
 
@@ -63,6 +68,12 @@ export const NO_SCREEN_LOCK: ScreenLock = {
 /** What the Wake Lock API gives us, named so this file does not depend on lib.dom's version. */
 interface WakeLockSentinelLike {
   release(): Promise<void>;
+  /**
+   * `true` once the platform has let the sentinel go — on `release()`, or when
+   * the page was hidden. Optional because an engine or a double may omit it,
+   * and then `held` falls back to "not released by us".
+   */
+  readonly released?: boolean;
 }
 
 interface WakeLockLike {
@@ -163,7 +174,7 @@ export function browserScreenLockSource(
         });
       return {
         get held(): boolean {
-          return !released;
+          return !released && current.released !== true;
         },
         release: async (): Promise<void> => {
           if (released) {
@@ -174,7 +185,11 @@ export function browserScreenLockSource(
           }
           released = true;
           stopWatching();
-          await current.release();
+          // Caught as the other two releases are: `current` may be a sentinel
+          // the platform already let go while the page was hidden, and some
+          // engines reject a second release — which a caller that discards
+          // this promise with `void` would turn into an unhandled rejection.
+          await current.release().catch(() => undefined);
         },
       };
     },

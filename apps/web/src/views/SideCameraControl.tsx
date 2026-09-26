@@ -372,14 +372,21 @@ function Offer({
     const facing = before.live ? before.facing : undefined;
     starting.current = true;
     void controller.turnOn('user').then((failed) => {
-      starting.current = false;
       if (failed === undefined) {
+        starting.current = false;
         turnedOn.current = true;
         restore.current = facing;
       } else if (facing !== undefined) {
         // The rider's own camera went off to be turned round, and the front
-        // one would not come on: theirs comes back.
-        void controller.turnOn(facing);
+        // one would not come on: theirs comes back. The guard stays set until
+        // it has (#566's re-review) — a press during the restore finds no
+        // live camera and would start a second `turnOn` beside it. `turnOn`
+        // never rejects, so `finally` is the settle.
+        void controller.turnOn(facing).finally(() => {
+          starting.current = false;
+        });
+      } else {
+        starting.current = false;
       }
       if (!mounted.current) {
         // Nobody is here to scan with it: give it back at once.

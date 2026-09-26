@@ -41,6 +41,9 @@ export function hideablePage(): HideablePage {
             sentinel.held = false;
             return Promise.resolve();
           },
+          get released(): boolean {
+            return !sentinel.held;
+          },
         });
       },
     },

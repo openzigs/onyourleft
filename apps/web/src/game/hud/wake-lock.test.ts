@@ -142,4 +142,46 @@ describe('a lock the platform let go while the page was hidden — #566’s revi
     expect(platform.requests()).toBe(2);
     expect(platform.live()).toBe(0);
   });
+
+  it('holds one lock when the page is shown twice with nothing hidden between', async () => {
+    // Two re-requests can both succeed while the page stays visible — a quick
+    // hide/show/hide/show whose first answer lands after the second show. Each
+    // new sentinel replaces the one before and gives it back; without that, the
+    // platform would be holding three.
+    const platform = hideablePage();
+    const lock = await browserScreenLockSource(platform.api, platform.page).acquire();
+    platform.show();
+    platform.show();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(platform.requests()).toBe(3);
+    expect(platform.live()).toBe(1);
+    await lock.release();
+    expect(platform.live()).toBe(0);
+  });
+
+  it('says it is not held while the platform has let it go, and held again once taken back', async () => {
+    const platform = hideablePage();
+    const lock = await browserScreenLockSource(platform.api, platform.page).acquire();
+    expect(lock.held).toBe(true);
+    platform.hide();
+    expect(lock.held).toBe(false);
+    platform.show();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(lock.held).toBe(true);
+    await lock.release();
+    expect(lock.held).toBe(false);
+  });
+
+  it('does not reject when the engine refuses to release a sentinel it already let go', async () => {
+    const lock = await browserScreenLockSource({
+      request: () =>
+        Promise.resolve({
+          release: () => Promise.reject(new Error('already released')),
+        }),
+    }).acquire();
+
+    await expect(lock.release()).resolves.toBeUndefined();
+  });
 });

@@ -315,6 +315,38 @@ describe('pairing, on the tablet', () => {
     expect(document.body.textContent).toContain('This tablet’s camera would not turn on.');
   });
 
+  it('starts nothing for a press while the rider’s own camera is being turned back on — #566’s re-review', async () => {
+    // The front camera fails, and the back one is on its way back. A press
+    // then used to find no live camera and start a second `turnOn` alongside
+    // the restore: the two-`startCamera` race the double-press guard closes.
+    const { camera, controller } = await tablet({
+      camera: { startFails: 'unavailable', startFailsFacing: 'user', holdStarts: true },
+    });
+    const on = controller.turnOn();
+    await settle();
+    camera.releaseStarts();
+    await on;
+    await press('Pair a phone');
+    await press('Read the phone’s code');
+    // The front camera is asked for and fails; the restore is now held.
+    camera.releaseStarts();
+    await settle();
+    await settle();
+    expect(camera.facings).toStrictEqual(['environment', 'user', 'environment']);
+    await press('Read the phone’s code');
+    camera.releaseStarts();
+    await settle();
+    await settle();
+    camera.releaseStarts();
+    await settle();
+    expect(camera.facings).toStrictEqual(['environment', 'user', 'environment']);
+    expect(camera.liveStreams()).toBe(1);
+    expect(controller.state()).toMatchObject({ live: true, facing: 'environment' });
+    // And once the restore has settled, a press is a press again.
+    await press('Read the phone’s code');
+    expect(camera.facings).toStrictEqual(['environment', 'user', 'environment', 'user']);
+  });
+
   it('starts one camera for a double press, and leaves none running after Stop looking — #566’s review', async () => {
     const { camera } = await tablet({ camera: { holdStarts: true } });
     await press('Pair a phone');
