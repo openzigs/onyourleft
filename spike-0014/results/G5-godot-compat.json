@@ -1,0 +1,208 @@
+{
+ "run": "G5-godot-compat",
+ "present": {
+  "frames": 17849,
+  "seconds": 299.7,
+  "fps": 59.55,
+  "p50": 16.63,
+  "p90": 16.68,
+  "p99": 16.8,
+  "max": 249.5,
+  "over20msShare": 0.06,
+  "over50msShare": 0.017,
+  "holesOver250ms": 6
+ },
+ "gpuFreqMHz": {
+  "mean": 235.0,
+  "p50": 202.0,
+  "p90": 302.0,
+  "samples": 241
+ },
+ "thermal": [
+  {
+   "t": "1790450956",
+   "status": 0,
+   "skin": 26.0,
+   "g3d": 35.0,
+   "big": 48.0,
+   "cpuPct": 40.7,
+   "rendererCpuPct": 21.4
+  },
+  {
+   "t": "1790450993",
+   "status": 0,
+   "skin": 26.2,
+   "g3d": 35.0,
+   "big": 37.0,
+   "cpuPct": 42.8,
+   "rendererCpuPct": 30.0
+  },
+  {
+   "t": "1790451031",
+   "status": 0,
+   "skin": 26.2,
+   "g3d": 35.0,
+   "big": 36.0,
+   "cpuPct": 50.0,
+   "rendererCpuPct": 55.1
+  },
+  {
+   "t": "1790451068",
+   "status": 0,
+   "skin": 26.2,
+   "g3d": 34.0,
+   "big": 35.0,
+   "cpuPct": 57.1,
+   "rendererCpuPct": 40.0
+  },
+  {
+   "t": "1790451106",
+   "status": 0,
+   "skin": 26.1,
+   "g3d": 34.0,
+   "big": 38.0,
+   "cpuPct": 55.5,
+   "rendererCpuPct": 14.8
+  },
+  {
+   "t": "1790451143",
+   "status": 0,
+   "skin": 26.3,
+   "g3d": 35.0,
+   "big": 36.0,
+   "cpuPct": 57.1,
+   "rendererCpuPct": 27.5
+  },
+  {
+   "t": "1790451180",
+   "status": 0,
+   "skin": 26.1,
+   "g3d": 34.0,
+   "big": 36.0,
+   "cpuPct": 48.1,
+   "rendererCpuPct": 27.5
+  },
+  {
+   "t": "1790451217",
+   "status": 0,
+   "skin": 26.1,
+   "g3d": 35.0,
+   "big": 36.0,
+   "cpuPct": 57.6,
+   "rendererCpuPct": 29.6
+  },
+  {
+   "t": "1790451255",
+   "status": 0,
+   "skin": 26.1,
+   "g3d": 35.0,
+   "big": 37.0,
+   "cpuPct": 46.4,
+   "rendererCpuPct": 26.6
+  }
+ ],
+ "thermalSummary": {
+  "maxStatus": 0,
+  "skinFirst": 26.0,
+  "skinLast": 26.1,
+  "skinMax": 26.3,
+  "g3dMean": 34.7,
+  "cpuPctMean": 50.6,
+  "rendererCpuPctMean": 30.3
+ },
+ "memMiB": {
+  "totalPss": 404.5,
+  "graphics": 191.4,
+  "nativeHeap": 90.3,
+  "code": 57.9
+ },
+ "gfxinfo": {
+  "Total frames rendered": "1041",
+  "50th percentile": "7ms",
+  "90th percentile": "10ms",
+  "99th percentile": "44ms",
+  "50th gpu percentile": "2ms",
+  "90th gpu percentile": "2ms",
+  "99th gpu percentile": "3ms",
+  "janky": "3.46"
+ },
+ "godot": {
+  "windows": 10,
+  "frameMs": {
+   "p50": 16.64,
+   "p90": 19.23,
+   "p99": 22.33
+  },
+  "gpuMs": {
+   "p50": 0.0,
+   "p90": 0.0,
+   "p99": 0.0
+  },
+  "cpuMs": {
+   "p50": 1.9,
+   "p90": 2.69,
+   "p99": 3.78
+  },
+  "jsToJavaMs": {
+   "p50": 2.65,
+   "p95": 5.1,
+   "p99": 44.1,
+   "max": 78.45
+  },
+  "jsToGodotMs": {
+   "p50": 14.71,
+   "p95": 20.73,
+   "p99": 60.2,
+   "max": 97.36
+  },
+  "arrivalGapMs": {
+   "p50": 50.0,
+   "p95": 61.0,
+   "p99": 98.5,
+   "max": 142.0
+  },
+  "worldBuildMs": {
+   "p50": 8.6,
+   "p99": 15.68,
+   "max": 15.68
+  },
+  "steps": 6021,
+  "lostSteps": 0,
+  "starvedFrames": 2282,
+  "frames": 17930,
+  "starvedShare": 12.73,
+  "over20": 959,
+  "late50GodotShare": null,
+  "late50JavaShare": null,
+  "drawCalls": 22.0,
+  "primitives": 36565.0,
+  "videoMemMiB": 39.1,
+  "worldBytesPerWindow": 256614,
+  "jsToJavaMaxAll": 137.199951171875
+ },
+ "godotPage": {
+  "stepBuildMs": {
+   "p50": 6.2,
+   "p90": 13.2,
+   "p99": 17.45
+  },
+  "windowSerialiseMs": {
+   "p50": 45.3,
+   "p90": 58.45,
+   "p99": 64.75
+  },
+  "windowJsonBytes": 373556,
+  "javaDecodeMs": 11.5,
+  "webviewRafMs": {
+   "p50": 16.6,
+   "p90": 16.7,
+   "p99": 33.2
+  }
+ },
+ "memAllMiB": {
+  "dev.openzigs.onyourleft.godotspike": 400.3,
+  "com.google.android.webview:sandboxed_process0:org.chromium.c": 17.8,
+  "com.google.android.webview:webview_service": 5.7,
+  "webview_zygote": 3.0
+ }
+}

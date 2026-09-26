@@ -1,0 +1,817 @@
+diff --git a/apps/mobile/android/app/build.gradle b/apps/mobile/android/app/build.gradle
+index f5adb14..5383796 100644
+--- a/apps/mobile/android/app/build.gradle
++++ b/apps/mobile/android/app/build.gradle
+@@ -5,7 +5,7 @@ android {
+     namespace = "dev.openzigs.onyourleft"
+     compileSdk = rootProject.ext.compileSdkVersion
+     defaultConfig {
+-        applicationId "dev.openzigs.onyourleft"
++        applicationId "dev.openzigs.onyourleft.godotspike"
+         minSdkVersion rootProject.ext.minSdkVersion
+         targetSdkVersion rootProject.ext.targetSdkVersion
+         versionCode 1
+@@ -14,9 +14,22 @@ android {
+         aaptOptions {
+              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+-            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
++            // Spike 0013: Godot's project needs its hidden `.godot/` directory in the assets.
++            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
+         }
+     }
++    // Spike 0013 (#433): the Godot project, imported headless, as assets beside Capacitor's.
++    sourceSets {
++        main {
++            assets.srcDirs += [project.findProperty('godotAssets') ?: 'src/godot']
++        }
++    }
++    if (project.hasProperty('compressedLibs')) {
++        packaging { jniLibs { useLegacyPackaging = true } }
++    }
++    if (project.hasProperty('arm64Only')) {
++        defaultConfig.ndk { abiFilters 'arm64-v8a' }
++    }
+     buildTypes {
+         release {
+             minifyEnabled false
+@@ -37,6 +50,8 @@ dependencies {
+     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+     implementation project(':capacitor-android')
++    // Spike 0013 (#433): the Godot Android library, from Maven Central.
++    implementation "org.godotengine:godot:${project.findProperty('godotVersion') ?: '4.7.1.stable'}"
+     testImplementation "junit:junit:$junitVersion"
+     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+diff --git a/apps/mobile/android/app/src/main/AndroidManifest.xml b/apps/mobile/android/app/src/main/AndroidManifest.xml
+index df6b3bb..1673e16 100644
+--- a/apps/mobile/android/app/src/main/AndroidManifest.xml
++++ b/apps/mobile/android/app/src/main/AndroidManifest.xml
+@@ -34,7 +34,8 @@
+             android:grantUriPermissions="true">
+             <meta-data
+                 android:name="android.support.FILE_PROVIDER_PATHS"
+-                android:resource="@xml/file_paths"></meta-data>
++                android:resource="@xml/file_paths"
++                tools:replace="android:resource"></meta-data>
+         </provider>
+ 
+         <!--
+diff --git a/apps/mobile/android/app/src/main/java/dev/openzigs/onyourleft/GodotWorldPlugin.java b/apps/mobile/android/app/src/main/java/dev/openzigs/onyourleft/GodotWorldPlugin.java
+new file mode 100644
+index 0000000..47cfcaa
+--- /dev/null
++++ b/apps/mobile/android/app/src/main/java/dev/openzigs/onyourleft/GodotWorldPlugin.java
+@@ -0,0 +1,98 @@
++// SPDX-License-Identifier: AGPL-3.0-or-later
++
++package dev.openzigs.onyourleft;
++
++import android.util.Base64;
++
++import com.getcapacitor.JSObject;
++import com.getcapacitor.Plugin;
++import com.getcapacitor.PluginCall;
++import com.getcapacitor.PluginMethod;
++import com.getcapacitor.annotation.CapacitorPlugin;
++
++import org.json.JSONObject;
++
++import java.util.HashMap;
++import java.util.Iterator;
++import java.util.Map;
++
++/**
++ * Spike 0013 (#433), throwaway. The TypeScript side of the bridge: Capacitor's asynchronous
++ * JSON calls, forwarded to {@link WorldBridgePlugin}.
++ */
++@CapacitorPlugin(name = "GodotWorld")
++public class GodotWorldPlugin extends Plugin {
++
++    @PluginMethod
++    public void start(PluginCall call) {
++        WorldBridgePlugin.setConfig(call.getData().toString());
++        MainActivity activity = (MainActivity) getActivity();
++        activity.runOnUiThread(() -> {
++            long at = activity.startGodot(call.getData());
++            JSObject reply = new JSObject();
++            reply.put("startedAt", at);
++            call.resolve(reply);
++        });
++    }
++
++    @PluginMethod
++    public void stop(PluginCall call) {
++        MainActivity activity = (MainActivity) getActivity();
++        activity.runOnUiThread(() -> {
++            activity.stopGodot();
++            call.resolve();
++        });
++    }
++
++    /** One simulation step. Resolved at once: the page does not await it. */
++    @PluginMethod
++    public void step(PluginCall call) {
++        double recvAt = System.currentTimeMillis();
++        JSObject data = call.getData();
++        try {
++            data.put("recvAt", recvAt);
++        } catch (Exception ignored) {
++        }
++        WorldBridgePlugin.putStep(data.toString());
++        call.resolve();
++    }
++
++    /** A window of world geometry. Every string field ending in "B64" is decoded to bytes. */
++    @PluginMethod
++    public void world(PluginCall call) {
++        long t0 = System.nanoTime();
++        JSObject data = call.getData();
++        Map<String, byte[]> bytes = new HashMap<>();
++        JSONObject meta = new JSONObject();
++        int total = 0;
++        try {
++            Iterator<String> keys = data.keys();
++            while (keys.hasNext()) {
++                String key = keys.next();
++                if (key.endsWith("B64")) {
++                    byte[] decoded = Base64.decode(data.getString(key), Base64.DEFAULT);
++                    total += decoded.length;
++                    bytes.put(key.substring(0, key.length() - 3), decoded);
++                } else {
++                    meta.put(key, data.get(key));
++                }
++            }
++        } catch (Exception e) {
++            call.reject(e.toString());
++            return;
++        }
++        WorldBridgePlugin.putWorld(meta.toString(), bytes);
++        JSObject reply = new JSObject();
++        reply.put("bytes", total);
++        reply.put("decodeMs", (System.nanoTime() - t0) / 1e6);
++        call.resolve(reply);
++    }
++
++    /** What GDScript has reported since the last call, one line each. */
++    @PluginMethod
++    public void reports(PluginCall call) {
++        JSObject reply = new JSObject();
++        reply.put("lines", WorldBridgePlugin.takeReports());
++        call.resolve(reply);
++    }
++}
+diff --git a/apps/mobile/android/app/src/main/java/dev/openzigs/onyourleft/MainActivity.java b/apps/mobile/android/app/src/main/java/dev/openzigs/onyourleft/MainActivity.java
+index 8b6c41c..e7e7d36 100644
+--- a/apps/mobile/android/app/src/main/java/dev/openzigs/onyourleft/MainActivity.java
++++ b/apps/mobile/android/app/src/main/java/dev/openzigs/onyourleft/MainActivity.java
+@@ -2,21 +2,99 @@
+ 
+ package dev.openzigs.onyourleft;
+ 
++import android.graphics.Color;
++import android.view.View;
++import android.view.ViewGroup;
++import android.webkit.WebView;
++import android.widget.FrameLayout;
++
+ import com.getcapacitor.BridgeActivity;
++import com.getcapacitor.JSObject;
+ 
+-public class MainActivity extends BridgeActivity {
++import org.godotengine.godot.Godot;
++import org.godotengine.godot.GodotFragment;
++import org.godotengine.godot.GodotHost;
++import org.godotengine.godot.plugin.GodotPlugin;
++
++import java.util.ArrayList;
++import java.util.Collections;
++import java.util.List;
++import java.util.Set;
++
++public class MainActivity extends BridgeActivity implements GodotHost {
++
++    private GodotFragment godotFragment;
++    private WorldBridgePlugin worldBridge;
++    private final List<String> commandLine = new ArrayList<>();
++    private static final int GODOT_CONTAINER_ID = View.generateViewId();
+ 
+-    /**
+-     * ⚠️ {@link RecordingServicePlugin} and {@link ThermalPlugin} (#247) are registered here, BEFORE
+-     * {@code super.onCreate}. Capacitor
+-     * auto-discovers plugins that ship as packages; one that lives in the application's own source
+-     * tree has to be registered by hand, and registering it after the bridge is built is a silent
+-     * no-op -- the web layer gets "plugin not implemented" at the moment a rider presses record.
+-     */
+     @Override
+     public void onCreate(android.os.Bundle savedInstanceState) {
+         registerPlugin(RecordingServicePlugin.class);
+         registerPlugin(ThermalPlugin.class);
++        registerPlugin(GodotWorldPlugin.class);
+         super.onCreate(savedInstanceState);
+     }
++
++    /**
++     * Spike 0013 (#433): put a Godot view BENEATH the WebView and make the WebView transparent.
++     * Returns the wall-clock millisecond it was asked to start.
++     */
++    long startGodot(JSObject config) {
++        long at = System.currentTimeMillis();
++        if (godotFragment != null) return at;
++        commandLine.clear();
++        if ("compat".equals(config.getString("renderer"))) {
++            commandLine.add("--rendering-method");
++            commandLine.add("gl_compatibility");
++            commandLine.add("--rendering-driver");
++            commandLine.add("opengl3");
++        }
++        WebView web = bridge.getWebView();
++        ViewGroup parent = (ViewGroup) web.getParent();
++        FrameLayout container = new FrameLayout(this);
++        container.setId(GODOT_CONTAINER_ID);
++        if (!"1".equals(config.getString("exposeGodot"))) {
++            // Godot's SurfaceView takes focus and its hidden keyboard EditText is an unlabelled
++            // accessibility node; the world is decoration beneath a DOM HUD, so hide both.
++            container.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
++            container.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
++        }
++        parent.addView(container, 0, new ViewGroup.LayoutParams(
++                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
++        web.setBackgroundColor(Color.TRANSPARENT);
++        godotFragment = new GodotFragment();
++        getSupportFragmentManager()
++                .beginTransaction()
++                .replace(GODOT_CONTAINER_ID, godotFragment)
++                .commitNowAllowingStateLoss();
++        return at;
++    }
++
++    void stopGodot() {
++        if (godotFragment == null) return;
++        getSupportFragmentManager().beginTransaction().remove(godotFragment).commitNowAllowingStateLoss();
++        godotFragment = null;
++    }
++
++    @Override
++    public android.app.Activity getActivity() {
++        return this;
++    }
++
++    @Override
++    public Godot getGodot() {
++        return godotFragment == null ? null : godotFragment.getGodot();
++    }
++
++    @Override
++    public List<String> getCommandLine() {
++        return Collections.unmodifiableList(commandLine);
++    }
++
++    @Override
++    public Set<GodotPlugin> getHostPlugins(Godot godot) {
++        if (worldBridge == null) worldBridge = new WorldBridgePlugin(godot);
++        return Collections.singleton(worldBridge);
++    }
+ }
+diff --git a/apps/mobile/android/app/src/main/java/dev/openzigs/onyourleft/WorldBridgePlugin.java b/apps/mobile/android/app/src/main/java/dev/openzigs/onyourleft/WorldBridgePlugin.java
+new file mode 100644
+index 0000000..9e8759e
+--- /dev/null
++++ b/apps/mobile/android/app/src/main/java/dev/openzigs/onyourleft/WorldBridgePlugin.java
+@@ -0,0 +1,128 @@
++// SPDX-License-Identifier: AGPL-3.0-or-later
++
++package dev.openzigs.onyourleft;
++
++import androidx.annotation.NonNull;
++
++import org.godotengine.godot.Godot;
++import org.godotengine.godot.plugin.GodotPlugin;
++import org.godotengine.godot.plugin.UsedByGodot;
++
++import java.util.HashMap;
++import java.util.Map;
++
++/**
++ * Spike 0013 (#433), throwaway. The Godot side of the bridge: what GDScript polls once a frame.
++ *
++ * <p>The Capacitor plugin ({@link GodotWorldPlugin}) writes here from the bridge's thread; the
++ * Godot render thread reads from GDScript through {@code Engine.get_singleton("WorldBridge")}.
++ * Everything is guarded by one lock, and every read TAKES what it returns, so nothing is read
++ * twice.
++ */
++public class WorldBridgePlugin extends GodotPlugin {
++
++    private static final Object LOCK = new Object();
++    private static StringBuilder steps = new StringBuilder();
++    private static String worldMeta = null;
++    private static Map<String, byte[]> worldBytes = new HashMap<>();
++    private static Map<String, byte[]> pendingBytes = new HashMap<>();
++    private static String config = "";
++    private static final java.util.ArrayDeque<String> reports = new java.util.ArrayDeque<>();
++
++    public WorldBridgePlugin(Godot godot) {
++        super(godot);
++    }
++
++    @NonNull
++    @Override
++    public String getPluginName() {
++        return "WorldBridge";
++    }
++
++    // ---- written by the Capacitor side ----
++
++    static void setConfig(String json) {
++        synchronized (LOCK) {
++            config = json;
++        }
++    }
++
++    /** One step, as a JSON object with recvAt already stamped. */
++    static void putStep(String json) {
++        synchronized (LOCK) {
++            if (steps.length() > 0) steps.append(',');
++            steps.append(json);
++        }
++    }
++
++    static void putWorld(String meta, Map<String, byte[]> bytes) {
++        synchronized (LOCK) {
++            worldMeta = meta;
++            pendingBytes = bytes;
++        }
++    }
++
++    static String takeReports() {
++        synchronized (LOCK) {
++            StringBuilder out = new StringBuilder();
++            while (!reports.isEmpty()) {
++                if (out.length() > 0) out.append('\n');
++                out.append(reports.pollFirst());
++            }
++            return out.toString();
++        }
++    }
++
++    // ---- read by GDScript ----
++
++    @UsedByGodot
++    public String config() {
++        synchronized (LOCK) {
++            return config;
++        }
++    }
++
++    @UsedByGodot
++    public String takeSteps() {
++        synchronized (LOCK) {
++            if (steps.length() == 0) return "";
++            String out = "[" + steps + "]";
++            steps = new StringBuilder();
++            return out;
++        }
++    }
++
++    @UsedByGodot
++    public boolean hasWorld() {
++        synchronized (LOCK) {
++            return worldMeta != null;
++        }
++    }
++
++    @UsedByGodot
++    public String takeWorldMeta() {
++        synchronized (LOCK) {
++            String out = worldMeta;
++            worldMeta = null;
++            worldBytes = pendingBytes;
++            pendingBytes = new HashMap<>();
++            return out == null ? "" : out;
++        }
++    }
++
++    @UsedByGodot
++    public byte[] worldBytes(String name) {
++        synchronized (LOCK) {
++            byte[] out = worldBytes.get(name);
++            return out == null ? new byte[0] : out;
++        }
++    }
++
++    @UsedByGodot
++    public void report(String line) {
++        synchronized (LOCK) {
++            reports.addLast(line);
++            while (reports.size() > 64) reports.pollFirst();
++        }
++    }
++}
+diff --git a/apps/mobile/capacitor.config.ts b/apps/mobile/capacitor.config.ts
+index e2fa61d..ccfb483 100644
+--- a/apps/mobile/capacitor.config.ts
++++ b/apps/mobile/capacitor.config.ts
+@@ -26,6 +26,8 @@ const config = {
+     // has nothing legitimate to carry. Leaving the platform default explicit
+     // is cheaper than rediscovering it from a manifest merge.
+     allowMixedContent: false,
++    // Spike 0013 (#433): a debug build logs every plugin call's whole payload.
++    loggingBehavior: 'none',
+   },
+ };
+ 
+diff --git a/apps/web/browser/godot-harness.ts b/apps/web/browser/godot-harness.ts
+new file mode 100644
+index 0000000..3491245
+--- /dev/null
++++ b/apps/web/browser/godot-harness.ts
+@@ -0,0 +1,280 @@
++// SPDX-License-Identifier: AGPL-3.0-or-later
++
++/**
++ * Spike 0013 (#433) — THROWAWAY, on a spike branch, never merged.
++ *
++ * The TypeScript half of "Godot beneath the WebView". This page is the WebView,
++ * made transparent; the world is drawn by Godot in a native view beneath it.
++ * Everything that decides WHERE anything is stays here, in the product's own
++ * code: `rideFrame` (the same function `realistic-harness.ts` renders through
++ * three.js) builds each frame, and this page ships
++ *
++ * - one STEP per 50 ms of simulation (20 Hz, #323's step), carrying the chase
++ *   camera's eye and target (`camera.ts` §`cameraRig`) and the three riders; and
++ * - one WINDOW of geometry every {@link WINDOW_EVERY_METRES} — the road, the
++ *   ground, the water, the bridges and every scenery placement of that frame —
++ *   as base64 over Capacitor's JSON bridge.
++ *
++ * Godot interpolates between steps on its own clock and draws. Query:
++ * `?shadows=1&msaa=2&scale=1&renderer=mobile|compat&delay=50&minutes=20`.
++ */
++
++import { cameraRig } from '../src/game/camera';
++import { verticalFieldOfViewDegrees } from '../src/game/camera';
++import type { SceneFrame } from '../src/game/port';
++import { INITIAL_QUALITY, worldRung } from '../src/game/quality';
++import { corridorOrigin, VIEW_AHEAD_METRES } from '../src/game/terrain';
++import { percentiles } from './realistic/config';
++import { rideFrame, RIDE_METRES_PER_SECOND } from './realistic/frame';
++import { realisticRoute } from './realistic/route';
++
++interface GodotWorldPlugin {
++  start(options: Record<string, unknown>): Promise<{ startedAt: number }>;
++  stop(): Promise<void>;
++  step(step: Record<string, unknown>): Promise<void>;
++  world(window: Record<string, unknown>): Promise<{ bytes: number; decodeMs: number }>;
++  reports(): Promise<{ lines: string }>;
++}
++
++/** Capacitor's own native bridge, injected into the page; no `@capacitor/core` in apps/web. */
++interface NativeBridge {
++  nativePromise(plugin: string, method: string, options?: Record<string, unknown>): Promise<unknown>;
++}
++const cap = (window as unknown as { Capacitor: NativeBridge }).Capacitor;
++const call = <T>(method: string, options: Record<string, unknown> = {}): Promise<T> =>
++  cap.nativePromise('GodotWorld', method, options) as Promise<T>;
++const GodotWorld: GodotWorldPlugin = {
++  start: (options) => call('start', options),
++  stop: () => call('stop'),
++  step: (step) => call('step', step),
++  world: (payload) => call('world', payload),
++  reports: () => call('reports'),
++};
++
++/** The same ride the three.js baseline page rides (`realistic-harness.ts`). */
++const START_METRES = 2_550;
++const LOOP_FROM_METRES = 300;
++const LOOP_METRES = 3_500;
++const STEP_SECONDS = 0.05;
++const WINDOW_EVERY_METRES = Number(new URLSearchParams(location.search).get('every') ?? '25');
++const REPORT_SECONDS = 30;
++
++const params = new URLSearchParams(location.search);
++const config = {
++  shadows: params.get('shadows') === '1',
++  msaa: Number(params.get('msaa') ?? '0'),
++  scale: Number(params.get('scale') ?? '1'),
++  renderer: params.get('renderer') ?? 'mobile',
++  delayMs: Number(params.get('delay') ?? '50'),
++  exposeGodot: params.get('exposeGodot') ?? '0',
++};
++/** `?quiet=1`: stop changing the DOM after 5 s, so uiautomator can reach an idle state. */
++const quiet = params.get('quiet') === '1';
++const quietAt = performance.now() + 5000;
++const frozen = (): boolean => quiet && performance.now() > quietAt;
++
++const logBox = document.getElementById('log') as HTMLElement;
++const lines: string[] = [];
++/** Every line, for the run script to read over DevTools (console forwarding is off). */
++const everything: string[] = [];
++(window as unknown as { __oylGodotPage: string[] }).__oylGodotPage = everything;
++function log(line: string): void {
++  console.log(line);
++  everything.push(line);
++  if (frozen()) return;
++  lines.push(line.slice(0, 400));
++  while (lines.length > 8) lines.shift();
++  logBox.textContent = lines.join('\n');
++}
++
++let taps = 0;
++(document.getElementById('tap') as HTMLElement).addEventListener('click', () => {
++  taps += 1;
++  (document.getElementById('taps') as HTMLElement).textContent = String(taps);
++  log(`OYL-GODOT-TAP ${JSON.stringify({ taps, at: Date.now() })}`);
++});
++
++function base64(bytes: Uint8Array): string {
++  let text = '';
++  const CHUNK = 0x8000;
++  for (let i = 0; i < bytes.length; i += CHUNK) {
++    text += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
++  }
++  return btoa(text);
++}
++
++function f32(array: Float32Array): string {
++  return base64(new Uint8Array(array.buffer, array.byteOffset, array.byteLength));
++}
++
++/** RGB triples to RGBA, which Godot's `to_color_array` reads. */
++function rgba(rgb: Float32Array): string {
++  const out = new Float32Array((rgb.length / 3) * 4);
++  for (let i = 0, j = 0; i < rgb.length; i += 3, j += 4) {
++    out[j] = rgb[i] as number;
++    out[j + 1] = rgb[i + 1] as number;
++    out[j + 2] = rgb[i + 2] as number;
++    out[j + 3] = 1;
++  }
++  return f32(out);
++}
++
++/**
++ * Indices with the winding reversed: three.js's front faces are anticlockwise
++ * and Godot's are clockwise. Copied, because the corridor's are borrowed.
++ */
++function godotIndices(indices: Uint32Array): string {
++  const out = new Int32Array(indices.length);
++  for (let i = 0; i + 2 < indices.length; i += 3) {
++    out[i] = indices[i] as number;
++    out[i + 1] = indices[i + 2] as number;
++    out[i + 2] = indices[i + 1] as number;
++  }
++  return base64(new Uint8Array(out.buffer));
++}
++
++function windowOf(frame: SceneFrame, aspect: number): Record<string, unknown> {
++  return {
++    fovDeg: verticalFieldOfViewDegrees(aspect),
++    viewEnd: VIEW_AHEAD_METRES,
++    sky: frame.world.skyColour,
++    ground: frame.world.groundColour,
++    horizon: frame.world.horizonColour,
++    sun: frame.world.sun,
++    roadVB64: f32(frame.corridor.vertices),
++    roadCB64: rgba(frame.corridor.colours),
++    roadIB64: godotIndices(frame.corridor.indices),
++    terrVB64: f32(frame.terrain.mesh.vertices),
++    terrNB64: f32(frame.terrain.mesh.normals),
++    terrCB64: rgba(frame.terrain.mesh.colours),
++    terrIB64: godotIndices(frame.terrain.mesh.indices),
++    waterVB64: f32(frame.water.surface.vertices),
++    waterIB64: godotIndices(frame.water.surface.indices),
++    bridges: frame.water.bridges.map((p) => [
++      p.x,
++      p.y,
++      p.z,
++      p.axisX,
++      p.axisY,
++      p.axisZ,
++      p.length,
++      p.width,
++      p.height,
++    ]),
++    scatter: frame.scatter.map((s) => [s.kind, s.x, s.y, s.z, s.rotation, s.scale, s.variant]),
++  };
++}
++
++async function run(): Promise<void> {
++  const profile = realisticRoute();
++  const origin = corridorOrigin(profile);
++  // The stylised world's top rung, held — what `?world=stylised&ladder=0` renders.
++  const rung = worldRung({ realistic: false, quality: { ...INITIAL_QUALITY, level: 0 } });
++  const startAsked = Date.now();
++  const started = await GodotWorld.start(config);
++  log(`OYL-GODOT-PAGE-START ${JSON.stringify({ config, startAsked, ...started })}`);
++
++  const t0 = performance.now();
++  let stepsSent = 0;
++  let windowAt = -Infinity;
++  let windows = 0;
++  const stepBuildMs: number[] = [];
++  const windowMs: number[] = [];
++  const windowBytes: number[] = [];
++  const decodeMs: number[] = [];
++  const rafMs: number[] = [];
++  let lastRaf = 0;
++  let reportAt = t0;
++  let hudAt = t0;
++  let inFlight = 0;
++  let maxInFlight = 0;
++
++  const distanceAt = (seconds: number): number =>
++    LOOP_FROM_METRES +
++    ((START_METRES - LOOP_FROM_METRES + seconds * RIDE_METRES_PER_SECOND) % LOOP_METRES);
++
++  const tick = (now: number): void => {
++    if (lastRaf > 0) rafMs.push(now - lastRaf);
++    lastRaf = now;
++    const due = Math.floor((now - t0) / 1000 / STEP_SECONDS);
++    while (stepsSent <= due) {
++      const seconds = stepsSent * STEP_SECONDS;
++      const distance = distanceAt(seconds);
++      const b0 = performance.now();
++      const frame = rideFrame({ profile, origin, distance, elapsed: seconds, rung });
++      const rig = cameraRig(frame.camera);
++      const step = {
++        seq: stepsSent,
++        d: distance,
++        eye: [rig.eye.x, rig.eye.y, rig.eye.z],
++        target: [rig.target.x, rig.target.y, rig.target.z],
++        markers: frame.markers.map((m) => [m.x, m.y, m.z, m.headingX, m.headingZ, m.lean]),
++        sentAt: performance.timeOrigin + performance.now(),
++      };
++      void GodotWorld.step(step);
++      stepBuildMs.push(performance.now() - b0);
++      if (Math.abs(distance - windowAt) >= WINDOW_EVERY_METRES) {
++        windowAt = distance;
++        const w0 = performance.now();
++        const payload = windowOf(frame, innerWidth / innerHeight);
++        const size = JSON.stringify(payload).length;
++        inFlight += 1;
++        maxInFlight = Math.max(maxInFlight, inFlight);
++        const sent = performance.now();
++        windowMs.push(sent - w0);
++        windowBytes.push(size);
++        windows += 1;
++        void GodotWorld.world(payload).then((reply) => {
++          inFlight -= 1;
++          decodeMs.push(reply.decodeMs);
++        });
++      }
++      stepsSent += 1;
++      if (now - hudAt > 250 && !frozen()) {
++        hudAt = now;
++        (document.getElementById('distance') as HTMLElement).textContent =
++          `${(distance / 1000).toFixed(2)} km`;
++        (document.getElementById('speed') as HTMLElement).textContent =
++          `${(RIDE_METRES_PER_SECOND * 3.6).toFixed(1)} km/h`;
++        (document.getElementById('steps') as HTMLElement).textContent = String(stepsSent);
++      }
++    }
++    if (now - reportAt >= REPORT_SECONDS * 1000) {
++      reportAt = now;
++      log(
++        `OYL-GODOT-PAGE ${JSON.stringify({
++          minute: (now - t0) / 60000,
++          stepsSent,
++          windows,
++          stepBuildMs: percentiles(stepBuildMs),
++          windowSerialiseMs: percentiles(windowMs),
++          windowJsonBytes: percentiles(windowBytes),
++          javaDecodeMs: percentiles(decodeMs),
++          webviewRafMs: percentiles(rafMs),
++          maxWindowsInFlight: maxInFlight,
++          taps,
++        })}`,
++      );
++      stepBuildMs.length = 0;
++      windowMs.length = 0;
++      windowBytes.length = 0;
++      decodeMs.length = 0;
++      rafMs.length = 0;
++      maxInFlight = 0;
++    }
++    requestAnimationFrame(tick);
++  };
++  requestAnimationFrame(tick);
++
++  setInterval(() => {
++    void GodotWorld.reports().then((reply) => {
++      for (const line of reply.lines.split('\n')) {
++        if (line !== '') log(line);
++      }
++    });
++  }, 2000);
++}
++
++run().catch((error: unknown) => {
++  log(`OYL-GODOT-PAGE-ERROR ${String(error)}`);
++});
+diff --git a/apps/web/browser/godot.html b/apps/web/browser/godot.html
+new file mode 100644
+index 0000000..d4b1af9
+--- /dev/null
++++ b/apps/web/browser/godot.html
+@@ -0,0 +1,66 @@
++<!doctype html>
++<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
++<html lang="en">
++  <head>
++    <meta charset="utf-8" />
++    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
++    <title>Spike 0013 — Godot beneath the WebView</title>
++    <style>
++      html,
++      body {
++        margin: 0;
++        background: transparent;
++        overflow: hidden;
++        height: 100%;
++        font: 16px/1.3 system-ui, sans-serif;
++      }
++      .panel {
++        position: fixed;
++        background: #1b2230;
++        color: #f2f0e6;
++        padding: 10px 14px;
++        border-radius: 8px;
++        min-width: 150px;
++      }
++      .panel b {
++        display: block;
++        font-size: 32px;
++      }
++      #tap {
++        min-height: 48px;
++        min-width: 120px;
++        font: inherit;
++      }
++      #log {
++        position: fixed;
++        bottom: 0;
++        left: 0;
++        right: 0;
++        margin: 0;
++        color: #fff;
++        background: rgba(0, 0, 0, 0.55);
++        font: 12px/1.3 ui-monospace, monospace;
++        white-space: pre-wrap;
++        max-height: 30vh;
++        overflow: hidden;
++      }
++    </style>
++  </head>
++  <body>
++    <div class="panel" style="top: 16px; left: 16px">
++      <span>Distance</span><b id="distance">—</b>
++    </div>
++    <div class="panel" style="top: 16px; right: 16px">
++      <span>Speed</span><b id="speed">—</b>
++    </div>
++    <div class="panel" style="top: 120px; left: 16px">
++      <span>Steps sent</span><b id="steps">0</b>
++    </div>
++    <div class="panel" style="top: 120px; right: 16px">
++      <span>Taps</span><b id="taps">0</b>
++      <button id="tap" type="button">Tap test</button>
++    </div>
++    <pre id="log"></pre>
++    <script type="module" src="./godot-harness.ts"></script>
++  </body>
++</html>
+diff --git a/apps/web/browser/realistic-harness.ts b/apps/web/browser/realistic-harness.ts
+index 5ac4fa9..a374103 100644
+--- a/apps/web/browser/realistic-harness.ts
++++ b/apps/web/browser/realistic-harness.ts
+@@ -41,6 +41,7 @@ import {
+   DISPLAY_RATE,
+   INITIAL_QUALITY,
+   nextWorldQuality,
++  RIDER_SHADOW_MAP_RUNG,
+   worldRung,
+   type WorldQualityState,
+ } from '../src/game/quality';
+@@ -226,7 +227,9 @@ async function run(): Promise<void> {
+     realistic: config.world === 'realistic',
+     quality: { ...INITIAL_QUALITY, level: config.rung },
+   };
+-  const view = threeGameRenderer.create(canvas, worldRung(state));
++  // Spike 0013: `#shadowmap` draws the rung above the ladder, with the riders' real shadow map.
++  const shadowMap = location.hash === '#shadowmap';
++  const view = threeGameRenderer.create(canvas, shadowMap ? RIDER_SHADOW_MAP_RUNG : worldRung(state));
+   const resize = (): void => view.resize(canvas.clientWidth, canvas.clientHeight);
+   resize();
+   addEventListener('resize', resize);
+diff --git a/apps/web/vite.browser.config.ts b/apps/web/vite.browser.config.ts
+index 173a9b4..aafe243 100644
+--- a/apps/web/vite.browser.config.ts
++++ b/apps/web/vite.browser.config.ts
+@@ -107,6 +107,8 @@ export default defineConfig({
+       input: {
+         map: 'browser/index.html',
+         game: 'browser/game.html',
++        // Spike 0013 (#433), throwaway: Godot beneath the WebView.
++        godot: 'browser/godot.html',
+         // #266. The ride HUD, laid out by a real engine at a phone's width —
+         // the one thing jsdom cannot do, on the one surface where it is
+         // load-bearing. `hud-harness.tsx` says what it does and does not prove.

@@ -1,0 +1,415 @@
+{
+ "run": "G20-godot",
+ "present": {
+  "frames": 71497,
+  "seconds": 1200.2,
+  "fps": 59.57,
+  "p50": 16.63,
+  "p90": 16.67,
+  "p99": 16.76,
+  "max": 249.5,
+  "over20msShare": 0.11,
+  "over50msShare": 0.007,
+  "holesOver250ms": 29
+ },
+ "gpuFreqMHz": {
+  "mean": 241.8,
+  "p50": 202.0,
+  "p90": 302.0,
+  "samples": 960
+ },
+ "thermal": [
+  {
+   "t": "1790451745",
+   "status": 0,
+   "skin": 25.4,
+   "g3d": 35.0,
+   "big": 38.0,
+   "cpuPct": 34.6,
+   "rendererCpuPct": 17.8
+  },
+  {
+   "t": "1790451782",
+   "status": 0,
+   "skin": 25.8,
+   "g3d": 35.0,
+   "big": 37.0,
+   "cpuPct": 50.0,
+   "rendererCpuPct": 23.3
+  },
+  {
+   "t": "1790451820",
+   "status": 0,
+   "skin": 25.8,
+   "g3d": 36.0,
+   "big": 37.0,
+   "cpuPct": 62.0,
+   "rendererCpuPct": 24.1
+  },
+  {
+   "t": "1790451857",
+   "status": 0,
+   "skin": 25.9,
+   "g3d": 36.0,
+   "big": 38.0,
+   "cpuPct": 50.0,
+   "rendererCpuPct": 33.3
+  },
+  {
+   "t": "1790451895",
+   "status": 0,
+   "skin": 26.0,
+   "g3d": 36.0,
+   "big": 37.0,
+   "cpuPct": 50.0,
+   "rendererCpuPct": 31.0
+  },
+  {
+   "t": "1790451932",
+   "status": 0,
+   "skin": 26.0,
+   "g3d": 36.0,
+   "big": 37.0,
+   "cpuPct": 53.5,
+   "rendererCpuPct": 25.9
+  },
+  {
+   "t": "1790451970",
+   "status": 0,
+   "skin": 26.1,
+   "g3d": 36.0,
+   "big": 37.0,
+   "cpuPct": 55.5,
+   "rendererCpuPct": 17.8
+  },
+  {
+   "t": "1790452007",
+   "status": 0,
+   "skin": 26.1,
+   "g3d": 36.0,
+   "big": 39.0,
+   "cpuPct": 59.2,
+   "rendererCpuPct": 41.3
+  },
+  {
+   "t": "1790452045",
+   "status": 0,
+   "skin": 26.2,
+   "g3d": 36.0,
+   "big": 37.0,
+   "cpuPct": 50.0,
+   "rendererCpuPct": 31.0
+  },
+  {
+   "t": "1790452082",
+   "status": 0,
+   "skin": 26.1,
+   "g3d": 36.0,
+   "big": 37.0,
+   "cpuPct": 59.2,
+   "rendererCpuPct": 34.4
+  },
+  {
+   "t": "1790452120",
+   "status": 0,
+   "skin": 26.2,
+   "g3d": 36.0,
+   "big": 37.0,
+   "cpuPct": 48.1,
+   "rendererCpuPct": 25.9
+  },
+  {
+   "t": "1790452157",
+   "status": 0,
+   "skin": 26.2,
+   "g3d": 35.0,
+   "big": 37.0,
+   "cpuPct": 64.2,
+   "rendererCpuPct": 30.0
+  },
+  {
+   "t": "1790452195",
+   "status": 0,
+   "skin": 26.2,
+   "g3d": 36.0,
+   "big": 38.0,
+   "cpuPct": 48.1,
+   "rendererCpuPct": 28.5
+  },
+  {
+   "t": "1790452233",
+   "status": 0,
+   "skin": 26.2,
+   "g3d": 36.0,
+   "big": 39.0,
+   "cpuPct": 53.5,
+   "rendererCpuPct": 44.4
+  },
+  {
+   "t": "1790452270",
+   "status": 0,
+   "skin": 26.3,
+   "g3d": 36.0,
+   "big": 38.0,
+   "cpuPct": 44.8,
+   "rendererCpuPct": 33.3
+  },
+  {
+   "t": "1790452307",
+   "status": 0,
+   "skin": 26.3,
+   "g3d": 36.0,
+   "big": 37.0,
+   "cpuPct": 53.5,
+   "rendererCpuPct": 30.0
+  },
+  {
+   "t": "1790452345",
+   "status": 0,
+   "skin": 26.3,
+   "g3d": 36.0,
+   "big": 37.0,
+   "cpuPct": 48.2,
+   "rendererCpuPct": 15.7
+  },
+  {
+   "t": "1790452382",
+   "status": 0,
+   "skin": 26.5,
+   "g3d": 36.0,
+   "big": 37.0,
+   "cpuPct": 57.1,
+   "rendererCpuPct": 31.0
+  },
+  {
+   "t": "1790452419",
+   "status": 0,
+   "skin": 26.3,
+   "g3d": 36.0,
+   "big": 38.0,
+   "cpuPct": 57.1,
+   "rendererCpuPct": 32.1
+  },
+  {
+   "t": "1790452457",
+   "status": 0,
+   "skin": 26.3,
+   "g3d": 36.0,
+   "big": 36.0,
+   "cpuPct": 72.4,
+   "rendererCpuPct": 36.6
+  },
+  {
+   "t": "1790452494",
+   "status": 0,
+   "skin": 26.4,
+   "g3d": 36.0,
+   "big": 38.0,
+   "cpuPct": 59.2,
+   "rendererCpuPct": 33.3
+  },
+  {
+   "t": "1790452532",
+   "status": 0,
+   "skin": 26.3,
+   "g3d": 36.0,
+   "big": 38.0,
+   "cpuPct": 48.1,
+   "rendererCpuPct": 27.5
+  },
+  {
+   "t": "1790452570",
+   "status": 0,
+   "skin": 26.3,
+   "g3d": 36.0,
+   "big": 37.0,
+   "cpuPct": 48.1,
+   "rendererCpuPct": 34.4
+  },
+  {
+   "t": "1790452607",
+   "status": 0,
+   "skin": 26.4,
+   "g3d": 36.0,
+   "big": 37.0,
+   "cpuPct": 53.5,
+   "rendererCpuPct": 33.3
+  },
+  {
+   "t": "1790452645",
+   "status": 0,
+   "skin": 26.3,
+   "g3d": 36.0,
+   "big": 38.0,
+   "cpuPct": 55.5,
+   "rendererCpuPct": 25.9
+  },
+  {
+   "t": "1790452683",
+   "status": 0,
+   "skin": 26.3,
+   "g3d": 36.0,
+   "big": 37.0,
+   "cpuPct": 51.7,
+   "rendererCpuPct": 25.9
+  },
+  {
+   "t": "1790452720",
+   "status": 0,
+   "skin": 26.3,
+   "g3d": 36.0,
+   "big": 37.0,
+   "cpuPct": 53.8,
+   "rendererCpuPct": 34.4
+  },
+  {
+   "t": "1790452758",
+   "status": 0,
+   "skin": 26.3,
+   "g3d": 36.0,
+   "big": 38.0,
+   "cpuPct": 50.0,
+   "rendererCpuPct": 25.9
+  },
+  {
+   "t": "1790452795",
+   "status": 0,
+   "skin": 26.3,
+   "g3d": 36.0,
+   "big": 38.0,
+   "cpuPct": 55.5,
+   "rendererCpuPct": 23.3
+  },
+  {
+   "t": "1790452833",
+   "status": 0,
+   "skin": 26.3,
+   "g3d": 36.0,
+   "big": 38.0,
+   "cpuPct": 53.5,
+   "rendererCpuPct": 30.0
+  },
+  {
+   "t": "1790452871",
+   "status": 0,
+   "skin": 26.4,
+   "g3d": 36.0,
+   "big": 37.0,
+   "cpuPct": 57.1,
+   "rendererCpuPct": 33.3
+  },
+  {
+   "t": "1790452908",
+   "status": 0,
+   "skin": 26.4,
+   "g3d": 36.0,
+   "big": 38.0,
+   "cpuPct": 51.8,
+   "rendererCpuPct": 24.1
+  }
+ ],
+ "thermalSummary": {
+  "maxStatus": 0,
+  "skinFirst": 25.4,
+  "skinLast": 26.4,
+  "skinMax": 26.5,
+  "g3dMean": 35.9,
+  "cpuPctMean": 53.4,
+  "rendererCpuPctMean": 29.3
+ },
+ "memMiB": {
+  "totalPss": 580.6,
+  "graphics": 289.5,
+  "nativeHeap": 166.5,
+  "code": 61.2
+ },
+ "gfxinfo": {
+  "Total frames rendered": "4118",
+  "50th percentile": "7ms",
+  "90th percentile": "10ms",
+  "99th percentile": "40ms",
+  "50th gpu percentile": "2ms",
+  "90th gpu percentile": "2ms",
+  "99th gpu percentile": "5ms",
+  "janky": "2.50"
+ },
+ "godot": {
+  "windows": 40,
+  "frameMs": {
+   "p50": 16.64,
+   "p90": 17.49,
+   "p99": 19.54
+  },
+  "gpuMs": {
+   "p50": 8.43,
+   "p90": 9.72,
+   "p99": 10.79
+  },
+  "cpuMs": {
+   "p50": 0.94,
+   "p90": 1.55,
+   "p99": 2.61
+  },
+  "jsToJavaMs": {
+   "p50": 2.5,
+   "p95": 4.8,
+   "p99": 33.2,
+   "max": 77.5
+  },
+  "jsToGodotMs": {
+   "p50": 11.73,
+   "p95": 19.84,
+   "p99": 51.47,
+   "max": 97.7
+  },
+  "arrivalGapMs": {
+   "p50": 50.0,
+   "p95": 61.0,
+   "p99": 89.0,
+   "max": 138.0
+  },
+  "worldBuildMs": {
+   "p50": 8.49,
+   "p99": 16.53,
+   "max": 16.53
+  },
+  "steps": 24023,
+  "lostSteps": 0,
+  "starvedFrames": 3957,
+  "frames": 71994,
+  "starvedShare": 5.5,
+  "over20": 554,
+  "late50GodotShare": null,
+  "late50JavaShare": null,
+  "drawCalls": 20.0,
+  "primitives": 38001.0,
+  "videoMemMiB": 57.7,
+  "worldBytesPerWindow": 256900,
+  "jsToJavaMaxAll": 131.199951171875
+ },
+ "godotPage": {
+  "stepBuildMs": {
+   "p50": 6.0,
+   "p90": 13.05,
+   "p99": 17.05
+  },
+  "windowSerialiseMs": {
+   "p50": 39.7,
+   "p90": 54.45,
+   "p99": 59.6
+  },
+  "windowJsonBytes": 374244,
+  "javaDecodeMs": 10.99,
+  "webviewRafMs": {
+   "p50": 16.6,
+   "p90": 16.7,
+   "p99": 33.2
+  }
+ },
+ "memAllMiB": {
+  "dev.openzigs.onyourleft.godotspike": 579.8,
+  "com.google.android.webview:sandboxed_process0:org.chromium.c": 17.8,
+  "com.google.android.webview:webview_service": 5.8,
+  "webview_zygote": 3.0
+ }
+}

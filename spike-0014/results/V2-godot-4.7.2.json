@@ -1,0 +1,163 @@
+{
+ "run": "V2-godot-4.7.2",
+ "present": {
+  "frames": 7138,
+  "seconds": 120.0,
+  "fps": 59.49,
+  "p50": 16.63,
+  "p90": 16.67,
+  "p99": 16.76,
+  "max": 183.0,
+  "over20msShare": 0.15,
+  "over50msShare": 0.028,
+  "holesOver250ms": 3
+ },
+ "gpuFreqMHz": {
+  "mean": 239.6,
+  "p50": 202.0,
+  "p90": 302.0,
+  "samples": 96
+ },
+ "thermal": [
+  {
+   "t": "1790453489",
+   "status": 0,
+   "skin": 26.3,
+   "g3d": 37.0,
+   "big": 50.0,
+   "cpuPct": 44.4,
+   "rendererCpuPct": 18.5
+  },
+  {
+   "t": "1790453527",
+   "status": 0,
+   "skin": 26.5,
+   "g3d": 37.0,
+   "big": 38.0,
+   "cpuPct": 53.5,
+   "rendererCpuPct": 27.5
+  },
+  {
+   "t": "1790453564",
+   "status": 0,
+   "skin": 26.7,
+   "g3d": 38.0,
+   "big": 40.0,
+   "cpuPct": 51.8,
+   "rendererCpuPct": 24.1
+  },
+  {
+   "t": "1790453601",
+   "status": 0,
+   "skin": 26.6,
+   "g3d": 36.0,
+   "big": 40.0,
+   "cpuPct": 48.1,
+   "rendererCpuPct": 21.4
+  }
+ ],
+ "thermalSummary": {
+  "maxStatus": 0,
+  "skinFirst": 26.3,
+  "skinLast": 26.6,
+  "skinMax": 26.7,
+  "g3dMean": 37.0,
+  "cpuPctMean": 49.5,
+  "rendererCpuPctMean": 22.9
+ },
+ "memMiB": {
+  "totalPss": 617.8,
+  "graphics": 290.3,
+  "nativeHeap": 190.2,
+  "code": 75.6
+ },
+ "gfxinfo": {
+  "Total frames rendered": "426",
+  "50th percentile": "7ms",
+  "90th percentile": "10ms",
+  "99th percentile": "48ms",
+  "50th gpu percentile": "2ms",
+  "90th gpu percentile": "2ms",
+  "99th gpu percentile": "6ms",
+  "janky": "3.52"
+ },
+ "godot": {
+  "windows": 4,
+  "frameMs": {
+   "p50": 16.63,
+   "p90": 17.46,
+   "p99": 19.53
+  },
+  "gpuMs": {
+   "p50": 8.3,
+   "p90": 9.64,
+   "p99": 10.75
+  },
+  "cpuMs": {
+   "p50": 0.93,
+   "p90": 1.51,
+   "p99": 2.63
+  },
+  "jsToJavaMs": {
+   "p50": 2.65,
+   "p95": 4.8,
+   "p99": 36.6,
+   "max": 88.2
+  },
+  "jsToGodotMs": {
+   "p50": 11.51,
+   "p95": 20.11,
+   "p99": 53.75,
+   "max": 110.42
+  },
+  "arrivalGapMs": {
+   "p50": 50.0,
+   "p95": 60.5,
+   "p99": 89.0,
+   "max": 154.5
+  },
+  "worldBuildMs": {
+   "p50": 8.13,
+   "p99": 15.69,
+   "max": 15.69
+  },
+  "steps": 2449,
+  "lostSteps": 0,
+  "starvedFrames": 374,
+  "frames": 7143,
+  "starvedShare": 5.24,
+  "over20": 54,
+  "late50GodotShare": null,
+  "late50JavaShare": null,
+  "drawCalls": 18.5,
+  "primitives": 38653.0,
+  "videoMemMiB": 57.7,
+  "worldBytesPerWindow": 256585,
+  "jsToJavaMaxAll": 132.699951171875
+ },
+ "godotPage": {
+  "stepBuildMs": {
+   "p50": 6.45,
+   "p90": 12.8,
+   "p99": 17.1
+  },
+  "windowSerialiseMs": {
+   "p50": 40.85,
+   "p90": 54.95,
+   "p99": 61.0
+  },
+  "windowJsonBytes": 374535,
+  "javaDecodeMs": 14.78,
+  "webviewRafMs": {
+   "p50": 16.6,
+   "p90": 16.7,
+   "p99": 33.2
+  }
+ },
+ "memAllMiB": {
+  "dev.openzigs.onyourleft.godotspike": 621.5,
+  "com.google.android.webview:sandboxed_process0:org.chromium.c": 17.9,
+  "com.google.android.webview:webview_service": 5.8,
+  "webview_zygote": 3.0
+ }
+}

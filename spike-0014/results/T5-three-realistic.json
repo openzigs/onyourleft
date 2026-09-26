@@ -1,0 +1,172 @@
+{
+ "run": "T5-three-realistic",
+ "present": {
+  "frames": 17894,
+  "seconds": 300.3,
+  "fps": 59.59,
+  "p50": 16.63,
+  "p90": 16.66,
+  "p99": 16.74,
+  "max": 232.9,
+  "over20msShare": 0.09,
+  "over50msShare": 0.017,
+  "holesOver250ms": 6
+ },
+ "gpuFreqMHz": {
+  "mean": 694.5,
+  "p50": 701.0,
+  "p90": 848.0,
+  "samples": 245
+ },
+ "thermal": [
+  {
+   "t": "1790450122",
+   "status": 0,
+   "skin": 27.2,
+   "g3d": 50.0,
+   "big": 60.0,
+   "cpuPct": 74.0,
+   "rendererCpuPct": 65.5
+  },
+  {
+   "t": "1790450159",
+   "status": 0,
+   "skin": 28.5,
+   "g3d": 54.0,
+   "big": 47.0,
+   "cpuPct": 92.5,
+   "rendererCpuPct": 77.7
+  },
+  {
+   "t": "1790450195",
+   "status": 0,
+   "skin": 29.0,
+   "g3d": 53.0,
+   "big": 47.0,
+   "cpuPct": 100.0,
+   "rendererCpuPct": 74.0
+  },
+  {
+   "t": "1790450232",
+   "status": 0,
+   "skin": 29.3,
+   "g3d": 52.0,
+   "big": 48.0,
+   "cpuPct": 78.5,
+   "rendererCpuPct": 70.3
+  },
+  {
+   "t": "1790450268",
+   "status": 0,
+   "skin": 29.4,
+   "g3d": 53.0,
+   "big": 47.0,
+   "cpuPct": 64.2,
+   "rendererCpuPct": 63.3
+  },
+  {
+   "t": "1790450305",
+   "status": 0,
+   "skin": 30.0,
+   "g3d": 55.0,
+   "big": 50.0,
+   "cpuPct": 71.4,
+   "rendererCpuPct": 68.9
+  },
+  {
+   "t": "1790450341",
+   "status": 0,
+   "skin": 29.9,
+   "g3d": 54.0,
+   "big": 48.0,
+   "cpuPct": 92.5,
+   "rendererCpuPct": 65.5
+  },
+  {
+   "t": "1790450378",
+   "status": 0,
+   "skin": 29.6,
+   "g3d": 51.0,
+   "big": 46.0,
+   "cpuPct": 107.0,
+   "rendererCpuPct": 74.0
+  },
+  {
+   "t": "1790450415",
+   "status": 0,
+   "skin": 29.7,
+   "g3d": 56.0,
+   "big": 49.0,
+   "cpuPct": 92.8,
+   "rendererCpuPct": 75.8
+  }
+ ],
+ "thermalSummary": {
+  "maxStatus": 0,
+  "skinFirst": 27.2,
+  "skinLast": 29.7,
+  "skinMax": 30.0,
+  "g3dMean": 53.1,
+  "cpuPctMean": 85.9,
+  "rendererCpuPctMean": 70.6
+ },
+ "memMiB": {
+  "totalPss": 569.9,
+  "graphics": 445.6,
+  "nativeHeap": 49.1,
+  "code": 20.9
+ },
+ "gfxinfo": {
+  "Total frames rendered": "18312",
+  "50th percentile": "27ms",
+  "90th percentile": "32ms",
+  "99th percentile": "40ms",
+  "50th gpu percentile": "10ms",
+  "90th gpu percentile": "19ms",
+  "99th gpu percentile": "23ms",
+  "janky": "0.07"
+ },
+ "threePage": {
+  "result": {
+   "world": "realistic",
+   "rung": "realistic",
+   "frameCap": "display",
+   "frameMs": {
+    "p50": 16.600000000002183,
+    "p90": 16.700000000000728,
+    "p99": 16.799999999999272,
+    "count": 1803
+   },
+   "drawCalls": 34,
+   "drawingBuffer": [
+    2560,
+    1600
+   ],
+   "devicePixelRatio": 2,
+   "stalls": 0,
+   "userAgent": "Mozilla/5.0 (Linux; Android 17; Pixel Tablet Build/CP2A.260705.006; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/153.0.8010.36 Safari/537.36"
+  },
+  "soakMinutes": 4,
+  "soakFrameP50": [
+   16.60000000000582,
+   16.60000000000582,
+   16.60000000000582,
+   16.60000000000582
+  ],
+  "soakFrameP99": [
+   16.799999999995634,
+   16.79999999998836,
+   16.70000000001164,
+   16.79999999998836
+  ],
+  "rungs": [
+   "realistic"
+  ]
+ },
+ "memAllMiB": {
+  "dev.openzigs.onyourleft.godotspike": 575.1,
+  "com.google.android.webview:sandboxed_process0:org.chromium.c": 17.8,
+  "com.google.android.webview:webview_service": 5.6,
+  "webview_zygote": 3.0
+ }
+}

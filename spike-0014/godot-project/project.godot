@@ -1,0 +1,20 @@
+; Spike 0013 (#433). Throwaway: not merged, not shipped.
+config_version=5
+
+[application]
+
+config/name="OYL Godot spike 0013"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.7", "Mobile")
+
+[display]
+
+window/handheld/orientation=6
+window/vsync/vsync_mode=1
+
+[rendering]
+
+renderer/rendering_method="mobile"
+renderer/rendering_method.mobile="mobile"
+textures/vram_compression/import_etc2_astc=true
+anti_aliasing/quality/msaa_3d=0
