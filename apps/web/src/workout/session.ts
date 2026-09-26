@@ -281,7 +281,8 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
    * that one still had its own answer coming, and the next tick wrote the same
    * target again. An older outcome still reports its fault, because the rider
    * should hear that the machine refused something; it does not move the
-   * player.
+   * player. ⚠️ Since #579 that includes an older write that SUCCEEDED: it is
+   * not handed to `acknowledge` either.
    */
   let asks = 0;
 
@@ -294,7 +295,14 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
       switch (outcome.kind) {
         case 'written':
           lastFault = undefined;
-          player.acknowledge(outcome.quantised);
+          // ⚠️ #579. An older write answered late is not an answer to the
+          // player's current ask: acknowledging it cleared the newer target
+          // while that one was still on the wire, and reported the older
+          // wattage as held. What the trainer confirmed is still recorded —
+          // `holding` is the writer's, and is true of the wire.
+          if (current) {
+            player.acknowledge(outcome.quantised);
+          }
           break;
         case 'failed':
           lastFault = faultText(outcome.error);
