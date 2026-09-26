@@ -24,7 +24,15 @@ import { describe, expect, it } from 'vitest';
 
 import {
   advanceCrank,
+  bicycleRoll,
   BICYCLE_COLOURS,
+  combinedLean,
+  CRANK_PARKING_LEAN_RADIANS,
+  drawnCrankAngle,
+  lowestPedalHeight,
+  PEDAL_STRIKE_LEAN_RADIANS,
+  UPPER_BODY_PIVOT,
+  UPPER_BODY_UPRIGHT_SHARE,
   CRANK_AXIS_Y,
   CRANK_AXIS_Z,
   CRANK_LENGTH_METRES,
@@ -430,7 +438,7 @@ describe('the rider sits on the bicycle — #369', () => {
     // That it is the DEFAULT is what keeps the picture and the drag area from
     // describing two different riders on the same frame.
     const grips = emptyRiderJoints();
-    riderJoints(0, grips);
+    riderJoints(0, grips, 0);
     const hoods = handPosition(DEFAULT_RIDING_POSITION);
     for (const grip of grips.grip) {
       expect(grip.y).toBeCloseTo(hoods.y, 9);
@@ -872,7 +880,7 @@ describe('the joints a realistic body is posed onto — #369', () => {
     const joints = emptyRiderJoints();
     for (let step = 0; step < 72; step += 1) {
       const angle = (step / 72) * TAU;
-      riderJoints(angle, joints);
+      riderJoints(angle, joints, 0);
       const bones = legBones(angle);
       for (const index of [0, 1] as const) {
         const thigh = bones[index * 2] as LimbBone;
@@ -889,7 +897,7 @@ describe('the joints a realistic body is posed onto — #369', () => {
   });
 
   it('puts each foot on its own pedal, half a turn apart', () => {
-    const joints = riderJoints(0.3, emptyRiderJoints());
+    const joints = riderJoints(0.3, emptyRiderJoints(), 0);
     for (const index of [0, 1] as const) {
       const foot = joints.foot[index];
       expect(Math.hypot(foot.y - CRANK_AXIS_Y, foot.z - CRANK_AXIS_Z)).toBeCloseTo(
@@ -903,9 +911,9 @@ describe('the joints a realistic body is posed onto — #369', () => {
   });
 
   it('moves the legs only when the crank angle does — #349’s rule, for the realistic rider', () => {
-    const a = riderJoints(1.1, emptyRiderJoints());
-    const same = riderJoints(1.1, emptyRiderJoints());
-    const turned = riderJoints(1.1 + Math.PI / 2, emptyRiderJoints());
+    const a = riderJoints(1.1, emptyRiderJoints(), 0);
+    const same = riderJoints(1.1, emptyRiderJoints(), 0);
+    const turned = riderJoints(1.1 + Math.PI / 2, emptyRiderJoints(), 0);
     expect(same).toEqual(a);
     expect(turned.foot[0]).not.toEqual(a.foot[0]);
     // The body does not move with the cranks: hips, shoulders and hands hold.
@@ -916,6 +924,142 @@ describe('the joints a realistic body is posed onto — #369', () => {
 
   it('writes into the set it is given rather than making another', () => {
     const joints = emptyRiderJoints();
-    expect(riderJoints(0, joints)).toBe(joints);
+    expect(riderJoints(0, joints, 0)).toBe(joints);
+  });
+});
+
+const DEGREE = Math.PI / 180;
+
+describe('the body stays more upright than the bicycle — #546', () => {
+  const LEANS = [-38, -25, -10, -2, 2, 10, 25, 38].map((degrees) => degrees * DEGREE);
+
+  it('puts the pair’s centre of mass exactly at the lean the physics asks for', () => {
+    for (const lean of LEANS) {
+      const roll = bicycleRoll(lean);
+      expect(combinedLean(roll.bicycle, roll.body)).toBeCloseTo(lean, 12);
+    }
+  });
+
+  it('leans the bicycle further than that and the body less far, by a quarter', () => {
+    for (const lean of LEANS) {
+      const roll = bicycleRoll(lean);
+      // The bicycle leans MORE than the combined lean…
+      expect(Math.abs(roll.bicycle)).toBeGreaterThan(Math.abs(lean));
+      expect(Math.sign(roll.bicycle)).toBe(Math.sign(lean));
+      // …the body is held back toward upright, against it…
+      expect(roll.body).toBeCloseTo(-UPPER_BODY_UPRIGHT_SHARE * roll.bicycle, 12);
+      // …so the body, in the world, leans LESS than the combined lean.
+      expect(Math.abs(roll.bicycle + roll.body)).toBeLessThan(Math.abs(lean));
+    }
+    // By how much, at a lean a rider reaches: a few per cent, not a multiplier.
+    const at30 = bicycleRoll(30 * DEGREE);
+    expect(at30.bicycle / DEGREE).toBeGreaterThan(30.5);
+    expect(at30.bicycle / DEGREE).toBeLessThan(32);
+  });
+
+  it('is upright when nobody leans, with no negative zero to carry', () => {
+    expect(bicycleRoll(0)).toEqual({ bicycle: 0, body: 0 });
+    expect(Object.is(bicycleRoll(0).body, -0)).toBe(false);
+  });
+
+  it('balances as a centre of mass should: a rigid rider leans as one body, and a split one between its two parts', () => {
+    for (const lean of LEANS) {
+      expect(combinedLean(lean, 0)).toBeCloseTo(lean, 12);
+      const body = -0.3 * lean;
+      const combined = combinedLean(lean, body);
+      expect(Math.min(lean, lean + body)).toBeLessThan(combined);
+      expect(Math.max(lean, lean + body)).toBeGreaterThan(combined);
+    }
+  });
+
+  it('rolls only the shoulders about the hips; the hands, the hips and the feet are the bicycle’s', () => {
+    const upright = riderJoints(0.7, emptyRiderJoints(), 0);
+    const held = riderJoints(0.7, emptyRiderJoints(), 0.2);
+    expect(held.hips).toEqual(upright.hips);
+    expect(held.hips.y).toBe(UPPER_BODY_PIVOT.y);
+    expect(held.hips.z).toBe(UPPER_BODY_PIVOT.z);
+    expect(held.grip).toEqual(upright.grip);
+    expect(held.foot).toEqual(upright.foot);
+    // The back keeps its length and turns by the roll, toward −X for a
+    // positive one, which is the renderer's sign.
+    const back = (joints: typeof upright): readonly [number, number] => [
+      joints.shoulders.x - joints.hips.x,
+      joints.shoulders.y - joints.hips.y,
+    ];
+    const [ux, uy] = back(upright);
+    const [hx, hy] = back(held);
+    expect(Math.hypot(hx, hy)).toBeCloseTo(Math.hypot(ux, uy), 12);
+    expect(Math.atan2(-hx, hy)).toBeCloseTo(0.2, 12);
+    expect(held.shoulders.z).toBe(upright.shoulders.z);
+  });
+});
+
+describe('the inside pedal never touches the road — #546', () => {
+  const EVERY_CRANK_ANGLE = Array.from({ length: 3_600 }, (_, step) => (step / 3_600) * TAU);
+
+  it('states where a pedal strikes as about 31.4°, from this file’s own pedal and crank', () => {
+    expect(PEDAL_STRIKE_LEAN_RADIANS / DEGREE).toBeCloseTo(31.4, 1);
+    // …and the closed form is the geometry's: just under it no crank angle
+    // touches, just over it one does, either way.
+    for (const side of [1, -1]) {
+      const under = Math.min(
+        ...EVERY_CRANK_ANGLE.map((angle) =>
+          lowestPedalHeight(side * (PEDAL_STRIKE_LEAN_RADIANS - 0.001), angle),
+        ),
+      );
+      const over = Math.min(
+        ...EVERY_CRANK_ANGLE.map((angle) =>
+          lowestPedalHeight(side * (PEDAL_STRIKE_LEAN_RADIANS + 0.001), angle),
+        ),
+      );
+      expect(under).toBeGreaterThan(0);
+      expect(over).toBeLessThan(0);
+    }
+  });
+
+  it('parks the cranks with the OUTSIDE pedal down past the parking lean', () => {
+    // A positive lean tips the bicycle toward −X, so the +X arm is outside and
+    // at six o'clock at π; a negative lean, the −X arm, at 0.
+    for (const angle of [0, 1, 2, 3, 4, 5, 6]) {
+      expect(drawnCrankAngle(angle, CRANK_PARKING_LEAN_RADIANS)).toBe(Math.PI);
+      expect(drawnCrankAngle(angle, -CRANK_PARKING_LEAN_RADIANS)).toBe(0);
+      expect(drawnCrankAngle(angle, 40 * DEGREE)).toBe(Math.PI);
+    }
+    // And the pedal on the high side is the outside one there: at six o'clock
+    // on the side the bicycle leans away from.
+    expect(lowestPedalHeight(40 * DEGREE, Math.PI)).toBeGreaterThan(0.05);
+  });
+
+  it('leaves the cranks alone until the lean comes near the strike', () => {
+    for (const angle of [0, 0.5, 2, 4]) {
+      expect(drawnCrankAngle(angle, 0)).toBe(angle);
+      expect(drawnCrankAngle(angle, 15 * DEGREE)).toBe(angle);
+      expect(drawnCrankAngle(angle, -15 * DEGREE)).toBe(angle);
+    }
+    // "Where the renderer left them" stays that until something has to move.
+    expect(drawnCrankAngle(undefined, 15 * DEGREE)).toBeUndefined();
+    expect(drawnCrankAngle(undefined, 30 * DEGREE)).toBe(Math.PI);
+  });
+
+  it('keeps every pedal off the road at every crank angle and every lean to 45°, either way', () => {
+    for (let degrees = -45; degrees <= 45; degrees += 0.25) {
+      const lean = degrees * DEGREE;
+      for (let step = 0; step < 360; step += 1) {
+        const drawn = drawnCrankAngle((step / 360) * TAU, lean) as number;
+        expect(lowestPedalHeight(lean, drawn)).toBeGreaterThanOrEqual(0);
+      }
+    }
+  });
+
+  it('swings the cranks to parked rather than snapping them', () => {
+    for (const angle of [0, 1.5, 3, 4.5]) {
+      let previous = drawnCrankAngle(angle, 0) as number;
+      for (let hundredths = 1; hundredths <= 4_500; hundredths += 1) {
+        const here = drawnCrankAngle(angle, (hundredths / 100) * DEGREE) as number;
+        const moved = Math.abs(((here - previous + 3 * Math.PI) % TAU) - Math.PI);
+        expect(moved).toBeLessThan(0.02);
+        previous = here;
+      }
+    }
   });
 });

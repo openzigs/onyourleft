@@ -55,11 +55,13 @@ import {
 /**
  * What the bicycle under the rider weighs, in kilograms.
  *
- * ⚠️ **Not exported, deliberately.** A test that imported it could only assert
- * this number equals this number; what is worth pinning is the *sum*, and
- * `rider.test.ts` pins that through {@link rideConditionsFor} instead. It is
- * also the shape `check:wiring` asks for — an export in `game/` with no
- * production caller is a `WIRE002`.
+ * ⚠️ **Exported since #546, and a reviewer who remembers "not exported,
+ * deliberately" is reading the old file.** The reason it was not still holds
+ * for tests — one that imported it could only assert this number equals this
+ * number, and `rider.test.ts` pins the *sum* through {@link rideConditionsFor}
+ * — but `bicycle.ts` §`bicycleRoll` now balances the drawn lean over the
+ * bicycle's mass as well as the rider's, and a second 9 kg written there would
+ * be a second statement of what the bicycle weighs.
  *
  * ⚠️ **It exists because `AthleteRecord.mass` is the athlete and
  * `RideConditions.totalMass` is `m_T`** — *"rider plus bicycle plus anything
@@ -81,7 +83,7 @@ import {
  * that is asserted rather than described — `rider.test.ts` §"leaves a rider who
  * has said nothing exactly where they were".
  */
-const BICYCLE_MASS_KILOGRAMS = 9;
+export const BICYCLE_MASS_KILOGRAMS = 9;
 
 /**
  * Sea level, 15 °C: the ISO 2533 reference, from `packages/physics`'s model.

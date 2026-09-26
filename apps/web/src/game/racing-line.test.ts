@@ -22,17 +22,23 @@ import {
 } from '@onyourleft/domain';
 
 import {
+  LINE_HOME_OFFSET_METRES,
   LINE_LIMIT_METRES,
   MAXIMUM_LEAN_RADIANS,
   MAXIMUM_ROLL_RADIANS_PER_METRE,
+  MAXIMUM_ROLL_RADIANS_PER_SECOND,
+  ROAD_SIDE,
   leanAt,
   lineOffsetAt,
   racingLine,
+  rollRatePerMetre,
   solvedLine,
   steadyTurnLean,
 } from './racing-line';
+import { RIDER_HALF_WIDTH_METRES } from './bicycle';
 import {
   circuitRoute,
+  cornerRoute,
   hairpinRoute,
   hillRoute,
   northRoute,
@@ -156,23 +162,23 @@ describe('it is a racing line — #499 criterion 3', () => {
     expect(line).toBeLessThan(centre);
   });
 
-  it('rides a straight down the middle', () => {
+  it('rides a straight at home — #546, where #499 rode it on the centre line', () => {
     const line = racingLine(northRoute(1_000, () => 0));
     for (const offset of line.offsets) {
-      expect(offset).toBe(0);
+      expect(offset).toBeCloseTo(LINE_HOME_OFFSET_METRES, 9);
     }
   });
 
-  it('settles back to the middle on a long straight away from a bend', () => {
-    // 350 m before the hairpin, which is six settle lengths.
+  it('settles back home on a long straight away from a bend', () => {
+    // 350 m before the hairpin, which is seven settle lengths.
     const line = racingLine(hairpin);
-    expect(Math.abs(lineOffsetAt(line, 50))).toBeLessThan(0.01);
+    expect(Math.abs(lineOffsetAt(line, 50) - LINE_HOME_OFFSET_METRES)).toBeLessThan(0.01);
   });
 
   it('has stopped moving by the last step', () => {
     for (const route of [hairpin, sBend, hairpinRoute(10), stadiumRoute(30)]) {
       const settled = racingLine(route).offsets;
-      const oneMore = solvedLine(route, 31).offsets;
+      const oneMore = solvedLine(route, 41).offsets;
       for (let index = 0; index < settled.length; index += 1) {
         expect(Math.abs((oneMore[index] ?? 0) - (settled[index] ?? 0))).toBeLessThan(1e-3);
       }
@@ -227,8 +233,10 @@ describe('the lean — #499 criterion 5', () => {
   it('is nought at rest and on a straight', () => {
     expect(steadyTurnLean(0, 1 / 20)).toBe(0);
     expect(steadyTurnLean(12, 0)).toBe(0);
+    // Nought to rounding: since #546 a straight is ridden 1.75 m off the
+    // centreline, so its three points carry a sum's worth of float error.
     const straight = racingLine(northRoute(1_000, () => 0));
-    expect(leanAt(straight, 500, 12)).toBe(0);
+    expect(Math.abs(leanAt(straight, 500, 12))).toBeLessThan(1e-12);
     expect(leanAt(racingLine(hairpin), BEND_START + 0.5 * BEND_LENGTH, 0)).toBe(0);
   });
 
@@ -290,14 +298,16 @@ describe('the lean is smoothed over distance — #499 criterion 6', () => {
     }
   });
 
-  it('rolls at no more than twice that through an S-bend, where one lean unwinds as the other builds', () => {
+  it('rolls no faster through an S-bend, where one lean unwinds as the other builds — #546', () => {
+    // #499 allowed twice the rate here, because its two directions of lean
+    // were limited apart and added. Since #546 the sum is limited too.
     const line = racingLine(sBend);
     const step = 0.05;
     let previous = leanAt(line, 350, 12);
     for (let at = 350 + step; at <= 550; at += step) {
       const here = leanAt(line, at, 12);
       expect(Math.abs(here - previous) / step).toBeLessThanOrEqual(
-        2 * MAXIMUM_ROLL_RADIANS_PER_METRE * (1 + 1e-9),
+        rollRatePerMetre(12) * (1 + 1e-9),
       );
       previous = here;
     }
@@ -329,7 +339,7 @@ describe('its cost — #499', () => {
   it('solves a 1 000 km route once, in bounded time, and keeps it on the road', () => {
     const route = longWindingRoute();
     const started = performance.now();
-    const line = solvedLine(route, 30);
+    const line = solvedLine(route, 40);
     const took = performance.now() - started;
     // Printed, because it is the figure #499 asks to be recorded: about 0.8 s
     // on the machine this was written on, and several times that under the
@@ -338,4 +348,322 @@ describe('its cost — #499', () => {
     expect(took).toBeLessThan(30_000);
     expect(peak(Array.from(line.offsets))).toBeLessThanOrEqual(LINE_LIMIT_METRES);
   }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// #546 — a racer's line on a closed road, kept to the right, with a late apex
+// ---------------------------------------------------------------------------
+
+/** `R = (b − a·cos(θ/2)) / (1 − cos(θ/2))` — #546's closed form for the line's radius. */
+function closedFormRadius(radius: number, turn: number): number {
+  const inner = radius - LINE_LIMIT_METRES;
+  const outer = radius + LINE_LIMIT_METRES;
+  return (outer - inner * Math.cos(turn / 2)) / (1 - Math.cos(turn / 2));
+}
+
+/** One bend of a fixture: where its arc starts, how long it is, how far it turns, and which way. */
+interface Bend {
+  readonly name: string;
+  readonly route: RouteProfile;
+  readonly radius: number;
+  readonly turn: number;
+  readonly start: number;
+  /** −1 for a bend toward the normal's negative side (right), +1 for the other. */
+  readonly inside: -1 | 1;
+}
+
+const BENDS: readonly Bend[] = [
+  ...[10, 20, 40].flatMap((radius): Bend[] => [
+    {
+      name: `a ${String(radius)} m right-hand corner`,
+      route: cornerRoute(radius),
+      radius,
+      turn: Math.PI / 2,
+      start: 400,
+      inside: -1,
+    },
+    {
+      name: `a ${String(radius)} m left-hand corner`,
+      route: cornerRoute(radius, 90, 'left'),
+      radius,
+      turn: Math.PI / 2,
+      start: 400,
+      inside: 1,
+    },
+  ]),
+  {
+    name: 'the 20 m hairpin',
+    route: hairpin,
+    radius: HAIRPIN_RADIUS,
+    turn: Math.PI,
+    start: BEND_START,
+    inside: -1,
+  },
+];
+
+/** Where the line holds the inside: the first and last metre within 0.1 m of its limit. */
+function insideRun(bend: Bend): {
+  readonly from: number;
+  readonly to: number;
+  readonly deepest: number;
+} {
+  const line = racingLine(bend.route);
+  const length = bend.radius * bend.turn;
+  let deepest = Number.POSITIVE_INFINITY;
+  for (let at = bend.start - 60; at <= bend.start + length + 60; at += 0.25) {
+    deepest = Math.min(deepest, bend.inside * lineOffsetAt(line, at));
+  }
+  let from = Number.POSITIVE_INFINITY;
+  let to = Number.NEGATIVE_INFINITY;
+  for (let at = bend.start - 60; at <= bend.start + length + 60; at += 0.25) {
+    if (bend.inside * lineOffsetAt(line, at) <= -LINE_LIMIT_METRES + 0.1) {
+      from = Math.min(from, at);
+      to = Math.max(to, at);
+    }
+  }
+  return { from, to, deepest };
+}
+
+describe('holds the right-hand side on a straight, not the centre line — #546', () => {
+  it('keeps to the right, a lane’s middle from the edge, where #499 rode the centre line', () => {
+    expect(ROAD_SIDE).toBe(1);
+    // The home is on ROAD_SIDE's side of the centre line…
+    expect(Math.sign(LINE_HOME_OFFSET_METRES)).toBe(ROAD_SIDE);
+    // …and no point of the bicycle there is within 0.5 m of the centre line:
+    // the bar end is the widest point.
+    expect(Math.abs(LINE_HOME_OFFSET_METRES) - RIDER_HALF_WIDTH_METRES).toBeGreaterThanOrEqual(0.5);
+    // Nor within 0.6 m of the far edge, measured to the bar's middle.
+    expect(ROAD_WIDTH_METRES / 2 - Math.abs(LINE_HOME_OFFSET_METRES)).toBeGreaterThanOrEqual(0.6);
+  });
+
+  it.each(BENDS)(
+    'is within 0.1 m of home more than 150 m from $name',
+    ({ route, start, radius, turn }) => {
+      const line = racingLine(route);
+      const end = start + radius * turn;
+      let furthest = 0;
+      for (let at = 0; at <= route.totalDistance; at += 1) {
+        if (at > start - 150 && at < end + 150) continue;
+        furthest = Math.max(furthest, Math.abs(lineOffsetAt(line, at) - LINE_HOME_OFFSET_METRES));
+      }
+      expect(furthest).toBeLessThan(0.1);
+    },
+  );
+});
+
+describe('a closed road: the whole carriageway through a bend, and a late apex — #546', () => {
+  it.each(BENDS)('stays a handlebar and 0.4 m inside the edge through $name', ({ route }) => {
+    const line = racingLine(route);
+    for (let at = 0; at <= route.totalDistance; at += 0.5) {
+      const offset = Math.abs(lineOffsetAt(line, at));
+      // The bar end clear of the edge by 0.4 m, and the tyre — in the
+      // bicycle's plane — by at least the Highway Code's 0.5 m.
+      expect(ROAD_WIDTH_METRES / 2 - offset - RIDER_HALF_WIDTH_METRES).toBeGreaterThanOrEqual(
+        0.4 - 1e-9,
+      );
+      expect(ROAD_WIDTH_METRES / 2 - offset).toBeGreaterThanOrEqual(0.5);
+    }
+  });
+
+  /**
+   * Where the apex lands, as the middle of the stretch the line holds within
+   * 0.1 m of the inside, in metres after the bend's bisector — published, as
+   * #546 asks, and measured 2026-09-26:
+   *
+   * | bend | apex after the bisector |
+   * |---|--:|
+   * | 10 m corner, either hand | +0.1 m |
+   * | 20 m corner, either hand | +0.7 m |
+   * | 40 m corner, right / left | +3.5 / +3.3 m |
+   * | 20 m hairpin | +5.3 m |
+   *
+   * ⚠️ **The 10 m corner is where the resolution bites**: its arc is 15.7 m,
+   * a sample and a half of a 10 m profile, and it is the case the late-apex
+   * gain was raised to 40 for (at 10 its apex was 0.1 m BEFORE the bisector).
+   */
+  it.each(BENDS)('apexes on the inside, at or after the bisector, on $name', (bend) => {
+    const bisector = bend.start + (bend.radius * bend.turn) / 2;
+    const run = insideRun(bend);
+    const apex = (run.from + run.to) / 2 - bisector;
+    expect(run.deepest).toBeLessThanOrEqual(-LINE_LIMIT_METRES + 0.1);
+    expect(apex).toBeGreaterThanOrEqual(0);
+  });
+
+  /**
+   * ⚠️ **The exit is held to the tangent point on a 90° corner and NOT on the
+   * hairpin, and that is the late apex rather than a tolerance.** The closed
+   * form is the geometric line's, whose apex is on the bisector; a late apex
+   * opens the exit out, and on a 180° hairpin that moves the point where the
+   * line regains the outside later — measured 2026-09-26 at 2.57 m out (0.33 m
+   * short of the edge) at the geometric tangent point, 5.8 m past the bend,
+   * and at the edge by 10 m. So the exit is held to twice that reach instead:
+   * a line that never went wide again would still fail.
+   */
+  it.each(BENDS)(
+    'enters and leaves $name within 0.3 m of the outside, at the line’s tangent points',
+    (bend) => {
+      const line = racingLine(bend.route);
+      const radius = closedFormRadius(bend.radius, bend.turn);
+      // The line's arc leaves each straight's outside edge `(R − a)·sin(θ/2)`
+      // before the bend begins and after it ends — the foot of the
+      // perpendicular from the line's centre onto that edge.
+      const reach = (radius - (bend.radius - LINE_LIMIT_METRES)) * Math.sin(bend.turn / 2);
+      const outside = -bend.inside * LINE_LIMIT_METRES;
+      const end = bend.start + bend.radius * bend.turn;
+      expect(Math.abs(lineOffsetAt(line, bend.start - reach) - outside)).toBeLessThanOrEqual(0.3);
+      const exit = bend.turn < Math.PI ? reach : 2 * reach;
+      expect(Math.abs(lineOffsetAt(line, end + exit) - outside)).toBeLessThanOrEqual(0.3);
+    },
+  );
+
+  /**
+   * The line's tightest radius, from this file's own curvature of its offsets,
+   * against the closed form — measured 2026-09-26, right / left-hand:
+   *
+   * | bend | tightest | closed form |
+   * |---|--:|--:|
+   * | 10 m corner | 26.2 / 26.3 m | 26.9 m |
+   * | 20 m corner | 34.4 / 34.5 m | 36.9 m |
+   * | 40 m corner | 53.2 / 53.3 m | 56.9 m |
+   * | 20 m hairpin | 21.0 m | 22.9 m |
+   *
+   * Tighter than the closed form everywhere, which is the late apex: the way in
+   * is bent harder than the geometric line's single arc so that the way out
+   * can be opened.
+   */
+  it.each(BENDS)('is at its tightest within 10 % of the closed-form radius on $name', (bend) => {
+    const tightest = 1 / peak(curvaturesOf(bend.route, racingLine(bend.route).offsets));
+    const expected = closedFormRadius(bend.radius, bend.turn);
+    expect(Math.abs(tightest - expected) / expected).toBeLessThanOrEqual(0.1);
+  });
+
+  it('turns in harder than it opens out — which is what makes the apex late', () => {
+    // The 40 m corner, on the line's own curvature: over the first half of
+    // the bend the line is more curved than over the second.
+    const bend = BENDS.find((each) => each.name === 'a 40 m right-hand corner') as Bend;
+    const curvatures = curvaturesOf(bend.route, racingLine(bend.route).offsets);
+    const sampleAt = (at: number): number => Math.round(at / bend.route.resolution) - 1;
+    const bisector = bend.start + (bend.radius * bend.turn) / 2;
+    let before = 0;
+    let after = 0;
+    for (let offset = 0; offset < 60; offset += bend.route.resolution) {
+      before += Math.abs(curvatures[sampleAt(bisector - offset)] ?? 0);
+      after += Math.abs(curvatures[sampleAt(bisector + offset)] ?? 0);
+    }
+    expect(before).toBeGreaterThan(after);
+  });
+
+  it('crosses an S-bend once between its two apexes, with no second inflection', () => {
+    const line = racingLine(sBend);
+    const first = BEND_START + 0.5 * QUARTER;
+    const second = BEND_START + 1.5 * QUARTER;
+    let crossings = 0;
+    let previous = Math.sign(lineOffsetAt(line, first));
+    for (let at = first; at <= second; at += 0.25) {
+      const side = Math.sign(lineOffsetAt(line, at));
+      if (side !== 0 && side !== previous) {
+        crossings += 1;
+        previous = side;
+      }
+    }
+    expect(crossings).toBe(1);
+    // The line's own curvature changes sign once between them too.
+    const curvatures = curvaturesOf(sBend, line.offsets);
+    const from = Math.round(first / sBend.resolution);
+    const to = Math.round(second / sBend.resolution);
+    let inflections = 0;
+    for (let index = from; index < to; index += 1) {
+      const here = curvatures[index - 1] ?? 0;
+      const next = curvatures[index] ?? 0;
+      if (Math.sign(here) !== Math.sign(next) && here !== 0 && next !== 0) inflections += 1;
+    }
+    expect(inflections).toBe(1);
+  });
+});
+
+describe('never leans OUT of a bend it is turning into — #546', () => {
+  /**
+   * What countersteering moves outward is the steer and the contact patches,
+   * not the lean (Fajans, *"Steering in bicycles and motorcycles"*, Am. J.
+   * Phys. 68, 2000), so a drawn lean away from a bend at turn-in would be
+   * wrong. From the line's entry tangent point to the end of the bend the
+   * lean never takes the sign away from it.
+   *
+   * ⚠️ **Before that point it can, and it is physics rather than a
+   * countersteer.** Since #546 the line sets a bend up from the side of the
+   * road it needs, and a line that moves across the road curves away from the
+   * bend to do it; the lean is `tan φ = v²/(g·R)` of THAT curve. Measured
+   * 2026-09-26 on the 20 m corners, 30 m before the bend: 0.5° at 8 m/s and
+   * 1.8° at 16 m/s where the home is already the outside (right-hand), and
+   * 1.5° and 5.9° where the line crosses the whole road to get there
+   * (left-hand). The owner's "true to physics" is why it is drawn.
+   */
+  it.each(BENDS)('from the line’s turn-in to the end of $name', (bend) => {
+    const line = racingLine(bend.route);
+    const radius = closedFormRadius(bend.radius, bend.turn);
+    const turnIn =
+      bend.start - (radius - (bend.radius - LINE_LIMIT_METRES)) * Math.sin(bend.turn / 2);
+    const end = bend.start + bend.radius * bend.turn;
+    for (const speed of [4, 8, 12, 16]) {
+      for (let at = turnIn; at <= end; at += 0.25) {
+        expect(-bend.inside * leanAt(line, at, speed)).toBeLessThanOrEqual(0.5 * DEGREES);
+      }
+    }
+  });
+});
+
+describe('rolls in over time, not only over distance — #546', () => {
+  it('never rolls faster than the stated rate a second, at any speed from 3 to 20 m/s', () => {
+    // Sampled at v·Δt, so a step is Δt of riding. A single bend at each: the
+    // S-bend's two leans each obey it and add, as #499 already states.
+    const seconds = 0.02;
+    for (const bend of BENDS) {
+      const line = racingLine(bend.route);
+      const end = bend.start + bend.radius * bend.turn;
+      for (let speed = 3; speed <= 20; speed += 1) {
+        const step = speed * seconds;
+        let previous = leanAt(line, bend.start - 80, speed);
+        let fastest = 0;
+        for (let at = bend.start - 80 + step; at <= end + 80; at += step) {
+          const here = leanAt(line, at, speed);
+          fastest = Math.max(fastest, Math.abs(here - previous) / seconds);
+          expect(Math.abs(here - previous) / step).toBeLessThanOrEqual(
+            MAXIMUM_ROLL_RADIANS_PER_METRE * (1 + 1e-9),
+          );
+          previous = here;
+        }
+        expect(fastest).toBeLessThanOrEqual(MAXIMUM_ROLL_RADIANS_PER_SECOND * (1 + 1e-9));
+      }
+    }
+  });
+
+  it('keeps its reach bounded at a speed nothing reaches, and still rolls no faster than it', () => {
+    // 100 m/s is 360 km/h: the per-metre rate stops falling at whatever rolls
+    // the whole cap in 50 m, so the window — and the work — stop growing.
+    expect(rollRatePerMetre(100)).toBeCloseTo(MAXIMUM_LEAN_RADIANS / 50, 12);
+    expect(rollRatePerMetre(1_000)).toBe(rollRatePerMetre(100));
+    const line = racingLine(hairpin);
+    const step = 0.25;
+    let previous = leanAt(line, 300, 100);
+    for (let at = 300 + step; at <= 520; at += step) {
+      const here = leanAt(line, at, 100);
+      expect(Number.isFinite(here)).toBe(true);
+      expect(Math.abs(here - previous) / step).toBeLessThanOrEqual(
+        rollRatePerMetre(100) * (1 + 1e-9),
+      );
+      previous = here;
+    }
+    // …and at that speed the hairpin still leans the rider well into it:
+    // not to the cap, because rolled in over 50 m a 63 m bend is too short to
+    // hold it, which is the per-second bound doing its job.
+    expect(-leanAt(line, BEND_START + BEND_LENGTH / 2, 100)).toBeGreaterThan(
+      0.9 * MAXIMUM_LEAN_RADIANS,
+    );
+  });
+
+  it('states the per-second bound as 60° a second, and the rate it gives as the lesser', () => {
+    expect(MAXIMUM_ROLL_RADIANS_PER_SECOND / DEGREES).toBeCloseTo(60, 9);
+    expect(rollRatePerMetre(5)).toBe(MAXIMUM_ROLL_RADIANS_PER_METRE);
+    expect(rollRatePerMetre(16)).toBeCloseTo(MAXIMUM_ROLL_RADIANS_PER_SECOND / 16, 12);
+  });
 });

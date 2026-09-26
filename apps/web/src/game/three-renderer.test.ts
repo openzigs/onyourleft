@@ -49,7 +49,7 @@ import {
   type RoutePoint,
 } from '@onyourleft/domain';
 
-import { LINE_LIMIT_METRES, racingLine } from './racing-line';
+import { LINE_HOME_OFFSET_METRES, LINE_LIMIT_METRES, racingLine } from './racing-line';
 import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
 import { corridorOrigin, roadCorridor } from './terrain';
@@ -74,6 +74,7 @@ import {
   CRANK_AXIS_Y,
   CRANK_AXIS_Z,
   LEG_BONE_COUNT,
+  UPPER_BODY_PIVOT,
 } from './bicycle';
 import { MAXIMUM_SCENERY_VARIANTS, SCENERY_MODELS } from './scenery-models';
 import { MAXIMUM_LIT_CHANNEL } from './scenery-palette';
@@ -1364,19 +1365,32 @@ describe('the verge and the camera cone — #355, re-derived for #423 and #424',
 
   /**
    * #499 moves the camera across the road with the rider's racing line, and
-   * every figure above is for a camera on the centreline. Restated rather than
-   * re-pinned, as #499's camera criterion asks: this block's straight is where
-   * the camera still IS on the centreline, and a bend is where it is not.
+   * every figure in the table above was taken with the camera on the
+   * centreline. Restated rather than re-pinned, as #499's camera criterion
+   * asks.
+   *
+   * ⚠️ **Since #546 that is no longer where the camera is on a straight**, and
+   * a reviewer who remembers this case asserting "the racing line leaves the
+   * camera on the centreline of a straight" is reading the old file: the line
+   * holds the rider's home, 1.75 m to the right (`racing-line.ts`
+   * §`LINE_HOME_OFFSET_METRES`), and the camera follows the rider across. Every
+   * floor above still holds through that camera — measured 2026-09-26, shipped
+   * against rejected: 16 : 9 73.3 % / 65.0 %, 16 : 10 68.2 % / 58.9 %, 4 : 3
+   * 59.7 % / 47.3 %, 9 : 21 13.5 % / 4.2 % (on the centreline, the same run:
+   * 74.1 / 64.8, 69.8 / 59.3, 59.5 / 47.6, 12.8 / 3.2). So the table's figures
+   * are the centreline's and the floors are unmoved.
    */
-  it('is measured through a camera the racing line leaves on the centreline of a straight — #499', () => {
+  it('is measured through a camera the racing line holds at home on a straight — #499, #546', () => {
     const line = racingLine(levelProfile);
-    let widest = 0;
-    for (const offset of line.offsets) widest = Math.max(widest, Math.abs(offset));
+    let furthest = 0;
+    for (const offset of line.offsets) {
+      furthest = Math.max(furthest, Math.abs(offset - LINE_HOME_OFFSET_METRES));
+    }
     // Non-vacuity: the fixture is long enough to be solved at all.
     expect(line.offsets.length).toBeGreaterThan(1000);
-    expect(widest).toBeLessThan(0.01);
+    expect(furthest).toBeLessThan(0.01);
     // And the camera the near field is measured through is where that puts
-    // it: on the centreline, measured against the corridor's own centre points.
+    // it: at home, measured against the corridor's own centre points.
     for (const frame of frames) {
       let nearest = Number.POSITIVE_INFINITY;
       const centre = frame.corridor.centre;
@@ -1397,7 +1411,7 @@ describe('the verge and the camera cone — #355, re-derived for #423 and #424',
           Math.hypot(frame.camera.x - (a.x + t * dx), frame.camera.z - (a.z + t * dz)),
         );
       }
-      expect(nearest).toBeLessThan(0.01);
+      expect(Math.abs(nearest - Math.abs(LINE_HOME_OFFSET_METRES))).toBeLessThan(0.01);
     }
   });
 
@@ -1576,7 +1590,7 @@ function frameWithScatter(): SceneFrame {
       quadCount: 1,
     },
     camera: POSE,
-    markers: [{ kind: 'rider', x: 0, y: 0, z: 0, headingX: 0, headingZ: 1, lean: 0 }],
+    markers: [{ kind: 'rider', x: 0, y: 0, z: 0, headingX: 0, headingZ: 1, lean: 0, bodyLean: 0 }],
     world: {
       skyColour: 0x88aaff,
       groundColour: 0x557744,
@@ -2536,6 +2550,7 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
       headingX: facing.headingX ?? 0,
       headingZ: facing.headingZ ?? 1,
       lean: 0,
+      bodyLean: 0,
       ...(crankAngle === undefined ? {} : { crankAngle }),
     };
   }
@@ -2571,26 +2586,35 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
     ];
   }
 
-  it('is three draw calls for three riders, not three each', () => {
+  it('is four draw calls for three riders, not four each', () => {
     // #240's NFR-2: draw calls are the budget, and `bicycle.ts` describes about
     // two dozen solids. #368's whole affordability argument is that the bot and
     // the ghost are two more instances in buffers that already exist.
+    // ⚠️ Three until #546: the upper body is its own mesh since then, because
+    // it rolls against the bicycle (`bicycle.ts` §`RIDER_BICYCLE_PARTS`).
     const belt = new RiderBelt();
-    const { bodies, cranksets, limbs } = belt.meshes;
+    const { bodies, torsos, cranksets, limbs } = belt.meshes;
 
-    expect(belt.group.children).toHaveLength(3);
-    expect(new Set([bodies, cranksets, limbs]).size).toBe(3);
-    // One material across all three, which is what the vertex colours buy.
-    expect(new Set([bodies.material, cranksets.material, limbs.material]).size).toBe(1);
+    expect(belt.group.children).toHaveLength(4);
+    expect(new Set([bodies, torsos, cranksets, limbs]).size).toBe(4);
+    // One material across all four, which is what the vertex colours buy.
+    expect(
+      new Set([bodies.material, torsos.material, cranksets.material, limbs.material]).size,
+    ).toBe(1);
     belt.place([riderAt(), riderAt({ z: 40 }, {}, 0, 'bot'), riderAt({ z: 80 }, {}, 0, 'ghost')]);
-    // …and still three after a frame carrying all three.
-    expect(belt.group.children).toHaveLength(3);
+    // …and still four after a frame carrying all three.
+    expect(belt.group.children).toHaveLength(4);
     belt.dispose();
   });
 
   it('carries a colour on every vertex, which is what keeps it one material', () => {
     const belt = new RiderBelt();
-    for (const mesh of [belt.meshes.bodies, belt.meshes.cranksets, belt.meshes.limbs]) {
+    for (const mesh of [
+      belt.meshes.bodies,
+      belt.meshes.torsos,
+      belt.meshes.cranksets,
+      belt.meshes.limbs,
+    ]) {
       const colour = mesh.geometry.getAttribute('color');
       const position = mesh.geometry.getAttribute('position');
       expect(colour).toBeDefined();
@@ -3216,6 +3240,7 @@ describe('the riders lean into a bend — #499', () => {
       headingX: heading[0],
       headingZ: heading[1],
       lean,
+      bodyLean: 0,
       crankAngle,
     };
   }
@@ -3275,6 +3300,40 @@ describe('the riders lean into a bend — #499', () => {
     // road heading north.
     expect(cranksUpright[0]).toBeCloseTo(0, 6);
     expect(axisOf(belt.meshes.cranksets, 0, 1)[0]).toBeLessThan(-0.3);
+    belt.dispose();
+  });
+
+  it('holds the upper body back against the bicycle, about the hips — #546', () => {
+    // A bicycle at 0.5 with the body rolled −0.125 against it: the body's own
+    // up is at 0.375 in the world, the bicycle's at 0.5.
+    const belt = new RiderBelt();
+    belt.place([{ ...leaning(0.5), bodyLean: -0.125 }]);
+    const bicycleUp = axisOf(belt.meshes.bodies, 0, 1);
+    const bodyUp = axisOf(belt.meshes.torsos, 0, 1);
+    expect(bicycleUp[1]).toBeCloseTo(Math.cos(0.5), 6);
+    expect(bodyUp[1]).toBeCloseTo(Math.cos(0.375), 6);
+    expect(bodyUp[0]).toBeCloseTo(-Math.sin(0.375), 6);
+    // …and the hips are where the bicycle puts them: the pivot, carried by
+    // both matrices, lands on the same point.
+    const carried = (array: ArrayLike<number>): readonly number[] => {
+      const m = (index: number): number => array[index] ?? NaN;
+      const [x, y, z] = [0, UPPER_BODY_PIVOT.y, UPPER_BODY_PIVOT.z];
+      return [0, 1, 2].map((row) => m(row) * x + m(4 + row) * y + m(8 + row) * z + m(12 + row));
+    };
+    const onBicycle = carried(belt.meshes.bodies.instanceMatrix.array);
+    const onBody = carried(belt.meshes.torsos.instanceMatrix.array);
+    for (const axis of [0, 1, 2]) {
+      expect(onBody[axis]).toBeCloseTo(onBicycle[axis] as number, 5);
+    }
+    belt.dispose();
+  });
+
+  it('draws the body with the bicycle when it is not held back', () => {
+    const belt = new RiderBelt();
+    belt.place([leaning(0.4)]);
+    expect(Array.from(belt.meshes.torsos.instanceMatrix.array.slice(0, 16))).toEqual(
+      Array.from(belt.meshes.bodies.instanceMatrix.array.slice(0, 16)),
+    );
     belt.dispose();
   });
 });
