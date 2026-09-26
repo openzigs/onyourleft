@@ -48,6 +48,12 @@ game's own *Ride* press now asks the trainer for control, so L1's *"take control
 first"* is no longer the way in, and AC is the hardware step that says whether the press does it.
 Checked with `grep '^## Part'` for a duplicate letter first — AB was the last, and AC was free. It
 **changes resistance** and runs with L, before D (Safety rule 2).
+**Results filled 2026-09-26** from the owner's session of 2026-09-25 into the morning of 2026-09-26,
+on the Pixel Tablet with a Wahoo KICKR CORE: A5, Part C, Part S, Part T (T1, T3, T4) and AE3. See
+*What the 2026-09-25 session established* below for the build and for what it filed. **Part AF
+added — and run — the same day** for [#519](https://github.com/openzigs/onyourleft/issues/519):
+whether the shell reaches a plain-`http:` model server on the LAN. Checked with `grep '^## Part'`
+for a duplicate letter first — AE was the last, and AF was free.
 **Discharges, when run:** [#87](https://github.com/openzigs/onyourleft/issues/87) criteria 2, 3, 5
 and 6 and its two-OEM line; the Android half of
 [#85](https://github.com/openzigs/onyourleft/issues/85); and
@@ -156,6 +162,41 @@ records only whether the feature bits *offer* gradient. **Part L is that step.**
 
 ---
 
+## What the 2026-09-25 session established
+
+Run by the owner from the afternoon of 2026-09-25 into the morning of 2026-09-26.
+
+| | |
+|---|---|
+| Devices | Google Pixel Tablet, Android 17, WebView 153.0.8010.36 — **every result below was taken on it**. A Pixel 8 (Android 17, WebView 153.0.8010.36) was also in the session |
+| Trainer | Wahoo KICKR CORE, over FTMS |
+| Build | debug APK from `main` at `cfa8956` (the merge of #540), which contains #524 and #526. A5, S, T and AE3 ran on it, and Part C ran overnight on the same install. Part AF ran earlier the same afternoon on `2b84996`, and says so |
+
+| Part | Result |
+|---|---|
+| A5 | **Pass** — the notification question is asked and the service is foreground and `connectedDevice`. The notification is filed under **Silent**, so it is easy to miss. #526's three extra observations were **not** run |
+| C | **C1–C3 pass while powered**: a 10½-hour ride backgrounded with the screen off, continuous. ⚠️ The charger was connected throughout, and **the battery run is still owed** |
+| S | **S1 and S2 pass** in a saved workout: the stall rescue wrote the machine's minimum as a `0x05`, and no `0x08` was sent. ⚠️ **Manual ERG has no stall rescue**, and the trainer's own firmware let go instead. S3 and S4 not run |
+| T | T1 passes. T3 and T4 give frame and GPU times with the shadow map off and on. There is a stall of about 5 s at the start of a ride with the map on. T2 and T5 not run |
+| AE | **AE3 passes**, in the product rather than the harness, with a whole-ride `gfxinfo`. AE1 and AE2 not run |
+| AF | **The shell blocks a plain-`http:` LAN model server as mixed content** (#519) |
+
+**Found along the way**, one issue each (After the session, item 4):
+
+| Issue | What |
+|---|---|
+| [#542](https://github.com/openzigs/onyourleft/issues/542) | An ERG workout re-sends an unchanged, acknowledged target about once a second (14 writes in 16 s) — Part S |
+| [#543](https://github.com/openzigs/onyourleft/issues/543) | The road's bends are drawn as straight pieces with sharp corners |
+| [#544](https://github.com/openzigs/onyourleft/issues/544) | Distant hills draw as pale, near-white bands with hard edges in the realistic world |
+| [#545](https://github.com/openzigs/onyourleft/issues/545) | Scenery clips at the camera: a sliver of building wall and a flat grey tree trunk at the frame's edge |
+| [#546](https://github.com/openzigs/onyourleft/issues/546) | Make the drawn rider take a real racing line and body position through bends |
+| [#547](https://github.com/openzigs/onyourleft/issues/547) | Make the riders' real shadow map the default in the stylised world, instead of the blob — T4's verdict by eye |
+| [#548](https://github.com/openzigs/onyourleft/issues/548) | After a ride is stopped and saved, the Ride screen offers no way to start another without restarting the app |
+| [#551](https://github.com/openzigs/onyourleft/issues/551) | Show the side camera's state on the ride screen, and say when its link drops mid-ride |
+| [#552](https://github.com/openzigs/onyourleft/issues/552) | Flaky browser test: `sidelink.browser.spec.ts` saw `pairing` where it expected `framing` |
+
+---
+
 ## What you need
 
 | | |
@@ -254,10 +295,21 @@ reaches a chooser"* is a sentence only a device can write. Until A7 is filled in
 | A2 | | |
 | A3 | | |
 | A4 | | |
-| A5 | | |
+| A5 | **Pass**, with the Silent caveat below. Google Pixel Tablet, Android 17, 2026-09-25, `main` at `cfa8956`. Before the first ride `POST_NOTIFICATIONS` read `granted=false` with no `USER_SET` flag, so it had never been asked. Pressing *Start recording* raised Android's *Allow notifications* dialog, and the owner tapped **Allow**. `dumpsys activity services` then listed `RecordingService` with `isForeground=true` and `types=0x10` (`connectedDevice`). The notification *"Recording ride — Sensors stay connected while this is showing."* was posted on channel `ride_recording` at importance 2 (`LOW`) | |
 | A6 | | |
 | A7 | | |
 | A8 | | |
+
+⚠️ **A5's notification is Silent, and the owner did not see it at first.** Android files a channel
+at importance 2 (`IMPORTANCE_LOW`) under the shade's *Silent* section, below the ordinary
+notifications. It was there, and `dumpsys` shows it was posted. But *"pull down the notification
+shade"* does not show it at a glance. Whether `ride_recording` should be `LOW` is not decided here.
+
+⚠️ **The three observations #526 added under A5 were not run.** The owner allowed the dialog the
+first time it appeared. So the dialog was never left up with the screen off, and it was never
+dismissed. Whether Android 13+ reports a dismissal as `denied`, and whether that is then never asked
+again, **is still open**. The notification did appear on the same ride after Allow, as the third
+bullet expects, but that was seen in passing and was not run as its own step.
 
 ---
 
@@ -329,9 +381,18 @@ is an ADR.
 
 | Step | Phone 1 | Phone 2 |
 |---|---|---|
-| C1 | duration recorded: | |
-| C2 | | |
-| C3 | samples / elapsed: | |
+| C1 | duration recorded: **37 887 s**, against 37 886 s elapsed. **Pass, while powered.** Recording started at 21:08:04 on 2026-09-25. The app was backgrounded and the screen turned off at 21:08:19. The owner stopped it at 07:39:30 the next morning. The trainer sent **38 019** Indoor Bike Data notifications, with a largest gap of 2 s and none over 3 s. The app process was the same one all night | |
+| C2 | **Pass, while powered.** `RecordingService` was foreground and typed `connectedDevice` at six `dumpsys` checks over the first hour. The process was not restarted, and the notification stream above ran unbroken to the stop | |
+| C3 | samples / elapsed: **37 887 / 37 886 s**. **Pass, while powered.** The ride saved | |
+
+**Phone:** Google Pixel Tablet, Android 17, WebView 153.0.8010.36. **Build:** debug, `main` at
+`cfa8956`, the same install as A5. **Trainer:** Wahoo KICKR CORE (FTMS).
+
+⚠️ **The tablet was on USB power for the whole run, so this is the easy case.** Android relaxes its
+background limits on a device that is charging: Doze does not start while it is plugged in. A ride on
+battery is the case #87 criterion 3 is really about, and **it is still to be run**. It needs the same
+three rows with the charger unplugged before the recording starts. Until then, the pass above says
+the service holds a ride overnight on a powered device, and nothing about a battery.
 
 ---
 
@@ -1850,14 +1911,31 @@ adb logcat | grep -i "BluetoothLe"
 
 | Step | Trainer minimum (W) | `0x05` values seen, in order | `0x08` seen? | Power as cadence fell (rpm → W) |
 |---|---|---|---|---|
-| S1 | | | | |
-| S2 | | | | flapped? |
-| S3 | | | | |
-| S4 | | | | |
+| S1 | **0** (the value the rescue wrote) | A saved workout with a 200 W block. The owner stalled at 20:41:37–40. At 20:41:41 the app wrote a `0x05` at **0 W**, the machine's minimum. Every write was acknowledged `80 05 01` | **No**, anywhere in the session | **Pass**, as the owner reported it: the rescue fired at the stall. The two-thirds step before the stall is not in the record, because cadence fell in about three seconds |
+| S2 | 0 | **133 W** (two thirds of 200 W) at 20:41:43, as the owner pedalled again. Then **0 W** again at 20:42:02 | **No** | **Pass** for the step from floor to two thirds. The later step back to the full 200 W is not in the record, so this does not settle whether the target flapped |
+| S3 | | *Not run* | | |
+| S4 | | *Not run* | | |
 
-**Did the stall rescue take the load off your legs, in your own words?** ______________
+⚠️ **Manual ERG has no stall rescue, and on this trainer the firmware let go instead.** Before the
+workout, the owner set **150 W** on the Ride screen's Trainer panel, with no workout running, and let
+cadence fall to **37 rpm**. The app wrote **nothing**. The trainer's own firmware released the load
+after about **9 s** (20:35:38–20:35:47). That is how the client is built: the rescue belongs to the
+workout player (`erg-safety.ts` §`assessErgCadence`), and a target set by hand does not go through
+the player. So S1–S4 pass or fail on a **workout** only. A rider on a manual ERG target is relying
+on the trainer, and a different trainer may not let go.
 
-**Trainer (make, model, firmware, address):** ______________  **Build:** ______________
+⚠️ **Found along the way: [#542](https://github.com/openzigs/onyourleft/issues/542).** During the
+workout, an unchanged target that had already been acknowledged was written again about once a
+second, 14 writes in 16 s. It is harmless on this trainer, since every write was acknowledged, but
+it looks like the busy loop `player.ts` §`acknowledge` is there to prevent. #542 owns finding out
+why.
+
+**Did the stall rescue take the load off your legs, in your own words?** Not asked in so many words.
+The owner reported the rescue as working.
+
+**Trainer (make, model, firmware, address):** Wahoo KICKR CORE (FTMS); firmware not recorded
+**Build:** debug, `main` at `cfa8956`, on the Pixel Tablet (Android 17, WebView 153.0.8010.36),
+2026-09-25
 
 ---
 
@@ -1913,26 +1991,40 @@ adb shell dumpsys gfxinfo dev.openzigs.onyourleft | grep -iE "Total frames|Janky
 
 | | T3 — contact shadows | T4 — shadow map | difference |
 |---|--:|--:|--:|
-| Total frames rendered | | | |
-| Janky frames (legacy, > 16 ms) | | | |
-| Frame time 50th / 90th | | | |
-| **GPU time 50th / 90th** | | | |
-| Missed Vsync | | | |
+| Total frames rendered | not recorded | not recorded | |
+| Janky frames (legacy, > 16 ms) | 0 | 0 | 0 |
+| Frame time 50th / 90th | 13 / 21 ms (95th 22, 99th 29) | 14 / 21 ms (95th 22, 99th 32) | +1 / 0 ms (95th 0, 99th +3) |
+| **GPU time 50th / 90th** | **8 / 12 ms** (95th 13, 99th 21) | **7 / 12 ms** (95th 13, 99th 22) | −1 / 0 ms (95th 0, 99th +1) |
+| Missed Vsync | not recorded | not recorded | |
 
-**Does the rider stand on the road (T1)?** ______________
+Each column is 12 s of steady riding. T4's column was taken **after** the start of the ride, and
+that matters. ⚠️ **The first 12 s of a ride with the map on stalled for about 5 s.** Frame
+25 / 32 / 34 / 42 ms (50th / 90th / 95th / 99th), and a GPU 99th percentile of **4 950 ms**. That
+one frame is most likely the shadow pass's shaders compiling on first use, but it has not been
+measured as that. The first 12 s of a ride with the map **off** were not measured, so whether that start stalls too is
+not known. A rider sees it as a freeze at the
+start of the ride, and whether the map becomes a rung has to account for it.
 
-**Does the ghost read as not-really-there, or as broken (T2)?** ______________
+**Does the rider stand on the road (T1)?** **Yes.** The rider is on the road, and the pacer has its
+own shadow.
 
-**Is the real shadow worth having over the blob, by eye (T4)?** ______________
+**Does the ghost read as not-really-there, or as broken (T2)?** *Not run.*
 
-**Did the ladder leave the map rung in 20 minutes, and when (T5)? Did the map ever come back in the same ride?** ______________
+**Is the real shadow worth having over the blob, by eye (T4)?** **Yes**, in the owner's words: *"use
+bike shaped shadow over blob"*. Filed as [#547](https://github.com/openzigs/onyourleft/issues/547).
 
-**Phone (OEM, model, Android):** ______________  **Build:** ______________
+**Did the ladder leave the map rung in 20 minutes, and when (T5)? Did the map ever come back in the same ride?** *Not run.*
+
+**Phone (OEM, model, Android):** Google Pixel Tablet, Android 17, WebView 153.0.8010.36
+**Build:** debug, `main` at `cfa8956`, 2026-09-25
 
 **The decision this is for**, to be written on #426 when the table is filled: the shadow map
 **lands as a rung** (and on which devices it is offered), or it is recorded as **"measured, not
 worth it"** with the numbers above and the rung is removed. #426 stays open until one of the two is
-written down; it was opened with `Refs`, not `Closes`, for exactly this.
+written down; it was opened with `Refs`, not `Closes`, for exactly this. ⚠️ **As of the
+2026-09-25 session it is not written down yet.** The owner's by-eye answer points towards landing
+the map, and #547 asks for more than that: the map as the stylised world's default. But T5 (whether
+the ladder holds the map for 20 minutes) and the start-of-ride stall above are both still open.
 
 ---
 
@@ -2761,8 +2853,64 @@ route as Part Z (§"Build and install"), from a `main` that has #506 in it.
 
 | Step | As described? | What was seen, or measured |
 |---|---|---|
-| AE1 | | |
-| AE2 | | |
-| AE3 | | |
+| AE1 | *Not run* | Needs the staged harness build (§"Build and install", `realistic:stage`). The session's APK was a plain `main` build without it |
+| AE2 | *Not run* | Same reason as AE1 |
+| AE3 | **Yes** | Ridden in the **product**, not the harness: the realistic world chosen in Settings, on the owner's own saved route of about 29 miles. The village is there and every house is complete, with doors, windows, chimneys and brick. The field walls, hedges and fences read correctly from the saddle |
 
-**Phone (OEM, model, Android, WebView):** ______________  **Build:** ______________
+**AE3's whole ride, by `dumpsys gfxinfo`** (reset at 20:45:17): **25 907** frames, **14** janky
+(0.05 %). Frame time 50th / 90th / 95th / 99th **11 / 22 / 23 / 28 ms**. GPU **4 / 8 / 13 / 16 ms**.
+Thermal status 0 throughout. ⚠️ `gfxinfo` reports no draw calls or triangles, so this is **not**
+AE1's or AE2's row. It is the cost of a whole real ride in the realistic world, villages included,
+against AA3's GPU 5 / 8 / 12 ms held at one farmstead.
+
+**Phone (OEM, model, Android, WebView):** Google Pixel Tablet, Android 17, WebView 153.0.8010.36
+**Build:** debug, `main` at `cfa8956`, 2026-09-25
+
+---
+
+## Part AF — does the shell reach a plain-`http:` model server on the LAN? ([#519](https://github.com/openzigs/onyourleft/issues/519))
+
+**Why this part exists.** The Android shell serves the app from a secure origin
+(`https://localhost`), and `apps/mobile/capacitor.config.ts` sets `allowMixedContent: false`. #387's
+analysis transport marks every request with `targetAddressSpace` (`local` or `loopback`). Chromium's
+Local Network Access rules use that mark to relax mixed-content blocking for a private address once
+the rider grants permission. Nothing had measured whether the Android System WebView does the same,
+asks for the permission, or blocks the request. If it blocks, [ADR 0029](../adr/0029-camera-imagery-as-a-data-class.md)
+D-6's default transport, plain LAN, does not work inside the APK.
+
+⚠️ **This part was run by the change that added it**, as Part P was, so it is a dated measurement
+rather than a script. ⚠️ **It changes no resistance** and needs no trainer.
+
+| Step | What to do | What should happen |
+|---|---|---|
+| AF1 | Run an OpenAI-compatible server on a computer on the same Wi-Fi, bound to `0.0.0.0`, answering over plain `http:`. Check it from that computer with `curl` | It answers |
+| AF2 | On the Camera page, save `http://<LAN address>:<port>` and press *Send one picture to check the connection*. Watch the server's log and `adb logcat` | Record what the page says, whether **any** request or preflight reached the server, whether a Local Network Access or other permission prompt appeared, and which layer refused, from logcat: mixed content, LNA, or cleartext policy |
+
+### AF results
+
+| Step | Result | What was seen |
+|---|---|---|
+| AF1 | **Yes** | A throwaway stub on the owner's Mac at `http://192.168.68.65:8519`, bound to `0.0.0.0`. It answered `ready`, sent CORS headers for `https://localhost` and `Access-Control-Allow-Private-Network`, and answered `curl` from the Mac |
+| AF2 | **Blocked, as mixed content** | The page reported that the computer **cannot be reached**. The stub logged **no request and no preflight** from the tablet, so the request never left the WebView. **No** Local Network Access prompt and **no** permission dialog appeared. Logcat: `E Capacitor/Console: ... Mixed Content: The page at 'https://localhost/#/camera' was loaded over HTTPS, but requested an insecure resource 'http://192.168.68.65:8519/v1/chat/completions'. This request has been blocked; the content must be served over HTTPS.` |
+
+**Which layer refused: mixed content.** In this WebView, `targetAddressSpace: 'local'` does **not**
+relax mixed-content blocking. The refusal was not the cleartext policy and not LNA: the request
+never got as far as either.
+
+**What it means, and what is not decided here.** ADR 0029 D-6's default transport, plain LAN, does
+**not** work inside the APK today. Each way round it is a security setting, and #519 requires an
+owner decision in an issue or an ADR rather than a config change:
+
+1. `allowMixedContent` in `capacitor.config.ts`, which also brings Android's cleartext policy into
+   play.
+2. A native HTTP path outside the WebView, such as CapacitorHttp. That still meets the cleartext
+   policy.
+3. Require an `https:` endpoint that the phone trusts, which is hard for a rider to set up.
+
+It matters less since [ADR 0033](../adr/0033-side-camera-link.md) made on-device analysis on the
+tablet the primary path (#530), so the rider's computer is now optional. #519 also still owes the
+rider-facing document's update: [`docs/analysis-on-your-own-computer.md`](../analysis-on-your-own-computer.md)
+should say *"blocked"* rather than *"untried"*. This part does not make that edit.
+
+**Phone (OEM, model, Android, WebView):** Google Pixel Tablet, Android 17, WebView 153.0.8010.36
+**Build:** debug, `main` at `2b84996`, 2026-09-25
