@@ -19,7 +19,9 @@ import {
   horizonRelief,
   terrainCorridor,
 } from './landform';
-import { hillRoute, valleyRoute } from './route-fixtures-testing';
+import { hillRoute, northRoute, valleyRoute } from './route-fixtures-testing';
+import { cameraRig } from './camera';
+import { REALISTIC_HORIZON_HAZE_SHARE, ridgeLift, skylineCrestFloor } from './realistic-light';
 import { scatterSeed, type SceneryKind } from './scatter';
 import { corridorOrigin, roadCorridor } from './terrain';
 import {
@@ -42,6 +44,7 @@ import {
   GROUNDING_METRES,
   groundingShade,
   realisticStructureGeometry,
+  HORIZON_HAZE_SHARE,
   HorizonRing,
   ScatterBelt,
   SKY_GRADIENT_RISE,
@@ -193,10 +196,16 @@ describe('the distant hills a view draws — #458', () => {
     eyeRoadY: 12,
     targetRoadY: 12,
   };
+  /**
+   * The horizon a view hands the ring, in linear light — deliberately NOT
+   * `world.horizonColour`, so a ring that read the world's own horizon again
+   * (#544's defect) is told apart from one that took what it was handed.
+   */
+  const HORIZON = { r: 0.21, g: 0.23, b: 0.27 } as const;
 
   it('stands a ring of the relief’s own tops round the camera, at the route’s heights', () => {
     const ring = new HorizonRing();
-    ring.update(relief, world, pose);
+    ring.update(relief, world, pose, HORIZON);
     const positions = ring.mesh.geometry.getAttribute('position') as unknown as Attribute;
     for (let segment = 0; segment < HORIZON_SEGMENTS; segment += 1) {
       const top = segment * 3 + 2;
@@ -207,8 +216,10 @@ describe('the distant hills a view draws — #458', () => {
       expect(positions.getY(top)).toBeCloseTo(relief.tops[segment] as number, 3);
       expect(positions.getY(segment * 3)).toBeCloseTo(relief.base, 3);
     }
-    // Round the CAMERA in plan, but at the route's own heights: a rider who
-    // climbs rises past the hills rather than carrying them up.
+    // Round the CAMERA in plan, but at the route's own heights: with no crest
+    // floor — the stylised world — a rider who climbs rises past the hills
+    // rather than carrying them up. The realistic world's floor changes that
+    // (#544); see "follows the rider's eye on a LEVEL route" below.
     expect([ring.mesh.position.x, ring.mesh.position.y, ring.mesh.position.z]).toEqual([
       40, 0, 900,
     ]);
@@ -224,7 +235,7 @@ describe('the distant hills a view draws — #458', () => {
 
   it('meets the fogged ground in the horizon colour, and hazes the ridge', () => {
     const ring = new HorizonRing();
-    ring.update(relief, world, pose);
+    ring.update(relief, world, pose, HORIZON);
     const colours = ring.mesh.geometry.getAttribute('color') as unknown as Attribute;
     const channel = (vertex: number): readonly number[] => [
       colours.getX(vertex),
@@ -234,6 +245,97 @@ describe('the distant hills a view draws — #458', () => {
     // The foot is exactly the horizon colour; the ridge is not.
     expect(channel(1)).toEqual(channel(0));
     expect(channel(2)).not.toEqual(channel(1));
+  });
+
+  it('meets the horizon it is HANDED, not the world’s own — #544', () => {
+    const ring = new HorizonRing();
+    ring.update(relief, world, pose, HORIZON);
+    const colours = ring.mesh.geometry.getAttribute('color') as unknown as Attribute;
+    const handed = [HORIZON.r, HORIZON.g, HORIZON.b];
+    // The foot and the skirt, round the whole ring, are the handed colour —
+    // which in the realistic world is the photographed sky's, so there is no
+    // edge where the ring meets the fog or the sky.
+    for (let segment = 0; segment <= HORIZON_SEGMENTS; segment += 1) {
+      for (const row of [0, 1]) {
+        const vertex = segment * 3 + row;
+        [colours.getX(vertex), colours.getY(vertex), colours.getZ(vertex)].forEach(
+          (channel, index) => expect(channel).toBeCloseTo(handed[index] as number, 6),
+        );
+      }
+    }
+    // The ridge lies between the ground and that horizon, and nearer the
+    // horizon: #544's "converges on the sky's".
+    const ground = [16, 8, 0].map((shift) => srgbToLinear((world.groundColour >> shift) & 0xff));
+    const ridge = [colours.getX(2), colours.getY(2), colours.getZ(2)];
+    ridge.forEach((channel, index) => {
+      const from = ground[index] as number;
+      const to = handed[index] as number;
+      const share = (channel - from) / (to - from);
+      expect(share).toBeGreaterThan(0.5);
+      expect(share).toBeLessThan(1);
+    });
+  });
+
+  it('lifts the WHOLE ridge to a crest floor, keeping its shape — #544', () => {
+    const ring = new HorizonRing();
+    const lowest = Math.min(...relief.tops);
+    const floor = lowest + 250;
+    ring.update(relief, world, pose, HORIZON, floor);
+    const positions = ring.mesh.geometry.getAttribute('position') as unknown as Attribute;
+    const crests = Array.from({ length: HORIZON_SEGMENTS }, (_, segment) =>
+      positions.getY(segment * 3 + 2),
+    );
+    // The lowest crest meets the floor, and every crest moved by the same
+    // amount — a clamp would have laid every low crest on one level line.
+    expect(Math.min(...crests)).toBeCloseTo(floor, 3);
+    crests.forEach((crest, segment) =>
+      expect(crest - (relief.tops[segment] as number)).toBeCloseTo(250, 3),
+    );
+    // A floor already under the ridge moves nothing, and a later frame with no
+    // floor puts the ridge back.
+    ring.update(relief, world, pose, HORIZON, lowest - 10);
+    expect(positions.getY(2)).toBeCloseTo(relief.tops[0] as number, 3);
+    ring.update(relief, world, pose, HORIZON, floor);
+    ring.update(relief, world, pose, HORIZON);
+    expect(positions.getY(2)).toBeCloseTo(relief.tops[0] as number, 3);
+  });
+
+  it('follows the rider’s eye on a LEVEL route in the realistic world, not only high up — #544', () => {
+    // The trade #589's review asked to be stated truly: the crest floor is the
+    // eye plus about 96 m, and a route's own crests stand 30 to 150 m above
+    // the middle of its elevation, so on the level the lowest crest is under
+    // the floor and the whole ridge is lifted — and then moves with the eye.
+    const level = northRoute(2_000, () => 0);
+    const levelRelief = horizonRelief(level, corridorOrigin(level), scatterSeed(level));
+    const eyeAt = (roadY: number): number =>
+      cameraRig({ ...pose, y: roadY, eyeRoadY: roadY, targetRoadY: roadY }).eye.y;
+    const floorAt = (roadY: number): number =>
+      skylineCrestFloor(eyeAt(roadY), HORIZON_RADIUS_METRES);
+    expect(ridgeLift(levelRelief.tops, floorAt(0))).toBeGreaterThan(0);
+    const ring = new HorizonRing();
+    const positions = ring.mesh.geometry.getAttribute('position') as unknown as Attribute;
+    ring.update(levelRelief, world, pose, HORIZON, floorAt(0));
+    const before = positions.getY(2);
+    ring.update(levelRelief, world, pose, HORIZON, floorAt(20));
+    // Twenty metres up the eye, twenty metres up the ridge: one for one.
+    expect(positions.getY(2) - before).toBeCloseTo(eyeAt(20) - eyeAt(0), 3);
+  });
+
+  it('hazes the realistic ridge more than the stylised one — #544', () => {
+    // `REALISTIC_HORIZON_HAZE_SHARE`'s argument is a direction — AgX pulls
+    // the stylised share's ridge toward the ground — and the browser gate's
+    // 0.5 bound does not hold it (0.7 still reads 0.51 there, B5 in #589).
+    expect(REALISTIC_HORIZON_HAZE_SHARE).toBeGreaterThan(HORIZON_HAZE_SHARE);
+  });
+
+  it('hazes the ridge by the share it is handed — #544', () => {
+    const ring = new HorizonRing();
+    const colours = ring.mesh.geometry.getAttribute('color') as unknown as Attribute;
+    const ground = srgbToLinear((world.groundColour >> 16) & 0xff);
+    ring.update(relief, world, pose, HORIZON, Number.NEGATIVE_INFINITY, 0.8);
+    expect(colours.getX(2)).toBeCloseTo(ground + (HORIZON.r - ground) * 0.8, 6);
+    ring.update(relief, world, pose, HORIZON);
+    expect(colours.getX(2)).toBeCloseTo(ground + (HORIZON.r - ground) * 0.7, 6);
   });
 });
 
@@ -661,3 +763,9 @@ describe('the sky and the surfaces — #425', () => {
     expect(defines()).not.toContain('SURFACE_DETAIL');
   });
 });
+
+/** One sRGB byte as linear light — IEC 61966-2-1, which three's `setHex` applies. */
+function srgbToLinear(byte: number): number {
+  const channel = byte / 255;
+  return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+}

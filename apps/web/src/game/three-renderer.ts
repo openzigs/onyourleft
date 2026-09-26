@@ -265,12 +265,17 @@ import {
 } from './realistic-assets';
 import { REALISTIC_NEAR_MESHES } from './realistic-budget';
 import {
+  drawnHorizonColour,
   environmentIntensity,
   halfToFloat,
   PHOTOGRAPHIC_ROAD_GRAIN,
   REALISTIC_EXPOSURE,
+  REALISTIC_HORIZON_BAND,
+  REALISTIC_HORIZON_HAZE_SHARE,
   reflectedSkyColour,
   skyBandRadiance,
+  ridgeLift,
+  skylineCrestFloor,
   skyRotation,
   WATER_HORIZON_BAND,
   WATER_ZENITH_BAND,
@@ -3152,6 +3157,14 @@ export class TerrainBelt {
  * and its ridge is a little of the ground colour, which is what distance
  * leaves of a hill.
  *
+ * ⚠️ **The horizon colour is HANDED to it, since #544**, and it is the colour
+ * the scene's fog is — never `world.horizonColour` read here on its own. In
+ * the stylised world the two are the same; in the realistic world the fog and
+ * this ring converge on the sky the HDRI actually draws at the horizon
+ * (`realistic-light.ts` §`drawnHorizonColour`), and reading the stylised
+ * horizon here is what drew these hills as a pale band in front of a darker
+ * photographed sky on the owner's tablet.
+ *
  * ⚠️ **A backdrop, and it is the only one left**: no depth write, drawn first,
  * so everything nearer is drawn over it whatever its height. It reaches down to
  * {@link HorizonRelief.base}, far below the route, so a ray that passes over
@@ -3172,6 +3185,8 @@ export class HorizonRing {
   readonly #horizon = new Color();
   /** The relief the positions were last built for, so a frame that did not change it costs nothing. */
   #built: HorizonRelief | undefined;
+  /** The crest floor they were last built for. @see update */
+  #floor = Number.NEGATIVE_INFINITY;
 
   constructor() {
     this.#geometry.setAttribute('position', new BufferAttribute(this.#positions, 3));
@@ -3199,15 +3214,44 @@ export class HorizonRing {
     return this.#mesh;
   }
 
-  /** Centres the ring on the camera, and colours it from this frame's world. */
-  update(relief: HorizonRelief, world: WorldStyle, pose: CameraPose): void {
-    if (this.#built !== relief) {
+  /** The colour the foot was last drawn in, linear. @see horizonColoursOf */
+  get foot(): readonly [number, number, number] {
+    return [this.#horizon.r, this.#horizon.g, this.#horizon.b];
+  }
+
+  /**
+   * Centres the ring on the camera, and colours it from this frame's world
+   * and `horizon` — the colour the view's fog is this frame, in linear light.
+   *
+   * `crestFloor` is the lowest any crest is drawn, in local metres, reached by
+   * lifting the whole ridge so its shape is kept: nothing in
+   * the stylised world, and in the realistic world the photograph's own
+   * skyline (`realistic-light.ts` §`skylineCrestFloor`, #544) — which follows
+   * the eye and binds on practically every realistic frame, so there the
+   * lifted ridge moves up and down with the rider. `hazeShare`
+   * is how much of `horizon` the ridge carries: {@link HORIZON_HAZE_SHARE},
+   * or in the realistic world `realistic-light.ts` §`REALISTIC_HORIZON_HAZE_SHARE`.
+   */
+  update(
+    relief: HorizonRelief,
+    world: WorldStyle,
+    pose: CameraPose,
+    horizon: { readonly r: number; readonly g: number; readonly b: number },
+    crestFloor = Number.NEGATIVE_INFINITY,
+    hazeShare = HORIZON_HAZE_SHARE,
+  ): void {
+    if (this.#built !== relief || this.#floor !== crestFloor) {
       this.#built = relief;
+      this.#floor = crestFloor;
+      // #544: the WHOLE ridge is lifted until its lowest crest meets the
+      // floor, never each crest clamped to it — clamping flattened every low
+      // crest onto one level line, which is a hard straight edge of its own.
+      const lift = ridgeLift(relief.tops, crestFloor);
       for (let segment = 0; segment <= HORIZON_SEGMENTS; segment += 1) {
         const angle = (segment / HORIZON_SEGMENTS) * Math.PI * 2;
         const x = Math.cos(angle) * HORIZON_RADIUS_METRES;
         const z = Math.sin(angle) * HORIZON_RADIUS_METRES;
-        const top = relief.tops[segment % HORIZON_SEGMENTS] as number;
+        const top = (relief.tops[segment % HORIZON_SEGMENTS] as number) + lift;
         const heights = [relief.base, relief.foot, top];
         for (let row = 0; row < 3; row += 1) {
           const at = (segment * 3 + row) * 3;
@@ -3218,8 +3262,8 @@ export class HorizonRing {
       }
       (this.#geometry.getAttribute('position') as BufferAttribute).needsUpdate = true;
     }
-    this.#horizon.setHex(world.horizonColour);
-    this.#haze.setHex(world.groundColour).lerp(this.#horizon, HORIZON_HAZE_SHARE);
+    this.#horizon.setRGB(horizon.r, horizon.g, horizon.b);
+    this.#haze.setHex(world.groundColour).lerp(this.#horizon, hazeShare);
     for (let segment = 0; segment <= HORIZON_SEGMENTS; segment += 1) {
       for (let row = 0; row < 3; row += 1) {
         const colour = row === 2 ? this.#haze : this.#horizon;
@@ -3230,8 +3274,12 @@ export class HorizonRing {
       }
     }
     (this.#geometry.getAttribute('color') as BufferAttribute).needsUpdate = true;
-    // Only the ground plane's position follows the camera; the heights are the
-    // route's, so a rider who climbs rises past the hills rather than with them.
+    // Only the ground plane's position follows the camera. In the STYLISED
+    // world the heights are the route's, so a rider who climbs rises past the
+    // hills rather than with them. In the REALISTIC world that is not so
+    // (#544): the crest floor follows the eye and binds on practically every
+    // frame, so the lifted ridge rises and falls with the rider one for one —
+    // `realistic-light.ts` §`skylineCrestFloor` has the arithmetic.
     this.#mesh.position.set(pose.x, 0, pose.z);
   }
 
@@ -3246,8 +3294,12 @@ export class HorizonRing {
  * of the ground colour is what is left of a hill 1.1 km away. This
  * repository's own choice, by eye, against the 95 % `world.ts` fogs the
  * corridor's own far end by.
+ *
+ * Exported so `terrain-belt.test.ts` can hold the realistic world's share
+ * above it, which is the direction `realistic-light.ts`
+ * §`REALISTIC_HORIZON_HAZE_SHARE` argues for.
  */
-const HORIZON_HAZE_SHARE = 0.7;
+export const HORIZON_HAZE_SHARE = 0.7;
 
 /**
  * The procedural surface detail — #425's half that needs no asset.
@@ -4015,6 +4067,12 @@ interface RealisticSky {
    */
   readonly zenith: LinearColour;
   readonly horizon: LinearColour;
+  /**
+   * The mean radiance just above the photograph's own skyline — what the fog
+   * and the horizon ring converge on in the realistic world (#544).
+   * @see REALISTIC_HORIZON_BAND
+   */
+  readonly skyline: LinearColour;
 }
 
 /** Everything the realistic world is drawn from, loaded once per tab. */
@@ -4206,6 +4264,8 @@ export async function loadRealisticWorld(
       // #475. @see WaterBelt.update
       zenith: skyBandRadiance(pixels, WATER_ZENITH_BAND[0], WATER_ZENITH_BAND[1]),
       horizon: skyBandRadiance(pixels, WATER_HORIZON_BAND[0], WATER_HORIZON_BAND[1]),
+      // #544. @see ThreeGameView.#updateWorld
+      skyline: skyBandRadiance(pixels, REALISTIC_HORIZON_BAND[0], REALISTIC_HORIZON_BAND[1]),
     };
     // ⚠️ Swapped in only once the new world is whole, and the old one released
     // only after the swap: a reload that failed half-way, or whose release
@@ -6169,6 +6229,35 @@ export function filterWaterRipplesOf(view: GameView, on: boolean): void {
 }
 
 /**
+ * Turns a view's realistic horizon back to the stylised world's pale one, or
+ * on again — #544. The browser gate's control: with it off, the pale band the
+ * owner saw on the tablet must read back off the drawing buffer, or the
+ * measurement with it on proves nothing about that band.
+ *
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`;
+ * the product never turns the photographed horizon off.
+ */
+export function horizonFromSkyOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.horizonFromSky(on);
+}
+
+/**
+ * The fog's colour and the horizon ring's foot in the last frame, linear —
+ * #544: they are one colour, so where a hill meets the fog there is no edge.
+ * `NaN`s for a view that is not this adapter's.
+ *
+ * @test-facing read by `game-harness.ts` for the browser gate's foot-equals-fog
+ * assertion; nothing in the render path needs to ask.
+ */
+export function horizonColoursOf(view: GameView): {
+  readonly fog: readonly [number, number, number];
+  readonly foot: readonly [number, number, number];
+} {
+  const none = [Number.NaN, Number.NaN, Number.NaN] as const;
+  return view instanceof ThreeGameView ? view.horizonColours : { fog: none, foot: none };
+}
+
+/**
  * Whether a view's bridges wear the realistic world's photographed stone —
  * #501's review. `#applyWorld` hands `BridgeBelt.setWorld` the loaded stone,
  * and without it the bridge falls back to a plain material with every other
@@ -6244,6 +6333,18 @@ class ThreeGameView implements GameView {
    */
   readonly #sky = new Color(UNSET_COLOUR);
   readonly #fog = new FogExp2(UNSET_COLOUR, 0);
+  /**
+   * What the far end of the world converges on this frame — the fog's colour
+   * and the horizon ring's (#544). @see #updateWorld
+   */
+  readonly #horizonColour = new Color(UNSET_COLOUR);
+  /**
+   * Whether a realistic frame's horizon is the photographed sky's — the
+   * product's only setting; `false` is the browser gate's control. @see horizonFromSkyOf
+   */
+  #horizonFromSky = true;
+  /** Whether this frame's horizon is the photographed sky's. Set by `#updateWorld`. */
+  #horizonIsSky = false;
   /** The ground beside the road — #458. @see TerrainBelt */
   readonly #terrain = new TerrainBelt();
   /** The hills on the horizon — #458. @see HorizonRing */
@@ -6370,7 +6471,18 @@ class ThreeGameView implements GameView {
     this.#updateWorld(frame.world);
     this.#world = frame.world;
     this.#terrain.update(frame.terrain.mesh, frame.world.groundColour);
-    this.#horizon.update(frame.terrain.horizon, frame.world, frame.camera);
+    this.#horizon.update(
+      frame.terrain.horizon,
+      frame.world,
+      frame.camera,
+      this.#horizonColour,
+      // #544: in the realistic world no crest stands below the photograph's
+      // own skyline, or the photographed field is drawn above the hills.
+      this.#horizonIsSky
+        ? skylineCrestFloor(cameraRig(frame.camera).eye.y, HORIZON_RADIUS_METRES)
+        : Number.NEGATIVE_INFINITY,
+      this.#horizonIsSky ? REALISTIC_HORIZON_HAZE_SHARE : HORIZON_HAZE_SHARE,
+    );
     this.#water.update(
       frame.water.surface,
       frame.world,
@@ -6481,6 +6593,20 @@ class ThreeGameView implements GameView {
   /** Which world the last rung this view was given is drawn in. @see drawnWorldOf */
   get drawnWorld(): QualitySettings['world'] {
     return this.#drawing;
+  }
+
+  /** @see horizonFromSkyOf */
+  horizonFromSky(on: boolean): void {
+    this.#horizonFromSky = on;
+  }
+
+  /** @see horizonColoursOf */
+  get horizonColours(): {
+    readonly fog: readonly [number, number, number];
+    readonly foot: readonly [number, number, number];
+  } {
+    const fog = this.#fog.color;
+    return { fog: [fog.r, fog.g, fog.b], foot: this.#horizon.foot };
   }
 
   /** @see filterWaterRipplesOf */
@@ -6621,7 +6747,8 @@ class ThreeGameView implements GameView {
    */
   #updateWorld(world: WorldStyle): void {
     this.#sky.setHex(world.skyColour);
-    this.#fog.color.setHex(world.horizonColour);
+    this.#horizonColour.setHex(world.horizonColour);
+    this.#horizonIsSky = false;
     this.#fog.density = world.fogDensity;
     // ⚠️ Every frame, like the fog and for the same reason: the world is a
     // function of the route and a renderer is handed a frame, not a route. A
@@ -6639,9 +6766,19 @@ class ThreeGameView implements GameView {
       const turn = skyRotation(loaded.sky.sunU, world.sun.x, world.sun.z);
       this.#scene.backgroundRotation.set(0, turn, 0);
       this.#scene.environmentRotation.set(0, turn, 0);
+      // #544: the far end converges on the sky DRAWN behind it. The stylised
+      // horizon is a pale haze the stylised sky dome is painted to meet; the
+      // photographed sky is darker than it, and every fogged surface and the
+      // whole horizon ring used to converge on the pale one — a white film in
+      // front of a grey sky, with a hard edge wherever it met either.
+      if (this.#horizonFromSky) {
+        this.#horizonColour.setRGB(...drawnHorizonColour(loaded.sky.skyline, intensity));
+        this.#horizonIsSky = true;
+      }
     } else {
       this.#lighting.apply(world.sun);
     }
+    this.#fog.color.copy(this.#horizonColour);
   }
 
   /**

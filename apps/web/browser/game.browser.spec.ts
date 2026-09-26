@@ -28,6 +28,7 @@ import { MINIMUM_RIDER_FRAME_SHARE, riderFrameBox } from '../src/game/camera';
 import type {
   LineMeasurement,
   PresenceCostMeasurement,
+  HorizonReading,
   RealisticMeasurement,
   RiderExtent,
 } from './game-harness';
@@ -2234,6 +2235,59 @@ test.describe('the realistic world — ADR 0026', () => {
     expect(measured.crankHeldPixels).toBe(0);
   });
 
+  test('draws the distant hills between the ground and the sky, converging on the sky, with no hard edge — #544', async ({
+    harnessRun,
+  }) => {
+    const measured = await realistic(harnessRun);
+    const describe = (each: HorizonReading): string =>
+      `${each.frame} ${String(each.offAxisDegrees)}°: sky ${each.sky.toFixed(4)}, ridge ` +
+      `${each.ridge.toFixed(4)}, ground ${each.ground.toFixed(4)}, share ${shareOf(each).toFixed(2)}, ` +
+      `crest ${crestContrast(each).toFixed(3)}:1, darkest above the relief ${each.darkestAboveRelief.toFixed(4)}`;
+    console.log(
+      `the distant hills — ${measured.horizon.map(describe).join('; ')} | control: ` +
+        `${measured.horizonControl.map(describe).join('; ')}`,
+    );
+    expect(measured.horizon.length).toBe(4);
+    expect(measured.horizonControl.length).toBe(4);
+    for (const each of measured.horizon) {
+      // A hill is darker than the sky it stands against and lighter than the
+      // ground it is made of…
+      expect(each.sky, describe(each)).toBeGreaterThan(each.ground);
+      // …and nearer the sky: "converges on the sky's".
+      expect(shareOf(each), describe(each)).toBeGreaterThan(CONVERGED_SHARE);
+      expect(shareOf(each), describe(each)).toBeLessThanOrEqual(1);
+      // No hard edge where the hill meets the sky.
+      expect(crestContrast(each), describe(each)).toBeLessThanOrEqual(MAXIMUM_CREST_CONTRAST);
+      // And above where the route's own relief would have put the crest there
+      // is hill or sky, never the photograph's field and treeline — which are
+      // darker than any lit ground in this world.
+      expect(each.darkestAboveRelief, describe(each)).toBeGreaterThan(each.ground);
+    }
+    // …and none where it meets the fog: the ring's foot IS the fog's colour.
+    expect(measured.horizonColours.foot).toEqual(measured.horizonColours.fog);
+    // The control's fog and foot are the stylised world's own horizon — what
+    // the owner saw — and not the photographed sky's.
+    expect(measured.horizonControlExpected.length).toBe(3);
+    expect(measured.horizonColoursControl.foot).toEqual(measured.horizonColoursControl.fog);
+    measured.horizonControlExpected.forEach((channel, index) =>
+      expect(measured.horizonColoursControl.fog[index]).toBeCloseTo(channel, 4),
+    );
+    expect(measured.horizonColoursControl.fog).not.toEqual(measured.horizonColours.fog);
+    // The control is today's pale band, and it must fail where the owner saw
+    // it fail: on the level, a ridge BRIGHTER than the sky behind it…
+    const control = (frame: string): HorizonReading[] =>
+      measured.horizonControl.filter((each) => each.frame === frame);
+    for (const each of control('level')) {
+      expect(shareOf(each), describe(each)).toBeGreaterThan(1);
+    }
+    // …and from the top of a descent, a pale ridge under the photograph's own
+    // field and treeline: a hard edge.
+    for (const each of control('descent')) {
+      expect(crestContrast(each), describe(each)).toBeGreaterThan(MAXIMUM_CREST_CONTRAST);
+      expect(each.darkestAboveRelief, describe(each)).toBeLessThan(each.ground);
+    }
+  });
+
   test('steps down to the stylised world whole, and publishes what realism costs', async ({
     harnessRun,
   }) => {
@@ -2256,3 +2310,39 @@ test.describe('the realistic world — ADR 0026', () => {
     );
   });
 });
+
+/**
+ * How far from the ground toward the sky a distant ridge must be drawn, as a
+ * share of the luminance between them: **more than 0.5**, so it is nearer the
+ * sky's — #544's "converges on the sky's". Measured 0.57 to 0.78 across the
+ * four columns on 2026-09-26, and 1.53 to 1.63 on the level in the control
+ * (brighter than the sky: the pale band).
+ */
+const CONVERGED_SHARE = 0.5;
+
+/**
+ * The most contrast there may be across a distant ridge's crest, as a WCAG 2.2
+ * ratio of the sky 4 to 9 pixels above it and the ridge 4 to 9 below: **1.35**
+ * — #544's "no hard straight edge", stated as a number. Measured 1.10 to 1.28
+ * on 2026-09-26, against 4.3 to 4.8 in the control from the top of a descent,
+ * where the pale ridge stood under the photograph's dark treeline. For scale,
+ * WCAG asks 3:1 of a boundary that must be SEEN; 1.35 is well under it.
+ */
+const MAXIMUM_CREST_CONTRAST = 1.35;
+
+/**
+ * Where a ridge's luminance lies between the ground's and the sky's behind it
+ * — #544: 0 is the ground's own, 1 the sky's, above 1 brighter than the sky.
+ */
+function shareOf(reading: HorizonReading): number {
+  return (reading.ridge - reading.ground) / (reading.sky - reading.ground);
+}
+
+/** The WCAG 2.2 contrast ratio across a ridge's crest. */
+function crestContrast(reading: HorizonReading): number {
+  const [light, dark] = [
+    Math.max(reading.sky, reading.ridge),
+    Math.min(reading.sky, reading.ridge),
+  ];
+  return (light + 0.05) / (dark + 0.05);
+}
