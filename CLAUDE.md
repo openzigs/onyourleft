@@ -3569,6 +3569,8 @@ top of an issue **supersedes its body**.
 | Why a workout target is branded, and which two numbers it stops being confused | `packages/domain/src/workout/workout.ts` §`ThresholdShare` |
 | Why a workout is expanded into a timeline instead of walked with a cursor | `packages/domain/src/workout/timeline.ts` |
 | How the ERG spiral of death is told apart from a rider grinding on purpose | `packages/domain/src/workout/erg-safety.ts` §`assessErgCadence` |
+| Why a target typed into the Ride screen's ERG form is eased when the rider stalls, and why it goes back on by itself | `apps/web/src/ride/manual-erg.ts`, `packages/domain/src/workout/erg-safety.ts` §`createErgRescue`, [#567](https://github.com/openzigs/onyourleft/issues/567) |
+| Why a silent cadence sensor does not end a stall rescue | `packages/domain/src/workout/erg-safety.ts` §`ErgRescue` |
 | Why the workout clock keeps running while a target is unacknowledged, and what waits instead | `packages/domain/src/workout/player.ts` §"An interval has not begun until its target is acknowledged" |
 | Why a quantised acknowledgement is not a change, and the busy loop that follows from reading it as one | `packages/domain/src/workout/player.ts` §`acknowledge` |
 | Why an acknowledged, unchanged ERG target is not written again, and what notices a trainer that lost the session instead | `packages/domain/src/workout/player.ts` §"An acknowledged target is not written again (#542)", [#542](https://github.com/openzigs/onyourleft/issues/542) |

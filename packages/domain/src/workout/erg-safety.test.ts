@@ -21,6 +21,8 @@ import { revolutionsPerMinute, seconds } from '../quantities';
 import {
   assessErgCadence,
   COLLAPSE_RPM,
+  createErgRescue,
+  RECOVERING_REASON,
   RELIEF_SHARE,
   STALLING_CADENCE,
   STOPPED_CADENCE,
@@ -165,5 +167,102 @@ describe('the window', () => {
     const readings = history(10, [80, 74, 68, 62, 56]);
     expect(assessErgCadence(readings, seconds(10)).kind).toBe('spiralling');
     expect(assessErgCadence(readings, seconds(10 + TREND_WINDOW + 1)).kind).toBe('holding');
+  });
+});
+
+/**
+ * #567: the rescue latch, shared by the workout player and the Ride screen's
+ * manual ERG. What the player's own tests say about the latch still holds
+ * through the player; these pin the object on its own, and the one rule it
+ * adds.
+ */
+describe('the rescue latch — #567', () => {
+  /** One reading per second from `from` to `to` inclusive, at `cadence`. */
+  const steady = (from: number, to: number, cadence: number): CadenceReading[] =>
+    Array.from({ length: to - from + 1 }, (_, index) => ({
+      at: seconds(from + index),
+      cadence: revolutionsPerMinute(cadence),
+    }));
+
+  it('holds the full target for a rider who never spiralled', () => {
+    const rescue = createErgRescue();
+    expect(rescue.judge(steady(0, 10, 90), seconds(10))).toEqual({ kind: 'full' });
+  });
+
+  it('eases a spiralling rider to the relief share, with the verdict’s reason', () => {
+    const rescue = createErgRescue();
+    const step = rescue.judge(history(10, [80, 74, 68, 62, 56]), seconds(10));
+    expect(step.kind).toBe('relief');
+    expect(step.kind === 'relief' ? step.share : undefined).toBe(RELIEF_SHARE);
+  });
+
+  it('asks for the floor when the rider has stopped', () => {
+    const rescue = createErgRescue();
+    expect(rescue.judge(history(10, [30, 20, 8]), seconds(10)).kind).toBe('floor');
+  });
+
+  it('keeps the relief on until a whole window has held steady, then lets the full target back', () => {
+    const rescue = createErgRescue();
+    const readings = history(10, [80, 74, 68, 62, 56]);
+    expect(rescue.judge(readings, seconds(10)).kind).toBe('relief');
+    // Cadence back up and steady from 11: the verdict holds from the moment the
+    // collapse leaves the eight-second window, and the latch counts from there.
+    const recovering = [...readings, ...steady(11, 40, 85)];
+    const steps: string[] = [];
+    for (let at = 11; at <= 40; at += 1) {
+      steps.push(rescue.judge(recovering, seconds(at)).kind);
+    }
+    // Holding from 11, so released a whole window later — at 19, index 8.
+    const firstFull = steps.indexOf('full');
+    expect(firstFull).toBe(TREND_WINDOW);
+    expect(steps.slice(0, firstFull).every((kind) => kind === 'relief')).toBe(true);
+    expect(steps.slice(firstFull).every((kind) => kind === 'full')).toBe(true);
+  });
+
+  it('says why the relief is still on once cadence is back', () => {
+    const rescue = createErgRescue();
+    const readings = history(10, [80, 74, 68, 62, 56]);
+    rescue.judge(readings, seconds(10));
+    const later = [...readings, ...steady(11, 30, 85)];
+    expect(rescue.judge(later, seconds(19))).toEqual({
+      kind: 'relief',
+      share: RELIEF_SHARE,
+      reason: RECOVERING_REASON,
+    });
+  });
+
+  it('does not count a silent sensor as recovery', () => {
+    // A rider stalls, and their cadence sensor then says nothing. Eight seconds
+    // of nothing used to put the full target back on them.
+    const rescue = createErgRescue();
+    const stalled = history(10, [30, 20, 8]);
+    expect(rescue.judge(stalled, seconds(10)).kind).toBe('floor');
+    // Once the stall has left the window there is nothing to judge: relief,
+    // never the full target, however long the silence lasts.
+    for (let at = 11; at <= 60; at += 1) {
+      const kind = rescue.judge(stalled, seconds(at)).kind;
+      // Floor while two of the readings are still in the window, then relief.
+      expect(kind).toBe(at < 10 + TREND_WINDOW ? 'floor' : 'relief');
+    }
+  });
+
+  it('forgets a rescue on reset', () => {
+    const rescue = createErgRescue();
+    rescue.judge(history(10, [80, 74, 68, 62, 56]), seconds(10));
+    rescue.reset();
+    expect(rescue.judge(steady(20, 30, 90), seconds(30))).toEqual({ kind: 'full' });
+  });
+
+  it('does not end a rescue on a trainer that has stopped reporting cadence at all', () => {
+    const rescue = createErgRescue();
+    rescue.judge(history(10, [80, 74, 68, 62, 56]), seconds(10));
+    for (let at = 11; at <= 40; at += 1) {
+      expect(rescue.judge(undefined, seconds(at)).kind).toBe('relief');
+    }
+  });
+
+  it('never rescues a trainer that reports no cadence', () => {
+    const rescue = createErgRescue();
+    expect(rescue.judge(undefined, seconds(10))).toEqual({ kind: 'full' });
   });
 });

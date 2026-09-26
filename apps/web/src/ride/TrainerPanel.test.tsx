@@ -45,6 +45,7 @@ const snapshot = (overrides: Partial<TrainerSnapshot> = {}): TrainerSnapshot => 
   lost: undefined,
   refusal: undefined,
   releaseFault: undefined,
+  ergRescue: undefined,
   ...overrides,
 });
 
@@ -271,5 +272,40 @@ describe('control is its own step, and ERG is one thing to do with it — #503',
     expect(text).toContain('may still be holding 250 W');
     expect(text).toContain('Ask the trainer for control');
     expect(mounted?.container.querySelector('#oyl-erg-target')).toBeNull();
+  });
+});
+
+describe('a hand-set target the stall rescue eased — #567', () => {
+  const holding = (): Partial<TrainerSnapshot> => ({
+    controllable: true,
+    canSetPower: true,
+    hasControl: true,
+    target: { kind: 'confirmed', target: watts(100) },
+  });
+
+  it('says it was eased, why, the rider’s own number, and that it comes back by itself', async () => {
+    const text = await render(
+      snapshot({
+        ...holding(),
+        ergRescue: {
+          target: watts(150),
+          holding: 'relief',
+          reason:
+            'Cadence is falling under the target, so it has been eased to let you spin back up.',
+        },
+      }),
+    );
+    expect(text).toContain('Eased');
+    expect(text).toContain('Cadence is falling under the target');
+    expect(text).toContain('Your 150 W comes back by itself');
+    expect(text).toContain('press End ERG to leave it off');
+    // What the machine holds is still said as what it confirmed.
+    expect(text).toContain('Holding 100 W.');
+  });
+
+  it('says nothing about easing while the rider’s own target is on — the control', async () => {
+    const text = await render(snapshot(holding()));
+    expect(text).not.toContain('Eased');
+    expect(text).not.toContain('comes back by itself');
   });
 });

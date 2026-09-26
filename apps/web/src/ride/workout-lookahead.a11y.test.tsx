@@ -60,6 +60,7 @@ const trainer: TrainerSnapshot = {
   lost: undefined,
   refusal: undefined,
   releaseFault: undefined,
+  ergRescue: undefined,
 };
 
 function at(elapsedSeconds: number, status: RideWorkoutSnapshot['status'] = 'running') {

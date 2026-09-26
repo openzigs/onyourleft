@@ -38,10 +38,12 @@ export {
 export type { WorkoutSegment, WorkoutTimeline } from './timeline';
 export { expandWorkout, segmentAt, targetAt } from './timeline';
 
-export type { CadenceReading, ErgVerdict } from './erg-safety';
+export type { CadenceReading, ErgRescue, ErgRescueStep, ErgVerdict } from './erg-safety';
 export {
   assessErgCadence,
   COLLAPSE_RPM,
+  createErgRescue,
+  RECOVERING_REASON,
   RELIEF_SHARE,
   STALLING_CADENCE,
   STOPPED_CADENCE,

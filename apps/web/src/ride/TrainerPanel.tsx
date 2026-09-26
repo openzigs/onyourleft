@@ -66,6 +66,7 @@ import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
 
 import type { TrainerSnapshot } from './controller';
+import type { ManualErgRescue } from './manual-erg';
 
 /**
  * Human words for why control went. Each is a different thing to do next.
@@ -257,6 +258,19 @@ export function TrainerPanel({
       )}
 
       {/*
+        #567: a hand-set target the stall rescue has eased. Says the rider's
+        own number, why it is not on the machine, and that it comes back by
+        itself — the decision #567 asked to be stated. Not `live`, for the
+        reason *Control lost* above is not: the ONE ride region speaks, and
+        this is not the answer to a press.
+      */}
+      {trainer.ergRescue === undefined ? null : (
+        <StatusMessage tone="warning" label="Eased">
+          {rescueSentence(trainer.ergRescue)}
+        </StatusMessage>
+      )}
+
+      {/*
         ⚠️ **These two stay `live`, and that is decided rather than missed
         (#445).** Each is the answer to the rider's OWN press — *Set target*, or
         *Ask the trainer for control* — on the form their focus is in, so it is
@@ -376,4 +390,18 @@ export function targetSentence(trainer: TrainerSnapshot): string {
         ? 'No target set. The trainer is following your effort.'
         : 'No target set.';
   }
+}
+
+/**
+ * What the panel says while a hand-set target is eased — #567.
+ *
+ * ⚠️ **It states the decision**: the rider's target is put back by itself once
+ * cadence has held steady, which is what a workout does (`manual-erg.ts` §"After
+ * the rider recovers"). *End ERG*, beside it, is the way to keep it off.
+ */
+function rescueSentence(rescue: ManualErgRescue): string {
+  return (
+    `${rescue.reason} Your ${String(rescue.target)} W comes back by itself once your ` +
+    'cadence has held steady for eight seconds — press End ERG to leave it off.'
+  );
 }
