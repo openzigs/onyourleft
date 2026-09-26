@@ -29,6 +29,7 @@ import {
   thresholdShare,
   watts,
   type CadenceReading,
+  type Seconds,
   type Workout,
   type WorkoutBlock,
 } from '@onyourleft/domain';
@@ -126,6 +127,31 @@ async function ride(
 }
 
 /**
+ * {@link ride}, with the machine's clock kept to the ride's.
+ *
+ * ⚠️ The bench's clock moves one second per control point write. Until #542
+ * the player rewrote its target every second, so that was one second per tick
+ * by accident — and a test reading the machine's own power stream was reading
+ * a stream the refresh was clocking. A steady block is written once now, so a
+ * tick that wrote nothing advances the machine itself.
+ */
+async function rideClocked(
+  trainer: { readonly wire: readonly unknown[]; readonly bench: { advance(by: Seconds): void } },
+  session: WorkoutSession,
+  fromSecond: number,
+  toSecond: number,
+): Promise<void> {
+  for (let second = fromSecond; second <= toSecond; second += 1) {
+    const before = trainer.wire.length;
+    session.tick(seconds(second));
+    await session.settled();
+    if (trainer.wire.length === before) {
+      trainer.bench.advance(seconds(1));
+    }
+  }
+}
+
+/**
  * Let a release run out. It is not the writer's, so `settled()` does not wait
  * for it: a Stop queued behind the control's own promise chain lands a few
  * microtasks after the tick that asked for it.
@@ -189,7 +215,7 @@ describe('a completed ERG workout holds the target profile', () => {
     const TOLERANCE_WATTS = 1;
     const { trainer, session } = await loop();
     session.start(seconds(0));
-    await ride(session, 0, 11);
+    await rideClocked(trainer, session, 0, 11);
 
     // Group the power stream by the plan's interval, discarding the first
     // reading of each — the one that may predate the setpoint reaching the
@@ -606,19 +632,91 @@ describe('the ERG spiral is broken against a real control point', () => {
 });
 
 describe('a refused write is reported and retried, not thrown', () => {
-  it('tells the rider control was lost, and takes it back on the next tick', async () => {
-    // Control permission is revoked by the machine. The next setpoint is
-    // refused, which the loop turns into a fault a screen can show — and the
-    // workout carries on rather than ending.
+  it('tells the rider control was lost, and asks again on the next tick', async () => {
+    // Control permission is revoked by the machine. The next setpoint — the
+    // second interval's, since #542 stopped the first being rewritten every
+    // second — is refused, which the loop turns into a fault a screen can show,
+    // and the workout carries on rather than ending. (In the client the `0xFF`
+    // status also reaches the ride controller's `onControlLost`, which pauses
+    // the workout; that is `controller.test.ts`'s, not this file's.)
     const { trainer, session } = await loop();
     session.start(seconds(0));
     await ride(session, 0, 1);
 
     trainer.handle().script({ kind: 'control-permission-lost' });
-    await ride(session, 2, 3);
+    await ride(session, 2, 6);
 
     expect(session.state().lastFault).toContain('trainer');
     expect(session.state().player.status).toBe('running');
+    // A refused write is the one way an unchanged target is asked for again:
+    // once control is taken back, the next tick writes the same 250 W with no
+    // interval boundary to prompt it.
+    await trainer.control.requestControl();
+    const before = trainer.wire.filter((entry) => entry.direction === 'write').length;
+    await ride(session, 7, 7);
+    const writes = trainer.wire.filter((entry) => entry.direction === 'write');
+    expect(writes.slice(before).map((entry) => entry.bytes)).toStrictEqual([targetWrite(250)]);
+    expect(trainer.targetPowerOnTheTrainer()).toBe(250);
+  });
+});
+
+describe('an acknowledged, unchanged target is written once — #542', () => {
+  // ⚠️ Validation 0002 Part S, 2026-09-25: `05 C8 00` written fourteen times in
+  // sixteen seconds, every one acknowledged `80 05 01`. The player refreshed an
+  // unchanged target every second. What a machine that revokes control does is
+  // say so, and the case above is that path.
+  const targetWrites = (trainer: {
+    readonly wire: readonly { direction: string; bytes: readonly number[] }[];
+  }) =>
+    trainer.wire
+      .filter((entry) => entry.direction === 'write' && entry.bytes[0] === SET_TARGET_POWER)
+      .map((entry) => entry.bytes);
+
+  it('writes a steady minute once, against a machine that answers 200 W as 200 W', async () => {
+    const { trainer, session } = await loop(() => expandWorkout(workout([steady(90, 0.8)])));
+    session.start(seconds(0));
+    await rideClocked(trainer, session, 0, 59);
+
+    expect(targetWrites(trainer)).toStrictEqual([targetWrite(200)]);
+    expect(trainer.targetPowerOnTheTrainer()).toBe(200);
+    expect(session.state().holding).toBe(200);
+  });
+
+  it('still eases at once: a pause after a long steady stretch writes the floor on that tick — #441', async () => {
+    const { trainer, session } = await loop(
+      () => expandWorkout(workout([steady(90, 0.8)])),
+      MEASURED_TRAINER(),
+    );
+    session.start(seconds(0));
+    await rideClocked(trainer, session, 0, 30);
+    session.pause(seconds(31));
+    await session.settled();
+
+    expect(targetWrites(trainer)).toStrictEqual([targetWrite(200), targetWrite(FLOOR_WATTS)]);
+    expect(trainer.targetPowerOnTheTrainer()).toBe(FLOOR_WATTS);
+  });
+
+  it('still relieves at once: a collapse after a long steady stretch writes the relief on that tick — #441', async () => {
+    const { trainer, session } = await loop(() => expandWorkout(workout([steady(90, 1.0)])));
+    session.start(seconds(0));
+    // Twenty steady seconds at 90 rpm, written once.
+    await ride(session, 0, 20, (second) => ({
+      at: seconds(second),
+      cadence: revolutionsPerMinute(90),
+    }));
+    expect(targetWrites(trainer)).toStrictEqual([targetWrite(250)]);
+
+    // Then the fight is lost, and the relief goes on the tick the verdict turns.
+    const collapse = [80, 70, 60, 52, 46, 42];
+    await ride(session, 21, 26, (second) => ({
+      at: seconds(second),
+      cadence: revolutionsPerMinute(collapse[second - 21] ?? 42),
+    }));
+    const writes = targetWrites(trainer);
+    expect(writes.length).toBeGreaterThan(1);
+    const relieved = (writes[1]?.[1] ?? 0) + ((writes[1]?.[2] ?? 0) << 8);
+    expect(relieved).toBeLessThan(250);
+    expect(trainer.targetPowerOnTheTrainer()).toBeLessThan(250);
   });
 });
 

@@ -2109,14 +2109,10 @@ describe('#516 — what the camera’s answer sends a trainer mid-workout', () =
     await ride(rig, DEFAULT_AUTO_PAUSE_AFTER_SECONDS + 3);
     await flushMicrotasks(20);
     expect(rig.controller.getSnapshot().phase).toBe('paused');
-    // Until the engine paused, the workout went on re-asserting its OWN target
-    // as it does on any ride; what the pause added is one Set Target Power at
+    // The workout's own target was acknowledged before this and is not
+    // written again (#542); what the pause added is one Set Target Power at
     // the floor the machine reported — no Stop, no Reset, no Request Control.
-    const since = rig.written.slice(before);
-    expect(since.at(-1)).toStrictEqual([SET_TARGET_POWER, 30, 0]);
-    for (const write of since.slice(0, -1)) {
-      expect(write).toStrictEqual([SET_TARGET_POWER, OWN_TARGET, 0]);
-    }
+    expect(rig.written.slice(before)).toStrictEqual([[SET_TARGET_POWER, 30, 0]]);
     expect(rig.targetOnTheTrainer()).toBe(30);
 
     // And it stays one write while nobody is there.
@@ -2134,11 +2130,9 @@ describe('#516 — what the camera’s answer sends a trainer mid-workout', () =
     await ride(rig, DEFAULT_AUTO_PAUSE_AFTER_SECONDS + 23);
     await flushMicrotasks(20);
     expect(rig.controller.getSnapshot().phase).toBe('recording');
-    // The workout's own re-assertions, and nothing at the floor.
-    expect(rig.written.slice(before).length).toBeGreaterThan(0);
-    for (const write of rig.written.slice(before)) {
-      expect(write).toStrictEqual([SET_TARGET_POWER, OWN_TARGET, 0]);
-    }
+    // Nothing at all: the workout's own target was acknowledged before this
+    // and is not re-asserted every second since #542, and nothing eased it.
+    expect(rig.written.slice(before)).toStrictEqual([]);
     expect(rig.targetOnTheTrainer()).toBe(OWN_TARGET);
     rig.controller.dispose();
   });

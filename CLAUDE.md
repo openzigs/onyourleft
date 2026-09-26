@@ -3556,6 +3556,7 @@ top of an issue **supersedes its body**.
 | How the ERG spiral of death is told apart from a rider grinding on purpose | `packages/domain/src/workout/erg-safety.ts` §`assessErgCadence` |
 | Why the workout clock keeps running while a target is unacknowledged, and what waits instead | `packages/domain/src/workout/player.ts` §"An interval has not begun until its target is acknowledged" |
 | Why a quantised acknowledgement is not a change, and the busy loop that follows from reading it as one | `packages/domain/src/workout/player.ts` §`acknowledge` |
+| Why an acknowledged, unchanged ERG target is not written again, and what notices a trainer that lost the session instead | `packages/domain/src/workout/player.ts` §"An acknowledged target is not written again (#542)", [#542](https://github.com/openzigs/onyourleft/issues/542) |
 | Which single place rebases the workout offset after a pause, and why the other two do not | `packages/domain/src/workout/player.ts` §`resume` |
 | Why a workout player cannot send an FTMS Reset even by mistake | `packages/sensors/protocol/src/erg-writer.ts` §`ErgSink` |
 | What the end of a workout sends, what an ease inside one sends, and which object may reach for each | `apps/web/src/workout/session.ts` §`finish`, §`ease`, §`WorkoutTrainer`, §4h |

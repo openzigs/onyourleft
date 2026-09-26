@@ -156,8 +156,16 @@ async function rideAndRecord(): Promise<Uint8Array> {
   // own clock rather than on one this test invented. See `settleAt`.
   session.start(seconds(0));
   for (let second = 0; second <= 12; second += 1) {
+    // ⚠️ The bench's clock moves one second per control point write. Until
+    // #542 the player rewrote its target every second, so that was one second
+    // per tick by accident; a steady block is written once now, so a tick
+    // that wrote nothing moves the machine's clock itself.
+    const writes = trainer.wire.length;
     session.tick(seconds(second));
     await session.settled();
+    if (trainer.wire.length === writes) {
+      trainer.bench.advance(seconds(1));
+    }
   }
   expect(session.state().player.status).toBe('finished');
 

@@ -116,7 +116,6 @@ export interface WorkoutSessionOptions {
   readonly powerFloor: Watts;
   /** Told what happened, so a screen can re-render. */
   readonly onChange?: ((state: WorkoutSessionState) => void) | undefined;
-  readonly refreshSeconds?: number | undefined;
 }
 
 export interface WorkoutSessionState {
@@ -178,11 +177,7 @@ export interface WorkoutSession {
 export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSession {
   const { timeline, thresholdPower, control, powerFloor, onChange } = options;
 
-  const player: WorkoutPlayer = createWorkoutPlayer({
-    timeline,
-    thresholdPower,
-    ...(options.refreshSeconds === undefined ? {} : { refreshSeconds: options.refreshSeconds }),
-  });
+  const player: WorkoutPlayer = createWorkoutPlayer({ timeline, thresholdPower });
   const writer: ErgWriter = createErgWriter(control);
 
   let cadence: CadenceReading[] = [];
