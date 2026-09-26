@@ -60,7 +60,7 @@
 
 import { useState, type FormEvent, type JSX } from 'react';
 
-import { watts, type Watts } from '@onyourleft/domain';
+import { TREND_WINDOW, watts, type Watts } from '@onyourleft/domain';
 
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
@@ -398,10 +398,13 @@ export function targetSentence(trainer: TrainerSnapshot): string {
  * ⚠️ **It states the decision**: the rider's target is put back by itself once
  * cadence has held steady, which is what a workout does (`manual-erg.ts` §"After
  * the rider recovers"). *End ERG*, beside it, is the way to keep it off.
+ *
+ * The window is read off {@link TREND_WINDOW} rather than typed, so the
+ * sentence cannot go quietly wrong when #137 recalibrates it (PR #582's review).
  */
 function rescueSentence(rescue: ManualErgRescue): string {
   return (
     `${rescue.reason} Your ${String(rescue.target)} W comes back by itself once your ` +
-    'cadence has held steady for eight seconds — press End ERG to leave it off.'
+    `cadence has held steady for ${String(TREND_WINDOW)} seconds — press End ERG to leave it off.`
   );
 }

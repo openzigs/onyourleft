@@ -21,6 +21,7 @@ import { revolutionsPerMinute, seconds } from '../quantities';
 import {
   assessErgCadence,
   COLLAPSE_RPM,
+  CADENCE_SILENT_REASON,
   createErgRescue,
   RECOVERING_REASON,
   RELIEF_SHARE,
@@ -231,18 +232,76 @@ describe('the rescue latch — #567', () => {
     });
   });
 
-  it('does not count a silent sensor as recovery', () => {
+  it('does not count a silent sensor as recovery, and does not step a stopped rider UP on it', () => {
     // A rider stalls, and their cadence sensor then says nothing. Eight seconds
-    // of nothing used to put the full target back on them.
+    // of nothing used to put the full target back on them; until PR #582's
+    // review it still stepped them from the floor up to relief and left them
+    // there. Silence holds the floor now, for as long as it lasts.
     const rescue = createErgRescue();
     const stalled = history(10, [30, 20, 8]);
     expect(rescue.judge(stalled, seconds(10)).kind).toBe('floor');
-    // Once the stall has left the window there is nothing to judge: relief,
-    // never the full target, however long the silence lasts.
+    for (let at = 11; at <= 70; at += 1) {
+      const step = rescue.judge(stalled, seconds(at));
+      expect(step.kind).toBe('floor');
+      if (at >= 10 + TREND_WINDOW) {
+        // The stall has left the window: nothing is heard, and the panel must
+        // not call that recovery.
+        expect(step.kind === 'floor' ? step.reason : undefined).toBe(CADENCE_SILENT_REASON);
+      }
+    }
+  });
+
+  it('holds the floor through the review’s probe — a stall at 3 s, then nothing, to 100 s', () => {
+    // PR #582's review, verbatim: 60, 60, 5, 5 rpm at t = 0–3 and nothing
+    // after gave `floor` for t = 3–10 and `relief` from t = 11 onward.
+    const rescue = createErgRescue();
+    const probe = history(3, [60, 60, 5, 5]);
+    for (let at = 3; at <= 100; at += 1) {
+      expect(rescue.judge(probe, seconds(at)).kind).toBe('floor');
+    }
+  });
+
+  it('holds the floor when the trainer stops reporting cadence at all after a stall', () => {
+    const rescue = createErgRescue();
+    expect(rescue.judge(history(10, [30, 20, 8]), seconds(10)).kind).toBe('floor');
+    for (let at = 11; at <= 100; at += 1) {
+      expect(rescue.judge(undefined, seconds(at)).kind).toBe('floor');
+    }
+  });
+
+  it('after a silent stall, steps back up only on HEARD cadence — relief, then full a whole window later', () => {
+    const rescue = createErgRescue();
+    const stalled = history(10, [30, 20, 8]);
+    rescue.judge(stalled, seconds(10));
+    for (let at = 11; at <= 70; at += 1) {
+      rescue.judge(stalled, seconds(at));
+    }
+    // The rider pedals again from 71, and the sensor hears it.
+    const back = [...stalled, ...steady(71, 100, 85)];
+    const steps: string[] = [];
+    for (let at = 71; at <= 100; at += 1) {
+      steps.push(rescue.judge(back, seconds(at)).kind);
+    }
+    // One reading at 71 is not a window: still the floor. Two readings from 72
+    // are heard and holding: relief, the steady clock starting there.
+    expect(steps[0]).toBe('floor');
+    const firstFull = steps.indexOf('full');
+    expect(steps.slice(1, firstFull).every((kind) => kind === 'relief')).toBe(true);
+    expect(firstFull).toBe(1 + TREND_WINDOW);
+    expect(steps.slice(firstFull).every((kind) => kind === 'full')).toBe(true);
+  });
+
+  it('keeps a spiralling rider’s relief through silence, without calling it recovery', () => {
+    const rescue = createErgRescue();
+    const readings = history(10, [80, 74, 68, 62, 56]);
+    expect(rescue.judge(readings, seconds(10)).kind).toBe('relief');
     for (let at = 11; at <= 60; at += 1) {
-      const kind = rescue.judge(stalled, seconds(at)).kind;
-      // Floor while two of the readings are still in the window, then relief.
-      expect(kind).toBe(at < 10 + TREND_WINDOW ? 'floor' : 'relief');
+      const step = rescue.judge(readings, seconds(at));
+      expect(step.kind).toBe('relief');
+      expect(step.kind === 'relief' ? step.share : undefined).toBe(RELIEF_SHARE);
+      if (at >= 10 + TREND_WINDOW) {
+        expect(step.kind === 'relief' ? step.reason : undefined).toBe(CADENCE_SILENT_REASON);
+      }
     }
   });
 

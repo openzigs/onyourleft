@@ -43,6 +43,7 @@ export {
   assessErgCadence,
   COLLAPSE_RPM,
   createErgRescue,
+  CADENCE_SILENT_REASON,
   RECOVERING_REASON,
   RELIEF_SHARE,
   STALLING_CADENCE,

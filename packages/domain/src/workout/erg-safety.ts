@@ -201,6 +201,15 @@ export const RECOVERING_REASON =
   'Cadence is recovering, so the target stays eased until it has held steady.';
 
 /**
+ * Why a rescue is held where it is while no cadence is being heard — PR #582's
+ * review. ⚠️ Not {@link RECOVERING_REASON}: a sensor that has gone quiet is no
+ * evidence of recovery, and saying "recovering" over silence is a false
+ * statement to a rider who may be stopped.
+ */
+export const CADENCE_SILENT_REASON =
+  'No cadence is being reported, so the target stays eased until it is.';
+
+/**
  * The rescue latch — how a rescue STARTS and how it ENDS, for every ERG writer
  * in the program (#441, #567).
  *
@@ -222,6 +231,15 @@ export const RECOVERING_REASON =
  * then went quiet had their full target put back after eight seconds of
  * nothing, on the strength of no evidence at all. While rescuing, a silent
  * window restarts the steady clock rather than advancing it.
+ *
+ * ⚠️ **And silence does not move a rescue UP either (PR #582's review).**
+ * Restarting the clock was not enough: the step was still read off the
+ * verdict, and a silent window's verdict is `holding`, so a rider at the floor
+ * whose sensor went quiet was stepped up to relief — for a 150 W target, from
+ * the 25 W floor to 100 W — with no evidence they were pedalling, for as long
+ * as the silence lasted. While rescuing, a silent window now HOLDS the step
+ * the last heard verdict chose (the floor stays the floor, a relief keeps its
+ * share) and says {@link CADENCE_SILENT_REASON} rather than "recovering".
  */
 export interface ErgRescue {
   /**
@@ -239,6 +257,13 @@ export function createErgRescue(): ErgRescue {
   let rescuing = false;
   /** When the current unbroken run of heard `holding` verdicts began. */
   let steadySince: number | undefined;
+  /** The step the last HEARD verdict chose while rescuing — what silence holds. */
+  let held: ErgRescueStep = { kind: 'full' };
+
+  const hold = (step: ErgRescueStep): ErgRescueStep => {
+    held = step;
+    return step;
+  };
 
   return {
     judge(history, now): ErgRescueStep {
@@ -249,6 +274,8 @@ export function createErgRescue(): ErgRescue {
         if (rescuing) {
           if (!heard(history, now)) {
             steadySince = undefined;
+            // Hold, never step up: silence is no evidence either way.
+            return held.kind === 'full' ? held : { ...held, reason: CADENCE_SILENT_REASON };
           } else {
             steadySince ??= now;
             if (now - steadySince >= TREND_WINDOW) {
@@ -263,19 +290,22 @@ export function createErgRescue(): ErgRescue {
       }
 
       if (verdict.kind === 'stalled') {
-        return { kind: 'floor', reason: verdict.reason };
+        return hold({ kind: 'floor', reason: verdict.reason });
       }
       if (!rescuing) {
-        return { kind: 'full' };
+        return hold({ kind: 'full' });
       }
-      return verdict.kind === 'spiralling'
-        ? { kind: 'relief', share: verdict.relief, reason: verdict.reason }
-        : { kind: 'relief', share: RELIEF_SHARE, reason: RECOVERING_REASON };
+      return hold(
+        verdict.kind === 'spiralling'
+          ? { kind: 'relief', share: verdict.relief, reason: verdict.reason }
+          : { kind: 'relief', share: RELIEF_SHARE, reason: RECOVERING_REASON },
+      );
     },
 
     reset(): void {
       rescuing = false;
       steadySince = undefined;
+      held = { kind: 'full' };
     },
   };
 }

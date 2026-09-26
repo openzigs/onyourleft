@@ -1909,6 +1909,7 @@ adb logcat | grep -i "BluetoothLe"
 | S5 | [#542](https://github.com/openzigs/onyourleft/issues/542). A saved workout with a steady block of at least two minutes. Ride it at a comfortable cadence, with the logcat above running, and count the `0x05` writes in each whole minute of the block | **One** `0x05` at the block's start and **none** after it while the target is unchanged — so 1 in the first minute and 0 in each after. A retry appears only after a write that was refused or not answered. Before #542 this was about one a second (14 in 16 s) |
 | S6 | [#567](https://github.com/openzigs/onyourleft/issues/567). ⚠️ **Manual ERG, no workout.** Ride screen, control taken, **no workout running**. Set **150 W** on the Trainer panel's ERG form and ride 60 s. Then stop pushing: let cadence fall from about 70 rpm towards zero over 10–15 s, as in the 2026-09-25 run below | As cadence falls under ~50 rpm the app writes a `0x05` at **100 W** (two thirds of 150), and at or below **10 rpm** a `0x05` at the trainer's **minimum** — **no `0x08` anywhere**. The Trainer panel shows **Eased**, the reason, and *Your 150 W comes back by itself…*. **Power must FALL before the trainer's own firmware lets go** (about 9 s under 40 rpm on this machine): the first `0x05` should be in the log well before that |
 | S7 | From S6's stall, pedal again and settle at a comfortable cadence | `0x05` at 100 W while cadence is under 50 rpm, then — only after about **8 s** steady — `0x05` at **150 W**, and the **Eased** notice goes. No flapping |
+| S8 | [#567](https://github.com/openzigs/onyourleft/issues/567), PR #582's review. ⚠️ **Expected behaviour, not a bug.** Standing still with the pedals at rest and control taken, **no workout**, set **150 W** on the ERG form *before* pedalling. Wait 5 s, then start pedalling and settle at a comfortable cadence | Within about a second of the 150 W write the app writes a `0x05` at the trainer's **minimum**, and the panel shows **Eased** — the trainer reports 0 rpm while the rider is stationary, which is a stall. **This is what a workout started while stationary does too**, and it is the same rule on purpose. Once the rider pedals: `0x05` at 100 W, then — after about **8 s** steady — `0x05` at **150 W**. No `0x08` anywhere |
 
 ### S results
 
@@ -1921,6 +1922,7 @@ adb logcat | grep -i "BluetoothLe"
 | S5 | | *Not run.* `0x05` writes per whole minute of the steady block: | | |
 | S6 | | *Not run* | | |
 | S7 | | *Not run* | | |
+| S8 | | *Not run* | | |
 
 ⚠️ **Manual ERG has no stall rescue, and on this trainer the firmware let go instead.** Before the
 workout, the owner set **150 W** on the Ride screen's Trainer panel, with no workout running, and let

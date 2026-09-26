@@ -10,7 +10,15 @@
  * validation 0002 Part S's manual-ERG row.
  */
 
-import { revolutionsPerMinute, seconds, watts, type CadenceReading } from '@onyourleft/domain';
+import {
+  CADENCE_SILENT_REASON,
+  RECOVERING_REASON,
+  revolutionsPerMinute,
+  seconds,
+  watts,
+  type CadenceReading,
+  type Watts,
+} from '@onyourleft/domain';
 import { SensorError } from '@onyourleft/sensors';
 import { ftmsTrainer } from '@onyourleft/sensors/simulator';
 import { connectSimulatedTrainer } from '@onyourleft/sensors/protocol/testing';
@@ -194,6 +202,42 @@ describe('a stall under a hand-set target is rescued — #567', () => {
     expect(erg.rescue()).toBeDefined();
   });
 
+  it('holds a stopped rider at the FLOOR through sixty seconds of silence, then steps up only on heard cadence — PR #582', async () => {
+    // The review's probe: silence after a stall used to step the machine UP
+    // from the 25 W floor to 100 W and hold it there, on no evidence at all,
+    // with the panel saying "Cadence is recovering".
+    const { trainer, erg, targetWrites } = await rig();
+    await erg.set(watts(150));
+    await pedal(erg, 0, [80, 78, 60, 40, 20, 8, 5, 4]);
+    expect(trainer.targetPowerOnTheTrainer()).toBe(FLOOR_WATTS);
+    const atTheFloor = targetWrites().length;
+    await pedal(
+      erg,
+      8,
+      Array.from({ length: 60 }, () => undefined),
+    );
+    expect(trainer.targetPowerOnTheTrainer()).toBe(FLOOR_WATTS);
+    expect(targetWrites()).toHaveLength(atTheFloor);
+    expect(erg.rescue()).toStrictEqual({
+      target: 150,
+      holding: 'floor',
+      reason: CADENCE_SILENT_REASON,
+    });
+    expect(erg.rescue()?.reason).not.toBe(RECOVERING_REASON);
+
+    // Pedalling again from 68, heard: relief first, then the rider's own 150 W
+    // once a whole window has held steady — not before.
+    const recovery = Array.from({ length: 12 }, () => 85);
+    await pedal(erg, 68, recovery.slice(0, 2));
+    expect(trainer.targetPowerOnTheTrainer()).toBe(100);
+    expect(erg.rescue()?.reason).toBe(RECOVERING_REASON);
+    await pedal(erg, 70, recovery.slice(2, 8));
+    expect(trainer.targetPowerOnTheTrainer()).toBe(100);
+    await pedal(erg, 76, recovery.slice(8));
+    expect(trainer.targetPowerOnTheTrainer()).toBe(150);
+    expect(targetWrites().slice(atTheFloor)).toStrictEqual([targetWrite(100), targetWrite(150)]);
+  });
+
   it('forgets the rescue when the rider sets a target again', async () => {
     const { trainer, erg } = await rig();
     await erg.set(watts(150));
@@ -264,6 +308,80 @@ describe('a rescue write the machine refuses', () => {
       Array.from({ length: 10 }, () => 85),
     );
     expect(asked).toStrictEqual([9000]);
+  });
+});
+
+describe('a rider target the machine refuses, during a rescue — PR #582', () => {
+  it('leaves the rescue in place, so the OLD target does not come straight back at full', async () => {
+    const asked: number[] = [];
+    const erg = createManualErg({
+      control: {
+        setTargetPower: (target) => {
+          asked.push(target);
+          return target === 9000
+            ? Promise.reject(new SensorError('control-rejected', 'out of range'))
+            : Promise.resolve(target);
+        },
+      },
+      powerFloor: watts(FLOOR_WATTS),
+      onFault: () => undefined,
+      onChange: () => undefined,
+    });
+    await erg.set(watts(150));
+    await pedal(erg, 0, PART_S_COLLAPSE);
+    expect(erg.rescue()?.target).toBe(150);
+    const outcome = await erg.set(watts(9000));
+    expect(outcome.kind).toBe('failed');
+    // Pedalling well again for less than a whole window: the latch the refused
+    // target would have wiped is still holding relief.
+    await pedal(erg, 9, [85, 85, 85, 85]);
+    expect(asked.slice(asked.indexOf(9000) + 1)).not.toContain(150);
+    expect(erg.rescue()).toMatchObject({ target: 150, holding: 'relief' });
+    // And the whole window comes round in the end.
+    await pedal(
+      erg,
+      13,
+      Array.from({ length: 10 }, () => 85),
+    );
+    expect(asked.at(-1)).toBe(150);
+    expect(erg.rescue()).toBeUndefined();
+  });
+
+  it('keeps judging the old rescue while the refused target was in flight, so a rider who recovered meanwhile is not held back', async () => {
+    const asked: number[] = [];
+    let refuse: ((error: unknown) => void) | undefined;
+    const erg = createManualErg({
+      control: {
+        setTargetPower: (target) => {
+          asked.push(target);
+          return target === 9000
+            ? new Promise<Watts>((_, reject) => {
+                refuse = reject;
+              })
+            : Promise.resolve(target);
+        },
+      },
+      powerFloor: watts(FLOOR_WATTS),
+      onFault: () => undefined,
+      onChange: () => undefined,
+    });
+    await erg.set(watts(150));
+    await pedal(erg, 0, PART_S_COLLAPSE);
+    expect(erg.rescue()?.target).toBe(150);
+    const outcome = erg.set(watts(9000));
+    // The machine sits on the answer while the rider pedals steadily for longer
+    // than a whole window. No `settled()` here: the write is still in flight.
+    for (let at = 9; at <= 24; at += 1) {
+      erg.observeCadence({ at: seconds(at), cadence: revolutionsPerMinute(85) });
+      erg.tick(seconds(at));
+    }
+    refuse?.(new SensorError('control-rejected', 'out of range'));
+    expect((await outcome).kind).toBe('failed');
+    await pedal(erg, 25, [85]);
+    // The old rescue saw the whole steady window, so the rider's accepted
+    // target is back — not held at relief for another eight seconds.
+    expect(asked.at(-1)).toBe(150);
+    expect(erg.rescue()).toBeUndefined();
   });
 });
 

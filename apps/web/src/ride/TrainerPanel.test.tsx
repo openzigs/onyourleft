@@ -18,7 +18,7 @@
 
 import { describe, expect, it, afterEach } from 'vitest';
 
-import { watts } from '@onyourleft/domain';
+import { TREND_WINDOW, watts } from '@onyourleft/domain';
 
 import { mount, type Mounted } from '../testing/mount';
 
@@ -299,6 +299,8 @@ describe('a hand-set target the stall rescue eased — #567', () => {
     expect(text).toContain('Cadence is falling under the target');
     expect(text).toContain('Your 150 W comes back by itself');
     expect(text).toContain('press End ERG to leave it off');
+    // The window is the latch's own, not a number typed beside it.
+    expect(text).toContain(`held steady for ${String(TREND_WINDOW)} seconds`);
     // What the machine holds is still said as what it confirmed.
     expect(text).toContain('Holding 100 W.');
   });

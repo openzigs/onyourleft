@@ -38,8 +38,13 @@
  * a rider who would rather it did not.
  *
  * ⚠️ A silent cadence sensor is not recovery: `createErgRescue` restarts its
- * steady clock on a window with nothing in it, so a rider whose sensor went
- * quiet after a stall is never handed the full target back on no evidence.
+ * steady clock on a window with nothing in it and HOLDS the step it was on, so
+ * a rider whose sensor went quiet after a stall stays at the floor rather than
+ * being stepped up, or handed the full target back, on no evidence.
+ *
+ * ⚠️ A rider's new target ends a rescue only once the machine ACCEPTS it
+ * (PR #582's review): a refused one puts the rescue back as it was, so the old
+ * target cannot return at full around the recovery window.
  *
  * ## Every write through one ERG writer
  *
@@ -56,6 +61,7 @@ import {
   createErgRescue,
   watts,
   type CadenceReading,
+  type ErgRescue,
   type ErgRescueStep,
   type Seconds,
   type Watts,
@@ -112,7 +118,15 @@ export function createManualErg(options: {
 }): ManualErg {
   const { control, powerFloor, onFault, onChange } = options;
   const writer: ErgWriter = createErgWriter(control);
-  const latch = createErgRescue();
+  let latch: ErgRescue = createErgRescue();
+  /**
+   * The rescue as it stood before a rider's target that the machine has not
+   * yet accepted — PR #582's review. A refused target must not have wiped it:
+   * the rider's OLD target would come straight back at full on the next tick,
+   * skipping the whole-window recovery the latch exists for. Judged alongside
+   * the fresh latch while it waits, so it is current if it is put back.
+   */
+  let beforeRider: { readonly latch: ErgRescue; readonly step: ErgRescueStep } | undefined;
 
   let cadence: CadenceReading[] = [];
   /** The rider's target — the last one the machine accepted, or the one in flight. */
@@ -145,13 +159,24 @@ export function createManualErg(options: {
         onMachine = settled.target;
         if (fromRider) {
           accepted = settled.target;
+          // The machine took the rider's own target: the rescue it replaced
+          // is over, by the rider's act.
+          beforeRider = undefined;
         }
       } else if (settled.kind === 'failed') {
         if (mine === asks) {
           lastAsked = onMachine;
           if (fromRider) {
             target = accepted;
+            if (beforeRider !== undefined) {
+              latch = beforeRider.latch;
+              step = beforeRider.step;
+              beforeRider = undefined;
+            }
           }
+        } else if (fromRider) {
+          // An ease went out after it: the fresh latch is the one in charge.
+          beforeRider = undefined;
         }
         if (!fromRider) {
           onFault(settled.error);
@@ -178,7 +203,12 @@ export function createManualErg(options: {
   return {
     set(value: Watts): Promise<ErgWriteOutcome> {
       target = value;
-      latch.reset();
+      // Not `latch.reset()`: the old rescue is kept until the machine accepts
+      // this target, so a refusal puts it back rather than wiping it. A second
+      // target while the first is in flight keeps the OLDEST — the last state
+      // the machine actually agreed to.
+      beforeRider ??= { latch, step };
+      latch = createErgRescue();
       step = { kind: 'full' };
       return ask(value, true);
     },
@@ -194,6 +224,9 @@ export function createManualErg(options: {
         return;
       }
       const before = step.kind;
+      if (beforeRider !== undefined) {
+        beforeRider = { latch: beforeRider.latch, step: beforeRider.latch.judge(cadence, now) };
+      }
       step = latch.judge(cadence, now);
       const value = wanted(target);
       if (value !== lastAsked) {
