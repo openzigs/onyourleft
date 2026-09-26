@@ -31,8 +31,10 @@ import { sidePairingPort } from '../camera/side-link';
 import {
   CameraView,
   CAMERA_NO_PORT,
+  SIDE_CAMERA_UNAVAILABLE,
   SIDE_CAMERA_WAY_TITLE,
   SINGLE_PICTURE_PURPOSE,
+  SINGLE_PICTURE_PURPOSE_ALONE,
   SINGLE_PICTURE_TITLE,
 } from './CameraView';
 
@@ -94,6 +96,24 @@ describe('the way in — #557', () => {
     expect(link.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     expect(document.body.textContent).toContain(SINGLE_PICTURE_PURPOSE);
+    expect(document.body.textContent).not.toContain(SIDE_CAMERA_UNAVAILABLE);
+  });
+
+  it('says plainly that a side camera cannot be paired here, and points nowhere, when this device cannot pair — #566’s review', async () => {
+    const camera = scriptedCamera();
+    const controller = controllerFor(camera);
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    mounted = await mount(<CameraView controller={controller} />);
+    const text = document.body.textContent ?? '';
+    expect(text).toContain(SIDE_CAMERA_UNAVAILABLE);
+    // Not sent to a section, a button or a phone page that is not there.
+    expect(text).not.toContain('Pair a phone');
+    expect(text).not.toContain('A side camera on a tripod');
+    expect(queryAll(document, 'a[href="#/camera/side"]')).toHaveLength(0);
+    expect(button('Pair a phone')).toBeUndefined();
+    // The one-picture camera still says what it is for, without the pointer.
+    expect(text).toContain(SINGLE_PICTURE_PURPOSE_ALONE);
+    expect(text).not.toContain(SINGLE_PICTURE_PURPOSE);
   });
 });
 

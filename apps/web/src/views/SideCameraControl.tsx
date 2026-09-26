@@ -346,7 +346,20 @@ function Offer({
     };
   }, [giveBack]);
 
+  // #566's review: "Read the phone's code" has focus the moment it appears,
+  // so a double Enter or tap used to start two `turnOn`s at once — and the
+  // second `startCamera` replaced the session the first had opened, leaving a
+  // stream running that nothing could stop. One start at a time; a press
+  // while one is on its way is the same press. A ref rather than state,
+  // because two presses in one tick both read the state from before either.
+  // Not `disabled`: that would take focus off the control the rider is on
+  // (`design/Button.tsx` §`disabled`), and a no-op press says nothing wrong.
+  const starting = useRef(false);
+
   const startScanning = useCallback(() => {
+    if (starting.current) {
+      return;
+    }
     setProblem(undefined);
     const before = controller.state();
     if (before.live && before.facing === 'user') {
@@ -357,7 +370,9 @@ function Offer({
     // rider can see the viewfinder below. A back camera the rider left on is
     // turned round for the read (`session.ts` §`turnOn`) and back afterwards.
     const facing = before.live ? before.facing : undefined;
+    starting.current = true;
     void controller.turnOn('user').then((failed) => {
+      starting.current = false;
       if (failed === undefined) {
         turnedOn.current = true;
         restore.current = facing;

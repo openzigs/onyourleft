@@ -727,6 +727,111 @@ test.describe('the touch target is declared rather than emergent', () => {
 });
 
 /**
+ * A link drawn as a button — #566's review.
+ *
+ * The Camera screen's "Use this phone as the side camera" is an `<a
+ * class="oyl-button">` inside a sentence in a list item. An `<a>` is inline,
+ * and `min-height`/`min-width` do not apply to a non-replaced inline box, whose
+ * vertical padding takes no line space either: it looked like a button, stood
+ * short of the target, and painted over the lines around it. `theme.css`
+ * §`a.oyl-button` makes it the inline-block a `<button>` already is.
+ *
+ * This measures the REAL `CameraView` in the shipping shell (the harness's
+ * `?pairing=on`, which is what makes the way in render), at the SC 1.4.10
+ * viewport, a phone and a landscape tablet, and it carries its control: the
+ * same link with `display: inline` put back must fail one of the two claims,
+ * or a green run says nothing about the declaration.
+ */
+const LINK_VIEWPORTS = [
+  { name: '320×256', width: 320, height: 256 },
+  { name: '375×667 — a phone', width: 375, height: 667 },
+  { name: '1280×800 — a landscape tablet', width: 1280, height: 800 },
+] as const;
+
+const SIDE_CAMERA_LINK = 'a.oyl-button[href="#/camera/side"]';
+
+interface LinkTarget {
+  readonly found: boolean;
+  readonly height: number;
+  readonly width: number;
+  /** Whether the whole link lies inside its own list item — takes line space. */
+  readonly inItsLine: boolean;
+  /** Whether it stays clear of the next step's list item. */
+  readonly clearOfNext: boolean;
+}
+
+async function sideCameraLink(page: Page, stripped: boolean): Promise<LinkTarget> {
+  return page.evaluate(
+    ({ selector, strip }) => {
+      const link = document.querySelector<HTMLElement>(selector);
+      const item = link?.closest('li');
+      if (link === null || item === null || item === undefined) {
+        return { found: false, height: 0, width: 0, inItsLine: false, clearOfNext: false };
+      }
+      const before = link.style.cssText;
+      if (strip) {
+        link.style.display = 'inline';
+      }
+      const box = link.getBoundingClientRect();
+      const line = item.getBoundingClientRect();
+      const next = item.nextElementSibling?.getBoundingClientRect();
+      const measured = {
+        found: true,
+        height: box.height,
+        width: box.width,
+        inItsLine: box.top >= line.top - 0.5 && box.bottom <= line.bottom + 0.5,
+        clearOfNext: next === undefined || box.bottom <= next.top + 0.5,
+      };
+      link.style.cssText = before;
+      return measured;
+    },
+    { selector: SIDE_CAMERA_LINK, strip: stripped },
+  );
+}
+
+for (const viewport of LINK_VIEWPORTS) {
+  test.describe(`${viewport.name} — a link drawn as a button`, () => {
+    test.use({ viewport: { width: viewport.width, height: viewport.height } });
+
+    test('the side camera’s way in is a 44×44 target that takes its own line space', async ({
+      page,
+    }) => {
+      await page.goto('/shell.html?pairing=on#/camera');
+      await page.waitForSelector('html[data-oyl-shell-ready]');
+      await page.waitForSelector(SIDE_CAMERA_LINK);
+
+      const shipped = await sideCameraLink(page, false);
+      expect(
+        shipped.found,
+        `no ${SIDE_CAMERA_LINK} inside a list item on #/camera, so there is nothing to measure — ` +
+          'see shell-harness.tsx §PAIRING_ON',
+      ).toBe(true);
+      expect(
+        shipped.height,
+        `the link is ${shipped.height.toFixed(1)}px tall; SC 2.5.5 asks for ` +
+          `${String(TOUCH_TARGET_PIXELS)}px`,
+      ).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+      expect(shipped.width).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+      expect(
+        shipped.inItsLine,
+        'the link’s box spills out of its own list item, so it paints over the lines around it',
+      ).toBe(true);
+      expect(shipped.clearOfNext, 'the link overlaps the next step').toBe(true);
+
+      // The control: the same link laid out inline, as it was before the fix,
+      // must fail at least one of the claims above.
+      const inline = await sideCameraLink(page, true);
+      expect(inline.found).toBe(true);
+      expect(
+        inline.height < TOUCH_TARGET_PIXELS || !inline.inItsLine || !inline.clearOfNext,
+        `laid out inline the link still measures ${inline.height.toFixed(1)}px and sits in its ` +
+          'own line, so this test cannot tell the fix from its absence',
+      ).toBe(true);
+    });
+  });
+}
+
+/**
  * #427 — the navigation is a BAR on a compact window and a RAIL on a wider
  * one, and every destination in it is a 44×44 target by the same three
  * measurements #316 made for `.oyl-button`.

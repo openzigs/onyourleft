@@ -710,6 +710,25 @@ h3:first-child {
     border-color 120ms ease;
 }
 
+/*
+ * A LINK drawn as a button — #566's review. A `<button>` is inline-block by
+ * default and an `<a>` is inline, and `min-height`/`min-width` do not apply to
+ * a non-replaced inline box: its vertical padding takes no line space either,
+ * so the Camera screen's "Use this phone as the side camera", inside a
+ * sentence in a list item, looked like a button, was about 38 px tall and
+ * painted over the lines above and below it. Home's two links only met the
+ * target because their flex container blockifies them.
+ *
+ * `inline-block` rather than `inline-flex`, and on links only: it is what a
+ * `<button>` already is, so every `<button class="oyl-button">` is untouched,
+ * and it does not turn a label's text and inline children into flex items.
+ * `browser/shell.browser.spec.ts` §"a link drawn as a button" measures it,
+ * with this declaration taken away as its control.
+ */
+a.oyl-button {
+  display: inline-block;
+}
+
 .oyl-button:hover:not(:disabled) {
   background: var(--oyl-color-accent-hover);
   border-color: var(--oyl-color-accent-hover);

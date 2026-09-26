@@ -33,7 +33,12 @@ import {
 } from './side-link';
 import type { PhoneSidePairing, TabletSidePairing } from './side-pairing-port';
 import type { SideLinkEvent } from './side-camera-link-port';
-import type { ScreenLock, ScreenLockSource } from '../game/hud/wake-lock';
+import {
+  browserScreenLockSource,
+  type ScreenLock,
+  type ScreenLockSource,
+} from '../game/hud/wake-lock';
+import { hideablePage } from '../game/hud/wake-lock-testing';
 import {
   cleanFrameBytes,
   flushSideLink,
@@ -581,6 +586,29 @@ describe('the tablet stays awake while it pairs and while it is paired — #557'
     lock.arrive();
     await flushSideLink();
     expect(lock.released()).toBe(1);
+  });
+
+  it('takes the lock again when the tablet comes back into view, and not once the pairing has ended — #566’s review', async () => {
+    // The platform lets a screen lock go whenever the page is hidden. A rider
+    // who switched away for a moment used to come back to a tablet that slept
+    // on its own timeout, and D-4 then dropped the link.
+    const platform = hideablePage();
+    const { tablet } = await paired({}, browserScreenLockSource(platform.api, platform.page));
+    await flushSideLink();
+    expect(platform.live()).toBe(1);
+    platform.hide();
+    platform.show();
+    await flushSideLink();
+    expect(platform.requests()).toBe(2);
+    expect(platform.live()).toBe(1);
+    tablet.control.endSidePairing();
+    await flushSideLink();
+    expect(platform.live()).toBe(0);
+    platform.hide();
+    platform.show();
+    await flushSideLink();
+    expect(platform.requests()).toBe(2);
+    expect(platform.live()).toBe(0);
   });
 
   it('makes a pairing with no lock source at all', async () => {

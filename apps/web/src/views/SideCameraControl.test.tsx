@@ -34,6 +34,7 @@ import {
   photographedCode,
   scriptedCamera,
   sidePeerNetwork,
+  type ScriptedCameraOptions,
   virtualTime,
 } from '../camera/testing';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
@@ -84,6 +85,7 @@ async function tablet(
     readonly agreed?: boolean;
     readonly readerFails?: boolean;
     readonly analyse?: SidePairingOptions['analyse'];
+    readonly camera?: Pick<ScriptedCameraOptions, 'startFails' | 'startFailsFacing' | 'holdStarts'>;
   } = {},
 ) {
   const network = sidePeerNetwork();
@@ -99,6 +101,7 @@ async function tablet(
   /** A code held up to the tablet's camera instead of the phone's, when set. */
   let inView: string | undefined;
   const camera = scriptedCamera({
+    ...options.camera,
     codePixels: () => {
       const shown = inView ?? phone?.answerCode;
       return shown === undefined
@@ -295,6 +298,35 @@ describe('pairing, on the tablet', () => {
     await settle();
     expect(camera.facings).toStrictEqual(['environment', 'user', 'environment']);
     expect(controller.state()).toMatchObject({ live: true, facing: 'environment' });
+  });
+
+  it('turns the rider’s own back camera on again when the front one will not come on — #566’s review', async () => {
+    // The back camera goes off to be turned round, the front one fails: the
+    // rider's camera is theirs again rather than left off unasked.
+    const { camera, controller } = await tablet({
+      camera: { startFails: 'unavailable', startFailsFacing: 'user' },
+    });
+    await controller.turnOn();
+    await press('Pair a phone');
+    await press('Read the phone’s code');
+    await settle();
+    expect(camera.facings).toStrictEqual(['environment', 'user', 'environment']);
+    expect(controller.state()).toMatchObject({ live: true, facing: 'environment' });
+    expect(document.body.textContent).toContain('This tablet’s camera would not turn on.');
+  });
+
+  it('starts one camera for a double press, and leaves none running after Stop looking — #566’s review', async () => {
+    const { camera } = await tablet({ camera: { holdStarts: true } });
+    await press('Pair a phone');
+    await press('Read the phone’s code');
+    await press('Read the phone’s code');
+    camera.releaseStarts();
+    await settle();
+    await settle();
+    expect(camera.calls.filter((call) => call === 'start')).toHaveLength(1);
+    expect(camera.liveStreams()).toBe(1);
+    await press('Stop looking');
+    expect(camera.liveStreams()).toBe(0);
   });
 
   it('asks for consent rather than opening a camera nobody agreed to', async () => {

@@ -143,10 +143,27 @@ export const SINGLE_PICTURE_TITLE = 'This device’s own camera, one picture at 
  * What the single-picture section is for — #557. It is not the side camera,
  * it shows no preview, and the owner's first attempt at pairing started here.
  */
-export const SINGLE_PICTURE_PURPOSE =
+export const SINGLE_PICTURE_PURPOSE_ALONE =
   'For checking that this device’s camera works, and for the pause-when-nobody-is-on-the-bike ' +
-  'check when this device is the one pointing at you. It shows no picture of what it sees. It ' +
+  'check when this device is the one pointing at you. It shows no picture of what it sees.';
+
+/**
+ * {@link SINGLE_PICTURE_PURPOSE_ALONE}, and where the side camera actually is —
+ * said only where it IS there to be pointed at (#566's review).
+ */
+export const SINGLE_PICTURE_PURPOSE =
+  `${SINGLE_PICTURE_PURPOSE_ALONE} It ` +
   'is not the side camera: to pair a phone, use “A side camera on a tripod” above.';
+
+/**
+ * What the side camera's way in says on a device that cannot pair at all —
+ * #566's review. `main.tsx` builds no pairing port where this browser has no
+ * WebRTC, and the steps used to send the rider to a "Pair a phone" button that
+ * was not on the page: #48's "looks like the way in and is not".
+ */
+export const SIDE_CAMERA_UNAVAILABLE =
+  'A side camera cannot be paired on this device: this browser cannot make the direct link ' +
+  'between two devices that pairing needs. This device’s own camera, below, still works.';
 
 export function CameraView({ controller, sidePairing }: CameraViewProps): JSX.Element {
   if (controller === undefined) {
@@ -343,18 +360,22 @@ function Camera({
           The way to use the camera with a ride is a spare phone on a tripod beside the bike, paired
           with the tablet you ride with. The phone films; the tablet starts and stops it.
         </p>
-        <ol>
-          <li>
-            On the phone on the tripod:{' '}
-            <a className="oyl-button" href="#/camera/side">
-              Use this phone as the side camera
-            </a>
-          </li>
-          <li>
-            On the tablet: agree to the camera below, then press “Pair a phone” under “A side camera
-            on a tripod”.
-          </li>
-        </ol>
+        {sidePairing === undefined ? (
+          <p>{SIDE_CAMERA_UNAVAILABLE}</p>
+        ) : (
+          <ol>
+            <li>
+              On the phone on the tripod:{' '}
+              <a className="oyl-button" href="#/camera/side">
+                Use this phone as the side camera
+              </a>
+            </li>
+            <li>
+              On the tablet: agree to the camera below, then press “Pair a phone” under “A side
+              camera on a tripod”.
+            </li>
+          </ol>
+        )}
       </section>
 
       {agreed ? null : (
@@ -399,7 +420,7 @@ function Camera({
             #557: says what it is FOR, because it is not the side camera and
             the owner took it for the way in.
           */}
-          <p>{SINGLE_PICTURE_PURPOSE}</p>
+          <p>{sidePairing === undefined ? SINGLE_PICTURE_PURPOSE_ALONE : SINGLE_PICTURE_PURPOSE}</p>
           <p>{live ? 'The camera is on.' : 'The camera is off.'}</p>
           {live ? (
             <Button
