@@ -149,6 +149,27 @@ export const CAMERA_ABOVE_METRES = 2;
 export const CAMERA_TARGET_AHEAD_METRES = 25;
 
 /**
+ * The chase camera's near plane, in metres: **0.5**. Nothing nearer the eye
+ * than this is drawn.
+ *
+ * ⚠️ **Here since #545, and a literal in `three-renderer.ts` before it.** That
+ * issue asked whether scenery crosses it now that the camera follows the rider
+ * across the road (#499) and keeps right on a straight (#546), and
+ * `near-field.test.ts` rides the fixture routes to answer: at every aspect a
+ * device draws, no triangle of any shape either world draws meets the solid
+ * between the eye and this plane; at 6 : 1 a few conifers do, and
+ * `near-field.ts` §`clearOfTheCamera` is what the renderer drops them with. A
+ * near plane moved here is moved under that gate and that cull; moved only in
+ * the renderer, it would be under neither.
+ *
+ * Half a metre is not small by accident. The depth buffer's precision goes as
+ * `near / far`, and the far plane is 2 km: halving this halves the precision
+ * everywhere, and that is paid for in the distance, where the road and the
+ * ground beside it meet.
+ */
+export const NEAR_PLANE_METRES = 0.5;
+
+/**
  * The camera's **vertical** field of view on a frame wide enough not to need
  * more, in degrees — three's own convention.
  *

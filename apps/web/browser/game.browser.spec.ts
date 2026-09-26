@@ -27,6 +27,7 @@ import { MINIMUM_RIDER_FRAME_SHARE, riderFrameBox } from '../src/game/camera';
 
 import type {
   LineMeasurement,
+  NearFieldMeasurement,
   PresenceCostMeasurement,
   HorizonReading,
   RealisticMeasurement,
@@ -88,6 +89,7 @@ interface GameHarnessResult {
     readonly straightOn: LineMeasurement;
     readonly straightOff: LineMeasurement;
   };
+  readonly nearField: NearFieldMeasurement;
   readonly resourcesAfterFirstFrame: number;
   readonly resourcesAfterAllFrames: number;
   readonly resourcesAfterSecondSweep: number;
@@ -2092,6 +2094,52 @@ test.describe('the rider rides a line and leans on it — #499', () => {
     expect(Math.abs(straightOff.centre - 0.5)).toBeLessThan(0.02);
     // The rider on the line: right of the middle, by a lane's worth.
     expect(straightOn.centre - 0.5).toBeGreaterThan(0.08);
+  });
+});
+
+/**
+ * The camera passing scenery, read off the drawing buffer — #545.
+ *
+ * `near-field.test.ts` holds what the renderer is HANDED to the near plane:
+ * over the fixture rides, `clearOfTheCamera` leaves nothing whose triangles
+ * the plane cuts. That is arithmetic about a list and about the shapes read off
+ * the files, and a renderer that drew the frame's own list instead of the
+ * culled one — or built its shapes wrongly, or a camera whose near plane is not
+ * `camera.ts`' — would pass it. This draws the closest pass and looks.
+ *
+ * The measure is `game-harness.ts` §`nearFieldProbe`'s: the same frame with the
+ * near plane where it ships and half as far, whose difference is exactly what
+ * the shipped plane cut away — over the scenery whose reach could bring it to
+ * the plane at all, because moving the plane also moves the depth buffer's precision under a
+ * far tree's foot, which is not a cut. At 6 : 1 in the realistic world, the one
+ * aspect at which the fixture routes are cut at all.
+ */
+test.describe('scenery the camera passes is not cut by the near plane — #545', () => {
+  test('shows no cut geometry at the closest pass, where the same frame uncut shows it', async ({
+    harnessRun,
+  }) => {
+    // The realistic load: the world the owner saw it in. It shares that one
+    // load with the realistic world's cases below.
+    const result = await harness(harnessRun, '?realistic');
+    expect(result.errors).toEqual([]);
+    const near = result.nearField;
+    console.info(
+      `#545 at ${String(near.distance)} m in the ${near.world} world, the cull dropped a ` +
+        `${near.cut.join(' and a ')} ${near.pivotMetres.toFixed(2)} m from the eye: ` +
+        `${String(near.shippedPixels)} pixels cut with the cull, ` +
+        `${String(near.controlPixels)} without it, ${String(near.noisePixels)} drawing it twice`,
+    );
+    // Non-vacuity: the probe drew the realistic world, and found a frame
+    // where the renderer's own cull had something to drop.
+    expect(near.world).toBe('realistic');
+    expect(near.cut.length).toBeGreaterThan(0);
+    // The noise floor is nothing: the same frame drawn twice is the same frame.
+    expect(near.noisePixels).toBe(0);
+    // The control — the defect, drawn: without the cull the near plane cuts
+    // what the camera is passing, and the nearer plane shows it.
+    expect(near.controlPixels).toBeGreaterThan(100);
+    // And with it, nothing stands between the two planes.
+    expect(near.shippedPixels).toBe(0);
   });
 });
 
