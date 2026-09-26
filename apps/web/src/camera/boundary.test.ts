@@ -152,6 +152,20 @@ describe('no camera platform type escapes apps/web/src/camera', () => {
       );
     expect(findings).toStrictEqual([]);
   });
+
+  it('does not let a pairing-code read escape either — #529', () => {
+    // ADR 0033 D-4: the pixels a pairing code is read from are *"decoded in
+    // memory for the code only … never sent, never kept"*. What leaves this
+    // directory is the code's TEXT, from `CameraController.readPairingCode`.
+    const findings = sources()
+      .filter((path) => !inCamera(path) && !/\.test\.tsx?$/.test(path))
+      .filter((path) =>
+        /(?<![\w.$])(?:CodePixels|readCodePixels|pairingCodeFromPixels)\b/.test(
+          stripComments(readFileSync(join(SOURCE_ROOT, path), 'utf8')),
+        ),
+      );
+    expect(findings).toStrictEqual([]);
+  });
 });
 
 describe('there is exactly one camera port and one consent module', () => {

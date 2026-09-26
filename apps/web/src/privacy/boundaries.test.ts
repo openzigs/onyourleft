@@ -62,6 +62,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { analysisRequestBody } from '../camera/analysis-transport';
 import { capturedFrame } from '../camera/frame';
+import { controlMessageText, phoneMessageFrom } from '../camera/side-link-messages';
 import { cleanFrameBytes } from '../camera/testing';
 import { sharedTrack } from '../detail/privacy';
 import { routeShare } from '../routes/share';
@@ -130,6 +131,15 @@ const BOUNDARIES: readonly Boundary[] = [
     // inside the picture, which is why D-9 re-encodes it at capture — see
     // `boundaries.ts`' own header, and `analysis-transport.test.ts` for the key
     // set the body is pinned to.
+    direction: 'departing',
+  },
+  {
+    module: 'camera/side-link-transport.ts',
+    what: 'commands and state words between the tablet and its side-camera phone (#529)',
+    // ⚠️ Departing: it leaves this device for another, even one the same rider
+    // owns (ADR 0033 D-3). What crosses is enumerated in
+    // `camera/side-link-messages.ts`, and D-3's *"never across"* list — a
+    // position among it — is asserted below by walking every message.
     direction: 'departing',
   },
   {
@@ -350,6 +360,37 @@ describe('the picture sent to the rider’s own computer carries no coordinate b
       where: { latitude: 51.5, longitude: -0.12 },
     };
     expect(coordinatesIn(body)).toHaveLength(1);
+  });
+});
+
+describe('the side-camera link carries no coordinate at all — #529', () => {
+  /** Every message either end of the link can send, each once. */
+  const EVERY_MESSAGE = [
+    controlMessageText({ t: 'start', n: 0 }),
+    controlMessageText({ t: 'stop', n: 1 }),
+    controlMessageText({ t: 'ping' }),
+    controlMessageText({ t: 'hello', k: 'AQIDBA' }),
+    controlMessageText({ t: 'ack', n: 1 }),
+    controlMessageText({ t: 'state', report: { state: 'filming' } }),
+    controlMessageText({ t: 'state', report: { state: 'stopped', reason: 'link-lost' } }),
+  ];
+
+  it('has none in any field of any message', () => {
+    for (const message of EVERY_MESSAGE) {
+      expect(coordinatesIn(JSON.parse(message) as unknown), message).toStrictEqual([]);
+    }
+  });
+
+  it('refuses, on arrival, a message that carries one', () => {
+    // The control, in the link's own terms: a position added to a message is
+    // an unknown field, and D-4 refuses the message — so there is no way for
+    // one to be RECEIVED either.
+    const carrying = {
+      ...(JSON.parse(EVERY_MESSAGE[5] ?? '{}') as Record<string, unknown>),
+      where: { latitude: 51.5, longitude: -0.12 },
+    };
+    expect(coordinatesIn(carrying)).toHaveLength(1);
+    expect(phoneMessageFrom(JSON.stringify(carrying))).toBeUndefined();
   });
 });
 

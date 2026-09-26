@@ -125,6 +125,14 @@ export const LAUNCH_ARGS = [
   // dialog nobody is there to press, and the spec times out with no reason
   // attached — the shape #165 recorded.
   '--use-fake-ui-for-media-stream',
+  // #529. Chromium otherwise hides a WebRTC host candidate's address behind an
+  // mDNS `.local` name, and resolving one needs a multicast responder a CI
+  // container may not have. Spike 0012 found both Android WebViews publish
+  // their raw private address, so the raw address is the path production takes
+  // — and the one `sidelink.browser.spec.ts` should measure. A name-only pair
+  // is `side-link-code.test.ts`' and `side-link.test.ts`' case. Changes nothing
+  // for a page that opens no peer connection.
+  '--disable-features=WebRtcHideLocalIpsWithMdns',
 ];
 
 export default defineConfig({

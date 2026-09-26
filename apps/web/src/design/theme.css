@@ -2550,3 +2550,29 @@ select option {
   stroke: var(--oyl-color-accent);
   stroke-dasharray: 8 6;
 }
+
+/* =============================================================================
+ * THE PAIRING CODE — #529, ADR 0033 D-1.
+ *
+ * `camera/PairingCode.tsx` draws one QR code for the other device's camera.
+ * Dark on light, square, as large as the screen comfortably allows — a phone
+ * held a forearm away has to resolve every module of it — and never repainted:
+ * `forced-color-adjust: none`, because a high-contrast mode that inverted or
+ * flattened it would make a code no camera could read, and a code is not text
+ * a person reads.
+ * ========================================================================== */
+.oyl-pairing-code {
+  block-size: auto;
+  display: block;
+  forced-color-adjust: none;
+  inline-size: min(100%, 22rem, 60vh);
+  margin: 0 0 var(--oyl-space-md);
+}
+
+.oyl-pairing-code__paper {
+  fill: var(--oyl-color-canvas);
+}
+
+.oyl-pairing-code__ink {
+  fill: var(--oyl-color-ink);
+}

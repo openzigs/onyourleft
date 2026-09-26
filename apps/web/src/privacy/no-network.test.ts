@@ -59,6 +59,18 @@
  * `docs/privacy-policy.md` and `apps/mobile/src/android/data-safety.ts` changed
  * in the same pull request. The rider's computer is the RIDER's — not #7's
  * instance, which is ours and does not exist — and the policy says so by name.
+ *
+ * ## Since #529 it sees WebRTC, and permits one peer connection
+ *
+ * [ADR 0033](../../../../docs/adr/0033-side-camera-link.md) D-9 recorded that
+ * this scan did not match `RTCPeerConnection`, so a peer connection anywhere
+ * in the client — pointed at a public STUN server — passed the gate under the
+ * policy's first sentence. #529 did D-9's three steps in order: the scan
+ * learned the primitive (and its prefixed spelling, and the `globalThis.`
+ * spelling every other row deliberately skips), {@link PERMITTED_NETWORK_CALLS}
+ * gained exactly one entry with the same three fixtures as #387's, and the
+ * configuration the scan cannot see is asserted in
+ * `camera/side-link-transport.test.ts`.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
@@ -87,6 +99,14 @@ const NETWORK_PRIMITIVES: readonly { readonly name: string; readonly pattern: Re
   { name: 'EventSource', pattern: /(?<![\w.$])EventSource\b/g },
   { name: 'sendBeacon', pattern: /\.sendBeacon\s*\(/g },
   { name: 'navigator.sendBeacon', pattern: /(?<![\w.$])navigator\s*\.\s*sendBeacon\b/g },
+  // #529, ADR 0033 D-9 step 1. ⚠️ **No `.` in the lookbehind, unlike every
+  // row above**: `globalThis.RTCPeerConnection` is how a constructor this
+  // client does not import is reached, and a scan that skipped it would be
+  // blind to the one spelling the side-camera link actually uses. The prefixed
+  // one is its own row because `webkitRTCPeerConnection` ends in the other
+  // name after a word character, which the first pattern refuses to match.
+  { name: 'RTCPeerConnection', pattern: /(?<![\w$])RTCPeerConnection\b/g },
+  { name: 'webkitRTCPeerConnection', pattern: /(?<![\w$])webkitRTCPeerConnection\b/g },
 ];
 
 /** One place the client could transmit something. */
@@ -121,6 +141,27 @@ describe('the scan itself', () => {
     expect(networkCallsIn('const s = new WebSocket(url);')).toHaveLength(1);
     expect(networkCallsIn('new EventSource(url)')).toHaveLength(1);
     expect(networkCallsIn('navigator.sendBeacon(url, body);').length).toBeGreaterThan(0);
+  });
+
+  it('finds a WebRTC peer connection, however it is reached — #529, ADR 0033 D-9', () => {
+    // The finding D-9 reported: before #529 every one of these passed the gate.
+    expect(networkCallsIn('const peer = new RTCPeerConnection({ iceServers: [] });')).toEqual([
+      expect.objectContaining({ primitive: 'RTCPeerConnection' }),
+    ]);
+    expect(networkCallsIn('const Peer = globalThis.RTCPeerConnection;')[0]?.primitive).toBe(
+      'RTCPeerConnection',
+    );
+    expect(networkCallsIn('const Peer = window.RTCPeerConnection;')[0]?.primitive).toBe(
+      'RTCPeerConnection',
+    );
+    expect(networkCallsIn('new webkitRTCPeerConnection(config)')).toEqual([
+      expect.objectContaining({ primitive: 'webkitRTCPeerConnection' }),
+    ]);
+  });
+
+  it('does not fire on a name that merely contains one', () => {
+    expect(networkCallsIn('const sideRTCPeerConnectionish = 1;')).toEqual([]);
+    expect(networkCallsIn('interface MyRTCPeerConnectionLike {}')).toEqual([]);
   });
 
   it('is not fooled by a comment that talks about one', () => {
@@ -171,7 +212,14 @@ export const PERMITTED_NETWORK_CALLS: readonly {
   readonly module: string;
   readonly primitive: string;
   readonly count: number;
-}[] = [{ module: join('camera', 'analysis-transport.ts'), primitive: 'fetch', count: 1 }];
+}[] = [
+  { module: join('camera', 'analysis-transport.ts'), primitive: 'fetch', count: 1 },
+  // #529, ADR 0033 D-9 step 2: the side-camera link, and exactly one naming of
+  // the constructor. What it is pointed at — no ICE server of any kind — is
+  // not something this scan can see; `camera/side-link-transport.test.ts` is
+  // where that is asserted (D-9 step 3).
+  { module: join('camera', 'side-link-transport.ts'), primitive: 'RTCPeerConnection', count: 1 },
+];
 
 /** One source file, by its path relative to `apps/web/src`. */
 export interface ScannedFile {
@@ -231,10 +279,15 @@ describe('the narrowed gate itself — #387', () => {
     path: TRANSPORT,
     source: 'const send = options.send ?? (async (url, init) => fetch(url, init));',
   };
+  const LINK = join('camera', 'side-link-transport.ts');
+  const link: ScannedFile = {
+    path: LINK,
+    source: 'const Peer = globalThis.RTCPeerConnection;',
+  };
   const quiet: ScannedFile = { path: join('views', 'CameraView.tsx'), source: 'const x = 1;' };
 
   it('is clean over a tree that is exactly what the policy describes', () => {
-    expect(networkFindingsOutside([transport, quiet], PERMITTED_NETWORK_CALLS)).toEqual([]);
+    expect(networkFindingsOutside([transport, link, quiet], PERMITTED_NETWORK_CALLS)).toEqual([]);
   });
 
   it('goes red for a fetch added anywhere else under apps/web/src', () => {
@@ -244,7 +297,7 @@ describe('the narrowed gate itself — #387', () => {
       path: join('views', 'CameraView.tsx'),
       source: "const r = await fetch('https://example.invalid/upload', { method: 'POST' });",
     };
-    const findings = networkFindingsOutside([transport, elsewhere], PERMITTED_NETWORK_CALLS);
+    const findings = networkFindingsOutside([transport, link, elsewhere], PERMITTED_NETWORK_CALLS);
     expect(findings).toHaveLength(1);
     expect(findings[0]).toContain(join('views', 'CameraView.tsx'));
   });
@@ -255,7 +308,9 @@ describe('the narrowed gate itself — #387', () => {
       path: join('camera', 'analysis-helpers.ts'),
       source: 'void fetch(url);',
     };
-    expect(networkFindingsOutside([transport, sibling], PERMITTED_NETWORK_CALLS)).toHaveLength(1);
+    expect(
+      networkFindingsOutside([transport, link, sibling], PERMITTED_NETWORK_CALLS),
+    ).toHaveLength(1);
   });
 
   it('goes red for a second fetch inside the permitted module', () => {
@@ -263,7 +318,7 @@ describe('the narrowed gate itself — #387', () => {
       path: TRANSPORT,
       source: `${transport.source}\nvoid fetch('https://example.invalid/telemetry');`,
     };
-    expect(networkFindingsOutside([twice], PERMITTED_NETWORK_CALLS)).toHaveLength(1);
+    expect(networkFindingsOutside([twice, link], PERMITTED_NETWORK_CALLS)).toHaveLength(1);
   });
 
   it('goes red for a different primitive inside the permitted module', () => {
@@ -271,16 +326,55 @@ describe('the narrowed gate itself — #387', () => {
       path: TRANSPORT,
       source: `${transport.source}\nconst s = new WebSocket(url);`,
     };
-    const findings = networkFindingsOutside([socket], PERMITTED_NETWORK_CALLS);
+    const findings = networkFindingsOutside([socket, link], PERMITTED_NETWORK_CALLS);
     expect(findings).toHaveLength(1);
     expect(findings[0]).toContain('WebSocket');
   });
 
   it('goes red when the permitted call is gone, so the list cannot outlive it', () => {
     const emptied: ScannedFile = { path: TRANSPORT, source: 'const send = options.send;' };
-    const findings = networkFindingsOutside([emptied], PERMITTED_NETWORK_CALLS);
+    const findings = networkFindingsOutside([emptied, link], PERMITTED_NETWORK_CALLS);
     expect(findings).toHaveLength(1);
     expect(findings[0]).toContain('0 fetch');
+  });
+
+  // ADR 0033 D-9 step 2: the three fixtures above, each with a WebRTC
+  // counterpart.
+  it('goes red for a second peer connection inside the side-link module', () => {
+    const twice: ScannedFile = {
+      path: LINK,
+      source: `${link.source}\nconst another = new RTCPeerConnection(config);`,
+    };
+    const findings = networkFindingsOutside([transport, twice], PERMITTED_NETWORK_CALLS);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain('2 RTCPeerConnection');
+  });
+
+  it('goes red for a different primitive inside the side-link module', () => {
+    const fetched: ScannedFile = {
+      path: LINK,
+      source: `${link.source}\nvoid fetch('https://stun.example.invalid');`,
+    };
+    const findings = networkFindingsOutside([transport, fetched], PERMITTED_NETWORK_CALLS);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain('fetch');
+  });
+
+  it('goes red for a peer connection anywhere else, the prefixed one included', () => {
+    const elsewhere: ScannedFile = {
+      path: join('camera', 'side-link.ts'),
+      source: 'const peer = new webkitRTCPeerConnection({});',
+    };
+    const findings = networkFindingsOutside([transport, link, elsewhere], PERMITTED_NETWORK_CALLS);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain('webkitRTCPeerConnection');
+  });
+
+  it('goes red when the side link’s peer connection is gone', () => {
+    const emptied: ScannedFile = { path: LINK, source: 'const Peer = undefined;' };
+    const findings = networkFindingsOutside([transport, emptied], PERMITTED_NETWORK_CALLS);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain('0 RTCPeerConnection');
   });
 });
 
@@ -300,8 +394,9 @@ describe('the client', () => {
     expect(
       networkFindingsOutside(files, PERMITTED_NETWORK_CALLS),
       'docs/privacy-policy.md says this client sends nothing except one picture to a computer the ' +
-        'rider configured and switched on; that is now false, and the policy and the Data Safety ' +
-        'form are what must change',
+        'rider configured and switched on, and a start and a stop to a side-camera phone the rider ' +
+        'paired by scanning; that is now false, and the policy and the Data Safety form are what ' +
+        'must change',
     ).toEqual([]);
   });
 });

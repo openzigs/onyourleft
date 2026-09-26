@@ -46,9 +46,10 @@
  * of D-9 would rest on a fake returning whatever the test author typed.
  */
 
-import { CameraCaptureError } from './camera-port';
+import { CameraCaptureError, CODE_PIXELS_LONG_SIDE } from './camera-port';
 import type {
   CameraAvailability,
+  CodePixels,
   CameraPermission,
   CameraPort,
   CameraProblemKind,
@@ -132,6 +133,21 @@ export interface FrameGrabber {
    * playing `<video>` for the session instead of starting one per sample.
    */
   luminance(stream: MediaStreamLike): LuminanceSampler;
+  /**
+   * A reader of pictures for a pairing code — #529. A sampler for
+   * {@link luminance}'s reason: the phone and the tablet read several times a
+   * second while a code is being scanned, and one playing `<video>` for the
+   * scan is cheaper than one per read.
+   */
+  codePixels(stream: MediaStreamLike): CodePixelSampler;
+}
+
+/** Pictures for a pairing code from one stream. @see FrameGrabber.codePixels */
+export interface CodePixelSampler {
+  /** @throws {CameraCaptureError} from the fixed table, never a platform message. */
+  sample(): Promise<CodePixels>;
+  /** Lets go of whatever the sampler holds. Idempotent. */
+  release(): void;
 }
 
 /** Coarse brightness grids from one stream. @see FrameGrabber.luminance */
@@ -337,6 +353,8 @@ function browserSession(
   // Made on the first presence check and let go with the camera, so a session
   // that never checks presence never builds one.
   let sampler: LuminanceSampler | undefined;
+  // The same, for a pairing code (#529): made on the first read.
+  let codes: CodePixelSampler | undefined;
   return {
     get live(): boolean {
       if (stopped) {
@@ -389,6 +407,21 @@ function browserSession(
         throw new CameraCaptureError('unavailable', cameraProblemMessage('unavailable'));
       }
     },
+    async readCodePixels(): Promise<CodePixels> {
+      if (stopped) {
+        throw new CameraCaptureError('unavailable', cameraProblemMessage('unavailable'));
+      }
+      codes ??= grabber.codePixels(stream);
+      try {
+        return await codes.sample();
+      } catch (error) {
+        // The same rule as `captureFrame`: the fixed wording or nothing.
+        if (error instanceof CameraCaptureError) {
+          throw error;
+        }
+        throw new CameraCaptureError('unavailable', cameraProblemMessage('unavailable'));
+      }
+    },
     attachCameraPreview(surface: PreviewSurface): () => void {
       // The stream itself, played by the platform: nothing is drawn, encoded
       // or read, so no pixel of it passes through this program's code.
@@ -410,6 +443,8 @@ function browserSession(
       stopped = true;
       sampler?.release();
       sampler = undefined;
+      codes?.release();
+      codes = undefined;
       for (const track of stream.getVideoTracks()) {
         track.stop();
       }
@@ -434,6 +469,7 @@ function browserSession(
 export function canvasFrameGrabber(): FrameGrabber {
   return {
     luminance: videoLuminanceSampler,
+    codePixels: videoCodePixelSampler,
     async grab(stream: MediaStreamLike): Promise<GrabbedFrame> {
       // The cast is the boundary: above this line the program has a
       // `MediaStreamLike`, and only the browser's own API needs the real thing.
@@ -527,6 +563,59 @@ export function videoLuminanceSampler(stream: MediaStreamLike): LuminanceSampler
       context.drawImage(video, 0, 0, PRESENCE_GRID_COLUMNS, PRESENCE_GRID_ROWS);
       const pixels = context.getImageData(0, 0, PRESENCE_GRID_COLUMNS, PRESENCE_GRID_ROWS);
       return { ...lumaGrid(pixels.data, PRESENCE_GRID_COLUMNS, PRESENCE_GRID_ROWS), frame };
+    },
+    release(): void {
+      video.pause();
+      video.srcObject = null;
+    },
+  };
+}
+
+/**
+ * The real pairing-code reader: one detached `<video>` playing the stream,
+ * drawn into a canvas at most {@link CODE_PIXELS_LONG_SIDE} on its long side
+ * and read back — #529.
+ *
+ * ⚠️ **Nothing is encoded and nothing is kept**: the pixels are returned to
+ * `session.ts` §`readPairingCode`, decoded for a code and dropped (ADR 0033
+ * D-4). Like the rest of this file's platform half it is reachable from no
+ * jsdom suite; `browser/sidelink.browser.spec.ts` reads a code through it off
+ * the synthetic camera's picture.
+ */
+export function videoCodePixelSampler(stream: MediaStreamLike): CodePixelSampler {
+  const media = stream as unknown as MediaStream;
+  const video = document.createElement('video');
+  video.srcObject = media;
+  video.muted = true;
+  video.playsInline = true;
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  let started: Promise<void> | undefined;
+  return {
+    async sample(): Promise<CodePixels> {
+      if (context === null) {
+        throw new CameraCaptureError('unavailable', cameraProblemMessage('unavailable'));
+      }
+      started ??= video.play().then(async () => onceReady(video));
+      try {
+        await started;
+      } catch (error) {
+        started = undefined;
+        throw error;
+      }
+      const { videoWidth, videoHeight } = video;
+      if (videoWidth === 0 || videoHeight === 0) {
+        throw new CameraCaptureError('unavailable', cameraProblemMessage('unavailable'));
+      }
+      const scale = Math.min(1, CODE_PIXELS_LONG_SIDE / Math.max(videoWidth, videoHeight));
+      const width = Math.max(1, Math.round(videoWidth * scale));
+      const height = Math.max(1, Math.round(videoHeight * scale));
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      context.drawImage(video, 0, 0, width, height);
+      return { width, height, rgba: context.getImageData(0, 0, width, height).data };
     },
     release(): void {
       video.pause();

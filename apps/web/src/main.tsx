@@ -56,6 +56,8 @@ import { riderAnalysisPort } from './camera/analysis-transport';
 import { keepThisRide } from './camera/keep';
 import { shellCameraNotice } from './camera/shell-camera';
 import { CameraController } from './camera/session';
+import { sidePairingPort } from './camera/side-link';
+import { sideLinkAvailable } from './camera/side-link-transport';
 import type { ThermalPort } from './game/thermal-port';
 import { THERMAL_FORECAST_SECONDS } from './game/thermal';
 import { platformStorage, requestPersistenceOnce } from './support/persistent-storage';
@@ -800,6 +802,10 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   // Built once per tab, for the reason `buildCameraController` gives — and
   // before the platform, because the ride controller reads its presence (#390).
   const camera = await buildCameraController();
+  // #529. One per tab, like the camera: the tablet's pairing is held by the
+  // port so that leaving the Camera screen to ride does not end it. None
+  // where there is no WebRTC — both side-camera screens then say so.
+  const sidePairing = sideLinkAvailable() ? sidePairingPort() : undefined;
   const platform = await buildPlatform(capabilities, camera);
   const rideController = platform.rideController;
   // Read once: two calls would be two reads of a global for one prop.
@@ -814,6 +820,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(storage === undefined ? {} : { storage })}
           {...(platform.shell === undefined ? {} : { shell: platform.shell })}
           {...(camera === undefined ? {} : { camera })}
+          {...(sidePairing === undefined ? {} : { sidePairing })}
           {...(platform.thermal === undefined ? {} : { thermal: platform.thermal })}
           settings={buildUnitsPort()}
           athleteMass={buildAthleteMassPort()}

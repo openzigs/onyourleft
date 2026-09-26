@@ -27,11 +27,17 @@
  * stands: `framing.ts` §`FRAMING_VERDICT_TEXT` is worded about the camera for
  * that reason.
  *
- * ⚠️ **Pairing is not here yet.** The link is
- * [#529](https://github.com/openzigs/onyourleft/issues/529), gated on
- * [#532](https://github.com/openzigs/onyourleft/issues/532) (ADR 0033 D-0), so
- * the shell hands this screen no link and it says so in words: the framing
- * setup works, and filming — which only the tablet can start — cannot.
+ * ## Pairing, since #529
+ *
+ * While the camera is on for framing and the phone is not paired, the screen
+ * reads the tablet's code with that same camera, answers it, and shows its own
+ * code for the tablet to read (ADR 0033 D-1). The link goes to the session
+ * only once the tablet has connected (`side-camera.ts` §`pair`).
+ *
+ * ⚠️ **A pairing lasts one session** (D-4). *Set up again* builds a new
+ * session, and a link that has ENDED is never handed to it: #536's review
+ * found the old screen re-using the link the last session ended and saying
+ * *"Paired with your tablet"* over it. The new session scans again.
  */
 
 import { useCallback, useEffect, useState, useSyncExternalStore, type JSX } from 'react';
@@ -50,6 +56,10 @@ import {
   type SideCameraState,
 } from '../camera/side-camera';
 import type { SideCameraLinkPort } from '../camera/side-camera-link-port';
+import { PairingCode } from '../camera/PairingCode';
+import { PAIRING_REFUSAL_TEXT, type PairingRefusal } from '../camera/side-link-code';
+import type { PhoneSidePairing, SidePairingPort } from '../camera/side-pairing-port';
+import { PAIRING_READER_UNLOADED, usePairingScan } from '../camera/usePairingScan';
 import { CAMERA_NO_PORT } from './CameraView';
 
 /** The id the section is named by. */
@@ -72,20 +82,28 @@ export const FILMING_WORD = 'Filming';
 export const FILMING_DETAIL =
   'Camera on. This phone is taking pictures of whoever is in front of it.';
 
-/** What an unpaired phone is told, while framing. */
+/**
+ * What an unpaired phone is told, while framing, where it CANNOT pair — this
+ * browser has no way to make a direct link (#529).
+ */
 export const NOT_PAIRED_TEXT =
-  'This phone is not paired with a tablet, and pairing is not in this version of the app yet. ' +
+  'This browser cannot make a direct link to your tablet, so this phone cannot be paired here. ' +
   'Filming starts from the tablet, so it cannot start here — but you can use this screen to ' +
   'stand the tripod in the right place.';
 
-/** What the phone says about the link while framing. */
-function linkSentence(state: SideCameraState): string {
+/** What the phone says about the link while framing, once it has one. */
+function linkSentence(state: SideCameraState): string | undefined {
   if (!state.paired) {
-    return NOT_PAIRED_TEXT;
+    return undefined;
   }
-  return state.linkCondition === 'lost'
-    ? 'This phone cannot reach your tablet.'
-    : 'Paired with your tablet. Filming starts when you press start on the tablet.';
+  switch (state.linkCondition) {
+    case 'lost':
+      return 'This phone cannot reach your tablet.';
+    case 'ended':
+      return 'The pairing with your tablet has ended. Turn the camera off and set up again to pair.';
+    default:
+      return 'Paired with your tablet. Filming starts when you press start on the tablet.';
+  }
 }
 
 /** The countdown, in words. */
@@ -101,6 +119,11 @@ export interface SideCameraViewProps {
    * and supplied by tests and by the browser gate's harness.
    */
   readonly link?: SideCameraLinkPort | undefined;
+  /**
+   * Where this phone's pairing comes from — #529. `undefined` where this
+   * browser has no WebRTC, and the screen then says it cannot be paired.
+   */
+  readonly pairing?: SidePairingPort | undefined;
   /**
    * Tells the shell the filming sign has the screen — #423's mechanism, as the
    * trainer game uses it. @see GameViewProps.onImmersive
@@ -129,6 +152,7 @@ export function SideCameraView(props: SideCameraViewProps): JSX.Element {
 function SideCamera({
   controller,
   link,
+  pairing,
   onImmersive,
   timers,
 }: SideCameraViewProps & { readonly controller: CameraController }): JSX.Element {
@@ -143,7 +167,10 @@ function SideCamera({
     // first session is disposed before it has turned anything on.
     const created = new SideCameraSession({
       camera: controller,
-      link,
+      // ⚠️ **Never a link that has ended** (#529, from #536's review): a
+      // pairing is one session's (ADR 0033 D-4), and "Set up again" must scan
+      // again rather than show "Paired with your tablet" over a dead link.
+      link: link?.sideLinkCondition() === 'ended' ? undefined : link,
       ...(timers ?? {}),
     });
     setSession(created);
@@ -164,6 +191,7 @@ function SideCamera({
       key={generation}
       controller={controller}
       session={session}
+      pairing={pairing}
       onImmersive={onImmersive}
       again={() => {
         setGeneration((value) => value + 1);
@@ -175,11 +203,13 @@ function SideCamera({
 function SessionScreen({
   controller,
   session,
+  pairing,
   onImmersive,
   again,
 }: {
   readonly controller: CameraController;
   readonly session: SideCameraSession;
+  readonly pairing: SidePairingPort | undefined;
   readonly onImmersive: ((immersive: boolean) => void) | undefined;
   readonly again: () => void;
 }): JSX.Element {
@@ -318,7 +348,13 @@ function SessionScreen({
                 ? FRAMING_VERDICT_TEXT['no-reference']
                 : null}
           </p>
-          <p>{linkSentence(state)}</p>
+          {state.paired ? (
+            <p>{linkSentence(state)}</p>
+          ) : pairing === undefined ? (
+            <p>{NOT_PAIRED_TEXT}</p>
+          ) : (
+            <PhonePairing controller={controller} pairing={pairing} session={session} />
+          )}
           {state.secondsLeft === undefined ? null : (
             <p role="timer">{countdownSentence(state.secondsLeft)}</p>
           )}
@@ -343,6 +379,137 @@ function SessionScreen({
         </section>
       ) : null}
     </section>
+  );
+}
+
+/** Where the phone's pairing has got to. */
+type PairingStep =
+  | { readonly kind: 'scan' }
+  | { readonly kind: 'answering' }
+  | { readonly kind: 'answer'; readonly answer: PhoneSidePairing }
+  | { readonly kind: 'failed' }
+  | { readonly kind: 'unavailable' };
+
+/**
+ * Read the tablet's code, answer it, show the answer, and hand the link to the
+ * session once the tablet has connected — #529, ADR 0033 D-1.
+ */
+function PhonePairing({
+  controller,
+  pairing,
+  session,
+}: {
+  readonly controller: CameraController;
+  readonly pairing: SidePairingPort;
+  readonly session: SideCameraSession;
+}): JSX.Element {
+  const [step, setStep] = useState<PairingStep>({ kind: 'scan' });
+  const [refusal, setRefusal] = useState<PairingRefusal | undefined>(undefined);
+
+  usePairingScan(
+    controller,
+    step.kind === 'scan',
+    (code) => {
+      setStep({ kind: 'answering' });
+      void pairing.answerSideCamera(code).then((made) => {
+        if (typeof made === 'object') {
+          setRefusal(undefined);
+          setStep({ kind: 'answer', answer: made });
+        } else {
+          setRefusal(made);
+          setStep({ kind: 'scan' });
+        }
+      });
+    },
+    () => {
+      // The reader would not load (#550's second review). The camera is the
+      // session's — the rider is framing with it — so it stays on; the scan
+      // stops and says so rather than "Looking…" for ever.
+      setStep({ kind: 'unavailable' });
+    },
+  );
+
+  useEffect(() => {
+    if (step.kind !== 'answer') {
+      return;
+    }
+    const { link } = step.answer;
+    const settle = (): void => {
+      const condition = link.sideLinkCondition();
+      if (condition === 'connected') {
+        // Refused only by a session that is over or already paired; the link
+        // is then nobody's, and it is ended rather than left open.
+        if (!session.pair(link)) {
+          link.endSideLink();
+        }
+      } else if (condition === 'ended') {
+        setStep({ kind: 'failed' });
+      }
+    };
+    const unsubscribe = link.onSideLinkEvent((event) => {
+      if (event.kind === 'condition') {
+        settle();
+      }
+    });
+    settle();
+    return () => {
+      unsubscribe();
+      // Left before the tablet connected: nobody will ever use this link.
+      if (link.sideLinkCondition() === 'connecting') {
+        link.endSideLink();
+      }
+    };
+  }, [step, session]);
+
+  if (step.kind === 'answer') {
+    return (
+      <>
+        <PairingCode code={step.answer.answerCode} label="Pairing code for your tablet to scan" />
+        <p>
+          Now press &ldquo;Read the phone&rsquo;s code&rdquo; on the tablet, and hold the tablet so
+          its camera can see this code.
+        </p>
+      </>
+    );
+  }
+  if (step.kind === 'unavailable') {
+    return (
+      <StatusMessage tone="warning" live>
+        {PAIRING_READER_UNLOADED}
+      </StatusMessage>
+    );
+  }
+  if (step.kind === 'failed') {
+    return (
+      <>
+        <StatusMessage tone="warning" live>
+          The tablet did not connect. Press &ldquo;Pair a phone&rdquo; on the tablet to show a fresh
+          code, then scan it here.
+        </StatusMessage>
+        <Button
+          variant="secondary"
+          onClick={() => {
+            setStep({ kind: 'scan' });
+          }}
+        >
+          Scan the tablet&rsquo;s code again
+        </Button>
+      </>
+    );
+  }
+  return (
+    <>
+      <p>
+        To pair with your tablet: on the tablet, open Camera and press &ldquo;Pair a phone&rdquo;,
+        then hold this phone so its camera can see the tablet&rsquo;s code.
+      </p>
+      <p role="status">
+        {step.kind === 'answering' ? 'Found the tablet’s code.' : 'Looking for the tablet’s code…'}
+      </p>
+      {refusal === undefined ? null : (
+        <StatusMessage tone="warning">{PAIRING_REFUSAL_TEXT[refusal]}</StatusMessage>
+      )}
+    </>
   );
 }
 

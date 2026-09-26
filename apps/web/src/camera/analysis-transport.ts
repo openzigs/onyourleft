@@ -48,8 +48,12 @@
  *   a public name, which is what such a tunnel's address is, so this is a
  *   property of the code as well as a sentence. Reversing it needs a
  *   superseding ADR arguing that the operator cannot read the payload.
- * - **WebRTC is out**: it needs signalling infrastructure, which is a server
- *   this project does not have (owner decision D6).
+ * - **WebRTC is out FOR THIS PATH** — the rider's computer is not a browser
+ *   peer. ⚠️ The reason given here until #529 was that WebRTC *"needs
+ *   signalling infrastructure, which is a server"*, and that is not true of
+ *   two devices in one room: [ADR 0033](../../../../docs/adr/0033-side-camera-link.md)
+ *   permits a WebRTC data channel signalled by two QR codes for the SIDE
+ *   CAMERA, and `side-link-transport.ts` is it (ADR 0033 D-10).
  * - **Permitted and not built here**: a WireGuard-class overlay for the remote
  *   case, where the relay forwards ciphertext only. It needs nothing from this
  *   module — the rider's overlay gives their machine an address in

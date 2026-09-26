@@ -116,8 +116,9 @@ describe('the scan itself', () => {
  * already here, is a red test whatever it is named after.
  */
 const PAUSE_AND_RESUME_CALLS: Readonly<Record<string, { pause: number; resume: number }>> = {
-  // A detached <video>, released with the camera. Not a ride.
-  [join('camera', 'browser-camera.ts')]: { pause: 1, resume: 0 },
+  // Two detached <video>s — the presence sampler's and, since #529, the
+  // pairing-code reader's — each released with the camera. Not a ride.
+  [join('camera', 'browser-camera.ts')]: { pause: 2, resume: 0 },
   // The Web Audio context, resumed inside a press. Not a ride.
   [join('game', 'audio-cues.ts')]: { pause: 0, resume: 1 },
   [join('game', 'web-audio.ts')]: { pause: 0, resume: 1 },

@@ -210,6 +210,24 @@ export interface LuminanceGrid {
 }
 
 /**
+ * One picture's pixels, for one question only: is there a pairing code in it
+ * — #529, [ADR 0033](../../../../docs/adr/0033-side-camera-link.md) D-4.
+ *
+ * ⚠️ **Not a frame, and never treated as one**, on {@link LuminanceGrid}'s
+ * terms: no encoding and no container, handed to `side-link-qr.ts`
+ * §`pairingCodeFromPixels` and dropped with the call. D-4: *"decoded in memory
+ * for the code only, discarded as soon as a code is read or scanning is
+ * cancelled, never sent, never kept and never analysed for anything else"*.
+ * `boundary.test.ts` holds it inside this directory.
+ */
+export interface CodePixels {
+  readonly width: number;
+  readonly height: number;
+  /** Row-major RGBA, four bytes a pixel. */
+  readonly rgba: Uint8ClampedArray;
+}
+
+/**
  * Where a live preview is shown — #528.
  *
  * The slice of a `<video>` element {@link CameraSession.attachCameraPreview}
@@ -264,6 +282,18 @@ export interface CameraSession {
    */
   sampleLuminance(): Promise<LuminanceGrid>;
   /**
+   * One picture's pixels, now, at most {@link CODE_PIXELS_LONG_SIDE} on its
+   * long side — #529's pairing-code reader, and nothing else.
+   *
+   * ⚠️ **Deliberately not {@link captureFrame}**: nothing is encoded, so there
+   * is no file a picture could become, and the size is bounded because a QR
+   * code across a metre needs no more.
+   *
+   * @throws never with anything of the picture in it: a read that cannot be
+   * taken rejects with a {@link CameraCaptureError} from the fixed table.
+   */
+  readCodePixels(): Promise<CodePixels>;
+  /**
    * Play this camera, live, into `surface` — the side camera's framing screen
    * (#528).
    *
@@ -286,6 +316,14 @@ export interface CameraSession {
    */
   readonly live: boolean;
 }
+
+/**
+ * The longest side, in pixels, a pairing-code read is drawn at: 640. A code on
+ * a tablet or a phone at arm's length fills a good part of the picture, and
+ * `jsqr` reads one of version 10 at this size; a larger read is more work on
+ * the thread drawing the screen, several times a second, for nothing.
+ */
+export const CODE_PIXELS_LONG_SIDE = 640;
 
 /** The one seam between this client and a camera. */
 export interface CameraPort {

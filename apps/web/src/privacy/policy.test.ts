@@ -65,4 +65,17 @@ describe('the published privacy policy', () => {
     // false, is gone rather than left standing beside the new one.
     expect(text).not.toContain('`sendBeacon` call at all');
   });
+
+  it('says what the side-camera link carries, and that it carries no picture yet — #529', () => {
+    // ADR 0033 D-10: the policy changes in the pull request that sends the
+    // first link byte, and the words about pictures land with #530. So this
+    // pins the section AND the count it made false.
+    const text = readFileSync(POLICY, 'utf8');
+    expect(text).toContain('A second phone you pair as a side camera');
+    expect(text).toContain('exactly **two** network calls');
+    expect(text).not.toContain('exactly **one** network call');
+    expect(text).toContain('no picture');
+    expect(text).toContain('A pairing lasts one session');
+    expect(text).toContain('keeps filming for up to 30 seconds, then stops');
+  });
 });

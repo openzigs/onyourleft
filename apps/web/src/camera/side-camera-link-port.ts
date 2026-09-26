@@ -5,17 +5,14 @@
  * more** — #528,
  * [ADR 0033](../../../../docs/adr/0033-side-camera-link.md) D-3 and D-5.
  *
- * ## No implementation exists yet, and this port is why that is safe
+ * ## The implementation is `side-link.ts`, since #529
  *
- * The link itself — the data channel, the two QR codes, the one-time secret,
- * the candidate rule — is [#529](https://github.com/openzigs/onyourleft/issues/529),
- * and ADR 0033 D-0 forbids it choosing a transport before
- * [#532](https://github.com/openzigs/onyourleft/issues/532) has measured one.
- * So #528 builds the phone's side of the session against this interface, and
- * `main.tsx` hands the screen none: a phone that cannot be paired says so and
- * offers the framing setup alone. When #529 lands, its transport implements
- * this port and the screen's behaviour on a lost link — the part a rider's
- * safety rests on — is already built and tested.
+ * #528 built the phone's side of the session against this interface before a
+ * transport existed; [#529](https://github.com/openzigs/onyourleft/issues/529)
+ * is the WebRTC data channel that implements it (`side-link.ts`
+ * §`PhoneSideLink`), reached through `side-pairing-port.ts`, which is where a
+ * link comes from. ⚠️ **A reviewer who remembers "no implementation exists
+ * yet" is reading the old file.**
  *
  * ## Why a `*-port.ts`, and the names
  *
@@ -38,12 +35,24 @@
 /**
  * Whether the tablet can currently hear this phone.
  *
- * `lost` is D-5's case: the phone keeps filming **for at most 30 seconds**,
- * then stops on its own timer. A link that recovers inside that window is
- * `connected` again and the session goes on (ADR 0033 D-5's *"streaming
- * resumes with the next frame captured"*).
+ * - `connecting` — the phone has shown its answer and the tablet has not
+ *   connected yet (#529). A session is not handed a link in this condition;
+ *   the screen waits for `connected` first.
+ * - `connected` — the tablet can hear this phone.
+ * - `lost` — D-5's case: the phone keeps filming **for at most 30 seconds**,
+ *   then stops on its own timer. A link that recovers inside that window is
+ *   `connected` again and the session goes on (ADR 0033 D-5's *"streaming
+ *   resumes with the next frame captured"*).
+ * - `ended` — the pairing is over and **nothing can bring it back** (#529,
+ *   carried over from #536's review): either device ended it, or the
+ *   connection failed, which a host-only link cannot re-establish without a
+ *   new pair of codes (D-1). ⚠️ **A session on an ended link is on its own
+ *   30 seconds** exactly as on a lost one — an ended link never recovers, so
+ *   the stop is certain — and a new session needs a new pairing (D-4: *"scan
+ *   every time"*). `views/SideCameraView.tsx` refuses to hand an ended link to
+ *   a new session for that reason.
  */
-export type SideLinkCondition = 'connected' | 'lost';
+export type SideLinkCondition = 'connecting' | 'connected' | 'lost' | 'ended';
 
 /**
  * One thing the link reports: its condition changing, or a command from the

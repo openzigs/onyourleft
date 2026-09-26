@@ -136,6 +136,11 @@ export default defineConfig({
         // control is 44 × 44 and uncovered. `sidecamera-harness.tsx` says what
         // it does and does not prove.
         sidecamera: 'browser/sidecamera.html',
+        // #529: the side-camera link, paired end to end in a real engine —
+        // two peer connections through the real codes and the SDP rebuilt
+        // from them. `sidelink-harness.ts` says what it does and does not
+        // prove.
+        sidelink: 'browser/sidelink.html',
         // ADR 0026 D-12: the ONE place the realistic world can be reached until
         // #475 offers it to riders — the owner's page, ridden automatically,
         // with the stylised world a tap away and a twenty-minute soak.
