@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useEffect, useRef, type JSX, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, type JSX, type ReactNode, type Ref } from 'react';
 
 /** Primary for the one action a view is for; secondary for everything else. */
 export type ButtonVariant = 'primary' | 'secondary';
@@ -42,6 +42,12 @@ export interface ButtonProps {
    * page that moves under the rider.
    */
   readonly focusOnMount?: boolean;
+  /**
+   * The underlying `<button>`, for a screen that has to put focus back on it
+   * after the control a rider pressed unmounts (WCAG 2.2 SC 2.4.3) — #548's
+   * *Start a new ride* hands focus to *Start recording* this way.
+   */
+  readonly ref?: Ref<HTMLButtonElement>;
 }
 
 /**
@@ -58,8 +64,22 @@ export function Button({
   disabled = false,
   describedBy,
   focusOnMount = false,
+  ref,
 }: ButtonProps): JSX.Element {
   const element = useRef<HTMLButtonElement>(null);
+  // Both #557's `focusOnMount` (which needs the element here) and #548's `ref`
+  // (which hands it to a caller) point at the one `<button>`.
+  const setElement = useCallback(
+    (node: HTMLButtonElement | null): void => {
+      element.current = node;
+      if (typeof ref === 'function') {
+        ref(node);
+      } else if (ref !== undefined && ref !== null) {
+        ref.current = node;
+      }
+    },
+    [ref],
+  );
   useEffect(() => {
     if (focusOnMount) {
       element.current?.focus();
@@ -73,7 +93,7 @@ export function Button({
   // defaulted above, so no third value can reach here.
   return (
     <button
-      ref={element}
+      ref={setElement}
       className={className}
       type={type}
       onClick={onClick}

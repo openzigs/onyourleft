@@ -300,6 +300,18 @@ export interface RideSnapshot {
   readonly storage: RecorderStorageState;
   /** Where the finished ride got to. See {@link RideSaveState}. */
   readonly saveState: RideSaveState;
+  /**
+   * The rider confirmed Stop and the stop is still settling — #548.
+   *
+   * `phase` is already `stopped`, but the trainer is still being released, the
+   * final checkpoint flushed and the ride saved. Until this clears,
+   * `saveState` can still hold the PREVIOUS ride's value (a fresh controller,
+   * and every ride after {@link RideController.startNewRide}, starts at
+   * `unavailable`), so a screen reading `saveState` alone would tell the rider
+   * the tab is safe to close before the last write has landed, and offer a
+   * new ride that would drop the recorder the stop is writing from.
+   */
+  readonly stopping: boolean;
   /** What the save failed with, for a screen that wants to say more than "failed". */
   readonly saveError: string | undefined;
   /** The activity a finished ride became, so a screen can link to it. */
@@ -332,6 +344,43 @@ export interface RideSnapshot {
    * `undefined` otherwise, which is every ride where nothing was asked.
    */
   readonly notificationNotice: string | undefined;
+}
+
+/**
+ * Whether a stopped ride may be put away and a new one begun — #548.
+ *
+ * Only once the ride that stopped is **somewhere other than this tab's memory**:
+ * the last checkpoint landed (`storage === 'ok'`) and the save has finished
+ * one of the three ways that leave nothing to protect — `saved`, `empty`
+ * (there was no ride to save), or `unavailable` (this build cannot save, and
+ * the checkpoint on the device is the ride; it is offered back as one).
+ *
+ * ⚠️ **Not while `saving` or `failed`, and that is the data-safety half.**
+ * Mid-save the recorder is the only thing holding the ride's series, and a
+ * failed save is still being explained on the stopped screen; replacing the
+ * recorder under either would throw away the one copy a warning is about.
+ *
+ * ⚠️ **Not while `stopping` either.** Between Stop being confirmed and its
+ * save beginning, the phase says `stopped` while `saveState` can still say
+ * the previous ride's `unavailable` — see {@link RideSnapshot.stopping}.
+ *
+ * One rule, read by the controller that enforces it and by the screen that
+ * decides whether to offer the control. Every input it reads is on the
+ * snapshot — `stopping` included, which until #565's review was a flag only
+ * the controller could see, so the screen offered the control in exactly the
+ * window the controller refused it.
+ */
+export function canStartNewRide(
+  state: Pick<RideSnapshot, 'phase' | 'storage' | 'saveState' | 'stopping'>,
+): boolean {
+  return (
+    state.phase === 'stopped' &&
+    !state.stopping &&
+    state.storage === 'ok' &&
+    (state.saveState === 'saved' ||
+      state.saveState === 'empty' ||
+      state.saveState === 'unavailable')
+  );
 }
 
 /**
@@ -459,6 +508,17 @@ export interface RideController {
   cancelStop(): void;
   /** Second press. Stops the recording and checkpoints it. */
   confirmStop(): Promise<void>;
+  /**
+   * Put a stopped ride away and return to `idle`, ready to record another —
+   * #548. Refused (`false`) unless {@link canStartNewRide} holds.
+   *
+   * The next {@link start} builds a new recorder with a new session id and a
+   * fresh clock. **Paired sensors and trainer control are kept**: the rider is
+   * still on the same bike. Nothing is written to the trainer here — the ride
+   * that stopped already released it through the one release (#372), and
+   * starting a new ride is not a reason to touch resistance.
+   */
+  startNewRide(): Promise<boolean>;
 
   /**
    * Ride a saved workout against the paired trainer (#14).
@@ -590,6 +650,15 @@ export function createRideController(options: RideControllerOptions): RideContro
   let recoverable: readonly RecoverableRide[] = [];
   let phase: RidePhase = 'idle';
   let stopArmed = false;
+  /**
+   * `confirmStop` is between setting `stopped` and its save settling — #548.
+   * The phase says `stopped` and `saveState` still holds the LAST ride's value
+   * while the trainer is released and the final checkpoint flushed, so without
+   * this a new ride pressed in that window would drop the recorder the stop
+   * is still writing from. Published as {@link RideSnapshot.stopping}, so the
+   * screen reads it through {@link canStartNewRide} too.
+   */
+  let finishing = false;
   let pairingError: string | undefined;
   let requested: Watts | undefined;
   let controlLost: ControlLossReason | undefined;
@@ -690,7 +759,12 @@ export function createRideController(options: RideControllerOptions): RideContro
    * screen is off, which is the one time the service matters.
    */
   const syncKeepAlive = (): void => {
-    const wanted = !disposed && rideInProgress(phase);
+    // #565's second review: `confirmStop` publishes `stopped` BEFORE it sends
+    // the trainer Stop, flushes the last checkpoint and saves. Keyed on the
+    // phase alone, that first render let the foreground service go with the
+    // ride's last writes still in flight — with the screen off, exactly the
+    // writes #524 exists to protect. `finishing` holds it until they land.
+    const wanted = !disposed && (rideInProgress(phase) || finishing);
     if (wanted === keptAlive || options.keepAlive === undefined) {
       return;
     }
@@ -844,6 +918,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       },
       storage: recorder?.storageState ?? 'ok',
       saveState,
+      stopping: finishing,
       saveError,
       savedActivityId,
       leftover,
@@ -1093,6 +1168,14 @@ export function createRideController(options: RideControllerOptions): RideContro
     }
     try {
       const rows = await listRecoverableRecordings(store, athleteId);
+      // Checked again after the read: *Start a new ride* re-renders the idle
+      // screen before this settles, and a rider who presses Start in that gap
+      // must not have the offer appear mid-ride (#565's review, item 4). Read
+      // through `rideInProgress` because the check above has narrowed `phase`
+      // for the compiler, which cannot see the await let it move.
+      if (rideInProgress(phase)) {
+        return;
+      }
       recoverable = recoverableRides(rows, { excluding: recorder?.sessionId });
     } catch {
       // A store that cannot be read is what "offline" looks like on this
@@ -1348,11 +1431,60 @@ export function createRideController(options: RideControllerOptions): RideContro
       // the workout and a ride named after the session it rode has to read that
       // name while it still exists.
       const ridden = workout?.record.name;
-      endWorkoutSession();
-      await stopTrainer();
-      await recording().stop(at);
+      finishing = true;
+      // Published now, not after the first await: the 1 Hz tick and every
+      // trainer notification re-render the screen during the release and the
+      // flush, and each of those renders must read the ride as still stopping.
       changed();
-      await saveTheRide(recorder, ridden);
+      try {
+        endWorkoutSession();
+        await stopTrainer();
+        await recording().stop(at);
+        changed();
+        await saveTheRide(recorder, ridden);
+      } catch (error: unknown) {
+        // Fail closed (#565's second review). Nothing on today's paths throws
+        // here, but if something did before `saveTheRide` set the outcome, the
+        // screen would fall back to the previous ride's save state — "Closing
+        // the tab is safe now" and a new ride offered over an unsaved
+        // recorder. `failed` says neither, and the checkpoint is left for
+        // recovery exactly as a refused save leaves it.
+        if (saveState !== 'saved') {
+          saveState = 'failed';
+        }
+        throw error;
+      } finally {
+        finishing = false;
+        changed();
+      }
+    },
+
+    async startNewRide(): Promise<boolean> {
+      if (
+        !canStartNewRide({
+          phase,
+          stopping: finishing,
+          storage: recorder?.storageState ?? 'ok',
+          saveState,
+        })
+      ) {
+        return false;
+      }
+      recorder = undefined;
+      phase = 'idle';
+      stopArmed = false;
+      saveState = 'unavailable';
+      saveError = undefined;
+      savedActivityId = undefined;
+      leftover = false;
+      clock = now();
+      changed();
+      // The ride that just stopped is no longer "the one in progress", so a
+      // working copy it left behind — the `leftover` case — is offered back
+      // now rather than on the next launch. A saved ride's checkpoint is
+      // already gone and offers nothing.
+      await refreshRecoverable();
+      return true;
     },
 
     /** Re-read the rides this device is still holding — #212. */
