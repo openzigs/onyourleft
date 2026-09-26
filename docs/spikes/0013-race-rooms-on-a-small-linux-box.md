@@ -45,10 +45,16 @@
    the same 6 000 riders were healthy and cost **about 28 % more CPU in total** (§4.2).
 3. ⚠️ **With compression on — which is what a browser asks for — memory runs out before CPU does.**
    Chrome offers `permessage-deflate` and `workerd` accepts it by default. Each connection then holds
-   a compression context, and a room of 50 costs about **33 MB**: **~0.67 MB per rider**, against
-   **~0.14–0.29 MB** with compression switched off. Compression **halves** the outbound wire bytes
-   and moved the CPU by under 3 % (§5). **That trade is a dial the operator owns, and on an 8 GB box
-   it is the dial that decides how many riders fit.**
+   a compression context, and in the **180-second** many-room runs a room of 50 cost about
+   **33 MiB**: **~0.67 MiB per rider**, against **~0.14–0.29 MiB** with compression switched off.
+   Compression **halves** the outbound wire bytes and moved the CPU by under 3 % (§5). **That trade
+   is a dial the operator owns, and on an 8 GB box it is the dial that decides how many riders
+   fit.** ⚠️ **Those per-rider figures are three minutes old at the moment they were read, and this
+   spike's own hour contradicts them**: the hour's resident set climbed for about 20 minutes and
+   settled at a median of 207 MiB, which is **~3.3 MiB per rider** over the 43 MiB baseline — about
+   **five times** the 180-second figure (spike 0007's hour gives ~1.7). The steady-state figure for
+   many rooms in one process was **not measured**, and §4.3 says what that does to the capacity
+   column.
 4. **Per-room CPU falls as rooms are added** — 1.70 % of a core for one room, **0.63 %** each at 80
    rooms — and the re-simulation per rider-second falls with it, from **162 µs** to **~60 µs**. The
    likeliest cause is a CPU that clocks down when it is nearly idle, and it is **not established**
@@ -209,8 +215,9 @@ waited **11.5 s**.
 saturated. Linear interpolation between them puts 100 % of this core at roughly **11 000–12 000
 riders**, which is the arithmetic and not a measurement: nobody ran 10 000.
 
-⚠️ **This is `workerd`'s documented shape, not a defect of this room**, and it is the finding most
-likely to change a self-hosting plan. A box with four vCPUs gives one `workerd` process **one** of
+⚠️ **This is `workerd`'s shape as observed here, not a defect of this room** — observed from the
+thread counters above, not taken from any `workerd` documentation, which this spike did not cite —
+and it is the finding most likely to change a self-hosting plan. A box with four vCPUs gives one `workerd` process **one** of
 them. Using the rest means running one process per core and deciding which process a room lives on
 — which is a **router** somebody has to write, because `idFromName` places a room within a process
 and knows nothing of the others. Run H did it the crude way, room *i* to process *i* mod 4, and it
@@ -234,13 +241,30 @@ cores were full. **Memory** is the first limit, and which limit depends on the c
 
 | | Memory per rider, measured | Riders in ~7 GB, arithmetic |
 |---|---|---|
-| Compression **on** (browser default) | **~0.67 MB** (runs C, D: 673 and 672 KB per rider over the idle baseline) | **~10 000** |
-| Compression **off** | **~0.14–0.29 MB** (runs G and F) | **~25 000–50 000** |
+| Compression **on** (browser default), **180 s** runs | **~0.67 MiB** (runs C, D: 673 and 672 KiB per rider over the idle baseline) | **~10 000** |
+| Compression **on**, **the hour** (§3, one room) | **~3.3 MiB** ((207 − 43) MiB median ÷ 50); **~4.3 MiB** at the 257 MiB maximum | **~2 000** |
+| Compression **off**, **180 s** runs | **~0.14–0.29 MiB** (runs G and F) | **~25 000–50 000** |
+| Compression **off**, an hour | **not measured** | — |
+
+⚠️ **The 180-second rows are not steady state, and the hour row is.** Every run in the §4 table
+lasted 180 s (120 s for I) on a freshly started container, and §3's hour shows the resident set of
+a compressed room still **climbing for about the first 20 minutes** before it settles into a
+sawtooth. The 180-second figures are therefore read part-way up that climb, and the hour's
+**~3.3 MiB per rider** is **about five times** the 0.67 MiB they give; spike 0007's hour, on the
+macOS host, gives **~1.7 MiB** ((116.9 − 30.2) ÷ 50). **This spike does not reconcile the two.**
+The hour is one room in one process, and a single isolate's heap and garbage-collection headroom
+need not scale with the number of rooms in it, so the steady state for 80 rooms could sit anywhere
+between the two rows — **nobody ran many rooms for an hour**, and that run is what would settle
+it. Until it is run, **read ~2 000 riders as the pessimistic end and ~10 000 as the optimistic end
+of a compressed 7 GB box**, not ~10 000 alone. The compression-off rows have no hour at all, and
+nothing here says whether they climb by the same factor. What survives either reading is the
+ordering: memory, not CPU, is the first limit with compression on, and the hour makes that
+**more** true rather than less.
 
 ⚠️ **The right-hand column is division, not a run**, and it takes no account of the operating system,
-a database, the rest of the instance, or the second process's baseline. Run E's **420 KB** per rider
+a database, the rest of the instance, or the second process's baseline. Run E's **420 KiB** per rider
 at 4 000 riders is lower than C and D's 672 because the resident set was read at one instant of a
-sawtooth; `memory.peak` for E was **1 889 MiB**, which is **~470 KB** per rider over the baseline.
+sawtooth; `memory.peak` for E was **1 889 MiB**, which is **~470 KiB** per rider over the baseline.
 **Read the column as an order of magnitude, and read it before buying a box, not instead of
 measuring one.**
 
@@ -260,7 +284,10 @@ measuring one.**
 — 2.5 % over 180 s, inside the run-to-run noise §4's samples show. The second half is the one
 nobody would have guessed: a deflate context is a sliding window and a hash table **per
 connection**, held for the life of the socket, and at 50 sockets a room that is **~19 MiB per room
-more** than the same room uncompressed.
+more** than the same room uncompressed. ⚠️ **Both columns are 180-second runs**, and §4.3 is why
+that matters: the one compressed room measured for an hour settled at about five times the
+per-rider memory run C shows, and no uncompressed room was run for an hour. The **direction** —
+compression costs memory — is measured; the **ratio** at steady state is not.
 
 **Nobody has to choose it on purpose, which is the reason to write it down.** Chrome — and so the
 Capacitor WebView — offers `permessage-deflate` on every WebSocket, and `workerd` accepts it unless
@@ -294,8 +321,8 @@ cache and JIT warmth: one room's tick runs once a second and finds a cold core e
 
 ⚠️ **Neither was measured.** Nobody read a clock frequency — Docker Desktop's VM does not expose the
 host's — and nobody pinned one. **So the per-room cost at one room is the figure most likely to be
-an artefact**, and quoting 1.70 % as "what a room costs" overstates it by about **three to four
-times** against the figure at scale. The resident set is the same shape of difference: Linux's
+an artefact**, and quoting 1.70 % as "what a room costs" overstates it by about **2.7 to 4
+times** against the figure at scale (1.70 % against 0.63 % in run E and 0.43 % in run G). The resident set is the same shape of difference: Linux's
 allocator, Linux's page accounting and a different `workerd` build, not a different room.
 
 ---
@@ -327,11 +354,9 @@ allocator, Linux's page accounting and a different `workerd` build, not a differ
 ## 8. The Cloudflare half, and why it was not attempted
 
 #464's first criterion wants the **dashboard's billed numbers** for one hour-long 50-rider room.
-That needs a Cloudflare account to deploy to, and the only credential on this machine is a
-`wrangler` login belonging to the repository's owner — an OAuth token that expired in March 2026,
-with a refresh token beside it. **Deploying to somebody else's account with a stored credential, on
-a run nobody is watching, is not a step a measurement takes on its own authority**, whatever the
-plan the account is on. It is left for the owner, and it is small:
+That needs a Cloudflare account to deploy to, and **no Cloudflare account was set up for this
+run**. Deploying to an account on a run nobody is watching is not a step a measurement takes on
+its own authority, whatever the plan the account is on. It is left for the owner, and it is small:
 
 - **What would run**: the same room, one Durable Object, with `wrangler deploy`; this spike's load
   generator pointed at it for 3 600 s; the dashboard's *Requests* and *Duration (GB-s)* for that

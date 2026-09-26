@@ -341,8 +341,12 @@ ran a 50-rider race room under `workerd` for an hour, and many rooms at once in 
 like the reference box. Two things from them bear on *"at what population does one box stop being
 enough?"* and neither is a cost: **one `workerd` process uses one core**, so the box's four vCPUs
 are four processes and a router; and **with WebSocket compression on — the browser default — memory
-runs out before CPU**, at roughly 0.67 MB per connected rider. Both were measured on an M4 Pro, not
-on the reference box's cores. **The billing test in item 1 above was not run**, so nothing enters
+runs out before CPU**. ⚠️ **How much memory a rider costs is not settled**: the many-room runs
+lasted three minutes and read about 0.67 MiB per connected rider, while the one room run for an
+hour kept climbing for about 20 minutes and settled near 3.3 MiB per rider — about five times as
+much. Spike 0013 §4.3 does not reconcile the two, so a compressed reference box holds somewhere
+between roughly 2 000 and 10 000 riders by that arithmetic, and only a many-room run of an hour
+narrows it. Both spikes were measured on an M4 Pro, not on the reference box's cores. **The billing test in item 1 above was not run**, so nothing enters
 the tables and the sentence *"this model asserts no real-time figure"* stands.
 
 ---
