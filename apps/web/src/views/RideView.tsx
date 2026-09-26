@@ -56,7 +56,12 @@ import { WorkoutPanel } from '../ride/WorkoutPanel';
 import type { WorkoutPort } from '../workouts/store-port';
 import type { AnalysisPort } from '../analysis/store-port';
 import type { RecoverableRide } from '../recording/recovery';
-import type { PairingRole, RideController, RideSnapshot } from '../ride/controller';
+import {
+  canStartNewRide,
+  type PairingRole,
+  type RideController,
+  type RideSnapshot,
+} from '../ride/controller';
 import { useRideSnapshot } from '../ride/useRideController';
 import { hrefFor, routeById } from '../shell/routes';
 
@@ -368,82 +373,26 @@ function RideControls({
   }
 
   if (snapshot.phase === 'stopped') {
-    // ⚠️ Only when the last checkpoint landed. The final flush happens inside
-    // `confirmStop`, and it can be refused — a full device, an aborted
-    // transaction — which leaves the last seconds of the ride in this tab and
-    // nowhere else. Gated on the phase alone, this claimed "every second of it
-    // is saved … Closing the tab is safe now" directly above `StorageNotice`
-    // saying the device had no room left. The rider believes the reassuring one
-    // and closes the tab.
-    if (snapshot.storage !== 'ok') {
-      return (
-        <StatusMessage tone="warning" label="Stopped" live>
-          The ride is stopped, but the last checkpoint did not save, so its final seconds are only
-          in this tab. Do not close it yet.
-        </StatusMessage>
-      );
-    }
-    // ⚠️ This block used to say "every second of it is saved on this device"
-    // and nothing else, with a comment attributing the missing half to #51.
-    // That attribution was wrong — #51 is file import and export — and the
-    // effect was that a rider was told their ride was safe while it existed
-    // only as a *checkpoint*: absent from their activities, and offered back on
-    // next open as an interrupted ride. `recording/finish.ts` is the step that
-    // was missing; these branches are what the rider is now told about it.
-    if (snapshot.saveState === 'saving') {
-      return (
-        <StatusMessage tone="info" label="Stopped" live>
-          The ride is stopped and every second of it is on this device. Adding it to your
-          activities…
-        </StatusMessage>
-      );
-    }
-    if (snapshot.saveState === 'failed') {
-      // The ride is NOT lost, and saying so first is the point: the checkpoint
-      // is deliberately left in place when a save fails, so the recovery path
-      // still has it. A message that led with the failure would read as a lost
-      // ride.
-      return (
-        <StatusMessage tone="warning" label="Stopped" live>
-          The ride is stopped and every second of it is on this device, but it could not be added to
-          your activities{snapshot.saveError === undefined ? '' : `: ${snapshot.saveError}`}. It is
-          still here and will be offered back next time you open On Your Left.
-        </StatusMessage>
-      );
-    }
-    if (snapshot.saveState === 'empty') {
-      return (
-        <StatusMessage tone="info" label="Stopped" live>
-          Nothing was recorded, so there is no ride to save. Pair a sensor and press Start to record
-          one.
-        </StatusMessage>
-      );
-    }
-    if (snapshot.saveState === 'saved') {
-      // ⚠️ The leftover case is still a SUCCESS: the ride is in the athlete's
-      // activities and that is the sentence that matters. What it adds is the
-      // one thing a rider would otherwise misread — the working copy will be
-      // offered back on the next visit, and it is a copy rather than a rescue.
-      return snapshot.leftover ? (
-        <StatusMessage tone="warning" label="Saved, with a working copy left behind" live>
-          The ride is stopped and saved to your activities. The working copy on this device could
-          not be removed, so it will be offered back next time — discarding it changes nothing about
-          the saved ride.
-        </StatusMessage>
-      ) : (
-        <StatusMessage tone="success" label="Saved" live>
-          The ride is stopped and saved to your activities. Closing the tab is safe now.
-        </StatusMessage>
-      );
-    }
-    // `unavailable` — this build has no activity store, which is the
-    // accessibility suite's case. The old wording, which is still true: the
-    // recording is on the device, and nothing claims more than that.
+    // #548: until this existed a stopped ride was a dead end. `RideSession` is
+    // mounted above the router for the app's lifetime, so neither navigating
+    // away nor anything else reset the controller, and in the Android shell a
+    // rider had to kill the app to record a second ride. Offered after the
+    // notice, and only where `canStartNewRide` says the stopped ride is safe to
+    // put away — never while it exists only in this tab, so the warnings above
+    // are never followed by a control that would discard what they protect.
     return (
-      <StatusMessage tone="success" label="Saved" live>
-        The ride is stopped, and every second of it is saved on this device. Closing the tab is safe
-        now.
-      </StatusMessage>
+      <>
+        <StoppedNotice snapshot={snapshot} />
+        {canStartNewRide(snapshot) ? (
+          <Button
+            onClick={() => {
+              void controller.startNewRide();
+            }}
+          >
+            Start a new ride
+          </Button>
+        ) : null}
+      </>
     );
   }
 
@@ -506,6 +455,86 @@ function RideControls({
         </Button>
       )}
     </>
+  );
+}
+
+/** What a stopped ride ends on — where it got to, and whether the tab is safe to close. */
+function StoppedNotice({ snapshot }: { readonly snapshot: RideSnapshot }): JSX.Element {
+  // ⚠️ Only when the last checkpoint landed. The final flush happens inside
+  // `confirmStop`, and it can be refused — a full device, an aborted
+  // transaction — which leaves the last seconds of the ride in this tab and
+  // nowhere else. Gated on the phase alone, this claimed "every second of it
+  // is saved … Closing the tab is safe now" directly above `StorageNotice`
+  // saying the device had no room left. The rider believes the reassuring one
+  // and closes the tab.
+  if (snapshot.storage !== 'ok') {
+    return (
+      <StatusMessage tone="warning" label="Stopped" live>
+        The ride is stopped, but the last checkpoint did not save, so its final seconds are only in
+        this tab. Do not close it yet.
+      </StatusMessage>
+    );
+  }
+  // ⚠️ This block used to say "every second of it is saved on this device"
+  // and nothing else, with a comment attributing the missing half to #51.
+  // That attribution was wrong — #51 is file import and export — and the
+  // effect was that a rider was told their ride was safe while it existed
+  // only as a *checkpoint*: absent from their activities, and offered back on
+  // next open as an interrupted ride. `recording/finish.ts` is the step that
+  // was missing; these branches are what the rider is now told about it.
+  if (snapshot.saveState === 'saving') {
+    return (
+      <StatusMessage tone="info" label="Stopped" live>
+        The ride is stopped and every second of it is on this device. Adding it to your activities…
+      </StatusMessage>
+    );
+  }
+  if (snapshot.saveState === 'failed') {
+    // The ride is NOT lost, and saying so first is the point: the checkpoint
+    // is deliberately left in place when a save fails, so the recovery path
+    // still has it. A message that led with the failure would read as a lost
+    // ride.
+    return (
+      <StatusMessage tone="warning" label="Stopped" live>
+        The ride is stopped and every second of it is on this device, but it could not be added to
+        your activities{snapshot.saveError === undefined ? '' : `: ${snapshot.saveError}`}. It is
+        still here and will be offered back next time you open On Your Left.
+      </StatusMessage>
+    );
+  }
+  if (snapshot.saveState === 'empty') {
+    return (
+      <StatusMessage tone="info" label="Stopped" live>
+        Nothing was recorded, so there is no ride to save. Pair a sensor, then start a new ride to
+        record one.
+      </StatusMessage>
+    );
+  }
+  if (snapshot.saveState === 'saved') {
+    // ⚠️ The leftover case is still a SUCCESS: the ride is in the athlete's
+    // activities and that is the sentence that matters. What it adds is the
+    // one thing a rider would otherwise misread — the working copy will be
+    // offered back on the next visit, and it is a copy rather than a rescue.
+    return snapshot.leftover ? (
+      <StatusMessage tone="warning" label="Saved, with a working copy left behind" live>
+        The ride is stopped and saved to your activities. The working copy on this device could not
+        be removed, so it will be offered back next time — discarding it changes nothing about the
+        saved ride.
+      </StatusMessage>
+    ) : (
+      <StatusMessage tone="success" label="Saved" live>
+        The ride is stopped and saved to your activities. Closing the tab is safe now.
+      </StatusMessage>
+    );
+  }
+  // `unavailable` — this build has no activity store, which is the
+  // accessibility suite's case. The old wording, which is still true: the
+  // recording is on the device, and nothing claims more than that.
+  return (
+    <StatusMessage tone="success" label="Saved" live>
+      The ride is stopped, and every second of it is saved on this device. Closing the tab is safe
+      now.
+    </StatusMessage>
   );
 }
 

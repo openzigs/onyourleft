@@ -47,6 +47,8 @@ export interface RecordedCalls {
   armStop: number;
   cancelStop: number;
   confirmStop: number;
+  /** #548 — the stopped screen's way back to a ride. */
+  startNewRide: number;
   requestControl: number;
   clearTarget: number;
   endWorkout: number;
@@ -160,6 +162,7 @@ export function stubRideController(initial: RideSnapshot = idleSnapshot()): Stub
     armStop: 0,
     cancelStop: 0,
     confirmStop: 0,
+    startNewRide: 0,
     requestControl: 0,
     clearTarget: 0,
     endWorkout: 0,
@@ -225,6 +228,13 @@ export function stubRideController(initial: RideSnapshot = idleSnapshot()): Stub
     confirmStop: async () => {
       calls.confirmStop += 1;
       return Promise.resolve();
+    },
+    // ⚠️ Answers `true` unconditionally, for `startWorkout`'s reason below: the
+    // refusal is the real controller's rule (`canStartNewRide`), and
+    // `controller.test.ts` drives it there.
+    startNewRide: async () => {
+      calls.startNewRide += 1;
+      return Promise.resolve(true);
     },
     requestTrainerControl: async () => {
       calls.requestControl += 1;

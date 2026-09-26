@@ -489,6 +489,59 @@ describe('the notice a stopped ride ends on', () => {
   });
 });
 
+describe('#548 — a stopped ride is followed by a way to start another', () => {
+  const offered = (): boolean =>
+    queryAll<HTMLButtonElement>(document, 'button').some(
+      (button) => button.textContent?.trim() === 'Start a new ride',
+    );
+
+  it('offers it once the ride is saved, and asks the controller when pressed', async () => {
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ phase: 'stopped', saveState: 'saved' });
+    await show(stub);
+
+    await activateWithKeyboard(buttonNamed('Start a new ride'));
+    await settle();
+    expect(stub.calls.startNewRide).toBe(1);
+    // Nothing else was asked of the controller on the way.
+    expect(stub.calls.start).toBe(0);
+  });
+
+  it.each(['empty', 'unavailable'] as const)(
+    'offers it when the save ended %s, which leaves nothing only in this tab',
+    async (saveState) => {
+      const stub = stubRideController(ridingSnapshot());
+      stub.set({ phase: 'stopped', saveState });
+      await show(stub);
+      expect(offered()).toBe(true);
+    },
+  );
+
+  it.each([
+    { saveState: 'saving' },
+    { saveState: 'failed', saveError: 'the device is full' },
+    { saveState: 'saved', storage: 'failed' },
+    { saveState: 'saved', storage: 'quota-exceeded' },
+  ] as const)('does not offer it while the ride exists only in this tab: %o', async (state) => {
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ phase: 'stopped', ...state });
+    await show(stub);
+    expect(offered()).toBe(false);
+  });
+
+  it('keeps the start control on the idle screen it returns to', async () => {
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ phase: 'stopped', saveState: 'saved' });
+    await show(stub);
+    stub.set(idleSnapshot());
+    await settle();
+    expect(offered()).toBe(false);
+    await activateWithKeyboard(buttonNamed('Start recording'));
+    await settle();
+    expect(stub.calls.start).toBe(1);
+  });
+});
+
 describe('the ride clock', () => {
   it('reads as hours only once there are some', () => {
     expect(formatDuration(0)).toBe('0:00');
