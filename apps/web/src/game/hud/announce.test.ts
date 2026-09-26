@@ -37,6 +37,7 @@ import {
   announce,
   remainingFrom,
   spokenPower,
+  withdrawPending,
   type AnnounceInput,
   type AnnouncerState,
 } from './announce';
@@ -220,8 +221,16 @@ describe('never means never — for every announceable reading', () => {
   // #445: the three status kinds were #394's live regions, spoken to every
   // rider with a screen reader whatever they had chosen. Moving them into the
   // one region must not put them behind a switch that is off by default.
-  for (const kind of ['trainer-lost', 'workout-fault', 'interval-now'] as const) {
-    it(`still says ${kind} with the master switch off — #445`, () => {
+  //
+  // #551 adds the side camera's link lost, for the same reason: the Camera
+  // screen spoke the phone's state to every rider (`role="status"`).
+  for (const kind of [
+    'trainer-lost',
+    'workout-fault',
+    'interval-now',
+    'side-camera-lost',
+  ] as const) {
+    it(`still says ${kind} with the master switch off — #445, #551`, () => {
       const { said } = run([{ now: 0, events: [{ kind, text: `${kind} happened.` }] }], {
         ...DEFAULT_ANNOUNCEMENTS,
       });
@@ -313,7 +322,9 @@ describe('priority is an ORDER, not a politeness', () => {
       'interval-now',
       'interval-ahead',
     ]);
-    expect(ALWAYS_SPOKEN).toEqual(PRIORITY.slice(0, 3));
+    // #551: the three safety statuses, then the side camera's lost link —
+    // spoken to everyone, and ranked below the climb (see below).
+    expect(ALWAYS_SPOKEN).toEqual([...PRIORITY.slice(0, 3), 'side-camera-lost']);
     expect(PRIORITY.indexOf('distance-tick')).toBeLessThan(PRIORITY.indexOf('power'));
   });
 
@@ -337,6 +348,38 @@ describe('priority is an ORDER, not a politeness', () => {
       { ...ON, powerEverySeconds: 'never' },
     );
     expect(said[1]).toBe('Climb in 250 metres, 6 percent');
+  });
+});
+
+describe('the side camera’s link lost — #551', () => {
+  it('ranks below the climb and above every reading', () => {
+    const lost = PRIORITY.indexOf('side-camera-lost');
+    expect(lost).toBe(PRIORITY.indexOf('climb-ahead') + 1);
+    for (const reading of ['power-off-target', 'distance-tick', 'power'] as const) {
+      expect(lost).toBeLessThan(PRIORITY.indexOf(reading));
+    }
+  });
+
+  it('wins a window over a distance mark, and loses one to a climb', () => {
+    const lost = { kind: 'side-camera-lost', text: 'Side camera link lost.' } as const;
+    const overReading = run(
+      [
+        { now: 0, remaining: { value: 10.1, unit: 'kilometres' } },
+        { now: 60, remaining: { value: 9.9, unit: 'kilometres' }, events: [lost] },
+      ],
+      { ...ON, powerEverySeconds: 'never' },
+    );
+    expect(overReading.said[1]).toBe('Side camera link lost.');
+    const underClimb = run(
+      [
+        {
+          now: 0,
+          events: [lost, { kind: 'climb-ahead', text: 'Climb in 250 metres, 6 percent' }],
+        },
+      ],
+      { ...ON, powerEverySeconds: 'never' },
+    );
+    expect(underClimb.said[0]).toBe('Climb in 250 metres, 6 percent');
   });
 });
 
@@ -484,5 +527,38 @@ describe('no text-to-speech anywhere in the client', () => {
       /speechSynthesis|SpeechSynthesisUtterance/.test(stripComments(readFileSync(file, 'utf8'))),
     );
     expect(found.map((file) => relative(ROOTS[0] ?? '', file))).toEqual([]);
+  });
+});
+
+describe('a waiting event can be taken back once it is no longer true — PR #599, N1', () => {
+  const quiet = { now: 0, readings: [], preference: ON };
+  // Something said at 0, so the next event waits for the window.
+  const busy = announce(INITIAL_ANNOUNCER, {
+    ...quiet,
+    events: [{ kind: 'trainer-lost', text: 'The road is not reaching your trainer' }],
+  }).state;
+  const waiting = announce(busy, {
+    ...quiet,
+    now: 1,
+    events: [{ kind: 'workout-fault', text: 'Eased: Pedalling has stopped.' }],
+  }).state;
+
+  it('withdraws the waiting event the caller says is stale, so the window opens on nothing', () => {
+    // The apparatus: it really was waiting, and would have been said.
+    expect(waiting.pending?.text).toBe('Eased: Pedalling has stopped.');
+    expect(announce(waiting, { ...quiet, now: ANNOUNCE_WINDOW_SECONDS + 1 }).sentence).toBe(
+      'Eased: Pedalling has stopped.',
+    );
+
+    const withdrawn = withdrawPending(waiting, (event) => event.text.startsWith('Eased: '));
+    expect(withdrawn.pending).toBeUndefined();
+    expect(announce(withdrawn, { ...quiet, now: ANNOUNCE_WINDOW_SECONDS + 1 }).sentence).toBe(
+      undefined,
+    );
+  });
+
+  it('leaves a waiting event the caller does not name exactly where it was', () => {
+    expect(withdrawPending(waiting, () => false)).toBe(waiting);
+    expect(withdrawPending(busy, () => true)).toBe(busy);
   });
 });

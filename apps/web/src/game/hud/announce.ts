@@ -27,6 +27,7 @@
  * | 3 | the workout block, as it changes | event (#394) | safety | **yes** — #394 |
  * | 4 | the next workout block, ahead of it | event (#398) | safety | no |
  * | 5 | a climb or a descent ahead | event (#399) | attested | no |
+ * | 5a | the side camera's link lost | event (#551) | ADR 0033 D-5 | **yes** — #551 |
  * | 6 | power off an acknowledged target | ≥ 10 % for ≥ 5 s | attested | no |
  * | 7 | distance to go | a distance tick | attested | no |
  * | 8 | power | a time cadence | attested | no |
@@ -41,10 +42,12 @@
  * |---|---|---|
  * | `trainer-lost` | `ride/RideAnnouncer.tsx` | `TrainerSnapshot.lost` ("Control lost") and `.releaseFault` ("Not released") |
  * | `trainer-lost` | `GameView` | the road notice at the start of a ride, and a refused gradient write — which is how control lost ARRIVES in the game (`GameView` §`trainer`) |
- * | `workout-fault` | `ride/RideAnnouncer.tsx` | `RideWorkoutSnapshot.fault` |
+ * | `workout-fault` | `ride/RideAnnouncer.tsx` | `RideWorkoutSnapshot.fault`, and `.rescue` as "Eased: …" (#585) |
+ * | `workout-fault` | `GameView` | a running workout's stall rescue, through `GameTrainerPort.workoutRescue` (#585) |
  * | `interval-now` | `ride/RideAnnouncer.tsx` | `RideWorkoutSnapshot.nowRiding`, as it changes |
  * | `interval-ahead` | `ride/RideAnnouncer.tsx` | `ride/lookahead.ts` |
  * | `climb-ahead` | `GameView` | `hud/climb-ahead.ts` |
+ * | `side-camera-lost` | `GameView` and `ride/RideAnnouncer.tsx` | `ride/side-camera.ts` §`sideCameraLostEvent` |
  * | readings | `GameView` | `fields.ts` §`hudReadings` |
  *
  * ⚠️ **Rank 1 is broader than its name**, and the name was kept rather than
@@ -71,7 +74,17 @@
  * gradient ride it is also the one warning that the trainer's resistance is
  * about to rise under the rider's legs.
  *
- * ## ⚠️ Three kinds are spoken with announcements OFF — {@link ALWAYS_SPOKEN}
+ * ⚠️ **Rank 5a is #551's, and #395 did not place it** — #395 predates the
+ * side camera. It goes BELOW the climb and above every reading. Below the
+ * climb, because a climb is resistance arriving under the rider's legs in the
+ * next few seconds and a lost camera link is a camera: nothing about it
+ * touches the machine the rider is on. Above every reading, because it is an
+ * event with a clock on it — the phone stops by itself within 30 seconds
+ * (ADR 0033 D-5) — and a routine power sentence holding it up would be
+ * spending that clock. It is numbered 5a rather than renumbering 6 to 8,
+ * because those numbers are quoted in #395 and in the pull requests since.
+ *
+ * ## ⚠️ Four kinds are spoken with announcements OFF — {@link ALWAYS_SPOKEN}
  *
  * #395's table says the safety rows are *"on when announcements are on"*, and
  * this module departs from that cell on purpose. Those three sentences were
@@ -82,6 +95,13 @@
  * switch that is off by default would have been a change to WHETHER, and would
  * have silenced "Control lost" for every rider who never opened Settings. The
  * owner may reverse this: it is the membership of one array.
+ *
+ * ⚠️ **The fourth is #551's `side-camera-lost`, for the same reason.** On the
+ * Camera screen the phone's state is a status message (`views/
+ * SideCameraControl.tsx` §`PhoneState`, `role="status"`), spoken to every
+ * rider with a screen reader whatever they chose, as SC 4.1.3 asks. The same
+ * fact on the ride going through a switch that is off by default would have
+ * made it silent for exactly the rider who cannot see the line.
  *
  * **Not announceable in this cut**, each for #395's reason: cadence and heart
  * rate (inferred only — nothing attested asks for them), the pacer and ghost
@@ -120,7 +140,8 @@ export type AnnouncementEvent =
   | { readonly kind: 'workout-fault'; readonly text: string }
   | { readonly kind: 'interval-now'; readonly text: string }
   | { readonly kind: 'interval-ahead'; readonly text: string }
-  | { readonly kind: 'climb-ahead'; readonly text: string };
+  | { readonly kind: 'climb-ahead'; readonly text: string }
+  | { readonly kind: 'side-camera-lost'; readonly text: string };
 
 /** Every kind of sentence, events and readings together. */
 export type AnnouncementKind =
@@ -136,6 +157,7 @@ export const PRIORITY: readonly AnnouncementKind[] = [
   'interval-now',
   'interval-ahead',
   'climb-ahead',
+  'side-camera-lost',
   'power-off-target',
   'distance-tick',
   'power',
@@ -149,10 +171,11 @@ export const ALWAYS_SPOKEN: readonly AnnouncementKind[] = [
   'trainer-lost',
   'workout-fault',
   'interval-now',
+  'side-camera-lost',
 ];
 
 /**
- * What the announcer does with announcements off: the three status kinds and
+ * What the announcer does with announcements off: the four status kinds and
  * nothing else — every reading and every optional event is `'never'`.
  */
 function statusOnly(preference: AnnouncementPreference): AnnouncementPreference {
@@ -225,6 +248,26 @@ export interface Announcement {
 const rank = (kind: AnnouncementKind): number => PRIORITY.indexOf(kind);
 
 /**
+ * The same state with its waiting event taken back, when `stale` says it is no
+ * longer true — PR #599's review, N1. Pure, like {@link announce}.
+ *
+ * An event waits for the window rather than being dropped, because it is
+ * safety; the cost is that one which stopped being true while it waited is
+ * still said, up to {@link ANNOUNCE_WINDOW_SECONDS} late. The one caller that
+ * knows a sentence has gone stale is the one that produced it — a workout's
+ * "Eased: …" once the rescue has cleared — so it asks for it back here rather
+ * than this module guessing from the text.
+ */
+export function withdrawPending(
+  state: AnnouncerState,
+  stale: (event: AnnouncementEvent) => boolean,
+): AnnouncerState {
+  return state.pending !== undefined && stale(state.pending)
+    ? { ...state, pending: undefined }
+    : state;
+}
+
+/**
  * The spoken form of the power reading. ⚠️ A dropped sensor is "no power
  * reading" — never "zero", never "nought": `fields.ts` §`NO_READING` renders a
  * dash for exactly this, and a sentence that said a number would be the
@@ -267,7 +310,8 @@ export function announce(state: AnnouncerState, input: AnnounceInput): Announcem
   const { now } = input;
   // ⚠️ Off is off for every READING and every optional event — nothing said,
   // and no baseline carried into the moment it is switched on — but NOT for
-  // the three status kinds #394 already spoke to everyone (#445).
+  // the three status kinds #394 already spoke to everyone (#445), nor #551's
+  // side camera, which the Camera screen already spoke to everyone.
   const off = !input.preference.enabled;
   const preference = off ? statusOnly(input.preference) : input.preference;
 

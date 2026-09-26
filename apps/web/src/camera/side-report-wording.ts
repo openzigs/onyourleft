@@ -102,6 +102,16 @@ export const SIDE_REPORT_OBSERVED =
   'Each of these compares the first third of this ride’s side-camera session with its last third, as the same camera saw them. They are rough estimates from one camera, which is why each one says possibly.';
 
 /**
+ * {@link SIDE_REPORT_OBSERVED}, for a session where at least one of the five
+ * kinds could not be compared at all (#564). Each observation already names
+ * its own two sides, so this is not an R2 breach without it; it says ONCE, in
+ * the summary, that the list covers only the parts the camera saw well enough,
+ * so a kind missing from the list is not read as a kind that did not change.
+ * Checked against D-2 as {@link SIDE_REPORT_UNCHANGED_IN_PART} is.
+ */
+export const SIDE_REPORT_OBSERVED_IN_PART = `${SIDE_REPORT_OBSERVED} The camera saw too little of some parts of you to compare them at all, so these cover only the parts it could.`;
+
+/**
  * The session was compared, **all five kinds were compared**, and nothing
  * changed by as much as the report mentions. ⚠️ Not a verdict on the rider (R3): it says only that these rough
  * estimates did not differ by much.
@@ -154,6 +164,7 @@ export const SIDE_REPORT_UNREADABLE_ROW =
 /** The summaries a saved report may carry — one of these is always its first sentence. */
 export const SIDE_REPORT_SUMMARIES: readonly string[] = [
   SIDE_REPORT_OBSERVED,
+  SIDE_REPORT_OBSERVED_IN_PART,
   SIDE_REPORT_UNCHANGED,
   SIDE_REPORT_UNCHANGED_IN_PART,
   SIDE_REPORT_TOO_SHORT,

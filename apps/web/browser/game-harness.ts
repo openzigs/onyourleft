@@ -93,13 +93,17 @@ import {
 import { GRADIENT_TINT_FULL_SCALE_PERCENT } from '../src/game/terrain';
 import { structuresAt } from '../src/game/settlements';
 import { waterways } from '../src/game/waterways';
-import { VERGE_DROP_METRES } from '../src/game/landform';
+import { HORIZON_RADIUS_METRES, HORIZON_SEGMENTS, VERGE_DROP_METRES } from '../src/game/landform';
+import { ridgeLift, skylineCrestFloor } from '../src/game/realistic-light';
+import { srgbByteToLinear } from '../src/game/scenery-palette';
 import { buildingPlan, onFace, OPENING_RECESS_METRES } from '../src/game/buildings';
 import {
   drawnWorldOf,
   bridgesWearStoneOf,
   loadRealisticWorld,
   loadSceneryModels,
+  horizonColoursOf,
+  horizonFromSkyOf,
   sceneMaterialsOf,
   sceneryDrawnOf,
   setBuildingOpenings,
@@ -364,6 +368,12 @@ declare global {
         readonly on: LineMeasurement;
         readonly onUpright: LineMeasurement;
         readonly off: LineMeasurement;
+        /**
+         * The rider on a STRAIGHT, on the line and — the control — on the
+         * centreline, through the centreline's camera — #546. @see lineProbe
+         */
+        readonly straightOn: LineMeasurement;
+        readonly straightOff: LineMeasurement;
       };
       /**
        * GPU buffers and textures three had created after the first frame, and
@@ -936,6 +946,8 @@ function lineProbe(
   readonly on: LineMeasurement;
   readonly onUpright: LineMeasurement;
   readonly off: LineMeasurement;
+  readonly straightOn: LineMeasurement;
+  readonly straightOff: LineMeasurement;
 } {
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -963,7 +975,13 @@ function lineProbe(
   const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
   if (gl === null) {
     view.destroy();
-    return { on: NO_LINE, onUpright: NO_LINE, off: NO_LINE };
+    return {
+      on: NO_LINE,
+      onUpright: NO_LINE,
+      off: NO_LINE,
+      straightOn: NO_LINE,
+      straightOff: NO_LINE,
+    };
   }
   const drawn = (frame: SceneFrame): Uint8Array => {
     // Twice, and only the second read: `riderExtent` says why.
@@ -971,7 +989,7 @@ function lineProbe(
     view.render(frame);
     return readRegion(gl, 0, 0, width, height);
   };
-  const absent = drawn(nobody);
+  let absent = drawn(nobody);
   const measured = (present: Uint8Array): LineMeasurement => {
     let pixels = 0;
     let columns = 0;
@@ -1023,8 +1041,41 @@ function lineProbe(
     drawn({ ...leaning, markers: leaning.markers.map((marker) => ({ ...marker, lean: 0 })) }),
   );
   const off = measured(drawn(riderOnly(onTheCentre)));
+
+  // #546: on a straight, where #499's line put the rider on the dashed centre
+  // line and the owner's ruling puts them on the right. Through the
+  // centreline's camera again, so the road's middle is the frame's middle and
+  // "right of it" is a side of the SCREEN — which is what `racing-line.ts`
+  // §`ROAD_SIDE` claims and cannot show by itself. The control is the same
+  // rider on the centreline, where #499 drew every straight.
+  const straight = northRoute(1_000, () => 0);
+  const straightState = {
+    ...atStartLine(straight),
+    ride: { speed: metresPerSecond(9), distance: metres(500) },
+  };
+  const straightOrigin = corridorOrigin(straight);
+  const straightOnTheLine = sceneFrame({
+    profile: straight,
+    origin: straightOrigin,
+    state: straightState,
+  });
+  const straightOnTheCentre = sceneFrame({
+    profile: straight,
+    origin: straightOrigin,
+    state: straightState,
+    centreline: true,
+  });
+  const straightStill = (frame: SceneFrame): SceneFrame => ({
+    ...frame,
+    camera: straightOnTheCentre.camera,
+    scatter: [],
+    markers: frame.markers.filter((marker) => marker.kind === 'rider'),
+  });
+  absent = drawn({ ...straightOnTheCentre, scatter: [], markers: [] });
+  const straightOn = measured(drawn(straightStill(straightOnTheLine)));
+  const straightOff = measured(drawn(straightStill(straightOnTheCentre)));
   view.destroy();
-  return { on, onUpright, off };
+  return { on, onUpright, off, straightOn, straightOff };
 }
 
 /** What the harness reports for the world before a frame has produced one. */
@@ -2126,6 +2177,7 @@ function colourProbes(probe: SceneFrame): {
           headingX: pose.headingX,
           headingZ: pose.headingZ,
           lean: 0,
+          bodyLean: 0,
           crankAngle: at,
         },
       ],
@@ -2550,8 +2602,16 @@ const SHADOW_MAP_ROUNDS = 2;
  * actually carries. `camera.ts` is used to AIM and never to assert — what says
  * a probe landed on tarmac is still its colour, read back from the GPU.
  *
- * The right vector is `(headingZ, −headingX)` because the camera has no roll,
- * which is `three-renderer.test.ts` §`asTheCameraSeesIt`'s argument.
+ * ⚠️ **The screen's right is `(−headingZ, headingX)` — the road's own normal —
+ * and this comment said `(headingZ, −headingX)` until #546.** The corridor puts
+ * east on `+x` and north on `+z` with `+y` up, and in a right-handed renderer a
+ * camera looking north with `+y` up has WEST on its right, so the old vector
+ * was the screen's LEFT. It went unnoticed because every probe was symmetric
+ * about a camera on the centreline, and a point mirrored across the road is
+ * still road; #546 moved the camera 1.75 m to the right with the rider, and
+ * the mirrored near-road probe landed on the grass beyond the far edge.
+ * `game.browser.spec.ts` §"#546" reads the rider on the RIGHT of the screen
+ * with the line's positive offset, which is the measurement this rests on.
  */
 function inTheFrame(
   frame: SceneFrame,
@@ -2563,15 +2623,16 @@ function inTheFrame(
   const axis = { x: target.x - eye.x, y: target.y - eye.y, z: target.z - eye.z };
   const length = Math.hypot(axis.x, axis.y, axis.z);
   const forward = { x: axis.x / length, y: axis.y / length, z: axis.z / length };
-  const right = { x: pose.headingZ, z: -pose.headingX };
-  // up = forward × right, for a camera with no roll. ⚠️ The other order is
-  // DOWN, and the first version of this had it: the far road probe landed
-  // below the near one and `game.browser.spec.ts` §"takes its distant probe
-  // further up the ROAD" is what said so.
+  const right = { x: -pose.headingZ, z: pose.headingX };
+  // up = right × forward, for a camera with no roll, in a right-handed frame.
+  // ⚠️ With the mirrored right this used to be `forward × right`, which is the
+  // same vector: the two sign errors cancelled, and `game.browser.spec.ts`
+  // §"takes its distant probe further up the ROAD" is what caught the order
+  // when only one of them was made.
   const up = {
-    x: right.z * forward.y,
-    y: right.x * forward.z - right.z * forward.x,
-    z: -right.x * forward.y,
+    x: -right.z * forward.y,
+    y: right.z * forward.x - right.x * forward.z,
+    z: right.x * forward.y,
   };
   const to = { x: point.x - eye.x, y: point.y - eye.y, z: point.z - eye.z };
   const depth = to.x * forward.x + to.y * forward.y + to.z * forward.z;
@@ -2596,8 +2657,37 @@ function onTheRoad(
   across: number,
 ): { readonly x: number; readonly y: number; readonly z: number } {
   const pose = frame.camera;
-  const x = pose.x + ahead * pose.headingX + across * pose.headingZ;
-  const z = pose.z + ahead * pose.headingZ - across * pose.headingX;
+  // ⚠️ **From the CENTRELINE abreast of the camera, not from the camera** —
+  // #546. The camera follows the rider across the road (#499), and since #546
+  // the rider holds the right-hand side on a straight, so the camera stands
+  // 1.75 m off the centreline where #499's line left it on it. Measured from
+  // the camera, `across: 0` was 1.75 m from the painted centre line and every
+  // probe stated against the road's middle missed it.
+  let baseX = pose.x;
+  let baseZ = pose.z;
+  let closest = Number.POSITIVE_INFINITY;
+  const centre = frame.corridor.centre;
+  for (let index = 1; index < centre.length; index += 1) {
+    const a = centre[index - 1];
+    const b = centre[index];
+    if (a === undefined || b === undefined) continue;
+    const dx = b.x - a.x;
+    const dz = b.z - a.z;
+    const lengthSquared = dx * dx + dz * dz;
+    if (lengthSquared === 0) continue;
+    const t = Math.max(0, Math.min(1, ((pose.x - a.x) * dx + (pose.z - a.z) * dz) / lengthSquared));
+    const footX = a.x + t * dx;
+    const footZ = a.z + t * dz;
+    const apart = Math.hypot(pose.x - footX, pose.z - footZ);
+    if (apart < closest) {
+      closest = apart;
+      baseX = footX;
+      baseZ = footZ;
+    }
+  }
+  // `across` to the screen's right, which is the road's normal (@see inTheFrame).
+  const x = baseX + ahead * pose.headingX - across * pose.headingZ;
+  const z = baseZ + ahead * pose.headingZ + across * pose.headingX;
   // The centreline point nearest that spot: the corridor samples the road about
   // every ten metres and this route is straight, so nearest is within 5 m and a
   // 5 % grade puts that inside a quarter of a metre of height.
@@ -2624,23 +2714,25 @@ function pixelFor(
 }
 
 /**
- * Where the road's near lane is probed: 20 m up the road, 1.5 m right of the
- * centre line.
+ * Where the road's near lane is probed: 20 m up the road, 1.5 m LEFT of the
+ * centre line — the lane the rider is not in.
  *
  * 20 m, because `camera.ts` §`roadAppearsOverRiderMetres` puts everything
  * nearer than 14 m directly behind the rider's back. 1.5 m, because that is
  * clear of a 0.15 m centre-line mark, of the rider — whose 0.2 m half-width
  * shadows ±0.9 m of road at this depth — and of the edge line 3.3 m out.
+ * ⚠️ Left since #546: the rider holds the right-hand lane 1.75 m out now, and
+ * the camera with them, so the right lane at 1.5 m is behind their back.
  */
-const NEAR_ROAD_PROBE = { ahead: 20, across: 1.5 } as const;
+const NEAR_ROAD_PROBE = { ahead: 20, across: -1.5 } as const;
 
 /**
  * The same lane, 150 m up the road: the only difference between the two
  * read-backs is how far each has converged on the horizon. Past the bot, which
- * `frameAt` puts 120 m ahead on the centre line and which is 1.2 m clear of
- * this ray at its own depth.
+ * `frameAt` puts 120 m ahead on its line — the right-hand lane since #546 —
+ * and so clear of this ray.
  */
-const FAR_ROAD_PROBE = { ahead: 150, across: 1.5 } as const;
+const FAR_ROAD_PROBE = { ahead: 150, across: -1.5 } as const;
 
 /**
  * Where the GROUND is probed: 6 m ahead of the rider, 4.5 m left of the centre
@@ -2748,20 +2840,27 @@ function shadingAcross(present: Uint8Array, absent: Uint8Array): MarkerShading {
 function findCentreLine(
   gl: WebGL2RenderingContext | WebGLRenderingContext,
   width: number,
-  fromRow: number,
-  toRow: number,
+  from: { readonly x: number; readonly y: number },
+  to: { readonly x: number; readonly y: number },
 ): { readonly centre: Pixel; readonly beside: Pixel; readonly row: number } {
-  const column = Math.floor(width / 2);
-  const beside = column + Math.max(2, Math.round(width * BESIDE_FRACTION));
+  // ⚠️ **Along the centre line's own image, not down the frame's middle** —
+  // #546. The camera follows the rider, who holds the right-hand lane on a
+  // straight since #546, so the painted line is left of the frame's middle
+  // and converges on it with distance. A straight road's centre line is a
+  // straight line on the screen, so the column is interpolated between the
+  // two ends of the stretch, each put through the camera by `pixelFor`.
+  const offset = Math.max(2, Math.round(width * BESIDE_FRACTION));
   let best: { centre: Pixel; beside: Pixel; row: number; apart: number } = {
     centre: NOWHERE,
     beside: NOWHERE,
     row: 0,
     apart: -1,
   };
-  for (let row = Math.floor(fromRow); row <= Math.floor(toRow); row += 1) {
+  for (let row = Math.floor(from.y); row <= Math.floor(to.y); row += 1) {
+    const share = to.y === from.y ? 0 : (row - from.y) / (to.y - from.y);
+    const column = Math.round(from.x + (to.x - from.x) * share);
     const onLine = readPixel(gl, column, row);
-    const onRoad = readPixel(gl, beside, row);
+    const onRoad = readPixel(gl, column + offset, row);
     const apart = Math.abs(luminanceOf(onLine) - luminanceOf(onRoad));
     if (apart > best.apart) {
       best = { centre: onLine, beside: onRoad, row, apart };
@@ -3070,6 +3169,50 @@ export interface RealisticMeasurement {
   readonly windowGlass: readonly number[];
   readonly windowControl: readonly number[];
   readonly windowWall: readonly number[];
+  /**
+   * #544: the distant hills against the sky, read off the drawing buffer — as
+   * the product draws them, and (the control) with the view's horizon put back
+   * to the stylised world's pale one, which is the band the owner saw.
+   * @see horizonReadings
+   */
+  readonly horizon: readonly HorizonReading[];
+  readonly horizonControl: readonly HorizonReading[];
+  /** The fog's colour and the ring's foot, linear, as drawn and in the control. @see horizonColoursOf */
+  readonly horizonColours: {
+    readonly fog: readonly number[];
+    readonly foot: readonly number[];
+  };
+  readonly horizonColoursControl: {
+    readonly fog: readonly number[];
+    readonly foot: readonly number[];
+  };
+  /**
+   * What the control's fog and foot must be: the last control frame's own
+   * `world.horizonColour` — the stylised world's pale horizon — in linear
+   * light, so the gate pins that the control really is today's band.
+   */
+  readonly horizonControlExpected: readonly number[];
+}
+
+/**
+ * One column of the distant hills, read back — #544. Relative luminances
+ * (WCAG 2.2's formula) of the sky just above the ridge's crest, the ridge just
+ * below it, and the lit ground beside the road, which is what a hill is made
+ * of before distance hazes it.
+ */
+export interface HorizonReading {
+  /** Which frame, and how far off the rider's heading the column looks, in degrees. */
+  readonly frame: string;
+  readonly offAxisDegrees: number;
+  readonly sky: number;
+  readonly ridge: number;
+  readonly ground: number;
+  /**
+   * The darkest pixel between where the route's own relief puts the crest and
+   * just above the crest as drawn — where, before #544, a rider standing above
+   * the ridge saw the photograph's own field and treeline over the hills.
+   */
+  readonly darkestAboveRelief: number;
 }
 
 const NO_REALISTIC: RealisticMeasurement = {
@@ -3109,6 +3252,11 @@ const NO_REALISTIC: RealisticMeasurement = {
   windowGlass: [],
   windowControl: [],
   windowWall: [],
+  horizon: [],
+  horizonControl: [],
+  horizonColours: { fog: [], foot: [] },
+  horizonColoursControl: { fog: [], foot: [] },
+  horizonControlExpected: [],
 };
 
 /** Relative luminance of an sRGB pixel, WCAG 2.2's own formula. */
@@ -3139,6 +3287,100 @@ function meanLuminanceAround(
     total += relativeLuminanceOf(pixels[at] ?? 0, pixels[at + 1] ?? 0, pixels[at + 2] ?? 0);
   }
   return total / (side * side);
+}
+
+/**
+ * How far above and below a crest the sky and the ridge are read, in pixels:
+ * **4 to 9** either side. Clear of the crest's own anti-aliased row and of the
+ * interpolation between two ring segments, which bends the drawn crest a
+ * pixel or two off the straight chord this probe projects; inside the ring
+ * and above the corridor's own ground at every column {@link horizonReadings}
+ * reads, measured on 2026-09-26.
+ */
+const CREST_CLEARANCE_PIXELS = [4, 9] as const;
+
+/**
+ * Reads the distant hills in one column of a frame just drawn — #544.
+ *
+ * ⚠️ **Aimed from the geometry**, like every probe here since #424 (@see
+ * inTheFrame): the crest is the ring's own top at that bearing, lifted by
+ * the same `realistic-light.ts` §`ridgeLift` `three-renderer.ts`
+ * §`HorizonRing.update` draws with when the horizon is the photographed sky's
+ * — one function, so the probe and the drawn ridge cannot disagree about where
+ * the crest is.
+ */
+function horizonReading(
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  frame: SceneFrame,
+  name: string,
+  offAxisDegrees: number,
+  lifted: boolean,
+): HorizonReading {
+  const pose = frame.camera;
+  const turn = (offAxisDegrees * Math.PI) / 180;
+  const dx = pose.headingX * Math.cos(turn) - pose.headingZ * Math.sin(turn);
+  const dz = pose.headingX * Math.sin(turn) + pose.headingZ * Math.cos(turn);
+  const bearing = (Math.atan2(dz, dx) + 2 * Math.PI) % (2 * Math.PI);
+  const at = (bearing / (2 * Math.PI)) * HORIZON_SEGMENTS;
+  const lower = Math.floor(at);
+  const tops = frame.terrain.horizon.tops;
+  const from = tops[lower % HORIZON_SEGMENTS] as number;
+  const to = tops[(lower + 1) % HORIZON_SEGMENTS] as number;
+  const lift = lifted
+    ? ridgeLift(tops, skylineCrestFloor(cameraRig(pose).eye.y, HORIZON_RADIUS_METRES))
+    : 0;
+  const onTheRing = (y: number): { readonly x: number; readonly y: number } =>
+    pixelFor(frame, canvas, {
+      x: pose.x + dx * HORIZON_RADIUS_METRES,
+      y,
+      z: pose.z + dz * HORIZON_RADIUS_METRES,
+    });
+  const relief = from + (to - from) * (at - lower);
+  const crest = onTheRing(relief + lift);
+  const reliefCrest = onTheRing(relief);
+  const [near, far] = CREST_CLEARANCE_PIXELS;
+  const band = (rowFrom: number): number => {
+    const rows = far - near + 1;
+    const pixels = readRegion(gl, Math.round(crest.x), Math.round(rowFrom), 1, rows);
+    let total = 0;
+    for (let row = 0; row < rows; row += 1) {
+      total += relativeLuminanceOf(
+        pixels[row * 4] ?? 0,
+        pixels[row * 4 + 1] ?? 0,
+        pixels[row * 4 + 2] ?? 0,
+      );
+    }
+    return total / rows;
+  };
+  const beside = onTheRoad(frame, GROUND_PROBE.ahead, GROUND_PROBE.across);
+  const scanFrom = Math.round(reliefCrest.y);
+  const scanRows = Math.max(1, Math.round(crest.y) + far - scanFrom + 1);
+  const scanned = readRegion(gl, Math.round(crest.x), scanFrom, 1, scanRows);
+  let darkestAboveRelief = Number.POSITIVE_INFINITY;
+  for (let row = 0; row < scanRows; row += 1) {
+    darkestAboveRelief = Math.min(
+      darkestAboveRelief,
+      relativeLuminanceOf(
+        scanned[row * 4] ?? 0,
+        scanned[row * 4 + 1] ?? 0,
+        scanned[row * 4 + 2] ?? 0,
+      ),
+    );
+  }
+  return {
+    darkestAboveRelief,
+    frame: name,
+    offAxisDegrees,
+    // The drawing buffer's rows count UP, so the sky is above the crest's row.
+    sky: band(crest.y + near),
+    ridge: band(crest.y - far),
+    ground: meanLuminanceAround(
+      gl,
+      pixelFor(frame, canvas, { ...beside, y: beside.y - VERGE_DROP_METRES }),
+      2,
+    ),
+  };
 }
 
 /** How many pixels two read-backs of the same size disagree about. */
@@ -3273,6 +3515,37 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     view.render(bare);
     return meanLuminanceAround(gl, pixelFor(bare, canvas, onTheRoad(bare, 20, 1.5)), 3);
   };
+  // #544: the distant hills on a level road, and from the top of a descent —
+  // where the rider stands above most of the ridge, which is where the
+  // photograph's own field and treeline used to show above the hills — then
+  // the same frames with the horizon put back to the stylised world's.
+  const horizonFrames = [
+    { name: 'level', frame: riding(level, 400), columns: [-30, 30] },
+    { name: 'descent', frame: riding(descent, 300), columns: [30, 45] },
+  ].map((each) => ({ ...each, frame: { ...each.frame, markers: [], scatter: [] } }));
+  const readHorizon = (fromSky: boolean): HorizonReading[] => {
+    horizonFromSkyOf(view, fromSky);
+    return horizonFrames.flatMap(({ name, frame, columns }) => {
+      view.render(frame);
+      view.render(frame);
+      return columns.map((off) => horizonReading(gl, canvas, frame, name, off, fromSky));
+    });
+  };
+  const horizon = readHorizon(true);
+  const horizonColours = horizonColoursOf(view);
+  const horizonControl = readHorizon(false);
+  const horizonColoursControl = horizonColoursOf(view);
+  // The control's last frame is the descent's; its fog is that frame's world
+  // horizon, as `three-renderer.ts` §`#updateWorld` sets it with no sky.
+  const lastControlWorld = horizonFrames[horizonFrames.length - 1]?.frame.world;
+  const horizonControlExpected =
+    lastControlWorld === undefined
+      ? []
+      : [16, 8, 0].map((shift) =>
+          srgbByteToLinear((lastControlWorld.horizonColour >> shift) & 0xff),
+        );
+  horizonFromSkyOf(view, true);
+
   const climbLuminance = roadLuminance(riding(climb, 400));
   const descentLuminance = roadLuminance(riding(descent, 400));
   const levelClimbLuminance = roadLuminance(riding(level, 400));
@@ -3475,6 +3748,11 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     windowGlass,
     windowControl,
     windowWall,
+    horizon,
+    horizonControl,
+    horizonColours,
+    horizonColoursControl,
+    horizonControlExpected,
   };
 }
 
@@ -3501,7 +3779,13 @@ function emptyHarness(errors: readonly string[]): NonNullable<Window['__oylGameH
     roadFarPixel: NOWHERE,
     roadProbeRows: [0, 0],
     riderFrame: { landscape: NO_RIDER, portrait: NO_RIDER },
-    line: { on: NO_LINE, onUpright: NO_LINE, off: NO_LINE },
+    line: {
+      on: NO_LINE,
+      onUpright: NO_LINE,
+      off: NO_LINE,
+      straightOn: NO_LINE,
+      straightOff: NO_LINE,
+    },
     resourcesAfterFirstFrame: 0,
     resourcesAfterAllFrames: 0,
     resourcesAfterSecondSweep: 0,
@@ -3604,7 +3888,13 @@ async function run(): Promise<void> {
   let roadFarPixel: Pixel = NOWHERE;
   let roadProbeRows: readonly [number, number] = [0, 0];
   let riderFrame = { landscape: NO_RIDER, portrait: NO_RIDER };
-  let line = { on: NO_LINE, onUpright: NO_LINE, off: NO_LINE };
+  let line = {
+    on: NO_LINE,
+    onUpright: NO_LINE,
+    off: NO_LINE,
+    straightOn: NO_LINE,
+    straightOff: NO_LINE,
+  };
   let resourcesAfterFirstFrame = 0;
   let resourcesAfterAllFrames = 0;
   let resourcesAfterSecondSweep = 0;
@@ -3801,8 +4091,8 @@ async function run(): Promise<void> {
           const found = findCentreLine(
             gl,
             canvas.width,
-            pixelFor(frame, canvas, onTheRoad(frame, CENTRE_LINE_STRETCH.fromAhead, 0)).y,
-            pixelFor(frame, canvas, onTheRoad(frame, CENTRE_LINE_STRETCH.toAhead, 0)).y,
+            pixelFor(frame, canvas, onTheRoad(frame, CENTRE_LINE_STRETCH.fromAhead, 0)),
+            pixelFor(frame, canvas, onTheRoad(frame, CENTRE_LINE_STRETCH.toAhead, 0)),
           );
           centreLinePixel = found.centre;
           roadBesidePixel = found.beside;

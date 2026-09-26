@@ -82,8 +82,10 @@ import {
   watts,
   type RoutePoint,
   type RouteProfile,
+  type WorkoutRescue,
 } from '@onyourleft/domain';
 
+import { scriptedSidePairing } from '../src/camera/testing';
 import type { GamePort } from '../src/game/GameView';
 import type { GameTrainerPort } from '../src/game/trainer-port';
 import { CUES_STORAGE_KEY, DEFAULT_CUES, writeCuePreference } from '../src/game/cue-preference';
@@ -220,7 +222,29 @@ const GAME: GamePort = {
  * accepts gradients has nothing to warn about. The two are mutually exclusive
  * by construction (`GameView` §`trainerReading`), so they are two fixtures.
  */
-const WITH_A_NOTICE = new URLSearchParams(window.location.search).get('trainer') === 'workout';
+const WITH_A_NOTICE =
+  new URLSearchParams(window.location.search).get('trainer') === 'workout' ||
+  new URLSearchParams(window.location.search).get('rescue') !== null;
+
+/**
+ * `ride.html?rescue=floor` — the workout fixture above with the workout's stall
+ * rescue in force (#585, PR #599's review finding B1). A rescue only exists on
+ * a running workout, so this implies `?trainer=workout`.
+ *
+ * ⚠️ **The floor, deliberately**: of the rescue's sentences it is the longest
+ * one `workout/rescue-text.ts` can build, because only the floor adds the
+ * two-step way back. Until this query the double returned `undefined` from
+ * `workoutRescue`, so no browser gate had ever laid out the HUD with an
+ * "Eased" notice — and on a phone on its side it pushed Pause and End ride off
+ * the stage with all 460 browser cases green.
+ */
+const RESCUE: WorkoutRescue | undefined =
+  new URLSearchParams(window.location.search).get('rescue') === 'floor'
+    ? {
+        kind: 'floor',
+        reason: 'Pedalling has stopped, so the target has been dropped to the trainer’s lowest.',
+      }
+    : undefined;
 
 /**
  * `ride.html?sounds=on` — a ride with #400's mute and volume in the HUD's
@@ -229,10 +253,31 @@ const WITH_A_NOTICE = new URLSearchParams(window.location.search).get('trainer')
  */
 const WITH_SOUNDS = new URLSearchParams(window.location.search).get('sounds') === 'on';
 
+/**
+ * `ride.html?side=filming` and `?side=lost` — a ride with a tripod phone
+ * paired (#551). `filming` puts the side camera's line and *Stop side camera*
+ * in the actions panel, which makes it taller; `lost` puts the lost link in
+ * the notice slot, the HUD's exception, and keeps the stop. The pairing is the
+ * scripted one the unit tests use: the real link needs a second device.
+ */
+const SIDE = new URLSearchParams(window.location.search).get('side');
+/**
+ * `?side=ended` — #577's review, finding 1: a lost link that ENDED the
+ * pairing. Terminal, so it is the actions panel's line and not a notice, and
+ * there is nothing left to stop.
+ */
+const SIDE_PAIRING =
+  SIDE === 'filming' || SIDE === 'lost'
+    ? scriptedSidePairing({ phone: SIDE })
+    : SIDE === 'ended'
+      ? scriptedSidePairing({ phone: 'lost', ended: 'link-lost' })
+      : undefined;
+
 /** A trainer that accepts every gradient, so the trainer line is on the screen. */
 const TRAINER: GameTrainerPort = {
   // #503: the Ride press's request for control — this double changes nothing.
   askForControlOnRide: () => Promise.resolve(),
+  workoutRescue: () => RESCUE,
   readTrainer: () =>
     WITH_A_NOTICE
       ? { kind: 'workout', control: undefined }
@@ -320,6 +365,8 @@ function measure(): StageMeasurement {
     ['the elevation strip', '.oyl-hud__profile-svg'],
     ['the plan view', '.oyl-hud__plan-svg'],
     ['the trainer line', '.oyl-hud__trainer'],
+    ['the side camera line', '.oyl-hud__side-camera'],
+    ['the side camera stop', '.oyl-hud__side-camera-stop'],
   ] as const) {
     const element = document.querySelector(selector);
     if (element !== null) {
@@ -343,9 +390,18 @@ function measure(): StageMeasurement {
     // The grid items a rider SEES. Since #397 the HUD also holds its one live
     // region, visually hidden by clip — a 1 px box that is not a panel and
     // must not be counted as one.
-    panels: [...document.querySelectorAll('.oyl-hud > :not([data-oyl-announcer])')].map((each) =>
-      item(each.className, each),
-    ),
+    // #576: on a short landscape phone with sounds on, the side camera's row
+    // is lifted out of the actions panel by anchor positioning and drawn as a
+    // panel of its own (`theme.css` §"SOUNDS ON AND A SIDE CAMERA PAIRED").
+    // It is still the actions panel's child in the document, so it is counted
+    // as a panel only when it has been lifted out — otherwise every
+    // measurement would find it "over" the panel it is inside.
+    panels: [
+      ...document.querySelectorAll('.oyl-hud > :not([data-oyl-announcer])'),
+      ...[...document.querySelectorAll('.oyl-hud__side-camera-row')].filter(
+        (each) => window.getComputedStyle(each).position === 'absolute',
+      ),
+    ].map((each) => item(each.className, each)),
     items,
     primary: labels('.oyl-hud__fields--primary'),
     secondary: labels('.oyl-hud__fields--secondary'),
@@ -420,7 +476,12 @@ async function run(): Promise<void> {
   flushSync(() => {
     createRoot(host).render(
       <StrictMode>
-        <AppShell capabilities={NO_BLUETOOTH} game={GAME} gameTrainer={TRAINER} />
+        <AppShell
+          capabilities={NO_BLUETOOTH}
+          game={GAME}
+          gameTrainer={TRAINER}
+          {...(SIDE_PAIRING === undefined ? {} : { sidePairing: SIDE_PAIRING })}
+        />
       </StrictMode>,
     );
   });
@@ -454,6 +515,24 @@ async function run(): Promise<void> {
   await until(WITH_A_NOTICE ? 'the notice' : 'the trainer line', () =>
     document.querySelector(WITH_A_NOTICE ? '.oyl-hud__notices' : '.oyl-hud__trainer'),
   );
+  // #585: the Eased notice, when this page was asked for a rescue.
+  if (RESCUE !== undefined) {
+    await until('the Eased notice', () =>
+      [...document.querySelectorAll('.oyl-hud__notices')].find((each) =>
+        (each.textContent ?? '').includes('Eased'),
+      ),
+    );
+  }
+  // #551: the side camera's line or notice, when this page was asked for one.
+  if (SIDE_PAIRING !== undefined) {
+    await until('the side camera on the HUD', () =>
+      SIDE === 'ended'
+        ? document.querySelector('.oyl-hud__side-camera')
+        : [...document.querySelectorAll('.oyl-hud button')].find(
+            (each) => each.textContent === 'Stop side camera',
+          ),
+    );
+  }
   // ⚠️ Before anything is measured. @see hud-harness.tsx
   await document.fonts.ready;
 

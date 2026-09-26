@@ -1798,8 +1798,12 @@ select option {
 
    `--oyl-font-size-md` rather than the 2.5 rem a value gets: this is a sentence
    read once, not a magnitude glanced at, and `hud-value-size.test.ts` carries
-   the floor that keeps it above the label beside it. */
-.oyl-hud__trainer {
+   the floor that keeps it above the label beside it.
+
+   #551: the side camera's line is the same kind of sentence in the same
+   panel, so it is set the same way and measured against the same pair. */
+.oyl-hud__trainer,
+.oyl-hud__side-camera {
   margin: 0;
   color: var(--oyl-color-hud-ink-muted);
   font-size: var(--oyl-font-size-md);
@@ -1809,6 +1813,28 @@ select option {
 .oyl-hud__controls {
   display: flex;
   gap: var(--oyl-space-md);
+}
+
+/* #551: the side camera's line and *Stop side camera*, side by side in one
+   row, so the actions panel grows by one line rather than by a line and a
+   control. The stop is the mute's size and keeps its one word on one line,
+   for #512's reason (`.oyl-hud .oyl-sound__mute` below): a label that can
+   wrap grows the row on a font with wider glyphs. `HudPanel.tsx` has the
+   measurement. */
+.oyl-hud__side-camera-row {
+  display: flex;
+  align-items: center;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-hud__side-camera-row > .oyl-hud__side-camera {
+  flex: 1;
+}
+
+.oyl-hud__side-camera-stop {
+  flex-shrink: 0;
+  margin-inline-start: auto;
+  white-space: nowrap;
 }
 
 .oyl-hud__control {
@@ -2150,6 +2176,19 @@ select option {
  * as a sighted one loses the picture, which is the honest equivalence — and
  * since #437 "as long as" is until the notice is put away, not the whole ride.
  *
+ * ⚠️ **Two notices do not share this cell, and one of them is not put away.**
+ * A running workout's stall rescue (#585) is an *"Eased"* notice among the
+ * faults, and a workout that owns the trainer always has the road notice too:
+ * the two together were 309 px tall at 844×390 and 736×360, and put *Pause*
+ * and *End ride* below the stage. So `GameView` §`roadNotice` takes the road
+ * notice, and its control, off the HUD while the rescue holds, and the Eased
+ * notice has this cell alone. **What that costs, recorded as #419 asks: on a
+ * phone the elevation strip and the plan view are not shown for as long as a
+ * workout is eased**, the trade #551 made for a lost side-camera link and for
+ * its reason — it is the machine under the rider now, not a thing to put away,
+ * and it ends by itself. `ride.browser.spec.ts` §"#585" measures it at every
+ * overlay viewport, with the two notices together as its control.
+ *
  * ⚠️ **One limit, stated rather than gated.** Upright on a phone at the very
  * bottom of the column layout's range — 752 px tall — a notice of the longest
  * kind ends within a few pixels of the top of the rider's helmet, and on a
@@ -2259,6 +2298,111 @@ select option {
     display: grid;
     gap: var(--oyl-space-sm);
     grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  }
+}
+
+/*
+ * SOUNDS ON AND A SIDE CAMERA PAIRED, ON A PHONE — #576.
+ *
+ * #400's sound row and #551's side-camera row each fit the actions panel on
+ * their own, and together they did not: measured in the pinned Chromium, the
+ * panel was 228 px on this machine's fonts, ran 30 px off a 736×360 stage, and
+ * landed on the rider at 360×800 and 360×752. The stage has no navigation, so
+ * a *Pause* or *End ride* pushed off it is a ride the rider cannot leave.
+ * `ride.browser.spec.ts` §"with sounds on" measures every overlay viewport in
+ * this combination, and its control puts the old stacking back and requires
+ * the same measurement to fail.
+ *
+ * ⚠️ #419 asks that what gives way be recorded, so — **on a tablet nothing
+ * does**, and the two rows stay where #400 and #551 put them. On a phone:
+ *
+ * - **Short corners (a phone on its side): the side camera's row leaves the
+ *   actions panel** and becomes a small panel of its own in the LEFT column,
+ *   directly above the route panel (or above the notice that stands in the
+ *   route panel's cell, #437). That column has about 100 px of nothing but
+ *   road between the primary panel and the route panel at 736×360, and the
+ *   right column has none: its 16 rem is too narrow for the line, *Stop*,
+ *   *Mute* and the volume in one row (238 px of content; the four need about
+ *   320). The actions panel is then exactly #400's sound case, which CI
+ *   measured with 16 px to spare. Anchored rather than placed by the grid,
+ *   because the row is INSIDE the actions panel in the document — beside
+ *   Pause and End ride, where a keyboard and a screen reader meet it — and a
+ *   grid cannot lift a grandchild into another column. ⚠️ Where the engine
+ *   has no anchor positioning (a WebView older than Chrome 125) the rule does
+ *   not apply and the panel is what it was before #576; `@supports` says so
+ *   rather than leaving a half-applied rule.
+ *
+ * - **Column (a phone upright): the side camera's row and the sound row
+ *   SHARE one row**, because width is what an upright phone has and height is
+ *   what it does not (the rider's wheels are most of the way down). *Mute
+ *   sounds* shows only "Mute" there — the rest is clipped, never removed, so
+ *   the name still begins with what is seen (SC 2.5.3) — and the volume keeps
+ *   its 2.75 rem floor. The panel is then about as tall as #551's own case.
+ */
+@supports (anchor-name: --oyl-probe) {
+  @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem) {
+    /* Whichever holds the bottom-start cell. The route panel is `display:
+       none` while a notice stands open there (#437), and a collapsed notice is
+       a 1 px clipped box, so exactly one of the two is ever laid out and
+       carrying the name. */
+    .oyl-game--riding .oyl-hud__route,
+    .oyl-game--riding .oyl-hud__notices:not(.oyl-hud__notices--collapsed) {
+      anchor-name: --oyl-hud-bottom-start;
+    }
+
+    .oyl-game--riding .oyl-hud__actions:has(> .oyl-sound) > .oyl-hud__side-camera-row {
+      position: absolute;
+      position-anchor: --oyl-hud-bottom-start;
+      bottom: anchor(top);
+      left: anchor(left);
+      width: anchor-size(width);
+      margin-bottom: var(--oyl-space-sm);
+      box-sizing: border-box;
+      /* A panel of its own now, so it carries the panel's surface: the colour
+         pair `contrast.a11y.test.ts` checks is the pair a rider sees. */
+      background: var(--oyl-color-hud-surface);
+      border: 1px solid var(--oyl-color-hud-border);
+      border-radius: var(--oyl-radius);
+      color: var(--oyl-color-hud-ink);
+      padding: var(--oyl-space-sm);
+    }
+  }
+}
+
+@media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud__actions:has(> .oyl-sound):has(> .oyl-hud__side-camera-row) {
+    flex-flow: row wrap;
+  }
+
+  .oyl-game--riding
+    .oyl-hud__actions:has(> .oyl-sound):has(> .oyl-hud__side-camera-row)
+    > :is(.oyl-hud__trainer, .oyl-hud__controls) {
+    flex-basis: 100%;
+  }
+
+  .oyl-game--riding .oyl-hud__actions:has(> .oyl-sound) > .oyl-hud__side-camera-row {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  /* 8 rem: "Mute" and a volume slider above its 2.75 rem floor. `min-width: 0`
+     because a flex item will not shrink below its content otherwise, and a
+     range input is 129 px of content (#512 measured the same thing). */
+  .oyl-game--riding .oyl-hud__actions:has(> .oyl-hud__side-camera-row) > .oyl-sound {
+    flex: 0 0 8rem;
+    min-width: 0;
+  }
+
+  .oyl-game--riding .oyl-hud__actions:has(> .oyl-hud__side-camera-row) .oyl-sound__mute-more {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
   }
 }
 

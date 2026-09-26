@@ -78,6 +78,7 @@
  * drives the second one only, and the first belongs to the workout session.
  */
 
+import type { WorkoutRescue } from '@onyourleft/domain';
 import type { TrainerControl } from '@onyourleft/sensors/protocol';
 
 /**
@@ -239,6 +240,19 @@ export interface GameTrainerPort {
    * to fire.
    */
   askForControlOnRide(): Promise<void>;
+  /**
+   * The stall rescue holding a running WORKOUT's target down, and why — or
+   * `undefined` — #585.
+   *
+   * ⚠️ **Read on every frame, where {@link readTrainer} is read once per
+   * ride**, and that is not a contradiction: this decides no write. The
+   * workout keeps ticking above the router while the rider is in the game
+   * (`GameTrainerKind` `workout`), and a stall eased by it mid-ride is a
+   * change a rider riding the game must be told about as it happens — the
+   * same thing `WorkoutPanel` shows on the Ride screen. A snapshot read: the
+   * controller caches its snapshot, so this is a property access per frame.
+   */
+  workoutRescue(): WorkoutRescue | undefined;
 }
 
 /** What {@link gameTrainerFrom} reads of the ride screen's `TrainerSnapshot`. */
@@ -259,7 +273,8 @@ interface TrainerFacts {
 interface GameTrainerSource {
   getSnapshot(): {
     readonly trainer: TrainerFacts;
-    readonly workout: { readonly status: string } | undefined;
+    readonly workout:
+      { readonly status: string; readonly rescue: WorkoutRescue | undefined } | undefined;
   };
   simulationControl(): GradientTrainer | undefined;
   requestTrainerControl(): Promise<void>;
@@ -300,6 +315,7 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
       }
       await controller.requestTrainerControl();
     },
+    workoutRescue: () => controller?.getSnapshot().workout?.rescue,
   };
 }
 

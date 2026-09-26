@@ -30,7 +30,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ASSET_MANIFEST_SOURCE } from '../credits/source';
-import { creditsFrom } from '../credits/credits';
+import { creditsFrom, NOTHING_ASKED_LICENCES, SHIPPED_LICENCE_TEXTS } from '../credits/credits';
 import { parseAssetManifest } from '../credits/manifest';
 import { mount, queryAll, type Mounted } from '../testing/mount';
 
@@ -151,6 +151,59 @@ describe('an asset that owes nothing', () => {
   });
 });
 
+/** The section a rendered file's credit sits in, by its `data-terms`. */
+function sectionOf(file: string): string | undefined {
+  const code = queryAll<HTMLElement>(mounted?.container ?? document, 'code').find(
+    (each) => each.textContent === file,
+  );
+  return code?.closest<HTMLElement>('[data-terms]')?.dataset.terms;
+}
+
+/** The links inside the one credit that lists this file. */
+function linksOfCreditFor(file: string): readonly string[] {
+  const code = queryAll<HTMLElement>(mounted?.container ?? document, 'code').find(
+    (each) => each.textContent === file,
+  );
+  const credit = code?.closest('ul')?.closest('li');
+  return credit === null || credit === undefined
+    ? []
+    : queryAll<HTMLAnchorElement>(credit, 'a').map((link) => link.getAttribute('href') ?? '');
+}
+
+const APACHE = [
+  '[[asset]]',
+  'path = "apps/web/public/pose/pose_landmarker_lite.task"',
+  'source = "Google MediaPipe"',
+  'licence = "Apache-2.0"',
+  'read = "2026-09-25"',
+  'sha256 = "ee"',
+  'creator = "Google (MediaPipe)"',
+  'url = "https://example.invalid/model-card"',
+  'modified = "no"',
+].join('\n');
+
+describe('an asset whose licence asks for its text to travel with it — #597', () => {
+  it('is not listed under the section that says its licence asks for nothing', async () => {
+    await render(`${FIXTURE}\n\n${APACHE}`);
+    expect(sectionOf('apps/web/public/pose/pose_landmarker_lite.task')).toBe('licence-copy');
+    expect(sectionOf('apps/web/src/game/models/tree_default.glb')).toBe('nothing');
+  });
+
+  it('links the copy of the licence this app ships, from its own credit', async () => {
+    await render(APACHE);
+    expect(linksOfCreditFor('apps/web/public/pose/pose_landmarker_lite.task')).toContain(
+      './licences/Apache-2.0.txt',
+    );
+    expect(text()).toMatch(/copy of the licence travel with the work/);
+  });
+
+  it('does not claim the courtesy wording when only such an asset is credited', async () => {
+    await render(APACHE);
+    expect(text()).not.toMatch(/asks for nothing in return/);
+    expect(text()).not.toContain('Nothing else in this build came from somebody outside');
+  });
+});
+
 describe('the gate: every attribution-requiring row in ASSETS.toml reaches the screen', () => {
   it('credits each one by creator, link and file', async () => {
     // ⚠️ **Today this loop runs zero times**, because no `CC-BY-4.0` asset is
@@ -187,6 +240,38 @@ describe('the gate: every attribution-requiring row in ASSETS.toml reaches the s
     expect(text()).toContain('Kenney');
     expect(text()).toContain('apps/web/src/game/models/tree_default.glb');
     expect(hrefs()).toContain('https://kenney.nl/assets/nature-kit');
+  });
+});
+
+describe('the gate: no credit in ASSETS.toml renders without the licence it asks for — #597', () => {
+  it('links every Apache-2.0 credit to the licence copy this app ships', async () => {
+    const { licenceCopy } = creditsFrom(parseAssetManifest(ASSET_MANIFEST_SOURCE));
+    // Not vacuous: the Roboto glyphs and the pose model are both credited.
+    expect(licenceCopy.map((work) => work.licence)).toContain('Apache-2.0');
+    await render();
+    for (const work of licenceCopy) {
+      for (const file of work.files) {
+        expect(sectionOf(file), `${file} is not in the licence-copy section`).toBe('licence-copy');
+        expect(linksOfCreditFor(file), `${file} links no copy of ${work.licence}`).toContain(
+          SHIPPED_LICENCE_TEXTS[work.licence],
+        );
+      }
+    }
+  });
+
+  it('lists under the courtesy wording only licences that ask for nothing', async () => {
+    const credits = creditsFrom(parseAssetManifest(ASSET_MANIFEST_SOURCE));
+    await render();
+    const all = [...credits.required, ...credits.licenceCopy, ...credits.courtesy];
+    const courtesyFiles = all
+      .flatMap((work) => work.files.map((file) => ({ file, licence: work.licence })))
+      .filter(({ file }) => sectionOf(file) === 'nothing');
+    expect(courtesyFiles.length).toBeGreaterThan(0);
+    for (const { file, licence } of courtesyFiles) {
+      expect(NOTHING_ASKED_LICENCES, `${file} (${licence}) is called a courtesy`).toContain(
+        licence,
+      );
+    }
   });
 });
 
@@ -277,6 +362,10 @@ describe('what the screen refuses to invent', () => {
     await render(mit);
     expect(text()).toContain('MIT');
     expect(hrefs()).toContain('https://github.com/ionic-team/capacitor');
+    // And not under the courtesy sentence: nobody here has said what MIT asks.
+    expect(sectionOf('apps/mobile/android/app/src/main/res/drawable/splash.png')).toBe(
+      'unclassified',
+    );
   });
 
   it('says so when nothing at all came from outside this project', async () => {

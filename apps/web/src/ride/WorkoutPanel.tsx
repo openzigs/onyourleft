@@ -72,6 +72,7 @@ import { useEffect, useRef, useState, type JSX } from 'react';
 import type { Watts } from '@onyourleft/domain';
 import type { WorkoutRecord } from '@onyourleft/store';
 
+import type { SideControlState } from '../camera/side-pairing-port';
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
 import { deviceStorage, type PreferenceStorage } from '../game/hud/announce-preference';
@@ -80,6 +81,7 @@ import type { CueOutput } from '../game/audio-port';
 import { readCuePreference, writeCuePreference, type CuePreference } from '../game/cue-preference';
 import { SoundControls } from '../game/SoundControls';
 import { sharedCueOutput } from '../game/web-audio';
+import { workoutRescueText } from '../workout/rescue-text';
 import { durationText, workoutRow } from '../workouts/library';
 
 import { RideAnnouncer } from './RideAnnouncer';
@@ -123,6 +125,12 @@ export interface WorkoutPanelProps {
   readonly sounds?: CueOutput | undefined;
   /** The announcer's clock, in seconds (#445); the wall clock unless a test hands one in. */
   readonly announcerClock?: (() => number) | undefined;
+  /**
+   * The paired side camera's state, for the ride's one region — #551. This
+   * panel holds that region (`RideAnnouncer.tsx`), which is the only reason
+   * a camera's state passes through a workout panel.
+   */
+  readonly sideCamera?: SideControlState | undefined;
 }
 
 export function WorkoutPanel({
@@ -136,6 +144,7 @@ export function WorkoutPanel({
   power,
   sounds,
   announcerClock,
+  sideCamera,
 }: WorkoutPanelProps): JSX.Element {
   const [saved, setSaved] = useState<readonly WorkoutRecord[]>([]);
   const [loadFault, setLoadFault] = useState<string | undefined>(undefined);
@@ -222,6 +231,7 @@ export function WorkoutPanel({
     <RideAnnouncer
       trainer={trainer}
       workout={workout}
+      sideCamera={sideCamera}
       storage={announcements}
       clock={announcerClock}
       // #400: the interval sound, on the block CHANGE — not on the sentence
@@ -258,6 +268,14 @@ export function WorkoutPanel({
             ? 'The trainer has not confirmed a target yet.'
             : `Holding ${String(workout.holdingWatts)} W.`}
         </p>
+        {workout.rescue === undefined ? null : (
+          // #585: the stall rescue's reason, which the workout path used to
+          // compute and never show. Not `live`, for the fault's reason below:
+          // `RideAnnouncer` speaks it when it appears or changes.
+          <StatusMessage tone="warning" label="Eased">
+            {workoutRescueText(workout.rescue, 'ride-screen')}
+          </StatusMessage>
+        )}
         {workout.fault === undefined ? null : (
           // Not `live` since #445: `RideAnnouncer` speaks it, in order.
           <StatusMessage tone="warning">{workout.fault}</StatusMessage>

@@ -60,12 +60,13 @@
 
 import { useState, type FormEvent, type JSX } from 'react';
 
-import { watts, type Watts } from '@onyourleft/domain';
+import { TREND_WINDOW, watts, type Watts } from '@onyourleft/domain';
 
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
 
 import type { TrainerSnapshot } from './controller';
+import type { ManualErgRescue } from './manual-erg';
 
 /**
  * Human words for why control went. Each is a different thing to do next.
@@ -257,6 +258,19 @@ export function TrainerPanel({
       )}
 
       {/*
+        #567: a hand-set target the stall rescue has eased. Says the rider's
+        own number, why it is not on the machine, and that it comes back by
+        itself — the decision #567 asked to be stated. Not `live`, for the
+        reason *Control lost* above is not: the ONE ride region speaks, and
+        this is not the answer to a press.
+      */}
+      {trainer.ergRescue === undefined ? null : (
+        <StatusMessage tone="warning" label="Eased">
+          {rescueSentence(trainer.ergRescue)}
+        </StatusMessage>
+      )}
+
+      {/*
         ⚠️ **These two stay `live`, and that is decided rather than missed
         (#445).** Each is the answer to the rider's OWN press — *Set target*, or
         *Ask the trainer for control* — on the form their focus is in, so it is
@@ -376,4 +390,36 @@ export function targetSentence(trainer: TrainerSnapshot): string {
         ? 'No target set. The trainer is following your effort.'
         : 'No target set.';
   }
+}
+
+/**
+ * What the panel says while a hand-set target is eased — #567.
+ *
+ * ⚠️ **It states the decision**: the rider's target is put back by itself once
+ * cadence has held steady, which is what a workout does (`manual-erg.ts` §"After
+ * the rider recovers"). *End ERG*, beside it, is the way to keep it off.
+ *
+ * The window is read off {@link TREND_WINDOW} rather than typed, so the
+ * sentence cannot go quietly wrong when #137 recalibrates it (PR #582's review).
+ */
+function rescueSentence(rescue: ManualErgRescue): string {
+  const steady = `your cadence has held steady for ${String(TREND_WINDOW)} seconds`;
+  // PR #582's third review: the number named is only ever one the machine
+  // ACCEPTED. A target the rider set during the rescue is not written until it
+  // ends — the rescue is the only writer — and is said as that, separately.
+  //
+  // PR #582's fourth review: from the floor the way back is two steps — a
+  // lighter target as soon as the rider is pedalling again, and theirs only
+  // once a whole window of that has held — so the floor says both. A rescue
+  // always has an accepted target to name: a trainer that has none is never
+  // rescued (`manual-erg.ts` rule 6).
+  const lighterFirst =
+    rescue.holding === 'floor'
+      ? ' Once you are pedalling again it steps up to a lighter target first.'
+      : '';
+  const back =
+    rescue.pending !== undefined
+      ? `${lighterFirst} Your new target of ${String(rescue.pending)} W will be set once ${steady}.`
+      : `${lighterFirst} Your ${String(rescue.target)} W comes back by itself once ${steady}.`;
+  return `${rescue.reason}${back} Press End ERG to leave it off.`;
 }

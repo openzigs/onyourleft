@@ -1907,6 +1907,9 @@ adb logcat | grep -i "BluetoothLe"
 | S3 | A workout with a **free-ride block** after an ERG block. Ride into the free ride and let cadence fall | One `0x05` at the trainer's minimum as the block starts, no `0x08`, and power **falls** with cadence — the previous interval's target is gone |
 | S4 | During an ERG block, press **Pause** while pedalling; keep pedalling slowly for 10 s; then **Resume** | On Pause one `0x05` at the minimum, no `0x08`; power falls with cadence while paused. On Resume the interval's target comes back within a second or two |
 | S5 | [#542](https://github.com/openzigs/onyourleft/issues/542). A saved workout with a steady block of at least two minutes. Ride it at a comfortable cadence, with the logcat above running, and count the `0x05` writes in each whole minute of the block | **One** `0x05` at the block's start and **none** after it while the target is unchanged — so 1 in the first minute and 0 in each after. A retry appears only after a write that was refused or not answered. Before #542 this was about one a second (14 in 16 s) |
+| S6 | [#567](https://github.com/openzigs/onyourleft/issues/567). ⚠️ **Manual ERG, no workout.** Ride screen, control taken, **no workout running**. Set **150 W** on the Trainer panel's ERG form and ride 60 s. Then stop pushing: let cadence fall from about 70 rpm towards zero over 10–15 s, as in the 2026-09-25 run below | As cadence falls under ~50 rpm the app writes a `0x05` at **100 W** (two thirds of 150), and at or below **10 rpm** a `0x05` at the trainer's **minimum** — **no `0x08` anywhere**. The Trainer panel shows **Eased**, the reason, and *Your 150 W comes back by itself…*. **Power must FALL before the trainer's own firmware lets go** (about 9 s under 40 rpm on this machine): the first `0x05` should be in the log well before that |
+| S7 | From S6's stall, pedal again and settle at a comfortable cadence | `0x05` at 100 W while cadence is under 50 rpm, then — only after about **8 s** steady — `0x05` at **150 W**, and the **Eased** notice goes. No flapping |
+| S8 | [#567](https://github.com/openzigs/onyourleft/issues/567), PR #582's review. ⚠️ **Expected behaviour, not a bug.** Standing still with the pedals at rest and control taken, **no workout**, set **150 W** on the ERG form *before* pedalling. Wait 5 s, then start pedalling and settle at a comfortable cadence | Within about a second of the 150 W write the app writes a `0x05` at the trainer's **minimum**, and the panel shows **Eased** — the trainer reports 0 rpm while the rider is stationary, which is a stall. **This is what a workout started while stationary does too**, and it is the same rule on purpose. Once the rider pedals: `0x05` at 100 W, then — after about **8 s** steady — `0x05` at **150 W**. No `0x08` anywhere |
 
 ### S results
 
@@ -1917,6 +1920,9 @@ adb logcat | grep -i "BluetoothLe"
 | S3 | | *Not run* | | |
 | S4 | | *Not run* | | |
 | S5 | | *Not run.* `0x05` writes per whole minute of the steady block: | | |
+| S6 | | *Not run* | | |
+| S7 | | *Not run* | | |
+| S8 | | *Not run* | | |
 
 ⚠️ **Manual ERG has no stall rescue, and on this trainer the firmware let go instead.** Before the
 workout, the owner set **150 W** on the Ride screen's Trainer panel, with no workout running, and let
@@ -1925,6 +1931,14 @@ after about **9 s** (20:35:38–20:35:47). That is how the client is built: the 
 workout player (`erg-safety.ts` §`assessErgCadence`), and a target set by hand does not go through
 the player. So S1–S4 pass or fail on a **workout** only. A rider on a manual ERG target is relying
 on the trainer, and a different trainer may not let go.
+
+⚠️ **#567's answer, 2026-09-26: a hand-set target now has the same rescue.** The latch the workout
+player used is one object now (`erg-safety.ts` §`createErgRescue`), and the Ride screen's ERG form
+holds one too (`apps/web/src/ride/manual-erg.ts`): the same stall detection, the same `0x05` ease to
+two thirds or to the machine's minimum, never a Stop, through one ERG writer. After recovery the
+rider's target is **put back** once cadence has held for a whole window, and the panel says so while
+it is eased. **S6 and S7 are the hardware check**, and their result cells are empty. The paragraph
+above is the 2026-09-25 finding and stays as it was.
 
 ⚠️ **Found along the way: [#542](https://github.com/openzigs/onyourleft/issues/542).** During the
 workout, an unchanged target that had already been acknowledged was written again about once a
@@ -2926,3 +2940,60 @@ should say *"blocked"* rather than *"untried"*. This part does not make that edi
 
 **Phone (OEM, model, Android, WebView):** Google Pixel Tablet, Android 17, WebView 153.0.8010.36
 **Build:** debug, `main` at `2b84996`, 2026-09-25
+
+---
+
+## Part AG — the distant hills in the realistic world ([#544](https://github.com/openzigs/onyourleft/issues/544))
+
+**Why this part exists.** On 2026-09-25 (`main` at `cfa8956`) the owner saw the realistic world's
+far hills as *"white film in the distance … almost like rendering issue"*: flat, pale grey-white
+sheets with hard straight edges, brighter than the grey sky behind them. Two causes, both fixed by
+#544:
+
+1. The fog and the horizon ring were coloured with the **stylised** world's horizon, a pale haze
+   painted to meet the stylised sky dome. The realistic sky is a photograph, darker than that haze
+   at the horizon, so everything distant converged on a colour brighter than the sky.
+2. The photograph was taken standing in a field, so its lowest ~5° are a field, a treeline and
+   hills. Wherever the rider stood above the ring's crests (the top of a climb, a descent), the
+   photograph's own field showed **above** the game's hills, with the pale ring under it.
+
+Since #544 the fog and the ring's foot are the photographed sky just above its skyline
+(`realistic-light.ts` §`REALISTIC_HORIZON_BAND`, times the background intensity). The ridge carries
+80 % of it. The whole ridge is lifted, keeping its shape, until no crest stands below 5° from the eye
+(§`skylineCrestFloor`). The browser gate reads it off the drawing buffer against a control that
+reproduces the pale band (`game.browser.spec.ts` §"#544"). Whether it looks right on the tablet is
+only here. ⚠️ **The stylised world is unchanged**, and every stylised figure the browser gate prints
+is identical before and after.
+
+⚠️ **The trade, stated plainly.** In the realistic world the distant ridge follows the rider's
+height on nearly every frame, not only at the top of a climb. The 5° floor is the eye plus about
+96 m at the ring's 1.1 km, and the route's own crests stand only 30 to 150 m above the middle of
+its elevation, so on a level road the lowest crest is almost always under the floor. The whole
+ridge is then lifted, and from there it rises and falls with the rider one for one: it behaves like
+a backdrop at infinity. So in the realistic world a rider who climbs does **not** rise past the
+hills, and a rider who descends does not drop below them. (The stylised world keeps the route's
+own heights, and there the rider does rise past the hills.) AG3 and AG5 ask whether that reads as
+wrong.
+
+Same tablet, same debug-APK route as Part Z (§"Build and install"), from a `main` that has #544 in
+it. Choose the realistic world in Settings.
+
+| Step | What to do | What should happen |
+|---|---|---|
+| AG1 | Ride the owner's own saved route on the level for a minute, looking past the trees on either side | The distant hills are a hazy grey-green, **darker** than the sky just above them and lighter than the grass near the road. No white film behind the trees |
+| AG2 | Watch where a hill meets the sky | A soft, low-contrast line, not a bright sheet with a hard straight top |
+| AG3 | Ride to the top of the route's biggest climb and look out over the descent | Hazy hills all round the horizon. None of the photograph's own field or treeline shows above them. ⚠️ The hills stay at the same height in the view as they were at the bottom: they climbed with you. That is the trade #544 made (see above), and this step is where to say whether it reads as wrong |
+| AG5 | Ride a rolling stretch, or climb then descend, watching a distant hill against the trees in front of it | The distant ridge moves up and down with you one for one, while the nearer trees and ground do not. Say whether that reads as wrong: a ridge that visibly bobs with the rider is the new behaviour most likely to |
+| AG4 | The stylised world (`?world=stylised&panel=0&ladder=0`) at the same places | As it was before #544 |
+
+### AG results
+
+| Step | As described? | What was seen |
+|---|---|---|
+| AG1 | | |
+| AG2 | | |
+| AG3 | | |
+| AG4 | | |
+| AG5 | | |
+
+**Phone (OEM, model, Android, WebView):** ______________  **Build:** ______________

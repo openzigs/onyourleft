@@ -130,18 +130,37 @@ export interface RiderMarker {
   readonly headingX: number;
   readonly headingZ: number;
   /**
-   * How far the bicycle leans, in radians from upright — #499. Positive leans
+   * How far the BICYCLE leans, in radians from upright — #499. Positive leans
    * its top toward the road's own normal, `(−headingZ, headingX)` — the side
    * `terrain.ts` calls left — which is the side a bend toward that normal
    * turns to, so a rider always leans INTO the bend. The renderer rolls the
    * bicycle and whoever is on it about the line between its two tyre contacts.
    *
+   * ⚠️ **Since #546 this is the bicycle's lean and NOT the physics'**, and a
+   * reviewer who remembers it equal to `racing-line.ts` §`leanAt` is reading
+   * the old file. `leanAt` is the COMBINED lean, `tan φ = v²/(g·R)`; the body
+   * stays more upright than the bicycle ({@link bodyLean}), so the bicycle
+   * leans a little more than φ for the pair's centre of mass to sit at φ
+   * (`bicycle.ts` §`bicycleRoll`). `bicycle.ts` §`combinedLean` of this and
+   * {@link bodyLean} is φ.
+   *
    * ⚠️ **Required, on {@link CameraPose.eyeRoadY}'s argument**: an optional
    * lean nobody supplied would compile, render, and draw every rider bolt
    * upright for ever — which is exactly what #499 was filed about.
-   * `racing-line.ts` §`leanAt` is where it comes from.
    */
   readonly lean: number;
+  /**
+   * How far the rider's upper body is rolled RELATIVE TO THE BICYCLE, in
+   * radians, about the bicycle's own `+Z` through the hips — #546. In
+   * {@link lean}'s sign, and of the opposite sign to it: the body is held back
+   * toward upright, by `bicycle.ts` §`UPPER_BODY_UPRIGHT_SHARE` of the
+   * bicycle's lean. Nought on a rider who is not leaning.
+   *
+   * Required for {@link lean}'s reason: an optional roll nobody supplied would
+   * draw every body leaning with its bicycle, which is what the owner ruled
+   * against on 2026-09-25.
+   */
+  readonly bodyLean: number;
   /**
    * How far the cranks have turned, in radians — #349, #368.
    *

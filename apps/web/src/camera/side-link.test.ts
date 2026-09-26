@@ -193,6 +193,35 @@ describe('pairing, through both codes', () => {
     expect(tablet.control.sideControlState()).toMatchObject({ phone: 'framing', ended: undefined });
   });
 
+  it('stops its opening ping once the phone has proved itself — one ping a heartbeat, not two (#573)', async () => {
+    const { network, pass } = await paired();
+    const control = network.peers[0]?.channels.find((c) => c.label === CONTROL_CHANNEL);
+    const pings = (): number => (control?.sent ?? []).filter((m) => m === '{"t":"ping"}').length;
+    const before = pings();
+    const heartbeats = 10;
+    await pass(heartbeats * HEARTBEAT_MILLISECONDS);
+    // The heartbeat alone. With the opening ping left running beside it, the
+    // tablet would send twice this for the whole pairing.
+    expect(pings() - before).toBe(heartbeats);
+  });
+
+  it('lets go of the channel’s open handler when it ends, and an open after the end sends nothing (#573)', async () => {
+    const { port, network } = setUp();
+    const tablet = await offer(port);
+    const control = network.peers[0]?.channels.find((c) => c.label === CONTROL_CHANNEL);
+    // Not yet open, so the tablet is waiting on its `open` to invite.
+    const opened = control?.onopen;
+    expect(opened).toBeTypeOf('function');
+    tablet.control.endSidePairing();
+    await flushSideLink();
+    expect(control?.onopen).toBeNull();
+    // An engine that fires the old handler anyway, on a channel it calls open:
+    // `#invite` returns on the end rather than pinging a pairing that is over.
+    Object.assign(control ?? {}, { readyState: 'open' });
+    opened?.();
+    expect(control?.sent).toEqual([]);
+  });
+
   it('points every peer at nothing but the other device — the offer carries no server', async () => {
     const context = setUp();
     const tablet = await offer(context.port);

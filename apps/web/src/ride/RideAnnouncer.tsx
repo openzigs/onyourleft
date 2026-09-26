@@ -24,8 +24,10 @@
  * | `TrainerSnapshot.lost`, when it appears or changes | `trainer-lost` | "Control lost: …", the words `TrainerPanel` shows |
  * | `TrainerSnapshot.releaseFault`, likewise | `trainer-lost` | "Not released: …" |
  * | `RideWorkoutSnapshot.fault`, likewise | `workout-fault` | "Heads up: …" |
+ * | `RideWorkoutSnapshot.rescue`, when it appears or its reason changes (#585) | `workout-fault` | "Eased: …", the words `WorkoutPanel` shows |
  * | `RideWorkoutSnapshot.nowRiding`, when it changes | `interval-now` | "Now: …" (#394) |
  * | the next block, `lead` seconds before it | `interval-ahead` | #398's sentence |
+ * | the side camera's link, when it goes (#551) | `side-camera-lost` | `side-camera.ts` §`SIDE_CAMERA_LOST_SENTENCE` |
  *
  * **When something APPEARS or CHANGES, never when it is first rendered** —
  * #394's rule, kept: a screen a rider navigates back to, with control already
@@ -54,6 +56,7 @@ import {
   ANNOUNCE_WINDOW_SECONDS,
   announce,
   INITIAL_ANNOUNCER,
+  withdrawPending,
   type AnnouncementEvent,
   type AnnouncementKind,
   type AnnouncerState,
@@ -64,8 +67,16 @@ import {
   type PreferenceStorage,
 } from '../game/hud/announce-preference';
 
+import type { SideControlState } from '../camera/side-pairing-port';
+import {
+  EASED_SPOKEN_PREFIX,
+  isEasedAnnouncement,
+  workoutRescueText,
+} from '../workout/rescue-text';
+
 import type { RideWorkoutSnapshot, TrainerSnapshot } from './controller';
 import { upcomingBlock } from './lookahead';
+import { sideCameraLost, sideCameraLostEvent } from './side-camera';
 import { LOSS_REASON } from './TrainerPanel';
 
 /** The wall clock, in seconds. */
@@ -74,6 +85,17 @@ const wallSeconds = (): number => performance.now() / 1000;
 export interface RideAnnouncerProps {
   readonly trainer: TrainerSnapshot;
   readonly workout: RideWorkoutSnapshot | undefined;
+  /**
+   * The paired side camera's state, or `undefined` with no pairing — #551.
+   * Its link going is said once, when it goes (`side-camera.ts`
+   * §`sideCameraLostEvent`).
+   *
+   * ⚠️ **Optional, so a caller that stops passing it is green in
+   * `check:wiring`** (§Limits' third entry).
+   * `ride/side-camera-ride-screen.a11y.test.tsx` drives the Ride screen and
+   * reads the region, which is what pins it.
+   */
+  readonly sideCamera?: SideControlState | undefined;
   /** Where the rider's announcement choice is read from. This device's, by default. */
   readonly storage?: PreferenceStorage | undefined;
   /**
@@ -102,15 +124,25 @@ interface Seen {
   readonly lost: TrainerSnapshot['lost'];
   readonly releaseFault: string | undefined;
   readonly fault: string | undefined;
+  /** The workout's eased sentence (#585), so a change of REASON is a change. */
+  readonly eased: string | undefined;
   readonly nowRiding: string | undefined;
+  readonly sideCamera: SideControlState | undefined;
 }
 
-function seenIn(trainer: TrainerSnapshot, workout: RideWorkoutSnapshot | undefined): Seen {
+function seenIn(
+  trainer: TrainerSnapshot,
+  workout: RideWorkoutSnapshot | undefined,
+  sideCamera: SideControlState | undefined,
+): Seen {
   return {
     lost: trainer.lost,
     releaseFault: trainer.releaseFault,
     fault: workout?.fault,
+    eased:
+      workout?.rescue === undefined ? undefined : workoutRescueText(workout.rescue, 'ride-screen'),
     nowRiding: workout?.nowRiding,
+    sideCamera,
   };
 }
 
@@ -132,11 +164,23 @@ function changes(before: Seen, now: Seen): AnnouncementEvent[] {
   if (now.fault !== before.fault && now.fault !== undefined) {
     events.push({ kind: 'workout-fault', text: `Heads up: ${now.fault}` });
   }
+  // #585: the stall rescue, as `workout-fault` — rank 2 and spoken with
+  // announcements off, because it is the machine under the rider holding a
+  // different target from the workout's. Said when it appears or its reason
+  // changes (a stall going silent, a relief recovering), never when it clears:
+  // the full target coming back is felt, and the panel stops saying it.
+  if (now.eased !== before.eased && now.eased !== undefined) {
+    events.push({ kind: 'workout-fault', text: `${EASED_SPOKEN_PREFIX}${now.eased}` });
+  }
   if (now.releaseFault !== before.releaseFault && now.releaseFault !== undefined) {
     events.push({ kind: 'trainer-lost', text: `Not released: ${now.releaseFault}` });
   }
   if (now.lost !== before.lost && now.lost !== undefined) {
     events.push({ kind: 'trainer-lost', text: `Control lost: ${LOSS_REASON[now.lost]}` });
+  }
+  const side = sideCameraLostEvent(sideCameraLost(before.sideCamera), now.sideCamera);
+  if (side !== undefined) {
+    events.push(side);
   }
   return events;
 }
@@ -144,6 +188,7 @@ function changes(before: Seen, now: Seen): AnnouncementEvent[] {
 export function RideAnnouncer({
   trainer,
   workout,
+  sideCamera,
   storage,
   onEvent,
   clock,
@@ -155,7 +200,7 @@ export function RideAnnouncer({
     readAnnouncementPreference(storage === undefined ? deviceStorage() : storage),
   );
   const announcer = useRef<AnnouncerState>(INITIAL_ANNOUNCER);
-  const seen = useRef<Seen>(seenIn(trainer, workout));
+  const seen = useRef<Seen>(seenIn(trainer, workout, sideCamera));
   /** The boundary last offered, so one change is announced once. */
   const offered = useRef<number | undefined>(undefined);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -204,11 +249,24 @@ export function RideAnnouncer({
   const timeline = workout?.timeline;
   const elapsedSeconds = workout?.elapsedSeconds;
   const status = workout?.status;
-  const { lost, releaseFault, fault, nowRiding } = seenIn(trainer, workout);
+  const { lost, releaseFault, fault, eased, nowRiding } = seenIn(trainer, workout, sideCamera);
 
   useEffect(() => {
-    const events = changes(seen.current, { lost, releaseFault, fault, nowRiding });
-    seen.current = { lost, releaseFault, fault, nowRiding };
+    const events = changes(seen.current, {
+      lost,
+      releaseFault,
+      fault,
+      eased,
+      nowRiding,
+      sideCamera,
+    });
+    // Cleared while its sentence was still waiting for the window: take it
+    // back, or "Eased" is said after the full target is back (PR #599's
+    // review, N1).
+    if (seen.current.eased !== undefined && eased === undefined) {
+      announcer.current = withdrawPending(announcer.current, isEasedAnnouncement);
+    }
+    seen.current = { lost, releaseFault, fault, eased, nowRiding, sideCamera };
     if (
       preference.enabled &&
       lead !== 'never' &&
@@ -223,7 +281,19 @@ export function RideAnnouncer({
       }
     }
     hear.current(events);
-  }, [lost, releaseFault, fault, nowRiding, preference, lead, timeline, elapsedSeconds, status]);
+  }, [
+    lost,
+    releaseFault,
+    fault,
+    eased,
+    nowRiding,
+    sideCamera,
+    preference,
+    lead,
+    timeline,
+    elapsedSeconds,
+    status,
+  ]);
 
   return (
     <p className="oyl-visually-hidden" role="status" data-oyl-announcer="ride">

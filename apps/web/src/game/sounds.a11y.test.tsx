@@ -303,6 +303,7 @@ describe('the audio may stop once nothing is riding — #447', () => {
     const workoutOwnsIt: GameTrainerPort = {
       // #503: the Ride press's request for control — this double changes nothing.
       askForControlOnRide: () => Promise.resolve(),
+      workoutRescue: () => undefined,
       readTrainer: () =>
         gameTrainerFrom(
           { paired: true, controllable: true, canSimulate: true, hasControl: true },
@@ -325,6 +326,7 @@ describe('the audio may stop once nothing is riding — #447', () => {
   const liveWorkout: GameTrainerPort = {
     // #503: the Ride press's request for control — this double changes nothing.
     askForControlOnRide: () => Promise.resolve(),
+    workoutRescue: () => undefined,
     readTrainer: () =>
       gameTrainerFrom(
         { paired: true, controllable: true, canSimulate: true, hasControl: true },
@@ -407,6 +409,7 @@ describe('a workout — #400', () => {
     lost: undefined,
     refusal: undefined,
     releaseFault: undefined,
+    ergRescue: undefined,
   };
 
   function riding(overrides: Partial<RideWorkoutSnapshot> = {}): RideWorkoutSnapshot {
@@ -418,6 +421,7 @@ describe('a workout — #400', () => {
       holdingWatts: 150,
       nowRiding: '10 min at 60%',
       fault: undefined,
+      rescue: undefined,
       timeline: TIMELINE,
       ...overrides,
     };

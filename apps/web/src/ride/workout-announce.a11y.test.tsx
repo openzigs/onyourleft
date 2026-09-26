@@ -69,6 +69,7 @@ const trainer: TrainerSnapshot = {
   lost: undefined,
   refusal: undefined,
   releaseFault: undefined,
+  ergRescue: undefined,
 };
 
 const running = (overrides: Partial<RideWorkoutSnapshot> = {}): RideWorkoutSnapshot => ({
@@ -79,6 +80,7 @@ const running = (overrides: Partial<RideWorkoutSnapshot> = {}): RideWorkoutSnaps
   holdingWatts: 150,
   nowRiding: '10 min at 60%',
   fault: undefined,
+  rescue: undefined,
   timeline: expandWorkout({ name: 'Sweet spot', blocks }),
   ...overrides,
 });

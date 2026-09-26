@@ -51,7 +51,7 @@
  * looking: `fitBounds` on the harness track picks a zoom, MapLibre asks for
  * whichever tiles cover the viewport, and every one of them exists.
  *
- * **No OpenStreetMap data of any kind.** Three rectangles and a line, drawn
+ * **No OpenStreetMap data of any kind.** Two rectangles, a line and a point, drawn
  * from arithmetic in this file. That matters beyond tidiness: ODbL attribution
  * attaches to a Produced Work derived from OSM, and a fixture that carried a
  * scrap of real coastline would quietly make this repository's build output a
@@ -146,7 +146,27 @@ export const FIXTURE_MAX_ZOOM = 14;
  * `basemap.ts` names `import.meta.env`. Keeping this file dependency-free is
  * what lets one module serve the build, the unit suite and the gate.
  */
-export const FIXTURE_SOURCE_LAYERS = ['earth', 'water', 'roads'] as const;
+export const FIXTURE_SOURCE_LAYERS = ['earth', 'water', 'roads', 'places'] as const;
+
+/**
+ * The name the fixture's one place carries, so the browser gate has a label to
+ * look for (#578).
+ *
+ * ⚠️ **Not ASCII, on purpose.** *Kāneʻohe* needs three glyph ranges — ASCII
+ * from `0-255`, the macron from `256-511`, the ʻokina (U+02BB) from `512-767`
+ * — so a page that paints it has fetched and drawn from three of the committed
+ * range files rather than one. A place name is a fact and not OpenStreetMap
+ * data; nothing about it comes from an OSM extract.
+ */
+export const FIXTURE_PLACE_NAME = 'Kāneʻohe';
+
+/** Where the named places are in every tile: a 4 × 4 grid, cell-centred. */
+export const FIXTURE_PLACE_GRID: readonly { readonly x: number; readonly y: number }[] = [
+  0, 1, 2, 3,
+].flatMap((row) => [0, 1, 2, 3].map((column) => ({ x: 512 + column * 1024, y: 512 + row * 1024 })));
+
+/** The name the fixture's road carries, for the road-name layer (#578). */
+export const FIXTURE_ROAD_NAME = 'Mill Lane';
 
 /**
  * The MVT coordinate extent, in tile units.
@@ -173,11 +193,9 @@ const EDGE_BUFFER = 64;
 /**
  * MVT geometry types, from the Mapbox Vector Tile specification 2.1 §4.3.4.
  *
- * `POINT` is 1 and is absent here because the fixture has no point feature to
- * declare it for — an unused constant is a compile error under `noUnusedLocals`,
- * and a name that documents a format this file does not write is a worse thing
- * to keep than a gap in a numbering.
+ * `POINT` arrived with #578's place, which is the first point feature here.
  */
+const GEOMETRY_POINT = 1;
 const GEOMETRY_LINESTRING = 2;
 const GEOMETRY_POLYGON = 3;
 
@@ -221,6 +239,8 @@ interface TilePoint {
 interface EncodedFeature {
   readonly type: number;
   readonly geometry: readonly number[];
+  /** The feature's `name` property, the one tag a label reads. */
+  readonly name?: string;
 }
 
 /**
@@ -301,7 +321,7 @@ function packVarints(values: readonly number[]): readonly number[] {
   return packed;
 }
 
-/** A UTF-8 string field. ASCII only here, which every layer name below is. */
+/** A UTF-8 string field. Layer names are ASCII; a feature's name need not be. */
 function writeStringField(out: number[], field: number, value: string): void {
   const bytes: number[] = [];
   for (const unit of new TextEncoder().encode(value)) {
@@ -377,20 +397,45 @@ function line(points: readonly TilePoint[]): readonly number[] {
 }
 
 /**
+ * One point, as MVT command and parameter integers: `MoveTo(1)` and the point.
+ */
+function point(at: TilePoint): readonly number[] {
+  return [1 + 1 * 8, zigzag(at.x), zigzag(at.y)];
+}
+
+/**
  * One MVT layer.
  *
- * No `keys` and no `values`: the style has no filter and no data-driven paint,
- * so a feature in this fixture has no properties to carry. A tag column that
- * nothing reads would be bytes in a measurement that is partly about bytes.
+ * One key at most, `name`, and only on a layer with a named feature — since
+ * #578 that is the place and the road, which the label layers read. A tag
+ * column nothing reads would be bytes in a measurement that is partly about
+ * bytes, so the earth and the water still carry none.
  */
 function encodeLayer(name: string, features: readonly EncodedFeature[]): readonly number[] {
   const layer: number[] = [];
   writeStringField(layer, 1, name);
+  const values: string[] = [];
   for (const feature of features) {
     const body: number[] = [];
+    if (feature.name !== undefined) {
+      if (!values.includes(feature.name)) {
+        values.push(feature.name);
+      }
+      // Tags: key 0 (`name`), value at its index. MVT 2.1 §4.2.
+      writeBytesField(body, 2, packVarints([0, values.indexOf(feature.name)]));
+    }
     writeVarintField(body, 3, feature.type);
     writeBytesField(body, 4, packVarints(feature.geometry));
     writeBytesField(layer, 2, body);
+  }
+  if (values.length > 0) {
+    writeStringField(layer, 3, 'name');
+    for (const value of values) {
+      // A `Value` message whose `string_value` is field 1.
+      const encoded: number[] = [];
+      writeStringField(encoded, 1, value);
+      writeBytesField(layer, 4, encoded);
+    }
   }
   writeVarintField(layer, 5, EXTENT);
   // Field 15. Stated rather than defaulted — see {@link EXTENT}.
@@ -401,7 +446,7 @@ function encodeLayer(name: string, features: readonly EncodedFeature[]): readonl
 /**
  * The one tile every id in the archive resolves to.
  *
- * Three layers, matching {@link FIXTURE_SOURCE_LAYERS} and therefore the three
+ * Four layers, matching {@link FIXTURE_SOURCE_LAYERS} and therefore the four
  * the style reads:
  *
  * - **`earth`** — the whole tile, so *some* basemap colour is on screen at any
@@ -412,9 +457,17 @@ function encodeLayer(name: string, features: readonly EncodedFeature[]): readonl
  *   "a tile drew" is not one colour's word: two layers from the same tile,
  *   painted in the style's own order, is a much harder thing to produce by
  *   accident than one flat fill.
- * - **`roads`** — a line across the middle, which is the only feature here that
- *   is not a polygon. It is what stops the encoder being proved by rectangles
- *   alone.
+ * - **`roads`** — a line across the middle, the first feature here that is not
+ *   a polygon. It is what stops the encoder being proved by rectangles alone,
+ *   and since #578 it is named {@link FIXTURE_ROAD_NAME} for the road-name
+ *   layer.
+ * - **`places`** — a four-by-four grid of points, every one named
+ *   {@link FIXTURE_PLACE_NAME} (#578). A grid rather than one point because a
+ *   label is drawn only where its point is on screen, and a ride's map is
+ *   framed wherever the ride happens to be: with one point per tile, whether
+ *   the gate saw a label would depend on where a tile boundary fell. Sixteen
+ *   points a tile put one every 128 px at the zoom the label cases are framed
+ *   at; MapLibre's own collision test hides the ones that would overlap.
  */
 export function fixtureTile(): Uint8Array {
   const outer = EXTENT + EDGE_BUFFER;
@@ -439,8 +492,14 @@ export function fixtureTile(): Uint8Array {
           { x: -EDGE_BUFFER, y: EXTENT / 2 },
           { x: outer, y: EXTENT / 2 },
         ]),
+        name: FIXTURE_ROAD_NAME,
       },
     ],
+    places: FIXTURE_PLACE_GRID.map((at) => ({
+      type: GEOMETRY_POINT,
+      geometry: point(at),
+      name: FIXTURE_PLACE_NAME,
+    })),
   };
 
   const tile: number[] = [];
@@ -508,7 +567,7 @@ function metadataJson(): string {
     description: 'Synthetic geometry. Contains no OpenStreetMap data.',
     vector_layers: FIXTURE_SOURCE_LAYERS.map((id) => ({
       id,
-      fields: {},
+      fields: id === 'roads' || id === 'places' ? { name: 'String' } : {},
       minzoom: 0,
       maxzoom: FIXTURE_MAX_ZOOM,
     })),

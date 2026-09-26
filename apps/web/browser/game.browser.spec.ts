@@ -28,6 +28,7 @@ import { MINIMUM_RIDER_FRAME_SHARE, riderFrameBox } from '../src/game/camera';
 import type {
   LineMeasurement,
   PresenceCostMeasurement,
+  HorizonReading,
   RealisticMeasurement,
   RiderExtent,
 } from './game-harness';
@@ -84,6 +85,8 @@ interface GameHarnessResult {
     readonly on: LineMeasurement;
     readonly onUpright: LineMeasurement;
     readonly off: LineMeasurement;
+    readonly straightOn: LineMeasurement;
+    readonly straightOff: LineMeasurement;
   };
   readonly resourcesAfterFirstFrame: number;
   readonly resourcesAfterAllFrames: number;
@@ -271,7 +274,7 @@ const CHANNELS = ['red', 'green', 'blue'] as const;
 const RIDER_BOX_TOLERANCE = 0.02;
 
 /**
- * What one frame of the harness route costs, with the scenery taken out: **7**.
+ * What one frame of the harness route costs, with the scenery taken out: **9**.
  *
  * | | calls |
  * |---|--:|
@@ -279,7 +282,8 @@ const RIDER_BOX_TOLERANCE = 0.02;
  * | the hills on the horizon (#458) | 1 |
  * | the sky's gradient (#425) | 1 |
  * | the road, however many marks and edge lines it carries (#242) | 1 |
- * | every rider's merged body and bicycle, instanced (#349, #368) | 1 |
+ * | every rider's bicycle, instanced (#349, #368) | 1 |
+ * | every rider's upper body, rolled against it about the hips (#546) | 1 |
  * | every rider's crankset, which turns on its own axis (#349, #368) | 1 |
  * | every rider's four leg segments, as one instanced mesh (#349, #368) | 1 |
  * | every rider's contact shadow, as one instanced transparent mesh (#426) | 1 |
@@ -319,8 +323,16 @@ const RIDER_BOX_TOLERANCE = 0.02;
  * ⚠️ **7 → 8 with #425, deliberately**: the sky is a dome of vertex colours
  * where it was the scene's background colour, which costs a draw call and no
  * texture. The background is still set, underneath it.
+ *
+ * ⚠️ **8 → 9 with #546, deliberately — the riders' term is 4, not 3.** The
+ * owner ruled on 2026-09-25 that a rider's body stays more upright than the
+ * bicycle through a bend, with the combined lean still true to physics, and a
+ * body merged into the bicycle's vertices can only roll with it. So the upper
+ * body — arms, torso, helmet — is its own instanced mesh (`bicycle.ts`
+ * §`RIDER_UPPER_BODY_PARTS`), rolled about the hips: one call for all three
+ * riders, and a ghost still adds none.
  */
-const SCENE_DRAW_CALLS = 1 + 1 + 1 + 1 + 3 + 1;
+const SCENE_DRAW_CALLS = 1 + 1 + 1 + 1 + 4 + 1;
 
 /**
  * The most meshes the scenery belt may ever hold: **24**.
@@ -2054,6 +2066,33 @@ test.describe('the rider rides a line and leans on it — #499', () => {
     expect(Math.abs(roll)).toBeGreaterThan(0.01);
     expect(Math.sign(roll)).toBe(Math.sign(on.centre - 0.5));
   });
+
+  /**
+   * #546: on a straight the rider keeps to the RIGHT, where #499's line put
+   * them on the dashed centre line — the owner's 2026-09-25 tablet ride, in
+   * both worlds. Read off the screen rather than off `racing-line.ts`, because
+   * which side of the road the normal is on the SCREEN is a question of the
+   * renderer's handedness that no arithmetic in jsdom answers
+   * (`racing-line.ts` §`ROAD_SIDE`).
+   */
+  test('keeps to the right of the road on a straight, where the centreline rider is in its middle — #546', async ({
+    harnessRun,
+  }) => {
+    const { straightOn, straightOff } = (await harness(harnessRun)).line;
+    console.info(
+      `#546 on a straight: on the line, centred at ${(straightOn.centre * 100).toFixed(1)} % ` +
+        `of the width; on the centreline ${(straightOff.centre * 100).toFixed(1)} %`,
+    );
+    for (const each of [straightOn, straightOff]) {
+      expect(each.pixels).toBeGreaterThan(500);
+    }
+    // The control: the centreline rider, through the centreline's camera, is
+    // in the middle of the frame — which is where the road's centre line is.
+    // It would fail the assertion below, which is the defect #546 was filed on.
+    expect(Math.abs(straightOff.centre - 0.5)).toBeLessThan(0.02);
+    // The rider on the line: right of the middle, by a lane's worth.
+    expect(straightOn.centre - 0.5).toBeGreaterThan(0.08);
+  });
 });
 
 /**
@@ -2196,6 +2235,59 @@ test.describe('the realistic world — ADR 0026', () => {
     expect(measured.crankHeldPixels).toBe(0);
   });
 
+  test('draws the distant hills between the ground and the sky, converging on the sky, with no hard edge — #544', async ({
+    harnessRun,
+  }) => {
+    const measured = await realistic(harnessRun);
+    const describe = (each: HorizonReading): string =>
+      `${each.frame} ${String(each.offAxisDegrees)}°: sky ${each.sky.toFixed(4)}, ridge ` +
+      `${each.ridge.toFixed(4)}, ground ${each.ground.toFixed(4)}, share ${shareOf(each).toFixed(2)}, ` +
+      `crest ${crestContrast(each).toFixed(3)}:1, darkest above the relief ${each.darkestAboveRelief.toFixed(4)}`;
+    console.log(
+      `the distant hills — ${measured.horizon.map(describe).join('; ')} | control: ` +
+        `${measured.horizonControl.map(describe).join('; ')}`,
+    );
+    expect(measured.horizon.length).toBe(4);
+    expect(measured.horizonControl.length).toBe(4);
+    for (const each of measured.horizon) {
+      // A hill is darker than the sky it stands against and lighter than the
+      // ground it is made of…
+      expect(each.sky, describe(each)).toBeGreaterThan(each.ground);
+      // …and nearer the sky: "converges on the sky's".
+      expect(shareOf(each), describe(each)).toBeGreaterThan(CONVERGED_SHARE);
+      expect(shareOf(each), describe(each)).toBeLessThanOrEqual(1);
+      // No hard edge where the hill meets the sky.
+      expect(crestContrast(each), describe(each)).toBeLessThanOrEqual(MAXIMUM_CREST_CONTRAST);
+      // And above where the route's own relief would have put the crest there
+      // is hill or sky, never the photograph's field and treeline — which are
+      // darker than any lit ground in this world.
+      expect(each.darkestAboveRelief, describe(each)).toBeGreaterThan(each.ground);
+    }
+    // …and none where it meets the fog: the ring's foot IS the fog's colour.
+    expect(measured.horizonColours.foot).toEqual(measured.horizonColours.fog);
+    // The control's fog and foot are the stylised world's own horizon — what
+    // the owner saw — and not the photographed sky's.
+    expect(measured.horizonControlExpected.length).toBe(3);
+    expect(measured.horizonColoursControl.foot).toEqual(measured.horizonColoursControl.fog);
+    measured.horizonControlExpected.forEach((channel, index) =>
+      expect(measured.horizonColoursControl.fog[index]).toBeCloseTo(channel, 4),
+    );
+    expect(measured.horizonColoursControl.fog).not.toEqual(measured.horizonColours.fog);
+    // The control is today's pale band, and it must fail where the owner saw
+    // it fail: on the level, a ridge BRIGHTER than the sky behind it…
+    const control = (frame: string): HorizonReading[] =>
+      measured.horizonControl.filter((each) => each.frame === frame);
+    for (const each of control('level')) {
+      expect(shareOf(each), describe(each)).toBeGreaterThan(1);
+    }
+    // …and from the top of a descent, a pale ridge under the photograph's own
+    // field and treeline: a hard edge.
+    for (const each of control('descent')) {
+      expect(crestContrast(each), describe(each)).toBeGreaterThan(MAXIMUM_CREST_CONTRAST);
+      expect(each.darkestAboveRelief, describe(each)).toBeLessThan(each.ground);
+    }
+  });
+
   test('steps down to the stylised world whole, and publishes what realism costs', async ({
     harnessRun,
   }) => {
@@ -2218,3 +2310,39 @@ test.describe('the realistic world — ADR 0026', () => {
     );
   });
 });
+
+/**
+ * How far from the ground toward the sky a distant ridge must be drawn, as a
+ * share of the luminance between them: **more than 0.5**, so it is nearer the
+ * sky's — #544's "converges on the sky's". Measured 0.57 to 0.78 across the
+ * four columns on 2026-09-26, and 1.53 to 1.63 on the level in the control
+ * (brighter than the sky: the pale band).
+ */
+const CONVERGED_SHARE = 0.5;
+
+/**
+ * The most contrast there may be across a distant ridge's crest, as a WCAG 2.2
+ * ratio of the sky 4 to 9 pixels above it and the ridge 4 to 9 below: **1.35**
+ * — #544's "no hard straight edge", stated as a number. Measured 1.10 to 1.28
+ * on 2026-09-26, against 4.3 to 4.8 in the control from the top of a descent,
+ * where the pale ridge stood under the photograph's dark treeline. For scale,
+ * WCAG asks 3:1 of a boundary that must be SEEN; 1.35 is well under it.
+ */
+const MAXIMUM_CREST_CONTRAST = 1.35;
+
+/**
+ * Where a ridge's luminance lies between the ground's and the sky's behind it
+ * — #544: 0 is the ground's own, 1 the sky's, above 1 brighter than the sky.
+ */
+function shareOf(reading: HorizonReading): number {
+  return (reading.ridge - reading.ground) / (reading.sky - reading.ground);
+}
+
+/** The WCAG 2.2 contrast ratio across a ridge's crest. */
+function crestContrast(reading: HorizonReading): number {
+  const [light, dark] = [
+    Math.max(reading.sky, reading.ridge),
+    Math.min(reading.sky, reading.ridge),
+  ];
+  return (light + 0.05) / (dark + 0.05);
+}

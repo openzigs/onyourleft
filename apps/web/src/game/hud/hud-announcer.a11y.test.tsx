@@ -320,6 +320,7 @@ function trainerPort(hasControl: boolean): GameTrainerPort {
     readTrainer: () => gameTrainerFrom(snapshot, control, false),
     // #503: asked when the rider presses Ride, and grants nothing.
     askForControlOnRide: () => Promise.resolve(),
+    workoutRescue: () => undefined,
   };
 }
 

@@ -227,6 +227,50 @@ export function hairpinRoute(radius: number): RouteProfile {
 }
 
 /**
+ * A corner — #546: 400 m north, a bend of `radius` through `degrees` (90 by
+ * default) to the `hand` side (right by default), and 400 m on along the new
+ * heading, level all the way. #499's fixtures are 180° hairpins and S-bends; a single corner that
+ * is not a hairpin is the case where a racing line's radius has a closed form,
+ * `R = (b − a·cos(θ/2)) / (1 − cos(θ/2))`, for the line to be held to.
+ */
+export function cornerRoute(
+  radius: number,
+  degrees = 90,
+  hand: 'right' | 'left' = 'right',
+): RouteProfile {
+  const metresPerDegreeLongitude =
+    METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
+  const turn = (degrees * Math.PI) / 180;
+  // A left-hand corner is the right-hand one mirrored east for west.
+  const mirror = hand === 'right' ? 1 : -1;
+  const points: RoutePoint[] = [];
+  const push = (east: number, north: number): void => {
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(FIXTURE_LATITUDE + north / METRES_PER_DEGREE_LATITUDE),
+        degreesLongitude(-0.12 + (mirror * east) / metresPerDegreeLongitude),
+      ),
+      elevation: altitudeMetres(0),
+    });
+  };
+  for (let north = 0; north < 400; north += 10) {
+    push(0, north);
+  }
+  const steps = Math.max(6, Math.round((turn * radius) / 5));
+  // About a centre `radius` to the east — to the west, mirrored, for `left`.
+  for (let step = 0; step <= steps; step += 1) {
+    const angle = (step / steps) * turn;
+    push(radius * (1 - Math.cos(angle)), 400 + radius * Math.sin(angle));
+  }
+  const endEast = radius * (1 - Math.cos(turn));
+  const endNorth = 400 + radius * Math.sin(turn);
+  for (let along = 10; along <= 400; along += 10) {
+    push(endEast + along * Math.sin(turn), endNorth + along * Math.cos(turn));
+  }
+  return routeProfile(points);
+}
+
+/**
  * An S-bend — #499: 400 m north, a right-hand bend of `radius` through 90°, a
  * left-hand bend of the same radius back through 90°, and 400 m north again,
  * level all the way. The two bends meet with no straight between them, which

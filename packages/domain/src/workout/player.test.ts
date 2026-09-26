@@ -4,7 +4,14 @@ import { describe, expect, it } from 'vitest';
 
 import { revolutionsPerMinute, seconds, watts, type Seconds } from '../quantities';
 
-import { COLLAPSE_RPM, RELIEF_SHARE, TREND_WINDOW, type CadenceReading } from './erg-safety';
+import {
+  CADENCE_SILENT_REASON,
+  COLLAPSE_RPM,
+  RECOVERING_REASON,
+  RELIEF_SHARE,
+  TREND_WINDOW,
+  type CadenceReading,
+} from './erg-safety';
 import { createWorkoutPlayer, type PlayerIntent } from './player';
 import { expandWorkout } from './timeline';
 import { thresholdShare, type Workout, type WorkoutBlock } from './workout';
@@ -481,6 +488,87 @@ describe('the ERG spiral is broken by easing the target, not by ending the inter
         subject.tick(seconds(24 + TREND_WINDOW), { cadence: steady80(24 + TREND_WINDOW) }).intent,
       ),
     ).toBe(150);
+  });
+});
+
+describe('the rescue says why it is holding the target down, on every tick — #585', () => {
+  const stalledAt = (at: number): readonly CadenceReading[] => [
+    { at: seconds(at - 6), cadence: revolutionsPerMinute(30) },
+    { at: seconds(at), cadence: revolutionsPerMinute(4) },
+  ];
+
+  it('carries no rescue while the workout’s own target stands', () => {
+    const subject = player();
+    subject.start(seconds(0));
+    expect(subject.state().rescue).toBeUndefined();
+    expect(subject.tick(seconds(1)).rescue).toBeUndefined();
+  });
+
+  it('keeps the relief’s reason on the ticks that write nothing — the `hold` ticks', () => {
+    // The defect #585 is about: the intent is `write-target` for ONE tick and
+    // `hold` afterwards, and `hold` has no reason in it.
+    const subject = player();
+    subject.start(seconds(0));
+    const eased = subject.tick(seconds(10), { cadence: falling(70, 45, 10) });
+    expect(eased.rescue).toMatchObject({ kind: 'relief' });
+    const reason = eased.rescue?.reason;
+    expect(reason).toBeDefined();
+    subject.acknowledge(watts(wroteWatts(eased.intent)));
+    const holding = subject.tick(seconds(11), { cadence: falling(70, 45, 11) });
+    expect(holding.intent.kind).toBe('hold');
+    expect(holding.rescue).toEqual(eased.rescue);
+    // …and while a write is still outstanding, too.
+    const other = player();
+    other.start(seconds(0));
+    other.tick(seconds(10), { cadence: falling(70, 45, 10) });
+    const pending = other.tick(seconds(11), { cadence: falling(70, 45, 11) });
+    expect(pending.pending).toBeDefined();
+    expect(pending.rescue?.reason).toBe(reason);
+  });
+
+  it('says the stall at the floor, and the silent sensor once the cadence goes quiet', () => {
+    const subject = player();
+    subject.start(seconds(0));
+    const stalled = subject.tick(seconds(10), { cadence: stalledAt(10) });
+    expect(stalled.rescue).toMatchObject({ kind: 'floor' });
+    expect(stalled.rescue?.reason).toBe(stalled.intent.kind === 'release' && stalled.intent.reason);
+    // Every reading ages out of the window: the sensor has gone quiet.
+    const silent = subject.tick(seconds(10 + TREND_WINDOW + 1), { cadence: stalledAt(10) });
+    expect(silent.rescue).toEqual({ kind: 'floor', reason: CADENCE_SILENT_REASON });
+  });
+
+  it('says it is recovering, and then clears once cadence has held for a whole window', () => {
+    const subject = player();
+    subject.start(seconds(0));
+    const eased = subject.tick(seconds(10), { cadence: falling(70, 45, 10) });
+    subject.acknowledge(watts(wroteWatts(eased.intent)));
+    const steady80 = (at: number): readonly CadenceReading[] => [
+      { at: seconds(at - 1), cadence: revolutionsPerMinute(80) },
+      { at: seconds(at), cadence: revolutionsPerMinute(80) },
+    ];
+    expect(subject.tick(seconds(20), { cadence: steady80(20) }).rescue).toEqual({
+      kind: 'relief',
+      share: RELIEF_SHARE,
+      reason: RECOVERING_REASON,
+    });
+    const back = subject.tick(seconds(20 + TREND_WINDOW), { cadence: steady80(20 + TREND_WINDOW) });
+    expect(back.intent).toMatchObject({ eased: false });
+    expect(back.rescue).toBeUndefined();
+  });
+
+  it('is cleared by a pause, a lost link, a free-ride block, the end and a new start', () => {
+    const eased = () => {
+      const subject = player(expandWorkout(workout([steady(20, 0.6), freeRide(20)])));
+      subject.start(seconds(0));
+      expect(subject.tick(seconds(10), { cadence: stalledAt(10) }).rescue).toBeDefined();
+      return subject;
+    };
+    expect(eased().pause(seconds(11)).rescue).toBeUndefined();
+    expect(eased().linkLost(seconds(11)).rescue).toBeUndefined();
+    expect(eased().stop().rescue).toBeUndefined();
+    expect(eased().start(seconds(50)).rescue).toBeUndefined();
+    expect(eased().tick(seconds(25), { cadence: stalledAt(25) }).rescue).toBeUndefined();
+    expect(eased().tick(seconds(45), { cadence: stalledAt(45) }).rescue).toBeUndefined();
   });
 });
 

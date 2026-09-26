@@ -65,6 +65,7 @@ import {
   type UnixSeconds,
   type Watts,
   type WorkoutBlock,
+  type WorkoutRescue,
 } from '@onyourleft/domain';
 import {
   isSensorError,
@@ -110,6 +111,7 @@ import type { RideKeepAlivePort } from './keep-alive-port';
 import type { RideNotificationPermissionPort } from './notification-permission-port';
 import { NO_TRAINER_CONTROL, type OpenTrainer, type TrainerConnection } from './trainer';
 import { createWorkoutSession, RELEASE_INCOMPLETE, type WorkoutSession } from '../workout/session';
+import { createManualErg, type ManualErg, type ManualErgRescue } from './manual-erg';
 import { blockText } from '../workouts/library';
 
 /** Which channel each metric on the screen reads from. */
@@ -232,6 +234,14 @@ export interface TrainerSnapshot {
   readonly releaseFault: string | undefined;
   /** Why the last setpoint was refused, for a screen that says more than "failed". */
   readonly refusal: string | undefined;
+  /**
+   * A hand-set ERG target that the stall rescue has eased — #567. `undefined`
+   * while the rider's own target is what is being asked for, and whenever no
+   * hand-set target is in force. ⚠️ {@link target} is still what the machine
+   * CONFIRMED, which during a rescue is the eased number; this is the other
+   * half — what the rider asked for, and why it is not on the machine.
+   */
+  readonly ergRescue: ManualErgRescue | undefined;
 }
 
 /** A metric and what the screen may say about it. */
@@ -276,6 +286,12 @@ export interface RideWorkoutSnapshot {
   readonly nowRiding: string | undefined;
   /** Why the last workout write could not be made, if any. */
   readonly fault: string | undefined;
+  /**
+   * The stall rescue holding the workout's target down, with its reason — or
+   * `undefined` while the workout's own target stands (#585). The player's
+   * `PlayerState.rescue`, unchanged; `workout/rescue-text.ts` is the sentence.
+   */
+  readonly rescue: WorkoutRescue | undefined;
   /**
    * The plan itself, so a screen can look AHEAD in it — #398. The same
    * timeline the session plays; `segmentAt(timeline, elapsed + lead)` is the
@@ -693,6 +709,12 @@ export function createRideController(options: RideControllerOptions): RideContro
   let workout: WorkoutInProgress | undefined;
   let refusal: string | undefined;
   let releaseFault: string | undefined;
+  /**
+   * The hand-set ERG target and its stall rescue (#567), with the control it
+   * was built on — a re-paired trainer is a different control, and a writer
+   * over the old one would write to nothing.
+   */
+  let manual: { readonly client: TrainerControl; readonly erg: ManualErg } | undefined;
   /** The release on the wire, if one is. @see releaseTrainer */
   let releasing: Promise<TrainerRelease> | undefined;
   let clock: UnixSeconds = now();
@@ -841,6 +863,36 @@ export function createRideController(options: RideControllerOptions): RideContro
   const control = (): TrainerControl | undefined => trainerEntry()?.trainer?.control;
 
   /**
+   * Stop the hand-set target's writer, for good — #567. Writes nothing: the
+   * machine is left to whatever comes next, which is a release, a workout, the
+   * game's gradient, or a control point that has already been lost.
+   */
+  const endManualErg = (): void => {
+    manual?.erg.close();
+    manual = undefined;
+  };
+
+  /** The hand-set target's writer over this control, built on first use. */
+  const manualErgFor = (client: TrainerControl, connection: TrainerConnection): ManualErg => {
+    if (manual?.client !== client) {
+      endManualErg();
+      manual = {
+        client,
+        erg: createManualErg({
+          control: client,
+          // #441: what an ease writes — the machine's own reported minimum.
+          powerFloor: connection.powerRange.minimum,
+          onFault: (error) => {
+            refusal = describe(error);
+          },
+          onChange: changed,
+        }),
+      };
+    }
+    return manual.erg;
+  };
+
+  /**
    * Let the trainer go — **the one release in the client** (#372).
    *
    * Every path that ends a ride, a workout, manual ERG or a game ride reaches
@@ -862,6 +914,10 @@ export function createRideController(options: RideControllerOptions): RideContro
    * control after this either: rule 2 at the top of the file.
    */
   const releaseTrainer = (client: TrainerControl): Promise<TrainerRelease> => {
+    // A release ends a hand-set target too, and its rescue with it (#567): a
+    // stall rescue writing a 0x05 after the Stop would be taking the machine
+    // back into ERG after the rider was told it had been let go.
+    endManualErg();
     if (releasing !== undefined) {
       return releasing;
     }
@@ -943,6 +999,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         lost: controlLost,
         refusal,
         releaseFault,
+        ergRescue: manual?.erg.rescue(),
       },
       storage: recorder?.storageState ?? 'ok',
       saveState,
@@ -1008,10 +1065,10 @@ export function createRideController(options: RideControllerOptions): RideContro
     // a target off a reading the recorder never saw would be deciding from a
     // stream nothing else can audit.
     if (measurement.capability === 'cadence') {
-      workout?.session.observeCadence({
-        at: seconds(measurement.at),
-        cadence: measurement.cadence,
-      });
+      const reading = { at: seconds(measurement.at), cadence: measurement.cadence };
+      workout?.session.observeCadence(reading);
+      // #567: a hand-set target gets the same rule, from the same stream.
+      manual?.erg.observeCadence(reading);
     }
     // The reading is what wakes an automatic pause, so the phase moves with it
     // rather than on the next tick: for that second the screen would otherwise
@@ -1097,6 +1154,9 @@ export function createRideController(options: RideControllerOptions): RideContro
             // `now()` for `startWorkout`'s reason: a control-loss indication
             // arrives between ticks, so the cached clock is behind it.
             workout?.session.linkLost(rideSeconds(now()));
+            // #567: a hand-set target ends with control. Its rescue would only
+            // be refused, and the rider sets a target again once control is back.
+            endManualErg();
             // The requested setpoint is dropped rather than left pending: the
             // procedure it belonged to has been rejected, and a screen still
             // saying "requested 250 W" would be waiting for an answer that
@@ -1112,6 +1172,9 @@ export function createRideController(options: RideControllerOptions): RideContro
   const detach = (entry: SensorEntry): void => {
     for (const release of entry.release.splice(0)) {
       release();
+    }
+    if (manual !== undefined && manual.client === entry.trainer?.control) {
+      endManualErg();
     }
     entry.trainer?.control.close();
     entry.trainer = undefined;
@@ -1300,6 +1363,7 @@ export function createRideController(options: RideControllerOptions): RideContro
           ? undefined
           : blockText(workout.record.workout.blocks[segment.block] ?? EMPTY_BLOCK),
       fault: state.lastFault,
+      rescue: state.player.rescue,
     };
   };
 
@@ -1609,6 +1673,9 @@ export function createRideController(options: RideControllerOptions): RideContro
         return false;
       }
       endWorkoutSession('replace');
+      // #567: the workout owns the target from here. A hand-set target's rescue
+      // left running would be a second writer on one control point.
+      endManualErg();
       const timeline = expandWorkout(record.workout);
       const session = createWorkoutSession({
         timeline,
@@ -1672,13 +1739,23 @@ export function createRideController(options: RideControllerOptions): RideContro
         changed();
         return;
       }
+      const connection = trainerEntry()?.trainer;
+      if (connection === undefined) {
+        return;
+      }
       requested = target;
       refusal = undefined;
       changed();
       try {
-        await client.setTargetPower(target);
-      } catch (error) {
-        refusal = describe(error);
+        // #567: through the hand-set target's own ERG writer, so its stall
+        // rescue and the rider's target are serialised on one control point.
+        // During a rescue the target is `deferred` rather than written — the
+        // rescue is the only writer while it lasts (PR #582's third review) —
+        // and `ergRescue.pending` is what the screen says about it.
+        const outcome = await manualErgFor(client, connection).set(target);
+        if (outcome.kind === 'failed') {
+          refusal = describe(outcome.error);
+        }
       } finally {
         // Cleared whichever way it went. On success the client's own
         // `targetPower()` is now `confirmed` and is what the screen reads; on
@@ -1702,7 +1779,12 @@ export function createRideController(options: RideControllerOptions): RideContro
         return undefined;
       }
       return {
-        setSimulationParameters: (parameters) => client.setSimulationParameters(parameters),
+        setSimulationParameters: (parameters) => {
+          // #567: a gradient takes the machine out of ERG, so a hand-set
+          // target's rescue writing a 0x05 under a game ride would put it back.
+          endManualErg();
+          return client.setSimulationParameters(parameters);
+        },
         letGo: () => releaseTrainer(client),
       };
     },
@@ -1712,6 +1794,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       // sends the release; `stopTrainer` then joins that Stop rather than
       // sending a second one. @see RideController.clearTargetPower
       endWorkoutSession();
+      // #567: the hand-set target's rescue ends in `releaseTrainer`.
       await stopTrainer();
       changed();
     },
@@ -1740,6 +1823,11 @@ export function createRideController(options: RideControllerOptions): RideContro
         }
         workoutTick(at);
       }
+      // #567: a hand-set target is judged whatever the ride is doing — a rider
+      // can hold ERG without recording, and a paused ride is exactly when
+      // somebody stops pedalling. No control check here: losing control, a
+      // release and an unpair each end the hand-set target where they happen.
+      manual?.erg.tick(rideSeconds(at));
       // Unconditionally: staleness is a function of the clock, so a channel
       // goes quiet on the tick whether or not anything is recording.
       changed();

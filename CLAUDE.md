@@ -94,7 +94,13 @@ apps/                 AGPL-3.0-or-later, without exception
                         ⚠️ Since #530 it also holds `pose/` — the side
                         camera's pose model, Apache-2.0, excluded from the
                         precache by that directory too, with its runtime and
-                        worker emitted beside it by `tools/pose/`
+                        worker emitted beside it by `tools/pose/`. ⚠️ Since
+                        #597 it also holds `licences/Apache-2.0.txt` — a byte
+                        copy of `LICENSES/Apache-2.0.txt`, which the credits
+                        screen links from every Apache-2.0 credit (the map's
+                        glyphs, the pose model) because §4(a) asks for the
+                        text to travel with the work; `credits.test.ts` holds
+                        the bytes equal
     tools/pose/         the pose model's WebAssembly runtime, copied out of
                         the pinned `@mediapipe/tasks-vision` into `dist/pose/`
                         and served from there in development (#530) — never
@@ -106,6 +112,14 @@ apps/                 AGPL-3.0-or-later, without exception
                         first `.py` in the tree, which is why LIC001/LIC002 scan
                         `.py` now. ⚠️ Blender is a TOOL: nothing in CI runs it,
                         and a version other than the pinned 4.4.3 is refused
+    tools/glyphs/       the map's label glyphs (#578) — a committed Roboto
+                        v2.138, the LAST Apache-2.0 Roboto (v3 is OFL, which no
+                        list here admits), and the reader, the signed-distance
+                        rasteriser and the range-file writer that turn it into
+                        `public/glyphs/Roboto-Regular/`. Plain arithmetic on the
+                        pinned Node, so `generate-glyphs.test.ts` regenerates
+                        every range byte for byte inside `pnpm run test`.
+                        ⚠️ A newer Roboto is a licence change, not an upgrade
     tools/precache/     what the worker precaches, as a pure function over the
                         build's output (#406) — build-time code, so it lives
                         beside the icon generator rather than in `src/`
@@ -155,7 +169,15 @@ apps/                 AGPL-3.0-or-later, without exception
                         ⚠️ `no-absolute-angles.test.ts` beside them is a gate
                         over ALL of `src/`: a degree sign, the word, a
                         `'degree'` formatter or a frontal-plane word in any
-                        rendered string is a red build (ADR 0030 D-8)
+                        rendered string is a red build (ADR 0030 D-8). Since
+                        #564 it matches with invisible characters removed
+                        (soft hyphen, zero-width space/joiners, word joiner),
+                        reads a JSX element's text WHOLE as well as node by
+                        node, and narrows `inversion`, level shoulders and
+                        lateral movement to a body; and every report sentence
+                        is held under the store's `MAXIMUM_SIDE_REPORT_SENTENCE`
+                        by a test, because one past it is refused on save and
+                        the keeper drops the report without a word
     src/efforts/        the effort-history screen's reads and its stub (#67) — the
                         read budget, and where a sample index comes from
     src/detail/         the ride detail view's data layer (#50) — the read budget, the
@@ -174,7 +196,12 @@ apps/                 AGPL-3.0-or-later, without exception
     src/map/            the ride map (#63) — the basemap configuration and the proof
                         it reaches no other origin, the GeoJSON conversion, the
                         once-per-application protocol registration, and the one
-                        file that names MapLibre
+                        file that names MapLibre. Since #578 it labels places
+                        and road names from glyphs the app ships, at a RELATIVE
+                        `glyphs` URL so they add no origin. ⚠️ MapLibre 6.10
+                        draws text in the device's font when a range cannot be
+                        fetched, so a label painting proves nothing about the
+                        glyphs — the browser gate asserts the requests
     src/recording/      the recorder: engine + durable checkpoints + recovery (#46),
                         and since #14's fourth criterion the step that turns a
                         finished recording into an activity — the write order,
@@ -298,7 +325,14 @@ apps/                 AGPL-3.0-or-later, without exception
     src/views/          one component per route (#48)
     src/workout/        the workout control loop (#14) — the one place the
                         player's decisions meet a trainer's control point,
-                        driven end to end against the #44 simulator
+                        driven end to end against the #44 simulator; and
+                        since #585 `rescue-text.ts`, the ONE sentence both
+                        screens show and say while a stall rescue holds a
+                        workout's target down. ⚠️ On a phone the game's
+                        "Eased" notice takes the notice cell from the road
+                        notice while the rescue holds (`GameView.tsx`
+                        §`roadNotice`); `ride.html?rescue=floor` is the
+                        browser gate that measures it
     src/workouts/       the workout library and builder (#14) — the read
                         budget, the row model that quotes no watts, the one
                         place a typed percentage becomes a share, and since
@@ -342,7 +376,21 @@ apps/                 AGPL-3.0-or-later, without exception
                         that puts each foot on its own pedal, and the one rule
                         that decides whether the RIDER's cranks turn: they turn
                         exactly when the HUD shows a cadence number, at exactly
-                        that number. ⚠️ It names no model, no pack and no licence —
+                        that number. ⚠️ **Since #546 that rule has ONE exception,
+                        the owner's, and a reviewer who remembers it without one
+                        is reading the old file**: in a bend tight enough that
+                        the inside pedal would strike the road (about 31° of
+                        BICYCLE lean, computed from this file's own pedal —
+                        `PEDAL_STRIKE_LEAN_RADIANS`), every rider's cranks, the
+                        rider's own included, are DRAWN parked with the outside
+                        pedal down (`drawnCrankAngle`). The HUD and
+                        `advanceCrank` are unchanged, and the cranks come back
+                        to the integrated angle after the bend. ⚠️ And since
+                        #546 the body is not merged into the bicycle: the upper
+                        body is its own mesh, held back toward upright about the
+                        hips (`bicycleRoll`), so the BICYCLE leans a few per cent
+                        more than `tan φ = v²/(g·R)` and the pair's centre of
+                        mass leans exactly that. ⚠️ It names no model, no pack and no licence —
                         `ASSETS.toml` gains no row, and ADR 0022 D-1's "one CC0
                         source" is untouched, because there is no CC0 rigged
                         cyclist to download and a pedalling clip would have had
@@ -373,7 +421,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         ⚠️ The stylised world's budget is DRAW CALLS rather
                         than triangles (#240 NFR-2), and the bar leaves that
                         at six; the realistic world's is triangles, and the
-                        bar costs 96 of its 12 000.
+                        bar costs 96 of its 12 000. ⚠️ **#546 spent one**: the
+                        riders are FOUR instanced meshes since then, not three,
+                        because the upper body rolls against the bicycle —
+                        `game.browser.spec.ts` §`SCENE_DRAW_CALLS` is 9.
                         ⚠️ **Since #368 the bot and the ghost
                         DO get one, and a reviewer who remembers "the bot and
                         the ghost deliberately do NOT get one: three
@@ -406,7 +457,18 @@ apps/                 AGPL-3.0-or-later, without exception
                         elastic band) cuts inside and comes out more curved than
                         the centreline. `scene.ts` §`lateralOf` is where two
                         level riders are kept apart, and the camera follows the
-                        rider across the road without rolling
+                        rider across the road without rolling. ⚠️ **Since #546
+                        a straight is ridden on the RIGHT, not on the centre
+                        line**, and a reviewer who remembers the line settling
+                        to offset nought is reading the old file: the owner
+                        ruled a CLOSED road (the whole width through a bend), the
+                        right-hand side "for now" (`ROAD_SIDE`, one constant,
+                        and the road's normal is the SCREEN's right — the
+                        corridor is a mirror of the map in a right-handed
+                        renderer, which the browser gate reads back), a LATE
+                        apex (`LATE_APEX_GAIN`), and a roll rate bounded per
+                        SECOND as well as per metre (60°/s). `leanAt` is the
+                        COMBINED lean; `bicycle.ts` §`bicycleRoll` splits it
     src/game/contact-shadow.ts
                         where each rider's contact shadow lies (#426) — thrown
                         from `world.ts`'s ONE sun, never a second light
@@ -1337,6 +1399,14 @@ pnpm --filter @onyourleft/web run realistic:fetch
 pnpm --filter @onyourleft/web run realistic:process --check
 pnpm --filter @onyourleft/web run realistic:stage
 
+# Regenerate the map's label glyphs (#578) from the committed Roboto v2.138.
+# Deterministic, and `--check` writes nothing and fails unless every committed
+# range is what it would write. The ordinary suite makes the same comparison
+# (`tools/glyphs/generate-glyphs.test.ts`), so this is for after changing the
+# generator or the ranges — then update the six ASSETS.toml digests with it.
+pnpm --filter @onyourleft/web run glyphs:generate
+pnpm --filter @onyourleft/web run glyphs:generate --check
+
 # Regenerate the #29 synthetic FIT fixture corpus from its generator. It is
 # DETERMINISTIC: running it on a clean tree leaves `git status` clean, which is
 # what makes a corpus that is committed and generated the same corpus. It writes
@@ -2016,13 +2086,13 @@ browser runs**.
 | `hosted-archive.ts` | what that third block decides **without** a network: which archive, which origins it may then reach, and where to put the ride inside whatever coverage the archive's own header declares. Pure, with `hosted-archive.test.ts` beside it in the Vitest suite — which is the answer to "a skipped block rots unseen" |
 | `pmtiles-fixture.ts` | a PMTiles v3 archive written from arithmetic, so the gate has a basemap to render. Emitted into `browser/dist` by `vite.browser.config.ts`, never committed, and carrying no OpenStreetMap data. ⚠️ It used to be the **only** file here with a Vitest test beside it; `hosted-archive.ts` is the second, and `apps/web/vitest.config.ts`'s `browser/**/*.test.ts` covers both |
 | `game.html`, `game-harness.ts` | since #91, the same idea for the renderer: a page that builds a scene through the **real** `game/three-renderer.ts` and the **real** `terrain.ts` |
-| `game.browser.spec.ts` | its spec — the renderer constructs against a live context, the geometry is one a driver accepts, and a frame reaches the drawing buffer (read back with `readPixels`, because `render` not throwing is a weaker claim). ⚠️ Since #430's pull request it also has §"the realistic world", on **one** extra load, `game.html?realistic`: the D-7 fallback, D-11 over a live scene, the one-call road, the gradient tint's contrast read off the drawing buffer **after the light and AgX**, the realistic rider's legs against the cranks, and the step down — and that the DEFAULT load fetches none of the realistic set. Since #499 it also reads the rider back off-centre and ROLLED at a 20 m hairpin's apex, through the centreline's camera held still, with the same rider drawn upright at the same place and the centreline rider as its two controls (`game-harness.ts` §`lineProbe`) |
+| `game.browser.spec.ts` | its spec — the renderer constructs against a live context, the geometry is one a driver accepts, and a frame reaches the drawing buffer (read back with `readPixels`, because `render` not throwing is a weaker claim). ⚠️ Since #430's pull request it also has §"the realistic world", on **one** extra load, `game.html?realistic`: the D-7 fallback, D-11 over a live scene, the one-call road, the gradient tint's contrast read off the drawing buffer **after the light and AgX**, the realistic rider's legs against the cranks, and the step down — and that the DEFAULT load fetches none of the realistic set. Since #499 it also reads the rider back off-centre and ROLLED at a 20 m hairpin's apex, through the centreline's camera held still, with the same rider drawn upright at the same place and the centreline rider as its two controls (`game-harness.ts` §`lineProbe`). Since #546 it also reads the rider on a STRAIGHT right of the frame's middle, with the centreline rider — #499's straight — as the control that must fail. ⚠️ **Since #546 the harness's `inTheFrame` and `onTheRoad` take the screen's right as the road's normal `(−headingZ, headingX)`** — they took `(headingZ, −headingX)`, the screen's LEFT, and every probe was symmetric about a camera on the centreline, so nothing noticed until #546 moved the camera 1.75 m right with the rider |
 | `hud.html`, `hud-harness.tsx` | since #266, the ride HUD: the **real** `game/hud/HudPanel.tsx` under the **real** `design/theme.css`, on the **real** stage `GameView` gives it, with every field populated and all three of #259's settled outcome words. ⚠️ **Until #423 that was the `oyl-shell` → `oyl-main` → `oyl-game` chain, and a reviewer who remembers it is reading the old file**: the HUD is laid over a `position: fixed` stage now, so its containing block is the viewport whatever is above it, and the old chain would have gone on measuring a stacked layout a rider only gets at 320×256. One thing on this page is the harness's own and it says so: each stage is `position: relative` and `100vh` tall, because six fixed stages are six panels on top of one another. A **`.tsx`**, and the first React in this directory |
 | `hud.browser.spec.ts` | its spec — no `.oyl-hud__value` overflows its grid track at a phone in either orientation, at **360 px** (where #423's first layout ran the third primary reading off the screen) and at a landscape tablet, read back from the browser's own layout. Its **control panels** are the half that makes a green run mean something; ⚠️ since #423 the control moves the words into the primary list as well as stripping #259's class, because every word is a secondary reading now and at 1.5 rem it would spill by under three pixels, which is not a control |
 | `shell.html`, `shell-harness.tsx` | since #307's review, the app **shell**: the **real** `shell/AppShell.tsx` with the **real** `ROUTES` table under the **real** `design/theme.css`. The second `.tsx` here. ⚠️ Its spacer goes **inside `.oyl-main`** and the file says why at length — after `.oyl-shell` the header scrolls out of its own sticky containing block and measures 0 px, and inside `.oyl-shell` `main` stays shorter than the viewport so a focus scroll never consults `scroll-margin-top`. Each mistake made a different assertion pass over nothing. ⚠️ Since #316 it also renders the **real** `design/Button.tsx` in both variants, with `RideView`'s own labels, because a shell handed no ports renders **zero** controls on all eleven routes and a size assertion over an empty list passes |
 | `shell.browser.spec.ts` | its spec — how much of the viewport persistent chrome still covers after a scroll, where a fragment jump lands the `h1`, whether the focused skip link is the topmost thing at its own centre (hit-tested, not read off a `z-index`), and no horizontal scrolling at 320 px. ⚠️ Since #316 it also measures the **touch target** three ways, and the three fail for different reasons — see below ⚠️ **Since #427 `PERSISTENT_CHROME_BUDGET` is an AREA** — the header and the navigation bar or rail together — and the spec also measures the bar/rail switch and each destination's 44×44 target the three ways #316 measures a button |
 | `offline.browser.spec.ts` | since #408, the offline claim — against **`apps/web/dist`**, in a **persistent** context closed and reopened, with **two controls**. The only spec here that does not drive a harness page, and the first use of `setOffline` in this repository |
-| `ride.html`, `ride-harness.tsx` | since [#373](https://github.com/openzigs/onyourleft/issues/373), the trainer game's ride, and since [#423](https://github.com/openzigs/onyourleft/issues/423) its **stage**. ⚠️ **It RIDES now, and a reviewer who remembers it rendering `<HudPanel>` by hand is reading the old file**: the real `AppShell` at the real game route is handed a game port, and the page ticks the picker's own checkboxes and presses its own *Ride* — so a `GameView` that stopped putting `oyl-game--riding` on its root, or a shell that stopped listening, fails here rather than passing over a fixture that still does both. The fixture is the WIDEST ride the picker can start (a pacer, a ghost and a wind). It renders **no WebGL**. `?trainer=workout` is the same ride with the longest standing notice there is |
+| `ride.html`, `ride-harness.tsx` | since [#373](https://github.com/openzigs/onyourleft/issues/373), the trainer game's ride, and since [#423](https://github.com/openzigs/onyourleft/issues/423) its **stage**. ⚠️ **It RIDES now, and a reviewer who remembers it rendering `<HudPanel>` by hand is reading the old file**: the real `AppShell` at the real game route is handed a game port, and the page ticks the picker's own checkboxes and presses its own *Ride* — so a `GameView` that stopped putting `oyl-game--riding` on its root, or a shell that stopped listening, fails here rather than passing over a fixture that still does both. The fixture is the WIDEST ride the picker can start (a pacer, a ghost and a wind). It renders **no WebGL**. `?trainer=workout` is the same ride with the longest standing notice there is. Since #551, `?side=filming` and `?side=lost` are the same ride with a tripod phone paired, through the scripted pairing the unit tests use |
 | `ride.browser.spec.ts` | its spec — at **nine overlay viewports, a landscape tablet among them, which no gate had ever measured** (eight until #512): the world fills the viewport, the chrome is absent, every reading and control is on screen at `scrollY === 0` and hit-tested uncovered, no panel is over another or over the RIDER (`game/camera.ts` §`riderFrameBox`), and a safe-area inset moves every panel. ⚠️ **Since #512 the rider's box is the LEANING one at every overlay viewport** — `riderFrameBox(aspect, MAXIMUM_LEAN_RADIANS)`, a reviewer who remembers 736×360 carrying a `leaningRiderCovered` flag and a pinned "#512 is still open" case is reading the old file. The owner chose to resize the panels rather than move #499's camera: `theme.css` §"A SHORT corners layout" caps the bottom row and a standing notice at 16 rem, with the arithmetic (a leaning box's half-width is about 0.19 × the viewport's HEIGHT, so the layout's tallest viewport, 736×480, is the tightest and is now measured — 12 px clear). ⚠️ **#373 called landscape solved and it was not**: it moved the trainer line into a panel that was itself 572 px tall in a 390 px viewport (#419), confirmed on hardware in #422. ⚠️ Its **control** takes `oyl-game--riding` off the live element and requires *End ride* to fall below the fold again; without it every assertion here is true of a page that rendered nothing. The case that asserted #419's premise — *"the HUD panel is taller than a landscape phone viewport"* — is **removed**, as that issue asked, rather than loosened |
 | `rideview.html`, `rideview-harness.tsx` | since [#422](https://github.com/openzigs/onyourleft/issues/422), the **Ride SCREEN** — `views/RideView.tsx` at `#/`, which is not the game. On the owner's tablet in landscape a prose reading measure cut it off at the ride controls with `WorkoutPanel` below the fold, and a rider testing whether ERG releases (#372) started a plain recording instead: **a layout defect produced a false answer to a safety question.** The fixture is the screen at its fullest — control granted, a saved workout, a threshold — because the control the owner could not see only renders then |
 | `rideview.browser.spec.ts` | its spec — every ride control on screen with no scrolling at 1280×800 and 1024×768, the trainer BESIDE the live metrics, and nothing wider than a phone. Its control puts the measure and the single column back and requires the workout to be below the fold again, which is the defect itself. ⚠️ **Since #436's review it also measures at 1280×720 and 1024×720, and a reviewer who remembers two tablet viewports is reading the old file**: 1280×800 is the tablet's *display*, the Android shell configures no fullscreen mode, and the WebView is shorter by the system bars — at 728 px *Pause* / *Stop* were below the fold behind a green gate. ⚠️ **720 was assumed, and was the wrong mechanism — since #439 `TABLET_IN_THE_SHELL` is 1280×800 with edge-to-edge insets 36/32, read off the device, and applied to the ENGINE through `browser/insets.ts`** (`Emulation.setSafeAreaInsetsOverride`, so `env()` itself reports them): at API 35+ the bars are drawn over the WebView rather than taken off it, and the fold is `height − bottom inset`. The upright insets are the landscape ones reused, and say so. Every tablet case now **publishes its margin to the fold** and holds it to a 50 px floor rather than to zero, because a control that clears by 3 px in this Chromium's fonts has not been shown to clear anywhere else. **The rule it leaves behind: a browser-gate "device" viewport is the display's CSS size, not the WebView's — report the margin, and treat one under about 50 px as unproven on that device** |
@@ -2113,7 +2183,9 @@ come back tomorrow with no network" expressible.
 indistinguishable from `setOffline(true)` not taking effect, from the page coming out of Chromium's
 own HTTP cache, from an empty page that "loaded", and from the harness serving a different build.
 So (1) a resource deliberately outside the precache must **fail** in the same run — a `fetch()` and
-not a navigation, because the worker serves the precached shell for *every* navigation — and (2)
+not a navigation, because the worker serves the precached shell for every navigation to a path
+it has not precached (⚠️ since #597 a navigation to a precached FILE is served that file, which is
+what lets the credits screen's link to the shipped Apache-2.0 text open as the text) — and (2)
 every offline response must report `fromServiceWorker`. Measured both ways round: deleting
 `setOffline(true)` turns the control red by **succeeding**, and making the worker answer nothing
 turns the two serving assertions red while leaving the control's expectation untouched.
@@ -3456,6 +3528,9 @@ top of an issue **supersedes its body**.
 | Why a GPL dependency may be built with and never shipped by an app | [ADR 0025](docs/adr/0025-app-store-additional-permission.md) D-5, `scripts/check-dependency-licences.mjs` §`storeShipped`, §4g |
 | Why the About screen links to the source, and why that link is a condition rather than a courtesy | `apps/web/src/privacy/policy.ts` §`SOURCE_CODE_URL`, [ADR 0025](docs/adr/0025-app-store-additional-permission.md) D-7 |
 | What a contribution under `apps/` is licensed under, exactly | [`CONTRIBUTING.md`](CONTRIBUTING.md) §"Licensing of contributions", [ADR 0025](docs/adr/0025-app-store-additional-permission.md) D-6 |
+| Which font the map's labels are set in, why that release and no newer one, and how its glyphs are made | `apps/web/tools/glyphs/font-source.ts`, `apps/web/tools/glyphs/sdf.ts`, [#578](https://github.com/openzigs/onyourleft/issues/578) |
+| Why a label painting on the map proves nothing about the app's glyphs, and what the gate asserts instead | `apps/web/browser/map.browser.spec.ts` §"place names", `apps/web/src/map/basemap.ts` §`GLYPHS_URL` |
+| Why the label glyphs are precached when the tiles under them are not | `apps/web/tools/precache/precache.ts` §`PRECACHE_EXCLUSIONS` |
 | Where the basemap URL is configured, what a build with nothing set draws, and how to turn the map off | `apps/web/src/map/basemap.ts` §`PUBLISHED_BASEMAP_URL`, `.env.example` §`VITE_BASEMAP_PMTILES_URL`, [#534](https://github.com/openzigs/onyourleft/issues/534) |
 | How a rider turns map tiles off, why that is a style with no source rather than a hidden layer, and what proves "off" contacts nothing | `apps/web/src/map/tiles-preference.ts`, `apps/web/src/map/basemap.ts` §`basemapStyle`, `apps/web/browser/map.browser.spec.ts` §"with map tiles turned off" |
 | Why a published basemap archive must never be deleted while a shipped build names it, and what a release re-checks about its host | `apps/web/src/map/basemap.ts` §`PUBLISHED_BASEMAP_URL`, [`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §8 "Before every release tag" |
@@ -3517,6 +3592,7 @@ top of an issue **supersedes its body**.
 | Whether a LIVE race between riders is inside the claims ADR 0007 read, and the one limitation carrying the whole distance | [`docs/spikes/0005-live-racing-patent-read.md`](docs/spikes/0005-live-racing-patent-read.md) §3.1, §6, [#466](https://github.com/openzigs/onyourleft/issues/466) |
 | Why ADR 0007 D4's ghost line does not answer the live-racing question, and what does | [ADR 0007](docs/adr/0007-patent-posture.md) D4, D5, [`docs/spikes/0005-live-racing-patent-read.md`](docs/spikes/0005-live-racing-patent-read.md) §6 |
 | What one 50-rider race room actually costs in CPU, memory and bandwidth, and what the number does NOT include | [`docs/spikes/0007-race-room-under-workerd.md`](docs/spikes/0007-race-room-under-workerd.md), [#464](https://github.com/openzigs/onyourleft/issues/464) |
+| How many race rooms one `workerd` process carries, why a four-core box needs four of them, and why compression decides how many riders fit in memory | [`docs/spikes/0013-race-rooms-on-a-small-linux-box.md`](docs/spikes/0013-race-rooms-on-a-small-linux-box.md) §4, §5, [#464](https://github.com/openzigs/onyourleft/issues/464) |
 | Why a race room's fan-out latency and its runtime latency are two different numbers | [`docs/spikes/0007-race-room-under-workerd.md`](docs/spikes/0007-race-room-under-workerd.md) §5 |
 | Why racing another rider's ghost is still forbidden after a fuller patent read, and who has to decide otherwise | [ADR 0021](docs/adr/0021-racing-another-riders-ghost.md) D-1, D-7, [ADR 0007](docs/adr/0007-patent-posture.md) D5, [#330](https://github.com/openzigs/onyourleft/issues/330) |
 | What a replayed cross-rider ghost fails that a live race also fails, and what it meets that a live race does not | [ADR 0021](docs/adr/0021-racing-another-riders-ghost.md) D-2, D-3, [`docs/spikes/0005-live-racing-patent-read.md`](docs/spikes/0005-live-racing-patent-read.md) §3.3 |
@@ -3569,6 +3645,9 @@ top of an issue **supersedes its body**.
 | Why a workout target is branded, and which two numbers it stops being confused | `packages/domain/src/workout/workout.ts` §`ThresholdShare` |
 | Why a workout is expanded into a timeline instead of walked with a cursor | `packages/domain/src/workout/timeline.ts` |
 | How the ERG spiral of death is told apart from a rider grinding on purpose | `packages/domain/src/workout/erg-safety.ts` §`assessErgCadence` |
+| Why a target typed into the Ride screen's ERG form is eased when the rider stalls, and why it goes back on by itself | `apps/web/src/ride/manual-erg.ts`, `packages/domain/src/workout/erg-safety.ts` §`createErgRescue`, [#567](https://github.com/openzigs/onyourleft/issues/567) |
+| Why a silent cadence sensor neither ends a stall rescue nor steps it up | `packages/domain/src/workout/erg-safety.ts` §`ErgRescue` |
+| Why a workout says why its target is eased, on the Ride screen and in the game, and why the game waits a frame to say it | `packages/domain/src/workout/player.ts` §`PlayerState.rescue`, `apps/web/src/workout/rescue-text.ts`, `apps/web/src/game/GameView.tsx` §`easedRef`, [#585](https://github.com/openzigs/onyourleft/issues/585) |
 | Why the workout clock keeps running while a target is unacknowledged, and what waits instead | `packages/domain/src/workout/player.ts` §"An interval has not begun until its target is acknowledged" |
 | Why a quantised acknowledgement is not a change, and the busy loop that follows from reading it as one | `packages/domain/src/workout/player.ts` §`acknowledge` |
 | Why an acknowledged, unchanged ERG target is not written again, and what notices a trainer that lost the session instead | `packages/domain/src/workout/player.ts` §"An acknowledged target is not written again (#542)", [#542](https://github.com/openzigs/onyourleft/issues/542) |
@@ -3666,6 +3745,10 @@ top of an issue **supersedes its body**.
 | What the cranks do when nobody is reporting a cadence, and why that is better than a rate | `apps/web/src/game/bicycle.ts` §`advanceCrank` |
 | Why the knee is resolved forward rather than backward, and the clamp the fit makes reachable | `apps/web/src/game/bicycle.ts` §`legBones` |
 | Why a rider rides off the centreline and leans, why the line is the least PEAK curvature rather than the least squared, and what it does not move | `apps/web/src/game/racing-line.ts`, `apps/web/src/game/scene.ts` §`lateralOf`, `apps/web/src/game/line-on-the-road.test.ts`, [#499](https://github.com/openzigs/onyourleft/issues/499) |
+| Why a straight is ridden on the right rather than on the centre line, which side "right" is on the screen, and why the apex is late | `apps/web/src/game/racing-line.ts` §`ROAD_SIDE`, §`LINE_HOME_OFFSET_METRES`, §`LATE_APEX_GAIN`, `apps/web/browser/game.browser.spec.ts` §"#546", [#546](https://github.com/openzigs/onyourleft/issues/546) |
+| Why the drawn lean rolls at no more than 60° a second, and why an S-bend no longer rolls at twice the rate | `apps/web/src/game/racing-line.ts` §`MAXIMUM_ROLL_RADIANS_PER_SECOND`, §`leanAt` |
+| Why the bicycle leans a little further than `tan φ = v²/(g·R)` and the body less far, and where the masses came from | `apps/web/src/game/bicycle.ts` §`bicycleRoll`, §`UPPER_BODY_UPRIGHT_SHARE`, §`HAT_MASS_SHARE`, `apps/web/src/game/port.ts` §`RiderMarker.bodyLean` |
+| When a pedal would strike the road, and why the rider's own cranks are parked outside-pedal-down in a tight bend whatever the cadence | `apps/web/src/game/bicycle.ts` §`PEDAL_STRIKE_LEAN_RADIANS`, §`drawnCrankAngle`, §`advanceCrank` |
 | Why the riders cast a contact shadow, from which sun, and why the ghost casts none | `apps/web/src/game/contact-shadow.ts` §`CASTS_CONTACT_SHADOW`, `apps/web/src/game/three-renderer.ts` §`ContactShadowBelt`, [#426](https://github.com/openzigs/onyourleft/issues/426) |
 | Why the scene-free frame is six draw calls since #426, and what the shadow map would cost instead | `apps/web/browser/game.browser.spec.ts` §`SCENE_DRAW_CALLS`, §"measures what the shading costs" |
 | Why the shadow map is a rung above the ladder with no control on any screen, and how a device is measured with it on | `apps/web/src/game/quality.ts` §`RIDER_SHADOW_MAP_RUNG`, §`RIDER_SHADOW_MAP_STORAGE_KEY`, [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part T |
@@ -3832,6 +3915,7 @@ top of an issue **supersedes its body**.
 | Why the photographic road barely shines, and what the full sheen did to the gradient cue | `apps/web/src/game/three-renderer.ts` §`ROAD_SHEEN`, `game.browser.spec.ts` §"the realistic world" |
 | Why every face of the photographic road is lit as facing up | `apps/web/src/game/three-renderer.ts` §`photographicRoadMaterial`, `terrain.ts` §`roadIndices` |
 | How bright the HDRI's environment is, and which way its sun faces | `apps/web/src/game/realistic-light.ts` §`environmentIntensity`, §`skyRotation` |
+| Why the realistic world's far hills and fog meet the photographed sky rather than the stylised haze, and why the ridge is lifted above the photograph's own skyline and so moves up and down with the rider on nearly every frame | `apps/web/src/game/realistic-light.ts` §`drawnHorizonColour`, §`REALISTIC_SKYLINE_DEGREES`, §`skylineCrestFloor`, §`ridgeLift`, `apps/web/src/game/three-renderer.ts` §`HorizonRing`, `game.browser.spec.ts` §"#544", [#544](https://github.com/openzigs/onyourleft/issues/544) |
 | Why the realistic bicycle is built from numbers, and how the MakeHuman body pedals | `apps/web/src/game/bicycle.ts` §"Two riders now", §`riderJoints`, `three-renderer.ts` §`RealisticRiderBelt` |
 | Why the realistic structures are built from numbers and wear CC0 photographs, and why a house is two belts | `apps/web/src/game/realistic-assets.ts` §`REALISTIC_STRUCTURE_SURFACES`, `three-renderer.ts` §`RealisticStructureBelts`, [#475](https://github.com/openzigs/onyourleft/issues/475) |
 | Why the water stays a shader in the realistic world, and what it reflects there | `apps/web/src/game/three-renderer.ts` §`WaterBelt.update`, `realistic-light.ts` §`reflectedSkyColour` |
@@ -3841,6 +3925,8 @@ top of an issue **supersedes its body**.
 | What a frame cap that is not a frame rate is read as, and why it is clamped rather than thrown | `apps/web/src/game/frame-pacer.ts` §`INVALID_CAP_READ_AS` |
 | Why the HUD's quality state is a level and not the ladder's whole state | `apps/web/src/game/GameView.tsx` §`qualityLevel` |
 | Why a skipped animation frame is not a fast frame, and what the ladder is told under a cap | `apps/web/src/game/frame-pacer.ts`, `apps/web/src/game/GameView.tsx` §`tick` |
+| Which licences the credits screen calls a courtesy, why Apache-2.0 is not one, and why a licence it has not been told about is shown as unclassified | `apps/web/src/credits/credits.ts` §`LICENCE_COPY_LICENCES`, §`NOTHING_ASKED_LICENCES`, §`SHIPPED_LICENCE_TEXTS`, [#597](https://github.com/openzigs/onyourleft/issues/597) |
+| Why the service worker serves a navigation to a precached file as that file rather than the shell | `apps/web/src/offline/worker-core.ts` §`decideFetch`, `apps/web/browser/offline.browser.spec.ts` §"#597" |
 | What stops an empty credits screen looking exactly like a correct one | `apps/web/src/views/CreditsView.test.tsx`, [#142](https://github.com/openzigs/onyourleft/issues/142) |
 | What a person with TalkBack runs, and which questions only they can answer | [`docs/validation/0003-screen-reader-and-assistive-technology.md`](docs/validation/0003-screen-reader-and-assistive-technology.md), [#393](https://github.com/openzigs/onyourleft/issues/393) |
 | How a climb ahead is found, and why the lookahead starts from the wrapped position | `apps/web/src/game/hud/climb-ahead.ts`, [#399](https://github.com/openzigs/onyourleft/issues/399) |
@@ -3856,6 +3942,7 @@ top of an issue **supersedes its body**.
 | What stops any screen rendering an absolute joint angle or a frontal-plane word, and the three exemptions | `apps/web/src/camera/no-absolute-angles.ts` §`EXEMPT`, `apps/web/src/camera/no-absolute-angles.test.ts`, [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md) D-8 |
 | Why an empty side-camera section and a correct one cannot look the same, and why a stored sentence the app does not know is withheld | `apps/web/src/detail/SideCameraSection.tsx`, `SideCameraSection.test.tsx` |
 | What proves nothing on the report's path reaches a trainer | `apps/web/src/camera/side-report-safety.test.ts` |
+| What a ride shows and says about the side camera, why a lost link is a notice and "filming" is not, and why it is spoken with announcements off | `apps/web/src/ride/side-camera.ts`, `apps/web/src/game/hud/announce.ts` §`side-camera-lost`, `apps/web/src/game/hud/HudPanel.tsx` §`sideCamera`, [#551](https://github.com/openzigs/onyourleft/issues/551) |
 | What proves the HUD's live region is not hidden and moves nothing, and why that is not a screen reader | `apps/web/browser/hud.browser.spec.ts` §"#401", [#401](https://github.com/openzigs/onyourleft/issues/401) |
 
 <!-- Last updated: 2026-09-17 by delivery:code-issue resolving #355 (the verge as a visibility constant, and the camera-cone gate that had been missing) -->

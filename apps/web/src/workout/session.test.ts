@@ -602,6 +602,54 @@ describe('the ERG spiral is broken against a real control point', () => {
     expect(trainer.targetPowerOnTheTrainer()).toBe(FLOOR_WATTS);
   });
 
+  it('holds a stalled rider at the floor while their cadence sensor is silent, and steps up only on heard cadence — PR #582', async () => {
+    // The review's finding: silence after a stall used to step the rescue UP,
+    // from the floor to relief, and hold it there for as long as it lasted.
+    const { trainer, session } = await loop(
+      () => expandWorkout(workout([steady(300, 1.0)])),
+      MEASURED_TRAINER(),
+    );
+    session.start(seconds(0));
+    const stalling = new Map<number, number>([
+      [0, 80],
+      [1, 78],
+      [2, 60],
+      [3, 40],
+      [4, 20],
+      [5, 8],
+      [6, 5],
+      [7, 4],
+    ]);
+    // The stall, then sixty seconds of nothing at all from the sensor.
+    await ride(session, 0, 70, (second) => {
+      const rpm = stalling.get(second);
+      return rpm === undefined
+        ? undefined
+        : { at: seconds(second), cadence: revolutionsPerMinute(rpm) };
+    });
+    await flush();
+    const targets = () =>
+      trainer.wire
+        .filter((entry) => entry.direction === 'write' && entry.bytes[0] === SET_TARGET_POWER)
+        .map((entry) => entry.bytes[1]! | (entry.bytes[2]! << 8));
+    const full = targets()[0]!;
+    expect(trainer.targetPowerOnTheTrainer()).toBe(FLOOR_WATTS);
+    // Nothing written after the floor: no step up on silence.
+    expect(targets().at(-1)).toBe(FLOOR_WATTS);
+    const afterSilence = targets().length;
+
+    // The rider pedals again, and the sensor hears it.
+    await ride(session, 71, 100, (second) => ({
+      at: seconds(second),
+      cadence: revolutionsPerMinute(88),
+    }));
+    await flush();
+    const recovery = targets().slice(afterSilence);
+    expect(recovery.at(-1)).toBe(full);
+    expect(recovery[0]).toBeGreaterThan(FLOOR_WATTS);
+    expect(recovery[0]).toBeLessThan(full);
+  });
+
   it('raises a relief target that would fall under the floor to the floor, rather than having it refused', async () => {
     // 20 % of 250 W is 50 W; two thirds of that is 33 W, below this machine's
     // 40 W minimum. Written as asked it would be refused out of range — an ease
@@ -820,6 +868,60 @@ describe('an acknowledged, unchanged target is written once — #542', () => {
     await flush();
 
     expect(asked).toStrictEqual([250, 250]);
+  });
+
+  it('does not mark the NEWER target answered when an OLDER write is written late — #579', async () => {
+    // The `written` half of PR #574's rule. 200 W goes on the wire, a pause
+    // forgets it, and the resume moves into a 250 W block, so 250 W is asked
+    // for while 200 W is still unanswered. Until #579 the late "written" for
+    // 200 W reached `acknowledge`: the player's pending 250 W was cleared while
+    // it was still in flight, and 200 W was reported as held.
+    const { trainer } = await loop();
+    const asked: number[] = [];
+    const answers: Array<(value: number) => void> = [];
+    const heldSeen: Array<number | undefined> = [];
+    const session = createWorkoutSession({
+      timeline: expandWorkout(workout([steady(2, 0.8), steady(60, 1.0)])),
+      thresholdPower: THRESHOLD,
+      powerFloor: watts(FLOOR_WATTS),
+      onChange: (state) => heldSeen.push(state.player.held),
+      control: {
+        setTargetPower: (target) => {
+          asked.push(target);
+          return new Promise((resolve) => {
+            answers.push((value) => resolve(watts(value)));
+          });
+        },
+        stop: () => trainer.control.stop(),
+        letGo: () => trainer.control.letGo(),
+      },
+    });
+    session.start(seconds(0));
+    session.tick(seconds(0));
+    session.pause(seconds(1));
+    session.resume(seconds(2));
+    session.tick(seconds(3));
+    await flush();
+    expect(asked).toStrictEqual([200]);
+    expect(session.state().player.pending).toBe(250);
+
+    // The older write is answered late. The newer one goes on the wire.
+    answers[0]?.(200);
+    await flush();
+    expect(asked).toStrictEqual([200, 250]);
+    expect(session.state().player.pending).toBe(250);
+    expect(session.state().player.held).toBeUndefined();
+
+    // Its own answer is what settles it.
+    answers[1]?.(250);
+    await flush();
+    expect(session.state().player.pending).toBeUndefined();
+    expect(session.state().player.held).toBe(250);
+    session.tick(seconds(4));
+    await flush();
+    expect(asked).toStrictEqual([200, 250]);
+    // Never, at any change a screen was told about, was 200 W the player's held.
+    expect(heldSeen).not.toContain(200);
   });
 });
 

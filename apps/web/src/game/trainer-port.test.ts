@@ -381,7 +381,7 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
     const controller = {
       getSnapshot: () => ({
         trainer: facts,
-        workout: workout === 'none' ? undefined : { status: workout },
+        workout: workout === 'none' ? undefined : { status: workout, rescue: undefined },
       }),
       simulationControl: () =>
         workout === 'none' && facts.controllable ? silentControl() : undefined,
@@ -460,6 +460,22 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
     const port = gameTrainerPortOver(undefined);
     expect(port.readTrainer()).toEqual(NO_GAME_TRAINER);
     await expect(port.askForControlOnRide()).resolves.toBeUndefined();
+  });
+
+  it('reads a running workout’s stall rescue off the controller, on every call — #585', () => {
+    let rescue: { readonly kind: 'floor'; readonly reason: string } | undefined = undefined;
+    const port = gameTrainerPortOver({
+      getSnapshot: () => ({
+        trainer: { ...NO_CONTROL, hasControl: true },
+        workout: { status: 'running', rescue },
+      }),
+      simulationControl: () => undefined,
+      requestTrainerControl: () => Promise.resolve(),
+    });
+    expect(port.workoutRescue()).toBeUndefined();
+    rescue = { kind: 'floor', reason: 'Pedalling has stopped.' };
+    expect(port.workoutRescue()).toEqual(rescue);
+    expect(gameTrainerPortOver(undefined).workoutRescue()).toBeUndefined();
   });
 
   it('reads a finished workout for the audio, as main.tsx did — #447', () => {
