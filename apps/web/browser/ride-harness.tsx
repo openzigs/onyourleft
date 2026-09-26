@@ -254,6 +254,7 @@ const SIDE_PAIRING =
 const TRAINER: GameTrainerPort = {
   // #503: the Ride press's request for control — this double changes nothing.
   askForControlOnRide: () => Promise.resolve(),
+  workoutRescue: () => undefined,
   readTrainer: () =>
     WITH_A_NOTICE
       ? { kind: 'workout', control: undefined }

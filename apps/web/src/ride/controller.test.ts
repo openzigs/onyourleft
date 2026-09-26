@@ -878,6 +878,47 @@ describe('#14 — riding a saved workout on this screen', () => {
     rig.controller.dispose();
   });
 
+  it('says why the target is eased on the snapshot, on every tick of the rescue — #585', async () => {
+    // ⚠️ The Ride screen reads `workout.rescue` and nothing else; the player's
+    // intent is `hold` on every tick after the first eased write, so a snapshot
+    // built from the intent would say it once and then forget it.
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    rig.controller.startWorkout(
+      savedWorkout([{ kind: 'steady', seconds: seconds(600), target: thresholdShare(1.0) }]),
+      THRESHOLD,
+    );
+    await ride(rig, 2);
+    await flushMicrotasks();
+    expect(rig.controller.getSnapshot().workout?.rescue).toBeUndefined();
+
+    // The rider stops pedalling: the floor, and the stall's own sentence.
+    for (const rpm of [80, 60, 40, 20, 8, 5, 4]) {
+      rig.bench.rider.set({ cadence: revolutionsPerMinute(rpm) });
+      await ride(rig, 1);
+      await flushMicrotasks();
+    }
+    const stalled = rig.controller.getSnapshot().workout?.rescue;
+    expect(stalled).toMatchObject({ kind: 'floor' });
+    expect(stalled?.reason).toContain('Pedalling has stopped');
+    // …still there a few ticks later, with nothing new written.
+    await ride(rig, 2);
+    await flushMicrotasks();
+    expect(rig.controller.getSnapshot().workout?.rescue).toMatchObject({ kind: 'floor' });
+
+    // Back on the pedals and steady for well over a trend window: cleared.
+    for (let second = 0; second < 25; second += 1) {
+      rig.bench.rider.set({ cadence: revolutionsPerMinute(88) });
+      await ride(rig, 1);
+      await flushMicrotasks();
+    }
+    expect(rig.targetOnTheTrainer()).toBe(250);
+    expect(rig.controller.getSnapshot().workout?.rescue).toBeUndefined();
+    rig.controller.dispose();
+  });
+
   it('holds the first interval on the trainer itself', async () => {
     const rig = benchWith();
     await rig.controller.pair('trainer');

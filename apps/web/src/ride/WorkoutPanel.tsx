@@ -81,6 +81,7 @@ import type { CueOutput } from '../game/audio-port';
 import { readCuePreference, writeCuePreference, type CuePreference } from '../game/cue-preference';
 import { SoundControls } from '../game/SoundControls';
 import { sharedCueOutput } from '../game/web-audio';
+import { workoutRescueText } from '../workout/rescue-text';
 import { durationText, workoutRow } from '../workouts/library';
 
 import { RideAnnouncer } from './RideAnnouncer';
@@ -267,6 +268,14 @@ export function WorkoutPanel({
             ? 'The trainer has not confirmed a target yet.'
             : `Holding ${String(workout.holdingWatts)} W.`}
         </p>
+        {workout.rescue === undefined ? null : (
+          // #585: the stall rescue's reason, which the workout path used to
+          // compute and never show. Not `live`, for the fault's reason below:
+          // `RideAnnouncer` speaks it when it appears or changes.
+          <StatusMessage tone="warning" label="Eased">
+            {workoutRescueText(workout.rescue, 'ride-screen')}
+          </StatusMessage>
+        )}
         {workout.fault === undefined ? null : (
           // Not `live` since #445: `RideAnnouncer` speaks it, in order.
           <StatusMessage tone="warning">{workout.fault}</StatusMessage>

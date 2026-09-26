@@ -42,7 +42,8 @@
  * |---|---|---|
  * | `trainer-lost` | `ride/RideAnnouncer.tsx` | `TrainerSnapshot.lost` ("Control lost") and `.releaseFault` ("Not released") |
  * | `trainer-lost` | `GameView` | the road notice at the start of a ride, and a refused gradient write — which is how control lost ARRIVES in the game (`GameView` §`trainer`) |
- * | `workout-fault` | `ride/RideAnnouncer.tsx` | `RideWorkoutSnapshot.fault` |
+ * | `workout-fault` | `ride/RideAnnouncer.tsx` | `RideWorkoutSnapshot.fault`, and `.rescue` as "Eased: …" (#585) |
+ * | `workout-fault` | `GameView` | a running workout's stall rescue, through `GameTrainerPort.workoutRescue` (#585) |
  * | `interval-now` | `ride/RideAnnouncer.tsx` | `RideWorkoutSnapshot.nowRiding`, as it changes |
  * | `interval-ahead` | `ride/RideAnnouncer.tsx` | `ride/lookahead.ts` |
  * | `climb-ahead` | `GameView` | `hud/climb-ahead.ts` |

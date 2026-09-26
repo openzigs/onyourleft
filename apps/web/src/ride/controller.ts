@@ -65,6 +65,7 @@ import {
   type UnixSeconds,
   type Watts,
   type WorkoutBlock,
+  type WorkoutRescue,
 } from '@onyourleft/domain';
 import {
   isSensorError,
@@ -285,6 +286,12 @@ export interface RideWorkoutSnapshot {
   readonly nowRiding: string | undefined;
   /** Why the last workout write could not be made, if any. */
   readonly fault: string | undefined;
+  /**
+   * The stall rescue holding the workout's target down, with its reason — or
+   * `undefined` while the workout's own target stands (#585). The player's
+   * `PlayerState.rescue`, unchanged; `workout/rescue-text.ts` is the sentence.
+   */
+  readonly rescue: WorkoutRescue | undefined;
   /**
    * The plan itself, so a screen can look AHEAD in it — #398. The same
    * timeline the session plays; `segmentAt(timeline, elapsed + lead)` is the
@@ -1356,6 +1363,7 @@ export function createRideController(options: RideControllerOptions): RideContro
           ? undefined
           : blockText(workout.record.workout.blocks[segment.block] ?? EMPTY_BLOCK),
       fault: state.lastFault,
+      rescue: state.player.rescue,
     };
   };
 

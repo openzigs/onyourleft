@@ -115,7 +115,7 @@
 
 import { seconds, watts, type Seconds, type Watts } from '../quantities';
 
-import { createErgRescue, type CadenceReading } from './erg-safety';
+import { createErgRescue, type CadenceReading, type ErgRescueStep } from './erg-safety';
 import { segmentAt, targetAt, type WorkoutSegment, type WorkoutTimeline } from './timeline';
 
 export type PlayerStatus = 'idle' | 'running' | 'paused' | 'finished';
@@ -166,7 +166,28 @@ export interface PlayerState {
   readonly held: Watts | undefined;
   /** The last thing the player asked for. */
   readonly intent: PlayerIntent;
+  /**
+   * The stall rescue holding the workout's target down, and why — #585.
+   * `undefined` whenever the workout's own target stands.
+   *
+   * ⚠️ **Its own field, not read off {@link intent}.** A relief is a
+   * `write-target` once and then `hold` for every tick it stays on the
+   * machine, and `hold` carries no reason — so a screen reading the intent
+   * would show the reason for one tick and lose it for the rest of the rescue,
+   * which is the whole of #585: a rider left at the trainer's lowest target
+   * with nothing saying why. This is set on EVERY running ERG tick from the
+   * rescue's own step, whether or not anything is written.
+   *
+   * Cleared by a free-ride block (the block's own reason is on the intent, and
+   * no verdict is taken there), a pause, a lost link, the end and a new start.
+   * The latch itself survives the first two — see the module note — and the
+   * next ERG tick puts the field back if it still holds.
+   */
+  readonly rescue: WorkoutRescue | undefined;
 }
+
+/** A stall rescue in force: the floor or a relief share, with its fixed sentence. */
+export type WorkoutRescue = Exclude<ErgRescueStep, { readonly kind: 'full' }>;
 
 export interface PlayerOptions {
   readonly timeline: WorkoutTimeline;
@@ -227,6 +248,8 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
    */
   let lastAsked: Watts | undefined;
   let intent: PlayerIntent = { kind: 'hold' };
+  /** @see PlayerState.rescue */
+  let inForce: WorkoutRescue | undefined;
   /**
    * Whether a spiral or a stall has been seen and not yet recovered from. See
    * the module note: a rescue ends on a whole window of `holding`, not on one.
@@ -242,6 +265,7 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
     pending,
     held,
     intent,
+    rescue: inForce,
   });
 
   const advance = (now: Seconds): void => {
@@ -263,6 +287,7 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       held = undefined;
       lastAsked = undefined;
       intent = { kind: 'hold' };
+      inForce = undefined;
       rescue.reset();
       return snapshot();
     },
@@ -277,6 +302,7 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
         status = 'finished';
         pending = undefined;
         intent = { kind: 'finished' };
+        inForce = undefined;
         return snapshot();
       }
 
@@ -297,6 +323,7 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
         // only what this player knows: the block has no target of its own.
         pending = undefined;
         lastAsked = undefined;
+        inForce = undefined;
         intent = { kind: 'release', reason: 'This block sets no target of its own — ride easy.' };
         return snapshot();
       }
@@ -316,6 +343,8 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       // clock is the ride's; every test here started at zero and could not see
       // it.
       const step = rescue.judge(rider?.cadence, now);
+      // #585: before any early return below, so a `hold` tick still says why.
+      inForce = step.kind === 'full' ? undefined : step;
 
       if (step.kind === 'floor') {
         pending = undefined;
@@ -366,6 +395,7 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       // afresh. Keeping it would leave the player refusing to write on resume
       // until an acknowledgement that may never come.
       pending = undefined;
+      inForce = undefined;
       intent = { kind: 'release', reason: 'Paused.' };
       return snapshot();
     },
@@ -422,6 +452,7 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       status = status === 'finished' ? 'finished' : 'paused';
       runningSince = undefined;
       pending = undefined;
+      inForce = undefined;
       intent = {
         kind: 'release',
         reason: 'The trainer disconnected, so the workout is paused. Nothing has been lost.',
@@ -433,6 +464,7 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       status = 'finished';
       runningSince = undefined;
       pending = undefined;
+      inForce = undefined;
       intent = { kind: 'finished' };
       return snapshot();
     },
