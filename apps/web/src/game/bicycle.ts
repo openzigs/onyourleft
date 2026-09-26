@@ -168,8 +168,13 @@
  *   line's curvature and the rider's own simulated speed — never the
  *   centreline's. It is drawn by rolling this whole model about its own `+Z`,
  *   the line between the tyre contacts, which is why the origin being on the
- *   road between them matters (`three-renderer.ts` §`RiderBelt`). Nothing here
- *   changed shape for it, and the cadence rule below is untouched.
+ *   road between them matters (`three-renderer.ts` §`RiderBelt`).
+ *   ⚠️ **Since #546 the whole model no longer rolls as one**: that lean is the
+ *   COMBINED one, the bicycle leans a little further, and the upper body
+ *   ({@link RIDER_UPPER_BODY_PARTS}) is held back toward upright about the
+ *   hips (@see bicycleRoll); and in a tight bend the cranks are parked
+ *   outside-pedal-down (@see drawnCrankAngle), which is the one exception to
+ *   the cadence rule below.
  * - **No steering, and no pitch on a gradient.** Both are below what a 1.6 m
  *   object 8 m from the camera resolves, and both would need state this file
  *   does not have.
@@ -200,8 +205,9 @@
  *   {@link advanceCrank} settles for the rider.
  */
 
+import { DEFAULT_RIDER_MASS_KILOGRAMS } from '../athlete/mass';
 import type { SensorReading } from './hud/fields';
-import { DEFAULT_RIDING_POSITION, type RidingPosition } from './rider';
+import { BICYCLE_MASS_KILOGRAMS, DEFAULT_RIDING_POSITION, type RidingPosition } from './rider';
 
 /** A turn, in radians. Written out once so that no call site spells `2 * PI`. */
 const TAU = Math.PI * 2;
@@ -370,6 +376,17 @@ function spanBetween(
     pitch: Math.atan2(dz, dy),
   };
 }
+
+/**
+ * A pedal: a box this wide across the bicycle, this tall and this long, with
+ * its middle this far from the bicycle's plane — #349's numbers, named by #546
+ * because they are what decides when a leaning bicycle's pedal meets the road.
+ * @see PEDAL_STRIKE_LEAN_RADIANS
+ */
+const PEDAL_WIDTH_METRES = 0.09;
+const PEDAL_HEIGHT_METRES = 0.016;
+const PEDAL_DEPTH_METRES = 0.07;
+const PEDAL_ACROSS_METRES = 0.1;
 
 /** Where the cranks turn, in the model's own frame: the bottom bracket. */
 export const CRANK_AXIS_Y = 0.27;
@@ -659,16 +676,25 @@ const HEAD_TUBE_FOOT_Z = 0.38;
 const TORSO_SPAN = spanBetween(HIP_Y, HIP_Z, SHOULDER_Y, SHOULDER_Z);
 
 /**
- * The bicycle and the body: everything that does **not** turn with the cranks.
+ * The bicycle: everything that does **not** turn with the cranks and does not
+ * lean with the rider's upper body.
  *
  * ⚠️ **One merged geometry and one draw call**, which is the same trade
  * `terrain.ts` makes for the road: the parts carry their colours as vertex
  * data, so a bicycle of four colours is still one material. #240's NFR-2 says
- * draw calls are the budget that matters here, and the rider costs **three** in
- * total — this, the cranks, and the four leg segments as one instanced mesh —
- * against the one the sphere cost.
+ * draw calls are the budget that matters here, and the rider costs **four** in
+ * total — this, {@link RIDER_UPPER_BODY_PARTS}, the cranks, and the four leg
+ * segments as one instanced mesh — against the one the sphere cost.
+ *
+ * ⚠️ **It was three, with the body merged in here, until #546**, and a
+ * reviewer who remembers `RIDER_BODY_PARTS` as the bicycle's one mesh is
+ * reading the old file. The owner ruled on 2026-09-25 that a rider's body
+ * stays MORE UPRIGHT than the bicycle through a bend (@see bicycleRoll), and a
+ * body merged into the bicycle's vertices can only roll with it. One draw call
+ * for all three riders is what that ruling costs; `game.browser.spec.ts`
+ * §`SCENE_DRAW_CALLS` publishes it.
  */
-export const RIDER_BODY_PARTS: readonly RiderPart[] = [
+export const RIDER_BICYCLE_PARTS: readonly RiderPart[] = [
   // ---------------------------------------------------------------- the wheels
   // A torus stands in its own XY plane with its axle along `+Z`; a quarter turn
   // about `+Y` puts the axle across the bicycle, which is where an axle goes.
@@ -737,15 +763,6 @@ export const RIDER_BODY_PARTS: readonly RiderPart[] = [
       { x: side * 0.05, y: HEAD_TUBE_FOOT_Y, z: HEAD_TUBE_FOOT_Z },
       { y: WHEEL_RADIUS, z: FRONT_HUB_Z },
     ),
-    // The arms. Same solid as a frame tube because at this distance an arm is a
-    // segment between two joints and nothing else.
-    tube(
-      `arm ${side}`,
-      RIDER_PALETTE.jersey,
-      0.032,
-      { x: side * SHOULDER_ACROSS, y: SHOULDER_Y, z: SHOULDER_Z },
-      { y: GRIP_Y, z: GRIP_Z },
-    ),
   ]),
   // ------------------------------------------------------- the drop bar, #369
   // A handlebar lies across the bicycle, so its tube is rolled a quarter turn.
@@ -789,7 +806,34 @@ export const RIDER_BODY_PARTS: readonly RiderPart[] = [
     y: SADDLE_Y + 0.025,
     z: SADDLE_Z - 0.02,
   }),
-  // ----------------------------------------------------------------- the rider
+];
+
+/**
+ * The rider's upper body — the arms, the torso and the helmet: what rolls
+ * about the hips, relative to the bicycle, by `RiderMarker.bodyLean` (#546).
+ * The legs are not in it: they are {@link legBones}, from the hips to the
+ * pedals, and the hips are on the saddle.
+ *
+ * ⚠️ **The arms roll with the torso and the hands therefore leave the bar
+ * slightly**: a grip is 0.07 m below the pivot and 0.16 m out, so at the
+ * largest roll {@link bicycleRoll} draws — about 10° — a hand moves about 3 cm
+ * from the hood. At a bar-mounted phone's distance that is under a pixel, and
+ * the alternative is two more solved limbs per rider. The realistic body does
+ * not have the compromise: its arms are aimed at the grips every frame
+ * (`three-renderer.ts` §`RealisticRiderBelt`).
+ */
+export const RIDER_UPPER_BODY_PARTS: readonly RiderPart[] = [
+  ...[-1, 1].map((side) =>
+    // The arms. Same solid as a frame tube because at this distance an arm is a
+    // segment between two joints and nothing else.
+    tube(
+      `arm ${side}`,
+      RIDER_PALETTE.jersey,
+      0.032,
+      { x: side * SHOULDER_ACROSS, y: SHOULDER_Y, z: SHOULDER_Z },
+      { y: GRIP_Y, z: GRIP_Z },
+    ),
+  ),
   part(
     'torso',
     { shape: 'box', width: 0.34, height: TORSO_SPAN.length, depth: 0.22 },
@@ -802,6 +846,27 @@ export const RIDER_BODY_PARTS: readonly RiderPart[] = [
     z: HELMET_Z,
   }),
 ];
+
+/**
+ * The bicycle and the body together: everything that does not turn with the
+ * cranks, in the model's own frame, at rest.
+ *
+ * @test-facing the renderer draws {@link RIDER_BICYCLE_PARTS} and
+ * {@link RIDER_UPPER_BODY_PARTS} as two meshes since #546; `bicycle.test.ts`
+ * holds the whole rider's shape — stands on the road, fits the lane, the arms
+ * reach the bar — to the union, at rest, which is the shape it had before.
+ */
+export const RIDER_BODY_PARTS: readonly RiderPart[] = [
+  ...RIDER_BICYCLE_PARTS,
+  ...RIDER_UPPER_BODY_PARTS,
+];
+
+/**
+ * The point the upper body rolls about, in the model's own frame: the hips,
+ * on the saddle — #546. The renderer's roll is about the bicycle's `+Z`
+ * through this point.
+ */
+export const UPPER_BODY_PIVOT = { y: HIP_Y, z: HIP_Z } as const;
 
 /**
  * The cranks, the chainring and the pedals — **in the axis's own frame**.
@@ -834,9 +899,14 @@ export const RIDER_CRANK_PARTS: readonly RiderPart[] = [
   ...[1, -1].map((side) =>
     part(
       `pedal ${side}`,
-      { shape: 'box', width: 0.09, height: 0.016, depth: 0.07 },
+      {
+        shape: 'box',
+        width: PEDAL_WIDTH_METRES,
+        height: PEDAL_HEIGHT_METRES,
+        depth: PEDAL_DEPTH_METRES,
+      },
       RIDER_PALETTE.tyre,
-      { x: side * 0.1, y: side * CRANK_LENGTH_METRES, z: 0 },
+      { x: side * PEDAL_ACROSS_METRES, y: side * CRANK_LENGTH_METRES, z: 0 },
     ),
   ),
 ];
@@ -976,10 +1046,19 @@ export function emptyRiderJoints(): RiderJoints {
   };
 }
 
-/** Where the rider's joints are at a crank angle, written into `into`. @see RiderJoints */
-export function riderJoints(crankAngle: number, into: RiderJoints): RiderJoints {
+/**
+ * Where the rider's joints are at a crank angle, written into `into`.
+ *
+ * `bodyLean` is `RiderMarker.bodyLean` — #546: the upper body's roll about the
+ * bicycle's `+Z` through the hips, relative to the bicycle, with the renderer's
+ * sign (a roll of `+θ` takes `+Y` toward `−X`). It moves the shoulders and
+ * nothing else: the hips are on the saddle, the feet on the pedals and the
+ * hands on the bar are all the bicycle's. @see RIDER_UPPER_BODY_PARTS
+ */
+export function riderJoints(crankAngle: number, into: RiderJoints, bodyLean: number): RiderJoints {
   set(into.hips, 0, HIP_Y, HIP_Z);
-  set(into.shoulders, 0, SHOULDER_Y, SHOULDER_Z);
+  const back = SHOULDER_Y - HIP_Y;
+  set(into.shoulders, -back * Math.sin(bodyLean), HIP_Y + back * Math.cos(bodyLean), SHOULDER_Z);
   for (const index of [0, 1] as const) {
     const side = index === 0 ? 1 : -1;
     const pedalAngle = side === 1 ? crankAngle : crankAngle + Math.PI;
@@ -1066,6 +1145,15 @@ export const MAXIMUM_CRANK_STEP_SECONDS = 0.25;
  * in front of a bicycle that is not. The alternative is a rate this program made
  * up, and #349 is explicit that a made-up rate *"is worse than a sphere, because
  * it claims something false"*.
+ *
+ * ⚠️ **One exception, the owner's, since #546 — and a reviewer who remembers
+ * "the rider's cranks turn exactly when the HUD shows a cadence" without it is
+ * reading the old file.** In a bend tight enough that the inside pedal would
+ * strike the road (@see PEDAL_STRIKE_LEAN_RADIANS, about 31° from this file's
+ * own pedal), the rider's cranks are DRAWN parked with the outside pedal
+ * down, whatever the cadence reads — as a racer's are (@see drawnCrankAngle).
+ * This function is unchanged by it: the angle it returns is still the integral
+ * of the HUD's number, and is where the cranks come back to after the bend.
  *
  * Wrapped into `[0, 2π)` so the number a caller carries between frames stays
  * small however long a ride runs.
@@ -1164,4 +1252,234 @@ export function simulatedCrankAngle(distanceMetres: number): number {
     return 0;
   }
   return wrapped((distanceMetres / SIMULATED_DEVELOPMENT_METRES) * TAU);
+}
+
+// ---------------------------------------------------------------------------
+// #546 — the body more upright than the bicycle, and the pedal off the road
+// ---------------------------------------------------------------------------
+
+/**
+ * How much of the bicycle's lean the rider's upper body gives back, rolling
+ * about the hips toward upright: **a quarter** — #546.
+ *
+ * The owner ruled on 2026-09-25 that the body stays MORE UPRIGHT than the
+ * bicycle through a bend, with the COMBINED lean still `tan φ = v²/(g·R)`.
+ * That is a known way to ride a steady turn: Cain and Perkins measured steady
+ * turns with the rider leaning with, into and out of the bicycle (*"Comparison
+ * of experimental data to a model for bicycle steady-state turning"*, Vehicle
+ * System Dynamics 50(8), 2012), and the coaching wording is *"your upper body
+ * should remain relatively upright while the bike leans beneath you"*
+ * (BikeTips, *"How to corner a road bike"*). What the physics fixes is the
+ * combined centre of mass; the split between the two is the rider's.
+ *
+ * ⚠️ **A quarter is CHOSEN, not measured** — no source gives a number. It is
+ * large enough to see (7.5° of body against the bicycle at 30°) and small
+ * enough that a stylised hand stays within about 3 cm of the bar
+ * (@see RIDER_UPPER_BODY_PARTS).
+ */
+export const UPPER_BODY_UPRIGHT_SHARE = 0.25;
+
+/**
+ * The share of a rider's mass in the head, arms and trunk — "HAT" — as
+ * against the legs: **0.678**, and where in the hip-to-shoulder length its
+ * centre sits: **0.626 of it from the hip**. Winter, *Biomechanics and Motor
+ * Control of Human Movement*, table 4.1 (after Dempster), read on 2026-09-26
+ * from a course copy (courses.grainger.illinois.edu, `Anthro-Winter.pdf`): the
+ * row *"Head, arms, and trunk (HAT) — Greater trochanter/glenohumeral joint —
+ * 0.678 — 0.626 / 0.374"*. The 0.626 is read from the greater trochanter,
+ * the first-named landmark, as every limb row in that table is read; it is
+ * also the only reading in which adding a head and arms moves the trunk's own
+ * centre (0.50) UP.
+ */
+const HAT_MASS_SHARE = 0.678;
+const HAT_CENTRE_FROM_HIP_SHARE = 0.626;
+
+/**
+ * Where the three masses the lean is balanced over sit, as heights in the
+ * bicycle's own plane:
+ *
+ * - the bicycle's, **0.1 m above its hubs** — chosen: a road bicycle's mass is
+ *   its frame and wheels, and nothing here weighs a frame;
+ * - the legs' (both, 0.322 of the rider — Winter's 0.100 + 0.0465 + 0.0145 a
+ *   side), **half way between the hips and the bottom bracket**;
+ * - the HAT's, on the hip-to-shoulder line at {@link HAT_CENTRE_FROM_HIP_SHARE}.
+ *
+ * The rider's mass is the DEFAULT one (`athlete/mass.ts`), because this is a
+ * drawing: only the ratio of the masses moves the answer, and a rider's own
+ * weight moving the angle their bicycle is drawn at by a tenth of a degree is
+ * not something anybody asked for.
+ */
+const BICYCLE_CENTRE_Y = WHEEL_RADIUS + 0.1;
+const LEGS_CENTRE_Y = (HIP_Y + CRANK_AXIS_Y) / 2;
+const HAT_ABOVE_HIP = HAT_CENTRE_FROM_HIP_SHARE * (SHOULDER_Y - HIP_Y);
+/** `Σ m·y` of everything that leans with the bicycle, the HAT counted at its pivot. */
+const MOMENT_WITH_THE_BICYCLE =
+  BICYCLE_MASS_KILOGRAMS * BICYCLE_CENTRE_Y +
+  DEFAULT_RIDER_MASS_KILOGRAMS * (1 - HAT_MASS_SHARE) * LEGS_CENTRE_Y +
+  DEFAULT_RIDER_MASS_KILOGRAMS * HAT_MASS_SHARE * HIP_Y;
+/** The HAT's moment about its own pivot, `m·l`. */
+const MOMENT_ABOUT_THE_HIPS = DEFAULT_RIDER_MASS_KILOGRAMS * HAT_MASS_SHARE * HAT_ABOVE_HIP;
+
+/**
+ * The lean of the rider-and-bicycle's combined centre of mass, from the
+ * contact line, for a bicycle at `bicycle` and an upper body rolled `body`
+ * relative to it — both in `RiderMarker.lean`'s sign. The inverse of
+ * {@link bicycleRoll}, which solves through it, and what
+ * `line-on-the-road.test.ts` and `bicycle.test.ts` hold every drawn pair to
+ * `tan φ = v²/(g·R)` through.
+ */
+export function combinedLean(bicycle: number, body: number): number {
+  const sideways =
+    MOMENT_WITH_THE_BICYCLE * Math.sin(bicycle) + MOMENT_ABOUT_THE_HIPS * Math.sin(bicycle + body);
+  const upwards =
+    MOMENT_WITH_THE_BICYCLE * Math.cos(bicycle) + MOMENT_ABOUT_THE_HIPS * Math.cos(bicycle + body);
+  return Math.atan2(sideways, upwards);
+}
+
+/** A rider's two rolls: the bicycle's, and the upper body's relative to it. */
+export interface RiderRoll {
+  /** `RiderMarker.lean`. */
+  readonly bicycle: number;
+  /** `RiderMarker.bodyLean` — toward upright, so of the opposite sign. */
+  readonly body: number;
+}
+
+/**
+ * The bicycle's lean and the body's roll against it, for a COMBINED lean the
+ * physics asks for — #546.
+ *
+ * The body gives back {@link UPPER_BODY_UPRIGHT_SHARE} of the bicycle's lean,
+ * so the bicycle has to lean MORE than `combined` for the pair's centre of mass
+ * to sit at `combined` — about 3 % more with these masses. That is not an
+ * exaggeration; it is what keeping the body upright costs, and
+ * {@link combinedLean} of the answer is `combined` to 1e-12. Solved by fixed
+ * point, which contracts by the body's small share of the moment every step.
+ */
+export function bicycleRoll(combined: number): RiderRoll {
+  let bicycle = combined;
+  for (let step = 0; step < 12; step += 1) {
+    bicycle += combined - combinedLean(bicycle, -UPPER_BODY_UPRIGHT_SHARE * bicycle);
+  }
+  // `+ 0` so that an upright rider's body is `0` and never `-0`.
+  return { bicycle, body: -UPPER_BODY_UPRIGHT_SHARE * bicycle + 0 };
+}
+
+/**
+ * The height above the road of the lowest point of either pedal, for a bicycle
+ * leaning `bicycleLean` with its cranks at `crankAngle` — #546. Negative is a
+ * pedal through the road.
+ *
+ * Every corner of both pedal boxes, turned with the crankset about `+X`
+ * (@see RIDER_CRANK_PARTS) and then with the bicycle about its `+Z` contact
+ * line; a roll of `+θ` takes `+Y` toward `−X`, so a corner at `(x, y)` stands
+ * `x·sin θ + y·cos θ` above the road.
+ *
+ * @test-facing the product parks the cranks by {@link CRANK_PARKING_LEAN_RADIANS},
+ * a closed form; `bicycle.test.ts` and `line-on-the-road.test.ts` hold every
+ * drawn crank on every fixture to this corner-by-corner geometry instead, which
+ * is what stops the closed form and the pedal disagreeing.
+ */
+export function lowestPedalHeight(bicycleLean: number, crankAngle: number): number {
+  const cos = Math.cos(crankAngle);
+  const sin = Math.sin(crankAngle);
+  const rise = Math.cos(bicycleLean);
+  const tip = Math.sin(bicycleLean);
+  let lowest = Number.POSITIVE_INFINITY;
+  for (const side of [1, -1]) {
+    for (const across of [PEDAL_WIDTH_METRES / 2, -PEDAL_WIDTH_METRES / 2]) {
+      for (const up of [PEDAL_HEIGHT_METRES / 2, -PEDAL_HEIGHT_METRES / 2]) {
+        for (const along of [PEDAL_DEPTH_METRES / 2, -PEDAL_DEPTH_METRES / 2]) {
+          const x = side * PEDAL_ACROSS_METRES + across;
+          const y = CRANK_AXIS_Y + (side * CRANK_LENGTH_METRES + up) * cos - along * sin;
+          lowest = Math.min(lowest, x * tip + y * rise);
+        }
+      }
+    }
+  }
+  return lowest;
+}
+
+/**
+ * The lean at which a pedal first touches the road, at the worst crank angle:
+ * **about 31.4°**, computed from this file's own pedal and crank — #546.
+ *
+ * The inside pedal's outer bottom edge is the lowest point; at its worst the
+ * box has turned a little past six o'clock, where its toe dips further than
+ * its centre has risen. So the edge stands `CRANK_AXIS_Y − hypot(crank +
+ * half a pedal's height, half its length)` above the road on an upright bicycle
+ * and `PEDAL_ACROSS + half its width` out from its plane, and it touches at
+ * the angle whose tangent is the one over the other. `bicycle.test.ts` sweeps
+ * {@link lowestPedalHeight} to hold this closed form to the geometry.
+ *
+ * ⚠️ **This model's, not a real frame's**: #546 records that no road-bike
+ * pedal-strike angle was found.
+ */
+export const PEDAL_STRIKE_LEAN_RADIANS = Math.atan2(
+  CRANK_AXIS_Y - Math.hypot(CRANK_LENGTH_METRES + PEDAL_HEIGHT_METRES / 2, PEDAL_DEPTH_METRES / 2),
+  PEDAL_ACROSS_METRES + PEDAL_WIDTH_METRES / 2,
+);
+
+/**
+ * The bicycle lean beyond which the cranks are parked with the OUTSIDE pedal
+ * down: **3° short of {@link PEDAL_STRIKE_LEAN_RADIANS}** — #546, and the owner's
+ * ruling of 2026-09-25.
+ *
+ * *"Outside pedal down, weight on it, inside pedal up"* (road.cc, *"11 tips for
+ * better cornering"*; Physical Cycling, *"Cornering lines"*: *"Put all your
+ * weight onto the outside pedal if you stop pedaling"*). Below this the cranks
+ * turn as they always have; above it they are drawn parked.
+ */
+export const CRANK_PARKING_LEAN_RADIANS = PEDAL_STRIKE_LEAN_RADIANS - (3 * Math.PI) / 180;
+
+/**
+ * How far below {@link CRANK_PARKING_LEAN_RADIANS} the cranks start to swing
+ * toward parked: **8°**. Below the strike angle every crank angle clears the
+ * road, so the swing can take its time; without it a crank would snap half a
+ * turn in one frame as the lean crossed a line.
+ */
+const CRANK_PARKING_BAND_RADIANS = (8 * Math.PI) / 180;
+
+/**
+ * The crank angle to DRAW a rider at, for the angle their pedalling put the
+ * cranks at and the lean their bicycle is drawn at — #546.
+ *
+ * ⚠️ **This amends #349's rule for the rider, and it is the owner's ruling
+ * rather than a convenience.** #349 says the rider's cranks turn exactly when
+ * the HUD shows a cadence, at exactly that cadence (@see advanceCrank). In a
+ * bend tight enough that the inside pedal would strike, they do not: they are
+ * parked with the OUTSIDE pedal down, for the rider as well as for the bot and
+ * the ghost, whatever the cadence reads. The HUD is untouched and still shows
+ * the reading; what is drawn is what a racer's legs do there.
+ *
+ * Stateless, like the rest of the drawing: the angle carried between frames is
+ * still the integral of the cadence (`GameView`), and this only decides what
+ * is drawn from it, so a rider leaves the bend with the cranks where their
+ * pedalling has them. Between {@link CRANK_PARKING_LEAN_RADIANS} less
+ * {@link CRANK_PARKING_BAND_RADIANS} and that angle the drawn crank swings
+ * smoothly from one to the other.
+ *
+ * The outside pedal is the `+X` one when the bicycle leans positive — a roll of
+ * `+θ` takes the bicycle's top toward `−X`, so `−X` is the inside — and the
+ * `+X` arm is at six o'clock at angle π. `undefined` is "the cranks are where
+ * the renderer left them" (`RiderMarker.crankAngle`), and stays so wherever
+ * nothing needs parking.
+ */
+export function drawnCrankAngle(
+  crankAngle: number | undefined,
+  bicycleLean: number,
+): number | undefined {
+  const lean = Math.abs(bicycleLean);
+  const from = CRANK_PARKING_LEAN_RADIANS - CRANK_PARKING_BAND_RADIANS;
+  if (!(lean > from)) {
+    return crankAngle;
+  }
+  const parked = bicycleLean > 0 ? Math.PI : 0;
+  if (crankAngle === undefined || lean >= CRANK_PARKING_LEAN_RADIANS) {
+    return parked;
+  }
+  const t = (lean - from) / CRANK_PARKING_BAND_RADIANS;
+  const share = t * t * (3 - 2 * t);
+  // The shorter way round, so a crank half a turn from parked does not spin.
+  const difference = wrapped(parked - crankAngle + Math.PI) - Math.PI;
+  return wrapped(crankAngle + share * difference);
 }

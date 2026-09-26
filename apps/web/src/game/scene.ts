@@ -23,7 +23,14 @@
 
 import { ghostDistanceAt, ghostHasFinished, seconds, type GhostTrack } from '@onyourleft/domain';
 
-import { BICYCLE_LENGTH_METRES, RIDER_HALF_WIDTH_METRES, simulatedCrankAngle } from './bicycle';
+import {
+  BICYCLE_LENGTH_METRES,
+  RIDER_HALF_WIDTH_METRES,
+  bicycleRoll,
+  drawnCrankAngle,
+  simulatedCrankAngle,
+  type RiderRoll,
+} from './bicycle';
 import { horizonRelief, terrainCorridor } from './landform';
 import { CAMERA_BEHIND_METRES, CAMERA_TARGET_AHEAD_METRES } from './camera';
 import type { CameraPose, RiderMarker, SceneFrame, WaterFrame } from './port';
@@ -132,10 +139,7 @@ export function sceneFrame(input: SceneInput): SceneFrame {
   // remember to clear. One seed for the scenery and the ground under it, so a
   // tree and the hillside it stands on are hashed from the same route.
   const seed = scatterSeed(input.profile);
-  // #499. Computed once per route and cached against the profile object
-  // (`racing-line.ts` §`racingLine`), so this is the first frame's cost only.
-  const line = input.centreline === true ? undefined : racingLine(input.profile);
-  const riders = ridersOnTheRoad(corridor, input, riderDistance, line);
+  const riders = placedRiders(input, corridor);
   return {
     corridor,
     // The camera follows the rider sideways — their drawn place, not the line's
@@ -327,8 +331,25 @@ const LINE_GIVEN_UP = 1 - (DRAWN_LIMIT_METRES - SIDE_BY_SIDE_METRES) / LINE_LIMI
  */
 const LEVEL_LANES: Readonly<Record<RiderMarker['kind'], number>> = { rider: 0, bot: -1, ghost: 1 };
 
+/**
+ * The riders of one frame on `corridor` — what {@link sceneFrame} draws as its
+ * markers, rider first, and the one place it gets them.
+ *
+ * Its own export so that a test sweeping hundreds of rider positions can place
+ * the riders without building the scenery, the ground and the water beside
+ * them each time — nine tenths of a frame, none of which a marker reads (#588).
+ * `line-on-the-road.test.ts` checks that it and `sceneFrame` agree.
+ */
+export function placedRiders(input: SceneInput, corridor: RoadCorridor): readonly PlacedRider[] {
+  const riderDistance: number = input.riderDistance ?? input.state.ride.distance;
+  // #499. Computed once per route and cached against the profile object
+  // (`racing-line.ts` §`racingLine`), so this is the first frame's cost only.
+  const line = input.centreline === true ? undefined : racingLine(input.profile);
+  return ridersOnTheRoad(corridor, input, riderDistance, line);
+}
+
 /** A rider on the road, and how far across it they were drawn. */
-interface PlacedRider {
+export interface PlacedRider {
   readonly marker: RiderMarker;
   /** Metres across the road from the centreline, positive on the normal's side. */
   readonly lateral: number;
@@ -398,10 +419,16 @@ function ridersOnTheRoad(
   }
   return riders.map((rider) => {
     const lateral = line === undefined ? 0 : lateralOf(rider, riders, line);
-    const lean = line === undefined ? 0 : leanAt(line, rider.distance, rider.speed);
-    const marker = markerAt(corridor, rider.distance, rider.kind, lateral, lean);
+    // The COMBINED lean the physics asks for, split into the bicycle's and the
+    // body's — #546. @see RiderMarker.lean
+    const roll = bicycleRoll(line === undefined ? 0 : leanAt(line, rider.distance, rider.speed));
+    const marker = markerAt(corridor, rider.distance, rider.kind, lateral, roll);
+    // #546: in a bend tight enough for the inside pedal to strike, every
+    // rider's cranks — the rider's own included, by the owner's ruling — are
+    // DRAWN parked with the outside pedal down. @see drawnCrankAngle
+    const crankAngle = drawnCrankAngle(rider.crankAngle, roll.bicycle);
     return {
-      marker: rider.crankAngle === undefined ? marker : { ...marker, crankAngle: rider.crankAngle },
+      marker: crankAngle === undefined ? marker : { ...marker, crankAngle },
       lateral,
     };
   });
@@ -486,7 +513,7 @@ function markerAt(
   atDistance: number,
   kind: RiderMarker['kind'],
   lateral: number,
-  lean: number,
+  roll: RiderRoll,
 ): RiderMarker {
   const at = placeOnCorridor(corridor, atDistance);
   // ⚠️ The heading is the road's at **this** marker's own distance, not the
@@ -501,7 +528,8 @@ function markerAt(
     y: at.y,
     z: at.z + heading.headingX * lateral,
     ...heading,
-    lean,
+    lean: roll.bicycle,
+    bodyLean: roll.body,
   };
 }
 

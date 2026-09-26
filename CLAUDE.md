@@ -350,7 +350,21 @@ apps/                 AGPL-3.0-or-later, without exception
                         that puts each foot on its own pedal, and the one rule
                         that decides whether the RIDER's cranks turn: they turn
                         exactly when the HUD shows a cadence number, at exactly
-                        that number. ⚠️ It names no model, no pack and no licence —
+                        that number. ⚠️ **Since #546 that rule has ONE exception,
+                        the owner's, and a reviewer who remembers it without one
+                        is reading the old file**: in a bend tight enough that
+                        the inside pedal would strike the road (about 31° of
+                        BICYCLE lean, computed from this file's own pedal —
+                        `PEDAL_STRIKE_LEAN_RADIANS`), every rider's cranks, the
+                        rider's own included, are DRAWN parked with the outside
+                        pedal down (`drawnCrankAngle`). The HUD and
+                        `advanceCrank` are unchanged, and the cranks come back
+                        to the integrated angle after the bend. ⚠️ And since
+                        #546 the body is not merged into the bicycle: the upper
+                        body is its own mesh, held back toward upright about the
+                        hips (`bicycleRoll`), so the BICYCLE leans a few per cent
+                        more than `tan φ = v²/(g·R)` and the pair's centre of
+                        mass leans exactly that. ⚠️ It names no model, no pack and no licence —
                         `ASSETS.toml` gains no row, and ADR 0022 D-1's "one CC0
                         source" is untouched, because there is no CC0 rigged
                         cyclist to download and a pedalling clip would have had
@@ -381,7 +395,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         ⚠️ The stylised world's budget is DRAW CALLS rather
                         than triangles (#240 NFR-2), and the bar leaves that
                         at six; the realistic world's is triangles, and the
-                        bar costs 96 of its 12 000.
+                        bar costs 96 of its 12 000. ⚠️ **#546 spent one**: the
+                        riders are FOUR instanced meshes since then, not three,
+                        because the upper body rolls against the bicycle —
+                        `game.browser.spec.ts` §`SCENE_DRAW_CALLS` is 9.
                         ⚠️ **Since #368 the bot and the ghost
                         DO get one, and a reviewer who remembers "the bot and
                         the ghost deliberately do NOT get one: three
@@ -414,7 +431,18 @@ apps/                 AGPL-3.0-or-later, without exception
                         elastic band) cuts inside and comes out more curved than
                         the centreline. `scene.ts` §`lateralOf` is where two
                         level riders are kept apart, and the camera follows the
-                        rider across the road without rolling
+                        rider across the road without rolling. ⚠️ **Since #546
+                        a straight is ridden on the RIGHT, not on the centre
+                        line**, and a reviewer who remembers the line settling
+                        to offset nought is reading the old file: the owner
+                        ruled a CLOSED road (the whole width through a bend), the
+                        right-hand side "for now" (`ROAD_SIDE`, one constant,
+                        and the road's normal is the SCREEN's right — the
+                        corridor is a mirror of the map in a right-handed
+                        renderer, which the browser gate reads back), a LATE
+                        apex (`LATE_APEX_GAIN`), and a roll rate bounded per
+                        SECOND as well as per metre (60°/s). `leanAt` is the
+                        COMBINED lean; `bicycle.ts` §`bicycleRoll` splits it
     src/game/contact-shadow.ts
                         where each rider's contact shadow lies (#426) — thrown
                         from `world.ts`'s ONE sun, never a second light
@@ -2024,7 +2052,7 @@ browser runs**.
 | `hosted-archive.ts` | what that third block decides **without** a network: which archive, which origins it may then reach, and where to put the ride inside whatever coverage the archive's own header declares. Pure, with `hosted-archive.test.ts` beside it in the Vitest suite — which is the answer to "a skipped block rots unseen" |
 | `pmtiles-fixture.ts` | a PMTiles v3 archive written from arithmetic, so the gate has a basemap to render. Emitted into `browser/dist` by `vite.browser.config.ts`, never committed, and carrying no OpenStreetMap data. ⚠️ It used to be the **only** file here with a Vitest test beside it; `hosted-archive.ts` is the second, and `apps/web/vitest.config.ts`'s `browser/**/*.test.ts` covers both |
 | `game.html`, `game-harness.ts` | since #91, the same idea for the renderer: a page that builds a scene through the **real** `game/three-renderer.ts` and the **real** `terrain.ts` |
-| `game.browser.spec.ts` | its spec — the renderer constructs against a live context, the geometry is one a driver accepts, and a frame reaches the drawing buffer (read back with `readPixels`, because `render` not throwing is a weaker claim). ⚠️ Since #430's pull request it also has §"the realistic world", on **one** extra load, `game.html?realistic`: the D-7 fallback, D-11 over a live scene, the one-call road, the gradient tint's contrast read off the drawing buffer **after the light and AgX**, the realistic rider's legs against the cranks, and the step down — and that the DEFAULT load fetches none of the realistic set. Since #499 it also reads the rider back off-centre and ROLLED at a 20 m hairpin's apex, through the centreline's camera held still, with the same rider drawn upright at the same place and the centreline rider as its two controls (`game-harness.ts` §`lineProbe`) |
+| `game.browser.spec.ts` | its spec — the renderer constructs against a live context, the geometry is one a driver accepts, and a frame reaches the drawing buffer (read back with `readPixels`, because `render` not throwing is a weaker claim). ⚠️ Since #430's pull request it also has §"the realistic world", on **one** extra load, `game.html?realistic`: the D-7 fallback, D-11 over a live scene, the one-call road, the gradient tint's contrast read off the drawing buffer **after the light and AgX**, the realistic rider's legs against the cranks, and the step down — and that the DEFAULT load fetches none of the realistic set. Since #499 it also reads the rider back off-centre and ROLLED at a 20 m hairpin's apex, through the centreline's camera held still, with the same rider drawn upright at the same place and the centreline rider as its two controls (`game-harness.ts` §`lineProbe`). Since #546 it also reads the rider on a STRAIGHT right of the frame's middle, with the centreline rider — #499's straight — as the control that must fail. ⚠️ **Since #546 the harness's `inTheFrame` and `onTheRoad` take the screen's right as the road's normal `(−headingZ, headingX)`** — they took `(headingZ, −headingX)`, the screen's LEFT, and every probe was symmetric about a camera on the centreline, so nothing noticed until #546 moved the camera 1.75 m right with the rider |
 | `hud.html`, `hud-harness.tsx` | since #266, the ride HUD: the **real** `game/hud/HudPanel.tsx` under the **real** `design/theme.css`, on the **real** stage `GameView` gives it, with every field populated and all three of #259's settled outcome words. ⚠️ **Until #423 that was the `oyl-shell` → `oyl-main` → `oyl-game` chain, and a reviewer who remembers it is reading the old file**: the HUD is laid over a `position: fixed` stage now, so its containing block is the viewport whatever is above it, and the old chain would have gone on measuring a stacked layout a rider only gets at 320×256. One thing on this page is the harness's own and it says so: each stage is `position: relative` and `100vh` tall, because six fixed stages are six panels on top of one another. A **`.tsx`**, and the first React in this directory |
 | `hud.browser.spec.ts` | its spec — no `.oyl-hud__value` overflows its grid track at a phone in either orientation, at **360 px** (where #423's first layout ran the third primary reading off the screen) and at a landscape tablet, read back from the browser's own layout. Its **control panels** are the half that makes a green run mean something; ⚠️ since #423 the control moves the words into the primary list as well as stripping #259's class, because every word is a secondary reading now and at 1.5 rem it would spill by under three pixels, which is not a control |
 | `shell.html`, `shell-harness.tsx` | since #307's review, the app **shell**: the **real** `shell/AppShell.tsx` with the **real** `ROUTES` table under the **real** `design/theme.css`. The second `.tsx` here. ⚠️ Its spacer goes **inside `.oyl-main`** and the file says why at length — after `.oyl-shell` the header scrolls out of its own sticky containing block and measures 0 px, and inside `.oyl-shell` `main` stays shorter than the viewport so a focus scroll never consults `scroll-margin-top`. Each mistake made a different assertion pass over nothing. ⚠️ Since #316 it also renders the **real** `design/Button.tsx` in both variants, with `RideView`'s own labels, because a shell handed no ports renders **zero** controls on all eleven routes and a size assertion over an empty list passes |
@@ -3674,6 +3702,10 @@ top of an issue **supersedes its body**.
 | What the cranks do when nobody is reporting a cadence, and why that is better than a rate | `apps/web/src/game/bicycle.ts` §`advanceCrank` |
 | Why the knee is resolved forward rather than backward, and the clamp the fit makes reachable | `apps/web/src/game/bicycle.ts` §`legBones` |
 | Why a rider rides off the centreline and leans, why the line is the least PEAK curvature rather than the least squared, and what it does not move | `apps/web/src/game/racing-line.ts`, `apps/web/src/game/scene.ts` §`lateralOf`, `apps/web/src/game/line-on-the-road.test.ts`, [#499](https://github.com/openzigs/onyourleft/issues/499) |
+| Why a straight is ridden on the right rather than on the centre line, which side "right" is on the screen, and why the apex is late | `apps/web/src/game/racing-line.ts` §`ROAD_SIDE`, §`LINE_HOME_OFFSET_METRES`, §`LATE_APEX_GAIN`, `apps/web/browser/game.browser.spec.ts` §"#546", [#546](https://github.com/openzigs/onyourleft/issues/546) |
+| Why the drawn lean rolls at no more than 60° a second, and why an S-bend no longer rolls at twice the rate | `apps/web/src/game/racing-line.ts` §`MAXIMUM_ROLL_RADIANS_PER_SECOND`, §`leanAt` |
+| Why the bicycle leans a little further than `tan φ = v²/(g·R)` and the body less far, and where the masses came from | `apps/web/src/game/bicycle.ts` §`bicycleRoll`, §`UPPER_BODY_UPRIGHT_SHARE`, §`HAT_MASS_SHARE`, `apps/web/src/game/port.ts` §`RiderMarker.bodyLean` |
+| When a pedal would strike the road, and why the rider's own cranks are parked outside-pedal-down in a tight bend whatever the cadence | `apps/web/src/game/bicycle.ts` §`PEDAL_STRIKE_LEAN_RADIANS`, §`drawnCrankAngle`, §`advanceCrank` |
 | Why the riders cast a contact shadow, from which sun, and why the ghost casts none | `apps/web/src/game/contact-shadow.ts` §`CASTS_CONTACT_SHADOW`, `apps/web/src/game/three-renderer.ts` §`ContactShadowBelt`, [#426](https://github.com/openzigs/onyourleft/issues/426) |
 | Why the scene-free frame is six draw calls since #426, and what the shadow map would cost instead | `apps/web/browser/game.browser.spec.ts` §`SCENE_DRAW_CALLS`, §"measures what the shading costs" |
 | Why the shadow map is a rung above the ladder with no control on any screen, and how a device is measured with it on | `apps/web/src/game/quality.ts` §`RIDER_SHADOW_MAP_RUNG`, §`RIDER_SHADOW_MAP_STORAGE_KEY`, [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part T |
