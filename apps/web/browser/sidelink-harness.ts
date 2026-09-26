@@ -197,70 +197,6 @@ function addresses(code: string, role: 'offer' | 'answer'): readonly string[] {
   return 'code' in read ? read.code.parameters.candidates.map((each) => each.address) : [];
 }
 
-// TEMPORARY (#568): a trace of the control channel at both ends. Reverted.
-/* eslint-disable @typescript-eslint/unbound-method */
-const TRACE: string[] = [];
-{
-  const t0 = performance.now();
-  const stamp = (): string => (performance.now() - t0).toFixed(1);
-  const tabletChannels = new WeakSet<RTCDataChannel>();
-  const originalSend = RTCDataChannel.prototype.send;
-  RTCDataChannel.prototype.send = function (this: RTCDataChannel, data: never) {
-    if (this.label === 'control') {
-      TRACE.push(
-        `${stamp()} ${tabletChannels.has(this) ? 'tablet' : 'phone'} send id=${String(this.id)} ${this.readyState} buffered=${String(this.bufferedAmount)} ${typeof data === 'string' ? (data as string).slice(0, 14) : 'bin'}`,
-      );
-    }
-    originalSend.call(this, data);
-  };
-  const originalCreate = RTCPeerConnection.prototype.createDataChannel;
-  RTCPeerConnection.prototype.createDataChannel = function (
-    this: RTCPeerConnection,
-    label: string,
-    init?: RTCDataChannelInit,
-  ) {
-    const channel = originalCreate.call(this, label, init);
-    if (label === 'control') {
-      tabletChannels.add(channel);
-      channel.addEventListener('open', () => {
-        TRACE.push(`${stamp()} tablet open id=${String(channel.id)}`);
-      });
-      channel.addEventListener('message', (e: MessageEvent) => {
-        TRACE.push(`${stamp()} tablet recv ${String(e.data).slice(0, 14)}`);
-      });
-      channel.addEventListener('close', () => {
-        TRACE.push(`${stamp()} tablet close`);
-      });
-    }
-    return channel;
-  };
-  const describe = Object.getOwnPropertyDescriptor(RTCPeerConnection.prototype, 'ondatachannel');
-  if (describe?.set !== undefined) {
-    const set = describe.set;
-    Object.defineProperty(RTCPeerConnection.prototype, 'ondatachannel', {
-      ...describe,
-      set(this: RTCPeerConnection, handler: ((event: RTCDataChannelEvent) => void) | null) {
-        set.call(
-          this,
-          handler === null
-            ? null
-            : (event: RTCDataChannelEvent) => {
-                TRACE.push(
-                  `${stamp()} phone datachannel ${event.channel.label} id=${String(event.channel.id)} ${event.channel.readyState}`,
-                );
-                if (event.channel.label === 'control') {
-                  event.channel.addEventListener('message', (e: MessageEvent) => {
-                    TRACE.push(`${stamp()} phone recv ${String(e.data).slice(0, 14)}`);
-                  });
-                }
-                handler(event);
-              },
-        );
-      },
-    });
-  }
-}
-
 async function run(): Promise<SideLinkMeasurement> {
   const errors: string[] = [];
   const phoneHeard: SideLinkEvent[] = [];
@@ -445,7 +381,6 @@ async function run(): Promise<SideLinkMeasurement> {
       throw error;
     }
     errors.push(error.message);
-    errors.push(...TRACE);
     // Nothing after a stalled step is measured, and neither end is left open.
     tablet.control.endSidePairing();
     phone.link.endSideLink();

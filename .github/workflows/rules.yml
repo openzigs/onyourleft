@@ -72,7 +72,7 @@ jobs:
     # game.browser.spec.ts reloads a harness that takes ten seconds on a runner
     # with no GPU. Twenty is still a stop: a hung job dies in twenty minutes
     # rather than six hours.
-    timeout-minutes: 35
+    timeout-minutes: 20
     steps:
       - name: Check out the repository
         # Pinned to a full commit SHA, not a tag: a tag is mutable, and a
@@ -430,10 +430,6 @@ jobs:
       # halves as one command.
       - name: Browser gate
         run: pnpm run test:browser
-
-      # TEMPORARY (#552, #568): one repeat run in CI. Reverted before review.
-      - name: TEMPORARY sidelink repeat
-        run: pnpm --filter @onyourleft/web exec vite build --config vite.browser.config.ts && DEBUG=pw:browser pnpm --filter @onyourleft/web exec playwright test sidelink --repeat-each=350 2>&1 | grep -vE 'CVDisplayLink|^\s*$' | grep -E 'Send failed|DataChannel|sctp|SCTP|passed|failed|\+   "|✘' ; test "${PIPESTATUS[0]}" -eq 0
 
       # DEP001. The other half of the licence boundary: check-repo-rules.sh
       # checks the headers and manifests of the code we write, this checks the
