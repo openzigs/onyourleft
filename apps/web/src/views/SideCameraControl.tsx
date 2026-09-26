@@ -8,15 +8,20 @@
  * A section of the Camera screen. In the order a rider meets it:
  *
  * 1. **Pair a phone** shows the offer code (D-1).
- * 2. **Read the phone's code** turns THIS tablet's camera on — only with the
- *    consent already given above it, because scanning is camera use (D-4) —
- *    reads the phone's answer, and turns the camera back off if it was off.
+ * 2. **Read the phone's code** turns THIS tablet's FRONT camera on — only
+ *    with the consent already given above it, because scanning is camera use
+ *    (D-4) — shows what it sees while it looks (#557), reads the phone's
+ *    answer, and gives the camera back as it found it.
  * 3. Once paired: the phone's state in words (#529's *"pairing, framing,
  *    filming, stopped, or link lost"*), **Start filming**, **Stop filming**,
  *    what became of the last command, and **End pairing**.
  *
  * ⚠️ **No picture of the phone's is ever on this screen** — the owner's
- * ruling on #527, *"the tablet shows state only"*. Since #530 the pictures do
+ * ruling on #527, *"the tablet shows state only"*. The one picture this
+ * screen ever shows is its OWN front camera's, while it is reading the
+ * phone's code and never once paired: the owner relaxed #527 for those
+ * seconds on 2026-09-26 (#557, ADR 0033's amendment), and
+ * `camera/ScanViewfinder.tsx` is the whole of it. Since #530 the pictures do
  * cross to this tablet, and they go straight to the pose model
  * (`camera/side-analysis.ts`); what this screen reads is
  * `camera/side-analysis-port.ts` §`SideAnalysisState` — counts, and whether
@@ -33,7 +38,9 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type JS
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
 import { PairingCode } from '../camera/PairingCode';
+import type { CameraFacing } from '../camera/camera-port';
 import type { CameraController } from '../camera/session';
+import { ScanViewfinder } from '../camera/ScanViewfinder';
 import { PAIRING_REFUSAL_TEXT, type PairingRefusal } from '../camera/side-link-code';
 import {
   SIDE_PAIRING_END_TEXT,
@@ -54,6 +61,16 @@ import type {
 } from '../camera/side-analysis-port';
 import { FRAMING_VERDICT_TEXT } from '../camera/framing';
 import { PAIRING_READER_UNLOADED, usePairingScan } from '../camera/usePairingScan';
+
+/**
+ * The tablet's own next step while its offer is up — #557. Shown beside the
+ * button that does it, and read out with it (`aria-describedby`).
+ */
+export const TABLET_NEXT_STEP =
+  'once the phone shows its own code, press “Read the phone’s code” and turn this tablet’s ' +
+  'screen towards the phone’s.';
+
+const NEXT_STEP_ID = 'oyl-side-control-next';
 
 /** What the tablet is told when reading the phone's code needs a camera it has not agreed to. */
 export const TABLET_SCAN_NEEDS_CONSENT =
@@ -78,7 +95,7 @@ export interface SideCameraControlProps {
 export function SideCameraControl({ controller, pairing }: SideCameraControlProps): JSX.Element {
   const [current, setCurrent] = useState<TabletSidePairing | undefined>(() => {
     // An offer this screen voided on its way out (D-4, {@link Offer}) is not
-    // news on the way back in: the rider left, and "You ended the pairing"
+    // news on the way back in: the rider left, and "You ended the session"
     // would be a sentence about something they did not do. They meet "Pair a
     // phone" instead. A pairing that ended any other way is still told.
     const held = pairing.currentSideCamera();
@@ -246,19 +263,37 @@ function Offer({
   const [scanning, setScanning] = useState(false);
   const [problem, setProblem] = useState<string | undefined>(undefined);
   /**
-   * Whether THIS section turned the camera on, so it turns it off again — and
-   * only then: a camera the rider turned on above is theirs to turn off. A ref,
-   * because it is read when the section goes away, not rendered.
+   * Whether THIS section turned the front camera on, so it gives it back
+   * again — and only then: a front camera the rider already had on is theirs.
+   * A ref, because it is read when the section goes away, not rendered.
    */
   const turnedOn = useRef(false);
+  /**
+   * Which way the rider's OWN camera faced, when this section turned it round
+   * to the front to read the code (#557) — so it is turned back rather than
+   * off. `undefined` when no camera was on.
+   */
+  const restore = useRef<CameraFacing | undefined>(undefined);
+
+  /** Give the camera back as this section found it: off, or facing the way it was. */
+  const giveBack = useCallback(() => {
+    if (!turnedOn.current) {
+      return;
+    }
+    turnedOn.current = false;
+    const facing = restore.current;
+    restore.current = undefined;
+    if (facing === undefined) {
+      controller.turnOff();
+    } else {
+      void controller.turnOn(facing);
+    }
+  }, [controller]);
 
   const stopScanning = useCallback(() => {
     setScanning(false);
-    if (turnedOn.current) {
-      turnedOn.current = false;
-      controller.turnOff();
-    }
-  }, [controller]);
+    giveBack();
+  }, [giveBack]);
 
   // ADR 0033 D-4: the offer is *"void once an answer is accepted and when the
   // pairing screen closes"*. This section is the pairing screen's offer, so
@@ -292,44 +327,51 @@ function Offer({
   }, [pairing]);
 
   // Leaving mid-scan leaves no camera on that this section turned on (D-4:
-  // *"discarded as soon as a code is read or scanning is cancelled"*).
+  // *"discarded as soon as a code is read or scanning is cancelled"*), and a
+  // rider's own camera it turned round is turned back.
   //
   // ⚠️ **Including a camera still coming on when the section went** (#550's
   // second review): `turnOn` can take a few hundred milliseconds, or as long
   // as the platform's permission prompt is up, and a section that left in
   // that window found `turnedOn` false here and did nothing — then the camera
   // came on with no screen owning it. `mounted` is what `startScanning` reads
-  // when the camera arrives, and it turns the camera straight back off.
+  // when the camera arrives, and it gives the camera straight back.
   // `side-camera.ts` §`turnOnForFraming` is the phone's half of the same rule.
   const mounted = useRef(false);
   useEffect(() => {
     mounted.current = true;
-    const ours = turnedOn;
     return () => {
       mounted.current = false;
-      if (ours.current) {
-        ours.current = false;
-        controller.turnOff();
-      }
+      giveBack();
     };
-  }, [controller]);
+  }, [giveBack]);
 
   const startScanning = useCallback(() => {
     setProblem(undefined);
-    if (controller.state().live) {
+    const before = controller.state();
+    if (before.live && before.facing === 'user') {
       setScanning(true);
       return;
     }
-    void controller.turnOn().then((failed) => {
+    // #557: the FRONT camera, so the two screens can face each other and the
+    // rider can see the viewfinder below. A back camera the rider left on is
+    // turned round for the read (`session.ts` §`turnOn`) and back afterwards.
+    const facing = before.live ? before.facing : undefined;
+    void controller.turnOn('user').then((failed) => {
+      if (failed === undefined) {
+        turnedOn.current = true;
+        restore.current = facing;
+      } else if (facing !== undefined) {
+        // The rider's own camera went off to be turned round, and the front
+        // one would not come on: theirs comes back.
+        void controller.turnOn(facing);
+      }
       if (!mounted.current) {
-        // Nobody is here to scan with it or to turn it off: off it goes.
-        if (failed === undefined) {
-          controller.turnOff();
-        }
+        // Nobody is here to scan with it: give it back at once.
+        giveBack();
         return;
       }
       if (failed === undefined) {
-        turnedOn.current = true;
         setScanning(true);
       } else {
         setProblem(
@@ -339,7 +381,7 @@ function Offer({
         );
       }
     });
-  }, [controller]);
+  }, [controller, giveBack]);
 
   usePairingScan(
     controller,
@@ -359,8 +401,8 @@ function Offer({
       });
     },
     () => {
-      // The reader would not load: stop, turn off a camera this section turned
-      // on for the scan, and say so rather than "Looking…" for ever.
+      // The reader would not load: stop, give back a camera this section
+      // turned on for the scan, and say so rather than "Looking…" for ever.
       stopScanning();
       setProblem(PAIRING_READER_UNLOADED);
     },
@@ -374,8 +416,8 @@ function Offer({
           it so it can see this code.
         </li>
         <li>
-          The phone then shows a code of its own. Press “Read the phone’s code” and hold this tablet
-          so its camera can see it.
+          The phone then shows a code of its own. On this tablet, press “Read the phone’s code”, and
+          hold the two screens facing each other so this tablet’s front camera can see it.
         </li>
       </ol>
       <PairingCode
@@ -383,15 +425,28 @@ function Offer({
         label="Pairing code for the side-camera phone to scan"
       />
       <p>{SIDE_PHONE_STATE_TEXT.pairing}</p>
+      {/*
+        #557: the tablet's own step, straight after its code, with focus on it
+        — the "Pair a phone" button the rider just pressed is gone, and a rider
+        whose phone had scanned used to find a tablet that "does not seem to
+        be doing anything".
+      */}
+      <p id={NEXT_STEP_ID}>
+        <strong>Next, on this tablet: </strong>
+        {TABLET_NEXT_STEP}
+      </p>
       {scanning ? (
         <>
           <p role="status">Looking for the phone’s code…</p>
-          <Button variant="secondary" onClick={stopScanning}>
+          <ScanViewfinder controller={controller} />
+          <Button variant="secondary" onClick={stopScanning} focusOnMount>
             Stop looking
           </Button>
         </>
       ) : (
-        <Button onClick={startScanning}>Read the phone’s code</Button>
+        <Button onClick={startScanning} describedBy={NEXT_STEP_ID} focusOnMount>
+          Read the phone’s code
+        </Button>
       )}
       {problem === undefined ? null : (
         <StatusMessage tone="warning" live>

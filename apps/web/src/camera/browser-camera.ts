@@ -49,6 +49,7 @@
 import { CameraCaptureError, CODE_PIXELS_LONG_SIDE, SIDE_FRAME_LONG_SIDE } from './camera-port';
 import type {
   CameraAvailability,
+  CameraFacing,
   CodePixels,
   CameraPermission,
   CameraPort,
@@ -260,10 +261,19 @@ function problemFor(error: unknown): CameraProblemKind {
  * property nothing in this milestone reads; `frame.ts` records the actual
  * dimensions instead, so whatever the device gave is what is written down.
  */
-export const CAMERA_CONSTRAINTS = {
-  video: { facingMode: { ideal: 'environment' } },
-  audio: false,
-} as const;
+export const CAMERA_CONSTRAINTS = cameraConstraints('environment');
+
+/**
+ * What the camera is asked for, facing `facing` — #557. The same shape as
+ * {@link CAMERA_CONSTRAINTS} and the same `ideal`, so a device with only the
+ * other camera still opens it rather than refusing.
+ */
+export function cameraConstraints(facing: CameraFacing): {
+  readonly video: { readonly facingMode: { readonly ideal: CameraFacing } };
+  readonly audio: false;
+} {
+  return { video: { facingMode: { ideal: facing } }, audio: false };
+}
 
 /**
  * This browser's own media devices, or `undefined`.
@@ -343,13 +353,13 @@ export function browserCameraPort(options: BrowserCameraOptions): CameraPort {
       }
     },
 
-    async startCamera(): Promise<CameraSession> {
+    async startCamera(facing: CameraFacing = 'environment'): Promise<CameraSession> {
       if (!secureContext) {
         throw new CameraCaptureError('unsupported', cameraProblemMessage('unsupported'));
       }
       let stream: MediaStreamLike;
       try {
-        stream = await devices.getUserMedia(CAMERA_CONSTRAINTS);
+        stream = await devices.getUserMedia(cameraConstraints(facing));
       } catch (error) {
         const kind = problemFor(error);
         throw new CameraCaptureError(kind, cameraProblemMessage(kind));

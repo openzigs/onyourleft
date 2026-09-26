@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import type { JSX, ReactNode } from 'react';
+import { useEffect, useRef, type JSX, type ReactNode } from 'react';
 
 /** Primary for the one action a view is for; secondary for everything else. */
 export type ButtonVariant = 'primary' | 'secondary';
@@ -31,6 +31,17 @@ export interface ButtonProps {
   readonly disabled?: boolean;
   /** The id of an element that explains this button, for `aria-describedby`. */
   readonly describedBy?: string;
+  /**
+   * Move focus here when the button first appears — #557.
+   *
+   * ⚠️ **Only for a button that REPLACES the control the rider just pressed**,
+   * such as the next step of a flow that the press revealed. That control is
+   * gone, so focus would otherwise fall back to the page and a keyboard or
+   * screen-reader user would have to hunt for where they are. Never on a
+   * button that appears on its own: focus that moves without a press is a
+   * page that moves under the rider.
+   */
+  readonly focusOnMount?: boolean;
 }
 
 /**
@@ -46,7 +57,15 @@ export function Button({
   type = 'button',
   disabled = false,
   describedBy,
+  focusOnMount = false,
 }: ButtonProps): JSX.Element {
+  const element = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (focusOnMount) {
+      element.current?.focus();
+    }
+    // On mount only: a prop that turns on later has not replaced anything.
+  }, []);
   const className = variant === 'primary' ? 'oyl-button' : 'oyl-button oyl-button--secondary';
   // `type` is passed straight through. It used to go through a ternary that
   // returned its own argument (#143) — which read like a guard against a third
@@ -54,6 +73,7 @@ export function Button({
   // defaulted above, so no third value can reach here.
   return (
     <button
+      ref={element}
       className={className}
       type={type}
       onClick={onClick}

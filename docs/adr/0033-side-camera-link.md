@@ -589,3 +589,32 @@ this path it means:
 - **The owner wants a photographic reference** or a keep on this path. D-6 and D-7 are then
   superseded for this path, and ADR 0029 D-2 and D-4 govern those pictures as they do any other
   kept frame.
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-09-26** — **The tablet shows a viewfinder while, and only while, it reads the phone's
+  code, and it reads with its FRONT camera.** This relaxes the owner's #527 ruling in §Context —
+  *"Preview on the tablet: **None.** … The tablet shows state only"* — for the seconds of pairing
+  alone, and the owner asked for it on
+  [#557](https://github.com/openzigs/onyourleft/issues/557) on 2026-09-26: *"the phone needs to be
+  showing the camera view or a preview"*. The first pairing on the owner's Pixel Tablet and Pixel 8
+  took three attempts: the tablet read the answer QR with its back camera (`facingMode:
+  'environment'`) and no picture on screen, so the rider pointed the tablet's back at the phone
+  with neither screen in view, and it only worked with the phone flat on a table and the tablet held
+  flat above it. What stands and what changes:
+  - **Stands.** No picture of the PHONE's is ever on the tablet — D-6's pictures go to the pose
+    model and are thrown away. The viewfinder is the tablet's own camera, is never shown once the
+    phone is paired, and takes no frame: the platform plays the camera's stream into an element
+    (`camera/ScanViewfinder.tsx`, `session.ts` §`showPreview`), and nothing is drawn, encoded, sent
+    or kept. The paragraph *"The tablet's camera during pairing"* under D-4 is unchanged: the
+    frames the code is read from are still decoded in memory for the code only and discarded.
+  - **Changes.** The tablet's scan asks for the front camera (`camera-port.ts` §`CameraFacing`), as
+    a preference, so a device with one camera still uses it. A back camera the rider left on is
+    turned round for the read and back afterwards (`session.ts` §`turnOn`).
+  - **Also from #557, and not a change to any decision here.** The tablet holds a screen wake lock
+    from the offer until the pairing ends, however it ends, because a tablet that slept on its
+    default one-minute timeout voided the offer or dropped the link twice (D-4's rule working as
+    written, on a device nobody told to stay awake). And a pairing ended by *Stop filming* on the
+    tablet is now reported on the tablet as ended there, which is what the phone already said.

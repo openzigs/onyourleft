@@ -42,6 +42,7 @@ import {
   SIDE_FRAMING_TEXT,
   SideCameraControl,
   sidePicturesText,
+  TABLET_NEXT_STEP,
   TABLET_SCAN_NEEDS_CONSENT,
 } from './SideCameraControl';
 
@@ -169,6 +170,44 @@ describe('pairing, on the tablet', () => {
     expect(document.body.textContent).toContain(SIDE_PHONE_STATE_TEXT.framing);
   });
 
+  it('reads with the FRONT camera, and shows what it sees while, and only while, it reads — #557', async () => {
+    const { camera, phoneReads } = await tablet();
+    await press('Pair a phone');
+    expect(document.querySelector('[data-oyl-scan-viewfinder]')).toBeNull();
+    await phoneReads();
+    await press('Read the phone’s code');
+    expect(camera.facings).toStrictEqual(['user']);
+    expect(document.querySelector('[data-oyl-scan-viewfinder] video')).not.toBeNull();
+    expect(camera.calls).toContain('preview');
+    await scanOnce();
+    // Paired: the viewfinder is gone and the stream is off it.
+    expect(document.querySelector('[data-oyl-scan-viewfinder]')).toBeNull();
+    expect(camera.calls).toContain('preview-detached');
+  });
+
+  it('takes the viewfinder down when the rider stops looking — #557', async () => {
+    const { camera } = await tablet();
+    await press('Pair a phone');
+    await press('Read the phone’s code');
+    expect(document.querySelector('[data-oyl-scan-viewfinder]')).not.toBeNull();
+    await press('Stop looking');
+    expect(document.querySelector('[data-oyl-scan-viewfinder]')).toBeNull();
+    expect(camera.calls).toContain('preview-detached');
+  });
+
+  it('puts the tablet’s own next step in front of the rider, focused, as soon as the offer is up — #557', async () => {
+    await tablet();
+    await press('Pair a phone');
+    const read = button('Read the phone’s code');
+    expect(read).toBeDefined();
+    expect(document.activeElement).toBe(read);
+    const described = read?.getAttribute('aria-describedby') ?? '';
+    expect(document.getElementById(described)?.textContent).toContain(TABLET_NEXT_STEP);
+    await press('Read the phone’s code');
+    // The pressed button is gone; focus is not left on the page.
+    expect(document.activeElement).toBe(button('Stop looking'));
+  });
+
   it('turns the camera it opened off again when the rider stops looking', async () => {
     const { camera } = await tablet();
     await press('Pair a phone');
@@ -233,14 +272,29 @@ describe('pairing, on the tablet', () => {
     expect(readerLoads()).toBe(1);
   });
 
-  it('leaves alone a camera the rider turned on themselves', async () => {
+  it('leaves alone a FRONT camera the rider turned on themselves', async () => {
     const { camera, controller } = await tablet();
-    await controller.turnOn();
+    await controller.turnOn('user');
     await press('Pair a phone');
     await press('Read the phone’s code');
     await press('Stop looking');
     expect(camera.calls).not.toContain('stop');
+    expect(camera.facings).toStrictEqual(['user']);
     expect(controller.state().live).toBe(true);
+  });
+
+  it('turns a back camera the rider left on round to read, and back again afterwards — #557', async () => {
+    // The owner's own route in: "Turn the camera on" above, then pairing. The
+    // scan used to read with that back camera, blind.
+    const { camera, controller } = await tablet();
+    await controller.turnOn();
+    await press('Pair a phone');
+    await press('Read the phone’s code');
+    expect(controller.state()).toMatchObject({ live: true, facing: 'user' });
+    await press('Stop looking');
+    await settle();
+    expect(camera.facings).toStrictEqual(['environment', 'user', 'environment']);
+    expect(controller.state()).toMatchObject({ live: true, facing: 'environment' });
   });
 
   it('asks for consent rather than opening a camera nobody agreed to', async () => {
@@ -390,6 +444,29 @@ describe('driving the phone, on the tablet', () => {
     await flushSideLink();
     expect(phone.link.sideLinkCondition()).toBe('ended');
     expect(button('Pair a phone')).toBeDefined();
+  });
+
+  it('agrees with the phone about who ended it, after Stop filming on this tablet — #557', async () => {
+    // The owner's fifth finding: the phone said "Your tablet ended the
+    // session" and this tablet said the phone had ended it.
+    const { phone } = await paired();
+    phone.link.reportToTablet({ state: 'stopped', reason: 'tablet' });
+    await flushSideLink();
+    phone.link.endSideLink();
+    await flushSideLink();
+    await settle();
+    expect(document.body.textContent).toContain(SIDE_PAIRING_END_TEXT['ended-here']);
+    expect(document.body.textContent).not.toContain(SIDE_PAIRING_END_TEXT['phone-ended']);
+  });
+
+  it('still says the phone ended it when the rider stopped it on the phone', async () => {
+    const { phone } = await paired();
+    phone.link.reportToTablet({ state: 'stopped', reason: 'rider' });
+    await flushSideLink();
+    phone.link.endSideLink();
+    await flushSideLink();
+    await settle();
+    expect(document.body.textContent).toContain(SIDE_PAIRING_END_TEXT['phone-ended']);
   });
 
   it('keeps the pairing when the screen goes away and comes back', async () => {

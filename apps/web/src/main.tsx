@@ -818,6 +818,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   // line is what supplies it.
   const sidePairing = sideLinkAvailable()
     ? sidePairingPort({
+        // #557: the tablet stays awake while it pairs and while it is paired.
+        screenLock: browserScreenLockSource(platformWakeLock()),
         analyse: (control) =>
           new SideAnalysis({
             control,

@@ -2552,6 +2552,30 @@ select option {
 }
 
 /* =============================================================================
+ * THE TABLET'S VIEWFINDER WHILE IT READS THE PHONE'S CODE — #557.
+ *
+ * `camera/ScanViewfinder.tsx`: shown while scanning and never once paired
+ * (ADR 0033's 2026-09-26 amendment). Mirrored, as a front camera's preview is
+ * everywhere else, so moving the phone left moves its picture left; the code
+ * reader reads the camera's own pixels, which this does not touch. Bounded in
+ * both directions so the tablet's own code beside it stays on screen.
+ */
+.oyl-scan-viewfinder {
+  margin: 0 0 var(--oyl-space-md);
+}
+
+.oyl-scan-viewfinder__video {
+  background: var(--oyl-color-ink);
+  block-size: auto;
+  display: block;
+  inline-size: 100%;
+  max-block-size: 40vh;
+  max-inline-size: 24rem;
+  object-fit: contain;
+  transform: scaleX(-1);
+}
+
+/* =============================================================================
  * THE PAIRING CODE — #529, ADR 0033 D-1.
  *
  * `camera/PairingCode.tsx` draws one QR code for the other device's camera.

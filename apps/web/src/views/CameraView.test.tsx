@@ -26,7 +26,15 @@ import {
   type Mounted,
 } from '../testing/mount';
 
-import { CameraView, CAMERA_NO_PORT } from './CameraView';
+import { sidePairingPort } from '../camera/side-link';
+
+import {
+  CameraView,
+  CAMERA_NO_PORT,
+  SIDE_CAMERA_WAY_TITLE,
+  SINGLE_PICTURE_PURPOSE,
+  SINGLE_PICTURE_TITLE,
+} from './CameraView';
 
 let mounted: Mounted | undefined;
 
@@ -53,6 +61,39 @@ describe('with no camera port', () => {
     // `views/DevicesView.tsx`'s rule: a disabled button is removed from the tab
     // order, so a keyboard user never reaches it and never hears why.
     expect(queryAll(document, 'button')).toHaveLength(0);
+  });
+});
+
+describe('the way in — #557', () => {
+  it('puts the side camera first, as a button, ahead of the one-picture camera, which says what it is for', async () => {
+    const camera = scriptedCamera();
+    const controller = controllerFor(camera);
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    mounted = await mount(
+      <CameraView
+        controller={controller}
+        sidePairing={sidePairingPort({ peer: () => undefined })}
+      />,
+    );
+    const headings = queryAll(document, 'h3').map((each) => each.textContent ?? '');
+    const way = headings.indexOf(SIDE_CAMERA_WAY_TITLE);
+    const pairing = headings.indexOf('A side camera on a tripod');
+    const single = headings.indexOf(SINGLE_PICTURE_TITLE);
+    expect(way).toBeGreaterThanOrEqual(0);
+    expect(pairing).toBeGreaterThan(way);
+    expect(single).toBeGreaterThan(pairing);
+
+    // The phone's way in is drawn as a button, and comes before every control.
+    const link = queryAll<HTMLAnchorElement>(document, 'a[href="#/camera/side"]')[0];
+    expect(link?.classList.contains('oyl-button')).toBe(true);
+    const first = queryAll(document, 'button')[0];
+    expect(first).toBeDefined();
+    if (link === undefined || first === undefined) {
+      return;
+    }
+    expect(link.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    expect(document.body.textContent).toContain(SINGLE_PICTURE_PURPOSE);
   });
 });
 

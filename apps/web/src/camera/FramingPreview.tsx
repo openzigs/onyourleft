@@ -7,9 +7,11 @@
  *
  * The owner's ruling on #527: *"framing is set up on this phone only. The
  * tablet shows state and no preview."* So this is the one place in the client
- * a camera's picture is on a screen, and it is here, in `camera/`, because it
- * is the one component that names a `<video>` element — `boundary.test.ts`
- * holds every camera platform name inside this directory.
+ * a camera's picture is on a screen for longer than a pairing — ⚠️ since #557
+ * the tablet also shows its own front camera while it reads the phone's code,
+ * and `ScanViewfinder.tsx` is that — and it is here, in `camera/`, because it
+ * names a `<video>` element: `boundary.test.ts` holds every camera platform
+ * name inside this directory.
  *
  * ⚠️ **What it does with the picture: nothing.** The camera's stream is played
  * by the platform into the element (`session.ts` §`showPreview`); no pixel is

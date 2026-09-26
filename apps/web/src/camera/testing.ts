@@ -20,6 +20,7 @@
 
 import type {
   CameraAvailability,
+  CameraFacing,
   CameraPermission,
   CameraPort,
   CameraProblemKind,
@@ -69,6 +70,8 @@ export interface ScriptedCamera {
   readonly port: CameraPort;
   /** Every method call, in order, so a test can assert one never happened. */
   readonly calls: string[];
+  /** Which way each `startCamera()` asked the camera to face, in order — #557. */
+  readonly facings: CameraFacing[];
   /** The live session, if one was started. */
   session(): CameraSession | undefined;
   /** Ends the track from outside, as an operating system or another app would. */
@@ -97,6 +100,7 @@ export function cleanFrameBytes(length = 1024): Uint8Array {
 /** A {@link CameraPort} that does what it is told and records what it was asked. */
 export function scriptedCamera(options: ScriptedCameraOptions = {}): ScriptedCamera {
   const calls: string[] = [];
+  const facings: CameraFacing[] = [];
   let live = false;
   let session: CameraSession | undefined;
   let samples = 0;
@@ -111,8 +115,9 @@ export function scriptedCamera(options: ScriptedCameraOptions = {}): ScriptedCam
       calls.push('request');
       return Promise.resolve({ kind: options.permission ?? 'granted' });
     },
-    startCamera: async () => {
+    startCamera: async (facing = 'environment') => {
       calls.push('start');
+      facings.push(facing);
       if (options.startFails !== undefined) {
         throw new CameraCaptureError(options.startFails, cameraProblemMessage(options.startFails));
       }
@@ -197,6 +202,7 @@ export function scriptedCamera(options: ScriptedCameraOptions = {}): ScriptedCam
   return {
     port,
     calls,
+    facings,
     session: () => session,
     endTheTrack: () => {
       live = false;

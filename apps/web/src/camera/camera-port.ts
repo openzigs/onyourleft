@@ -351,6 +351,18 @@ export const CODE_PIXELS_LONG_SIDE = 640;
  */
 export const SIDE_FRAME_LONG_SIDE = 256;
 
+/**
+ * Which way a camera faces — #557.
+ *
+ * `'environment'` is the back of the device, the one a tripod phone points at
+ * the rider. `'user'` is the screen's side, the one the TABLET reads the
+ * phone's pairing code with: the two screens face each other, so the tablet
+ * can show a viewfinder and the rider can see both codes at once. Reading it
+ * with the back camera meant pointing the tablet's back at the phone with
+ * neither screen in view, which the owner could not do (#557).
+ */
+export type CameraFacing = 'environment' | 'user';
+
 /** The one seam between this client and a camera. */
 export interface CameraPort {
   /** What this platform can say before anything is opened. Never rejects. */
@@ -370,10 +382,14 @@ export interface CameraPort {
   /**
    * Turn the camera on.
    *
+   * @param facing - which way the camera should face, as a PREFERENCE: a
+   * device with one camera uses it whichever way it faces. `'environment'`
+   * when omitted.
+   *
    * @throws {CameraCaptureError} with a notice from the fixed table, never a
    * platform message. See {@link CameraNotice}.
    */
-  startCamera(): Promise<CameraSession>;
+  startCamera(facing?: CameraFacing): Promise<CameraSession>;
 }
 
 /**

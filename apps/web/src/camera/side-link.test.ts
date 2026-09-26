@@ -33,6 +33,7 @@ import {
 } from './side-link';
 import type { PhoneSidePairing, TabletSidePairing } from './side-pairing-port';
 import type { SideLinkEvent } from './side-camera-link-port';
+import type { ScreenLock, ScreenLockSource } from '../game/hud/wake-lock';
 import {
   cleanFrameBytes,
   flushSideLink,
@@ -44,10 +45,11 @@ import {
 
 const SECRET = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
 
-function setUp(options: SidePeerNetworkOptions = {}) {
+function setUp(options: SidePeerNetworkOptions = {}, screenLock?: ScreenLockSource) {
   const network = sidePeerNetwork(options);
   const time = virtualTime();
   const port = sidePairingPort({
+    screenLock,
     peer: network.peer,
     randomBytes: (length) => SECRET.slice(0, length),
     clock: time.clock,
@@ -88,8 +90,8 @@ async function answer(
 }
 
 /** Both ends, paired through both codes, the phone's secret proved. */
-async function paired(options: SidePeerNetworkOptions = {}) {
-  const context = setUp(options);
+async function paired(options: SidePeerNetworkOptions = {}, screenLock?: ScreenLockSource) {
+  const context = setUp(options, screenLock);
   const tablet = await offer(context.port);
   const phone = await answer(context.port, tablet.offerCode);
   expect(await tablet.acceptSidePhoneCode(phone.answerCode)).toBeUndefined();
@@ -489,6 +491,123 @@ describe('ending a pairing, from either device (D-4’s revoking)', () => {
     sessions.push(session);
     expect(session.pair(phone.link)).toBe(false);
     expect(session.state().paired).toBe(false);
+  });
+});
+
+/**
+ * A screen-lock source that records what it was asked, and can hold its answer
+ * back until a test lets it go.
+ */
+function recordingScreenLock(options: { readonly late?: boolean } = {}) {
+  let acquired = 0;
+  let released = 0;
+  let arrive: () => void = () => undefined;
+  const arrived = new Promise<void>((resolve) => {
+    arrive = resolve;
+  });
+  const source: ScreenLockSource = {
+    acquire: async (): Promise<ScreenLock> => {
+      acquired += 1;
+      if (options.late === true) {
+        await arrived;
+      }
+      let held = true;
+      return {
+        get held(): boolean {
+          return held;
+        },
+        release: async (): Promise<void> => {
+          if (held) {
+            held = false;
+            released += 1;
+          }
+          return Promise.resolve();
+        },
+      };
+    },
+  };
+  return {
+    source,
+    acquired: () => acquired,
+    released: () => released,
+    arrive: () => {
+      arrive();
+    },
+  };
+}
+
+describe('the tablet stays awake while it pairs and while it is paired — #557', () => {
+  it('takes the lock with the offer, holds it once paired, and gives it back when the rider ends it', async () => {
+    const lock = recordingScreenLock();
+    const { tablet } = await paired({}, lock.source);
+    await flushSideLink();
+    expect(lock.acquired()).toBe(1);
+    expect(lock.released()).toBe(0);
+    tablet.control.endSidePairing();
+    await flushSideLink();
+    expect(lock.released()).toBe(1);
+    // A second end gives nothing back twice.
+    tablet.control.endSidePairing();
+    await flushSideLink();
+    expect(lock.released()).toBe(1);
+  });
+
+  it('gives it back when an offer nobody answered expires', async () => {
+    const lock = recordingScreenLock();
+    const context = setUp({}, lock.source);
+    await offer(context.port);
+    await flushSideLink();
+    expect(lock.acquired()).toBe(1);
+    context.time.advance(OFFER_LIFETIME_MILLISECONDS);
+    await flushSideLink();
+    expect(lock.released()).toBe(1);
+  });
+
+  it('gives it back when the connection fails', async () => {
+    const lock = recordingScreenLock();
+    const { tablet, network } = await paired({}, lock.source);
+    network.peers[0]?.setConnection('failed');
+    await flushSideLink();
+    expect(tablet.control.sideControlState().ended).toBe('link-lost');
+    expect(lock.released()).toBe(1);
+  });
+
+  it('gives back a lock that only arrived after the pairing had ended', async () => {
+    const lock = recordingScreenLock({ late: true });
+    const { tablet } = await paired({}, lock.source);
+    tablet.control.endSidePairing();
+    await flushSideLink();
+    expect(lock.released()).toBe(0);
+    lock.arrive();
+    await flushSideLink();
+    expect(lock.released()).toBe(1);
+  });
+
+  it('makes a pairing with no lock source at all', async () => {
+    const { tablet } = await paired();
+    tablet.control.endSidePairing();
+    await flushSideLink();
+    expect(tablet.control.sideControlState().ended).toBe('ended-here');
+  });
+});
+
+describe('who ended it, said the same on both devices — #557', () => {
+  it('Stop filming on the tablet: the phone says the tablet ended it, and so does the tablet', async () => {
+    const { tablet, phone, time } = await paired();
+    const { session } = await framingPhone(time);
+    sessions.push(session);
+    session.pair(phone.link);
+    await flushSideLink();
+    tablet.control.commandSideCamera('start');
+    await flushSideLink();
+    tablet.control.commandSideCamera('stop');
+    await flushSideLink();
+    expect(session.state().stopReason).toBe('tablet');
+    expect(tablet.control.sideControlState()).toMatchObject({
+      phone: 'stopped',
+      stopReason: 'tablet',
+      ended: 'ended-here',
+    });
   });
 });
 
