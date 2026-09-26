@@ -24,11 +24,13 @@
     "@onyourleft/physics": "workspace:*",
     "@onyourleft/sensors": "workspace:*",
     "@onyourleft/store": "workspace:*",
+    "jsqr": "1.4.0",
     "maplibre-gl": "6.10.0",
     "pmtiles": "4.5.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "three": "0.185.1"
+    "three": "0.185.1",
+    "uqr": "0.1.3"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

@@ -59,6 +59,10 @@ const GRABBER: FrameGrabber = {
     sample: async () => Promise.resolve(stillRoom()),
     release: () => undefined,
   }),
+  codePixels: () => ({
+    sample: async () => Promise.resolve({ width: 2, height: 1, rgba: new Uint8ClampedArray(8) }),
+    release: () => undefined,
+  }),
 };
 
 function devices(
@@ -461,6 +465,79 @@ describe('the presence sampler, behind the session — #390', () => {
       const message = error instanceof Error ? error.message : String(error);
       expect(frameLeaksIn(message)).toStrictEqual([]);
       expect(message).not.toContain('blob:');
+      return true;
+    });
+  });
+});
+
+describe('the pairing-code reader, behind the session — #529', () => {
+  function countingCodes(fails?: Error): {
+    grabber: FrameGrabber;
+    made: () => number;
+    released: () => number;
+  } {
+    let made = 0;
+    let released = 0;
+    return {
+      grabber: {
+        ...GRABBER,
+        codePixels: () => {
+          made += 1;
+          return {
+            sample: async () =>
+              fails === undefined
+                ? Promise.resolve({ width: 2, height: 1, rgba: new Uint8ClampedArray(8) })
+                : Promise.reject(fails),
+            release: () => {
+              released += 1;
+            },
+          };
+        },
+      },
+      made: () => made,
+      released: () => released,
+    };
+  }
+
+  it('makes one reader for the session, and lets it go with the camera', async () => {
+    const counted = countingCodes();
+    const port = browserCameraPort({
+      devices: devices(async () => Promise.resolve(streamOf([track()]))),
+      grabber: counted.grabber,
+      secureContext: true,
+    });
+    const session = await port.startCamera();
+    expect(counted.made()).toBe(0);
+    const pixels = await session.readCodePixels();
+    await session.readCodePixels();
+    expect(pixels.rgba.length).toBe(pixels.width * pixels.height * 4);
+    expect(counted.made()).toBe(1);
+    session.stopCamera();
+    expect(counted.released()).toBe(1);
+  });
+
+  it('refuses a read once the camera is stopped', async () => {
+    const port = browserCameraPort({
+      devices: devices(async () => Promise.resolve(streamOf([track()]))),
+      grabber: GRABBER,
+      secureContext: true,
+    });
+    const session = await port.startCamera();
+    session.stopCamera();
+    await expect(session.readCodePixels()).rejects.toBeInstanceOf(CameraCaptureError);
+  });
+
+  it('replaces a reader’s own failure with the fixed wording — ADR 0029 D-8', async () => {
+    const counted = countingCodes(new Error('video said blob:https://example/abc'));
+    const port = browserCameraPort({
+      devices: devices(async () => Promise.resolve(streamOf([track()]))),
+      grabber: counted.grabber,
+      secureContext: true,
+    });
+    const session = await port.startCamera();
+    await expect(session.readCodePixels()).rejects.toSatisfy((error: unknown) => {
+      expect(error).toBeInstanceOf(CameraCaptureError);
+      expect(error instanceof Error ? error.message : String(error)).not.toContain('blob:');
       return true;
     });
   });

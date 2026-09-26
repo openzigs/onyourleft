@@ -18,7 +18,19 @@ import { BYSTANDER_SENTENCE } from '../camera/consent';
 import { FRAMING_VERDICT_TEXT } from '../camera/framing';
 import { CameraController } from '../camera/session';
 import { LINK_LOSS_LIMIT_MILLISECONDS, LINK_LOSS_SENTENCE } from '../camera/side-camera';
-import { manualSchedule, scriptedCamera, scriptedLink, virtualTime } from '../camera/testing';
+import { CONNECT_LIMIT_MILLISECONDS, sidePairingPort } from '../camera/side-link';
+import { PAIRING_REFUSAL_TEXT } from '../camera/side-link-code';
+import { pairingCodeModules } from '../camera/side-link-qr';
+import type { SidePairingPort, TabletSidePairing } from '../camera/side-pairing-port';
+import {
+  flushSideLink,
+  manualSchedule,
+  photographedCode,
+  scriptedCamera,
+  scriptedLink,
+  sidePeerNetwork,
+  virtualTime,
+} from '../camera/testing';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
 
 import { FILMING_WORD, NOT_PAIRED_TEXT, SideCameraView } from './SideCameraView';
@@ -227,5 +239,141 @@ describe('filming', () => {
     mounted?.unmount();
     mounted = undefined;
     expect(camera.calls.filter((call) => call === 'stop')).toHaveLength(1);
+  });
+});
+
+describe('a pairing lasts one session — #529, from #536’s review', () => {
+  it('"Set up again" does not reuse the link the last session ended', async () => {
+    // The finding: the old screen handed the ended link to the new session,
+    // which then said "Paired with your tablet" over a pairing that was over.
+    await filming();
+    await press('Stop filming');
+    await press('Set up again');
+    await tick();
+    await press('Turn the camera on');
+    expect(document.body.textContent).not.toContain('Paired with your tablet');
+    expect(document.body.textContent).toContain(NOT_PAIRED_TEXT);
+    expect(button('Start')).toBeUndefined();
+  });
+});
+
+describe('pairing the phone with the tablet — #529', () => {
+  /** Real milliseconds: the scan's own interval, which a test does not own. */
+  async function scanOnce(): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    await settle();
+    await flushSideLink();
+    await settle();
+  }
+
+  async function pairingPhone(options: { readonly showAnswer?: boolean } = {}) {
+    const network = sidePeerNetwork();
+    const time = virtualTime();
+    const port = sidePairingPort({
+      peer: network.peer,
+      clock: time.clock,
+      after: time.after,
+      every: time.every,
+    });
+    const answers: string[] = [];
+    const phonePort: SidePairingPort = {
+      offerSideCamera: async () => port.offerSideCamera(),
+      currentSideCamera: () => port.currentSideCamera(),
+      answerSideCamera: async (offerCode) => {
+        const made = await port.answerSideCamera(offerCode);
+        if (typeof made === 'object') {
+          answers.push(made.answerCode);
+        }
+        return made;
+      },
+    };
+    // The tablet is another device on the same network; its offer is what
+    // the phone's camera sees.
+    const tablet = (await port.offerSideCamera()) as TabletSidePairing;
+    // `showAnswer`: the phone's camera is pointed at an ANSWER code — the
+    // wrong step's — which it must refuse and go on looking.
+    const shown =
+      options.showAnswer === true
+        ? tablet.offerCode.replace('"r":"o"', '"r":"a"').replace(/,"k":"[^"]+"/, '')
+        : tablet.offerCode;
+    const camera = scriptedCamera({
+      codePixels: () => photographedCode(pairingCodeModules(shown)),
+    });
+    const controller = new CameraController({
+      port: camera.port,
+      schedule: manualSchedule().schedule,
+    });
+    mounted = await mount(
+      <SideCameraView controller={controller} pairing={phonePort} timers={time} />,
+    );
+    await settle();
+    return { tablet, camera, answers, time };
+  }
+
+  it('reads the tablet’s code, shows its own, and is paired once the tablet reads it', async () => {
+    const { tablet, answers } = await pairingPhone();
+    await tick();
+    await press('Turn the camera on');
+    expect(document.body.textContent).toContain('Looking for the tablet’s code');
+    await scanOnce();
+    expect(answers).toHaveLength(1);
+    expect(document.querySelector('[data-oyl-pairing-code]')?.getAttribute('aria-label')).toBe(
+      'Pairing code for your tablet to scan',
+    );
+    expect(await tablet.acceptSidePhoneCode(answers[0] ?? '')).toBeUndefined();
+    await flushSideLink();
+    await settle();
+    expect(document.body.textContent).toContain('Paired with your tablet');
+    expect(document.querySelector('[data-oyl-pairing-code]')).toBeNull();
+    // And the tablet now drives it.
+    await flushSideLink();
+    expect(tablet.control.sideControlState().phone).toBe('framing');
+    tablet.control.commandSideCamera('start');
+    await flushSideLink();
+    await settle();
+    expect(document.body.textContent).toContain(FILMING_WORD);
+    expect(tablet.control.sideControlState().command?.status).toBe('acknowledged');
+  });
+
+  it('ends a link nobody connected when the rider leaves', async () => {
+    const { tablet, answers, time } = await pairingPhone();
+    await tick();
+    await press('Turn the camera on');
+    await scanOnce();
+    expect(answers).toHaveLength(1);
+    mounted?.unmount();
+    mounted = undefined;
+    await flushSideLink();
+    // The phone's end is gone, so the tablet reading its answer now finds
+    // nobody to prove the secret — and gives up, rather than pairing with a
+    // phone that left.
+    await tablet.acceptSidePhoneCode(answers[0] ?? '');
+    await flushSideLink();
+    time.advance(CONNECT_LIMIT_MILLISECONDS);
+    expect(tablet.control.sideControlState().ended).toBe('no-path');
+  });
+
+  it('refuses the other step’s code in words, and goes on looking', async () => {
+    const { answers } = await pairingPhone({ showAnswer: true });
+    await tick();
+    await press('Turn the camera on');
+    await scanOnce();
+    expect(answers).toHaveLength(0);
+    expect(document.body.textContent).toContain(PAIRING_REFUSAL_TEXT['wrong-code']);
+    expect(document.body.textContent).toContain('Looking for the tablet’s code');
+  });
+
+  it('says the tablet did not connect, and offers to scan again', async () => {
+    const { answers, time } = await pairingPhone();
+    await tick();
+    await press('Turn the camera on');
+    await scanOnce();
+    expect(answers).toHaveLength(1);
+    // The tablet never reads the answer: the phone's end gives up.
+    time.advance(CONNECT_LIMIT_MILLISECONDS);
+    await settle();
+    expect(document.body.textContent).toContain('The tablet did not connect');
+    await press('Scan the tablet’s code again');
+    expect(document.body.textContent).toContain('Looking for the tablet’s code');
   });
 });

@@ -1620,7 +1620,10 @@ to that closure, both MIT, so the sentence above still describes it) and — als
 Apache-2.0; a devDependency of `apps/web`, and the only dependency in the workspace that pins a
 **browser** as well as a version — see §4f) and — since #91 — `three` **0.185.1** (MIT,
 **zero dependencies**, a runtime dependency of `apps/web`) with `@types/three` 0.185.4 (MIT, a
-devDependency, because `three` ships no types of its own) are
+devDependency, because `three` ships no types of its own) and — since #529 — `uqr` 0.1.3 (MIT) and
+`jsqr` 1.4.0 (Apache-2.0), both **zero-dependency** runtime dependencies of `apps/web`, which draw and
+read the side camera's pairing QR codes and are named in exactly one file,
+`apps/web/src/camera/side-link-qr.ts`, are
 installed;
 
 ⚠️ **`three` is pinned at 0.185.1 rather than at the current 0.186.0 deliberately, and since #489
@@ -1987,6 +1990,7 @@ browser runs**.
 | `rideview.browser.spec.ts` | its spec — every ride control on screen with no scrolling at 1280×800 and 1024×768, the trainer BESIDE the live metrics, and nothing wider than a phone. Its control puts the measure and the single column back and requires the workout to be below the fold again, which is the defect itself. ⚠️ **Since #436's review it also measures at 1280×720 and 1024×720, and a reviewer who remembers two tablet viewports is reading the old file**: 1280×800 is the tablet's *display*, the Android shell configures no fullscreen mode, and the WebView is shorter by the system bars — at 728 px *Pause* / *Stop* were below the fold behind a green gate. ⚠️ **720 was assumed, and was the wrong mechanism — since #439 `TABLET_IN_THE_SHELL` is 1280×800 with edge-to-edge insets 36/32, read off the device, and applied to the ENGINE through `browser/insets.ts`** (`Emulation.setSafeAreaInsetsOverride`, so `env()` itself reports them): at API 35+ the bars are drawn over the WebView rather than taken off it, and the fold is `height − bottom inset`. The upright insets are the landscape ones reused, and say so. Every tablet case now **publishes its margin to the fold** and holds it to a 50 px floor rather than to zero, because a control that clears by 3 px in this Chromium's fonts has not been shown to clear anywhere else. **The rule it leaves behind: a browser-gate "device" viewport is the display's CSS size, not the WebView's — report the margin, and treat one under about 50 px as unproven on that device** |
 | `loop.html`, `loop-harness.ts`, `loop.browser.spec.ts` | since #440, the start of a LOOP drawn by the real renderer at the real chase camera, with the road isolated by rendering each frame with and without its index list. It asserts the far road converges on the middle of the frame — the camera looks down the road it is on, measured through the centreline's camera since #499 put the product's on the rider's line — and its **control is a profile exactly as a pre-#440 build stored one** (the line, marked `loop` afterwards), which must look across the road instead. ⚠️ The cause was in `packages/domain`'s `routeProfile`, not the camera: see §9 |
 | `sidecamera.html`, `sidecamera-harness.tsx`, `sidecamera.browser.spec.ts` | since [#528](https://github.com/openzigs/onyourleft/issues/528), the tripod phone's **filming sign**, driven into the filming state through the real `AppShell` and the screen's own controls, with the scripted link the unit tests use handed in through `AppShellProps.sideCameraLink` (there is no production link: #529, held by ADR 0033 D-0). At five phone viewports, both ways up, down to 320 px: the stage's box is the viewport and a 7 × 7 hit-test grid finds nothing but the sign and the shell's own camera indicator; the shell's header and navigation are absent; the word's em is at least 15 % of the short side and twice any other visible text, on one line; and exactly **one** control is on the page, 44 × 44, inside the viewport and topmost at its centre — also with the link lost and the countdown showing. Its **control** strips the stage's class from the live element and requires the same markup NOT to cover the screen. ⚠️ It measures CSS pixels, not a doorway: `theme.css` §"THE SIDE CAMERA" says what the floor comes to in millimetres on a typical phone, and that the legibility rule it is set against was read second-hand |
+| `sidelink.html`, `sidelink-harness.ts`, `sidelink.browser.spec.ts` | since #529, the side-camera link paired end to end in the real engine: two peer connections in one page through the real offer and answer codes and the SDP `camera/side-link-sdp.ts` rebuilds, a start and a stop acknowledged across, and the offer drawn on a canvas and read back by the real reader. ⚠️ `playwright.config.ts` passes `--disable-features=WebRtcHideLocalIpsWithMdns` so the candidates are raw private addresses — the path spike 0012 found both Android WebViews take — rather than `.local` names a CI container may have no responder for. ⚠️ **Not two devices**, and not #541's packet capture |
 | `insets.ts` | since #439, edge-to-edge safe-area insets applied to the ENGINE through `Emulation.setSafeAreaInsetsOverride`, so `env()` itself reports them, plus the one inset reading taken off the owner's tablet. Every #439 case also reads the insets back, so a Playwright bump that drops the protocol call fails rather than measuring a page with none |
 | `../playwright.config.ts` | Chromium only, no retries, the SwiftShader flags without which a GPU-less runner gives MapLibre no context at all — and since #408 **two `webServer` entries**, because the product and the harness are different builds |
 | `../vite.browser.config.ts` | the harness build. A second Vite config, so the harness cannot reach a shipped bundle |
@@ -2115,12 +2119,12 @@ command and its own CI step.
 ⚠️ **`vite.browser.config.ts` names every entry explicitly, and must.** Vite's multi-page mode
 discovers only `index.html`; a page added without a line in `build.rollupOptions.input` is simply
 not built, and the failure is a 404 while the spec runs rather than a build error — which reads
-like a server fault and sends the next person to `playwright.config.ts`. There are **eleven** entries
+like a server fault and sends the next person to `playwright.config.ts`. There are **twelve** entries
 today, not two — the map, the game, the HUD, the app shell, the game's stage (#373, #423), the
 Ride screen (#422), the loop start (#440), the home screen (#428), the side camera's filming sign
-(#528), the owner's realistic page (ADR 0026 D-12) and the capture tool — and this sentence said
-*four* until #373, *seven* until #430's pull request, when it had been stale for two entries
-already, and *ten* until #528, so read
+(#528), the side-camera link (#529), the owner's realistic page (ADR 0026 D-12) and the capture
+tool — and this sentence said *four* until #373, *seven* until #430's pull request, when it had
+been stale for two entries already, *ten* until #528 and *eleven* until #529, so read
 `build.rollupOptions.input` rather than this line. ⚠️ Since that pull request the harness build's
 `publicDir` is the app's own `public/`, so the realistic world is served to both builds at the
 same path. #266 confirmed the trap by
@@ -3799,6 +3803,9 @@ top of an issue **supersedes its body**.
 | What a person with TalkBack runs, and which questions only they can answer | [`docs/validation/0003-screen-reader-and-assistive-technology.md`](docs/validation/0003-screen-reader-and-assistive-technology.md), [#393](https://github.com/openzigs/onyourleft/issues/393) |
 | How a climb ahead is found, and why the lookahead starts from the wrapped position | `apps/web/src/game/hud/climb-ahead.ts`, [#399](https://github.com/openzigs/onyourleft/issues/399) |
 | Where the ride's sounds are decided, why a dropped sensor is silence, and where the audio context is created | `apps/web/src/game/audio-cues.ts`, `apps/web/src/game/web-audio.ts`, [#400](https://github.com/openzigs/onyourleft/issues/400) |
+| How the tablet and the side-camera phone pair with no server, and what a pairing code may carry | `apps/web/src/camera/side-link-code.ts`, `apps/web/src/camera/side-link-sdp.ts`, [ADR 0033](docs/adr/0033-side-camera-link.md) D-1, D-4, [#529](https://github.com/openzigs/onyourleft/issues/529) |
+| Why the side link calls itself lost after three seconds, and why a deliberate end waits for the channel to close | `apps/web/src/camera/side-link.ts` §`SILENCE_IS_LOST_MILLISECONDS`, §`CLOSE_GRACE_MILLISECONDS` |
+| The one place the client names a WebRTC peer connection, and what the no-network gate can and cannot see of it | `apps/web/src/camera/side-link-transport.ts`, `apps/web/src/privacy/no-network.test.ts` §`PERMITTED_NETWORK_CALLS`, [ADR 0033](docs/adr/0033-side-camera-link.md) D-9 |
 | What proves the HUD's live region is not hidden and moves nothing, and why that is not a screen reader | `apps/web/browser/hud.browser.spec.ts` §"#401", [#401](https://github.com/openzigs/onyourleft/issues/401) |
 
 <!-- Last updated: 2026-09-17 by delivery:code-issue resolving #355 (the verge as a visibility constant, and the camera-cone gate that had been missing) -->

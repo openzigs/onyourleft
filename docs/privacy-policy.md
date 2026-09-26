@@ -14,9 +14,10 @@ from that map request, **on its own the app uploads nothing** — not a ride, no
 position, not a crash report, not a page view.
 
 That is not a promise about our intentions. It is a property of the software: the code this project
-writes contains exactly **one** network call, and it can do only the one thing described in the next
-paragraph. The whole thing is [open source](https://github.com/openzigs/onyourleft), so you can check
-that rather than take our word for it.
+writes contains exactly **two** network calls, and each can do only the one thing described below —
+a picture to a computer of your own, and a direct link between your tablet and a second phone you
+paired with it. The whole thing is [open source](https://github.com/openzigs/onyourleft), so you can
+check that rather than take our word for it.
 
 **The one thing you can switch on: a picture sent to a computer of your own.** If you use the
 camera, you can enter the address of a computer on your own network — one you run, with a model
@@ -89,6 +90,8 @@ Only these, and only when you do them:
   put it and it is then out of the app's hands.
 - **A ride or route you choose to share.** A copy, trimmed by your privacy zones.
 - **A picture sent to your own computer, if you set one up and switch it on.** See the next section.
+- **Start and stop between your tablet and a side-camera phone, if you pair them.** See **A second
+  phone you pair as a side camera** below.
 - **Map tile requests, when a map is on screen.** Map tiles are **on by default**, and you can turn
   them off in Settings → *Ride map*. To draw a ride that has
   a GPS track, your device requests map tiles from `tiles.openzigs.com` — a single static
@@ -107,9 +110,32 @@ Only these, and only when you do them:
   reading the file's index the app requests no tiles at all. A build of the app can be pointed at another tile
   host, or at none.
 
+## A second phone you pair as a side camera
+
+If you set up a spare phone on a tripod as a side camera, the tablet and the phone talk to each other
+directly, over your own Wi-Fi.
+
+- **How they are paired:** you scan a code on the tablet with the phone's camera, and a code on the
+  phone with the tablet's camera. Nothing else carries the pairing — no server of ours, no account,
+  and no third-party service. The pictures the two cameras see while scanning are read for the code
+  and thrown away at once.
+- **What crosses:** the tablet's *start* and *stop*, and the phone's word for where it is — framing,
+  filming or stopped, and why it stopped. Not your rides, not your position, not your heart rate,
+  not a name, and — in this version — **no picture**.
+- **Where it goes:** from one of your devices to the other, directly. The app configures no relay
+  and no address-discovery server of any kind, and it refuses a pairing code that names an address
+  outside your own network. The link is encrypted, as every WebRTC data channel is.
+- **What is remembered:** nothing. A pairing lasts one session. Either device ends it, and the next
+  session is paired by scanning again.
+- **Anyone on your Wi-Fi** cannot join the link without the codes, and cannot read what crosses it.
+  They can see that your two devices are exchanging encrypted traffic.
+- **If the phone loses touch with the tablet**, it keeps filming for up to 30 seconds, then stops.
+  The phone tells you this before its camera is ever turned on.
+
 ## Pictures sent to your own computer
 
-This is the one thing this app's own code can send anywhere, and it is off until you turn it on.
+This is the only way this app's own code sends **a picture** anywhere, and it is off until you turn
+it on.
 
 - **What is sent:** one still picture from the camera, and a fixed question written into the app.
   Nothing else — not your rides, not your position, not your heart rate, not a name, not an

@@ -183,7 +183,7 @@ export function browserEvery(task: () => void, milliseconds: number): () => void
 /** The side camera's session. One per visit to the screen. */
 export class SideCameraSession {
   readonly #camera: SideCameraCamera;
-  readonly #link: SideCameraLinkPort | undefined;
+  #link: SideCameraLinkPort | undefined;
   readonly #clock: () => number;
   readonly #after: (task: () => void, milliseconds: number) => () => void;
   readonly #every: (task: () => void, milliseconds: number) => () => void;
@@ -216,11 +216,7 @@ export class SideCameraSession {
     this.#condition = this.#link?.sideLinkCondition();
     this.#snapshot = this.#build();
     if (this.#link !== undefined) {
-      this.#unsubscribe.push(
-        this.#link.onSideLinkEvent((event) => {
-          this.#hear(event);
-        }),
-      );
+      this.#listen(this.#link);
     }
     this.#unsubscribe.push(
       this.#camera.subscribe(() => {
@@ -236,6 +232,42 @@ export class SideCameraSession {
         }
       }),
     );
+  }
+
+  /**
+   * Take the link the rider has just paired — #529.
+   *
+   * The phone pairs AFTER its camera is on, because the camera is what reads
+   * the tablet's code (ADR 0033 D-1), so a session that began unpaired is
+   * handed its link here rather than being rebuilt — rebuilding would stop the
+   * camera the rider has just framed with.
+   *
+   * ⚠️ **Once, and never over a stopped session.** A session that already has
+   * a link keeps it — D-4's *"one connection, once"* — and a stopped one takes
+   * none, because a pairing is spent with the session it belonged to. A link
+   * that is not `connected` is refused too: the screen waits for the tablet to
+   * connect before it hands one over.
+   *
+   * @returns whether the link was taken. One that was not is the caller's to
+   * end.
+   */
+  pair(link: SideCameraLinkPort): boolean {
+    if (
+      this.#disposed ||
+      this.#link !== undefined ||
+      this.#phase === 'stopped' ||
+      link.sideLinkCondition() !== 'connected'
+    ) {
+      return false;
+    }
+    this.#link = link;
+    this.#condition = 'connected';
+    this.#listen(link);
+    if (this.#phase === 'framing' || this.#phase === 'filming') {
+      link.reportToTablet({ state: this.#phase });
+    }
+    this.#announce();
+    return true;
   }
 
   /** The current state. The same object until something changes. */
@@ -284,9 +316,10 @@ export class SideCameraSession {
     this.#problem = undefined;
     this.#phase = 'framing';
     this.#link?.reportToTablet({ state: 'framing' });
-    // Already lost when the camera came on: the 30 seconds apply from now,
-    // because a camera is running and nobody at the tablet can stop it.
-    if (this.#condition === 'lost') {
+    // Already lost (or ended) when the camera came on: the 30 seconds apply
+    // from now, because a camera is running and nobody at the tablet can stop
+    // it.
+    if (this.#condition === 'lost' || this.#condition === 'ended') {
       this.#startCountdown();
     }
     this.#announce();
@@ -319,6 +352,14 @@ export class SideCameraSession {
       unsubscribe();
     }
     this.#listeners.clear();
+  }
+
+  #listen(link: SideCameraLinkPort): void {
+    this.#unsubscribe.push(
+      link.onSideLinkEvent((event) => {
+        this.#hear(event);
+      }),
+    );
   }
 
   #hear(event: SideLinkEvent): void {
@@ -375,11 +416,15 @@ export class SideCameraSession {
       return;
     }
     this.#condition = condition;
-    if (condition === 'lost') {
-      if (this.#phase === 'framing' || this.#phase === 'filming') {
+    if (condition === 'lost' || condition === 'ended') {
+      // ⚠️ **`ended` is `lost` that cannot recover** (#529): the countdown
+      // starts, or — when the link was already lost — goes on from where it
+      // was. A link going from `lost` to `ended` must not restart the 30
+      // seconds, which would give a camera nobody can stop a second helping.
+      if ((this.#phase === 'framing' || this.#phase === 'filming') && this.#lostAt === undefined) {
         this.#startCountdown();
       }
-    } else {
+    } else if (condition === 'connected') {
       // Back inside the window: D-5's recovery. The countdown goes and the
       // tablet is told where this phone is, because it may have missed it.
       this.#cancelTimers();

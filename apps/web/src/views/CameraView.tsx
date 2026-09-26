@@ -79,6 +79,8 @@ import { keptSummarySentence } from '../camera/keep';
 import { useAnalysis, type AnalysisState } from '../camera/useAnalysis';
 import { presenceSentence } from '../camera/presence';
 import type { CameraController, CaptureOutcome } from '../camera/session';
+import type { SidePairingPort } from '../camera/side-pairing-port';
+import { SideCameraControl } from './SideCameraControl';
 
 /**
  * What became of the picture just taken — kept, dropped, or refused a home.
@@ -117,9 +119,15 @@ export interface CameraViewProps {
    * and never hears why.
    */
   readonly controller?: CameraController | undefined;
+  /**
+   * Pairing a side-camera phone — #529. `undefined` where `main.tsx` built
+   * none; the section is then absent, and the side-camera screen on the phone
+   * says why it cannot be paired.
+   */
+  readonly sidePairing?: SidePairingPort | undefined;
 }
 
-export function CameraView({ controller }: CameraViewProps): JSX.Element {
+export function CameraView({ controller, sidePairing }: CameraViewProps): JSX.Element {
   if (controller === undefined) {
     return (
       <section aria-labelledby={TITLE_ID}>
@@ -128,10 +136,16 @@ export function CameraView({ controller }: CameraViewProps): JSX.Element {
       </section>
     );
   }
-  return <Camera controller={controller} />;
+  return <Camera controller={controller} sidePairing={sidePairing} />;
 }
 
-function Camera({ controller }: { readonly controller: CameraController }): JSX.Element {
+function Camera({
+  controller,
+  sidePairing,
+}: {
+  readonly controller: CameraController;
+  readonly sidePairing: SidePairingPort | undefined;
+}): JSX.Element {
   // ⚠️ Three booleans rather than the whole state object: `useSyncExternalStore`
   // compares snapshots with `Object.is`, so a getter returning a fresh object
   // every call renders for ever. `camera/indicator.tsx` records the same trap.
@@ -448,6 +462,15 @@ function Camera({ controller }: { readonly controller: CameraController }): JSX.
       ) : null}
 
       {agreed ? <AnalysisSection controller={controller} live={live} /> : null}
+
+      {/*
+        #529. The tablet's half of the side camera. After the consent section
+        on purpose: reading the phone's code uses THIS device's camera (ADR
+        0033 D-4), so the rider meets the consent first.
+      */}
+      {sidePairing === undefined ? null : (
+        <SideCameraControl controller={controller} pairing={sidePairing} />
+      )}
 
       {/*
         ⚠️ **A COUNT, and never a picture.** ADR 0029 D-11 keeps a kept frame

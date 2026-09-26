@@ -25,6 +25,7 @@ import type {
   CameraProblemKind,
   CameraSession,
   CapturedFrame,
+  CodePixels,
   LuminanceGrid,
 } from './camera-port';
 import { CameraCaptureError } from './camera-port';
@@ -35,6 +36,8 @@ import type {
   SideLinkEvent,
 } from './side-camera-link-port';
 import { capturedFrame } from './frame';
+import { sidePeerParametersFrom, type SidePeerParameters } from './side-link-sdp';
+import type { SideChannel, SideDescription, SidePeer } from './side-link-transport';
 import { cameraProblemMessage } from './notice';
 
 /** What the scripted camera should do. Every member has a usable default. */
@@ -55,6 +58,8 @@ export interface ScriptedCameraOptions {
   readonly luminance?: (sample: number) => LuminanceGrid;
   /** Thrown from `sampleLuminance()`. */
   readonly sampleFails?: CameraProblemKind;
+  /** What each pairing-code read returns, in turn — #529. Default: a blank picture. */
+  readonly codePixels?: ((read: number) => CodePixels) | undefined;
 }
 
 /** What a scripted camera recorded about how it was used. */
@@ -90,6 +95,7 @@ export function scriptedCamera(options: ScriptedCameraOptions = {}): ScriptedCam
   let live = false;
   let session: CameraSession | undefined;
   let samples = 0;
+  let codeReads = 0;
 
   const port: CameraPort = {
     cameraAvailability: async () => {
@@ -139,6 +145,18 @@ export function scriptedCamera(options: ScriptedCameraOptions = {}): ScriptedCam
           samples += 1;
           return Promise.resolve((options.luminance ?? (() => stillRoom()))(index));
         },
+        readCodePixels: async (): Promise<CodePixels> => {
+          calls.push('code');
+          const index = codeReads;
+          codeReads += 1;
+          return Promise.resolve(
+            options.codePixels?.(index) ?? {
+              width: 4,
+              height: 4,
+              rgba: new Uint8ClampedArray(64).fill(255),
+            },
+          );
+        },
         attachCameraPreview: () => {
           calls.push('preview');
           return () => {
@@ -185,6 +203,34 @@ export function stillRoom(
     values[cell * 7] = (values[cell * 7] ?? 0) + 60;
   }
   return { columns, rows, values };
+}
+
+/**
+ * `modules` — a pairing code, from `side-link-qr.ts` §`pairingCodeModules` —
+ * as a camera would see a screen showing them: `scale` pixels a module, the
+ * four-module quiet zone, dark `ink` on light `paper` — #529.
+ */
+export function photographedCode(
+  modules: readonly (readonly boolean[])[],
+  scale = 4,
+  ink = 20,
+  paper = 245,
+): CodePixels {
+  const quiet = 4;
+  const size = (modules.length + quiet * 2) * scale;
+  const rgba = new Uint8ClampedArray(size * size * 4);
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const dark = modules[Math.floor(y / scale) - quiet]?.[Math.floor(x / scale) - quiet] === true;
+      const value = dark ? ink : paper;
+      const at = (y * size + x) * 4;
+      rgba[at] = value;
+      rgba[at + 1] = value;
+      rgba[at + 2] = value;
+      rgba[at + 3] = 255;
+    }
+  }
+  return { width: size, height: size, rgba };
 }
 
 /** A scheduler a test drives by hand. @see CameraControllerOptions.schedule */
@@ -291,6 +337,10 @@ export function scriptedLink(initial: SideLinkCondition = 'connected'): SideCame
     },
     endSideLink: () => {
       link.ended += 1;
+      // #529: a link that has ended says so, which is what the screen reads
+      // to refuse it to a new session (`SideCameraView.tsx`). Not emitted:
+      // the session that ended it is already stopped and hears nothing.
+      condition = 'ended';
     },
     emit: (event: SideLinkEvent) => {
       if (event.kind === 'condition') {
@@ -302,4 +352,328 @@ export function scriptedLink(initial: SideLinkCondition = 'connected'): SideCame
     },
   };
   return link;
+}
+
+/** How a {@link sidePeerNetwork} behaves. Every member has a usable default. */
+export interface SidePeerNetworkOptions {
+  /** The host candidates the `index`th peer gathers. Default: one private IPv4 address each. */
+  readonly addresses?: ((index: number) => readonly string[]) | undefined;
+  /** Whether gathering ever completes. Default `true`. */
+  readonly gathers?: boolean | undefined;
+  /** Whether two peers with each other's descriptions connect. Default `true`. */
+  readonly connects?: boolean | undefined;
+}
+
+/** A scripted peer, with what a test needs to see of it. */
+export interface ScriptedSidePeer extends SidePeer {
+  readonly index: number;
+  /** Every channel on this end: the ones it made and the ones it was given. */
+  readonly channels: readonly ScriptedSideChannel[];
+  readonly closed: boolean;
+  /** Move the connection to `state`, firing its change event as the platform would. */
+  setConnection(state: string): void;
+}
+
+/** A scripted channel. */
+export interface ScriptedSideChannel extends SideChannel {
+  /** Every string this end sent, in order. */
+  readonly sent: readonly string[];
+}
+
+/**
+ * Two (or more) peer connections that find each other in memory — #529.
+ *
+ * jsdom implements no WebRTC, so this is what `side-link.test.ts` drives the
+ * whole pairing through: each peer writes a description in Chromium's shape,
+ * and two peers connect when — and only when — each holds a remote description
+ * whose ICE credentials and fingerprint are the OTHER's own. So the codes, the
+ * SDP rebuilt from them and the single use of an offer are all exercised,
+ * rather than a double that connects whatever it is handed.
+ *
+ * ⚠️ **What it cannot say is whether a real engine connects over what the
+ * SDP builder writes.** `browser/sidelink.browser.spec.ts` is where that is
+ * measured, in the pinned Chromium.
+ *
+ * Messages are delivered in a microtask, in order, so a test awaits
+ * {@link flushSideLink} before it reads what arrived.
+ */
+export function sidePeerNetwork(options: SidePeerNetworkOptions = {}): {
+  readonly peer: () => ScriptedSidePeer;
+  readonly peers: readonly ScriptedSidePeer[];
+  /** Stop delivering anything, in either direction, with no event: the link goes quiet. */
+  drop(): void;
+  /** Deliver again. */
+  restore(): void;
+  /** Every peer's connection fails, as ICE's own consent checks would end it. */
+  fail(): void;
+} {
+  const peers: FakeSidePeer[] = [];
+  const network = {
+    dropped: false,
+    connects: options.connects ?? true,
+    gathers: options.gathers ?? true,
+    addresses: options.addresses ?? ((index: number) => [`192.168.1.${String(10 + index)}`]),
+    tryConnect(): void {
+      for (const offerer of peers) {
+        for (const answerer of peers) {
+          if (offerer === answerer || offerer.twin !== undefined || answerer.twin !== undefined) {
+            continue;
+          }
+          if (
+            offerer.local?.type === 'offer' &&
+            answerer.local?.type === 'answer' &&
+            matches(offerer.remote, answerer) &&
+            matches(answerer.remote, offerer)
+          ) {
+            offerer.twin = answerer;
+            answerer.twin = offerer;
+            queueMicrotask(() => {
+              if (network.connects) {
+                connect(offerer, answerer);
+              } else {
+                offerer.setConnection('failed');
+                answerer.setConnection('failed');
+              }
+            });
+          }
+        }
+      }
+    },
+  };
+  return {
+    peer: () => {
+      const created = new FakeSidePeer(peers.length, network);
+      peers.push(created);
+      return created;
+    },
+    peers,
+    drop: () => {
+      network.dropped = true;
+    },
+    restore: () => {
+      network.dropped = false;
+    },
+    fail: () => {
+      for (const peer of peers) {
+        peer.setConnection('failed');
+        for (const channel of peer.channels) {
+          channel.shut();
+        }
+      }
+    },
+  };
+}
+
+/** Let every queued delivery happen. */
+export async function flushSideLink(): Promise<void> {
+  for (let round = 0; round < 10; round += 1) {
+    await Promise.resolve();
+  }
+}
+
+interface FakeNetwork {
+  readonly dropped: boolean;
+  readonly gathers: boolean;
+  readonly addresses: (index: number) => readonly string[];
+  tryConnect(): void;
+}
+
+function matches(remote: SidePeerParameters | undefined, peer: FakeSidePeer): boolean {
+  return (
+    remote !== undefined &&
+    remote.ufrag === peer.ufrag &&
+    remote.password === peer.password &&
+    remote.fingerprint.every((byte) => byte === peer.index + 1)
+  );
+}
+
+function connect(offerer: FakeSidePeer, answerer: FakeSidePeer): void {
+  offerer.setConnection('connected');
+  answerer.setConnection('connected');
+  for (const channel of [...offerer.channels]) {
+    const twin = new FakeSideChannel(channel.label, channel.network);
+    twin.twin = channel;
+    channel.twin = twin;
+    twin.readyState = 'open';
+    answerer.channels.push(twin);
+    answerer.ondatachannel?.({ channel: twin });
+    channel.readyState = 'open';
+    channel.onopen?.();
+  }
+}
+
+class FakeSideChannel implements ScriptedSideChannel {
+  readonly label: string;
+  readonly network: FakeNetwork;
+  readonly sent: string[] = [];
+  readyState = 'connecting';
+  twin: FakeSideChannel | undefined;
+  onopen: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+  onmessage: ((event: { readonly data: unknown }) => void) | null = null;
+
+  constructor(label: string, network: FakeNetwork) {
+    this.label = label;
+    this.network = network;
+  }
+
+  send(data: string): void {
+    if (this.readyState !== 'open') {
+      throw new Error('InvalidStateError');
+    }
+    this.sent.push(data);
+    const twin = this.twin;
+    if (this.network.dropped || twin === undefined) {
+      return;
+    }
+    queueMicrotask(() => {
+      if (twin.readyState === 'open' && !this.network.dropped) {
+        twin.onmessage?.({ data });
+      }
+    });
+  }
+
+  /**
+   * A GRACEFUL close, as a real channel's is: what was already sent is
+   * delivered first, then both ends close. ⚠️ **A peer connection's own
+   * `close()` is not graceful** — {@link FakeSidePeer.close} shuts at once and
+   * drops anything in flight, as the real one does — which is the difference
+   * `side-link.ts` §`letGo` exists for.
+   */
+  close(): void {
+    if (this.readyState === 'closing' || this.readyState === 'closed') {
+      return;
+    }
+    this.readyState = 'closing';
+    queueMicrotask(() => {
+      this.shut();
+    });
+  }
+
+  /** Closes both ends at once, each hearing its own `close`. */
+  shut(): void {
+    for (const end of [this, this.twin]) {
+      if (end === undefined || end.readyState === 'closed') {
+        continue;
+      }
+      end.readyState = 'closed';
+      queueMicrotask(() => {
+        end.onclose?.();
+      });
+    }
+  }
+}
+
+class FakeSidePeer implements ScriptedSidePeer {
+  readonly index: number;
+  readonly network: FakeNetwork;
+  readonly channels: FakeSideChannel[] = [];
+  readonly ufrag: string;
+  readonly password: string;
+  local: SideDescription | undefined;
+  remote: SidePeerParameters | undefined;
+  twin: FakeSidePeer | undefined;
+  closed = false;
+  iceGatheringState = 'new';
+  connectionState = 'new';
+  onicegatheringstatechange: (() => void) | null = null;
+  onconnectionstatechange: (() => void) | null = null;
+  ondatachannel: ((event: { readonly channel: SideChannel }) => void) | null = null;
+
+  constructor(index: number, network: FakeNetwork) {
+    this.index = index;
+    this.network = network;
+    this.ufrag = `uf${String(index)}AB`;
+    this.password = `pw${String(index)}`.padEnd(24, 'x');
+  }
+
+  get localDescription(): SideDescription | null {
+    return this.local ?? null;
+  }
+
+  createDataChannel(label: string): SideChannel {
+    const channel = new FakeSideChannel(label, this.network);
+    this.channels.push(channel);
+    return channel;
+  }
+
+  async createOffer(): Promise<SideDescription> {
+    return Promise.resolve({ type: 'offer', sdp: this.#sdp('actpass') });
+  }
+
+  async createAnswer(): Promise<SideDescription> {
+    return Promise.resolve({ type: 'answer', sdp: this.#sdp('active') });
+  }
+
+  async setLocalDescription(description: SideDescription): Promise<void> {
+    this.local = description;
+    if (this.network.gathers) {
+      queueMicrotask(() => {
+        this.iceGatheringState = 'complete';
+        this.onicegatheringstatechange?.();
+      });
+    } else {
+      this.iceGatheringState = 'gathering';
+    }
+    this.network.tryConnect();
+    return Promise.resolve();
+  }
+
+  async setRemoteDescription(description: SideDescription): Promise<void> {
+    if (this.closed) {
+      throw new Error('InvalidStateError');
+    }
+    this.remote = sidePeerParametersFrom(description.sdp);
+    this.network.tryConnect();
+    return Promise.resolve();
+  }
+
+  setConnection(state: string): void {
+    if (this.closed || this.connectionState === state) {
+      return;
+    }
+    this.connectionState = state;
+    this.onconnectionstatechange?.();
+  }
+
+  close(): void {
+    // A real peer connection fires no state change on its own `close()`.
+    this.closed = true;
+    this.connectionState = 'closed';
+    for (const channel of this.channels) {
+      channel.shut();
+    }
+  }
+
+  #sdp(setup: string): string {
+    const fingerprint = Array.from({ length: 32 }, () =>
+      (this.index + 1).toString(16).toUpperCase().padStart(2, '0'),
+    ).join(':');
+    return [
+      'v=0',
+      'o=- 4611731400430051336 2 IN IP4 127.0.0.1',
+      's=-',
+      't=0 0',
+      'a=group:BUNDLE 0',
+      'a=extmap-allow-mixed',
+      'a=msid-semantic: WMS',
+      'm=application 9 UDP/DTLS/SCTP webrtc-datachannel',
+      'c=IN IP4 0.0.0.0',
+      ...this.network
+        .addresses(this.index)
+        .map(
+          (address, candidate) =>
+            `a=candidate:${String(candidate + 100)} 1 udp 2113937151 ${address} ${String(50_000 + this.index)} typ host generation 0 network-cost 999`,
+        ),
+      `a=ice-ufrag:${this.ufrag}`,
+      `a=ice-pwd:${this.password}`,
+      'a=ice-options:trickle',
+      `a=fingerprint:sha-256 ${fingerprint}`,
+      `a=setup:${setup}`,
+      'a=mid:0',
+      'a=sctp-port:5000',
+      'a=max-message-size:262144',
+      '',
+    ].join('\r\n');
+  }
 }

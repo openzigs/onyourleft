@@ -67,6 +67,7 @@ import type {
 } from './analysis-port';
 import type { FrameKeep } from './keep';
 import { cameraNotice } from './notice';
+import { pairingCodeFromPixels } from './side-link-qr';
 import {
   nextPresence,
   observePair,
@@ -567,6 +568,39 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
       return noPreview;
     }
     return session.attachCameraPreview(surface);
+  }
+
+  /**
+   * Look once for a pairing code in what the running camera sees — #529,
+   * [ADR 0033](../../../../docs/adr/0033-side-camera-link.md) D-1 and D-4.
+   *
+   * The phone reads the tablet's code this way, and the tablet the phone's.
+   * ⚠️ **Only a camera that is already running**, which is only ever one the
+   * rider agreed to and turned on, on THIS device — D-4: *"scanning counts as
+   * camera use"*, so the consent flow has already been shown. It never opens a
+   * camera and never asks the port for anything but the one read.
+   *
+   * ⚠️ **The pixels do not outlive this call**: they go to
+   * `side-link-qr.ts` §`pairingCodeFromPixels` and are dropped with it — never
+   * sent, never kept, never counted as a capture, and never analysed for
+   * anything but a code (D-4).
+   *
+   * @returns the code's text, or `undefined` when there was no camera, no code,
+   * or the read failed. Never rejects: the screen reads again on its next tick.
+   */
+  async readPairingCode(): Promise<string | undefined> {
+    // No consent check of its own: a session exists only after `turnOn`, which
+    // refuses without consent, and `revoke` ends it — so a running session IS
+    // the consent, and a second check here could never fire.
+    const session = this.#session;
+    if (session === undefined || !session.live) {
+      return undefined;
+    }
+    try {
+      return pairingCodeFromPixels(await session.readCodePixels());
+    } catch {
+      return undefined;
+    }
   }
 
   /**

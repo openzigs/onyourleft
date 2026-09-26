@@ -142,8 +142,15 @@ const ANALYSIS_MODULE =
  * A new one is a red test: somebody adding an importer has to add it here,
  * and to say whether it can ever hold an answer.
  */
-const IMPORTERS: Readonly<Record<string, 'holds an answer' | 'builds the port'>> = {
+const IMPORTERS: Readonly<
+  Record<string, 'holds an answer' | 'builds the port' | 'reuses the address rule'>
+> = {
   [join('camera', 'session.ts')]: 'holds an answer',
+  // #529: ADR 0033 D-4 requires the side link's candidate rule to BE
+  // `analysis-endpoint.ts` §`addressSpaceOf`, reached through an adapter,
+  // rather than a second classifier. It imports that one pure function and
+  // can hold no answer — there is none on the side link.
+  [join('camera', 'side-link-code.ts')]: 'reuses the address rule',
   [join('views', 'CameraView.tsx')]: 'holds an answer',
   'main.tsx': 'builds the port',
 };

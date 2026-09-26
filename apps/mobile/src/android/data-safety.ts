@@ -71,6 +71,13 @@ export interface DataSafetyAnswer {
  * rider configured on their own network and switched on. That is data
  * transferred off the device, so it is collected; see the row.
  *
+ * ⚠️ **Since #529 there is a second** — `camera/side-link-transport.ts`, the
+ * side-camera link between a rider's tablet and a phone they paired by
+ * scanning — and **no row moves for it**: it carries a start, a stop and the
+ * phone's state words, which are none of Play's data types. ADR 0033 D-10
+ * puts the re-read of the Photos row with #530, the first PICTURE on that
+ * link, and it is not pre-answered here.
+ *
  * ⚠️ The health rows are here because Play's Health Content and Services policy
  * covers apps that are not primarily health apps — its own example is a game
  * that uses activity data to advance play, which is this app exactly (#95). The

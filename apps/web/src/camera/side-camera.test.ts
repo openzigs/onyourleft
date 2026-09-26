@@ -131,6 +131,33 @@ describe('the 30 seconds after the link is lost', () => {
     expect(stops(camera)).toBe(1);
   });
 
+  it('counts an ENDED link as lost that cannot recover — #529', async () => {
+    const { session, camera, link, time } = await filming();
+    link.emit({ kind: 'condition', condition: 'ended' });
+    expect(session.state().secondsLeft).toBe(30);
+    time.advance(LINK_LOSS_LIMIT_MILLISECONDS - 1);
+    expect(stops(camera)).toBe(0);
+    time.advance(1);
+    expect(stops(camera)).toBe(1);
+    expect(session.state().stopReason).toBe('link-lost');
+  });
+
+  it('does not restart the 30 seconds when a lost link then ends — #529', async () => {
+    // Lost, then the connection gives up for good: the camera nobody can stop
+    // gets the 30 seconds from the LOSS, not a second helping from the end.
+    const { camera, link, time } = await filming();
+    link.emit({ kind: 'condition', condition: 'lost' });
+    time.advance(20_000);
+    link.emit({ kind: 'condition', condition: 'ended' });
+    time.advance(LINK_LOSS_LIMIT_MILLISECONDS - 20_000);
+    expect(stops(camera)).toBe(1);
+  });
+
+  it('starts no countdown while a link is still connecting — #529', async () => {
+    const { session } = await filming({ condition: 'connecting' });
+    expect(session.state().secondsLeft).toBeUndefined();
+  });
+
   it('applies while framing too, because the camera is on then as well', async () => {
     const camera = scriptedCamera();
     const controller = new CameraController({
@@ -366,5 +393,51 @@ describe('keeps nothing (D-8)', () => {
       const code = source.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
       expect(code).not.toMatch(/localStorage|sessionStorage|indexedDB|caches\b|@onyourleft\/store/);
     }
+  });
+});
+
+describe('taking a link after the camera is on — #529', () => {
+  async function framingUnpaired() {
+    const camera = scriptedCamera();
+    const controller = new CameraController({
+      port: camera.port,
+      schedule: manualSchedule().schedule,
+    });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    const time = virtualTime();
+    const session = new SideCameraSession({ camera: controller, ...time });
+    await session.turnOnForFraming();
+    return { session, camera, time };
+  }
+
+  it('takes a connected link, tells the tablet where it is, and obeys it', async () => {
+    const { session } = await framingUnpaired();
+    const link = scriptedLink();
+    expect(session.pair(link)).toBe(true);
+    expect(session.state().paired).toBe(true);
+    expect(link.reports).toStrictEqual([{ state: 'framing' }]);
+    link.emit({ kind: 'start' });
+    expect(session.state().phase).toBe('filming');
+  });
+
+  it('takes one link only, never one that is not connected, and none once stopped', async () => {
+    const { session } = await framingUnpaired();
+    expect(session.pair(scriptedLink('connecting'))).toBe(false);
+    expect(session.pair(scriptedLink('ended'))).toBe(false);
+    expect(session.pair(scriptedLink())).toBe(true);
+    expect(session.pair(scriptedLink())).toBe(false);
+    session.stopHere();
+    const { session: stopped } = await framingUnpaired();
+    stopped.stopHere();
+    expect(stopped.pair(scriptedLink())).toBe(false);
+  });
+
+  it('runs the 30 seconds on a link it was handed late, exactly as on one it began with', async () => {
+    const { session, camera, time } = await framingUnpaired();
+    const link = scriptedLink();
+    session.pair(link);
+    link.emit({ kind: 'condition', condition: 'lost' });
+    time.advance(LINK_LOSS_LIMIT_MILLISECONDS);
+    expect(stops(camera)).toBe(1);
   });
 });

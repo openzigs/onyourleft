@@ -84,6 +84,7 @@ import type { WorkoutPort } from '../workouts/store-port';
 import { CameraIndicator } from '../camera/indicator';
 import type { CameraController } from '../camera/session';
 import type { SideCameraLinkPort } from '../camera/side-camera-link-port';
+import type { SidePairingPort } from '../camera/side-pairing-port';
 import type { ThermalPort } from '../game/thermal-port';
 
 import { UpdateOffer } from '../offline/UpdateOffer';
@@ -148,15 +149,20 @@ export interface AppShellProps {
   /**
    * The tripod phone's link to the tablet — #528, ADR 0033.
    *
-   * ⚠️ **`main.tsx` supplies none, and that is the state of the product, not
-   * an omission.** The link is [#529](https://github.com/openzigs/onyourleft/issues/529),
-   * which ADR 0033 D-0 holds until [#532](https://github.com/openzigs/onyourleft/issues/532)
-   * has measured a transport; until then the side-camera screen says in words
-   * that this phone cannot be paired. The prop exists so that the browser
-   * gate can drive the real shell into the filming state and measure it, and
-   * so #529's pairing has one place to arrive.
+   * ⚠️ **`main.tsx` supplies none, and since #529 that is not the state of the
+   * product**: a phone's link comes from {@link sidePairing}, which the
+   * side-camera screen scans for itself. This prop is the browser gate's, so
+   * that it can drive the real shell into the filming state without a second
+   * device.
    */
   readonly sideCameraLink?: SideCameraLinkPort | undefined;
+  /**
+   * Pairing the tablet with a side-camera phone — #529, ADR 0033 D-1. One per
+   * tab, built by `main.tsx`, because the tablet's pairing has to outlive the
+   * Camera screen it is made on (`side-pairing-port.ts` §`currentSideCamera`).
+   * `undefined` where this platform has no WebRTC; both screens then say so.
+   */
+  readonly sidePairing?: SidePairingPort | undefined;
   /**
    * Android's thermal forecast, for the game's quality ladder (#247). Absent
    * in a browser. @see game/thermal-port.ts
@@ -419,14 +425,20 @@ function viewFor(
     case 'segment-detail':
       return <SegmentDetailView port={props.efforts} segment={match.parameter} />;
     case 'camera':
-      return <CameraView {...(props.camera === undefined ? {} : { controller: props.camera })} />;
+      return (
+        <CameraView
+          {...(props.camera === undefined ? {} : { controller: props.camera })}
+          {...(props.sidePairing === undefined ? {} : { sidePairing: props.sidePairing })}
+        />
+      );
     case 'side-camera':
-      // #528. `main.tsx` hands over no link: pairing is #529, which ADR 0033
-      // D-0 holds until #532 has measured a transport. The screen says so.
+      // #528, #529. The link comes from pairing on this screen; `link` is
+      // the browser gate's way in and `main.tsx` supplies none.
       return (
         <SideCameraView
           {...(props.camera === undefined ? {} : { controller: props.camera })}
           {...(props.sideCameraLink === undefined ? {} : { link: props.sideCameraLink })}
+          {...(props.sidePairing === undefined ? {} : { pairing: props.sidePairing })}
           // #423's mechanism: while the phone films, the sign has the screen.
           onImmersive={onImmersive}
         />
