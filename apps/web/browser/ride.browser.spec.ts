@@ -655,13 +655,19 @@ function sideCameraCollisions(seen: StageMeasurement, viewport: Viewport): strin
     }
   });
   found.push(...laidOut.filter((each) => overlap(each.box, riderBox(viewport))).map(describeItem));
-  const pressed = ['control: Pause', 'control: End ride', 'control: Stop side camera'];
+  const pressed = ['control: Pause', 'control: End ride', 'the side camera stop'];
   found.push(
     ...pressed
       .map((name) => named(seen.items, name))
       .filter((each) => !inside(each.box, viewport) || !each.onTop)
       .map(describeItem),
   );
+  // The stop is the mute's size (`HudPanel.tsx` says why), so it is held to
+  // the mute's floor: SC 2.5.5's 44 × 44.
+  const stop = named(seen.items, 'the side camera stop');
+  if (stop.box.width < 44 - SUBPIXEL_TOLERANCE || stop.box.height < 44 - SUBPIXEL_TOLERANCE) {
+    found.push(`${describeItem(stop)} is smaller than 44 × 44`);
+  }
   return found;
 }
 

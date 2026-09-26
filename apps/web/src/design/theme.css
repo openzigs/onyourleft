@@ -1816,16 +1816,25 @@ select option {
 }
 
 /* #551: the side camera's line and *Stop side camera*, side by side in one
-   row, so the actions panel grows by one control's height rather than by a
-   line and a control — `HudPanel.tsx` has the measurement. */
+   row, so the actions panel grows by one line rather than by a line and a
+   control. The stop is the mute's size and keeps its one word on one line,
+   for #512's reason (`.oyl-hud .oyl-sound__mute` below): a label that can
+   wrap grows the row on a font with wider glyphs. `HudPanel.tsx` has the
+   measurement. */
 .oyl-hud__side-camera-row {
   display: flex;
   align-items: center;
-  gap: var(--oyl-space-md);
+  gap: var(--oyl-space-sm);
 }
 
 .oyl-hud__side-camera-row > .oyl-hud__side-camera {
   flex: 1;
+}
+
+.oyl-hud__side-camera-stop {
+  flex-shrink: 0;
+  margin-inline-start: auto;
+  white-space: nowrap;
 }
 
 .oyl-hud__control {

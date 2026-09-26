@@ -293,14 +293,24 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
         </div>
         {/*
           #551: the side camera's line and its stop, as ONE row under Pause and
-          End ride — so the two a rider presses every ride keep their places,
-          and so the panel grows by one control's height and not by a line
-          and a control. Measured in the pinned Chromium: as a line above the
-          controls and a stop below them, the actions panel was 236 px tall
-          and landed on the route panel at 736×360 and on the rider upright at
-          360×800 (`ride.browser.spec.ts` §"#551"). ⚠️ With #400's sound
-          controls as well it is 256 px and does not fit any phone viewport;
-          tablets fit. That is #576, not measured by a case here yet.
+          End ride, so the two a rider presses every ride keep their places.
+
+          ⚠️ **The stop is #400's mute's size, 44 px, and not
+          {@link CONTROL_MINIMUM_PIXELS}**, and that was measured rather than
+          chosen. As a 72 px control on a row of its own the actions panel was
+          236 px tall on a Mac and landed on the route panel at 736×360 and on
+          the rider upright at 360×800 and 360×752; as a 72 px control beside
+          the line it was 203 px on a Mac and 230 px on the CI runner's wider
+          fonts, and ran off a 736×360 stage (`ride.browser.spec.ts`
+          §"#551"). 44 px is SC 2.5.5's (AAA) target, which is what the mute
+          beside it clears; the 72 px floor stays for *Pause* and *End ride*,
+          which a rider presses every ride. Its visible word is "Stop" and its
+          name is "Stop side camera" — the rest is visually hidden, so the
+          name begins with what is seen (SC 2.5.3) and the line beside it says
+          what is stopped.
+
+          ⚠️ With #400's sound controls as well it does not fit any phone
+          viewport; tablets fit. That is #576.
         */}
         {props.sideCamera === undefined ? null : (
           <div className="oyl-hud__side-camera-row">
@@ -310,11 +320,10 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
             {props.sideCamera.onStop === undefined ? null : (
               <button
                 type="button"
-                className="oyl-hud__control"
+                className="oyl-button oyl-button--secondary oyl-hud__side-camera-stop"
                 onClick={props.sideCamera.onStop}
-                style={{ minWidth: CONTROL_MINIMUM_PIXELS, minHeight: CONTROL_MINIMUM_PIXELS }}
               >
-                Stop side camera
+                Stop<span className="oyl-visually-hidden"> side camera</span>
               </button>
             )}
           </div>

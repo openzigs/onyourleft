@@ -172,7 +172,7 @@ describe('the side camera on the ride HUD — #551', () => {
     // A steady state is not an exception: nothing in the notice slot.
     expect(notices()?.textContent ?? '').not.toContain('Side camera');
 
-    const stop = [...document.querySelectorAll<HTMLButtonElement>('.oyl-hud__control')].find(
+    const stop = [...document.querySelectorAll<HTMLButtonElement>('.oyl-hud button')].find(
       (each) => each.textContent === 'Stop side camera',
     );
     expect(stop).toBeDefined();

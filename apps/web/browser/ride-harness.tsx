@@ -333,6 +333,7 @@ function measure(): StageMeasurement {
     ['the plan view', '.oyl-hud__plan-svg'],
     ['the trainer line', '.oyl-hud__trainer'],
     ['the side camera line', '.oyl-hud__side-camera'],
+    ['the side camera stop', '.oyl-hud__side-camera-stop'],
   ] as const) {
     const element = document.querySelector(selector);
     if (element !== null) {

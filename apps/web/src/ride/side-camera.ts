@@ -96,16 +96,23 @@ export function sideCameraOnRide(
 export const SIDE_CAMERA_LABEL = 'Side camera';
 
 /**
- * The line, per state, after {@link SIDE_CAMERA_LABEL} and a colon. Short: it
- * is read at arm's length, mid-ride.
+ * The line, per state, after {@link SIDE_CAMERA_LABEL} and a colon.
+ *
+ * ⚠️ **Short because the HUD has no room, measured.** On a 736×360 phone the
+ * actions panel has about 16 px to spare on the CI runner's fonts before it
+ * lands on the panel above (`ride.browser.spec.ts` §"#551" publishes it), and
+ * this line shares a row with *Stop side camera* in about 160 px. Two lines
+ * fit that row; the first wording (*"stopping — waiting for the phone to
+ * confirm"*) was four. The lost link is a notice and has the notice slot's
+ * width, so it keeps the 30 seconds.
  */
 export const SIDE_CAMERA_ON_RIDE_TEXT: Readonly<Record<SideCameraOnRide, string>> = {
   lost: 'link lost. If it was filming, it stops by itself within 30 seconds.',
-  ended: 'the session ended.',
+  ended: 'session ended.',
   stopped: 'stopped.',
-  stopping: 'stopping — waiting for the phone to confirm.',
-  'stop-unconfirmed': 'the phone did not confirm the stop. Look at the phone.',
-  framing: 'on, and not filming.',
+  stopping: 'stopping…',
+  'stop-unconfirmed': 'stop not confirmed. Look at the phone.',
+  framing: 'on, not filming.',
   filming: 'filming.',
 };
 
