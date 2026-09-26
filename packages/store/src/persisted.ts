@@ -59,6 +59,7 @@ import type {
   CameraFrameRecord,
   FramingCheckRecord,
   FramingReferenceRecord,
+  SideCameraReportRecord,
   LapRecord,
   PrivacyZoneRecord,
   OriginalFileReference,
@@ -1307,5 +1308,106 @@ export function fromPersistedFramingReference(
     })),
     // Absent stays absent: "not recorded" is not any of the four verdicts.
     ...(row.check === undefined ? {} : { check: row.check as FramingCheckRecord }),
+  };
+}
+
+/**
+ * A side-camera report, as it sits on disk — #388. The same fields as
+ * {@link SideCameraReportRecord}, in plain types.
+ */
+export interface PersistedSideCameraReport {
+  activityId: string;
+  athleteId: string;
+  summary: string;
+  observations: string[];
+}
+
+/**
+ * The most observations one report may carry.
+ *
+ * The report has five kinds of observation (#388's owner ruling: torso, knee
+ * at the bottom of the stroke, elbow, head fore and aft, and fore and aft on
+ * the saddle), and each says one direction — so five is the most it can
+ * produce. The bound is a little above that so a sixth kind is a change to
+ * this number rather than a refused write, and it is what stops a hand-edited
+ * row handing the detail view a page of text.
+ */
+export const MAXIMUM_SIDE_REPORT_OBSERVATIONS = 8;
+
+/**
+ * The longest sentence a report may carry. The longest the wording file
+ * writes is well under half of this; a sentence is not a paragraph.
+ */
+export const MAXIMUM_SIDE_REPORT_SENTENCE = 400;
+
+/**
+ * What is wrong with a side-camera report's sentences, or `undefined` when
+ * nothing is — one rule for the way in and the way out, like
+ * {@link framingReferenceProblem}.
+ *
+ * ⚠️ **The message names the field and the constraint and never the value.**
+ * The value is a sentence about somebody's body.
+ */
+export function sideCameraReportProblem(report: {
+  readonly summary: unknown;
+  readonly observations: unknown;
+}): string | undefined {
+  if (!isSentence(report.summary)) {
+    return `sideCameraReport.summary: must be a sentence of at most ${String(MAXIMUM_SIDE_REPORT_SENTENCE)} characters`;
+  }
+  const observations = report.observations;
+  if (!Array.isArray(observations)) {
+    return 'sideCameraReport.observations: must be a list';
+  }
+  if (observations.length > MAXIMUM_SIDE_REPORT_OBSERVATIONS) {
+    return `sideCameraReport.observations: must hold at most ${String(MAXIMUM_SIDE_REPORT_OBSERVATIONS)} sentences`;
+  }
+  for (const [index, observation] of (observations as unknown[]).entries()) {
+    if (!isSentence(observation)) {
+      return `sideCameraReport.observations[${String(index)}]: must be a sentence of at most ${String(MAXIMUM_SIDE_REPORT_SENTENCE)} characters`;
+    }
+  }
+  return undefined;
+}
+
+function isSentence(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.trim().length > 0 &&
+    value.length <= MAXIMUM_SIDE_REPORT_SENTENCE
+  );
+}
+
+/**
+ * A side-camera report, on its way to disk — #388. Field by field, so a field
+ * added to the record later is absent from disk until somebody adds it here.
+ */
+export function toPersistedSideCameraReport(
+  record: SideCameraReportRecord,
+): PersistedSideCameraReport {
+  return {
+    activityId: record.activityId,
+    athleteId: record.athleteId,
+    summary: record.summary,
+    observations: [...record.observations],
+  };
+}
+
+/**
+ * @throws {StoreDecodeError} naming the field and the constraint, and never
+ * the value — see {@link sideCameraReportProblem}.
+ */
+export function fromPersistedSideCameraReport(
+  row: PersistedSideCameraReport,
+): SideCameraReportRecord {
+  const problem = sideCameraReportProblem(row);
+  if (problem !== undefined) {
+    throw new StoreDecodeError(problem);
+  }
+  return {
+    activityId: activityId(decodedString('sideCameraReport.activityId', row.activityId)),
+    athleteId: athleteId(decodedString('sideCameraReport.athleteId', row.athleteId)),
+    summary: row.summary,
+    observations: [...row.observations],
   };
 }

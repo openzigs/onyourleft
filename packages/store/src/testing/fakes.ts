@@ -7,14 +7,15 @@
  * observing the test go red. A harness that passes against a no-op write is
  * worthless, and this is the only way to know it does not."*
  *
- * There are **fifteen** fakes here, and there are fifteen on purpose: a harness
+ * There are **seventeen** fakes here, and there are seventeen on purpose: a harness
  * that catches one failure shape is calibrated to that shape. They stand for the
  * causes CLAUDE.md section 5 names, and they fail for different reasons at
  * different points in the read. The fourth arrived with #46's write path, the
  * fifth with #61's, the sixth with #64's, the seventh with #66's, the eighth
  * with #89's, the ninth with #73's, the tenth with #14's, the eleventh with
  * #93's, the twelfth with #238's, the thirteenth with #325's, the
- * fourteenth with #384's and the fifteenth with #528's, which is the rule this file exists to enforce: a new
+ * fourteenth with #384's, the fifteenth with #528's, the sixteenth with #530's and the
+ * seventeenth with #388's, which is the rule this file exists to enforce: a new
  * path may not ship without a fake proving the harness catches its failure.
  *
  * ⚠️ **The fourteenth breaks a DELETE, and every one before it breaks a write
@@ -47,6 +48,7 @@
  * | `roundedMassStoreFactory` | *wrong layer* — a layer above tidied a mass to a whole kilogram on its way in | the row comes back with a mass, a plausible one, and a pound reading that is no longer what the rider typed |
  * | `survivingFrameStoreFactory` | *wrong time* — a **delete** that reports how many it removed and removes nothing | the erase says "2 pictures removed", and a fresh connection still has both |
  * | `firstReferenceStoreFactory` | *wrong time* — a put that kept the row already there instead of replacing it | every put succeeds and the reference comes back well-formed — **from the first session**, not the last |
+ * | `lastSentenceDroppedReportStoreFactory` | *wrong layer* — a layer above dropped the last sentence of the side camera's report on its way in | the report comes back for the right ride, with the right summary and a plausible list — **one observation short**, and nothing on the page says so |
  * | `verdictlessReferenceStoreFactory` | *wrong layer* — a layer above copied the reference's numbers and dropped whether the framing check passed | every landmark comes back exact, and the session's verdict is **gone**, so no later report may compare it with anything |
  *
  * The second and third are the ones a naive harness misses. Both write to the
@@ -79,6 +81,7 @@ import type {
   ActivityRecord,
   FramingReferenceRecord,
   RouteRecord,
+  SideCameraReportRecord,
   SegmentEffortRecord,
   SegmentRecord,
   WorkoutRecord,
@@ -178,6 +181,8 @@ function bindStore(real: ActivityStore): PersistentStore {
     putFramingReference: async (record) => real.putFramingReference(record),
     getFramingReference: async (owner) => real.getFramingReference(owner),
     deleteFramingReference: async (owner) => real.deleteFramingReference(owner),
+    putSideCameraReport: async (record) => real.putSideCameraReport(record),
+    getSideCameraReport: async (owner, activity) => real.getSideCameraReport(owner, activity),
   };
 }
 
@@ -269,6 +274,10 @@ export function memoryWriteStoreFactory(): StoreFactory {
         putActivityRecord: (row: StoredActivityRecord) => {
           memory.set(`record:${row.activityId}`, row);
           return Promise.resolve(row.activityId);
+        },
+        putSideCameraReport: (record: SideCameraReportRecord) => {
+          memory.set(`side-report:${record.activityId}`, record);
+          return Promise.resolve();
         },
       };
     },
@@ -954,6 +963,37 @@ export function verdictlessReferenceStoreFactory(): StoreFactory {
             athleteId: record.athleteId,
             aspect: record.aspect,
             landmarks: record.landmarks,
+          }),
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A repository whose side-camera report put **drops the last observation**.
+ *
+ * The seventeenth fake, for #388's write path. It stands for a layer above
+ * the store that trimmed a list on its way in — a `slice(0, -1)` meant to drop
+ * a trailing blank, a bound applied one short. Every write succeeds, the row
+ * is there, the summary is exact and the list is well-formed: a round trip
+ * that checked only that a report came back for the ride is green against it.
+ * What the rider loses is a sentence about their own ride, silently.
+ * `assertSideCameraReportRoundTrip` compares the observations one by one and
+ * their count; `side-camera-report-store.test.ts` is the red/green pair.
+ */
+export function lastSentenceDroppedReportStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        putSideCameraReport: async (record: SideCameraReportRecord): Promise<void> =>
+          real.putSideCameraReport({
+            ...record,
+            observations: record.observations.slice(0, -1),
           }),
       };
     },

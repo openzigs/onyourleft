@@ -40,6 +40,7 @@ import { STREAM_CHANNELS, type NewStreamSet } from '../streams';
 import type {
   CameraFrameRecord,
   FramingReferenceRecord,
+  SideCameraReportRecord,
   RouteRecord,
   SegmentEndpointRecord,
   SegmentRecord,
@@ -667,6 +668,53 @@ export async function assertFramingReferenceRoundTrip(
     ) {
       throw new RoundTripFailure(
         `framingReference.landmarks[${String(index)}]: is not the landmark kept`,
+      );
+    }
+  }
+  return read;
+}
+
+/**
+ * Keep a side-camera report, close every connection, read it back through a
+ * fresh one and compare every sentence, in order — #388.
+ *
+ * ⚠️ **Run it on a harness that already holds a report for the same ride** and
+ * it is also the test of "the newest wins". And every observation is compared
+ * one by one, because `fakes.ts` §`lastSentenceDroppedReportStoreFactory`
+ * returns a report with the right ride, the right summary and a plausible
+ * list — one sentence short.
+ *
+ * ⚠️ The failure names the field and the index, and never the sentence: the
+ * sentence is about somebody's body.
+ *
+ * @throws {RoundTripFailure}
+ */
+export async function assertSideCameraReportRoundTrip(
+  harness: StoreHarness,
+  report: SideCameraReportRecord,
+): Promise<SideCameraReportRecord> {
+  const read = await harness.roundTrip(
+    async (store) => store.putSideCameraReport(report),
+    async (store) => store.getSideCameraReport(report.athleteId, report.activityId),
+  );
+  if (read === undefined) {
+    throw new RoundTripFailure(
+      `the side-camera report for ${report.activityId} was kept and reported success, and a fresh connection cannot see it`,
+    );
+  }
+  if (read.athleteId !== report.athleteId || read.activityId !== report.activityId) {
+    throw new RoundTripFailure('sideCameraReport: the report that came back is for another ride');
+  }
+  if (read.summary !== report.summary) {
+    throw new RoundTripFailure('sideCameraReport.summary: is not the summary kept');
+  }
+  if (read.observations.length !== report.observations.length) {
+    throw new RoundTripFailure('sideCameraReport.observations: a different number came back');
+  }
+  for (const [index, expected] of report.observations.entries()) {
+    if (read.observations[index] !== expected) {
+      throw new RoundTripFailure(
+        `sideCameraReport.observations[${String(index)}]: is not the sentence kept`,
       );
     }
   }
