@@ -656,9 +656,17 @@ picture of a person, so it goes with `deleteAthlete` (ADR 0029 D-4's *"everythin
 one"*), is named in `apps/web/src/transfer/erase-device.ts` §`ERASE_REMOVES`, and travels in the
 account export's manifest (ADR 0004 E).
 
-⚠️ **Nothing writes one in production yet.** The landmarks come from the pose model on the tablet,
-which is [#530](https://github.com/openzigs/onyourleft/issues/530). #528 builds the record, its
-erase and its export first, so the writer lands into rules that already hold.
+⚠️ **Its production writer is [#530](https://github.com/openzigs/onyourleft/issues/530)'s
+`apps/web/src/camera/side-analysis.ts`**, at the end of a session. #528 built the record, its erase
+and its export first, so the writer landed into rules that already held.
+
+**`check` records whether that session's framing check passed** (ADR 0033 D-7): `matches`,
+`differs`, `no-reference` or `not-checked`, in the same put as the placement it describes, so the
+verdict and its numbers are always one session's. It is optional and unindexed, so it is not a
+migration (§"An optional field is not a migration"). A row without it reads as *not recorded* and
+fails closed: only `matches` permits a cross-session sentence in #388's report. An unrecognised value
+is refused on the way in and on the way out, and the message names the allowed values, never the
+stored one. `verdictlessReferenceStoreFactory` is the sixteenth fake: a put that drops `check`.
 
 `firstReferenceStoreFactory` is the fifteenth fake: a put that keeps the row already there. It
 passes every single-session test — the put succeeds, the read returns a well-formed reference for

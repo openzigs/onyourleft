@@ -133,8 +133,10 @@ directly, over your own Wi-Fi.
   to any service. What is kept is where the model found your ear, shoulder, elbow, wrist, hip, knee,
   ankle, heel and toe in each picture: numbers, not a picture, held in the tablet's memory for the
   report after the ride and gone when the app is closed. At the end of a session the tablet also
-  keeps, on the device, where you were in the picture overall, so that the next session can check
-  the camera is in the same place; erasing the device removes it.
+  keeps, on the device, where you were in the picture overall, and whether that session's check
+  found the camera where it was the time before. The first is so the next session can check the
+  camera is in the same place; the second is so the report after a ride compares two sessions only
+  when the camera did not move between them. Erasing the device removes both.
 - **The pose model** is Google's MediaPipe Pose Landmarker, and it is part of the app: it and the
   code that runs it are served from the app itself, never downloaded from Google. ⚠️ **That code
   contains a usage logger that would send Google a report** of how often the model ran and how long

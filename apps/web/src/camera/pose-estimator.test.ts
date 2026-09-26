@@ -170,11 +170,16 @@ describe('when the worker fails', () => {
 describe('letting it go', () => {
   it('terminates the worker, settles what was waiting, and refuses anything after', async () => {
     const worker = scriptedWorker();
-    const estimator = workerPoseEstimator(() => worker);
+    const time = virtualTime();
+    const estimator = workerPoseEstimator(() => worker, time);
     const waiting = estimator.estimateSidePose(cleanFrameBytes());
     estimator.closeSidePoseModel();
     estimator.closeSidePoseModel();
     expect(worker.terminated).toBe(1);
+    // #555's second review: closing must cancel each waiting picture's reply
+    // deadline, not leave a 60 s timer alive on a dead estimator. Behaviour
+    // alone cannot see it — the stray timer's `fail()` is a harmless no-op.
+    expect(time.active()).toBe(0);
     await expect(waiting).resolves.toEqual({ kind: 'unavailable' });
     await expect(estimator.estimateSidePose(cleanFrameBytes())).resolves.toEqual({
       kind: 'unavailable',

@@ -104,7 +104,7 @@
  */
 
 import type { SignedActivityRecord, UnixSeconds } from '@onyourleft/domain';
-import type { ActivityId, AthleteId } from '@onyourleft/store';
+import type { ActivityId, AthleteId, FramingCheckRecord } from '@onyourleft/store';
 
 import { ActivityExportError, exportActivity, fileStemOf } from './export-activity';
 import type { ActivityFileFormat } from './file-format';
@@ -410,7 +410,7 @@ export function accountManifest(input: {
           readonly x: number;
           readonly y: number;
         }[];
-        readonly check?: string | undefined;
+        readonly check?: FramingCheckRecord | undefined;
       }
     | undefined;
   readonly exportedAt: number;
