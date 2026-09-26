@@ -476,6 +476,39 @@ test.describe('a cold start with the network off', () => {
     }
   });
 
+  test('opens the licence text the credits screen links, not the app shell — #597', async () => {
+    // The credits screen links the Apache-2.0 text this app ships beside the
+    // Roboto glyphs and the pose model. Opening it is a NAVIGATION, and the
+    // worker used to answer every navigation with the shell — so a controlled
+    // page showed the home screen where the licence should have been, online
+    // or off. The link is read off the rendered screen rather than typed here,
+    // so a screen that stopped linking it fails too.
+    const second = await session(profile);
+    await second.context.setOffline(true);
+    try {
+      await second.page.goto(`${PRODUCT_ORIGIN}/#/about/credits`);
+      await expect(second.page.locator('h1')).toHaveText('Credits');
+      const link = second.page.locator('[data-terms="licence-copy"] a', {
+        hasText: 'Apache-2.0',
+      });
+      await expect(link.first()).toBeVisible();
+      const href = await link.first().evaluate((anchor) => (anchor as HTMLAnchorElement).href);
+      expect(href).toBe(`${PRODUCT_ORIGIN}/licences/Apache-2.0.txt`);
+
+      const opened = await second.page.goto(href);
+      expect(opened?.status(), 'the licence text did not open offline').toBe(200);
+      expect(opened?.fromServiceWorker(), 'the licence text was not served by the worker').toBe(
+        true,
+      );
+      const body = (await opened?.text()) ?? '';
+      expect(body, 'the navigation was answered with something other than the licence').toMatch(
+        /^\s*Apache License\s+Version 2\.0, January 2004/,
+      );
+    } finally {
+      await second.close();
+    }
+  });
+
   test('asks the browser for persistent storage, exactly once — #409', async () => {
     // ⚠️ **This asserts the CALL, not `persisted()`, and that is a measurement
     // rather than a preference.** #409 asks for the round trip to be read back

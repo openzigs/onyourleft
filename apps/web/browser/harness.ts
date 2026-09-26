@@ -67,6 +67,7 @@
 import {
   basemapStyle,
   BASEMAP_SOURCE_ID,
+  LABEL_TEXT_COLOUR,
   OSM_ATTRIBUTION,
   TRACK_LINE_COLOUR,
   type BasemapConfig,
@@ -193,10 +194,40 @@ export interface MapLoadResult {
   readonly centreColours: readonly string[];
 }
 
+/** One request for a glyph range, as Resource Timing recorded it (#578). */
+export interface GlyphRequest {
+  /** The absolute URL the engine resolved the style's `glyphs` template to. */
+  readonly url: string;
+  /** The HTTP status, `0` where the browser withheld it. */
+  readonly status: number;
+}
+
+/**
+ * What the page observed about the map's labels (#578).
+ *
+ * Published separately from {@link MapLoadResult} and later, because a label
+ * needs a tile *and* a glyph range, fetched and parsed after the tile is.
+ */
+export interface LabelLoadResult {
+  /** At least {@link LABEL_INK_PIXELS} pixels of the labels' ink reached the drawing buffer. */
+  readonly painted: boolean;
+  /** How many pixels of it were found on the last frame read. */
+  readonly inkPixels: number;
+  /** Frames the whole buffer was read on. */
+  readonly frames: number;
+  /** The ink looked for, `#rrggbb`, out of the real style. */
+  readonly ink: string;
+  /** Every glyph-range request the page made, in order. */
+  readonly glyphRequests: readonly GlyphRequest[];
+  /** What the style's `glyphs` was when it was handed to the engine. */
+  readonly glyphs: string | undefined;
+}
+
 declare global {
   interface Window {
     __oylHarness?: HarnessResult;
     __oylMapLoad?: MapLoadResult;
+    __oylLabels?: LabelLoadResult;
   }
 }
 
@@ -496,6 +527,127 @@ function watchForPaint(container: HTMLDivElement, style: BasemapStyle, archive: 
   }, deadline);
 }
 
+/**
+ * How many pixels of ink count as "a label painted".
+ *
+ * A label at 12 px or more puts well over a hundred pixels of solid ink on the
+ * buffer; a stray antialiased pixel of some other colour that happens to land
+ * inside the tolerance is one or two. The threshold sits between the two by an
+ * order of magnitude each way, and the spec's controls are what say it does.
+ */
+const LABEL_INK_PIXELS = 40;
+
+/**
+ * How far a pixel may sit from the ink and still count as ink.
+ *
+ * Wider than {@link COLOUR_TOLERANCE}, because text is where a rasteriser
+ * blends: a glyph's stem at 12 px is barely two pixels wide and its core is
+ * the only part that reaches the declared colour. Still far from every other
+ * colour the style paints — the nearest, the ride's line, is over a hundred
+ * away on the red channel.
+ */
+const INK_TOLERANCE = 24;
+
+/** Glyph-range requests, from the browser's own Resource Timing buffer. */
+function glyphRequests(): GlyphRequest[] {
+  return performance
+    .getEntriesByType('resource')
+    .filter((entry) => /\/\d+-\d+\.pbf$/.test(new URL(entry.name).pathname))
+    .map((entry) => ({
+      url: entry.name,
+      status: (entry as PerformanceResourceTiming).responseStatus,
+    }));
+}
+
+/**
+ * Watch the whole drawing buffer for the labels' ink (#578).
+ *
+ * A whole-buffer read per frame is expensive, and it is only ever done until
+ * the ink is found or the deadline passes — the same deadline
+ * {@link watchForPaint} uses, so a control that can never paint a label waits
+ * exactly as long as one that can never paint a tile.
+ */
+function watchForLabels(container: HTMLDivElement, style: BasemapStyle): void {
+  const deadline = paintDeadlineMs();
+  const ink = parseHex(LABEL_TEXT_COLOUR);
+  let frames = 0;
+  let inkPixels = 0;
+  let done = false;
+
+  const publish = (): void => {
+    if (done) {
+      return;
+    }
+    done = true;
+    window.__oylLabels = {
+      painted: inkPixels >= LABEL_INK_PIXELS,
+      inkPixels,
+      frames,
+      ink: LABEL_TEXT_COLOUR,
+      glyphRequests: glyphRequests(),
+      glyphs: style.glyphs,
+    };
+  };
+
+  const probe = (): void => {
+    const canvas = container.querySelector('canvas');
+    const gl = canvas?.getContext('webgl2') ?? canvas?.getContext('webgl') ?? null;
+    if (canvas === null || gl === null || canvas.width === 0 || ink === undefined) {
+      return;
+    }
+    frames += 1;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const pixels = new Uint8Array(canvas.width * canvas.height * 4);
+    gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    let count = 0;
+    for (let offset = 0; offset < pixels.length; offset += 4) {
+      if (
+        Math.abs((pixels[offset] ?? 0) - ink[0]) <= INK_TOLERANCE &&
+        Math.abs((pixels[offset + 1] ?? 0) - ink[1]) <= INK_TOLERANCE &&
+        Math.abs((pixels[offset + 2] ?? 0) - ink[2]) <= INK_TOLERANCE
+      ) {
+        count += 1;
+      }
+    }
+    inkPixels = count;
+  };
+
+  const tick = (): void => {
+    if (done) {
+      return;
+    }
+    probe();
+    if (inkPixels >= LABEL_INK_PIXELS) {
+      publish();
+      return;
+    }
+    window.requestAnimationFrame(tick);
+  };
+  window.requestAnimationFrame(tick);
+  window.setTimeout(() => {
+    probe();
+    publish();
+  }, deadline);
+}
+
+/**
+ * The style's `glyphs`, as `?glyphs=` may replace it (#578).
+ *
+ * `off` removes it, and anything else replaces it — the two controls the spec
+ * needs to say the positive case's glyphs came from the app's own files:
+ * with none, MapLibre asks for no range at all; with a path that is not there,
+ * it asks, is refused, and warns. The product never takes this path.
+ */
+function withGlyphsParameter(style: BasemapStyle): BasemapStyle {
+  const configured = new URL(window.location.href).searchParams.get('glyphs');
+  if (configured === null) {
+    return style;
+  }
+  const rest: { -readonly [K in keyof BasemapStyle]: BasemapStyle[K] } = { ...style };
+  delete rest.glyphs;
+  return configured === 'off' ? rest : { ...rest, glyphs: configured };
+}
+
 /** A short two-point line, so the map has geometry to fit itself to. */
 const TRACK: TrackGeometry = {
   type: 'MultiLineString',
@@ -568,7 +720,7 @@ function run(): void {
 
   const archive = archiveUrl();
   const config: BasemapConfig = { archiveUrl: archive, attribution: OSM_ATTRIBUTION };
-  const style = basemapStyle(config, { tiles: tilesDrawn() });
+  const style = withGlyphsParameter(basemapStyle(config, { tiles: tilesDrawn() }));
   const errors: string[] = [];
   let created = false;
 
@@ -577,6 +729,7 @@ function run(): void {
   // context's attributes cannot be changed afterwards.
   preserveTheDrawingBuffer();
   watchForPaint(container, style, archive);
+  watchForLabels(container, style);
 
   try {
     // Registered before the map is created, exactly as `MapPanel.tsx` does it.

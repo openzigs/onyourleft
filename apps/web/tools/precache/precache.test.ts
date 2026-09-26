@@ -7,8 +7,15 @@ import {
   POSE_MODEL_FILE,
   POSE_RUNTIME_WASM_FILE,
 } from '../../src/camera/pose-files';
+import { SHIPPED_LICENCE_TEXTS } from '../../src/credits/credits';
 import { REALISTIC_DIRECTORY, realisticFiles } from '../../src/game/realistic-assets';
 import { SCENERY_ATLAS, SCENERY_MODELS } from '../../src/game/scenery-models';
+import {
+  FONT_LICENCE_FILE,
+  FONT_STACK,
+  GLYPH_RANGE_STARTS,
+  rangeName,
+} from '../glyphs/font-source';
 import { cacheVersion, precacheEntries, PRECACHE_EXCLUSIONS, type PrecacheFile } from './precache';
 
 /** A stand-in hash: distinguishing, cheap, and obviously not cryptographic. */
@@ -165,6 +172,49 @@ describe('the side camera’s pose model is not precached — #530', () => {
     expect(cacheVersion([...BUILD, ...changed], fakeDigest)).toBe(
       cacheVersion([...BUILD, ...pose], fakeDigest),
     );
+  });
+});
+
+describe('the map’s label glyphs ARE precached — #578', () => {
+  // The decision, stated where it can go red: 586 KiB of ranges and their
+  // licence, out of `public/glyphs/`, cached like every other file the build
+  // emits. `font-source.ts` §`GLYPH_RANGE_STARTS` and `precache.ts`
+  // §`PRECACHE_EXCLUSIONS` say why they are not excluded the way the
+  // realistic world and the pose model are.
+  const glyphs = [
+    ...GLYPH_RANGE_STARTS.map((start) => `glyphs/${FONT_STACK}/${rangeName(start)}.pbf`),
+    `glyphs/${FONT_STACK}/${FONT_LICENCE_FILE}`,
+  ].map((name) => file(name));
+
+  it('holds every range and the font’s licence', () => {
+    const entries = precacheEntries([...BUILD, ...glyphs]);
+    for (const each of glyphs) {
+      expect(entries, each.name).toContain(each.name);
+    }
+  });
+
+  it('moves the cache version when a range changes, so a rider gets the new glyphs', () => {
+    const changed = glyphs.map((each) => file(each.name, 'zz'));
+    expect(cacheVersion([...BUILD, ...changed], fakeDigest)).not.toBe(
+      cacheVersion([...BUILD, ...glyphs], fakeDigest),
+    );
+  });
+});
+
+describe('the licence texts the credits screen links ARE precached — #597', () => {
+  // The worker answers a navigation to a precached file with that file, and
+  // any other navigation with the app shell. A licence text left out of the
+  // precache would open as the home screen once the worker controlled the
+  // page, which is the defect #597 found.
+  it('holds every one', () => {
+    const texts = Object.values(SHIPPED_LICENCE_TEXTS).map((link) =>
+      file(link.replace(/^\.\//, '')),
+    );
+    expect(texts.length).toBeGreaterThan(0);
+    const entries = precacheEntries([...BUILD, ...texts]);
+    for (const each of texts) {
+      expect(entries, each.name).toContain(each.name);
+    }
   });
 });
 

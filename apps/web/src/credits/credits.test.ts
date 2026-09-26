@@ -22,7 +22,16 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { ATTRIBUTION_LICENCES, creditsFrom, externalLink, licenceLink } from './credits';
+import {
+  ATTRIBUTION_LICENCES,
+  creditsFrom,
+  externalLink,
+  LICENCE_COPY_LICENCES,
+  licenceLink,
+  licenceTerms,
+  NOTHING_ASKED_LICENCES,
+  SHIPPED_LICENCE_TEXTS,
+} from './credits';
 import { parseAssetManifest } from './manifest';
 
 function credits(lines: readonly string[]): ReturnType<typeof creditsFrom> {
@@ -53,6 +62,28 @@ const A_CC0 = entry({
   sha256: 'bb',
   creator: 'Kenney',
   url: 'https://kenney.nl/assets/nature-kit',
+  modified: 'no',
+});
+
+const AN_APACHE = entry({
+  path: 'apps/web/public/glyphs/Roboto-Regular/0-255.pbf',
+  source: 'Roboto v2.138 Regular, rasterised by this repository',
+  licence: 'Apache-2.0',
+  read: '2026-09-26',
+  sha256: 'ee',
+  creator: 'Christian Robertson for Google',
+  url: 'https://github.com/googlefonts/roboto-2/releases/tag/v2.138',
+  modified: 'rasterised',
+});
+
+const AN_MIT = entry({
+  path: 'apps/mobile/android/app/src/main/res/drawable/splash.png',
+  source: 'the Capacitor Android template',
+  licence: 'MIT',
+  read: '2026-09-16',
+  sha256: 'ff',
+  creator: 'Ionic',
+  url: 'https://github.com/ionic-team/capacitor',
   modified: 'no',
 });
 
@@ -92,6 +123,31 @@ describe('which assets are credited', () => {
     const { required, courtesy } = credits([...A_CC_BY, ...A_CC0, ...A_FIXTURE]);
     expect(required.map((work) => work.licence)).toEqual(['CC-BY-4.0']);
     expect(courtesy.map((work) => work.licence)).toEqual(['CC0-1.0']);
+  });
+
+  it('lists an Apache-2.0 work apart from the courtesy list, with its licence copy — #597', () => {
+    // Apache-2.0 §4(a) asks for the licence text to travel with the work. The
+    // courtesy section says its licences ask for nothing, so an Apache-2.0
+    // work under it was the screen denying an obligation that exists.
+    const { required, licenceCopy, courtesy, problems } = credits([...AN_APACHE, ...A_CC0]);
+    expect(required).toEqual([]);
+    expect(licenceCopy.map((work) => work.creator)).toEqual(['Christian Robertson for Google']);
+    expect(licenceCopy[0]?.terms).toBe('licence-copy');
+    expect(courtesy.map((work) => work.licence)).toEqual(['CC0-1.0']);
+    expect(problems).toEqual([]);
+  });
+
+  it('puts a licence it has not been told about in neither list, and says so', () => {
+    // The courtesy list is an allowlist. MIT asks for its notice to travel
+    // with the work, so "everything not CC BY is a courtesy" would put it
+    // under a sentence saying it asks for nothing.
+    const { licenceCopy, courtesy, unclassified, problems } = credits(AN_MIT);
+    expect(licenceCopy).toEqual([]);
+    expect(courtesy).toEqual([]);
+    expect(unclassified.map((work) => work.licence)).toEqual(['MIT']);
+    expect(problems.join('\n')).toContain(
+      'apps/mobile/android/app/src/main/res/drawable/splash.png is under MIT, and this page has not been told',
+    );
   });
 
   it('gathers the files of one work into one credit rather than repeating it', () => {
@@ -169,10 +225,13 @@ describe('the licence a credit names', () => {
     expect(licenceLink('CC0-1.0')).toBe('https://creativecommons.org/publicdomain/zero/1.0/');
   });
 
-  it('gives no link for a licence it has no canonical URL for', () => {
+  it('gives no link for a licence it has no canonical URL or shipped copy for', () => {
     // The identifier alone is still an honest statement; a guessed URL is not.
     expect(licenceLink('MIT')).toBeUndefined();
-    expect(licenceLink('Apache-2.0')).toBeUndefined();
+  });
+
+  it('links Apache-2.0 to the copy this app ships, relative to the page — #597', () => {
+    expect(licenceLink('Apache-2.0')).toBe('./licences/Apache-2.0.txt');
   });
 
   it('has a link for every licence that requires attribution', () => {
@@ -183,6 +242,51 @@ describe('the licence a credit names', () => {
     for (const licence of ATTRIBUTION_LICENCES) {
       expect(licenceLink(licence), `no licence text linked for ${licence}`).toBeDefined();
     }
+  });
+});
+
+describe('the licence texts this app ships — #597', () => {
+  const publicDirectory = new URL('../../public/', import.meta.url);
+  const canonical = new URL('../../../../LICENSES/', import.meta.url);
+
+  it('has a shipped copy for every licence that asks for one to travel with the work', () => {
+    for (const licence of LICENCE_COPY_LICENCES) {
+      expect(SHIPPED_LICENCE_TEXTS[licence], `no shipped copy of ${licence}`).toBeDefined();
+    }
+  });
+
+  it('names files that are in `public/`, byte-identical to the canonical texts', () => {
+    // Relative to the page, so what `public/` holds is what `dist` serves.
+    // The bytes are the text `LIC005` pins by digest in ADR 0001, so a copy
+    // that was retyped, rewrapped or truncated is a red test rather than a
+    // licence text that is not quite the licence.
+    const shipped = Object.entries(SHIPPED_LICENCE_TEXTS);
+    expect(shipped.length).toBeGreaterThan(0);
+    for (const [licence, link] of shipped) {
+      expect(link.startsWith('./'), `${link} is not relative to the page`).toBe(true);
+      const bytes = readFileSync(fileURLToPath(new URL(link.slice(2), publicDirectory)));
+      const expected = readFileSync(fileURLToPath(new URL(`${licence}.txt`, canonical)));
+      expect(bytes.equals(expected), `${link} is not the canonical ${licence} text`).toBe(true);
+    }
+  });
+
+  it('keeps the three sets of licences apart', () => {
+    for (const licence of [
+      ...ATTRIBUTION_LICENCES,
+      ...LICENCE_COPY_LICENCES,
+      ...NOTHING_ASKED_LICENCES,
+    ]) {
+      expect(
+        [ATTRIBUTION_LICENCES, LICENCE_COPY_LICENCES, NOTHING_ASKED_LICENCES].filter((set) =>
+          set.includes(licence),
+        ),
+        `${licence} is in more than one set`,
+      ).toHaveLength(1);
+    }
+    expect(licenceTerms('Apache-2.0')).toBe('licence-copy');
+    expect(licenceTerms('CC0-1.0')).toBe('nothing');
+    expect(licenceTerms('CC-BY-4.0')).toBe('attribution');
+    expect(licenceTerms('MIT')).toBe('unclassified');
   });
 });
 

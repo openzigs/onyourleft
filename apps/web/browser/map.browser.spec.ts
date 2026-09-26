@@ -61,7 +61,7 @@ import { expect, test } from '@playwright/test';
 import { PMTiles } from 'pmtiles';
 
 import { HARNESS_ORIGIN } from '../playwright.config';
-import type { HarnessResult, MapLoadResult } from './harness';
+import type { HarnessResult, LabelLoadResult, MapLoadResult } from './harness';
 import {
   centreTrack,
   coldLoadReport,
@@ -75,7 +75,11 @@ import {
   type ArchiveBounds,
   type ArchiveResponseFact,
 } from './hosted-archive';
-import { FIXTURE_ARCHIVE_FILE, FIXTURE_BOUNDED_ARCHIVE_FILE } from './pmtiles-fixture';
+import {
+  FIXTURE_ARCHIVE_FILE,
+  FIXTURE_BOUNDED_ARCHIVE_FILE,
+  FIXTURE_PLACE_NAME,
+} from './pmtiles-fixture';
 
 /** Where the harness asks for its archive. Same origin as the page. */
 const ARCHIVE_PATH = '/basemap.pmtiles';
@@ -163,6 +167,48 @@ async function mapLoad(page: import('@playwright/test').Page): Promise<MapLoadRe
   }
   return result;
 }
+
+/** What the page saw of the labels, once it has stopped watching (#578). */
+async function labelLoad(page: import('@playwright/test').Page): Promise<LabelLoadResult> {
+  await page.waitForFunction(() => window.__oylLabels !== undefined);
+  const result = await page.evaluate(() => window.__oylLabels);
+  if (result === undefined) {
+    throw new Error('the harness published no label result');
+  }
+  return result;
+}
+
+/**
+ * Every warning MapLibre prints when it could not load a glyph range and drew
+ * the text in the device's own font instead (#578).
+ *
+ * MapLibre 6.10's wording, `glyph_manager.ts` §`_warnOnMissingGlyphRange`. The
+ * control below is what says this spelling is still the one it prints: if a
+ * MapLibre bump rewords it, the 404 control goes red rather than the positive
+ * case going quietly green over a fallback.
+ */
+function glyphFallbacks(page: import('@playwright/test').Page): string[] {
+  const warnings: string[] = [];
+  page.on('console', (message) => {
+    if (message.text().includes('Unable to load glyph range')) {
+      warnings.push(message.text());
+    }
+  });
+  return warnings;
+}
+
+/**
+ * The glyph ranges {@link FIXTURE_PLACE_NAME} needs, by `{range}` token.
+ * Computed from the name, so a new fixture name is checked with no edit here.
+ */
+const PLACE_NAME_RANGES = [
+  ...new Set(
+    [...FIXTURE_PLACE_NAME].map((character) => {
+      const start = Math.floor((character.codePointAt(0) ?? 0) / 256) * 256;
+      return `${String(start)}-${String(start + 255)}`;
+    }),
+  ),
+].sort();
 
 /**
  * Wait until the archive has actually been asked for.
@@ -663,6 +709,12 @@ test.describe('with map tiles turned off — the owner’s choice of 2026-09-25'
 
     expect(seen.requests.filter((url) => url.startsWith(FIXTURE_URL))).toEqual([]);
     expect(load.archiveRequests).toEqual([]);
+    // #578: nothing to label, so no glyph range and no label ink. This is also
+    // what says the label probe can report "nothing" at all.
+    const labels = await labelLoad(page);
+    expect(labels.glyphs).toBeUndefined();
+    expect(labels.glyphRequests).toEqual([]);
+    expect(labels.painted, `${String(labels.inkPixels)} ink pixels with no tiles`).toBe(false);
     const foreign = seen.requests.filter(
       (url) =>
         !url.startsWith('blob:') &&
@@ -670,6 +722,119 @@ test.describe('with map tiles turned off — the owner’s choice of 2026-09-25'
         new URL(url).origin !== HARNESS_ORIGIN,
     );
     expect(foreign, `requests left the page's origin: ${foreign.join(', ')}`).toEqual([]);
+  });
+});
+
+/**
+ * #578: place names, drawn from glyphs the app ships.
+ *
+ * ⚠️ **"A label painted" cannot, on its own, tell the app's glyphs from the
+ * device's font — and that is a finding, not a caveat.** MapLibre 6.10 draws a
+ * glyph itself, with TinySDF and whatever font the browser has, whenever the
+ * style has no `glyphs` URL or the URL cannot serve a range
+ * (`glyph_manager.ts` §`_getAndCacheGlyphsPromise`). So a style with no glyphs
+ * at all **still labels the map**, and the positive case's ink assertion would
+ * be green over a regression that deleted every range file. The issue's
+ * premise — that a control without `glyphs` would fail to paint — is false for
+ * this engine, and both controls below measure it.
+ *
+ * What does distinguish the two is the network and the console: the positive
+ * case requires every range the name needs to have been fetched **from the
+ * page's own origin** with a 200, and MapLibre to have printed no fallback
+ * warning. The two controls prove each half can fail — with no `glyphs`, no
+ * range is asked for; with a `glyphs` path that is not there, every range is
+ * refused and the warning is printed.
+ *
+ * ⚠️ **Framed at a ride's zoom, not the harness's default.** The default track
+ * is 140 m long and fits at about zoom 18, where the viewport is a twentieth of
+ * one overzoomed z14 tile and no fixture place is in it — the first run of this
+ * block found exactly that, zero ink and zero glyph requests, because MapLibre
+ * lays out no symbol whose point is off screen. {@link LABEL_TRACK} is 5 km,
+ * which is a short ride, and frames at about zoom 12, where the fixture's grid
+ * of places is every 128 px.
+ */
+const LABEL_TRACK = trackParameter(
+  centreTrack({ west: -0.2, south: 51.45, east: 0, north: 51.55 }, 5000),
+);
+
+test.describe('place names, from glyphs the app ships — #578', () => {
+  test('paints the fixture’s place name from the app’s own glyph ranges, and nothing else', async ({
+    page,
+  }) => {
+    const seen = watch(page);
+    const fallbacks = glyphFallbacks(page);
+    await page.goto(
+      `/?archive=${encodeURIComponent(FIXTURE_URL)}&track=${encodeURIComponent(LABEL_TRACK)}`,
+    );
+    const labels = await labelLoad(page);
+
+    expect(
+      labels.painted,
+      `no label ink (${labels.ink}) reached the drawing buffer: ${String(labels.inkPixels)} pixels over ${String(labels.frames)} frames`,
+    ).toBe(true);
+    expect(labels.glyphs).toBe('./glyphs/{fontstack}/{range}.pbf');
+
+    // Every range Kāneʻohe needs — three of them — from the page's own origin.
+    const fetched = labels.glyphRequests.map((request) => new URL(request.url));
+    const ranges = fetched
+      .filter((url) => url.pathname.startsWith('/glyphs/Roboto-Regular/'))
+      .map((url) => url.pathname.replace('/glyphs/Roboto-Regular/', '').replace('.pbf', ''));
+    for (const range of PLACE_NAME_RANGES) {
+      expect(ranges, `range ${range} was not fetched from the app`).toContain(range);
+    }
+    for (const request of labels.glyphRequests) {
+      expect(new URL(request.url).origin, request.url).toBe(HARNESS_ORIGIN);
+      expect(request.status, request.url).toBe(200);
+    }
+    // And MapLibre drew none of it from the device's font.
+    expect(fallbacks, fallbacks.join('\n')).toEqual([]);
+
+    const foreign = seen.requests.filter(
+      (url) =>
+        !url.startsWith('blob:') &&
+        !url.startsWith('data:') &&
+        new URL(url).origin !== HARNESS_ORIGIN,
+    );
+    expect(foreign, `requests left the page's origin: ${foreign.join(', ')}`).toEqual([]);
+  });
+
+  test('asks for no glyph range at all when the style names none — the first control', async ({
+    page,
+  }) => {
+    const fallbacks = glyphFallbacks(page);
+    await page.goto(
+      `/?archive=${encodeURIComponent(FIXTURE_URL)}&track=${encodeURIComponent(LABEL_TRACK)}&glyphs=off&paintDeadline=${String(CONTROL_DEADLINE_MS)}`,
+    );
+    const labels = await labelLoad(page);
+
+    expect(labels.glyphs).toBeUndefined();
+    expect(labels.glyphRequests).toEqual([]);
+    // No URL, so no range to miss and no warning — MapLibre goes straight to
+    // the device's font.
+    expect(fallbacks).toEqual([]);
+    // ⚠️ And it STILL paints: the finding in this block's header, measured.
+    // Were this ever false, the positive case's ink would be evidence of the
+    // app's glyphs on its own; while it is true, the requests are.
+    expect(labels.painted, `${String(labels.inkPixels)} ink pixels`).toBe(true);
+  });
+
+  test('warns and falls back when the glyphs are not there — the second control', async ({
+    page,
+  }) => {
+    const fallbacks = glyphFallbacks(page);
+    await page.goto(
+      `/?archive=${encodeURIComponent(FIXTURE_URL)}&track=${encodeURIComponent(LABEL_TRACK)}&glyphs=${encodeURIComponent('./missing-glyphs/{fontstack}/{range}.pbf')}&paintDeadline=${String(CONTROL_DEADLINE_MS)}`,
+    );
+    const labels = await labelLoad(page);
+
+    // Asked for, from our own origin, and refused.
+    expect(labels.glyphRequests.length).toBeGreaterThan(0);
+    for (const request of labels.glyphRequests) {
+      expect(request.url).toContain('/missing-glyphs/');
+      expect(request.status, request.url).toBe(404);
+    }
+    // The warning the positive case requires to be absent, present.
+    expect(fallbacks.length).toBeGreaterThan(0);
   });
 });
 
