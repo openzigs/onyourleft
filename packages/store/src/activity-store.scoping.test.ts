@@ -100,6 +100,7 @@ import { ActivityStore } from './activity-store';
 import type {
   CameraFrameRecord,
   FramingReferenceRecord,
+  SideCameraReportRecord,
   MatchCheckpointRecord,
   PrivacyZoneRecord,
   SegmentEffortRecord,
@@ -114,6 +115,7 @@ import {
   cameraFrameFor,
   chunksOf,
   framingReferenceFor,
+  sideCameraReportFor,
   createStoreHarness,
   effortFor,
   extractableDeviceKey,
@@ -165,6 +167,7 @@ interface World {
   readonly checkpoint: MatchCheckpointRecord;
   readonly frame: CameraFrameRecord;
   readonly reference: FramingReferenceRecord;
+  readonly report: SideCameraReportRecord;
 }
 
 /** A distinct 64-character lowercase hex digest per athlete. */
@@ -226,6 +229,8 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
   // #528. Different numbers per athlete, so a probe that handed back the
   // wrong athlete's reference cannot pass on shape alone.
   const reference = framingReferenceFor(owner);
+  // #388. Different sentences per athlete, on this athlete's own ride.
+  const report = sideCameraReportFor(owner, ride.id);
 
   await harness.write(async (store) => {
     await store.putRoute(route);
@@ -245,6 +250,7 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     await store.putMatchCheckpoint(checkpoint);
     await store.putCameraFrame(frame);
     await store.putFramingReference(reference);
+    await store.putSideCameraReport(report);
     await store.setActivityLoadSummary(owner, ride.id, {
       effortWeightedPower: watts(210 + ATHLETES.indexOf(owner)),
       loadCoveredTime: seconds(SAMPLE_COUNT),
@@ -264,6 +270,7 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     checkpoint,
     frame,
     reference,
+    report,
   };
 }
 
@@ -687,6 +694,21 @@ const PROBES: readonly ScopingProbe[] = [
       await store.deleteFramingReference(mine.owner);
       const theirsAfter = await store.getFramingReference(theirs.owner);
       expect(theirsAfter?.landmarks).toStrictEqual(theirs.reference.landmarks);
+    },
+  },
+  {
+    member: 'getSideCameraReport',
+    leaks: 'what the side camera’s report said about somebody else’s body on somebody else’s ride',
+    async run(store, mine, theirs) {
+      const read = await store.getSideCameraReport(mine.owner, mine.ride.id);
+      expect(read?.summary).toBe(mine.report.summary);
+      // Asking for THEIR ride as ME answers nothing — the lookup is scoped on
+      // the athlete as well as the ride, never on the ride alone.
+      await expect(store.getSideCameraReport(mine.owner, theirs.ride.id)).resolves.toBeUndefined();
+      // And read as THEM, so a read that ignored the owner and returned the
+      // first row for the ride id could not pass by coincidence.
+      const theirsRead = await store.getSideCameraReport(theirs.owner, theirs.ride.id);
+      expect(theirsRead?.summary).toBe(theirs.report.summary);
     },
   },
 ];

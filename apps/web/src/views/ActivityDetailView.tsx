@@ -24,6 +24,13 @@
  * `detail/load.ts` is where that is enforced and `detail/load.test.ts` counts
  * it.
  *
+ * ## The side camera (#388)
+ *
+ * A ride the side camera filmed carries a report: sentences, saved with the
+ * ride when the session ended (the owner's ruling of 2026-09-26). It is read
+ * with the overview — one point lookup, no picture and no number on the row —
+ * and rendered by `detail/SideCameraSection.tsx`, only for a ride that has one.
+ *
  * ## The shared view
  *
  * The rider's own track is shown whole. ADR 0004 decision E and #51's export
@@ -58,6 +65,7 @@ import {
   type Trace,
 } from '../detail/load';
 import type { SharedTrack } from '../detail/privacy';
+import { SideCameraSection } from '../detail/SideCameraSection';
 import {
   CHART_POINTS,
   DEFAULT_SERIES,
@@ -332,7 +340,7 @@ export function ActivityDetailView({
     );
   }
 
-  const { activity, streams, laps } = state.overview;
+  const { activity, streams, laps, sideCamera } = state.overview;
   const available = streams?.channels ?? [];
   const chartable = traceSeries(units).filter((series) => available.includes(series.channel));
 
@@ -498,6 +506,13 @@ export function ActivityDetailView({
           </tbody>
         </table>
       )}
+
+      {/*
+        #388. Only for a ride the side camera filmed — the owner's ruling puts
+        the report on the ride's own page and nowhere else, and a ride with no
+        report renders nothing here at all.
+      */}
+      <SideCameraSection sideCamera={sideCamera} />
 
       {activity.hasPosition ? (
         <>

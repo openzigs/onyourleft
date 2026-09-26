@@ -53,7 +53,8 @@ your own action:
 | A signing keypair, used to sign your own activity records | generated on the device the first time it is needed |
 | Pictures from the camera — only the ones you chose to keep | the camera, if you turn it on and then turn on "keep the pictures from this ride" for that ride. Otherwise a picture is thrown away as soon as it has been looked at |
 | The address and model name of your own computer, if you set one up | typed by you on the Camera page, and kept in this device's browser storage |
-| Where you were in the side camera's picture in your last session — a handful of positions, not a picture — and whether that session's check found the camera where it was the time before | worked out on the tablet from the side-camera phone's pictures, so the next session can check the camera is in the same place |
+| Where you were in the side camera's picture — a handful of positions, not a picture — from your last session whose check found the camera where it was the time before (or your first session), and whether that check passed | worked out on the tablet from the side-camera phone's pictures, so the next session can check the camera is in the same place |
+| What the side camera's report said about a ride — a few sentences, such as "your upper body was possibly lower late in the session than early in it", with no picture, no positions and no numbers | written on the tablet when a side-camera session ends, from the positions it kept in memory, and saved with the ride that session filmed so you can read it on that ride's page |
 
 The private half of the signing key is a non-extractable key held by the browser or WebView: the app
 itself cannot read it, cannot copy it, and cannot send it anywhere. Its public half travels only
@@ -131,12 +132,18 @@ directly, over your own Wi-Fi.
   and it is thrown away as soon as it has been looked at. **No picture is ever saved on the tablet,
   shown on its screen, or sent anywhere else** — not to us, not to a computer of your own, and not
   to any service. What is kept is where the model found your ear, shoulder, elbow, wrist, hip, knee,
-  ankle, heel and toe in each picture: numbers, not a picture, held in the tablet's memory for the
-  report after the ride and gone when the app is closed. At the end of a session the tablet also
-  keeps, on the device, where you were in the picture overall, and whether that session's check
-  found the camera where it was the time before. The first is so the next session can check the
-  camera is in the same place; the second is so the report after a ride compares two sessions only
-  when the camera did not move between them. Erasing the device removes both.
+  ankle, heel and toe in each picture: numbers, not a picture, held in the tablet's memory and gone
+  when the app is closed. At the end of a session the tablet keeps two things
+  on the device. **The report:** a few sentences about what changed between the start and the end
+  of the session — whether your upper body was lower, your knee straighter at the bottom of the
+  stroke, your elbow more bent, your head further forward, or you sat further back on the saddle —
+  each worded as a possibility, with no numbers, saved with the ride the session filmed and shown
+  on that ride's page. Nothing is ever said about side-to-side movement, because one camera from
+  the side cannot see it. If no ride was recorded while the camera was filming, nothing is saved.
+  **Where you were in the picture overall**, and whether that session's check found the camera
+  where it was the time before — kept only when the check passed, or when there was nothing to
+  check against yet, so that a camera that creeps a little each time is still noticed. Deleting a
+  ride removes its report; erasing the device removes both; and the account export includes both.
 - **The pose model** is Google's MediaPipe Pose Landmarker, and it is part of the app: it and the
   code that runs it are served from the app itself, never downloaded from Google. ⚠️ **That code
   contains a usage logger that would send Google a report** of how often the model ran and how long

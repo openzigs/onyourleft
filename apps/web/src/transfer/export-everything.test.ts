@@ -18,6 +18,7 @@ import {
   framingReferenceWithoutCheck,
   resetFixtureIds,
   rideFor,
+  sideCameraReportFor,
   routeFor,
   seedAthletes,
   signedRecordFor,
@@ -967,3 +968,53 @@ function containsBytes(haystack: Uint8Array, needle: Uint8Array): boolean {
   }
   return false;
 }
+
+/* -------------------------------------------------------------------------- *
+ * #388: the side camera's report on a ride comes back with that ride.
+ * -------------------------------------------------------------------------- */
+
+describe('exporting the side camera’s reports (#388)', () => {
+  function entries(files: readonly DownloadableFile[]): Record<string, unknown>[] {
+    return manifestOf(files)['activities'] as Record<string, unknown>[];
+  }
+
+  it('carries a filmed ride’s sentences in that ride’s manifest entry, read through the real store', async () => {
+    const { written } = await seedLibrary(2);
+    const filmed = written[1]?.ride;
+    expect(filmed).toBeDefined();
+    if (filmed === undefined) {
+      return;
+    }
+    const report = sideCameraReportFor(ATHLETE_A, filmed.id);
+    await harness.write(async (store) => store.putSideCameraReport(report));
+
+    const { files } = await runExport();
+    const entry = entries(files).find((each) => each['activityId'] === filmed.id);
+    expect(entry?.['sideCameraReport']).toStrictEqual({
+      summary: report.summary,
+      observations: report.observations,
+    });
+  });
+
+  it('writes null, not nothing, for a ride that was not filmed', async () => {
+    await seedLibrary(2);
+    const { files } = await runExport();
+    for (const entry of entries(files)) {
+      expect(entry).toHaveProperty('sideCameraReport', null);
+    }
+  });
+
+  it('carries no other athlete’s report', async () => {
+    await seedLibrary(1);
+    const theirs = rideFor(ATHLETE_B);
+    await harness.write(async (store) => {
+      await store.putActivity(theirs);
+      await store.putSideCameraReport(sideCameraReportFor(ATHLETE_B, theirs.id));
+    });
+    const { files } = await runExport();
+    const text = new TextDecoder().decode(
+      files.find((file) => file.fileName === MANIFEST_FILE_NAME)?.bytes,
+    );
+    expect(text).not.toContain(ATHLETE_B);
+  });
+});

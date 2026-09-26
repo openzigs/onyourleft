@@ -134,6 +134,18 @@ export interface ManifestEntry {
    * difference between a rider knowing what they lost and not.
    */
   readonly signedRecord: string | null;
+  /**
+   * What the side camera's report said about this ride — #388 — or **`null`**
+   * when it was not filmed, for {@link signedRecord}'s reason: an omitted
+   * member cannot be told from one the export dropped.
+   *
+   * Sentences only, because that is all that is kept: no picture and no pose
+   * number is on the row to export.
+   */
+  readonly sideCameraReport: {
+    readonly summary: string;
+    readonly observations: readonly string[];
+  } | null;
 }
 
 /**
@@ -619,6 +631,9 @@ export async function exportEverything(
     // will not encode must not take its record down with it. That is the whole
     // complaint the issue makes about the pair of them.
     const stored = await store.getActivityRecord(athleteId, summary.id);
+    // #388. Read with the ride, so it is inside this run's bound and in the
+    // manifest entry of the ride it is about.
+    const sideReport = await store.getSideCameraReport(athleteId, summary.id);
     const recordName = stored === undefined ? undefined : signedRecordFileName(fileName);
 
     let outcome: AccountExportOutcome;
@@ -680,6 +695,11 @@ export async function exportEverything(
       ...(reason === undefined ? {} : { reason }),
       // `null`, never omitted. See {@link ManifestEntry.signedRecord}.
       signedRecord: recordName ?? null,
+      // Fields, not the row: its athlete and activity are the entry's own.
+      sideCameraReport:
+        sideReport === undefined
+          ? null
+          : { summary: sideReport.summary, observations: [...sideReport.observations] },
     });
     outcomes.push(outcome);
     options.onProgress?.({ completed: outcomes.length, total: wanted.length, outcome });
