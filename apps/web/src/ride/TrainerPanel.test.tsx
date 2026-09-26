@@ -325,7 +325,7 @@ describe('a hand-set target the stall rescue eased — #567', () => {
       }),
     );
     expect(text).toContain(
-      'Your new target of 240 W will be set once you are pedalling steadily again.',
+      `Your new target of 240 W will be set once your cadence has held steady for ${String(TREND_WINDOW)} seconds.`,
     );
     // The pending number is never said as one that "comes back": it has not
     // been on the machine, and the accepted one is not what will be set.
@@ -333,19 +333,37 @@ describe('a hand-set target the stall rescue eased — #567', () => {
     expect(text).toContain('Press End ERG to leave it off');
   });
 
-  it('names no number when no target has been accepted yet', async () => {
+  it('from the floor, says a lighter target comes first and the rider’s own a whole window later — PR #582 fourth review', async () => {
     const text = await render(
       snapshot({
         ...holding(),
         ergRescue: {
-          target: undefined,
+          target: watts(150),
           holding: 'floor',
           reason: 'You have stopped pedalling, so the target is at its lowest.',
           pending: undefined,
         },
       }),
     );
-    expect(text).toContain('The trainer stays at its lowest target until your cadence');
-    expect(text).not.toContain('undefined');
+    expect(text).toContain('Once you are pedalling again it steps up to a lighter target first.');
+    expect(text).toContain(
+      `Your 150 W comes back by itself once your cadence has held steady for ${String(TREND_WINDOW)} seconds.`,
+    );
+  });
+
+  it('says nothing of a lighter step while already on relief — the control', async () => {
+    const text = await render(
+      snapshot({
+        ...holding(),
+        ergRescue: {
+          target: watts(150),
+          holding: 'relief',
+          reason: 'Cadence is recovering, so the target stays eased until it has held steady.',
+          pending: undefined,
+        },
+      }),
+    );
+    expect(text).not.toContain('lighter target first');
+    expect(text).toContain('Your 150 W comes back by itself');
   });
 });

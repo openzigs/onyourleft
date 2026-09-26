@@ -66,8 +66,7 @@
  *    be recalled, so the ease is queued behind it: it reaches the wire the
  *    moment that write settles (accepted or refused), which is the earliest
  *    anything could, and it was computed without it. If it was accepted, the
- *    next tick re-derives the ease from it. With no accepted target at all yet,
- *    the ease is the floor, which needs none.
+ *    next tick re-derives the ease from it.
  * 4. **When the latch hands back to `full`**, a pending target is written as
  *    an ordinary rider write — acknowledged, and if refused, reported through
  *    `onFault` and reverted to the last accepted target, which is what the
@@ -75,14 +74,33 @@
  *    put back.
  * 5. **A refused target is never written again** unless the rider sets it
  *    again, and nothing is derived from it: it never became the accepted target.
+ * 6. **Only a trainer holding an ACCEPTED rider target is rescued** (PR #582's
+ *    fourth review). Until the machine has accepted one, the latch is not even
+ *    consulted: a rider whose first target was refused has a trainer that
+ *    nothing put into ERG, and a floor `0x05` to it would put it into ERG at a
+ *    value nobody set — and leave it there, because nothing is restored after.
+ *    A first target still on the wire when a stall is judged is rescued on the
+ *    tick after it is accepted, which is rule 3's one-write bound.
+ * 7. **A refused restore backs off, then stops** (PR #582's fourth review).
+ *    Putting the accepted target back is the one write the rider did not just
+ *    ask for, so a machine that refuses it is not asked every tick: it is
+ *    retried at most {@link RESTORE_RETRIES} more times, after
+ *    {@link RESTORE_FIRST_GAP_SECONDS} s and then twice as long each time,
+ *    and then not again until the rider sets a target. The refusal is
+ *    reported through `onFault` ONCE — on the first — not once per attempt.
+ *    The machine then holds whatever it last accepted, which is an ease: a
+ *    target lower than the rider's own.
  *
  * What that buys, as properties `manual-erg.test.ts` loops over held and
  * refused writes in every order: no Stop or Reset; a refused target never
  * re-sent and never eased from; a stalled rider eased within one tick of the
  * stall being judged plus at most the one write already on the wire, however
  * often they press *Set* and however slowly the machine answers;
- * {@link ManualErg.rescue} never naming an unaccepted target; and nothing
- * written or changed after {@link ManualErg.close}.
+ * {@link ManualErg.rescue} never naming an unaccepted target; nothing written
+ * or changed after {@link ManualErg.close}; an ease only ever derived from the
+ * target accepted at the tick that decided it, and never above it; and —
+ * liveness, which a module that never wrote would fail — a rider's *Set*
+ * outside a rescue written at once, and a pending target written at hand-back.
  *
  * ⚠️ **What it costs**: a rider who changes their target mid-rescue waits for
  * the recovery window before it goes on — including a LOWER target. That is
@@ -120,15 +138,20 @@ import {
 /** How long a cadence history is kept — the workout session's own figure. */
 const CADENCE_HISTORY_SECONDS = 30;
 
+/** How many more times a refused restore is tried before it is given up (rule 7). */
+export const RESTORE_RETRIES = 3;
+
+/** The wait before the first retry of a refused restore; each later one doubles it. */
+export const RESTORE_FIRST_GAP_SECONDS = 2;
+
 /** What the Ride screen may say about a rescue in progress. */
 export interface ManualErgRescue {
   /**
    * The last target the machine ACCEPTED from the rider — never one in flight,
-   * waiting, pending or refused (PR #582's third review). `undefined` only when
-   * the rider's first target had not been accepted when the rescue began; the
-   * rescue then holds the machine's floor, which needs no target to derive.
+   * waiting, pending or refused (PR #582's third review). Always a number: a
+   * trainer that has accepted no rider target is never rescued (rule 6).
    */
-  readonly target: Watts | undefined;
+  readonly target: Watts;
   /** `relief` is a share of {@link target}; `floor` is the machine's lowest. */
   readonly holding: 'relief' | 'floor';
   readonly reason: string;
@@ -180,6 +203,8 @@ interface Ask {
   readonly value: Watts;
   /** The rider's own target, rather than an ease or a restore. */
   readonly fromRider: boolean;
+  /** Putting the accepted target back after a rescue (rule 7). */
+  readonly restore: boolean;
   /**
    * Whose refusal it is to report: `caller` when a `set()` promise carries the
    * outcome, `fault` for every rescue write and for a pending target written
@@ -208,8 +233,6 @@ export function createManualErg(options: {
   const latch: ErgRescue = createErgRescue();
 
   let cadence: CadenceReading[] = [];
-  /** Whether the rider has set a target at all — before then there is nothing to rescue. */
-  let started = false;
   let closed = false;
   /** The last target the machine ACCEPTED from the rider — the only base an ease has. */
   let accepted: Watts | undefined;
@@ -223,6 +246,31 @@ export function createManualErg(options: {
   let asks = 0;
   /** Offers not yet settled, in the order offered. */
   let unsettled: Ask[] = [];
+  /** The last tick's clock — what a refused restore's back-off is measured from. */
+  let lastTick: Seconds | undefined;
+  /** Refusals of the restore since the rider last set a target, or it was accepted (rule 7). */
+  let restoreRefusals = 0;
+  /** When the last refused restore was refused, on {@link lastTick}'s clock. */
+  let restoreRefusedAt: Seconds | undefined;
+
+  /** Whether a refused restore may be tried again at `now` (rule 7). */
+  const restoreAllowed = (now: Seconds): boolean => {
+    if (restoreRefusals === 0 || restoreRefusedAt === undefined) {
+      return true;
+    }
+    if (restoreRefusals > RESTORE_RETRIES) {
+      return false;
+    }
+    const gap = RESTORE_FIRST_GAP_SECONDS * 2 ** (restoreRefusals - 1);
+    // A clock that went backwards is not a reason to wait for ever.
+    return now - restoreRefusedAt >= gap || now < restoreRefusedAt;
+  };
+
+  /** The rider set a target: a given-up restore may be tried again (rule 7). */
+  const forgetRestoreRefusals = (): void => {
+    restoreRefusals = 0;
+    restoreRefusedAt = undefined;
+  };
 
   /** Offers still headed for the machine: the first is on the wire, a second waits. */
   const live = (): Ask[] => unsettled.filter((entry) => !entry.superseded);
@@ -237,6 +285,7 @@ export function createManualErg(options: {
     value: Watts,
     fromRider: boolean,
     reportTo: 'caller' | 'fault',
+    restore = false,
   ): { readonly entry: Ask; readonly outcome: Promise<ErgWriteOutcome> } => {
     // A busy writer puts this offer in its waiting slot, superseding whatever
     // was there — marked NOW, so a tick in the same turn does not mistake the
@@ -247,7 +296,15 @@ export function createManualErg(options: {
     }
     lastAsked = value;
     asks += 1;
-    const entry: Ask = { id: asks, value, fromRider, reportTo, superseded: false, deferred: false };
+    const entry: Ask = {
+      id: asks,
+      value,
+      fromRider,
+      restore,
+      reportTo,
+      superseded: false,
+      deferred: false,
+    };
     unsettled.push(entry);
     const outcome = writer.offer(value);
     void outcome.then((settled) => {
@@ -261,6 +318,9 @@ export function createManualErg(options: {
         if (fromRider) {
           accepted = settled.target;
         }
+        if (fromRider || restore) {
+          forgetRestoreRefusals();
+        }
       } else if (settled.kind === 'failed') {
         // Not on the machine. Whatever is next judged against `lastAsked` must
         // see what the machine actually holds: a refused ease is retried, and
@@ -272,7 +332,14 @@ export function createManualErg(options: {
         }
         // A refused rider target never became `accepted`, so nothing is ever
         // derived from it, and nothing here writes it again.
-        if (reportTo === 'fault') {
+        let report = reportTo === 'fault';
+        if (restore) {
+          // Rule 7: back off, then stop; said once, on the first refusal.
+          restoreRefusals += 1;
+          restoreRefusedAt = lastTick;
+          report = restoreRefusals === 1;
+        }
+        if (report) {
           onFault(settled.error);
         }
       }
@@ -282,13 +349,13 @@ export function createManualErg(options: {
   };
 
   /** What a rescue step holds — derived from the ACCEPTED target and nothing else. */
-  const easeFor = (rescuing: Exclude<ErgRescueStep, { kind: 'full' }>): Watts => {
-    if (rescuing.kind === 'floor' || accepted === undefined) {
+  const easeFor = (rescuing: Exclude<ErgRescueStep, { kind: 'full' }>, base: Watts): Watts => {
+    if (rescuing.kind === 'floor') {
       return powerFloor;
     }
     // Raised to the floor: the machine refuses an out-of-range target
     // outright, and a refused ease rescues nobody (#441).
-    return watts(Math.max(Math.round(accepted * rescuing.share), powerFloor));
+    return watts(Math.max(Math.round(base * rescuing.share), powerFloor));
   };
 
   return {
@@ -296,7 +363,7 @@ export function createManualErg(options: {
       if (closed) {
         return Promise.resolve({ kind: 'closed', target: value });
       }
-      started = true;
+      forgetRestoreRefusals();
       if (step.kind !== 'full') {
         // The rescue owns the machine: recorded, not written.
         pending = value;
@@ -320,7 +387,9 @@ export function createManualErg(options: {
     tick(now: Seconds): void {
       const keepFrom = now - CADENCE_HISTORY_SECONDS;
       cadence = cadence.filter((reading) => reading.at >= keepFrom);
-      if (closed || !started) {
+      lastTick = now;
+      // Rule 6: nothing to rescue until the machine holds a rider's target.
+      if (closed || accepted === undefined) {
         return;
       }
       const before = step.kind;
@@ -339,8 +408,8 @@ export function createManualErg(options: {
         // Put the accepted target back — unless a rider target is on its way,
         // which is newer than it.
         const riderOnItsWay = live().some((entry) => entry.fromRider);
-        if (accepted !== undefined && accepted !== lastAsked && !riderOnItsWay) {
-          ask(accepted, false, 'fault');
+        if (accepted !== lastAsked && !riderOnItsWay && restoreAllowed(now)) {
+          ask(accepted, false, 'fault', true);
         } else if (before !== 'full') {
           onChange();
         }
@@ -357,7 +426,7 @@ export function createManualErg(options: {
         riderWaiting.deferred = true;
         pending = riderWaiting.value;
       }
-      const value = easeFor(step);
+      const value = easeFor(step, accepted);
       if (value !== lastAsked || riderWaiting !== undefined) {
         ask(value, false, 'fault');
       }
@@ -370,9 +439,13 @@ export function createManualErg(options: {
       if (closed || step.kind === 'full') {
         return undefined;
       }
+      if (accepted === undefined) {
+        // Unreachable by rule 6 — a rescue needs an accepted target to begin.
+        return undefined;
+      }
       return {
         target: accepted,
-        holding: accepted === undefined ? 'floor' : step.kind,
+        holding: step.kind,
         reason: step.reason,
         pending,
       };

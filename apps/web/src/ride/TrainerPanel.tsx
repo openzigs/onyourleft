@@ -407,11 +407,19 @@ function rescueSentence(rescue: ManualErgRescue): string {
   // PR #582's third review: the number named is only ever one the machine
   // ACCEPTED. A target the rider set during the rescue is not written until it
   // ends — the rescue is the only writer — and is said as that, separately.
+  //
+  // PR #582's fourth review: from the floor the way back is two steps — a
+  // lighter target as soon as the rider is pedalling again, and theirs only
+  // once a whole window of that has held — so the floor says both. A rescue
+  // always has an accepted target to name: a trainer that has none is never
+  // rescued (`manual-erg.ts` rule 6).
+  const lighterFirst =
+    rescue.holding === 'floor'
+      ? ' Once you are pedalling again it steps up to a lighter target first.'
+      : '';
   const back =
     rescue.pending !== undefined
-      ? ` Your new target of ${String(rescue.pending)} W will be set once you are pedalling steadily again.`
-      : rescue.target !== undefined
-        ? ` Your ${String(rescue.target)} W comes back by itself once ${steady}.`
-        : ` The trainer stays at its lowest target until ${steady}.`;
+      ? `${lighterFirst} Your new target of ${String(rescue.pending)} W will be set once ${steady}.`
+      : `${lighterFirst} Your ${String(rescue.target)} W comes back by itself once ${steady}.`;
   return `${rescue.reason}${back} Press End ERG to leave it off.`;
 }

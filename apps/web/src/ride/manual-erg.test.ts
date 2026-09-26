@@ -24,7 +24,12 @@ import { ftmsTrainer } from '@onyourleft/sensors/simulator';
 import { connectSimulatedTrainer } from '@onyourleft/sensors/protocol/testing';
 import { describe, expect, it } from 'vitest';
 
-import { createManualErg, type ManualErg } from './manual-erg';
+import {
+  createManualErg,
+  RESTORE_FIRST_GAP_SECONDS,
+  RESTORE_RETRIES,
+  type ManualErg,
+} from './manual-erg';
 
 const SET_TARGET_POWER = 0x05;
 const STOP_OR_PAUSE = 0x08;
@@ -672,9 +677,16 @@ const easeOf = (target: number): number => Math.max(Math.round((target * 2) / 3)
 describe('the ownership rule, over interleavings — PR #582 third review', () => {
   /**
    * Hundreds of seeded rides: ticks through steady, collapsing, stopped and
-   * silent cadence; rider targets set at any moment, in and out of a rescue;
-   * writes held, accepted or refused in any order; sometimes a close. After
-   * every step the five invariants are checked against what reached the sink.
+   * silent cadence, usually a second apart and sometimes not; rider targets
+   * set at any moment, in and out of a rescue; writes held, accepted or
+   * refused in any order; sometimes a close. After every step the invariants
+   * are checked against what reached the sink.
+   *
+   * PR #582's fourth review: the safety invariants alone passed a module that
+   * never wrote the rider's target at all, and "derivable from any value ever
+   * acknowledged" passed an ease taken from a STALE base. So there are
+   * liveness invariants (L1, L2), the ease is held to the base as it was at
+   * the tick that decided it (3), and the floor to a bound (7).
    */
   it.each(Array.from({ length: 250 }, (_, index) => index + 1))(
     'holds every invariant on seeded ride %i',
@@ -685,6 +697,10 @@ describe('the ownership rule, over interleavings — PR #582 third review', () =
       const writes = new Map<number, number>();
       const acked = new Set<number>();
       let lastAckedRider: number | undefined;
+      /** The accepted rider target as it stood at the most recent tick. */
+      let baseAtLastTick: number | undefined;
+      /** Every value that reached the sink, in order. */
+      const log: number[] = [];
       let closed = false;
       let callbacksAfterClose = 0;
       const violations: string[] = [];
@@ -697,19 +713,29 @@ describe('the ownership rule, over interleavings — PR #582 third review', () =
             violations.push(`wrote ${String(target)} after close`);
           }
           writes.set(target, (writes.get(target) ?? 0) + 1);
+          log.push(target);
           const isRider = (RIDER_VALUES as readonly number[]).includes(target);
           // (6) The rescue is the only writer while it lasts.
           if (isRider && current.erg?.rescue() !== undefined) {
             violations.push(`rider target ${String(target)} reached the wire during a rescue`);
           }
-          // (2) No ease derived from anything but an ACCEPTED rider target.
-          if (!isRider && target !== FLOOR_WATTS) {
-            const derivable = [...acked].some(
-              (value) =>
-                (RIDER_VALUES as readonly number[]).includes(value) && easeOf(value) === target,
-            );
-            if (!derivable) {
-              violations.push(`ease ${String(target)} derived from no accepted target`);
+          // (3) An ease is derived from the rider target accepted at the tick
+          // that DECIDED it, and is never above it. An ease reaches the sink
+          // either inside that tick or when the write ahead of it settles —
+          // before any later tick, because a later tick would re-decide it —
+          // so the base at the latest tick is the deciding tick's base.
+          // (6') Nothing but a rider target is written to a trainer holding no
+          // accepted rider target — not even the floor (rule 6).
+          if (!isRider) {
+            if (baseAtLastTick === undefined) {
+              violations.push(`ease ${String(target)} with no accepted rider target`);
+            } else if (
+              target !== FLOOR_WATTS &&
+              (target !== easeOf(baseAtLastTick) || target > baseAtLastTick)
+            ) {
+              violations.push(
+                `ease ${String(target)} not derived from ${String(baseAtLastTick)}, the base when it was decided`,
+              );
             }
           }
           return new Promise<Watts>((resolve, reject) => {
@@ -758,6 +784,8 @@ describe('the ownership rule, over interleavings — PR #582 third review', () =
           closed = true;
         }
         const roll = random();
+        const idle = pending.length === 0;
+        const logBefore = log.length;
         if (roll < 0.45) {
           if (random() < 0.15) {
             phase = pick(['steady', 'collapse', 'stopped', 'silent'] as const);
@@ -774,12 +802,34 @@ describe('the ownership rule, over interleavings — PR #582 third review', () =
           if (rpm !== undefined) {
             erg.observeCadence({ at: seconds(at), cadence: revolutionsPerMinute(rpm) });
           }
+          const rescueBefore = erg.rescue();
+          baseAtLastTick = lastAckedRider;
           erg.tick(seconds(at));
-          at += 1;
+          await flush();
+          // (L2) Liveness: at hand-back, a pending target is written — at once
+          // when nothing is on the wire.
+          if (
+            rescueBefore?.pending !== undefined &&
+            erg.rescue() === undefined &&
+            !closed &&
+            idle &&
+            !log.slice(logBefore).includes(rescueBefore.pending)
+          ) {
+            violations.push(`pending ${String(rescueBefore.pending)} dropped at hand-back`);
+          }
+          // Usually a second; sometimes a stutter or a gap.
+          at += random() < 0.1 ? pick([0.3, 0.7, 2.5, 6] as const) : 1;
         } else if (roll < 0.65) {
           const value = pick(RIDER_VALUES);
           sets.set(value, (sets.get(value) ?? 0) + 1);
+          const outsideRescue = erg.rescue() === undefined && !closed;
           void erg.set(watts(value));
+          await flush();
+          // (L1) Liveness: outside a rescue, with nothing on the wire, the
+          // rider's Set reaches the sink before anything else happens.
+          if (outsideRescue && idle && log.at(-1) !== value) {
+            violations.push(`Set ${String(value)} outside a rescue was not written`);
+          }
         } else if (pending.length > 0) {
           const head = pending.shift();
           head?.answer(!ALWAYS_REFUSED.has(head.target) && random() > 0.1);
@@ -788,6 +838,13 @@ describe('the ownership rule, over interleavings — PR #582 third review', () =
 
         // (4) rescue() names only the last target the machine ACCEPTED.
         const rescue = erg.rescue();
+        // (7) A bounded time to the floor: whenever the rescue holds the floor
+        // and nothing is on the wire, the floor is the last thing asked for —
+        // it went out in the deciding tick or the moment the write ahead of it
+        // settled, however the rider pressed and however slowly acks came.
+        if (rescue?.holding === 'floor' && pending.length === 0 && log.at(-1) !== FLOOR_WATTS) {
+          violations.push(`the floor held with ${String(log.at(-1))} last asked and the wire idle`);
+        }
         if (rescue !== undefined && rescue.target !== lastAckedRider) {
           violations.push(
             `rescue() named ${String(rescue.target)} with ${String(lastAckedRider)} accepted`,
@@ -811,6 +868,110 @@ describe('the ownership rule, over interleavings — PR #582 third review', () =
       expect(violations).toStrictEqual([]);
     },
   );
+});
+
+describe('a trainer holding no accepted rider target is not rescued — PR #582 fourth review', () => {
+  it('writes nothing after a refused FIRST target, however the rider stalls and recovers', async () => {
+    // The review's probe: the wire used to read [9000, 25] — a floor 0x05 put
+    // a trainer nothing had put into ERG into ERG at 25 W, and left it there.
+    const rig = heldRig((target) => (target === 9000 ? 'refuse' : 'ok'));
+    expect((await rig.erg.set(watts(9000))).kind).toBe('failed');
+    await pedal(rig.erg, 0, [5, 5, 5, 5, 5, 5]);
+    expect(rig.erg.rescue()).toBeUndefined();
+    await pedal(
+      rig.erg,
+      6,
+      Array.from({ length: 30 }, () => 85),
+    );
+    expect(rig.asked).toStrictEqual([9000]);
+    expect(rig.erg.rescue()).toBeUndefined();
+    expect(rig.faults).toStrictEqual([]);
+  });
+
+  it('rescues a first target on the tick after the machine accepts it — the control', async () => {
+    // A first target still on the wire when the stall is judged: nothing is
+    // held yet, so nothing is eased; once it is accepted, the next tick does.
+    const rig = heldRig((target) => (target === 150 ? 'hold' : 'ok'));
+    void rig.erg.set(watts(150));
+    await pedalHeld(rig.erg, 0, [5, 5, 5, 5, 5, 5]);
+    expect(rig.asked).toStrictEqual([150]);
+    rig.held[0]?.accept();
+    await flush();
+    await pedalHeld(rig.erg, 6, [5]);
+    expect(rig.asked).toStrictEqual([150, FLOOR_WATTS]);
+    expect(rig.erg.rescue()).toMatchObject({ target: 150, holding: 'floor' });
+  });
+});
+
+describe('a restore the machine refuses backs off, then stops — PR #582 fourth review', () => {
+  /** 150 W accepted once, then refused on every later attempt. */
+  function refusingRestore() {
+    let offered = 0;
+    const times: number[] = [];
+    let clock = 0;
+    const rig = heldRig((target) => {
+      if (target === 150) {
+        offered += 1;
+        if (offered > 1) {
+          times.push(clock);
+          return 'refuse';
+        }
+      }
+      return 'ok';
+    });
+    return { rig, times, setClock: (at: number) => (clock = at) };
+  }
+
+  async function pedalClocked(
+    erg: ManualErg,
+    setClock: (at: number) => void,
+    from: number,
+    cadences: readonly number[],
+  ): Promise<void> {
+    for (const [index, rpm] of cadences.entries()) {
+      setClock(from + index);
+      erg.observeCadence({ at: seconds(from + index), cadence: revolutionsPerMinute(rpm) });
+      erg.tick(seconds(from + index));
+      await erg.settled();
+      await flush();
+    }
+  }
+
+  it('is retried a bounded number of times, further apart each time, and reported once', async () => {
+    // The review's probe: 31 writes of 150 and 32 faults in 40 s.
+    const { rig, times, setClock } = refusingRestore();
+    await rig.erg.set(watts(150));
+    await pedalClocked(rig.erg, setClock, 0, [80, 78, 60, 40, 20, 8, 5, 4]);
+    await pedalClocked(
+      rig.erg,
+      setClock,
+      8,
+      Array.from({ length: 60 }, () => 85),
+    );
+    expect(times).toHaveLength(1 + RESTORE_RETRIES);
+    const gaps = times.slice(1).map((at, index) => at - (times[index] ?? 0));
+    expect(gaps).toStrictEqual(
+      Array.from({ length: RESTORE_RETRIES }, (_, index) => RESTORE_FIRST_GAP_SECONDS * 2 ** index),
+    );
+    expect(rig.faults).toHaveLength(1);
+    expect(rig.erg.rescue()).toBeUndefined();
+  });
+
+  it('is tried again once the rider sets a target', async () => {
+    const { rig, setClock } = refusingRestore();
+    await rig.erg.set(watts(150));
+    await pedalClocked(rig.erg, setClock, 0, [80, 78, 60, 40, 20, 8, 5, 4]);
+    await pedalClocked(
+      rig.erg,
+      setClock,
+      8,
+      Array.from({ length: 60 }, () => 85),
+    );
+    const given = rig.asked.length;
+    // Refused on the caller's promise, as any rider target is.
+    expect((await rig.erg.set(watts(150))).kind).toBe('failed');
+    expect(rig.asked.slice(given)).toStrictEqual([150]);
+  });
 });
 
 describe('closing', () => {
