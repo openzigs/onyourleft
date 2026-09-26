@@ -392,6 +392,13 @@ export const RIDE_NOTIFICATION_REFUSED =
   'Your ride is still recording. Android will not show its “Recording ride” notification, because notifications are not allowed for On Your Left. You can allow them in the app’s settings.';
 
 /**
+ * What a rider who sets an ERG target by hand during a workout is told (#542's
+ * review). It names what to do instead, because the form is still on screen.
+ */
+const MANUAL_ERG_DURING_WORKOUT =
+  'A workout is setting the trainer’s target. End the workout to set one by hand.';
+
+/**
  * What a finished ride needs to become an activity — #14's fourth criterion,
  * and the "store it" in `CLAUDE.md` §1's description of the milestone.
  *
@@ -555,11 +562,32 @@ export interface RideController {
    * a refusal lands on {@link TrainerSnapshot.refusal} for both.
    */
   requestTrainerControl(): Promise<void>;
+  /**
+   * Set an ERG target by hand.
+   *
+   * ⚠️ **Refused while a workout is running (#542's review), and nothing is
+   * written.** The workout owns the control point for the reason
+   * {@link RideController.simulationControl} gives, and since #542 its player
+   * writes a target once rather than every second — so a hand-set target sent
+   * over the top of it used to be undone within a second by the refresh, and
+   * would now stay on the machine for the rest of the block while the workout
+   * reported its own target acknowledged. The screen and the trainer would
+   * disagree on the channel CLAUDE.md §6 puts in the safety class. The rider
+   * is told why on {@link TrainerSnapshot.refusal}: {@link MANUAL_ERG_DURING_WORKOUT}.
+   */
   setTargetPower(target: Watts): Promise<void>;
   /**
    * End ERG — release the trainer (#372) through the one release, an FTMS
    * Stop. Control is kept. ⚠️ On the trainer measured the target stays applied
    * after it, which the owner has accepted; setting a new one works.
+   *
+   * ⚠️ **While a workout is running this ends the workout** (#542's review),
+   * whose session releases the trainer through the same one release. A Stop
+   * sent underneath a running workout would leave its player believing its
+   * target was still on the machine, and since #542 it does not write an
+   * acknowledged target again — so the workout would go on reporting a target
+   * nothing was holding. Ending ERG and ending the workout are the same act
+   * while the workout is what set the ERG target.
    */
   clearTargetPower(): Promise<void>;
   /**
@@ -1636,6 +1664,14 @@ export function createRideController(options: RideControllerOptions): RideContro
       if (client === undefined) {
         return;
       }
+      // ⚠️ The workout owns the target while it exists — see the declaration.
+      // Refused here, where the write is, rather than by hiding the form: a
+      // caller that never read the snapshot still cannot reach the machine.
+      if (workout !== undefined) {
+        refusal = MANUAL_ERG_DURING_WORKOUT;
+        changed();
+        return;
+      }
       requested = target;
       refusal = undefined;
       changed();
@@ -1672,6 +1708,10 @@ export function createRideController(options: RideControllerOptions): RideContro
     },
 
     async clearTargetPower(): Promise<void> {
+      // ⚠️ Ending ERG under a running workout ends the workout, whose session
+      // sends the release; `stopTrainer` then joins that Stop rather than
+      // sending a second one. @see RideController.clearTargetPower
+      endWorkoutSession();
       await stopTrainer();
       changed();
     },

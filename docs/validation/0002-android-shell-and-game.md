@@ -1906,6 +1906,7 @@ adb logcat | grep -i "BluetoothLe"
 | S2 | From S1's stall, start pedalling again and settle at a comfortable cadence | The target steps back: two thirds while cadence is under 50 rpm, then — only after about **8 s** steady — the full target. It should **not** flap between full and eased while cadence hovers near 50 |
 | S3 | A workout with a **free-ride block** after an ERG block. Ride into the free ride and let cadence fall | One `0x05` at the trainer's minimum as the block starts, no `0x08`, and power **falls** with cadence — the previous interval's target is gone |
 | S4 | During an ERG block, press **Pause** while pedalling; keep pedalling slowly for 10 s; then **Resume** | On Pause one `0x05` at the minimum, no `0x08`; power falls with cadence while paused. On Resume the interval's target comes back within a second or two |
+| S5 | [#542](https://github.com/openzigs/onyourleft/issues/542). A saved workout with a steady block of at least two minutes. Ride it at a comfortable cadence, with the logcat above running, and count the `0x05` writes in each whole minute of the block | **One** `0x05` at the block's start and **none** after it while the target is unchanged — so 1 in the first minute and 0 in each after. A retry appears only after a write that was refused or not answered. Before #542 this was about one a second (14 in 16 s) |
 
 ### S results
 
@@ -1915,6 +1916,7 @@ adb logcat | grep -i "BluetoothLe"
 | S2 | 0 | **133 W** (two thirds of 200 W) at 20:41:43, as the owner pedalled again. Then **0 W** again at 20:42:02 | **No** | **Pass** for the step from floor to two thirds. The later step back to the full 200 W is not in the record, so this does not settle whether the target flapped |
 | S3 | | *Not run* | | |
 | S4 | | *Not run* | | |
+| S5 | | *Not run.* `0x05` writes per whole minute of the steady block: | | |
 
 ⚠️ **Manual ERG has no stall rescue, and on this trainer the firmware let go instead.** Before the
 workout, the owner set **150 W** on the Ride screen's Trainer panel, with no workout running, and let
@@ -1929,6 +1931,16 @@ workout, an unchanged target that had already been acknowledged was written agai
 second, 14 writes in 16 s. It is harmless on this trainer, since every write was acknowledged, but
 it looks like the busy loop `player.ts` §`acknowledge` is there to prevent. #542 owns finding out
 why.
+
+⚠️ **#542's answer, 2026-09-26: it was not that busy loop.** The player refreshed an unchanged,
+acknowledged target on a timer, `REFRESH_SECONDS = 1`, on purpose — #14 recorded a host writing at
+about 1 Hz so that a machine which had lost the session would be told again. The quantised
+acknowledgement was never involved: this trainer answers 200 W as 200 W, and the player compared
+against what it had asked for either way. The refresh is gone. A target is written again only when
+the whole watts change, after a write that was refused, timed out or superseded, or after a pause or
+a stall put the trainer at its floor. A machine that revokes control says so with a `0xFF` status or
+a `0x05` result, and both already pause the workout. The case this gives up is a machine that drops
+its target **without** saying so. **S5 is the hardware check**, and its result cell is empty.
 
 **Did the stall rescue take the load off your legs, in your own words?** Not asked in so many words.
 The owner reported the rescue as working.

@@ -31,9 +31,11 @@
  *
  * So {@link ErgWriter.offer} **returns an outcome** rather than nothing. A
  * player awaits the one it cares about — the target at an interval boundary —
- * and ignores the ones from the 1 Hz refresh. One code path, no second method,
- * and "acknowledged" becomes something a test can assert instead of a claim in
- * a comment.
+ * and may ignore the rest, such as a ramp's steps. (The player's 1 Hz refresh
+ * of an unchanged target is gone since #542: this writer sends every offer it
+ * is given, so what it is offered is the player's decision.) One code path, no
+ * second method, and "acknowledged" becomes something a test can assert
+ * instead of a claim in a comment.
  *
  * ⚠️ **It resolves and never rejects.** A caller offering at 1 Hz has nowhere
  * to catch a rejection that arrives four seconds later, and an unhandled

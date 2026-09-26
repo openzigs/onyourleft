@@ -56,4 +56,4 @@ export type {
   RiderSample,
   WorkoutPlayer,
 } from './player';
-export { createWorkoutPlayer, REFRESH_SECONDS } from './player';
+export { createWorkoutPlayer } from './player';

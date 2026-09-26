@@ -2109,14 +2109,10 @@ describe('#516 — what the camera’s answer sends a trainer mid-workout', () =
     await ride(rig, DEFAULT_AUTO_PAUSE_AFTER_SECONDS + 3);
     await flushMicrotasks(20);
     expect(rig.controller.getSnapshot().phase).toBe('paused');
-    // Until the engine paused, the workout went on re-asserting its OWN target
-    // as it does on any ride; what the pause added is one Set Target Power at
+    // The workout's own target was acknowledged before this and is not
+    // written again (#542); what the pause added is one Set Target Power at
     // the floor the machine reported — no Stop, no Reset, no Request Control.
-    const since = rig.written.slice(before);
-    expect(since.at(-1)).toStrictEqual([SET_TARGET_POWER, 30, 0]);
-    for (const write of since.slice(0, -1)) {
-      expect(write).toStrictEqual([SET_TARGET_POWER, OWN_TARGET, 0]);
-    }
+    expect(rig.written.slice(before)).toStrictEqual([[SET_TARGET_POWER, 30, 0]]);
     expect(rig.targetOnTheTrainer()).toBe(30);
 
     // And it stays one write while nobody is there.
@@ -2134,11 +2130,9 @@ describe('#516 — what the camera’s answer sends a trainer mid-workout', () =
     await ride(rig, DEFAULT_AUTO_PAUSE_AFTER_SECONDS + 23);
     await flushMicrotasks(20);
     expect(rig.controller.getSnapshot().phase).toBe('recording');
-    // The workout's own re-assertions, and nothing at the floor.
-    expect(rig.written.slice(before).length).toBeGreaterThan(0);
-    for (const write of rig.written.slice(before)) {
-      expect(write).toStrictEqual([SET_TARGET_POWER, OWN_TARGET, 0]);
-    }
+    // Nothing at all: the workout's own target was acknowledged before this
+    // and is not re-asserted every second since #542, and nothing eased it.
+    expect(rig.written.slice(before)).toStrictEqual([]);
     expect(rig.targetOnTheTrainer()).toBe(OWN_TARGET);
     rig.controller.dispose();
   });
@@ -2866,6 +2860,91 @@ describe('#548 — what the Trainer panel says about a manual ERG target once a 
     expect(ready.hasControl).toBe(true);
     expect(targetSentence(ready)).not.toContain('Holding');
     expect(rig.written.length).toBe(afterStop);
+    rig.controller.dispose();
+  });
+});
+
+describe('a running workout owns the ERG target — #542’s review', () => {
+  // ⚠️ Until #542 the workout player re-sent its target every second, which
+  // silently put the workout's target back after the rider set one by hand on
+  // the ERG form. #542 removed that refresh, and the hand-set target then stayed
+  // on the machine for the rest of the block while the workout reported its
+  // own target acknowledged — the screen and the trainer disagreeing about the
+  // resistance a person is pedalling against. Measured on the review of PR
+  // #574: 150 W on the machine, 200 W on the screen.
+  const THRESHOLD = watts(250);
+  const oneBlock = (): WorkoutRecord => ({
+    id: workoutId('w1'),
+    createdBy: ATHLETE_A,
+    name: 'Long',
+    workout: {
+      name: 'Long',
+      blocks: [{ kind: 'steady', seconds: seconds(120), target: thresholdShare(0.8) }],
+    },
+    createdAt: unixSeconds(1),
+    updatedAt: unixSeconds(1),
+  });
+
+  async function inAWorkout(): Promise<Bench> {
+    const rig = benchWith({ machine: { retainsTargetsThroughStop: true } });
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    expect(rig.controller.startWorkout(oneBlock(), THRESHOLD)).toBe(true);
+    await ride(rig, 2);
+    await flushMicrotasks();
+    expect(rig.targetOnTheTrainer()).toBe(200);
+    return rig;
+  }
+
+  it('refuses a target set by hand, writes nothing, and says why', async () => {
+    const rig = await inAWorkout();
+    const before = rig.written.length;
+
+    await rig.controller.setTargetPower(watts(150));
+    await flushMicrotasks();
+    await ride(rig, 8);
+    await flushMicrotasks();
+
+    expect(rig.written.slice(before)).toStrictEqual([]);
+    expect(rig.targetOnTheTrainer()).toBe(200);
+    const snapshot = rig.controller.getSnapshot();
+    expect(snapshot.workout).toBeDefined();
+    expect(snapshot.trainer.requested).toBeUndefined();
+    expect(snapshot.trainer.refusal).toMatch(/workout is setting the trainer’s target/);
+    rig.controller.dispose();
+  });
+
+  it('accepts a target set by hand again once the workout has ended', async () => {
+    // The control: a guard that refused every hand-set target would pass the
+    // test above.
+    const rig = await inAWorkout();
+    rig.controller.endWorkout();
+    await flushMicrotasks(20);
+
+    await rig.controller.setTargetPower(watts(150));
+
+    expect(rig.targetOnTheTrainer()).toBe(150);
+    expect(rig.controller.getSnapshot().trainer.refusal).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('ends the workout when the rider ends ERG, with one Stop', async () => {
+    // A Stop sent underneath the workout would leave its player believing its
+    // target was still on the machine, and since #542 it does not write an
+    // acknowledged target again.
+    const rig = await inAWorkout();
+    const before = rig.written.length;
+
+    await rig.controller.clearTargetPower();
+    await flushMicrotasks(20);
+
+    const snapshot = rig.controller.getSnapshot();
+    expect(snapshot.workout).toBeUndefined();
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(snapshot.trainer.lost).toBeUndefined();
+    expect(snapshot.trainer.hasControl).toBe(true);
+    expect(snapshot.phase).toBe('recording');
     rig.controller.dispose();
   });
 });

@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { revolutionsPerMinute, seconds, watts, type Seconds } from '../quantities';
 
 import { COLLAPSE_RPM, RELIEF_SHARE, TREND_WINDOW, type CadenceReading } from './erg-safety';
-import { createWorkoutPlayer, REFRESH_SECONDS, type PlayerIntent } from './player';
+import { createWorkoutPlayer, type PlayerIntent } from './player';
 import { expandWorkout } from './timeline';
 import { thresholdShare, type Workout, type WorkoutBlock } from './workout';
 
@@ -27,12 +27,8 @@ const THRESHOLD = watts(250);
 /** Two blocks with different targets, so a boundary crossing changes the number. */
 const twoBlocks = () => expandWorkout(workout([steady(60, 0.6), steady(60, 1.0)]));
 
-const player = (timeline = twoBlocks(), refreshSeconds?: number) =>
-  createWorkoutPlayer({
-    timeline,
-    thresholdPower: THRESHOLD,
-    ...(refreshSeconds === undefined ? {} : { refreshSeconds }),
-  });
+const player = (timeline = twoBlocks()) =>
+  createWorkoutPlayer({ timeline, thresholdPower: THRESHOLD });
 
 /** The watts a `write-target` intent asked for; fails loudly on any other kind. */
 const wroteWatts = (intent: PlayerIntent): number => {
@@ -41,6 +37,15 @@ const wroteWatts = (intent: PlayerIntent): number => {
   }
   return intent.watts;
 };
+
+/**
+ * Whether the trainer is left on a relief target by this tick: either the
+ * player writes an eased one, or it writes nothing over the eased one it last
+ * had acknowledged. Since #542 an unchanged target is not written again, so
+ * "still eased" is usually a `hold` — and never a write of the full target.
+ */
+const leavesEased = (intent: PlayerIntent): boolean =>
+  intent.kind === 'hold' || (intent.kind === 'write-target' && intent.eased);
 
 /** A cadence history falling from `from` to `to` across the trend window. */
 const falling = (from: number, to: number, endingAt: number): readonly CadenceReading[] => [
@@ -120,10 +125,9 @@ describe('an interval has not begun until its target is acknowledged', () => {
     // ⚠️ The defect this test was written to find. `setTargetPower` quantises,
     // so a machine asked for 150 W answers 151 W. A player that compared the
     // next tick against the READBACK would see 0.604 where it wanted 0.6, call
-    // that a change, and rewrite the same target on every tick forever — with
-    // the refresh interval the only thing bounding the loop it was supposed to
-    // be closing. The comparison is against what was asked.
-    const subject = player(twoBlocks(), 1000);
+    // that a change, and rewrite the same target on every tick forever. The
+    // comparison is against what was asked.
+    const subject = player();
     subject.start(seconds(100));
     subject.tick(seconds(101));
     subject.acknowledge(watts(151));
@@ -149,34 +153,63 @@ describe('an interval has not begun until its target is acknowledged', () => {
   });
 });
 
-describe('the loop stays closed by refreshing an unchanged target', () => {
-  it('holds inside the refresh interval', () => {
-    const subject = player(twoBlocks(), 5);
-    subject.start(seconds(0));
-    subject.tick(seconds(0));
-    subject.acknowledge(watts(150));
-    expect(subject.tick(seconds(3)).intent).toEqual({ kind: 'hold' });
-  });
+describe('an acknowledged, unchanged target is written once — #542', () => {
+  /**
+   * Tick once a second from `from` to `to`, acknowledging every write at
+   * exactly what was asked — the owner's trainer answered 200 W as 200 W — and
+   * return what was written, in order.
+   */
+  const rideAcknowledging = (
+    subject: ReturnType<typeof player>,
+    from: number,
+    to: number,
+  ): number[] => {
+    const written: number[] = [];
+    for (let second = from; second <= to; second += 1) {
+      const { intent } = subject.tick(seconds(second));
+      if (intent.kind === 'write-target') {
+        written.push(intent.watts);
+        subject.acknowledge(intent.watts);
+      }
+    }
+    return written;
+  };
 
-  it('rewrites the same target once the interval has passed', () => {
-    // #14's revision block: an FTMS host writes continuously at about 1 Hz,
-    // because a machine that has silently lost the session ignores what it was
-    // told and a player that wrote once would never find out.
-    const subject = player(twoBlocks(), 5);
-    subject.start(seconds(0));
-    subject.tick(seconds(0));
-    subject.acknowledge(watts(150));
-    expect(wroteWatts(subject.tick(seconds(5)).intent)).toBe(150);
-  });
-
-  it('refreshes about once a second by default', () => {
-    expect(REFRESH_SECONDS).toBe(1);
+  it('writes a steady block once, however long it lasts', () => {
+    // ⚠️ The defect #542 recorded on hardware: fourteen `05 C8 00` writes in
+    // sixteen seconds, every one acknowledged. The refresh wrote this block
+    // sixty times.
     const subject = player();
     subject.start(seconds(0));
-    subject.tick(seconds(0));
-    subject.acknowledge(watts(150));
-    expect(subject.tick(seconds(0.5)).intent).toEqual({ kind: 'hold' });
-    expect(wroteWatts(subject.tick(seconds(1)).intent)).toBe(150);
+    expect(rideAcknowledging(subject, 0, 59)).toEqual([150]);
+  });
+
+  it('writes the next block once as well, at its boundary', () => {
+    const subject = player();
+    subject.start(seconds(0));
+    expect(rideAcknowledging(subject, 0, 119)).toEqual([150, 250]);
+  });
+
+  it('does not write a slow ramp again until the watts it rounds to move', () => {
+    // 150 W to 160 W over 100 s: the share moves every tick, the watts every
+    // ten seconds, and only the watts reach the wire.
+    const subject = player(
+      expandWorkout(
+        workout([
+          {
+            kind: 'ramp',
+            seconds: seconds(100),
+            from: thresholdShare(0.6),
+            to: thresholdShare(0.64),
+          },
+        ]),
+      ),
+    );
+    subject.start(seconds(0));
+    const written = rideAcknowledging(subject, 0, 99);
+    expect(written).toHaveLength(new Set(written).size);
+    expect(written[0]).toBe(150);
+    expect(written.at(-1)).toBe(160);
   });
 });
 
@@ -306,12 +339,12 @@ describe('the ERG spiral is broken by easing the target, not by ending the inter
       }));
 
     // Recovered, but not for a whole window yet: still eased.
-    const early = subject.tick(seconds(20), { cadence: steadyAt(14, 20) });
-    expect(early.intent).toMatchObject({ eased: true });
-    subject.acknowledge(watts(wroteWatts(early.intent)));
-    const almost = subject.tick(seconds(20 + TREND_WINDOW - 1), { cadence: steadyAt(20, 27) });
-    expect(almost.intent).toMatchObject({ eased: true });
-    subject.acknowledge(watts(wroteWatts(almost.intent)));
+    expect(leavesEased(subject.tick(seconds(20), { cadence: steadyAt(14, 20) }).intent)).toBe(true);
+    expect(
+      leavesEased(
+        subject.tick(seconds(20 + TREND_WINDOW - 1), { cadence: steadyAt(20, 27) }).intent,
+      ),
+    ).toBe(true);
 
     // A whole window of `holding`: the full target, and only now.
     const state = subject.tick(seconds(20 + TREND_WINDOW), { cadence: steadyAt(21, 28) });
@@ -322,8 +355,9 @@ describe('the ERG spiral is broken by easing the target, not by ending the inter
   it('does not flap the target when cadence hovers either side of the stalling line — #441', () => {
     // 48 rpm is `spiralling` (below 50), 52 rpm a moment later is `holding` by
     // the verdict alone. Without the latch that is full → eased → full → eased
-    // at 1 Hz. With it, the target stays eased the whole time.
-    const subject = player(twoBlocks(), 1);
+    // at 1 Hz. With it, the target stays eased the whole time — and since #542
+    // an eased target that has not changed is written once, not every second.
+    const subject = player();
     subject.start(seconds(0));
     const written: boolean[] = [];
     for (let second = 10; second <= 30; second += 1) {
@@ -339,8 +373,7 @@ describe('the ERG spiral is broken by easing the target, not by ending the inter
         subject.acknowledge(state.intent.watts);
       }
     }
-    expect(written.length).toBeGreaterThan(5);
-    expect(written.every((eased) => eased)).toBe(true);
+    expect(written).toEqual([true]);
   });
 
   it('never eases a rider grinding low on purpose who has not spiralled', () => {
@@ -438,10 +471,11 @@ describe('the ERG spiral is broken by easing the target, not by ending the inter
     ];
     // The window still holds the 35 rpm reading at 15-21 s, so `spiralling`
     // (below 50) or `holding` — either way the latch keeps it eased.
-    expect(subject.tick(seconds(24), { cadence: steady80(24) }).intent).toMatchObject({
-      eased: true,
-    });
-    subject.acknowledge(watts(Math.round(150 * RELIEF_SHARE)));
+    const stillEased = subject.tick(seconds(24), { cadence: steady80(24) });
+    expect(leavesEased(stillEased.intent)).toBe(true);
+    if (stillEased.intent.kind === 'write-target') {
+      subject.acknowledge(stillEased.intent.watts);
+    }
     expect(
       wroteWatts(
         subject.tick(seconds(24 + TREND_WINDOW), { cadence: steady80(24 + TREND_WINDOW) }).intent,
@@ -450,13 +484,55 @@ describe('the ERG spiral is broken by easing the target, not by ending the inter
   });
 });
 
+describe('a target the trainer no longer holds is written again, though unchanged — #542', () => {
+  // Since #542 an unchanged target is not rewritten. Each case here is one
+  // where the target is unchanged from what was last ASKED but the trainer has
+  // since been put somewhere else, so skipping it would leave the rider there.
+
+  it('rewrites the relief after a stall, because the stall put the trainer at its floor', () => {
+    const subject = player();
+    subject.start(seconds(0));
+    // A collapse: the relief target, written and acknowledged.
+    const eased = subject.tick(seconds(10), { cadence: falling(70, 45, 10) });
+    const relief = wroteWatts(eased.intent);
+    subject.acknowledge(watts(relief));
+
+    // A stall: the caller writes the machine's floor over the relief.
+    const stall = subject.tick(seconds(20), {
+      cadence: [
+        { at: seconds(14), cadence: revolutionsPerMinute(30) },
+        { at: seconds(20), cadence: revolutionsPerMinute(4) },
+      ],
+    });
+    expect(stall.intent.kind).toBe('release');
+
+    // Pedalling again: the SAME relief number, and it has to go back on.
+    const restarting = subject.tick(seconds(24), {
+      cadence: [
+        { at: seconds(20), cadence: revolutionsPerMinute(4) },
+        { at: seconds(24), cadence: revolutionsPerMinute(35) },
+      ],
+    });
+    expect(wroteWatts(restarting.intent)).toBe(relief);
+  });
+
+  it('writes the first target of a restarted workout even when it is the last one asked', () => {
+    const subject = player();
+    subject.start(seconds(0));
+    subject.tick(seconds(0));
+    subject.acknowledge(watts(150));
+    subject.start(seconds(100));
+    expect(wroteWatts(subject.tick(seconds(100)).intent)).toBe(150);
+  });
+});
+
 describe('a failed write is retried rather than forgotten', () => {
-  it('asks again on the next tick, inside the refresh interval', () => {
-    const subject = player(twoBlocks(), 1000);
+  it('asks again on the next tick, for the same unchanged target', () => {
+    const subject = player();
     subject.start(seconds(0));
     subject.tick(seconds(0));
     subject.writeFailed();
-    // The refresh is far away, so only the forgotten share can explain a write.
+    // Nothing has changed, so only the forgotten ask can explain a write.
     expect(wroteWatts(subject.tick(seconds(1)).intent)).toBe(150);
   });
 
@@ -525,15 +601,16 @@ describe('pausing and resuming', () => {
     expect(subject.tick(seconds(310)).elapsed).toBe(30);
   });
 
-  it('writes immediately on resume rather than waiting out the refresh', () => {
-    const subject = player(twoBlocks(), 1000);
+  it('writes the unchanged target again on resume, because the pause eased it', () => {
+    const subject = player();
     subject.start(seconds(0));
     subject.tick(seconds(0));
     subject.acknowledge(watts(150));
     subject.pause(seconds(1));
     subject.resume(seconds(500));
-    // A rider pressing resume should feel the trainer pick up; with a refresh
-    // of 1000 s only the cleared bookkeeping can explain this write.
+    // A rider pressing resume should feel the trainer pick up; the target is
+    // the one acknowledged before the pause, so only the cleared bookkeeping
+    // can explain this write.
     expect(wroteWatts(subject.tick(seconds(500)).intent)).toBe(150);
   });
 

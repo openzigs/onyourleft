@@ -34,6 +34,39 @@
  * device would drift the plan away from the clock the rider is watching. What
  * waits is the *next* write, not the ride.
  *
+ * ## An acknowledged target is not written again (#542)
+ *
+ * ⚠️ **This player used to refresh an unchanged target every second, and a
+ * reviewer who remembers `REFRESH_SECONDS` is reading the old file.** #14's
+ * revision block recorded a host writing at about 1 Hz, and the refresh was
+ * meant to notice a machine that had silently lost the session. On the owner's
+ * trainer (validation 0002 Part S, 2026-09-25) it wrote `05 C8 00` fourteen
+ * times in sixteen seconds against a target acknowledged `80 05 01` every time
+ * — a write a second on the one channel that applies resistance to a person.
+ * It was not the quantisation trap {@link WorkoutPlayer.acknowledge} guards
+ * against; it was the refresh doing exactly what it was written to do.
+ *
+ * The refresh is gone because what it was for is covered by the protocol
+ * rather than by polling: a machine that revokes control says so with a
+ * `0xFF` Fitness Machine Status, and one that refuses a write answers `0x05`
+ * Control Not Permitted — both reach the ride controller's `onControlLost`,
+ * which pauses the workout. So a target is written again only when it
+ * CHANGES, in the whole watts that would go on the wire, or when the write
+ * did not land — refused, timed out, or superseded ({@link
+ * WorkoutPlayer.writeFailed}) — or after a pause, when the trainer has been
+ * eased to its floor and no longer holds it. ⚠️ The case this gives up is a
+ * machine that drops its target WITHOUT saying so; nothing measured here does.
+ *
+ * ⚠️ **The refresh also used to undo any OTHER writer in the program**, and
+ * that is what removing it exposed (PR #574's review): a target set by hand on
+ * the Ride screen's ERG form stayed on the machine for the rest of the block
+ * while this player reported its own acknowledged. So a workout owns the
+ * control point outright — `apps/web/src/ride/controller.ts`
+ * §`setTargetPower` refuses a hand-set target while one runs, and
+ * §`clearTargetPower` ends the workout rather than stopping underneath it.
+ * This player assumes it is the only thing writing a target; a new writer to
+ * the same characteristic has to be refused the same way.
+ *
  * ## A disconnect pauses, and never discards
  *
  * > *"A test proves a trainer disconnect mid-workout pauses the workout and
@@ -145,20 +178,7 @@ export interface PlayerOptions {
    * doing it again here would put a made-up number on a trainer.
    */
   readonly thresholdPower: Watts;
-  /**
-   * How often to refresh an unchanged target, in seconds.
-   *
-   * #14's revision block records an FTMS host writing **continuously at roughly
-   * 1 Hz** rather than once per interval, and a machine that has been reset or
-   * has lost the session silently ignores what it was told — so a player that
-   * writes once per interval and stops has no way to notice. Refreshing is how
-   * the loop stays closed.
-   */
-  readonly refreshSeconds?: number | undefined;
 }
-
-/** The default refresh, matching the observed host cadence. */
-export const REFRESH_SECONDS = 1;
 
 /** What a tick is told about the rider. */
 export interface RiderSample {
@@ -191,7 +211,6 @@ export interface WorkoutPlayer {
 
 export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
   const { timeline, thresholdPower } = options;
-  const refresh = options.refreshSeconds ?? REFRESH_SECONDS;
 
   let status: PlayerStatus = 'idle';
   let elapsed = 0;
@@ -201,8 +220,12 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
   let elapsedAtResume = 0;
   let pending: Watts | undefined;
   let held: Watts | undefined;
-  let lastWrittenAt: number | undefined;
-  let lastShare: number | undefined;
+  /**
+   * The last target this player ASKED for and has not since given up on, in
+   * whole watts. `undefined` means the next target is written whatever it is.
+   * See the module note on why an unchanged one is not written again.
+   */
+  let lastAsked: Watts | undefined;
   let intent: PlayerIntent = { kind: 'hold' };
   /**
    * Whether a spiral or a stall has been seen and not yet recovered from. See
@@ -238,8 +261,7 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       runningSince = now;
       pending = undefined;
       held = undefined;
-      lastWrittenAt = undefined;
-      lastShare = undefined;
+      lastAsked = undefined;
       intent = { kind: 'hold' };
       rescuing = false;
       steadySince = undefined;
@@ -275,7 +297,7 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
         // harder spins the rider out rather than loading them — so it says
         // only what this player knows: the block has no target of its own.
         pending = undefined;
-        lastShare = undefined;
+        lastAsked = undefined;
         intent = { kind: 'release', reason: 'This block sets no target of its own — ride easy.' };
         return snapshot();
       }
@@ -314,7 +336,7 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
 
       if (verdict.kind === 'stalled') {
         pending = undefined;
-        lastShare = undefined;
+        lastAsked = undefined;
         intent = { kind: 'release', reason: verdict.reason };
         return snapshot();
       }
@@ -332,17 +354,20 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
         return snapshot();
       }
 
-      const changed = lastShare === undefined || Math.abs(lastShare - effective) > 1e-9;
-      const stale = lastWrittenAt === undefined || elapsed - lastWrittenAt >= refresh;
-      if (!changed && !stale) {
+      // ⚠️ #542: compared in the WHOLE WATTS that would be written, and never
+      // refreshed on a timer. A trainer that has acknowledged 200 W is holding
+      // 200 W, and asking again is a write on the one channel that applies
+      // resistance to a person, with nothing to gain. A slow ramp is the same
+      // case in disguise: its share moves every tick while the watts it
+      // rounds to move every few seconds, and only the watts reach the wire.
+      const target = watts(Math.round(thresholdPower * effective));
+      if (lastAsked === target) {
         intent = { kind: 'hold' };
         return snapshot();
       }
 
-      const target = watts(Math.round(thresholdPower * effective));
       pending = target;
-      lastShare = effective;
-      lastWrittenAt = elapsed;
+      lastAsked = target;
       intent = { kind: 'write-target', watts: target, share, eased };
       return snapshot();
     },
@@ -376,22 +401,22 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       // this decision that no test could tell had gone stale. Mutation-tested:
       // deleting the same line from either of those two left the suite green.
       elapsedAtResume = elapsed;
-      // Forget when the last write happened, so the first tick after a resume
-      // writes rather than waiting out the refresh interval. A rider pressing
-      // resume should feel the trainer pick up.
-      lastWrittenAt = undefined;
-      lastShare = undefined;
+      // Forget what was last asked for, so the first tick after a resume
+      // writes even when the target is the one from before the pause: the
+      // session eased the trainer to its floor on the way in, so the machine
+      // is not holding it any more. A rider pressing resume should feel the
+      // trainer pick up.
+      lastAsked = undefined;
       return snapshot();
     },
 
     acknowledge(written: Watts): PlayerState {
       pending = undefined;
-      // ⚠️ `lastShare` deliberately keeps what was ASKED FOR, not `written`.
+      // ⚠️ `lastAsked` deliberately keeps what was ASKED FOR, not `written`.
       // `setTargetPower` quantises, so a readback of 151 W against an ask of
       // 150 W is an ordinary acknowledgement rather than a change — and a
       // comparison against the readback would therefore differ on every tick
-      // and rewrite the same target forever, which is the exact busy loop the
-      // refresh interval exists to bound. What the machine holds is worth
+      // and rewrite the same target forever. What the machine holds is worth
       // showing a rider, so it is kept and reported; it is not what the next
       // tick's decision is made against.
       held = written;
@@ -400,9 +425,11 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
 
     writeFailed(): PlayerState {
       pending = undefined;
-      // Forget the share too, so the next tick counts as a change and tries
-      // again rather than deciding nothing has moved.
-      lastShare = undefined;
+      // Forget what was asked for too, so the next tick counts as a change and
+      // tries again rather than deciding nothing has moved. This — a refused,
+      // timed-out or superseded write — is the one way an unchanged target is
+      // written twice (#542).
+      lastAsked = undefined;
       return snapshot();
     },
 
