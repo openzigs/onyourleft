@@ -1080,6 +1080,36 @@ function pointAt(
 }
 
 /**
+ * Where the road is DRAWN at a route distance, in local metres — the same
+ * point {@link roadCorridor} puts the ribbon's centreline through there. #543's
+ * review.
+ *
+ * ⚠️ **Anything that stands ON or BESIDE the drawn road reads this, never
+ * `positionAt`.** Since #543 the ribbon runs up to about 1.9 m inside the
+ * route's own vertex at a planner's 45° corner, so a part placed from the
+ * route's centreline stands that far off the road it belongs to. The review
+ * measured a bridge parapet 1.27 m into the carriageway at a 45° corner on the
+ * valley floor; `waterways.ts` §`bridgeParts` and §`waterSurface` read this
+ * since. The scenery and the settlements are placed BESIDE the route with a
+ * verge to spare and deliberately do not — see {@link BEND_SMOOTHING_METRES}.
+ *
+ * `distance` is an odometer reading: it is wrapped (a loop) or clamped (a
+ * line) exactly as {@link roadCorridor}'s own points are.
+ */
+export function drawnRoadPosition(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  distance: number,
+): { readonly x: number; readonly z: number } {
+  return drawnGroundPosition(
+    profile,
+    origin,
+    distanceOnRoute(profile, distance),
+    BEND_SMOOTHING_METRES,
+  );
+}
+
+/**
  * Where the road is DRAWN at a route distance: the mean of the route's own
  * centreline over {@link BEND_SMOOTHING_METRES} either side of it — #543.
  *

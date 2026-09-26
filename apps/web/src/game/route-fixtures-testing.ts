@@ -79,6 +79,46 @@ export function valleyRoute(): RouteProfile {
 }
 
 /**
+ * {@link valleyRoute}'s valley on a road that turns a corner at its floor —
+ * #543's review. Sampled every **25 m**, the way a planner exports a road, and
+ * with a single corner of `degrees` (to the right) at **1 000 m**, which is
+ * where the stream crosses: north before it, `degrees` east of north after.
+ *
+ * ⚠️ The case every other bridge fixture here cannot be: they are straight, and
+ * on a straight the drawn road and the route's centreline are the same line
+ * (`terrain.ts` §`BEND_SMOOTHING_METRES`), so a part placed from the wrong one
+ * stands in the right place anyway.
+ */
+export function bentValleyRoute(degrees = 45): RouteProfile {
+  const metresPerDegreeLongitude =
+    METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
+  const corner = 1_000;
+  const turn = (degrees * Math.PI) / 180;
+  const points: RoutePoint[] = [];
+  for (let along = 0; along <= 3_000 + 1e-9; along += 25) {
+    const past = Math.max(0, along - corner);
+    const east = past * Math.sin(turn);
+    const north = Math.min(along, corner) + past * Math.cos(turn);
+    const elevation =
+      along <= 400
+        ? 30
+        : along <= 1_000
+          ? 30 - ((along - 400) / 600) * 30
+          : along <= 1_600
+            ? ((along - 1_000) / 600) * 30
+            : 30;
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(FIXTURE_LATITUDE + north / METRES_PER_DEGREE_LATITUDE),
+        degreesLongitude(-0.12 + east / metresPerDegreeLongitude),
+      ),
+      elevation: altitudeMetres(elevation),
+    });
+  }
+  return routeProfile(points, { loop: false });
+}
+
+/**
  * A valley with a level floor 40 m wide and 12 % walls — #501's review. Its
  * floor meets its walls 20 m either side of the stream, inside a bridge's
  * approach (`waterways.ts` §`BRIDGE_HALF_SPAN_METRES` to
