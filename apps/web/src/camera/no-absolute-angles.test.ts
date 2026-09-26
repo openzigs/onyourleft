@@ -21,7 +21,13 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { angleClaimsIn, EXEMPT, isExempt, textsIn } from './no-absolute-angles';
+import {
+  angleClaimsIn,
+  decodeCharacterReferences,
+  EXEMPT,
+  isExempt,
+  textsIn,
+} from './no-absolute-angles';
 
 const SOURCE_ROOT = fileURLToPath(new URL('..', import.meta.url));
 /** The one file the walk leaves out: the rule itself. */
@@ -65,6 +71,65 @@ describe('the scan itself can fire', () => {
     expect(angleClaimsIn('x.ts', "const s = 'about 4\\u00b0';")).toHaveLength(1);
   });
 
+  // #561's review, the blocking finding: the parser hands JSX text back with
+  // its character references undecoded, so each of these used to pass.
+  it.each([
+    '<p>Knee 142&deg;</p>',
+    '<p>Knee 142&DEG;</p>',
+    '<p>Knee 142&#176;</p>',
+    '<p>Knee 142&#0176;</p>',
+    '<p>Knee 142&#xb0;</p>',
+    '<p>Knee 142&#x00B0;</p>',
+    '<p>Knee 142&#XB0;</p>',
+    '<p>Knee 142&ordm;</p>',
+    '<p>Knee 142&#730;</p>',
+  ])('catches a character reference in JSX text: %s', (jsx) => {
+    expect(angleClaimsIn('x.tsx', `const e = ${jsx};`)).toStrictEqual([
+      expect.objectContaining({ rule: 'degree sign' }),
+    ]);
+  });
+
+  it.each([
+    '<img alt="Knee 142&deg;" />',
+    '<abbr title="142&#176;">x</abbr>',
+    '<span aria-label="Knee 142&#x00b0;" />',
+  ])('catches a character reference in a JSX attribute: %s', (jsx) => {
+    expect(angleClaimsIn('x.tsx', `const e = ${jsx};`)).toStrictEqual([
+      expect.objectContaining({ rule: 'degree sign' }),
+    ]);
+  });
+
+  it('catches the frontal plane spelled with a character reference in JSX', () => {
+    expect(angleClaimsIn('x.tsx', 'const e = <p>possible hip&nbsp;drop</p>;')).toStrictEqual([
+      expect.objectContaining({ rule: 'frontal plane' }),
+    ]);
+  });
+
+  it('decodes every form of reference, and leaves what it cannot decode', () => {
+    expect(decodeCharacterReferences('&deg;&Deg;&#176;&#0176;&#xb0;&#X00B0;')).toBe('°°°°°°');
+    expect(decodeCharacterReferences('&ordm; &#730;')).toBe('º ˚');
+    expect(decodeCharacterReferences('&unknownthing; &#xzz; plain')).toBe(
+      '&unknownthing; &#xzz; plain',
+    );
+  });
+
+  it.each([
+    "'Knee 142º'",
+    "'Knee 142˚'",
+    "'Knee 142\\u00ba'",
+    "'Knee 142 deg'",
+    "'knee 142deg'",
+    "'KNEE 142 DEG'",
+  ])('catches a look-alike of the degree sign, and the abbreviation: %s', (literal) => {
+    expect(angleClaimsIn('x.ts', `const s = ${literal};`)).toStrictEqual([
+      expect.objectContaining({ rule: 'degree sign' }),
+    ]);
+  });
+
+  it('does not read "deg" inside a word, or with no number before it, as the abbreviation', () => {
+    expect(angleClaimsIn('x.ts', "const s = 'a degu, legs, deg';")).toEqual([]);
+  });
+
   it('catches the word, singular or plural, in any case', () => {
     expect(angleClaimsIn('x.ts', "const s = 'Your knee bent 12 degrees';")).toHaveLength(1);
     expect(angleClaimsIn('x.tsx', 'const e = <span>Degrees</span>;')).toHaveLength(1);
@@ -93,6 +158,21 @@ describe('the scan itself can fire', () => {
     'side-to-side movement',
     'side to side',
     'the frontal plane',
+    // ADR 0030 D-4's own terms, which #561's review found missing.
+    'Your foot eversion was possibly larger',
+    'possible eversion at the ankle',
+    'foot inversion',
+    'your foot everted',
+    'your feet inverted',
+    'shoulder levelness',
+    'Your shoulders were possibly less level',
+    'your shoulder was not level',
+    'level shoulders',
+    'uneven shoulders',
+    'a pelvic tilt',
+    'your hips tilting',
+    'lateral movement of the knee',
+    'a lateral shift',
   ])('catches the frontal plane as a word: %s', (text) => {
     expect(angleClaimsIn('x.ts', `const s = ${JSON.stringify(text)};`)).toStrictEqual([
       expect.objectContaining({ rule: 'frontal plane' }),
@@ -127,6 +207,27 @@ describe('the scan itself can fire', () => {
       [],
     );
     expect(angleClaimsIn('x.ts', "const s = 'rockets and a swayback horse';")).toEqual([]);
+  });
+
+  it('does not decode a plain string, which nothing renders as HTML', () => {
+    // Five characters reach a rider, not a degree sign.
+    expect(textsIn('x.ts', "const s = '142&deg;';").map((each) => each.text)).toEqual(['142&deg;']);
+  });
+
+  it('excuses only the exact text an exemption names, never a text that contains it', () => {
+    const entry = EXEMPT.find((each) => each.file === 'game/GameView.tsx');
+    expect(entry).toBeDefined();
+    if (entry === undefined) {
+      return;
+    }
+    const exact = { file: entry.file, line: 1, text: entry.text, rule: 'degree word' } as const;
+    expect(isExempt(exact)).toBe(true);
+    // #561's review's own probe.
+    expect(
+      isExempt({ ...exact, text: 'Wind direction, degrees it blows from; your knee is 142°' }),
+    ).toBe(false);
+    expect(isExempt({ ...exact, text: `${entry.text} ` })).toBe(false);
+    expect(isExempt({ ...exact, file: 'camera/side-report.ts' })).toBe(false);
   });
 
   it('does not read an import path as text', () => {
@@ -168,9 +269,7 @@ describe('no string in this client renders an absolute angle or the frontal plan
     );
     for (const entry of EXEMPT) {
       expect(
-        findings.some(
-          (finding) => finding.file === entry.file && finding.text.includes(entry.text),
-        ),
+        findings.some((finding) => finding.file === entry.file && finding.text === entry.text),
         `${entry.file}: ${entry.text}`,
       ).toBe(true);
     }

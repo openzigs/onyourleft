@@ -114,10 +114,71 @@ export const FRAMING_CHECK_POSES = 10;
  *
  * A bound rather than a limit anybody should meet — a numbers-only pose is a
  * few hundred bytes, so this is some tens of megabytes at worst — because a
- * tablet left filming overnight should not grow a list without end. Past it,
- * poses are counted and not kept.
+ * tablet left filming overnight should not grow a list without end.
+ *
+ * ⚠️ **Past it the kept poses are THINNED, not truncated** (#561's review).
+ * They used to stop being kept, so a four-hour session's "last third" was the
+ * last third of its first three hours, and the report told the rider it was
+ * the session's. {@link PoseSamples} keeps every other pose when it fills and
+ * then keeps one in twice as many, so what is kept always spans the whole
+ * session at an even spacing and the thirds are the session's own.
  */
 export const MAXIMUM_POSE_SAMPLES = 3 * 60 * 60 * 5;
+
+/**
+ * A session's kept poses, bounded by thinning rather than by truncation — see
+ * {@link MAXIMUM_POSE_SAMPLES}.
+ *
+ * Every kept pose is the `k × stride`-th pose offered, for one stride: when
+ * the list is full, every other kept pose is dropped and the stride doubles.
+ * So the kept poses are evenly spaced over everything offered so far, the
+ * first is always the first offered (the framing check reads the first
+ * {@link FRAMING_CHECK_POSES}, long before any thinning), and at most
+ * `maximum` are held.
+ */
+export class PoseSamples {
+  readonly #maximum: number;
+  readonly #kept: SidePoseSample[] = [];
+  #stride = 1;
+  #offered = 0;
+
+  constructor(maximum: number = MAXIMUM_POSE_SAMPLES) {
+    if (!Number.isInteger(maximum) || maximum < 2) {
+      throw new RangeError('a pose sample bound must be a whole number of at least two');
+    }
+    this.#maximum = maximum;
+  }
+
+  /** The kept poses, oldest first. */
+  get kept(): readonly SidePoseSample[] {
+    return this.#kept;
+  }
+
+  /** Offer the next pose; it is kept if it falls on the current stride. */
+  offer(sample: SidePoseSample): void {
+    const index = this.#offered;
+    this.#offered += 1;
+    if (index % this.#stride !== 0) {
+      return;
+    }
+    if (this.#kept.length >= this.#maximum) {
+      let write = 0;
+      for (let read = 0; read < this.#kept.length; read += 2) {
+        const each = this.#kept[read];
+        if (each !== undefined) {
+          this.#kept[write] = each;
+          write += 1;
+        }
+      }
+      this.#kept.length = write;
+      this.#stride *= 2;
+      if (index % this.#stride !== 0) {
+        return;
+      }
+    }
+    this.#kept.push(sample);
+  }
+}
 
 /**
  * One picture's pose, as the report will read it.
@@ -171,7 +232,7 @@ export class SideAnalysis implements SideAnalysisPort {
   readonly #references: FramingReferenceKeeping | undefined;
   readonly #listeners = new Set<() => void>();
   readonly #unsubscribe: (() => void)[] = [];
-  readonly #samples: SidePoseSample[] = [];
+  readonly #poses = new PoseSamples();
   readonly #report: SideReportSession | undefined;
 
   #estimator: SidePoseEstimator | undefined;
@@ -224,7 +285,7 @@ export class SideAnalysis implements SideAnalysisPort {
    * post-ride report's input (#388). Numbers only; see {@link SidePoseSample}.
    */
   poseSamples(): readonly SidePoseSample[] {
-    return this.#samples;
+    return this.#poses.kept;
   }
 
   #controlChanged(): void {
@@ -306,13 +367,11 @@ export class SideAnalysis implements SideAnalysisPort {
   #record(picture: SidePicture, outcome: SidePoseOutcome): void {
     switch (outcome.kind) {
       case 'pose':
-        if (this.#samples.length < MAXIMUM_POSE_SAMPLES) {
-          this.#samples.push({
-            sequence: picture.sequence,
-            milliseconds: picture.milliseconds,
-            pose: outcome.pose,
-          });
-        }
+        this.#poses.offer({
+          sequence: picture.sequence,
+          milliseconds: picture.milliseconds,
+          pose: outcome.pose,
+        });
         this.#set({ model: 'ready', posed: this.#state.posed + 1 });
         this.#check();
         return;
@@ -334,11 +393,11 @@ export class SideAnalysis implements SideAnalysisPort {
     if (
       this.#state.framing !== 'checking' ||
       this.#reference === undefined ||
-      this.#samples.length < FRAMING_CHECK_POSES
+      this.#poses.kept.length < FRAMING_CHECK_POSES
     ) {
       return;
     }
-    const placement = placementOf(this.#samples.slice(0, FRAMING_CHECK_POSES));
+    const placement = placementOf(this.#poses.kept.slice(0, FRAMING_CHECK_POSES));
     const verdict =
       placement === undefined ? 'differs' : framingVerdict(this.#reference, placement);
     this.#control.shareFramingVerdict(verdict);
@@ -359,7 +418,7 @@ export class SideAnalysis implements SideAnalysisPort {
     this.#keepReference(framing);
     // #388: the report's sentences, and nothing they were made from, go to
     // the ride this session filmed. The samples stay here, in memory only.
-    this.#report?.endSideReportSession(sideReportFrom(this.#samples, this.#state));
+    this.#report?.endSideReportSession(sideReportFrom(this.#poses.kept, this.#state));
   }
 
   /**
@@ -376,11 +435,11 @@ export class SideAnalysis implements SideAnalysisPort {
     if (
       keeping === undefined ||
       !REFERENCE_MOVES_ON.includes(check) ||
-      this.#samples.length < FRAMING_CHECK_POSES
+      this.#poses.kept.length < FRAMING_CHECK_POSES
     ) {
       return;
     }
-    const placement = placementOf(this.#samples);
+    const placement = placementOf(this.#poses.kept);
     if (placement === undefined) {
       return;
     }

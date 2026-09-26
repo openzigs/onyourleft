@@ -9,6 +9,7 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { MAXIMUM_POSE_SAMPLES, PoseSamples } from './side-analysis';
 import type { SidePose, SidePoseLandmark } from './side-analysis-port';
 import {
   MEASURED_SPREAD_DEGREES,
@@ -30,6 +31,7 @@ import {
   SIDE_REPORT_SUMMARIES,
   SIDE_REPORT_TOO_SHORT,
   SIDE_REPORT_UNCHANGED,
+  SIDE_REPORT_UNCHANGED_IN_PART,
   SIDE_REPORT_UNREADABLE,
 } from './side-report-wording';
 
@@ -182,6 +184,106 @@ describe('one change at a time, and nothing else', () => {
       SIDE_OBSERVATION_SENTENCES.torso.decreased,
       SIDE_OBSERVATION_SENTENCES.elbow.decreased,
     ]);
+  });
+});
+
+/** `samples` with one landmark missing from every pose. */
+function without(
+  samples: readonly SideReportSample[],
+  landmark: SidePoseLandmark,
+): SideReportSample[] {
+  return samples.map((sample) => ({
+    ...sample,
+    pose: {
+      ...sample.pose,
+      landmarks: sample.pose.landmarks.filter((mark) => mark.name !== landmark),
+    },
+  }));
+}
+
+describe('what "nothing changed" claims (#561’s review, ADR 0030 R2)', () => {
+  it('says only that the parts it could compare did not change, when some could not be compared', () => {
+    // No ankle anywhere: the knee and the saddle need it, the other three do not.
+    const samples = without(session(BASE), 'ankle');
+    expect(report(samples)).toStrictEqual({
+      summary: SIDE_REPORT_UNCHANGED_IN_PART,
+      observations: [],
+    });
+  });
+
+  it('keeps the plain "nothing changed" for a session where all five were compared', () => {
+    expect(report(session(BASE))?.summary).toBe(SIDE_REPORT_UNCHANGED);
+  });
+
+  it('still reports a change it could see when another part could not be compared', () => {
+    const samples = without(session(BASE, { ...BASE, torso: 35 }), 'ankle');
+    expect(report(samples)).toStrictEqual({
+      summary: SIDE_REPORT_OBSERVED,
+      observations: [SIDE_OBSERVATION_SENTENCES.torso.decreased],
+    });
+  });
+
+  it('does not word the partial sentence as though everything were compared', () => {
+    expect(SIDE_REPORT_UNCHANGED_IN_PART).not.toBe(SIDE_REPORT_UNCHANGED);
+    expect(SIDE_REPORT_UNCHANGED_IN_PART).toMatch(/^Nothing that could be compared changed/);
+    expect(SIDE_REPORT_UNCHANGED_IN_PART).toContain('only the parts it could');
+    expect(isReportSummary(SIDE_REPORT_UNCHANGED_IN_PART)).toBe(true);
+  });
+});
+
+describe('a session longer than the pose bound (#561’s review)', () => {
+  /** Four hours at five pictures a second, the last hour sitting lower. */
+  function fourHours(): PoseSamples {
+    const kept = new PoseSamples();
+    const count = 4 * 60 * 60 * 5;
+    const late = { ...BASE, torso: 35 };
+    for (let index = 0; index < count; index += 1) {
+      kept.offer({
+        sequence: index,
+        milliseconds: index * 200,
+        pose: poseAt(index >= count * 0.75 ? late : BASE, index * 1.7),
+      });
+    }
+    return kept;
+  }
+
+  it('compares the session’s real last third, not the last third of its first three hours', () => {
+    const kept = fourHours().kept;
+    expect(kept.length).toBeLessThanOrEqual(MAXIMUM_POSE_SAMPLES);
+    // The kept poses reach the end of the session.
+    expect(kept.at(-1)?.milliseconds).toBeGreaterThan((4 * 60 * 60 - 60) * 1000);
+    // The last hour's change is in the last third, so it is reported.
+    expect(
+      sideReportFrom(kept, {
+        model: 'ready',
+        posed: 4 * 60 * 60 * 5,
+        noRider: 0,
+        unreadable: 0,
+      }),
+    ).toStrictEqual({
+      summary: SIDE_REPORT_OBSERVED,
+      observations: [SIDE_OBSERVATION_SENTENCES.torso.decreased],
+    });
+  });
+
+  it('thins evenly: the first pose is kept, the spacing is one stride, and the bound holds', () => {
+    const kept = new PoseSamples(10);
+    for (let index = 0; index < 100; index += 1) {
+      kept.offer({ sequence: index, milliseconds: index, pose: poseAt(BASE, 0) });
+    }
+    const sequences = kept.kept.map((each) => each.sequence);
+    expect(sequences.length).toBeLessThanOrEqual(10);
+    expect(sequences[0]).toBe(0);
+    const gaps = new Set(sequences.slice(1).map((each, index) => each - (sequences[index] ?? 0)));
+    expect(gaps.size).toBe(1);
+    // Nothing offered after the last kept pose is a whole stride away.
+    const stride = [...gaps][0] ?? 0;
+    expect(99 - (sequences.at(-1) ?? 0)).toBeLessThan(stride);
+  });
+
+  it('refuses a bound it could not thin', () => {
+    expect(() => new PoseSamples(1)).toThrow(RangeError);
+    expect(() => new PoseSamples(2.5)).toThrow(RangeError);
   });
 });
 

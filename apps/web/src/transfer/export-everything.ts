@@ -104,7 +104,13 @@
  */
 
 import type { SignedActivityRecord, UnixSeconds } from '@onyourleft/domain';
-import type { ActivityId, AthleteId, FramingCheckRecord } from '@onyourleft/store';
+import {
+  StoreDecodeError,
+  type ActivityId,
+  type AthleteId,
+  type FramingCheckRecord,
+  type SideCameraReportRecord,
+} from '@onyourleft/store';
 
 import { ActivityExportError, exportActivity, fileStemOf } from './export-activity';
 import type { ActivityFileFormat } from './file-format';
@@ -141,12 +147,31 @@ export interface ManifestEntry {
    *
    * Sentences only, because that is all that is kept: no picture and no pose
    * number is on the row to export.
+   *
+   * ⚠️ **A report on this device that could not be read is the third value,
+   * `{ unreadable: … }`**, and neither `null` nor an aborted export (#561's
+   * review): `null` would say the ride was never filmed, and one row a later
+   * build wrote used to throw out of the loop and take the rider's whole
+   * pre-erase safety net with it. The ride's file and every other ride are
+   * still written, and this entry says what the archive could not carry.
    */
-  readonly sideCameraReport: {
-    readonly summary: string;
-    readonly observations: readonly string[];
-  } | null;
+  readonly sideCameraReport:
+    | {
+        readonly summary: string;
+        readonly observations: readonly string[];
+      }
+    | { readonly unreadable: string }
+    | null;
 }
+
+/**
+ * What the manifest says of a side-camera report that is on this device and
+ * could not be read — ADR 0029 D-8's rule for an error about a body: it names
+ * what is missing and carries nothing of the row, neither its sentences nor
+ * the store's own message, which names the field it refused.
+ */
+export const SIDE_CAMERA_REPORT_UNREADABLE =
+  'this ride has a side-camera report on this device that could not be read, so this archive does not contain it';
 
 /**
  * Where an export stopped, in the terms the list is ordered by.
@@ -633,7 +658,7 @@ export async function exportEverything(
     const stored = await store.getActivityRecord(athleteId, summary.id);
     // #388. Read with the ride, so it is inside this run's bound and in the
     // manifest entry of the ride it is about.
-    const sideReport = await store.getSideCameraReport(athleteId, summary.id);
+    const sideReport = await readSideCameraReport(store, athleteId, summary.id);
     const recordName = stored === undefined ? undefined : signedRecordFileName(fileName);
 
     let outcome: AccountExportOutcome;
@@ -699,7 +724,9 @@ export async function exportEverything(
       sideCameraReport:
         sideReport === undefined
           ? null
-          : { summary: sideReport.summary, observations: [...sideReport.observations] },
+          : sideReport === 'unreadable'
+            ? { unreadable: SIDE_CAMERA_REPORT_UNREADABLE }
+            : { summary: sideReport.summary, observations: [...sideReport.observations] },
     });
     outcomes.push(outcome);
     options.onProgress?.({ completed: outcomes.length, total: wanted.length, outcome });
@@ -808,4 +835,28 @@ export async function exportEverything(
         ? { startedAt: lastFinished.startedAt, activityId: lastFinished.id }
         : undefined,
   };
+}
+
+/**
+ * One ride's side-camera report, `undefined` when it has none, or
+ * `'unreadable'` when a row is there and does not decode (#561's review).
+ *
+ * ⚠️ Narrowed to {@link StoreDecodeError}, for the reason the ride export
+ * narrows to its own error: that is a row this build cannot read, and a
+ * rider's history survives it. Anything else is this client or the store
+ * being broken, and belongs uncaught.
+ */
+async function readSideCameraReport(
+  store: AccountStore,
+  athleteId: AthleteId,
+  activityId: ActivityId,
+): Promise<SideCameraReportRecord | 'unreadable' | undefined> {
+  try {
+    return await store.getSideCameraReport(athleteId, activityId);
+  } catch (error) {
+    if (error instanceof StoreDecodeError) {
+      return 'unreadable';
+    }
+    throw error;
+  }
 }

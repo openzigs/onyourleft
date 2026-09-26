@@ -50,6 +50,7 @@ import {
   accountManifest,
   cameraFrameFileName,
   exportEverything,
+  SIDE_CAMERA_REPORT_UNREADABLE,
   signedRecordFileName,
   type AccountExportCursor,
 } from './export-everything';
@@ -1002,6 +1003,82 @@ describe('exporting the side camera’s reports (#388)', () => {
     for (const entry of entries(files)) {
       expect(entry).toHaveProperty('sideCameraReport', null);
     }
+  });
+
+  /**
+   * Overwrites one ride's stored report row with `observations` it cannot
+   * decode — what a later build's longer report looks like to this one — by
+   * the database directly, past the store's own validation on the way in.
+   */
+  async function corruptReportRow(ride: ActivityId): Promise<void> {
+    await harness.discard();
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const opening = indexedDB.open(harness.databaseName);
+      opening.onsuccess = () => {
+        resolve(opening.result);
+      };
+      opening.onerror = () => {
+        reject(new Error('could not open the database'));
+      };
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const transaction = database.transaction('sideCameraReports', 'readwrite');
+        const table = transaction.objectStore('sideCameraReports');
+        const reading = table.get(ride);
+        reading.onsuccess = () => {
+          const row = reading.result as Record<string, unknown>;
+          table.put({ ...row, observations: ['x'.repeat(10_000)] });
+        };
+        transaction.oncomplete = () => {
+          resolve();
+        };
+        transaction.onerror = () => {
+          reject(new Error('could not write the row'));
+        };
+      });
+    } finally {
+      database.close();
+    }
+  }
+
+  it('does not abort the whole export for one report it cannot read, and says so in that ride’s entry', async () => {
+    // #561's review: one undecodable row used to throw out of the loop and
+    // take the rider's whole pre-erase archive with it.
+    const { written } = await seedLibrary(3);
+    const broken = written[1]?.ride;
+    const fine = written[2]?.ride;
+    expect(broken).toBeDefined();
+    expect(fine).toBeDefined();
+    if (broken === undefined || fine === undefined) {
+      return;
+    }
+    await harness.write(async (store) => {
+      await store.putSideCameraReport(sideCameraReportFor(ATHLETE_A, broken.id));
+      await store.putSideCameraReport(sideCameraReportFor(ATHLETE_A, fine.id));
+    });
+    await corruptReportRow(broken.id);
+    // The store does refuse that row, read back through a fresh connection,
+    // so the case below is about the export and not about a lenient store.
+    await expect(
+      harness.read(async (store) => store.getSideCameraReport(ATHLETE_A, broken.id)),
+    ).rejects.toThrow();
+
+    const { files, report } = await runExport();
+    expect(report.exported).toBe(3);
+    const listed = entries(files);
+    expect(listed).toHaveLength(3);
+    const brokenEntry = listed.find((each) => each['activityId'] === broken.id);
+    expect(brokenEntry?.['written']).toBe(true);
+    expect(brokenEntry?.['sideCameraReport']).toStrictEqual({
+      unreadable: SIDE_CAMERA_REPORT_UNREADABLE,
+    });
+    // Nothing of the row is carried: not its sentences, not the store's message.
+    expect(JSON.stringify(brokenEntry)).not.toContain('xxxx');
+    // The ride after it is exported whole, report and all.
+    expect(listed.find((each) => each['activityId'] === fine.id)?.['sideCameraReport']).toEqual(
+      expect.objectContaining({ summary: expect.any(String) as unknown }),
+    );
   });
 
   it('carries no other athlete’s report', async () => {

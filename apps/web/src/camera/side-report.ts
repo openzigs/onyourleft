@@ -66,6 +66,7 @@ import {
   SIDE_REPORT_OBSERVED,
   SIDE_REPORT_TOO_SHORT,
   SIDE_REPORT_UNCHANGED,
+  SIDE_REPORT_UNCHANGED_IN_PART,
   SIDE_REPORT_UNREADABLE,
   type SideChangeDirection,
   type SideObservationKind,
@@ -237,8 +238,18 @@ export function sideReportFrom(
     const direction: SideChangeDirection = change > 0 ? 'increased' : 'decreased';
     return [SIDE_OBSERVATION_SENTENCES[kind][direction]];
   });
+  if (observations.length > 0) {
+    return { summary: SIDE_REPORT_OBSERVED, observations };
+  }
+  // ⚠️ "Nothing changed" is a claim about everything the report looks at, so
+  // it is made only when all five kinds were compared. When some could not
+  // be — an ankle the model rarely found leaves out the knee and the saddle —
+  // the sentence says so rather than reading as though all five were (ADR
+  // 0030 R2: a comparison names its conditions; #561's review).
   return {
-    summary: observations.length === 0 ? SIDE_REPORT_UNCHANGED : SIDE_REPORT_OBSERVED,
+    summary: compared.every(({ change }) => change !== undefined)
+      ? SIDE_REPORT_UNCHANGED
+      : SIDE_REPORT_UNCHANGED_IN_PART,
     observations,
   };
 }

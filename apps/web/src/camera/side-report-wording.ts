@@ -102,12 +102,27 @@ export const SIDE_REPORT_OBSERVED =
   'Each of these compares the first third of this ride’s side-camera session with its last third, as the same camera saw them. They are rough estimates from one camera, which is why each one says possibly.';
 
 /**
- * The session was compared and nothing changed by as much as the report
- * mentions. ⚠️ Not a verdict on the rider (R3): it says only that these rough
+ * The session was compared, **all five kinds were compared**, and nothing
+ * changed by as much as the report mentions. ⚠️ Not a verdict on the rider (R3): it says only that these rough
  * estimates did not differ by much.
  */
 export const SIDE_REPORT_UNCHANGED =
   'Nothing changed by enough to mention between the first third of this ride’s side-camera session and its last third. This is not a judgement of your position — only that these rough, one-camera estimates did not differ by much.';
+
+/**
+ * The session was compared, nothing that COULD be compared changed by as much
+ * as the report mentions, and at least one of the five kinds could not be
+ * compared at all — too few pictures in one of the thirds showed the landmarks
+ * it needs (#561's review). ⚠️ {@link SIDE_REPORT_UNCHANGED} would overstate
+ * this case: read against ADR 0030 R2, a comparison names both sides **and the
+ * conditions**, and "nothing changed" with no qualifier names a comparison of
+ * everything. Checked against D-2 by hand: past tense (D-1), both sides named
+ * (R1, R2), no judgement (R3), nothing about equipment (R4), no condition
+ * (R5), no clinical framing (R6), no prompt (R7), no number (R8), no score
+ * (R9), no range (R10), nothing across the rider (D-4).
+ */
+export const SIDE_REPORT_UNCHANGED_IN_PART =
+  'Nothing that could be compared changed by enough to mention between the first third of this ride’s side-camera session and its last third. The camera saw too little of some parts of you to compare them at all, so this covers only the parts it could. This is not a judgement of your position — only that these rough, one-camera estimates did not differ by much.';
 
 /** The session was too short for its thirds to be compared. */
 export const SIDE_REPORT_TOO_SHORT =
@@ -140,6 +155,7 @@ export const SIDE_REPORT_UNREADABLE_ROW =
 export const SIDE_REPORT_SUMMARIES: readonly string[] = [
   SIDE_REPORT_OBSERVED,
   SIDE_REPORT_UNCHANGED,
+  SIDE_REPORT_UNCHANGED_IN_PART,
   SIDE_REPORT_TOO_SHORT,
   SIDE_REPORT_UNREADABLE,
   SIDE_REPORT_NO_MODEL,

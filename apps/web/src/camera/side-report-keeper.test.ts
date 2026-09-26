@@ -155,6 +155,61 @@ describe('which ride a session’s report goes with', () => {
     expect(rides.listening()).toBe(0);
   });
 
+  it('drops the report, and stops listening, when the save it waited for failed', () => {
+    // #561's review: the controller never returns to idle, so the drop has to
+    // happen on the save's outcome. A failed save is the one a rider sees most.
+    const rides = scriptedRides();
+    const { puts, store } = recordingStore();
+    const session = sideReportKeeper({
+      rides: rides.source,
+      store,
+      athleteId: ATHLETE_A,
+    }).beginSideReportSession();
+    rides.start();
+    session.endSideReportSession(REPORT);
+    rides.stopAndSave(undefined, 'failed');
+    // The phase stays `stopped`, as the real controller leaves it.
+    expect(rides.source.getSnapshot().phase).toBe('stopped');
+    expect(puts).toStrictEqual([]);
+    expect(rides.listening()).toBe(0);
+  });
+
+  it('does not give a failed ride’s report to the next ride that saves', () => {
+    const rides = scriptedRides();
+    const { puts, store } = recordingStore();
+    const session = sideReportKeeper({
+      rides: rides.source,
+      store,
+      athleteId: ATHLETE_A,
+    }).beginSideReportSession();
+    rides.start();
+    session.endSideReportSession(REPORT);
+    rides.stopAndSave(undefined, 'failed');
+    // A later ride (after #548's reset) saves; the report was already dropped.
+    rides.set({ phase: 'idle', saveState: 'unavailable' });
+    rides.start();
+    rides.stopAndSave(activityId('the-next-ride'));
+    expect(puts).toStrictEqual([]);
+  });
+
+  it('drops the report when a stopped ride is reset to idle without being saved (#548)', () => {
+    // Stopped, never saved — `saveState` stays what it was — then reset.
+    const rides = scriptedRides();
+    const { puts, store } = recordingStore();
+    const session = sideReportKeeper({
+      rides: rides.source,
+      store,
+      athleteId: ATHLETE_A,
+    }).beginSideReportSession();
+    rides.start();
+    session.endSideReportSession(REPORT);
+    rides.set({ phase: 'stopped' });
+    expect(rides.listening()).toBe(1);
+    rides.set({ phase: 'idle' });
+    expect(puts).toStrictEqual([]);
+    expect(rides.listening()).toBe(0);
+  });
+
   it('drops the report when no ride was under way at any point in the session', () => {
     const rides = scriptedRides();
     const { puts, store } = recordingStore();

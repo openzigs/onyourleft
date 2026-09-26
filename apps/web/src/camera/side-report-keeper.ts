@@ -22,9 +22,8 @@
  *
  * 1. The session ends while a ride is recording, paused or being saved — the
  *    report waits, in this tab's memory only, and is saved with that ride the
- *    moment it is saved. If that ride ends without being saved (it was empty,
- *    the save failed, it was discarded), the report is dropped, and nothing
- *    was ever written.
+ *    moment it is saved. If that ride's save comes back `empty` or `failed`,
+ *    the report is dropped there and then, and nothing was ever written.
  * 2. The session ends after a ride was saved during it — the report is saved
  *    with that ride at once.
  * 3. No ride was under way at any point during the session — the report is
@@ -43,6 +42,27 @@
  * from the camera to the store and `side-report-safety.test.ts` holds that no
  * module on it imports anything that can reach a trainer. The ride controller
  * satisfies the shape structurally, and `main.tsx` hands it over.
+ *
+ * ## Where a report is dropped, and the one case it waits for ever (#561's review)
+ *
+ * ⚠️ **The drop happens on the save's outcome, not on the ride going back to
+ * `idle`.** `ride/controller.ts` never returns `phase` to `idle` after
+ * `stopped` today (#548 is the issue that will), so a keeper that waited for
+ * `idle` would never drop anything. Every stop in production is followed by
+ * `saving` — `main.tsx` always wires `rideSave` — and the `saving` →
+ * `empty`/`failed` step is what drops the report; `side-report-keeper.test.ts`
+ * holds both outcomes to it.
+ *
+ * The `idle` branch below is for **#548's reset** and nothing today: a ride
+ * that was stopped and never saved, then reset to `idle`, must not leave the
+ * report waiting for a save that is not coming. It is tested against the
+ * reset #548 will add, so it is not a guard that cannot fire.
+ *
+ * What still waits: a build with no save port at all (`saveState` stays
+ * `unavailable` after the stop). There is no snapshot that tells "about to
+ * save" from "never will" — the stop notifies before `saving` with the same
+ * `unavailable` — so the report stays in memory until the tab goes. Nothing is
+ * written, which is the rule's outcome; only the memory is held longer.
  *
  * ## What it does not do
  *
@@ -121,7 +141,8 @@ function openSession(options: SideReportKeeperOptions): SideReportSession {
       }
       stage = 'none';
     } else if (stage === 'riding' && now.phase === 'idle') {
-      // Left without saving — nothing to put a report with.
+      // #548's reset of a ride that was stopped and never saved — nothing to
+      // put a report with. Not reachable until #548 lands; see the header.
       stage = 'none';
     }
     if (ended && stage === 'none') {

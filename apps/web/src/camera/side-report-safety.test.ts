@@ -48,12 +48,21 @@ const REPORT_PATH = [
 const TRAINER_MODULE =
   /(?:^|\/)(?:ride\/(?:controller|trainer|RideSession)|game\/(?:gradient|trainer-port|GameView)|workout\/)|@onyourleft\/sensors/;
 
+/**
+ * Every module specifier in `code`: `from '…'`, a bare `import '…'`, and — since
+ * #561's review — a dynamic `import('…')` with a literal, so a lazily loaded
+ * controller on the report's path is walked like a static one.
+ */
+function specifiersIn(code: string): string[] {
+  return [...code.matchAll(/(?:\bfrom\s+|\bimport\s*\(\s*|\bimport\s+)'([^']+)'/g)].map(
+    (match) => match[1] ?? '',
+  );
+}
+
 /** The relative imports of one module, resolved to files under `src`. */
 function importsOf(path: string): { readonly local: string[]; readonly bare: string[] } {
   const code = stripComments(readFileSync(join(SOURCE_ROOT, path), 'utf8'));
-  const specifiers = [...code.matchAll(/(?:from|import)\s+'([^']+)'/g)].map(
-    (match) => match[1] ?? '',
-  );
+  const specifiers = specifiersIn(code);
   const local: string[] = [];
   const bare: string[] = [];
   for (const specifier of specifiers) {
@@ -123,6 +132,20 @@ describe('the report path reaches no trainer (#388, CLAUDE.md §6)', () => {
     ]) {
       expect(TRAINER_MODULE.test(specifier), specifier).toBe(true);
     }
+  });
+
+  it('follows every spelling of an import, a dynamic one included (#561’s review)', () => {
+    expect(
+      specifiersIn(
+        [
+          "import { a } from './static';",
+          "import './side-effect';",
+          "export { b } from './re-export';",
+          "const lazy = await import('../ride/controller');",
+          "const spaced = import( './spaced' );",
+        ].join('\n'),
+      ),
+    ).toStrictEqual(['./static', './side-effect', './re-export', '../ride/controller', './spaced']);
   });
 
   it('would notice it through an import two steps away, not only a direct one', () => {
