@@ -123,7 +123,7 @@ export const ERASE_REMOVES: readonly string[] = [
   // artefact a rider reading the line above would not think to include. #528's
   // criterion is that it is named here, and `deleteAthlete`'s cascade is what
   // makes the line true (`activity-store.erasure.test.ts` derives the table).
-  'where you were in the side camera’s picture last time, which is a set of numbers read off a picture of you',
+  'where you were in the side camera’s picture last time, and whether the camera had moved since the time before, which is a set of numbers read off a picture of you',
 ];
 
 /**

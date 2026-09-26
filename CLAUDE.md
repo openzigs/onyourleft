@@ -90,7 +90,15 @@ apps/                 AGPL-3.0-or-later, without exception
                         `realistic/` — the realistic world's 17 files, 30.8 MiB,
                         CC0, made by `tools/realistic/`, in `dist` and so in the
                         APK, and excluded from the precache BY THAT DIRECTORY
-                        (ADR 0026 D-7, and ADR 0024's 2026-09-22 amendment)
+                        (ADR 0026 D-7, and ADR 0024's 2026-09-22 amendment).
+                        ⚠️ Since #530 it also holds `pose/` — the side
+                        camera's pose model, Apache-2.0, excluded from the
+                        precache by that directory too, with its runtime and
+                        worker emitted beside it by `tools/pose/`
+    tools/pose/         the pose model's WebAssembly runtime, copied out of
+                        the pinned `@mediapipe/tasks-vision` into `dist/pose/`
+                        and served from there in development (#530) — never
+                        from a CDN, never committed
     tools/realistic/    the asset pipeline (#430, ADR 0026 D-5) — which upstream
                         pages were read and what they said, the input lock, the
                         headless-Blender scripts that made every derived file,
@@ -3807,6 +3815,8 @@ top of an issue **supersedes its body**.
 | How the tablet and the side-camera phone pair with no server, and what a pairing code may carry | `apps/web/src/camera/side-link-code.ts`, `apps/web/src/camera/side-link-sdp.ts`, [ADR 0033](docs/adr/0033-side-camera-link.md) D-1, D-4, [#529](https://github.com/openzigs/onyourleft/issues/529) |
 | Why the side link calls itself lost after three seconds, and why a deliberate end waits for the channel to close | `apps/web/src/camera/side-link.ts` §`SILENCE_IS_LOST_MILLISECONDS`, §`CLOSE_GRACE_MILLISECONDS` |
 | The one place the client names a WebRTC peer connection, and what the no-network gate can and cannot see of it | `apps/web/src/camera/side-link-transport.ts`, `apps/web/src/privacy/no-network.test.ts` §`PERMITTED_NETWORK_CALLS`, [ADR 0033](docs/adr/0033-side-camera-link.md) D-9 |
+| Why the side camera's pose model runs behind a network fence, and what it would send without one | `apps/web/src/camera/pose-runtime.ts` §`fenceWorkerNetwork`, `apps/web/browser/pose.browser.spec.ts`, [#530](https://github.com/openzigs/onyourleft/issues/530) |
+| What the tablet keeps of a side-camera picture, and for how long | `apps/web/src/camera/side-analysis.ts`, [ADR 0033](docs/adr/0033-side-camera-link.md) D-3, D-6 |
 | What proves the HUD's live region is not hidden and moves nothing, and why that is not a screen reader | `apps/web/browser/hud.browser.spec.ts` §"#401", [#401](https://github.com/openzigs/onyourleft/issues/401) |
 
 <!-- Last updated: 2026-09-17 by delivery:code-issue resolving #355 (the verge as a visibility constant, and the camera-cone gate that had been missing) -->

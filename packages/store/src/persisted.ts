@@ -57,6 +57,7 @@ import type {
   ActivityRecord,
   AthleteRecord,
   CameraFrameRecord,
+  FramingCheckRecord,
   FramingReferenceRecord,
   LapRecord,
   PrivacyZoneRecord,
@@ -67,6 +68,7 @@ import type {
   RouteRecord,
   WorkoutRecord,
 } from './records';
+import { FRAMING_CHECK_RECORDS } from './records';
 import { parseUnitSystem } from './unit-system';
 import { DEFAULT_VISIBILITY, parseVisibility } from './visibility';
 
@@ -1172,6 +1174,8 @@ export interface PersistedFramingReference {
   athleteId: string;
   aspect: number;
   landmarks: { name: string; x: number; y: number }[];
+  /** #530. Absent on a row written before it; see `FramingReferenceRecord.check`. */
+  check?: string;
 }
 
 /**
@@ -1206,7 +1210,17 @@ export const MAXIMUM_FRAMING_LANDMARK_NAME = 32;
 export function framingReferenceProblem(reference: {
   readonly aspect: unknown;
   readonly landmarks: unknown;
+  readonly check?: unknown;
 }): string | undefined {
+  if (
+    reference.check !== undefined &&
+    !(FRAMING_CHECK_RECORDS as readonly unknown[]).includes(reference.check)
+  ) {
+    // A verdict this build does not know is refused rather than read as one it
+    // does: the only value that permits anything is `matches`, and a
+    // hand-edited row must not reach it by accident.
+    return `framingReference.check: must be one of ${FRAMING_CHECK_RECORDS.join(', ')}`;
+  }
   if (
     typeof reference.aspect !== 'number' ||
     !Number.isFinite(reference.aspect) ||
@@ -1268,6 +1282,7 @@ export function toPersistedFramingReference(
       x: landmark.x,
       y: landmark.y,
     })),
+    ...(record.check === undefined ? {} : { check: record.check }),
   };
 }
 
@@ -1290,5 +1305,7 @@ export function fromPersistedFramingReference(
       x: landmark.x,
       y: landmark.y,
     })),
+    // Absent stays absent: "not recorded" is not any of the four verdicts.
+    ...(row.check === undefined ? {} : { check: row.check as FramingCheckRecord }),
   };
 }

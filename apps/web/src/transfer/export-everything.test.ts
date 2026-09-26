@@ -15,6 +15,7 @@ import {
   createStoreHarness,
   extractableDeviceKey,
   framingReferenceFor,
+  framingReferenceWithoutCheck,
   resetFixtureIds,
   rideFor,
   routeFor,
@@ -925,8 +926,19 @@ describe('exporting the side camera’s framing reference (#528)', () => {
 
     expect(reference['aspect']).toBe(mine.aspect);
     expect(reference['landmarks']).toStrictEqual(mine.landmarks);
+    // #530, D-7: whether that session's framing check passed travels with it.
+    expect(reference['check']).toBe(mine.check);
     // Fields, not the row: the athlete is the manifest's own, not repeated.
-    expect(Object.keys(reference).sort()).toStrictEqual(['aspect', 'landmarks']);
+    expect(Object.keys(reference).sort()).toStrictEqual(['aspect', 'check', 'landmarks']);
+  });
+
+  it('writes down that a reference from before #530 has no recorded verdict', async () => {
+    await seedLibrary(1);
+    const before = framingReferenceWithoutCheck(ATHLETE_A);
+    await harness.write(async (store) => store.putFramingReference(before));
+    const { files } = await runExport();
+    const reference = manifestOf(files)['framingReference'] as Record<string, unknown>;
+    expect(reference).toHaveProperty('check', null);
   });
 
   it('says there is none rather than omitting the key', async () => {

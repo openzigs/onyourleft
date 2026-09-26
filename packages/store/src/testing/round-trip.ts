@@ -645,6 +645,15 @@ export async function assertFramingReferenceRoundTrip(
       'framingReference: the reference that came back is not the one kept',
     );
   }
+  // #530, ADR 0033 D-7: whether the check passed is on the same row, and it is
+  // the one field that decides whether a report may compare two sessions. A
+  // layer that copied the fields it knew about would drop it and leave every
+  // number here right — `fakes.ts` §`verdictlessReferenceStoreFactory`.
+  if (read.check !== reference.check) {
+    throw new RoundTripFailure(
+      'framingReference.check: the framing check’s outcome that came back is not the one kept',
+    );
+  }
   if (read.landmarks.length !== reference.landmarks.length) {
     throw new RoundTripFailure('framingReference.landmarks: a different number came back');
   }

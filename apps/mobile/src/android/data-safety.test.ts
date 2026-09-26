@@ -170,6 +170,16 @@ describe('the declaration filed on Play', () => {
     expect(photos?.why).toContain('#387');
   });
 
+  it('answers the photos row for the side camera too — #530, ADR 0033 D-10', () => {
+    // D-10: *"#530 reads Play's text first-hand and answers for BOTH paths in
+    // one row"*. A `why` that still described only #387's path would be a
+    // filing that says nothing about the pictures the side camera sends.
+    const photos = DATA_SAFETY_DECLARATION.find((answer) => answer.dataType.startsWith('Photos'));
+    expect(photos?.why).toContain('#530');
+    expect(photos?.why).toContain('end-to-end encrypted');
+    expect(photos?.why).toContain('never stored, shown or sent on');
+  });
+
   it('collects nothing else — the camera change moved one row and only one', () => {
     const collected = DATA_SAFETY_DECLARATION.filter((answer) => answer.collected).map(
       (answer) => answer.dataType,

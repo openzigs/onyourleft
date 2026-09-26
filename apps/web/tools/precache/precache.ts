@@ -45,7 +45,7 @@ export interface PrecacheFile {
  *
  * ⚠️ An **exclusion** list, which is the opposite failure mode from the
  * inclusion list the header refuses: a pattern nobody updates leaves a new file
- * *in* the precache, which is the safe direction. Three entries:
+ * *in* the precache, which is the safe direction. Four entries:
  *
  * - a source map is a debugging artefact a rider never requests, and the
  *   product build emits none today, so this is insurance rather than a filter;
@@ -65,8 +65,24 @@ export interface PrecacheFile {
  *   every stylised asset cached, no realistic one — and
  *   `offline.browser.spec.ts` does the same against the cache a real browser
  *   filled from the real build.
+ * - ⚠️ **`pose/`, since #530** — the side camera's pose model (5.8 MB of
+ *   weights, out of `public/pose/`) and its WebAssembly runtime (11.8 MB,
+ *   emitted by `tools/pose/pose-runtime-plugin.ts`). Spike 0010 §7 measured
+ *   that precaching them would multiply a first visit by about seven for
+ *   every rider, camera or not; ADR 0026 D-7 made the same trade for the
+ *   realistic world, by the same rule: selected by where the files live, so a
+ *   file added there later is excluded with no edit here. They are fetched
+ *   the first time a paired phone sends a picture. ⚠️ **Offline, in a
+ *   browser, that means no pose model** — the tablet says the model could not
+ *   be loaded and counts nothing; inside the Android shell there is no worker
+ *   and both files ship in the APK.
  */
-export const PRECACHE_EXCLUSIONS: readonly RegExp[] = [/\.map$/, /^sw\.js$/, /^realistic\//];
+export const PRECACHE_EXCLUSIONS: readonly RegExp[] = [
+  /\.map$/,
+  /^sw\.js$/,
+  /^realistic\//,
+  /^pose\//,
+];
 
 function included(name: string): boolean {
   return !PRECACHE_EXCLUSIONS.some((pattern) => pattern.test(name));

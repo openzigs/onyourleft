@@ -219,6 +219,14 @@ export const PERMITTED_NETWORK_CALLS: readonly {
   // not something this scan can see; `camera/side-link-transport.test.ts` is
   // where that is asserted (D-9 step 3).
   { module: join('camera', 'side-link-transport.ts'), primitive: 'RTCPeerConnection', count: 1 },
+  // #530. ⚠️ **Not a call — a fence, pinned here so it cannot vanish.** The
+  // pose worker's `XMLHttpRequest` is NARROWED to this app's own origin by
+  // `camera/pose-fence.ts`, which has to name it to reach its prototype; the
+  // worker's `fetch` is narrowed the same way, through a member spelling this
+  // scan does not match. §"the pose worker's network fence" below says why a
+  // dependency needs fencing at all. An exact count, so deleting the fence
+  // is a red run here as well as in `browser/pose.browser.spec.ts`.
+  { module: join('camera', 'pose-fence.ts'), primitive: 'XMLHttpRequest', count: 1 },
 ];
 
 /** One source file, by its path relative to `apps/web/src`. */
@@ -284,10 +292,17 @@ describe('the narrowed gate itself — #387', () => {
     path: LINK,
     source: 'const Peer = globalThis.RTCPeerConnection;',
   };
+  const FENCE = join('camera', 'pose-fence.ts');
+  const fence: ScannedFile = {
+    path: FENCE,
+    source: 'const scope = globalThis as unknown as { readonly XMLHttpRequest?: unknown };',
+  };
   const quiet: ScannedFile = { path: join('views', 'CameraView.tsx'), source: 'const x = 1;' };
 
   it('is clean over a tree that is exactly what the policy describes', () => {
-    expect(networkFindingsOutside([transport, link, quiet], PERMITTED_NETWORK_CALLS)).toEqual([]);
+    expect(
+      networkFindingsOutside([transport, link, quiet, fence], PERMITTED_NETWORK_CALLS),
+    ).toEqual([]);
   });
 
   it('goes red for a fetch added anywhere else under apps/web/src', () => {
@@ -297,7 +312,10 @@ describe('the narrowed gate itself — #387', () => {
       path: join('views', 'CameraView.tsx'),
       source: "const r = await fetch('https://example.invalid/upload', { method: 'POST' });",
     };
-    const findings = networkFindingsOutside([transport, link, elsewhere], PERMITTED_NETWORK_CALLS);
+    const findings = networkFindingsOutside(
+      [transport, link, elsewhere, fence],
+      PERMITTED_NETWORK_CALLS,
+    );
     expect(findings).toHaveLength(1);
     expect(findings[0]).toContain(join('views', 'CameraView.tsx'));
   });
@@ -309,7 +327,7 @@ describe('the narrowed gate itself — #387', () => {
       source: 'void fetch(url);',
     };
     expect(
-      networkFindingsOutside([transport, link, sibling], PERMITTED_NETWORK_CALLS),
+      networkFindingsOutside([transport, link, sibling, fence], PERMITTED_NETWORK_CALLS),
     ).toHaveLength(1);
   });
 
@@ -318,7 +336,7 @@ describe('the narrowed gate itself — #387', () => {
       path: TRANSPORT,
       source: `${transport.source}\nvoid fetch('https://example.invalid/telemetry');`,
     };
-    expect(networkFindingsOutside([twice, link], PERMITTED_NETWORK_CALLS)).toHaveLength(1);
+    expect(networkFindingsOutside([twice, link, fence], PERMITTED_NETWORK_CALLS)).toHaveLength(1);
   });
 
   it('goes red for a different primitive inside the permitted module', () => {
@@ -326,14 +344,14 @@ describe('the narrowed gate itself — #387', () => {
       path: TRANSPORT,
       source: `${transport.source}\nconst s = new WebSocket(url);`,
     };
-    const findings = networkFindingsOutside([socket, link], PERMITTED_NETWORK_CALLS);
+    const findings = networkFindingsOutside([socket, link, fence], PERMITTED_NETWORK_CALLS);
     expect(findings).toHaveLength(1);
     expect(findings[0]).toContain('WebSocket');
   });
 
   it('goes red when the permitted call is gone, so the list cannot outlive it', () => {
     const emptied: ScannedFile = { path: TRANSPORT, source: 'const send = options.send;' };
-    const findings = networkFindingsOutside([emptied, link], PERMITTED_NETWORK_CALLS);
+    const findings = networkFindingsOutside([emptied, link, fence], PERMITTED_NETWORK_CALLS);
     expect(findings).toHaveLength(1);
     expect(findings[0]).toContain('0 fetch');
   });
@@ -345,7 +363,7 @@ describe('the narrowed gate itself — #387', () => {
       path: LINK,
       source: `${link.source}\nconst another = new RTCPeerConnection(config);`,
     };
-    const findings = networkFindingsOutside([transport, twice], PERMITTED_NETWORK_CALLS);
+    const findings = networkFindingsOutside([transport, twice, fence], PERMITTED_NETWORK_CALLS);
     expect(findings).toHaveLength(1);
     expect(findings[0]).toContain('2 RTCPeerConnection');
   });
@@ -355,7 +373,7 @@ describe('the narrowed gate itself — #387', () => {
       path: LINK,
       source: `${link.source}\nvoid fetch('https://stun.example.invalid');`,
     };
-    const findings = networkFindingsOutside([transport, fetched], PERMITTED_NETWORK_CALLS);
+    const findings = networkFindingsOutside([transport, fetched, fence], PERMITTED_NETWORK_CALLS);
     expect(findings).toHaveLength(1);
     expect(findings[0]).toContain('fetch');
   });
@@ -365,14 +383,38 @@ describe('the narrowed gate itself — #387', () => {
       path: join('camera', 'side-link.ts'),
       source: 'const peer = new webkitRTCPeerConnection({});',
     };
-    const findings = networkFindingsOutside([transport, link, elsewhere], PERMITTED_NETWORK_CALLS);
+    const findings = networkFindingsOutside(
+      [transport, link, elsewhere, fence],
+      PERMITTED_NETWORK_CALLS,
+    );
     expect(findings).toHaveLength(1);
     expect(findings[0]).toContain('webkitRTCPeerConnection');
   });
 
+  // #530: the pose worker's fence, pinned like a call so that deleting it is
+  // a red run.
+  it('goes red when the pose worker’s fence is gone', () => {
+    const findings = networkFindingsOutside([transport, link], PERMITTED_NETWORK_CALLS);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain('0 XMLHttpRequest');
+  });
+
+  it('goes red for an XMLHttpRequest anywhere but the fence', () => {
+    const elsewhere: ScannedFile = {
+      path: join('camera', 'pose-worker.ts'),
+      source: 'const request = new XMLHttpRequest();',
+    };
+    const findings = networkFindingsOutside(
+      [transport, link, fence, elsewhere],
+      PERMITTED_NETWORK_CALLS,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain(join('camera', 'pose-worker.ts'));
+  });
+
   it('goes red when the side link’s peer connection is gone', () => {
     const emptied: ScannedFile = { path: LINK, source: 'const Peer = undefined;' };
-    const findings = networkFindingsOutside([transport, emptied], PERMITTED_NETWORK_CALLS);
+    const findings = networkFindingsOutside([transport, emptied, fence], PERMITTED_NETWORK_CALLS);
     expect(findings).toHaveLength(1);
     expect(findings[0]).toContain('0 RTCPeerConnection');
   });
@@ -460,6 +502,61 @@ describe('the service worker’s one network call', () => {
     // to nought would mean the fallback was deleted and this whole block is
     // describing something that is not there.
     expect(inTheWorker).toBe(1);
+  });
+});
+
+/**
+ * **A dependency that would report home, and the fence that stops it** (#530).
+ *
+ * The scan above reads the source this project writes, so it cannot see a
+ * request a DEPENDENCY makes — which is how `@mediapipe/tasks-vision` 1.0.1,
+ * the side camera's pose model runtime, came to hold a usage logger that posts
+ * to `https://odml.pa.googleapis.com/v1/log` every sixty seconds, in the
+ * worker that analyses a rider's pictures, with nothing here noticing.
+ * `camera/pose-runtime.ts` §`fenceWorkerNetwork` refuses every request off
+ * the worker's own origin, and `browser/pose.browser.spec.ts` is the gate
+ * that watches the real worker make its requests — measured both ways: with
+ * the fence it reaches only this origin; with the fence's import deleted it
+ * posts to that host, and the spec goes red naming it.
+ *
+ * What this block holds is the half a real engine is not needed for: that the
+ * fence is the FIRST thing the worker evaluates. Module imports are evaluated
+ * in order, before a module's own statements, so a fence imported after
+ * MediaPipe — or called from the worker's body — would run after the library
+ * had already been set up with the original `fetch`.
+ */
+describe('the pose worker’s network fence — #530', () => {
+  const WORKER = join(SOURCE_ROOT, 'camera', 'pose-worker.ts');
+
+  /** Every module specifier `source` imports, in order. */
+  function importsOf(source: string): readonly string[] {
+    const file = ts.createSourceFile('worker.ts', source, ts.ScriptTarget.Latest, true);
+    return file.statements
+      .filter(ts.isImportDeclaration)
+      .map((statement) => (statement.moduleSpecifier as ts.StringLiteral).text);
+  }
+
+  it('imports the fence before anything else, and before MediaPipe above all', () => {
+    const imports = importsOf(readFileSync(WORKER, 'utf8'));
+    expect(imports[0]).toBe('./pose-fence');
+    const mediapipe = imports.findIndex((specifier) => specifier.startsWith('@mediapipe/'));
+    expect(mediapipe).toBeGreaterThan(0);
+  });
+
+  it('would see a fence imported after MediaPipe — the rule is not vacuous', () => {
+    expect(importsOf("import '@mediapipe/tasks-vision';\nimport './pose-fence';\n")[0]).not.toBe(
+      './pose-fence',
+    );
+  });
+
+  it('is the only place in the client MediaPipe is imported', () => {
+    const importers = scannable()
+      .filter((file) =>
+        importsOf(readFileSync(file, 'utf8')).some((each) => each.startsWith('@mediapipe/')),
+      )
+      .map((file) => relative(SOURCE_ROOT, file));
+    // Anywhere else, the library would run in a scope with no fence.
+    expect(importers).toEqual([join('camera', 'pose-worker.ts')]);
   });
 });
 

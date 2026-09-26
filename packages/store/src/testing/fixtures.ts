@@ -102,6 +102,7 @@ import type { DeviceKeyRecord, StoredActivityRecord } from '../identity';
 import type {
   AthleteRecord,
   CameraFrameRecord,
+  FramingCheckRecord,
   FramingReferenceRecord,
   NewActivity,
   NewLap,
@@ -830,7 +831,11 @@ export async function seedCameraFrame(
  * side camera's outline puts one — not because the store cares, but so a
  * reader of a failing test is not also reading nonsense.
  */
-export function framingReferenceFor(owner: AthleteId, session = 1): FramingReferenceRecord {
+export function framingReferenceFor(
+  owner: AthleteId,
+  session = 1,
+  check: FramingCheckRecord = 'matches',
+): FramingReferenceRecord {
   const shift = (ATHLETES.indexOf(owner) + 1) * 0.01 + session * 0.001;
   const at = (x: number, y: number): { x: number; y: number } => ({
     x: Math.min(1, x + shift),
@@ -847,5 +852,15 @@ export function framingReferenceFor(owner: AthleteId, session = 1): FramingRefer
       { name: 'knee', ...at(0.52, 0.62) },
       { name: 'ankle', ...at(0.47, 0.82) },
     ],
+    check,
   };
+}
+
+/**
+ * A framing reference as #528 wrote one, before #530 recorded whether the
+ * framing check passed — the row a reader must treat as "not recorded".
+ */
+export function framingReferenceWithoutCheck(owner: AthleteId): FramingReferenceRecord {
+  const { athleteId: owning, aspect, landmarks } = framingReferenceFor(owner);
+  return { athleteId: owning, aspect, landmarks };
 }

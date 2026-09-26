@@ -34,8 +34,10 @@ import type {
   SideCameraLinkPort,
   SideLinkCondition,
   SideLinkEvent,
+  SidePictureSent,
 } from './side-camera-link-port';
 import { capturedFrame } from './frame';
+import type { SidePicture } from './side-link-pictures';
 import { sidePeerParametersFrom, type SidePeerParameters } from './side-link-sdp';
 import type { SideChannel, SideDescription, SidePeer } from './side-link-transport';
 import { cameraProblemMessage } from './notice';
@@ -86,6 +88,9 @@ export function cleanFrameBytes(length = 1024): Uint8Array {
   for (let index = 32; index < length; index += 1) {
     bytes[index] = (index * 37) % 251;
   }
+  // A JPEG's end-of-image marker, so the side link's picture decoder
+  // (`side-link-pictures.ts` §`sidePictureFrom`, #530) reads it as whole.
+  bytes.set([0xff, 0xd9], length - 2);
   return bytes;
 }
 
@@ -144,6 +149,23 @@ export function scriptedCamera(options: ScriptedCameraOptions = {}): ScriptedCam
           const index = samples;
           samples += 1;
           return Promise.resolve((options.luminance ?? (() => stillRoom()))(index));
+        },
+        captureSideFrame: async (): Promise<CapturedFrame> => {
+          calls.push('side-frame');
+          if (options.captureFails !== undefined) {
+            throw new CameraCaptureError(
+              options.captureFails,
+              cameraProblemMessage(options.captureFails),
+            );
+          }
+          return Promise.resolve(
+            capturedFrame({
+              bytes: options.bytes ?? cleanFrameBytes(),
+              mediaType: 'image/jpeg',
+              width: 256,
+              height: 144,
+            }),
+          );
         },
         readCodePixels: async (): Promise<CodePixels> => {
           calls.push('code');
@@ -268,6 +290,8 @@ export function virtualTime(): {
   readonly after: (task: () => void, milliseconds: number) => () => void;
   readonly every: (task: () => void, milliseconds: number) => () => void;
   advance(milliseconds: number): void;
+  /** How many timers are still set — a repeating one left running is a leak (#530). */
+  active(): number;
 } {
   let now = 0;
   interface Timer {
@@ -292,6 +316,7 @@ export function virtualTime(): {
     clock: () => now,
     after: (task, milliseconds) => add(task, milliseconds, undefined),
     every: (task, milliseconds) => add(task, milliseconds, milliseconds),
+    active: () => timers.filter((timer) => !timer.cancelled).length,
     advance(milliseconds: number): void {
       const until = now + milliseconds;
       for (;;) {
@@ -317,6 +342,10 @@ export function virtualTime(): {
 /** A link the test drives, recording what the phone told the tablet. */
 export function scriptedLink(initial: SideLinkCondition = 'connected'): SideCameraLinkPort & {
   readonly reports: PhoneReport[];
+  /** Every picture the phone handed over, whatever the answer (#530). */
+  readonly pictures: SidePicture[];
+  /** What the next picture is answered with. `sent` by default. */
+  answer: SidePictureSent;
   ended: number;
   emit(event: SideLinkEvent): void;
 } {
@@ -324,6 +353,12 @@ export function scriptedLink(initial: SideLinkCondition = 'connected'): SideCame
   let condition = initial;
   const link = {
     reports: [] as PhoneReport[],
+    pictures: [] as SidePicture[],
+    answer: 'sent' as SidePictureSent,
+    sendPictureToTablet: (picture: SidePicture): SidePictureSent => {
+      link.pictures.push(picture);
+      return link.answer;
+    },
     ended: 0,
     sideLinkCondition: () => condition,
     onSideLinkEvent: (listener: (event: SideLinkEvent) => void) => {
@@ -362,6 +397,11 @@ export interface SidePeerNetworkOptions {
   readonly gathers?: boolean | undefined;
   /** Whether two peers with each other's descriptions connect. Default `true`. */
   readonly connects?: boolean | undefined;
+  /**
+   * What each connected peer's `sctp.maxMessageSize` says. Default 262 144,
+   * which is Chromium's (#530).
+   */
+  readonly maxMessageSize?: number | undefined;
 }
 
 /** A scripted peer, with what a test needs to see of it. */
@@ -378,6 +418,14 @@ export interface ScriptedSidePeer extends SidePeer {
 export interface ScriptedSideChannel extends SideChannel {
   /** Every string this end sent, in order. */
   readonly sent: readonly string[];
+  /** Every binary message this end sent, in order — the side camera's pictures (#530). */
+  readonly sentBinary: readonly ArrayBuffer[];
+  /** What the channel was made with, on the end that made it. */
+  readonly init: { readonly ordered: boolean; readonly maxRetransmits?: number } | undefined;
+  /** Set by a test to stand for a stalled link: what `send` would still have queued. */
+  bufferedAmount: number;
+  /** Deliver `data` to this end as if the other end had sent it — a hostile peer (#530). */
+  deliver(data: unknown): void;
 }
 
 /**
@@ -410,6 +458,7 @@ export function sidePeerNetwork(options: SidePeerNetworkOptions = {}): {
   const peers: FakeSidePeer[] = [];
   const network = {
     dropped: false,
+    maxMessageSize: options.maxMessageSize ?? 262_144,
     connects: options.connects ?? true,
     gathers: options.gathers ?? true,
     addresses: options.addresses ?? ((index: number) => [`192.168.1.${String(10 + index)}`]),
@@ -473,6 +522,7 @@ export async function flushSideLink(): Promise<void> {
 
 interface FakeNetwork {
   readonly dropped: boolean;
+  readonly maxMessageSize: number;
   readonly gathers: boolean;
   readonly addresses: (index: number) => readonly string[];
   tryConnect(): void;
@@ -488,10 +538,13 @@ function matches(remote: SidePeerParameters | undefined, peer: FakeSidePeer): bo
 }
 
 function connect(offerer: FakeSidePeer, answerer: FakeSidePeer): void {
+  for (const peer of [offerer, answerer]) {
+    peer.sctp = { maxMessageSize: peer.network.maxMessageSize };
+  }
   offerer.setConnection('connected');
   answerer.setConnection('connected');
   for (const channel of [...offerer.channels]) {
-    const twin = new FakeSideChannel(channel.label, channel.network);
+    const twin = new FakeSideChannel(channel.label, channel.network, undefined);
     twin.twin = channel;
     channel.twin = twin;
     twin.readyState = 'open';
@@ -505,30 +558,61 @@ function connect(offerer: FakeSidePeer, answerer: FakeSidePeer): void {
 class FakeSideChannel implements ScriptedSideChannel {
   readonly label: string;
   readonly network: FakeNetwork;
+  readonly init: { readonly ordered: boolean; readonly maxRetransmits?: number } | undefined;
   readonly sent: string[] = [];
+  readonly sentBinary: ArrayBuffer[] = [];
+  bufferedAmount = 0;
+  binaryType = 'blob';
   readyState = 'connecting';
   twin: FakeSideChannel | undefined;
   onopen: (() => void) | null = null;
   onclose: (() => void) | null = null;
   onmessage: ((event: { readonly data: unknown }) => void) | null = null;
 
-  constructor(label: string, network: FakeNetwork) {
+  constructor(
+    label: string,
+    network: FakeNetwork,
+    init: { readonly ordered: boolean; readonly maxRetransmits?: number } | undefined,
+  ) {
     this.label = label;
     this.network = network;
+    this.init = init;
   }
 
-  send(data: string): void {
+  send(data: string | ArrayBuffer): void {
     if (this.readyState !== 'open') {
       throw new Error('InvalidStateError');
     }
-    this.sent.push(data);
+    // A real channel refuses a message over the connection's limit rather
+    // than truncating it; so does this one, so a sender that did not check
+    // the size fails here as it would on a device.
+    const size = typeof data === 'string' ? data.length : data.byteLength;
+    if (size > this.network.maxMessageSize) {
+      throw new TypeError('OperationError: message too large');
+    }
+    // What arrives is a copy, as it is off a real network: the sender's
+    // buffer is not the receiver's.
+    const delivered = typeof data === 'string' ? data : data.slice(0);
+    if (typeof data === 'string') {
+      this.sent.push(data);
+    } else {
+      this.sentBinary.push(data.slice(0));
+    }
     const twin = this.twin;
     if (this.network.dropped || twin === undefined) {
       return;
     }
     queueMicrotask(() => {
       if (twin.readyState === 'open' && !this.network.dropped) {
-        twin.onmessage?.({ data });
+        twin.onmessage?.({ data: delivered });
+      }
+    });
+  }
+
+  deliver(data: unknown): void {
+    queueMicrotask(() => {
+      if (this.readyState === 'open') {
+        this.onmessage?.({ data });
       }
     });
   }
@@ -574,6 +658,7 @@ class FakeSidePeer implements ScriptedSidePeer {
   remote: SidePeerParameters | undefined;
   twin: FakeSidePeer | undefined;
   closed = false;
+  sctp: { readonly maxMessageSize: number } | null = null;
   iceGatheringState = 'new';
   connectionState = 'new';
   onicegatheringstatechange: (() => void) | null = null;
@@ -591,8 +676,11 @@ class FakeSidePeer implements ScriptedSidePeer {
     return this.local ?? null;
   }
 
-  createDataChannel(label: string): SideChannel {
-    const channel = new FakeSideChannel(label, this.network);
+  createDataChannel(
+    label: string,
+    init: { readonly ordered: boolean; readonly maxRetransmits?: number },
+  ): SideChannel {
+    const channel = new FakeSideChannel(label, this.network, init);
     this.channels.push(channel);
     return channel;
   }

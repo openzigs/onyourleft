@@ -11,6 +11,12 @@
  * start and a stop across, each acknowledged, and the pairing ended from the
  * tablet.
  *
+ * Since #530 it also takes three pictures off the synthetic camera through
+ * the real side sampler (`browser-camera.ts` §`videoSidePictureSampler`) and
+ * the frame tripwire, and sends them phone → tablet on the `frames` channel —
+ * the one step of the link jsdom cannot do with a real engine's binary
+ * messages and its own `maxMessageSize`.
+ *
  * It also draws the offer as the screen does and reads it back with the real
  * reader off a real canvas, which is the one step of scanning jsdom cannot do
  * with a browser's own pixels.
@@ -33,7 +39,9 @@
  *   every candidate the codes carried is on a private network.
  */
 
-import { videoCodePixelSampler } from '../src/camera/browser-camera';
+import { videoCodePixelSampler, videoSidePictureSampler } from '../src/camera/browser-camera';
+import { capturedFrame } from '../src/camera/frame';
+import type { SidePicture } from '../src/camera/side-link-pictures';
 import { pairingCodeFromPixels, pairingCodeModules } from '../src/camera/side-link-qr';
 import { readPairingCode } from '../src/camera/side-link-code';
 import { sidePairingPort } from '../src/camera/side-link';
@@ -67,6 +75,19 @@ export interface SideLinkMeasurement {
   readonly framing: SideControlState | undefined;
   /** What the phone heard, in order. */
   readonly phoneHeard: readonly SideLinkEvent[];
+  /**
+   * #530: three pictures off the synthetic camera through the real side
+   * sampler and the frame tripwire, sent phone → tablet on the `frames`
+   * channel. What the phone was told, what size each was, and what arrived.
+   */
+  readonly picturesSent: readonly string[];
+  readonly pictureSizes: readonly { readonly width: number; readonly height: number }[];
+  readonly picturesArrived: readonly {
+    readonly sequence: number;
+    readonly milliseconds: number;
+    readonly bytes: number;
+    readonly jpeg: boolean;
+  }[];
   /** The command statuses the tablet reached, after start and after stop. */
   readonly afterStart: SideControlState | undefined;
   readonly afterStop: SideControlState | undefined;
@@ -180,6 +201,39 @@ async function run(): Promise<SideLinkMeasurement> {
   phone.link.reportToTablet({ state: 'filming' });
   await until(() => tablet.control.sideControlState().phone === 'filming');
 
+  // #530: pictures, phone → tablet, made the way the phone makes them.
+  const arrived: SidePicture[] = [];
+  tablet.control.onSideCameraPicture((picture) => arrived.push(picture));
+  const picturesSent: string[] = [];
+  const pictureSizes: { width: number; height: number }[] = [];
+  if (camera !== undefined) {
+    const sampler = videoSidePictureSampler(camera);
+    try {
+      for (let sequence = 0; sequence < 3; sequence += 1) {
+        const frame = capturedFrame(await sampler.sample());
+        pictureSizes.push({ width: frame.width, height: frame.height });
+        picturesSent.push(
+          phone.link.sendPictureToTablet({
+            sequence,
+            milliseconds: sequence * 200,
+            bytes: frame.bytes,
+          }),
+        );
+        await until(() => arrived.length > sequence, 3000);
+      }
+    } catch (error) {
+      errors.push(`the side sampler failed: ${String(error)}`);
+    } finally {
+      sampler.release();
+    }
+  }
+  const picturesArrived = arrived.map((picture) => ({
+    sequence: picture.sequence,
+    milliseconds: picture.milliseconds,
+    bytes: picture.bytes.length,
+    jpeg: picture.bytes[0] === 0xff && picture.bytes[1] === 0xd8,
+  }));
+
   tablet.control.commandSideCamera('stop');
   await until(
     () =>
@@ -202,6 +256,9 @@ async function run(): Promise<SideLinkMeasurement> {
     connectMilliseconds,
     framing,
     phoneHeard,
+    picturesSent,
+    pictureSizes,
+    picturesArrived,
     afterStart,
     afterStop,
     tabletEnded: tablet.control.sideControlState(),
@@ -219,6 +276,9 @@ function empty(errors: readonly string[]): SideLinkMeasurement {
     connectMilliseconds: undefined,
     framing: undefined,
     phoneHeard: [],
+    picturesSent: [],
+    pictureSizes: [],
+    picturesArrived: [],
     afterStart: undefined,
     afterStop: undefined,
     tabletEnded: undefined,

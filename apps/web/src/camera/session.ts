@@ -643,6 +643,37 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
   }
 
   /**
+   * One small picture from the running camera, for the side camera's link to
+   * the tablet — #530, [ADR 0033](../../../../docs/adr/0033-side-camera-link.md)
+   * D-3.
+   *
+   * ⚠️ **Not a capture in {@link captureOne}'s sense**: it never reaches the
+   * sink, so it can never be kept (ADR 0033 D-6 and D-8: no keep on this path,
+   * and the phone keeps nothing), and it is not counted. It is re-encoded from
+   * pixels and passed through `frame.ts` §`capturedFrame` all the same, which
+   * is ADR 0029 D-9's one strip point, unchanged.
+   *
+   * ⚠️ **Only a camera that is already running**, for {@link readPairingCode}'s
+   * reason: a running session exists only after `turnOn`, which refuses
+   * without consent. It never opens a camera.
+   *
+   * @returns the picture, or `undefined` when there is no running camera or the
+   * picture could not be taken. Never rejects, and says nothing about why —
+   * the next picture is a fifth of a second away.
+   */
+  async captureSideFrame(): Promise<CapturedFrame | undefined> {
+    const session = this.#session;
+    if (session === undefined || !session.live) {
+      return undefined;
+    }
+    try {
+      return await session.captureSideFrame();
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * Take one frame and hand it to the sink.
    *
    * ⚠️ **Nothing here holds the frame after this returns**, which is the

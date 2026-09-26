@@ -33,6 +33,7 @@ import {
   FIXTURE_BOUNDED_ARCHIVE_FILE,
   PUBLISHED_ARCHIVE_BOUNDS,
 } from './browser/pmtiles-fixture';
+import { poseRuntime } from './tools/pose/pose-runtime-plugin';
 
 /**
  * Emit the PMTiles archive the gate renders from (#63).
@@ -71,7 +72,9 @@ function pmtilesFixture(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [pmtilesFixture()],
+  // #530: the pose runtime the product ships, so `pose.browser.spec.ts` runs
+  // the same bytes a rider's tablet would.
+  plugins: [pmtilesFixture(), poseRuntime()],
   root: 'browser',
   // ⚠️ The APP's `public/`, not a `browser/public/` of the harness's own —
   // since ADR 0026. The realistic world's files are committed there and served
@@ -141,6 +144,11 @@ export default defineConfig({
         // from them. `sidelink-harness.ts` says what it does and does not
         // prove.
         sidelink: 'browser/sidelink.html',
+        // #530: the tablet's pose model, in its real worker over the real
+        // runtime, looking at a CC0 photograph of a rider side-on — and the
+        // fence that keeps MediaPipe's usage log off the network.
+        // `pose-harness.ts` says what it does and does not prove.
+        pose: 'browser/pose.html',
         // ADR 0026 D-12: the ONE place the realistic world can be reached until
         // #475 offers it to riders — the owner's page, ridden automatically,
         // with the stylised world a tap away and a twenty-minute soak.

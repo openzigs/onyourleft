@@ -849,8 +849,8 @@ export interface FramingLandmarkRecord {
 }
 
 /**
- * Where the rider was in the side camera's picture, the last time the framing
- * check passed — #528,
+ * Where the rider was in the side camera's picture in their last session —
+ * #528,
  * [ADR 0033](../../../docs/adr/0033-side-camera-link.md) D-7.
  *
  * ## It is numbers, and it is not a picture
@@ -885,9 +885,14 @@ export interface FramingLandmarkRecord {
  * abandoned months ago; `testing/fakes.ts` §`firstReferenceStoreFactory` is the
  * store built to fail exactly there.
  *
- * ⚠️ **Nothing writes one yet.** The landmarks come from the pose model on the
- * tablet ([#530](https://github.com/openzigs/onyourleft/issues/530)); #528
- * builds the phone that draws the outline and this record for #530 to fill.
+ * ⚠️ **Written since #530**, by the tablet's analysis at the end of each
+ * side-camera session that saw enough of the rider
+ * (`apps/web/src/camera/side-analysis.ts`). ⚠️ **This used to say "the last
+ * time the framing check passed"**, which was #528's reading; the owner's
+ * words are *"a stored reference from the rider's last session"* (ADR 0033
+ * §Context), so a session whose check said the camera had moved still becomes
+ * the next session's reference — a rider who moved the tripod for good is
+ * compared against where it stands now.
  */
 export interface FramingReferenceRecord {
   /** Whose reference this is. It is also the primary key. */
@@ -901,4 +906,49 @@ export interface FramingReferenceRecord {
    */
   readonly aspect: number;
   readonly landmarks: readonly FramingLandmarkRecord[];
+  /**
+   * Whether the framing check passed in the session these numbers came from —
+   * [#530](https://github.com/openzigs/onyourleft/issues/530), ADR 0033 D-7:
+   * *"Whether the check passed is stored with the session's numbers. That
+   * record is what the report reads when it decides whether a cross-session
+   * sentence is permitted."*
+   *
+   * On the same row as the placement, and written in the same put, so the
+   * verdict and the numbers it is about cannot describe two different
+   * sessions. See {@link FramingCheckRecord} for the four values.
+   *
+   * ⚠️ **Optional, and absent means "not recorded", which a reader must treat
+   * as NOT passed.** README §"An optional field is not a migration": a row
+   * written before #530 has no verdict, and no schema version is needed to
+   * read it. Only `'matches'` permits a cross-session sentence; every other
+   * value, and the absence, gives within-session differences only.
+   */
+  readonly check?: FramingCheckRecord;
 }
+
+/**
+ * The framing check's outcome in one session — ADR 0033 D-7.
+ *
+ * - `matches` — the check ran against the reference stored before this
+ *   session and passed. The only value that permits a cross-session sentence.
+ * - `differs` — it ran and did not pass: the camera moved, or the check could
+ *   not establish that it had not.
+ * - `no-reference` — there was nothing to check against (a first session, or
+ *   a reference this build could not read).
+ * - `not-checked` — there was a reference, and the session ended before the
+ *   check had enough pictures of the rider, or before the reference was read.
+ *
+ * ⚠️ **"Passed" is against the reference stored before the session**, and
+ * since #530 that is always the previous session's placement (the owner's
+ * *"last session"*), so it is a statement about two consecutive sessions and
+ * not about the first one ever filmed.
+ */
+export type FramingCheckRecord = 'matches' | 'differs' | 'no-reference' | 'not-checked';
+
+/** Every {@link FramingCheckRecord}, for a decoder that refuses anything else. */
+export const FRAMING_CHECK_RECORDS: readonly FramingCheckRecord[] = [
+  'matches',
+  'differs',
+  'no-reference',
+  'not-checked',
+];

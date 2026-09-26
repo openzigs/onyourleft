@@ -47,6 +47,7 @@
  * | `roundedMassStoreFactory` | *wrong layer* — a layer above tidied a mass to a whole kilogram on its way in | the row comes back with a mass, a plausible one, and a pound reading that is no longer what the rider typed |
  * | `survivingFrameStoreFactory` | *wrong time* — a **delete** that reports how many it removed and removes nothing | the erase says "2 pictures removed", and a fresh connection still has both |
  * | `firstReferenceStoreFactory` | *wrong time* — a put that kept the row already there instead of replacing it | every put succeeds and the reference comes back well-formed — **from the first session**, not the last |
+ * | `verdictlessReferenceStoreFactory` | *wrong layer* — a layer above copied the reference's numbers and dropped whether the framing check passed | every landmark comes back exact, and the session's verdict is **gone**, so no later report may compare it with anything |
  *
  * The second and third are the ones a naive harness misses. Both write to the
  * **real** IndexedDB, inside a **real** transaction that **really commits**, and
@@ -917,6 +918,43 @@ export function firstReferenceStoreFactory(): StoreFactory {
           }
           await real.putFramingReference(record);
         },
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A repository whose framing-reference put **drops whether the check passed**.
+ *
+ * The sixteenth fake, for #530 and ADR 0033 D-7's *"whether the check passed
+ * is stored with the session's numbers"*. It stands for a layer above the
+ * store that rebuilt the record from the fields it knew about — `athleteId`,
+ * `aspect` and `landmarks` — which is exactly how `setAthleteThresholds` once
+ * erased `mass` (README §"A narrow write must be built from the row it read").
+ *
+ * Every number comes back exact, the put resolves, and the row is there: a
+ * round trip that compares only the placement is green against it. What is
+ * lost is the one field that decides whether a report may compare this
+ * session with another, and its absence reads as "not recorded" — which fails
+ * closed, so the rider is silently denied every cross-session sentence.
+ * `assertFramingReferenceRoundTrip` compares `check` on its own line for that
+ * reason; `framing-reference-store.test.ts` is the red/green pair.
+ */
+export function verdictlessReferenceStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        putFramingReference: async (record: FramingReferenceRecord): Promise<void> =>
+          real.putFramingReference({
+            athleteId: record.athleteId,
+            aspect: record.aspect,
+            landmarks: record.landmarks,
+          }),
       };
     },
     destroy: async (name) => {

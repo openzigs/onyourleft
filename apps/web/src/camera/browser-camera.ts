@@ -46,7 +46,7 @@
  * of D-9 would rest on a fake returning whatever the test author typed.
  */
 
-import { CameraCaptureError, CODE_PIXELS_LONG_SIDE } from './camera-port';
+import { CameraCaptureError, CODE_PIXELS_LONG_SIDE, SIDE_FRAME_LONG_SIDE } from './camera-port';
 import type {
   CameraAvailability,
   CodePixels,
@@ -140,6 +140,21 @@ export interface FrameGrabber {
    * scan is cheaper than one per read.
    */
   codePixels(stream: MediaStreamLike): CodePixelSampler;
+  /**
+   * A sampler of small encoded pictures for the side camera's link — #530. A
+   * sampler for {@link luminance}'s reason: five a second, for as long as the
+   * phone films, and one playing `<video>` and one canvas for the session is
+   * what that rate can afford.
+   */
+  sidePictures(stream: MediaStreamLike): SidePictureSampler;
+}
+
+/** Small encoded pictures from one stream. @see FrameGrabber.sidePictures */
+export interface SidePictureSampler {
+  /** @throws {CameraCaptureError} from the fixed table, never a platform message. */
+  sample(): Promise<GrabbedFrame>;
+  /** Lets go of whatever the sampler holds. Idempotent. */
+  release(): void;
 }
 
 /** Pictures for a pairing code from one stream. @see FrameGrabber.codePixels */
@@ -355,6 +370,8 @@ function browserSession(
   let sampler: LuminanceSampler | undefined;
   // The same, for a pairing code (#529): made on the first read.
   let codes: CodePixelSampler | undefined;
+  // The same, for the side camera's pictures (#530): made on the first one.
+  let sidePictures: SidePictureSampler | undefined;
   return {
     get live(): boolean {
       if (stopped) {
@@ -422,6 +439,26 @@ function browserSession(
         throw new CameraCaptureError('unavailable', cameraProblemMessage('unavailable'));
       }
     },
+    async captureSideFrame(): Promise<CapturedFrame> {
+      if (stopped) {
+        throw new CameraCaptureError('unavailable', cameraProblemMessage('unavailable'));
+      }
+      sidePictures ??= grabber.sidePictures(stream);
+      let grabbed: GrabbedFrame;
+      try {
+        grabbed = await sidePictures.sample();
+      } catch (error) {
+        // The same rule as `captureFrame`: the fixed wording or nothing.
+        if (error instanceof CameraCaptureError) {
+          throw error;
+        }
+        throw new CameraCaptureError('unavailable', cameraProblemMessage('unavailable'));
+      }
+      // Through the same tripwire as every other frame (ADR 0029 D-9): a
+      // picture that crosses the link is a frame, and is refused here if the
+      // re-encode did not happen.
+      return capturedFrame(grabbed);
+    },
     attachCameraPreview(surface: PreviewSurface): () => void {
       // The stream itself, played by the platform: nothing is drawn, encoded
       // or read, so no pixel of it passes through this program's code.
@@ -445,6 +482,8 @@ function browserSession(
       sampler = undefined;
       codes?.release();
       codes = undefined;
+      sidePictures?.release();
+      sidePictures = undefined;
       for (const track of stream.getVideoTracks()) {
         track.stop();
       }
@@ -470,6 +509,7 @@ export function canvasFrameGrabber(): FrameGrabber {
   return {
     luminance: videoLuminanceSampler,
     codePixels: videoCodePixelSampler,
+    sidePictures: videoSidePictureSampler,
     async grab(stream: MediaStreamLike): Promise<GrabbedFrame> {
       // The cast is the boundary: above this line the program has a
       // `MediaStreamLike`, and only the browser's own API needs the real thing.
@@ -616,6 +656,68 @@ export function videoCodePixelSampler(stream: MediaStreamLike): CodePixelSampler
       }
       context.drawImage(video, 0, 0, width, height);
       return { width, height, rgba: context.getImageData(0, 0, width, height).data };
+    },
+    release(): void {
+      video.pause();
+      video.srcObject = null;
+    },
+  };
+}
+
+/**
+ * The real side-camera sampler: one detached `<video>` playing the stream,
+ * drawn into a canvas at most {@link SIDE_FRAME_LONG_SIDE} on its long side,
+ * and encoded as a JPEG — #530, ADR 0033 D-3.
+ *
+ * ⚠️ **This is a frame, and it is the D-9 re-encode**: the canvas is drawn
+ * from the video's pixels and encoded by `toBlob`, exactly as
+ * {@link canvasFrameGrabber} does at full size, and the session hands the
+ * bytes through `frame.ts` §`capturedFrame`. The only differences are the
+ * size, and that the video and the canvas are kept for the session instead of
+ * made per picture. Like the rest of this file's platform half it is
+ * reachable from no jsdom suite; `browser/sidelink.browser.spec.ts` sends
+ * pictures through it off the synthetic camera.
+ */
+export function videoSidePictureSampler(stream: MediaStreamLike): SidePictureSampler {
+  const media = stream as unknown as MediaStream;
+  const video = document.createElement('video');
+  video.srcObject = media;
+  video.muted = true;
+  video.playsInline = true;
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  let started: Promise<void> | undefined;
+  return {
+    async sample(): Promise<GrabbedFrame> {
+      if (context === null) {
+        throw new CameraCaptureError('unavailable', cameraProblemMessage('unavailable'));
+      }
+      started ??= video.play().then(async () => onceReady(video));
+      try {
+        await started;
+      } catch (error) {
+        started = undefined;
+        throw error;
+      }
+      const { videoWidth, videoHeight } = video;
+      if (videoWidth === 0 || videoHeight === 0) {
+        throw new CameraCaptureError('unavailable', cameraProblemMessage('unavailable'));
+      }
+      const scale = Math.min(1, SIDE_FRAME_LONG_SIDE / Math.max(videoWidth, videoHeight));
+      const width = Math.max(1, Math.round(videoWidth * scale));
+      const height = Math.max(1, Math.round(videoHeight * scale));
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      context.drawImage(video, 0, 0, width, height);
+      const blob = await toBlob(canvas);
+      return {
+        bytes: new Uint8Array(await blob.arrayBuffer()),
+        mediaType: FRAME_MEDIA_TYPE,
+        width,
+        height,
+      };
     },
     release(): void {
       video.pause();

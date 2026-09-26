@@ -137,10 +137,17 @@ const EXPECTED_PRECACHE = distFiles()
   // the rule, rather than read out of `precache.ts`, so this spec states the
   // decision independently of the code that implements it.
   .filter((file) => !file.startsWith('realistic/'))
+  // ⚠️ #530: the side camera's pose model, its runtime and its worker are in
+  // `dist` too, and are deliberately NOT precached — spike 0010 §7's warning
+  // that they would multiply a first visit by about seven for every rider.
+  // The directory again, for the same reason as the line above.
+  .filter((file) => !file.startsWith('pose/'))
   .sort();
 
 /** The realistic world's files in `dist`: there, and not to be cached. ADR 0026 D-7. */
 const REALISTIC_IN_DIST = distFiles().filter((file) => file.startsWith('realistic/'));
+
+const POSE_IN_DIST = distFiles().filter((file) => file.startsWith('pose/'));
 
 /**
  * What the worker actually cached, read out of the browser.
@@ -281,6 +288,15 @@ test.describe('what the worker actually cached', () => {
     expect(REALISTIC_IN_DIST.length).toBeGreaterThan(10);
     expect(precached.filter((entry) => entry.startsWith('realistic/'))).toEqual([]);
     for (const file of REALISTIC_IN_DIST) expect(precached).not.toContain(file);
+  });
+
+  test('holds none of the side camera’s pose model, which IS in the build — #530', () => {
+    // Both halves, as above: the model, its runtime and its worker are really
+    // in `dist`, and none of them reached the cache a real browser filled.
+    expect(POSE_IN_DIST.some((file) => file.endsWith('.task'))).toBe(true);
+    expect(POSE_IN_DIST.some((file) => file.endsWith('.wasm'))).toBe(true);
+    expect(POSE_IN_DIST.some((file) => file.startsWith('pose/pose-worker-'))).toBe(true);
+    expect(precached.filter((entry) => entry.startsWith('pose/'))).toEqual([]);
   });
 
   test('leaves the control outside the cache, and outside dist entirely', () => {

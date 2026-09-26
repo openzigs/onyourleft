@@ -104,7 +104,7 @@
  */
 
 import type { SignedActivityRecord, UnixSeconds } from '@onyourleft/domain';
-import type { ActivityId, AthleteId } from '@onyourleft/store';
+import type { ActivityId, AthleteId, FramingCheckRecord } from '@onyourleft/store';
 
 import { ActivityExportError, exportActivity, fileStemOf } from './export-activity';
 import type { ActivityFileFormat } from './file-format';
@@ -398,9 +398,9 @@ export function accountManifest(input: {
   /** #384. @see CameraManifest */
   readonly camera: CameraManifest;
   /**
-   * #528, ADR 0033 D-7: where the rider was in the side camera's picture the
-   * last time the framing check passed — numbers, never a picture — or
-   * `undefined` when there is none.
+   * #528, ADR 0033 D-7: where the rider was in the side camera's picture in
+   * their last session — numbers, never a picture — and, since #530, whether
+   * that session's framing check passed; or `undefined` when there is none.
    */
   readonly framingReference:
     | {
@@ -410,6 +410,7 @@ export function accountManifest(input: {
           readonly x: number;
           readonly y: number;
         }[];
+        readonly check?: FramingCheckRecord | undefined;
       }
     | undefined;
   readonly exportedAt: number;
@@ -461,6 +462,10 @@ export function accountManifest(input: {
               x: landmark.x,
               y: landmark.y,
             })),
+            // #530, D-7: whether the check passed in the session these numbers
+            // came from. `null` when the row predates the record, so "not
+            // recorded" is written down rather than omitted.
+            check: input.framingReference.check ?? null,
           },
   };
   return {

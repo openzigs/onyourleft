@@ -2,6 +2,11 @@
 
 import { describe, expect, it } from 'vitest';
 
+import {
+  POSE_DIRECTORY,
+  POSE_MODEL_FILE,
+  POSE_RUNTIME_WASM_FILE,
+} from '../../src/camera/pose-files';
 import { REALISTIC_DIRECTORY, realisticFiles } from '../../src/game/realistic-assets';
 import { SCENERY_ATLAS, SCENERY_MODELS } from '../../src/game/scenery-models';
 import { cacheVersion, precacheEntries, PRECACHE_EXCLUSIONS, type PrecacheFile } from './precache';
@@ -131,6 +136,34 @@ describe('the realistic world is not precached, and the stylised one all is — 
     const changed = realistic.map((each) => file(each.name, 'zz'));
     expect(cacheVersion([...BUILD, ...stylised, ...changed], fakeDigest)).toBe(
       cacheVersion(build, fakeDigest),
+    );
+  });
+});
+
+describe('the side camera’s pose model is not precached — #530', () => {
+  /** What a build emits for it: the weights out of `public/pose/`, the runtime by the plugin. */
+  const pose = [POSE_MODEL_FILE, POSE_RUNTIME_WASM_FILE].map((name) =>
+    file(`${POSE_DIRECTORY}${name}`),
+  );
+
+  it('holds neither the weights nor the runtime, so no rider downloads them unasked', () => {
+    for (const each of pose) {
+      expect(precacheEntries([...BUILD, ...pose]), each.name).not.toContain(each.name);
+    }
+  });
+
+  it('excludes a file added there later, and nothing that merely mentions the word', () => {
+    const added = file(`${POSE_DIRECTORY}pose_landmarker_full.task`);
+    const chunk = file('assets/pose-estimator-abc.js');
+    const entries = precacheEntries([...BUILD, ...pose, added, chunk]);
+    expect(entries).not.toContain(added.name);
+    expect(entries).toContain(chunk.name);
+  });
+
+  it('does not move the cache version when only the pose files change', () => {
+    const changed = pose.map((each) => file(each.name, 'zz'));
+    expect(cacheVersion([...BUILD, ...changed], fakeDigest)).toBe(
+      cacheVersion([...BUILD, ...pose], fakeDigest),
     );
   });
 });

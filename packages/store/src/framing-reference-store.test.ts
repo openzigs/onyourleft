@@ -28,12 +28,15 @@ import {
   ATHLETE_B,
   createStoreHarness,
   firstReferenceStoreFactory,
+  verdictlessReferenceStoreFactory,
   framingReferenceFor,
+  framingReferenceWithoutCheck,
   resetFixtureIds,
   RoundTripFailure,
   seedAthletes,
 } from './testing';
 import type { StoreHarness } from './testing';
+import type { FramingCheckRecord } from './records';
 
 let harness: StoreHarness;
 
@@ -156,6 +159,77 @@ describe('what a reference has to be', () => {
     await expect(
       harness.write(async (store) => store.putFramingReference(reference)),
     ).rejects.toThrow(/^(?!.*1\.2345).*$/s);
+  });
+});
+
+describe('whether the framing check passed, kept with the session’s numbers (#530, D-7)', () => {
+  it.each<FramingCheckRecord>(['matches', 'differs', 'no-reference', 'not-checked'])(
+    'keeps %s on the same row as the placement',
+    async (check) => {
+      const read = await assertFramingReferenceRoundTrip(
+        harness,
+        framingReferenceFor(ATHLETE_A, 1, check),
+      );
+      expect(read.check).toBe(check);
+    },
+  );
+
+  it('replaces the verdict with the placement, so the two always describe one session', async () => {
+    await harness.write(async (store) =>
+      store.putFramingReference(framingReferenceFor(ATHLETE_A, 1, 'matches')),
+    );
+    const read = await assertFramingReferenceRoundTrip(
+      harness,
+      framingReferenceFor(ATHLETE_A, 2, 'differs'),
+    );
+    expect(read.check).toBe('differs');
+  });
+
+  it('reads a row written before #530 as "not recorded", not as any verdict', async () => {
+    const before = framingReferenceWithoutCheck(ATHLETE_A);
+    const read = await harness.roundTrip(
+      async (store) => store.putFramingReference(before),
+      async (store) => store.getFramingReference(ATHLETE_A),
+    );
+    expect(read).toBeDefined();
+    expect(read).not.toHaveProperty('check');
+  });
+
+  it('refuses a verdict it does not know, on the way in and on the way out', async () => {
+    const reference = {
+      ...framingReferenceFor(ATHLETE_A),
+      check: 'passed' as FramingCheckRecord,
+    };
+    await expect(
+      harness.write(async (store) => store.putFramingReference(reference)),
+    ).rejects.toThrow(StoreValidationError);
+    const row = { ...toPersistedFramingReference(framingReferenceFor(ATHLETE_A)), check: 'yes' };
+    expect(() => fromPersistedFramingReference(row)).toThrow(StoreDecodeError);
+  });
+});
+
+describe('the fake that drops whether the check passed', () => {
+  it('passes a reference that carries no verdict, so it is otherwise the real store', async () => {
+    const broken = createStoreHarness({ factory: verdictlessReferenceStoreFactory() });
+    try {
+      await seedAthletes(broken);
+      const before = framingReferenceWithoutCheck(ATHLETE_A);
+      await expect(assertFramingReferenceRoundTrip(broken, before)).resolves.toBeDefined();
+    } finally {
+      await broken.destroy();
+    }
+  });
+
+  it('is caught by the round trip, with every landmark right', async () => {
+    const broken = createStoreHarness({ factory: verdictlessReferenceStoreFactory() });
+    try {
+      await seedAthletes(broken);
+      await expect(
+        assertFramingReferenceRoundTrip(broken, framingReferenceFor(ATHLETE_A, 1, 'matches')),
+      ).rejects.toThrow(/framingReference\.check/);
+    } finally {
+      await broken.destroy();
+    }
   });
 });
 

@@ -300,6 +300,50 @@ describe('the live preview — #528', () => {
   });
 });
 
+describe('the side camera’s small pictures — #530', () => {
+  it('takes one from the running camera, and neither keeps nor counts it', async () => {
+    const camera = scriptedCamera();
+    const kept: CapturedFrame[] = [];
+    const { controller } = controllerFor(camera, kept);
+    controller.agree(AGREED);
+    await controller.turnOn();
+    const before = controller.state();
+    const picture = await controller.captureSideFrame();
+    expect(picture?.width).toBe(256);
+    expect(camera.calls).toContain('side-frame');
+    // Never through the sink, so never kept (ADR 0033 D-6, D-8) …
+    expect(kept).toEqual([]);
+    // … and not a capture the Camera screen counts.
+    expect(controller.state()).toStrictEqual(before);
+  });
+
+  it('opens no camera, and answers nothing, when none is running', async () => {
+    const camera = scriptedCamera();
+    const { controller } = controllerFor(camera);
+    controller.agree(AGREED);
+    await expect(controller.captureSideFrame()).resolves.toBeUndefined();
+    expect(camera.calls).toStrictEqual([]);
+  });
+
+  it('answers nothing from a camera that has gone out', async () => {
+    const camera = scriptedCamera();
+    const { controller } = controllerFor(camera);
+    controller.agree(AGREED);
+    await controller.turnOn();
+    camera.endTheTrack();
+    await expect(controller.captureSideFrame()).resolves.toBeUndefined();
+    expect(camera.calls).not.toContain('side-frame');
+  });
+
+  it('never rejects when the picture cannot be taken', async () => {
+    const camera = scriptedCamera({ captureFails: 'unavailable' });
+    const { controller } = controllerFor(camera);
+    controller.agree(AGREED);
+    await controller.turnOn();
+    await expect(controller.captureSideFrame()).resolves.toBeUndefined();
+  });
+});
+
 describe('revoking', () => {
   it('stops a running camera, not just the flag', async () => {
     const camera = scriptedCamera();

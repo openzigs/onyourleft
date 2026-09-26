@@ -34,7 +34,12 @@ import {
 } from '../camera/testing';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
 
-import { FILMING_WORD, NOT_PAIRED_TEXT, SideCameraView } from './SideCameraView';
+import {
+  FILMING_WORD,
+  NOT_PAIRED_TEXT,
+  SIDE_PICTURES_GO_SENTENCE,
+  SideCameraView,
+} from './SideCameraView';
 import { CAMERA_NO_PORT } from './CameraView';
 
 let mounted: Mounted | undefined;
@@ -120,6 +125,8 @@ describe('before the camera is ever on', () => {
     const { camera } = await phone();
     expect(document.body.textContent).toContain(BYSTANDER_SENTENCE);
     expect(document.body.textContent).toContain(LINK_LOSS_SENTENCE);
+    // #530: and where the pictures go, now that they go somewhere.
+    expect(document.body.textContent).toContain(SIDE_PICTURES_GO_SENTENCE);
     // And nothing has been asked of the camera: shown BEFORE, not beside.
     expect(camera.calls).toStrictEqual([]);
   });

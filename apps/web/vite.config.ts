@@ -19,6 +19,8 @@ import { fileURLToPath } from 'node:url';
 import react from '@vitejs/plugin-react';
 import { build, defineConfig, type Plugin } from 'vite';
 
+import { POSE_DIRECTORY, POSE_WORKER_CHUNK } from './src/camera/pose-files';
+import { poseRuntime } from './tools/pose/pose-runtime-plugin';
 import { cacheVersion, precacheEntries, type PrecacheFile } from './tools/precache/precache';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
@@ -170,5 +172,25 @@ function byteSize(files: readonly PrecacheFile[], entries: readonly string[]): n
 }
 
 export default defineConfig({
-  plugins: [react(), serviceWorker()],
+  // #530: the pose model's runtime, from this origin. Before the service
+  // worker's plugin, which is `enforce: 'post'` anyway, so the file it emits
+  // is in the list the precache is derived from — and excluded from it by
+  // `tools/precache/precache.ts` §`PRECACHE_EXCLUSIONS`.
+  plugins: [react(), poseRuntime(), serviceWorker()],
+  worker: {
+    rolldownOptions: {
+      output: {
+        // ⚠️ #530: the pose worker goes to `pose/` beside its model and
+        // runtime, so the precache's `pose/` exclusion leaves it out too — it
+        // is useless offline without the two files it loads, and it is a
+        // quarter of a megabyte a rider who never pairs a side camera would
+        // otherwise download on a first visit. Every other worker (MapLibre's)
+        // stays exactly where Vite puts it by default.
+        entryFileNames: (chunk) =>
+          chunk.name === POSE_WORKER_CHUNK
+            ? `${POSE_DIRECTORY}[name]-[hash].js`
+            : 'assets/[name]-[hash].js',
+      },
+    },
+  },
 });
