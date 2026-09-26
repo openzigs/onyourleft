@@ -1125,6 +1125,42 @@ describe('a bend is drawn as a curve, not as straight pieces — #543', () => {
     }
   });
 
+  it('draws the road from the origin it is handed, not the first caller’s — #569', () => {
+    // #569 integrates the route once and keeps the table against the profile.
+    // A caller handing the same profile another origin must get the road
+    // projected from THAT origin: each drawn point is still the brute-force
+    // mean of the route over the window, as seen from there. Latitude and
+    // longitude both move, because both are in the projection.
+    const profile = plannerRoute();
+    const home = corridorOrigin(profile);
+    const away = { ...home, latitude: home.latitude + 0.01, longitude: home.longitude - 0.02 };
+    const middle = (PLANNER_BENDS[1] as { middleMetres: number }).middleMetres;
+    const drawnFrom = (origin: typeof home): { x: number; z: number } =>
+      roadCorridor(profile, origin, middle, { behindMetres: 0, aheadMetres: 0 })
+        .centre[0] as unknown as { x: number; z: number };
+    const meanFrom = (origin: typeof home): { x: number; z: number } => {
+      const samples = 4000;
+      let x = 0;
+      let z = 0;
+      for (let index = 0; index < samples; index += 1) {
+        const at =
+          middle - BEND_SMOOTHING_METRES + ((index + 0.5) / samples) * 2 * BEND_SMOOTHING_METRES;
+        const ground = localGroundPosition(origin, positionAt(profile, at));
+        x += ground.x / samples;
+        z += ground.z / samples;
+      }
+      return { x, z };
+    };
+    for (const origin of [home, away, home]) {
+      const drawn = drawnFrom(origin);
+      const mean = meanFrom(origin);
+      expect(Math.hypot(drawn.x - mean.x, drawn.z - mean.z)).toBeLessThan(0.001);
+    }
+    // And the two do put the road in different places, or the loop above
+    // could pass with one table.
+    expect(Math.abs(drawnFrom(away).x - drawnFrom(home).x)).toBeGreaterThan(100);
+  });
+
   it('carries the curve across a loop’s wrap without a step', () => {
     const profile = stadiumRoute(20);
     const origin = corridorOrigin(profile);

@@ -426,6 +426,21 @@ describe('the ground is the same place on every lap — #458', () => {
     }
   });
 
+  it('does not depend on what was built before it — #569', () => {
+    // #569 keeps storage between builds to pay for #543's rows: the clearance
+    // grid and its lists, and the relief hashes of the last two nodes. What is
+    // kept must be storage and never an answer, so the same ground built
+    // before and after two other routes' ground — a hairpin, whose far leg
+    // lies where this road's probes go, and a circuit, each on its own seed —
+    // is the same ground to the bit.
+    const profile = hillRoute();
+    const alone = Float32Array.from(frameAt(profile, 640).ground.vertices);
+    frameAt(hairpinRoute(12), 150);
+    frameAt(circuitRoute(40), 60);
+    const after = frameAt(profile, 640).ground.vertices;
+    expect(Array.from(after)).toEqual(Array.from(alone));
+  });
+
   it('is bounded: never more relief than the cap, however long the route', () => {
     const profile = steadyClimb();
     const origin = corridorOrigin(profile);

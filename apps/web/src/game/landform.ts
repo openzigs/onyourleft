@@ -72,7 +72,7 @@
 import { distanceOnRoute, elevationAt, gradeAt, type RouteProfile } from '@onyourleft/domain';
 
 import { slotHash, uniformFrom } from './seeded';
-import { DRY, waterShaping, waterways, type WaterShaping } from './waterways';
+import { DRY, waterNearRoute, waterShaping, waterways, type WaterShaping } from './waterways';
 import {
   ROAD_WIDTH_METRES,
   ribbonNormals,
@@ -439,6 +439,7 @@ export function terrainCorridor(
   // #459. The streams and lakes, as a ceiling on the ground and a damping of
   // its relief. @see waterShaping
   const ways = waterways(profile, seed);
+  const hasWater = ways.crossings.length + ways.lakes.length > 0;
   const centre = corridor.centre;
   const rows = centre.length;
   const normals2d = ribbonNormals(centre);
@@ -454,6 +455,9 @@ export function terrainCorridor(
     const point = centre[row] as CorridorPoint;
     const normalX = normals2d[row * 2] as number;
     const normalZ = normals2d[row * 2 + 1] as number;
+    // #569: whether any water reaches this cross-section at all, asked once a
+    // row. Where none does, `waterShaping` would answer DRY at every column.
+    const wetRow = hasWater && waterNearRoute(ways, profile, point.distance);
     for (let side = 0; side < 2; side += 1) {
       const sign = side === 0 ? 1 : -1;
       const relief = reliefFields(profile, seed, point.distance, side);
@@ -468,10 +472,9 @@ export function terrainCorridor(
         const lateral = column < 2 ? offset : Math.min(offset, limit);
         const at = row * perRow + side * COLUMNS + column;
         vertices[at * 3] = point.x + normalX * lateral * sign;
-        const shaping =
-          ways.crossings.length + ways.lakes.length === 0
-            ? DRY
-            : waterShaping(ways, profile, origin, point.distance, lateral * sign, point.y);
+        const shaping = wetRow
+          ? waterShaping(ways, profile, origin, point.distance, lateral * sign, point.y)
+          : DRY;
         // Column 0 is `point.y` exactly: `groundHeight` drops nothing and adds
         // no relief at the road's half-width, so the edge needs no special case.
         const height = groundHeight(point.y, relief, lateral, shaping);
@@ -615,6 +618,45 @@ interface ReliefFields {
   readonly tilt: number;
 }
 
+/** How many relief layers {@link reliefFields} reads a node's hash under. */
+const RELIEF_LAYERS = 7;
+
+/**
+ * The last two relief nodes' hashes — #569. A relief node is
+ * {@link RELIEF_SPAN_METRES} of road, so the 135 rows of a corridor since #543
+ * fall on three or four of them, and every row used to hash its two nodes
+ * afresh: up to twelve hashes a row and side. A value here is the same pure
+ * function of the seed, the node and the layer it always was; only the
+ * repetition is gone.
+ */
+const reliefNodes = [0, 1].map(() => ({
+  seed: Number.NaN,
+  node: Number.NaN,
+  values: new Float64Array(RELIEF_LAYERS),
+}));
+let reliefNodeVictim = 0;
+
+function reliefNodeValue(seed: number, node: number, layer: number): number {
+  for (let slot = 0; slot < reliefNodes.length; slot += 1) {
+    const entry = reliefNodes[slot] as (typeof reliefNodes)[number];
+    if (entry.seed === seed && entry.node === node) {
+      // The other slot is the one to evict next, so a row's two nodes never
+      // push each other out.
+      reliefNodeVictim = 1 - slot;
+      return entry.values[layer] as number;
+    }
+  }
+  const slot = reliefNodeVictim;
+  const entry = reliefNodes[slot] as (typeof reliefNodes)[number];
+  entry.seed = seed;
+  entry.node = node;
+  for (let each = 0; each < RELIEF_LAYERS; each += 1) {
+    entry.values[each] = uniformFrom(slotHash(seed, node, RELIEF_KEY + each), 0);
+  }
+  reliefNodeVictim = 1 - slot;
+  return entry.values[layer] as number;
+}
+
 function reliefFields(
   profile: RouteProfile,
   seed: number,
@@ -633,8 +675,8 @@ function reliefFields(
   const node = Math.floor(at);
   const ramp = smoothstep01(at - node);
   const field = (layer: number): number => {
-    const from = uniformFrom(slotHash(seed, node % nodes, RELIEF_KEY + layer), 0);
-    const to = uniformFrom(slotHash(seed, (node + 1) % nodes, RELIEF_KEY + layer), 0);
+    const from = reliefNodeValue(seed, node % nodes, layer);
+    const to = reliefNodeValue(seed, (node + 1) % nodes, layer);
     return (from + (to - from) * ramp) * 2 - 1;
   };
   // Which side is uphill: one smooth field for both sides, used with opposite
@@ -792,6 +834,14 @@ const CLEAR_CELL_METRES = 12;
 const CLEAR_REACH_STEPS = 8;
 
 /**
+ * {@link clearReach}'s grid and the lists it empties into it, kept from one
+ * frame to the next — #569. The grid's contents are rebuilt every call; only
+ * the storage is kept, as `terrainScratch` keeps the ground's (#469).
+ */
+const clearCells = new Map<number, number[]>();
+const clearListPool: number[][] = [];
+
+/**
  * {@link foldReach}, tightened so that no column of the ground stands within
  * {@link ROAD_CLEARANCE_METRES} of any other stretch of this corridor's road.
  *
@@ -815,7 +865,23 @@ function clearReach(
   // segment, 0.50 ms of a frame; a box test on each took it to 0.15 ms, and the
   // grid to about a third of that again — measured, and the JS thread's cost
   // is the one #240's NFR-2 names.
-  const cells = new Map<number, number[]>();
+  //
+  // ⚠️ **Since #569 the grid and its lists are lent, a probe outside the whole
+  // road's box is clear without a lookup, and the distance is compared
+  // squared.** #543 made the corridor 135 rows of two-metre segments rather
+  // than 47 of ten, so a cell beside the road holds about four times the
+  // segments and there are three times the rows probing it: this function
+  // became the largest single cost of a scene frame. None of the three moves
+  // an answer — a list is emptied before it is reused, the box is grown by
+  // the clearance, and `d² < c²` is `d < c` for the non-negative numbers
+  // here. `landform.test.ts` §"does not depend on what was built before it"
+  // is what holds the first.
+  const cells = clearCells;
+  for (const list of cells.values()) {
+    list.length = 0;
+    clearListPool.push(list);
+  }
+  cells.clear();
   const cellOf = (value: number): number => Math.floor(value / CLEAR_CELL_METRES);
   const key = (column: number, row: number): number => column * 100_003 + row;
   for (let segment = 0; segment + 1 < centre.length; segment += 1) {
@@ -828,16 +894,38 @@ function clearReach(
     for (let column = lowX; column <= highX; column += 1) {
       for (let cellRow = lowZ; cellRow <= highZ; cellRow += 1) {
         const at = key(column, cellRow);
-        const list = cells.get(at);
-        if (list === undefined) cells.set(at, [segment]);
-        else list.push(segment);
+        let list = cells.get(at);
+        if (list === undefined) {
+          list = clearListPool.pop() ?? [];
+          cells.set(at, list);
+        }
+        list.push(segment);
       }
     }
   }
+  // The whole road's box, grown by the clearance: a probe outside it is clear
+  // without a lookup, which is most of the outer columns on most roads.
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let minZ = Number.POSITIVE_INFINITY;
+  let maxZ = Number.NEGATIVE_INFINITY;
+  for (const point of centre) {
+    minX = Math.min(minX, point.x);
+    maxX = Math.max(maxX, point.x);
+    minZ = Math.min(minZ, point.z);
+    maxZ = Math.max(maxZ, point.z);
+  }
+  minX -= ROAD_CLEARANCE_METRES;
+  maxX += ROAD_CLEARANCE_METRES;
+  minZ -= ROAD_CLEARANCE_METRES;
+  maxZ += ROAD_CLEARANCE_METRES;
+  const clearance = ROAD_CLEARANCE_METRES * ROAD_CLEARANCE_METRES;
   const clearOf = (x: number, z: number): boolean => {
+    if (x < minX || x > maxX || z < minZ || z > maxZ) return true;
     const near = cells.get(key(cellOf(x), cellOf(z)));
     if (near === undefined) return true;
-    for (const segment of near) {
+    for (let index = 0; index < near.length; index += 1) {
+      const segment = near[index] as number;
       const from = centre[segment] as CorridorPoint;
       const to = centre[segment + 1] as CorridorPoint;
       const dx = to.x - from.x;
@@ -845,7 +933,9 @@ function clearReach(
       const span = dx * dx + dz * dz;
       const t =
         span > 0 ? Math.min(1, Math.max(0, ((x - from.x) * dx + (z - from.z) * dz) / span)) : 0;
-      if (Math.hypot(x - (from.x + dx * t), z - (from.z + dz * t)) < ROAD_CLEARANCE_METRES) {
+      const ox = x - (from.x + dx * t);
+      const oz = z - (from.z + dz * t);
+      if (ox * ox + oz * oz < clearance) {
         return false;
       }
     }
@@ -958,26 +1048,33 @@ function terrainIndices(rows: number): Uint32Array {
  */
 function gridNormals(vertices: Float32Array, rows: number, normals: Float32Array): void {
   const perRow = COLUMNS * 2;
-  const point = (row: number, side: number, column: number, axis: number): number =>
-    vertices[(row * perRow + side * COLUMNS + column) * 3 + axis] as number;
+  // Vertex `(row, side, column)` starts at `(row · perRow + side · COLUMNS +
+  // column) · 3`. Written out as offsets rather than through a helper, and the
+  // length taken as a square root rather than `Math.hypot`, since #569: this
+  // runs on every vertex of the ground every frame, and #543 nearly tripled
+  // the rows.
   for (let row = 0; row < rows; row += 1) {
-    const back = Math.max(0, row - 1);
-    const ahead = Math.min(rows - 1, row + 1);
+    const back = Math.max(0, row - 1) * perRow;
+    const ahead = Math.min(rows - 1, row + 1) * perRow;
+    const here = row * perRow;
     for (let side = 0; side < 2; side += 1) {
+      const sideOffset = side * COLUMNS;
       for (let column = 0; column < COLUMNS; column += 1) {
-        const inner = Math.max(0, column - 1);
-        const outer = Math.min(COLUMNS - 1, column + 1);
-        const ax = point(ahead, side, column, 0) - point(back, side, column, 0);
-        const ay = point(ahead, side, column, 1) - point(back, side, column, 1);
-        const az = point(ahead, side, column, 2) - point(back, side, column, 2);
-        const cx = point(row, side, outer, 0) - point(row, side, inner, 0);
-        const cy = point(row, side, outer, 1) - point(row, side, inner, 1);
-        const cz = point(row, side, outer, 2) - point(row, side, inner, 2);
+        const inner = (here + sideOffset + Math.max(0, column - 1)) * 3;
+        const outer = (here + sideOffset + Math.min(COLUMNS - 1, column + 1)) * 3;
+        const before = (back + sideOffset + column) * 3;
+        const after = (ahead + sideOffset + column) * 3;
+        const ax = (vertices[after] as number) - (vertices[before] as number);
+        const ay = (vertices[after + 1] as number) - (vertices[before + 1] as number);
+        const az = (vertices[after + 2] as number) - (vertices[before + 2] as number);
+        const cx = (vertices[outer] as number) - (vertices[inner] as number);
+        const cy = (vertices[outer + 1] as number) - (vertices[inner + 1] as number);
+        const cz = (vertices[outer + 2] as number) - (vertices[inner + 2] as number);
         let nx = ay * cz - az * cy;
         let ny = az * cx - ax * cz;
         let nz = ax * cy - ay * cx;
-        const length = Math.hypot(nx, ny, nz);
-        const at = (row * perRow + side * COLUMNS + column) * 3;
+        const length = Math.sqrt(nx * nx + ny * ny + nz * nz);
+        const at = (here + sideOffset + column) * 3;
         if (!(length > 0)) {
           // A collapsed cross-section — behind the start of a point-to-point
           // route, where every row is the same point. Straight up is what a

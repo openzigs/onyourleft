@@ -434,6 +434,33 @@ export function waterShaping(
 }
 
 /**
+ * Whether {@link waterShaping} can answer anything but {@link DRY} anywhere
+ * across the route at `wrapped` — #569.
+ *
+ * Exactly the two tests in {@link waterShaping} that do not depend on how far
+ * out the point is: a crossing too far along the road, and a lake with no
+ * shore here. When both hold for every water, every point of the cross-section
+ * is dry, so `landform.ts` asks once a row instead of once a vertex. #543 made
+ * that 3 500 calls a frame, nearly all of them far from any water.
+ */
+export function waterNearRoute(ways: Waterways, profile: RouteProfile, wrapped: number): boolean {
+  for (const crossing of ways.crossings) {
+    const u = Math.abs(routeOffset(profile, wrapped, crossing.distance));
+    if (
+      !(u > CHANNEL_FLAT_METRES + (CHANNEL_BANK_METRES - CHANNEL_FLAT_METRES) * (1 + BANK_RELEASE))
+    ) {
+      return true;
+    }
+  }
+  for (const lake of ways.lakes) {
+    if (lakeShore(lake, profile, wrapped) !== undefined) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Whether a point beside the route is in water or on its banks — where
  * nothing may stand: a stream's whole channel, and a lake with its bank.
  */

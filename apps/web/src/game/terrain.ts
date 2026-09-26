@@ -1140,21 +1140,36 @@ function drawnGroundPosition(
   wrapped: number,
   smoothing: number,
 ): { readonly x: number; readonly z: number } {
-  const half = profile.loop
-    ? smoothing
-    : Math.min(smoothing, wrapped, profile.totalDistance - wrapped);
+  const total: number = profile.totalDistance;
+  const half = profile.loop ? smoothing : Math.min(smoothing, wrapped, total - wrapped);
   if (!(half > 0)) {
     return localGroundPosition(origin, positionAt(profile, wrapped));
   }
-  const resolution: number = profile.resolution;
   const low = wrapped - half;
   const high = wrapped + half;
+  if (low >= 0 && high < total) {
+    // Inside one lap: the difference of the running integral at the window's
+    // two ends. @see centrelineIntegral
+    const integral = centrelineIntegral(profile, origin);
+    const from = integral(low);
+    const to = integral(high);
+    return { x: (to.x - from.x) / (2 * half), z: (to.z - from.z) / (2 * half) };
+  }
+  // Across a loop's wrap (a point-to-point route's window never leaves
+  // `[0, totalDistance]`): the cells summed one at a time, with `positionAt`
+  // wrapping at each end. ⚠️ **Kept rather than folded into the integral**,
+  // because at the wrap the two are NOT the same function on a loop that does
+  // not close: a profile stored as a line and marked a loop afterwards — the
+  // #440 control — jumps there, and summing the cell that ends ON the wrap
+  // reads its far end as the start of the next lap. `terrain.test.ts` §"the
+  // control — the same loop as a pre-#440 build stored it" is what said so.
+  const resolution: number = profile.resolution;
   let from = low;
   let fromPosition = localGroundPosition(origin, positionAt(profile, from));
   let sumX = 0;
   let sumZ = 0;
   // The breakpoints are the grid points inside the window — whole multiples of
-  // the resolution, on a loop's unwrapped distance as much as on a line's.
+  // the resolution, on a loop's unwrapped distance.
   for (let node = Math.floor(low / resolution) + 1; ; node += 1) {
     const to = Math.min(high, node * resolution);
     const toPosition = localGroundPosition(origin, positionAt(profile, to));
@@ -1169,3 +1184,82 @@ function drawnGroundPosition(
   }
   return { x: sumX / (2 * half), z: sumZ / (2 * half) };
 }
+
+/**
+ * The route's own centreline integrated along route distance, from the start
+ * to a distance inside one lap — #569's cost, measured in its pull request.
+ *
+ * ⚠️ **The same sum of trapezoids {@link drawnGroundPosition} always took, with
+ * its whole cells added up once per route instead of once per point.** The
+ * integral at a distance is a table entry at the grid point below it plus one
+ * partial trapezoid, and a window's mean is the difference at its two ends —
+ * still exact, still a function of route distance alone, so nothing shimmers.
+ * Summing the cells afresh cost about four `positionAt` calls a point, each a
+ * fresh `GeographicPosition` through two range-checked brands, on 135 points
+ * every frame on the thread GATT notifications arrive on.
+ *
+ * Cached against the profile OBJECT — `waterways.ts` §`computed` argues why
+ * that is the one key that cannot go stale — and against the origin's two
+ * numbers as well, so a caller with another origin gets another table rather
+ * than a wrong one.
+ */
+function centrelineIntegral(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+): (distance: number) => { readonly x: number; readonly z: number } {
+  const cached = centrelineIntegrals.get(profile);
+  if (
+    cached !== undefined &&
+    cached.latitude === origin.latitude &&
+    cached.longitude === origin.longitude
+  ) {
+    return cached.at;
+  }
+  const count = profile.positions.length;
+  const resolution: number = profile.resolution;
+  const xs = new Float64Array(count);
+  const zs = new Float64Array(count);
+  for (let index = 0; index < count; index += 1) {
+    const ground = localGroundPosition(origin, profile.positions[index] as GeographicPosition);
+    xs[index] = ground.x;
+    zs[index] = ground.z;
+  }
+  const sumX = new Float64Array(count);
+  const sumZ = new Float64Array(count);
+  for (let index = 1; index < count; index += 1) {
+    sumX[index] =
+      (sumX[index - 1] as number) +
+      (((xs[index - 1] as number) + (xs[index] as number)) / 2) * resolution;
+    sumZ[index] =
+      (sumZ[index - 1] as number) +
+      (((zs[index - 1] as number) + (zs[index] as number)) / 2) * resolution;
+  }
+  // The index and the fraction are `positionAt`'s own — the domain's `gridAt`,
+  // clamped the same way — so this integrates exactly the polyline it reads.
+  const at = (distance: number): { x: number; z: number } => {
+    const raw = distance / resolution;
+    const index = Math.max(0, Math.min(Math.floor(raw), count - 2));
+    const fraction = Math.max(0, Math.min(1, raw - index));
+    const x0 = xs[index] as number;
+    const z0 = zs[index] as number;
+    const x = x0 + ((xs[index + 1] as number) - x0) * fraction;
+    const z = z0 + ((zs[index + 1] as number) - z0) * fraction;
+    const length = distance - index * resolution;
+    return {
+      x: (sumX[index] as number) + ((x0 + x) / 2) * length,
+      z: (sumZ[index] as number) + ((z0 + z) / 2) * length,
+    };
+  };
+  centrelineIntegrals.set(profile, { latitude: origin.latitude, longitude: origin.longitude, at });
+  return at;
+}
+
+/** @see centrelineIntegral */
+const centrelineIntegrals = new WeakMap<
+  RouteProfile,
+  {
+    readonly latitude: number;
+    readonly longitude: number;
+    readonly at: (distance: number) => { readonly x: number; readonly z: number };
+  }
+>();
