@@ -179,3 +179,114 @@ export function assessErgCadence(history: readonly CadenceReading[], now: Second
 
   return { kind: 'holding' };
 }
+
+/**
+ * What a rescue asks the caller to hold now — the verdict with the latch
+ * applied. @see createErgRescue
+ */
+export type ErgRescueStep =
+  /** No rescue. Hold the target the rider (or the workout) asked for. */
+  | { readonly kind: 'full' }
+  /** Hold `share` of that target — raised to the machine's floor by the caller. */
+  | { readonly kind: 'relief'; readonly share: number; readonly reason: string }
+  /** The rider has stopped. Hold the machine's lowest target. */
+  | { readonly kind: 'floor'; readonly reason: string };
+
+/**
+ * Why the relief is still on after cadence has come back — the latch's own
+ * sentence, because {@link assessErgCadence} has nothing to say about a rider
+ * who is no longer in trouble.
+ */
+export const RECOVERING_REASON =
+  'Cadence is recovering, so the target stays eased until it has held steady.';
+
+/**
+ * The rescue latch — how a rescue STARTS and how it ENDS, for every ERG writer
+ * in the program (#441, #567).
+ *
+ * ⚠️ **One rule for two writers.** It used to be two variables inside
+ * `player.ts`, which is why a manual ERG target set on the Ride screen had no
+ * stall rescue at all (#567): the rule belonged to the workout. Now the
+ * workout player and `apps/web/src/ride/manual-erg.ts` both hold one of these,
+ * so "the same stall detection as a workout" is a fact about the call graph.
+ *
+ * A rescue starts on any `spiralling` or `stalled` verdict and ends only once
+ * the verdict has been `holding` for a whole {@link TREND_WINDOW} — see
+ * `player.ts` §"A rescue ends on a whole trend window of recovery" for why one
+ * good reading is not enough.
+ *
+ * ⚠️ **Silence is not recovery (#567).** {@link assessErgCadence} answers
+ * `holding` for a window with fewer than two readings, which is right for a
+ * rider who was never rescued — a sensor that has not spoken is not a spiral.
+ * It is wrong for one who was: a rider who stalled and whose cadence sensor
+ * then went quiet had their full target put back after eight seconds of
+ * nothing, on the strength of no evidence at all. While rescuing, a silent
+ * window restarts the steady clock rather than advancing it.
+ */
+export interface ErgRescue {
+  /**
+   * Judge the history at `now`, update the latch, and say what to hold.
+   *
+   * @param history `undefined` when the trainer reports no cadence — never a
+   * rescue, and never a recovery from one.
+   */
+  judge(history: readonly CadenceReading[] | undefined, now: Seconds): ErgRescueStep;
+  /** Forget any rescue — a new workout, or a target the rider set by hand. */
+  reset(): void;
+}
+
+export function createErgRescue(): ErgRescue {
+  let rescuing = false;
+  /** When the current unbroken run of heard `holding` verdicts began. */
+  let steadySince: number | undefined;
+
+  return {
+    judge(history, now): ErgRescueStep {
+      const verdict: ErgVerdict =
+        history === undefined ? { kind: 'holding' } : assessErgCadence(history, now);
+
+      if (verdict.kind === 'holding') {
+        if (rescuing) {
+          if (!heard(history, now)) {
+            steadySince = undefined;
+          } else {
+            steadySince ??= now;
+            if (now - steadySince >= TREND_WINDOW) {
+              rescuing = false;
+              steadySince = undefined;
+            }
+          }
+        }
+      } else {
+        rescuing = true;
+        steadySince = undefined;
+      }
+
+      if (verdict.kind === 'stalled') {
+        return { kind: 'floor', reason: verdict.reason };
+      }
+      if (!rescuing) {
+        return { kind: 'full' };
+      }
+      return verdict.kind === 'spiralling'
+        ? { kind: 'relief', share: verdict.relief, reason: verdict.reason }
+        : { kind: 'relief', share: RELIEF_SHARE, reason: RECOVERING_REASON };
+    },
+
+    reset(): void {
+      rescuing = false;
+      steadySince = undefined;
+    },
+  };
+}
+
+/** Whether the window at `now` holds enough readings to be a verdict at all. */
+function heard(history: readonly CadenceReading[] | undefined, now: Seconds): boolean {
+  if (history === undefined) {
+    return false;
+  }
+  const inWindow = history.filter(
+    (reading) => reading.at <= now && now - reading.at <= TREND_WINDOW,
+  );
+  return inWindow.length >= 2;
+}

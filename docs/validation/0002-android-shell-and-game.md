@@ -1907,6 +1907,8 @@ adb logcat | grep -i "BluetoothLe"
 | S3 | A workout with a **free-ride block** after an ERG block. Ride into the free ride and let cadence fall | One `0x05` at the trainer's minimum as the block starts, no `0x08`, and power **falls** with cadence — the previous interval's target is gone |
 | S4 | During an ERG block, press **Pause** while pedalling; keep pedalling slowly for 10 s; then **Resume** | On Pause one `0x05` at the minimum, no `0x08`; power falls with cadence while paused. On Resume the interval's target comes back within a second or two |
 | S5 | [#542](https://github.com/openzigs/onyourleft/issues/542). A saved workout with a steady block of at least two minutes. Ride it at a comfortable cadence, with the logcat above running, and count the `0x05` writes in each whole minute of the block | **One** `0x05` at the block's start and **none** after it while the target is unchanged — so 1 in the first minute and 0 in each after. A retry appears only after a write that was refused or not answered. Before #542 this was about one a second (14 in 16 s) |
+| S6 | [#567](https://github.com/openzigs/onyourleft/issues/567). ⚠️ **Manual ERG, no workout.** Ride screen, control taken, **no workout running**. Set **150 W** on the Trainer panel's ERG form and ride 60 s. Then stop pushing: let cadence fall from about 70 rpm towards zero over 10–15 s, as in the 2026-09-25 run below | As cadence falls under ~50 rpm the app writes a `0x05` at **100 W** (two thirds of 150), and at or below **10 rpm** a `0x05` at the trainer's **minimum** — **no `0x08` anywhere**. The Trainer panel shows **Eased**, the reason, and *Your 150 W comes back by itself…*. **Power must FALL before the trainer's own firmware lets go** (about 9 s under 40 rpm on this machine): the first `0x05` should be in the log well before that |
+| S7 | From S6's stall, pedal again and settle at a comfortable cadence | `0x05` at 100 W while cadence is under 50 rpm, then — only after about **8 s** steady — `0x05` at **150 W**, and the **Eased** notice goes. No flapping |
 
 ### S results
 
@@ -1917,6 +1919,8 @@ adb logcat | grep -i "BluetoothLe"
 | S3 | | *Not run* | | |
 | S4 | | *Not run* | | |
 | S5 | | *Not run.* `0x05` writes per whole minute of the steady block: | | |
+| S6 | | *Not run* | | |
+| S7 | | *Not run* | | |
 
 ⚠️ **Manual ERG has no stall rescue, and on this trainer the firmware let go instead.** Before the
 workout, the owner set **150 W** on the Ride screen's Trainer panel, with no workout running, and let
@@ -1925,6 +1929,14 @@ after about **9 s** (20:35:38–20:35:47). That is how the client is built: the 
 workout player (`erg-safety.ts` §`assessErgCadence`), and a target set by hand does not go through
 the player. So S1–S4 pass or fail on a **workout** only. A rider on a manual ERG target is relying
 on the trainer, and a different trainer may not let go.
+
+⚠️ **#567's answer, 2026-09-26: a hand-set target now has the same rescue.** The latch the workout
+player used is one object now (`erg-safety.ts` §`createErgRescue`), and the Ride screen's ERG form
+holds one too (`apps/web/src/ride/manual-erg.ts`): the same stall detection, the same `0x05` ease to
+two thirds or to the machine's minimum, never a Stop, through one ERG writer. After recovery the
+rider's target is **put back** once cadence has held for a whole window, and the panel says so while
+it is eased. **S6 and S7 are the hardware check**, and their result cells are empty. The paragraph
+above is the 2026-09-25 finding and stays as it was.
 
 ⚠️ **Found along the way: [#542](https://github.com/openzigs/onyourleft/issues/542).** During the
 workout, an unchanged target that had already been acknowledged was written again about once a

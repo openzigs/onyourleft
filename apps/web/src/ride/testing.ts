@@ -86,6 +86,7 @@ export function idleSnapshot(): RideSnapshot {
       lost: undefined,
       refusal: undefined,
       releaseFault: undefined,
+      ergRescue: undefined,
     },
     storage: 'ok',
     pairingError: undefined,
@@ -141,6 +142,7 @@ export function ridingSnapshot(): RideSnapshot {
       lost: undefined,
       refusal: undefined,
       releaseFault: undefined,
+      ergRescue: undefined,
     },
   };
 }

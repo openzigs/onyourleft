@@ -22,6 +22,7 @@
 
 import {
   gradePercent,
+  metresPerSecond,
   revolutionsPerMinute,
   seconds,
   thresholdShare,
@@ -174,6 +175,8 @@ interface BenchOptions {
   readonly permissionLostBeforeStopAnswer?: boolean;
   /** Refuse every `0x08` write at the ATT layer, so a release cannot land. */
   readonly refuseStop?: boolean;
+  /** Refuse every `0x05` below this many watts at the ATT layer — a refused ease (#567). */
+  readonly refuseTargetsBelow?: number;
 }
 
 function benchWith(options: BenchOptions = {}): Bench {
@@ -232,6 +235,13 @@ function benchWith(options: BenchOptions = {}): Bench {
             written.push([...value]);
             if (options.refuseStop === true && value[0] === STOP_OR_PAUSE) {
               return Promise.reject(new Error('write not permitted'));
+            }
+            if (
+              options.refuseTargetsBelow !== undefined &&
+              value[0] === 0x05 &&
+              (value[1] ?? 0) + ((value[2] ?? 0) << 8) < options.refuseTargetsBelow
+            ) {
+              return Promise.reject(new Error('ease not permitted'));
             }
             const outcome = controlPoint.write(requestFromOctets(value));
             if (outcome.kind === 'att-error') {
@@ -2945,6 +2955,182 @@ describe('a running workout owns the ERG target — #542’s review', () => {
     expect(snapshot.trainer.lost).toBeUndefined();
     expect(snapshot.trainer.hasControl).toBe(true);
     expect(snapshot.phase).toBe('recording');
+    rig.controller.dispose();
+  });
+});
+
+describe('#567 — a hand-set ERG target gets the workout’s stall rescue', () => {
+  /**
+   * `manual-erg.test.ts` proves the rescue; this proves the RIDE SCREEN feeds
+   * it — the cadence the trainer reports, the clock the controller ticks, the
+   * floor the machine reported — and that nothing else is left writing over
+   * it. A line missing from `onMeasurement` or `tick` is green there and red
+   * here.
+   */
+  const FLOOR = 25;
+
+  async function manualRig() {
+    const rig = benchWith({
+      machine: { retainsTargetsThroughStop: true, minTargetPower: watts(FLOOR) },
+    });
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    rig.bench.rider.set({ cadence: revolutionsPerMinute(85) });
+    await rig.controller.setTargetPower(watts(150));
+    await ride(rig, 3);
+    await flushMicrotasks();
+    return rig;
+  }
+
+  async function pedalAt(rig: Bench, cadences: readonly number[]): Promise<void> {
+    for (const rpm of cadences) {
+      rig.bench.rider.set({ cadence: revolutionsPerMinute(rpm) });
+      await ride(rig, 1);
+      await flushMicrotasks(20);
+    }
+  }
+
+  const PART_S = [68, 66, 62, 57, 52, 47, 43, 40, 37];
+  const writesOf = (rig: Bench, opCode: number) =>
+    rig.written.filter((bytes) => bytes[0] === opCode);
+
+  it('eases a collapsing rider, with a 0x05 and no Stop, and says why on the snapshot', async () => {
+    const rig = await manualRig();
+    expect(rig.targetOnTheTrainer()).toBe(150);
+
+    await pedalAt(rig, PART_S);
+
+    expect(rig.targetOnTheTrainer()).toBe(100);
+    expect(writesOf(rig, STOP_OR_PAUSE)).toStrictEqual([]);
+    const trainer = rig.controller.getSnapshot().trainer;
+    expect(trainer.ergRescue).toMatchObject({ target: 150, holding: 'relief' });
+    // What the machine confirmed is the eased number — the screen does not
+    // claim the rider's 150 W is on it.
+    expect(targetSentence(trainer)).toBe('Holding 100 W.');
+    rig.controller.dispose();
+  });
+
+  it('eases a stopped rider to the floor the machine reported, recording or not', async () => {
+    const rig = await manualRig();
+    await pedalAt(rig, [80, 60, 40, 20, 8, 5, 4]);
+    expect(rig.targetOnTheTrainer()).toBe(FLOOR);
+    expect(rig.controller.getSnapshot().trainer.ergRescue).toMatchObject({ holding: 'floor' });
+    rig.controller.dispose();
+  });
+
+  it('puts the rider’s target back once cadence has held steady', async () => {
+    const rig = await manualRig();
+    await pedalAt(rig, PART_S);
+    expect(rig.targetOnTheTrainer()).toBe(100);
+    await pedalAt(
+      rig,
+      Array.from({ length: 20 }, () => 85),
+    );
+    expect(rig.targetOnTheTrainer()).toBe(150);
+    expect(rig.controller.getSnapshot().trainer.ergRescue).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('stops rescuing after End ERG — the release is the last write', async () => {
+    const rig = await manualRig();
+    await rig.controller.clearTargetPower();
+    await flushMicrotasks(20);
+    const before = rig.written.length;
+    await pedalAt(rig, PART_S);
+    expect(rig.written.slice(before)).toStrictEqual([]);
+    expect(rig.controller.getSnapshot().trainer.ergRescue).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('stops rescuing once the game sends a gradient — no 0x05 under a game ride', async () => {
+    const rig = await manualRig();
+    const game = rig.controller.simulationControl();
+    expect(game).toBeDefined();
+    await game?.setSimulationParameters({
+      windSpeed: metresPerSecond(0),
+      grade: gradePercent(2),
+      rollingResistanceCoefficient: 0.004,
+      windResistanceCoefficient: 0.51,
+    });
+    await flushMicrotasks(20);
+    const before = rig.written.length;
+    await pedalAt(rig, PART_S);
+    expect(rig.written.slice(before).filter((bytes) => bytes[0] === 0x05)).toStrictEqual([]);
+    rig.controller.dispose();
+  });
+
+  it('ends with control: taking control back does not revive the old target’s rescue', async () => {
+    // Control lost ends a hand-set target; the rider sets one again once
+    // control is back. A rescue that survived would write against a target
+    // the rider has not set on this grant.
+    const rig = await manualRig();
+    rig.bench.device(TRAINER).script({ kind: 'control-permission-lost' });
+    rig.bench.advance(seconds(1));
+    await flushMicrotasks(20);
+    await rig.controller.requestTrainerControl();
+    await flushMicrotasks(20);
+    const before = rig.written.length;
+    await pedalAt(rig, PART_S);
+    expect(rig.written.slice(before).filter((bytes) => bytes[0] === 0x05)).toStrictEqual([]);
+    expect(rig.controller.getSnapshot().trainer.ergRescue).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('tells the rider when the machine refuses an ease', async () => {
+    const rig = benchWith({
+      machine: { retainsTargetsThroughStop: true, minTargetPower: watts(FLOOR) },
+      refuseTargetsBelow: 150,
+    });
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    rig.bench.rider.set({ cadence: revolutionsPerMinute(85) });
+    await rig.controller.setTargetPower(watts(150));
+    await ride(rig, 3);
+    expect(rig.controller.getSnapshot().trainer.refusal).toBeUndefined();
+
+    await pedalAt(rig, PART_S);
+    expect(rig.targetOnTheTrainer()).toBe(150);
+    expect(rig.controller.getSnapshot().trainer.refusal).toContain('refused');
+    rig.controller.dispose();
+  });
+
+  it('forgets a rescue when the trainer is unpaired', async () => {
+    const rig = await manualRig();
+    await pedalAt(rig, PART_S);
+    expect(rig.controller.getSnapshot().trainer.ergRescue).toBeDefined();
+    await rig.controller.unpair(TRAINER);
+    expect(rig.controller.getSnapshot().trainer.ergRescue).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('stops rescuing once a workout takes the control point', async () => {
+    const rig = await manualRig();
+    await rig.controller.start();
+    expect(
+      rig.controller.startWorkout(
+        {
+          id: workoutId('w1'),
+          createdBy: ATHLETE_A,
+          name: 'Long',
+          workout: {
+            name: 'Long',
+            blocks: [{ kind: 'steady', seconds: seconds(600), target: thresholdShare(0.8) }],
+          },
+          createdAt: unixSeconds(1),
+          updatedAt: unixSeconds(1),
+        },
+        watts(250),
+      ),
+    ).toBe(true);
+    await ride(rig, 2);
+    await flushMicrotasks(20);
+    expect(rig.targetOnTheTrainer()).toBe(200);
+    // A collapse now is the WORKOUT's to rescue: two thirds of its 200 W, not
+    // two thirds of the old hand-set 150 W, which a rescue left running would
+    // write over it.
+    await pedalAt(rig, PART_S);
+    expect(rig.targetOnTheTrainer()).toBe(133);
+    expect(rig.controller.getSnapshot().trainer.ergRescue).toBeUndefined();
     rig.controller.dispose();
   });
 });
