@@ -98,6 +98,9 @@ import {
   fromPersistedCameraFrame,
   fromPersistedFramingReference,
   framingReferenceProblem,
+  fromPersistedSideCameraReport,
+  sideCameraReportProblem,
+  toPersistedSideCameraReport,
   fromPersistedRoute,
   fromPersistedWorkout,
   toPersistedCameraFrame,
@@ -108,6 +111,7 @@ import {
   type PersistedAthlete,
   type PersistedCameraFrame,
   type PersistedFramingReference,
+  type PersistedSideCameraReport,
   type PersistedLap,
   type PersistedPrivacyZone,
   type PersistedRoute,
@@ -120,6 +124,7 @@ import type {
   AthleteRecord,
   CameraFrameRecord,
   FramingReferenceRecord,
+  SideCameraReportRecord,
   LapRecord,
   NewActivity,
   NewLap,
@@ -314,6 +319,12 @@ export interface AthleteDeletionCounts {
    * picture of the rider, so ADR 0029 D-4's *"everything derived from one"*.
    */
   readonly framingReferences: number;
+  /**
+   * The side camera's post-ride reports removed — #388, one per ride that had
+   * one. Sentences read off pictures of the rider, so ADR 0029 D-4's
+   * *"everything derived from one"*.
+   */
+  readonly sideCameraReports: number;
 }
 
 /**
@@ -476,6 +487,10 @@ export class ActivityStore {
 
   get #framingReferences(): Table<PersistedFramingReference, string> {
     return this.#db.table<PersistedFramingReference, string>(TABLE.framingReferences);
+  }
+
+  get #sideCameraReports(): Table<PersistedSideCameraReport, string> {
+    return this.#db.table<PersistedSideCameraReport, string>(TABLE.sideCameraReports);
   }
 
   // --- Athletes -------------------------------------------------------------
@@ -754,6 +769,7 @@ export class ActivityStore {
         this.#workouts,
         this.#cameraFrames,
         this.#framingReferences,
+        this.#sideCameraReports,
       ],
       async () => {
         // The signed records and the device key go with the athlete. The key is
@@ -818,6 +834,12 @@ export class ActivityStore {
         // shape matches every other line of the sentence an erase produces.
         const framingReferences = (await this.#framingReferences.get(id)) === undefined ? 0 : 1;
         await this.#framingReferences.delete(id);
+        // #388. What the side camera's report said about each ride — sentences
+        // read off pictures of the rider, so they go with the rider.
+        const sideCameraReports = await this.#sideCameraReports
+          .where(INDEX.sideCameraReportByAthlete)
+          .equals(id)
+          .delete();
         await this.#athletes.delete(id);
         return {
           activities,
@@ -831,6 +853,7 @@ export class ActivityStore {
           workouts,
           cameraFrames,
           framingReferences,
+          sideCameraReports,
         };
       },
     );
@@ -1050,6 +1073,7 @@ export class ActivityStore {
         this.#streamBlobs,
         this.#activityRecords,
         this.#segmentEfforts,
+        this.#sideCameraReports,
       ],
       async () => {
         const existing = await this.#activities
@@ -1082,6 +1106,10 @@ export class ActivityStore {
         // source activity by design (`records.ts` says why). A segment is a
         // copy that stands alone; an effort is a claim about a specific ride.
         await this.#segmentEfforts.where(INDEX.effortByActivity).equals(id).delete();
+        // #388. The side camera's report is about this ride and nothing else,
+        // and it was read off pictures of the rider: left behind it would be
+        // sentences about somebody's body under a ride that no longer exists.
+        await this.#sideCameraReports.delete(id);
         await this.#activities.delete(id);
         return true;
       },
@@ -1570,6 +1598,60 @@ export class ActivityStore {
       await this.#framingReferences.delete(owner);
       return true;
     });
+  }
+
+  // --- Side-camera reports (#388) -------------------------------------------
+
+  /**
+   * Keeps what the side camera's post-ride report said about a ride,
+   * **replacing** any report that ride already had — #388.
+   *
+   * Sentences only (the owner's ruling of 2026-09-26: *"no pictures and no
+   * pose points, only the rendered observations"*). The production caller is
+   * `apps/web/src/camera/side-report-keeper.ts`, when a side-camera session
+   * ends and the ride it filmed has been saved.
+   *
+   * **Refuses a report on a ride that is not the athlete's**, inside the same
+   * transaction as the write — a report filed under one athlete against
+   * another's ride would be read on the second athlete's detail page.
+   *
+   * @throws {StoreReferentialError} if `record.activityId` names no activity of
+   * `record.athleteId`'s.
+   * @throws {StoreValidationError} naming the field and the constraint — never
+   * the value, which is a sentence about somebody's body.
+   */
+  async putSideCameraReport(record: SideCameraReportRecord): Promise<void> {
+    const problem = sideCameraReportProblem(record);
+    if (problem !== undefined) {
+      throw new StoreValidationError(problem);
+    }
+    await this.#db.transaction('rw', [this.#activities, this.#sideCameraReports], async () => {
+      const ride = await this.#activities
+        .where(INDEX.activityByAthleteAndId)
+        .equals([record.athleteId, record.activityId])
+        .first();
+      if (ride === undefined) {
+        throw new StoreReferentialError(
+          `cannot store a side-camera report: athlete ${record.athleteId} has no activity ${record.activityId}`,
+        );
+      }
+      await this.#sideCameraReports.put(toPersistedSideCameraReport(record));
+    });
+  }
+
+  /**
+   * What the side camera's report said about this athlete's ride, or
+   * `undefined` — the ordinary answer, for every ride that was not filmed.
+   */
+  async getSideCameraReport(
+    owner: AthleteId,
+    activity: ActivityId,
+  ): Promise<SideCameraReportRecord | undefined> {
+    const row = await this.#sideCameraReports
+      .where(INDEX.sideCameraReportByAthleteAndActivity)
+      .equals([owner, activity])
+      .first();
+    return row === undefined ? undefined : fromPersistedSideCameraReport(row);
   }
 
   // --- Segment efforts (#66) ------------------------------------------------

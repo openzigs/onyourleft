@@ -24,6 +24,7 @@ import type {
   CameraFrameRecord,
   DeviceKeyRecord,
   FramingReferenceRecord,
+  SideCameraReportRecord,
   LapRecord,
   ListActivitiesOptions,
   NewActivity,
@@ -135,6 +136,16 @@ export interface AccountStore {
    * data."* Numbers, never a picture, and at most one.
    */
   getFramingReference(owner: AthleteId): Promise<FramingReferenceRecord | undefined>;
+  /**
+   * The side camera's report on one ride — #388, the owner's retention ruling:
+   * the report's sentences are *"included in the account export"*. Read per
+   * ride, inside the export's own bound on one run, and written into that
+   * ride's manifest entry.
+   */
+  getSideCameraReport(
+    owner: AthleteId,
+    activity: ActivityId,
+  ): Promise<SideCameraReportRecord | undefined>;
 }
 
 /**

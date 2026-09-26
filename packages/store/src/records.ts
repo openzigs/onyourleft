@@ -887,12 +887,13 @@ export interface FramingLandmarkRecord {
  *
  * ⚠️ **Written since #530**, by the tablet's analysis at the end of each
  * side-camera session that saw enough of the rider
- * (`apps/web/src/camera/side-analysis.ts`). ⚠️ **This used to say "the last
- * time the framing check passed"**, which was #528's reading; the owner's
- * words are *"a stored reference from the rider's last session"* (ADR 0033
- * §Context), so a session whose check said the camera had moved still becomes
- * the next session's reference — a rider who moved the tripod for good is
- * compared against where it stands now.
+ * (`apps/web/src/camera/side-analysis.ts`). ⚠️ **Since #388 only a session
+ * whose framing check PASSED, or a first session with nothing to check
+ * against, moves it forward** — the owner's ruling of 2026-09-26. #530 had
+ * every session replace it, which let a tripod that crept a little each time
+ * reset the baseline it was checked against; a reader who remembers "a session
+ * whose check said the camera had moved still becomes the next reference" is
+ * reading the old file. `side-analysis.ts` §`REFERENCE_MOVES_ON` is the rule.
  */
 export interface FramingReferenceRecord {
   /** Whose reference this is. It is also the primary key. */
@@ -952,3 +953,55 @@ export const FRAMING_CHECK_RECORDS: readonly FramingCheckRecord[] = [
   'no-reference',
   'not-checked',
 ];
+
+/**
+ * What the side camera's post-ride report said about one ride — #388,
+ * [ADR 0030](../../../docs/adr/0030-what-the-app-may-say-about-a-body.md) and
+ * [ADR 0033](../../../docs/adr/0033-side-camera-link.md) D-6.
+ *
+ * ## Sentences, and nothing they were made from
+ *
+ * The owner's ruling on #388 (2026-09-26): *"when a side-camera session ends,
+ * the report's sentences are saved with that ride. No pictures and no pose
+ * points, only the rendered observations."* So this record is words: no byte
+ * array, no landmark, no angle and no number of any kind. The pose numbers the
+ * sentences were read from stay in the tablet's memory and are gone when the
+ * app closes, exactly as they were before #388.
+ *
+ * ## It belongs to a ride, and goes with it
+ *
+ * Keyed on the activity, with every read scoped to the athlete as well. It is
+ * derived from pictures of a person (ADR 0029 D-4's *"everything derived from
+ * one"*), so it goes with `deleteActivity` and with `deleteAthlete`, is named
+ * in `apps/web/src/transfer/erase-device.ts` §`ERASE_REMOVES`, and travels in
+ * the account export (ADR 0004 E).
+ *
+ * ## One per ride, and the newest wins
+ *
+ * A second session during the same ride replaces the first report rather than
+ * adding one: the report is about the ride, and two reports on one ride page
+ * would be a list a rider has to reconcile.
+ *
+ * ⚠️ **This package does not check the wording.** Every sentence here was
+ * written by `apps/web/src/camera/side-report-wording.ts`, which is the one
+ * vocabulary file ADR 0030 D-8 asks for; the detail view renders only
+ * sentences that file can produce. What this package checks is the shape and
+ * the bounds, so a hand-edited row cannot hand the view a page of text.
+ */
+export interface SideCameraReportRecord {
+  /** The ride this report is about. It is also the primary key. */
+  readonly activityId: ActivityId;
+  /** Whose ride. **Every read of this record filters on it.** */
+  readonly athleteId: AthleteId;
+  /**
+   * The one sentence that says what was compared, or why nothing could be —
+   * always present, always rendered.
+   */
+  readonly summary: string;
+  /**
+   * The observations, each one sentence, each worded as a possibility. Empty
+   * when nothing changed enough to mention, or nothing could be compared —
+   * which the summary then says in words.
+   */
+  readonly observations: readonly string[];
+}

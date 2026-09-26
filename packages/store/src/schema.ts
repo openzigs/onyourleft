@@ -33,7 +33,7 @@
 /**
  * The current schema version.
  *
- * **11** since #528. Version 2 added `streamSets` and `streamBlobs`; version 3
+ * **12** since #388. Version 2 added `streamSets` and `streamBlobs`; version 3
  * added `recordingSessions` and `recordingChunks`; version 4 added `deviceKeys`
  * and `activityRecords`; version 5 added `segments`; version 6 added
  * `segmentEfforts` and `matchCheckpoints`; version 7 added `routes`; version 8
@@ -81,10 +81,16 @@
  * still empty. Its rollback is the same export → downgrade → re-import: the
  * account export carries the reference in the manifest (ADR 0004 E).
  *
+ * ⚠️ **Version 12 is #388's `sideCameraReports`, and it is additive for the
+ * same reason again.** A new store, no existing shape touched,
+ * `SCHEMA_MIGRATIONS` still empty. Its rollback is export → downgrade →
+ * re-import: the account export carries each ride's report in the manifest
+ * entry for that ride (ADR 0004 E).
+ *
  * Bumping this for a change that *does* alter a record's shape means adding a
  * migration pair.
  */
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;
 
 /**
  * Dexie stores its schema version in IndexedDB multiplied by ten, leaving room
@@ -142,6 +148,12 @@ export const TABLE = {
    * picture (ADR 0033 D-7). Keyed by the athlete.
    */
   framingReferences: 'framingReferences',
+  /**
+   * #388: at most one row per ride — the side camera's post-ride report, as
+   * the sentences it rendered. Words only: no picture, no pose point, no
+   * number. Keyed by the activity, read by the athlete and the activity.
+   */
+  sideCameraReports: 'sideCameraReports',
 } as const;
 
 /**
@@ -288,6 +300,13 @@ export const INDEX = {
   cameraFrameByAthleteAndCapturedAt: '[athleteId+capturedAt]',
   /** #384: `deleteCameraFrames`, and `deleteAthlete`'s cascade. */
   cameraFrameByAthlete: 'athleteId',
+  /**
+   * #388: `getSideCameraReport` — the athlete-scoped point lookup, so there is
+   * no read of a report that is not also told whose ride it is.
+   */
+  sideCameraReportByAthleteAndActivity: '[athleteId+activityId]',
+  /** #388: `deleteAthlete`'s cascade. */
+  sideCameraReportByAthlete: 'athleteId',
 } as const;
 
 /**
@@ -650,6 +669,24 @@ export const STORES_V11: Readonly<Record<string, string>> = {
   [TABLE.framingReferences]: 'athleteId',
 };
 
+/**
+ * Version 12 — #388's side-camera reports, added beside the sixteen stores
+ * that exist.
+ *
+ * Keyed on `activityId`, so a second report for one ride replaces the first,
+ * and every read goes through {@link INDEX.sideCameraReportByAthleteAndActivity}
+ * — there is no method that answers "the report for this ride" without also
+ * being told whose ride it is (CLAUDE.md §6).
+ */
+export const STORES_V12: Readonly<Record<string, string>> = {
+  // The sixteen stores of versions 1 to 11 are inherited unchanged.
+  [TABLE.sideCameraReports]: [
+    'activityId',
+    INDEX.sideCameraReportByAthlete,
+    INDEX.sideCameraReportByAthleteAndActivity,
+  ].join(', '),
+};
+
 export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V1,
   STORES_V2,
@@ -662,4 +699,5 @@ export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V9,
   STORES_V10,
   STORES_V11,
+  STORES_V12,
 ];
