@@ -18,8 +18,15 @@
 
 import { describe, expect, it, afterEach } from 'vitest';
 
-import { watts } from '@onyourleft/domain';
-import type { UnitSystem } from '@onyourleft/store';
+import { seconds, watts } from '@onyourleft/domain';
+import { createSimulator } from '@onyourleft/sensors/simulator';
+import { recordingSessionId, type UnitSystem } from '@onyourleft/store';
+import {
+  ATHLETE_A,
+  createStoreHarness,
+  seedAthletes,
+  type StoreHarness,
+} from '@onyourleft/store/testing';
 
 import { idleSnapshot, ridingSnapshot, stubRideController } from '../ride/testing';
 import {
@@ -31,7 +38,8 @@ import {
   type Mounted,
 } from '../testing/mount';
 
-import { RIDE_NOTIFICATION_REFUSED } from '../ride/controller';
+import { createRideController, RIDE_NOTIFICATION_REFUSED } from '../ride/controller';
+import type { RecordingCheckpointStore } from '../recording/recorder';
 import { formatDuration } from '../format';
 import { UnitsProvider } from '../units/context';
 import { RideView } from './RideView';
@@ -486,6 +494,177 @@ describe('the notice a stopped ride ends on', () => {
     stub.set({ phase: 'stopped', saveState: 'empty' });
     await show(stub);
     expect(document.body.textContent).toContain('Nothing was recorded');
+  });
+});
+
+describe('#548 — a stopped ride is followed by a way to start another', () => {
+  const offered = (): boolean =>
+    queryAll<HTMLButtonElement>(document, 'button').some(
+      (button) => button.textContent?.trim() === 'Start a new ride',
+    );
+
+  it('offers it once the ride is saved, and asks the controller when pressed', async () => {
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ phase: 'stopped', saveState: 'saved' });
+    await show(stub);
+
+    await activateWithKeyboard(buttonNamed('Start a new ride'));
+    await settle();
+    expect(stub.calls.startNewRide).toBe(1);
+    // Nothing else was asked of the controller on the way.
+    expect(stub.calls.start).toBe(0);
+  });
+
+  it.each(['empty', 'unavailable'] as const)(
+    'offers it when the save ended %s, which leaves nothing only in this tab',
+    async (saveState) => {
+      const stub = stubRideController(ridingSnapshot());
+      stub.set({ phase: 'stopped', saveState });
+      await show(stub);
+      expect(offered()).toBe(true);
+    },
+  );
+
+  it.each([
+    { saveState: 'saving' },
+    { saveState: 'failed', saveError: 'the device is full' },
+    { saveState: 'saved', storage: 'failed' },
+    { saveState: 'saved', storage: 'quota-exceeded' },
+  ] as const)('does not offer it while the ride exists only in this tab: %o', async (state) => {
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ phase: 'stopped', ...state });
+    await show(stub);
+    expect(offered()).toBe(false);
+  });
+
+  it('tells the rider when the controller refuses the press, rather than doing nothing', async () => {
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ phase: 'stopped', saveState: 'saved' });
+    const refusing = { ...stub.controller, startNewRide: async () => Promise.resolve(false) };
+    mounted = await mount(<RideView controller={refusing} />);
+    await settle();
+    expect(document.body.textContent).not.toContain('could not be started');
+
+    await activateWithKeyboard(buttonNamed('Start a new ride'));
+    await settle();
+    expect(document.body.textContent).toContain('A new ride could not be started yet');
+    // Said in a live region, so a screen-reader rider hears it too.
+    const notice = queryAll<HTMLElement>(document, '[role="status"], [role="alert"]').find((node) =>
+      node.textContent?.includes('could not be started'),
+    );
+    expect(notice).toBeDefined();
+  });
+
+  it('keeps the start control on the idle screen it returns to', async () => {
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ phase: 'stopped', saveState: 'saved' });
+    await show(stub);
+    stub.set(idleSnapshot());
+    await settle();
+    expect(offered()).toBe(false);
+    await activateWithKeyboard(buttonNamed('Start recording'));
+    await settle();
+    expect(stub.calls.start).toBe(1);
+  });
+});
+
+describe('#565 review — the stop window, driven through the real controller', () => {
+  /**
+   * `confirmStop` sets `stopped` and only then releases the trainer, flushes
+   * the final checkpoint and saves. The 1 Hz tick re-renders the screen all
+   * that time, and before #565's review the snapshot could not say the stop
+   * was still settling: `saveState` held the previous ride's `unavailable`, so
+   * the screen offered *Start a new ride* (which the controller then silently
+   * refused) and told the rider "Closing the tab is safe now" before the last
+   * write had landed. The checkpoint store is held here so the window stays
+   * open long enough to look at.
+   */
+  let harness: StoreHarness;
+  const offered = (): boolean =>
+    queryAll<HTMLButtonElement>(document, 'button').some(
+      (button) => button.textContent?.trim() === 'Start a new ride',
+    );
+
+  afterEach(async () => {
+    await harness.destroy();
+  });
+
+  it('offers no new ride and never calls the tab safe to close until the stop has settled', async () => {
+    harness = createStoreHarness();
+    await seedAthletes(harness);
+    let held: Promise<void> | undefined;
+    let release = (): void => undefined;
+    const gate = async (): Promise<void> => {
+      if (held !== undefined) {
+        await held;
+      }
+    };
+    const store: RecordingCheckpointStore = {
+      putRecordingSession: async (record) => {
+        await gate();
+        return harness.write(async (inner) => inner.putRecordingSession(record));
+      },
+      appendRecordingChunk: async (chunk) => {
+        await gate();
+        return harness.write(async (inner) => inner.appendRecordingChunk(chunk));
+      },
+      listRecordingSessions: async (owner) =>
+        harness.write(async (inner) => inner.listRecordingSessions(owner)),
+      recoverRecording: async (owner, id) =>
+        harness.write(async (inner) => inner.recoverRecording(owner, id)),
+      deleteRecordingSession: async (owner, id) =>
+        harness.write(async (inner) => inner.deleteRecordingSession(owner, id)),
+    };
+    const { transport, bench } = createSimulator({ devices: [] });
+    let rides = 0;
+    const controller = createRideController({
+      transport,
+      store,
+      athleteId: ATHLETE_A,
+      newSessionId: () => {
+        rides += 1;
+        return recordingSessionId(`ride-${String(rides)}`);
+      },
+      now: () => bench.now,
+    });
+    mounted = await mount(<RideView controller={controller} />);
+    await settle();
+
+    await activateWithKeyboard(buttonNamed('Start recording'));
+    await settle();
+    for (let second = 0; second < 3; second += 1) {
+      bench.advance(seconds(1));
+      await controller.tick(bench.now);
+    }
+    await settle();
+
+    held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    controller.armStop();
+    const stopping = controller.confirmStop();
+    await settle();
+    // Straight away, before anything else re-renders the screen…
+    expect(controller.getSnapshot().phase).toBe('stopped');
+    expect(document.body.textContent).toContain('Do not close the tab yet');
+    expect(offered()).toBe(false);
+
+    // …and still so on every tick of the 1 Hz clock while the stop is held.
+    bench.advance(seconds(1));
+    await controller.tick(bench.now);
+    await settle();
+    const text = document.body.textContent;
+    expect(offered()).toBe(false);
+    expect(text).not.toContain('Closing the tab is safe now');
+    expect(text).toContain('Do not close the tab yet');
+
+    held = undefined;
+    release();
+    await stopping;
+    await settle();
+    expect(offered()).toBe(true);
+    expect(document.body.textContent).toContain('Closing the tab is safe now');
+    controller.dispose();
   });
 });
 
