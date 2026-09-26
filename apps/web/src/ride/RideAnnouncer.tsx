@@ -26,6 +26,7 @@
  * | `RideWorkoutSnapshot.fault`, likewise | `workout-fault` | "Heads up: …" |
  * | `RideWorkoutSnapshot.nowRiding`, when it changes | `interval-now` | "Now: …" (#394) |
  * | the next block, `lead` seconds before it | `interval-ahead` | #398's sentence |
+ * | the side camera's link, when it goes (#551) | `side-camera-lost` | `side-camera.ts` §`SIDE_CAMERA_LOST_SENTENCE` |
  *
  * **When something APPEARS or CHANGES, never when it is first rendered** —
  * #394's rule, kept: a screen a rider navigates back to, with control already
@@ -64,8 +65,11 @@ import {
   type PreferenceStorage,
 } from '../game/hud/announce-preference';
 
+import type { SideControlState } from '../camera/side-pairing-port';
+
 import type { RideWorkoutSnapshot, TrainerSnapshot } from './controller';
 import { upcomingBlock } from './lookahead';
+import { sideCameraLost, sideCameraLostEvent } from './side-camera';
 import { LOSS_REASON } from './TrainerPanel';
 
 /** The wall clock, in seconds. */
@@ -74,6 +78,16 @@ const wallSeconds = (): number => performance.now() / 1000;
 export interface RideAnnouncerProps {
   readonly trainer: TrainerSnapshot;
   readonly workout: RideWorkoutSnapshot | undefined;
+  /**
+   * The paired side camera's state, or `undefined` with no pairing — #551.
+   * Its link going is said once, when it goes (`side-camera.ts`
+   * §`sideCameraLostEvent`).
+   *
+   * ⚠️ **Optional, so a caller that stops passing it is green in
+   * `check:wiring`** (§Limits' third entry). `views/RideView.test.tsx` §"#551"
+   * drives the Ride screen and reads the region, which is what pins it.
+   */
+  readonly sideCamera?: SideControlState | undefined;
   /** Where the rider's announcement choice is read from. This device's, by default. */
   readonly storage?: PreferenceStorage | undefined;
   /**
@@ -103,14 +117,20 @@ interface Seen {
   readonly releaseFault: string | undefined;
   readonly fault: string | undefined;
   readonly nowRiding: string | undefined;
+  readonly sideCamera: SideControlState | undefined;
 }
 
-function seenIn(trainer: TrainerSnapshot, workout: RideWorkoutSnapshot | undefined): Seen {
+function seenIn(
+  trainer: TrainerSnapshot,
+  workout: RideWorkoutSnapshot | undefined,
+  sideCamera: SideControlState | undefined,
+): Seen {
   return {
     lost: trainer.lost,
     releaseFault: trainer.releaseFault,
     fault: workout?.fault,
     nowRiding: workout?.nowRiding,
+    sideCamera,
   };
 }
 
@@ -138,12 +158,17 @@ function changes(before: Seen, now: Seen): AnnouncementEvent[] {
   if (now.lost !== before.lost && now.lost !== undefined) {
     events.push({ kind: 'trainer-lost', text: `Control lost: ${LOSS_REASON[now.lost]}` });
   }
+  const side = sideCameraLostEvent(sideCameraLost(before.sideCamera), now.sideCamera);
+  if (side !== undefined) {
+    events.push(side);
+  }
   return events;
 }
 
 export function RideAnnouncer({
   trainer,
   workout,
+  sideCamera,
   storage,
   onEvent,
   clock,
@@ -155,7 +180,7 @@ export function RideAnnouncer({
     readAnnouncementPreference(storage === undefined ? deviceStorage() : storage),
   );
   const announcer = useRef<AnnouncerState>(INITIAL_ANNOUNCER);
-  const seen = useRef<Seen>(seenIn(trainer, workout));
+  const seen = useRef<Seen>(seenIn(trainer, workout, sideCamera));
   /** The boundary last offered, so one change is announced once. */
   const offered = useRef<number | undefined>(undefined);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -204,11 +229,11 @@ export function RideAnnouncer({
   const timeline = workout?.timeline;
   const elapsedSeconds = workout?.elapsedSeconds;
   const status = workout?.status;
-  const { lost, releaseFault, fault, nowRiding } = seenIn(trainer, workout);
+  const { lost, releaseFault, fault, nowRiding } = seenIn(trainer, workout, sideCamera);
 
   useEffect(() => {
-    const events = changes(seen.current, { lost, releaseFault, fault, nowRiding });
-    seen.current = { lost, releaseFault, fault, nowRiding };
+    const events = changes(seen.current, { lost, releaseFault, fault, nowRiding, sideCamera });
+    seen.current = { lost, releaseFault, fault, nowRiding, sideCamera };
     if (
       preference.enabled &&
       lead !== 'never' &&
@@ -223,7 +248,18 @@ export function RideAnnouncer({
       }
     }
     hear.current(events);
-  }, [lost, releaseFault, fault, nowRiding, preference, lead, timeline, elapsedSeconds, status]);
+  }, [
+    lost,
+    releaseFault,
+    fault,
+    nowRiding,
+    sideCamera,
+    preference,
+    lead,
+    timeline,
+    elapsedSeconds,
+    status,
+  ]);
 
   return (
     <p className="oyl-visually-hidden" role="status" data-oyl-announcer="ride">

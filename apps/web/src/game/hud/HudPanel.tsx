@@ -160,6 +160,20 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * ride is.
    */
   readonly sound?: ReactNode;
+  /**
+   * The paired side camera — #551: one line, and *Stop side camera* while the
+   * phone films or the link is lost. `undefined` with no pairing.
+   *
+   * ⚠️ **In the actions panel rather than the notice slot**, and #437 is why:
+   * a notice on a phone takes the route panel's cell, and a line that says
+   * "filming" for a whole ride would take it for the whole ride. What IS in
+   * the notice slot is the exception — a lost link — which `GameView` puts in
+   * {@link notices} and leaves `line` undefined for.
+   *
+   * ⚠️ **Words only** — ADR 0033's *"no preview on the tablet"*.
+   */
+  readonly sideCamera?:
+    { readonly line: string | undefined; readonly onStop: (() => void) | undefined } | undefined;
   readonly standingNotice?:
     | {
         readonly content: ReactNode;
@@ -277,6 +291,43 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
             </button>
           )}
         </div>
+        {/*
+          #551: the side camera's line and its stop, as ONE row under Pause and
+          End ride, so the two a rider presses every ride keep their places.
+
+          ⚠️ **The stop is #400's mute's size, 44 px, and not
+          {@link CONTROL_MINIMUM_PIXELS}**, and that was measured rather than
+          chosen. As a 72 px control on a row of its own the actions panel was
+          236 px tall on a Mac and landed on the route panel at 736×360 and on
+          the rider upright at 360×800 and 360×752; as a 72 px control beside
+          the line it was 203 px on a Mac and 230 px on the CI runner's wider
+          fonts, and ran off a 736×360 stage (`ride.browser.spec.ts`
+          §"#551"). 44 px is SC 2.5.5's (AAA) target, which is what the mute
+          beside it clears; the 72 px floor stays for *Pause* and *End ride*,
+          which a rider presses every ride. Its visible word is "Stop" and its
+          name is "Stop side camera" — the rest is visually hidden, so the
+          name begins with what is seen (SC 2.5.3) and the line beside it says
+          what is stopped.
+
+          ⚠️ With #400's sound controls as well it does not fit any phone
+          viewport; tablets fit. That is #576.
+        */}
+        {props.sideCamera === undefined ? null : (
+          <div className="oyl-hud__side-camera-row">
+            {props.sideCamera.line === undefined ? null : (
+              <p className="oyl-hud__side-camera">{props.sideCamera.line}</p>
+            )}
+            {props.sideCamera.onStop === undefined ? null : (
+              <button
+                type="button"
+                className="oyl-button oyl-button--secondary oyl-hud__side-camera-stop"
+                onClick={props.sideCamera.onStop}
+              >
+                Stop<span className="oyl-visually-hidden"> side camera</span>
+              </button>
+            )}
+          </div>
+        )}
         {props.sound}
       </div>
 

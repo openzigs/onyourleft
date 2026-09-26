@@ -72,6 +72,7 @@ import { useEffect, useRef, useState, type JSX } from 'react';
 import type { Watts } from '@onyourleft/domain';
 import type { WorkoutRecord } from '@onyourleft/store';
 
+import type { SideControlState } from '../camera/side-pairing-port';
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
 import { deviceStorage, type PreferenceStorage } from '../game/hud/announce-preference';
@@ -123,6 +124,12 @@ export interface WorkoutPanelProps {
   readonly sounds?: CueOutput | undefined;
   /** The announcer's clock, in seconds (#445); the wall clock unless a test hands one in. */
   readonly announcerClock?: (() => number) | undefined;
+  /**
+   * The paired side camera's state, for the ride's one region — #551. This
+   * panel holds that region (`RideAnnouncer.tsx`), which is the only reason
+   * a camera's state passes through a workout panel.
+   */
+  readonly sideCamera?: SideControlState | undefined;
 }
 
 export function WorkoutPanel({
@@ -136,6 +143,7 @@ export function WorkoutPanel({
   power,
   sounds,
   announcerClock,
+  sideCamera,
 }: WorkoutPanelProps): JSX.Element {
   const [saved, setSaved] = useState<readonly WorkoutRecord[]>([]);
   const [loadFault, setLoadFault] = useState<string | undefined>(undefined);
@@ -222,6 +230,7 @@ export function WorkoutPanel({
     <RideAnnouncer
       trainer={trainer}
       workout={workout}
+      sideCamera={sideCamera}
       storage={announcements}
       clock={announcerClock}
       // #400: the interval sound, on the block CHANGE — not on the sentence

@@ -220,8 +220,16 @@ describe('never means never — for every announceable reading', () => {
   // #445: the three status kinds were #394's live regions, spoken to every
   // rider with a screen reader whatever they had chosen. Moving them into the
   // one region must not put them behind a switch that is off by default.
-  for (const kind of ['trainer-lost', 'workout-fault', 'interval-now'] as const) {
-    it(`still says ${kind} with the master switch off — #445`, () => {
+  //
+  // #551 adds the side camera's link lost, for the same reason: the Camera
+  // screen spoke the phone's state to every rider (`role="status"`).
+  for (const kind of [
+    'trainer-lost',
+    'workout-fault',
+    'interval-now',
+    'side-camera-lost',
+  ] as const) {
+    it(`still says ${kind} with the master switch off — #445, #551`, () => {
       const { said } = run([{ now: 0, events: [{ kind, text: `${kind} happened.` }] }], {
         ...DEFAULT_ANNOUNCEMENTS,
       });
@@ -313,7 +321,9 @@ describe('priority is an ORDER, not a politeness', () => {
       'interval-now',
       'interval-ahead',
     ]);
-    expect(ALWAYS_SPOKEN).toEqual(PRIORITY.slice(0, 3));
+    // #551: the three safety statuses, then the side camera's lost link —
+    // spoken to everyone, and ranked below the climb (see below).
+    expect(ALWAYS_SPOKEN).toEqual([...PRIORITY.slice(0, 3), 'side-camera-lost']);
     expect(PRIORITY.indexOf('distance-tick')).toBeLessThan(PRIORITY.indexOf('power'));
   });
 
@@ -337,6 +347,38 @@ describe('priority is an ORDER, not a politeness', () => {
       { ...ON, powerEverySeconds: 'never' },
     );
     expect(said[1]).toBe('Climb in 250 metres, 6 percent');
+  });
+});
+
+describe('the side camera’s link lost — #551', () => {
+  it('ranks below the climb and above every reading', () => {
+    const lost = PRIORITY.indexOf('side-camera-lost');
+    expect(lost).toBe(PRIORITY.indexOf('climb-ahead') + 1);
+    for (const reading of ['power-off-target', 'distance-tick', 'power'] as const) {
+      expect(lost).toBeLessThan(PRIORITY.indexOf(reading));
+    }
+  });
+
+  it('wins a window over a distance mark, and loses one to a climb', () => {
+    const lost = { kind: 'side-camera-lost', text: 'Side camera link lost.' } as const;
+    const overReading = run(
+      [
+        { now: 0, remaining: { value: 10.1, unit: 'kilometres' } },
+        { now: 60, remaining: { value: 9.9, unit: 'kilometres' }, events: [lost] },
+      ],
+      { ...ON, powerEverySeconds: 'never' },
+    );
+    expect(overReading.said[1]).toBe('Side camera link lost.');
+    const underClimb = run(
+      [
+        {
+          now: 0,
+          events: [lost, { kind: 'climb-ahead', text: 'Climb in 250 metres, 6 percent' }],
+        },
+      ],
+      { ...ON, powerEverySeconds: 'never' },
+    );
+    expect(underClimb.said[0]).toBe('Climb in 250 metres, 6 percent');
   });
 });
 

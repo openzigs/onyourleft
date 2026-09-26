@@ -63,6 +63,9 @@ import {
   type RideSnapshot,
 } from '../ride/controller';
 import { useRideSnapshot } from '../ride/useRideController';
+import { SideCameraOnRide } from '../ride/SideCameraOnRide';
+import { useSideCamera } from '../ride/useSideCamera';
+import type { SidePairingPort } from '../camera/side-pairing-port';
 import { hrefFor, routeById } from '../shell/routes';
 
 export interface RideViewProps {
@@ -98,6 +101,16 @@ export interface RideViewProps {
    * supplies one, and this is not it.
    */
   readonly analysis?: AnalysisPort | undefined;
+  /**
+   * The tablet's side-camera pairing — #551. Its state is on this screen as
+   * one line, its link going is said once, and it can be stopped from here.
+   * `undefined` where there is no WebRTC, which is also no pairing.
+   *
+   * ⚠️ **Optional, so a shell that stops passing it is green in
+   * `check:wiring`** (§Limits' third entry). `shell/side-camera-on-ride.test.tsx`
+   * drives it through the real shell, which is what pins `AppShell`'s half.
+   */
+  readonly sidePairing?: SidePairingPort | undefined;
 }
 
 /** The pairing buttons, in the order the revision block asks for. */
@@ -108,7 +121,12 @@ const PAIRING_STEPS: readonly { readonly role: PairingRole; readonly label: stri
   { role: 'speed-cadence', label: 'Pair a speed or cadence sensor' },
 ];
 
-export function RideView({ controller, workouts, analysis }: RideViewProps): JSX.Element {
+export function RideView({
+  controller,
+  workouts,
+  analysis,
+  sidePairing,
+}: RideViewProps): JSX.Element {
   if (controller === undefined) {
     return (
       <>
@@ -121,20 +139,30 @@ export function RideView({ controller, workouts, analysis }: RideViewProps): JSX
       </>
     );
   }
-  return <LiveRide controller={controller} workouts={workouts} analysis={analysis} />;
+  return (
+    <LiveRide
+      controller={controller}
+      workouts={workouts}
+      analysis={analysis}
+      sidePairing={sidePairing}
+    />
+  );
 }
 
 function LiveRide({
   controller,
   workouts,
   analysis,
+  sidePairing,
 }: {
   readonly controller: RideController;
   readonly workouts: WorkoutPort | undefined;
   readonly analysis: AnalysisPort | undefined;
+  readonly sidePairing: SidePairingPort | undefined;
 }): JSX.Element {
   const snapshot = useRideSnapshot(controller);
   const thresholdPower = useThresholdPower(analysis);
+  const sideCamera = useSideCamera(sidePairing);
 
   // ⚠️ On mount, because #212's whole point is that a rider who lost a tab is
   // *told* — the recording was always on the device and nothing looked for it.
@@ -180,6 +208,12 @@ function LiveRide({
           {formatDuration(snapshot.movingSeconds)} moving · {snapshot.sampleCount} seconds recorded
         </p>
         <StorageNotice snapshot={snapshot} />
+        {/*
+          #551: after the clock rather than before the controls — #436's
+          review measured what a line above Pause / Stop costs them on a
+          tablet — and rendered only while a phone is paired.
+        */}
+        <SideCameraOnRide state={sideCamera.state} onStop={sideCamera.stop} />
         <RecoveryOffer controller={controller} snapshot={snapshot} />
       </div>
 
@@ -205,6 +239,8 @@ function LiveRide({
           power={livePower(snapshot)}
           port={workouts}
           thresholdPower={thresholdPower}
+          // #551: the ride's one region says the side camera's link going.
+          sideCamera={sideCamera.state}
           onStart={(record) => {
             // ⚠️ Guarded rather than defaulted. The panel does not render a Start
             // control without a threshold, so this is unreachable through the UI

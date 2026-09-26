@@ -639,6 +639,102 @@ test.describe('a ride with sounds on', () => {
 });
 
 /**
+ * #551 — a ride with a tripod phone paired. `?side=filming` puts the side
+ * camera's line and *Stop side camera* in the actions panel, which makes it
+ * taller; `?side=lost` puts the lost link in the notice slot, the HUD's
+ * exception, and keeps the stop. At every overlay viewport: the line, the
+ * stop and the ride's own controls are on screen and uncovered, and no panel
+ * lands on another or on the rider.
+ */
+function sideCameraCollisions(seen: StageMeasurement, viewport: Viewport): string[] {
+  const laidOut = seen.panels.filter((each) => each.box.height > 1);
+  const found = laidOut.filter((each) => !inside(each.box, viewport)).map(describeItem);
+  laidOut.forEach((a, index) => {
+    for (const b of laidOut.slice(index + 1)) {
+      if (overlap(a.box, b.box)) found.push(`${describeItem(a)} × ${describeItem(b)}`);
+    }
+  });
+  found.push(...laidOut.filter((each) => overlap(each.box, riderBox(viewport))).map(describeItem));
+  const pressed = ['control: Pause', 'control: End ride', 'the side camera stop'];
+  found.push(
+    ...pressed
+      .map((name) => named(seen.items, name))
+      .filter((each) => !inside(each.box, viewport) || !each.onTop)
+      .map(describeItem),
+  );
+  // The stop is the mute's size (`HudPanel.tsx` says why), so it is held to
+  // the mute's floor: SC 2.5.5's 44 × 44.
+  const stop = named(seen.items, 'the side camera stop');
+  if (stop.box.width < 44 - SUBPIXEL_TOLERANCE || stop.box.height < 44 - SUBPIXEL_TOLERANCE) {
+    found.push(`${describeItem(stop)} is smaller than 44 × 44`);
+  }
+  return found;
+}
+
+test.describe('a ride with a side camera paired — #551', () => {
+  for (const viewport of OVERLAY_VIEWPORTS) {
+    test(`filming: the line and its stop fit the actions panel — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openRide(page, viewport, '?side=filming');
+      const seen = await measure(page);
+
+      // The apparatus: the line was rendered, in the actions panel, and has a
+      // box. Without this every assertion below is true of a ride with no
+      // pairing at all.
+      const line = named(seen.items, 'the side camera line');
+      expect(line.box.height, describeItem(line)).toBeGreaterThan(0);
+      expect(inside(line.box, viewport) && line.onTop, describeItem(line)).toBe(true);
+      const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
+      expect(actions === undefined ? false : overlap(line.box, actions.box)).toBe(true);
+      // Published rather than bounded, for #512's reason (§"a ride with sounds
+      // on"): the runner's fonts are not a Mac's, and the room above the
+      // panel is what a taller line would eat first.
+      const above = seen.panels
+        .filter((each) => each !== actions && each.box.bottom <= (actions?.box.top ?? 0) + 1)
+        .map((each) => (actions?.box.top ?? 0) - each.box.bottom);
+      const rider = riderBox(viewport);
+      console.log(
+        `side camera filming — ${viewport.name} — actions panel ` +
+          `${(actions?.box.height ?? 0).toFixed(0)} px tall; ` +
+          `${above.length === 0 ? 'nothing above it' : `${Math.min(...above).toFixed(0)} px to the panel above`}; ` +
+          `rider box ends at y = ${rider.bottom.toFixed(0)}, x ${rider.left.toFixed(0)}–${rider.right.toFixed(0)}; ` +
+          `panel from x = ${(actions?.box.left ?? 0).toFixed(0)}, y = ${(actions?.box.top ?? 0).toFixed(0)}`,
+      );
+
+      expect(sideCameraCollisions(seen, viewport)).toEqual([]);
+    });
+
+    test(`lost: the notice and the stop, over nothing — ${viewport.name}`, async ({ page }) => {
+      await openRide(page, viewport, '?side=lost');
+      const seen = await measure(page);
+
+      const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
+      expect(notice?.box.height ?? 0).toBeGreaterThan(20);
+      const text = await page.evaluate(
+        () => document.querySelector('.oyl-hud__notices')?.textContent ?? '',
+      );
+      expect(text).toContain('link lost');
+
+      expect(sideCameraCollisions(seen, viewport)).toEqual([]);
+    });
+  }
+
+  // The control: the same measurement over a line made taller than the room
+  // a short landscape phone has for it must fail. Without this, a line the
+  // measurement never looked at would pass as readily as one that fits.
+  test('the control — a line taller than the room there is fails the same measurement', async ({
+    page,
+  }) => {
+    const shortest = OVERLAY_VIEWPORTS.find((each) => each.height === 360) as Viewport;
+    await openRide(page, shortest, '?side=filming');
+    await page.addStyleTag({ content: '.oyl-hud__side-camera { min-height: 12rem; }' });
+    const seen = await measure(page);
+    expect(sideCameraCollisions(seen, shortest)).not.toEqual([]);
+  });
+});
+
+/**
  * #437 — once the notice is put away, the route panel is back.
  *
  * On a phone the open notice takes the route panel's cell (above), which used

@@ -378,6 +378,8 @@ function viewFor(
           controller={props.rideController}
           workouts={props.workouts}
           analysis={props.analysis}
+          // #551: the side camera's line, its Stop, and its link going said.
+          {...(props.sidePairing === undefined ? {} : { sidePairing: props.sidePairing })}
         />
       );
     case 'activities':
@@ -420,6 +422,9 @@ function viewFor(
           {...(props.camera === undefined ? {} : { camera: props.camera })}
           // #247. The forecast half of the ladder; only the shell supplies one.
           {...(props.thermal === undefined ? {} : { thermal: props.thermal })}
+          // #551. The side camera's line on the HUD, its Stop, and its link
+          // going said through the HUD's one region.
+          {...(props.sidePairing === undefined ? {} : { sidePairing: props.sidePairing })}
         />
       );
     case 'segment-detail':

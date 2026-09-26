@@ -38,6 +38,13 @@ import type {
   SidePictureSent,
 } from './side-camera-link-port';
 import { capturedFrame } from './frame';
+import type { PhoneCommand } from './side-link-messages';
+import type {
+  SideCameraControlPort,
+  SideControlState,
+  SidePairingPort,
+  TabletSidePairing,
+} from './side-pairing-port';
 import type { SidePicture } from './side-link-pictures';
 import { sidePeerParametersFrom, type SidePeerParameters } from './side-link-sdp';
 import type { SideChannel, SideDescription, SidePeer } from './side-link-transport';
@@ -822,4 +829,62 @@ class FakeSidePeer implements ScriptedSidePeer {
       '',
     ].join('\r\n');
   }
+}
+
+/**
+ * A tablet's pairing the test drives — #551. The ride screens only READ a
+ * pairing and send `stop`, so this is the smallest thing that answers
+ * `currentSideCamera` with a control whose state the test sets.
+ *
+ * `set` replaces fields and tells every listener, as `side-link.ts` does on
+ * every change; `commands` records what the tablet sent.
+ */
+export function scriptedSidePairing(initial: Partial<SideControlState> = {}): SidePairingPort & {
+  readonly control: SideCameraControlPort;
+  readonly commands: PhoneCommand[];
+  set(next: Partial<SideControlState>): void;
+} {
+  let state: SideControlState = {
+    phone: 'filming',
+    answered: true,
+    stopReason: undefined,
+    command: undefined,
+    ended: undefined,
+    ...initial,
+  };
+  const listeners = new Set<() => void>();
+  const commands: PhoneCommand[] = [];
+  const control: SideCameraControlPort = {
+    sideControlState: () => state,
+    onSideControlChange: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    commandSideCamera: (command) => {
+      commands.push(command);
+    },
+    endSidePairing: () => undefined,
+    onSideCameraPicture: () => () => undefined,
+    shareFramingReference: () => undefined,
+    shareFramingVerdict: () => undefined,
+  };
+  const pairing: TabletSidePairing = {
+    offerCode: 'scripted-offer',
+    acceptSidePhoneCode: () => Promise.resolve(undefined),
+    control,
+    analysis: undefined,
+  };
+  return {
+    control,
+    commands,
+    set: (next) => {
+      state = { ...state, ...next };
+      for (const listener of [...listeners]) listener();
+    },
+    offerSideCamera: () => Promise.resolve(pairing),
+    currentSideCamera: () => pairing,
+    answerSideCamera: () => Promise.reject(new Error('the scripted pairing is the tablet’s')),
+  };
 }
