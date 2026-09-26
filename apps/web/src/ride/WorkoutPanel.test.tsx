@@ -10,12 +10,17 @@
  */
 
 import {
+  CADENCE_SILENT_REASON,
+  createErgRescue,
   expandWorkout,
+  revolutionsPerMinute,
   seconds,
+  TREND_WINDOW,
   thresholdShare,
   unixSeconds,
   watts,
   type WorkoutBlock,
+  type WorkoutRescue,
 } from '@onyourleft/domain';
 import { athleteId as toAthleteId, workoutId, type WorkoutRecord } from '@onyourleft/store';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -82,6 +87,7 @@ const running = (overrides: Partial<RideWorkoutSnapshot> = {}): RideWorkoutSnaps
   holdingWatts: 150,
   nowRiding: '10 min at 60%',
   fault: undefined,
+  rescue: undefined,
   timeline: expandWorkout({ name: 'Sweet spot', blocks }),
   ...overrides,
 });
@@ -214,5 +220,87 @@ describe('while one is running', () => {
   it('does not offer the library while one is running', async () => {
     const view = await render({ workout: running() });
     expect(buttonSaying(view.container, 'Ride Sweet spot')).toBeUndefined();
+  });
+});
+
+describe('why the target is eased — #585', () => {
+  /**
+   * The rescue's own steps, from the real latch rather than typed here, so
+   * the sentences asserted are the ones `erg-safety.ts` actually produces.
+   */
+  function rescueSteps(): { stalled: WorkoutRescue; silent: WorkoutRescue } {
+    const rescue = createErgRescue();
+    const stall = [
+      { at: seconds(4), cadence: revolutionsPerMinute(30) },
+      { at: seconds(10), cadence: revolutionsPerMinute(4) },
+    ];
+    const stalled = rescue.judge(stall, seconds(10));
+    const silent = rescue.judge(stall, seconds(10 + TREND_WINDOW + 1));
+    if (stalled.kind === 'full' || silent.kind === 'full') throw new Error('expected a rescue');
+    return { stalled, silent };
+  }
+
+  /**
+   * The panel's own section. ⚠️ Not the container: the ride's one announcement
+   * region is rendered first inside it and says the stall too, so a
+   * container-wide "does not contain" would read the region's LAST sentence.
+   */
+  const shown = (root: ParentNode): string => root.querySelector('section')?.textContent ?? '';
+
+  const easedNotice = (root: ParentNode) =>
+    queryAll<HTMLElement>(root, '*').find((element) =>
+      (element.textContent ?? '').startsWith('Eased'),
+    );
+
+  it('says the stall, then the silent sensor, then nothing once the target is back', async () => {
+    const { stalled, silent } = rescueSteps();
+    expect(silent.reason).toBe(CADENCE_SILENT_REASON);
+
+    const view = await render({ workout: running() });
+    expect(shown(view.container)).not.toContain('Eased');
+
+    await view.rerender(
+      <WorkoutPanel
+        trainer={trainer()}
+        workout={running({ rescue: stalled })}
+        port={workoutStub(ATHLETE, [record()])}
+        thresholdPower={watts(250)}
+        onStart={() => undefined}
+        onEnd={() => undefined}
+      />,
+    );
+    let text = shown(view.container);
+    expect(text).toContain(stalled.reason);
+    // The floor's way back is two steps, and the way out is the panel's button.
+    expect(text).toContain('steps up to a lighter target first');
+    expect(text).toContain('Press End workout to leave it.');
+    expect(easedNotice(view.container)).toBeDefined();
+
+    await view.rerender(
+      <WorkoutPanel
+        trainer={trainer()}
+        workout={running({ rescue: silent })}
+        port={workoutStub(ATHLETE, [record()])}
+        thresholdPower={watts(250)}
+        onStart={() => undefined}
+        onEnd={() => undefined}
+      />,
+    );
+    text = shown(view.container);
+    expect(text).toContain(CADENCE_SILENT_REASON);
+    expect(text).not.toContain(stalled.reason);
+
+    await view.rerender(
+      <WorkoutPanel
+        trainer={trainer()}
+        workout={running({ rescue: undefined })}
+        port={workoutStub(ATHLETE, [record()])}
+        thresholdPower={watts(250)}
+        onStart={() => undefined}
+        onEnd={() => undefined}
+      />,
+    );
+    expect(shown(view.container)).not.toContain('Eased');
+    expect(shown(view.container)).not.toContain(CADENCE_SILENT_REASON);
   });
 });

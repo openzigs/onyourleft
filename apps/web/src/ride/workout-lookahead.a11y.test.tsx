@@ -72,6 +72,7 @@ function at(elapsedSeconds: number, status: RideWorkoutSnapshot['status'] = 'run
     holdingWatts: 150,
     nowRiding: '10 min at 60%',
     fault: undefined,
+    rescue: undefined,
     timeline: TIMELINE,
   } satisfies RideWorkoutSnapshot;
 }

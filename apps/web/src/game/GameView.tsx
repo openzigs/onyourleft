@@ -103,8 +103,14 @@ import type { GameRenderer, GameView as RendererView } from './port';
 import { NO_SENSORS, type GameSensors } from './sensors';
 import { speedUnit, spokenDistanceUnit } from '../units/format';
 import {
+  EASED_SPOKEN_PREFIX,
+  isEasedAnnouncement,
+  workoutRescueText,
+} from '../workout/rescue-text';
+import {
   announce,
   INITIAL_ANNOUNCER,
+  withdrawPending,
   remainingFrom,
   type AnnouncementEvent,
   type AnnouncerState,
@@ -138,6 +144,7 @@ import {
   type Kilograms,
   type RouteProfile,
   type Wind,
+  type WorkoutRescue,
 } from '@onyourleft/domain';
 
 /** One route the rider could ride, as the picker needs it. */
@@ -517,6 +524,16 @@ export function GameView(props: GameViewProps): JSX.Element {
   const shadowMapRef = useRef(false);
   const gradientFaultRef = useRef<string | undefined>(undefined);
   /**
+   * The running workout's eased sentence last seen, so one is said once — #585.
+   * A workout started on the Ride screen keeps ticking while the rider is in
+   * the game, and its stall rescue can ease the trainer mid-ride; this is what
+   * the loop compares against, and the HUD's notice reads the port directly.
+   * Cleared when a ride starts, so a rescue already in force is said as the
+   * ride begins — on the frame AFTER the road notice's, for the reason at the
+   * comparison in `tick`.
+   */
+  const easedRef = useRef<string | undefined>(undefined);
+  /**
    * The side camera — #551. The hook is what re-renders the HUD when the
    * phone's state changes, including while the ride is paused and the loop is
    * not running; the ref is what the loop reads, so `tick` does not re-run
@@ -852,6 +869,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       roadNoticeRef.current =
         notice === undefined ? undefined : `The road is not reaching your trainer: ${notice}`;
       gradientFaultRef.current = undefined;
+      easedRef.current = undefined;
       gradientRef.current =
         found.control === undefined
           ? undefined
@@ -1099,6 +1117,9 @@ export function GameView(props: GameViewProps): JSX.Element {
       // #445: the trainer's sentences go through the SAME core, so the order in
       // `announce.ts` is the order a rider hears. @see roadNoticeRef
       const events: AnnouncementEvent[] = [];
+      // #585: the road notice's frame is the one frame the eased sentence
+      // must wait out — see below.
+      const noticeThisFrame = roadNoticeRef.current !== undefined;
       if (roadNoticeRef.current !== undefined) {
         events.push({ kind: 'trainer-lost', text: roadNoticeRef.current });
         roadNoticeRef.current = undefined;
@@ -1107,6 +1128,26 @@ export function GameView(props: GameViewProps): JSX.Element {
       if (fault !== gradientFaultRef.current) {
         gradientFaultRef.current = fault;
         if (fault !== undefined) events.push({ kind: 'trainer-lost', text: `Trainer: ${fault}` });
+      }
+      // #585: a workout's stall rescue, as `workout-fault` — the Ride screen's
+      // kind for the same sentence (`ride/RideAnnouncer.tsx`), said when it
+      // appears or its reason changes and never when it clears.
+      //
+      // ⚠️ **Not on the road notice's frame.** A workout that owns the trainer
+      // always HAS a road notice, and `announce.ts` DROPS the lower of two
+      // events in one call rather than queueing it — so a rescue already in
+      // force when the ride starts was compared, recorded as said, and never
+      // said. Left for the next frame, it waits for the window instead.
+      const eased = easedText(trainerPortRef.current?.workoutRescue());
+      if (!noticeThisFrame && eased !== easedRef.current) {
+        easedRef.current = eased;
+        if (eased !== undefined) {
+          events.push({ kind: 'workout-fault', text: `${EASED_SPOKEN_PREFIX}${eased}` });
+        } else {
+          // Cleared while its sentence was still waiting for the window: take
+          // it back, or "Eased" is said after the full target is back (N1).
+          announcerRef.current = withdrawPending(announcerRef.current, isEasedAnnouncement);
+        }
       }
       if (slope.event !== undefined) events.push(slope.event);
       // #551: the side camera's link going, once, when it goes.
@@ -1359,7 +1400,25 @@ export function GameView(props: GameViewProps): JSX.Element {
   // ⚠️ Read during render rather than held in state — see {@link gradientRef}.
   // The tick's own `setState` is what schedules this render, so it is fresh.
   const gradient = gradientRef.current?.state();
-  const roadNotice = trainerRoadNotice(trainer, 'riding');
+  // #585: read during render, like `sensors` above — the tick's `setState` is
+  // what schedules this render, so it is as fresh as the frame.
+  const eased = easedText(props.trainer?.workoutRescue());
+  // ⚠️ **ONE notice cell on a phone, so the Eased notice takes it from the
+  // road notice while a rescue is in force** — PR #599's review, finding B1.
+  // A running workout ALWAYS has a road notice, and on a phone both sentences
+  // share the route panel's cell (`theme.css` §"WHERE THERE IS NO FREE
+  // CELL"): measured in the pinned Chromium, the two together were 309 px tall
+  // at 844×390 and 736×360 and pushed *Pause* and *End ride* below the stage —
+  // a stalled rider who could not reach End ride — and upright they ran over
+  // the rider. So while the workout is eased the road notice is not on the HUD
+  // at all, its *Trainer notice* control included, and comes back, in
+  // whatever state the rider's choice and the ride's clock give it, once the
+  // rescue clears. Nothing a rider needs is lost: the Eased sentence ends in
+  // the road notice's own way out (*"End the workout on the Ride screen"*),
+  // the road notice was said at the start of the ride, and a target held at
+  // the trainer's lowest is not a road being felt either way.
+  // `ride.browser.spec.ts` §"#585" measures it at every overlay viewport.
+  const roadNotice = eased === undefined ? trainerRoadNotice(trainer, 'riding') : undefined;
   // #437: open for the first STANDING_NOTICE_SECONDS of ride, then out of the
   // way unless the rider asks for it — on the RIDE's clock, so a paused ride
   // does not put away a notice nobody has had time to read.
@@ -1470,6 +1529,22 @@ export function GameView(props: GameViewProps): JSX.Element {
               {gradient.fault}
             </StatusMessage>
           ),
+          // #585: a running workout's stall rescue, and why. After the Trainer
+          // fault and before the side camera, in `announce.ts`'s order
+          // (`workout-fault` is rank 2). Not `live`: the HUD's one region says it.
+          //
+          // ⚠️ **On a phone it takes the route panel's cell for as long as the
+          // rescue holds**, which is the trade #551 made for a lost side-camera
+          // link, and for its reason: it is a thing happening to the machine
+          // under the rider NOW, so it is not a notice to put away. It ends by
+          // itself — the rescue clears on a whole window of steady cadence, or
+          // the workout is ended — and the route panel comes back with it.
+          // The road notice gives way to it meanwhile: see `roadNotice` above.
+          eased === undefined ? undefined : (
+            <StatusMessage key="workout-eased" tone="warning" label="Eased">
+              {eased}
+            </StatusMessage>
+          ),
           // #551: the side camera's link lost, in the notice slot the HUD
           // gives an exception. Not `live`: the HUD's one region says it.
           //
@@ -1521,6 +1596,11 @@ function sideCameraOnHud(
     line: line === 'lost' ? undefined : sideCameraLine(line),
     onStop: sideCameraStoppable(sideCamera.state) ? sideCamera.stop : undefined,
   };
+}
+
+/** A workout's stall rescue as the HUD says it, or nothing — #585. */
+function easedText(rescue: WorkoutRescue | undefined): string | undefined {
+  return rescue === undefined ? undefined : workoutRescueText(rescue, 'game');
 }
 
 /**

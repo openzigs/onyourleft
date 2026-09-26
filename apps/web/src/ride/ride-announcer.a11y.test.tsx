@@ -18,7 +18,16 @@
 import { act } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { expandWorkout, seconds, thresholdShare, type WorkoutBlock } from '@onyourleft/domain';
+import {
+  CADENCE_SILENT_REASON,
+  expandWorkout,
+  RECOVERING_REASON,
+  RELIEF_SHARE,
+  seconds,
+  thresholdShare,
+  type WorkoutBlock,
+  type WorkoutRescue,
+} from '@onyourleft/domain';
 
 import { mount, settle, type Mounted } from '../testing/mount';
 import { RideView } from '../views/RideView';
@@ -39,6 +48,7 @@ const workout = (overrides: Partial<RideWorkoutSnapshot> = {}): RideWorkoutSnaps
   holdingWatts: 150,
   nowRiding: '10 min at 60%',
   fault: undefined,
+  rescue: undefined,
   timeline: expandWorkout({ name: 'Sweet spot', blocks }),
   ...overrides,
 });
@@ -229,5 +239,108 @@ describe('a sentence waiting for the window is said when it opens — #445', () 
       await Promise.resolve();
     });
     expect(region()).toMatch(/^Control lost: The trainer took control back/);
+  });
+});
+
+describe('a workout’s eased target is said when it appears and when its reason changes — #585', () => {
+  const STALLED: WorkoutRescue = {
+    kind: 'floor',
+    reason: 'Pedalling has stopped, so the target has been dropped to the trainer’s lowest.',
+  };
+  const SILENT: WorkoutRescue = { kind: 'floor', reason: CADENCE_SILENT_REASON };
+  const RECOVERING: WorkoutRescue = {
+    kind: 'relief',
+    share: RELIEF_SHARE,
+    reason: RECOVERING_REASON,
+  };
+
+  it('says the stall through the one region, and shows it without a second voice', async () => {
+    const stub = await ride();
+    await change(stub, { workout: workout({ rescue: STALLED }) });
+
+    expect(region()).toMatch(/^Eased: Pedalling has stopped/);
+    expect(region()).toContain('Press End workout to leave it.');
+    expect(
+      voices().filter((each) => (each.textContent ?? '').includes('Pedalling has stopped')),
+      'said by more than one region',
+    ).toHaveLength(1);
+    const shown = [...document.querySelectorAll('.oyl-status')].find((each) =>
+      (each.textContent ?? '').includes('Pedalling has stopped'),
+    );
+    expect(shown, 'a sighted rider cannot see why it is eased').toBeDefined();
+  });
+
+  it('says the silent sensor when the reason changes, and nothing when it clears', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let now = 100;
+    const trainer = ridingSnapshot().trainer;
+    const panel = (w: RideWorkoutSnapshot) => (
+      <WorkoutPanel
+        trainer={trainer}
+        workout={w}
+        onStart={() => undefined}
+        onEnd={() => undefined}
+        announcerClock={() => now}
+      />
+    );
+    mounted = await mount(panel(workout()));
+    await mounted.rerender(panel(workout({ rescue: STALLED })));
+    expect(region()).toMatch(/^Eased: Pedalling has stopped/);
+
+    now = 110;
+    await mounted.rerender(panel(workout({ rescue: SILENT })));
+    expect(region()).toMatch(/^Eased: No cadence is being reported/);
+
+    now = 120;
+    await mounted.rerender(panel(workout({ rescue: RECOVERING })));
+    expect(region()).toMatch(/^Eased: Cadence is recovering/);
+
+    now = 130;
+    await mounted.rerender(panel(workout({ rescue: undefined })));
+    // Clearing is felt, not said: the region keeps its last sentence.
+    expect(region()).toMatch(/^Eased: Cadence is recovering/);
+  });
+
+  it('does not say a rescue that cleared while its sentence was waiting — PR #599, N1', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let now = 100;
+    const trainer = ridingSnapshot().trainer;
+    const panel = (w: RideWorkoutSnapshot) => (
+      <WorkoutPanel
+        trainer={trainer}
+        workout={w}
+        onStart={() => undefined}
+        onEnd={() => undefined}
+        announcerClock={() => now}
+      />
+    );
+    mounted = await mount(panel(workout()));
+    // Something said at 100, so the window is shut when the rescue arrives.
+    await mounted.rerender(panel(workout({ fault: 'The trainer did not answer.' })));
+    expect(region()).toMatch(/^Heads up: The trainer did not answer/);
+
+    now = 101;
+    await mounted.rerender(
+      panel(workout({ fault: 'The trainer did not answer.', rescue: STALLED })),
+    );
+    now = 102;
+    await mounted.rerender(panel(workout({ fault: 'The trainer did not answer.' })));
+
+    // The window opens, and the timer that was waiting for it fires.
+    now = 110;
+    await act(async () => {
+      vi.runAllTimers();
+      await Promise.resolve();
+    });
+    expect(region()).toMatch(/^Heads up: The trainer did not answer/);
+  });
+
+  it('is not announced again on a screen that appears with the target already eased', async () => {
+    const stub = stubRideController({ ...ridingSnapshot(), workout: workout({ rescue: STALLED }) });
+    mounted = await mount(<RideView controller={stub.controller} />);
+    await settle();
+
+    expect(region()).toBe('');
+    expect(document.body.textContent).toContain('Pedalling has stopped');
   });
 });

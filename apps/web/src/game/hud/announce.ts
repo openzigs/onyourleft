@@ -42,7 +42,8 @@
  * |---|---|---|
  * | `trainer-lost` | `ride/RideAnnouncer.tsx` | `TrainerSnapshot.lost` ("Control lost") and `.releaseFault` ("Not released") |
  * | `trainer-lost` | `GameView` | the road notice at the start of a ride, and a refused gradient write — which is how control lost ARRIVES in the game (`GameView` §`trainer`) |
- * | `workout-fault` | `ride/RideAnnouncer.tsx` | `RideWorkoutSnapshot.fault` |
+ * | `workout-fault` | `ride/RideAnnouncer.tsx` | `RideWorkoutSnapshot.fault`, and `.rescue` as "Eased: …" (#585) |
+ * | `workout-fault` | `GameView` | a running workout's stall rescue, through `GameTrainerPort.workoutRescue` (#585) |
  * | `interval-now` | `ride/RideAnnouncer.tsx` | `RideWorkoutSnapshot.nowRiding`, as it changes |
  * | `interval-ahead` | `ride/RideAnnouncer.tsx` | `ride/lookahead.ts` |
  * | `climb-ahead` | `GameView` | `hud/climb-ahead.ts` |
@@ -245,6 +246,26 @@ export interface Announcement {
 }
 
 const rank = (kind: AnnouncementKind): number => PRIORITY.indexOf(kind);
+
+/**
+ * The same state with its waiting event taken back, when `stale` says it is no
+ * longer true — PR #599's review, N1. Pure, like {@link announce}.
+ *
+ * An event waits for the window rather than being dropped, because it is
+ * safety; the cost is that one which stopped being true while it waited is
+ * still said, up to {@link ANNOUNCE_WINDOW_SECONDS} late. The one caller that
+ * knows a sentence has gone stale is the one that produced it — a workout's
+ * "Eased: …" once the rescue has cleared — so it asks for it back here rather
+ * than this module guessing from the text.
+ */
+export function withdrawPending(
+  state: AnnouncerState,
+  stale: (event: AnnouncementEvent) => boolean,
+): AnnouncerState {
+  return state.pending !== undefined && stale(state.pending)
+    ? { ...state, pending: undefined }
+    : state;
+}
 
 /**
  * The spoken form of the power reading. ⚠️ A dropped sensor is "no power

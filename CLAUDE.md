@@ -325,7 +325,14 @@ apps/                 AGPL-3.0-or-later, without exception
     src/views/          one component per route (#48)
     src/workout/        the workout control loop (#14) — the one place the
                         player's decisions meet a trainer's control point,
-                        driven end to end against the #44 simulator
+                        driven end to end against the #44 simulator; and
+                        since #585 `rescue-text.ts`, the ONE sentence both
+                        screens show and say while a stall rescue holds a
+                        workout's target down. ⚠️ On a phone the game's
+                        "Eased" notice takes the notice cell from the road
+                        notice while the rescue holds (`GameView.tsx`
+                        §`roadNotice`); `ride.html?rescue=floor` is the
+                        browser gate that measures it
     src/workouts/       the workout library and builder (#14) — the read
                         budget, the row model that quotes no watts, the one
                         place a typed percentage becomes a share, and since
@@ -3640,6 +3647,7 @@ top of an issue **supersedes its body**.
 | How the ERG spiral of death is told apart from a rider grinding on purpose | `packages/domain/src/workout/erg-safety.ts` §`assessErgCadence` |
 | Why a target typed into the Ride screen's ERG form is eased when the rider stalls, and why it goes back on by itself | `apps/web/src/ride/manual-erg.ts`, `packages/domain/src/workout/erg-safety.ts` §`createErgRescue`, [#567](https://github.com/openzigs/onyourleft/issues/567) |
 | Why a silent cadence sensor neither ends a stall rescue nor steps it up | `packages/domain/src/workout/erg-safety.ts` §`ErgRescue` |
+| Why a workout says why its target is eased, on the Ride screen and in the game, and why the game waits a frame to say it | `packages/domain/src/workout/player.ts` §`PlayerState.rescue`, `apps/web/src/workout/rescue-text.ts`, `apps/web/src/game/GameView.tsx` §`easedRef`, [#585](https://github.com/openzigs/onyourleft/issues/585) |
 | Why the workout clock keeps running while a target is unacknowledged, and what waits instead | `packages/domain/src/workout/player.ts` §"An interval has not begun until its target is acknowledged" |
 | Why a quantised acknowledgement is not a change, and the busy loop that follows from reading it as one | `packages/domain/src/workout/player.ts` §`acknowledge` |
 | Why an acknowledged, unchanged ERG target is not written again, and what notices a trainer that lost the session instead | `packages/domain/src/workout/player.ts` §"An acknowledged target is not written again (#542)", [#542](https://github.com/openzigs/onyourleft/issues/542) |

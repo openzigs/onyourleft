@@ -2176,6 +2176,19 @@ select option {
  * as a sighted one loses the picture, which is the honest equivalence — and
  * since #437 "as long as" is until the notice is put away, not the whole ride.
  *
+ * ⚠️ **Two notices do not share this cell, and one of them is not put away.**
+ * A running workout's stall rescue (#585) is an *"Eased"* notice among the
+ * faults, and a workout that owns the trainer always has the road notice too:
+ * the two together were 309 px tall at 844×390 and 736×360, and put *Pause*
+ * and *End ride* below the stage. So `GameView` §`roadNotice` takes the road
+ * notice, and its control, off the HUD while the rescue holds, and the Eased
+ * notice has this cell alone. **What that costs, recorded as #419 asks: on a
+ * phone the elevation strip and the plan view are not shown for as long as a
+ * workout is eased**, the trade #551 made for a lost side-camera link and for
+ * its reason — it is the machine under the rider now, not a thing to put away,
+ * and it ends by itself. `ride.browser.spec.ts` §"#585" measures it at every
+ * overlay viewport, with the two notices together as its control.
+ *
  * ⚠️ **One limit, stated rather than gated.** Upright on a phone at the very
  * bottom of the column layout's range — 752 px tall — a notice of the longest
  * kind ends within a few pixels of the top of the rider's helmet, and on a

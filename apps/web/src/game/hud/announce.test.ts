@@ -37,6 +37,7 @@ import {
   announce,
   remainingFrom,
   spokenPower,
+  withdrawPending,
   type AnnounceInput,
   type AnnouncerState,
 } from './announce';
@@ -526,5 +527,38 @@ describe('no text-to-speech anywhere in the client', () => {
       /speechSynthesis|SpeechSynthesisUtterance/.test(stripComments(readFileSync(file, 'utf8'))),
     );
     expect(found.map((file) => relative(ROOTS[0] ?? '', file))).toEqual([]);
+  });
+});
+
+describe('a waiting event can be taken back once it is no longer true — PR #599, N1', () => {
+  const quiet = { now: 0, readings: [], preference: ON };
+  // Something said at 0, so the next event waits for the window.
+  const busy = announce(INITIAL_ANNOUNCER, {
+    ...quiet,
+    events: [{ kind: 'trainer-lost', text: 'The road is not reaching your trainer' }],
+  }).state;
+  const waiting = announce(busy, {
+    ...quiet,
+    now: 1,
+    events: [{ kind: 'workout-fault', text: 'Eased: Pedalling has stopped.' }],
+  }).state;
+
+  it('withdraws the waiting event the caller says is stale, so the window opens on nothing', () => {
+    // The apparatus: it really was waiting, and would have been said.
+    expect(waiting.pending?.text).toBe('Eased: Pedalling has stopped.');
+    expect(announce(waiting, { ...quiet, now: ANNOUNCE_WINDOW_SECONDS + 1 }).sentence).toBe(
+      'Eased: Pedalling has stopped.',
+    );
+
+    const withdrawn = withdrawPending(waiting, (event) => event.text.startsWith('Eased: '));
+    expect(withdrawn.pending).toBeUndefined();
+    expect(announce(withdrawn, { ...quiet, now: ANNOUNCE_WINDOW_SECONDS + 1 }).sentence).toBe(
+      undefined,
+    );
+  });
+
+  it('leaves a waiting event the caller does not name exactly where it was', () => {
+    expect(withdrawPending(waiting, () => false)).toBe(waiting);
+    expect(withdrawPending(busy, () => true)).toBe(busy);
   });
 });

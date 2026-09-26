@@ -24,6 +24,7 @@
  * | `TrainerSnapshot.lost`, when it appears or changes | `trainer-lost` | "Control lost: …", the words `TrainerPanel` shows |
  * | `TrainerSnapshot.releaseFault`, likewise | `trainer-lost` | "Not released: …" |
  * | `RideWorkoutSnapshot.fault`, likewise | `workout-fault` | "Heads up: …" |
+ * | `RideWorkoutSnapshot.rescue`, when it appears or its reason changes (#585) | `workout-fault` | "Eased: …", the words `WorkoutPanel` shows |
  * | `RideWorkoutSnapshot.nowRiding`, when it changes | `interval-now` | "Now: …" (#394) |
  * | the next block, `lead` seconds before it | `interval-ahead` | #398's sentence |
  * | the side camera's link, when it goes (#551) | `side-camera-lost` | `side-camera.ts` §`SIDE_CAMERA_LOST_SENTENCE` |
@@ -55,6 +56,7 @@ import {
   ANNOUNCE_WINDOW_SECONDS,
   announce,
   INITIAL_ANNOUNCER,
+  withdrawPending,
   type AnnouncementEvent,
   type AnnouncementKind,
   type AnnouncerState,
@@ -66,6 +68,11 @@ import {
 } from '../game/hud/announce-preference';
 
 import type { SideControlState } from '../camera/side-pairing-port';
+import {
+  EASED_SPOKEN_PREFIX,
+  isEasedAnnouncement,
+  workoutRescueText,
+} from '../workout/rescue-text';
 
 import type { RideWorkoutSnapshot, TrainerSnapshot } from './controller';
 import { upcomingBlock } from './lookahead';
@@ -117,6 +124,8 @@ interface Seen {
   readonly lost: TrainerSnapshot['lost'];
   readonly releaseFault: string | undefined;
   readonly fault: string | undefined;
+  /** The workout's eased sentence (#585), so a change of REASON is a change. */
+  readonly eased: string | undefined;
   readonly nowRiding: string | undefined;
   readonly sideCamera: SideControlState | undefined;
 }
@@ -130,6 +139,8 @@ function seenIn(
     lost: trainer.lost,
     releaseFault: trainer.releaseFault,
     fault: workout?.fault,
+    eased:
+      workout?.rescue === undefined ? undefined : workoutRescueText(workout.rescue, 'ride-screen'),
     nowRiding: workout?.nowRiding,
     sideCamera,
   };
@@ -152,6 +163,14 @@ function changes(before: Seen, now: Seen): AnnouncementEvent[] {
   }
   if (now.fault !== before.fault && now.fault !== undefined) {
     events.push({ kind: 'workout-fault', text: `Heads up: ${now.fault}` });
+  }
+  // #585: the stall rescue, as `workout-fault` — rank 2 and spoken with
+  // announcements off, because it is the machine under the rider holding a
+  // different target from the workout's. Said when it appears or its reason
+  // changes (a stall going silent, a relief recovering), never when it clears:
+  // the full target coming back is felt, and the panel stops saying it.
+  if (now.eased !== before.eased && now.eased !== undefined) {
+    events.push({ kind: 'workout-fault', text: `${EASED_SPOKEN_PREFIX}${now.eased}` });
   }
   if (now.releaseFault !== before.releaseFault && now.releaseFault !== undefined) {
     events.push({ kind: 'trainer-lost', text: `Not released: ${now.releaseFault}` });
@@ -230,11 +249,24 @@ export function RideAnnouncer({
   const timeline = workout?.timeline;
   const elapsedSeconds = workout?.elapsedSeconds;
   const status = workout?.status;
-  const { lost, releaseFault, fault, nowRiding } = seenIn(trainer, workout, sideCamera);
+  const { lost, releaseFault, fault, eased, nowRiding } = seenIn(trainer, workout, sideCamera);
 
   useEffect(() => {
-    const events = changes(seen.current, { lost, releaseFault, fault, nowRiding, sideCamera });
-    seen.current = { lost, releaseFault, fault, nowRiding, sideCamera };
+    const events = changes(seen.current, {
+      lost,
+      releaseFault,
+      fault,
+      eased,
+      nowRiding,
+      sideCamera,
+    });
+    // Cleared while its sentence was still waiting for the window: take it
+    // back, or "Eased" is said after the full target is back (PR #599's
+    // review, N1).
+    if (seen.current.eased !== undefined && eased === undefined) {
+      announcer.current = withdrawPending(announcer.current, isEasedAnnouncement);
+    }
+    seen.current = { lost, releaseFault, fault, eased, nowRiding, sideCamera };
     if (
       preference.enabled &&
       lead !== 'never' &&
@@ -253,6 +285,7 @@ export function RideAnnouncer({
     lost,
     releaseFault,
     fault,
+    eased,
     nowRiding,
     sideCamera,
     preference,

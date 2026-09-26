@@ -174,7 +174,7 @@ function trainerPort(
   return gameTrainerPortOver({
     getSnapshot: () => ({
       trainer: facts,
-      workout: workoutRunning ? { status: 'running' } : undefined,
+      workout: workoutRunning ? { status: 'running', rescue: undefined } : undefined,
     }),
     simulationControl: () => control,
     requestTrainerControl: async () => {
@@ -567,6 +567,7 @@ describe('the Ride press asks the trainer for control — #503', () => {
         requests.push(requests.length);
         return fails ? Promise.reject(new Error('Control Not Permitted')) : Promise.resolve();
       },
+      workoutRescue: () => undefined,
     };
   }
 
@@ -868,6 +869,7 @@ describe('a press on Ride while the trainer is being asked — #509', () => {
             waiting.push(resolve);
           });
         },
+        workoutRescue: () => undefined,
       },
       grant: () => {
         granted = true;

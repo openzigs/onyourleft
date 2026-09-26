@@ -79,6 +79,7 @@ const GAME: GamePort = {
 const NO_CONTROL: GameTrainerPort = {
   // #503: the Ride press's request for control — this double changes nothing.
   askForControlOnRide: () => Promise.resolve(),
+  workoutRescue: () => undefined,
   readTrainer: () => ({ kind: 'no-control', control: undefined }),
 };
 

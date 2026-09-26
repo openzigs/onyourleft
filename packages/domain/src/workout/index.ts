@@ -58,5 +58,6 @@ export type {
   PlayerStatus,
   RiderSample,
   WorkoutPlayer,
+  WorkoutRescue,
 } from './player';
 export { createWorkoutPlayer } from './player';
