@@ -41,8 +41,8 @@
  *    side, eversion or inversion, a tilt of the pelvis, hips or shoulders, and
  *    "frontal" itself. ⚠️ **Narrowed to a body since #564**, each with a
  *    fixture that must NOT fire: inversion only of a foot or an ankle (not a
- *    temperature or a colour inversion), shoulders that are level only when
- *    they are somebody's (not a road's hard shoulder), and a lateral shift or
+ *    temperature or a colour inversion), shoulders that are level unless they
+ *    are a road's ("the road shoulder", "the hard shoulder"), and a lateral shift or
  *    movement of anything but the camera, its stand, the picture or the road.
  *
  * ## Invisible characters are removed before anything is matched
@@ -166,21 +166,25 @@ const FRONTAL_PLANE = new RegExp(
       'invert(?:s|ed|ing)?\\s+(?:foot|feet|ankles?)',
       '(?:foot|feet|ankles?)\\s+invert(?:s|ed|ing)?',
       // D-4: "shoulder levelness", in the shapes a sentence would take.
-      // "shoulder levelness", "your shoulders were possibly less level":
-      // up to three words between, so an adverb cannot walk it past. The
-      // sentence form needs a body's shoulder — somebody's — because a road
-      // has one too, and "the road shoulder is level with the verge" is about
-      // tarmac (#564).
-      'shoulders?\\s+levelness',
-      "(?:your|their|his|her|my|rider[’']s)\\s+shoulders?\\s+(?:[a-z]+\\s+){0,3}(?:un)?level(?:ness)?",
+      // "shoulder levelness", "your shoulders were possibly less level",
+      // "the shoulders were less level": up to three words between, so an
+      // adverb cannot walk it past. Only a ROAD's shoulder is excused — "the
+      // road shoulder is level with the verge", "the hard shoulder" — because
+      // that is tarmac (#564). A body's shoulder needs no possessive: an
+      // earlier narrowing to "your|their|…" let "Shoulders stayed level"
+      // through (#587's review).
+      '(?<!(?:road|hard)\\s+)shoulders?\\s+(?:[a-z]+\\s+){0,3}(?:un)?level(?:ness)?',
       'level\\s+shoulders?',
       'uneven\\s+shoulders?',
       '(?:pelvi[cs]|hips?|shoulders?)\\s+tilt(?:s|ing|ed)?',
       // D-4: "lateral sway", and any other lateral movement of a body — but
       // not of the camera, its stand or the picture, which a framing
       // instruction may well describe (#564). The bicycle is NOT excused: a
-      // bike rocking under a rider is the rider's frontal plane.
-      'lateral(?:ly)?\\s+(?:sway|movement|motion|shift|tilt|drop)(?!\\s+of\\s+(?:the\\s+|your\\s+)?(?:camera|phone|tablet|tripod|stand|picture|image|frame|view|screen|road))',
+      // bike rocking under a rider is the rider's frontal plane. ⚠️ Nor is a
+      // bare "frame", which in a cycling app is the bicycle's as often as the
+      // picture's (#587's review): "the camera frame" and "the picture frame"
+      // are still excused, by the word before it.
+      'lateral(?:ly)?\\s+(?:sway|movement|motion|shift|tilt|drop)(?!\\s+of\\s+(?:the\\s+|your\\s+)?(?:camera|phone|tablet|tripod|stand|picture|image|view|screen|road))',
       'frontal',
     ].join('|') +
     ')\\b',
@@ -365,13 +369,29 @@ export interface JsxElementText {
  * is joined. A JSX attribute is read on its own by {@link textsIn}, not here.
  */
 export function jsxElementTextsIn(file: string, source: string): readonly JsxElementText[] {
-  return jsxElementTextsOf(parse(file, source));
+  return jsxElementTextsOf(parse(file, source)).map(({ line, text, pieces }) => ({
+    line,
+    text,
+    pieces,
+  }));
+}
+
+/** Where an element's text is broken by something the scan cannot read. */
+const BREAK = '\u0000';
+
+/** An element's parts, breaks included, joined as they render. */
+function joinedParts(parts: readonly string[]): string {
+  return parts.join('').split(BREAK).join(' ${…} ').replace(/\s+/g, ' ').trim();
+}
+
+/** {@link JsxElementText}, with the parts it was joined from, breaks included. */
+interface JsxElementParts extends JsxElementText {
+  readonly parts: readonly string[];
 }
 
 /** {@link jsxElementTextsIn} over a tree already parsed. A `.ts` file holds no JSX. */
-function jsxElementTextsOf(parsed: ts.SourceFile): readonly JsxElementText[] {
-  const found: JsxElementText[] = [];
-  const BREAK = '\u0000';
+function jsxElementTextsOf(parsed: ts.SourceFile): readonly JsxElementParts[] {
+  const found: JsxElementParts[] = [];
   const collect = (children: ts.NodeArray<ts.JsxChild>, pieces: string[]): void => {
     for (const child of children) {
       if (ts.isJsxText(child)) {
@@ -390,8 +410,12 @@ function jsxElementTextsOf(parsed: ts.SourceFile): readonly JsxElementText[] {
             : BREAK,
         );
       } else {
-        // A self-closing element renders no text of its own.
-        pieces.push(BREAK);
+        // A self-closing element renders no text of its own — except the two
+        // that render as a gap and as nothing, which join the words beside
+        // them rather than break them (#587's review): `<p>hip<br/>drop</p>`
+        // is "hip" and "drop" on adjacent lines.
+        const tag = child.tagName.getText(parsed);
+        pieces.push(tag === 'br' ? ' ' : tag === 'wbr' ? '' : BREAK);
       }
     }
   };
@@ -406,12 +430,12 @@ function jsxElementTextsOf(parsed: ts.SourceFile): readonly JsxElementText[] {
     if (outermost) {
       const pieces: string[] = [];
       collect(node.children, pieces);
-      const text = pieces.join('').split(BREAK).join(' ${…} ').replace(/\s+/g, ' ').trim();
       const { line } = parsed.getLineAndCharacterOfPosition(node.getStart(parsed));
       found.push({
         line: line + 1,
-        text,
+        text: joinedParts(pieces),
         pieces: pieces.filter((piece) => piece !== BREAK && piece.length > 0),
+        parts: pieces,
       });
     }
     ts.forEachChild(node, visit);
@@ -444,12 +468,18 @@ export function angleClaimsIn(file: string, source: string): readonly AngleClaim
       findings.push({ file, line, text: text.trim(), rule });
     }
   }
-  // A word split across elements: reported once, for the element, and only
-  // when no piece of it is already a finding of its own.
-  for (const { line, text, pieces } of jsxElementTextsOf(parsed)) {
-    const rule = ruleBroken(text);
-    if (rule !== undefined && pieces.every((piece) => ruleBroken(piece) === undefined)) {
-      findings.push({ file, line, text, rule });
+  // A word split across elements: the element is read whole with every piece
+  // that is a finding of its own taken out — so a sentence is never reported
+  // twice, and one piece that fires (or is exempt) cannot switch the check
+  // off for the rest of the element (#587's review: an exempt label beside
+  // `hip <b>drop</b>` hid the split word).
+  for (const { line, parts } of jsxElementTextsOf(parsed)) {
+    const rest = joinedParts(
+      parts.map((part) => (part !== BREAK && ruleBroken(part) !== undefined ? BREAK : part)),
+    );
+    const rule = ruleBroken(rest);
+    if (rule !== undefined) {
+      findings.push({ file, line, text: rest, rule });
     }
   }
   return findings;

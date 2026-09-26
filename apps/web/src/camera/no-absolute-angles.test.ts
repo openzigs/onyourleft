@@ -183,6 +183,15 @@ describe('the scan itself can fire', () => {
     'the rider’s shoulder was level',
     'lateral shift of the hips',
     'lateral movement of the bike',
+    // #587's review: a body's shoulder needs no possessive, and a bare
+    // "frame" in a cycling app is the bicycle's.
+    'Shoulders stayed level',
+    'The shoulders were less level',
+    'the shoulders were less level',
+    'shoulders were level on the climb',
+    'lateral movement of the frame',
+    'lateral movement of the bike frame',
+    'a lateral shift of your frame',
   ])('catches the frontal plane as a word: %s', (text) => {
     expect(angleClaimsIn('x.ts', `const s = ${JSON.stringify(text)};`)).toStrictEqual([
       expect.objectContaining({ rule: 'frontal plane' }),
@@ -239,6 +248,44 @@ describe('the scan itself can fire', () => {
     ]);
   });
 
+  it('does not let one firing piece hide a split word elsewhere in the element', () => {
+    // #587's review: every piece that fired used to switch the whole-element
+    // check off, so a degree sign in one paragraph hid `hip <b>drop</b>` in
+    // the next.
+    expect(
+      angleClaimsIn('x.tsx', 'const e = <div><p>Knee 142°</p><p>hip <b>drop</b></p></div>;'),
+    ).toStrictEqual([
+      expect.objectContaining({ rule: 'degree sign', text: 'Knee 142°' }),
+      expect.objectContaining({ rule: 'frontal plane', text: '${…} hip drop' }),
+    ]);
+  });
+
+  it('does not let an EXEMPT piece hide a split word elsewhere in the element', () => {
+    // The exempt wind label is a finding (then excused by `isExempt`); it must
+    // not also excuse a split word beside it.
+    const findings = angleClaimsIn(
+      'game/GameView.tsx',
+      'const e = <div><p>Wind direction, degrees it blows from</p><p>hip <b>drop</b></p></div>;',
+    );
+    expect(findings.filter((finding) => !isExempt(finding))).toStrictEqual([
+      expect.objectContaining({ rule: 'frontal plane', text: '${…} hip drop' }),
+    ]);
+  });
+
+  it.each([
+    ['<p>hip<br/>drop</p>', 'frontal plane'],
+    ['<p>hip<br />drop</p>', 'frontal plane'],
+    ['<p>de<wbr/>grees</p>', 'degree word'],
+  ] as const)('reads <br/> as a gap and <wbr/> as nothing: %j', (jsx, rule) => {
+    expect(angleClaimsIn('x.tsx', `const e = ${jsx};`)).toStrictEqual([
+      expect.objectContaining({ rule }),
+    ]);
+  });
+
+  it('still reads any other self-closing element as a break', () => {
+    expect(angleClaimsIn('x.tsx', 'const e = <p>de<img alt="" />grees</p>;')).toEqual([]);
+  });
+
   it('does not join JSX text across an expression it cannot read — the stated limit', () => {
     // `{x}` renders whatever `x` is; the scan cannot know, so it does not guess.
     expect(angleClaimsIn('x.tsx', 'const e = <p>de{x}grees</p>;')).toEqual([]);
@@ -292,6 +339,11 @@ describe('the scan itself can fire', () => {
     'lateral shift of the camera',
     'a lateral movement of the tablet',
     'lateral motion of the picture',
+    // #587's review: the road is still excused, and so is the picture's frame.
+    'the road shoulder was less level than the lane',
+    'the road shoulders were level',
+    'lateral movement of the camera frame',
+    'lateral shift of the picture frame',
   ])('does not fire on a word that is not about a body: %s', (text) => {
     expect(angleClaimsIn('x.ts', `const s = ${JSON.stringify(text)};`)).toEqual([]);
   });
