@@ -67,7 +67,6 @@ import type {
 } from './analysis-port';
 import type { FrameKeep } from './keep';
 import { cameraNotice } from './notice';
-import { pairingCodeFromPixels } from './side-link-qr';
 import {
   nextPresence,
   observePair,
@@ -597,6 +596,11 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
       return undefined;
     }
     try {
+      // ⚠️ Loaded here and nowhere earlier (#550's review): the QR reader is
+      // most of what pairing added to the bundle, and it is needed only while
+      // a code is being looked for — never on a launch. A chunk that will not
+      // load is a read that found nothing, like every other failure here.
+      const { pairingCodeFromPixels } = await import('./side-link-qr');
       return pairingCodeFromPixels(await session.readCodePixels());
     } catch {
       return undefined;

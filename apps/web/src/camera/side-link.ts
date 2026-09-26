@@ -45,6 +45,7 @@
  */
 
 import {
+  base64Url,
   candidateAccepted,
   PAIRING_SECRET_BYTES,
   pairingCodeText,
@@ -117,7 +118,9 @@ export const COMMAND_ACK_MILLISECONDS = 3000;
  * of spike 0012's procedure took well under a minute; short enough that a
  * code photographed off the tablet is dead before anybody could do much with
  * it. The offer is also void the moment an answer is accepted and when the
- * pairing screen closes, which are the rules that do the real work.
+ * pairing screen closes (`views/SideCameraControl.tsx` §`Offer`, since #550's
+ * review), which are the rules that do the real work; this bound is what is
+ * left for a screen left open.
  */
 export const OFFER_LIFETIME_MILLISECONDS = 5 * 60 * 1000;
 
@@ -321,14 +324,6 @@ async function localParameters(
 /** Whether every candidate a code carries is an mDNS name. */
 function namesOnly(code: PairingCode): boolean {
   return code.parameters.candidates.every((candidate) => candidate.address.endsWith('.local'));
-}
-
-function base64Url(bytes: Uint8Array): string {
-  let binary = '';
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
 }
 
 /** A comparison whose time does not depend on where two equal-length strings first differ. */
@@ -655,9 +650,6 @@ async function answerFrom(
     return read.refusal;
   }
   const { code } = read;
-  if (code.secret === undefined) {
-    return 'malformed';
-  }
   const peer = timers.peer();
   if (peer === undefined) {
     return 'unavailable';

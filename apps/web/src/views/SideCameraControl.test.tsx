@@ -9,6 +9,7 @@
  * port.
  */
 
+import { StrictMode } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { CameraController } from '../camera/session';
@@ -72,11 +73,15 @@ async function tablet(options: { readonly agreed?: boolean } = {}) {
     every: time.every,
   });
   let phone: PhoneSidePairing | undefined;
+  /** A code held up to the tablet's camera instead of the phone's, when set. */
+  let inView: string | undefined;
   const camera = scriptedCamera({
-    codePixels: () =>
-      phone === undefined
+    codePixels: () => {
+      const shown = inView ?? phone?.answerCode;
+      return shown === undefined
         ? { width: 4, height: 4, rgba: new Uint8ClampedArray(64).fill(255) }
-        : photographedCode(pairingCodeModules(phone.answerCode)),
+        : photographedCode(pairingCodeModules(shown));
+    },
   });
   const controller = new CameraController({
     port: camera.port,
@@ -97,7 +102,10 @@ async function tablet(options: { readonly agreed?: boolean } = {}) {
     phone = made;
     return made;
   };
-  return { port, camera, controller, phoneReads, time };
+  const holdUp = (code: string | undefined): void => {
+    inView = code;
+  };
+  return { port, camera, controller, phoneReads, time, holdUp };
 }
 
 describe('pairing, on the tablet', () => {
@@ -157,6 +165,72 @@ describe('pairing, on the tablet', () => {
     await press('Read the phone’s code');
     expect(document.body.textContent).toContain(TABLET_SCAN_NEEDS_CONSENT);
     expect(camera.calls).not.toContain('start');
+  });
+
+  it('keeps looking, and says nothing, when it reads its own offer off a reflection', async () => {
+    // #550's review: with `refused !== 'wrong-code'` replaced by `true`, the
+    // tablet stopped scanning and put up a warning for the one refusal that
+    // is nobody's to act on, and every test here stayed green.
+    const { port, camera, holdUp, phoneReads } = await tablet();
+    await press('Pair a phone');
+    const offer = port.currentSideCamera()?.offerCode ?? '';
+    holdUp(offer);
+    await press('Read the phone’s code');
+    await scanOnce();
+    await scanOnce();
+    expect(document.body.textContent).toContain('Looking for the phone’s code');
+    expect(button('Stop looking')).toBeDefined();
+    expect(document.body.textContent).not.toContain(PAIRING_REFUSAL_TEXT['wrong-code']);
+    expect(camera.calls).not.toContain('stop');
+    // Still scanning, so the phone's code is read the moment it is in view.
+    await phoneReads();
+    holdUp(undefined);
+    await scanOnce();
+    expect(port.currentSideCamera()?.control.sideControlState().answered).toBe(true);
+  });
+
+  it('voids an unanswered offer when the screen closes — ADR 0033 D-4', async () => {
+    const { port } = await tablet();
+    await press('Pair a phone');
+    const pairing = port.currentSideCamera();
+    const offer = pairing?.offerCode ?? '';
+    mounted?.unmount();
+    mounted = undefined;
+    await settle();
+    expect(pairing?.control.sideControlState().ended).toBe('ended-here');
+    // The offer can no longer be answered…
+    const phone = await port.answerSideCamera(offer);
+    if (typeof phone !== 'object') {
+      throw new Error(phone);
+    }
+    expect(await pairing?.acceptSidePhoneCode(phone.answerCode)).toBe('used');
+  });
+
+  it('meets the rider coming back with a fresh start, not with “you ended it”', async () => {
+    const { port, controller } = await tablet();
+    await press('Pair a phone');
+    mounted?.unmount();
+    await settle();
+    mounted = await mount(<SideCameraControl controller={controller} pairing={port} />);
+    await settle();
+    expect(button('Pair a phone')).toBeDefined();
+    expect(document.body.textContent).not.toContain(SIDE_PAIRING_END_TEXT['ended-here']);
+    expect(document.querySelector('[data-oyl-pairing-code]')).toBeNull();
+  });
+
+  it('keeps the offer up under StrictMode, whose second mount is not the screen closing', async () => {
+    const { port, controller } = await tablet();
+    mounted?.unmount();
+    mounted = await mount(
+      <StrictMode>
+        <SideCameraControl controller={controller} pairing={port} />
+      </StrictMode>,
+    );
+    await settle();
+    await press('Pair a phone');
+    await settle();
+    expect(port.currentSideCamera()?.control.sideControlState().ended).toBeUndefined();
+    expect(document.querySelector('[data-oyl-pairing-code]')).not.toBeNull();
   });
 
   it('says why a pairing could not even start', async () => {

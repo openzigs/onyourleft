@@ -1623,7 +1623,8 @@ Apache-2.0; a devDependency of `apps/web`, and the only dependency in the worksp
 devDependency, because `three` ships no types of its own) and — since #529 — `uqr` 0.1.3 (MIT) and
 `jsqr` 1.4.0 (Apache-2.0), both **zero-dependency** runtime dependencies of `apps/web`, which draw and
 read the side camera's pairing QR codes and are named in exactly one file,
-`apps/web/src/camera/side-link-qr.ts`, are
+`apps/web/src/camera/side-link-qr.ts` and loaded from it with `import()` only while pairing, so
+neither is in the entry chunk, are
 installed;
 
 ⚠️ **`three` is pinned at 0.185.1 rather than at the current 0.186.0 deliberately, and since #489

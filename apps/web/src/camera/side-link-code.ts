@@ -53,8 +53,9 @@
  * **An mDNS `.local` name is accepted**, and a code whose candidates are all
  * names is NOT refused here: spike 0011 found two desktop Chromes connect over
  * names alone, and an Android end cannot resolve one. Whether a path exists is
- * found out by ICE, and `side-link.ts` §`linkFailureText` says it in words
- * when it did not.
+ * found out by ICE, and when it did not, `side-link.ts` §`TabletSideLink`
+ * (its `#failure`) chooses `SIDE_PAIRING_END_TEXT['names-only']`, which says
+ * it in words.
  *
  * ⚠️ **A refusal never repeats a value from the code** — ADR 0004 decision D's
  * rule, applied to an address on the rider's own network.
@@ -86,13 +87,33 @@ export const PAIRING_SECRET_BYTES = 32;
 /** Which of the two codes. */
 export type PairingRole = 'offer' | 'answer';
 
-/** What a decoded code carries. */
-export interface PairingCode {
-  readonly role: PairingRole;
+/**
+ * What a decoded code carries: an offer always has its one-time secret and an
+ * answer never does. Two types rather than one with an optional secret, so
+ * that a reader of an offer cannot be asked to handle a secret that
+ * {@link readPairingCode} has already refused to be without (#550's review).
+ */
+export type PairingCode = OfferPairingCode | AnswerPairingCode;
+
+/** An offer, as the phone reads it off the tablet. */
+export interface OfferPairingCode {
+  readonly role: 'offer';
   readonly parameters: SidePeerParameters;
-  /** The one-time secret, on an offer; `undefined` on an answer. */
-  readonly secret: Uint8Array | undefined;
+  /** The one-time secret — D-4. */
+  readonly secret: Uint8Array;
 }
+
+/** An answer, as the tablet reads it off the phone. */
+export interface AnswerPairingCode {
+  readonly role: 'answer';
+  readonly parameters: SidePeerParameters;
+  /** An answer carries none. */
+  readonly secret: undefined;
+}
+
+/** What {@link readPairingCode} answers. */
+export type PairingCodeRead<Code extends PairingCode = PairingCode> =
+  { readonly code: Code } | { readonly refusal: PairingRefusal };
 
 /** Why a scanned code was refused, or why a code could not be made. */
 export type PairingRefusal =
@@ -233,10 +254,13 @@ const PASSWORD_PATTERN = /^[A-Za-z0-9+/]{22,256}$/;
  * `expected` is the code this screen is waiting for: the phone expects an
  * offer and the tablet an answer.
  */
+export function readPairingCode(text: string, expected: 'offer'): PairingCodeRead<OfferPairingCode>;
 export function readPairingCode(
   text: string,
-  expected: PairingRole,
-): { readonly code: PairingCode } | { readonly refusal: PairingRefusal } {
+  expected: 'answer',
+): PairingCodeRead<AnswerPairingCode>;
+export function readPairingCode(text: string, expected: PairingRole): PairingCodeRead;
+export function readPairingCode(text: string, expected: PairingRole): PairingCodeRead {
   if (text.length > MAXIMUM_PAIRING_CODE_LENGTH || !text.startsWith(PAIRING_CODE_PREFIX)) {
     return { refusal: 'not-a-pairing-code' };
   }
@@ -275,13 +299,6 @@ export function readPairingCode(
   if (!setupFits(setup, role)) {
     return { refusal: 'malformed' };
   }
-  let secret: Uint8Array | undefined;
-  if (role === 'offer') {
-    secret = typeof k === 'string' ? fromBase64Url(k, PAIRING_SECRET_BYTES) : undefined;
-    if (secret === undefined) {
-      return { refusal: 'malformed' };
-    }
-  }
   if (!Array.isArray(c) || c.length > MAXIMUM_PAIRING_CANDIDATES) {
     return { refusal: 'malformed' };
   }
@@ -300,13 +317,15 @@ export function readPairingCode(
     }
     candidates.push(candidate);
   }
-  return {
-    code: {
-      role,
-      parameters: { ufrag, password, fingerprint, setup, candidates },
-      secret,
-    },
-  };
+  const parameters = { ufrag, password, fingerprint, setup, candidates };
+  if (role === 'answer') {
+    return { code: { role, parameters, secret: undefined } };
+  }
+  // Decoded last, so that the one place an offer's secret is checked is also
+  // the place its type is narrowed — #550's review found a second check of it
+  // downstream that could never fire.
+  const secret = typeof k === 'string' ? fromBase64Url(k, PAIRING_SECRET_BYTES) : undefined;
+  return secret === undefined ? { refusal: 'malformed' } : { code: { role, parameters, secret } };
 }
 
 function setupFits(setup: unknown, role: PairingRole): setup is SideSetup {
@@ -327,7 +346,13 @@ function candidateFromText(text: string): SideCandidate | undefined {
   return { address, port, transport: 'udp', type: 'host' };
 }
 
-function base64Url(bytes: Uint8Array): string {
+/**
+ * RFC 4648 §5's URL-safe base64, unpadded — how a code writes its fingerprint
+ * and its secret, and how the tablet and the phone both spell the secret they
+ * compare (`side-link.ts`). One copy, because two that drifted would fail every
+ * pairing (#550's review).
+ */
+export function base64Url(bytes: Uint8Array): string {
   let binary = '';
   for (const byte of bytes) {
     binary += String.fromCharCode(byte);

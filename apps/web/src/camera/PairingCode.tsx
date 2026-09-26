@@ -14,11 +14,39 @@
  * §"THE PAIRING CODE"). A code has no text alternative a person could use —
  * the credentials in it are for a camera — so the image is named for what it
  * is FOR, and the sentence beside it says what to do.
+ *
+ * ⚠️ **The drawing library is loaded when a code is first shown, not at
+ * launch** (#550's review). `side-link-qr.ts` names both QR libraries, and a
+ * static import here put them in the entry chunk — every cold start paid for a
+ * feature used only while pairing. Until the chunk arrives the picture's place
+ * says the code is being drawn; if it never arrives, it says so. The chunk is
+ * in the service worker's precache like every other one the build emits
+ * (`tools/precache/precache.ts`), so an offline tablet draws it too.
  */
 
-import { useMemo, type JSX } from 'react';
+import { useEffect, useMemo, useState, type JSX } from 'react';
 
-import { pairingCodeModules } from './side-link-qr';
+import { StatusMessage } from '../design/StatusMessage';
+
+import type { pairingCodeModules } from './side-link-qr';
+
+/** What draws a code: `side-link-qr.ts` §`pairingCodeModules`, once it has loaded. */
+export type PairingCodeDrawer = typeof pairingCodeModules;
+
+/**
+ * Load the drawing library. The module system keeps what it has loaded, so a
+ * second code costs a resolved promise rather than a fetch; nothing here
+ * remembers a failure, so the next code shown asks again.
+ */
+export async function loadPairingCodeDrawer(): Promise<PairingCodeDrawer> {
+  return (await import('./side-link-qr')).pairingCodeModules;
+}
+
+/** What stands in the code's place before it can be drawn. */
+export const PAIRING_CODE_DRAWING = 'Drawing the pairing code…';
+/** What stands in its place when the drawing library would not load. */
+export const PAIRING_CODE_UNDRAWN =
+  'This device could not draw the pairing code. Leave this screen and open it again to retry.';
 
 /** The quiet zone, in modules: the QR specification's four. */
 const QUIET_ZONE = 4;
@@ -28,11 +56,60 @@ export interface PairingCodeProps {
   readonly code: string;
   /** What the picture is for, which is its accessible name. */
   readonly label: string;
+  /**
+   * How the drawer is loaded. A test's way to make the load fail; the screens
+   * leave it alone.
+   */
+  readonly load?: () => Promise<PairingCodeDrawer>;
 }
 
-export function PairingCode({ code, label }: PairingCodeProps): JSX.Element {
+export function PairingCode({
+  code,
+  label,
+  load = loadPairingCodeDrawer,
+}: PairingCodeProps): JSX.Element {
+  const [draw, setDraw] = useState<PairingCodeDrawer | 'failed' | undefined>(undefined);
+  useEffect(() => {
+    if (draw !== undefined) {
+      return;
+    }
+    let current = true;
+    load().then(
+      (loaded) => {
+        if (current) {
+          setDraw(() => loaded);
+        }
+      },
+      () => {
+        if (current) {
+          setDraw('failed');
+        }
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [draw, load]);
+  if (draw === undefined) {
+    return <p role="status">{PAIRING_CODE_DRAWING}</p>;
+  }
+  if (draw === 'failed') {
+    return (
+      <StatusMessage tone="warning" live>
+        {PAIRING_CODE_UNDRAWN}
+      </StatusMessage>
+    );
+  }
+  return <DrawnCode code={code} label={label} draw={draw} />;
+}
+
+function DrawnCode({
+  code,
+  label,
+  draw,
+}: PairingCodeProps & { readonly draw: PairingCodeDrawer }): JSX.Element {
   const { size, path } = useMemo(() => {
-    const modules = pairingCodeModules(code);
+    const modules = draw(code);
     const parts: string[] = [];
     for (const [row, cells] of modules.entries()) {
       for (const [column, dark] of cells.entries()) {
@@ -42,7 +119,7 @@ export function PairingCode({ code, label }: PairingCodeProps): JSX.Element {
       }
     }
     return { size: modules.length + QUIET_ZONE * 2, path: parts.join('') };
-  }, [code]);
+  }, [code, draw]);
   return (
     <svg
       className="oyl-pairing-code"

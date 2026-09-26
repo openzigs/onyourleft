@@ -226,6 +226,22 @@ describe('pairing, through both codes', () => {
     expect(context.network.peers[0]?.closed).toBe(true);
   });
 
+  it('does not expire an offer that was answered — a live pairing outlasts the offer’s five minutes', async () => {
+    // #550's review: with the `#answered` guard on the expiry replaced by
+    // `true`, every live pairing ended five minutes in, mid-ride, and no test
+    // noticed. The link is kept talking a quarter-second at a time so that
+    // nothing but the expiry could end it.
+    const { tablet, pass } = await paired();
+    await pass(OFFER_LIFETIME_MILLISECONDS + 1000);
+    expect(tablet.control.sideControlState().ended).toBeUndefined();
+    tablet.control.commandSideCamera('start');
+    await flushSideLink();
+    expect(tablet.control.sideControlState().command).toEqual({
+      kind: 'start',
+      status: 'acknowledged',
+    });
+  });
+
   it('gives up on a phone the tablet never answers', async () => {
     const context = setUp();
     const tablet = await offer(context.port);

@@ -58,9 +58,17 @@ export interface SideCameraControlProps {
 }
 
 export function SideCameraControl({ controller, pairing }: SideCameraControlProps): JSX.Element {
-  const [current, setCurrent] = useState<TabletSidePairing | undefined>(() =>
-    pairing.currentSideCamera(),
-  );
+  const [current, setCurrent] = useState<TabletSidePairing | undefined>(() => {
+    // An offer this screen voided on its way out (D-4, {@link Offer}) is not
+    // news on the way back in: the rider left, and "You ended the pairing"
+    // would be a sentence about something they did not do. They meet "Pair a
+    // phone" instead. A pairing that ended any other way is still told.
+    const held = pairing.currentSideCamera();
+    const state = held?.control.sideControlState();
+    return state !== undefined && state.ended === 'ended-here' && !state.answered
+      ? undefined
+      : held;
+  });
   const [refusal, setRefusal] = useState<PairingRefusal | undefined>(undefined);
   const [busy, setBusy] = useState(false);
 
@@ -167,6 +175,33 @@ function Offer({
       controller.turnOff();
     }
   }, [controller]);
+
+  // ADR 0033 D-4: the offer is *"void once an answer is accepted and when the
+  // pairing screen closes"*. This section is the pairing screen's offer, so
+  // when it goes away with the offer still unanswered, the offer goes too —
+  // the five-minute expiry (`side-link.ts` §`OFFER_LIFETIME_MILLISECONDS`)
+  // stays as the bound for a screen left open. An ANSWERED pairing is not
+  // touched: it outlives the screen so the rider can ride.
+  //
+  // ⚠️ **Decided a microtask later, and only if this section did not come
+  // straight back.** React's StrictMode (which `main.tsx` renders under)
+  // runs every effect's cleanup and setup a second time on mount, in one
+  // synchronous pass; ending the offer in the cleanup itself would void every
+  // offer the moment it was shown, in development. `SideCameraControl.test.tsx`
+  // §"StrictMode" is the test that says so.
+  const shown = useRef(false);
+  useEffect(() => {
+    shown.current = true;
+    const { control } = pairing;
+    return () => {
+      shown.current = false;
+      queueMicrotask(() => {
+        if (!shown.current && !control.sideControlState().answered) {
+          control.endSidePairing();
+        }
+      });
+    };
+  }, [pairing]);
 
   // Leaving mid-scan leaves no camera on that this section turned on (D-4:
   // *"discarded as soon as a code is read or scanning is cancelled"*).
