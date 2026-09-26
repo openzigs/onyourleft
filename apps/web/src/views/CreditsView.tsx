@@ -30,13 +30,17 @@ import { StatusMessage } from '../design/StatusMessage';
  * hand-maintained credits list should be read as the failure of that decision
  * rather than as a workaround.
  *
- * ## The two sections, and the one that must not imply an obligation
+ * ## The sections, and the one that must not imply an obligation
  *
- * The first section is what the app **must** credit. The second is offered
- * anyway, for assets whose licence asks for nothing — every one in the tree
- * today. They are separate, and the courtesy one says in words that nothing is
- * owed, because #358's third bullet is that the screen *"must not imply an
- * obligation that does not exist"*.
+ * The first section is what the app **must** credit. The second — since
+ * #597 — is work whose licence asks for no credit but does ask for a copy of
+ * the licence to travel with it (Apache-2.0: the map's Roboto glyphs and the
+ * pose model), and each links the copy this app ships. The third is offered
+ * anyway, for assets whose licence asks for nothing. They are separate, and
+ * the courtesy one says in words that nothing is owed, because #358's third
+ * bullet is that the screen *"must not imply an obligation that does not
+ * exist"* — and ⚠️ until #597 the courtesy sentence was said of the two
+ * Apache-2.0 works too, which is the converse mistake: denying one that does.
  *
  * ## What is rendered when something is wrong
  *
@@ -109,6 +113,17 @@ function Work({ work }: { readonly work: CreditedWork }): JSX.Element {
   );
 }
 
+/** A list of works, keyed by the first file each one took. */
+function WorkList({ works }: { readonly works: readonly CreditedWork[] }): JSX.Element {
+  return (
+    <ul>
+      {works.map((work) => (
+        <Work key={`${work.creator}${work.licence}${work.files[0] ?? ''}`} work={work} />
+      ))}
+    </ul>
+  );
+}
+
 /**
  * What the modification note says.
  *
@@ -150,44 +165,69 @@ export function CreditsView({ manifest }: CreditsViewProps): JSX.Element {
 
       <p>
         This page is generated from the record this app keeps of every file it ships that somebody
-        else made — the artwork in the trainer game, and the templates the Android build is
-        assembled from. Nothing here is typed by hand, so an asset cannot be added without appearing
-        here. Links to the originals open in a new tab.
+        else made — the artwork in the trainer game, the lettering on the map, the side
+        camera&rsquo;s pose model, and the templates the Android build is assembled from. Nothing
+        here is typed by hand, so an asset cannot be added without appearing here. Links to the
+        originals open in a new tab.
       </p>
 
-      <h2>Credited because the licence asks for it</h2>
-      {credits.required.length === 0 ? (
-        <StatusMessage tone="info" label="Nothing owed">
-          No asset in this build is under a licence that requires attribution. Everything below is
-          credited because it seemed right, not because it was asked for.
-        </StatusMessage>
-      ) : (
-        <>
-          <p>{NOTICE}</p>
-          <ul>
-            {credits.required.map((work) => (
-              <Work key={`${work.creator}${work.licence}${work.files[0] ?? ''}`} work={work} />
-            ))}
-          </ul>
-        </>
+      <div data-terms="attribution">
+        <h2>Credited because the licence asks for it</h2>
+        {credits.required.length === 0 ? (
+          <StatusMessage tone="info" label="Nothing owed">
+            No asset in this build is under a licence that requires attribution. Nothing below is
+            credited because a licence asks for a credit; where a licence asks for something else,
+            that is said beside it.
+          </StatusMessage>
+        ) : (
+          <>
+            <p>{NOTICE}</p>
+            <WorkList works={credits.required} />
+          </>
+        )}
+      </div>
+
+      {credits.licenceCopy.length === 0 ? null : (
+        <div data-terms="licence-copy">
+          <h2>Shipped with a copy of its licence</h2>
+          <p>
+            Each of these is published under a licence that does not ask to be credited on a screen,
+            but does ask that a copy of the licence travel with the work. That copy ships inside
+            this app, and the licence named beside each work opens it.
+          </p>
+          <WorkList works={credits.licenceCopy} />
+        </div>
       )}
 
-      <h2>Credited as a courtesy</h2>
-      {credits.courtesy.length === 0 ? (
-        <p>Nothing else in this build came from somebody outside this project.</p>
-      ) : (
-        <>
+      <div data-terms="nothing">
+        <h2>Credited as a courtesy</h2>
+        {credits.courtesy.length === 0 ? (
           <p>
-            Each of these is published under a licence that asks for nothing in return — no credit
-            is required and none is implied to be owed. They are here because the work was worth
-            crediting anyway.
+            {credits.licenceCopy.length === 0 && credits.unclassified.length === 0
+              ? 'Nothing else in this build came from somebody outside this project.'
+              : 'Nothing in this build is under a licence that asks for nothing at all.'}
           </p>
-          <ul>
-            {credits.courtesy.map((work) => (
-              <Work key={`${work.creator}${work.licence}${work.files[0] ?? ''}`} work={work} />
-            ))}
-          </ul>
-        </>
+        ) : (
+          <>
+            <p>
+              Each of these is published under a licence that asks for nothing in return — no credit
+              is required and none is implied to be owed. They are here because the work was worth
+              crediting anyway.
+            </p>
+            <WorkList works={credits.courtesy} />
+          </>
+        )}
+      </div>
+
+      {credits.unclassified.length === 0 ? null : (
+        <div data-terms="unclassified">
+          <h2>Credited under another licence</h2>
+          <p>
+            This page has not been told what these licences ask for, so it says nothing about it.
+            The licence named beside each work is the one that applies.
+          </p>
+          <WorkList works={credits.unclassified} />
+        </div>
       )}
 
       <h2>Where this list comes from</h2>

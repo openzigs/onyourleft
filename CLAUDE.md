@@ -94,7 +94,13 @@ apps/                 AGPL-3.0-or-later, without exception
                         ⚠️ Since #530 it also holds `pose/` — the side
                         camera's pose model, Apache-2.0, excluded from the
                         precache by that directory too, with its runtime and
-                        worker emitted beside it by `tools/pose/`
+                        worker emitted beside it by `tools/pose/`. ⚠️ Since
+                        #597 it also holds `licences/Apache-2.0.txt` — a byte
+                        copy of `LICENSES/Apache-2.0.txt`, which the credits
+                        screen links from every Apache-2.0 credit (the map's
+                        glyphs, the pose model) because §4(a) asks for the
+                        text to travel with the work; `credits.test.ts` holds
+                        the bytes equal
     tools/pose/         the pose model's WebAssembly runtime, copied out of
                         the pinned `@mediapipe/tasks-vision` into `dist/pose/`
                         and served from there in development (#530) — never
@@ -2170,7 +2176,9 @@ come back tomorrow with no network" expressible.
 indistinguishable from `setOffline(true)` not taking effect, from the page coming out of Chromium's
 own HTTP cache, from an empty page that "loaded", and from the harness serving a different build.
 So (1) a resource deliberately outside the precache must **fail** in the same run — a `fetch()` and
-not a navigation, because the worker serves the precached shell for *every* navigation — and (2)
+not a navigation, because the worker serves the precached shell for every navigation to a path
+it has not precached (⚠️ since #597 a navigation to a precached FILE is served that file, which is
+what lets the credits screen's link to the shipped Apache-2.0 text open as the text) — and (2)
 every offline response must report `fromServiceWorker`. Measured both ways round: deleting
 `setOffline(true)` turns the control red by **succeeding**, and making the worker answer nothing
 turns the two serving assertions red while leaving the control's expectation untouched.
@@ -3909,6 +3917,8 @@ top of an issue **supersedes its body**.
 | What a frame cap that is not a frame rate is read as, and why it is clamped rather than thrown | `apps/web/src/game/frame-pacer.ts` §`INVALID_CAP_READ_AS` |
 | Why the HUD's quality state is a level and not the ladder's whole state | `apps/web/src/game/GameView.tsx` §`qualityLevel` |
 | Why a skipped animation frame is not a fast frame, and what the ladder is told under a cap | `apps/web/src/game/frame-pacer.ts`, `apps/web/src/game/GameView.tsx` §`tick` |
+| Which licences the credits screen calls a courtesy, why Apache-2.0 is not one, and why a licence it has not been told about is shown as unclassified | `apps/web/src/credits/credits.ts` §`LICENCE_COPY_LICENCES`, §`NOTHING_ASKED_LICENCES`, §`SHIPPED_LICENCE_TEXTS`, [#597](https://github.com/openzigs/onyourleft/issues/597) |
+| Why the service worker serves a navigation to a precached file as that file rather than the shell | `apps/web/src/offline/worker-core.ts` §`decideFetch`, `apps/web/browser/offline.browser.spec.ts` §"#597" |
 | What stops an empty credits screen looking exactly like a correct one | `apps/web/src/views/CreditsView.test.tsx`, [#142](https://github.com/openzigs/onyourleft/issues/142) |
 | What a person with TalkBack runs, and which questions only they can answer | [`docs/validation/0003-screen-reader-and-assistive-technology.md`](docs/validation/0003-screen-reader-and-assistive-technology.md), [#393](https://github.com/openzigs/onyourleft/issues/393) |
 | How a climb ahead is found, and why the lookahead starts from the wrapped position | `apps/web/src/game/hud/climb-ahead.ts`, [#399](https://github.com/openzigs/onyourleft/issues/399) |

@@ -115,10 +115,29 @@ describe('what the worker does with a request', () => {
   const precached = new Set(PRECACHE.map((entry) => new URL(entry, SCOPE).toString()));
   const base = { scope: SCOPE, precached };
 
-  it('serves the shell for a navigation, whatever the path', () => {
+  it('serves the shell for a navigation to any path that is not a precached file', () => {
     expect(
       decideFetch({ ...base, method: 'GET', mode: 'navigate', url: `${SCOPE}#/game` }),
     ).toEqual({ kind: 'shell' });
+    expect(
+      decideFetch({ ...base, method: 'GET', mode: 'navigate', url: `${SCOPE}not-precached.txt` }),
+    ).toEqual({ kind: 'shell' });
+  });
+
+  it('serves a precached file for a navigation to it, not the shell — #597', () => {
+    // The credits screen links the licence text the app ships. Opening that
+    // link is a navigation, and answering it with the shell showed the home
+    // screen where the licence should have been.
+    const licence = `${SCOPE}licences/Apache-2.0.txt`;
+    expect(
+      decideFetch({
+        ...base,
+        precached: new Set([...precached, licence]),
+        method: 'GET',
+        mode: 'navigate',
+        url: licence,
+      }),
+    ).toEqual({ kind: 'cached', url: `${SCOPE}licences/Apache-2.0.txt` });
   });
 
   it('serves a precached asset from the cache', () => {
@@ -181,6 +200,17 @@ describe('the fetch handler, end to end', () => {
     attachWorker(offline, { precache: PRECACHE, version: VERSION });
     const response = await offline.dispatchFetch(navigationRequest(SCOPE));
     expect(await response?.text()).toBe('body of index.html');
+    expect(offline.fetched).toEqual([]);
+  });
+
+  it('answers a navigation to a precached file with that file, not the shell — #597', async () => {
+    const scope = scopeWith();
+    await scope.dispatchLifecycle('install');
+    const offline = new FakeWorkerScope({ scope: SCOPE, network: new Map() });
+    offline.adopt(scope);
+    attachWorker(offline, { precache: PRECACHE, version: VERSION });
+    const response = await offline.dispatchFetch(navigationRequest(`${SCOPE}assets/index-abc.js`));
+    expect(await response?.text()).toBe('body of assets/index-abc.js');
     expect(offline.fetched).toEqual([]);
   });
 
