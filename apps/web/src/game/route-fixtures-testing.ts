@@ -260,3 +260,139 @@ export function stadiumRoute(radius: number): RouteProfile {
   push(0, 0);
   return routeProfile(points, { loop: true });
 }
+
+/**
+ * A road the way a route planner exports it — #543.
+ *
+ * The road itself is smooth: 300 m north, then bends of 60 m, 30 m, 20 m and
+ * 45 m radius through 90°, 120°, 100° and 70°, alternating right and left,
+ * with a 150 m straight after each, level. What a planner writes is not the
+ * road but a SIMPLIFICATION of it: the fewest points that stay within a few
+ * metres of the line (Ramer–Douglas–Peucker, which is the textbook way to do
+ * it and was implemented here from that description). At the 3 m tolerance
+ * used here a 20 m bend keeps a point about every 20 m and turns about 45° at
+ * each, and a straight keeps its two ends — the shape of a GPX from a
+ * planner, and of the owner's 29-mile route on 2026-09-25, whose bends drew as
+ * straight pieces meeting at sharp corners.
+ *
+ * ⚠️ **Arithmetic, not a real place** — the whole module's rule. What makes it
+ * "real-world-like" is the sampling, which is what #543 is about, not a
+ * coordinate anybody rode.
+ */
+export function plannerRoute(): RouteProfile {
+  const metresPerDegreeLongitude =
+    METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
+  const kept = simplified(plannerRoad().road, PLANNER_TOLERANCE_METRES);
+  return routeProfile(
+    kept.map(([x, y]) => ({
+      position: geographicPosition(
+        degreesLatitude(FIXTURE_LATITUDE + y / METRES_PER_DEGREE_LATITUDE),
+        degreesLongitude(-0.12 + x / metresPerDegreeLongitude),
+      ),
+      elevation: altitudeMetres(0),
+    })),
+  );
+}
+
+/** One of {@link plannerRoute}'s bends, as the smooth road it was simplified from has it. */
+export interface PlannerBend {
+  readonly radiusMetres: number;
+  readonly degrees: number;
+  /**
+   * Route distance from the start to the bend's middle. Approximate by up to a
+   * few metres, because simplification shortens a bend to its chords.
+   */
+  readonly middleMetres: number;
+  /** The centre of the bend's circle, in local metres east and north of the start. */
+  readonly centreEast: number;
+  readonly centreNorth: number;
+}
+
+/** {@link plannerRoute}'s four bends, in the order the route rides them. */
+export const PLANNER_BENDS: readonly PlannerBend[] = plannerRoad().bends;
+
+/** The smooth road {@link plannerRoute} simplifies: a point every metre, and its bends. */
+function plannerRoad(): {
+  readonly road: Array<readonly [number, number]>;
+  readonly bends: PlannerBend[];
+} {
+  const road: Array<readonly [number, number]> = [];
+  const bends: PlannerBend[] = [];
+  let east = 0;
+  let north = 0;
+  let heading = Math.PI / 2; // north, measured anticlockwise from east
+  const straight = (length: number): void => {
+    for (let metre = 0; metre < length; metre += 1) {
+      road.push([east, north]);
+      east += Math.cos(heading);
+      north += Math.sin(heading);
+    }
+  };
+  const bend = (radius: number, degrees: number, right: boolean): void => {
+    const side = right ? -1 : 1;
+    const length = Math.round((radius * degrees * Math.PI) / 180);
+    bends.push({
+      radiusMetres: radius,
+      degrees,
+      middleMetres: road.length + length / 2,
+      // The left normal is (−sin, cos); a right-hand bend turns about the right.
+      centreEast: east - side * radius * Math.sin(heading),
+      centreNorth: north + side * radius * Math.cos(heading),
+    });
+    const turn = ((degrees * Math.PI) / 180 / length) * side;
+    for (let metre = 0; metre < length; metre += 1) {
+      road.push([east, north]);
+      heading += turn / 2;
+      east += Math.cos(heading);
+      north += Math.sin(heading);
+      heading += turn / 2;
+    }
+  };
+  straight(300);
+  bend(60, 90, true);
+  straight(150);
+  bend(30, 120, false);
+  straight(150);
+  bend(20, 100, true);
+  straight(150);
+  bend(45, 70, false);
+  straight(150);
+  road.push([east, north]);
+  return { road, bends };
+}
+
+/** How far a planner's simplified line may stray from the road, in metres. */
+const PLANNER_TOLERANCE_METRES = 3;
+
+/** Ramer–Douglas–Peucker: the fewest points within `tolerance` of the line. */
+function simplified(
+  points: ReadonlyArray<readonly [number, number]>,
+  tolerance: number,
+): Array<readonly [number, number]> {
+  if (points.length < 3) return [...points];
+  const [ax, ay] = points[0] as readonly [number, number];
+  const [bx, by] = points[points.length - 1] as readonly [number, number];
+  const length = Math.hypot(bx - ax, by - ay);
+  let furthest = 0;
+  let at = 0;
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const [px, py] = points[index] as readonly [number, number];
+    const distance =
+      length > 0
+        ? Math.abs((bx - ax) * (ay - py) - (ax - px) * (by - ay)) / length
+        : Math.hypot(px - ax, py - ay);
+    if (distance > furthest) {
+      furthest = distance;
+      at = index;
+    }
+  }
+  if (furthest <= tolerance) {
+    return [
+      points[0] as readonly [number, number],
+      points[points.length - 1] as readonly [number, number],
+    ];
+  }
+  const left = simplified(points.slice(0, at + 1), tolerance);
+  const right = simplified(points.slice(at), tolerance);
+  return [...left.slice(0, -1), ...right];
+}

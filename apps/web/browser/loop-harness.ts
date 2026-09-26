@@ -64,10 +64,11 @@ import {
 
 import type { SceneFrame } from '../src/game/port';
 import { qualitySettings } from '../src/game/quality';
-import { sceneFrame } from '../src/game/scene';
+import { cameraPose, sceneFrame } from '../src/game/scene';
 import { atStartLine } from '../src/game/simulation';
-import { corridorOrigin } from '../src/game/terrain';
+import { corridorOrigin, roadCorridor } from '../src/game/terrain';
 import { loadSceneryModels, threeGameRenderer } from '../src/game/three-renderer';
+import { withCorridor } from './with-corridor';
 
 /** One frame's road, row by row, from the bottom of the frame up. */
 export interface RoadRows {
@@ -164,13 +165,26 @@ function loopPoints(): RoutePoint[] {
  * #440's claim is about and what this page measures.
  */
 function startFrame(profile: RouteProfile): SceneFrame {
-  const frame = sceneFrame({
-    profile,
-    origin: corridorOrigin(profile),
-    state: atStartLine(profile),
-    centreline: true,
-  });
-  return { ...frame, scatter: [], markers: [] };
+  const origin = corridorOrigin(profile);
+  const state = atStartLine(profile);
+  const frame = sceneFrame({ profile, origin, state, centreline: true });
+  // ⚠️ **The road as it was drawn before #543** (`unsmoothed`), with the
+  // camera placed on that corridor through the real `cameraPose`. This page
+  // measures the PROFILE's closure — whether the wrap is road with a length or
+  // a jump — and #543's drawing averages the route over ten metres either
+  // side, which spreads the stored profile's 15.6 m jump over twenty metres:
+  // the control's camera no longer looks across the road (58.3 % of the width
+  // against the 65 % required, measured), and on the closed loop the camera
+  // turns part-way along the closing segment's genuine 12 m jog (58.6 %
+  // against 55 %). Both are the smoothing doing what it is for, and neither is
+  // what #440 is about. `bend-harness.ts` is where the smoothing is gated.
+  const corridor = roadCorridor(profile, origin, state.ride.distance, { unsmoothed: true });
+  return {
+    ...withCorridor(frame, profile, origin, corridor),
+    camera: cameraPose(corridor, state.ride.distance, 0),
+    scatter: [],
+    markers: [],
+  };
 }
 
 function roadRows(profile: RouteProfile): RoadRows {

@@ -95,15 +95,94 @@ export const VIEW_AHEAD_METRES = 400;
 export const VIEW_BEHIND_METRES = 60;
 
 /**
+ * How far apart the corridor's centreline points are, in metres: **2** — #543.
+ *
+ * ⚠️ **A drawing density, and it used to be the profile's own grid.** Until
+ * #543 the corridor stepped in whole profile grid points, about 10 m, so a
+ * bend was drawn as ten-metre straights meeting at whatever angle the route
+ * turned through there. On a route from a planner — a sample every 20 to 100 m
+ * and 25° to 45° of turn at each — that is the owner's *"odd angles"* on the
+ * Pixel Tablet, 2026-09-25: a joint in the edge lines every ten metres, each a
+ * whole corner of the source file. No step fixes that on its own (a corner
+ * drawn finely is still a corner — {@link BEND_SMOOTHING_METRES} is what rounds
+ * it), and no smoothing fixes it at ten metres, because a turn spread over
+ * twenty metres of road is still two joints.
+ *
+ * Two metres puts {@link MAXIMUM_CORRIDOR_JOINT_DEGREES} within reach of a real
+ * bend: a genuine 20 m-radius corner turns 5.7° every two metres of road, and
+ * the road cannot be drawn smoother than the road is.
+ *
+ * ⚠️ **What it costs, measured rather than assumed**: the corridor is 231
+ * points rather than 47, and the ground beside it (`landform.ts`) is built on
+ * every one of them, so its triangles rise by the same factor — from about
+ * 2 200 to about 11 000 a frame. The JavaScript rebuild is the cost #240's
+ * NFR-2 names, and the figure is in #543's pull request.
+ */
+export const CORRIDOR_STEP_METRES = 2;
+
+/**
+ * Over how much road either side of a point its drawn position is averaged,
+ * in metres: **10** — #543.
+ *
+ * The drawn centreline at route distance `d` is the mean of the route's own
+ * centreline over `[d − 10, d + 10]`: a box filter, computed exactly (see
+ * {@link drawnGroundPosition}). A corner of `θ` in the source file becomes a
+ * turn spread over twenty metres, and on a straight — any straight, of any
+ * length — the mean of a line is the line, so nothing moves there at all.
+ *
+ * ⚠️ **It cuts corners, and by how much is the trade.** At a sharp corner of
+ * `θ` the drawn road passes `(10 / 2)·sin(θ / 2)` metres inside the source's
+ * vertex: 1.3 m at 30°, 1.9 m at 45°, 3.5 m at 90°. On a true arc of radius
+ * `R` it runs about `10² / (6R)` inside it, 0.8 m at 20 m. The scenery is
+ * placed beside the ROUTE, `scatter.ts`'s 3 m verge beyond the road's edge on
+ * each leg, so what a cut costs is taken out of that verge: all but the 90°
+ * figure are inside it, and at 90° — a crossroads in one sample — a tree
+ * 6.5 m from both legs stands 9.2 m from the vertex along the bisector, which
+ * still leaves about 2.2 m between it and the drawn road's inner edge. And a
+ * real road is round where its file is angular, so inside the vertex is where
+ * the road actually is. A wider window rounds more and cuts more; this one
+ * keeps a planner's 45° corner a metre inside the verge.
+ *
+ * ⚠️ **The DRAWN road, never the ridden one.** A point keeps the route
+ * distance it was built for (`CorridorPoint.distance`), and its height and
+ * gradient are read there, on the centreline: the trainer's grade, distance,
+ * "To go", the ghost and the pacer's gap do not see this (CLAUDE.md §2's
+ * racing-line note; `line-on-the-road.test.ts`). The scenery's PLACEMENT does
+ * not see it either — `scatter.ts` projects the route itself — which is why
+ * the arrangement digest did not move.
+ */
+export const BEND_SMOOTHING_METRES = 10;
+
+/**
+ * The most the drawn road may turn between one corridor segment and the next
+ * on a planner's route, in degrees: **8** — #543's stated bound.
+ *
+ * Held by `terrain.test.ts` on `route-fixtures-testing.ts` §`plannerRoute` — a
+ * road of 20 m to 60 m bends exported the way a route planner exports one —
+ * and by the browser gate, which reads a bend back off the drawing buffer.
+ * The road's own curvature is the floor under it: a 20 m bend turns 5.7°
+ * every {@link CORRIDOR_STEP_METRES}, and the rest is the corners the source
+ * file put in it, spread over {@link BEND_SMOOTHING_METRES}.
+ *
+ * @test-facing the bound `terrain.test.ts` and `bend.browser.spec.ts` hold the
+ * drawn road to; nothing in the corridor's construction reads it.
+ */
+export const MAXIMUM_CORRIDOR_JOINT_DEGREES = 8;
+
+/**
  * The most quads the corridor is ever built from.
  *
  * The mobile budget is **draw calls, overdraw and fill rate, not triangles**
  * (#91), so this is not really a triangle budget — it is a bound on the work the
  * *rebuild* does, which happens on the JavaScript thread that GATT notifications
- * also arrive on. A corridor of 460 m at the profile's 10 m grid is 46 quads;
- * this leaves an order of magnitude of headroom before {@link roadCorridor}
- * starts striding, and the striding is what keeps a 1 m-resolution profile from
- * turning into 460.
+ * also arrive on. A corridor of 460 m at the profile's 10 m grid is 46 grid
+ * steps, and since #543 each is drawn as five {@link CORRIDOR_STEP_METRES}
+ * pieces: 230 quads. The grid is still strided when a fine profile would pass
+ * this, and a piece is never split so finely that the pieces would.
+ *
+ * ⚠️ **Until #543 the corridor was 46 quads and this left "an order of
+ * magnitude of headroom"**; a reviewer who remembers that is reading the old
+ * file. The headroom is what #543 spent.
  */
 export const MAXIMUM_CORRIDOR_QUADS = 256;
 
@@ -434,27 +513,59 @@ export function roadCorridor(
   profile: RouteProfile,
   origin: CorridorOrigin,
   atDistance: number,
-  options: { readonly aheadMetres?: number; readonly behindMetres?: number } = {},
+  options: {
+    readonly aheadMetres?: number;
+    readonly behindMetres?: number;
+    /**
+     * The road as it was drawn before #543: one point per grid step and the
+     * route's own centreline, corners and all. The CONTROL — for
+     * `browser/bend-harness.ts`, which requires it to kink, and for
+     * `browser/loop-harness.ts`, whose #440 measurement is of the profile's
+     * closure and was calibrated on this drawing. Nothing the product runs
+     * passes it.
+     */
+    readonly unsmoothed?: boolean;
+  } = {},
 ): RoadCorridor {
   const ahead = options.aheadMetres ?? VIEW_AHEAD_METRES;
   const behind = options.behindMetres ?? VIEW_BEHIND_METRES;
   const span = ahead + behind;
 
-  // Stride in whole grid points, so every sample lands on a real profile entry
-  // and no elevation is interpolated twice — once here and once in `elevationAt`.
+  // The grid step: whole profile grid points, strided to stay inside
+  // MAXIMUM_CORRIDOR_QUADS. It still decides how FAR the corridor reaches —
+  // the last whole grid step inside the span — because that is what the
+  // scenery is windowed by (`scene.ts` §`scatter`), and #543 changes how the
+  // road is drawn and not what stands beside it.
   const resolution: number = profile.resolution;
   const wantedPoints = Math.floor(span / resolution) + 1;
   const stride = Math.max(1, Math.ceil((wantedPoints - 1) / MAXIMUM_CORRIDOR_QUADS));
-  const step = resolution * stride;
+  const gridStep = resolution * stride;
+  const gridSteps = Math.max(1, Math.floor(span / gridStep + 1e-9));
+  // ⚠️ #543: each grid step divided into about CORRIDOR_STEP_METRES pieces.
+  // Every point is interpolated (#323) whatever the step, so landing on a grid
+  // entry bought nothing; what the grid step cost was a joint every ten metres.
+  const pieces =
+    options.unsmoothed === true
+      ? 1
+      : Math.max(
+          1,
+          Math.min(
+            Math.round(gridStep / CORRIDOR_STEP_METRES),
+            Math.floor(MAXIMUM_CORRIDOR_QUADS / gridSteps),
+          ),
+        );
+  const step = gridStep / pieces;
+  const smoothing = options.unsmoothed === true ? 0 : BEND_SMOOTHING_METRES;
 
   const centre: CorridorPoint[] = [];
   const start = atDistance - behind;
-  for (let along = start; along <= atDistance + ahead + 1e-9; along += step) {
-    centre.push(pointAt(profile, origin, along));
+  const count = Math.floor(span / step + 1e-9) + 1;
+  for (let point = 0; point < count; point += 1) {
+    centre.push(pointAt(profile, origin, start + point * step, smoothing));
   }
   if (centre.length < 2) {
     // A route shorter than one step still has to produce a drawable ribbon.
-    centre.push(pointAt(profile, origin, start + step));
+    centre.push(pointAt(profile, origin, start + step, smoothing));
   }
 
   const normals = ribbonNormals(centre);
@@ -877,7 +988,12 @@ function clamp(value: number, low: number, high: number): number {
  * The wrap is applied to the *geometry* and recorded in `distance`; the
  * unwrapped `along` it was asked for is kept beside it. @see CorridorPoint.along
  */
-function pointAt(profile: RouteProfile, origin: CorridorOrigin, along: number): CorridorPoint {
+function pointAt(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  along: number,
+  smoothing: number,
+): CorridorPoint {
   // `distanceOnRoute` wraps a loop and clamps a point-to-point route, which is
   // exactly the behaviour the corridor wants at both ends: on a loop the road
   // continues, and on a straight route it stops rather than extrapolating into
@@ -899,7 +1015,10 @@ function pointAt(profile: RouteProfile, origin: CorridorOrigin, along: number): 
   // difference between two grid points every time the rider crosses one"*.
   // `scatter.ts` and `hud/plan.ts` were already reading positions this way;
   // this file was the one that was not.
-  const ground = localGroundPosition(origin, positionAt(profile, wrapped));
+  //
+  // #543: and since then averaged over {@link BEND_SMOOTHING_METRES} either
+  // side, so a corner in the source file is drawn as a bend.
+  const ground = drawnGroundPosition(profile, origin, wrapped, smoothing);
   return {
     x: ground.x,
     y: (elevationAt(profile, wrapped) as number) - origin.elevation,
@@ -907,4 +1026,65 @@ function pointAt(profile: RouteProfile, origin: CorridorOrigin, along: number): 
     distance: wrapped,
     along,
   };
+}
+
+/**
+ * Where the road is DRAWN at a route distance: the mean of the route's own
+ * centreline over {@link BEND_SMOOTHING_METRES} either side of it — #543.
+ *
+ * ## Exact, not sampled
+ *
+ * `positionAt` is linear between two profile grid points, so the centreline is
+ * a polyline in route distance and its mean over a window is a sum of
+ * trapezoids, one per grid cell the window crosses: exact, with no sampling
+ * phase. ⚠️ **That is not a nicety.** The corridor is rebuilt from the rider's
+ * distance every frame, so its points slide along the road; a mean taken from
+ * samples at fixed offsets from each point would change slightly as the rider
+ * moved and the road would shimmer. This answer is a function of `wrapped`
+ * alone, so the same place is drawn in the same place on every frame and every
+ * lap.
+ *
+ * ## The two ends of a point-to-point route
+ *
+ * The window shrinks to fit inside `[0, totalDistance]`, reaching zero at each
+ * end, so the drawn road starts and finishes exactly where the route does. A
+ * window running off the end onto the clamped start point would pull the
+ * whole first ten metres back toward it — a road that began a couple of
+ * metres short of the start line. A loop has no ends: its window runs across
+ * the wrap, and `positionAt` wraps with it.
+ */
+function drawnGroundPosition(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  wrapped: number,
+  smoothing: number,
+): { readonly x: number; readonly z: number } {
+  const half = profile.loop
+    ? smoothing
+    : Math.min(smoothing, wrapped, profile.totalDistance - wrapped);
+  if (!(half > 0)) {
+    return localGroundPosition(origin, positionAt(profile, wrapped));
+  }
+  const resolution: number = profile.resolution;
+  const low = wrapped - half;
+  const high = wrapped + half;
+  let from = low;
+  let fromPosition = localGroundPosition(origin, positionAt(profile, from));
+  let sumX = 0;
+  let sumZ = 0;
+  // The breakpoints are the grid points inside the window — whole multiples of
+  // the resolution, on a loop's unwrapped distance as much as on a line's.
+  for (let node = Math.floor(low / resolution) + 1; ; node += 1) {
+    const to = Math.min(high, node * resolution);
+    const toPosition = localGroundPosition(origin, positionAt(profile, to));
+    const length = to - from;
+    sumX += ((fromPosition.x + toPosition.x) / 2) * length;
+    sumZ += ((fromPosition.z + toPosition.z) / 2) * length;
+    if (to >= high) {
+      break;
+    }
+    from = to;
+    fromPosition = toPosition;
+  }
+  return { x: sumX / (2 * half), z: sumZ / (2 * half) };
 }
