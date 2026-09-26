@@ -104,7 +104,11 @@ apps/                 AGPL-3.0-or-later, without exception
                         entries are credited and why, and the one line that
                         inlines the manifest at build time rather than fetching
                         it. ADR 0023 D-3 — for a CC-BY asset this screen is the
-                        obligation, not a nicety
+                        obligation, not a nicety. Since #597 an Apache-2.0
+                        credit is its own section and links the licence text
+                        the app ships (public/licences/), and the courtesy
+                        section is an allowlist (CC0-1.0) rather than "every
+                        licence that is not CC BY"
     src/design/         design tokens, theme.css and the primitives (#48)
     src/detail/         the ride detail view's data layer (#50): the read budget, the
                         gap-preserving downsampler, the SVG trace, and the
