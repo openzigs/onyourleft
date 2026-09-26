@@ -589,3 +589,21 @@ this path it means:
 - **The owner wants a photographic reference** or a keep on this path. D-6 and D-7 are then
   superseded for this path, and ADR 0029 D-2 and D-4 govern those pictures as they do any other
   kept frame.
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-09-26** — **The tablet now speaks first on `control`, so D-4's *"sent as the first `control`
+  message"* is exact only as *"the phone's first message"*.**
+  [#568](https://github.com/openzigs/onyourleft/issues/568) caught Chromium dropping the phone's
+  secret when the phone sent it from inside `ondatachannel`. The send did not throw, the channel
+  said `open`, nothing was buffered, and the message never arrived. That happened about once in a
+  hundred pairings in CI. The phone's next message was then the first thing the tablet heard, and
+  D-4 correctly ended the pairing as *not our phone*. So the tablet now sends a `ping` (a D-3
+  message that carries nothing) when its channel opens, and again every heartbeat until the phone
+  has proved itself. The phone sends nothing until it has heard the tablet, and then sends the
+  secret first. **The rule is unchanged**: the secret is the phone's first message, anything else
+  first from the phone ends the pairing before another byte is read, and nothing the tablet sends
+  before proof carries any content. `camera/side-link.ts` §"Why the phone waits to be spoken to"
+  is the record, and `side-link.test.ts` reproduces the lost send.
