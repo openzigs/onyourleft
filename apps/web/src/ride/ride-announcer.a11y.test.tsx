@@ -301,6 +301,40 @@ describe('a workout’s eased target is said when it appears and when its reason
     expect(region()).toMatch(/^Eased: Cadence is recovering/);
   });
 
+  it('does not say a rescue that cleared while its sentence was waiting — PR #599, N1', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let now = 100;
+    const trainer = ridingSnapshot().trainer;
+    const panel = (w: RideWorkoutSnapshot) => (
+      <WorkoutPanel
+        trainer={trainer}
+        workout={w}
+        onStart={() => undefined}
+        onEnd={() => undefined}
+        announcerClock={() => now}
+      />
+    );
+    mounted = await mount(panel(workout()));
+    // Something said at 100, so the window is shut when the rescue arrives.
+    await mounted.rerender(panel(workout({ fault: 'The trainer did not answer.' })));
+    expect(region()).toMatch(/^Heads up: The trainer did not answer/);
+
+    now = 101;
+    await mounted.rerender(
+      panel(workout({ fault: 'The trainer did not answer.', rescue: STALLED })),
+    );
+    now = 102;
+    await mounted.rerender(panel(workout({ fault: 'The trainer did not answer.' })));
+
+    // The window opens, and the timer that was waiting for it fires.
+    now = 110;
+    await act(async () => {
+      vi.runAllTimers();
+      await Promise.resolve();
+    });
+    expect(region()).toMatch(/^Heads up: The trainer did not answer/);
+  });
+
   it('is not announced again on a screen that appears with the target already eased', async () => {
     const stub = stubRideController({ ...ridingSnapshot(), workout: workout({ rescue: STALLED }) });
     mounted = await mount(<RideView controller={stub.controller} />);

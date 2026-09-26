@@ -148,15 +148,26 @@ async function startRide(): Promise<void> {
     />,
   );
   await settle();
-  const ride = queryAll<HTMLButtonElement>(document.body, 'button').find((each) =>
-    (each.textContent ?? '').startsWith('Ride '),
+  await press('Ride ');
+}
+
+/** Press the button whose text starts with `label`, and let React settle. */
+async function press(label: string): Promise<void> {
+  const button = queryAll<HTMLButtonElement>(document.body, 'button').find((each) =>
+    (each.textContent ?? '').startsWith(label),
   );
+  if (button === undefined) throw new Error(`no "${label}" button`);
   await act(async () => {
-    ride?.click();
+    button.click();
     await Promise.resolve();
   });
   await settle();
 }
+
+const trainerNoticeControl = (): HTMLButtonElement | undefined =>
+  queryAll<HTMLButtonElement>(document.body, 'button').find(
+    (each) => each.textContent === 'Trainer notice',
+  );
 
 const region = (): string =>
   document.querySelector('[data-oyl-announcer="hud"]')?.textContent ?? '<no region>';
@@ -227,6 +238,73 @@ describe('a workout’s stall rescue on the game’s HUD — #585', () => {
     // ⚠️ The case that was dropped: said AFTER the road notice, not instead.
     expect(heard.at(-1)).toMatch(/^Eased: Pedalling has stopped/);
     expect(notices()).toContain('Pedalling has stopped');
+  });
+
+  it('gives the one notice cell to the Eased notice, and the road notice back once it clears', async () => {
+    // PR #599's review, finding B1: on a phone the two share the route
+    // panel's cell, and together they pushed Pause and End ride off a
+    // landscape stage. `ride.browser.spec.ts` §"#585" measures the layout;
+    // this pins the rule it rests on.
+    await startRide();
+    await pump(2);
+    // The apparatus: before the rescue the road notice stands, with its control.
+    expect(notices()).toContain('workout is driving your trainer');
+    expect(trainerNoticeControl()).toBeDefined();
+
+    rescue = STALLED;
+    await pump(1);
+    expect(notices()).toContain('Pedalling has stopped');
+    expect(document.querySelector('.oyl-hud__notices')?.textContent ?? '').not.toContain(
+      'workout is driving your trainer',
+    );
+    expect(trainerNoticeControl()).toBeUndefined();
+
+    rescue = undefined;
+    await pump(1);
+    expect(notices()).not.toContain('Eased');
+    expect(notices()).toContain('workout is driving your trainer');
+    expect(trainerNoticeControl()).toBeDefined();
+  });
+
+  it('says a rescue still in force again when a second ride starts in the same view', async () => {
+    // PR #599's review, N2: `start` clears what was last said, so a rescue that
+    // outlasts one ride is said at the start of the next rather than taken as
+    // already heard.
+    rescue = STALLED;
+    await startRide();
+    await pump(12);
+    expect(region()).toMatch(/^Eased: Pedalling has stopped/);
+
+    await press('End ride');
+    await press('Ride ');
+    const heard: string[] = [];
+    for (let frame = 0; frame < 12; frame += 1) {
+      await pump(1);
+      heard.push(region());
+    }
+    // The apparatus: the second ride's road notice was said, so the region
+    // really did move on from the first ride's last sentence.
+    expect(heard.some((each) => each.startsWith('The road is not reaching your trainer'))).toBe(
+      true,
+    );
+    expect(heard.at(-1)).toMatch(/^Eased: Pedalling has stopped/);
+  });
+
+  it('does not say a rescue that cleared while its sentence was waiting — PR #599, N1', async () => {
+    rescue = STALLED;
+    await startRide();
+    // The road notice takes the first window; the Eased sentence waits.
+    await pump(2);
+    expect(region()).toMatch(/^The road is not reaching your trainer/);
+
+    // Cleared a second into the ride, before the window opens again.
+    rescue = undefined;
+    const heard: string[] = [];
+    for (let frame = 0; frame < 12; frame += 1) {
+      await pump(1);
+      heard.push(region());
+    }
+    expect(heard.filter((each) => each.startsWith('Eased'))).toEqual([]);
   });
 
   it('passes the accessibility audit with the notice standing', async () => {

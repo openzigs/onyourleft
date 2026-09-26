@@ -25,6 +25,21 @@
 
 import { TREND_WINDOW, type WorkoutRescue } from '@onyourleft/domain';
 
+/**
+ * What opens the sentence when it is SPOKEN, on either screen — so the one
+ * announcer that said it can take a waiting one back once the rescue has
+ * cleared (PR #599's review, N1). The label a rider SEES is `StatusMessage`'s.
+ */
+export const EASED_SPOKEN_PREFIX = 'Eased: ';
+
+/** Whether a spoken event is a workout's eased sentence. @see EASED_SPOKEN_PREFIX */
+export function isEasedAnnouncement(event: {
+  readonly kind: string;
+  readonly text: string;
+}): boolean {
+  return event.kind === 'workout-fault' && event.text.startsWith(EASED_SPOKEN_PREFIX);
+}
+
 /** Where the sentence is shown, which decides how it says to leave the workout. */
 export type RescueTextPlace = 'ride-screen' | 'game';
 

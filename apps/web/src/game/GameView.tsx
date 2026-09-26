@@ -102,10 +102,15 @@ import { corridorOrigin } from './terrain';
 import type { GameRenderer, GameView as RendererView } from './port';
 import { NO_SENSORS, type GameSensors } from './sensors';
 import { speedUnit, spokenDistanceUnit } from '../units/format';
-import { workoutRescueText } from '../workout/rescue-text';
+import {
+  EASED_SPOKEN_PREFIX,
+  isEasedAnnouncement,
+  workoutRescueText,
+} from '../workout/rescue-text';
 import {
   announce,
   INITIAL_ANNOUNCER,
+  withdrawPending,
   remainingFrom,
   type AnnouncementEvent,
   type AnnouncerState,
@@ -1136,7 +1141,13 @@ export function GameView(props: GameViewProps): JSX.Element {
       const eased = easedText(trainerPortRef.current?.workoutRescue());
       if (!noticeThisFrame && eased !== easedRef.current) {
         easedRef.current = eased;
-        if (eased !== undefined) events.push({ kind: 'workout-fault', text: `Eased: ${eased}` });
+        if (eased !== undefined) {
+          events.push({ kind: 'workout-fault', text: `${EASED_SPOKEN_PREFIX}${eased}` });
+        } else {
+          // Cleared while its sentence was still waiting for the window: take
+          // it back, or "Eased" is said after the full target is back (N1).
+          announcerRef.current = withdrawPending(announcerRef.current, isEasedAnnouncement);
+        }
       }
       if (slope.event !== undefined) events.push(slope.event);
       // #551: the side camera's link going, once, when it goes.
@@ -1389,10 +1400,25 @@ export function GameView(props: GameViewProps): JSX.Element {
   // ⚠️ Read during render rather than held in state — see {@link gradientRef}.
   // The tick's own `setState` is what schedules this render, so it is fresh.
   const gradient = gradientRef.current?.state();
-  const roadNotice = trainerRoadNotice(trainer, 'riding');
   // #585: read during render, like `sensors` above — the tick's `setState` is
   // what schedules this render, so it is as fresh as the frame.
   const eased = easedText(props.trainer?.workoutRescue());
+  // ⚠️ **ONE notice cell on a phone, so the Eased notice takes it from the
+  // road notice while a rescue is in force** — PR #599's review, finding B1.
+  // A running workout ALWAYS has a road notice, and on a phone both sentences
+  // share the route panel's cell (`theme.css` §"WHERE THERE IS NO FREE
+  // CELL"): measured in the pinned Chromium, the two together were 309 px tall
+  // at 844×390 and 736×360 and pushed *Pause* and *End ride* below the stage —
+  // a stalled rider who could not reach End ride — and upright they ran over
+  // the rider. So while the workout is eased the road notice is not on the HUD
+  // at all, its *Trainer notice* control included, and comes back, in
+  // whatever state the rider's choice and the ride's clock give it, once the
+  // rescue clears. Nothing a rider needs is lost: the Eased sentence ends in
+  // the road notice's own way out (*"End the workout on the Ride screen"*),
+  // the road notice was said at the start of the ride, and a target held at
+  // the trainer's lowest is not a road being felt either way.
+  // `ride.browser.spec.ts` §"#585" measures it at every overlay viewport.
+  const roadNotice = eased === undefined ? trainerRoadNotice(trainer, 'riding') : undefined;
   // #437: open for the first STANDING_NOTICE_SECONDS of ride, then out of the
   // way unless the rider asks for it — on the RIDE's clock, so a paused ride
   // does not put away a notice nobody has had time to read.
@@ -1506,6 +1532,14 @@ export function GameView(props: GameViewProps): JSX.Element {
           // #585: a running workout's stall rescue, and why. After the Trainer
           // fault and before the side camera, in `announce.ts`'s order
           // (`workout-fault` is rank 2). Not `live`: the HUD's one region says it.
+          //
+          // ⚠️ **On a phone it takes the route panel's cell for as long as the
+          // rescue holds**, which is the trade #551 made for a lost side-camera
+          // link, and for its reason: it is a thing happening to the machine
+          // under the rider NOW, so it is not a notice to put away. It ends by
+          // itself — the rescue clears on a whole window of steady cadence, or
+          // the workout is ended — and the route panel comes back with it.
+          // The road notice gives way to it meanwhile: see `roadNotice` above.
           eased === undefined ? undefined : (
             <StatusMessage key="workout-eased" tone="warning" label="Eased">
               {eased}

@@ -56,6 +56,7 @@ import {
   ANNOUNCE_WINDOW_SECONDS,
   announce,
   INITIAL_ANNOUNCER,
+  withdrawPending,
   type AnnouncementEvent,
   type AnnouncementKind,
   type AnnouncerState,
@@ -67,7 +68,11 @@ import {
 } from '../game/hud/announce-preference';
 
 import type { SideControlState } from '../camera/side-pairing-port';
-import { workoutRescueText } from '../workout/rescue-text';
+import {
+  EASED_SPOKEN_PREFIX,
+  isEasedAnnouncement,
+  workoutRescueText,
+} from '../workout/rescue-text';
 
 import type { RideWorkoutSnapshot, TrainerSnapshot } from './controller';
 import { upcomingBlock } from './lookahead';
@@ -165,7 +170,7 @@ function changes(before: Seen, now: Seen): AnnouncementEvent[] {
   // changes (a stall going silent, a relief recovering), never when it clears:
   // the full target coming back is felt, and the panel stops saying it.
   if (now.eased !== before.eased && now.eased !== undefined) {
-    events.push({ kind: 'workout-fault', text: `Eased: ${now.eased}` });
+    events.push({ kind: 'workout-fault', text: `${EASED_SPOKEN_PREFIX}${now.eased}` });
   }
   if (now.releaseFault !== before.releaseFault && now.releaseFault !== undefined) {
     events.push({ kind: 'trainer-lost', text: `Not released: ${now.releaseFault}` });
@@ -255,6 +260,12 @@ export function RideAnnouncer({
       nowRiding,
       sideCamera,
     });
+    // Cleared while its sentence was still waiting for the window: take it
+    // back, or "Eased" is said after the full target is back (PR #599's
+    // review, N1).
+    if (seen.current.eased !== undefined && eased === undefined) {
+      announcer.current = withdrawPending(announcer.current, isEasedAnnouncement);
+    }
     seen.current = { lost, releaseFault, fault, eased, nowRiding, sideCamera };
     if (
       preference.enabled &&

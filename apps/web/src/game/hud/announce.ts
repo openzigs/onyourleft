@@ -248,6 +248,26 @@ export interface Announcement {
 const rank = (kind: AnnouncementKind): number => PRIORITY.indexOf(kind);
 
 /**
+ * The same state with its waiting event taken back, when `stale` says it is no
+ * longer true — PR #599's review, N1. Pure, like {@link announce}.
+ *
+ * An event waits for the window rather than being dropped, because it is
+ * safety; the cost is that one which stopped being true while it waited is
+ * still said, up to {@link ANNOUNCE_WINDOW_SECONDS} late. The one caller that
+ * knows a sentence has gone stale is the one that produced it — a workout's
+ * "Eased: …" once the rescue has cleared — so it asks for it back here rather
+ * than this module guessing from the text.
+ */
+export function withdrawPending(
+  state: AnnouncerState,
+  stale: (event: AnnouncementEvent) => boolean,
+): AnnouncerState {
+  return state.pending !== undefined && stale(state.pending)
+    ? { ...state, pending: undefined }
+    : state;
+}
+
+/**
  * The spoken form of the power reading. ⚠️ A dropped sensor is "no power
  * reading" — never "zero", never "nought": `fields.ts` §`NO_READING` renders a
  * dash for exactly this, and a sentence that said a number would be the

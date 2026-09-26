@@ -306,7 +306,14 @@ apps/                 AGPL-3.0-or-later, without exception
     src/views/          one component per route (#48)
     src/workout/        the workout control loop (#14) — the one place the
                         player's decisions meet a trainer's control point,
-                        driven end to end against the #44 simulator
+                        driven end to end against the #44 simulator; and
+                        since #585 `rescue-text.ts`, the ONE sentence both
+                        screens show and say while a stall rescue holds a
+                        workout's target down. ⚠️ On a phone the game's
+                        "Eased" notice takes the notice cell from the road
+                        notice while the rescue holds (`GameView.tsx`
+                        §`roadNotice`); `ride.html?rescue=floor` is the
+                        browser gate that measures it
     src/workouts/       the workout library and builder (#14) — the read
                         budget, the row model that quotes no watts, the one
                         place a typed percentage becomes a share, and since

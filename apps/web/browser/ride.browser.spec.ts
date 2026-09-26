@@ -579,6 +579,121 @@ test.describe('a ride with a standing notice', () => {
 });
 
 /**
+ * #585 — a running workout's stall rescue, on the game's HUD (PR #599's
+ * review, finding B1). `?rescue=floor` is the workout fixture above with the
+ * rescue in force, and the floor is the longest sentence
+ * `workout/rescue-text.ts` builds.
+ *
+ * ⚠️ **Why this exists**: the harness's trainer double returned `undefined`
+ * from `workoutRescue`, so no case here had ever laid the "Eased" notice out
+ * — and beside the road notice a workout always has, it was 309 px tall on a
+ * phone on its side and put *Pause* and *End ride* below the stage, with every
+ * case in this file green. `GameView` §`roadNotice` now gives the Eased notice
+ * the one notice cell while the rescue holds, and this measures that at every
+ * overlay viewport; the control below puts the road notice back beside it and
+ * requires the same measurement to fail.
+ */
+function easedCollisions(seen: StageMeasurement, viewport: Viewport): string[] {
+  const laidOut = seen.panels.filter((each) => each.box.height > 1);
+  const found = laidOut.filter((each) => !inside(each.box, viewport)).map(describeItem);
+  laidOut.forEach((a, index) => {
+    for (const b of laidOut.slice(index + 1)) {
+      if (overlap(a.box, b.box)) found.push(`${describeItem(a)} × ${describeItem(b)}`);
+    }
+  });
+  found.push(...laidOut.filter((each) => overlap(each.box, riderBox(viewport))).map(describeItem));
+  found.push(
+    ...['control: Pause', 'control: End ride']
+      .map((name) => named(seen.items, name))
+      .filter((each) => !inside(each.box, viewport) || !each.onTop)
+      .map(describeItem),
+  );
+  return found;
+}
+
+/** The HUD's notice cell as a rider reads it. */
+async function noticeText(page: Page): Promise<string> {
+  return page.evaluate(() => document.querySelector('.oyl-hud__notices')?.textContent ?? '');
+}
+
+test.describe('a ride with a workout eased — #585', () => {
+  const QUERY = '?rescue=floor';
+
+  for (const viewport of OVERLAY_VIEWPORTS) {
+    test(`the Eased notice, whole and over nothing — ${viewport.name}`, async ({ page }) => {
+      await openRide(page, viewport, QUERY);
+      const seen = await measure(page);
+
+      // The apparatus: the Eased notice was laid out, with the floor's
+      // sentence in it. Without this every assertion below is true of a ride
+      // with no rescue at all.
+      const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
+      expect(notice?.box.height ?? 0).toBeGreaterThan(40);
+      const text = await noticeText(page);
+      expect(text).toContain('Eased');
+      expect(text).toContain('Pedalling has stopped');
+      // The road notice gives way to it, control and all — `GameView`
+      // §`roadNotice`.
+      expect(text).not.toContain('workout is driving your trainer');
+      expect(seen.items.some((each) => each.name === 'control: Trainer notice')).toBe(false);
+
+      // On a phone the notice takes the route panel's cell (declared in
+      // `theme.css` §"WHERE THERE IS NO FREE CELL"); on a tablet nothing
+      // gives way. Both are asserted, so neither is true by accident.
+      const onAPhone = Math.min(viewport.width, viewport.height) <= 480;
+      const laidOut = seen.panels.filter((each) => each.box.height > 1);
+      expect(laidOut).toHaveLength(onAPhone ? 4 : 5);
+      const plan = named(seen.items, 'the plan view');
+      expect(inside(plan.box, viewport) && plan.onTop).toBe(!onAPhone);
+
+      // Published rather than bounded, for #512's reason: the runner's fonts
+      // are not a Mac's, and these are the margins a longer line eats first.
+      const above = laidOut
+        .filter((each) => each !== notice && each.box.bottom <= (notice?.box.top ?? 0) + 1)
+        .map((each) => (notice?.box.top ?? 0) - each.box.bottom);
+      const rider = riderBox(viewport);
+      console.log(
+        `workout eased — ${viewport.name} — notice ${(notice?.box.height ?? 0).toFixed(0)} px ` +
+          `tall; ${above.length === 0 ? 'nothing above it' : `${Math.min(...above).toFixed(0)} px to the panel above`}` +
+          (viewport.height > viewport.width
+            ? `; ${(rider.top - (notice?.box.bottom ?? 0)).toFixed(0)} px above the rider's box`
+            : `; ends at x = ${(notice?.box.right ?? 0).toFixed(0)}, rider from x = ${rider.left.toFixed(0)}`),
+      );
+
+      expect(easedCollisions(seen, viewport)).toEqual([]);
+    });
+  }
+
+  // The control: the road notice put back beside the Eased one, which is the
+  // HUD as PR #599 first shipped it. On a phone on its side that put *Pause*
+  // and *End ride* below the stage, and upright the cell ran over the rider —
+  // so the same measurement must fail at both. Without it, every case above is
+  // as true of a notice cell the measurement never looked at.
+  for (const viewport of OVERLAY_VIEWPORTS.filter(
+    (each) => each.height === 360 || each.height === 390 || each.height === 752,
+  )) {
+    test(`the control — the road notice beside it does not fit — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openRide(page, viewport, QUERY);
+      await page.evaluate(() => {
+        const eased = document.querySelector('.oyl-hud__notices .oyl-status');
+        if (eased === null) throw new Error('no Eased notice to put the road notice beside');
+        const road = eased.cloneNode(true) as HTMLElement;
+        road.textContent =
+          'The road is not reaching your trainer: A workout is driving your trainer, so the ' +
+          'hills on this route are not being sent to it — two things cannot set the ' +
+          'resistance at once. End the workout on the Ride screen to feel the road instead.';
+        eased.before(road);
+      });
+      const seen = await measure(page);
+      expect(await noticeText(page)).toContain('workout is driving your trainer');
+      expect(easedCollisions(seen, viewport)).not.toEqual([]);
+    });
+  }
+});
+
+/**
  * #400 — a ride with sounds on puts *Mute sounds* and *Sound volume* in the
  * actions panel, which makes it taller. WCAG 2.2 SC 1.4.2 needs both reachable
  * DURING a ride, so they must be on screen, uncovered, at every overlay
