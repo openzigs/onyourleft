@@ -679,17 +679,20 @@ describe('never leans OUT of a bend it is turning into — #546', () => {
 });
 
 describe('rolls in over time, not only over distance — #546', () => {
-  it('never rolls faster than the stated rate a second, at any speed from 3 to 20 m/s', () => {
-    // Sampled at v·Δt, so a step is Δt of riding. A single bend at each: the
-    // S-bend's two leans each obey it and add, as #499 already states.
-    //
-    // Every step is still compared, but the steepest is asserted once, with
-    // where it was: an `expect` a step was 140 000 of them, most of this case's
-    // time under the coverage run, and the case that timed out on main (#588).
-    const seconds = 0.02;
-    let steepest = { perMetre: 0, where: 'nowhere' };
-    let fastest = { perSecond: 0, where: 'nowhere' };
-    for (const bend of BENDS) {
+  it.each(BENDS)(
+    'never rolls faster than the stated rate a second, at any speed from 3 to 20 m/s, on $name',
+    (bend) => {
+      // Sampled at v·Δt, so a step is Δt of riding. A single bend at each: the
+      // S-bend's two leans each obey it and add, as #499 already states.
+      //
+      // Every step is still compared, but the steepest is asserted once, with
+      // where it was: an `expect` a step was 140 000 of them, most of this case's
+      // time under the coverage run. And it is one case a bend rather than one
+      // for all seven: as one it took 7.4 s on CI for #546's merge and timed out
+      // (#588), and still 4.9 s on CI once `leanAt` was made cheaper.
+      const seconds = 0.02;
+      let steepest = { perMetre: 0, where: 'nowhere' };
+      let fastest = { perSecond: 0, where: 'nowhere' };
       const line = racingLine(bend.route);
       const end = bend.start + bend.radius * bend.turn;
       for (let speed = 3; speed <= 20; speed += 1) {
@@ -699,30 +702,27 @@ describe('rolls in over time, not only over distance — #546', () => {
           const here = leanAt(line, at, speed);
           const change = Math.abs(here - previous);
           if (change / step > steepest.perMetre) {
-            steepest = {
-              perMetre: change / step,
-              where: `${bend.name}, ${String(at)} m, ${String(speed)} m/s`,
-            };
+            steepest = { perMetre: change / step, where: `${String(at)} m, ${String(speed)} m/s` };
           }
           if (change / seconds > fastest.perSecond) {
             fastest = {
               perSecond: change / seconds,
-              where: `${bend.name}, ${String(at)} m, ${String(speed)} m/s`,
+              where: `${String(at)} m, ${String(speed)} m/s`,
             };
           }
           previous = here;
         }
       }
-    }
-    expect(steepest.perMetre, steepest.where).toBeLessThanOrEqual(
-      MAXIMUM_ROLL_RADIANS_PER_METRE * (1 + 1e-9),
-    );
-    expect(fastest.perSecond, fastest.where).toBeLessThanOrEqual(
-      MAXIMUM_ROLL_RADIANS_PER_SECOND * (1 + 1e-9),
-    );
-    // …and it did roll: a sweep that leaned nobody would pass the two above.
-    expect(fastest.perSecond).toBeGreaterThan(0.5 * MAXIMUM_ROLL_RADIANS_PER_SECOND);
-  });
+      expect(steepest.perMetre, steepest.where).toBeLessThanOrEqual(
+        MAXIMUM_ROLL_RADIANS_PER_METRE * (1 + 1e-9),
+      );
+      expect(fastest.perSecond, fastest.where).toBeLessThanOrEqual(
+        MAXIMUM_ROLL_RADIANS_PER_SECOND * (1 + 1e-9),
+      );
+      // …and it did roll: a sweep that leaned nobody would pass the two above.
+      expect(fastest.perSecond).toBeGreaterThan(0.5 * MAXIMUM_ROLL_RADIANS_PER_SECOND);
+    },
+  );
 
   it('keeps its reach bounded at a speed nothing reaches, and still rolls no faster than it', () => {
     // 100 m/s is 360 km/h: the per-metre rate stops falling at whatever rolls
