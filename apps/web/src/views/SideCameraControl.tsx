@@ -194,6 +194,9 @@ function Paired({
  */
 export function sidePicturesText(state: SideAnalysisState): string {
   const looked = state.posed + state.noRider + state.unreadable;
+  if (state.place === 'computer') {
+    return computerPicturesText(state, looked);
+  }
   switch (state.model) {
     case 'waiting':
       return 'The phone’s pictures are looked at on this tablet as they arrive, and thrown away at once. None has arrived yet.';
@@ -206,6 +209,29 @@ export function sidePicturesText(state: SideAnalysisState): string {
         `Pictures looked at on this tablet and thrown away: ${String(looked)}, ` +
         `with you in ${String(state.posed)} of them. ` +
         `Skipped because the tablet was busy: ${String(state.skipped)}.`
+      );
+  }
+}
+
+/**
+ * The same, when the rider switched the side camera over to their own
+ * computer (#553, ADR 0033 D-11). ⚠️ **Every sentence says the pictures go to
+ * the computer**, because that is the promise the switch changed; none says
+ * what the computer found.
+ */
+function computerPicturesText(state: SideAnalysisState, looked: number): string {
+  switch (state.model) {
+    case 'waiting':
+      return 'The phone’s pictures are sent on to your computer as they arrive, and not kept on this tablet. None has arrived yet.';
+    case 'loading':
+      return 'Sending the first picture to your computer. Pictures arriving meanwhile wait, one at a time.';
+    case 'unavailable':
+      return 'Your computer could not be reached or did not answer, so no more pictures are being sent to it. They are still thrown away here as they arrive.';
+    case 'ready':
+      return (
+        `Pictures sent to your computer and not kept here: ${String(looked)}, ` +
+        `with you in ${String(state.posed)} of them. ` +
+        `Skipped because your computer was busy: ${String(state.skipped)}.`
       );
   }
 }

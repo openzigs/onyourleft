@@ -35,9 +35,10 @@ import { stripComments } from '../units/no-inline-units';
 import { ANALYSIS_FAILURE_TEXT, type AnalysisPort } from './analysis-port';
 import { endpointDecision } from './analysis-endpoint';
 import { riderAnalysisPort } from './analysis-transport';
+import { computerPoseEstimator } from './computer-pose';
 import { frameLeaksIn } from './notice';
 import { CameraController } from './session';
-import { manualSchedule, scriptedCamera } from './testing';
+import { manualSchedule, scriptedCamera, sizedFrameBytes } from './testing';
 
 const SOURCE_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -143,8 +144,18 @@ const ANALYSIS_MODULE =
  * and to say whether it can ever hold an answer.
  */
 const IMPORTERS: Readonly<
-  Record<string, 'holds an answer' | 'builds the port' | 'reuses the address rule'>
+  Record<
+    string,
+    'holds an answer' | 'builds the port' | 'reuses the address rule' | 'chooses the port'
+  >
 > = {
+  // #553, ADR 0033 D-11: the side camera's pictures sent on to the rider's
+  // computer. It holds an answer for exactly as long as it takes to reduce it
+  // to numbers or to nothing (`sidePoseFromAnswer`), and imports no trainer
+  // module — the check below holds it to that like every other holder.
+  [join('camera', 'computer-pose.ts')]: 'holds an answer',
+  // #553: hands a port to `computer-pose.ts` or does not. Never calls it.
+  [join('camera', 'side-analyser.ts')]: 'chooses the port',
   [join('camera', 'session.ts')]: 'holds an answer',
   // #529: ADR 0033 D-4 requires the side link's candidate rule to BE
   // `analysis-endpoint.ts` §`addressSpaceOf`, reached through an adapter,
@@ -197,9 +208,21 @@ describe('2. in the module graph, an answer cannot reach a trainer', () => {
 });
 
 describe('3. in the text, an answer is reduced before anything renders', () => {
-  it('reads `.description` in one production place, and it is not a view', () => {
+  it('reads `.description` in two production places, and neither is a view', () => {
+    // ⚠️ It said ONE until #553: `computer-pose.ts` is the second, and it
+    // reduces the answer to image-plane numbers or to `unreadable` before
+    // anything else sees it — the test below runs a hostile answer through it.
     const readers = sources().filter((path) => /\.description\b/.test(code(path)));
-    expect(readers).toStrictEqual([join('camera', 'useAnalysis.ts')]);
+    expect([...readers].sort()).toStrictEqual(
+      [join('camera', 'computer-pose.ts'), join('camera', 'useAnalysis.ts')].sort(),
+    );
+  });
+
+  it('turns a hostile answer to the side-pose question into nothing — #553', async () => {
+    const estimator = computerPoseEstimator(hostilePort);
+    expect(await estimator.estimateSidePose(sizedFrameBytes(640, 480))).toStrictEqual({
+      kind: 'unreadable',
+    });
   });
 
   it('has no dangerouslySetInnerHTML anywhere in the client', () => {
@@ -210,7 +233,11 @@ describe('3. in the text, an answer is reduced before anything renders', () => {
   });
 
   it('builds no URL and no path from anything in the analysis holders', () => {
-    for (const path of [join('camera', 'useAnalysis.ts'), join('views', 'CameraView.tsx')]) {
+    for (const path of [
+      join('camera', 'useAnalysis.ts'),
+      join('views', 'CameraView.tsx'),
+      join('camera', 'computer-pose.ts'),
+    ]) {
       expect(code(path), path).not.toMatch(/new URL\(|createObjectURL|download=|href=\{/);
     }
   });

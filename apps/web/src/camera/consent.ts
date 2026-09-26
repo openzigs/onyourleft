@@ -105,7 +105,7 @@ export const BYSTANDER_SENTENCE =
  */
 export const CONSENT_STATEMENT: readonly string[] = [
   'The camera takes still pictures of you while you ride, and only while the "Camera on" sign is showing.',
-  'Nothing is sent anywhere unless you set up a computer of your own below and switch it on. Then a picture goes to that one computer, only when you press the button that sends it, and nowhere else.',
+  'Nothing is sent anywhere unless you set up a computer of your own below and switch it on. Then a picture goes to that one computer, only when you press the button that sends it, and nowhere else — or, if you also switch on sending the side camera’s pictures there, every picture the side camera takes while it films.',
   'A picture is thrown away as soon as it has been looked at, unless you turn on "keep this ride’s pictures" first. There is no setting that keeps them always.',
   'A picture you kept stays on this device until you delete it, delete the ride, or erase this device. A copy you have already exported is yours and is wherever you put it.',
 ];

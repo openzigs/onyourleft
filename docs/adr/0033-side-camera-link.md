@@ -631,3 +631,23 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
     default one-minute timeout voided the offer or dropped the link twice (D-4's rule working as
     written, on a device nobody told to stay awake). And a pairing ended by *Stop filming* on the
     tablet is now reported on the tablet as ended there, which is what the phone already said.
+- **2026-09-26** — **D-11 is built, and what the computer is asked was decided by its
+  implementation rather than by the owner.** [#553](https://github.com/openzigs/onyourleft/issues/553)
+  lands the rider's computer as the side camera's analyser. The owner's ruling on #553 settled how
+  the picture travels inside the Android app (ADR 0029's 2026-09-26 amendment); it did not settle
+  #553's first question — what the computer is asked and what shape its answer takes — so the
+  implementation took the narrowest answer that needs no second protocol, and records it here for
+  the owner to overturn. **The request is #387's**, unchanged in path, body and address rule,
+  through `analysis-transport.ts` and nowhere else, carrying a fixed question
+  (`analysis-port.ts` §`ANALYSIS_PROMPTS` `side-pose`) that asks for the near side's nine
+  landmarks as image-plane shares in a JSON shape this repository owns. **The answer is untrusted
+  input** (ADR 0029 D-8): `computer-pose.ts` §`sidePoseFromAnswer` refuses an unknown key rather
+  than ignoring it (ADR 0017 D-4's rule), refuses a coordinate outside the picture, and produces the
+  same `SidePoseOutcome` the tablet's model does, which reaches no trainer, URL, path or screen.
+  **D-11's switch** is its own stored answer, off by default, shown only once a computer is saved
+  and switched on, with **D-11's drafted consent sentence verbatim** — the owner did not reword it.
+  It is chosen once per pairing and re-read for every picture, so switching off stops the next one.
+  ⚠️ **Whether a general vision model answers the question well is unmeasured**, as #553 said
+  before it was built; the tablet's own model stays the default for that reason. D-6, D-7 and
+  D-8 are unchanged: the tablet still keeps no picture, and the numbers are held and reported
+  exactly as they are from the tablet's model.

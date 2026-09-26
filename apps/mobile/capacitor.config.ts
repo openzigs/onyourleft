@@ -22,9 +22,15 @@ const config = {
   webDir: '../web/dist',
   android: {
     // The shell is a wrapper around a local-first client: it reads no remote
-    // origin (there is no server in Phase 1 — owner decision D6), so cleartext
-    // has nothing legitimate to carry. Leaving the platform default explicit
-    // is cheaper than rediscovering it from a manifest merge.
+    // origin (there is no server in Phase 1 — owner decision D6), so the PAGE
+    // has nothing legitimate to load over cleartext. Leaving the platform
+    // default explicit is cheaper than rediscovering it from a manifest merge.
+    //
+    // ⚠️ Since #553 the APP does send one thing in cleartext — a picture to
+    // the rider's own computer on their network — and it goes through
+    // Capacitor's native HTTP, not the WebView, so this stays false: the
+    // owner's 2026-09-26 ruling keeps it on everywhere else. The manifest's
+    // `usesCleartextTraffic` says what that costs and what limits it.
     allowMixedContent: false,
   },
 };

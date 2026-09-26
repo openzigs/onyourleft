@@ -236,6 +236,16 @@ describe('the declaration filed on Play', () => {
     expect(photos?.why).toContain('never stored, shown or sent on');
   });
 
+  it('names the side camera’s stream to the rider’s computer — #553, ADR 0033 D-11', () => {
+    // #553's criterion: "The Photos row's `why` names the stream."
+    const photos = DATA_SAFETY_DECLARATION.find((answer) => answer.dataType.startsWith('Photos'));
+    expect(photos?.why).toContain('#553');
+    expect(photos?.why).toContain('about five a second');
+    expect(photos?.why).toContain('off by default');
+    expect(photos?.collected).toBe(true);
+    expect(photos?.shared).toBe(false);
+  });
+
   it('collects nothing else — the map and the camera, and nothing more', () => {
     const collected = DATA_SAFETY_DECLARATION.filter((answer) => answer.collected).map(
       (answer) => answer.dataType,

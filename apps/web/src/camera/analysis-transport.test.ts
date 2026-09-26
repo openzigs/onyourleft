@@ -17,6 +17,9 @@ import {
   MAXIMUM_PICTURE_BYTES,
   riderAnalysisPort,
   type AnalysisSend,
+  type NativeAnalysisPost,
+  type NativeAnalysisReply,
+  type NativeAnalysisRequest,
 } from './analysis-transport';
 import { capturedFrame } from './frame';
 import { cleanFrameBytes } from './testing';
@@ -204,5 +207,128 @@ describe('cancelling', () => {
     call?.cancel();
     expect(await call?.outcome).toStrictEqual({ kind: 'failed', failure: 'cancelled' });
     expect(signal?.aborted).toBe(true);
+  });
+});
+
+describe('inside the Android shell, the native request — #553', () => {
+  function recordingNative(answer: () => Promise<NativeAnalysisReply> | NativeAnalysisReply): {
+    readonly native: NativeAnalysisPost;
+    readonly sent: NativeAnalysisRequest[];
+  } {
+    const sent: NativeAnalysisRequest[] = [];
+    return {
+      sent,
+      native: async (sending) => {
+        sent.push(sending);
+        return Promise.resolve(answer());
+      },
+    };
+  }
+
+  const READY: NativeAnalysisReply = {
+    status: 200,
+    body: JSON.stringify({ choices: [{ message: { content: 'ready' } }] }),
+  };
+
+  it('goes native and never through fetch, with the same body to the same URL', async () => {
+    const { native, sent } = recordingNative(() => READY);
+    const { send, sent: fetched } = recordingSend(() => modelReply('ready'));
+    const port = riderAnalysisPort(endpoint(), { send, native });
+    const outcome = await port?.askAboutFrame(request()).outcome;
+    expect(outcome).toEqual({ kind: 'described', description: 'ready' });
+    expect(fetched).toHaveLength(0);
+    expect(sent).toEqual([
+      {
+        url: 'http://192.168.1.20:8080/v1/chat/completions',
+        headers: { 'Content-Type': 'application/json' },
+        json: analysisRequestBody('vision-4b', request()),
+      },
+    ]);
+  });
+
+  it.each([
+    ['a .local name', 'http://studio.local:8080'],
+    ['a .home.arpa name', 'http://pc.home.arpa:8080'],
+    ['an .internal name', 'http://pc.internal:8080'],
+    ['localhost', 'http://localhost:8080'],
+    ['a loopback number', 'http://127.0.0.1:8080'],
+    ['an IPv6 loopback', 'http://[::1]:8080'],
+  ])('refuses %s BEFORE any native request, and says why', async (_what, address) => {
+    const { native, sent } = recordingNative(() => READY);
+    const port = riderAnalysisPort(endpoint(address), { native });
+    expect(port).toBeDefined();
+    const outcome = await port?.askAboutFrame(request()).outcome;
+    expect(outcome).toEqual({ kind: 'failed', failure: 'address-not-numeric' });
+    expect(sent).toHaveLength(0);
+  });
+
+  it.each([
+    ['a private IPv4 number', 'http://10.0.0.5:8080'],
+    ['a 172.16/12 number', 'http://172.20.1.2:8080'],
+    ['an overlay number', 'http://100.101.1.2:8080'],
+    ['a unique-local IPv6 number', 'http://[fd12::5]:8080'],
+    ['https to a private number', 'https://192.168.1.20:8443'],
+  ])('sends to %s', async (_what, address) => {
+    const { native, sent } = recordingNative(() => READY);
+    await riderAnalysisPort(endpoint(address), { native })?.askAboutFrame(request()).outcome;
+    expect(sent).toHaveLength(1);
+  });
+
+  it('builds no port at all for a public address, so nothing native can be reached either', () => {
+    const { native } = recordingNative(() => READY);
+    const forged: AnalysisEndpoint = { address: 'http://8.8.8.8', model: 'x', switchedOn: true };
+    expect(riderAnalysisPort(forged, { native })).toBeUndefined();
+    expect(riderAnalysisPort(endpoint('http://192.168.1.20', false), { native })).toBeUndefined();
+  });
+
+  it('reads a native rejection as unreachable, and nothing of its message', async () => {
+    const port = riderAnalysisPort(endpoint(), {
+      native: async () => Promise.reject(new Error('failed to connect to /192.168.1.20')),
+    });
+    expect(await port?.askAboutFrame(request()).outcome).toEqual({
+      kind: 'failed',
+      failure: 'unreachable',
+    });
+  });
+
+  it('reads a redirect it was told not to follow as not a model server', async () => {
+    const { native } = recordingNative(() => ({ status: 307, body: '' }));
+    expect(
+      await riderAnalysisPort(endpoint(), { native })?.askAboutFrame(request()).outcome,
+    ).toEqual({ kind: 'failed', failure: 'not-a-model-server' });
+  });
+
+  it('refuses an answer larger than it will read', async () => {
+    const { native } = recordingNative(() => ({
+      status: 200,
+      body: 'x'.repeat(MAXIMUM_RESPONSE_BYTES + 1),
+    }));
+    expect(
+      await riderAnalysisPort(endpoint(), { native })?.askAboutFrame(request()).outcome,
+    ).toEqual({ kind: 'failed', failure: 'too-large' });
+  });
+
+  it('sends no picture larger than it will send', async () => {
+    const { native, sent } = recordingNative(() => READY);
+    const outcome = await riderAnalysisPort(endpoint(), { native })?.askAboutFrame(
+      request(cleanFrameBytes(MAXIMUM_PICTURE_BYTES + 16)),
+    ).outcome;
+    expect(outcome).toEqual({ kind: 'failed', failure: 'picture-too-large' });
+    expect(sent).toHaveLength(0);
+  });
+
+  it('settles as cancelled when cancelled, and the answer that comes later is dropped', async () => {
+    let release: (reply: NativeAnalysisReply) => void = () => undefined;
+    const port = riderAnalysisPort(endpoint(), {
+      native: async () =>
+        new Promise<NativeAnalysisReply>((resolve) => {
+          release = resolve;
+        }),
+    });
+    const call = port?.askAboutFrame(request());
+    call?.cancel();
+    call?.cancel();
+    release(READY);
+    expect(await call?.outcome).toEqual({ kind: 'failed', failure: 'cancelled' });
   });
 });

@@ -4,12 +4,26 @@
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!--
+      usesCleartextTraffic (#553). The owner ruled on 2026-09-26 that a picture
+      goes to the rider's own computer through Capacitor's native HTTP, because
+      the WebView blocks plain http as mixed content (validation 0002 Part AF).
+      A home model server has no certificate, so native cleartext has to be
+      allowed, and a network security config cannot list a rider's LAN address
+      in advance, so it is allowed for the app as a whole. What limits it is
+      the app's own code: the web client's analysis transport refuses anything
+      but a private address written as numbers BEFORE the native request is
+      made, and apps/web/src/privacy/no-network.test.ts permits native HTTP in
+      one module only. The WebView's own allowMixedContent stays false
+      (capacitor.config.ts), so nothing the page loads is affected.
+    -->
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
         android:theme="@style/AppTheme">
 
         <activity

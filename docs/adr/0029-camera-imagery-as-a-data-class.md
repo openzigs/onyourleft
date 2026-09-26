@@ -740,3 +740,23 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   wording is not edited, and ADR 0033 D-5 argues why this adds to D-5 rather than reversing it.
   **D-9 and D-10 bind the new path unchanged.** Pictures are stripped at capture on the phone, and
   no picture reaches a cache on either device.
+- **2026-09-26** — **D-6's plain-LAN transport did not work inside the Android app, and now goes
+  round the web view rather than through it.** Validation 0002 Part AF measured, on 2026-09-25, the
+  shell's web view blocking #387's plain `http:` request to the rider's computer as **mixed
+  content** before it left the tablet; the `targetAddressSpace` annotation this ADR's transport
+  relies on did not relax it there. The owner ruled on
+  [#553](https://github.com/openzigs/onyourleft/issues/553): inside the shell the request goes
+  through **Capacitor's native HTTP**, **only to the private-network address the rider saved**, and
+  the web view's `allowMixedContent: false` stays on for everything else. Android's cleartext policy
+  now permits plain `http:` for the application, because a network security config cannot list a
+  rider's address in advance, so **the app's own code is what limits it**: inside the shell the
+  address must be a private address written as numbers — no name, which a native lookup could
+  resolve anywhere, and no loopback — and anything else is refused **before** a native request is
+  made (`camera/analysis-transport.ts` §`nativeAnalysisPort`, `analysis-endpoint.ts`
+  §`isPrivateAddressLiteral`). **D-6's rule is unchanged**: still the rider's own network, still no
+  relay that can read the payload, still Cloudflare Tunnel rejected by name; the browser path is
+  exactly as before. **Q1's gate is re-stated, not widened**: `no-network.test.ts` still permits
+  one `fetch` in `apps/web`, and now also reads `apps/mobile/src` and permits `CapacitorHttp` in one
+  module there and nowhere else. The privacy policy, the rider-facing document and the Data Safety
+  row moved in the same pull request. ⚠️ Part AF has not been re-run on the tablet over the native
+  route; until it is, "works in the Android app" is not established.

@@ -27,9 +27,11 @@ check that rather than take our word for it.
 **The one thing you can switch on: a picture sent to a computer of your own.** If you use the
 camera, you can enter the address of a computer on your own network — one you run, with a model
 server you installed on it — and switch it on. The app then sends one picture from the camera to
-that address, and only when you press the button that sends it. Nothing is set up to begin with,
-and nothing is sent until you have entered an address and switched it on. It is described under
-**Pictures sent to your own computer** below.
+that address, and only when you press the button that sends it. If you also switch on sending a
+side camera's pictures there — a second switch, off to begin with — every picture the side camera
+takes while it films goes there instead of being looked at on the tablet. Nothing is set up to
+begin with, and nothing is sent until you have entered an address and switched it on. It is
+described under **Pictures sent to your own computer** below.
 
 ⚠️ **That computer is yours, not ours.** On Your Left runs no server. It is not an On Your Left
 service, not an account, and not the future sync server this project may one day run
@@ -149,8 +151,10 @@ directly, over your own Wi-Fi.
   and not the time of day.
 - **What the tablet does with a picture:** a pose model running on the tablet itself looks at it,
   and it is thrown away as soon as it has been looked at. **No picture is ever saved on the tablet,
-  shown on its screen, or sent anywhere else** — not to us, not to a computer of your own, and not
-  to any service. What is kept is where the model found your ear, shoulder, elbow, wrist, hip, knee,
+  shown on its screen, or sent anywhere else** — not to us and not to any service — **unless you
+  switched on sending the side camera's pictures to a computer of your own**, in which case each
+  one goes to that computer instead of the tablet's model, as described under **Pictures sent to
+  your own computer** below, and is still not kept on the tablet. What is kept is where the model found your ear, shoulder, elbow, wrist, hip, knee,
   ankle, heel and toe in each picture: numbers, not a picture, held in the tablet's memory and gone
   when the app is closed. At the end of a session the tablet keeps two things
   on the device. **The report:** a few sentences about what changed between the start and the end
@@ -186,7 +190,8 @@ This is the only way this app's own code sends **a picture** anywhere, and it is
 it on.
 
 - **What is sent:** one still picture from the camera, and a fixed question written into the app.
-  Nothing else — not your rides, not your position, not your heart rate, not a name, not an
+  For a side camera's pictures the question asks where your ear, shoulder, elbow, wrist, hip, knee,
+  ankle, heel and toe are in the picture, as numbers. Nothing else — not your rides, not your position, not your heart rate, not a name, not an
   identifier, and not a filename. The picture is re-encoded from its pixels when it is taken, so it
   carries no location or device metadata.
 - **Where it goes:** to the one address you typed, and nowhere else. The app refuses an address
@@ -194,10 +199,19 @@ it on.
   in `.local`, or the address your own encrypted network (such as a WireGuard-based one) gives your
   computer. It will not send a picture to a service on the internet, and it will not follow a
   redirect somewhere else.
-- **When:** only when you press the button that sends it. Never on a timer and never in the
-  background.
+- **When:** only when you press the button that sends it — **or, if you switched on sending the
+  side camera's pictures there, continuously while the side camera is filming**: every picture it
+  takes, about five a second, goes to your computer as it arrives, one at a time, with any that
+  arrive while your computer is still busy thrown away unsent. That is a second switch on the Camera
+  page, separate from the first and off until you turn it on, and it takes effect the next time you
+  pair a side camera. Nothing is ever sent on a timer of the app's own, and nothing is sent when you
+  have not switched it on.
 - **How:** over your own network. Unless your computer's address starts with `https://`, the
   picture is **not encrypted on the way**, so anyone who can watch your home network could see it.
+  In the Android app the picture is sent by the app itself rather than by the web page inside it,
+  because Android's web view refuses a plain `http://` request from a secure page; so in the
+  Android app the address must be your computer's private address **written as numbers** (such as
+  `192.168.1.20`), and a name, or the tablet's own address, is refused before anything is sent.
   The app does not send it through any tunnel or relay service; one that can read what it carries —
   Cloudflare Tunnel is the example we have ruled out by name — would put a photograph of you, in
   your home, on somebody else's servers.
@@ -208,7 +222,9 @@ it on.
   on, and does not try to detect or blur anybody.
 
 To stop it, switch it off or press **Forget this computer** on the Camera page. Nothing is sent
-afterwards. [How to set up a computer of your own](analysis-on-your-own-computer.md) says what to
+afterwards — including from a side camera that is already filming, whose next picture is not sent
+and whose pictures are then not looked at for the rest of that session. Forgetting the computer
+also switches off sending the side camera's pictures to it. [How to set up a computer of your own](analysis-on-your-own-computer.md) says what to
 install, and what the risk of a downloaded model file is to that computer.
 
 There is no option in this app to send a picture to a hosted AI service, and no such service is
@@ -223,7 +239,7 @@ built in, suggested or named.
   logger, and the app blocks every request it would make (see **A second phone you pair as a side
   camera** above).
 - No sale or sharing of personal information. Nothing is transmitted to us or to anybody else
-  except the picture you choose to send to your own computer and the map tile requests described
+  except the pictures you choose to send to your own computer and the map tile requests described
   above, whose record our Cloudflare account can see for up to 7 days and which we neither use nor
   share.
 - No tracking across apps or sites.

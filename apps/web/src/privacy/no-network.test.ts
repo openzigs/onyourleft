@@ -115,6 +115,11 @@ const NETWORK_PRIMITIVES: readonly { readonly name: string; readonly pattern: Re
   // name after a word character, which the first pattern refuses to match.
   { name: 'RTCPeerConnection', pattern: /(?<![\w$])RTCPeerConnection\b/g },
   { name: 'webkitRTCPeerConnection', pattern: /(?<![\w$])webkitRTCPeerConnection\b/g },
+  // #553. Capacitor's native HTTP, which sends from OUTSIDE the WebView and so
+  // outside every rule the WebView applies — mixed content included. No `.` in
+  // the lookbehind, for the WebRTC rows' reason: `Capacitor.Plugins.CapacitorHttp`
+  // is a spelling, and so is the plugin's name as a string.
+  { name: 'CapacitorHttp', pattern: /(?<![\w$])CapacitorHttp\b/g },
 ];
 
 /** One place the client could transmit something. */
@@ -165,6 +170,13 @@ describe('the scan itself', () => {
     expect(networkCallsIn('new webkitRTCPeerConnection(config)')).toEqual([
       expect.objectContaining({ primitive: 'webkitRTCPeerConnection' }),
     ]);
+  });
+
+  it('finds Capacitor’s native HTTP, however it is reached — #553', () => {
+    expect(networkCallsIn("import { CapacitorHttp } from '@capacitor/core';")).toHaveLength(1);
+    expect(networkCallsIn('await Capacitor.Plugins.CapacitorHttp.request(o);')).toHaveLength(1);
+    expect(networkCallsIn("registerPlugin('CapacitorHttp')")).toHaveLength(1);
+    expect(networkCallsIn('const MyCapacitorHttpish = 1;')).toEqual([]);
   });
 
   it('does not fire on a name that merely contains one', () => {
@@ -447,6 +459,96 @@ describe('the client', () => {
         'rider configured and switched on, and a start and a stop to a side-camera phone the rider ' +
         'paired by scanning; that is now false, and the policy and the Data Safety form are what ' +
         'must change',
+    ).toEqual([]);
+  });
+});
+
+/**
+ * **The Android shell's own source — #553.**
+ *
+ * The owner's 2026-09-26 ruling on #553 sends the picture to the rider's
+ * computer through Capacitor's native HTTP inside the shell, because the
+ * WebView blocks plain `http:` as mixed content (validation 0002 Part AF).
+ * That call cannot live in `apps/web` — a browser must download no line of
+ * Capacitor — so it lives in `apps/mobile`, which the scan above never read.
+ * This reads it, with the same rule: **one module, one primitive, an exact
+ * count**, and every other primitive anywhere in `apps/mobile/src` a finding.
+ *
+ * What limits WHERE that call may go is not here: the web transport refuses
+ * anything but a private address written as numbers before the native call
+ * exists (`camera/analysis-transport.test.ts` §"inside the Android shell").
+ */
+const MOBILE_SOURCE_ROOT = fileURLToPath(new URL('../../../mobile/src', import.meta.url));
+
+/** The ONE place the shell's own source may make a network request, and how many times it names it. */
+export const PERMITTED_MOBILE_NETWORK_CALLS: typeof PERMITTED_NETWORK_CALLS = [
+  // Two namings: the import, and the default the adapter is built over. A
+  // third — a second request, or a second module's reach for it — is red.
+  { module: join('http', 'analysis-http.ts'), primitive: 'CapacitorHttp', count: 2 },
+];
+
+describe('the Android shell’s own source — #553', () => {
+  const ADAPTER: ScannedFile = {
+    path: join('http', 'analysis-http.ts'),
+    source:
+      "import { CapacitorHttp } from '@capacitor/core';\nexport const make = (http = CapacitorHttp) => http;",
+  };
+
+  it('is clean over a tree that is exactly what the policy describes', () => {
+    expect(networkFindingsOutside([ADAPTER], PERMITTED_MOBILE_NETWORK_CALLS)).toEqual([]);
+  });
+
+  it('goes red for native HTTP anywhere else in the shell', () => {
+    const elsewhere: ScannedFile = {
+      path: join('ble', 'transport.ts'),
+      source: 'void CapacitorHttp.request({ url });',
+    };
+    const findings = networkFindingsOutside([ADAPTER, elsewhere], PERMITTED_MOBILE_NETWORK_CALLS);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain(join('ble', 'transport.ts'));
+  });
+
+  it('goes red for a fetch in the shell, and for a second native request in the adapter', () => {
+    const fetched: ScannedFile = { path: join('thermal', 'thermal.ts'), source: 'void fetch(u);' };
+    expect(networkFindingsOutside([ADAPTER, fetched], PERMITTED_MOBILE_NETWORK_CALLS)).toHaveLength(
+      1,
+    );
+    const twice: ScannedFile = {
+      path: ADAPTER.path,
+      source: `${ADAPTER.source}\nvoid CapacitorHttp.get({ url });`,
+    };
+    expect(networkFindingsOutside([twice], PERMITTED_MOBILE_NETWORK_CALLS)).toHaveLength(1);
+  });
+
+  it('goes red when the adapter is gone, so the policy cannot outlive it', () => {
+    expect(networkFindingsOutside([], PERMITTED_MOBILE_NETWORK_CALLS)[0]).toContain(
+      '0 CapacitorHttp',
+    );
+  });
+
+  it('makes no network request but the one the policy describes', () => {
+    const files: ScannedFile[] = [];
+    const walk = (directory: string): void => {
+      for (const entry of readdirSync(directory, { withFileTypes: true })) {
+        const path = join(directory, entry.name);
+        if (entry.isDirectory()) {
+          walk(path);
+        } else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) {
+          files.push({
+            path: relative(MOBILE_SOURCE_ROOT, path),
+            source: readFileSync(path, 'utf8'),
+          });
+        }
+      }
+    };
+    walk(MOBILE_SOURCE_ROOT);
+    // The population, asserted, for the reason `the client` gives.
+    expect(files.length).toBeGreaterThan(10);
+    expect(
+      networkFindingsOutside(files, PERMITTED_MOBILE_NETWORK_CALLS),
+      'docs/privacy-policy.md says the shell sends one picture to the rider’s own computer through ' +
+        'native HTTP and nothing else; that is now false, and the policy and the Data Safety form ' +
+        'are what must change',
     ).toEqual([]);
   });
 });

@@ -82,6 +82,11 @@ import {
   type EndpointRefusal,
 } from '../camera/analysis-endpoint';
 import { keptSummarySentence } from '../camera/keep';
+import {
+  readSideAnalyserOnComputer,
+  SIDE_ANALYSER_CONSENT,
+  writeSideAnalyserOnComputer,
+} from '../camera/side-analyser';
 import { useAnalysis, type AnalysisState } from '../camera/useAnalysis';
 import { presenceSentence } from '../camera/presence';
 import type { CameraController, CaptureOutcome } from '../camera/session';
@@ -634,6 +639,47 @@ export function analysisSentence(state: AnalysisState): string | undefined {
 }
 
 /**
+ * The side camera's own switch — #553, ADR 0033 D-11.
+ *
+ * ⚠️ **Separate from #387's switch above and off by default**, with the
+ * consent sentence beside it rather than behind it: ticking it is what the
+ * sentence is consent to. Shown only once a computer is saved and switched on,
+ * because it means nothing without one — and it sends nothing without one
+ * either, which `side-analyser.ts` §`chooseSideAnalyser` holds.
+ */
+function SideAnalyserSwitch({
+  on,
+  onChange,
+}: {
+  readonly on: boolean;
+  readonly onChange: (on: boolean) => void;
+}): JSX.Element {
+  return (
+    <>
+      <p id="oyl-side-analyser-consent">{SIDE_ANALYSER_CONSENT}</p>
+      <p>
+        <label className="oyl-announce__switch">
+          <input
+            type="checkbox"
+            checked={on}
+            aria-describedby="oyl-side-analyser-consent"
+            onChange={(event) => {
+              onChange(event.target.checked);
+            }}
+          />{' '}
+          Send the side camera’s pictures to this computer
+        </label>
+      </p>
+      <p>
+        {on
+          ? 'On. The next time you pair a side camera, its pictures go to your computer.'
+          : 'Off. The side camera’s pictures are looked at on this tablet and go nowhere else. One already sending them to your computer has stopped.'}
+      </p>
+    </>
+  );
+}
+
+/**
  * The rider's own computer — #387.
  *
  * ⚠️ **Rendered only once the camera is agreed to**, and the check control only
@@ -659,6 +705,7 @@ function AnalysisSection({
   const [refusal, setRefusal] = useState<EndpointRefusal | undefined>(undefined);
   const [message, setMessage] = useState<string | undefined>(undefined);
   const [configured, setConfigured] = useState(saved?.switchedOn === true);
+  const [sideOnComputer, setSideOnComputer] = useState(readSideAnalyserOnComputer);
   const { state, ask } = useAnalysis(controller);
   const sentence = analysisSentence(state);
 
@@ -691,7 +738,9 @@ function AnalysisSection({
     setMessage(
       kept
         ? decision.endpoint.switchedOn
-          ? 'Saved. Pictures are sent to this computer only when you press the button below.'
+          ? sideOnComputer
+            ? 'Saved. Pictures are sent to this computer when you press the button below, and while the side camera is filming.'
+            : 'Saved. Pictures are sent to this computer only when you press the button below.'
           : 'Saved, and switched off. Nothing is sent.'
         : 'This device would not keep the address, so nothing is sent.',
     );
@@ -761,6 +810,11 @@ function AnalysisSection({
             variant="secondary"
             onClick={() => {
               forgetAnalysisEndpoint();
+              // A forgotten computer takes the side camera's switch with it, so
+              // saving a new computer later does not start a stream nobody
+              // switched on for it (#553).
+              writeSideAnalyserOnComputer(false);
+              setSideOnComputer(false);
               setAddress('');
               setModel('');
               setSwitchedOn(false);
@@ -783,6 +837,15 @@ function AnalysisSection({
           {message}
         </StatusMessage>
       )}
+      {configured ? (
+        <SideAnalyserSwitch
+          on={sideOnComputer}
+          onChange={(on) => {
+            const kept = writeSideAnalyserOnComputer(on);
+            setSideOnComputer(kept && on);
+          }}
+        />
+      ) : null}
       {live && configured ? (
         <p>
           <Button

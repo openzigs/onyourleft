@@ -216,6 +216,11 @@ export interface SideAnalysisOptions {
   readonly control: SideCameraControlPort;
   /** The pose model, made on the first picture — `pose-estimator.ts` in production. */
   readonly estimator: () => SidePoseEstimator;
+  /**
+   * Where that model is: `tablet` unless said otherwise. `side-analyser.ts`
+   * §`chooseSideAnalyser` answers it together with {@link estimator} (#553).
+   */
+  readonly place?: 'tablet' | 'computer' | undefined;
   /** Where the reference lives. Without it there is no check and nothing is kept between sessions. */
   readonly references?: FramingReferenceKeeping | undefined;
   /**
@@ -242,6 +247,7 @@ export class SideAnalysis implements SideAnalysisPort {
   #reference: FramingReference | undefined;
   #referenceAsked = false;
   #state: SideAnalysisState = {
+    place: 'tablet',
     model: 'waiting',
     posed: 0,
     noRider: 0,
@@ -256,6 +262,7 @@ export class SideAnalysis implements SideAnalysisPort {
     this.#makeEstimator = options.estimator;
     this.#references = options.references;
     this.#report = options.reports?.beginSideReportSession();
+    this.#state = { ...this.#state, place: options.place ?? 'tablet' };
     if (this.#references === undefined) {
       this.#state = { ...this.#state, framing: 'no-reference' };
     }

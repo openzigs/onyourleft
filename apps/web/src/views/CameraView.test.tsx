@@ -12,6 +12,11 @@ import { ANALYSIS_ENDPOINT_STORAGE_KEY, readAnalysisEndpoint } from '../camera/a
 import type { AnalysisPort } from '../camera/analysis-port';
 import { riderAnalysisPort, type AnalysisSend } from '../camera/analysis-transport';
 import { BYSTANDER_SENTENCE } from '../camera/consent';
+import {
+  readSideAnalyserOnComputer,
+  SIDE_ANALYSER_CONSENT,
+  SIDE_ANALYSER_STORAGE_KEY,
+} from '../camera/side-analyser';
 import type { FrameKeep } from '../camera/keep';
 import { frameLeaksIn } from '../camera/notice';
 import { CameraController } from '../camera/session';
@@ -887,6 +892,64 @@ describe('your own computer — #387', () => {
     await settle();
     expect(document.body.textContent).toContain('could not be reached');
     expect(frameLeaksIn(document.body.textContent ?? '')).toStrictEqual([]);
+  });
+
+  describe('the side camera’s own switch — #553, ADR 0033 D-11', () => {
+    afterEach(() => {
+      localStorage.removeItem(SIDE_ANALYSER_STORAGE_KEY);
+    });
+
+    function sideBox(): HTMLInputElement | undefined {
+      return queryAll<HTMLInputElement>(document, 'input[type="checkbox"]').find((box) =>
+        (box.closest('label')?.textContent ?? '').includes('side camera’s pictures'),
+      );
+    }
+
+    it('is not offered until a computer is saved and switched on, and then starts OFF beside its consent sentence', async () => {
+      await wired(replying('ready').send);
+      expect(sideBox()).toBeUndefined();
+      expect(document.body.textContent).not.toContain(SIDE_ANALYSER_CONSENT);
+      await saveComputer('http://192.168.1.20:8080', 'vision-4b', false);
+      expect(sideBox()).toBeUndefined();
+      await saveComputer('http://192.168.1.20:8080', 'vision-4b', true);
+      const box = sideBox();
+      expect(box?.checked).toBe(false);
+      expect(readSideAnalyserOnComputer()).toBe(false);
+      const consent = document.getElementById(box?.getAttribute('aria-describedby') ?? '');
+      expect(consent?.textContent).toBe(SIDE_ANALYSER_CONSENT);
+      // #387's own switch is untouched by it.
+      expect(switchedOnBox()?.checked).toBe(true);
+    });
+
+    it('is stored when ticked and gone when unticked, separately from the computer', async () => {
+      await wired(replying('ready').send);
+      await saveComputer('http://192.168.1.20:8080', 'vision-4b', true);
+      sideBox()?.click();
+      await settle();
+      expect(readSideAnalyserOnComputer()).toBe(true);
+      expect(sideBox()?.checked).toBe(true);
+      expect(readAnalysisEndpoint()?.switchedOn).toBe(true);
+      sideBox()?.click();
+      await settle();
+      expect(localStorage.getItem(SIDE_ANALYSER_STORAGE_KEY)).toBeNull();
+    });
+
+    it('is switched off when the computer is forgotten', async () => {
+      await wired(replying('ready').send);
+      await saveComputer('http://192.168.1.20:8080', 'vision-4b', true);
+      sideBox()?.click();
+      await settle();
+      const forget = button('Forget this computer');
+      if (forget === undefined) {
+        expect.unreachable('no forget control');
+        return;
+      }
+      await activateWithKeyboard(forget);
+      await settle();
+      expect(readSideAnalyserOnComputer()).toBe(false);
+      await saveComputer('http://192.168.1.20:8080', 'vision-4b', true);
+      expect(sideBox()?.checked).toBe(false);
+    });
   });
 
   async function saveStoredOn(): Promise<void> {

@@ -78,6 +78,7 @@ import { ANALYSIS_PROMPTS } from './analysis-port';
 import {
   addressSpaceOf,
   completionsUrl,
+  isPrivateAddressLiteral,
   type AddressSpace,
   type AnalysisEndpoint,
 } from './analysis-endpoint';
@@ -101,10 +102,53 @@ export const MAXIMUM_ANSWER_TOKENS = 400;
 /** How a request is sent. The platform's own `fetch` in production. */
 export type AnalysisSend = (url: string, init: RequestInit) => Promise<Response>;
 
+/**
+ * One request made OUTSIDE the WebView — [#553](https://github.com/openzigs/onyourleft/issues/553).
+ *
+ * The body is handed over as the JSON value it is, not as text, because the
+ * native layer serialises a JSON body itself and a string it was handed would
+ * be sent as a string.
+ */
+export interface NativeAnalysisRequest {
+  readonly url: string;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly json: Readonly<Record<string, unknown>>;
+}
+
+/** What a native request came back with: its status, and its body as text. */
+export interface NativeAnalysisReply {
+  readonly status: number;
+  readonly body: string;
+}
+
+/**
+ * How a request is sent inside the Android shell: Capacitor's native HTTP,
+ * which `apps/mobile/src/http/analysis-http.ts` is the one caller of.
+ *
+ * ⚠️ **Why a second way out at all**: validation 0002 Part AF measured the
+ * shell's WebView blocking a plain-`http:` request to the rider's computer as
+ * mixed content, before it left the device — so #387's path did not work in
+ * the APK at all. The owner ruled on 2026-09-26 (#553): send it through native
+ * HTTP, **only to the private-network address the rider saved**, and keep the
+ * WebView's `allowMixedContent: false` for everything else. Android's
+ * cleartext policy then has to allow plain `http:` for the whole app, because
+ * a network security config cannot list a rider's address in advance — so
+ * what limits it is this module: with `native` given, an address that is not
+ * `analysis-endpoint.ts` §`isPrivateAddressLiteral` is answered
+ * `address-not-numeric` and **`native` is never called**.
+ */
+export type NativeAnalysisPost = (request: NativeAnalysisRequest) => Promise<NativeAnalysisReply>;
+
 /** @see riderAnalysisPort */
 export interface AnalysisTransportOptions {
   /** Injected so a test needs no network. Defaults to the platform's `fetch`. */
   readonly send?: AnalysisSend | undefined;
+  /**
+   * Inside the Android shell, the native request that replaces `send` (#553).
+   * When given, `send` is not used at all, and only a private address written
+   * as numbers is ever passed to it.
+   */
+  readonly native?: NativeAnalysisPost | undefined;
 }
 
 /**
@@ -214,17 +258,21 @@ export function riderAnalysisPort(
   // Re-checked here as well as where the endpoint was made: an endpoint is a
   // plain object, and one built by hand rather than by `endpointDecision`
   // must not be the way round the rule.
-  let space: AddressSpace | undefined;
+  let hostname: string;
   try {
-    space = addressSpaceOf(new URL(endpoint.address).hostname);
+    ({ hostname } = new URL(endpoint.address));
   } catch {
-    space = undefined;
+    return undefined;
   }
+  const space = addressSpaceOf(hostname);
   if (space === undefined) {
     return undefined;
   }
-  const send: AnalysisSend = options.send ?? (async (url, init) => fetch(url, init));
   const url = completionsUrl(endpoint);
+  if (options.native !== undefined) {
+    return nativeAnalysisPort(endpoint, url, options.native, isPrivateAddressLiteral(hostname));
+  }
+  const send: AnalysisSend = options.send ?? (async (url, init) => fetch(url, init));
   const targetAddressSpace = space;
 
   return {
@@ -278,6 +326,70 @@ export function riderAnalysisPort(
           }
           cancelled = true;
           abort.abort();
+          settleCancelled(failed('cancelled'));
+        },
+      };
+    },
+  };
+}
+
+/**
+ * The same port over a native request — #553, the owner's 2026-09-26 ruling.
+ *
+ * Everything that makes the `fetch` path safe holds here too, and each by a
+ * different means, which is why it is written out:
+ *
+ * | The `fetch` path | Here |
+ * |---|---|
+ * | `redirect: 'error'` | the native layer is told not to follow one (`apps/mobile`), and a `3xx` that comes back is read by `analysis-response.ts` as not a model server |
+ * | the address rule | {@link isPrivateAddressLiteral}, which is STRICTER: no name and no loopback, because the native request is outside every rule the WebView applies |
+ * | the body | {@link analysisRequestBody}, the same four keys |
+ * | `boundedText` | ⚠️ **weaker**: the native layer hands back the whole body, so the bound is applied after it has arrived rather than while it streams. `analysis-response.ts` still refuses anything over its limit |
+ * | cancellation | the wait is abandoned and the outcome is `cancelled`; a native request cannot be aborted from here and runs to its end, its answer discarded |
+ */
+function nativeAnalysisPort(
+  endpoint: AnalysisEndpoint,
+  url: string,
+  native: NativeAnalysisPost,
+  literal: boolean,
+): AnalysisPort {
+  return {
+    askAboutFrame(request: AnalysisRequest): AnalysisCall {
+      if (!literal) {
+        // Refused before any request exists — the owner's "a public or
+        // hostname address is refused BEFORE any native request".
+        return { outcome: Promise.resolve(failed('address-not-numeric')), cancel: () => undefined };
+      }
+      let cancelled = false;
+      let settleCancelled: (outcome: AnalysisOutcome) => void = () => undefined;
+      const whenCancelled = new Promise<AnalysisOutcome>((resolve) => {
+        settleCancelled = resolve;
+      });
+      const work = async (): Promise<AnalysisOutcome> => {
+        if (request.frame.bytes.length > MAXIMUM_PICTURE_BYTES) {
+          return failed('picture-too-large');
+        }
+        let reply: NativeAnalysisReply;
+        try {
+          // ⚠️ Nothing of a rejection is read, for the reason the `fetch`
+          // path gives: a native error's message can name the address.
+          reply = await native({
+            url,
+            headers: { 'Content-Type': 'application/json' },
+            json: analysisRequestBody(endpoint.model, request),
+          });
+        } catch {
+          return failed(cancelled ? 'cancelled' : 'unreachable');
+        }
+        return readAnalysisReply({ status: reply.status, body: reply.body });
+      };
+      return {
+        outcome: Promise.race([work(), whenCancelled]),
+        cancel: () => {
+          if (cancelled) {
+            return;
+          }
+          cancelled = true;
           settleCancelled(failed('cancelled'));
         },
       };

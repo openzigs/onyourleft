@@ -2941,6 +2941,28 @@ should say *"blocked"* rather than *"untried"*. This part does not make that edi
 **Phone (OEM, model, Android, WebView):** Google Pixel Tablet, Android 17, WebView 153.0.8010.36
 **Build:** debug, `main` at `2b84996`, 2026-09-25
 
+### AF after #553 — the native route, owed on the tablet
+
+The owner chose option 2 on
+[#553](https://github.com/openzigs/onyourleft/issues/553) (2026-09-26): inside the shell the
+request goes through Capacitor's native HTTP, only to a private address written as numbers, with
+`allowMixedContent: false` kept and `android:usesCleartextTraffic="true"` added to the manifest.
+The rider-facing document now says *"blocked"* for the web view and describes the native route.
+⚠️ **The rows below are empty because nobody has run them**, and until they are filled the native
+route is written and unit-tested, not measured.
+
+| Step | What to do | What should happen |
+|---|---|---|
+| AF3 | Build from the #553 merge. With AF1's server running, save `http://<LAN address>:<port>` on the Camera page and press *Send one picture to check the connection* | The server logs **one** `POST /v1/chat/completions` from the tablet, with **no** preflight (a native request sends none), and the page says the computer answered. Logcat shows no `Mixed Content` line |
+| AF4 | Save the same computer as `http://<name>.local:<port>` and press the check again | The page says the address must be written as numbers, and the server logs **nothing** |
+| AF5 | With a computer saved and on, tick *Send the side camera’s pictures to this computer*, pair a side camera and film for about ten seconds | The server logs a steady stream of requests, one at a time; the tablet's side-camera screen says pictures go to your computer. Untick the switch: the requests stop at the next picture |
+
+| Step | Result | What was seen |
+|---|---|---|
+| AF3 | | |
+| AF4 | | |
+| AF5 | | |
+
 ---
 
 ## Part AG — the distant hills in the realistic world ([#544](https://github.com/openzigs/onyourleft/issues/544))
