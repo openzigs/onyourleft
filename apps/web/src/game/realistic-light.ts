@@ -241,6 +241,97 @@ export function reflectedSkyColour(band: LinearColour, targetLuminance: number):
 }
 
 /**
+ * Where the photographed sky's own skyline ends, in degrees above the eye:
+ * **5** — #544.
+ *
+ * `farm_field_2k.hdr` is a photograph taken standing in a field, so its lowest
+ * few degrees are not sky at all: a ploughed field, a treeline and distant
+ * hills, averaging 0.12 of radiance at 0°, rising to 0.67 at 4° and 0.83 at
+ * 5°, and levelling at about 0.9–1.0 from 6° up — read row by row off the
+ * committed file on 2026-09-26. Column by column, 83 % of the picture's
+ * skyline is at or under 5°. The realistic world is not that field, so where
+ * the horizon ring stood lower than this, the photograph's ground was drawn
+ * ABOVE the game's hills — the "white film" under a dark treeline on the
+ * owner's tablet. `three-renderer.ts` §`HorizonRing` lifts every crest of the
+ * realistic ring to at least this elevation ({@link skylineCrestFloor}).
+ *
+ * ⚠️ **A property of this one photograph.** A different `REALISTIC_SKY` needs
+ * this re-read, and {@link REALISTIC_HORIZON_BAND} with it.
+ */
+export const REALISTIC_SKYLINE_DEGREES = 5;
+
+/**
+ * The band of the photographed sky the realistic world's far end converges on,
+ * in degrees: **5° to 10°** — the sky just above the photograph's own skyline
+ * ({@link REALISTIC_SKYLINE_DEGREES}), which is what the lifted crests of the
+ * horizon ring stand against. #475's {@link WATER_HORIZON_BAND} starts at 0°
+ * and so averages in the photographed field, which drew the hills darker than
+ * the sky behind them; the water keeps it, because it re-scales the hue to the
+ * stylised brightness anyway.
+ */
+export const REALISTIC_HORIZON_BAND: readonly [number, number] = [REALISTIC_SKYLINE_DEGREES, 10];
+
+/**
+ * How much of the photographed sky's horizon colour the realistic world's
+ * distant ridge carries: **0.8** — #544.
+ *
+ * The stylised ring's 0.7 (`three-renderer.ts` §`HORIZON_HAZE_SHARE`) was set
+ * by eye against the stylised sky, whose output is not tone mapped. Under AgX
+ * the same 0.7 put the ridge only 51 % of the way from the ground's luminance
+ * to the sky's in the worst column `game.browser.spec.ts` §"the distant hills"
+ * reads — barely nearer the sky than the ground — and #544 asks that it
+ * converge on the sky's; at 0.8 the worst of those columns is 57 %. At 1.1 km the realistic world's own fog would take a
+ * hill entirely, so more haze is the physical direction as well.
+ */
+export const REALISTIC_HORIZON_HAZE_SHARE = 0.8;
+
+/**
+ * The lowest a crest of the realistic horizon ring may stand, in local metres:
+ * `eyeY` plus the rise that puts it at `skylineDegrees` above the eye at
+ * `radiusMetres` — so no crest is ever drawn below the photograph's own
+ * skyline, and the sky above every hill is sky (#544).
+ *
+ * ⚠️ **It follows the EYE**, which the ring's own heights deliberately do not:
+ * a rider who climbs high enough carries the realistic hills up with them
+ * rather than looking down on the photographed field. That is the trade — the
+ * alternative is the field drawn above the world.
+ */
+export function skylineCrestFloor(
+  eyeY: number,
+  radiusMetres: number,
+  skylineDegrees: number = REALISTIC_SKYLINE_DEGREES,
+): number {
+  return eyeY + radiusMetres * Math.tan((skylineDegrees * Math.PI) / 180);
+}
+
+/**
+ * The colour the realistic sky is DRAWN at the horizon, in linear light — the
+ * one the far end of the realistic world converges on (#544).
+ *
+ * `band` is {@link skyBandRadiance} over {@link REALISTIC_HORIZON_BAND}, the
+ * HDRI's own radiance just above its skyline, and `backgroundIntensity` the factor three
+ * multiplies every background texel by (`scene.backgroundIntensity`, which
+ * `three-renderer.ts` sets to {@link environmentIntensity}). The product is
+ * what reaches the tone mapper from the sky behind a distant hill, so a
+ * surface handed this colour, and tone mapped the same way, is drawn at the
+ * sky's own brightness.
+ *
+ * ⚠️ **Unlike {@link reflectedSkyColour} it keeps the photograph's
+ * brightness.** The water keeps the stylised world's because its shader was
+ * tuned against it; the fog and the distant hills have to MEET the drawn sky,
+ * and the stylised world's horizon (`world.ts` §`HORIZON_HAZE`) is brighter
+ * than the realistic sky drawn behind it — which is what drew the far hills as
+ * a pale band in front of a darker sky (#544).
+ */
+export function drawnHorizonColour(band: LinearColour, backgroundIntensity: number): LinearColour {
+  if (!(backgroundIntensity >= 0) || !Number.isFinite(backgroundIntensity)) {
+    throw new Error('a sky drawn at no finite intensity has no horizon colour');
+  }
+  const [r, g, b] = band;
+  return [r * backgroundIntensity, g * backgroundIntensity, b * backgroundIntensity];
+}
+
+/**
  * Where in the picture the sky's sun is: the brightest texel of its upper
  * hemisphere, as a horizontal texture coordinate in [0, 1).
  */

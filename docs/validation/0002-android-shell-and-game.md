@@ -2926,3 +2926,48 @@ should say *"blocked"* rather than *"untried"*. This part does not make that edi
 
 **Phone (OEM, model, Android, WebView):** Google Pixel Tablet, Android 17, WebView 153.0.8010.36
 **Build:** debug, `main` at `2b84996`, 2026-09-25
+
+---
+
+## Part AG — the distant hills in the realistic world ([#544](https://github.com/openzigs/onyourleft/issues/544))
+
+**Why this part exists.** On 2026-09-25 (`main` at `cfa8956`) the owner saw the realistic world's
+far hills as *"white film in the distance … almost like rendering issue"*: flat, pale grey-white
+sheets with hard straight edges, brighter than the grey sky behind them. Two causes, both fixed by
+#544:
+
+1. The fog and the horizon ring were coloured with the **stylised** world's horizon, a pale haze
+   painted to meet the stylised sky dome. The realistic sky is a photograph, darker than that haze
+   at the horizon, so everything distant converged on a colour brighter than the sky.
+2. The photograph was taken standing in a field, so its lowest ~5° are a field, a treeline and
+   hills. Wherever the rider stood above the ring's crests (the top of a climb, a descent), the
+   photograph's own field showed **above** the game's hills, with the pale ring under it.
+
+Since #544 the fog and the ring's foot are the photographed sky just above its skyline
+(`realistic-light.ts` §`REALISTIC_HORIZON_BAND`, times the background intensity). The ridge carries
+80 % of it. The whole ridge is lifted, keeping its shape, until no crest stands below 5° from the eye
+(§`skylineCrestFloor`). The browser gate reads it off the drawing buffer against a control that
+reproduces the pale band (`game.browser.spec.ts` §"#544"). Whether it looks right on the tablet is
+only here. ⚠️ **The stylised world is unchanged**, and every stylised figure the browser gate prints
+is identical before and after.
+
+Same tablet, same debug-APK route as Part Z (§"Build and install"), from a `main` that has #544 in
+it. Choose the realistic world in Settings.
+
+| Step | What to do | What should happen |
+|---|---|---|
+| AG1 | Ride the owner's own saved route on the level for a minute, looking past the trees on either side | The distant hills are a hazy grey-green, **darker** than the sky just above them and lighter than the grass near the road. No white film behind the trees |
+| AG2 | Watch where a hill meets the sky | A soft, low-contrast line, not a bright sheet with a hard straight top |
+| AG3 | Ride to the top of the route's biggest climb and look out over the descent | Hazy hills all round the horizon. None of the photograph's own field or treeline shows above them. ⚠️ The hills rise with you once you are high enough: that is the trade #544 made, and this step is where to say whether it reads as wrong |
+| AG4 | The stylised world (`?world=stylised&panel=0&ladder=0`) at the same places | As it was before #544 |
+
+### AG results
+
+| Step | As described? | What was seen |
+|---|---|---|
+| AG1 | | |
+| AG2 | | |
+| AG3 | | |
+| AG4 | | |
+
+**Phone (OEM, model, Android, WebView):** ______________  **Build:** ______________

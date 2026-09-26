@@ -5,11 +5,15 @@ import { describe, expect, it } from 'vitest';
 import { AA_LARGE_TEXT_OR_NON_TEXT, relativeLuminance } from '../design/contrast';
 import {
   AGX_WHITE_INPUT,
+  drawnHorizonColour,
   environmentIntensity,
   halfToFloat,
   PHOTOGRAPHIC_ROAD_GRAIN,
+  REALISTIC_HORIZON_BAND,
+  REALISTIC_SKYLINE_DEGREES,
   reflectedSkyColour,
   skyBandRadiance,
+  skylineCrestFloor,
   skyRotation,
   skySunU,
   WATER_HORIZON_BAND,
@@ -175,24 +179,24 @@ describe('the photograph is a grain on the road’s gradient tint, never its col
   });
 });
 
-describe('what the realistic water reflects — #475', () => {
-  /** A sky whose three channels differ, so a hue is something to get wrong. */
-  function coloured(
-    width: number,
-    height: number,
-    colour: (row: number) => readonly [number, number, number],
-  ): SkyPixels {
-    return {
-      width,
-      height,
-      channel: (index) => {
-        const texel = Math.floor(index / 4);
-        const channel = index % 4;
-        return channel === 3 ? 1 : (colour(Math.floor(texel / width))[channel] ?? 0);
-      },
-    };
-  }
+/** A sky whose three channels differ, so a hue is something to get wrong. */
+function coloured(
+  width: number,
+  height: number,
+  colour: (row: number) => readonly [number, number, number],
+): SkyPixels {
+  return {
+    width,
+    height,
+    channel: (index) => {
+      const texel = Math.floor(index / 4);
+      const channel = index % 4;
+      return channel === 3 ? 1 : (colour(Math.floor(texel / width))[channel] ?? 0);
+    },
+  };
+}
 
+describe('what the realistic water reflects — #475', () => {
   it('averages only the rows inside the band, as the rows of the picture they are', () => {
     // 180 rows: a degree each. Above 30° is blue, below it is orange.
     const picture = coloured(8, 180, (row) => (90 - (row + 0.5) > 30 ? [0, 0, 1] : [1, 0.5, 0]));
@@ -227,5 +231,43 @@ describe('what the realistic water reflects — #475', () => {
     expect(r / g).toBeCloseTo(2, 10);
     expect(g / b).toBeCloseTo(2, 10);
     expect(reflectedSkyColour([0, 0, 0], 0.3)).toEqual([0, 0, 0]);
+  });
+});
+
+describe('what the realistic world’s far end converges on — #544', () => {
+  it('is the sky as DRAWN: the photograph’s radiance times the background’s intensity', () => {
+    // Every channel scaled by the same factor three multiplies a background
+    // texel by, and nothing re-scaled to the stylised world's brightness — the
+    // difference from the water's `reflectedSkyColour`, which is the point.
+    expect(drawnHorizonColour([0.9, 0.95, 1.1], 0.4)).toEqual([0.9 * 0.4, 0.95 * 0.4, 1.1 * 0.4]);
+    expect(drawnHorizonColour([0.9, 0.95, 1.1], 0)).toEqual([0, 0, 0]);
+    expect(() => drawnHorizonColour([1, 1, 1], Number.NaN)).toThrow(/intensity/);
+    expect(() => drawnHorizonColour([1, 1, 1], -1)).toThrow(/intensity/);
+    expect(() => drawnHorizonColour([1, 1, 1], Number.POSITIVE_INFINITY)).toThrow(/intensity/);
+  });
+
+  it('reads the sky above the photograph’s own skyline, not the field below it', () => {
+    // A photograph like the committed one: a dark field and treeline up to the
+    // skyline, and sky above it. One row a degree.
+    const picture = coloured(4, 180, (row) =>
+      90 - (row + 0.5) < REALISTIC_SKYLINE_DEGREES ? [0.1, 0.1, 0.05] : [0.9, 0.95, 1],
+    );
+    const band = skyBandRadiance(picture, REALISTIC_HORIZON_BAND[0], REALISTIC_HORIZON_BAND[1]);
+    [0.9, 0.95, 1].forEach((channel, index) => expect(band[index]).toBeCloseTo(channel, 12));
+    // The water's band starts at the horizon and so averages the field in —
+    // which drew the hills darker than the sky behind them.
+    const [water] = skyBandRadiance(picture, WATER_HORIZON_BAND[0], WATER_HORIZON_BAND[1]);
+    expect(water).toBeLessThan(0.6);
+  });
+
+  it('keeps every crest at or above the photograph’s skyline, from wherever the eye is', () => {
+    for (const eye of [0, 12, 480]) {
+      const floor = skylineCrestFloor(eye, 1_100);
+      expect((Math.atan2(floor - eye, 1_100) * 180) / Math.PI).toBeCloseTo(
+        REALISTIC_SKYLINE_DEGREES,
+        10,
+      );
+    }
+    expect(skylineCrestFloor(0, 1_100, 0)).toBeCloseTo(0, 10);
   });
 });
