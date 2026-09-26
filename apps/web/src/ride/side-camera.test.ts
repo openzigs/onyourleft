@@ -17,6 +17,7 @@ import {
   sideCameraLine,
   sideCameraLost,
   sideCameraLostEvent,
+  sideCameraLostNotice,
   sideCameraOnRide,
   sideCameraStoppable,
 } from './side-camera';
@@ -50,9 +51,16 @@ describe('the line — #551’s first criterion', () => {
     expect(sideCameraLine('framing')).toContain('not filming');
   });
 
-  it('calls a link that went and ended the pairing lost, not ended', () => {
+  it('calls a link that went and ended the pairing lost-and-ended, not ended', () => {
     // `side-link.ts` §`#end` sets the phone lost for `link-lost`.
-    expect(sideCameraOnRide(paired({ phone: 'lost', ended: 'link-lost' }))).toBe('lost');
+    expect(sideCameraOnRide(paired({ phone: 'lost', ended: 'link-lost' }))).toBe('lost-ended');
+  });
+
+  it('words an ended link so that it stays true for the rest of the ride — #577', () => {
+    // The open pairing's words promise "within 30 seconds"; a line that stands
+    // for the rest of the ride must not.
+    expect(sideCameraLine('lost-ended')).toBe('Side camera: link lost. The phone stops by itself.');
+    expect(sideCameraLine('lost-ended')).not.toMatch(/\d/);
   });
 
   it('calls a stop the tablet asked for, and the pairing that closed after it, stopped', () => {
@@ -115,8 +123,27 @@ describe('the link going — #551’s second criterion', () => {
 
   it('reads lost the way the line does', () => {
     expect(sideCameraLost(paired({ phone: 'lost' }))).toBe(true);
+    expect(sideCameraLost(paired({ phone: 'lost', ended: 'link-lost' }))).toBe(true);
     expect(sideCameraLost(paired({ phone: 'lost', answered: false }))).toBe(false);
     expect(sideCameraLost(paired())).toBe(false);
+  });
+
+  it('is an event when the link goes and ends the pairing in one step — #577', () => {
+    expect(sideCameraLostEvent(false, paired({ phone: 'lost', ended: 'link-lost' }))).toEqual({
+      kind: 'side-camera-lost',
+      text: SIDE_CAMERA_LOST_SENTENCE,
+    });
+    // Lost, then ended by it: the link went once.
+    expect(
+      sideCameraLostEvent(true, paired({ phone: 'lost', ended: 'link-lost' })),
+    ).toBeUndefined();
+  });
+
+  it('is the HUD’s notice only while the pairing is open — #577', () => {
+    expect(sideCameraLostNotice(paired({ phone: 'lost' }))).toBe(true);
+    expect(sideCameraLostNotice(paired({ phone: 'lost', ended: 'link-lost' }))).toBe(false);
+    expect(sideCameraLostNotice(paired())).toBe(false);
+    expect(sideCameraLostNotice(undefined)).toBe(false);
   });
 });
 

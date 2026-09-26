@@ -84,8 +84,9 @@ export interface RideAnnouncerProps {
    * §`sideCameraLostEvent`).
    *
    * ⚠️ **Optional, so a caller that stops passing it is green in
-   * `check:wiring`** (§Limits' third entry). `views/RideView.test.tsx` §"#551"
-   * drives the Ride screen and reads the region, which is what pins it.
+   * `check:wiring`** (§Limits' third entry).
+   * `ride/side-camera-ride-screen.a11y.test.tsx` drives the Ride screen and
+   * reads the region, which is what pins it.
    */
   readonly sideCamera?: SideControlState | undefined;
   /** Where the rider's announcement choice is read from. This device's, by default. */

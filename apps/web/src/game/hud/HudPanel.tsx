@@ -309,8 +309,11 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
           name begins with what is seen (SC 2.5.3) and the line beside it says
           what is stopped.
 
-          ⚠️ With #400's sound controls as well it does not fit any phone
-          viewport; tablets fit. That is #576.
+          ⚠️ With #400's sound controls as well it did not fit any phone
+          viewport (#576). It still renders HERE, beside Pause and End ride in
+          the document, and on a phone `theme.css` §"SOUNDS ON AND A SIDE
+          CAMERA PAIRED" lays it out elsewhere: in a panel of its own in the
+          left column on its side, sharing the sound row upright.
         */}
         {props.sideCamera === undefined ? null : (
           <div className="oyl-hud__side-camera-row">

@@ -35,8 +35,16 @@ import type { SideControlState } from '../camera/side-pairing-port';
 /**
  * The line's states, in the order {@link sideCameraOnRide} decides them.
  *
- * - `lost` — the tablet cannot hear the phone. #551's own word, and the one
- *   that matters: the phone stops by itself within 30 seconds (D-5).
+ * - `lost` — the tablet cannot hear the phone and the pairing is still open.
+ *   #551's own word, and the one that matters: the phone stops by itself
+ *   within 30 seconds (D-5), and a stop sent now may still be heard.
+ * - `lost-ended` — the link went and the pairing ENDED because of it
+ *   (`side-link.ts` §`#end`, `link-lost`). Terminal: nothing can be sent any
+ *   more, and after the phone's 30 seconds "within 30 seconds" is false. So it
+ *   is NOT the HUD's notice (#577's review, finding 1) — a notice on a phone
+ *   takes the route panel's cell (#437), and one that could never be acted on
+ *   or retired would take it for the rest of the ride. It is the actions
+ *   panel's line instead, worded so that it stays true.
  * - `ended` — the pairing ended some other way while the phone had not said
  *   it stopped (a broken message, a stranger's connection). Not "stopped",
  *   because the tablet does not know that it did.
@@ -51,7 +59,14 @@ import type { SideControlState } from '../camera/side-pairing-port';
  * - `filming` — filming.
  */
 export type SideCameraOnRide =
-  'lost' | 'ended' | 'stopped' | 'stopping' | 'stop-unconfirmed' | 'framing' | 'filming';
+  | 'lost'
+  | 'lost-ended'
+  | 'ended'
+  | 'stopped'
+  | 'stopping'
+  | 'stop-unconfirmed'
+  | 'framing'
+  | 'filming';
 
 /**
  * Where a paired side camera is, as one line — or `undefined` when there is
@@ -74,7 +89,7 @@ export function sideCameraOnRide(
     return undefined;
   }
   if (state.phone === 'lost') {
-    return 'lost';
+    return state.ended === undefined ? 'lost' : 'lost-ended';
   }
   if (state.phone === 'stopped') {
     return 'stopped';
@@ -108,6 +123,9 @@ export const SIDE_CAMERA_LABEL = 'Side camera';
  */
 export const SIDE_CAMERA_ON_RIDE_TEXT: Readonly<Record<SideCameraOnRide, string>> = {
   lost: 'link lost. If it was filming, it stops by itself within 30 seconds.',
+  // No "30 seconds": this line stands for the rest of the ride, and the
+  // phone's 30 seconds run out long before that.
+  'lost-ended': 'link lost. The phone stops by itself.',
   ended: 'session ended.',
   stopped: 'stopped.',
   stopping: 'stopping…',
@@ -141,8 +159,25 @@ export function sideCameraStoppable(state: SideControlState | undefined): boolea
   );
 }
 
-/** Whether a ride would call this link lost. */
+/**
+ * Whether a ride would call this link lost — open or ended. What the
+ * announcement is keyed on: a link that goes and ends the pairing in the same
+ * step (the peer connection failing outright) is still a link that went.
+ */
 export function sideCameraLost(state: SideControlState | undefined): boolean {
+  const line = sideCameraOnRide(state);
+  return line === 'lost' || line === 'lost-ended';
+}
+
+/**
+ * Whether the lost link is the HUD's NOTICE — only while the pairing is still
+ * open, which is while a stop may still be heard and "within 30 seconds" is
+ * still news. #577's review, finding 1: `lost-ended` is terminal, and a notice
+ * that can never be acted on or retired would hold a phone's route cell
+ * (#437) for the rest of the ride. Once the pairing has ended the state is the
+ * actions panel's line.
+ */
+export function sideCameraLostNotice(state: SideControlState | undefined): boolean {
   return sideCameraOnRide(state) === 'lost';
 }
 

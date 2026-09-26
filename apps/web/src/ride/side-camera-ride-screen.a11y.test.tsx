@@ -123,6 +123,19 @@ describe('the side camera on the Ride screen — #551', () => {
     expect(lostHandedOver()).toBe(1);
   });
 
+  it('stops promising "within 30 seconds" once the lost link has ended the pairing — #577', async () => {
+    const pairing = scriptedSidePairing({ phone: 'filming' });
+    await open(pairing);
+    await set(pairing, { phone: 'lost' });
+    expect(line()?.textContent).toContain('30 seconds');
+
+    await set(pairing, { ended: 'link-lost' });
+    expect(line()?.textContent).toContain('link lost. The phone stops by itself.');
+    expect(line()?.textContent).not.toContain('30 seconds');
+    expect(document.body.textContent).not.toContain('Stop side camera');
+    expect(lostHandedOver()).toBe(1);
+  });
+
   it('does not announce a link that was already lost when the screen opened', async () => {
     await open(scriptedSidePairing({ phone: 'lost' }));
 

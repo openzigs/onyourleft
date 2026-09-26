@@ -40,9 +40,11 @@ export function SideCameraOnRide({ state, onStop }: SideCameraOnRideProps): JSX.
   }
   return (
     <div className="oyl-ride__side-camera" data-oyl-side-camera={line}>
-      {line === 'lost' ? (
+      {line === 'lost' || line === 'lost-ended' ? (
+        // A warning either way; the ended link's words carry no "30 seconds",
+        // which stops being true while the line is still on the screen.
         <StatusMessage tone="warning" label={SIDE_CAMERA_LABEL}>
-          {SIDE_CAMERA_ON_RIDE_TEXT.lost}
+          {SIDE_CAMERA_ON_RIDE_TEXT[line]}
         </StatusMessage>
       ) : (
         <p>{sideCameraLine(line)}</p>

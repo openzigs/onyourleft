@@ -50,7 +50,13 @@ export function SoundControls({ preference, onChange }: SoundControlsProps): JSX
           onChange({ ...preference, muted: !preference.muted });
         }}
       >
-        Mute sounds
+        {/*
+          #576: on an upright phone with a side camera paired the HUD shows
+          only "Mute" — `theme.css` §"SOUNDS ON AND A SIDE CAMERA PAIRED"
+          clips the rest there, and only there. Clipped, not removed, so the
+          name stays "Mute sounds" and begins with what is seen (SC 2.5.3).
+        */}
+        Mute<span className="oyl-sound__mute-more"> sounds</span>
       </button>
       <label className="oyl-sound__volume">
         {/*

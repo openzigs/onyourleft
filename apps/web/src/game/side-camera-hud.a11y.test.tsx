@@ -48,6 +48,7 @@ import { mount, settle, type Mounted } from '../testing/mount';
 import type { GamePort, RidableRoute } from './GameView';
 import * as core from './hud/announce';
 import type { GameRenderer } from './port';
+import type { GameTrainerPort, GradientTrainer } from './trainer-port';
 
 vi.mock('./hud/announce', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./hud/announce')>();
@@ -114,13 +115,17 @@ afterEach(() => {
   globalThis.location.hash = '';
 });
 
-async function ride(pairing: ReturnType<typeof scriptedSidePairing>): Promise<void> {
+async function ride(
+  pairing: ReturnType<typeof scriptedSidePairing>,
+  trainer?: GameTrainerPort,
+): Promise<void> {
   mounted = await mount(
     <AppShell
       capabilities={NO_BLUETOOTH}
       game={GAME}
       gameRenderer={() => Promise.resolve(RENDERER)}
       sidePairing={pairing}
+      {...(trainer === undefined ? {} : { gameTrainer: trainer })}
     />,
   );
   await settle();
@@ -236,6 +241,86 @@ describe('the side camera on the ride HUD — #551', () => {
     });
     await frame(2);
     expect(lostHandedOver()).toBe(2);
+  });
+
+  it('moves a link that ENDED the pairing out of the notice slot, onto the line — #577', async () => {
+    // The review's finding 1: `link-lost` is terminal (`side-link.ts` §`#end`),
+    // so a notice for it could never be acted on or retired, and would hold a
+    // phone's route cell (#437) for the rest of the ride, still promising
+    // "within 30 seconds" long after they had passed.
+    const pairing = scriptedSidePairing({ phone: 'filming' });
+    await ride(pairing);
+    await frame(2);
+    await act(async () => {
+      pairing.set({ phone: 'lost' });
+      await Promise.resolve();
+    });
+    await frame(2);
+    // The control for what follows: while the pairing is open it IS a notice.
+    expect(notices()?.textContent).toContain('link lost');
+
+    await act(async () => {
+      pairing.set({ ended: 'link-lost' });
+      await Promise.resolve();
+    });
+    await frame(2);
+
+    expect(notices()?.textContent ?? '').not.toContain('Side camera');
+    expect(actions()?.textContent).toContain('Side camera: link lost. The phone stops by itself.');
+    // What a rider SEES — the region's sentence was true when it was said.
+    const seen = [...document.querySelectorAll('.oyl-hud > :not([data-oyl-announcer])')]
+      .map((each) => each.textContent)
+      .join(' ');
+    expect(seen).not.toContain('30 seconds');
+    // Nothing can be sent once the pairing has ended, so nothing is offered.
+    expect(document.body.textContent).not.toContain('Stop side camera');
+    // It went once; ending is not a second going.
+    expect(lostHandedOver()).toBe(1);
+  });
+
+  it('says a link that went and ended the pairing in the same step — #577', async () => {
+    // The peer connection failing outright ends the pairing with no 3 s of
+    // silence first. That is still the link going, and still said.
+    const pairing = scriptedSidePairing({ phone: 'filming' });
+    await ride(pairing);
+    await frame(2);
+    await act(async () => {
+      pairing.set({ phone: 'lost', ended: 'link-lost' });
+      await Promise.resolve();
+    });
+    await frame(2);
+
+    expect(lostHandedOver()).toBe(1);
+    expect(actions()?.textContent).toContain('Side camera: link lost.');
+  });
+
+  it('puts a Trainer fault above a lost side camera, in the announcer’s order — #577', async () => {
+    // The review's finding 3. `announce.ts` ranks `trainer-lost` above
+    // `side-camera-lost`: a trainer that stopped taking the road is a safety
+    // fault, and a camera is not. The one a rider READS first is the one they
+    // would HEAR first.
+    const control: GradientTrainer = {
+      setSimulationParameters: () => Promise.reject(new Error('the trainer said no')),
+      letGo: () => Promise.resolve({ kind: 'stopped' as const }),
+    };
+    const trainer: GameTrainerPort = {
+      readTrainer: () => ({ kind: 'ready', control }),
+      askForControlOnRide: () => Promise.resolve(),
+    };
+    const pairing = scriptedSidePairing({ phone: 'filming' });
+    await ride(pairing, trainer);
+    await frame(3);
+    await act(async () => {
+      pairing.set({ phone: 'lost' });
+      await Promise.resolve();
+    });
+    await frame(2);
+
+    const text = notices()?.textContent ?? '';
+    // The apparatus: both are there, or the order below says nothing.
+    expect(text).toContain('Trainer');
+    expect(text).toContain('Side camera');
+    expect(text.indexOf('Trainer')).toBeLessThan(text.indexOf('Side camera'));
   });
 
   it('does not announce a link that was already lost when the ride began', async () => {

@@ -238,8 +238,17 @@ const WITH_SOUNDS = new URLSearchParams(window.location.search).get('sounds') ==
  * scripted one the unit tests use: the real link needs a second device.
  */
 const SIDE = new URLSearchParams(window.location.search).get('side');
+/**
+ * `?side=ended` — #577's review, finding 1: a lost link that ENDED the
+ * pairing. Terminal, so it is the actions panel's line and not a notice, and
+ * there is nothing left to stop.
+ */
 const SIDE_PAIRING =
-  SIDE === 'filming' || SIDE === 'lost' ? scriptedSidePairing({ phone: SIDE }) : undefined;
+  SIDE === 'filming' || SIDE === 'lost'
+    ? scriptedSidePairing({ phone: SIDE })
+    : SIDE === 'ended'
+      ? scriptedSidePairing({ phone: 'lost', ended: 'link-lost' })
+      : undefined;
 
 /** A trainer that accepts every gradient, so the trainer line is on the screen. */
 const TRAINER: GameTrainerPort = {
@@ -357,9 +366,18 @@ function measure(): StageMeasurement {
     // The grid items a rider SEES. Since #397 the HUD also holds its one live
     // region, visually hidden by clip — a 1 px box that is not a panel and
     // must not be counted as one.
-    panels: [...document.querySelectorAll('.oyl-hud > :not([data-oyl-announcer])')].map((each) =>
-      item(each.className, each),
-    ),
+    // #576: on a short landscape phone with sounds on, the side camera's row
+    // is lifted out of the actions panel by anchor positioning and drawn as a
+    // panel of its own (`theme.css` §"SOUNDS ON AND A SIDE CAMERA PAIRED").
+    // It is still the actions panel's child in the document, so it is counted
+    // as a panel only when it has been lifted out — otherwise every
+    // measurement would find it "over" the panel it is inside.
+    panels: [
+      ...document.querySelectorAll('.oyl-hud > :not([data-oyl-announcer])'),
+      ...[...document.querySelectorAll('.oyl-hud__side-camera-row')].filter(
+        (each) => window.getComputedStyle(each).position === 'absolute',
+      ),
+    ].map((each) => item(each.className, each)),
     items,
     primary: labels('.oyl-hud__fields--primary'),
     secondary: labels('.oyl-hud__fields--secondary'),
@@ -476,9 +494,11 @@ async function run(): Promise<void> {
   // #551: the side camera's line or notice, when this page was asked for one.
   if (SIDE_PAIRING !== undefined) {
     await until('the side camera on the HUD', () =>
-      [...document.querySelectorAll('.oyl-hud button')].find(
-        (each) => each.textContent === 'Stop side camera',
-      ),
+      SIDE === 'ended'
+        ? document.querySelector('.oyl-hud__side-camera')
+        : [...document.querySelectorAll('.oyl-hud button')].find(
+            (each) => each.textContent === 'Stop side camera',
+          ),
     );
   }
   // ⚠️ Before anything is measured. @see hud-harness.tsx

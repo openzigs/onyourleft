@@ -720,6 +720,139 @@ test.describe('a ride with a side camera paired — #551', () => {
     });
   }
 
+  /**
+   * #576 — sounds on AND a side camera paired. Each passed alone and the two
+   * together did not fit a phone: the actions panel was 228 px on a Mac, ran
+   * off a 736×360 stage and landed on the rider upright. The stage has no
+   * navigation, so a Pause or End ride pushed off it is a ride the rider
+   * cannot leave. Every control is held on screen and uncovered, the mute
+   * and the volume included (WCAG 2.2 SC 1.4.2).
+   */
+  for (const viewport of OVERLAY_VIEWPORTS) {
+    for (const side of ['filming', 'lost'] as const) {
+      test(`with sounds on, ${side}: every control is reachable — ${viewport.name}`, async ({
+        page,
+      }) => {
+        await openRide(page, viewport, `?side=${side}&sounds=on`);
+        const seen = await measure(page);
+        const sound = seen.items.filter((each) => each.name.startsWith('sound: '));
+        // The apparatus: both halves were rendered.
+        expect(sound.map((each) => each.name)).toEqual([
+          'sound: Mute sounds',
+          'sound: Sound volume',
+        ]);
+        named(seen.items, 'the side camera stop');
+        const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
+        const above = seen.panels
+          .filter((each) => each !== actions && each.box.bottom <= (actions?.box.top ?? 0) + 1)
+          .map((each) => (actions?.box.top ?? 0) - each.box.bottom);
+        // Published rather than bounded, for #512's reason: the runner's fonts
+        // are not a Mac's. Upright, the room that runs out is the room above
+        // the rider's box, so that margin is printed too.
+        const rider = riderBox(viewport);
+        console.log(
+          `side camera ${side} + sounds on — ${viewport.name} — actions panel ` +
+            `${(actions?.box.height ?? 0).toFixed(0)} px tall; ` +
+            `${above.length === 0 ? 'nothing above it' : `${Math.min(...above).toFixed(0)} px to the panel above`}` +
+            (viewport.height > viewport.width
+              ? `; ${((actions?.box.top ?? 0) - rider.bottom).toFixed(0)} px below the rider's box`
+              : ''),
+        );
+        expect([
+          ...sideCameraCollisions(seen, viewport),
+          ...sound.filter((each) => !inside(each.box, viewport) || !each.onTop).map(describeItem),
+        ]).toEqual([]);
+      });
+    }
+  }
+
+  /**
+   * #576's control — put back what the actions panel did before: the side
+   * camera's row stacked inside it, under Pause and End ride and over the
+   * sound row. The same measurement must then fail on a short landscape phone
+   * AND upright, which is #576 reproduced; without this, every case above is
+   * as true of a harness where sounds never came on.
+   */
+  for (const viewport of OVERLAY_VIEWPORTS.filter(
+    (each) => each.height === 360 || each.height === 752,
+  )) {
+    test(`the control — the rows stacked as before #576 do not fit — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openRide(page, viewport, '?side=filming&sounds=on');
+      await page.addStyleTag({
+        content:
+          '.oyl-game--riding .oyl-hud .oyl-hud__actions { flex-flow: column nowrap !important; }' +
+          '.oyl-game--riding .oyl-hud .oyl-hud__actions > .oyl-hud__side-camera-row {' +
+          ' position: static !important; margin: 0 !important; padding: 0 !important;' +
+          ' border: 0 !important; width: auto !important; }' +
+          '.oyl-game--riding .oyl-hud .oyl-sound__mute-more { position: static !important;' +
+          ' width: auto !important; height: auto !important; margin: 0 !important;' +
+          ' clip-path: none !important; }',
+      });
+      const seen = await measure(page);
+      // The apparatus: the row really is back inside the panel.
+      expect(seen.panels.some((each) => each.name.includes('side-camera-row'))).toBe(false);
+      expect(sideCameraCollisions(seen, viewport)).not.toEqual([]);
+    });
+  }
+
+  /**
+   * #577's review, finding 1 — a lost link that ENDED the pairing. It is
+   * terminal, so it is the actions panel's line and the notice slot is left
+   * free: on a phone that slot is the route panel's cell (#437), and a notice
+   * nothing could act on or retire would have held it for the rest of the
+   * ride. At every overlay viewport: no notice, the route panel's strip and
+   * plan view on screen, the line in the actions panel, and nothing over
+   * anything else.
+   */
+  for (const viewport of OVERLAY_VIEWPORTS) {
+    test(`ended: the line, and the route panel back — ${viewport.name}`, async ({ page }) => {
+      await openRide(page, viewport, '?side=ended');
+      const seen = await measure(page);
+
+      const line = named(seen.items, 'the side camera line');
+      expect(inside(line.box, viewport) && line.onTop, describeItem(line)).toBe(true);
+      const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
+      expect(actions === undefined ? false : overlap(line.box, actions.box)).toBe(true);
+      expect(seen.panels.some((each) => each.name.includes('oyl-hud__notices'))).toBe(false);
+      expect(seen.items.some((each) => each.name === 'the side camera stop')).toBe(false);
+      for (const name of ['the elevation strip', 'the plan view']) {
+        const item = named(seen.items, name);
+        expect(inside(item.box, viewport) && item.onTop, describeItem(item)).toBe(true);
+      }
+
+      const laidOut = seen.panels.filter((each) => each.box.height > 1);
+      const found = laidOut.filter((each) => !inside(each.box, viewport)).map(describeItem);
+      laidOut.forEach((a, index) => {
+        for (const b of laidOut.slice(index + 1)) {
+          if (overlap(a.box, b.box)) found.push(`${describeItem(a)} × ${describeItem(b)}`);
+        }
+      });
+      found.push(
+        ...laidOut.filter((each) => overlap(each.box, riderBox(viewport))).map(describeItem),
+      );
+      expect(found).toEqual([]);
+    });
+  }
+
+  // The control for the case above: the same page with the pairing still
+  // OPEN puts the lost link in the notice slot, and on a phone that slot is
+  // the route panel's cell — so the same "the plan view is on screen" must
+  // fail there. Without it, an ended case whose notice rendered somewhere the
+  // measurement never looked would pass as readily as one with no notice.
+  for (const viewport of OVERLAY_VIEWPORTS.filter((each) => each.height === 360)) {
+    test(`the control — an OPEN lost link takes the route cell — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openRide(page, viewport, '?side=lost');
+      const seen = await measure(page);
+      expect(seen.panels.some((each) => each.name.includes('oyl-hud__notices'))).toBe(true);
+      const plan = named(seen.items, 'the plan view');
+      expect(inside(plan.box, viewport) && plan.onTop).toBe(false);
+    });
+  }
+
   // The control: the same measurement over a line made taller than the room
   // a short landscape phone has for it must fail. Without this, a line the
   // measurement never looked at would pass as readily as one that fits.

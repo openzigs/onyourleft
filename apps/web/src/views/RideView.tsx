@@ -107,8 +107,9 @@ export interface RideViewProps {
    * `undefined` where there is no WebRTC, which is also no pairing.
    *
    * ⚠️ **Optional, so a shell that stops passing it is green in
-   * `check:wiring`** (§Limits' third entry). `shell/side-camera-on-ride.test.tsx`
-   * drives it through the real shell, which is what pins `AppShell`'s half.
+   * `check:wiring`** (§Limits' third entry).
+   * `ride/side-camera-ride-screen.a11y.test.tsx` drives it through the real
+   * shell, which is what pins `AppShell`'s half.
    */
   readonly sidePairing?: SidePairingPort | undefined;
 }
