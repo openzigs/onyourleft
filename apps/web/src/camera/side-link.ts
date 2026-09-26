@@ -703,9 +703,12 @@ export class TabletSideLink implements SideCameraControlPort {
     this.#peer.onconnectionstatechange = null;
     letGo(this.#peer, this.#channel, this.#timers);
     this.#announce();
-    // After the announcement, so a listener that reads the state on its way
-    // out (`side-analysis.ts` finishing a session) still hears nothing more.
-    this.#pictureListeners.clear();
+    // ⚠️ No `#pictureListeners.clear()` here, and one was removed in #555's
+    // review: `#hearPicture` returns on `#ended` before it reads a byte, and
+    // the handler above is gone too, so a picture after this reaches nobody —
+    // whether they subscribed before the end or after it. `side-link.test.ts`
+    // §"hands no picture to anybody once the pairing has ended" is the pin,
+    // and deleting the `#ended` guard turns it red where the clear could not.
   }
 
   #build(): SideControlState {

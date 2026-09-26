@@ -53,7 +53,7 @@ your own action:
 | A signing keypair, used to sign your own activity records | generated on the device the first time it is needed |
 | Pictures from the camera — only the ones you chose to keep | the camera, if you turn it on and then turn on "keep the pictures from this ride" for that ride. Otherwise a picture is thrown away as soon as it has been looked at |
 | The address and model name of your own computer, if you set one up | typed by you on the Camera page, and kept in this device's browser storage |
-| Where you were in the side camera's picture in your last session — a handful of positions, not a picture | worked out on the tablet from the side-camera phone's pictures, so the next session can check the camera is in the same place |
+| Where you were in the side camera's picture in your last session — a handful of positions, not a picture — and whether that session's check found the camera where it was the time before | worked out on the tablet from the side-camera phone's pictures, so the next session can check the camera is in the same place |
 
 The private half of the signing key is a non-extractable key held by the browser or WebView: the app
 itself cannot read it, cannot copy it, and cannot send it anywhere. Its public half travels only

@@ -28,7 +28,8 @@
  *    them, against the reference stored from the rider's last session, and
  *    tells the phone the verdict.
  * 5. **Stores this session's placement as the next session's reference** when
- *    it ends, if it saw enough of the rider to have one.
+ *    it ends, if it saw enough of the rider to have one — with whether this
+ *    session's framing check passed on the same row (D-7's record).
  *
  * ## What it does not do: send the pictures to the rider's own computer
  *
@@ -60,7 +61,7 @@
  * passed"*, which is #528's reading and not the owner's; it says this now.
  */
 
-import type { AthleteId, FramingReferenceRecord } from '@onyourleft/store';
+import type { AthleteId, FramingCheckRecord, FramingReferenceRecord } from '@onyourleft/store';
 
 import {
   FRAMING_LANDMARKS,
@@ -327,11 +328,18 @@ export class SideAnalysis implements SideAnalysisPort {
     this.#estimator?.closeSidePoseModel();
     const framing = this.#state.framing === 'checking' ? 'not-checked' : this.#state.framing;
     this.#set({ finished: true, framing });
-    this.#keepReference();
+    this.#keepReference(framing);
   }
 
-  /** This session's placement, as the next session's reference. */
-  #keepReference(): void {
+  /**
+   * This session's placement, as the next session's reference — and, on the
+   * same row and in the same put, whether this session's framing check passed
+   * (D-7: *"Whether the check passed is stored with the session's numbers.
+   * That record is what the report reads when it decides whether a
+   * cross-session sentence is permitted."*). One put, so the verdict and the
+   * placement cannot describe two different sessions.
+   */
+  #keepReference(check: FramingCheckRecord): void {
     const keeping = this.#references;
     if (keeping === undefined || this.#samples.length < FRAMING_CHECK_POSES) {
       return;
@@ -345,6 +353,7 @@ export class SideAnalysis implements SideAnalysisPort {
         athleteId: keeping.athleteId,
         aspect: placement.aspect,
         landmarks: placement.landmarks,
+        check,
       })
       .catch(() => {
         // Nothing of the error is read (ADR 0029 D-8, and a storage error names

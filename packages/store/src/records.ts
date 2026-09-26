@@ -906,4 +906,49 @@ export interface FramingReferenceRecord {
    */
   readonly aspect: number;
   readonly landmarks: readonly FramingLandmarkRecord[];
+  /**
+   * Whether the framing check passed in the session these numbers came from —
+   * [#530](https://github.com/openzigs/onyourleft/issues/530), ADR 0033 D-7:
+   * *"Whether the check passed is stored with the session's numbers. That
+   * record is what the report reads when it decides whether a cross-session
+   * sentence is permitted."*
+   *
+   * On the same row as the placement, and written in the same put, so the
+   * verdict and the numbers it is about cannot describe two different
+   * sessions. See {@link FramingCheckRecord} for the four values.
+   *
+   * ⚠️ **Optional, and absent means "not recorded", which a reader must treat
+   * as NOT passed.** README §"An optional field is not a migration": a row
+   * written before #530 has no verdict, and no schema version is needed to
+   * read it. Only `'matches'` permits a cross-session sentence; every other
+   * value, and the absence, gives within-session differences only.
+   */
+  readonly check?: FramingCheckRecord;
 }
+
+/**
+ * The framing check's outcome in one session — ADR 0033 D-7.
+ *
+ * - `matches` — the check ran against the reference stored before this
+ *   session and passed. The only value that permits a cross-session sentence.
+ * - `differs` — it ran and did not pass: the camera moved, or the check could
+ *   not establish that it had not.
+ * - `no-reference` — there was nothing to check against (a first session, or
+ *   a reference this build could not read).
+ * - `not-checked` — there was a reference, and the session ended before the
+ *   check had enough pictures of the rider, or before the reference was read.
+ *
+ * ⚠️ **"Passed" is against the reference stored before the session**, and
+ * since #530 that is always the previous session's placement (the owner's
+ * *"last session"*), so it is a statement about two consecutive sessions and
+ * not about the first one ever filmed.
+ */
+export type FramingCheckRecord = 'matches' | 'differs' | 'no-reference' | 'not-checked';
+
+/** Every {@link FramingCheckRecord}, for a decoder that refuses anything else. */
+export const FRAMING_CHECK_RECORDS: readonly FramingCheckRecord[] = [
+  'matches',
+  'differs',
+  'no-reference',
+  'not-checked',
+];

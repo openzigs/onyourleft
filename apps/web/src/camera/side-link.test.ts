@@ -583,6 +583,27 @@ describe('pictures, phone → tablet — #530, ADR 0033 D-3 and D-4', () => {
     expect(phone.link.sideLinkCondition()).toBe('ended');
   });
 
+  it('hands no picture to anybody once the pairing has ended, even one already on its way', async () => {
+    const { tablet, network } = await paired();
+    const frames = network.peers[0]?.channels.find((c) => c.label === FRAMES_CHANNEL);
+    if (frames === undefined) {
+      throw new Error('no pictures channel');
+    }
+    // The handler as it was while the pairing was up: a message the platform
+    // had already dispatched to it when the pairing ended.
+    const inFlight = frames.onmessage;
+    const before: SidePicture[] = [];
+    tablet.control.onSideCameraPicture((picture) => before.push(picture));
+    tablet.control.endSidePairing();
+    const after: SidePicture[] = [];
+    tablet.control.onSideCameraPicture((picture) => after.push(picture));
+    inFlight?.({ data: sidePictureMessage(PICTURE) });
+    frames.onmessage?.({ data: sidePictureMessage(PICTURE) });
+    await flushSideLink();
+    expect(before).toEqual([]);
+    expect(after).toEqual([]);
+  });
+
   it('counts a picture as hearing from the phone, so a filming phone is not called lost', async () => {
     const { tablet, phone, network, pass } = await paired();
     // Only the pictures get through: the heartbeat on control does not.

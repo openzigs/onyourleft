@@ -7,9 +7,10 @@
  * through the real link.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { athleteId, type FramingReferenceRecord } from '@onyourleft/store';
+import { ATHLETE_A, createStoreHarness, seedAthletes } from '@onyourleft/store/testing';
 
 import type { FramingReference, FramingVerdict } from './framing';
 import {
@@ -352,7 +353,9 @@ describe('when the session ends', () => {
     expect(model.closed()).toBe(1);
     expect(link.listening()).toBe(0);
     expect(analysis.sideAnalysisState().finished).toBe(true);
-    expect(keeping.puts).toEqual([{ athleteId: ATHLETE, ...referenceOf(pose(0.05)) }]);
+    expect(keeping.puts).toEqual([
+      { athleteId: ATHLETE, ...referenceOf(pose(0.05)), check: 'not-checked' },
+    ]);
     // The numbers are still there for the report.
     expect(analysis.poseSamples()).toHaveLength(FRAMING_CHECK_POSES);
   });
@@ -368,7 +371,57 @@ describe('when the session ends', () => {
     }
     link.set({ ended: 'ended-here' });
     await settle();
-    expect(keeping.puts).toEqual([{ athleteId: ATHLETE, ...referenceOf(pose(0.2)) }]);
+    expect(keeping.puts).toEqual([
+      { athleteId: ATHLETE, ...referenceOf(pose(0.2)), check: 'differs' },
+    ]);
+  });
+
+  it('records whether the check passed with the session’s numbers, read back through the store (D-7)', async () => {
+    const harness = createStoreHarness();
+    try {
+      await seedAthletes(harness);
+      await harness.write(async (store) =>
+        store.putFramingReference({ athleteId: ATHLETE_A, ...referenceOf(pose()) }),
+      );
+      const link = scriptedControl();
+      const model = scriptedModel();
+      const puts: Promise<void>[] = [];
+      new SideAnalysis({
+        control: link.control,
+        estimator: model.make,
+        references: {
+          athleteId: ATHLETE_A,
+          store: {
+            getFramingReference: async (owner) =>
+              harness.write(async (store) => store.getFramingReference(owner)),
+            putFramingReference: async (record) => {
+              const put = harness.write(async (store) => store.putFramingReference(record));
+              puts.push(put);
+              return put;
+            },
+          },
+        },
+      });
+      link.set({ phone: 'framing' });
+      await vi.waitFor(() => {
+        expect(link.references).toHaveLength(1);
+      });
+      for (let index = 0; index < FRAMING_CHECK_POSES; index += 1) {
+        link.picture();
+        await model.answer({ kind: 'pose', pose: pose(0.01) });
+      }
+      expect(link.verdicts).toEqual(['matches']);
+      link.set({ phone: 'stopped' });
+      expect(puts).toHaveLength(1);
+      await Promise.all(puts);
+      // A fresh connection, through the public read (CLAUDE.md §5).
+      const kept = await harness.read(async (store) => store.getFramingReference(ATHLETE_A));
+      expect(kept?.check).toBe('matches');
+      // The verdict is about THIS session's placement, on the same row.
+      expect(kept?.landmarks).toEqual(referenceOf(pose(0.01)).landmarks);
+    } finally {
+      await harness.destroy();
+    }
   });
 
   it('keeps nothing, and says the check was not made, when it saw too little of the rider', async () => {

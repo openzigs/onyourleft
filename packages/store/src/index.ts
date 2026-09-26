@@ -30,6 +30,7 @@ export type {
   ActivitySummary,
   AthleteRecord,
   CameraFrameRecord,
+  FramingCheckRecord,
   FramingLandmarkRecord,
   FramingReferenceRecord,
   LapRecord,

@@ -7,8 +7,12 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { workerPoseEstimator, type PoseWorkerLike } from './pose-estimator';
-import { cleanFrameBytes } from './testing';
+import {
+  POSE_REPLY_DEADLINE_MILLISECONDS,
+  workerPoseEstimator,
+  type PoseWorkerLike,
+} from './pose-estimator';
+import { cleanFrameBytes, virtualTime } from './testing';
 
 interface Posted {
   readonly message: { readonly id: number; readonly picture: ArrayBuffer };
@@ -40,6 +44,12 @@ function scriptedWorker(): PoseWorkerLike & {
     },
   };
   return worker;
+}
+
+async function flush(): Promise<void> {
+  for (let round = 0; round < 5; round += 1) {
+    await Promise.resolve();
+  }
 }
 
 describe('one picture to the worker', () => {
@@ -104,6 +114,47 @@ describe('when the worker fails', () => {
     const waiting = estimator.estimateSidePose(cleanFrameBytes());
     worker.reply({ id: 0, kind: 'described', text: 'a person on a bicycle' });
     await expect(waiting).resolves.toEqual({ kind: 'unavailable' });
+  });
+
+  it('answers unavailable when the worker never replies, with no error either (#555 review)', async () => {
+    let made = 0;
+    // A worker that takes every picture and never says anything: stuck in its
+    // model load, with no `error` event.
+    const worker = scriptedWorker();
+    const time = virtualTime();
+    const estimator = workerPoseEstimator(() => {
+      made += 1;
+      return worker;
+    }, time);
+    let outcome: unknown;
+    void estimator.estimateSidePose(cleanFrameBytes()).then((answer) => {
+      outcome = answer;
+    });
+    time.advance(POSE_REPLY_DEADLINE_MILLISECONDS - 1);
+    await flush();
+    expect(outcome).toBeUndefined();
+    time.advance(1);
+    await flush();
+    expect(outcome).toEqual({ kind: 'unavailable' });
+    expect(worker.terminated).toBe(1);
+    // Dead, as after an error: nothing more is sent and no new worker is made.
+    await expect(estimator.estimateSidePose(cleanFrameBytes())).resolves.toEqual({
+      kind: 'unavailable',
+    });
+    expect(worker.posted).toHaveLength(1);
+    expect(made).toBe(1);
+  });
+
+  it('cancels a picture’s deadline when it is answered, so a slow session is not cut off', async () => {
+    const worker = scriptedWorker();
+    const time = virtualTime();
+    const estimator = workerPoseEstimator(() => worker, time);
+    const first = estimator.estimateSidePose(cleanFrameBytes());
+    worker.reply({ id: 0, kind: 'unreadable' });
+    await expect(first).resolves.toEqual({ kind: 'unreadable' });
+    expect(time.active()).toBe(0);
+    time.advance(POSE_REPLY_DEADLINE_MILLISECONDS * 2);
+    expect(worker.terminated).toBe(0);
   });
 
   it('answers unavailable when no worker can be made', async () => {

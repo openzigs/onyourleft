@@ -16,6 +16,15 @@
  * waiting on it `unavailable` and the estimator dead: nothing more is sent to
  * a worker that has failed once, and the screen says the model is
  * unavailable rather than counting pictures as unreadable for ever.
+ *
+ * ⚠️ **So is a worker that never answers** (#555's review). A worker stuck in
+ * its model load raises no `error` event, and without a bound the promise for
+ * that picture never settles: `side-analysis.ts` would stay busy for the rest
+ * of the session and count every later picture as skipped, with the screen
+ * never saying the model is unavailable. {@link POSE_REPLY_DEADLINE_MILLISECONDS}
+ * is that bound, and running out of it is the same failure as an `error`
+ * event — the same fixed word on the screen, and nothing of any picture in it.
+ * CLAUDE.md §8's rule for a Web Bluetooth promise, applied to a worker.
  */
 
 import type { SidePoseEstimator, SidePoseOutcome } from './side-analysis-port';
@@ -44,23 +53,63 @@ export function poseWorker(): PoseWorkerLike {
   }) as unknown as PoseWorkerLike;
 }
 
+/**
+ * How long one picture may wait for the worker's reply before the model is
+ * called unavailable: a minute.
+ *
+ * ## Provenance — ⚠️ the author's choice, not a measurement
+ *
+ * The first reply waits for the whole model load — about 17 MB of runtime and
+ * weights fetched, compiled and initialised — on a tablet that may be on poor
+ * Wi-Fi, so the bound is set far above spike 0010's per-picture cost and is
+ * meant only to turn "never" into "unavailable". Every later reply is tens of
+ * milliseconds, so a minute cannot cut a healthy model off.
+ * [#554](https://github.com/openzigs/onyourleft/issues/554)'s on-device
+ * measurement is what would move it.
+ */
+export const POSE_REPLY_DEADLINE_MILLISECONDS = 60_000;
+
+/** Timers the estimator uses, so a test can move time by hand. */
+export interface PoseEstimatorTimers {
+  readonly after: (task: () => void, milliseconds: number) => () => void;
+}
+
+const realTimers: PoseEstimatorTimers = {
+  after: (task, milliseconds) => {
+    const handle = setTimeout(task, milliseconds);
+    return () => {
+      clearTimeout(handle);
+    };
+  },
+};
+
 /** A pose estimator over a worker made by `makeWorker` — {@link poseWorker} in production. */
 export function workerPoseEstimator(
   makeWorker: () => PoseWorkerLike = poseWorker,
+  timers: PoseEstimatorTimers = realTimers,
 ): SidePoseEstimator {
   let worker: PoseWorkerLike | undefined;
   let dead = false;
   let next = 0;
-  const waiting = new Map<number, (outcome: SidePoseOutcome) => void>();
+  const waiting = new Map<
+    number,
+    { readonly settle: (outcome: SidePoseOutcome) => void; readonly cancel: () => void }
+  >();
+
+  /** Settle everything waiting as `unavailable`, and cancel each deadline. */
+  const release = (): void => {
+    for (const { settle, cancel } of waiting.values()) {
+      cancel();
+      settle({ kind: 'unavailable' });
+    }
+    waiting.clear();
+  };
 
   const fail = (): void => {
     dead = true;
     worker?.terminate();
     worker = undefined;
-    for (const settle of waiting.values()) {
-      settle({ kind: 'unavailable' });
-    }
-    waiting.clear();
+    release();
   };
 
   const started = (): PoseWorkerLike | undefined => {
@@ -80,9 +129,10 @@ export function workerPoseEstimator(
           fail();
           return;
         }
-        const settle = waiting.get(reply.id);
+        const entry = waiting.get(reply.id);
         waiting.delete(reply.id);
-        settle?.(poseOutcomeOf(reply));
+        entry?.cancel();
+        entry?.settle(poseOutcomeOf(reply));
       };
       worker.onerror = () => {
         fail();
@@ -106,7 +156,12 @@ export function workerPoseEstimator(
       const id = next;
       next += 1;
       return new Promise<SidePoseOutcome>((resolve) => {
-        waiting.set(id, resolve);
+        waiting.set(id, {
+          settle: resolve,
+          // A worker that has not answered this picture in time is a failed
+          // worker: every picture waiting on it is settled, and it is gone.
+          cancel: timers.after(fail, POSE_REPLY_DEADLINE_MILLISECONDS),
+        });
         try {
           target.postMessage({ id, picture: buffer }, [buffer]);
         } catch {
@@ -124,10 +179,7 @@ export function workerPoseEstimator(
       dead = true;
       worker?.terminate();
       worker = undefined;
-      for (const settle of waiting.values()) {
-        settle({ kind: 'unavailable' });
-      }
-      waiting.clear();
+      release();
     },
   };
 }
