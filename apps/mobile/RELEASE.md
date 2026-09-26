@@ -104,9 +104,13 @@ requests tiles from `tiles.openzigs.com` by default (a rider can turn that off i
 Settings). ⚠️ **Since [#558](https://github.com/openzigs/onyourleft/issues/558)
 the approximate-location row is "collected"**, and a reviewer who remembers it
 resting on Play's ephemeral-processing exemption is reading the old file:
-Cloudflare's standard HTTP analytics keep each tile request's IP address and
-path for up to 7 days, which is not ephemeral. §8 has a step that re-checks
-that retention before every tag.
+Cloudflare's standard HTTP analytics keep each tile request's IP address, time
+and user agent where this project's account can see them for up to 7 days, which
+is not ephemeral. They do **not** keep which tile: the basemap is one PMTiles
+file, the tile is picked by a `Range` header the dataset has no field for, and
+every request's path is the same — which is why the row is approximate and the
+precise row is not collected. §8 has a step that re-checks both before every
+tag.
 
 #95's fifth criterion asks a reviewer to confirm the **merged** manifest supports
 the "no location collection" claim — since #558, the claim that the app does
@@ -250,9 +254,12 @@ release, and the artefact is the same file a tag would publish.
 on it: the Data Safety **approximate location** row (`src/android/data-safety.ts`)
 and the privacy policy's tile paragraphs (`docs/privacy-policy.md`). Both say
 that Cloudflare, which serves `tiles.openzigs.com` for us, keeps a record of
-recent requests — the client IP address and the tile path — for **up to 7
-days**, and that nothing else keeps them. Nothing in this repository can check
-that: it is the Cloudflare account's plan and settings.
+each map request — the client IP address, the time and the device or browser
+type, **not which part of the map** — that this project's Cloudflare account can
+see for **up to 7 days**, and that no further logging, log export or analytics
+of those requests is turned on. Nothing in this repository can check that: it
+is the Cloudflare account's plan and settings, and what the app's requests look
+like on the wire.
 `apps/web/src/privacy/no-network.test.ts` checks only that the two documents
 name the host and the 7 days, not that the 7 days is still true.
 
@@ -264,6 +271,14 @@ every zone and not switchable off) hold per-request records for
 available on the account; the R2 bucket has no event notifications and its
 `r2.dev` address is disabled; Web Analytics is on for the zone but injects its
 beacon into HTML responses only, so tile responses are not measured by it.
+Then, the same day (#559's review), `httpRequestsAdaptiveGroups` on the zone,
+filtered to host `tiles.openzigs.com` over the last 23 hours and grouped by
+`clientRequestPath`: every request the app made had **one** path,
+`/basemap-us-20260914.pmtiles` (26 requests). The other paths were scanners
+(`/.env`, `/robots.txt`, `/sitemap.xml`, `/`) and one test probe
+(`/oyl-no-such-archive.pmtiles`). The basemap is a single PMTiles file read with
+HTTP `Range` headers, and `Range` is not a field of that dataset, so the record
+says nothing about which part of the map a rider looked at.
 
 In the Cloudflare dashboard, for the zone and the R2 bucket serving
 `tiles.openzigs.com`, confirm:
@@ -280,6 +295,16 @@ In the Cloudflare dashboard, for the zone and the R2 bucket serving
 3. **Web Analytics** is still limited to HTML pages — no beacon or rule covers
    the tile host — and no Logs or Log Explorer product stores its requests, and
    the bucket has no R2 event notification that records them.
+4. **The kept record still does not name the tile.** Re-run the query above:
+   `httpRequestsAdaptiveGroups` on the zone, filtered to
+   `clientRequestHTTPHost: "tiles.openzigs.com"` over the last day, grouped by
+   `clientRequestPath`. The app's requests must share **one constant path** —
+   the archive file `basemapStyle` names — with anything else explained as a
+   scanner or a probe. ⚠️ If a tile setup ever puts the tile in the URL (a
+   z/x/y tile server, a tile in the query string, one file per region fine
+   enough to locate a ride), the kept record names where a rider looked: the
+   **precise location** row must become collected, and every sentence that says
+   *"not which part of the map"* must change, before the tag.
 
 Record the date and who checked in the release's notes.
 
@@ -293,13 +318,15 @@ exists, reaches the same host and is covered by the same answer without passing
 through a tag.
 
 **If any of them has changed** — the plan moved to Business (31 days) or
-Enterprise (90), a Logpush job or other store now keeps the requests, or Web
-Analytics now covers the tiles — either put it back before tagging, or do all of
+Enterprise (90), a Logpush job or other store now keeps the requests, Web
+Analytics now covers the tiles, or the app's requests no longer share one path —
+either put it back before tagging, or do all of
 these before the tag, not after:
 
 - change the approximate-location row's `why` in `src/android/data-safety.ts`
-  to say what is kept, for how long and by whom, and re-file the Data Safety
-  form in Play Console to match;
+  to say what is kept, for how long and by whom — and, if step 4 failed, the
+  precise-location row too — and re-file the Data Safety form in Play Console
+  to match;
 - change `docs/privacy-policy.md`'s short version and its map tile bullet, and
   the *Ride map* sentence in `apps/web/src/views/SettingsView.tsx`, to the same
   period and the same store;

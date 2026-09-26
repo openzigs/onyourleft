@@ -93,8 +93,8 @@ export interface DataSafetyAnswer {
  *
  * ⚠️ **Since #558 the other is approximate location**, and a reviewer who
  * remembers "every row but one" is reading the old file: the ride map's tile
- * requests are kept by the tile host's analytics for up to 7 days, which is
- * not ephemeral processing. See the row.
+ * requests' IP addresses are visible in the tile host's analytics for up to
+ * 7 days, which is not ephemeral processing. See the row.
  *
  * ⚠️ The health rows are here because Play's Health Content and Services policy
  * covers apps that are not primarily health apps — its own example is a game
@@ -107,7 +107,7 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     // reviewer who remembers this row answering `false` on Play's *ephemeral
     // processing* exemption is reading #534's file. Since #534 every build
     // that is not told otherwise draws a ride's map from tiles.openzigs.com,
-    // and which tiles are asked for says roughly where the ride was. MapLibre
+    // and the host sees the rider's IP address with every request. MapLibre
     // makes the request inside the app's own WebView, which Play's definition
     // of *collect* counts ("data transmitted by libraries/SDKs and from
     // webviews under app control", Google Play Console Help, "Provide
@@ -116,15 +116,32 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     // The exemption assumed the host kept nothing. Measured 2026-09-26 through
     // the Cloudflare API (#558): the zone's standard HTTP analytics, present
     // on every zone and not switchable off, hold per-request records for
-    // tiles.openzigs.com with the client IP and the request path, queryable by
-    // this project's account, for up to 7 days on the Free plan (Cloudflare,
+    // tiles.openzigs.com with the client IP, the time, the user agent, the
+    // country and network (ASN) and the request path, queryable by this
+    // project's account for up to 7 days on the Free plan (Cloudflare,
     // Security Analytics "Availability" table: Free and Pro "up to the last 7
     // days", Business 31). Seven days is not ephemeral, so the owner chose on
     // 2026-09-26 to disclose it.
     //
-    // - **Approximate**, not precise: a tile names a map area, not a point,
-    //   and the app requests no GPS fix and never transmits a ride's
-    //   positions — see the Precise location row.
+    // - **Approximate**, not precise — and ⚠️ NOT because "a tile names an
+    //   area, not a point", which is the argument this row first carried and
+    //   which does not hold. Play draws the line by AREA (approximate is
+    //   ≥ 3 km², precise < 3 km²), and a z15 Web Mercator tile over the
+    //   archive's 24–50°N is 0.64–1.23 km²: if the tile a rider asked for were
+    //   in the kept record, this row would have to be PRECISE as well. It is
+    //   not in the record. The basemap is ONE PMTiles file and pmtiles picks
+    //   each tile out of it with an HTTP `Range` header, so every request has
+    //   the same `clientRequestPath`, and `httpRequestsAdaptive` has no Range
+    //   field. Measured 2026-09-26 (#559's review, grouping that dataset by
+    //   `clientRequestPath` over 23 h): every app request was
+    //   `/basemap-us-20260914.pmtiles`. The Range header is handled while the
+    //   request is served and is not kept — Play's ephemeral case — so what is
+    //   retained about location is the IP address and the country/ASN derived
+    //   from it, which is IP-geolocation grade: approximate. The app requests
+    //   no GPS fix and never transmits a ride's positions — see the Precise
+    //   location row. ⚠️ If a tile setup ever puts the tile in the URL (a
+    //   z/x/y server, a query string), the kept record names it and the
+    //   Precise row flips; `apps/mobile/RELEASE.md` §8 re-runs the query.
     // - **`shared: false`**: Cloudflare processes the requests for this
     //   project as its service provider, which Play does not count as sharing.
     // - **`optional: true`**: a rider can turn map tiles off in Settings → Ride
@@ -142,13 +159,13 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     shared: false,
     optional: true,
     purposes: ['App functionality'],
-    why: 'the ride map requests tiles from tiles.openzigs.com by default (#534; a rider can turn that off in Settings), and which tiles are asked for says roughly where the ride was. Cloudflare, which serves that host for this project, keeps a record of recent requests — including the IP address and the tile path — for up to 7 days in its standard HTTP analytics, which cannot be switched off (#558). This project does not use or share that record, and it is not linked to any ride or account',
+    why: 'the ride map requests tiles from tiles.openzigs.com by default (#534; a rider can turn that off in Settings). Cloudflare, which serves that host for this project, keeps a record of each map request — the IP address, the time, and the device or browser type, not which part of the map — that this project’s Cloudflare account can see for up to 7 days in its standard HTTP analytics, which cannot be switched off (#558). The map is one file and each tile is picked out of it by a byte range that the record does not include, so the location it holds is what an IP address says. This project does not use or share that record, and it is not linked to any ride or account',
   },
   {
     dataType: 'Location — precise location',
     collected: false,
     shared: false,
-    why: 'a recorded ride carries positions and they stay in IndexedDB on the device; the app requests no GPS fix and never transmits a position. The location permissions in the manifest exist only so that a BLE scan works below API 31, which Android required, and they are bounded at API 30 — see locationClaimFaults. The one location signal that leaves the device is a map tile request, answered under approximate location',
+    why: 'a recorded ride carries positions and they stay in IndexedDB on the device; the app requests no GPS fix and never transmits a position. The location permissions in the manifest exist only so that a BLE scan works below API 31, which Android required, and they are bounded at API 30 — see locationClaimFaults. The one location signal that leaves the device is a map tile request: which part of the map it asks for is handled while the request is served and not kept, and what is kept is the IP address, answered under approximate location',
   },
   {
     dataType: 'Health and fitness — health info',

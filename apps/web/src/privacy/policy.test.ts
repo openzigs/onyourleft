@@ -46,7 +46,7 @@ describe('the published privacy policy', () => {
     // contradicted it and is gone; what it says instead is who keeps what.
     expect(text).not.toContain('We collect nothing');
     expect(text.replace(/\s+/g, ' ')).toContain(
-      'Cloudflare, which runs the tile server for us, keeps a record of recent requests',
+      'Cloudflare, which runs the tile server for us, keeps a record of each map request — your IP address, the time, and your device or browser type, not which part of the map',
     );
     expect(text.toLowerCase()).toContain('location');
     expect(text.toLowerCase()).toContain('heart rate');

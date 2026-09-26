@@ -13,7 +13,8 @@
  * ⚠️ **That opening sentence is history, and a reviewer who remembers it is
  * reading the old policy**: #387 made the Photos row collected, and #558 made
  * approximate location collected, because the map tile host's analytics keep
- * each request for up to 7 days. §"the default basemap is disclosed" and
+ * each request's IP address where this project's account can see it for up to
+ * 7 days. §"the default basemap is disclosed" and
  * §"nothing claims the tile host keeps nothing" at the foot of this file are
  * what hold the policy and the form to that.
  *
@@ -628,8 +629,10 @@ describe('the default basemap is disclosed — #534', () => {
   });
 
   /**
-   * #558: the host's own analytics keep each request's IP address and tile
-   * path for up to 7 days. Both filed statements have to SAY so — the policy
+   * #558: the host's own analytics keep each request's IP address, time and
+   * device type — not which part of the map, #559 — where this project's
+   * account can see them for up to 7 days. Both filed statements have to SAY
+   * so — the policy
    * a rider reads and the `why` filed on Play — and this goes red if either
    * stops naming the retention. It checks the words are there, not that the
    * period is still right; `apps/mobile/RELEASE.md` §8 is where a person
@@ -648,6 +651,12 @@ describe('the default basemap is disclosed — #534', () => {
         `the policy's "${heading}" does not say how long the tile host keeps a request`,
       ).toContain('for up to 7 days');
       expect(section).toContain('ip address');
+      // #559: the tile is picked by a Range header the kept record does not
+      // include, so each place that states the record says what it is NOT.
+      expect(
+        section,
+        `the policy's "${heading}" does not say the kept record leaves out which part of the map`,
+      ).toContain('not which part of the map');
     }
     const why = locationWhy(
       readFileSync(
@@ -660,6 +669,7 @@ describe('the default basemap is disclosed — #534', () => {
       'the Location answer does not say how long the tile host keeps a request',
     ).toContain('up to 7 days');
     expect(why).toContain('IP address');
+    expect(why).toContain('not which part of the map');
   });
 
   it('is not satisfied by a comment — the parse sees the `why` string and nothing else', () => {
@@ -725,11 +735,18 @@ function locationWhy(source: string): string | undefined {
  * kept a record of a map tile request, and filed the Location row as not
  * collected on the strength of it. It was false: Cloudflare's standard HTTP
  * analytics, on every zone and not switchable off, keep each request's IP
- * address and tile path for up to 7 days. The owner chose on 2026-09-26 to
- * disclose that, and every such claim was removed.
+ * address, time and user agent for up to 7 days. The owner chose on 2026-09-26
+ * to disclose that, and every such claim was removed.
  *
- * This scans what a rider or a reviewer reads — the policy, the release
- * procedure, and every non-test source file under both apps, comments
+ * ⚠️ **#559 retired a second, opposite overclaim**: #558's first wording said
+ * the kept record held *which map tiles were asked for*. It does not — the
+ * basemap is one PMTiles file, the tile is chosen by a `Range` header the
+ * analytics have no field for, and every app request had the same path when
+ * measured on 2026-09-26 — so those phrases are on the list too.
+ *
+ * This scans what a rider or a reviewer reads — every Markdown file directly
+ * under `docs/`, the repository and mobile READMEs, the release procedure,
+ * and every non-test source file under both apps, comments
  * included, because `data-safety.ts`'s comment is where the filing is argued —
  * for the phrases that made the claim. Test files are skipped because they
  * name a phrase in order to assert its absence, which this file does.
@@ -743,11 +760,23 @@ const RETIRED_TILE_HOST_CLAIMS: readonly string[] = [
   'keeps nothing this project reads',
   'host keeps nothing',
   'processed ephemerally',
+  'which map tiles were asked for',
+  'path of each tile asked for',
+  'the tile path',
 ];
 
-/** Lower-cased, emphasis and code marks dropped, every run of whitespace one space. */
+/**
+ * Lower-cased, emphasis and code marks dropped, a JSX whitespace expression
+ * (`{' '}`, `{" "}`) read as the space it renders, every run of whitespace one
+ * space. Without the JSX step a phrase split across a line in a component —
+ * `the{' '}` then `request` — escaped the scan (#559's review).
+ */
 function normalised(text: string): string {
-  return text.replace(/[*`]/g, '').replace(/\s+/g, ' ').toLowerCase();
+  return text
+    .replace(/\{\s*(['"`])\s+\1\s*\}/g, ' ')
+    .replace(/[*`]/g, '')
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
 }
 
 /** Every retired tile-host claim in a text, in list order. */
@@ -775,16 +804,28 @@ describe('nothing claims the tile host keeps nothing — #558', () => {
     return found;
   };
 
+  const docs = join(REPOSITORY_ROOT, 'docs');
   const scanned = [
-    join(REPOSITORY_ROOT, 'docs', 'privacy-policy.md'),
+    // Every document directly under docs/ — the policy, the architecture and
+    // anything written beside them (#559's review appended a retired phrase
+    // to docs/architecture.md and every suite stayed green).
+    ...readdirSync(docs, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+      .map((entry) => join(docs, entry.name)),
+    join(REPOSITORY_ROOT, 'README.md'),
+    join(REPOSITORY_ROOT, 'apps', 'mobile', 'README.md'),
     join(REPOSITORY_ROOT, 'apps', 'mobile', 'RELEASE.md'),
     ...sources(join(REPOSITORY_ROOT, 'apps', 'web', 'src')),
     ...sources(join(REPOSITORY_ROOT, 'apps', 'mobile', 'src')),
   ];
 
-  it('scans the policy, the release procedure and both apps’ sources', () => {
+  it('scans the docs, the READMEs, the release procedure and both apps’ sources', () => {
     // A walk that found nothing would make the next case pass over nothing.
     const paths = scanned.map((path) => relative(REPOSITORY_ROOT, path));
+    expect(paths).toContain(join('docs', 'privacy-policy.md'));
+    expect(paths).toContain(join('docs', 'architecture.md'));
+    expect(paths).toContain('README.md');
+    expect(paths).toContain(join('apps', 'mobile', 'README.md'));
     expect(paths).toContain(join('apps', 'web', 'src', 'views', 'SettingsView.tsx'));
     expect(paths).toContain(join('apps', 'mobile', 'src', 'android', 'data-safety.ts'));
     expect(paths).not.toContain(join('apps', 'web', 'src', 'privacy', 'no-network.test.ts'));
@@ -808,6 +849,14 @@ describe('nothing claims the tile host keeps nothing — #558', () => {
     expect(retiredTileHostClaimsIn("', and we keep no record of the request'")).toStrictEqual([
       'no record of the request',
     ]);
+    // A phrase split across two lines of JSX by a `{' '}` — the shape Prettier
+    // produces when a sentence wraps inside a component (#559's review).
+    expect(
+      retiredTileHostClaimsIn("data, and we keep no record of the{' '}\n            request."),
+    ).toStrictEqual(['no record of the request']);
+    expect(
+      retiredTileHostClaimsIn('keeps a record — including which map tiles were{" "}\nasked for'),
+    ).toStrictEqual(['which map tiles were asked for']);
     expect(retiredTileHostClaimsIn('Cloudflare keeps a record for up to 7 days.')).toStrictEqual(
       [],
     );

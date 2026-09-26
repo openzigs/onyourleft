@@ -685,7 +685,8 @@ function MapTilesPanel({
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
   const host = basemap === undefined ? undefined : new URL(basemap.archiveUrl).host;
   // What the host keeps is ours to state only about the host this project
-  // runs: Cloudflare keeps a record of recent requests for up to 7 days (#558,
+  // runs: Cloudflare keeps a record of each request (IP address, time, device
+  // type — not the tile) that our account can see for up to 7 days (#558,
   // `apps/mobile/RELEASE.md` §8 re-checks it). A self-hoster's build names
   // somebody else's server, and this app can say nothing either way about its
   // logs — so for that host there is no retention sentence at all.
@@ -708,7 +709,7 @@ function MapTilesPanel({
             rode. That sends the map area and your device’s IP address to {host}. It sends no ride
             data.
             {ours
-              ? ` Cloudflare, which runs ${host} for us, keeps a record of recent requests — including your IP address and which map tiles were asked for — for up to 7 days. We don’t use it or share it.`
+              ? ` Cloudflare, which runs ${host} for us, keeps a record of each map request — your IP address, the time, and your device or browser type, not which part of the map — that our Cloudflare account can see for up to 7 days. We don’t use it or share it.`
               : ''}{' '}
             When it is off, the app asks {host} for nothing and draws your route on a plain
             background.

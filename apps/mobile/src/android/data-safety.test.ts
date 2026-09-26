@@ -135,7 +135,8 @@ describe('the declaration filed on Play', () => {
   it('declares approximate location collected for the map, optional and not shared — #558', () => {
     // ⚠️ #534's answer was `collected: false` on Play's ephemeral-processing
     // exemption, and #558 measured it false: the tile host's standard
-    // analytics keep the IP address and the tile path for up to 7 days.
+    // analytics keep the IP address, the time and the user agent of each
+    // request for up to 7 days.
     const approximate = DATA_SAFETY_DECLARATION.find(
       (answer) => answer.dataType === 'Location — approximate location',
     );
@@ -150,6 +151,27 @@ describe('the declaration filed on Play', () => {
     expect(approximate?.why).toContain('up to 7 days');
     expect(approximate?.why).toContain('IP address');
     expect(approximate?.why).toContain('does not use or share');
+  });
+
+  it('rests approximate-not-precise on what is KEPT, not on a tile being an area — #559', () => {
+    // #559's review: Play draws the line by area (precise < 3 km²) and a z15
+    // tile is 0.64–1.23 km², so "a tile names an area, not a point" would make
+    // the row PRECISE if the tile were retained. It is not: the basemap is one
+    // PMTiles file, the tile is chosen by a Range header the analytics do not
+    // record, and every request's path is the same (measured 2026-09-26). The
+    // filed words have to say that, or the next reader flips the row for the
+    // wrong reason — or keeps it for one.
+    const approximate = DATA_SAFETY_DECLARATION.find(
+      (answer) => answer.dataType === 'Location — approximate location',
+    );
+    const precise = DATA_SAFETY_DECLARATION.find(
+      (answer) => answer.dataType === 'Location — precise location',
+    );
+    expect(approximate?.why).toContain('not which part of the map');
+    expect(approximate?.why).toContain('byte range that the record does not include');
+    expect(approximate?.why).not.toContain('tile path');
+    expect(approximate?.why).not.toContain('roughly where the ride was');
+    expect(precise?.why).toContain('handled while the request is served and not kept');
   });
 
   it('declares no precise location collection and no sharing of it', () => {
