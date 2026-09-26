@@ -76,6 +76,17 @@ export interface PrecacheFile {
  *   browser, that means no pose model** — the tablet says the model could not
  *   be loaded and counts nothing; inside the Android shell there is no worker
  *   and both files ship in the APK.
+ *
+ * ⚠️ **`glyphs/` is deliberately NOT here, since #578.** The map's label
+ * glyphs — six Roboto ranges and the font's licence, 586 KiB (about 312 KiB
+ * gzipped) out of `public/glyphs/`, about a sixth on top of what a first
+ * visit already precaches — are cached like everything else. The two
+ * exclusions above are for tens of megabytes a rider may never use; these are
+ * what every map with a place on it draws its words from, and precaching them
+ * means the first map a rider opens costs no extra round trips before its
+ * labels appear. Said plainly, the other half: offline, the tiles those
+ * labels sit on are not precached (ADR 0024 D-2), so what this buys offline is
+ * little. `precache.test.ts` §"#578" holds the decision.
  */
 export const PRECACHE_EXCLUSIONS: readonly RegExp[] = [
   /\.map$/,

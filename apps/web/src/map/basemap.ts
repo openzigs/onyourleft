@@ -30,13 +30,22 @@
  * A third-party URL added to `basemapStyle` fails that test rather than a
  * review.
  *
- * ⚠️ **ADR 0010 does not mention glyphs or sprites**, and that is a gap this
- * issue found rather than one it can close: #53 publishes the archive, and it
- * must publish font and sprite assets on the same origin if the map is ever to
- * carry labels. Until it does, {@link basemapStyle} emits **no** `glyphs` and
- * **no** `sprite`, so the map renders geometry without text. That is a visible
- * limitation and the right one: a labelled map that phones home is worse than
- * an unlabelled map that does not.
+ * ⚠️ **ADR 0010 does not mention glyphs or sprites**, and #63 found that gap
+ * rather than closing it: for months {@link basemapStyle} emitted **no**
+ * `glyphs` and **no** `sprite`, so the map drew geometry without a word on it.
+ * A labelled map that phones home was judged worse than an unlabelled map that
+ * does not, and that judgement stands.
+ *
+ * ⚠️ **Since #578 the map has labels, and a reviewer who remembers "no glyphs"
+ * is reading the old file.** The owner decided on 2026-09-26 to bundle an
+ * Apache-2.0 font's glyphs **in the app**, so {@link GLYPHS_URL} is a
+ * **relative** URL: it resolves against the page, which is this deployment by
+ * definition, and {@link styleOrigins} — which records no origin for a relative
+ * URL — still reports the archive's origin and nothing else. The glyphs are
+ * made by `tools/glyphs/` from a committed Roboto v2.138 (the last Apache-2.0
+ * Roboto) and served out of `public/glyphs/`; `map.browser.spec.ts` §"place
+ * names" proves the engine really fetches them from the page's own origin.
+ * There is still **no sprite**: no layer here draws an icon.
  *
  * ## The archive URL is configuration, not a constant
  *
@@ -230,6 +239,7 @@ export interface BasemapLayer {
   readonly type: string;
   readonly source?: string;
   readonly 'source-layer'?: string;
+  readonly minzoom?: number;
   readonly paint?: Readonly<Record<string, unknown>>;
   readonly layout?: Readonly<Record<string, unknown>>;
 }
@@ -245,6 +255,56 @@ export const TRACK_LAYER_ID = 'oyl-track-line';
 export const TRACK_LINE_COLOUR = '#b5341f';
 /** The vector source the basemap tiles arrive on. */
 export const BASEMAP_SOURCE_ID = 'basemap';
+
+/**
+ * Where the label glyphs are, relative to the page (#578).
+ *
+ * ⚠️ **Relative on purpose, and that is the whole privacy argument.** A
+ * relative URL resolves against the document, so in a browser it is this
+ * deployment's own origin and inside the Android shell it is the shell's own
+ * `https://localhost` — the glyphs ship in the APK. {@link styleOrigins}
+ * records no origin for it, so "the style reaches the archive and nothing
+ * else" is still the assertion `basemap.test.ts` makes, unweakened. An absolute
+ * URL built from `location` would have said the same thing with a second
+ * origin in the set for every reader to reason about.
+ *
+ * `./` rather than `/`: a build served under a sub-path finds its own copy.
+ * MapLibre fetches glyphs on the main thread, so it resolves against the page
+ * and not against the worker's script. `{fontstack}` and `{range}` are
+ * MapLibre's own tokens, and it substitutes the stack name without encoding
+ * it — which is why {@link LABEL_FONT} has no space in it.
+ */
+export const GLYPHS_URL = './glyphs/{fontstack}/{range}.pbf';
+
+/**
+ * The one font stack the labels are set in: Roboto v2.138, Regular, the last
+ * Apache-2.0 release. `tools/glyphs/font-source.ts` §`FONT_STACK` names the
+ * directory the ranges are generated into, and `basemap.test.ts` holds the two
+ * equal — a stack the style asks for that no directory holds is a 404 per
+ * range, and MapLibre then draws the text in the device's own font instead,
+ * silently.
+ */
+export const LABEL_FONT = 'Roboto-Regular';
+
+/**
+ * The labels' ink and halo.
+ *
+ * The ink is checked against **every** colour the style can put behind a
+ * label — the background, each fill and each line — for WCAG 2.2 AA text
+ * contrast in `labels.a11y.test.ts`, which derives that list from the style
+ * rather than keeping one. The halo is a lift, not the thing contrast rests
+ * on. Exported so the browser harness can find the ink on the drawing buffer
+ * without a second copy of it.
+ */
+export const LABEL_TEXT_COLOUR = '#3a3731';
+export const LABEL_HALO_COLOUR = '#ffffff';
+
+/** One paint for both label layers, so the contrast check covers both by covering one. */
+const LABEL_PAINT: Readonly<Record<string, unknown>> = {
+  'text-color': LABEL_TEXT_COLOUR,
+  'text-halo-color': LABEL_HALO_COLOUR,
+  'text-halo-width': 1.5,
+};
 
 /** The layer that needs no tile, and so the whole of a style with tiles turned off. */
 const BACKGROUND_LAYER: BasemapLayer = {
@@ -266,11 +326,13 @@ const BACKGROUND_LAYER: BasemapLayer = {
  * The `pmtiles://` prefix is added here rather than stored, so the
  * configuration holds an address and this holds the protocol selector.
  *
- * No `glyphs` and no `sprite`: see the module note. Both would be third-party
- * origins today, and the criterion above is worth more than labels.
+ * `glyphs` is {@link GLYPHS_URL}, relative, so the labels cost no origin (see
+ * the module note), and there is still no `sprite`. The two label layers read
+ * the Protomaps schema's `places` and `roads` layers by their `name` property.
  *
  * ⚠️ **`tiles: false` is a style with no source at all** — the background
- * layer and nothing else — and that is what the rider's Settings switch
+ * layer and nothing else, and no `glyphs` either, because there is nothing to
+ * label — and that is what the rider's Settings switch
  * (`tiles-preference.ts`, the owner's decision of 2026-09-25) turns into. Not
  * a source with its layers hidden: a declared source is a URL MapLibre may
  * fetch, and "off" has to mean the tile host is contacted by nothing.
@@ -288,6 +350,7 @@ export function basemapStyle(
   }
   return {
     version: 8,
+    glyphs: GLYPHS_URL,
     sources: {
       [BASEMAP_SOURCE_ID]: {
         type: 'vector',
@@ -320,6 +383,41 @@ export function basemapStyle(
         source: BASEMAP_SOURCE_ID,
         'source-layer': 'roads',
         paint: { 'line-color': '#ffffff', 'line-width': 1 },
+      },
+      {
+        // Road names only from zoom 13, where a street is long enough on
+        // screen to carry one; below that they are clutter along lines too
+        // short to read them on. A ride's map is fitted to the ride, so a
+        // short ride gets street names and a long one gets place names only,
+        // which is the right way round at each scale.
+        id: 'road-names',
+        type: 'symbol',
+        source: BASEMAP_SOURCE_ID,
+        'source-layer': 'roads',
+        minzoom: 13,
+        layout: {
+          'symbol-placement': 'line',
+          'text-field': ['get', 'name'],
+          'text-font': [LABEL_FONT],
+          'text-size': 12,
+        },
+        paint: LABEL_PAINT,
+      },
+      {
+        // Above the road names, so where the two collide the place wins.
+        id: 'places',
+        type: 'symbol',
+        source: BASEMAP_SOURCE_ID,
+        'source-layer': 'places',
+        layout: {
+          'text-field': ['get', 'name'],
+          'text-font': [LABEL_FONT],
+          // 12 px at a region's zoom up to 15 px at a street's. 12 is the
+          // smallest size any text in this client is set at.
+          'text-size': ['interpolate', ['linear'], ['zoom'], 8, 12, 16, 15],
+          'text-max-width': 8,
+        },
+        paint: LABEL_PAINT,
       },
     ],
   };

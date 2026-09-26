@@ -48,6 +48,9 @@ import {
   buildFixtureArchive,
   PUBLISHED_ARCHIVE_BOUNDS,
   FIXTURE_MAX_ZOOM,
+  FIXTURE_PLACE_GRID,
+  FIXTURE_PLACE_NAME,
+  FIXTURE_ROAD_NAME,
   FIXTURE_SOURCE_LAYERS,
   fixtureTile,
   pyramidTileCount,
@@ -117,6 +120,8 @@ function readFields(bytes: Uint8Array): { field: number; varint?: number; bytes?
 interface DecodedFeature {
   readonly type: number;
   readonly commands: readonly number[];
+  /** Its tags, resolved through the layer's own keys and values. */
+  readonly properties: Readonly<Record<string, string>>;
 }
 
 interface DecodedLayer {
@@ -136,30 +141,52 @@ function readTile(bytes: Uint8Array): DecodedLayer[] {
     let name = '';
     let extent = 0;
     let version = 0;
-    const features: DecodedFeature[] = [];
+    const raw: { type: number; commands: number[]; tags: number[] }[] = [];
+    const keys: string[] = [];
+    const values: string[] = [];
+    const varints = (bytes: Uint8Array): number[] => {
+      const cursor: ProtobufCursor = { bytes, position: 0 };
+      const out: number[] = [];
+      while (cursor.position < bytes.length) {
+        out.push(readVarint(cursor));
+      }
+      return out;
+    };
     for (const field of readFields(entry.bytes)) {
       if (field.field === 1 && field.bytes !== undefined) {
         name = new TextDecoder().decode(field.bytes);
       } else if (field.field === 2 && field.bytes !== undefined) {
         let type = 0;
-        const commands: number[] = [];
+        let commands: number[] = [];
+        let tags: number[] = [];
         for (const part of readFields(field.bytes)) {
           if (part.field === 3 && part.varint !== undefined) {
             type = part.varint;
           } else if (part.field === 4 && part.bytes !== undefined) {
-            const cursor: ProtobufCursor = { bytes: part.bytes, position: 0 };
-            while (cursor.position < part.bytes.length) {
-              commands.push(readVarint(cursor));
-            }
+            commands = varints(part.bytes);
+          } else if (part.field === 2 && part.bytes !== undefined) {
+            tags = varints(part.bytes);
           }
         }
-        features.push({ type, commands });
+        raw.push({ type, commands, tags });
+      } else if (field.field === 3 && field.bytes !== undefined) {
+        keys.push(new TextDecoder().decode(field.bytes));
+      } else if (field.field === 4 && field.bytes !== undefined) {
+        const stringValue = readFields(field.bytes).find((part) => part.field === 1);
+        values.push(new TextDecoder().decode(stringValue?.bytes ?? new Uint8Array()));
       } else if (field.field === 5 && field.varint !== undefined) {
         extent = field.varint;
       } else if (field.field === 15 && field.varint !== undefined) {
         version = field.varint;
       }
     }
+    const features: DecodedFeature[] = raw.map(({ type, commands, tags }) => {
+      const properties: Record<string, string> = {};
+      for (let index = 0; index + 1 < tags.length; index += 2) {
+        properties[keys[tags[index] ?? -1] ?? '?'] = values[tags[index + 1] ?? -1] ?? '?';
+      }
+      return { type, commands, properties };
+    });
     layers.push({ name, extent, version, features });
   }
   return layers;
@@ -208,13 +235,19 @@ function signedArea(points: readonly { x: number; y: number }[]): number {
   return total / 2;
 }
 
-/** Every `source-layer` the real style reads from the basemap vector source. */
+/**
+ * Every `source-layer` the real style reads from the basemap vector source,
+ * once each — since #578 the roads are read twice, as lines and as names.
+ */
 function styleSourceLayers(style: BasemapStyle): string[] {
-  return style.layers
-    .filter((layer) => layer.source === BASEMAP_SOURCE_ID)
-    .map((layer) => layer['source-layer'])
-    .filter((name): name is string => name !== undefined)
-    .sort();
+  return [
+    ...new Set(
+      style.layers
+        .filter((layer) => layer.source === BASEMAP_SOURCE_ID)
+        .map((layer) => layer['source-layer'])
+        .filter((name): name is string => name !== undefined),
+    ),
+  ].sort();
 }
 
 const FIXTURE_URL = 'https://tiles.example.test/basemap.pmtiles';
@@ -335,7 +368,7 @@ describe('the fixture tile', () => {
     for (const layer of layers) {
       expect(layer.version, `${layer.name} version`).toBe(2);
       expect(layer.extent, `${layer.name} extent`).toBe(4096);
-      expect(layer.features.length).toBe(1);
+      expect(layer.features.length).toBe(layer.name === 'places' ? FIXTURE_PLACE_GRID.length : 1);
     }
   });
 
@@ -365,6 +398,39 @@ describe('the fixture tile', () => {
     for (const point of points) {
       expect(point.x < 0 || point.x > 4096).toBe(true);
       expect(point.y < 0 || point.y > 4096).toBe(true);
+    }
+  });
+
+  it('names the place and the road the label layers read — #578', () => {
+    const layers = readTile(fixtureTile());
+    const places = layers.find((layer) => layer.name === 'places');
+    const roads = layers.find((layer) => layer.name === 'roads');
+
+    // Points, every one with the name the browser gate looks for.
+    expect(places?.features.length).toBe(16);
+    expect(places?.features.map((feature) => walk(feature.commands)[0])).toEqual(
+      FIXTURE_PLACE_GRID,
+    );
+    for (const feature of places?.features ?? []) {
+      expect(feature.type).toBe(1);
+      expect(feature.properties).toEqual({ name: FIXTURE_PLACE_NAME });
+    }
+    expect(roads?.features[0]?.properties).toEqual({ name: FIXTURE_ROAD_NAME });
+    // And nothing else is tagged: the fills carry no property to read.
+    for (const layer of layers.filter((each) => each.name === 'earth' || each.name === 'water')) {
+      expect(layer.features[0]?.properties, layer.name).toEqual({});
+    }
+  });
+
+  it('names what every label layer in the real style reads — #578', () => {
+    // The label layers' `text-field` is `['get', 'name']`; a fixture layer the
+    // style labels that carried no name would paint no label, and the browser
+    // gate's positive case would be testing nothing.
+    const style = basemapStyle({ archiveUrl: FIXTURE_URL, attribution: OSM_ATTRIBUTION });
+    const layers = readTile(fixtureTile());
+    for (const layer of style.layers.filter((each) => each.type === 'symbol')) {
+      const source = layers.find((each) => each.name === layer['source-layer']);
+      expect(source?.features[0]?.properties.name, layer.id).toBeTruthy();
     }
   });
 
