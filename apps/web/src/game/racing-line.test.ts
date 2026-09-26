@@ -341,14 +341,80 @@ describe('its cost — #499', () => {
     const started = performance.now();
     const line = solvedLine(route, 40);
     const took = performance.now() - started;
-    // Printed, because it is the figure #499 asks to be recorded: about 0.8 s
-    // on the machine this was written on, and several times that under the
-    // coverage run. The bound is a hang detector, not a performance claim.
+    // Printed, because it is the figure #499 asks to be recorded. It said
+    // "about 0.8 s"; re-measured for #588 with this case run alone, median of
+    // five on one machine: 0.83 s before #546, 1.09 s after it took the steps
+    // from 30 to 40, and 0.69 s since #588 — under the coverage run 2.90 s,
+    // 3.74 s and 2.80 s, and 13.1 s on CI's coverage run for #546's merge.
+    // The bound is a hang detector, not a performance claim.
     console.info(`racing line: ${String(route.positions.length)} samples in ${took.toFixed(0)} ms`);
     expect(took).toBeLessThan(30_000);
     expect(peak(Array.from(line.offsets))).toBeLessThanOrEqual(LINE_LIMIT_METRES);
   }, 60_000);
+
+  /**
+   * #588 made the solve and the lean cheaper by restructuring them — a buffer
+   * set made once, a chord's length taken once, the lean's first stage as two
+   * running passes — and claims neither moved. That is a claim about a diff, so
+   * it is pinned to numbers instead: a digest of the line and of the lean at
+   * three speeds on five fixtures, a hairpin each way of tight and a loop among
+   * them, **taken on `main` before a line of #588 was written** with the code
+   * it replaced. `arrangement-unchanged.test.ts` makes the same argument about
+   * the scenery, and fixes the precision for the same reason: a tenth of a
+   * millimetre and a millionth of a radian are far finer than anything drawn
+   * and far coarser than the last bit of a double.
+   *
+   * A red digest here means the line or the lean MOVED. If that was the point
+   * of the change, re-take these and say so in its pull request; if it was
+   * meant to be a speed-up, it was not one.
+   */
+  it.each([
+    ['a 10 m hairpin', () => hairpinRoute(10), 'bd14b29f', 'db209abb'],
+    ['the 20 m hairpin', () => hairpinRoute(HAIRPIN_RADIUS), '357049c6', '25daa5dc'],
+    ['the S-bend', () => sBendRoute(S_RADIUS), 'bef6fc52', '359e3337'],
+    ['a 10 m left-hand corner', () => cornerRoute(10, 90, 'left'), '976368df', '9a0ed418'],
+    ['the stadium, a loop', () => stadiumRoute(30), '7ba899f0', '14d8d5d5'],
+  ] as const)(
+    'draws the line and the lean on %s exactly as main did before #588',
+    (_, make, lineDigest, leanDigest) => {
+      // A fresh profile, so the line is solved here rather than read from a cache
+      // an earlier case filled.
+      const route = make();
+      const line = racingLine(route);
+      const drawn: string[] = [];
+      for (let index = 0; index < line.offsets.length; index += 1) {
+        drawn.push(
+          `${(line.offsets[index] as number).toFixed(4)} ${(line.curvatures[index] as number).toFixed(6)}`,
+        );
+      }
+      const leaning: string[] = [];
+      for (let at = 0; at <= route.totalDistance; at += 0.7) {
+        leaning.push([4, 9, 16].map((speed) => leanAt(line, at, speed).toFixed(6)).join(' '));
+      }
+      // Not an empty line, which would digest to something too.
+      expect(drawn.length).toBe(route.positions.length);
+      expect(peak(Array.from(line.offsets))).toBeGreaterThan(1);
+      expect({ line: digest(drawn), lean: digest(leaning) }).toEqual({
+        line: lineDigest,
+        lean: leanDigest,
+      });
+    },
+  );
 });
+
+/** FNV-1a, 32-bit, as eight hex digits — `arrangement-unchanged.test.ts`'s. */
+function digest(lines: readonly string[]): string {
+  let hash = 0x811c9dc5;
+  for (const line of lines) {
+    for (let at = 0; at < line.length; at += 1) {
+      hash ^= line.charCodeAt(at);
+      hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+    hash ^= 0x0a;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+}
 
 // ---------------------------------------------------------------------------
 // #546 — a racer's line on a closed road, kept to the right, with a late apex
@@ -616,25 +682,46 @@ describe('rolls in over time, not only over distance — #546', () => {
   it('never rolls faster than the stated rate a second, at any speed from 3 to 20 m/s', () => {
     // Sampled at v·Δt, so a step is Δt of riding. A single bend at each: the
     // S-bend's two leans each obey it and add, as #499 already states.
+    //
+    // Every step is still compared, but the steepest is asserted once, with
+    // where it was: an `expect` a step was 140 000 of them, most of this case's
+    // time under the coverage run, and the case that timed out on main (#588).
     const seconds = 0.02;
+    let steepest = { perMetre: 0, where: 'nowhere' };
+    let fastest = { perSecond: 0, where: 'nowhere' };
     for (const bend of BENDS) {
       const line = racingLine(bend.route);
       const end = bend.start + bend.radius * bend.turn;
       for (let speed = 3; speed <= 20; speed += 1) {
         const step = speed * seconds;
         let previous = leanAt(line, bend.start - 80, speed);
-        let fastest = 0;
         for (let at = bend.start - 80 + step; at <= end + 80; at += step) {
           const here = leanAt(line, at, speed);
-          fastest = Math.max(fastest, Math.abs(here - previous) / seconds);
-          expect(Math.abs(here - previous) / step).toBeLessThanOrEqual(
-            MAXIMUM_ROLL_RADIANS_PER_METRE * (1 + 1e-9),
-          );
+          const change = Math.abs(here - previous);
+          if (change / step > steepest.perMetre) {
+            steepest = {
+              perMetre: change / step,
+              where: `${bend.name}, ${String(at)} m, ${String(speed)} m/s`,
+            };
+          }
+          if (change / seconds > fastest.perSecond) {
+            fastest = {
+              perSecond: change / seconds,
+              where: `${bend.name}, ${String(at)} m, ${String(speed)} m/s`,
+            };
+          }
           previous = here;
         }
-        expect(fastest).toBeLessThanOrEqual(MAXIMUM_ROLL_RADIANS_PER_SECOND * (1 + 1e-9));
       }
     }
+    expect(steepest.perMetre, steepest.where).toBeLessThanOrEqual(
+      MAXIMUM_ROLL_RADIANS_PER_METRE * (1 + 1e-9),
+    );
+    expect(fastest.perSecond, fastest.where).toBeLessThanOrEqual(
+      MAXIMUM_ROLL_RADIANS_PER_SECOND * (1 + 1e-9),
+    );
+    // …and it did roll: a sweep that leaned nobody would pass the two above.
+    expect(fastest.perSecond).toBeGreaterThan(0.5 * MAXIMUM_ROLL_RADIANS_PER_SECOND);
   });
 
   it('keeps its reach bounded at a speed nothing reaches, and still rolls no faster than it', () => {

@@ -117,7 +117,10 @@
  * every frame after reads it. Each step is at most
  * {@link ACTIVE_SET_ROUNDS_PER_STEP} O(n) solves and the steps are fixed at
  * {@link GAUSS_NEWTON_STEPS}. `racing-line.test.ts` §"its cost" times it
- * on a 1 000 km route, because nothing in the store bounds a route's length.
+ * on a 1 000 km route, because nothing in the store bounds a route's length,
+ * and — since #588 made the solve and the lean cheaper by restructuring them —
+ * holds the line and the lean on five fixtures to a digest taken before that
+ * change, so a speed-up that moved either is red.
  *
  * ## The lean
  *
@@ -440,8 +443,19 @@ export function lineOffsetAt(line: RacingLine, distance: number): number {
  * ⚠️ **Both windows depend on the speed**, through the per-second bound: at
  * 20 m/s the second stage reads 26 m either side, each point of which reads
  * 13 m either side of itself. Bounded by
- * {@link MINIMUM_ROLL_RADIANS_PER_METRE}; the samples are held in a buffer made
+ * {@link MINIMUM_ROLL_RADIANS_PER_METRE}; the samples are held in buffers made
  * once, so a frame allocates nothing here.
+ *
+ * ⚠️ **The first stage is two passes, not a window per sample** — #588. Read
+ * as written above it is a window of `2·reach + 1` at each of `2·span + 1`
+ * samples: 5 565 steps a call at 20 m/s, three riders a frame, and the reason
+ * `main` went red when #546 widened both windows. The running maximum of
+ * `demand − rate·|s − d|` is the same number carried forward and then back,
+ * falling by one roll step a sample, so each pass is one step per sample. A
+ * sample further off than `reach` cannot win — it would have fallen by more
+ * than the whole cap, below the nought each direction starts at — so the
+ * unbounded passes and the windowed maximum agree, to rounding (a fall
+ * subtracted k times rather than multiplied by k; about 10⁻¹⁵ rad).
  */
 export function leanAt(line: RacingLine, distance: number, speed: number): number {
   if (!(speed > 0)) {
@@ -455,24 +469,35 @@ export function leanAt(line: RacingLine, distance: number, speed: number): numbe
   const centre = Math.round(distance / LEAN_STEP_METRES);
   const lowest = centre - span - reach;
   const count = 2 * (span + reach) + 1;
-  const demand = scratch(count);
+  const { demand, leftward, rightward } = leanScratch(count);
   for (let index = 0; index < count; index += 1) {
     demand[index] = steadyTurnLean(speed, curvatureAt(line, (lowest + index) * LEAN_STEP_METRES));
   }
   const rollStep = rate * LEAN_STEP_METRES;
+  // The first stage, both directions, carried forward…
+  let left = Number.NEGATIVE_INFINITY;
+  let right = Number.NEGATIVE_INFINITY;
+  for (let index = 0; index < count; index += 1) {
+    const value = demand[index] as number;
+    left = Math.max(value, left - rollStep);
+    right = Math.max(-value, right - rollStep);
+    leftward[index] = left;
+    rightward[index] = right;
+  }
+  // …and back, where each direction's floor of nought is applied.
+  left = Number.NEGATIVE_INFINITY;
+  right = Number.NEGATIVE_INFINITY;
+  for (let index = count - 1; index >= 0; index -= 1) {
+    const value = demand[index] as number;
+    left = Math.max(value, left - rollStep);
+    right = Math.max(-value, right - rollStep);
+    leftward[index] = Math.max(0, left, leftward[index] as number);
+    rightward[index] = Math.max(0, right, rightward[index] as number);
+  }
   let upper = Number.POSITIVE_INFINITY;
   let lower = Number.NEGATIVE_INFINITY;
   for (let step = centre - span; step <= centre + span; step += 1) {
-    // The first stage at this sample.
-    let leftward = 0;
-    let rightward = 0;
-    for (let near = -reach; near <= reach; near += 1) {
-      const value = demand[step + near - lowest] as number;
-      const fall = rollStep * Math.abs(near);
-      leftward = Math.max(leftward, value - fall);
-      rightward = Math.max(rightward, -value - fall);
-    }
-    const anticipated = leftward - rightward;
+    const anticipated = (leftward[step - lowest] as number) - (rightward[step - lowest] as number);
     // The second stage, at the rider's own distance.
     const away = rate * Math.abs(step * LEAN_STEP_METRES - distance);
     lower = Math.max(lower, anticipated - away);
@@ -481,15 +506,27 @@ export function leanAt(line: RacingLine, distance: number, speed: number): numbe
   return (lower + upper) / 2;
 }
 
-/** The buffer {@link leanAt} reads its samples into, grown when it must be. */
-let demandBuffer = new Float64Array(256);
+/**
+ * The three buffers {@link leanAt} works in — MODULE scratch, shared by every
+ * line and every rider, grown when a call needs more and never shrunk. Safe
+ * because `leanAt` is synchronous and re-entered by nothing it calls.
+ */
+let leanBuffers = {
+  demand: new Float64Array(256),
+  leftward: new Float64Array(256),
+  rightward: new Float64Array(256),
+};
 
-/** At least `count` numbers to write into, reused from call to call. */
-function scratch(count: number): Float64Array {
-  if (demandBuffer.length < count) {
-    demandBuffer = new Float64Array(count);
+/** At least `count` numbers in each of {@link leanBuffers}, reused from call to call. */
+function leanScratch(count: number): typeof leanBuffers {
+  if (leanBuffers.demand.length < count) {
+    leanBuffers = {
+      demand: new Float64Array(count),
+      leftward: new Float64Array(count),
+      rightward: new Float64Array(count),
+    };
   }
-  return demandBuffer;
+  return leanBuffers;
 }
 
 /**
@@ -571,10 +608,15 @@ function neighbour(profile: RouteProfile, count: number, index: number): number 
 
 /**
  * The road the line is solved over, indexed by PADDED sample — on a loop,
- * {@link loopPaddingSamples} of the lap laid either side, so `at` wraps.
+ * {@link loopPaddingSamples} of the lap laid either side, so `index` wraps.
  */
 interface PaddedRoad {
-  readonly at: (padded: number) => number;
+  /**
+   * The lap sample each padded sample reads. A table rather than the modulo it
+   * holds, because every curvature reads three of them, five times a sample a
+   * step — #588.
+   */
+  readonly index: Int32Array;
   readonly xs: Float64Array;
   readonly zs: Float64Array;
   readonly normals: Float64Array;
@@ -604,8 +646,12 @@ function solveLine(profile: RouteProfile, steps: number): RacingLine {
   }
   const padding = profile.loop ? loopPaddingSamples(profile.resolution) : 0;
   const size = nodes + 2 * padding;
+  const lapIndex = new Int32Array(size);
+  for (let padded = 0; padded < size; padded += 1) {
+    lapIndex[padded] = profile.loop ? (((padded - padding) % nodes) + nodes) % nodes : padded;
+  }
   const road: PaddedRoad = {
-    at: (padded) => (profile.loop ? (((padded - padding) % nodes) + nodes) % nodes : padded),
+    index: lapIndex,
     xs,
     zs,
     normals: sampleNormals(xs, zs, profile.loop),
@@ -613,20 +659,30 @@ function solveLine(profile: RouteProfile, steps: number): RacingLine {
     resolution: profile.resolution,
   };
 
-  let solved: Float64Array = new Float64Array(size);
+  // ⚠️ **One set of arrays for the whole solve — #588.** Every step used to
+  // allocate the system, three copies of it per active-set round, the factors
+  // and the answer: about a dozen arrays of the route's length, forty times.
+  // The answer is written over in place, which is safe because each step reads
+  // the last one's only while building its own system, before solving it.
+  const work = workspace(size);
+  const solved = work.solution;
   const pinned = new Int8Array(size);
+  // The curvature of the line at every row, kept from one step to the next: a
+  // step's peak is measured from it, and the next step linearises about the
+  // same offsets, so it is the curvature that step would otherwise recompute.
+  // The FIRST step weighs every row alike (@see linearise), so the centreline's
+  // own peak is measured and deliberately not used.
+  measure(road, solved, work);
   let peak = 0;
   for (let step = 0; step < steps; step += 1) {
-    solved = solveOnRoad(linearised(size, road, solved, peak), pinned);
-    peak = 0;
-    for (let row = 1; row < size - 1; row += 1) {
-      peak = Math.max(peak, Math.abs(curvatureOf(road, solved, row, -1, 0).curvature));
-    }
+    linearise(road, solved, peak, work);
+    solveOnRoad(work, pinned);
+    peak = measure(road, solved, work);
   }
-  for (let index = 0; index < nodes; index += 1) {
-    offsets[index] = solved[index + padding] as number;
-    const edge = !profile.loop && (index === 0 || index === nodes - 1);
-    curvatures[index] = edge ? 0 : curvatureOf(road, solved, index + padding, -1, 0).curvature;
+  for (let at = 0; at < nodes; at += 1) {
+    offsets[at] = solved[at + padding] as number;
+    const edge = !profile.loop && (at === 0 || at === nodes - 1);
+    curvatures[at] = edge ? 0 : (work.curvature[at + padding] as number);
   }
   if (profile.loop) {
     offsets[count - 1] = offsets[0] as number;
@@ -735,61 +791,136 @@ function lateApexWeights(
 }
 
 /**
- * The line's signed curvature at a padded row, with the sample at position
- * `which` of the three it is read from (0, 1 or 2 — the one before, the row
- * itself, the one after; −1 for none) nudged sideways by `nudge` metres.
+ * The signed curvature of two chords `a` then `b`, given their lengths: the
+ * turn between them over their mean length, positive when the line bends
+ * toward the normal, and nought when they have no length between them.
  *
- * The turn between the two chords over their mean length, positive when the
- * line bends toward the normal.
+ * ⚠️ **Chords and lengths rather than a row and a nudge — #588.** It used to
+ * take the offsets, a row and which of the three samples to nudge, rebuild all
+ * three points, take both lengths and hand back a fresh object, five times a
+ * sample a step. The caller builds the points once now, moves only the one
+ * that is nudged, and takes a length again only for a chord that moved — each
+ * chord's own length is {@link measure}'s, and a chord is shared by two rows.
+ * Every number that reaches this arithmetic is the one it was, so the line is
+ * unchanged to the bit.
  */
-function curvatureOf(
-  road: PaddedRoad,
-  offsets: Float64Array,
-  row: number,
-  which: number,
-  nudge: number,
-): { readonly curvature: number; readonly chord: number } {
-  // Written out rather than through a helper returning a pair: this runs five
-  // times per sample per step, and a tuple each time was most of the solve.
-  const { at, xs, zs, normals } = road;
-  const i0 = at(row - 1);
-  const i1 = at(row);
-  const i2 = at(row + 1);
-  const o0 = (offsets[row - 1] as number) + (which === 0 ? nudge : 0);
-  const o1 = (offsets[row] as number) + (which === 1 ? nudge : 0);
-  const o2 = (offsets[row + 1] as number) + (which === 2 ? nudge : 0);
-  const x0 = (xs[i0] as number) + o0 * (normals[i0 * 2] as number);
-  const z0 = (zs[i0] as number) + o0 * (normals[i0 * 2 + 1] as number);
-  const x1 = (xs[i1] as number) + o1 * (normals[i1 * 2] as number);
-  const z1 = (zs[i1] as number) + o1 * (normals[i1 * 2 + 1] as number);
-  const x2 = (xs[i2] as number) + o2 * (normals[i2 * 2] as number);
-  const z2 = (zs[i2] as number) + o2 * (normals[i2 * 2 + 1] as number);
-  const ax = x1 - x0;
-  const az = z1 - z0;
-  const bx = x2 - x1;
-  const bz = z2 - z1;
-  const chord = (Math.hypot(ax, az) + Math.hypot(bx, bz)) / 2;
+function curvatureOfChords(
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+  aLength: number,
+  bLength: number,
+): number {
+  const chord = (aLength + bLength) / 2;
   if (chord === 0) {
-    return NO_CURVATURE;
+    return 0;
   }
   // The normal is the heading turned a quarter toward `+x × +z`'s positive
   // side, so a turn toward it has a positive `a × b` taken in that order.
   const turn = Math.atan2(ax * bz - az * bx, ax * bx + az * bz);
-  return { curvature: turn / chord, chord };
+  return turn / chord;
 }
 
-/** What {@link curvatureOf} says of three points with no length between them. */
-const NO_CURVATURE = { curvature: 0, chord: 0 } as const;
+/**
+ * Where the line is at every padded sample of `offsets`, the length of every
+ * chord between two, and the line's curvature and mean chord at every row,
+ * into the workspace — and the largest curvature among them, the peak the
+ * next step weighs against. Curvature is read at rows `1` to `size − 2`: the
+ * two ends have no neighbour.
+ */
+function measure(road: PaddedRoad, offsets: Float64Array, work: Workspace): number {
+  const { index, xs, zs, normals } = road;
+  const { x, z, length } = work;
+  const size = offsets.length;
+  for (let padded = 0; padded < size; padded += 1) {
+    const at = index[padded] as number;
+    const offset = offsets[padded] as number;
+    x[padded] = (xs[at] as number) + offset * (normals[at * 2] as number);
+    z[padded] = (zs[at] as number) + offset * (normals[at * 2 + 1] as number);
+  }
+  for (let chord = 0; chord < size - 1; chord += 1) {
+    length[chord] = Math.hypot(
+      (x[chord + 1] as number) - (x[chord] as number),
+      (z[chord + 1] as number) - (z[chord] as number),
+    );
+  }
+  let peak = 0;
+  for (let row = 1; row < size - 1; row += 1) {
+    const x1 = x[row] as number;
+    const z1 = z[row] as number;
+    const aLength = length[row - 1] as number;
+    const bLength = length[row] as number;
+    const curvature = curvatureOfChords(
+      x1 - (x[row - 1] as number),
+      z1 - (z[row - 1] as number),
+      (x[row + 1] as number) - x1,
+      (z[row + 1] as number) - z1,
+      aLength,
+      bLength,
+    );
+    work.curvature[row] = curvature;
+    work.chord[row] = (aLength + bLength) / 2;
+    peak = Math.max(peak, Math.abs(curvature));
+  }
+  return peak;
+}
 
-/** A symmetric five-diagonal system `H·o = b`. */
-interface BandedSystem {
-  /** `H[i][i]`. */
+/**
+ * Every array one solve works in, made once for it — #588. The system
+ * `H·o = b` is five-diagonal and symmetric: `diagonal` is `H[i][i]`, `first`
+ * `H[i][i + 1]`, `second` `H[i][i + 2]`.
+ */
+interface Workspace {
   readonly diagonal: Float64Array;
-  /** `H[i][i + 1]`. */
   readonly first: Float64Array;
-  /** `H[i][i + 2]`. */
   readonly second: Float64Array;
   readonly rhs: Float64Array;
+  /** The same system with the pinned samples moved to the right-hand side. @see solvePinned */
+  readonly pinnedDiagonal: Float64Array;
+  readonly pinnedFirst: Float64Array;
+  readonly pinnedSecond: Float64Array;
+  readonly pinnedRhs: Float64Array;
+  /** The `LDLᵀ` factors. @see bandedSolve */
+  readonly d: Float64Array;
+  readonly l1: Float64Array;
+  readonly l2: Float64Array;
+  /** The offsets: the last step's answer, and the next step's, written over it. */
+  readonly solution: Float64Array;
+  /** Where {@link solution} puts each padded sample, and each chord's length. @see measure */
+  readonly x: Float64Array;
+  readonly z: Float64Array;
+  readonly length: Float64Array;
+  /** The line's curvature and mean chord at each row of {@link solution}. @see measure */
+  readonly curvature: Float64Array;
+  readonly chord: Float64Array;
+  /** The three slopes of one row's curvature. */
+  readonly slopes: Float64Array;
+}
+
+/** A {@link Workspace} for a system of `size` unknowns, the answer starting at nought. */
+function workspace(size: number): Workspace {
+  const array = (): Float64Array => new Float64Array(size);
+  return {
+    diagonal: array(),
+    first: array(),
+    second: array(),
+    rhs: array(),
+    pinnedDiagonal: array(),
+    pinnedFirst: array(),
+    pinnedSecond: array(),
+    pinnedRhs: array(),
+    d: array(),
+    l1: array(),
+    l2: array(),
+    solution: array(),
+    x: array(),
+    z: array(),
+    length: array(),
+    curvature: array(),
+    chord: array(),
+    slopes: new Float64Array(3),
+  };
 }
 
 /** The step each curvature's slope is measured over, in metres of offset. */
@@ -797,7 +928,7 @@ const SLOPE_STEP_METRES = 1e-4;
 
 /**
  * One Gauss-Newton step of the energy in the module note, as the system whose
- * solution is the NEXT set of offsets.
+ * solution is the NEXT set of offsets — written into the workspace.
  *
  * The curvature term is the residual `κ·|κ|³ / κ̂³` per row, so its square is
  * the eighth power; linearised about `current`, its slope is four times the
@@ -805,58 +936,99 @@ const SLOPE_STEP_METRES = 1e-4;
  * QUARTER of the way to straight rather than all of it — the Gauss-Newton step
  * for that residual, and the step without the quarter overshoots and never
  * settles. The length and the pull are quadratic in the offsets already.
+ *
+ * Each row's points, chords and curvature at `current` are {@link measure}'s,
+ * taken when `current` was solved, rather than taken again here.
  */
-function linearised(
-  size: number,
-  road: PaddedRoad,
-  current: Float64Array,
-  peak: number,
-): BandedSystem {
+function linearise(road: PaddedRoad, current: Float64Array, peak: number, work: Workspace): void {
+  const { index, xs, zs, normals } = road;
+  const { diagonal, first, second, rhs, slopes, x, z, length } = work;
+  const size = current.length;
   const h = road.resolution;
   const settle = h / LINE_SETTLE_METRES ** 4;
-  const diagonal = new Float64Array(size).fill(settle);
-  const first = new Float64Array(size);
-  const second = new Float64Array(size);
+  diagonal.fill(settle);
+  first.fill(0);
+  second.fill(0);
   // The pull toward home, `settle·(o − home)²`, puts `settle·home` on the
   // right-hand side — #546. Nought here is the centre line.
-  const rhs = new Float64Array(size).fill(settle * LINE_HOME_OFFSET_METRES);
+  rhs.fill(settle * LINE_HOME_OFFSET_METRES);
 
   // The length: `μ/h·|ΔC + o₁N₁ − o₀N₀|²` per chord, exactly quadratic.
-  const length = LENGTH_WEIGHT / h;
+  const lengthWeight = LENGTH_WEIGHT / h;
   for (let chord = 0; chord < size - 1; chord += 1) {
-    const i = road.at(chord);
-    const j = road.at(chord + 1);
-    const dx = (road.xs[j] as number) - (road.xs[i] as number);
-    const dz = (road.zs[j] as number) - (road.zs[i] as number);
-    const nix = road.normals[i * 2] as number;
-    const niz = road.normals[i * 2 + 1] as number;
-    const njx = road.normals[j * 2] as number;
-    const njz = road.normals[j * 2 + 1] as number;
-    diagonal[chord] = (diagonal[chord] as number) + length;
-    diagonal[chord + 1] = (diagonal[chord + 1] as number) + length;
-    first[chord] = (first[chord] as number) - length * (nix * njx + niz * njz);
-    rhs[chord] = (rhs[chord] as number) + length * (nix * dx + niz * dz);
-    rhs[chord + 1] = (rhs[chord + 1] as number) - length * (njx * dx + njz * dz);
+    const i = index[chord] as number;
+    const j = index[chord + 1] as number;
+    const dx = (xs[j] as number) - (xs[i] as number);
+    const dz = (zs[j] as number) - (zs[i] as number);
+    const nix = normals[i * 2] as number;
+    const niz = normals[i * 2 + 1] as number;
+    const njx = normals[j * 2] as number;
+    const njz = normals[j * 2 + 1] as number;
+    diagonal[chord] = (diagonal[chord] as number) + lengthWeight;
+    diagonal[chord + 1] = (diagonal[chord + 1] as number) + lengthWeight;
+    first[chord] = (first[chord] as number) - lengthWeight * (nix * njx + niz * njz);
+    rhs[chord] = (rhs[chord] as number) + lengthWeight * (nix * dx + niz * dz);
+    rhs[chord + 1] = (rhs[chord + 1] as number) - lengthWeight * (njx * dx + njz * dz);
   }
 
   const q = (PEAK_EXPONENT - 2) / 2;
-  const slopes = new Float64Array(3);
   for (let row = 1; row < size - 1; row += 1) {
-    const here = curvatureOf(road, current, row, -1, 0);
-    if (here.chord === 0) continue;
+    if (work.chord[row] === 0) continue;
+    const here = work.curvature[row] as number;
     // Before the first step there is no peak to weigh against, and every row
     // weighs the same.
     const weight =
       h *
-      (road.weights[road.at(row)] as number) *
-      (peak > 0 ? (Math.abs(here.curvature) / peak) ** (2 * q) : 1);
+      (road.weights[index[row] as number] as number) *
+      (peak > 0 ? (Math.abs(here) / peak) ** (2 * q) : 1);
     if (weight === 0) continue;
-    let target = here.curvature / (1 + q);
+    // The three points as they stand, and each of them in turn moved sideways
+    // by the slope step: a nudged point moves the chords either side of it,
+    // and only those are measured again.
+    const x0 = x[row - 1] as number;
+    const z0 = z[row - 1] as number;
+    const x1 = x[row] as number;
+    const z1 = z[row] as number;
+    const x2 = x[row + 1] as number;
+    const z2 = z[row + 1] as number;
+    const ax = x1 - x0;
+    const az = z1 - z0;
+    const bx = x2 - x1;
+    const bz = z2 - z1;
+    const aLength = length[row - 1] as number;
+    const bLength = length[row] as number;
+    const i0 = index[row - 1] as number;
+    const i1 = index[row] as number;
+    const i2 = index[row + 1] as number;
+    const m0 = (current[row - 1] as number) + SLOPE_STEP_METRES;
+    const m1 = (current[row] as number) + SLOPE_STEP_METRES;
+    const m2 = (current[row + 1] as number) + SLOPE_STEP_METRES;
+    const nx0 = (xs[i0] as number) + m0 * (normals[i0 * 2] as number);
+    const nz0 = (zs[i0] as number) + m0 * (normals[i0 * 2 + 1] as number);
+    const nx1 = (xs[i1] as number) + m1 * (normals[i1 * 2] as number);
+    const nz1 = (zs[i1] as number) + m1 * (normals[i1 * 2 + 1] as number);
+    const nx2 = (xs[i2] as number) + m2 * (normals[i2 * 2] as number);
+    const nz2 = (zs[i2] as number) + m2 * (normals[i2 * 2 + 1] as number);
+    const a0x = x1 - nx0;
+    const a0z = z1 - nz0;
+    const a1x = nx1 - x0;
+    const a1z = nz1 - z0;
+    const b1x = x2 - nx1;
+    const b1z = z2 - nz1;
+    const b2x = nx2 - x1;
+    const b2z = nz2 - z1;
+    slopes[0] =
+      (curvatureOfChords(a0x, a0z, bx, bz, Math.hypot(a0x, a0z), bLength) - here) /
+      SLOPE_STEP_METRES;
+    slopes[1] =
+      (curvatureOfChords(a1x, a1z, b1x, b1z, Math.hypot(a1x, a1z), Math.hypot(b1x, b1z)) - here) /
+      SLOPE_STEP_METRES;
+    slopes[2] =
+      (curvatureOfChords(ax, az, b2x, b2z, aLength, Math.hypot(b2x, b2z)) - here) /
+      SLOPE_STEP_METRES;
+    let target = here / (1 + q);
     for (let member = 0; member < 3; member += 1) {
-      const nudged = curvatureOf(road, current, row, member, SLOPE_STEP_METRES).curvature;
-      const slope = (nudged - here.curvature) / SLOPE_STEP_METRES;
-      slopes[member] = slope;
-      target -= slope * (current[row - 1 + member] as number);
+      target -= (slopes[member] as number) * (current[row - 1 + member] as number);
     }
     // Minimising w·(Σ jᵢ·oᵢ + target)² adds w·j·jᵀ to H and −w·j·target to b.
     for (let left = 0; left < 3; left += 1) {
@@ -872,12 +1044,12 @@ function linearised(
       }
     }
   }
-  return { diagonal, first, second, rhs };
 }
 
 /**
  * Minimises one step's energy with every sample held within
- * ±{@link LINE_LIMIT_METRES}: an active set of samples pinned at an edge.
+ * ±{@link LINE_LIMIT_METRES}: an active set of samples pinned at an edge. The
+ * answer is written into the workspace's `solution`.
  *
  * `pinned` is 0 for a free sample and ±1 for one held at the edge, and it is
  * CARRIED from one Gauss-Newton step to the next rather than started empty,
@@ -889,9 +1061,10 @@ function linearised(
  * one step was pushed back out by the next, and a 10 m hairpin's line still
  * moved by 3.4 m between the 30th step and the 31st.
  */
-function solveOnRoad(system: BandedSystem, pinned: Int8Array): Float64Array {
-  const size = system.diagonal.length;
-  let solution = solvePinned(system, pinned);
+function solveOnRoad(work: Workspace, pinned: Int8Array): void {
+  const solution = work.solution;
+  const size = solution.length;
+  solvePinned(work, pinned);
   for (let round = 1; round < ACTIVE_SET_ROUNDS_PER_STEP; round += 1) {
     let changed = false;
     for (let index = 0; index < size; index += 1) {
@@ -904,7 +1077,7 @@ function solveOnRoad(system: BandedSystem, pinned: Int8Array): Float64Array {
         }
       } else {
         // Released when the energy would fall by moving it inward.
-        const gradient = residualAt(system, solution, index);
+        const gradient = residualAt(work, solution, index);
         if ((side > 0 && gradient > 0) || (side < 0 && gradient < 0)) {
           pinned[index] = 0;
           changed = true;
@@ -914,7 +1087,7 @@ function solveOnRoad(system: BandedSystem, pinned: Int8Array): Float64Array {
     if (!changed) {
       break;
     }
-    solution = solvePinned(system, pinned);
+    solvePinned(work, pinned);
   }
   for (let index = 0; index < size; index += 1) {
     solution[index] = Math.max(
@@ -922,11 +1095,10 @@ function solveOnRoad(system: BandedSystem, pinned: Int8Array): Float64Array {
       Math.min(LINE_LIMIT_METRES, solution[index] as number),
     );
   }
-  return solution;
 }
 
 /** `(H·o − b)[index]`: half the energy's gradient in that unknown. */
-function residualAt(system: BandedSystem, o: Float64Array, index: number): number {
+function residualAt(system: Workspace, o: Float64Array, index: number): number {
   const { diagonal, first, second, rhs } = system;
   let sum = (diagonal[index] as number) * (o[index] as number);
   if (index >= 1) sum += (first[index - 1] as number) * (o[index - 1] as number);
@@ -939,29 +1111,31 @@ function residualAt(system: BandedSystem, o: Float64Array, index: number): numbe
 /**
  * Solves the system with the pinned samples held at their edge: their rows
  * become the identity and their columns move to the right-hand side, so what
- * is factorised is still symmetric and still five-diagonal.
+ * is factorised is still symmetric and still five-diagonal. Works on the
+ * workspace's `pinned*` copies, so the system itself is left as it was built.
  */
-function solvePinned(system: BandedSystem, pinned: Int8Array): Float64Array {
-  const size = system.diagonal.length;
-  const diagonal = Float64Array.from(system.diagonal);
-  const first = Float64Array.from(system.first);
-  const second = Float64Array.from(system.second);
-  const rhs = Float64Array.from(system.rhs);
+function solvePinned(work: Workspace, pinned: Int8Array): void {
+  const {
+    pinnedDiagonal: diagonal,
+    pinnedFirst: first,
+    pinnedSecond: second,
+    pinnedRhs: rhs,
+  } = work;
+  const size = diagonal.length;
+  diagonal.set(work.diagonal);
+  first.set(work.first);
+  second.set(work.second);
+  rhs.set(work.rhs);
   for (let index = 0; index < size; index += 1) {
     const side = pinned[index] as number;
     if (side === 0) continue;
     const value = side * LINE_LIMIT_METRES;
-    // Move this column to the right-hand side of every free row it touches.
-    const touched: readonly (readonly [number, number | undefined])[] = [
-      [index - 2, system.second[index - 2]],
-      [index - 1, system.first[index - 1]],
-      [index + 1, system.first[index]],
-      [index + 2, system.second[index]],
-    ];
-    for (const [row, coefficient] of touched) {
-      if (row < 0 || row >= size || coefficient === undefined || pinned[row] !== 0) continue;
-      rhs[row] = (rhs[row] as number) - coefficient * value;
-    }
+    // Move this column to the right-hand side of every free row it touches —
+    // the two before it and the two after, in that order.
+    unpin(rhs, pinned, index - 2, index >= 2 ? work.second[index - 2] : undefined, value);
+    unpin(rhs, pinned, index - 1, index >= 1 ? work.first[index - 1] : undefined, value);
+    unpin(rhs, pinned, index + 1, work.first[index], value);
+    unpin(rhs, pinned, index + 2, work.second[index], value);
     diagonal[index] = 1;
     rhs[index] = value;
     if (index >= 1) first[index - 1] = 0;
@@ -969,23 +1143,35 @@ function solvePinned(system: BandedSystem, pinned: Int8Array): Float64Array {
     first[index] = 0;
     second[index] = 0;
   }
-  return bandedSolve(diagonal, first, second, rhs);
+  bandedSolve(diagonal, first, second, rhs, work);
+}
+
+/** Moves a pinned column's `coefficient · value` onto a free row's right-hand side. */
+function unpin(
+  rhs: Float64Array,
+  pinned: Int8Array,
+  row: number,
+  coefficient: number | undefined,
+  value: number,
+): void {
+  if (row < 0 || row >= rhs.length || coefficient === undefined || pinned[row] !== 0) return;
+  rhs[row] = (rhs[row] as number) - coefficient * value;
 }
 
 /**
  * `LDLᵀ` of a symmetric positive-definite five-diagonal matrix, and the two
- * triangular solves. O(n), and in place over fresh arrays.
+ * triangular solves, into the workspace's `solution`. O(n); every factor is
+ * written before it is read, so nothing is cleared between calls.
  */
 function bandedSolve(
   diagonal: Float64Array,
   first: Float64Array,
   second: Float64Array,
   rhs: Float64Array,
-): Float64Array {
+  work: Workspace,
+): void {
   const size = diagonal.length;
-  const d = new Float64Array(size);
-  const l1 = new Float64Array(size);
-  const l2 = new Float64Array(size);
+  const { d, l1, l2, solution: x } = work;
   for (let i = 0; i < size; i += 1) {
     const b2 = i >= 2 ? (second[i - 2] as number) / (d[i - 2] as number) : 0;
     const b1 =
@@ -1001,7 +1187,6 @@ function bandedSolve(
       (i >= 2 ? b2 * b2 * (d[i - 2] as number) : 0) -
       (i >= 1 ? b1 * b1 * (d[i - 1] as number) : 0);
   }
-  const x = new Float64Array(size);
   for (let i = 0; i < size; i += 1) {
     x[i] =
       (rhs[i] as number) -
@@ -1017,5 +1202,4 @@ function bandedSolve(
       (i + 1 < size ? (l1[i + 1] as number) * (x[i + 1] as number) : 0) -
       (i + 2 < size ? (l2[i + 2] as number) * (x[i + 2] as number) : 0);
   }
-  return x;
 }
