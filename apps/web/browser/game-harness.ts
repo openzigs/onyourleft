@@ -781,6 +781,8 @@ declare global {
         readonly mapDrawCalls: number;
         /** Pixels the map shadow darkens under the rider alone, against `'none'`. */
         readonly shadowPixels: number;
+        /** Pixels that differ, map against `'none'`, with the rider made the ghost — #547. */
+        readonly ghostShadowPixels: number;
       };
       /**
        * What a presence check costs with the renderer running — #390.
@@ -788,6 +790,11 @@ declare global {
        * @see presenceCostProbe
        */
       readonly presenceCost: PresenceCostMeasurement;
+      /**
+       * The first frames of a ride on the shadow map rung, with and without
+       * `prepare` — #547. Measured only under `?shadow-map`. @see rideStartProbe
+       */
+      readonly rideStart: RideStartMeasurement;
       /** The realistic world — ADR 0026. Measured only by `?realistic`. @see realisticProbe */
       readonly realistic: RealisticMeasurement;
       readonly errors: readonly string[];
@@ -2422,7 +2429,152 @@ const NO_SHADOW_MAP: ShadowMapMeasurement = {
   contactDrawCalls: 0,
   mapDrawCalls: 0,
   shadowPixels: 0,
+  ghostShadowPixels: 0,
 };
+
+/**
+ * The first frames of a ride on the shadow map rung, with and without
+ * `prepare` — #547. @see rideStartProbe
+ */
+export interface RideStartMeasurement {
+  readonly measured: boolean;
+  /** Whether this context offers `KHR_parallel_shader_compile`. Published, not asserted. */
+  readonly parallelCompile: boolean;
+  /** Programs linked inside `prepare` — the work moved out of the ride. */
+  readonly linksInPrepare: number;
+  /** Milliseconds `prepare` took to settle, wall clock; the main thread is free between polls. */
+  readonly prepareMs: number;
+  /** Programs linked in the first {@link RIDE_START_FRAMES} frames after `prepare`. */
+  readonly preparedLinks: number;
+  /** The same frames' GPU-awaited milliseconds, one each. */
+  readonly preparedFrameMs: readonly number[];
+  /** Programs linked in the first frames of a view drawn WITHOUT `prepare` — the control. */
+  readonly unpreparedLinks: number;
+  readonly unpreparedFrameMs: readonly number[];
+}
+
+const NO_RIDE_START: RideStartMeasurement = {
+  measured: false,
+  parallelCompile: false,
+  linksInPrepare: 0,
+  prepareMs: 0,
+  preparedLinks: 0,
+  preparedFrameMs: [],
+  unpreparedLinks: 0,
+  unpreparedFrameMs: [],
+};
+
+/** The first frames of a ride {@link rideStartProbe} watches. */
+const RIDE_START_FRAMES = 10;
+
+/**
+ * Counts `linkProgram` calls on every WebGL 2 context while `body` runs — one
+ * per GPU program three builds. Async, unlike {@link countingDrawCalls},
+ * because `prepare` is.
+ */
+async function countingLinks<T>(body: (links: () => number) => Promise<T>): Promise<T> {
+  const gl = WebGL2RenderingContext.prototype;
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  const original = gl.linkProgram;
+  let links = 0;
+  gl.linkProgram = function patched(this: WebGL2RenderingContext, program: WebGLProgram): void {
+    links += 1;
+    original.call(this, program);
+  };
+  try {
+    return await body(() => links);
+  } finally {
+    gl.linkProgram = original;
+  }
+}
+
+/**
+ * **Where the start-of-ride stall went** — #547, and the browser half of its
+ * second criterion.
+ *
+ * Part T on the Pixel Tablet: the first 12 s of a ride with the shadow map had
+ * a GPU 99th percentile of 4 950 ms, most likely every program compiling
+ * inside the first `render`. Two fresh views on {@link RIDER_SHADOW_MAP_RUNG},
+ * each on its own canvas and so its own context, draw the ride's first
+ * {@link RIDE_START_FRAMES} frames, each timed with the GPU awaited:
+ *
+ * - **the control** draws at once, as every first frame did before #547, and
+ *   must link programs inside those frames — the stall, reproduced;
+ * - **the product's order** awaits `prepare` with the ride's first frame, as
+ *   `GameView` does, and must link NONE in them.
+ *
+ * ⚠️ **Links are the precise half and milliseconds the coarse one.** A
+ * `linkProgram` issued inside a frame is a program built inside it, whatever
+ * it costs here. But links are not all a first frame pays for — every buffer's
+ * first upload and a driver's first-draw work are in it too, and while this
+ * probe was being written a `prepare` that linked everything without the
+ * ride's first frame staged left 600 of a 610 ms first frame where it was,
+ * with a link count of zero (`three-renderer.ts` §`prepare`).
+ * So the spec also holds the prepared frames' worst against the control's
+ * first, by a wide factor. A software rasteriser's milliseconds are not a
+ * phone's; the tablet's are validation 0002 Part T's to re-take.
+ *
+ * ⚠️ **Not the GPU process's program cache.** The control's first frame costs
+ * hundreds of milliseconds on a page that has already drawn this scene on
+ * dozens of other contexts, which is the measurement that says the cost is per
+ * context — and why warming a throwaway context while the picker is shown, as
+ * #547 floated, was not the fix taken.
+ */
+async function rideStartProbe(): Promise<RideStartMeasurement> {
+  const profile = harnessRoute();
+  const origin = corridorOrigin(profile);
+  const start = atStartLine(profile);
+  const frameAt = (distance: number) =>
+    lentSceneFrame({
+      profile,
+      origin,
+      state: { ...start, ride: { ...start.ride, distance: metres(distance) } },
+      botDistance: distance + 4,
+    });
+  const firstFrames = async (prepared: boolean) =>
+    countingLinks(async (links) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 600;
+      canvas.height = 400;
+      const view = threeGameRenderer.create(canvas, RIDER_SHADOW_MAP_RUNG);
+      view.resize(600, 400);
+      const gl = canvas.getContext('webgl2');
+      const parallelCompile = gl?.getExtension('KHR_parallel_shader_compile') != null;
+      const beforePrepare = links();
+      const prepareStarted = performance.now();
+      if (prepared) {
+        // As `GameView` does: the first frame it builds is the one it prepares with.
+        await view.prepare(frameAt(0));
+      }
+      const prepareMs = performance.now() - prepareStarted;
+      const linksInPrepare = links() - beforePrepare;
+      const beforeFrames = links();
+      const frameMs: number[] = [];
+      for (let index = 1; index <= RIDE_START_FRAMES; index += 1) {
+        const started = performance.now();
+        view.render(frameAt(index * SWEEP_STEP_METRES));
+        awaitTheGpu(gl);
+        frameMs.push(performance.now() - started);
+      }
+      const frameLinks = links() - beforeFrames;
+      view.destroy();
+      return { parallelCompile, prepareMs, linksInPrepare, frameLinks, frameMs };
+    });
+  // The control first, so the product's view is never the first to build a
+  // program this page's GPU process has not seen.
+  const unprepared = await firstFrames(false);
+  const prepared = await firstFrames(true);
+  return {
+    measured: true,
+    parallelCompile: prepared.parallelCompile,
+    linksInPrepare: prepared.linksInPrepare,
+    prepareMs: prepared.prepareMs,
+    preparedLinks: prepared.frameLinks,
+    preparedFrameMs: prepared.frameMs,
+    unpreparedLinks: unprepared.frameLinks,
+    unpreparedFrameMs: unprepared.frameMs,
+  };
+}
 
 /** @see presenceCostProbe */
 export interface PresenceCostMeasurement {
@@ -2713,6 +2865,19 @@ function shadowMapProbe(probe: SceneFrame): ShadowMapMeasurement {
     view.setQuality(NO_RIDER_SHADOWS);
     view.render(riderOnly);
     const shadowPixels = luminanceAcross(withMap, whole());
+    // #547: the same frame with the rider made the GHOST, which casts no
+    // shadow on this rung either (`three-renderer.ts` §`RiderBelt.#castersOnly`).
+    // Everything else is identical, so any pixel that differs is its shadow.
+    const ghostOnly: SceneFrame = {
+      ...riderOnly,
+      markers: riderOnly.markers.map((marker) => ({ ...marker, kind: 'ghost' as const })),
+    };
+    view.setQuality(RIDER_SHADOW_MAP_RUNG);
+    view.render(ghostOnly);
+    const ghostWithMap = whole();
+    view.setQuality(NO_RIDER_SHADOWS);
+    view.render(ghostOnly);
+    const ghostShadow = luminanceAcross(ghostWithMap, whole());
 
     for (const settings of [contact, RIDER_SHADOW_MAP_RUNG]) {
       view.setQuality(settings);
@@ -2741,6 +2906,8 @@ function shadowMapProbe(probe: SceneFrame): ShadowMapMeasurement {
       mapDrawCalls,
       // Only pixels the map made DARKER count as its shadow.
       shadowPixels: shadowPixels.with < shadowPixels.without ? shadowPixels.pixels : 0,
+      // Every pixel that differs, darker or not: the ghost changes nothing.
+      ghostShadowPixels: ghostShadow.pixels,
     };
   });
   return result;
@@ -4008,6 +4175,7 @@ function emptyHarness(errors: readonly string[]): NonNullable<Window['__oylGameH
     contactShadowNoise: 0,
     shadowMap: NO_SHADOW_MAP,
     presenceCost: NO_PRESENCE_COST,
+    rideStart: NO_RIDE_START,
     realistic: NO_REALISTIC,
     errors,
   };
@@ -4120,6 +4288,7 @@ async function run(): Promise<void> {
   let contactShadowNoise = 0;
   let shadowMap: ShadowMapMeasurement = NO_SHADOW_MAP;
   let presenceCost: PresenceCostMeasurement = NO_PRESENCE_COST;
+  let rideStart: RideStartMeasurement = NO_RIDE_START;
   /** The frame the model comparison is measured on. @see sceneryIndicesByKind */
   let probeFrame: SceneFrame | null = null;
   /** The frame the variant measurements are taken on. @see variantIndices */
@@ -4642,6 +4811,16 @@ async function run(): Promise<void> {
     errors.push(error instanceof Error ? error.message : String(error));
   }
 
+  // #547, on canvases of its own, and awaited for the same reason: `prepare`
+  // is. Only on the load that already measures the shadow map.
+  try {
+    if (new URLSearchParams(location.search).has('shadow-map')) {
+      rideStart = await rideStartProbe();
+    }
+  } catch (error: unknown) {
+    errors.push(error instanceof Error ? error.message : String(error));
+  }
+
   window.__oylGameHarness = {
     created,
     hasContext,
@@ -4717,6 +4896,7 @@ async function run(): Promise<void> {
     contactShadowNoise,
     shadowMap,
     presenceCost,
+    rideStart,
     realistic: NO_REALISTIC,
     errors,
   };

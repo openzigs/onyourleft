@@ -516,10 +516,11 @@ export function GameView(props: GameViewProps): JSX.Element {
   const trainerPortRef = useRef(props.trainer);
   trainerPortRef.current = props.trainer;
   /**
-   * Whether THIS DEVICE asked for the riders' shadow map — #426. Read at the
-   * start of each ride, like every other choice here; off unless somebody set
-   * it, and there is no control for it (`quality.ts`
-   * §`RIDER_SHADOW_MAP_STORAGE_KEY` says why). @see rungFor
+   * Whether this ride still draws the riders' shadow map — #426, #547. Read at
+   * the start of each ride, like every other choice here: ON for a stylised
+   * ride unless THIS DEVICE turned it off, and there is no control for that
+   * (`quality.ts` §`RIDER_SHADOW_MAP_STORAGE_KEY` says why). The ladder's first
+   * step down clears it for the rest of the ride. @see rungFor
    */
   const shadowMapRef = useRef(false);
   const gradientFaultRef = useRef<string | undefined>(undefined);
@@ -568,6 +569,16 @@ export function GameView(props: GameViewProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const simulationRef = useRef<GameSimulation | undefined>(undefined);
   const viewRef = useRef<RendererView | undefined>(undefined);
+  /**
+   * The view that has been prepared — #547. The loop draws the world only into
+   * THIS view, so a ride's first shown frame never builds a program or uploads
+   * a buffer: Part T measured a 4 950 ms GPU frame at the start of a ride with
+   * the shadow map when it did. Compared by IDENTITY in the loop, so the last ride's view
+   * settling late does not make the next ride's ready. @see RendererView.prepare
+   */
+  const preparedViewRef = useRef<RendererView | undefined>(undefined);
+  /** The view whose `prepare` is in flight, so it is asked once. @see preparedViewRef */
+  const preparingViewRef = useRef<RendererView | undefined>(undefined);
   const ghostRef = useRef<GhostTrack | undefined>(undefined);
   /**
    * How much scenery the current rung allows — #245.
@@ -786,9 +797,13 @@ export function GameView(props: GameViewProps): JSX.Element {
       // #475: which world this ride asked for, read from the device like every
       // other choice here. A ride starts at the top of its ladder — the
       // realistic one only for a rider who chose it (ADR 0026 D-3) — and the
-      // shadow map is not asked for on a realistic ride: its rung is a
-      // STYLISED one, and a ride that stepped out of realism because it was hot
-      // must land on the stylised top, not on something heavier.
+      // shadow map is not drawn on a realistic ride: its rung is a STYLISED
+      // one, and a ride that stepped out of realism because it was hot must
+      // land on the stylised top, not on something heavier. ⚠️ #547 made the
+      // map the stylised default and deliberately left the realistic world on
+      // the contact blob: its rider is `RealisticRiderBelt`, which casts into
+      // no map, and ADR 0026 D-6's budget and Part Z's soak were both taken
+      // with the blob. Giving it the map is its own measurement.
       const realistic = readRealisticWorldChoice(deviceStorage());
       realisticWantedRef.current = realistic;
       qualityRef.current = realistic ? INITIAL_REALISTIC_QUALITY : STYLISED_START;
@@ -1216,33 +1231,49 @@ export function GameView(props: GameViewProps): JSX.Element {
       // last two simulation steps at THIS instant, so a frame drawn at 20 fps
       // is placed exactly where one drawn at 60 would have been at that moment.
       const drawn = paced.draw ? simulation.drawnAt(at) : undefined;
-      if (drawn !== undefined)
-        viewRef.current?.render(
-          sceneFrame({
-            profile: chosen.profile,
-            origin,
-            state: simulation.state,
-            riderDistance: drawn.riderDistance,
-            // #237: the bot's odometer, from the state the simulation just
-            // advanced. `SceneInput.botDistance` was declared and optional and
-            // never supplied, which is why a built, tested and green pacer drew
-            // nothing on a real 47.53 km route.
-            ...(drawn.botDistance === undefined ? {} : { botDistance: drawn.botDistance }),
-            ghost: ghostRef.current,
-            // #245: the rung's scenery budget, so a throttling phone stops
-            // *placing* the scenery it is about to stop drawing. @see
-            // scatterItemsRef for why this is not read off `quality` here.
-            scatterItems: scatterItemsRef.current,
-            // #460, the same shape for the same reason. @see structureItemsRef
-            structureItems: structureItemsRef.current,
-            // #349: how far the cranks have turned. `port.ts`
-            // §`RiderMarker.crankAngle` records that an optional field nobody
-            // supplies is a hole this repository's gates cannot see, which is
-            // exactly what `botDistance` was before #237 — so `GameView.test.tsx`
-            // reads this back off the frame the renderer was handed.
-            crankAngle: crankRef.current,
-          }),
-        );
+      // #547: the world is drawn only into a view that has been PREPARED with
+      // the ride's first frame — its programs, uploads and first draw paid
+      // where nobody sees them — and the first frame this loop builds for a
+      // new view is the one it is prepared with. The HUD, the simulation and
+      // the trainer run meanwhile, exactly as they do while `three` is still
+      // arriving. `prepare` never rejects. @see preparedViewRef
+      const view = viewRef.current;
+      const prepared = view !== undefined && view === preparedViewRef.current;
+      const waiting = !prepared && view !== undefined && view === preparingViewRef.current;
+      if (drawn !== undefined && view !== undefined && !waiting) {
+        const frame = sceneFrame({
+          profile: chosen.profile,
+          origin,
+          state: simulation.state,
+          riderDistance: drawn.riderDistance,
+          // #237: the bot's odometer, from the state the simulation just
+          // advanced. `SceneInput.botDistance` was declared and optional and
+          // never supplied, which is why a built, tested and green pacer drew
+          // nothing on a real 47.53 km route.
+          ...(drawn.botDistance === undefined ? {} : { botDistance: drawn.botDistance }),
+          ghost: ghostRef.current,
+          // #245: the rung's scenery budget, so a throttling phone stops
+          // *placing* the scenery it is about to stop drawing. @see
+          // scatterItemsRef for why this is not read off `quality` here.
+          scatterItems: scatterItemsRef.current,
+          // #460, the same shape for the same reason. @see structureItemsRef
+          structureItems: structureItemsRef.current,
+          // #349: how far the cranks have turned. `port.ts`
+          // §`RiderMarker.crankAngle` records that an optional field nobody
+          // supplies is a hole this repository's gates cannot see, which is
+          // exactly what `botDistance` was before #237 — so `GameView.test.tsx`
+          // reads this back off the frame the renderer was handed.
+          crankAngle: crankRef.current,
+        });
+        if (prepared) {
+          view.render(frame);
+        } else {
+          preparingViewRef.current = view;
+          void view.prepare(frame).then(() => {
+            preparedViewRef.current = view;
+          });
+        }
+      }
 
       // The measurement `quality.ts` decides from. Taken here because this is
       // the only place that knows how long a frame took.

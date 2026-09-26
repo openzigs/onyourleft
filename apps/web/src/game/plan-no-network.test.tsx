@@ -77,6 +77,7 @@ function headlessRenderer(): GameRenderer {
     loadRealisticWorld: () => Promise.reject(new Error('no realistic world was chosen')),
     create: () => ({
       hasContext: false,
+      prepare: () => Promise.resolve(),
       render: () => undefined,
       setQuality: () => undefined,
       resize: () => undefined,

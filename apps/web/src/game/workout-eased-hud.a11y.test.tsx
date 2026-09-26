@@ -73,6 +73,7 @@ const RENDERER: GameRenderer = {
   loadRealisticWorld: () => Promise.reject(new Error('no realistic world was chosen')),
   create: () => ({
     hasContext: true,
+    prepare: () => Promise.resolve(),
     render: () => undefined,
     setQuality: () => undefined,
     resize: () => undefined,

@@ -70,6 +70,7 @@ function sizingRenderer(sizes: [number, number][]): GameRenderer {
     loadRealisticWorld: () => Promise.reject(new Error('no realistic world was chosen')),
     create: () => ({
       hasContext: true,
+      prepare: () => Promise.resolve(),
       render: () => undefined,
       setQuality: () => undefined,
       resize: (width: number, height: number) => {

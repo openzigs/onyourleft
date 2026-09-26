@@ -79,10 +79,17 @@
  *   transparent instanced draw, on every rung of the ladder. The ghost casts
  *   none (`contact-shadow.ts` §`CASTS_CONTACT_SHADOW`).
  * - A shadow map for the riders only, caught by a `ShadowMaterial` plane under
- *   them — `quality.ts` §`RIDER_SHADOW_MAP_RUNG`, above the ladder, off unless
- *   a device asks for it, and unmeasured on a phone. The scenery neither casts
- *   nor receives on any rung, and `three-seam.test.ts` counts every
- *   `castShadow` and `receiveShadow` write in this file to keep it so.
+ *   them — `quality.ts` §`RIDER_SHADOW_MAP_RUNG`, above the ladder, and since
+ *   #547 the rung every STYLISED ride starts on, the owner's ruling after
+ *   validation 0002 Part T; the ladder's first step down leaves it for the
+ *   ride. ⚠️ A reviewer who remembers "off unless a device asks for it" is
+ *   reading the old file. The blob is the fallback on every other rung, and
+ *   the realistic world's. `ThreeGameView.prepare` draws the ride's first
+ *   frame into one pixel before any frame is shown, which is what moved the
+ *   ride's opening stall out of the ride.
+ *   The scenery neither casts nor receives on any rung, and
+ *   `three-seam.test.ts` counts every `castShadow` and `receiveShadow` write
+ *   in this file to keep it so.
  *
  * ## The road's colour is now its own vertices'
  *
@@ -232,6 +239,7 @@ import {
   type RiderPart,
 } from './bicycle';
 import {
+  CASTS_CONTACT_SHADOW,
   CONTACT_SHADOW_DARKNESS,
   CONTACT_SHADOW_LIFT_METRES,
   placeContactShadow,
@@ -2340,6 +2348,11 @@ export class RiderBelt {
   readonly #posed = new Float64Array(RIDDEN_KINDS.length * POSE_KEY.length).fill(Number.NaN);
   /** Which kind is in which slot, as one string, so a change is one compare. */
   #layout = '';
+  /**
+   * How many of the placed slots cast a shadow — #547. They are the first ones:
+   * `place` puts every caster before every rider that does not. @see #castersOnly
+   */
+  #casters = 0;
   /** Whether this belt draws at all. @see setShown */
   #shown = true;
 
@@ -2386,9 +2399,37 @@ export class RiderBelt {
       // every ride, so there is nothing for a cull to decide. The same reason
       // the road and the ground set it, and the opposite of the scenery belt.
       mesh.frustumCulled = false;
+      this.#castersOnly(mesh, mesh === this.#limbs ? LEG_BONE_COUNT : 1);
       this.#group.add(mesh);
     }
     this.#group.visible = false;
+  }
+
+  /**
+   * Draws only the riders that cast into the shadow map's pass — #547, and
+   * #93's rule on the map rung: **the ghost casts no shadow there either.**
+   *
+   * ⚠️ **It did until #547**, and nothing noticed, because the map was a rung
+   * only a device that asked for it ever drew: the ghost is an instance in the
+   * same four meshes as the rider and the pacer, `castShadow` is a property of
+   * a MESH, and so the one ghost `contact-shadow.ts` §`CASTS_CONTACT_SHADOW`
+   * kept out of the blobs cast a real shadow as soon as the map was on. Making
+   * the map the default would have made that every ghost race.
+   *
+   * three calls `onBeforeShadow` immediately before it submits a caster to the
+   * pass and `onAfterShadow` immediately after, and reads `count` at the
+   * submission, so the pass draws the first {@link #casters} riders and the
+   * picture draws them all.
+   */
+  #castersOnly(mesh: InstancedMesh, perRider: number): void {
+    let drawn = 0;
+    mesh.onBeforeShadow = () => {
+      drawn = mesh.count;
+      mesh.count = this.#casters * perRider;
+    };
+    mesh.onAfterShadow = () => {
+      mesh.count = drawn;
+    };
   }
 
   addTo(scene: Scene): void {
@@ -2439,13 +2480,20 @@ export class RiderBelt {
     // `setHex(undefined)` and drawn in a `NaN` colour. The three kinds
     // `port.ts` declares cannot reach it; a fourth, or a frame built from
     // parsed data, could.
-    const drawn = markers.filter((marker) => Object.hasOwn(RIDER_TINTS, marker.kind));
+    // #547: the riders that cast a shadow FIRST, so the shadow pass can draw a
+    // prefix of each mesh and leave the ghost out. @see #castersOnly
+    const drawn = markers
+      .filter((marker) => Object.hasOwn(RIDER_TINTS, marker.kind))
+      .sort(
+        (a, b) => Number(!CASTS_CONTACT_SHADOW[a.kind]) - Number(!CASTS_CONTACT_SHADOW[b.kind]),
+      );
     const layout = drawn.map((marker) => marker.kind).join(',');
     if (layout !== this.#layout) {
       this.#layout = layout;
       this.#posed.fill(Number.NaN);
     }
     let slot = 0;
+    let casters = 0;
     let posed = false;
     for (const marker of drawn) {
       if (slot >= RIDDEN_KINDS.length) {
@@ -2453,7 +2501,11 @@ export class RiderBelt {
       }
       posed = this.#placeOne(slot, marker) || posed;
       slot += 1;
+      if (CASTS_CONTACT_SHADOW[marker.kind]) {
+        casters = slot;
+      }
     }
+    this.#casters = casters;
     for (const mesh of [this.#bodies, this.#torsos, this.#cranksets]) {
       mesh.count = slot;
       mesh.instanceMatrix.needsUpdate = true;
@@ -6548,6 +6600,8 @@ class ThreeGameView implements GameView {
   };
   #widthCssPixels = 1;
   #heightCssPixels = 1;
+  /** Whether {@link destroy} has run, so a {@link prepare} still in flight draws nothing after it. */
+  #destroyed = false;
   #vertexCapacity = 0;
   #indexCapacity = 0;
 
@@ -6622,6 +6676,12 @@ class ThreeGameView implements GameView {
     if (this.#renderer === undefined) {
       return;
     }
+    this.#stage(frame);
+    this.#renderer.render(this.#scene, this.#camera);
+  }
+
+  /** Everything {@link render} does to the scene before it draws it. */
+  #stage(frame: SceneFrame): void {
     this.#updateWorld(frame.world);
     this.#world = frame.world;
     // Worked out once a frame: the horizon, the near-plane cull and the camera
@@ -6671,7 +6731,77 @@ class ThreeGameView implements GameView {
     this.#updateMarkers(frame.markers);
     this.#updateShadows(frame);
     this.#placeCamera(rig);
-    this.#renderer.render(this.#scene, this.#camera);
+  }
+
+  /**
+   * The ride's first frame, drawn into ONE pixel before any frame is shown —
+   * #547. @see GameView.prepare
+   *
+   * Three steps, because a first frame pays in three places:
+   *
+   * 1. **The scene is staged from the frame**, synchronously — exactly what
+   *    {@link render} does before it draws, so every belt holds the rider, the
+   *    pacer, the ground and the scenery the ride starts with. Synchronous
+   *    because the frame's arrays are LENT (`landform.ts` §`TerrainMesh.lease`):
+   *    the next frame the host builds writes over them.
+   * 2. **`compileAsync`** over the whole scene, hidden objects included, under
+   *    the rung's lights and with `shadowMap.enabled` as the rung left it, so
+   *    the program keys match what `render` will look up. With
+   *    `KHR_parallel_shader_compile` the links run off the main thread and
+   *    this polls for them.
+   * 3. **One render with the scissor at a single pixel, then a fence.** The
+   *    draw is what the other two cannot reach: the depth programs the riders
+   *    are cast into the map with, which three makes only inside
+   *    `WebGLShadowMap.render`; every buffer's first upload; and whatever a
+   *    driver does on a program's first DRAW rather than its link. The scissor
+   *    keeps the picture to one pixel. The fence is polled, never waited on,
+   *    so the main thread stays free until the GPU has finished; it is given
+   *    up on after {@link PREPARE_FENCE_LIMIT_MS}.
+   *
+   * ⚠️ **Step 1 is not optional, measured.** A `prepare` that built every
+   * program and drew the scene WITHOUT the ride's first frame in it — no
+   * rider, no ground, no scenery placed — linked everything and left about
+   * 600 ms of a 610 ms first frame where it was, in the pinned Chromium: most
+   * of a first frame is its data's first upload, not its programs. Dropping
+   * the fence is the same size of failure (≈ 560 ms): the warm-up is still on
+   * the GPU when the first shown frame queues behind it.
+   *
+   * ⚠️ **What the pinned Chromium cannot tell apart**, stated: a scissor of
+   * NOTHING warms it just as well as one pixel does (a driver may skip a draw
+   * that covers no pixel, which is why it is one), and SwiftShader offers no
+   * `KHR_parallel_shader_compile`, so dropping `compileAsync` leaves the gate
+   * green — the programs are then linked, blocking, inside the warm-up render.
+   * What `compileAsync` buys is a main thread that keeps running while a
+   * phone links them, and only the tablet can show it.
+   *
+   * ⚠️ **It warms the CURRENT rung only.** A step down later — `surfaceDetail`
+   * goes, and on the map rung `shadowMap.enabled` goes with it — still builds
+   * programs on the frame it happens, once a ride, as before #547; and the
+   * realistic world's are built when it is drawn.
+   */
+  async prepare(frame: SceneFrame): Promise<void> {
+    const renderer = this.#renderer;
+    if (renderer === undefined) {
+      return;
+    }
+    try {
+      this.#stage(frame);
+      await renderer.compileAsync(this.#scene, this.#camera);
+      if (this.#destroyed) {
+        return;
+      }
+      renderer.setScissorTest(true);
+      renderer.setScissor(0, 0, 1, 1);
+      try {
+        renderer.render(this.#scene, this.#camera);
+      } finally {
+        renderer.setScissorTest(false);
+      }
+      await gpuFinished(renderer.getContext());
+    } catch {
+      // The first frame builds what it needs, as every first frame did before
+      // #547. A context lost mid-warm-up is the ordinary way here.
+    }
   }
 
   setQuality(settings: QualitySettings): void {
@@ -6839,8 +6969,9 @@ class ThreeGameView implements GameView {
    * material's program**, so turning it on or off after the first frame needs
    * those programs rebuilt — the rider's two materials and the catcher. Done
    * only when the value CHANGES. The map is turned on at most once a ride and
-   * off at most once: the map rung is above the ladder, the first step down
-   * leaves it, and `quality.ts` §`keepsShadowMap` is the latch that stops a
+   * off at most once: the map rung is above the ladder and a stylised ride
+   * starts on it (#547), where `prepare` has already drawn it once; the
+   * first step down leaves it, and `quality.ts` §`keepsShadowMap` is the latch that stops a
    * climb back to level 0 re-entering it. Without that latch this rebuild ran
    * on every 0 → 1 → 0 round trip, and the stall it causes is itself a
    * frame-time spike that can push the ladder down again.
@@ -6880,6 +7011,7 @@ class ThreeGameView implements GameView {
   }
 
   destroy(): void {
+    this.#destroyed = true;
     this.#realistic?.dispose();
     this.#roadGeometry.dispose();
     this.#terrain.dispose();
@@ -7078,6 +7210,53 @@ class ThreeGameView implements GameView {
  * nothing is re-uploaded, and the road stays wherever it was on the frame the
  * buffer was created.
  */
+/**
+ * How long {@link ThreeGameView.prepare} waits for the GPU to finish its warm-up
+ * draw before it lets the ride draw anyway: **10 s**. Part T's stall was about
+ * 5 s on the Pixel Tablet, and a warm-up that outlived twice that is not one a
+ * rider should wait out with no world.
+ */
+export const PREPARE_FENCE_LIMIT_MS = 10_000;
+
+/** How often {@link gpuFinished} looks at its fence. */
+const PREPARE_FENCE_POLL_MS = 16;
+
+/**
+ * Settles once the GPU has finished every command issued so far — polled on a
+ * fence, so the main thread is never blocked on it the way a `readPixels` or a
+ * `finish` would block it. Settles at once where there is no fence to make
+ * (a WebGL 1 context, a lost one), and after {@link PREPARE_FENCE_LIMIT_MS}
+ * whatever the fence says.
+ */
+export function gpuFinished(gl: WebGLRenderingContext | WebGL2RenderingContext): Promise<void> {
+  if (!('fenceSync' in gl) || gl.isContextLost()) {
+    return Promise.resolve();
+  }
+  const fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+  if (fence === null) {
+    return Promise.resolve();
+  }
+  gl.flush();
+  const started = performance.now();
+  return new Promise((resolve) => {
+    const look = (): void => {
+      const done =
+        gl.isContextLost() ||
+        gl.getSyncParameter(fence, gl.SYNC_STATUS) === gl.SIGNALED ||
+        performance.now() - started > PREPARE_FENCE_LIMIT_MS;
+      if (done) {
+        if (!gl.isContextLost()) {
+          gl.deleteSync(fence);
+        }
+        resolve();
+        return;
+      }
+      setTimeout(look, PREPARE_FENCE_POLL_MS);
+    };
+    look();
+  });
+}
+
 function upload(attribute: BufferAttribute, values: Float32Array | Uint32Array): void {
   (attribute.array as Float32Array | Uint32Array).set(values);
   attribute.needsUpdate = true;

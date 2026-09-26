@@ -440,3 +440,20 @@ issue.
 
 ⚠️ **No competitor's product, asset, screenshot or source was consulted**, and no asset was
 downloaded, converted or committed in the course of writing this. ADR 0009 L2 and R2 are untouched.
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-09-26** — **The rider shadow map is no longer an opt-in rung.** D-3 cites
+  `quality.ts` §`RIDER_SHADOW_MAP_RUNG` as *"the one rung a rider must ask for"*, D-9 calls it
+  *"already an opt-in rung"*, and the #426 row of the
+  consequences table reads *"the rider shadow map an opt-in rung"*. Since
+  [#547](https://github.com/openzigs/onyourleft/issues/547) — the owner's ruling after validation
+  0002 Part T, *"use bike shaped shadow over blob"* — it is the rung every **stylised** ride
+  starts on, and a device has to store `oyl.game.riderShadowMap = off` to not get it. What D-3
+  took from it is unchanged: the ladder still never enters it by itself, the first step down still
+  leaves it for the rest of the ride (`quality.ts` §`keepsShadowMap`), and **the realistic world
+  still draws the contact blob** — #547 left it there deliberately, because its rider casts into
+  no map and D-6's budget and Part Z's soak were both taken with the blob. The realistic world
+  remains the one set of rungs a rider must choose. Nothing in this ADR's decisions changes.

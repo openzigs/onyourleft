@@ -480,9 +480,23 @@ apps/                 AGPL-3.0-or-later, without exception
                         road rather than received by it, because the road is
                         unlit and has no shadow lookup at all. A real shadow
                         map for the riders is `quality.ts`
-                        §`RIDER_SHADOW_MAP_RUNG`: above the ladder, off unless
-                        a device asks, and unmeasured on a phone — validation
-                        0002 Part T, which #426 closes on
+                        §`RIDER_SHADOW_MAP_RUNG`: above the ladder, and ⚠️
+                        **since #547 the rung every STYLISED ride starts on**
+                        — the owner's *"use bike shaped shadow over blob"*
+                        after validation 0002 Part T. A reviewer who remembers
+                        "off unless a device asks" is reading the old file: a
+                        device now stores `oyl.game.riderShadowMap = off` to
+                        not get it. The blob is the FALLBACK — every rung after
+                        the first step down (`keepsShadowMap`'s latch is
+                        unchanged), the realistic world, and a device that
+                        turned the map off. ⚠️ **The ghost casts no MAP shadow
+                        either**, and did until #547: it shares the rider's
+                        meshes, so `three-renderer.ts` §`RiderBelt` hands the
+                        pass the casters only, by this file's table. The ride's
+                        opening stall (a 4 950 ms GPU frame on the tablet) is
+                        paid in `three-renderer.ts` §`prepare`, which draws the
+                        first frame into one pixel before any is shown. Part
+                        T5 (20 minutes with the map on) is still owed
     src/game/terrain.ts the road as geometry (#91), and since #242 as a road: two
                         edge lines and a broken centre line built into the same
                         vertex buffer, and a surface tinted by signed gradient.
@@ -3759,8 +3773,10 @@ top of an issue **supersedes its body**.
 | Whether the camera's near plane cuts the scenery it passes, what riding the fixture routes found, and what the renderer drops | `apps/web/src/game/near-field.ts`, `apps/web/src/game/near-field.test.ts` §"a ride", `apps/web/src/game/camera.ts` §`NEAR_PLANE_METRES`, `apps/web/browser/game-harness.ts` §`nearFieldProbe`, [#545](https://github.com/openzigs/onyourleft/issues/545) |
 | Why the near-plane cull asks a shape's triangles and never only its box | `apps/web/src/game/near-field.ts` §"How it is answered", `apps/web/src/game/near-field.test.ts` §"why the cull reads the triangles" |
 | Why the riders cast a contact shadow, from which sun, and why the ghost casts none | `apps/web/src/game/contact-shadow.ts` §`CASTS_CONTACT_SHADOW`, `apps/web/src/game/three-renderer.ts` §`ContactShadowBelt`, [#426](https://github.com/openzigs/onyourleft/issues/426) |
-| Why the scene-free frame is six draw calls since #426, and what the shadow map would cost instead | `apps/web/browser/game.browser.spec.ts` §`SCENE_DRAW_CALLS`, §"measures what the shading costs" |
-| Why the shadow map is a rung above the ladder with no control on any screen, and how a device is measured with it on | `apps/web/src/game/quality.ts` §`RIDER_SHADOW_MAP_RUNG`, §`RIDER_SHADOW_MAP_STORAGE_KEY`, [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part T |
+| Why the scene-free frame is six draw calls since #426, and what the shadow map would cost instead | `apps/web/browser/game.browser.spec.ts` §`SCENE_DRAW_CALLS`, §`SHADOW_MAP_EXTRA_DRAW_CALLS`, §"measures what the shading costs" |
+| Why the shadow map is a rung above the ladder that every stylised ride starts on, which rungs keep it, and how a device is measured with it off | `apps/web/src/game/quality.ts` §`RIDER_SHADOW_MAP_RUNG`, §`RIDER_SHADOW_MAP_STORAGE_KEY`, [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part T, [#547](https://github.com/openzigs/onyourleft/issues/547) |
+| Why a ride's world is not drawn until its first frame has been drawn into one pixel, and what that moved out of the ride | `apps/web/src/game/three-renderer.ts` §`prepare`, `apps/web/src/game/port.ts` §`GameView.prepare`, `apps/web/browser/game-harness.ts` §`rideStartProbe` |
+| Why the ghost casts no shadow on the shadow map rung, when it shares the rider's meshes | `apps/web/src/game/three-renderer.ts` §`RiderBelt.#castersOnly`, `apps/web/src/game/contact-shadow.ts` §`CASTS_CONTACT_SHADOW` |
 | What `three-seam.test.ts` counts about shadows, and why a shadow map needed a rule no lamp count could give | `apps/web/src/game/three-seam.test.ts` §"lets only the sun and the riders cast a shadow" |
 | Why the rider costs three draw calls where the sphere cost one | `apps/web/src/game/three-renderer.ts` §`RiderModel`, `apps/web/browser/game.browser.spec.ts` §`SCENE_DRAW_CALLS` |
 | Why every marker now carries a heading, and why it is the road's rather than the camera's | `apps/web/src/game/port.ts` §`RiderMarker.headingX`, `apps/web/src/game/scene.ts` §`headingAt` |

@@ -31,7 +31,6 @@ import type { GameRenderer, SceneFrame } from './port';
 import {
   FRAME_MS_REDUCE_ABOVE,
   REALISTIC_LADDER,
-  RIDER_SHADOW_MAP_STORAGE_KEY,
   SUSTAINED_SAMPLES,
   qualitySettings,
   type QualitySettings,
@@ -84,6 +83,7 @@ const RENDERER: GameRenderer = {
     told.push(settings);
     return {
       hasContext: true,
+      prepare: () => Promise.resolve(),
       render: (frame) => {
         rendered.push(frame);
       },
@@ -201,8 +201,7 @@ describe('which world a ride draws — #475', () => {
   it('loads it once and draws the ride in it, for a device that chose it', async () => {
     localStorage.setItem(REALISTIC_WORLD_STORAGE_KEY, 'on');
     // The shadow map's rung is a stylised one, and a realistic ride does not
-    // ask for it even on a device that did.
-    localStorage.setItem(RIDER_SHADOW_MAP_STORAGE_KEY, 'on');
+    // draw it, though it is the stylised default since #547.
     await ride();
     expect(asked).toBe(1);
     // The view is built at once and draws the stylised world until the
@@ -246,11 +245,11 @@ describe('which world a ride draws — #475', () => {
 
   it('falls back to the stylised top and says so when the load fails — ADR 0026 D-7', async () => {
     localStorage.setItem(REALISTIC_WORLD_STORAGE_KEY, 'on');
-    // The plain top, not the shadow map's rung, even on a device that asked
-    // for the map: a realistic ride does not ask for it (`GameView` §`start`),
-    // and a failed load is the one way out of realism that skips level 1,
-    // where `keepsShadowMap`'s latch would have taken it away anyway.
-    localStorage.setItem(RIDER_SHADOW_MAP_STORAGE_KEY, 'on');
+    // The plain top, not the shadow map's rung, though the map is the
+    // stylised default since #547: a realistic ride does not draw it
+    // (`GameView` §`start`), and a failed load is the one way out of realism
+    // that skips level 1, where `keepsShadowMap`'s latch would have taken it
+    // away anyway.
     await ride();
     await settleLoad(OFFLINE);
     expect(told.at(-1)).toEqual(qualitySettings(0));
@@ -264,9 +263,8 @@ describe('which world a ride draws — #475', () => {
 
   it('leaves realism for the stylised top when the device runs hot, says so, and never returns', async () => {
     localStorage.setItem(REALISTIC_WORLD_STORAGE_KEY, 'on');
-    // A device that also asked for the shadow map still lands on the plain
-    // stylised top: the map's rung is heavier, and a hot device is leaving.
-    localStorage.setItem(RIDER_SHADOW_MAP_STORAGE_KEY, 'on');
+    // The plain stylised top, though the map is the stylised default since
+    // #547: the map's rung is heavier, and a hot device is leaving.
     await ride();
     await settleLoad({ loaded: true });
     told = [];

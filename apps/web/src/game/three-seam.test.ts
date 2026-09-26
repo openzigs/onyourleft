@@ -179,6 +179,13 @@ describe('the rendering seam', () => {
     // | `.receiveShadow =` | the shadow catcher, in `ThreeGameView`'s constructor | 1 |
     // | `shadowMap.enabled =` | `ThreeGameView.#applyRiderShadows`, from the rung | 1 |
     //
+    // ⚠️ **Unchanged by #547, on purpose.** The map became the rung a stylised
+    // ride STARTS on, which is a change of `quality.ts`' default and not of
+    // who may cast: still the sun and the riders, still only on the map rung.
+    // And `ThreeGameView.prepare`, which warms that rung before the first
+    // frame, writes no shadow state at all — it draws with the state the rung
+    // already set, so the warm-up cannot leave a caster on that `setQuality`
+    // did not put there.
     // ⚠️ A count, so a third caster is a red test whoever edited it — and the
     // BEHAVIOUR (the belt never casts; the riders cast on the map rung only) is
     // `three-renderer.test.ts`'s, which this cannot see.

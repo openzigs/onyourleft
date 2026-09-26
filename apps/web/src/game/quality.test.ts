@@ -29,6 +29,7 @@ import {
   REALISTIC_LADDER,
   RIDER_SHADOW_MAP_RUNG,
   RIDER_SHADOW_MAP_STORAGE_KEY,
+  SHADOW_MAP_OFF,
   SUSTAINED_SAMPLES,
   TARGET_FRAMES_PER_SECOND,
   keepsShadowMap,
@@ -492,10 +493,23 @@ describe('the riders’ shadows on the ladder — #426', () => {
 
   it('puts the shadow map on no rung of the ladder — the ladder never reaches it by itself', () => {
     // From level 0, a device running cool for as long as you like stays at 0,
-    // and 0 has no shadow map: off by default, on the device floor and above.
+    // and 0 has no shadow map: a ride that has lost the map does not get it
+    // back from the ladder, which is what makes the drop one-way (#547).
     const cool = sustain(INITIAL_QUALITY, { frameMs: 5, thermalHeadroom: 0.1 }, 1_000);
     expect(cool.level).toBe(0);
     expect(rungFor(cool.level, false).riderShadows).toBe('contact');
+  });
+
+  it('is where a stylised ride starts on a device that said nothing — #547', () => {
+    // The owner's ruling: "use bike shaped shadow over blob". A device with
+    // nothing stored, and a device with no storage at all, start on the map.
+    const nothingStored = { getItem: () => null };
+    expect(rungFor(INITIAL_QUALITY.level, readShadowMapChoice(nothingStored))).toBe(
+      RIDER_SHADOW_MAP_RUNG,
+    );
+    expect(rungFor(INITIAL_QUALITY.level, readShadowMapChoice(undefined))).toBe(
+      RIDER_SHADOW_MAP_RUNG,
+    );
   });
 
   it('is the full rung with one field changed, so a measurement of it is of the map alone', () => {
@@ -538,20 +552,23 @@ describe('the riders’ shadows on the ladder — #426', () => {
     expect(keepsShadowMap(false, 0)).toBe(false);
   });
 
-  it('reads the choice off this device, and any failure to read it is "no"', () => {
+  it('reads the choice off this device: only "off" turns it off, and a failure to read is the default — #547', () => {
     const storing = (value: string | null) => ({ getItem: () => value });
+    expect(readShadowMapChoice(storing(SHADOW_MAP_OFF))).toBe(false);
+    // The value Part T4 used to set to ask for it is the default again.
     expect(readShadowMapChoice(storing('on'))).toBe(true);
-    expect(readShadowMapChoice(storing(null))).toBe(false);
-    expect(readShadowMapChoice(storing('yes'))).toBe(false);
-    expect(readShadowMapChoice(undefined)).toBe(false);
+    expect(readShadowMapChoice(storing(null))).toBe(true);
+    expect(readShadowMapChoice(storing('Off'))).toBe(true);
+    expect(readShadowMapChoice(undefined)).toBe(true);
     expect(
       readShadowMapChoice({
         getItem: () => {
           throw new Error('blocked');
         },
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(RIDER_SHADOW_MAP_STORAGE_KEY).toBe('oyl.game.riderShadowMap');
+    expect(SHADOW_MAP_OFF).toBe('off');
   });
 });
 

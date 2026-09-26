@@ -266,6 +266,27 @@ export interface TerrainFrame {
 export interface GameView {
   /** Draw one frame. Called by the host's loop; never drives the simulation. */
   render(frame: SceneFrame): void;
+  /**
+   * Draw the ride's FIRST frame where nobody sees it, and settle once the GPU
+   * has finished — #547. Everything a first frame pays for (its programs, the
+   * shadow pass's depth programs, every buffer's first upload, a driver's
+   * first-draw work) is paid here instead.
+   *
+   * ⚠️ **The host draws no world until this has settled**, and that is the
+   * whole of the fix for Part T's start-of-ride stall: on the Pixel Tablet the
+   * first seconds of a ride with the shadow map had a GPU 99th percentile of
+   * 4 950 ms, because all of that happened inside the first `render`. The
+   * frame is consumed before this returns, like {@link render}'s, because its
+   * arrays are lent; nothing here blocks the main thread, so the HUD, the
+   * simulation and the trainer's gradient keep running meanwhile.
+   *
+   * ⚠️ **Never rejects.** A warm-up that fails leaves the first frame to pay,
+   * which is what every first frame did before #547; a view with no context
+   * settles at once. Required rather than optional, on
+   * {@link RiderMarker.crankAngle}'s reasoning: an optional member nobody
+   * supplies is green in every gate here.
+   */
+  prepare(frame: SceneFrame): Promise<void>;
   /** Apply a new quality level. @see QualitySettings */
   setQuality(settings: QualitySettings): void;
   /** Tell the renderer the canvas changed size. */

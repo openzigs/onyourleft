@@ -1967,12 +1967,16 @@ The owner reported the rescue as working.
 
 ## Part T — the riders' shadows, and what a real shadow map costs ([#426](https://github.com/openzigs/onyourleft/issues/426))
 
-#426 grounded the three bicycles. Two things shipped, and only one of them is on by default:
+#426 grounded the three bicycles. Two things shipped. ⚠️ **Since
+[#547](https://github.com/openzigs/onyourleft/issues/547) the shadow map is the one on by default
+in the stylised world**, and the contact shadows are the fallback. A reader who remembers the map
+as the opt-in one is reading the old file. The T results below were taken before #547, when it
+was opt-in:
 
 | | on by default? | what it costs, by construction | where it is measured |
 |---|---|---|---|
-| **Contact shadows** — a soft blob under the rider and the pacer, placed from `world.ts`'s own sun | **yes, on every rung** | one transparent instanced draw call for all of them (the scenery-free frame is 6 calls, from 5) | `game.browser.spec.ts` §"draws each of the three in its own colour" reads it back, with the shadows off as its control |
-| **A shadow map** for the riders only, caught by a shadow-catching plane under them | **no** — `quality.ts` §`RIDER_SHADOW_MAP_RUNG`, above the ladder, and the first thing the ladder gives up — for the rest of the ride, `quality.ts` §`keepsShadowMap` | a shadow pass of the three rider meshes into a 512² depth map, plus the catcher | the pinned Chromium publishes a frame time on a software rasteriser, which says nothing about a phone. ⚠️ Since [#473](https://github.com/openzigs/onyourleft/issues/473) the harness times frames built as `GameView` builds them (lent, no copy); a figure published before it also paid for a ~55 KB copy a frame the product never makes, so the two are not comparable. **This part is the measurement #426 closes on** |
+| **Contact shadows** — a soft blob under the rider and the pacer, placed from `world.ts`'s own sun | **on every rung but the map's**, and so on every stylised ride after its first step down, in the realistic world, and on a device that turned the map off | one transparent instanced draw call for all of them (the scenery-free frame is 6 calls, from 5) | `game.browser.spec.ts` §"draws each of the three in its own colour" reads it back, with the shadows off as its control |
+| **A shadow map** for the riders only, caught by a shadow-catching plane under them | **yes, where a stylised ride starts** since #547 — `quality.ts` §`RIDER_SHADOW_MAP_RUNG`, above the ladder, and the first thing the ladder gives up — for the rest of the ride, `quality.ts` §`keepsShadowMap` | a shadow pass of the three rider meshes into a 512² depth map, plus the catcher | the pinned Chromium publishes a frame time on a software rasteriser, which says nothing about a phone. ⚠️ Since [#473](https://github.com/openzigs/onyourleft/issues/473) the harness times frames built as `GameView` builds them (lent, no copy); a figure published before it also paid for a ~55 KB copy a frame the product never makes, so the two are not comparable. **This part is the measurement #426 closes on** |
 
 ⚠️ **The ghost casts neither, on purpose** (`contact-shadow.ts` §`CASTS_CONTACT_SHADOW`): a bicycle
 with no shadow reads as *not really here*, which is #93's at-a-glance criterion. T2 asks whether it
@@ -1983,29 +1987,32 @@ note that the figure #426 quotes — *"GPU 50th percentile 7 ms during a ride"* 
 #366/#367/#368. T3 re-takes it without the map first, on the same build, so the comparison is on
 one day and one phone rather than across three months of changes.
 
-### T — how the shadow map is switched on
+### T — how the shadow map is switched off
 
-There is **no control for it on any screen**, deliberately (`quality.ts`
-§`RIDER_SHADOW_MAP_STORAGE_KEY` says why). With a **debug** build running and Part P's adb forward in
-place, on any screen but the game:
+⚠️ **Inverted by #547**: the map is on by default, so what a measurement sets is **off**. There is
+**no control for it on any screen**, deliberately (`quality.ts` §`RIDER_SHADOW_MAP_STORAGE_KEY`
+says why). With a **debug** build running and Part P's adb forward in place, on any screen but the
+game:
 
 ```bash
 node apps/mobile/tools/webview-probe.mjs \
-  'localStorage.setItem("oyl.game.riderShadowMap", "on"), localStorage.getItem("oyl.game.riderShadowMap")'
+  'localStorage.setItem("oyl.game.riderShadowMap", "off"), localStorage.getItem("oyl.game.riderShadowMap")'
 ```
 
-It prints `on`. It is read at the **start** of each ride, so start a new one. To turn it off again,
-the same with `localStorage.removeItem("oyl.game.riderShadowMap")`, which prints `undefined`.
+It prints `off`. It is read at the **start** of each ride, so start a new one. To turn the map back
+on, the same with `localStorage.removeItem("oyl.game.riderShadowMap")`, which prints `undefined`.
+A device still holding `"on"` from a run before #547 gets the map, which is the default.
 
 ### T — the steps
 
 | Step | What to do | What to record |
 |---|---|---|
-| T1 | Shadow map **off** (the default). Ride any route with a pacer | Does the rider look **on** the road now, rather than floating over it? Does the pacer's blob follow the pacer, and fall on the same side as the rider's? |
+| T1 | Shadow map **off** (above). Ride any route with a pacer | Does the rider look **on** the road now, rather than floating over it? Does the pacer's blob follow the pacer, and fall on the same side as the rider's? |
 | T2 | Ride the same route racing a ghost | The ghost has **no** shadow. Does that read as *"not really here"*, or as a rendering fault? |
-| T3 | Shadow map **off**. 12 s of riding, target rung, the `dumpsys` block below | the **off** column |
-| T4 | Switch the shadow map **on** (above), start a new ride, and repeat T3 | the **on** column. And by eye: is the real shadow worth having over the blob? |
+| T3 | Shadow map **off** (above — since #547 it is not the default). 12 s of riding, target rung, the `dumpsys` block below | the **off** column |
+| T4 | Switch the shadow map back **on** (above — the default since #547), start a new ride, and repeat T3 | the **on** column. And by eye: is the real shadow worth having over the blob? |
 | T5 | With it **on**, ride for **20 minutes** and note whether the ladder stepped down — the HUD's quality line, or `dumpsys` frame times rising | whether it left the map rung, and after how long. The first step down takes the map away **for the rest of that ride** (`quality.ts` §`keepsShadowMap`): a phone that cools and climbs back to level 0 does **not** get the map back, so the shadow under the rider should change from the real shadow to the blob once and never change back. If it comes back mid-ride, that is a defect — record it rather than the frame times. To measure the map again after a step down, start a **new** ride |
+| T6 | ⚠️ **Since #547, on a build containing it.** Map **on** (the default). `dumpsys gfxinfo … reset` on the picker, press *Ride*, and take the `dumpsys` block after the **first** 12 s of the ride | whether the start still stalls: #547 draws the ride's first frame into one pixel before any frame is shown (`three-renderer.ts` §`prepare`), so the GPU 99th percentile should no longer be seconds. By eye: how long the world stays dark before it appears, and whether the HUD hitched meanwhile. Then the same with the map **off**, the first-12-s row T3 never had |
 
 ```bash
 adb shell dumpsys gfxinfo dev.openzigs.onyourleft reset
@@ -2039,7 +2046,9 @@ own shadow.
 **Is the real shadow worth having over the blob, by eye (T4)?** **Yes**, in the owner's words: *"use
 bike shaped shadow over blob"*. Filed as [#547](https://github.com/openzigs/onyourleft/issues/547).
 
-**Did the ladder leave the map rung in 20 minutes, and when (T5)? Did the map ever come back in the same ride?** *Not run.*
+**Did the ladder leave the map rung in 20 minutes, and when (T5)? Did the map ever come back in the same ride?** *Not run.* ⚠️ **#547 asks for T5 to be run and recorded BEFORE the map ships as the default**, and its pull request makes it the default in code without it: the tablet was not in the loop. That criterion stays open on #547 (the pull request says `Refs`, not `Closes`) and T5 is owed before a release is cut from a build containing it.
+
+**Does the start of a ride still stall (T6)?** *Not run* — #547's browser gate says no program is built and no first-frame cost is left in the first ten frames in the pinned Chromium, which is not the tablet.
 
 **Phone (OEM, model, Android):** Google Pixel Tablet, Android 17, WebView 153.0.8010.36
 **Build:** debug, `main` at `cfa8956`, 2026-09-25
