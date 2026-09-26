@@ -43,9 +43,10 @@
  * step's name and what was seen instead go into `errors`, nothing after it
  * runs, and the page publishes at once.
  *
- * ⚠️ Naming the step is what found a THIRD failure, and it is not fixed here:
- * the tablet ending the pairing as `not-our-phone` because the phone's report
- * was the first message it heard, not the `hello` (#568). It reads as
+ * ⚠️ Naming the step is what found a THIRD failure, and it was the
+ * product's: the tablet ending the pairing as `not-our-phone` because the
+ * engine had dropped the phone's `hello`, sent from inside `ondatachannel`
+ * (#568; `side-link.ts` §"Why the phone waits to be spoken to"). It read as
  * `framing: not seen … "ended":"not-our-phone"`.
  *
  * ## What this does NOT prove
