@@ -2254,6 +2254,23 @@ describe('#524 — the ride keeps the process alive while it is active', () => {
     expect(port.calls).toEqual(['keep', 'sleep']);
   });
 
+  it('keeps the process alive until the stop has sent, flushed and saved', async () => {
+    // #565's second review: the stop publishes `stopped` first, and the keep
+    // alive used to read only the phase, so it let go before the trainer Stop
+    // and the last checkpoint — the writes the service exists to protect.
+    const port = recordingPort();
+    const rig = benchWith({ keepAlive: port });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 3);
+    rig.controller.armStop();
+    const stopping = rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().stopping).toBe(true);
+    expect(port.calls).toEqual(['keep']);
+    await stopping;
+    expect(port.calls).toEqual(['keep', 'sleep']);
+  });
+
   it('keeps a recovered ride alive when it is continued', async () => {
     const first = benchWith();
     await first.controller.pair('trainer');

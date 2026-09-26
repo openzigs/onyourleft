@@ -759,7 +759,12 @@ export function createRideController(options: RideControllerOptions): RideContro
    * screen is off, which is the one time the service matters.
    */
   const syncKeepAlive = (): void => {
-    const wanted = !disposed && rideInProgress(phase);
+    // #565's second review: `confirmStop` publishes `stopped` BEFORE it sends
+    // the trainer Stop, flushes the last checkpoint and saves. Keyed on the
+    // phase alone, that first render let the foreground service go with the
+    // ride's last writes still in flight — with the screen off, exactly the
+    // writes #524 exists to protect. `finishing` holds it until they land.
+    const wanted = !disposed && (rideInProgress(phase) || finishing);
     if (wanted === keptAlive || options.keepAlive === undefined) {
       return;
     }
@@ -1437,6 +1442,17 @@ export function createRideController(options: RideControllerOptions): RideContro
         await recording().stop(at);
         changed();
         await saveTheRide(recorder, ridden);
+      } catch (error: unknown) {
+        // Fail closed (#565's second review). Nothing on today's paths throws
+        // here, but if something did before `saveTheRide` set the outcome, the
+        // screen would fall back to the previous ride's save state — "Closing
+        // the tab is safe now" and a new ride offered over an unsaved
+        // recorder. `failed` says neither, and the checkpoint is left for
+        // recovery exactly as a refused save leaves it.
+        if (saveState !== 'saved') {
+          saveState = 'failed';
+        }
+        throw error;
       } finally {
         finishing = false;
         changed();

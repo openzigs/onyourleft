@@ -364,6 +364,12 @@ function RideControls({
   // it renders under is the controller's own, and said anyway: a control that
   // does nothing when pressed reads as a broken one.
   const [newRideRefused, setNewRideRefused] = useState(false);
+  // A refusal describes the moment it happened; once the ride's state moves
+  // on (the save lands, a new ride starts) it is stale and must not sit beside
+  // "Saved" (#565's second review).
+  useEffect(() => {
+    setNewRideRefused(false);
+  }, [snapshot.phase, snapshot.saveState, snapshot.stopping]);
   useEffect(() => {
     if (snapshot.phase === 'idle' && focusStartWhenIdle.current) {
       focusStartWhenIdle.current = false;
