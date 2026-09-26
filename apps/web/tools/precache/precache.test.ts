@@ -7,6 +7,7 @@ import {
   POSE_MODEL_FILE,
   POSE_RUNTIME_WASM_FILE,
 } from '../../src/camera/pose-files';
+import { SHIPPED_LICENCE_TEXTS } from '../../src/credits/credits';
 import { REALISTIC_DIRECTORY, realisticFiles } from '../../src/game/realistic-assets';
 import { SCENERY_ATLAS, SCENERY_MODELS } from '../../src/game/scenery-models';
 import {
@@ -197,6 +198,23 @@ describe('the map’s label glyphs ARE precached — #578', () => {
     expect(cacheVersion([...BUILD, ...changed], fakeDigest)).not.toBe(
       cacheVersion([...BUILD, ...glyphs], fakeDigest),
     );
+  });
+});
+
+describe('the licence texts the credits screen links ARE precached — #597', () => {
+  // The worker answers a navigation to a precached file with that file, and
+  // any other navigation with the app shell. A licence text left out of the
+  // precache would open as the home screen once the worker controlled the
+  // page, which is the defect #597 found.
+  it('holds every one', () => {
+    const texts = Object.values(SHIPPED_LICENCE_TEXTS).map((link) =>
+      file(link.replace(/^\.\//, '')),
+    );
+    expect(texts.length).toBeGreaterThan(0);
+    const entries = precacheEntries([...BUILD, ...texts]);
+    for (const each of texts) {
+      expect(entries, each.name).toContain(each.name);
+    }
   });
 });
 

@@ -8,17 +8,33 @@
  * answer, and it is checkable without a DOM. `CreditsView.tsx` renders what
  * this returns and decides nothing.
  *
- * ## The two lists, and why they are two
+ * ## The lists, and why they are four
  *
  * - **{@link Credits.required}** — every entry whose licence is in
  *   {@link ATTRIBUTION_LICENCES}. [ADR 0023](../../../../docs/adr/0023-cc-by-assets-and-attribution.md)
  *   §Consequences puts it plainly: an entry missing from here is a build
  *   distributing that asset unlicensed. This list is the obligation.
- * - **{@link Credits.courtesy}** — every other entry that records a
- *   {@link AssetEntry.creator}. #358's third bullet: CC0 assets *may* be
- *   listed and are not required to be, *"and the screen must not imply an
- *   obligation that does not exist"*. So they are rendered under their own
- *   heading, in their own words, and never mixed in.
+ * - **{@link Credits.licenceCopy}** — every entry that records a
+ *   {@link AssetEntry.creator} and whose licence is in
+ *   {@link LICENCE_COPY_LICENCES}: a credit is not asked for, but a copy of
+ *   the licence has to travel with the work (Apache-2.0 §4(a)), so each one
+ *   links the copy this app ships. #597.
+ * - **{@link Credits.courtesy}** — every entry that records a creator and
+ *   whose licence is in {@link NOTHING_ASKED_LICENCES}. #358's third bullet:
+ *   CC0 assets *may* be listed and are not required to be, *"and the screen
+ *   must not imply an obligation that does not exist"*. So they are rendered
+ *   under their own heading, in their own words, and never mixed in.
+ * - **{@link Credits.unclassified}** — a credited entry under any other
+ *   licence, which is also a {@link Credits.problems} line.
+ *
+ * ⚠️ **The courtesy list is chosen by an allowlist, and until #597 it was
+ * "everything else".** The section says its licences ask for nothing in
+ * return, and "everything that is not CC BY" put the map's Roboto glyphs and
+ * the pose model under that sentence — both Apache-2.0, whose §4(a) asks for
+ * the licence text to travel with the work. A licence nobody has read here is
+ * therefore neither courtesy nor obligation: it is shown, and said to be
+ * unclassified, because the sentence above it would otherwise be a claim about
+ * a licence nobody checked.
  *
  * ⚠️ **Recording a creator is what opts an asset into the courtesy list**,
  * rather than a licence test or a path test. `ASSET006` accepts the three
@@ -58,16 +74,59 @@ import type { AssetEntry, ParsedManifest } from './manifest';
 export const ATTRIBUTION_LICENCES: readonly string[] = ['CC-BY-4.0'];
 
 /**
+ * The licences that ask for a copy of their own text to travel with the work,
+ * and do not ask for a credit — #597.
+ *
+ * Apache-2.0 §4(a): *"You must give any other recipients of the Work or
+ * Derivative Works a copy of this License"*. §4(d) adds the upstream `NOTICE`
+ * file where there is one; for the two Apache-2.0 works credited today there
+ * is none — `googlefonts/roboto-2` at `v2.138` and its release archive carry a
+ * `LICENSE` and no `NOTICE`, and the pose model's `.task` bundle holds two
+ * `.tflite` files and nothing else (both read 2026-09-26). A new Apache-2.0
+ * asset re-asks that question; see `ASSETS.toml` above the pose model.
+ *
+ * ⚠️ Every licence here must have a {@link SHIPPED_LICENCE_TEXTS} entry, or
+ * {@link creditsFrom} reports the work as shipping without its licence.
+ * `MIT` and the BSDs ask for their notice to travel too, and are deliberately
+ * not listed: no MIT or BSD entry records a creator, so none is credited, and
+ * one that did would land in {@link Credits.unclassified} rather than under a
+ * sentence nobody checked.
+ */
+export const LICENCE_COPY_LICENCES: readonly string[] = ['Apache-2.0'];
+
+/**
+ * The licences that ask for nothing at all, which is what the courtesy
+ * section's wording says of them. An allowlist, on purpose — see the header.
+ */
+export const NOTHING_ASKED_LICENCES: readonly string[] = ['CC0-1.0'];
+
+/**
+ * The licence texts this app SHIPS, relative to the page — #597.
+ *
+ * Relative for `map/basemap.ts` §`GLYPHS_URL`'s reason: it resolves against
+ * this deployment's own origin, and inside the Android shell against
+ * `https://localhost`, so the text is in the APK rather than on somebody
+ * else's server. The files are in `apps/web/public/licences/`, which Vite
+ * copies into `dist` verbatim and the service worker precaches;
+ * `credits.test.ts` holds each one byte-identical to the canonical text
+ * `LIC005` pins.
+ */
+export const SHIPPED_LICENCE_TEXTS: Readonly<Record<string, string>> = {
+  'Apache-2.0': './licences/Apache-2.0.txt',
+};
+
+/**
  * The licence texts a credit can point at.
  *
- * Only identifiers whose canonical URL is published and stable. A licence
- * absent from here renders as its identifier alone, which is still a true
+ * A shipped copy, or a canonical URL that is published and stable. A licence
+ * absent from both renders as its identifier alone, which is still a true
  * statement — a guessed URL is not, and CC BY 4.0 §3(a)(1)(A)(iii) asks for a
  * notice *referring to this Public License* rather than to something like it.
  */
 const LICENCE_TEXTS: Readonly<Record<string, string>> = {
   'CC-BY-4.0': 'https://creativecommons.org/licenses/by/4.0/',
   'CC0-1.0': 'https://creativecommons.org/publicdomain/zero/1.0/',
+  ...SHIPPED_LICENCE_TEXTS,
 };
 
 /**
@@ -115,13 +174,41 @@ export interface CreditedWork {
   readonly modified?: string;
   /** Whether the licence obliges the credit, or it is offered anyway. */
   readonly attributionRequired: boolean;
+  /** What the licence asks of this app — which section the work is listed in. */
+  readonly terms: LicenceTerms;
   /** Repository-relative paths, in manifest order. */
   readonly files: readonly string[];
 }
 
+/**
+ * What a licence asks of this app, as far as this page is concerned.
+ *
+ * - `attribution` — a credit, every time it ships ({@link ATTRIBUTION_LICENCES}).
+ * - `licence-copy` — a copy of the licence text, and no credit
+ *   ({@link LICENCE_COPY_LICENCES}).
+ * - `nothing` — nothing at all ({@link NOTHING_ASKED_LICENCES}).
+ * - `unclassified` — a licence this page has not been told about.
+ */
+export type LicenceTerms = 'attribution' | 'licence-copy' | 'nothing' | 'unclassified';
+
+/** What this licence asks of the app. Equality, never a prefix. */
+export function licenceTerms(licence: string): LicenceTerms {
+  if (ATTRIBUTION_LICENCES.includes(licence)) {
+    return 'attribution';
+  }
+  if (LICENCE_COPY_LICENCES.includes(licence)) {
+    return 'licence-copy';
+  }
+  return NOTHING_ASKED_LICENCES.includes(licence) ? 'nothing' : 'unclassified';
+}
+
 export interface Credits {
   readonly required: readonly CreditedWork[];
+  /** Credited, each with a link to the copy of its licence this app ships. */
+  readonly licenceCopy: readonly CreditedWork[];
   readonly courtesy: readonly CreditedWork[];
+  /** Credited under a licence this page does not describe. */
+  readonly unclassified: readonly CreditedWork[];
   /**
    * Everything that stopped this being a complete answer, in words.
    *
@@ -190,11 +277,32 @@ export function creditsFrom(manifest: ParsedManifest): Credits {
     licence: first.licence,
     ...(first.modified === undefined ? {} : { modified: first.modified }),
     attributionRequired: requiresAttribution(first.licence),
+    terms: licenceTerms(first.licence),
     files,
   }));
+  for (const work of all) {
+    if (work.terms === 'licence-copy' && SHIPPED_LICENCE_TEXTS[work.licence] === undefined) {
+      // Apache-2.0 §4(a) is met by the copy travelling with the work, and a
+      // credit linking none is this app shipping the work without it.
+      problems.push(
+        `${work.files.join(', ')} is under ${work.licence}, which asks for a copy of the licence ` +
+          'to travel with it, and this app ships no copy of that licence',
+      );
+    }
+    if (work.terms === 'unclassified') {
+      problems.push(
+        `${work.files.join(', ')} is under ${work.licence}, and this page has not been told what ` +
+          'that licence asks for',
+      );
+    }
+  }
+  const withTerms = (terms: LicenceTerms): readonly CreditedWork[] =>
+    all.filter((work) => work.terms === terms);
   return {
-    required: all.filter((work) => work.attributionRequired),
-    courtesy: all.filter((work) => !work.attributionRequired),
+    required: withTerms('attribution'),
+    licenceCopy: withTerms('licence-copy'),
+    courtesy: withTerms('nothing'),
+    unclassified: withTerms('unclassified'),
     problems,
   };
 }

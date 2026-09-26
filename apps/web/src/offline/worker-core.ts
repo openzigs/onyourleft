@@ -138,6 +138,12 @@ export interface FetchInput {
  * 3. **A navigation** — served the precached shell, because a hash-routed
  *    single-page app's every route is the same document, and a rider opening a
  *    bookmark with the network off is the case this whole epic is for.
+ *    ⚠️ **Unless the navigation is to a precached file**, which is served
+ *    that file (#597). The credits screen links the Apache-2.0 text this app
+ *    ships, and opening a link is a navigation: answering every one with the
+ *    shell put the app's home screen where the licence should have been, with
+ *    the network on or off, as soon as this worker controlled the page. The
+ *    shell is itself precached, so a navigation to `index.html` is unchanged.
  * 4. **In the precache** — served from the cache.
  *
  * Anything else is untouched, which is what leaves #408's control able to fail.
@@ -157,9 +163,6 @@ export function decideFetch(input: FetchInput): FetchDecision {
   if (url.origin !== scope.origin) {
     return { kind: 'untouched' };
   }
-  if (input.mode === 'navigate') {
-    return { kind: 'shell' };
-  }
   // The query string is dropped, because a precached asset is addressed by
   // path: Vite's own `?url` imports resolve to a hashed filename with no query
   // on it, and a cache-busting parameter a caller appends must not turn a
@@ -167,6 +170,9 @@ export function decideFetch(input: FetchInput): FetchDecision {
   const withoutSearch = `${url.origin}${url.pathname}`;
   if (input.precached.has(withoutSearch)) {
     return { kind: 'cached', url: withoutSearch };
+  }
+  if (input.mode === 'navigate') {
+    return { kind: 'shell' };
   }
   return { kind: 'untouched' };
 }
