@@ -433,7 +433,7 @@ jobs:
 
       # TEMPORARY (#552): one repeat run in CI. Reverted before review.
       - name: TEMPORARY sidelink repeat
-        run: pnpm --filter @onyourleft/web exec playwright test sidelink --repeat-each=50
+        run: pnpm --filter @onyourleft/web exec playwright test sidelink --repeat-each=150
 
       # DEP001. The other half of the licence boundary: check-repo-rules.sh
       # checks the headers and manifests of the code we write, this checks the
