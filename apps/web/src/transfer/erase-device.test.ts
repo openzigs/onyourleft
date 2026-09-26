@@ -16,6 +16,7 @@ import {
   ATHLETE_B,
   createStoreHarness,
   framingReferenceFor,
+  sideCameraReportFor,
   resetFixtureIds,
   rideFor,
   routeFor,
@@ -23,6 +24,7 @@ import {
   streamSetFor,
   workoutFor,
 } from '@onyourleft/store/testing';
+import type { ActivityId } from '@onyourleft/store';
 import { unixSeconds } from '@onyourleft/domain';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -126,6 +128,10 @@ describe('what the rider is told before they press it', () => {
     expect(ERASE_REMOVES.join(' ')).toContain('side camera');
   });
 
+  it('names the side camera’s reports — #388, the owner’s retention ruling', () => {
+    expect(ERASE_REMOVES.join(' ')).toContain('side camera’s report');
+  });
+
   it('names the copy on the rider’s own machine, and NOT a hosted one — #387', () => {
     // ADR 0029 D-4 writes two `ERASE_CANNOT_REACH` lines. #387 made the first
     // true — a picture can now be sent to the rider's own computer — and it is
@@ -156,12 +162,16 @@ describe('what the rider is told before they press it', () => {
 });
 
 describe('erasing, against the real store', () => {
-  async function seed(owner: typeof ATHLETE_A, rides: number): Promise<void> {
+  async function seed(owner: typeof ATHLETE_A, rides: number): Promise<ActivityId[]> {
+    const ids: ActivityId[] = [];
     for (let index = 0; index < rides; index += 1) {
       const ride = rideFor(owner, { hasPosition: true });
+      ids.push(ride.id);
       await harness.write(async (store) => {
         await store.putActivity(ride);
         await store.putStreamSet(streamSetFor(ride, { sampleCount: 20 }));
+        // #388. The side camera's report on this ride, named in ERASE_REMOVES.
+        await store.putSideCameraReport(sideCameraReportFor(owner, ride.id));
       });
     }
     await harness.write(async (store) => {
@@ -173,11 +183,12 @@ describe('erasing, against the real store', () => {
       // #528. Numbers read off a picture of the rider, named in ERASE_REMOVES.
       await store.putFramingReference(framingReferenceFor(owner));
     });
+    return ids;
   }
 
   it('removes this athlete and reports what went', async () => {
     await seedAthletes(harness);
-    await seed(ATHLETE_A, 2);
+    const erased = await seed(ATHLETE_A, 2);
 
     const outcome = await harness.write(async (store) => eraseDevice(store, ATHLETE_A));
 
@@ -198,6 +209,12 @@ describe('erasing, against the real store', () => {
     // that line true rather than a promise.
     const reference = await harness.read(async (store) => store.getFramingReference(ATHLETE_A));
     expect(reference).toBeUndefined();
+    // #388: ERASE_REMOVES names the side camera's reports, and this is what
+    // makes that line true.
+    for (const id of erased) {
+      const report = await harness.read(async (store) => store.getSideCameraReport(ATHLETE_A, id));
+      expect(report).toBeUndefined();
+    }
   });
 
   it('leaves another athlete alone', async () => {

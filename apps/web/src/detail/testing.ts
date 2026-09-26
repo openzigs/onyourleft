@@ -27,6 +27,7 @@ import {
   type LapRecord,
   type PrivacyZoneRecord,
   type Samples,
+  type SideCameraReportRecord,
   type StreamChannel,
   type StreamSetSummary,
 } from '@onyourleft/store';
@@ -43,6 +44,8 @@ export interface StubRide {
   readonly channels: StubChannels;
   readonly laps: readonly LapRecord[];
   readonly sampleInterval?: number;
+  /** #388: the side camera's report on this ride, or `'unreadable'` for a row that will not decode. */
+  readonly sideCamera?: SideCameraReportRecord | 'unreadable';
 }
 
 export interface StubDetail extends DetailPort {
@@ -156,6 +159,14 @@ export function stubDetail(
     listPrivacyZones: () => {
       zoneReads.push(zoneReads.length);
       return Promise.resolve([...zones]);
+    },
+    getSideCameraReport: (_owner: AthleteId, id: ActivityId) => {
+      if (id !== ride.activity.id || ride.sideCamera === undefined) {
+        return Promise.resolve(undefined);
+      }
+      return ride.sideCamera === 'unreadable'
+        ? Promise.reject(new Error('sideCameraReport.summary: must be a sentence'))
+        : Promise.resolve(ride.sideCamera);
     },
   };
 

@@ -17,9 +17,26 @@
  *    description from the code's checked fields (`side-link-sdp.ts`), answers,
  *    and shows the answer code.
  * 3. **The tablet reads the answer** — once — and the two connect directly.
- * 4. **The phone proves it read the offer**: its first message is the secret.
- *    Anything else first, or a wrong secret, and the tablet ends the pairing
- *    before it reads another byte (D-4).
+ * 4. **The tablet speaks first**: a `ping` as soon as `control` opens, again
+ *    every {@link HEARTBEAT_MILLISECONDS} until the phone has proved itself.
+ * 5. **The phone proves it read the offer**, in answer to that: its first
+ *    message is the secret. Anything else first, or a wrong secret, and the
+ *    tablet ends the pairing before it reads another byte (D-4).
+ *
+ * ## Why the phone waits to be spoken to
+ *
+ * #568. The phone used to send its secret the moment its `control` channel
+ * arrived, inside `ondatachannel`, and Chromium sometimes drops a message sent
+ * there: `send` does not throw, the channel says `open`, nothing is buffered,
+ * and the message never arrives. Caught by a trace in CI, about one pairing in
+ * a hundred. The phone's next message was then the first the tablet heard,
+ * and D-4 ended the pairing as `not-our-phone`. A message the phone has
+ * RECEIVED on `control` was handed up by an engine whose channel was open at
+ * its end, so a reply sent from there is past that window. The tablet's own
+ * channel opens with its `open` event rather than being handed over already
+ * open, and its ping repeats in case one is lost all the same. D-4 is
+ * unchanged: the secret is still the phone's first message, and nothing the
+ * tablet sends before proof carries anything.
  *
  * ## Why neither end waits for the connection to say it is gone
  *
@@ -430,6 +447,8 @@ export class TabletSideLink implements SideCameraControlPort {
   #stopReason: SideCameraStopReason | undefined;
   #command: { kind: PhoneCommand; number: number; status: SideCommandStatus } | undefined;
   #cancelAck: (() => void) | undefined;
+  /** The opening ping's repeat, until the phone has proved itself (#568). */
+  #cancelInvite: (() => void) | undefined;
   #nextCommand = 0;
   #lastHeard = 0;
   #ended: SidePairingEnd | undefined;
@@ -458,6 +477,14 @@ export class TabletSideLink implements SideCameraControlPort {
     channel.onmessage = (event) => {
       this.#hear(event.data);
     };
+    // #568: the tablet speaks first, and keeps speaking until it is answered.
+    if (channel.readyState === 'open') {
+      this.#invite();
+    } else {
+      channel.onopen = () => {
+        this.#invite();
+      };
+    }
     frames.onmessage = (event) => {
       this.#hearPicture(event.data);
     };
@@ -613,6 +640,8 @@ export class TabletSideLink implements SideCameraControlPort {
       // of it is read.
       if (message?.t === 'hello' && sameSecret(message.k, this.#secret)) {
         this.#proved = true;
+        this.#cancelInvite?.();
+        this.#cancelInvite = undefined;
         this.#heard();
         this.#cancels.push(
           this.#timers.every(() => {
@@ -658,6 +687,24 @@ export class TabletSideLink implements SideCameraControlPort {
     this.#setLost(false);
   }
 
+  /**
+   * The tablet's opening `ping`, and again every {@link HEARTBEAT_MILLISECONDS}
+   * until the phone has proved itself — the phone says nothing until it has
+   * heard one (#568). It carries nothing, so sending it before proof tells
+   * whoever is at the other end of this DTLS connection nothing.
+   */
+  #invite(): void {
+    if (this.#proved || this.#ended !== undefined || this.#cancelInvite !== undefined) {
+      return;
+    }
+    this.#send({ t: 'ping' });
+    const cancel = this.#timers.every(() => {
+      this.#send({ t: 'ping' });
+    }, HEARTBEAT_MILLISECONDS);
+    this.#cancelInvite = cancel;
+    this.#cancels.push(cancel);
+  }
+
   #beat(): void {
     this.#send({ t: 'ping' });
     if (this.#timers.clock() - this.#lastHeard >= SILENCE_IS_LOST_MILLISECONDS) {
@@ -699,6 +746,7 @@ export class TabletSideLink implements SideCameraControlPort {
     }
     this.#channel.onmessage = null;
     this.#channel.onclose = null;
+    this.#channel.onopen = null;
     this.#frames.onmessage = null;
     this.#peer.onconnectionstatechange = null;
     letGo(this.#peer, this.#channel, this.#timers);
@@ -789,6 +837,8 @@ export class PhoneSideLink implements SideCameraLinkPort {
   #lastHeard = 0;
   /** The last command number obeyed, so a repeated one is not obeyed twice. */
   #lastCommand = -1;
+  /** Whether the secret has been sent — the first thing this phone says (#568). */
+  #greeted = false;
 
   constructor(peer: SidePeer, secret: string, timers: Resolved) {
     this.#peer = peer;
@@ -907,27 +957,30 @@ export class PhoneSideLink implements SideCameraLinkPort {
       return;
     }
     this.#channel = channel;
-    const opened = (): void => {
-      // D-4: the secret first, before anything else this phone says.
-      this.#send({ t: 'hello', k: this.#secret });
-      this.#heard();
-      this.#cancels.push(
-        this.#timers.every(() => {
-          this.#beat();
-        }, HEARTBEAT_MILLISECONDS),
-      );
-    };
+    // #568: nothing is sent from here. A message sent inside `ondatachannel`
+    // can be dropped by the engine with no error, so the phone waits for the
+    // tablet's opening ping and sends its secret in answer (§`#greet`).
     channel.onmessage = (event) => {
       this.#hear(event.data);
     };
     channel.onclose = () => {
       this.endSideLink();
     };
-    if (channel.readyState === 'open') {
-      opened();
-    } else {
-      channel.onopen = opened;
-    }
+  }
+
+  /**
+   * D-4: the secret first, before anything else this phone says — sent in
+   * answer to the first thing the tablet says (#568), and only then is the
+   * link `connected` and the heartbeat started.
+   */
+  #greet(): void {
+    this.#greeted = true;
+    this.#send({ t: 'hello', k: this.#secret });
+    this.#cancels.push(
+      this.#timers.every(() => {
+        this.#beat();
+      }, HEARTBEAT_MILLISECONDS),
+    );
   }
 
   #hear(data: unknown): void {
@@ -938,6 +991,9 @@ export class PhoneSideLink implements SideCameraLinkPort {
     if (message === undefined) {
       this.endSideLink();
       return;
+    }
+    if (!this.#greeted) {
+      this.#greet();
     }
     this.#heard();
     switch (message.t) {
@@ -990,7 +1046,9 @@ export class PhoneSideLink implements SideCameraLinkPort {
   /** Never throws: on a lost link there is nobody to tell (the port's rule). */
   #send(message: PhoneMessage): void {
     const channel = this.#channel;
-    if (channel?.readyState !== 'open') {
+    // Nothing before the secret (D-4): a report made before the tablet has
+    // spoken is dropped, as one made before the channel opens always was.
+    if (channel?.readyState !== 'open' || (!this.#greeted && message.t !== 'hello')) {
       return;
     }
     try {

@@ -26,6 +26,7 @@ import type {
   LapRecord,
   PrivacyZoneRecord,
   Samples,
+  SideCameraReportRecord,
   StreamChannel,
   StreamSetSummary,
 } from '@onyourleft/store';
@@ -49,6 +50,16 @@ export interface DetailStore {
    * `privacy.ts`.
    */
   listPrivacyZones(owner: AthleteId): Promise<PrivacyZoneRecord[]>;
+  /**
+   * What the side camera's post-ride report said about this ride, or
+   * `undefined` for a ride that was not filmed — #388. One point lookup of a
+   * few sentences: no picture and no pose number is ever on the row, so this
+   * read costs the budget nothing it could not afford.
+   */
+  getSideCameraReport(
+    owner: AthleteId,
+    id: ActivityId,
+  ): Promise<SideCameraReportRecord | undefined>;
 }
 
 export interface DetailPort {

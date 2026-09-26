@@ -104,6 +104,7 @@ import type {
   CameraFrameRecord,
   FramingCheckRecord,
   FramingReferenceRecord,
+  SideCameraReportRecord,
   NewActivity,
   NewLap,
   RouteRecord,
@@ -863,4 +864,32 @@ export function framingReferenceFor(
 export function framingReferenceWithoutCheck(owner: AthleteId): FramingReferenceRecord {
   const { athleteId: owning, aspect, landmarks } = framingReferenceFor(owner);
   return { athleteId: owning, aspect, landmarks };
+}
+
+/**
+ * A side-camera report on one ride — #388.
+ *
+ * ⚠️ **Different sentences per athlete and per `session`**, for
+ * `framingReferenceFor`'s reason: a scoping probe that returned somebody else's
+ * report, or a store that kept the first of two, must not hand back something
+ * indistinguishable from the right answer. The store checks shape and bounds,
+ * not wording, so the sentences are marked rather than drawn from the client's
+ * vocabulary — this package cannot import it.
+ */
+export function sideCameraReportFor(
+  owner: AthleteId,
+  activity: ActivityId,
+  session = 1,
+): SideCameraReportRecord {
+  const mark = `${owner} session ${String(session)}`;
+  return {
+    athleteId: owner,
+    activityId: activity,
+    summary: `A summary of the side camera for ${mark}.`,
+    observations: [
+      `A first possible observation for ${mark}.`,
+      `A second possible observation for ${mark}.`,
+      `A third possible observation for ${mark}.`,
+    ],
+  };
 }

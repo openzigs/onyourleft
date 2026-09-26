@@ -124,6 +124,11 @@ export const ERASE_REMOVES: readonly string[] = [
   // criterion is that it is named here, and `deleteAthlete`'s cascade is what
   // makes the line true (`activity-store.erasure.test.ts` derives the table).
   'where you were in the side camera’s picture last time, and whether the camera had moved since the time before, which is a set of numbers read off a picture of you',
+  // #388, by name, for the reason the line above is: the owner's retention
+  // ruling keeps the side camera's report — sentences about the rider's body,
+  // read off pictures of them — with each ride, and says it goes with the
+  // athlete. `deleteAthlete`'s cascade is what makes the line true.
+  'what the side camera’s report said about each ride it filmed',
 ];
 
 /**

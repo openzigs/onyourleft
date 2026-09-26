@@ -58,6 +58,7 @@ import { shellCameraNotice } from './camera/shell-camera';
 import { CameraController } from './camera/session';
 import { workerPoseEstimator } from './camera/pose-estimator';
 import { SideAnalysis } from './camera/side-analysis';
+import { sideReportKeeper } from './camera/side-report-keeper';
 import { sidePairingPort } from './camera/side-link';
 import { sideLinkAvailable } from './camera/side-link-transport';
 import type { ThermalPort } from './game/thermal-port';
@@ -816,6 +817,20 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   // entry): the pairing would carry pictures that nothing looked at.
   // `camera/side-link.test.ts` §"pictures" is what drives the option; this
   // line is what supplies it.
+  const platform = await buildPlatform(capabilities, camera);
+  const rideController = platform.rideController;
+  // #388. Each pairing's post-ride report, saved with the ride it filmed —
+  // the ride controller is what says which ride that is, which is why the
+  // pairing is built after it. ⚠️ `reports` is optional too, so leaving it out
+  // is green in `check:wiring` for the same reason `analyse` is:
+  // `camera/side-analysis.test.ts` §"the post-ride report" drives the option,
+  // and this line is what supplies it.
+  // With no ride controller there is no ride to save a report with, so none
+  // is made.
+  const sideReports =
+    rideController === undefined
+      ? undefined
+      : sideReportKeeper({ rides: rideController, store: localStore(), athleteId: LOCAL_ATHLETE });
   const sidePairing = sideLinkAvailable()
     ? sidePairingPort({
         analyse: (control) =>
@@ -823,11 +838,10 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
             control,
             estimator: () => workerPoseEstimator(),
             references: { store: localStore(), athleteId: LOCAL_ATHLETE },
+            reports: sideReports,
           }),
       })
     : undefined;
-  const platform = await buildPlatform(capabilities, camera);
-  const rideController = platform.rideController;
   // Read once: two calls would be two reads of a global for one prop.
   const storage = platformStorage();
   const root = createRoot(container);

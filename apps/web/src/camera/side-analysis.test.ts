@@ -23,6 +23,8 @@ import {
 import type { SidePose, SidePoseEstimator, SidePoseOutcome } from './side-analysis-port';
 import type { SidePicture } from './side-link-pictures';
 import type { SideCameraControlPort, SideControlState } from './side-pairing-port';
+import type { SideReport } from './side-report';
+import { SIDE_REPORT_TOO_SHORT } from './side-report-wording';
 import { cleanFrameBytes } from './testing';
 
 const ATHLETE = athleteId('athlete-side');
@@ -342,8 +344,12 @@ describe('the framing check (D-7)', () => {
 });
 
 describe('when the session ends', () => {
-  it('lets the model go, stops listening, and keeps this session’s placement as the next reference', async () => {
+  it('lets the model go, stops listening, and keeps a first session’s placement as the next reference', async () => {
     const { link, model, keeping, analysis } = setUp();
+    // No stored reference: the first session, which is the one case besides a
+    // passing check whose placement moves the reference forward (#388).
+    link.set({ phone: 'framing' });
+    await settle();
     for (let index = 0; index < FRAMING_CHECK_POSES; index += 1) {
       link.picture();
       await model.answer({ kind: 'pose', pose: pose(0.05) });
@@ -354,15 +360,19 @@ describe('when the session ends', () => {
     expect(link.listening()).toBe(0);
     expect(analysis.sideAnalysisState().finished).toBe(true);
     expect(keeping.puts).toEqual([
-      { athleteId: ATHLETE, ...referenceOf(pose(0.05)), check: 'not-checked' },
+      { athleteId: ATHLETE, ...referenceOf(pose(0.05)), check: 'no-reference' },
     ]);
     // The numbers are still there for the report.
     expect(analysis.poseSamples()).toHaveLength(FRAMING_CHECK_POSES);
   });
 
-  it('keeps the placement even when the check said the camera had moved — the rider’s LAST session', async () => {
+  it('keeps the PREVIOUS reference when the check said the camera had moved — the owner’s ruling on #388', async () => {
+    // ⚠️ #555 moved the reference forward after every session, so a tripod
+    // that crept a little each time reset the baseline it was being checked
+    // against and never failed. The owner's ruling of 2026-09-26: only a
+    // passing check (or a first session) moves it.
     const stored: FramingReferenceRecord = { athleteId: ATHLETE, ...referenceOf(pose()) };
-    const { link, model, keeping } = setUp(stored);
+    const { link, model, keeping, analysis } = setUp(stored);
     link.set({ phone: 'framing' });
     await settle();
     for (let index = 0; index < FRAMING_CHECK_POSES; index += 1) {
@@ -371,9 +381,40 @@ describe('when the session ends', () => {
     }
     link.set({ ended: 'ended-here' });
     await settle();
+    expect(analysis.sideAnalysisState().framing).toBe('differs');
+    expect(keeping.puts).toEqual([]);
+  });
+
+  it('moves the reference forward when the check passed', async () => {
+    const stored: FramingReferenceRecord = { athleteId: ATHLETE, ...referenceOf(pose()) };
+    const { link, model, keeping } = setUp(stored);
+    link.set({ phone: 'framing' });
+    await settle();
+    for (let index = 0; index < FRAMING_CHECK_POSES; index += 1) {
+      link.picture();
+      await model.answer({ kind: 'pose', pose: pose(0.01) });
+    }
+    link.set({ ended: 'ended-here' });
+    await settle();
     expect(keeping.puts).toEqual([
-      { athleteId: ATHLETE, ...referenceOf(pose(0.2)), check: 'differs' },
+      { athleteId: ATHLETE, ...referenceOf(pose(0.01)), check: 'matches' },
     ]);
+  });
+
+  it('keeps the previous reference when the check was never made, however much was filmed', async () => {
+    // A stored reference that the session never got to check against — here
+    // because the phone never said its camera was on, so it was never asked
+    // for. `not-checked` is not a pass, so the stored one stays.
+    const stored: FramingReferenceRecord = { athleteId: ATHLETE, ...referenceOf(pose()) };
+    const { link, model, keeping, analysis } = setUp(stored);
+    for (let index = 0; index < FRAMING_CHECK_POSES * 2; index += 1) {
+      link.picture();
+      await model.answer({ kind: 'pose', pose: pose(0.2) });
+    }
+    link.set({ phone: 'stopped' });
+    await settle();
+    expect(analysis.sideAnalysisState().framing).toBe('not-checked');
+    expect(keeping.puts).toEqual([]);
   });
 
   it('records whether the check passed with the session’s numbers, read back through the store (D-7)', async () => {
@@ -495,5 +536,60 @@ describe('a placement from many pictures', () => {
 
   it('is nothing for no pictures', () => {
     expect(placementOf([])).toBeUndefined();
+  });
+});
+
+describe('the post-ride report (#388)', () => {
+  function withReports() {
+    const link = scriptedControl();
+    const model = scriptedModel();
+    const ended: (SideReport | undefined)[] = [];
+    let begun = 0;
+    const analysis = new SideAnalysis({
+      control: link.control,
+      estimator: model.make,
+      reports: {
+        beginSideReportSession: () => {
+          begun += 1;
+          return {
+            endSideReportSession: (report) => {
+              ended.push(report);
+            },
+          };
+        },
+      },
+    });
+    return { link, model, analysis, ended, begun: () => begun };
+  }
+
+  it('opens a report session with the pairing and hands it the report when the pairing ends', async () => {
+    const { link, model, ended, begun } = withReports();
+    expect(begun()).toBe(1);
+    link.picture();
+    await model.answer();
+    expect(ended).toStrictEqual([]);
+    link.set({ phone: 'stopped' });
+    await settle();
+    // One picture is far too short a session to compare: the report says so,
+    // in words — and it IS a report, handed over, rather than nothing.
+    expect(ended).toStrictEqual([{ summary: SIDE_REPORT_TOO_SHORT, observations: [] }]);
+  });
+
+  it('hands over sentences and nothing they were made from', async () => {
+    const { link, model, ended } = withReports();
+    link.picture();
+    await model.answer();
+    link.set({ ended: 'ended-here' });
+    await settle();
+    expect(Object.keys(ended[0] ?? {}).sort()).toStrictEqual(['observations', 'summary']);
+    expect(JSON.stringify(ended)).not.toMatch(/landmarks|"x"|milliseconds|bytes/);
+  });
+
+  it('hands over "nothing to report" for a pairing that never filmed, once', async () => {
+    const { link, ended } = withReports();
+    link.set({ phone: 'stopped' });
+    link.set({ ended: 'ended-here' });
+    await settle();
+    expect(ended).toStrictEqual([undefined]);
   });
 });

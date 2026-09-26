@@ -146,11 +146,25 @@ apps/                 AGPL-3.0-or-later, without exception
                         touch target rather than arriving at one: the height used to
                         be a by-product of two spacing tokens, a type token and a
                         border, landing 0.8 px clear of 44 — see §4f
+    src/camera/side-report*.ts
+                        the side camera's post-ride report (#388) — the pose
+                        numbers of one session reduced to SENTENCES, first third
+                        against last third, sagittal only, each worded
+                        "possibly" and holding no number; every sentence in
+                        `side-report-wording.ts`; which ride it is saved with.
+                        ⚠️ `no-absolute-angles.test.ts` beside them is a gate
+                        over ALL of `src/`: a degree sign, the word, a
+                        `'degree'` formatter or a frontal-plane word in any
+                        rendered string is a red build (ADR 0030 D-8)
     src/efforts/        the effort-history screen's reads and its stub (#67) — the
                         read budget, and where a sample index comes from
     src/detail/         the ride detail view's data layer (#50) — the read budget, the
                         gap-preserving downsampler, the SVG trace and the
-                        privacy-zone trim that says what a shared copy contains
+                        privacy-zone trim that says what a shared copy contains;
+                        and since #388 the ride's "Side camera" section — only
+                        for a ride with a saved report, rendering only sentences
+                        `camera/side-report-wording.ts` can produce, with an
+                        explicit "nothing to show" and no control of any kind
     src/home/           where the app opens (#428) — one bounded store read
                         and no stream decode on every launch, the week and the
                         fitness line carried to today, and the empty state a
@@ -877,7 +891,9 @@ packages/             Apache-2.0, without exception
                       the synthetic rider that composes #92's rule with it
   store/              local activity, stream, recording-checkpoint, signed-record,
                       segment, effort and route store, and the round-trip harness
-                      (#26-#28, #46, #61, #64, #66, #89)
+                      (#26-#28, #46, #61, #64, #66, #89); since #388 the side
+                      camera's post-ride report at schema version 12 —
+                      sentences only, one per ride
 
 docs/
   architecture.md     layout, component boundaries, ADR index
@@ -3818,6 +3834,12 @@ top of an issue **supersedes its body**.
 | The one place the client names a WebRTC peer connection, and what the no-network gate can and cannot see of it | `apps/web/src/camera/side-link-transport.ts`, `apps/web/src/privacy/no-network.test.ts` §`PERMITTED_NETWORK_CALLS`, [ADR 0033](docs/adr/0033-side-camera-link.md) D-9 |
 | Why the side camera's pose model runs behind a network fence, and what it would send without one | `apps/web/src/camera/pose-runtime.ts` §`fenceWorkerNetwork`, `apps/web/browser/pose.browser.spec.ts`, [#530](https://github.com/openzigs/onyourleft/issues/530) |
 | What the tablet keeps of a side-camera picture, and for how long | `apps/web/src/camera/side-analysis.ts`, [ADR 0033](docs/adr/0033-side-camera-link.md) D-3, D-6 |
+| When a session's placement becomes the next framing reference, and why a failed check keeps the old one | `apps/web/src/camera/side-analysis.ts` §`REFERENCE_MOVES_ON`, [#388](https://github.com/openzigs/onyourleft/issues/388) |
+| What the side camera's post-ride report may say, where every sentence lives, and why it has no numbers yet | `apps/web/src/camera/side-report.ts` §`MEASURED_SPREAD_DEGREES`, `apps/web/src/camera/side-report-wording.ts`, [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md) D-2, [#388](https://github.com/openzigs/onyourleft/issues/388) |
+| Which ride a side-camera session's report is saved with, and when it is dropped instead | `apps/web/src/camera/side-report-keeper.ts` |
+| What stops any screen rendering an absolute joint angle or a frontal-plane word, and the three exemptions | `apps/web/src/camera/no-absolute-angles.ts` §`EXEMPT`, `apps/web/src/camera/no-absolute-angles.test.ts`, [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md) D-8 |
+| Why an empty side-camera section and a correct one cannot look the same, and why a stored sentence the app does not know is withheld | `apps/web/src/detail/SideCameraSection.tsx`, `SideCameraSection.test.tsx` |
+| What proves nothing on the report's path reaches a trainer | `apps/web/src/camera/side-report-safety.test.ts` |
 | What proves the HUD's live region is not hidden and moves nothing, and why that is not a screen reader | `apps/web/browser/hud.browser.spec.ts` §"#401", [#401](https://github.com/openzigs/onyourleft/issues/401) |
 
 <!-- Last updated: 2026-09-17 by delivery:code-issue resolving #355 (the verge as a visibility constant, and the camera-cone gate that had been missing) -->

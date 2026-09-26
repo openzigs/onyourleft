@@ -27,6 +27,7 @@
 
 import {
   contentHashOf,
+  metres,
   seconds,
   signActivityRecord,
   unixSeconds,
@@ -47,7 +48,7 @@ import {
   type RecordMigration,
 } from './migrations';
 import { SCHEMA_VERSION, SCHEMA_VERSIONS, STORES_V1, STORES_V2, STORES_V3, TABLE } from './schema';
-import { cameraFrameFor, framingReferenceFor } from './testing';
+import { cameraFrameFor, framingReferenceFor, sideCameraReportFor } from './testing';
 import { ensureDeviceSigningKey, webCryptoSha256, webCryptoVerifier } from './web-crypto';
 
 /**
@@ -275,7 +276,8 @@ describe('the production registry', () => {
     // record's shape, this test is what says the registry must gain an entry.
     // Version 11 (#528) adds `framingReferences`, the same case again: a new
     // store, keyed by the athlete, with no rows to migrate.
-    expect(SCHEMA_VERSION).toBe(11);
+    // Version 12 (#388) adds `sideCameraReports`, the same case once more.
+    expect(SCHEMA_VERSION).toBe(12);
     expect(SCHEMA_MIGRATIONS).toEqual([]);
   });
 
@@ -657,6 +659,51 @@ describe('version 10 to version 11 — #528’s framing reference', () => {
     expect(athlete?.displayName).toBe('A');
     expect(none).toBeUndefined();
     expect(kept?.landmarks).toStrictEqual(reference.landmarks);
+    expect(beforeVersion).toBeLessThan(SCHEMA_VERSION * 10);
+  });
+});
+
+describe('version 11 to version 12 — #388’s side-camera reports', () => {
+  /**
+   * Additive again: rows written at version 11 survive the reopen at 12, and
+   * the new store is usable on a database that predates it — answering "this
+   * ride was not filmed" for a ride that already existed.
+   */
+  it('keeps every version-11 record and makes the report store usable', async () => {
+    const v11 = new Dexie(databaseName);
+    SCHEMA_VERSIONS.slice(0, 11).forEach((stores, index) => {
+      v11.version(index + 1).stores(stores);
+    });
+    await v11.table(TABLE.athletes).put({ id: 'athlete-a', displayName: 'A', createdAt: 1 });
+    const beforeVersion = v11.backendDB().version;
+    v11.close();
+
+    const store = openActivityStore(databaseName);
+    const owner = athleteId('athlete-a');
+    const ride = {
+      id: activityId('ride-before-12'),
+      athleteId: owner,
+      name: 'Before twelve',
+      startedAt: unixSeconds(1_760_000_000),
+      startedAtTimeZone: 'Europe/London',
+      elapsedTime: seconds(600),
+      movingTime: seconds(600),
+      distance: metres(5000),
+      hasPosition: false,
+      createdAt: unixSeconds(1_760_000_600),
+    };
+    await store.putActivity(ride);
+    const none = await store.getSideCameraReport(owner, ride.id);
+    const report = sideCameraReportFor(owner, ride.id);
+    await store.putSideCameraReport(report);
+    store.close();
+
+    const reopened = openActivityStore(databaseName);
+    const kept = await reopened.getSideCameraReport(owner, ride.id);
+    reopened.close();
+
+    expect(none).toBeUndefined();
+    expect(kept?.observations).toStrictEqual(report.observations);
     expect(beforeVersion).toBeLessThan(SCHEMA_VERSION * 10);
   });
 });
