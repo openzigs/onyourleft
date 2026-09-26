@@ -24,6 +24,7 @@ import {
   FRAMES_CHANNEL,
   COMMAND_ACK_MILLISECONDS,
   CONNECT_LIMIT_MILLISECONDS,
+  HEARTBEAT_MILLISECONDS,
   OFFER_LIFETIME_MILLISECONDS,
   SIDE_PAIRING_END_TEXT,
   SILENCE_IS_LOST_MILLISECONDS,
@@ -144,6 +145,45 @@ describe('pairing, through both codes', () => {
       t: 'hello',
       k: 'AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA',
     });
+  });
+
+  it('pairs when the engine loses what the phone sends inside ondatachannel — #568', async () => {
+    // Chromium did this to the phone's secret about one pairing in a hundred
+    // in CI: sent, `open`, nothing buffered, never delivered. A phone that
+    // spoke first was then ended as `not-our-phone` by its next message.
+    const { tablet, phone, pass } = await paired({ losesSendsInDataChannelEvent: true });
+    expect(phone.link.sideLinkCondition()).toBe('connected');
+    phone.link.reportToTablet({ state: 'framing' });
+    await flushSideLink();
+    await pass(HEARTBEAT_MILLISECONDS);
+    expect(tablet.control.sideControlState().ended).toBeUndefined();
+    expect(tablet.control.sideControlState().phone).toBe('framing');
+  });
+
+  it('says nothing until the tablet has spoken, and answers its repeated opening ping', async () => {
+    const context = setUp();
+    const tablet = await offer(context.port);
+    const phone = await answer(context.port, tablet.offerCode);
+    // The tablet's first ping is lost with everything else.
+    context.network.drop();
+    await tablet.acceptSidePhoneCode(phone.answerCode);
+    await flushSideLink();
+    const phoneControl = context.network.peers[1]?.channels.find(
+      (channel) => channel.label === CONTROL_CHANNEL,
+    );
+    expect(phoneControl?.readyState).toBe('open');
+    // Not even a report the phone is asked to make: nothing before the secret.
+    phone.link.reportToTablet({ state: 'framing' });
+    expect(phoneControl?.sent).toEqual([]);
+    expect(phone.link.sideLinkCondition()).toBe('connecting');
+    // The next ping gets through, and the secret answers it.
+    context.network.restore();
+    await context.pass(HEARTBEAT_MILLISECONDS);
+    expect(JSON.parse(phoneControl?.sent[0] ?? '{}')).toMatchObject({ t: 'hello' });
+    expect(phone.link.sideLinkCondition()).toBe('connected');
+    phone.link.reportToTablet({ state: 'framing' });
+    await flushSideLink();
+    expect(tablet.control.sideControlState()).toMatchObject({ phone: 'framing', ended: undefined });
   });
 
   it('points every peer at nothing but the other device — the offer carries no server', async () => {
@@ -655,7 +695,8 @@ describe('pictures, phone → tablet — #530, ADR 0033 D-3 and D-4', () => {
       landmarks: [{ name: 'hip', x: 0.5, y: 0.5 }],
     });
     tablet.control.shareFramingVerdict('matches');
-    expect(control?.sent).toEqual([]);
+    // The tablet's opening ping (#568) carries nothing, and is all it sent.
+    expect(control?.sent).toEqual(['{"t":"ping"}']);
   });
 
   it('hands every picture to the analysis the pairing port was given, and ends it with the pairing', async () => {

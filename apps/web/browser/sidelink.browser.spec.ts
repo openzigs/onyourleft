@@ -19,6 +19,10 @@ test.beforeAll(async ({ browser }) => {
     response?.status(),
     'sidelink.html did not load — is it named in vite.browser.config.ts build.rollupOptions.input?',
   ).toBe(200);
+  // Above the harness's own worst case, so a slow or failed pairing arrives
+  // here as a named step in `errors` rather than as this timeout (#552): two
+  // gathers at the product's 5 s, the connection at its 15 s and a second, and
+  // one stalled step's 10 s come to 36 s, and the run stops at that step.
   await page.waitForFunction(() => window.__oylSideLink !== undefined, undefined, {
     timeout: 45_000,
   });
@@ -37,6 +41,9 @@ test.describe('the side-camera link, in a real engine', () => {
     // Printed, not bounded: one machine's loopback says nothing about a LAN.
     console.log(
       `side link: connected ${String(Math.round(measurement.connectMilliseconds ?? -1))} ms after the answer was accepted`,
+    );
+    console.log(
+      `side link: steps ${measurement.steps.map((each) => `${each.step} ${String(each.milliseconds)} ms`).join(', ')}`,
     );
   });
 
@@ -67,7 +74,8 @@ test.describe('the side-camera link, in a real engine', () => {
   });
 
   test('shows the phone’s state on the tablet, and acknowledges a start and a stop', () => {
-    expect(measurement.framing?.phone).toBe('framing');
+    // A stalled step leaves this undefined and names itself in `errors`.
+    expect(measurement.framing?.phone, measurement.errors.join('; ')).toBe('framing');
     expect(measurement.afterStart?.command).toEqual({ kind: 'start', status: 'acknowledged' });
     expect(measurement.afterStop?.command).toEqual({ kind: 'stop', status: 'acknowledged' });
     expect(measurement.phoneHeard).toEqual(
