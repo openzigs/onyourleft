@@ -732,19 +732,26 @@ function foldReach(
   reach: Float64Array,
 ): Float64Array {
   reach.fill(Number.POSITIVE_INFINITY);
-  for (let row = 0; row < centre.length; row += 1) {
-    const before = Math.max(0, row - 1);
-    const after = Math.min(centre.length - 1, row + 1);
-    const from = centre[before] as CorridorPoint;
-    const to = centre[after] as CorridorPoint;
+  // ⚠️ **Per quad, since #543.** Each pair of neighbouring rows is a strip of
+  // quads, and it folds on the inside wherever its two cross-sections meet —
+  // `apart / turn` out from the road, and both of its rows are held inside
+  // that. This used to read one curvature per row from the rows either side,
+  // which is the same thing while the rows are evenly spaced; #543 made them
+  // two metres apart near the rider and a grid step beyond, and at that seam
+  // a two-metre quad whose far cross-section is a ten-metre chord's turns
+  // three times as sharply as the window around it said — measured, as a
+  // triangle wound towards the ground 27 m inside an 80 m circuit.
+  for (let row = 0; row + 1 < centre.length; row += 1) {
+    const from = centre[row] as CorridorPoint;
+    const to = centre[row + 1] as CorridorPoint;
     const apart = Math.hypot(to.x - from.x, to.z - from.z);
     if (!(apart > 0)) {
       continue;
     }
-    const ax = normals[before * 2] as number;
-    const az = normals[before * 2 + 1] as number;
-    const bx = normals[after * 2] as number;
-    const bz = normals[after * 2 + 1] as number;
+    const ax = normals[row * 2] as number;
+    const az = normals[row * 2 + 1] as number;
+    const bx = normals[(row + 1) * 2] as number;
+    const bz = normals[(row + 1) * 2 + 1] as number;
     // Positive when the road turns toward its left normal: the left is inside.
     const turn = Math.atan2(ax * bz - az * bx, ax * bx + az * bz);
     const curvature = turn / apart;
@@ -756,7 +763,11 @@ function foldReach(
     // a left-hand bend turns it anticlockwise in this x-east, z-north plane —
     // a POSITIVE cross product, so the left side is the inside.
     // `landform.test.ts` folds a left and a right bend to pin which is which.
-    reach[row * 2 + (curvature > 0 ? 0 : 1)] = limit;
+    // Written on the pair's first row only: {@link steadied} takes each row's
+    // reach down to the least of its neighbours', which carries it to the
+    // second.
+    const at = row * 2 + (curvature > 0 ? 0 : 1);
+    reach[at] = Math.min(reach[at] as number, limit);
   }
   return reach;
 }

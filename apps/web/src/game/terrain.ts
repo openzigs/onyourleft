@@ -112,13 +112,30 @@ export const VIEW_BEHIND_METRES = 60;
  * bend: a genuine 20 m-radius corner turns 5.7° every two metres of road, and
  * the road cannot be drawn smoother than the road is.
  *
- * ⚠️ **What it costs, measured rather than assumed**: the corridor is 231
- * points rather than 47, and the ground beside it (`landform.ts`) is built on
- * every one of them, so its triangles rise by the same factor — from about
- * 2 200 to about 11 000 a frame. The JavaScript rebuild is the cost #240's
- * NFR-2 names, and the figure is in #543's pull request.
+ * ⚠️ **What it costs**: the corridor is 131 points rather than 47 at the
+ * default reach — 106 of them two metres apart, from 60 m behind the rider to
+ * {@link CORRIDOR_DENSE_AHEAD_METRES} ahead — and the ground beside it
+ * (`landform.ts`) is built on every one, so its triangles rise by the same
+ * factor. The figures are in #543's pull request.
  */
 export const CORRIDOR_STEP_METRES = 2;
+
+/**
+ * How far ahead of the rider the corridor keeps {@link CORRIDOR_STEP_METRES},
+ * in metres: **150** — #543. Beyond it, and to the far end, a point per grid
+ * step as before.
+ *
+ * ⚠️ **A cost decision, measured.** The ground beside the road (`landform.ts`)
+ * is built on every corridor point, so its JavaScript cost is proportional to
+ * them — and the first cut of #543 drew all 460 m at two metres, 231 points
+ * against 47: a whole scene frame went from about 1.0 to about 3.1 ms on a
+ * laptop on a route with water, and three suites already near their timeouts
+ * went past them in CI's coverage run. 150 m ahead is where a bend still fills
+ * a good part of the frame; past it the seven-metre road is a few tens of
+ * pixels across, and its corners are the smoothed road's own, seen at ten
+ * metres rather than the source file's.
+ */
+export const CORRIDOR_DENSE_AHEAD_METRES = 150;
 
 /**
  * Over how much road either side of a point its drawn position is averaged,
@@ -176,13 +193,15 @@ export const MAXIMUM_CORRIDOR_JOINT_DEGREES = 8;
  * (#91), so this is not really a triangle budget — it is a bound on the work the
  * *rebuild* does, which happens on the JavaScript thread that GATT notifications
  * also arrive on. A corridor of 460 m at the profile's 10 m grid is 46 grid
- * steps, and since #543 each is drawn as five {@link CORRIDOR_STEP_METRES}
- * pieces: 230 quads. The grid is still strided when a fine profile would pass
- * this, and a piece is never split so finely that the pieces would.
+ * steps, and since #543 the 21 of them within
+ * {@link CORRIDOR_DENSE_AHEAD_METRES} are each drawn as five
+ * {@link CORRIDOR_STEP_METRES} pieces: 130 quads. The grid is still strided
+ * when a fine profile would pass this, and a step is never split so finely
+ * that the pieces would.
  *
  * ⚠️ **Until #543 the corridor was 46 quads and this left "an order of
  * magnitude of headroom"**; a reviewer who remembers that is reading the old
- * file. The headroom is what #543 spent.
+ * file. #543 spent some of it.
  */
 export const MAXIMUM_CORRIDOR_QUADS = 256;
 
@@ -541,9 +560,16 @@ export function roadCorridor(
   const stride = Math.max(1, Math.ceil((wantedPoints - 1) / MAXIMUM_CORRIDOR_QUADS));
   const gridStep = resolution * stride;
   const gridSteps = Math.max(1, Math.floor(span / gridStep + 1e-9));
-  // ⚠️ #543: each grid step divided into about CORRIDOR_STEP_METRES pieces.
-  // Every point is interpolated (#323) whatever the step, so landing on a grid
-  // entry bought nothing; what the grid step cost was a joint every ten metres.
+  // ⚠️ #543: near the rider each grid step is divided into about
+  // CORRIDOR_STEP_METRES pieces; beyond CORRIDOR_DENSE_AHEAD_METRES it is
+  // not. Every point is interpolated (#323) whatever the step, so landing on
+  // a grid entry bought nothing; what the grid step cost was a joint every ten
+  // metres. @see CORRIDOR_DENSE_AHEAD_METRES for why not the whole corridor.
+  const denseGridSteps = Math.min(
+    gridSteps,
+    Math.ceil((behind + CORRIDOR_DENSE_AHEAD_METRES) / gridStep - 1e-9),
+  );
+  const coarseGridSteps = gridSteps - denseGridSteps;
   const pieces =
     options.unsmoothed === true
       ? 1
@@ -551,28 +577,25 @@ export function roadCorridor(
           1,
           Math.min(
             Math.round(gridStep / CORRIDOR_STEP_METRES),
-            Math.floor(MAXIMUM_CORRIDOR_QUADS / gridSteps),
+            Math.floor((MAXIMUM_CORRIDOR_QUADS - coarseGridSteps) / Math.max(1, denseGridSteps)),
           ),
         );
-  const step = gridStep / pieces;
+  const layout: RibbonLayout = { start: atDistance - behind, gridStep, pieces, denseGridSteps };
   const smoothing = options.unsmoothed === true ? 0 : BEND_SMOOTHING_METRES;
 
   const centre: CorridorPoint[] = [];
-  const start = atDistance - behind;
-  const count = Math.floor(span / step + 1e-9) + 1;
-  for (let point = 0; point < count; point += 1) {
-    centre.push(pointAt(profile, origin, start + point * step, smoothing));
+  for (let point = 0; point <= denseGridSteps * pieces; point += 1) {
+    centre.push(pointAt(profile, origin, layout.start + (point * gridStep) / pieces, smoothing));
   }
-  if (centre.length < 2) {
-    // A route shorter than one step still has to produce a drawable ribbon.
-    centre.push(pointAt(profile, origin, start + step, smoothing));
+  for (let grid = denseGridSteps + 1; grid <= gridSteps; grid += 1) {
+    centre.push(pointAt(profile, origin, layout.start + grid * gridStep, smoothing));
   }
 
   const normals = ribbonNormals(centre);
   const surfaceVertices = centre.length * ROAD_COLUMNS;
   // Fixed for a given corridor configuration, and that is what makes the road's
   // buffer a constant size — see `markSlotCount`.
-  const slots = markSlotCount((centre.length - 1) * step);
+  const slots = markSlotCount(gridSteps * gridStep);
   const vertices = new Float32Array((surfaceVertices + slots * 4) * 3);
   const colours = new Float32Array(vertices.length);
 
@@ -580,8 +603,7 @@ export function roadCorridor(
   writeCentreLine(profile, centre, normals, {
     atDistance,
     behind,
-    start,
-    step,
+    layout,
     firstVertex: surfaceVertices,
     slots,
     vertices,
@@ -735,12 +757,40 @@ function writeSurface(
   }
 }
 
+/**
+ * Where a corridor's points are along the road — #543.
+ *
+ * Point `k` of the first `denseGridSteps · pieces + 1` is at odometer
+ * `start + k · gridStep / pieces`; after those, one point per grid step to the
+ * corridor's far end. A function of the configuration and the rider's
+ * distance only, so a corridor's point count never changes as the rider moves
+ * and every buffer built on it keeps its size (#240's NFR-3, #469).
+ */
+interface RibbonLayout {
+  readonly start: number;
+  readonly gridStep: number;
+  readonly pieces: number;
+  readonly denseGridSteps: number;
+}
+
+/**
+ * The ribbon coordinate of an odometer reading: `k` at point `k`, and
+ * fractional between two — the inverse of {@link RibbonLayout}.
+ */
+function ribbonParameter(layout: RibbonLayout, odometer: number): number {
+  const offset = odometer - layout.start;
+  const denseLength = layout.denseGridSteps * layout.gridStep;
+  if (offset <= denseLength) {
+    return (offset * layout.pieces) / layout.gridStep;
+  }
+  return layout.denseGridSteps * layout.pieces + (offset - denseLength) / layout.gridStep;
+}
+
 /** Everything {@link writeCentreLine} needs that is not the centreline itself. */
 interface CentreLineRequest {
   readonly atDistance: number;
   readonly behind: number;
-  readonly start: number;
-  readonly step: number;
+  readonly layout: RibbonLayout;
   readonly firstVertex: number;
   readonly slots: number;
   readonly vertices: Float32Array;
@@ -772,10 +822,11 @@ interface CentreLineRequest {
  *
  * ## Why the marks are placed on the ribbon's own parameter and not by position
  *
- * A mark's ends are interpolated along the ribbon by `(odometer - start) /
- * step`, which is exact: `pointAt` places the ribbon's point `k` at odometer
- * `start + k * step`, so the parameter *is* the ribbon coordinate of that route
- * distance.
+ * A mark's ends are interpolated along the ribbon at {@link ribbonParameter},
+ * which is exact: `pointAt` places the ribbon's points where
+ * {@link RibbonLayout} says, so the parameter *is* the ribbon coordinate of
+ * that route distance. (It was `(odometer - start) / step` until #543 made the
+ * step finer near the rider than beyond.)
  *
  * ⚠️ **It carried a phase correction until #323 and no longer does, and a
  * reviewer who remembers one is reading the old file.** `pointAt` used to snap
@@ -800,7 +851,7 @@ function writeCentreLine(
   normals: Float64Array,
   request: CentreLineRequest,
 ): void {
-  const { start, step, vertices, colours } = request;
+  const { layout, vertices, colours } = request;
   const half = CENTRE_LINE_WIDTH_METRES / 2;
   const lastIndex = centre.length - 1;
 
@@ -818,8 +869,8 @@ function writeCentreLine(
     // Clamped to the ribbon rather than dropped. A mark whose whole length is
     // outside collapses to one parameter, which makes its four vertices
     // coincide and its two triangles cover no pixels at all.
-    const fromParameter = clamp((from - start) / step, 0, lastIndex);
-    const toParameter = clamp((to - start) / step, 0, lastIndex);
+    const fromParameter = clamp(ribbonParameter(layout, from), 0, lastIndex);
+    const toParameter = clamp(ribbonParameter(layout, to), 0, lastIndex);
 
     const at = (request.firstVertex + slot * 4) * 3;
     writeMarkEdge(centre, normals, fromParameter, half, vertices, at);

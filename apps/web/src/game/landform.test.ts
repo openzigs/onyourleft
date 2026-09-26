@@ -281,10 +281,11 @@ describe('the ground never rises into the carriageway — #458', () => {
     // of the road — the far leg of a hairpin, the inside of a tight turn — so
     // the assertion above had something to refuse.
     expect(over).toBeGreaterThan(50);
-    // ⚠️ A timeout of its own since #543, which gave the corridor five times
-    // the rows: every ground vertex is judged against every road triangle, so
-    // this is about twenty-five times the work, and it passed 5 s under the
-    // coverage run (5.7 s, measured) — the precedent is `line-on-the-road.test.ts`.
+    // ⚠️ A timeout of its own since #543, which gave the corridor about 2.8
+    // times the rows: every ground vertex is judged against every road
+    // triangle, so the work grows with the square of that. A first cut with
+    // five times the rows passed 5 s under the coverage run (5.7 s, measured);
+    // the precedent is `line-on-the-road.test.ts`.
   }, 30_000);
 
   it('folds the inside of a bend in, on the correct side', () => {

@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BEND_SMOOTHING_METRES,
   CENTRE_LINE_MARK_METRES,
+  CORRIDOR_DENSE_AHEAD_METRES,
   MAXIMUM_CORRIDOR_JOINT_DEGREES,
   CENTRE_LINE_PERIOD_METRES,
   GRADIENT_TINT_FULL_SCALE_PERCENT,
@@ -364,10 +365,15 @@ describe('the rebuild is bounded', () => {
       behindMetres: 60,
     });
 
-    // 460 m at 10 m is 46 grid steps, and since #543 each is drawn as five
-    // pieces of about CORRIDOR_STEP_METRES: 230 quads, inside the budget, with
-    // no grid step skipped.
-    expect(corridor.quadCount).toBe(46 * 5);
+    // 460 m at this route's 9.99 m grid is 46 grid steps, none skipped. Since
+    // #543 the 22 of them that reach from 60 m behind to
+    // CORRIDOR_DENSE_AHEAD_METRES ahead (21 fall 0.2 m short of 210 m) are
+    // each drawn as five pieces of about CORRIDOR_STEP_METRES: 134 quads.
+    expect(corridor.quadCount).toBe(22 * 5 + 24);
+    expect((corridor.centre[corridor.centre.length - 1]?.along ?? 0) - 200).toBeCloseTo(
+      46 * profile.resolution - 60,
+      9,
+    );
     const step = (corridor.centre[1]?.along ?? 0) - (corridor.centre[0]?.along ?? 0);
     expect(step * 5).toBeCloseTo(profile.resolution, 9);
   });
@@ -433,13 +439,19 @@ describe('the start of a loop — #440', () => {
     }));
   }
 
-  /** The longest step between consecutive centreline points, in 3D metres. */
+  /**
+   * The longest step between consecutive centreline points, in 3D metres —
+   * among the points two metres apart since #543, which at distance 0 are the
+   * 60 m behind the start line and the first CORRIDOR_DENSE_AHEAD_METRES ahead
+   * of it: the stretch the wrap is in.
+   */
   function longestStep(corridor: RoadCorridor): number {
     let longest = 0;
     for (let index = 1; index < corridor.centre.length; index += 1) {
       const a = corridor.centre[index - 1];
       const b = corridor.centre[index];
       if (a === undefined || b === undefined) continue;
+      if (b.along > CORRIDOR_DENSE_AHEAD_METRES) break;
       longest = Math.max(longest, Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z));
     }
     return longest;
@@ -512,7 +524,7 @@ describe('the centre line is periodic in route distance — #242', () => {
     // it strides to 2 m, and a 10 m grid is drawn in 2 m pieces, so the two
     // would share a vertex spacing and this test could not fail. A 1.5 m grid
     // strides to 3 m, which is too coarse to divide.
-    expect(coarseCorridor.quadCount).toBe(46 * 5);
+    expect(coarseCorridor.quadCount).toBe(22 * 5 + 24);
     expect(fineCorridor.quadCount).toBeLessThanOrEqual(MAXIMUM_CORRIDOR_QUADS);
     const spacing = (corridor: RoadCorridor): number =>
       (corridor.centre[1]?.along ?? 0) - (corridor.centre[0]?.along ?? 0);
@@ -997,9 +1009,14 @@ describe('a bend is drawn as a curve, not as straight pieces — #543', () => {
    * behind the start of a point-to-point route onto the start (#440), and the
    * direction of a zero-length segment is not a turn.
    */
-  function worstJointDegrees(corridor: RoadCorridor): number {
+  function worstJointDegrees(corridor: RoadCorridor, rider: number): number {
     let worst = 0;
-    const centre = corridor.centre;
+    // "At the rider's draw density" — #543's words: the points two metres
+    // apart. Beyond CORRIDOR_DENSE_AHEAD_METRES the corridor is a point a grid
+    // step, as it always was, and a bend there is drawn at ten metres.
+    const centre = corridor.centre.filter(
+      (point) => point.along <= rider + CORRIDOR_DENSE_AHEAD_METRES + 1e-6,
+    );
     for (let index = 1; index + 1 < centre.length; index += 1) {
       const a = centre[index - 1];
       const b = centre[index];
@@ -1022,7 +1039,7 @@ describe('a bend is drawn as a curve, not as straight pieces — #543', () => {
     let worst = 0;
     for (let at = 0; at <= profile.totalDistance; at += 7) {
       const corridor = roadCorridor(profile, origin, at, { unsmoothed });
-      worst = Math.max(worst, worstJointDegrees(corridor));
+      worst = Math.max(worst, worstJointDegrees(corridor, at));
     }
     return worst;
   }
