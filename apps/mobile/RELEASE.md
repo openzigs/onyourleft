@@ -96,17 +96,22 @@ that file, not one typed out by hand.
 
 **The Data Safety answers are `src/android/data-safety.ts`**, written down as
 data rather than left in a screenshot of a console — a form nobody can read from
-the repository is a form nobody can review. Every row is "not collected", which
+the repository is a form nobody can review. Most rows are "not collected", which
 is a statement about the product: there is no server (owner decision D6) and no
 analytics. ⚠️ **"No outbound request in the client at all" stopped being true
 with [#534](https://github.com/openzigs/onyourleft/issues/534)**: a ride's map
 requests tiles from `tiles.openzigs.com` by default (a rider can turn that off in
-Settings). The Location row stays "not collected" on Play's ephemeral-processing
-exemption, and that holds only while the host keeps nothing — which is why §8
-has a step that re-checks it before every tag.
+Settings). ⚠️ **Since [#558](https://github.com/openzigs/onyourleft/issues/558)
+the approximate-location row is "collected"**, and a reviewer who remembers it
+resting on Play's ephemeral-processing exemption is reading the old file:
+Cloudflare's standard HTTP analytics keep each tile request's IP address and
+path for up to 7 days, which is not ephemeral. §8 has a step that re-checks
+that retention before every tag.
 
 #95's fifth criterion asks a reviewer to confirm the **merged** manifest supports
-the "no location collection" claim. That is now done twice over:
+the "no location collection" claim — since #558, the claim that the app does
+not read the **device's** location (the precise-location row). That is now done
+twice over:
 
 - [#318](https://github.com/openzigs/onyourleft/issues/318) established what the
   merged manifest carries and reviewed each entry, and
@@ -239,48 +244,70 @@ adb install -r <the .apk>
 That is the path to #95's definition of done. It needs no tag, creates no
 release, and the artefact is the same file a tag would publish.
 
-### Before every release tag — the tile host keeps nothing
+### Before every release tag — the tile host's retention is what the policy says
 
 ⚠️ **Do this before pushing any `v*` tag, every time.** Two filed statements rest
-on it: the Data Safety **Location** row's `collected: false`
-(`src/android/data-safety.ts`) and the privacy policy's *"the tile server keeps
-no record of the request"* (`docs/privacy-policy.md`). Both are true only while
-nothing retains the map's tile requests for us, and nothing in this repository
-can check that — it is a setting in the Cloudflare account, and a dashboard
-toggle made it false without any gate going red (#535's review).
+on it: the Data Safety **approximate location** row (`src/android/data-safety.ts`)
+and the privacy policy's tile paragraphs (`docs/privacy-policy.md`). Both say
+that Cloudflare, which serves `tiles.openzigs.com` for us, keeps a record of
+recent requests — the client IP address and the tile path — for **up to 7
+days**, and that nothing else keeps them. Nothing in this repository can check
+that: it is the Cloudflare account's plan and settings.
+`apps/web/src/privacy/no-network.test.ts` checks only that the two documents
+name the host and the 7 days, not that the 7 days is still true.
 
-In the Cloudflare dashboard, for the R2 bucket and the zone serving
-`tiles.openzigs.com`, confirm all three are **off**:
+**What was measured** ([#558](https://github.com/openzigs/onyourleft/issues/558),
+2026-09-26, read-only through the Cloudflare API): the zone `openzigs.com` is on
+the **Free** plan; its standard HTTP analytics (`httpRequestsAdaptive`, present on
+every zone and not switchable off) hold per-request records for
+`tiles.openzigs.com` with `clientIP` and `clientRequestPath`; Logpush is not
+available on the account; the R2 bucket has no event notifications and its
+`r2.dev` address is disabled; Web Analytics is on for the zone but injects its
+beacon into HTML responses only, so tile responses are not measured by it.
 
-1. **R2 access logging** on the bucket.
-2. **Logpush** — no job whose dataset covers `tiles.openzigs.com` (HTTP
-   requests, R2 access, or any other dataset that carries the request URL or
-   client IP).
-3. **Analytics that retain per-request data** for the host — Web Analytics on
-   the zone, and any Logs or Log Explorer product that stores requests.
+In the Cloudflare dashboard, for the zone and the R2 bucket serving
+`tiles.openzigs.com`, confirm:
+
+1. **The plan** is still **Free** (or Pro). Retention of the zone's analytics
+   follows the plan — Cloudflare's
+   [Security Analytics availability table](https://developers.cloudflare.com/waf/analytics/security-analytics/)
+   gives *"up to the last 7 days"* for Free and Pro, 31 days for Business and 90
+   for Enterprise.
+2. **Logpush** is still unavailable, or has no job whose dataset covers
+   `tiles.openzigs.com` (HTTP requests, R2 access, or any other dataset that
+   carries the request URL or client IP). A Logpush job keeps requests for as
+   long as its destination does, which the policy does not say.
+3. **Web Analytics** is still limited to HTML pages — no beacon or rule covers
+   the tile host — and no Logs or Log Explorer product stores its requests, and
+   the bucket has no R2 event notification that records them.
 
 Record the date and who checked in the release's notes.
 
 ⚠️ **A tag is when this is checked, not the only time it has to be true.** The
-filed answers describe every build already installed, so a logging setting
-switched on between tags makes them false for riders who never update. Treat
-any change to the Cloudflare account's logging, Logpush or analytics settings
-as needing this same check at the time it is made, and re-run it at least once
-a quarter. A public deployment of `apps/web/dist`, if one ever exists, reaches
-the same host and is covered by the same answer without passing through a tag.
+filed answers describe every build already installed, so a plan change or a
+logging setting switched on between tags makes them false for riders who never
+update. Treat any change to the Cloudflare account's plan, logging, Logpush or
+analytics settings as needing this same check at the time it is made, and re-run
+it at least once a quarter. A public deployment of `apps/web/dist`, if one ever
+exists, reaches the same host and is covered by the same answer without passing
+through a tag.
 
-**If any one of them is on**, either turn it off before tagging, or — if it has
-to stay on — do all of these before the tag, not after:
+**If any of them has changed** — the plan moved to Business (31 days) or
+Enterprise (90), a Logpush job or other store now keeps the requests, or Web
+Analytics now covers the tiles — either put it back before tagging, or do all of
+these before the tag, not after:
 
-- change the Location row in `src/android/data-safety.ts` to
-  `collected: true` for **approximate location**, with a `why` that says what is
-  retained, for how long and why, and re-file the Data Safety form in Play
-  Console to match;
-- change `docs/privacy-policy.md`: remove *"keeps no record of the request"*
-  and say what is kept, for how long, and who can read it;
-- land both in one pull request, because the policy and the form must agree
-  (§4) and `apps/web/src/privacy/no-network.test.ts` only checks that they name
-  the host, not that what they say about it is true.
+- change the approximate-location row's `why` in `src/android/data-safety.ts`
+  to say what is kept, for how long and by whom, and re-file the Data Safety
+  form in Play Console to match;
+- change `docs/privacy-policy.md`'s short version and its map tile bullet, and
+  the *Ride map* sentence in `apps/web/src/views/SettingsView.tsx`, to the same
+  period and the same store;
+- update the retention the tests look for in
+  `apps/web/src/privacy/no-network.test.ts` and
+  `src/android/data-safety.test.ts`;
+- land all of it in one pull request, because the policy, the app and the form
+  must agree (§4).
 
 **To cut a release:** push a `v*` tag, **after the step above**. The same job runs, and the GitHub Release
 step publishes the APK as a release asset — the AGPL-native distribution path,

@@ -684,9 +684,11 @@ function MapTilesPanel({
   const [drawn, setDrawn] = useState(() => readMapTilesChoice(storage));
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
   const host = basemap === undefined ? undefined : new URL(basemap.archiveUrl).host;
-  // The no-record promise is ours to make only about the host this project
-  // runs (`apps/mobile/RELEASE.md` §8 checks it). A self-hoster's build names
-  // somebody else's server, and this app cannot vouch for its logs.
+  // What the host keeps is ours to state only about the host this project
+  // runs: Cloudflare keeps a record of recent requests for up to 7 days (#558,
+  // `apps/mobile/RELEASE.md` §8 re-checks it). A self-hoster's build names
+  // somebody else's server, and this app can say nothing either way about its
+  // logs — so for that host there is no retention sentence at all.
   const ours = host !== undefined && host === new URL(PUBLISHED_BASEMAP_URL).host;
   return (
     <section
@@ -704,8 +706,12 @@ function MapTilesPanel({
           <p className="oyl-muted">
             When this is on, opening a ride that has GPS asks {host} for the map around where you
             rode. That sends the map area and your device’s IP address to {host}. It sends no ride
-            data{ours ? ', and we keep no record of the request' : ''}. When it is off, the app asks{' '}
-            {host} for nothing and draws your route on a plain background.
+            data.
+            {ours
+              ? ` Cloudflare, which runs ${host} for us, keeps a record of recent requests — including your IP address and which map tiles were asked for — for up to 7 days. We don’t use it or share it.`
+              : ''}{' '}
+            When it is off, the app asks {host} for nothing and draws your route on a plain
+            background.
           </p>
           <p>
             <label className="oyl-announce__switch">
