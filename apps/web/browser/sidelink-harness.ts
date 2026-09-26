@@ -304,22 +304,39 @@ async function run(): Promise<SideLinkMeasurement> {
       const sampler = videoSidePictureSampler(camera);
       try {
         for (let sequence = 0; sequence < 3; sequence += 1) {
-          let frame: ReturnType<typeof capturedFrame>;
-          try {
-            frame = capturedFrame(await sampler.sample());
-          } catch (error) {
-            throw new Stalled(`the side sampler failed: ${String(error)}`);
+          // Offered until the phone takes one, the way its own stream offers
+          // every capture and drops the ones it cannot send: `no-link` until
+          // the `frames` channel is open, which is its own channel and is not
+          // what `connected` waits for (#552, seen in CI). `too-large` is not
+          // transient and stalls at once.
+          const offered = performance.now();
+          let sent: string;
+          for (;;) {
+            let frame: ReturnType<typeof capturedFrame>;
+            try {
+              frame = capturedFrame(await sampler.sample());
+            } catch (error) {
+              throw new Stalled(`the side sampler failed: ${String(error)}`);
+            }
+            sent = phone.link.sendPictureToTablet({
+              sequence,
+              milliseconds: sequence * 200,
+              bytes: frame.bytes,
+            });
+            if (sent === 'sent') {
+              pictureSizes.push({ width: frame.width, height: frame.height });
+              break;
+            }
+            if (sent === 'too-large' || performance.now() - offered > STEP_MILLISECONDS) {
+              throw new Stalled(`picture ${String(sequence)}: the phone said ${sent}`);
+            }
+            await new Promise((resolve) => setTimeout(resolve, 20));
           }
-          pictureSizes.push({ width: frame.width, height: frame.height });
-          const sent = phone.link.sendPictureToTablet({
-            sequence,
-            milliseconds: sequence * 200,
-            bytes: frame.bytes,
-          });
           picturesSent.push(sent);
-          if (sent !== 'sent') {
-            throw new Stalled(`picture ${String(sequence)}: the phone said ${sent}`);
-          }
+          steps.push({
+            step: `picture ${String(sequence)} taken`,
+            milliseconds: Math.round(performance.now() - offered),
+          });
           await until(
             steps,
             `picture ${String(sequence)}`,
