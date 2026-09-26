@@ -72,9 +72,42 @@
  *    length with curvature: raised tenfold, the line hugs the inside of a
  *    20 m hairpin with a peak of 0.057 against the centreline's 0.050.
  *
- * The pull toward the centre is {@link LINE_SETTLE_METRES}: on a straight far
- * from any bend the curvature term weighs nothing, and without the pull the
- * line's place there would be whatever the nearest bend left.
+ * The pull is toward the rider's HOME on the road, not toward the centre —
+ * #546. On a straight far from any bend the curvature term weighs nothing, and
+ * without a pull the line's place there would be whatever the nearest bend
+ * left; {@link LINE_SETTLE_METRES} says how quickly it returns, and
+ * {@link LINE_HOME_OFFSET_METRES} says where to. ⚠️ **It used to pull to
+ * offset nought, which IS the dashed centre line** (`terrain.ts`
+ * §`writeCentreLine`), and that is the owner's *"rides on the centre line even
+ * on straights"* from the 2026-09-25 tablet ride. The energy's last term is
+ * therefore `(h / settle⁴) Σᵢ (offset[i] − home)²`.
+ *
+ * ## A closed road, a side to keep to, and a late apex — #546
+ *
+ * The owner's rulings of 2026-09-25, each of them one named constant here
+ * rather than an assumption spread through the solve:
+ *
+ * - **A closed road.** Through a bend the line may use the whole carriageway,
+ *   crossing the centre line, as a race on closed roads does (UCI and USA
+ *   Cycling both describe rolling road closures that give riders the full
+ *   width). The limit is therefore still ±{@link LINE_LIMIT_METRES} about the
+ *   centreline, on both sides.
+ * - **The right-hand side, for now.** On a straight, and wherever no bend is
+ *   asking for the road, the line holds {@link LINE_HOME_OFFSET_METRES}: the
+ *   middle of the right-hand lane, which is the Highway Code's *primary
+ *   position* (Rule 72) and leaves the bar end 1.55 m clear of the centre
+ *   line. "For now" is {@link ROAD_SIDE}: one constant, which the browser gate
+ *   reads back as a side of the SCREEN rather than of this file's normal.
+ * - **A late apex.** A racer on a road they cannot see through turns in later
+ *   and reaches the inside after the bend's geometric apex, so that the exit is
+ *   the wider half (road.cc, *"11 tips for better cornering"*; Wikipedia,
+ *   *"Racing line"*). Here that is a weight on the curvature term that is
+ *   LIGHTER where the road's own bend is tightening and HEAVIER where it is
+ *   opening out — {@link LATE_APEX_GAIN}, read off a smoothed centreline
+ *   curvature so that it is continuous and returns to one on every straight.
+ *   A line that may curve more cheaply on the way in does its turning early,
+ *   and its apex moves past the bisector. `racing-line.test.ts` §"#546"
+ *   publishes where it lands.
  *
  * ## Computed once per route, and bounded
  *
@@ -126,12 +159,82 @@ const LINE_MARGIN_METRES = RIDER_HALF_WIDTH_METRES + 0.4;
 export const LINE_LIMIT_METRES = ROAD_WIDTH_METRES / 2 - LINE_MARGIN_METRES;
 
 /**
- * The length over which the line settles back to the centre on a straight:
- * **60 m**, as the pull's weight `h / settle⁴`. Chosen: short enough that a
- * straight between two bends is ridden down the middle, long enough that the
- * approach to a hairpin has room to go wide.
+ * The length over which the line settles back to its home on a straight:
+ * **50 m**, as the pull's weight `h / settle⁴`. Chosen: short enough that a
+ * straight between two bends is ridden at home, long enough that the approach
+ * to a hairpin has room to go wide. ⚠️ **It was 60 m until #546**, when the
+ * home stopped being the centre: a bend whose outside is the far side of the
+ * road now draws the line ACROSS it, and at 60 m that crossing had not
+ * settled within 0.1 m of home 150 m from the bend (0.12 m off); at 50 m it
+ * is 0.03 m off, which `racing-line.test.ts` §"#546" holds.
  */
-const LINE_SETTLE_METRES = 60;
+const LINE_SETTLE_METRES = 50;
+
+/**
+ * Which side of the road a rider keeps to, as a sign on the road's own normal:
+ * **+1**, the normal's side — the owner's *"right side, for now"* (#546).
+ *
+ * ⚠️ **The normal's side is the rider's RIGHT on the screen**, although
+ * `terrain.ts` calls it left. The corridor puts east on `+x` and north on
+ * `+z` with `+y` up, which is a mirror of a map in a right-handed renderer:
+ * a camera behind a rider heading north sees `−x`, west, on its right, and the
+ * normal `(−headingZ, headingX)` there is `(−1, 0)`. So the side named here is
+ * held to what the owner sees by `game.browser.spec.ts` §"#546", which reads
+ * the rider back on a straight and requires it right of the frame's middle —
+ * not by this comment, which is an argument about a handedness. ⚠️ The same
+ * handedness draws every route as a MIRROR of its map — #583, filed from this
+ * issue — and whichever way #583 is fixed, that browser case is what says this
+ * constant still names the screen's right.
+ */
+export const ROAD_SIDE: 1 | -1 = 1;
+
+/**
+ * How far in from its own edge a rider holds the road on a straight: **1.75
+ * m**, a quarter of the 7 m road — the middle of the lane, which is the
+ * Highway Code's *primary position* (Rule 72) and puts the bar end 1.55 m
+ * from the centre line and 1.55 m from the edge. Chosen, and stated as a
+ * choice: #546 found no source giving a racer's lateral place on a straight.
+ */
+const HOME_FROM_EDGE_METRES = ROAD_WIDTH_METRES / 4;
+
+/**
+ * Where the line settles on a straight, in metres from the centreline on the
+ * normal's side: {@link ROAD_SIDE} times the road's half-width less
+ * {@link HOME_FROM_EDGE_METRES} — **+1.75 m**.
+ */
+export const LINE_HOME_OFFSET_METRES = ROAD_SIDE * (ROAD_WIDTH_METRES / 2 - HOME_FROM_EDGE_METRES);
+
+/**
+ * How much more the line's curvature costs where a bend is opening out than
+ * where it is tightening: **40**, as the ratio of the heaviest weight to the
+ * lightest. @see lateApexWeights
+ *
+ * Measured, not derived — `racing-line.test.ts` §"#546" publishes where the
+ * apex lands at each radius. Because the line minimises very nearly its PEAK
+ * curvature (the eighth power), a weight `w` moves the line's curvature by
+ * only `w^(1/8)`: 40 lets the way in bend about 1.6 times as hard as the way
+ * out at the two extremes. At 3 and at 10 the apex of a 10 m corner stayed
+ * BEFORE the bisector (−0.5 and −0.1 m, as the middle of the stretch the line
+ * holds the inside); at 40 every fixture's apex is at or after it, and the
+ * line's tightest radius stays within 10 % of the closed form — which is what
+ * says this is a late apex rather than a different, tighter bend.
+ */
+const LATE_APEX_GAIN = 40;
+
+/**
+ * The window the late-apex weight reads the road's bend over: **15 m**, as
+ * the standard deviation of a Gaussian. Wide enough that a polygonal route's
+ * single-sample corner (#543) reads as a bend with a way in and a way out,
+ * narrow enough that two bends 60 m apart do not read as one.
+ */
+const LATE_APEX_WINDOW_METRES = 15;
+
+/**
+ * The curvature below which the road is read as straight by the late-apex
+ * weight: **1/500 m⁻¹**. What keeps the weight at one on a straight, where the
+ * smoothed curvature's relative change is noise over nothing.
+ */
+const LATE_APEX_STRAIGHT_CURVATURE = 1 / 500;
 
 /**
  * How much the solve prefers a shorter line among equally curved ones:
@@ -149,11 +252,13 @@ const LENGTH_WEIGHT = 1e-4;
 const PEAK_EXPONENT = 8;
 
 /**
- * How many Gauss-Newton steps the line takes: **30**. Every fixture in
- * `racing-line.test.ts` has stopped moving by then, and a test holds a 31st
- * step to under a millimetre; at 20 a 10 m hairpin was still settling.
+ * How many Gauss-Newton steps the line takes: **40**. Every fixture in
+ * `racing-line.test.ts` has stopped moving by then, and a test holds a 41st
+ * step to under a millimetre. It was 30 until #546: with the late-apex weights
+ * a 31st step still moved a fixture's line by 1.6 mm; at 20 (#499) a 10 m
+ * hairpin was still settling.
  */
-const GAUSS_NEWTON_STEPS = 30;
+const GAUSS_NEWTON_STEPS = 40;
 
 /**
  * How many active-set rounds one Gauss-Newton step may take: **3**. The set is
@@ -207,17 +312,54 @@ export const MAXIMUM_LEAN_RADIANS = Math.atan(DRY_ROAD_TYRE_FRICTION);
  * where you are. A slower rider therefore rolls in over more time, which is
  * also what a slower rider does.
  *
- * ⚠️ **Through an S-bend the bound is twice this**: one lean unwinds at this
- * rate while the other builds at it (@see leanAt).
+ * ⚠️ **Through an S-bend the bound was twice this until #546**: one lean
+ * unwound at this rate while the other built at it. It is this rate everywhere
+ * now (@see leanAt, the second stage).
+ *
+ * ⚠️ **Since #546 it is the ceiling, not the rate**: above 7.5 m/s the
+ * per-second bound below is the tighter one (@see rollRatePerMetre).
  */
 export const MAXIMUM_ROLL_RADIANS_PER_METRE = (8 * Math.PI) / 180;
 
 /**
- * How far ahead of — and behind — a rider the lean looks for a bend: the
- * distance a full lean takes to roll in, so a rider reaches the cap by the
- * point the bend asks for it. @see leanAt
+ * The fastest the drawn lean may change in one direction, per SECOND: **60°
+ * a second** — #546.
+ *
+ * ⚠️ **{@link MAXIMUM_ROLL_RADIANS_PER_METRE} alone was a per-metre bound, and
+ * per metre is `8°·v` per second**: 80°/s at 10 m/s and 130°/s at 16 m/s, so
+ * a descending rider snapped into a bend. A rider takes about half a second to
+ * a second to roll in — a modelled turn entry of *"1 second … in good
+ * agreement with reality"* to about 45° (Shayak, *"The physics of motorcycles
+ * and fast bicycles"*, arXiv:1611.03857, a motorcycle-scale model), with the
+ * roll rate peaking near half the final lean (motochassis, *"Initiating a
+ * turn"*). 60°/s is the peak of a roll to 30° over one second, and it is
+ * chosen from that rather than measured: #546 records that no measured human
+ * bicycle roll rate was found.
+ *
+ * It is still STATELESS: the per-metre rate a speed allows is
+ * `min(8°, 60° / v)` (@see rollRatePerMetre), and the speed is an input.
  */
-const LEAN_WINDOW_METRES = MAXIMUM_LEAN_RADIANS / MAXIMUM_ROLL_RADIANS_PER_METRE;
+export const MAXIMUM_ROLL_RADIANS_PER_SECOND = (60 * Math.PI) / 180;
+
+/**
+ * The slowest the per-metre rate is ever taken as: whatever rolls the full
+ * {@link MAXIMUM_LEAN_RADIANS} in **50 m**. It bounds the lean's window, and
+ * so its cost, at a speed nothing reaches: the per-second bound stops binding
+ * only above `60°/s ÷ (38.7° / 50 m)` ≈ 78 m/s, which is 280 km/h.
+ */
+const MINIMUM_ROLL_RADIANS_PER_METRE = MAXIMUM_LEAN_RADIANS / 50;
+
+/**
+ * The per-metre roll rate a speed allows — the lesser of
+ * {@link MAXIMUM_ROLL_RADIANS_PER_METRE} and
+ * {@link MAXIMUM_ROLL_RADIANS_PER_SECOND} over the speed.
+ */
+export function rollRatePerMetre(speed: number): number {
+  return Math.max(
+    MINIMUM_ROLL_RADIANS_PER_METRE,
+    Math.min(MAXIMUM_ROLL_RADIANS_PER_METRE, MAXIMUM_ROLL_RADIANS_PER_SECOND / speed),
+  );
+}
 
 /** The step the lean window is read at, in metres of absolute route distance. */
 const LEAN_STEP_METRES = 0.5;
@@ -271,35 +413,83 @@ export function lineOffsetAt(line: RacingLine, distance: number): number {
 }
 
 /**
- * The lean to DRAW a rider at, in radians — positive toward the road's normal,
- * which is the side the line bends toward when its curvature is positive, so
- * the rider always leans INTO the bend.
+ * The COMBINED lean — rider and bicycle together, the one physics fixes — in
+ * radians, positive toward the road's normal, which is the side the line bends
+ * toward when its curvature is positive, so the rider always leans INTO the
+ * bend. `bicycle.ts` §`bicycleRoll` splits it into the bicycle's lean and the
+ * body's.
  *
- * `steadyTurnLean` at every point within {@link LEAN_WINDOW_METRES}, each
- * reduced by {@link MAXIMUM_ROLL_RADIANS_PER_METRE} for every metre it is from
- * the rider, and the largest kept — once for each direction of lean. That is a
- * stateless rate limit: the result changes by at most that rate per metre in
- * each direction, it reaches a bend's full lean at the point the bend asks for
- * it, and it has already started leaning a few metres before. The sample points
- * are fixed in route distance rather than placed relative to the rider, which
- * is what makes the bound exact rather than approximately true.
+ * Two stateless rate limits, on sample points fixed in route distance so that
+ * each bound is exact rather than approximately true:
+ *
+ * 1. **Anticipation, as #499 built it.** At each sample, `steadyTurnLean` at
+ *    every point within the distance a full lean takes to roll in, each
+ *    reduced by {@link rollRatePerMetre} for every metre it is from the
+ *    sample, and the largest kept — once for each direction of lean. It
+ *    reaches a bend's full lean at the point the bend asks for it, and has
+ *    already started leaning a few metres before.
+ * 2. **One roll at a time — #546.** Where one lean unwinds as the other builds
+ *    — an S-bend, or since #546 the lane change that sets a bend up from the
+ *    far side of the road — the first stage's two directions add and roll at
+ *    TWICE the rate. So its result is passed through the symmetric Lipschitz
+ *    envelope `(max_s(g(s) − r|s − d|) + min_s(g(s) + r|s − d|)) / 2`, which
+ *    rolls at no more than the rate `r` anywhere, and is EXACTLY the first
+ *    stage wherever that already rolled no faster — so a single bend keeps its
+ *    anticipation to the metre, and only a transition is changed.
+ *
+ * ⚠️ **Both windows depend on the speed**, through the per-second bound: at
+ * 20 m/s the second stage reads 26 m either side, each point of which reads
+ * 13 m either side of itself. Bounded by
+ * {@link MINIMUM_ROLL_RADIANS_PER_METRE}; the samples are held in a buffer made
+ * once, so a frame allocates nothing here.
  */
 export function leanAt(line: RacingLine, distance: number, speed: number): number {
   if (!(speed > 0)) {
     return 0;
   }
-  let leftward = 0;
-  let rightward = 0;
-  const first = Math.ceil((distance - LEAN_WINDOW_METRES) / LEAN_STEP_METRES);
-  const last = Math.floor((distance + LEAN_WINDOW_METRES) / LEAN_STEP_METRES);
-  for (let step = first; step <= last; step += 1) {
-    const at = step * LEAN_STEP_METRES;
-    const demand = steadyTurnLean(speed, curvatureAt(line, at));
-    const reach = MAXIMUM_ROLL_RADIANS_PER_METRE * Math.abs(at - distance);
-    leftward = Math.max(leftward, demand - reach);
-    rightward = Math.max(rightward, -demand - reach);
+  const rate = rollRatePerMetre(speed);
+  // How far a full lean takes to roll in (the first stage's reach), and how far
+  // from one extreme to the other (the second's).
+  const reach = Math.ceil(MAXIMUM_LEAN_RADIANS / rate / LEAN_STEP_METRES);
+  const span = 2 * reach;
+  const centre = Math.round(distance / LEAN_STEP_METRES);
+  const lowest = centre - span - reach;
+  const count = 2 * (span + reach) + 1;
+  const demand = scratch(count);
+  for (let index = 0; index < count; index += 1) {
+    demand[index] = steadyTurnLean(speed, curvatureAt(line, (lowest + index) * LEAN_STEP_METRES));
   }
-  return leftward - rightward;
+  const rollStep = rate * LEAN_STEP_METRES;
+  let upper = Number.POSITIVE_INFINITY;
+  let lower = Number.NEGATIVE_INFINITY;
+  for (let step = centre - span; step <= centre + span; step += 1) {
+    // The first stage at this sample.
+    let leftward = 0;
+    let rightward = 0;
+    for (let near = -reach; near <= reach; near += 1) {
+      const value = demand[step + near - lowest] as number;
+      const fall = rollStep * Math.abs(near);
+      leftward = Math.max(leftward, value - fall);
+      rightward = Math.max(rightward, -value - fall);
+    }
+    const anticipated = leftward - rightward;
+    // The second stage, at the rider's own distance.
+    const away = rate * Math.abs(step * LEAN_STEP_METRES - distance);
+    lower = Math.max(lower, anticipated - away);
+    upper = Math.min(upper, anticipated + away);
+  }
+  return (lower + upper) / 2;
+}
+
+/** The buffer {@link leanAt} reads its samples into, grown when it must be. */
+let demandBuffer = new Float64Array(256);
+
+/** At least `count` numbers to write into, reused from call to call. */
+function scratch(count: number): Float64Array {
+  if (demandBuffer.length < count) {
+    demandBuffer = new Float64Array(count);
+  }
+  return demandBuffer;
 }
 
 /**
@@ -388,6 +578,8 @@ interface PaddedRoad {
   readonly xs: Float64Array;
   readonly zs: Float64Array;
   readonly normals: Float64Array;
+  /** The late-apex weight per sample, by unpadded index. @see lateApexWeights */
+  readonly weights: Float64Array;
   readonly resolution: number;
 }
 
@@ -417,6 +609,7 @@ function solveLine(profile: RouteProfile, steps: number): RacingLine {
     xs,
     zs,
     normals: sampleNormals(xs, zs, profile.loop),
+    weights: lateApexWeights(xs, zs, profile.loop, profile.resolution),
     resolution: profile.resolution,
   };
 
@@ -473,6 +666,72 @@ function sampleNormals(xs: Float64Array, zs: Float64Array, loop: boolean): Float
     normals[index * 2 + 1] = normals[firstReal * 2 + 1] as number;
   }
   return normals;
+}
+
+/**
+ * How much the line's curvature costs at each sample, for a late apex — #546.
+ *
+ * `LATE_APEX_GAIN ^ (−tanh(D) / 2)`, where `D` is the road's own smoothed
+ * curvature magnitude `k` (a Gaussian of {@link LATE_APEX_WINDOW_METRES}) read
+ * as a relative rate of change, `σ · (dk/ds) / (k + k₀)`: a lighter weight
+ * where the bend is tightening, a heavier one where it is opening out, one in
+ * the middle of a steady arc and on every straight. Continuous, so the solve
+ * is never handed a step in its weights to dump curvature against; and ONE on
+ * a straight, so nothing about a road with no bends changed.
+ *
+ * ⚠️ **Read from the CENTRELINE, and fixed before the first step**: a weight
+ * read from the line would move with the answer and the Gauss-Newton steps
+ * would be chasing their own tail.
+ */
+function lateApexWeights(
+  xs: Float64Array,
+  zs: Float64Array,
+  loop: boolean,
+  resolution: number,
+): Float64Array {
+  const nodes = xs.length;
+  const index = (at: number): number =>
+    loop ? ((at % nodes) + nodes) % nodes : Math.max(0, Math.min(nodes - 1, at));
+  // The centreline's own curvature magnitude, from three samples.
+  const raw = new Float64Array(nodes);
+  for (let at = 0; at < nodes; at += 1) {
+    if (!loop && (at === 0 || at === nodes - 1)) continue;
+    const i0 = index(at - 1);
+    const i2 = index(at + 1);
+    const ax = (xs[at] as number) - (xs[i0] as number);
+    const az = (zs[at] as number) - (zs[i0] as number);
+    const bx = (xs[i2] as number) - (xs[at] as number);
+    const bz = (zs[i2] as number) - (zs[at] as number);
+    const chord = (Math.hypot(ax, az) + Math.hypot(bx, bz)) / 2;
+    raw[at] = chord > 0 ? Math.abs(Math.atan2(ax * bz - az * bx, ax * bx + az * bz)) / chord : 0;
+  }
+  // Smoothed with a Gaussian, cut at three standard deviations.
+  const sigma = LATE_APEX_WINDOW_METRES / resolution;
+  const reach = Math.ceil(3 * sigma);
+  const kernel = new Float64Array(2 * reach + 1);
+  let total = 0;
+  for (let k = -reach; k <= reach; k += 1) {
+    const value = Math.exp(-(k * k) / (2 * sigma * sigma));
+    kernel[k + reach] = value;
+    total += value;
+  }
+  const smooth = new Float64Array(nodes);
+  for (let at = 0; at < nodes; at += 1) {
+    let sum = 0;
+    for (let k = -reach; k <= reach; k += 1) {
+      sum += (kernel[k + reach] as number) * (raw[index(at + k)] as number);
+    }
+    smooth[at] = sum / total;
+  }
+  const weights = new Float64Array(nodes);
+  for (let at = 0; at < nodes; at += 1) {
+    const slope =
+      ((smooth[index(at + 1)] as number) - (smooth[index(at - 1)] as number)) / (2 * resolution);
+    const relative =
+      (LATE_APEX_WINDOW_METRES * slope) / ((smooth[at] as number) + LATE_APEX_STRAIGHT_CURVATURE);
+    weights[at] = LATE_APEX_GAIN ** (-Math.tanh(relative) / 2);
+  }
+  return weights;
 }
 
 /**
@@ -554,10 +813,13 @@ function linearised(
   peak: number,
 ): BandedSystem {
   const h = road.resolution;
-  const diagonal = new Float64Array(size).fill(h / LINE_SETTLE_METRES ** 4);
+  const settle = h / LINE_SETTLE_METRES ** 4;
+  const diagonal = new Float64Array(size).fill(settle);
   const first = new Float64Array(size);
   const second = new Float64Array(size);
-  const rhs = new Float64Array(size);
+  // The pull toward home, `settle·(o − home)²`, puts `settle·home` on the
+  // right-hand side — #546. Nought here is the centre line.
+  const rhs = new Float64Array(size).fill(settle * LINE_HOME_OFFSET_METRES);
 
   // The length: `μ/h·|ΔC + o₁N₁ − o₀N₀|²` per chord, exactly quadratic.
   const length = LENGTH_WEIGHT / h;
@@ -584,7 +846,10 @@ function linearised(
     if (here.chord === 0) continue;
     // Before the first step there is no peak to weigh against, and every row
     // weighs the same.
-    const weight = h * (peak > 0 ? (Math.abs(here.curvature) / peak) ** (2 * q) : 1);
+    const weight =
+      h *
+      (road.weights[road.at(row)] as number) *
+      (peak > 0 ? (Math.abs(here.curvature) / peak) ** (2 * q) : 1);
     if (weight === 0) continue;
     let target = here.curvature / (1 + q);
     for (let member = 0; member < 3; member += 1) {

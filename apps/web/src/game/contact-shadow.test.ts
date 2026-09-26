@@ -34,6 +34,7 @@ const marker = (kind: RiderMarker['kind'], x = 0, z = 0, lean = 0): RiderMarker 
   headingX: 0,
   headingZ: 1,
   lean,
+  bodyLean: 0,
 });
 
 /**

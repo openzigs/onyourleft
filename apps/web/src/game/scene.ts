@@ -23,7 +23,14 @@
 
 import { ghostDistanceAt, ghostHasFinished, seconds, type GhostTrack } from '@onyourleft/domain';
 
-import { BICYCLE_LENGTH_METRES, RIDER_HALF_WIDTH_METRES, simulatedCrankAngle } from './bicycle';
+import {
+  BICYCLE_LENGTH_METRES,
+  RIDER_HALF_WIDTH_METRES,
+  bicycleRoll,
+  drawnCrankAngle,
+  simulatedCrankAngle,
+  type RiderRoll,
+} from './bicycle';
 import { horizonRelief, terrainCorridor } from './landform';
 import { CAMERA_BEHIND_METRES, CAMERA_TARGET_AHEAD_METRES } from './camera';
 import type { CameraPose, RiderMarker, SceneFrame, WaterFrame } from './port';
@@ -398,10 +405,16 @@ function ridersOnTheRoad(
   }
   return riders.map((rider) => {
     const lateral = line === undefined ? 0 : lateralOf(rider, riders, line);
-    const lean = line === undefined ? 0 : leanAt(line, rider.distance, rider.speed);
-    const marker = markerAt(corridor, rider.distance, rider.kind, lateral, lean);
+    // The COMBINED lean the physics asks for, split into the bicycle's and the
+    // body's — #546. @see RiderMarker.lean
+    const roll = bicycleRoll(line === undefined ? 0 : leanAt(line, rider.distance, rider.speed));
+    const marker = markerAt(corridor, rider.distance, rider.kind, lateral, roll);
+    // #546: in a bend tight enough for the inside pedal to strike, every
+    // rider's cranks — the rider's own included, by the owner's ruling — are
+    // DRAWN parked with the outside pedal down. @see drawnCrankAngle
+    const crankAngle = drawnCrankAngle(rider.crankAngle, roll.bicycle);
     return {
-      marker: rider.crankAngle === undefined ? marker : { ...marker, crankAngle: rider.crankAngle },
+      marker: crankAngle === undefined ? marker : { ...marker, crankAngle },
       lateral,
     };
   });
@@ -486,7 +499,7 @@ function markerAt(
   atDistance: number,
   kind: RiderMarker['kind'],
   lateral: number,
-  lean: number,
+  roll: RiderRoll,
 ): RiderMarker {
   const at = placeOnCorridor(corridor, atDistance);
   // ⚠️ The heading is the road's at **this** marker's own distance, not the
@@ -501,7 +514,8 @@ function markerAt(
     y: at.y,
     z: at.z + heading.headingX * lateral,
     ...heading,
-    lean,
+    lean: roll.bicycle,
+    bodyLean: roll.body,
   };
 }
 

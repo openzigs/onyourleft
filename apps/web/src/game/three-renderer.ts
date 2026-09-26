@@ -220,7 +220,9 @@ import {
   CRANK_AXIS_Z,
   LEG_BONE_COUNT,
   LIMB_RADIUS_METRES,
-  RIDER_BODY_PARTS,
+  RIDER_BICYCLE_PARTS,
+  RIDER_UPPER_BODY_PARTS,
+  UPPER_BODY_PIVOT,
   RIDER_CRANK_PARTS,
   RIDER_PALETTE,
   emptyRiderJoints,
@@ -2287,6 +2289,8 @@ export class RiderBelt {
   readonly #group = new Group();
   readonly #materials = vertexColouredMaterials();
   readonly #bodies: InstancedMesh;
+  /** The upper bodies, rolled against the bicycle about the hips — #546. */
+  readonly #torsos: InstancedMesh;
   readonly #cranksets: InstancedMesh;
   readonly #limbs: InstancedMesh;
 
@@ -2337,14 +2341,19 @@ export class RiderBelt {
 
   constructor() {
     const riders = RIDDEN_KINDS.length;
-    this.#bodies = new InstancedMesh(mergedParts(RIDER_BODY_PARTS), this.#materials.lit, riders);
+    this.#bodies = new InstancedMesh(mergedParts(RIDER_BICYCLE_PARTS), this.#materials.lit, riders);
+    this.#torsos = new InstancedMesh(
+      mergedParts(RIDER_UPPER_BODY_PARTS),
+      this.#materials.lit,
+      riders,
+    );
     this.#cranksets = new InstancedMesh(
       mergedParts(RIDER_CRANK_PARTS),
       this.#materials.lit,
       riders,
     );
     this.#limbs = new InstancedMesh(limbGeometry(), this.#materials.lit, riders * LEG_BONE_COUNT);
-    for (const mesh of [this.#bodies, this.#cranksets, this.#limbs]) {
+    for (const mesh of [this.#bodies, this.#torsos, this.#cranksets, this.#limbs]) {
       mesh.instanceMatrix.setUsage(DynamicDrawUsage);
       // ⚠️ **Allocates `instanceColor` while `count` is still the capacity**,
       // because three sizes that buffer from `count` at the moment it is first
@@ -2380,13 +2389,19 @@ export class RiderBelt {
     return this.#group;
   }
 
-  /** The three meshes, in draw order. @see RiderBelt */
+  /** The four meshes, in draw order. @see RiderBelt */
   get meshes(): {
     readonly bodies: InstancedMesh;
+    readonly torsos: InstancedMesh;
     readonly cranksets: InstancedMesh;
     readonly limbs: InstancedMesh;
   } {
-    return { bodies: this.#bodies, cranksets: this.#cranksets, limbs: this.#limbs };
+    return {
+      bodies: this.#bodies,
+      torsos: this.#torsos,
+      cranksets: this.#cranksets,
+      limbs: this.#limbs,
+    };
   }
 
   /**
@@ -2423,7 +2438,7 @@ export class RiderBelt {
       posed = this.#placeOne(slot, marker) || posed;
       slot += 1;
     }
-    for (const mesh of [this.#bodies, this.#cranksets]) {
+    for (const mesh of [this.#bodies, this.#torsos, this.#cranksets]) {
       mesh.count = slot;
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor !== null) {
@@ -2464,6 +2479,7 @@ export class RiderBelt {
   setShading(shading: QualitySettings['shading']): void {
     const material = this.#materials[shading];
     this.#bodies.material = material;
+    this.#torsos.material = material;
     this.#cranksets.material = material;
     this.#limbs.material = material;
   }
@@ -2474,7 +2490,7 @@ export class RiderBelt {
    * and self-shadowing is a second shadow pass over the same three meshes.
    */
   setCasting(on: boolean): void {
-    for (const mesh of [this.#bodies, this.#cranksets, this.#limbs]) {
+    for (const mesh of [this.#bodies, this.#torsos, this.#cranksets, this.#limbs]) {
       mesh.castShadow = on;
     }
   }
@@ -2486,7 +2502,7 @@ export class RiderBelt {
   }
 
   dispose(): void {
-    for (const mesh of [this.#bodies, this.#cranksets, this.#limbs]) {
+    for (const mesh of [this.#bodies, this.#torsos, this.#cranksets, this.#limbs]) {
       mesh.geometry.dispose();
       mesh.dispose();
     }
@@ -2524,6 +2540,18 @@ export class RiderBelt {
     this.#rider.compose(this.#position, this.#turn, this.#stretch);
     this.#bodies.setMatrixAt(slot, this.#rider);
     this.#bodies.setColorAt(slot, this.#tint.setHex(RIDER_TINTS[marker.kind]));
+
+    // #546: the upper body, rolled against the bicycle about the hips — the
+    // bicycle's own `+Z` through `UPPER_BODY_PIVOT`, in the bicycle's frame,
+    // so that it is held back toward upright whatever way the bicycle faces.
+    // Pivot, roll, and back: `T(p)·R·T(−p)`.
+    this.#position.set(0, UPPER_BODY_PIVOT.y, UPPER_BODY_PIVOT.z);
+    this.#turn.setFromAxisAngle(this.#alongTheBicycle, marker.bodyLean);
+    this.#local.compose(this.#position, this.#turn, this.#stretch);
+    this.#matrix.makeTranslation(0, -UPPER_BODY_PIVOT.y, -UPPER_BODY_PIVOT.z);
+    this.#local.multiply(this.#matrix);
+    this.#torsos.setMatrixAt(slot, this.#matrix.multiplyMatrices(this.#rider, this.#local));
+    this.#torsos.setColorAt(slot, this.#tint);
 
     // ⚠️ The crank geometry is written in the bottom bracket's own frame, so
     // the crankset is *mounted* at the axis and turns about its own origin.
@@ -5167,8 +5195,10 @@ export class RealisticRiderBelt {
     rider.root.visible = true;
     rider.root.position.set(marker.x, marker.y, marker.z);
     rider.root.quaternion.setFromAxisAngle(this.#up, Math.atan2(marker.headingX, marker.headingZ));
-    // #499: the MakeHuman rider and its bicycle lean TOGETHER, because both are
-    // posed from this root. @see RiderBelt, where the axis and sign are argued.
+    // #499: the MakeHuman rider and its bicycle lean by the BICYCLE's lean
+    // from this root; since #546 the body is then held back toward upright
+    // against it through the shoulders (`#pose`). @see RiderBelt, where the
+    // axis and sign are argued.
     rider.root.quaternion.multiply(this.#roll.setFromAxisAngle(this.#alongTheBicycle, marker.lean));
     // ⚠️ A frame that carries no angle HOLDS the one this rider had: no
     // cadence is no rotation, which is #349's rule and `advanceCrank`'s.
@@ -5176,7 +5206,7 @@ export class RealisticRiderBelt {
     const tint = this.#tint.setHex(RIDER_TINTS[marker.kind]);
     rider.material.color.copy(tint);
     rider.root.updateMatrixWorld(true);
-    this.#pose(rider, rider.angle);
+    this.#pose(rider, rider.angle, marker.bodyLean);
     const world = rider.root.matrixWorld;
     for (const mesh of [this.#frame, this.#rubber, this.#metal]) {
       mesh.setMatrixAt(slot, world);
@@ -5196,14 +5226,16 @@ export class RealisticRiderBelt {
   }
 
   /** Aims one rider's bones at `bicycle.ts`'s joints for a crank angle. */
-  #pose(rider: RealisticRiderSlot, crankAngle: number): void {
+  #pose(rider: RealisticRiderSlot, crankAngle: number, bodyLean: number): void {
     for (let index = 0; index < rider.ordered.length; index += 1) {
       const bone = rider.ordered[index] as Bone;
       bone.quaternion.copy(rider.restQuaternions[index] as Quaternion);
       bone.position.copy(rider.restPositions[index] as Vector3);
     }
     rider.root.updateMatrixWorld(true);
-    const joints = riderJoints(crankAngle, this.#joints);
+    // #546: the shoulders held back toward upright against the bicycle; the
+    // back is aimed at them below, so the MakeHuman body rolls about its hips.
+    const joints = riderJoints(crankAngle, this.#joints, bodyLean);
     const toWorld = (point: JointPoint, into: Vector3): Vector3 =>
       into.set(point.x, point.y, point.z).applyMatrix4(rider.root.matrixWorld);
     // The whole body, moved so its hips sit on the saddle.
@@ -5416,8 +5448,7 @@ function realisticBicycle(): {
   const frame: BufferGeometry[] = [];
   const rubber: BufferGeometry[] = [];
   const metal: BufferGeometry[] = [];
-  for (const part of RIDER_BODY_PARTS) {
-    if (part.name.startsWith('arm') || part.name === 'torso' || part.name === 'helmet') continue;
+  for (const part of RIDER_BICYCLE_PARTS) {
     const solid = part.solid;
     if (solid.shape === 'ring') {
       // A wheel in the bicycle's YZ plane at its hub: tyre, rim, hub, spokes.

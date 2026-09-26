@@ -84,6 +84,8 @@ interface GameHarnessResult {
     readonly on: LineMeasurement;
     readonly onUpright: LineMeasurement;
     readonly off: LineMeasurement;
+    readonly straightOn: LineMeasurement;
+    readonly straightOff: LineMeasurement;
   };
   readonly resourcesAfterFirstFrame: number;
   readonly resourcesAfterAllFrames: number;
@@ -271,7 +273,7 @@ const CHANNELS = ['red', 'green', 'blue'] as const;
 const RIDER_BOX_TOLERANCE = 0.02;
 
 /**
- * What one frame of the harness route costs, with the scenery taken out: **7**.
+ * What one frame of the harness route costs, with the scenery taken out: **9**.
  *
  * | | calls |
  * |---|--:|
@@ -279,7 +281,8 @@ const RIDER_BOX_TOLERANCE = 0.02;
  * | the hills on the horizon (#458) | 1 |
  * | the sky's gradient (#425) | 1 |
  * | the road, however many marks and edge lines it carries (#242) | 1 |
- * | every rider's merged body and bicycle, instanced (#349, #368) | 1 |
+ * | every rider's bicycle, instanced (#349, #368) | 1 |
+ * | every rider's upper body, rolled against it about the hips (#546) | 1 |
  * | every rider's crankset, which turns on its own axis (#349, #368) | 1 |
  * | every rider's four leg segments, as one instanced mesh (#349, #368) | 1 |
  * | every rider's contact shadow, as one instanced transparent mesh (#426) | 1 |
@@ -319,8 +322,16 @@ const RIDER_BOX_TOLERANCE = 0.02;
  * ⚠️ **7 → 8 with #425, deliberately**: the sky is a dome of vertex colours
  * where it was the scene's background colour, which costs a draw call and no
  * texture. The background is still set, underneath it.
+ *
+ * ⚠️ **8 → 9 with #546, deliberately — the riders' term is 4, not 3.** The
+ * owner ruled on 2026-09-25 that a rider's body stays more upright than the
+ * bicycle through a bend, with the combined lean still true to physics, and a
+ * body merged into the bicycle's vertices can only roll with it. So the upper
+ * body — arms, torso, helmet — is its own instanced mesh (`bicycle.ts`
+ * §`RIDER_UPPER_BODY_PARTS`), rolled about the hips: one call for all three
+ * riders, and a ghost still adds none.
  */
-const SCENE_DRAW_CALLS = 1 + 1 + 1 + 1 + 3 + 1;
+const SCENE_DRAW_CALLS = 1 + 1 + 1 + 1 + 4 + 1;
 
 /**
  * The most meshes the scenery belt may ever hold: **24**.
@@ -2053,6 +2064,33 @@ test.describe('the rider rides a line and leans on it — #499', () => {
     const roll = on.topShift - onUpright.topShift;
     expect(Math.abs(roll)).toBeGreaterThan(0.01);
     expect(Math.sign(roll)).toBe(Math.sign(on.centre - 0.5));
+  });
+
+  /**
+   * #546: on a straight the rider keeps to the RIGHT, where #499's line put
+   * them on the dashed centre line — the owner's 2026-09-25 tablet ride, in
+   * both worlds. Read off the screen rather than off `racing-line.ts`, because
+   * which side of the road the normal is on the SCREEN is a question of the
+   * renderer's handedness that no arithmetic in jsdom answers
+   * (`racing-line.ts` §`ROAD_SIDE`).
+   */
+  test('keeps to the right of the road on a straight, where the centreline rider is in its middle — #546', async ({
+    harnessRun,
+  }) => {
+    const { straightOn, straightOff } = (await harness(harnessRun)).line;
+    console.info(
+      `#546 on a straight: on the line, centred at ${(straightOn.centre * 100).toFixed(1)} % ` +
+        `of the width; on the centreline ${(straightOff.centre * 100).toFixed(1)} %`,
+    );
+    for (const each of [straightOn, straightOff]) {
+      expect(each.pixels).toBeGreaterThan(500);
+    }
+    // The control: the centreline rider, through the centreline's camera, is
+    // in the middle of the frame — which is where the road's centre line is.
+    // It would fail the assertion below, which is the defect #546 was filed on.
+    expect(Math.abs(straightOff.centre - 0.5)).toBeLessThan(0.02);
+    // The rider on the line: right of the middle, by a lane's worth.
+    expect(straightOn.centre - 0.5).toBeGreaterThan(0.08);
   });
 });
 

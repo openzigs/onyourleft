@@ -24,11 +24,23 @@ import {
 } from '@onyourleft/domain';
 import type { SimulationParameters } from '@onyourleft/sensors/protocol';
 
-import { BICYCLE_LENGTH_METRES, RIDER_HALF_WIDTH_METRES } from './bicycle';
+import {
+  BICYCLE_LENGTH_METRES,
+  CRANK_PARKING_LEAN_RADIANS,
+  RIDER_HALF_WIDTH_METRES,
+  combinedLean,
+  lowestPedalHeight,
+} from './bicycle';
 import { createGradientSession } from './gradient';
 import type { RiderMarker, SceneFrame } from './port';
 import { leanAt, lineOffsetAt, racingLine } from './racing-line';
-import { hairpinRoute, northRoute } from './route-fixtures-testing';
+import {
+  circuitRoute,
+  cornerRoute,
+  hairpinRoute,
+  northRoute,
+  sBendRoute,
+} from './route-fixtures-testing';
 import { sceneFrame } from './scene';
 import { GameSimulation, atStartLine, type GameState } from './simulation';
 import { ROAD_WIDTH_METRES, corridorOrigin, roadCorridor } from './terrain';
@@ -112,9 +124,14 @@ describe('the rider rides the line — #499', () => {
 
   it('leans into the bend at its own speed', () => {
     const frame = frameOf(hairpin, stateAt(hairpin, APEX, 8));
-    const lean = markerOf(frame, 'rider').lean;
-    expect(lean).toBe(leanAt(racingLine(hairpin), APEX, 8));
-    expect(lean).toBeLessThan(-0.1);
+    const rider = markerOf(frame, 'rider');
+    // #546: the physics fixes the COMBINED lean; the bicycle leans more and
+    // the body less, and the two together are exactly `leanAt`.
+    expect(combinedLean(rider.lean, rider.bodyLean)).toBeCloseTo(
+      leanAt(racingLine(hairpin), APEX, 8),
+      12,
+    );
+    expect(rider.lean).toBeLessThan(-0.1);
   });
 
   it('is upright at rest, whatever the bend', () => {
@@ -150,9 +167,9 @@ describe('the bot and the ghost ride it too, at their own speeds — #499', () =
     const bot = markerOf(frame, 'bot');
     const line = racingLine(hairpin);
     expect(across(frame, bot, botAt)).toBeCloseTo(lineOffsetAt(line, botAt), 6);
-    expect(bot.lean).toBe(leanAt(line, botAt, 11));
+    expect(combinedLean(bot.lean, bot.bodyLean)).toBeCloseTo(leanAt(line, botAt, 11), 12);
     // …and not at the rider's speed, which would be a different lean here.
-    expect(bot.lean).not.toBeCloseTo(leanAt(line, botAt, 6), 3);
+    expect(combinedLean(bot.lean, bot.bodyLean)).not.toBeCloseTo(leanAt(line, botAt, 6), 3);
   });
 
   it('leans the ghost at the speed its replay was ridden at', () => {
@@ -164,7 +181,7 @@ describe('the bot and the ghost ride it too, at their own speeds — #499', () =
     const drawn = markerOf(frame, 'ghost');
     const line = racingLine(hairpin);
     expect(across(frame, drawn, ghostAt)).toBeCloseTo(lineOffsetAt(line, ghostAt), 6);
-    expect(drawn.lean).toBeCloseTo(leanAt(line, ghostAt, 10), 9);
+    expect(combinedLean(drawn.lean, drawn.bodyLean)).toBeCloseTo(leanAt(line, ghostAt, 10), 9);
   });
 
   it('leaves a ghost that has finished upright, because it has stopped', () => {
@@ -356,5 +373,125 @@ describe('nothing measured along the road moves — #499', () => {
     expect(roadCorridor(hairpin, corridorOrigin(hairpin), APEX).vertices).toEqual(
       withLine.corridor.vertices,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #546 — true to physics, and a racer's body in a bend
+// ---------------------------------------------------------------------------
+
+describe('the lean drawn is the lean the physics asks for, and no more — #546', () => {
+  /**
+   * The line's own curvature at a distance on a circuit, found by this test
+   * from the corridor: three points of the drawn line a sample apart.
+   */
+  function lineCurvature(profile: RouteProfile, at: number): number {
+    const line = racingLine(profile);
+    const frame = frameOf(profile, stateAt(profile, at, 0));
+    const point = (distance: number): { x: number; z: number } => {
+      const centre = centreAt(frame, distance);
+      const ahead = centreAt(frame, distance + 0.01);
+      const length = Math.hypot(ahead.x - centre.x, ahead.z - centre.z);
+      const normalX = -(ahead.z - centre.z) / length;
+      const normalZ = (ahead.x - centre.x) / length;
+      const offset = lineOffsetAt(line, distance);
+      return { x: centre.x + offset * normalX, z: centre.z + offset * normalZ };
+    };
+    const a = point(at - 5);
+    const b = point(at);
+    const c = point(at + 5);
+    const ax = b.x - a.x;
+    const az = b.z - a.z;
+    const bx = c.x - b.x;
+    const bz = c.z - b.z;
+    const turn = Math.atan2(ax * bz - az * bx, ax * bx + az * bz);
+    return turn / ((Math.hypot(ax, az) + Math.hypot(bx, bz)) / 2);
+  }
+
+  it.each([15, 30, 45])(
+    'is atan(v²κ/g) of the line to half a degree, mid-bend at %i km/h',
+    (kilometresPerHour) => {
+      // A circuit is one steady bend, so the roll limiter is not binding.
+      const circuit = circuitRoute(60);
+      const speed = kilometresPerHour / 3.6;
+      const at = 200;
+      const frame = frameOf(circuit, stateAt(circuit, at, speed));
+      const rider = markerOf(frame, 'rider');
+      const physics = Math.atan((speed * speed * lineCurvature(circuit, at)) / 9.80665);
+      expect(Math.abs(physics)).toBeGreaterThan(0.5 * (Math.PI / 180));
+      expect(
+        Math.abs(combinedLean(rider.lean, rider.bodyLean) - physics) / (Math.PI / 180),
+      ).toBeLessThan(0.5);
+    },
+  );
+});
+
+describe('a racer’s cranks in a tight bend — #546', () => {
+  const FIXTURES: readonly (readonly [string, RouteProfile, number, number])[] = [
+    ['the 10 m hairpin', hairpinRoute(10), 300, 600],
+    ['the 20 m hairpin', hairpin, 300, 600],
+    ['a 10 m corner', cornerRoute(10), 300, 500],
+    ['a 10 m left-hand corner', cornerRoute(10, 90, 'left'), 300, 500],
+    ['the S-bend', sBendRoute(20), 300, 600],
+    ['a 60 m circuit', circuitRoute(60), 0, 377],
+  ];
+
+  it.each(FIXTURES)(
+    'never puts a pedal of the rider, the bot or the ghost through the road on %s',
+    (_, route, from, to) => {
+      for (const speed of [6, 10, 14, 18]) {
+        const ghost = buildGhostTrack({
+          elapsedSeconds: [0, 1_000],
+          distanceMetres: [0, speed * 1_000],
+        });
+        for (let at = from; at <= to; at += 1.3) {
+          const frame = frameOf(
+            route,
+            stateAt(route, at, speed, { distance: at + 20, speed }, Math.max(0, at - 30) / speed),
+            // A cadence reading that has the rider's cranks at every angle in turn.
+            { botDistance: at + 20, ghost, crankAngle: at * 1.7 },
+          );
+          for (const marker of frame.markers) {
+            const crank = marker.crankAngle ?? 0;
+            expect(lowestPedalHeight(marker.lean, crank)).toBeGreaterThanOrEqual(0);
+          }
+        }
+      }
+    },
+  );
+
+  it('parks the OUTSIDE pedal at six o’clock on a bot, a ghost and the rider leaning past the parking lean', () => {
+    const route = hairpinRoute(10);
+    const ghost = buildGhostTrack({ elapsedSeconds: [0, 1_000], distanceMetres: [0, 14_000] });
+    let parked = 0;
+    for (let at = 380; at <= 460; at += 0.7) {
+      const frame = frameOf(
+        route,
+        stateAt(route, at, 14, { distance: at + 10, speed: 14 }, at / 14),
+        {
+          botDistance: at + 10,
+          ghost,
+          crankAngle: at,
+        },
+      );
+      for (const marker of frame.markers) {
+        if (Math.abs(marker.lean) < CRANK_PARKING_LEAN_RADIANS) continue;
+        parked += 1;
+        // The outside arm is +X on a positive lean, and at six o'clock at π; on
+        // a negative lean it is −X, and at six o'clock at 0.
+        const outsideDown = marker.lean > 0 ? Math.PI : 0;
+        const crank = marker.crankAngle as number;
+        const off = Math.abs(((crank - outsideDown + 3 * Math.PI) % (2 * Math.PI)) - Math.PI);
+        expect(off).toBeLessThanOrEqual(15 * (Math.PI / 180));
+      }
+    }
+    // Non-vacuity: a 10 m hairpin at 14 m/s leans all three past it.
+    expect(parked).toBeGreaterThan(30);
+  });
+
+  it('draws the rider’s own cadence wherever the bend is not tight enough to park', () => {
+    const route = northRoute(2_000, () => 0);
+    const frame = frameOf(route, stateAt(route, 1_000, 12), { crankAngle: 1.234 });
+    expect(markerOf(frame, 'rider').crankAngle).toBe(1.234);
   });
 });
