@@ -25,8 +25,11 @@
  *    and is not an angle. ⚠️ **"A degree sign" is three characters, not one**
  *    (#561's review): `°` (U+00B0), and the two that render the same to a
  *    rider — `º` (U+00BA, the masculine ordinal, which some keyboards type in
- *    its place) and `˚` (U+02DA, the ring above). And the abbreviation: a
- *    number followed by `deg` (`142 deg`, `142deg`).
+ *    its place) and `˚` (U+02DA, the ring above) — and since #564 three more:
+ *    `⁰` (U+2070, superscript zero), `ᵒ` (U+1D52, modifier small o) and `∘`
+ *    (U+2218, the ring operator). Only a CAPITAL `C` or `F` after the sign is
+ *    a temperature: `142°c` is an angle with a typo, not a unit (#564). And
+ *    the abbreviation: a number followed by `deg` (`142 deg`, `142deg`).
  * 2. **The word "degree" or "degrees"** in any text.
  * 3. **A formatter that renders one**: the string `'degree'` on its own, which
  *    is what `Intl.NumberFormat`'s `unit` option would be handed.
@@ -36,7 +39,27 @@
  *    (`valgus`, `varus`, `abduction`, `adduction`, knee track, hip drop,
  *    `sway`), plus the forms a rider would read: pelvic drop, rocking, side to
  *    side, eversion or inversion, a tilt of the pelvis, hips or shoulders, and
- *    "frontal" itself.
+ *    "frontal" itself. ⚠️ **Narrowed to a body since #564**, each with a
+ *    fixture that must NOT fire: inversion only of a foot or an ankle (not a
+ *    temperature or a colour inversion), shoulders that are level only when
+ *    they are somebody's (not a road's hard shoulder), and a lateral shift or
+ *    movement of anything but the camera, its stand, the picture or the road.
+ *
+ * ## Invisible characters are removed before anything is matched
+ *
+ * A soft hyphen (U+00AD), a zero-width space, non-joiner or joiner
+ * (U+200B–U+200D) or a word joiner (U+2060) inside a word renders as nothing
+ * and splits the word for `\b` — `'val\u00adgus'` reads as a banned word and
+ * used to pass (#564). Every text is matched with them removed, and `&shy;`,
+ * `&zwj;` and `&zwnj;` are decoded so the same rule reaches them in JSX.
+ *
+ * ## A JSX element is also read whole
+ *
+ * `<p>de<b>grees</b></p>` renders `degrees`, and a node-by-node read sees
+ * `de` and `grees` (#564). {@link jsxElementTextsIn} joins every outermost
+ * element's text as JSX renders it, line-break rule included, and
+ * {@link angleClaimsIn} reports it once — only when none of its pieces is a
+ * finding already, so a sentence is never reported twice.
  *
  * ## JSX is read as it renders, character references included
  *
@@ -68,7 +91,9 @@
  * ## What it cannot see
  *
  * A number assembled at run time from pieces none of which is forbidden —
- * `String.fromCharCode(176)`, a sign built from its code point — and anything
+ * `String.fromCharCode(176)`, a sign built from its code point, or JSX text
+ * split around an expression it cannot read (`<p>de{x}grees</p>`, where the
+ * middle is whatever `x` is; a fixture pins this as a limit) — and anything
  * a rider reads that does not come from this source tree. **A green scan is
  * not evidence that ADR 0030 was followed** (D-8's last paragraph); it is
  * evidence that the two violations it names are absent.
@@ -90,7 +115,24 @@ export interface AngleClaimFinding {
  * (U+02DA) — that is not the start of a temperature unit; or a number followed
  * by the abbreviation `deg`.
  */
-const DEGREE_SIGN = /[\u00b0\u00ba\u02da](?![CF]\b)|\d\s*deg\b/i;
+const DEGREE_SIGN = /[\u00b0\u00ba\u02da\u2070\u1d52\u2218](?![CF]\b)/;
+
+/**
+ * The abbreviation, after a number. Case-insensitive, unlike
+ * {@link DEGREE_SIGN}: that one is case-SENSITIVE on purpose, so that only a
+ * capital `C` or `F` after the sign reads as a temperature and `142°c` does
+ * not slip past as one (#564).
+ */
+const DEGREE_ABBREVIATION = /\d\s*deg\b/i;
+
+/**
+ * The characters a rider cannot see and a regular expression can: the soft
+ * hyphen (U+00AD), the zero-width space, non-joiner and joiner
+ * (U+200B–U+200D) and the word joiner (U+2060). One inside a word splits it
+ * for `\b` and for nobody reading it (#564), so every text is matched with
+ * them removed.
+ */
+const INVISIBLE = /[\u00ad\u200b-\u200d\u2060]/g;
 
 /** The word, singular or plural, whole. */
 const DEGREE_WORD = /\bdegrees?\b/i;
@@ -116,19 +158,29 @@ const FRONTAL_PLANE = new RegExp(
       'side[\\s-]to[\\s-]side',
       // D-4: "foot eversion", and the other direction of the same rotation.
       'eversion',
-      'inversion',
+      // Inversion only of a foot or an ankle (#564): bare, it is a
+      // temperature inversion or a colour inversion as often as a body.
+      '(?:foot|feet|ankles?)\\s+inversion',
+      'inversion\\s+(?:of|at|in)\\s+(?:the\\s+|your\\s+|their\\s+)?(?:foot|feet|ankles?)',
       'evert(?:s|ed|ing)?',
       'invert(?:s|ed|ing)?\\s+(?:foot|feet|ankles?)',
       '(?:foot|feet|ankles?)\\s+invert(?:s|ed|ing)?',
       // D-4: "shoulder levelness", in the shapes a sentence would take.
       // "shoulder levelness", "your shoulders were possibly less level":
-      // up to three words between, so an adverb cannot walk it past.
-      'shoulders?\\s+(?:[a-z]+\\s+){0,3}(?:un)?level(?:ness)?',
+      // up to three words between, so an adverb cannot walk it past. The
+      // sentence form needs a body's shoulder — somebody's — because a road
+      // has one too, and "the road shoulder is level with the verge" is about
+      // tarmac (#564).
+      'shoulders?\\s+levelness',
+      "(?:your|their|his|her|my|rider[’']s)\\s+shoulders?\\s+(?:[a-z]+\\s+){0,3}(?:un)?level(?:ness)?",
       'level\\s+shoulders?',
       'uneven\\s+shoulders?',
       '(?:pelvi[cs]|hips?|shoulders?)\\s+tilt(?:s|ing|ed)?',
-      // D-4: "lateral sway", and any other lateral movement of a body.
-      'lateral(?:ly)?\\s+(?:sway|movement|motion|shift|tilt|drop)',
+      // D-4: "lateral sway", and any other lateral movement of a body — but
+      // not of the camera, its stand or the picture, which a framing
+      // instruction may well describe (#564). The bicycle is NOT excused: a
+      // bike rocking under a rider is the rider's frontal plane.
+      'lateral(?:ly)?\\s+(?:sway|movement|motion|shift|tilt|drop)(?!\\s+of\\s+(?:the\\s+|your\\s+)?(?:camera|phone|tablet|tripod|stand|picture|image|frame|view|screen|road))',
       'frontal',
     ].join('|') +
     ')\\b',
@@ -151,6 +203,11 @@ const NAMED_REFERENCES: Readonly<Record<string, string>> = {
   gt: '>',
   quot: '"',
   apos: "'",
+  // The invisible ones (#564): each renders as nothing, so each can split a
+  // word. Decoded here so that INVISIBLE removes them.
+  shy: '\u00ad',
+  zwj: '\u200d',
+  zwnj: '\u200c',
 };
 
 /**
@@ -249,22 +306,134 @@ export function textsIn(file: string, source: string): readonly { line: number; 
   return found;
 }
 
+/**
+ * JSX text as React renders it: a line break and the white space around it
+ * vanish, the lines that are left are joined with one space, and a line with
+ * no break is kept as written. The rule is JSX's own, the one Babel and
+ * TypeScript both apply when they emit.
+ */
+function renderedJsxText(raw: string): string {
+  const lines = raw.split(/\r\n|\n|\r/);
+  if (lines.length === 1) {
+    return raw;
+  }
+  return lines
+    .map((line, index) => {
+      let kept = line.replace(/\t/g, ' ');
+      if (index > 0) {
+        kept = kept.replace(/^ +/, '');
+      }
+      if (index < lines.length - 1) {
+        kept = kept.replace(/ +$/, '');
+      }
+      return kept;
+    })
+    .filter((line) => line.length > 0)
+    .join(' ');
+}
+
+/** A JSX element's text, joined as it renders, and the pieces it was joined from. */
+export interface JsxElementText {
+  readonly line: number;
+  readonly text: string;
+  readonly pieces: readonly string[];
+}
+
+/**
+ * The whole text of every outermost JSX element or fragment in one file,
+ * with its descendants' text joined as it renders — so `<p>de<b>grees</b></p>`
+ * is read as `degrees`, which is what a rider sees (#564). {@link textsIn}
+ * reads the same text node by node, and {@link angleClaimsIn} reports an
+ * element's whole text only when none of its pieces is already a finding.
+ *
+ * ⚠️ **An expression the scan cannot read is a break, not a guess**: in
+ * `<p>de{x}grees</p>` the middle is whatever `x` is at run time, so the two
+ * sides are not joined. A string literal in braces (`{'grees'}`) is text and
+ * is joined. A JSX attribute is read on its own by {@link textsIn}, not here.
+ */
+export function jsxElementTextsIn(file: string, source: string): readonly JsxElementText[] {
+  const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const found: JsxElementText[] = [];
+  const BREAK = '\u0000';
+  const collect = (children: ts.NodeArray<ts.JsxChild>, pieces: string[]): void => {
+    for (const child of children) {
+      if (ts.isJsxText(child)) {
+        pieces.push(renderedJsxText(decodeCharacterReferences(child.text)));
+      } else if (ts.isJsxElement(child) || ts.isJsxFragment(child)) {
+        collect(child.children, pieces);
+      } else if (ts.isJsxExpression(child)) {
+        const inner = child.expression;
+        if (inner === undefined) {
+          // `{/* a comment */}` renders nothing, and breaks nothing.
+          continue;
+        }
+        pieces.push(
+          ts.isStringLiteral(inner) || ts.isNoSubstitutionTemplateLiteral(inner)
+            ? inner.text
+            : BREAK,
+        );
+      } else {
+        // A self-closing element renders no text of its own.
+        pieces.push(BREAK);
+      }
+    }
+  };
+  const visit = (node: ts.Node): void => {
+    // Only an OUTERMOST element is a text of its own: one nested in another's
+    // children is part of that one's text. One inside an expression or an
+    // attribute is outermost again, because its parent is not an element.
+    const outermost =
+      (ts.isJsxElement(node) || ts.isJsxFragment(node)) &&
+      !ts.isJsxElement(node.parent) &&
+      !ts.isJsxFragment(node.parent);
+    if (outermost) {
+      const pieces: string[] = [];
+      collect(node.children, pieces);
+      const text = pieces.join('').split(BREAK).join(' ${…} ').replace(/\s+/g, ' ').trim();
+      const { line } = parsed.getLineAndCharacterOfPosition(node.getStart(parsed));
+      found.push({
+        line: line + 1,
+        text,
+        pieces: pieces.filter((piece) => piece !== BREAK && piece.length > 0),
+      });
+    }
+    ts.forEachChild(node, visit);
+  };
+  if (file.endsWith('.tsx')) {
+    visit(parsed);
+  }
+  return found;
+}
+
+/** The rule `text` breaks, if any — matched with the invisible characters removed. */
+function ruleBroken(text: string): AngleClaimFinding['rule'] | undefined {
+  const visible = text.replace(INVISIBLE, '');
+  return visible.trim().toLowerCase() === 'degree'
+    ? 'degree formatter'
+    : DEGREE_SIGN.test(visible) || DEGREE_ABBREVIATION.test(visible)
+      ? 'degree sign'
+      : DEGREE_WORD.test(visible)
+        ? 'degree word'
+        : FRONTAL_PLANE.test(visible)
+          ? 'frontal plane'
+          : undefined;
+}
+
 /** Every absolute-angle or frontal-plane claim in one file's rendered text. */
 export function angleClaimsIn(file: string, source: string): readonly AngleClaimFinding[] {
   const findings: AngleClaimFinding[] = [];
   for (const { line, text } of textsIn(file, source)) {
-    const rule: AngleClaimFinding['rule'] | undefined =
-      text.trim().toLowerCase() === 'degree'
-        ? 'degree formatter'
-        : DEGREE_SIGN.test(text)
-          ? 'degree sign'
-          : DEGREE_WORD.test(text)
-            ? 'degree word'
-            : FRONTAL_PLANE.test(text)
-              ? 'frontal plane'
-              : undefined;
+    const rule = ruleBroken(text);
     if (rule !== undefined) {
       findings.push({ file, line, text: text.trim(), rule });
+    }
+  }
+  // A word split across elements: reported once, for the element, and only
+  // when no piece of it is already a finding of its own.
+  for (const { line, text, pieces } of jsxElementTextsIn(file, source)) {
+    const rule = ruleBroken(text);
+    if (rule !== undefined && pieces.every((piece) => ruleBroken(piece) === undefined)) {
+      findings.push({ file, line, text, rule });
     }
   }
   return findings;

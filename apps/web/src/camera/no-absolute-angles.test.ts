@@ -26,6 +26,7 @@ import {
   decodeCharacterReferences,
   EXEMPT,
   isExempt,
+  jsxElementTextsIn,
   textsIn,
 } from './no-absolute-angles';
 
@@ -173,10 +174,125 @@ describe('the scan itself can fire', () => {
     'your hips tilting',
     'lateral movement of the knee',
     'a lateral shift',
+    // #564: the narrowed patterns still catch the body.
+    'inversion of the foot',
+    'inversion at the ankle',
+    'ankle inversion',
+    'their shoulders were less level',
+    'the rider’s shoulder was level',
+    'lateral shift of the hips',
+    'lateral movement of the bike',
   ])('catches the frontal plane as a word: %s', (text) => {
     expect(angleClaimsIn('x.ts', `const s = ${JSON.stringify(text)};`)).toStrictEqual([
       expect.objectContaining({ rule: 'frontal plane' }),
     ]);
+  });
+
+  // #564: an invisible character splits a word for the regex and for nobody
+  // reading it. Each of these renders as the banned word.
+  it.each([
+    ["'knee val\\u00adgus'", 'soft hyphen'],
+    ["'knee val\\u200bgus'", 'zero-width space'],
+    ["'knee val\\u200cgus'", 'zero-width non-joiner'],
+    ["'knee val\\u200dgus'", 'zero-width joiner'],
+    ["'knee val\\u2060gus'", 'word joiner'],
+    ["'142 de\\u00adgrees'", 'soft hyphen in the degree word'],
+  ])('catches a word split by an invisible character: %s (%s)', (literal) => {
+    expect(angleClaimsIn('x.ts', `const s = ${literal};`)).toHaveLength(1);
+  });
+
+  it.each([
+    '<p>knee val&shy;gus</p>',
+    '<p>knee val&zwj;gus</p>',
+    '<p>knee val&zwnj;gus</p>',
+    '<p>knee val&#x200B;gus</p>',
+    '<p>knee val&#8288;gus</p>',
+    '<span title="knee val&shy;gus" />',
+  ])('catches a word split by an invisible character reference in JSX: %s', (jsx) => {
+    expect(angleClaimsIn('x.tsx', `const e = ${jsx};`)).toStrictEqual([
+      expect.objectContaining({ rule: 'frontal plane' }),
+    ]);
+  });
+
+  it('decodes the invisible characters’ named references', () => {
+    expect(decodeCharacterReferences('a&shy;b&zwj;c&zwnj;d')).toBe('a­b‍c‌d');
+  });
+
+  // #564: a word split across JSX elements renders whole, so it is read whole.
+  it.each([
+    ['<p>de<b>grees</b></p>', 'degree word'],
+    ['<p>knee val<i>gus</i></p>', 'frontal plane'],
+    ["<p>de{'grees'}</p>", 'degree word'],
+    ['<p>\n  de\n  <b>grees</b>\n</p>', 'degree word'],
+    ['<>142<sup>&deg;</sup> </>', 'degree sign'],
+    ['<p>hip <span>d<b>rop</b></span></p>', 'frontal plane'],
+  ] as const)('catches a word split across JSX elements: %j', (jsx, rule) => {
+    expect(angleClaimsIn('x.tsx', `const e = ${jsx};`)).toStrictEqual([
+      expect.objectContaining({ rule }),
+    ]);
+  });
+
+  it('reports a JSX element once when one of its own pieces already fires', () => {
+    expect(angleClaimsIn('x.tsx', 'const e = <p>Knee 142° <b>now</b></p>;')).toStrictEqual([
+      expect.objectContaining({ rule: 'degree sign', text: 'Knee 142°' }),
+    ]);
+  });
+
+  it('does not join JSX text across an expression it cannot read — the stated limit', () => {
+    // `{x}` renders whatever `x` is; the scan cannot know, so it does not guess.
+    expect(angleClaimsIn('x.tsx', 'const e = <p>de{x}grees</p>;')).toEqual([]);
+    expect(angleClaimsIn('x.tsx', 'const e = <p>de<b>fine</b> text</p>;')).toEqual([]);
+  });
+
+  it('reads a JSX element’s text the way JSX renders its line breaks', () => {
+    expect(jsxElementTextsIn('x.tsx', 'const e = <p>\n  one\n  two <b>three</b>\n</p>;')).toEqual([
+      { line: 1, text: 'one two three', pieces: ['one two ', 'three'] },
+    ]);
+  });
+
+  // #564: three more characters a rider reads as a degree sign.
+  it.each([
+    "'Knee 142⁰'",
+    "'Knee 142ᵒ'",
+    "'Knee 142∘'",
+    "'Knee 142\\u2070'",
+    "'Knee 142\\u1d52'",
+    "'Knee 142\\u2218'",
+  ])('catches a further look-alike of the degree sign: %s', (literal) => {
+    expect(angleClaimsIn('x.ts', `const s = ${literal};`)).toStrictEqual([
+      expect.objectContaining({ rule: 'degree sign' }),
+    ]);
+  });
+
+  it.each(['<p>Knee 142&#x2070;</p>', '<p>Knee 142&#8304;</p>', '<p>Knee 142&#x1D52;</p>'])(
+    'catches a further look-alike written as a reference in JSX: %s',
+    (jsx) => {
+      expect(angleClaimsIn('x.tsx', `const e = ${jsx};`)).toStrictEqual([
+        expect.objectContaining({ rule: 'degree sign' }),
+      ]);
+    },
+  );
+
+  it('reads only a capital C or F after the sign as a temperature', () => {
+    expect(angleClaimsIn('x.ts', "const s = 'Knee 142°c';")).toStrictEqual([
+      expect.objectContaining({ rule: 'degree sign' }),
+    ]);
+    expect(angleClaimsIn('x.ts', "const s = 'Knee 142°f';")).toHaveLength(1);
+    expect(angleClaimsIn('x.ts', "const s = 'It was 21°C and 70°F';")).toEqual([]);
+  });
+
+  // #564: words that are not about a body, and must not fire.
+  it.each([
+    'a temperature inversion',
+    'colour inversion',
+    'Inversion of the picture',
+    'the road shoulder is level with the verge',
+    'the hard shoulder was level',
+    'lateral shift of the camera',
+    'a lateral movement of the tablet',
+    'lateral motion of the picture',
+  ])('does not fire on a word that is not about a body: %s', (text) => {
+    expect(angleClaimsIn('x.ts', `const s = ${JSON.stringify(text)};`)).toEqual([]);
   });
 
   it('reports the line an editor would show', () => {

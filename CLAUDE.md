@@ -155,7 +155,15 @@ apps/                 AGPL-3.0-or-later, without exception
                         ⚠️ `no-absolute-angles.test.ts` beside them is a gate
                         over ALL of `src/`: a degree sign, the word, a
                         `'degree'` formatter or a frontal-plane word in any
-                        rendered string is a red build (ADR 0030 D-8)
+                        rendered string is a red build (ADR 0030 D-8). Since
+                        #564 it matches with invisible characters removed
+                        (soft hyphen, zero-width space/joiners, word joiner),
+                        reads a JSX element's text WHOLE as well as node by
+                        node, and narrows `inversion`, level shoulders and
+                        lateral movement to a body; and every report sentence
+                        is held under the store's `MAXIMUM_SIDE_REPORT_SENTENCE`
+                        by a test, because one past it is refused on save and
+                        the keeper drops the report without a word
     src/efforts/        the effort-history screen's reads and its stub (#67) — the
                         read budget, and where a sample index comes from
     src/detail/         the ride detail view's data layer (#50) — the read budget, the
