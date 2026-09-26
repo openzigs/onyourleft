@@ -62,18 +62,12 @@
  * Pure, and names no rendering library.
  */
 
-import {
-  distanceOnRoute,
-  elevationAt,
-  gradeAt,
-  positionAt,
-  type RouteProfile,
-} from '@onyourleft/domain';
+import { distanceOnRoute, elevationAt, gradeAt, type RouteProfile } from '@onyourleft/domain';
 
 import { slotHash, uniformFrom } from './seeded';
 import {
   ROAD_WIDTH_METRES,
-  localGroundPosition,
+  drawnRoadPosition,
   ribbonNormals,
   type CorridorOrigin,
   type CorridorPoint,
@@ -440,6 +434,33 @@ export function waterShaping(
 }
 
 /**
+ * Whether {@link waterShaping} can answer anything but {@link DRY} anywhere
+ * across the route at `wrapped` — #569.
+ *
+ * Exactly the two tests in {@link waterShaping} that do not depend on how far
+ * out the point is: a crossing too far along the road, and a lake with no
+ * shore here. When both hold for every water, every point of the cross-section
+ * is dry, so `landform.ts` asks once a row instead of once a vertex. #543 made
+ * that 3 500 calls a frame, nearly all of them far from any water.
+ */
+export function waterNearRoute(ways: Waterways, profile: RouteProfile, wrapped: number): boolean {
+  for (const crossing of ways.crossings) {
+    const u = Math.abs(routeOffset(profile, wrapped, crossing.distance));
+    if (
+      !(u > CHANNEL_FLAT_METRES + (CHANNEL_BANK_METRES - CHANNEL_FLAT_METRES) * (1 + BANK_RELEASE))
+    ) {
+      return true;
+    }
+  }
+  for (const lake of ways.lakes) {
+    if (lakeShore(lake, profile, wrapped) !== undefined) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Whether a point beside the route is in water or on its banks — where
  * nothing may stand: a stream's whole channel, and a lake with its bank.
  */
@@ -604,15 +625,12 @@ export function waterSurface(
     // lap's crossing is the same place, and two copies of one strip would
     // fight for the same depth.
     if (occurrences(profile, crossing.distance, first.along, last.along).length > 0) {
-      const here = localGroundPosition(origin, positionAt(profile, crossing.distance));
-      const ahead = localGroundPosition(
-        origin,
-        positionAt(profile, distanceOnRoute(profile, crossing.distance + 5)),
-      );
-      const behind = localGroundPosition(
-        origin,
-        positionAt(profile, distanceOnRoute(profile, crossing.distance - 5)),
-      );
+      // ⚠️ On the DRAWN road, not the route's centreline — #543's review. The
+      // strip runs under the bridge and across the carriageway, and in a bend
+      // the ribbon is drawn up to ~1.9 m inside the route's vertex.
+      const here = drawnRoadPosition(profile, origin, crossing.distance);
+      const ahead = drawnRoadPosition(profile, origin, crossing.distance + 5);
+      const behind = drawnRoadPosition(profile, origin, crossing.distance - 5);
       const dx = ahead.x - behind.x;
       const dz = ahead.z - behind.z;
       const length = Math.hypot(dx, dz);
@@ -770,7 +788,11 @@ export function bridgeParts(
   const last = corridor.centre[corridor.centre.length - 1] as CorridorPoint;
   const roadAt = (distance: number): { x: number; y: number; z: number } => {
     const wrapped = distanceOnRoute(profile, distance);
-    const ground = localGroundPosition(origin, positionAt(profile, wrapped));
+    // ⚠️ The DRAWN road — #543's review. Until then this was the route's own
+    // centreline, which is where the ribbon ran until #543 rounded its bends:
+    // at a 45° corner on the valley floor that put the inner parapet 1.27 m
+    // into the carriageway. The HEIGHT stays the route's, as the ribbon's does.
+    const ground = drawnRoadPosition(profile, origin, wrapped);
     return { x: ground.x, y: elevationAt(profile, wrapped) - origin.elevation, z: ground.z };
   };
   for (const crossing of ways.crossings) {

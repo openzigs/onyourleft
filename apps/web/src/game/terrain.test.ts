@@ -13,7 +13,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  BEND_SMOOTHING_METRES,
   CENTRE_LINE_MARK_METRES,
+  CORRIDOR_DENSE_AHEAD_METRES,
+  MAXIMUM_CORRIDOR_JOINT_DEGREES,
   CENTRE_LINE_PERIOD_METRES,
   GRADIENT_TINT_FULL_SCALE_PERCENT,
   MAXIMUM_CORRIDOR_QUADS,
@@ -25,17 +28,23 @@ import {
   ROAD_COLUMNS,
   ROAD_WIDTH_METRES,
   corridorOrigin,
+  localGroundPosition,
   roadCorridor,
   roadTint,
   type RoadCorridor,
 } from './terrain';
+import { PLANNER_BENDS, hairpinRoute, plannerRoute, stadiumRoute } from './route-fixtures-testing';
+import { SCATTER_VERGE_METRES } from './scatter';
 import { AA_LARGE_TEXT_OR_NON_TEXT, contrastRatio, relativeLuminance } from '../design/contrast';
 import {
   altitudeMetres,
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
+  distanceOnRoute,
+  elevationAt,
   gradePercent,
+  positionAt,
   routeProfile,
   type RoutePoint,
   type RouteProfile,
@@ -356,8 +365,17 @@ describe('the rebuild is bounded', () => {
       behindMetres: 60,
     });
 
-    // 460 m at 10 m is 46 quads, comfortably inside the budget.
-    expect(corridor.quadCount).toBe(46);
+    // 460 m at this route's 9.99 m grid is 46 grid steps, none skipped. Since
+    // #543 the 22 of them that reach from 60 m behind to
+    // CORRIDOR_DENSE_AHEAD_METRES ahead (21 fall 0.2 m short of 210 m) are
+    // each drawn as five pieces of about CORRIDOR_STEP_METRES: 134 quads.
+    expect(corridor.quadCount).toBe(22 * 5 + 24);
+    expect((corridor.centre[corridor.centre.length - 1]?.along ?? 0) - 200).toBeCloseTo(
+      46 * profile.resolution - 60,
+      9,
+    );
+    const step = (corridor.centre[1]?.along ?? 0) - (corridor.centre[0]?.along ?? 0);
+    expect(step * 5).toBeCloseTo(profile.resolution, 9);
   });
 });
 
@@ -421,34 +439,49 @@ describe('the start of a loop — #440', () => {
     }));
   }
 
-  /** The longest step between consecutive centreline points, in 3D metres. */
+  /**
+   * The longest step between consecutive centreline points, in 3D metres —
+   * among the points two metres apart since #543, which at distance 0 are the
+   * 60 m behind the start line and the first CORRIDOR_DENSE_AHEAD_METRES ahead
+   * of it: the stretch the wrap is in.
+   */
   function longestStep(corridor: RoadCorridor): number {
     let longest = 0;
     for (let index = 1; index < corridor.centre.length; index += 1) {
       const a = corridor.centre[index - 1];
       const b = corridor.centre[index];
       if (a === undefined || b === undefined) continue;
+      if (b.along > CORRIDOR_DENSE_AHEAD_METRES) break;
       longest = Math.max(longest, Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z));
     }
     return longest;
   }
 
+  /** How far apart, in route distance, the corridor's points are. */
+  function drawStep(corridor: RoadCorridor): number {
+    return (corridor.centre[1]?.along ?? 0) - (corridor.centre[0]?.along ?? 0);
+  }
+
   it('draws the road through the start with no step longer than the grid', () => {
     // The corridor reaches 60 m behind the rider, so at distance 0 it runs
-    // through the wrap. Every step is one grid step of road, and the wrap is
-    // not special.
+    // through the wrap. Every step is one drawing step of road, and the wrap is
+    // not special. (Measured against the corridor's own step since #543, which
+    // divides the grid's.)
     const profile = routeProfile(untidyLoopPoints(), { loop: true });
     const corridor = roadCorridor(profile, corridorOrigin(profile), 0);
-    expect(longestStep(corridor)).toBeLessThanOrEqual(profile.resolution * 1.05);
+    expect(longestStep(corridor)).toBeLessThanOrEqual(drawStep(corridor) * 1.05);
   });
 
   it('the control — the same loop as a pre-#440 build stored it steps across the gap', () => {
     // ⚠️ Without this, "no step longer than the grid" is equally true of a
     // corridor that never reached the wrap. This is the profile a route saved
     // before #440 still carries: the line, marked as a loop after the fact.
+    // ⚠️ #543's smoothing spreads the 15.6 m gap over the twenty metres its
+    // window spans, so a step no longer crosses the whole of it — measured at
+    // 5.4 m against a 2 m step. Twice the step still tells the two apart.
     const stored: RouteProfile = { ...routeProfile(untidyLoopPoints()), loop: true };
     const corridor = roadCorridor(stored, corridorOrigin(stored), 0);
-    expect(longestStep(corridor)).toBeGreaterThan(stored.resolution * 1.5);
+    expect(longestStep(corridor)).toBeGreaterThan(drawStep(corridor) * 2);
   });
 
   it('puts NOTHING behind the start of a point-to-point route', () => {
@@ -481,16 +514,21 @@ describe('the centre line is periodic in route distance — #242', () => {
    */
   it('has the same period in metres at a stride of one and a stride above one', () => {
     const coarse = straightClimb(10);
-    const fine = straightClimb(1);
+    const fine = straightClimb(1.5);
     const coarseCorridor = roadCorridor(coarse, corridorOrigin(coarse), 200);
     const fineCorridor = roadCorridor(fine, corridorOrigin(fine), 200);
 
-    // Non-vacuity: one of these strides and the other does not, which is the
-    // whole difference the test rests on. 460 m at the profile's 10 m grid is
-    // 46 quads; at a 1 m grid it would be 460, so the budget forces a stride.
-    expect(coarseCorridor.quadCount).toBe(46);
+    // Non-vacuity: one of these strides and the other does not, and — what a
+    // dash indexed by vertex would actually read — their VERTICES are a
+    // different distance apart. ⚠️ Since #543 a 1 m grid no longer shows that:
+    // it strides to 2 m, and a 10 m grid is drawn in 2 m pieces, so the two
+    // would share a vertex spacing and this test could not fail. A 1.5 m grid
+    // strides to 3 m, which is too coarse to divide.
+    expect(coarseCorridor.quadCount).toBe(22 * 5 + 24);
     expect(fineCorridor.quadCount).toBeLessThanOrEqual(MAXIMUM_CORRIDOR_QUADS);
-    expect(fineCorridor.centre.length - 1).toBeLessThan(460);
+    const spacing = (corridor: RoadCorridor): number =>
+      (corridor.centre[1]?.along ?? 0) - (corridor.centre[0]?.along ?? 0);
+    expect(Math.abs(spacing(fineCorridor) - spacing(coarseCorridor))).toBeGreaterThan(0.5);
 
     const coarseGaps = markGaps(coarseCorridor);
     const fineGaps = markGaps(fineCorridor);
@@ -509,7 +547,7 @@ describe('the centre line is periodic in route distance — #242', () => {
     // Stronger than the period: a pattern with the right spacing and the wrong
     // phase passes the test above and is still a different road.
     const coarse = straightClimb(10);
-    const fine = straightClimb(1);
+    const fine = straightClimb(1.5);
     const coarseStarts = markStarts(roadCorridor(coarse, corridorOrigin(coarse), 200));
     const fineStarts = markStarts(roadCorridor(fine, corridorOrigin(fine), 200));
 
@@ -960,5 +998,212 @@ describe('the road slides with the rider rather than jumping a grid point — #3
     expect(first.x).toBeCloseTo(0, 9);
     expect(first.z).toBeCloseTo(0, 9);
     expect(first.y).toBeCloseTo(0, 9);
+  });
+});
+
+describe('a bend is drawn as a curve, not as straight pieces — #543', () => {
+  /**
+   * The largest turn, in degrees, between one centreline segment and the next.
+   *
+   * ⚠️ Segments of no length are skipped: the corridor clamps every point
+   * behind the start of a point-to-point route onto the start (#440), and the
+   * direction of a zero-length segment is not a turn.
+   */
+  function worstJointDegrees(corridor: RoadCorridor, rider: number): number {
+    let worst = 0;
+    // "At the rider's draw density" — #543's words: the points two metres
+    // apart. Beyond CORRIDOR_DENSE_AHEAD_METRES the corridor is a point a grid
+    // step, as it always was, and a bend there is drawn at ten metres.
+    const centre = corridor.centre.filter(
+      (point) => point.along <= rider + CORRIDOR_DENSE_AHEAD_METRES + 1e-6,
+    );
+    for (let index = 1; index + 1 < centre.length; index += 1) {
+      const a = centre[index - 1];
+      const b = centre[index];
+      const c = centre[index + 1];
+      if (a === undefined || b === undefined || c === undefined) continue;
+      const inX = b.x - a.x;
+      const inZ = b.z - a.z;
+      const outX = c.x - b.x;
+      const outZ = c.z - b.z;
+      if (Math.hypot(inX, inZ) < 1e-6 || Math.hypot(outX, outZ) < 1e-6) continue;
+      const turn = Math.abs(Math.atan2(inX * outZ - inZ * outX, inX * outX + inZ * outZ));
+      worst = Math.max(worst, (turn * 180) / Math.PI);
+    }
+    return worst;
+  }
+
+  /** The worst joint of every corridor a ride along the whole route builds. */
+  function worstAlong(profile: RouteProfile, unsmoothed = false): number {
+    const origin = corridorOrigin(profile);
+    let worst = 0;
+    for (let at = 0; at <= profile.totalDistance; at += 7) {
+      const corridor = roadCorridor(profile, origin, at, { unsmoothed });
+      worst = Math.max(worst, worstJointDegrees(corridor, at));
+    }
+    return worst;
+  }
+
+  it('holds every joint of a planner’s route under the stated bound', () => {
+    const profile = plannerRoute();
+    const worst = worstAlong(profile);
+    expect(worst).toBeLessThan(MAXIMUM_CORRIDOR_JOINT_DEGREES);
+    // Not a bound that holds because the road is straight: the road's own
+    // 20 m bend turns 5.7° every two metres, and this is within a few degrees
+    // of that — measured at 5.7°.
+    expect(worst).toBeGreaterThan(4);
+  });
+
+  it('the control — the road as it was drawn before #543 turns a whole corner at once', () => {
+    // ⚠️ Without this, "under the bound" is equally true of a fixture that
+    // turned gently everywhere. The same route drawn as it was puts each of
+    // the planner's corners into one joint: measured at 38.5°.
+    expect(worstAlong(plannerRoute(), true)).toBeGreaterThan(3 * MAXIMUM_CORRIDOR_JOINT_DEGREES);
+  });
+
+  it('does not reach beyond the verge to find the curve', () => {
+    // The drawn road cuts a corner by up to half the window times the sine of
+    // half the corner. The scenery is placed beside the ROUTE (`scatter.ts`
+    // projects it itself), so this is what keeps a tree off the drawn tarmac.
+    const profile = plannerRoute();
+    const origin = corridorOrigin(profile);
+    let furthest = 0;
+    for (const { middleMetres: middle } of PLANNER_BENDS) {
+      for (const point of roadCorridor(profile, origin, middle).centre) {
+        const route = localGroundPosition(origin, positionAt(profile, point.distance));
+        furthest = Math.max(furthest, Math.hypot(route.x - point.x, route.z - point.z));
+      }
+    }
+    expect(furthest).toBeLessThan(SCATTER_VERGE_METRES - 1);
+    // And it did move the road, or the bound above says nothing.
+    expect(furthest).toBeGreaterThan(0.5);
+  });
+
+  it('moves nothing on a straight', () => {
+    // The mean of a straight line over any window is the line.
+    const profile = straightClimb();
+    const origin = corridorOrigin(profile);
+    for (const point of roadCorridor(profile, origin, 300).centre) {
+      const route = localGroundPosition(origin, positionAt(profile, point.distance));
+      expect(point.x).toBeCloseTo(route.x, 6);
+      expect(point.z).toBeCloseTo(route.z, 6);
+    }
+  });
+
+  it('is the exact mean of the route over the window, so it does not shimmer as the rider moves', () => {
+    // A mean taken from samples at fixed offsets from each point would change
+    // a little as the corridor slid along the road, which it does every frame.
+    // The exact one is checked against a brute-force mean at 1 cm.
+    const profile = plannerRoute();
+    const origin = corridorOrigin(profile);
+    const middle = (PLANNER_BENDS[2] as { middleMetres: number }).middleMetres;
+    const corridor = roadCorridor(profile, origin, middle, { behindMetres: 0, aheadMetres: 0 });
+    const drawn = corridor.centre[0] as { x: number; z: number };
+    const samples = 4000;
+    let x = 0;
+    let z = 0;
+    for (let index = 0; index < samples; index += 1) {
+      const at =
+        middle - BEND_SMOOTHING_METRES + ((index + 0.5) / samples) * 2 * BEND_SMOOTHING_METRES;
+      const ground = localGroundPosition(origin, positionAt(profile, at));
+      x += ground.x / samples;
+      z += ground.z / samples;
+    }
+    expect(Math.hypot(drawn.x - x, drawn.z - z)).toBeLessThan(0.001);
+  });
+
+  it('starts and finishes a point-to-point route exactly where the route does', () => {
+    const profile = plannerRoute();
+    const origin = corridorOrigin(profile);
+    const total: number = profile.totalDistance;
+    for (const distance of [0, total]) {
+      const drawn = roadCorridor(profile, origin, distance, { behindMetres: 0, aheadMetres: 0 })
+        .centre[0] as { x: number; z: number };
+      const route = localGroundPosition(origin, positionAt(profile, distance));
+      expect(drawn.x).toBeCloseTo(route.x, 6);
+      expect(drawn.z).toBeCloseTo(route.z, 6);
+    }
+  });
+
+  it('draws the road from the origin it is handed, not the first caller’s — #569', () => {
+    // #569 integrates the route once and keeps the table against the profile.
+    // A caller handing the same profile another origin must get the road
+    // projected from THAT origin: each drawn point is still the brute-force
+    // mean of the route over the window, as seen from there. Latitude and
+    // longitude both move, because both are in the projection.
+    const profile = plannerRoute();
+    const home = corridorOrigin(profile);
+    const away = { ...home, latitude: home.latitude + 0.01, longitude: home.longitude - 0.02 };
+    const middle = (PLANNER_BENDS[1] as { middleMetres: number }).middleMetres;
+    const drawnFrom = (origin: typeof home): { x: number; z: number } =>
+      roadCorridor(profile, origin, middle, { behindMetres: 0, aheadMetres: 0 })
+        .centre[0] as unknown as { x: number; z: number };
+    const meanFrom = (origin: typeof home): { x: number; z: number } => {
+      const samples = 4000;
+      let x = 0;
+      let z = 0;
+      for (let index = 0; index < samples; index += 1) {
+        const at =
+          middle - BEND_SMOOTHING_METRES + ((index + 0.5) / samples) * 2 * BEND_SMOOTHING_METRES;
+        const ground = localGroundPosition(origin, positionAt(profile, at));
+        x += ground.x / samples;
+        z += ground.z / samples;
+      }
+      return { x, z };
+    };
+    for (const origin of [home, away, home]) {
+      const drawn = drawnFrom(origin);
+      const mean = meanFrom(origin);
+      expect(Math.hypot(drawn.x - mean.x, drawn.z - mean.z)).toBeLessThan(0.001);
+    }
+    // And the two do put the road in different places, or the loop above
+    // could pass with one table.
+    expect(Math.abs(drawnFrom(away).x - drawnFrom(home).x)).toBeGreaterThan(100);
+  });
+
+  it('carries the curve across a loop’s wrap without a step', () => {
+    const profile = stadiumRoute(20);
+    const origin = corridorOrigin(profile);
+    const total: number = profile.totalDistance;
+    const at = (distance: number): { x: number; z: number } =>
+      roadCorridor(profile, origin, distance, { behindMetres: 0, aheadMetres: 0 })
+        .centre[0] as unknown as { x: number; z: number };
+    const before = at(total - 0.01);
+    const after = at(0.01);
+    expect(Math.hypot(before.x - after.x, before.z - after.z)).toBeLessThan(0.05);
+    // The same place on the second lap is the same drawn place.
+    const lapTwo = at(total + 123);
+    const lapOne = at(123);
+    expect(lapTwo.x).toBeCloseTo(lapOne.x, 6);
+    expect(lapTwo.z).toBeCloseTo(lapOne.z, 6);
+  });
+
+  it('draws the road only: height and route distance are the centreline’s', () => {
+    // #543's "unchanged" criterion. What a point is FOR — its route distance,
+    // and the height and gradient read there — is the route's; only where it
+    // is drawn across the ground moved.
+    const profile = hairpinRoute(20);
+    const origin = corridorOrigin(profile);
+    const corridor = roadCorridor(profile, origin, 480);
+    let moved = 0;
+    corridor.centre.forEach((point, row) => {
+      expect(point.distance).toBe(distanceOnRoute(profile, point.along));
+      expect(point.y).toBeCloseTo(
+        (elevationAt(profile, point.distance) as number) - origin.elevation,
+        9,
+      );
+      expect(colourAt(corridor, row, 2)).toEqual(
+        colourAt(
+          roadCorridor(profile, origin, point.along, { behindMetres: 0, aheadMetres: 0 }),
+          0,
+          2,
+        ),
+      );
+      const route = localGroundPosition(origin, positionAt(profile, point.distance));
+      moved = Math.max(moved, Math.hypot(route.x - point.x, route.z - point.z));
+    });
+    // And the hairpin's road was drawn somewhere other than its centreline, or
+    // none of that says anything.
+    expect(moved).toBeGreaterThan(0.5);
   });
 });

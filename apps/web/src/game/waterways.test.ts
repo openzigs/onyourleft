@@ -16,6 +16,7 @@ import {
   elevationAt,
   gradeAt,
   metres,
+  positionAt,
   seconds,
   unixSeconds,
   type RouteProfile,
@@ -29,6 +30,7 @@ import {
   terrainHeightAt,
 } from './landform';
 import {
+  bentValleyRoute,
   circuitRoute,
   flatFloorValleyRoute,
   hillRoute,
@@ -41,7 +43,13 @@ import {
 import { scatterSeed } from './scatter';
 import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
-import { ROAD_WIDTH_METRES, corridorOrigin, roadCorridor } from './terrain';
+import {
+  ROAD_WIDTH_METRES,
+  corridorOrigin,
+  localGroundPosition,
+  roadCorridor,
+  type CorridorPoint,
+} from './terrain';
 import type { GradientTrainer } from './trainer-port';
 import { auditWetGround } from './wet-ground-testing';
 import {
@@ -225,6 +233,79 @@ describe('the bridge — #459', () => {
     expect((abutment?.y ?? 0) - tallest / 2).toBeLessThan(water - STREAM_DEPTH_METRES);
     // Nothing is placed in view of a corridor that cannot see the bridge.
     expect(bridgeParts(profile, origin, roadCorridor(profile, origin, 2_600), ways)).toEqual([]);
+  });
+
+  it('stands the bridge and the stream on the DRAWN road where the crossing is in a bend — #543 review', () => {
+    // A 45° corner at the valley floor, sampled every 25 m the way a planner
+    // exports one. Since #543 the ribbon is drawn round that corner, up to
+    // ~1.9 m inside the route's own vertex; the review measured the inner
+    // parapet 2.23 m from the drawn centreline — 1.27 m into the carriageway —
+    // because it was placed from the route's centreline. The test the straight
+    // valley above makes cannot see that: on a straight the two are one line.
+    const bent = bentValleyRoute(45);
+    const bentOrigin = corridorOrigin(bent);
+    const bentWays = waysOf(bent);
+    const at = bentWays.crossings[0]?.distance ?? Number.NaN;
+    expect(Math.abs(at - 1_000)).toBeLessThan(25);
+    const corridor = roadCorridor(bent, bentOrigin, at - 50);
+    const centre = corridor.centre;
+    /** Plan distance from a point to the ribbon's own centreline — what is DRAWN. */
+    const toDrawnRoad = (x: number, z: number): number => {
+      let nearest = Number.POSITIVE_INFINITY;
+      for (let index = 0; index + 1 < centre.length; index += 1) {
+        const a = centre[index] as CorridorPoint;
+        const b = centre[index + 1] as CorridorPoint;
+        const dx = b.x - a.x;
+        const dz = b.z - a.z;
+        const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / (dx * dx + dz * dz)));
+        nearest = Math.min(nearest, Math.hypot(x - (a.x + dx * t), z - (a.z + dz * t)));
+      }
+      return nearest;
+    };
+    /** Where the ribbon passes at a route distance, read off its own points. */
+    const drawnAt = (distance: number): { x: number; z: number } => {
+      const after = centre.findIndex((point) => point.distance >= distance);
+      const b = centre[after] as CorridorPoint;
+      const a = centre[after - 1] as CorridorPoint;
+      const t = (distance - a.distance) / (b.distance - a.distance);
+      return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t };
+    };
+
+    // Non-vacuity: at the crossing the drawn road really is off the route's
+    // centreline, by more than the error this test tolerates.
+    const route = localGroundPosition(bentOrigin, positionAt(bent, at));
+    const drawn = drawnAt(at);
+    expect(Math.hypot(route.x - drawn.x, route.z - drawn.z)).toBeGreaterThan(1);
+
+    const parapets = bridgeParts(bent, bentOrigin, corridor, bentWays).filter(
+      (part) => Math.abs(part.height - (PARAPET_HEIGHT_METRES + 0.1)) < 1e-9,
+    );
+    expect(parapets.length).toBeGreaterThan(4);
+    const offsets = parapets.map((parapet) => toDrawnRoad(parapet.x, parapet.z));
+    // Beside the carriageway, never on it: its inner face is at the edge.
+    expect(Math.min(...offsets), 'a parapet stands in the carriageway').toBeGreaterThan(
+      ROAD_WIDTH_METRES / 2 + PARAPET_THICKNESS_METRES / 2 - 0.1,
+    );
+    // And against it — not left standing out in the verge on the outside.
+    expect(Math.max(...offsets), 'a parapet stands away from the road').toBeLessThan(
+      ROAD_WIDTH_METRES / 2 + PARAPET_THICKNESS_METRES / 2 + 0.1,
+    );
+
+    // The stream's strip crosses under the DRAWN road: its middle row has a
+    // point on the ribbon's centreline where the crossing is.
+    const surface = waterSurface(bent, bentOrigin, corridor, bentWays);
+    let onRoad = Number.POSITIVE_INFINITY;
+    for (let vertex = 0; vertex < surface.shore.length; vertex += 1) {
+      if (surface.shore[vertex] !== 1) continue;
+      onRoad = Math.min(
+        onRoad,
+        Math.hypot(
+          (surface.vertices[vertex * 3] as number) - drawn.x,
+          (surface.vertices[vertex * 3 + 2] as number) - drawn.z,
+        ),
+      );
+    }
+    expect(onRoad).toBeLessThan(0.05);
   });
 
   it('never leaves the road over an open trench beyond the abutments — #468 review B2', () => {

@@ -132,6 +132,8 @@ export default defineConfig({
         rideview: 'browser/rideview.html',
         // #440: the start of a loop, drawn by the real renderer at the real camera.
         loop: 'browser/loop.html',
+        // #543: a bend, drawn by the real renderer and read back from straight above.
+        bend: 'browser/bend.html',
         // #428: the home screen, laid out at a tablet's width and at 320 px.
         home: 'browser/home.html',
         // #528: the tripod phone's filming sign, at a phone's size — whether

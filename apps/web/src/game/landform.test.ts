@@ -157,15 +157,27 @@ function heightOver(
 ): number | undefined {
   const { vertices, indices } = mesh;
   for (let at = 0; at + 2 < indices.length; at += 3) {
-    const [a, b, c] = [indices[at], indices[at + 1], indices[at + 2]].map(
-      (index) => (index as number) * 3,
-    ) as [number, number, number];
+    // No array per triangle, and a bounding box before any division: since
+    // #543 the road has five times the triangles and this is called for every
+    // vertex of five times the ground, so the old shape of this loop took the
+    // test past its timeout under the coverage run.
+    const a = (indices[at] as number) * 3;
+    const b = (indices[at + 1] as number) * 3;
+    const c = (indices[at + 2] as number) * 3;
     const ax = vertices[a] as number;
     const az = vertices[a + 2] as number;
     const bx = vertices[b] as number;
     const bz = vertices[b + 2] as number;
     const cx = vertices[c] as number;
     const cz = vertices[c + 2] as number;
+    if (
+      x < Math.min(ax, bx, cx) - 1 ||
+      x > Math.max(ax, bx, cx) + 1 ||
+      z < Math.min(az, bz, cz) - 1 ||
+      z > Math.max(az, bz, cz) + 1
+    ) {
+      continue;
+    }
     const area = (bx - ax) * (cz - az) - (cx - ax) * (bz - az);
     if (Math.abs(area) < 1e-9) continue;
     const u = ((bx - x) * (cz - z) - (cx - x) * (bz - z)) / area;
@@ -269,7 +281,12 @@ describe('the ground never rises into the carriageway — #458', () => {
     // of the road — the far leg of a hairpin, the inside of a tight turn — so
     // the assertion above had something to refuse.
     expect(over).toBeGreaterThan(50);
-  });
+    // ⚠️ A timeout of its own since #543, which gave the corridor about 2.8
+    // times the rows: every ground vertex is judged against every road
+    // triangle, so the work grows with the square of that. A first cut with
+    // five times the rows passed 5 s under the coverage run (5.7 s, measured);
+    // the precedent is `line-on-the-road.test.ts`.
+  }, 30_000);
 
   it('folds the inside of a bend in, on the correct side', () => {
     // `hairpinRoute` turns RIGHT, so its right side (side 1) is the inside.
@@ -407,6 +424,21 @@ describe('the ground is the same place on every lap — #458', () => {
     for (let at = 1; at < first.length; at += 3) {
       expect(third.vertices[at]).toBeCloseTo(first[at] as number, 3);
     }
+  });
+
+  it('does not depend on what was built before it — #569', () => {
+    // #569 keeps storage between builds to pay for #543's rows: the clearance
+    // grid and its lists, and the relief hashes of the last two nodes. What is
+    // kept must be storage and never an answer, so the same ground built
+    // before and after two other routes' ground — a hairpin, whose far leg
+    // lies where this road's probes go, and a circuit, each on its own seed —
+    // is the same ground to the bit.
+    const profile = hillRoute();
+    const alone = Float32Array.from(frameAt(profile, 640).ground.vertices);
+    frameAt(hairpinRoute(12), 150);
+    frameAt(circuitRoute(40), 60);
+    const after = frameAt(profile, 640).ground.vertices;
+    expect(Array.from(after)).toEqual(Array.from(alone));
   });
 
   it('is bounded: never more relief than the cap, however long the route', () => {

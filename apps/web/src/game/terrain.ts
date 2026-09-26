@@ -95,15 +95,113 @@ export const VIEW_AHEAD_METRES = 400;
 export const VIEW_BEHIND_METRES = 60;
 
 /**
+ * How far apart the corridor's centreline points are, in metres: **2** — #543.
+ *
+ * ⚠️ **A drawing density, and it used to be the profile's own grid.** Until
+ * #543 the corridor stepped in whole profile grid points, about 10 m, so a
+ * bend was drawn as ten-metre straights meeting at whatever angle the route
+ * turned through there. On a route from a planner — a sample every 20 to 100 m
+ * and 25° to 45° of turn at each — that is the owner's *"odd angles"* on the
+ * Pixel Tablet, 2026-09-25: a joint in the edge lines every ten metres, each a
+ * whole corner of the source file. No step fixes that on its own (a corner
+ * drawn finely is still a corner — {@link BEND_SMOOTHING_METRES} is what rounds
+ * it), and no smoothing fixes it at ten metres, because a turn spread over
+ * twenty metres of road is still two joints.
+ *
+ * Two metres puts {@link MAXIMUM_CORRIDOR_JOINT_DEGREES} within reach of a real
+ * bend: a genuine 20 m-radius corner turns 5.7° every two metres of road, and
+ * the road cannot be drawn smoother than the road is.
+ *
+ * ⚠️ **What it costs**: the corridor is 131 points rather than 47 at the
+ * default reach — 106 of them two metres apart, from 60 m behind the rider to
+ * {@link CORRIDOR_DENSE_AHEAD_METRES} ahead — and the ground beside it
+ * (`landform.ts`) is built on every one, so its triangles rise by the same
+ * factor. The figures are in #543's pull request.
+ */
+export const CORRIDOR_STEP_METRES = 2;
+
+/**
+ * How far ahead of the rider the corridor keeps {@link CORRIDOR_STEP_METRES},
+ * in metres: **150** — #543. Beyond it, and to the far end, a point per grid
+ * step as before.
+ *
+ * ⚠️ **A cost decision, measured.** The ground beside the road (`landform.ts`)
+ * is built on every corridor point, so its JavaScript cost is proportional to
+ * them — and the first cut of #543 drew all 460 m at two metres, 231 points
+ * against 47: a whole scene frame went from about 1.0 to about 3.1 ms on a
+ * laptop on a route with water, and three suites already near their timeouts
+ * went past them in CI's coverage run. 150 m ahead is where a bend still fills
+ * a good part of the frame; past it the seven-metre road is a few tens of
+ * pixels across, and its corners are the smoothed road's own, seen at ten
+ * metres rather than the source file's.
+ */
+export const CORRIDOR_DENSE_AHEAD_METRES = 150;
+
+/**
+ * Over how much road either side of a point its drawn position is averaged,
+ * in metres: **10** — #543.
+ *
+ * The drawn centreline at route distance `d` is the mean of the route's own
+ * centreline over `[d − 10, d + 10]`: a box filter, computed exactly (see
+ * {@link drawnGroundPosition}). A corner of `θ` in the source file becomes a
+ * turn spread over twenty metres, and on a straight — any straight, of any
+ * length — the mean of a line is the line, so nothing moves there at all.
+ *
+ * ⚠️ **It cuts corners, and by how much is the trade.** At a sharp corner of
+ * `θ` the drawn road passes `(10 / 2)·sin(θ / 2)` metres inside the source's
+ * vertex: 1.3 m at 30°, 1.9 m at 45°, 3.5 m at 90°. On a true arc of radius
+ * `R` it runs about `10² / (6R)` inside it, 0.8 m at 20 m. The scenery is
+ * placed beside the ROUTE, `scatter.ts`'s 3 m verge beyond the road's edge on
+ * each leg, so what a cut costs is taken out of that verge: all but the 90°
+ * figure are inside it, and at 90° — a crossroads in one sample — a tree
+ * 6.5 m from both legs stands 9.2 m from the vertex along the bisector, which
+ * still leaves about 2.2 m between it and the drawn road's inner edge. And a
+ * real road is round where its file is angular, so inside the vertex is where
+ * the road actually is. A wider window rounds more and cuts more; this one
+ * keeps a planner's 45° corner a metre inside the verge.
+ *
+ * ⚠️ **The DRAWN road, never the ridden one.** A point keeps the route
+ * distance it was built for (`CorridorPoint.distance`), and its height and
+ * gradient are read there, on the centreline: the trainer's grade, distance,
+ * "To go", the ghost and the pacer's gap do not see this (CLAUDE.md §2's
+ * racing-line note; `line-on-the-road.test.ts`). The scenery's PLACEMENT does
+ * not see it either — `scatter.ts` projects the route itself — which is why
+ * the arrangement digest did not move.
+ */
+export const BEND_SMOOTHING_METRES = 10;
+
+/**
+ * The most the drawn road may turn between one corridor segment and the next
+ * on a planner's route, in degrees: **8** — #543's stated bound.
+ *
+ * Held by `terrain.test.ts` on `route-fixtures-testing.ts` §`plannerRoute` — a
+ * road of 20 m to 60 m bends exported the way a route planner exports one —
+ * and by the browser gate, which reads a bend back off the drawing buffer.
+ * The road's own curvature is the floor under it: a 20 m bend turns 5.7°
+ * every {@link CORRIDOR_STEP_METRES}, and the rest is the corners the source
+ * file put in it, spread over {@link BEND_SMOOTHING_METRES}.
+ *
+ * @test-facing the bound `terrain.test.ts` and `bend.browser.spec.ts` hold the
+ * drawn road to; nothing in the corridor's construction reads it.
+ */
+export const MAXIMUM_CORRIDOR_JOINT_DEGREES = 8;
+
+/**
  * The most quads the corridor is ever built from.
  *
  * The mobile budget is **draw calls, overdraw and fill rate, not triangles**
  * (#91), so this is not really a triangle budget — it is a bound on the work the
  * *rebuild* does, which happens on the JavaScript thread that GATT notifications
- * also arrive on. A corridor of 460 m at the profile's 10 m grid is 46 quads;
- * this leaves an order of magnitude of headroom before {@link roadCorridor}
- * starts striding, and the striding is what keeps a 1 m-resolution profile from
- * turning into 460.
+ * also arrive on. A corridor of 460 m at the profile's 10 m grid is 46 grid
+ * steps, and since #543 the 21 of them within
+ * {@link CORRIDOR_DENSE_AHEAD_METRES} are each drawn as five
+ * {@link CORRIDOR_STEP_METRES} pieces: 130 quads. The grid is still strided
+ * when a fine profile would pass this, and a step is never split so finely
+ * that the pieces would.
+ *
+ * ⚠️ **Until #543 the corridor was 46 quads and this left "an order of
+ * magnitude of headroom"**; a reviewer who remembers that is reading the old
+ * file. #543 spent some of it.
  */
 export const MAXIMUM_CORRIDOR_QUADS = 256;
 
@@ -434,34 +532,70 @@ export function roadCorridor(
   profile: RouteProfile,
   origin: CorridorOrigin,
   atDistance: number,
-  options: { readonly aheadMetres?: number; readonly behindMetres?: number } = {},
+  options: {
+    readonly aheadMetres?: number;
+    readonly behindMetres?: number;
+    /**
+     * The road as it was drawn before #543: one point per grid step and the
+     * route's own centreline, corners and all. The CONTROL — for
+     * `browser/bend-harness.ts`, which requires it to kink, and for
+     * `browser/loop-harness.ts`, whose #440 measurement is of the profile's
+     * closure and was calibrated on this drawing. Nothing the product runs
+     * passes it.
+     */
+    readonly unsmoothed?: boolean;
+  } = {},
 ): RoadCorridor {
   const ahead = options.aheadMetres ?? VIEW_AHEAD_METRES;
   const behind = options.behindMetres ?? VIEW_BEHIND_METRES;
   const span = ahead + behind;
 
-  // Stride in whole grid points, so every sample lands on a real profile entry
-  // and no elevation is interpolated twice — once here and once in `elevationAt`.
+  // The grid step: whole profile grid points, strided to stay inside
+  // MAXIMUM_CORRIDOR_QUADS. It still decides how FAR the corridor reaches —
+  // the last whole grid step inside the span — because that is what the
+  // scenery is windowed by (`scene.ts` §`scatter`), and #543 changes how the
+  // road is drawn and not what stands beside it.
   const resolution: number = profile.resolution;
   const wantedPoints = Math.floor(span / resolution) + 1;
   const stride = Math.max(1, Math.ceil((wantedPoints - 1) / MAXIMUM_CORRIDOR_QUADS));
-  const step = resolution * stride;
+  const gridStep = resolution * stride;
+  const gridSteps = Math.max(1, Math.floor(span / gridStep + 1e-9));
+  // ⚠️ #543: near the rider each grid step is divided into about
+  // CORRIDOR_STEP_METRES pieces; beyond CORRIDOR_DENSE_AHEAD_METRES it is
+  // not. Every point is interpolated (#323) whatever the step, so landing on
+  // a grid entry bought nothing; what the grid step cost was a joint every ten
+  // metres. @see CORRIDOR_DENSE_AHEAD_METRES for why not the whole corridor.
+  const denseGridSteps = Math.min(
+    gridSteps,
+    Math.ceil((behind + CORRIDOR_DENSE_AHEAD_METRES) / gridStep - 1e-9),
+  );
+  const coarseGridSteps = gridSteps - denseGridSteps;
+  const pieces =
+    options.unsmoothed === true
+      ? 1
+      : Math.max(
+          1,
+          Math.min(
+            Math.round(gridStep / CORRIDOR_STEP_METRES),
+            Math.floor((MAXIMUM_CORRIDOR_QUADS - coarseGridSteps) / Math.max(1, denseGridSteps)),
+          ),
+        );
+  const layout: RibbonLayout = { start: atDistance - behind, gridStep, pieces, denseGridSteps };
+  const smoothing = options.unsmoothed === true ? 0 : BEND_SMOOTHING_METRES;
 
   const centre: CorridorPoint[] = [];
-  const start = atDistance - behind;
-  for (let along = start; along <= atDistance + ahead + 1e-9; along += step) {
-    centre.push(pointAt(profile, origin, along));
+  for (let point = 0; point <= denseGridSteps * pieces; point += 1) {
+    centre.push(pointAt(profile, origin, layout.start + (point * gridStep) / pieces, smoothing));
   }
-  if (centre.length < 2) {
-    // A route shorter than one step still has to produce a drawable ribbon.
-    centre.push(pointAt(profile, origin, start + step));
+  for (let grid = denseGridSteps + 1; grid <= gridSteps; grid += 1) {
+    centre.push(pointAt(profile, origin, layout.start + grid * gridStep, smoothing));
   }
 
   const normals = ribbonNormals(centre);
   const surfaceVertices = centre.length * ROAD_COLUMNS;
   // Fixed for a given corridor configuration, and that is what makes the road's
   // buffer a constant size — see `markSlotCount`.
-  const slots = markSlotCount((centre.length - 1) * step);
+  const slots = markSlotCount(gridSteps * gridStep);
   const vertices = new Float32Array((surfaceVertices + slots * 4) * 3);
   const colours = new Float32Array(vertices.length);
 
@@ -469,8 +603,7 @@ export function roadCorridor(
   writeCentreLine(profile, centre, normals, {
     atDistance,
     behind,
-    start,
-    step,
+    layout,
     firstVertex: surfaceVertices,
     slots,
     vertices,
@@ -624,12 +757,40 @@ function writeSurface(
   }
 }
 
+/**
+ * Where a corridor's points are along the road — #543.
+ *
+ * Point `k` of the first `denseGridSteps · pieces + 1` is at odometer
+ * `start + k · gridStep / pieces`; after those, one point per grid step to the
+ * corridor's far end. A function of the configuration and the rider's
+ * distance only, so a corridor's point count never changes as the rider moves
+ * and every buffer built on it keeps its size (#240's NFR-3, #469).
+ */
+interface RibbonLayout {
+  readonly start: number;
+  readonly gridStep: number;
+  readonly pieces: number;
+  readonly denseGridSteps: number;
+}
+
+/**
+ * The ribbon coordinate of an odometer reading: `k` at point `k`, and
+ * fractional between two — the inverse of {@link RibbonLayout}.
+ */
+function ribbonParameter(layout: RibbonLayout, odometer: number): number {
+  const offset = odometer - layout.start;
+  const denseLength = layout.denseGridSteps * layout.gridStep;
+  if (offset <= denseLength) {
+    return (offset * layout.pieces) / layout.gridStep;
+  }
+  return layout.denseGridSteps * layout.pieces + (offset - denseLength) / layout.gridStep;
+}
+
 /** Everything {@link writeCentreLine} needs that is not the centreline itself. */
 interface CentreLineRequest {
   readonly atDistance: number;
   readonly behind: number;
-  readonly start: number;
-  readonly step: number;
+  readonly layout: RibbonLayout;
   readonly firstVertex: number;
   readonly slots: number;
   readonly vertices: Float32Array;
@@ -661,10 +822,11 @@ interface CentreLineRequest {
  *
  * ## Why the marks are placed on the ribbon's own parameter and not by position
  *
- * A mark's ends are interpolated along the ribbon by `(odometer - start) /
- * step`, which is exact: `pointAt` places the ribbon's point `k` at odometer
- * `start + k * step`, so the parameter *is* the ribbon coordinate of that route
- * distance.
+ * A mark's ends are interpolated along the ribbon at {@link ribbonParameter},
+ * which is exact: `pointAt` places the ribbon's points where
+ * {@link RibbonLayout} says, so the parameter *is* the ribbon coordinate of
+ * that route distance. (It was `(odometer - start) / step` until #543 made the
+ * step finer near the rider than beyond.)
  *
  * ⚠️ **It carried a phase correction until #323 and no longer does, and a
  * reviewer who remembers one is reading the old file.** `pointAt` used to snap
@@ -689,7 +851,7 @@ function writeCentreLine(
   normals: Float64Array,
   request: CentreLineRequest,
 ): void {
-  const { start, step, vertices, colours } = request;
+  const { layout, vertices, colours } = request;
   const half = CENTRE_LINE_WIDTH_METRES / 2;
   const lastIndex = centre.length - 1;
 
@@ -707,8 +869,8 @@ function writeCentreLine(
     // Clamped to the ribbon rather than dropped. A mark whose whole length is
     // outside collapses to one parameter, which makes its four vertices
     // coincide and its two triangles cover no pixels at all.
-    const fromParameter = clamp((from - start) / step, 0, lastIndex);
-    const toParameter = clamp((to - start) / step, 0, lastIndex);
+    const fromParameter = clamp(ribbonParameter(layout, from), 0, lastIndex);
+    const toParameter = clamp(ribbonParameter(layout, to), 0, lastIndex);
 
     const at = (request.firstVertex + slot * 4) * 3;
     writeMarkEdge(centre, normals, fromParameter, half, vertices, at);
@@ -877,7 +1039,12 @@ function clamp(value: number, low: number, high: number): number {
  * The wrap is applied to the *geometry* and recorded in `distance`; the
  * unwrapped `along` it was asked for is kept beside it. @see CorridorPoint.along
  */
-function pointAt(profile: RouteProfile, origin: CorridorOrigin, along: number): CorridorPoint {
+function pointAt(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  along: number,
+  smoothing: number,
+): CorridorPoint {
   // `distanceOnRoute` wraps a loop and clamps a point-to-point route, which is
   // exactly the behaviour the corridor wants at both ends: on a loop the road
   // continues, and on a straight route it stops rather than extrapolating into
@@ -899,7 +1066,10 @@ function pointAt(profile: RouteProfile, origin: CorridorOrigin, along: number): 
   // difference between two grid points every time the rider crosses one"*.
   // `scatter.ts` and `hud/plan.ts` were already reading positions this way;
   // this file was the one that was not.
-  const ground = localGroundPosition(origin, positionAt(profile, wrapped));
+  //
+  // #543: and since then averaged over {@link BEND_SMOOTHING_METRES} either
+  // side, so a corner in the source file is drawn as a bend.
+  const ground = drawnGroundPosition(profile, origin, wrapped, smoothing);
   return {
     x: ground.x,
     y: (elevationAt(profile, wrapped) as number) - origin.elevation,
@@ -908,3 +1078,188 @@ function pointAt(profile: RouteProfile, origin: CorridorOrigin, along: number): 
     along,
   };
 }
+
+/**
+ * Where the road is DRAWN at a route distance, in local metres — the same
+ * point {@link roadCorridor} puts the ribbon's centreline through there. #543's
+ * review.
+ *
+ * ⚠️ **Anything that stands ON or BESIDE the drawn road reads this, never
+ * `positionAt`.** Since #543 the ribbon runs up to about 1.9 m inside the
+ * route's own vertex at a planner's 45° corner, so a part placed from the
+ * route's centreline stands that far off the road it belongs to. The review
+ * measured a bridge parapet 1.27 m into the carriageway at a 45° corner on the
+ * valley floor; `waterways.ts` §`bridgeParts` and §`waterSurface` read this
+ * since. The scenery and the settlements are placed BESIDE the route with a
+ * verge to spare and deliberately do not — see {@link BEND_SMOOTHING_METRES}.
+ *
+ * `distance` is an odometer reading: it is wrapped (a loop) or clamped (a
+ * line) exactly as {@link roadCorridor}'s own points are.
+ */
+export function drawnRoadPosition(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  distance: number,
+): { readonly x: number; readonly z: number } {
+  return drawnGroundPosition(
+    profile,
+    origin,
+    distanceOnRoute(profile, distance),
+    BEND_SMOOTHING_METRES,
+  );
+}
+
+/**
+ * Where the road is DRAWN at a route distance: the mean of the route's own
+ * centreline over {@link BEND_SMOOTHING_METRES} either side of it — #543.
+ *
+ * ## Exact, not sampled
+ *
+ * `positionAt` is linear between two profile grid points, so the centreline is
+ * a polyline in route distance and its mean over a window is a sum of
+ * trapezoids, one per grid cell the window crosses: exact, with no sampling
+ * phase. ⚠️ **That is not a nicety.** The corridor is rebuilt from the rider's
+ * distance every frame, so its points slide along the road; a mean taken from
+ * samples at fixed offsets from each point would change slightly as the rider
+ * moved and the road would shimmer. This answer is a function of `wrapped`
+ * alone, so the same place is drawn in the same place on every frame and every
+ * lap.
+ *
+ * ## The two ends of a point-to-point route
+ *
+ * The window shrinks to fit inside `[0, totalDistance]`, reaching zero at each
+ * end, so the drawn road starts and finishes exactly where the route does. A
+ * window running off the end onto the clamped start point would pull the
+ * whole first ten metres back toward it — a road that began a couple of
+ * metres short of the start line. A loop has no ends: its window runs across
+ * the wrap, and `positionAt` wraps with it.
+ */
+function drawnGroundPosition(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  wrapped: number,
+  smoothing: number,
+): { readonly x: number; readonly z: number } {
+  const total: number = profile.totalDistance;
+  const half = profile.loop ? smoothing : Math.min(smoothing, wrapped, total - wrapped);
+  if (!(half > 0)) {
+    return localGroundPosition(origin, positionAt(profile, wrapped));
+  }
+  const low = wrapped - half;
+  const high = wrapped + half;
+  if (low >= 0 && high < total) {
+    // Inside one lap: the difference of the running integral at the window's
+    // two ends. @see centrelineIntegral
+    const integral = centrelineIntegral(profile, origin);
+    const from = integral(low);
+    const to = integral(high);
+    return { x: (to.x - from.x) / (2 * half), z: (to.z - from.z) / (2 * half) };
+  }
+  // Across a loop's wrap (a point-to-point route's window never leaves
+  // `[0, totalDistance]`): the cells summed one at a time, with `positionAt`
+  // wrapping at each end. ⚠️ **Kept rather than folded into the integral**,
+  // because at the wrap the two are NOT the same function on a loop that does
+  // not close: a profile stored as a line and marked a loop afterwards — the
+  // #440 control — jumps there, and summing the cell that ends ON the wrap
+  // reads its far end as the start of the next lap. `terrain.test.ts` §"the
+  // control — the same loop as a pre-#440 build stored it" is what said so.
+  const resolution: number = profile.resolution;
+  let from = low;
+  let fromPosition = localGroundPosition(origin, positionAt(profile, from));
+  let sumX = 0;
+  let sumZ = 0;
+  // The breakpoints are the grid points inside the window — whole multiples of
+  // the resolution, on a loop's unwrapped distance.
+  for (let node = Math.floor(low / resolution) + 1; ; node += 1) {
+    const to = Math.min(high, node * resolution);
+    const toPosition = localGroundPosition(origin, positionAt(profile, to));
+    const length = to - from;
+    sumX += ((fromPosition.x + toPosition.x) / 2) * length;
+    sumZ += ((fromPosition.z + toPosition.z) / 2) * length;
+    if (to >= high) {
+      break;
+    }
+    from = to;
+    fromPosition = toPosition;
+  }
+  return { x: sumX / (2 * half), z: sumZ / (2 * half) };
+}
+
+/**
+ * The route's own centreline integrated along route distance, from the start
+ * to a distance inside one lap — #569's cost, measured in its pull request.
+ *
+ * ⚠️ **The same sum of trapezoids {@link drawnGroundPosition} always took, with
+ * its whole cells added up once per route instead of once per point.** The
+ * integral at a distance is a table entry at the grid point below it plus one
+ * partial trapezoid, and a window's mean is the difference at its two ends —
+ * still exact, still a function of route distance alone, so nothing shimmers.
+ * Summing the cells afresh cost about four `positionAt` calls a point, each a
+ * fresh `GeographicPosition` through two range-checked brands, on 135 points
+ * every frame on the thread GATT notifications arrive on.
+ *
+ * Cached against the profile OBJECT — `waterways.ts` §`computed` argues why
+ * that is the one key that cannot go stale — and against the origin's two
+ * numbers as well, so a caller with another origin gets another table rather
+ * than a wrong one.
+ */
+function centrelineIntegral(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+): (distance: number) => { readonly x: number; readonly z: number } {
+  const cached = centrelineIntegrals.get(profile);
+  if (
+    cached !== undefined &&
+    cached.latitude === origin.latitude &&
+    cached.longitude === origin.longitude
+  ) {
+    return cached.at;
+  }
+  const count = profile.positions.length;
+  const resolution: number = profile.resolution;
+  const xs = new Float64Array(count);
+  const zs = new Float64Array(count);
+  for (let index = 0; index < count; index += 1) {
+    const ground = localGroundPosition(origin, profile.positions[index] as GeographicPosition);
+    xs[index] = ground.x;
+    zs[index] = ground.z;
+  }
+  const sumX = new Float64Array(count);
+  const sumZ = new Float64Array(count);
+  for (let index = 1; index < count; index += 1) {
+    sumX[index] =
+      (sumX[index - 1] as number) +
+      (((xs[index - 1] as number) + (xs[index] as number)) / 2) * resolution;
+    sumZ[index] =
+      (sumZ[index - 1] as number) +
+      (((zs[index - 1] as number) + (zs[index] as number)) / 2) * resolution;
+  }
+  // The index and the fraction are `positionAt`'s own — the domain's `gridAt`,
+  // clamped the same way — so this integrates exactly the polyline it reads.
+  const at = (distance: number): { x: number; z: number } => {
+    const raw = distance / resolution;
+    const index = Math.max(0, Math.min(Math.floor(raw), count - 2));
+    const fraction = Math.max(0, Math.min(1, raw - index));
+    const x0 = xs[index] as number;
+    const z0 = zs[index] as number;
+    const x = x0 + ((xs[index + 1] as number) - x0) * fraction;
+    const z = z0 + ((zs[index + 1] as number) - z0) * fraction;
+    const length = distance - index * resolution;
+    return {
+      x: (sumX[index] as number) + ((x0 + x) / 2) * length,
+      z: (sumZ[index] as number) + ((z0 + z) / 2) * length,
+    };
+  };
+  centrelineIntegrals.set(profile, { latitude: origin.latitude, longitude: origin.longitude, at });
+  return at;
+}
+
+/** @see centrelineIntegral */
+const centrelineIntegrals = new WeakMap<
+  RouteProfile,
+  {
+    readonly latitude: number;
+    readonly longitude: number;
+    readonly at: (distance: number) => { readonly x: number; readonly z: number };
+  }
+>();
