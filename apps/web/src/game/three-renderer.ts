@@ -6744,11 +6744,12 @@ class ThreeGameView implements GameView {
    *    pacer, the ground and the scenery the ride starts with. Synchronous
    *    because the frame's arrays are LENT (`landform.ts` §`TerrainMesh.lease`):
    *    the next frame the host builds writes over them.
-   * 2. **`compileAsync`** over the whole scene, hidden objects included, under
+   * 2. **`compile`** over the whole scene, hidden objects included, under
    *    the rung's lights and with `shadowMap.enabled` as the rung left it, so
    *    the program keys match what `render` will look up. With
    *    `KHR_parallel_shader_compile` the links run off the main thread and
-   *    this polls for them.
+   *    {@link programsLinked} polls for them — until they link, the view is
+   *    destroyed, the context is lost, or {@link PREPARE_FENCE_LIMIT_MS}.
    * 3. **One render with the scissor at a single pixel, then a fence.** The
    *    draw is what the other two cannot reach: the depth programs the riders
    *    are cast into the map with, which three makes only inside
@@ -6769,9 +6770,9 @@ class ThreeGameView implements GameView {
    * ⚠️ **What the pinned Chromium cannot tell apart**, stated: a scissor of
    * NOTHING warms it just as well as one pixel does (a driver may skip a draw
    * that covers no pixel, which is why it is one), and SwiftShader offers no
-   * `KHR_parallel_shader_compile`, so dropping `compileAsync` leaves the gate
+   * `KHR_parallel_shader_compile`, so dropping {@link programsLinked} leaves the gate
    * green — the programs are then linked, blocking, inside the warm-up render.
-   * What `compileAsync` buys is a main thread that keeps running while a
+   * What {@link programsLinked} buys is a main thread that keeps running while a
    * phone links them, and only the tablet can show it.
    *
    * ⚠️ **It warms the CURRENT rung only.** A step down later — `surfaceDetail`
@@ -6786,7 +6787,14 @@ class ThreeGameView implements GameView {
     }
     try {
       this.#stage(frame);
-      await renderer.compileAsync(this.#scene, this.#camera);
+      // Not `compileAsync`: its own poll can neither be stopped nor survive the
+      // view going away. @see programsLinked
+      renderer.compile(this.#scene, this.#camera);
+      await programsLinked(
+        renderer.getContext(),
+        () => renderer.info.programs ?? [],
+        () => this.#destroyed,
+      );
       if (this.#destroyed) {
         return;
       }
@@ -7202,24 +7210,76 @@ class ThreeGameView implements GameView {
 }
 
 /**
- * Copies one of `terrain.ts`'s arrays into the buffer three already holds.
- *
- * `set` into the existing array rather than replacing it, because replacing it
- * is the per-frame allocation #240's NFR-3 forbids. `needsUpdate` is the half
- * that is easy to forget and impossible to see: without it the copy happens,
- * nothing is re-uploaded, and the road stays wherever it was on the frame the
- * buffer was created.
- */
-/**
- * How long {@link ThreeGameView.prepare} waits for the GPU to finish its warm-up
- * draw before it lets the ride draw anyway: **10 s**. Part T's stall was about
- * 5 s on the Pixel Tablet, and a warm-up that outlived twice that is not one a
- * rider should wait out with no world.
+ * How long {@link ThreeGameView.prepare} waits on each of its two waits — the
+ * programs' links and the GPU finishing its warm-up draw — before it lets the
+ * ride draw anyway: **10 s**. Part T's stall was about 5 s on the Pixel Tablet,
+ * and a warm-up that outlived twice that is not one a rider should wait out
+ * with no world.
  */
 export const PREPARE_FENCE_LIMIT_MS = 10_000;
 
-/** How often {@link gpuFinished} looks at its fence. */
+/** How often {@link gpuFinished} and {@link programsLinked} look again. */
 const PREPARE_FENCE_POLL_MS = 16;
+
+/**
+ * Settles the first time `done` answers true, or after
+ * {@link PREPARE_FENCE_LIMIT_MS} whatever it answers. Polled on a timer, never
+ * waited on, so the main thread stays free.
+ */
+function settledWhen(done: () => boolean): Promise<void> {
+  const started = performance.now();
+  return new Promise((resolve) => {
+    const look = (): void => {
+      if (done() || performance.now() - started > PREPARE_FENCE_LIMIT_MS) {
+        resolve();
+        return;
+      }
+      setTimeout(look, PREPARE_FENCE_POLL_MS);
+    };
+    look();
+  });
+}
+
+/**
+ * Settles once every program three holds has finished linking — the half of
+ * `compileAsync` {@link ThreeGameView.prepare} needs, without the half it
+ * cannot have (#606's review).
+ *
+ * ⚠️ **Why not `renderer.compileAsync`**, read from three 0.185.1's source:
+ * its poll looks up each material's `currentProgram` on a timer of its own, and
+ * nothing can stop it. A view destroyed mid-poll disposes those materials, the
+ * lookup answers `{}`, and `program.isReady()` throws a TypeError out of three's
+ * `setTimeout` where no `catch` can reach it; a context lost mid-poll reads
+ * `COMPLETION_STATUS_KHR` as `null` for ever, so it polls every 10 ms for the
+ * rest of the visit. Either way the promise never settles, and the ride never
+ * draws its world. This polls the same status and stops on all three: the
+ * view gone (`stopped`), the context lost, and the limit.
+ *
+ * Settles at once where there is no `KHR_parallel_shader_compile` to poll —
+ * the programs then link, blocking, inside the warm-up draw, exactly as they
+ * do under `compileAsync` on such a device. A program whose GL object is gone
+ * counts as linked: there is nothing left to wait for.
+ */
+export function programsLinked(
+  gl: WebGLRenderingContext | WebGL2RenderingContext,
+  programs: () => readonly { readonly program: unknown }[],
+  stopped: () => boolean,
+): Promise<void> {
+  const parallel = gl.getExtension('KHR_parallel_shader_compile');
+  if (parallel === null) {
+    return Promise.resolve();
+  }
+  return settledWhen(
+    () =>
+      stopped() ||
+      gl.isContextLost() ||
+      programs().every(
+        ({ program }) =>
+          program === undefined ||
+          gl.getProgramParameter(program as WebGLProgram, parallel.COMPLETION_STATUS_KHR) === true,
+      ),
+  );
+}
 
 /**
  * Settles once the GPU has finished every command issued so far — polled on a
@@ -7237,26 +7297,24 @@ export function gpuFinished(gl: WebGLRenderingContext | WebGL2RenderingContext):
     return Promise.resolve();
   }
   gl.flush();
-  const started = performance.now();
-  return new Promise((resolve) => {
-    const look = (): void => {
-      const done =
-        gl.isContextLost() ||
-        gl.getSyncParameter(fence, gl.SYNC_STATUS) === gl.SIGNALED ||
-        performance.now() - started > PREPARE_FENCE_LIMIT_MS;
-      if (done) {
-        if (!gl.isContextLost()) {
-          gl.deleteSync(fence);
-        }
-        resolve();
-        return;
-      }
-      setTimeout(look, PREPARE_FENCE_POLL_MS);
-    };
-    look();
+  return settledWhen(
+    () => gl.isContextLost() || gl.getSyncParameter(fence, gl.SYNC_STATUS) === gl.SIGNALED,
+  ).then(() => {
+    if (!gl.isContextLost()) {
+      gl.deleteSync(fence);
+    }
   });
 }
 
+/**
+ * Copies one of `terrain.ts`'s arrays into the buffer three already holds.
+ *
+ * `set` into the existing array rather than replacing it, because replacing it
+ * is the per-frame allocation #240's NFR-3 forbids. `needsUpdate` is the half
+ * that is easy to forget and impossible to see: without it the copy happens,
+ * nothing is re-uploaded, and the road stays wherever it was on the frame the
+ * buffer was created.
+ */
 function upload(attribute: BufferAttribute, values: Float32Array | Uint32Array): void {
   (attribute.array as Float32Array | Uint32Array).set(values);
   attribute.needsUpdate = true;

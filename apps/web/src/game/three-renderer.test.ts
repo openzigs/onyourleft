@@ -107,6 +107,7 @@ import {
   PREPARE_FENCE_LIMIT_MS,
   RiderBelt,
   gpuFinished,
+  programsLinked,
   SCATTER_INSTANCE_CAPACITY,
   sceneryFitMetres,
   SCATTER_LATERAL_METRES,
@@ -3466,5 +3467,129 @@ describe('waiting for the GPU after the warm-up draw — #547', () => {
     await expect(gpuFinished(gl)).resolves.toBeUndefined();
     const webgl1 = { isContextLost: () => false } as unknown as WebGLRenderingContext;
     await expect(gpuFinished(webgl1)).resolves.toBeUndefined();
+  });
+
+  /**
+   * Just enough of a context with `KHR_parallel_shader_compile` to answer
+   * `COMPLETION_STATUS_KHR`: `true` once a program has been looked at more
+   * than `linkAfterLooks` times, and `null` — what a LOST context answers —
+   * once `lostAfterLooks` is passed. #606's review.
+   */
+  function linking(opts: {
+    linkAfterLooks?: number;
+    lostAfterLooks?: number;
+    noParallel?: boolean;
+  }) {
+    let looks = 0;
+    const COMPLETION_STATUS_KHR = 0x91b1;
+    const gl = {
+      getExtension: (name: string) =>
+        name === 'KHR_parallel_shader_compile' && opts.noParallel !== true
+          ? { COMPLETION_STATUS_KHR }
+          : null,
+      isContextLost: () => opts.lostAfterLooks !== undefined && looks > opts.lostAfterLooks,
+      getProgramParameter: (_program: unknown, name: number) => {
+        expect(name).toBe(COMPLETION_STATUS_KHR);
+        looks += 1;
+        if (opts.lostAfterLooks !== undefined && looks > opts.lostAfterLooks) {
+          return null;
+        }
+        return opts.linkAfterLooks !== undefined && looks > opts.linkAfterLooks;
+      },
+    };
+    return { gl: gl as unknown as WebGL2RenderingContext, looks: () => looks };
+  }
+
+  it('settles once every program has linked, polling rather than blocking', async () => {
+    vi.useFakeTimers();
+    const { gl, looks } = linking({ linkAfterLooks: 3 });
+    let settled = false;
+    void programsLinked(
+      gl,
+      () => [{ program: {} }],
+      () => false,
+    ).then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(settled).toBe(true);
+    expect(looks()).toBe(4);
+  });
+
+  it('stops polling when the view is destroyed while it waits', async () => {
+    vi.useFakeTimers();
+    const { gl, looks } = linking({});
+    let destroyed = false;
+    let settled = false;
+    void programsLinked(
+      gl,
+      () => [{ program: {} }],
+      () => destroyed,
+    ).then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(settled).toBe(false);
+    destroyed = true;
+    await vi.advanceTimersByTimeAsync(20);
+    expect(settled).toBe(true);
+    const after = looks();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(looks()).toBe(after);
+  });
+
+  it('settles when the context is lost, where the status reads null for ever', async () => {
+    vi.useFakeTimers();
+    const { gl } = linking({ lostAfterLooks: 2 });
+    let settled = false;
+    void programsLinked(
+      gl,
+      () => [{ program: {} }],
+      () => false,
+    ).then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(settled).toBe(true);
+  });
+
+  it('gives up after the limit, so a link that never finishes does not leave the ride dark', async () => {
+    vi.useFakeTimers();
+    const { gl } = linking({});
+    let settled = false;
+    void programsLinked(
+      gl,
+      () => [{ program: {} }],
+      () => false,
+    ).then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(PREPARE_FENCE_LIMIT_MS - 100);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(settled).toBe(true);
+  });
+
+  it('settles at once with no parallel-compile extension, and counts a deleted program as linked', async () => {
+    const without = linking({ noParallel: true });
+    await expect(
+      programsLinked(
+        without.gl,
+        () => [{ program: {} }],
+        () => false,
+      ),
+    ).resolves.toBeUndefined();
+    expect(without.looks()).toBe(0);
+    const deleted = linking({});
+    await expect(
+      programsLinked(
+        deleted.gl,
+        () => [{ program: undefined }],
+        () => false,
+      ),
+    ).resolves.toBeUndefined();
+    expect(deleted.looks()).toBe(0);
   });
 });
