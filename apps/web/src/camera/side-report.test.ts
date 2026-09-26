@@ -7,6 +7,7 @@
  * fire on its own change and on nothing else.
  */
 
+import { MAXIMUM_SIDE_REPORT_SENTENCE } from '@onyourleft/store';
 import { describe, expect, it } from 'vitest';
 
 import { MAXIMUM_POSE_SAMPLES, PoseSamples } from './side-analysis';
@@ -28,6 +29,7 @@ import {
   SIDE_OBSERVATION_VOCABULARY,
   SIDE_REPORT_NO_MODEL,
   SIDE_REPORT_OBSERVED,
+  SIDE_REPORT_OBSERVED_IN_PART,
   SIDE_REPORT_SUMMARIES,
   SIDE_REPORT_TOO_SHORT,
   SIDE_REPORT_UNCHANGED,
@@ -215,12 +217,22 @@ describe('what "nothing changed" claims (#561’s review, ADR 0030 R2)', () => {
     expect(report(session(BASE))?.summary).toBe(SIDE_REPORT_UNCHANGED);
   });
 
-  it('still reports a change it could see when another part could not be compared', () => {
+  it('still reports a change it could see when another part could not be compared, and says once that some were not (#564)', () => {
     const samples = without(session(BASE, { ...BASE, torso: 35 }), 'ankle');
     expect(report(samples)).toStrictEqual({
-      summary: SIDE_REPORT_OBSERVED,
+      summary: SIDE_REPORT_OBSERVED_IN_PART,
       observations: [SIDE_OBSERVATION_SENTENCES.torso.decreased],
     });
+  });
+
+  it('keeps the plain observed summary when every kind was compared', () => {
+    expect(report(session(BASE, { ...BASE, torso: 35 }))?.summary).toBe(SIDE_REPORT_OBSERVED);
+  });
+
+  it('words the partial observed summary as the observed one, plus what was left out', () => {
+    expect(SIDE_REPORT_OBSERVED_IN_PART.startsWith(SIDE_REPORT_OBSERVED)).toBe(true);
+    expect(SIDE_REPORT_OBSERVED_IN_PART).toContain('only the parts it could');
+    expect(isReportSummary(SIDE_REPORT_OBSERVED_IN_PART)).toBe(true);
   });
 
   it('does not word the partial sentence as though everything were compared', () => {
@@ -349,6 +361,16 @@ describe('what a report may say (ADR 0030)', () => {
       for (const observation of said?.observations ?? []) {
         expect(isReportSentence(observation)).toBe(true);
       }
+    }
+  });
+
+  // #564: the store refuses a sentence longer than this, and the keeper would
+  // then drop the whole report without a word. A wording edit past it is a red
+  // test here rather than a report that silently never saves.
+  it('says nothing longer than the store will keep', () => {
+    expect(SIDE_REPORT_SUMMARIES.length + SIDE_OBSERVATION_VOCABULARY.length).toBeGreaterThan(10);
+    for (const sentence of [...SIDE_REPORT_SUMMARIES, ...SIDE_OBSERVATION_VOCABULARY]) {
+      expect(sentence.length, sentence).toBeLessThanOrEqual(MAXIMUM_SIDE_REPORT_SENTENCE);
     }
   });
 

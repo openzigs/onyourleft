@@ -187,6 +187,9 @@ export {
   toPersistedRoute,
   fromPersistedSegment,
   toPersistedSegment,
+  // The side camera's report sentences have a length the store refuses past;
+  // the client's wording is held under it by a test (#564).
+  MAXIMUM_SIDE_REPORT_SENTENCE,
 } from './persisted';
 
 // --- Identity: the device keypair and signed activity records (#61) ---------
