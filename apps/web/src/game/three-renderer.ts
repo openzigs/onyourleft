@@ -306,7 +306,9 @@ import {
   CAMERA_BEHIND_METRES,
   CAMERA_FIELD_OF_VIEW_DEGREES,
   FRUSTUM_SPREAD,
+  NEAR_PLANE_METRES,
   cameraRig,
+  type CameraRig,
   verticalFieldOfViewDegrees,
 } from './camera';
 import {
@@ -315,6 +317,13 @@ import {
   VIEW_AHEAD_METRES,
   VIEW_BEHIND_METRES,
 } from './terrain';
+import {
+  clearOfTheCamera,
+  prepareShape,
+  type DrawnWorld,
+  type ShapeTriangles,
+  type ShapesOf,
+} from './near-field';
 import { FIELD_DEPTH_METRES, FIELD_EDGE_LATERAL_METRES } from './settlements';
 import {
   MAXIMUM_BRIDGE_PARTS,
@@ -1424,6 +1433,8 @@ export async function loadSceneryModels(
     }
   }
   sceneryGeometries = loaded;
+  // #545: the near-plane cull's shapes, built now rather than on a frame.
+  warmNearFieldShapes('stylised');
 }
 
 /**
@@ -4281,6 +4292,8 @@ export async function loadRealisticWorld(
       structures,
       body,
     };
+    // #545: the near-plane cull's shapes, built now rather than on a frame.
+    warmNearFieldShapes('realistic');
     if (previous !== undefined) {
       try {
         releaseRealisticWorld(previous);
@@ -6229,6 +6242,138 @@ export function filterWaterRipplesOf(view: GameView, on: boolean): void {
 }
 
 /**
+ * Moves a view's near plane and turns its near-plane cull off or on — #545.
+ * The browser gate's measure and its control: a frame drawn with the near
+ * plane where it ships and again with it nearer differs only where something
+ * stood between the two planes, which is exactly what the shipped plane cut
+ * away; with the cull off, a frame whose scenery the plane cuts must show it.
+ *
+ * @test-facing the browser gate's switch, read by `game-harness.ts`; the
+ * product never moves the near plane nor turns the cull off.
+ */
+export function nearFieldOf(view: GameView, nearMetres: number, clear: boolean): void {
+  if (view instanceof ThreeGameView) view.nearField(nearMetres, clear);
+}
+
+/** How many numbers {@link writeTriangles} writes for a geometry: nine a triangle. */
+function triangleNumbers(geometry: BufferGeometry): number {
+  const index = geometry.getIndex();
+  return (index === null ? geometry.getAttribute('position').count : index.count) * 3;
+}
+
+/**
+ * Writes a geometry's triangles into `out` from `offset`, nine numbers a
+ * triangle, scaled by `factor`; returns where it stopped. Into a sized array
+ * rather than a growing one, so a realistic tree's half-million numbers are
+ * one allocation (#545's review).
+ */
+function writeTriangles(
+  geometry: BufferGeometry,
+  factor: number,
+  out: Float32Array,
+  offset: number,
+): number {
+  const position = geometry.getAttribute('position');
+  const index = geometry.getIndex();
+  const corners = index === null ? position.count : index.count;
+  let at = offset;
+  for (let corner = 0; corner < corners; corner += 1) {
+    const vertex = index === null ? corner : index.getX(corner);
+    out[at] = position.getX(vertex) * factor;
+    out[at + 1] = position.getY(vertex) * factor;
+    out[at + 2] = position.getZ(vertex) * factor;
+    at += 3;
+  }
+  return at;
+}
+
+/** Each loaded kind's shapes as triangles, built once per set of loaded geometries. */
+const nearFieldTriangles = new WeakMap<object, readonly ShapeTriangles[]>();
+
+/**
+ * The shapes each kind is drawn as in a world, as triangles in the item's own
+ * frame at a scale of 1 — what `near-field.ts` §`clearOfTheCamera` asks when
+ * an item's box reaches the near plane — #545.
+ *
+ * - **Stylised**: {@link sceneryGeometries}, already fitted and centred by
+ *   {@link prepareSceneryGeometry}. A kind with none loaded — the post, or a
+ *   model that failed — is `undefined`, and is judged by its box.
+ * - **Realistic**: each loaded shape's parts together, sized as
+ *   {@link RealisticVegetationBelt} sizes an instance, `sceneryFitMetres` over
+ *   the scan's extent. The structures and the post are `undefined`.
+ *
+ * Kept against the geometries they were built from, so a frame costs a
+ * lookup. ⚠️ **Built when the models LOAD, not on the frame a tree first comes
+ * near** — {@link warmNearFieldShapes}, from {@link loadSceneryModels} and
+ * {@link loadRealisticWorld}. #545's review found the first version building a
+ * realistic kind's half-million numbers, and `near-field.ts` sorting them, on
+ * that frame; built lazily they still would be, so the warm is what moves the
+ * cost off the render loop.
+ */
+function nearFieldShapesOf(
+  world: DrawnWorld,
+  kind: SceneryKind,
+): readonly ShapeTriangles[] | undefined {
+  if (world === 'realistic') {
+    if (!isRealisticVegetation(kind)) return undefined;
+    const shapes = realisticWorld?.vegetation.get(kind);
+    if (shapes === undefined || shapes.length === 0) return undefined;
+    const cached = nearFieldTriangles.get(shapes);
+    if (cached !== undefined) return cached;
+    const built = shapes.map((shape) => {
+      const out = new Float32Array(
+        shape.parts.reduce((sum, part) => sum + triangleNumbers(part.geometry), 0),
+      );
+      let at = 0;
+      for (const part of shape.parts) {
+        at = writeTriangles(part.geometry, sceneryFitMetres(kind) / shape.extent, out, at);
+      }
+      return out;
+    });
+    nearFieldTriangles.set(shapes, built);
+    return built;
+  }
+  const geometries = sceneryGeometries.get(kind);
+  if (geometries === undefined || geometries.length === 0) return undefined;
+  const cached = nearFieldTriangles.get(geometries);
+  if (cached !== undefined) return cached;
+  const built = geometries.map((geometry) => {
+    const out = new Float32Array(triangleNumbers(geometry));
+    writeTriangles(geometry, 1, out, 0);
+    return out;
+  });
+  nearFieldTriangles.set(geometries, built);
+  return built;
+}
+
+/** One lookup per world, made once rather than a closure a frame. */
+const NEAR_FIELD_SHAPES: Readonly<Record<DrawnWorld, ShapesOf>> = {
+  stylised: (kind) => nearFieldShapesOf('stylised', kind),
+  realistic: (kind) => nearFieldShapesOf('realistic', kind),
+};
+
+/** The shapes each kind is drawn as in a world. @see nearFieldShapesOf */
+export function nearFieldShapes(world: DrawnWorld): ShapesOf {
+  return NEAR_FIELD_SHAPES[world];
+}
+
+/**
+ * Builds and prepares every kind's near-field shapes for a world, so that none
+ * is built on a frame — #545's review. Called when that world's models load.
+ */
+function warmNearFieldShapes(world: DrawnWorld): void {
+  try {
+    for (const kind of SCENERY_KINDS) {
+      for (const shape of nearFieldShapesOf(world, kind) ?? []) prepareShape(shape);
+    }
+  } catch {
+    // ⚠️ Not a failed load: the models ARE loaded, and a load reported as
+    // failed after its world was swapped in would leave the old one unreleased.
+    // Whatever did not warm is built on the frame that first asks, as before.
+  }
+}
+
+/**
  * Turns a view's realistic horizon back to the stylised world's pale one, or
  * on again — #544. The browser gate's control: with it off, the pale band the
  * owner saw on the tablet must read back off the drawing buffer, or the
@@ -6285,7 +6430,16 @@ class ThreeGameView implements GameView {
   readonly hasContext: boolean;
   readonly #renderer: WebGLRenderer | undefined;
   readonly #scene = new Scene();
-  readonly #camera = new PerspectiveCamera(CAMERA_FIELD_OF_VIEW_DEGREES, 1, 0.5, 2_000);
+  // #545: `camera.ts`' near plane, which `near-field.test.ts` rides the
+  // fixture routes against.
+  readonly #camera = new PerspectiveCamera(
+    CAMERA_FIELD_OF_VIEW_DEGREES,
+    1,
+    NEAR_PLANE_METRES,
+    2_000,
+  );
+  /** Whether the near-plane cull is on. @see nearFieldOf */
+  #clearOfTheCamera = true;
   /** Reused every frame: `#placeCamera` allocated a `Vector3` per frame until #424 (NFR-3). */
   readonly #lookAt = new Vector3();
   readonly #roadGeometry = new BufferGeometry();
@@ -6470,6 +6624,9 @@ class ThreeGameView implements GameView {
     }
     this.#updateWorld(frame.world);
     this.#world = frame.world;
+    // Worked out once a frame: the horizon, the near-plane cull and the camera
+    // all read it.
+    const rig = cameraRig(frame.camera);
     this.#terrain.update(frame.terrain.mesh, frame.world.groundColour);
     this.#horizon.update(
       frame.terrain.horizon,
@@ -6479,7 +6636,7 @@ class ThreeGameView implements GameView {
       // #544: in the realistic world no crest stands below the photograph's
       // own skyline, or the photographed field is drawn above the hills.
       this.#horizonIsSky
-        ? skylineCrestFloor(cameraRig(frame.camera).eye.y, HORIZON_RADIUS_METRES)
+        ? skylineCrestFloor(rig.eye.y, HORIZON_RADIUS_METRES)
         : Number.NEGATIVE_INFINITY,
       this.#horizonIsSky ? REALISTIC_HORIZON_HAZE_SHARE : HORIZON_HAZE_SHARE,
     );
@@ -6495,12 +6652,25 @@ class ThreeGameView implements GameView {
     // ⚠️ Both worlds' belts are handed the frame, and the hidden world's
     // return at once (ADR 0026 D-3): one frame, one arrangement, whichever
     // world draws it — so the two can never disagree about where a tree is.
-    this.#scatter.update(frame.scatter, frame.camera);
-    this.#realistic?.updateScenery(frame.scatter, frame.camera);
+    //
+    // #545: and neither is handed an item the near plane would cut, for THIS
+    // frame's aspect and THIS world's shapes. `near-field.ts` says what that is,
+    // and why it asks the triangles rather than a box.
+    const scenery = this.#clearOfTheCamera
+      ? clearOfTheCamera(
+          frame.scatter,
+          rig,
+          this.#camera.aspect,
+          this.#drawing,
+          nearFieldShapes(this.#drawing),
+        )
+      : frame.scatter;
+    this.#scatter.update(scenery, frame.camera);
+    this.#realistic?.updateScenery(scenery, frame.camera);
     this.#realistic?.riders.place(frame.markers);
     this.#updateMarkers(frame.markers);
     this.#updateShadows(frame);
-    this.#placeCamera(frame.camera);
+    this.#placeCamera(rig);
     this.#renderer.render(this.#scene, this.#camera);
   }
 
@@ -6607,6 +6777,13 @@ class ThreeGameView implements GameView {
   } {
     const fog = this.#fog.color;
     return { fog: [fog.r, fog.g, fog.b], foot: this.#horizon.foot };
+  }
+
+  /** @see nearFieldOf */
+  nearField(nearMetres: number, clear: boolean): void {
+    this.#camera.near = nearMetres;
+    this.#camera.updateProjectionMatrix();
+    this.#clearOfTheCamera = clear;
   }
 
   /** @see filterWaterRipplesOf */
@@ -6856,8 +7033,7 @@ class ThreeGameView implements GameView {
    * level gaze from behind the rider whatever the road did, and `cameraRig`
    * says what that does to a low camera on a hill. This applies the answer.
    */
-  #placeCamera(pose: CameraPose): void {
-    const { eye, target } = cameraRig(pose);
+  #placeCamera({ eye, target }: CameraRig): void {
     this.#camera.position.set(eye.x, eye.y, eye.z);
     this.#camera.lookAt(this.#lookAt.set(target.x, target.y, target.z));
     // #425. The sky is centred on the eye, so it is always the same distance

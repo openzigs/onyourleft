@@ -69,7 +69,7 @@ import {
   type RoutePoint,
 } from '@onyourleft/domain';
 
-import { cameraRig, verticalHalfTangent } from '../src/game/camera';
+import { NEAR_PLANE_METRES, cameraRig, verticalHalfTangent } from '../src/game/camera';
 import type { CameraPose, SceneFrame } from '../src/game/port';
 import type { WorldStyle } from '../src/game/world';
 
@@ -110,7 +110,10 @@ import {
   threeGameRenderer,
   waterSkyOf,
   filterWaterRipplesOf,
+  nearFieldOf,
+  nearFieldShapes,
 } from '../src/game/three-renderer';
+import { clearOfTheCamera, nearPyramid, sceneryReach } from '../src/game/near-field';
 import { realisticWorldNotice } from '../src/game/realistic-assets';
 import {
   scatterSeed,
@@ -257,6 +260,27 @@ interface SettlementMeasurement {
 
 /** What {@link shadowMapProbe} publishes. */
 type ShadowMapMeasurement = NonNullable<Window['__oylGameHarness']>['shadowMap'];
+
+/**
+ * The closest pass of scenery to the camera on a ride, as the renderer drew
+ * it — #545. @see nearFieldProbe
+ */
+export interface NearFieldMeasurement {
+  /** Route distance of the frame the probe chose, in metres. */
+  readonly distance: number;
+  /** How far the nearest dropped item's pivot is from the eye in plan, in metres. */
+  readonly pivotMetres: number;
+  /** What the renderer's cull dropped in that frame, by kind. */
+  readonly cut: readonly string[];
+  /** Pixels that differ between the near plane where it ships and one half as far, cull on. */
+  readonly shippedPixels: number;
+  /** The same with the cull off — the control. */
+  readonly controlPixels: number;
+  /** The shipped frame drawn twice and compared: what "differs" means with nothing changed. */
+  readonly noisePixels: number;
+  /** Which world the probe's view drew — the realistic one, or the measure is of the wrong world. */
+  readonly world: string;
+}
 
 /** One read-back pixel, as four bytes. */
 type Pixel = readonly [number, number, number, number];
@@ -705,6 +729,8 @@ declare global {
       readonly water: WaterMeasurement;
       /** #460 — a village and its fields, drawn and timed. @see settlementProbe */
       readonly settlement: SettlementMeasurement;
+      /** #545 — the closest pass of scenery to the camera, drawn. @see nearFieldProbe */
+      readonly nearField: NearFieldMeasurement;
       /**
        * Pixels the bot's own cranks move over half a development — #368.
        *
@@ -1076,6 +1102,145 @@ function lineProbe(
   const straightOff = measured(drawn(straightStill(straightOnTheCentre)));
   view.destroy();
   return { on, onUpright, off, straightOn, straightOff };
+}
+
+/** What {@link nearFieldProbe} reports when it did not run. */
+const NO_NEAR_FIELD: NearFieldMeasurement = {
+  distance: Number.NaN,
+  pivotMetres: Number.NaN,
+  cut: [],
+  shippedPixels: Number.NaN,
+  controlPixels: Number.NaN,
+  noisePixels: Number.NaN,
+  world: '',
+};
+
+/**
+ * How much nearer than it ships the control draws the near plane: half.
+ *
+ * Nearer than that and the depth buffer's precision — which goes as
+ * `near / far` — starts to flicker the far road against the ground beside it,
+ * and that reads here as a difference: at a tenth, about fifty pixels of a
+ * frame with nothing near the eye at all. Half uncovers everything the shipped
+ * plane cut between a quarter and half a metre from the eye.
+ */
+const CONTROL_NEAR_SHARE = 0.5;
+
+/**
+ * The closest pass of scenery to the camera on a ride, drawn — #545's second
+ * criterion.
+ *
+ * ## The measure
+ *
+ * A frame is drawn with the near plane where it ships and again with it half
+ * as far ({@link CONTROL_NEAR_SHARE}). The two differ ONLY where something
+ * stood between the two planes — which is what the shipped plane cuts away. So
+ * the count of pixels that differ is how much cut geometry the shipped frame
+ * has: nought means none.
+ *
+ * ## Which frame
+ *
+ * A 20 m hairpin climbing at 4 %, ridden a metre at a time with the camera on
+ * the racing line, in the REALISTIC world the owner saw it in, on a 6 : 1
+ * canvas: the widest frame the stylesheet allows, and the only aspect at which
+ * `near-field.test.ts` finds the fixture routes cut at all. The frame is the
+ * one where `near-field.ts` §`clearOfTheCamera`, asked with the renderer's own
+ * loaded shapes, drops the most — the closest pass, and the only kind of frame
+ * on which a green "nothing cut" could be wrong.
+ *
+ * ## The control
+ *
+ * The same frame with the cull off ({@link nearFieldOf}) must differ, and
+ * plainly: that is the defect, drawn. Without it, a frame with nothing near the
+ * eye, or a near plane the hook failed to move, would report "nothing cut" for
+ * free. And the shipped frame drawn twice is the noise floor, so a renderer
+ * that is never still cannot pass as a clean one.
+ */
+function nearFieldProbe(
+  width: number,
+  height: number,
+  settings: QualitySettings,
+): NearFieldMeasurement {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const view = threeGameRenderer.create(canvas, settings);
+  view.resize(width, height);
+  const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+  if (gl === null) {
+    view.destroy();
+    return NO_NEAR_FIELD;
+  }
+  const world = drawnWorldOf(view);
+  const shapes = nearFieldShapes(world);
+  const profile = hairpinRoute(20);
+  const origin = corridorOrigin(profile);
+  const start = atStartLine(profile);
+  const inputAt = (distance: number): Parameters<typeof builtSceneFrame>[0] => ({
+    profile,
+    origin,
+    state: { ...start, ride: { speed: metresPerSecond(8), distance: metres(distance) } },
+  });
+  let chosen: { distance: number; pivot: number; cut: readonly string[] } | undefined;
+  for (let distance = 0; distance < profile.totalDistance; distance += 1) {
+    const lent = lentSceneFrame(inputAt(distance));
+    const rig = cameraRig(lent.camera);
+    const kept = new Set(clearOfTheCamera(lent.scatter, rig, width / height, world, shapes));
+    const dropped = lent.scatter.filter((item) => !kept.has(item));
+    if (dropped.length === 0) continue;
+    const pivot = Math.min(
+      ...dropped.map((item) => Math.hypot(item.x - rig.eye.x, item.z - rig.eye.z)),
+    );
+    if (chosen === undefined || pivot < chosen.pivot) {
+      chosen = { distance, pivot, cut: dropped.map((item) => item.kind) };
+    }
+  }
+  if (chosen === undefined) {
+    view.destroy();
+    return NO_NEAR_FIELD;
+  }
+  // Only the scenery that COULD reach the plane — an item whose pivot is
+  // further off in plan than its own reach (`near-field.ts` §`sceneryReach`)
+  // plus the pyramid's cannot be cut. What stands further off is not neutral
+  // to this measure: moving the near plane moves the depth buffer's precision
+  // everywhere, and a far tree's foot against the ground changes by a few
+  // pixels — eight, on the frame this probe picks, with nothing near the eye.
+  const built = sceneFrame(inputAt(chosen.distance));
+  const rig = cameraRig(built.camera);
+  const pyramid = nearPyramid(rig, width / height);
+  const frame: SceneFrame = {
+    ...built,
+    scatter: built.scatter.filter((item) => {
+      const reach = sceneryReach(item.kind, world);
+      const plan = Math.hypot(reach.x, Math.max(-reach.back, reach.front)) * item.scale;
+      return Math.hypot(item.x - rig.eye.x, item.z - rig.eye.z) <= plan + pyramid.radius;
+    }),
+  };
+  const drawn = (near: number, clear: boolean): Uint8Array => {
+    nearFieldOf(view, near, clear);
+    // Twice, and only the second read: `riderExtent` says why.
+    view.render(frame);
+    view.render(frame);
+    return readRegion(gl, 0, 0, width, height);
+  };
+  const differing = (a: Uint8Array, b: Uint8Array): number =>
+    compareRegions(a, b, width, height, 0, 0, width, height).changed;
+  const shipped = drawn(NEAR_PLANE_METRES, true);
+  const again = drawn(NEAR_PLANE_METRES, true);
+  const shippedNear = drawn(NEAR_PLANE_METRES * CONTROL_NEAR_SHARE, true);
+  const control = drawn(NEAR_PLANE_METRES, false);
+  const controlNear = drawn(NEAR_PLANE_METRES * CONTROL_NEAR_SHARE, false);
+  nearFieldOf(view, NEAR_PLANE_METRES, true);
+  view.destroy();
+  return {
+    distance: chosen.distance,
+    pivotMetres: chosen.pivot,
+    cut: chosen.cut,
+    shippedPixels: differing(shipped, shippedNear),
+    controlPixels: differing(control, controlNear),
+    noisePixels: differing(shipped, again),
+    world,
+  };
 }
 
 /** What the harness reports for the world before a frame has produced one. */
@@ -3836,6 +4001,7 @@ function emptyHarness(errors: readonly string[]): NonNullable<Window['__oylGameH
     gradient: NO_GRADIENT,
     water: NO_WATER,
     settlement: NO_SETTLEMENT,
+    nearField: NO_NEAR_FIELD,
     botCrankPixels: 0,
     contactShadowPixels: {},
     contactShadowLuminance: {},
@@ -3860,7 +4026,11 @@ async function run(): Promise<void> {
   // makes — and so the realistic world's load is paid by one page load only.
   if (new URLSearchParams(location.search).has('realistic')) {
     try {
-      window.__oylGameHarness = { ...emptyHarness(errors), realistic: await realisticProbe() };
+      const realistic = await realisticProbe();
+      // #545, in the world the owner saw it in — after `realisticProbe`, which
+      // is what loaded that world. @see nearFieldProbe
+      const nearField = nearFieldProbe(1_200, 200, REALISTIC_LADDER[0] as QualitySettings);
+      window.__oylGameHarness = { ...emptyHarness(errors), realistic, nearField };
     } catch (error: unknown) {
       errors.push(error instanceof Error ? error.message : String(error));
       window.__oylGameHarness = emptyHarness(errors);
@@ -4540,6 +4710,7 @@ async function run(): Promise<void> {
     gradient,
     water,
     settlement,
+    nearField: NO_NEAR_FIELD,
     botCrankPixels,
     contactShadowPixels,
     contactShadowLuminance,
