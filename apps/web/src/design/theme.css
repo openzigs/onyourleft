@@ -1798,8 +1798,12 @@ select option {
 
    `--oyl-font-size-md` rather than the 2.5 rem a value gets: this is a sentence
    read once, not a magnitude glanced at, and `hud-value-size.test.ts` carries
-   the floor that keeps it above the label beside it. */
-.oyl-hud__trainer {
+   the floor that keeps it above the label beside it.
+
+   #551: the side camera's line is the same kind of sentence in the same
+   panel, so it is set the same way and measured against the same pair. */
+.oyl-hud__trainer,
+.oyl-hud__side-camera {
   margin: 0;
   color: var(--oyl-color-hud-ink-muted);
   font-size: var(--oyl-font-size-md);
@@ -1809,6 +1813,19 @@ select option {
 .oyl-hud__controls {
   display: flex;
   gap: var(--oyl-space-md);
+}
+
+/* #551: the side camera's line and *Stop side camera*, side by side in one
+   row, so the actions panel grows by one control's height rather than by a
+   line and a control — `HudPanel.tsx` has the measurement. */
+.oyl-hud__side-camera-row {
+  display: flex;
+  align-items: center;
+  gap: var(--oyl-space-md);
+}
+
+.oyl-hud__side-camera-row > .oyl-hud__side-camera {
+  flex: 1;
 }
 
 .oyl-hud__control {

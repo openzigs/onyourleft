@@ -160,6 +160,20 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * ride is.
    */
   readonly sound?: ReactNode;
+  /**
+   * The paired side camera — #551: one line, and *Stop side camera* while the
+   * phone films or the link is lost. `undefined` with no pairing.
+   *
+   * ⚠️ **In the actions panel rather than the notice slot**, and #437 is why:
+   * a notice on a phone takes the route panel's cell, and a line that says
+   * "filming" for a whole ride would take it for the whole ride. What IS in
+   * the notice slot is the exception — a lost link — which `GameView` puts in
+   * {@link notices} and leaves `line` undefined for.
+   *
+   * ⚠️ **Words only** — ADR 0033's *"no preview on the tablet"*.
+   */
+  readonly sideCamera?:
+    { readonly line: string | undefined; readonly onStop: (() => void) | undefined } | undefined;
   readonly standingNotice?:
     | {
         readonly content: ReactNode;
@@ -277,6 +291,34 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
             </button>
           )}
         </div>
+        {/*
+          #551: the side camera's line and its stop, as ONE row under Pause and
+          End ride — so the two a rider presses every ride keep their places,
+          and so the panel grows by one control's height and not by a line
+          and a control. Measured in the pinned Chromium: as a line above the
+          controls and a stop below them, the actions panel was 236 px tall
+          and landed on the route panel at 736×360 and on the rider upright at
+          360×800 (`ride.browser.spec.ts` §"#551"). ⚠️ With #400's sound
+          controls as well it is 256 px and does not fit any phone viewport;
+          tablets fit. That is #576, not measured by a case here yet.
+        */}
+        {props.sideCamera === undefined ? null : (
+          <div className="oyl-hud__side-camera-row">
+            {props.sideCamera.line === undefined ? null : (
+              <p className="oyl-hud__side-camera">{props.sideCamera.line}</p>
+            )}
+            {props.sideCamera.onStop === undefined ? null : (
+              <button
+                type="button"
+                className="oyl-hud__control"
+                onClick={props.sideCamera.onStop}
+                style={{ minWidth: CONTROL_MINIMUM_PIXELS, minHeight: CONTROL_MINIMUM_PIXELS }}
+              >
+                Stop side camera
+              </button>
+            )}
+          </div>
+        )}
         {props.sound}
       </div>
 
