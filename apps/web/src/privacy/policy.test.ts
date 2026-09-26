@@ -66,7 +66,7 @@ describe('the published privacy policy', () => {
     expect(text).not.toContain('`sendBeacon` call at all');
   });
 
-  it('says what the side-camera link carries, and that it carries no picture yet — #529', () => {
+  it('says what the side-camera link carries — #529 — and, since #530, the pictures', () => {
     // ADR 0033 D-10: the policy changes in the pull request that sends the
     // first link byte, and the words about pictures land with #530. So this
     // pins the section AND the count it made false.
@@ -74,8 +74,17 @@ describe('the published privacy policy', () => {
     expect(text).toContain('A second phone you pair as a side camera');
     expect(text).toContain('exactly **two** network calls');
     expect(text).not.toContain('exactly **one** network call');
-    expect(text).toContain('no picture');
     expect(text).toContain('A pairing lasts one session');
     expect(text).toContain('keeps filming for up to 30 seconds, then stops');
+    // #530. The sentence #529 pinned is gone rather than left beside the new
+    // ones, because it is false now.
+    expect(text).not.toContain('in this version — **no picture**');
+    expect(text).toContain('second go from the phone to the tablet');
+    // D-6, in the owner's words' terms: none kept, none shown, none sent on.
+    expect(text).toContain('No picture is ever saved on the tablet');
+    // And the dependency that would report home, disclosed with what stops it.
+    expect(text).toContain('contains a usage logger');
+    expect(text).toContain('The app blocks it');
+    expect(text).not.toContain('No third-party SDK of any kind is linked into the app');
   });
 });

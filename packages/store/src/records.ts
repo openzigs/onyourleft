@@ -849,8 +849,8 @@ export interface FramingLandmarkRecord {
 }
 
 /**
- * Where the rider was in the side camera's picture, the last time the framing
- * check passed — #528,
+ * Where the rider was in the side camera's picture in their last session —
+ * #528,
  * [ADR 0033](../../../docs/adr/0033-side-camera-link.md) D-7.
  *
  * ## It is numbers, and it is not a picture
@@ -885,9 +885,14 @@ export interface FramingLandmarkRecord {
  * abandoned months ago; `testing/fakes.ts` §`firstReferenceStoreFactory` is the
  * store built to fail exactly there.
  *
- * ⚠️ **Nothing writes one yet.** The landmarks come from the pose model on the
- * tablet ([#530](https://github.com/openzigs/onyourleft/issues/530)); #528
- * builds the phone that draws the outline and this record for #530 to fill.
+ * ⚠️ **Written since #530**, by the tablet's analysis at the end of each
+ * side-camera session that saw enough of the rider
+ * (`apps/web/src/camera/side-analysis.ts`). ⚠️ **This used to say "the last
+ * time the framing check passed"**, which was #528's reading; the owner's
+ * words are *"a stored reference from the rider's last session"* (ADR 0033
+ * §Context), so a session whose check said the camera had moved still becomes
+ * the next session's reference — a rider who moved the tripod for good is
+ * compared against where it stands now.
  */
 export interface FramingReferenceRecord {
   /** Whose reference this is. It is also the primary key. */

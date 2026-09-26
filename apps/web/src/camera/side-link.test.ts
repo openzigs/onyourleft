@@ -15,9 +15,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { CameraController } from './session';
+import { SideAnalysis } from './side-analysis';
+import { sidePictureMessage, type SidePicture } from './side-link-pictures';
 import { LINK_LOSS_LIMIT_MILLISECONDS, SideCameraSession } from './side-camera';
 import { PAIRING_CODE_PREFIX, type PairingRefusal } from './side-link-code';
 import {
+  CONTROL_CHANNEL,
+  FRAMES_CHANNEL,
   COMMAND_ACK_MILLISECONDS,
   CONNECT_LIMIT_MILLISECONDS,
   OFFER_LIFETIME_MILLISECONDS,
@@ -30,6 +34,7 @@ import {
 import type { PhoneSidePairing, TabletSidePairing } from './side-pairing-port';
 import type { SideLinkEvent } from './side-camera-link-port';
 import {
+  cleanFrameBytes,
   flushSideLink,
   scriptedCamera,
   sidePeerNetwork,
@@ -342,12 +347,16 @@ describe('untrusted input ends the pairing (D-4)', () => {
     expect(tablet.control.sideControlState().ended).toBe('broken');
   });
 
-  it('on the phone, for a second channel', async () => {
+  it('on the phone, for a second channel of a name it already has', async () => {
     const { phone, network } = await paired();
+    // #530: the tablet's offer carries `control` AND `frames`, so a THIRD
+    // channel — a second `frames` — is what D-3 does not list.
     network.peers[1]?.ondatachannel?.({
       channel: {
         label: 'frames',
         readyState: 'open',
+        bufferedAmount: 0,
+        binaryType: 'arraybuffer',
         send: () => undefined,
         close: () => undefined,
         onopen: null,
@@ -480,5 +489,193 @@ describe('ending a pairing, from either device (D-4’s revoking)', () => {
     sessions.push(session);
     expect(session.pair(phone.link)).toBe(false);
     expect(session.state().paired).toBe(false);
+  });
+});
+
+describe('pictures, phone → tablet — #530, ADR 0033 D-3 and D-4', () => {
+  const PICTURE = { sequence: 0, milliseconds: 200, bytes: cleanFrameBytes(2000) };
+
+  it('opens the pictures channel beside control, unordered and with no retransmission', async () => {
+    const { network } = await paired();
+    const [control, frames] = network.peers[0]?.channels ?? [];
+    expect(control?.label).toBe(CONTROL_CHANNEL);
+    expect(control?.init).toEqual({ ordered: true });
+    expect(frames?.label).toBe(FRAMES_CHANNEL);
+    expect(frames?.init).toEqual({ ordered: false, maxRetransmits: 0 });
+    // Both ends read a picture as an ArrayBuffer, never as a Blob.
+    expect(frames?.binaryType).toBe('arraybuffer');
+    expect(network.peers[1]?.channels.find((c) => c.label === FRAMES_CHANNEL)?.binaryType).toBe(
+      'arraybuffer',
+    );
+  });
+
+  it('carries a picture across, whole, with its number and time and nothing else', async () => {
+    const { tablet, phone } = await paired();
+    const heard: SidePicture[] = [];
+    tablet.control.onSideCameraPicture((picture) => heard.push(picture));
+    expect(phone.link.sendPictureToTablet(PICTURE)).toBe('sent');
+    await flushSideLink();
+    expect(heard).toEqual([PICTURE]);
+  });
+
+  it('sends nothing on the control channel for a picture', async () => {
+    const { phone, network } = await paired();
+    const control = network.peers[1]?.channels.find((c) => c.label === CONTROL_CHANNEL);
+    const before = control?.sent.length ?? 0;
+    phone.link.sendPictureToTablet(PICTURE);
+    expect(control?.sent.length).toBe(before);
+    expect(
+      network.peers[1]?.channels.find((c) => c.label === FRAMES_CHANNEL)?.sentBinary,
+    ).toHaveLength(1);
+  });
+
+  it('refuses, and says why, a picture it cannot send — with no link, behind a stalled one, or too big', async () => {
+    const small = await paired({ maxMessageSize: 1500 });
+    // Too big for what THIS connection says it carries, though well inside 64 KiB.
+    expect(small.phone.link.sendPictureToTablet(PICTURE)).toBe('too-large');
+    expect(small.phone.link.sendPictureToTablet({ ...PICTURE, bytes: cleanFrameBytes(1000) })).toBe(
+      'sent',
+    );
+
+    const { phone, network } = await paired();
+    const frames = network.peers[1]?.channels.find((c) => c.label === FRAMES_CHANNEL);
+    if (frames === undefined) {
+      throw new Error('no frames channel');
+    }
+    frames.bufferedAmount = 2009;
+    expect(phone.link.sendPictureToTablet(PICTURE)).toBe('busy');
+    frames.bufferedAmount = 0;
+    network.drop();
+    await flushSideLink();
+    phone.link.endSideLink();
+    expect(phone.link.sendPictureToTablet(PICTURE)).toBe('no-link');
+    expect(frames.sentBinary).toHaveLength(0);
+  });
+
+  it('sends no picture before the tablet has connected', async () => {
+    const { port } = setUp();
+    const tablet = await offer(port);
+    const phone = await answer(port, tablet.offerCode);
+    expect(phone.link.sendPictureToTablet(PICTURE)).toBe('no-link');
+  });
+
+  it('ends the pairing on the tablet for a picture before the phone proved itself', async () => {
+    const { port, network } = setUp();
+    const tablet = await offer(port);
+    const frames = network.peers[0]?.channels.find((c) => c.label === FRAMES_CHANNEL);
+    frames?.onmessage?.({ data: sidePictureMessage(PICTURE) });
+    expect(tablet.control.sideControlState().ended).toBe('not-our-phone');
+  });
+
+  it('ends the pairing on the tablet for anything on the pictures channel that is not a picture', async () => {
+    const { tablet, network } = await paired();
+    const frames = network.peers[0]?.channels.find((c) => c.label === FRAMES_CHANNEL);
+    frames?.deliver('{"t":"state","s":"filming"}');
+    await flushSideLink();
+    expect(tablet.control.sideControlState().ended).toBe('broken');
+  });
+
+  it('ends the pairing on the phone for anything the tablet sends on the pictures channel', async () => {
+    const { phone, network } = await paired();
+    const frames = network.peers[1]?.channels.find((c) => c.label === FRAMES_CHANNEL);
+    frames?.deliver(sidePictureMessage(PICTURE));
+    await flushSideLink();
+    expect(phone.link.sideLinkCondition()).toBe('ended');
+  });
+
+  it('counts a picture as hearing from the phone, so a filming phone is not called lost', async () => {
+    const { tablet, phone, network, pass } = await paired();
+    // Only the pictures get through: the heartbeat on control does not.
+    const phoneControl = network.peers[1]?.channels.find((c) => c.label === CONTROL_CHANNEL);
+    if (phoneControl === undefined) {
+      throw new Error('no control channel');
+    }
+    phoneControl.send = () => undefined;
+    for (let second = 0; second < 5; second += 1) {
+      phone.link.sendPictureToTablet({ ...PICTURE, sequence: second });
+      await pass(1000);
+    }
+    expect(tablet.control.sideControlState().phone).not.toBe('lost');
+  });
+
+  it('shares the reference and the verdict with the phone, and only once it has proved itself', async () => {
+    const { port } = setUp();
+    const early = await offer(port);
+    const reference = { aspect: 16 / 9, landmarks: [{ name: 'hip' as const, x: 0.4, y: 0.5 }] };
+    // Before an answer: nothing to share with, and nothing breaks.
+    early.control.shareFramingReference(reference);
+    early.control.shareFramingVerdict('matches');
+
+    const { tablet, phone } = await paired();
+    const heard: SideLinkEvent[] = [];
+    phone.link.onSideLinkEvent((event) => heard.push(event));
+    tablet.control.shareFramingReference(reference);
+    tablet.control.shareFramingVerdict('differs');
+    await flushSideLink();
+    expect(heard).toEqual([
+      { kind: 'reference', reference },
+      { kind: 'verdict', verdict: 'differs' },
+    ]);
+  });
+
+  it('shares nothing over a connection whose device has not proved itself (D-4)', async () => {
+    const { port, network } = setUp();
+    const tablet = await offer(port);
+    const phone = await answer(port, tablet.offerCode);
+    // Connected, and the tablet's channel open — but the phone's secret never
+    // arrives, so whoever is at the other end is not yet the phone.
+    network.drop();
+    await tablet.acceptSidePhoneCode(phone.answerCode);
+    await flushSideLink();
+    const control = network.peers[0]?.channels.find((c) => c.label === CONTROL_CHANNEL);
+    expect(control?.readyState).toBe('open');
+    tablet.control.shareFramingReference({
+      aspect: 1,
+      landmarks: [{ name: 'hip', x: 0.5, y: 0.5 }],
+    });
+    tablet.control.shareFramingVerdict('matches');
+    expect(control?.sent).toEqual([]);
+  });
+
+  it('hands every picture to the analysis the pairing port was given, and ends it with the pairing', async () => {
+    const network = sidePeerNetwork();
+    const time = virtualTime();
+    const looked: Uint8Array[] = [];
+    let closed = 0;
+    const port = sidePairingPort({
+      peer: network.peer,
+      randomBytes: (length) => SECRET.slice(0, length),
+      ...time,
+      analyse: (control) =>
+        new SideAnalysis({
+          control,
+          estimator: () => ({
+            estimateSidePose: async (picture) => {
+              looked.push(picture);
+              return Promise.resolve({ kind: 'no-rider' });
+            },
+            closeSidePoseModel: () => {
+              closed += 1;
+            },
+          }),
+        }),
+    });
+    const tablet = await offer(port);
+    const phone = await answer(port, tablet.offerCode);
+    await tablet.acceptSidePhoneCode(phone.answerCode);
+    await flushSideLink();
+    phone.link.sendPictureToTablet(PICTURE);
+    await flushSideLink();
+    expect(looked.map((bytes) => bytes.length)).toEqual([PICTURE.bytes.length]);
+    expect(tablet.analysis?.sideAnalysisState()).toMatchObject({ noRider: 1, finished: false });
+    tablet.control.endSidePairing();
+    await flushSideLink();
+    expect(tablet.analysis?.sideAnalysisState().finished).toBe(true);
+    expect(closed).toBe(1);
+  });
+
+  it('has no analysis where the port was given none', async () => {
+    const { tablet } = await paired();
+    expect(tablet.analysis).toBeUndefined();
   });
 });

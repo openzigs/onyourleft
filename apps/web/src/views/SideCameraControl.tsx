@@ -16,8 +16,12 @@
  *    what became of the last command, and **End pairing**.
  *
  * ⚠️ **No picture of the phone's is ever on this screen** — the owner's
- * ruling on #527, *"the tablet shows state only"* — and nothing here could
- * show one: the pairing port carries none.
+ * ruling on #527, *"the tablet shows state only"*. Since #530 the pictures do
+ * cross to this tablet, and they go straight to the pose model
+ * (`camera/side-analysis.ts`); what this screen reads is
+ * `camera/side-analysis-port.ts` §`SideAnalysisState` — counts, and whether
+ * the camera is where it was last time — and nothing on that port could be
+ * drawn as a picture or says anything about a body (ADR 0033 D-6, ADR 0030).
  *
  * ⚠️ **The pairing is not this component's.** It is held by the port
  * (`side-pairing-port.ts` §`currentSideCamera`) so that leaving this screen to
@@ -43,6 +47,12 @@ import type {
   SidePairingPort,
   TabletSidePairing,
 } from '../camera/side-pairing-port';
+import type {
+  SideAnalysisPort,
+  SideAnalysisState,
+  SideFramingState,
+} from '../camera/side-analysis-port';
+import { FRAMING_VERDICT_TEXT } from '../camera/framing';
 import { PAIRING_READER_UNLOADED, usePairingScan } from '../camera/usePairingScan';
 
 /** What the tablet is told when reading the phone's code needs a camera it has not agreed to. */
@@ -140,6 +150,7 @@ function Paired({
           {SIDE_PAIRING_END_TEXT[state.ended]}
         </StatusMessage>
         <PhoneState state={state} />
+        {pairing.analysis === undefined ? null : <Analysis analysis={pairing.analysis} />}
         <Button onClick={again} disabled={busy}>
           Pair a phone
         </Button>
@@ -149,7 +160,72 @@ function Paired({
   if (!state.answered) {
     return <Offer controller={controller} pairing={pairing} />;
   }
-  return <Controls control={pairing.control} state={state} />;
+  return (
+    <>
+      <Controls control={pairing.control} state={state} />
+      {pairing.analysis === undefined ? null : <Analysis analysis={pairing.analysis} />}
+    </>
+  );
+}
+
+/**
+ * What the tablet says about the pictures, by where the model is — #530.
+ *
+ * ⚠️ **About the tablet and the camera, never the body** (ADR 0030): how many
+ * pictures were looked at and how many were skipped, and nothing a model
+ * found in them.
+ */
+export function sidePicturesText(state: SideAnalysisState): string {
+  const looked = state.posed + state.noRider + state.unreadable;
+  switch (state.model) {
+    case 'waiting':
+      return 'The phone’s pictures are looked at on this tablet as they arrive, and thrown away at once. None has arrived yet.';
+    case 'loading':
+      return 'Loading the pose model on this tablet. Pictures arriving meanwhile wait, one at a time.';
+    case 'unavailable':
+      return 'This tablet could not load its pose model, so the phone’s pictures are not being looked at. They are still thrown away as they arrive.';
+    case 'ready':
+      return (
+        `Pictures looked at on this tablet and thrown away: ${String(looked)}, ` +
+        `with you in ${String(state.posed)} of them. ` +
+        `Skipped because the tablet was busy: ${String(state.skipped)}.`
+      );
+  }
+}
+
+/** What the tablet says about the framing check (ADR 0033 D-7), by where it has got to. */
+export const SIDE_FRAMING_TEXT: Readonly<Record<SideFramingState, string>> = {
+  checking: 'Checking whether the camera is where it was last time.',
+  matches: FRAMING_VERDICT_TEXT.matches,
+  differs: FRAMING_VERDICT_TEXT.differs,
+  'no-reference': FRAMING_VERDICT_TEXT['no-reference'],
+  'not-checked':
+    'The session ended before the camera’s position could be checked, so it will only be compared with itself.',
+};
+
+function useAnalysisState(analysis: SideAnalysisPort): SideAnalysisState {
+  return useSyncExternalStore(
+    (listener) => analysis.onSideAnalysisChange(listener),
+    () => analysis.sideAnalysisState(),
+    () => analysis.sideAnalysisState(),
+  );
+}
+
+function Analysis({ analysis }: { readonly analysis: SideAnalysisPort }): JSX.Element {
+  const state = useAnalysisState(analysis);
+  return (
+    <>
+      {/*
+        Not a live region: the count changes five times a second while the
+        phone films, and a screen reader told each one would say nothing else.
+        The framing check below changes once, and is announced.
+      */}
+      <p data-oyl-side-pictures={state.model}>{sidePicturesText(state)}</p>
+      <StatusMessage tone={state.framing === 'differs' ? 'warning' : 'info'} live>
+        {SIDE_FRAMING_TEXT[state.framing]}
+      </StatusMessage>
+    </>
+  );
 }
 
 function useControlState(control: SideCameraControlPort): SideControlState {

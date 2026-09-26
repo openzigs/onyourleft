@@ -23,6 +23,7 @@ import {
   onceReady,
   type FrameGrabber,
   type FrameReadySource,
+  type GrabbedFrame,
   type MediaDevicesLike,
   type MediaStreamLike,
   type VideoTrackLike,
@@ -61,6 +62,16 @@ const GRABBER: FrameGrabber = {
   }),
   codePixels: () => ({
     sample: async () => Promise.resolve({ width: 2, height: 1, rgba: new Uint8ClampedArray(8) }),
+    release: () => undefined,
+  }),
+  sidePictures: () => ({
+    sample: async () =>
+      Promise.resolve({
+        bytes: cleanFrameBytes(),
+        mediaType: 'image/jpeg',
+        width: 256,
+        height: 144,
+      }),
     release: () => undefined,
   }),
 };
@@ -536,6 +547,96 @@ describe('the pairing-code reader, behind the session — #529', () => {
     });
     const session = await port.startCamera();
     await expect(session.readCodePixels()).rejects.toSatisfy((error: unknown) => {
+      expect(error).toBeInstanceOf(CameraCaptureError);
+      expect(error instanceof Error ? error.message : String(error)).not.toContain('blob:');
+      return true;
+    });
+  });
+});
+
+describe('the side camera’s pictures, behind the session — #530', () => {
+  function countingPictures(picture: () => Promise<GrabbedFrame>): {
+    grabber: FrameGrabber;
+    made: () => number;
+    released: () => number;
+  } {
+    let made = 0;
+    let released = 0;
+    return {
+      grabber: {
+        ...GRABBER,
+        sidePictures: () => {
+          made += 1;
+          return {
+            sample: picture,
+            release: () => {
+              released += 1;
+            },
+          };
+        },
+      },
+      made: () => made,
+      released: () => released,
+    };
+  }
+
+  const small = async (): Promise<GrabbedFrame> =>
+    Promise.resolve({ bytes: cleanFrameBytes(), mediaType: 'image/jpeg', width: 256, height: 144 });
+
+  it('makes one sampler for the session, however many pictures, and lets it go with the camera', async () => {
+    const counted = countingPictures(small);
+    const port = browserCameraPort({
+      devices: devices(async () => Promise.resolve(streamOf([track()]))),
+      grabber: counted.grabber,
+      secureContext: true,
+    });
+    const session = await port.startCamera();
+    expect(counted.made()).toBe(0);
+    const frame = await session.captureSideFrame();
+    await session.captureSideFrame();
+    expect([frame.width, frame.height]).toEqual([256, 144]);
+    expect(counted.made()).toBe(1);
+    session.stopCamera();
+    expect(counted.released()).toBe(1);
+  });
+
+  it('passes every picture through the same metadata tripwire as a full frame (ADR 0029 D-9)', async () => {
+    const counted = countingPictures(async () => {
+      const bytes = cleanFrameBytes();
+      bytes.set([0x45, 0x78, 0x69, 0x66, 0x00, 0x00], 40);
+      return Promise.resolve({ bytes, mediaType: 'image/jpeg', width: 256, height: 144 });
+    });
+    const port = browserCameraPort({
+      devices: devices(async () => Promise.resolve(streamOf([track()]))),
+      grabber: counted.grabber,
+      secureContext: true,
+    });
+    const session = await port.startCamera();
+    await expect(session.captureSideFrame()).rejects.toBeInstanceOf(CameraCaptureError);
+  });
+
+  it('refuses a picture once the camera is stopped', async () => {
+    const port = browserCameraPort({
+      devices: devices(async () => Promise.resolve(streamOf([track()]))),
+      grabber: GRABBER,
+      secureContext: true,
+    });
+    const session = await port.startCamera();
+    session.stopCamera();
+    await expect(session.captureSideFrame()).rejects.toBeInstanceOf(CameraCaptureError);
+  });
+
+  it('replaces a sampler’s own failure with the fixed wording — ADR 0029 D-8', async () => {
+    const counted = countingPictures(async () =>
+      Promise.reject(new Error('video said blob:https://example/abc')),
+    );
+    const port = browserCameraPort({
+      devices: devices(async () => Promise.resolve(streamOf([track()]))),
+      grabber: counted.grabber,
+      secureContext: true,
+    });
+    const session = await port.startCamera();
+    await expect(session.captureSideFrame()).rejects.toSatisfy((error: unknown) => {
       expect(error).toBeInstanceOf(CameraCaptureError);
       expect(error instanceof Error ? error.message : String(error)).not.toContain('blob:');
       return true;

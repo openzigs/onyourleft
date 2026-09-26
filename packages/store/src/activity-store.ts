@@ -1522,11 +1522,11 @@ export class ActivityStore {
    * store that kept the first instead, and
    * `framing-reference-store.test.ts` is the round trip that catches it.
    *
-   * ⚠️ **Nothing calls this in production yet.** The landmarks come from the
-   * pose model on the tablet
-   * ([#530](https://github.com/openzigs/onyourleft/issues/530)); #528 builds the
-   * record, its erase and its export so that the writer lands into rules that
-   * already hold.
+   * Its production caller is the tablet's side-camera analysis
+   * ([#530](https://github.com/openzigs/onyourleft/issues/530),
+   * `apps/web/src/camera/side-analysis.ts`), at the end of each session; #528
+   * built the record, its erase and its export first, so that the writer
+   * landed into rules that already held.
    *
    * Refuses a reference whose athlete does not exist, inside the same
    * transaction as the write, for `putCameraFrame`'s reason.
@@ -1548,7 +1548,7 @@ export class ActivityStore {
 
   /**
    * This athlete's framing reference, or `undefined` when there is none — the
-   * ordinary state before a first side-camera session whose check passed.
+   * ordinary state before a first side-camera session.
    */
   async getFramingReference(owner: AthleteId): Promise<FramingReferenceRecord | undefined> {
     const row = await this.#framingReferences.get(owner);

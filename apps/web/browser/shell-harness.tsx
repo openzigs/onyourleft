@@ -361,6 +361,7 @@ function main(): void {
           captureFrame: () => Promise.reject(new Error('this harness does not capture')),
           sampleLuminance: () => Promise.reject(new Error('this harness does not sample')),
           readCodePixels: () => Promise.reject(new Error('this harness reads no code')),
+          captureSideFrame: () => Promise.reject(new Error('this harness sends no picture')),
           attachCameraPreview: () => () => undefined,
           stopCamera: () => undefined,
           live: true,

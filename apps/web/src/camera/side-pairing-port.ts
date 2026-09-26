@@ -27,7 +27,10 @@
  * connection it described is gone.
  */
 
+import type { FramingReference, FramingVerdict } from './framing';
+import type { SideAnalysisPort } from './side-analysis-port';
 import type { PairingRefusal } from './side-link-code';
+import type { SidePicture } from './side-link-pictures';
 import type { PhoneCommand } from './side-link-messages';
 import type { SideCameraLinkPort, SideCameraStopReason } from './side-camera-link-port';
 
@@ -106,6 +109,25 @@ export interface SideCameraControlPort {
    * framing or filming is told to stop first. Idempotent.
    */
   endSidePairing(): void;
+  /**
+   * Call `listener` with every picture the phone sends — #530. Only after the
+   * phone has proved itself (D-4), and nothing once the pairing has ended.
+   *
+   * ⚠️ **The picture is the listener's for the length of the call and no
+   * longer**: nothing here holds one, and `side-analysis.ts` — the one
+   * production listener — keeps at most one waiting for the model (D-6).
+   *
+   * @returns the unsubscribe.
+   */
+  onSideCameraPicture(listener: (picture: SidePicture) => void): () => void;
+  /**
+   * Send the phone the rider's stored framing reference, so it can draw the
+   * ghost outline — ADR 0033 D-7, numbers only. Ignored before the phone has
+   * proved itself and after the pairing ends.
+   */
+  shareFramingReference(reference: FramingReference): void;
+  /** Send the phone the tablet's framing check (D-7). Ignored as above. */
+  shareFramingVerdict(verdict: FramingVerdict): void;
 }
 
 /** The tablet's pairing, while its offer is on screen and after. */
@@ -123,6 +145,12 @@ export interface TabletSidePairing {
   acceptSidePhoneCode(answerCode: string): Promise<PairingRefusal | undefined>;
   /** The link, from the moment the offer exists. */
   readonly control: SideCameraControlPort;
+  /**
+   * What the tablet makes of the phone's pictures — #530 — or `undefined`
+   * where this build has no pose model to run. Made with the pairing and ends
+   * with it.
+   */
+  readonly analysis: SideAnalysisPort | undefined;
 }
 
 /** The phone's pairing, once it has read the tablet's offer. */

@@ -19,6 +19,7 @@ import {
   COUNTDOWN_REFRESH_MILLISECONDS,
   LINK_LOSS_LIMIT_MILLISECONDS,
   LINK_LOSS_SENTENCE,
+  PICTURE_INTERVAL_MILLISECONDS,
   SideCameraSession,
   STOPPED_TEXT,
 } from './side-camera';
@@ -439,5 +440,168 @@ describe('taking a link after the camera is on — #529', () => {
     link.emit({ kind: 'condition', condition: 'lost' });
     time.advance(LINK_LOSS_LIMIT_MILLISECONDS);
     expect(stops(camera)).toBe(1);
+  });
+});
+
+describe('the pictures — #530, ADR 0033 D-3, D-5 and D-8', () => {
+  /** Let a tick's picture be taken and handed over. */
+  async function settle(): Promise<void> {
+    for (let round = 0; round < 10; round += 1) {
+      await Promise.resolve();
+    }
+  }
+
+  /** Advance one picture interval at a time, letting each picture land. */
+  async function pass(time: ReturnType<typeof virtualTime>, milliseconds: number): Promise<void> {
+    for (let left = milliseconds; left > 0; left -= PICTURE_INTERVAL_MILLISECONDS) {
+      time.advance(Math.min(PICTURE_INTERVAL_MILLISECONDS, left));
+      await settle();
+    }
+  }
+
+  it('takes five a second while filming, numbered from nought and timed from the start of filming', async () => {
+    const { link, time, camera } = await filming();
+    await pass(time, 1000);
+    expect(link.pictures.map((picture) => [picture.sequence, picture.milliseconds])).toEqual([
+      [0, 200],
+      [1, 400],
+      [2, 600],
+      [3, 800],
+      [4, 1000],
+    ]);
+    // Each is the small capture, and not the full-size one a kept frame would be.
+    expect(camera.calls.filter((call) => call === 'side-frame')).toHaveLength(5);
+    expect(camera.calls).not.toContain('capture');
+    // A sequence number, milliseconds and the picture: nothing else crosses (D-3).
+    for (const picture of link.pictures) {
+      expect(Object.keys(picture).sort()).toEqual(['bytes', 'milliseconds', 'sequence']);
+    }
+  });
+
+  it('takes none while framing, before the tablet says start', async () => {
+    const camera = scriptedCamera();
+    const controller = new CameraController({
+      port: camera.port,
+      schedule: manualSchedule().schedule,
+    });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    const link = scriptedLink();
+    const time = virtualTime();
+    const session = new SideCameraSession({ camera: controller, link, ...time });
+    await session.turnOnForFraming();
+    await pass(time, 2000);
+    expect(link.pictures).toEqual([]);
+  });
+
+  it('takes none while the link is lost, and goes on numbering where it left off when it returns', async () => {
+    const { link, time, camera } = await filming();
+    await pass(time, 400);
+    link.emit({ kind: 'condition', condition: 'lost' });
+    await pass(time, 2000);
+    expect(link.pictures).toHaveLength(2);
+    // The camera was asked for nothing while there was nobody to send it to.
+    expect(camera.calls.filter((call) => call === 'side-frame')).toHaveLength(2);
+    link.emit({ kind: 'condition', condition: 'connected' });
+    await pass(time, 200);
+    expect(link.pictures.map((picture) => picture.sequence)).toEqual([0, 1, 2]);
+  });
+
+  it('drops, at once, a picture that was being taken when the link went', async () => {
+    const { link, time } = await filming();
+    time.advance(PICTURE_INTERVAL_MILLISECONDS);
+    // The picture is being taken; the link goes before it is ready.
+    link.emit({ kind: 'condition', condition: 'lost' });
+    await settle();
+    expect(link.pictures).toEqual([]);
+  });
+
+  it('does not count a picture the link would not take, and the next one reuses its number', async () => {
+    const { link, time } = await filming();
+    link.answer = 'busy';
+    await pass(time, 200);
+    link.answer = 'sent';
+    await pass(time, 200);
+    expect(link.pictures.map((picture) => picture.sequence)).toEqual([0, 0]);
+  });
+
+  it('takes one picture at a time: a slow one makes the next ticks wait, not queue', async () => {
+    const camera = scriptedCamera();
+    const controller = new CameraController({
+      port: camera.port,
+      schedule: manualSchedule().schedule,
+    });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    let asked = 0;
+    let release: () => void = () => undefined;
+    const slow = {
+      turnOn: async () => controller.turnOn(),
+      turnOff: () => {
+        controller.turnOff();
+      },
+      state: () => controller.state(),
+      subscribe: (listener: () => void) => controller.subscribe(listener),
+      captureSideFrame: async () => {
+        asked += 1;
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return controller.captureSideFrame();
+      },
+    };
+    const link = scriptedLink();
+    const time = virtualTime();
+    const session = new SideCameraSession({ camera: slow, link, ...time });
+    await session.turnOnForFraming();
+    link.emit({ kind: 'start' });
+    await pass(time, 1000);
+    expect(asked).toBe(1);
+    release();
+    await settle();
+    expect(link.pictures).toHaveLength(1);
+    await pass(time, 200);
+    expect(asked).toBe(2);
+  });
+
+  it('times each picture from the start of filming, not from when the phone was switched on', async () => {
+    const camera = scriptedCamera();
+    const controller = new CameraController({
+      port: camera.port,
+      schedule: manualSchedule().schedule,
+    });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    const link = scriptedLink();
+    const time = virtualTime();
+    time.advance(90_000);
+    const session = new SideCameraSession({ camera: controller, link, ...time });
+    await session.turnOnForFraming();
+    time.advance(5_000);
+    link.emit({ kind: 'start' });
+    await pass(time, 200);
+    expect(link.pictures.map((picture) => picture.milliseconds)).toEqual([200]);
+  });
+
+  it('leaves no picture timer running once stopped', async () => {
+    const { session, time } = await filming();
+    await pass(time, 200);
+    session.stopHere();
+    expect(time.active()).toBe(0);
+  });
+
+  it('takes no more once stopped, or once the screen has gone', async () => {
+    const stopped = await filming();
+    await pass(stopped.time, 200);
+    stopped.session.stopHere();
+    await pass(stopped.time, 2000);
+    expect(stopped.link.pictures).toHaveLength(1);
+
+    const gone = await filming();
+    await pass(gone.time, 200);
+    gone.session.dispose();
+    await pass(gone.time, 2000);
+    expect(gone.link.pictures).toHaveLength(1);
+  });
+
+  it('takes a picture every interval the owner named: five a second', () => {
+    expect(1000 / PICTURE_INTERVAL_MILLISECONDS).toBe(5);
   });
 });

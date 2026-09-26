@@ -42,7 +42,19 @@ export interface SideDescription {
 export interface SideChannel {
   readonly label: string;
   readonly readyState: string;
-  send(data: string): void;
+  /**
+   * Bytes queued to send and not yet handed to the network — #530. The phone
+   * reads it before it sends a picture, so a stalled link holds at most one
+   * picture in memory rather than a queue of them (ADR 0033 D-6's rule, on
+   * the sending end).
+   */
+  readonly bufferedAmount: number;
+  /**
+   * How a binary message arrives. `'arraybuffer'` on both of the side link's
+   * channels, so a picture is an `ArrayBuffer` rather than a `Blob` (#530).
+   */
+  binaryType: string;
+  send(data: string | ArrayBuffer): void;
   close(): void;
   onopen: (() => void) | null;
   onclose: (() => void) | null;
@@ -51,12 +63,25 @@ export interface SideChannel {
 
 /** The slice of a peer connection the link uses. */
 export interface SidePeer {
-  createDataChannel(label: string, init: { readonly ordered: boolean }): SideChannel;
+  /**
+   * `maxRetransmits: 0` with `ordered: false` is the `frames` channel (#530,
+   * ADR 0033 D-3): a late picture is worth nothing to a pose model.
+   */
+  createDataChannel(
+    label: string,
+    init: { readonly ordered: boolean; readonly maxRetransmits?: number },
+  ): SideChannel;
   createOffer(): Promise<SideDescription>;
   createAnswer(): Promise<SideDescription>;
   setLocalDescription(description: SideDescription): Promise<void>;
   setRemoteDescription(description: SideDescription): Promise<void>;
   readonly localDescription: SideDescription | null;
+  /**
+   * The SCTP transport, once there is one — read for its `maxMessageSize`
+   * before a picture is sent (#530, ADR 0033 D-3: *"#530 checks the size
+   * rather than assuming it"*). `null` before the connection has one.
+   */
+  readonly sctp: { readonly maxMessageSize: number } | null;
   readonly iceGatheringState: string;
   readonly connectionState: string;
   onicegatheringstatechange: (() => void) | null;

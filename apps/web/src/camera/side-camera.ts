@@ -42,15 +42,29 @@
  * IndexedDB or a cache, and `side-camera.test.ts` §"keeps nothing" scans this
  * file and its screen to hold that.
  *
- * ## What it does NOT do yet
+ * ## The pictures, since #530
  *
- * Send pictures. The frames channel is
- * [#530](https://github.com/openzigs/onyourleft/issues/530); D-5's *"a frame
- * captured while the link is down is discarded at once"* is its rule to
- * implement, over {@link SideCameraState.linkCondition}.
+ * While filming, the session takes a small picture every
+ * {@link PICTURE_INTERVAL_MILLISECONDS} (`camera-port.ts`
+ * §`SIDE_FRAME_LONG_SIDE` on its long side, re-encoded from pixels) and hands
+ * it to the link, numbered and timed from the moment filming began and with
+ * nothing else (ADR 0033 D-3). ⚠️ **A reviewer who remembers "it does NOT
+ * send pictures yet" is reading #528's file.** Three rules, each of which the
+ * tests hold:
+ *
+ * - **Nothing is taken while the link is not connected**, and a picture that
+ *   was being taken when the link went is dropped rather than sent later —
+ *   D-5's *"a frame captured while the link is down is discarded at once"*,
+ *   in its narrower form: the camera keeps running for the 30 seconds, but no
+ *   picture is made for nobody.
+ * - **One picture at a time.** A picture still being taken when the next tick
+ *   comes means the tick is skipped, and the link refuses a picture while the
+ *   last one has not left (`side-camera-link-port.ts` §`SidePictureSent`).
+ * - **Nothing is kept.** The picture goes to the link and this object holds no
+ *   reference to it afterwards, whatever the link answered (D-8).
  */
 
-import type { CameraProblemKind } from './camera-port';
+import type { CameraProblemKind, CapturedFrame } from './camera-port';
 import {
   framingReferenceFrom,
   framingVerdictFrom,
@@ -87,6 +101,18 @@ export const LINK_LOSS_LIMIT_MILLISECONDS = 30_000;
  */
 export const LINK_LOSS_SENTENCE =
   'If this phone loses touch with your tablet, it keeps filming for up to 30 seconds, then stops.';
+
+/**
+ * How often the phone takes a picture while filming: every 200 ms, five a
+ * second.
+ *
+ * The owner's figure (#527: *"about 5 per second, at the model's input size
+ * (~256 px)"*), and the rate spike 0010 costed the model at on the tablet:
+ * 65.8 / 80.9 ms p50 / p95 per picture beside the ride, so the model is busy
+ * for well under half of each interval. ADR 0033 D-3 says #385 confirms or
+ * adjusts it by an amendment there; it has not moved.
+ */
+export const PICTURE_INTERVAL_MILLISECONDS = 200;
 
 /**
  * How often the countdown is refreshed while the link is lost.
@@ -146,6 +172,8 @@ export interface SideCameraState {
  */
 export interface SideCameraCamera {
   turnOn(): Promise<CameraProblemKind | undefined>;
+  /** One small picture, or `undefined`. Never rejects. @see CameraController.captureSideFrame */
+  captureSideFrame(): Promise<CapturedFrame | undefined>;
   turnOff(): void;
   state(): { readonly live: boolean };
   subscribe(listener: () => void): () => void;
@@ -206,6 +234,14 @@ export class SideCameraSession {
   #reference: FramingReference | undefined;
   #verdict: FramingVerdict | undefined;
   #snapshot: SideCameraState;
+  /** The picture timer, while filming. */
+  #cancelPictures: (() => void) | undefined;
+  /** When filming began, on this phone's clock — the zero of every picture's milliseconds. */
+  #filmingSince = 0;
+  /** The next picture's number. */
+  #sequence = 0;
+  /** Whether a picture is being taken now. */
+  #taking = false;
 
   constructor(options: SideCameraSessionOptions) {
     this.#camera = options.camera;
@@ -348,6 +384,8 @@ export class SideCameraSession {
       this.#stop('rider');
     }
     this.#cancelTimers();
+    this.#cancelPictures?.();
+    this.#cancelPictures = undefined;
     for (const unsubscribe of this.#unsubscribe.splice(0)) {
       unsubscribe();
     }
@@ -378,6 +416,7 @@ export class SideCameraSession {
         // on by itself — the narrower reading of *"the tablet drives it"*.
         if (this.#phase === 'framing') {
           this.#phase = 'filming';
+          this.#startPictures();
           this.#link?.reportToTablet({ state: 'filming' });
           this.#announce();
         }
@@ -435,6 +474,51 @@ export class SideCameraSession {
     this.#announce();
   }
 
+  #startPictures(): void {
+    this.#filmingSince = this.#clock();
+    this.#sequence = 0;
+    this.#cancelPictures = this.#every(() => {
+      void this.#takePicture();
+    }, PICTURE_INTERVAL_MILLISECONDS);
+  }
+
+  /** One tick: a picture, if the link can take one, sent and let go. */
+  async #takePicture(): Promise<void> {
+    if (this.#taking || !this.#mayPicture()) {
+      return;
+    }
+    this.#taking = true;
+    const milliseconds = this.#clock() - this.#filmingSince;
+    let frame: CapturedFrame | undefined;
+    try {
+      frame = await this.#camera.captureSideFrame();
+    } finally {
+      this.#taking = false;
+    }
+    // Asked again: the link may have gone, or the session stopped, while the
+    // picture was being taken — and then it is dropped here, at once (D-5).
+    if (frame === undefined || !this.#mayPicture()) {
+      return;
+    }
+    const sent = this.#link?.sendPictureToTablet({
+      sequence: this.#sequence,
+      milliseconds,
+      bytes: frame.bytes,
+    });
+    if (sent === 'sent') {
+      this.#sequence += 1;
+    }
+  }
+
+  #mayPicture(): boolean {
+    return (
+      !this.#disposed &&
+      this.#phase === 'filming' &&
+      this.#link !== undefined &&
+      this.#condition === 'connected'
+    );
+  }
+
   #startCountdown(): void {
     this.#cancelTimers();
     this.#lostAt = this.#clock();
@@ -472,6 +556,8 @@ export class SideCameraSession {
 
   #stop(reason: SideCameraStopReason): void {
     this.#cancelTimers();
+    this.#cancelPictures?.();
+    this.#cancelPictures = undefined;
     // ⚠️ The phase before the camera, and only because turning the camera off
     // announces: the camera watch in the constructor would otherwise hear a
     // camera going out under a session still "filming" and stop it a second

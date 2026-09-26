@@ -73,10 +73,11 @@ export interface DataSafetyAnswer {
  *
  * ⚠️ **Since #529 there is a second** — `camera/side-link-transport.ts`, the
  * side-camera link between a rider's tablet and a phone they paired by
- * scanning — and **no row moves for it**: it carries a start, a stop and the
- * phone's state words, which are none of Play's data types. ADR 0033 D-10
- * puts the re-read of the Photos row with #530, the first PICTURE on that
- * link, and it is not pre-answered here.
+ * scanning. #529 moved no row for it: it carried a start, a stop and the
+ * phone's state words, which are none of Play's data types. ⚠️ **Since #530
+ * it carries PICTURES**, phone → tablet, and ADR 0033 D-10 put the re-read of
+ * the Photos row here; the row now answers for both paths, and its comment
+ * says why the answer did not change.
  *
  * ⚠️ The health rows are here because Play's Health Content and Services policy
  * covers apps that are not primarily health apps — its own example is a game
@@ -167,11 +168,38 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     //
     // **`optional: true`**: off until the rider sets up a computer and
     // switches it on, and the app works in full without it.
+    //
+    // ⚠️ **Re-read by #530 for the side camera, ADR 0033 D-10 — and the
+    // answer is UNCHANGED, for a different reason on each path.** Play's text,
+    // read first-hand 2026-09-25 (Google Play Console Help, "Provide
+    // information for Google Play's Data safety section"): *"'Collect' means
+    // transmitting data from your app off a user's device"*, and among the
+    // exemptions, *"User data that is sent off device, but that is unreadable
+    // by you or anyone other than the sender and recipient as a result of
+    // end-to-end encryption does not need to be disclosed."*
+    //
+    // - **The side camera's pictures** go from one of the rider's devices to
+    //   another over a WebRTC data channel, which is DTLS-encrypted end to end
+    //   and cannot be switched off (ADR 0033 D-1), with no relay and no server
+    //   of ours or anybody's between them. The sender and the recipient are
+    //   the rider's own phone and tablet, and nobody else — this project
+    //   included — can read them. **That path alone would be exempt**, and on
+    //   the tablet a picture is analysed in memory and discarded (D-6), which
+    //   is also *"only processed locally"*.
+    // - **#387's path to the rider's computer is not exempt** — plain `http:`
+    //   on a home network — and it still exists. So the row stays
+    //   `collected: true`; ADR 0033 D-10 says as much: *"the row must stay
+    //   `collected: true` while #387's path exists"*.
+    //
+    // ⚠️ The side camera does NOT send a picture on to the rider's computer
+    // (ADR 0033 D-11 is not built), and if it ever does, that is #387's
+    // non-exempt path carrying a continuous stream, and this row's `why`
+    // changes with it.
     dataType: 'Photos and videos',
     collected: true,
     shared: false,
     optional: true,
-    why: 'a still picture from the camera (#382, #383) is sent — only when the rider presses the button that sends it — to one computer the rider configured at an address on their own network and switched on (#387). Nothing is set up by default and nothing is sent until it is. It is not sent to this project, which runs no server, and not to any third party: an address that is not on the rider’s own network is refused. A picture is otherwise discarded after it has been looked at unless the rider turns on this ride’s keep (ADR 0029 D-2)',
+    why: 'a still picture from the camera (#382, #383) is sent — only when the rider presses the button that sends it — to one computer the rider configured at an address on their own network and switched on (#387). Nothing is set up by default and nothing is sent until it is. It is not sent to this project, which runs no server, and not to any third party: an address that is not on the rider’s own network is refused. A picture is otherwise discarded after it has been looked at unless the rider turns on this ride’s keep (ADR 0029 D-2). Separately, a side-camera phone the rider paired by scanning sends its pictures to the rider’s own tablet over an end-to-end encrypted WebRTC data channel with no relay (#530, ADR 0033 D-1), where each is analysed on the tablet and discarded at once, never stored, shown or sent on (ADR 0033 D-6) — end-to-end encrypted transfer between the rider’s own devices, which Play exempts, and so not what makes this row collected',
   },
   {
     dataType: 'Device or other IDs',

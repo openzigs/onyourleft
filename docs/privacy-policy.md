@@ -53,6 +53,7 @@ your own action:
 | A signing keypair, used to sign your own activity records | generated on the device the first time it is needed |
 | Pictures from the camera — only the ones you chose to keep | the camera, if you turn it on and then turn on "keep the pictures from this ride" for that ride. Otherwise a picture is thrown away as soon as it has been looked at |
 | The address and model name of your own computer, if you set one up | typed by you on the Camera page, and kept in this device's browser storage |
+| Where you were in the side camera's picture in your last session — a handful of positions, not a picture | worked out on the tablet from the side-camera phone's pictures, so the next session can check the camera is in the same place |
 
 The private half of the signing key is a non-extractable key held by the browser or WebView: the app
 itself cannot read it, cannot copy it, and cannot send it anywhere. Its public half travels only
@@ -90,8 +91,9 @@ Only these, and only when you do them:
   put it and it is then out of the app's hands.
 - **A ride or route you choose to share.** A copy, trimmed by your privacy zones.
 - **A picture sent to your own computer, if you set one up and switch it on.** See the next section.
-- **Start and stop between your tablet and a side-camera phone, if you pair them.** See **A second
-  phone you pair as a side camera** below.
+- **Start and stop, and pictures, between your tablet and a side-camera phone, if you pair them.**
+  The pictures go from the phone to your tablet and no further. See **A second phone you pair as a
+  side camera** below.
 - **Map tile requests, when a map is on screen.** Map tiles are **on by default**, and you can turn
   them off in Settings → *Ride map*. To draw a ride that has
   a GPS track, your device requests map tiles from `tiles.openzigs.com` — a single static
@@ -120,8 +122,26 @@ directly, over your own Wi-Fi.
   and no third-party service. The pictures the two cameras see while scanning are read for the code
   and thrown away at once.
 - **What crosses:** the tablet's *start* and *stop*, and the phone's word for where it is — framing,
-  filming or stopped, and why it stopped. Not your rides, not your position, not your heart rate,
-  not a name, and — in this version — **no picture**.
+  filming or stopped, and why it stopped. **While the phone is filming, about five small pictures a
+  second go from the phone to the tablet**, each carrying a number and how long after filming began
+  it was taken, and nothing else. Each is re-encoded from its pixels on the phone, so it carries no
+  location or device metadata. Not your rides, not your position, not your heart rate, not a name,
+  and not the time of day.
+- **What the tablet does with a picture:** a pose model running on the tablet itself looks at it,
+  and it is thrown away as soon as it has been looked at. **No picture is ever saved on the tablet,
+  shown on its screen, or sent anywhere else** — not to us, not to a computer of your own, and not
+  to any service. What is kept is where the model found your ear, shoulder, elbow, wrist, hip, knee,
+  ankle, heel and toe in each picture: numbers, not a picture, held in the tablet's memory for the
+  report after the ride and gone when the app is closed. At the end of a session the tablet also
+  keeps, on the device, where you were in the picture overall, so that the next session can check
+  the camera is in the same place; erasing the device removes it.
+- **The pose model** is Google's MediaPipe Pose Landmarker, and it is part of the app: it and the
+  code that runs it are served from the app itself, never downloaded from Google. ⚠️ **That code
+  contains a usage logger that would send Google a report** of how often the model ran and how long
+  it took (not the pictures). **The app blocks it**: the model runs in a part of the app that is
+  refused every connection except to the app itself, and the project's tests check that no request
+  leaves.
+- **What the phone keeps:** nothing. No picture, no numbers and no record of the pairing.
 - **Where it goes:** from one of your devices to the other, directly. The app configures no relay
   and no address-discovery server of any kind, and it refuses a pairing code that names an address
   outside your own network. The link is encrypted, as every WebRTC data channel is.
@@ -170,7 +190,10 @@ built in, suggested or named.
 
 - No advertising, and no advertising identifier.
 - No analytics, no telemetry, no crash reporting, no session recording.
-- No third-party SDK of any kind is linked into the app.
+- No third-party SDK is linked into the app for any of those. One library the app does include —
+  Google's MediaPipe, which runs the side camera's pose model on your tablet — contains a usage
+  logger, and the app blocks every request it would make (see **A second phone you pair as a side
+  camera** above).
 - No sale or sharing of personal information — none is held by us, and nothing is transmitted to us
   or to anybody else except the picture you choose to send to your own computer and the map tile
   requests described above.

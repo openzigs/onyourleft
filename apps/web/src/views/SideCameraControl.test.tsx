@@ -13,13 +13,22 @@ import { StrictMode } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { CameraController } from '../camera/session';
-import { SIDE_PAIRING_END_TEXT, SIDE_PHONE_STATE_TEXT, sidePairingPort } from '../camera/side-link';
+import {
+  SIDE_PAIRING_END_TEXT,
+  SIDE_PHONE_STATE_TEXT,
+  sidePairingPort,
+  type SidePairingOptions,
+} from '../camera/side-link';
+import { FRAMING_CHECK_POSES, SideAnalysis } from '../camera/side-analysis';
+import type { SidePoseOutcome } from '../camera/side-analysis-port';
+import { FRAMING_VERDICT_TEXT } from '../camera/framing';
 import { PAIRING_REFUSAL_TEXT } from '../camera/side-link-code';
 import { pairingCodeModules } from '../camera/side-link-qr';
 import type { PhoneSidePairing } from '../camera/side-pairing-port';
 import type { SideLinkEvent } from '../camera/side-camera-link-port';
 import { PAIRING_READER_UNLOADED } from '../camera/usePairingScan';
 import {
+  cleanFrameBytes,
   flushSideLink,
   manualSchedule,
   photographedCode,
@@ -29,7 +38,12 @@ import {
 } from '../camera/testing';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
 
-import { SideCameraControl, TABLET_SCAN_NEEDS_CONSENT } from './SideCameraControl';
+import {
+  SIDE_FRAMING_TEXT,
+  SideCameraControl,
+  sidePicturesText,
+  TABLET_SCAN_NEEDS_CONSENT,
+} from './SideCameraControl';
 
 let mounted: Mounted | undefined;
 
@@ -64,7 +78,13 @@ async function scanOnce(): Promise<void> {
   await settle();
 }
 
-async function tablet(options: { readonly agreed?: boolean; readonly readerFails?: boolean } = {}) {
+async function tablet(
+  options: {
+    readonly agreed?: boolean;
+    readonly readerFails?: boolean;
+    readonly analyse?: SidePairingOptions['analyse'];
+  } = {},
+) {
   const network = sidePeerNetwork();
   const time = virtualTime();
   const port = sidePairingPort({
@@ -72,6 +92,7 @@ async function tablet(options: { readonly agreed?: boolean; readonly readerFails
     clock: time.clock,
     after: time.after,
     every: time.every,
+    analyse: options.analyse,
   });
   let phone: PhoneSidePairing | undefined;
   /** A code held up to the tablet's camera instead of the phone's, when set. */
@@ -378,5 +399,97 @@ describe('driving the phone, on the tablet', () => {
     await settle();
     expect(document.body.textContent).toContain(SIDE_PHONE_STATE_TEXT.framing);
     expect(button('Start filming')).toBeDefined();
+  });
+});
+
+describe('what the tablet says about the pictures — #530', () => {
+  /** A pairing whose tablet looks at pictures with a model that answers `outcome`. */
+  async function analysing(outcome: SidePoseOutcome = { kind: 'no-rider' }) {
+    const context = await tablet({
+      analyse: (control) =>
+        new SideAnalysis({
+          control,
+          estimator: () => ({
+            estimateSidePose: async () => Promise.resolve(outcome),
+            closeSidePoseModel: () => undefined,
+          }),
+        }),
+    });
+    await press('Pair a phone');
+    const phone = await context.phoneReads();
+    await press('Read the phone’s code');
+    await scanOnce();
+    phone.link.reportToTablet({ state: 'filming' });
+    await flushSideLink();
+    await settle();
+    let sequence = 0;
+    const send = async (count: number): Promise<void> => {
+      for (let index = 0; index < count; index += 1) {
+        phone.link.sendPictureToTablet({
+          sequence,
+          milliseconds: sequence * 200,
+          bytes: cleanFrameBytes(),
+        });
+        sequence += 1;
+        await flushSideLink();
+        await settle();
+      }
+    };
+    return { ...context, phone, send };
+  }
+
+  it('says none has arrived before the first picture, and that they are thrown away', async () => {
+    await analysing();
+    expect(document.body.textContent).toContain('None has arrived yet');
+    expect(document.body.textContent).toContain('thrown away at once');
+  });
+
+  it('counts the pictures looked at, and says nothing about what the model found in them', async () => {
+    const { send } = await analysing();
+    await send(3);
+    const shown = document.querySelector('[data-oyl-side-pictures]');
+    expect(shown?.getAttribute('data-oyl-side-pictures')).toBe('ready');
+    expect(shown?.textContent).toBe(
+      sidePicturesText({
+        model: 'ready',
+        posed: 0,
+        noRider: 3,
+        unreadable: 0,
+        skipped: 0,
+        framing: 'no-reference',
+        finished: false,
+      }),
+    );
+    // Not a live region: a count that changes five times a second is not announced.
+    expect(shown?.closest('[aria-live],[role="status"]')).toBeNull();
+    // No picture, of any kind, on the screen.
+    expect(document.querySelector('img, video, canvas[data-oyl-side-picture]')).toBeNull();
+  });
+
+  it('says there is no earlier session to line up with, when there is none', async () => {
+    await analysing();
+    expect(document.body.textContent).toContain(SIDE_FRAMING_TEXT['no-reference']);
+    expect(SIDE_FRAMING_TEXT['no-reference']).toBe(FRAMING_VERDICT_TEXT['no-reference']);
+  });
+
+  it('says so when the model will not load, and that pictures are still thrown away', async () => {
+    const { send } = await analysing({ kind: 'unavailable' });
+    await send(1);
+    expect(document.querySelector('[data-oyl-side-pictures]')?.textContent).toContain(
+      'could not load its pose model',
+    );
+  });
+
+  it('still shows the counts once the pairing has ended', async () => {
+    const { send } = await analysing({
+      kind: 'pose',
+      pose: { aspect: 1, nearSide: 'left', landmarks: [] },
+    });
+    await send(FRAMING_CHECK_POSES - 1);
+    await press('End pairing');
+    expect(document.body.textContent).toContain(SIDE_PAIRING_END_TEXT['ended-here']);
+    expect(document.querySelector('[data-oyl-side-pictures]')?.textContent).toContain(
+      `with you in ${String(FRAMING_CHECK_POSES - 1)} of them`,
+    );
   });
 });

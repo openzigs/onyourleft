@@ -66,6 +66,17 @@ import { CAMERA_NO_PORT } from './CameraView';
 const TITLE_ID = 'oyl-side-camera-title';
 
 /**
+ * Where this phone's pictures go, said before its camera is ever on — #530,
+ * ADR 0033 D-3 and D-6. The consent screen changes in the pull request that
+ * sends the first picture, which is the only order in which it stays true.
+ */
+export const SIDE_PICTURES_GO_SENTENCE =
+  'While it is filming, it sends about five small pictures a second to the tablet you paired it ' +
+  'with — directly, over your own Wi-Fi, encrypted — and nowhere else. The tablet looks at each ' +
+  'one and throws it away at once. It keeps where you were in the picture, as numbers, and never ' +
+  'the picture.';
+
+/**
  * The one big word the filming sign carries.
  *
  * ⚠️ **A word, and the word is the carrier** — #48's sixth criterion and
@@ -301,6 +312,7 @@ function SessionScreen({
               While you set it up, it shows you its own picture so you can line the bike up. That
               picture is not kept.
             </li>
+            <li>{SIDE_PICTURES_GO_SENTENCE}</li>
             <li>
               This phone keeps nothing about you once the session ends — no picture, no outline, no
               record of the session.

@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { auditAccessibility, formatViolations } from '../a11y/audit';
 import { CameraController } from '../camera/session';
+import { SideAnalysis } from '../camera/side-analysis';
 import { sidePairingPort } from '../camera/side-link';
 import { pairingCodeModules } from '../camera/side-link-qr';
 import type { TabletSidePairing } from '../camera/side-pairing-port';
@@ -66,6 +67,16 @@ function setUp() {
     clock: time.clock,
     after: time.after,
     every: time.every,
+    // #530: the analysis's words are on the paired screen too, so the audit
+    // covers them.
+    analyse: (control) =>
+      new SideAnalysis({
+        control,
+        estimator: () => ({
+          estimateSidePose: async () => Promise.resolve({ kind: 'no-rider' as const }),
+          closeSidePoseModel: () => undefined,
+        }),
+      }),
   });
   return { port, time };
 }
@@ -122,6 +133,7 @@ describe('the tablet', () => {
     await flushSideLink();
     await onTheCameraScreen(port);
     expect(queryAll(document, 'button').map((each) => each.textContent)).toContain('Start filming');
+    expect(document.querySelector('[data-oyl-side-pictures]')).not.toBeNull();
     expectNoViolations('the tablet paired');
     await press('End pairing');
     expectNoViolations('the tablet after ending the pairing');

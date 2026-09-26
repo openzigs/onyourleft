@@ -294,6 +294,20 @@ export interface CameraSession {
    */
   readCodePixels(): Promise<CodePixels>;
   /**
+   * One small frame, now, at most {@link SIDE_FRAME_LONG_SIDE} on its long
+   * side — the side camera's picture for the tablet (#530, ADR 0033 D-3).
+   *
+   * ⚠️ **A frame in every sense {@link captureFrame} is**: re-encoded from
+   * pixels and passed through `frame.ts` §`capturedFrame`, so ADR 0029 D-9's
+   * one strip point is unchanged. It differs only in size, and in holding one
+   * `<video>` and one canvas for the session rather than one per picture,
+   * because it is asked for five times a second.
+   *
+   * @throws never with anything of the picture in it: a capture that cannot
+   * be taken rejects with a {@link CameraCaptureError} from the fixed table.
+   */
+  captureSideFrame(): Promise<CapturedFrame>;
+  /**
    * Play this camera, live, into `surface` — the side camera's framing screen
    * (#528).
    *
@@ -324,6 +338,18 @@ export interface CameraSession {
  * the thread drawing the screen, several times a second, for nothing.
  */
 export const CODE_PIXELS_LONG_SIDE = 640;
+
+/**
+ * The longest side, in pixels, of a side-camera picture: 256.
+ *
+ * The owner's figure (#527: *"about 5 per second, at the model's input size
+ * (~256 px)"*), which spike 0010 costed on the tablet with a 256 × 256
+ * picture. Pose Landmarker lite takes a 256-pixel input, so a larger picture
+ * would be scaled down on the tablet after crossing the link at several times
+ * the size — the bytes on the wire and the pixels the model sees are the same
+ * picture at this size.
+ */
+export const SIDE_FRAME_LONG_SIDE = 256;
 
 /** The one seam between this client and a camera. */
 export interface CameraPort {

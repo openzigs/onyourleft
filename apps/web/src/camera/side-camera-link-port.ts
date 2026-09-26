@@ -26,11 +26,16 @@
  * ## Exactly what crosses, in each direction (D-3)
  *
  * Tablet → phone: *start*, *stop*, the framing reference (numbers, D-7) and
- * the framing verdict. Phone → tablet: its state, and why it stopped. **No
- * picture travels over anything declared here** — the frames channel is
- * [#530](https://github.com/openzigs/onyourleft/issues/530)'s — and nothing
- * here carries an athlete, a ride reading, a position or a wall-clock time.
+ * the framing verdict. Phone → tablet: its state, and why it stopped, and —
+ * since [#530](https://github.com/openzigs/onyourleft/issues/530) — the
+ * pictures, on their own channel, through {@link SideCameraLinkPort.sendPictureToTablet}.
+ * ⚠️ **A reviewer who remembers "no picture travels over anything declared
+ * here" is reading #528's file.** Nothing here carries an athlete, a ride
+ * reading, a position or a wall-clock time: a picture carries a sequence
+ * number and milliseconds since filming began, and nothing else (D-3).
  */
+
+import type { SidePicture } from './side-link-pictures';
 
 /**
  * Whether the tablet can currently hear this phone.
@@ -87,6 +92,22 @@ export type PhoneReport =
   | { readonly state: 'filming' }
   | { readonly state: 'stopped'; readonly reason: SideCameraStopReason };
 
+/**
+ * What became of one picture the phone tried to send — #530.
+ *
+ * - `sent` — handed to the channel. Not acknowledged, and not meant to be:
+ *   the `frames` channel has no retransmission (D-3).
+ * - `no-link` — the link is not connected, so the picture is discarded at
+ *   once (D-5: *"a frame captured while the link is down is discarded at
+ *   once"*).
+ * - `busy` — the last picture has not left yet, so this one is dropped rather
+ *   than queued behind it (D-6's *"a queue of photographs in memory is
+ *   refused"*, on the sending end).
+ * - `too-large` — larger than the connection carries in one message; not sent
+ *   and not split (`side-link-pictures.ts` §`MAXIMUM_SIDE_PICTURE_MESSAGE_BYTES`).
+ */
+export type SidePictureSent = 'sent' | 'no-link' | 'busy' | 'too-large';
+
 /** The phone's end of the link. */
 export interface SideCameraLinkPort {
   /** Whether the tablet can hear this phone right now. */
@@ -106,6 +127,14 @@ export interface SideCameraLinkPort {
    * report is the transport's business (#529), and so is re-sending one.
    */
   reportToTablet(report: PhoneReport): void;
+  /**
+   * Send one picture to the tablet — #530. Never throws and never waits, for
+   * {@link reportToTablet}'s reason; what became of it is the answer.
+   *
+   * ⚠️ **The caller drops the picture whatever the answer is.** Nothing on the
+   * phone keeps one (D-8), and a picture that was not sent is not sent later.
+   */
+  sendPictureToTablet(picture: SidePicture): SidePictureSent;
   /**
    * End the pairing. D-4: *"a pairing lasts one session"* and *"ends when
    * either device stops the session"* — nothing is remembered, so ending it is

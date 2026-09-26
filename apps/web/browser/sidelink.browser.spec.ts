@@ -75,6 +75,26 @@ test.describe('the side-camera link, in a real engine', () => {
     );
   });
 
+  test('sends pictures phone → tablet, small, whole and numbered — #530', () => {
+    expect(measurement.picturesSent).toEqual(['sent', 'sent', 'sent']);
+    for (const size of measurement.pictureSizes) {
+      expect(Math.max(size.width, size.height)).toBeLessThanOrEqual(256);
+      expect(Math.max(size.width, size.height)).toBeGreaterThan(0);
+    }
+    expect(measurement.picturesArrived.map((each) => [each.sequence, each.milliseconds])).toEqual([
+      [0, 0],
+      [1, 200],
+      [2, 400],
+    ]);
+    for (const each of measurement.picturesArrived) {
+      expect(each.jpeg).toBe(true);
+      expect(each.bytes).toBeGreaterThan(0);
+    }
+    console.log(
+      `side link: pictures of ${measurement.picturesArrived.map((each) => String(each.bytes)).join(', ')} bytes`,
+    );
+  });
+
   test('ends at both ends when the tablet ends it', () => {
     expect(measurement.tabletEnded?.ended).toBe('ended-here');
     expect(measurement.phoneCondition).toBe('ended');

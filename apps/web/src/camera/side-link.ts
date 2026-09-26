@@ -61,15 +61,24 @@ import {
   type PhoneMessage,
   type TabletMessage,
 } from './side-link-messages';
+import {
+  MAXIMUM_SIDE_PICTURE_MESSAGE_BYTES,
+  sidePictureFrom,
+  sidePictureMessage,
+  type SidePicture,
+} from './side-link-pictures';
 import { sdpFromSidePeerParameters, sidePeerParametersFrom, SideSdpError } from './side-link-sdp';
 import { createSidePeer, type SideChannel, type SidePeer } from './side-link-transport';
 import { browserAfter, browserEvery } from './side-camera';
+import type { FramingReference, FramingVerdict } from './framing';
+import type { SideAnalysisPort } from './side-analysis-port';
 import type {
   PhoneReport,
   SideCameraLinkPort,
   SideCameraStopReason,
   SideLinkCondition,
   SideLinkEvent,
+  SidePictureSent,
 } from './side-camera-link-port';
 import type {
   PhoneSidePairing,
@@ -82,8 +91,16 @@ import type {
   TabletSidePairing,
 } from './side-pairing-port';
 
-/** The one data channel #529 opens. #530's pictures get their own. */
+/** The channel for commands and state: reliable and ordered (ADR 0033 D-3). */
 export const CONTROL_CHANNEL = 'control';
+
+/**
+ * The channel for pictures, phone → tablet only — #530, ADR 0033 D-3:
+ * *"unordered, no retransmission. A late picture is worth nothing to a pose
+ * model and would only queue behind newer ones."* The tablet makes it beside
+ * `control`, so both are in the one offer the QR code carries.
+ */
+export const FRAMES_CHANNEL = 'frames';
 
 /**
  * How often each end says it is still there: once a second. Spike 0012 measured
@@ -234,16 +251,24 @@ export interface SideLinkTimers {
   readonly every?: ((task: () => void, milliseconds: number) => () => void) | undefined;
 }
 
-/** How a pairing port is built. Every member has a production default. */
+/** How a pairing port is built. Every member but `analyse` has a production default. */
 export interface SidePairingOptions extends SideLinkTimers {
   /** A new peer connection, or `undefined` with no WebRTC. */
   readonly peer?: (() => SidePeer | undefined) | undefined;
   /** `length` cryptographically random bytes. */
   readonly randomBytes?: ((length: number) => Uint8Array) | undefined;
+  /**
+   * What the tablet makes of a pairing's pictures — #530. Called once per
+   * offer, with that offer's control; `main.tsx` passes `side-analysis.ts`
+   * §`SideAnalysis` over the tablet's pose model. Without it the tablet
+   * receives pictures and looks at none of them.
+   */
+  readonly analyse?: ((control: SideCameraControlPort) => SideAnalysisPort) | undefined;
 }
 
 interface Resolved {
   readonly peer: () => SidePeer | undefined;
+  readonly analyse: ((control: SideCameraControlPort) => SideAnalysisPort) | undefined;
   readonly randomBytes: (length: number) => Uint8Array;
   readonly clock: () => number;
   readonly after: (task: () => void, milliseconds: number) => () => void;
@@ -253,6 +278,7 @@ interface Resolved {
 function resolve(options: SidePairingOptions): Resolved {
   return {
     peer: options.peer ?? (() => createSidePeer()),
+    analyse: options.analyse,
     randomBytes:
       options.randomBytes ??
       ((length) => globalThis.crypto.getRandomValues(new Uint8Array(length))),
@@ -344,6 +370,8 @@ async function offerFrom(timers: Resolved): Promise<TabletSidePairing | PairingR
     return 'unavailable';
   }
   const channel = peer.createDataChannel(CONTROL_CHANNEL, { ordered: true });
+  const frames = peer.createDataChannel(FRAMES_CHANNEL, { ordered: false, maxRetransmits: 0 });
+  frames.binaryType = 'arraybuffer';
   try {
     await peer.setLocalDescription(await peer.createOffer());
   } catch {
@@ -366,11 +394,12 @@ async function offerFrom(timers: Resolved): Promise<TabletSidePairing | PairingR
   const offerOnlyNames = parameters.candidates
     .filter(candidateAccepted)
     .every((candidate) => candidate.address.endsWith('.local'));
-  const control = new TabletSideLink(peer, channel, base64Url(secret), timers);
+  const control = new TabletSideLink(peer, channel, frames, base64Url(secret), timers);
   return {
     offerCode: made.text,
     acceptSidePhoneCode: async (answerCode) => control.accept(answerCode, offerOnlyNames),
     control,
+    analysis: timers.analyse?.(control),
   };
 }
 
@@ -383,9 +412,11 @@ async function offerFrom(timers: Resolved): Promise<TabletSidePairing | PairingR
 export class TabletSideLink implements SideCameraControlPort {
   readonly #peer: SidePeer;
   readonly #channel: SideChannel;
+  readonly #frames: SideChannel;
   readonly #secret: string;
   readonly #timers: Resolved;
   readonly #listeners = new Set<() => void>();
+  readonly #pictureListeners = new Set<(picture: SidePicture) => void>();
   readonly #cancels: (() => void)[] = [];
 
   /** Whether an answer has been accepted — D-4's single use. */
@@ -404,9 +435,16 @@ export class TabletSideLink implements SideCameraControlPort {
   #ended: SidePairingEnd | undefined;
   #snapshot: SideControlState;
 
-  constructor(peer: SidePeer, channel: SideChannel, secret: string, timers: Resolved) {
+  constructor(
+    peer: SidePeer,
+    channel: SideChannel,
+    frames: SideChannel,
+    secret: string,
+    timers: Resolved,
+  ) {
     this.#peer = peer;
     this.#channel = channel;
+    this.#frames = frames;
     this.#secret = secret;
     this.#timers = timers;
     this.#snapshot = this.#build();
@@ -419,6 +457,9 @@ export class TabletSideLink implements SideCameraControlPort {
     );
     channel.onmessage = (event) => {
       this.#hear(event.data);
+    };
+    frames.onmessage = (event) => {
+      this.#hearPicture(event.data);
     };
     channel.onclose = () => {
       this.#end(this.#phone === 'stopped' ? 'phone-ended' : this.#failure());
@@ -508,6 +549,49 @@ export class TabletSideLink implements SideCameraControlPort {
       this.#nextCommand += 1;
     }
     this.#end('ended-here');
+  }
+
+  onSideCameraPicture(listener: (picture: SidePicture) => void): () => void {
+    this.#pictureListeners.add(listener);
+    return () => {
+      this.#pictureListeners.delete(listener);
+    };
+  }
+
+  shareFramingReference(reference: FramingReference): void {
+    if (this.#ended === undefined && this.#proved) {
+      this.#send({ t: 'reference', reference });
+    }
+  }
+
+  shareFramingVerdict(verdict: FramingVerdict): void {
+    if (this.#ended === undefined && this.#proved) {
+      this.#send({ t: 'verdict', verdict });
+    }
+  }
+
+  /**
+   * One message on `frames`. D-4 applies to it exactly as to `control`: a
+   * picture before the phone has proved itself, or anything that is not a
+   * picture, ends the pairing before another byte is read.
+   */
+  #hearPicture(data: unknown): void {
+    if (this.#ended !== undefined) {
+      return;
+    }
+    if (!this.#proved) {
+      this.#end('not-our-phone');
+      return;
+    }
+    const picture = sidePictureFrom(data);
+    if (picture === undefined) {
+      this.#end('broken');
+      return;
+    }
+    this.#heard();
+    for (const listener of [...this.#pictureListeners]) {
+      listener(picture);
+    }
   }
 
   /** The failure's reason, by how far the pairing got. */
@@ -615,9 +699,13 @@ export class TabletSideLink implements SideCameraControlPort {
     }
     this.#channel.onmessage = null;
     this.#channel.onclose = null;
+    this.#frames.onmessage = null;
     this.#peer.onconnectionstatechange = null;
     letGo(this.#peer, this.#channel, this.#timers);
     this.#announce();
+    // After the announcement, so a listener that reads the state on its way
+    // out (`side-analysis.ts` finishing a session) still hears nothing more.
+    this.#pictureListeners.clear();
   }
 
   #build(): SideControlState {
@@ -692,6 +780,8 @@ export class PhoneSideLink implements SideCameraLinkPort {
   readonly #cancels: (() => void)[] = [];
 
   #channel: SideChannel | undefined;
+  /** The `frames` channel, which this phone only ever sends on. */
+  #frames: SideChannel | undefined;
   #condition: SideLinkCondition = 'connecting';
   #lastHeard = 0;
   /** The last command number obeyed, so a repeated one is not obeyed twice. */
@@ -736,6 +826,43 @@ export class PhoneSideLink implements SideCameraLinkPort {
     this.#send({ t: 'state', report });
   }
 
+  sendPictureToTablet(picture: SidePicture): SidePictureSent {
+    const frames = this.#frames;
+    if (this.#condition !== 'connected' || frames?.readyState !== 'open') {
+      return 'no-link';
+    }
+    // ⚠️ **One picture in memory, not a queue** — ADR 0033 D-6's rule, on
+    // the sending end. Anything still buffered is the last picture not yet
+    // handed to the network, and a new one would queue behind it.
+    if (frames.bufferedAmount > 0) {
+      return 'busy';
+    }
+    const message = sidePictureMessage(picture, this.#pictureRoom());
+    if (message === undefined) {
+      return 'too-large';
+    }
+    try {
+      frames.send(message);
+      return 'sent';
+    } catch {
+      return 'no-link';
+    }
+  }
+
+  /**
+   * How long a message this connection will carry — D-3's *"checks the size
+   * rather than assuming it"*. The connection's own figure where it states a
+   * finite positive one, and {@link MAXIMUM_SIDE_PICTURE_MESSAGE_BYTES}
+   * otherwise; `side-link-pictures.ts` §`sidePictureMessage` takes the smaller
+   * of that and its own bound.
+   */
+  #pictureRoom(): number {
+    const stated = this.#peer.sctp?.maxMessageSize;
+    return typeof stated === 'number' && Number.isFinite(stated) && stated > 0
+      ? stated
+      : MAXIMUM_SIDE_PICTURE_MESSAGE_BYTES;
+  }
+
   endSideLink(): void {
     if (this.#condition === 'ended') {
       return;
@@ -750,13 +877,27 @@ export class PhoneSideLink implements SideCameraLinkPort {
       this.#channel.onclose = null;
       this.#channel.onopen = null;
     }
+    if (this.#frames !== undefined) {
+      this.#frames.onmessage = null;
+    }
     letGo(this.#peer, this.#channel, this.#timers);
     this.#setCondition('ended');
   }
 
   #adopt(channel: SideChannel): void {
-    // One channel, named, once. A second channel, or one by another name, is
-    // not something D-3 lists, and the pairing ends (D-4).
+    // Two channels, each named, each once (D-3). A third, a second of either,
+    // or one by another name is not something D-3 lists, and the pairing ends
+    // (D-4). They may arrive in either order.
+    if (channel.label === FRAMES_CHANNEL && this.#frames === undefined) {
+      this.#frames = channel;
+      channel.binaryType = 'arraybuffer';
+      // Phone → tablet only: the tablet never sends a picture, or anything
+      // else, on `frames`, so anything that arrives on it is not the tablet.
+      channel.onmessage = () => {
+        this.endSideLink();
+      };
+      return;
+    }
     if (this.#channel !== undefined || channel.label !== CONTROL_CHANNEL) {
       channel.close();
       this.endSideLink();

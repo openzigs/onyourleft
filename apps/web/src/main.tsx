@@ -56,6 +56,8 @@ import { riderAnalysisPort } from './camera/analysis-transport';
 import { keepThisRide } from './camera/keep';
 import { shellCameraNotice } from './camera/shell-camera';
 import { CameraController } from './camera/session';
+import { workerPoseEstimator } from './camera/pose-estimator';
+import { SideAnalysis } from './camera/side-analysis';
 import { sidePairingPort } from './camera/side-link';
 import { sideLinkAvailable } from './camera/side-link-transport';
 import type { ThermalPort } from './game/thermal-port';
@@ -805,7 +807,25 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   // #529. One per tab, like the camera: the tablet's pairing is held by the
   // port so that leaving the Camera screen to ride does not end it. None
   // where there is no WebRTC — both side-camera screens then say so.
-  const sidePairing = sideLinkAvailable() ? sidePairingPort() : undefined;
+  //
+  // #530. Each pairing's pictures are looked at on THIS device by the pose
+  // model in a worker, made on the first picture — so a pairing that never
+  // films loads no model — and the framing reference is the local athlete's
+  // (ADR 0033 D-7). ⚠️ The `analyse` option is optional, so leaving it out
+  // here is well typed and `check:wiring` cannot see it (§Limits' third
+  // entry): the pairing would carry pictures that nothing looked at.
+  // `camera/side-link.test.ts` §"pictures" is what drives the option; this
+  // line is what supplies it.
+  const sidePairing = sideLinkAvailable()
+    ? sidePairingPort({
+        analyse: (control) =>
+          new SideAnalysis({
+            control,
+            estimator: () => workerPoseEstimator(),
+            references: { store: localStore(), athleteId: LOCAL_ATHLETE },
+          }),
+      })
+    : undefined;
   const platform = await buildPlatform(capabilities, camera);
   const rideController = platform.rideController;
   // Read once: two calls would be two reads of a global for one prop.
