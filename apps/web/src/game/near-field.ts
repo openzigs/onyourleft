@@ -26,7 +26,13 @@
  *    pyramid. A box is a bound: an item whose box stays clear cannot be cut,
  *    and nearly every item is let go here, on distance alone.
  * 2. {@link shapeMeets} — for an item whose box does not, the TRIANGLES of the
- *    shapes it may be drawn as.
+ *    shapes it may be drawn as. ⚠️ **Without making an object, and past most
+ *    of them on a sphere**: a realistic tree is 24 000 to 28 000 triangles a
+ *    shape, and the first version of this step placed every one as three new
+ *    objects on every frame a tree's box reached the eye — up to 3 ms a frame
+ *    at the tablet's aspect, where it drops nothing (#545's review). Each shape
+ *    is prepared once, when the models load, into runs of nearby triangles
+ *    under one bounding sphere ({@link prepareShape}).
  *
  * ⚠️ **Step 2 is not optional.** A realistic fir's box is a square seven metres
  * across around a sparse cone of cards. Over `near-field.test.ts`' rides the
@@ -209,6 +215,16 @@ export interface NearPyramid {
   readonly edges: readonly RigPoint[];
   /** The farthest any of {@link points} is from the eye. */
   readonly radius: number;
+  /**
+   * {@link points}, {@link normals} and {@link edges} again as flat numbers,
+   * three a vector, for {@link shapeMeets}' per-triangle test — which reads
+   * these rather than the objects so that it makes no object per triangle.
+   */
+  readonly packed: {
+    readonly points: Float64Array;
+    readonly normals: Float64Array;
+    readonly edges: Float64Array;
+  };
 }
 
 function vector(x: number, y: number, z: number): RigPoint {
@@ -264,12 +280,26 @@ export function nearPyramid(
     RigPoint,
     RigPoint,
   ];
+  const points = [rig.eye, ...corners];
+  const normals = [forward, cross(ea, eb), cross(eb, ec), cross(ec, ed), cross(ed, ea)];
+  const edges = [right, up, ea, eb, ec, ed];
   return {
-    points: [rig.eye, ...corners],
-    normals: [forward, cross(ea, eb), cross(eb, ec), cross(ec, ed), cross(ed, ea)],
-    edges: [right, up, ea, eb, ec, ed],
+    points,
+    normals,
+    edges,
     radius: Math.hypot(near, across, rise),
+    packed: { points: packed(points), normals: packed(normals), edges: packed(edges) },
   };
+}
+
+function packed(vectors: readonly RigPoint[]): Float64Array {
+  const out = new Float64Array(vectors.length * 3);
+  vectors.forEach((each, at) => {
+    out[at * 3] = each.x;
+    out[at * 3 + 1] = each.y;
+    out[at * 3 + 2] = each.z;
+  });
+  return out;
 }
 
 /** Where a set of points lies along an axis. */
@@ -355,7 +385,104 @@ export function intrudes(item: ScatterItem, pyramid: NearPyramid, world: DrawnWo
   return meetsPyramid(corners, axes, axes, pyramid);
 }
 
-/** Whether one triangle, three corners in the world, meets the pyramid. */
+/**
+ * The one triangle {@link triangleMeets} and {@link shapeMeets} test, three
+ * corners of x, y and z in the world. ⚠️ **One array for the whole program, on
+ * purpose**: the test runs per triangle on the render loop's thread, and the
+ * first version made three corner objects and eighteen crossed axes for each —
+ * about 150 000 short-lived objects on a frame a realistic tree passed the eye,
+ * on which nothing was dropped (#545's review; #240's NFR-3).
+ */
+const TRIANGLE = new Float64Array(9);
+
+/**
+ * Whether {@link TRIANGLE} and the pyramid lie apart along the axis
+ * `(ax, ay, az)`. Two parallel edges cross to nothing, and nothing separates
+ * nothing.
+ */
+function triangleApartAlong(ax: number, ay: number, az: number, points: Float64Array): boolean {
+  if (ax * ax + ay * ay + az * az < 1e-18) return false;
+  let lowT = Number.POSITIVE_INFINITY;
+  let highT = Number.NEGATIVE_INFINITY;
+  for (let at = 0; at < 9; at += 3) {
+    const along =
+      (TRIANGLE[at] as number) * ax +
+      (TRIANGLE[at + 1] as number) * ay +
+      (TRIANGLE[at + 2] as number) * az;
+    if (along < lowT) lowT = along;
+    if (along > highT) highT = along;
+  }
+  let lowP = Number.POSITIVE_INFINITY;
+  let highP = Number.NEGATIVE_INFINITY;
+  for (let at = 0; at < points.length; at += 3) {
+    const along =
+      (points[at] as number) * ax +
+      (points[at + 1] as number) * ay +
+      (points[at + 2] as number) * az;
+    if (along < lowP) lowP = along;
+    if (along > highP) highP = along;
+  }
+  return highT < lowP || highP < lowT;
+}
+
+/**
+ * Whether {@link TRIANGLE} meets the pyramid: {@link meetsPyramid}'s
+ * separating-axis test — the triangle's normal, the pyramid's five, and each
+ * of the triangle's three edges crossed with each of the pyramid's six — on
+ * numbers rather than objects.
+ */
+function packedTriangleMeets(pyramid: NearPyramid): boolean {
+  const { points, normals, edges } = pyramid.packed;
+  const t = TRIANGLE;
+  const abx = (t[3] as number) - (t[0] as number);
+  const aby = (t[4] as number) - (t[1] as number);
+  const abz = (t[5] as number) - (t[2] as number);
+  const bcx = (t[6] as number) - (t[3] as number);
+  const bcy = (t[7] as number) - (t[4] as number);
+  const bcz = (t[8] as number) - (t[5] as number);
+  const cax = (t[0] as number) - (t[6] as number);
+  const cay = (t[1] as number) - (t[7] as number);
+  const caz = (t[2] as number) - (t[8] as number);
+  if (
+    triangleApartAlong(aby * bcz - abz * bcy, abz * bcx - abx * bcz, abx * bcy - aby * bcx, points)
+  ) {
+    return false;
+  }
+  for (let at = 0; at < normals.length; at += 3) {
+    if (
+      triangleApartAlong(
+        normals[at] as number,
+        normals[at + 1] as number,
+        normals[at + 2] as number,
+        points,
+      )
+    ) {
+      return false;
+    }
+  }
+  for (let edge = 0; edge < 3; edge += 1) {
+    const ex = edge === 0 ? abx : edge === 1 ? bcx : cax;
+    const ey = edge === 0 ? aby : edge === 1 ? bcy : cay;
+    const ez = edge === 0 ? abz : edge === 1 ? bcz : caz;
+    for (let at = 0; at < edges.length; at += 3) {
+      const ox = edges[at] as number;
+      const oy = edges[at + 1] as number;
+      const oz = edges[at + 2] as number;
+      if (triangleApartAlong(ey * oz - ez * oy, ez * ox - ex * oz, ex * oy - ey * ox, points)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+/**
+ * Whether one triangle, three corners in the world, meets the pyramid.
+ *
+ * @test-facing the separating-axis test on one triangle, which
+ * `near-field.test.ts` holds to cases worked by hand; `shapeMeets` runs the
+ * same test on its own survivors without making the three corners this takes.
+ */
 export function triangleMeets(
   a: RigPoint,
   b: RigPoint,
@@ -374,10 +501,16 @@ export function triangleMeets(
       return false;
     }
   }
-  const ab = minus(b, a);
-  const bc = minus(c, b);
-  const ca = minus(a, c);
-  return meetsPyramid([a, b, c], [cross(ab, bc)], [ab, bc, ca], pyramid);
+  TRIANGLE[0] = a.x;
+  TRIANGLE[1] = a.y;
+  TRIANGLE[2] = a.z;
+  TRIANGLE[3] = b.x;
+  TRIANGLE[4] = b.y;
+  TRIANGLE[5] = b.z;
+  TRIANGLE[6] = c.x;
+  TRIANGLE[7] = c.y;
+  TRIANGLE[8] = c.z;
+  return packedTriangleMeets(pyramid);
 }
 
 /**
@@ -387,10 +520,127 @@ export function triangleMeets(
 export type ShapeTriangles = Float32Array;
 
 /**
+ * How many triangles share one bounding sphere in a {@link PreparedShape}.
+ * Measured on the realistic trees at 16 : 10 (#545's review): 32 lets all but
+ * a handful of a 56 000-triangle broadleaf go on one sphere test per chunk,
+ * and a smaller chunk only adds spheres to test.
+ */
+const CHUNK_TRIANGLES = 32;
+
+/** The cell a triangle is sorted into, in metres, so that a chunk is a place and not a run of the file. */
+const CHUNK_CELL_METRES = 0.5;
+
+/**
+ * A shape made ready for {@link shapeMeets}: its triangles re-ordered so that
+ * neighbours in space are neighbours in the array, and a bounding sphere per
+ * {@link CHUNK_TRIANGLES} of them — four numbers a chunk, centre and radius.
+ */
+interface PreparedShape {
+  readonly triangles: Float32Array;
+  readonly spheres: Float32Array;
+}
+
+/** Each shape's preparation, kept against the array it was made from. */
+const PREPARED = new WeakMap<ShapeTriangles, PreparedShape>();
+
+/**
+ * Prepares a shape for {@link shapeMeets}, once: sorts its triangles by the
+ * {@link CHUNK_CELL_METRES} cell their centroid is in, and bounds each run of
+ * {@link CHUNK_TRIANGLES}. `three-renderer.ts` calls this when the models LOAD,
+ * so the one-off cost lands before a ride rather than on the frame a tree first
+ * comes near the eye; a shape nobody prepared is prepared on first ask.
+ */
+export function prepareShape(shape: ShapeTriangles): void {
+  preparedOf(shape);
+}
+
+function preparedOf(shape: ShapeTriangles): PreparedShape {
+  const cached = PREPARED.get(shape);
+  if (cached !== undefined) return cached;
+  const count = Math.floor(shape.length / 9);
+  const cells = new Float64Array(count * 3);
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let minZ = Number.POSITIVE_INFINITY;
+  for (let triangle = 0; triangle < count; triangle += 1) {
+    const at = triangle * 9;
+    for (let axis = 0; axis < 3; axis += 1) {
+      const centroid =
+        ((shape[at + axis] as number) +
+          (shape[at + 3 + axis] as number) +
+          (shape[at + 6 + axis] as number)) /
+        3;
+      cells[triangle * 3 + axis] = centroid;
+    }
+    minX = Math.min(minX, cells[triangle * 3] as number);
+    minY = Math.min(minY, cells[triangle * 3 + 1] as number);
+    minZ = Math.min(minZ, cells[triangle * 3 + 2] as number);
+  }
+  const cellOf = (triangle: number, axis: number, min: number): number =>
+    Math.floor(((cells[triangle * 3 + axis] as number) - min) / CHUNK_CELL_METRES);
+  const order = Array.from({ length: count }, (_, triangle) => triangle);
+  order.sort(
+    (p, q) =>
+      cellOf(p, 1, minY) - cellOf(q, 1, minY) ||
+      cellOf(p, 2, minZ) - cellOf(q, 2, minZ) ||
+      cellOf(p, 0, minX) - cellOf(q, 0, minX) ||
+      p - q,
+  );
+  const triangles = new Float32Array(count * 9);
+  order.forEach((from, to) => {
+    triangles.set(shape.subarray(from * 9, from * 9 + 9), to * 9);
+  });
+  const chunks = Math.ceil(count / CHUNK_TRIANGLES);
+  const spheres = new Float32Array(chunks * 4);
+  for (let chunk = 0; chunk < chunks; chunk += 1) {
+    const from = chunk * CHUNK_TRIANGLES * 9;
+    const to = Math.min(count, (chunk + 1) * CHUNK_TRIANGLES) * 9;
+    const low = [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY];
+    const high = [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY];
+    for (let at = from; at < to; at += 1) {
+      const axis = at % 3;
+      low[axis] = Math.min(low[axis] as number, triangles[at] as number);
+      high[axis] = Math.max(high[axis] as number, triangles[at] as number);
+    }
+    const centre = [0, 1, 2].map((axis) => ((low[axis] as number) + (high[axis] as number)) / 2);
+    let radius = 0;
+    for (let at = from; at < to; at += 3) {
+      radius = Math.max(
+        radius,
+        Math.hypot(
+          (triangles[at] as number) - (centre[0] as number),
+          (triangles[at + 1] as number) - (centre[1] as number),
+          (triangles[at + 2] as number) - (centre[2] as number),
+        ),
+      );
+    }
+    spheres[chunk * 4] = centre[0] as number;
+    spheres[chunk * 4 + 1] = centre[1] as number;
+    spheres[chunk * 4 + 2] = centre[2] as number;
+    // Rounded outwards: a Float32 radius a hair short would let a chunk go that
+    // touches the pyramid by that hair.
+    spheres[chunk * 4 + 3] = radius * (1 + 1e-6) + 1e-6;
+  }
+  const prepared = { triangles, spheres };
+  PREPARED.set(shape, prepared);
+  return prepared;
+}
+
+/**
  * Whether any triangle of `shape`, drawn for `item`, meets the pyramid — the
  * question the near plane actually asks. Placed as `three-renderer.ts`' belts
  * place an instance: scaled by `item.scale`, turned by `item.rotation` about
  * +y, stood at the item.
+ *
+ * ⚠️ **It makes no object, and it tests few triangles.** The pyramid lies
+ * inside a sphere of `pyramid.radius` about the eye, so the eye is taken into
+ * the SHAPE's frame once, and a chunk whose sphere, or a triangle whose three
+ * corners on one side, lie beyond that radius is let go before anything is
+ * placed. Only what survives — on the rides, a few triangles of a tree beside
+ * the eye — is placed in the world and given the full test. #545's review
+ * measured the first version, which placed every triangle as three new
+ * objects, at up to 3 ms a frame on this path at the tablet's aspect, where it
+ * drops nothing.
  */
 export function shapeMeets(
   item: ScatterItem,
@@ -398,16 +648,64 @@ export function shapeMeets(
   pyramid: NearPyramid,
 ): boolean {
   const s = item.scale;
+  // An item drawn at no size has no triangle to cut.
+  if (!(s > 0)) return false;
+  const { triangles, spheres } = preparedOf(shape);
   const cos = Math.cos(item.rotation);
   const sin = Math.sin(item.rotation);
-  const placed = (at: number): RigPoint => {
-    const x = (shape[at] as number) * s;
-    const y = (shape[at + 1] as number) * s;
-    const z = (shape[at + 2] as number) * s;
-    return vector(item.x + x * cos + z * sin, item.y + y, item.z - x * sin + z * cos);
-  };
-  for (let at = 0; at + 8 < shape.length; at += 9) {
-    if (triangleMeets(placed(at), placed(at + 3), placed(at + 6), pyramid)) return true;
+  const eye = pyramid.points[0] as RigPoint;
+  // The eye in the shape's own frame: the placement below, undone.
+  const dx = eye.x - item.x;
+  const dz = eye.z - item.z;
+  const ex = (dx * cos - dz * sin) / s;
+  const ey = (eye.y - item.y) / s;
+  const ez = (dx * sin + dz * cos) / s;
+  const reach = pyramid.radius / s;
+  const count = Math.floor(triangles.length / 9);
+  for (let chunk = 0; chunk * 4 < spheres.length; chunk += 1) {
+    const cx = (spheres[chunk * 4] as number) - ex;
+    const cy = (spheres[chunk * 4 + 1] as number) - ey;
+    const cz = (spheres[chunk * 4 + 2] as number) - ez;
+    const within = (spheres[chunk * 4 + 3] as number) + reach;
+    if (cx * cx + cy * cy + cz * cz > within * within) continue;
+    const last = Math.min(count, (chunk + 1) * CHUNK_TRIANGLES);
+    for (let triangle = chunk * CHUNK_TRIANGLES; triangle < last; triangle += 1) {
+      const at = triangle * 9;
+      if (beyondOnAnAxis(triangles, at, ex, ey, ez, reach)) continue;
+      for (let corner = 0; corner < 9; corner += 3) {
+        const x = (triangles[at + corner] as number) * s;
+        const y = (triangles[at + corner + 1] as number) * s;
+        const z = (triangles[at + corner + 2] as number) * s;
+        TRIANGLE[corner] = item.x + x * cos + z * sin;
+        TRIANGLE[corner + 1] = item.y + y;
+        TRIANGLE[corner + 2] = item.z - x * sin + z * cos;
+      }
+      if (packedTriangleMeets(pyramid)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Whether all three corners of the triangle at `at` lie more than `reach` from
+ * `(ex, ey, ez)` on the same side along one axis — so it is outside the sphere
+ * of that radius, whichever way the shape is turned.
+ */
+function beyondOnAnAxis(
+  triangles: Float32Array,
+  at: number,
+  ex: number,
+  ey: number,
+  ez: number,
+  reach: number,
+): boolean {
+  for (let axis = 0; axis < 3; axis += 1) {
+    const centre = axis === 0 ? ex : axis === 1 ? ey : ez;
+    const a = (triangles[at + axis] as number) - centre;
+    const b = (triangles[at + 3 + axis] as number) - centre;
+    const c = (triangles[at + 6 + axis] as number) - centre;
+    if (a > reach && b > reach && c > reach) return true;
+    if (a < -reach && b < -reach && c < -reach) return true;
   }
   return false;
 }
@@ -445,8 +743,15 @@ export function clearOfTheCamera(
   let kept: ScatterItem[] | undefined;
   for (let index = 0; index < items.length; index += 1) {
     const item = items[index] as ScatterItem;
-    const shapes = intrudes(item, pyramid, world) ? shapesOf(item.kind) : [];
-    const cut = shapes === undefined || shapes.some((shape) => shapeMeets(item, shape, pyramid));
+    let cut = false;
+    if (intrudes(item, pyramid, world)) {
+      const shapes = shapesOf(item.kind);
+      cut = shapes === undefined;
+      // A loop rather than `some`, which would make a closure per item.
+      for (let shape = 0; !cut && shapes !== undefined && shape < shapes.length; shape += 1) {
+        cut = shapeMeets(item, shapes[shape] as ShapeTriangles, pyramid);
+      }
+    }
     if (cut) {
       kept ??= items.slice(0, index);
     } else {

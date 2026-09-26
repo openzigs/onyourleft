@@ -186,3 +186,106 @@ export function fittedRealistic(
   const factor = fit / extent;
   return triangles.map((value) => value * factor);
 }
+
+/**
+ * Whether `shape`, drawn for `item`, meets the solid between the eye and a
+ * near plane `near` metres out — worked a DIFFERENT way from `near-field.ts`,
+ * so that the rides and the agreement test hold the shipped answer to
+ * something other than itself (#545's review).
+ *
+ * `near-field.ts` asks the separating-axis question of the triangles that
+ * survive its chunk spheres. This places EVERY triangle with its own
+ * arithmetic, takes it into the camera's frame — forward, right and up as
+ * `nearPyramid`'s header says three aims a camera, written out again here —
+ * and CLIPS it against the pyramid's five planes: whatever of it is left is
+ * what the plane would cut. No chunk, no sphere, no shared code but the lens.
+ */
+export function referenceShapeMeets(
+  item: {
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+    readonly rotation: number;
+    readonly scale: number;
+  },
+  shape: ShapeTriangles,
+  rig: {
+    readonly eye: { readonly x: number; readonly y: number; readonly z: number };
+    readonly target: { readonly x: number; readonly y: number; readonly z: number };
+  },
+  spread: number,
+  rise: number,
+  near: number,
+): boolean {
+  const ax = rig.target.x - rig.eye.x;
+  const ay = rig.target.y - rig.eye.y;
+  const az = rig.target.z - rig.eye.z;
+  const length = Math.hypot(ax, ay, az);
+  const fx = ax / length;
+  const fy = ay / length;
+  const fz = az / length;
+  const flat = Math.hypot(fx, fz);
+  const rx = -fz / flat;
+  const rz = fx / flat;
+  // up = right × forward, with right's y nought.
+  const ux = -rz * fy;
+  const uy = rz * fx - rx * fz;
+  const uz = rx * fy;
+  const cos = Math.cos(item.rotation);
+  const sin = Math.sin(item.rotation);
+  const s = item.scale;
+  const camera = new Float64Array(9);
+  for (let at = 0; at + 8 < shape.length; at += 9) {
+    for (let corner = 0; corner < 3; corner += 1) {
+      const x = (shape[at + corner * 3] as number) * s;
+      const y = (shape[at + corner * 3 + 1] as number) * s;
+      const z = (shape[at + corner * 3 + 2] as number) * s;
+      const wx = item.x + x * cos + z * sin - rig.eye.x;
+      const wy = item.y + y - rig.eye.y;
+      const wz = item.z - x * sin + z * cos - rig.eye.z;
+      camera[corner * 3] = wx * rx + wz * rz;
+      camera[corner * 3 + 1] = wx * ux + wy * uy + wz * uz;
+      camera[corner * 3 + 2] = wx * fx + wy * fy + wz * fz;
+    }
+    const depths = [camera[2] as number, camera[5] as number, camera[8] as number];
+    if (depths.every((depth) => depth > near) || depths.every((depth) => depth < 0)) continue;
+    let polygon: (readonly [number, number, number])[] = [0, 1, 2].map(
+      (corner) =>
+        [
+          camera[corner * 3] as number,
+          camera[corner * 3 + 1] as number,
+          camera[corner * 3 + 2] as number,
+        ] as const,
+    );
+    // Each plane as the value that must be ≥ 0 inside the pyramid.
+    const planes: ((p: readonly [number, number, number]) => number)[] = [
+      (p) => near - p[2],
+      (p) => spread * p[2] - p[0],
+      (p) => spread * p[2] + p[0],
+      (p) => rise * p[2] - p[1],
+      (p) => rise * p[2] + p[1],
+    ];
+    for (const inside of planes) {
+      const next: (readonly [number, number, number])[] = [];
+      for (let index = 0; index < polygon.length; index += 1) {
+        const from = polygon[index] as readonly [number, number, number];
+        const to = polygon[(index + 1) % polygon.length] as readonly [number, number, number];
+        const a = inside(from);
+        const b = inside(to);
+        if (a >= 0) next.push(from);
+        if (a >= 0 !== b >= 0) {
+          const t = a / (a - b);
+          next.push([
+            from[0] + (to[0] - from[0]) * t,
+            from[1] + (to[1] - from[1]) * t,
+            from[2] + (to[2] - from[2]) * t,
+          ]);
+        }
+      }
+      polygon = next;
+      if (polygon.length === 0) break;
+    }
+    if (polygon.length > 0) return true;
+  }
+  return false;
+}

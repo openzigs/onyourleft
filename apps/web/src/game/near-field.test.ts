@@ -14,9 +14,11 @@
  *    worked by hand and to an independent sampling of the same solid.
  * 3. **A ride cuts nothing**, with the camera on the racing line, on the
  *    fixture routes, a metre at a time, at every aspect from an upright phone
- *    to 6 : 1, in both worlds — and the same ride with the plane moved out to
- *    where the scenery is DOES cut, which is the control that makes the first
- *    half mean something.
+ *    to 6 : 1, in both worlds — and at 6 : 1 the frame as built DOES meet the
+ *    plane, which is the control that makes the first half mean something.
+ *    What the cull drops is held, item for item, to `referenceShapeMeets`,
+ *    which clips triangles where `shapeMeets` separates them and shares none
+ *    of its code (#545's review).
  */
 
 import { readdirSync } from 'node:fs';
@@ -49,11 +51,18 @@ import {
   shapeMeets,
   triangleMeets,
   type DrawnWorld,
+  type NearPyramid,
   type Reach,
   type ShapeTriangles,
   type ShapesOf,
 } from './near-field';
-import { boundsOf, fittedRealistic, fittedStylised, modelTriangles } from './near-field-testing';
+import {
+  boundsOf,
+  fittedRealistic,
+  fittedStylised,
+  modelTriangles,
+  referenceShapeMeets,
+} from './near-field-testing';
 import { REALISTIC_VEGETATION } from './realistic-assets';
 import {
   circuitRoute,
@@ -449,6 +458,62 @@ describe('shapeMeets — a shape placed as the renderer places an instance', () 
   });
 });
 
+describe('shapeMeets — the committed shapes, against a test worked another way', () => {
+  it('agrees with the clipping reference for every shape placed about the eye', () => {
+    // The shipped test skips whole chunks of a shape on a sphere, skips a
+    // triangle on its corners in the shape's own frame, and only then asks
+    // the separating axes (#545's review). Each of those is a way to let a cut
+    // triangle go, so every committed shape is placed about the eye — close
+    // enough that some of it meets the pyramid and some does not — and held to
+    // `referenceShapeMeets`, which clips every triangle and skips none.
+    let state = 5_450;
+    const next = (): number => {
+      state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return state / 2_147_483_648;
+    };
+    const aspects = [9 / 19.5, 16 / 10, 6];
+    let meets = 0;
+    let clear = 0;
+    for (const world of WORLDS) {
+      for (const [kind, shapes] of SHAPES[world]) {
+        const reach = sceneryReach(kind, world);
+        for (const shape of shapes) {
+          for (let trial = 0; trial < 24; trial += 1) {
+            const aspect = aspects[trial % aspects.length] as number;
+            const scale = 0.7 + next() * 0.7;
+            const subject = item(
+              kind,
+              (next() * 2 - 1) * reach.x * scale,
+              LEVEL.eye.y - next() * reach.top * scale,
+              (next() * 2 - 1) * reach.x * scale,
+              next() * Math.PI * 2,
+              scale,
+            );
+            const shipped = shapeMeets(subject, shape, nearPyramid(LEVEL, aspect));
+            const reference = referenceShapeMeets(
+              subject,
+              shape,
+              LEVEL,
+              horizontalSpread(aspect),
+              verticalHalfTangent(aspect),
+              NEAR_PLANE_METRES,
+            );
+            expect(
+              shipped,
+              `${world} ${kind} ${JSON.stringify(subject)} at ${String(aspect)}`,
+            ).toBe(reference);
+            if (reference) meets += 1;
+            else clear += 1;
+          }
+        }
+      }
+    }
+    // Both answers, many times, so a `shapeMeets` that said either everywhere fails.
+    expect(meets).toBeGreaterThan(100);
+    expect(clear).toBeGreaterThan(100);
+  });
+});
+
 describe('clearOfTheCamera — what the renderer is handed', () => {
   // One triangle square to the view, 0.2 m across: in the plane when stood at
   // (0, 0, 0.4), and 30 m up the road otherwise.
@@ -533,21 +598,32 @@ function ride(name: string): readonly RideFrame[] {
   return frames;
 }
 
-/** Whether a near plane `near` metres out cuts `subject` as `world` draws it. */
+/**
+ * Whether the near plane cuts `subject` as `world` draws it, for a frame of
+ * this aspect. The box is `intrudes`' — the bound the first two describes hold
+ * — and the triangles are {@link referenceShapeMeets}': clipped, not
+ * separated, and sharing no code with `shapeMeets`, so that a ride holds the
+ * cull to an answer it did not compute itself (#545's review).
+ */
 function cutBy(
   subject: ScatterItem,
   rig: CameraRig,
+  pyramid: NearPyramid,
   aspect: number,
   world: DrawnWorld,
-  near = NEAR_PLANE_METRES,
 ): 'no' | 'box only' | 'geometry' {
-  const pyramid = nearPyramid(rig, aspect, near);
   if (!intrudes(subject, pyramid, world)) return 'no';
   const shapes = SHAPES[world].get(subject.kind);
   // A structure or a post has no shape here and is held to its box — the
   // stronger claim, and the one the rides make good.
   if (shapes === undefined) return 'geometry';
-  return shapes.some((shape) => shapeMeets(subject, shape, pyramid)) ? 'geometry' : 'box only';
+  const spread = horizontalSpread(aspect);
+  const rise = verticalHalfTangent(aspect);
+  return shapes.some((shape) =>
+    referenceShapeMeets(subject, shape, rig, spread, rise, NEAR_PLANE_METRES),
+  )
+    ? 'geometry'
+    : 'box only';
 }
 
 /** The shapes the gate reads, off the committed files, for `clearOfTheCamera`. */
@@ -564,29 +640,38 @@ describe('a ride — nothing the camera passes is cut by the near plane (#545)',
   /** Item-frames whose box met the pyramid and whose shapes did not, by world. */
   const boxOnly = new Map<DrawnWorld, number>();
 
+  /** Frames measured, by ride, so a finding below cannot pass over rides that never ran. */
+  const measured = new Map<string, number>();
+
   for (const name of Object.keys(RIDES)) {
     it(`${name}: what the renderer draws, every aspect, both worlds`, () => {
       for (const { rig, scatter } of ride(name)) {
         for (const world of WORLDS) {
           for (const [label, aspect] of Object.entries(ASPECTS)) {
-            const answers = new Map<ScatterItem, ReturnType<typeof cutBy>>();
+            const pyramid = nearPyramid(rig, aspect);
             const key = `${world} ${label}`;
+            const cut = new Set<ScatterItem>();
             for (const subject of scatter) {
-              const answer = cutBy(subject, rig, aspect, world);
-              answers.set(subject, answer);
-              if (answer === 'geometry') uncut.set(key, (uncut.get(key) ?? 0) + 1);
+              const answer = cutBy(subject, rig, pyramid, aspect, world);
+              if (answer === 'geometry') {
+                cut.add(subject);
+                uncut.set(key, (uncut.get(key) ?? 0) + 1);
+              }
               if (answer === 'box only') boxOnly.set(world, (boxOnly.get(world) ?? 0) + 1);
             }
+            // Exactly what the reference would cut is dropped, and nothing
+            // else: a cull that dropped too much is a tree missing from a
+            // frame, which is a defect as well.
             const drawn = clearOfTheCamera(scatter, rig, aspect, world, shapesFromFiles(world));
-            for (const subject of drawn) {
-              if (answers.get(subject) === 'geometry') {
-                throw new Error(
-                  `${name}, ${world}, ${label}: the near plane cuts a drawn ${subject.kind}`,
-                );
-              }
+            const expected = scatter.filter((subject) => !cut.has(subject));
+            if (drawn.length !== expected.length || drawn.some((at, i) => at !== expected[i])) {
+              throw new Error(
+                `${name}, ${world}, ${label}: the cull dropped ${String(scatter.length - drawn.length)} where the reference cuts ${String(cut.size)}`,
+              );
             }
           }
         }
+        measured.set(name, (measured.get(name) ?? 0) + 1);
       }
     }, 120_000);
   }
@@ -596,6 +681,12 @@ describe('a ride — nothing the camera passes is cut by the near plane (#545)',
     // within the plane of anything at the aspect of a phone or a tablet. If a
     // change to the camera, the line or the placement brings it there, this is
     // where it shows — before the cull quietly starts dropping trees.
+    //
+    // ⚠️ The counts are the rides' own, so every ride must have run: on its
+    // own, with `-t`, this used to pass over empty counts (#545's review).
+    for (const name of Object.keys(RIDES)) {
+      expect(measured.get(name) ?? 0, `${name}: frames measured`).toBeGreaterThan(0);
+    }
     for (const world of WORLDS) {
       for (const [label] of DEVICE_ASPECTS) {
         expect(uncut.get(`${world} ${label}`) ?? 0, `${world} ${label}`).toBe(0);
