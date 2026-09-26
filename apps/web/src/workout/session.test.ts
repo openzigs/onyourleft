@@ -602,6 +602,54 @@ describe('the ERG spiral is broken against a real control point', () => {
     expect(trainer.targetPowerOnTheTrainer()).toBe(FLOOR_WATTS);
   });
 
+  it('holds a stalled rider at the floor while their cadence sensor is silent, and steps up only on heard cadence — PR #582', async () => {
+    // The review's finding: silence after a stall used to step the rescue UP,
+    // from the floor to relief, and hold it there for as long as it lasted.
+    const { trainer, session } = await loop(
+      () => expandWorkout(workout([steady(300, 1.0)])),
+      MEASURED_TRAINER(),
+    );
+    session.start(seconds(0));
+    const stalling = new Map<number, number>([
+      [0, 80],
+      [1, 78],
+      [2, 60],
+      [3, 40],
+      [4, 20],
+      [5, 8],
+      [6, 5],
+      [7, 4],
+    ]);
+    // The stall, then sixty seconds of nothing at all from the sensor.
+    await ride(session, 0, 70, (second) => {
+      const rpm = stalling.get(second);
+      return rpm === undefined
+        ? undefined
+        : { at: seconds(second), cadence: revolutionsPerMinute(rpm) };
+    });
+    await flush();
+    const targets = () =>
+      trainer.wire
+        .filter((entry) => entry.direction === 'write' && entry.bytes[0] === SET_TARGET_POWER)
+        .map((entry) => entry.bytes[1]! | (entry.bytes[2]! << 8));
+    const full = targets()[0]!;
+    expect(trainer.targetPowerOnTheTrainer()).toBe(FLOOR_WATTS);
+    // Nothing written after the floor: no step up on silence.
+    expect(targets().at(-1)).toBe(FLOOR_WATTS);
+    const afterSilence = targets().length;
+
+    // The rider pedals again, and the sensor hears it.
+    await ride(session, 71, 100, (second) => ({
+      at: seconds(second),
+      cadence: revolutionsPerMinute(88),
+    }));
+    await flush();
+    const recovery = targets().slice(afterSilence);
+    expect(recovery.at(-1)).toBe(full);
+    expect(recovery[0]).toBeGreaterThan(FLOOR_WATTS);
+    expect(recovery[0]).toBeLessThan(full);
+  });
+
   it('raises a relief target that would fall under the floor to the floor, rather than having it refused', async () => {
     // 20 % of 250 W is 50 W; two thirds of that is 33 W, below this machine's
     // 40 W minimum. Written as asked it would be refused out of range — an ease

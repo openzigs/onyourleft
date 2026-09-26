@@ -115,7 +115,7 @@
 
 import { seconds, watts, type Seconds, type Watts } from '../quantities';
 
-import { assessErgCadence, RELIEF_SHARE, TREND_WINDOW, type CadenceReading } from './erg-safety';
+import { createErgRescue, type CadenceReading } from './erg-safety';
 import { segmentAt, targetAt, type WorkoutSegment, type WorkoutTimeline } from './timeline';
 
 export type PlayerStatus = 'idle' | 'running' | 'paused' | 'finished';
@@ -230,10 +230,10 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
   /**
    * Whether a spiral or a stall has been seen and not yet recovered from. See
    * the module note: a rescue ends on a whole window of `holding`, not on one.
+   * ⚠️ Shared with the Ride screen's manual ERG since #567 —
+   * `erg-safety.ts` §`createErgRescue` is the one copy of the rule.
    */
-  let rescuing = false;
-  /** When the current unbroken run of `holding` verdicts began, while rescuing. */
-  let steadySince: number | undefined;
+  const rescue = createErgRescue();
 
   const snapshot = (): PlayerState => ({
     status,
@@ -263,8 +263,7 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       held = undefined;
       lastAsked = undefined;
       intent = { kind: 'hold' };
-      rescuing = false;
-      steadySince = undefined;
+      rescue.reset();
       return snapshot();
     },
 
@@ -316,34 +315,17 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       // never fires. Found by wiring this into `apps/web/src/ride`, where the
       // clock is the ride's; every test here started at zero and could not see
       // it.
-      const verdict =
-        rider?.cadence === undefined
-          ? ({ kind: 'holding' } as const)
-          : assessErgCadence(rider.cadence, now);
+      const step = rescue.judge(rider?.cadence, now);
 
-      if (verdict.kind === 'holding') {
-        if (rescuing) {
-          steadySince ??= now;
-          if (now - steadySince >= TREND_WINDOW) {
-            rescuing = false;
-            steadySince = undefined;
-          }
-        }
-      } else {
-        rescuing = true;
-        steadySince = undefined;
-      }
-
-      if (verdict.kind === 'stalled') {
+      if (step.kind === 'floor') {
         pending = undefined;
         lastAsked = undefined;
-        intent = { kind: 'release', reason: verdict.reason };
+        intent = { kind: 'release', reason: step.reason };
         return snapshot();
       }
 
-      const eased = rescuing;
-      const relief = verdict.kind === 'spiralling' ? verdict.relief : RELIEF_SHARE;
-      const effective = eased ? share * relief : share;
+      const eased = step.kind === 'relief';
+      const effective = step.kind === 'relief' ? share * step.share : share;
 
       // ⚠️ While a write is outstanding the player asks for nothing more. That
       // is #14's "acknowledged before the interval is treated as begun", and it
