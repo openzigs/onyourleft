@@ -259,13 +259,26 @@ export const EXEMPT: readonly {
 
 /** Every piece of rendered text in one file's source, with the line it starts on. */
 export function textsIn(file: string, source: string): readonly { line: number; text: string }[] {
-  const parsed = ts.createSourceFile(
+  return textsOf(parse(file, source));
+}
+
+/**
+ * One file's source, parsed once — {@link angleClaimsIn} walks the same tree
+ * twice, node by node and element by element, because a second parse of
+ * every file in the client made the whole-tree gate slow enough to time out
+ * on a loaded CI runner (#564's first CI run).
+ */
+function parse(file: string, source: string): ts.SourceFile {
+  return ts.createSourceFile(
     file,
     source,
     ts.ScriptTarget.Latest,
     true,
     file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
   );
+}
+
+function textsOf(parsed: ts.SourceFile): readonly { line: number; text: string }[] {
   const found: { line: number; text: string }[] = [];
   const visit = (node: ts.Node): void => {
     if (ts.isTemplateExpression(node)) {
@@ -352,7 +365,11 @@ export interface JsxElementText {
  * is joined. A JSX attribute is read on its own by {@link textsIn}, not here.
  */
 export function jsxElementTextsIn(file: string, source: string): readonly JsxElementText[] {
-  const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  return jsxElementTextsOf(parse(file, source));
+}
+
+/** {@link jsxElementTextsIn} over a tree already parsed. A `.ts` file holds no JSX. */
+function jsxElementTextsOf(parsed: ts.SourceFile): readonly JsxElementText[] {
   const found: JsxElementText[] = [];
   const BREAK = '\u0000';
   const collect = (children: ts.NodeArray<ts.JsxChild>, pieces: string[]): void => {
@@ -399,9 +416,7 @@ export function jsxElementTextsIn(file: string, source: string): readonly JsxEle
     }
     ts.forEachChild(node, visit);
   };
-  if (file.endsWith('.tsx')) {
-    visit(parsed);
-  }
+  visit(parsed);
   return found;
 }
 
@@ -422,7 +437,8 @@ function ruleBroken(text: string): AngleClaimFinding['rule'] | undefined {
 /** Every absolute-angle or frontal-plane claim in one file's rendered text. */
 export function angleClaimsIn(file: string, source: string): readonly AngleClaimFinding[] {
   const findings: AngleClaimFinding[] = [];
-  for (const { line, text } of textsIn(file, source)) {
+  const parsed = parse(file, source);
+  for (const { line, text } of textsOf(parsed)) {
     const rule = ruleBroken(text);
     if (rule !== undefined) {
       findings.push({ file, line, text: text.trim(), rule });
@@ -430,7 +446,7 @@ export function angleClaimsIn(file: string, source: string): readonly AngleClaim
   }
   // A word split across elements: reported once, for the element, and only
   // when no piece of it is already a finding of its own.
-  for (const { line, text, pieces } of jsxElementTextsIn(file, source)) {
+  for (const { line, text, pieces } of jsxElementTextsOf(parsed)) {
     const rule = ruleBroken(text);
     if (rule !== undefined && pieces.every((piece) => ruleBroken(piece) === undefined)) {
       findings.push({ file, line, text, rule });

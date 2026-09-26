@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import {
+  type AngleClaimFinding,
   angleClaimsIn,
   decodeCharacterReferences,
   EXEMPT,
@@ -359,6 +360,23 @@ describe('the scan itself can fire', () => {
   });
 });
 
+/**
+ * Every finding in the tree, exemptions not applied — computed ONCE for the
+ * two cases that read it, because a walk that parses every file in the client
+ * is the slowest thing in this file and ran twice (#564's first CI run timed
+ * both out at Vitest's default five seconds on a loaded runner).
+ */
+let treeFindings: readonly AngleClaimFinding[] | undefined;
+function everyFinding(): readonly AngleClaimFinding[] {
+  treeFindings ??= scannable().flatMap((file) =>
+    angleClaimsIn(relative(SOURCE_ROOT, file), readFileSync(file, 'utf8')),
+  );
+  return treeFindings;
+}
+
+/** A bound for the tree walk: about 0.4 s locally, so this is room for a busy runner. */
+const TREE_WALK_TIMEOUT_MILLISECONDS = 30_000;
+
 describe('no string in this client renders an absolute angle or the frontal plane (#388)', () => {
   it('finds files to scan at all, so a clean pass is not a vacuous one', () => {
     const files = scannable();
@@ -368,28 +386,32 @@ describe('no string in this client renders an absolute angle or the frontal plan
     expect(files).not.toContain(RULE_MODULE);
   });
 
-  it('has no findings', () => {
-    const findings = scannable()
-      .flatMap((file) => angleClaimsIn(relative(SOURCE_ROOT, file), readFileSync(file, 'utf8')))
-      .filter((finding) => !isExempt(finding));
-    expect(
-      findings.map(
-        (finding) => `${finding.file}:${String(finding.line)}  ${finding.rule}  ${finding.text}`,
-      ),
-    ).toEqual([]);
-  });
-
-  it('has no exemption that excuses nothing — a stale one fails, like LIC006', () => {
-    const findings = scannable().flatMap((file) =>
-      angleClaimsIn(relative(SOURCE_ROOT, file), readFileSync(file, 'utf8')),
-    );
-    for (const entry of EXEMPT) {
+  it(
+    'has no findings',
+    () => {
+      const findings = everyFinding().filter((finding) => !isExempt(finding));
       expect(
-        findings.some((finding) => finding.file === entry.file && finding.text === entry.text),
-        `${entry.file}: ${entry.text}`,
-      ).toBe(true);
-    }
-  });
+        findings.map(
+          (finding) => `${finding.file}:${String(finding.line)}  ${finding.rule}  ${finding.text}`,
+        ),
+      ).toEqual([]);
+    },
+    TREE_WALK_TIMEOUT_MILLISECONDS,
+  );
+
+  it(
+    'has no exemption that excuses nothing — a stale one fails, like LIC006',
+    () => {
+      const findings = everyFinding();
+      for (const entry of EXEMPT) {
+        expect(
+          findings.some((finding) => finding.file === entry.file && finding.text === entry.text),
+          `${entry.file}: ${entry.text}`,
+        ).toBe(true);
+      }
+    },
+    TREE_WALK_TIMEOUT_MILLISECONDS,
+  );
 
   it('exempts nothing in the side camera, whose report is what this gate is for', () => {
     expect(EXEMPT.filter((entry) => entry.file.startsWith('camera/'))).toEqual([]);
