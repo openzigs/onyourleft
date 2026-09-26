@@ -13,12 +13,21 @@
  *   against a second archive URL with no code change.
  * - **#534** — and when nothing is configured, a build draws the archive #53
  *   published rather than nothing, with the origin guard still holding.
+ * - **#578** — labels, from glyphs the app ships, at a relative URL that adds
+ *   no origin to the set the guard above checks.
  */
+
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FONT_STACK, GLYPH_RANGE_STARTS, rangeName } from '../../tools/glyphs/font-source';
+
 import {
   BASEMAP_SOURCE_ID,
+  GLYPHS_URL,
+  LABEL_FONT,
   basemapOrigin,
   basemapStyle,
   browserBasemapConfig,
@@ -118,12 +127,47 @@ describe('basemapStyle — built here, never fetched', () => {
     expect(style.sources[BASEMAP_SOURCE_ID]?.attribution).toBe('© OpenStreetMap contributors');
   });
 
-  it('declares no glyphs and no sprite, because both would be a third-party origin today', () => {
-    // The map renders without labels until #53 publishes font and sprite assets
-    // on the basemap's own origin. A labelled map that phones home is worse.
+  it('takes its glyphs from the page’s own origin, and still declares no sprite — #578', () => {
+    // Relative, so it resolves against this deployment; and therefore no new
+    // origin in the set criterion 3 checks. An absolute third-party glyphs URL
+    // is what `styleOrigins` catches below — this is what it lets through.
     const style = basemapStyle({ archiveUrl: ARCHIVE, attribution: OSM_ATTRIBUTION });
-    expect(style.glyphs).toBeUndefined();
+    expect(style.glyphs).toBe(GLYPHS_URL);
+    expect(GLYPHS_URL.startsWith('./')).toBe(true);
+    expect(styleOrigins(style)).toEqual(['https://tiles.example.org']);
     expect(style.sprite).toBeUndefined();
+  });
+
+  it('labels places and road names by their name, in the one font it ships — #578', () => {
+    const style = basemapStyle({ archiveUrl: ARCHIVE, attribution: OSM_ATTRIBUTION });
+    const symbols = style.layers.filter((layer) => layer.type === 'symbol');
+    expect(symbols.map((layer) => [layer.id, layer['source-layer']])).toEqual([
+      ['road-names', 'roads'],
+      ['places', 'places'],
+    ]);
+    for (const layer of symbols) {
+      expect(layer.source, layer.id).toBe(BASEMAP_SOURCE_ID);
+      expect(layer.layout?.['text-field'], layer.id).toEqual(['get', 'name']);
+      expect(layer.layout?.['text-font'], layer.id).toEqual([LABEL_FONT]);
+      // No icon: a sprite would be a second asset set to ship and credit.
+      expect(layer.layout?.['icon-image'], layer.id).toBeUndefined();
+    }
+  });
+
+  it('asks for a font stack the app actually ships, in every range it generates — #578', () => {
+    // MapLibre substitutes the stack name into the URL; a name no directory
+    // holds 404s every range and the text falls back to the device's own
+    // font without a word. The generator's directory and the style's name are
+    // two spellings of one thing, so they are held equal here.
+    expect(LABEL_FONT).toBe(FONT_STACK);
+    for (const start of GLYPH_RANGE_STARTS) {
+      const path = GLYPHS_URL.replace('{fontstack}', LABEL_FONT).replace(
+        '{range}',
+        rangeName(start),
+      );
+      const file = fileURLToPath(new URL(path.replace('./', '../../public/'), import.meta.url));
+      expect(existsSync(file), path).toBe(true);
+    }
   });
 
   it('renders against a second archive with no code change — criterion 7', () => {
@@ -144,6 +188,8 @@ describe('basemapStyle with map tiles turned off — the owner’s decision of 2
     );
     expect(style.sources).toEqual({});
     expect(styleOrigins(style)).toEqual([]);
+    // And nothing to label, so no glyphs URL for anything to fetch.
+    expect(style.glyphs).toBeUndefined();
   });
 
   it('keeps the background, so the ride’s line is drawn on something', () => {

@@ -106,6 +106,14 @@ apps/                 AGPL-3.0-or-later, without exception
                         first `.py` in the tree, which is why LIC001/LIC002 scan
                         `.py` now. ⚠️ Blender is a TOOL: nothing in CI runs it,
                         and a version other than the pinned 4.4.3 is refused
+    tools/glyphs/       the map's label glyphs (#578) — a committed Roboto
+                        v2.138, the LAST Apache-2.0 Roboto (v3 is OFL, which no
+                        list here admits), and the reader, the signed-distance
+                        rasteriser and the range-file writer that turn it into
+                        `public/glyphs/Roboto-Regular/`. Plain arithmetic on the
+                        pinned Node, so `generate-glyphs.test.ts` regenerates
+                        every range byte for byte inside `pnpm run test`.
+                        ⚠️ A newer Roboto is a licence change, not an upgrade
     tools/precache/     what the worker precaches, as a pure function over the
                         build's output (#406) — build-time code, so it lives
                         beside the icon generator rather than in `src/`
@@ -174,7 +182,12 @@ apps/                 AGPL-3.0-or-later, without exception
     src/map/            the ride map (#63) — the basemap configuration and the proof
                         it reaches no other origin, the GeoJSON conversion, the
                         once-per-application protocol registration, and the one
-                        file that names MapLibre
+                        file that names MapLibre. Since #578 it labels places
+                        and road names from glyphs the app ships, at a RELATIVE
+                        `glyphs` URL so they add no origin. ⚠️ MapLibre 6.10
+                        draws text in the device's font when a range cannot be
+                        fetched, so a label painting proves nothing about the
+                        glyphs — the browser gate asserts the requests
     src/recording/      the recorder: engine + durable checkpoints + recovery (#46),
                         and since #14's fourth criterion the step that turns a
                         finished recording into an activity — the write order,
@@ -1364,6 +1377,14 @@ pnpm --filter @onyourleft/web run icons:generate
 pnpm --filter @onyourleft/web run realistic:fetch
 pnpm --filter @onyourleft/web run realistic:process --check
 pnpm --filter @onyourleft/web run realistic:stage
+
+# Regenerate the map's label glyphs (#578) from the committed Roboto v2.138.
+# Deterministic, and `--check` writes nothing and fails unless every committed
+# range is what it would write. The ordinary suite makes the same comparison
+# (`tools/glyphs/generate-glyphs.test.ts`), so this is for after changing the
+# generator or the ranges — then update the six ASSETS.toml digests with it.
+pnpm --filter @onyourleft/web run glyphs:generate
+pnpm --filter @onyourleft/web run glyphs:generate --check
 
 # Regenerate the #29 synthetic FIT fixture corpus from its generator. It is
 # DETERMINISTIC: running it on a clean tree leaves `git status` clean, which is
@@ -3484,6 +3505,9 @@ top of an issue **supersedes its body**.
 | Why a GPL dependency may be built with and never shipped by an app | [ADR 0025](docs/adr/0025-app-store-additional-permission.md) D-5, `scripts/check-dependency-licences.mjs` §`storeShipped`, §4g |
 | Why the About screen links to the source, and why that link is a condition rather than a courtesy | `apps/web/src/privacy/policy.ts` §`SOURCE_CODE_URL`, [ADR 0025](docs/adr/0025-app-store-additional-permission.md) D-7 |
 | What a contribution under `apps/` is licensed under, exactly | [`CONTRIBUTING.md`](CONTRIBUTING.md) §"Licensing of contributions", [ADR 0025](docs/adr/0025-app-store-additional-permission.md) D-6 |
+| Which font the map's labels are set in, why that release and no newer one, and how its glyphs are made | `apps/web/tools/glyphs/font-source.ts`, `apps/web/tools/glyphs/sdf.ts`, [#578](https://github.com/openzigs/onyourleft/issues/578) |
+| Why a label painting on the map proves nothing about the app's glyphs, and what the gate asserts instead | `apps/web/browser/map.browser.spec.ts` §"place names", `apps/web/src/map/basemap.ts` §`GLYPHS_URL` |
+| Why the label glyphs are precached when the tiles under them are not | `apps/web/tools/precache/precache.ts` §`PRECACHE_EXCLUSIONS` |
 | Where the basemap URL is configured, what a build with nothing set draws, and how to turn the map off | `apps/web/src/map/basemap.ts` §`PUBLISHED_BASEMAP_URL`, `.env.example` §`VITE_BASEMAP_PMTILES_URL`, [#534](https://github.com/openzigs/onyourleft/issues/534) |
 | How a rider turns map tiles off, why that is a style with no source rather than a hidden layer, and what proves "off" contacts nothing | `apps/web/src/map/tiles-preference.ts`, `apps/web/src/map/basemap.ts` §`basemapStyle`, `apps/web/browser/map.browser.spec.ts` §"with map tiles turned off" |
 | Why a published basemap archive must never be deleted while a shipped build names it, and what a release re-checks about its host | `apps/web/src/map/basemap.ts` §`PUBLISHED_BASEMAP_URL`, [`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §8 "Before every release tag" |

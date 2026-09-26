@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "vite",
     "icons:generate": "node tools/icons/generate-icons.ts",
+    "glyphs:generate": "node --import ./tools/ts-extensionless-resolve.mjs tools/glyphs/generate-glyphs.ts",
     "realistic:fetch": "node --import ./tools/ts-extensionless-resolve.mjs tools/realistic/fetch-assets.ts",
     "realistic:process": "node --import ./tools/ts-extensionless-resolve.mjs tools/realistic/process-assets.ts",
     "realistic:stage": "node --import ./tools/ts-extensionless-resolve.mjs tools/realistic/stage-into-apk.ts",
