@@ -43,7 +43,8 @@ import {
   type GradientTrainer,
 } from './trainer-port';
 import type { GameRenderer, SceneFrame } from './port';
-import type { ScreenLockSource } from './hud/wake-lock';
+import { browserScreenLockSource, type ScreenLockSource } from './hud/wake-lock';
+import { hideablePage, type HideablePage } from './hud/wake-lock-testing';
 
 /**
  * #509: the real `createGradientSession`, counted. A session built and never
@@ -1073,5 +1074,105 @@ describe('a press on Ride while the trainer is being asked — #509', () => {
     expect(lock.acquired).toHaveLength(0);
     expect(vi.mocked(createGradientSession)).not.toHaveBeenCalled();
     expect(commands.written).toHaveLength(0);
+  });
+});
+
+describe('the ride gives the screen back, and does not take it again — #566’s review', () => {
+  /**
+   * The real `browserScreenLockSource` over a page that can be hidden, with
+   * each `release()` the component makes counted on the way through.
+   *
+   * ⚠️ Since #566 an unreleased lock takes itself back on every return to the
+   * page, so a `GameView` that forgot to release it would keep the tablet
+   * awake after every app switch for the rest of the tab's life. `wake-lock.test.ts`
+   * proves the lock lets go when asked; this proves the component asks.
+   */
+  function watchedLock(): {
+    readonly page: HideablePage;
+    readonly source: ScreenLockSource;
+    readonly released: () => number;
+  } {
+    const page = hideablePage();
+    const real = browserScreenLockSource(page.api, page.page);
+    let released = 0;
+    return {
+      page,
+      source: {
+        acquire: async () => {
+          const lock = await real.acquire();
+          return {
+            get held() {
+              return lock.held;
+            },
+            release: async () => {
+              released += 1;
+              return lock.release();
+            },
+          };
+        },
+      },
+      released: () => released,
+    };
+  }
+
+  async function rideWith(lock: ScreenLockSource): Promise<void> {
+    const commands: Commands = { written: [], releases: [], requests: [] };
+    mounted = await mount(
+      <GameView
+        port={pedallingPort(hillRoute())}
+        trainer={trainerPort(READY, commands)}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+        now={() => nowMs}
+        screenLock={lock}
+      />,
+    );
+    await settle();
+    await clickThrough(buttonStarting('Ride '));
+    await pump(4);
+    await settle();
+  }
+
+  it('releases once when the rider presses End ride, and a page shown afterwards asks for nothing', async () => {
+    const lock = watchedLock();
+    await rideWith(lock.source);
+    expect(lock.page.requests()).toBe(1);
+    expect(lock.page.live()).toBe(1);
+    // Mid-ride, a page hidden and shown takes the lock back — the control
+    // that makes the "asks for nothing" below mean something.
+    lock.page.hide();
+    lock.page.show();
+    await settle();
+    expect(lock.page.requests()).toBe(2);
+    expect(lock.page.live()).toBe(1);
+
+    await clickThrough(buttonStarting('End ride'));
+    await settle();
+    expect(lock.released()).toBe(1);
+    expect(lock.page.live()).toBe(0);
+    expect(lock.page.watching()).toBe(0);
+
+    lock.page.hide();
+    lock.page.show();
+    await settle();
+    expect(lock.page.requests()).toBe(2);
+    expect(lock.page.live()).toBe(0);
+  });
+
+  it('releases once when the rider leaves mid-ride, and never takes it back', async () => {
+    const lock = watchedLock();
+    await rideWith(lock.source);
+    expect(lock.page.live()).toBe(1);
+
+    mounted?.unmount();
+    mounted = undefined;
+    await settle();
+    expect(lock.released()).toBe(1);
+    expect(lock.page.live()).toBe(0);
+
+    lock.page.hide();
+    lock.page.show();
+    await settle();
+    expect(lock.page.requests()).toBe(1);
+    expect(lock.page.live()).toBe(0);
   });
 });

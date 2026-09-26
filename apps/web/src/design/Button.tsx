@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import type { JSX, ReactNode, Ref } from 'react';
+import { useCallback, useEffect, useRef, type JSX, type ReactNode, type Ref } from 'react';
 
 /** Primary for the one action a view is for; secondary for everything else. */
 export type ButtonVariant = 'primary' | 'secondary';
@@ -32,6 +32,17 @@ export interface ButtonProps {
   /** The id of an element that explains this button, for `aria-describedby`. */
   readonly describedBy?: string;
   /**
+   * Move focus here when the button first appears — #557.
+   *
+   * ⚠️ **Only for a button that REPLACES the control the rider just pressed**,
+   * such as the next step of a flow that the press revealed. That control is
+   * gone, so focus would otherwise fall back to the page and a keyboard or
+   * screen-reader user would have to hunt for where they are. Never on a
+   * button that appears on its own: focus that moves without a press is a
+   * page that moves under the rider.
+   */
+  readonly focusOnMount?: boolean;
+  /**
    * The underlying `<button>`, for a screen that has to put focus back on it
    * after the control a rider pressed unmounts (WCAG 2.2 SC 2.4.3) — #548's
    * *Start a new ride* hands focus to *Start recording* this way.
@@ -52,8 +63,29 @@ export function Button({
   type = 'button',
   disabled = false,
   describedBy,
+  focusOnMount = false,
   ref,
 }: ButtonProps): JSX.Element {
+  const element = useRef<HTMLButtonElement>(null);
+  // Both #557's `focusOnMount` (which needs the element here) and #548's `ref`
+  // (which hands it to a caller) point at the one `<button>`.
+  const setElement = useCallback(
+    (node: HTMLButtonElement | null): void => {
+      element.current = node;
+      if (typeof ref === 'function') {
+        ref(node);
+      } else if (ref !== undefined && ref !== null) {
+        ref.current = node;
+      }
+    },
+    [ref],
+  );
+  useEffect(() => {
+    if (focusOnMount) {
+      element.current?.focus();
+    }
+    // On mount only: a prop that turns on later has not replaced anything.
+  }, []);
   const className = variant === 'primary' ? 'oyl-button' : 'oyl-button oyl-button--secondary';
   // `type` is passed straight through. It used to go through a ternary that
   // returned its own argument (#143) — which read like a guard against a third
@@ -61,7 +93,7 @@ export function Button({
   // defaulted above, so no third value can reach here.
   return (
     <button
-      ref={ref}
+      ref={setElement}
       className={className}
       type={type}
       onClick={onClick}

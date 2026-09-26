@@ -114,6 +114,41 @@ describe('turning it on', () => {
     await controller.turnOn();
     expect(camera.calls.filter((call) => call === 'start')).toHaveLength(1);
   });
+
+  it('faces the back unless asked, and says which way it faces only while it runs — #557', async () => {
+    const camera = scriptedCamera();
+    const { controller } = controllerFor(camera);
+    controller.agree(AGREED);
+    expect(controller.state().facing).toBeUndefined();
+    await controller.turnOn();
+    expect(camera.facings).toStrictEqual(['environment']);
+    expect(controller.state().facing).toBe('environment');
+    controller.turnOff();
+    expect(controller.state().facing).toBeUndefined();
+  });
+
+  it('turns a camera running the other way round, and leaves one facing the right way alone — #557', async () => {
+    const camera = scriptedCamera();
+    const { controller } = controllerFor(camera);
+    controller.agree(AGREED);
+    await controller.turnOn();
+    await expect(controller.turnOn('user')).resolves.toBeUndefined();
+    expect(camera.facings).toStrictEqual(['environment', 'user']);
+    // The old one was stopped before the new one was opened: two cameras are
+    // never on at once.
+    expect(camera.calls).toStrictEqual([
+      'availability',
+      'request',
+      'start',
+      'stop',
+      'availability',
+      'request',
+      'start',
+    ]);
+    expect(controller.state()).toMatchObject({ live: true, facing: 'user' });
+    await controller.turnOn('user');
+    expect(camera.facings).toStrictEqual(['environment', 'user']);
+  });
 });
 
 describe('capturing', () => {

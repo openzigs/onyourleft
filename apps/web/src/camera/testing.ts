@@ -20,6 +20,7 @@
 
 import type {
   CameraAvailability,
+  CameraFacing,
   CameraPermission,
   CameraPort,
   CameraProblemKind,
@@ -48,6 +49,16 @@ export interface ScriptedCameraOptions {
   readonly permission?: CameraPermission['kind'];
   /** Thrown from `startCamera()`. */
   readonly startFails?: CameraProblemKind;
+  /**
+   * Restricts {@link startFails} to a camera asked to face this way — #566's
+   * review: a front camera that will not come on while the back one would.
+   */
+  readonly startFailsFacing?: CameraFacing;
+  /**
+   * Holds every `startCamera()` until the test releases it, so two starts can
+   * be in flight at once — #566's review.
+   */
+  readonly holdStarts?: boolean;
   /** Thrown from `captureFrame()`. */
   readonly captureFails?: CameraProblemKind;
   /** The bytes a capture yields. Clean by default; see {@link cleanFrameBytes}. */
@@ -69,10 +80,19 @@ export interface ScriptedCamera {
   readonly port: CameraPort;
   /** Every method call, in order, so a test can assert one never happened. */
   readonly calls: string[];
+  /** Which way each `startCamera()` asked the camera to face, in order — #557. */
+  readonly facings: CameraFacing[];
   /** The live session, if one was started. */
   session(): CameraSession | undefined;
   /** Ends the track from outside, as an operating system or another app would. */
   endTheTrack(): void;
+  /**
+   * How many started streams are still running — each session's own, so two
+   * starts that overlapped are two streams rather than one flag (#566).
+   */
+  liveStreams(): number;
+  /** Lets every held `startCamera()` go on, when {@link ScriptedCameraOptions.holdStarts}. */
+  releaseStarts(): void;
 }
 
 /**
@@ -97,8 +117,11 @@ export function cleanFrameBytes(length = 1024): Uint8Array {
 /** A {@link CameraPort} that does what it is told and records what it was asked. */
 export function scriptedCamera(options: ScriptedCameraOptions = {}): ScriptedCamera {
   const calls: string[] = [];
-  let live = false;
+  const facings: CameraFacing[] = [];
   let session: CameraSession | undefined;
+  /** Every stream started, and whether it is still running. */
+  const streams: { live: boolean }[] = [];
+  let heldStarts: (() => void)[] = [];
   let samples = 0;
   let codeReads = 0;
 
@@ -111,15 +134,25 @@ export function scriptedCamera(options: ScriptedCameraOptions = {}): ScriptedCam
       calls.push('request');
       return Promise.resolve({ kind: options.permission ?? 'granted' });
     },
-    startCamera: async () => {
+    startCamera: async (facing = 'environment') => {
       calls.push('start');
-      if (options.startFails !== undefined) {
+      facings.push(facing);
+      if (options.holdStarts === true) {
+        await new Promise<void>((resolve) => {
+          heldStarts.push(resolve);
+        });
+      }
+      if (
+        options.startFails !== undefined &&
+        (options.startFailsFacing === undefined || options.startFailsFacing === facing)
+      ) {
         throw new CameraCaptureError(options.startFails, cameraProblemMessage(options.startFails));
       }
-      live = true;
+      const stream = { live: true };
+      streams.push(stream);
       session = {
         get live(): boolean {
-          return live;
+          return stream.live;
         },
         captureFrame: async (): Promise<CapturedFrame> => {
           calls.push('capture');
@@ -187,7 +220,7 @@ export function scriptedCamera(options: ScriptedCameraOptions = {}): ScriptedCam
         },
         stopCamera: () => {
           calls.push('stop');
-          live = false;
+          stream.live = false;
         },
       };
       return Promise.resolve(session);
@@ -197,9 +230,20 @@ export function scriptedCamera(options: ScriptedCameraOptions = {}): ScriptedCam
   return {
     port,
     calls,
+    facings,
     session: () => session,
     endTheTrack: () => {
-      live = false;
+      for (const stream of streams) {
+        stream.live = false;
+      }
+    },
+    liveStreams: () => streams.filter((each) => each.live).length,
+    releaseStarts: () => {
+      const held = heldStarts;
+      heldStarts = [];
+      for (const resolve of held) {
+        resolve();
+      }
     },
   };
 }

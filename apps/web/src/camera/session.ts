@@ -49,6 +49,7 @@
  */
 
 import type {
+  CameraFacing,
   CameraNotice,
   CameraPort,
   CameraProblemKind,
@@ -131,6 +132,12 @@ export interface CameraState {
    * nothing.
    */
   readonly live: boolean;
+  /**
+   * Which way the running camera was asked to face — #557 — or `undefined`
+   * while none is running. What was ASKED for: a device with one camera uses
+   * it whichever way it faces, and the platform does not always say which.
+   */
+  readonly facing: CameraFacing | undefined;
   /** Why the camera is not running, when it is not. `undefined` while it is. */
   readonly problem: CameraProblemKind | undefined;
   /** How many frames have been taken since the camera was last turned on. */
@@ -413,6 +420,7 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
 
   #consent: CameraConsent = NO_CONSENT;
   #session: CameraSession | undefined;
+  #facing: CameraFacing = 'environment';
   #problem: CameraProblemKind | undefined = 'no-consent';
   #captured = 0;
   #keptThisSession = 0;
@@ -456,6 +464,7 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
     return {
       consent: this.#consent,
       live: this.#session?.live ?? false,
+      facing: this.#session?.live === true ? this.#facing : undefined,
       problem: this.#problem,
       captured: this.#captured,
       keeping: this.#keep?.keeping ?? false,
@@ -509,11 +518,18 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
   }
 
   /**
-   * Turn the camera on.
+   * Turn the camera on, facing `facing` — `'environment'` unless asked.
+   *
+   * ⚠️ **A camera already running the OTHER way is turned off and opened again
+   * facing this way** (#557): the tablet reads the phone's pairing code with
+   * its front camera, and a back camera the rider left on above would
+   * otherwise be read with instead — which is the blind scan #557 was filed
+   * about. Opening again goes the whole way through, keep switch included, so
+   * nothing the rider set on the old camera carries over unasked.
    *
    * @returns `undefined` when it is running, or the problem when it is not.
    */
-  async turnOn(): Promise<CameraProblemKind | undefined> {
+  async turnOn(facing: CameraFacing = 'environment'): Promise<CameraProblemKind | undefined> {
     if (!this.#consent.local) {
       // ⚠️ Before the port, deliberately — see the file header. Deleting this
       // guard opens a camera on a device nobody agreed on, and
@@ -524,7 +540,10 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
       return 'no-consent';
     }
     if (this.#session?.live === true) {
-      return undefined;
+      if (this.#facing === facing) {
+        return undefined;
+      }
+      this.turnOff();
     }
     const availability = await this.#port.cameraAvailability();
     if (availability.kind !== 'available') {
@@ -535,7 +554,8 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
       return this.#fail(permission.kind);
     }
     try {
-      this.#session = await this.#port.startCamera();
+      this.#session = await this.#port.startCamera(facing);
+      this.#facing = facing;
     } catch (error) {
       // The kind, and nothing else. `CameraCaptureError` carries no `cause` and
       // the adapter has already dropped the platform's own message — ADR 0029

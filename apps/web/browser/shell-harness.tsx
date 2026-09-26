@@ -63,6 +63,7 @@ import {
 import { endpointDecision } from '../src/camera/analysis-endpoint';
 import { riderAnalysisPort } from '../src/camera/analysis-transport';
 import { CameraController } from '../src/camera/session';
+import { sidePairingPort } from '../src/camera/side-link';
 import { Button } from '../src/design/Button';
 import { AppShell } from '../src/shell/AppShell';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
@@ -212,6 +213,17 @@ function TouchTargets(): JSX.Element {
  */
 const CAMERA_LIVE = 'live';
 
+/**
+ * `?pairing=on` hands the shell a side-camera pairing port — #566's review —
+ * so the Camera screen at `#/camera` renders its side-camera way in, whose
+ * "Use this phone as the side camera" is a LINK drawn as a button inside a
+ * sentence. Opt-in for `CAMERA_LIVE`'s reason: every pre-existing case goes on
+ * loading the page it was written against. The port opens no connection until
+ * a rider presses "Pair a phone", and nothing here does; its peer is `undefined`
+ * so even that press could reach no network.
+ */
+const PAIRING_ON = 'on';
+
 /** The `z-index` the ride stage declares — `theme.css` §"THE STAGE". */
 const PRODUCT_MAXIMUM_STACKING = 20;
 
@@ -348,6 +360,8 @@ function main(): void {
   }
 
   const wantsCamera = new URLSearchParams(globalThis.location.search).get('camera') === CAMERA_LIVE;
+  const wantsPairing =
+    new URLSearchParams(globalThis.location.search).get('pairing') === PAIRING_ON;
   const camera = new CameraController({
     // A port that never opens anything: what this page measures is where the
     // INDICATOR is drawn, and a real camera would be a media device in the
@@ -375,7 +389,11 @@ function main(): void {
   flushSync(() => {
     createRoot(host).render(
       <StrictMode>
-        <AppShell capabilities={NO_BLUETOOTH} camera={camera} />
+        <AppShell
+          capabilities={NO_BLUETOOTH}
+          camera={camera}
+          {...(wantsPairing ? { sidePairing: sidePairingPort({ peer: () => undefined }) } : {})}
+        />
       </StrictMode>,
     );
   });

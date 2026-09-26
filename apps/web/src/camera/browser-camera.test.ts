@@ -17,8 +17,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { CameraCaptureError } from './camera-port';
 import {
+  CAMERA_CONSTRAINTS,
   FIRST_FRAME_MILLISECONDS,
   browserCameraPort,
+  cameraConstraints,
   frameProgress,
   onceReady,
   type FrameGrabber,
@@ -178,6 +180,27 @@ describe('asking for permission', () => {
       secureContext: true,
     });
     await expect(port.requestCameraAccess()).resolves.toStrictEqual({ kind: 'unavailable' });
+  });
+});
+
+describe('which way the camera faces — #557', () => {
+  it('asks for the back camera by default and the front one when told, as a preference either way', async () => {
+    const asked: unknown[] = [];
+    const port = browserCameraPort({
+      devices: devices(async (constraints) => {
+        asked.push(constraints);
+        return Promise.resolve(streamOf([track()]));
+      }),
+      grabber: GRABBER,
+      secureContext: true,
+    });
+    await port.startCamera();
+    await port.startCamera('user');
+    expect(asked).toStrictEqual([
+      { video: { facingMode: { ideal: 'environment' } }, audio: false },
+      { video: { facingMode: { ideal: 'user' } }, audio: false },
+    ]);
+    expect(CAMERA_CONSTRAINTS).toStrictEqual(cameraConstraints('environment'));
   });
 });
 

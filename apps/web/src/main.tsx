@@ -833,6 +833,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
       : sideReportKeeper({ rides: rideController, store: localStore(), athleteId: LOCAL_ATHLETE });
   const sidePairing = sideLinkAvailable()
     ? sidePairingPort({
+        // #557: the tablet stays awake while it pairs and while it is paired.
+        screenLock: browserScreenLockSource(platformWakeLock()),
         analyse: (control) =>
           new SideAnalysis({
             control,

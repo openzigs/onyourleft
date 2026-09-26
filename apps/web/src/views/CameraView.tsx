@@ -34,6 +34,12 @@
  * app, which the rider already has, and `docs/validation/0002-…` Part S is
  * where somebody with a tripod records whether that is good enough.
  *
+ * ⚠️ **One exception since #557, and it is not this section's camera**: while
+ * the side-camera section below reads the phone's pairing code, it shows what
+ * this device's FRONT camera sees, and takes it down the moment the code is
+ * read (`camera/ScanViewfinder.tsx`, ADR 0033's 2026-09-26 amendment). No
+ * frame is taken for it and nothing of it is kept.
+ *
  * ⚠️ **No hosted-model control.** `camera/consent.ts` says why at length: there
  * is no hosted path, and a control granting something no code can act on is one
  * that *"looks like the way in and is not"* — #48's first criterion. Since
@@ -126,6 +132,38 @@ export interface CameraViewProps {
    */
   readonly sidePairing?: SidePairingPort | undefined;
 }
+
+/** The heading of the side camera's way in — #557. */
+export const SIDE_CAMERA_WAY_TITLE = 'Filming a ride: the side camera';
+
+/** The heading of this device's own single-picture camera — #557. */
+export const SINGLE_PICTURE_TITLE = 'This device’s own camera, one picture at a time';
+
+/**
+ * What the single-picture section is for — #557. It is not the side camera,
+ * it shows no preview, and the owner's first attempt at pairing started here.
+ */
+export const SINGLE_PICTURE_PURPOSE_ALONE =
+  'For checking that this device’s camera works, and for the pause-when-nobody-is-on-the-bike ' +
+  'check when this device is the one pointing at you. It shows no picture of what it sees.';
+
+/**
+ * {@link SINGLE_PICTURE_PURPOSE_ALONE}, and where the side camera actually is —
+ * said only where it IS there to be pointed at (#566's review).
+ */
+export const SINGLE_PICTURE_PURPOSE =
+  `${SINGLE_PICTURE_PURPOSE_ALONE} It ` +
+  'is not the side camera: to pair a phone, use “A side camera on a tripod” above.';
+
+/**
+ * What the side camera's way in says on a device that cannot pair at all —
+ * #566's review. `main.tsx` builds no pairing port where this browser has no
+ * WebRTC, and the steps used to send the rider to a "Pair a phone" button that
+ * was not on the page: #48's "looks like the way in and is not".
+ */
+export const SIDE_CAMERA_UNAVAILABLE =
+  'A side camera cannot be paired on this device: this browser cannot make the direct link ' +
+  'between two devices that pairing needs. This device’s own camera, below, still works.';
 
 export function CameraView({ controller, sidePairing }: CameraViewProps): JSX.Element {
   if (controller === undefined) {
@@ -310,11 +348,35 @@ function Camera({
         #528. The tripod phone's own screen, for the arrangement the owner
         chose (#386): a link rather than a control, because it is a different
         page with its own consent, not a setting of this one.
+
+        ⚠️ **Before everything else on this screen that does something, and
+        drawn as a button** (#557): the owner's first attempt went to "Turn the
+        camera on" and "Take a picture" below, which have no preview and are
+        not the pairing at all, because this was one small link in a sentence.
       */}
-      <p>
-        <a href="#/camera/side">Use this phone as the side camera</a> — on a tripod beside the bike,
-        started and stopped from your tablet.
-      </p>
+      <section aria-labelledby="oyl-camera-side-way">
+        <h3 id="oyl-camera-side-way">{SIDE_CAMERA_WAY_TITLE}</h3>
+        <p>
+          The way to use the camera with a ride is a spare phone on a tripod beside the bike, paired
+          with the tablet you ride with. The phone films; the tablet starts and stops it.
+        </p>
+        {sidePairing === undefined ? (
+          <p>{SIDE_CAMERA_UNAVAILABLE}</p>
+        ) : (
+          <ol>
+            <li>
+              On the phone on the tripod:{' '}
+              <a className="oyl-button" href="#/camera/side">
+                Use this phone as the side camera
+              </a>
+            </li>
+            <li>
+              On the tablet: agree to the camera below, then press “Pair a phone” under “A side
+              camera on a tripod”.
+            </li>
+          </ol>
+        )}
+      </section>
 
       {agreed ? null : (
         <section aria-labelledby="oyl-camera-agree">
@@ -340,9 +402,25 @@ function Camera({
         </section>
       )}
 
+      {/*
+        #529. The tablet's half of the side camera. After the consent section
+        on purpose: reading the phone's code uses THIS device's camera (ADR
+        0033 D-4), so the rider meets the consent first. ⚠️ **And before the
+        single-picture camera since #557**, which is not the way in and was
+        taken for it.
+      */}
+      {sidePairing === undefined ? null : (
+        <SideCameraControl controller={controller} pairing={sidePairing} />
+      )}
+
       {agreed ? (
         <section aria-labelledby="oyl-camera-control">
-          <h3 id="oyl-camera-control">The camera</h3>
+          <h3 id="oyl-camera-control">{SINGLE_PICTURE_TITLE}</h3>
+          {/*
+            #557: says what it is FOR, because it is not the side camera and
+            the owner took it for the way in.
+          */}
+          <p>{sidePairing === undefined ? SINGLE_PICTURE_PURPOSE_ALONE : SINGLE_PICTURE_PURPOSE}</p>
           <p>{live ? 'The camera is on.' : 'The camera is off.'}</p>
           {live ? (
             <Button
@@ -462,15 +540,6 @@ function Camera({
       ) : null}
 
       {agreed ? <AnalysisSection controller={controller} live={live} /> : null}
-
-      {/*
-        #529. The tablet's half of the side camera. After the consent section
-        on purpose: reading the phone's code uses THIS device's camera (ADR
-        0033 D-4), so the rider meets the consent first.
-      */}
-      {sidePairing === undefined ? null : (
-        <SideCameraControl controller={controller} pairing={sidePairing} />
-      )}
 
       {/*
         ⚠️ **A COUNT, and never a picture.** ADR 0029 D-11 keeps a kept frame

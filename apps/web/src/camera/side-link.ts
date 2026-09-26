@@ -89,6 +89,7 @@ import { createSidePeer, type SideChannel, type SidePeer } from './side-link-tra
 import { browserAfter, browserEvery } from './side-camera';
 import type { FramingReference, FramingVerdict } from './framing';
 import type { SideAnalysisPort } from './side-analysis-port';
+import { NO_SCREEN_LOCK, type ScreenLock, type ScreenLockSource } from '../game/hud/wake-lock';
 import type {
   PhoneReport,
   SideCameraLinkPort,
@@ -210,8 +211,8 @@ function letGo(peer: SidePeer, channel: SideChannel | undefined, timers: Resolve
 
 /** What the tablet says, per way a pairing ended. Nothing here names a body (ADR 0030). */
 export const SIDE_PAIRING_END_TEXT: Readonly<Record<SidePairingEnd, string>> = {
-  'ended-here': 'You ended the pairing on this tablet.',
-  'phone-ended': 'The phone ended the pairing.',
+  'ended-here': 'You ended the session on this tablet.',
+  'phone-ended': 'The session was ended on the phone.',
   'link-lost':
     'Lost touch with the phone. If it was filming, it stops by itself within 30 seconds.',
   'no-path':
@@ -281,11 +282,29 @@ export interface SidePairingOptions extends SideLinkTimers {
    * receives pictures and looks at none of them.
    */
   readonly analyse?: ((control: SideCameraControlPort) => SideAnalysisPort) | undefined;
+  /**
+   * Where the tablet's screen lock comes from — #557. Taken when an offer is
+   * made and given back when that pairing ends, however it ends.
+   *
+   * ⚠️ **The lock belongs to the PAIRING, not to the Camera screen.** A tablet
+   * that slept mid-pairing voided the offer or dropped the link (D-4, #550),
+   * twice in the owner's first attempt; and the pairing outlives the screen so
+   * the rider can ride (`side-pairing-port.ts` §`currentSideCamera`), so a
+   * lock held by the screen would have let go the moment they left it.
+   * `main.tsx` passes the browser's own; without one, nothing is held.
+   */
+  readonly screenLock?: ScreenLockSource | undefined;
 }
+
+/** A source that never holds anything: no wake lock was supplied. */
+const NO_SCREEN_LOCK_SOURCE: ScreenLockSource = {
+  acquire: async () => Promise.resolve(NO_SCREEN_LOCK),
+};
 
 interface Resolved {
   readonly peer: () => SidePeer | undefined;
   readonly analyse: ((control: SideCameraControlPort) => SideAnalysisPort) | undefined;
+  readonly screenLock: ScreenLockSource;
   readonly randomBytes: (length: number) => Uint8Array;
   readonly clock: () => number;
   readonly after: (task: () => void, milliseconds: number) => () => void;
@@ -296,6 +315,7 @@ function resolve(options: SidePairingOptions): Resolved {
   return {
     peer: options.peer ?? (() => createSidePeer()),
     analyse: options.analyse,
+    screenLock: options.screenLock ?? NO_SCREEN_LOCK_SOURCE,
     randomBytes:
       options.randomBytes ??
       ((length) => globalThis.crypto.getRandomValues(new Uint8Array(length))),
@@ -453,6 +473,8 @@ export class TabletSideLink implements SideCameraControlPort {
   #lastHeard = 0;
   #ended: SidePairingEnd | undefined;
   #snapshot: SideControlState;
+  /** The screen lock this pairing holds (#557), given back in {@link #end}. */
+  readonly #screenLock: Promise<ScreenLock>;
 
   constructor(
     peer: SidePeer,
@@ -467,6 +489,10 @@ export class TabletSideLink implements SideCameraControlPort {
     this.#secret = secret;
     this.#timers = timers;
     this.#snapshot = this.#build();
+    // Not awaited: a platform that is slow to answer, or refuses, must not
+    // hold up the offer. `acquire` resolves rather than rejects when it cannot
+    // (`wake-lock.ts`), and the catch is for a source that breaks that.
+    this.#screenLock = timers.screenLock.acquire().catch(() => NO_SCREEN_LOCK);
     this.#cancels.push(
       timers.after(() => {
         if (!this.#answered) {
@@ -489,7 +515,7 @@ export class TabletSideLink implements SideCameraControlPort {
       this.#hearPicture(event.data);
     };
     channel.onclose = () => {
-      this.#end(this.#phone === 'stopped' ? 'phone-ended' : this.#failure());
+      this.#end(this.#phone === 'stopped' ? this.#stoppedEnd() : this.#failure());
     };
     peer.onconnectionstatechange = () => {
       const state = peer.connectionState;
@@ -621,6 +647,20 @@ export class TabletSideLink implements SideCameraControlPort {
     }
   }
 
+  /**
+   * Who ended a pairing the phone closed after saying it had stopped — #557.
+   *
+   * ⚠️ **The phone's own reason decides it**, because the phone is the one
+   * that knows. *Stop filming* on this tablet makes the phone stop with reason
+   * `tablet` and then close — one session per pairing (D-4) — and this used to
+   * read every close after a stop as `phone-ended`, so the tablet said *"The
+   * phone ended the pairing"* while the phone said *"Your tablet ended the
+   * session"*: the owner's fifth finding on #557.
+   */
+  #stoppedEnd(): SidePairingEnd {
+    return this.#stopReason === 'tablet' ? 'ended-here' : 'phone-ended';
+  }
+
   /** The failure's reason, by how far the pairing got. */
   #failure(): SidePairingEnd {
     if (this.#proved) {
@@ -750,6 +790,12 @@ export class TabletSideLink implements SideCameraControlPort {
     this.#frames.onmessage = null;
     this.#peer.onconnectionstatechange = null;
     letGo(this.#peer, this.#channel, this.#timers);
+    // ⚠️ **Released on EVERY end, and that is the half that matters** (#557,
+    // `wake-lock.ts`'s own emphasis): a lock leaked here keeps the tablet
+    // awake on a stand until its battery is flat, and nothing about that
+    // looks like this feature's fault. Through the promise, so a lock that
+    // arrives after the pairing ended is given back as soon as it does.
+    void this.#screenLock.then(async (lock) => lock.release()).catch(() => undefined);
     this.#announce();
     // ⚠️ No `#pictureListeners.clear()` here, and one was removed in #555's
     // review: `#hearPicture` returns on `#ended` before it reads a byte, and
