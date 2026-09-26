@@ -30,13 +30,21 @@
  * there: `send` does not throw, the channel says `open`, nothing is buffered,
  * and the message never arrives. Caught by a trace in CI, about one pairing in
  * a hundred. The phone's next message was then the first the tablet heard,
- * and D-4 ended the pairing as `not-our-phone`. A message the phone has
- * RECEIVED on `control` was handed up by an engine whose channel was open at
- * its end, so a reply sent from there is past that window. The tablet's own
- * channel opens with its `open` event rather than being handed over already
- * open, and its ping repeats in case one is lost all the same. D-4 is
- * unchanged: the secret is still the phone's first message, and nothing the
- * tablet sends before proof carries anything.
+ * and D-4 ended the pairing as `not-our-phone`. The reasoning was that a
+ * message the phone has RECEIVED on `control` was handed up by an engine whose
+ * channel was open at its end, so a reply sent from there would be past that
+ * window. ⚠️ **That is not established, and CI has contradicted it once**:
+ * run 36252687970 shows the phone sending `hello` from inside that message
+ * handler, then about ten heartbeats, and none of them arriving — every
+ * phone → tablet message lost, in about one pairing in 650. Waiting to be
+ * spoken to is aimed at the ONE-lost-first-message failure this section was
+ * written for (and holds against `testing.ts`'s double of it); it does not
+ * explain or prevent a direction that loses everything, which stays open on
+ * #568. The tablet's own channel opens with its `open`
+ * event rather than being handed over already open, and its ping repeats in
+ * case one is lost all the same. D-4 is unchanged: the secret is still the
+ * phone's first message, and nothing the tablet sends before proof carries
+ * anything.
  *
  * ## Why neither end waits for the connection to say it is gone
  *
@@ -786,6 +794,10 @@ export class TabletSideLink implements SideCameraControlPort {
     }
     this.#channel.onmessage = null;
     this.#channel.onclose = null;
+    // Belt and braces (#573): an `open` arriving after the end would reach
+    // `#invite`, which already returns on `#ended`; this takes the handler
+    // away so it is not asked at all. `side-link.test.ts` §"lets go of the
+    // channel's open handler" pins each half separately.
     this.#channel.onopen = null;
     this.#frames.onmessage = null;
     this.#peer.onconnectionstatechange = null;
