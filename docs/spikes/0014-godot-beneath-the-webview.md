@@ -13,10 +13,12 @@
   built from released parts with no engine patch. **On this scene it is not measurably better than
   three.js, by the criterion set in advance.** Both hold 60 Hz with the same present-interval
   percentiles, the GPU sits near its idle clock under both, and neither heats the tablet. The one
-  clear difference, about 0.57 of a core less CPU, is structural rather than the engine's. **Four of
-  the eight pre-registered kill conditions trip as written: K3, K4, K6 and K8.** Two of those
-  (K3 and K6) are properties of this spike's build choices, and the tables below say which change
-  would move them. Nothing on iOS was reached.
+  clear difference, about 0.57 of a core less CPU, is structural rather than the engine's. **Three of
+  the eight pre-registered kill conditions trip as written: K4, K6 and K8. A fourth, K3, is
+  unmeasured as written**, which the criterion counts as not a pass: its share clause needs a run of
+  at least ten minutes, and only the 5-minute runs recorded that share (1.76 %, over the line). K6,
+  and K3's 5-minute result, are properties of this spike's build choices, and the tables below say
+  which change would move them. Nothing on iOS was reached.
 
 A spike is a dated measurement that decides nothing (`CLAUDE.md` §7).
 
@@ -75,7 +77,10 @@ applies: nothing here says the hybrid works on iOS.
 1. `app/build.gradle`: the Maven dependency; a second `assets` source directory holding the Godot
    project (headless-imported, so `.godot/imported` travels with it); and an `ignoreAssetsPattern`
    without the leading `.*`, because Capacitor's pattern drops the hidden `.godot/` directory and
-   Godot then cannot load an imported resource.
+   Godot then cannot load an imported resource. ⚠️ Dropping `.*` admits **every** hidden file under
+   every asset source, not only `.godot/`, including anything that lands in `apps/web/dist`. A
+   production route would admit `.godot` by name or rename the imported resources; that is #434's
+   to choose.
 2. `AndroidManifest.xml`: `tools:replace="android:resource"` on our `FileProvider`'s `<meta-data>`.
    The library declares a `FileProvider` with the same authority (`${applicationId}.fileprovider`)
    and its own paths file, so the merge **fails** without it. Keeping ours drops Godot's
@@ -146,7 +151,7 @@ is sampled, and why the engines' own numbers are not the headline:
   de-duplicated on the actual-present timestamp. The layer is the WebView's window (`VRI-…`) for
   three.js and the Godot `SurfaceView` for Godot. **This is the one frame-time measure that is the
   same instrument for both engines.** `--timestats` would have been better and is disabled on this
-  build (`totalFrames = 0`). Sampling holes of ≥ 250 ms (5–28 a run, during the thermal dumps) are
+  build (`totalFrames = 0`). Sampling holes of ≥ 250 ms (3–29 a run, during the thermal dumps) are
   excluded from the percentiles and counted.
 - **GPU load by DVFS**: `/sys/class/misc/mali0/device/cur_freq` once a second. `utilization` and
   `time_in_state` are permission-denied to the shell user, and no power rail is readable.
@@ -184,7 +189,10 @@ logcat, takes about 0.13 s.
   button). Out of the box it **also** holds Godot's `SurfaceView`, which **has input focus**, and an
   unlabelled, clickable `EditText` (Godot's hidden keyboard field, reported `NAF`). With the two
   container lines in §"What was built", the tree of important nodes is **exactly the DOM**, and focus
-  is the WebView's.
+  is the WebView's. ⚠️ The before and after tree dumps `a11y.sh` wrote were **not committed** to the
+  spike branch's `results/`, so unlike every number in §§3–6 this finding has no committed evidence;
+  it rests on the dumps as read at the time. And `FOCUS_BLOCK_DESCENDANTS` was checked only for
+  TalkBack's focus: whether it changes Godot's **own** input (a keyboard or a gamepad) was not tested.
 - **Not done**: a person navigating the HUD with TalkBack by ear. Validation 0003 is where that
   lives.
 
@@ -201,6 +209,15 @@ the 20-minute run (24 023 steps, **0 lost** by sequence number):
 
 (p50–p99 are the median, over forty 30-second windows, of each window's percentile. *Max* is the
 median window's max. The worst single step of the run was 131 ms TS → Java.)
+
+⚠️ **This run did not record the share of steps later than 50 ms.** That counter was added to
+`world.gd` after the 20-minute run (19:42Z), so it exists only for the later 5-minute runs (§3a,
+and the shadows run). What the 20-minute run does bound: each window's p99 is a nearest-rank
+percentile over about 600 steps, so a window whose p99 is over 50 ms had **more than 1 %** of its
+steps over 50 ms. The median of the forty window p99s is 51.47 ms, so **at least 20 of the 40
+windows** were over 1 %. At least six late steps in each of those puts at least 120 of the run's
+24 023 steps over 50 ms, which is **at least 0.5 %** of the run. It does not show whether the whole
+run was over 1 %.
 
 What that does to the picture:
 
@@ -220,15 +237,17 @@ What that does to the picture:
 
 ### 3a. Is the tail the bridge, or the page?
 
-**Mostly the page: specifically, the geometry window, and it goes away when that is moved.** The same
-5-minute run twice, differing only in how often a geometry window is sent:
+**Mostly the page: specifically, the geometry window, and most of it goes when that window is sent
+less often.** The same 5-minute run twice, differing only in how often a geometry window is sent. The
+window still travels in the same queue as the steps in both runs; a separate channel for geometry
+was **not built**:
 
 | Geometry window every | TS → Java p99 / max | TS → Godot p95 / p99 | Steps later than 50 ms at Godot / at Java | Arrival gap p99 | Frames held at 50 ms delay |
 |---|---|---|---|--:|--:|
 | **25 m, as built** (about every 2.8 s) | 35.3 / 81.3 ms | 19.6 / 49.3 ms | **1.76 %** / 0.50 % | 90 ms | 5.39 % |
 | 250 m (about every 28 s) | **5.7** / 38.5 ms | 19.1 / **21.2** ms | **0.88 %** / 0.12 % | 64 ms | 4.08 % |
 
-- **Capacitor's bridge itself is fast and lossless**: with the geometry out of the way, TS → Java is
+- **Capacitor's bridge itself is fast and lossless**: with a window a tenth as often, TS → Java is
   2.4 / 4.4 / 5.7 ms at p50 / p95 / p99.
 - **What remains over 50 ms (0.88 %)** is the wait for Godot's next frame (it polls once a frame)
   on top of the WebView's own rAF cadence, which is when the page emits steps.
@@ -269,7 +288,7 @@ ahead on frame time.** Every present-interval percentile agrees to within 0.05 m
 
 - **Neither stylised run heated the tablet.** Thermal status stayed 0 throughout and skin moved by
   about 1 °C in twenty minutes. The Godot run ended **about 1 °C warmer** than the three.js run
-  (26.4 against 25.5 °C, having read 1.3 °C cooler just before its run began) and its G3D sensor about 1.5 °C warmer. So on
+  (26.4 against 25.5 °C, from first readings 0.1 °C apart: 25.4 and 25.5) and its G3D sensor about 1.5 °C warmer. So on
   this scene Godot is **not cooler**. #247's question, what a *hot* device does, is not answered by
   either run: this scene never makes the tablet hot.
 - **GPU load is at the bottom of the DVFS range for both** (the idle frequency is 202 MHz, and the
@@ -320,8 +339,8 @@ actually linked. The list below is the table's, which is what a credits screen w
 | **OFL-1.1** | fonts (Open Sans, Noto Sans, …) | ⚠️ not in the tables (a font licence) |
 | **IJG** (with BSD-3) | libjpeg-turbo | ⚠️ not in the tables |
 | **Unicode** | ICU | ⚠️ not in the tables |
-| **HarfBuzz** (old MIT variant), **glslang** (a BSD/MIT set), **X11** | HarfBuzz, glslang, Mesa Wayland protocols | ⚠️ not in the tables |
-| **CC-BY-4.0** | **the Godot logo**, shown by the default boot splash | ADR 0023 admits CC-BY for a committed **asset** with attribution; as part of a *dependency* it is not ruled on |
+| **HarfBuzz** (old MIT variant), **glslang** (a BSD/MIT set), **X11** | HarfBuzz, glslang, Mesa Wayland protocols | ⚠️ not in the tables. The X11 entry (Wayland protocols) is probably Linux-only and not linked into the Android library; that was not checked, for the reason given above the table |
+| **CC-BY-4.0** | **the Godot logo**, shown by the default boot splash | ADR 0023 admits CC-BY for a committed **asset** with attribution; as part of a *dependency* it is not ruled on. `application/boot_splash/show_image=false` (or a project splash image) stops it being **shown**, but it may still **ship** inside the library's `.so` or `.pck`, and shipping is what needs the ruling (not checked here) |
 
 **No GPL, LGPL or AGPL component appears, so DEP002 is not engaged.** Several licences are ones ADR
 0015 has not ruled on. `DEP001` fails closed on those, as it did for `Unlicense` before ADR 0016. And
@@ -335,10 +354,10 @@ one, so `ASSETS.toml` has nothing to say about it unless it is vendored.
 |---|---|---|
 | K1 | **Not tripped** | Built from the published 4.7.1 library, no engine patch, public API only |
 | K2 | **Not tripped, with a required fix** | Touch 3/3. The DOM is in the accessibility tree; Godot's focus and its unlabelled `EditText` must be hidden by the host (two lines, measured) |
-| K3 | **Tripped, as built** | TS → Godot p95 is 19.8 ms (under the 50 ms line), but **1.76 % of steps** reached Godot more than 50 ms after they were sent (1.96 % with shadows), over the 1 % line. With the geometry windows moved out of the steps' way, it is 0.88 % and the p99 is 21 ms (§3a). And at a one-step render delay, 5.5 % of frames hold the last pose; that is the delay's arithmetic, not the bridge |
-| K4 | **Tripped** | (a) Not measurable as written: the two engines' GPU times are different instruments. The engine-neutral proxy, GPU DVFS, is 242 against 256 MHz, 5 % and not 25 %. (b) Not cooler: Godot ended about 1 °C warmer. (c) Godot holds 60 Hz with sun shadows and with shadows + MSAA 2×, **but three.js's shadow configuration holds 60 Hz too** (59.41 fps, p99 16.75 ms), so (c) is not met. The CPU saving (§5) is outside K4's three clauses and is not counted as a pass |
+| K3 | **Unmeasured as written, so not a pass** | The p95 clause was measured over 20 minutes and is **not tripped**: TS → Godot p95 19.8 ms against a 50 ms line. The share clause needs **at least ten minutes**, and the 20-minute run did not record the late share (§3). On the **5-minute** runs, which fall short of that length, **1.76 % of steps** reached Godot more than 50 ms after they were sent (1.96 % with shadows), over the 1 % line. The 20-minute run bounds it only from below: at least 20 of its 40 windows were over 1 %, which is at least 0.5 % of the run. With a geometry window sent a tenth as often, the 5-minute share is 0.88 % and the p99 is 21 ms (§3a). And at a one-step render delay, 5.5 % of frames hold the last pose; that is the delay's arithmetic, not the bridge |
+| K4 | **Tripped** | (a) Not measurable as written: the two engines' GPU times are different instruments. The engine-neutral proxy, GPU DVFS, is 242 against 256 MHz, 5 % and not 25 %. (b) Not cooler: Godot ended about 1 °C warmer. (c) Godot holds 60 Hz with sun shadows and with shadows + MSAA 2×, **but three.js's shadow configuration holds 60 Hz too** (59.41 fps, p99 16.75 ms), so (c) is not met. ⚠️ (c) was **not like-for-like**: three.js's configuration (`RIDER_SHADOW_MAP_RUNG`) casts shadows from the **riders only**, where Godot cast real-time sun shadows over the **whole scene within 120 m**. Godot did more shadow work and still held 60 Hz, so the comparison understates Godot's headroom. A three.js configuration with whole-scene shadows was not run, and "(c) not met" does not mean the two cost the same. The CPU saving (§5) is outside K4's three clauses and is not counted as a pass |
 | K5 | **Not tripped** | Over-20 ms share 0.11 % (Godot) against 0.34 % (three.js). Thermal status 0 for both, though Godot ended about 1 °C warmer |
-| K6 | **Tripped on APK size, as written** | +69.6 MiB for arm64 with AGP's default packaging, against a 60 MiB line (+26.1 MiB compressed, +296 MiB for all ABIs). Memory +301 MiB passes the 400 MiB line; with shadows + MSAA 2× it is +670 MiB and does not. Cold start +1.1 s passes the 3 s line |
+| K6 | **Tripped on APK size as written, and on memory with shadows + MSAA 2×** | +69.6 MiB for arm64 with AGP's default packaging, against a 60 MiB line (+26.1 MiB compressed, +296 MiB for all ABIs). Memory +301 MiB passes the 400 MiB line; with shadows + MSAA 2× it is +670 MiB and does not (+655 MiB even against three.js's own shadow-map run, 295 MiB). Cold start +1.1 s passes the 3 s line |
 | K7 | **Not tripped** | 4.7.1 → 4.7.2 by version string alone: builds, renders, same numbers |
 | K8 | **Tripped, as written** | No copyleft, but Zlib, FTL, BSL-1.0, OFL-1.1, IJG, Unicode, HarfBuzz, glslang and X11 are licences ADR 0015 does not admit today. Every one is permissive in kind, and admitting them is an ADR 0015 ruling, which is #434's to ask for, not this spike's to assume |
 
@@ -347,15 +366,19 @@ one, so `ASSETS.toml` has nothing to say about it unless it is vendored.
 **This spike decides nothing.** Read against #434's list:
 
 1. **Go or no-go**: **by the criterion set before measuring, this is a no-go signal on
-   this scene.** K3, K4, K6 and K8 trip as written. It is not this spike's to decide which of them
-   #434 treats as fatal, but the four are not alike, and that is the useful part:
+   this scene.** K4, K6 and K8 trip as written, and K3 is unmeasured as written, which is not a
+   pass. It is not this spike's to decide which of them #434 treats as fatal, but the four are not
+   alike, and that is the useful part:
    - **K4 is the substantive one.** On the stylised world, the one both renderers can draw, Godot is
      not better in frame time, GPU load or heat. A native renderer's case would have to rest on a
      scene three.js *cannot* hold. The realistic three.js world (695 MHz, +2.5 °C in 5 minutes) is
      where to look, and it was not drawn in Godot.
-   - **K3 and K6 follow from this spike's choices.** Moving the geometry off the step path brings K3
-     under its line (0.88 %). Compressed native libraries bring K6's APK delta to 26 MiB, at the cost
-     of a 71 MB extraction on install.
+   - **K3 and K6 follow from this spike's choices.** K3's share clause was measured only on 5-minute
+     runs, where it was over its line (1.76 %). Sending a geometry window a tenth as often brought
+     that to 0.88 % (5 minutes); a separate channel for geometry was not built. A run of at least ten
+     minutes that records the share is what would settle K3 as written. Compressed native libraries
+     bring K6's APK delta to 26 MiB, at the cost of a 71 MB extraction on install. K6's memory line
+     is tripped only with shadows + MSAA 2×.
    - **K8 is a ruling, not a defect.** Every licence named is permissive in kind; what trips is that
      ADR 0015 has not ruled on them.
 2. **The port's new shape**: measured, not designed. A native renderer needs no canvas and no GL
@@ -391,7 +414,11 @@ one, so `ASSETS.toml` has nothing to say about it unless it is vendored.
 - **A live BLE connection during the runs** (ADR 0008 D-2's configuration); the owner was not riding.
 - **Power**: no rail or energy consumer is readable without root on this build.
 - **The realistic world in Godot**, and any visual comparison beyond screenshots.
-- **A person using TalkBack.**
+- **K3's late-step share over a run of ten minutes or more**: the 20-minute run predates the counter
+  (§3), so K3 is unmeasured as written.
+- **A three.js configuration with whole-scene shadows**, so K4(c) is not a like-for-like comparison.
+- **A person using TalkBack**, and Godot's own keyboard or gamepad input with its container's focus
+  blocked.
 - **A release build** of the app; the Godot library is its release template in both builds.
 - **A Godot minor-version bump** (4.8 is a dev snapshot).
 
