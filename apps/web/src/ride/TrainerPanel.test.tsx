@@ -292,13 +292,14 @@ describe('a hand-set target the stall rescue eased — #567', () => {
           holding: 'relief',
           reason:
             'Cadence is falling under the target, so it has been eased to let you spin back up.',
+          pending: undefined,
         },
       }),
     );
     expect(text).toContain('Eased');
     expect(text).toContain('Cadence is falling under the target');
     expect(text).toContain('Your 150 W comes back by itself');
-    expect(text).toContain('press End ERG to leave it off');
+    expect(text).toContain('Press End ERG to leave it off');
     // The window is the latch's own, not a number typed beside it.
     expect(text).toContain(`held steady for ${String(TREND_WINDOW)} seconds`);
     // What the machine holds is still said as what it confirmed.
@@ -309,5 +310,42 @@ describe('a hand-set target the stall rescue eased — #567', () => {
     const text = await render(snapshot(holding()));
     expect(text).not.toContain('Eased');
     expect(text).not.toContain('comes back by itself');
+  });
+
+  it('says a target set DURING the rescue will be set once the rider is steady — PR #582 third review', async () => {
+    const text = await render(
+      snapshot({
+        ...holding(),
+        ergRescue: {
+          target: watts(150),
+          holding: 'floor',
+          reason: 'You have stopped pedalling, so the target is at its lowest.',
+          pending: watts(240),
+        },
+      }),
+    );
+    expect(text).toContain(
+      'Your new target of 240 W will be set once you are pedalling steadily again.',
+    );
+    // The pending number is never said as one that "comes back": it has not
+    // been on the machine, and the accepted one is not what will be set.
+    expect(text).not.toContain('comes back by itself');
+    expect(text).toContain('Press End ERG to leave it off');
+  });
+
+  it('names no number when no target has been accepted yet', async () => {
+    const text = await render(
+      snapshot({
+        ...holding(),
+        ergRescue: {
+          target: undefined,
+          holding: 'floor',
+          reason: 'You have stopped pedalling, so the target is at its lowest.',
+          pending: undefined,
+        },
+      }),
+    );
+    expect(text).toContain('The trainer stays at its lowest target until your cadence');
+    expect(text).not.toContain('undefined');
   });
 });

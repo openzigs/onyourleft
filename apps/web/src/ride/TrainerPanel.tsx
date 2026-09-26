@@ -403,8 +403,15 @@ export function targetSentence(trainer: TrainerSnapshot): string {
  * sentence cannot go quietly wrong when #137 recalibrates it (PR #582's review).
  */
 function rescueSentence(rescue: ManualErgRescue): string {
-  return (
-    `${rescue.reason} Your ${String(rescue.target)} W comes back by itself once your ` +
-    `cadence has held steady for ${String(TREND_WINDOW)} seconds — press End ERG to leave it off.`
-  );
+  const steady = `your cadence has held steady for ${String(TREND_WINDOW)} seconds`;
+  // PR #582's third review: the number named is only ever one the machine
+  // ACCEPTED. A target the rider set during the rescue is not written until it
+  // ends — the rescue is the only writer — and is said as that, separately.
+  const back =
+    rescue.pending !== undefined
+      ? ` Your new target of ${String(rescue.pending)} W will be set once you are pedalling steadily again.`
+      : rescue.target !== undefined
+        ? ` Your ${String(rescue.target)} W comes back by itself once ${steady}.`
+        : ` The trainer stays at its lowest target until ${steady}.`;
+  return `${rescue.reason}${back} Press End ERG to leave it off.`;
 }

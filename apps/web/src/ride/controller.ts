@@ -1741,6 +1741,9 @@ export function createRideController(options: RideControllerOptions): RideContro
       try {
         // #567: through the hand-set target's own ERG writer, so its stall
         // rescue and the rider's target are serialised on one control point.
+        // During a rescue the target is `deferred` rather than written — the
+        // rescue is the only writer while it lasts (PR #582's third review) —
+        // and `ergRescue.pending` is what the screen says about it.
         const outcome = await manualErgFor(client, connection).set(target);
         if (outcome.kind === 'failed') {
           refusal = describe(outcome.error);

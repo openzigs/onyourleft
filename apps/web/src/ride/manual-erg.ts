@@ -42,20 +42,53 @@
  * a rider whose sensor went quiet after a stall stays at the floor rather than
  * being stepped up, or handed the full target back, on no evidence.
  *
- * ⚠️ A rider's new target ends a rescue only once the machine ACCEPTS it
- * (PR #582's review): a refused one puts the rescue back as it was, so the old
- * target cannot return at full around the recovery window.
+ * ## One writer at a time: during a rescue, ONLY the rescue writes
  *
- * ⚠️ **A refused rider target is never written again unless the rider asks
- * again** (PR #582's second review). Rider asks are counted apart from the
- * rescue's own: when the machine refuses the rider's NEWEST target, the target
- * goes back to the last one the machine accepted and the rescue to what it was
- * before — whether or not an ease went out after it, because an ease does not
- * replace the rider's number. Only a newer RIDER target decides instead. And no
- * rescue write is offered while a rider target is still waiting behind another
- * write, so an ease can never supersede one and carry a number the machine has
- * not agreed to onto the wire in its place; the ease goes out on the next tick
- * once the rider's write is on the wire.
+ * PR #582 went through three reviews, and every one found a new race between
+ * the rider's writes and the rescue's writes sharing one single-slot ERG
+ * writer: an ease derived from a target the machine later refused, an ease
+ * superseding a rider target waiting behind another write, and an ease starved
+ * by a rider pressing *Set* faster than the machine answered. Each patch fixed
+ * one interleaving and left the next. So the ownership is now a rule rather
+ * than a set of guards:
+ *
+ * 1. **Outside a rescue** (the latch says `full`) the rider's *Set* writes
+ *    immediately, exactly as before #567.
+ * 2. **During a rescue** (the latch says `relief` or `floor`) the rescue is the
+ *    ONLY writer. A *Set* is recorded as the rider's PENDING target and is NOT
+ *    written; the panel says it will be set once they are pedalling steadily
+ *    again. A newer *Set* replaces the pending one. A rider target that was
+ *    still WAITING in the writer's slot when the rescue began (not yet on the
+ *    wire) is superseded by the ease and becomes the pending target.
+ * 3. **An ease is only ever derived from the last target the machine
+ *    ACCEPTED** from the rider — never from one in flight, waiting, pending or
+ *    refused. A rider write already ON THE WIRE when the rescue begins cannot
+ *    be recalled, so the ease is queued behind it: it reaches the wire the
+ *    moment that write settles (accepted or refused), which is the earliest
+ *    anything could, and it was computed without it. If it was accepted, the
+ *    next tick re-derives the ease from it. With no accepted target at all yet,
+ *    the ease is the floor, which needs none.
+ * 4. **When the latch hands back to `full`**, a pending target is written as
+ *    an ordinary rider write — acknowledged, and if refused, reported through
+ *    `onFault` and reverted to the last accepted target, which is what the
+ *    next tick puts back. With no pending target, the last accepted one is
+ *    put back.
+ * 5. **A refused target is never written again** unless the rider sets it
+ *    again, and nothing is derived from it: it never became the accepted target.
+ *
+ * What that buys, as properties `manual-erg.test.ts` loops over held and
+ * refused writes in every order: no Stop or Reset; a refused target never
+ * re-sent and never eased from; a stalled rider eased within one tick of the
+ * stall being judged plus at most the one write already on the wire, however
+ * often they press *Set* and however slowly the machine answers;
+ * {@link ManualErg.rescue} never naming an unaccepted target; and nothing
+ * written or changed after {@link ManualErg.close}.
+ *
+ * ⚠️ **What it costs**: a rider who changes their target mid-rescue waits for
+ * the recovery window before it goes on — including a LOWER target. That is
+ * deliberate: the rescue already holds relief or the floor under the accepted
+ * target, and a second writer is the thing three reviews could not make safe.
+ * *End ERG* is on the same form and is never deferred.
  *
  * ## Every write through one ERG writer
  *
@@ -89,161 +122,195 @@ const CADENCE_HISTORY_SECONDS = 30;
 
 /** What the Ride screen may say about a rescue in progress. */
 export interface ManualErgRescue {
-  /** The target the rider set, which is NOT what the machine is holding. */
-  readonly target: Watts;
+  /**
+   * The last target the machine ACCEPTED from the rider — never one in flight,
+   * waiting, pending or refused (PR #582's third review). `undefined` only when
+   * the rider's first target had not been accepted when the rescue began; the
+   * rescue then holds the machine's floor, which needs no target to derive.
+   */
+  readonly target: Watts | undefined;
   /** `relief` is a share of {@link target}; `floor` is the machine's lowest. */
   readonly holding: 'relief' | 'floor';
   readonly reason: string;
+  /**
+   * A target the rider set DURING this rescue. Not written: the rescue is the
+   * only writer while it lasts, and this goes on once it hands back.
+   */
+  readonly pending: Watts | undefined;
 }
+
+/**
+ * What became of a rider's *Set*: the writer's own outcome, or `deferred` —
+ * kept as the pending target because a rescue owns the machine.
+ */
+export type ManualErgSetOutcome =
+  ErgWriteOutcome | { readonly kind: 'deferred'; readonly target: Watts };
 
 export interface ManualErg {
   /**
-   * The rider set a target. Once the machine accepts it, any rescue is
-   * forgotten: this is the rider's own act, and if they are still in trouble
-   * the next tick eases it again. If the machine refuses it — and no newer
-   * target of the rider's is outstanding — the last accepted target and the
-   * rescue it was under are put back, and the refused number is never written
-   * again unless the rider sets it again.
+   * The rider set a target. Outside a rescue it is written now; during one it
+   * is DEFERRED — kept as the pending target and written, as a rider write,
+   * once the rescue hands back. A refused target is never written again unless
+   * the rider sets it again.
    *
-   * Resolves with the writer's outcome for THIS target — never rejects.
+   * Resolves with what became of THIS target — never rejects. A deferred
+   * target's eventual refusal is reported through `onFault`, because the
+   * caller's promise has long since resolved.
    */
-  set(target: Watts): Promise<ErgWriteOutcome>;
+  set(target: Watts): Promise<ManualErgSetOutcome>;
   observeCadence(reading: CadenceReading): void;
   /** Judge the rider at `now`, and write only if what should be held changed. */
   tick(now: Seconds): void;
-  /** `undefined` while the rider's own target is what is being held. */
+  /** `undefined` while no rescue is in progress, and after {@link close}. */
   rescue(): ManualErgRescue | undefined;
   /**
-   * Stop writing, for good. ⚠️ Does not touch the trainer — the release is
-   * the ride controller's one release, and a workout or the game may be about
-   * to write on this same control point.
+   * Stop writing, for good, and forget any pending target — nothing is written
+   * or changed after this, whatever settles late. ⚠️ Does not touch the
+   * trainer — the release is the ride controller's one release, and a workout
+   * or the game may be about to write on this same control point.
    */
   close(): void;
   /** Resolves once no write is outstanding. For tests. */
   settled(): Promise<void>;
 }
 
+/** One offer to the writer, until its outcome is in. */
+interface Ask {
+  readonly id: number;
+  readonly value: Watts;
+  /** The rider's own target, rather than an ease or a restore. */
+  readonly fromRider: boolean;
+  /**
+   * Whose refusal it is to report: `caller` when a `set()` promise carries the
+   * outcome, `fault` for every rescue write and for a pending target written
+   * when the rescue hands back.
+   */
+  readonly reportTo: 'caller' | 'fault';
+  /** Replaced in the writer's waiting slot — marked in the same turn. */
+  superseded: boolean;
+  /** A rider target an ease superseded, kept as the pending one. */
+  deferred: boolean;
+}
+
 export function createManualErg(options: {
   readonly control: ErgSink;
   /** The minimum of the Supported Power Range the machine itself reported. */
   readonly powerFloor: Watts;
-  /** A rescue write the machine refused — the rider's own refusal is the caller's. */
+  /**
+   * A write the machine refused that no `set()` promise reports: a rescue
+   * write, or a pending target written when the rescue handed back.
+   */
   readonly onFault: (error: unknown) => void;
   readonly onChange: () => void;
 }): ManualErg {
   const { control, powerFloor, onFault, onChange } = options;
   const writer: ErgWriter = createErgWriter(control);
-  let latch: ErgRescue = createErgRescue();
-  /**
-   * The rescue as it stood before a rider's target that the machine has not
-   * yet accepted — PR #582's review. A refused target must not have wiped it:
-   * the rider's OLD target would come straight back at full on the next tick,
-   * skipping the whole-window recovery the latch exists for. Judged alongside
-   * the fresh latch while it waits, so it is current if it is put back.
-   */
-  let beforeRider: { readonly latch: ErgRescue; readonly step: ErgRescueStep } | undefined;
+  const latch: ErgRescue = createErgRescue();
 
   let cadence: CadenceReading[] = [];
-  /** The rider's target — the last one the machine accepted, or the one in flight. */
-  let target: Watts | undefined;
-  /** The last target the machine accepted from the rider. What a refusal reverts to. */
+  /** Whether the rider has set a target at all — before then there is nothing to rescue. */
+  let started = false;
+  let closed = false;
+  /** The last target the machine ACCEPTED from the rider — the only base an ease has. */
   let accepted: Watts | undefined;
-  /** What was last asked of the machine, in the watts put on the wire. */
+  /** A target the rider set during a rescue, not written. */
+  let pending: Watts | undefined;
+  /** What was last offered to the writer, in the watts put on the wire. */
   let lastAsked: Watts | undefined;
   /** What the machine last acknowledged, in the same terms. */
   let onMachine: Watts | undefined;
   let step: ErgRescueStep = { kind: 'full' };
-  /** Every ask, rescue and rider alike — which ask is the CURRENT one. */
   let asks = 0;
-  /** The rider's asks alone — whether a NEWER rider target is outstanding. */
-  let riderAsks = 0;
-  /** Asks not yet settled, in the order offered: the first is on the wire. */
-  let unsettled: { readonly id: number; readonly fromRider: boolean }[] = [];
+  /** Offers not yet settled, in the order offered. */
+  let unsettled: Ask[] = [];
 
-  /**
-   * Offer `value` through the writer.
-   *
-   * ⚠️ A refused write sets {@link lastAsked} back to what the machine last
-   * acknowledged — so a refused ease is tried again on the next tick (an ease
-   * that did not land is not an ease). Only for the CURRENT ask: an older
-   * outcome describes a target nobody is waiting for any more.
-   *
-   * A refused RIDER target is judged against rider asks alone: unless a newer
-   * rider target is outstanding, {@link target} goes back to {@link accepted}
-   * and the rescue to {@link beforeRider}, so the refused number is never
-   * derived from, eased from or written again.
-   */
-  const ask = (value: Watts, fromRider: boolean): Promise<ErgWriteOutcome> => {
+  /** Offers still headed for the machine: the first is on the wire, a second waits. */
+  const live = (): Ask[] => unsettled.filter((entry) => !entry.superseded);
+
+  /** The offer in the writer's waiting slot, if any. */
+  const waitingAsk = (): Ask | undefined => {
+    const queue = live();
+    return writer.busy() && queue.length >= 2 ? queue[queue.length - 1] : undefined;
+  };
+
+  const ask = (
+    value: Watts,
+    fromRider: boolean,
+    reportTo: 'caller' | 'fault',
+  ): { readonly entry: Ask; readonly outcome: Promise<ErgWriteOutcome> } => {
+    // A busy writer puts this offer in its waiting slot, superseding whatever
+    // was there — marked NOW, so a tick in the same turn does not mistake the
+    // displaced offer for a live one.
+    const displaced = waitingAsk();
+    if (displaced !== undefined) {
+      displaced.superseded = true;
+    }
     lastAsked = value;
     asks += 1;
-    const mine = asks;
-    if (fromRider) {
-      riderAsks += 1;
-    }
-    const mineRider = riderAsks;
-    unsettled.push({ id: mine, fromRider });
+    const entry: Ask = { id: asks, value, fromRider, reportTo, superseded: false, deferred: false };
+    unsettled.push(entry);
     const outcome = writer.offer(value);
     void outcome.then((settled) => {
-      unsettled = unsettled.filter((entry) => entry.id !== mine);
+      unsettled = unsettled.filter((other) => other.id !== entry.id);
+      if (closed) {
+        // PR #582's third review: a late answer after close() changes nothing.
+        return;
+      }
       if (settled.kind === 'written') {
         onMachine = settled.target;
         if (fromRider) {
           accepted = settled.target;
-          // The machine took the rider's own target: the rescue it replaced
-          // is over, by the rider's act.
-          beforeRider = undefined;
         }
       } else if (settled.kind === 'failed') {
-        if (mine === asks) {
+        // Not on the machine. Whatever is next judged against `lastAsked` must
+        // see what the machine actually holds: a refused ease is retried, and
+        // a refused rider target reverts to the accepted one on the next tick.
+        // Only for the CURRENT offer — an older outcome describes an offer
+        // nobody is waiting for any more.
+        if (entry.id === asks) {
           lastAsked = onMachine;
         }
-        if (!fromRider) {
+        // A refused rider target never became `accepted`, so nothing is ever
+        // derived from it, and nothing here writes it again.
+        if (reportTo === 'fault') {
           onFault(settled.error);
-        } else if (mineRider === riderAsks) {
-          // The rider's newest target was refused. An ease offered after it
-          // does not make it any less refused: it is dropped, and the rescue
-          // it replaced — judged every tick while it waited — is put back.
-          // Were it kept, the latch would write it (or a share of it) the
-          // moment the rider recovered, without them asking again.
-          target = accepted;
-          if (beforeRider !== undefined) {
-            latch = beforeRider.latch;
-            step = beforeRider.step;
-            beforeRider = undefined;
-          }
         }
-        // Otherwise a newer RIDER target is outstanding: it decides, and the
-        // rescue to put back if it too is refused is kept for it.
       }
       onChange();
     });
-    return outcome;
+    return { entry, outcome };
   };
 
-  const wanted = (rider: Watts): Watts => {
-    switch (step.kind) {
-      case 'full':
-        return rider;
-      case 'relief':
-        // Raised to the floor: the machine refuses an out-of-range target
-        // outright, and a refused ease rescues nobody (#441).
-        return watts(Math.max(Math.round(rider * step.share), powerFloor));
-      case 'floor':
-        return powerFloor;
+  /** What a rescue step holds — derived from the ACCEPTED target and nothing else. */
+  const easeFor = (rescuing: Exclude<ErgRescueStep, { kind: 'full' }>): Watts => {
+    if (rescuing.kind === 'floor' || accepted === undefined) {
+      return powerFloor;
     }
+    // Raised to the floor: the machine refuses an out-of-range target
+    // outright, and a refused ease rescues nobody (#441).
+    return watts(Math.max(Math.round(accepted * rescuing.share), powerFloor));
   };
 
   return {
-    set(value: Watts): Promise<ErgWriteOutcome> {
-      target = value;
-      // Not `latch.reset()`: the old rescue is kept until the machine accepts
-      // this target, so a refusal puts it back rather than wiping it. A second
-      // target while the first is in flight keeps the OLDEST — the last state
-      // the machine actually agreed to.
-      beforeRider ??= { latch, step };
-      latch = createErgRescue();
-      step = { kind: 'full' };
-      return ask(value, true);
+    set(value: Watts): Promise<ManualErgSetOutcome> {
+      if (closed) {
+        return Promise.resolve({ kind: 'closed', target: value });
+      }
+      started = true;
+      if (step.kind !== 'full') {
+        // The rescue owns the machine: recorded, not written.
+        pending = value;
+        onChange();
+        return Promise.resolve({ kind: 'deferred', target: value });
+      }
+      const { entry, outcome } = ask(value, true, 'caller');
+      // Superseded by an ease and kept as the pending target: say so, rather
+      // than "superseded", which reads as though a newer target replaced it.
+      return outcome.then((settled): ManualErgSetOutcome =>
+        settled.kind === 'superseded' && entry.deferred
+          ? { kind: 'deferred', target: value }
+          : settled,
+      );
     },
 
     observeCadence(reading: CadenceReading): void {
@@ -253,41 +320,68 @@ export function createManualErg(options: {
     tick(now: Seconds): void {
       const keepFrom = now - CADENCE_HISTORY_SECONDS;
       cadence = cadence.filter((reading) => reading.at >= keepFrom);
-      if (target === undefined) {
+      if (closed || !started) {
         return;
       }
       const before = step.kind;
-      if (beforeRider !== undefined) {
-        beforeRider = { latch: beforeRider.latch, step: beforeRider.latch.judge(cadence, now) };
-      }
       step = latch.judge(cadence, now);
-      const value = wanted(target);
-      // A rider target still waiting behind another write would be superseded
-      // by this one and never reach the machine, and the number written in its
-      // place would be derived from a target the machine has not agreed to.
-      // Wait for it to be on the wire; the next tick offers the ease.
-      const riderWaiting = unsettled.slice(1).some((entry) => entry.fromRider);
-      if (value !== lastAsked && !riderWaiting) {
-        void ask(value, false);
-      } else if (step.kind !== before) {
+
+      if (step.kind === 'full') {
+        if (pending !== undefined) {
+          // The rescue hands back: the rider's pending target goes on as their
+          // own write, and a refusal of it is reported rather than retried.
+          const value = pending;
+          pending = undefined;
+          ask(value, true, 'fault');
+          onChange();
+          return;
+        }
+        // Put the accepted target back — unless a rider target is on its way,
+        // which is newer than it.
+        const riderOnItsWay = live().some((entry) => entry.fromRider);
+        if (accepted !== undefined && accepted !== lastAsked && !riderOnItsWay) {
+          ask(accepted, false, 'fault');
+        } else if (before !== 'full') {
+          onChange();
+        }
+        return;
+      }
+
+      // A rescue, and the only writer. A rider target still WAITING in the
+      // slot is superseded by the ease and kept as the pending one. A rider
+      // target already ON the wire cannot be recalled: the ease queues behind
+      // it, computed without it.
+      const waiting = waitingAsk();
+      const riderWaiting = waiting?.fromRider === true ? waiting : undefined;
+      if (riderWaiting !== undefined) {
+        riderWaiting.deferred = true;
+        pending = riderWaiting.value;
+      }
+      const value = easeFor(step);
+      if (value !== lastAsked || riderWaiting !== undefined) {
+        ask(value, false, 'fault');
+      }
+      if (step.kind !== before || riderWaiting !== undefined) {
         onChange();
       }
     },
 
     rescue(): ManualErgRescue | undefined {
-      if (target === undefined || step.kind === 'full') {
+      if (closed || step.kind === 'full') {
         return undefined;
       }
       return {
-        target,
-        holding: step.kind,
+        target: accepted,
+        holding: accepted === undefined ? 'floor' : step.kind,
         reason: step.reason,
+        pending,
       };
     },
 
     close(): void {
+      closed = true;
+      pending = undefined;
       writer.close();
-      target = undefined;
     },
 
     settled: () => writer.idle(),

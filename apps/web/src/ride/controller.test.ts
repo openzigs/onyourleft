@@ -3094,6 +3094,29 @@ describe('#567 — a hand-set ERG target gets the workout’s stall rescue', () 
     rig.controller.dispose();
   });
 
+  it('defers a target set during a rescue, says so, and writes it once the rider is steady — PR #582 third review', async () => {
+    const rig = await manualRig();
+    await pedalAt(rig, PART_S);
+    expect(rig.targetOnTheTrainer()).toBe(100);
+    const before = writesOf(rig, 0x05).length;
+    await rig.controller.setTargetPower(watts(180));
+    await flushMicrotasks(20);
+    // Not written: the rescue is the only writer while it lasts, and the
+    // screen is not left saying "asked for 180 W — waiting".
+    expect(writesOf(rig, 0x05)).toHaveLength(before);
+    const trainer = rig.controller.getSnapshot().trainer;
+    expect(trainer.requested).toBeUndefined();
+    expect(trainer.refusal).toBeUndefined();
+    expect(trainer.ergRescue).toMatchObject({ target: 150, pending: 180 });
+    await pedalAt(
+      rig,
+      Array.from({ length: 20 }, () => 85),
+    );
+    expect(rig.targetOnTheTrainer()).toBe(180);
+    expect(rig.controller.getSnapshot().trainer.ergRescue).toBeUndefined();
+    rig.controller.dispose();
+  });
+
   it('forgets a rescue when the trainer is unpaired', async () => {
     const rig = await manualRig();
     await pedalAt(rig, PART_S);
