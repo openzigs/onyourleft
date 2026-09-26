@@ -385,6 +385,154 @@ describe('a rider target the machine refuses, during a rescue — PR #582', () =
   });
 });
 
+/** Let every settled write's bookkeeping run, without waiting for a held one. */
+async function flush(): Promise<void> {
+  for (let turn = 0; turn < 10; turn += 1) {
+    await Promise.resolve();
+  }
+}
+
+/** One reading and a tick per second, WITHOUT waiting for a held write. */
+async function pedalHeld(erg: ManualErg, from: number, cadences: readonly number[]): Promise<void> {
+  for (const [index, rpm] of cadences.entries()) {
+    const at = seconds(from + index);
+    erg.observeCadence({ at, cadence: revolutionsPerMinute(rpm) });
+    erg.tick(at);
+    await flush();
+  }
+}
+
+describe('a refused rider target is never written again unless the rider asks — PR #582 second review', () => {
+  it('drops a refused target even when an ease went out after it, and never derives a write from it', async () => {
+    // The review's probe: 150 W steady, then 9000 W with the write held; the
+    // rider stalls in the same seconds, so an ease to the floor goes out after
+    // it; then the 9000 is refused. The wire used to read
+    // [150, 9000, 25, 6000, 9000 ×21] with 22 faults, and the panel said
+    // "Your 9000 W comes back by itself".
+    const asked: number[] = [];
+    const faults: unknown[] = [];
+    let refuse: ((error: unknown) => void) | undefined;
+    const erg = createManualErg({
+      control: {
+        setTargetPower: (target) => {
+          asked.push(target);
+          return target === 9000
+            ? new Promise<Watts>((_, reject) => {
+                refuse = reject;
+              })
+            : Promise.resolve(target);
+        },
+      },
+      powerFloor: watts(FLOOR_WATTS),
+      onFault: (error) => faults.push(error),
+      onChange: () => undefined,
+    });
+    await erg.set(watts(150));
+    await pedal(
+      erg,
+      0,
+      Array.from({ length: 10 }, () => 85),
+    );
+    const outcome = erg.set(watts(9000));
+    await pedalHeld(erg, 10, [80, 60, 30, 8, 5]);
+    // The stall is judged under the fresh latch and an ease to the floor is
+    // offered, queued behind the held 9000.
+    expect(erg.rescue()).toMatchObject({ holding: 'floor' });
+
+    refuse?.(new SensorError('control-rejected', 'out of range'));
+    expect((await outcome).kind).toBe('failed');
+    await erg.settled();
+    // The ease went out after the refused target: it reached the wire next.
+    expect(asked.slice(asked.indexOf(9000) + 1, asked.indexOf(9000) + 2)).toStrictEqual([
+      FLOOR_WATTS,
+    ]);
+    // The panel speaks of the target the machine accepted, not the refused one.
+    expect(erg.rescue()).toMatchObject({ target: 150, holding: 'floor' });
+
+    // The rider recovers and holds steady for far longer than a window.
+    await pedal(erg, 15, [30, 40, 45]);
+    await pedal(
+      erg,
+      18,
+      Array.from({ length: 30 }, () => 85),
+    );
+    const afterRefusal = asked.slice(asked.indexOf(9000) + 1);
+    expect(afterRefusal).not.toContain(9000);
+    expect(afterRefusal).not.toContain(6000);
+    expect(afterRefusal.at(-1)).toBe(150);
+    expect(faults).toStrictEqual([]);
+    expect(erg.rescue()).toBeUndefined();
+  });
+
+  it('keeps the rescue when two quick rider targets during it are both refused', async () => {
+    // The review's second probe: the first refusal used to clear the kept
+    // rescue because a later ask existed — the rider's own — so the second
+    // found nothing to put back and 150 W came straight back at full:
+    // [150, 100, 9000, 9001, 150].
+    const asked: number[] = [];
+    const erg = createManualErg({
+      control: {
+        setTargetPower: (target) => {
+          asked.push(target);
+          return target >= 9000
+            ? Promise.reject(new SensorError('control-rejected', 'out of range'))
+            : Promise.resolve(target);
+        },
+      },
+      powerFloor: watts(FLOOR_WATTS),
+      onFault: () => undefined,
+      onChange: () => undefined,
+    });
+    await erg.set(watts(150));
+    await pedal(erg, 0, PART_S_COLLAPSE);
+    expect(erg.rescue()).toMatchObject({ target: 150, holding: 'relief' });
+
+    const first = erg.set(watts(9000));
+    const second = erg.set(watts(9001));
+    await Promise.all([first, second]);
+    await erg.settled();
+
+    // Pedalling well again for less than a whole window: still relief.
+    await pedal(erg, 9, [85, 85, 85]);
+    expect(asked).not.toStrictEqual([150, 100, 9000, 9001, 150]);
+    expect(asked.slice(asked.indexOf(9001) + 1)).not.toContain(150);
+    expect(erg.rescue()).toMatchObject({ target: 150, holding: 'relief' });
+  });
+
+  it('never lets an ease supersede a rider target still waiting behind another write', async () => {
+    // A rider target queued behind a write in flight must reach the wire: an
+    // ease offered in the meantime would replace it in the writer's one
+    // waiting slot, carrying a share of a number nobody has accepted.
+    const asked: number[] = [];
+    let release: (() => void) | undefined;
+    const erg = createManualErg({
+      control: {
+        setTargetPower: (target) => {
+          asked.push(target);
+          return target === 150 && release === undefined && asked.length > 1
+            ? new Promise<Watts>((resolve) => {
+                release = () => resolve(target);
+              })
+            : Promise.resolve(target);
+        },
+      },
+      powerFloor: watts(FLOOR_WATTS),
+      onFault: () => undefined,
+      onChange: () => undefined,
+    });
+    await erg.set(watts(150));
+    await pedal(erg, 0, PART_S_COLLAPSE.slice(0, 7));
+    // Relief is on; the rider resets 150 (held in flight) then 120 (waiting).
+    void erg.set(watts(150));
+    const waiting = erg.set(watts(120));
+    await pedalHeld(erg, 7, [40, 37]);
+    release?.();
+    expect((await waiting).kind).toBe('written');
+    await erg.settled();
+    expect(asked).toContain(120);
+  });
+});
+
 describe('closing', () => {
   it('writes nothing after close, whatever the rider does', async () => {
     const { erg, targetWrites } = await rig();

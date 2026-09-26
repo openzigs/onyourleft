@@ -46,6 +46,17 @@
  * (PR #582's review): a refused one puts the rescue back as it was, so the old
  * target cannot return at full around the recovery window.
  *
+ * ⚠️ **A refused rider target is never written again unless the rider asks
+ * again** (PR #582's second review). Rider asks are counted apart from the
+ * rescue's own: when the machine refuses the rider's NEWEST target, the target
+ * goes back to the last one the machine accepted and the rescue to what it was
+ * before — whether or not an ease went out after it, because an ease does not
+ * replace the rider's number. Only a newer RIDER target decides instead. And no
+ * rescue write is offered while a rider target is still waiting behind another
+ * write, so an ease can never supersede one and carry a number the machine has
+ * not agreed to onto the wire in its place; the ease goes out on the next tick
+ * once the rider's write is on the wire.
+ *
  * ## Every write through one ERG writer
  *
  * The rider's target and every ease go through ONE `ErgWriter`, so an ease
@@ -87,8 +98,12 @@ export interface ManualErgRescue {
 
 export interface ManualErg {
   /**
-   * The rider set a target. Forgets any rescue: this is the rider's own act,
-   * and if they are still in trouble the next tick eases it again.
+   * The rider set a target. Once the machine accepts it, any rescue is
+   * forgotten: this is the rider's own act, and if they are still in trouble
+   * the next tick eases it again. If the machine refuses it — and no newer
+   * target of the rider's is outstanding — the last accepted target and the
+   * rescue it was under are put back, and the refused number is never written
+   * again unless the rider sets it again.
    *
    * Resolves with the writer's outcome for THIS target — never rejects.
    */
@@ -138,23 +153,38 @@ export function createManualErg(options: {
   /** What the machine last acknowledged, in the same terms. */
   let onMachine: Watts | undefined;
   let step: ErgRescueStep = { kind: 'full' };
+  /** Every ask, rescue and rider alike — which ask is the CURRENT one. */
   let asks = 0;
+  /** The rider's asks alone — whether a NEWER rider target is outstanding. */
+  let riderAsks = 0;
+  /** Asks not yet settled, in the order offered: the first is on the wire. */
+  let unsettled: { readonly id: number; readonly fromRider: boolean }[] = [];
 
   /**
    * Offer `value` through the writer.
    *
    * ⚠️ A refused write sets {@link lastAsked} back to what the machine last
    * acknowledged — so a refused ease is tried again on the next tick (an ease
-   * that did not land is not an ease), and a refused rider's target is not
-   * re-sent behind the rider's back. Only for the CURRENT ask: an older
+   * that did not land is not an ease). Only for the CURRENT ask: an older
    * outcome describes a target nobody is waiting for any more.
+   *
+   * A refused RIDER target is judged against rider asks alone: unless a newer
+   * rider target is outstanding, {@link target} goes back to {@link accepted}
+   * and the rescue to {@link beforeRider}, so the refused number is never
+   * derived from, eased from or written again.
    */
   const ask = (value: Watts, fromRider: boolean): Promise<ErgWriteOutcome> => {
     lastAsked = value;
     asks += 1;
     const mine = asks;
+    if (fromRider) {
+      riderAsks += 1;
+    }
+    const mineRider = riderAsks;
+    unsettled.push({ id: mine, fromRider });
     const outcome = writer.offer(value);
     void outcome.then((settled) => {
+      unsettled = unsettled.filter((entry) => entry.id !== mine);
       if (settled.kind === 'written') {
         onMachine = settled.target;
         if (fromRider) {
@@ -166,21 +196,24 @@ export function createManualErg(options: {
       } else if (settled.kind === 'failed') {
         if (mine === asks) {
           lastAsked = onMachine;
-          if (fromRider) {
-            target = accepted;
-            if (beforeRider !== undefined) {
-              latch = beforeRider.latch;
-              step = beforeRider.step;
-              beforeRider = undefined;
-            }
-          }
-        } else if (fromRider) {
-          // An ease went out after it: the fresh latch is the one in charge.
-          beforeRider = undefined;
         }
         if (!fromRider) {
           onFault(settled.error);
+        } else if (mineRider === riderAsks) {
+          // The rider's newest target was refused. An ease offered after it
+          // does not make it any less refused: it is dropped, and the rescue
+          // it replaced — judged every tick while it waited — is put back.
+          // Were it kept, the latch would write it (or a share of it) the
+          // moment the rider recovered, without them asking again.
+          target = accepted;
+          if (beforeRider !== undefined) {
+            latch = beforeRider.latch;
+            step = beforeRider.step;
+            beforeRider = undefined;
+          }
         }
+        // Otherwise a newer RIDER target is outstanding: it decides, and the
+        // rescue to put back if it too is refused is kept for it.
       }
       onChange();
     });
@@ -229,7 +262,12 @@ export function createManualErg(options: {
       }
       step = latch.judge(cadence, now);
       const value = wanted(target);
-      if (value !== lastAsked) {
+      // A rider target still waiting behind another write would be superseded
+      // by this one and never reach the machine, and the number written in its
+      // place would be derived from a target the machine has not agreed to.
+      // Wait for it to be on the wire; the next tick offers the ease.
+      const riderWaiting = unsettled.slice(1).some((entry) => entry.fromRider);
+      if (value !== lastAsked && !riderWaiting) {
         void ask(value, false);
       } else if (step.kind !== before) {
         onChange();
