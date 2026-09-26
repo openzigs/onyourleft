@@ -709,6 +709,15 @@ function AnalysisSection({
   const { state, ask } = useAnalysis(controller);
   const sentence = analysisSentence(state);
 
+  // Switching the computer off takes the side camera's switch with it, as
+  // Forget does. Otherwise the stored "on" outlives the switch that hid it,
+  // and switching the computer back on would start sending again at the next
+  // pairing without the rider touching the side switch (#553's review).
+  const switchSideOff = (): void => {
+    writeSideAnalyserOnComputer(false);
+    setSideOnComputer(false);
+  };
+
   const save = (): void => {
     const decision = endpointDecision({ address, model, switchedOn });
     if (decision.endpoint === undefined && !switchedOn) {
@@ -723,6 +732,7 @@ function AnalysisSection({
       if (!kept) {
         forgetAnalysisEndpoint();
       }
+      switchSideOff();
       setRefusal(undefined);
       setConfigured(false);
       setMessage('Switched off. Nothing is sent.');
@@ -735,6 +745,9 @@ function AnalysisSection({
     }
     const kept = writeAnalysisEndpoint(decision.endpoint);
     setConfigured(kept && decision.endpoint.switchedOn);
+    if (!(kept && decision.endpoint.switchedOn)) {
+      switchSideOff();
+    }
     setMessage(
       kept
         ? decision.endpoint.switchedOn
@@ -813,8 +826,7 @@ function AnalysisSection({
               // A forgotten computer takes the side camera's switch with it, so
               // saving a new computer later does not start a stream nobody
               // switched on for it (#553).
-              writeSideAnalyserOnComputer(false);
-              setSideOnComputer(false);
+              switchSideOff();
               setAddress('');
               setModel('');
               setSwitchedOn(false);

@@ -950,6 +950,25 @@ describe('your own computer — #387', () => {
       await saveComputer('http://192.168.1.20:8080', 'vision-4b', true);
       expect(sideBox()?.checked).toBe(false);
     });
+
+    it.each([
+      ['with the address kept', 'http://192.168.1.20:8080'],
+      ['with the address cleared', ''],
+    ])(
+      'is switched off when the computer is switched off %s, and stays off when it is switched back on — #553 review',
+      async (_how, address) => {
+        await wired(replying('ready').send);
+        await saveComputer('http://192.168.1.20:8080', 'vision-4b', true);
+        sideBox()?.click();
+        await settle();
+        expect(readSideAnalyserOnComputer()).toBe(true);
+        await saveComputer(address, 'vision-4b', false);
+        expect(readSideAnalyserOnComputer()).toBe(false);
+        await saveComputer('http://192.168.1.20:8080', 'vision-4b', true);
+        expect(readSideAnalyserOnComputer()).toBe(false);
+        expect(sideBox()?.checked).toBe(false);
+      },
+    );
   });
 
   async function saveStoredOn(): Promise<void> {

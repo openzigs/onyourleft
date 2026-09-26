@@ -19,6 +19,7 @@ import {
 import {
   COMPUTER_POSE_DEADLINE_MILLISECONDS,
   computerPoseEstimator,
+  MAXIMUM_CONSECUTIVE_DEADLINES,
   jpegDimensions,
   sidePoseFromAnswer,
   type ComputerPoseTimers,
@@ -317,6 +318,42 @@ describe('computerPoseEstimator — each picture through the one transport', () 
     expect((await estimator.estimateSidePose(jpeg(640, 480))).kind).toBe('pose');
     expect(asked).toHaveLength(2);
     expect(pending()).toBe(0);
+  });
+
+  it('stops sending once the computer runs out the deadline too many times in a row — #553 review', async () => {
+    expect(MAXIMUM_CONSECUTIVE_DEADLINES).toBe(2);
+    const { port, asked, cancelled } = scriptedPort(['hang', 'hang', POSE_ANSWER]);
+    const { timers, fire } = manualTimers();
+    const estimator = computerPoseEstimator(() => port, timers);
+    const first = estimator.estimateSidePose(jpeg(640, 480));
+    fire();
+    expect(await first).toEqual({ kind: 'unreadable' });
+    const second = estimator.estimateSidePose(jpeg(640, 480));
+    fire();
+    expect(await second).toEqual({ kind: 'unavailable' });
+    expect(await estimator.estimateSidePose(jpeg(640, 480))).toEqual({ kind: 'unavailable' });
+    expect(cancelled).toEqual([0, 1]);
+    expect(asked).toHaveLength(2);
+  });
+
+  it('counts only deadlines IN A ROW: any answer in time resets the count', async () => {
+    const { port, asked } = scriptedPort([
+      'hang',
+      { kind: 'failed', failure: 'malformed' },
+      'hang',
+      POSE_ANSWER,
+    ]);
+    const { timers, fire } = manualTimers();
+    const estimator = computerPoseEstimator(() => port, timers);
+    const first = estimator.estimateSidePose(jpeg(640, 480));
+    fire();
+    expect(await first).toEqual({ kind: 'unreadable' });
+    expect(await estimator.estimateSidePose(jpeg(640, 480))).toEqual({ kind: 'unreadable' });
+    const third = estimator.estimateSidePose(jpeg(640, 480));
+    fire();
+    expect(await third).toEqual({ kind: 'unreadable' });
+    expect((await estimator.estimateSidePose(jpeg(640, 480))).kind).toBe('pose');
+    expect(asked).toHaveLength(4);
   });
 
   it('cancels what is in flight when closed, and sends nothing afterwards', async () => {

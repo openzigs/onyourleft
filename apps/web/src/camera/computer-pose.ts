@@ -77,6 +77,26 @@ import {
 export const COMPUTER_POSE_DEADLINE_MILLISECONDS = 30_000;
 
 /**
+ * How many pictures in a row may run out {@link COMPUTER_POSE_DEADLINE_MILLISECONDS}
+ * before nothing more is sent this session: two.
+ *
+ * A deadline is not one of {@link FAILURES_THAT_STOP}: the first answer also
+ * waits for the model to load, so one slow picture is not a dead computer. But
+ * a computer that NEVER answers inside the deadline was never stopped. Every
+ * picture was sent, waited on and given up, for the whole ride. Inside the
+ * shell that is worse than it looks. A native request cannot be aborted from
+ * here (`analysis-transport.ts` §`nativeAnalysisPort`), so each abandoned
+ * picture's upload kept running for up to the plugin's read timeout, with
+ * several in flight at once.
+ *
+ * ## Provenance — ⚠️ the author's choice, not a measurement
+ *
+ * Two lets a cold model load cost one picture and not the session. Any answer
+ * inside the deadline, even a failure, resets the count.
+ */
+export const MAXIMUM_CONSECUTIVE_DEADLINES = 2;
+
+/**
  * The failures after which nothing more is sent this session: the computer is
  * not there, will not talk to this app, or is not a model server. Every other
  * failure is one picture's, and the next is tried.
@@ -266,6 +286,7 @@ export function computerPoseEstimator(
   timers: ComputerPoseTimers = realTimers,
 ): SidePoseEstimator {
   let dead = false;
+  let deadlinesInARow = 0;
   let inFlight: AnalysisCall | undefined;
   return {
     async estimateSidePose(picture: Uint8Array): Promise<SidePoseOutcome> {
@@ -289,7 +310,14 @@ export function computerPoseEstimator(
       }
       const call = port.askAboutFrame({ frame, question: 'side-pose' });
       inFlight = call;
+      let timedOut = false;
+      // ⚠️ Cancelling only stops THIS side waiting. Through `fetch` the
+      // request is aborted; through the shell's native request it is not, and
+      // the picture is still sent and its answer discarded
+      // (`analysis-transport.ts` §`nativeAnalysisPort`). That is why a run of
+      // deadlines stops the session: see `MAXIMUM_CONSECUTIVE_DEADLINES`.
       const stopDeadline = timers.after(() => {
+        timedOut = true;
         call.cancel();
       }, COMPUTER_POSE_DEADLINE_MILLISECONDS);
       const outcome = await call.outcome;
@@ -297,6 +325,15 @@ export function computerPoseEstimator(
       if (inFlight === call) {
         inFlight = undefined;
       }
+      if (timedOut) {
+        deadlinesInARow += 1;
+        if (deadlinesInARow >= MAXIMUM_CONSECUTIVE_DEADLINES) {
+          dead = true;
+          return { kind: 'unavailable' };
+        }
+        return dead ? { kind: 'unavailable' } : { kind: 'unreadable' };
+      }
+      deadlinesInARow = 0;
       if (outcome.kind === 'failed') {
         if (FAILURES_THAT_STOP.has(outcome.failure)) {
           dead = true;

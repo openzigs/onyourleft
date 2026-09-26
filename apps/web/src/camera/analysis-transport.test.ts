@@ -16,6 +16,7 @@ import {
   analysisRequestBody,
   MAXIMUM_PICTURE_BYTES,
   riderAnalysisPort,
+  riderAnalysisSource,
   type AnalysisSend,
   type NativeAnalysisPost,
   type NativeAnalysisReply,
@@ -330,5 +331,59 @@ describe('inside the Android shell, the native request — #553', () => {
     call?.cancel();
     release(READY);
     expect(await call?.outcome).toEqual({ kind: 'failed', failure: 'cancelled' });
+  });
+});
+
+describe('which way a picture leaves — #553 review', () => {
+  const READY: NativeAnalysisReply = {
+    status: 200,
+    body: JSON.stringify({ choices: [{ message: { content: 'ready' } }] }),
+  };
+
+  it('inside the shell, goes through the native request and never through fetch', async () => {
+    const natives: NativeAnalysisRequest[] = [];
+    const native: NativeAnalysisPost = async (sending) => {
+      natives.push(sending);
+      return Promise.resolve(READY);
+    };
+    const { send, sent: fetched } = recordingSend(() => modelReply('ready'));
+    const source = await riderAnalysisSource(
+      true,
+      async () => Promise.resolve(native),
+      () => endpoint(),
+      send,
+    );
+    const outcome = await source()?.askAboutFrame(request()).outcome;
+    expect(outcome).toEqual({ kind: 'described', description: 'ready' });
+    expect(fetched).toHaveLength(0);
+    expect(natives.map((sending) => sending.url)).toEqual([
+      'http://192.168.1.20:8080/v1/chat/completions',
+    ]);
+  });
+
+  it('in a browser, never loads the native request and goes through fetch', async () => {
+    let loaded = 0;
+    const loadNative = async (): Promise<NativeAnalysisPost> => {
+      loaded += 1;
+      return Promise.reject(new Error('a browser must not load Capacitor'));
+    };
+    const { send, sent: fetched } = recordingSend(() => modelReply('ready'));
+    const source = await riderAnalysisSource(false, loadNative, () => endpoint(), send);
+    const outcome = await source()?.askAboutFrame(request()).outcome;
+    expect(outcome).toEqual({ kind: 'described', description: 'ready' });
+    expect(loaded).toBe(0);
+    expect(fetched).toHaveLength(1);
+  });
+
+  it('reads the endpoint again on every call', async () => {
+    let current: AnalysisEndpoint | undefined = endpoint();
+    const source = await riderAnalysisSource(
+      true,
+      async () => Promise.resolve(async () => Promise.resolve(READY)),
+      () => current,
+    );
+    expect(source()).toBeDefined();
+    current = undefined;
+    expect(source()).toBeUndefined();
   });
 });

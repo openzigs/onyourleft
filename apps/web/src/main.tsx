@@ -52,7 +52,7 @@ import {
   platformMediaDevices,
 } from './camera/browser-camera';
 import { readAnalysisEndpoint } from './camera/analysis-endpoint';
-import { riderAnalysisPort } from './camera/analysis-transport';
+import { riderAnalysisPort, riderAnalysisSource } from './camera/analysis-transport';
 import { keepThisRide } from './camera/keep';
 import { shellCameraNotice } from './camera/shell-camera';
 import { CameraController } from './camera/session';
@@ -729,12 +729,13 @@ function buildUpdateWatcher(
  * `@onyourleft/mobile`, so a browser downloads no line of Capacitor.
  */
 async function buildRiderAnalysis(): Promise<() => ReturnType<typeof riderAnalysisPort>> {
-  if (!isNativeShell(platformCapacitor())) {
-    return () => riderAnalysisPort(readAnalysisEndpoint());
-  }
-  const mobile = await import('@onyourleft/mobile');
-  const native = mobile.capacitorAnalysisPost();
-  return () => riderAnalysisPort(readAnalysisEndpoint(), { native });
+  // The shell-or-browser choice is `riderAnalysisSource`'s, where a test can
+  // see it; this passes the platform read and nothing else.
+  return riderAnalysisSource(
+    isNativeShell(platformCapacitor()),
+    async () => (await import('@onyourleft/mobile')).capacitorAnalysisPost(),
+    readAnalysisEndpoint,
+  );
 }
 
 /**

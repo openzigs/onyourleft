@@ -396,3 +396,36 @@ function nativeAnalysisPort(
     },
   };
 }
+
+/**
+ * **Which way a picture leaves this device**: the WebView's `fetch` in a
+ * browser, Capacitor's native HTTP inside the Android shell (#553). The
+ * returned function looks the endpoint up again on every call, as #387's
+ * button does.
+ *
+ * ⚠️ **This is here, not inline in `main.tsx`, so that it can go red.**
+ * `AnalysisTransportOptions.native` is optional because a browser has none. So
+ * a `main.tsx` that stopped passing it inside the shell would still typecheck
+ * and pass every gate. The shell would then fall back to the WebView's
+ * `fetch`, and validation 0002 Part AF measured that being blocked as mixed
+ * content. Nothing would be sent, but the feature would stop working on
+ * Android without anyone noticing. `analysis-transport.test.ts` §"which way a
+ * picture leaves" drives both branches of this function.
+ *
+ * @param nativeShell `support/capacitor.ts` §`isNativeShell`, read by the caller.
+ * @param loadNative the native request, loaded only inside the shell, so a
+ *   browser downloads no line of Capacitor.
+ * @param endpoint `analysis-endpoint.ts` §`readAnalysisEndpoint`.
+ */
+export async function riderAnalysisSource(
+  nativeShell: boolean,
+  loadNative: () => Promise<NativeAnalysisPost>,
+  endpoint: () => AnalysisEndpoint | undefined,
+  send?: AnalysisSend,
+): Promise<() => AnalysisPort | undefined> {
+  if (!nativeShell) {
+    return () => riderAnalysisPort(endpoint(), { send });
+  }
+  const native = await loadNative();
+  return () => riderAnalysisPort(endpoint(), { send, native });
+}

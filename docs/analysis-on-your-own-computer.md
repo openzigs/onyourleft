@@ -145,7 +145,10 @@ coordinates is not the same as running a pose model, and the tablet's own pose m
 this app was measured with. That is why this switch is off by default.
 
 If your computer cannot be reached, refuses, or is not a model server, the tablet stops sending
-for the rest of that session and says so on the side-camera screen.
+for the rest of that session and says so on the side-camera screen. It does the same when two
+pictures in a row go thirty seconds without an answer. One slow picture is allowed, because the
+first answer also waits for the model to load. In the Android app a picture given up on this way
+has still been sent: the app stops waiting for the answer, but it cannot stop the upload.
 
 ## How it travels, and what that means
 
@@ -184,6 +187,7 @@ has not yet been re-measured on the tablet**; Part AF says what to run.
 ## Turning it off
 
 Untick **Send pictures to this computer when I ask** and save, untick **Send the side camera's
-pictures to this computer**, or press **Forget this computer**, which also switches off the side
-camera's switch. Nothing is sent afterwards. Erasing this device does not reach a copy of a picture your computer
+pictures to this computer**, or press **Forget this computer**. Switching the computer off and
+forgetting it both also switch off the side camera's switch, so switching the computer back on
+later does not start sending the side camera's pictures again until you tick that switch again. Nothing is sent afterwards. Erasing this device does not reach a copy of a picture your computer
 already has — the app says so before you erase.
