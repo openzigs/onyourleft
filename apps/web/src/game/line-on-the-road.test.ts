@@ -41,7 +41,7 @@ import {
   northRoute,
   sBendRoute,
 } from './route-fixtures-testing';
-import { sceneFrame } from './scene';
+import { placedRiders, sceneFrame } from './scene';
 import { GameSimulation, atStartLine, type GameState } from './simulation';
 import { ROAD_WIDTH_METRES, corridorOrigin, roadCorridor } from './terrain';
 
@@ -439,24 +439,53 @@ describe('a racer’s cranks in a tight bend — #546', () => {
   it.each(FIXTURES)(
     'never puts a pedal of the rider, the bot or the ghost through the road on %s',
     (_, route, from, to) => {
+      // The riders are placed through `placedRiders` — the step `sceneFrame`
+      // takes its markers from — rather than through a whole frame, because the
+      // scenery, the ground and the water beside the road are nine tenths of a
+      // frame and no marker reads them: 924 whole frames a case timed out on CI
+      // (#588). Every twentieth sample is ALSO built as a whole frame and must
+      // agree to the bit, so a frame that stopped drawing these markers is
+      // still red here.
+      const origin = corridorOrigin(route);
+      let sample = 0;
+      let compared = 0;
       for (const speed of [6, 10, 14, 18]) {
         const ghost = buildGhostTrack({
           elapsedSeconds: [0, 1_000],
           distanceMetres: [0, speed * 1_000],
         });
         for (let at = from; at <= to; at += 1.3) {
-          const frame = frameOf(
-            route,
-            stateAt(route, at, speed, { distance: at + 20, speed }, Math.max(0, at - 30) / speed),
+          const input = {
+            profile: route,
+            origin,
+            state: stateAt(
+              route,
+              at,
+              speed,
+              { distance: at + 20, speed },
+              Math.max(0, at - 30) / speed,
+            ),
+            botDistance: at + 20,
+            ghost,
             // A cadence reading that has the rider's cranks at every angle in turn.
-            { botDistance: at + 20, ghost, crankAngle: at * 1.7 },
+            crankAngle: at * 1.7,
+          };
+          const markers = placedRiders(input, roadCorridor(route, origin, at)).map(
+            (placed) => placed.marker,
           );
-          for (const marker of frame.markers) {
+          expect(markers).toHaveLength(3);
+          if (sample % 20 === 0) {
+            expect(sceneFrame(input).markers).toEqual(markers);
+            compared += 1;
+          }
+          sample += 1;
+          for (const marker of markers) {
             const crank = marker.crankAngle ?? 0;
             expect(lowestPedalHeight(marker.lean, crank)).toBeGreaterThanOrEqual(0);
           }
         }
       }
+      expect(compared).toBeGreaterThan(5);
     },
   );
 
