@@ -658,7 +658,11 @@ account export's manifest (ADR 0004 E).
 
 ⚠️ **Its production writer is [#530](https://github.com/openzigs/onyourleft/issues/530)'s
 `apps/web/src/camera/side-analysis.ts`**, at the end of a session. #528 built the record, its erase
-and its export first, so the writer landed into rules that already held.
+and its export first, so the writer landed into rules that already held. ⚠️ **Since #388 the writer
+puts one only when that session's check was `matches`, or there was no reference yet
+(`no-reference`)** — the owner's ruling of 2026-09-26, so a tripod that creeps a little each session
+no longer resets the baseline it is checked against. The store itself is unchanged: a put still
+replaces.
 
 **`check` records whether that session's framing check passed** (ADR 0033 D-7): `matches`,
 `differs`, `no-reference` or `not-checked`, in the same put as the placement it describes, so the
@@ -675,6 +679,28 @@ is what `framing-reference-store.test.ts` pairs it with.
 
 A validation error names the field and the constraint and **never the value**: a landmark is where
 somebody's knee was in a photograph of them (ADR 0029 D-8).
+
+## The side camera's post-ride report — #388
+
+`sideCameraReports` is schema version 12: at most one row per **ride**, keyed by `activityId`, and
+every read goes through `[athleteId+activityId]` — `getSideCameraReport(owner, activity)` cannot
+answer for a ride without being told whose it is. A second put for the same ride replaces the first.
+
+⚠️ **It is sentences, and nothing they were made from.** The owner's ruling of 2026-09-26: *"the
+report's sentences are saved with that ride. No pictures and no pose points, only the rendered
+observations."* So the record is a `summary` and a list of `observations`, strings bounded in number
+(`MAXIMUM_SIDE_REPORT_OBSERVATIONS`) and length (`MAXIMUM_SIDE_REPORT_SENTENCE`), refused on the way
+in and on the way out by one rule. **This package does not check the wording** — it cannot import
+the client's vocabulary file — and the detail view renders only sentences that file can produce.
+
+`putSideCameraReport` **refuses a report on a ride that is not the athlete's**, inside the same
+transaction as the write. The report goes with `deleteActivity` (it is about that ride and nothing
+else) and with `deleteAthlete` (ADR 0029 D-4's *"everything derived from one"*), is named in
+`ERASE_REMOVES`, and travels in the account export inside its ride's manifest entry.
+
+`lastSentenceDroppedReportStoreFactory` is the seventeenth fake: a put that drops the last
+observation. The report comes back for the right ride with the right summary and a well-formed list,
+one sentence short; `side-camera-report-store.test.ts` is the red/green pair.
 
 ## Not in this package
 

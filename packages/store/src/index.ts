@@ -33,6 +33,7 @@ export type {
   FramingCheckRecord,
   FramingLandmarkRecord,
   FramingReferenceRecord,
+  SideCameraReportRecord,
   LapRecord,
   NewActivity,
   NewLap,

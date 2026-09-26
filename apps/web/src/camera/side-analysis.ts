@@ -28,7 +28,8 @@
  *    them, against the reference stored from the rider's last session, and
  *    tells the phone the verdict.
  * 5. **Stores this session's placement as the next session's reference** when
- *    it ends, if it saw enough of the rider to have one — with whether this
+ *    it ends, if it saw enough of the rider to have one **and its framing
+ *    check passed or had nothing to check against** (#388) — with whether this
  *    session's framing check passed on the same row (D-7's record).
  *
  * ## What it does not do: send the pictures to the rider's own computer
@@ -50,15 +51,25 @@
  * quantity about a body at all**, which is how #530's ADR 0030 criterion is
  * met here: there is nothing for it to bind yet.
  *
- * ## Why "the last session", even when its check failed
+ * ## The reference moves forward only on a passing check (#388)
  *
- * The owner's words (ADR 0033 §Context, from #386): *"a stored reference from
- * the rider's **last session**"*. So a session's placement becomes the
- * reference whether or not it matched the one before: a rider who moves the
- * tripod for good is compared against where it stands now from the next
- * session on, rather than against a placement they abandoned. ⚠️ `packages/store`
- * §`FramingReferenceRecord` used to say *"the last time the framing check
- * passed"*, which is #528's reading and not the owner's; it says this now.
+ * ⚠️ **#555 built "every session becomes the next reference", and a reader
+ * who remembers that is reading the old file.** The owner's ruling on #388
+ * (2026-09-26): a session's placement becomes the next reference only when
+ * its framing check was `matches`, or when there was no reference yet
+ * (`no-reference`, the first session). A session that `differs`, or was
+ * `not-checked`, leaves the previous reference where it is. The reason is the
+ * review's drift concern: a tripod that creeps a little every session used to
+ * reset the baseline it was being checked against, so it never failed.
+ * {@link REFERENCE_MOVES_ON} is the rule, and `side-analysis.test.ts` holds
+ * each of the four outcomes to it.
+ *
+ * ## What it hands the post-ride report (#388)
+ *
+ * When the session ends, the pose numbers are reduced by `side-report.ts` to
+ * the report's SENTENCES — words, no numbers, sagittal only — and those are
+ * handed to `side-report-port.ts` §`SideReportSession`, which saves them with
+ * the ride. The numbers themselves are never handed on and never saved.
  */
 
 import type { AthleteId, FramingCheckRecord, FramingReferenceRecord } from '@onyourleft/store';
@@ -78,6 +89,8 @@ import type {
   SidePoseOutcome,
 } from './side-analysis-port';
 import type { SidePicture } from './side-link-pictures';
+import { sideReportFrom } from './side-report';
+import type { SideReportKeepingPort, SideReportSession } from './side-report-port';
 import type { SideCameraControlPort } from './side-pairing-port';
 
 /**
@@ -101,10 +114,71 @@ export const FRAMING_CHECK_POSES = 10;
  *
  * A bound rather than a limit anybody should meet — a numbers-only pose is a
  * few hundred bytes, so this is some tens of megabytes at worst — because a
- * tablet left filming overnight should not grow a list without end. Past it,
- * poses are counted and not kept.
+ * tablet left filming overnight should not grow a list without end.
+ *
+ * ⚠️ **Past it the kept poses are THINNED, not truncated** (#561's review).
+ * They used to stop being kept, so a four-hour session's "last third" was the
+ * last third of its first three hours, and the report told the rider it was
+ * the session's. {@link PoseSamples} keeps every other pose when it fills and
+ * then keeps one in twice as many, so what is kept always spans the whole
+ * session at an even spacing and the thirds are the session's own.
  */
 export const MAXIMUM_POSE_SAMPLES = 3 * 60 * 60 * 5;
+
+/**
+ * A session's kept poses, bounded by thinning rather than by truncation — see
+ * {@link MAXIMUM_POSE_SAMPLES}.
+ *
+ * Every kept pose is the `k × stride`-th pose offered, for one stride: when
+ * the list is full, every other kept pose is dropped and the stride doubles.
+ * So the kept poses are evenly spaced over everything offered so far, the
+ * first is always the first offered (the framing check reads the first
+ * {@link FRAMING_CHECK_POSES}, long before any thinning), and at most
+ * `maximum` are held.
+ */
+export class PoseSamples {
+  readonly #maximum: number;
+  readonly #kept: SidePoseSample[] = [];
+  #stride = 1;
+  #offered = 0;
+
+  constructor(maximum: number = MAXIMUM_POSE_SAMPLES) {
+    if (!Number.isInteger(maximum) || maximum < 2) {
+      throw new RangeError('a pose sample bound must be a whole number of at least two');
+    }
+    this.#maximum = maximum;
+  }
+
+  /** The kept poses, oldest first. */
+  get kept(): readonly SidePoseSample[] {
+    return this.#kept;
+  }
+
+  /** Offer the next pose; it is kept if it falls on the current stride. */
+  offer(sample: SidePoseSample): void {
+    const index = this.#offered;
+    this.#offered += 1;
+    if (index % this.#stride !== 0) {
+      return;
+    }
+    if (this.#kept.length >= this.#maximum) {
+      let write = 0;
+      for (let read = 0; read < this.#kept.length; read += 2) {
+        const each = this.#kept[read];
+        if (each !== undefined) {
+          this.#kept[write] = each;
+          write += 1;
+        }
+      }
+      this.#kept.length = write;
+      this.#stride *= 2;
+      if (index % this.#stride !== 0) {
+        return;
+      }
+    }
+    this.#kept.push(sample);
+  }
+}
 
 /**
  * One picture's pose, as the report will read it.
@@ -119,6 +193,14 @@ export interface SidePoseSample {
   readonly milliseconds: number;
   readonly pose: SidePose;
 }
+
+/**
+ * The framing outcomes after which this session's placement becomes the next
+ * session's reference — the owner's ruling on #388: a passing check, or a
+ * first session with nothing to check against. `differs` and `not-checked`
+ * keep the previous reference.
+ */
+export const REFERENCE_MOVES_ON: readonly FramingCheckRecord[] = ['matches', 'no-reference'];
 
 /** Where the rider's framing reference is kept, and whose it is. */
 export interface FramingReferenceKeeping {
@@ -136,6 +218,11 @@ export interface SideAnalysisOptions {
   readonly estimator: () => SidePoseEstimator;
   /** Where the reference lives. Without it there is no check and nothing is kept between sessions. */
   readonly references?: FramingReferenceKeeping | undefined;
+  /**
+   * Where this pairing's post-ride report goes when it ends (#388) —
+   * `side-report-keeper.ts` in production. Without it no report is made.
+   */
+  readonly reports?: SideReportKeepingPort | undefined;
 }
 
 /** The analysis of one pairing's pictures. */
@@ -145,7 +232,8 @@ export class SideAnalysis implements SideAnalysisPort {
   readonly #references: FramingReferenceKeeping | undefined;
   readonly #listeners = new Set<() => void>();
   readonly #unsubscribe: (() => void)[] = [];
-  readonly #samples: SidePoseSample[] = [];
+  readonly #poses = new PoseSamples();
+  readonly #report: SideReportSession | undefined;
 
   #estimator: SidePoseEstimator | undefined;
   #busy = false;
@@ -167,6 +255,7 @@ export class SideAnalysis implements SideAnalysisPort {
     this.#control = options.control;
     this.#makeEstimator = options.estimator;
     this.#references = options.references;
+    this.#report = options.reports?.beginSideReportSession();
     if (this.#references === undefined) {
       this.#state = { ...this.#state, framing: 'no-reference' };
     }
@@ -196,7 +285,7 @@ export class SideAnalysis implements SideAnalysisPort {
    * post-ride report's input (#388). Numbers only; see {@link SidePoseSample}.
    */
   poseSamples(): readonly SidePoseSample[] {
-    return this.#samples;
+    return this.#poses.kept;
   }
 
   #controlChanged(): void {
@@ -278,13 +367,11 @@ export class SideAnalysis implements SideAnalysisPort {
   #record(picture: SidePicture, outcome: SidePoseOutcome): void {
     switch (outcome.kind) {
       case 'pose':
-        if (this.#samples.length < MAXIMUM_POSE_SAMPLES) {
-          this.#samples.push({
-            sequence: picture.sequence,
-            milliseconds: picture.milliseconds,
-            pose: outcome.pose,
-          });
-        }
+        this.#poses.offer({
+          sequence: picture.sequence,
+          milliseconds: picture.milliseconds,
+          pose: outcome.pose,
+        });
         this.#set({ model: 'ready', posed: this.#state.posed + 1 });
         this.#check();
         return;
@@ -306,11 +393,11 @@ export class SideAnalysis implements SideAnalysisPort {
     if (
       this.#state.framing !== 'checking' ||
       this.#reference === undefined ||
-      this.#samples.length < FRAMING_CHECK_POSES
+      this.#poses.kept.length < FRAMING_CHECK_POSES
     ) {
       return;
     }
-    const placement = placementOf(this.#samples.slice(0, FRAMING_CHECK_POSES));
+    const placement = placementOf(this.#poses.kept.slice(0, FRAMING_CHECK_POSES));
     const verdict =
       placement === undefined ? 'differs' : framingVerdict(this.#reference, placement);
     this.#control.shareFramingVerdict(verdict);
@@ -329,10 +416,14 @@ export class SideAnalysis implements SideAnalysisPort {
     const framing = this.#state.framing === 'checking' ? 'not-checked' : this.#state.framing;
     this.#set({ finished: true, framing });
     this.#keepReference(framing);
+    // #388: the report's sentences, and nothing they were made from, go to
+    // the ride this session filmed. The samples stay here, in memory only.
+    this.#report?.endSideReportSession(sideReportFrom(this.#poses.kept, this.#state));
   }
 
   /**
-   * This session's placement, as the next session's reference — and, on the
+   * This session's placement, as the next session's reference when
+   * {@link REFERENCE_MOVES_ON} says it may be — and, on the
    * same row and in the same put, whether this session's framing check passed
    * (D-7: *"Whether the check passed is stored with the session's numbers.
    * That record is what the report reads when it decides whether a
@@ -341,10 +432,14 @@ export class SideAnalysis implements SideAnalysisPort {
    */
   #keepReference(check: FramingCheckRecord): void {
     const keeping = this.#references;
-    if (keeping === undefined || this.#samples.length < FRAMING_CHECK_POSES) {
+    if (
+      keeping === undefined ||
+      !REFERENCE_MOVES_ON.includes(check) ||
+      this.#poses.kept.length < FRAMING_CHECK_POSES
+    ) {
       return;
     }
-    const placement = placementOf(this.#samples);
+    const placement = placementOf(this.#poses.kept);
     if (placement === undefined) {
       return;
     }

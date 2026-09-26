@@ -27,6 +27,7 @@ import type {
   ActivityId,
   ActivityRecord,
   LapRecord,
+  SideCameraReportRecord,
   StreamSetSummary,
   Samples,
   UnitSystem,
@@ -42,7 +43,24 @@ export interface RideOverview {
   /** `undefined` for a ride with no stored streams at all — an imported summary, say. */
   readonly streams: StreamSetSummary | undefined;
   readonly laps: readonly LapRecord[];
+  /** The side camera's report on this ride (#388). See {@link SideCameraOverview}. */
+  readonly sideCamera: SideCameraOverview;
 }
+
+/**
+ * What the ride's page knows about a side-camera report (#388).
+ *
+ * - `none` — the ordinary case: this ride was not filmed. The page shows no
+ *   side-camera section at all (the owner's ruling: *"shown only for a ride
+ *   with a side-camera session"*).
+ * - `report` — the saved sentences.
+ * - `unreadable` — there is a row and it would not decode. Said in words
+ *   rather than hidden, because hiding it would look exactly like `none`.
+ */
+export type SideCameraOverview =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'report'; readonly report: SideCameraReportRecord }
+  | { readonly kind: 'unreadable' };
 
 /**
  * The overview, or `undefined` when this athlete has no such ride.
@@ -65,7 +83,23 @@ export async function loadOverview(
   // anyway, so the parallel spelling buys nothing but a wider failure surface.
   const streams = await port.store.getStreamSetSummary(port.athleteId, id);
   const laps = await port.store.listLaps(port.athleteId, id);
-  return { activity, streams, laps };
+  const sideCamera = await readSideCamera(port, id);
+  return { activity, streams, laps, sideCamera };
+}
+
+/**
+ * The ride's side-camera report, never throwing: a row that will not decode
+ * must not take the rest of the ride's page with it.
+ */
+async function readSideCamera(port: DetailPort, id: ActivityId): Promise<SideCameraOverview> {
+  try {
+    const report = await port.store.getSideCameraReport(port.athleteId, id);
+    return report === undefined ? { kind: 'none' } : { kind: 'report', report };
+  } catch {
+    // Nothing of the error is read: the store's decode error names a field,
+    // and the value it refused is a sentence about somebody's body.
+    return { kind: 'unreadable' };
+  }
 }
 
 /** One channel, at chart resolution, in the unit it is read in. */
