@@ -57,6 +57,16 @@
  * eased to its floor and no longer holds it. ⚠️ The case this gives up is a
  * machine that drops its target WITHOUT saying so; nothing measured here does.
  *
+ * ⚠️ **The refresh also used to undo any OTHER writer in the program**, and
+ * that is what removing it exposed (PR #574's review): a target set by hand on
+ * the Ride screen's ERG form stayed on the machine for the rest of the block
+ * while this player reported its own acknowledged. So a workout owns the
+ * control point outright — `apps/web/src/ride/controller.ts`
+ * §`setTargetPower` refuses a hand-set target while one runs, and
+ * §`clearTargetPower` ends the workout rather than stopping underneath it.
+ * This player assumes it is the only thing writing a target; a new writer to
+ * the same characteristic has to be refused the same way.
+ *
  * ## A disconnect pauses, and never discards
  *
  * > *"A test proves a trainer disconnect mid-workout pauses the workout and

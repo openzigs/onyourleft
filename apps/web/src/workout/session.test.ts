@@ -718,6 +718,109 @@ describe('an acknowledged, unchanged target is written once — #542', () => {
     expect(relieved).toBeLessThan(250);
     expect(trainer.targetPowerOnTheTrainer()).toBeLessThan(250);
   });
+
+  it('does not write the newest target again when an OLDER write fails late — PR #574’s review', async () => {
+    // A write on the wire, a pause that forgets it, and a resume that asks for
+    // the same 250 W afresh: two writes of one target, the second queued behind
+    // the first. When the FIRST then fails, its outcome is about a write the
+    // player has already stopped waiting for. Until PR #574's review it reached
+    // `writeFailed`, which forgot the NEWER ask while that ask still had its
+    // own answer coming — so the next tick queued 250 W a third time. The
+    // writer merges queued writes, so it was one extra write per slow round
+    // trip rather than a loop; with #542's refresh gone it was the only
+    // duplicate left.
+    const { trainer } = await loop();
+    const asked: number[] = [];
+    const answers: Array<{ resolve: (value: number) => void; reject: (error: unknown) => void }> =
+      [];
+    const session = createWorkoutSession({
+      timeline: expandWorkout(workout([steady(60, 1.0)])),
+      thresholdPower: THRESHOLD,
+      powerFloor: watts(FLOOR_WATTS),
+      control: {
+        setTargetPower: (target) => {
+          asked.push(target);
+          return new Promise((resolve, reject) => {
+            answers.push({ resolve: (value) => resolve(watts(value)), reject });
+          });
+        },
+        stop: () => trainer.control.stop(),
+        letGo: () => trainer.control.letGo(),
+      },
+    });
+    session.start(seconds(0));
+    session.tick(seconds(0));
+    session.pause(seconds(1));
+    session.resume(seconds(2));
+    session.tick(seconds(2));
+    await flush();
+    expect(asked).toStrictEqual([250]);
+
+    answers[0]?.reject(new SensorError('control-rejected', 'the machine refused op code 0x5'));
+    await flush();
+    // The newer 250 W is on the wire now, and has not been answered.
+    expect(asked).toStrictEqual([250, 250]);
+
+    session.tick(seconds(3));
+    await flush();
+    answers[1]?.resolve(250);
+    await flush();
+    answers[2]?.resolve(250);
+    await flush();
+    session.tick(seconds(4));
+    session.tick(seconds(5));
+    await flush();
+
+    expect(asked).toStrictEqual([250, 250]);
+    expect(session.state().holding).toBe(250);
+  });
+
+  it('does not write the newest target again when an OLDER queued write is superseded — PR #574’s review', async () => {
+    // The same, reached through `superseded`: a restart forgets the write on
+    // the wire twice over, so one ask is queued and the next replaces it. The
+    // replaced one's outcome is not about the player's current ask. (Nothing
+    // in the client restarts a session today; the guard is one rule for every
+    // outcome that is not an answer, and this is what pins it.)
+    const { trainer } = await loop();
+    const asked: number[] = [];
+    const answers: Array<(value: number) => void> = [];
+    const session = createWorkoutSession({
+      timeline: expandWorkout(workout([steady(60, 1.0)])),
+      thresholdPower: THRESHOLD,
+      powerFloor: watts(FLOOR_WATTS),
+      control: {
+        setTargetPower: (target) => {
+          asked.push(target);
+          return new Promise((resolve) => {
+            answers.push((value) => resolve(watts(value)));
+          });
+        },
+        stop: () => trainer.control.stop(),
+        letGo: () => trainer.control.letGo(),
+      },
+    });
+    session.start(seconds(0));
+    session.tick(seconds(0));
+    session.start(seconds(1));
+    session.tick(seconds(1));
+    session.start(seconds(2));
+    session.tick(seconds(2));
+    await flush();
+    expect(asked).toStrictEqual([250]);
+
+    answers[0]?.(250);
+    await flush();
+    expect(asked).toStrictEqual([250, 250]);
+    session.tick(seconds(3));
+    await flush();
+    answers[1]?.(250);
+    answers[2]?.(250);
+    await flush();
+    session.tick(seconds(4));
+    await flush();
+
+    expect(asked).toStrictEqual([250, 250]);
+  });
 });
 
 describe('a free ride eases the trainer once, not every second', () => {

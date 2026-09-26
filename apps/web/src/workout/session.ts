@@ -270,9 +270,27 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
     );
   };
 
+  /**
+   * How many targets the player has asked for — so an outcome can tell whether
+   * it answers the player's CURRENT ask or an older one.
+   *
+   * ⚠️ PR #574's review. A pause, a stall or a free ride forgets the write on
+   * the wire, and the next ask can be queued behind it. When the older write
+   * then fails, or is superseded, its outcome is about a target the player has
+   * stopped waiting for; handing it to `writeFailed` forgot the NEWER ask while
+   * that one still had its own answer coming, and the next tick wrote the same
+   * target again. An older outcome still reports its fault, because the rider
+   * should hear that the machine refused something; it does not move the
+   * player.
+   */
+  let asks = 0;
+
   const offer = (target: Watts): void => {
     released = false;
+    asks += 1;
+    const ask = asks;
     void writer.offer(target).then((outcome) => {
+      const current = ask === asks;
       switch (outcome.kind) {
         case 'written':
           lastFault = undefined;
@@ -280,14 +298,18 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
           break;
         case 'failed':
           lastFault = faultText(outcome.error);
-          player.writeFailed();
+          if (current) {
+            player.writeFailed();
+          }
           break;
         case 'superseded':
         case 'closed':
           // Neither is an answer to the player's ask, and neither is a fault.
           // A superseded target was replaced by a newer one, whose own outcome
           // clears the pending state; a closed one means the session is over.
-          player.writeFailed();
+          if (current) {
+            player.writeFailed();
+          }
           break;
       }
       changed();
