@@ -888,3 +888,29 @@ export function scriptedSidePairing(initial: Partial<SideControlState> = {}): Si
     answerSideCamera: () => Promise.reject(new Error('the scripted pairing is the tablet’s')),
   };
 }
+
+/**
+ * A JPEG that says how big it is: {@link cleanFrameBytes}' JFIF segment, then
+ * any `before` bytes, then a real frame header, so `computer-pose.ts`
+ * §`jpegDimensions` reads `width` × `height` from it (#553). Carries no
+ * metadata unless `before` adds some.
+ */
+export function sizedFrameBytes(
+  width: number,
+  height: number,
+  before: readonly number[] = [],
+): Uint8Array {
+  const start = [0xff, 0xd8];
+  const jfif = [0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00];
+  const density = [0x00, 0x01, 0x00, 0x01, 0x00, 0x00];
+  // SOF0: length 17, precision 8, the two sizes, three components.
+  const size = [height >> 8, height & 0xff, width >> 8, width & 0xff];
+  const frame = [0xff, 0xc0, 0x00, 0x11, 0x08, ...size, 0x03];
+  const components = [0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01];
+  const scan = [0xff, 0xda, 0x00, 0x02];
+  const head = [...start, ...jfif, ...density, ...before, ...frame, ...components, ...scan];
+  const bytes = new Uint8Array(head.length + 64);
+  bytes.set(head, 0);
+  bytes.set([0xff, 0xd9], bytes.length - 2);
+  return bytes;
+}

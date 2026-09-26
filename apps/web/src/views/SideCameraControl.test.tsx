@@ -545,7 +545,10 @@ describe('driving the phone, on the tablet', () => {
 
 describe('what the tablet says about the pictures — #530', () => {
   /** A pairing whose tablet looks at pictures with a model that answers `outcome`. */
-  async function analysing(outcome: SidePoseOutcome = { kind: 'no-rider' }) {
+  async function analysing(
+    outcome: SidePoseOutcome = { kind: 'no-rider' },
+    place?: 'tablet' | 'computer',
+  ) {
     const context = await tablet({
       analyse: (control) =>
         new SideAnalysis({
@@ -554,6 +557,7 @@ describe('what the tablet says about the pictures — #530', () => {
             estimateSidePose: async () => Promise.resolve(outcome),
             closeSidePoseModel: () => undefined,
           }),
+          place,
         }),
     });
     await press('Pair a phone');
@@ -592,6 +596,7 @@ describe('what the tablet says about the pictures — #530', () => {
     expect(shown?.getAttribute('data-oyl-side-pictures')).toBe('ready');
     expect(shown?.textContent).toBe(
       sidePicturesText({
+        place: 'tablet',
         model: 'ready',
         posed: 0,
         noRider: 3,
@@ -605,6 +610,36 @@ describe('what the tablet says about the pictures — #530', () => {
     expect(shown?.closest('[aria-live],[role="status"]')).toBeNull();
     // No picture, of any kind, on the screen.
     expect(document.querySelector('img, video, canvas[data-oyl-side-picture]')).toBeNull();
+  });
+
+  it('says the pictures go to the rider’s computer when that is where they go — #553', async () => {
+    const { send } = await analysing({ kind: 'no-rider' }, 'computer');
+    const shown = (): string =>
+      document.querySelector('[data-oyl-side-pictures]')?.textContent ?? '';
+    expect(shown()).toContain('sent on to your computer');
+    expect(shown()).not.toContain('on this tablet as they arrive');
+    await send(2);
+    expect(shown()).toBe(
+      sidePicturesText({
+        place: 'computer',
+        model: 'ready',
+        posed: 0,
+        noRider: 2,
+        unreadable: 0,
+        skipped: 0,
+        framing: 'no-reference',
+        finished: false,
+      }),
+    );
+    expect(shown()).toContain('Pictures sent to your computer');
+  });
+
+  it('says the computer stopped being sent pictures when it could not be reached — #553', async () => {
+    const { send } = await analysing({ kind: 'unavailable' }, 'computer');
+    await send(1);
+    expect(document.querySelector('[data-oyl-side-pictures]')?.textContent).toContain(
+      'no more pictures are being sent to it',
+    );
   });
 
   it('says there is no earlier session to line up with, when there is none', async () => {

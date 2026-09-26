@@ -86,11 +86,16 @@ import type { CapturedFrame } from './camera-port';
  * any caller put anything at all beside the picture — an athlete id, a ride
  * name — and the body would still look like "a prompt".
  *
- * One member today. [#388](https://github.com/openzigs/onyourleft/issues/388)'s
- * report adds its own, and each one it adds is bound by
- * [ADR 0030](../../../../docs/adr/0030-what-the-app-may-say-about-a-body.md).
+ * Two members. ⚠️ This said *"one member today"* until
+ * [#553](https://github.com/openzigs/onyourleft/issues/553) added
+ * `side-pose`: the side camera's pictures, sent on to the rider's computer
+ * when the rider has switched that on (ADR 0033 D-11), each asking for the
+ * near side's landmarks as numbers. Each question is bound by
+ * [ADR 0030](../../../../docs/adr/0030-what-the-app-may-say-about-a-body.md):
+ * neither asks for an angle, a length or anything about a body beyond where
+ * a point is in the picture.
  */
-export type AnalysisQuestion = 'connection-check';
+export type AnalysisQuestion = 'connection-check' | 'side-pose';
 
 /**
  * The words sent for each question, verbatim.
@@ -104,6 +109,22 @@ export const ANALYSIS_PROMPTS: Readonly<Record<AnalysisQuestion, string>> = {
   'connection-check':
     'This is a test of the connection between an app and this computer. Do not describe the ' +
     'picture. Reply with the single word: ready',
+  // #553. ⚠️ **The answer's shape is this repository's own**, and
+  // `computer-pose.ts` §`sidePoseFromAnswer` is its only reader: a key it does
+  // not know is refused rather than ignored (ADR 0017 D-4's rule), and a
+  // number outside the picture is refused rather than clamped. The landmark
+  // names are `side-analysis-port.ts` §`SIDE_POSE_LANDMARKS`, in that order;
+  // `computer-pose.test.ts` holds this text to that list, so a tenth landmark
+  // there is a red test here rather than a question nobody asks.
+  'side-pose':
+    'This picture shows a person riding a bicycle on an indoor trainer, filmed from the side. ' +
+    'Find the side of their body nearest the camera. Reply with JSON only, with no other text, ' +
+    'in exactly this form: {"rider":true,"nearSide":"left","landmarks":{"ear":[x,y],' +
+    '"shoulder":[x,y],"elbow":[x,y],"wrist":[x,y],"hip":[x,y],"knee":[x,y],"ankle":[x,y],' +
+    '"heel":[x,y],"toe":[x,y]}} where x and y are the point as fractions of the picture from its ' +
+    'top-left corner, each between 0 and 1, "toe" is the tip of the shoe, "nearSide" is the ' +
+    'person’s own left or right, and a point you cannot see is null. If nobody is riding in the ' +
+    'picture, reply {"rider":false}',
 };
 
 /** One picture and one question, which is everything the port is given. */
@@ -152,7 +173,14 @@ export type AnalysisFailure =
   /** The answer was larger than this client will read. */
   | 'too-large'
   /** The rider, or a newer request, cancelled this one. */
-  | 'cancelled';
+  | 'cancelled'
+  /**
+   * Inside the Android shell, the address is not a private address written as
+   * numbers — #553. Reached **without** a request being made: the native path
+   * is held to `analysis-endpoint.ts` §`isPrivateAddressLiteral`, and a name or
+   * this device's own address is refused before anything is sent.
+   */
+  | 'address-not-numeric';
 
 /**
  * What came back.
@@ -235,4 +263,7 @@ export const ANALYSIS_FAILURE_TEXT: Readonly<Record<AnalysisFailure, string>> = 
   malformed: 'Your computer answered, but not in a form this app can read.',
   'too-large': 'Your computer answered with more than this app will read, so it was ignored.',
   cancelled: 'Cancelled.',
+  'address-not-numeric':
+    'In this app on Android, your computer’s address has to be its private address written as ' +
+    'numbers, such as http://192.168.1.20:8080. A name is not accepted here, and nothing was sent.',
 };

@@ -69,9 +69,11 @@
  * this file accepts — a private IP literal or a `.local` name — once the rider
  * grants the permission it asks for; `analysis-transport.ts` also annotates the
  * request with the address space so a `.home.arpa` or `.internal` name is
- * treated the same way. ⚠️ **Unverified inside the Android shell**, whose
- * WebView sets `allowMixedContent: false` (`apps/mobile/capacitor.config.ts`);
- * the rider-facing document says so.
+ * treated the same way. ⚠️ **Inside the Android shell this does NOT work, and
+ * a reviewer who remembers "unverified" is reading the old file**: validation
+ * 0002 Part AF measured the shell's WebView (`allowMixedContent: false`)
+ * blocking the request as mixed content. Since #553 the shell sends it through
+ * Capacitor's native HTTP instead, held to {@link isPrivateAddressLiteral}.
  */
 
 /** Where the rider's answer is kept: this device's `localStorage`, and nothing else. */
@@ -249,6 +251,36 @@ export function addressSpaceOf(hostname: string): AddressSpace | undefined {
     return 'local';
   }
   return undefined;
+}
+
+/**
+ * Whether `hostname` is a private-network address WRITTEN AS NUMBERS — the
+ * narrower rule the Android shell's native request is held to
+ * ([#553](https://github.com/openzigs/onyourleft/issues/553), the owner's
+ * 2026-09-26 ruling).
+ *
+ * Inside the shell a request to the rider's computer does not go through the
+ * WebView, which blocks plain `http:` as mixed content (validation 0002 Part
+ * AF). It goes through Capacitor's native HTTP, and Android's cleartext policy
+ * has to permit that for every address, because a network security config
+ * cannot list a rider's LAN address in advance. So **this function is what
+ * limits it**, and it is stricter than {@link addressSpaceOf} in two ways:
+ *
+ * - **No name of any kind.** `.local`, `.home.arpa` and `.internal` are local
+ *   by reservation, but a native request resolves a name through whatever DNS
+ *   the device uses, and the answer could be anywhere. A number is where it
+ *   says it is.
+ * - **No loopback.** On the tablet, `127.0.0.1` is the tablet itself, which is
+ *   no computer of the rider's; another app listening there is not what the
+ *   rider set up.
+ *
+ * `true` only for an IPv4 or IPv6 literal that {@link addressSpaceOf} calls
+ * `local`.
+ */
+export function isPrivateAddressLiteral(hostname: string): boolean {
+  const literal =
+    (hostname.startsWith('[') && hostname.endsWith(']')) || ipv4Octets(hostname) !== undefined;
+  return literal && addressSpaceOf(hostname) === 'local';
 }
 
 /** Name suffixes that are local by reservation. @see addressSpaceOf */

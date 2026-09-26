@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   addressSpaceOf,
+  isPrivateAddressLiteral,
   ANALYSIS_ENDPOINT_STORAGE_KEY,
   completionsUrl,
   endpointDecision,
@@ -227,5 +228,37 @@ describe('what is stored is re-decided, not trusted', () => {
     };
     expect(writeAnalysisEndpoint(endpoint, full)).toBe(false);
     expect(writeAnalysisEndpoint(endpoint, undefined)).toBe(false);
+  });
+});
+
+describe('isPrivateAddressLiteral — what the Android shell’s native request may reach (#553)', () => {
+  it.each([
+    '10.0.0.5',
+    '172.16.0.1',
+    '172.31.255.254',
+    '192.168.1.20',
+    '169.254.1.1',
+    '100.64.0.1',
+    '[fd00::1]',
+    '[fe80::1]',
+  ])('accepts %s', (hostname) => {
+    expect(isPrivateAddressLiteral(hostname)).toBe(true);
+  });
+
+  it.each([
+    'studio.local',
+    'pc.home.arpa',
+    'pc.internal',
+    'localhost',
+    'a.localhost',
+    '127.0.0.1',
+    '[::1]',
+    '8.8.8.8',
+    '172.32.0.1',
+    '[2001:db8::1]',
+    'example.com',
+    '192.168.1',
+  ])('refuses %s', (hostname) => {
+    expect(isPrivateAddressLiteral(hostname)).toBe(false);
   });
 });

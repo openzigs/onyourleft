@@ -889,6 +889,11 @@ apps/                 AGPL-3.0-or-later, without exception
                         Android side of the FTMS control point — the write
                         that is acknowledged, and the sibling that is not
     src/permission/     what a rider is told when Bluetooth will not work (#87)
+    src/http/           the ONE native HTTP request the shell makes (#553): a
+                        picture to the rider's own computer, outside the
+                        WebView that blocks it as mixed content. What limits
+                        where it goes is the web transport, and
+                        `no-network.test.ts` permits `CapacitorHttp` here only
     tools/              the one thing here that talks to a phone rather than
                         running on one (#410) — `webview-probe.mjs` evaluates an
                         expression inside the shell's WebView over adb, which is
@@ -3573,6 +3578,8 @@ top of an issue **supersedes its body**.
 | Which one module may send anything off the device, and what goes red for a second | `apps/web/src/camera/analysis-transport.ts`, `apps/web/src/privacy/no-network.test.ts` §`PERMITTED_NETWORK_CALLS`, [#387](https://github.com/openzigs/onyourleft/issues/387) |
 | How the tablet and the tripod phone connect with no server, what a stranger on the same Wi-Fi can and cannot do, and why the no-network gate cannot see WebRTC yet | [ADR 0033](docs/adr/0033-side-camera-link.md) D-1, D-4, D-9, [#532](https://github.com/openzigs/onyourleft/issues/532) |
 | Why the rider's computer must be on their own network by its spelling, and why a hosted model cannot be typed in | `apps/web/src/camera/analysis-endpoint.ts` §`addressSpaceOf`, [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) §Amendments §Q1 |
+| Why the Android app sends a picture to the rider's computer outside its web view, and what limits where it can go | `apps/web/src/camera/analysis-transport.ts` §`nativeAnalysisPort`, `apps/web/src/camera/analysis-endpoint.ts` §`isPrivateAddressLiteral`, `apps/mobile/src/http/analysis-http.ts`, [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) §Amendments 2026-09-26, [#553](https://github.com/openzigs/onyourleft/issues/553) |
+| When the side camera's pictures go to the rider's computer instead of the tablet's model, what it is asked, and how its answer is refused | `apps/web/src/camera/side-analyser.ts`, `apps/web/src/camera/computer-pose.ts` §`sidePoseFromAnswer`, [ADR 0033](docs/adr/0033-side-camera-link.md) D-11 and §Amendments 2026-09-26 |
 | Why a model's answer is never shown yet, and what stops it reaching a trainer | `apps/web/src/camera/useAnalysis.ts`, `apps/web/src/camera/analysis-safety.test.ts`, [`docs/analysis-on-your-own-computer.md`](docs/analysis-on-your-own-computer.md) |
 | Why claiming a fitness benefit makes the measurement rules matter MORE rather than less | [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md) §Amendments, [#495](https://github.com/openzigs/onyourleft/issues/495) |
 | Whether the EU or the UK makes this camera analysis a medical device, and the single rule carrying the whole distance | [spike 0008](docs/spikes/0008-eu-uk-medical-device-read.md) §4.3, §6 |

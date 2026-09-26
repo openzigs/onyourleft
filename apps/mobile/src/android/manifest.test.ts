@@ -395,3 +395,20 @@ describe('reading the shapes a permission list cannot see', () => {
     expect(queries(xml)).toEqual(['package:com.example.other']);
   });
 });
+
+describe('cleartext, for the rider’s own computer only — #553', () => {
+  it('lets the app’s native HTTP reach a plain-http address, and says so on the application', () => {
+    const application = startTags(APP_MANIFEST).find((tag) => tag.name === 'application');
+    expect(application?.attributes.get('android:usesCleartextTraffic')).toBe('true');
+    // No network security config: one that narrowed cleartext to named hosts
+    // could not name a rider's LAN address, and one that widened it further
+    // would be a second rule beside the one the web transport holds.
+    expect(application?.attributes.has('android:networkSecurityConfig')).toBe(false);
+  });
+
+  it('keeps the WebView refusing mixed content, which is what the owner’s ruling kept', () => {
+    const config = readFileSync(join(HERE, '..', '..', 'capacitor.config.ts'), 'utf8');
+    expect(config).toMatch(/^\s*allowMixedContent: false,$/m);
+    expect(config).not.toMatch(/cleartext:\s*true/);
+  });
+});

@@ -52,11 +52,12 @@ import {
   platformMediaDevices,
 } from './camera/browser-camera';
 import { readAnalysisEndpoint } from './camera/analysis-endpoint';
-import { riderAnalysisPort } from './camera/analysis-transport';
+import { riderAnalysisPort, riderAnalysisSource } from './camera/analysis-transport';
 import { keepThisRide } from './camera/keep';
 import { shellCameraNotice } from './camera/shell-camera';
 import { CameraController } from './camera/session';
 import { workerPoseEstimator } from './camera/pose-estimator';
+import { chooseSideAnalyser, readSideAnalyserOnComputer } from './camera/side-analyser';
 import { SideAnalysis } from './camera/side-analysis';
 import { sideReportKeeper } from './camera/side-report-keeper';
 import { sidePairingPort } from './camera/side-link';
@@ -716,6 +717,28 @@ function buildUpdateWatcher(
 }
 
 /**
+ * The rider's own computer, looked up on every call rather than once — #387,
+ * and since #553 the transport it goes through.
+ *
+ * ⚠️ **Inside the Android shell the request is Capacitor's native HTTP**, not
+ * the WebView's `fetch`: validation 0002 Part AF measured the WebView blocking
+ * plain `http:` to the rider's computer as mixed content, and the owner ruled
+ * (#553) that it goes native, only to a private address written as numbers.
+ * `camera/analysis-transport.ts` §`nativeAnalysisPort` is what holds it to
+ * that. Behind the same `import()` as every other reach for
+ * `@onyourleft/mobile`, so a browser downloads no line of Capacitor.
+ */
+async function buildRiderAnalysis(): Promise<() => ReturnType<typeof riderAnalysisPort>> {
+  // The shell-or-browser choice is `riderAnalysisSource`'s, where a test can
+  // see it; this passes the platform read and nothing else.
+  return riderAnalysisSource(
+    isNativeShell(platformCapacitor()),
+    async () => (await import('@onyourleft/mobile')).capacitorAnalysisPost(),
+    readAnalysisEndpoint,
+  );
+}
+
+/**
  * The camera, or nothing (#382).
  *
  * ⚠️ **`undefined` is an ordinary state and is the right answer surprisingly
@@ -748,7 +771,9 @@ function buildUpdateWatcher(
  * may appear outside `apps/web/src/camera/`, and `navigator.mediaDevices` is
  * one of them.
  */
-async function buildCameraController(): Promise<CameraController | undefined> {
+async function buildCameraController(
+  analysis: () => ReturnType<typeof riderAnalysisPort>,
+): Promise<CameraController | undefined> {
   // ⚠️ Not called `mediaDevices`. `camera/boundary.test.ts` forbids that NAME
   // outside `apps/web/src/camera/`, and a local variable is a name — the scan
   // is deliberately about the word rather than about an import, because the
@@ -775,11 +800,9 @@ async function buildCameraController(): Promise<CameraController | undefined> {
     newFrameId: () => cameraFrameId(globalThis.crypto.randomUUID()),
     now: browserClock,
   });
-  // #387. The rider's own computer, looked up on every press rather than once
-  // here, so switching it off on the Camera screen stops the next request.
-  // With nothing saved this answers `undefined` and nothing can be sent.
-  const analysis = (): ReturnType<typeof riderAnalysisPort> =>
-    riderAnalysisPort(readAnalysisEndpoint());
+  // #387. The rider's own computer — `analysis` is looked up on every press
+  // rather than once, so switching it off on the Camera screen stops the next
+  // request. With nothing saved it answers `undefined` and nothing can be sent.
   if (!isNativeShell(platformCapacitor())) {
     return new CameraController({ port, keep, analysis });
   }
@@ -804,7 +827,8 @@ async function buildCameraController(): Promise<CameraController | undefined> {
 async function render(athlete: AthleteRecord | undefined): Promise<void> {
   // Built once per tab, for the reason `buildCameraController` gives — and
   // before the platform, because the ride controller reads its presence (#390).
-  const camera = await buildCameraController();
+  const riderAnalysis = await buildRiderAnalysis();
+  const camera = await buildCameraController(riderAnalysis);
   // #529. One per tab, like the camera: the tablet's pairing is held by the
   // port so that leaving the Camera screen to ride does not end it. None
   // where there is no WebRTC — both side-camera screens then say so.
@@ -835,13 +859,24 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
     ? sidePairingPort({
         // #557: the tablet stays awake while it pairs and while it is paired.
         screenLock: browserScreenLockSource(platformWakeLock()),
-        analyse: (control) =>
-          new SideAnalysis({
+        analyse: (control) => {
+          // #553, ADR 0033 D-11: the rider's computer instead of this tablet's
+          // model, only when the rider switched the side camera over to it AND
+          // their computer is saved and switched on. Chosen once per pairing,
+          // and re-read for every picture so switching off stops the next one.
+          const analyser = chooseSideAnalyser({
+            onComputer: () => readSideAnalyserOnComputer(),
+            computer: riderAnalysis,
+            tablet: () => workerPoseEstimator(),
+          });
+          return new SideAnalysis({
             control,
-            estimator: () => workerPoseEstimator(),
+            estimator: analyser.estimator,
+            place: analyser.place,
             references: { store: localStore(), athleteId: LOCAL_ATHLETE },
             reports: sideReports,
-          }),
+          });
+        },
       })
     : undefined;
   // Read once: two calls would be two reads of a global for one prop.

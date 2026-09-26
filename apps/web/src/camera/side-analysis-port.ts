@@ -129,6 +129,13 @@ export type SideFramingState = 'no-reference' | 'checking' | FramingVerdict | 'n
 
 /** Everything the tablet's screen may show about the analysis. Counts and words, never a picture. */
 export interface SideAnalysisState {
+  /**
+   * Where the pictures are looked at — this tablet's own model, or the rider's
+   * computer when they switched the side camera over to it (#553, ADR 0033
+   * D-11). The screen says which, because the two are different promises about
+   * where a picture goes.
+   */
+  readonly place: 'tablet' | 'computer';
   /** Whether the model is loaded. */
   readonly model: 'waiting' | 'loading' | 'ready' | 'unavailable';
   /** Pictures that came to a pose. */

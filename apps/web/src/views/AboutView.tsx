@@ -120,7 +120,8 @@ export function AboutView(): JSX.Element {
         and the app contains no code that transmits your rides, your heart rate or your position
         anywhere. The one thing it can send is a picture from the camera, to a computer of your own
         on your own network — and only if you set that computer up on the Camera page, switch it on,
-        and press the button that sends the picture.
+        and press the button that sends the picture. A side camera&rsquo;s pictures go there too, as
+        they are taken, only if you also switch that on.
       </p>
       <p>
         {/* target="_blank" so that following it inside the Android shell hands

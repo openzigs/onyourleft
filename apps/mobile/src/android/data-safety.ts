@@ -245,16 +245,26 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     //   `collected: true`; ADR 0033 D-10 says as much: *"the row must stay
     //   `collected: true` while #387's path exists"*.
     //
-    // ⚠️ The side camera does NOT send a picture on to the rider's computer
-    // (ADR 0033 D-11 is not built), and if it ever does, that is #387's
-    // non-exempt path carrying a continuous stream, and this row's `why`
-    // changes with it.
+    // ⚠️ **Since #553 the side camera CAN send its pictures on to the
+    // rider's computer** (ADR 0033 D-11), and a reviewer who remembers "D-11
+    // is not built" is reading the old file. That is #387's non-exempt path
+    // carrying a continuous stream — about five a second while the side
+    // camera films — so the answer stays `collected: true` and the `why`
+    // names the stream, which #553's criterion asks for in terms.
+    // `shared: false` still holds on Play's own words: the destination is the
+    // rider's computer, and the stream runs only after the rider ticked a
+    // second switch, off by default, beside a sentence saying exactly this —
+    // *"a specific user-initiated action, where the user reasonably expects
+    // the data to be shared"*. `optional: true` holds for the same reason.
+    // Inside the shell the request is Capacitor's native HTTP rather than the
+    // WebView's (the owner's 2026-09-26 ruling), which changes how it
+    // travels and nothing about what this row answers.
     dataType: 'Photos and videos',
     collected: true,
     shared: false,
     optional: true,
     purposes: ['App functionality'],
-    why: 'a still picture from the camera (#382, #383) is sent — only when the rider presses the button that sends it — to one computer the rider configured at an address on their own network and switched on (#387). Nothing is set up by default and nothing is sent until it is. It is not sent to this project, which runs no server, and not to any third party: an address that is not on the rider’s own network is refused. A picture is otherwise discarded after it has been looked at unless the rider turns on this ride’s keep (ADR 0029 D-2). Separately, a side-camera phone the rider paired by scanning sends its pictures to the rider’s own tablet over an end-to-end encrypted WebRTC data channel with no relay (#530, ADR 0033 D-1), where each is analysed on the tablet and discarded at once, never stored, shown or sent on (ADR 0033 D-6) — end-to-end encrypted transfer between the rider’s own devices, which Play exempts, and so not what makes this row collected',
+    why: 'a still picture from the camera (#382, #383) is sent — only when the rider presses the button that sends it — to one computer the rider configured at an address on their own network and switched on (#387). Nothing is set up by default and nothing is sent until it is. It is not sent to this project, which runs no server, and not to any third party: an address that is not on the rider’s own network is refused. A picture is otherwise discarded after it has been looked at unless the rider turns on this ride’s keep (ADR 0029 D-2). Separately, a side-camera phone the rider paired by scanning sends its pictures to the rider’s own tablet over an end-to-end encrypted WebRTC data channel with no relay (#530, ADR 0033 D-1), where each is analysed on the tablet and discarded at once, never stored, shown or sent on (ADR 0033 D-6) — end-to-end encrypted transfer between the rider’s own devices, which Play exempts, and so not what makes this row collected. The one exception is a stream the rider switches on (#553, ADR 0033 D-11): with a second switch, off by default, ticked beside a sentence saying so, every side-camera picture — about five a second while the side camera films — is sent on to that same computer of the rider’s instead of being analysed on the tablet, over the same path as above, and is still not kept on the tablet',
   },
   {
     dataType: 'Device or other IDs',
