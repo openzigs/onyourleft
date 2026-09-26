@@ -2550,25 +2550,43 @@ async function recordAndStop(rig: Bench, forSeconds: number): Promise<void> {
 describe('#548 — canStartNewRide, the one rule the screen and the controller share', () => {
   it('allows a stopped ride whose last checkpoint landed, once the save is settled safely', () => {
     const allowed = (['saved', 'empty', 'unavailable'] as const).map((saveState) =>
-      canStartNewRide({ phase: 'stopped', storage: 'ok', saveState }),
+      canStartNewRide({ phase: 'stopped', stopping: false, storage: 'ok', saveState }),
     );
     expect(allowed).toEqual([true, true, true]);
   });
 
   it('refuses while the ride exists only in this tab, or is still being explained', () => {
-    expect(canStartNewRide({ phase: 'stopped', storage: 'ok', saveState: 'saving' })).toBe(false);
-    expect(canStartNewRide({ phase: 'stopped', storage: 'ok', saveState: 'failed' })).toBe(false);
-    expect(canStartNewRide({ phase: 'stopped', storage: 'failed', saveState: 'saved' })).toBe(
-      false,
-    );
     expect(
-      canStartNewRide({ phase: 'stopped', storage: 'quota-exceeded', saveState: 'saved' }),
+      canStartNewRide({ phase: 'stopped', stopping: false, storage: 'ok', saveState: 'saving' }),
     ).toBe(false);
+    expect(
+      canStartNewRide({ phase: 'stopped', stopping: false, storage: 'ok', saveState: 'failed' }),
+    ).toBe(false);
+    expect(
+      canStartNewRide({ phase: 'stopped', stopping: false, storage: 'failed', saveState: 'saved' }),
+    ).toBe(false);
+    expect(
+      canStartNewRide({
+        phase: 'stopped',
+        stopping: false,
+        storage: 'quota-exceeded',
+        saveState: 'saved',
+      }),
+    ).toBe(false);
+  });
+
+  it('refuses while the stop is still settling, whatever the save state says', () => {
+    // #565's review: the phase is `stopped` before the release, the flush and
+    // the save have run, and `saveState` can still read the previous ride's.
+    const whileStopping = (['saved', 'empty', 'unavailable'] as const).map((saveState) =>
+      canStartNewRide({ phase: 'stopped', stopping: true, storage: 'ok', saveState }),
+    );
+    expect(whileStopping).toEqual([false, false, false]);
   });
 
   it('refuses in every phase but stopped', () => {
     const phases = (['idle', 'recording', 'paused'] as const).map((phase) =>
-      canStartNewRide({ phase, storage: 'ok', saveState: 'saved' }),
+      canStartNewRide({ phase, stopping: false, storage: 'ok', saveState: 'saved' }),
     );
     expect(phases).toEqual([false, false, false]);
   });
@@ -2680,10 +2698,13 @@ describe('#548 — after a ride is stopped and saved, another can be started', (
     const stopping = rig.controller.confirmStop();
     expect(rig.controller.getSnapshot().phase).toBe('stopped');
     expect(rig.controller.getSnapshot().saveState).toBe('unavailable');
+    // …which is why the snapshot says so, and the screen can read it.
+    expect(rig.controller.getSnapshot().stopping).toBe(true);
 
     expect(await rig.controller.startNewRide()).toBe(false);
     await stopping;
     expect(rig.controller.getSnapshot().saveState).toBe('saved');
+    expect(rig.controller.getSnapshot().stopping).toBe(false);
     const read = await harness.read(async (store) => store.listActivitySummaries(ATHLETE_A));
     expect(read.map((summary) => summary.id)).toEqual(['ride-1']);
     // And once it has settled, the press is honoured.
@@ -2738,6 +2759,42 @@ describe('#548 — after a ride is stopped and saved, another can be started', (
 
     expect(await rig.controller.startNewRide()).toBe(false);
     expect(rig.controller.getSnapshot().phase).toBe('stopped');
+    rig.controller.dispose();
+  });
+
+  it('does not offer a leftover mid-ride when Start is pressed before the re-read settles', async () => {
+    // #565's review, item 4: `startNewRide` renders the idle screen and THEN
+    // re-reads what the device holds. A rider quick enough to press Start in
+    // that gap must not find the offer appearing on a ride in progress.
+    let hold: ((value: void) => void) | undefined;
+    let held = false;
+    const store = harnessStore();
+    const rig = benchWith({
+      checkpointStore: {
+        listRecordingSessions: async (owner) => {
+          if (held) {
+            await new Promise<void>((resolve) => {
+              hold = resolve;
+            });
+          }
+          return store.listRecordingSessions(owner);
+        },
+      },
+    });
+    await rig.controller.pair('trainer');
+    await recordAndStop(rig, 2);
+    expect(rig.controller.getSnapshot().saveState).toBe('unavailable');
+
+    held = true;
+    const starting = rig.controller.startNewRide();
+    await Promise.resolve();
+    await rig.controller.start();
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    hold?.();
+    expect(await starting).toBe(true);
+
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    expect(rig.controller.getSnapshot().recoverable).toEqual([]);
     rig.controller.dispose();
   });
 

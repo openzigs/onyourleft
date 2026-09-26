@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import type { JSX, ReactNode } from 'react';
+import type { JSX, ReactNode, Ref } from 'react';
 
 /** Primary for the one action a view is for; secondary for everything else. */
 export type ButtonVariant = 'primary' | 'secondary';
@@ -31,6 +31,12 @@ export interface ButtonProps {
   readonly disabled?: boolean;
   /** The id of an element that explains this button, for `aria-describedby`. */
   readonly describedBy?: string;
+  /**
+   * The underlying `<button>`, for a screen that has to put focus back on it
+   * after the control a rider pressed unmounts (WCAG 2.2 SC 2.4.3) — #548's
+   * *Start a new ride* hands focus to *Start recording* this way.
+   */
+  readonly ref?: Ref<HTMLButtonElement>;
 }
 
 /**
@@ -46,6 +52,7 @@ export function Button({
   type = 'button',
   disabled = false,
   describedBy,
+  ref,
 }: ButtonProps): JSX.Element {
   const className = variant === 'primary' ? 'oyl-button' : 'oyl-button oyl-button--secondary';
   // `type` is passed straight through. It used to go through a ternary that
@@ -54,6 +61,7 @@ export function Button({
   // defaulted above, so no third value can reach here.
   return (
     <button
+      ref={ref}
       className={className}
       type={type}
       onClick={onClick}

@@ -42,7 +42,7 @@
  * component rendering the two buttons in the right order.
  */
 
-import { useEffect, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 
 import type { Watts } from '@onyourleft/domain';
 
@@ -352,10 +352,30 @@ function RideControls({
   readonly controller: RideController;
   readonly snapshot: RideSnapshot;
 }): JSX.Element {
+  // #548, WCAG 2.2 SC 2.4.3: pressing *Start a new ride* unmounts it, and
+  // without somewhere to go focus falls to `<body>` — a keyboard or TalkBack
+  // rider loses their place on the screen they are about to ride from. It is
+  // handed to *Start recording*, the control that replaces it, once the idle
+  // screen has actually rendered, whichever of the render and the controller's
+  // answer lands first.
+  const startRecording = useRef<HTMLButtonElement>(null);
+  const focusStartWhenIdle = useRef(false);
+  // A press the controller refused. Unreachable from the button while the rule
+  // it renders under is the controller's own, and said anyway: a control that
+  // does nothing when pressed reads as a broken one.
+  const [newRideRefused, setNewRideRefused] = useState(false);
+  useEffect(() => {
+    if (snapshot.phase === 'idle' && focusStartWhenIdle.current) {
+      focusStartWhenIdle.current = false;
+      startRecording.current?.focus();
+    }
+  }, [snapshot.phase]);
+
   if (snapshot.phase === 'idle') {
     return (
       <>
         <Button
+          ref={startRecording}
           onClick={() => {
             void controller.start();
           }}
@@ -386,11 +406,24 @@ function RideControls({
         {canStartNewRide(snapshot) ? (
           <Button
             onClick={() => {
-              void controller.startNewRide();
+              setNewRideRefused(false);
+              focusStartWhenIdle.current = true;
+              void controller.startNewRide().then((started) => {
+                if (!started) {
+                  focusStartWhenIdle.current = false;
+                  setNewRideRefused(true);
+                }
+              });
             }}
           >
             Start a new ride
           </Button>
+        ) : null}
+        {newRideRefused ? (
+          <StatusMessage tone="warning" label="Not started" live>
+            A new ride could not be started yet, because the ride that stopped is not finished
+            saving. It is still on this screen; try again once it says it is saved.
+          </StatusMessage>
         ) : null}
       </>
     );
@@ -482,6 +515,19 @@ function StoppedNotice({ snapshot }: { readonly snapshot: RideSnapshot }): JSX.E
   // only as a *checkpoint*: absent from their activities, and offered back on
   // next open as an interrupted ride. `recording/finish.ts` is the step that
   // was missing; these branches are what the rider is now told about it.
+  //
+  // #565's review: the phase says `stopped` before the trainer is released,
+  // the final checkpoint flushed and the save begun, and all that time
+  // `saveState` can still say the PREVIOUS ride's `unavailable` — whose
+  // sentence below is "Closing the tab is safe now". Not yet it is not.
+  if (snapshot.stopping) {
+    return (
+      <StatusMessage tone="info" label="Stopping" live>
+        The ride is stopped. Letting the trainer go and writing its last seconds to this device… Do
+        not close the tab yet.
+      </StatusMessage>
+    );
+  }
   if (snapshot.saveState === 'saving') {
     return (
       <StatusMessage tone="info" label="Stopped" live>
