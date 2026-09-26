@@ -31,6 +31,18 @@ import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 
 import { riderMassFor } from '../athlete/mass';
 import type { CameraThrottle } from '../camera/session';
+import type { SidePairingPort } from '../camera/side-pairing-port';
+import {
+  SIDE_CAMERA_LABEL,
+  SIDE_CAMERA_ON_RIDE_TEXT,
+  sideCameraLine,
+  sideCameraLost,
+  sideCameraLostEvent,
+  sideCameraLostNotice,
+  sideCameraOnRide,
+  sideCameraStoppable,
+} from '../ride/side-camera';
+import { useSideCamera, type SideCameraOnRideState } from '../ride/useSideCamera';
 import { BROWSER_THERMAL, type ThermalPort } from './thermal-port';
 import { everyInterval, forecastForFrame, watchThermalHeadroom } from './thermal';
 import { StatusMessage } from '../design/StatusMessage';
@@ -286,6 +298,21 @@ export interface GameViewProps {
    * shell goes on rendering it while the chrome is absent.
    */
   readonly onImmersive?: ((immersive: boolean) => void) | undefined;
+  /**
+   * The tablet's side-camera pairing — #551. While a phone is paired its state
+   * is one line on the HUD, its link going is said through the HUD's one
+   * region, and *Stop side camera* is on the stage while it films.
+   *
+   * ⚠️ **Nothing here is a picture** (ADR 0033, the owner's ruling on #527):
+   * what is read is `camera/side-pairing-port.ts` §`SideControlState`, which
+   * is words about a phone. `ride/side-camera.ts` is the whole of what a ride
+   * does with it.
+   *
+   * ⚠️ An optional prop threaded through JSX, so a shell that stops passing it
+   * is green in `check:wiring` (§Limits); `game/side-camera-hud.a11y.test.tsx`
+   * starts a ride through the real shell and reads the HUD, which pins it.
+   */
+  readonly sidePairing?: SidePairingPort | undefined;
 }
 
 type Phase = 'choosing' | 'riding' | 'paused';
@@ -489,6 +516,17 @@ export function GameView(props: GameViewProps): JSX.Element {
    */
   const shadowMapRef = useRef(false);
   const gradientFaultRef = useRef<string | undefined>(undefined);
+  /**
+   * The side camera — #551. The hook is what re-renders the HUD when the
+   * phone's state changes, including while the ride is paused and the loop is
+   * not running; the ref is what the loop reads, so `tick` does not re-run
+   * when the port does. `sideLostRef` is what the loop last saw, so a lost
+   * link is said once, when it goes — `side-camera.ts` §`sideCameraLostEvent`.
+   */
+  const sideCamera = useSideCamera(props.sidePairing);
+  const sidePairingRef = useRef(props.sidePairing);
+  sidePairingRef.current = props.sidePairing;
+  const sideLostRef = useRef(false);
   /**
    * This ride's sounds — #400. Made inside the *Ride* press, so the audio
    * context is resumed from a gesture.
@@ -723,6 +761,11 @@ export function GameView(props: GameViewProps): JSX.Element {
       announcerRef.current = INITIAL_ANNOUNCER;
       setAnnouncement('');
       announcementsRef.current = readAnnouncementPreference(deviceStorage());
+      // #551: a link already lost when the ride starts is on the HUD's line,
+      // and is not news — only a link that goes DURING this ride is said.
+      sideLostRef.current = sideCameraLost(
+        sidePairingRef.current?.currentSideCamera()?.control.sideControlState(),
+      );
       // #475: which world this ride asked for, read from the device like every
       // other choice here. A ride starts at the top of its ladder — the
       // realistic one only for a rider who chose it (ADR 0026 D-3) — and the
@@ -1066,6 +1109,21 @@ export function GameView(props: GameViewProps): JSX.Element {
         if (fault !== undefined) events.push({ kind: 'trainer-lost', text: `Trainer: ${fault}` });
       }
       if (slope.event !== undefined) events.push(slope.event);
+      // #551: the side camera's link going, once, when it goes.
+      //
+      // ⚠️ Two cases where "once" is NONE, both stated rather than fixed
+      // (#577's review, finding 6). (a) `announce.ts` holds one pending event
+      // and DROPS a lower one rather than queueing it, by design: a climb
+      // announced in the same window outranks this and the sentence is not
+      // said later, although `sideLostRef` has already recorded the link as
+      // gone. (b) While the ride is paused this loop does not run, so a link
+      // lost then is said on resume. In both the notice (or, once the pairing
+      // has ended, the actions panel's line) is on the screen for a rider who
+      // can see it; `docs/validation/0003` is where the spoken half is checked.
+      const side = sidePairingRef.current?.currentSideCamera()?.control.sideControlState();
+      const sideLost = sideCameraLostEvent(sideLostRef.current, side);
+      sideLostRef.current = sideCameraLost(side);
+      if (sideLost !== undefined) events.push(sideLost);
       const heard = announce(announcerRef.current, {
         now: simulation.state.elapsed,
         readings,
@@ -1368,6 +1426,14 @@ export function GameView(props: GameViewProps): JSX.Element {
         // #422). `hud/fields.ts` §`TrainerLine` argues the placement and says
         // what did fix it; `browser/ride.browser.spec.ts` measures it.
         trainer={trainerReading(gradient)}
+        // #551: the side camera's one line and its Stop. A lost link on an
+        // OPEN pairing is not here but in `notices` below — it is the
+        // exception, and a steady "filming" in the notice slot would take a
+        // phone's route panel for the whole ride, which is #437's defect. A
+        // link that went and ENDED the pairing is terminal, so it is back
+        // here (#577's review, finding 1): `ride/side-camera.ts`
+        // §`sideCameraLostNotice`.
+        sideCamera={sideCameraOnHud(sideCamera)}
         onPause={() => {
           setPhase((current) => (current === 'paused' ? 'riding' : 'paused'));
         }}
@@ -1404,6 +1470,21 @@ export function GameView(props: GameViewProps): JSX.Element {
               {gradient.fault}
             </StatusMessage>
           ),
+          // #551: the side camera's link lost, in the notice slot the HUD
+          // gives an exception. Not `live`: the HUD's one region says it.
+          //
+          // ⚠️ **After the Trainer fault, in `announce.ts`'s order** (#577's
+          // review, finding 3): a trainer that stopped taking the road is a
+          // safety fault and `trainer-lost` outranks `side-camera-lost` there,
+          // so the one a rider reads first is the one they would hear first.
+          //
+          // ⚠️ **Only while the pairing is open** (finding 1) — see
+          // `ride/side-camera.ts` §`sideCameraLostNotice`.
+          sideCameraLostNotice(sideCamera.state) ? (
+            <StatusMessage key="side-camera" tone="warning" label={SIDE_CAMERA_LABEL}>
+              {SIDE_CAMERA_ON_RIDE_TEXT.lost}
+            </StatusMessage>
+          ) : undefined,
           // #475, ADR 0026 D-7's "and says so". For STANDING_NOTICE_SECONDS of
           // ride from when it was first shown, on the ride's clock, and then
           // out of the way: it is a fact about the picture rather than a thing
@@ -1420,6 +1501,26 @@ export function GameView(props: GameViewProps): JSX.Element {
       />
     </section>
   );
+}
+
+/**
+ * The side camera as the HUD's actions panel shows it — #551: the line, or
+ * nothing while the link is lost on an open pairing (the notice slot has it
+ * then; a pairing the lost link ENDED is a line here again), and *Stop
+ * side camera* while there is something to stop. `undefined` with no pairing.
+ */
+function sideCameraOnHud(
+  sideCamera: SideCameraOnRideState,
+): { readonly line: string | undefined; readonly onStop: (() => void) | undefined } | undefined {
+  const line = sideCameraOnRide(sideCamera.state);
+  if (line === undefined) {
+    return undefined;
+  }
+  return {
+    // The open-pairing lost link is the notice's; `lost-ended` is a line.
+    line: line === 'lost' ? undefined : sideCameraLine(line),
+    onStop: sideCameraStoppable(sideCamera.state) ? sideCamera.stop : undefined,
+  };
 }
 
 /**

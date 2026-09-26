@@ -25,6 +25,8 @@ import {
   RIDER_HALF_WIDTH_METRES,
   RIDER_HEIGHT_METRES,
   RIDER_HELMET_AHEAD_METRES,
+  UPPER_BODY_PIVOT,
+  bicycleRoll,
 } from './bicycle';
 import {
   CAMERA_ABOVE_METRES,
@@ -298,6 +300,38 @@ describe('a leaning rider in the frame — #499', () => {
           const down = downTheFrame(rig, at.along, at.height, aspect);
           expect(down, String(aspect)).toBeGreaterThanOrEqual(box.top);
           expect(down, String(aspect)).toBeLessThanOrEqual(box.bottom);
+        }
+      }
+    }
+  });
+
+  it('still holds the rider as #546 draws it at the cap: the bicycle further over, the body held back', () => {
+    // The box is stated for the COMBINED cap. Since #546 the bicycle leans a
+    // few per cent further than that, and the upper body — everything above the
+    // hips — rolls back toward upright about them first.
+    const rig = cameraRig(poseOn(0));
+    for (const aspect of ASPECTS) {
+      const box = riderFrameBox(aspect, MAXIMUM_LEAN_RADIANS);
+      for (const lean of [MAXIMUM_LEAN_RADIANS, -MAXIMUM_LEAN_RADIANS]) {
+        const roll = bicycleRoll(lean);
+        expect(Math.abs(roll.bicycle)).toBeGreaterThan(MAXIMUM_LEAN_RADIANS);
+        for (const point of RIDER_POINTS) {
+          const onTheBody = point.height > UPPER_BODY_PIVOT.y;
+          const above = point.height - UPPER_BODY_PIVOT.y;
+          const held = onTheBody
+            ? {
+                along: point.along,
+                height:
+                  UPPER_BODY_PIVOT.y +
+                  above * Math.cos(roll.body) -
+                  point.across * Math.sin(roll.body),
+                across: point.across * Math.cos(roll.body) + above * Math.sin(roll.body),
+              }
+            : point;
+          const at = rolled(held, roll.bicycle);
+          const off = offCentre(rig, at.along, at.height, at.across, aspect);
+          expect(0.5 - off, String(aspect)).toBeGreaterThanOrEqual(box.left);
+          expect(0.5 + off, String(aspect)).toBeLessThanOrEqual(box.right);
         }
       }
     }
