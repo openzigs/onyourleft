@@ -225,6 +225,27 @@ describe('reading a code — every other thing is refused', () => {
     expect(refusalOf(withField('c', ['192.168.1.2:0']))).toBe('not-local');
   });
 
+  it('judges the candidates before the secret — the order #550’s fix chose, pinned', () => {
+    // A bad secret AND a public candidate: the candidate's refusal wins,
+    // because the secret is decoded last (where its type is narrowed). Either
+    // answer names nothing of the code (`PAIRING_REFUSAL_TEXT`); this pins
+    // WHICH, so a reorder is a decision rather than a drift.
+    const both = (candidates: readonly string[]): string => {
+      const body = JSON.parse(offerText().slice(PAIRING_CODE_PREFIX.length)) as Record<
+        string,
+        unknown
+      >;
+      body['k'] = 'AAAA';
+      body['c'] = candidates;
+      return `${PAIRING_CODE_PREFIX}${JSON.stringify(body)}`;
+    };
+    expect(refusalOf(both(['203.0.113.9:5000']))).toBe('not-local');
+    expect(refusalOf(both([]))).toBe('no-candidate');
+    expect(refusalOf(both(['192.168.1.2']))).toBe('malformed');
+    // …and with good candidates, the bad secret is still refused.
+    expect(refusalOf(both(['192.168.1.2:5000']))).toBe('malformed');
+  });
+
   it('refuses a code with no candidate at all', () => {
     expect(refusalOf(withField('c', []))).toBe('no-candidate');
   });

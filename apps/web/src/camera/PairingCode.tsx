@@ -35,8 +35,15 @@ export type PairingCodeDrawer = typeof pairingCodeModules;
 
 /**
  * Load the drawing library. The module system keeps what it has loaded, so a
- * second code costs a resolved promise rather than a fetch; nothing here
- * remembers a failure, so the next code shown asks again.
+ * second code costs a resolved promise rather than a fetch.
+ *
+ * ⚠️ **It may keep a failure too** (#550's second review): the HTML module
+ * map has historically cached a failed fetch for the life of the page
+ * (whatwg/html#6768), and whether the pinned Chromium and the Android WebView
+ * have stopped doing so was not confirmed. So nothing here promises that a
+ * second try on the same page asks the network again, and
+ * {@link PAIRING_CODE_UNDRAWN} tells the rider to reload rather than to leave
+ * the screen and come back.
  */
 export async function loadPairingCodeDrawer(): Promise<PairingCodeDrawer> {
   return (await import('./side-link-qr')).pairingCodeModules;
@@ -46,7 +53,8 @@ export async function loadPairingCodeDrawer(): Promise<PairingCodeDrawer> {
 export const PAIRING_CODE_DRAWING = 'Drawing the pairing code…';
 /** What stands in its place when the drawing library would not load. */
 export const PAIRING_CODE_UNDRAWN =
-  'This device could not draw the pairing code. Leave this screen and open it again to retry.';
+  'This device could not load what draws the pairing code. Reload the page, or close the app and ' +
+  'open it again, then try again.';
 
 /** The quiet zone, in modules: the QR specification's four. */
 const QUIET_ZONE = 4;

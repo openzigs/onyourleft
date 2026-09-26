@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import type { CodePixels } from './camera-port';
-import { CameraController } from './session';
+import { CameraController, PAIRING_READER_UNAVAILABLE } from './session';
 import { pairingCodeText } from './side-link-code';
 import { pairingCodeFromPixels, pairingCodeModules } from './side-link-qr';
 import { photographedCode as photographed, scriptedCamera } from './testing';
@@ -122,6 +122,20 @@ describe('reading a code with the camera — CameraController.readPairingCode', 
     expect(controller.state().captured).toBe(0);
   });
 
+  it('says the reader is unavailable, distinctly, when its chunk will not load — #550’s second review', async () => {
+    const camera = scriptedCamera({ codePixels: () => photographed(pairingCodeModules(OFFER)) });
+    const controller = new CameraController({
+      port: camera.port,
+      schedule: () => () => undefined,
+      loadCodeReader: async () => Promise.reject(new Error('the chunk would not load')),
+    });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    await controller.turnOn();
+    await expect(controller.readPairingCode()).resolves.toBe(PAIRING_READER_UNAVAILABLE);
+    // Nothing was read off the camera for a reader that is not there.
+    expect(camera.calls).not.toContain('code');
+  });
+
   it('never rejects when the read fails', async () => {
     const { controller } = controllerOn(() => {
       throw new Error('the camera went away');
@@ -162,7 +176,28 @@ describe('the two QR libraries stay out of the entry chunk — #550’s review',
   }
 
   it('is reached from production code by a dynamic import and nothing else', () => {
-    const staticImport = /^\s*import\s+(?!type\b)[^;]*from\s+'[^']*\/side-link-qr'/m;
+    // Every static form that pulls the module into the importing chunk:
+    // `import … from`, `export … from` (a re-export) and a bare side-effect
+    // `import '…'` (#550's second review). `import type` / `export type` are
+    // erased and allowed.
+    const staticImport =
+      /^\s*(?:(?:import|export)\s+(?!type\b)[^;]*from\s+|import\s+)'[^']*\/side-link-qr(?:\.ts)?'/m;
+    const probes = [
+      "import { pairingCodeModules } from './side-link-qr';",
+      "export { pairingCodeModules } from './side-link-qr';",
+      "export * from '../camera/side-link-qr';",
+      "import './side-link-qr';",
+    ];
+    for (const probe of probes) {
+      expect(staticImport.test(probe), probe).toBe(true);
+    }
+    for (const allowed of [
+      "import type { pairingCodeModules } from './side-link-qr';",
+      "export type { PairingCodeDrawer } from './side-link-qr';",
+      "const loaded = await import('./side-link-qr');",
+    ]) {
+      expect(staticImport.test(allowed), allowed).toBe(false);
+    }
     const reachers = productionSources(SOURCE_ROOT)
       .filter((file) => staticImport.test(readFileSync(file, 'utf8')))
       .map((file) => relative(SOURCE_ROOT, file));

@@ -59,7 +59,7 @@ import type { SideCameraLinkPort } from '../camera/side-camera-link-port';
 import { PairingCode } from '../camera/PairingCode';
 import { PAIRING_REFUSAL_TEXT, type PairingRefusal } from '../camera/side-link-code';
 import type { PhoneSidePairing, SidePairingPort } from '../camera/side-pairing-port';
-import { usePairingScan } from '../camera/usePairingScan';
+import { PAIRING_READER_UNLOADED, usePairingScan } from '../camera/usePairingScan';
 import { CAMERA_NO_PORT } from './CameraView';
 
 /** The id the section is named by. */
@@ -387,7 +387,8 @@ type PairingStep =
   | { readonly kind: 'scan' }
   | { readonly kind: 'answering' }
   | { readonly kind: 'answer'; readonly answer: PhoneSidePairing }
-  | { readonly kind: 'failed' };
+  | { readonly kind: 'failed' }
+  | { readonly kind: 'unavailable' };
 
 /**
  * Read the tablet's code, answer it, show the answer, and hand the link to the
@@ -405,18 +406,28 @@ function PhonePairing({
   const [step, setStep] = useState<PairingStep>({ kind: 'scan' });
   const [refusal, setRefusal] = useState<PairingRefusal | undefined>(undefined);
 
-  usePairingScan(controller, step.kind === 'scan', (code) => {
-    setStep({ kind: 'answering' });
-    void pairing.answerSideCamera(code).then((made) => {
-      if (typeof made === 'object') {
-        setRefusal(undefined);
-        setStep({ kind: 'answer', answer: made });
-      } else {
-        setRefusal(made);
-        setStep({ kind: 'scan' });
-      }
-    });
-  });
+  usePairingScan(
+    controller,
+    step.kind === 'scan',
+    (code) => {
+      setStep({ kind: 'answering' });
+      void pairing.answerSideCamera(code).then((made) => {
+        if (typeof made === 'object') {
+          setRefusal(undefined);
+          setStep({ kind: 'answer', answer: made });
+        } else {
+          setRefusal(made);
+          setStep({ kind: 'scan' });
+        }
+      });
+    },
+    () => {
+      // The reader would not load (#550's second review). The camera is the
+      // session's — the rider is framing with it — so it stays on; the scan
+      // stops and says so rather than "Looking…" for ever.
+      setStep({ kind: 'unavailable' });
+    },
+  );
 
   useEffect(() => {
     if (step.kind !== 'answer') {
@@ -459,6 +470,13 @@ function PhonePairing({
           its camera can see this code.
         </p>
       </>
+    );
+  }
+  if (step.kind === 'unavailable') {
+    return (
+      <StatusMessage tone="warning" live>
+        {PAIRING_READER_UNLOADED}
+      </StatusMessage>
     );
   }
   if (step.kind === 'failed') {

@@ -54,6 +54,7 @@ import type {
   CameraProblemKind,
   CameraSession,
   CapturedFrame,
+  CodePixels,
   PreviewSurface,
 } from './camera-port';
 import { CameraCaptureError } from './camera-port';
@@ -348,7 +349,34 @@ export interface CameraControllerOptions {
    * drives the branch.
    */
   readonly analysis?: (() => AnalysisPort | undefined) | undefined;
+  /**
+   * How the pairing-code reader is loaded — #529. Defaults to
+   * {@link loadPairingCodeReader}, the lazy chunk; a test's way to make that
+   * load fail. Production leaves it alone.
+   */
+  readonly loadCodeReader?: (() => Promise<PairingCodeReader>) | undefined;
 }
+
+/** What reads a code out of a frame: `side-link-qr.ts` §`pairingCodeFromPixels`. */
+export type PairingCodeReader = (pixels: CodePixels) => string | undefined;
+
+/**
+ * Load the QR reader — the only production way `side-link-qr.ts` is reached
+ * from here, and deliberately a dynamic import (#550's review): the reader is
+ * most of what pairing added to the bundle and is needed only while a code is
+ * looked for.
+ */
+export async function loadPairingCodeReader(): Promise<PairingCodeReader> {
+  return (await import('./side-link-qr')).pairingCodeFromPixels;
+}
+
+/**
+ * What {@link CameraController.readPairingCode} answers when the reader itself
+ * would not load — #550's second review. Distinct from "no code in this frame",
+ * because a scan that treated it as that would look for ever, re-asking for a
+ * chunk every tick with the camera on and nothing said.
+ */
+export const PAIRING_READER_UNAVAILABLE: unique symbol = Symbol('pairing reader unavailable');
 
 /** A promise that settles after `milliseconds`, on the browser's own timer. */
 export async function browserWait(milliseconds: number): Promise<void> {
@@ -380,6 +408,7 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
   readonly #clock: () => number;
   readonly #wait: (milliseconds: number) => Promise<void>;
   readonly #analysis: (() => AnalysisPort | undefined) | undefined;
+  readonly #loadCodeReader: () => Promise<PairingCodeReader>;
   readonly #listeners = new Set<() => void>();
 
   #consent: CameraConsent = NO_CONSENT;
@@ -419,6 +448,7 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
     this.#clock = options.clock ?? Date.now;
     this.#wait = options.wait ?? browserWait;
     this.#analysis = options.analysis;
+    this.#loadCodeReader = options.loadCodeReader ?? loadPairingCodeReader;
   }
 
   /** The current answer. Cheap; call it in a render. */
@@ -585,9 +615,11 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
    * anything but a code (D-4).
    *
    * @returns the code's text, or `undefined` when there was no camera, no code,
-   * or the read failed. Never rejects: the screen reads again on its next tick.
+   * or the read failed; or {@link PAIRING_READER_UNAVAILABLE} when the reader
+   * itself would not load, which the scan stops on rather than retrying.
+   * Never rejects.
    */
-  async readPairingCode(): Promise<string | undefined> {
+  async readPairingCode(): Promise<string | undefined | typeof PAIRING_READER_UNAVAILABLE> {
     // No consent check of its own: a session exists only after `turnOn`, which
     // refuses without consent, and `revoke` ends it — so a running session IS
     // the consent, and a second check here could never fire.
@@ -595,13 +627,16 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
     if (session === undefined || !session.live) {
       return undefined;
     }
+    let read: PairingCodeReader;
     try {
-      // ⚠️ Loaded here and nowhere earlier (#550's review): the QR reader is
-      // most of what pairing added to the bundle, and it is needed only while
-      // a code is being looked for — never on a launch. A chunk that will not
-      // load is a read that found nothing, like every other failure here.
-      const { pairingCodeFromPixels } = await import('./side-link-qr');
-      return pairingCodeFromPixels(await session.readCodePixels());
+      read = await this.#loadCodeReader();
+    } catch {
+      // Nothing of the error is read (ADR 0029 D-8): a chunk URL is not the
+      // rider's to act on, and the sentence the screen shows is fixed.
+      return PAIRING_READER_UNAVAILABLE;
+    }
+    try {
+      return read(await session.readCodePixels());
     } catch {
       return undefined;
     }

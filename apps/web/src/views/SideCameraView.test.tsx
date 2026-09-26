@@ -22,6 +22,7 @@ import { CONNECT_LIMIT_MILLISECONDS, sidePairingPort } from '../camera/side-link
 import { PAIRING_REFUSAL_TEXT } from '../camera/side-link-code';
 import { pairingCodeModules } from '../camera/side-link-qr';
 import type { SidePairingPort, TabletSidePairing } from '../camera/side-pairing-port';
+import { PAIRING_READER_UNLOADED } from '../camera/usePairingScan';
 import {
   flushSideLink,
   manualSchedule,
@@ -266,7 +267,9 @@ describe('pairing the phone with the tablet — #529', () => {
     await settle();
   }
 
-  async function pairingPhone(options: { readonly showAnswer?: boolean } = {}) {
+  async function pairingPhone(
+    options: { readonly showAnswer?: boolean; readonly readerFails?: boolean } = {},
+  ) {
     const network = sidePeerNetwork();
     const time = virtualTime();
     const port = sidePairingPort({
@@ -299,15 +302,24 @@ describe('pairing the phone with the tablet — #529', () => {
     const camera = scriptedCamera({
       codePixels: () => photographedCode(pairingCodeModules(shown)),
     });
+    let readerLoads = 0;
     const controller = new CameraController({
       port: camera.port,
       schedule: manualSchedule().schedule,
+      ...(options.readerFails === true
+        ? {
+            loadCodeReader: async () => {
+              readerLoads += 1;
+              return Promise.reject(new Error('the chunk would not load'));
+            },
+          }
+        : {}),
     });
     mounted = await mount(
       <SideCameraView controller={controller} pairing={phonePort} timers={time} />,
     );
     await settle();
-    return { tablet, camera, answers, time };
+    return { tablet, camera, answers, time, readerLoads: () => readerLoads };
   }
 
   it('reads the tablet’s code, shows its own, and is paired once the tablet reads it', async () => {
@@ -375,5 +387,19 @@ describe('pairing the phone with the tablet — #529', () => {
     expect(document.body.textContent).toContain('The tablet did not connect');
     await press('Scan the tablet’s code again');
     expect(document.body.textContent).toContain('Looking for the tablet’s code');
+  });
+
+  it('stops looking, and says so, when the code reader will not load — #550’s second review', async () => {
+    const { camera, readerLoads } = await pairingPhone({ readerFails: true });
+    await tick();
+    await press('Turn the camera on');
+    await scanOnce();
+    await scanOnce();
+    await scanOnce();
+    expect(document.body.textContent).toContain(PAIRING_READER_UNLOADED);
+    expect(document.body.textContent).not.toContain('Looking for the tablet’s code');
+    // Asked once, not every tick with the camera running.
+    expect(readerLoads()).toBe(1);
+    expect(camera.calls).not.toContain('code');
   });
 });

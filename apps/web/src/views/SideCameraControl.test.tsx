@@ -18,6 +18,7 @@ import { PAIRING_REFUSAL_TEXT } from '../camera/side-link-code';
 import { pairingCodeModules } from '../camera/side-link-qr';
 import type { PhoneSidePairing } from '../camera/side-pairing-port';
 import type { SideLinkEvent } from '../camera/side-camera-link-port';
+import { PAIRING_READER_UNLOADED } from '../camera/usePairingScan';
 import {
   flushSideLink,
   manualSchedule,
@@ -63,7 +64,7 @@ async function scanOnce(): Promise<void> {
   await settle();
 }
 
-async function tablet(options: { readonly agreed?: boolean } = {}) {
+async function tablet(options: { readonly agreed?: boolean; readonly readerFails?: boolean } = {}) {
   const network = sidePeerNetwork();
   const time = virtualTime();
   const port = sidePairingPort({
@@ -83,9 +84,18 @@ async function tablet(options: { readonly agreed?: boolean } = {}) {
         : photographedCode(pairingCodeModules(shown));
     },
   });
+  let readerLoads = 0;
   const controller = new CameraController({
     port: camera.port,
     schedule: manualSchedule().schedule,
+    ...(options.readerFails === true
+      ? {
+          loadCodeReader: async () => {
+            readerLoads += 1;
+            return Promise.reject(new Error('the chunk would not load'));
+          },
+        }
+      : {}),
   });
   if (options.agreed !== false) {
     controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
@@ -105,7 +115,15 @@ async function tablet(options: { readonly agreed?: boolean } = {}) {
   const holdUp = (code: string | undefined): void => {
     inView = code;
   };
-  return { port, camera, controller, phoneReads, time, holdUp };
+  return {
+    port,
+    camera,
+    controller,
+    phoneReads,
+    time,
+    holdUp,
+    readerLoads: () => readerLoads,
+  };
 }
 
 describe('pairing, on the tablet', () => {
@@ -147,6 +165,51 @@ describe('pairing, on the tablet', () => {
     mounted?.unmount();
     mounted = undefined;
     expect(camera.calls).toContain('stop');
+  });
+
+  it('turns a camera still coming on off again when the screen went away first — #550’s second review', async () => {
+    // The review's probe: `turnOn` held behind a promise, the screen closed
+    // while it was pending, then released. Before the fix the camera came on
+    // with no screen owning it and `live` stayed true.
+    const { camera, controller } = await tablet();
+    const realTurnOn = controller.turnOn.bind(controller);
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    controller.turnOn = async () => {
+      await gate;
+      return realTurnOn();
+    };
+    await press('Pair a phone');
+    await press('Read the phone’s code');
+    expect(camera.calls).not.toContain('start');
+    mounted?.unmount();
+    mounted = undefined;
+    release();
+    await settle();
+    await settle();
+    expect(camera.calls).toContain('start');
+    expect(controller.state().live).toBe(false);
+    expect(camera.calls).toContain('stop');
+  });
+
+  it('stops looking, turns its camera off and says so when the code reader will not load', async () => {
+    const { camera, controller, readerLoads } = await tablet({ readerFails: true });
+    await press('Pair a phone');
+    await press('Read the phone’s code');
+    expect(controller.state().live).toBe(true);
+    await scanOnce();
+    await scanOnce();
+    await scanOnce();
+    expect(document.body.textContent).toContain(PAIRING_READER_UNLOADED);
+    expect(document.body.textContent).not.toContain('Looking for the phone’s code');
+    expect(button('Read the phone’s code')).toBeDefined();
+    // The camera this section turned on for the scan is off again, and the
+    // chunk was asked for once rather than every tick.
+    expect(controller.state().live).toBe(false);
+    expect(camera.calls).toContain('stop');
+    expect(readerLoads()).toBe(1);
   });
 
   it('leaves alone a camera the rider turned on themselves', async () => {
@@ -231,6 +294,21 @@ describe('pairing, on the tablet', () => {
     await settle();
     expect(port.currentSideCamera()?.control.sideControlState().ended).toBeUndefined();
     expect(document.querySelector('[data-oyl-pairing-code]')).not.toBeNull();
+  });
+
+  it('keeps the offer when a section showing it is remounted in the same tick', async () => {
+    // #550's second review: a per-instance flag let the OLD section's
+    // microtask void the offer the NEW one had already put on screen.
+    const { port, controller } = await tablet();
+    mounted?.unmount();
+    mounted = await mount(<SideCameraControl key="a" controller={controller} pairing={port} />);
+    await settle();
+    await press('Pair a phone');
+    await mounted.rerender(<SideCameraControl key="b" controller={controller} pairing={port} />);
+    await settle();
+    expect(port.currentSideCamera()?.control.sideControlState().ended).toBeUndefined();
+    expect(document.querySelector('[data-oyl-pairing-code]')).not.toBeNull();
+    expect(document.body.textContent).not.toContain(SIDE_PAIRING_END_TEXT['ended-here']);
   });
 
   it('says why a pairing could not even start', async () => {

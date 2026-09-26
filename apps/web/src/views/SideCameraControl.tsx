@@ -43,7 +43,7 @@ import type {
   SidePairingPort,
   TabletSidePairing,
 } from '../camera/side-pairing-port';
-import { usePairingScan } from '../camera/usePairingScan';
+import { PAIRING_READER_UNLOADED, usePairingScan } from '../camera/usePairingScan';
 
 /** What the tablet is told when reading the phone's code needs a camera it has not agreed to. */
 export const TABLET_SCAN_NEEDS_CONSENT =
@@ -51,6 +51,14 @@ export const TABLET_SCAN_NEEDS_CONSENT =
   'press “Read the phone’s code” again.';
 
 const TITLE_ID = 'oyl-side-control-title';
+
+/**
+ * How many {@link Offer} sections are showing each offer right now — the count
+ * the void on leaving reads, so a same-tick remount of a section showing the
+ * same offer does not void it (#550's second review). Keyed weakly by the
+ * pairing's control, so an offer nobody holds takes its count with it.
+ */
+const OFFERS_ON_SCREEN = new WeakMap<SideCameraControlPort, number>();
 
 export interface SideCameraControlProps {
   readonly controller: CameraController;
@@ -183,20 +191,24 @@ function Offer({
   // stays as the bound for a screen left open. An ANSWERED pairing is not
   // touched: it outlives the screen so the rider can ride.
   //
-  // ⚠️ **Decided a microtask later, and only if this section did not come
-  // straight back.** React's StrictMode (which `main.tsx` renders under)
+  // ⚠️ **Decided a microtask later, and only if no section showing THIS offer
+  // came straight back.** React's StrictMode (which `main.tsx` renders under)
   // runs every effect's cleanup and setup a second time on mount, in one
   // synchronous pass; ending the offer in the cleanup itself would void every
   // offer the moment it was shown, in development. `SideCameraControl.test.tsx`
-  // §"StrictMode" is the test that says so.
-  const shown = useRef(false);
+  // §"StrictMode" is the test that says so. ⚠️ **Counted per offer, not per
+  // component instance** (#550's second review): a remount in the same tick —
+  // a key change, a parent swapping its subtree — is a NEW instance showing
+  // the same offer, and a per-instance flag let the old one's microtask void
+  // the code the new one had just put on screen. §"a remount in the same tick"
+  // is its test.
   useEffect(() => {
-    shown.current = true;
     const { control } = pairing;
+    OFFERS_ON_SCREEN.set(control, (OFFERS_ON_SCREEN.get(control) ?? 0) + 1);
     return () => {
-      shown.current = false;
+      OFFERS_ON_SCREEN.set(control, (OFFERS_ON_SCREEN.get(control) ?? 1) - 1);
       queueMicrotask(() => {
-        if (!shown.current && !control.sideControlState().answered) {
+        if ((OFFERS_ON_SCREEN.get(control) ?? 0) === 0 && !control.sideControlState().answered) {
           control.endSidePairing();
         }
       });
@@ -205,9 +217,20 @@ function Offer({
 
   // Leaving mid-scan leaves no camera on that this section turned on (D-4:
   // *"discarded as soon as a code is read or scanning is cancelled"*).
+  //
+  // ⚠️ **Including a camera still coming on when the section went** (#550's
+  // second review): `turnOn` can take a few hundred milliseconds, or as long
+  // as the platform's permission prompt is up, and a section that left in
+  // that window found `turnedOn` false here and did nothing — then the camera
+  // came on with no screen owning it. `mounted` is what `startScanning` reads
+  // when the camera arrives, and it turns the camera straight back off.
+  // `side-camera.ts` §`turnOnForFraming` is the phone's half of the same rule.
+  const mounted = useRef(false);
   useEffect(() => {
+    mounted.current = true;
     const ours = turnedOn;
     return () => {
+      mounted.current = false;
       if (ours.current) {
         ours.current = false;
         controller.turnOff();
@@ -222,6 +245,13 @@ function Offer({
       return;
     }
     void controller.turnOn().then((failed) => {
+      if (!mounted.current) {
+        // Nobody is here to scan with it or to turn it off: off it goes.
+        if (failed === undefined) {
+          controller.turnOff();
+        }
+        return;
+      }
       if (failed === undefined) {
         turnedOn.current = true;
         setScanning(true);
@@ -235,20 +265,30 @@ function Offer({
     });
   }, [controller]);
 
-  usePairingScan(controller, scanning, (code) => {
-    void pairing.acceptSidePhoneCode(code).then((refused) => {
-      if (refused === undefined) {
-        // The control state now says `answered`, which replaces this section.
-        stopScanning();
-      } else if (refused !== 'wrong-code') {
-        // The tablet's own offer, read off its own screen's reflection, is
-        // the one refusal said nowhere: every other one is the rider's to act
-        // on, and scanning stops so the sentence is not replaced.
-        stopScanning();
-        setProblem(PAIRING_REFUSAL_TEXT[refused]);
-      }
-    });
-  });
+  usePairingScan(
+    controller,
+    scanning,
+    (code) => {
+      void pairing.acceptSidePhoneCode(code).then((refused) => {
+        if (refused === undefined) {
+          // The control state now says `answered`, which replaces this section.
+          stopScanning();
+        } else if (refused !== 'wrong-code') {
+          // The tablet's own offer, read off its own screen's reflection, is
+          // the one refusal said nowhere: every other one is the rider's to act
+          // on, and scanning stops so the sentence is not replaced.
+          stopScanning();
+          setProblem(PAIRING_REFUSAL_TEXT[refused]);
+        }
+      });
+    },
+    () => {
+      // The reader would not load: stop, turn off a camera this section turned
+      // on for the scan, and say so rather than "Looking…" for ever.
+      stopScanning();
+      setProblem(PAIRING_READER_UNLOADED);
+    },
+  );
 
   return (
     <>
