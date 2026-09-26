@@ -13,6 +13,7 @@ import {
   REALISTIC_SKYLINE_DEGREES,
   reflectedSkyColour,
   skyBandRadiance,
+  ridgeLift,
   skylineCrestFloor,
   skyRotation,
   skySunU,
@@ -269,5 +270,13 @@ describe('what the realistic world’s far end converges on — #544', () => {
       );
     }
     expect(skylineCrestFloor(0, 1_100, 0)).toBeCloseTo(0, 10);
+  });
+
+  it('lifts the whole ridge by the gap between its LOWEST crest and the floor, or not at all', () => {
+    expect(ridgeLift([40, 10, 90], 60)).toBe(50);
+    expect(ridgeLift([40, 10, 90], 10)).toBe(0);
+    expect(ridgeLift([40, 10, 90], 5)).toBe(0);
+    expect(ridgeLift([40, 10, 90], Number.NEGATIVE_INFINITY)).toBe(0);
+    expect(ridgeLift([], 60)).toBe(0);
   });
 });

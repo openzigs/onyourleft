@@ -2265,6 +2265,14 @@ test.describe('the realistic world — ADR 0026', () => {
     }
     // …and none where it meets the fog: the ring's foot IS the fog's colour.
     expect(measured.horizonColours.foot).toEqual(measured.horizonColours.fog);
+    // The control's fog and foot are the stylised world's own horizon — what
+    // the owner saw — and not the photographed sky's.
+    expect(measured.horizonControlExpected.length).toBe(3);
+    expect(measured.horizonColoursControl.foot).toEqual(measured.horizonColoursControl.fog);
+    measured.horizonControlExpected.forEach((channel, index) =>
+      expect(measured.horizonColoursControl.fog[index]).toBeCloseTo(channel, 4),
+    );
+    expect(measured.horizonColoursControl.fog).not.toEqual(measured.horizonColours.fog);
     // The control is today's pale band, and it must fail where the owner saw
     // it fail: on the level, a ridge BRIGHTER than the sky behind it…
     const control = (frame: string): HorizonReading[] =>

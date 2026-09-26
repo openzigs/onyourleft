@@ -19,7 +19,9 @@ import {
   horizonRelief,
   terrainCorridor,
 } from './landform';
-import { hillRoute, valleyRoute } from './route-fixtures-testing';
+import { hillRoute, northRoute, valleyRoute } from './route-fixtures-testing';
+import { cameraRig } from './camera';
+import { REALISTIC_HORIZON_HAZE_SHARE, ridgeLift, skylineCrestFloor } from './realistic-light';
 import { scatterSeed, type SceneryKind } from './scatter';
 import { corridorOrigin, roadCorridor } from './terrain';
 import {
@@ -42,6 +44,7 @@ import {
   GROUNDING_METRES,
   groundingShade,
   realisticStructureGeometry,
+  HORIZON_HAZE_SHARE,
   HorizonRing,
   ScatterBelt,
   SKY_GRADIENT_RISE,
@@ -213,8 +216,10 @@ describe('the distant hills a view draws — #458', () => {
       expect(positions.getY(top)).toBeCloseTo(relief.tops[segment] as number, 3);
       expect(positions.getY(segment * 3)).toBeCloseTo(relief.base, 3);
     }
-    // Round the CAMERA in plan, but at the route's own heights: a rider who
-    // climbs rises past the hills rather than carrying them up.
+    // Round the CAMERA in plan, but at the route's own heights: with no crest
+    // floor — the stylised world — a rider who climbs rises past the hills
+    // rather than carrying them up. The realistic world's floor changes that
+    // (#544); see "follows the rider's eye on a LEVEL route" below.
     expect([ring.mesh.position.x, ring.mesh.position.y, ring.mesh.position.z]).toEqual([
       40, 0, 900,
     ]);
@@ -293,6 +298,34 @@ describe('the distant hills a view draws — #458', () => {
     ring.update(relief, world, pose, HORIZON, floor);
     ring.update(relief, world, pose, HORIZON);
     expect(positions.getY(2)).toBeCloseTo(relief.tops[0] as number, 3);
+  });
+
+  it('follows the rider’s eye on a LEVEL route in the realistic world, not only high up — #544', () => {
+    // The trade #589's review asked to be stated truly: the crest floor is the
+    // eye plus about 96 m, and a route's own crests stand 30 to 150 m above
+    // the middle of its elevation, so on the level the lowest crest is under
+    // the floor and the whole ridge is lifted — and then moves with the eye.
+    const level = northRoute(2_000, () => 0);
+    const levelRelief = horizonRelief(level, corridorOrigin(level), scatterSeed(level));
+    const eyeAt = (roadY: number): number =>
+      cameraRig({ ...pose, y: roadY, eyeRoadY: roadY, targetRoadY: roadY }).eye.y;
+    const floorAt = (roadY: number): number =>
+      skylineCrestFloor(eyeAt(roadY), HORIZON_RADIUS_METRES);
+    expect(ridgeLift(levelRelief.tops, floorAt(0))).toBeGreaterThan(0);
+    const ring = new HorizonRing();
+    const positions = ring.mesh.geometry.getAttribute('position') as unknown as Attribute;
+    ring.update(levelRelief, world, pose, HORIZON, floorAt(0));
+    const before = positions.getY(2);
+    ring.update(levelRelief, world, pose, HORIZON, floorAt(20));
+    // Twenty metres up the eye, twenty metres up the ridge: one for one.
+    expect(positions.getY(2) - before).toBeCloseTo(eyeAt(20) - eyeAt(0), 3);
+  });
+
+  it('hazes the realistic ridge more than the stylised one — #544', () => {
+    // `REALISTIC_HORIZON_HAZE_SHARE`'s argument is a direction — AgX pulls
+    // the stylised share's ridge toward the ground — and the browser gate's
+    // 0.5 bound does not hold it (0.7 still reads 0.51 there, B5 in #589).
+    expect(REALISTIC_HORIZON_HAZE_SHARE).toBeGreaterThan(HORIZON_HAZE_SHARE);
   });
 
   it('hazes the ridge by the share it is handed — #544', () => {

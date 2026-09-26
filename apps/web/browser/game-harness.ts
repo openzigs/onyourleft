@@ -94,7 +94,8 @@ import { GRADIENT_TINT_FULL_SCALE_PERCENT } from '../src/game/terrain';
 import { structuresAt } from '../src/game/settlements';
 import { waterways } from '../src/game/waterways';
 import { HORIZON_RADIUS_METRES, HORIZON_SEGMENTS, VERGE_DROP_METRES } from '../src/game/landform';
-import { skylineCrestFloor } from '../src/game/realistic-light';
+import { ridgeLift, skylineCrestFloor } from '../src/game/realistic-light';
+import { srgbByteToLinear } from '../src/game/scenery-palette';
 import { buildingPlan, onFace, OPENING_RECESS_METRES } from '../src/game/buildings';
 import {
   drawnWorldOf,
@@ -3185,6 +3186,12 @@ export interface RealisticMeasurement {
     readonly fog: readonly number[];
     readonly foot: readonly number[];
   };
+  /**
+   * What the control's fog and foot must be: the last control frame's own
+   * `world.horizonColour` — the stylised world's pale horizon — in linear
+   * light, so the gate pins that the control really is today's band.
+   */
+  readonly horizonControlExpected: readonly number[];
 }
 
 /**
@@ -3249,6 +3256,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   horizonControl: [],
   horizonColours: { fog: [], foot: [] },
   horizonColoursControl: { fog: [], foot: [] },
+  horizonControlExpected: [],
 };
 
 /** Relative luminance of an sRGB pixel, WCAG 2.2's own formula. */
@@ -3295,10 +3303,11 @@ const CREST_CLEARANCE_PIXELS = [4, 9] as const;
  * Reads the distant hills in one column of a frame just drawn — #544.
  *
  * ⚠️ **Aimed from the geometry**, like every probe here since #424 (@see
- * inTheFrame): the crest is the ring's own top at that bearing, lifted as
- * `three-renderer.ts` §`HorizonRing.update` lifts it when the horizon is the
- * photographed sky's — so the probe and the drawn ridge cannot disagree about
- * where the crest is.
+ * inTheFrame): the crest is the ring's own top at that bearing, lifted by
+ * the same `realistic-light.ts` §`ridgeLift` `three-renderer.ts`
+ * §`HorizonRing.update` draws with when the horizon is the photographed sky's
+ * — one function, so the probe and the drawn ridge cannot disagree about where
+ * the crest is.
  */
 function horizonReading(
   gl: WebGL2RenderingContext,
@@ -3319,10 +3328,7 @@ function horizonReading(
   const from = tops[lower % HORIZON_SEGMENTS] as number;
   const to = tops[(lower + 1) % HORIZON_SEGMENTS] as number;
   const lift = lifted
-    ? Math.max(
-        0,
-        skylineCrestFloor(cameraRig(pose).eye.y, HORIZON_RADIUS_METRES) - Math.min(...tops),
-      )
+    ? ridgeLift(tops, skylineCrestFloor(cameraRig(pose).eye.y, HORIZON_RADIUS_METRES))
     : 0;
   const onTheRing = (y: number): { readonly x: number; readonly y: number } =>
     pixelFor(frame, canvas, {
@@ -3529,6 +3535,15 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const horizonColours = horizonColoursOf(view);
   const horizonControl = readHorizon(false);
   const horizonColoursControl = horizonColoursOf(view);
+  // The control's last frame is the descent's; its fog is that frame's world
+  // horizon, as `three-renderer.ts` §`#updateWorld` sets it with no sky.
+  const lastControlWorld = horizonFrames[horizonFrames.length - 1]?.frame.world;
+  const horizonControlExpected =
+    lastControlWorld === undefined
+      ? []
+      : [16, 8, 0].map((shift) =>
+          srgbByteToLinear((lastControlWorld.horizonColour >> shift) & 0xff),
+        );
   horizonFromSkyOf(view, true);
 
   const climbLuminance = roadLuminance(riding(climb, 400));
@@ -3737,6 +3752,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     horizonControl,
     horizonColours,
     horizonColoursControl,
+    horizonControlExpected,
   };
 }
 

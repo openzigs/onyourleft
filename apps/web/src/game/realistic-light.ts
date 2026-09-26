@@ -291,10 +291,19 @@ export const REALISTIC_HORIZON_HAZE_SHARE = 0.8;
  * `radiusMetres` — so no crest is ever drawn below the photograph's own
  * skyline, and the sky above every hill is sky (#544).
  *
- * ⚠️ **It follows the EYE**, which the ring's own heights deliberately do not:
- * a rider who climbs high enough carries the realistic hills up with them
- * rather than looking down on the photographed field. That is the trade — the
- * alternative is the field drawn above the world.
+ * ⚠️ **It follows the EYE**, which the ring's own heights deliberately do not
+ * — and it binds on practically EVERY realistic frame, not only once a rider
+ * is high up. The floor is the eye plus `1100 · tan 5° ≈ 96 m`; the route's
+ * own crests stand 30 to 150 m above the middle of its elevation
+ * (`landform.ts` §`HORIZON_RISE_METRES`), and on a level route the eye is
+ * about 2 m above that middle, so the lowest of the 48 crests is almost
+ * always under the floor. The whole ridge is then lifted by
+ * {@link ridgeLift} and, from there on, rises and falls with the rider's eye
+ * one for one: in the realistic world the distant hills behave like a
+ * backdrop at infinity, and a rider who climbs does NOT rise past them. That
+ * is the trade — the alternative is the photographed field drawn above the
+ * world — and validation 0002 Part AG asks the owner to judge it on a climb
+ * and a descent.
  */
 export function skylineCrestFloor(
   eyeY: number,
@@ -302,6 +311,26 @@ export function skylineCrestFloor(
   skylineDegrees: number = REALISTIC_SKYLINE_DEGREES,
 ): number {
   return eyeY + radiusMetres * Math.tan((skylineDegrees * Math.PI) / 180);
+}
+
+/**
+ * How far the whole horizon ring is lifted so that its lowest crest stands at
+ * `floor`: `max(0, floor − min(tops))`, in metres — #544.
+ *
+ * The WHOLE ridge moves by this one amount, keeping its shape; clamping each
+ * crest to the floor instead laid every low crest on one level line, which is
+ * a hard straight edge of its own. `three-renderer.ts` §`HorizonRing.update`
+ * draws with it and the browser gate's probe aims with it, so the two cannot
+ * disagree about where a crest is. A floor of `-Infinity` — the stylised
+ * world's — lifts nothing, and so does an empty ring.
+ */
+export function ridgeLift(tops: ArrayLike<number>, floor: number): number {
+  let lowest = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < tops.length; index += 1) {
+    lowest = Math.min(lowest, tops[index] as number);
+  }
+  const lift = floor - lowest;
+  return lift > 0 ? lift : 0;
 }
 
 /**

@@ -274,6 +274,7 @@ import {
   REALISTIC_HORIZON_HAZE_SHARE,
   reflectedSkyColour,
   skyBandRadiance,
+  ridgeLift,
   skylineCrestFloor,
   skyRotation,
   WATER_HORIZON_BAND,
@@ -3225,7 +3226,9 @@ export class HorizonRing {
    * `crestFloor` is the lowest any crest is drawn, in local metres, reached by
    * lifting the whole ridge so its shape is kept: nothing in
    * the stylised world, and in the realistic world the photograph's own
-   * skyline (`realistic-light.ts` §`skylineCrestFloor`, #544). `hazeShare`
+   * skyline (`realistic-light.ts` §`skylineCrestFloor`, #544) — which follows
+   * the eye and binds on practically every realistic frame, so there the
+   * lifted ridge moves up and down with the rider. `hazeShare`
    * is how much of `horizon` the ridge carries: {@link HORIZON_HAZE_SHARE},
    * or in the realistic world `realistic-light.ts` §`REALISTIC_HORIZON_HAZE_SHARE`.
    */
@@ -3243,9 +3246,7 @@ export class HorizonRing {
       // #544: the WHOLE ridge is lifted until its lowest crest meets the
       // floor, never each crest clamped to it — clamping flattened every low
       // crest onto one level line, which is a hard straight edge of its own.
-      let lowest = Number.POSITIVE_INFINITY;
-      for (const each of relief.tops) lowest = Math.min(lowest, each);
-      const lift = Math.max(0, crestFloor - lowest);
+      const lift = ridgeLift(relief.tops, crestFloor);
       for (let segment = 0; segment <= HORIZON_SEGMENTS; segment += 1) {
         const angle = (segment / HORIZON_SEGMENTS) * Math.PI * 2;
         const x = Math.cos(angle) * HORIZON_RADIUS_METRES;
@@ -3273,8 +3274,12 @@ export class HorizonRing {
       }
     }
     (this.#geometry.getAttribute('color') as BufferAttribute).needsUpdate = true;
-    // Only the ground plane's position follows the camera; the heights are the
-    // route's, so a rider who climbs rises past the hills rather than with them.
+    // Only the ground plane's position follows the camera. In the STYLISED
+    // world the heights are the route's, so a rider who climbs rises past the
+    // hills rather than with them. In the REALISTIC world that is not so
+    // (#544): the crest floor follows the eye and binds on practically every
+    // frame, so the lifted ridge rises and falls with the rider one for one —
+    // `realistic-light.ts` §`skylineCrestFloor` has the arithmetic.
     this.#mesh.position.set(pose.x, 0, pose.z);
   }
 
@@ -3289,8 +3294,12 @@ export class HorizonRing {
  * of the ground colour is what is left of a hill 1.1 km away. This
  * repository's own choice, by eye, against the 95 % `world.ts` fogs the
  * corridor's own far end by.
+ *
+ * Exported so `terrain-belt.test.ts` can hold the realistic world's share
+ * above it, which is the direction `realistic-light.ts`
+ * §`REALISTIC_HORIZON_HAZE_SHARE` argues for.
  */
-const HORIZON_HAZE_SHARE = 0.7;
+export const HORIZON_HAZE_SHARE = 0.7;
 
 /**
  * The procedural surface detail — #425's half that needs no asset.
@@ -6225,8 +6234,8 @@ export function filterWaterRipplesOf(view: GameView, on: boolean): void {
  * owner saw on the tablet must read back off the drawing buffer, or the
  * measurement with it on proves nothing about that band.
  *
- * @unwired reached only from the browser gate's harness; the product never
- * turns the photographed horizon off.
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`;
+ * the product never turns the photographed horizon off.
  */
 export function horizonFromSkyOf(view: GameView, on: boolean): void {
   if (view instanceof ThreeGameView) view.horizonFromSky(on);
@@ -6237,8 +6246,8 @@ export function horizonFromSkyOf(view: GameView, on: boolean): void {
  * #544: they are one colour, so where a hill meets the fog there is no edge.
  * `NaN`s for a view that is not this adapter's.
  *
- * @unwired reached only from the browser gate's harness; nothing in the render
- * path needs to ask.
+ * @test-facing read by `game-harness.ts` for the browser gate's foot-equals-fog
+ * assertion; nothing in the render path needs to ask.
  */
 export function horizonColoursOf(view: GameView): {
   readonly fog: readonly [number, number, number];

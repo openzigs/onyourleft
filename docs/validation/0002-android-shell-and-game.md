@@ -2951,6 +2951,16 @@ reproduces the pale band (`game.browser.spec.ts` §"#544"). Whether it looks rig
 only here. ⚠️ **The stylised world is unchanged**, and every stylised figure the browser gate prints
 is identical before and after.
 
+⚠️ **The trade, stated plainly.** In the realistic world the distant ridge follows the rider's
+height on nearly every frame, not only at the top of a climb. The 5° floor is the eye plus about
+96 m at the ring's 1.1 km, and the route's own crests stand only 30 to 150 m above the middle of
+its elevation, so on a level road the lowest crest is almost always under the floor. The whole
+ridge is then lifted, and from there it rises and falls with the rider one for one: it behaves like
+a backdrop at infinity. So in the realistic world a rider who climbs does **not** rise past the
+hills, and a rider who descends does not drop below them. (The stylised world keeps the route's
+own heights, and there the rider does rise past the hills.) AG3 and AG5 ask whether that reads as
+wrong.
+
 Same tablet, same debug-APK route as Part Z (§"Build and install"), from a `main` that has #544 in
 it. Choose the realistic world in Settings.
 
@@ -2958,7 +2968,8 @@ it. Choose the realistic world in Settings.
 |---|---|---|
 | AG1 | Ride the owner's own saved route on the level for a minute, looking past the trees on either side | The distant hills are a hazy grey-green, **darker** than the sky just above them and lighter than the grass near the road. No white film behind the trees |
 | AG2 | Watch where a hill meets the sky | A soft, low-contrast line, not a bright sheet with a hard straight top |
-| AG3 | Ride to the top of the route's biggest climb and look out over the descent | Hazy hills all round the horizon. None of the photograph's own field or treeline shows above them. ⚠️ The hills rise with you once you are high enough: that is the trade #544 made, and this step is where to say whether it reads as wrong |
+| AG3 | Ride to the top of the route's biggest climb and look out over the descent | Hazy hills all round the horizon. None of the photograph's own field or treeline shows above them. ⚠️ The hills stay at the same height in the view as they were at the bottom: they climbed with you. That is the trade #544 made (see above), and this step is where to say whether it reads as wrong |
+| AG5 | Ride a rolling stretch, or climb then descend, watching a distant hill against the trees in front of it | The distant ridge moves up and down with you one for one, while the nearer trees and ground do not. Say whether that reads as wrong: a ridge that visibly bobs with the rider is the new behaviour most likely to |
 | AG4 | The stylised world (`?world=stylised&panel=0&ladder=0`) at the same places | As it was before #544 |
 
 ### AG results
@@ -2969,5 +2980,6 @@ it. Choose the realistic world in Settings.
 | AG2 | | |
 | AG3 | | |
 | AG4 | | |
+| AG5 | | |
 
 **Phone (OEM, model, Android, WebView):** ______________  **Build:** ______________
