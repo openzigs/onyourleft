@@ -594,6 +594,19 @@ this path it means:
 
 Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
 
+- **2026-09-26** — **The tablet now speaks first on `control`, so D-4's *"sent as the first `control`
+  message"* is exact only as *"the phone's first message"*.**
+  [#568](https://github.com/openzigs/onyourleft/issues/568) caught Chromium dropping the phone's
+  secret when the phone sent it from inside `ondatachannel`. The send did not throw, the channel
+  said `open`, nothing was buffered, and the message never arrived. That happened about once in a
+  hundred pairings in CI. The phone's next message was then the first thing the tablet heard, and
+  D-4 correctly ended the pairing as *not our phone*. So the tablet now sends a `ping` (a D-3
+  message that carries nothing) when its channel opens, and again every heartbeat until the phone
+  has proved itself. The phone sends nothing until it has heard the tablet, and then sends the
+  secret first. **The rule is unchanged**: the secret is the phone's first message, anything else
+  first from the phone ends the pairing before another byte is read, and nothing the tablet sends
+  before proof carries any content. `camera/side-link.ts` §"Why the phone waits to be spoken to"
+  is the record, and `side-link.test.ts` reproduces the lost send.
 - **2026-09-26** — **The tablet shows a viewfinder while, and only while, it reads the phone's
   code, and it reads with its FRONT camera.** This relaxes the owner's #527 ruling in §Context —
   *"Preview on the tablet: **None.** … The tablet shows state only"* — for the seconds of pairing

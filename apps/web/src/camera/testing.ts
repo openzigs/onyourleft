@@ -446,6 +446,14 @@ export interface SidePeerNetworkOptions {
    * which is Chromium's (#530).
    */
   readonly maxMessageSize?: number | undefined;
+  /**
+   * Whether a message the ANSWERING end sends from inside its `ondatachannel`
+   * handler is lost, with no error and the channel still `open` — what
+   * Chromium did to the phone's first message about one pairing in a hundred
+   * in CI (#568). It is still recorded in `sent`, because the sender did send
+   * it. Default `false`.
+   */
+  readonly losesSendsInDataChannelEvent?: boolean | undefined;
 }
 
 /** A scripted peer, with what a test needs to see of it. */
@@ -503,6 +511,7 @@ export function sidePeerNetwork(options: SidePeerNetworkOptions = {}): {
   const network = {
     dropped: false,
     maxMessageSize: options.maxMessageSize ?? 262_144,
+    losesSendsInDataChannelEvent: options.losesSendsInDataChannelEvent ?? false,
     connects: options.connects ?? true,
     gathers: options.gathers ?? true,
     addresses: options.addresses ?? ((index: number) => [`192.168.1.${String(10 + index)}`]),
@@ -567,6 +576,7 @@ export async function flushSideLink(): Promise<void> {
 interface FakeNetwork {
   readonly dropped: boolean;
   readonly maxMessageSize: number;
+  readonly losesSendsInDataChannelEvent: boolean;
   readonly gathers: boolean;
   readonly addresses: (index: number) => readonly string[];
   tryConnect(): void;
@@ -593,7 +603,9 @@ function connect(offerer: FakeSidePeer, answerer: FakeSidePeer): void {
     channel.twin = twin;
     twin.readyState = 'open';
     answerer.channels.push(twin);
+    twin.handedOver = offerer.network.losesSendsInDataChannelEvent;
     answerer.ondatachannel?.({ channel: twin });
+    twin.handedOver = false;
     channel.readyState = 'open';
     channel.onopen?.();
   }
@@ -609,6 +621,8 @@ class FakeSideChannel implements ScriptedSideChannel {
   binaryType = 'blob';
   readyState = 'connecting';
   twin: FakeSideChannel | undefined;
+  /** Inside the answerer's `ondatachannel`, where a send may be lost (#568). */
+  handedOver = false;
   onopen: (() => void) | null = null;
   onclose: (() => void) | null = null;
   onmessage: ((event: { readonly data: unknown }) => void) | null = null;
@@ -643,7 +657,7 @@ class FakeSideChannel implements ScriptedSideChannel {
       this.sentBinary.push(data.slice(0));
     }
     const twin = this.twin;
-    if (this.network.dropped || twin === undefined) {
+    if (this.network.dropped || twin === undefined || this.handedOver) {
       return;
     }
     queueMicrotask(() => {
