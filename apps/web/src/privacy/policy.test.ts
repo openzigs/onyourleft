@@ -41,7 +41,13 @@ describe('the published privacy policy', () => {
     // Not a word count. Each of these is a claim the Data Safety form makes,
     // and a policy that stopped making one of them would contradict the form
     // while still being a valid Markdown file of the right length.
-    expect(text).toContain('We collect nothing');
+    // #558: the form now answers approximate location `collected: true` for
+    // the map's tile requests, so the policy's old "We collect nothing" opener
+    // contradicted it and is gone; what it says instead is who keeps what.
+    expect(text).not.toContain('We collect nothing');
+    expect(text.replace(/\s+/g, ' ')).toContain(
+      'Cloudflare, which runs the tile server for us, keeps a record of each map request — your IP address, the time, and your device or browser type, not which part of the map',
+    );
     expect(text.toLowerCase()).toContain('location');
     expect(text.toLowerCase()).toContain('heart rate');
     expect(text).toContain('Last updated:');

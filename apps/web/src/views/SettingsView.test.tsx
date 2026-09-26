@@ -973,8 +973,16 @@ describe('the ride map’s tiles — the owner’s decision of 2026-09-25', () =
     expect(copy).toContain('asks tiles.openzigs.com for the map around where you rode');
     expect(copy).toContain('sends the map area and your device’s IP address to tiles.openzigs.com');
     expect(copy).toContain('It sends no ride data');
-    // The no-record promise is made about the host this project runs.
-    expect(copy).toContain('we keep no record of the request');
+    // #558: about the host this project runs, the screen says what Cloudflare
+    // keeps and for how long — the retired "no record" promise was false.
+    expect(copy).toContain(
+      'Cloudflare, which runs tiles.openzigs.com for us, keeps a record of each map request — your IP address, the time, and your device or browser type, not which part of the map — that our Cloudflare account can see for up to 7 days.',
+    );
+    expect(copy).toContain('We don’t use it or share it.');
+    expect(copy).not.toContain('no record');
+    // #559's review: the tile is chosen by a Range header the kept record does
+    // not include, so the screen must not say the record names the tiles.
+    expect(copy).not.toContain('which map tiles were asked for');
     mounted.unmount();
 
     // A self-hoster's build names its own host, not ours.
@@ -985,9 +993,12 @@ describe('the ride map’s tiles — the owner’s decision of 2026-09-25', () =
     const theirCopy = theirs.container.querySelector('.oyl-map-tiles')?.textContent ?? '';
     expect(theirCopy).toContain('maps.example.net');
     expect(theirCopy).not.toContain('tiles.openzigs.com');
-    // …and it is never made about somebody else's server, whose logs this app
-    // cannot vouch for (#535 review).
+    // …and no retention claim is made either way about somebody else's server,
+    // whose logs this app knows nothing about (#535 review, #558).
     expect(theirCopy).not.toContain('no record');
+    expect(theirCopy).not.toContain('Cloudflare');
+    expect(theirCopy).not.toContain('7 days');
+    expect(theirCopy).not.toContain('keeps');
     theirs.unmount();
   });
 

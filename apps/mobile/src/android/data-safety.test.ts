@@ -132,13 +132,69 @@ describe('the rule that decides whether the declaration is still true', () => {
 });
 
 describe('the declaration filed on Play', () => {
-  it('declares no location collection and no sharing of it', () => {
-    const location = DATA_SAFETY_DECLARATION.find((answer) =>
-      answer.dataType.startsWith('Location'),
+  it('declares approximate location collected for the map, optional and not shared — #558', () => {
+    // ⚠️ #534's answer was `collected: false` on Play's ephemeral-processing
+    // exemption, and #558 measured it false: the tile host's standard
+    // analytics keep the IP address, the time and the user agent of each
+    // request for up to 7 days.
+    const approximate = DATA_SAFETY_DECLARATION.find(
+      (answer) => answer.dataType === 'Location — approximate location',
     );
-    expect(location, 'the form has a Location row whether or not we collect any').toBeDefined();
-    expect(location?.collected).toBe(false);
-    expect(location?.shared).toBe(false);
+    expect(approximate, 'the form has no approximate-location row').toBeDefined();
+    expect(approximate?.collected).toBe(true);
+    // Cloudflare is a service provider processing for this project.
+    expect(approximate?.shared).toBe(false);
+    // Settings → Ride map turns the request off and the app still works.
+    expect(approximate?.optional).toBe(true);
+    expect(approximate?.purposes).toStrictEqual(['App functionality']);
+    // The `why` is what is filed; it has to say what is kept and for how long.
+    expect(approximate?.why).toContain('up to 7 days');
+    expect(approximate?.why).toContain('IP address');
+    expect(approximate?.why).toContain('does not use or share');
+  });
+
+  it('rests approximate-not-precise on what is KEPT, not on a tile being an area — #559', () => {
+    // #559's review: Play draws the line by area (precise < 3 km²) and a z15
+    // tile is 0.64–1.23 km², so "a tile names an area, not a point" would make
+    // the row PRECISE if the tile were retained. It is not: the basemap is one
+    // PMTiles file, the tile is chosen by a Range header the analytics do not
+    // record, and every request's path is the same (measured 2026-09-26). The
+    // filed words have to say that, or the next reader flips the row for the
+    // wrong reason — or keeps it for one.
+    const approximate = DATA_SAFETY_DECLARATION.find(
+      (answer) => answer.dataType === 'Location — approximate location',
+    );
+    const precise = DATA_SAFETY_DECLARATION.find(
+      (answer) => answer.dataType === 'Location — precise location',
+    );
+    expect(approximate?.why).toContain('not which part of the map');
+    expect(approximate?.why).toContain('byte range that the record does not include');
+    expect(approximate?.why).not.toContain('tile path');
+    expect(approximate?.why).not.toContain('roughly where the ride was');
+    expect(precise?.why).toContain('handled while the request is served and not kept');
+  });
+
+  it('declares no precise location collection and no sharing of it', () => {
+    const precise = DATA_SAFETY_DECLARATION.find(
+      (answer) => answer.dataType === 'Location — precise location',
+    );
+    expect(
+      precise,
+      'the form has a precise-location row whether or not we collect any',
+    ).toBeDefined();
+    expect(precise?.collected).toBe(false);
+    expect(precise?.shared).toBe(false);
+  });
+
+  it('gives every collected row a purpose, and no uncollected row one', () => {
+    for (const answer of DATA_SAFETY_DECLARATION) {
+      if (answer.collected) {
+        expect(answer.purposes?.length ?? 0, answer.dataType).toBeGreaterThan(0);
+        expect(answer.optional, answer.dataType).toBeDefined();
+      } else {
+        expect(answer.purposes, answer.dataType).toBeUndefined();
+      }
+    }
   });
 
   it('answers the health rows rather than omitting them', () => {
@@ -180,11 +236,11 @@ describe('the declaration filed on Play', () => {
     expect(photos?.why).toContain('never stored, shown or sent on');
   });
 
-  it('collects nothing else — the camera change moved one row and only one', () => {
+  it('collects nothing else — the map and the camera, and nothing more', () => {
     const collected = DATA_SAFETY_DECLARATION.filter((answer) => answer.collected).map(
       (answer) => answer.dataType,
     );
-    expect(collected).toStrictEqual(['Photos and videos']);
+    expect(collected).toStrictEqual(['Location — approximate location', 'Photos and videos']);
     for (const answer of DATA_SAFETY_DECLARATION) {
       expect(answer.shared, answer.dataType).toBe(false);
     }

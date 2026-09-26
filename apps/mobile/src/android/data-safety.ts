@@ -27,6 +27,12 @@
  * that is worth having precisely because it arrives looking like a version bump
  * rather than like a policy decision.
  *
+ * ⚠️ **Since #558 "no location collection" means the DEVICE's location**, and
+ * a reviewer who remembers the Location row answering `false` outright is
+ * reading the old file. The ride map's tile requests are declared as
+ * approximate location collected (see the row); what this rule still guards is
+ * the precise row — that the app cannot read where the device is.
+ *
  * ⚠️ **`neverForLocation` is load-bearing and is not decoration.** Android
  * treats a Bluetooth scan as a way of deriving location unless the scan
  * permission asserts it is not used for that, and Play's location policy
@@ -50,6 +56,12 @@ export interface DataSafetyAnswer {
    * arise. #387.
    */
   readonly optional?: boolean;
+  /**
+   * Play's *purposes* for a collected type — its own words, such as
+   * `App functionality`. Absent on a row that is not collected, where the
+   * question does not arise. #558.
+   */
+  readonly purposes?: readonly string[];
   /** Why the answer is what it is. Read in review; never asserted. */
   readonly why: string;
 }
@@ -57,7 +69,7 @@ export interface DataSafetyAnswer {
 /**
  * The declaration filed for this app.
  *
- * ⚠️ Every row but one is `collected: false`, and that is a statement about
+ * ⚠️ Every row but two is `collected: false`, and that is a statement about
  * the PRODUCT, not a convenience: Phase 1 has no server, no account and no
  * analytics (CLAUDE.md §1, owner decision D6). Play's definition of
  * "collected" is data transferred off the device; a ride the athlete exports
@@ -79,6 +91,11 @@ export interface DataSafetyAnswer {
  * the Photos row here; the row now answers for both paths, and its comment
  * says why the answer did not change.
  *
+ * ⚠️ **Since #558 the other is approximate location**, and a reviewer who
+ * remembers "every row but one" is reading the old file: the ride map's tile
+ * requests' IP addresses are visible in the tile host's analytics for up to
+ * 7 days, which is not ephemeral processing. See the row.
+ *
  * ⚠️ The health rows are here because Play's Health Content and Services policy
  * covers apps that are not primarily health apps — its own example is a game
  * that uses activity data to advance play, which is this app exactly (#95). The
@@ -86,32 +103,69 @@ export interface DataSafetyAnswer {
  */
 export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
   {
-    // ⚠️ **Re-read by #534, and the answer is UNCHANGED — but it now rests on
-    // a condition a person has to keep true.** Since #534 every build that is
-    // not told otherwise draws a ride's map from tiles.openzigs.com, and a tile
-    // request says roughly where the ride was — MapLibre makes it inside the
-    // app's own WebView, which Play's definition of *collect* counts ("data
-    // transmitted by libraries/SDKs and from webviews under app control",
-    // Google Play Console Help, "Provide information for Google Play's Data
-    // safety section", read 2026-09-25).
+    // ⚠️ **Re-answered by #558, and the answer CHANGED — collected: true.** A
+    // reviewer who remembers this row answering `false` on Play's *ephemeral
+    // processing* exemption is reading #534's file. Since #534 every build
+    // that is not told otherwise draws a ride's map from tiles.openzigs.com,
+    // and the host sees the rider's IP address with every request. MapLibre
+    // makes the request inside the app's own WebView, which Play's definition
+    // of *collect* counts ("data transmitted by libraries/SDKs and from
+    // webviews under app control", Google Play Console Help, "Provide
+    // information for Google Play's Data safety section", read 2026-09-25).
     //
-    // It stays `collected: false` on Play's *ephemeral processing* exemption:
-    // the host is a static object on Cloudflare R2 that answers a byte range
-    // and keeps nothing this project reads, and this project does not use the
-    // requests to derive a location — Play's own test for an IP address.
-    // ⚠️ **That is true only while nothing retains those requests for us**: an
-    // R2 access log, a Logpush job or an analytics product turned on for that
-    // host makes the exemption false, and this row becomes
-    // `collected: true` for approximate location. Checking the bucket's
-    // configuration needs the Cloudflare account, which no pull request has —
-    // so `apps/mobile/RELEASE.md` §8 "Before every release tag" is the step
-    // that re-checks it, and says what changes here if one is on. Since the
-    // owner's decision of 2026-09-25 a rider can also turn map tiles off in
-    // Settings, which stops the request altogether.
-    dataType: 'Location (approximate or precise)',
+    // The exemption assumed the host kept nothing. Measured 2026-09-26 through
+    // the Cloudflare API (#558): the zone's standard HTTP analytics, present
+    // on every zone and not switchable off, hold per-request records for
+    // tiles.openzigs.com with the client IP, the time, the user agent, the
+    // country and network (ASN) and the request path, queryable by this
+    // project's account for up to 7 days on the Free plan (Cloudflare,
+    // Security Analytics "Availability" table: Free and Pro "up to the last 7
+    // days", Business 31). Seven days is not ephemeral, so the owner chose on
+    // 2026-09-26 to disclose it.
+    //
+    // - **Approximate**, not precise — and ⚠️ NOT because "a tile names an
+    //   area, not a point", which is the argument this row first carried and
+    //   which does not hold. Play draws the line by AREA (approximate is
+    //   ≥ 3 km², precise < 3 km²), and a z15 Web Mercator tile over the
+    //   archive's 24–50°N is 0.64–1.23 km²: if the tile a rider asked for were
+    //   in the kept record, this row would have to be PRECISE as well. It is
+    //   not in the record. The basemap is ONE PMTiles file and pmtiles picks
+    //   each tile out of it with an HTTP `Range` header, so every request has
+    //   the same `clientRequestPath`, and `httpRequestsAdaptive` has no Range
+    //   field. Measured 2026-09-26 (#559's review, grouping that dataset by
+    //   `clientRequestPath` over 23 h): every app request was
+    //   `/basemap-us-20260914.pmtiles`. The Range header is handled while the
+    //   request is served and is not kept — Play's ephemeral case — so what is
+    //   retained about location is the IP address and the country/ASN derived
+    //   from it, which is IP-geolocation grade: approximate. The app requests
+    //   no GPS fix and never transmits a ride's positions — see the Precise
+    //   location row. ⚠️ If a tile setup ever puts the tile in the URL (a
+    //   z/x/y server, a query string), the kept record names it and the
+    //   Precise row flips; `apps/mobile/RELEASE.md` §8 re-runs the query.
+    // - **`shared: false`**: Cloudflare processes the requests for this
+    //   project as its service provider, which Play does not count as sharing.
+    // - **`optional: true`**: a rider can turn map tiles off in Settings → Ride
+    //   map, and the app then requests nothing and still draws the ride.
+    // - **App functionality**: the request exists to draw the map; this
+    //   project does not use the retained record.
+    //
+    // ⚠️ `apps/mobile/RELEASE.md` §8 re-checks before every tag that the
+    // retention is still what this row and the privacy policy say — the plan
+    // decides the period, and a Business plan keeps 31 days.
+    // `apps/web/src/privacy/no-network.test.ts` fails if this `why` stops
+    // naming the host or the 7 days.
+    dataType: 'Location — approximate location',
+    collected: true,
+    shared: false,
+    optional: true,
+    purposes: ['App functionality'],
+    why: 'the ride map requests tiles from tiles.openzigs.com by default (#534; a rider can turn that off in Settings). Cloudflare, which serves that host for this project, keeps a record of each map request — the IP address, the time, and the device or browser type, not which part of the map — that this project’s Cloudflare account can see for up to 7 days in its standard HTTP analytics, which cannot be switched off (#558). The map is one file and each tile is picked out of it by a byte range that the record does not include, so the location it holds is what an IP address says. This project does not use or share that record, and it is not linked to any ride or account',
+  },
+  {
+    dataType: 'Location — precise location',
     collected: false,
     shared: false,
-    why: 'a recorded ride carries positions and they stay in IndexedDB on the device. The location permissions in the manifest exist only so that a BLE scan works below API 31, which Android required, and they are bounded at API 30 — see locationClaimFaults. Since #534 the ride map requests tiles from tiles.openzigs.com by default (a rider can turn that off in Settings), and which tiles are asked for says roughly where the ride was; that request is processed ephemerally by a static file host that keeps nothing this project reads, and is not used to derive a location — see the comment above this row for the condition that keeps this answer true',
+    why: 'a recorded ride carries positions and they stay in IndexedDB on the device; the app requests no GPS fix and never transmits a position. The location permissions in the manifest exist only so that a BLE scan works below API 31, which Android required, and they are bounded at API 30 — see locationClaimFaults. The one location signal that leaves the device is a map tile request: which part of the map it asks for is handled while the request is served and not kept, and what is kept is the IP address, answered under approximate location',
   },
   {
     dataType: 'Health and fitness — health info',
@@ -199,6 +253,7 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     collected: true,
     shared: false,
     optional: true,
+    purposes: ['App functionality'],
     why: 'a still picture from the camera (#382, #383) is sent — only when the rider presses the button that sends it — to one computer the rider configured at an address on their own network and switched on (#387). Nothing is set up by default and nothing is sent until it is. It is not sent to this project, which runs no server, and not to any third party: an address that is not on the rider’s own network is refused. A picture is otherwise discarded after it has been looked at unless the rider turns on this ride’s keep (ADR 0029 D-2). Separately, a side-camera phone the rider paired by scanning sends its pictures to the rider’s own tablet over an end-to-end encrypted WebRTC data channel with no relay (#530, ADR 0033 D-1), where each is analysed on the tablet and discarded at once, never stored, shown or sent on (ADR 0033 D-6) — end-to-end encrypted transfer between the rider’s own devices, which Play exempts, and so not what makes this row collected',
   },
   {

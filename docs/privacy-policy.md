@@ -1,17 +1,22 @@
 # On Your Left — privacy policy
 
-**Last updated: 2026-09-25.** This is the policy for the On Your Left Android app
+**Last updated: 2026-09-26.** This is the policy for the On Your Left Android app
 (`dev.openzigs.onyourleft`) and for the web client it is built from. It is the policy linked from the
 app's About page and from the Google Play listing, and those two links point at this file
 ([#95](https://github.com/openzigs/onyourleft/issues/95)).
 
 ## The short version
 
-**We collect nothing.** There is no account and no analytics. **Your rides stay on your device.** To
-draw a map, the app asks our tile server for the map around where you rode. It sends no ride data,
-and we keep no record of the request, nor have one kept for us. You can turn map tiles off in Settings. Apart
-from that map request, **on its own the app uploads nothing** — not a ride, not a heart rate, not a
-position, not a crash report, not a page view.
+There is no account, and the app contains no analytics. **Your rides stay on your device.** To draw a
+map, the app asks our tile server for the map around where you rode. It sends no ride data.
+**Cloudflare, which runs the tile server for us, keeps a record of each map request — your IP
+address, the time, and your device or browser type, not which part of the map — that our Cloudflare
+account can see for up to 7 days**, as part of the standard traffic analytics it keeps for every
+site it serves. We do not use that record or share
+it, and it is not linked to your rides or to any account. You can turn map tiles off in Settings,
+and then no request is made and there is nothing to record. Apart from that map request,
+**on its own the app uploads nothing** — not a ride, not a heart rate, not a position, not a crash
+report, not a page view.
 
 That is not a promise about our intentions. It is a property of the software: the code this project
 writes contains exactly **two** network calls, and each can do only the one thing described below —
@@ -35,8 +40,9 @@ The other exception is a map, and it is described under **What leaves the device
 ride with a GPS track is shown on a map, the map library the app uses requests map tiles from
 `tiles.openzigs.com`, which is where this project keeps its basemap. That is a request the map
 library makes, not this app's code, and it is **on by default** — it carries no account, cookie or
-identifier of ours, but the host can see your IP address and roughly which area you are looking at.
-**You can turn it off**: Settings → *Ride map* → *Draw map tiles under my rides*. With it off the app
+identifier of ours, but the host sees your IP address and roughly which area you are looking at
+while it answers. The record Cloudflare keeps afterwards — your IP address, the time, and your
+device or browser type, not which part of the map — our Cloudflare account can see for up to 7 days. **You can turn it off**: Settings → *Ride map* → *Draw map tiles under my rides*. With it off the app
 requests nothing from `tiles.openzigs.com`, and still draws your route on a plain background.
 
 ## What the app holds, and where
@@ -66,9 +72,13 @@ in.
 ## Location
 
 A ride can carry positions, and a route is a line on a map, so the app holds location data on your
-device. **It does not collect it** — a ride's positions are never transmitted to us or to anybody
-else. The one thing that says anything about where you rode is the map's tile request, described
-under **What leaves the device**, and you can turn that off.
+device. **A ride's positions are never transmitted** — not to us and not to anybody else. The one
+thing that says anything about where you rode is the map's tile request, described under **What
+leaves the device**: the tiles asked for say roughly where you rode, and the host sees that while it
+answers the request. What Cloudflare keeps afterwards is your IP address, the time, and your device
+or browser type, not which part of the map, and our Cloudflare account can see it for up to 7 days.
+An IP address says roughly which country or network you are on, not where you rode. You can turn map
+tiles off.
 
 Three things worth being precise about:
 
@@ -101,10 +111,19 @@ Only these, and only when you do them:
   the request but the request itself: no ride data, no account, no cookie and no identifier. But the host
   sees your IP address and which tiles you asked for, and for your own ride that is roughly **where
   you rode** — including inside your privacy zones, because your own view of your own ride is never
-  trimmed. We keep no record of the request, nor have one kept for us: no access logging, log export or
-  analytics is turned on for that host, and that is checked before every release. Cloudflare, which
-  operates the host for us, handles the traffic under its own privacy policy; this project does not
-  use it to identify you or to work out where you are. With map tiles off, the app requests nothing
+  trimmed. That is what the host sees while it answers. **Cloudflare, which runs the host for us,
+  keeps a record of each map request — your IP address, the time, and your device or browser type,
+  not which part of the map — that our Cloudflare account can see for up to 7 days**, as part of the
+  standard traffic analytics Cloudflare keeps for every site it serves, which cannot be switched off.
+  The map is one file and the app picks each tile out of it with a byte range, which that record
+  does not include: every request in it names the same file. Seven days is how far back this
+  project's Cloudflare plan lets its account look (Cloudflare's
+  [Security Analytics availability table](https://developers.cloudflare.com/waf/analytics/security-analytics/)
+  gives *"up to the last 7 days"*). This project's Cloudflare account can look at it. **We do not use it and we do not share it**: it
+  is not linked to your rides or to any account, and we do not use it to
+  identify you or to work out where you are. No further logging, log export or analytics of those
+  requests is turned on, and that is checked before every release. Cloudflare handles the traffic
+  as our service provider, under its own privacy policy. With map tiles off, the app requests nothing
   from `tiles.openzigs.com` and draws your route on a plain background, with the OpenStreetMap
   credit beneath it.
   Indoor rides, and the map drawn during a game ride, request nothing. The tiles cover the
@@ -191,14 +210,15 @@ built in, suggested or named.
 ## What the app does not do
 
 - No advertising, and no advertising identifier.
-- No analytics, no telemetry, no crash reporting, no session recording.
+- The app contains no analytics, no telemetry, no crash reporting and no session recording.
 - No third-party SDK is linked into the app for any of those. One library the app does include —
   Google's MediaPipe, which runs the side camera's pose model on your tablet — contains a usage
   logger, and the app blocks every request it would make (see **A second phone you pair as a side
   camera** above).
-- No sale or sharing of personal information — none is held by us, and nothing is transmitted to us
-  or to anybody else except the picture you choose to send to your own computer and the map tile
-  requests described above.
+- No sale or sharing of personal information. Nothing is transmitted to us or to anybody else
+  except the picture you choose to send to your own computer and the map tile requests described
+  above, whose record our Cloudflare account can see for up to 7 days and which we neither use nor
+  share.
 - No tracking across apps or sites.
 
 ## Deleting your data
@@ -208,12 +228,15 @@ deletes every ride, route, segment, effort, workout and setting, and the signing
 after you type a confirmation phrase.
 
 Some things an erase cannot reach, and the app says so before you press it: files you have already
-exported, a copy of a ride you have already given to somebody, and a picture you sent to your own
-computer, which is a copy that computer holds.
+exported, a copy of a ride you have already given to somebody, a picture you sent to your own
+computer, which is a copy that computer holds, and Cloudflare's record of recent map requests —
+your IP address, the time, and your device or browser type — which we cannot delete on request and
+which ages out of what our Cloudflare account can see after 7 days.
 
 ## Children
 
-The app is not directed at children and collects nothing from anybody, including them.
+The app is not directed at children. It collects nothing from anybody, including them, beyond the
+map tile requests described above, which you can turn off.
 
 ## Changes to this policy
 
