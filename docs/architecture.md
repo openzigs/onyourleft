@@ -559,9 +559,18 @@ it did not have, and each is checkable rather than a matter of taste:
 **The native controls are styled and still native.** `appearance: none` removes the platform's
 drawing of a closed `<select>` and nothing else: the popup, the keyboard model, typeahead and the
 accessibility tree stay the platform's, which is the line between styling a control and building a
-listbox out of `<div>`s ([#305](https://github.com/openzigs/onyourleft/issues/305)). It is reverted
-under `forced-colors: active`, because a control whose OS skin has been removed *and* whose
-replacement skin is then flattened has no affordance left at all.
+listbox out of `<div>`s ([#307](https://github.com/openzigs/onyourleft/issues/307), PR
+[#311](https://github.com/openzigs/onyourleft/pull/311), discussed in
+[#308](https://github.com/openzigs/onyourleft/issues/308); this paragraph cited #305, the
+segment-sweep cursor, until #667). It is reverted under `forced-colors: active`, because a control
+whose OS skin has been removed *and* whose replacement skin is then flattened has no affordance left
+at all. ⚠️ **Since [#667](https://github.com/openzigs/onyourleft/issues/667) the picker is styled
+too**: the owner reversed #307's "no styled popup" rule in #654, and inside
+`@supports (appearance: base-select)` the select opts into `base-select` with `::picker(select)` and
+its options drawn from the tokens — still a `<select>`, still the platform's keyboard model and
+accessibility tree. The forced-colours revert comes after it and undoes it. Checkboxes, radios, a
+range and a progress bar take `accent-color` from the accent token, the file input's button is the
+secondary button, and a checkbox or radio row is a declared 44 px target.
 
 ⚠️ **#307's review added a fourth thing, and it is a gate rather than a system.** The first three are
 all checkable *without a browser* — a colour ratio, a number against a ratio, a `var()` against a
