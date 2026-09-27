@@ -28,12 +28,21 @@ import {
   ROAD_COLUMNS,
   ROAD_WIDTH_METRES,
   corridorOrigin,
+  drawnRoadFrame,
+  drawnRoadPosition,
   localGroundPosition,
   roadCorridor,
   roadTint,
   type RoadCorridor,
 } from './terrain';
-import { PLANNER_BENDS, hairpinRoute, plannerRoute, stadiumRoute } from './route-fixtures-testing';
+import {
+  PLANNER_BENDS,
+  hairpinRoute,
+  northRoute,
+  plannerCornerRoute,
+  plannerRoute,
+  stadiumRoute,
+} from './route-fixtures-testing';
 import { SCATTER_VERGE_METRES } from './scatter';
 import { AA_LARGE_TEXT_OR_NON_TEXT, contrastRatio, relativeLuminance } from '../design/contrast';
 import {
@@ -1205,5 +1214,40 @@ describe('a bend is drawn as a curve, not as straight pieces — #543', () => {
     // And the hairpin's road was drawn somewhere other than its centreline, or
     // none of that says anything.
     expect(moved).toBeGreaterThan(0.5);
+  });
+});
+
+describe('the frame things stand beside is the drawn road’s — #571', () => {
+  it('is at the drawn road, with its left normal square to the ribbon there', () => {
+    const profile = plannerCornerRoute(90);
+    const origin = corridorOrigin(profile);
+    for (let at = 1_480; at <= 1_520; at += 3) {
+      const frame = drawnRoadFrame(profile, origin, at);
+      const drawn = drawnRoadPosition(profile, origin, at);
+      const ahead = drawnRoadPosition(profile, origin, at + 2);
+      expect(frame).toBeDefined();
+      if (frame === undefined) continue;
+      expect(frame.x).toBe(drawn.x);
+      expect(frame.z).toBe(drawn.z);
+      expect(Math.hypot(frame.normalX, frame.normalZ)).toBeCloseTo(1, 12);
+      // Square to the ribbon, and to its LEFT: (−dz, dx), terrain's convention.
+      const dx = ahead.x - drawn.x;
+      const dz = ahead.z - drawn.z;
+      expect(frame.normalX * dx + frame.normalZ * dz).toBeCloseTo(0, 9);
+      expect(dx * frame.normalZ - dz * frame.normalX).toBeGreaterThan(0);
+    }
+  });
+
+  it('still has a direction at the very end of a route, looking back', () => {
+    // The forward sample is clamped onto the end itself there, so the forward
+    // difference is nothing and the backward one is what is left.
+    const profile = northRoute(400, () => 0);
+    const origin = corridorOrigin(profile);
+    const end = profile.totalDistance;
+    const frame = drawnRoadFrame(profile, origin, end);
+    expect(frame).toBeDefined();
+    // Due north, so the left normal is due west: −x.
+    expect(frame?.normalX).toBeCloseTo(-1, 9);
+    expect(frame?.normalZ).toBeCloseTo(0, 9);
   });
 });

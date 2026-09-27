@@ -119,6 +119,40 @@ export function bentValleyRoute(degrees = 45): RouteProfile {
 }
 
 /**
+ * A level road with ONE sharp corner in one sample — #571. Sampled every
+ * **25 m**, as {@link bentValleyRoute} is, with the corner of `degrees` (to the
+ * `hand` side) at **1 500 m** and 1 500 m more on the new heading.
+ *
+ * ⚠️ **Level and dry on purpose**, where {@link bentValleyRoute} is neither:
+ * its corner is the valley floor, so a stream crosses there and `inWater`
+ * takes away the field boundaries and the scenery a corner test is about. At
+ * nought metres everywhere a field is enclosed and the scenery is planted
+ * right through the corner, which is the only place the drawn road
+ * (`terrain.ts` §`BEND_SMOOTHING_METRES`) and the route are different lines.
+ */
+export function plannerCornerRoute(degrees = 90, hand: 'right' | 'left' = 'right'): RouteProfile {
+  const metresPerDegreeLongitude =
+    METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
+  const corner = 1_500;
+  const turn = (degrees * Math.PI) / 180;
+  const mirror = hand === 'right' ? 1 : -1;
+  const points: RoutePoint[] = [];
+  for (let along = 0; along <= 3_000 + 1e-9; along += 25) {
+    const past = Math.max(0, along - corner);
+    const east = mirror * past * Math.sin(turn);
+    const north = Math.min(along, corner) + past * Math.cos(turn);
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(FIXTURE_LATITUDE + north / METRES_PER_DEGREE_LATITUDE),
+        degreesLongitude(-0.12 + east / metresPerDegreeLongitude),
+      ),
+      elevation: altitudeMetres(0),
+    });
+  }
+  return routeProfile(points, { loop: false });
+}
+
+/**
  * A valley with a level floor 40 m wide and 12 % walls — #501's review. Its
  * floor meets its walls 20 m either side of the stream, inside a bridge's
  * approach (`waterways.ts` §`BRIDGE_HALF_SPAN_METRES` to

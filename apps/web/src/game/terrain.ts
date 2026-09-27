@@ -150,23 +150,27 @@ export const CORRIDOR_DENSE_AHEAD_METRES = 150;
  * ⚠️ **It cuts corners, and by how much is the trade.** At a sharp corner of
  * `θ` the drawn road passes `(10 / 2)·sin(θ / 2)` metres inside the source's
  * vertex: 1.3 m at 30°, 1.9 m at 45°, 3.5 m at 90°. On a true arc of radius
- * `R` it runs about `10² / (6R)` inside it, 0.8 m at 20 m. The scenery is
- * placed beside the ROUTE, `scatter.ts`'s 3 m verge beyond the road's edge on
- * each leg, so what a cut costs is taken out of that verge: all but the 90°
- * figure are inside it, and at 90° — a crossroads in one sample — a tree
- * 6.5 m from both legs stands 9.2 m from the vertex along the bisector, which
- * still leaves about 2.2 m between it and the drawn road's inner edge. And a
- * real road is round where its file is angular, so inside the vertex is where
- * the road actually is. A wider window rounds more and cuts more; this one
- * keeps a planner's 45° corner a metre inside the verge.
+ * `R` it runs about `10² / (6R)` inside it, 0.8 m at 20 m. A real road is
+ * round where its file is angular, so inside the vertex is where the road
+ * actually is. A wider window rounds more and cuts more.
+ *
+ * ⚠️ **Since #571 nothing beside the road pays for the cut**, and a reviewer
+ * who remembers this comment arguing that the scatter's verge absorbs it is
+ * reading the old one. The argument was that trees stood beside the ROUTE and
+ * the cut came out of the 3 m verge, which held to 45°; at a planner's 90°
+ * corner it did not — a conifer 0.18 m from the drawn centreline, measured
+ * by `corner-placement.test.ts`. The scenery, the field boundaries and the
+ * buildings stand beside the DRAWN road since (see {@link drawnRoadFrame}),
+ * and are clear of its carriageway to 110°; beyond that the scatter still
+ * folds across the corner's other leg, which predates #543 and is #613.
  *
  * ⚠️ **The DRAWN road, never the ridden one.** A point keeps the route
  * distance it was built for (`CorridorPoint.distance`), and its height and
  * gradient are read there, on the centreline: the trainer's grade, distance,
  * "To go", the ghost and the pacer's gap do not see this (CLAUDE.md §2's
- * racing-line note; `line-on-the-road.test.ts`). The scenery's PLACEMENT does
- * not see it either — `scatter.ts` projects the route itself — which is why
- * the arrangement digest did not move.
+ * racing-line note; `line-on-the-road.test.ts`). The scenery's PLACEMENT did
+ * not see it either until #571, which is why #543 left the arrangement digest
+ * where it was and #571 moved it.
  */
 export const BEND_SMOOTHING_METRES = 10;
 
@@ -1090,8 +1094,12 @@ function pointAt(
  * route's centreline stands that far off the road it belongs to. The review
  * measured a bridge parapet 1.27 m into the carriageway at a 45° corner on the
  * valley floor; `waterways.ts` §`bridgeParts` and §`waterSurface` read this
- * since. The scenery and the settlements are placed BESIDE the route with a
- * verge to spare and deliberately do not — see {@link BEND_SMOOTHING_METRES}.
+ * since. ⚠️ **So do the scenery and the settlements since #571**, through
+ * {@link drawnRoadFrame}: this comment used to say they were placed beside the
+ * ROUTE with a verge to spare and deliberately did not, and at a planner's 90°
+ * corner the verge was not to spare — a conifer 0.18 m from the drawn road's
+ * centreline, and the end of a hedge 0.3 m into its carriageway, measured by
+ * `corner-placement.test.ts`.
  *
  * `distance` is an odometer reading: it is wrapped (a loop) or clamped (a
  * line) exactly as {@link roadCorridor}'s own points are.
@@ -1108,6 +1116,59 @@ export function drawnRoadPosition(
     BEND_SMOOTHING_METRES,
   );
 }
+
+/**
+ * Where the road is DRAWN at a route distance and which way its LEFT normal
+ * points there, in local metres — #571. `undefined` where the drawn road has
+ * no direction at all.
+ *
+ * The normal is a forward difference over one {@link CORRIDOR_STEP_METRES},
+ * which is how {@link ribbonNormals} takes the ribbon's own; where that is
+ * degenerate — the far end of a point-to-point route, whose next point is
+ * clamped onto this one — the backward difference instead.
+ *
+ * ⚠️ **What `scatter.ts` and `settlements.ts` stand things beside.** Until
+ * #571 both built this frame from the ROUTE's centreline, which is where the
+ * ribbon ran until #543 rounded its corners; at a planner's 90° corner that put
+ * field boundaries and trees in the carriageway a rider sees. On a straight
+ * the two are the same line, and nothing moves.
+ */
+export function drawnRoadFrame(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  distance: number,
+):
+  | { readonly x: number; readonly z: number; readonly normalX: number; readonly normalZ: number }
+  | undefined {
+  const here = drawnRoadPosition(profile, origin, distance);
+  const ahead = drawnRoadPosition(profile, origin, distance + CORRIDOR_STEP_METRES);
+  let dx = ahead.x - here.x;
+  let dz = ahead.z - here.z;
+  if (!(Math.hypot(dx, dz) > DEGENERATE_TANGENT_METRES)) {
+    const behind = drawnRoadPosition(profile, origin, distance - CORRIDOR_STEP_METRES);
+    dx = here.x - behind.x;
+    dz = here.z - behind.z;
+  }
+  const length = Math.hypot(dx, dz);
+  if (!(length > DEGENERATE_TANGENT_METRES)) {
+    return undefined;
+  }
+  return { x: here.x, z: here.z, normalX: -dz / length, normalZ: dx / length };
+}
+
+/**
+ * Below this, the road has no direction at all: **a micrometre**. Moved here
+ * from `scatter.ts` by #571, with {@link drawnRoadFrame}.
+ *
+ * Not zero, because the two points either side of an out-and-back's turning
+ * point are the *same* point reached by two different sums of the same
+ * floats, and they come back differing in their last bits rather than not at
+ * all. A baseline that measures 10⁻¹³ m is not a direction; it is the rounding
+ * error, and normalising it would turn that error into a bearing — which is
+ * also why {@link drawnRoadFrame} takes a forward difference and not a centred
+ * one, which is degenerate at exactly that turning point.
+ */
+export const DEGENERATE_TANGENT_METRES = 1e-6;
 
 /**
  * Where the road is DRAWN at a route distance: the mean of the route's own
