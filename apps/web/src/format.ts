@@ -34,7 +34,7 @@ export const POWER_UNIT = 'W';
  * caller *does* hold a `Seconds` — a stored ride's `elapsedTime` — it is
  * assignable, so nothing is lost at the stricter call site.
  */
-export function formatDuration(totalSeconds: number): string {
+export   function formatDuration(totalSeconds: number): string {
   const whole = Math.max(0, Math.floor(totalSeconds));
   const hours = Math.floor(whole / 3600);
   const minutes = Math.floor((whole % 3600) / 60);
