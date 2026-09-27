@@ -86,7 +86,14 @@ apps/                 AGPL-3.0-or-later, without exception
                         sidecamera.html and sidecamera-harness.tsx — the
                         tripod phone's filming sign at a phone's size, driven
                         through the real shell with a scripted link, because
-                        the real one (#529) does not exist yet
+                        the real one (#529) does not exist yet. Since #660 it
+                        also holds reflow.html and reflow-harness.tsx — the
+                        real shell over EMPTY and POPULATED in-memory ports,
+                        which `reflow.browser.spec.ts` walks route by route
+                        from `ALL_ROUTES` (parameterised routes included) at
+                        320×256, 390×844 and 844×390, failing any route whose
+                        document scrolls sideways and any box that scrolls
+                        sideways without being a focusable, named region
     public/             what Vite copies verbatim into `dist` (#405) — the web app
                         manifest and the three icons it names. A `.webmanifest`
                         is on neither LIC001's nor LIC002's extension list and
@@ -2139,7 +2146,7 @@ percentage.
 
 | File | What it decides |
 |---|---|
-| `audit.ts` | fifteen structural rules over a rendered DOM (it said fourteen until #394; `landmarks-are-distinguishable` is the fifteenth — count `ACCESSIBILITY_RULES` rather than this cell) — an unnamed control, a control not in the tab order, a broken heading order, a dangling ARIA reference, a positive `tabindex`, and so on. `tabbableElements` is the tab-order model the keyboard tests rest on |
+| `audit.ts` | sixteen structural rules over a rendered DOM (it said fourteen until #394 and fifteen until #660; `table-in-scroll-region` is the sixteenth — every table the child of a focusable, named scroll region, `design/ScrollTable.tsx`, because SC 1.4.10 lets a table keep its columns on a phone only there — count `ACCESSIBILITY_RULES` rather than this cell) — an unnamed control, a control not in the tab order, a broken heading order, a dangling ARIA reference, a positive `tabindex`, and so on. `tabbableElements` is the tab-order model the keyboard tests rest on |
 | `audit.a11y.test.ts` | a violating fixture for **every** rule, plus an assertion that every rule in `ACCESSIBILITY_RULES` has one. A rule added without a failing fixture fails the build |
 | `routes.a11y.test.tsx` | renders every entry in `shell/routes.ts` and audits it. A route added to the table is audited without anyone editing this file |
 | `contrast.a11y.test.ts` | WCAG 2.2 AA contrast for every declared token pair, and that every token appears in a pair |
@@ -2222,6 +2229,7 @@ browser runs**.
 | `sidecamera.html`, `sidecamera-harness.tsx`, `sidecamera.browser.spec.ts` | since [#528](https://github.com/openzigs/onyourleft/issues/528), the tripod phone's **filming sign**, driven into the filming state through the real `AppShell` and the screen's own controls, with the scripted link the unit tests use handed in through `AppShellProps.sideCameraLink` (there is no production link: #529, held by ADR 0033 D-0). At five phone viewports, both ways up, down to 320 px: the stage's box is the viewport and a 7 × 7 hit-test grid finds nothing but the sign and the shell's own camera indicator; the shell's header and navigation are absent; the word's em is at least 15 % of the short side and twice any other visible text, on one line; and exactly **one** control is on the page, 44 × 44, inside the viewport and topmost at its centre — also with the link lost and the countdown showing. Its **control** strips the stage's class from the live element and requires the same markup NOT to cover the screen. ⚠️ It measures CSS pixels, not a doorway: `theme.css` §"THE SIDE CAMERA" says what the floor comes to in millimetres on a typical phone, and that the legibility rule it is set against was read second-hand |
 | `sidelink.html`, `sidelink-harness.ts`, `sidelink.browser.spec.ts` | since #529, the side-camera link paired end to end in the real engine: two peer connections in one page through the real offer and answer codes and the SDP `camera/side-link-sdp.ts` rebuilds, a start and a stop acknowledged across, and the offer drawn on a canvas and read back by the real reader. ⚠️ `playwright.config.ts` passes `--disable-features=WebRtcHideLocalIpsWithMdns` so the candidates are raw private addresses — the path spike 0012 found both Android WebViews take — rather than `.local` names a CI container may have no responder for. ⚠️ **Not two devices**, and not #541's packet capture |
 | `bend.html`, `bend-harness.ts`, `bend.browser.spec.ts` | since #543, a planner-sampled 20 m bend drawn by the real renderer and read back from **straight above** — a heading of nothing puts `cameraRig`'s eye over its target — with the road isolated the #440 way. Rays from the bend's centre find each edge; the edge is walked in 2 m chords and what is held to `MAXIMUM_CORRIDOR_JOINT_DEGREES` is the **kink**, a turn less its neighbours' mean, because a smooth inner edge turns 7° every two metres anyway. Its control is the road as drawn before #543 (`roadCorridor`'s `unsmoothed`), which must kink. `with-corridor.ts` rebuilds the ground and water around a swapped corridor, which the loop page needs too since #543: ground shaped for one road over another split 32 rows of it. ⚠️ Since #583 the sweep of rays starts on a ray that MISSES the road: it started at 0°, and #583's mirrored bend straddled 0° and read as two short edges (81.7° and 73.3° of turn) with nothing else wrong |
+| `reflow.html`, `reflow-harness.tsx`, `reflow.browser.spec.ts` | since [#660](https://github.com/openzigs/onyourleft/issues/660), WCAG 2.2 SC 1.4.10 (Reflow) on **every** route: the real `AppShell` over in-memory ports that are either empty or populated (forty rides with long and unbreakable names, a ride with a chart, laps, a map and a side-camera report, a segment with efforts, a route, a workout), opened at 320×256, 390×844 and 844×390. The routes come from `ALL_ROUTES` — imported, never listed — and the PAGE reads the same table and reports any route it was never asked to render, so a walk over a hand list fails; a parameterised route the harness has no fixture id for is a failure, not a skip. Each route must render its own `h1`, a populated route must show its fixture, the document must not scroll sideways, and every box that DOES scroll sideways must take focus and carry a role and a name. ⚠️ **Four controls**: an over-wide element in `main` must fail at all three viewports; a region that cannot take focus and a region with no name must each fail; and the real `design/ScrollTable.tsx`, wider than the phone with visually hidden text at its far end, must pass — which is what caught that an absolutely positioned descendant escapes a scroll container that is not its containing block (`theme.css` §`.oyl-scroll-region`). It prints every route's margin. ⚠️ Not a real phone's fonts, not a text size above 100 %, and not the dark theme (#654 P1-f) |
 | `insets.ts` | since #439, edge-to-edge safe-area insets applied to the ENGINE through `Emulation.setSafeAreaInsetsOverride`, so `env()` itself reports them, plus the one inset reading taken off the owner's tablet. Every #439 case also reads the insets back, so a Playwright bump that drops the protocol call fails rather than measuring a page with none |
 | `../playwright.config.ts` | Chromium only, no retries, the SwiftShader flags without which a GPU-less runner gives MapLibre no context at all — and since #408 **two `webServer` entries**, because the product and the harness are different builds |
 | `../vite.browser.config.ts` | the harness build. A second Vite config, so the harness cannot reach a shipped bundle |
@@ -2352,13 +2360,15 @@ command and its own CI step.
 ⚠️ **`vite.browser.config.ts` names every entry explicitly, and must.** Vite's multi-page mode
 discovers only `index.html`; a page added without a line in `build.rollupOptions.input` is simply
 not built, and the failure is a 404 while the spec runs rather than a build error — which reads
-like a server fault and sends the next person to `playwright.config.ts`. There are **twelve** entries
+like a server fault and sends the next person to `playwright.config.ts`. There are **fifteen** entries
 today, not two — the map, the game, the HUD, the app shell, the game's stage (#373, #423), the
-Ride screen (#422), the loop start (#440), the home screen (#428), the side camera's filming sign
-(#528), the side-camera link (#529), the owner's realistic page (ADR 0026 D-12) and the capture
-tool — and this sentence said *four* until #373, *seven* until #430's pull request, when it had
-been stale for two entries already, *ten* until #528 and *eleven* until #529, so read
-`build.rollupOptions.input` rather than this line. ⚠️ Since that pull request the harness build's
+Ride screen (#422), the loop start (#440), the bend (#543), the home screen (#428), the side
+camera's filming sign (#528), the side-camera link (#529), the pose model (#530), the owner's
+realistic page (ADR 0026 D-12), the capture tool and the reflow walk (#660) — and this sentence
+said *four* until #373, *seven* until #430's pull request, when it had been stale for two entries
+already, *ten* until #528, *eleven* until #529 and *twelve* until #660, when it had been stale for
+two entries again (the bend and the pose model), so read `build.rollupOptions.input` rather than
+this line. ⚠️ Since that pull request the harness build's
 `publicDir` is the app's own `public/`, so the realistic world is served to both builds at the
 same path. #266 confirmed the trap by
 deleting its own line — the run died sixty seconds later inside `waitForFunction` with no mention
@@ -3905,6 +3915,8 @@ top of an issue **supersedes its body**.
 | Why a link is four tokens rather than `accent`, which surfaces each is paired with, and what a dark palette would owe | `apps/web/src/design/tokens.ts` §`LINK_SURFACES`, §`LINK_CONTRAST_MEASURED`, `apps/web/src/design/theme.css` §"A link — #661", `apps/web/browser/links.browser.spec.ts` |
 | Why a contrast pair records what it measures as well as what it must clear | `apps/web/src/design/tokens.ts` §`ContrastRequirement.measured` |
 | How far a `<select>` may be styled before it stops being one | `apps/web/src/design/theme.css` §`select`, [#305](https://github.com/openzigs/onyourleft/issues/305) |
+| Why no route may scroll sideways on a phone, what a table does instead, and what walks every route to check | `apps/web/src/design/ScrollTable.tsx`, `apps/web/src/a11y/audit.ts` §`table-in-scroll-region`, `apps/web/browser/reflow.browser.spec.ts`, [#660](https://github.com/openzigs/onyourleft/issues/660) |
+| When the activity library is a card list and when it is a table, and why the width it is given decides rather than the window | `apps/web/src/library/layout.ts` §`TABLE_FROM_REM`, `apps/web/src/views/ActivitiesView.tsx` §`useLibraryLayout` |
 | Why the button's 44 px touch target is declared rather than emergent, and why a floor is not enough on its own | `apps/web/src/design/theme.css` §`.oyl-button`, `apps/web/browser/shell.browser.spec.ts` §`TOUCH_TARGET_PIXELS` |
 | When the header sticks, when it deliberately does not, and the measurement that decides | `apps/web/src/design/theme.css` §`@media (min-width: 64rem) and (min-height: 40rem)`, `apps/web/browser/shell.browser.spec.ts` |
 | Where the trainer status line is, why it is in the HUD rather than under it, and why #373 did not make it visible in landscape | `apps/web/src/game/hud/fields.ts` §`TrainerLine`, `apps/web/src/game/hud/HudPanel.tsx`, `apps/web/browser/ride.browser.spec.ts`, [#373](https://github.com/openzigs/onyourleft/issues/373), [#422](https://github.com/openzigs/onyourleft/issues/422) |

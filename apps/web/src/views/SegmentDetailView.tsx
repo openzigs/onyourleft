@@ -32,6 +32,7 @@ import type { EffortPort } from '../efforts/store-port';
 import { hrefForActivity } from '../shell/routes';
 import { useUnits } from '../units/context';
 import { formatSmallDistance, measurementText } from '../units/format';
+import { ScrollTable } from '../design/ScrollTable';
 
 /** A signed difference, as a rider reads it. */
 function formatDelta(seconds: number): string {
@@ -172,8 +173,10 @@ export function SegmentDetailView({ port, segment }: SegmentDetailViewProps): JS
         </StatusMessage>
       ) : (
         <>
-          <table className="oyl-data-table">
-            <caption>Your efforts on this segment, fastest first. {RANKING_BASIS_LABEL}.</caption>
+          <ScrollTable
+            className="oyl-data-table"
+            caption={<>Your efforts on this segment, fastest first. {RANKING_BASIS_LABEL}.</>}
+          >
             <thead>
               <tr>
                 <th scope="col">Compare</th>
@@ -218,7 +221,7 @@ export function SegmentDetailView({ port, segment }: SegmentDetailViewProps): JS
                 );
               })}
             </tbody>
-          </table>
+          </ScrollTable>
 
           <button type="button" onClick={compare} disabled={chosen.length !== 2}>
             Compare the two selected efforts
@@ -264,11 +267,10 @@ function Overlay({ result }: { readonly result: OverlayResult }): JSX.Element {
         Recorded every {comparison.first.sampleIntervalSeconds.toFixed(1)} s and every{' '}
         {comparison.second.sampleIntervalSeconds.toFixed(1)} s.
       </p>
-      <table className="oyl-data-table">
-        <caption>
-          Elapsed time at each point along the shorter of the two efforts, from the nearest recorded
-          sample.
-        </caption>
+      <ScrollTable
+        className="oyl-data-table"
+        caption="Elapsed time at each point along the shorter of the two efforts, from the nearest recorded sample."
+      >
         <thead>
           <tr>
             <th scope="col">Distance</th>
@@ -291,7 +293,7 @@ function Overlay({ result }: { readonly result: OverlayResult }): JSX.Element {
             </tr>
           ))}
         </tbody>
-      </table>
+      </ScrollTable>
     </section>
   );
 }

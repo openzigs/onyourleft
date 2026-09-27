@@ -18,6 +18,7 @@ import {
 import { blockText, workoutRow, type WorkoutRow } from '../workouts/library';
 import { WORKOUT_LIST_LIMIT, type WorkoutPort } from '../workouts/store-port';
 import { exportedWorkout, workoutFromFile } from '../workouts/transfer';
+import { ScrollTable } from '../design/ScrollTable';
 
 /**
  * Workouts (#14) — the ones this device holds, and building a new one.
@@ -458,8 +459,7 @@ export function WorkoutsView({ port, now, save }: WorkoutsViewProps): JSX.Elemen
       ) : entries.length === 0 ? (
         <p>No workouts saved on this device yet.</p>
       ) : (
-        <table>
-          <caption>Workouts saved on this device, newest first.</caption>
+        <ScrollTable caption="Workouts saved on this device, newest first.">
           <thead>
             <tr>
               <th scope="col">Name</th>
@@ -503,7 +503,7 @@ export function WorkoutsView({ port, now, save }: WorkoutsViewProps): JSX.Elemen
               </tr>
             ))}
           </tbody>
-        </table>
+        </ScrollTable>
       )}
 
       {pendingDelete === undefined ? null : (

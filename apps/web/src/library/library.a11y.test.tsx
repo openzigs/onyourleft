@@ -19,7 +19,7 @@
 
 import { metres, seconds, unixSeconds, watts } from '@onyourleft/domain';
 import { activityId, athleteId, type ActivitySummary } from '@onyourleft/store';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { auditAccessibility, formatViolations, tabbableElements } from '../a11y/audit';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
@@ -34,6 +34,7 @@ let mounted: Mounted | undefined;
 afterEach(() => {
   mounted?.unmount();
   mounted = undefined;
+  vi.unstubAllGlobals();
 });
 
 function ride(id: string, name: string, hasPosition: boolean): ActivitySummary {
@@ -81,10 +82,15 @@ describe('the activity library, populated', () => {
     await mountLibrary();
 
     const tabbable = tabbableElements(document.body);
-    const buttons = queryAll<HTMLButtonElement>(document.body, 'button');
-    expect(buttons.length).toBeGreaterThanOrEqual(4);
-    for (const button of buttons) {
-      expect(tabbable).toContain(button);
+    // The sort control (a select since #660), one delete per row, and the
+    // table's own scroll region, which a keyboard has to reach to scroll it.
+    const controls = queryAll<HTMLElement>(
+      document.body,
+      'button, select, [role="region"][tabindex="0"]',
+    );
+    expect(controls.length).toBe(4);
+    for (const control of controls) {
+      expect(tabbable).toContain(control);
     }
   });
 
@@ -121,5 +127,53 @@ describe('the activity library, populated', () => {
     const violations = auditAccessibility(document);
     expect(violations, formatViolations(violations)).toStrictEqual([]);
     expect(document.body.textContent).toContain('cannot be undone');
+  });
+});
+
+/**
+ * #660: on a phone the library is a list of cards, and the audit has to see
+ * that layout too — jsdom has no `ResizeObserver`, so without one reporting a
+ * narrow width every case above audits the table only.
+ */
+describe('the activity library, as a card list on a narrow width', () => {
+  async function mountCards(): Promise<void> {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        readonly #callback: ResizeObserverCallback;
+        constructor(callback: ResizeObserverCallback) {
+          this.#callback = callback;
+        }
+        observe(): void {
+          this.#callback([{ contentRect: { width: 300 } } as unknown as ResizeObserverEntry], this);
+        }
+        disconnect(): void {
+          // Nothing to release.
+        }
+        unobserve(): void {
+          // Nothing to release.
+        }
+      },
+    );
+    await mountLibrary();
+    expect(queryAll(document.body, '.oyl-activity-cards > li')).toHaveLength(2);
+  }
+
+  it('has no accessibility violations', async () => {
+    await mountCards();
+    const violations = auditAccessibility(document);
+    expect(violations, formatViolations(violations)).toStrictEqual([]);
+  });
+
+  it('names each card’s delete by its ride, and says indoor in words', async () => {
+    await mountCards();
+    const names = queryAll<HTMLButtonElement>(document.body, '.oyl-activity-cards button').map(
+      (button) => button.textContent ?? '',
+    );
+    expect([...names].sort()).toStrictEqual(['Delete Tuesday hills', 'Delete Zwift hour']);
+    const indoor = queryAll(document.body, '.oyl-activity-cards > li').find((card) =>
+      (card.textContent ?? '').includes('Zwift hour'),
+    );
+    expect(indoor?.textContent).toContain('indoor');
   });
 });

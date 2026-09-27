@@ -162,6 +162,7 @@ export default defineConfig({
         // the page cannot be discovered to be broken on the one afternoon
         // somebody has the hardware — see `capture.browser.spec.ts`.
         capture: 'browser/capture.html',
+        reflow: 'browser/reflow.html',
       },
     },
     // Sourcemaps so a failure in CI names a line of ours rather than a column
