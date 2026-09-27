@@ -2041,9 +2041,12 @@ load reads a field the OTHER load no longer measures at its "nothing measured" v
 rather than passes; move the probe, do not read across.
 ⚠️ **What #651 bought, and what it did not.** It asked for a green job of 12 minutes or less. On
 `main` before it, green runs took 1005 s, 1009 s and 1039 s on an AMD EPYC 7763 runner and 723 s on
-the faster EPYC 9V45 one; on #651's pull request, on the 7763, 933 s (run 36337270885): 141 s of
+a faster runner whose CPU no run printed; on #651's pull request, on the 7763, 933 s (run 36337270885): 141 s of
 concurrent checks, 28 s of `test:a11y`, 347 s of Vitest with coverage and 390 s of browser gate.
-**It is not twelve minutes on that runner, and nothing short of removing a gate makes it so**: the
+**It is not twelve minutes on that runner, and what is left to cut is a gate or its instrumentation**:
+removing or weakening a gate, or running the heaviest files outside coverage — and coverage is
+reported, not gated (§5), so that last one would change what the report says rather than what
+fails. #651 did none of them. The
 job is CPU-bound on two cores (above), Vitest with coverage alone is 347 s of the 933, and its two
 largest files — the #545 near-field rides at 216 s and the FIT fuzz at 99 s — are slowed about
 three times by coverage's instrumentation of their hot loops (2.8 times for the rides, measured as

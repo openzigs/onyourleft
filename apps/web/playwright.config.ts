@@ -141,10 +141,13 @@ export const LAUNCH_ARGS = [
  * ⚠️ **The job's `timeout-minutes` is 20, and this has to END before it does,
  * or the run reports nothing**: a job the runner cancels says "cancelled" and
  * names no case and no describe. On the slower of the two runners CI lands on
- * (an AMD EPYC 7763) this gate starts as late as 572 s into the job, behind the
- * Vitest run (run 36340917231; 538 s and 542 s on two before it), so 580 s
- * ends it by 1 152 s — 48 s inside the job's 1 200, with only the coverage
- * upload after it. The slowest GREEN gate measured on that runner took 452 s
+ * (an AMD EPYC 7763) this gate starts as late as 578 s into the job, behind the
+ * Vitest run (run 36342083309, attempt 1; 572 s, 538 s and 542 s on three
+ * before it), so 580 s ends it by 1 158 s — 42 s inside the job's 1 200, with
+ * only the coverage publish and upload (2–3 s) after it. ⚠️ **Nothing
+ * re-checks that 42 s.** Every step added before this gate eats into it, and
+ * the first sign will be a cancelled job rather than a red case: #664 added
+ * about 10 s while #651 was open. The slowest GREEN gate measured on that runner took 452 s
  * (run 36318760634), and #651's took 390 s to 405 s.
  *
  * Every load the gate pays for has a budget of its own, and the arithmetic
@@ -225,9 +228,16 @@ export default defineConfig({
   // and splitting the four loads across two workers doubled each of them —
   // `?realistic` 64 s to 145 s, `?realistic&trees` 79 s to 146 s, run
   // 36325068145 — and made the plain page's load a second time besides. So
-  // they run after everything else, alone, and `game.browser.spec.ts`
+  // they are queued after everything else, and `game.browser.spec.ts`
   // §`paysForTheRealisticLoad` is the arithmetic that fits a gate where every
   // one of them hangs inside `GATE_BUDGET_MS`.
+  //
+  // ⚠️ **"Last" is queue order and nothing more.** With two workers, the game
+  // group starts as soon as one worker is free, which can be while the other
+  // is still running the last `chromium` spec — so its first load can overlap
+  // that spec's tail. Nothing here waits for the `chromium` project to finish;
+  // a `dependencies` entry would, and it would also skip the game spec
+  // whenever any other spec failed, which a gate must not do.
   //
   // Not a second browser and not a second job — one `playwright test`, one
   // Chromium, the one `Repository rules` check (CLAUDE.md §4c).

@@ -20,7 +20,7 @@
  * about thermal behaviour, and nothing about how any of it behaves on a phone.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { test as base, devices, expect } from '@playwright/test';
@@ -553,10 +553,18 @@ const test = base.extend<object, { harnessRun: (query?: string) => Promise<Harne
  * another name; a load that finished is loaded again as before, which is
  * #456's accepted cost of a red ASSERTION and is unchanged.
  *
- * A load another LIVE worker is still making is not a hang, and is not refused:
- * two projects can ask for the plain page at once (`playwright.config.ts`
- * §`projects`). Only a worker that is gone — whose process no longer exists —
- * left its load unfinished for good.
+ * A load another LIVE worker is still making is not a hang, and is not refused.
+ * Today that cannot happen — only the `game` project runs this file (the
+ * `chromium` project `testIgnore`s it, `playwright.config.ts` §`projects`), and
+ * that project is one group in one worker — but a second worker reading a
+ * query would be, and refusing it would be a false failure. Only a worker that
+ * is gone — whose process no longer exists — left its load unfinished for good.
+ *
+ * ⚠️ **An entry is written to a temporary file and renamed over the old one**,
+ * because `rename` within a directory is atomic and `writeFileSync` is not: a
+ * worker killed mid-write — which is exactly when this ledger matters — would
+ * otherwise leave a truncated entry, and the next hook would throw a
+ * `SyntaxError` from `JSON.parse` instead of the message naming the describe.
  */
 interface LoadLedger {
   begin(query: string): void;
@@ -575,7 +583,9 @@ function loadLedger(outputDir: string): LoadLedger {
   const entryPath = (query: string): string =>
     join(directory, `${encodeURIComponent(query === '' ? 'plain' : query)}.json`);
   const write = (query: string, entry: LoadEntry): void => {
-    writeFileSync(entryPath(query), JSON.stringify(entry));
+    const temporary = `${entryPath(query)}.${process.pid}.tmp`;
+    writeFileSync(temporary, JSON.stringify(entry));
+    renameSync(temporary, entryPath(query));
   };
   const read = (query: string): LoadEntry | undefined =>
     existsSync(entryPath(query))
@@ -702,20 +712,25 @@ const TREES_LOAD_BUDGET_MS = 120_000;
  * listed LAST (`playwright.config.ts` §`projects`), so its four loads run one
  * after another in one worker once the rest of the gate is done. On the slower
  * of the two runners CI lands on (an AMD EPYC 7763) the rest of the gate took
- * 164 s, 168 s and 177 s (runs 36334163962, 36337270885 and 36340917231 — it
- * grows as specs are added). If every one of the four loads hung:
+ * 164 s, 168 s, 177 s and 179 s (runs 36334163962, 36337270885, 36340917231
+ * and 36342083309's first attempt — it grows as specs are added). If every
+ * one of the four loads hung:
  *
  *     50 + 65 + 120 + 120    the four budgets: plain, `?shadow-map`,
  *                            `?realistic`, `?realistic&trees`
  *   = 355 s
  *   +  30 s                  21 describes failing, each replacing the worker,
  *                            and the two servers starting (measured below)
- *   + 177 s                  the rest of the gate, first
- *   = 562 s                  inside the gate's own 580 (`GATE_BUDGET_MS`)
+ *   + 179 s                  the rest of the gate, first
+ *   = 564 s                  inside the gate's own 580 (`GATE_BUDGET_MS`)
  *
  * and the gate cannot outlive the job: on that runner it starts as late as
- * 572 s in, so 580 s ends it by 1 152 s — 48 s inside `timeout-minutes: 20`,
- * with only the coverage upload after it. Each budget
+ * 578 s in (run 36342083309, attempt 1), so 580 s ends it by 1 158 s — 42 s
+ * inside `timeout-minutes: 20`, with only the coverage publish and upload
+ * (2–3 s) after it. ⚠️ **Nothing re-checks either margin** — the 16 s between
+ * 564 and 580, or the 42 s between 1 158 and 1 200. A spec added to the gate
+ * eats the first and a step added before the gate eats the second, and
+ * neither says so until a hang meets it. Each budget
  * is at least 1.5 times what its load took alone there (§`PLAIN_LOAD_BUDGET_MS`
  * and §`REALISTIC_LOAD_BUDGET_MS` give the margins).
  *
@@ -761,7 +776,7 @@ const SHADOW_MAP_LOAD_BUDGET_MS = 65_000;
 
 /**
  * Pays for a load in a `beforeAll` under its own budget — #607, generalised by
- * #651. Every describe calls it for the load its cases read: once the load is
+ * #651. Every describe calls it for every load its cases read: once the load is
  * in the worker's memo every later hook reads it for nothing, and if it hung,
  * the ledger (§`loadLedger`) refuses the next worker's attempt at once — so a
  * hung load costs ONE budget, whichever describe paid it, and that describe is
@@ -1595,6 +1610,10 @@ test.describe('the scenery reaches the screen, and costs one call a kind — #24
  */
 test.describe('the world is lit, and can stop being — #286', () => {
   paysForTheLoad('?shadow-map', SHADOW_MAP_LOAD_BUDGET_MS);
+  // Its first cases read the plain page too. Earlier describes have loaded it,
+  // so on a green run this reads the memo for nothing; second, so that a hung
+  // plain page never stops `?shadow-map` being paid for and measured.
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
 
   test('finds the probe at both shadings, so the spreads mean something', async ({
     harnessRun,
@@ -2675,6 +2694,8 @@ test.describe('scenery the camera passes is not cut by the near plane — #545',
  */
 test.describe('the realistic world — ADR 0026', () => {
   paysForTheRealisticLoad();
+  // Two cases compare against the plain page — second, for #286's reason.
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
 
   const realistic = async (
     run: (query?: string) => Promise<HarnessRun>,
