@@ -650,15 +650,16 @@ async function harness(
  * as it ends (`game-harness.ts` §`phaseEnds`), so the next load that outgrows
  * this says which phase grew.
  *
- * ⚠️ **It is 110 s since #651, not 150, and a reviewer who remembers 150 is
+ * ⚠️ **It is 120 s since #651, not 150, and a reviewer who remembers 150 is
  * reading the old file.** #651's issue asked for exactly this — "if the sum
  * can't fit, lower the budgets" — and §`paysForTheRealisticLoad` is the sum.
  * On the slower of the two runners CI lands on (an AMD EPYC 7763) the load
- * took 64 s and 70 s alone (runs 36320822283 and 36334163962), so 110 s is
- * 1.6 times the slower.
+ * took 64 s, 70 s and 77 s alone (runs 36320822283, 36334163962 and
+ * 36337270885 — the last with #621's seeded-tint probe added), so 120 s is
+ * 1.56 times the slowest.
  */
-const REALISTIC_LOAD_BUDGET_MS = 110_000;
-/** `?realistic&trees` — 79 s alone on both of those runs, so 1.5 times. */
+const REALISTIC_LOAD_BUDGET_MS = 120_000;
+/** `?realistic&trees` — 79 s and 80 s alone on the last two of those runs, so 1.5 times. */
 const TREES_LOAD_BUDGET_MS = 120_000;
 
 /**
@@ -701,15 +702,16 @@ const TREES_LOAD_BUDGET_MS = 120_000;
  * listed LAST (`playwright.config.ts` §`projects`), so its four loads run one
  * after another in one worker once the rest of the gate is done. On the slower
  * of the two runners CI lands on (an AMD EPYC 7763) the rest of the gate took
- * 164 s (run 36334163962). If every one of the four loads hung:
+ * 164 s and 168 s (runs 36334163962 and 36337270885). If every one of the four
+ * loads hung:
  *
- *     60 + 75 + 110 + 120    the four budgets: plain, `?shadow-map`,
+ *     60 + 75 + 120 + 120    the four budgets: plain, `?shadow-map`,
  *                            `?realistic`, `?realistic&trees`
- *   = 365 s
+ *   = 375 s
  *   +  30 s                  21 describes failing, each replacing the worker,
  *                            and the two servers starting (measured below)
- *   + 164 s                  the rest of the gate, first
- *   = 559 s                  inside the gate's own 600 (`GATE_BUDGET_MS`)
+ *   + 168 s                  the rest of the gate, first
+ *   = 573 s                  inside the gate's own 600 (`GATE_BUDGET_MS`)
  *
  * and the gate cannot outlive the job: on that runner it starts about 540 s
  * in, so 600 s ends it by about 1 140 s — a minute inside
@@ -745,8 +747,8 @@ function paysForTheRealisticLoad(): void {
  * each case reads one load's copy, so each load now takes only its own cases'
  * (`game-harness.ts` §`SHADOW_MAP_LOAD`). Measured phase by phase on that
  * runner (run 36334163962), that was 12.6 s of the plain page's 34 and about
- * 16 s of `?shadow-map`'s 55. The budgets are about three times and two times
- * what is left.
+ * 16 s of `?shadow-map`'s 55. They took 22 s and 39 s after (run
+ * 36337270885), so the budgets are 2.7 and 1.9 times what is left.
  *
  * ⚠️ **Alone, and that is measured**: the game spec runs after everything
  * else (`playwright.config.ts` §`projects`). Run beside the rest of the gate,

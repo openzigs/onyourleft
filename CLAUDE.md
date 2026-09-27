@@ -1996,7 +1996,7 @@ its own, every describe pays for the load it reads, the game spec runs LAST, and
 has a `globalTimeout`** — a reviewer who remembers the plain page and `?shadow-map` loaded inside a
 case's 60 s, or "at most three budgets, inside the job's twenty", is reading the old file. That
 sentence counted the budgets and not the job, and was false. The budgets are 60 s for the plain
-page, 75 s for `?shadow-map`, 110 s for `?realistic` and 120 s for `?realistic&trees` — each at least
+page, 75 s for `?shadow-map`, 120 s for `?realistic` and 120 s for `?realistic&trees` — each at least
 1.5 times what its load took alone on the slower runner — and a cross-worker ledger
 (`game.browser.spec.ts` §`loadLedger`) makes a hung load cost ONE of them per run, with every other
 describe that reads it failing at once in its hook and naming the describe that paid. The
