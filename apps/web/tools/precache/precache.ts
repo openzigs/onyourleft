@@ -87,6 +87,11 @@ export interface PrecacheFile {
  * labels appear. Said plainly, the other half: offline, the tiles those
  * labels sit on are not precached (ADR 0024 D-2), so what this buys offline is
  * little. `precache.test.ts` §"#578" holds the decision.
+ *
+ * ⚠️ **Nor is `licences/`, since #664.** The third-party notices — about
+ * 125 KiB, every licence notice of every package the app ships — are
+ * precached beside the Apache-2.0 text #597 put there, so the document the
+ * Credits screen links opens offline. `precache.test.ts` §"#664" holds it.
  */
 export const PRECACHE_EXCLUSIONS: readonly RegExp[] = [
   /\.map$/,

@@ -157,7 +157,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         (ADR 0023 D-3), and there is none in the tree yet — so a
                         screen rendering nothing would look correct, and
                         `CreditsView.test.tsx` renders a fixture manifest for
-                        exactly that reason
+                        exactly that reason. Since #664 it also lists the
+                        SOFTWARE the app includes, read from the contents of
+                        the third-party notices `check:notices` generates and
+                        gates (§4g), and links the full document
     src/design/         design tokens, theme.css and the primitives (#48), and since
                         #307 the two systems those tokens now form — the elevation
                         ramp, which is a surface COLOUR because a shadow is invisible
@@ -1548,6 +1551,32 @@ pnpm run check:licences
 # FAILS as well as one that passes. Needs Node, so also not in `check:repo`.
 bash scripts/check-dependency-licences.test.sh
 
+# The third-party notices gate (#664). Admitted is not the same as noticed: the
+# check above decides which licences may ship, this one that their notices do.
+# Runs its own `pnpm install --frozen-lockfile` (#298's reason, section 4k),
+# regenerates apps/web/public/licences/third-party.txt and
+# apps/web/src/credits/third-party-contents.txt from the union of every
+# workspace package's distributed closure, and fails (NOT001-NOT008) when either
+# committed file is not what it writes. About 2 s on a warm install locally and
+# 4 s in CI, measured 2026-09-27 (this line said twenty until #676's review
+# measured it). `notices:generate`
+# is the same run with --write, and is how a dependency bump is repaired: run
+# it, then READ the diff. See section 4g.
+pnpm run check:notices
+pnpm run notices:generate
+
+# Its own suite. Fixture-driven, with a fake `pnpm` on PATH so the real
+# union code is what runs; the count is what the run prints (96 on 2026-09-27;
+# 68 before #676's review).
+# Needs Node, so not in `check:repo`.
+bash scripts/check-third-party-notices.test.sh
+
+# What the APK links, from Gradle, written where
+# apps/mobile/src/android/native-closure.test.ts reads it (#664). NOT a gate
+# and NOT in CI: it needs a JDK and an Android SDK. Without its report that
+# test skips loudly, naming this command; with a stale one it fails.
+pnpm --filter @onyourleft/mobile run native:closure
+
 # All eight bare-clone script checks in one command.
 pnpm run check:repo
 
@@ -1892,7 +1921,8 @@ with its own fixture suite), `shellcheck scripts/*.sh`, then `pnpm install --fro
 `bash scripts/check-wiring.test.sh`, `check:capacitor`,
 `bash scripts/check-capacitor-generated.test.sh`, `check:cost-model`,
 `bash scripts/check-cost-model.test.sh`, `bash scripts/coverage-summary.test.sh`, `build`,
-`playwright install --with-deps chromium`, `test:browser`, `bash scripts/check-dependency-licences.test.sh` and `check:licences` — then
+`playwright install --with-deps chromium`, `test:browser`, `bash scripts/check-dependency-licences.test.sh`, `check:licences`,
+`bash scripts/check-third-party-notices.test.sh` and `check:notices` — then
 publishes the coverage table to the run summary and uploads the HTML report as an artefact.
 Those last two carry `if: always()` and cannot fail the job: the run where coverage moved
 unexpectedly is exactly the one whose table you want, and a reporting step that can fail a
@@ -1909,7 +1939,8 @@ process by itself and fails the step if **any** command failed — its own suite
 a runner that swallowed a failure would make that step twenty-two gates removed and still look
 green, and #651's pull request proved it red on the runner with one formatting defect (run
 36325105846: `format:check` FAILED, the other twelve then in that step finished, the job failed).
-⚠️ **Anything that runs Vitest stays out of it**, and so does `check:capacitor`: Vitest's 5 s case
+⚠️ **Anything that runs Vitest stays out of it**, and so do `check:capacitor` and `check:notices`,
+which each run their own install under the tree the linter is walking: Vitest's 5 s case
 timeout is already within a second of several cases on the slower runner, and beside other work
 three of them passed it (run 36324592730) — `test:a11y` and `test:coverage` each run alone. And
 `test:coverage` and `test:browser` are **not** run together, though they are the two longest steps:
@@ -2619,6 +2650,37 @@ separately rather than being subsumed here.
 not. Its own suite is `bash scripts/check-dependency-licences.test.sh` — 56 cases, and every policy
 branch has a case that goes **red** as well as one that passes. ⚠️ That said 49 here while §4a said
 50; the number is what the suite prints, so read the run rather than either line.
+
+#### Admitted is not the same as noticed — #664
+
+⚠️ **Everything above decides which licences may SHIP. None of it says whether their notices ship
+with them**, and until [#664](https://github.com/openzigs/onyourleft/issues/664) none did: MIT, ISC,
+the BSDs and Apache-2.0 all ask for their copyright and permission notice — and Apache-2.0 for any
+`NOTICE` file — to travel with copies, and `dist` carried only the Apache-2.0 text #597 added for
+two assets. `DEP001` reads a manifest's `license` field, which names a licence and carries none of
+its text, so it could never have seen this. The second half is a separate gate:
+
+| | |
+|---|---|
+| The document | `apps/web/public/licences/third-party.txt`, served from `dist`, precached, and in the APK. Every package in the app's distributed closure with the **verbatim** text of every licence and notice file it ships — any root file whose name contains `licence`/`license`, `notice` or `copying` (so `ThirdPartyNotices.txt` and tslib's `CopyrightNotice.txt` too, since #676's review), and every file in a root `LICENSES/` directory, source files excepted; every native library the APK links; the files the build copies out of a package (`pose/`'s WebAssembly runtime); and the code the **bundler** writes into the build (Part 4) |
+| Where it comes from | `scripts/check-third-party-notices.mjs`, over the **same** `discoverPackages`/`readClosure` `check:licences` uses — imported, not re-derived — so what is admitted and what is noticed are one list. The union, not `--filter @onyourleft/web`, for the reason above: `dexie` reaches the app only through `@onyourleft/store` |
+| The gate | `check:notices` (NOT001–NOT008) and its suite, in the one `Repository rules` job. Shape (b) of #664: **committed and regenerated-and-diffed**, with its own frozen install — the script's header says why not built at build time |
+| What fails closed | a package with no licence file (NOT003). Three in today's closure ship none — `@mediapipe/tasks-vision`, `murmurhash-js`, `pmtiles` — and each has a reviewed entry in `apps/web/third-party-notices.json`, keyed by **name and version**, saying where its notice comes from instead; an entry nothing uses is NOT004 |
+| The native half | `apps/mobile/native-closure.json`, a **reviewed** list, because CI cannot run Gradle. `apps/mobile/src/android/native-closure.test.ts` holds it to `./gradlew :app:dependencies --configuration releaseRuntimeClasspath` in both directions wherever `native:closure` has written a report, and **skips loudly** elsewhere — #318's shape, and like it **not a CI gate** |
+| Code no closure lists | ⚠️ **Vite's module-preload polyfill and `__vitePreload` helper are in the entry chunk, and Rolldown's CommonJS-interop runtime is `assets/rolldown-runtime-*.js`** — both MIT, both shipped, and both from **devDependencies**, so `--prod` never lists them (#676's review, read off a real `dist`). `WRITTEN_BY_THE_BUNDLER` in the script names the two, resolved from `apps/web` as Node resolves them, and each needs a reviewed `writtenByTheBundler` entry at its **installed** version — so a Vite or Rolldown bump fails closed (NOT008) until somebody re-reads what it writes. A new bundler is a new line there, and nothing finds one for you |
+| Files copied out of a package | `copiedIntoBuild` is a reviewed list; what holds it complete is the **build**, not `check:notices`, which deliberately needs no build. `apps/web/tools/notices/copied-into-build.ts` is a plugin in the product's `vite.config.ts` that fails `pnpm run build` when the bundle holds a non-code asset (not `.js`/`.css`/`.html`/`.map`) that came from a package — no origin module at all, which is how a plugin's `emitFile` arrives, or one under `node_modules` — and the list does not name it; and when the list names a file the build did not write. ⚠️ **Its limits**: it reads the one product build, so the service-worker sub-build and the harness build are not read; `public/` is not in the bundle and is `ASSETS.toml`'s; and a package's bytes passed off as this repository's own source (copied into `src/` and imported from there) look like ours, which is `ASSET001`'s to catch |
+| Where a rider reads it | Credits §"Software this app includes", reached from About. The screen inlines the document's **contents** (the list, ~5 KiB) rather than the document (~125 KiB); both are the generator's output and `check:notices` compares both |
+
+⚠️ **The text is read from the files, never from the manifest.** `lucide-react`'s manifest says
+`ISC`; its `LICENSE` is ISC **and** MIT, for the icons derived from Feather. The field is printed as
+what a package declares, and the notice is every licence file it ships — the fixture suite's
+Lucide/Feather case is the proof. ⚠️ And like `DEP001` it **cannot see what a package vendors**:
+MediaPipe's bundle is one binary built from many projects, and is noticed only as far as that
+package's own files notice it.
+
+⚠️ **A dependency bump now fails CI until somebody regenerates**, on purpose: `pnpm run
+notices:generate`, then read the licence text in the diff before committing it. A Dependabot pull
+request goes red at `Third-party notices` for exactly that reason.
 
 ### 4i. Route planning has an interface and no engine, deliberately
 
@@ -3807,7 +3869,8 @@ top of an issue **supersedes its body**.
 | How two efforts recorded at different rates are compared without truncating either | `packages/domain/src/segment/comparison.ts`, §`overlayEfforts` |
 | Why an effort stores no sample indices, and where they come from instead | `apps/web/src/efforts/load.ts` §`sampleIndexAt` |
 | Why a bend is drawn as a curve rather than as the route's own straight pieces, what it cuts off a corner, and what it does not move | `apps/web/src/game/terrain.ts` §`BEND_SMOOTHING_METRES`, §`CORRIDOR_STEP_METRES`, §`CORRIDOR_DENSE_AHEAD_METRES`, `apps/web/browser/bend-harness.ts`, [#543](https://github.com/openzigs/onyourleft/issues/543) |
-| Why the scenery, the field boundaries and the buildings stand beside the DRAWN road rather than the route, and why the scenery is held off ANY stretch of it since a corner sharper than 110° folded a band across the other leg | `apps/web/src/game/terrain.ts` §`drawnRoadFrame`, `apps/web/src/game/road-grid.ts` §`roadGrid`, §`distanceToDrawnRoad`, `apps/web/src/game/corner-placement.test.ts`, [#571](https://github.com/openzigs/onyourleft/issues/571), [#613](https://github.com/openzigs/onyourleft/issues/613) |
+| Why the scenery, the field boundaries and the buildings stand beside the DRAWN road rather than the route, and why the scenery is held off ANY stretch of it since a corner sharper than 110° folded a band across the other leg | `apps/web/src/game/terrain.ts` §`drawnRoadFrame`, `apps/web/src/game/road-grid.ts` §`roadGrid`, §`distanceToDrawnRoad`, §`leastSquaredNearRoad` (the one cell search `settlements.ts` §`structureClearance` shares since #602), `apps/web/src/game/corner-placement.test.ts`, [#571](https://github.com/openzigs/onyourleft/issues/571), [#613](https://github.com/openzigs/onyourleft/issues/613) |
+| What holds a wall, hedge, fence or signpost inside the footprint the placement keeps clear of the road, and why the fence's end posts are not centred on its ends | `apps/web/src/game/boundary-footprint.test.ts`, `apps/web/src/game/three-renderer.ts` §`FENCE_END_POST_Z`, [#602](https://github.com/openzigs/onyourleft/issues/602) |
 | Why a loop's closing gap is part of the lap, and what a route saved before that still carries | `packages/domain/src/route/profile.ts` §`LOOP_CLOSURE_METRES`, `apps/web/browser/loop-harness.ts`, [#440](https://github.com/openzigs/onyourleft/issues/440) |
 | Why a route's gradient is three windows rather than one smoothing pass, and what each costs | `packages/domain/src/route/profile.ts`, [`docs/architecture.md`](docs/architecture.md) §"The route profile" |
 | Why a lone bad elevation reading never reaches the trainer, and the case where two do | `packages/domain/src/route/profile.ts` §`DESPIKE_WINDOW_METRES`, `profile.test.ts` §"where the despike stage stops working" |
@@ -4145,6 +4208,7 @@ top of an issue **supersedes its body**.
 | Where the ride's sounds are decided, why a dropped sensor is silence, and where the audio context is created | `apps/web/src/game/audio-cues.ts`, `apps/web/src/game/web-audio.ts`, [#400](https://github.com/openzigs/onyourleft/issues/400) |
 | How the tablet and the side-camera phone pair with no server, and what a pairing code may carry | `apps/web/src/camera/side-link-code.ts`, `apps/web/src/camera/side-link-sdp.ts`, [ADR 0033](docs/adr/0033-side-camera-link.md) D-1, D-4, [#529](https://github.com/openzigs/onyourleft/issues/529) |
 | Why the side link calls itself lost after three seconds, and why a deliberate end waits for the channel to close | `apps/web/src/camera/side-link.ts` §`SILENCE_IS_LOST_MILLISECONDS`, §`CLOSE_GRACE_MILLISECONDS` |
+| Why the phone never speaks first on the side link, why it keeps its secret on a channel that says it cannot send, and why an unanswered pairing ends in three seconds as `unanswered` rather than as no path | `apps/web/src/camera/side-link.ts` §"Why the phone waits to be spoken to", §"A channel that hears and cannot answer", `apps/web/src/camera/testing.ts` §`strandsHandedChannels`, [ADR 0033](docs/adr/0033-side-camera-link.md) §Amendments 2026-09-27, [#568](https://github.com/openzigs/onyourleft/issues/568) |
 | The one place the client names a WebRTC peer connection, and what the no-network gate can and cannot see of it | `apps/web/src/camera/side-link-transport.ts`, `apps/web/src/privacy/no-network.test.ts` §`PERMITTED_NETWORK_CALLS`, [ADR 0033](docs/adr/0033-side-camera-link.md) D-9 |
 | Why the side camera's pose model runs behind a network fence, and what it would send without one | `apps/web/src/camera/pose-runtime.ts` §`fenceWorkerNetwork`, `apps/web/browser/pose.browser.spec.ts`, [#530](https://github.com/openzigs/onyourleft/issues/530) |
 | What the tablet keeps of a side-camera picture, and for how long | `apps/web/src/camera/side-analysis.ts`, [ADR 0033](docs/adr/0033-side-camera-link.md) D-3, D-6 |

@@ -30,21 +30,65 @@
  * there: `send` does not throw, the channel says `open`, nothing is buffered,
  * and the message never arrives. Caught by a trace in CI, about one pairing in
  * a hundred. The phone's next message was then the first the tablet heard,
- * and D-4 ended the pairing as `not-our-phone`. The reasoning was that a
- * message the phone has RECEIVED on `control` was handed up by an engine whose
- * channel was open at its end, so a reply sent from there would be past that
- * window. ⚠️ **That is not established, and CI has contradicted it once**:
- * run 36252687970 shows the phone sending `hello` from inside that message
- * handler, then about ten heartbeats, and none of them arriving — every
- * phone → tablet message lost, in about one pairing in 650. Waiting to be
- * spoken to is aimed at the ONE-lost-first-message failure this section was
- * written for (and holds against `testing.ts`'s double of it); it does not
- * explain or prevent a direction that loses everything, which stays open on
- * #568. The tablet's own channel opens with its `open`
- * event rather than being handed over already open, and its ping repeats in
- * case one is lost all the same. D-4 is unchanged: the secret is still the
- * phone's first message, and nothing the tablet sends before proof carries
- * anything.
+ * and D-4 ended the pairing as `not-our-phone`. It is the engine's and not
+ * this code's: on 2026-09-27 a page with none of this code in it — two bare
+ * peer connections, the answering end sending once inside `ondatachannel` —
+ * lost that send in 3 of 1 860 loopback pairings in the pinned Chromium, on
+ * a machine at a load average of 130 to 180, and never lost a reply sent from
+ * a `message` handler.
+ *
+ * Why, read in Blink and libwebrtc on 2026-09-27: a channel the OTHER end
+ * opened is created in the engine as `connecting`, and becomes `open` only
+ * once the engine has sent its acknowledgement, on the network thread. Blink
+ * does not wait for that: `RTCPeerConnection::DidAddRemoteDataChannel` sets
+ * the channel `open` without asking (`SetStateToOpenWithoutEvent`) and fires
+ * `datachannel`. A send in that window reaches the engine while it is still
+ * `connecting`, which refuses it as `INVALID_STATE`, and Blink's
+ * `SendDataBuffer` only logs that (`Send failed`). A message this phone has
+ * RECEIVED, on the other hand, was handed up by an engine whose channel was
+ * `open` — libwebrtc queues anything that arrives before — so a reply sent
+ * from there is past the window. The tablet's own channel opens with its
+ * `open` event rather than being handed over already open, and its ping
+ * repeats in case one is lost all the same. D-4 is unchanged: the secret is
+ * still the phone's first message, and nothing the tablet sends before proof
+ * carries anything.
+ *
+ * ## A channel that hears and cannot answer
+ *
+ * #568's second mode, about one pairing in 650 in CI after the fix above: the
+ * phone heard the tablet and answered, and nothing it sent — the secret, a
+ * report, ten heartbeats — ever reached the tablet, while the tablet's pings
+ * went on arriving. The same code explains it. Blink's channel starts
+ * listening to the engine a task AFTER `datachannel`, and then asks the engine
+ * its state; if the engine still says `connecting`, that answer is posted to
+ * the page — and the engine's own `open`, from the network thread, can be
+ * posted ahead of it. Blink then applies `open` (nothing to do: it had said
+ * so already) and then `connecting`, and nothing ever changes it back. The
+ * page's channel says `connecting` for the rest of the pairing; Blink hands
+ * up every message regardless of its own state; and a channel that is not
+ * `open` refuses every send. ⚠️ **This is read from the source and made
+ * deterministic in `testing.ts` §`strandsHandedChannels`; it has not been
+ * caught in the real engine**, where the window it needs is narrower than the
+ * one above. What the product does about it is two rules, neither of which
+ * touches D-4:
+ *
+ * - **The phone does not spend its secret on a channel that says it cannot
+ *   carry it.** A ping heard on one is not answered, and the next heard on a
+ *   channel that can answer is; the tablet repeats its ping every heartbeat
+ *   until proved. If the channel still cannot answer
+ *   {@link SILENCE_IS_LOST_MILLISECONDS} after the tablet was first heard on
+ *   it — before proof or after — the phone ends the link, rather than hear a
+ *   tablet that cannot hear it and call itself connected for ever.
+ * - **The tablet ends a pairing whose `control` has opened and whose phone
+ *   has not proved itself {@link SILENCE_IS_LOST_MILLISECONDS} later**, as
+ *   `unanswered`: three unanswered pings, the silence a proved link is called
+ *   lost after. It used to wait out {@link CONNECT_LIMIT_MILLISECONDS} and then
+ *   say the devices could not reach each other, which they had.
+ *
+ * The pairing still fails and the rider pairs again. Recovering inside it
+ * would take a channel the PHONE makes — one this bug cannot strand, because
+ * Blink asks the engine about a channel it made itself — which D-3 does not
+ * list and the tablet does not accept.
  *
  * ## Why neither end waits for the connection to say it is gone
  *
@@ -232,6 +276,9 @@ export const SIDE_PAIRING_END_TEXT: Readonly<Record<SidePairingEnd, string>> = {
     'both devices and pair again.',
   'not-our-phone':
     'A device connected without this pairing’s code, so the tablet closed the connection. ' +
+    'Pair again.',
+  unanswered:
+    'The phone connected, but nothing it sent reached this tablet, so the pairing ended. ' +
     'Pair again.',
   broken: 'The other device sent something this version does not understand, so the pairing ended.',
   'offer-expired': 'The pairing code was not scanned in time. Pair again to show a fresh one.',
@@ -477,6 +524,8 @@ export class TabletSideLink implements SideCameraControlPort {
   #cancelAck: (() => void) | undefined;
   /** The opening ping's repeat, until the phone has proved itself (#568). */
   #cancelInvite: (() => void) | undefined;
+  /** Whether `control` has opened — there was a path, whatever happens next (#568). */
+  #opened = false;
   #nextCommand = 0;
   #lastHeard = 0;
   #ended: SidePairingEnd | undefined;
@@ -558,6 +607,18 @@ export class TabletSideLink implements SideCameraControlPort {
     }
     this.#answered = true;
     this.#namesOnly = offerOnlyNames && namesOnly(read.code);
+    // ⚠️ Bounded from HERE, before the answer is applied, and not after it
+    // (#568's review of what bounds an unproved pairing): the offer's own
+    // expiry stops counting the moment an answer is accepted, so a platform
+    // whose `setRemoteDescription` never settled left the tablet answered,
+    // unproved and never ended.
+    this.#cancels.push(
+      this.#timers.after(() => {
+        if (!this.#proved) {
+          this.#end(this.#failure());
+        }
+      }, CONNECT_LIMIT_MILLISECONDS),
+    );
     this.#announce();
     try {
       await this.#peer.setRemoteDescription({
@@ -568,13 +629,6 @@ export class TabletSideLink implements SideCameraControlPort {
       this.#end('broken');
       return undefined;
     }
-    this.#cancels.push(
-      this.#timers.after(() => {
-        if (!this.#proved) {
-          this.#end(this.#failure());
-        }
-      }, CONNECT_LIMIT_MILLISECONDS),
-    );
     return undefined;
   }
 
@@ -674,6 +728,11 @@ export class TabletSideLink implements SideCameraControlPort {
     if (this.#proved) {
       return 'link-lost';
     }
+    if (this.#opened) {
+      // The devices reached each other — `control` opened — so it was not
+      // the path, and "check the Wi-Fi" would send the rider the wrong way.
+      return 'unanswered';
+    }
     return this.#namesOnly ? 'names-only' : 'no-path';
   }
 
@@ -745,12 +804,24 @@ export class TabletSideLink implements SideCameraControlPort {
     if (this.#proved || this.#ended !== undefined || this.#cancelInvite !== undefined) {
       return;
     }
+    this.#opened = true;
     this.#send({ t: 'ping' });
     const cancel = this.#timers.every(() => {
       this.#send({ t: 'ping' });
     }, HEARTBEAT_MILLISECONDS);
     this.#cancelInvite = cancel;
     this.#cancels.push(cancel);
+    // #568's second mode: a phone that hears these pings and whose every
+    // answer is lost. Three unanswered pings is the silence a proved link is
+    // called lost after, and the rider is told now rather than at the
+    // connect limit, in words that do not blame the Wi-Fi.
+    this.#cancels.push(
+      this.#timers.after(() => {
+        if (!this.#proved) {
+          this.#end('unanswered');
+        }
+      }, SILENCE_IS_LOST_MILLISECONDS),
+    );
   }
 
   #beat(): void {
@@ -897,6 +968,11 @@ export class PhoneSideLink implements SideCameraLinkPort {
   #lastCommand = -1;
   /** Whether the secret has been sent — the first thing this phone says (#568). */
   #greeted = false;
+  /**
+   * Whether the bound on a `control` channel that hears the tablet and says
+   * it cannot answer is running (§"A channel that hears and cannot answer").
+   */
+  #unanswerableTimed = false;
 
   constructor(peer: SidePeer, secret: string, timers: Resolved) {
     this.#peer = peer;
@@ -1050,6 +1126,15 @@ export class PhoneSideLink implements SideCameraLinkPort {
       this.endSideLink();
       return;
     }
+    if (this.#channel?.readyState !== 'open') {
+      this.#unanswerable();
+      if (!this.#greeted) {
+        // The secret is not spent on a channel that would drop it: the tablet
+        // pings again every heartbeat until it is proved, and the next ping
+        // heard on a channel that can answer is answered (#568).
+        return;
+      }
+    }
     if (!this.#greeted) {
       this.#greet();
     }
@@ -1074,6 +1159,27 @@ export class PhoneSideLink implements SideCameraLinkPort {
       case 'ping':
         return;
     }
+  }
+
+  /**
+   * The tablet was heard on a channel that says it cannot carry an answer.
+   * If it still says so after {@link SILENCE_IS_LOST_MILLISECONDS} — the
+   * silence the tablet itself calls lost — this phone ends the link rather
+   * than go on hearing a tablet that cannot hear it (#568).
+   */
+  #unanswerable(): void {
+    if (this.#unanswerableTimed) {
+      return;
+    }
+    this.#unanswerableTimed = true;
+    this.#cancels.push(
+      this.#timers.after(() => {
+        this.#unanswerableTimed = false;
+        if (this.#channel?.readyState !== 'open') {
+          this.endSideLink();
+        }
+      }, SILENCE_IS_LOST_MILLISECONDS),
+    );
   }
 
   #heard(): void {

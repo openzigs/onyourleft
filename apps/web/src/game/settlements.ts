@@ -90,7 +90,7 @@ import {
   type StructureKind,
 } from './scatter';
 import { slotHash, uniformFrom } from './seeded';
-import { NO_SEGMENTS, ROAD_CELL_METRES, roadCellKey, roadGrid } from './road-grid';
+import { leastSquaredNearRoad, squaredToSegment } from './road-grid';
 import { drawnRoadFrame, type CorridorOrigin } from './terrain';
 import { inWater, waterways } from './waterways';
 import { treeLineMetres } from './world';
@@ -353,52 +353,57 @@ export function structureClearance(
   origin: CorridorOrigin,
   item: ScatterItem,
 ): number {
-  const road = roadGrid(profile, origin);
   const footprint = STRUCTURE_FOOTPRINTS[item.kind as StructureKind];
   const reach =
     Math.hypot(footprint.x, Math.max(-footprint.back, footprint.front)) + ROAD_CLEARANCE_METRES;
-  const cellOf = (value: number): number => Math.floor(value / ROAD_CELL_METRES);
-  const cos = Math.cos(item.rotation);
-  const sin = Math.sin(item.rotation);
-  // Into the structure's own frame: the inverse of a yaw of `rotation`.
-  const localX = (x: number, z: number): number => (x - item.x) * cos - (z - item.z) * sin;
-  const localZ = (x: number, z: number): number => (x - item.x) * sin + (z - item.z) * cos;
-  // A segment in two of the cells searched is measured twice, which costs a
-  // few multiplications and no allocation — the frame's thread is the one
-  // GATT notifications arrive on (#240's NFR-2).
-  let least = Number.POSITIVE_INFINITY;
-  for (let column = cellOf(item.x - reach); column <= cellOf(item.x + reach); column += 1) {
-    for (let row = cellOf(item.z - reach); row <= cellOf(item.z + reach); row += 1) {
-      for (const segment of road.cells.get(roadCellKey(column, row)) ?? NO_SEGMENTS) {
-        const ax = road.points[segment * 2] as number;
-        const az = road.points[segment * 2 + 1] as number;
-        const bx = road.points[segment * 2 + 2] as number;
-        const bz = road.points[segment * 2 + 3] as number;
-        least = Math.min(
-          least,
-          segmentToBox(
-            localX(ax, az),
-            localZ(ax, az),
-            localX(bx, bz),
-            localZ(bx, bz),
-            footprint.x,
-            footprint.back,
-            footprint.front,
-          ),
-        );
-      }
-    }
-  }
-  return least;
+  boxQuery.x = item.x;
+  boxQuery.z = item.z;
+  boxQuery.cos = Math.cos(item.rotation);
+  boxQuery.sin = Math.sin(item.rotation);
+  boxQuery.half = footprint.x;
+  boxQuery.back = footprint.back;
+  boxQuery.front = footprint.front;
+  // `road-grid.ts`' one cell search, the same `scatter.ts` asks of a point:
+  // no closure and no allocation, because this runs for every structure in
+  // view, every frame, on the thread GATT notifications arrive on (#240's
+  // NFR-2, #469).
+  return Math.sqrt(leastSquaredNearRoad(profile, origin, reach, segmentToFootprint, boxQuery));
+}
+
+/** The footprint {@link structureClearance} measures, reused between calls. */
+const boxQuery = { x: 0, z: 0, cos: 1, sin: 0, half: 0, back: 0, front: 0 };
+
+/**
+ * `road-grid.ts` §`SegmentMeasure` from {@link boxQuery}'s footprint: the
+ * segment turned into the structure's own frame — the inverse of a yaw of
+ * `rotation` — and measured against its box.
+ */
+function segmentToFootprint(
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+  query: typeof boxQuery,
+): number {
+  const { x, z, cos, sin } = query;
+  return segmentToBoxSquared(
+    (ax - x) * cos - (az - z) * sin,
+    (ax - x) * sin + (az - z) * cos,
+    (bx - x) * cos - (bz - z) * sin,
+    (bx - x) * sin + (bz - z) * cos,
+    query.half,
+    query.back,
+    query.front,
+  );
 }
 
 /**
- * The distance from segment `(ax, az)–(bx, bz)` to the box `|x| ≤ half`,
- * `back ≤ z ≤ front`: nought when they meet, and otherwise the least of each
- * end to the box and each corner to the segment — which is where two convex
- * shapes that do not meet are closest.
+ * The SQUARED distance from segment `(ax, az)–(bx, bz)` to the box
+ * `|x| ≤ half`, `back ≤ z ≤ front`: nought when they meet, and otherwise the
+ * least of each end to the box and each corner to the segment — which is where
+ * two convex shapes that do not meet are closest.
  */
-function segmentToBox(
+function segmentToBoxSquared(
   ax: number,
   az: number,
   bx: number,
@@ -423,16 +428,16 @@ function segmentToBox(
   if (clip.enter <= clip.leave) return 0;
   const span = dx * dx + dz * dz;
   return Math.min(
-    pointToBox(ax, az, half, back, front),
-    pointToBox(bx, bz, half, back, front),
-    pointToSegment(-half, back, ax, az, dx, dz, span),
-    pointToSegment(half, back, ax, az, dx, dz, span),
-    pointToSegment(-half, front, ax, az, dx, dz, span),
-    pointToSegment(half, front, ax, az, dx, dz, span),
+    pointToBoxSquared(ax, az, half, back, front),
+    pointToBoxSquared(bx, bz, half, back, front),
+    squaredToSegment(-half, back, ax, az, dx, dz, span),
+    squaredToSegment(half, back, ax, az, dx, dz, span),
+    squaredToSegment(-half, front, ax, az, dx, dz, span),
+    squaredToSegment(half, front, ax, az, dx, dz, span),
   );
 }
 
-/** The parameter interval {@link segmentToBox} narrows, reused between calls. */
+/** The parameter interval {@link segmentToBoxSquared} narrows, reused between calls. */
 const clip = { enter: 0, leave: 1 };
 
 /** One Liang–Barsky clip, against the edge where `p·t ≤ q`. */
@@ -449,23 +454,17 @@ function clipAgainst(p: number, q: number): void {
   else clip.leave = Math.min(clip.leave, t);
 }
 
-/** From a point to the box `|x| ≤ half`, `back ≤ z ≤ front`. */
-function pointToBox(x: number, z: number, half: number, back: number, front: number): number {
-  return Math.hypot(Math.max(0, Math.abs(x) - half), Math.max(0, back - z, z - front));
-}
-
-/** From a point to the segment from `(ax, az)` along `(dx, dz)`, whose squared length is `span`. */
-function pointToSegment(
+/** From a point to the box `|x| ≤ half`, `back ≤ z ≤ front`, squared. */
+function pointToBoxSquared(
   x: number,
   z: number,
-  ax: number,
-  az: number,
-  dx: number,
-  dz: number,
-  span: number,
+  half: number,
+  back: number,
+  front: number,
 ): number {
-  const t = span > 0 ? Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / span)) : 0;
-  return Math.hypot(x - (ax + dx * t), z - (az + dz * t));
+  const ox = Math.max(0, Math.abs(x) - half);
+  const oz = Math.max(0, back - z, z - front);
+  return ox * ox + oz * oz;
 }
 
 /** Where on the route something is, and which way the road runs there. */

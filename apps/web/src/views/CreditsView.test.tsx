@@ -32,6 +32,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ASSET_MANIFEST_SOURCE } from '../credits/source';
 import { creditsFrom, NOTHING_ASKED_LICENCES, SHIPPED_LICENCE_TEXTS } from '../credits/credits';
 import { parseAssetManifest } from '../credits/manifest';
+import { parseNotices, THIRD_PARTY_NOTICES_URL } from '../credits/notices';
+import { THIRD_PARTY_CONTENTS_SOURCE } from '../credits/notices-source';
 import { mount, queryAll, type Mounted } from '../testing/mount';
 
 import { CreditsView } from './CreditsView';
@@ -43,9 +45,12 @@ afterEach(() => {
   mounted = undefined;
 });
 
-async function render(manifest?: string): Promise<Mounted> {
+async function render(manifest?: string, notices?: string): Promise<Mounted> {
   const result = await mount(
-    manifest === undefined ? <CreditsView /> : <CreditsView manifest={manifest} />,
+    <CreditsView
+      {...(manifest === undefined ? {} : { manifest })}
+      {...(notices === undefined ? {} : { notices })}
+    />,
   );
   mounted = result;
   return result;
@@ -407,5 +412,87 @@ describe('the manifest ships with the build', () => {
     // be a screen that shows nothing inside the Android shell's file:// origin.
     await render();
     expect(text()).toContain('Kenney');
+    // #664: and the software list, which is inlined for the same reason.
+    expect(text()).toContain('maplibre-gl');
+  });
+});
+
+/**
+ * A notices document's contents, as `check-third-party-notices.mjs` writes
+ * them: one app package, one native library, and a project line that is not
+ * a package of its own.
+ */
+const NOTICES = [
+  'THIRD-PARTY SOFTWARE IN ON YOUR LEFT',
+  '',
+  'Part 1 — in the app (2 packages)',
+  '  dexie 4.4.6 — Apache-2.0',
+  '  lucide-react 1.48.0 — ISC',
+  '',
+  'Part 2 — in the Android app only (1 libraries)',
+  '  org.jetbrains.kotlin:kotlin-stdlib:2.2.20 — Apache-2.0',
+  '',
+  '  Built into the Android app from source:',
+  '  :capacitor-android — built from @capacitor/android, noticed in part 1',
+  '',
+  'Part 3 — files copied out of a package into the build',
+  '  pose/vision_wasm_module_internal.wasm — from @mediapipe/tasks-vision 1.0.1 (x)',
+  '',
+].join('\n');
+
+function software(): string {
+  return mounted?.container.querySelector('[data-terms="software"]')?.textContent ?? '';
+}
+
+describe('the software this app includes — #664', () => {
+  it('lists a named package from the notices, with its version and licence', async () => {
+    // ⚠️ The fixture is what makes this a test: a section that rendered
+    // nothing would satisfy "every package appears" over an empty list, which
+    // is `CreditsView.test.tsx`'s own reason for its CC-BY fixture.
+    await render(undefined, NOTICES);
+    expect(software()).toContain('dexie 4.4.6, under Apache-2.0');
+    expect(software()).toContain('lucide-react 1.48.0, under ISC');
+  });
+
+  it('lists the native libraries apart, under their own heading', async () => {
+    await render(undefined, NOTICES);
+    const headings = queryAll(mounted?.container ?? document, '[data-terms="software"] h3').map(
+      (heading) => heading.textContent,
+    );
+    expect(headings).toEqual(['In the app', 'In the Android app only']);
+    expect(software()).toContain('org.jetbrains.kotlin:kotlin-stdlib 2.2.20, under Apache-2.0');
+    // A project is built from a package already listed; it is not one itself.
+    expect(software()).not.toContain(':capacitor-android');
+  });
+
+  it('links the full notices document this app ships, relative to the page', async () => {
+    await render(undefined, NOTICES);
+    expect(hrefs()).toContain(THIRD_PARTY_NOTICES_URL);
+    expect(THIRD_PARTY_NOTICES_URL).toBe('./licences/third-party.txt');
+  });
+
+  it('says the list may be incomplete when the notices cannot be read, rather than rendering nothing', async () => {
+    await render(undefined, 'not a notices document');
+    expect(software()).toContain('This list may be incomplete');
+  });
+
+  it('says so when a part is shorter than it declares', async () => {
+    await render(undefined, NOTICES.replace('  lucide-react 1.48.0 — ISC\n', ''));
+    expect(software()).toContain('says it has 2 entries and 1 could be read');
+  });
+
+  it('renders the real notices with nothing it could not read', async () => {
+    // The gate over the shipped list: every package the generator wrote
+    // reaches the screen. The generator is what makes the list complete;
+    // `check:notices` is what keeps the committed contents its output.
+    const real = parseNotices(THIRD_PARTY_CONTENTS_SOURCE);
+    expect(real.problems).toEqual([]);
+    expect(real.app.length).toBeGreaterThan(20);
+    expect(real.android.length).toBeGreaterThan(20);
+    await render();
+    for (const item of [...real.app, ...real.android]) {
+      expect(software()).toContain(`${item.name} ${item.version}, under ${item.licence}`);
+    }
+    expect(software()).not.toContain('This list may be incomplete');
   });
 });
