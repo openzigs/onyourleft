@@ -319,6 +319,12 @@ export interface RiderExtent {
 
 declare global {
   interface Window {
+    /**
+     * How long each phase of the run took, in milliseconds — #644. Published
+     * beside the result rather than in it, and printed by the spec, never
+     * asserted: a timing assertion on a shared runner is a flake.
+     */
+    __oylHarnessPhases?: Record<string, number>;
     __oylGameHarness?: {
       readonly created: boolean;
       readonly hasContext: boolean;
@@ -1260,6 +1266,21 @@ function nearFieldProbe(
     noisePixels: differing(shipped, again),
     world,
   };
+}
+
+/**
+ * Wall-clock time per phase of the run — #644, which is what a load that
+ * outgrew its budget needed and did not have. Each call closes the phase that
+ * began at the previous one; a name used twice adds up.
+ */
+const HARNESS_PHASES: Record<string, number> = {};
+let phaseStarted = performance.now();
+function phaseEnds(name: string): void {
+  const now = performance.now();
+  HARNESS_PHASES[name] = (HARNESS_PHASES[name] ?? 0) + (now - phaseStarted);
+  // As it happens, too: a load killed by its budget never publishes the table.
+  console.info(`harness phase: ${name} ${((now - phaseStarted) / 1000).toFixed(1)} s`);
+  phaseStarted = now;
 }
 
 /** What the harness reports for the world before a frame has produced one. */
@@ -3874,6 +3895,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     sky: unreachable,
   });
   const failedNotice = realisticWorldNotice(failed) ?? '';
+  phaseEnds('realistic: fallback and failed load');
 
   const started = performance.now();
   // #475: through the renderer the product ships, which is how `GameView`
@@ -3882,6 +3904,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   // world.
   const outcome = await threeGameRenderer.loadRealisticWorld();
   const loadMs = performance.now() - started;
+  phaseEnds('realistic: loadRealisticWorld');
 
   const steepness = GRADIENT_TINT_FULL_SCALE_PERCENT / 100 + 0.02;
   const climb = northRoute(2_000, (along) => along * steepness);
@@ -3948,6 +3971,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     view.render(roadless);
     drawCallsWithoutRoad = calls() - middle;
   });
+  phaseEnds('realistic: view, textures, draw calls');
 
   const roadLuminance = (frame: SceneFrame): number => {
     const bare: SceneFrame = { ...frame, markers: [], scatter: [] };
@@ -3985,6 +4009,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
           srgbByteToLinear((lastControlWorld.horizonColour >> shift) & 0xff),
         );
   horizonFromSkyOf(view, true);
+  phaseEnds('realistic: horizon');
 
   const climbLuminance = roadLuminance(riding(climb, 400));
   const descentLuminance = roadLuminance(riding(descent, 400));
@@ -4008,6 +4033,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const turned = whole();
   view.render(withCrank(undefined));
   const held = whole();
+  phaseEnds('realistic: road luminance and cranks');
 
   // #500: a house on the road 24 m ahead, turned to face the camera, and its
   // front ground-floor window read back — then the same square on a view
@@ -4089,6 +4115,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const plainHouseGl = plainHouseCanvas.getContext('webgl2');
   const windowControl = plainHouseGl === null ? [] : meanRgbAround(plainHouseGl, glassPoint);
   plainHouse.destroy();
+  phaseEnds('realistic: house window');
 
   // The same frame in the stylised world, on a view of its own: how much of the
   // picture the realistic world actually changed.
@@ -4107,6 +4134,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     stylisedPixels.length === realisticPixels.length
       ? pixelsChanged(stylisedPixels, realisticPixels) / (canvas.width * canvas.height)
       : 0;
+  phaseEnds('realistic: stylised comparison');
 
   // #617: the trees' levels of detail, on views of their own.
   const trees = treeLevelProbe(wooded, { ...riding(level, 400), markers: [] }, WIDTH, HEIGHT, top);
@@ -4128,6 +4156,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     riding(valleyRoute(), 800 + distance, build);
   const realisticFrameMs = timeFrames(view, frameAt, gl);
   const stylisedFrameMs = timeFrames(plain, frameAt, plainGl);
+  phaseEnds('realistic: budget and frame timing');
   // #475: each view's last frame was its own world's. @see waterSkyOf
   const waterSkyRealistic = waterSkyOf(view);
   const waterSkyStylised = waterSkyOf(plain);
@@ -4142,6 +4171,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     (each) => each.visible && each.type === 'MeshStandardMaterial',
   ).length;
   view.destroy();
+  phaseEnds('realistic: step down');
 
   console.log(
     `realistic: loaded in ${loadMs.toFixed(0)} ms; a frame ${realisticFrameMs.toFixed(1)} ms against ` +
@@ -4279,6 +4309,7 @@ function treeLevelProbe(
     });
   const product = trianglesOf(REALISTIC_TREE_LEVELS);
   const hardSwap = trianglesOf(HARD_SWAP_TREE_LEVELS);
+  phaseEnds('trees: triangles');
 
   // A broadleaf: a conifer's needles are thin enough that its covered area
   // shimmers by 7 % a frame at one level, which would bury the hand-over.
@@ -4337,11 +4368,13 @@ function treeLevelProbe(
       return { out: steps, covered, changed };
     });
   const handOver = handOverOf(REALISTIC_TREE_LEVELS);
+  phaseEnds('trees: hand-over');
   const handOverControl = handOverOf({
     ...REALISTIC_TREE_LEVELS,
     dithered: false,
     handOverFrames: 1,
   });
+  phaseEnds('trees: hand-over control');
   if (!(watchedDistance > 18.2 && watchedDistance < 19.8)) {
     throw new Error(`#617: the watched tree is ${String(watchedDistance)} m away`);
   }
@@ -4369,6 +4402,7 @@ function treeLevelProbe(
     ...REALISTIC_TREE_LEVELS,
     rankOnly: 'in-view',
   });
+  phaseEnds('trees: nearest visible');
   console.log(
     `#617: the wooded view submits ${String(product.triangles)} triangles against ` +
       `${String(hardSwap.triangles)} with the hard swap (${String(hardSwap.triangles - product.triangles)} fewer), ` +
@@ -4487,6 +4521,7 @@ async function run(): Promise<void> {
   // the same place and for exactly the same reason. A harness that skipped it
   // would draw the primitive world and every assertion below would pass.
   await loadSceneryModels();
+  phaseEnds('scenery models');
   // ADR 0026. A run of its own, so the default run fetches none of the
   // realistic set — which `game.browser.spec.ts` asserts off the requests it
   // makes — and so the realistic world's load is paid by one page load only.
@@ -4496,6 +4531,8 @@ async function run(): Promise<void> {
       // #545, in the world the owner saw it in — after `realisticProbe`, which
       // is what loaded that world. @see nearFieldProbe
       const nearField = nearFieldProbe(1_600, 200, REALISTIC_LADDER[0] as QualitySettings);
+      phaseEnds('near field');
+      window.__oylHarnessPhases = HARNESS_PHASES;
       window.__oylGameHarness = { ...emptyHarness(errors), realistic, nearField };
     } catch (error: unknown) {
       errors.push(error instanceof Error ? error.message : String(error));
@@ -5119,6 +5156,8 @@ async function run(): Promise<void> {
     errors.push(error instanceof Error ? error.message : String(error));
   }
 
+  phaseEnds('default run');
+  window.__oylHarnessPhases = HARNESS_PHASES;
   window.__oylGameHarness = {
     created,
     hasContext,

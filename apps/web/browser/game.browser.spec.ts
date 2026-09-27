@@ -477,10 +477,16 @@ const test = base.extend<object, { harnessRun: (query?: string) => Promise<Harne
           page.on('request', (request) => requested.push(request.url()));
           const shaderErrors: string[] = [];
           page.on('console', (message) => {
+            // #644: each phase as it ends, so a load its budget kills still
+            // says in the CI log how far it got.
+            if (message.text().startsWith('harness phase: ')) {
+              console.log(`game.html${query} ${message.text()}`);
+            }
             if (message.type() === 'error' && message.text().includes('THREE.WebGLProgram')) {
               shaderErrors.push(message.text().slice(0, 400));
             }
           });
+          const loadStarted = Date.now();
           await page.goto(`${HARNESS_ORIGIN}/game.html${query}`);
           // The harness publishes at the end of `run()` and nowhere else, so
           // waiting on the property existing is waiting on the run having
@@ -489,6 +495,15 @@ const test = base.extend<object, { harnessRun: (query?: string) => Promise<Harne
           // anything, exactly as `main.tsx` does.
           await page.waitForFunction(() => window.__oylGameHarness !== undefined);
           const result = await page.evaluate(() => window.__oylGameHarness as GameHarnessResult);
+          // #644: printed, never asserted — so the next load that outgrows its
+          // budget says in the CI log which phase grew.
+          const phases = await page.evaluate(() => window.__oylHarnessPhases ?? {});
+          console.log(
+            `game.html${query}: ${String(Math.round((Date.now() - loadStarted) / 1000))} s; ` +
+              Object.entries(phases)
+                .map(([name, ms]) => `${name} ${(ms / 1000).toFixed(1)} s`)
+                .join('; '),
+          );
           return { result, requested, shaderErrors };
         } finally {
           await context.close();
@@ -522,7 +537,7 @@ async function harness(
  * On CI it took 33 s, 36 s and 48 s on green runs and over 60 s on two red
  * ones — a spread, on the same commit, that is the runner rather than the code.
  */
-const REALISTIC_LOAD_BUDGET_MS = 150_000;
+const REALISTIC_LOAD_BUDGET_MS = 280_000;
 
 /**
  * Pays for the `?realistic` load in a `beforeAll` with its own budget — #607.
