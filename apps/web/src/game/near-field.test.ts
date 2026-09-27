@@ -19,18 +19,14 @@
  *    What the cull drops is held, item for item, to `referenceShapeMeets`,
  *    which clips triangles where `shapeMeets` separates them and shares none
  *    of its code (#545's review).
- *
- * ⚠️ **The third is not in this file since #651**, and a reviewer who remembers
- * the rides here is reading the old one: they are `near-field-rides-*.test.ts`,
- * one file a group, because as one file they were the Vitest run's last minute
- * and a half. `near-field-rides-testing.ts` says why and what holds the split;
- * what is here is the guard that no ride was lost in it.
  */
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
+
+import { metres, metresPerSecond, type RouteProfile } from '@onyourleft/domain';
 
 import {
   BUILDING_ROLES,
@@ -41,6 +37,7 @@ import {
 } from './buildings';
 import {
   NEAR_PLANE_METRES,
+  cameraRig,
   horizontalSpread,
   verticalHalfTangent,
   type CameraRig,
@@ -54,23 +51,74 @@ import {
   shapeMeets,
   triangleMeets,
   type DrawnWorld,
+  type NearPyramid,
   type Reach,
+  type ShapeTriangles,
   type ShapesOf,
 } from './near-field';
-import { RIDE_GROUPS, RIDES, SHAPES, STYLISED_MODELS, WORLDS } from './near-field-rides-testing';
 import {
   boundsOf,
+  fittedRealistic,
   fittedStylised,
   modelTriangles,
   referenceShapeMeets,
 } from './near-field-testing';
+import { REALISTIC_VEGETATION } from './realistic-assets';
+import {
+  circuitRoute,
+  hairpinRoute,
+  northRoute,
+  plannerRoute,
+  sBendRoute,
+} from './route-fixtures-testing';
+import { sceneFrame } from './scene';
 import { SCENERY_MODELS } from './scenery-models';
 import { SCATTER_KINDS, STRUCTURE_KINDS, type SceneryKind, type ScatterItem } from './scatter';
+import { atStartLine } from './simulation';
+import { corridorOrigin } from './terrain';
 import {
   realisticStructureGeometry,
   realisticStructureSurfaces,
   sceneryFitMetres,
 } from './three-renderer';
+
+const WORLDS: readonly DrawnWorld[] = ['stylised', 'realistic'];
+
+const STYLISED_MODELS = fileURLToPath(new URL('./models/', import.meta.url));
+const REALISTIC_MODELS = fileURLToPath(new URL('../../public/realistic/', import.meta.url));
+
+/**
+ * Every shape a natural kind is drawn as, in each world, in the item's own
+ * frame at a scale of 1 — placed as the renderer places it.
+ *
+ * ⚠️ **Every shape of the kind, not the one an item's variant picks.** Which
+ * shape a variant slot wears depends on how many the rung draws
+ * (`quality.ts` §`sceneryVariants`), so the gate asks of all of them.
+ */
+const SHAPES: Readonly<Record<DrawnWorld, ReadonlyMap<SceneryKind, readonly ShapeTriangles[]>>> = {
+  stylised: new Map(
+    Object.entries(SCENERY_MODELS)
+      .filter(([kind]) => !isBuiltKind(kind))
+      .map(([kind, models]) => [
+        kind as SceneryKind,
+        (models ?? []).map((model) =>
+          fittedStylised(
+            modelTriangles(`${STYLISED_MODELS}${model.name}.glb`).triangles,
+            sceneryFitMetres(kind as SceneryKind),
+          ),
+        ),
+      ]),
+  ),
+  realistic: new Map(
+    Object.entries(REALISTIC_VEGETATION).map(([kind, models]) => [
+      kind as SceneryKind,
+      models.map((model) => {
+        const { triangles, extras } = modelTriangles(`${REALISTIC_MODELS}${model.file}`);
+        return fittedRealistic(triangles, extras, sceneryFitMetres(kind as SceneryKind));
+      }),
+    ]),
+  ),
+};
 
 /** Holds a shape's box, in the item's own frame at scale 1, inside a reach. */
 function expectInside(
@@ -502,27 +550,197 @@ describe('clearOfTheCamera — what the renderer is handed', () => {
   });
 });
 
-describe('the rides are split, and none is lost — #651', () => {
-  const here = fileURLToPath(new URL('./', import.meta.url));
+/** The rides — fixture routes, with the camera on the rider's racing line. */
+const RIDES: Readonly<Record<string, () => RouteProfile>> = {
+  // Long enough to pass villages, farmsteads and their field boundaries, on
+  // the straight #546 puts the rider on the right of.
+  'a level road through villages': () => northRoute(4_000, () => 50),
+  'a 20 m hairpin': () => hairpinRoute(20),
+  'an S-bend of 30 m': () => sBendRoute(30),
+  // ⚠️ Both hands since #583. Until then the world was a mirror of its map, so
+  // the two fixtures above were drawn as these two are now, and the control
+  // below — a conifer's branches cut at 8 : 1 — was found on THEIR frames. The
+  // right-handed ones place the scenery the other way round, and on those the
+  // stylised world finds no cut at 8 : 1 at all; the mirrored pair keeps the
+  // control finding one and keeps both hands measured.
+  'a 20 m left-hand hairpin': () => hairpinRoute(20, 'left'),
+  'an S-bend of 30 m, left first': () => sBendRoute(30, 'left'),
+  "a planner's route": () => plannerRoute(),
+  'a 300 m circuit': () => circuitRoute(300, () => 20),
+  // ⚠️ Both hands of these two since #583. Until then the world was a mirror
+  // of its map, so the two above were drawn as these two are now — and the
+  // control below, a conifer's branches cut at 8 : 1 in the STYLISED world,
+  // was found on those frames and on no other ride. Drawn the right way round
+  // the stylised world finds no cut at 8 : 1 on any ride here; the mirrored
+  // pair keeps the control able to find one, and both hands measured.
+  "a planner's route, mirrored": () => plannerRoute({ mirrored: true }),
+  'a 300 m right-hand circuit': () => circuitRoute(300, () => 20, 'right'),
+};
 
-  it('puts every ride in exactly one group', () => {
-    const grouped = RIDE_GROUPS.flat();
-    expect([...grouped].sort()).toEqual(Object.keys(RIDES).sort());
-    expect(new Set(grouped).size).toBe(grouped.length);
+/**
+ * The frames the renderer is handed, from an upright phone to the widest the
+ * stylesheet allows — and one wider than any of them, which is the control's.
+ */
+const ASPECTS: Readonly<Record<string, number>> = {
+  'a phone in landscape': 19.5 / 9,
+  '16 : 9': 16 / 9,
+  "the owner's tablet": 16 / 10,
+  '4 : 3': 4 / 3,
+  'a tablet upright': 10 / 16,
+  'a phone upright': 9 / 19.5,
+  'the widest frame': 6,
+  // ⚠️ **The control's frame, and no frame the stylesheet can produce** —
+  // #571. The control was 6 : 1 until then, and what the stylised world met
+  // there was ONE conifer inside a 20 m hairpin, 5.8 m from the drawn road's
+  // centreline — inside the 6.5 m the scatter's verge keeps clear — because it
+  // was placed beside the route's arc rather than the ribbon, which runs
+  // inside it. Placed beside the ribbon, nothing on any ride here reaches a
+  // 6 : 1 plane in either world. 8 : 1 widens the near rectangle to 5.6 m:
+  // measured, every ride but the S-bend meets it in at least one world, and
+  // the circuit and the planner's route in both.
+  'the control frame': 8,
+};
+
+interface RideFrame {
+  readonly rig: CameraRig;
+  readonly scatter: readonly ScatterItem[];
+}
+
+const rides = new Map<string, readonly RideFrame[]>();
+
+function ride(name: string): readonly RideFrame[] {
+  const cached = rides.get(name);
+  if (cached !== undefined) return cached;
+  const profile = (RIDES[name] as () => RouteProfile)();
+  const origin = corridorOrigin(profile);
+  const start = atStartLine(profile);
+  const frames: RideFrame[] = [];
+  for (let distance = 0; distance < profile.totalDistance; distance += 1) {
+    const frame = sceneFrame({
+      profile,
+      origin,
+      state: { ...start, ride: { speed: metresPerSecond(8), distance: metres(distance) } },
+    });
+    frames.push({ rig: cameraRig(frame.camera), scatter: frame.scatter });
+  }
+  rides.set(name, frames);
+  return frames;
+}
+
+/**
+ * Whether the near plane cuts `subject` as `world` draws it, for a frame of
+ * this aspect. The box is `intrudes`' — the bound the first two describes hold
+ * — and the triangles are {@link referenceShapeMeets}': clipped, not
+ * separated, and sharing no code with `shapeMeets`, so that a ride holds the
+ * cull to an answer it did not compute itself (#545's review).
+ */
+function cutBy(
+  subject: ScatterItem,
+  rig: CameraRig,
+  pyramid: NearPyramid,
+  aspect: number,
+  world: DrawnWorld,
+): 'no' | 'box only' | 'geometry' {
+  if (!intrudes(subject, pyramid, world)) return 'no';
+  const shapes = SHAPES[world].get(subject.kind);
+  // A structure or a post has no shape here and is held to its box — the
+  // stronger claim, and the one the rides make good.
+  if (shapes === undefined) return 'geometry';
+  const spread = horizontalSpread(aspect);
+  const rise = verticalHalfTangent(aspect);
+  return shapes.some((shape) =>
+    referenceShapeMeets(subject, shape, rig, spread, rise, NEAR_PLANE_METRES),
+  )
+    ? 'geometry'
+    : 'box only';
+}
+
+/** The shapes the gate reads, off the committed files, for `clearOfTheCamera`. */
+function shapesFromFiles(world: DrawnWorld): ShapesOf {
+  return (kind) => SHAPES[world].get(kind);
+}
+
+/** The aspects a device draws — every one but the widest the stylesheet allows. */
+const DEVICE_ASPECTS = Object.entries(ASPECTS).filter(
+  ([label]) => label !== 'the widest frame' && label !== 'the control frame',
+);
+
+describe('a ride — nothing the camera passes is cut by the near plane (#545)', () => {
+  /** Item-frames the plane cuts in the frame as `scene.ts` built it, by world and aspect. */
+  const uncut = new Map<string, number>();
+  /** Item-frames whose box met the pyramid and whose shapes did not, by world. */
+  const boxOnly = new Map<DrawnWorld, number>();
+
+  /** Frames measured, by ride, so a finding below cannot pass over rides that never ran. */
+  const measured = new Map<string, number>();
+
+  for (const name of Object.keys(RIDES)) {
+    it(`${name}: what the renderer draws, every aspect, both worlds`, () => {
+      for (const { rig, scatter } of ride(name)) {
+        for (const world of WORLDS) {
+          for (const [label, aspect] of Object.entries(ASPECTS)) {
+            const pyramid = nearPyramid(rig, aspect);
+            const key = `${world} ${label}`;
+            const cut = new Set<ScatterItem>();
+            for (const subject of scatter) {
+              const answer = cutBy(subject, rig, pyramid, aspect, world);
+              if (answer === 'geometry') {
+                cut.add(subject);
+                uncut.set(key, (uncut.get(key) ?? 0) + 1);
+              }
+              if (answer === 'box only') boxOnly.set(world, (boxOnly.get(world) ?? 0) + 1);
+            }
+            // Exactly what the reference would cut is dropped, and nothing
+            // else: a cull that dropped too much is a tree missing from a
+            // frame, which is a defect as well.
+            const drawn = clearOfTheCamera(scatter, rig, aspect, world, shapesFromFiles(world));
+            const expected = scatter.filter((subject) => !cut.has(subject));
+            if (drawn.length !== expected.length || drawn.some((at, i) => at !== expected[i])) {
+              throw new Error(
+                `${name}, ${world}, ${label}: the cull dropped ${String(scatter.length - drawn.length)} where the reference cuts ${String(cut.size)}`,
+              );
+            }
+          }
+        }
+        measured.set(name, (measured.get(name) ?? 0) + 1);
+      }
+    }, 120_000);
+  }
+
+  it('cuts nothing a device draws even before the cull — the owner’s tablet among them', () => {
+    // The finding, pinned: on these routes the camera on its line never comes
+    // within the plane of anything at the aspect of a phone or a tablet. If a
+    // change to the camera, the line or the placement brings it there, this is
+    // where it shows — before the cull quietly starts dropping trees.
+    //
+    // ⚠️ The counts are the rides' own, so every ride must have run: on its
+    // own, with `-t`, this used to pass over empty counts (#545's review).
+    for (const name of Object.keys(RIDES)) {
+      expect(measured.get(name) ?? 0, `${name}: frames measured`).toBeGreaterThan(0);
+    }
+    for (const world of WORLDS) {
+      for (const [label] of DEVICE_ASPECTS) {
+        expect(uncut.get(`${world} ${label}`) ?? 0, `${world} ${label}`).toBe(0);
+      }
+    }
   });
 
-  it('has a file for every group that registers exactly that group, and no other file', () => {
-    const files = readdirSync(here)
-      .filter((name) => /^near-field-rides-.*\.test\.ts$/.test(name))
-      .sort();
-    expect(files).toEqual(
-      RIDE_GROUPS.map((_, group) => `near-field-rides-${String(group)}.test.ts`).sort(),
-    );
-    for (const [group] of RIDE_GROUPS.entries()) {
-      const text = readFileSync(`${here}near-field-rides-${String(group)}.test.ts`, 'utf8');
-      expect(text.match(/describeRides\(\d+\)/g), `group ${String(group)}`).toEqual([
-        `describeRides(${String(group)})`,
-      ]);
+  it('the control: at 8 : 1 the plane DOES cut the frame as built, in both worlds', () => {
+    // What makes the green rides mean something: the same measure, on the same
+    // frames, finds a cut where the rectangle is 5.6 m across (4.2 m at 6 : 1
+    // until #571 — see 'the control frame') — conifers'
+    // lowest branches beside the eye. A measure that could not find one — a
+    // shape placed in the wrong frame, a pyramid facing backwards, a reader
+    // that returned no triangles — would pass every ride over nothing. And it
+    // is exactly what `clearOfTheCamera` removed in the rides above.
+    for (const world of WORLDS) {
+      expect(uncut.get(`${world} the control frame`) ?? 0, world).toBeGreaterThan(0);
     }
+  });
+
+  it('and the boxes alone meet the pyramid where no triangle does — why the cull reads the triangles', () => {
+    // A cull on the box, the first thing #545's branch tried, would have
+    // dropped a visible tree this many times to prevent nothing.
+    expect(boxOnly.get('realistic') ?? 0).toBeGreaterThan(100);
   });
 });

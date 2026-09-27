@@ -140,9 +140,10 @@ export const LAUNCH_ARGS = [
  *
  * ⚠️ **The job's `timeout-minutes` is 20, and this has to END before it does,
  * or the run reports nothing**: a job the runner cancels says "cancelled" and
- * names no case and no describe. On the slowest runner measured (an AMD EPYC
- * 7763, run 36325068145) this gate starts 8m47s into the job, behind the
- * Vitest run; ten minutes ends it by 18m47s, with the coverage upload after it.
+ * names no case and no describe. On the slower of the two runners CI lands on
+ * (an AMD EPYC 7763) this gate starts about nine minutes into the job, behind
+ * the Vitest run — 538 s and 542 s (runs 36326756014 and 36334163962) — so
+ * ten minutes ends it by about 19m02s, with only the coverage upload after it.
  * The slowest GREEN gate measured on that runner took 452 s (run 36318760634).
  *
  * Every load the gate pays for has a budget of its own, and the arithmetic
@@ -207,8 +208,10 @@ export default defineConfig({
   globalTimeout: GATE_BUDGET_MS,
   // ⚠️ **Playwright's default of half the cores, and that is measured — #651.**
   // The `ubuntu-latest` runner's four vCPUs are two cores' hyperthreads
-  // (`lscpu`, run 36333257690), and a fourth Vitest worker on it added nothing
-  // but contention (`vitest.config.ts` §`sequence`). Two workers is one a core.
+  // (`lscpu`, run 36333257690). On that run a fourth Vitest worker made the
+  // suite no faster — 336 s to 334 s — while its summed test time rose from
+  // 676 s to 807 s and one case passed its timeout: a thread that shares a
+  // core adds contention, not a core. Two workers here is one a core.
   // ⚠️ **Two projects, one browser, one run — #651, and the game spec is
   // LAST.** Playwright queues a project's groups in the order the projects are
   // listed, and the game spec is one group — its shared harness (#456) is a

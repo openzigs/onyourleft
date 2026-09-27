@@ -66,15 +66,6 @@ import { MAXIMUM_LEAN_RADIANS } from '../src/game/racing-line';
 import type { Box, StageItem, StageMeasurement } from './ride-harness';
 
 /**
- * Every case here drives a page of its own and shares nothing with another, so
- * they are spread over every worker rather than run one after another in one
- * — #651. This file is the longest in the gate's layout half (about two
- * minutes of case time on the runner, run 36326090778), and as one group it
- * set that half's length on its own however many workers there were.
- */
-test.describe.configure({ mode: 'parallel' });
-
-/**
  * How far past an edge a box may measure and still count as inside it.
  *
  * ⚠️ One pixel, and it is sub-pixel layout rather than slack: a panel whose
