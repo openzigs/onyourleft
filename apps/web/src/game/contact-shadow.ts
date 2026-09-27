@@ -145,6 +145,38 @@ export interface ContactShadow {
   halfAcross: number;
 }
 
+/** Where the shadow of a point one metre up lands, relative to its foot. @see sunThrowPerMetre */
+export interface SunThrow {
+  x: number;
+  z: number;
+}
+
+/**
+ * The sun's ground projection: where the shadow of a point ONE metre up lands,
+ * relative to the point's foot — along the sun's horizontal direction, AWAY
+ * from the sun, `1 / tan(elevation)` long. Written into `into`.
+ *
+ * ⚠️ **The one place this program turns `world.ts`'s sun into a shadow on the
+ * ground**, and since #620 it has two callers: the riders' blob here, and the
+ * scenery's ground blobs (`ground-blob.ts`). A second copy of these two lines
+ * would be a second light direction the day one of them changed.
+ *
+ * @returns `false` under a sun at or below the horizon, which `world.ts` never
+ * produces and which would throw a shadow of infinite length; `into` is then
+ * untouched. Allocates nothing.
+ */
+export function sunThrowPerMetre(sun: Pick<SunStyle, 'x' | 'y' | 'z'>, into: SunThrow): boolean {
+  if (!(sun.y > 0)) {
+    return false;
+  }
+  into.x = -sun.x / sun.y;
+  into.z = -sun.z / sun.y;
+  return true;
+}
+
+/** Reused by {@link placeContactShadow}, which is called for every rider on every frame. */
+const SUN_THROW: SunThrow = { x: 0, z: 0 };
+
 /**
  * Where one rider's contact shadow lies under one sun, written into `into`.
  *
@@ -166,13 +198,11 @@ export function placeContactShadow(
   if (!Object.hasOwn(CASTS_CONTACT_SHADOW, marker.kind) || !CASTS_CONTACT_SHADOW[marker.kind]) {
     return false;
   }
-  if (!(sun.y > 0)) {
+  if (!sunThrowPerMetre(sun, SUN_THROW)) {
     return false;
   }
-  // Where the shadow of a point `h` up lands, relative to the point's foot:
-  // along the sun's horizontal direction, AWAY from the sun, `h / tan(elev)`.
-  const awayX = -sun.x / sun.y;
-  const awayZ = -sun.z / sun.y;
+  const awayX = SUN_THROW.x;
+  const awayZ = SUN_THROW.z;
   const acrossX = marker.headingZ;
   const acrossZ = -marker.headingX;
   // #499: a leaning rider's middle is not over the wheels. It is `sin φ` of its

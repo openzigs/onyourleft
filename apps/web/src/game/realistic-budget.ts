@@ -334,6 +334,36 @@ export const HARD_SWAP_TREE_LEVELS: TreeLevels = {
 export const REALISTIC_STRUCTURE_ITEMS = 36;
 
 /**
+ * How many ground blobs a realistic frame may draw — #620: **62**, one under
+ * every item the realistic world draws as a MESH and every structure it may
+ * carry. `three-renderer.ts` §`GroundBlobBelt` is built with exactly this
+ * capacity.
+ *
+ * | Casters | Blobs |
+ * |---|--:|
+ * | Trees at the full or middle level ({@link REALISTIC_TREE_LEVELS}: 1 full, 4 middle, the full-to-middle band) | 6 |
+ * | Shrubs and rocks drawn as meshes ({@link REALISTIC_NEAR_MESHES}) | 8 + 12 |
+ * | Structures ({@link REALISTIC_STRUCTURE_ITEMS}) | 36 |
+ *
+ * ⚠️ **A tree in the middle-to-impostor band, or drawn as its impostor, has
+ * none**: an impostor is 40 m and more away, where a blob is a few pixels the
+ * fog is already taking, and #620's ceiling of 124 triangles is these 62 at
+ * two each.
+ *
+ * ⚠️ **They are counted in the frame's triangles**:
+ * `realistic-budget.test.ts` adds `REALISTIC_GROUND_BLOBS × 2` to the worst
+ * frame, which the structures had left 1 350 triangles of room under
+ * {@link REALISTIC_FRAME_TRIANGLES} — 124 of it spent, 1 226 left.
+ */
+export const REALISTIC_GROUND_BLOBS =
+  REALISTIC_TREE_LEVELS.near +
+  REALISTIC_TREE_LEVELS.middle +
+  (REALISTIC_TREE_LEVELS.dithered ? 1 : 0) +
+  REALISTIC_NEAR_MESHES.shrub +
+  REALISTIC_NEAR_MESHES.rock +
+  REALISTIC_STRUCTURE_ITEMS;
+
+/**
  * The most instanced meshes the realistic STRUCTURES may cost: **35** — #482,
  * from #481's review (finding 6), which found the figure bounded and stated
  * nowhere; and since #500, which gave every building two shapes and dressed

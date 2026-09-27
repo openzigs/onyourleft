@@ -115,9 +115,12 @@ import {
   threeGameRenderer,
   waterSkyOf,
   filterWaterRipplesOf,
+  groundBlobsOf,
   nearFieldOf,
   nearFieldShapes,
+  showGroundBlobsOf,
 } from '../src/game/three-renderer';
+import { groundBlobAlpha, groundUnder } from '../src/game/ground-blob';
 import { clearOfTheCamera, nearPyramid, sceneryReach } from '../src/game/near-field';
 import { realisticWorldNotice } from '../src/game/realistic-assets';
 import {
@@ -3649,6 +3652,113 @@ function foliageOrderOf(pieces: readonly DrawnPiece[]): FoliageOrder {
   };
 }
 
+/** What {@link groundBlobProbe} measures — #620. Every colour is a mean of sRGB bytes. */
+export interface GroundBlobMeasurement {
+  /** The ground at the tree's blob's middle, and 5 m from it, with the blobs drawn. */
+  readonly probe: readonly number[];
+  readonly reference: readonly number[];
+  /** The same two points with the blobs hidden — the control. */
+  readonly probeHidden: readonly number[];
+  readonly referenceHidden: readonly number[];
+  /** How far the probe is from the blob's middle as a share of its rim, and whether no tree covers it. */
+  readonly probeRim: number;
+  readonly probeClear: boolean;
+  /** How far the reference is from the blob's middle, as a share of its rim (≥ 1 is outside it). */
+  readonly referenceRim: number;
+  readonly referenceClear: boolean;
+  /** Metres between the two points, horizontally. */
+  readonly referenceMetres: number;
+  /** A point on the verge 0.5 m off the road's edge under a blob, drawn and hidden. */
+  readonly verge: readonly number[];
+  readonly vergeHidden: readonly number[];
+  /** How far the verge point is from its blob's middle, as a share of its rim. */
+  readonly vergeRim: number;
+  /** Whether no tree covers the verge point. */
+  readonly edgeClear: boolean;
+  /**
+   * The SHIPPED shader's road clip, made observable on level ground — #686's
+   * review. @see GroundBlobClipMeasurement
+   */
+  readonly clip: GroundBlobClipMeasurement;
+  /** Draw calls for the probe frame with the blobs, and without. */
+  readonly drawCalls: number;
+  readonly drawCallsHidden: number;
+  /** The blobs and their triangles in the probe frame, and in the wooded valley frame. */
+  readonly blobs: number;
+  readonly triangles: number;
+  readonly woodedBlobs: number;
+  readonly woodedTriangles: number;
+}
+
+/**
+ * The road clip of `three-renderer.ts` §`GROUND_BLOB_VERTEX` and
+ * §`GROUND_BLOB_FRAGMENT`, read back off the drawing buffer — #686's review.
+ *
+ * Tree A's blob is drawn with a clip plane forced through its middle, facing
+ * the screen's right, so the shader should keep the right half and discard
+ * the left; then — **the control** — with both planes the no-op `(0, 0, −1)`,
+ * so both halves darken. Each colour is a mean of sRGB bytes at one point, the
+ * blobs drawn and hidden; `expected` is `ground-blob.ts` §`groundBlobAlpha`
+ * at that point.
+ */
+export interface GroundBlobClipMeasurement {
+  /** Whether the harness could reach the blob mesh's clip attributes at all. */
+  readonly measured: boolean;
+  /** The point on the side the forced plane keeps, and the one it clips. */
+  readonly kept: GroundBlobClipPoint;
+  readonly clipped: GroundBlobClipPoint;
+}
+
+export interface GroundBlobClipPoint {
+  /** Metres from the forced plane, positive on the kept side. */
+  readonly metres: number;
+  /** Pixels between the point and the plane's line through the blob's middle, on screen. */
+  readonly pixels: number;
+  /** Whether no tree covers the strip read. */
+  readonly clear: boolean;
+  /** How far from the middle as a share of the rim, and the blob's alpha there. */
+  readonly rim: number;
+  readonly expected: number;
+  /** The forced plane, the control's no-op planes, and the blobs hidden. */
+  readonly forced: readonly number[];
+  readonly control: readonly number[];
+  readonly hidden: readonly number[];
+}
+
+const NO_CLIP_POINT: GroundBlobClipPoint = {
+  metres: 0,
+  pixels: 0,
+  clear: false,
+  rim: 0,
+  expected: 0,
+  forced: [],
+  control: [],
+  hidden: [],
+};
+
+const NO_GROUNDING: GroundBlobMeasurement = {
+  probe: [],
+  reference: [],
+  probeHidden: [],
+  referenceHidden: [],
+  probeRim: 0,
+  probeClear: false,
+  referenceRim: 0,
+  referenceClear: false,
+  referenceMetres: 0,
+  verge: [],
+  vergeHidden: [],
+  vergeRim: 0,
+  edgeClear: false,
+  clip: { measured: false, kept: NO_CLIP_POINT, clipped: NO_CLIP_POINT },
+  drawCalls: 0,
+  drawCallsHidden: 0,
+  blobs: 0,
+  triangles: 0,
+  woodedBlobs: 0,
+  woodedTriangles: 0,
+};
+
 /** What the `?realistic` run measures — ADR 0026. @see realisticProbe */
 export interface RealisticMeasurement {
   readonly measured: boolean;
@@ -3741,6 +3851,8 @@ export interface RealisticMeasurement {
   readonly windowWall: readonly number[];
   /** #621: two trees and two houses of one shape, tinted and not. @see tintProbe */
   readonly tint: TintMeasurement;
+  /** #620: the ground under a tree's blob and 5 m from it, with and without the blobs. @see groundBlobProbe */
+  readonly grounding: GroundBlobMeasurement;
   /**
    * #544: the distant hills against the sky, read off the drawing buffer — as
    * the product draws them, and (the control) with the view's horizon put back
@@ -3900,6 +4012,7 @@ const NO_REALISTIC: RealisticMeasurement = {
     housesControl: [],
     houseTints: [],
   },
+  grounding: NO_GROUNDING,
   horizon: [],
   horizonControl: [],
   horizonColours: { fog: [], foot: [] },
@@ -4279,6 +4392,392 @@ function tintProbe(
 }
 
 /**
+ * The ground under the realistic scenery, darkened — #620.
+ *
+ * Two broadleaf trees on the level road, and nothing else: **A**, 7 m ahead,
+ * 9 m to the left and 1.4 times the size, whose blob is probed; and **B**, 18 m
+ * ahead, 6 m to the left and as large, whose shadow this route's sun throws
+ * towards the road's left edge.
+ *
+ * - **The probe** is the ground in A's blob's core, at its whole darkness —
+ *   read off the blob's own instance matrix, so the probe is where the product
+ *   put it — at the point nearest the middle no tree covers; and the reference
+ *   the ground 5 m from it, outside both blobs, off the road, clear of the
+ *   trees and at nearly the probe's depth. Both read with the blobs drawn,
+ *   and — **the control** — hidden, where the two must agree to 3 %: what is
+ *   measured with them drawn is the blob, not the ground.
+ * - **The road's edge**: a point on the verge 0.5 m off it, abreast of B's
+ *   blob, drawn and hidden, which must darken: a blob reaches the road's edge.
+ *   ⚠️ **Nothing here asserts that it stops there, and that is measured**: on
+ *   this level road the verge drops 0.25 m, so a blob beside it lies BELOW
+ *   the tarmac and the road's own depth hides whatever of it reaches under
+ *   the carriageway — the shader's clip deleted, the road read back
+ *   unchanged. Where it would show is ground above the road.
+ *   `ground-blob.test.ts` holds the planes on the hairpin for every blob and
+ *   every sun, and {@link groundBlobClip} holds the shipped shader's use of
+ *   them, with a plane forced through a blob on this road.
+ * - **The cost**: non-empty draw calls with the blobs and without.
+ */
+function groundBlobProbe(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  base: SceneFrame,
+): Omit<GroundBlobMeasurement, 'woodedBlobs' | 'woodedTriangles'> {
+  const frame: SceneFrame = { ...base, markers: [] };
+  const pose = frame.camera;
+  const right = { x: -pose.headingZ, z: pose.headingX };
+  /** Half the width, in pixels, of the strip the probe and the reference are read over. */
+  const STRIP = 10;
+  const tree = (ahead: number, across: number, scale: number): ScatterItem => {
+    const at = onTheRoad(frame, ahead, across);
+    return {
+      kind: 'tree-broadleaf',
+      x: at.x,
+      y: groundAt(at.x, at.z, at.y),
+      z: at.z,
+      rotation: 0,
+      scale,
+      variant: 0,
+    };
+  };
+  function groundAt(x: number, z: number, otherwise: number): number {
+    const under = { y: otherwise, nx: 0, ny: 1, nz: 0 };
+    return groundUnder(frame.terrain.mesh, frame.corridor.centre, x, z, under)
+      ? under.y
+      : otherwise;
+  }
+  // ⚠️ A is NEAR, and large, on purpose. The first version stood it 25 m
+  // ahead at scale 1, where ground 30 m from a 2 m eye is foreshortened to
+  // under a pixel a metre on this 640 × 360 canvas: the blob's core was three
+  // pixels tall and every 3 × 3 read mixed it with the ground beyond it, which
+  // read back as half the darkening. 7 m ahead at 1.4 puts the core about ten
+  // pixels tall.
+  const scene: SceneFrame = { ...frame, scatter: [tree(7, -9, 1.4), tree(18, -6, 1.4)] };
+  // A strip 21 pixels wide and 3 tall on the ground — wide, because the
+  // ground's photograph varies pixel to pixel and a mean over 63 of them is
+  // what lets the control hold to 3 % (over 27 it read 3.4 % apart); short, because ground is foreshortened
+  // up the screen. The road-edge points are read 3 × 3: they are 0.5 m either
+  // side of an edge.
+  const meanAround = (point: { x: number; y: number; z: number }, halfWidth = STRIP): number[] => {
+    const at = pixelFor(scene, canvas, point);
+    const width = halfWidth * 2 + 1;
+    const pixels = readRegion(gl, Math.round(at.x) - halfWidth, Math.round(at.y) - 1, width, 3);
+    const sum = [0, 0, 0];
+    for (let index = 0; index < pixels.length; index += 4) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        (sum[channel] as number) += pixels[index + channel] ?? 0;
+      }
+    }
+    return sum.map((channel) => channel / (width * 3));
+  };
+  const settle = (): void => {
+    for (let at = 0; at < 4; at += 1) view.render(scene);
+  };
+  showGroundBlobsOf(view, true);
+  settle();
+  const drawn = groundBlobsOf(view);
+  const blob = (
+    slot: number,
+  ): {
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+    readonly rim: (x: number, z: number) => number;
+    readonly at: (u: number, v: number) => { readonly x: number; readonly z: number };
+  } => {
+    const m = drawn.matrices.slice(slot * 16, slot * 16 + 16);
+    const [ax, , az] = [m[0] ?? 0, m[1] ?? 0, m[2] ?? 0];
+    const [lx, , lz] = [m[8] ?? 0, m[9] ?? 0, m[10] ?? 0];
+    const x = m[12] ?? 0;
+    const z = m[14] ?? 0;
+    return {
+      x,
+      y: m[13] ?? 0,
+      z,
+      // Where (x, z) is in the blob's own unit coordinates, as the shader sees it.
+      rim: (px: number, pz: number) => {
+        const det = ax * lz - az * lx;
+        const u = ((px - x) * lz - (pz - z) * lx) / det;
+        const v = (ax * (pz - z) - az * (px - x)) / det;
+        return Math.hypot(u, v);
+      },
+      at: (u: number, v: number) => ({ x: x + ax * u + lx * v, z: z + az * u + lz * v }),
+    };
+  };
+  const a = blob(0);
+  const b = blob(1);
+
+  // Which pixels a tree covers: the frame with the blobs hidden, against the
+  // same frame with no tree at all. A probe must see the GROUND — a leaf card
+  // hanging over it would read the same drawn and hidden, and halve the
+  // darkening measured (the first run of this probe did exactly that).
+  showGroundBlobsOf(view, false);
+  settle();
+  const withTrees = readRegion(gl, 0, 0, canvas.width, canvas.height);
+  const bare: SceneFrame = { ...scene, scatter: [] };
+  for (let at = 0; at < 4; at += 1) view.render(bare);
+  const withoutTrees = readRegion(gl, 0, 0, canvas.width, canvas.height);
+  showGroundBlobsOf(view, true);
+  settle();
+  const clearOfTrees = (point: { x: number; y: number; z: number }, halfWidth = STRIP): boolean => {
+    const centre = pixelFor(scene, canvas, point);
+    for (let dy = -1; dy <= 1; dy += 1) {
+      for (let dx = -halfWidth; dx <= halfWidth; dx += 1) {
+        const px = Math.round(centre.x) + dx;
+        const py = Math.round(centre.y) + dy;
+        if (px < 0 || py < 0 || px >= canvas.width || py >= canvas.height) return false;
+        const index = (py * canvas.width + px) * 4;
+        for (let channel = 0; channel < 3; channel += 1) {
+          if ((withTrees[index + channel] ?? 0) !== (withoutTrees[index + channel] ?? 0))
+            return false;
+        }
+      }
+    }
+    return true;
+  };
+  const grounded = (point: { x: number; z: number }): { x: number; y: number; z: number } => ({
+    ...point,
+    y: groundAt(point.x, point.z, a.y),
+  });
+  // The probe: the point of A's blob's CORE — where the blob is at its whole
+  // darkness — nearest its middle that no tree covers.
+  const core: { x: number; y: number; z: number }[] = [];
+  for (const u of [0, -0.15, 0.15, -0.3, 0.3]) {
+    for (const v of [0, -0.15, 0.15, -0.3, 0.3]) {
+      if (Math.hypot(u, v) <= 0.3) core.push(grounded(a.at(u, v)));
+    }
+  }
+  core.sort((p, q) => a.rim(p.x, p.z) - a.rim(q.x, q.z));
+  const probePoint = core.find(clearOfTrees) ?? { x: a.x, y: a.y, z: a.z };
+  // The reference: 5 m from the probe, outside both blobs, clear of the
+  // trees, and off the road and its verge.
+  const lateralOf = (point: { x: number; z: number }): number =>
+    Math.abs((point.x - pose.x) * right.x + (point.z - pose.z) * right.z);
+  // Straight across the view first — the same row of ground, so the same
+  // mottle and the same depth — then eight directions between.
+  const directions = [
+    right,
+    { x: -right.x, z: -right.z },
+    ...Array.from({ length: 8 }, (_, step) => ({
+      x: Math.cos(((step + 0.5) / 8) * 2 * Math.PI),
+      z: Math.sin(((step + 0.5) / 8) * 2 * Math.PI),
+    })),
+  ];
+  const candidates = directions
+    .map((direction) =>
+      grounded({ x: probePoint.x + 5 * direction.x, z: probePoint.z + 5 * direction.z }),
+    )
+    .filter(
+      (point) =>
+        a.rim(point.x, point.z) >= 1.2 &&
+        b.rim(point.x, point.z) >= 1.2 &&
+        lateralOf(point) >= 6.5 &&
+        clearOfTrees(point),
+    );
+  const reference = candidates[0] ?? grounded({ x: probePoint.x, z: probePoint.z + 5 });
+  // The road's edge abreast of B's middle: its distance up the road from the
+  // centreline point abreast of the camera.
+  const aheadOfB = (b.x - pose.x) * pose.headingX + (b.z - pose.z) * pose.headingZ;
+  // B stands on the LEFT, where `across` is negative (@see onTheRoad).
+  const vergeAt = onTheRoad(scene, aheadOfB, -(3.5 + 0.5));
+  const verge = { ...vergeAt, y: groundAt(vergeAt.x, vergeAt.z, vergeAt.y) };
+
+  const read = (): number[][] => [
+    meanAround(probePoint),
+    meanAround(reference),
+    meanAround(verge, 1),
+  ];
+  const [probe, referenceShown, vergeShown] = read();
+  let drawCalls = 0;
+  let drawCallsHidden = 0;
+  countingNonEmptyDrawCalls((calls) => {
+    view.render(scene);
+    const before = calls();
+    view.render(scene);
+    drawCalls = calls() - before;
+    showGroundBlobsOf(view, false);
+    view.render(scene);
+    const middle = calls();
+    view.render(scene);
+    drawCallsHidden = calls() - middle;
+  });
+  settle();
+  const [probeHidden, referenceHidden, vergeHidden] = read();
+  showGroundBlobsOf(view, true);
+  view.render(scene);
+  const clip = groundBlobClip(view, gl, canvas, scene, a, right, clearOfTrees, grounded);
+  return {
+    probe: probe ?? [],
+    reference: referenceShown ?? [],
+    probeHidden: probeHidden ?? [],
+    referenceHidden: referenceHidden ?? [],
+    probeRim: a.rim(probePoint.x, probePoint.z),
+    probeClear: clearOfTrees(probePoint),
+    referenceRim: a.rim(reference.x, reference.z),
+    referenceClear: clearOfTrees(reference),
+    referenceMetres: Math.hypot(reference.x - probePoint.x, reference.z - probePoint.z),
+    verge: vergeShown ?? [],
+    vergeHidden: vergeHidden ?? [],
+    vergeRim: b.rim(verge.x, verge.z),
+    edgeClear: clearOfTrees(verge, 1),
+    clip,
+    drawCalls,
+    drawCallsHidden,
+    blobs: drawn.blobs,
+    triangles: drawn.triangles,
+  };
+}
+
+/**
+ * What a blob mesh's geometry is to {@link groundBlobClip}: named by shape, so
+ * this harness names no `three` (`three-seam.test.ts`).
+ */
+interface BlobClipAttribute {
+  readonly array: Float32Array;
+  clone(): BlobClipAttribute;
+}
+interface BlobClipGeometry {
+  getAttribute(name: string): BlobClipAttribute | undefined;
+  setAttribute(name: string, attribute: BlobClipAttribute): unknown;
+}
+
+/**
+ * The SHIPPED ground-blob shader's road clip, observed — #686's review, which
+ * found it pinned only as text: the vertex lines that carry the planes and the
+ * fragment's offset to the fragment test were covered by nothing, and
+ * inverting the offset, or never passing the planes on, left every gate green.
+ *
+ * On this level road the clip cannot be seen as the product lays it — a blob
+ * beside the road lies below the tarmac, and the road's depth hides what
+ * reaches under it (@see groundBlobProbe). So this forces a plane: tree A's
+ * blob is drawn with the geometry's two clip ATTRIBUTES swapped for copies the
+ * harness writes, slot 0's first plane `(right, 0)` — through the middle,
+ * keeping the screen's right half — and its second the no-op. The belt keeps
+ * writing its own attributes, which are not drawn until they are put back.
+ * ⚠️ **Nothing here ships**: the swap is this harness's, done on the mesh the
+ * view already hands `groundBlobsOf`, and the product has no way to force a
+ * plane at all. What is drawn is the real `GROUND_BLOB_VERTEX` and
+ * `GROUND_BLOB_FRAGMENT` in the real engine.
+ *
+ * One point each side of the plane, in A's blob where it is dark and no tree
+ * covers it, far enough from the plane's line on screen that the strip read
+ * does not straddle it; read with the forced plane, with the control (both
+ * planes the no-op), and with the blobs hidden.
+ */
+function groundBlobClip(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  scene: SceneFrame,
+  a: {
+    readonly x: number;
+    readonly z: number;
+    readonly rim: (x: number, z: number) => number;
+  },
+  right: { readonly x: number; readonly z: number },
+  clearOfTrees: (point: { x: number; y: number; z: number }, halfWidth?: number) => boolean,
+  grounded: (point: { x: number; z: number }) => { x: number; y: number; z: number },
+): GroundBlobClipMeasurement {
+  const none: GroundBlobClipMeasurement = {
+    measured: false,
+    kept: NO_CLIP_POINT,
+    clipped: NO_CLIP_POINT,
+  };
+  const mesh = (view as unknown as { readonly groundBlobMesh?: { geometry: BlobClipGeometry } })
+    .groundBlobMesh;
+  const geometry = mesh?.geometry;
+  const first = geometry?.getAttribute('blobClipFirst');
+  const second = geometry?.getAttribute('blobClipSecond');
+  if (geometry === undefined || first === undefined || second === undefined) return none;
+  /** Half the width of the strip read at each point: small, so it stays one side of the line. */
+  const HALF = 3;
+  const heading = { x: right.z, z: -right.x };
+  const pick = (
+    side: 1 | -1,
+  ): { x: number; y: number; z: number; metres: number; pixels: number } | undefined => {
+    for (const metres of [0.6, 0.8, 1.0, 0.45, 1.2]) {
+      for (const along of [0, 0.3, -0.3, 0.6, -0.6]) {
+        const point = grounded({
+          x: a.x + right.x * metres * side + heading.x * along,
+          z: a.z + right.z * metres * side + heading.z * along,
+        });
+        if (a.rim(point.x, point.z) > 0.6 || !clearOfTrees(point, HALF)) continue;
+        const onLine = grounded({
+          x: point.x - right.x * metres * side,
+          z: point.z - right.z * metres * side,
+        });
+        const pixels = Math.abs(
+          pixelFor(scene, canvas, point).x - pixelFor(scene, canvas, onLine).x,
+        );
+        if (pixels < HALF + 3) continue;
+        return { ...point, metres: metres * side, pixels };
+      }
+    }
+    return undefined;
+  };
+  const keptAt = pick(1);
+  const clippedAt = pick(-1);
+  if (keptAt === undefined || clippedAt === undefined) return none;
+  const mean = (point: { x: number; y: number; z: number }): number[] => {
+    const at = pixelFor(scene, canvas, point);
+    const width = HALF * 2 + 1;
+    const pixels = readRegion(gl, Math.round(at.x) - HALF, Math.round(at.y) - 1, width, 3);
+    const sum = [0, 0, 0];
+    for (let index = 0; index < pixels.length; index += 4) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        (sum[channel] as number) += pixels[index + channel] ?? 0;
+      }
+    }
+    return sum.map((channel) => channel / (width * 3));
+  };
+  const drawWith = (plane: readonly [number, number, number]): number[][] => {
+    const forcedFirst = first.clone();
+    const forcedSecond = second.clone();
+    forcedFirst.array.set(plane, 0);
+    forcedSecond.array.set([0, 0, -1], 0);
+    geometry.setAttribute('blobClipFirst', forcedFirst);
+    geometry.setAttribute('blobClipSecond', forcedSecond);
+    for (let at = 0; at < 4; at += 1) view.render(scene);
+    const read = [mean(keptAt), mean(clippedAt)];
+    geometry.setAttribute('blobClipFirst', first);
+    geometry.setAttribute('blobClipSecond', second);
+    return read;
+  };
+  const [keptForced, clippedForced] = drawWith([right.x, right.z, 0]);
+  const [keptControl, clippedControl] = drawWith([0, 0, -1]);
+  showGroundBlobsOf(view, false);
+  for (let at = 0; at < 4; at += 1) view.render(scene);
+  const keptHidden = mean(keptAt);
+  const clippedHidden = mean(clippedAt);
+  showGroundBlobsOf(view, true);
+  for (let at = 0; at < 4; at += 1) view.render(scene);
+  const point = (
+    at: { x: number; y: number; z: number; metres: number; pixels: number },
+    forced: number[] | undefined,
+    control: number[] | undefined,
+    hidden: number[],
+  ): GroundBlobClipPoint => {
+    const rim = a.rim(at.x, at.z);
+    return {
+      metres: at.metres,
+      pixels: at.pixels,
+      clear: clearOfTrees(at, HALF),
+      rim,
+      expected: groundBlobAlpha(rim),
+      forced: forced ?? [],
+      control: control ?? [],
+      hidden,
+    };
+  };
+  return {
+    measured: true,
+    kept: point(keptAt, keptForced, keptControl, keptHidden),
+    clipped: point(clippedAt, clippedForced, clippedControl, clippedHidden),
+  };
+}
+
+/**
  * The realistic world, measured in a real engine — ADR 0026, #425, #474, #369.
  *
  * What jsdom cannot see, and each is one field of {@link RealisticMeasurement}:
@@ -4546,6 +5045,19 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const tint = tintProbe(view, gl, canvas, riding(level, 400));
   phaseEnds('realistic: seeded tints');
 
+  // #620, on the same view and the same road; then what a whole wooded frame
+  // spends on its blobs.
+  const groundingProbe = groundBlobProbe(view, gl, canvas, riding(level, 400));
+  view.render(wooded);
+  view.render(wooded);
+  const woodedBlobs = groundBlobsOf(view);
+  const grounding: GroundBlobMeasurement = {
+    ...groundingProbe,
+    woodedBlobs: woodedBlobs.blobs,
+    woodedTriangles: woodedBlobs.triangles,
+  };
+  phaseEnds('realistic: ground blobs');
+
   // The same frame in the stylised world, on a view of its own: how much of the
   // picture the realistic world actually changed.
   const plainCanvas = canvasOf();
@@ -4700,6 +5212,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     windowControl,
     windowWall,
     tint,
+    grounding,
     horizon,
     horizonControl,
     horizonColours,
