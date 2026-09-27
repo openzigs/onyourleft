@@ -714,7 +714,7 @@ function sampleNormals(xs: Float64Array, zs: Float64Array, loop: boolean): Float
     const length = Math.hypot(dx, dz);
     if (length > 0) {
       // The same perpendicular `terrain.ts` §`ribbonNormals` takes, so the
-      // line's "left" and the road's are one side.
+      // line's positive side and the road's are one side — the right.
       normalX = -dz / length;
       normalZ = dx / length;
       if (firstReal === -1) firstReal = index;

@@ -122,7 +122,7 @@ function overTheBend(unsmoothed: boolean): SceneFrame {
     // straight down on the bend's centre. The fixture is level at 0 m.
     // ⚠️ `x` is WEST since #583 (`terrain.ts` §`localGroundPosition`), and the
     // fixture's origin is its start, so a centre `centreEast` metres east of
-    // it stands at `x = −centreEast`. Left positive, the camera looks down on
+    // it stands at `x = −centreEast`. With the sign left positive, it looks down on
     // a field 2·centreEast metres from the bend and the rays find no road —
     // which is what `bend.browser.spec.ts`'s chord counts would say.
     camera: {

@@ -67,7 +67,7 @@ const QUARTER = (Math.PI * S_RADIUS) / 2;
 
 /**
  * The signed curvature of a path through the profile's samples, each moved
- * `offsets[i]` along the centreline's own left normal — this test's own
+ * `offsets[i]` along the centreline's own normal (its right, since #583) — this test's own
  * reading of what `racing-line.ts` computes, so the two are independent.
  */
 function curvaturesOf(profile: RouteProfile, offsets: ArrayLike<number>): number[] {
