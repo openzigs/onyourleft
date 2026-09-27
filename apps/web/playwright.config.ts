@@ -135,6 +135,32 @@ export const LAUNCH_ARGS = [
   '--disable-features=WebRtcHideLocalIpsWithMdns',
 ];
 
+/**
+ * How long the whole run may take before it stops itself — #651.
+ *
+ * ⚠️ **The job's `timeout-minutes` is 20, and this has to END before it does,
+ * or the run reports nothing**: a job the runner cancels says "cancelled" and
+ * names no case and no describe. On the slower of the two runners CI lands on
+ * (an AMD EPYC 7763) this gate starts as late as 578 s into the job, behind the
+ * Vitest run (run 36342083309, attempt 1; 572 s, 538 s and 542 s on three
+ * before it), so 580 s ends it by 1 158 s — 42 s inside the job's 1 200, with
+ * only the coverage publish and upload (2–3 s) after it. ⚠️ **Nothing
+ * re-checks that 42 s.** Every step added before this gate eats into it, and
+ * the first sign will be a cancelled job rather than a red case: #664 added
+ * about 10 s while #651 was open. The slowest GREEN gate measured on that runner took 452 s
+ * (run 36318760634), and #651's took 390 s to 405 s.
+ *
+ * Every load the gate pays for has a budget of its own, and the arithmetic
+ * that fits the four game loads inside this one is `game.browser.spec.ts`
+ * §`paysForTheRealisticLoad`. This is what still reports when something with no
+ * budget of its own hangs: Playwright stops, marks what was running as
+ * interrupted and what had not started as not run, and exits non-zero.
+ */
+export const GATE_BUDGET_MS = 580_000;
+
+/** The game spec, which runs as a project of its own — see `projects`. */
+const GAME_SPEC = /game\.browser\.spec\.ts$/;
+
 export default defineConfig({
   testDir: './browser',
   testMatch: '**/*.browser.spec.ts',
@@ -182,5 +208,41 @@ export default defineConfig({
       stdout: 'pipe',
     },
   ],
-  projects: [{ name: 'chromium', use: devices['Desktop Chrome'] }],
+  // ⚠️ **A backstop, not a budget — #651.** @see GATE_BUDGET_MS
+  globalTimeout: GATE_BUDGET_MS,
+  // ⚠️ **Playwright's default of half the cores, and that is measured — #651.**
+  // The `ubuntu-latest` runner's four vCPUs are two cores' hyperthreads
+  // (`lscpu`, run 36333257690). On that run a fourth Vitest worker made the
+  // suite no faster — 336 s to 334 s — while its summed test time rose from
+  // 676 s to 807 s and one case passed its timeout: a thread that shares a
+  // core adds contention, not a core. Two workers here is one a core.
+  // ⚠️ **Two projects, one browser, one run — #651, and the game spec is
+  // LAST.** Playwright queues a project's groups in the order the projects are
+  // listed, and the game spec is one group — its shared harness (#456) is a
+  // worker fixture, so its four loads run one after another in one worker.
+  //
+  // ⚠️ Last, because its loads draw on the CPU: SwiftShader rasterises there
+  // and one load already keeps every core busy. Listed FIRST, #651 ran them
+  // beside the other specs and they slowed by half or more — the plain page
+  // 34 s to 58 s, and `?shadow-map` past its 120 s budget (run 36326756014) —
+  // and splitting the four loads across two workers doubled each of them —
+  // `?realistic` 64 s to 145 s, `?realistic&trees` 79 s to 146 s, run
+  // 36325068145 — and made the plain page's load a second time besides. So
+  // they are queued after everything else, and `game.browser.spec.ts`
+  // §`paysForTheRealisticLoad` is the arithmetic that fits a gate where every
+  // one of them hangs inside `GATE_BUDGET_MS`.
+  //
+  // ⚠️ **"Last" is queue order and nothing more.** With two workers, the game
+  // group starts as soon as one worker is free, which can be while the other
+  // is still running the last `chromium` spec — so its first load can overlap
+  // that spec's tail. Nothing here waits for the `chromium` project to finish;
+  // a `dependencies` entry would, and it would also skip the game spec
+  // whenever any other spec failed, which a gate must not do.
+  //
+  // Not a second browser and not a second job — one `playwright test`, one
+  // Chromium, the one `Repository rules` check (CLAUDE.md §4c).
+  projects: [
+    { name: 'chromium', testIgnore: GAME_SPEC, use: devices['Desktop Chrome'] },
+    { name: 'game', testMatch: GAME_SPEC, use: devices['Desktop Chrome'] },
+  ],
 });

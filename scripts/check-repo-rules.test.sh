@@ -196,9 +196,13 @@ assert_violation_and_silence() {
   local name="$1" rule="$2" needle="$3" silent="$4" out status
   out="$(bash "${CHECKER}" "${fixture_root}" 2>&1)"
   status=$?
+  # The ABSENCE is read from a here-string, not `printf | grep -q` (#651's
+  # review): under `pipefail`, `grep -q` exiting on its first match can leave
+  # `printf` dead of SIGPIPE, the pipeline then fails, and `!` turns a FOUND
+  # line into a pass. Every negated read in this file takes this form.
   if [ "${status}" -ne 0 ] \
      && printf '%s' "${out}" | grep "^${rule}: " | grep -qF -- "${needle}" \
-     && ! printf '%s' "${out}" | grep -q "^${silent}: "; then
+     && ! grep -q "^${silent}: " <<< "${out}"; then
     pass=$((pass + 1))
     printf 'ok   %s\n' "${name}"
   else
@@ -468,7 +472,7 @@ out="$(bash "${CHECKER}" "${fixture_root}" 2>&1)"
 status=$?
 if [ "${status}" -ne 0 ] \
    && printf '%s' "${out}" | grep -q '^ADR001: ' \
-   && ! printf '%s' "${out}" | grep -qF 'is already taken' \
+   && ! grep -qF 'is already taken' <<< "${out}" \
    && printf '%s' "${out}" | grep -qF 'docs/architecture.md'; then
   pass=$((pass + 1))
   printf 'ok   ADR001 points at the ownership table instead of naming a file to renumber\n'
@@ -1044,7 +1048,7 @@ out="$(bash "${CHECKER}" "${fixture_root}" 2>&1)"
 status=$?
 if [ "${status}" -ne 0 ] \
    && printf '%s' "${out}" | grep -q '^ADR003: ' \
-   && ! printf '%s' "${out}" | grep -q '^ADR004: '; then
+   && ! grep -q '^ADR004: ' <<< "${out}"; then
   pass=$((pass + 1))
   printf 'ok   an unclosed fence is ADR003 alone, not a misleading ADR004\n'
 else
