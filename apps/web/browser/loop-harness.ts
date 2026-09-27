@@ -50,6 +50,32 @@
  * profile a saved route from before the fix still carries (a stored profile is
  * a computed artefact and nothing rewrites it). The spec requires THAT frame to
  * show the break, so a green run is not a frame that drew no road.
+ *
+ * ## The road the product draws — #572
+ *
+ * Both frames above are the road as it was drawn before #543 (`unsmoothed`),
+ * because what they measure is the PROFILE's closure. So since #543 they are
+ * not the loop start a rider sees, and #572 adds the two readings that are:
+ *
+ * - {@link LoopStartMeasurement.drawn}: the closed loop through the real
+ *   `sceneFrame` — its own corridor, its own camera on the rider's racing line
+ *   — with only the markers and the scenery taken off, read the same way.
+ * - {@link LoopStartMeasurement.fromAbove}: the start of the loop, from
+ *   straight above, as the product draws it, read for KINKS the way
+ *   `bend-harness.ts` reads a bend (`road-edges.ts`).
+ *
+ * ⚠️ **The second exists because the first cannot see #440 any more, and that
+ * was measured, not assumed.** #543's drawing is the mean of the route over
+ * ten metres either side, and on this fixture the stored profile's 15.6 m
+ * jump and the closed loop's genuine 12 m jog come out at the same HEADING at
+ * the start line: a mean over a window that holds the whole jump turns the
+ * road by atan(12 / 30) = 21.8°, and one that holds ten of the jog's 15.6 m
+ * turns it by 22.3°. Read off this page: the product's chase camera puts the
+ * far road at 52.5 % of the width on the closed loop and 52.7 % on the stored
+ * one. What the mean does NOT hide is the jump's two ends: a step averaged over
+ * a window is a ramp with a corner at each end of it, where a jog of 15.6 m of
+ * road is a curve with none. So the product's own start is checked for a kink,
+ * and the stored profile drawn by the product is its control.
  */
 
 import {
@@ -62,12 +88,14 @@ import {
   type RoutePoint,
 } from '@onyourleft/domain';
 
+import { CAMERA_ABOVE_METRES, verticalHalfTangent } from '../src/game/camera';
 import type { SceneFrame } from '../src/game/port';
 import { qualitySettings } from '../src/game/quality';
 import { cameraPose, sceneFrame } from '../src/game/scene';
 import { atStartLine } from '../src/game/simulation';
-import { corridorOrigin, roadCorridor } from '../src/game/terrain';
+import { ROAD_WIDTH_METRES, corridorOrigin, roadCorridor } from '../src/game/terrain';
 import { loadSceneryModels, threeGameRenderer } from '../src/game/three-renderer';
+import { type EdgeReading, readEdge } from './road-edges';
 import { withCorridor } from './with-corridor';
 
 /** One frame's road, row by row, from the bottom of the frame up. */
@@ -91,13 +119,26 @@ export interface RoadRows {
   readonly aheadCentre: number;
 }
 
+/** The start of the loop from straight above, as the product draws it — #572. */
+export interface StartFromAbove {
+  readonly roadPixels: number;
+  /** The road's two edges through the start, walked in two-metre chords. */
+  readonly edges: readonly [EdgeReading, EdgeReading];
+}
+
 export interface LoopStartMeasurement {
   readonly width: number;
   readonly height: number;
-  /** The route as this build profiles it. */
+  /** The route as this build profiles it, drawn as it was before #543. */
   readonly closed: RoadRows;
-  /** The control: the same points as a pre-#440 build stored them. */
+  /** The control: the same points as a pre-#440 build stored them, drawn the same way. */
   readonly stored: RoadRows;
+  /** The route as this build profiles it, drawn by the product at its own camera — #572. */
+  readonly drawn: RoadRows;
+  /** The side of the square top-down frames, in pixels. */
+  readonly aboveSize: number;
+  /** The start from above: this build's loop, and — the control — the stored one. #572. */
+  readonly fromAbove: { readonly closed: StartFromAbove; readonly stored: StartFromAbove };
 }
 
 declare global {
@@ -177,7 +218,8 @@ function startFrame(profile: RouteProfile): SceneFrame {
   // against the 65 % required, measured), and on the closed loop the camera
   // turns part-way along the closing segment's genuine 12 m jog (58.6 %
   // against 55 %). Both are the smoothing doing what it is for, and neither is
-  // what #440 is about. `bend-harness.ts` is where the smoothing is gated.
+  // what #440 is about. `bend-harness.ts` is where the smoothing is gated, and
+  // since #572 `drawnStartFrame` below is this loop's start as it IS drawn.
   const corridor = roadCorridor(profile, origin, state.ride.distance, { unsmoothed: true });
   return {
     ...withCorridor(frame, profile, origin, corridor),
@@ -187,25 +229,85 @@ function startFrame(profile: RouteProfile): SceneFrame {
   };
 }
 
-function roadRows(profile: RouteProfile): RoadRows {
+/**
+ * The frame at the start line as the PRODUCT draws it — #572: the real
+ * `sceneFrame`'s own corridor and its own camera, on the rider's racing line,
+ * with only the markers and the scenery taken off so the pixels that change
+ * with the road are the road.
+ */
+function drawnStartFrame(profile: RouteProfile): SceneFrame {
+  const origin = corridorOrigin(profile);
+  const frame = sceneFrame({ profile, origin, state: atStartLine(profile) });
+  return { ...frame, scatter: [], markers: [] };
+}
+
+/** The side of the top-down frames, in pixels. */
+const ABOVE_SIZE = 1024;
+/** How high above the road the top-down camera is, in metres. */
+const ABOVE_METRES = 45;
+/**
+ * Where along the lap the top-down frame is centred: five metres before the
+ * start line, the middle of the stretch whose drawing the closure decides — the
+ * jog runs from 15.6 m before the line to the line, and #543's mean reaches ten
+ * metres beyond each end of it.
+ */
+const ABOVE_ALONG_METRES = -5;
+
+/**
+ * The start of the loop from straight above, as the product draws it — #572.
+ * `bend-harness.ts` §`overTheBend` says why a heading of nothing looks straight
+ * down.
+ */
+function startFromAboveFrame(profile: RouteProfile): SceneFrame {
+  const frame = drawnStartFrame(profile);
+  let over = frame.corridor.centre[0];
+  for (const point of frame.corridor.centre) {
+    if (
+      over === undefined ||
+      Math.abs(point.along - ABOVE_ALONG_METRES) < Math.abs(over.along - ABOVE_ALONG_METRES)
+    ) {
+      over = point;
+    }
+  }
+  if (over === undefined) {
+    throw new Error('loop harness: the product drew no corridor at the start');
+  }
+  return {
+    ...frame,
+    camera: {
+      x: over.x,
+      y: over.y,
+      z: over.z,
+      headingX: 0,
+      headingZ: 0,
+      eyeRoadY: over.y + ABOVE_METRES - CAMERA_ABOVE_METRES,
+      targetRoadY: over.y,
+    },
+  };
+}
+
+/**
+ * Which pixels are road: those that change when the road's index list is
+ * emptied. One byte a pixel, rows from the bottom of the frame up.
+ */
+function roadMask(withRoad: SceneFrame, width: number, height: number): Uint8Array {
   const canvas = document.createElement('canvas');
-  canvas.width = WIDTH;
-  canvas.height = HEIGHT;
+  canvas.width = width;
+  canvas.height = height;
   const view = threeGameRenderer.create(canvas, qualitySettings(0));
-  view.resize(WIDTH, HEIGHT);
+  view.resize(width, height);
   const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
   if (gl === null) {
     view.destroy();
     throw new Error('loop harness: no GL context');
   }
-  const withRoad = startFrame(profile);
   const noRoad: SceneFrame = {
     ...withRoad,
     corridor: { ...withRoad.corridor, indices: new Uint32Array(0) },
   };
   const read = (): Uint8Array => {
-    const pixels = new Uint8Array(WIDTH * HEIGHT * 4);
-    gl.readPixels(0, 0, WIDTH, HEIGHT, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    const pixels = new Uint8Array(width * height * 4);
+    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
     return pixels;
   };
   // Twice each and only the second read: the first draw of a geometry uploads it.
@@ -216,7 +318,21 @@ function roadRows(profile: RouteProfile): RoadRows {
   view.render(noRoad);
   const absent = read();
   view.destroy();
+  const mask = new Uint8Array(width * height);
+  for (let pixel = 0; pixel < width * height; pixel += 1) {
+    const at = pixel * 4;
+    mask[pixel] =
+      present[at] !== absent[at] ||
+      present[at + 1] !== absent[at + 1] ||
+      present[at + 2] !== absent[at + 2]
+        ? 1
+        : 0;
+  }
+  return mask;
+}
 
+function roadRows(withRoad: SceneFrame): RoadRows {
+  const mask = roadMask(withRoad, WIDTH, HEIGHT);
   const rows: Array<readonly [number, number] | null> = [];
   const runs: number[] = [];
   let roadPixels = 0;
@@ -226,11 +342,7 @@ function roadRows(profile: RouteProfile): RoadRows {
     let count = 0;
     let inRun = false;
     for (let column = 0; column < WIDTH; column += 1) {
-      const at = (row * WIDTH + column) * 4;
-      const road =
-        present[at] !== absent[at] ||
-        present[at + 1] !== absent[at + 1] ||
-        present[at + 2] !== absent[at + 2];
+      const road = mask[row * WIDTH + column] === 1;
       if (road) {
         roadPixels += 1;
         if (low === -1) low = column;
@@ -257,6 +369,83 @@ function roadRows(profile: RouteProfile): RoadRows {
   };
 }
 
+/**
+ * The road's two edges in a top-down mask, scanned across the road — #572.
+ *
+ * Which way the road runs on the screen is the renderer's choice for a camera
+ * with no heading, so both scans are taken — down the columns and along the
+ * rows — and the one that crossed the road more often is kept. A scan line is
+ * taken only while it crosses ONE run of road between half and one and a half
+ * road widths long (`bend-harness.ts` §`edges` says why), and an edge is only
+ * ever a contiguous stretch of such lines.
+ */
+function startEdges(
+  mask: Uint8Array,
+  pixelsPerMetre: number,
+): readonly [Array<readonly [number, number]>[], Array<readonly [number, number]>[]] {
+  const shortest = 0.5 * ROAD_WIDTH_METRES * pixelsPerMetre;
+  const longest = 1.5 * ROAD_WIDTH_METRES * pixelsPerMetre;
+  const scan = (
+    down: boolean,
+  ): readonly [Array<readonly [number, number]>[], Array<readonly [number, number]>[]] => {
+    const near: Array<readonly [number, number]>[] = [];
+    const far: Array<readonly [number, number]>[] = [];
+    let nearRun: Array<readonly [number, number]> = [];
+    let farRun: Array<readonly [number, number]> = [];
+    const close = (): void => {
+      if (nearRun.length > 0) near.push(nearRun);
+      if (farRun.length > 0) far.push(farRun);
+      nearRun = [];
+      farRun = [];
+    };
+    for (let line = 0; line < ABOVE_SIZE; line += 1) {
+      const runs: Array<readonly [number, number]> = [];
+      let entered = -1;
+      for (let step = 0; step <= ABOVE_SIZE; step += 1) {
+        const road =
+          step < ABOVE_SIZE &&
+          mask[down ? step * ABOVE_SIZE + line : line * ABOVE_SIZE + step] === 1;
+        if (road && entered === -1) entered = step;
+        if (!road && entered !== -1) {
+          runs.push([entered, step]);
+          entered = -1;
+        }
+      }
+      const only = runs.length === 1 ? runs[0] : undefined;
+      if (
+        only === undefined ||
+        only[0] === 0 ||
+        only[1] === ABOVE_SIZE ||
+        only[1] - only[0] < shortest ||
+        only[1] - only[0] > longest
+      ) {
+        close();
+        continue;
+      }
+      nearRun.push(down ? [line, only[0]] : [only[0], line]);
+      farRun.push(down ? [line, only[1]] : [only[1], line]);
+    }
+    close();
+    return [near, far];
+  };
+  const crossings = (edges: readonly [Array<unknown>[], Array<unknown>[]]): number =>
+    edges[0].reduce((sum, run) => sum + run.length, 0);
+  const columns = scan(true);
+  const rows = scan(false);
+  return crossings(columns) >= crossings(rows) ? columns : rows;
+}
+
+function startFromAbove(profile: RouteProfile, pixelsPerMetre: number): StartFromAbove {
+  const mask = roadMask(startFromAboveFrame(profile), ABOVE_SIZE, ABOVE_SIZE);
+  let roadPixels = 0;
+  for (const pixel of mask) roadPixels += pixel;
+  const [near, far] = startEdges(mask, pixelsPerMetre);
+  return {
+    roadPixels,
+    edges: [readEdge(near, pixelsPerMetre), readEdge(far, pixelsPerMetre)],
+  };
+}
+
 async function run(): Promise<LoopStartMeasurement> {
   await loadSceneryModels();
   const points = loopPoints();
@@ -265,7 +454,21 @@ async function run(): Promise<LoopStartMeasurement> {
   // ⚠️ The control: a profile as a pre-#440 build stored it — the line, marked
   // as a loop after the fact. Nothing about it is invented for the test.
   const stored: RouteProfile = { ...routeProfile(points), loop: true };
-  return { width: WIDTH, height: HEIGHT, closed: roadRows(closed), stored: roadRows(stored) };
+  // The top-down frame spans 2·altitude·tan(fov / 2) metres across its height,
+  // and it is square.
+  const pixelsPerMetre = ABOVE_SIZE / (2 * ABOVE_METRES * verticalHalfTangent(1));
+  return {
+    width: WIDTH,
+    height: HEIGHT,
+    closed: roadRows(startFrame(closed)),
+    stored: roadRows(startFrame(stored)),
+    drawn: roadRows(drawnStartFrame(closed)),
+    aboveSize: ABOVE_SIZE,
+    fromAbove: {
+      closed: startFromAbove(closed, pixelsPerMetre),
+      stored: startFromAbove(stored, pixelsPerMetre),
+    },
+  };
 }
 
 run().then(
