@@ -141,10 +141,11 @@ export const LAUNCH_ARGS = [
  * ⚠️ **The job's `timeout-minutes` is 20, and this has to END before it does,
  * or the run reports nothing**: a job the runner cancels says "cancelled" and
  * names no case and no describe. On the slower of the two runners CI lands on
- * (an AMD EPYC 7763) this gate starts about nine minutes into the job, behind
- * the Vitest run — 538 s and 542 s (runs 36326756014 and 36334163962) — so
- * ten minutes ends it by about 19m02s, with only the coverage upload after it.
- * The slowest GREEN gate measured on that runner took 452 s (run 36318760634).
+ * (an AMD EPYC 7763) this gate starts as late as 572 s into the job, behind the
+ * Vitest run (run 36340917231; 538 s and 542 s on two before it), so 580 s
+ * ends it by 1 152 s — 48 s inside the job's 1 200, with only the coverage
+ * upload after it. The slowest GREEN gate measured on that runner took 452 s
+ * (run 36318760634), and #651's took 390 s to 405 s.
  *
  * Every load the gate pays for has a budget of its own, and the arithmetic
  * that fits the four game loads inside this one is `game.browser.spec.ts`
@@ -152,7 +153,7 @@ export const LAUNCH_ARGS = [
  * budget of its own hangs: Playwright stops, marks what was running as
  * interrupted and what had not started as not run, and exits non-zero.
  */
-export const GATE_BUDGET_MS = 10 * 60_000;
+export const GATE_BUDGET_MS = 580_000;
 
 /** The game spec, which runs as a project of its own — see `projects`. */
 const GAME_SPEC = /game\.browser\.spec\.ts$/;
