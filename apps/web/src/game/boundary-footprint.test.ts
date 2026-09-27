@@ -15,10 +15,10 @@
  * one read covers both worlds' vertices.
  */
 
-import { BoxGeometry, type BufferGeometry } from 'three';
 import { describe, expect, it } from 'vitest';
 
 import { isBuiltKind } from './buildings';
+import type { StructureSurface } from './realistic-assets';
 import { STRUCTURE_KINDS, type StructureKind } from './scatter';
 import { STRUCTURE_FOOTPRINTS } from './settlements';
 import { realisticStructureGeometry, realisticStructureSurfaces } from './three-renderer';
@@ -32,23 +32,37 @@ const TOLERANCE_METRES = 1e-6;
 
 const BOUNDARY_KINDS = STRUCTURE_KINDS.filter((kind) => !isBuiltKind(kind));
 
-/** Each vertex of `geometry` that lies outside `kind`'s footprint, as `x, z`. */
-function outsideFootprint(kind: StructureKind, geometry: BufferGeometry): string[] {
+/** A point in a structure's own plan: `x` across its run, `z` along it. */
+type PlanPoint = readonly [x: number, z: number];
+
+/** Each of `points` that lies outside `kind`'s footprint, as `x, z`. */
+function outsideFootprint(kind: StructureKind, points: readonly PlanPoint[]): string[] {
   const footprint = STRUCTURE_FOOTPRINTS[kind];
+  return points
+    .filter(
+      ([x, z]) =>
+        Math.abs(x) > footprint.x + TOLERANCE_METRES ||
+        z < footprint.back - TOLERANCE_METRES ||
+        z > footprint.front + TOLERANCE_METRES,
+    )
+    .map(([x, z]) => `${x.toFixed(3)}, ${z.toFixed(3)}`);
+}
+
+/**
+ * Every vertex of one of a kind's surfaces, in plan. Read through the
+ * geometry's own accessors rather than by importing three here:
+ * `three-seam.test.ts` allows one file to name it.
+ */
+function planPoints(kind: StructureKind, surface: StructureSurface): PlanPoint[] | undefined {
+  const geometry = realisticStructureGeometry(kind, surface);
+  if (geometry === undefined) return undefined;
   const position = geometry.getAttribute('position');
-  const outside: string[] = [];
+  const points: PlanPoint[] = [];
   for (let index = 0; index < position.count; index += 1) {
-    const x = position.getX(index);
-    const z = position.getZ(index);
-    if (
-      Math.abs(x) > footprint.x + TOLERANCE_METRES ||
-      z < footprint.back - TOLERANCE_METRES ||
-      z > footprint.front + TOLERANCE_METRES
-    ) {
-      outside.push(`${x.toFixed(3)}, ${z.toFixed(3)}`);
-    }
+    points.push([position.getX(index), position.getZ(index)]);
   }
-  return outside;
+  geometry.dispose();
+  return points;
 }
 
 describe('the boundaries stand inside their footprints — #602', () => {
@@ -59,11 +73,10 @@ describe('the boundaries stand inside their footprints — #602', () => {
   it.each(BOUNDARY_KINDS)('keeps every vertex of a %s inside its footprint', (kind) => {
     let vertices = 0;
     for (const surface of realisticStructureSurfaces(kind)) {
-      const geometry = realisticStructureGeometry(kind, surface);
-      if (geometry === undefined) continue;
-      vertices += geometry.getAttribute('position').count;
-      expect(outsideFootprint(kind, geometry), `${kind} ${surface}`).toEqual([]);
-      geometry.dispose();
+      const points = planPoints(kind, surface);
+      if (points === undefined) continue;
+      vertices += points.length;
+      expect(outsideFootprint(kind, points), `${kind} ${surface}`).toEqual([]);
     }
     // A kind that built nothing would pass the loop above over no vertex.
     expect(vertices).toBeGreaterThan(0);
@@ -72,8 +85,12 @@ describe('the boundaries stand inside their footprints — #602', () => {
   it('would report the fence as it was before #602 — the control', () => {
     // The end post exactly as `BOUNDARY_STYLE` drew it: 0.12 m square, centred
     // on the end of the 8 m run, so its outer face stood at 4.06 m.
-    const oldEndPost = new BoxGeometry(0.12, 1.7, 0.12).translate(0, 0.45, 4);
-    expect(outsideFootprint('fence', oldEndPost).length).toBeGreaterThan(0);
-    oldEndPost.dispose();
+    const oldEndPost: PlanPoint[] = [
+      [-0.06, 3.94],
+      [0.06, 3.94],
+      [-0.06, 4.06],
+      [0.06, 4.06],
+    ];
+    expect(outsideFootprint('fence', oldEndPost)).toEqual(['-0.060, 4.060', '0.060, 4.060']);
   });
 });
