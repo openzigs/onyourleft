@@ -21,15 +21,18 @@
  * 1. the colour and the underline to be token values, converted from
  *    `design/tokens.ts` rather than re-typed here;
  * 2. the surface to be a token value too, and the (colour, surface) pair to be
- *    one `CONTRAST_REQUIREMENTS` declares — which is what makes "every surface a
- *    link sits on" a measurement rather than a list somebody wrote;
+ *    one `CONTRAST_REQUIREMENTS` declares at the TEXT threshold — which is what
+ *    makes "every surface a link sits on" a measurement rather than a list
+ *    somebody wrote;
  * 3. a link in running text — an `a` with no class of its own — to be
  *    underlined (WCAG 2.2 SC 1.4.1).
  *
  * Then it drives each link in running text into hover, keyboard focus and a
  * press, confirms the element really is in that state (`matches(':hover')`
  * and friends — a state that never applied would pass over the resting
- * colour), and requires the state's own token.
+ * colour), and requires the state's own token. The four status specimens
+ * (below) are the same on every route, so they are driven once rather than on
+ * each of them.
  *
  * ## The controls
  *
@@ -65,8 +68,12 @@
  *   ancestor would be checked against the wrong surface; none is today.
  */
 
-import { expect, test, type Page } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
+import { expect, test, type Locator, type Page } from '@playwright/test';
+
+import { AA_TEXT } from '../src/design/contrast';
 import {
   COLOUR_TOKENS,
   CONTRAST_REQUIREMENTS,
@@ -93,12 +100,21 @@ for (const [token, hex] of Object.entries(COLOUR_TOKENS) as [ColourToken, string
   TOKENS_BY_COLOUR.set(key, [...(TOKENS_BY_COLOUR.get(key) ?? []), token]);
 }
 
+/**
+ * Whether a link's (colour, surface) is a pair declared AS TEXT. A link is
+ * text, so only a requirement at {@link AA_TEXT} (4.5:1) answers for it: a
+ * 3:1 pair is a non-text or focus-ring requirement, and because tokens share
+ * values (`link` is `accent`'s teal, `ink` is `focus`'s) a pair declared for a
+ * ring could otherwise admit a link that nothing held to the text threshold.
+ */
 function isDeclaredPair(foreground: string, background: string): boolean {
   const fronts = TOKENS_BY_COLOUR.get(foreground) ?? [];
   const backs = TOKENS_BY_COLOUR.get(background) ?? [];
   return CONTRAST_REQUIREMENTS.some(
     (requirement) =>
-      fronts.includes(requirement.foreground) && backs.includes(requirement.background),
+      requirement.minimum >= AA_TEXT &&
+      fronts.includes(requirement.foreground) &&
+      backs.includes(requirement.background),
   );
 }
 
@@ -175,148 +191,236 @@ const STATUS_SURFACES: readonly ColourToken[] = [
 /** A link in running text: an `a` that no class of its own restyles. */
 const INLINE_LINK = 'a:not([class])';
 
+/** Whether a link is one of `shell-harness.tsx`'s specimens rather than the route's own. */
+async function isSpecimen(link: Locator): Promise<boolean> {
+  return link.evaluate((element) => element.closest('[data-oyl-link-specimen]') !== null);
+}
+
+/**
+ * Open a route for driving links: a press ends in a click, and a click on a
+ * hash link navigates — which would re-render the page under the loop. So
+ * every click is cancelled in the capture phase.
+ */
+async function openRouteForDriving(page: Page, route: (typeof ALL_ROUTES)[number]): Promise<void> {
+  await openRoute(page, route);
+  await page.evaluate(() => {
+    document.addEventListener(
+      'click',
+      (event) => {
+        event.preventDefault();
+      },
+      { capture: true },
+    );
+  });
+}
+
+/**
+ * Drive one link into hover, a press and keyboard focus, confirm each state
+ * really applied, and record every colour that is not the state's own token.
+ */
+async function driveLink(
+  page: Page,
+  link: Locator,
+  where: string,
+  faults: string[],
+): Promise<void> {
+  const name = `${where}: "${((await link.textContent()) ?? '').trim()}"`;
+
+  await link.hover();
+  const hovered = await link.evaluate((element) => ({
+    state: element.matches(':hover'),
+    colour: getComputedStyle(element).color,
+    underline: getComputedStyle(element).textDecorationLine,
+  }));
+  expect(hovered.state, `${name} never came under the pointer`).toBe(true);
+  if (hovered.colour !== stateColour('linkHover')) {
+    faults.push(`${name} under a pointer is ${hovered.colour}`);
+  }
+  if (!hovered.underline.includes('underline')) {
+    faults.push(`${name} loses its underline under a pointer`);
+  }
+
+  const box = await link.boundingBox();
+  if (box !== null) {
+    await page.mouse.down();
+    const pressed = await link.evaluate((element) => ({
+      state: element.matches(':active'),
+      colour: getComputedStyle(element).color,
+    }));
+    await page.mouse.up();
+    expect(pressed.state, `${name} was never pressed`).toBe(true);
+    if (pressed.colour !== stateColour('linkActive')) {
+      faults.push(`${name} while pressed is ${pressed.colour}`);
+    }
+  }
+
+  // Off the link, so the focus colour is not the hover colour by accident.
+  await page.mouse.move(0, 0);
+  // A key press first, so the engine's focus-visible heuristic treats the
+  // next focus as a keyboard one — asserted below rather than assumed.
+  await page.keyboard.press('Shift');
+  await link.focus();
+  const focused = await link.evaluate((element) => ({
+    state: element.matches(':focus-visible'),
+    hovered: element.matches(':hover'),
+    colour: getComputedStyle(element).color,
+    underline: getComputedStyle(element).textDecorationLine,
+  }));
+  expect(focused.state, `${name} never matched :focus-visible`).toBe(true);
+  expect(focused.hovered, `${name} was still under the pointer`).toBe(false);
+  if (focused.colour !== stateColour('linkHover')) {
+    faults.push(`${name} focused from the keyboard is ${focused.colour}`);
+  }
+  if (!focused.underline.includes('underline')) {
+    faults.push(`${name} loses its underline when focused`);
+  }
+  await link.blur();
+}
+
+/**
+ * How many `:where(a…)` rules `theme.css` declares, read from the file itself
+ * so the control's expected count moves with the stylesheet rather than being
+ * a number typed here.
+ */
+const LINK_RULES_IN_THEME = (
+  readFileSync(fileURLToPath(new URL('../src/design/theme.css', import.meta.url)), 'utf8').match(
+    /^:where\(a[:)]/gm,
+  ) ?? []
+).length;
+
+/*
+ * The walk and the drive are one test PER ROUTE rather than one loop over
+ * every route, so no route shares its 60 s budget with eighteen others — the
+ * single-loop version timed out under load. Each group is `serial`, which runs
+ * its cases in one worker, in order, and stops at the first failure; that is
+ * what lets each group's last case read the counts the cases before it
+ * collected, and fail when the route derivation produced nothing. ⚠️ So a
+ * `--grep` for one route leaves that last case red: it is the part that says
+ * every route was visited.
+ */
 test.describe('links — #661', () => {
-  test('every link on every route paints with a token, over a declared pair', async ({ page }) => {
-    const faults: string[] = [];
+  test.describe('every link on every route paints with a token, over a declared pair', () => {
+    test.describe.configure({ mode: 'serial' });
+
     let measured = 0;
     let inline = 0;
     let routes = 0;
     const specimenSurfaces = new Set<ColourToken>();
+
     for (const route of ALL_ROUTES) {
-      await openRoute(page, route);
-      routes += 1;
-      for (const link of await measureLinks(page)) {
-        measured += 1;
-        if (link.specimen) {
-          for (const token of TOKENS_BY_COLOUR.get(link.surface) ?? []) {
-            specimenSurfaces.add(token);
+      test(route.id, async ({ page }) => {
+        const faults: string[] = [];
+        await openRoute(page, route);
+        routes += 1;
+        for (const link of await measureLinks(page)) {
+          measured += 1;
+          if (link.specimen) {
+            for (const token of TOKENS_BY_COLOUR.get(link.surface) ?? []) {
+              specimenSurfaces.add(token);
+            }
+          } else if (link.className === '') {
+            inline += 1;
           }
-        } else if (link.className === '') {
-          inline += 1;
-        }
-        if (link.className === '') {
-          if (link.colour !== stateColour('link')) {
-            faults.push(`${route.id}: "${link.text}" at rest is ${link.colour}, not \`link\``);
+          if (link.className === '') {
+            if (link.colour !== stateColour('link')) {
+              faults.push(`${route.id}: "${link.text}" at rest is ${link.colour}, not \`link\``);
+            }
+          }
+          const where = `${route.id}: "${link.text}"${link.className === '' ? '' : ` (.${link.className})`}`;
+          if (!TOKENS_BY_COLOUR.has(link.colour)) {
+            faults.push(`${where} is ${link.colour}, which is no token`);
+          }
+          if (!TOKENS_BY_COLOUR.has(link.underlineColour)) {
+            faults.push(`${where} is underlined in ${link.underlineColour}, which is no token`);
+          }
+          if (!TOKENS_BY_COLOUR.has(link.surface)) {
+            faults.push(`${where} sits on ${link.surface}, which is no token surface`);
+          } else if (!isDeclaredPair(link.colour, link.surface)) {
+            faults.push(
+              `${where} is ${link.colour} on ${link.surface}, a pair CONTRAST_REQUIREMENTS does not declare as text`,
+            );
+          }
+          if (link.className === '' && !link.underline.includes('underline')) {
+            faults.push(`${where} is not underlined, so only its colour says it is a link`);
           }
         }
-        const where = `${route.id}: "${link.text}"${link.className === '' ? '' : ` (.${link.className})`}`;
-        if (!TOKENS_BY_COLOUR.has(link.colour)) {
-          faults.push(`${where} is ${link.colour}, which is no token`);
-        }
-        if (!TOKENS_BY_COLOUR.has(link.underlineColour)) {
-          faults.push(`${where} is underlined in ${link.underlineColour}, which is no token`);
-        }
-        if (!TOKENS_BY_COLOUR.has(link.surface)) {
-          faults.push(`${where} sits on ${link.surface}, which is no token surface`);
-        } else if (!isDeclaredPair(link.colour, link.surface)) {
-          faults.push(
-            `${where} is ${link.colour} on ${link.surface}, a pair CONTRAST_REQUIREMENTS does not declare`,
-          );
-        }
-        if (link.className === '' && !link.underline.includes('underline')) {
-          faults.push(`${where} is not underlined, so only its colour says it is a link`);
-        }
-      }
+        expect(faults).toEqual([]);
+      });
     }
-    // The walk counts what it measured, because every assertion above is true
-    // of an empty list: a derivation that produced no routes, or a harness
-    // that rendered no link in running text on any of them, would pass it.
-    console.log(
-      `#661: ${String(measured)} links, ${String(inline)} in running text, over ${String(routes)} routes`,
-    );
-    expect(ALL_ROUTES.length).toBeGreaterThan(0);
-    expect(routes).toBe(ALL_ROUTES.length);
-    expect(measured).toBeGreaterThan(0);
-    expect(inline, 'no route rendered a link in running text of its own').toBeGreaterThan(0);
-    // The specimens are only worth their place if each one really sat on its
-    // message's surface: a StatusMessage that stopped painting one would put
-    // all four on the canvas, and every pair would still be declared.
-    expect([...STATUS_SURFACES].filter((surface) => !specimenSurfaces.has(surface))).toEqual([]);
-    expect(faults).toEqual([]);
+
+    test('measured every route, and measured something', () => {
+      // Every assertion above is true of an empty list: a derivation that
+      // produced no routes, or a harness that rendered no link in running
+      // text on any of them, would pass it. So the walk is counted.
+      console.log(
+        `#661: ${String(measured)} links, ${String(inline)} in running text, over ${String(routes)} routes`,
+      );
+      expect(ALL_ROUTES.length).toBeGreaterThan(0);
+      expect(routes).toBe(ALL_ROUTES.length);
+      expect(measured).toBeGreaterThan(0);
+      expect(inline, 'no route rendered a link in running text of its own').toBeGreaterThan(0);
+      // The specimens are only worth their place if each one really sat on its
+      // message's surface: a StatusMessage that stopped painting one would put
+      // all four on the canvas, and every pair would still be declared.
+      expect([...STATUS_SURFACES].filter((surface) => !specimenSurfaces.has(surface))).toEqual([]);
+    });
   });
 
-  test('a link under a pointer, focused from the keyboard and pressed paints its own token', async ({
-    page,
-  }) => {
+  test.describe('a link under a pointer, focused from the keyboard and pressed paints its own token', () => {
+    test.describe.configure({ mode: 'serial' });
+
     let driven = 0;
-    const faults: string[] = [];
+    let routes = 0;
+
+    // The route's OWN links in running text, route by route. The four status
+    // specimens are the same on every route, so they are driven once, below,
+    // rather than re-driven nineteen times.
     for (const route of ALL_ROUTES) {
-      await openRoute(page, route);
-      // A press ends in a click, and a click on a hash link navigates — which
-      // would re-render the page under the loop. Cancelled in the capture phase.
-      await page.evaluate(() => {
-        document.addEventListener(
-          'click',
-          (event) => {
-            event.preventDefault();
-          },
-          { capture: true },
-        );
-      });
-      const links = page.locator(INLINE_LINK);
-      const count = await links.count();
-      for (let index = 0; index < count; index += 1) {
-        const link = links.nth(index);
-        if (!(await link.isVisible())) {
-          continue;
-        }
-        const name = `${route.id}: "${((await link.textContent()) ?? '').trim()}"`;
-
-        await link.hover();
-        const hovered = await link.evaluate((element) => ({
-          state: element.matches(':hover'),
-          colour: getComputedStyle(element).color,
-          underline: getComputedStyle(element).textDecorationLine,
-        }));
-        expect(hovered.state, `${name} never came under the pointer`).toBe(true);
-        if (hovered.colour !== stateColour('linkHover')) {
-          faults.push(`${name} under a pointer is ${hovered.colour}`);
-        }
-        if (!hovered.underline.includes('underline')) {
-          faults.push(`${name} loses its underline under a pointer`);
-        }
-
-        const box = await link.boundingBox();
-        if (box !== null) {
-          await page.mouse.down();
-          const pressed = await link.evaluate((element) => ({
-            state: element.matches(':active'),
-            colour: getComputedStyle(element).color,
-          }));
-          await page.mouse.up();
-          expect(pressed.state, `${name} was never pressed`).toBe(true);
-          if (pressed.colour !== stateColour('linkActive')) {
-            faults.push(`${name} while pressed is ${pressed.colour}`);
+      test(route.id, async ({ page }) => {
+        const faults: string[] = [];
+        await openRouteForDriving(page, route);
+        routes += 1;
+        const links = page.locator(INLINE_LINK);
+        const count = await links.count();
+        for (let index = 0; index < count; index += 1) {
+          const link = links.nth(index);
+          if (!(await link.isVisible()) || (await isSpecimen(link))) {
+            continue;
           }
+          await driveLink(page, link, route.id, faults);
+          driven += 1;
         }
-
-        // Off the link, so the focus colour is not the hover colour by accident.
-        await page.mouse.move(0, 0);
-        // A key press first, so the engine's focus-visible heuristic treats the
-        // next focus as a keyboard one — asserted below rather than assumed.
-        await page.keyboard.press('Shift');
-        await link.focus();
-        const focused = await link.evaluate((element) => ({
-          state: element.matches(':focus-visible'),
-          hovered: element.matches(':hover'),
-          colour: getComputedStyle(element).color,
-          underline: getComputedStyle(element).textDecorationLine,
-        }));
-        expect(focused.state, `${name} never matched :focus-visible`).toBe(true);
-        expect(focused.hovered, `${name} was still under the pointer`).toBe(false);
-        if (focused.colour !== stateColour('linkHover')) {
-          faults.push(`${name} focused from the keyboard is ${focused.colour}`);
-        }
-        if (!focused.underline.includes('underline')) {
-          faults.push(`${name} loses its underline when focused`);
-        }
-        await link.blur();
-        driven += 1;
-      }
+        expect(faults).toEqual([]);
+      });
     }
-    console.log(`#661: ${String(driven)} links driven through hover, press and focus`);
-    expect(driven).toBeGreaterThan(0);
-    expect(faults).toEqual([]);
+
+    test('the four status-message specimens', async ({ page }) => {
+      const first = ALL_ROUTES[0];
+      expect(first, 'the route table is empty').toBeDefined();
+      if (first === undefined) {
+        return;
+      }
+      await openRouteForDriving(page, first);
+      const faults: string[] = [];
+      const specimens = page.locator(`[data-oyl-link-specimen] ${INLINE_LINK}`);
+      const count = await specimens.count();
+      let drivenSpecimens = 0;
+      for (let index = 0; index < count; index += 1) {
+        await driveLink(page, specimens.nth(index), 'specimen', faults);
+        drivenSpecimens += 1;
+      }
+      expect(drivenSpecimens).toBe(STATUS_SURFACES.length);
+      expect(faults).toEqual([]);
+    });
+
+    test('drove every route, and drove a link of a route’s own', () => {
+      console.log(
+        `#661: ${String(driven)} route links driven through hover, press and focus, over ${String(routes)} routes`,
+      );
+      expect(ALL_ROUTES.length).toBeGreaterThan(0);
+      expect(routes).toBe(ALL_ROUTES.length);
+      expect(driven, 'no route rendered a link in running text of its own').toBeGreaterThan(0);
+    });
   });
 
   test('the control — with the `a` rules taken out, a link is the browser’s blue again', async ({
@@ -346,9 +450,11 @@ test.describe('links — #661', () => {
         }
       }
     }
-    // Four per route: the resting, visited, hover-and-focus and pressed rules.
-    // Zero would mean the selector moved and this control stripped nothing.
-    expect(stripped).toBe(ALL_ROUTES.length * 4);
+    // Every `:where(a…)` rule `theme.css` declares, on every route. Zero would
+    // mean the selector moved and this control stripped nothing; fewer, that
+    // the engine's rule text no longer starts the way the file's does.
+    expect(LINK_RULES_IN_THEME).toBeGreaterThan(0);
+    expect(stripped).toBe(ALL_ROUTES.length * LINK_RULES_IN_THEME);
     expect(offToken.length).toBeGreaterThan(0);
     expect(offToken).toContain(USER_AGENT_LINK);
   });
