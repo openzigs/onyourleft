@@ -1,0 +1,27 @@
+start 2026-09-26T23:22:32Z
+Thermal Status: 0
+	Temperature{mValue=57.000004, mType=0, mName=LITTLE, mStatus=0}
+	Temperature{mValue=36.847, mType=-1, mName=neutral_therm, mStatus=0}
+	Temperature{mValue=28.055002, mType=-1, mName=charger_skin_therm, mStatus=0}
+	Temperature{mValue=0.0, mType=4, mName=VIRTUAL-USB-UI, mStatus=0}
+	Temperature{mValue=25.160002, mType=-1, mName=disp_therm, mStatus=0}
+	Temperature{mValue=31.015001, mType=-1, mName=quiet_therm, mStatus=0}
+	Temperature{mValue=23.1, mType=2, mName=battery, mStatus=0}
+	Temperature{mValue=46.000004, mType=9, mName=AUR, mStatus=0}
+	Temperature{mValue=70.0, mType=0, mName=BIG, mStatus=0}
+	Temperature{mValue=46.000004, mType=1, mName=G3D, mStatus=0}
+	Temperature{mValue=48.000004, mType=9, mName=ISP, mStatus=0}
+	Temperature{mValue=57.000004, mType=0, mName=MID, mStatus=0}
+	Temperature{mValue=28.000002, mType=9, mName=ISP, mStatus=0}
+	Temperature{mValue=29.000002, mType=1, mName=G3D, mStatus=0}
+	Temperature{mValue=30.000002, mType=0, mName=LITTLE, mStatus=0}
+	Temperature{mValue=25.87129, mType=3, mName=VIRTUAL-SKIN, mStatus=0}
+	Temperature{mValue=27.033, mType=-1, mName=quiet_therm, mStatus=0}
+	Temperature{mValue=29.000002, mType=9, mName=AUR, mStatus=0}
+	Temperature{mValue=30.000002, mType=9, mName=TPU, mStatus=0}
+	Temperature{mValue=27.221, mType=-1, mName=usb_pwr_therm2, mStatus=0}
+	Temperature{mValue=29.000002, mType=0, mName=BIG, mStatus=0}
+	Temperature{mValue=25.886002, mType=-1, mName=usb_pwr_therm, mStatus=0}
+	Temperature{mValue=24.7, mType=2, mName=battery, mStatus=0}
+	Temperature{mValue=30.000002, mType=0, mName=MID, mStatus=0}
+	Temperature{mValue=27.854002, mType=-1, mName=neutral_therm, mStatus=0}
