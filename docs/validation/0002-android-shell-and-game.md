@@ -3171,8 +3171,47 @@ published figures (its run predates `oyl.txt`).
 | issue | run | build | layers | present p50 / p90 / **p95** / p99 ms | > 20 ms % | GPU mean / p50 / p90 MHz | skin before / start / min 20 °C | CPU app / WebView / **both** % | Graphics / GL mtrack MiB | triangles / frame | draw calls |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | spike 0015 | T20-three-realistic | `46c80c9` + spike patch | — | 16.63 / 16.66 / **16.68** / 16.75 | 0.12 | 707.8 / 701 / 848 | 25.6 / 27.2 / 32.8 | 87.8 / 74.9 / **162.7** | 419.3 / 308.2 | 266 742 | 32–37 |
-| #616 | baseline 1 | | | | | | | | | | |
-| #616 | baseline 2 | | | | | | | | | | |
-| #616 | **spread** (\|1 − 2\|) | | | | | | | | | | |
+| #616 | baseline 1 | `f91a5fb` + `realistic:stage` | — | 16.63 / 16.66 / **16.68** / 16.76 | 0.09 | 705.6 / 701 / 848 | 20.9 / 24.5 / 30.7 | 92.6 / 77.7 / **170.3** | 423.0 / 311.9 | 266 739 | 33 (32–37) |
+| #616 | baseline 2 | `f91a5fb` + `realistic:stage` | — | 16.63 / 16.66 / **16.68** / 16.75 | 0.11 | 707.7 / 701 / 848 | 25.8 / 29.1 / 32.3 | 92.6 / 74.8 / **167.4** | 419.5 / 308.4 | 266 741 | 33 (32–37) |
+| #616 | **spread** (\|1 − 2\|) | | | 0 / 0 / **0** / 0.01 | 0.02 | 2.1 (0.3 %) / 0 / 0 | 4.9 / 4.6 / **1.6** | 0 / 2.9 / **2.9** | 3.5 / 3.5 | 2 | 0 |
 
-**Phone (OEM, model, Android, WebView):** ______________  **Build:** ______________
+**Phone (OEM, model, Android, WebView):** Google Pixel Tablet, build `CP2A.260705.006`, Android 17,
+WebView 153.0.8010.36  **Build:** debug, `main` at **`f91a5fb`** (before #617's tree LODs, PR #637)
+with the owner's page staged, installed 2026-09-27. Baseline 1 ran 07:16–07:37, baseline 2
+07:39–07:59, taken by an agent over adb with nobody at the tablet and no trainer connected. Raw
+sampler output, `before.txt` and `oyl.txt` for each run are committed under
+[`runs/616-baseline-1/`](../../runs/616-baseline-1/) and [`runs/616-baseline-2/`](../../runs/616-baseline-2/).
+
+**What the two rows say, and what the spread is.**
+
+- **Present time, GPU clock, CPU, memory, triangles and draw calls agree.** Present p95 is
+  identical (16.68 ms), the GPU DVFS mean differs by 2.1 MHz (0.3 %), CPU *both* by 2.9 points of
+  a core, `GL mtrack` by 3.5 MiB. Every one of those is well inside #615's placeholder (±5 % GPU,
+  ±10 points CPU, +0.2 ms p95), so those placeholders are loose rather than tight: the measured
+  spread is the threshold from here on, as this Part says.
+- **Triangles and draw calls are a sequence by minute, not a constant**, and the sequence
+  reproduces: the per-minute `trianglesPerFrame` values of the two runs are the same numbers to
+  within two triangles (251 150, 257 3xx, … 271 389), and draw calls run 32–37 in both. The median
+  is 266 739 / 266 741, one pair of triangles apart. A change of more than a few triangles in this
+  column is therefore a change, as this Part claims — but "deterministic" holds per minute, and a
+  median over a different set of minutes (see the logcat finding below) could move by thousands.
+- ⚠️ **Skin is the one column that does not agree, and the spread in it is not noise.** Baseline 1
+  started from a tablet that had been idle for hours (20.9 °C); baseline 2 was cooled after
+  baseline 1 only to AH3's ≤ 26 °C (25.8 °C, 90 s screen-off). Skin at minute 20 then differs by
+  1.6 °C (30.7 against 32.3), and the rise over the run by 3.3 °C (9.8 against 6.5). AH3's
+  "≤ 26 °C" admits a 5 °C range of starting points, and minute-20 skin follows the start. A later
+  row should record its *skin before* and be compared against the baseline with the nearer start;
+  or AH3 should cool to a narrower band (for example 25–26 °C) than it does now.
+
+**What did not work as written.**
+
+- ⚠️ **`logcat` lost the page's early lines.** `oyl.txt` holds minutes 1–19 for baseline 1 and
+  only minutes 3–19 for baseline 2, and neither holds the 30-second `OYL-REALISTIC` line: the
+  default log buffer rolled over during twenty minutes. The per-minute figures reproduce, so the
+  medians still agree here, but a run should enlarge the buffer (`"$ADB" logcat -G 16M` before
+  `logcat -c`) or stream `logcat` to a file from the start.
+- **Minute 20 is never in `oyl.txt`.** The page publishes minute N during minute N + 1, counted from
+  when the page opened, and AH6 reads `logcat` as soon as the sampler writes `done`, about 20 min
+  20 s after the page opened. So `soak=21` yields at most minutes 1–19; waiting about 40 s more
+  before AH6's `logcat -d` would capture minute 20.
+- `adb` saw the tablet twice (USB and Wi-Fi), so every `"$ADB"` command needed `-s <serial>`.
