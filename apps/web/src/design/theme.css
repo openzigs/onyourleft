@@ -1260,7 +1260,14 @@ select option {
      `position: absolute`, and an absolutely positioned box is clipped by a
      scroll container only if that container is its containing block. Without
      this the hidden text escaped the region and widened the PAGE — 137 px at
-     844×390, measured, with the table itself scrolling correctly. */
+     844×390, measured on this branch while the activity library was still a
+     table of unbreakable names, with the table itself scrolling correctly.
+     ⚠️ That figure does NOT reproduce on the shipped tree: with this line
+     removed every route in `reflow.browser.spec.ts`'s walk stays green,
+     because nothing it renders now puts hidden text past a region's edge. What
+     guards this line is that spec's POSITIVE control alone — the real
+     `ScrollTable` with hidden text at the far end of a 1200 px row — which
+     goes red with it removed (the page scrolls 966 px at 320×256, #683). */
   position: relative;
 }
 

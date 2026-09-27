@@ -7,7 +7,8 @@
  * `design/theme.css`, handed in-memory ports that are either **empty** (a
  * device that has recorded nothing) or **populated** (forty rides with long
  * names, a ride with a track, a chart, laps, a map and a side-camera report,
- * a segment with efforts, a route, a workout). `?data=empty` or
+ * a segment with efforts, a route — on the Routes screen and in the game's
+ * picker — a workout). `?data=empty` or
  * `?data=populated` chooses which; there is no default, because a page that
  * silently picked one would make the other half of the walk a copy of it.
  *
@@ -36,9 +37,10 @@
  * ## The control
  *
  * `?control=overflow` appends a deliberately over-wide element to `.oyl-main`
- * on every route, and `?control=scroller` appends a box that scrolls sideways
- * inside itself and is not focusable. Each must turn the walk's own fault list
- * non-empty — without them, a page that rendered nothing would pass.
+ * on every route, and `?control=scroller`, `unnamed` and `grouped` each append
+ * a box that scrolls sideways inside itself and lacks one of the three things
+ * such a box needs. Each must turn the walk's own fault list non-empty —
+ * without them, a page that rendered nothing would pass.
  */
 
 import { StrictMode, type JSX } from 'react';
@@ -77,6 +79,8 @@ import {
 } from '@onyourleft/store';
 
 import type { AthleteMassPort } from '../src/athlete/store-port';
+import type { GamePort } from '../src/game/GameView';
+import { NO_SENSORS } from '../src/game/sensors';
 import { stubAnalysis } from '../src/analysis/testing';
 import { CameraController } from '../src/camera/session';
 import {
@@ -126,16 +130,78 @@ export const PARAMETERS: Partial<Record<RouteId, string>> = {
 };
 
 /**
- * What must be on the page for a POPULATED route to count as populated. A
- * fixture that stopped reaching its view would otherwise measure the empty
- * state twice and call it both.
+ * What a route shows when its fixtures reach it, for EVERY route in the table.
+ *
+ * A fixture that stopped reaching its view would otherwise measure the empty
+ * state twice and call it both. This was a `Partial` list of five markers
+ * until #683's review, and the review emptied the routes, workouts and analysis
+ * fixtures — three of the routes that overflowed on `main` — with all three
+ * populated walks staying green: an allowlist of markers misses a route by
+ * saying nothing about it. So it is a `Record` over {@link RouteId}, a route
+ * added to the table without an entry here is a compile error, and the spec
+ * ALSO fails a route this page publishes no entry for, taken from `ALL_ROUTES`
+ * at run time (#142's rule), in case the type is ever widened back.
+ *
+ * - `fixture` — the selector is present in the POPULATED walk and ABSENT in the
+ *   empty one. The absence is what proves the selector tells the two apart; a
+ *   marker the empty state also satisfies would pass over an emptied fixture.
+ * - `constant` — the route's content does not come from these fixtures, and
+ *   the selector must be present in BOTH walks.
+ * - `none` — nothing on the route comes from these fixtures, and the reason
+ *   says why. ⚠️ A `none` is a statement about THIS harness, not about the
+ *   screen: `transfer` has data-dependent content and is handed no port here,
+ *   and the reason says so rather than calling the screen static.
  */
-const POPULATED_MARKERS: Partial<Record<RouteId, string>> = {
-  activities: '.oyl-main a[href^="#/activities/"]',
-  'activity-detail': '.oyl-side-report',
-  'segment-detail': '.oyl-main tbody tr',
-  segments: '.oyl-main a[href^="#/segments/"]',
-  credits: '.oyl-main code',
+export type PopulatedExpectation =
+  | { readonly kind: 'fixture'; readonly marker: string }
+  | { readonly kind: 'constant'; readonly marker: string; readonly reason: string }
+  | { readonly kind: 'none'; readonly reason: string };
+
+export const POPULATED: Record<RouteId, PopulatedExpectation> = {
+  home: { kind: 'fixture', marker: '.oyl-main .oyl-home__facts' },
+  ride: { kind: 'fixture', marker: '.oyl-main .oyl-metric--live' },
+  game: { kind: 'fixture', marker: '.oyl-game__picker li input[type="checkbox"]' },
+  workouts: { kind: 'fixture', marker: '.oyl-main .oyl-scroll-region tbody tr' },
+  activities: { kind: 'fixture', marker: '.oyl-main a[href^="#/activities/"]' },
+  analysis: { kind: 'fixture', marker: '.oyl-main .oyl-scroll-region tbody tr' },
+  segments: { kind: 'fixture', marker: '.oyl-main a[href^="#/segments/"]' },
+  routes: { kind: 'fixture', marker: '.oyl-main .oyl-scroll-region tbody tr' },
+  'activity-detail': { kind: 'fixture', marker: '.oyl-side-report' },
+  'segment-detail': { kind: 'fixture', marker: '.oyl-main tbody tr' },
+  credits: {
+    kind: 'constant',
+    marker: '.oyl-main code',
+    reason: 'generated from ASSETS.toml at build time, the same in both walks',
+  },
+  devices: {
+    kind: 'none',
+    reason:
+      'what it lists comes from Bluetooth, and this page hands it a browser with none — the same in both walks',
+  },
+  transfer: {
+    kind: 'none',
+    reason:
+      'handed no transfer port, so it shows its not-available state in both walks; its forms with a store behind them are NOT walked here',
+  },
+  camera: {
+    kind: 'none',
+    reason: 'the camera this page hands it opens nothing, so it is the same in both walks',
+  },
+  settings: {
+    kind: 'none',
+    reason: 'its forms are the same whatever is stored; nothing it renders is a list of data',
+  },
+  about: { kind: 'none', reason: 'static prose' },
+  'route-builder': {
+    kind: 'none',
+    reason:
+      'handed no routing provider, and its draft is local storage rather than a port — the same in both walks',
+  },
+  'side-camera': {
+    kind: 'none',
+    reason: 'handed no pairing, so it shows its before-pairing state in both walks',
+  },
+  'not-found': { kind: 'none', reason: 'static: a heading and the route list' },
 };
 
 /** How many rides the populated library holds — more than a page of cards. */
@@ -172,8 +238,20 @@ export interface ReflowMeasurement {
   readonly libraryLayout: string | null;
   /** The height of the library's sort control, or `null` on any other route. */
   readonly sortControlHeight: number | null;
-  /** Whether the populated marker for this route is present, or `null` if it has none. */
-  readonly populated: boolean | null;
+  /**
+   * What this page expects of the route's fixtures — {@link POPULATED} — or
+   * `undefined` when it has no entry, which the spec fails in both walks.
+   */
+  readonly expectation: PopulatedExpectation | undefined;
+  /** Whether the expectation's marker is on the page, or `null` when it has none. */
+  readonly markerPresent: boolean | null;
+  /**
+   * Every uncaught error and unhandled rejection raised since the previous
+   * route was opened — so one raised while a route rendered, or while the page
+   * settled, is charged to that route rather than being read once, before the
+   * walk began (#683's review).
+   */
+  readonly errors: readonly string[];
   readonly settledWithinPatience: boolean;
 }
 
@@ -184,6 +262,7 @@ declare global {
       readonly errors: readonly string[];
       readonly data: 'empty' | 'populated';
       readonly parameters: Partial<Record<RouteId, string>>;
+      readonly populated: Partial<Record<RouteId, PopulatedExpectation>>;
       readonly visit: (hash: string) => Promise<ReflowMeasurement>;
       /** Every id in `ALL_ROUTES` this page has not rendered. */
       readonly unvisited: () => readonly RouteId[];
@@ -192,6 +271,8 @@ declare global {
 }
 
 const errors: string[] = [];
+/** How much of {@link errors} the previous {@link visit} has already reported. */
+let reported = 0;
 const visited = new Set<RouteId>();
 
 function north(metresNorth: number, metresEast = 0): GeographicPosition {
@@ -343,6 +424,31 @@ function quietCamera(): CameraController {
   });
 }
 
+/**
+ * The trainer game's routes. Populated: one route with a long name, which the
+ * picker lists with its ghost checkbox. No ride is started — this page has no
+ * renderer — so the sensors are never read.
+ */
+function gamePort(populated: boolean): GamePort {
+  return {
+    listRoutes: () =>
+      Promise.resolve(
+        populated
+          ? [
+              {
+                id: 'route-1',
+                name: 'Box Hill, Leith Hill and every lane between them the long way round',
+                profile: routeProfile(routePoints()),
+                attempts: 0,
+              },
+            ]
+          : [],
+      ),
+    loadGhost: () => Promise.resolve(undefined),
+    readSensors: () => NO_SENSORS,
+  };
+}
+
 async function realMap(): Promise<MapPort> {
   return (await import('../src/map/maplibre')).mapLibrePort;
 }
@@ -431,6 +537,7 @@ function shell(populated: boolean): JSX.Element {
             ]
           : [],
       )}
+      game={gamePort(populated)}
       map={realMap}
       basemap={{
         archiveUrl: new URL('/basemap-fixture.pmtiles', window.location.origin).toString(),
@@ -610,17 +717,19 @@ function applyControl(control: string | null): void {
     // Wider than any viewport the walk uses, and unbreakable.
     specimen.style.width = '1200px';
     specimen.style.height = '4px';
-  } else if (control === 'scroller' || control === 'unnamed') {
+  } else if (control === 'scroller' || control === 'unnamed' || control === 'grouped') {
     // Contained, so the DOCUMENT does not scroll — only this box does. Each
     // has two of the three things a scroll box needs and lacks one, so each
-    // proves its own half of the rule: `scroller` is a named region that
+    // proves its own part of the rule: `scroller` is a named region that
     // cannot take focus (a `ScrollTable` that lost its `tabIndex`), `unnamed`
-    // is a focusable region with no name.
+    // is a focusable region with no name, and `grouped` is focusable and named
+    // with a role that is not `region` (#683's review — any role used to pass).
     specimen.style.overflowX = 'auto';
-    specimen.setAttribute('role', 'region');
-    if (control === 'scroller') {
+    specimen.setAttribute('role', control === 'grouped' ? 'group' : 'region');
+    if (control !== 'unnamed') {
       specimen.setAttribute('aria-label', 'A wide specimen');
-    } else {
+    }
+    if (control !== 'scroller') {
       specimen.tabIndex = 0;
     }
     const inner = document.createElement('div');
@@ -665,7 +774,13 @@ async function visit(hash: string): Promise<ReflowMeasurement> {
   applyControl(control);
   await nextFrame();
   visited.add(route.id);
-  const marker = POPULATED_MARKERS[route.id];
+  // Read through a `Partial` view on purpose: the spec's "no entry" fault has
+  // to be reachable if the `Record` type is ever loosened.
+  const expectation = (POPULATED as Partial<Record<RouteId, PopulatedExpectation>>)[route.id];
+  const marker =
+    expectation === undefined || expectation.kind === 'none' ? undefined : expectation.marker;
+  const raised = errors.slice(reported);
+  reported = errors.length;
   const root = document.documentElement;
   const reach = widest();
   return {
@@ -680,7 +795,9 @@ async function visit(hash: string): Promise<ReflowMeasurement> {
     libraryLayout: document.querySelector('.oyl-library')?.getAttribute('data-layout') ?? null,
     sortControlHeight:
       document.querySelector('#oyl-library-sort')?.getBoundingClientRect().height ?? null,
-    populated: marker === undefined ? null : document.querySelector(marker) !== null,
+    expectation,
+    markerPresent: marker === undefined ? null : document.querySelector(marker) !== null,
+    errors: raised,
     settledWithinPatience: headed && quiet,
   };
 }
@@ -703,6 +820,7 @@ function main(): void {
     errors,
     data,
     parameters: PARAMETERS,
+    populated: POPULATED,
     visit,
     unvisited: () => ALL_ROUTES.map((route) => route.id).filter((id) => !visited.has(id)),
   };
@@ -710,6 +828,12 @@ function main(): void {
 
 window.addEventListener('error', (event) => {
   errors.push(event.message);
+});
+// A rejected promise nothing awaits raises no `error` event, and is the more
+// likely failure in a view that reads a port.
+window.addEventListener('unhandledrejection', (event) => {
+  const reason: unknown = event.reason;
+  errors.push(`unhandled rejection: ${reason instanceof Error ? reason.message : String(reason)}`);
 });
 
 try {
@@ -721,6 +845,7 @@ try {
     errors,
     data: 'empty',
     parameters: PARAMETERS,
+    populated: POPULATED,
     visit: () => Promise.reject(new Error('the reflow harness did not start')),
     unvisited: () => ALL_ROUTES.map((route) => route.id),
   };

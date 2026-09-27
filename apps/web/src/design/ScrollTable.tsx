@@ -29,6 +29,15 @@ import { useId, type JSX, type ReactNode } from 'react';
  * render and would make the tab order depend on the window's width, which is
  * the more surprising of the two.
  *
+ * And one `region` landmark per table, which is the other half of that cost
+ * (#683's review, kept as a trade-off rather than changed): a page with two
+ * tables whose captions read the same would be two landmarks of one role and
+ * one name, which a landmark list cannot tell apart. Give each table its own
+ * caption. ⚠️ **Nothing enforces that yet**: `a11y/audit.ts`
+ * §`landmarks-are-distinguishable` reads `nav`, `aside`, `section` and `form`
+ * by TAG, and this region is a `div` with `role="region"`, so two identical
+ * captions would pass it. Checked on the rule's source rather than assumed.
+ *
  * ⚠️ `browser/reflow.browser.spec.ts` is what measures that a box which DOES
  * scroll sideways is one of these; this component is what makes that true.
  */

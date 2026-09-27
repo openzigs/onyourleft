@@ -21,20 +21,26 @@
  *
  * - **It rendered.** Its `h1` is its own title, so a blank page, the not-found
  *   page and a route that never arrived cannot pass.
- * - **A populated route is populated.** The harness names what must be on the
- *   page for the fixture to have reached the view.
+ * - **A populated route is populated.** The harness declares, for every route,
+ *   what is on the page when its fixture reached the view — present in the
+ *   populated walk and absent in the empty one — or why nothing on it comes
+ *   from a fixture. A route it declares nothing for is a fault in both walks.
+ * - **Nothing threw.** An uncaught error or an unhandled rejection raised
+ *   while a route rendered or settled is that route's fault.
  * - **A box that scrolls sideways inside itself is reachable.** SC 1.4.10
  *   exempts a table's two-dimensional layout only when a keyboard user can
- *   scroll it: the box takes focus, has a role and has a name (#654's
- *   re-review). The document itself must still not scroll.
+ *   scroll it: the box takes focus, is a `region` and has a name (#654's
+ *   re-review) — the role `a11y/audit.ts` §`table-in-scroll-region` requires,
+ *   not merely any role. The document itself must still not scroll.
  *
- * ## The controls, and why there are three
+ * ## The controls
  *
  * - `?control=overflow` puts an over-wide element in `main`. The same fault
  *   function must report it — otherwise a harness that measured nothing, or a
  *   `scrollWidth` read off the wrong element, would pass every route.
- * - `?control=scroller` puts a box that scrolls inside itself and cannot take
- *   focus. The scroll-box rule must report it.
+ * - `?control=scroller`, `unnamed` and `grouped` each put a box that scrolls
+ *   inside itself and lacks one thing: focus, a name, the `region` role. The
+ *   scroll-box rule must report each, for the thing it lacks.
  * - `?control=region` puts the same box done properly — focusable, a region,
  *   named. The rule must NOT report it, so it cannot pass by flagging
  *   everything that scrolls and the product then being made to scroll nothing.
@@ -127,11 +133,26 @@ function reflowFaults(
       `${where}: the document scrolls sideways by ${String(seen.documentOverflow)} px — widest is ${seen.widest}`,
     );
   }
-  if (populated && seen.populated === false) {
-    faults.push(`${where}: the populated fixture did not reach the view`);
+  const expected = seen.expectation;
+  if (expected === undefined) {
+    faults.push(
+      `${where}: reflow-harness.tsx §POPULATED says nothing about this route — name what its ` +
+        'fixture puts on the page, or why nothing on it comes from one',
+    );
+  } else if (expected.kind === 'fixture' && seen.markerPresent !== populated) {
+    faults.push(
+      populated
+        ? `${where}: the populated fixture did not reach the view (no ${expected.marker})`
+        : `${where}: ${expected.marker} is on the EMPTY page, so it cannot tell the two walks apart`,
+    );
+  } else if (expected.kind === 'constant' && seen.markerPresent !== true) {
+    faults.push(`${where}: ${expected.marker} is missing, and it does not depend on the fixtures`);
+  }
+  for (const error of seen.errors) {
+    faults.push(`${where}: the page raised "${error}"`);
   }
   for (const box of seen.scrollBoxes) {
-    if (!box.focusable || box.role === null || box.name === '') {
+    if (!box.focusable || box.role !== 'region' || box.name === '') {
       faults.push(
         `${where}: ${box.description} scrolls sideways by ${String(box.overflow)} px and is not a ` +
           `focusable, named region (focusable ${String(box.focusable)}, role ${String(box.role)}, ` +
@@ -173,6 +194,10 @@ for (const data of DATASETS) {
       expect(unvisited, 'routes in ALL_ROUTES the walk never opened').toEqual([]);
       console.log(`reflow ${data} ${String(width)}×${String(height)}\n  ${margins.join('\n  ')}`);
       expect(faults).toEqual([]);
+      // Per route above, which names the route; this catches one raised after
+      // the last route was measured.
+      const raised = await page.evaluate(() => window.__oylReflow?.errors);
+      expect(raised, 'errors the page raised during the walk').toEqual([]);
     });
   }
 }
@@ -197,9 +222,31 @@ test.describe('the activity library is cards on a phone and a table where it fit
     test(`a ${layout === 'cards' ? 'card list' : 'table'} at ${String(width)}×${String(height)}`, async ({
       page,
     }) => {
+      // The first frame: every animation frame from navigation on records the
+      // library's layout, so a table drawn for one frame and then swapped for
+      // cards is seen. `rAF` callbacks run just before the browser paints, so
+      // what one reads is what that frame drew (#683's review).
+      await page.addInitScript(() => {
+        const frames: string[] = [];
+        (window as unknown as { __oylLayoutFrames: string[] }).__oylLayoutFrames = frames;
+        const sample = (): void => {
+          const drawn = document.querySelector('.oyl-library')?.getAttribute('data-layout');
+          if (drawn !== undefined && drawn !== null) {
+            frames.push(drawn);
+          }
+          requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      });
       await open(page, width, height, 'data=populated');
       const seen = await visit(page, hrefFor(activities));
       expect(seen.libraryLayout).toBe(layout);
+      const frames = await page.evaluate(
+        () => (window as unknown as { __oylLayoutFrames: string[] }).__oylLayoutFrames,
+      );
+      expect(frames.length, 'no frame drew the library').toBeGreaterThan(0);
+      expect(frames[0], 'the first frame that drew the library').toBe(layout);
+      expect(new Set(frames), 'every frame that drew the library').toEqual(new Set([layout]));
       expect(seen.sortControlHeight ?? 0).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
       expect(reflowFaults(activities, seen, true)).toEqual([]);
     });
@@ -226,10 +273,9 @@ test.describe('the controls', () => {
   for (const [control, lacks] of [
     ['scroller', 'focusable false'],
     ['unnamed', 'name ""'],
+    ['grouped', 'role group'],
   ] as const) {
-    test(`a sideways scroller that is a region but has ${lacks} fails the walk`, async ({
-      page,
-    }) => {
+    test(`a sideways scroller with ${lacks} fails the walk`, async ({ page }) => {
       await open(page, 320, 256, `data=empty&control=${control}`);
       const seen = await visit(page, hrefFor(route));
       const faults = reflowFaults(route, seen, false);

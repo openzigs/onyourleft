@@ -133,10 +133,20 @@ function sortOptionFor(orderBy: ActivityOrder, direction: SortDirection): SortOp
 /**
  * Table or cards, from the width the library is given — `library/layout.ts`.
  *
- * Measured with a `ResizeObserver` on the library's own container, whose first
- * notification arrives before the first paint, so a phone never draws the
- * table and then swaps it. Where there is no `ResizeObserver` — jsdom — nothing
- * is measured and it stays a table.
+ * ⚠️ **Measured once, synchronously, before the first paint, and then watched.**
+ * A `ResizeObserver` alone is not enough: its first notification does arrive
+ * before the first paint, but a state update from inside it is not flushed by
+ * React until after that paint, so a phone drew one frame of the table and
+ * then swapped it — sampled per animation frame in #683's review, three runs
+ * of three. An update made in a LAYOUT effect is flushed before the browser
+ * paints, so the width is read here first and the observer only follows later
+ * changes. `reflow.browser.spec.ts` §"the first frame" samples every frame
+ * from navigation and fails on a table before cards.
+ *
+ * Where there is no `ResizeObserver` — jsdom — nothing is measured and it
+ * stays a table. A width of nought is read as "not laid out" rather than as a
+ * phone, because jsdom reports nought for every box and a real container of
+ * nought width has nothing to lay out.
  */
 function useLibraryLayout(present: boolean): [RefObject<HTMLDivElement | null>, LibraryLayout] {
   const container = useRef<HTMLDivElement | null>(null);
@@ -146,10 +156,15 @@ function useLibraryLayout(present: boolean): [RefObject<HTMLDivElement | null>, 
     if (element === null || typeof ResizeObserver !== 'function') {
       return undefined;
     }
+    const rem = (): number =>
+      Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
+    const initial = contentWidth(element);
+    if (initial > 0) {
+      setLayout(libraryLayout(initial, rem()));
+    }
     const observer = new ResizeObserver((entries) => {
       const width = entries[entries.length - 1]?.contentRect.width;
-      const rem = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
-      setLayout(libraryLayout(width, rem));
+      setLayout(libraryLayout(width, rem()));
     });
     observer.observe(element);
     return () => {
@@ -158,6 +173,16 @@ function useLibraryLayout(present: boolean): [RefObject<HTMLDivElement | null>, 
     // Re-attached when a library arrives: with none, there is no container.
   }, [present]);
   return [container, layout];
+}
+
+/** The content-box width a `ResizeObserver` would report as `contentRect.width`. */
+function contentWidth(element: HTMLElement): number {
+  const style = getComputedStyle(element);
+  const edges = ['paddingLeft', 'paddingRight', 'borderLeftWidth', 'borderRightWidth'] as const;
+  return edges.reduce(
+    (width, edge) => width - (Number.parseFloat(style[edge]) || 0),
+    element.getBoundingClientRect().width,
+  );
 }
 
 type LoadState =
