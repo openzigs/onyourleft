@@ -541,7 +541,12 @@ describe('the other native controls are styled from tokens (#667)', () => {
     for (const literal of [
       'box-shadow: 0 0 2px #ff0000;',
       'background: #abcdef;',
+      // Upper case and the short forms: the `i` flags and `{3,8}` are each a
+      // mutation this list must go red for (#667's re-review).
+      'background: #ABCD;',
+      'color: #abc;',
       'outline: 2px solid rgb(0 0 0);',
+      'outline: 2px solid RGB(0 0 0);',
       'border-color: oklch(70% 0.1 200);',
       'color: color-mix(in srgb, var(--oyl-color-ink), white);',
       'text-decoration-color: Red;',
