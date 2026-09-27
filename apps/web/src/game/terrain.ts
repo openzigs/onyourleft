@@ -360,12 +360,15 @@ export const ROAD_SURFACE_GRAIN = 0.15;
 const ROAD_HALF_WIDTH_METRES = ROAD_WIDTH_METRES / 2;
 
 /**
- * Where each of the {@link ROAD_COLUMNS} sits, in metres left of the centreline.
+ * Where each of the {@link ROAD_COLUMNS} sits, in metres along the ribbon's own
+ * normal from the centreline — to the rider's RIGHT.
  *
- * Left is positive, which is the direction of the ribbon's own normal. The
- * pairs are `(0, 1)` the left edge line, `(2, 3)` the carriageway and `(4, 5)`
- * the right edge line; columns 1 and 2 are coincident, as are 3 and 4, and that
- * is deliberate — see {@link ROAD_COLUMNS}.
+ * The pairs are `(0, 1)` the right edge line, `(2, 3)` the carriageway and
+ * `(4, 5)` the left edge line; columns 1 and 2 are coincident, as are 3 and 4,
+ * and that is deliberate — see {@link ROAD_COLUMNS}. ⚠️ **This said "metres
+ * left of the centreline", and `(0, 1)` the left edge line, until #583**: the
+ * world was drawn as a mirror of its map, so the normal was the map's left and
+ * the screen's right. Since #583 it is the right on both.
  */
 const COLUMN_OFFSETS: readonly number[] = [
   ROAD_HALF_WIDTH_METRES,
@@ -384,7 +387,7 @@ const LAST_CARRIAGEWAY_COLUMN = 3;
 
 /** A point on the road's centreline, in local metres, with the route distance it came from. */
 export interface CorridorPoint {
-  /** East of the projection origin. */
+  /** WEST of the projection origin — east is `−x` since #583. @see localGroundPosition */
   readonly x: number;
   /** Up, relative to the route's first elevation. */
   readonly y: number;
@@ -492,6 +495,28 @@ export interface CorridorOrigin {
  *
  * `y` is not here because it is not a projection question: the road's height is
  * an interpolated elevation and the scenery's is the same one.
+ *
+ * ## ⚠️ East is `−x` — #583
+ *
+ * **North is `+z`, up is `+y`, and EAST is `−x`**, because three is
+ * right-handed: a camera looking north (`+z`) with `+y` up has `−x` on its
+ * right, and a map has east on the right going north. Put east on `+x`, as
+ * this function did until #583, and the world is a MIRROR of its map — every
+ * bend to the right on the road a rider knows is drawn turning left, and the
+ * HUD's north-up plan (`hud/plan.ts`) disagrees with the screen about which
+ * way the next bend goes. A reviewer who remembers `x` as east is reading the
+ * old file.
+ *
+ * Mirroring HERE, rather than mirroring the camera or scaling the scene by −1,
+ * is what keeps everything downstream a proper right-handed drawing: every
+ * normal, winding, lean and crank is built from the corridor by rotation, so
+ * none of them changed sign, and the renderer's face culling is untouched.
+ * What did change is everything stated in the compass — `world.ts`'s sun —
+ * which is why that negates its east component. Nothing measured ALONG the
+ * road can move: distance, grade, the ghost and the trainer's commands are
+ * read off the route in `packages/domain` and never off `x`.
+ * `plan-agrees-with-world.test.ts` and `game.browser.spec.ts` §"#583" are the
+ * gates.
  */
 export function localGroundPosition(
   origin: CorridorOrigin,
@@ -500,7 +525,7 @@ export function localGroundPosition(
   const metresPerDegreeLongitude =
     METRES_PER_DEGREE_LATITUDE * Math.cos((origin.latitude * Math.PI) / 180);
   return {
-    x: (position.longitude - origin.longitude) * metresPerDegreeLongitude,
+    x: (origin.longitude - position.longitude) * metresPerDegreeLongitude,
     z: (position.latitude - origin.latitude) * METRES_PER_DEGREE_LATITUDE,
   };
 }
@@ -1118,9 +1143,9 @@ export function drawnRoadPosition(
 }
 
 /**
- * Where the road is DRAWN at a route distance and which way its LEFT normal
- * points there, in local metres — #571. `undefined` where the drawn road has
- * no direction at all.
+ * Where the road is DRAWN at a route distance and which way its normal — its
+ * RIGHT, since #583; called its left before — points there, in local metres —
+ * #571. `undefined` where the drawn road has no direction at all.
  *
  * The normal is a forward difference over one {@link CORRIDOR_STEP_METRES},
  * which is how {@link ribbonNormals} takes the ribbon's own; where that is

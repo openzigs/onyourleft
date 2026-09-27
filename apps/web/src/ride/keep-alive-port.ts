@@ -13,13 +13,22 @@
  *
  * ## Why this is a `*-port.ts`
  *
- * CLAUDE.md §4j: the suffix makes both methods `WIRE003` targets, so a
- * controller that stopped calling them is a red gate. ⚠️ **The provider half is
- * the §Limits case**: `main.tsx` hands the Android implementation to
- * `createRideController` as an optional option, and a `main.tsx` that stopped
- * doing so is green in `check:wiring` and in every test. `ride/controller.test.ts`
- * §"#524" covers everything after that line; nothing covers the line itself,
- * which is the gap `presence-port.ts` records for the camera.
+ * CLAUDE.md §4j: the suffix makes both methods `WIRE003` targets. ⚠️ **That
+ * is weaker for `keepRideAlive` than it reads, measured rather than assumed**:
+ * the controller calls it in TWO places — `syncKeepAlive`, which is the one
+ * that matters, and `askAboutTheNotification`'s re-start after a granted
+ * notification (#526). Deleting the first call alone leaves `check:wiring`
+ * GREEN, because the second still names it; what goes red is
+ * `ride/controller.test.ts` §"#524" and §"#526". Deleting `letRideSleep`'s one
+ * call is a red `WIRE003`.
+ *
+ * **The provider half** used to be the §Limits case: `main.tsx` handed the
+ * Android implementation to `createRideController` as an optional option, and
+ * a `main.tsx` that stopped doing so was green everywhere. Since #524's second
+ * pull request the shell's controller is built by
+ * `ride/shell-ride-controller.ts`, which a `main.tsx` that stopped calling is a
+ * red `WIRE001`, and whose test drives a ride down to a scripted
+ * `RecordingServicePlugin` through the real `@onyourleft/mobile` adapters.
  *
  * ## ⚠️ Neither method may throw into the ride
  *

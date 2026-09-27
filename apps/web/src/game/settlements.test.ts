@@ -471,9 +471,10 @@ describe('nothing stands on the road, whichever stretch of it — #468 review B1
           clearance(line, item),
           `${item.kind} at (${item.x.toFixed(1)}, ${item.z.toFixed(1)}) on a ${String(radius)} m hairpin`,
         ).toBeGreaterThanOrEqual(ROAD_WIDTH_METRES / 2);
-        // The hairpin's two legs run north at x = 0 and x = 2r: count what
-        // stands in the gap between them, along the straights.
-        if (item.x > 0 && item.x < 2 * radius && item.z < 350) between += 1;
+        // The hairpin's two legs run north at x = 0 and x = −2r (it turns
+        // east, which is `−x` since #583): count what stands in the gap
+        // between them, along the straights.
+        if (item.x < 0 && item.x > -2 * radius && item.z < 350) between += 1;
       }
     }
     // Non-vacuity: the fixture really does enclose the fields between the

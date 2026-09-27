@@ -397,7 +397,7 @@ export function skySunU(sky: SkyPixels, step = 2): number {
  *   samples the picture at the world azimuth plus `θ`.
  *
  * So `θ` is the picture's sun azimuth less the world's. `sunX` and `sunZ` are
- * `world.ts`'s `SunStyle` components, `+X` east and `+Z` north.
+ * `world.ts`'s `SunStyle` components, `+X` WEST and `+Z` north since #583.
  */
 export function skyRotation(sunU: number, sunX: number, sunZ: number): number {
   const picture = (sunU - 0.5) * 2 * Math.PI;

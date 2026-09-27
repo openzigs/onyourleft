@@ -300,7 +300,10 @@ export interface Lake {
   /** Where on the route it starts and ends, wrapped; `from < to`. */
   readonly from: number;
   readonly to: number;
-  /** Which side of the road, left positive — the frame `terrain.ts` builds in. */
+  /**
+   * Which side of the road, positive on the normal's — the RIGHT since #583,
+   * called the left before — the frame `terrain.ts` builds in.
+   */
   readonly side: 1 | -1;
   readonly waterElevation: number;
 }
@@ -654,8 +657,9 @@ export function waterSurface(
       const y = crossing.waterElevation - origin.elevation;
       const base = vertexCount;
       for (const lateral of STREAM_LATERALS) {
-        // The left normal is (−tz, tx): `terrain.ts`'s convention. Across the
-        // stream is along the road.
+        // The normal is (−tz, tx): `terrain.ts`'s convention — the road's
+        // right since #583, called its left before. Across the stream is along
+        // the road.
         station(
           here.x - tz * lateral,
           y,
@@ -830,7 +834,8 @@ export function bridgeParts(
         const ax = dx / length;
         const ay = dy / length;
         const az = dz / length;
-        // Left normal in plan: `terrain.ts`'s convention.
+        // The normal in plan: `terrain.ts`'s convention — the road's right
+        // since #583, called its left before.
         const nx = -dz / flat;
         const nz = dx / flat;
         const mid = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2, z: (from.z + to.z) / 2 };

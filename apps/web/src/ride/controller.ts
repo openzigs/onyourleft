@@ -491,8 +491,9 @@ export interface RideControllerOptions {
    * Keep the process alive while a ride is active — #524. The Android
    * foreground service; absent in a browser. @see keep-alive-port.ts
    *
-   * ⚠️ An optional option, so a `main.tsx` that stopped passing it is green in
-   * `check:wiring` (§Limits) and in every test here.
+   * ⚠️ An optional option, which `check:wiring` (§Limits) cannot see
+   * supplied — so the shell's controller is built by
+   * `shell-ride-controller.ts`, which always supplies it and is watched.
    */
   readonly keepAlive?: RideKeepAlivePort | undefined;
   /**
@@ -501,8 +502,8 @@ export interface RideControllerOptions {
    * present, because it is that service's notification. @see
    * notification-permission-port.ts and §`askAboutTheNotification`.
    *
-   * ⚠️ An optional option, so `main.tsx` not passing it is green in
-   * `check:wiring` (§Limits) — the same gap `keepAlive` has.
+   * ⚠️ An optional option, supplied beside {@link keepAlive} by
+   * `shell-ride-controller.ts` for the same reason.
    */
   readonly notificationPermission?: RideNotificationPermissionPort | undefined;
 }
@@ -795,6 +796,22 @@ export function createRideController(options: RideControllerOptions): RideContro
   };
 
   /**
+   * Call a keep-alive method and let neither of its failures reach the ride —
+   * #524's third criterion. `.catch` on the returned promise is not enough on
+   * its own: a port that throws BEFORE it returns a promise would throw out of
+   * {@link changed}, which is inside `start()` and `confirmStop()`, and so fail
+   * a ride because a notification could not be posted. `controller.test.ts`
+   * §"#524" holds both halves.
+   */
+  const quietly = (call: () => Promise<void>): void => {
+    try {
+      call().catch(() => undefined);
+    } catch {
+      // Degraded, not broken: the ride records without the service.
+    }
+  };
+
+  /**
    * #524: ask the platform to keep the process alive exactly while a ride is
    * active, and let it go when it is not. Driven from the PHASE, here, rather
    * than from each of `start`, `continueRecovered`, `confirmStop` and `dispose`,
@@ -824,10 +841,10 @@ export function createRideController(options: RideControllerOptions): RideContro
     if (!wanted) {
       // #526: told on the ride that asked, and not carried into the next.
       notificationNotice = undefined;
-      keepAlive.letRideSleep().catch(() => undefined);
+      quietly(() => keepAlive.letRideSleep());
       return;
     }
-    keepAlive.keepRideAlive().catch(() => undefined);
+    quietly(() => keepAlive.keepRideAlive());
     const permission = options.notificationPermission;
     if (permission !== undefined) {
       void askAboutTheNotification(permission, keepAlive, generation);

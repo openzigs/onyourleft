@@ -167,7 +167,10 @@ const ANDROID_TRAITS: TransportTraits = {
   // ⚠️ True *because* `RecordingService` exists AND is started; it would be a
   // lie without either. Until #524 it existed and nothing started it, so this
   // was a lie: `ride/keep-alive-port.ts` is what starts it now, while a ride is
-  // active. Validation 0002 A5 and Part C are where it is first seen working.
+  // active. Validation 0002 A5 and Part C (2026-09-25, Pixel Tablet) saw it
+  // run foreground and typed `connectedDevice` for a ten-hour ride — ON USB
+  // POWER, where Doze never starts. The battery run is still owed, so this is
+  // true on a charging device and not yet shown on a battery.
   canRestoreConnectionsInBackground: true,
   // Three, not the seven Android is reported to manage. The budget is OS-wide
   // and shared with whatever else the rider has paired — earbuds and a watch
