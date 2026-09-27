@@ -154,9 +154,13 @@ export function distanceToDrawnRoad(
         const dz = (road.points[segment * 2 + 3] as number) - az;
         const span = dx * dx + dz * dz;
         const t = span > 0 ? Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / span)) : 0;
-        least = Math.min(least, Math.hypot(x - (ax + dx * t), z - (az + dz * t)));
+        const ox = x - (ax + dx * t);
+        const oz = z - (az + dz * t);
+        // Squared, and one root at the end: `Math.hypot` here doubled the
+        // time `three-renderer.test.ts`'s cull sweep takes, measured in CI.
+        least = Math.min(least, ox * ox + oz * oz);
       }
     }
   }
-  return least;
+  return Math.sqrt(least);
 }
