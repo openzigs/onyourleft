@@ -1019,8 +1019,16 @@ describe('the cull against what `scene.ts` actually hands it', () => {
    * ⚠️ **Ten radii, four of them tighter than anything #268 measured**, because
    * the bound's error is worst where the road bends hardest and a sweep that
    * stopped at 200 m would have called the box correct too.
+   *
+   * ⚠️ **Thirty seconds, and it is a hang guard rather than a budget — #651.**
+   * It had Vitest's default of five, which nobody chose for it: ten sweeps of
+   * thirty-two whole scene frames each. Under coverage on the CI runner it
+   * took 4.2 s to 5.0 s on green runs (runs 36326090778, 36334163962,
+   * 36337270885 and 36338736850's first attempt) and 5.6 s on the red second
+   * attempt of that last run, on the same commit — the runner, not the code.
+   * A cull that stopped terminating would still fail.
    */
-  it('never drops an item that is on screen and not yet fogged out', () => {
+  it('never drops an item that is on screen and not yet fogged out', { timeout: 30_000 }, () => {
     let clear = 0;
     for (const radius of [null, 3000, 1000, 450, 300, 200, 150, 100, 75, 50]) {
       const sweep = keptAlongTheRoute(radius);
