@@ -197,7 +197,13 @@ function measure(): RideViewMeasurement {
       continue;
     }
     groups[group] = boxOf(root);
-    for (const control of root.querySelectorAll('button, select, input')) {
+    // ⚠️ Since #659 the sensors group's one control is a LINK — pairing
+    // moved to Devices and this group says what is connected and links there.
+    // Links are counted in that group alone, so the fold assertions on the
+    // other two measure exactly what they measured before.
+    const selector =
+      group === 'sensors' ? 'button, select, input, a[href]' : 'button, select, input';
+    for (const control of root.querySelectorAll(selector)) {
       const box = boxOf(control);
       const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
       controls.push({

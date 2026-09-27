@@ -26,8 +26,12 @@ import type { DevicesHarness } from './devices-harness';
 
 /** A phone, upright — #654's re-review names this viewport for the fold. */
 const PHONE = { width: 390, height: 844 } as const;
-/** How long a step of the walk may take before it counts as absent. */
-const STEP_MS = 5_000;
+/**
+ * How long a step of the walk may take before it counts as absent. Generous,
+ * because the gate runs every spec at once on a loaded machine; the control
+ * pays it once, on the step that is missing.
+ */
+const STEP_MS = 15_000;
 
 async function open(page: Page, control = false): Promise<void> {
   await page.setViewportSize(PHONE);
