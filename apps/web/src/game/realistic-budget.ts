@@ -66,6 +66,7 @@
  */
 
 import type { RealisticVegetationKind } from './realistic-assets';
+import type { TreeLevels } from './tree-levels';
 
 const MEBIBYTE = 1024 * 1024;
 
@@ -119,10 +120,20 @@ export const REALISTIC_TEXTURE_PIXELS = {
  * realistic path, which a ride takes only for a rider who chose it (#475)
  */
 export const REALISTIC_TRIANGLES: Readonly<
-  Record<RealisticVegetationKind | 'rider' | 'structure', number>
+  Record<RealisticVegetationKind | 'tree-middle' | 'rider' | 'structure', number>
 > = {
   'tree-broadleaf': 28_000,
   'tree-conifer': 24_000,
+  /**
+   * A tree's middle level of detail, either kind — #617: **6 000**, the top of
+   * the 4 000–6 000 the issue suggested. It is the most the frame's saving
+   * leaves room for: {@link REALISTIC_TREE_LEVELS} draws up to six trees at
+   * this level, and at 6 000 the worst frame still falls by 63 988, over the
+   * 60 000 #617 asks; at 6 700 it would not. The most, rather than less,
+   * because a middle tree is already a fifth of a near one's triangles, and
+   * every triangle here is canopy a rider sees at 20 to 60 m.
+   */
+  'tree-middle': 6_000,
   shrub: 6_500,
   rock: 2_500,
   rider: 9_000,
@@ -172,24 +183,94 @@ export const REALISTIC_TRIANGLES: Readonly<
 export const REALISTIC_BICYCLE_TRIANGLES = 12_000;
 
 /**
- * How many items of each kind are drawn as MESHES in one frame — the nearest
- * ones; every tree beyond is an impostor, and every shrub and rock beyond is
- * not drawn.
+ * How many SHRUBS and ROCKS are drawn as meshes in one frame — the nearest
+ * ones; every one beyond is not drawn at all.
  *
  * ⚠️ **This is what bounds the frame's triangles, not the scenery density.**
- * `scatter.ts` places up to `SCATTER_MAX_ITEMS` and a forest is nearly all
- * conifer, so a cap by distance alone would put thirty 24 000-triangle trees in
- * the near band on a wooded road. A cap by count holds whatever the road.
+ * `scatter.ts` places up to `SCATTER_MAX_ITEMS`, so a cap by distance alone
+ * would put dozens of shrubs in the near band on an overgrown verge. A cap by
+ * count holds whatever the road.
  *
- * Six trees is the chase camera's near field: #424's camera sees the road about
- * 4.5 m behind the rider, and the scatter's own near-60 m gate
- * (`scatter.test.ts` §"#351") counts well under that inside 25 m.
+ * ⚠️ **The trees are not here since #617**, and a reviewer who remembers
+ * "the nearest 3 broadleaf and 3 conifer" is reading the old file: they have
+ * three levels now, counted by {@link REALISTIC_TREE_LEVELS}.
  */
-export const REALISTIC_NEAR_MESHES: Readonly<Record<RealisticVegetationKind, number>> = {
-  'tree-broadleaf': 3,
-  'tree-conifer': 3,
+export const REALISTIC_NEAR_MESHES: Readonly<
+  Record<Exclude<RealisticVegetationKind, 'tree-broadleaf' | 'tree-conifer'>, number>
+> = {
   shrub: 8,
   rock: 12,
+};
+
+/**
+ * How many realistic trees are drawn at each level of detail — #617:
+ * **one** full mesh, **four** middle ones, and a band of one tree at each
+ * hand-over drawn at both levels and dithered between them (`tree-levels.ts`
+ * says how). Every tree beyond is its impostor.
+ *
+ * So at most **two** trees are ever submitted as the full mesh and **six** as
+ * the middle one: `tree-levels.ts` §`treeSlots`.
+ *
+ * ## The worst frame, before and after
+ *
+ * | Trees | Triangles |
+ * |---|--:|
+ * | Before: 3 broadleaf at 28 000 and 3 conifer at 23 996, hard swap | 155 988 |
+ * | Now: 2 full at 28 000 (either kind's heaviest) | 56 000 |
+ * | Now: 6 middle at 5 998 (the heaviest committed middle file) | 35 988 |
+ * | Now, together | 91 988 |
+ *
+ * — **64 000 fewer** (63 988 with every middle file at its 6 000 ceiling),
+ * which is #617's "at least 60 000", and
+ * `realistic-budget.test.ts` sums it off the committed files rather than
+ * trusting this table.
+ *
+ * ## ⚠️ Both kinds ranked together, and why not a count per kind
+ *
+ * #617 asked for "a near count and a middle count per tree kind". With a
+ * dithered hand-over that cannot fall by 60 000: a band tree is SUBMITTED at
+ * both levels, so a kind with one full tree has two full slots, and two kinds
+ * are four — 103 992 triangles before a single middle tree, where the whole
+ * tree budget after a 60 000 cut is 95 988. One ranking over both kinds has
+ * one band, and fits. What it changes is which kind the nearest tree is: the
+ * nearest tree of EITHER kind is full, where before the nearest three of
+ * EACH were — so a conifer at 15 m behind a broadleaf at 10 m is middle now.
+ *
+ * ## ⚠️ The triangles freed are NOT spent, and that is a decision
+ *
+ * #617 asks whether any go back to {@link REALISTIC_STRUCTURE_ITEMS}, restoring
+ * field boundaries #506 took. They do not in this change: the tablet row
+ * (validation 0002's Part for #616, a 20-minute pair) has not been taken, and
+ * #506 was the lesson that a frame figure raised on arithmetic alone is a
+ * figure nobody measured. The frame's worst case now sits 65 350 under
+ * {@link REALISTIC_FRAME_TRIANGLES}; spending them is the change after the row.
+ */
+export const REALISTIC_TREE_LEVELS: TreeLevels = {
+  near: 1,
+  middle: 4,
+  dithered: true,
+  // Ten frames a level: a sixth of a second at 60 frames a second, a third at
+  // 30. Long enough that a rank jump is a fade rather than a pop, short enough
+  // that a tree the rider closes on at 12 m/s is at its level within 2 to 4 m.
+  handOverFrames: 10,
+  rankOnly: 'visible',
+};
+
+/**
+ * The trees as they were drawn before #617 — the nearest six as full meshes,
+ * a hard swap to the impostor, no middle level and no band — ranked together,
+ * as {@link REALISTIC_TREE_LEVELS} ranks them.
+ *
+ * @test-facing the browser gate's control: `game-harness.ts` draws the same
+ * view with it, whose triangles must be at least 60 000 more, and whose
+ * hand-over must jump; the product never draws with it
+ */
+export const HARD_SWAP_TREE_LEVELS: TreeLevels = {
+  near: 6,
+  middle: 0,
+  dithered: false,
+  handOverFrames: 1,
+  rankOnly: 'visible',
 };
 
 /**
@@ -212,6 +293,15 @@ export const REALISTIC_NEAR_MESHES: Readonly<Record<RealisticVegetationKind, num
  * and 36 rather than 38, so the frame holds with 1 350 triangles to spare at
  * the ceiling — 3 510 at today's heaviest structure, a church at 580. Chosen,
  * not measured on a device, like every figure here.
+ *
+ * ⚠️ **Since #617 the vegetation line is 168 692**, not 232 692: the trees
+ * have a middle level ({@link REALISTIC_TREE_LEVELS}) — two full trees at
+ * 28 000 and six middle ones at the committed files' heaviest, 5 998 — with
+ * the shrubs and rocks unchanged (47 904 + 28 800). The worst frame is 234 650
+ * with every structure at its ceiling, 65 350 under the figure — the table
+ * above is how 36 was reached and is kept as that record. The 36 did NOT move
+ * with it: {@link REALISTIC_TREE_LEVELS} says why the freed triangles wait for
+ * the tablet row.
  *
  * ## Why this option, and what it costs
  *

@@ -70,7 +70,7 @@ import {
 } from '@onyourleft/domain';
 
 import { NEAR_PLANE_METRES, cameraRig, verticalHalfTangent } from '../src/game/camera';
-import type { CameraPose, SceneFrame } from '../src/game/port';
+import type { CameraPose, GameView, SceneFrame } from '../src/game/port';
 import type { WorldStyle } from '../src/game/world';
 
 import { sceneFrame as builtSceneFrame } from '../src/game/scene';
@@ -107,6 +107,7 @@ import {
   sceneMaterialsOf,
   sceneryDrawnOf,
   setBuildingOpenings,
+  setTreeLevels,
   threeGameRenderer,
   waterSkyOf,
   filterWaterRipplesOf,
@@ -115,6 +116,9 @@ import {
 } from '../src/game/three-renderer';
 import { clearOfTheCamera, nearPyramid, sceneryReach } from '../src/game/near-field';
 import { realisticWorldNotice } from '../src/game/realistic-assets';
+import { HARD_SWAP_TREE_LEVELS, REALISTIC_TREE_LEVELS } from '../src/game/realistic-budget';
+import type { TreeLevels } from '../src/game/tree-levels';
+import { COUNTED_DRAWS, trianglesInDraw } from './realistic/draws';
 import {
   scatterSeed,
   STRUCTURE_KINDS,
@@ -1456,6 +1460,32 @@ function countingIndices(body: (indices: () => number) => void): void {
     for (const name of Object.keys(submitted)) {
       (gl as unknown as Record<string, unknown>)[name] = originals.get(name);
     }
+  }
+}
+
+/**
+ * Runs `body` with a count of the triangles every draw call submitted, as
+ * `realistic/draws.ts` counts them — #617, and #616's instrument on the
+ * product's own page rather than only the owner's. Patched and restored for
+ * `countingIndices`' reason.
+ */
+function countingTriangles(body: (triangles: () => number) => void): void {
+  const gl = WebGL2RenderingContext.prototype as unknown as Record<string, unknown>;
+  const originals = new Map<string, (...args: unknown[]) => unknown>();
+  let triangles = 0;
+  for (const name of COUNTED_DRAWS) {
+    const original = gl[name] as ((...args: unknown[]) => unknown) | undefined;
+    if (original === undefined) continue;
+    originals.set(name, original);
+    gl[name] = function counted(this: unknown, ...args: unknown[]): unknown {
+      triangles += trianglesInDraw(name, args);
+      return original.apply(this, args);
+    };
+  }
+  try {
+    body(() => triangles);
+  } finally {
+    for (const [name, original] of originals) gl[name] = original;
   }
 }
 
@@ -3532,6 +3562,51 @@ export interface RealisticMeasurement {
    * light, so the gate pins that the control really is today's band.
    */
   readonly horizonControlExpected: readonly number[];
+  /**
+   * #617: the triangles one frame of the wooded view submits at the WebGL draw
+   * calls (`realistic/draws.ts` §`trianglesInDraw`), as the product draws its
+   * trees and — the control — with the hard swap and no middle level
+   * (`realistic-budget.ts` §`HARD_SWAP_TREE_LEVELS`), on the same view.
+   */
+  readonly trianglesSubmitted: number;
+  readonly trianglesHardSwap: number;
+  /** How many scenery items the wooded view drew, so a view with no trees is not a saving. */
+  readonly woodedScenery: number;
+  /** @see TreeHandOver */
+  readonly handOver: TreeHandOver;
+  readonly handOverControl: TreeHandOver;
+  /**
+   * #617's review: the pixels the hand-over's seven off-screen trees cover on
+   * their own — which must be none, or the watched tree's covered area is
+   * not the watched tree's.
+   */
+  readonly handOverOffScreenCovered: number;
+  /**
+   * #617's review: the triangles ONE tree 12 m ahead adds to a frame in which
+   * two more stand behind the camera — as the product ranks them (the camera
+   * sees only this one, so it is the full mesh), and as the ranking before
+   * the review did (the two behind take the full slot and the band, so it is
+   * the middle level).
+   */
+  readonly nearestVisibleTriangles: number;
+  readonly nearestVisibleTrianglesControl: number;
+}
+
+/**
+ * One still tree across both its hand-overs, frame by frame — #617. The trees
+ * it is ranked against walk out past it 0.1 m a frame, as a rider's 6 m/s at
+ * 60 frames a second would close on it. @see treeLevelProbe
+ */
+export interface TreeHandOver {
+  /** How far the other trees have walked out, in metres, in each frame. */
+  readonly out: readonly number[];
+  /** The pixels that differ from the same view with no tree at all. */
+  readonly covered: readonly number[];
+  /**
+   * How far the picture's colour moved from the frame before, in 8-bit steps
+   * summed over every channel of every pixel. @see colourMoved
+   */
+  readonly changed: readonly number[];
 }
 
 /**
@@ -3597,6 +3672,14 @@ const NO_REALISTIC: RealisticMeasurement = {
   horizonColours: { fog: [], foot: [] },
   horizonColoursControl: { fog: [], foot: [] },
   horizonControlExpected: [],
+  trianglesSubmitted: 0,
+  trianglesHardSwap: 0,
+  woodedScenery: 0,
+  handOver: { out: [], covered: [], changed: [] },
+  handOverControl: { out: [], covered: [], changed: [] },
+  handOverOffScreenCovered: 0,
+  nearestVisibleTriangles: 0,
+  nearestVisibleTrianglesControl: 0,
 };
 
 /** Relative luminance of an sRGB pixel, WCAG 2.2's own formula. */
@@ -3724,6 +3807,23 @@ function horizonReading(
 }
 
 /** How many pixels two read-backs of the same size disagree about. */
+/**
+ * How far the picture's colour moved between two frames: the summed absolute
+ * difference of every channel, in 8-bit steps — #617's review, for a
+ * hand-over between two levels that cover the same pixels in different
+ * colours, which {@link pixelsChanged} against a background cannot see.
+ */
+function colourMoved(a: Uint8Array, b: Uint8Array): number {
+  let moved = 0;
+  for (let at = 0; at < a.length; at += 4) {
+    moved +=
+      Math.abs((a[at] ?? 0) - (b[at] ?? 0)) +
+      Math.abs((a[at + 1] ?? 0) - (b[at + 1] ?? 0)) +
+      Math.abs((a[at + 2] ?? 0) - (b[at + 2] ?? 0));
+  }
+  return moved;
+}
+
 function pixelsChanged(a: Uint8Array, b: Uint8Array): number {
   let changed = 0;
   for (let at = 0; at < a.length; at += 4) {
@@ -4008,6 +4108,9 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
       ? pixelsChanged(stylisedPixels, realisticPixels) / (canvas.width * canvas.height)
       : 0;
 
+  // #617: the trees' levels of detail, on views of their own.
+  const trees = treeLevelProbe(wooded, { ...riding(level, 400), markers: [] }, WIDTH, HEIGHT, top);
+
   // #478: the same frame at the top rung and at a rung with a budget of six.
   // Only the budget differs, so the world is not rebuilt between the two.
   view.render(wooded);
@@ -4093,6 +4196,193 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     horizonColours,
     horizonColoursControl,
     horizonControlExpected,
+    ...trees,
+  };
+}
+
+/**
+ * The trees' levels of detail in a real engine — #617.
+ *
+ * - **Triangles**: the wooded frame on a view drawing the product's levels and
+ *   on one drawing the hard swap with no middle level, counted at the draw
+ *   calls. Each frame is drawn twice and the second counted, for
+ *   `sceneryIndicesByKind`'s reason.
+ * - **The hand-over**: one broadleaf tree standing still 18.5 m ahead and 6 m
+ *   off the road, and seven more level with the rider and 12 to 18 m off to
+ *   the left, which walk out 0.1 m a frame — consecutive frames at 6 m/s —
+ *   until all seven are further than it. The camera can see those seven
+ *   (`three-renderer.ts` §`treeCanBeSeen`, which reckons with the widest
+ *   frame there is), so they are ranked, and this 16 : 9 frame does not show
+ *   them, which `handOverOffScreenCovered` checks. So the watched tree is
+ *   eighth at first (the impostor), passes through band B into the middle
+ *   level, through band A, and ends the nearest (the full mesh) — BOTH
+ *   hand-overs — while it is the only tree in the picture and the picture
+ *   is otherwise still, so what changes frame to frame is its level. The
+ *   control is the same counts with no band and no pacing, which swaps it
+ *   in one frame at each. ⚠️ Until #617's review this probe moved the TREE
+ *   and put two trees behind the camera to fill the first ranks; a tree
+ *   behind the camera is not ranked now, and a tree is known frame to frame
+ *   by where it stands, so a moving one would be a new tree every frame.
+ * - **The nearest tree in the picture** — #617's review: two trees behind the
+ *   camera and one 12 m ahead, counted at the draw calls with and without
+ *   the one ahead. Its control is the ranking before the review.
+ */
+function treeLevelProbe(
+  wooded: SceneFrame,
+  level: SceneFrame,
+  width: number,
+  height: number,
+  top: QualitySettings,
+): Pick<
+  RealisticMeasurement,
+  | 'trianglesSubmitted'
+  | 'trianglesHardSwap'
+  | 'woodedScenery'
+  | 'handOver'
+  | 'handOverControl'
+  | 'handOverOffScreenCovered'
+  | 'nearestVisibleTriangles'
+  | 'nearestVisibleTrianglesControl'
+> {
+  const withLevels = <T>(
+    levels: TreeLevels,
+    body: (view: GameView, gl: WebGL2RenderingContext) => T,
+  ): T => {
+    setTreeLevels(levels);
+    const canvas = document.createElement('canvas');
+    let view: GameView;
+    try {
+      view = threeGameRenderer.create(canvas, top);
+    } finally {
+      // Only the view just built draws with them: every later one is the product's.
+      setTreeLevels(REALISTIC_TREE_LEVELS);
+    }
+    try {
+      view.resize(width, height);
+      const gl = canvas.getContext('webgl2');
+      if (gl === null) throw new Error('#617: no WebGL 2 context for the tree levels');
+      return body(view, gl);
+    } finally {
+      view.destroy();
+    }
+  };
+  const trianglesOf = (levels: TreeLevels): { triangles: number; trees: number } =>
+    withLevels(levels, (view) => {
+      let triangles = 0;
+      countingTriangles((counted) => {
+        view.render(wooded);
+        const before = counted();
+        view.render(wooded);
+        triangles = counted() - before;
+      });
+      return { triangles, trees: sceneryDrawnOf(view) };
+    });
+  const product = trianglesOf(REALISTIC_TREE_LEVELS);
+  const hardSwap = trianglesOf(HARD_SWAP_TREE_LEVELS);
+
+  // A broadleaf: a conifer's needles are thin enough that its covered area
+  // shimmers by 7 % a frame at one level, which would bury the hand-over.
+  const tree = (ahead: number, across: number): ScatterItem => ({
+    kind: 'tree-broadleaf',
+    ...onTheRoad(level, ahead, across),
+    rotation: 0,
+    scale: 1,
+    variant: 0,
+  });
+  // Placed from the RIDER rather than from the centreline, because the rank is
+  // a distance from the rider, who rides 1.75 m right of it (#546).
+  const pose = level.camera;
+  const fromRider = (ahead: number, across: number): ScatterItem => ({
+    kind: 'tree-broadleaf',
+    x: pose.x + ahead * pose.headingX - across * pose.headingZ,
+    y: onTheRoad(level, ahead, 0).y,
+    z: pose.z + ahead * pose.headingZ + across * pose.headingX,
+    rotation: 0,
+    scale: 1,
+    variant: 0,
+  });
+  // The watched tree stands still, 18.5 m ahead: a tree is known frame to
+  // frame by WHERE it stands (`tree-levels.ts` §`TreeHandOver`), as every
+  // tree in a ride is. What moves is the seven others, level with the rider
+  // and 12 to 18 m off to the left — ranked, because the camera can see
+  // them, and out of this 16 : 9 frame — walking out 0.1 m a frame until
+  // all seven are further than the watched tree.
+  const watched = tree(18.5, 6);
+  const watchedDistance = Math.hypot(watched.x - pose.x, watched.z - pose.z);
+  const asideAt = (out: number): ScatterItem[] =>
+    [12, 13, 14, 15, 16, 17, 18].map((distance) => fromRider(0, -(distance + out)));
+  const steps = Array.from({ length: 91 }, (_, index) => index * 0.1);
+  let offScreen = 0;
+  const handOverOf = (levels: TreeLevels): TreeHandOver =>
+    withLevels(levels, (view, gl) => {
+      const bare: SceneFrame = { ...level, scatter: [] };
+      view.render(bare);
+      const nothing = readRegion(gl, 0, 0, width, height);
+      for (const out of [steps[0] ?? 0, steps.at(-1) ?? 0]) {
+        view.render({ ...level, scatter: asideAt(out) });
+        offScreen = Math.max(
+          offScreen,
+          pixelsChanged(nothing, readRegion(gl, 0, 0, width, height)),
+        );
+      }
+      let previous: Uint8Array | undefined;
+      const changed: number[] = [];
+      const covered = steps.map((out) => {
+        view.render({ ...level, scatter: [...asideAt(out), watched] });
+        const pixels = readRegion(gl, 0, 0, width, height);
+        changed.push(previous === undefined ? 0 : colourMoved(previous, pixels));
+        previous = pixels;
+        return pixelsChanged(nothing, pixels);
+      });
+      return { out: steps, covered, changed };
+    });
+  const handOver = handOverOf(REALISTIC_TREE_LEVELS);
+  const handOverControl = handOverOf({
+    ...REALISTIC_TREE_LEVELS,
+    dithered: false,
+    handOverFrames: 1,
+  });
+  if (!(watchedDistance > 18.2 && watchedDistance < 19.8)) {
+    throw new Error(`#617: the watched tree is ${String(watchedDistance)} m away`);
+  }
+
+  // Two trees behind the camera, which is 4.5 m behind the rider, and one in
+  // the picture. Rendered until every hand-over has settled, then counted.
+  const passed = [tree(-10, 0), tree(-14, 0)];
+  const nearestOf = (levels: TreeLevels): number =>
+    withLevels(levels, (view) => {
+      const settled = (frame: SceneFrame): number => {
+        let triangles = 0;
+        for (let at = 0; at < 3 * levels.handOverFrames; at += 1) view.render(frame);
+        countingTriangles((counted) => {
+          const before = counted();
+          view.render(frame);
+          triangles = counted() - before;
+        });
+        return triangles;
+      };
+      const without = settled({ ...level, scatter: passed });
+      return settled({ ...level, scatter: [...passed, tree(12, 6)] }) - without;
+    });
+  const nearestVisibleTriangles = nearestOf(REALISTIC_TREE_LEVELS);
+  const nearestVisibleTrianglesControl = nearestOf({
+    ...REALISTIC_TREE_LEVELS,
+    rankOnly: 'in-view',
+  });
+  console.log(
+    `#617: the wooded view submits ${String(product.triangles)} triangles against ` +
+      `${String(hardSwap.triangles)} with the hard swap (${String(hardSwap.triangles - product.triangles)} fewer), ` +
+      `${String(product.trees)} scenery items drawn`,
+  );
+  return {
+    trianglesSubmitted: product.triangles,
+    trianglesHardSwap: hardSwap.triangles,
+    woodedScenery: product.trees,
+    handOver,
+    handOverControl,
+    handOverOffScreenCovered: offScreen,
+    nearestVisibleTriangles,
+    nearestVisibleTrianglesControl,
   };
 }
 

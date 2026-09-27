@@ -260,6 +260,14 @@ export interface RealisticModel {
    * rather than a gap).
    */
   readonly impostor?: string;
+  /**
+   * The middle level of detail, for a tree — #617: the same scan thinned to
+   * `realistic-budget.ts` §`REALISTIC_TRIANGLES`' `tree-middle`, carrying no
+   * image, drawn between the nearest trees and the impostors
+   * (`realistic-budget.ts` §`REALISTIC_TREE_LEVELS`). `undefined` for a shrub
+   * or a rock, which have no far band to hand over to.
+   */
+  readonly middle?: string;
 }
 
 /**
@@ -276,19 +284,27 @@ export const REALISTIC_VEGETATION: Readonly<
       name: 'island_tree_02',
       file: 'island_tree_02.glb',
       impostor: 'island_tree_02-impostor.png',
+      middle: 'island_tree_02-middle.glb',
     },
-    { name: 'tree_small_02', file: 'tree_small_02.glb', impostor: 'tree_small_02-impostor.png' },
+    {
+      name: 'tree_small_02',
+      file: 'tree_small_02.glb',
+      impostor: 'tree_small_02-impostor.png',
+      middle: 'tree_small_02-middle.glb',
+    },
   ],
   'tree-conifer': [
     {
       name: 'fir_sapling_medium_a',
       file: 'fir_sapling_medium_a.glb',
       impostor: 'fir_sapling_medium_a-impostor.png',
+      middle: 'fir_sapling_medium_a-middle.glb',
     },
     {
       name: 'fir_sapling_medium_b',
       file: 'fir_sapling_medium_b.glb',
       impostor: 'fir_sapling_medium_b-impostor.png',
+      middle: 'fir_sapling_medium_b-middle.glb',
     },
   ],
   shrub: [
@@ -331,7 +347,9 @@ export function realisticFiles(): readonly string[] {
     REALISTIC_SURFACES.ground.normal,
     ...REALISTIC_VEGETATION_KINDS.flatMap((kind) =>
       REALISTIC_VEGETATION[kind].flatMap((model) =>
-        model.impostor === undefined ? [model.file] : [model.file, model.impostor],
+        [model.file, model.impostor, model.middle].filter(
+          (file): file is string => file !== undefined,
+        ),
       ),
     ),
     ...PHOTOGRAPHIC_STRUCTURE_SURFACES.flatMap((surface) => [

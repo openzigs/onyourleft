@@ -33,6 +33,7 @@ import type {
   HorizonReading,
   RealisticMeasurement,
   RiderExtent,
+  TreeHandOver,
 } from './game-harness';
 import { MINIMUM_TINT_CONTRAST_RATIO } from '../src/game/terrain';
 import {
@@ -2469,6 +2470,104 @@ test.describe('the realistic world — ADR 0026', () => {
     }
   });
 
+  test('submits at least 60 000 fewer triangles with the trees’ middle level — #617', async ({
+    harnessRun,
+  }) => {
+    const measured = await realistic(harnessRun);
+    console.log(
+      `#617: ${String(measured.trianglesSubmitted)} triangles a frame, ` +
+        `${String(measured.trianglesHardSwap)} with the hard swap; ` +
+        `${String(measured.woodedScenery)} scenery items drawn`,
+    );
+    // Non-vacuity: a real frame with scenery in it, counted at the draw calls.
+    expect(measured.woodedScenery).toBeGreaterThan(10);
+    expect(measured.trianglesSubmitted).toBeGreaterThan(50_000);
+    // The control is the same view with the six nearest trees full and no
+    // middle level — what a frame drew before #617.
+    expect(measured.trianglesHardSwap - measured.trianglesSubmitted).toBeGreaterThanOrEqual(
+      TRIANGLES_FALL_AT_LEAST,
+    );
+  });
+
+  test('hands a tree over between levels with no jump in the picture — #617', async ({
+    harnessRun,
+  }) => {
+    const measured = await realistic(harnessRun);
+    // Band B — middle and impostor — as the seventh tree beside the road walks
+    // out past the watched one (the control's swap is at the fifth, since it
+    // has no band), and band A — full and middle — as the first does.
+    // @see treeLevelProbe
+    const bands = [
+      { name: 'B', from: 0.5, to: 4 },
+      { name: 'A', from: 5.5, to: 8 },
+    ] as const;
+    // Non-vacuity: the seven trees beside the road are not in the picture, so
+    // what changes in it is the watched tree…
+    expect(measured.handOverOffScreenCovered).toBe(0);
+    // …which is on screen in every frame.
+    expect(Math.min(...measured.handOver.covered)).toBeGreaterThan(200);
+    console.log(
+      `#617: colour moved a frame ${JSON.stringify(measured.handOver.changed)} dithered, ` +
+        `${JSON.stringify(measured.handOverControl.changed)} with the hard swap; covered ` +
+        `${JSON.stringify(measured.handOver.covered)} / ${JSON.stringify(measured.handOverControl.covered)}`,
+    );
+    // The product's largest one-frame change ANYWHERE in the ride, not only in
+    // the windows: every frame outside a hand-over moves nothing, so this
+    // costs nothing and does not rest on where the windows were drawn.
+    const anywhere = largestMove(measured.handOver, -Infinity, Infinity);
+    let smallestSwap = Infinity;
+    for (const band of bands) {
+      const product = largestMove(measured.handOver, band.from, band.to);
+      const control = largestMove(measured.handOverControl, band.from, band.to);
+      const walked = movesWithin(measured.handOver, band.from, band.to);
+      console.log(
+        `#617: band ${band.name}: the largest one-frame change in the picture is ` +
+          `${String(product.moved)} dithered (at ${product.out.toFixed(1)} m), ` +
+          `${String(control.moved)} with the hard swap (at ${control.out.toFixed(1)} m), ` +
+          `${(100 * (product.moved / Math.max(1, control.moved))).toFixed(1)} % of it; ` +
+          `${String(walked.total)} in all over ${String(walked.frames)} frames`,
+      );
+      // The control swaps the tree whole in one frame, at THIS band — so each
+      // band is shown to be crossed, not only one…
+      expect(control.moved, `band ${band.name}`).toBeGreaterThan(MINIMUM_SWAP_MOVE);
+      smallestSwap = Math.min(smallestSwap, control.moved);
+      // …and the product DOES hand over there — a product that never changed
+      // level would move nothing and pass the bound below — spread over
+      // several frames rather than one.
+      expect(walked.total, `band ${band.name}`).toBeGreaterThan(0.5 * control.moved);
+      expect(walked.frames, `band ${band.name}`).toBeGreaterThanOrEqual(3);
+    }
+    expect(anywhere.moved).toBeLessThanOrEqual(MAXIMUM_HAND_OVER_SHARE * smallestSwap);
+    // And it arrives where the swap does: the same tree covering the same
+    // pixels at the start and at the end — the impostor first, the full mesh last.
+    expect(measured.handOver.covered[0]).toBe(measured.handOverControl.covered[0]);
+    expect(measured.handOver.covered.at(-1)).toBe(measured.handOverControl.covered.at(-1));
+    expect(measured.handOver.covered.at(-1)).not.toBe(measured.handOver.covered[0]);
+  });
+
+  test('draws the nearest tree IN THE PICTURE at full detail — #617’s review', async ({
+    harnessRun,
+  }) => {
+    const measured = await realistic(harnessRun);
+    console.log(
+      `#617: a tree 12 m ahead, with two behind the camera, adds ` +
+        `${String(measured.nearestVisibleTriangles)} triangles; ` +
+        `${String(measured.nearestVisibleTrianglesControl)} ranked as before the review`,
+    );
+    // It is the full mesh — 24 000 to 28 000 triangles — and nothing else
+    // moves: the two behind the camera are impostors either way.
+    expect(measured.nearestVisibleTriangles).toBeGreaterThan(20_000);
+    // The control: ranked with the two behind the camera it is NOT the full
+    // mesh alone. It lands in band A (full and middle) and pushes the 14 m
+    // tree behind the camera from the band's full mesh down to the middle
+    // level, so the frame gains about 12 000 — measured 11 980 on
+    // 2026-09-26 — where the product's gains a whole full tree.
+    expect(measured.nearestVisibleTrianglesControl).toBeGreaterThan(1_000);
+    expect(
+      measured.nearestVisibleTriangles - measured.nearestVisibleTrianglesControl,
+    ).toBeGreaterThan(10_000);
+  });
+
   test('steps down to the stylised world whole, and publishes what realism costs', async ({
     harnessRun,
   }) => {
@@ -2491,6 +2590,95 @@ test.describe('the realistic world — ADR 0026', () => {
     );
   });
 });
+
+/**
+ * The least #617's middle level must take off the wooded view's frame, against
+ * the same view drawn as before it: **60 000** triangles — the issue's own
+ * figure, which `realistic-budget.test.ts` also holds the worst case to.
+ */
+const TRIANGLES_FALL_AT_LEAST = 60_000;
+
+/**
+ * The most the picture may change in one frame of a hand-over, as a share of
+ * how much it changes in the one frame the hard swap takes: **0.2**. #617's
+ * "no single-frame jump", stated as a number, and measured against the swap
+ * itself so it holds for band B too — where the middle mesh and the impostor
+ * cover much the same pixels in different colours, which a covered-area count
+ * cannot see (it measured 2.5 % a frame dithered AND swapped).
+ *
+ * Measured on 2026-09-26 in the pinned Chromium, with the rest of the picture
+ * still (every frame outside a hand-over moves nothing at all): band B
+ * **10.5 %** (12 642 against 120 906), band A **12.1 %** (11 601 against
+ * 95 689). The dithered hand-over takes ten frames either way, and the swap
+ * one. A little under twice the larger: a middle level drawn whole across band
+ * B, not dithered, measured 22.7 % and fails it.
+ *
+ * ⚠️ Until #617's review this was 8 % of a tree's COVERED AREA, measured as
+ * the tree moved; a reviewer who remembers that is reading the old file.
+ *
+ * ⚠️ **It is a bound from above, and a bound from above passes a product
+ * that never hands over at all** — the second review measured exactly that
+ * (a pace of nought: nothing moved in 91 frames, and the case was green). So
+ * since then the case also holds the product to a FLOOR in each band — its
+ * summed change at least half the swap's, over three frames or more — and to
+ * the swap's own covered area at both ends, and this bound is taken over
+ * every frame against the smaller swap (12 642 against 95 689, 13.2 %).
+ */
+const MAXIMUM_HAND_OVER_SHARE = 0.2;
+
+/**
+ * The least the hard swap must move the picture in one frame for the control
+ * to be a swap at all: summed absolute 8-bit differences over every channel,
+ * **50 000** — measured 95 689 and 120 906 on 2026-09-26, about half the
+ * smaller.
+ */
+const MINIMUM_SWAP_MOVE = 50_000;
+
+/**
+ * How much the picture changed in all across the frames whose other trees
+ * have walked out `from` to `to` metres, and in how many of them it changed
+ * at all — what a hand-over that happened has and one that never did has not.
+ */
+function movesWithin(
+  handOver: TreeHandOver,
+  from: number,
+  to: number,
+): { readonly total: number; readonly frames: number } {
+  let total = 0;
+  let frames = 0;
+  for (let at = 1; at < handOver.changed.length; at += 1) {
+    const where = handOver.out[at] ?? Number.NaN;
+    if (!(where >= from && where < to)) continue;
+    const step = handOver.changed[at] ?? 0;
+    total += step;
+    if (step > 0) frames += 1;
+  }
+  return { total, frames };
+}
+
+/**
+ * The largest frame-to-frame change in the picture across a hand-over, and
+ * where — over the frames whose other trees have walked out `from` to `to`
+ * metres.
+ */
+function largestMove(
+  handOver: TreeHandOver,
+  from: number,
+  to: number,
+): { readonly moved: number; readonly out: number } {
+  let moved = 0;
+  let out = Number.NaN;
+  for (let at = 1; at < handOver.changed.length; at += 1) {
+    const where = handOver.out[at] ?? Number.NaN;
+    if (!(where >= from && where < to)) continue;
+    const step = handOver.changed[at] ?? 0;
+    if (step > moved) {
+      moved = step;
+      out = where;
+    }
+  }
+  return { moved, out };
+}
 
 /**
  * How far from the ground toward the sky a distant ridge must be drawn, as a

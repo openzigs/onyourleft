@@ -65,6 +65,15 @@ describe('the kinds layer 2 replaces — ADR 0026 D-12, #474', () => {
       }
     }
   });
+
+  it('gives every tree a middle level of detail and nothing else one — #617', () => {
+    for (const kind of REALISTIC_VEGETATION_KINDS) {
+      for (const model of REALISTIC_VEGETATION[kind]) {
+        expect(model.middle !== undefined, model.name).toBe(kind.startsWith('tree-'));
+        if (model.middle !== undefined) expect(model.middle).toBe(`${model.name}-middle.glb`);
+      }
+    }
+  });
 });
 
 describe('what a rider is told when the realistic world is not what they ride in — ADR 0026 D-7', () => {
