@@ -539,8 +539,8 @@ const test = base.extend<object, { harnessRun: (query?: string) => Promise<Harne
  * has no memo, and it loads the page afresh under the next case's budget — and
  * so on down every case that reads that query. For `?realistic` that was
  * bounded by #607's hook to one budget a describe; for the plain page, which
- * about forty cases in eighteen describes read inside their own 60 s, it was
- * not bounded at all: forty minutes, in a job that stops at twenty.
+ * about forty-five cases in sixteen describes read inside their own 60 s, it
+ * was not bounded at all: forty-five minutes, in a job that stops at twenty.
  *
  * So each load is written down where every worker can read it — the run's
  * output directory, which Playwright empties when a run starts — and a load
@@ -672,9 +672,33 @@ const REALISTIC_LOAD_BUDGET_MS = 150_000;
  * Every case still asks `harnessRun('?realistic')` for its result; this only
  * decides when the load is paid for and what it may take. No retry: the load
  * runs once per worker, exactly as before, and `playwright.config.ts` refuses
- * retries on purpose. Two describes call this for `?realistic` and one for
- * `?realistic&trees` (#644), so loads that never finish cost at most three
- * budgets — seven and a half minutes, inside the job's twenty.
+ * retries on purpose.
+ *
+ * ⚠️ **This paragraph said "loads that never finish cost at most three budgets
+ * — seven and a half minutes, inside the job's twenty", and it was false
+ * (#651).** It counted the budgets and not the job: the rest of the job took
+ * 16m42s by then, so three hung budgets on top came to about 21.8 minutes and
+ * the runner would have cancelled the job — reporting nothing — before the
+ * third one said which describe it was. And it left out the plain page, whose
+ * load no hook paid for: a hung one cost 60 s a case, down forty-five cases.
+ *
+ * What a hang costs now, and why it fits. The ledger (§`loadLedger`) makes a
+ * hung load cost ONE budget per query per run, whichever describe paid it:
+ * the plain page 90 s and `?shadow-map` 120 s (§`PLAIN_LOAD_BUDGET_MS`),
+ * `?realistic` 150 s and `?realistic&trees` 150 s. The game spec is a project
+ * of its own, listed first (`playwright.config.ts` §`projects`), so those
+ * four run one after another in ONE worker from the start of the gate while
+ * the other worker runs everything else: 90 + 120 + 150 + 150 = 510 s if
+ * every one of them hung, plus a few seconds each to replace the worker
+ * (measured below), inside the gate's own 600 s (`GATE_BUDGET_MS`). And the
+ * gate cannot outlive the job: it starts 8m47s in on the slowest runner
+ * measured, so 600 s ends it by 18m47s, inside `timeout-minutes: 20`.
+ * Measured with every load made to hang and every budget cut to a tenth
+ * (locally, `--project game`): 54 s of budgets took 71.7 s in all — four
+ * `beforeAll` timeouts, each under its own describe, and every other case
+ * failed at once by the ledger or marked "did not run". About eighteen
+ * seconds of that is starting the servers and replacing the worker four
+ * times, which does not shrink with the budgets: 510 + 18 is 528 of 600.
  */
 function paysForTheRealisticLoad(query = '?realistic'): void {
   paysForTheLoad(query, REALISTIC_LOAD_BUDGET_MS);
@@ -684,14 +708,15 @@ function paysForTheRealisticLoad(query = '?realistic'): void {
  * What the plain page and `?shadow-map` may take — #651.
  *
  * ⚠️ **Until #651 these two loads were paid inside the first case that asked,
- * under that case's 60 s**, and the plain one took 33.5 s and `?shadow-map`
- * 54.6 s on the runner (run 36320822283) — the second 5.4 s from its case's
- * timeout. #651 makes them side by side with the realistic ones
- * (`playwright.config.ts` §`projects`), so each is slower than it was alone,
- * and they are paid in a hook of their own for #607's reason: a budget that
- * says what the LOAD may take, not what a case may.
+ * under that case's 60 s**, which was a budget for a CASE standing in for one
+ * for a LOAD. On the runner (run 36320822283) the plain load took 33.5 s and
+ * `?shadow-map` 54.6 s — 5.4 s from its case's timeout. They are paid in hooks
+ * of their own now, for #607's reason, at a little under three and a little
+ * over two times what they took; the realistic loads keep #607's 150 s.
  */
-const PLAIN_LOAD_BUDGET_MS = 120_000;
+const PLAIN_LOAD_BUDGET_MS = 90_000;
+/** @see PLAIN_LOAD_BUDGET_MS */
+const SHADOW_MAP_LOAD_BUDGET_MS = 120_000;
 
 /**
  * Pays for a load in a `beforeAll` under its own budget — #607, generalised by
@@ -710,20 +735,6 @@ function paysForTheLoad(query: string, budget: number): void {
 
 /** #617's trees' own load — #644. @see TreeLevelMeasurement */
 const TREES_QUERY = '?realistic&trees';
-
-/**
- * The tags that put a describe in the project that pays for its load — #651.
- *
- * `playwright.config.ts` §`projects` runs `?realistic` and `?realistic&trees`
- * in projects of their own so that the four loads this file pays for are made
- * side by side rather than one after another, and it finds the describes by
- * these tags. ⚠️ **A describe that reads one of those loads and carries no tag
- * is still run, and still correct** — in the `game` project, which then pays
- * for that load a second time. It costs time, not coverage.
- */
-const REALISTIC_LOAD = { tag: '@realistic-load' };
-/** @see REALISTIC_LOAD */
-const TREES_LOAD = { tag: '@trees-load' };
 
 test.describe('the game renderer in a real browser', () => {
   paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
@@ -1439,7 +1450,7 @@ test.describe('the scenery reaches the screen, and costs one call a kind — #24
  * substitute and why the bot's own marker, 120 m up the road, is not.
  */
 test.describe('the world is lit, and can stop being — #286', () => {
-  paysForTheLoad('?shadow-map', PLAIN_LOAD_BUDGET_MS);
+  paysForTheLoad('?shadow-map', SHADOW_MAP_LOAD_BUDGET_MS);
 
   test('finds the probe at both shadings, so the spreads mean something', async ({
     harnessRun,
@@ -2416,40 +2427,36 @@ test.describe('the rider rides a line and leans on it — #499', () => {
  * the drawn road and nothing on the fixture reached that plane any more
  * (`game-harness.ts` §`nearFieldProbe` says why).
  */
-test.describe(
-  'scenery the camera passes is not cut by the near plane — #545',
-  REALISTIC_LOAD,
-  () => {
-    paysForTheRealisticLoad();
+test.describe('scenery the camera passes is not cut by the near plane — #545', () => {
+  paysForTheRealisticLoad();
 
-    test('shows no cut geometry at the closest pass, where the same frame uncut shows it', async ({
-      harnessRun,
-    }) => {
-      // The realistic load: the world the owner saw it in. It shares that one
-      // load with the realistic world's cases below.
-      const result = await harness(harnessRun, '?realistic');
-      expect(result.errors).toEqual([]);
-      const near = result.nearField;
-      console.info(
-        `#545 at ${String(near.distance)} m in the ${near.world} world, the cull dropped a ` +
-          `${near.cut.join(' and a ')} ${near.pivotMetres.toFixed(2)} m from the eye: ` +
-          `${String(near.shippedPixels)} pixels cut with the cull, ` +
-          `${String(near.controlPixels)} without it, ${String(near.noisePixels)} drawing it twice`,
-      );
-      // Non-vacuity: the probe drew the realistic world, and found a frame
-      // where the renderer's own cull had something to drop.
-      expect(near.world).toBe('realistic');
-      expect(near.cut.length).toBeGreaterThan(0);
-      // The noise floor is nothing: the same frame drawn twice is the same frame.
-      expect(near.noisePixels).toBe(0);
-      // The control — the defect, drawn: without the cull the near plane cuts
-      // what the camera is passing, and the nearer plane shows it.
-      expect(near.controlPixels).toBeGreaterThan(100);
-      // And with it, nothing stands between the two planes.
-      expect(near.shippedPixels).toBe(0);
-    });
-  },
-);
+  test('shows no cut geometry at the closest pass, where the same frame uncut shows it', async ({
+    harnessRun,
+  }) => {
+    // The realistic load: the world the owner saw it in. It shares that one
+    // load with the realistic world's cases below.
+    const result = await harness(harnessRun, '?realistic');
+    expect(result.errors).toEqual([]);
+    const near = result.nearField;
+    console.info(
+      `#545 at ${String(near.distance)} m in the ${near.world} world, the cull dropped a ` +
+        `${near.cut.join(' and a ')} ${near.pivotMetres.toFixed(2)} m from the eye: ` +
+        `${String(near.shippedPixels)} pixels cut with the cull, ` +
+        `${String(near.controlPixels)} without it, ${String(near.noisePixels)} drawing it twice`,
+    );
+    // Non-vacuity: the probe drew the realistic world, and found a frame
+    // where the renderer's own cull had something to drop.
+    expect(near.world).toBe('realistic');
+    expect(near.cut.length).toBeGreaterThan(0);
+    // The noise floor is nothing: the same frame drawn twice is the same frame.
+    expect(near.noisePixels).toBe(0);
+    // The control — the defect, drawn: without the cull the near plane cuts
+    // what the camera is passing, and the nearer plane shows it.
+    expect(near.controlPixels).toBeGreaterThan(100);
+    // And with it, nothing stands between the two planes.
+    expect(near.shippedPixels).toBe(0);
+  });
+});
 
 /**
  * The realistic world, in a real engine — ADR 0026, #425, #474, #369.
@@ -2459,7 +2466,7 @@ test.describe(
  * run `game-harness.ts` §`realisticProbe` makes. The default load is the
  * other half of D-7 and is asserted below too: it fetches none of the set.
  */
-test.describe('the realistic world — ADR 0026', REALISTIC_LOAD, () => {
+test.describe('the realistic world — ADR 0026', () => {
   paysForTheRealisticLoad();
 
   const realistic = async (
@@ -2681,7 +2688,7 @@ test.describe('the realistic world — ADR 0026', REALISTIC_LOAD, () => {
  * world actually loaded ON IT — without `drawnWorld`, a page that fell back to
  * the stylised world would be measuring trees with no middle level at all.
  */
-test.describe('the trees’ levels of detail in the realistic world — #617', TREES_LOAD, () => {
+test.describe('the trees’ levels of detail in the realistic world — #617', () => {
   paysForTheRealisticLoad(TREES_QUERY);
 
   const trees = async (

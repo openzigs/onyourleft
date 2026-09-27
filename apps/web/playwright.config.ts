@@ -138,24 +138,23 @@ export const LAUNCH_ARGS = [
 /**
  * How long the whole run may take before it stops itself — #651.
  *
- * ⚠️ The job's `timeout-minutes` is 20, and this has to END before it does or
- * the run reports nothing. The browser gate starts about four and a half
- * minutes into the job on the slowest runner measured (run 36320822283 reached
- * `Browser gate` at 8m34s serially; with the checks before it run concurrently
- * it is under five), and nothing after it but the coverage upload. Twelve
- * minutes ends it by about seventeen, three clear of the stop — and it is more
- * than twice the gate's green time on that runner, so it is not a budget a
- * green run comes near. `game.browser.spec.ts` §`paysForTheRealisticLoad` is the sum it
- * has to hold.
+ * ⚠️ **The job's `timeout-minutes` is 20, and this has to END before it does,
+ * or the run reports nothing**: a job the runner cancels says "cancelled" and
+ * names no case and no describe. On the slowest runner measured (an AMD EPYC
+ * 7763, run 36325068145) this gate starts 8m47s into the job, behind the
+ * Vitest run; ten minutes ends it by 18m47s, with the coverage upload after it.
+ * The slowest GREEN gate measured on that runner took 452 s (run 36318760634).
+ *
+ * Every load the gate pays for has a budget of its own, and the arithmetic
+ * that fits the four game loads inside this one is `game.browser.spec.ts`
+ * §`paysForTheRealisticLoad`. This is what still reports when something with no
+ * budget of its own hangs: Playwright stops, marks what was running as
+ * interrupted and what had not started as not run, and exits non-zero.
  */
-export const GATE_BUDGET_MS = 12 * 60_000;
+export const GATE_BUDGET_MS = 10 * 60_000;
 
-/** The game spec, which the projects below split by the load its cases read. */
+/** The game spec, which runs as a project of its own — see `projects`. */
 const GAME_SPEC = /game\.browser\.spec\.ts$/;
-/** Describes that read `?realistic` — `game.browser.spec.ts` §`REALISTIC_LOAD`. */
-const REALISTIC_LOAD_TAG = /@realistic-load/;
-/** Describes that read `?realistic&trees` — `game.browser.spec.ts` §`TREES_LOAD`. */
-const TREES_LOAD_TAG = /@trees-load/;
 
 export default defineConfig({
   testDir: './browser',
@@ -204,46 +203,27 @@ export default defineConfig({
       stdout: 'pipe',
     },
   ],
-  // ⚠️ **A backstop, not a budget — #651.** The required job stops at
-  // `timeout-minutes` and a job the runner cancels reports NOTHING: no failed
-  // case, no describe, only "cancelled". So the gate stops itself first and
-  // prints which cases were interrupted. Every load has a budget of its own
-  // below this one (`game.browser.spec.ts` §`REALISTIC_LOAD_BUDGET_MS`), and the
-  // arithmetic that fits them all inside it is in that file, §`paysForTheRealisticLoad`; this is
-  // what still reports when something with no budget of its own hangs.
+  // ⚠️ **A backstop, not a budget — #651.** @see GATE_BUDGET_MS
   globalTimeout: GATE_BUDGET_MS,
-  // ⚠️ **Four projects, one browser, one run — #651.** Playwright queues every
-  // group of one worker fixture after every group of another, and the game
-  // spec's shared harness load (#456) IS a worker fixture — so its four page
-  // loads, the slowest things in the gate, used to run one after another in
-  // ONE worker at the very END, with the other worker idle: 232 s of the
-  // gate's 400 on the runner, measured on run 36320822283. Projects run in the
-  // order they are listed here, and a project is a group of its own, so the
-  // game spec is split by the load its cases read (a tag on the describe) and
-  // listed FIRST. Every case still runs exactly once, in exactly one project:
-  // `game` is the complement of the other two, by `grepInvert`.
+  // ⚠️ **Two projects, one browser, one run — #651, and the game spec is
+  // FIRST.** Playwright queues a project's groups in the order the projects
+  // are listed, and the game spec is one group — its shared harness (#456) is
+  // a worker fixture, so its four loads run one after another in one worker.
+  // Listed last, as it was, those loads came after everything else, so if they
+  // hung their budgets were added to the whole of the rest of the gate. Listed
+  // first, they run beside it, in the other worker, and a gate where every
+  // one of them hangs still ends inside `GATE_BUDGET_MS` naming each describe.
   //
-  // It is not a second browser and not a second job — one `playwright test`,
-  // one Chromium, the one `Repository rules` check (CLAUDE.md §4c).
+  // ⚠️ It does NOT make a green gate faster, and it was not for want of trying
+  // (#651): SwiftShader draws on the CPU and one load already uses every core
+  // the runner has. Splitting the four loads across two workers doubled each
+  // of them — `?realistic` 64 s to 145 s, `?realistic&trees` 79 s to 146 s,
+  // run 36325068145 — and made the plain page's load a second time besides.
+  //
+  // Not a second browser and not a second job — one `playwright test`, one
+  // Chromium, the one `Repository rules` check (CLAUDE.md §4c).
   projects: [
-    {
-      name: 'game-realistic',
-      testMatch: GAME_SPEC,
-      grep: REALISTIC_LOAD_TAG,
-      use: devices['Desktop Chrome'],
-    },
-    {
-      name: 'game-trees',
-      testMatch: GAME_SPEC,
-      grep: TREES_LOAD_TAG,
-      use: devices['Desktop Chrome'],
-    },
-    {
-      name: 'game',
-      testMatch: GAME_SPEC,
-      grepInvert: [REALISTIC_LOAD_TAG, TREES_LOAD_TAG],
-      use: devices['Desktop Chrome'],
-    },
+    { name: 'game', testMatch: GAME_SPEC, use: devices['Desktop Chrome'] },
     { name: 'chromium', testIgnore: GAME_SPEC, use: devices['Desktop Chrome'] },
   ],
 });
