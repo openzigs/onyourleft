@@ -262,7 +262,9 @@ export function TrainerPanel({
         own number, why it is not on the machine, and that it comes back by
         itself — the decision #567 asked to be stated. Not `live`, for the
         reason *Control lost* above is not: the ONE ride region speaks, and
-        this is not the answer to a press.
+        this is not the answer to a press. Since #598 it does speak it —
+        `RideAnnouncer.tsx` says this sentence when it appears or its reason
+        changes; until then only a sighted rider was told.
       */}
       {trainer.ergRescue === undefined ? null : (
         <StatusMessage tone="warning" label="Eased">
@@ -401,8 +403,11 @@ export function targetSentence(trainer: TrainerSnapshot): string {
  *
  * The window is read off {@link TREND_WINDOW} rather than typed, so the
  * sentence cannot go quietly wrong when #137 recalibrates it (PR #582's review).
+ *
+ * Exported because `RideAnnouncer.tsx` SPEAKS it (#598): a rider who cannot see
+ * the panel hears the words it shows, not a second wording of them.
  */
-function rescueSentence(rescue: ManualErgRescue): string {
+export function rescueSentence(rescue: ManualErgRescue): string {
   const steady = `your cadence has held steady for ${String(TREND_WINDOW)} seconds`;
   // PR #582's third review: the number named is only ever one the machine
   // ACCEPTED. A target the rider set during the rescue is not written until it
