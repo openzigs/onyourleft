@@ -36,9 +36,9 @@ import {
   SIDE_REPORT_WITHHELD,
 } from '../camera/side-report-wording';
 import { mount, settle, type Mounted } from '../testing/mount';
-import { ActivityDetailView } from '../views/ActivityDetailView';
+import { ActivityDetailView, READING_RIDE_TEXT } from '../views/ActivityDetailView';
 
-import type { DetailPort } from './store-port';
+import type { DetailPort, DetailStore } from './store-port';
 import { stubActivity, stubDetail } from './testing';
 
 const ATHLETE = athleteId('athlete-a');
@@ -58,10 +58,46 @@ function report(
   return { athleteId: ATHLETE, activityId: RIDE, summary, observations };
 }
 
+/**
+ * The most turns of the event loop the page may take to read its ride before
+ * the test gives up. Each turn is at least one timer, so this is a bound of
+ * well over 200 ms: generous for a stub, and for the real store under load.
+ */
+const READ_TURNS = 200;
+
+/**
+ * How long the slowed store holds the side-camera read back: many times the
+ * two one-millisecond timers the page used to be given, and a small share of
+ * {@link READ_TURNS}.
+ */
+const SLOW_READ_MILLISECONDS = 25;
+
+/**
+ * Mount the ride's page and wait until it has READ the ride — until it no
+ * longer says {@link READING_RIDE_TEXT} — then return the section.
+ *
+ * ⚠️ **Why not a fixed number of `settle`s (#575).** This used to be two, and
+ * against the real store that is a race rather than a wait: `fake-indexeddb`
+ * runs every request as a chain of `setImmediate` tasks, the overview is four
+ * sequential reads plus opening the database, and a `settle` is one
+ * `setTimeout(0)` — about a millisecond of wall clock. Locally the read
+ * finished within the first; on a loaded CI runner it did not, the page was
+ * still loading, and the section was not there to hold a list — which read as
+ * `expected [] to deeply equal [ …(2) ]`. The store was not at fault: the
+ * report had committed, and the read found it as soon as it was let finish.
+ *
+ * Repeated `settle`s rather than one long `act` scope, for the reason
+ * `TransferView.test.tsx` §`runToCompletion` gives: React flushes a state
+ * update when the scope closes, not inside it.
+ */
 async function open(port: DetailPort, id = RIDE): Promise<HTMLElement | null> {
   mounted = await mount(<ActivityDetailView port={port} activityId={id} />);
-  await settle();
-  await settle();
+  for (let turn = 0; (document.body.textContent ?? '').includes(READING_RIDE_TEXT); turn += 1) {
+    if (turn >= READ_TURNS) {
+      throw new Error(`the ride's page was still reading its ride after ${READ_TURNS} turns`);
+    }
+    await settle();
+  }
   return document.querySelector<HTMLElement>('.oyl-side-report');
 }
 
@@ -188,6 +224,51 @@ describe('read back from the real store (CLAUDE.md §5)', () => {
       const store = openActivityStore(harness.databaseName);
       try {
         const section = await open({ athleteId: ATHLETE_A, store }, ride.id);
+        expect(
+          [...(section?.querySelectorAll('li') ?? [])].map((item) => item.textContent),
+        ).toEqual(OBSERVED);
+      } finally {
+        store.close();
+      }
+    } finally {
+      await harness.destroy();
+    }
+  });
+
+  it('waits for the read to finish, however slow the store is (#575)', async () => {
+    // The flake, made deterministic: the same real store, with the side-camera
+    // read held back by a timer far longer than the two `settle`s the page used
+    // to be given. A wait that counts turns instead of waiting for the read
+    // renders no section here, every time.
+    resetFixtureIds();
+    const harness = createStoreHarness();
+    try {
+      await seedAthletes(harness);
+      const ride = await seedRide(harness, ATHLETE_A);
+      await harness.write(async (store) =>
+        store.putSideCameraReport({
+          athleteId: ATHLETE_A,
+          activityId: ride.id,
+          summary: SIDE_REPORT_OBSERVED,
+          observations: OBSERVED,
+        }),
+      );
+      const store = openActivityStore(harness.databaseName);
+      const slow: DetailStore = {
+        getActivity: async (owner, id) => store.getActivity(owner, id),
+        getStreamSetSummary: async (owner, id) => store.getStreamSetSummary(owner, id),
+        getStreamChannel: async (owner, id, channel) => store.getStreamChannel(owner, id, channel),
+        listLaps: async (owner, id) => store.listLaps(owner, id),
+        listPrivacyZones: async (owner) => store.listPrivacyZones(owner),
+        getSideCameraReport: async (owner, id) => {
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, SLOW_READ_MILLISECONDS);
+          });
+          return store.getSideCameraReport(owner, id);
+        },
+      };
+      try {
+        const section = await open({ athleteId: ATHLETE_A, store: slow }, ride.id);
         expect(
           [...(section?.querySelectorAll('li') ?? [])].map((item) => item.textContent),
         ).toEqual(OBSERVED);

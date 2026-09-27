@@ -126,6 +126,17 @@ export interface ActivityDetailViewProps {
   readonly preferences?: PreferenceStorage | undefined;
 }
 
+/**
+ * What the page says while the ride's overview is still being read.
+ *
+ * Exported for a test to wait on (#575): a read through a real store is a chain
+ * of IndexedDB tasks, and a test that waits a fixed number of turns for it
+ * races the machine it runs on. Named here rather than retyped in the test so
+ * that rewording it cannot turn that wait into one that is over before the
+ * read has begun.
+ */
+export const READING_RIDE_TEXT = 'Reading this ride from the store on this device…';
+
 type OverviewState =
   | { readonly kind: 'loading' }
   | { readonly kind: 'ready'; readonly overview: RideOverview }
@@ -303,7 +314,7 @@ export function ActivityDetailView({
     return (
       <>
         <StatusMessage tone="info" live>
-          Reading this ride from the store on this device…
+          {READING_RIDE_TEXT}
         </StatusMessage>
         <WayOut />
       </>
