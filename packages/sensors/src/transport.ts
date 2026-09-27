@@ -222,6 +222,31 @@ export interface SensorTransport {
   disconnect(id: DeviceId): Promise<void>;
 
   /**
+   * Drop a link **and** let go of the device — #659, the Devices screen's
+   * *Forget*.
+   *
+   * Everything {@link disconnect} does, and then this transport stops issuing
+   * `id`: every id-keyed method answers `device-not-found` for it, exactly as
+   * for an id it never issued, until {@link discover} returns the device again.
+   * That is what makes a forgotten device one the athlete has to choose again
+   * rather than one a stale handle can quietly reach.
+   *
+   * Where the stack also holds a **permission** to reach the device, it is
+   * given up here and nowhere else: on Web Bluetooth that is
+   * `BluetoothDevice.forget()`, which revokes this origin's grant and is
+   * feature-detected, because a browser that predates it must still be able to
+   * forget. A stack with no such permission — the simulator, and the Capacitor
+   * plugin, whose Android side holds no bond this program made — forgets its
+   * own record and nothing more, which is the equivalent.
+   *
+   * Resolves for an id this transport does not hold, because forgetting what
+   * is already forgotten is the ordinary result of a second press. It rejects
+   * only when the stack itself refused to revoke a permission, and the record
+   * is gone either way.
+   */
+  forget(id: DeviceId): Promise<void>;
+
+  /**
    * Where a device's connection is now.
    *
    * Synchronous: a caller rendering a device list asks for every device on

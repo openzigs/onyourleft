@@ -197,7 +197,7 @@ export interface GameTrainer {
 /** A trainer nothing can be said to. The state every non-trainer ride is in. */
 export const NO_GAME_TRAINER: GameTrainer = { kind: 'none', control: undefined };
 
-/** How the game reaches whatever trainer the rider paired on the Ride screen. */
+/** How the game reaches whatever trainer the rider paired on Devices (#659). */
 export interface GameTrainerPort {
   /**
    * The trainer, as it is at this instant.

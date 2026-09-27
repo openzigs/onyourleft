@@ -414,11 +414,18 @@ export function createCapacitorTransport(options: CapacitorTransportOptions): Se
       }
       const device = adopt(found, request.capabilities);
       seen.add(found.deviceId);
-      links.set(device.identity.id, {
-        session: createDeviceSession(device),
-        pluginId: found.deviceId,
-        notifying: new Map(),
-      });
+      // ⚠️ Only a device this transport does not already hold (#659's
+      // review). Chosen again while it is connected — the ride controller's
+      // "already paired" path — an overwrite put a fresh `disconnected`
+      // session over the live one and orphaned every observer of the old,
+      // so the link said *disconnected* while its notifications ran on.
+      if (!links.has(device.identity.id)) {
+        links.set(device.identity.id, {
+          session: createDeviceSession(device),
+          pluginId: found.deviceId,
+          notifying: new Map(),
+        });
+      }
       return device;
     },
 
@@ -493,6 +500,30 @@ export function createCapacitorTransport(options: CapacitorTransportOptions): Se
 
     async disconnect(id: DeviceId): Promise<void> {
       const link = linkFor(id);
+      if (link.session.state === 'disconnected') {
+        return;
+      }
+      await teardown(link, 'disconnected');
+      await plugin.disconnect(link.pluginId);
+    },
+
+    /**
+     * #659. The plugin holds no permission this program could give back —
+     * there is no `forget` on `BleClient`, and on Android this program never
+     * bonds — so forgetting is dropping the link and the record. After it,
+     * `linkFor` answers `device-not-found`, and `discover` is the way back.
+     *
+     * ⚠️ The record goes FIRST, for Web Bluetooth's reason: a notification or
+     * a disconnect callback the plugin delivers after this must find no link
+     * to drive. `seen` keeps the plugin id, because `knownDevices` asking the
+     * plugin about a peripheral is not reaching it.
+     */
+    async forget(id: DeviceId): Promise<void> {
+      const link = links.get(id);
+      if (link === undefined) {
+        return;
+      }
+      links.delete(id);
       if (link.session.state === 'disconnected') {
         return;
       }

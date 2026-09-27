@@ -210,6 +210,43 @@ export function describeTransportConformance(name: string, subject: ConformanceS
         );
     });
 
+    it('forgets a device: its id is refused until discover returns it again (#659)', async () => {
+      const { transport, request, settle } = await subject.create();
+      const device = await transport.discover(request);
+      const id = device.identity.id;
+      await transport.connect(id);
+      const capability = firstMeasurementCapability(device.capabilities);
+      const delivered: SensorMeasurement[] = [];
+      await transport.subscribe(id, capability, (m) => delivered.push(m));
+
+      await transport.forget(id);
+      const afterForget = delivered.length;
+      let refused: unknown;
+      try {
+        transport.connectionState(id);
+      } catch (error) {
+        refused = error;
+      }
+      expect(isSensorError(refused, 'device-not-found'), 'a forgotten id is still issued').toBe(
+        true,
+      );
+      await transport.connect(id).then(
+        () => expect.unreachable('a forgotten id must not connect'),
+        (error: unknown) => expect(isSensorError(error, 'device-not-found')).toBe(true),
+      );
+      expect((await transport.knownDevices()).map((known) => known.identity.id)).not.toContain(id);
+      // A second press is not a fault.
+      await transport.forget(id);
+
+      await settle(CONFORMANCE_DELIVERY_WINDOW);
+      expect(delivered.length, 'a forgotten device went on delivering').toBe(afterForget);
+
+      // And the way back is the chooser, which issues the device again.
+      const again = await transport.discover(request);
+      await transport.connect(again.identity.id);
+      expect(transport.connectionState(again.identity.id)).toBe('connected');
+    });
+
     it('delivers nothing after unsubscribe, and nothing after disconnect', async () => {
       const { transport, request, settle } = await subject.create();
       const device = await transport.discover(request);

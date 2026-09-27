@@ -27,6 +27,7 @@ import type { AthleteMassPort } from '../athlete/store-port';
 import type { GamePort, RidableRoute } from '../game/GameView';
 import type { ThermalPort } from '../game/thermal-port';
 import { activateWithKeyboard, mount, settle, typeInto, type Mounted } from '../testing/mount';
+import { idleSnapshot, stubRideController } from '../ride/testing';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import type { ShellSupport } from '../support/shell-support-port';
 import { MASS_CLEARED, MASS_SAVED } from '../views/SettingsView';
@@ -35,6 +36,14 @@ import { AppShell } from './AppShell';
 import { hrefFor, routeById } from './routes';
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
+/** A browser that can pair: the chooser is never reached in these tests. */
+const CAN_PAIR: CapabilityProbe = {
+  bluetooth: {
+    getAvailability: async () => Promise.resolve(true),
+    requestDevice: async () => Promise.reject(new Error('no chooser in a test')),
+  },
+  secureContext: true,
+};
 
 /** What the plugin says on a phone where everything works. */
 const PHONE_CAN_PAIR: ShellSupport = { kind: 'available', canPair: true, notice: null };
@@ -204,6 +213,28 @@ describe('the Devices screen inside the Android shell', () => {
     await open('/devices');
     expect(viewSections()).toContain('This browser');
     expect(viewSections()).not.toContain('This phone');
+  });
+});
+
+describe('the Devices screen pairs through the ride controller (#659)', () => {
+  // ⚠️ The third JSX hop, and the one `check:wiring` cannot see (§Limits: an
+  // optional prop nobody supplies). `DevicesView.test.tsx` hands the view a
+  // controller directly, so dropping `controller={props.rideController}` from
+  // the `devices` case would leave every other test green while Devices went
+  // back to the dead end #659 is about. Read through the shell, as a rider gets
+  // there.
+  it('hands the Devices screen the controller the Ride screen reads', async () => {
+    const stub = stubRideController(idleSnapshot());
+    globalThis.location.hash = '#/devices';
+    mounted = await mount(<AppShell capabilities={CAN_PAIR} rideController={stub.controller} />);
+    await settle();
+
+    const pair = [...document.querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === 'Pair a smart trainer',
+    );
+    expect(pair, 'Devices rendered no pairing control').toBeDefined();
+    if (pair !== undefined) await activateWithKeyboard(pair);
+    expect(stub.calls.pair).toEqual(['trainer']);
   });
 });
 
