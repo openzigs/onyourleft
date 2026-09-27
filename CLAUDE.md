@@ -3802,7 +3802,7 @@ top of an issue **supersedes its body**.
 | Why a ride's world is not drawn until its first frame has been drawn into one pixel, and what that moved out of the ride | `apps/web/src/game/three-renderer.ts` §`prepare`, `apps/web/src/game/port.ts` §`GameView.prepare`, `apps/web/browser/game-harness.ts` §`rideStartProbe` |
 | Why the ghost casts no shadow on the shadow map rung, when it shares the rider's meshes | `apps/web/src/game/three-renderer.ts` §`RiderBelt.#castersOnly`, `apps/web/src/game/contact-shadow.ts` §`CASTS_CONTACT_SHADOW` |
 | What `three-seam.test.ts` counts about shadows, and why a shadow map needed a rule no lamp count could give | `apps/web/src/game/three-seam.test.ts` §"lets only the sun and the riders cast a shadow" |
-| Why the rider costs three draw calls where the sphere cost one | `apps/web/src/game/three-renderer.ts` §`RiderModel`, `apps/web/browser/game.browser.spec.ts` §`SCENE_DRAW_CALLS` |
+| Why the riders cost four draw calls (three before #546's upper body) where the sphere cost one | `apps/web/src/game/three-renderer.ts` §`RiderModel`, `apps/web/browser/game.browser.spec.ts` §`SCENE_DRAW_CALLS` |
 | Why every marker now carries a heading, and why it is the road's rather than the camera's | `apps/web/src/game/port.ts` §`RiderMarker.headingX`, `apps/web/src/game/scene.ts` §`headingAt` |
 | Why #286's shading probe is no longer the rider's own marker | `apps/web/browser/game-harness.ts` §`oneColourSolid` |
 | Why the HUD panel's opacity is asserted inside the accessibility gate | `apps/web/src/game/hud/hud-surface.a11y.test.ts`, `apps/web/src/design/tokens.ts` §`hudSurface` |

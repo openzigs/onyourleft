@@ -1041,6 +1041,26 @@ describe('the inside pedal never touches the road — #546', () => {
     expect(drawnCrankAngle(undefined, 30 * DEGREE)).toBe(Math.PI);
   });
 
+  it('eases a crank nobody gave an angle in from rest, rather than snapping it — #586', () => {
+    // Inside the band there is no angle to swing from, and it used to jump
+    // straight to parked. It swings from top dead centre, the renderers' own
+    // pose for a crankset never given one.
+    const middle = CRANK_PARKING_LEAN_RADIANS - 4 * DEGREE;
+    const eased = drawnCrankAngle(undefined, middle) as number;
+    expect(eased).toBeCloseTo(drawnCrankAngle(0, middle) as number, 12);
+    // Part of the way round: neither at rest nor parked.
+    const apart = (a: number, b: number): number =>
+      Math.abs(((a - b + 3 * Math.PI) % TAU) - Math.PI);
+    expect(apart(eased, 0)).toBeGreaterThan(0.1);
+    expect(apart(eased, Math.PI)).toBeGreaterThan(0.1);
+    let previous = 0;
+    for (let hundredths = 1; hundredths <= 4_500; hundredths += 1) {
+      const here = drawnCrankAngle(undefined, (hundredths / 100) * DEGREE) ?? 0;
+      expect(apart(here, previous)).toBeLessThan(0.02);
+      previous = here;
+    }
+  });
+
   it('keeps every pedal off the road at every crank angle and every lean to 45°, either way', () => {
     for (let degrees = -45; degrees <= 45; degrees += 0.25) {
       const lean = degrees * DEGREE;

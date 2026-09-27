@@ -2555,7 +2555,7 @@ export class RiderBelt {
   /**
    * Whether the riders cast into the sun's shadow map — #426, the `'map'` rung.
    * They do not RECEIVE one: what grounds a rider is its shadow on the road,
-   * and self-shadowing is a second shadow pass over the same three meshes.
+   * and self-shadowing is a second shadow pass over the same four meshes.
    */
   setCasting(on: boolean): void {
     for (const mesh of [this.#bodies, this.#torsos, this.#cranksets, this.#limbs]) {
