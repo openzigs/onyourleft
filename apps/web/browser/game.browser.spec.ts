@@ -3027,7 +3027,8 @@ test.describe('the realistic world — ADR 0026', () => {
     // reads BC7: still a GPU block format, and published so.
     const expected = textures.desktopRule ? ['BC7'] : ['ASTC 4x4', 'ETC2 RGB', 'ETC2 RGBA'];
     for (const format of textures.uploads) expect(expected, format).toContain(format);
-    for (const texture of textures.worn) expect(expected, JSON.stringify(texture)).toContain(texture.format);
+    for (const texture of textures.worn)
+      expect(expected, JSON.stringify(texture)).toContain(texture.format);
     // Nothing uploaded uncompressed — the claim.
     expect(textures.uploads).not.toContain('RGBA8');
     // ⚠️ THE CONTROL: the same file, through a loader told the device offers

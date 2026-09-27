@@ -126,7 +126,11 @@ import {
 } from '../src/game/three-renderer';
 import { groundBlobAlpha, groundUnder } from '../src/game/ground-blob';
 import { clearOfTheCamera, nearPyramid, sceneryReach } from '../src/game/near-field';
-import { REALISTIC_SURFACES, realisticUrl, realisticWorldNotice } from '../src/game/realistic-assets';
+import {
+  REALISTIC_SURFACES,
+  realisticUrl,
+  realisticWorldNotice,
+} from '../src/game/realistic-assets';
 import {
   FOLIAGE_TINT,
   instanceTint,
@@ -3778,7 +3782,11 @@ export interface TextureMeasurement {
    */
   readonly desktopRule: boolean;
   /** Every texture the loaded world holds but the sky, as `realisticTextureReport` labels it. */
-  readonly worn: readonly { readonly role: string; readonly format: string; readonly bytes: number }[];
+  readonly worn: readonly {
+    readonly role: string;
+    readonly format: string;
+    readonly bytes: number;
+  }[];
   /** The sky, which #618 leaves at half-float. */
   readonly sky: { readonly format: string; readonly bytes: number };
   /** The internal format of every upload a fresh view made of those textures, read off the GL calls. */
@@ -3790,7 +3798,11 @@ export interface TextureMeasurement {
    * no compressed format — its label, and what it was uploaded as. It must be
    * RGBA8 and labelled a fallback, or the claim above is about labels.
    */
-  readonly control: { readonly format: string; readonly compressed: boolean; readonly uploads: readonly string[] };
+  readonly control: {
+    readonly format: string;
+    readonly compressed: boolean;
+    readonly uploads: readonly string[];
+  };
 }
 
 const NO_TEXTURES: TextureMeasurement = {
@@ -3848,11 +3860,11 @@ function recordingUploads(body: () => void): string[] {
   gl.compressedTexImage2D = function (this: WebGL2RenderingContext, ...args: unknown[]) {
     if (args[1] === 0) note(args[2] as number);
     (compressed as (...rest: unknown[]) => void).apply(this, args);
-  } as typeof compressed;
+  };
   gl.texImage2D = function (this: WebGL2RenderingContext, ...args: unknown[]) {
     if (args[1] === 0) note(args[2] as number);
     (image as (...rest: unknown[]) => void).apply(this, args);
-  } as typeof image;
+  };
   try {
     body();
   } finally {
