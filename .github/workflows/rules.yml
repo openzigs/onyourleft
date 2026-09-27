@@ -430,24 +430,23 @@ jobs:
       # pull request body. The report is here because an untested branch is
       # worth seeing in review, and because it costs nothing to print.
       #
-      # Builds the harness and drives it: CLAUDE.md section 4a documents both
-      # halves of `test:browser` as one command.
-      #
-      # ⚠️ The two run CONCURRENTLY since #651, and a reviewer who remembers
-      # "Tests and coverage report" and "Browser gate" as two steps is reading
-      # the old file. They were the two longest steps -- 313 s and 409 s on run
-      # 36320822283 -- and one after the other they were most of the job. Each
-      # line is labelled with the command it came from; the step fails if
-      # EITHER fails; and the coverage steps below still carry `if: always()`,
-      # so a red run still publishes what it measured and they cannot fail the
-      # job. The browser gate stops itself before this job's timeout
-      # (`playwright.config.ts` §`GATE_BUDGET_MS`) so that a hang is reported
-      # by name rather than cancelled in silence.
-      - name: Tests with coverage, and the browser gate, concurrently
-        run: >-
-          bash scripts/run-concurrently.sh
-          'test:coverage' 'pnpm run test:coverage'
-          'test:browser' 'pnpm run test:browser'
+      # ⚠️ NOT concurrently with the browser gate, and that was measured rather
+      # than assumed (#651). They are the two longest steps and it was the
+      # obvious move; run 36323764725 did it and went red on BOTH halves. Each
+      # is CPU-bound on its own -- Vitest keeps three of the four CPUs busy, and
+      # SwiftShader draws the game on the CPU -- so together the plain game
+      # page's load passed its case's 60 s, and two Vitest cases that take
+      # about three seconds alone passed their 5 s. Two gates that go red
+      # because of each other are not two gates.
+      - name: Tests and coverage report
+        run: pnpm run test:coverage
+
+      # Builds the harness and drives it. CLAUDE.md section 4a documents both
+      # halves as one command. It stops itself before this job's timeout
+      # (`playwright.config.ts` §`GATE_BUDGET_MS`), so a hang is reported by
+      # name rather than cancelled in silence.
+      - name: Browser gate
+        run: pnpm run test:browser
 
 
       # Coverage is REPORTED, never gated -- ADR 0005 decision C and CLAUDE.md

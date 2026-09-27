@@ -1243,6 +1243,19 @@ bash scripts/check-doc-links.sh
 # Test that checker. Fixture-driven; 28 cases.
 bash scripts/check-doc-links.test.sh
 
+# Run several commands at once and fail if ANY of them fails (#651). Not a
+# check: it is how CI runs the checks, in three of its steps — see §4c. Every
+# line is labelled with its command as it arrives, each process is waited on by
+# itself, and a failing command's whole output is printed again at the end.
+# No commands at all is exit 2, not a pass. Bash only, so it runs on a bare
+# clone, and any §4a command can be handed to it as a string:
+bash scripts/run-concurrently.sh 'lint' 'pnpm run lint' 'typecheck' 'pnpm run typecheck'
+
+# Its own suite. Fixture-driven; 29 cases, most of them a failure the runner
+# must NOT swallow — in every position, ending before and after a success —
+# plus a rendezvous that fails if the commands were quietly run one at a time.
+bash scripts/run-concurrently.test.sh
+
 # The same two digests, printed for reading by eye.
 shasum -a 256 LICENSE LICENSES/Apache-2.0.txt
 ```

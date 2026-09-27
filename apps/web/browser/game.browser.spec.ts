@@ -677,8 +677,33 @@ const REALISTIC_LOAD_BUDGET_MS = 150_000;
  * budgets — seven and a half minutes, inside the job's twenty.
  */
 function paysForTheRealisticLoad(query = '?realistic'): void {
+  paysForTheLoad(query, REALISTIC_LOAD_BUDGET_MS);
+}
+
+/**
+ * What the plain page and `?shadow-map` may take — #651.
+ *
+ * ⚠️ **Until #651 these two loads were paid inside the first case that asked,
+ * under that case's 60 s**, and the plain one took 33.5 s and `?shadow-map`
+ * 54.6 s on the runner (run 36320822283) — the second 5.4 s from its case's
+ * timeout. #651 makes them side by side with the realistic ones
+ * (`playwright.config.ts` §`projects`), so each is slower than it was alone,
+ * and they are paid in a hook of their own for #607's reason: a budget that
+ * says what the LOAD may take, not what a case may.
+ */
+const PLAIN_LOAD_BUDGET_MS = 120_000;
+
+/**
+ * Pays for a load in a `beforeAll` under its own budget — #607, generalised by
+ * #651. One describe per query calls it: once the load is in the worker's memo
+ * every later describe reads it for nothing, and if it hung, the ledger
+ * (§`loadLedger`) refuses the next worker's attempt at once — so a hung load
+ * costs ONE budget, whichever describe paid it, and that describe is the one
+ * its failure names.
+ */
+function paysForTheLoad(query: string, budget: number): void {
   test.beforeAll(async ({ harnessRun }) => {
-    test.setTimeout(REALISTIC_LOAD_BUDGET_MS);
+    test.setTimeout(budget);
     await harnessRun(query);
   });
 }
@@ -701,6 +726,8 @@ const REALISTIC_LOAD = { tag: '@realistic-load' };
 const TREES_LOAD = { tag: '@trees-load' };
 
 test.describe('the game renderer in a real browser', () => {
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
+
   test('constructs against a live WebGL context', async ({ harnessRun }) => {
     const result = await harness(harnessRun);
 
@@ -1412,6 +1439,8 @@ test.describe('the scenery reaches the screen, and costs one call a kind — #24
  * substitute and why the bot's own marker, 120 m up the road, is not.
  */
 test.describe('the world is lit, and can stop being — #286', () => {
+  paysForTheLoad('?shadow-map', PLAIN_LOAD_BUDGET_MS);
+
   test('finds the probe at both shadings, so the spreads mean something', async ({
     harnessRun,
   }) => {
