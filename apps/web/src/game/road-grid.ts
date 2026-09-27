@@ -138,7 +138,7 @@ export type SegmentMeasure<Query> = (
 
 /**
  * The least of `measure` over every stretch of the drawn road that may lie
- * within `reach` of `(x, z)` — the ONE cell search, which
+ * within `reach` of `query`'s own `(x, z)` — the ONE cell search, which
  * {@link distanceToDrawnRoad} and `settlements.ts` §`structureClearance` both
  * ask. They were two copies of it from #613 until #602's fold-in of that
  * review, and had already drifted: #613's squared distances went into one.
@@ -149,18 +149,25 @@ export type SegmentMeasure<Query> = (
  *
  * A segment in two of the cells searched is measured twice, which costs a few
  * multiplications and no allocation.
+ *
+ * ⚠️ **The point is read from `query`, and only from there** (#602's review).
+ * It used to be passed twice — as `x, z` to choose the cells and inside
+ * `query` for `measure` — and a caller that set one and not the other would
+ * search the right cells and measure from the wrong point, with every test
+ * green unless its fixture happened to separate the two. One source cannot
+ * disagree with itself, and it costs no closure and no allocation (#469).
  */
-export function leastSquaredNearRoad<Query>(
+export function leastSquaredNearRoad<Query extends { readonly x: number; readonly z: number }>(
   profile: RouteProfile,
   origin: CorridorOrigin,
-  x: number,
-  z: number,
   reach: number,
   measure: SegmentMeasure<Query>,
   query: Query,
 ): number {
   const road = roadGrid(profile, origin);
   const points = road.points;
+  const x = query.x;
+  const z = query.z;
   const lastColumn = Math.floor((x + reach) / ROAD_CELL_METRES);
   const lastRow = Math.floor((z + reach) / ROAD_CELL_METRES);
   const firstRow = Math.floor((z - reach) / ROAD_CELL_METRES);
@@ -245,7 +252,5 @@ export function distanceToDrawnRoad(
 ): number {
   pointQuery.x = x;
   pointQuery.z = z;
-  return Math.sqrt(
-    leastSquaredNearRoad(profile, origin, x, z, reach, pointToSegmentSquared, pointQuery),
-  );
+  return Math.sqrt(leastSquaredNearRoad(profile, origin, reach, pointToSegmentSquared, pointQuery));
 }

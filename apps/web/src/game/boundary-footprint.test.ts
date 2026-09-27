@@ -82,7 +82,14 @@ describe('the boundaries stand inside their footprints — #602', () => {
     expect(vertices).toBeGreaterThan(0);
   });
 
-  it('would report the fence as it was before #602 — the control', () => {
+  it('the predicate reports the pre-#602 end-post corners', () => {
+    // ⚠️ NOT the control for the geometry test above: this hands the checker
+    // four points typed here, so it proves only that `outsideFootprint` can
+    // report an offender — not that reading the built geometry would surface
+    // the old posts. What proves THAT is mutation M2 in #602's pull request:
+    // `FENCE_END_POST_Z` put back at `BOUNDARY_PIECE_METRES / 2` turns
+    // "keeps every vertex of a fence inside its footprint" red.
+    //
     // The end post exactly as `BOUNDARY_STYLE` drew it: 0.12 m square, centred
     // on the end of the 8 m run, so its outer face stood at 4.06 m.
     const oldEndPost: PlanPoint[] = [

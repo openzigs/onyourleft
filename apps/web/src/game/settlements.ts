@@ -367,9 +367,7 @@ export function structureClearance(
   // no closure and no allocation, because this runs for every structure in
   // view, every frame, on the thread GATT notifications arrive on (#240's
   // NFR-2, #469).
-  return Math.sqrt(
-    leastSquaredNearRoad(profile, origin, item.x, item.z, reach, segmentToFootprint, boxQuery),
-  );
+  return Math.sqrt(leastSquaredNearRoad(profile, origin, reach, segmentToFootprint, boxQuery));
 }
 
 /** The footprint {@link structureClearance} measures, reused between calls. */
