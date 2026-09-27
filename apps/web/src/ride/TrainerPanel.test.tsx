@@ -22,7 +22,7 @@ import { TREND_WINDOW, watts } from '@onyourleft/domain';
 
 import { mount, type Mounted } from '../testing/mount';
 
-import type { TrainerSnapshot } from './controller';
+import { MANUAL_ERG_DURING_WORKOUT, type TrainerSnapshot } from './controller';
 import { TrainerPanel } from './TrainerPanel';
 
 let mounted: Mounted | undefined;
@@ -49,13 +49,14 @@ const snapshot = (overrides: Partial<TrainerSnapshot> = {}): TrainerSnapshot => 
   ...overrides,
 });
 
-async function render(trainer: TrainerSnapshot): Promise<string> {
+async function render(trainer: TrainerSnapshot, workoutOwnsTarget = false): Promise<string> {
   mounted = await mount(
     <TrainerPanel
       trainer={trainer}
       onRequestControl={() => undefined}
       onSetTargetPower={() => undefined}
       onClearTarget={() => undefined}
+      workoutOwnsTarget={workoutOwnsTarget}
     />,
   );
   return (mounted.container.textContent ?? '').replace(/\s+/g, ' ');
@@ -272,6 +273,32 @@ describe('control is its own step, and ERG is one thing to do with it — #503',
     expect(text).toContain('may still be holding 250 W');
     expect(text).toContain('Ask the trainer for control');
     expect(mounted?.container.querySelector('#oyl-erg-target')).toBeNull();
+  });
+});
+
+describe('a workout owns the target — #605', () => {
+  const held = snapshot({
+    controllable: true,
+    canSetPower: true,
+    hasControl: true,
+    powerRange: { minimum: 0, maximum: 2000, increment: 5 } as TrainerSnapshot['powerRange'],
+    target: { kind: 'confirmed', target: 225 } as TrainerSnapshot['target'],
+  });
+
+  it('offers no ERG form, and says why before anything is pressed', async () => {
+    const text = await render(held, true);
+    expect(text).toContain(`ERG, optional: ${MANUAL_ERG_DURING_WORKOUT}`);
+    expect(mounted?.container.querySelector('#oyl-erg-target')).toBeNull();
+    expect(mounted?.container.querySelectorAll('button')).toHaveLength(0);
+  });
+
+  it('offers the form with no workout — the control', async () => {
+    const text = await render(held, false);
+    expect(text).not.toContain(MANUAL_ERG_DURING_WORKOUT);
+    expect(mounted?.container.querySelector('#oyl-erg-target')).not.toBeNull();
+    expect(
+      [...(mounted?.container.querySelectorAll('button') ?? [])].map((each) => each.textContent),
+    ).toEqual(['Set target', 'End ERG']);
   });
 });
 

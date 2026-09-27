@@ -68,13 +68,22 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 
-import { seconds, thresholdShare, unixSeconds, watts } from '@onyourleft/domain';
+import {
+  expandWorkout,
+  seconds,
+  thresholdShare,
+  unixSeconds,
+  watts,
+  type WorkoutRescue,
+} from '@onyourleft/domain';
 import { athleteId, workoutId, type AthleteRecord, type WorkoutRecord } from '@onyourleft/store';
 
 import { stubAnalysis } from '../src/analysis/testing';
+import type { RideSnapshot } from '../src/ride/controller';
 import { ridingSnapshot, stubRideController } from '../src/ride/testing';
 import { AppShell } from '../src/shell/AppShell';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
+import { workoutRescueText } from '../src/workout/rescue-text';
 import { workoutStub } from '../src/workouts/testing';
 
 // The shipping stylesheet, which is the whole point — see this file's header.
@@ -102,6 +111,54 @@ const WORKOUT: WorkoutRecord = {
   createdAt: unixSeconds(1),
   updatedAt: unixSeconds(1),
 };
+
+/**
+ * `rideview.html?workout=eased` — #605: a workout RUNNING, with the stall
+ * rescue holding its target at the trainer's floor. `?workout=running` is the
+ * same workout with no rescue, which is the apparatus's control: the notice
+ * this page is asked to measure must be ABSENT there.
+ *
+ * ⚠️ **Through the stub controller's snapshot, not the real controller**, for
+ * the reason the rest of this page is: the geometry is what is measured, and
+ * `WorkoutPanel` renders the notice from `RideWorkoutSnapshot.rescue` exactly
+ * as it does from the real one (`controller.ts` §`rescue`). What the real
+ * player puts there is `ride-announcer.a11y.test.tsx`'s and
+ * `workout/session.test.ts`'s to assert, not a layout gate's.
+ *
+ * ⚠️ **The floor, with "Pedalling has stopped"**, because of the rescue's
+ * producible sentences it is the longest WHOLE one — only the floor adds the
+ * two-step way back — and the whole one is what a rider who opens *How the
+ * target comes back* reads. The longest HEADLINE is the spiralling relief's
+ * (84 characters against 78), which is six characters on a line that wraps
+ * at about 60, so it is the whole sentence that binds.
+ */
+const WORKOUT_STATE = new URLSearchParams(window.location.search).get('workout');
+
+const FLOOR: WorkoutRescue = {
+  kind: 'floor',
+  reason: 'Pedalling has stopped, so the target has been dropped to the trainer’s lowest.',
+};
+
+function snapshot(): RideSnapshot {
+  const riding = ridingSnapshot();
+  if (WORKOUT_STATE !== 'eased' && WORKOUT_STATE !== 'running') {
+    return riding;
+  }
+  return {
+    ...riding,
+    workout: {
+      name: WORKOUT.name,
+      status: 'running',
+      elapsedSeconds: 312,
+      totalSeconds: 720,
+      holdingWatts: WORKOUT_STATE === 'eased' ? 0 : 225,
+      nowRiding: '12 min at 90%',
+      fault: undefined,
+      rescue: WORKOUT_STATE === 'eased' ? FLOOR : undefined,
+      timeline: expandWorkout(WORKOUT.workout),
+    },
+  };
+}
 
 export interface Box {
   readonly left: number;
@@ -143,6 +200,8 @@ export interface RideViewMeasurement {
   readonly pageOverflow: number;
   /** What `theme.css` resolved a metric card's background to, as a load check. */
   readonly cardBackground: string;
+  /** #605: the workout's Eased notice, disclosure included, if there is one. */
+  readonly eased: { readonly box: Box; readonly text: string; readonly open: boolean } | undefined;
 }
 
 declare global {
@@ -155,6 +214,10 @@ declare global {
       readonly constrain: () => void;
       /** #439's control. @see ride-harness.tsx §restoreFullHeightShell */
       readonly restoreFullHeightShell: () => void;
+      /** #605: open *How the target comes back*, as a rider's press does. */
+      readonly openEasedDetail: () => void;
+      /** #605's control: the running workout as #585 shipped it. @see restoreAsShipped */
+      readonly restoreAsShipped: () => void;
     };
   }
 }
@@ -197,7 +260,9 @@ function measure(): RideViewMeasurement {
       continue;
     }
     groups[group] = boxOf(root);
-    for (const control of root.querySelectorAll('button, select, input')) {
+    // `summary` since #605: *How the target comes back* is a control a rider
+    // presses, so it is held to being on the screen like any other.
+    for (const control of root.querySelectorAll('button, select, input, summary')) {
       const box = boxOf(control);
       const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
       controls.push({
@@ -226,7 +291,68 @@ function measure(): RideViewMeasurement {
     scrollY: window.scrollY,
     pageOverflow: document.documentElement.scrollHeight - window.innerHeight,
     cardBackground: card === null ? '' : window.getComputedStyle(card).backgroundColor,
+    eased: easedNotice(),
   };
+}
+
+/** The Eased notice's surface: the status with its disclosure, as laid out. */
+function easedElement(): Element | undefined {
+  return [...document.querySelectorAll('.oyl-ride__group--trainer .oyl-status')].find(
+    (each) => textOf(each.querySelector('.oyl-status__label') ?? each) === 'Eased:',
+  );
+}
+
+function easedNotice(): RideViewMeasurement['eased'] {
+  const notice = easedElement();
+  if (notice === undefined) {
+    return undefined;
+  }
+  return {
+    box: boxOf(notice),
+    text: textOf(notice),
+    open: notice.querySelector('details')?.open ?? false,
+  };
+}
+
+function openEasedDetail(): void {
+  const summary = easedElement()?.querySelector('summary');
+  if (!(summary instanceof HTMLElement)) {
+    throw new Error('rideview harness: the Eased notice has no disclosure to open');
+  }
+  summary.click();
+}
+
+/**
+ * #605's control: the running workout's section as #585 shipped it — the
+ * WHOLE Eased sentence on the screen, four sentences and no disclosure, and
+ * *End workout* LAST, after the three lines of reading. Rewritten on the live
+ * elements rather than rendered from a second component, so it is the same
+ * surface, in the same column, under the same stylesheet.
+ *
+ * ⚠️ **What it does NOT put back is the ERG form**, which #605 stopped
+ * offering while a workout runs (`TrainerPanel.tsx` §`workoutOwnsTarget`): a
+ * form is state a harness cannot fake honestly. That half is proven by the
+ * mutation recorded in the pull request — the prop forced to `false` — and by
+ * `TrainerPanel.test.tsx` §"#605".
+ */
+function restoreAsShipped(): void {
+  const notice = easedElement();
+  const section = notice?.closest('section');
+  const end = [...(section?.querySelectorAll('button') ?? [])].find(
+    (each) => textOf(each) === 'End workout',
+  );
+  const glyph = notice?.querySelector('.oyl-status__glyph')?.cloneNode(true);
+  const label = notice?.querySelector('.oyl-status__label')?.cloneNode(true);
+  if (notice === undefined || !section || !end || !glyph || !label) {
+    throw new Error('rideview harness: there is no running workout with an Eased notice');
+  }
+  const long = document.createElement('p');
+  long.className = notice.className;
+  const body = document.createElement('span');
+  body.append(label, workoutRescueText(FLOOR, 'ride-screen'));
+  long.append(glyph, body);
+  notice.replaceWith(long);
+  section.append(end);
 }
 
 function constrain(): void {
@@ -282,7 +408,7 @@ async function run(): Promise<void> {
       <StrictMode>
         <AppShell
           capabilities={NO_BLUETOOTH}
-          rideController={stubRideController(ridingSnapshot()).controller}
+          rideController={stubRideController(snapshot()).controller}
           workouts={workoutStub(ATHLETE, [WORKOUT])}
           analysis={stubAnalysis(ATHLETE, [], RIDER)}
         />
@@ -294,17 +420,48 @@ async function run(): Promise<void> {
   // list AND the threshold have both been read, so waiting for it is what
   // makes the fixture "the state with the most on the screen" rather than
   // whichever state the page happened to be in when the spec looked.
-  await until('the control that starts a workout', () =>
-    [...document.querySelectorAll('.oyl-ride__group--trainer button')].find(
-      (each) => textOf(each) === `Ride ${WORKOUT.name}`,
-    ),
-  );
+  //
+  // #605: with a workout running there is no such control — `WorkoutPanel`
+  // shows the running workout instead, so the wait is for *End workout* and,
+  // when this page was asked for one, the Eased notice.
+  if (WORKOUT_STATE === 'eased' || WORKOUT_STATE === 'running') {
+    await until('the running workout', () =>
+      [...document.querySelectorAll('.oyl-ride__group--trainer button')].find(
+        (each) => textOf(each) === 'End workout',
+      ),
+    );
+    if (WORKOUT_STATE === 'eased') {
+      await until('the Eased notice', easedElement);
+    }
+  } else {
+    await until('the control that starts a workout', () =>
+      [...document.querySelectorAll('.oyl-ride__group--trainer button')].find(
+        (each) => textOf(each) === `Ride ${WORKOUT.name}`,
+      ),
+    );
+  }
   await document.fonts.ready;
 
-  window.__oylRideView = { ready: true, errors, measure, constrain, restoreFullHeightShell };
+  window.__oylRideView = {
+    ready: true,
+    errors,
+    measure,
+    constrain,
+    restoreFullHeightShell,
+    openEasedDetail,
+    restoreAsShipped,
+  };
 }
 
 run().catch((error: unknown) => {
   errors.push(error instanceof Error ? error.message : String(error));
-  window.__oylRideView = { ready: false, errors, measure, constrain, restoreFullHeightShell };
+  window.__oylRideView = {
+    ready: false,
+    errors,
+    measure,
+    constrain,
+    restoreFullHeightShell,
+    openEasedDetail,
+    restoreAsShipped,
+  };
 });

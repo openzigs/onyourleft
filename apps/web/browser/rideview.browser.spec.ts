@@ -172,12 +172,12 @@ const TABLETS: readonly Viewport[] = [
   SMALL_TABLET_IN_THE_SHELL,
 ];
 
-async function open(page: Page, viewport: Viewport): Promise<void> {
+async function open(page: Page, viewport: Viewport, query = ''): Promise<void> {
   await page.setViewportSize({ width: viewport.width, height: viewport.height });
   if (viewport.insets !== undefined) {
     await applyInsets(page, viewport.insets);
   }
-  const response = await page.goto('/rideview.html');
+  const response = await page.goto(`/rideview.html${query}`);
   expect(
     response?.status(),
     'rideview.html did not load — is it named in vite.browser.config.ts build.rollupOptions.input?',
@@ -438,6 +438,163 @@ for (const viewport of [TABLET_IN_THE_SHELL, TABLET_UPRIGHT_IN_THE_SHELL]) {
 
       expect(fixed.pageOverflow).toBeGreaterThan(0);
       expect(reverted.pageOverflow).toBe(fixed.pageOverflow);
+    });
+  });
+}
+
+/**
+ * #605 — a workout RUNNING with the stall rescue holding its target at the
+ * trainer's floor, on the Ride screen (PR #599's review, item 1).
+ *
+ * ⚠️ **What building this state found.** Nothing had measured the Ride screen
+ * with a workout running at all — the fixture above is the CHOOSER, whose
+ * *Ride* control was the one #422 was about. Running, at 1280×800 inside the
+ * Android shell, *End workout* was the LAST thing in the trainer column,
+ * under a 248 px ERG form every press of which the controller refuses while a
+ * workout runs, three lines of reading, and the four-sentence Eased notice:
+ * **233 px under the fold** — the control that ends what is holding a stalled
+ * rider, off the screen. With no rescue it cleared the fold by 24 px, under
+ * {@link FOLD_MARGIN_PIXELS}. Three changes, each measured:
+ *
+ *   - the ERG form is not offered while a workout owns the target
+ *     (`TrainerPanel.tsx` §`workoutOwnsTarget`) — 183 px;
+ *   - *End workout* comes first in the running section, the reading last
+ *     (`WorkoutPanel.tsx` §`riding`);
+ *   - the Eased notice is ONE sentence on the screen, the rest behind *How
+ *     the target comes back* (`workout/rescue-text.ts` §`workoutRescueHeadline`,
+ *     the owner's ruling on #605) — 55 px, which is the headroom #669's 48 px
+ *     controls will spend.
+ *
+ * The control puts the section back as #585 shipped it — the whole sentence,
+ * and *End workout* last — and requires *End workout* to fall under the
+ * floor again. It does NOT put the ERG form back; that half is a mutation in
+ * the pull request, and `TrainerPanel.test.tsx` §"#605".
+ */
+const EASED = '?workout=eased';
+
+/** The margin to the fold of a box's bottom edge. */
+function foldMargin(bottom: number, viewport: Viewport): number {
+  return viewport.height - insetsOf(viewport).bottom - bottom;
+}
+
+for (const viewport of TABLETS) {
+  test.describe(`a workout eased — #605 — ${viewport.name}`, () => {
+    /**
+     * ⚠️ The apparatus. A page that rendered the chooser, or a running
+     * workout with no rescue, has no Eased notice — and every margin below
+     * would be taken over controls that were never pushed down by one.
+     */
+    test('the harness rendered a running workout with its Eased notice, one sentence showing', async ({
+      page,
+    }) => {
+      await open(page, viewport, EASED);
+      const seen = await measure(page);
+
+      const names = seen.controls.map((each) => each.name);
+      expect(names).toEqual(
+        expect.arrayContaining(['Pause', 'Stop', 'End workout', 'How the target comes back']),
+      );
+      expect(names).not.toContain(STARTS_A_WORKOUT);
+      // The ERG form is not offered while the workout owns the target.
+      expect(names).not.toContain('Set target');
+      expect(names).not.toContain('End ERG');
+
+      expect(seen.eased?.box.height ?? 0).toBeGreaterThan(40);
+      expect(seen.eased?.open).toBe(false);
+      // The one visible sentence is the rescue's own reason, and the detail
+      // is in the document but closed.
+      const sentence = await page.evaluate(
+        () =>
+          document.querySelector('.oyl-ride__group--trainer .oyl-status__sentence')?.textContent ??
+          '',
+      );
+      expect(sentence).toBe(
+        'Eased: Pedalling has stopped, so the target has been dropped to the trainer’s lowest.',
+      );
+      expect(seen.eased?.text).toContain('Press End workout to leave it.');
+    });
+
+    test('with no rescue there is no Eased notice — the apparatus’s control', async ({ page }) => {
+      await open(page, viewport, '?workout=running');
+      const seen = await measure(page);
+
+      expect(seen.controls.map((each) => each.name)).toContain('End workout');
+      expect(seen.eased).toBeUndefined();
+    });
+
+    test('the notice and every ride control are on screen, and clear the fold by a margin', async ({
+      page,
+    }, testInfo) => {
+      await open(page, viewport, EASED);
+      const seen = await measure(page);
+
+      expect(seen.scrollY).toBe(0);
+      const during = seen.controls.filter((each) => each.group !== 'sensors');
+      expect(during.filter((each) => !onScreen(each, viewport)).map(describeControl)).toEqual([]);
+
+      const lowest = during.reduce((low, each) => (each.box.bottom > low.box.bottom ? each : low));
+      const end = during.find((each) => each.name === 'End workout');
+      const controlMargin = foldMargin(lowest.box.bottom, viewport);
+      const endMargin = foldMargin(end?.box.bottom ?? Infinity, viewport);
+      const noticeMargin = foldMargin(seen.eased?.box.bottom ?? Infinity, viewport);
+      const note =
+        `lowest control ${controlMargin.toFixed(1)} px (${describeControl(lowest)}); ` +
+        `End workout ${endMargin.toFixed(1)} px; the Eased notice ${noticeMargin.toFixed(1)} px, ` +
+        `${(seen.eased?.box.height ?? 0).toFixed(0)} px tall — at ${String(viewport.width)}×${String(viewport.height)}`;
+      testInfo.annotations.push({ type: 'workout eased, margin to the fold', description: note });
+      console.log(`workout eased, margin to the fold — ${note}`);
+
+      expect(controlMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+      expect(noticeMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+      expect((seen.eased?.box.top ?? -1) >= insetsOf(viewport).top).toBe(true);
+    });
+
+    test('opening the detail moves no control', async ({ page }, testInfo) => {
+      await open(page, viewport, EASED);
+      const closed = await measure(page);
+      await page.evaluate(() => {
+        window.__oylRideView?.openEasedDetail();
+      });
+      const opened = await measure(page);
+
+      expect(opened.eased?.open).toBe(true);
+      expect(opened.eased?.box.height ?? 0).toBeGreaterThan((closed.eased?.box.height ?? 0) + 20);
+      const at = (seen: typeof closed, name: string): number | undefined =>
+        seen.controls.find((each) => each.name === name)?.box.top;
+      for (const name of ['Pause', 'Stop', 'End workout', 'How the target comes back']) {
+        expect(at(opened, name), name).toBe(at(closed, name));
+      }
+      const note = `the opened notice ends ${foldMargin(opened.eased?.box.bottom ?? Infinity, viewport).toFixed(1)} px above the fold`;
+      testInfo.annotations.push({ type: 'workout eased, detail open', description: note });
+      console.log(`workout eased, detail open — ${viewport.name} — ${note}`);
+      // Published, and held to the fold itself rather than the floor: the
+      // rider opened it, and a longer read that scrolls is a page, not a
+      // control lost.
+      expect(foldMargin(opened.eased?.box.bottom ?? Infinity, viewport)).toBeGreaterThanOrEqual(0);
+    });
+
+    test('the control — as #585 shipped it, End workout is under the floor', async ({
+      page,
+    }, testInfo) => {
+      await open(page, viewport, EASED);
+      await page.evaluate(() => {
+        window.__oylRideView?.restoreAsShipped();
+      });
+      const seen = await measure(page);
+
+      expect(seen.eased?.text).toContain('Press End workout to leave it.');
+      expect(seen.eased?.open).toBe(false);
+      const end = seen.controls.find((each) => each.name === 'End workout');
+      expect(end?.box.height ?? 0).toBeGreaterThan(0);
+      const margin = foldMargin(end?.box.bottom ?? -Infinity, viewport);
+      testInfo.annotations.push({
+        type: 'control, End workout margin',
+        description: `${margin.toFixed(1)} px`,
+      });
+      console.log(
+        `workout eased, as #585 shipped it — ${viewport.name} — End workout ${margin.toFixed(1)} px`,
+      );
+      expect(margin).toBeLessThan(FOLD_MARGIN_PIXELS);
     });
   });
 }

@@ -10,7 +10,7 @@ import {
   type WorkoutRescue,
 } from '@onyourleft/domain';
 
-import { workoutRescueText } from './rescue-text';
+import { workoutRescueDetail, workoutRescueHeadline, workoutRescueText } from './rescue-text';
 
 const FLOOR: WorkoutRescue = { kind: 'floor', reason: CADENCE_SILENT_REASON };
 const RELIEF: WorkoutRescue = { kind: 'relief', share: RELIEF_SHARE, reason: RECOVERING_REASON };
@@ -37,5 +37,18 @@ describe('what a rider is told while a workout’s target is eased — #585', ()
     expect(workoutRescueText(RELIEF, 'game')).toMatch(
       /End the workout on the Ride screen to leave it\.$/,
     );
+  });
+
+  it('splits into the one sentence a screen shows and the rest — #605', () => {
+    expect(workoutRescueHeadline(FLOOR)).toBe(CADENCE_SILENT_REASON);
+    for (const rescue of [FLOOR, RELIEF]) {
+      for (const place of ['ride-screen', 'game'] as const) {
+        const detail = workoutRescueDetail(rescue, place);
+        expect(detail).not.toContain(rescue.reason);
+        // What is spoken is still all of it, in order.
+        expect(workoutRescueText(rescue, place)).toBe(`${rescue.reason} ${detail}`);
+      }
+    }
+    expect(workoutRescueDetail(FLOOR, 'ride-screen')).toMatch(/^Once you are pedalling again/);
   });
 });

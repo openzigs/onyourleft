@@ -409,9 +409,15 @@ export const RIDE_NOTIFICATION_REFUSED =
 
 /**
  * What a rider who sets an ERG target by hand during a workout is told (#542's
- * review). It names what to do instead, because the form is still on screen.
+ * review). It names what to do instead.
+ *
+ * ⚠️ **Since #605 the Ride screen does not offer the form while a workout
+ * runs**, and says this sentence in its place (`TrainerPanel.tsx`
+ * §`workoutOwnsTarget`) — so a rider reads it before pressing anything rather
+ * than after. The refusal in {@link RideController.setTargetPower} stays: a
+ * caller that never read the snapshot still cannot reach the machine.
  */
-const MANUAL_ERG_DURING_WORKOUT =
+export const MANUAL_ERG_DURING_WORKOUT =
   'A workout is setting the trainer’s target. End the workout to set one by hand.';
 
 /**

@@ -304,3 +304,37 @@ describe('why the target is eased — #585', () => {
     expect(shown(view.container)).not.toContain(CADENCE_SILENT_REASON);
   });
 });
+
+describe('what a stalled rider sees first — #605', () => {
+  const STALLED: WorkoutRescue = {
+    kind: 'floor',
+    reason: 'Pedalling has stopped, so the target has been dropped to the trainer’s lowest.',
+  };
+
+  it('shows ONE sentence, with the way back and the way out behind a closed disclosure', async () => {
+    const view = await render({ workout: running({ rescue: STALLED }) });
+    const sentence = view.container.querySelector('section .oyl-status__sentence');
+    expect(sentence?.textContent).toBe(`Eased: ${STALLED.reason}`);
+    const details = view.container.querySelector('section .oyl-status details');
+    expect(details).not.toBeNull();
+    expect((details as HTMLDetailsElement).open).toBe(false);
+    expect(details?.textContent).toContain('Press End workout to leave it.');
+  });
+
+  it('puts End workout before the notice, and the reading after both', async () => {
+    const view = await render({ workout: running({ rescue: STALLED }) });
+    const section = view.container.querySelector('section');
+    const end = buttonSaying(section ?? view.container, 'End workout');
+    const notice = section?.querySelector('.oyl-status');
+    const holding = queryAll<HTMLElement>(section ?? view.container, 'p').find((each) =>
+      (each.textContent ?? '').startsWith('Holding'),
+    );
+    if (end === undefined || notice === null || notice === undefined || holding === undefined) {
+      throw new Error('the running section is missing a part');
+    }
+    const follows = (a: Node, b: Node): boolean =>
+      (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    expect(follows(end, notice)).toBe(true);
+    expect(follows(notice, holding)).toBe(true);
+  });
+});

@@ -62,6 +62,7 @@ import { applyInsets, PIXEL_TABLET_LANDSCAPE_INSETS, resolvedInsets } from './in
 
 import { riderFrameBox } from '../src/game/camera';
 import { MAXIMUM_LEAN_RADIANS } from '../src/game/racing-line';
+import { workoutRescueText } from '../src/workout/rescue-text';
 
 import type { Box, StageItem, StageMeasurement } from './ride-harness';
 
@@ -611,6 +612,43 @@ function easedCollisions(seen: StageMeasurement, viewport: Viewport): string[] {
   return found;
 }
 
+/**
+ * #605 — how far the Eased notice must end above the leaning rider's box on an
+ * UPRIGHT screen, where the notice is stacked over the sky and the rider is
+ * under it. The number §4f treats as proven on a device: #585 shipped this at
+ * 2 px on the CI runner (20 on a Mac), which was inside the gate and proved
+ * nothing about a Pixel 8's fonts. The one-sentence notice clears it by the
+ * figure each run prints.
+ */
+const EASED_RIDER_CLEARANCE_PIXELS = 50;
+
+/** The sentence the ride harness's rescue has, whole — as #585 put it on the HUD. */
+const WHOLE_EASED_SENTENCE = workoutRescueText(
+  {
+    kind: 'floor',
+    reason: 'Pedalling has stopped, so the target has been dropped to the trainer’s lowest.',
+  },
+  'game',
+);
+
+/**
+ * Put the whole sentence back in the Eased notice on the live page — the HUD
+ * as #585 shipped it, before #605 cut it to its headline. Same element, same
+ * surface, same cell: only the words change.
+ */
+async function restoreWholeEasedSentence(page: Page): Promise<void> {
+  await page.evaluate((whole) => {
+    const label = [...document.querySelectorAll('.oyl-hud__notices .oyl-status__label')].find(
+      (each) => each.textContent?.startsWith('Eased'),
+    );
+    const body = label?.parentElement;
+    if (label === undefined || body === null || body === undefined) {
+      throw new Error('no Eased notice to restore');
+    }
+    body.replaceChildren(label, whole);
+  }, WHOLE_EASED_SENTENCE);
+}
+
 /** The HUD's notice cell as a rider reads it. */
 async function noticeText(page: Page): Promise<string> {
   return page.evaluate(() => document.querySelector('.oyl-hud__notices')?.textContent ?? '');
@@ -661,6 +699,35 @@ test.describe('a ride with a workout eased — #585', () => {
       );
 
       expect(easedCollisions(seen, viewport)).toEqual([]);
+      // #605: the ONE sentence, and upright a margin above the rider rather
+      // than a pass. @see EASED_RIDER_CLEARANCE_PIXELS
+      expect(text).not.toContain('comes back by itself');
+      if (viewport.height > viewport.width) {
+        expect(rider.top - (notice?.box.bottom ?? Infinity)).toBeGreaterThanOrEqual(
+          EASED_RIDER_CLEARANCE_PIXELS,
+        );
+      }
+    });
+  }
+
+  // #605's control: the whole sentence back in the same notice, at the
+  // viewport #605 was about. It must fall under the clearance again — which is
+  // #585 as it shipped, 2 px on the CI runner — or the floor above is being
+  // held over a notice that could never have been near the rider.
+  for (const viewport of OVERLAY_VIEWPORTS.filter((each) => each.height === 752)) {
+    test(`the control — the whole sentence comes within ${String(EASED_RIDER_CLEARANCE_PIXELS)} px of the rider — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openRide(page, viewport, QUERY);
+      await restoreWholeEasedSentence(page);
+      const seen = await measure(page);
+      expect(await noticeText(page)).toContain('comes back by itself');
+      const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
+      const clearance = riderBox(viewport).top - (notice?.box.bottom ?? Infinity);
+      console.log(
+        `workout eased, the whole sentence — ${viewport.name} — ${clearance.toFixed(0)} px above the rider's box`,
+      );
+      expect(clearance).toBeLessThan(EASED_RIDER_CLEARANCE_PIXELS);
     });
   }
 
@@ -676,6 +743,10 @@ test.describe('a ride with a workout eased — #585', () => {
       page,
     }) => {
       await openRide(page, viewport, QUERY);
+      // As PR #599 shipped it: the WHOLE Eased sentence, which #605 cut to its
+      // headline — with the headline alone the two notices together fit a
+      // phone on its side, so this would be a control that could not fail.
+      await restoreWholeEasedSentence(page);
       await page.evaluate(() => {
         const eased = document.querySelector('.oyl-hud__notices .oyl-status');
         if (eased === null) throw new Error('no Eased notice to put the road notice beside');

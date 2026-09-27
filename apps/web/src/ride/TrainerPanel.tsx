@@ -65,7 +65,7 @@ import { TREND_WINDOW, watts, type Watts } from '@onyourleft/domain';
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
 
-import type { TrainerSnapshot } from './controller';
+import { MANUAL_ERG_DURING_WORKOUT, type TrainerSnapshot } from './controller';
 import type { ManualErgRescue } from './manual-erg';
 
 /**
@@ -136,6 +136,26 @@ export interface TrainerPanelProps {
   readonly onRequestControl: () => void;
   readonly onSetTargetPower: (target: Watts) => void;
   readonly onClearTarget: () => void;
+  /**
+   * A workout is loaded and owns the trainer's target — #605. The ERG form is
+   * then not offered: every *Set target* would be refused
+   * ({@link MANUAL_ERG_DURING_WORKOUT}) and *End ERG* would end the workout,
+   * which *End workout* already does. "Offering a control the trainer will
+   * refuse is worse than not offering it" (the *No ERG* branch below) applies
+   * as much to a control THIS app will refuse.
+   *
+   * ⚠️ **Measured, and it is why this is here rather than a tidy-up.** With a
+   * workout running the form was 248 px of the trainer column, and with the
+   * workout eased it put *End workout* 233 px under the fold at 1280×800
+   * inside the Android shell — a stalled rider could not see the control that
+   * ends what is holding them. Without a rescue it cleared the fold by 24 px,
+   * under §4f's 50. `rideview.browser.spec.ts` §"#605".
+   *
+   * Required rather than optional, so a screen that forgets it is a compile
+   * error rather than a form that comes back (CLAUDE.md §4j's §Limits: an
+   * optional prop nobody supplies is invisible to the wiring gate).
+   */
+  readonly workoutOwnsTarget: boolean;
 }
 
 export function TrainerPanel({
@@ -143,6 +163,7 @@ export function TrainerPanel({
   onRequestControl,
   onSetTargetPower,
   onClearTarget,
+  workoutOwnsTarget,
 }: TrainerPanelProps): JSX.Element {
   const [draft, setDraft] = useState('150');
   /** A target this app refused before writing it. See {@link submit}. */
@@ -297,7 +318,12 @@ export function TrainerPanel({
         <Button onClick={onRequestControl}>Ask the trainer for control</Button>
       )}
 
-      {!ergShown ? null : !trainer.canSetPower ? (
+      {!ergShown ? null : workoutOwnsTarget ? (
+        // #605: the sentence the refusal would have said, before the press.
+        <p className="oyl-trainer__erg">
+          <strong>ERG, optional:</strong> {MANUAL_ERG_DURING_WORKOUT}
+        </p>
+      ) : !trainer.canSetPower ? (
         // Target Setting bit 3 is clear. Offering a control the trainer will
         // refuse is worse than not offering it — the revision block says so in
         // as many words — so the form is not rendered at all. ⚠️ Since #503

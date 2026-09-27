@@ -231,6 +231,9 @@ function LiveRide({
           onClearTarget={() => {
             void controller.clearTargetPower();
           }}
+          // #605: while a workout is loaded it owns the target, finished or not
+          // — `controller.ts` §`setTargetPower` refuses on exactly this.
+          workoutOwnsTarget={snapshot.workout !== undefined}
         />
         <WorkoutPanel
           trainer={snapshot.trainer}

@@ -95,3 +95,30 @@ describe('the live region', () => {
     expect(mounted.container.querySelector('[role="status"]')).not.toBeNull();
   });
 });
+
+describe('more to read — #605', () => {
+  it('keeps the sentence on the screen and puts only the rest behind a closed disclosure', async () => {
+    mounted = await mount(
+      <StatusMessage tone="warning" label="Eased" more={{ summary: 'Why', detail: 'The rest.' }}>
+        The one sentence.
+      </StatusMessage>,
+    );
+    const root = mounted.container.querySelector('.oyl-status');
+    // A `<details>` may not be inside a paragraph, so the root is not one.
+    expect(root?.tagName).toBe('DIV');
+    const sentence = root?.querySelector('.oyl-status__sentence');
+    expect(sentence?.textContent).toBe('Eased: The one sentence.');
+    expect(sentence?.closest('details')).toBeNull();
+    const details = root?.querySelector('details');
+    expect(details?.open).toBe(false);
+    expect(details?.querySelector('summary')?.textContent).toBe('Why');
+    expect(details?.textContent).toContain('The rest.');
+    expect(details?.textContent).not.toContain('The one sentence.');
+  });
+
+  it('is a paragraph with no disclosure without it — the control', async () => {
+    const container = await render('warning');
+    expect(container.querySelector('.oyl-status')?.tagName).toBe('P');
+    expect(container.querySelector('details')).toBeNull();
+  });
+});

@@ -18,7 +18,7 @@
 
 import { describe, expect, it, afterEach } from 'vitest';
 
-import { seconds, watts } from '@onyourleft/domain';
+import { expandWorkout, seconds, thresholdShare, watts } from '@onyourleft/domain';
 import { createSimulator } from '@onyourleft/sensors/simulator';
 import { recordingSessionId, type UnitSystem } from '@onyourleft/store';
 import {
@@ -38,7 +38,11 @@ import {
   type Mounted,
 } from '../testing/mount';
 
-import { createRideController, RIDE_NOTIFICATION_REFUSED } from '../ride/controller';
+import {
+  createRideController,
+  MANUAL_ERG_DURING_WORKOUT,
+  RIDE_NOTIFICATION_REFUSED,
+} from '../ride/controller';
 import type { RecordingCheckpointStore } from '../recording/recorder';
 import { formatDuration } from '../format';
 import { UnitsProvider } from '../units/context';
@@ -776,5 +780,42 @@ describe('#526 — a refused notification permission is said in words', () => {
     await show(stub);
 
     expect(document.body.textContent).not.toContain('Recording ride” notification');
+  });
+});
+
+describe('a running workout owns the target — #605', () => {
+  const blocks = [{ kind: 'steady' as const, seconds: seconds(600), target: thresholdShare(0.6) }];
+  const workout = {
+    name: 'Sweet spot',
+    status: 'running' as const,
+    elapsedSeconds: 120,
+    totalSeconds: 600,
+    holdingWatts: 150,
+    nowRiding: '10 min at 60%',
+    fault: undefined,
+    rescue: undefined,
+    timeline: expandWorkout({ name: 'Sweet spot', blocks }),
+  };
+
+  it('does not offer the ERG form while a workout is loaded, and says why', async () => {
+    const stub = stubRideController({ ...ridingSnapshot(), workout });
+    await show(stub);
+
+    expect(document.querySelector('#oyl-erg-target')).toBeNull();
+    expect(document.body.textContent).toContain(MANUAL_ERG_DURING_WORKOUT);
+    expect(buttonNamed('End workout')).toBeDefined();
+    expect(queryAll(document, 'button').map((each) => each.textContent?.trim())).not.toContain(
+      'End ERG',
+    );
+  });
+
+  it('offers it again once the workout is gone — the control', async () => {
+    const stub = stubRideController({ ...ridingSnapshot(), workout });
+    await show(stub);
+    stub.set({ workout: undefined });
+    await settle();
+
+    expect(document.querySelector('#oyl-erg-target')).not.toBeNull();
+    expect(document.body.textContent).not.toContain(MANUAL_ERG_DURING_WORKOUT);
   });
 });
