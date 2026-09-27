@@ -1263,6 +1263,14 @@ function drawnGroundPosition(
  * that is the one key that cannot go stale — and against the origin's two
  * numbers as well, so a caller with another origin gets another table rather
  * than a wrong one.
+ *
+ * ⚠️ **It holds ONE origin per profile** (#581, from #569's review). A second
+ * origin for the same profile rebuilds the table and REPLACES the first, so two
+ * callers alternating origins over one profile rebuild it on every call — still
+ * correct, never cheap. Nothing does that today: a ride has one origin, which
+ * is what `terrain.test.ts` §"draws the road from the origin it is handed"
+ * holds from the correctness side only. A caller that needs two is a reason to
+ * key on the origin too, not to share this entry.
  */
 function centrelineIntegral(
   profile: RouteProfile,

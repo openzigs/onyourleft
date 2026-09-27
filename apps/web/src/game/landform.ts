@@ -837,6 +837,13 @@ const CLEAR_REACH_STEPS = 8;
  * {@link clearReach}'s grid and the lists it empties into it, kept from one
  * frame to the next — #569. The grid's contents are rebuilt every call; only
  * the storage is kept, as `terrainScratch` keeps the ground's (#469).
+ *
+ * ⚠️ **Module scratch makes {@link clearReach} NON-REENTRANT** (#581, from
+ * #569's review). One grid serves every call, so two calls interleaved — a
+ * second landform built from inside the first, or from a worker sharing this
+ * module instance — would empty each other's lists mid-walk. Nothing does
+ * either today: a landform is built synchronously, start to finish, on one
+ * thread. Anything that changes that owes this grid a per-caller copy.
  */
 const clearCells = new Map<number, number[]>();
 const clearListPool: number[][] = [];
