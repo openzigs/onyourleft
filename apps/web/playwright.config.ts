@@ -135,6 +135,28 @@ export const LAUNCH_ARGS = [
   '--disable-features=WebRtcHideLocalIpsWithMdns',
 ];
 
+/**
+ * How long the whole run may take before it stops itself — #651.
+ *
+ * ⚠️ The job's `timeout-minutes` is 20, and this has to END before it does or
+ * the run reports nothing. The browser gate starts about four and a half
+ * minutes into the job on the slowest runner measured (run 36320822283 reached
+ * `Browser gate` at 8m34s serially; with the checks before it run concurrently
+ * it is under five), and nothing after it but the coverage upload. Twelve
+ * minutes ends it by about seventeen, three clear of the stop — and it is more
+ * than twice the gate's green time on that runner, so it is not a budget a
+ * green run comes near. `game.browser.spec.ts` §`paysForTheRealisticLoad` is the sum it
+ * has to hold.
+ */
+export const GATE_BUDGET_MS = 12 * 60_000;
+
+/** The game spec, which the projects below split by the load its cases read. */
+const GAME_SPEC = /game\.browser\.spec\.ts$/;
+/** Describes that read `?realistic` — `game.browser.spec.ts` §`REALISTIC_LOAD`. */
+const REALISTIC_LOAD_TAG = /@realistic-load/;
+/** Describes that read `?realistic&trees` — `game.browser.spec.ts` §`TREES_LOAD`. */
+const TREES_LOAD_TAG = /@trees-load/;
+
 export default defineConfig({
   testDir: './browser',
   testMatch: '**/*.browser.spec.ts',
@@ -182,5 +204,46 @@ export default defineConfig({
       stdout: 'pipe',
     },
   ],
-  projects: [{ name: 'chromium', use: devices['Desktop Chrome'] }],
+  // ⚠️ **A backstop, not a budget — #651.** The required job stops at
+  // `timeout-minutes` and a job the runner cancels reports NOTHING: no failed
+  // case, no describe, only "cancelled". So the gate stops itself first and
+  // prints which cases were interrupted. Every load has a budget of its own
+  // below this one (`game.browser.spec.ts` §`REALISTIC_LOAD_BUDGET_MS`), and the
+  // arithmetic that fits them all inside it is in that file, §`paysForTheRealisticLoad`; this is
+  // what still reports when something with no budget of its own hangs.
+  globalTimeout: GATE_BUDGET_MS,
+  // ⚠️ **Four projects, one browser, one run — #651.** Playwright queues every
+  // group of one worker fixture after every group of another, and the game
+  // spec's shared harness load (#456) IS a worker fixture — so its four page
+  // loads, the slowest things in the gate, used to run one after another in
+  // ONE worker at the very END, with the other worker idle: 232 s of the
+  // gate's 400 on the runner, measured on run 36320822283. Projects run in the
+  // order they are listed here, and a project is a group of its own, so the
+  // game spec is split by the load its cases read (a tag on the describe) and
+  // listed FIRST. Every case still runs exactly once, in exactly one project:
+  // `game` is the complement of the other two, by `grepInvert`.
+  //
+  // It is not a second browser and not a second job — one `playwright test`,
+  // one Chromium, the one `Repository rules` check (CLAUDE.md §4c).
+  projects: [
+    {
+      name: 'game-realistic',
+      testMatch: GAME_SPEC,
+      grep: REALISTIC_LOAD_TAG,
+      use: devices['Desktop Chrome'],
+    },
+    {
+      name: 'game-trees',
+      testMatch: GAME_SPEC,
+      grep: TREES_LOAD_TAG,
+      use: devices['Desktop Chrome'],
+    },
+    {
+      name: 'game',
+      testMatch: GAME_SPEC,
+      grepInvert: [REALISTIC_LOAD_TAG, TREES_LOAD_TAG],
+      use: devices['Desktop Chrome'],
+    },
+    { name: 'chromium', testIgnore: GAME_SPEC, use: devices['Desktop Chrome'] },
+  ],
 });

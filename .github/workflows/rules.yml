@@ -91,43 +91,47 @@ jobs:
       # CLAUDE.md section 4a. Every command below is one that file documents;
       # CI accumulating private knowledge is how a contributor's local green
       # becomes CI's red with no explanation.
-      - name: Repository rules (LIC001-4, LIC006, SCOPE001, WF001, ADR001-3)
-        run: bash scripts/check-repo-rules.sh
+      # The concurrency runner (#651) has a suite of its own and it runs FIRST,
+      # before anything is trusted to it: a runner that swallowed a failure
+      # would turn every concurrent step below into a gate removed, and a green
+      # step would look exactly the same. Bash only, like the checks after it.
+      - name: Concurrency runner tests
+        run: bash scripts/run-concurrently.test.sh
 
-      - name: Repository rule checker tests
-        run: bash scripts/check-repo-rules.test.sh
+      # ⚠️ Concurrently since #651, and a reviewer who remembers nine steps here
+      # is reading the old file. The same nine commands CLAUDE.md §4a lists,
+      # none of them removed; `run-concurrently.sh` runs them side by side,
+      # labels every line with the command it came from, fails the step if ANY
+      # of them fails, and prints each failing command's whole output again at
+      # the end. They are single-threaded bash and the runner has four CPUs.
+      #
+      # What each one is for:
+      #   LIC001-4, LIC006, SCOPE001, WF001, ADR001-4, SPIKE001-3, REL001-2,
+      #   XML001-4, ASSET001-7 -- check-repo-rules.sh, and its fixture suite.
+      #   LIC005 -- a silent edit to a licence text is a licensing incident, not
+      #   a typo, and it is the shape of diff a human reviewer scrolls past.
+      #   ENV001 -- every environment variable the code reads is templated.
+      #   DOC001/DOC002 -- relative links only; an external URL is not checked,
+      #   because that would need the network and turn a bare-clone gate into
+      #   one that fails on an aeroplane. See CLAUDE.md §4a.
 
-      # A silent edit to a licence text is a licensing incident, not a typo, and
-      # it is the shape of diff a human reviewer scrolls past.
-      - name: Licence text integrity (LIC005)
-        run: bash scripts/check-licence-hashes.sh
-
-      - name: Licence integrity checker tests
-        run: bash scripts/check-licence-hashes.test.sh
-
-      - name: Environment template completeness (ENV001)
-        run: bash scripts/check-env-example.sh
-
-      - name: Environment template checker tests
-        run: bash scripts/check-env-example.test.sh
-
-      # DOC001/DOC002. Relative links only — an external URL is not checked,
-      # because that would need the network and turn a bare-clone gate into one
-      # that fails on an aeroplane. See CLAUDE.md §4a.
-      - name: Documentation links (DOC001, DOC002)
-        run: bash scripts/check-doc-links.sh
-
-      - name: Documentation link checker tests
-        run: bash scripts/check-doc-links.test.sh
-
+      #
       # shellcheck is preinstalled on the standard Ubuntu runner image
       # (0.9.0 on ubuntu-24.04, which `ubuntu-latest` currently resolves to), so
       # there is nothing to install. The version is printed because the runner's
       # is older than a typical developer's and the two can disagree.
-      - name: Shell lint
-        run: |
-          shellcheck --version
-          shellcheck scripts/*.sh
+      - name: Bare-clone checks, concurrently
+        run: >-
+          bash scripts/run-concurrently.sh
+          'check-repo-rules' 'bash scripts/check-repo-rules.sh'
+          'check-repo-rules tests' 'bash scripts/check-repo-rules.test.sh'
+          'check-licence-hashes' 'bash scripts/check-licence-hashes.sh'
+          'check-licence-hashes tests' 'bash scripts/check-licence-hashes.test.sh'
+          'check-env-example' 'bash scripts/check-env-example.sh'
+          'check-env-example tests' 'bash scripts/check-env-example.test.sh'
+          'check-doc-links' 'bash scripts/check-doc-links.sh'
+          'check-doc-links tests' 'bash scripts/check-doc-links.test.sh'
+          'shellcheck' 'shellcheck --version && shellcheck scripts/*.sh'
 
       # --- The workspace toolchain, from here down (CLAUDE.md section 4a) ------
 
@@ -173,22 +177,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Formatting
-        run: pnpm run format:check
 
-      - name: Lint
-        run: pnpm run lint
-
-      - name: Typecheck
-        run: pnpm run typecheck
-
-      # `test:coverage`, not `test`. ADR 0005 decision C sets no percentage
-      # floor and forbids inventing one -- the gate is the mutation list in the
-      # pull request body. The report is here because an untested branch is
-      # worth seeing in review, and because it costs nothing to print.
-      - name: Tests and coverage report
-        run: pnpm run test:coverage
-
+      # ⚠️ Concurrently since #651, for the reason the bare-clone step gives:
+      # formatting, lint and the typecheck are mostly single-threaded, and so is
+      # every checker below, so one after another they left three of the
+      # runner's four CPUs idle for about four minutes. Every command is still
+      # the §4a command, every one still fails the step, and none is removed.
+      #
+      # Formatting, lint, typecheck: CLAUDE.md §4a.
+      #
+      # --- Accessibility ---
       # #48's fourth acceptance criterion: automated accessibility checks run on
       # every route and fail the build on a violation. The checks are Vitest
       # tests, so the step above already ran them and this one runs them again
@@ -219,10 +217,7 @@ jobs:
       # against what is on disk and fails on a difference. It runs BEFORE the
       # gate, so a mis-scoped gate is reported as that rather than as a green
       # run over fewer files.
-      - name: Accessibility
-        run: |
-          pnpm run check:a11y-suite
-          pnpm run test:a11y
+      #
 
       # The checker above decides what counts as an accessibility test from
       # paths and from package.json's own script, so it has a suite, and the
@@ -231,8 +226,8 @@ jobs:
       #
       # Not part of `pnpm run check:repo`: that is the bare-clone set, and this
       # one needs Node.
-      - name: Accessibility gate checker tests
-        run: bash scripts/check-a11y-suite.test.sh
+      #
+      # --- Wiring ---
 
       # The wiring gate (#278). Every gate above this one looks INSIDE a unit,
       # and five defects in one week were a correct, unit-tested, typechecked,
@@ -249,8 +244,7 @@ jobs:
       # In this job rather than one of its own, for the reason the accessibility
       # steps above give: `main` requires a status check whose context is
       # exactly "Repository rules".
-      - name: Wiring
-        run: pnpm run check:wiring
+      #
 
       # Its own suite, for the reason every checker here has one: a gate that
       # silently stopped checking is indistinguishable from a clean tree. Five
@@ -258,8 +252,66 @@ jobs:
       # actually was, and two of those are green on purpose and named so --
       # a stated limit nobody has pinned is a limit that quietly becomes a false
       # claim.
-      - name: Wiring gate checker tests
-        run: bash scripts/check-wiring.test.sh
+      #
+      # --- Cost model ---
+      # The cost model (#54). docs/cost-model.md states its inputs with their
+      # provenance and states what follows from them; this recomputes the second
+      # from the first and fails when they disagree. It is the gate for a defect
+      # no other one here can see: arithmetic that was true on the day it was
+      # typed, in a document whose inputs move. Two of them moved while it was
+      # being written -- the Protomaps planet build grew 103 MB in four days,
+      # and Verisign has announced a `.com` rise for 1 November 2026.
+      #
+      # It needs Node but no dependencies; it is nevertheless not in
+      # `check:repo`, which is the bare-clone set and is bash and coreutils
+      # only. In this job rather than one of its own, for the reason every step
+      # above gives: `main` requires a status check whose context is exactly
+      # "Repository rules".
+      #
+
+      # Its own suite, for the reason every checker here has one. Its most
+      # important case is the vacuous pass: a document whose tables parse and
+      # are never actually compared against anything, which without a guard
+      # exits 0 with a success line saying the model checks out.
+      #
+      # --- Coverage renderer ---
+
+      # The renderer has logic of its own -- it decides which package a covered
+      # file belongs to, from absolute paths that differ between a checkout, a
+      # runner and a worktree -- so it has a suite, and the suite runs here. Its
+      # first version attributed a dependency's own `packages/<name>/` directory
+      # to a workspace package of that name; the suite caught it.
+      #
+      # Not part of `pnpm run check:repo`: that is the bare-clone set, and this
+      # one needs Node.
+      #
+      # --- Dependency licences ---
+      # DEP001. The other half of the licence boundary: check-repo-rules.sh
+      # checks the headers and manifests of the code we write, this checks the
+      # licence of the code we pull in. It reads pnpm's own resolution of its
+      # own lockfile, so it needs the install above -- which is why it is here
+      # and not in check:repo, the bare-clone set. ADR 0015 classifies the
+      # licences; CLAUDE.md section 4g says what it does and does not cover.
+      - name: Workspace checks, concurrently
+        run: >-
+          bash scripts/run-concurrently.sh
+          'format:check' 'pnpm run format:check'
+          'lint' 'pnpm run lint'
+          'typecheck' 'pnpm run typecheck'
+          'accessibility' 'pnpm run check:a11y-suite && pnpm run test:a11y'
+          'accessibility checker tests' 'bash scripts/check-a11y-suite.test.sh'
+          'wiring' 'pnpm run check:wiring'
+          'wiring checker tests' 'bash scripts/check-wiring.test.sh'
+          'cost model' 'pnpm run check:cost-model'
+          'cost model checker tests' 'bash scripts/check-cost-model.test.sh'
+          'coverage renderer tests' 'bash scripts/coverage-summary.test.sh'
+          'dependency licence checker tests' 'bash scripts/check-dependency-licences.test.sh'
+          'dependency licences' 'pnpm run check:licences'
+
+      # ⚠️ NOT in the concurrent step above, deliberately (#651): it runs its own
+      # `pnpm install --frozen-lockfile` and creates and removes two directories
+      # under apps/mobile/android, and neither belongs under a linter that is
+      # walking the same tree at the same moment. It takes a few seconds.
 
       # The generated-artefact gate (#299). `cap sync` writes two files this
       # repository commits, and pnpm's store path carries the PEER version as
@@ -300,73 +352,12 @@ jobs:
       - name: Capacitor gate checker tests
         run: bash scripts/check-capacitor-generated.test.sh
 
-      # The cost model (#54). docs/cost-model.md states its inputs with their
-      # provenance and states what follows from them; this recomputes the second
-      # from the first and fails when they disagree. It is the gate for a defect
-      # no other one here can see: arithmetic that was true on the day it was
-      # typed, in a document whose inputs move. Two of them moved while it was
-      # being written -- the Protomaps planet build grew 103 MB in four days,
-      # and Verisign has announced a `.com` rise for 1 November 2026.
-      #
-      # It needs Node but no dependencies; it is nevertheless not in
-      # `check:repo`, which is the bare-clone set and is bash and coreutils
-      # only. In this job rather than one of its own, for the reason every step
-      # above gives: `main` requires a status check whose context is exactly
-      # "Repository rules".
-      - name: Cost model (COST001-6)
-        run: pnpm run check:cost-model
-
-      # Its own suite, for the reason every checker here has one. Its most
-      # important case is the vacuous pass: a document whose tables parse and
-      # are never actually compared against anything, which without a guard
-      # exits 0 with a success line saying the model checks out.
-      - name: Cost model checker tests
-        run: bash scripts/check-cost-model.test.sh
-
-      # The renderer has logic of its own -- it decides which package a covered
-      # file belongs to, from absolute paths that differ between a checkout, a
-      # runner and a worktree -- so it has a suite, and the suite runs here. Its
-      # first version attributed a dependency's own `packages/<name>/` directory
-      # to a workspace package of that name; the suite caught it.
-      #
-      # Not part of `pnpm run check:repo`: that is the bare-clone set, and this
-      # one needs Node.
-      - name: Coverage renderer tests
-        run: bash scripts/coverage-summary.test.sh
-
-      # Coverage is REPORTED, never gated -- ADR 0005 decision C and CLAUDE.md
-      # §5 make the mutation list the gate and forbid a percentage floor. This
-      # step exists because the numbers were being computed and then thrown
-      # away: `text` goes into this log under the install and build output, and
-      # `html` is written to a runner that is destroyed with it.
-      #
-      # `if: always()` so a failing suite still publishes what it measured --
-      # the run where coverage moved unexpectedly is the one you want the table
-      # for. It cannot fail the job: the renderer exits non-zero only when the
-      # report is missing or unparseable, and `|| true` keeps even that from
-      # turning a reporting step into a gate.
-      - name: Publish the coverage summary
-        if: always()
-        run: node scripts/coverage-summary.mjs >> "$GITHUB_STEP_SUMMARY" || true
-
-      # The full HTML report, for the run where a number in the table above
-      # looks wrong and the question is which line.
-      #
-      # SHA from:
-      #   gh api repos/actions/upload-artifact/git/ref/tags/v7.0.1 --jq .object.sha
-      - name: Upload the coverage report
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: coverage-report
-          path: coverage/
-          retention-days: 7
-          if-no-files-found: warn
 
       # A green typecheck is not a green build: the bundler resolves imports the
       # typechecker only reads types from.
       - name: Build
         run: pnpm run build
+
 
       # --- The browser gate (#63) ----------------------------------------------
 
@@ -426,19 +417,57 @@ jobs:
       - name: Install the pinned browser
         run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
 
-      # Builds the harness and drives it. CLAUDE.md section 4a documents both
-      # halves as one command.
-      - name: Browser gate
-        run: pnpm run test:browser
 
-      # DEP001. The other half of the licence boundary: check-repo-rules.sh
-      # checks the headers and manifests of the code we write, this checks the
-      # licence of the code we pull in. It reads pnpm's own resolution of its
-      # own lockfile, so it needs the install above -- which is why it is here
-      # and not in check:repo, the bare-clone set. ADR 0015 classifies the
-      # licences; CLAUDE.md section 4g says what it does and does not cover.
-      - name: Dependency licence checker tests
-        run: bash scripts/check-dependency-licences.test.sh
+      # `test:coverage`, not `test`. ADR 0005 decision C sets no percentage
+      # floor and forbids inventing one -- the gate is the mutation list in the
+      # pull request body. The report is here because an untested branch is
+      # worth seeing in review, and because it costs nothing to print.
+      #
+      # Builds the harness and drives it: CLAUDE.md section 4a documents both
+      # halves of `test:browser` as one command.
+      #
+      # ⚠️ The two run CONCURRENTLY since #651, and a reviewer who remembers
+      # "Tests and coverage report" and "Browser gate" as two steps is reading
+      # the old file. They were the two longest steps -- 313 s and 409 s on run
+      # 36320822283 -- and one after the other they were most of the job. Each
+      # line is labelled with the command it came from; the step fails if
+      # EITHER fails; and the coverage steps below still carry `if: always()`,
+      # so a red run still publishes what it measured and they cannot fail the
+      # job. The browser gate stops itself before this job's timeout
+      # (`playwright.config.ts` §`GATE_BUDGET_MS`) so that a hang is reported
+      # by name rather than cancelled in silence.
+      - name: Tests with coverage, and the browser gate, concurrently
+        run: >-
+          bash scripts/run-concurrently.sh
+          'test:coverage' 'pnpm run test:coverage'
+          'test:browser' 'pnpm run test:browser'
 
-      - name: Dependency licences
-        run: pnpm run check:licences
+
+      # Coverage is REPORTED, never gated -- ADR 0005 decision C and CLAUDE.md
+      # §5 make the mutation list the gate and forbid a percentage floor. This
+      # step exists because the numbers were being computed and then thrown
+      # away: `text` goes into this log under the install and build output, and
+      # `html` is written to a runner that is destroyed with it.
+      #
+      # `if: always()` so a failing suite still publishes what it measured --
+      # the run where coverage moved unexpectedly is the one you want the table
+      # for. It cannot fail the job: the renderer exits non-zero only when the
+      # report is missing or unparseable, and `|| true` keeps even that from
+      # turning a reporting step into a gate.
+      - name: Publish the coverage summary
+        if: always()
+        run: node scripts/coverage-summary.mjs >> "$GITHUB_STEP_SUMMARY" || true
+
+      # The full HTML report, for the run where a number in the table above
+      # looks wrong and the question is which line.
+      #
+      # SHA from:
+      #   gh api repos/actions/upload-artifact/git/ref/tags/v7.0.1 --jq .object.sha
+      - name: Upload the coverage report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 7
+          if-no-files-found: warn

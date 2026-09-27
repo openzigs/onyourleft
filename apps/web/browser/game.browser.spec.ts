@@ -20,6 +20,9 @@
  * about thermal behaviour, and nothing about how any of it behaves on a phone.
  */
 
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { test as base, devices, expect } from '@playwright/test';
 
 import { HARNESS_ORIGIN } from '../playwright.config';
@@ -471,9 +474,11 @@ const DESKTOP_CHROME = { viewport, userAgent, deviceScaleFactor, isMobile, hasTo
  */
 const test = base.extend<object, { harnessRun: (query?: string) => Promise<HarnessRun> }>({
   harnessRun: [
-    async ({ browser }, use) => {
+    async ({ browser }, use, workerInfo) => {
       const runs = new Map<string, Promise<HarnessRun>>();
+      const ledger = loadLedger(workerInfo.project.outputDir);
       const load = async (query: string): Promise<HarnessRun> => {
+        ledger.begin(query);
         const context = await browser.newContext(DESKTOP_CHROME);
         try {
           const page = await context.newPage();
@@ -503,7 +508,11 @@ const test = base.extend<object, { harnessRun: (query?: string) => Promise<Harne
           console.log(
             `game.html${query}: loaded in ${String(Math.round((Date.now() - loadStarted) / 1000))} s`,
           );
+          ledger.end(query);
           return { result, requested, shaderErrors };
+        } catch (error) {
+          ledger.fail(query, error);
+          throw error;
         } finally {
           await context.close();
         }
@@ -520,6 +529,95 @@ const test = base.extend<object, { harnessRun: (query?: string) => Promise<Harne
     { scope: 'worker' },
   ],
 });
+
+/**
+ * What one load of a query has come to in THIS run, across every worker — #651.
+ *
+ * ⚠️ **The memo above lives in a worker, and a worker does not outlive a
+ * failure**, so without this a load that HUNG was paid for again by the next
+ * case to ask: Playwright replaces the worker after a timeout, the new worker
+ * has no memo, and it loads the page afresh under the next case's budget — and
+ * so on down every case that reads that query. For `?realistic` that was
+ * bounded by #607's hook to one budget a describe; for the plain page, which
+ * about forty cases in eighteen describes read inside their own 60 s, it was
+ * not bounded at all: forty minutes, in a job that stops at twenty.
+ *
+ * So each load is written down where every worker can read it — the run's
+ * output directory, which Playwright empties when a run starts — and a load
+ * that an EARLIER worker began and never finished is not begun again. The case
+ * that asks fails at once, naming the case and describe that paid for it. What
+ * is refused is a second attempt at the same hung load, which is a retry by
+ * another name; a load that finished is loaded again as before, which is
+ * #456's accepted cost of a red ASSERTION and is unchanged.
+ *
+ * A load another LIVE worker is still making is not a hang, and is not refused:
+ * two projects can ask for the plain page at once (`playwright.config.ts`
+ * §`projects`). Only a worker that is gone — whose process no longer exists —
+ * left its load unfinished for good.
+ */
+interface LoadLedger {
+  begin(query: string): void;
+  end(query: string): void;
+  fail(query: string, error: unknown): void;
+}
+
+type LoadEntry =
+  | { readonly state: 'loading'; readonly pid: number; readonly by: string }
+  | { readonly state: 'loaded' }
+  | { readonly state: 'failed'; readonly by: string; readonly reason: string };
+
+function loadLedger(outputDir: string): LoadLedger {
+  const directory = join(outputDir, 'game-harness-loads');
+  mkdirSync(directory, { recursive: true });
+  const entryPath = (query: string): string =>
+    join(directory, `${encodeURIComponent(query === '' ? 'plain' : query)}.json`);
+  const write = (query: string, entry: LoadEntry): void => {
+    writeFileSync(entryPath(query), JSON.stringify(entry));
+  };
+  const read = (query: string): LoadEntry | undefined =>
+    existsSync(entryPath(query))
+      ? (JSON.parse(readFileSync(entryPath(query), 'utf8')) as LoadEntry)
+      : undefined;
+  const asking = (): string => base.info().titlePath.slice(1).join(' › ');
+  return {
+    begin(query) {
+      const earlier = read(query);
+      const page = `game.html${query}`;
+      if (earlier?.state === 'failed') {
+        throw new Error(
+          `${page} already failed to load in this run, for “${earlier.by}”: ${earlier.reason} ` +
+            '— not loading it again (#651); that failure is the one to read.',
+        );
+      }
+      if (earlier?.state === 'loading' && !processIsAlive(earlier.pid)) {
+        throw new Error(
+          `${page} was being loaded for “${earlier.by}” by a worker that did not survive it, ` +
+            'so that load hung or crashed — not loading it again (#651); that failure, ' +
+            'which names its describe, is the one to read.',
+        );
+      }
+      write(query, { state: 'loading', pid: process.pid, by: asking() });
+    },
+    end(query) {
+      write(query, { state: 'loaded' });
+    },
+    fail(query, error) {
+      const reason = error instanceof Error ? error.message.split('\n')[0] : String(error);
+      write(query, { state: 'failed', by: asking(), reason: reason ?? '' });
+    },
+  };
+}
+
+/** Whether a process exists — signal 0 checks without sending anything. */
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM: it exists and belongs to somebody else, which is still alive.
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
 
 /** The shared run's result, which is all but one case in this file reads. */
 async function harness(
@@ -587,6 +685,20 @@ function paysForTheRealisticLoad(query = '?realistic'): void {
 
 /** #617's trees' own load — #644. @see TreeLevelMeasurement */
 const TREES_QUERY = '?realistic&trees';
+
+/**
+ * The tags that put a describe in the project that pays for its load — #651.
+ *
+ * `playwright.config.ts` §`projects` runs `?realistic` and `?realistic&trees`
+ * in projects of their own so that the four loads this file pays for are made
+ * side by side rather than one after another, and it finds the describes by
+ * these tags. ⚠️ **A describe that reads one of those loads and carries no tag
+ * is still run, and still correct** — in the `game` project, which then pays
+ * for that load a second time. It costs time, not coverage.
+ */
+const REALISTIC_LOAD = { tag: '@realistic-load' };
+/** @see REALISTIC_LOAD */
+const TREES_LOAD = { tag: '@trees-load' };
 
 test.describe('the game renderer in a real browser', () => {
   test('constructs against a live WebGL context', async ({ harnessRun }) => {
@@ -2275,36 +2387,40 @@ test.describe('the rider rides a line and leans on it — #499', () => {
  * the drawn road and nothing on the fixture reached that plane any more
  * (`game-harness.ts` §`nearFieldProbe` says why).
  */
-test.describe('scenery the camera passes is not cut by the near plane — #545', () => {
-  paysForTheRealisticLoad();
+test.describe(
+  'scenery the camera passes is not cut by the near plane — #545',
+  REALISTIC_LOAD,
+  () => {
+    paysForTheRealisticLoad();
 
-  test('shows no cut geometry at the closest pass, where the same frame uncut shows it', async ({
-    harnessRun,
-  }) => {
-    // The realistic load: the world the owner saw it in. It shares that one
-    // load with the realistic world's cases below.
-    const result = await harness(harnessRun, '?realistic');
-    expect(result.errors).toEqual([]);
-    const near = result.nearField;
-    console.info(
-      `#545 at ${String(near.distance)} m in the ${near.world} world, the cull dropped a ` +
-        `${near.cut.join(' and a ')} ${near.pivotMetres.toFixed(2)} m from the eye: ` +
-        `${String(near.shippedPixels)} pixels cut with the cull, ` +
-        `${String(near.controlPixels)} without it, ${String(near.noisePixels)} drawing it twice`,
-    );
-    // Non-vacuity: the probe drew the realistic world, and found a frame
-    // where the renderer's own cull had something to drop.
-    expect(near.world).toBe('realistic');
-    expect(near.cut.length).toBeGreaterThan(0);
-    // The noise floor is nothing: the same frame drawn twice is the same frame.
-    expect(near.noisePixels).toBe(0);
-    // The control — the defect, drawn: without the cull the near plane cuts
-    // what the camera is passing, and the nearer plane shows it.
-    expect(near.controlPixels).toBeGreaterThan(100);
-    // And with it, nothing stands between the two planes.
-    expect(near.shippedPixels).toBe(0);
-  });
-});
+    test('shows no cut geometry at the closest pass, where the same frame uncut shows it', async ({
+      harnessRun,
+    }) => {
+      // The realistic load: the world the owner saw it in. It shares that one
+      // load with the realistic world's cases below.
+      const result = await harness(harnessRun, '?realistic');
+      expect(result.errors).toEqual([]);
+      const near = result.nearField;
+      console.info(
+        `#545 at ${String(near.distance)} m in the ${near.world} world, the cull dropped a ` +
+          `${near.cut.join(' and a ')} ${near.pivotMetres.toFixed(2)} m from the eye: ` +
+          `${String(near.shippedPixels)} pixels cut with the cull, ` +
+          `${String(near.controlPixels)} without it, ${String(near.noisePixels)} drawing it twice`,
+      );
+      // Non-vacuity: the probe drew the realistic world, and found a frame
+      // where the renderer's own cull had something to drop.
+      expect(near.world).toBe('realistic');
+      expect(near.cut.length).toBeGreaterThan(0);
+      // The noise floor is nothing: the same frame drawn twice is the same frame.
+      expect(near.noisePixels).toBe(0);
+      // The control — the defect, drawn: without the cull the near plane cuts
+      // what the camera is passing, and the nearer plane shows it.
+      expect(near.controlPixels).toBeGreaterThan(100);
+      // And with it, nothing stands between the two planes.
+      expect(near.shippedPixels).toBe(0);
+    });
+  },
+);
 
 /**
  * The realistic world, in a real engine — ADR 0026, #425, #474, #369.
@@ -2314,7 +2430,7 @@ test.describe('scenery the camera passes is not cut by the near plane — #545',
  * run `game-harness.ts` §`realisticProbe` makes. The default load is the
  * other half of D-7 and is asserted below too: it fetches none of the set.
  */
-test.describe('the realistic world — ADR 0026', () => {
+test.describe('the realistic world — ADR 0026', REALISTIC_LOAD, () => {
   paysForTheRealisticLoad();
 
   const realistic = async (
@@ -2536,7 +2652,7 @@ test.describe('the realistic world — ADR 0026', () => {
  * world actually loaded ON IT — without `drawnWorld`, a page that fell back to
  * the stylised world would be measuring trees with no middle level at all.
  */
-test.describe('the trees’ levels of detail in the realistic world — #617', () => {
+test.describe('the trees’ levels of detail in the realistic world — #617', TREES_LOAD, () => {
   paysForTheRealisticLoad(TREES_QUERY);
 
   const trees = async (
