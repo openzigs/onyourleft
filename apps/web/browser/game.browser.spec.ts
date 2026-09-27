@@ -39,6 +39,7 @@ import type {
 } from './game-harness';
 import { MINIMUM_TINT_CONTRAST_RATIO } from '../src/game/terrain';
 import { type InstanceTint, NO_TINT, tintedLinear } from '../src/game/instance-tint';
+import { GROUND_BLOB_DARKNESS } from '../src/game/ground-blob';
 import {
   PRESENCE_CHECK_MILLISECONDS,
   PRESENCE_GRID_COLUMNS,
@@ -587,6 +588,25 @@ function paysForTheRealisticLoad(query = '?realistic'): void {
     await harnessRun(query);
   });
 }
+
+/**
+ * #620's stated strength, written here a second time on purpose: the ground
+ * blob's darkness at its middle, as the share of the ENCODED pixel it takes
+ * away (`ground-blob.ts` §`GROUND_BLOB_DARKNESS`). A change to the constant
+ * is a change to this line too, which is what makes it a decision.
+ */
+const GROUND_BLOB_STATED = 0.3;
+/**
+ * The window the darkening read back must fall in: the stated 0.3 ± 0.05.
+ *
+ * #621's review is why it has TWO sides: a floor alone passed a tint 1.5
+ * times too strong, which looked better. Half the strength (0.15) and 1.5
+ * times it (0.45) each miss this by 0.10. The margin is what the pipeline adds
+ * between the constant and the pixel, measured: the blob is black fogged
+ * toward the fog colour, and at 25 m the fog gives some of it back; rounding
+ * a 3 × 3 mean of bytes is the rest.
+ */
+const GROUND_BLOB_WINDOW = [GROUND_BLOB_STATED - 0.05, GROUND_BLOB_STATED + 0.05] as const;
 
 /**
  * #621's margins, read back off the drawing buffer. The control's is the
@@ -2579,6 +2599,79 @@ test.describe('the realistic world — ADR 0026', () => {
     for (const miss of [...treeMisses, ...houseMisses]) {
       expect(miss).toBeLessThan(TINT_SHIFT_TOLERANCE);
     }
+  });
+
+  test('darkens the ground under a tree by the blob’s stated strength, from both sides — #620', async ({
+    harnessRun,
+  }) => {
+    // A tree 7 m ahead: the ground in its blob's core against the ground 5 m
+    // away, drawn and hidden; and a tree whose blob reaches the road's edge,
+    // read on the verge beside it. @see groundBlobProbe
+    const { grounding } = await realistic(harnessRun);
+    const mean = (rgb: readonly number[]): number =>
+      ((rgb[0] ?? 0) + (rgb[1] ?? 0) + (rgb[2] ?? 0)) / 3;
+    const luminance = (rgb: readonly number[]): number =>
+      0.2126 * linearOfByte(rgb[0] ?? 0) +
+      0.7152 * linearOfByte(rgb[1] ?? 0) +
+      0.0722 * linearOfByte(rgb[2] ?? 0);
+    const scaled = (rgb: readonly number[], share: number): number[] =>
+      rgb.map((channel) => channel * share);
+    const ratio = luminance(grounding.probe) / luminance(grounding.reference);
+    const controlRatio = luminance(grounding.probeHidden) / luminance(grounding.referenceHidden);
+    // What the blob took off the encoded pixel at its own middle: the drawn
+    // ground against the same ground with the blobs hidden.
+    const darkening = 1 - mean(grounding.probe) / mean(grounding.probeHidden);
+    // The issue's ratio, predicted through the pipeline from the unblobbed
+    // ground: the blob is blended over the ENCODED pixel (three tone-maps and
+    // encodes inside the ground's own shader), and luminance is WCAG's.
+    const ratioAt = (strength: number): number =>
+      luminance(scaled(grounding.probeHidden, 1 - strength)) / luminance(grounding.referenceHidden);
+    console.log(
+      `#620: probe ${JSON.stringify(grounding.probe.map(Math.round))} against ` +
+        `${JSON.stringify(grounding.reference.map(Math.round))} ${grounding.referenceMetres.toFixed(1)} m ` +
+        `away (rims ${grounding.probeRim.toFixed(2)}, ${grounding.referenceRim.toFixed(2)}); luminance ratio ${ratio.toFixed(3)}, ` +
+        `control ${controlRatio.toFixed(3)}; encoded darkening ${darkening.toFixed(3)} against ` +
+        `${String(GROUND_BLOB_DARKNESS)} stated, window [${GROUND_BLOB_WINDOW[0].toFixed(2)}, ` +
+        `${GROUND_BLOB_WINDOW[1].toFixed(2)}] → ratio [${ratioAt(GROUND_BLOB_WINDOW[1]).toFixed(3)}, ` +
+        `${ratioAt(GROUND_BLOB_WINDOW[0]).toFixed(3)}]; verge ${mean(grounding.verge).toFixed(1)} ` +
+        `against ${mean(grounding.vergeHidden).toFixed(1)} (rim ${grounding.vergeRim.toFixed(2)}); ` +
+        `${String(grounding.drawCalls)} draw calls against ${String(grounding.drawCallsHidden)} hidden; ` +
+        `${String(grounding.blobs)} blobs, ${String(grounding.triangles)} triangles; the wooded frame ` +
+        `${String(grounding.woodedBlobs)} blobs, ${String(grounding.woodedTriangles)} triangles`,
+    );
+    // Non-vacuity: the probe is ground inside the blob's core, the reference
+    // ground the blob does not reach, 5 m off, and no tree covers either.
+    expect(grounding.probeClear).toBe(true);
+    expect(grounding.probeRim).toBeLessThanOrEqual(0.35);
+    expect(grounding.referenceClear).toBe(true);
+    expect(grounding.referenceRim).toBeGreaterThanOrEqual(1);
+    expect(grounding.referenceMetres).toBeCloseTo(5, 1);
+    // THE CONTROL: with the blobs hidden the two points read alike, so what
+    // separates them below is the blob, not the ground's texture or light.
+    expect(Math.abs(controlRatio - 1)).toBeLessThan(0.03);
+    // The strength, BOTH sides: the encoded darkening at the middle within
+    // the window about the stated 0.3 — neither a blob too faint to read nor
+    // one darker than it says.
+    expect(GROUND_BLOB_DARKNESS).toBe(GROUND_BLOB_STATED);
+    expect(darkening).toBeGreaterThan(GROUND_BLOB_WINDOW[0]);
+    expect(darkening).toBeLessThan(GROUND_BLOB_WINDOW[1]);
+    // And the issue's own ratio, both sides of what that window predicts.
+    expect(ratio).toBeGreaterThan(ratioAt(GROUND_BLOB_WINDOW[1]));
+    expect(ratio).toBeLessThan(ratioAt(GROUND_BLOB_WINDOW[0]));
+    // The road's edge: the verge under B's blob darkens — a blob reaches the
+    // edge. That it stops there is `ground-blob.test.ts`' hairpin, not this:
+    // here the blob lies below the tarmac and the road's depth hides it
+    // (@see groundBlobProbe).
+    expect(grounding.edgeClear).toBe(true);
+    expect(grounding.vergeRim).toBeLessThan(0.6);
+    expect(mean(grounding.verge) / mean(grounding.vergeHidden)).toBeLessThan(0.9);
+    // The cost: one draw call for every blob, two triangles each.
+    expect(grounding.drawCalls - grounding.drawCallsHidden).toBe(1);
+    expect(grounding.blobs).toBe(2);
+    expect(grounding.triangles).toBe(4);
+    expect(grounding.woodedBlobs).toBeGreaterThan(0);
+    expect(grounding.woodedTriangles).toBe(2 * grounding.woodedBlobs);
+    expect(grounding.woodedTriangles).toBeLessThanOrEqual(124);
   });
 
   test('compiles every shader it draws with, in both worlds — #501', async ({ harnessRun }) => {

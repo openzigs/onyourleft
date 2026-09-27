@@ -243,8 +243,23 @@ import {
   CONTACT_SHADOW_DARKNESS,
   CONTACT_SHADOW_LIFT_METRES,
   placeContactShadow,
+  sunThrowPerMetre,
   type ContactShadow,
+  type SunThrow,
 } from './contact-shadow';
+import {
+  blobCasters,
+  GROUND_BLOB_CORE,
+  GROUND_BLOB_DARKNESS,
+  GROUND_BLOB_LIFT_METRES,
+  groundBlobAxes,
+  groundUnder,
+  placeGroundBlob,
+  roadClip,
+  type BlobCasters,
+  type GroundBlob,
+  type GroundPoint,
+} from './ground-blob';
 import {
   HORIZON_RADIUS_METRES,
   HORIZON_SEGMENTS,
@@ -271,7 +286,12 @@ import {
   type RealisticWorldOutcome,
   type StructureSurface,
 } from './realistic-assets';
-import { REALISTIC_NEAR_MESHES, REALISTIC_TREE_LEVELS } from './realistic-budget';
+import {
+  REALISTIC_GROUND_BLOBS,
+  REALISTIC_NEAR_MESHES,
+  REALISTIC_STRUCTURE_ITEMS,
+  REALISTIC_TREE_LEVELS,
+} from './realistic-budget';
 import {
   FOLIAGE_TINT,
   MASONRY_TINT,
@@ -344,6 +364,7 @@ import {
   ROAD_WIDTH_METRES,
   VIEW_AHEAD_METRES,
   VIEW_BEHIND_METRES,
+  type RoadCorridor,
 } from './terrain';
 import {
   clearOfTheCamera,
@@ -352,7 +373,7 @@ import {
   type ShapeTriangles,
   type ShapesOf,
 } from './near-field';
-import { FIELD_DEPTH_METRES, FIELD_EDGE_LATERAL_METRES } from './settlements';
+import { FIELD_DEPTH_METRES, FIELD_EDGE_LATERAL_METRES, STRUCTURE_FOOTPRINTS } from './settlements';
 import {
   MAXIMUM_BRIDGE_PARTS,
   waterSurfaceIsCurrent,
@@ -2904,6 +2925,284 @@ function contactShadowGeometry(): BufferGeometry {
 }
 
 /**
+ * The ground under the realistic scenery — #620: one soft dark ellipse under
+ * every tree, shrub and rock the realistic world draws as a mesh and every
+ * structure it draws, **one instanced transparent draw for all of them**,
+ * realistic world only (ADR 0026 D-3).
+ *
+ * `ground-blob.ts` decides where each goes — from `world.ts`'s one sun, through
+ * the riders' own `contact-shadow.ts` §`sunThrowPerMetre` — what ground it
+ * lies on, and where the road clips it. This draws them, the way
+ * {@link ContactShadowBelt} draws the riders', with the same three properties
+ * and for the same reasons: **transparent with no depth write**, so it is
+ * drawn after the ground, the trunks and the walls and hides none of them;
+ * **depth-tested**, so a trunk or a wall in front of its own blob still hides
+ * it, and so does ground that bends up through a quad; and **lifted and
+ * polygon-offset** off the ground's triangle.
+ *
+ * ## What is different from the riders' blob, and why
+ *
+ * - **Two triangles, not seventy-two.** #620's ceiling is two a blob, and the
+ *   frame's triangles have 1 350 of room (`realistic-budget.ts`
+ *   §`REALISTIC_GROUND_BLOBS`). The soft rim is therefore not in the vertices
+ *   but in the fragment: {@link GROUND_BLOB_FRAGMENT} computes
+ *   `ground-blob.ts` §`groundBlobAlpha` from the quad's own coordinates. Still
+ *   no texture.
+ * - **Tilted to the ground.** Each instance matrix is `ground-blob.ts`
+ *   §`groundBlobAxes`: the quad lies in the plane of the landform triangle
+ *   under the blob's middle.
+ * - **Clipped at the road's edge**, per instance: two half-planes as two
+ *   instance attributes, tested in the fragment exactly as
+ *   `ground-blob.ts` §`keptByRoadClip` tests them.
+ *
+ * ⚠️ **Nothing here names any shadow state**: no caster, no receiver, no map.
+ * `three-seam.test.ts` counts those, and this adds none.
+ *
+ * Exported for `three-renderer.test.ts`, for {@link RiderBelt}'s reasons.
+ */
+export class GroundBlobBelt {
+  readonly #material = withGroundBlobShading(
+    new MeshBasicMaterial({
+      color: 0x000000,
+      transparent: true,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -4,
+    }),
+  );
+  readonly #mesh: InstancedMesh;
+  /** The two clip planes of every instance, three floats each. @see roadClip */
+  readonly #clipFirst: InstancedBufferAttribute;
+  readonly #clipSecond: InstancedBufferAttribute;
+  /** How much of each instance is drawn. @see BlobCaster.strength */
+  readonly #strength: InstancedBufferAttribute;
+  /** One instance's planes, as `roadClip` writes them. */
+  readonly #planes = new Float32Array(6);
+  readonly #blob: GroundBlob = { x: 0, z: 0, yaw: 0, halfAlong: 0, halfAcross: 0 };
+  readonly #ground: GroundPoint = { y: 0, nx: 0, ny: 1, nz: 0 };
+  readonly #throw: SunThrow = { x: 0, z: 0 };
+  readonly #axes = new Float64Array(9);
+  readonly #matrix = new Matrix4();
+  #shown = true;
+
+  constructor(capacity: number = REALISTIC_GROUND_BLOBS) {
+    const geometry = groundBlobGeometry();
+    this.#clipFirst = new InstancedBufferAttribute(new Float32Array(capacity * 3), 3);
+    this.#clipSecond = new InstancedBufferAttribute(new Float32Array(capacity * 3), 3);
+    this.#strength = new InstancedBufferAttribute(new Float32Array(capacity), 1);
+    this.#clipFirst.setUsage(DynamicDrawUsage);
+    this.#clipSecond.setUsage(DynamicDrawUsage);
+    this.#strength.setUsage(DynamicDrawUsage);
+    geometry.setAttribute('blobClipFirst', this.#clipFirst);
+    geometry.setAttribute('blobClipSecond', this.#clipSecond);
+    geometry.setAttribute('blobStrength', this.#strength);
+    this.#mesh = new InstancedMesh(geometry, this.#material, capacity);
+    this.#mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+    this.#mesh.count = 0;
+    // The instances move every frame and span the whole near field; one mesh
+    // culled against a stale sphere would vanish, and culling it saves nothing.
+    this.#mesh.frustumCulled = false;
+    this.#mesh.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The one mesh. For `three-renderer.test.ts` and the harness. */
+  get mesh(): InstancedMesh {
+    return this.#mesh;
+  }
+
+  /** Whether the blobs are drawn at all: the realistic world's, and the browser gate's control. */
+  setShown(on: boolean): void {
+    this.#shown = on;
+    if (!on) {
+      this.#mesh.count = 0;
+      this.#mesh.visible = false;
+    }
+  }
+
+  /**
+   * One blob per caster in each list, under this frame's sun, on this frame's
+   * ground, clipped off this frame's road. Allocates nothing; stops at the
+   * belt's capacity.
+   */
+  update(
+    lists: readonly BlobCasters[],
+    corridor: RoadCorridor,
+    terrain: TerrainMesh,
+    sun: SunStyle,
+  ): void {
+    this.#mesh.count = 0;
+    this.#mesh.visible = false;
+    if (!this.#shown || !sunThrowPerMetre(sun, this.#throw)) return;
+    const capacity = this.#mesh.instanceMatrix.count;
+    const first = this.#clipFirst.array as Float32Array;
+    const second = this.#clipSecond.array as Float32Array;
+    const strength = this.#strength.array as Float32Array;
+    const axes = this.#axes;
+    let slot = 0;
+    for (const list of lists) {
+      for (let at = 0; at < list.count && slot < capacity; at += 1) {
+        const caster = list.casters[at];
+        if (caster === undefined) continue;
+        const blob = this.#blob;
+        placeGroundBlob(caster, this.#throw, blob);
+        const ground = this.#ground;
+        if (!groundUnder(terrain, corridor.centre, blob.x, blob.z, ground)) {
+          // Off the ground this frame built — past its last row. Nothing to lie on.
+          continue;
+        }
+        groundBlobAxes(blob, ground, axes);
+        roadClip(
+          corridor.centre,
+          blob.x,
+          blob.z,
+          Math.max(blob.halfAlong, blob.halfAcross),
+          this.#planes,
+        );
+        const lift = GROUND_BLOB_LIFT_METRES;
+        this.#matrix.set(
+          axes[0] as number,
+          axes[3] as number,
+          axes[6] as number,
+          blob.x + ground.nx * lift,
+          axes[1] as number,
+          axes[4] as number,
+          axes[7] as number,
+          ground.y + ground.ny * lift,
+          axes[2] as number,
+          axes[5] as number,
+          axes[8] as number,
+          blob.z + ground.nz * lift,
+          0,
+          0,
+          0,
+          1,
+        );
+        this.#mesh.setMatrixAt(slot, this.#matrix);
+        first.set(this.#planes.subarray(0, 3), slot * 3);
+        second.set(this.#planes.subarray(3, 6), slot * 3);
+        strength[slot] = caster.strength;
+        slot += 1;
+      }
+    }
+    this.#mesh.count = slot;
+    this.#mesh.instanceMatrix.needsUpdate = true;
+    this.#clipFirst.needsUpdate = true;
+    this.#clipSecond.needsUpdate = true;
+    this.#strength.needsUpdate = true;
+    this.#mesh.visible = slot > 0;
+  }
+
+  dispose(): void {
+    this.#mesh.geometry.dispose();
+    this.#mesh.dispose();
+    this.#material.dispose();
+  }
+}
+
+/**
+ * A unit quad lying in the ground plane, facing up: `(±1, 0, ±1)`, two
+ * triangles. ⚠️ Wound for +Y, for {@link contactShadowGeometry}'s reason —
+ * `three-renderer.test.ts` computes the normal rather than trusting this.
+ */
+function groundBlobGeometry(): BufferGeometry {
+  const geometry = new BufferGeometry();
+  geometry.setAttribute(
+    'position',
+    new BufferAttribute(new Float32Array([-1, 0, -1, 1, 0, -1, 1, 0, 1, -1, 0, 1]), 3),
+  );
+  geometry.setIndex([0, 2, 1, 0, 3, 2]);
+  return geometry;
+}
+
+/**
+ * What {@link withGroundBlobShading} adds to the vertex shader: the quad's own
+ * coordinates, and where the fragment is from the blob's middle in the
+ * horizontal plane — the frame `ground-blob.ts` §`roadClip` states its planes
+ * in. The mesh itself stands at the origin, so the instance matrix alone
+ * places it.
+ */
+const GROUND_BLOB_VERTEX = /* glsl */ `
+  vBlobLocal = position.xz;
+  vBlobOffset = (instanceMatrix * vec4(position, 1.0)).xz - instanceMatrix[3].xz;
+  vBlobClipFirst = blobClipFirst;
+  vBlobClipSecond = blobClipSecond;
+  vBlobStrength = blobStrength;
+`;
+
+/**
+ * What {@link withGroundBlobShading} adds to the fragment shader, after the
+ * colour: `ground-blob.ts` §`groundBlobAlpha` and §`keptByRoadClip`, in GLSL.
+ * `three-renderer.test.ts` §"#620" holds the constants in it to that file's.
+ */
+const GROUND_BLOB_FRAGMENT = /* glsl */ `
+  float blobAlpha = ${glslFloat(GROUND_BLOB_DARKNESS)} * vBlobStrength *
+    (1.0 - smoothstep(${glslFloat(GROUND_BLOB_CORE)}, 1.0, length(vBlobLocal)));
+  if (dot(vBlobClipFirst.xy, vBlobOffset) < vBlobClipFirst.z ||
+      dot(vBlobClipSecond.xy, vBlobOffset) < vBlobClipSecond.z) {
+    blobAlpha = 0.0;
+  }
+  if (blobAlpha <= 0.0) discard;
+  diffuseColor.a *= blobAlpha;
+`;
+
+/** A number as a GLSL float literal. */
+function glslFloat(value: number): string {
+  return Number.isInteger(value) ? `${String(value)}.0` : String(value);
+}
+
+/**
+ * Teaches a black `MeshBasicMaterial` to be a ground blob — #620. Its fog and
+ * its tone mapping are three's own, so a blob far off fades into the same fog
+ * as the ground under it, and the tone mapping of black is black.
+ */
+function withGroundBlobShading(material: MeshBasicMaterial): MeshBasicMaterial {
+  const varyings = `
+varying vec2 vBlobLocal;
+varying vec2 vBlobOffset;
+varying vec3 vBlobClipFirst;
+varying vec3 vBlobClipSecond;
+varying float vBlobStrength;`;
+  const spliced = "#620's ground blob";
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.vertexShader,
+        '#include <common>',
+        `#include <common>
+attribute vec3 blobClipFirst;
+attribute vec3 blobClipSecond;
+attribute float blobStrength;${varyings}`,
+        'vertex',
+        spliced,
+      ),
+      '#include <begin_vertex>',
+      `#include <begin_vertex>${GROUND_BLOB_VERTEX}`,
+      'vertex',
+      spliced,
+    );
+    shader.fragmentShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.fragmentShader,
+        '#include <common>',
+        `#include <common>${varyings}`,
+        'fragment',
+        spliced,
+      ),
+      '#include <color_fragment>',
+      `#include <color_fragment>${GROUND_BLOB_FRAGMENT}`,
+      'fragment',
+      spliced,
+    );
+  };
+  return material;
+}
+
+/**
  * One rider part, as geometry in the model's own frame.
  *
  * ⚠️ **The rotation order is X, then Y, then Z, then the translation**, and
@@ -5002,10 +5301,11 @@ function replacedOrThrown(
   include: string,
   replacement: string,
   stage: 'vertex' | 'fragment',
+  spliced = "#621's seeded tint",
 ): string {
   if (!source.includes(include)) {
     throw new Error(
-      `three's ${stage} shader no longer holds ${include}, where #621's seeded tint is spliced in`,
+      `three's ${stage} shader no longer holds ${include}, where ${spliced} is spliced in`,
     );
   }
   return source.replace(include, replacement);
@@ -5231,6 +5531,40 @@ function treeReach(parts: readonly RealisticPart[]): {
 }
 
 /**
+ * The ground one realistic shape covers, in its own units — #620: the mean of
+ * its bounding box's two horizontal half-extents about the trunk, and its
+ * height. {@link treeReach} is the bound a CULL needs (the box's corner, so
+ * nothing on screen is dropped); a blob wants the crown's radius, which the
+ * corner overstates by 41 % on a round crown.
+ */
+function groundFootprint(parts: readonly RealisticPart[]): {
+  readonly radius: number;
+  readonly height: number;
+} {
+  let x = 0;
+  let z = 0;
+  let height = 0;
+  for (const { geometry } of parts) {
+    if (geometry.boundingBox === null) geometry.computeBoundingBox();
+    const box = geometry.boundingBox;
+    if (box === null) continue;
+    x = Math.max(x, Math.abs(box.min.x), Math.abs(box.max.x));
+    z = Math.max(z, Math.abs(box.min.z), Math.abs(box.max.z));
+    height = Math.max(height, box.max.y);
+  }
+  return { radius: (x + z) / 2, height };
+}
+
+/**
+ * How many of the nearest trees a ground blob goes under — #620: every rank
+ * `tree-levels.ts` §`treeLevelAt` draws at the full or the middle level, and
+ * none in the middle-to-impostor band or beyond. @see REALISTIC_GROUND_BLOBS
+ */
+function groundedTrees(levels: TreeLevels): number {
+  return levels.near + levels.middle + (levels.dithered ? 1 : 0);
+}
+
+/**
  * The realistic world's trees, shrubs and rocks — ADR 0026 D-12 layer 2, #474.
  *
  * ## Where they stand is `scatter.ts`'s, unchanged
@@ -5300,6 +5634,14 @@ export class RealisticVegetationBelt {
   #drawn = 0;
   /** The item being placed's packed tint — #621. @see packedInstanceTint */
   #tint = 0;
+  /**
+   * The items this frame drew as MESHES — each tree at its full or middle
+   * level, and each shrub and rock — as the ground blobs' casters (#620).
+   * Written in {@link update}'s last pass; `GroundBlobBelt` reads it.
+   */
+  readonly grounded: BlobCasters;
+  /** How many of the nearest trees a blob goes under: the full and middle ranks. */
+  readonly #groundedTrees: number;
 
   /**
    * @param levels how the trees are drawn: the product's, unless a caller is
@@ -5315,6 +5657,10 @@ export class RealisticVegetationBelt {
     this.#trees = ranking(slots.ranked);
     this.#handOver = new TreeHandOver(slots, 2 * slots.ranked, levels.handOverFrames);
     this.#rankEntry = new Int32Array(slots.ranked);
+    this.#groundedTrees = groundedTrees(levels);
+    this.grounded = blobCasters(
+      this.#groundedTrees + REALISTIC_NEAR_MESHES.shrub + REALISTIC_NEAR_MESHES.rock,
+    );
     for (const kind of REALISTIC_VEGETATION_KINDS) {
       const shapes = vegetation.get(kind) ?? [];
       const tree = kind === 'tree-broadleaf' || kind === 'tree-conifer';
@@ -5366,6 +5712,7 @@ export class RealisticVegetationBelt {
         tint: kind === 'rock' ? 'masonry' : 'foliage',
         fit: sceneryFitMetres(kind),
         reach: shapes.map((shape) => treeReach(shape.parts)),
+        footprint: shapes.map((shape) => groundFootprint(shape.parts)),
       });
     }
   }
@@ -5464,6 +5811,7 @@ export class RealisticVegetationBelt {
   /** This frame's vegetation: the trees at their levels, the nearest shrubs and rocks as meshes. */
   update(items: readonly ScatterItem[], pose: CameraPose): void {
     this.#drawn = 0;
+    this.grounded.count = 0;
     if (!this.#shown) return;
     this.#trees.count = 0;
     for (const each of this.#kinds) {
@@ -5547,8 +5895,11 @@ export class RealisticVegetationBelt {
       // #621: one tint for every level the item is drawn at this frame.
       this.#tint = packedInstanceTint(item.x, item.z, realisticTints[each.tint]);
       let drawn = false;
+      // #620: whether any of it was drawn as a MESH, rather than as its impostor.
+      let asMesh: boolean;
       if (!each.tree) {
         if (rank < each.ranking.count) drawn = this.#put(each.near[variant], 0, 1);
+        asMesh = drawn;
       } else {
         // A tree with no entry — out of the camera's view, or beyond the ranks
         // and not walking out of them — is its impostor.
@@ -5567,14 +5918,36 @@ export class RealisticVegetationBelt {
         // pack that shipped none — is drawn at its impostor where the middle
         // level would be.
         if (high < 1) drawn = this.#put(each.near[variant], high, 1);
+        asMesh = drawn;
         if (middle === undefined) {
           if (high > 0) drawn = this.#putOne(impostor, 0, high) || drawn;
         } else {
-          if (high > low) drawn = this.#put(middle, low, high) || drawn;
+          if (high > low) {
+            const middleDrawn = this.#put(middle, low, high);
+            asMesh = asMesh || middleDrawn;
+            drawn = middleDrawn || drawn;
+          }
           if (low > 0) drawn = this.#putOne(impostor, 0, low) || drawn;
         }
       }
       if (drawn) this.#drawn += 1;
+      // #620: a blob under what was drawn as a mesh — every shrub and rock
+      // that was, and a tree ranked full or middle that was. Never under a
+      // tree drawn only as its impostor, nor one in the middle-to-impostor
+      // band. @see REALISTIC_GROUND_BLOBS
+      const grounded = !each.tree || (rank < order.count && rank < this.#groundedTrees);
+      // The furthest tree with a blob fades it as it nears the next tree back,
+      // and is at nothing when the two stand level — which is where they swap
+      // ranks, so no blob appears or vanishes in one frame. #617's hand-over
+      // measured it: the blob popping on at that rank was a one-frame change
+      // half as large again as the tree's own dithered one.
+      const strength =
+        each.tree && rank === this.#groundedTrees - 1
+          ? 1 - bandFade(rank, order.distances, order.count)
+          : 1;
+      if (asMesh && grounded && strength > 0) {
+        this.#ground(item, each.footprint[variant], size, strength);
+      }
     }
     for (const mesh of this.meshes) {
       if (mesh.count > 0) {
@@ -5583,6 +5956,28 @@ export class RealisticVegetationBelt {
       }
       mesh.visible = mesh.count > 0;
     }
+  }
+
+  /** One caster into {@link grounded}, if it has room. */
+  #ground(
+    item: ScatterItem,
+    footprint: { readonly radius: number; readonly height: number } | undefined,
+    size: number,
+    strength: number,
+  ): void {
+    const list = this.grounded;
+    const caster = list.casters[list.count];
+    if (caster === undefined || footprint === undefined) return;
+    caster.x = item.x;
+    caster.z = item.z;
+    caster.yaw = 0;
+    caster.round = true;
+    caster.halfAlong = footprint.radius * size;
+    caster.halfAcross = footprint.radius * size;
+    caster.centreAlong = 0;
+    caster.height = footprint.height * size;
+    caster.strength = strength;
+    list.count += 1;
   }
 
   /** This frame's matrix into every part of one level, keeping `[from, to)` of the dither. */
@@ -5678,6 +6073,8 @@ interface VegetationSlot {
   readonly fit: number;
   /** Per shape, how far it reaches from its trunk and above its base, in its own units. @see treeCanBeSeen */
   readonly reach: readonly { readonly across: number; readonly up: number }[];
+  /** Per shape, the ground it covers and how tall it is, in its own units. @see groundFootprint */
+  readonly footprint: readonly { readonly radius: number; readonly height: number }[];
 }
 
 /** An instanced mesh of a fixed capacity, empty, never frustum-culled. */
@@ -6792,6 +7189,8 @@ export class RealisticStructureBelts {
   readonly #belts: readonly { readonly surface: StructureSurface; readonly belt: ScatterBelt }[];
   /** The belt each kind is counted off: the first surface it wears. @see drawnItems */
   readonly #first = new Map<StructureKind, StructureSurface>();
+  /** How tall each kind is built, at scale 1, over every surface and shape — #620. */
+  readonly #heights = new Map<StructureKind, number>();
 
   /** @param textures the world's structure surfaces. @see RealisticWorld.structures */
   constructor(textures: RealisticWorld['structures']) {
@@ -6818,6 +7217,11 @@ export class RealisticStructureBelts {
           for (const shape of shapes) shape.dispose();
           throw new Error(`${kind}: its variants do not all wear ${surface}`);
         }
+        for (const shape of shapes) {
+          shape.computeBoundingBox();
+          const top = shape.boundingBox?.max.y ?? 0;
+          this.#heights.set(kind, Math.max(this.#heights.get(kind) ?? 0, top));
+        }
         models.set(kind, shapes);
       }
       const belt = new ScatterBelt(models, {
@@ -6829,6 +7233,15 @@ export class RealisticStructureBelts {
       for (const shapes of models.values()) for (const geometry of shapes) geometry.dispose();
       return { surface, belt };
     });
+  }
+
+  /**
+   * How tall a kind is built, at scale 1, in its tallest shape and surface —
+   * a church's tower, a house's chimney — which is the column its ground blob
+   * is thrown from (#620). Nought for a kind this world does not build.
+   */
+  heightOf(kind: StructureKind): number {
+    return this.#heights.get(kind) ?? 0;
   }
 
   /** The belt one surface is drawn by. */
@@ -6932,6 +7345,7 @@ export function setTreeLevels(levels: TreeLevels): void {
  *   procedural in both worlds. No Kenney model is drawn beside a photoscan on
  *   any rung — D-3.
  * - {@link RealisticRiderBelt}: the MakeHuman riders on their bicycles (#369).
+ * - {@link GroundBlobBelt}: the ground darkened under the scenery it drew (#620).
  * - The road's and the ground's photographic materials, swapped onto the
  *   stylised meshes, so the road stays one mesh and one draw call (#425).
  * - The environment map, prefiltered from the sky with this view's own
@@ -6945,9 +7359,16 @@ class RealisticDrawing {
   readonly structures: RealisticStructureBelts;
   readonly primitives: ScatterBelt;
   readonly riders: RealisticRiderBelt;
+  readonly grounding: GroundBlobBelt;
   readonly road: MeshStandardMaterial;
   readonly ground: MeshStandardMaterial;
   readonly environment: Texture;
+  /** This frame's structures, as ground-blob casters — #620. @see groundScenery */
+  readonly #structureCasters = blobCasters(REALISTIC_STRUCTURE_ITEMS);
+  /** Both lists the blob belt reads, made once. */
+  readonly #casterLists: readonly BlobCasters[];
+  /** The rung's scenery budget, as the structure belts spend it. @see setBudget */
+  #budget = Number.POSITIVE_INFINITY;
 
   constructor(
     world: RealisticWorld,
@@ -6970,6 +7391,8 @@ class RealisticDrawing {
       physical: true,
     });
     this.riders = new RealisticRiderBelt(world.body);
+    this.grounding = new GroundBlobBelt();
+    this.#casterLists = [this.vegetation.grounded, this.#structureCasters];
     this.road = photographicRoadMaterial(world.road.colour, world.road.normal);
     this.ground = photographicGroundMaterial(
       world.ground.colour,
@@ -6987,6 +7410,7 @@ class RealisticDrawing {
     this.structures.addTo(scene);
     this.primitives.addTo(scene);
     this.riders.addTo(scene);
+    this.grounding.addTo(scene);
   }
 
   setShown(on: boolean): void {
@@ -6994,6 +7418,7 @@ class RealisticDrawing {
     this.structures.setShown(on);
     this.primitives.setShown(on);
     this.riders.setShown(on);
+    this.grounding.setShown(on);
   }
 
   /** Every scenery belt, handed the same frame. */
@@ -7012,9 +7437,34 @@ class RealisticDrawing {
    * @see RealisticVegetationBelt.setBudget
    */
   setBudget(items: number): void {
+    this.#budget = items;
     this.vegetation.setBudget(items);
     this.structures.setBudget(items);
     this.primitives.setBudget(items);
+  }
+
+  /**
+   * The ground blobs under this frame's scenery — #620. Called after
+   * {@link updateScenery}, with the SAME items: the vegetation belt has
+   * written what it drew as meshes, and the structures are the ones the
+   * structure belts admit — in view, and inside the rung's budget counted over
+   * every kind, which is `ScatterBelt.update`'s own rule.
+   */
+  groundScenery(
+    items: readonly ScatterItem[],
+    pose: CameraPose,
+    corridor: RoadCorridor,
+    terrain: TerrainMesh,
+    sun: SunStyle,
+  ): void {
+    structureCasters(
+      items,
+      pose,
+      this.#budget,
+      (kind) => this.structures.heightOf(kind),
+      this.#structureCasters,
+    );
+    this.grounding.update(this.#casterLists, corridor, terrain, sun);
   }
 
   /** How many scenery items the last frame drew, every belt together. */
@@ -7027,10 +7477,54 @@ class RealisticDrawing {
     this.structures.dispose();
     this.primitives.dispose();
     this.riders.dispose();
+    this.grounding.dispose();
     this.road.dispose();
     this.ground.dispose();
     this.environment.dispose();
   }
+}
+
+/**
+ * This frame's structures as ground-blob casters, written into `into` — #620:
+ * the ones the structure belts admit, which is `ScatterBelt.update`'s own
+ * rule — in view, and inside the rung's `budget` counted over EVERY kind in
+ * the frame's order — each with `settlements.ts` §`STRUCTURE_FOOTPRINTS`'
+ * footprint and the height the realistic world builds it to. Stops at the
+ * list's capacity. Allocates nothing.
+ */
+export function structureCasters(
+  items: readonly ScatterItem[],
+  pose: CameraPose,
+  budget: number,
+  heightOf: (kind: StructureKind) => number,
+  into: BlobCasters,
+): void {
+  into.count = 0;
+  let admitted = 0;
+  for (const item of items) {
+    if (!inView(item, pose)) continue;
+    if (admitted >= budget) break;
+    admitted += 1;
+    if (!isStructureKind(item.kind)) continue;
+    const caster = into.casters[into.count];
+    if (caster === undefined) break;
+    const footprint = STRUCTURE_FOOTPRINTS[item.kind];
+    caster.x = item.x;
+    caster.z = item.z;
+    caster.yaw = item.rotation;
+    caster.round = false;
+    caster.halfAlong = ((footprint.front - footprint.back) / 2) * item.scale;
+    caster.halfAcross = footprint.x * item.scale;
+    caster.centreAlong = ((footprint.front + footprint.back) / 2) * item.scale;
+    caster.height = heightOf(item.kind) * item.scale;
+    caster.strength = 1;
+    into.count += 1;
+  }
+}
+
+/** Whether an item is one of `settlements.ts`' structures, which carry a footprint. */
+function isStructureKind(kind: SceneryKind): kind is StructureKind {
+  return Object.hasOwn(STRUCTURE_FOOTPRINTS, kind);
 }
 
 /**
@@ -7142,6 +7636,43 @@ export function filterWaterRipplesOf(view: GameView, on: boolean): void {
  */
 export function nearFieldOf(view: GameView, nearMetres: number, clear: boolean): void {
   if (view instanceof ThreeGameView) view.nearField(nearMetres, clear);
+}
+
+/**
+ * Turns a view's ground blobs off or on — #620. The browser gate's control:
+ * with them off, the ground under a tree's blob and the ground 5 m from it
+ * must read alike, or the darkening measured with them on is the ground's.
+ *
+ * @test-facing the browser gate's switch, read by `game-harness.ts`; the
+ * product never hides the blobs of a realistic frame.
+ */
+export function showGroundBlobsOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.showGroundBlobs(on);
+}
+
+/**
+ * What a view's last frame drew of the ground blobs — #620, for the browser
+ * gate: how many, how many triangles that is, and each one's instance matrix
+ * (column-major, sixteen numbers a blob), from which the harness reads where a
+ * blob's middle is and how far it reaches. Nothing in the stylised world,
+ * which draws none.
+ *
+ * @test-facing read by `game-harness.ts` for #620's probe and its cost
+ * figures; nothing in the render path needs to ask.
+ */
+export function groundBlobsOf(view: GameView): {
+  readonly blobs: number;
+  readonly triangles: number;
+  readonly matrices: readonly number[];
+} {
+  const mesh = view instanceof ThreeGameView ? view.groundBlobMesh : undefined;
+  const blobs = mesh?.visible === true ? mesh.count : 0;
+  const index = mesh?.geometry.getIndex();
+  return {
+    blobs,
+    triangles: blobs * ((index?.count ?? 0) / 3),
+    matrices: mesh === undefined ? [] : Array.from(mesh.instanceMatrix.array.slice(0, blobs * 16)),
+  };
 }
 
 /** How many numbers {@link writeTriangles} writes for a geometry: nine a triangle. */
@@ -7366,6 +7897,8 @@ class ThreeGameView implements GameView {
   );
   /** Whether the near-plane cull is on. @see nearFieldOf */
   #clearOfTheCamera = true;
+  /** Whether the realistic world's ground blobs are drawn. @see showGroundBlobsOf */
+  #groundBlobsShown = true;
   /** Reused every frame: `#placeCamera` allocated a `Vector3` per frame until #424 (NFR-3). */
   readonly #lookAt = new Vector3();
   readonly #roadGeometry = new BufferGeometry();
@@ -7606,6 +8139,13 @@ class ThreeGameView implements GameView {
       : frame.scatter;
     this.#scatter.update(scenery, frame.camera);
     this.#realistic?.updateScenery(scenery, frame.camera);
+    this.#realistic?.groundScenery(
+      scenery,
+      frame.camera,
+      frame.corridor,
+      frame.terrain.mesh,
+      frame.world.sun,
+    );
     this.#realistic?.riders.place(frame.markers);
     this.#updateMarkers(frame.markers);
     this.#updateShadows(frame);
@@ -7755,6 +8295,7 @@ class ThreeGameView implements GameView {
     this.#riders.setShown(!realistic);
     this.#skyDome.mesh.visible = !realistic;
     this.#realistic?.setShown(realistic);
+    this.#realistic?.grounding.setShown(realistic && this.#groundBlobsShown);
     this.#road.material = drawing?.road ?? this.#roadMaterial;
     this.#terrain.setPhotographic(drawing?.ground);
     this.#bridges.setWorld(world, realistic ? loaded?.structures.get('stone') : undefined);
@@ -7801,6 +8342,17 @@ class ThreeGameView implements GameView {
     this.#camera.near = nearMetres;
     this.#camera.updateProjectionMatrix();
     this.#clearOfTheCamera = clear;
+  }
+
+  /** @see showGroundBlobsOf */
+  showGroundBlobs(on: boolean): void {
+    this.#groundBlobsShown = on;
+    this.#realistic?.grounding.setShown(on && this.#drawing === 'realistic');
+  }
+
+  /** @see groundBlobsOf */
+  get groundBlobMesh(): InstancedMesh | undefined {
+    return this.#realistic?.grounding.mesh;
   }
 
   /** @see filterWaterRipplesOf */

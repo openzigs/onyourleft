@@ -36,6 +36,7 @@ import {
   estimatedTextureBytes,
   REALISTIC_BUILD_BYTES,
   REALISTIC_FRAME_TRIANGLES,
+  REALISTIC_GROUND_BLOBS,
   REALISTIC_NEAR_MESHES,
   REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_TEXTURE_CEILING_PIXELS,
@@ -44,6 +45,7 @@ import {
   REALISTIC_TREE_LEVELS,
   REALISTIC_TRIANGLES,
 } from './realistic-budget';
+import { GROUND_BLOB_TRIANGLES } from './ground-blob';
 import { readGlb } from './model-bytes-testing';
 import { fileImageSize, modelFacts } from './realistic-bytes-testing';
 import { STRUCTURE_KINDS } from './scatter';
@@ -186,6 +188,61 @@ describe('each committed file inside its class’s budget — ADR 0026 D-6', () 
     }
   });
 
+  it('bakes the rock’s occlusion into a vertex colour, and changes nothing else about it — #620', () => {
+    // #620's rock is the same 2 400 triangles and the same two 512 px maps it
+    // was before the bake — `process_rock.py` only adds a colour — and the
+    // colour is on every vertex without splitting one (a CORNER bake would
+    // have split 2 103 vertices into 4 095 and nearly doubled the file).
+    for (const model of REALISTIC_VEGETATION.rock) {
+      const path = at(model.file);
+      const facts = modelFacts(path);
+      expect(facts.triangles, model.file).toBe(2_400);
+      expect(facts.images, model.file).toEqual([
+        { width: 512, height: 512 },
+        { width: 512, height: 512 },
+      ]);
+      const glb = readGlb(path);
+      const json = glb.json as {
+        meshes: { primitives: { attributes: Record<string, number> }[] }[];
+        accessors: { count: number; bufferView: number; componentType: number; type: string }[];
+        bufferViews: { byteOffset?: number; byteLength: number }[];
+      };
+      const attributes = json.meshes[0]?.primitives[0]?.attributes ?? {};
+      const colour = json.accessors[attributes['COLOR_0'] ?? -1];
+      const position = json.accessors[attributes['POSITION'] ?? -1];
+      expect(colour, `${model.file} carries no baked occlusion`).toBeDefined();
+      expect(colour?.count).toBe(position?.count);
+      expect(position?.count).toBe(2_103);
+      // Float RGB, which is what Blender 4.4.3 writes: read it and require an
+      // occlusion that actually darkens — mean under 0.95 and a floor near 0 —
+      // while the top of the rock stays lit.
+      expect(colour?.componentType).toBe(5126);
+      expect(colour?.type).toBe('VEC3');
+      const view = json.bufferViews[colour?.bufferView ?? -1];
+      const start = view?.byteOffset ?? 0;
+      const values = new Float32Array(
+        glb.binary.buffer.slice(
+          glb.binary.byteOffset + start,
+          glb.binary.byteOffset + start + (view?.byteLength ?? 0),
+        ),
+      );
+      let sum = 0;
+      let low = 1;
+      let high = 0;
+      for (let at = 0; at < values.length; at += 3) {
+        const red = values[at] as number;
+        sum += red;
+        low = Math.min(low, red);
+        high = Math.max(high, red);
+      }
+      const mean = sum / (values.length / 3);
+      expect(mean).toBeLessThan(0.95);
+      expect(mean).toBeGreaterThan(0.5);
+      expect(low).toBeLessThan(0.2);
+      expect(high).toBeGreaterThan(0.95);
+    }
+  });
+
   it('gives the rider a skin and nothing else one', () => {
     expect(modelFacts(at(REALISTIC_RIDER)).skinned).toBe(true);
     for (const kind of REALISTIC_VEGETATION_KINDS) {
@@ -212,8 +269,11 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     readonly riders: number;
     readonly structureItems: number;
     readonly heaviestStructure: number;
+    readonly blobs: number;
   } => {
     return {
+      // #620: the ground blobs, every one the belt has room for, a quad each.
+      blobs: REALISTIC_GROUND_BLOBS * GROUND_BLOB_TRIANGLES,
       vegetation: worstVegetation(),
       // Three riders: the rider, the pacer and the ghost, each a body and a bicycle.
       riders: 3 * (riderTriangles + realisticBicycleTriangles()),
@@ -225,11 +285,11 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
   };
 
   it('holds the worst frame the caps allow under the frame’s triangles, structures included — #506', () => {
-    const { vegetation, riders, structureItems, heaviestStructure } = worstFrame();
+    const { vegetation, riders, structureItems, heaviestStructure, blobs } = worstFrame();
     // ⚠️ #506: until this the sum stopped at the riders, and 240 structures
     // at up to 640 triangles each went into no sum at all. This is the line
     // that is red on the tree #506 was filed against.
-    expect(vegetation + riders + structureItems * heaviestStructure).toBeLessThanOrEqual(
+    expect(vegetation + riders + structureItems * heaviestStructure + blobs).toBeLessThanOrEqual(
       REALISTIC_FRAME_TRIANGLES,
     );
     // Non-vacuity: the structures are a real share of the frame — a village
@@ -239,12 +299,29 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
   });
 
   it('holds it with every structure at its CEILING too, so a building may grow to its budget — #506', () => {
-    const { vegetation, riders, structureItems } = worstFrame();
+    const { vegetation, riders, structureItems, blobs } = worstFrame();
     expect(
-      vegetation + riders + structureItems * REALISTIC_TRIANGLES.structure,
+      vegetation + riders + structureItems * REALISTIC_TRIANGLES.structure + blobs,
     ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
     // And the figure the rungs spend is the one `realistic-budget.ts` states.
     expect(structureItems).toBe(REALISTIC_STRUCTURE_ITEMS);
+  });
+
+  it('counts a ground blob under every mesh and structure a frame can draw, inside #620’s 124 — #620', () => {
+    const { blobs, structureItems } = worstFrame();
+    // Every tree at the full or middle level, the band between them, every
+    // shrub and rock mesh, and every structure the richest realistic rung
+    // carries: the belt's capacity, and so the most a frame can submit.
+    const trees = REALISTIC_TREE_LEVELS.near + REALISTIC_TREE_LEVELS.middle + 1;
+    expect(REALISTIC_GROUND_BLOBS).toBe(
+      trees + REALISTIC_NEAR_MESHES.shrub + REALISTIC_NEAR_MESHES.rock + structureItems,
+    );
+    expect(REALISTIC_GROUND_BLOBS).toBe(62);
+    expect(GROUND_BLOB_TRIANGLES).toBe(2);
+    expect(blobs).toBeLessThanOrEqual(124);
+    console.log(
+      `#620: ${String(REALISTIC_GROUND_BLOBS)} ground blobs at most, ${String(blobs)} triangles`,
+    );
   });
 
   it('falls by at least 60 000 triangles with the trees’ middle level — #617', () => {

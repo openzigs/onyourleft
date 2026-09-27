@@ -288,7 +288,7 @@ export const OUTPUTS: readonly OutputSpec[] = [
     from: 'boulder_01',
     recipe: { how: 'blender', script: 'blender/process_rock.py', args: ['boulder_01', '2400'] },
     modified:
-      'collapse-decimated from 66 122 to about 2 400 triangles, its colour and normal maps downsized to 512 px and its roughness map dropped; stood on its base',
+      'collapse-decimated from 66 122 to about 2 400 triangles, its colour and normal maps downsized to 512 px and its roughness map dropped; stood on its base; ambient occlusion baked into a vertex colour against a ground plane',
   },
   ...STRUCTURE_TEXTURES.flatMap((texture) => {
     const made = structureMapFiles(texture.id);

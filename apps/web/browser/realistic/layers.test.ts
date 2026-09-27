@@ -6,6 +6,7 @@ import type { RealisticShape } from '../../src/game/three-renderer';
 import {
   BridgeBelt,
   ContactShadowBelt,
+  GroundBlobBelt,
   HorizonRing,
   RealisticStructureBelts,
   RealisticVegetationBelt,
@@ -106,6 +107,7 @@ function viewLikeScene(): {
   new RealisticStructureBelts(new Map()).addTo(into);
   const primitives = new ScatterBelt(new Map(), { skip: REALISTIC_PRIMITIVE_SKIP, physical: true });
   primitives.addTo(into);
+  new GroundBlobBelt().addTo(into);
   return { scene, road, catcher, stylised, vegetation, primitives };
 }
 

@@ -23,8 +23,24 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isBuiltKind } from './buildings';
 import { REALISTIC_LADDER, type QualitySettings } from './quality';
 import {
+  blobCasters,
+  GROUND_BLOB_CORE,
+  GROUND_BLOB_DARKNESS,
+  GROUND_BLOB_LIFT_METRES,
+  GROUND_BLOB_TRIANGLES,
+  groundUnder,
+  roadClip,
+  type BlobCasters,
+} from './ground-blob';
+import { terrainCorridor } from './landform';
+import { hillRoute } from './route-fixtures-testing';
+import { scatterSeed } from './scatter';
+import { corridorOrigin, roadCorridor } from './terrain';
+import { worldStyle } from './world';
+import {
   HARD_SWAP_TREE_LEVELS,
   REALISTIC_BICYCLE_TRIANGLES,
+  REALISTIC_GROUND_BLOBS,
   REALISTIC_NEAR_MESHES,
   REALISTIC_TREE_LEVELS,
 } from './realistic-budget';
@@ -72,6 +88,9 @@ import {
   SCATTER_INSTANCE_CAPACITY,
   setRealisticTints,
   treeCanBeSeen,
+  GroundBlobBelt,
+  sceneryFitMetres,
+  structureCasters,
   REALISTIC_PRIMITIVE_SKIP,
   realisticResourceUrl,
   RealisticStructureBelts,
@@ -1836,5 +1855,354 @@ describe('every realistic tree, shrub, rock and building wears a seeded tint —
     // And with all four present it compiles.
     const whole = { uniforms: {}, vertexShader: vertex, fragmentShader: fragment };
     expect(() => compile.onBeforeCompile(whole, undefined)).not.toThrow();
+  });
+});
+
+/** A loaded scene whose one mesh's geometry does, or does not, carry a colour. */
+function aSceneColoured(coloured: boolean): Parameters<typeof prepareRealisticShape>[0] {
+  const geometry = aGeometry();
+  if (coloured) geometry.setAttribute('color', geometry.getAttribute('position').clone());
+  else geometry.deleteAttribute('color');
+  return {
+    updateWorldMatrix: () => undefined,
+    traverse: (visit: (node: unknown) => void) => {
+      visit({ isMesh: false, userData: { oyl_scan_height: 1, oyl_scan_width: 1.8 } });
+      visit({
+        isMesh: true,
+        geometry,
+        material: loaderMaterial(),
+        matrixWorld: IDENTITY,
+        userData: {},
+      });
+    },
+  } as unknown as Parameters<typeof prepareRealisticShape>[0];
+}
+
+describe('the rock’s baked occlusion is drawn — #620', () => {
+  it('multiplies a part by its vertex colours exactly when the file carries them', () => {
+    // `process_rock.py` bakes the occlusion into COLOR_0 since #620, which
+    // `GLTFLoader` hands over as the geometry's `color`; the committed file is
+    // held to carrying it by `realistic-budget.test.ts` §"#620".
+    const rock = prepareRealisticShape(aSceneColoured(true), 'rock');
+    expect(rock.parts[0]?.material.vertexColors).toBe(true);
+    const bare = prepareRealisticShape(aSceneColoured(false), 'rock');
+    expect(bare.parts[0]?.material.vertexColors).toBe(false);
+  });
+});
+
+/** Which z every caster in a list stands at, nearest first. */
+const castersAt = (list: BlobCasters): number[] =>
+  list.casters
+    .slice(0, list.count)
+    .map((caster) => caster.z)
+    .sort((a, b) => a - b);
+
+describe('the vegetation belt names what it drew as meshes, for the ground blobs — #620', () => {
+  const small = (): RealisticShape =>
+    prepareRealisticShape(aScene([{ material: loaderMaterial() }]), 'small');
+
+  it('names the six nearest trees, the eight nearest shrubs and the twelve nearest rocks', () => {
+    const tree = aTreeWithMiddle();
+    const belt = new RealisticVegetationBelt(
+      new Map([
+        ['tree-broadleaf', [tree]],
+        ['shrub', [small()]],
+        ['rock', [small()]],
+      ] as const),
+    );
+    // Far first, so a belt naming the first items rather than the nearest is caught.
+    const trees = [95, 85, 75, 65, 55, 45, 35, 25, 18, 10].map((z) => item('tree-broadleaf', z, 0));
+    const shrubs = Array.from({ length: 12 }, (_, at) => item('shrub', 100 - at * 7, 6));
+    const rocks = Array.from({ length: 16 }, (_, at) => item('rock', 100 - at * 6, -6));
+    belt.update([...trees, ...shrubs, ...rocks], POSE);
+    const list = belt.grounded;
+    const byKind = (x: number): number[] =>
+      list.casters
+        .slice(0, list.count)
+        .filter((caster) => caster.x === x)
+        .map((caster) => caster.z)
+        .sort((a, b) => a - b);
+    // The full, the band and the four middle ranks: never the middle-to-impostor band.
+    expect(byKind(0)).toEqual([10, 18, 25, 35, 45, 55]);
+    expect(byKind(6)).toEqual([23, 30, 37, 44, 51, 58, 65, 72]);
+    expect(byKind(-6)).toEqual([10, 16, 22, 28, 34, 40, 46, 52, 58, 64, 70, 76]);
+    expect(list.count).toBe(REALISTIC_GROUND_BLOBS - 36);
+    for (const caster of list.casters.slice(0, list.count)) {
+      expect(caster.round).toBe(true);
+      expect(caster.halfAlong).toBe(caster.halfAcross);
+      expect(caster.halfAcross).toBeGreaterThan(0);
+      expect(caster.height).toBeGreaterThan(0);
+    }
+  });
+
+  it('fades the furthest tree’s blob as it nears the next tree back, so none appears in one frame', () => {
+    const tree = aTreeWithMiddle();
+    const belt = new RealisticVegetationBelt(new Map([['tree-broadleaf', [tree]]] as const));
+    const strengthAt = (z: number): number | undefined =>
+      belt.grounded.casters.slice(0, belt.grounded.count).find((caster) => caster.z === z)
+        ?.strength;
+    // Ranks 0 to 4 full; the sixth tree half-way between the fifth and the
+    // seventh, so half its blob.
+    belt.update(
+      [10, 18, 25, 35, 45, 55, 65, 75].map((z) => item('tree-broadleaf', z, 0)),
+      POSE,
+    );
+    for (const z of [10, 18, 25, 35, 45]) expect(strengthAt(z)).toBe(1);
+    expect(strengthAt(55)).toBeCloseTo(0.5, 9);
+    // Level with the seventh — the moment the two swap ranks — it has none,
+    // and so the one about to take its rank starts from none too.
+    belt.update(
+      [10, 18, 25, 35, 45, 65, 65.0001, 75].map((z) => item('tree-broadleaf', z, 0)),
+      POSE,
+    );
+    expect(strengthAt(65) ?? 0).toBeLessThan(1e-3);
+  });
+
+  it('names no tree drawn only as its impostor', () => {
+    // `aBelt`'s tree has no middle level, so every rank past the band is an
+    // impostor: the full tree and the band tree are the only meshes.
+    const belt = aBelt();
+    belt.update(
+      [150, 120, 90, 60, 40, 30, 20, 10].map((z) => item('tree-broadleaf', z)),
+      POSE,
+    );
+    expect(castersAt(belt.grounded)).toEqual([10, 20]);
+  });
+
+  it('sizes a caster by the item it stands for', () => {
+    const belt = aBelt();
+    belt.update([{ ...item('rock', 20), scale: 1 }], POSE);
+    const one = belt.grounded.casters[0];
+    // The crown's radius is the MEAN of the shape's two horizontal
+    // half-extents — not the bounding box's corner, which a cull wants — at
+    // the size the belt draws it: `sceneryFitMetres` over the scan's extent.
+    const shape = prepareRealisticShape(aScene([{ material: loaderMaterial() }]), 'small');
+    const geometry = shape.parts[0]?.geometry;
+    geometry?.computeBoundingBox();
+    const box = geometry?.boundingBox;
+    const size = sceneryFitMetres('rock') / shape.extent;
+    const half = (low: number, high: number): number => Math.max(Math.abs(low), Math.abs(high));
+    expect(one?.halfAcross).toBeCloseTo(
+      ((half(box?.min.x ?? 0, box?.max.x ?? 0) + half(box?.min.z ?? 0, box?.max.z ?? 0)) / 2) *
+        size,
+      9,
+    );
+    expect(one?.height).toBeCloseTo((box?.max.y ?? 0) * size, 9);
+    const [radius, height] = [one?.halfAcross ?? 0, one?.height ?? 0];
+    belt.update([{ ...item('rock', 20), scale: 1.4 }], POSE);
+    expect(belt.grounded.casters[0]?.halfAcross).toBeCloseTo(radius * 1.4, 9);
+    expect(belt.grounded.casters[0]?.height).toBeCloseTo(height * 1.4, 9);
+  });
+
+  it('names nothing while the stylised world is drawn', () => {
+    const belt = aBelt();
+    belt.update([item('rock', 20)], POSE);
+    expect(belt.grounded.count).toBe(1);
+    belt.setShown(false);
+    belt.update([item('rock', 20)], POSE);
+    expect(belt.grounded.count).toBe(0);
+  });
+});
+
+describe('the structures the ground blobs go under — #620', () => {
+  it('takes the structures the structure belts admit, with their footprints and heights', () => {
+    const into = blobCasters(4);
+    const house = { ...item('building', 20, 12), rotation: 0.5, scale: 1.2 };
+    structureCasters(
+      [
+        item('building', -400), // behind the corridor: never admitted
+        house,
+        item('tree-broadleaf', 30), // admitted, and spends the budget, but no structure
+        item('wall', 40),
+        item('church', 50), // past the budget of three
+      ],
+      POSE,
+      3,
+      (kind) => (kind === 'building' ? 8 : 1),
+      into,
+    );
+    expect(into.count).toBe(2);
+    const [first, second] = into.casters;
+    expect(first).toMatchObject({ x: 12, z: 20, yaw: 0.5, round: false });
+    // `settlements.ts`' house: ±4.5 m square, scaled.
+    expect(first?.halfAlong).toBeCloseTo(4.5 * 1.2, 9);
+    expect(first?.halfAcross).toBeCloseTo(4.5 * 1.2, 9);
+    expect(first?.height).toBeCloseTo(8 * 1.2, 9);
+    expect(second?.z).toBe(40);
+    // A wall: one 8 m piece along it, 0.3 m either side across it.
+    expect(second?.halfAlong).toBeCloseTo(4, 9);
+    expect(second?.halfAcross).toBeCloseTo(0.3, 9);
+    expect(second?.centreAlong).toBeCloseTo(0, 9);
+    expect(second?.height).toBe(1);
+  });
+
+  it('puts a church’s footprint where it stands, which is not its middle', () => {
+    const into = blobCasters(1);
+    structureCasters([item('church', 20)], POSE, Infinity, () => 12, into);
+    // `settlements.ts`' church: 3.8 m either side, −9.3 m behind to 9.5 m in front.
+    expect(into.casters[0]?.halfAcross).toBeCloseTo(3.8, 9);
+    expect(into.casters[0]?.halfAlong).toBeCloseTo(9.4, 9);
+    expect(into.casters[0]?.centreAlong).toBeCloseTo(0.1, 9);
+  });
+
+  it('builds a church taller than a house, and a house taller than a wall', () => {
+    const belts = aStructureBelt();
+    expect(belts.heightOf('church')).toBeGreaterThan(belts.heightOf('building'));
+    expect(belts.heightOf('building')).toBeGreaterThan(belts.heightOf('wall'));
+    expect(belts.heightOf('wall')).toBeGreaterThan(0);
+  });
+});
+
+describe('the ground blob belt — #620', () => {
+  const profile = hillRoute();
+  const origin = corridorOrigin(profile);
+  const corridor = roadCorridor(profile, origin, 900);
+  const terrain = terrainCorridor(profile, origin, corridor, scatterSeed(profile));
+  const sun = worldStyle(profile).sun;
+  /** Three trees beside the road, 7, 20 and 30 m out: the first a verge's width off the edge. */
+  const casters = (): BlobCasters => {
+    const list = blobCasters(3);
+    const point = corridor.centre[60];
+    const next = corridor.centre[61];
+    if (point === undefined || next === undefined) throw new Error('a short corridor');
+    const length = Math.hypot(next.x - point.x, next.z - point.z);
+    [7, 20, 30].forEach((out, at) => {
+      const caster = list.casters[at];
+      if (caster === undefined) return;
+      Object.assign(caster, {
+        x: point.x - ((next.z - point.z) / length) * out,
+        z: point.z + ((next.x - point.x) / length) * out,
+        yaw: 0,
+        round: true,
+        halfAlong: 3,
+        halfAcross: 3,
+        centreAlong: 0,
+        height: 9,
+        strength: 1,
+      });
+    });
+    list.count = 3;
+    return list;
+  };
+
+  it('is one quad of two triangles, facing up, and draws no texture', () => {
+    const belt = new GroundBlobBelt();
+    const geometry = belt.mesh.geometry;
+    const index = Array.from(geometry.getIndex()?.array ?? []);
+    expect(index.length / 3).toBe(GROUND_BLOB_TRIANGLES);
+    const position = geometry.getAttribute('position');
+    for (let at = 0; at < index.length; at += 3) {
+      const [a, b, c] = [index[at], index[at + 1], index[at + 2]].map((vertex) => [
+        position.getX(vertex ?? 0),
+        position.getY(vertex ?? 0),
+        position.getZ(vertex ?? 0),
+      ]) as [number[], number[], number[]];
+      const u = [0, 1, 2].map((k) => (b[k] as number) - (a[k] as number));
+      const v = [0, 1, 2].map((k) => (c[k] as number) - (a[k] as number));
+      const up = (u[2] as number) * (v[0] as number) - (u[0] as number) * (v[2] as number);
+      expect(up).toBeGreaterThan(0);
+    }
+    const material = belt.mesh.material as unknown as Record<string, unknown>;
+    expect(material['transparent']).toBe(true);
+    expect(material['depthWrite']).toBe(false);
+    expect(material['depthTest']).toBe(true);
+    expect(material['map']).toBeNull();
+    expect(belt.mesh.instanceMatrix.count).toBe(REALISTIC_GROUND_BLOBS);
+  });
+
+  it('puts one blob per caster on the landform’s own triangle, clipped off the road', () => {
+    const belt = new GroundBlobBelt();
+    const list = casters();
+    belt.update([list], corridor, terrain, sun);
+    expect(belt.mesh.count).toBe(3);
+    expect(belt.mesh.visible).toBe(true);
+    const planes = new Float32Array(6);
+    const matrix = belt.mesh.instanceMatrix.array;
+    const first = belt.mesh.geometry.getAttribute('blobClipFirst').array;
+    const second = belt.mesh.geometry.getAttribute('blobClipSecond').array;
+    for (let slot = 0; slot < 3; slot += 1) {
+      const x = matrix[slot * 16 + 12] as number;
+      const y = matrix[slot * 16 + 13] as number;
+      const z = matrix[slot * 16 + 14] as number;
+      const under = { y: 0, nx: 0, ny: 1, nz: 0 };
+      // The middle, lifted along the ground's normal: take the lift off again.
+      expect(groundUnder(terrain, corridor.centre, x, z, under)).toBe(true);
+      expect(y - under.y).toBeCloseTo(GROUND_BLOB_LIFT_METRES * under.ny, 2);
+      // The clip planes written are the ones `roadClip` gives for that blob.
+      const reach = Math.max(
+        Math.hypot(matrix[slot * 16] as number, matrix[slot * 16 + 2] as number),
+        Math.hypot(matrix[slot * 16 + 8] as number, matrix[slot * 16 + 10] as number),
+      );
+      roadClip(
+        corridor.centre,
+        x - under.nx * GROUND_BLOB_LIFT_METRES,
+        z - under.nz * GROUND_BLOB_LIFT_METRES,
+        reach,
+        planes,
+      );
+      for (let at = 0; at < 3; at += 1) {
+        expect(first[slot * 3 + at]).toBeCloseTo(planes[at] as number, 2);
+        expect(second[slot * 3 + at]).toBeCloseTo(planes[3 + at] as number, 2);
+      }
+    }
+    // Each instance's strength is its caster's.
+    const strengths = belt.mesh.geometry.getAttribute('blobStrength').array;
+    expect(Array.from(strengths.slice(0, 3))).toEqual([1, 1, 1]);
+    list.casters[1]!.strength = 0.25;
+    belt.update([list], corridor, terrain, sun);
+    expect(strengths[1]).toBe(0.25);
+    // Non-vacuity: the nearest blob, 7 m out with a 3 m crown, reaches the
+    // road and IS clipped; the one 30 m out is not.
+    expect(Math.hypot(first[0] as number, first[1] as number)).toBeCloseTo(1, 5);
+    expect(Array.from(first.slice(6, 9))).toEqual([0, 0, -1]);
+  });
+
+  it('stops at its capacity, and draws nothing hidden or under a sun that throws no shadow', () => {
+    const small = new GroundBlobBelt(2);
+    small.update([casters()], corridor, terrain, sun);
+    expect(small.mesh.count).toBe(2);
+    const belt = new GroundBlobBelt();
+    belt.update([casters()], corridor, terrain, { ...sun, y: 0 });
+    expect(belt.mesh.count).toBe(0);
+    expect(belt.mesh.visible).toBe(false);
+    belt.update([casters()], corridor, terrain, sun);
+    belt.setShown(false);
+    expect(belt.mesh.visible).toBe(false);
+    belt.update([casters()], corridor, terrain, sun);
+    expect(belt.mesh.count).toBe(0);
+  });
+
+  it('draws its darkness and its clip in the shader — the constants `ground-blob.ts` states', () => {
+    const belt = new GroundBlobBelt();
+    const compile = belt.mesh.material as unknown as {
+      onBeforeCompile: (shader: unknown, renderer: unknown) => void;
+    };
+    const vertex = '#include <common>\n#include <begin_vertex>';
+    const fragment = '#include <common>\n#include <color_fragment>';
+    const shader = { uniforms: {}, vertexShader: vertex, fragmentShader: fragment };
+    compile.onBeforeCompile(shader, undefined);
+    expect(shader.fragmentShader).toContain(`${String(GROUND_BLOB_DARKNESS)} * vBlobStrength *`);
+    expect(shader.vertexShader).toContain('vBlobStrength = blobStrength;');
+    expect(shader.fragmentShader).toContain(`smoothstep(${String(GROUND_BLOB_CORE)}, 1.0`);
+    expect(shader.fragmentShader).toContain(
+      'dot(vBlobClipFirst.xy, vBlobOffset) < vBlobClipFirst.z',
+    );
+    expect(shader.fragmentShader).toContain(
+      'dot(vBlobClipSecond.xy, vBlobOffset) < vBlobClipSecond.z',
+    );
+    expect(shader.vertexShader).toContain('attribute vec3 blobClipFirst;');
+    for (const [stage, include] of [
+      ['vertex', '#include <begin_vertex>'],
+      ['fragment', '#include <color_fragment>'],
+    ] as const) {
+      const broken = {
+        uniforms: {},
+        vertexShader: stage === 'vertex' ? vertex.replace(include, '') : vertex,
+        fragmentShader: stage === 'fragment' ? fragment.replace(include, '') : fragment,
+      };
+      expect(() => compile.onBeforeCompile(broken, undefined)).toThrow(
+        `three's ${stage} shader no longer holds ${include}, where #620's ground blob is spliced in`,
+      );
+    }
   });
 });

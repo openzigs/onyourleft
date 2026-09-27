@@ -13,9 +13,24 @@ The scan's normal map keeps the surface the decimation took away.
 
 1. Import the glTF, keep ONE object, stand it on the origin.
 2. Collapse-decimate to <target-tris>.
-3. Drop the roughness/metalness/occlusion map (the runtime uses a constant
-   roughness) and downsize the colour and normal maps to TEXTURE_PIXELS.
-4. Export a GLB.
+3. Bake ambient occlusion into a colour attribute with Cycles -- #620, the
+   same bake `process_tree.py` step 6 makes, with a ground plane under the
+   rock for the bake alone, so its foot and the crevices between its lobes
+   are dark for nothing at runtime. Until #620 a boulder was uniformly lit.
+4. Drop the roughness/metalness/occlusion map (the runtime uses a constant
+   roughness, and the occlusion is now in the vertices), wire the baked
+   colour into the material so glTF exports it as COLOR_0, and downsize the
+   colour and normal maps to TEXTURE_PIXELS.
+5. Export a GLB.
+
+## Why a Cycles bake and not the scan's own occlusion map
+
+The scan's map is a texture over the scan's UVs; carrying it to the vertices
+is a bake too (an emission bake of the map), and it knows nothing about the
+ground the rock stands on -- which is the occlusion #620 is about. The AO bake
+sees both. The decimated rock has 2 400 triangles over under two metres, so a
+vertex colour is a few centimetres apart: fine enough for a contact shadow and
+the gaps between lobes, and it costs no texture at all.
 
 ADR 0026 D-5: every choice is an argument or a constant here, the input is
 pinned by `inputs.lock.json` and the tool by `sources.ts` section PINNED_BLENDER.
@@ -25,6 +40,7 @@ import json
 import sys
 
 import bpy
+import numpy as np
 from mathutils import Vector
 
 args = sys.argv[sys.argv.index("--") + 1 :]
@@ -32,6 +48,15 @@ IN_GLTF, OUT_GLB, OUT_REPORT, OBJECT = args[:4]
 TARGET_TRIS = int(args[4])
 # The same ceiling the tree script uses; `realistic-budget.ts` holds it.
 TEXTURE_PIXELS = 512
+# #620: how far the occlusion bake looks, in metres of the scan. About half the
+# boulder's own height (it is 1.0 m tall before the runtime fits it), so a
+# lobe darkens its neighbour and the foot darkens against the ground, while
+# the top of the rock, which sees the whole sky, stays at 1. `process_tree.py`
+# uses 1.5 m for a canopy several metres across.
+AO_DISTANCE = 0.5
+# The ground plane the bake sees and the export does not: wide enough that
+# every ray leaving the rock's foot sideways within AO_DISTANCE meets it.
+AO_GROUND_METRES = 8.0
 
 
 def triangles(obj):
@@ -77,6 +102,45 @@ if triangles(rock) > TARGET_TRIS:
     modifier.ratio = TARGET_TRIS / triangles(rock)
     bpy.ops.object.modifier_apply(modifier="collapse")
 
+# --- 3. bake ambient occlusion into a colour attribute (#620) ---------------------
+scene = bpy.context.scene
+# ⚠️ ONE thread, no adaptive sampling, a fixed seed: `process_tree.py` says why
+# (Cycles sums samples in whatever order its threads finish), and `--check`
+# re-makes this file byte for byte only on one thread.
+scene.render.threads_mode = "FIXED"
+scene.render.threads = 1
+scene.cycles.use_adaptive_sampling = False
+scene.render.engine = "CYCLES"
+scene.cycles.device = "CPU"
+scene.cycles.samples = 64
+scene.cycles.seed = 620
+if scene.world is None:
+    scene.world = bpy.data.worlds.new("world")
+scene.world.light_settings.distance = AO_DISTANCE
+bpy.ops.mesh.primitive_plane_add(size=AO_GROUND_METRES, location=(0.0, 0.0, 0.0))
+ground = bpy.context.active_object
+# ⚠️ Per VERTEX, not per corner as `process_tree.py` bakes a plant. glTF has
+# one colour a vertex, so a corner attribute makes the exporter split every
+# vertex whose corners differ: the first run of this bake turned the rock's
+# 2 103 vertices into 4 095 and its 206 020 bytes into 319 048. A vertex bake
+# averages its corners and adds one COLOR_0 and nothing else (25 380 bytes).
+attribute = rock.data.color_attributes.new("ao", "BYTE_COLOR", "POINT")
+rock.data.color_attributes.active_color = attribute
+scene.render.bake.target = "VERTEX_COLORS"
+bpy.ops.object.select_all(action="DESELECT")
+rock.select_set(True)
+bpy.context.view_layer.objects.active = rock
+bpy.ops.object.bake(type="AO")
+ground_mesh = ground.data
+bpy.data.objects.remove(ground, do_unlink=True)
+bpy.data.meshes.remove(ground_mesh)
+ao = np.empty(len(attribute.data) * 4, dtype=np.float32)
+attribute.data.foreach_get("color", ao)
+channel = ao.reshape(-1, 4)[:, 0] if len(ao) else np.ones(1, dtype=np.float32)
+mean_ao = float(channel.mean())
+darkest_ao = float(channel.min())
+
+# --- 4. materials: drop the packed maps, wire the occlusion in, shrink images ----
 for slot in rock.material_slots:
     material = slot.material
     if material is None or not material.use_nodes:
@@ -90,6 +154,20 @@ for slot in rock.material_slots:
             links.remove(link)
     shader.inputs["Roughness"].default_value = 0.9
     shader.inputs["Metallic"].default_value = 0.0
+    # glTF carries COLOR_0 into the material only when a node reads it.
+    colour = nodes.new("ShaderNodeVertexColor")
+    colour.layer_name = "ao"
+    multiply = nodes.new("ShaderNodeMix")
+    multiply.data_type = "RGBA"
+    multiply.blend_type = "MULTIPLY"
+    multiply.inputs["Factor"].default_value = 1.0
+    base = shader.inputs["Base Color"]
+    if base.links:
+        links.new(base.links[0].from_socket, multiply.inputs["A"])
+    else:
+        multiply.inputs["A"].default_value = base.default_value
+    links.new(colour.outputs["Color"], multiply.inputs["B"])
+    links.new(multiply.outputs["Result"], base)
     for node in nodes:
         for socket in node.inputs:
             if socket.name == "Occlusion":
@@ -126,6 +204,8 @@ bpy.ops.export_scene.gltf(
     filepath=OUT_GLB,
     export_format="GLB",
     use_selection=True,
+    export_vertex_color="ACTIVE",
+    export_all_vertex_colors=False,
     export_image_format="AUTO",
     export_jpeg_quality=85,
     export_extras=True,
@@ -138,6 +218,8 @@ report = {
     "widthMetres": max(dims.x, dims.y),
     "images": sorted(images),
     "materials": len(rock.material_slots),
+    "meanAmbientOcclusion": mean_ao,
+    "darkestAmbientOcclusion": darkest_ao,
 }
 with open(OUT_REPORT, "w") as handle:
     json.dump(report, handle, indent=2, sort_keys=True)

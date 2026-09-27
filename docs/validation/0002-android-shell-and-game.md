@@ -3064,6 +3064,7 @@ row.
   | `-structures` | buildings, walls, hedges, fences, signposts |
   | `-water` | streams, lakes and bridges |
   | `-riders` | the three riders and their shadows |
+  | `-grounding` | since [#620](https://github.com/openzigs/onyourleft/issues/620): the ground blobs under the realistic trees, shrubs, rocks and structures — one mesh for all of them, so a layer of its own |
 
 - **The sampler and its summary are committed** under `apps/mobile/tools/`:
   `realistic-sampler.sh` runs on the tablet, and `realistic-summary.mjs` turns a run directory into
@@ -3207,6 +3208,8 @@ published figures (its run predates `oyl.txt`).
 | #619 | lever 1 after | | — | | | | | | | | |
 | #619 | lever 2 before | | — ; `rung=1`, `levers=-texture-bias` | | | | | | | | |
 | #619 | lever 2 after | | — ; `rung=1` | | | | | | | | |
+| #620 | before (no blobs) | | `-grounding` | | | | | | | | |
+| #620 | after | | — | | | | | | | | |
 
 **Phone (OEM, model, Android, WebView):** Google Pixel Tablet, build `CP2A.260705.006`, Android 17,
 WebView 153.0.8010.36  **Build:** debug, `main` at **`f91a5fb`** (before #617's tree LODs, PR #637)
@@ -3248,6 +3251,36 @@ sampler output, `before.txt` and `oyl.txt` for each run are committed under
   20 s after the page opened. So `soak=21` yields at most minutes 1–19; waiting about 40 s more
   before AH6's `logcat -d` would capture minute 20.
 - `adb` saw the tablet twice (USB and Wi-Fi), so every `"$ADB"` command needed `-s <serial>`.
+
+#### The #620 rows — the ground darkened under the scenery, and the rock's occlusion
+
+[#620](https://github.com/openzigs/onyourleft/issues/620) adds one draw call — a soft blob on the
+ground under every realistic tree, shrub, rock and structure drawn as a mesh, thrown from the one
+sun — and bakes ambient occlusion into the rock's vertex colours. Its ceiling is **no measurable
+increase** against this Part's spread: GPU DVFS mean, CPU *both*, skin at minute 20 and present
+p95. Deterministic figures, from the pull request and the browser gate: **+1 draw call** in a
+realistic frame (36 → 37 in the gate's wooded frame), **at most +124 triangles** (62 blobs × 2;
+the gate's wooded frame drew 40, +80), **0 texture bytes**, and **+25 380 build bytes** — the
+rock's new `COLOR_0` attribute, 2 103 vertices × 3 floats plus the glTF header, against
+`REALISTIC_BUILD_BYTES`' 9 MiB of room.
+
+Both rows are **one build**: the #620 branch (or a `main` with it merged), with the owner's page
+staged. ⚠️ **The rock's occlusion has no switch** — it is in the file — so the pair measures the
+blobs, and the rock's cost is a vertex attribute the GPU already reads for the trees.
+
+| Step | What to do |
+|---|---|
+| AH-620-1 | **Before**: AH1–AH7 with `&layers=-grounding` added to AH4's URL: `realistic.html?world=realistic&panel=0&ladder=0&seconds=30&soak=21&layers=-grounding`. `RUN=620-before` |
+| AH-620-2 | **Cool again (AH3, 25–26 °C)**, then **after**: AH1–AH7 with AH4's URL unchanged. `RUN=620-after` |
+| AH-620-3 | Write both rows into the table above. The **triangles / frame** column should rise by no more than 124 and **draw calls** by exactly 1 between them; the measured columns against #616's spread |
+| AH-620-4 | **By eye**, after the last run and before the tablet is restored: hold beside the first farmstead (`&at=1045`, AE1's hold) and look at the nearest trees, the house and the barn, with and without `&layers=-grounding`. Do the trees and the buildings now stand **in** the ground, and is any blob visibly on the road, on the water, or floating? Look at a boulder close up: is it darker at its foot and between its lobes than on its top? |
+
+| #620 by eye | Answer |
+|---|---|
+| Trees stand in the ground (with against without) | |
+| Buildings stand in the ground | |
+| Any blob on the road, on water, or floating | |
+| The boulder is darker at its foot and in its crevices | |
 
 #### The #619 rows — what the realistic world costs the GPU, lever by lever
 

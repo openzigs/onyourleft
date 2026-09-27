@@ -1144,6 +1144,33 @@ frame at about 450 000 against a 300 000 budget, and the budget's sum had left s
 building is still listed before any field boundary, so what the realistic world gives up is the far
 walls, hedges and fences.
 
+**The scenery stands IN the ground since [#620](https://github.com/openzigs/onyourleft/issues/620)**,
+and a reader who remembers a realistic tree or house on grass as bright right up to its trunk or
+wall is reading the old file. Two changes, both near-free:
+
+- **A ground blob under every realistic tree, shrub, rock and structure drawn as a mesh** —
+  `apps/web/src/game/ground-blob.ts` decides where (thrown from `world.ts`'s one sun through
+  `contact-shadow.ts` §`sunThrowPerMetre`, the projection the riders' blob uses, shared rather than
+  copied; on the landform triangle under the blob's middle; clipped at the road's edge by two
+  half-planes, one per stretch of road in reach, which `ground-blob.test.ts` holds on a hairpin), and
+  `three-renderer.ts` §`GroundBlobBelt` draws them: **one draw call, two triangles a blob, no
+  texture, no shadow state**, realistic rungs only. At most `realistic-budget.ts`
+  §`REALISTIC_GROUND_BLOBS` (62) a frame, **counted in the frame's triangles** — 124 of the 1 350
+  the structures had left. The furthest tree with a blob fades it as it nears the next tree back,
+  because #617's hand-over measured it popping on in one frame otherwise. The ground's own columns
+  are 4 to 9 m apart beside the road, which is why this is not baked into the ground's colours.
+  The owner's page switches it off with `?layers=-grounding`.
+- **The rock's ambient occlusion is baked**, the way the trees' already was:
+  `tools/realistic/blender/process_rock.py` bakes a Cycles AO into a per-VERTEX colour against a
+  ground plane the export leaves out, so the boulder is dark at its foot and between its lobes.
+  Same 2 400 triangles and the same two 512 px maps; the file is 25 380 bytes larger (its `COLOR_0`).
+  ⚠️ A per-CORNER bake split 2 103 vertices into 4 095 and nearly doubled the file; the script says so.
+
+⚠️ **A blob is blended over the ENCODED pixel**: three tone-maps and sRGB-encodes inside each
+material's shader when it draws to the canvas, so a blob of alpha 0.3 takes 0.3 off the displayed
+pixel, not off the light. `game.browser.spec.ts` §"#620" reads that back and holds it from both
+sides.
+
 ## Spike write-ups
 
 A spike is **not a decision**. It is a dated measurement that a decision may rest on, and it ages the
