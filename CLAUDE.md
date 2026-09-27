@@ -2008,6 +2008,16 @@ own cases read (`game-harness.ts` §`SHADOW_MAP_LOAD`) — measured on the runne
 the plain page's 34 and about 16 s of `?shadow-map`'s 55 spent for nobody. A new case on either
 load reads a field the OTHER load no longer measures at its "nothing measured" value, which fails
 rather than passes; move the probe, do not read across.
+⚠️ **What #651 bought, and what it did not.** It asked for a green job of 12 minutes or less. On
+`main` before it, green runs took 1005 s, 1009 s and 1039 s on an AMD EPYC 7763 runner and 723 s on
+the faster EPYC 9V45 one; on #651's pull request, on the 7763, 933 s (run 36337270885): 141 s of
+concurrent checks, 28 s of `test:a11y`, 347 s of Vitest with coverage and 390 s of browser gate.
+**It is not twelve minutes on that runner, and nothing short of removing a gate makes it so**: the
+job is CPU-bound on two cores (above), Vitest with coverage alone is 347 s of the 933, and its two
+largest files — the #545 near-field rides at 216 s and the FIT fuzz at 99 s — are slowed about
+three times by coverage's instrumentation of their hot loops (2.8 times for the rides, measured as
+CPU time locally; 3.3 times for the fuzz, `decode-fuzz.test.ts`'s own measurement). Which runner a job lands
+on is not something this repository can choose without paying for a larger one, which §8 forbids.
 
 ⚠️ **The browser is pinned by the lockfile, not by the install command.** `@playwright/test`
 **1.63.0** ships Chromium revision **1243**, and `playwright install chromium` fetches whatever the
