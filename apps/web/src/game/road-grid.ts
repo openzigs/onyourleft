@@ -27,7 +27,7 @@ import { CORRIDOR_STEP_METRES, drawnRoadPosition, type CorridorOrigin } from './
 const ROAD_GRID_MAXIMUM_POINTS = 200_000;
 
 /** The side of one cell of {@link roadGrid}, in metres. */
-export const ROAD_CELL_METRES = 32;
+const ROAD_CELL_METRES = 32;
 
 /** The whole route's centreline in local metres, bucketed by cell. */
 interface RoadGrid {
@@ -41,7 +41,7 @@ interface RoadGrid {
 const roadGrids = new WeakMap<RouteProfile, RoadGrid>();
 
 /** The key of one cell of {@link roadGrid}, by its column and row. */
-export function roadCellKey(column: number, row: number): number {
+function roadCellKey(column: number, row: number): number {
   return column * 100_003 + row;
 }
 
@@ -68,7 +68,7 @@ export function roadCellKey(column: number, row: number): number {
  * corner is drawn at, a 10 m chord is a metre inside the drawn road there and
  * a 2 m one four centimetres.
  */
-export function roadGrid(profile: RouteProfile, origin: CorridorOrigin): RoadGrid {
+function roadGrid(profile: RouteProfile, origin: CorridorOrigin): RoadGrid {
   const cached = roadGrids.get(profile);
   if (
     cached !== undefined &&
@@ -117,7 +117,119 @@ export function roadGrid(profile: RouteProfile, origin: CorridorOrigin): RoadGri
 }
 
 /** A cell with no road in it. Shared, so a miss allocates nothing. */
-export const NO_SEGMENTS: readonly number[] = [];
+const NO_SEGMENTS: readonly number[] = [];
+
+/**
+ * A measure of one segment of the drawn road, from `(ax, az)` to `(bx, bz)`,
+ * as a SQUARED distance — what {@link leastSquaredNearRoad} takes the least of.
+ *
+ * ⚠️ **A module-level function handed its query, never a closure** (#469): the
+ * search runs for every scatter item and every structure in view, every frame,
+ * on the thread GATT notifications arrive on, so a caller keeps one query
+ * object and rewrites it rather than building a function per call.
+ */
+export type SegmentMeasure<Query> = (
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+  query: Query,
+) => number;
+
+/**
+ * The least of `measure` over every stretch of the drawn road that may lie
+ * within `reach` of `query`'s own `(x, z)` — the ONE cell search, which
+ * {@link distanceToDrawnRoad} and `settlements.ts` §`structureClearance` both
+ * ask. They were two copies of it from #613 until #602's fold-in of that
+ * review, and had already drifted: #613's squared distances went into one.
+ *
+ * Squared, because a caller takes one root at the end rather than one a
+ * segment: `Math.hypot` per segment doubled the time `three-renderer.test.ts`'s
+ * cull sweep takes, measured in CI. `+Infinity` when no segment is in reach.
+ *
+ * A segment in two of the cells searched is measured twice, which costs a few
+ * multiplications and no allocation.
+ *
+ * ⚠️ **The point is read from `query`, and only from there** (#602's review).
+ * It used to be passed twice — as `x, z` to choose the cells and inside
+ * `query` for `measure` — and a caller that set one and not the other would
+ * search the right cells and measure from the wrong point, with every test
+ * green unless its fixture happened to separate the two. One source cannot
+ * disagree with itself, and it costs no closure and no allocation (#469).
+ */
+export function leastSquaredNearRoad<Query extends { readonly x: number; readonly z: number }>(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  reach: number,
+  measure: SegmentMeasure<Query>,
+  query: Query,
+): number {
+  const road = roadGrid(profile, origin);
+  const points = road.points;
+  const x = query.x;
+  const z = query.z;
+  const lastColumn = Math.floor((x + reach) / ROAD_CELL_METRES);
+  const lastRow = Math.floor((z + reach) / ROAD_CELL_METRES);
+  const firstRow = Math.floor((z - reach) / ROAD_CELL_METRES);
+  let least = Number.POSITIVE_INFINITY;
+  for (let column = Math.floor((x - reach) / ROAD_CELL_METRES); column <= lastColumn; column += 1) {
+    for (let row = firstRow; row <= lastRow; row += 1) {
+      for (const segment of road.cells.get(roadCellKey(column, row)) ?? NO_SEGMENTS) {
+        least = Math.min(
+          least,
+          measure(
+            points[segment * 2] as number,
+            points[segment * 2 + 1] as number,
+            points[segment * 2 + 2] as number,
+            points[segment * 2 + 3] as number,
+            query,
+          ),
+        );
+      }
+    }
+  }
+  return least;
+}
+
+/**
+ * The squared distance from `(x, z)` to the segment from `(ax, az)` along
+ * `(dx, dz)`, whose squared length is `span`.
+ *
+ * ⚠️ **A zero-length segment is its one point**, and the guard that says so is
+ * not decoration: without it `0 / 0` is `NaN`, `Math.min(least, NaN)` is `NaN`
+ * for the rest of a search, and a clearance compared against `NaN` is false —
+ * a check that switches itself off with no signal (#613's review).
+ */
+export function squaredToSegment(
+  x: number,
+  z: number,
+  ax: number,
+  az: number,
+  dx: number,
+  dz: number,
+  span: number,
+): number {
+  const t = span > 0 ? Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / span)) : 0;
+  const ox = x - (ax + dx * t);
+  const oz = z - (az + dz * t);
+  return ox * ox + oz * oz;
+}
+
+/** The point {@link distanceToDrawnRoad} measures from, reused between calls. */
+const pointQuery = { x: 0, z: 0 };
+
+/** {@link SegmentMeasure} from {@link pointQuery}'s point. */
+function pointToSegmentSquared(
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+  query: typeof pointQuery,
+): number {
+  const dx = bx - ax;
+  const dz = bz - az;
+  return squaredToSegment(query.x, query.z, ax, az, dx, dz, dx * dx + dz * dz);
+}
 
 /**
  * How close the point `(x, z)` comes to the centreline of ANY stretch of the
@@ -138,29 +250,7 @@ export function distanceToDrawnRoad(
   z: number,
   reach: number,
 ): number {
-  const road = roadGrid(profile, origin);
-  // No closure and no array: this runs for every scatter item in view, every
-  // frame, on the thread GATT notifications arrive on (#469).
-  const lastColumn = Math.floor((x + reach) / ROAD_CELL_METRES);
-  const lastRow = Math.floor((z + reach) / ROAD_CELL_METRES);
-  const firstRow = Math.floor((z - reach) / ROAD_CELL_METRES);
-  let least = Number.POSITIVE_INFINITY;
-  for (let column = Math.floor((x - reach) / ROAD_CELL_METRES); column <= lastColumn; column += 1) {
-    for (let row = firstRow; row <= lastRow; row += 1) {
-      for (const segment of road.cells.get(roadCellKey(column, row)) ?? NO_SEGMENTS) {
-        const ax = road.points[segment * 2] as number;
-        const az = road.points[segment * 2 + 1] as number;
-        const dx = (road.points[segment * 2 + 2] as number) - ax;
-        const dz = (road.points[segment * 2 + 3] as number) - az;
-        const span = dx * dx + dz * dz;
-        const t = span > 0 ? Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / span)) : 0;
-        const ox = x - (ax + dx * t);
-        const oz = z - (az + dz * t);
-        // Squared, and one root at the end: `Math.hypot` here doubled the
-        // time `three-renderer.test.ts`'s cull sweep takes, measured in CI.
-        least = Math.min(least, ox * ox + oz * oz);
-      }
-    }
-  }
-  return Math.sqrt(least);
+  pointQuery.x = x;
+  pointQuery.z = z;
+  return Math.sqrt(leastSquaredNearRoad(profile, origin, reach, pointToSegmentSquared, pointQuery));
 }
