@@ -719,12 +719,13 @@ test.describe('a ride with a workout eased — #585', () => {
   // notice's words and nothing else — same `<p>`, same glyph, same label, same
   // cell — so it is the HUD as #585 shipped it only if `StatusMessage`'s
   // plain (no-`more`) markup is what `GameView` still renders, which the
-  // exact-text assertion below and the a11y suite hold. Measured 2026-09-27 on
-  // a Mac: this rewrite and `GameView` itself rendering the whole sentence
-  // (mutation M5) both printed 20 px at 360×752, with byte-identical notice
-  // markup, run three times each. A 6 px reading of this control was reported
-  // in review and did NOT reproduce. The CI runner's own figure is what the
-  // run prints; it is not asserted to match any other machine's.
+  // exact-text assertion below and the a11y suite hold. The figure it prints
+  // VARIES BY MACHINE, because the fonts do: 20 px on one Mac, 6 px on the
+  // reviewer's, 2 px on the CI runner. What was measured is that on a given
+  // machine it prints the same figure as the defect itself — this rewrite and
+  // `GameView` rendering the whole sentence (mutation M5) both printed 20 px
+  // at 360×752 on a Mac, with byte-identical notice markup, three runs each.
+  // It is not asserted to match any other machine's figure.
   for (const viewport of OVERLAY_VIEWPORTS.filter((each) => each.height === 752)) {
     test(`the control — the whole sentence comes within ${String(EASED_RIDER_CLEARANCE_PIXELS)} px of the rider — ${viewport.name}`, async ({
       page,

@@ -829,6 +829,48 @@ describe('a running workout owns the target — #605', () => {
     expect(text).not.toContain('Holding 150 W.');
   });
 
+  /**
+   * #605's re-review. The refusal is shown whenever a workout is LOADED and
+   * control is held — and a loaded workout is not always setting anything.
+   * The words are written out rather than read off the constant, so a
+   * rewording that makes them false again is a red test here.
+   */
+  const ergParagraph = (): string =>
+    (document.querySelector('.oyl-trainer__erg')?.textContent ?? '').replace(/\s+/g, ' ');
+
+  it('says the refusal truthfully for a workout that has finished and is still loaded', async () => {
+    const stub = stubRideController({
+      ...ridingSnapshot(),
+      workout: { ...workout, status: 'finished' as const, elapsedSeconds: 600 },
+    });
+    await show(stub);
+
+    expect(document.querySelector('#oyl-erg-target')).toBeNull();
+    expect(ergParagraph()).toBe(
+      'ERG, optional: Holding 250 W. End the workout to set a target by hand.',
+    );
+  });
+
+  it('says it truthfully for a paused workout once control has come back after a lost link', async () => {
+    const riding = ridingSnapshot();
+    const stub = stubRideController({
+      ...riding,
+      workout: { ...workout, status: 'paused' as const },
+      trainer: {
+        ...riding.trainer,
+        hasControl: true,
+        lost: undefined,
+        target: { kind: 'none' },
+      },
+    });
+    await show(stub);
+
+    expect(document.querySelector('#oyl-erg-target')).toBeNull();
+    expect(ergParagraph()).toBe(
+      'ERG, optional: No target set. The trainer is following your effort. End the workout to set a target by hand.',
+    );
+  });
+
   it('offers it again once the workout is gone — the control', async () => {
     const stub = stubRideController({ ...ridingSnapshot(), workout });
     await show(stub);

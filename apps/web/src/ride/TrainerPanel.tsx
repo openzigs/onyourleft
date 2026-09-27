@@ -349,7 +349,10 @@ export function TrainerPanel({
             link gone the workout is setting nothing and it would be false.
             It rides in the same paragraph rather than its own, which is
             measured: a paragraph of its own cost the Eased notice 41 px of its
-            margin to the fold at 1280×800 in the shell, this costs one line.
+            margin to the fold at 1280×800 in the shell. Since #605's re-review
+            it is short enough to cost NO line upright, where the paragraph is
+            above the notice in one column — `controller.ts`
+            §`MANUAL_ERG_DURING_WORKOUT`, held by `rideview.browser.spec.ts`.
           */}
           <p className="oyl-trainer__erg">
             <strong>ERG, optional:</strong> {targetSentence(trainer)}

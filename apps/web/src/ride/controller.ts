@@ -416,9 +416,22 @@ export const RIDE_NOTIFICATION_REFUSED =
  * §`workoutOwnsTarget`) — so a rider reads it before pressing anything rather
  * than after. The refusal in {@link RideController.setTargetPower} stays: a
  * caller that never read the snapshot still cannot reach the machine.
+ *
+ * ⚠️ **It names no state the workout is in** (#605's re-review). The refusal
+ * is shown whenever a workout is LOADED and control is held, and a loaded
+ * workout is not always setting anything: it may have finished and not been
+ * ended, or be paused after control came back from a lost link. "A workout is
+ * setting the trainer's target" was false in both; "End the workout" is true
+ * in every one. ⚠️ **And it is this short on purpose**: beside "ERG,
+ * optional: Holding N W." it has to stay on ONE line in the upright tablet's
+ * 680 px column on the CI runner's fonts. Measured in the pinned Chromium
+ * with DejaVu Sans as `system-ui`, in a container that reproduces the
+ * runner's published margins to the tenth of a pixel: 585 px, where "A
+ * workout is loaded. End the workout to set a target by hand." is 753 px and
+ * wraps. That line is what the Eased notice's margin to the fold rests on,
+ * and `rideview.browser.spec.ts` §"#605" holds it to one line.
  */
-export const MANUAL_ERG_DURING_WORKOUT =
-  'A workout is setting the trainer’s target. End the workout to set one by hand.';
+export const MANUAL_ERG_DURING_WORKOUT = 'End the workout to set a target by hand.';
 
 /**
  * What a finished ride needs to become an activity — #14's fourth criterion,

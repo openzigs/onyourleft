@@ -489,7 +489,11 @@ function foldMargin(bottom: number, viewport: Viewport): number {
  * no control" holds by the ORDER. What the case guards is that order: putting
  * *End workout* back after the notice (as #585 shipped it) turns it red here
  * as at the landscape sizes, and the fold case with it. The upright notice's
- * margin to the fold is the smallest of the five (105 px on a Mac).
+ * margin to the fold is the smallest of the five, and its figure is the one
+ * #669's larger controls will spend: *Pause* / *Stop* and *End workout* sit
+ * above it in the same column, about 4 px each at 48 px, while #669 leaves
+ * the disclosure's summary alone. Published, not bounded beyond the floor —
+ * #669 is not merged, and a bound on a projection is a bound on a guess.
  */
 const EASED_VIEWPORTS: readonly Viewport[] = [...TABLETS, TABLET_UPRIGHT_IN_THE_SHELL];
 
@@ -562,6 +566,30 @@ for (const viewport of EASED_VIEWPORTS) {
 
       expect(controlMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
       expect(noticeMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+
+      // #605's re-review. Upright, the ERG line — the target sentence and the
+      // refusal after it — sits above the notice in the same column, so every
+      // line it wraps to is a line off the notice's margin. It is held to ONE.
+      // `controller.ts` §`MANUAL_ERG_DURING_WORKOUT` says why it is as short as
+      // it is: the reviewer's longer wording wraps on the runner's fonts.
+      if (viewport.height > viewport.width) {
+        const erg = await page.evaluate(() => {
+          const line = document.querySelector('.oyl-trainer__erg');
+          if (line === null) return undefined;
+          return {
+            height: line.getBoundingClientRect().height,
+            lineHeight: Number.parseFloat(window.getComputedStyle(line).lineHeight),
+            text: (line.textContent ?? '').replace(/\s+/g, ' '),
+          };
+        });
+        expect(erg?.text).toBe(
+          'ERG, optional: Holding 250 W. End the workout to set a target by hand.',
+        );
+        expect(
+          erg?.height ?? Infinity,
+          `the ERG line wraps: ${String(erg?.height)} px`,
+        ).toBeLessThan(1.5 * (erg?.lineHeight ?? 0));
+      }
       expect((seen.eased?.box.top ?? -1) >= insetsOf(viewport).top).toBe(true);
     });
 
