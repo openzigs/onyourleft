@@ -397,7 +397,8 @@ describe('the chase camera', () => {
       state: atStartLine(profile),
     });
 
-    expect(frame.camera.headingX).toBeGreaterThan(0.9);
+    // East is `−x` since #583 (`terrain.ts` §`localGroundPosition`).
+    expect(frame.camera.headingX).toBeLessThan(-0.9);
     expect(Math.abs(frame.camera.headingZ)).toBeLessThan(0.1);
   });
 
@@ -753,8 +754,9 @@ describe('a marker slides along the road rather than snapping to a corridor poin
 
     const pose = cameraPose(corridor, (farEnd?.along ?? 0) + 50, 0);
 
-    // The route runs due east, and so does the camera at its far end.
-    expect(pose.headingX).toBeGreaterThan(0.9);
+    // The route runs due east, and so does the camera at its far end — `−x`
+    // since #583.
+    expect(pose.headingX).toBeLessThan(-0.9);
     expect(Math.abs(pose.headingZ)).toBeLessThan(0.1);
   });
 

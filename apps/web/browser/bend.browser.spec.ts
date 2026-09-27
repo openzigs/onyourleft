@@ -58,7 +58,11 @@ test.describe('a bend is drawn as a curve — #543', () => {
     // turn through most of it — a green kink bound over a few chords of
     // straight would say nothing. (A turn is summed within one unbroken run of
     // rays, and the ends of the bend meet the frame, so it reads short of 100°:
-    // 94.7° and 98.7° drawn, 89.7° and 96.6° for the control, measured.)
+    // 94.7° and 98.7° drawn, 89.7° and 96.6° for the control, measured; and
+    // 95.2°, 98.4°, 89.8° and 99.0° since #583 drew the bend the right way
+    // round. #583's mirror first read 81.7° and 73.3° here, because the sweep
+    // of rays began at 0° and the mirrored bend straddled it —
+    // `bend-harness.ts` §`edges` now starts the sweep on a ray that misses.)
     for (const reading of [drawn, unsmoothed]) {
       expect(reading.inner.turnedDegrees, describe(reading)).toBeGreaterThan(80);
       expect(reading.outer.turnedDegrees, describe(reading)).toBeGreaterThan(80);

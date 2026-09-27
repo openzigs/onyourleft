@@ -201,9 +201,16 @@ export function steadyClimb(): RouteProfile {
  * wraps — with a gentle rise and fall so that a height is never trivially
  * zero.
  */
-export function circuitRoute(radius: number, elevation?: (along: number) => number): RouteProfile {
+export function circuitRoute(
+  radius: number,
+  elevation?: (along: number) => number,
+  hand: 'right' | 'left' = 'left',
+): RouteProfile {
   const metresPerDegreeLongitude =
     METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
+  // It sets off north and bends west — a LEFT-hand circuit, anticlockwise on
+  // the map — unless `hand` says otherwise, which mirrors it east for west.
+  const mirror = hand === 'left' ? 1 : -1;
   const circumference = 2 * Math.PI * radius;
   const steps = Math.max(24, Math.round(circumference / 10));
   const height =
@@ -214,7 +221,9 @@ export function circuitRoute(radius: number, elevation?: (along: number) => numb
     points.push({
       position: geographicPosition(
         degreesLatitude(FIXTURE_LATITUDE + (radius * Math.sin(angle)) / METRES_PER_DEGREE_LATITUDE),
-        degreesLongitude(-0.12 + (radius * (Math.cos(angle) - 1)) / metresPerDegreeLongitude),
+        degreesLongitude(
+          -0.12 + (mirror * radius * (Math.cos(angle) - 1)) / metresPerDegreeLongitude,
+        ),
       ),
       elevation: altitudeMetres(height((index / steps) * circumference)),
     });
@@ -224,19 +233,25 @@ export function circuitRoute(radius: number, elevation?: (along: number) => numb
 }
 
 /**
- * A route of straights and bends — 400 m north, a right-hand bend of `radius`
- * through 180°, 400 m south — climbing 4 % the whole way. A hairpin when the
- * radius is small.
+ * A route of straights and bends — 400 m north, a bend of `radius` through
+ * 180° to the `hand` side (right, toward the east, by default), 400 m south —
+ * climbing 4 % the whole way. A hairpin when the radius is small.
+ *
+ * ⚠️ **`'left'` is how a test reproduces a world drawn before #583.** Until
+ * then the world was a mirror of the map, so the right-hand hairpin was drawn
+ * as the left-hand one is now; a measurement taken on that drawing is
+ * reproduced by the mirrored fixture rather than re-taken.
  */
-export function hairpinRoute(radius: number): RouteProfile {
+export function hairpinRoute(radius: number, hand: 'right' | 'left' = 'right'): RouteProfile {
   const metresPerDegreeLongitude =
     METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
+  const mirror = hand === 'right' ? 1 : -1;
   const points: RoutePoint[] = [];
   const push = (east: number, north: number, along: number): void => {
     points.push({
       position: geographicPosition(
         degreesLatitude(FIXTURE_LATITUDE + north / METRES_PER_DEGREE_LATITUDE),
-        degreesLongitude(-0.12 + east / metresPerDegreeLongitude),
+        degreesLongitude(-0.12 + (mirror * east) / metresPerDegreeLongitude),
       ),
       elevation: altitudeMetres(along * 0.04),
     });
@@ -310,15 +325,17 @@ export function cornerRoute(
  * level all the way. The two bends meet with no straight between them, which
  * is the case where a line has to cross the road from one apex to the other.
  */
-export function sBendRoute(radius: number): RouteProfile {
+export function sBendRoute(radius: number, hand: 'right' | 'left' = 'right'): RouteProfile {
   const metresPerDegreeLongitude =
     METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
+  // `'left'` mirrors it east for west: its FIRST bend is then the left-hander.
+  const mirror = hand === 'right' ? 1 : -1;
   const points: RoutePoint[] = [];
   const push = (east: number, north: number): void => {
     points.push({
       position: geographicPosition(
         degreesLatitude(FIXTURE_LATITUDE + north / METRES_PER_DEGREE_LATITUDE),
-        degreesLongitude(-0.12 + east / metresPerDegreeLongitude),
+        degreesLongitude(-0.12 + (mirror * east) / metresPerDegreeLongitude),
       ),
       elevation: altitudeMetres(0),
     });
@@ -351,15 +368,17 @@ export function sBendRoute(radius: number): RouteProfile {
  * would show — `circuitRoute`'s constant bend puts the line at one offset all
  * the way round.
  */
-export function stadiumRoute(radius: number): RouteProfile {
+export function stadiumRoute(radius: number, hand: 'right' | 'left' = 'right'): RouteProfile {
   const metresPerDegreeLongitude =
     METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
+  // `'left'` mirrors it east for west: both bends are then left-handers.
+  const mirror = hand === 'right' ? 1 : -1;
   const points: RoutePoint[] = [];
   const push = (east: number, north: number): void => {
     points.push({
       position: geographicPosition(
         degreesLatitude(FIXTURE_LATITUDE + north / METRES_PER_DEGREE_LATITUDE),
-        degreesLongitude(-0.12 + east / metresPerDegreeLongitude),
+        degreesLongitude(-0.12 + (mirror * east) / metresPerDegreeLongitude),
       ),
       elevation: altitudeMetres(0),
     });
@@ -397,15 +416,19 @@ export function stadiumRoute(radius: number): RouteProfile {
  * "real-world-like" is the sampling, which is what #543 is about, not a
  * coordinate anybody rode.
  */
-export function plannerRoute(): RouteProfile {
+export function plannerRoute(options: { readonly mirrored?: boolean } = {}): RouteProfile {
   const metresPerDegreeLongitude =
     METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
+  // `mirrored` swaps east for west, so every bend turns the other way: how a
+  // test rides the road a world drawn before #583 drew (`hairpinRoute`'s note).
+  // ⚠️ {@link PLANNER_BENDS} describes the UNMIRRORED road.
+  const mirror = options.mirrored === true ? -1 : 1;
   const kept = simplified(plannerRoad().road, PLANNER_TOLERANCE_METRES);
   return routeProfile(
     kept.map(([x, y]) => ({
       position: geographicPosition(
         degreesLatitude(FIXTURE_LATITUDE + y / METRES_PER_DEGREE_LATITUDE),
-        degreesLongitude(-0.12 + x / metresPerDegreeLongitude),
+        degreesLongitude(-0.12 + (mirror * x) / metresPerDegreeLongitude),
       ),
       elevation: altitudeMetres(0),
     })),

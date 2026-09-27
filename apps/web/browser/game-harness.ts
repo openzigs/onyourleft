@@ -309,6 +309,18 @@ export interface LineMeasurement {
   readonly topShift: number;
 }
 
+/**
+ * Which way a bend turns ON THE SCREEN — #583. @see bendProbe
+ */
+export interface BendMeasurement {
+  /** Road pixels in the frame. Zero means there was nothing to measure. */
+  readonly pixels: number;
+  /** The centre of the road across its NEAR quarter of rows, as a fraction of the width. */
+  readonly nearCentre: number;
+  /** The centre of the road across its FAR quarter of rows, as a fraction of the width. */
+  readonly farCentre: number;
+}
+
 export interface RiderExtent {
   /** The canvas's width over its height. */
   readonly aspect: number;
@@ -406,6 +418,12 @@ declare global {
         readonly straightOn: LineMeasurement;
         readonly straightOff: LineMeasurement;
       };
+      /**
+       * A bend that turns RIGHT on the map, and — the control — the same bend
+       * mirrored east for west, which is exactly how a build before #583 drew
+       * the right-hand one. @see bendProbe
+       */
+      readonly bend: { readonly right: BendMeasurement; readonly mirrored: BendMeasurement };
       /**
        * GPU buffers and textures three had created after the first frame, and
        * after {@link FRAMES}. Equal means nothing new was allocated per frame.
@@ -1120,6 +1138,106 @@ function lineProbe(
   return { on, onUpright, off, straightOn, straightOff };
 }
 
+/** What {@link bendProbe} reports when it did not run. */
+const NO_BEND: BendMeasurement = { pixels: 0, nearCentre: 0, farCentre: 0 };
+
+/**
+ * Which way a bend turns on the screen — #583.
+ *
+ * `hairpinRoute(20)` turns toward the EAST: a right-hand bend on the map.
+ * Until #583 the world put east on `+x`, which a right-handed renderer draws
+ * on a northbound camera's LEFT, so this bend was drawn turning left — #546's
+ * branch measured the apex rider at 22.1 % of the width, on the inside.
+ *
+ * ## The measure
+ *
+ * The rider 5 m short of the bend, through the CENTRELINE's camera (the
+ * product's follows the rider across the road — {@link lineProbe} says why
+ * that would move the frame). Only the road is drawn: the frame with and
+ * without its index list, the pixels that differ being the road, which is
+ * `loop-harness.ts` §`roadMask`'s isolation. The road's centre across its far
+ * quarter of rows, against its centre across its near quarter, is which way it
+ * goes: further right for a right-hand bend.
+ *
+ * ## The control
+ *
+ * The same hairpin mirrored east for west (`hairpinRoute(20, 'left')`). Drawn
+ * by this build it is, point for point, what a build before #583 drew for the
+ * right-hand one — the projection is the only thing #583 changed, and
+ * mirroring the route is mirroring its input. `plan-agrees-with-world.test.ts`
+ * pins that equivalence in the fast suite. It must read turning LEFT, or the
+ * measure could not tell a mirrored world from a correct one.
+ */
+function bendProbe(
+  width: number,
+  height: number,
+): { readonly right: BendMeasurement; readonly mirrored: BendMeasurement } {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const view = threeGameRenderer.create(canvas, NO_RIDER_SHADOWS);
+  view.resize(width, height);
+  const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+  if (gl === null) {
+    view.destroy();
+    return { right: NO_BEND, mirrored: NO_BEND };
+  }
+  const drawn = (frame: SceneFrame): Uint8Array => {
+    // Twice, and only the second read: `riderExtent` says why.
+    view.render(frame);
+    view.render(frame);
+    return readRegion(gl, 0, 0, width, height);
+  };
+  const measured = (profile: ReturnType<typeof hairpinRoute>): BendMeasurement => {
+    const state = {
+      ...atStartLine(profile),
+      ride: { speed: metresPerSecond(9), distance: metres(395) },
+    };
+    const frame = sceneFrame({
+      profile,
+      origin: corridorOrigin(profile),
+      state,
+      centreline: true,
+    });
+    const road: SceneFrame = { ...frame, scatter: [], markers: [] };
+    const present = drawn(road);
+    const absent = drawn({ ...road, corridor: { ...road.corridor, indices: new Uint32Array(0) } });
+    // `readPixels` rows run from the BOTTOM, so the first occupied rows are the near road.
+    const rows: number[] = [];
+    let pixels = 0;
+    for (let row = 0; row < height; row += 1) {
+      let low = -1;
+      let high = -1;
+      for (let column = 0; column < width; column += 1) {
+        const at = (row * width + column) * 4;
+        if (
+          present[at] !== absent[at] ||
+          present[at + 1] !== absent[at + 1] ||
+          present[at + 2] !== absent[at + 2]
+        ) {
+          pixels += 1;
+          if (low === -1) low = column;
+          high = column;
+        }
+      }
+      if (low !== -1) rows.push((low + high + 1) / 2 / width);
+    }
+    if (rows.length < 8) return NO_BEND;
+    const quarter = Math.floor(rows.length / 4);
+    const mean = (values: readonly number[]): number =>
+      values.reduce((sum, value) => sum + value, 0) / values.length;
+    return {
+      pixels,
+      nearCentre: mean(rows.slice(0, quarter)),
+      farCentre: mean(rows.slice(rows.length - quarter)),
+    };
+  };
+  const right = measured(hairpinRoute(20));
+  const mirrored = measured(hairpinRoute(20, 'left'));
+  view.destroy();
+  return { right, mirrored };
+}
+
 /** What {@link nearFieldProbe} reports when it did not run. */
 const NO_NEAR_FIELD: NearFieldMeasurement = {
   distance: Number.NaN,
@@ -1156,7 +1274,7 @@ const CONTROL_NEAR_SHARE = 0.5;
  *
  * ## Which frame
  *
- * A 300 m circuit, ridden a metre at a time with the camera on the racing
+ * A right-hand 300 m circuit (#583), ridden a metre at a time with the camera on the racing
  * line, in the REALISTIC world the owner saw it in, on an 8 : 1 canvas —
  * `near-field.test.ts` §`'the control frame'`'s aspect, wider than any the
  * stylesheet allows. ⚠️ **It was a 20 m hairpin at 6 : 1, the widest the
@@ -1197,7 +1315,13 @@ function nearFieldProbe(
   }
   const world = drawnWorldOf(view);
   const shapes = nearFieldShapes(world);
-  const profile = circuitRoute(300, () => 20);
+  // ⚠️ The RIGHT-hand circuit since #583. The closest pass this probe was
+  // written round — a signpost, about 5 000 pixels — was found on the circuit
+  // as a build before #583 drew it, which was a mirror of its map: drawn the
+  // right way round, the left-hand `circuitRoute` brings nothing to an 8 : 1
+  // plane at all (`near-field.test.ts` §RIDES, measured), and this probe's
+  // control would have nothing to show. The right-hand one is that drawing.
+  const profile = circuitRoute(300, () => 20, 'right');
   const origin = corridorOrigin(profile);
   const start = atStartLine(profile);
   const inputAt = (distance: number): Parameters<typeof builtSceneFrame>[0] => ({
@@ -2992,15 +3116,23 @@ const SHADOW_MAP_ROUNDS = 2;
  * a probe landed on tarmac is still its colour, read back from the GPU.
  *
  * ⚠️ **The screen's right is `(−headingZ, headingX)` — the road's own normal —
- * and this comment said `(headingZ, −headingX)` until #546.** The corridor puts
- * east on `+x` and north on `+z` with `+y` up, and in a right-handed renderer a
- * camera looking north with `+y` up has WEST on its right, so the old vector
- * was the screen's LEFT. It went unnoticed because every probe was symmetric
- * about a camera on the centreline, and a point mirrored across the road is
- * still road; #546 moved the camera 1.75 m to the right with the rider, and
- * the mirrored near-road probe landed on the grass beyond the far edge.
- * `game.browser.spec.ts` §"#546" reads the rider on the RIGHT of the screen
- * with the line's positive offset, which is the measurement this rests on.
+ * and this comment said `(headingZ, −headingX)` until #546.** In a
+ * right-handed renderer a camera looking along `+z` with `+y` up has `−x` on
+ * its right, which is `(−headingZ, headingX)` for a heading of `(0, 1)`, and
+ * the old vector was the screen's LEFT. It went unnoticed because every probe
+ * was symmetric about a camera on the centreline, and a point mirrored across
+ * the road is still road; #546 moved the camera 1.75 m to the right with the
+ * rider, and the mirrored near-road probe landed on the grass beyond the far
+ * edge. `game.browser.spec.ts` §"#546" reads the rider on the RIGHT of the
+ * screen with the line's positive offset, which is the measurement this rests
+ * on.
+ *
+ * ⚠️ **Since #583 that vector is the MAP's right as well.** Until then the
+ * corridor put east on `+x`, so `−x` — the screen's right on a northbound
+ * camera — was west, and the whole world was drawn as a mirror of its map.
+ * #583 put east on `−x` (`terrain.ts` §`localGroundPosition`) and nothing here
+ * had to change: this function is about the camera, not the compass.
+ * `game.browser.spec.ts` §"#583" is what reads which way a bend turns.
  */
 function inTheFrame(
   frame: SceneFrame,
@@ -4629,6 +4761,7 @@ function emptyHarness(errors: readonly string[]): NonNullable<Window['__oylGameH
       straightOn: NO_LINE,
       straightOff: NO_LINE,
     },
+    bend: { right: NO_BEND, mirrored: NO_BEND },
     resourcesAfterFirstFrame: 0,
     resourcesAfterAllFrames: 0,
     resourcesAfterSecondSweep: 0,
@@ -4757,6 +4890,7 @@ async function run(): Promise<void> {
     straightOn: NO_LINE,
     straightOff: NO_LINE,
   };
+  let bend = { right: NO_BEND, mirrored: NO_BEND };
   let resourcesAfterFirstFrame = 0;
   let resourcesAfterAllFrames = 0;
   let resourcesAfterSecondSweep = 0;
@@ -5321,6 +5455,8 @@ async function run(): Promise<void> {
     riderFrame = { landscape: riderExtent(640, 360), portrait: riderExtent(400, 640) };
     // #499, on a canvas of its own. @see lineProbe
     line = lineProbe(640, 360);
+    // #583, on a canvas of its own. @see bendProbe
+    bend = bendProbe(640, 360);
   } catch (error: unknown) {
     errors.push(error instanceof Error ? error.message : String(error));
   }
@@ -5364,6 +5500,7 @@ async function run(): Promise<void> {
     roadProbeRows,
     riderFrame,
     line,
+    bend,
     resourcesAfterFirstFrame,
     resourcesAfterAllFrames,
     resourcesAfterSecondSweep,
