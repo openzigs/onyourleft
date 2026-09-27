@@ -53,8 +53,8 @@ function WorkingPathConstraints(): JSX.Element {
   return (
     <ul>
       <li>
-        Sensors are paired on the Ride screen, one at a time, and the pairing is for this session:
-        after the app is closed, each device is chosen again.
+        Sensors are paired above, one at a time, and the pairing is for this session: after the app
+        is closed, each device is chosen again.
       </li>
       <li>
         Plan for about three sensors at once. The limit belongs to the phone’s Bluetooth adapter and

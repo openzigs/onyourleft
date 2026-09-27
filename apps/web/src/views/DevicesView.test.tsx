@@ -248,6 +248,26 @@ describe('in a browser that can pair — #659, pairing lives here', () => {
   });
 });
 
+describe('a controller does not make pairing possible where the platform cannot (#48, #659)', () => {
+  // `main.tsx` builds no controller in such a browser, so this cannot happen in
+  // the product today — and it is asserted anyway, because the guard on this
+  // screen is `support.canPair` and not the controller's absence. A screen that
+  // offered Pair whenever it held a controller would put a control that cannot
+  // work in front of a rider whose radio is off, which is #48's first criterion.
+  for (const [name, probe] of [
+    ['Safari or Firefox', ABSENT],
+    ['a radio switched off', RADIO_OFF],
+    ['a check still running', NEVER_ANSWERS],
+  ] as const) {
+    it(`offers no pairing control for ${name}`, async () => {
+      const stub = stubRideController(idleSnapshot());
+      mounted = await mount(<DevicesView capabilities={probe} controller={stub.controller} />);
+      await settle();
+      expect(pairingControls(mounted.container)).toEqual([]);
+    });
+  }
+});
+
 describe('each device’s state is in words, not colour or an icon alone (WCAG 2.2 SC 1.4.1)', () => {
   const STATES: readonly ConnectionState[] = [
     'connected',

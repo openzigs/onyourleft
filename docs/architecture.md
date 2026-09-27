@@ -590,6 +590,19 @@ browser gets the blame. Where the browser cannot pair, **no pairing control is r
 a disabled one is out of the tab order and announces no reason, which is the silent failure the
 issue exists to prevent.
 
+**Where the browser or the phone CAN pair, the Devices screen is where it happens** (#659). Until
+then that screen said *"Not built yet"* while Home and the More tab sent a new rider to it, and the
+pairing buttons were on the Ride screen. `ride/SensorPairing.tsx` §`PairingPanel` is that block,
+moved rather than copied: it drives the one ride controller `main.tsx` builds — mounted above the
+router, so a device paired on Devices is the device Ride and Home show — through whichever
+transport §4h of CLAUDE.md chose. The Ride screen says what is connected, in words, and links to
+Devices. The controls come first and what the platform cannot do is beneath them in a closed
+`<details>`, with *"one user gesture per device"* kept outside it. *Forget* is
+`SensorTransport.forget`: `BluetoothDevice.forget()` in a browser that has it, which gives the
+origin's permission back, and in every transport the id stops being issued until the chooser
+returns the device again. `apps/web/browser/devices.browser.spec.ts` walks Home → Devices → Pair
+against the scripted Web Bluetooth stack, with today's dead end as its control.
+
 ### `apps/web/src/transfer`: import and export, and the sample grid nobody else owns
 
 Added by [#51](https://github.com/openzigs/onyourleft/issues/51), and it is `packages/fit`'s **first

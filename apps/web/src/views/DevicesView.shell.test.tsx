@@ -21,13 +21,17 @@ import type { TransportAvailability } from '@onyourleft/sensors';
 import { createCapacitorTransport, mayShowDeviceList, permissionNotice } from '@onyourleft/mobile';
 import { scriptedPort, type ScriptedPort, type ScriptedStack } from '@onyourleft/mobile/testing';
 import { unixSeconds } from '@onyourleft/domain';
+import { createIndoorBikeDataProfile } from '@onyourleft/sensors/protocol';
+import { athleteId, recordingSessionId } from '@onyourleft/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { tabbableElements } from '../a11y/audit';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { capacitorShellSupport, SHELL_ANSWER_TIMEOUT } from '../support/shell-support';
 import type { ShellSupportPort } from '../support/shell-support-port';
-import { mount, settle, type Mounted } from '../testing/mount';
+import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
+import { createRideController, type RideController } from '../ride/controller';
+import { idleSnapshot, stubRideController } from '../ride/testing';
 
 import { DevicesView } from './DevicesView';
 
@@ -197,6 +201,86 @@ describe('#48 criterion 1 still holds on the shell branch', () => {
     expect(text).not.toMatch(/cannot be paired/i);
     expect(text).toContain('Asking this phone about Bluetooth');
     expect(pairingControls(result.container)).toHaveLength(0);
+  });
+});
+
+describe('#659 — inside the shell, Devices pairs through the Capacitor transport', () => {
+  /** What `main.tsx` §`buildPlatform` builds inside the shell, over a scripted plugin. */
+  function shellPlatform(): {
+    readonly port: ShellSupportPort;
+    readonly plugin: ScriptedPort;
+    readonly controller: RideController;
+  } {
+    const plugin = scriptedPort({});
+    const transport = createCapacitorTransport({
+      plugin,
+      profiles: [createIndoorBikeDataProfile()],
+      now: () => unixSeconds(0),
+    });
+    return {
+      plugin,
+      port: capacitorShellSupport({
+        availability: async () => transport.availability(),
+        notice: permissionNotice,
+        mayShowDeviceList,
+      }),
+      controller: createRideController({
+        transport,
+        store: {
+          putRecordingSession: (record) => Promise.resolve(record.id),
+          appendRecordingChunk: () => Promise.resolve(0),
+          listRecordingSessions: () => Promise.resolve([]),
+          recoverRecording: () => Promise.resolve(undefined),
+          deleteRecordingSession: () => Promise.resolve(false),
+        },
+        athleteId: athleteId('shell'),
+        newSessionId: () => recordingSessionId('shell-ride'),
+        now: () => unixSeconds(0),
+      }),
+    };
+  }
+
+  function button(label: string): HTMLButtonElement {
+    const found = [...document.querySelectorAll('button')].find(
+      (each) => each.textContent?.trim() === label,
+    );
+    if (found === undefined) throw new Error(`no button labelled "${label}"`);
+    return found;
+  }
+
+  it('pairs, says so in words, and forgets — with the plugin’s availability answer still the gate (#284)', async () => {
+    const { port, plugin, controller } = shellPlatform();
+    mounted = await mount(
+      <DevicesView capabilities={WEBVIEW} shell={port} controller={controller} />,
+    );
+    await settle();
+    // The WebView says no Bluetooth; the plugin says yes, and the plugin wins.
+    expect(plugin.calls).toContain('isEnabled');
+
+    await activateWithKeyboard(button('Pair a smart trainer'));
+    await settle();
+    expect(document.body.textContent).toContain('Scripted Trainer: Connected');
+
+    await activateWithKeyboard(button('Forget Scripted Trainer'));
+    await settle();
+    expect(plugin.calls.filter((call) => call.startsWith('disconnect')).length).toBeGreaterThan(1);
+    const trainerRow = document.querySelector('.oyl-pairing__row .oyl-pairing__state');
+    expect(trainerRow?.textContent).toBe('Not paired');
+    controller.dispose();
+  });
+
+  it('offers no pairing control in any unusable state, even with a controller', async () => {
+    for (const kind of ['not-permitted', 'adapter-unavailable', 'unsupported'] as const) {
+      const { port } = shellPort({ kind });
+      const stub = stubRideController(idleSnapshot());
+      mounted = await mount(
+        <DevicesView capabilities={WEBVIEW} shell={port} controller={stub.controller} />,
+      );
+      await settle();
+      expect(pairingControls(mounted.container), `pairing control offered for ${kind}`).toEqual([]);
+      mounted.unmount();
+      mounted = undefined;
+    }
   });
 });
 
