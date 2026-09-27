@@ -69,6 +69,7 @@
 import {
   BICYCLE_FRONT_METRES,
   BICYCLE_LENGTH_METRES,
+  combinedLean,
   RIDER_HALF_WIDTH_METRES,
   RIDER_HEIGHT_METRES,
 } from './bicycle';
@@ -178,8 +179,15 @@ export function placeContactShadow(
   // height toward the road's normal — `−across` — and only `cos φ` of it up, so
   // it is both displaced and nearer the road, and the rider's whole length now
   // lies partly ACROSS the bicycle as well as up it.
-  const rise = Math.cos(marker.lean);
-  const tip = Math.sin(marker.lean);
+  //
+  // ⚠️ #586: the lean is the PAIR's, not `marker.lean`. Since #546 that field is
+  // the BICYCLE's, about 3 % more than the rider-and-bicycle's centre of mass
+  // (`bicycle.ts` §`bicycleRoll`), and a shadow is cast by the mass rather than
+  // by the frame. `combinedLean` of the two rolls is `racing-line.ts`
+  // §`leanAt`'s φ again.
+  const lean = combinedLean(marker.lean, marker.bodyLean);
+  const rise = Math.cos(lean);
+  const tip = Math.sin(lean);
   const middleX = -acrossX * tip * CAST_HEIGHT_METRES;
   const middleZ = -acrossZ * tip * CAST_HEIGHT_METRES;
   // The whole rider's shadow, projected onto the bicycle's two axes: how much

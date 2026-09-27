@@ -346,6 +346,7 @@ describe('its cost — #499', () => {
     // five on one machine: 0.83 s before #546, 1.09 s after it took the steps
     // from 30 to 40, and 0.69 s since #588 — under the coverage run 2.90 s,
     // 3.74 s and 2.80 s, and 13.1 s on CI's coverage run for #546's merge.
+    // Re-measured for #586 the same way: 0.67 s (0.667–0.679 s over five).
     // The bound is a hang detector, not a performance claim.
     console.info(`racing line: ${String(route.positions.length)} samples in ${took.toFixed(0)} ms`);
     expect(took).toBeLessThan(30_000);
@@ -682,8 +683,11 @@ describe('rolls in over time, not only over distance — #546', () => {
   it.each(BENDS)(
     'never rolls faster than the stated rate a second, at any speed from 3 to 20 m/s, on $name',
     (bend) => {
-      // Sampled at v·Δt, so a step is Δt of riding. A single bend at each: the
-      // S-bend's two leans each obey it and add, as #499 already states.
+      // Sampled at v·Δt, so a step is Δt of riding. A single bend at each. The
+      // S-bend's two leans no longer ADD, as they did under #499: since #546 one
+      // unwinds as the other builds on ONE shared rate (`racing-line.ts`
+      // §`MAXIMUM_ROLL_RADIANS_PER_SECOND`), which "rolls no faster through an
+      // S-bend" above asserts on its own.
       //
       // Every step is still compared, but the steepest is asserted once, with
       // where it was: an `expect` a step was 140 000 of them, most of this case's

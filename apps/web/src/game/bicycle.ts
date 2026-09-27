@@ -199,7 +199,9 @@
  *   silver — a whole-vehicle hue rather than one patch of one.
  * - The **cost** argument is reversed rather than merely accepted:
  *   `RiderBelt` instances all three, so three bicycles cost three draw calls
- *   where one bicycle and two solids cost five.
+ *   where one bicycle and two solids cost five. (Four since #546, which split
+ *   the upper body into its own mesh so it can roll against the bicycle —
+ *   still four for all three riders, not four each.)
  * - Their cranks turn from their **odometer** and not from a cadence — see
  *   {@link simulatedCrankAngle}, which is the honest answer to the question
  *   {@link advanceCrank} settles for the rider.
@@ -1440,6 +1442,14 @@ export const CRANK_PARKING_LEAN_RADIANS = PEDAL_STRIKE_LEAN_RADIANS - (3 * Math.
 const CRANK_PARKING_BAND_RADIANS = (8 * Math.PI) / 180;
 
 /**
+ * Where a crankset nobody has posed is drawn: top dead centre. Both renderers'
+ * own fallback for a slot that was never given an angle (`three-renderer.ts`
+ * §`RiderBelt`'s `held`, and the realistic rider's first pose), so easing from
+ * it is easing from what is on the screen. #586.
+ */
+const RESTING_CRANK_ANGLE = 0;
+
+/**
  * The crank angle to DRAW a rider at, for the angle their pedalling put the
  * cranks at and the lean their bicycle is drawn at — #546.
  *
@@ -1462,7 +1472,12 @@ const CRANK_PARKING_BAND_RADIANS = (8 * Math.PI) / 180;
  * `+θ` takes the bicycle's top toward `−X`, so `−X` is the inside — and the
  * `+X` arm is at six o'clock at angle π. `undefined` is "the cranks are where
  * the renderer left them" (`RiderMarker.crankAngle`), and stays so wherever
- * nothing needs parking.
+ * nothing needs parking. ⚠️ **Inside the band it eases from
+ * {@link RESTING_CRANK_ANGLE}** — #586: it used to snap straight to parked,
+ * because there was no angle to swing from. Only a frame nobody gave a crank
+ * angle reaches that (`GameView` always supplies the rider's, `scene.ts` the
+ * other two's), which is a test's or a harness's frame, and there the cranks
+ * are at rest.
  */
 export function drawnCrankAngle(
   crankAngle: number | undefined,
@@ -1474,12 +1489,13 @@ export function drawnCrankAngle(
     return crankAngle;
   }
   const parked = bicycleLean > 0 ? Math.PI : 0;
-  if (crankAngle === undefined || lean >= CRANK_PARKING_LEAN_RADIANS) {
+  if (lean >= CRANK_PARKING_LEAN_RADIANS) {
     return parked;
   }
+  const turned = crankAngle ?? RESTING_CRANK_ANGLE;
   const t = (lean - from) / CRANK_PARKING_BAND_RADIANS;
   const share = t * t * (3 - 2 * t);
   // The shorter way round, so a crank half a turn from parked does not spin.
-  const difference = wrapped(parked - crankAngle + Math.PI) - Math.PI;
-  return wrapped(crankAngle + share * difference);
+  const difference = wrapped(parked - turned + Math.PI) - Math.PI;
+  return wrapped(turned + share * difference);
 }

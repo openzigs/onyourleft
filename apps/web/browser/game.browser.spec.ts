@@ -1785,7 +1785,7 @@ test.describe('the rider pedals, and it reaches the screen — #349', () => {
     console.log(`what a move without pedalling moves — ${measured}`);
   });
 
-  test('costs three draw calls rather than the twenty its parts would', async ({ harnessRun }) => {
+  test('costs four draw calls rather than the twenty its parts would', async ({ harnessRun }) => {
     const result = await harness(harnessRun);
 
     // #240's NFR-2. `bicycle.ts` describes about two dozen solids, and a mesh

@@ -12,7 +12,13 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { BICYCLE_FRONT_METRES, BICYCLE_LENGTH_METRES, RIDER_HEIGHT_METRES } from './bicycle';
+import {
+  BICYCLE_FRONT_METRES,
+  BICYCLE_LENGTH_METRES,
+  bicycleRoll,
+  combinedLean,
+  RIDER_HEIGHT_METRES,
+} from './bicycle';
 import {
   CASTS_CONTACT_SHADOW,
   CONTACT_SHADOW_DARKNESS,
@@ -322,6 +328,29 @@ describe('a leaning rider’s shadow — #499', () => {
     placeContactShadow(marker('rider', 0, 0, -0.5), NOON, leant);
     expect(leant.halfAcross - upright.halfAcross).toBeCloseTo(
       (RIDER_HEIGHT_METRES * Math.sin(0.5)) / 2,
+      9,
+    );
+  });
+
+  it('follows the rider-and-bicycle’s combined lean, not the bicycle’s — #586', () => {
+    // Since #546 `lean` is the BICYCLE's and leans about 3 % further than the
+    // pair's centre of mass; the shadow is the pair's. Built the way `scene.ts`
+    // builds a marker, from the combined lean the physics asks for.
+    const combined = 0.5;
+    const roll = bicycleRoll(combined);
+    expect(roll.bicycle).toBeGreaterThan(combined + 0.005);
+    const upright = blank();
+    const leant = blank();
+    placeContactShadow(marker('rider', 0, 0, 0), NOON, upright);
+    placeContactShadow(
+      { ...marker('rider', 0, 0, roll.bicycle), bodyLean: roll.body },
+      NOON,
+      leant,
+    );
+    expect(combinedLean(roll.bicycle, roll.body)).toBeCloseTo(combined, 12);
+    expect(leant.x - upright.x).toBeCloseTo(-(RIDER_HEIGHT_METRES / 2) * Math.sin(combined), 9);
+    expect(leant.halfAcross - upright.halfAcross).toBeCloseTo(
+      (RIDER_HEIGHT_METRES * Math.sin(combined)) / 2,
       9,
     );
   });
