@@ -459,9 +459,10 @@ const DESKTOP_CHROME = { viewport, userAgent, deviceScaleFactor, isMobile, hasTo
  * Playwright replaces a worker after any failing case, and this memo lives in
  * the worker, so the case after a failure loads the page afresh: with the road
  * taken out of the scene nine cases went red and the file took 49 s rather
- * than 13. A green run pays two loads — the plain page and `?shadow-map` — and
- * nothing here retries a load that failed, which is the flake-hiding
- * `playwright.config.ts` refuses.
+ * than 13. A green run pays three loads — the plain page, `?shadow-map` and,
+ * since ADR 0026, `?realistic`, which #607 pays for in a hook of its own
+ * (§`paysForTheRealisticLoad`) — and nothing here retries a load that failed,
+ * which is the flake-hiding `playwright.config.ts` refuses.
  */
 const test = base.extend<object, { harnessRun: (query?: string) => Promise<HarnessRun> }>({
   harnessRun: [
@@ -511,6 +512,48 @@ async function harness(
   query = '',
 ): Promise<GameHarnessResult> {
   return (await run(query)).result;
+}
+
+/**
+ * What the `?realistic` load may take — #607. Two and a half times the 60 s a
+ * case gets, because that load is the slowest thing in the gate by far: about
+ * 31 MiB of textures and a prefiltered sky, then #545's sweep of the hairpin.
+ * On CI it took 33 s, 36 s and 48 s on green runs and over 60 s on two red
+ * ones — a spread, on the same commit, that is the runner rather than the code.
+ */
+const REALISTIC_LOAD_BUDGET_MS = 150_000;
+
+/**
+ * Pays for the `?realistic` load in a `beforeAll` with its own budget — #607.
+ *
+ * ⚠️ **It is the fail-fast as much as the budget, and the fail-fast is the
+ * half that saves the job.** Until #607 the load ran inside the first case that
+ * asked for it, under that case's 60 s. When it ran long that case went red,
+ * Playwright replaced the worker, the memo above went with the worker, and the
+ * NEXT realistic case loaded the page again under its own 60 s — and so on down
+ * every case in the describe, about a minute each, until the job hit
+ * `timeout-minutes: 20` and was cancelled (run 36275996016, `main`).
+ *
+ * A `beforeAll` that fails does not do that: Playwright marks the rest of its
+ * describe "did not run" rather than trying each. Measured on Playwright 1.63.0
+ * with a load longer than the case timeout: without the hook, four cases red at
+ * a timeout each; with it and a budget shorter than the load, one failure and
+ * three "did not run"; with a budget longer than the load, all four green. A
+ * case that fails an ASSERTION still costs one reload — in the new worker's copy
+ * of this hook, under this budget rather than a case's — which is #456's
+ * accepted cost, no worse.
+ *
+ * Every case still asks `harnessRun('?realistic')` for its result; this only
+ * decides when the load is paid for and what it may take. No retry: the load
+ * runs once per worker, exactly as before, and `playwright.config.ts` refuses
+ * retries on purpose. Two describes call this, so a load that never finishes
+ * costs at most two budgets — five minutes, inside the job's twenty.
+ */
+function paysForTheRealisticLoad(): void {
+  test.beforeAll(async ({ harnessRun }) => {
+    test.setTimeout(REALISTIC_LOAD_BUDGET_MS);
+    await harnessRun('?realistic');
+  });
 }
 
 test.describe('the game renderer in a real browser', () => {
@@ -2199,6 +2242,8 @@ test.describe('the rider rides a line and leans on it — #499', () => {
  * aspect at which the fixture routes are cut at all.
  */
 test.describe('scenery the camera passes is not cut by the near plane — #545', () => {
+  paysForTheRealisticLoad();
+
   test('shows no cut geometry at the closest pass, where the same frame uncut shows it', async ({
     harnessRun,
   }) => {
@@ -2236,6 +2281,8 @@ test.describe('scenery the camera passes is not cut by the near plane — #545',
  * other half of D-7 and is asserted below too: it fetches none of the set.
  */
 test.describe('the realistic world — ADR 0026', () => {
+  paysForTheRealisticLoad();
+
   const realistic = async (
     run: (query?: string) => Promise<HarnessRun>,
   ): Promise<RealisticMeasurement> => {

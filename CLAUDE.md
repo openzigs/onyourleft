@@ -1842,6 +1842,14 @@ a failing case makes Playwright replace its worker, so the case after it loads t
 run costs more than a green one (49 s against 13 s locally, with nine cases red). A new case that
 reads the shared result costs almost nothing. A new case that drives its own page still costs a
 load, so add it to the harness's one run where the claim allows.
+⚠️ **Since [#607](https://github.com/openzigs/onyourleft/issues/607) the `?realistic` load is paid
+in a `beforeAll` with a 150 s budget of its own** (`game.browser.spec.ts`
+§`paysForTheRealisticLoad`), and a reviewer who remembers it timed against the first case's 60 s is
+reading the old file. It took 33 to 48 s on green CI runs and over 60 s on two red ones, and each red
+case replaced the worker, so every later realistic case reloaded and timed out in turn until the job
+was cancelled at 20 minutes. A failed `beforeAll` marks the rest of its describe "did not run"
+instead, which was measured both ways round. A new case that needs a slow load of its own takes the
+same shape rather than a longer global `timeout`.
 
 ⚠️ **The browser is pinned by the lockfile, not by the install command.** `@playwright/test`
 **1.63.0** ships Chromium revision **1243**, and `playwright install chromium` fetches whatever the
