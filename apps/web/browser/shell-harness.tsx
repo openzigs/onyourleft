@@ -65,6 +65,7 @@ import { riderAnalysisPort } from '../src/camera/analysis-transport';
 import { CameraController } from '../src/camera/session';
 import { sidePairingPort } from '../src/camera/side-link';
 import { Button } from '../src/design/Button';
+import { StatusMessage, type StatusTone } from '../src/design/StatusMessage';
 import { AppShell } from '../src/shell/AppShell';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
 
@@ -188,6 +189,42 @@ function TouchTargets(): JSX.Element {
       <Button variant="secondary">Stop</Button>
       <Button>Yes, stop the ride</Button>
       <Button variant="secondary">Keep riding</Button>
+    </section>
+  );
+}
+
+/**
+ * `?links=specimens` renders a link inside each of the four status messages —
+ * #661 — opt-in for `CAMERA_LIVE`'s reason.
+ *
+ * ⚠️ **Why specimens, and why these four.** The product puts links inside
+ * status messages — the trainer game's "Realistic world" notice, Home's "A ride
+ * left unfinished" — and a link there sits on the message's own surface, a
+ * pair `design/tokens.ts` §`LINK_SURFACES` declares. But this page hands the
+ * shell no ports, and measured on it **no route renders a link on any status
+ * surface**: every link it draws sits on `canvas`, `surface` or the navigation's
+ * `surfaceOverlay`. So `links.browser.spec.ts`'s check that each link's surface
+ * is a declared pair would never meet a status surface at all, and would pass
+ * over exactly the case where a link's colour is closest to the ink around it.
+ *
+ * What is real: the shipping {@link StatusMessage}, its classes and the shipping
+ * stylesheet. What the harness supplies is the sentence and the `href`, which
+ * points at the page itself so a press goes nowhere. `data-oyl-link-specimen` is
+ * what the spec counts apart from a route's own links, so these cannot stand in
+ * for a route that rendered none.
+ */
+const LINK_SPECIMENS = 'specimens';
+
+const SPECIMEN_TONES: readonly StatusTone[] = ['info', 'success', 'warning', 'danger'];
+
+function LinkSpecimens(): JSX.Element {
+  return (
+    <section data-oyl-link-specimen="true" aria-label="Link specimens">
+      {SPECIMEN_TONES.map((tone) => (
+        <StatusMessage key={tone} tone={tone}>
+          A sentence with <a href="#/">a link in it</a>, as a {tone} message draws one.
+        </StatusMessage>
+      ))}
     </section>
   );
 }
@@ -362,6 +399,8 @@ function main(): void {
   const wantsCamera = new URLSearchParams(globalThis.location.search).get('camera') === CAMERA_LIVE;
   const wantsPairing =
     new URLSearchParams(globalThis.location.search).get('pairing') === PAIRING_ON;
+  const wantsLinkSpecimens =
+    new URLSearchParams(globalThis.location.search).get('links') === LINK_SPECIMENS;
   const camera = new CameraController({
     // A port that never opens anything: what this page measures is where the
     // INDICATOR is drawn, and a real camera would be a media device in the
@@ -423,6 +462,18 @@ function main(): void {
       </StrictMode>,
     );
   });
+
+  if (wantsLinkSpecimens) {
+    const links = document.createElement('div');
+    region.append(links);
+    flushSync(() => {
+      createRoot(links).render(
+        <StrictMode>
+          <LinkSpecimens />
+        </StrictMode>,
+      );
+    });
+  }
 
   const spacer = document.createElement('div');
   spacer.dataset['oylSpacer'] = 'true';

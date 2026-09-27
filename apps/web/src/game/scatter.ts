@@ -81,6 +81,7 @@ import {
 } from '@onyourleft/domain';
 
 import { terrainHeightAt } from './landform';
+import { distanceToDrawnRoad } from './road-grid';
 import { mixInto, slotHash, uniformFrom } from './seeded';
 import { inWater, waterways } from './waterways';
 import {
@@ -1024,10 +1025,27 @@ function fillCell(
         continue;
       }
 
+      const x = frame.x + frame.normalX * lateral * side;
+      const z = frame.z + frame.normalZ * lateral * side;
+      // ⚠️ **Off EVERY stretch of the drawn road, not only its own — #613.**
+      // {@link bandsAt} guards the inside of a bend through
+      // {@link CURVATURE_WINDOW_METRES}, and a corner a planner exported in
+      // one sample and sharper than about 110° is drawn at a radius (~10 m at
+      // 120°) the window reads as half again as wide, so a band folded across
+      // the other leg and stood a post 0.14 m from the centreline. This is the
+      // whole-road rule `settlements.ts` §`structureClearance` already holds a
+      // building to, at the clearance a straight road gives. Dropped after
+      // every draw, like the water above, so no other item moves; and before
+      // {@link thin}, so the budget is not spent on an item nobody will see.
+      const clearance = ROAD_WIDTH_METRES / 2 + SCATTER_VERGE_METRES;
+      if (distanceToDrawnRoad(profile, origin, x, z, clearance) < clearance) {
+        continue;
+      }
+
       found.push({
         item: {
           kind: pickKind(weights, uniform(base, STREAM_KIND)),
-          x: frame.x + frame.normalX * lateral * side,
+          x,
           // ⚠️ **On the ground, not at the road's height — #458.** It was
           // `elevationAt(at)` until then, which was right while the ground was
           // a flat quad 0.25 m under the road and is wrong on a landform: a
@@ -1036,7 +1054,7 @@ function fillCell(
           // from, column for column. Plan positions are untouched, and
           // `arrangement-unchanged.test.ts`' plan digest is what says so.
           y: terrainHeightAt(profile, origin, seed, at, lateral * side),
-          z: frame.z + frame.normalZ * lateral * side,
+          z,
           rotation: uniform(base, STREAM_ROTATION) * Math.PI * 2,
           scale:
             SCATTER_SCALE_LOWEST +

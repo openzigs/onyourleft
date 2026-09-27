@@ -110,6 +110,7 @@ import {
   type DrawnPiece,
   sceneryDrawnOf,
   setBuildingOpenings,
+  setRealisticTints,
   setTreeLevels,
   threeGameRenderer,
   waterSkyOf,
@@ -119,6 +120,14 @@ import {
 } from '../src/game/three-renderer';
 import { clearOfTheCamera, nearPyramid, sceneryReach } from '../src/game/near-field';
 import { realisticWorldNotice } from '../src/game/realistic-assets';
+import {
+  FOLIAGE_TINT,
+  instanceTint,
+  MASONRY_TINT,
+  NO_TINT,
+  type InstanceTint,
+  type TintBound,
+} from '../src/game/instance-tint';
 import { HARD_SWAP_TREE_LEVELS, REALISTIC_TREE_LEVELS } from '../src/game/realistic-budget';
 import type { TreeLevels } from '../src/game/tree-levels';
 import { COUNTED_DRAWS, trianglesInDraw } from './realistic/draws';
@@ -3730,6 +3739,8 @@ export interface RealisticMeasurement {
   readonly windowGlass: readonly number[];
   readonly windowControl: readonly number[];
   readonly windowWall: readonly number[];
+  /** #621: two trees and two houses of one shape, tinted and not. @see tintProbe */
+  readonly tint: TintMeasurement;
   /**
    * #544: the distant hills against the sky, read off the drawing buffer — as
    * the product draws them, and (the control) with the view's horizon put back
@@ -3880,6 +3891,15 @@ const NO_REALISTIC: RealisticMeasurement = {
   windowGlass: [],
   windowControl: [],
   windowWall: [],
+  tint: {
+    trees: [],
+    treesControl: [],
+    treePixels: [],
+    treeTints: [],
+    houses: [],
+    housesControl: [],
+    houseTints: [],
+  },
   horizon: [],
   horizonControl: [],
   horizonColours: { fog: [], foot: [] },
@@ -4048,6 +4068,214 @@ function pixelsChanged(a: Uint8Array, b: Uint8Array): number {
     if (a[at] !== b[at] || a[at + 1] !== b[at + 1] || a[at + 2] !== b[at + 2]) changed += 1;
   }
   return changed;
+}
+
+/**
+ * What {@link tintProbe} reads back — #621. Each colour is a mean sRGB triple.
+ */
+export interface TintMeasurement {
+  /** The two trees' mean colours as the product draws them. */
+  readonly trees: readonly (readonly number[])[];
+  /** The same two with every tint bound at nothing — the control. */
+  readonly treesControl: readonly (readonly number[])[];
+  /** How many pixels each tree covered: the non-vacuity of the means. */
+  readonly treePixels: readonly number[];
+  /** The tints `instance-tint.ts` gives the two trees, for the log. */
+  readonly treeTints: readonly InstanceTint[];
+  /** The mean of a square of each house's front wall, as the product draws it. */
+  readonly houses: readonly (readonly number[])[];
+  readonly housesControl: readonly (readonly number[])[];
+  readonly houseTints: readonly InstanceTint[];
+}
+
+/**
+ * Two instances of one shape, told apart by their tints alone — #621.
+ *
+ * - **Two broadleaf trees** of one variant, 20 m up a level road, turned
+ *   alike, drawn at the middle level (two trees level with the rider and off
+ *   the frame take the first two ranks, as #617's probe places them) — ONE AT
+ *   A TIME, the second under a metre from where the first stood, so the two
+ *   are seen from one angle in one light and differ only in which item they
+ *   are. Side by side in one frame they read 9 % apart with no tint at all.
+ * - **Two houses** of one shape, 40 m ahead either side of the road, turned
+ *   alike and in ONE frame, a square of each front wall read back: two parallel
+ *   walls of one photograph under one sun.
+ *
+ * Each pair is placed, to a sixteenth of a metre, where `instance-tint.ts`
+ * gives the two the most different brightness — the tint is a function of
+ * where an item stands, so this chooses the pair and never the tint.
+ *
+ * A tree's colour is the mean of the pixels it changes against the same frame
+ * without it.
+ *
+ * **The control** is the same frames with every bound at nothing
+ * (`three-renderer.ts` §`setRealisticTints`): the two must read back alike,
+ * which is what says the difference in the product is the tint and not the
+ * light, the fog or the angle each is seen from.
+ */
+function tintProbe(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  base: SceneFrame,
+): TintMeasurement {
+  const frame: SceneFrame = { ...base, markers: [] };
+  const pose = frame.camera;
+  const whole = (): Uint8Array => readRegion(gl, 0, 0, canvas.width, canvas.height);
+  const fromRider = (ahead: number, across: number): ScatterItem => ({
+    kind: 'tree-broadleaf',
+    x: pose.x + ahead * pose.headingX - across * pose.headingZ,
+    y: onTheRoad(frame, ahead, 0).y,
+    z: pose.z + ahead * pose.headingZ + across * pose.headingX,
+    rotation: 0,
+    scale: 1,
+    variant: 0,
+  });
+  /** The pair, out of sixteen nudges each, whose tints' brightness differs most. */
+  const widestPair = <T extends { readonly x: number; readonly z: number }>(
+    place: (nudge: number) => readonly [T, T],
+    bound: TintBound,
+  ): readonly [T, T] => {
+    let best: readonly [T, T] = place(0);
+    let widest = -1;
+    for (let a = 0; a < 16; a += 1) {
+      for (let b = 0; b < 16; b += 1) {
+        const [first] = place(a / 16);
+        const [, second] = place(b / 16);
+        const apart = Math.abs(
+          instanceTint(first.x, first.z, bound).brightness -
+            instanceTint(second.x, second.z, bound).brightness,
+        );
+        if (apart > widest) {
+          widest = apart;
+          best = [first, second];
+        }
+      }
+    }
+    return best;
+  };
+  const tintsOf = (items: readonly ScatterItem[], bound: TintBound): InstanceTint[] =>
+    items.map((item) => instanceTint(item.x, item.z, bound));
+
+  // The trees: ONE at a time, 20 m ahead, and the second a few centimetres
+  // from where the first stood — another item with its own tint, seen from
+  // the same angle in the same light. Two trees side by side are seen from
+  // either side and lit at different angles to the canopy, and read 9 %
+  // apart UNTINTED on the pinned Chromium, which buries the tint. Two fillers
+  // off the frame take ranks 0 and 1, so the tree is rank 2: the middle level.
+  const fillers = [fromRider(0, -12), fromRider(0, -13)];
+  const trees = widestPair(
+    (nudge) => [fromRider(20, nudge / 2), fromRider(20, -nudge / 2)] as const,
+    FOLIAGE_TINT,
+  );
+  const settle = (scene: SceneFrame): void => {
+    for (let at = 0; at < 12; at += 1) view.render(scene);
+  };
+  settle({ ...frame, scatter: fillers });
+  const bare = whole();
+  const treeReadings = trees.map((tree) => {
+    const scene: SceneFrame = { ...frame, scatter: [...fillers, tree] };
+    settle(scene);
+    const product = whole();
+    let control: Uint8Array;
+    try {
+      setRealisticTints(NO_TINT, NO_TINT);
+      view.render(scene);
+      control = whole();
+    } finally {
+      setRealisticTints(FOLIAGE_TINT, MASONRY_TINT);
+    }
+    // The tree's pixels: what it changed against the frame without it.
+    const sum = { product: [0, 0, 0], control: [0, 0, 0], pixels: 0 };
+    for (let at = 0; at < bare.length; at += 4) {
+      const moved =
+        Math.abs((control[at] ?? 0) - (bare[at] ?? 0)) +
+        Math.abs((control[at + 1] ?? 0) - (bare[at + 1] ?? 0)) +
+        Math.abs((control[at + 2] ?? 0) - (bare[at + 2] ?? 0));
+      if (moved <= 12) continue;
+      sum.pixels += 1;
+      for (let channel = 0; channel < 3; channel += 1) {
+        (sum.product[channel] as number) += product[at + channel] ?? 0;
+        (sum.control[channel] as number) += control[at + channel] ?? 0;
+      }
+    }
+    return sum;
+  });
+  const meanOf = (sum: readonly number[], pixels: number): number[] =>
+    sum.map((channel) => (pixels === 0 ? 0 : channel / pixels));
+
+  // The houses: one shape, both facing back down the road, a square of each
+  // front wall half-way between its first window and the door.
+  const houseAt = (across: number): ScatterItem => {
+    const at = onTheRoad(frame, 40, across);
+    const towards = onTheRoad(frame, 10, across);
+    const rotation = Math.atan2(towards.x - at.x, towards.z - at.z);
+    return { kind: 'building', ...at, rotation, scale: 1, variant: 0 };
+  };
+  const houses = widestPair(
+    (nudge) => [houseAt(11 + nudge), houseAt(-11 - nudge)] as const,
+    MASONRY_TINT,
+  );
+  const plan = buildingPlan('building', 0);
+  const front = plan.openings.find((opening) => opening.face.normal[2] > 0.999);
+  const firstWindow = plan.openings.find(
+    (opening) => opening.face.normal[2] > 0.999 && opening.kind === 'window',
+  );
+  const us = firstWindow?.outline.map(([u]) => u) ?? [0];
+  const vs = firstWindow?.outline.map(([, v]) => v) ?? [0];
+  const wallOf = (house: ScatterItem): { x: number; y: number; z: number } => {
+    if (front === undefined) return { x: 0, y: 0, z: 0 };
+    const [x, y, z] = onFace(
+      front.face,
+      (Math.min(...us) + Math.max(...us)) / 4,
+      (Math.min(...vs) + Math.max(...vs)) / 2,
+      0,
+    );
+    const cos = Math.cos(house.rotation);
+    const sin = Math.sin(house.rotation);
+    return { x: house.x + x * cos + z * sin, y: house.y + y, z: house.z - x * sin + z * cos };
+  };
+  const squareOf = (house: ScatterItem): number[] => {
+    const centre = pixelFor(frame, canvas, wallOf(house));
+    const half = 2;
+    const side = half * 2 + 1;
+    const pixels = readRegion(
+      gl,
+      Math.round(centre.x) - half,
+      Math.round(centre.y) - half,
+      side,
+      side,
+    );
+    const sum = [0, 0, 0];
+    for (let at = 0; at < pixels.length; at += 4) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        (sum[channel] as number) += pixels[at + channel] ?? 0;
+      }
+    }
+    return sum.map((channel) => channel / (side * side));
+  };
+  const withHouses: SceneFrame = { ...frame, scatter: [...houses] };
+  let housesControl: number[][];
+  try {
+    setRealisticTints(NO_TINT, NO_TINT);
+    view.render(withHouses);
+    view.render(withHouses);
+    housesControl = houses.map(squareOf);
+  } finally {
+    setRealisticTints(FOLIAGE_TINT, MASONRY_TINT);
+  }
+  view.render(withHouses);
+  const housesProduct = houses.map(squareOf);
+
+  return {
+    trees: treeReadings.map((sum) => meanOf(sum.product, sum.pixels)),
+    treesControl: treeReadings.map((sum) => meanOf(sum.control, sum.pixels)),
+    treePixels: treeReadings.map((sum) => sum.pixels),
+    treeTints: tintsOf(trees, FOLIAGE_TINT),
+    houses: housesProduct,
+    housesControl,
+    houseTints: tintsOf(houses, MASONRY_TINT),
+  };
 }
 
 /**
@@ -4314,6 +4542,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   plainHouse.destroy();
   phaseEnds('realistic: house window');
 
+  // #621, on the same view and the level road.
+  const tint = tintProbe(view, gl, canvas, riding(level, 400));
+  phaseEnds('realistic: seeded tints');
+
   // The same frame in the stylised world, on a view of its own: how much of the
   // picture the realistic world actually changed.
   const plainCanvas = canvasOf();
@@ -4467,6 +4699,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     windowGlass,
     windowControl,
     windowWall,
+    tint,
     horizon,
     horizonControl,
     horizonColours,

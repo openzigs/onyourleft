@@ -14,7 +14,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { contrastRatio } from '../design/contrast';
-import { COLOUR_TOKENS, CONTRAST_REQUIREMENTS } from '../design/tokens';
+import {
+  COLOUR_TOKENS,
+  CONTRAST_REQUIREMENTS,
+  LINK_STATE_TOKENS,
+  LINK_SURFACES,
+} from '../design/tokens';
 
 describe('every declared pair meets WCAG 2.2 AA', () => {
   for (const requirement of CONTRAST_REQUIREMENTS) {
@@ -97,6 +102,38 @@ describe('the requirement list is worth checking', () => {
     );
     const uncovered = Object.keys(COLOUR_TOKENS).filter((token) => !covered.has(token as never));
     expect(uncovered).toEqual([]);
+  });
+
+  it('pairs every link state with every surface a link sits on, at the text threshold', () => {
+    // #661's first criterion: each state, each surface. The pairs are built
+    // from a table in tokens.ts, and a cell dropped from that table is a pair
+    // dropped from the list with nothing else going red — `covers every colour
+    // token` above is satisfied by any ONE pair per state. This is what counts
+    // all thirty-two.
+    const missing = LINK_STATE_TOKENS.flatMap((state) =>
+      LINK_SURFACES.filter(
+        (surface) =>
+          !CONTRAST_REQUIREMENTS.some(
+            (requirement) =>
+              requirement.foreground === state &&
+              requirement.background === surface &&
+              requirement.minimum === 4.5,
+          ),
+      ).map((surface) => `${state} on ${surface}`),
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it('pairs the focus ring with every surface a link sits on', () => {
+    // A focused link draws the ring onto the surface behind it, so every
+    // surface a link can sit on is a surface the ring lands on.
+    const missing = LINK_SURFACES.filter(
+      (surface) =>
+        !CONTRAST_REQUIREMENTS.some(
+          (requirement) => requirement.foreground === 'focus' && requirement.background === surface,
+        ),
+    );
+    expect(missing).toEqual([]);
   });
 
   it('names a real threshold for each pair, not an invented one', () => {

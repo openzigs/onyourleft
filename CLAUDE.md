@@ -920,6 +920,18 @@ apps/                 AGPL-3.0-or-later, without exception
                         this file's too; the stylised one is still Kenney's
     src/game/seeded.ts  the hash every seeded, stateless placement draws from —
                         moved out of `scatter.ts` by #458, unchanged to the bit
+    src/game/instance-tint.ts
+                        the realistic world's seeded per-instance tint (#621) —
+                        hue, saturation and brightness drawn from `seeded.ts`,
+                        keyed by where an item stands, bounded HERE because
+                        `SCENERY_PALETTE` does not cover the realistic path
+                        (ADR 0026 D-10), and carried as ONE float in the
+                        instance colour's third channel. ⚠️ A tree's first two
+                        channels are its #617 hand-over keep, so
+                        `three-renderer.ts` §`withInstanceChannels` takes
+                        three's own tint by the instance colour out of every
+                        realistic material; the stylised belt allocates no
+                        instance colour at all
     src/game/route-fixtures-testing.ts
                         routes built from arithmetic for the landform, the water
                         and the settlements to be asserted over — a hill, a
@@ -1656,8 +1668,11 @@ not.
   created it, ahead of [#85](https://github.com/openzigs/onyourleft/issues/85), because #87's own
   criteria are about the Android shell and there was nothing to put them in. See the heading below
   for what it holds and, more usefully, what it has NOT been able to prove.
-- **`react-router` and the rest of the runtime dependency list in ADR 0005.** See the dependency
-  paragraph below the next heading for what *is* installed.
+- **A router package.** ADR 0005 names none, and none is installed: routing is hash-based and
+  hand-written (`apps/web/src/shell/routes.ts`), the decision
+  [`docs/architecture.md`](docs/architecture.md) §"`apps/web`: the shell, the design system and the
+  accessibility baseline" records. ⚠️ This bullet used to list `react-router` as ADR 0005's, and a
+  reviewer who remembers that is reading the old file.
 - **`apps/api`, or anything else server-shaped.** Not "not yet" — not in Phase 1 at all. Owner
   decision D6.
 
@@ -1848,8 +1863,13 @@ that ground. Moving it is its own issue and it owes: `test:browser` re-run with 
 prints restated; ADR 0026 **D-8**'s 527 333-byte `KTX2Loader`/`basis_transcoder.wasm` measurement
 retaken from the installed tree; and a check that `PMREMGenerator`, the HDR loader, `GLTFLoader` and
 `KTX2Loader` all still resolve out of `examples/jsm/`, which is the least stable part of that
-package's surface. **nothing else from ADR 0005's runtime list is**, `react-router` included. Add each in
-the issue that first needs it, after checking its licence against the
+package's surface. **No router package is installed**: ADR 0005 names none, and the hand-written
+hash router in `apps/web/src/shell/routes.ts` is the recorded decision (`docs/architecture.md`).
+⚠️ This used to read *"nothing else from ADR 0005's runtime list is, `react-router` included"*, and
+neither half held — ADR 0005 names no router, and the list above is not every runtime dependency
+(`@mediapipe/tasks-vision` under `apps/web` and the Capacitor packages under `apps/mobile` are
+installed and not named in it), so read each `package.json` rather than this paragraph. Add a new
+dependency in the issue that first needs it, after checking its licence against the
 directory it lands in (CONTRIBUTING.md).
 
 ⚠️ **`@onyourleft/fit` moved from `apps/web`'s `devDependencies` to its `dependencies` in #51**,
@@ -2226,6 +2246,7 @@ browser runs**.
 | `hud.browser.spec.ts` | its spec — no `.oyl-hud__value` overflows its grid track at a phone in either orientation, at **360 px** (where #423's first layout ran the third primary reading off the screen) and at a landscape tablet, read back from the browser's own layout. Its **control panels** are the half that makes a green run mean something; ⚠️ since #423 the control moves the words into the primary list as well as stripping #259's class, because every word is a secondary reading now and at 1.5 rem it would spill by under three pixels, which is not a control |
 | `shell.html`, `shell-harness.tsx` | since #307's review, the app **shell**: the **real** `shell/AppShell.tsx` with the **real** `ROUTES` table under the **real** `design/theme.css`. The second `.tsx` here. ⚠️ Its spacer goes **inside `.oyl-main`** and the file says why at length — after `.oyl-shell` the header scrolls out of its own sticky containing block and measures 0 px, and inside `.oyl-shell` `main` stays shorter than the viewport so a focus scroll never consults `scroll-margin-top`. Each mistake made a different assertion pass over nothing. ⚠️ Since #316 it also renders the **real** `design/Button.tsx` in both variants, with `RideView`'s own labels, because a shell handed no ports renders **zero** controls on all eleven routes and a size assertion over an empty list passes |
 | `shell.browser.spec.ts` | its spec — how much of the viewport persistent chrome still covers after a scroll, where a fragment jump lands the `h1`, whether the focused skip link is the topmost thing at its own centre (hit-tested, not read off a `z-index`), and no horizontal scrolling at 320 px. ⚠️ Since #316 it also measures the **touch target** three ways, and the three fail for different reasons — see below ⚠️ **Since #427 `PERSISTENT_CHROME_BUDGET` is an AREA** — the header and the navigation bar or rail together — and the spec also measures the bar/rail switch and each destination's 44×44 target the three ways #316 measures a button |
+| `links.browser.spec.ts` | since [#661](https://github.com/openzigs/onyourleft/issues/661), the colour of every link on every route in `ALL_ROUTES`, on `shell.html?links=specimens` — which adds one link inside each `StatusMessage` tone, because no route the portless shell renders puts a link on a status surface. Each computed colour, underline colour and surface must be a token (converted from `tokens.ts`, not re-typed), the (colour, surface) pair must be one `CONTRAST_REQUIREMENTS` declares **at the 4.5:1 text threshold** (a 3:1 non-text pair does not answer for a link), a classless link must be underlined, and hover, keyboard focus and a press must each paint their own token with the state asserted to have applied — one test per route, with the four specimens driven once and a last case in each serial group counting the routes visited. Its control deletes the `:where(a…)` rules through the CSSOM and requires the browser's `rgb(0, 0, 238)` back. ⚠️ **It cannot read `:visited`** — a browser reports a visited link as unvisited, by design — so `theme.a11y.test.ts` §"paints every link state with its own token" holds that rule |
 | `offline.browser.spec.ts` | since #408, the offline claim — against **`apps/web/dist`**, in a **persistent** context closed and reopened, with **two controls**. The only spec here that does not drive a harness page, and the first use of `setOffline` in this repository |
 | `ride.html`, `ride-harness.tsx` | since [#373](https://github.com/openzigs/onyourleft/issues/373), the trainer game's ride, and since [#423](https://github.com/openzigs/onyourleft/issues/423) its **stage**. ⚠️ **It RIDES now, and a reviewer who remembers it rendering `<HudPanel>` by hand is reading the old file**: the real `AppShell` at the real game route is handed a game port, and the page ticks the picker's own checkboxes and presses its own *Ride* — so a `GameView` that stopped putting `oyl-game--riding` on its root, or a shell that stopped listening, fails here rather than passing over a fixture that still does both. The fixture is the WIDEST ride the picker can start (a pacer, a ghost and a wind). It renders **no WebGL**. `?trainer=workout` is the same ride with the longest standing notice there is. Since #551, `?side=filming` and `?side=lost` are the same ride with a tripod phone paired, through the scripted pairing the unit tests use |
 | `ride.browser.spec.ts` | its spec — at **nine overlay viewports, a landscape tablet among them, which no gate had ever measured** (eight until #512): the world fills the viewport, the chrome is absent, every reading and control is on screen at `scrollY === 0` and hit-tested uncovered, no panel is over another or over the RIDER (`game/camera.ts` §`riderFrameBox`), and a safe-area inset moves every panel. ⚠️ **Since #512 the rider's box is the LEANING one at every overlay viewport** — `riderFrameBox(aspect, MAXIMUM_LEAN_RADIANS)`, a reviewer who remembers 736×360 carrying a `leaningRiderCovered` flag and a pinned "#512 is still open" case is reading the old file. The owner chose to resize the panels rather than move #499's camera: `theme.css` §"A SHORT corners layout" caps the bottom row and a standing notice at 16 rem, with the arithmetic (a leaning box's half-width is about 0.19 × the viewport's HEIGHT, so the layout's tallest viewport, 736×480, is the tightest and is now measured — 12 px clear). ⚠️ **#373 called landscape solved and it was not**: it moved the trainer line into a panel that was itself 572 px tall in a 390 px viewport (#419), confirmed on hardware in #422. ⚠️ Its **control** takes `oyl-game--riding` off the live element and requires *End ride* to fall below the fold again; without it every assertion here is true of a page that rendered nothing. The case that asserted #419's premise — *"the HUD panel is taller than a landscape phone viewport"* — is **removed**, as that issue asked, rather than loosened |
@@ -3746,7 +3767,7 @@ top of an issue **supersedes its body**.
 | How two efforts recorded at different rates are compared without truncating either | `packages/domain/src/segment/comparison.ts`, §`overlayEfforts` |
 | Why an effort stores no sample indices, and where they come from instead | `apps/web/src/efforts/load.ts` §`sampleIndexAt` |
 | Why a bend is drawn as a curve rather than as the route's own straight pieces, what it cuts off a corner, and what it does not move | `apps/web/src/game/terrain.ts` §`BEND_SMOOTHING_METRES`, §`CORRIDOR_STEP_METRES`, §`CORRIDOR_DENSE_AHEAD_METRES`, `apps/web/browser/bend-harness.ts`, [#543](https://github.com/openzigs/onyourleft/issues/543) |
-| Why the scenery, the field boundaries and the buildings stand beside the DRAWN road rather than the route, and the corner angle past which the scenery still folds into it | `apps/web/src/game/terrain.ts` §`drawnRoadFrame`, `apps/web/src/game/settlements.ts` §`roadGrid`, `apps/web/src/game/corner-placement.test.ts`, [#571](https://github.com/openzigs/onyourleft/issues/571), [#613](https://github.com/openzigs/onyourleft/issues/613) |
+| Why the scenery, the field boundaries and the buildings stand beside the DRAWN road rather than the route, and why the scenery is held off ANY stretch of it since a corner sharper than 110° folded a band across the other leg | `apps/web/src/game/terrain.ts` §`drawnRoadFrame`, `apps/web/src/game/road-grid.ts` §`roadGrid`, §`distanceToDrawnRoad`, `apps/web/src/game/corner-placement.test.ts`, [#571](https://github.com/openzigs/onyourleft/issues/571), [#613](https://github.com/openzigs/onyourleft/issues/613) |
 | Why a loop's closing gap is part of the lap, and what a route saved before that still carries | `packages/domain/src/route/profile.ts` §`LOOP_CLOSURE_METRES`, `apps/web/browser/loop-harness.ts`, [#440](https://github.com/openzigs/onyourleft/issues/440) |
 | Why a route's gradient is three windows rather than one smoothing pass, and what each costs | `packages/domain/src/route/profile.ts`, [`docs/architecture.md`](docs/architecture.md) §"The route profile" |
 | Why a lone bad elevation reading never reaches the trainer, and the case where two do | `packages/domain/src/route/profile.ts` §`DESPIKE_WINDOW_METRES`, `profile.test.ts` §"where the despike stage stops working" |
@@ -3915,6 +3936,7 @@ top of an issue **supersedes its body**.
 | Why depth in this client is a colour and never a shadow, and what holds the ramp to being one | `apps/web/src/design/tokens.ts` §`ELEVATION_SURFACES`, `apps/web/src/design/tokens.test.ts` |
 | What ratio the type scale follows, and why the sizes are written out rather than computed | `apps/web/src/design/tokens.ts` §`TYPE_SCALE_RATIO` |
 | What stops a design token being declared, asserted and painted by nothing | `apps/web/src/a11y/theme.a11y.test.ts` §"every token is painted by something" |
+| Why a link is four tokens rather than `accent`, which surfaces each is paired with, and what a dark palette would owe | `apps/web/src/design/tokens.ts` §`LINK_SURFACES`, §`LINK_CONTRAST_MEASURED`, `apps/web/src/design/theme.css` §"A link — #661", `apps/web/browser/links.browser.spec.ts` |
 | Why a contrast pair records what it measures as well as what it must clear | `apps/web/src/design/tokens.ts` §`ContrastRequirement.measured` |
 | How far a `<select>` may be styled before it stops being one | `apps/web/src/design/theme.css` §`select`, [#305](https://github.com/openzigs/onyourleft/issues/305) |
 | Why the button's 44 px touch target is declared rather than emergent, and why a floor is not enough on its own | `apps/web/src/design/theme.css` §`.oyl-button`, `apps/web/browser/shell.browser.spec.ts` §`TOUCH_TARGET_PIXELS` |
@@ -4066,6 +4088,7 @@ top of an issue **supersedes its body**.
 | How bright the HDRI's environment is, and which way its sun faces | `apps/web/src/game/realistic-light.ts` §`environmentIntensity`, §`skyRotation` |
 | Why the realistic world's far hills and fog meet the photographed sky rather than the stylised haze, and why the ridge is lifted above the photograph's own skyline and so moves up and down with the rider on nearly every frame | `apps/web/src/game/realistic-light.ts` §`drawnHorizonColour`, §`REALISTIC_SKYLINE_DEGREES`, §`skylineCrestFloor`, §`ridgeLift`, `apps/web/src/game/three-renderer.ts` §`HorizonRing`, `game.browser.spec.ts` §"#544", [#544](https://github.com/openzigs/onyourleft/issues/544) |
 | Why the realistic bicycle is built from numbers, and how the MakeHuman body pedals | `apps/web/src/game/bicycle.ts` §"Two riders now", §`riderJoints`, `three-renderer.ts` §`RealisticRiderBelt` |
+| Why two realistic trees or houses of one shape are not the same colour, how far the tint may move, and why a tree's levels cannot disagree about it | `apps/web/src/game/instance-tint.ts` §`FOLIAGE_TINT`, §`MASONRY_TINT`, `three-renderer.ts` §`withInstanceChannels`, `apps/web/browser/game-harness.ts` §`tintProbe`, [#621](https://github.com/openzigs/onyourleft/issues/621) |
 | Why the realistic structures are built from numbers and wear CC0 photographs, and why a house is two belts | `apps/web/src/game/realistic-assets.ts` §`REALISTIC_STRUCTURE_SURFACES`, `three-renderer.ts` §`RealisticStructureBelts`, [#475](https://github.com/openzigs/onyourleft/issues/475) |
 | Why the water stays a shader in the realistic world, and what it reflects there | `apps/web/src/game/three-renderer.ts` §`WaterBelt.update`, `realistic-light.ts` §`reflectedSkyColour` |
 | What frame rate each rung of the quality ladder draws at, and why the top TWO are the display's own | `apps/web/src/game/quality.ts` §`QUALITY_LADDER` "The owner's rulings", [#476](https://github.com/openzigs/onyourleft/issues/476), [#482](https://github.com/openzigs/onyourleft/issues/482) |

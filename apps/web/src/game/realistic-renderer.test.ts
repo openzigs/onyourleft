@@ -30,6 +30,15 @@ import {
 } from './realistic-budget';
 import { bandFade, treeSlots, type TreeLevels } from './tree-levels';
 import {
+  FOLIAGE_TINT,
+  MASONRY_TINT,
+  NO_TINT,
+  TINT_CODEC_RANGE,
+  TINT_CODEC_STEPS,
+  TINT_CODEC_ZERO,
+  packedInstanceTint,
+} from './instance-tint';
+import {
   CAMERA_BEHIND_METRES,
   FRUSTUM_SPREAD,
   NEAR_PLANE_METRES,
@@ -57,8 +66,11 @@ import {
   photographicRoadMaterial,
   prepareMiddleLevel,
   prepareRealisticShape,
+  readsInstanceTint,
   readsTextureLodBias,
   realisticBicycleTriangles,
+  SCATTER_INSTANCE_CAPACITY,
+  setRealisticTints,
   treeCanBeSeen,
   REALISTIC_PRIMITIVE_SKIP,
   realisticResourceUrl,
@@ -1498,5 +1510,331 @@ describe('the realistic bicycle — #369', () => {
     const triangles = realisticBicycleTriangles();
     expect(triangles).toBeGreaterThan(1_000);
     expect(triangles).toBeLessThanOrEqual(REALISTIC_BICYCLE_TRIANGLES);
+  });
+});
+
+/** A lit material's vertex and fragment shaders after its `onBeforeCompile`. */
+function compiledBoth(material: unknown): { vertex: string; fragment: string } {
+  const shader = {
+    uniforms: {} as Record<string, unknown>,
+    vertexShader: '#include <common>\n#include <begin_vertex>\n#include <color_vertex>',
+    fragmentShader:
+      '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <color_fragment>',
+  };
+  (material as { onBeforeCompile: (shader: unknown, renderer: unknown) => void }).onBeforeCompile(
+    shader,
+    undefined,
+  );
+  return { vertex: shader.vertexShader, fragment: shader.fragmentShader };
+}
+
+describe('every realistic tree, shrub, rock and building wears a seeded tint — #621', () => {
+  afterEach(() => {
+    setRealisticTints(FOLIAGE_TINT, MASONRY_TINT);
+  });
+
+  const everyKind = (): RealisticVegetationBelt => {
+    const tree = aTreeWithMiddle();
+    const rock = prepareRealisticShape(aScene([{ material: loaderMaterial() }]), 'rock');
+    const shrub = prepareRealisticShape(
+      aScene([{ material: loaderMaterial({ transparent: true }) }]),
+      'shrub',
+    );
+    return new RealisticVegetationBelt(
+      new Map([
+        ['tree-broadleaf', [tree]],
+        ['tree-conifer', [tree]],
+        ['shrub', [shrub]],
+        ['rock', [rock]],
+      ] as const),
+    );
+  };
+  // Far first; the nearest is full, 18 band A, 25–55 middle, 65 band B, beyond impostors.
+  const zs = [95, 85, 75, 65, 55, 45, 35, 25, 18, 10];
+  const trees = zs.map((z) => item('tree-broadleaf', z, 0));
+
+  /** The tint each instance of `mesh` was written, by the z it stands at. */
+  const tintsByZ = (
+    mesh: RealisticVegetationBelt['meshes'][number] | undefined,
+  ): Map<number, number> => {
+    const found = new Map<number, number>();
+    if (mesh === undefined) return found;
+    for (let slot = 0; slot < mesh.count; slot += 1) {
+      found.set(
+        mesh.instanceMatrix.array[slot * 16 + 14] ?? Number.NaN,
+        mesh.instanceColor?.array[slot * 3 + 2] ?? Number.NaN,
+      );
+    }
+    return found;
+  };
+
+  it('writes each tree the tint of where it stands, at every level it is drawn at', () => {
+    const belt = everyKind();
+    belt.update(trees, POSE);
+    const levels = belt.levelsOf('tree-broadleaf');
+    const full = levels.full[0]?.flatMap((mesh) => [...tintsByZ(mesh)]) ?? [];
+    const middle = (levels.middle[0] ?? []).flatMap((mesh) => [...tintsByZ(mesh)]);
+    const impostor = [...tintsByZ(levels.impostor[0])];
+    const written = [...full, ...middle, ...impostor];
+    // Every tree, at every level and every part of it, carries its own place's tint.
+    expect(written.length).toBeGreaterThan(zs.length);
+    for (const [z, tint] of written) {
+      expect(tint, String(z)).toBe(Math.fround(packedInstanceTint(0, z, FOLIAGE_TINT)));
+    }
+    // The band trees are the hand-overs: one tint on both sides of each.
+    const at = (entries: readonly (readonly [number, number])[], z: number): number[] =>
+      entries.filter(([one]) => one === z).map(([, tint]) => tint);
+    expect(new Set([...at(full, 18), ...at(middle, 18)]).size).toBe(1);
+    expect(at(full, 18).length).toBeGreaterThan(0);
+    expect(at(middle, 18).length).toBeGreaterThan(0);
+    expect(new Set([...at(middle, 65), ...at(impostor, 65)]).size).toBe(1);
+    expect(at(impostor, 65).length).toBeGreaterThan(0);
+    // Non-vacuity: the trees do not all wear one tint, and none is untinted.
+    expect(new Set(written.map(([, tint]) => tint)).size).toBeGreaterThan(5);
+    for (const [, tint] of written) expect(tint).not.toBe(0);
+  });
+
+  it('writes a tree the same tint on a later frame, whatever else moved', () => {
+    const belt = everyKind();
+    belt.update(trees, POSE);
+    const before = tintsByZ(belt.levelsOf('tree-broadleaf').impostor[0]).get(85);
+    // The frame's order reversed and two trees gone: 85 is the same item.
+    belt.update(
+      [...trees].reverse().filter((one) => one.z !== 10 && one.z !== 18),
+      POSE,
+    );
+    const after = tintsByZ(belt.levelsOf('tree-broadleaf').impostor[0]).get(85);
+    expect(before).toBeDefined();
+    expect(after).toBe(before);
+  });
+
+  it('keeps each tree’s hand-over keep beside its tint, so neither overwrites the other', () => {
+    const belt = everyKind();
+    belt.update(trees, POSE);
+    const full = belt.levelsOf('tree-broadleaf').full[0]?.[0];
+    let band = -1;
+    for (let slot = 0; slot < (full?.count ?? 0); slot += 1) {
+      if (full?.instanceMatrix.array[slot * 16 + 14] === 18) band = slot;
+    }
+    expect(band).toBeGreaterThanOrEqual(0);
+    const fade = bandFade(1, [10, 18, 25], 3);
+    expect(full?.instanceColor?.array[band * 3]).toBe(Math.fround(fade));
+    expect(full?.instanceColor?.array[band * 3 + 1]).toBe(2);
+  });
+
+  it('draws a shrub inside foliage’s bound and a rock inside masonry’s', () => {
+    const belt = everyKind();
+    belt.update([item('shrub', 20, 3), item('rock', 30, -4)], POSE);
+    const [shrubMesh] = belt.meshes.filter(
+      (mesh) =>
+        mesh.count > 0 &&
+        typeOf(mesh) !== 'ShaderMaterial' &&
+        (mesh.instanceMatrix.array[14] ?? 0) === 20,
+    );
+    const [rockMesh] = belt.meshes.filter(
+      (mesh) => mesh.count > 0 && (mesh.instanceMatrix.array[14] ?? 0) === 30,
+    );
+    expect(shrubMesh?.instanceColor?.array[2]).toBe(
+      Math.fround(packedInstanceTint(3, 20, FOLIAGE_TINT)),
+    );
+    expect(rockMesh?.instanceColor?.array[2]).toBe(
+      Math.fround(packedInstanceTint(-4, 30, MASONRY_TINT)),
+    );
+    expect(packedInstanceTint(-4, 30, MASONRY_TINT)).not.toBe(
+      packedInstanceTint(-4, 30, FOLIAGE_TINT),
+    );
+    // And neither keeps a dither interval: nought and nought keeps every fragment.
+    expect([shrubMesh?.instanceColor?.array[0], shrubMesh?.instanceColor?.array[1]]).toEqual([
+      0, 0,
+    ]);
+  });
+
+  it('writes a structure the same tint on every surface it wears, inside masonry’s bound', () => {
+    const belt = aStructureBelt();
+    belt.update([item('building', 20, 9)], POSE);
+    const surfaces = ['brick', 'roof-tiles', 'planks', 'glass'] as const;
+    const expected = Math.fround(packedInstanceTint(9, 20, MASONRY_TINT));
+    expect(expected).not.toBe(0);
+    for (const surface of surfaces) {
+      const mesh = belt.beltOf(surface)?.meshesOf('building')[0];
+      expect(mesh?.count, surface).toBe(1);
+      expect(Array.from(mesh?.instanceColor?.array.slice(0, 3) ?? []), surface).toEqual([
+        0,
+        0,
+        expected,
+      ]);
+      // Flagged for upload: three bumps `version` when `needsUpdate` is set.
+      expect(mesh?.instanceColor?.version, surface).toBeGreaterThan(0);
+    }
+  });
+
+  it('grows a structure’s tints with its matrices, so a crowded frame is tinted to the last item', () => {
+    const belt = aStructureBelt();
+    const count = SCATTER_INSTANCE_CAPACITY + 40;
+    const walls = Array.from({ length: count }, (_, index) => item('wall', 5 + index * 0.25, 3));
+    belt.update(walls, POSE);
+    const surface = realisticStructureSurfaces('wall')[0];
+    const mesh = surface === undefined ? undefined : belt.beltOf(surface)?.meshesOf('wall')[0];
+    expect(mesh?.count).toBe(count);
+    expect(mesh?.instanceColor?.count).toBeGreaterThanOrEqual(count);
+    const last = walls[count - 1];
+    expect(mesh?.instanceColor?.array[(count - 1) * 3 + 2]).toBe(
+      Math.fround(packedInstanceTint(last?.x ?? 0, last?.z ?? 0, MASONRY_TINT)),
+    );
+  });
+
+  it('draws every item untinted at a bound of nothing — the browser gate’s control — and back', () => {
+    const belt = everyKind();
+    const structures = aStructureBelt();
+    setRealisticTints(NO_TINT, NO_TINT);
+    belt.update([...trees, item('rock', 30, -4)], POSE);
+    structures.update([item('building', 20, 9)], POSE);
+    const tints = [
+      ...belt.meshes,
+      ...(structures.beltOf('brick')?.meshesOf('building') ?? []),
+    ].flatMap((mesh) =>
+      Array.from({ length: mesh.count }, (_, slot) => mesh.instanceColor?.array[slot * 3 + 2]),
+    );
+    expect(tints.length).toBeGreaterThan(zs.length);
+    for (const tint of tints) expect(tint).toBe(0);
+    setRealisticTints(FOLIAGE_TINT, MASONRY_TINT);
+    structures.update([item('building', 20, 9)], POSE);
+    expect(structures.beltOf('brick')?.meshesOf('building')[0]?.instanceColor?.array[2]).toBe(
+      Math.fround(packedInstanceTint(9, 20, MASONRY_TINT)),
+    );
+  });
+
+  it('teaches every realistic material to read it, and no stylised one', () => {
+    const belt = everyKind();
+    expect(belt.meshes.length).toBeGreaterThan(0);
+    for (const mesh of belt.meshes) {
+      if (typeOf(mesh) === 'ShaderMaterial') continue;
+      expect(readsInstanceTint(mesh.material as never), typeOf(mesh)).toBe(true);
+    }
+    const structures = aStructureBelt();
+    const structureMeshes = STRUCTURE_KINDS.flatMap((kind) =>
+      [...PHOTOGRAPHIC_STRUCTURE_SURFACES, 'painted', 'glass'].flatMap(
+        (surface) => structures.beltOf(surface as StructureSurface)?.meshesOf(kind) ?? [],
+      ),
+    );
+    expect(structureMeshes.length).toBeGreaterThan(0);
+    for (const mesh of structureMeshes) {
+      expect(readsInstanceTint(mesh.material as never)).toBe(true);
+    }
+    // The stylised world: untouched — no material taught, no instance colour.
+    const stylised = new ScatterBelt();
+    const stylisedMeshes = [...stylised.meshes.values()];
+    expect(stylisedMeshes.length).toBeGreaterThan(0);
+    for (const mesh of stylisedMeshes) {
+      expect(readsInstanceTint(mesh.material as never)).toBe(false);
+      expect(mesh.instanceColor).toBeNull();
+    }
+    stylised.update([item('rock', 20, 3), item('building', 30, 9)], POSE);
+    for (const mesh of stylisedMeshes) expect(mesh.instanceColor).toBeNull();
+  });
+
+  it('applies the tint in the shader after the surface’s colour, with three’s own tint taken out', () => {
+    const tree = aTreeWithMiddle();
+    // Before a belt teaches it, the bark compiles as three wrote it.
+    expect(compiledBoth(tree.parts[0]?.material).vertex).toContain('#include <color_vertex>');
+    new RealisticVegetationBelt(new Map([['tree-broadleaf', [tree]]]));
+    const { vertex, fragment } = compiledBoth(tree.parts[0]?.material);
+    expect(vertex).not.toContain('vColor.rgb *= instanceColor.rgb;');
+    expect(vertex).toContain('vOylTint = oylTintOf(instanceColor.z);');
+    expect(vertex).toContain('vOylKeep = instanceColor.xy;');
+    expect(fragment).toContain(
+      '#include <color_fragment>\ndiffuseColor.rgb = oylTinted(diffuseColor.rgb, vOylTint);',
+    );
+    const impostor = tree.impostor?.material as unknown as {
+      vertexShader: string;
+      fragmentShader: string;
+    };
+    expect(impostor.vertexShader).toContain('vOylTint = oylTintOf(instanceColor.z);');
+    expect(impostor.fragmentShader).toContain('oylTinted(texel.rgb, vOylTint)');
+  });
+
+  it('teaches a shrub’s material the tint without the tree’s dither', () => {
+    const shrub = prepareRealisticShape(
+      aScene([{ material: loaderMaterial({ transparent: true }) }]),
+      'shrub',
+    );
+    new RealisticVegetationBelt(new Map([['shrub', [shrub]]]));
+    const { vertex, fragment } = compiledBoth(shrub.parts[0]?.material);
+    expect(vertex).toContain('vOylTint = oylTintOf(instanceColor.z);');
+    expect(vertex).not.toContain('vOylKeep');
+    expect(fragment).toContain('oylTinted(diffuseColor.rgb, vOylTint)');
+    expect(fragment).not.toContain('oylDither');
+    // Its own program: three caches a program by this key, and a shrub's must
+    // not be served a tree's or an untaught one.
+    const key = (
+      shrub.parts[0]?.material as unknown as { customProgramCacheKey: () => string }
+    ).customProgramCacheKey();
+    expect(key).toMatch(/\|oyl-instance-tint$/);
+    const tree = aTreeWithMiddle();
+    new RealisticVegetationBelt(new Map([['tree-broadleaf', [tree]]]));
+    const treeKey = (
+      tree.parts[0]?.material as unknown as { customProgramCacheKey: () => string }
+    ).customProgramCacheKey();
+    expect(treeKey).toMatch(/\|oyl-tree-dither$/);
+  });
+
+  it('refuses to teach one material as a tree and as something else', () => {
+    const shape = prepareRealisticShape(aScene([{ material: loaderMaterial() }]), 'both');
+    new RealisticVegetationBelt(new Map([['shrub', [shape]]]));
+    expect(() => new RealisticVegetationBelt(new Map([['tree-conifer', [shape]]]))).toThrow(
+      /two ways/,
+    );
+  });
+
+  // #621's review: the shader's decode was held by nothing but the browser
+  // gate's floors, so the hue scale written in degrees where the shader turns
+  // radians passed every test. These are the codec's own ranges, read back out
+  // of the program three is handed.
+  it('decodes the tint in the shader with the codec’s own ranges, the hue in radians', () => {
+    const shrub = prepareRealisticShape(aScene([{ material: loaderMaterial() }]), 'shrub');
+    new RealisticVegetationBelt(new Map([['shrub', [shrub]]]));
+    const { vertex } = compiledBoth(shrub.parts[0]?.material);
+    const decode = /vec3 oylTintOf\(float stored\) \{([\s\S]*?)\n {2}\}/.exec(vertex)?.[1] ?? '';
+    const zero = /stored \+ ([-\d.]+);/.exec(decode);
+    expect(Number(zero?.[1])).toBe(TINT_CODEC_ZERO);
+    const steps = TINT_CODEC_STEPS.toFixed(1);
+    expect(decode).toContain(`(vec3(hue, saturation, brightness) - ${steps})`);
+    const scale = /\/ ([-\d.]+)\s*\* vec3\(\s*([-\d.]+),\s*([-\d.]+),\s*([-\d.]+)\s*\)/.exec(
+      decode,
+    );
+    expect(scale, decode).not.toBeNull();
+    expect(Number(scale?.[1])).toBe(TINT_CODEC_STEPS);
+    expect(Number(scale?.[2])).toBeCloseTo((TINT_CODEC_RANGE.hueDegrees * Math.PI) / 180, 7);
+    expect(Number(scale?.[3])).toBeCloseTo(TINT_CODEC_RANGE.saturation, 7);
+    expect(Number(scale?.[4])).toBeCloseTo(TINT_CODEC_RANGE.brightness, 7);
+  });
+
+  it('throws, naming #621, where three’s program no longer holds an include the tint is spliced at', () => {
+    const shrub = prepareRealisticShape(aScene([{ material: loaderMaterial() }]), 'shrub');
+    new RealisticVegetationBelt(new Map([['shrub', [shrub]]]));
+    const compile = shrub.parts[0]?.material as unknown as {
+      onBeforeCompile: (shader: unknown, renderer: unknown) => void;
+    };
+    const vertex = '#include <common>\n#include <begin_vertex>\n#include <color_vertex>';
+    const fragment = '#include <common>\n#include <map_fragment>\n#include <color_fragment>';
+    const cases = [
+      ['vertex', '#include <common>'],
+      ['vertex', '#include <color_vertex>'],
+      ['fragment', '#include <common>'],
+      ['fragment', '#include <color_fragment>'],
+    ] as const;
+    for (const [stage, include] of cases) {
+      const shader = {
+        uniforms: {},
+        vertexShader: stage === 'vertex' ? vertex.replace(include, '') : vertex,
+        fragmentShader: stage === 'fragment' ? fragment.replace(include, '') : fragment,
+      };
+      expect(() => compile.onBeforeCompile(shader, undefined), `${stage} ${include}`).toThrow(
+        `three's ${stage} shader no longer holds ${include}, where #621's seeded tint is spliced in`,
+      );
+    }
+    // And with all four present it compiles.
+    const whole = { uniforms: {}, vertexShader: vertex, fragmentShader: fragment };
+    expect(() => compile.onBeforeCompile(whole, undefined)).not.toThrow();
   });
 });
