@@ -241,8 +241,44 @@ describe('the capability queries change something', () => {
 });
 
 /**
+ * Every `@supports (appearance: base-select)` block, brace-matched, with where
+ * it starts and ends in the file (#667).
+ */
+function baseSelectBlocks(): {
+  readonly start: number;
+  readonly end: number;
+  readonly text: string;
+}[] {
+  const opening = '@supports (appearance: base-select) {';
+  const found: { start: number; end: number; text: string }[] = [];
+  for (
+    let start = themeCss.indexOf(opening);
+    start >= 0;
+    start = themeCss.indexOf(opening, start + 1)
+  ) {
+    let depth = 0;
+    for (let index = themeCss.indexOf('{', start); index < themeCss.length; index += 1) {
+      const character = themeCss[index];
+      if (character === '{') depth += 1;
+      if (character === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          found.push({ start, end: index + 1, text: themeCss.slice(start, index + 1) });
+          break;
+        }
+      }
+    }
+  }
+  return found;
+}
+
+/**
  * #307's third criterion, and the ⚠️ attached to it: the native controls are
  * styled *"without replacing them"*.
+ *
+ * ⚠️ Since #667 "without replacing them" admits `appearance: base-select`:
+ * the owner reversed #307's select rule on 2026-09-27 (#654). See the third
+ * case below.
  */
 describe('the native select is styled and still native', () => {
   it('skins the closed control', () => {
@@ -262,14 +298,155 @@ describe('the native select is styled and still native', () => {
     expect(rule).toMatch(/padding:[^;]*\s2rem\s/);
   });
 
-  it('never reaches for the one property that would replace the control', () => {
-    // `appearance: base-select` opts the element into a fully author-styled
-    // control, popup included — which is a listbox built out of the select's
-    // own parts, and #305 is the record of not building one. `appearance: none`
-    // stops at the closed control's skin and leaves the popup, the keyboard
-    // model and the accessibility tree to the platform.
-    expect(themeCss).not.toContain('base-select');
-    expect(themeCss).not.toContain('::picker(');
+  it('opts into the styled picker only where the engine supports it (#667)', () => {
+    // ⚠️ This REPLACES a test that said the opposite, and the reversal is the
+    // owner's rather than a drift. Until 2026-09-27 it asserted that the file
+    // never contained `base-select` or `::picker(`, on the ground that a styled
+    // popup is a listbox built out of the select's own parts — the rule #307
+    // recorded (PR #311, mutation M11; discussed in #308). The owner reversed it
+    // in #654, and #667 is the implementation: `appearance: base-select` keeps
+    // the element a `<select>`, with the platform's keyboard model, typeahead
+    // and accessibility tree, and only the drawing of the picker becomes ours.
+    // What survives of the old rule is its fallback: an engine WITHOUT
+    // `base-select` must get exactly the `appearance: none` skin it got before,
+    // which is only true while every mention of the new value is guarded.
+    const blocks = baseSelectBlocks();
+    expect(blocks.length, 'theme.css has no @supports (appearance: base-select) block').toBe(1);
+    const block = blocks[0]?.text ?? '';
+    expect(block).toContain('appearance: base-select');
+    expect(block).toContain('::picker(select)');
+
+    const outside = blocks.reduceRight(
+      (css, { start, end }) => css.slice(0, start) + css.slice(end),
+      themeCss,
+    );
+    // Comments are prose and may name the value; declarations may not.
+    const declarations = outside.replaceAll(/\/\*[\s\S]*?\*\//g, '');
+    expect(declarations, 'base-select outside its @supports block').not.toContain('base-select');
+    expect(declarations, '::picker( outside the @supports block').not.toContain('::picker(');
+    // And the fallback skin is still the one #307 shipped.
+    const rule = /\nselect \{([^}]*)\}/.exec(declarations)?.[1] ?? '';
+    expect(rule).toContain('appearance: none');
+  });
+
+  it('hands the styled picker back to the platform under forced colours as well', () => {
+    // The forced-colours revert is `select { appearance: auto; }` at the same
+    // specificity as the `@supports` block's `select { appearance: base-select;
+    // }`, so it only wins while it comes LATER in the file. Moved above the
+    // block, a high-contrast user in an engine with `base-select` would keep
+    // the author-drawn picker; `shell.browser.spec.ts` §"#667" reads the
+    // computed value back under emulated forced colours.
+    const forced = themeCss.indexOf('@media (forced-colors: active) {');
+    expect(forced).toBeGreaterThanOrEqual(0);
+    const forcedBlock = themeCss.slice(forced, themeCss.indexOf('\n}\n', forced));
+    expect(forcedBlock).toMatch(/\n {2}select \{[^}]*appearance: auto;/);
+    for (const { end } of baseSelectBlocks()) {
+      expect(
+        forced,
+        'the forced-colours block must come after the base-select block',
+      ).toBeGreaterThan(end);
+    }
+  });
+
+  it('paints every colour inside the styled picker with a token (#667)', () => {
+    // #672's dark theme re-points the custom properties. A literal colour here
+    // would be the one part of the picker it could not reach.
+    const block = baseSelectBlocks()[0]?.text ?? '';
+    const colourDeclarations = [
+      ...block.matchAll(/\n\s*((?:background|border|outline|color|accent)[a-z-]*)\s*:\s*([^;]+);/g),
+    ];
+    expect(colourDeclarations.length, 'no colour declarations found to check').toBeGreaterThan(3);
+    for (const [, property, value] of colourDeclarations) {
+      const residue = (value ?? '')
+        .replaceAll(/var\(--oyl-[a-z0-9-]+\)/g, '')
+        .replaceAll(/\b\d+(?:\.\d+)?(?:px|rem)?\b/g, '')
+        .replaceAll(/\b(?:solid|none)\b/g, '')
+        .trim();
+      expect(residue, `\`${property ?? ''}: ${value ?? ''}\` is not a token`).toBe('');
+      if (property === 'color' || property?.endsWith('-color') === true) {
+        expect(value).toMatch(/^var\(--oyl-color-[a-z-]+\)$/);
+      }
+    }
+    const picker = [...block.matchAll(/\n {2}::picker\(select\) \{([^}]*)\}/g)]
+      .map((match) => match[1] ?? '')
+      .join('');
+    expect(picker).toContain('background-color: var(--oyl-color-canvas)');
+    expect(picker).toContain('color: var(--oyl-color-ink)');
+  });
+});
+
+/**
+ * #667 — the other native controls, which were at the platform default.
+ *
+ * These read the declarations. What the declarations DO is measured in a real
+ * engine by `browser/shell.browser.spec.ts` §"#667"; neither replaces the
+ * other, for the reason #316 gives about a floor and the box it holds.
+ */
+describe('the other native controls are styled from tokens (#667)', () => {
+  /** Every rule body whose selector list is exactly `selector`. */
+  function bodyOf(selector: string): string {
+    const escaped = selector.replaceAll(/[()[\]:.,*+?^$|\\]/g, '\\$&');
+    const bodies = [...themeCss.matchAll(new RegExp(`\\n${escaped} \\{([^}]*)\\}`, 'g'))];
+    expect(bodies, `theme.css has ${String(bodies.length)} rules for \`${selector}\``).toHaveLength(
+      1,
+    );
+    return bodies[0]?.[1] ?? '';
+  }
+
+  /** `prop: value;` pairs of a rule body, in order. */
+  function declarationsOf(body: string): Map<string, string> {
+    return new Map(
+      [...body.matchAll(/\n\s*([a-z-]+)\s*:\s*([^;]+);/g)].map(([, name, value]) => [
+        name ?? '',
+        (value ?? '').trim(),
+      ]),
+    );
+  }
+
+  it('draws checkboxes, radios, a range and a progress bar in the accent token', () => {
+    const body = bodyOf(
+      "input[type='checkbox'],\ninput[type='radio'],\ninput[type='range'],\nprogress",
+    );
+    expect(declarationsOf(body).get('accent-color')).toBe('var(--oyl-color-accent)');
+  });
+
+  it('declares a 44 px floor on a checkbox or radio row, the label beside or around it', () => {
+    const body = bodyOf(
+      "label:has(> input[type='checkbox']),\nlabel:has(> input[type='radio']),\n" +
+        "label:has(+ input[type='checkbox']),\nlabel:has(+ input[type='radio'])",
+    );
+    const declared = declarationsOf(body);
+    // SC 2.5.5 (AAA) is 44 px; SC 2.5.8 (AA) is 24 px and is not the reason.
+    expect(declared.get('min-height')).toBe('2.75rem');
+    // `min-height` does nothing to an inline box, so the display is half of it.
+    expect(declared.get('display')).toBe('inline-flex');
+  });
+
+  it("draws the file input's button as the secondary button, with the same tokens", () => {
+    const button = declarationsOf(bodyOf('.oyl-button'));
+    const secondary = new Map([...button, ...declarationsOf(bodyOf('.oyl-button--secondary'))]);
+    const file = declarationsOf(bodyOf("input[type='file']::file-selector-button"));
+    for (const property of [
+      'font',
+      'cursor',
+      'min-height',
+      'padding',
+      'border',
+      'border-radius',
+      'background',
+      'color',
+    ]) {
+      expect(
+        file.get(property),
+        `::file-selector-button's ${property} is not .oyl-button--secondary's`,
+      ).toBe(secondary.get(property));
+    }
+    expect(file.get('min-height')).toBe('2.75rem');
+    // The gap from what follows it, and from the label before it, is a token.
+    expect(file.get('margin-inline-end')).toMatch(/^var\(--oyl-space-[a-z]+\)$/);
+    expect(
+      declarationsOf(bodyOf("p > label + input[type='file']")).get('margin-inline-start'),
+    ).toMatch(/^var\(--oyl-space-[a-z]+\)$/);
   });
 });
 

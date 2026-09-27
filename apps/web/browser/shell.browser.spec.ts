@@ -49,6 +49,10 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { AA_LARGE_TEXT_OR_NON_TEXT, contrastRatio } from '../src/design/contrast';
+import { COLOUR_TOKENS, type ColourToken } from '../src/design/tokens';
+import { decodePng } from '../src/game/model-bytes-testing';
+
 /**
  * The viewports measured, and why each is here.
  *
@@ -469,7 +473,7 @@ test.describe('the sticky header and its scroll margin are one decision', () => 
  * and each of those three drops it under on its own. #307 had already moved the
  * type scale under this control in the week the number was measured.
  *
- * `select` had been given an explicit `min-height: 2.75rem` by #305 with a
+ * `select` had been given an explicit `min-height: 2.75rem` by #307 (PR #311) with a
  * comment explaining the value. The button beside it got nothing — so the
  * repository had already decided the number mattered, on the control that
  * matters less.
@@ -1381,4 +1385,424 @@ test.describe('the rider’s own computer, in a real engine', () => {
     expect(result['failure'], JSON.stringify(result)).toBe('not-configured');
     expect(elsewhere).toStrictEqual([]);
   });
+});
+
+/**
+ * #667 — the native controls, styled and still native.
+ *
+ * `shell-harness.tsx` §`NativeControls` renders them under
+ * `?controls=specimens`, copied from the views that ship them, because a shell
+ * handed no ports draws no form at all. `theme.a11y.test.ts` reads the
+ * declarations; this is what they DO, read back from the pinned Chromium.
+ *
+ * ## The select, and its control
+ *
+ * `appearance: base-select` is opted into inside `@supports`, and this is the
+ * first consumer of it in the repository. The positive cases open the picker
+ * by keyboard and by click, measure every option at 44 px, read the role the
+ * platform's own accessibility tree reports, and hold the picker's computed
+ * colours to the tokens exactly. ⚠️ **The control is the same page with the
+ * `@supports` block deleted from the shipping sheet** (`&base-select=off`):
+ * there the closed skin is `appearance: none` and the option boxes are NOT 44
+ * px — a platform popup lays nothing out in the page at all — so a green
+ * positive run cannot be a measurement of something else.
+ *
+ * ## What was found building it, and is not a defect
+ *
+ * `Enter` on a CLOSED select does not open the picker, with or without
+ * `base-select`: that is Chromium's keyboard model for a select (Space,
+ * Alt+ArrowDown and a click open it), and keeping the platform's keyboard model
+ * is the whole reason the owner allowed `base-select` rather than a listbox.
+ * `Enter` on an option in an OPEN picker chooses it and closes the picker, and
+ * that is asserted.
+ *
+ * ## What this does NOT prove
+ *
+ * Anything on a real phone or in the Android WebView — #667's tablet criterion
+ * is a device check nobody running this gate can make. And the UNCHECKED box's
+ * outline and a range's track are drawn by the platform in its own greys,
+ * which `accent-color` does not reach and no token names.
+ */
+const CONTROLS_PAGE = '/shell.html?controls=specimens';
+const CONTROLS_WITHOUT_BASE_SELECT = `${CONTROLS_PAGE}&base-select=off`;
+
+/** The checkbox and radio rows the harness renders — two markups, four rows. */
+const ROW_SELECTOR = '[data-oyl-native-row]';
+const ROW_COUNT = 4;
+
+/** A token as Chromium reports a computed colour. */
+function rgbOf(token: ColourToken): string {
+  const hex = COLOUR_TOKENS[token];
+  const channel = (at: number): number => Number.parseInt(hex.slice(at, at + 2), 16);
+  return `rgb(${String(channel(1))}, ${String(channel(3))}, ${String(channel(5))})`;
+}
+
+async function openControls(page: Page, url = CONTROLS_PAGE): Promise<void> {
+  await page.goto(url);
+  await page.waitForSelector('html[data-oyl-shell-ready]');
+  expect(
+    await page.locator('[data-oyl-native-control]').count(),
+    'the native control specimens did not render — see shell-harness.tsx §NativeControls',
+  ).toBe(8);
+}
+
+interface RowBox {
+  readonly markup: string;
+  readonly height: number;
+  readonly width: number;
+  readonly minHeight: string;
+}
+
+async function rowBoxes(page: Page, stripped: boolean): Promise<readonly RowBox[]> {
+  return page.evaluate(
+    ({ selector, strip }) =>
+      [...document.querySelectorAll<HTMLElement>(selector)].map((row) => {
+        const before = row.style.cssText;
+        if (strip) row.style.minHeight = '0px';
+        const box = row.getBoundingClientRect();
+        const measured = {
+          markup: row.dataset['oylNativeRow'] ?? '',
+          height: box.height,
+          width: box.width,
+          minHeight: getComputedStyle(row).minHeight,
+        };
+        row.style.cssText = before;
+        return measured;
+      }),
+    { selector: ROW_SELECTOR, strip: stripped },
+  );
+}
+
+for (const viewport of VIEWPORTS) {
+  test.describe(`#667 — ${viewport.name} — a checkbox or radio row`, () => {
+    test.use({ viewport: { width: viewport.width, height: viewport.height } });
+
+    test('is at least a 44×44 target as Chromium lays it out, whichever markup it uses', async ({
+      page,
+    }) => {
+      await openControls(page);
+      const rows = await rowBoxes(page, false);
+      expect(rows.length).toBe(ROW_COUNT);
+      expect(new Set(rows.map((row) => row.markup))).toEqual(new Set(['beside', 'wrapping']));
+      for (const row of rows) {
+        expect(
+          row.height,
+          `a ${row.markup} row is ${row.height.toFixed(1)}px tall`,
+        ).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+        expect(
+          row.width,
+          `a ${row.markup} row is ${row.width.toFixed(1)}px wide`,
+        ).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+      }
+    });
+
+    test("the file input's button is a 44 px target", async ({ page }) => {
+      await openControls(page);
+      const height = await page
+        .locator('[data-oyl-native-control="file"]')
+        .evaluate((input) => input.getBoundingClientRect().height);
+      expect(height).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+    });
+  });
+}
+
+test.describe('#667 — the row target is declared, and nothing else holds it', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test('the 44 px minimum is a declaration on every row', async ({ page }) => {
+    await openControls(page);
+    for (const row of await rowBoxes(page, false)) {
+      expect(Number.parseFloat(row.minHeight), `a ${row.markup} row`).toBeGreaterThanOrEqual(
+        TOUCH_TARGET_PIXELS,
+      );
+    }
+  });
+
+  test('with the floor stripped off, a row falls short — the floor is what holds it', async ({
+    page,
+  }) => {
+    // #316's third measurement, and here it is expected to FAIL the target:
+    // a row is one line of body text beside a 13 px box, about 25 px, so the
+    // declaration is the only thing that makes it 44. A row that still
+    // measured 44 with its floor gone would mean something else — a wrapped
+    // line, a padding — had started carrying the target without anybody
+    // deciding it, which is the emergent guarantee #316 removed.
+    await openControls(page);
+    const rows = await rowBoxes(page, true);
+    expect(rows.length).toBe(ROW_COUNT);
+    for (const row of rows) {
+      expect(row.minHeight, 'the floor was not taken off, so this measures it').toBe('0px');
+      expect(row.height, `a ${row.markup} row with no floor`).toBeGreaterThan(0);
+      expect(row.height, `a ${row.markup} row with no floor`).toBeLessThan(TOUCH_TARGET_PIXELS);
+    }
+  });
+});
+
+test.describe('#667 — the file input, the boxes and the accent', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test('draws the file button as the secondary button, a token clear of its label', async ({
+    page,
+  }) => {
+    await openControls(page);
+    const read = await page.evaluate(() => {
+      const pick = (style: CSSStyleDeclaration) => ({
+        color: style.color,
+        backgroundColor: style.backgroundColor,
+        borderTopColor: style.borderTopColor,
+        borderTopWidth: style.borderTopWidth,
+        borderTopLeftRadius: style.borderTopLeftRadius,
+        paddingTop: style.paddingTop,
+        paddingLeft: style.paddingLeft,
+        fontSize: style.fontSize,
+        minHeight: style.minHeight,
+      });
+      const input = document.querySelector('[data-oyl-native-control="file"]');
+      const label = document.querySelector('label[for="specimen-file"]');
+      const secondary = document.querySelector('[data-oyl-touch-target] .oyl-button--secondary');
+      if (input === null || label === null || secondary === null) return undefined;
+      return {
+        file: pick(getComputedStyle(input, '::file-selector-button')),
+        secondary: pick(getComputedStyle(secondary)),
+        gap: input.getBoundingClientRect().left - label.getBoundingClientRect().right,
+      };
+    });
+    expect(read, 'the file input, its label or a secondary button is missing').toBeDefined();
+    expect(read?.file).toEqual(read?.secondary);
+    expect(read?.file.color).toBe(rgbOf('accent'));
+    expect(read?.file.backgroundColor).toBe(rgbOf('canvas'));
+    // `--oyl-space-sm`, 8 px: "GPX fileChoose File" is the defect.
+    expect(read?.gap).toBe(8);
+  });
+
+  test('paints checkboxes, radios, a range and a progress bar in the accent token', async ({
+    page,
+  }) => {
+    await openControls(page);
+    const accents = await page.evaluate(() =>
+      [
+        ...document.querySelectorAll(
+          '[data-oyl-native-control="checkbox"], [data-oyl-native-control="radio"], ' +
+            '[data-oyl-native-control="range"], [data-oyl-native-control="progress"]',
+        ),
+      ].map((control) => getComputedStyle(control).accentColor),
+    );
+    expect(accents.length).toBe(6);
+    for (const accent of accents) {
+      expect(accent).toBe(rgbOf('accent'));
+    }
+  });
+
+  test('a checked box is filled with the accent and its mark is the accent ink', async ({
+    page,
+  }, info) => {
+    // The two pairs `tokens.ts` declares for #667, read off the pixels rather
+    // than trusted: the platform chooses the mark's colour, not the stylesheet.
+    await openControls(page);
+    const path = info.outputPath('checked-box.png');
+    await page
+      .locator('[data-oyl-native-row="wrapping"] [data-oyl-native-control="checkbox"]')
+      .screenshot({ path });
+    const png = decodePng(path);
+    const hex = (at: number): string =>
+      `#${[0, 1, 2]
+        .map((channel) => (png.data[at + channel] ?? 0).toString(16).padStart(2, '0'))
+        .join('')}`;
+    const accent = COLOUR_TOKENS.accent;
+    // The box is found by its fill, and only its interior is read, so the page
+    // around a 13 px box cannot supply the "mark".
+    let left = png.width;
+    let right = -1;
+    let top = png.height;
+    let bottom = -1;
+    for (let y = 0; y < png.height; y += 1) {
+      for (let x = 0; x < png.width; x += 1) {
+        if (hex((y * png.width + x) * 4) === accent) {
+          left = Math.min(left, x);
+          right = Math.max(right, x);
+          top = Math.min(top, y);
+          bottom = Math.max(bottom, y);
+        }
+      }
+    }
+    expect(right, `no pixel of the checked box is ${accent}, the accent token`).toBeGreaterThan(
+      left,
+    );
+    const inside = new Map<string, number>();
+    for (let y = top + 2; y <= bottom - 2; y += 1) {
+      for (let x = left + 2; x <= right - 2; x += 1) {
+        const colour = hex((y * png.width + x) * 4);
+        inside.set(colour, (inside.get(colour) ?? 0) + 1);
+      }
+    }
+    expect(inside.get(accent) ?? 0, 'the fill').toBeGreaterThan(10);
+    expect(inside.get(COLOUR_TOKENS.accentInk) ?? 0, 'the mark, in accentInk').toBeGreaterThan(5);
+    expect(contrastRatio(COLOUR_TOKENS.accentInk, accent)).toBeGreaterThanOrEqual(
+      AA_LARGE_TEXT_OR_NON_TEXT,
+    );
+  });
+});
+
+test.describe('#667 — the select opts into a styled picker and stays a select', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  async function state(page: Page) {
+    return page.evaluate(() => {
+      const select = document.querySelector<HTMLSelectElement>(
+        '[data-oyl-native-control="select"]',
+      );
+      if (select === null) throw new Error('no select specimen');
+      return {
+        value: select.value,
+        open: select.matches(':open'),
+        appearance: getComputedStyle(select).appearance,
+        options: [...select.options].map((option) => {
+          const style = getComputedStyle(option);
+          return {
+            label: option.label,
+            height: option.getBoundingClientRect().height,
+            checked: option.selected,
+            color: style.color,
+            backgroundColor: style.backgroundColor,
+          };
+        }),
+        picker: (() => {
+          const style = getComputedStyle(select, '::picker(select)');
+          return {
+            appearance: style.appearance,
+            color: style.color,
+            backgroundColor: style.backgroundColor,
+            borderTopColor: style.borderTopColor,
+          };
+        })(),
+      };
+    });
+  }
+
+  test('opens by Space and by click, and every option is a 44 px target', async ({ page }) => {
+    await openControls(page);
+    const select = page.locator('[data-oyl-native-control="select"]');
+    expect((await state(page)).appearance).toBe('base-select');
+
+    await select.focus();
+    await page.keyboard.press('Space');
+    await expect.poll(async () => (await state(page)).open).toBe(true);
+    const opened = await state(page);
+    expect(opened.options.length).toBe(4);
+    for (const option of opened.options) {
+      expect(option.height, `“${option.label}” in the open picker`).toBeGreaterThanOrEqual(
+        TOUCH_TARGET_PIXELS,
+      );
+    }
+    await page.keyboard.press('Escape');
+    await expect.poll(async () => (await state(page)).open).toBe(false);
+
+    await select.click();
+    await expect.poll(async () => (await state(page)).open).toBe(true);
+    await page.keyboard.press('Escape');
+  });
+
+  test('keeps the platform keyboard model: arrows and Enter choose, typing jumps', async ({
+    page,
+  }) => {
+    await openControls(page);
+    const select = page.locator('[data-oyl-native-control="select"]');
+    await select.focus();
+    await page.keyboard.press('Space');
+    await expect.poll(async () => (await state(page)).open).toBe(true);
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Enter');
+    await expect.poll(async () => state(page)).toMatchObject({ value: '15', open: false });
+
+    // Typeahead on the closed control: one option starts with "f".
+    await page.keyboard.press('f');
+    await expect.poll(async () => (await state(page)).value).toBe('45');
+  });
+
+  test('is still a combobox with options in the platform’s own accessibility tree', async ({
+    page,
+    context,
+  }) => {
+    await openControls(page);
+    await page.locator('[data-oyl-native-control="select"]').focus();
+    await page.keyboard.press('Space');
+    await expect.poll(async () => (await state(page)).open).toBe(true);
+    const session = await context.newCDPSession(page);
+    const { nodes } = await session.send('Accessibility.getFullAXTree');
+    const roles = nodes
+      .filter((node) => node.ignored !== true)
+      .map((node) => ({ role: String(node.role?.value), name: String(node.name?.value ?? '') }));
+    expect(roles).toContainEqual({ role: 'combobox', name: 'Say your power' });
+    // Chromium's internal name for a select's popup list; the platform layers
+    // expose it as a listbox.
+    expect(roles.some((node) => ['listbox', 'MenuListPopup'].includes(node.role))).toBe(true);
+    expect(roles.filter((node) => node.role === 'option').map((node) => node.name)).toEqual([
+      'never',
+      'every 15 seconds',
+      'every 30 seconds',
+      'forty-five seconds',
+    ]);
+  });
+
+  test('paints the picker and its options with the tokens, exactly', async ({ page }) => {
+    await openControls(page);
+    await page.locator('[data-oyl-native-control="select"]').focus();
+    await page.keyboard.press('Space');
+    await expect.poll(async () => (await state(page)).open).toBe(true);
+    // Move the pointer and the focus away from any option, so each is read at
+    // rest: the focused option is the checked one, which wins on colour.
+    await page.mouse.move(1270, 790);
+    const read = await state(page);
+    expect(read.picker).toEqual({
+      appearance: 'base-select',
+      color: rgbOf('ink'),
+      backgroundColor: rgbOf('canvas'),
+      borderTopColor: rgbOf('border'),
+    });
+    const checked = read.options.filter((option) => option.checked);
+    expect(checked.length).toBe(1);
+    expect(checked[0]).toMatchObject({
+      color: rgbOf('accentInk'),
+      backgroundColor: rgbOf('accent'),
+    });
+    for (const option of read.options.filter((each) => !each.checked)) {
+      expect(option, option.label).toMatchObject({
+        color: rgbOf('ink'),
+        backgroundColor: rgbOf('canvas'),
+      });
+    }
+    await page.keyboard.press('Escape');
+  });
+
+  test('the control — without the @supports block it is the closed skin, and no option is 44 px', async ({
+    page,
+  }) => {
+    await openControls(page, CONTROLS_WITHOUT_BASE_SELECT);
+    expect(
+      await page.evaluate(() => document.documentElement.dataset['oylBaseSelectRemoved']),
+      'the harness removed no @supports (appearance: base-select) block, so this is not the control',
+    ).toBe('1');
+    expect((await state(page)).appearance).toBe('none');
+    await page.locator('[data-oyl-native-control="select"]').focus();
+    await page.keyboard.press('Space');
+    const read = await state(page);
+    expect(read.options.length).toBe(4);
+    // The same assertion the positive case makes, required to FAIL here.
+    expect(
+      read.options.every((option) => option.height >= TOUCH_TARGET_PIXELS),
+      'the platform popup laid its options out at 44 px, so the positive case may not have ' +
+        'measured the styled picker at all',
+    ).toBe(false);
+    await page.keyboard.press('Escape');
+  });
+
+  for (const url of [CONTROLS_PAGE, CONTROLS_WITHOUT_BASE_SELECT]) {
+    test(`hands the control back to the platform under forced colours — ${url}`, async ({
+      page,
+    }) => {
+      await openControls(page, url);
+      await page.emulateMedia({ forcedColors: 'active' });
+      expect((await state(page)).appearance).toBe('auto');
+    });
+  }
 });
