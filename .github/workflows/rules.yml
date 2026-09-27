@@ -442,3 +442,20 @@ jobs:
 
       - name: Dependency licences
         run: pnpm run check:licences
+
+      # NOT001-NOT007 (#664). Admitted is not the same as noticed: the step
+      # above decides which licences may ship, and says nothing about whether
+      # their notices ship with them. This regenerates the app's third-party
+      # notices from the installed tree -- the union of every workspace
+      # package's distributed closure, read by the same two functions
+      # check:licences uses -- and fails when the committed document is not
+      # what it writes. It runs its own `pnpm install --frozen-lockfile` first,
+      # for #298's reason (CLAUDE.md section 4k), so it is not in check:repo.
+      # In this job rather than one of its own, for the reason every step
+      # above gives: `main` requires a status check whose context is exactly
+      # "Repository rules".
+      - name: Third-party notices checker tests
+        run: bash scripts/check-third-party-notices.test.sh
+
+      - name: Third-party notices
+        run: pnpm run check:notices

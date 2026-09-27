@@ -157,7 +157,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         (ADR 0023 D-3), and there is none in the tree yet — so a
                         screen rendering nothing would look correct, and
                         `CreditsView.test.tsx` renders a fixture manifest for
-                        exactly that reason
+                        exactly that reason. Since #664 it also lists the
+                        SOFTWARE the app includes, read from the contents of
+                        the third-party notices `check:notices` generates and
+                        gates (§4g), and links the full document
     src/design/         design tokens, theme.css and the primitives (#48), and since
                         #307 the two systems those tokens now form — the elevation
                         ramp, which is a surface COLOUR because a shadow is invisible
@@ -1521,6 +1524,29 @@ pnpm run check:licences
 # FAILS as well as one that passes. Needs Node, so also not in `check:repo`.
 bash scripts/check-dependency-licences.test.sh
 
+# The third-party notices gate (#664). Admitted is not the same as noticed: the
+# check above decides which licences may ship, this one that their notices do.
+# Runs its own `pnpm install --frozen-lockfile` (#298's reason, section 4k),
+# regenerates apps/web/public/licences/third-party.txt and
+# apps/web/src/credits/third-party-contents.txt from the union of every
+# workspace package's distributed closure, and fails (NOT001-NOT007) when either
+# committed file is not what it writes. About twenty seconds. `notices:generate`
+# is the same run with --write, and is how a dependency bump is repaired: run
+# it, then READ the diff. See section 4g.
+pnpm run check:notices
+pnpm run notices:generate
+
+# Its own suite. Fixture-driven, with a fake `pnpm` on PATH so the real
+# union code is what runs; the count is what the run prints (68 on 2026-09-27).
+# Needs Node, so not in `check:repo`.
+bash scripts/check-third-party-notices.test.sh
+
+# What the APK links, from Gradle, written where
+# apps/mobile/src/android/native-closure.test.ts reads it (#664). NOT a gate
+# and NOT in CI: it needs a JDK and an Android SDK. Without its report that
+# test skips loudly, naming this command; with a stale one it fails.
+pnpm --filter @onyourleft/mobile run native:closure
+
 # All eight bare-clone script checks in one command.
 pnpm run check:repo
 
@@ -1856,7 +1882,8 @@ with its own fixture suite), `shellcheck scripts/*.sh`, then `pnpm install --fro
 `bash scripts/check-wiring.test.sh`, `check:capacitor`,
 `bash scripts/check-capacitor-generated.test.sh`, `check:cost-model`,
 `bash scripts/check-cost-model.test.sh`, `bash scripts/coverage-summary.test.sh`, `build`,
-`playwright install --with-deps chromium`, `test:browser`, `bash scripts/check-dependency-licences.test.sh` and `check:licences` — then
+`playwright install --with-deps chromium`, `test:browser`, `bash scripts/check-dependency-licences.test.sh`, `check:licences`,
+`bash scripts/check-third-party-notices.test.sh` and `check:notices` — then
 publishes the coverage table to the run summary and uploads the HTML report as an artefact.
 Those last two carry `if: always()` and cannot fail the job: the run where coverage moved
 unexpectedly is exactly the one whose table you want, and a reporting step that can fail a
@@ -2524,6 +2551,35 @@ separately rather than being subsumed here.
 not. Its own suite is `bash scripts/check-dependency-licences.test.sh` — 56 cases, and every policy
 branch has a case that goes **red** as well as one that passes. ⚠️ That said 49 here while §4a said
 50; the number is what the suite prints, so read the run rather than either line.
+
+#### Admitted is not the same as noticed — #664
+
+⚠️ **Everything above decides which licences may SHIP. None of it says whether their notices ship
+with them**, and until [#664](https://github.com/openzigs/onyourleft/issues/664) none did: MIT, ISC,
+the BSDs and Apache-2.0 all ask for their copyright and permission notice — and Apache-2.0 for any
+`NOTICE` file — to travel with copies, and `dist` carried only the Apache-2.0 text #597 added for
+two assets. `DEP001` reads a manifest's `license` field, which names a licence and carries none of
+its text, so it could never have seen this. The second half is a separate gate:
+
+| | |
+|---|---|
+| The document | `apps/web/public/licences/third-party.txt`, served from `dist`, precached, and in the APK. Every package in the app's distributed closure with the **verbatim** text of each `LICENSE`/`LICENCE`/`COPYING` and `NOTICE` file it ships; every native library the APK links; the files the build copies out of a package (`pose/`'s WebAssembly runtime) |
+| Where it comes from | `scripts/check-third-party-notices.mjs`, over the **same** `discoverPackages`/`readClosure` `check:licences` uses — imported, not re-derived — so what is admitted and what is noticed are one list. The union, not `--filter @onyourleft/web`, for the reason above: `dexie` reaches the app only through `@onyourleft/store` |
+| The gate | `check:notices` (NOT001–NOT007) and its suite, in the one `Repository rules` job. Shape (b) of #664: **committed and regenerated-and-diffed**, with its own frozen install — the script's header says why not built at build time |
+| What fails closed | a package with no licence file (NOT003). Three in today's closure ship none — `@mediapipe/tasks-vision`, `murmurhash-js`, `pmtiles` — and each has a reviewed entry in `apps/web/third-party-notices.json`, keyed by **name and version**, saying where its notice comes from instead; an entry nothing uses is NOT004 |
+| The native half | `apps/mobile/native-closure.json`, a **reviewed** list, because CI cannot run Gradle. `apps/mobile/src/android/native-closure.test.ts` holds it to `./gradlew :app:dependencies --configuration releaseRuntimeClasspath` in both directions wherever `native:closure` has written a report, and **skips loudly** elsewhere — #318's shape, and like it **not a CI gate** |
+| Where a rider reads it | Credits §"Software this app includes", reached from About. The screen inlines the document's **contents** (the list, ~5 KiB) rather than the document (~125 KiB); both are the generator's output and `check:notices` compares both |
+
+⚠️ **The text is read from the files, never from the manifest.** `lucide-react`'s manifest says
+`ISC`; its `LICENSE` is ISC **and** MIT, for the icons derived from Feather. The field is printed as
+what a package declares, and the notice is every licence file it ships — the fixture suite's
+Lucide/Feather case is the proof. ⚠️ And like `DEP001` it **cannot see what a package vendors**:
+MediaPipe's bundle is one binary built from many projects, and is noticed only as far as that
+package's own files notice it.
+
+⚠️ **A dependency bump now fails CI until somebody regenerates**, on purpose: `pnpm run
+notices:generate`, then read the licence text in the diff before committing it. A Dependabot pull
+request goes red at `Third-party notices` for exactly that reason.
 
 ### 4i. Route planning has an interface and no engine, deliberately
 

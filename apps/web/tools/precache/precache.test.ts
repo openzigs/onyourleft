@@ -175,6 +175,22 @@ describe('the side camera’s pose model is not precached — #530', () => {
   });
 });
 
+describe('the third-party notices ARE precached — #664', () => {
+  // The decision, stated where it can go red: about 125 KiB of licence text
+  // out of `public/licences/`, cached like the Apache-2.0 text beside it, so
+  // the notices the Credits screen links open with the network off. A notice
+  // a rider can reach only online is a notice that is not always there.
+  // `offline.browser.spec.ts` §"#664" opens it offline from the cache a real
+  // browser filled.
+  it('holds the notices document and the licence text beside it', () => {
+    const notices = [file('licences/third-party.txt'), file('licences/Apache-2.0.txt')];
+    const entries = precacheEntries([...BUILD, ...notices]);
+    for (const each of notices) {
+      expect(entries, each.name).toContain(each.name);
+    }
+  });
+});
+
 describe('the map’s label glyphs ARE precached — #578', () => {
   // The decision, stated where it can go red: 586 KiB of ranges and their
   // licence, out of `public/glyphs/`, cached like every other file the build

@@ -154,10 +154,14 @@ export function AboutView(): JSX.Element {
           ADR 0023 D-3 puts the attribution inside the app because CC BY 4.0
           §3(a)(2) judges "a reasonable manner" by the medium, and the medium is
           an APK whose user never sees the repository. `AboutView.test.tsx`
-          asserts the link is here for that reason. */}
+          asserts the link is here for that reason. Since #664 it is also the
+          way to the software notices: MIT, ISC, the BSDs and Apache-2.0 all
+          ask for their notice to travel with copies, and a store user reaches
+          them from here or not at all. */}
       <p>
-        The artwork this app ships was made by other people.{' '}
-        <a href={hrefFor(routeById('credits'))}>Credits</a> says who, and under what terms.
+        The artwork this app ships was made by other people, and so is much of the open-source
+        software it is built from. <a href={hrefFor(routeById('credits'))}>Credits</a> says who, and
+        under what terms, and carries every software licence notice in full.
       </p>
     </>
   );
