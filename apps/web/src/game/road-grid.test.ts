@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { distanceToDrawnRoad } from './road-grid';
+import { distanceToDrawnRoad, squaredToSegment } from './road-grid';
 import { northRoute, plannerCornerRoute } from './route-fixtures-testing';
 import { corridorOrigin, drawnRoadFrame } from './terrain';
 
@@ -51,5 +51,22 @@ describe('the distance to any stretch of the drawn road — #613', () => {
       if (distanceToDrawnRoad(corner, cornerOrigin, x, z, 10) < 6.5) nearer += 1;
     }
     expect(nearer).toBe(1);
+  });
+});
+
+describe("a segment with no length — #613's review, folded into #602", () => {
+  it('is measured as its one point, never as NaN', () => {
+    // Without the guard `0 / 0` is NaN, `Math.min(least, NaN)` stays NaN for
+    // the rest of a search, and every clearance compared against it is false:
+    // the check would keep an item standing on the road, silently.
+    expect(squaredToSegment(3, 4, 0, 0, 0, 0, 0)).toBe(25);
+    expect(squaredToSegment(-1, 2, -1, 2, 0, 0, 0)).toBe(0);
+  });
+
+  it('still clamps a real segment to its ends', () => {
+    // The control that the guard is what the first case reads: a segment
+    // from the origin along +x, from a point beyond its far end.
+    expect(squaredToSegment(5, 0, 0, 0, 2, 0, 4)).toBe(9);
+    expect(squaredToSegment(1, 3, 0, 0, 2, 0, 4)).toBe(9);
   });
 });
