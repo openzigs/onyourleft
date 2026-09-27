@@ -38,7 +38,6 @@ import {
 
 import {
   CLUSTER_SPAN_METRES,
-  DEGENERATE_TANGENT_METRES,
   MINIMUM_SCATTER_SEPARATION_METRES,
   SCATTER_BAND_METRES,
   SCATTER_KINDS,
@@ -55,7 +54,13 @@ import {
   type ScatterItem,
   type SceneryKind,
 } from './scatter';
-import { ROAD_WIDTH_METRES, corridorOrigin, localGroundPosition, roadCorridor } from './terrain';
+import {
+  DEGENERATE_TANGENT_METRES,
+  ROAD_WIDTH_METRES,
+  corridorOrigin,
+  localGroundPosition,
+  roadCorridor,
+} from './terrain';
 
 /** Large enough that the budget never binds, so placement is what is measured. */
 const UNBOUNDED: ScatterBudget = { maxItems: 100_000, riderMetres: 0 };
@@ -1281,7 +1286,8 @@ describe('a degenerate profile does not stop the ride', () => {
 
   it('survives a road that doubles back on itself', () => {
     // ⚠️ **An out-and-back's turning point has the road before it and the road
-    // after it in the same place**, which is why `normalAt` takes a forward
+    // after it in the same place**, which is why `terrain.ts` §`drawnRoadFrame`
+    // (#571; `scatter.ts` §`normalAt` before it) takes a forward
     // difference rather than a centred one: a centred difference here measures
     // the distance between two coordinates that *are* the same point and comes
     // back with floating-point noise, which normalises into an arbitrary

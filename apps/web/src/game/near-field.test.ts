@@ -14,7 +14,7 @@
  *    worked by hand and to an independent sampling of the same solid.
  * 3. **A ride cuts nothing**, with the camera on the racing line, on the
  *    fixture routes, a metre at a time, at every aspect from an upright phone
- *    to 6 : 1, in both worlds — and at 6 : 1 the frame as built DOES meet the
+ *    to 6 : 1, in both worlds — and at 8 : 1 the frame as built DOES meet the
  *    plane, which is the control that makes the first half mean something.
  *    What the cull drops is held, item for item, to `referenceShapeMeets`,
  *    which clips triangles where `shapeMeets` separates them and shares none
@@ -561,7 +561,10 @@ const RIDES: Readonly<Record<string, () => RouteProfile>> = {
   'a 300 m circuit': () => circuitRoute(300, () => 20),
 };
 
-/** The frames the renderer is handed, from an upright phone to the widest the stylesheet allows. */
+/**
+ * The frames the renderer is handed, from an upright phone to the widest the
+ * stylesheet allows — and one wider than any of them, which is the control's.
+ */
 const ASPECTS: Readonly<Record<string, number>> = {
   'a phone in landscape': 19.5 / 9,
   '16 : 9': 16 / 9,
@@ -570,6 +573,16 @@ const ASPECTS: Readonly<Record<string, number>> = {
   'a tablet upright': 10 / 16,
   'a phone upright': 9 / 19.5,
   'the widest frame': 6,
+  // ⚠️ **The control's frame, and no frame the stylesheet can produce** —
+  // #571. The control was 6 : 1 until then, and what the stylised world met
+  // there was ONE conifer inside a 20 m hairpin, 5.8 m from the drawn road's
+  // centreline — inside the 6.5 m the scatter's verge keeps clear — because it
+  // was placed beside the route's arc rather than the ribbon, which runs
+  // inside it. Placed beside the ribbon, nothing on any ride here reaches a
+  // 6 : 1 plane in either world. 8 : 1 widens the near rectangle to 5.6 m:
+  // measured, every ride but the S-bend meets it in at least one world, and
+  // the circuit and the planner's route in both.
+  'the control frame': 8,
 };
 
 interface RideFrame {
@@ -632,7 +645,9 @@ function shapesFromFiles(world: DrawnWorld): ShapesOf {
 }
 
 /** The aspects a device draws — every one but the widest the stylesheet allows. */
-const DEVICE_ASPECTS = Object.entries(ASPECTS).filter(([label]) => label !== 'the widest frame');
+const DEVICE_ASPECTS = Object.entries(ASPECTS).filter(
+  ([label]) => label !== 'the widest frame' && label !== 'the control frame',
+);
 
 describe('a ride — nothing the camera passes is cut by the near plane (#545)', () => {
   /** Item-frames the plane cuts in the frame as `scene.ts` built it, by world and aspect. */
@@ -694,15 +709,16 @@ describe('a ride — nothing the camera passes is cut by the near plane (#545)',
     }
   });
 
-  it('the control: at 6 : 1 the plane DOES cut the frame as built, in both worlds', () => {
+  it('the control: at 8 : 1 the plane DOES cut the frame as built, in both worlds', () => {
     // What makes the green rides mean something: the same measure, on the same
-    // frames, finds a cut where the rectangle is 4.2 m across — conifers'
+    // frames, finds a cut where the rectangle is 5.6 m across (4.2 m at 6 : 1
+    // until #571 — see 'the control frame') — conifers'
     // lowest branches beside the eye. A measure that could not find one — a
     // shape placed in the wrong frame, a pyramid facing backwards, a reader
     // that returned no triangles — would pass every ride over nothing. And it
     // is exactly what `clearOfTheCamera` removed in the rides above.
     for (const world of WORLDS) {
-      expect(uncut.get(`${world} the widest frame`) ?? 0, world).toBeGreaterThan(0);
+      expect(uncut.get(`${world} the control frame`) ?? 0, world).toBeGreaterThan(0);
     }
   });
 

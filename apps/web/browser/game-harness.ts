@@ -1147,10 +1147,18 @@ const CONTROL_NEAR_SHARE = 0.5;
  *
  * ## Which frame
  *
- * A 20 m hairpin climbing at 4 %, ridden a metre at a time with the camera on
- * the racing line, in the REALISTIC world the owner saw it in, on a 6 : 1
- * canvas: the widest frame the stylesheet allows, and the only aspect at which
- * `near-field.test.ts` finds the fixture routes cut at all. The frame is the
+ * A 300 m circuit, ridden a metre at a time with the camera on the racing
+ * line, in the REALISTIC world the owner saw it in, on an 8 : 1 canvas —
+ * `near-field.test.ts` §`'the control frame'`'s aspect, wider than any the
+ * stylesheet allows. ⚠️ **It was a 20 m hairpin at 6 : 1, the widest the
+ * stylesheet allows, until #571**, which stood the scenery beside the drawn
+ * road rather than the route: the conifer that reached a 6 : 1 plane inside
+ * the hairpin stood 5.8 m from the drawn road's centreline, inside the 6.5 m
+ * the scatter's verge keeps clear, and placed beside the ribbon nothing on any
+ * fixture route reaches a 6 : 1 plane. At 8 : 1 the hairpin
+ * still has a pass, but one whose uncut frame differs by 16 pixels, too few
+ * for the control below to mean anything; the circuit's closest pass, a
+ * signpost, differs by about 5 000. The frame is the
  * one where `near-field.ts` §`clearOfTheCamera`, asked with the renderer's own
  * loaded shapes, drops the most — the closest pass, and the only kind of frame
  * on which a green "nothing cut" could be wrong.
@@ -1180,7 +1188,7 @@ function nearFieldProbe(
   }
   const world = drawnWorldOf(view);
   const shapes = nearFieldShapes(world);
-  const profile = hairpinRoute(20);
+  const profile = circuitRoute(300, () => 20);
   const origin = corridorOrigin(profile);
   const start = atStartLine(profile);
   const inputAt = (distance: number): Parameters<typeof builtSceneFrame>[0] => ({
@@ -4197,7 +4205,7 @@ async function run(): Promise<void> {
       const realistic = await realisticProbe();
       // #545, in the world the owner saw it in — after `realisticProbe`, which
       // is what loaded that world. @see nearFieldProbe
-      const nearField = nearFieldProbe(1_200, 200, REALISTIC_LADDER[0] as QualitySettings);
+      const nearField = nearFieldProbe(1_600, 200, REALISTIC_LADDER[0] as QualitySettings);
       window.__oylGameHarness = { ...emptyHarness(errors), realistic, nearField };
     } catch (error: unknown) {
       errors.push(error instanceof Error ? error.message : String(error));

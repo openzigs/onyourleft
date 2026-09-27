@@ -35,7 +35,12 @@ import {
   structuresAt,
 } from './settlements';
 import { atStartLine } from './simulation';
-import { ROAD_WIDTH_METRES, corridorOrigin, localGroundPosition } from './terrain';
+import {
+  ROAD_WIDTH_METRES,
+  corridorOrigin,
+  drawnRoadPosition,
+  localGroundPosition,
+} from './terrain';
 import { inWater, waterways } from './waterways';
 
 const BUILDINGS = new Set(['building', 'barn', 'church', 'shop-row', 'shed']);
@@ -335,15 +340,20 @@ describe('the scenery keeps out of the gardens — #460', () => {
 describe('nothing stands on the road, whichever stretch of it — #468 review B1', () => {
   /**
    * The least distance, in plan, from any point of an item's footprint to the
-   * road's centreline — the route resampled every metre through
-   * `positionAt`, and the footprint sampled every half metre. Deliberately a
-   * different method from `settlements.ts` §`offTheRoad`, which is exact.
+   * road's centreline — the DRAWN road resampled every metre through
+   * `terrain.ts` §`drawnRoadPosition`, and the footprint sampled every half
+   * metre. Deliberately a different method from `settlements.ts`
+   * §`structureClearance`, which is exact against its own two-metre chords.
+   *
+   * ⚠️ **The drawn road since #571**, and the route's own positions until then:
+   * the road a structure must keep off is the one a rider sees, which since
+   * #543 runs inside the route at every bend.
    */
   function centreline(profile: RouteProfile): readonly { x: number; z: number }[] {
     const origin = corridorOrigin(profile);
     const line: { x: number; z: number }[] = [];
     for (let along = 0; along <= profile.totalDistance; along += 1) {
-      line.push(localGroundPosition(origin, positionAt(profile, metres(along))));
+      line.push(drawnRoadPosition(profile, origin, along));
     }
     return line;
   }
@@ -392,6 +402,9 @@ describe('nothing stands on the road, whichever stretch of it — #468 review B1
     return least;
   }
 
+  /** How far a two-metre chord of a 19 m arc lies inside it, rounded up: 1² / (2 · 19). */
+  const CHORD_SAGITTA_METRES = 0.03;
+
   it('measures a footprint against the road exactly, whatever way it is turned', () => {
     // The exact measure against the sampled one, over every kind at scattered
     // places and headings around a hairpin — its two legs and its bend — so a
@@ -423,10 +436,17 @@ describe('nothing stands on the road, whichever stretch of it — #468 review B1
         // Within the reach that matters — past it the grid is not searched
         // and the answer is only a bound — the samples can only ever be
         // further than the truth, and by no more than half a sample.
+        //
+        // ⚠️ **Less a chord's sagitta since #571**: the drawn road is a curve
+        // through a bend, not the route's polyline, and the grid measures it
+        // in two-metre chords where the samples here are one metre apart. A
+        // two-metre chord of this hairpin's ~19 m drawn arc lies 2.6 cm inside
+        // it, so the exact answer may be up to that much FURTHER than the
+        // samples from a footprint outside the bend.
         if (sampled < ROAD_CLEARANCE_METRES) {
           near += 1;
           if (sampled < 0.5) straddling += 1;
-          expect(exact).toBeLessThanOrEqual(sampled + 1e-9);
+          expect(exact).toBeLessThanOrEqual(sampled + CHORD_SAGITTA_METRES);
           expect(sampled - exact, `${kind} at trial ${String(trial)}`).toBeLessThan(0.45);
         }
       }

@@ -226,7 +226,19 @@ describe('the arrangement a route produces — #341', () => {
     // gardens is cleared. `settlements.test.ts` asserts what must be true of
     // the new arrangement — grouped, facing the road, the same every lap —
     // and none of it names a coordinate.
-    expect(digest(placed.map(serialise))).toBe('e0ca4264');
+    //
+    // ⚠️ **And regenerated for #571, which moves the arrangement on purpose** —
+    // `e0ca4264` before it. Everything beside the road now stands beside the
+    // DRAWN road (`terrain.ts` §`drawnRoadFrame`) rather than the route, and
+    // takes the road's direction at its own distance rather than at the
+    // nearest grid point. On this fixture's 400 m arc the ribbon runs 4 cm
+    // inside the route, and the direction was up to half a grid step stale:
+    // measured against the sweep before #571, the median item moved 0.13 m
+    // and the furthest 0.44 m, every kind, rotation, scale and variant the
+    // same. `corner-placement.test.ts` is what asserts the property that
+    // needed the move — nothing in the carriageway at a planner's sharp
+    // corner — and none of it names a coordinate here.
+    expect(digest(placed.map(serialise))).toBe('a68475ff');
   });
 
   it('places the same scenery IN PLAN as it did before the terrain — #458', () => {
@@ -237,7 +249,10 @@ describe('the arrangement a route produces — #341', () => {
     // the same change the digest above records, seen in plan. Like that one it
     // is now a record rather than evidence, until the next change that says it
     // leaves placement alone.
-    expect(digest(placed.map(serialisePlan))).toBe('d6e24a9e');
+    //
+    // ⚠️ **#571 moved it too, and it was `d6e24a9e` until then** — the same
+    // move as the digest above, in plan.
+    expect(digest(placed.map(serialisePlan))).toBe('2830159f');
   });
 
   it('places a world at all, so the digest is not over an empty sweep', () => {
@@ -289,8 +304,12 @@ describe('the arrangement a route produces — #341', () => {
     const natural = placed.filter((item) =>
       (SCATTER_KINDS as readonly string[]).includes(item.kind),
     );
-    expect(natural.length).toBe(6946);
-    expect(new Set(natural.map((item) => `${item.x},${item.z}`)).size).toBe(1018);
+    //
+    // ⚠️ **6 946 in 1 018 places until #571**, which moved every house a few
+    // centimetres with the road it faces: one tree that a garden used to
+    // clear stands just outside it now, in six frames.
+    expect(natural.length).toBe(6952);
+    expect(new Set(natural.map((item) => `${item.x},${item.z}`)).size).toBe(1019);
     expect(placed.length - natural.length).toBe(1917);
   });
 
@@ -360,14 +379,18 @@ describe('the arrangement a route produces — #341', () => {
     // did not actually move.
     // ⚠️ Since #460 the first item of the sweep is a village's first house,
     // facing the road, where it was a building the scatter stood at 78 m.
+    // ⚠️ Since #571 each of them is where the drawn road puts it: the house
+    // 5 cm and the last conifer 28 cm from where they were, and the middle
+    // item is a different one, because the tree a garden no longer clears
+    // (above) makes the sweep six items longer and moves where its middle is.
     expect(first === undefined ? '' : serialise(first)).toBe(
-      'building 32.848 -0.280 193.390 2.056 1.000',
+      'building 32.895 -0.280 193.409 2.058 1.000',
     );
     expect(middle === undefined ? '' : serialise(middle)).toBe(
-      'tree-broadleaf 637.145 15.886 300.906 4.644 1.340',
+      'tree-conifer 812.564 26.197 78.134 2.329 1.041',
     );
     expect(last === undefined ? '' : serialise(last)).toBe(
-      'tree-conifer 696.706 42.982 -291.975 0.240 1.178',
+      'tree-conifer 696.874 42.982 -291.754 0.240 1.178',
     );
   });
 });

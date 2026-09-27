@@ -79,7 +79,6 @@ import {
   elevationAt,
   gradeAt,
   positionAt,
-  type GeographicPosition,
   type RouteProfile,
 } from '@onyourleft/domain';
 
@@ -91,7 +90,12 @@ import {
   type StructureKind,
 } from './scatter';
 import { slotHash, uniformFrom } from './seeded';
-import { localGroundPosition, type CorridorOrigin } from './terrain';
+import {
+  CORRIDOR_STEP_METRES,
+  drawnRoadFrame,
+  drawnRoadPosition,
+  type CorridorOrigin,
+} from './terrain';
 import { inWater, waterways } from './waterways';
 import { treeLineMetres } from './world';
 
@@ -337,13 +341,19 @@ export const STRUCTURE_FOOTPRINTS: Readonly<
   signpost: { x: 0.1, back: -0.95, front: 0.95 },
 };
 
+/**
+ * The most points {@link roadGrid} samples the drawn road at: **200 000** — a
+ * 400 km route at two metres, 3.2 MB of doubles, built once a route.
+ */
+const ROAD_GRID_MAXIMUM_POINTS = 200_000;
+
 /** The side of one cell of {@link roadGrid}, in metres. */
 const ROAD_CELL_METRES = 32;
 
 /** The whole route's centreline in local metres, bucketed by cell. */
 interface RoadGrid {
   readonly origin: CorridorOrigin;
-  /** Two floats a point: the route's own grid, in plan. */
+  /** Two floats a point: the drawn road every two metres, in plan. */
   readonly points: Float64Array;
   /** Segment `s` runs from point `s` to point `s + 1`. */
   readonly cells: ReadonlyMap<number, readonly number[]>;
@@ -365,8 +375,17 @@ function cellKey(column: number, row: number): number {
  * window a frame would think to look in. `scatter.ts` fixed its own form of
  * this in #348, and `landform.ts` §`clearReach` its own in #458; each placer
  * that stands things along the road's normal has shipped without the check at
- * first. The route's own points are what `terrain.ts` §`pointAt` interpolates
- * the road between, so a segment here is the drawn centreline.
+ * first.
+ *
+ * ⚠️ **The DRAWN centreline, sampled every `terrain.ts`
+ * §`CORRIDOR_STEP_METRES` — #571.** It was the route's own points until then,
+ * on the reasoning that `terrain.ts` §`pointAt` interpolated the road between
+ * them; since #543 it averages them, and at a planner's 90° corner the road a
+ * rider sees runs 3.5 m inside the route's vertex, which is most of
+ * {@link ROAD_CLEARANCE_METRES}. Two metres rather than the route's own grid
+ * because a chord lies inside the arc it cuts: at the ~13 m radius a 90°
+ * corner is drawn at, a 10 m chord is a metre inside the drawn road there and
+ * a 2 m one four centimetres.
  */
 function roadGrid(profile: RouteProfile, origin: CorridorOrigin): RoadGrid {
   const cached = roadGrids.get(profile);
@@ -377,14 +396,21 @@ function roadGrid(profile: RouteProfile, origin: CorridorOrigin): RoadGrid {
   ) {
     return cached;
   }
-  // ⚠️ No segment from the last point back to the first on a loop:
-  // `positionAt` interpolates between neighbours only, and a loop's grid ends
-  // on its own closing point, so no such stretch is ever drawn.
-  const positions = profile.positions;
-  const count = positions.length;
+  // Every CORRIDOR_STEP_METRES of the route, and never more than
+  // ROAD_GRID_MAXIMUM_POINTS of them: a route is an imported file, and the
+  // step widens on one long enough to reach the bound rather than the table
+  // growing without one.
+  //
+  // ⚠️ On a loop the last sample is `totalDistance`, which `drawnRoadPosition`
+  // wraps onto the start — so the closing stretch is a segment here, as it is
+  // on the screen (#440 made a loop's closing gap part of the lap).
+  const total: number = profile.totalDistance;
+  const step = Math.max(CORRIDOR_STEP_METRES, total / (ROAD_GRID_MAXIMUM_POINTS - 1));
+  // The last point is `total` itself, however short the last step.
+  const count = Math.ceil(total / step - 1e-9) + 1;
   const points = new Float64Array(count * 2);
   for (let index = 0; index < count; index += 1) {
-    const local = localGroundPosition(origin, positions[index] as GeographicPosition);
+    const local = drawnRoadPosition(profile, origin, Math.min(total, index * step));
     points[index * 2] = local.x;
     points[index * 2 + 1] = local.z;
   }
@@ -557,22 +583,11 @@ function frameAt(
   origin: CorridorOrigin,
   wrapped: number,
 ): Frame | undefined {
-  const here = localGroundPosition(origin, positionAt(profile, wrapped));
-  const ahead = localGroundPosition(
-    origin,
-    positionAt(profile, distanceOnRoute(profile, wrapped + 5)),
-  );
-  const behind = localGroundPosition(
-    origin,
-    positionAt(profile, distanceOnRoute(profile, wrapped - 5)),
-  );
-  const dx = ahead.x - behind.x;
-  const dz = ahead.z - behind.z;
-  const length = Math.hypot(dx, dz);
-  if (!(length > 0)) {
-    return undefined;
-  }
-  return { x: here.x, z: here.z, normalX: -dz / length, normalZ: dx / length };
+  // ⚠️ The DRAWN road — #571. This was the route's own centreline, 5 m either
+  // side, until then: at a planner's 90° corner the ribbon runs 3.5 m inside
+  // the route's vertex (`terrain.ts` §`BEND_SMOOTHING_METRES`), and a hedge
+  // {@link FIELD_EDGE_LATERAL_METRES} from the route stood in the road.
+  return drawnRoadFrame(profile, origin, wrapped);
 }
 
 /** Whether a stretch of the route would be built on: level, low and dry. */

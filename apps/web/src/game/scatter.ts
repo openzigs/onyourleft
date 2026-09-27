@@ -83,7 +83,12 @@ import {
 import { terrainHeightAt } from './landform';
 import { mixInto, slotHash, uniformFrom } from './seeded';
 import { inWater, waterways } from './waterways';
-import { ROAD_WIDTH_METRES, localGroundPosition, type CorridorOrigin } from './terrain';
+import {
+  ROAD_WIDTH_METRES,
+  drawnRoadFrame,
+  localGroundPosition,
+  type CorridorOrigin,
+} from './terrain';
 import { treeLineMetres } from './world';
 
 /**
@@ -479,7 +484,7 @@ export const BAND_FILL = 0.55;
  *
  * ⚠️ **This is what keeps #348's "the verge rule must still hold absolutely"
  * true at a wider band, and it repairs a defect that predates the issue.**
- * `normalAt` places an item by the road's local normal, so on the inside of a
+ * `terrain.ts` §`drawnRoadFrame` places an item by the road's local normal, so on the inside of a
  * bend of radius `R` an offset of `d` puts the item `R − d` from the centre of
  * the turn: the whole band folds inward, and at `d > R` it comes out the other
  * side of the road. Measured against the committed code on a circular fixture,
@@ -677,17 +682,6 @@ export const AMBIGUOUS_TURN_RADIUS_METRES = 12;
 export const AMBIGUOUS_CHORD_SHARE =
   Math.abs(Math.sin(CURVATURE_WINDOW_METRES / AMBIGUOUS_TURN_RADIUS_METRES)) /
   (CURVATURE_WINDOW_METRES / AMBIGUOUS_TURN_RADIUS_METRES);
-
-/**
- * Below this, the road has no direction at all: **a micrometre**.
- *
- * Not zero, because the two grid points either side of an out-and-back's
- * turning point are the *same* point reached by two different sums of the same
- * floats, and they come back differing in their last bits rather than not at
- * all. A twenty-metre baseline that measures 10⁻¹³ m is not a direction; it is
- * the rounding error, and normalising it would turn that error into a bearing.
- */
-export const DEGENERATE_TANGENT_METRES = 1e-6;
 
 /**
  * How far up the local tree line people still build: a fifth of the way.
@@ -1021,13 +1015,19 @@ function fillCell(
       if (inWater(ways, profile, at, lateral * side)) {
         continue;
       }
-      const ground = localGroundPosition(origin, positionAt(profile, at));
-      const normal = normalAt(profile, origin, at);
+      // ⚠️ Beside the DRAWN road, not the route — #571. At a planner's 90°
+      // corner the ribbon runs 3.5 m inside the route's vertex, more than the
+      // verge, and a tree placed from the route stood in the carriageway.
+      // `undefined` only where the drawn road has no direction at all.
+      const frame = drawnRoadFrame(profile, origin, at);
+      if (frame === undefined) {
+        continue;
+      }
 
       found.push({
         item: {
           kind: pickKind(weights, uniform(base, STREAM_KIND)),
-          x: ground.x + normal.x * lateral * side,
+          x: frame.x + frame.normalX * lateral * side,
           // ⚠️ **On the ground, not at the road's height — #458.** It was
           // `elevationAt(at)` until then, which was right while the ground was
           // a flat quad 0.25 m under the road and is wrong on a landform: a
@@ -1036,7 +1036,7 @@ function fillCell(
           // from, column for column. Plan positions are untouched, and
           // `arrangement-unchanged.test.ts`' plan digest is what says so.
           y: terrainHeightAt(profile, origin, seed, at, lateral * side),
-          z: ground.z + normal.z * lateral * side,
+          z: frame.z + frame.normalZ * lateral * side,
           rotation: uniform(base, STREAM_ROTATION) * Math.PI * 2,
           scale:
             SCATTER_SCALE_LOWEST +
@@ -1230,7 +1230,7 @@ function curvatureAt(profile: RouteProfile, origin: CorridorOrigin, at: number):
   // a bound rather than a number.
   //
   // ⚠️ Written as `!(spanned > …)` rather than `spanned <= …` for the reason
-  // `normalAt` gives below, and **that half is a form rather than a guarantee**:
+  // `terrain.ts` §`drawnRoadFrame` gives, and **that half is a form rather than a guarantee**:
   // rewriting it the other way round leaves every test in this repository green,
   // measured rather than assumed. A `RouteProfile`'s positions are validated
   // before it exists, so nothing here can reach a `NaN` chord to assert on — do
@@ -1257,70 +1257,6 @@ function curvatureAt(profile: RouteProfile, origin: CorridorOrigin, at: number):
   // claims — and it stopped being invisible when {@link bandsAt} started
   // deciding how far scenery may stand from a bending road.
   return Math.abs(turn) / CURVATURE_WINDOW_METRES;
-}
-
-/**
- * The unit normal to the road at a point, in the ground plane.
- *
- * Taken from the route's own positions rather than from a stored bearing, the
- * same argument `scene.ts` §`cameraPose` makes: a separately-computed bearing is
- * a second source of truth that drifts, and here it would drift *sideways* and
- * put a tree in the road.
- *
- * ⚠️ **A forward difference with a backward fallback, and not a centred one.**
- * A centred difference is degenerate at an out-and-back's turning point — the
- * grid point before it and the grid point after it are the *same place* — and
- * the only answer left there is an arbitrary compass direction, which is a
- * branch no test could distinguish from its absence. Both of the differences
- * used here are real road directions, and between them exactly one case is left
- * over: **the last grid point of a route that does not loop**, where
- * `distanceOnRoute` clamps the forward sample onto the point itself. That case
- * is reached on every ride that gets to the end, and `scatter.test.ts` asserts
- * it, which is what makes the fallback a tested path rather than a comfort.
- */
-function normalAt(
-  profile: RouteProfile,
-  origin: CorridorOrigin,
-  at: number,
-): { readonly x: number; readonly z: number } {
-  const step: number = profile.resolution;
-  // ⚠️ **Snapped to the grid before the lookups**, which is what `terrain.ts`
-  // §`pointAt` does for the centreline and is worth the line for the same
-  // reason: the samples then land on real profile entries, so the tangent is the
-  // one the ribbon is actually built from rather than one interpolated a metre
-  // to the side of it.
-  const grid = Math.round(at / step) * step;
-  const here = localGroundPosition(origin, positionAt(profile, distanceOnRoute(profile, grid)));
-  const ahead = localGroundPosition(
-    origin,
-    positionAt(profile, distanceOnRoute(profile, grid + step)),
-  );
-
-  let dx = ahead.x - here.x;
-  let dz = ahead.z - here.z;
-  // ⚠️ Written as `!(length > …)` rather than `length <= …` so that a `NaN`
-  // takes this branch too instead of falling through it. **It catches a `NaN`
-  // input and not a degenerate fallback**, and that distinction is not academic:
-  // the backward difference has a length of its own, and on a loop shorter than
-  // two grid steps it is zero as well, so `0 / 0` leaves with the item. Circuits
-  // of 1.25 m to 2.25 m radius did exactly that — twelve `NaN` coordinates at
-  // 2 m — and a `NaN` in a vertex buffer draws a black screen rather than a
-  // visible fault, the argument `scene.ts` §`cameraPose` makes about a
-  // degenerate look-at. What closes it is upstream and absolute rather than a
-  // third difference here: a loop that short reads as tighter than
-  // {@link AMBIGUOUS_TURN_RADIUS_METRES}, so {@link bandsAt} places nothing on
-  // it and this function is never reached. `scatter.test.ts` §"never emits a
-  // coordinate that is not a number" sweeps every radius up to 40 m for it.
-  if (!(Math.hypot(dx, dz) > DEGENERATE_TANGENT_METRES)) {
-    const behind = localGroundPosition(
-      origin,
-      positionAt(profile, distanceOnRoute(profile, grid - step)),
-    );
-    dx = here.x - behind.x;
-    dz = here.z - behind.z;
-  }
-  const length = Math.hypot(dx, dz);
-  return { x: -dz / length, z: dx / length };
 }
 
 /** How much of each cell is filled, where this route runs. */

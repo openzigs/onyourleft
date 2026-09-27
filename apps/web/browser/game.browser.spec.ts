@@ -2238,8 +2238,10 @@ test.describe('the rider rides a line and leans on it — #499', () => {
  * near plane where it ships and half as far, whose difference is exactly what
  * the shipped plane cut away — over the scenery whose reach could bring it to
  * the plane at all, because moving the plane also moves the depth buffer's precision under a
- * far tree's foot, which is not a cut. At 6 : 1 in the realistic world, the one
- * aspect at which the fixture routes are cut at all.
+ * far tree's foot, which is not a cut. At 8 : 1 in the realistic world —
+ * 6 : 1, the widest the stylesheet allows, until #571 stood the scenery beside
+ * the drawn road and nothing on the fixture reached that plane any more
+ * (`game-harness.ts` §`nearFieldProbe` says why).
  */
 test.describe('scenery the camera passes is not cut by the near plane — #545', () => {
   paysForTheRealisticLoad();
