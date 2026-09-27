@@ -153,6 +153,7 @@ import {
   BufferAttribute,
   BufferGeometry,
   Color,
+  type CompressedTexture,
   ConeGeometry,
   CylinderGeometry,
   DirectionalLight,
@@ -182,8 +183,17 @@ import {
   ShaderMaterial,
   ShadowMaterial,
   SphereGeometry,
+  RGB_ETC1_Format,
+  RGB_ETC2_Format,
+  RGBA_ASTC_4x4_Format,
+  RGBA_BPTC_Format,
+  RGBA_ETC2_EAC_Format,
+  RGBA_PVRTC_4BPPV1_Format,
+  RGBA_S3TC_DXT1_Format,
+  RGBA_S3TC_DXT5_Format,
+  RGB_PVRTC_4BPPV1_Format,
+  RGBAFormat,
   SRGBColorSpace,
-  TextureLoader,
   TorusGeometry,
   ShaderChunk,
   UniformsLib,
@@ -209,6 +219,12 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 // D-2: *"three 0.185.1 already ships PMREMGenerator, the HDR loader, GLTFLoader
 // and KTX2Loader"*), so this adds no dependency and `DEP001` is not engaged.
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
+// ⚠️ **#618: the realistic textures are KTX2**, and three 0.185.1 ships this
+// loader too (ADR 0026 D-2, D-8). Its transcoder is Binomial's Apache-2.0 Basis
+// Universal, vendored inside `three`, which `DEP001` cannot see — so it is
+// copied into the build by `tools/basis/transcoder-plugin.ts` and noticed by
+// hand. @see compressedRealisticLoaders
+import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 
@@ -286,6 +302,7 @@ import {
   type RealisticWorldOutcome,
   type StructureSurface,
 } from './realistic-assets';
+import { REALISTIC_TRANSCODER_DIRECTORY } from './transcoder-files';
 import {
   REALISTIC_GROUND_BLOBS,
   REALISTIC_NEAR_MESHES,
@@ -4563,6 +4580,12 @@ export interface RealisticLoaders {
   readonly model: (url: string) => Promise<Object3D>;
   readonly texture: (url: string) => Promise<Texture>;
   readonly sky: (url: string) => Promise<DataTexture>;
+  /**
+   * Releases what the loaders hold once a load has settled — #618: the
+   * `KTX2Loader`'s worker pool, each worker holding a transcoder instance.
+   * {@link loadRealisticWorld} calls it whether the load succeeded or not.
+   */
+  readonly dispose?: () => void;
 }
 
 /**
@@ -4584,15 +4607,282 @@ export function realisticResourceUrl(own: string): (url: string) => string {
       : 'data:application/octet-stream;base64,';
 }
 
-const THREE_LOADERS: RealisticLoaders = {
-  model: async (url) => {
-    const manager = new LoadingManager();
-    manager.setURLModifier(realisticResourceUrl(url));
-    return (await new GLTFLoader(manager).loadAsync(url)).scene;
-  },
-  texture: (url) => new TextureLoader().loadAsync(url),
-  sky: (url) => new HDRLoader().loadAsync(url),
-};
+/* ----------------------------------------------------------------------------
+ * The textures stay compressed on the GPU — #618
+ * ------------------------------------------------------------------------- */
+
+/**
+ * The WebGL extensions a KTX2 texture's GPU format is chosen from — what
+ * `KTX2Loader.detectSupport` reads off a renderer's `extensions`, and nothing
+ * else of it.
+ */
+export interface CompressionExtensions {
+  has(name: string): boolean;
+  get(name: string): unknown;
+}
+
+/**
+ * What this device can sample compressed, read off a throwaway WebGL 2 context
+ * and then released.
+ *
+ * ⚠️ **A probe, because the world is loaded before any view exists** — the
+ * reason {@link realisticWorld} is module state at all — and `KTX2Loader`
+ * must know the GPU's formats before it transcodes a byte. The same GPU draws
+ * the view's context, so it offers the same extensions; `WebGLRenderer`
+ * enables each one on its own context as it uploads the first texture in
+ * that format. No WebGL 2 at all answers "none", and the world then
+ * transcodes to RGBA8 — which no view without a context would draw anyway.
+ */
+function probedCompressionExtensions(): CompressionExtensions {
+  const canvas = typeof document === 'undefined' ? undefined : document.createElement('canvas');
+  const gl = canvas?.getContext('webgl2') ?? null;
+  const offered = new Set(gl?.getSupportedExtensions() ?? []);
+  // `detectSupport` asks the ASTC extension for its profiles, so they are read
+  // now, while the context is alive.
+  const astc =
+    gl !== null && offered.has('WEBGL_compressed_texture_astc')
+      ? (gl.getExtension('WEBGL_compressed_texture_astc') as {
+          getSupportedProfiles(): string[];
+        } | null)
+      : null;
+  const profiles = astc?.getSupportedProfiles() ?? [];
+  (gl?.getExtension('WEBGL_lose_context') as { loseContext(): void } | null)?.loseContext();
+  return {
+    has: (name) => offered.has(name),
+    get: (name) =>
+      name === 'WEBGL_compressed_texture_astc' && offered.has(name)
+        ? { getSupportedProfiles: () => profiles }
+        : null,
+  };
+}
+
+/**
+ * The realistic world's loaders, with every texture kept compressed — #618.
+ *
+ * - A texture is a KTX2 file, and `KTX2Loader` transcodes it — off the main
+ *   thread, in its worker pool — to the best block format `extensions` offers:
+ *   on the owner's tablet, **ETC2** for the Basis ETC1S colour maps and
+ *   **ASTC 4×4** for the UASTC normal maps; with none of them, RGBA8, which
+ *   {@link realisticTextureFormat} labels a fallback rather than letting it
+ *   pass for compressed.
+ * - A model's embedded maps are KTX2 under `KHR_texture_basisu`, which the
+ *   pipeline makes REQUIRED, so `GLTFLoader` is handed the same `KTX2Loader`.
+ * - The sky is unchanged: an HDR, at half-float, for `PMREMGenerator`. A
+ *   compressed sky is its own issue (#615 §"Deliberately not filed").
+ *
+ * ⚠️ **One `KTX2Loader` a load, disposed when the load has settled**: its
+ * workers each hold a transcoder instance, and three warns when two loaders
+ * are alive at once. {@link loadRealisticWorld} calls `dispose`.
+ *
+ * ⚠️ **The transcoder path is always set**, to
+ * {@link REALISTIC_TRANSCODER_DIRECTORY} under the build's base unless a
+ * caller says otherwise: the loader's own default is a URL inside `three`,
+ * which `tools/basis/transcoder-plugin.ts` takes out of the build.
+ *
+ * The product reaches it through {@link THREE_LOADERS}, over the device's own
+ * extensions; `realistic-textures.test.ts` drives it with a device that does
+ * and does not offer ASTC and ETC, and the browser gate's control with none.
+ */
+export function compressedRealisticLoaders(
+  extensions: CompressionExtensions,
+  transcoderPath: string = `${import.meta.env.BASE_URL}${REALISTIC_TRANSCODER_DIRECTORY}`,
+): RealisticLoaders & { readonly dispose: () => void } {
+  const ktx2 = new KTX2Loader()
+    .setTranscoderPath(transcoderPath)
+    // `detectSupport` reads `renderer.extensions` and nothing else of it.
+    .detectSupport({ extensions } as unknown as WebGLRenderer);
+  return {
+    model: async (url) => {
+      const manager = new LoadingManager();
+      manager.setURLModifier(realisticResourceUrl(url));
+      return (await new GLTFLoader(manager).setKTX2Loader(ktx2).loadAsync(url)).scene;
+    },
+    texture: (url) => ktx2.loadAsync(url),
+    sky: (url) => new HDRLoader().loadAsync(url),
+    dispose: () => {
+      ktx2.dispose();
+    },
+  };
+}
+
+/**
+ * The product's loaders: {@link compressedRealisticLoaders} over the device's
+ * own extensions, built when a load first asks and released by its `dispose`,
+ * so a world that is already loaded probes nothing.
+ */
+function productRealisticLoaders(): RealisticLoaders {
+  let built: ReturnType<typeof compressedRealisticLoaders> | undefined;
+  const loaders = (): ReturnType<typeof compressedRealisticLoaders> =>
+    (built ??= compressedRealisticLoaders(probedCompressionExtensions()));
+  return {
+    model: (url) => loaders().model(url),
+    texture: (url) => loaders().texture(url),
+    sky: (url) => loaders().sky(url),
+    dispose: () => {
+      built?.dispose();
+      built = undefined;
+    },
+  };
+}
+
+const THREE_LOADERS: RealisticLoaders = productRealisticLoaders();
+
+/**
+ * What a realistic texture is held as on the GPU — #618. A block format by
+ * name, `RGBA8 (fallback)` for a KTX2 texture the device could not take
+ * compressed, `half-float` for the sky and `image` for a picture three
+ * decoded, which since #618 no realistic texture but the sky is.
+ */
+export type RealisticTextureFormat =
+  | 'ASTC 4x4'
+  | 'ETC2 RGB'
+  | 'ETC2 RGBA'
+  | 'ETC1'
+  | 'BC7'
+  | 'BC1'
+  | 'BC3'
+  | 'PVRTC'
+  | 'RGBA8 (fallback)'
+  | 'half-float'
+  | 'image';
+
+const BLOCK_FORMATS: ReadonlyMap<number, RealisticTextureFormat> = new Map([
+  [RGBA_ASTC_4x4_Format, 'ASTC 4x4'],
+  [RGB_ETC2_Format, 'ETC2 RGB'],
+  [RGBA_ETC2_EAC_Format, 'ETC2 RGBA'],
+  [RGB_ETC1_Format, 'ETC1'],
+  [RGBA_BPTC_Format, 'BC7'],
+  [RGBA_S3TC_DXT1_Format, 'BC1'],
+  [RGBA_S3TC_DXT5_Format, 'BC3'],
+  [RGBA_PVRTC_4BPPV1_Format, 'PVRTC'],
+  [RGB_PVRTC_4BPPV1_Format, 'PVRTC'],
+]);
+
+/** One realistic texture, as the GPU is handed it. */
+interface RealisticTextureReport {
+  readonly role: 'road' | 'ground' | 'structure' | 'model' | 'impostor' | 'sky';
+  readonly format: RealisticTextureFormat;
+  /** Whether the GPU holds it in a block format — never true of a fallback. */
+  readonly compressed: boolean;
+  readonly width: number;
+  readonly height: number;
+  /**
+   * The bytes three hands the GPU for it, every mip level: the transcoded
+   * blocks for a KTX2 texture, the texels for the sky. `NaN` for a decoded
+   * picture, whose size three never sees.
+   */
+  readonly bytes: number;
+}
+
+/**
+ * How one texture is held on the GPU. @see RealisticTextureReport
+ *
+ * @test-facing the browser gate's control labels its RGBA8 texture with it,
+ * and `realistic-textures.test.ts` holds its labels; the product reports
+ * through {@link realisticTextureReport}
+ */
+export function realisticTextureFormat(texture: Texture): {
+  readonly format: RealisticTextureFormat;
+  readonly compressed: boolean;
+  readonly bytes: number;
+} {
+  const compressed = texture as Partial<CompressedTexture>;
+  if (compressed.isCompressedTexture === true) {
+    const bytes = (compressed.mipmaps ?? []).reduce(
+      (sum, level: { data?: ArrayBufferView }) => sum + (level.data?.byteLength ?? 0),
+      0,
+    );
+    const block = BLOCK_FORMATS.get(texture.format);
+    if (block !== undefined) return { format: block, compressed: true, bytes };
+    if (texture.format === RGBAFormat)
+      return { format: 'RGBA8 (fallback)', compressed: false, bytes };
+  }
+  if (texture.type === HalfFloatType) {
+    const image = texture.image as { width: number; height: number };
+    return { format: 'half-float', compressed: false, bytes: image.width * image.height * 8 };
+  }
+  return { format: 'image', compressed: false, bytes: Number.NaN };
+}
+
+/**
+ * Every texture the loaded realistic world holds, once per image, and how the
+ * GPU is handed it — #618. Empty when no world is loaded.
+ *
+ * @test-facing `realistic-textures.test.ts` holds a load to it, and the
+ * browser gate publishes it from the one shared `?realistic` load
+ */
+export function realisticTextureReport(): readonly RealisticTextureReport[] {
+  const world = realisticWorld;
+  if (world === undefined) return [];
+  // ⚠️ By SOURCE, not by texture: `GLTFLoader` gives two materials that share
+  // one image two textures over one `Source` — a fir's live and dead branches
+  // do — and three uploads a source once. The browser gate found it: 52
+  // textures, 48 uploads.
+  const seen = new Set<unknown>();
+  const out: RealisticTextureReport[] = [];
+  const add = (texture: Texture | null | undefined, role: RealisticTextureReport['role']): void => {
+    if (texture === null || texture === undefined || seen.has(texture.source)) return;
+    seen.add(texture.source);
+    const image = texture.image as { width?: number; height?: number } | undefined;
+    out.push({
+      role,
+      ...realisticTextureFormat(texture),
+      width: image?.width ?? 0,
+      height: image?.height ?? 0,
+    });
+  };
+  add(world.sky.texture, 'sky');
+  for (const map of [world.road.colour, world.road.normal]) add(map, 'road');
+  for (const map of [world.ground.colour, world.ground.normal]) add(map, 'ground');
+  for (const maps of world.structures.values()) {
+    add(maps.colour, 'structure');
+    add(maps.normal, 'structure');
+  }
+  for (const shapes of world.vegetation.values()) {
+    for (const shape of shapes) {
+      for (const part of shape.parts) {
+        add(part.material.map, 'model');
+        add(part.material.normalMap, 'model');
+      }
+      add(shape.impostor?.texture, 'impostor');
+    }
+  }
+  return out;
+}
+
+/**
+ * Hands textures to a view's GPU now, rather than on the first frame that
+ * samples them — `WebGLRenderer.initTexture` — so the browser gate can read
+ * back what each upload was: the loaded world's, or `textures` for a control.
+ *
+ * @unwired reached only from the browser gate's harness; the product uploads a
+ * texture on the first frame that draws it, as three does unasked
+ */
+export function uploadRealisticTexturesOf(view: GameView, textures?: readonly Texture[]): number {
+  if (!(view instanceof ThreeGameView)) return 0;
+  const world = realisticWorld;
+  const all =
+    textures ??
+    (world === undefined
+      ? []
+      : [
+          world.road.colour,
+          world.road.normal,
+          world.ground.colour,
+          world.ground.normal,
+          ...[...world.structures.values()].flatMap((maps) => [maps.colour, maps.normal]),
+          ...[...world.vegetation.values()].flatMap((shapes) =>
+            shapes.flatMap((shape) => [
+              ...shape.parts.flatMap((part) => [part.material.map, part.material.normalMap]),
+              shape.impostor?.texture ?? null,
+            ]),
+          ),
+        ].filter((texture): texture is Texture => texture !== null));
+  const unique = [...new Set(all)];
+  for (const texture of unique) view.initTexture(texture);
+  // What was uploaded: one per source. @see realisticTextureReport
+  return new Set(unique.map((texture) => texture.source)).size;
+}
 
 /**
  * Loads the realistic world, all of it or none of it — ADR 0026 D-3, D-7.
@@ -4607,6 +4897,16 @@ const THREE_LOADERS: RealisticLoaders = {
 export async function loadRealisticWorld(
   loaders: RealisticLoaders = THREE_LOADERS,
 ): Promise<RealisticWorldOutcome> {
+  try {
+    return await loadEveryRealisticFile(loaders);
+  } finally {
+    // #618: the transcoder's workers, whether the world loaded or not.
+    loaders.dispose?.();
+  }
+}
+
+/** {@link loadRealisticWorld}, before its loaders are released. */
+async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<RealisticWorldOutcome> {
   // Everything that has been loaded or built so far, so that a failure can
   // release all of it. @see the ⚠️ on settling below
   const loaded: { textures: Texture[]; objects: Object3D[]; shapes: RealisticShape[] } = {
@@ -8444,6 +8744,11 @@ class ThreeGameView implements GameView {
       for (const restore of restores) restore();
     }
     return drawn;
+  }
+
+  /** Uploads one texture to this view's GPU now. @see uploadRealisticTexturesOf */
+  initTexture(texture: Texture): void {
+    this.#renderer?.initTexture(texture);
   }
 
   /** Every mesh in the scene and what it wears — for the harness's D-11 check. @see sceneMaterialsOf */

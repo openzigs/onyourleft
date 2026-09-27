@@ -2,8 +2,14 @@
 
 import { useMemo, type JSX } from 'react';
 
-import { creditsFrom, externalLink, licenceLink, type CreditedWork } from '../credits/credits';
-import { parseAssetManifest } from '../credits/manifest';
+import {
+  COPIED_WORKS,
+  creditsFrom,
+  externalLink,
+  licenceLink,
+  type CreditedWork,
+} from '../credits/credits';
+import { parseAssetManifest, type AssetEntry } from '../credits/manifest';
 import { parseNotices, THIRD_PARTY_NOTICES_URL, type IncludedSoftware } from '../credits/notices';
 import { THIRD_PARTY_CONTENTS_SOURCE } from '../credits/notices-source';
 import { ASSET_MANIFEST_SOURCE } from '../credits/source';
@@ -83,6 +89,12 @@ export interface CreditsViewProps {
    * a named package reaches the screen, and a broken document says so.
    */
   readonly notices?: string;
+  /**
+   * Works the build copies in rather than commits — #618. Defaults to
+   * `credits.ts` §`COPIED_WORKS`; a prop so a fixture manifest can be rendered
+   * with nothing beside it.
+   */
+  readonly copied?: readonly AssetEntry[];
 }
 
 /**
@@ -175,10 +187,14 @@ function SoftwareList({ items }: { readonly items: readonly IncludedSoftware[] }
   );
 }
 
-export function CreditsView({ manifest, notices }: CreditsViewProps): JSX.Element {
+export function CreditsView({
+  manifest,
+  notices,
+  copied = COPIED_WORKS,
+}: CreditsViewProps): JSX.Element {
   const credits = useMemo(
-    () => creditsFrom(parseAssetManifest(manifest ?? ASSET_MANIFEST_SOURCE)),
-    [manifest],
+    () => creditsFrom(parseAssetManifest(manifest ?? ASSET_MANIFEST_SOURCE), copied),
+    [manifest, copied],
   );
   const software = useMemo(() => parseNotices(notices ?? THIRD_PARTY_CONTENTS_SOURCE), [notices]);
 

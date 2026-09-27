@@ -21,6 +21,7 @@ import { build, defineConfig, type Plugin } from 'vite';
 
 import { POSE_DIRECTORY, POSE_WORKER_CHUNK } from './src/camera/pose-files';
 import { copiedIntoBuild } from './tools/notices/copied-into-build';
+import { basisTranscoder } from './tools/basis/transcoder-plugin';
 import { poseRuntime } from './tools/pose/pose-runtime-plugin';
 import { cacheVersion, precacheEntries, type PrecacheFile } from './tools/precache/precache';
 
@@ -179,7 +180,11 @@ export default defineConfig({
   // `tools/precache/precache.ts` §`PRECACHE_EXCLUSIONS`.
   // #664: and a file the build copies out of a package that the third-party
   // notices do not name fails the build — `tools/notices/copied-into-build.ts`.
-  plugins: [react(), poseRuntime(), serviceWorker(), copiedIntoBuild(ROOT)],
+  // #618: the Basis transcoder the realistic world's KTX2 textures need, copied
+  // out of the pinned `three` into `realistic/basis/` — excluded from the
+  // precache by the realistic set's own rule — and `KTX2Loader`'s default
+  // URLs taken out, which would otherwise put it in `assets/` and the precache.
+  plugins: [react(), poseRuntime(), basisTranscoder(), serviceWorker(), copiedIntoBuild(ROOT)],
   worker: {
     rolldownOptions: {
       output: {

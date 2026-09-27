@@ -3011,6 +3011,49 @@ test.describe('the realistic world — ADR 0026', () => {
     expect(measured.texturesCreated).toBeGreaterThan(5);
   });
 
+  test('hands the GPU every realistic texture compressed, and the RGBA8 control is labelled a fallback — #618', async ({
+    harnessRun,
+  }) => {
+    const { textures, firstFrameMs, loadMs } = await realistic(harnessRun);
+    // Non-vacuity: the whole set was read and uploaded — four surface maps,
+    // fourteen structure maps, four impostors and every map in a model.
+    expect(textures.worn.length).toBeGreaterThanOrEqual(40);
+    expect(textures.uploaded).toBe(textures.worn.length);
+    expect(textures.uploads).toHaveLength(textures.uploaded);
+    // Which block formats THIS context gets. ⚠️ SwiftShader offers ASTC and
+    // ETC — measured on 2026-09-27, against #618's own premise that it offers
+    // neither — so on a Mac this reads ASTC and ETC2, the tablet's formats.
+    // On the CI runner `KTX2Loader`'s own Linux rule turns them off, and it
+    // reads BC7: still a GPU block format, and published so.
+    const expected = textures.desktopRule ? ['BC7'] : ['ASTC 4x4', 'ETC2 RGB', 'ETC2 RGBA'];
+    for (const format of textures.uploads) expect(expected, format).toContain(format);
+    for (const texture of textures.worn) expect(expected, JSON.stringify(texture)).toContain(texture.format);
+    // Nothing uploaded uncompressed — the claim.
+    expect(textures.uploads).not.toContain('RGBA8');
+    // ⚠️ THE CONTROL: the same file, through a loader told the device offers
+    // no compressed format, goes up as RGBA8 AND says so. Without it, every
+    // assertion above could be true of labels that said "compressed" whatever
+    // was uploaded.
+    expect(textures.control.uploads).toEqual(['RGBA8']);
+    expect(textures.control.format).toBe('RGBA8 (fallback)');
+    expect(textures.control.compressed).toBe(false);
+    expect(expected).not.toContain(textures.control.uploads[0]);
+    // The sky is #618's one exclusion: half-float, for PMREMGenerator.
+    expect(textures.sky.format).toBe('half-float');
+    const mib = (bytes: number): string => (bytes / 2 ** 20).toFixed(1);
+    const held = textures.worn.reduce((sum, texture) => sum + texture.bytes, 0);
+    const counts = new Map<string, number>();
+    for (const format of textures.uploads) counts.set(format, (counts.get(format) ?? 0) + 1);
+    console.log(
+      `#618: ${String(textures.uploaded)} realistic textures uploaded as ` +
+        `${[...counts].map(([format, count]) => `${String(count)} ${format}`).join(', ')}` +
+        `${textures.desktopRule ? " (KTX2Loader's Linux desktop rule)" : ''}, ${mib(held)} MiB; ` +
+        `the sky ${mib(textures.sky.bytes)} MiB at half-float; the control ${textures.control.format}; ` +
+        `offered ${textures.offered.join(' ')} on ${textures.platform}; ` +
+        `loaded in ${loadMs.toFixed(0)} ms, first realistic frame at ${firstFrameMs.toFixed(0)} ms (SwiftShader)`,
+    );
+  });
+
   test('draws the canopy after the opaque world, and the frame is the same picture — #619 lever 1', async ({
     harnessRun,
   }) => {

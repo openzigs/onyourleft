@@ -114,6 +114,8 @@ Part 2 — in the Android app only (50 libraries)
 
 Part 3 — files copied out of a package into the build
   pose/vision_wasm_module_internal.wasm — from @mediapipe/tasks-vision 1.0.1 (apps/web/tools/pose/pose-runtime-plugin.ts)
+  realistic/basis/basis_transcoder.js — from three 0.185.1 (apps/web/tools/basis/transcoder-plugin.ts); it is Basis Universal transcoder 1.50, vendored there — Apache-2.0 AND BSD-3-Clause
+  realistic/basis/basis_transcoder.wasm — from three 0.185.1 (apps/web/tools/basis/transcoder-plugin.ts); it is Basis Universal transcoder 1.50, vendored there — Apache-2.0 AND BSD-3-Clause
 
 Part 4 — code the build tools write into the app
   vite 8.3.0 — MIT: its module-preload polyfill and its __vitePreload helper, in the entry chunk

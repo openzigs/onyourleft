@@ -114,6 +114,8 @@ Part 2 — in the Android app only (50 libraries)
 
 Part 3 — files copied out of a package into the build
   pose/vision_wasm_module_internal.wasm — from @mediapipe/tasks-vision 1.0.1 (apps/web/tools/pose/pose-runtime-plugin.ts)
+  realistic/basis/basis_transcoder.js — from three 0.185.1 (apps/web/tools/basis/transcoder-plugin.ts); it is Basis Universal transcoder 1.50, vendored there — Apache-2.0 AND BSD-3-Clause
+  realistic/basis/basis_transcoder.wasm — from three 0.185.1 (apps/web/tools/basis/transcoder-plugin.ts); it is Basis Universal transcoder 1.50, vendored there — Apache-2.0 AND BSD-3-Clause
 
 Part 4 — code the build tools write into the app
   vite 8.3.0 — MIT: its module-preload polyfill and its __vitePreload helper, in the entry chunk
@@ -2106,6 +2108,64 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+========================================================================
+Name: Basis Universal transcoder
+Version: 1.50
+Licence: Apache-2.0 AND BSD-3-Clause
+Part: copied
+
+--- What the build carries ---
+
+basis_transcoder.js and basis_transcoder.wasm, in realistic/basis/: the transcoder of Basis Universal v1.50, by Binomial LLC, as three 0.185.1 vendors it under examples/jsm/libs/basis/ (three.js took v1.50 in mrdoob/three.js#29418, its last change to these files). The realistic world's KTX2 textures are transcoded by it, on the device, to the GPU's own block formats. The WebAssembly has Zstandard's decoder compiled in, under BSD-3-Clause, which is how it reads a UASTC texture's Zstandard supercompression. Upstream v1.50 carries no NOTICE file (one was added in February 2026, after this version), so Apache-2.0 section 4(d) asks for none; the copy of the licence section 4(a) asks for is the appendix. three's own licence field says MIT and cannot say any of this, which is why it is written here.
+
+--- from https://github.com/BinomialLLC/basis_universal/blob/051ad6d8a64bb95a79e8601c317055fd1782ad3e/.reuse/dep5, read 2026-09-27 ---
+
+Files: *
+Copyright: 2019-2024 Binomial LLC
+           2016 The Android Open Source Project
+License: Apache-2.0
+
+Files: zstd/*
+Copyright: 2016-present Facebook, Inc.
+License: BSD-3-Clause
+
+--- from https://github.com/BinomialLLC/basis_universal/blob/051ad6d8a64bb95a79e8601c317055fd1782ad3e/zstd/LICENSE, read 2026-09-27 ---
+
+BSD License
+
+For Zstandard software
+
+Copyright (c) 2016-present, Facebook, Inc. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+ * Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+ * Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+ * Neither the name Facebook nor the names of its contributors may be used to
+   endorse or promote products derived from this software without specific
+   prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+--- Apache-2.0 ---
+
+The full text of Apache-2.0 is reproduced once, at the end of this document.
 
 ========================================================================
 Name: vite

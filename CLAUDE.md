@@ -110,6 +110,19 @@ apps/                 AGPL-3.0-or-later, without exception
                         camera's pose model, Apache-2.0, excluded from the
                         precache by that directory too, with its runtime and
                         worker emitted beside it by `tools/pose/`. ⚠️ Since
+                        #618 every realistic texture there but the sky is
+                        KTX2 (Basis Universal) — no JPEG or PNG is left
+    tools/basis/        the Basis Universal transcoder the realistic world's
+                        KTX2 textures need, copied out of the pinned `three`
+                        into `dist/realistic/basis/` — under the realistic
+                        set's precache exclusion — never committed and never
+                        from a CDN (#618); and the rewrite that takes
+                        `KTX2Loader`'s own default URLs out of the build, which
+                        would otherwise put a second copy in `assets/` and so
+                        in the precache. ⚠️ Its licence is Apache-2.0 with a
+                        BSD-3-Clause decoder inside, vendored in the MIT
+                        `three` where `DEP001` cannot see it: the credits
+                        screen and the third-party notices name it. ⚠️ Since
                         #597 it also holds `licences/Apache-2.0.txt` — a byte
                         copy of `LICENSES/Apache-2.0.txt`, which the credits
                         screen links from every Apache-2.0 credit (the map's
@@ -782,7 +795,14 @@ apps/                 AGPL-3.0-or-later, without exception
                         the realistic world (ADR 0026, #425, #474, #369) — its
                         asset table, its D-6 budget (re-set from validation
                         0002 Part Z's soak by #475; every figure stood), and
-                        the arithmetic that makes its sky and sun one sky. The
+                        the arithmetic that makes its sky and sun one sky.
+                        ⚠️ **Since #618 its textures stay compressed on the
+                        GPU** (ADR 0026 D-8's 2026-09-27 amendment): KTX2,
+                        transcoded by three's `KTX2Loader` to ETC2 and ASTC on
+                        the tablet, and the budget's texture estimate prices
+                        them so — 59.3 MiB where RGBA8 was 136, the sky 40 of
+                        it. A reviewer who remembers "every texture decoded to
+                        RGBA8" is reading the old file. The
                         renderer half is in `three-renderer.ts` (D-10).
                         ⚠️ **Since #475 a rider CAN choose it**, and a reviewer
                         who remembers "NOT OFFERED to a rider" is reading the
@@ -1560,6 +1580,10 @@ pnpm --filter @onyourleft/web run icons:generate
 # on 2026-09-22. `--records` prints the ASSETS.toml entries the pipeline's own
 # table produces. `realistic:stage` copies the owner's harness page into a built
 # `dist` for a LOCAL debug APK (validation 0002 Part Z) — never a release.
+# ⚠️ Since #618 it also needs KTX-Software's `ktx` at v4.4.2 exactly (KTX
+# names it; the default is `ktx` on the PATH), a second pinned TOOL that makes
+# every KTX2 texture, byte-stable, so `--check` still compares byte for byte.
+# `apps/web/tools/realistic/sources.ts` §`PINNED_KTX` says how it was installed.
 pnpm --filter @onyourleft/web run realistic:fetch
 pnpm --filter @onyourleft/web run realistic:process --check
 pnpm --filter @onyourleft/web run realistic:stage
@@ -4243,6 +4267,10 @@ top of an issue **supersedes its body**.
 | Why the Blender scripts run on one thread, and what an unordered set did to a shrub | `apps/web/tools/realistic/blender/process_tree.py` §"ONE thread" and §"An ordered de-duplication" |
 | Why the realistic canopy is drawn after the opaque world, why the second realistic rung reads its photographs a mip coarser, and how the owner's page switches either off | `apps/web/src/game/three-renderer.ts` §`FOLIAGE_RENDER_ORDER`, §`REALISTIC_TEXTURE_LOD_BIAS`, `apps/web/src/game/quality.ts` §`QualitySettings.textureLodBias`, `apps/web/browser/realistic/config.ts` §`LEVERS`, [#619](https://github.com/openzigs/onyourleft/issues/619) |
 | What the realistic world may cost, what the soak re-set it from, and why nothing moved | `apps/web/src/game/realistic-budget.ts`, validation 0002 Part Z |
+| Why the realistic textures are KTX2, what a device is handed, and what labels a fallback as one | `apps/web/src/game/three-renderer.ts` §`compressedRealisticLoaders`, §`realisticTextureFormat`, `apps/web/src/game/realistic-textures.test.ts`, [ADR 0026](docs/adr/0026-realistic-game-world.md) §Amendments 2026-09-27, [#618](https://github.com/openzigs/onyourleft/issues/618) |
+| How a KTX2 texture is made again byte for byte, which KTX-Software is pinned, and why a picture is flipped before it is encoded | `apps/web/tools/realistic/sources.ts` §`PINNED_KTX`, §`ktxCreateArguments`, §`TextureOrigin`, `apps/web/tools/realistic/encode-ktx2.ts` |
+| Where the Basis transcoder comes from, why it is not precached, and whose licence it is | `apps/web/tools/basis/transcoder-plugin.ts`, `apps/web/src/credits/credits.ts` §`COPIED_WORKS`, `apps/web/third-party-notices.json` §`copiedIntoBuild` |
+| Why the texture estimate prices ETC2 RGB at half a byte a texel and the sky at eight | `apps/web/src/game/realistic-budget.ts` §`DEVICE_BYTES_PER_TEXEL`, §`REALISTIC_TEXTURE_MEMORY_BYTES` |
 | Why the realistic trees have a middle level, why the near and middle counts are for both kinds together, and why the triangles it freed are not spent yet | `apps/web/src/game/realistic-budget.ts` §`REALISTIC_TREE_LEVELS`, `apps/web/src/game/tree-levels.ts`, [#617](https://github.com/openzigs/onyourleft/issues/617) |
 | How a tree hands over between levels without a pop, and what the browser gate measures of it | `apps/web/src/game/three-renderer.ts` §`withTreeDither`, `apps/web/browser/game-harness.ts` §`treeLevelProbe` |
 | Why a realistic frame carries 36 structures where the stylised one carries 240, and what the frame's triangle sum used to leave out | `apps/web/src/game/realistic-budget.ts` §`REALISTIC_STRUCTURE_ITEMS`, `realistic-budget.test.ts` §"structures included", validation 0002 Part AE, [#506](https://github.com/openzigs/onyourleft/issues/506) |

@@ -437,11 +437,51 @@ export const REALISTIC_FRAME_TRIANGLES = 300_000;
  * half-float. A driver may pad, compress or evict; nothing in a browser reports
  * what it actually did. {@link estimatedTextureBytes} is the arithmetic.
  *
+ * ## ⚠️ Since #618 the estimate assumes the TABLET'S COMPRESSED FORMATS
+ *
+ * Every realistic texture but the sky is KTX2 since #618 (ADR 0026 D-8's
+ * 2026-09-27 amendment), and the estimate prices each as the owner's Pixel
+ * Tablet is handed it — {@link DEVICE_BYTES_PER_TEXEL}: a Basis ETC1S colour
+ * map as **ETC2 RGB, half a byte a texel**, one with alpha as **ETC2 RGBA, a
+ * byte**, and a UASTC normal map as **ASTC 4×4, a byte**; the HDR sky still at
+ * half-float, eight bytes, with its prefiltered environment. A reviewer who
+ * remembers every texture at four bytes — RGBA8, which three decoded every
+ * JPEG and PNG to — is reading the old file: that estimate was **136 MiB** for
+ * the same set and `realistic-budget.test.ts` still computes it, as the
+ * "before" the compressed one is held under. A device with neither ASTC nor
+ * ETC (a desktop, say) is handed BC7, a byte a texel, or at worst RGBA8; this
+ * figure is the tablet's, because the tablet is the device the budget is for.
+ *
+ * The 160 MiB ceiling itself did not move: #618 lowers what the set asks for,
+ * and the ceiling on what it may ask for is a D-6 decision this change does
+ * not take.
+ *
  * @test-facing held by `realistic-budget.test.ts`, which reads every committed
  * realistic file back off disk against it; the renderer spends it only on the
  * realistic path, which a ride takes only for a rider who chose it (#475)
  */
 export const REALISTIC_TEXTURE_MEMORY_BYTES = 160 * MEBIBYTE;
+
+/**
+ * What the owner's tablet is handed per texel, by Basis Universal encoding —
+ * #618: what three's `KTX2Loader` transcodes each to where the device offers
+ * both ASTC and ETC, which the Pixel Tablet's Mali-G710 does.
+ *
+ * - `etc1s` — ETC1S colour, transcoded to **ETC2 RGB**: 8 bytes a 4×4 block;
+ * - `etc1s-alpha` — ETC1S with alpha, to **ETC2 RGBA** (EAC alpha): 16 bytes a block;
+ * - `uastc` — UASTC, to **ASTC 4×4**: 16 bytes a block. (`KTX2Loader` sends
+ *   ETC1S to ETC2 rather than ASTC where it has both, by its own priority
+ *   table: ETC2 is half the memory and ETC1S is ETC1 underneath.)
+ *
+ * @test-facing held by `realistic-budget.test.ts`, which prices every
+ * committed KTX2 file with it, and by `realistic-textures.test.ts`' reading of
+ * what the real loader hands a device that offers ASTC and ETC
+ */
+export const DEVICE_BYTES_PER_TEXEL = {
+  etc1s: 0.5,
+  'etc1s-alpha': 1,
+  uastc: 1,
+} as const;
 
 /**
  * The most bytes the realistic set may add to the build — and so to the APK,
@@ -450,6 +490,11 @@ export const REALISTIC_TEXTURE_MEMORY_BYTES = 160 * MEBIBYTE;
  * Nobody measured what an APK this size costs a rider to install; the figure is
  * a ceiling on growth rather than a target, and the pull request that lands the
  * set states the number it actually adds.
+ *
+ * ⚠️ **Since #618 it counts the transcoder too** — `basis_transcoder.js` and
+ * `.wasm`, 584 862 bytes, copied into `dist/realistic/basis/` out of `three` by
+ * `tools/basis/transcoder-plugin.ts` — because they are in the build only for
+ * the realistic world. `realistic-budget.test.ts` adds them.
  *
  * @test-facing held by `realistic-budget.test.ts`, which reads every committed
  * realistic file back off disk against it; the renderer spends it only on the
@@ -467,7 +512,10 @@ export const REALISTIC_BUILD_BYTES = 40 * MEBIBYTE;
 export interface TextureShape {
   readonly width: number;
   readonly height: number;
-  /** 4 for 8-bit RGBA; 8 for half-float RGBA, which is what three makes of an HDR. */
+  /**
+   * 8 for half-float RGBA, which is what three makes of an HDR; 4 for 8-bit
+   * RGBA; since #618 a compressed format's own, {@link DEVICE_BYTES_PER_TEXEL}.
+   */
   readonly bytesPerTexel: number;
   readonly mipmapped: boolean;
 }

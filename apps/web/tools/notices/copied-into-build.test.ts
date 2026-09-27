@@ -11,9 +11,18 @@ import {
   unnoticedCopies,
   type BuiltAsset,
 } from './copied-into-build';
+import { REALISTIC_TRANSCODER_DIRECTORY } from '../../src/game/transcoder-files';
+import { TRANSCODER_FILES } from '../basis/transcoder-plugin';
 
 const WEB_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const POSE_RUNTIME = `${POSE_DIRECTORY}${POSE_RUNTIME_WASM_FILE}`;
+/** What `tools/basis/transcoder-plugin.ts` emits — #618: a plugin's `emitFile`, so no original file. */
+const TRANSCODER = Object.fromEntries(
+  TRANSCODER_FILES.map((name) => {
+    const fileName = `${REALISTIC_TRANSCODER_DIRECTORY}${name}`;
+    return [fileName, { type: 'asset' as const, fileName, originalFileNames: [] as string[] }];
+  }),
+);
 
 function asset(fileName: string, ...originalFileNames: string[]): BuiltAsset {
   return { fileName, originalFileNames };
@@ -95,19 +104,35 @@ describe('a file the build copies out of a package is named in the notices — #
     );
   }
 
-  it('lets the real build through: the committed list names the pose runtime', () => {
+  it('lets the real build through: the committed list names the pose runtime and — #618 — the transcoder', () => {
     expect(() => {
       runPlugin({
         [POSE_RUNTIME]: { type: 'asset', fileName: POSE_RUNTIME, originalFileNames: [] },
+        ...TRANSCODER,
         'assets/index-abc.js': { type: 'chunk', fileName: 'assets/index-abc.js' },
       });
     }).not.toThrow();
+  });
+
+  it('fails the build when the transcoder’s .wasm is not written — #618', () => {
+    // Its `.js` is code and is not this rule's; its `.wasm` is, and the list
+    // names both, so a build that stopped writing it is a stale entry.
+    const withoutWasm = Object.fromEntries(
+      Object.entries(TRANSCODER).filter(([name]) => !name.endsWith('.wasm')),
+    );
+    expect(() => {
+      runPlugin({
+        [POSE_RUNTIME]: { type: 'asset', fileName: POSE_RUNTIME, originalFileNames: [] },
+        ...withoutWasm,
+      });
+    }).toThrow(/realistic\/basis\/basis_transcoder\.wasm is in .* and the build did not write it/);
   });
 
   it('fails the build over a package’s binary the committed list does not name', () => {
     expect(() => {
       runPlugin({
         [POSE_RUNTIME]: { type: 'asset', fileName: POSE_RUNTIME, originalFileNames: [] },
+        ...TRANSCODER,
         'assets/basis_transcoder-abc.wasm': {
           type: 'asset',
           fileName: 'assets/basis_transcoder-abc.wasm',
@@ -119,7 +144,7 @@ describe('a file the build copies out of a package is named in the notices — #
 
   it('fails the build when a named file is no longer written', () => {
     expect(() => {
-      runPlugin({});
+      runPlugin({ ...TRANSCODER });
     }).toThrow(/pose\/vision_wasm_module_internal\.wasm is in .* and the build did not write it/);
   });
 });

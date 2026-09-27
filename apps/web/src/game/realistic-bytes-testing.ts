@@ -8,7 +8,8 @@
  * triangles a shipped tree has and how large its maps are, and asking the
  * renderer would be checking an implementation against itself. So this reads
  * the files from the published formats — glTF 2.0's container, JPEG's frame
- * header, PNG's `IHDR`, Radiance's resolution string — and nothing else, and
+ * header, PNG's `IHDR`, Radiance's resolution string and, since #618, KTX
+ * 2.0's header and data format descriptor — and nothing else, and
  * refuses what it has not been taught rather than guessing.
  *
  * ⚠️ `-testing.ts`, so `check-wiring.mjs` §`isTestSupport` treats it as what it
@@ -66,8 +67,74 @@ export function hdrSize(bytes: Uint8Array): ImageSize {
   return { height: Number(matched[1]), width: Number(matched[2]) };
 }
 
-/** A picture's size, whichever of the two formats a GLB may embed. */
+/** The twelve bytes a KTX 2.0 file opens with — `«KTX 20»\r\n\x1A\n`. */
+const KTX2_IDENTIFIER = [0xab, 0x4b, 0x54, 0x58, 0x20, 0x32, 0x30, 0xbb, 0x0d, 0x0a, 0x1a, 0x0a];
+
+/** What the budget reads from a KTX2 file — #618. */
+export interface Ktx2Facts extends ImageSize {
+  /** Mip levels stored, the base included. */
+  readonly levels: number;
+  /** Which Basis Universal encoding: ETC1S, or UASTC. */
+  readonly scheme: 'etc1s' | 'uastc';
+  /** Whether it carries alpha. */
+  readonly alpha: boolean;
+  /** Its transfer function, from the data format descriptor. */
+  readonly transfer: 'srgb' | 'linear';
+}
+
+/**
+ * Reads a KTX 2.0 file's header and data format descriptor — the Khronos KTX
+ * 2.0 specification §3 and the Khronos Data Format Specification 1.3 §5, the
+ * Basis Universal colour models 163 (ETC1S) and 166 (UASTC). Refuses anything
+ * that is not a Basis Universal texture, because that is all this set holds.
+ */
+export function ktx2Facts(bytes: Uint8Array): Ktx2Facts {
+  if (!KTX2_IDENTIFIER.every((byte, index) => bytes[index] === byte)) throw new Error('not a KTX2');
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (view.getUint32(12, true) !== 0) throw new Error('KTX2: not a Basis Universal texture');
+  const dfd = view.getUint32(48, true);
+  const model = view.getUint8(dfd + 12);
+  const transfer = view.getUint8(dfd + 14);
+  const blockSize = view.getUint16(dfd + 10, true);
+  const samples = (blockSize - 24) / 16;
+  const channels: number[] = [];
+  for (let sample = 0; sample < samples; sample += 1) {
+    channels.push(view.getUint8(dfd + 4 + 24 + sample * 16 + 3) & 0x0f);
+  }
+  let scheme: Ktx2Facts['scheme'];
+  let alpha: boolean;
+  if (model === 163) {
+    scheme = 'etc1s';
+    // ETC1S: an AAA slice (channel 15) beside the RGB one.
+    alpha = channels.includes(15);
+  } else if (model === 166) {
+    scheme = 'uastc';
+    // UASTC: RGBA (3) or RRRG (5).
+    alpha = channels.includes(3) || channels.includes(5);
+  } else {
+    throw new Error(`KTX2: colour model ${String(model)} is not Basis Universal`);
+  }
+  return {
+    width: view.getUint32(20, true),
+    height: view.getUint32(24, true),
+    levels: view.getUint32(40, true),
+    scheme,
+    alpha,
+    transfer: transfer === 2 ? 'srgb' : 'linear',
+  };
+}
+
+/** Whether these bytes are a KTX2 file. */
+export function isKtx2(bytes: Uint8Array): boolean {
+  return KTX2_IDENTIFIER.every((byte, index) => bytes[index] === byte);
+}
+
+/** A picture's size, whichever format a GLB may embed — JPEG, PNG or, since #618, KTX2. */
 export function imageSize(bytes: Uint8Array): ImageSize {
+  if (isKtx2(bytes)) {
+    const facts = ktx2Facts(bytes);
+    return { width: facts.width, height: facts.height };
+  }
   return bytes[0] === 0x89 ? pngSize(bytes) : jpegSize(bytes);
 }
 
@@ -77,6 +144,8 @@ export interface ModelFacts {
   readonly triangles: number;
   /** Every embedded image's size. */
   readonly images: readonly ImageSize[];
+  /** Every embedded image that is KTX2, read — #618. */
+  readonly ktx2: readonly Ktx2Facts[];
   /** Whether it carries a skin — the rider does and nothing else should. */
   readonly skinned: boolean;
   /** The first node's extras, where the pipeline records what the runtime needs. */
@@ -116,15 +185,16 @@ export function modelFacts(path: string): ModelFacts {
       triangles += (json.accessors?.[counted ?? -1]?.count ?? 0) / 3;
     }
   }
-  const images = (json.images ?? []).map((image) => {
+  const embedded = (json.images ?? []).map((image) => {
     const view = json.bufferViews?.[image.bufferView ?? -1];
     if (view === undefined) throw new Error(`${path}: an image is not embedded`);
     const start = view.byteOffset ?? 0;
-    return imageSize(file.binary.subarray(start, start + view.byteLength));
+    return file.binary.subarray(start, start + view.byteLength);
   });
   return {
     triangles,
-    images,
+    images: embedded.map(imageSize),
+    ktx2: embedded.filter(isKtx2).map(ktx2Facts),
     skinned: (json.skins ?? []).length > 0,
     extras: json.nodes?.find((node) => node.extras !== undefined)?.extras ?? {},
   };
@@ -134,4 +204,9 @@ export function modelFacts(path: string): ModelFacts {
 export function fileImageSize(path: string): ImageSize {
   const bytes = new Uint8Array(readFileSync(path));
   return path.endsWith('.hdr') ? hdrSize(bytes) : imageSize(bytes);
+}
+
+/** A standalone KTX2 file, read. @see ktx2Facts */
+export function fileKtx2Facts(path: string): Ktx2Facts {
+  return ktx2Facts(new Uint8Array(readFileSync(path)));
 }

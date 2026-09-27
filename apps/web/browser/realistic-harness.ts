@@ -146,6 +146,12 @@ declare global {
     __oylRealisticEarly?: EarlyRecord;
     __oylRealistic?: {
       readonly ready: boolean;
+      /**
+       * #618: milliseconds from the page opening to its first drawn realistic
+       * frame — `performance.now()` then — for validation 0002 Part AH's #618
+       * rows, whose ceiling is +500 ms. Absent until that frame.
+       */
+      readonly firstFrameMs?: number;
       readonly errors: readonly string[];
       /** What the first script saw of Capacitor's bridge, and what the shell sent it. @see EarlyRecord */
       readonly bridge: Omit<EarlyRecord, 'errors' | 'report'> | undefined;
@@ -335,7 +341,10 @@ async function run(): Promise<void> {
     // view's one `render` it holds exactly this frame's.
     lastFrameRendererTriangles = layerSwitch.renderer()?.info.render.triangles;
     framesInWindow += 1;
-    if (!published.ready) publish({ ready: true });
+    if (!published.ready) {
+      publish({ ready: true, firstFrameMs: performance.now() });
+      console.log(`OYL-REALISTIC-FIRST-FRAME ${performance.now().toFixed(0)}`);
+    }
     if (!measured && clock.windowFull(config.seconds)) {
       measured = true;
       windowFrom = elapsed;

@@ -565,6 +565,11 @@ export function renderNotices(root) {
 
   const names = new Set(union.map((dependency) => dependency.name));
   const copied = [];
+  // #618: a copied file that is somebody ELSE'S work, vendored inside the
+  // package it is copied out of — Binomial's Apache-2.0 transcoder inside the
+  // MIT `three` — carries its own notice, rendered once per work however many
+  // of its files are copied. Its package's own licence field cannot say it.
+  const vendoredEntries = new Map();
   for (const file of web.copiedIntoBuild ?? []) {
     const source = union.find((dependency) => dependency.name === file.package);
     if (source === undefined) {
@@ -580,7 +585,55 @@ export function renderNotices(root) {
       );
       continue;
     }
-    copied.push(`  ${file.path} — from ${source.name} ${source.version} (${file.by})`);
+    const vendored = file.vendored;
+    if (vendored === undefined) {
+      copied.push(`  ${file.path} — from ${source.name} ${source.version} (${file.by})`);
+      continue;
+    }
+    const key = `${vendored.name}@${vendored.version}`;
+    copied.push(
+      `  ${file.path} — from ${source.name} ${source.version} (${file.by}); ` +
+        `it is ${vendored.name} ${vendored.version}, vendored there — ${vendored.licence}`,
+    );
+    if (vendoredEntries.has(key)) continue;
+    const sections = [{ heading: 'What the build carries', text: vendored.what }];
+    for (const upstream of vendored.upstream ?? []) {
+      sections.push({
+        heading: `from ${upstream.url}, read ${upstream.read}`,
+        text: normalised(upstream.text),
+      });
+    }
+    if (vendored.licenceText !== undefined) {
+      if (licenceText(root, vendored.licenceText) === undefined) {
+        problems.push(
+          `NOT005 ${file.path} is ${key}, which asks for the text of ${vendored.licenceText}, ` +
+            'which this generator does not hold.',
+        );
+        continue;
+      }
+      appendices.add(vendored.licenceText);
+      sections.push({
+        heading: vendored.licenceText,
+        text: `The full text of ${vendored.licenceText} is reproduced once, at the end of this document.`,
+      });
+    }
+    if (sections.length === 1) {
+      problems.push(
+        `NOT005 ${file.path} is ${key}, vendored in ${source.name}, and its entry in ${WEB_INPUTS} ` +
+          'supplies no licence text for it.',
+      );
+      continue;
+    }
+    vendoredEntries.set(
+      key,
+      entry({
+        name: vendored.name,
+        version: vendored.version,
+        licence: vendored.licence,
+        part: 'copied',
+        sections,
+      }),
+    );
   }
 
   const nativeEntries = [];
@@ -690,6 +743,7 @@ export function renderNotices(root) {
     contents,
     '',
     ...entries,
+    ...vendoredEntries.values(),
     ...bundlerEntries,
     ...nativeEntries,
     ...appendixText,

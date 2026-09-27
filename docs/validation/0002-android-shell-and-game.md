@@ -3210,6 +3210,8 @@ published figures (its run predates `oyl.txt`).
 | #619 | lever 2 after | | — ; `rung=1` | | | | | | | | |
 | #620 | before (no blobs) | | `-grounding` | | | | | | | | |
 | #620 | after | | — | | | | | | | | |
+| #618 | before (RGBA8) | the commit before #618's merge | — | | | | | | | | |
+| #618 | after (KTX2) | #618's merge | — | | | | | | | | |
 
 **Phone (OEM, model, Android, WebView):** Google Pixel Tablet, build `CP2A.260705.006`, Android 17,
 WebView 153.0.8010.36  **Build:** debug, `main` at **`f91a5fb`** (before #617's tree LODs, PR #637)
@@ -3305,4 +3307,45 @@ with the ladder held (`ladder=0`) unless the row says `rung=1`.
 - **Levers 3, 4 and 5 have no rows**: 3 and 4 were recorded as not worth it from arithmetic on
   `main` (#619's pull request gives the numbers), and 5 — the top rung's render scale — waits for
   the owner's ruling.
+
+
+### #618's rows — the textures compressed on the GPU
+
+[#618](https://github.com/openzigs/onyourleft/issues/618) makes every realistic texture but the sky
+KTX2, transcoded on the device to ASTC or ETC2 (ADR 0026 D-8's 2026-09-27 amendment). Its rows are
+two AH runs, **before** on the commit before #618's merge and **after** on the merge, each cooled to
+AH3's band, all layers on. `dumpsys meminfo` at minute 10 is already what the sampler takes; the
+column to read is **`GL mtrack`**, which Part Z8 put at 310 MiB with RGBA8 textures and which should
+fall. The estimate it is set against is `realistic-budget.ts`': **136.0 MiB before, 59.3 MiB
+after**, of which the sky and its prefiltered environment are 40.0 MiB in both, so a fall of about
+77 MiB is what the textures alone account for. What else `GL mtrack` holds — the 2560 × 1600
+render targets, the vertex buffers — does not change with #618, so the difference between the two
+rows is the textures.
+
+⚠️ **Confirm the formats on the tablet before the after run.** The browser gate reads the upload
+formats in a desktop Chromium, not on a Mali GPU. With the app open on the realistic page, this
+must list both `WEBGL_compressed_texture_astc` and `WEBGL_compressed_texture_etc`; if it does not,
+the after row is of RGBA8 textures and says nothing about #618:
+
+```bash
+node apps/mobile/tools/webview-probe.mjs \
+  "document.createElement('canvas').getContext('webgl2').getSupportedExtensions().filter((e) => /compress/.test(e)).join(' ')"
+```
+
+**The expected direction is `GL mtrack` and the GPU DVFS mean down**, and nothing else moving:
+triangles and draw calls are unchanged by construction. If the GPU clock does **not** fall, that is a
+finding for [#619](https://github.com/openzigs/onyourleft/issues/619), written here and not argued
+away. Also record the **time to the first realistic frame** from the page opening, which #618's
+ceiling puts at no more than 500 ms later than before: since #618 the page logs it as
+`OYL-REALISTIC-FIRST-FRAME <ms>` (and publishes `firstFrameMs`), so it is in `oyl.txt` with AH6's
+grep. ⚠️ The *before* build predates that line; read it there from the first `OYL-REALISTIC-SOAK`
+line's timestamp against the page opening, or take the before row on a checkout with the one-line
+change applied. For reference, the browser gate measured it in SwiftShader
+at a median of 2 041 ms before and 2 499 ms after (+458 ms, ten and eleven runs, noisy by a second
+either way), where SwiftShader decodes ETC2 and ASTC in software, which a Mali GPU does not.
+
+| #618 | first realistic frame, ms | `GL mtrack` at minute 10, MiB | the tablet offers ASTC and ETC |
+|---|---|---|---|
+| before | | | |
+| after | | | |
 
