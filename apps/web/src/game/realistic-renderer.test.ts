@@ -29,7 +29,15 @@ import {
   REALISTIC_TREE_LEVELS,
 } from './realistic-budget';
 import { bandFade, treeSlots, type TreeLevels } from './tree-levels';
-import { FOLIAGE_TINT, MASONRY_TINT, NO_TINT, packedInstanceTint } from './instance-tint';
+import {
+  FOLIAGE_TINT,
+  MASONRY_TINT,
+  NO_TINT,
+  TINT_CODEC_RANGE,
+  TINT_CODEC_STEPS,
+  TINT_CODEC_ZERO,
+  packedInstanceTint,
+} from './instance-tint';
 import {
   CAMERA_BEHIND_METRES,
   FRUSTUM_SPREAD,
@@ -1776,5 +1784,57 @@ describe('every realistic tree, shrub, rock and building wears a seeded tint —
     expect(() => new RealisticVegetationBelt(new Map([['tree-conifer', [shape]]]))).toThrow(
       /two ways/,
     );
+  });
+
+  // #621's review: the shader's decode was held by nothing but the browser
+  // gate's floors, so the hue scale written in degrees where the shader turns
+  // radians passed every test. These are the codec's own ranges, read back out
+  // of the program three is handed.
+  it('decodes the tint in the shader with the codec’s own ranges, the hue in radians', () => {
+    const shrub = prepareRealisticShape(aScene([{ material: loaderMaterial() }]), 'shrub');
+    new RealisticVegetationBelt(new Map([['shrub', [shrub]]]));
+    const { vertex } = compiledBoth(shrub.parts[0]?.material);
+    const decode = /vec3 oylTintOf\(float stored\) \{([\s\S]*?)\n {2}\}/.exec(vertex)?.[1] ?? '';
+    const zero = /stored \+ ([-\d.]+);/.exec(decode);
+    expect(Number(zero?.[1])).toBe(TINT_CODEC_ZERO);
+    const steps = TINT_CODEC_STEPS.toFixed(1);
+    expect(decode).toContain(`(vec3(hue, saturation, brightness) - ${steps})`);
+    const scale = /\/ ([-\d.]+)\s*\* vec3\(\s*([-\d.]+),\s*([-\d.]+),\s*([-\d.]+)\s*\)/.exec(
+      decode,
+    );
+    expect(scale, decode).not.toBeNull();
+    expect(Number(scale?.[1])).toBe(TINT_CODEC_STEPS);
+    expect(Number(scale?.[2])).toBeCloseTo((TINT_CODEC_RANGE.hueDegrees * Math.PI) / 180, 7);
+    expect(Number(scale?.[3])).toBeCloseTo(TINT_CODEC_RANGE.saturation, 7);
+    expect(Number(scale?.[4])).toBeCloseTo(TINT_CODEC_RANGE.brightness, 7);
+  });
+
+  it('throws, naming #621, where three’s program no longer holds an include the tint is spliced at', () => {
+    const shrub = prepareRealisticShape(aScene([{ material: loaderMaterial() }]), 'shrub');
+    new RealisticVegetationBelt(new Map([['shrub', [shrub]]]));
+    const compile = shrub.parts[0]?.material as unknown as {
+      onBeforeCompile: (shader: unknown, renderer: unknown) => void;
+    };
+    const vertex = '#include <common>\n#include <begin_vertex>\n#include <color_vertex>';
+    const fragment = '#include <common>\n#include <map_fragment>\n#include <color_fragment>';
+    const cases = [
+      ['vertex', '#include <common>'],
+      ['vertex', '#include <color_vertex>'],
+      ['fragment', '#include <common>'],
+      ['fragment', '#include <color_fragment>'],
+    ] as const;
+    for (const [stage, include] of cases) {
+      const shader = {
+        uniforms: {},
+        vertexShader: stage === 'vertex' ? vertex.replace(include, '') : vertex,
+        fragmentShader: stage === 'fragment' ? fragment.replace(include, '') : fragment,
+      };
+      expect(() => compile.onBeforeCompile(shader, undefined), `${stage} ${include}`).toThrow(
+        `three's ${stage} shader no longer holds ${include}, where #621's seeded tint is spliced in`,
+      );
+    }
+    // And with all four present it compiles.
+    const whole = { uniforms: {}, vertexShader: vertex, fragmentShader: fragment };
+    expect(() => compile.onBeforeCompile(whole, undefined)).not.toThrow();
   });
 });

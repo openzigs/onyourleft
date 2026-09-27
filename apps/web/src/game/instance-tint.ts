@@ -28,8 +28,14 @@
  * the brightness scaled. `three-renderer.ts` §`TINT_GLSL` is the shader's copy;
  * {@link tintedLinear} is this file's, for the tests. Every step is linear in
  * the colour, so a lit mesh (tinted before its light) and an impostor (tinted
- * after the light it was baked with) are shifted alike, and a tree does not
- * change colour at a hand-over.
+ * after the light it was baked with) are shifted NEARLY alike under the
+ * scene's near-white light, and a tree does not visibly change colour at a
+ * hand-over. Not exactly: the brightness scale commutes with any light, but
+ * the hue turn and the saturation scale commute with a GREY light only, and
+ * the HDRI and the sun are warm; and the mesh's specular is untinted where the
+ * impostor, which tints its baked light whole, tints that too. Both residues
+ * are small beside the tint itself on matte foliage under a light this close
+ * to white, which is what "nearly" rests on — #621's review.
  *
  * ## How it travels
  *

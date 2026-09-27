@@ -3063,6 +3063,11 @@ function tintChannels(mesh: InstancedMesh): void {
  * **every frame**, which is precisely the per-frame-allocation shape #240's
  * NFR-3 forbids. Doubling makes the number of strandings logarithmic in the
  * count instead of linear in the frame number.
+ *
+ * ⚠️ **A tinted belt strands a colour buffer as well (#621)**: its caller then
+ * runs {@link tintChannels}, which replaces `instanceColor` with one as long as
+ * the grown matrices, so each growth strands one of each. The doubling bounds
+ * both alike, since the colour buffer is only ever replaced when this grew.
  */
 function reserve(mesh: InstancedMesh, needed: number): void {
   const held = mesh.instanceMatrix.count;
@@ -4920,7 +4925,9 @@ export function readsInstanceTint(material: Material): boolean {
  *
  * ⚠️ **Throws if three's chunk no longer holds the tint line**, rather than
  * compiling a tree tinted by its keep interval — a three bump that reworded the
- * chunk is a red test, not a tree drawn in a false colour. And throws if a
+ * chunk is a red test, not a tree drawn in a false colour. Likewise, at
+ * compile, if the program no longer holds any of the four includes the tint is
+ * spliced in at ({@link replacedOrThrown}). And throws if a
  * material is taught twice with and without the dither, which would be one
  * shape drawn by two belts that disagree about it.
  *
@@ -4941,27 +4948,35 @@ function withInstanceChannels<M extends Material>(material: M, dither: boolean):
   const keep = dither ? 'varying vec2 vOylKeep;\n' : '';
   material.onBeforeCompile = (shader, renderer) => {
     earlier(shader, renderer);
-    shader.vertexShader = shader.vertexShader
-      .replace(
-        '#include <common>',
-        `#include <common>\n${keep}varying vec3 vOylTint;\n${TINT_DECODE_GLSL}`,
-      )
-      .replace(
-        '#include <color_vertex>',
-        `${dither ? 'vOylKeep = vec2(0.0);\n' : ''}vOylTint = vec3(0.0);\n${ShaderChunk.color_vertex.replace(
-          INSTANCE_TINT,
-          `${dither ? 'vOylKeep = instanceColor.xy;\n' : ''}vOylTint = oylTintOf(instanceColor.z);`,
-        )}`,
-      );
-    shader.fragmentShader = shader.fragmentShader
-      .replace(
-        '#include <common>',
-        `#include <common>\n${keep}varying vec3 vOylTint;\n${TINT_APPLY_GLSL}`,
-      )
-      .replace(
-        '#include <color_fragment>',
-        '#include <color_fragment>\ndiffuseColor.rgb = oylTinted(diffuseColor.rgb, vOylTint);',
-      );
+    let vertex = replacedOrThrown(
+      shader.vertexShader,
+      '#include <common>',
+      `#include <common>\n${keep}varying vec3 vOylTint;\n${TINT_DECODE_GLSL}`,
+      'vertex',
+    );
+    vertex = replacedOrThrown(
+      vertex,
+      '#include <color_vertex>',
+      `${dither ? 'vOylKeep = vec2(0.0);\n' : ''}vOylTint = vec3(0.0);\n${ShaderChunk.color_vertex.replace(
+        INSTANCE_TINT,
+        `${dither ? 'vOylKeep = instanceColor.xy;\n' : ''}vOylTint = oylTintOf(instanceColor.z);`,
+      )}`,
+      'vertex',
+    );
+    shader.vertexShader = vertex;
+    let fragment = replacedOrThrown(
+      shader.fragmentShader,
+      '#include <common>',
+      `#include <common>\n${keep}varying vec3 vOylTint;\n${TINT_APPLY_GLSL}`,
+      'fragment',
+    );
+    fragment = replacedOrThrown(
+      fragment,
+      '#include <color_fragment>',
+      '#include <color_fragment>\ndiffuseColor.rgb = oylTinted(diffuseColor.rgb, vOylTint);',
+      'fragment',
+    );
+    shader.fragmentShader = fragment;
     if (dither) {
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <clipping_planes_fragment>',
@@ -4972,6 +4987,28 @@ function withInstanceChannels<M extends Material>(material: M, dither: boolean):
   material.customProgramCacheKey = () =>
     `${earlierKey}|${dither ? 'oyl-tree-dither' : 'oyl-instance-tint'}`;
   return material;
+}
+
+/**
+ * `source` with `include` replaced — or a throw naming #621, where three's
+ * program no longer holds that include. A `replace` that finds nothing returns
+ * its input unchanged, so without this a three bump that moved `<common>` or
+ * `<color_fragment>` would compile a program that declares the tint and never
+ * applies it — or applies a function it never declared — and the first sign
+ * would be a colour, not an error. @see withInstanceChannels
+ */
+function replacedOrThrown(
+  source: string,
+  include: string,
+  replacement: string,
+  stage: 'vertex' | 'fragment',
+): string {
+  if (!source.includes(include)) {
+    throw new Error(
+      `three's ${stage} shader no longer holds ${include}, where #621's seeded tint is spliced in`,
+    );
+  }
+  return source.replace(include, replacement);
 }
 
 /** A tree's material: its seeded tint and its hand-over dither. @see withInstanceChannels */
@@ -6705,7 +6742,11 @@ function structureMaterials(
   // boundary's does not). @see projectedInMetres
   // #619 lever 2: a photographed surface reads the rung's bias; painted and
   // glass sample no texture and are left as they were.
-  // #621: and every one reads its structure's seeded tint.
+  // #621: and every one reads its structure's seeded tint — GLASS INCLUDED, and
+  // deliberately: #621 tints the structure INSTANCE, so a window shifts with
+  // its own walls rather than being the one thing on a house that every house
+  // shares; masonry's bound is small enough that glass stays glass, and the
+  // browser gate's window-glass assertions are unchanged by it.
   const biased = <M extends Material>(material: M): M =>
     withInstanceChannels(maps === undefined ? material : withTextureLodBias(material), false);
   return {

@@ -38,6 +38,7 @@ import type {
   TreeLevelMeasurement,
 } from './game-harness';
 import { MINIMUM_TINT_CONTRAST_RATIO } from '../src/game/terrain';
+import { type InstanceTint, NO_TINT, tintedLinear } from '../src/game/instance-tint';
 import {
   PRESENCE_CHECK_MILLISECONDS,
   PRESENCE_GRID_COLUMNS,
@@ -597,10 +598,73 @@ function paysForTheRealisticLoad(query = '?realistic'): void {
 const TINT_CONTROL_MAXIMUM = 0.02;
 const TINT_PRODUCT_MINIMUM = 0.04;
 /**
+ * How far an instance's shift may miss what `instance-tint.ts` §`tintedLinear`
+ * predicts from its own untinted reading, as a share of the shift predicted —
+ * the ceiling #621's review found missing. @see shiftMissedBy
+ *
+ * The prediction leaves out the tone mapping, and AgX draws every shift at
+ * about three quarters of its size here: on the pinned Chromium on 2026-09-27
+ * the trees missed by 0.27 and 0.28 and the houses by 0.18 and 0.26, so the
+ * product clears this by 0.12. A tint never applied misses by exactly 1, and
+ * each of these, measured on the same build, went red here and nowhere else in
+ * this case (every floor stayed green): the hue scale written in degrees where
+ * the shader turns radians — the review's mutation — 0.69 at the least; the
+ * brightness scale at ten times, 5.2 at the least; the decode's sign flipped,
+ * 1.71; the brightness alone flipped, 1.66. The prediction is made in linear
+ * light from the sRGB bytes of the untinted reading, which is not the space
+ * the tint is applied in (before the light and AgX) — hence a tolerance
+ * derived from the measurement rather than from the bounds.
+ */
+const TINT_SHIFT_TOLERANCE = 0.4;
+/**
  * The fewest pixels a tree in #621's probe may cover and still be a tree: the
  * middle-level broadleaf 20 m ahead covered 313 and 321 on the pinned Chromium.
  */
 const TINT_TREE_MINIMUM_PIXELS = 150;
+
+/** An sRGB byte as linear light. */
+function linearOfByte(byte: number): number {
+  const value = byte / 255;
+  return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+}
+
+/** Linear light as an sRGB byte. */
+function byteOfLinear(value: number): number {
+  const clamped = Math.max(0, Math.min(1, value));
+  return 255 * (clamped <= 0.0031308 ? 12.92 * clamped : 1.055 * clamped ** (1 / 2.4) - 0.055);
+}
+
+/**
+ * What an instance read back untinted as `control` should read tinted by
+ * `tint`, by `instance-tint.ts` §`tintedLinear` — #621's review.
+ */
+function tintPredicted(control: readonly number[], tint: InstanceTint): number[] {
+  const [r, g, b] = control.map(linearOfByte);
+  return tintedLinear([r ?? 0, g ?? 0, b ?? 0], tint).map(byteOfLinear);
+}
+
+/**
+ * How far an instance's tint missed its prediction, as a share of the shift
+ * predicted: `|read − predicted| / |predicted − control|` over the three
+ * channels, each a vector from the instance's own untinted reading. Nought is
+ * the prediction exactly; ONE is a tint never applied at all.
+ */
+function shiftMissedBy(
+  reading: readonly number[],
+  predicted: readonly number[],
+  control: readonly number[],
+): number {
+  let miss = 0;
+  let shift = 0;
+  for (const channel of [0, 1, 2]) {
+    const base = control[channel] ?? 0;
+    const read = (reading[channel] ?? 0) - base;
+    const wanted = (predicted[channel] ?? 0) - base;
+    miss += (read - wanted) ** 2;
+    shift += wanted ** 2;
+  }
+  return Math.sqrt(miss) / Math.max(1e-6, Math.sqrt(shift));
+}
 
 /** #617's trees' own load — #644. @see TreeLevelMeasurement */
 const TREES_QUERY = '?realistic&trees';
@@ -2479,6 +2543,24 @@ test.describe('the realistic world — ADR 0026', () => {
         `against ${(100 * apart(tint.housesControl)).toFixed(1)} %; tints ` +
         JSON.stringify([...tint.treeTints, ...tint.houseTints]),
     );
+    // The ceiling (#621's review): each instance's shift from its OWN untinted
+    // reading, predicted by `instance-tint.ts` §`tintedLinear` — the arithmetic
+    // the bounds are tested on — and the shader's shift held to it.
+    const missOf = (
+      readings: readonly (readonly number[])[],
+      controls: readonly (readonly number[])[],
+      tints: readonly InstanceTint[],
+    ): number[] =>
+      readings.map((reading, at) => {
+        const control = controls[at] ?? [];
+        return shiftMissedBy(reading, tintPredicted(control, tints[at] ?? NO_TINT), control);
+      });
+    const treeMisses = missOf(tint.trees, tint.treesControl, tint.treeTints);
+    const houseMisses = missOf(tint.houses, tint.housesControl, tint.houseTints);
+    console.log(
+      `#621: each shift against tintedLinear's — trees missed by ${treeMisses.map((m) => m.toFixed(2)).join(', ')}, ` +
+        `houses by ${houseMisses.map((m) => m.toFixed(2)).join(', ')}`,
+    );
     // Non-vacuity: both trees were drawn, and big enough for a mean to mean something.
     for (const pixels of tint.treePixels) expect(pixels).toBeGreaterThan(TINT_TREE_MINIMUM_PIXELS);
     // THE CONTROL: with every bound at nothing, the two of each pair read back
@@ -2489,6 +2571,14 @@ test.describe('the realistic world — ADR 0026', () => {
     // The product: the same pairs, told apart.
     expect(apart(tint.trees)).toBeGreaterThan(TINT_PRODUCT_MINIMUM);
     expect(apart(tint.houses)).toBeGreaterThan(TINT_PRODUCT_MINIMUM);
+    // THE CEILING: each instance shifted as its tint predicts. A floor alone
+    // passed the shader with its hue turned in radians where it meant degrees
+    // — the trees 34.8 % apart and the houses mauve.
+    expect(treeMisses).toHaveLength(2);
+    expect(houseMisses).toHaveLength(2);
+    for (const miss of [...treeMisses, ...houseMisses]) {
+      expect(miss).toBeLessThan(TINT_SHIFT_TOLERANCE);
+    }
   });
 
   test('compiles every shader it draws with, in both worlds — #501', async ({ harnessRun }) => {
