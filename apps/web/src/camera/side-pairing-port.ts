@@ -72,6 +72,12 @@ export type SidePairingEnd =
   | 'names-only'
   /** The device that connected did not send this pairing's secret first (D-4). */
   | 'not-our-phone'
+  /**
+   * The connection opened and the phone was pinged, and nothing it sent
+   * arrived: no secret, and nothing else (#568). Not a stranger — that is
+   * `not-our-phone` — and not the network, which carried the pings.
+   */
+  | 'unanswered'
   /** The other end sent something D-3 does not list (D-4). */
   | 'broken'
   /** The offer was not answered in time (D-4's bound). */

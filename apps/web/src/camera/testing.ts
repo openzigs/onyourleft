@@ -461,6 +461,17 @@ export interface SidePeerNetworkOptions {
    * it. Default `false`.
    */
   readonly losesSendsInDataChannelEvent?: boolean | undefined;
+  /**
+   * Whether every channel handed to the ANSWERING end is left saying
+   * `connecting` straight after its `ondatachannel`, while the other end's
+   * messages still reach it — #568's second mode, and Blink's: it forces a
+   * handed-over channel `open` without asking the engine, and an
+   * observer registered a task later can post the engine's older
+   * `connecting` behind its `open`. `send` then refuses, as Blink's does on
+   * a channel that is not open. {@link sidePeerNetwork}'s `reopen` stands for
+   * the engine's next state change putting it right. Default `false`.
+   */
+  readonly strandsHandedChannels?: boolean | undefined;
 }
 
 /** A scripted peer, with what a test needs to see of it. */
@@ -513,19 +524,31 @@ export function sidePeerNetwork(options: SidePeerNetworkOptions = {}): {
   restore(): void;
   /** Every peer's connection fails, as ICE's own consent checks would end it. */
   fail(): void;
+  /** Every stranded channel says `open` again and fires its `open`, as Blink does on the change. */
+  reopen(): void;
 } {
   const peers: FakeSidePeer[] = [];
   const network = {
     dropped: false,
     maxMessageSize: options.maxMessageSize ?? 262_144,
     losesSendsInDataChannelEvent: options.losesSendsInDataChannelEvent ?? false,
+    strandsHandedChannels: options.strandsHandedChannels ?? false,
     connects: options.connects ?? true,
     gathers: options.gathers ?? true,
     addresses: options.addresses ?? ((index: number) => [`192.168.1.${String(10 + index)}`]),
     tryConnect(): void {
       for (const offerer of peers) {
         for (const answerer of peers) {
-          if (offerer === answerer || offerer.twin !== undefined || answerer.twin !== undefined) {
+          if (
+            offerer === answerer ||
+            offerer.twin !== undefined ||
+            answerer.twin !== undefined ||
+            offerer.closed ||
+            answerer.closed
+          ) {
+            // A peer that has been closed connects to nothing — which is what
+            // a phone that left before the tablet read its answer is (#568:
+            // before this, the tablet's `control` opened to nobody).
             continue;
           }
           if (
@@ -570,6 +593,17 @@ export function sidePeerNetwork(options: SidePeerNetworkOptions = {}): {
         }
       }
     },
+    reopen: () => {
+      for (const peer of peers) {
+        for (const channel of peer.channels) {
+          if (channel.stranded && channel.readyState === 'connecting') {
+            channel.stranded = false;
+            channel.readyState = 'open';
+            channel.onopen?.();
+          }
+        }
+      }
+    },
   };
 }
 
@@ -584,6 +618,7 @@ interface FakeNetwork {
   readonly dropped: boolean;
   readonly maxMessageSize: number;
   readonly losesSendsInDataChannelEvent: boolean;
+  readonly strandsHandedChannels: boolean;
   readonly gathers: boolean;
   readonly addresses: (index: number) => readonly string[];
   tryConnect(): void;
@@ -613,6 +648,10 @@ function connect(offerer: FakeSidePeer, answerer: FakeSidePeer): void {
     twin.handedOver = offerer.network.losesSendsInDataChannelEvent;
     answerer.ondatachannel?.({ channel: twin });
     twin.handedOver = false;
+    if (offerer.network.strandsHandedChannels) {
+      twin.stranded = true;
+      twin.readyState = 'connecting';
+    }
     channel.readyState = 'open';
     channel.onopen?.();
   }
@@ -630,6 +669,8 @@ class FakeSideChannel implements ScriptedSideChannel {
   twin: FakeSideChannel | undefined;
   /** Inside the answerer's `ondatachannel`, where a send may be lost (#568). */
   handedOver = false;
+  /** Says `connecting` and still hears the other end — #568's second mode. */
+  stranded = false;
   onopen: (() => void) | null = null;
   onclose: (() => void) | null = null;
   onmessage: ((event: { readonly data: unknown }) => void) | null = null;
@@ -668,7 +709,7 @@ class FakeSideChannel implements ScriptedSideChannel {
       return;
     }
     queueMicrotask(() => {
-      if (twin.readyState === 'open' && !this.network.dropped) {
+      if (twin.hears() && !this.network.dropped) {
         twin.onmessage?.({ data: delivered });
       }
     });
@@ -676,10 +717,15 @@ class FakeSideChannel implements ScriptedSideChannel {
 
   deliver(data: unknown): void {
     queueMicrotask(() => {
-      if (this.readyState === 'open') {
+      if (this.hears()) {
         this.onmessage?.({ data });
       }
     });
+  }
+
+  /** Whether a message sent to this end reaches its `onmessage`. */
+  hears(): boolean {
+    return this.readyState === 'open' || (this.stranded && this.readyState === 'connecting');
   }
 
   /**

@@ -167,6 +167,120 @@ describe('pairing, through both codes', () => {
     expect(tablet.control.sideControlState().phone).toBe('framing');
   });
 
+  it('keeps its secret while its channel says it cannot answer, and pairs once it can — #568', async () => {
+    // Blink hands the phone its channel `open` without asking the engine, and
+    // can then leave it saying `connecting` while the tablet's pings still
+    // arrive. A secret sent then is dropped before it leaves the page, and
+    // the phone's next message would end a genuine pairing as not-our-phone.
+    const context = setUp({ strandsHandedChannels: true });
+    const tablet = await offer(context.port);
+    const phone = await answer(context.port, tablet.offerCode);
+    await tablet.acceptSidePhoneCode(phone.answerCode);
+    await flushSideLink();
+    const phoneControl = context.network.peers[1]?.channels.find(
+      (channel) => channel.label === CONTROL_CHANNEL,
+    );
+    expect(phoneControl?.readyState).toBe('connecting');
+    expect(phoneControl?.sent).toEqual([]);
+    expect(phone.link.sideLinkCondition()).toBe('connecting');
+    // The engine puts the channel right; the next ping is answered.
+    context.network.reopen();
+    await context.pass(HEARTBEAT_MILLISECONDS);
+    expect(JSON.parse(phoneControl?.sent[0] ?? '{}')).toMatchObject({ t: 'hello' });
+    expect(phone.link.sideLinkCondition()).toBe('connected');
+    phone.link.reportToTablet({ state: 'framing' });
+    await flushSideLink();
+    expect(tablet.control.sideControlState()).toMatchObject({ phone: 'framing', ended: undefined });
+    // And well past the bound, nothing ends it: the channel can answer now.
+    await context.pass(CONNECT_LIMIT_MILLISECONDS);
+    expect(tablet.control.sideControlState().ended).toBeUndefined();
+    expect(phone.link.sideLinkCondition()).toBe('connected');
+    // A bound that ran out on a channel that had come right is not spent:
+    // stranded again, the phone still lets go.
+    Object.assign(phoneControl ?? {}, { stranded: true, readyState: 'connecting' });
+    await context.pass(HEARTBEAT_MILLISECONDS + SILENCE_IS_LOST_MILLISECONDS);
+    expect(phone.link.sideLinkCondition()).toBe('ended');
+  });
+
+  it('does not sit unproved when the phone’s channel never comes right — CI run 36252687970, reproduced (#568)', async () => {
+    // The state CI saw ten seconds after the phone connected:
+    // `{"phone":"pairing","answered":true}`, nothing ended, nothing from the
+    // phone ever arriving while the tablet's pings did. With the phone's
+    // channel stranded and never put right, both ends now end within the
+    // silence bound, and the tablet says why in words that do not blame the
+    // network.
+    const context = setUp({ strandsHandedChannels: true });
+    const tablet = await offer(context.port);
+    const phone = await answer(context.port, tablet.offerCode);
+    await tablet.acceptSidePhoneCode(phone.answerCode);
+    await flushSideLink();
+    const phoneControl = context.network.peers[1]?.channels.find(
+      (channel) => channel.label === CONTROL_CHANNEL,
+    );
+    await context.pass(SILENCE_IS_LOST_MILLISECONDS);
+    expect(tablet.control.sideControlState()).toMatchObject({
+      phone: 'pairing',
+      answered: true,
+      ended: 'unanswered',
+    });
+    expect(phone.link.sideLinkCondition()).toBe('ended');
+    // It spent nothing, and it never called itself connected.
+    expect(phoneControl?.sent).toEqual([]);
+    expect(context.network.peers.every((peer) => peer.closed)).toBe(true);
+  });
+
+  it('ends a pairing whose phone never answers three seconds after control opened, and says so — #568', async () => {
+    // #568's second mode, from the tablet's side: pings going out, nothing
+    // coming back. It used to wait out the connect limit and then say the
+    // devices could not reach each other — which they had.
+    const context = setUp();
+    const tablet = await offer(context.port);
+    const phone = await answer(context.port, tablet.offerCode);
+    // Nothing crosses once connected: the phone hears no ping, so answers
+    // nothing, and its own limit is the connect limit, far past this.
+    context.network.drop();
+    await tablet.acceptSidePhoneCode(phone.answerCode);
+    await flushSideLink();
+    await context.pass(SILENCE_IS_LOST_MILLISECONDS - 250);
+    expect(tablet.control.sideControlState().ended).toBeUndefined();
+    await context.pass(250);
+    expect(tablet.control.sideControlState().ended).toBe('unanswered');
+    expect(SIDE_PAIRING_END_TEXT.unanswered).toMatch(/Pair again/);
+    expect(SIDE_PAIRING_END_TEXT.unanswered).not.toMatch(/Wi-Fi/);
+    expect(context.network.peers[0]?.closed).toBe(true);
+  });
+
+  it('calls a pairing that opened and then closed before proof unanswered, not a network with no path — #568', async () => {
+    const context = setUp();
+    const tablet = await offer(context.port);
+    const phone = await answer(context.port, tablet.offerCode);
+    context.network.drop();
+    await tablet.acceptSidePhoneCode(phone.answerCode);
+    await flushSideLink();
+    // The phone goes, before it has said anything: the channel closes.
+    phone.link.endSideLink();
+    await flushSideLink();
+    expect(tablet.control.sideControlState().ended).toBe('unanswered');
+  });
+
+  it('ends the phone’s end of a link whose channel hears the tablet and cannot answer — #568', async () => {
+    // Proved, then left saying `connecting`: every report and heartbeat is
+    // dropped before it leaves the page, and the tablet's pings still arrive,
+    // so the phone would otherwise call itself connected for ever while the
+    // tablet shows it lost — and never start D-5's 30 seconds.
+    const { network, tablet, phone, pass } = await paired();
+    const phoneControl = network.peers[1]?.channels.find(
+      (channel) => channel.label === CONTROL_CHANNEL,
+    );
+    Object.assign(phoneControl ?? {}, { stranded: true, readyState: 'connecting' });
+    await pass(HEARTBEAT_MILLISECONDS);
+    expect(phone.link.sideLinkCondition()).toBe('connected');
+    await pass(SILENCE_IS_LOST_MILLISECONDS);
+    expect(phone.link.sideLinkCondition()).toBe('ended');
+    await flushSideLink();
+    expect(tablet.control.sideControlState().ended).toBe('link-lost');
+  });
+
   it('says nothing until the tablet has spoken, and answers its repeated opening ping', async () => {
     const context = setUp();
     const tablet = await offer(context.port);
@@ -329,6 +443,27 @@ describe('pairing, through both codes', () => {
     const phone = await answer(context.port, tablet.offerCode);
     context.time.advance(CONNECT_LIMIT_MILLISECONDS);
     expect(phone.link.sideLinkCondition()).toBe('ended');
+  });
+
+  it('ends an answered pairing whose answer is never applied — the bound starts at the answer, not after it (#568)', async () => {
+    // The offer's own expiry stops once an answer is accepted, so the connect
+    // limit is the only bound left; it used to be set only once the engine
+    // had applied the answer, and an engine that never settled left the
+    // tablet `answered`, unproved and never ended.
+    const context = setUp();
+    const tablet = await offer(context.port);
+    const phone = await answer(context.port, tablet.offerCode);
+    Object.assign(context.network.peers[0] ?? {}, {
+      setRemoteDescription: async () => new Promise<void>(() => undefined),
+    });
+    void tablet.acceptSidePhoneCode(phone.answerCode);
+    await flushSideLink();
+    expect(tablet.control.sideControlState()).toMatchObject({ answered: true, ended: undefined });
+    context.time.advance(CONNECT_LIMIT_MILLISECONDS - 1);
+    expect(tablet.control.sideControlState().ended).toBeUndefined();
+    context.time.advance(1);
+    expect(tablet.control.sideControlState().ended).toBe('no-path');
+    expect(context.network.peers[0]?.closed).toBe(true);
   });
 
   it('says there is no path when the devices cannot reach each other', async () => {
