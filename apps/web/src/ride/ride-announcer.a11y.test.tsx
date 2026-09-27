@@ -26,6 +26,7 @@ import {
   seconds,
   thresholdShare,
   type WorkoutBlock,
+  watts,
   type WorkoutRescue,
 } from '@onyourleft/domain';
 
@@ -34,6 +35,7 @@ import { RideView } from '../views/RideView';
 import { WorkoutPanel } from './WorkoutPanel';
 
 import type { RideSnapshot, RideWorkoutSnapshot, TrainerSnapshot } from './controller';
+import type { ManualErgRescue } from './manual-erg';
 import { ridingSnapshot, stubRideController } from './testing';
 
 const blocks: readonly WorkoutBlock[] = [
@@ -58,6 +60,7 @@ afterEach(() => {
   mounted?.unmount();
   mounted = undefined;
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 const region = (): string =>
@@ -337,6 +340,139 @@ describe('a workout’s eased target is said when it appears and when its reason
 
   it('is not announced again on a screen that appears with the target already eased', async () => {
     const stub = stubRideController({ ...ridingSnapshot(), workout: workout({ rescue: STALLED }) });
+    mounted = await mount(<RideView controller={stub.controller} />);
+    await settle();
+
+    expect(region()).toBe('');
+    expect(document.body.textContent).toContain('Pedalling has stopped');
+  });
+});
+
+describe('a hand-set ERG target that is eased is said, as the workout’s is — #598', () => {
+  /**
+   * ⚠️ **Keyed on the REASON, not on the whole sentence**, which is #598's
+   * own wording. The panel's sentence also names a target the rider set
+   * during the rescue; only what the MACHINE is doing, and why, is said again.
+   */
+  const STALLED: ManualErgRescue = {
+    target: watts(200),
+    holding: 'floor',
+    reason: 'Pedalling has stopped, so the target has been dropped to the trainer’s lowest.',
+    pending: undefined,
+  };
+  const SILENT: ManualErgRescue = { ...STALLED, reason: CADENCE_SILENT_REASON };
+  const RECOVERING: ManualErgRescue = {
+    ...STALLED,
+    holding: 'relief',
+    reason: RECOVERING_REASON,
+  };
+
+  async function manualRide(): Promise<ReturnType<typeof stubRideController>> {
+    const stub = stubRideController({ ...ridingSnapshot(), workout: undefined });
+    mounted = await mount(<RideView controller={stub.controller} />);
+    await settle();
+    return stub;
+  }
+
+  it('says the stall through the one region, in the words the panel shows', async () => {
+    const stub = await manualRide();
+    expect(region()).toBe('');
+
+    await change(stub, { trainer: trainerWith({ ergRescue: STALLED }) });
+
+    expect(region()).toMatch(/^Eased: Pedalling has stopped/);
+    expect(region()).toContain('Your 200 W comes back by itself');
+    expect(region()).toContain('Press End ERG to leave it off.');
+    expect(
+      voices().filter((each) => (each.textContent ?? '').includes('Pedalling has stopped')),
+      'said by more than one region',
+    ).toHaveLength(1);
+    const shown = [...document.querySelectorAll('.oyl-status')].find((each) =>
+      (each.textContent ?? '').includes('Pedalling has stopped'),
+    );
+    expect(shown?.textContent, 'the panel and the region say different things').toContain(
+      region().slice('Eased: '.length),
+    );
+  });
+
+  /** The Ride screen's panel under a clock the test holds, as #585's cases do. */
+  function panelAt(clock: () => number) {
+    return (trainer: TrainerSnapshot) => (
+      <WorkoutPanel
+        trainer={trainer}
+        workout={undefined}
+        onStart={() => undefined}
+        onEnd={() => undefined}
+        announcerClock={clock}
+      />
+    );
+  }
+
+  it('says it again when the reason changes, and nothing when it clears', async () => {
+    let now = 100;
+    const panel = panelAt(() => now);
+    mounted = await mount(panel(trainerWith({})));
+    await mounted.rerender(panel(trainerWith({ ergRescue: STALLED })));
+    expect(region()).toMatch(/^Eased: Pedalling has stopped/);
+
+    now = 110;
+    await mounted.rerender(panel(trainerWith({ ergRescue: SILENT })));
+    expect(region()).toMatch(/^Eased: No cadence is being reported/);
+
+    now = 120;
+    await mounted.rerender(panel(trainerWith({ ergRescue: RECOVERING })));
+    expect(region()).toMatch(/^Eased: Cadence is recovering/);
+
+    now = 130;
+    await mounted.rerender(panel(trainerWith({ ergRescue: undefined })));
+    // Clearing is felt, not said: the region keeps its last sentence.
+    expect(region()).toMatch(/^Eased: Cadence is recovering/);
+  });
+
+  it('is not said again when only the rider’s pending target changes', async () => {
+    let now = 100;
+    const panel = panelAt(() => now);
+    mounted = await mount(panel(trainerWith({})));
+    await mounted.rerender(panel(trainerWith({ ergRescue: STALLED })));
+    expect(region()).toContain('Your 200 W comes back by itself');
+
+    now = 110;
+    await mounted.rerender(panel(trainerWith({ ergRescue: { ...STALLED, pending: watts(180) } })));
+    // Not the rescue said again for the rider's own *Set* — which is, today,
+    // said by nothing at all (see `RideAnnouncer.tsx` §`Seen.manualReason`).
+    expect(region()).toContain('Your 200 W comes back by itself');
+  });
+
+  it('does not say a rescue that cleared while its sentence was waiting', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let now = 100;
+    const panel = panelAt(() => now);
+    const refused = 'The trainer did not acknowledge the stop.';
+    mounted = await mount(panel(trainerWith({})));
+    // Something said at 100, so the window is shut when the rescue arrives.
+    await mounted.rerender(panel(trainerWith({ releaseFault: refused })));
+    expect(region()).toMatch(/^Not released:/);
+
+    now = 101;
+    await mounted.rerender(panel(trainerWith({ releaseFault: refused, ergRescue: STALLED })));
+    now = 102;
+    await mounted.rerender(panel(trainerWith({ releaseFault: refused })));
+
+    // The window opens, and the timer that was waiting for it fires.
+    now = 110;
+    await act(async () => {
+      vi.runAllTimers();
+      await Promise.resolve();
+    });
+    expect(region()).toMatch(/^Not released:/);
+  });
+
+  it('is not announced again on a screen that appears with the target already eased', async () => {
+    const stub = stubRideController({
+      ...ridingSnapshot(),
+      workout: undefined,
+      trainer: trainerWith({ ergRescue: STALLED }),
+    });
     mounted = await mount(<RideView controller={stub.controller} />);
     await settle();
 

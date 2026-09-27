@@ -25,6 +25,7 @@
  * | `TrainerSnapshot.releaseFault`, likewise | `trainer-lost` | "Not released: …" |
  * | `RideWorkoutSnapshot.fault`, likewise | `workout-fault` | "Heads up: …" |
  * | `RideWorkoutSnapshot.rescue`, when it appears or its reason changes (#585) | `workout-fault` | "Eased: …", the words `WorkoutPanel` shows |
+ * | `TrainerSnapshot.ergRescue`, when it appears or its reason changes (#598) | `workout-fault` | "Eased: …", the words `TrainerPanel` shows |
  * | `RideWorkoutSnapshot.nowRiding`, when it changes | `interval-now` | "Now: …" (#394) |
  * | the next block, `lead` seconds before it | `interval-ahead` | #398's sentence |
  * | the side camera's link, when it goes (#551) | `side-camera-lost` | `side-camera.ts` §`SIDE_CAMERA_LOST_SENTENCE` |
@@ -77,7 +78,7 @@ import {
 import type { RideWorkoutSnapshot, TrainerSnapshot } from './controller';
 import { upcomingBlock } from './lookahead';
 import { sideCameraLost, sideCameraLostEvent } from './side-camera';
-import { LOSS_REASON } from './TrainerPanel';
+import { LOSS_REASON, rescueSentence } from './TrainerPanel';
 
 /** The wall clock, in seconds. */
 const wallSeconds = (): number => performance.now() / 1000;
@@ -126,6 +127,17 @@ interface Seen {
   readonly fault: string | undefined;
   /** The workout's eased sentence (#585), so a change of REASON is a change. */
   readonly eased: string | undefined;
+  /**
+   * A hand-set ERG target's rescue (#598): its REASON, which is what decides a
+   * change, and the sentence the panel shows, which is what is said. Keyed on
+   * the reason, as #598 asks, rather than on the sentence: the sentence also
+   * names a target the rider set during the rescue, and re-saying the whole
+   * rescue for that is not what the issue asked for. ⚠️ **That press is then
+   * said by nothing** — a deferred *Set* sets no `refusal` and the panel's
+   * sentence is not `live` — which is #655.
+   */
+  readonly manualReason: string | undefined;
+  readonly manualEased: string | undefined;
   readonly nowRiding: string | undefined;
   readonly sideCamera: SideControlState | undefined;
 }
@@ -141,6 +153,8 @@ function seenIn(
     fault: workout?.fault,
     eased:
       workout?.rescue === undefined ? undefined : workoutRescueText(workout.rescue, 'ride-screen'),
+    manualReason: trainer.ergRescue?.reason,
+    manualEased: trainer.ergRescue === undefined ? undefined : rescueSentence(trainer.ergRescue),
     nowRiding: workout?.nowRiding,
     sideCamera,
   };
@@ -171,6 +185,13 @@ function changes(before: Seen, now: Seen): AnnouncementEvent[] {
   // the full target coming back is felt, and the panel stops saying it.
   if (now.eased !== before.eased && now.eased !== undefined) {
     events.push({ kind: 'workout-fault', text: `${EASED_SPOKEN_PREFIX}${now.eased}` });
+  }
+  // #598: the same, for a target the rider set by hand on the ERG form (#567).
+  // `workout-fault` for #585's reason — the machine under the rider is holding
+  // something other than what they asked for — and the same prefix, so a
+  // waiting one is withdrawn by the same rule when it clears.
+  if (now.manualReason !== before.manualReason && now.manualEased !== undefined) {
+    events.push({ kind: 'workout-fault', text: `${EASED_SPOKEN_PREFIX}${now.manualEased}` });
   }
   if (now.releaseFault !== before.releaseFault && now.releaseFault !== undefined) {
     events.push({ kind: 'trainer-lost', text: `Not released: ${now.releaseFault}` });
@@ -249,7 +270,11 @@ export function RideAnnouncer({
   const timeline = workout?.timeline;
   const elapsedSeconds = workout?.elapsedSeconds;
   const status = workout?.status;
-  const { lost, releaseFault, fault, eased, nowRiding } = seenIn(trainer, workout, sideCamera);
+  const { lost, releaseFault, fault, eased, manualReason, manualEased, nowRiding } = seenIn(
+    trainer,
+    workout,
+    sideCamera,
+  );
 
   useEffect(() => {
     const events = changes(seen.current, {
@@ -257,16 +282,33 @@ export function RideAnnouncer({
       releaseFault,
       fault,
       eased,
+      manualReason,
+      manualEased,
       nowRiding,
       sideCamera,
     });
     // Cleared while its sentence was still waiting for the window: take it
     // back, or "Eased" is said after the full target is back (PR #599's
     // review, N1).
-    if (seen.current.eased !== undefined && eased === undefined) {
+    // The same for a hand-set target's rescue (#598). The two cannot stand at
+    // once — a workout's ERG and the form's are one control point, and
+    // `ride/controller.ts` closes the manual writer when a workout starts.
+    if (
+      (seen.current.eased !== undefined && eased === undefined) ||
+      (seen.current.manualReason !== undefined && manualReason === undefined)
+    ) {
       announcer.current = withdrawPending(announcer.current, isEasedAnnouncement);
     }
-    seen.current = { lost, releaseFault, fault, eased, nowRiding, sideCamera };
+    seen.current = {
+      lost,
+      releaseFault,
+      fault,
+      eased,
+      manualReason,
+      manualEased,
+      nowRiding,
+      sideCamera,
+    };
     if (
       preference.enabled &&
       lead !== 'never' &&
@@ -286,6 +328,8 @@ export function RideAnnouncer({
     releaseFault,
     fault,
     eased,
+    manualReason,
+    manualEased,
     nowRiding,
     sideCamera,
     preference,
