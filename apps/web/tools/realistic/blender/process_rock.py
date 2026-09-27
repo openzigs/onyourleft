@@ -18,9 +18,10 @@ The scan's normal map keeps the surface the decimation took away.
    rock for the bake alone, so its foot and the crevices between its lobes
    are dark for nothing at runtime. Until #620 a boulder was uniformly lit.
 4. Drop the roughness/metalness/occlusion map (the runtime uses a constant
-   roughness, and the occlusion is now in the vertices), wire the baked
-   colour into the material so glTF exports it as COLOR_0, and downsize the
-   colour and normal maps to TEXTURE_PIXELS.
+   roughness, and the occlusion is now in the vertices) and downsize the
+   colour and normal maps to TEXTURE_PIXELS. The baked colour is exported as
+   COLOR_0 because it is the ACTIVE colour attribute; no node reads it (see
+   step 4's note on the bytes that saves).
 5. Export a GLB.
 
 ## Why a Cycles bake and not the scan's own occlusion map
@@ -123,7 +124,8 @@ ground = bpy.context.active_object
 # one colour a vertex, so a corner attribute makes the exporter split every
 # vertex whose corners differ: the first run of this bake turned the rock's
 # 2 103 vertices into 4 095 and its 206 020 bytes into 319 048. A vertex bake
-# averages its corners and adds one COLOR_0 and nothing else (25 380 bytes).
+# averages its corners and adds one COLOR_0 and nothing else (16 984 bytes, as
+# step 4 exports it).
 attribute = rock.data.color_attributes.new("ao", "BYTE_COLOR", "POINT")
 rock.data.color_attributes.active_color = attribute
 scene.render.bake.target = "VERTEX_COLORS"
@@ -154,20 +156,15 @@ for slot in rock.material_slots:
             links.remove(link)
     shader.inputs["Roughness"].default_value = 0.9
     shader.inputs["Metallic"].default_value = 0.0
-    # glTF carries COLOR_0 into the material only when a node reads it.
-    colour = nodes.new("ShaderNodeVertexColor")
-    colour.layer_name = "ao"
-    multiply = nodes.new("ShaderNodeMix")
-    multiply.data_type = "RGBA"
-    multiply.blend_type = "MULTIPLY"
-    multiply.inputs["Factor"].default_value = 1.0
-    base = shader.inputs["Base Color"]
-    if base.links:
-        links.new(base.links[0].from_socket, multiply.inputs["A"])
-    else:
-        multiply.inputs["A"].default_value = base.default_value
-    links.new(colour.outputs["Color"], multiply.inputs["B"])
-    links.new(multiply.outputs["Result"], base)
+    # ⚠️ NO node reads the "ao" attribute, on purpose. The exporter's
+    # `export_vertex_color="ACTIVE"` writes the active colour attribute as
+    # COLOR_0 anyway, and glTF multiplies COLOR_0 into the base colour by
+    # definition. Wired through a node, Blender 4.4.3 exports it as FLOAT
+    # VEC3 (12 bytes a vertex); unwired, it takes its ACTIVE path, adds the
+    # alpha and exports the BYTE_COLOR attribute as normalized UNSIGNED_SHORT
+    # VEC4 (8 bytes a vertex). An UNSIGNED_BYTE colour is not something this
+    # exporter writes for a real attribute (#686's review asked), and a
+    # post-export rewrite of the file is a step ADR 0026 D-5 does not have.
     for node in nodes:
         for socket in node.inputs:
             if socket.name == "Occlusion":

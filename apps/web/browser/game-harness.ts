@@ -120,7 +120,7 @@ import {
   nearFieldShapes,
   showGroundBlobsOf,
 } from '../src/game/three-renderer';
-import { groundUnder } from '../src/game/ground-blob';
+import { groundBlobAlpha, groundUnder } from '../src/game/ground-blob';
 import { clearOfTheCamera, nearPyramid, sceneryReach } from '../src/game/near-field';
 import { realisticWorldNotice } from '../src/game/realistic-assets';
 import {
@@ -3675,6 +3675,11 @@ export interface GroundBlobMeasurement {
   readonly vergeRim: number;
   /** Whether no tree covers the verge point. */
   readonly edgeClear: boolean;
+  /**
+   * The SHIPPED shader's road clip, made observable on level ground — #686's
+   * review. @see GroundBlobClipMeasurement
+   */
+  readonly clip: GroundBlobClipMeasurement;
   /** Draw calls for the probe frame with the blobs, and without. */
   readonly drawCalls: number;
   readonly drawCallsHidden: number;
@@ -3684,6 +3689,52 @@ export interface GroundBlobMeasurement {
   readonly woodedBlobs: number;
   readonly woodedTriangles: number;
 }
+
+/**
+ * The road clip of `three-renderer.ts` §`GROUND_BLOB_VERTEX` and
+ * §`GROUND_BLOB_FRAGMENT`, read back off the drawing buffer — #686's review.
+ *
+ * Tree A's blob is drawn with a clip plane forced through its middle, facing
+ * the screen's right, so the shader should keep the right half and discard
+ * the left; then — **the control** — with both planes the no-op `(0, 0, −1)`,
+ * so both halves darken. Each colour is a mean of sRGB bytes at one point, the
+ * blobs drawn and hidden; `expected` is `ground-blob.ts` §`groundBlobAlpha`
+ * at that point.
+ */
+export interface GroundBlobClipMeasurement {
+  /** Whether the harness could reach the blob mesh's clip attributes at all. */
+  readonly measured: boolean;
+  /** The point on the side the forced plane keeps, and the one it clips. */
+  readonly kept: GroundBlobClipPoint;
+  readonly clipped: GroundBlobClipPoint;
+}
+
+export interface GroundBlobClipPoint {
+  /** Metres from the forced plane, positive on the kept side. */
+  readonly metres: number;
+  /** Pixels between the point and the plane's line through the blob's middle, on screen. */
+  readonly pixels: number;
+  /** Whether no tree covers the strip read. */
+  readonly clear: boolean;
+  /** How far from the middle as a share of the rim, and the blob's alpha there. */
+  readonly rim: number;
+  readonly expected: number;
+  /** The forced plane, the control's no-op planes, and the blobs hidden. */
+  readonly forced: readonly number[];
+  readonly control: readonly number[];
+  readonly hidden: readonly number[];
+}
+
+const NO_CLIP_POINT: GroundBlobClipPoint = {
+  metres: 0,
+  pixels: 0,
+  clear: false,
+  rim: 0,
+  expected: 0,
+  forced: [],
+  control: [],
+  hidden: [],
+};
 
 const NO_GROUNDING: GroundBlobMeasurement = {
   probe: [],
@@ -3699,6 +3750,7 @@ const NO_GROUNDING: GroundBlobMeasurement = {
   vergeHidden: [],
   vergeRim: 0,
   edgeClear: false,
+  clip: { measured: false, kept: NO_CLIP_POINT, clipped: NO_CLIP_POINT },
   drawCalls: 0,
   drawCallsHidden: 0,
   blobs: 0,
@@ -4360,9 +4412,10 @@ function tintProbe(
  *   this level road the verge drops 0.25 m, so a blob beside it lies BELOW
  *   the tarmac and the road's own depth hides whatever of it reaches under
  *   the carriageway — the shader's clip deleted, the road read back
- *   unchanged. Where it would show is ground above the road, and
- *   `ground-blob.test.ts` holds the clip on the hairpin for every blob and
- *   every sun instead.
+ *   unchanged. Where it would show is ground above the road.
+ *   `ground-blob.test.ts` holds the planes on the hairpin for every blob and
+ *   every sun, and {@link groundBlobClip} holds the shipped shader's use of
+ *   them, with a plane forced through a blob on this road.
  * - **The cost**: non-empty draw calls with the blobs and without.
  */
 function groundBlobProbe(
@@ -4553,6 +4606,7 @@ function groundBlobProbe(
   const [probeHidden, referenceHidden, vergeHidden] = read();
   showGroundBlobsOf(view, true);
   view.render(scene);
+  const clip = groundBlobClip(view, gl, canvas, scene, a, right, clearOfTrees, grounded);
   return {
     probe: probe ?? [],
     reference: referenceShown ?? [],
@@ -4567,10 +4621,159 @@ function groundBlobProbe(
     vergeHidden: vergeHidden ?? [],
     vergeRim: b.rim(verge.x, verge.z),
     edgeClear: clearOfTrees(verge, 1),
+    clip,
     drawCalls,
     drawCallsHidden,
     blobs: drawn.blobs,
     triangles: drawn.triangles,
+  };
+}
+
+/**
+ * What a blob mesh's geometry is to {@link groundBlobClip}: named by shape, so
+ * this harness names no `three` (`three-seam.test.ts`).
+ */
+interface BlobClipAttribute {
+  readonly array: Float32Array;
+  clone(): BlobClipAttribute;
+}
+interface BlobClipGeometry {
+  getAttribute(name: string): BlobClipAttribute | undefined;
+  setAttribute(name: string, attribute: BlobClipAttribute): unknown;
+}
+
+/**
+ * The SHIPPED ground-blob shader's road clip, observed — #686's review, which
+ * found it pinned only as text: the vertex lines that carry the planes and the
+ * fragment's offset to the fragment test were covered by nothing, and
+ * inverting the offset, or never passing the planes on, left every gate green.
+ *
+ * On this level road the clip cannot be seen as the product lays it — a blob
+ * beside the road lies below the tarmac, and the road's depth hides what
+ * reaches under it (@see groundBlobProbe). So this forces a plane: tree A's
+ * blob is drawn with the geometry's two clip ATTRIBUTES swapped for copies the
+ * harness writes, slot 0's first plane `(right, 0)` — through the middle,
+ * keeping the screen's right half — and its second the no-op. The belt keeps
+ * writing its own attributes, which are not drawn until they are put back.
+ * ⚠️ **Nothing here ships**: the swap is this harness's, done on the mesh the
+ * view already hands `groundBlobsOf`, and the product has no way to force a
+ * plane at all. What is drawn is the real `GROUND_BLOB_VERTEX` and
+ * `GROUND_BLOB_FRAGMENT` in the real engine.
+ *
+ * One point each side of the plane, in A's blob where it is dark and no tree
+ * covers it, far enough from the plane's line on screen that the strip read
+ * does not straddle it; read with the forced plane, with the control (both
+ * planes the no-op), and with the blobs hidden.
+ */
+function groundBlobClip(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  scene: SceneFrame,
+  a: {
+    readonly x: number;
+    readonly z: number;
+    readonly rim: (x: number, z: number) => number;
+  },
+  right: { readonly x: number; readonly z: number },
+  clearOfTrees: (point: { x: number; y: number; z: number }, halfWidth?: number) => boolean,
+  grounded: (point: { x: number; z: number }) => { x: number; y: number; z: number },
+): GroundBlobClipMeasurement {
+  const none: GroundBlobClipMeasurement = {
+    measured: false,
+    kept: NO_CLIP_POINT,
+    clipped: NO_CLIP_POINT,
+  };
+  const mesh = (view as unknown as { readonly groundBlobMesh?: { geometry: BlobClipGeometry } })
+    .groundBlobMesh;
+  const geometry = mesh?.geometry;
+  const first = geometry?.getAttribute('blobClipFirst');
+  const second = geometry?.getAttribute('blobClipSecond');
+  if (geometry === undefined || first === undefined || second === undefined) return none;
+  /** Half the width of the strip read at each point: small, so it stays one side of the line. */
+  const HALF = 3;
+  const heading = { x: right.z, z: -right.x };
+  const pick = (
+    side: 1 | -1,
+  ): { x: number; y: number; z: number; metres: number; pixels: number } | undefined => {
+    for (const metres of [0.6, 0.8, 1.0, 0.45, 1.2]) {
+      for (const along of [0, 0.3, -0.3, 0.6, -0.6]) {
+        const point = grounded({
+          x: a.x + right.x * metres * side + heading.x * along,
+          z: a.z + right.z * metres * side + heading.z * along,
+        });
+        if (a.rim(point.x, point.z) > 0.6 || !clearOfTrees(point, HALF)) continue;
+        const onLine = grounded({
+          x: point.x - right.x * metres * side,
+          z: point.z - right.z * metres * side,
+        });
+        const pixels = Math.abs(
+          pixelFor(scene, canvas, point).x - pixelFor(scene, canvas, onLine).x,
+        );
+        if (pixels < HALF + 3) continue;
+        return { ...point, metres: metres * side, pixels };
+      }
+    }
+    return undefined;
+  };
+  const keptAt = pick(1);
+  const clippedAt = pick(-1);
+  if (keptAt === undefined || clippedAt === undefined) return none;
+  const mean = (point: { x: number; y: number; z: number }): number[] => {
+    const at = pixelFor(scene, canvas, point);
+    const width = HALF * 2 + 1;
+    const pixels = readRegion(gl, Math.round(at.x) - HALF, Math.round(at.y) - 1, width, 3);
+    const sum = [0, 0, 0];
+    for (let index = 0; index < pixels.length; index += 4) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        (sum[channel] as number) += pixels[index + channel] ?? 0;
+      }
+    }
+    return sum.map((channel) => channel / (width * 3));
+  };
+  const drawWith = (plane: readonly [number, number, number]): number[][] => {
+    const forcedFirst = first.clone();
+    const forcedSecond = second.clone();
+    forcedFirst.array.set(plane, 0);
+    forcedSecond.array.set([0, 0, -1], 0);
+    geometry.setAttribute('blobClipFirst', forcedFirst);
+    geometry.setAttribute('blobClipSecond', forcedSecond);
+    for (let at = 0; at < 4; at += 1) view.render(scene);
+    const read = [mean(keptAt), mean(clippedAt)];
+    geometry.setAttribute('blobClipFirst', first);
+    geometry.setAttribute('blobClipSecond', second);
+    return read;
+  };
+  const [keptForced, clippedForced] = drawWith([right.x, right.z, 0]);
+  const [keptControl, clippedControl] = drawWith([0, 0, -1]);
+  showGroundBlobsOf(view, false);
+  for (let at = 0; at < 4; at += 1) view.render(scene);
+  const keptHidden = mean(keptAt);
+  const clippedHidden = mean(clippedAt);
+  showGroundBlobsOf(view, true);
+  for (let at = 0; at < 4; at += 1) view.render(scene);
+  const point = (
+    at: { x: number; y: number; z: number; metres: number; pixels: number },
+    forced: number[] | undefined,
+    control: number[] | undefined,
+    hidden: number[],
+  ): GroundBlobClipPoint => {
+    const rim = a.rim(at.x, at.z);
+    return {
+      metres: at.metres,
+      pixels: at.pixels,
+      clear: clearOfTrees(at, HALF),
+      rim,
+      expected: groundBlobAlpha(rim),
+      forced: forced ?? [],
+      control: control ?? [],
+      hidden,
+    };
+  };
+  return {
+    measured: true,
+    kept: point(keptAt, keptForced, keptControl, keptHidden),
+    clipped: point(clippedAt, clippedForced, clippedControl, clippedHidden),
   };
 }
 

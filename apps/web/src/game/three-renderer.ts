@@ -253,7 +253,7 @@ import {
   GROUND_BLOB_DARKNESS,
   GROUND_BLOB_LIFT_METRES,
   groundBlobAxes,
-  groundUnder,
+  groundUnderBlob,
   placeGroundBlob,
   roadClip,
   type BlobCasters,
@@ -2970,7 +2970,9 @@ function contactShadowGeometry(): BufferGeometry {
  *   no texture.
  * - **Tilted to the ground.** Each instance matrix is `ground-blob.ts`
  *   §`groundBlobAxes`: the quad lies in the plane of the landform triangle
- *   under the blob's middle.
+ *   under the blob's middle, on its caster's own sheet
+ *   (`ground-blob.ts` §`groundUnderBlob`), or — a middle thrown over the
+ *   carriageway — in the plane of the one under the caster's foot.
  * - **Clipped at the road's edge**, per instance: two half-planes as two
  *   instance attributes, tested in the fragment exactly as
  *   `ground-blob.ts` §`keptByRoadClip` tests them.
@@ -3071,7 +3073,7 @@ export class GroundBlobBelt {
         const blob = this.#blob;
         placeGroundBlob(caster, this.#throw, blob);
         const ground = this.#ground;
-        if (!groundUnder(terrain, corridor.centre, blob.x, blob.z, ground)) {
+        if (!groundUnderBlob(terrain, corridor.centre, blob, caster, ground)) {
           // Off the ground this frame built — past its last row. Nothing to lie on.
           continue;
         }
@@ -3157,7 +3159,10 @@ const GROUND_BLOB_VERTEX = /* glsl */ `
 /**
  * What {@link withGroundBlobShading} adds to the fragment shader, after the
  * colour: `ground-blob.ts` §`groundBlobAlpha` and §`keptByRoadClip`, in GLSL.
- * `three-renderer.test.ts` §"#620" holds the constants in it to that file's.
+ * `realistic-renderer.test.ts` §"#620" holds the constants in it to that
+ * file's, as text; `game.browser.spec.ts` §"#620" holds what it DOES with the
+ * planes — and {@link GROUND_BLOB_VERTEX}'s offset and varyings with it — off
+ * the drawing buffer (`game-harness.ts` §`groundBlobClip`).
  */
 const GROUND_BLOB_FRAGMENT = /* glsl */ `
   float blobAlpha = ${glslFloat(GROUND_BLOB_DARKNESS)} * vBlobStrength *
@@ -5989,6 +5994,7 @@ export class RealisticVegetationBelt {
     const caster = list.casters[list.count];
     if (caster === undefined || footprint === undefined) return;
     caster.x = item.x;
+    caster.y = item.y;
     caster.z = item.z;
     caster.yaw = 0;
     caster.round = true;
@@ -7530,6 +7536,7 @@ export function structureCasters(
     if (caster === undefined) break;
     const footprint = STRUCTURE_FOOTPRINTS[item.kind];
     caster.x = item.x;
+    caster.y = item.y;
     caster.z = item.z;
     caster.yaw = item.rotation;
     caster.round = false;

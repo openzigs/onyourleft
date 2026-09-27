@@ -601,10 +601,12 @@ const GROUND_BLOB_STATED = 0.3;
  *
  * #621's review is why it has TWO sides: a floor alone passed a tint 1.5
  * times too strong, which looked better. Half the strength (0.15) and 1.5
- * times it (0.45) each miss this by 0.10. The margin is what the pipeline adds
- * between the constant and the pixel, measured: the blob is black fogged
- * toward the fog colour, and at 25 m the fog gives some of it back; rounding
- * a 3 × 3 mean of bytes is the rest.
+ * times it (0.45) each miss this by 0.10. ⚠️ The margin is a CHOSEN
+ * tolerance, not a measured pipeline effect: the probe reads a tree 7 m ahead
+ * over 21 × 3 strips, where the fog gives back next to nothing and the
+ * darkening read back is 0.299 against the stated 0.3. #686's review scaled
+ * the shader's alpha and found ×0.75 and ×1.25 red by 0.026 and 0.023, ×1.15
+ * green at 0.344 — ±0.05 is ±17 % of the strength.
  */
 const GROUND_BLOB_WINDOW = [GROUND_BLOB_STATED - 0.05, GROUND_BLOB_STATED + 0.05] as const;
 
@@ -2659,12 +2661,44 @@ test.describe('the realistic world — ADR 0026', () => {
     expect(ratio).toBeGreaterThan(ratioAt(GROUND_BLOB_WINDOW[1]));
     expect(ratio).toBeLessThan(ratioAt(GROUND_BLOB_WINDOW[0]));
     // The road's edge: the verge under B's blob darkens — a blob reaches the
-    // edge. That it stops there is `ground-blob.test.ts`' hairpin, not this:
-    // here the blob lies below the tarmac and the road's depth hides it
-    // (@see groundBlobProbe).
+    // edge. That the product's planes stop it there is `ground-blob.test.ts`'
+    // hairpin: here the blob lies below the tarmac and the road's depth hides
+    // it (@see groundBlobProbe). That the shader obeys a plane is the clip
+    // case below.
     expect(grounding.edgeClear).toBe(true);
     expect(grounding.vergeRim).toBeLessThan(0.6);
     expect(mean(grounding.verge) / mean(grounding.vergeHidden)).toBeLessThan(0.9);
+    // THE SHIPPED CLIP (#686's review): tree A's blob with a plane forced
+    // through its middle keeping the screen's right half. The kept point
+    // darkens by the blob's own alpha there and the clipped one not at all;
+    // the control — both planes the no-op — darkens both. Each read against
+    // the same point with the blobs hidden. @see groundBlobClip
+    const { clip } = grounding;
+    const darkened = (drawn: readonly number[], hidden: readonly number[]): number =>
+      1 - mean(drawn) / mean(hidden);
+    const clipFigures = (name: string, at: typeof clip.kept): string =>
+      `${name} ${at.metres.toFixed(2)} m (${at.pixels.toFixed(0)} px) from the plane, rim ` +
+      `${at.rim.toFixed(2)}, alpha ${at.expected.toFixed(3)}: forced ` +
+      `${darkened(at.forced, at.hidden).toFixed(3)}, control ${darkened(at.control, at.hidden).toFixed(3)}`;
+    console.log(
+      `#620 clip: ${clipFigures('kept', clip.kept)}; ${clipFigures('clipped', clip.clipped)}`,
+    );
+    expect(clip.measured).toBe(true);
+    expect(clip.kept.clear).toBe(true);
+    expect(clip.clipped.clear).toBe(true);
+    expect(clip.kept.metres).toBeGreaterThan(0);
+    expect(clip.clipped.metres).toBeLessThan(0);
+    // Non-vacuity: both points are where the blob is dark.
+    expect(clip.kept.expected).toBeGreaterThan(0.15);
+    expect(clip.clipped.expected).toBeGreaterThan(0.15);
+    for (const at of [clip.kept, clip.clipped]) {
+      // The control darkens both halves by the blob's alpha, from both sides.
+      expect(Math.abs(darkened(at.control, at.hidden) - at.expected)).toBeLessThan(0.05);
+    }
+    expect(
+      Math.abs(darkened(clip.kept.forced, clip.kept.hidden) - clip.kept.expected),
+    ).toBeLessThan(0.05);
+    expect(Math.abs(darkened(clip.clipped.forced, clip.clipped.hidden))).toBeLessThan(0.02);
     // The cost: one draw call for every blob, two triangles each.
     expect(grounding.drawCalls - grounding.drawCallsHidden).toBe(1);
     expect(grounding.blobs).toBe(2);

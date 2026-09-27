@@ -20,6 +20,7 @@ import {
   groundBlobAlpha,
   groundBlobAxes,
   groundUnder,
+  groundUnderBlob,
   keptByRoadClip,
   placeGroundBlob,
   ROAD_EDGE_METRES,
@@ -48,9 +49,10 @@ function sunAt(elevation: number, azimuth: number): SunStyle {
   };
 }
 
-function aTree(x: number, z: number, radius = 3, height = 9): BlobCaster {
+function aTree(x: number, z: number, radius = 3, height = 9, y = 0): BlobCaster {
   return {
     x,
+    y,
     z,
     yaw: 0,
     round: true,
@@ -105,6 +107,7 @@ describe('a ground blob is thrown from the one sun — #620', () => {
     const sun = sunAt(60, 90); // due +X: the shadow falls towards −X
     const caster: BlobCaster = {
       x: 0,
+      y: 0,
       z: 0,
       yaw: 0,
       round: false,
@@ -302,7 +305,9 @@ function sampleBlobs(
     const placed = blob();
     placeGroundBlob(caster, throwPerMetre, placed);
     const under = ground();
-    if (!groundUnder(mesh, centre, placed.x, placed.z, under)) continue;
+    // The product's own choice of ground — a middle thrown over the road
+    // included, which lies in its foot's plane and must be clipped too.
+    if (!groundUnderBlob(mesh, centre, placed, caster, under)) continue;
     blobs += 1;
     groundBlobAxes(placed, under, axes);
     const reach = Math.max(placed.halfAlong, placed.halfAcross);
@@ -381,9 +386,10 @@ describe('a ground blob never lies on the carriageway — #620, on the hairpin',
         const footprint = STRUCTURE_FOOTPRINTS[item.kind as keyof typeof STRUCTURE_FOOTPRINTS];
         casters.push(
           footprint === undefined
-            ? aTree(item.x, item.z, 3 * item.scale, 9 * item.scale)
+            ? aTree(item.x, item.z, 3 * item.scale, 9 * item.scale, item.y)
             : {
                 x: item.x,
+                y: item.y,
                 z: item.z,
                 yaw: item.rotation,
                 round: false,
@@ -401,7 +407,9 @@ describe('a ground blob never lies on the carriageway — #620, on the hairpin',
           const z = bend.z + dz;
           const off = fromTheRoad(centre, x, z);
           if (off < ROAD_EDGE_METRES + 1 || off > ROAD_EDGE_METRES + 5) continue;
-          casters.push(aTree(x, z, 3, 9));
+          const foot = ground();
+          if (!groundUnder(mesh, centre, x, z, foot)) continue;
+          casters.push(aTree(x, z, 3, 9, foot.y));
         }
       }
 
@@ -503,6 +511,126 @@ describe('a ground blob never lies on the carriageway — #620, on the hairpin',
     roadClip(corridor.centre, point.x + 60, point.z, 5, planes);
     expect(Array.from(planes)).toEqual([0, 0, -1, 0, 0, -1]);
   });
+});
+
+/** The height of every distinct sheet of `mesh` over `(x, z)`, found by reading every triangle. */
+function sheetsOver(mesh: ReturnType<typeof terrainCorridor>, x: number, z: number): number[] {
+  const v = mesh.vertices;
+  const heights: number[] = [];
+  for (let at = 0; at < mesh.indices.length; at += 3) {
+    const [p, q, r] = [0, 1, 2].map((k) => (mesh.indices[at + k] as number) * 3) as [
+      number,
+      number,
+      number,
+    ];
+    const ux = (v[q] as number) - (v[p] as number);
+    const uz = (v[q + 2] as number) - (v[p + 2] as number);
+    const vx = (v[r] as number) - (v[p] as number);
+    const vz = (v[r + 2] as number) - (v[p + 2] as number);
+    const det = ux * vz - uz * vx;
+    if (Math.abs(det) < 1e-9) continue;
+    const wx = x - (v[p] as number);
+    const wz = z - (v[p + 2] as number);
+    const s = (wx * vz - wz * vx) / det;
+    const t = (ux * wz - uz * wx) / det;
+    if (s < 0 || t < 0 || s + t > 1) continue;
+    const y =
+      (v[p + 1] as number) +
+      s * ((v[q + 1] as number) - (v[p + 1] as number)) +
+      t * ((v[r + 1] as number) - (v[p + 1] as number));
+    if (heights.every((other) => Math.abs(other - y) > 0.05)) heights.push(y);
+  }
+  return heights;
+}
+
+describe('which ground a blob lies on — #620, #686’s review', () => {
+  it('lays a blob the sun throws over the carriageway in the plane under its caster’s foot, rather than dropping it', () => {
+    const profile = hillRoute();
+    const origin = corridorOrigin(profile);
+    const corridor = roadCorridor(profile, origin, 900);
+    const mesh = terrainCorridor(profile, origin, corridor, scatterSeed(profile));
+    let laid = 0;
+    for (let row = 30; row < corridor.centre.length - 30; row += 4) {
+      const point = corridor.centre[row] as CorridorPoint;
+      const next = corridor.centre[row + 1] as CorridorPoint;
+      const length = Math.hypot(next.x - point.x, next.z - point.z);
+      const rightX = -(next.z - point.z) / length;
+      const rightZ = (next.x - point.x) / length;
+      // A tree a metre off the LEFT edge, under a 55° sun from its left: the
+      // shadow of its middle falls 3.2 m to the right, on the tarmac.
+      const out = ROAD_EDGE_METRES + 1;
+      const foot = ground();
+      const fx = point.x - rightX * out;
+      const fz = point.z - rightZ * out;
+      if (!groundUnder(mesh, corridor.centre, fx, fz, foot)) continue;
+      const caster = aTree(fx, fz, 3, 9, foot.y);
+      const up = (55 * Math.PI) / 180;
+      const sun: SunStyle = {
+        x: -rightX * Math.cos(up),
+        y: Math.sin(up),
+        z: -rightZ * Math.cos(up),
+        ambient: 0.4,
+        direct: 0.6,
+      };
+      const placed = blob();
+      placeGroundBlob(caster, sunThrow(sun), placed);
+      // Non-vacuity: the middle IS over the road, where no landform is.
+      expect(groundUnder(mesh, corridor.centre, placed.x, placed.z, ground())).toBe(false);
+      const into = ground();
+      expect(groundUnderBlob(mesh, corridor.centre, placed, caster, into)).toBe(true);
+      expect(into.nx).toBeCloseTo(foot.nx, 9);
+      expect(into.ny).toBeCloseTo(foot.ny, 9);
+      expect(into.nz).toBeCloseTo(foot.nz, 9);
+      expect(into.y).toBeCloseTo(
+        foot.y - (foot.nx * (placed.x - fx) + foot.nz * (placed.z - fz)) / foot.ny,
+        6,
+      );
+      laid += 1;
+    }
+    expect(laid).toBeGreaterThan(10);
+  });
+
+  it('takes the sheet nearest its caster’s foot where a hairpin’s two sheets of ground overlap', () => {
+    const profile = hairpinRoute(10);
+    const origin = corridorOrigin(profile);
+    const seed = scatterSeed(profile);
+    const bendAt = 400 + (Math.PI * 10) / 2;
+    const corridor = roadCorridor(profile, origin, bendAt);
+    const mesh = terrainCorridor(profile, origin, corridor, seed);
+    const items = scatterAt(profile, origin, seed, bendAt - 60, bendAt + 150, {
+      maxItems: 100_000,
+      riderMetres: bendAt,
+    });
+    let overlapping = 0;
+    let firstFoundWrong = 0;
+    const world = worldStyle(profile).sun;
+    for (const sun of [world, sunAt(55, 0), sunAt(55, 90), sunAt(55, 180), sunAt(55, 270)]) {
+      for (const item of items) {
+        const caster = aTree(item.x, item.z, 3 * item.scale, 9 * item.scale, item.y);
+        const placed = blob();
+        placeGroundBlob(caster, sunThrow(sun), placed);
+        const sheets = sheetsOver(mesh, placed.x, placed.z);
+        if (sheets.length < 2) continue;
+        overlapping += 1;
+        // The caster stands on one of them: its blob lies on the one whose
+        // height is nearest the foot's.
+        const nearest = sheets.reduce((best, y) =>
+          Math.abs(y - item.y) < Math.abs(best - item.y) ? y : best,
+        );
+        const into = ground();
+        expect(groundUnderBlob(mesh, corridor.centre, placed, caster, into)).toBe(true);
+        expect(into.y).toBeCloseTo(nearest, 3);
+        const first = ground();
+        groundUnder(mesh, corridor.centre, placed.x, placed.z, first);
+        if (Math.abs(first.y - nearest) > 0.05) firstFoundWrong += 1;
+      }
+    }
+    // Non-vacuity, and the control: the overlaps are there, and the first
+    // triangle found is the wrong sheet for some of them — the defect #686's
+    // review measured, one blob in 29 under the visible ground.
+    expect(overlapping).toBeGreaterThan(20);
+    expect(firstFoundWrong).toBeGreaterThan(0);
+  }, 60_000);
 });
 
 describe('a frame’s casters are made once — #620', () => {

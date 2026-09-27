@@ -1971,8 +1971,10 @@ describe('the vegetation belt names what it drew as meshes, for the ground blobs
 
   it('sizes a caster by the item it stands for', () => {
     const belt = aBelt();
-    belt.update([{ ...item('rock', 20), scale: 1 }], POSE);
+    belt.update([{ ...item('rock', 20), y: 3.25, scale: 1 }], POSE);
     const one = belt.grounded.casters[0];
+    // Its foot's height: which sheet of ground its blob lies on (@see groundUnderBlob).
+    expect(one?.y).toBe(3.25);
     // The crown's radius is the MEAN of the shape's two horizontal
     // half-extents — not the bounding box's corner, which a cull wants — at
     // the size the belt draws it: `sceneryFitMetres` over the scan's extent.
@@ -2007,7 +2009,7 @@ describe('the vegetation belt names what it drew as meshes, for the ground blobs
 describe('the structures the ground blobs go under — #620', () => {
   it('takes the structures the structure belts admit, with their footprints and heights', () => {
     const into = blobCasters(4);
-    const house = { ...item('building', 20, 12), rotation: 0.5, scale: 1.2 };
+    const house = { ...item('building', 20, 12), y: 2.5, rotation: 0.5, scale: 1.2 };
     structureCasters(
       [
         item('building', -400), // behind the corridor: never admitted
@@ -2023,7 +2025,7 @@ describe('the structures the ground blobs go under — #620', () => {
     );
     expect(into.count).toBe(2);
     const [first, second] = into.casters;
-    expect(first).toMatchObject({ x: 12, z: 20, yaw: 0.5, round: false });
+    expect(first).toMatchObject({ x: 12, y: 2.5, z: 20, yaw: 0.5, round: false });
     // `settlements.ts`' house: ±4.5 m square, scaled.
     expect(first?.halfAlong).toBeCloseTo(4.5 * 1.2, 9);
     expect(first?.halfAcross).toBeCloseTo(4.5 * 1.2, 9);
@@ -2069,9 +2071,14 @@ describe('the ground blob belt — #620', () => {
     [7, 20, 30].forEach((out, at) => {
       const caster = list.casters[at];
       if (caster === undefined) return;
+      const x = point.x - ((next.z - point.z) / length) * out;
+      const z = point.z + ((next.x - point.x) / length) * out;
+      const foot = { y: 0, nx: 0, ny: 1, nz: 0 };
+      groundUnder(terrain, corridor.centre, x, z, foot);
       Object.assign(caster, {
-        x: point.x - ((next.z - point.z) / length) * out,
-        z: point.z + ((next.x - point.x) / length) * out,
+        x,
+        y: foot.y,
+        z,
         yaw: 0,
         round: true,
         halfAlong: 3,
@@ -2155,6 +2162,57 @@ describe('the ground blob belt — #620', () => {
     // road and IS clipped; the one 30 m out is not.
     expect(Math.hypot(first[0] as number, first[1] as number)).toBeCloseTo(1, 5);
     expect(Array.from(first.slice(6, 9))).toEqual([0, 0, -1]);
+  });
+
+  it('draws the blob of a tree whose middle the sun throws onto the road, clipped, rather than dropping it', () => {
+    // `ground-blob.ts` §`groundUnderBlob`: the landform starts at the road's
+    // edge, so a middle over the tarmac has no triangle under it. The belt
+    // used to `continue` there, and the blob vanished in one frame as its
+    // middle crossed the edge — #686's review.
+    const point = corridor.centre[60];
+    const next = corridor.centre[61];
+    if (point === undefined || next === undefined) throw new Error('a short corridor');
+    const length = Math.hypot(next.x - point.x, next.z - point.z);
+    const rightX = -(next.z - point.z) / length;
+    const rightZ = (next.x - point.x) / length;
+    // A tree a metre off the LEFT edge, under a 55° sun from its left.
+    const x = point.x - rightX * 4.5;
+    const z = point.z - rightZ * 4.5;
+    const foot = { y: 0, nx: 0, ny: 1, nz: 0 };
+    expect(groundUnder(terrain, corridor.centre, x, z, foot)).toBe(true);
+    const list = blobCasters(1);
+    Object.assign(list.casters[0] ?? {}, {
+      x,
+      y: foot.y,
+      z,
+      yaw: 0,
+      round: true,
+      halfAlong: 3,
+      halfAcross: 3,
+      centreAlong: 0,
+      height: 9,
+      strength: 1,
+    });
+    list.count = 1;
+    const up = (55 * Math.PI) / 180;
+    const across = {
+      ...sun,
+      x: -rightX * Math.cos(up),
+      y: Math.sin(up),
+      z: -rightZ * Math.cos(up),
+    };
+    const belt = new GroundBlobBelt();
+    belt.update([list], corridor, terrain, across);
+    expect(belt.mesh.count).toBe(1);
+    const matrix = belt.mesh.instanceMatrix.array;
+    const middleX = (matrix[12] as number) - foot.nx * GROUND_BLOB_LIFT_METRES;
+    const middleZ = (matrix[14] as number) - foot.nz * GROUND_BLOB_LIFT_METRES;
+    // Non-vacuity: its middle IS over the road, where no ground is.
+    expect(groundUnder(terrain, corridor.centre, middleX, middleZ, { ...foot })).toBe(false);
+    // And the road clip is a real one, through the blob.
+    const first = belt.mesh.geometry.getAttribute('blobClipFirst').array;
+    expect(Math.hypot(first[0] as number, first[1] as number)).toBeCloseTo(1, 5);
+    expect(first[2] as number).toBeGreaterThan(0);
   });
 
   it('stops at its capacity, and draws nothing hidden or under a sun that throws no shadow', () => {

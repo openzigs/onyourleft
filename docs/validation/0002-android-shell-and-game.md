@@ -3260,8 +3260,9 @@ sun — and bakes ambient occlusion into the rock's vertex colours. Its ceiling 
 increase** against this Part's spread: GPU DVFS mean, CPU *both*, skin at minute 20 and present
 p95. Deterministic figures, from the pull request and the browser gate: **+1 draw call** in a
 realistic frame (36 → 37 in the gate's wooded frame), **at most +124 triangles** (62 blobs × 2;
-the gate's wooded frame drew 40, +80), **0 texture bytes**, and **+25 380 build bytes** — the
-rock's new `COLOR_0` attribute, 2 103 vertices × 3 floats plus the glTF header, against
+the gate's wooded frame drew 40, +80), **0 texture bytes**, and **+16 984 build bytes** — the
+rock's new `COLOR_0` attribute, 2 103 vertices × four normalized 16-bit channels plus the glTF
+header (it was +25 380 as three floats until #686's review), against
 `REALISTIC_BUILD_BYTES`' 9 MiB of room.
 
 Both rows are **one build**: the #620 branch (or a `main` with it merged), with the owner's page

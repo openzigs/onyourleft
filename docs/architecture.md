@@ -1156,19 +1156,27 @@ wall is reading the old file. Two changes, both near-free:
 - **A ground blob under every realistic tree, shrub, rock and structure drawn as a mesh** —
   `apps/web/src/game/ground-blob.ts` decides where (thrown from `world.ts`'s one sun through
   `contact-shadow.ts` §`sunThrowPerMetre`, the projection the riders' blob uses, shared rather than
-  copied; on the landform triangle under the blob's middle; clipped at the road's edge by two
-  half-planes, one per stretch of road in reach, which `ground-blob.test.ts` holds on a hairpin), and
+  copied; on the landform triangle under the blob's middle — on the sheet nearest the caster's foot
+  where a hairpin's two overlap, and in the foot's plane when the middle is thrown over the road;
+  clipped at the road's edge by two half-planes, one per stretch of road in reach), and
   `three-renderer.ts` §`GroundBlobBelt` draws them: **one draw call, two triangles a blob, no
   texture, no shadow state**, realistic rungs only. At most `realistic-budget.ts`
   §`REALISTIC_GROUND_BLOBS` (62) a frame, **counted in the frame's triangles** — 124 of the 1 350
   the structures had left. The furthest tree with a blob fades it as it nears the next tree back,
   because #617's hand-over measured it popping on in one frame otherwise. The ground's own columns
   are 4 to 9 m apart beside the road, which is why this is not baked into the ground's colours.
-  The owner's page switches it off with `?layers=-grounding`.
+  The owner's page switches it off with `?layers=-grounding`. ⚠️ **What holds the clip is two
+  gates**: `ground-blob.test.ts` holds `roadClip`'s planes on a hairpin through `keptByRoadClip`,
+  a TypeScript twin of the shader's test; the SHIPPED GLSL is held by `game.browser.spec.ts`
+  §"#620", which forces a plane through a blob's middle in the harness (`game-harness.ts`
+  §`groundBlobClip`) and reads one half dark and the other not, with a no-op control. Until #686's
+  review only the twin was held, and inverting the shader's offset left every gate green.
 - **The rock's ambient occlusion is baked**, the way the trees' already was:
   `tools/realistic/blender/process_rock.py` bakes a Cycles AO into a per-VERTEX colour against a
   ground plane the export leaves out, so the boulder is dark at its foot and between its lobes.
-  Same 2 400 triangles and the same two 512 px maps; the file is 25 380 bytes larger (its `COLOR_0`).
+  Same 2 400 triangles and the same two 512 px maps; the file is 16 984 bytes larger (its
+  `COLOR_0`, four normalized 16-bit channels a vertex — three floats, until #686's review, cost
+  25 380).
   ⚠️ A per-CORNER bake split 2 103 vertices into 4 095 and nearly doubled the file; the script says so.
 
 ⚠️ **A blob is blended over the ENCODED pixel**: three tone-maps and sRGB-encodes inside each

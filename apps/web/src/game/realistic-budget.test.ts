@@ -204,7 +204,13 @@ describe('each committed file inside its class’s budget — ADR 0026 D-6', () 
       const glb = readGlb(path);
       const json = glb.json as {
         meshes: { primitives: { attributes: Record<string, number> }[] }[];
-        accessors: { count: number; bufferView: number; componentType: number; type: string }[];
+        accessors: {
+          count: number;
+          bufferView: number;
+          componentType: number;
+          type: string;
+          normalized?: boolean;
+        }[];
         bufferViews: { byteOffset?: number; byteLength: number }[];
       };
       const attributes = json.meshes[0]?.primitives[0]?.attributes ?? {};
@@ -213,29 +219,36 @@ describe('each committed file inside its class’s budget — ADR 0026 D-6', () 
       expect(colour, `${model.file} carries no baked occlusion`).toBeDefined();
       expect(colour?.count).toBe(position?.count);
       expect(position?.count).toBe(2_103);
-      // Float RGB, which is what Blender 4.4.3 writes: read it and require an
-      // occlusion that actually darkens — mean under 0.95 and a floor near 0 —
-      // while the top of the rock stays lit.
-      expect(colour?.componentType).toBe(5126);
-      expect(colour?.type).toBe('VEC3');
+      // Normalized UNSIGNED_SHORT RGBA — what Blender 4.4.3 writes for the
+      // ACTIVE byte-colour attribute when no node reads it, 8 bytes a vertex
+      // where the node-wired FLOAT RGB it wrote first cost 12 (#686's review;
+      // `process_rock.py` step 4). Read it and require an occlusion that
+      // actually darkens — mean under 0.95 and a floor near 0 — while the top
+      // of the rock stays lit, and an alpha of 1 everywhere, so the colour
+      // makes nothing see-through.
+      expect(colour?.componentType).toBe(5123);
+      expect(colour?.type).toBe('VEC4');
+      expect(colour?.normalized).toBe(true);
       const view = json.bufferViews[colour?.bufferView ?? -1];
       const start = view?.byteOffset ?? 0;
-      const values = new Float32Array(
+      const values = new Uint16Array(
         glb.binary.buffer.slice(
           glb.binary.byteOffset + start,
           glb.binary.byteOffset + start + (view?.byteLength ?? 0),
         ),
       );
+      expect(values.length).toBe(4 * 2_103);
       let sum = 0;
       let low = 1;
       let high = 0;
-      for (let at = 0; at < values.length; at += 3) {
-        const red = values[at] as number;
+      for (let at = 0; at < values.length; at += 4) {
+        const red = (values[at] as number) / 65_535;
         sum += red;
         low = Math.min(low, red);
         high = Math.max(high, red);
+        expect(values[at + 3]).toBe(65_535);
       }
-      const mean = sum / (values.length / 3);
+      const mean = sum / (values.length / 4);
       expect(mean).toBeLessThan(0.95);
       expect(mean).toBeGreaterThan(0.5);
       expect(low).toBeLessThan(0.2);

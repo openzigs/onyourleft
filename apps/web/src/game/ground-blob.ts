@@ -31,12 +31,21 @@
  *
  * ## On the landform, not on a plane
  *
- * {@link groundUnder} finds the triangle of THIS frame's `TerrainMesh` the
+ * {@link groundUnderBlob} finds the triangle of THIS frame's `TerrainMesh` the
  * blob's middle is over — the triangles the renderer draws, not a smoother
- * surface nobody sees — and the blob lies in that triangle's plane, lifted
- * {@link GROUND_BLOB_LIFT_METRES} along its normal. A blob is one quad, so on
- * ground that folds under it part of it is under the ground and the depth test
- * hides that part; it never floats a hand's width in the air.
+ * surface nobody sees — on the sheet its caster stands on where two sheets
+ * overlap, and the blob lies in that triangle's plane, lifted
+ * {@link GROUND_BLOB_LIFT_METRES} along its normal. A middle the sun throws
+ * over the carriageway, where there is no landform, lies in the plane of the
+ * triangle under the caster's foot instead.
+ *
+ * ⚠️ **A blob is one flat quad, so it does not follow ground that bends under
+ * it.** Where the ground rises inside the quad, that part is under the ground
+ * and the depth test hides it. Where the ground FALLS away — a crest, a verge
+ * dropping off — the quad stands clear of it. #686's review measured that
+ * over the fixtures' near scenery: 2 to 3 % of a blob's sampled points more
+ * than 10 cm above the ground, at most 0.36 m on `hillRoute`, nearly all of it
+ * at the faint rim, where the darkness is a few per cent.
  *
  * ## Never on the carriageway
  *
@@ -45,8 +54,10 @@
  * centreline widened by {@link ROAD_EDGE_METRES} — on their far side; the
  * shader keeps only what is on the near side of both. One plane per stretch of
  * road that comes within reach, so a tree on the inside of a hairpin, with road
- * on two sides of it, is clipped at both. `ground-blob.test.ts` holds it on
- * `route-fixtures-testing.ts`' hairpin.
+ * on two sides of it, is clipped at both. `ground-blob.test.ts` holds these
+ * planes on `route-fixtures-testing.ts`' hairpin through {@link keptByRoadClip},
+ * a TypeScript twin of the shader's test; the SHIPPED shader's clip is held by
+ * `game.browser.spec.ts` §"#620" (`game-harness.ts` §`groundBlobClip`).
  *
  * ⚠️ **Conservative, stated**: a stretch's plane is the straight line tangent
  * to the furthest-in point of that stretch, so on the OUTSIDE of a bend the
@@ -134,6 +145,12 @@ export interface BlobCaster {
   x: number;
   z: number;
   /**
+   * The height of the ground at its foot — the sheet of landform it stands on.
+   * Where two sheets overlap (a hairpin's legs, each with its own ground) this
+   * is what says which of them its blob lies on. @see groundUnderBlob
+   */
+  y: number;
+  /**
    * The rotation about +Y taking +Z onto its footprint's long axis — a
    * structure's own facing. Ignored for a {@link round} caster, whose blob is
    * turned to the sun.
@@ -172,6 +189,7 @@ export function blobCasters(capacity: number): BlobCasters {
   for (let at = 0; at < capacity; at += 1) {
     casters.push({
       x: 0,
+      y: 0,
       z: 0,
       yaw: 0,
       round: true,
@@ -243,7 +261,8 @@ const NEAR_ROWS = 3;
 
 /**
  * The ground under `(x, z)` — the height of THIS frame's landform triangle
- * there, and that triangle's normal — written into `into`.
+ * there, and that triangle's normal — written into `into`: the FIRST triangle
+ * found, with no view on which of two overlapping sheets it is.
  *
  * `centre` is the corridor the mesh was built from, one cross-section a point.
  * The quads near the nearest cross-section are searched first and then every
@@ -252,6 +271,10 @@ const NEAR_ROWS = 3;
  *
  * @returns `false` when no triangle is under the point — beyond the mesh, or a
  * mesh that does not match the corridor — and `into` is untouched.
+ *
+ * @test-facing read by `game-harness.ts`, which stands #620's probe trees on
+ * the ground with it, and by `ground-blob.test.ts`; the belt asks
+ * {@link groundUnderBlob}, which knows which sheet a caster stands on
  */
 export function groundUnder(
   mesh: TerrainMesh,
@@ -262,9 +285,76 @@ export function groundUnder(
 ): boolean {
   const rows = mesh.rows;
   if (rows < 2 || centre.length !== rows) return false;
+  const nearest = nearestRow(centre, x, z);
+  const from = Math.max(0, nearest - NEAR_ROWS);
+  const to = Math.min(rows - 1, nearest + NEAR_ROWS);
+  return quadsUnder(mesh, from, to, x, z, into) || quadsUnder(mesh, 0, rows - 1, x, z, into);
+}
+
+/**
+ * How far from the height a sheet is expected at a triangle may be and still
+ * end the search there: **1 m**. Past it, every quad is searched for a nearer
+ * one. The landform bends between a foot and its blob's middle — a hill's
+ * cross-slope measured 0.5 to 0.8 m off the foot's plane carried a few metres
+ * — while two overlapping sheets on the hairpins measured 9 to 14 m apart.
+ */
+const SAME_SHEET_SLACK_METRES = 1;
+
+/** A triangle this near the height sought is the one: the search stops. */
+const SHEET_MATCH_METRES = 0.05;
+
+/**
+ * The ground a caster's blob lies on, written into `into`: the height at the
+ * blob's middle and the normal of the triangle it lies in.
+ *
+ * - **Which sheet.** Where two sheets of landform overlap — a hairpin's legs
+ *   each carry their own ground, and the outside of one can run over or under
+ *   the other — the blob lies on the sheet the caster stands on. The triangle
+ *   under the foot is the one nearest its own height ({@link BlobCaster.y});
+ *   that triangle's plane, carried out to the blob's middle, says where the
+ *   same sheet should be there, and the triangle under the middle nearest that
+ *   height is the one taken. The quads near the cross-sections nearest the
+ *   point and nearest the foot are searched first; every quad only when those
+ *   hold none within {@link SAME_SHEET_SLACK_METRES}.
+ * - **A middle over the carriageway.** The landform starts at the road's
+ *   edge, so a blob the sun throws across the road has no ground under its
+ *   middle. It is laid in the plane of the triangle under the caster's own
+ *   foot, carried out to the middle, and the road clip removes what is over
+ *   the road — rather than dropped, which made a blob vanish in one frame as
+ *   its middle crossed the edge.
+ *
+ * @returns `false` only when neither the middle nor the foot has ground under
+ * it — beyond the mesh — and `into` is untouched.
+ */
+export function groundUnderBlob(
+  mesh: TerrainMesh,
+  centre: readonly CorridorPoint[],
+  blob: GroundBlob,
+  caster: BlobCaster,
+  into: GroundPoint,
+): boolean {
+  if (mesh.rows < 2 || centre.length !== mesh.rows) return false;
+  const foot = nearestRow(centre, caster.x, caster.z);
+  const footOnRoad = nearestSquared < ROAD_EDGE_SQUARED;
+  const middle = nearestRow(centre, blob.x, blob.z);
+  const middleOnRoad = nearestSquared < ROAD_EDGE_SQUARED;
+  if (footOnRoad || !sheetUnder(mesh, caster.x, caster.z, foot, foot, caster.y, into)) {
+    return !middleOnRoad && sheetUnder(mesh, blob.x, blob.z, middle, foot, caster.y, into);
+  }
+  // The foot's triangle's plane, carried out to the middle.
+  const expected =
+    into.y - (into.nx * (blob.x - caster.x) + into.nz * (blob.z - caster.z)) / into.ny;
+  if (!middleOnRoad && sheetUnder(mesh, blob.x, blob.z, middle, foot, expected, into)) return true;
+  // No ground under the middle: that plane is the ground it lies on.
+  into.y = expected;
+  return true;
+}
+
+/** The index of the cross-section nearest `(x, z)`, and its squared distance in {@link nearestSquared}. */
+function nearestRow(centre: readonly CorridorPoint[], x: number, z: number): number {
   let nearest = 0;
   let best = Number.POSITIVE_INFINITY;
-  for (let row = 0; row < rows; row += 1) {
+  for (let row = 0; row < centre.length; row += 1) {
     const point = centre[row] as CorridorPoint;
     const distance = (point.x - x) ** 2 + (point.z - z) ** 2;
     if (distance < best) {
@@ -272,9 +362,100 @@ export function groundUnder(
       nearest = row;
     }
   }
-  const from = Math.max(0, nearest - NEAR_ROWS);
-  const to = Math.min(rows - 1, nearest + NEAR_ROWS);
-  return quadsUnder(mesh, from, to, x, z, into) || quadsUnder(mesh, 0, rows - 1, x, z, into);
+  nearestSquared = best;
+  return nearest;
+}
+
+let nearestSquared = 0;
+
+/**
+ * A point nearer a cross-section than this is on the carriageway, where no
+ * landform is — the ground starts at the road's edge — and is not searched.
+ */
+const ROAD_EDGE_SQUARED = ROAD_EDGE_METRES * ROAD_EDGE_METRES;
+
+/** The best triangle {@link sheetUnder} has found so far, and how far it is from the height sought. */
+const sheetBest: GroundPoint = { y: 0, nx: 0, ny: 1, nz: 0 };
+const sheetCandidate: GroundPoint = { y: 0, nx: 0, ny: 1, nz: 0 };
+let sheetGap = Number.POSITIVE_INFINITY;
+
+/**
+ * The triangle under `(x, z)` whose height there is nearest `y`, searching the
+ * quads near cross-section `here` — the one nearest the point — and near
+ * `foot`, and every quad only when those hold none within
+ * {@link SAME_SHEET_SLACK_METRES} of `y`. @see groundUnderBlob
+ */
+function sheetUnder(
+  mesh: TerrainMesh,
+  x: number,
+  z: number,
+  here: number,
+  foot: number,
+  y: number,
+  into: GroundPoint,
+): boolean {
+  const rows = mesh.rows;
+  sheetGap = Number.POSITIVE_INFINITY;
+  const hereFrom = Math.max(0, here - NEAR_ROWS);
+  const hereTo = Math.min(rows - 1, here + NEAR_ROWS);
+  const footFrom = Math.max(0, foot - NEAR_ROWS);
+  const footTo = Math.min(rows - 1, foot + NEAR_ROWS);
+  if (footFrom <= hereTo && hereFrom <= footTo) {
+    nearestQuad(mesh, Math.min(hereFrom, footFrom), Math.max(hereTo, footTo), x, z, y);
+  } else if (!nearestQuad(mesh, hereFrom, hereTo, x, z, y)) {
+    nearestQuad(mesh, footFrom, footTo, x, z, y);
+  }
+  if (sheetGap > SAME_SHEET_SLACK_METRES) nearestQuad(mesh, 0, rows - 1, x, z, y);
+  if (sheetGap === Number.POSITIVE_INFINITY) return false;
+  into.y = sheetBest.y;
+  into.nx = sheetBest.nx;
+  into.ny = sheetBest.ny;
+  into.nz = sheetBest.nz;
+  return true;
+}
+
+/**
+ * Every triangle between cross-sections `from` and `to` that `(x, z)` is
+ * over, kept if nearer `y` than the best so far.
+ *
+ * @returns `true` when one within {@link SHEET_MATCH_METRES} was found, and
+ * the search stopped there.
+ */
+function nearestQuad(
+  mesh: TerrainMesh,
+  from: number,
+  to: number,
+  x: number,
+  z: number,
+  y: number,
+): boolean {
+  const perRow = COLUMNS * 2;
+  for (let row = from; row < to; row += 1) {
+    for (let side = 0; side < 2; side += 1) {
+      for (let column = 0; column + 1 < COLUMNS; column += 1) {
+        const a = row * perRow + side * COLUMNS + column;
+        const b = a + 1;
+        const c = a + perRow;
+        const d = c + 1;
+        if (onTriangle(mesh.vertices, a, b, c, x, z, sheetCandidate) && keptNearer(y)) return true;
+        if (onTriangle(mesh.vertices, b, d, c, x, z, sheetCandidate) && keptNearer(y)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** Keeps the candidate if it is nearer `y` than the best; whether it is near enough to stop. */
+function keptNearer(y: number): boolean {
+  const gap = Math.abs(sheetCandidate.y - y);
+  if (gap < sheetGap) {
+    sheetGap = gap;
+    sheetBest.y = sheetCandidate.y;
+    sheetBest.nx = sheetCandidate.nx;
+    sheetBest.ny = sheetCandidate.ny;
+    sheetBest.nz = sheetCandidate.nz;
+  }
+  return sheetGap <= SHEET_MATCH_METRES;
 }
 
 /** The first triangle between cross-sections `from` and `to` that `(x, z)` is over. */
