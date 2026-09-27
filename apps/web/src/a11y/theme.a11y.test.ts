@@ -103,6 +103,56 @@ describe('every token is painted by something', () => {
   });
 });
 
+/**
+ * #661: a link in running text paints with a token in every state.
+ *
+ * `browser/links.browser.spec.ts` reads the computed colour back for rest,
+ * hover, keyboard focus and a press — and CANNOT for `:visited`, because a
+ * browser reports a visited link's style as if it were not (a history-sniffing
+ * defence). This is the half that covers visited: the rule exists, it reads
+ * the token, and it is not a literal.
+ */
+describe('paints every link state with its own token', () => {
+  /** The body of the one rule whose selector is exactly `selector`. */
+  function ruleBody(selector: string): string {
+    const escaped = selector.replaceAll(/[()[\]:.,*+?^$|\\]/g, '\\$&');
+    const bodies = [...themeCss.matchAll(new RegExp(`(?:^|\\n)${escaped} \\{([^}]*)\\}`, 'g'))];
+    expect(bodies, `theme.css has ${String(bodies.length)} rules for \`${selector}\``).toHaveLength(
+      1,
+    );
+    return bodies[0]?.[1] ?? '';
+  }
+
+  it.each([
+    [':where(a)', '--oyl-color-link'],
+    [':where(a:visited)', '--oyl-color-link-visited'],
+    [':where(a:hover, a:focus-visible)', '--oyl-color-link-hover'],
+    [':where(a:active)', '--oyl-color-link-active'],
+  ])('`%s` is painted with %s', (selector, property) => {
+    expect(ruleBody(selector)).toMatch(new RegExp(`\\n\\s*color: var\\(${property}\\);`));
+  });
+
+  it('underlines a link at rest, and no state takes the underline away', () => {
+    // WCAG 2.2 SC 1.4.1. Inside a status message a link's colour is within a
+    // shade of the message's ink, so the line is what says "link".
+    expect(ruleBody(':where(a)')).toContain('text-decoration-line: underline;');
+    for (const selector of [
+      ':where(a:visited)',
+      ':where(a:hover, a:focus-visible)',
+      ':where(a:active)',
+    ]) {
+      expect(ruleBody(selector)).not.toMatch(/text-decoration(-line)?:\s*none/);
+    }
+  });
+
+  it('writes no link rule with specificity, so a class always wins', () => {
+    // `a:visited` is (0,1,1) and beats `.oyl-button` (0,1,0): a visited Ride
+    // button would have turned purple on a teal fill. Every link rule is
+    // wrapped in `:where()`, and a bare one anywhere in the file is refused.
+    expect(themeCss).not.toMatch(/(?:^|\n|,\s*)a(?::[a-z-]+)?\s*[{,]/);
+  });
+});
+
 describe('the stylesheet keeps the promises the checks depend on', () => {
   it('never removes a focus outline without replacing it', () => {
     // `outline: none` on `:focus-visible` is the single most common way a
