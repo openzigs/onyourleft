@@ -20,6 +20,9 @@
  * about thermal behaviour, and nothing about how any of it behaves on a phone.
  */
 
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { test as base, devices, expect } from '@playwright/test';
 
 import { HARNESS_ORIGIN } from '../playwright.config';
@@ -475,9 +478,11 @@ const DESKTOP_CHROME = { viewport, userAgent, deviceScaleFactor, isMobile, hasTo
  */
 const test = base.extend<object, { harnessRun: (query?: string) => Promise<HarnessRun> }>({
   harnessRun: [
-    async ({ browser }, use) => {
+    async ({ browser }, use, workerInfo) => {
       const runs = new Map<string, Promise<HarnessRun>>();
+      const ledger = loadLedger(workerInfo.project.outputDir);
       const load = async (query: string): Promise<HarnessRun> => {
+        ledger.begin(query);
         const context = await browser.newContext(DESKTOP_CHROME);
         try {
           const page = await context.newPage();
@@ -507,7 +512,11 @@ const test = base.extend<object, { harnessRun: (query?: string) => Promise<Harne
           console.log(
             `game.html${query}: loaded in ${String(Math.round((Date.now() - loadStarted) / 1000))} s`,
           );
+          ledger.end(query);
           return { result, requested, shaderErrors };
+        } catch (error) {
+          ledger.fail(query, error);
+          throw error;
         } finally {
           await context.close();
         }
@@ -524,6 +533,105 @@ const test = base.extend<object, { harnessRun: (query?: string) => Promise<Harne
     { scope: 'worker' },
   ],
 });
+
+/**
+ * What one load of a query has come to in THIS run, across every worker — #651.
+ *
+ * ⚠️ **The memo above lives in a worker, and a worker does not outlive a
+ * failure**, so without this a load that HUNG was paid for again by the next
+ * case to ask: Playwright replaces the worker after a timeout, the new worker
+ * has no memo, and it loads the page afresh under the next case's budget — and
+ * so on down every case that reads that query. For `?realistic` that was
+ * bounded by #607's hook to one budget a describe; for the plain page, which
+ * about forty-five cases in sixteen describes read inside their own 60 s, it
+ * was not bounded at all: forty-five minutes, in a job that stops at twenty.
+ *
+ * So each load is written down where every worker can read it — the run's
+ * output directory, which Playwright empties when a run starts — and a load
+ * that an EARLIER worker began and never finished is not begun again. The case
+ * that asks fails at once, naming the case and describe that paid for it. What
+ * is refused is a second attempt at the same hung load, which is a retry by
+ * another name; a load that finished is loaded again as before, which is
+ * #456's accepted cost of a red ASSERTION and is unchanged.
+ *
+ * A load another LIVE worker is still making is not a hang, and is not refused.
+ * Today that cannot happen — only the `game` project runs this file (the
+ * `chromium` project `testIgnore`s it, `playwright.config.ts` §`projects`), and
+ * that project is one group in one worker — but a second worker reading a
+ * query would be, and refusing it would be a false failure. Only a worker that
+ * is gone — whose process no longer exists — left its load unfinished for good.
+ *
+ * ⚠️ **An entry is written to a temporary file and renamed over the old one**,
+ * because `rename` within a directory is atomic and `writeFileSync` is not: a
+ * worker killed mid-write — which is exactly when this ledger matters — would
+ * otherwise leave a truncated entry, and the next hook would throw a
+ * `SyntaxError` from `JSON.parse` instead of the message naming the describe.
+ */
+interface LoadLedger {
+  begin(query: string): void;
+  end(query: string): void;
+  fail(query: string, error: unknown): void;
+}
+
+type LoadEntry =
+  | { readonly state: 'loading'; readonly pid: number; readonly by: string }
+  | { readonly state: 'loaded' }
+  | { readonly state: 'failed'; readonly by: string; readonly reason: string };
+
+function loadLedger(outputDir: string): LoadLedger {
+  const directory = join(outputDir, 'game-harness-loads');
+  mkdirSync(directory, { recursive: true });
+  const entryPath = (query: string): string =>
+    join(directory, `${encodeURIComponent(query === '' ? 'plain' : query)}.json`);
+  const write = (query: string, entry: LoadEntry): void => {
+    const temporary = `${entryPath(query)}.${process.pid}.tmp`;
+    writeFileSync(temporary, JSON.stringify(entry));
+    renameSync(temporary, entryPath(query));
+  };
+  const read = (query: string): LoadEntry | undefined =>
+    existsSync(entryPath(query))
+      ? (JSON.parse(readFileSync(entryPath(query), 'utf8')) as LoadEntry)
+      : undefined;
+  const asking = (): string => base.info().titlePath.slice(1).join(' › ');
+  return {
+    begin(query) {
+      const earlier = read(query);
+      const page = `game.html${query}`;
+      if (earlier?.state === 'failed') {
+        throw new Error(
+          `${page} already failed to load in this run, for “${earlier.by}”: ${earlier.reason} ` +
+            '— not loading it again (#651); that failure is the one to read.',
+        );
+      }
+      if (earlier?.state === 'loading' && !processIsAlive(earlier.pid)) {
+        throw new Error(
+          `${page} was being loaded for “${earlier.by}” by a worker that did not survive it, ` +
+            'so that load hung or crashed — not loading it again (#651); that failure, ' +
+            'which names its describe, is the one to read.',
+        );
+      }
+      write(query, { state: 'loading', pid: process.pid, by: asking() });
+    },
+    end(query) {
+      write(query, { state: 'loaded' });
+    },
+    fail(query, error) {
+      const reason = error instanceof Error ? error.message.split('\n')[0] : String(error);
+      write(query, { state: 'failed', by: asking(), reason: reason ?? '' });
+    },
+  };
+}
+
+/** Whether a process exists — signal 0 checks without sending anything. */
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM: it exists and belongs to somebody else, which is still alive.
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
 
 /** The shared run's result, which is all but one case in this file reads. */
 async function harness(
@@ -552,8 +660,18 @@ async function harness(
  * draw calls draw a sixteenth of the pixels. The harness prints every phase
  * as it ends (`game-harness.ts` §`phaseEnds`), so the next load that outgrows
  * this says which phase grew.
+ *
+ * ⚠️ **It is 120 s since #651, not 150, and a reviewer who remembers 150 is
+ * reading the old file.** #651's issue asked for exactly this — "if the sum
+ * can't fit, lower the budgets" — and §`paysForTheRealisticLoad` is the sum.
+ * On the slower of the two runners CI lands on (an AMD EPYC 7763) the load
+ * took 64 s, 70 s and 77 s alone (runs 36320822283, 36334163962 and
+ * 36337270885 — the last with #621's seeded-tint probe added — and 77 s again
+ * on 36340917231), so 120 s is 1.56 times the slowest.
  */
-const REALISTIC_LOAD_BUDGET_MS = 150_000;
+const REALISTIC_LOAD_BUDGET_MS = 120_000;
+/** `?realistic&trees` — 79 s to 80 s alone on the last three of those runs, so 1.5 times. */
+const TREES_LOAD_BUDGET_MS = 120_000;
 
 /**
  * Pays for the `?realistic` load in a `beforeAll` with its own budget — #607.
@@ -578,13 +696,105 @@ const REALISTIC_LOAD_BUDGET_MS = 150_000;
  * Every case still asks `harnessRun('?realistic')` for its result; this only
  * decides when the load is paid for and what it may take. No retry: the load
  * runs once per worker, exactly as before, and `playwright.config.ts` refuses
- * retries on purpose. Two describes call this for `?realistic` and one for
- * `?realistic&trees` (#644), so loads that never finish cost at most three
- * budgets — seven and a half minutes, inside the job's twenty.
+ * retries on purpose.
+ *
+ * ⚠️ **This paragraph said "loads that never finish cost at most three budgets
+ * — seven and a half minutes, inside the job's twenty", and it was false
+ * (#651).** It counted the budgets and not the job: the rest of the job took
+ * 16m42s by then, so three hung budgets on top came to about 21.8 minutes and
+ * the runner would have cancelled the job — reporting nothing — before the
+ * third one said which describe it was. And it left out the plain page, whose
+ * load no hook paid for: a hung one cost 60 s a case, down forty-five cases.
+ *
+ * What a hang costs now, and why it fits. The ledger (§`loadLedger`) makes a
+ * hung load cost ONE budget per query per run, whichever describe paid it,
+ * and every other describe that reads that query fails at once in its own hook
+ * (§`paysForTheLoad`). The game spec is a Playwright project of its own,
+ * listed LAST (`playwright.config.ts` §`projects`), so its four loads run one
+ * after another in one worker once the rest of the gate is done. On the slower
+ * of the two runners CI lands on (an AMD EPYC 7763) the rest of the gate took
+ * 164 s, 168 s, 177 s and 179 s (runs 36334163962, 36337270885, 36340917231
+ * and 36342083309's first attempt — it grows as specs are added). If every
+ * one of the four loads hung:
+ *
+ *     50 + 65 + 120 + 120    the four budgets: plain, `?shadow-map`,
+ *                            `?realistic`, `?realistic&trees`
+ *   = 355 s
+ *   +  30 s                  21 describes failing, each replacing the worker,
+ *                            and the two servers starting (measured below)
+ *   + 179 s                  the rest of the gate, first
+ *   = 564 s                  inside the gate's own 580 (`GATE_BUDGET_MS`)
+ *
+ * and the gate cannot outlive the job: on that runner it starts as late as
+ * 578 s in (run 36342083309, attempt 1), so 580 s ends it by 1 158 s — 42 s
+ * inside `timeout-minutes: 20`, with only the coverage publish and upload
+ * (2–3 s) after it. ⚠️ **Nothing re-checks either margin** — the 16 s between
+ * 564 and 580, or the 42 s between 1 158 and 1 200. A spec added to the gate
+ * eats the first and a step added before the gate eats the second, and
+ * neither says so until a hang meets it. Each budget
+ * is at least 1.5 times what its load took alone there (§`PLAIN_LOAD_BUDGET_MS`
+ * and §`REALISTIC_LOAD_BUDGET_MS` give the margins).
+ *
+ * Measured with every load made to hang and every budget cut to a tenth —
+ * 36.5 s of budgets — locally, `--project game`, on #651's branch:
+ * 45 s in all. Four `beforeAll` timeouts, each under the describe that paid
+ * for that load; seventeen more describes failed at once by the ledger, each
+ * naming the describe whose load hung; fifty cases "did not run". The 8.5 s
+ * besides the budgets is the servers and the 21 worker replacements, and does
+ * not shrink with the budgets; the 30 s above is it scaled by how much slower
+ * that runner draws the same loads (about three and a half times). With the
+ * ledger's refusal switched off, the same run took 158 s: 21 hooks each paid
+ * a hung budget of their own.
  */
-function paysForTheRealisticLoad(query = '?realistic'): void {
+function paysForTheRealisticLoad(): void {
+  paysForTheLoad('?realistic', REALISTIC_LOAD_BUDGET_MS);
+}
+
+/**
+ * What the plain page and `?shadow-map` may take — #651.
+ *
+ * ⚠️ **Until #651 these two loads were paid inside the first case that asked,
+ * under that case's 60 s**, which was a budget for a CASE standing in for one
+ * for a LOAD. On the EPYC 7763 (run 36320822283) the plain load took 33.5 s
+ * and `?shadow-map` 54.6 s — 5.4 s from its case's timeout. They are paid in
+ * hooks of their own now, for #607's reason.
+ *
+ * ⚠️ **And each is cheaper since #651**: the two loads ran every probe, and
+ * each case reads one load's copy, so each load now takes only its own cases'
+ * (`game-harness.ts` §`SHADOW_MAP_LOAD`). Measured phase by phase on that
+ * runner (run 36334163962), that was 12.6 s of the plain page's 34 and about
+ * 16 s of `?shadow-map`'s 55. They took 22 s and 39 s after (runs
+ * 36337270885 and 36340917231), so the budgets are 2.3 and 1.7 times that.
+ *
+ * ⚠️ **Alone, and that is measured**: the game spec runs after everything
+ * else (`playwright.config.ts` §`projects`). Run beside the rest of the gate,
+ * as #651 tried, the plain load took 58 s and `?shadow-map` passed 120 s
+ * (run 36326756014) — SwiftShader draws on the CPU the other worker is using.
+ */
+const PLAIN_LOAD_BUDGET_MS = 50_000;
+/** @see PLAIN_LOAD_BUDGET_MS */
+const SHADOW_MAP_LOAD_BUDGET_MS = 65_000;
+
+/**
+ * Pays for a load in a `beforeAll` under its own budget — #607, generalised by
+ * #651. Every describe calls it for every load its cases read: once the load is
+ * in the worker's memo every later hook reads it for nothing, and if it hung,
+ * the ledger (§`loadLedger`) refuses the next worker's attempt at once — so a
+ * hung load costs ONE budget, whichever describe paid it, and that describe is
+ * the one its failure names.
+ *
+ * ⚠️ **Every describe, not the first, and that is measured (#651).** With the
+ * hook in the first describe alone, a hung plain page cost its one budget and
+ * then failed each of the forty-odd cases after it, in every describe, one at
+ * a time — and Playwright replaces the worker after EVERY failure, which is a
+ * new process and a new Chromium each. Locally, with every load hung and each
+ * budget cut to a tenth, that was 47 failures and 115 s for 36.5 s of budgets.
+ * A hook that the ledger refuses fails its describe once and marks the rest
+ * "did not run", which replaces the worker once a describe.
+ */
+function paysForTheLoad(query: string, budget: number): void {
   test.beforeAll(async ({ harnessRun }) => {
-    test.setTimeout(REALISTIC_LOAD_BUDGET_MS);
+    test.setTimeout(budget);
     await harnessRun(query);
   });
 }
@@ -692,6 +902,8 @@ function shiftMissedBy(
 const TREES_QUERY = '?realistic&trees';
 
 test.describe('the game renderer in a real browser', () => {
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
+
   test('constructs against a live WebGL context', async ({ harnessRun }) => {
     const result = await harness(harnessRun);
 
@@ -765,6 +977,8 @@ test.describe('the game renderer in a real browser', () => {
 });
 
 test.describe('the world #241 derives from the route reaches the screen', () => {
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
+
   /**
    * ⚠️ **This is the criterion that catches #240's named defect for this
    * epic.** A `WorldStyle` computed by `world.ts`, carried on `SceneFrame` and
@@ -985,6 +1199,8 @@ test.describe('the world #241 derives from the route reaches the screen', () => 
  * criterion's control.
  */
 test.describe('the gradient shows beside the road — #458', () => {
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
+
   test('hides a block below the rider’s level beside a climb, and shows one beside a descent', async ({
     harnessRun,
   }, testInfo) => {
@@ -1051,6 +1267,8 @@ test.describe('the gradient shows beside the road — #458', () => {
  * the HDRI wait for #431; this block is what can be claimed without them.
  */
 test.describe('a sky with a gradient, and surfaces with detail — #425', () => {
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
+
   test('grades the sky from overhead to the haze, where it used to be one colour', async ({
     harnessRun,
   }, testInfo) => {
@@ -1094,6 +1312,8 @@ test.describe('a sky with a gradient, and surfaces with detail — #425', () => 
 });
 
 test.describe('water under a bridge — #459', () => {
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
+
   test('draws the stream beside the bridge, and the road’s deck above it', async ({
     harnessRun,
   }, testInfo) => {
@@ -1147,6 +1367,8 @@ test.describe('water under a bridge — #459', () => {
  * village and its fields and times the frame with and without them.
  */
 test.describe('a village and its fields — #460', () => {
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
+
   test('draws the structures, one call a kind, and publishes what they cost', async ({
     harnessRun,
   }, testInfo) => {
@@ -1175,6 +1397,8 @@ test.describe('a village and its fields — #460', () => {
 });
 
 test.describe('the road reads as a road — #242', () => {
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
+
   /**
    * ⚠️ **The criterion that catches #240's named defect one layer down.** A
    * colour attribute `terrain.ts` fills, carries on `RoadCorridor` and
@@ -1261,6 +1485,8 @@ test.describe('the road reads as a road — #242', () => {
 });
 
 test.describe('the gradient cue reaches the screen, on a frame after the first — #242', () => {
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
+
   /**
    * ⚠️ **This is the only test in the repository that can see a vertex buffer
    * that was written and never re-uploaded**, and that is this program's
@@ -1298,6 +1524,8 @@ test.describe('the gradient cue reaches the screen, on a frame after the first �
 });
 
 test.describe('the scenery reaches the screen, and costs one call a kind — #244', () => {
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
+
   /**
    * ⚠️ **This is the criterion that catches #240's named defect for this epic
    * one layer further down than #241's and #242's.** `scatter.ts` places the
@@ -1403,6 +1631,12 @@ test.describe('the scenery reaches the screen, and costs one call a kind — #24
  * substitute and why the bot's own marker, 120 m up the road, is not.
  */
 test.describe('the world is lit, and can stop being — #286', () => {
+  paysForTheLoad('?shadow-map', SHADOW_MAP_LOAD_BUDGET_MS);
+  // Its first cases read the plain page too. Earlier describes have loaded it,
+  // so on a green run this reads the memo for nothing; second, so that a hung
+  // plain page never stops `?shadow-map` being paid for and measured.
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
+
   test('finds the probe at both shadings, so the spreads mean something', async ({
     harnessRun,
   }) => {
@@ -1701,6 +1935,8 @@ test.describe('the world is lit, and can stop being — #286', () => {
  * makes a silent failure invisible, so this is where it is caught.
  */
 test.describe('the scenery is models, not solids — #341', () => {
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
+
   test('draws more geometry for every kind ADR 0022 gives a model', async ({
     harnessRun,
   }, testInfo) => {
@@ -1866,6 +2102,8 @@ test.describe('the scenery is models, not solids — #341', () => {
  * carries", where it is read straight off the mesh.
  */
 test.describe('the rider pedals, and it reaches the screen — #349', () => {
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
+
   test('changes what is on the screen when the cranks turn', async ({ harnessRun }, testInfo) => {
     const result = await harness(harnessRun);
 
@@ -1949,6 +2187,8 @@ test.describe('the rider pedals, and it reaches the screen — #349', () => {
  * provably must.
  */
 test.describe('the scenery carries its own colours — #366', () => {
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
+
   test('draws a broadleaf tree with a trunk that is not its canopy', async ({
     harnessRun,
   }, testInfo) => {
@@ -2006,6 +2246,8 @@ test.describe('the scenery carries its own colours — #366', () => {
  * was left by #341.
  */
 test.describe('a kind is drawn as several shapes, and it is measured — #367', () => {
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
+
   test('draws each of a kind’s variants as a different shape', async ({ harnessRun }) => {
     // ⚠️ **Per variant, which no other measurement here can say.** A belt that
     // had quietly collapsed every variant onto one geometry would hold the
@@ -2083,6 +2325,8 @@ test.describe('a kind is drawn as several shapes, and it is measured — #367', 
  * 10 m, 50 m and 200 m, and its result table is empty.
  */
 test.describe('the pacer and the ghost are bicycles — #368', () => {
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
+
   test('costs no draw call at all for the two that were solids', async ({ harnessRun }) => {
     // ⚠️ **The direction nobody expects.** #349 drew one bicycle in three calls
     // and left the bot a cone and the ghost an octahedron at one apiece; #368
@@ -2228,6 +2472,8 @@ test.describe('the pacer and the ghost are bicycles — #368', () => {
  * §`riderExtent` says what that catches that arithmetic cannot.
  */
 test.describe('the rider is prominent — #424', () => {
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
+
   /**
    * ⚠️ One case where there were three, and it was CI's clock rather than
    * taste: every case in this file reloaded the harness until #456, which is
@@ -2296,6 +2542,8 @@ test.describe('the rider is prominent — #424', () => {
  * on purpose: `game-harness.ts` §`lineProbe` says why.
  */
 test.describe('the rider rides a line and leans on it — #499', () => {
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
+
   test('is off-centre and rolled at a hairpin’s apex, and centred and upright without the line', async ({
     harnessRun,
   }) => {
@@ -2375,6 +2623,8 @@ test.describe('the rider rides a line and leans on it — #499', () => {
  * That is exactly how #583 happened, so it is read here off a drawing buffer.
  */
 test.describe('a bend to the right on the map is a bend to the right on the screen — #583', () => {
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
+
   test('draws the right-hand hairpin turning right, and its mirror — the pre-#583 drawing — turning left', async ({
     harnessRun,
   }) => {
@@ -2466,6 +2716,8 @@ test.describe('scenery the camera passes is not cut by the near plane — #545',
  */
 test.describe('the realistic world — ADR 0026', () => {
   paysForTheRealisticLoad();
+  // Two cases compare against the plain page — second, for #286's reason.
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
 
   const realistic = async (
     run: (query?: string) => Promise<HarnessRun>,
@@ -2898,7 +3150,7 @@ test.describe('the realistic world — ADR 0026', () => {
  * the stylised world would be measuring trees with no middle level at all.
  */
 test.describe('the trees’ levels of detail in the realistic world — #617', () => {
-  paysForTheRealisticLoad(TREES_QUERY);
+  paysForTheLoad(TREES_QUERY, TREES_LOAD_BUDGET_MS);
 
   const trees = async (
     run: (query?: string) => Promise<HarnessRun>,

@@ -5613,6 +5613,22 @@ async function run(): Promise<void> {
     return;
   }
 
+  /**
+   * Which of the two default loads this is — #651. They ran the SAME probes,
+   * every one of them, and each case reads only one load's copy: the shading's
+   * cost, #426's shadow map, #390's presence check and #547's ride start are
+   * read off `?shadow-map` alone, and everything else off the plain page
+   * alone (`game.browser.spec.ts`, every `harness(harnessRun, …)`). So each
+   * load now takes only what its own cases read. Measured on the runner, phase
+   * by phase (run 36334163962): the plain page spent 12.6 s of its 34 timing
+   * the shading for nobody, and `?shadow-map` about 16 s of its 55 on the
+   * models, the variants, the colours, the ground, the water, the settlements
+   * and the three probes after them, for nobody. The sweeps and the light
+   * probe before the timing still run in both: they are what the timing is
+   * taken on the far side of, and they cost about 5 s.
+   */
+  const SHADOW_MAP_LOAD = new URLSearchParams(location.search).has('shadow-map');
+
   let created = false;
   let hasContext = false;
   let framesDrawn = 0;
@@ -5906,6 +5922,7 @@ async function run(): Promise<void> {
           roadOnDescentPixel = readPixel(gl, at.x, at.y);
         }
         resourcesAfterAllFrames = resources();
+        phaseEnds('default: first sweep and read-backs');
 
         // ⚠️ **The same hundred frames again**, and the frames of this second
         // pass are deliberately not counted into {@link framesDrawn}. @see
@@ -5915,6 +5932,7 @@ async function run(): Promise<void> {
         view.render(withoutScenery);
         view.render(frameAt(ON_THE_DESCENT_METRES));
         resourcesAfterSecondSweep = resources();
+        phaseEnds('default: second sweep');
 
         // ------------------------------------------------ the light — #286
         //
@@ -6087,38 +6105,43 @@ async function run(): Promise<void> {
         // every later one whichever shading it was, and that is a warm-up, not
         // a cost. Throwing one away at each shading is what makes the rounds
         // below comparable to each other.
-        for (const settings of [lit, flat]) {
-          view.setQuality(settings);
-          void timeFrames(view, frameAt, gl);
-        }
-
-        const litRounds: number[] = [];
-        const flatRounds: number[] = [];
-        for (let round = 0; round < SHADING_ROUNDS; round += 1) {
-          // ⚠️ **Which shading goes first alternates**, and that is a defect
-          // found by reading the numbers rather than a precaution. With `flat`
-          // always first it came out consistently *faster* to light the scene
-          // — about 0.3 ms a frame, across every run — because whatever the
-          // machine does at the start of a round was charged to whichever
-          // sweep opened it, every time. Averaging two orders charges it to
-          // both, and the sign stopped being stable, which is the honest
-          // answer for a difference this far inside the noise.
-          const flatFirst = round % 2 === 0;
-          for (const shading of flatFirst ? ([flat, lit] as const) : ([lit, flat] as const)) {
-            view.setQuality(shading);
-            const each = timeFrames(view, frameAt, gl);
-            (shading === lit ? litRounds : flatRounds).push(each);
+        phaseEnds('default: light and pedalling');
+        // Read off `?shadow-map` alone — @see SHADOW_MAP_LOAD
+        if (SHADOW_MAP_LOAD) {
+          for (const settings of [lit, flat]) {
+            view.setQuality(settings);
+            void timeFrames(view, frameAt, gl);
           }
+
+          const litRounds: number[] = [];
+          const flatRounds: number[] = [];
+          for (let round = 0; round < SHADING_ROUNDS; round += 1) {
+            // ⚠️ **Which shading goes first alternates**, and that is a defect
+            // found by reading the numbers rather than a precaution. With `flat`
+            // always first it came out consistently *faster* to light the scene
+            // — about 0.3 ms a frame, across every run — because whatever the
+            // machine does at the start of a round was charged to whichever
+            // sweep opened it, every time. Averaging two orders charges it to
+            // both, and the sign stopped being stable, which is the honest
+            // answer for a difference this far inside the noise.
+            const flatFirst = round % 2 === 0;
+            for (const shading of flatFirst ? ([flat, lit] as const) : ([lit, flat] as const)) {
+              view.setQuality(shading);
+              const each = timeFrames(view, frameAt, gl);
+              (shading === lit ? litRounds : flatRounds).push(each);
+            }
+          }
+          const mean = (values: readonly number[]) =>
+            values.reduce((total, each) => total + each, 0) / values.length;
+          const range = (values: readonly number[]) => Math.max(...values) - Math.min(...values);
+          litFrameMs = mean(litRounds);
+          flatFrameMs = mean(flatRounds);
+          // The widest disagreement between two measurements of the *same*
+          // shading — see `frameMsNoise`. The larger of the two groups, because
+          // the question is how much this measurement moves on its own.
+          frameMsNoise = Math.max(range(litRounds), range(flatRounds));
+          phaseEnds('default: shading timing');
         }
-        const mean = (values: readonly number[]) =>
-          values.reduce((total, each) => total + each, 0) / values.length;
-        const range = (values: readonly number[]) => Math.max(...values) - Math.min(...values);
-        litFrameMs = mean(litRounds);
-        flatFrameMs = mean(flatRounds);
-        // The widest disagreement between two measurements of the *same*
-        // shading — see `frameMsNoise`. The larger of the two groups, because
-        // the question is how much this measurement moves on its own.
-        frameMsNoise = Math.max(range(litRounds), range(flatRounds));
 
         view.destroy();
       });
@@ -6136,7 +6159,8 @@ async function run(): Promise<void> {
   // needs the models *cleared*, which is asynchronous by the same signature
   // the loading is.
   try {
-    if (probeFrame !== null) {
+    // Read off the plain page alone — @see SHADOW_MAP_LOAD
+    if (probeFrame !== null && !SHADOW_MAP_LOAD) {
       const frame: SceneFrame = probeFrame;
       for (const item of frame.scatter) {
         sceneryInstances[item.kind] = (sceneryInstances[item.kind] ?? 0) + 1;
@@ -6147,6 +6171,7 @@ async function run(): Promise<void> {
       // same browser, on the same frame, through the same view.
       await loadSceneryModels(() => Promise.reject(new Error('cleared for the control')));
       sceneryIndicesPlain = sceneryIndicesByKind(frame);
+      phaseEnds('default: models');
       await loadSceneryModels();
     }
   } catch (error: unknown) {
@@ -6159,9 +6184,10 @@ async function run(): Promise<void> {
   // counters there are prototype patches held for a synchronous body, and this
   // needs its own view and its own frames.
   try {
-    if (variantFrame !== null) {
+    if (variantFrame !== null && !SHADOW_MAP_LOAD) {
       variantIndices = variantIndicesByKind(variantFrame);
       sceneryCallsByVariants = sceneryCallsAcrossRungs(variantFrame);
+      phaseEnds('default: variants');
     }
   } catch (error: unknown) {
     errors.push(error instanceof Error ? error.message : String(error));
@@ -6169,7 +6195,13 @@ async function run(): Promise<void> {
 
   // ---------------------------- the colours and the riders — #366, #368
   try {
-    if (probeFrame !== null) {
+    // #426's shadow map: read off `?shadow-map` alone — @see SHADOW_MAP_LOAD
+    if (probeFrame !== null && SHADOW_MAP_LOAD) {
+      shadowMap = shadowMapProbe(probeFrame);
+      phaseEnds('default: shadow map');
+    }
+    // Everything else in this block is read off the plain page alone.
+    if (probeFrame !== null && !SHADOW_MAP_LOAD) {
       const found = colourProbes(probeFrame);
       texturesCreated = found.texturesCreated;
       texturesBaseline = found.texturesBaseline;
@@ -6186,23 +6218,29 @@ async function run(): Promise<void> {
       contactShadowPixels = found.contactShadowPixels;
       contactShadowLuminance = found.contactShadowLuminance;
       contactShadowNoise = found.contactShadowNoise;
-      if (new URLSearchParams(location.search).has('shadow-map')) {
-        shadowMap = shadowMapProbe(probeFrame);
-      }
+      phaseEnds('default: colours');
     }
-    // #458, on a canvas of its own. @see gradientProbe
-    gradient = gradientProbe();
-    // #459. @see waterProbe
-    water = waterProbe();
-    // #460. @see settlementProbe
-    settlement = settlementProbe();
-    // #424, on canvases of their own — @see riderExtent. 16 : 9 is the
-    // criterion's own frame; 10 : 16 is a tablet held upright.
-    riderFrame = { landscape: riderExtent(640, 360), portrait: riderExtent(400, 640) };
-    // #499, on a canvas of its own. @see lineProbe
-    line = lineProbe(640, 360);
-    // #583, on a canvas of its own. @see bendProbe
-    bend = bendProbe(640, 360);
+    if (!SHADOW_MAP_LOAD) {
+      // #458, on a canvas of its own. @see gradientProbe
+      gradient = gradientProbe();
+      phaseEnds('default: gradient');
+      // #459. @see waterProbe
+      water = waterProbe();
+      phaseEnds('default: water');
+      // #460. @see settlementProbe
+      settlement = settlementProbe();
+      phaseEnds('default: settlement');
+      // #424, on canvases of their own — @see riderExtent. 16 : 9 is the
+      // criterion's own frame; 10 : 16 is a tablet held upright.
+      riderFrame = { landscape: riderExtent(640, 360), portrait: riderExtent(400, 640) };
+      phaseEnds('default: rider extent');
+      // #499, on a canvas of its own. @see lineProbe
+      line = lineProbe(640, 360);
+      phaseEnds('default: line');
+      // #583, on a canvas of its own. @see bendProbe
+      bend = bendProbe(640, 360);
+      phaseEnds('default: bend');
+    }
   } catch (error: unknown) {
     errors.push(error instanceof Error ? error.message : String(error));
   }
@@ -6210,8 +6248,9 @@ async function run(): Promise<void> {
   // #390, on a canvas of its own and outside the block above, because it has
   // to `await` a camera. Only on the load that already times rungs.
   try {
-    if (probeFrame !== null && new URLSearchParams(location.search).has('shadow-map')) {
+    if (probeFrame !== null && SHADOW_MAP_LOAD) {
       presenceCost = await presenceCostProbe(probeFrame);
+      phaseEnds('default: presence cost');
     }
   } catch (error: unknown) {
     errors.push(error instanceof Error ? error.message : String(error));
@@ -6220,8 +6259,9 @@ async function run(): Promise<void> {
   // #547, on canvases of its own, and awaited for the same reason: `prepare`
   // is. Only on the load that already measures the shadow map.
   try {
-    if (new URLSearchParams(location.search).has('shadow-map')) {
+    if (SHADOW_MAP_LOAD) {
       rideStart = await rideStartProbe();
+      phaseEnds('default: ride start');
     }
   } catch (error: unknown) {
     errors.push(error instanceof Error ? error.message : String(error));
