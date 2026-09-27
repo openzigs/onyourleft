@@ -108,7 +108,7 @@ apps/                 AGPL-3.0-or-later, without exception
                         credit is its own section and links the licence text
                         the app ships (public/licences/), and the courtesy
                         section is an allowlist (CC0-1.0) rather than "every
-                        licence that is not CC BY"
+                        licence that is not CC BY".
                         Since #664 it also lists the software the app ships —
                         notices.ts reads third-party-contents.txt, which
                         scripts/check-third-party-notices.mjs generates beside

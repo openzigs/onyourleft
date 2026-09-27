@@ -76,6 +76,28 @@ entry() {
   printf '"%s %s":[{"name":"%s","versions":["%s"],"paths":["%s"],"license":"%s"}]' "$1" "$2" "$2" "$3" "$4" "$1"
 }
 
+# The reviewed bundler entries every fixture carries, for the vite and rolldown
+# new_fixture installs. `through` stops before the part of vite's file that
+# covers code which does NOT ship, and a case holds that.
+BUNDLER_ENTRIES='{"vite@8.3.0":{"what":"its preload helper","files":[{"file":"LICENSE.md","from":"# Vite core license","through":"SOFTWARE."}]},"rolldown@1.2.6":{"what":"its interop runtime","files":[{"file":"LICENSE"}]}}'
+
+# inputs <json> -- the web inputs, with the fixture's bundler entries added
+# unless the JSON names its own.
+inputs() {
+  node -e 'const j = JSON.parse(process.argv[1]); j.writtenByTheBundler ??= JSON.parse(process.argv[2]); process.stdout.write(JSON.stringify(j));' \
+    "$1" "${BUNDLER_ENTRIES}" > "${tmp}/apps/web/third-party-notices.json"
+}
+
+# entry_block <name> <version> -- that entry of the document, separator to separator.
+entry_block() {
+  awk -v name="Name: $1" -v version="Version: $2" '
+    /^========================================================================$/ { if (on) exit; held = 1; next }
+    held == 1 { held = ($0 == name) ? 2 : 0; next }
+    held == 2 { if ($0 == version) on = 1; held = 0 }
+    on { print }
+  ' "${tmp}/${DOCUMENT}"
+}
+
 new_fixture() {
   cleanup
   tmp="$(mktemp -d)"
@@ -105,7 +127,7 @@ esac
 PNPM
   chmod +x "${tmp}/bin/pnpm"
 
-  printf '{"noLicenceFile":{},"copiedIntoBuild":[]}\n' > "${tmp}/apps/web/third-party-notices.json"
+  inputs '{"noLicenceFile":{},"copiedIntoBuild":[]}'
   cat > "${tmp}/apps/mobile/native-closure.json" <<'JSON'
 {
   "reviewed": "2026-09-27",
@@ -129,6 +151,18 @@ JSON
   printf 'Dexie.js\nCopyright (c) 2014 David Fahlander\n' > "${DEXIE}/NOTICE"
   VITEST="$(package vitest 4.1.11)"
   printf 'MIT License -- a build tool\n' > "${VITEST}/LICENSE"
+
+  # The bundler, laid out as pnpm lays it out: vite reached from apps/web
+  # through a symlink, rolldown as vite's sibling inside .pnpm. Neither is in
+  # any closure -- vite is a devDependency -- which is the point.
+  VITE="${tmp}/node_modules/.pnpm/vite@8.3.0/node_modules/vite"
+  ROLLDOWN="${tmp}/node_modules/.pnpm/vite@8.3.0/node_modules/rolldown"
+  mkdir -p "${VITE}" "${ROLLDOWN}" "${tmp}/apps/web/node_modules"
+  printf '{"name":"vite","version":"8.3.0","license":"MIT"}\n' > "${VITE}/package.json"
+  printf '# Vite core license\nVite fixture core licence\nSOFTWARE.\n\n# Licenses of bundled dependencies\nbundled into the dev server only\n' > "${VITE}/LICENSE.md"
+  printf '{"name":"rolldown","version":"1.2.6","license":"MIT"}\n' > "${ROLLDOWN}/package.json"
+  printf 'Rolldown fixture licence\n' > "${ROLLDOWN}/LICENSE"
+  ln -s "${VITE}" "${tmp}/apps/web/node_modules/vite"
 
   closure @onyourleft/web "{$(entry MIT react 19.0.0 "${REACT}")}"
   closure @onyourleft/store "{$(entry Apache-2.0 dexie 4.4.6 "${DEXIE}")}"
@@ -163,7 +197,7 @@ generate
 assert_exit 'generates over a fixture workspace' 0
 run --assume-installed
 assert_exit 'and the check agrees with what it just wrote' 0
-assert_says 'and says how much it checked' '2 packages and 1 native libraries'
+assert_says 'and says how much it checked' '2 packages, 2 build tools and 1 native libraries'
 if [ -f "${tmp}/${CONTENTS}" ] && grep -qF 'Part 1 — in the app (2 packages)' "${tmp}/${CONTENTS}" \
   && ! grep -qF -- '=====' "${tmp}/${CONTENTS}"; then
   ok 'writes the contents file, which is the document up to its first entry'
@@ -227,14 +261,52 @@ printf 'lower-case licence\n' > "${ODD}/license"
 printf 'second licence\n' > "${ODD}/LICENSE-MIT"
 printf 'copying text\n' > "${ODD}/COPYING.md"
 mkdir -p "${ODD}/licenses"
-printf 'a directory is not a licence file\n' > "${ODD}/licenses/other.txt"
+printf 'a file in a root licenses directory\n' > "${ODD}/licenses/other.txt"
 printf 'not a licence\n' > "${ODD}/licensed-material.txt"
+printf 'third-party notices text\n' > "${ODD}/ThirdPartyNotices.txt"
+printf 'copyright notice text\n' > "${ODD}/CopyrightNotice.txt"
+printf 'module.exports = "a licence helper, which is code"\n' > "${ODD}/license.js"
+printf 'export declare const notice: string; // types\n' > "${ODD}/notice.d.ts"
+printf 'export const inDirectory = "code";\n' > "${ODD}/licenses/helper.js"
 closure @onyourleft/web "{$(entry MIT react 19.0.0 "${REACT}"),$(entry MIT odd-names 1.0.0 "${ODD}")}"
 generate
 assert_document_has 'reads a lower-case `license`' 'lower-case licence'
 assert_document_has 'reads a suffixed LICENSE-MIT' 'second licence'
 assert_document_has 'reads COPYING' 'copying text'
 assert_document_lacks 'does not read a file whose name only starts like one' 'not a licence'
+assert_document_has 'reads a notice whose name does not START with notice (ThirdPartyNotices.txt)' 'third-party notices text'
+assert_document_has 'reads tslib'\''s shape, CopyrightNotice.txt' 'copyright notice text'
+assert_document_has 'reads every file in a root licenses/ directory' 'a file in a root licenses directory'
+assert_document_has 'naming it by its path in the package' '--- licenses/other.txt (from the package) ---'
+assert_document_lacks 'does not read a license.js, which is code' 'a licence helper, which is code'
+assert_document_lacks 'does not read a notice.d.ts, which is code' 'export declare const notice'
+assert_document_lacks 'does not read code inside the licenses/ directory either' 'inDirectory'
+
+# --- One package at two versions: pnpm's versions[i] goes with paths[i] --------
+#
+# pnpm groups a package installed at two versions into ONE entry with parallel
+# `versions` and `paths` arrays. Each version must be noticed with the text
+# from its OWN directory -- a generator that took paths[0] for both would
+# notice version 2 with version 1's licence and every check would still pass.
+
+new_fixture
+TWO_A="$(package twice 1.0.0)"
+TWO_B="$(package twice 2.0.0)"
+printf 'the licence of twice one\n' > "${TWO_A}/LICENSE"
+printf 'the licence of twice two\n' > "${TWO_B}/LICENSE"
+closure @onyourleft/web "{$(entry MIT react 19.0.0 "${REACT}"),\"MIT twice\":[{\"name\":\"twice\",\"versions\":[\"1.0.0\",\"2.0.0\"],\"paths\":[\"${TWO_A}\",\"${TWO_B}\"],\"license\":\"MIT\"}]}"
+generate
+assert_exit 'generates with one package at two versions' 0
+if entry_block twice 1.0.0 | grep -qF 'the licence of twice one' && ! entry_block twice 1.0.0 | grep -qF 'twice two'; then
+  ok 'notices version 1 with the text from version 1'"'"'s own directory'
+else
+  bad 'notices version 1 with the text from version 1'"'"'s own directory' "$(entry_block twice 1.0.0)"
+fi
+if entry_block twice 2.0.0 | grep -qF 'the licence of twice two' && ! entry_block twice 2.0.0 | grep -qF 'twice one'; then
+  ok 'and version 2 with the text from version 2'"'"'s'
+else
+  bad 'and version 2 with the text from version 2'"'"'s' "$(entry_block twice 2.0.0)"
+fi
 
 # --- Fails closed: no licence file ---------------------------------------------
 
@@ -247,31 +319,27 @@ assert_says 'naming the package and its version' 'NOT003 no-licence-here@2.0.0 s
 if [ -f "${tmp}/${DOCUMENT}" ]; then bad 'and writes no document at all' "$(head -5 "${tmp}/${DOCUMENT}")"; else ok 'and writes no document at all'; fi
 
 # A reviewed entry for the SAME name at another version does not excuse it.
-printf '{"noLicenceFile":{"no-licence-here@1.0.0":{"why":"x","upstream":{"url":"u","read":"r","text":"t"}}},"copiedIntoBuild":[]}\n' \
-  > "${tmp}/apps/web/third-party-notices.json"
+inputs '{"noLicenceFile":{"no-licence-here@1.0.0":{"why":"x","upstream":{"url":"u","read":"r","text":"t"}}},"copiedIntoBuild":[]}'
 generate
 assert_exit 'a reviewed entry for another version does not excuse it' 1
 assert_says 'and says a new version is read again' 'There is one for no-licence-here@1.0.0'
 
 # An excerpt read from a file the package does ship makes it pass.
 printf '# no-licence-here\n\n## Licence\n\nCopyright 2026 Someone. MIT.\n' > "${BARE}/README.md"
-printf '{"noLicenceFile":{"no-licence-here@2.0.0":{"why":"x","excerpt":{"file":"README.md","from":"## Licence"}}},"copiedIntoBuild":[]}\n' \
-  > "${tmp}/apps/web/third-party-notices.json"
+inputs '{"noLicenceFile":{"no-licence-here@2.0.0":{"why":"x","excerpt":{"file":"README.md","from":"## Licence"}}},"copiedIntoBuild":[]}'
 generate
 assert_exit 'a reviewed excerpt from inside the package lets it through' 0
 assert_document_has 'with the excerpt, from its marker to the end' 'Copyright 2026 Someone. MIT.'
 assert_document_lacks 'and nothing above the marker' '# no-licence-here'
 
 # ... and a marker that is not there fails rather than noticing nothing.
-printf '{"noLicenceFile":{"no-licence-here@2.0.0":{"why":"x","excerpt":{"file":"README.md","from":"## License"}}},"copiedIntoBuild":[]}\n' \
-  > "${tmp}/apps/web/third-party-notices.json"
+inputs '{"noLicenceFile":{"no-licence-here@2.0.0":{"why":"x","excerpt":{"file":"README.md","from":"## License"}}},"copiedIntoBuild":[]}'
 generate
 assert_exit 'an excerpt whose marker is gone fails' 1
 assert_says 'naming the marker' 'NOT004 no-licence-here@2.0.0: the reviewed excerpt of README.md'
 
 # The canonical text a reviewed entry asks for is appended once.
-printf '{"noLicenceFile":{"no-licence-here@2.0.0":{"why":"x","excerpt":{"file":"README.md","from":"## Licence"},"licenceText":"Apache-2.0"}},"copiedIntoBuild":[]}\n' \
-  > "${tmp}/apps/web/third-party-notices.json"
+inputs '{"noLicenceFile":{"no-licence-here@2.0.0":{"why":"x","excerpt":{"file":"README.md","from":"## Licence"},"licenceText":"Apache-2.0"}},"copiedIntoBuild":[]}'
 generate
 assert_document_has 'appends the canonical text a reviewed entry names' 'Appendix: Apache-2.0'
 if [ "$(grep -c '^Appendix: Apache-2.0$' "${tmp}/${DOCUMENT}")" = 1 ]; then ok 'once, however many entries ask for it'; else bad 'once, however many entries ask for it'; fi
@@ -279,15 +347,13 @@ if [ "$(grep -c '^Appendix: Apache-2.0$' "${tmp}/${DOCUMENT}")" = 1 ]; then ok '
 # --- Stale reviewed entries ------------------------------------------------------
 
 new_fixture
-printf '{"noLicenceFile":{"gone@1.0.0":{"why":"x","upstream":{"url":"u","read":"r","text":"t"}}},"copiedIntoBuild":[]}\n' \
-  > "${tmp}/apps/web/third-party-notices.json"
+inputs '{"noLicenceFile":{"gone@1.0.0":{"why":"x","upstream":{"url":"u","read":"r","text":"t"}}},"copiedIntoBuild":[]}'
 generate
 assert_exit 'a reviewed entry for a package not in the closure fails' 1
 assert_says 'naming it' 'NOT004 gone@1.0.0 has a reviewed entry'
 
 new_fixture
-printf '{"noLicenceFile":{"react@19.0.0":{"why":"x","upstream":{"url":"u","read":"r","text":"t"}}},"copiedIntoBuild":[]}\n' \
-  > "${tmp}/apps/web/third-party-notices.json"
+inputs '{"noLicenceFile":{"react@19.0.0":{"why":"x","upstream":{"url":"u","read":"r","text":"t"}}},"copiedIntoBuild":[]}'
 generate
 assert_exit 'a reviewed entry for a package that now ships its own licence fails' 1
 assert_says 'naming the file it ships' 'NOT004 react@19.0.0 ships its own licence file now (LICENSE)'
@@ -337,9 +403,16 @@ assert_says 'as NOT007' "NOT007 ${DOCUMENT} is not there"
 new_fixture
 closure @onyourleft/web '{}'
 closure @onyourleft/store '{}'
+# ⚠️ No Android project here, so NOTHING but the empty closure is wrong with
+# this tree: the fixture's :bridge project names react, which an empty closure
+# lacks, and its NOT005 used to hold the exit code at 1 with the NOT002 check
+# deleted. Without the check this tree now generates cleanly, and the exit
+# assertion goes red on its own.
+sed -i.bak 's/"projects": \[.*\]/"projects": []/' "${tmp}/apps/mobile/native-closure.json"
 generate
 assert_exit 'an empty closure fails' 1
 assert_says 'as NOT002' 'NOT002 the distributed closure of every workspace package is empty'
+assert_silent 'and for that reason alone' 'NOT005'
 
 new_fixture
 generate
@@ -395,14 +468,64 @@ assert_says 'naming the project' 'NOT005 the Android project :bridge'
 new_fixture
 mkdir -p "${REACT}/wasm"
 printf 'wasm' > "${REACT}/wasm/runtime.wasm"
-printf '{"noLicenceFile":{},"copiedIntoBuild":[{"path":"pose/runtime.wasm","package":"react","file":"wasm/runtime.wasm","by":"a plugin"}]}\n' \
-  > "${tmp}/apps/web/third-party-notices.json"
+inputs '{"noLicenceFile":{},"copiedIntoBuild":[{"path":"pose/runtime.wasm","package":"react","file":"wasm/runtime.wasm","by":"a plugin"}]}'
 generate
 assert_document_has 'names a file copied into the build, and its package' 'pose/runtime.wasm — from react 19.0.0 (a plugin)'
 rm "${REACT}/wasm/runtime.wasm"
 generate
 assert_exit 'a copied file its package no longer has fails' 1
 assert_says 'as NOT005' 'NOT005 pose/runtime.wasm is copied out of react@19.0.0/wasm/runtime.wasm'
+
+# --- Code the bundler writes into the build (#676's review) ------------------------
+#
+# vite and rolldown are in no closure -- vite is a devDependency -- and their
+# own code is in every build. So an entry for each, at its installed version,
+# is REQUIRED rather than merely rendered.
+
+new_fixture
+generate
+assert_document_has 'notices the bundler, which no closure lists' 'Name: vite'
+assert_document_has 'as the bundler'\''s part' 'Part: bundler'
+assert_document_has 'with the part of its licence file that covers the code that ships' 'Vite fixture core licence'
+assert_document_lacks 'and not the part that covers code which does not' 'bundled into the dev server only'
+assert_document_has 'and rolldown, reached through vite as pnpm lays it out' 'Rolldown fixture licence'
+if grep -qF 'Part 4 — code the build tools write into the app' "${tmp}/${CONTENTS}" \
+  && grep -qF '  vite 8.3.0 — MIT: its preload helper' "${tmp}/${CONTENTS}"; then
+  ok 'and lists them in the contents'
+else
+  bad 'and lists them in the contents' "$(cat "${tmp}/${CONTENTS}")"
+fi
+
+new_fixture
+inputs "{\"noLicenceFile\":{},\"copiedIntoBuild\":[],\"writtenByTheBundler\":$(node -e 'const j = JSON.parse(process.argv[1]); delete j["vite@8.3.0"]; process.stdout.write(JSON.stringify(j));' "${BUNDLER_ENTRIES}")}"
+generate
+assert_exit 'the bundler with no reviewed entry fails' 1
+assert_says 'as NOT008, naming it and its installed version' 'NOT008 the build writes vite@8.3.0'
+
+new_fixture
+inputs "{\"noLicenceFile\":{},\"copiedIntoBuild\":[],\"writtenByTheBundler\":$(node -e 'const j = JSON.parse(process.argv[1]); delete j["rolldown@1.2.6"]; process.stdout.write(JSON.stringify(j));' "${BUNDLER_ENTRIES}")}"
+generate
+assert_exit 'the bundler'\''s own bundler with no reviewed entry fails too' 1
+assert_says 'as NOT008' 'NOT008 the build writes rolldown@1.2.6'
+
+new_fixture
+printf '{"name":"vite","version":"8.4.0","license":"MIT"}\n' > "${VITE}/package.json"
+generate
+assert_exit 'a bundler bump fails closed' 1
+assert_says 'saying the new version is read again' 'There is one for vite@8.3.0; a new version is read again'
+assert_says 'and the old entry is stale' 'NOT004 vite@8.3.0 has a `writtenByTheBundler` entry'
+
+new_fixture
+printf 'no marker here\n' > "${VITE}/LICENSE.md"
+generate
+assert_exit 'a bundler licence file without its reviewed marker fails' 1
+assert_says 'as NOT004' 'NOT004 vite@8.3.0: LICENSE.md, from `# Vite core license`,'
+
+new_fixture
+rm "${tmp}/apps/web/node_modules/vite"
+generate
+assert_exit 'a bundler that cannot be resolved fails rather than noticing nothing' 1
+assert_says 'as NOT008' 'NOT008 vite could not be resolved'
 
 # --- Deterministic --------------------------------------------------------------------
 

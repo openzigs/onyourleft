@@ -7,7 +7,8 @@ the packages themselves ship them.
 Part 1 is everything in the app itself: the web build a browser downloads,
 which the Android app carries too. Part 2 is the native libraries only the
 Android app contains. Part 3 names the files the build copies whole out of a
-package in part 1.
+package in part 1. Part 4 is code the build tools write into the app, which
+no package in part 1 accounts for.
 
 Generated from the installed dependency tree by
 scripts/check-third-party-notices.mjs. Do not edit it by hand.
@@ -113,3 +114,7 @@ Part 2 — in the Android app only (50 libraries)
 
 Part 3 — files copied out of a package into the build
   pose/vision_wasm_module_internal.wasm — from @mediapipe/tasks-vision 1.0.1 (apps/web/tools/pose/pose-runtime-plugin.ts)
+
+Part 4 — code the build tools write into the app
+  vite 8.3.0 — MIT: its module-preload polyfill and its __vitePreload helper, in the entry chunk
+  rolldown 1.2.6 — MIT: its CommonJS-interop runtime (the __commonJS, __toESM and __export helpers), in the assets/rolldown-runtime-*.js chunk

@@ -21,7 +21,7 @@
  * `apps/web/public/licences/third-party.txt`, which Vite copies into `dist`
  * — so it is served beside the app, precached by the service worker like
  * everything else in `public/`, and inside the APK because the APK carries
- * `dist` (CLAUDE.md §4h). One document with three parts:
+ * `dist` (CLAUDE.md §4h). One document with four parts:
  *
  * 1. every package in the app's **distributed** closure, with its name,
  *    version, licence expression and the **verbatim** text of every
@@ -30,17 +30,20 @@
  *    `apps/mobile/native-closure.json` (`src/android/native-closure.ts` holds
  *    that list to Gradle where Gradle has run);
  * 3. the files the build copies out of a package into `dist`, and which
- *    package each came from.
+ *    package each came from;
+ * 4. the code the bundler itself writes into `dist` — see
+ *    `WRITTEN_BY_THE_BUNDLER`.
  *
  * ## Shape (b): committed, and regenerated-and-diffed — not built
  *
  * #664 offered two shapes. This is (b), for three reasons that are about this
  * repository rather than taste:
  *
- * - **The closure is pnpm's answer, and asking costs seconds per workspace
- *   package.** Doing it inside `vite build` would put seven `pnpm licenses
- *   list` calls in every build, including the two `test:browser` makes, and
- *   make a build depend on a package manager being on `PATH`.
+ * - **The closure is pnpm's answer, and a build should not have to ask.**
+ *   The whole check is about 2 s on a warm install (4 s in CI) — the cost is
+ *   not the reason. Doing it inside `vite build` would put seven `pnpm
+ *   licenses list` calls in every build, including the two `test:browser`
+ *   makes, and make a build depend on a package manager being on `PATH`.
  * - **A dependency bump then shows its licence text in the diff.** A new
  *   package, or one whose `LICENSE` changed, is a red check on the pull request
  *   that caused it and a hunk a reviewer reads — which is the point of a
@@ -103,6 +106,9 @@
  *           package
  *   NOT006  the committed document is not what the generator writes
  *   NOT007  the committed document is not there
+ *   NOT008  a package whose code the bundler writes into the build (Vite's
+ *           module-preload polyfill and preload helper, Rolldown's runtime) has
+ *           no reviewed entry at its installed version
  *
  * Usage: node scripts/check-third-party-notices.mjs [--root <dir>] [--write]
  *                                                   [--assume-installed]
@@ -110,6 +116,14 @@
  *
  * ## Limits
  *
+ * - `copiedIntoBuild` is a reviewed list this checker renders and cannot
+ *   complete: it does not build. What holds it complete is the build itself —
+ *   `apps/web/tools/notices/copied-into-build.ts`, a plugin in the product's
+ *   `vite.config.ts`, fails `pnpm run build` over a package's non-code asset
+ *   the list does not name. It reads the product build only.
+ * - `WRITTEN_BY_THE_BUNDLER` is written down, not discovered: a second bundler,
+ *   or a plugin that injects its own runtime, is noticed only once somebody
+ *   adds it there.
  * - It notices what pnpm says ships. Code a package **vendors** under its own
  *   licence field — MediaPipe's bundle is one binary built from many projects
  *   — is noticed only as far as that package's own files notice it. The same
@@ -131,7 +145,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import process from 'node:process';
 
 import { differingLines } from './check-capacitor-generated.mjs';
@@ -168,6 +182,31 @@ export const NATIVE_INPUTS = 'apps/mobile/native-closure.json';
  */
 export const LICENCE_TEXTS = { 'Apache-2.0': 'LICENSES/Apache-2.0.txt' };
 
+/**
+ * The packages whose OWN code the bundler writes into `dist`, each as the chain
+ * of names Node resolves from `apps/web` to reach it.
+ *
+ * ⚠️ **In no closure at all**, which is why this list exists (#676's review).
+ * `vite` is a devDependency, so `--prod` never lists it — yet `vite build`
+ * writes its module-preload polyfill and its `__vitePreload` helper into the
+ * entry chunk, and Rolldown, which Vite builds with, writes its CommonJS
+ * interop runtime (`__commonJS`, `__toESM`, `__export`) into a
+ * `rolldown-runtime-*.js` chunk the entry chunk imports. Both are MIT and
+ * both ship.
+ * Read off a real `dist` on 2026-09-27: `grep -l modulepreload
+ * apps/web/dist/assets/*.js` names the entry chunk, and
+ * `dist/assets/rolldown-runtime-*.js` is those helpers and nothing else.
+ *
+ * Each needs a reviewed entry in `writtenByTheBundler`, keyed by the version
+ * INSTALLED here — so a Vite or Rolldown bump fails closed (NOT008) until
+ * somebody re-reads what the new version writes and what its licence file
+ * says, the same posture as `noLicenceFile`. A new bundler is a new line here.
+ */
+export const WRITTEN_BY_THE_BUNDLER = [['vite'], ['vite', 'rolldown']];
+
+/** Where the bundler chains above are resolved from: the app that is built. */
+export const BUILT_APP = 'apps/web';
+
 /** How the committed document is put right. It runs the frozen install itself. */
 export const REPAIR = 'pnpm run notices:generate';
 
@@ -175,13 +214,28 @@ export const REPAIR = 'pnpm run notices:generate';
 export const SEPARATOR = '='.repeat(72);
 
 /**
- * A licence or notice file, by name: `LICENSE`, `LICENCE`, `COPYING`,
- * `NOTICE`, with or without an extension or a suffix (`LICENSE.txt`,
- * `LICENSE-MIT`, `license.md`). Case-insensitive, because `require-from-string`
- * ships `license` in lower case.
+ * A licence or notice file, by name, anywhere in the name and in any case:
+ * `LICENSE`, `license`, `LICENCE`, `LICENSE-MIT`, `COPYING.md`, `NOTICE`, and
+ * — since #676's review — `ThirdPartyNotices.txt` and tslib's
+ * `CopyrightNotice.txt`, which a pattern anchored at the start of the name
+ * read past. The word must END there (an `s` aside), so `licensed-material.txt`
+ * and a `noticeable` helper are not licence files.
  */
-const LICENCE_FILE = /^(?:licen[cs]e|copying|notice)(?:[-._].*)?$/i;
-const NOTICE_FILE = /^notice/i;
+const LICENCE_FILE = /(?:licen[cs]e|notice)s?(?![a-z])|copying(?![a-z])/i;
+const NOTICE_FILE = /notice/i;
+
+/**
+ * A root directory some packages keep their licences in, one file per licence
+ * (REUSE's `LICENSES/`). Every file in it is read, whatever its name.
+ */
+const LICENCE_DIRECTORY = /^licen[cs]es$/i;
+
+/**
+ * Source, never a licence, whatever it is called: a `license.js` helper, a
+ * `notice.d.ts`, a source map. Read as a notice, it would put code in the
+ * document and pass every check.
+ */
+const SOURCE_FILE = /\.(?:[cm]?[jt]sx?|map|json)$/i;
 
 /** Line endings and a byte-order mark normalised; the words untouched. */
 function normalised(text) {
@@ -219,15 +273,59 @@ export function distributedUnion(root) {
   );
 }
 
-/** Every licence and notice file in a package directory, licences first. */
+/**
+ * Every licence and notice file in a package directory, licences first: those
+ * at its root, then everything in a root `LICENSES/` directory, named by their
+ * path inside the package.
+ */
 export function licenceFiles(directory) {
   if (directory === undefined || !existsSync(directory)) return [];
-  return readdirSync(directory)
-    .filter((name) => LICENCE_FILE.test(name) && statSync(join(directory, name)).isFile())
-    .sort((left, right) => {
-      const notice = Number(NOTICE_FILE.test(left)) - Number(NOTICE_FILE.test(right));
-      return notice || byCodePoint(left, right);
-    });
+  const isFile = (path) => statSync(join(directory, path)).isFile();
+  const found = [];
+  for (const name of readdirSync(directory)) {
+    if (SOURCE_FILE.test(name)) continue;
+    if (LICENCE_FILE.test(name) && isFile(name)) {
+      found.push(name);
+      continue;
+    }
+    if (LICENCE_DIRECTORY.test(name) && statSync(join(directory, name)).isDirectory()) {
+      for (const inner of readdirSync(join(directory, name))) {
+        const path = `${name}/${inner}`;
+        if (!SOURCE_FILE.test(inner) && isFile(path)) found.push(path);
+      }
+    }
+  }
+  return found.sort((left, right) => {
+    const notice = Number(NOTICE_FILE.test(left)) - Number(NOTICE_FILE.test(right));
+    return notice || byCodePoint(left, right);
+  });
+}
+
+/**
+ * Node's own lookup, one name at a time: from `from`, each ancestor's
+ * `node_modules/<name>`, the real path of the first that exists. Under pnpm a
+ * package's dependencies are its siblings in `.pnpm/<it>/node_modules`, which
+ * this reaches as the first ancestor's `node_modules`. The walk stops at
+ * `root`: a `vite` in a home directory's `node_modules` is not this build's.
+ */
+export function resolveChain(root, from, chain) {
+  let directory = from;
+  for (const name of chain) {
+    let found;
+    for (let at = directory; ; at = dirname(at)) {
+      if (basename(at) !== 'node_modules') {
+        const candidate = join(at, 'node_modules', name);
+        if (existsSync(join(candidate, 'package.json'))) {
+          found = realpathSync(candidate);
+          break;
+        }
+      }
+      if (at === root || dirname(at) === at) break;
+    }
+    if (found === undefined) return undefined;
+    directory = found;
+  }
+  return directory;
 }
 
 /** Lines `from` (inclusive) through `through` (inclusive), or to the end. */
@@ -389,6 +487,82 @@ export function renderNotices(root) {
     }
   }
 
+  // Code the bundler writes into the build, which no closure lists.
+  const bundlerEntries = [];
+  const bundlerLines = [];
+  const written = web.writtenByTheBundler ?? {};
+  const wanted = new Set();
+  for (const chain of WRITTEN_BY_THE_BUNDLER) {
+    const directory = resolveChain(realpathSync(root), realpathSync(join(root, BUILT_APP)), chain);
+    const name = chain.at(-1);
+    if (directory === undefined) {
+      problems.push(
+        `NOT008 ${chain.join(' → ')} could not be resolved from ${BUILT_APP}, so the code it ` +
+          'writes into the build cannot be noticed.',
+      );
+      continue;
+    }
+    const manifest = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'));
+    const key = `${name}@${manifest.version}`;
+    wanted.add(key);
+    const reviewed = written[key];
+    if (reviewed === undefined) {
+      const others = Object.keys(written).filter((other) => other.startsWith(`${name}@`));
+      problems.push(
+        `NOT008 the build writes ${key}'s own code into dist and no reviewed entry in ` +
+          `${WEB_INPUTS} \`writtenByTheBundler\` notices it` +
+          (others.length > 0
+            ? `. There is one for ${others.join(', ')}; a new version is read again, not assumed.`
+            : '.'),
+      );
+      continue;
+    }
+    const sections = [];
+    for (const file of reviewed.files ?? []) {
+      const path = join(directory, file.file);
+      const whole = existsSync(path) ? readFileSync(path, 'utf8') : undefined;
+      const text = whole === undefined || file.from === undefined ? whole : excerptOf(whole, file);
+      if (text === undefined) {
+        problems.push(
+          `NOT004 ${key}: ${file.file}` +
+            (file.from === undefined ? '' : `, from \`${file.from}\`,`) +
+            ' is not in the installed package.',
+        );
+        continue;
+      }
+      sections.push({
+        heading:
+          file.from === undefined
+            ? `${file.file} (from the package)`
+            : `${file.file}, from \`${file.from}\` (from the package)`,
+        text: normalised(text),
+      });
+    }
+    if (sections.length === 0) {
+      problems.push(`NOT004 ${key}: its reviewed entry in ${WEB_INPUTS} supplies no text.`);
+      continue;
+    }
+    const licence = manifest.license || '(none declared)';
+    bundlerLines.push(`  ${name} ${manifest.version} — ${licence}: ${reviewed.what}`);
+    bundlerEntries.push(
+      entry({
+        name,
+        version: manifest.version,
+        licence,
+        part: 'bundler',
+        sections: [{ heading: 'What the build carries', text: reviewed.what }, ...sections],
+      }),
+    );
+  }
+  for (const key of Object.keys(written).sort(byCodePoint)) {
+    if (!wanted.has(key)) {
+      problems.push(
+        `NOT004 ${key} has a \`writtenByTheBundler\` entry in ${WEB_INPUTS} and is not a ` +
+          'bundler this build is made with at that version — delete the entry.',
+      );
+    }
+  }
+
   const names = new Set(union.map((dependency) => dependency.name));
   const copied = [];
   for (const file of web.copiedIntoBuild ?? []) {
@@ -490,7 +664,8 @@ export function renderNotices(root) {
     'Part 1 is everything in the app itself: the web build a browser downloads,',
     'which the Android app carries too. Part 2 is the native libraries only the',
     'Android app contains. Part 3 names the files the build copies whole out of a',
-    'package in part 1.',
+    'package in part 1. Part 4 is code the build tools write into the app, which',
+    'no package in part 1 accounts for.',
     '',
     'Generated from the installed dependency tree by',
     'scripts/check-third-party-notices.mjs. Do not edit it by hand.',
@@ -507,14 +682,25 @@ export function renderNotices(root) {
     '',
     'Part 3 — files copied out of a package into the build',
     ...(copied.length > 0 ? copied : ['  (none)']),
+    '',
+    'Part 4 — code the build tools write into the app',
+    ...(bundlerLines.length > 0 ? bundlerLines : ['  (none)']),
   ].join('\n');
-  const document = [contents, '', ...entries, ...nativeEntries, ...appendixText].join('\n');
+  const document = [
+    contents,
+    '',
+    ...entries,
+    ...bundlerEntries,
+    ...nativeEntries,
+    ...appendixText,
+  ].join('\n');
 
   return {
     problems,
     document,
     contents,
     packages: union.length,
+    bundled: bundlerEntries.length,
     libraries: nativeLibraries.length,
   };
 }
@@ -561,7 +747,9 @@ export function thirdPartyNotices({ root, write = false, assumeInstalled = false
   const rendered = renderNotices(root);
   if (rendered.problems.length > 0) return { problems: rendered.problems };
 
-  const summary = `${String(rendered.packages)} packages and ${String(rendered.libraries)} native libraries`;
+  const summary =
+    `${String(rendered.packages)} packages, ${String(rendered.bundled)} build tools ` +
+    `and ${String(rendered.libraries)} native libraries`;
   const outputs = [
     { file: DOCUMENT, text: `${rendered.document}\n` },
     { file: CONTENTS, text: `${rendered.contents}\n` },

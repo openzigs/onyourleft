@@ -1529,15 +1529,18 @@ bash scripts/check-dependency-licences.test.sh
 # Runs its own `pnpm install --frozen-lockfile` (#298's reason, section 4k),
 # regenerates apps/web/public/licences/third-party.txt and
 # apps/web/src/credits/third-party-contents.txt from the union of every
-# workspace package's distributed closure, and fails (NOT001-NOT007) when either
-# committed file is not what it writes. About twenty seconds. `notices:generate`
+# workspace package's distributed closure, and fails (NOT001-NOT008) when either
+# committed file is not what it writes. About 2 s on a warm install locally and
+# 4 s in CI, measured 2026-09-27 (this line said twenty until #676's review
+# measured it). `notices:generate`
 # is the same run with --write, and is how a dependency bump is repaired: run
 # it, then READ the diff. See section 4g.
 pnpm run check:notices
 pnpm run notices:generate
 
 # Its own suite. Fixture-driven, with a fake `pnpm` on PATH so the real
-# union code is what runs; the count is what the run prints (68 on 2026-09-27).
+# union code is what runs; the count is what the run prints (96 on 2026-09-27;
+# 68 before #676's review).
 # Needs Node, so not in `check:repo`.
 bash scripts/check-third-party-notices.test.sh
 
@@ -2563,11 +2566,13 @@ its text, so it could never have seen this. The second half is a separate gate:
 
 | | |
 |---|---|
-| The document | `apps/web/public/licences/third-party.txt`, served from `dist`, precached, and in the APK. Every package in the app's distributed closure with the **verbatim** text of each `LICENSE`/`LICENCE`/`COPYING` and `NOTICE` file it ships; every native library the APK links; the files the build copies out of a package (`pose/`'s WebAssembly runtime) |
+| The document | `apps/web/public/licences/third-party.txt`, served from `dist`, precached, and in the APK. Every package in the app's distributed closure with the **verbatim** text of every licence and notice file it ships — any root file whose name contains `licence`/`license`, `notice` or `copying` (so `ThirdPartyNotices.txt` and tslib's `CopyrightNotice.txt` too, since #676's review), and every file in a root `LICENSES/` directory, source files excepted; every native library the APK links; the files the build copies out of a package (`pose/`'s WebAssembly runtime); and the code the **bundler** writes into the build (Part 4) |
 | Where it comes from | `scripts/check-third-party-notices.mjs`, over the **same** `discoverPackages`/`readClosure` `check:licences` uses — imported, not re-derived — so what is admitted and what is noticed are one list. The union, not `--filter @onyourleft/web`, for the reason above: `dexie` reaches the app only through `@onyourleft/store` |
-| The gate | `check:notices` (NOT001–NOT007) and its suite, in the one `Repository rules` job. Shape (b) of #664: **committed and regenerated-and-diffed**, with its own frozen install — the script's header says why not built at build time |
+| The gate | `check:notices` (NOT001–NOT008) and its suite, in the one `Repository rules` job. Shape (b) of #664: **committed and regenerated-and-diffed**, with its own frozen install — the script's header says why not built at build time |
 | What fails closed | a package with no licence file (NOT003). Three in today's closure ship none — `@mediapipe/tasks-vision`, `murmurhash-js`, `pmtiles` — and each has a reviewed entry in `apps/web/third-party-notices.json`, keyed by **name and version**, saying where its notice comes from instead; an entry nothing uses is NOT004 |
 | The native half | `apps/mobile/native-closure.json`, a **reviewed** list, because CI cannot run Gradle. `apps/mobile/src/android/native-closure.test.ts` holds it to `./gradlew :app:dependencies --configuration releaseRuntimeClasspath` in both directions wherever `native:closure` has written a report, and **skips loudly** elsewhere — #318's shape, and like it **not a CI gate** |
+| Code no closure lists | ⚠️ **Vite's module-preload polyfill and `__vitePreload` helper are in the entry chunk, and Rolldown's CommonJS-interop runtime is `assets/rolldown-runtime-*.js`** — both MIT, both shipped, and both from **devDependencies**, so `--prod` never lists them (#676's review, read off a real `dist`). `WRITTEN_BY_THE_BUNDLER` in the script names the two, resolved from `apps/web` as Node resolves them, and each needs a reviewed `writtenByTheBundler` entry at its **installed** version — so a Vite or Rolldown bump fails closed (NOT008) until somebody re-reads what it writes. A new bundler is a new line there, and nothing finds one for you |
+| Files copied out of a package | `copiedIntoBuild` is a reviewed list; what holds it complete is the **build**, not `check:notices`, which deliberately needs no build. `apps/web/tools/notices/copied-into-build.ts` is a plugin in the product's `vite.config.ts` that fails `pnpm run build` when the bundle holds a non-code asset (not `.js`/`.css`/`.html`/`.map`) that came from a package — no origin module at all, which is how a plugin's `emitFile` arrives, or one under `node_modules` — and the list does not name it; and when the list names a file the build did not write. ⚠️ **Its limits**: it reads the one product build, so the service-worker sub-build and the harness build are not read; `public/` is not in the bundle and is `ASSETS.toml`'s; and a package's bytes passed off as this repository's own source (copied into `src/` and imported from there) look like ours, which is `ASSET001`'s to catch |
 | Where a rider reads it | Credits §"Software this app includes", reached from About. The screen inlines the document's **contents** (the list, ~5 KiB) rather than the document (~125 KiB); both are the generator's output and `check:notices` compares both |
 
 ⚠️ **The text is read from the files, never from the manifest.** `lucide-react`'s manifest says

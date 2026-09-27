@@ -443,7 +443,7 @@ jobs:
       - name: Dependency licences
         run: pnpm run check:licences
 
-      # NOT001-NOT007 (#664). Admitted is not the same as noticed: the step
+      # NOT001-NOT008 (#664). Admitted is not the same as noticed: the step
       # above decides which licences may ship, and says nothing about whether
       # their notices ship with them. This regenerates the app's third-party
       # notices from the installed tree -- the union of every workspace

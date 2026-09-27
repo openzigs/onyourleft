@@ -6,7 +6,8 @@
     "closed again until somebody re-reads the new version. 'excerpt' is read from a file INSIDE the installed package; 'upstream' is text",
     "read from the project's own repository at a named commit, because the package carries none at all. 'licenceText' adds the licence's",
     "canonical text, which this repository already pins (LIC005). copiedIntoBuild: files the build copies verbatim out of a package into dist,",
-    "named so the notice says which package each came from."
+    "named so the notice says which package each came from.",
+    "writtenByTheBundler: packages whose OWN code the bundler writes into dist, which no closure lists because they are build tools -- see WRITTEN_BY_THE_BUNDLER in the generator. Keyed by the INSTALLED name@version, so a bump fails closed (NOT008). 'files' are read verbatim from the installed package; 'from'/'through' cut a file down to the part that covers the code that ships."
   ],
   "noLicenceFile": {
     "@mediapipe/tasks-vision@1.0.1": {
@@ -41,5 +42,28 @@
       "file": "wasm/vision_wasm_module_internal.wasm",
       "by": "apps/web/tools/pose/pose-runtime-plugin.ts"
     }
-  ]
+  ],
+  "writtenByTheBundler": {
+    "rolldown@1.2.6": {
+      "what": "its CommonJS-interop runtime (the __commonJS, __toESM and __export helpers), in the assets/rolldown-runtime-*.js chunk",
+      "files": [
+        {
+          "file": "LICENSE"
+        },
+        {
+          "file": "THIRD-PARTY-LICENSE"
+        }
+      ]
+    },
+    "vite@8.3.0": {
+      "what": "its module-preload polyfill and its __vitePreload helper, in the entry chunk",
+      "files": [
+        {
+          "file": "LICENSE.md",
+          "from": "# Vite core license",
+          "through": "SOFTWARE."
+        }
+      ]
+    }
+  }
 }
