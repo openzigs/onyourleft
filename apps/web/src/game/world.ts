@@ -254,8 +254,15 @@ export const SUN_ELEVATION_AT_POLE_DEGREES = 55;
  * Where the sun is in the compass, in degrees clockwise from north: **225**,
  * the south-west.
  *
- * ⚠️ **It was 135 until #583, and the sun did not move.** Until #583 the world
- * was drawn as a mirror of its map (`terrain.ts` §`localGroundPosition`), so
+ * ⚠️ **It was 135 until #583, and the sun did not move IN THE WORLD — but on
+ * most routes it did move relative to the rider.** Every road that is not
+ * north- or south-bound now points the other way in the world, so the rider
+ * turns under a light that stayed put: on an eastbound road the sun was
+ * ahead-left before #583 and is behind-right after it. That is the mirror
+ * being corrected, not a lighting regression, and neither is #643's pale
+ * horizon band showing on a different set of routes than before. Until #583
+ * the world was drawn as a mirror of its map (`terrain.ts`
+ * §`localGroundPosition`), so
  * the vector 135° named was drawn in the SOUTH-WEST of every route: a rider
  * heading north had it behind them on their left. #583 drew the map the right
  * way round and renamed the bearing to where that same world vector now is,

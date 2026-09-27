@@ -582,7 +582,16 @@ apps/                 AGPL-3.0-or-later, without exception
                         DEPTH rather than also a position along the road, the
                         verge went back to 6 m, and a clustering field leaves
                         stretches of road bare. The budget did not move and
-                        must not. Since #348 the file also caps how far
+                        must not. ⚠️ **#583 kept that digest by MIRRORING
+                        THE TEST FIXTURE**, and a reviewer who reads that as
+                        "a real route draws as it did" is reading it too
+                        strongly: the world stopped being a mirror of its
+                        map, so on a real route scenery keeps its screen side
+                        while every bend turns the other way, the
+                        inside-of-bend limits land on the other side, and the
+                        owner's routes do not look identical — the fixture
+                        left bending east gives 6 954 natural items where
+                        main gave 6 952. Since #348 the file also caps how far
                         scenery may stand from a BENDING road — without it a
                         band this deep folds through the inside of a hairpin
                         and stands in the carriageway, which the committed

@@ -1144,8 +1144,8 @@ export function drawnRoadPosition(
 
 /**
  * Where the road is DRAWN at a route distance and which way its normal — its
- * RIGHT, since #583; called its left before — points there, in local metres — #571. `undefined` where the drawn road has
- * no direction at all.
+ * RIGHT, since #583; called its left before — points there, in local metres —
+ * #571. `undefined` where the drawn road has no direction at all.
  *
  * The normal is a forward difference over one {@link CORRIDOR_STEP_METRES},
  * which is how {@link ribbonNormals} takes the ribbon's own; where that is

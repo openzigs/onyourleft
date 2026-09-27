@@ -109,6 +109,12 @@ function bendingRoute(): RoutePoint[] {
     // Left bending east, the sweep is a different one (6 954 natural items
     // rather than 6 952, a different first house), which is the mirror
     // showing, not the arrangement moving.
+    // ⚠️ What that does NOT mean on a real route: the digest held because the
+    // FIXTURE was mirrored, not because a rider's route draws as it did. On
+    // the owner's routes scenery keeps its screen side while every bend now
+    // turns the other way, so the inside-of-bend limits (`scatter.ts`
+    // §`bandsAt`) land on the other side and a route does not look identical
+    // to main — the 6 952 → 6 954 difference above is exactly that.
     const east = -radius * (1 - Math.cos(turned));
     points.push({
       position: geographicPosition(
