@@ -4067,7 +4067,8 @@ function stoneBridgeMaterial(maps: StoneMaps): MeshStandardMaterial {
       .replace('#include <project_vertex>', `#include <project_vertex>\n${STONE_UV}`);
   };
   material.customProgramCacheKey = () => 'oyl-stone-bridge';
-  return material;
+  // #619 lever 2. Chained last, after the assignment above.
+  return withTextureLodBias(material);
 }
 
 /* ============================================================================
@@ -4568,6 +4569,8 @@ export function prepareRealisticShape(
     );
     // #617: the name the middle level's parts are paired by. @see prepareMiddleLevel
     material.name = typeof loaded.name === 'string' ? loaded.name : '';
+    // #619 lever 2. The middle level wears this same material, so it is taught too.
+    withTextureLodBias(material);
     loaded.dispose();
     const index = geometry.getIndex();
     triangles += (index?.count ?? geometry.getAttribute('position').count) / 3;
@@ -4652,6 +4655,132 @@ const REALISTIC_ROUGHNESS = 0.85;
 
 /** Where an alpha-tested leaf card is cut: half coverage, glTF's own default for MASK. */
 const REALISTIC_ALPHA_CUTOFF = 0.5;
+
+/**
+ * When each level of the realistic vegetation's alpha-tested foliage is drawn
+ * — #619 lever 1: after everything opaque, and nearest level first.
+ *
+ * ## Why the order is worth setting
+ *
+ * A leaf card is cut with `discard` ({@link REALISTIC_ALPHA_CUTOFF}), and on a
+ * tile-based GPU — the tablet's Mali-G710 — a fragment shader that may discard
+ * cannot have its hidden fragments removed ahead of shading the way an opaque
+ * one's are: whatever the depth buffer does not already reject is shaded.
+ * three sorts its opaque list by `renderOrder`, then by MATERIAL, then by
+ * depth, and the scans' materials are made at load, before the road's, the
+ * ground's and the structures' — so until #619 the canopy was drawn FIRST,
+ * into an empty depth buffer, and every leaf behind a hill, a house or the
+ * ground in front of it was shaded and then overdrawn.
+ *
+ * Drawn after them, it meets a depth buffer the opaque world has already
+ * filled, and the leaves behind it fail the depth test before they are
+ * shaded. Near before middle before impostor puts the nearest canopy — which
+ * hides the most — into the depth buffer first.
+ *
+ * ## What it does not change
+ *
+ * **The picture.** The depth test keeps the nearest fragment whatever order
+ * they arrive in, and #617's two levels of one tree keep complementary pixels,
+ * so there is no tie for the order to break — `game.browser.spec.ts` §"#619"
+ * reads a frame back both ways and requires them identical. Bark, rocks and
+ * anything else opaque stay at 0, with the rest of the opaque world. Shadow
+ * passes do not sort by it. Within one level the instances are in the frame's
+ * own order, which is not nearest first; the full level holds only the few
+ * nearest trees, and re-sorting instances each frame is left unmeasured.
+ *
+ * ⚠️ **The realistic world only**: the stylised belt sets none, so no stylised
+ * draw moves.
+ */
+const FOLIAGE_RENDER_ORDER = { near: 1, middle: 2, impostor: 3 } as const;
+
+/**
+ * Where a vegetation mesh at a level is drawn: its level's place if it is
+ * alpha-tested, and 0 — with the rest of the opaque world — if it is not.
+ * @see FOLIAGE_RENDER_ORDER
+ */
+function foliageRenderOrder(mesh: InstancedMesh, level: keyof typeof FOLIAGE_RENDER_ORDER): number {
+  const material = mesh.material as Material;
+  const cut = level === 'impostor' || material.alphaTest > 0;
+  return cut ? FOLIAGE_RENDER_ORDER[level] : 0;
+}
+
+/** Gives a vegetation mesh its place in the draw order. @see foliageRenderOrder */
+function drawnInOrder(
+  mesh: InstancedMesh,
+  level: keyof typeof FOLIAGE_RENDER_ORDER,
+): InstancedMesh {
+  mesh.renderOrder = foliageRenderOrder(mesh, level);
+  return mesh;
+}
+
+/**
+ * The realistic world's texture level-of-detail bias — #619 lever 2: the ONE
+ * uniform every textured realistic material reads, set by the view from its
+ * rung (`quality.ts` §`QualitySettings.textureLodBias`) immediately before it
+ * draws.
+ *
+ * ## Why one uniform, set per draw, rather than a define or a texture setting
+ *
+ * - **A define** would recompile every realistic program when a hot tablet
+ *   steps down, in the middle of a ride — the hitch #547 warms programs to
+ *   avoid. A uniform's value changes nothing three caches.
+ * - **A texture setting** does not exist: WebGL 2 has no `TEXTURE_LOD_BIAS`,
+ *   and a smaller base level would be a second upload of every photograph.
+ * - **Per view, per draw**: the materials are the loaded world's and several
+ *   views share them, so the value is written by whichever view is about to
+ *   draw, as three writes every other uniform at draw time. A view drawing the
+ *   stylised world writes 0, which no stylised material reads anyway.
+ *
+ * @see withTextureLodBias
+ */
+const REALISTIC_TEXTURE_LOD_BIAS = { value: 0 };
+
+/**
+ * Teaches a realistic material the rung's texture bias — #619 lever 2.
+ *
+ * Every `texture2D` its fragment shader makes, three's own chunks included,
+ * becomes GLSL ES 3.00's `texture(sampler, uv, bias)`. A bias of 0 is the
+ * unbiased read the specification defines it to be, so the top rung's picture
+ * is unchanged; and it moves only a MIPMAPPED texture — the environment map's
+ * atlas, the shadow map and three's DFG table have no mips, so they are read
+ * exactly as before. `textureLod` — the road's and the ground's one-texel
+ * mean — names its level outright and is not touched.
+ *
+ * ⚠️ Chained after whatever the material already does before it compiles,
+ * and keyed apart, for {@link withSurfaceDetail}'s reason. Idempotent.
+ */
+function withTextureLodBias<M extends Material>(material: M): M {
+  if (TEXTURE_BIASED.has(material)) return material;
+  TEXTURE_BIASED.add(material);
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    shader.uniforms['oylTextureLodBias'] = REALISTIC_TEXTURE_LOD_BIAS;
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <common>',
+      `#include <common>
+uniform float oylTextureLodBias;
+#undef texture2D
+#define texture2D(oylSampler, oylUv) texture(oylSampler, oylUv, oylTextureLodBias)`,
+    );
+  };
+  material.customProgramCacheKey = () => `${earlierKey}|oyl-texture-lod-bias`;
+  return material;
+}
+
+/** The materials {@link withTextureLodBias} has already taught. */
+const TEXTURE_BIASED = new WeakSet<Material>();
+
+/**
+ * Whether a material reads the rung's texture bias — #619.
+ *
+ * @test-facing held by `realistic-renderer.test.ts`, which asserts every
+ * textured realistic material is taught it and no stylised one is
+ */
+export function readsTextureLodBias(material: Material): boolean {
+  return TEXTURE_BIASED.has(material);
+}
 
 /**
  * The hand-over between a tree's levels of detail — #617: a fragment is kept
@@ -4813,7 +4942,8 @@ function impostorMaterial(
     `,
   });
   (material.uniforms['strip'] as { value: Texture | null }).value = strip;
-  return constructed(material);
+  // #619 lever 2: the strip is mipmapped, so the far band sheds with the rest.
+  return constructed(withTextureLodBias(material));
 }
 
 /**
@@ -5029,22 +5159,28 @@ export class RealisticVegetationBelt {
         shapes,
         near: shapes.map((shape) =>
           shape.parts.map((part) =>
-            keeps(instanced(part.geometry, part.material, nearCap), nearCap),
+            drawnInOrder(keeps(instanced(part.geometry, part.material, nearCap), nearCap), 'near'),
           ),
         ),
         middle: shapes.map((shape) =>
           tree && shape.middle !== undefined && slots.middle > 0
             ? shape.middle.parts.map((part) =>
-                keeps(instanced(part.geometry, part.material, slots.middle), slots.middle),
+                drawnInOrder(
+                  keeps(instanced(part.geometry, part.material, slots.middle), slots.middle),
+                  'middle',
+                ),
               )
             : undefined,
         ),
         far: shapes.map((shape) =>
           shape.impostor === undefined
             ? undefined
-            : keeps(
-                instanced(this.#quad, shape.impostor.material, SCATTER_INSTANCE_CAPACITY),
-                SCATTER_INSTANCE_CAPACITY,
+            : drawnInOrder(
+                keeps(
+                  instanced(this.#quad, shape.impostor.material, SCATTER_INSTANCE_CAPACITY),
+                  SCATTER_INSTANCE_CAPACITY,
+                ),
+                'impostor',
               ),
         ),
         ranking: tree ? this.#trees : ranking(nearCap),
@@ -5082,6 +5218,24 @@ export class RealisticVegetationBelt {
 
   addTo(scene: Scene): void {
     for (const mesh of this.meshes) scene.add(mesh);
+  }
+
+  /**
+   * Draws the foliage in its #619 order, or — the browser gate's and the
+   * owner's page's control — puts every mesh back at 0, where three draws it
+   * in the order its materials were made. @see FOLIAGE_RENDER_ORDER
+   */
+  setFoliageOrdered(on: boolean): void {
+    for (const each of this.#kinds) {
+      const levels = [
+        ['near', each.near.flat()],
+        ['middle', each.middle.flatMap((meshes) => meshes ?? [])],
+        ['impostor', each.far.filter((mesh): mesh is InstancedMesh => mesh !== undefined)],
+      ] as const;
+      for (const [level, meshes] of levels) {
+        for (const mesh of meshes) mesh.renderOrder = on ? foliageRenderOrder(mesh, level) : 0;
+      }
+    }
   }
 
   /** Hides every mesh, for a frame drawn in the stylised world. */
@@ -5388,7 +5542,7 @@ function variantOf(variant: number, shapes: number): number {
  * unfiltered texture shimmers (#425). Whether it does on the tablet is the
  * owner's check, in validation 0002 Part Z; nothing in CI can see shimmer.
  */
-function photographicRoadMaterial(colour: Texture, normal: Texture): MeshStandardMaterial {
+export function photographicRoadMaterial(colour: Texture, normal: Texture): MeshStandardMaterial {
   const material = constructed(
     new MeshStandardMaterial({
       vertexColors: true,
@@ -5442,7 +5596,8 @@ material.specularF90 *= ${ROAD_SHEEN.toFixed(3)};`,
       );
   };
   material.customProgramCacheKey = () => 'oyl-photographic-road';
-  return material;
+  // #619 lever 2. Chained last, after the assignment above.
+  return withTextureLodBias(material);
 }
 
 /**
@@ -5489,7 +5644,7 @@ const PLANAR_UV = /* glsl */ `
  * for a tiling that reads as a grid at 150 m, and it keeps #460's field
  * patchwork (`withSurfaceDetail`) on top.
  */
-function photographicGroundMaterial(
+export function photographicGroundMaterial(
   colour: Texture,
   normal: Texture,
   fieldSpan: { value: number },
@@ -5528,8 +5683,9 @@ function photographicGroundMaterial(
     );
   };
   material.customProgramCacheKey = () => 'oyl-photographic-ground';
-  // #460's patchwork, chained after the photograph rather than replacing it.
-  return withSurfaceDetail(material, 'ground', fieldSpan, fieldCount);
+  // #460's patchwork, chained after the photograph rather than replacing it,
+  // and #619 lever 2's bias after both.
+  return withTextureLodBias(withSurfaceDetail(material, 'ground', fieldSpan, fieldCount));
 }
 
 /**
@@ -6398,22 +6554,30 @@ function structureMaterials(
   // ⚠️ `vertexColors` since #500: every structure geometry carries its part's
   // shade in its vertex colour, and a building's the grounding as well (a
   // boundary's does not). @see projectedInMetres
+  // #619 lever 2: a photographed surface reads the rung's bias; painted and
+  // glass sample no texture and are left as they were.
+  const biased = <M extends Material>(material: M): M =>
+    maps === undefined ? material : withTextureLodBias(material);
   return {
-    lit: constructed(
-      new MeshStandardMaterial({
-        color: finish.tint,
-        roughness: finish.roughness,
-        metalness: finish.metalness,
-        vertexColors: true,
-        ...(maps === undefined ? {} : { map: maps.colour, normalMap: maps.normal }),
-      }),
+    lit: biased(
+      constructed(
+        new MeshStandardMaterial({
+          color: finish.tint,
+          roughness: finish.roughness,
+          metalness: finish.metalness,
+          vertexColors: true,
+          ...(maps === undefined ? {} : { map: maps.colour, normalMap: maps.normal }),
+        }),
+      ),
     ),
-    flat: constructed(
-      new MeshBasicMaterial({
-        color: finish.tint,
-        vertexColors: true,
-        ...(maps === undefined ? {} : { map: maps.colour }),
-      }),
+    flat: biased(
+      constructed(
+        new MeshBasicMaterial({
+          color: finish.tint,
+          vertexColors: true,
+          ...(maps === undefined ? {} : { map: maps.colour }),
+        }),
+      ),
     ),
   };
 }
@@ -6892,6 +7056,43 @@ export function horizonFromSkyOf(view: GameView, on: boolean): void {
 }
 
 /**
+ * Puts a view's realistic foliage back in the order three would draw it
+ * unasked, or in #619's order again — lever 1's control. With it off, the
+ * canopy is drawn among the opaque world rather than after it, and the frame
+ * must read back identical: the order is a cost, never a picture.
+ *
+ * @test-facing the control switch the browser gate and the owner's page both
+ * use, read by `game-harness.ts` and `realistic-harness.ts`; the product never
+ * turns the order off
+ */
+export function foliageOrderedOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.foliageOrdered(on);
+}
+
+/**
+ * One draw of a frame, as {@link drawOrderOf} reports it.
+ *
+ * @unwired the shape of what `drawOrderOf` hands the browser gate's harness
+ */
+export interface DrawnPiece {
+  /** Whether its fragments may be discarded: an alpha-tested leaf, or a far tree's billboard. */
+  readonly cut: boolean;
+  /** Whether three draws it in its transparent pass, after every opaque draw. */
+  readonly transparent: boolean;
+}
+
+/**
+ * Every draw of one frame, in the order three made them — #619 lever 1.
+ * Empty for a view that is not this adapter's, or has no context.
+ *
+ * @test-facing read by `game-harness.ts` for the browser gate's draw-order
+ * assertion; the product never needs to ask what order it drew in
+ */
+export function drawOrderOf(view: GameView, frame: SceneFrame): readonly DrawnPiece[] {
+  return view instanceof ThreeGameView ? view.drawOrder(frame) : [];
+}
+
+/**
  * The fog's colour and the horizon ring's foot in the last frame, linear —
  * #544: they are one colour, so where a hill meets the fog there is no edge.
  * `NaN`s for a view that is not this adapter's.
@@ -7130,6 +7331,11 @@ class ThreeGameView implements GameView {
       return;
     }
     this.#stage(frame);
+    // #619 lever 2: this view's rung, written into the one uniform every
+    // textured realistic material reads — here, because several views share
+    // those materials. @see REALISTIC_TEXTURE_LOD_BIAS
+    REALISTIC_TEXTURE_LOD_BIAS.value =
+      this.#drawing === 'realistic' ? this.#quality.textureLodBias : 0;
     this.#renderer.render(this.#scene, this.#camera);
   }
 
@@ -7390,6 +7596,55 @@ class ThreeGameView implements GameView {
   /** The sky the water reflected in the last frame. @see waterSkyOf */
   get waterSky(): readonly [number, number, number] {
     return this.#water.reflectedSky;
+  }
+
+  /** @see foliageOrderedOf */
+  foliageOrdered(on: boolean): void {
+    this.#realistic?.vegetation.setFoliageOrdered(on);
+  }
+
+  /**
+   * Renders one frame with every mesh's `onBeforeRender` noting it, then puts
+   * each hook back. Shadow passes call `onBeforeShadow` instead, so what is
+   * noted is the colour pass alone. @see drawOrderOf
+   */
+  drawOrder(frame: SceneFrame): readonly DrawnPiece[] {
+    if (this.#renderer === undefined) return [];
+    const drawn: DrawnPiece[] = [];
+    const restores: (() => void)[] = [];
+    this.#scene.traverse((node) => {
+      const mesh = node as Partial<Mesh>;
+      if (mesh.isMesh !== true || mesh.material === undefined) return;
+      const material: Material | undefined = Array.isArray(mesh.material)
+        ? mesh.material[0]
+        : mesh.material;
+      if (material === undefined) return;
+      // Put back exactly as found: an own hook, or none over the prototype's.
+      const own = Object.hasOwn(node, 'onBeforeRender');
+      // eslint-disable-next-line @typescript-eslint/unbound-method -- restored onto its own object below
+      const original = node.onBeforeRender;
+      const previous = original.bind(node);
+      const piece: DrawnPiece = {
+        cut:
+          material.alphaTest > 0 ||
+          (material as Partial<ShaderMaterial>).uniforms?.['strip'] !== undefined,
+        transparent: material.transparent,
+      };
+      node.onBeforeRender = (...args) => {
+        drawn.push(piece);
+        previous(...args);
+      };
+      restores.push(() => {
+        if (own) node.onBeforeRender = original;
+        else delete (node as Partial<Object3D>).onBeforeRender;
+      });
+    });
+    try {
+      this.render(frame);
+    } finally {
+      for (const restore of restores) restore();
+    }
+    return drawn;
   }
 
   /** Every mesh in the scene and what it wears — for the harness's D-11 check. @see sceneMaterialsOf */

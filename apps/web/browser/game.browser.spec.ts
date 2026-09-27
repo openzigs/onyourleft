@@ -2440,6 +2440,48 @@ test.describe('the realistic world — ADR 0026', () => {
     expect(measured.texturesCreated).toBeGreaterThan(5);
   });
 
+  test('draws the canopy after the opaque world, and the frame is the same picture — #619 lever 1', async ({
+    harnessRun,
+  }) => {
+    const measured = await realistic(harnessRun);
+    const { foliageOrder: ordered, foliageOrderControl: control } = measured;
+    // Non-vacuity: the wooded frame has leaves AND an opaque world to order.
+    expect(ordered.cut).toBeGreaterThan(0);
+    expect(ordered.opaque).toBeGreaterThan(0);
+    // Every alpha-tested leaf and billboard after the last opaque draw…
+    expect(ordered.cutBeforeOpaque).toBe(0);
+    // …where the CONTROL — the order three chose unasked, materials first —
+    // drew some of the canopy before the ground, the road or a house. Without
+    // it, "no leaf before the opaque world" could be a frame that happened to
+    // put them there anyway.
+    expect(control.cutBeforeOpaque).toBeGreaterThan(0);
+    expect(control.cut).toBe(ordered.cut);
+    // And the order is a cost, never a picture: the depth test keeps the
+    // nearest fragment whichever arrives first.
+    expect(measured.foliageOrderChangedPixels).toBe(0);
+  });
+
+  test('samples the photographs one mip coarser on the second rung only — #619 lever 2', async ({
+    harnessRun,
+  }) => {
+    const measured = await realistic(harnessRun);
+    // The second realistic rung carries the bias, and the shaders read it:
+    // taking it away changes the picture.
+    expect(measured.textureBiasReducedShare).toBeGreaterThan(0.01);
+    // THE CONTROL: the top rung carries none, so taking it away changes nothing.
+    expect(measured.textureBiasTopShare).toBe(0);
+    // The stylised world is not checked here and cannot be: a view drawing it
+    // writes 0 into the shared bias, so forcing its rung to 1 reaches no
+    // shader. `realistic-renderer.test.ts` §"biases nothing the stylised world
+    // draws" holds it, at the material.
+    console.log(
+      `#619: a mip coarser changes ${(measured.textureBiasReducedShare * 100).toFixed(1)} % of the ` +
+        `second realistic rung's wooded frame; foliage ${String(measured.foliageOrder.cut)} cut draws ` +
+        `after ${String(measured.foliageOrder.opaque)} opaque, against ` +
+        `${String(measured.foliageOrderControl.cutBeforeOpaque)} before an opaque draw unasked`,
+    );
+  });
+
   test('turns the realistic rider’s legs with the cranks, and holds them when the cadence goes — #369, #349', async ({
     harnessRun,
   }) => {

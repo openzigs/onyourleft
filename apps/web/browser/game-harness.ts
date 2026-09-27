@@ -104,7 +104,10 @@ import {
   loadSceneryModels,
   horizonColoursOf,
   horizonFromSkyOf,
+  drawOrderOf,
+  foliageOrderedOf,
   sceneMaterialsOf,
+  type DrawnPiece,
   sceneryDrawnOf,
   setBuildingOpenings,
   setTreeLevels,
@@ -3483,6 +3486,28 @@ function sweep(
 /** The scenery budget the `?realistic` run draws one frame at — #478. @see RealisticMeasurement.sceneryDrawnBudgeted */
 const REALISTIC_PROBE_BUDGET = 6;
 
+/** One frame's opaque-pass draw order, counted — #619 lever 1. @see foliageOrderOf */
+export interface FoliageOrder {
+  readonly cut: number;
+  readonly opaque: number;
+  readonly cutBeforeOpaque: number;
+}
+
+/**
+ * Counts a frame's opaque-pass draws: the transparent pass comes after every
+ * opaque draw whatever the order, so it is left out.
+ */
+function foliageOrderOf(pieces: readonly DrawnPiece[]): FoliageOrder {
+  const opaquePass = pieces.filter((piece) => !piece.transparent);
+  const lastOpaque = opaquePass.map((piece) => !piece.cut).lastIndexOf(true);
+  return {
+    cut: opaquePass.filter((piece) => piece.cut).length,
+    opaque: opaquePass.filter((piece) => !piece.cut).length,
+    cutBeforeOpaque: opaquePass.slice(0, Math.max(0, lastOpaque)).filter((piece) => piece.cut)
+      .length,
+  };
+}
+
 /** What the `?realistic` run measures — ADR 0026. @see realisticProbe */
 export interface RealisticMeasurement {
   readonly measured: boolean;
@@ -3517,6 +3542,24 @@ export interface RealisticMeasurement {
   readonly crankHeldPixels: number;
   /** How far the realistic frame differs from the stylised one across the whole picture, as a share. */
   readonly worldChangedShare: number;
+  /**
+   * #619 lever 1: the wooded frame's opaque-pass draws, in the order three made
+   * them — `cut` draws are alpha-tested leaves and billboards, `opaque` the
+   * rest, and `cutBeforeOpaque` how many cut draws came before the LAST opaque
+   * one. The product's order is the first; `…Control` is the order three
+   * chose unasked (`foliageOrderedOf(view, false)`), which must interleave.
+   */
+  readonly foliageOrder: FoliageOrder;
+  readonly foliageOrderControl: FoliageOrder;
+  /** #619 lever 1: pixels that differ between the two orders' frames. Zero: the order is a cost, not a picture. */
+  readonly foliageOrderChangedPixels: number;
+  /**
+   * #619 lever 2: the share of the wooded frame that changes when a rung's
+   * texture bias is taken to 0 — at the second realistic rung, which carries
+   * one, and at the top rung, the control, which must carry none.
+   */
+  readonly textureBiasReducedShare: number;
+  readonly textureBiasTopShare: number;
   /**
    * #478: the scenery items the realistic world drew for the same frame at the
    * top rung, and at a rung whose budget is `sceneryProbeBudget` — the line in
@@ -3686,6 +3729,11 @@ const NO_REALISTIC: RealisticMeasurement = {
   crankTurnPixels: 0,
   crankHeldPixels: 0,
   worldChangedShare: 0,
+  foliageOrder: { cut: 0, opaque: 0, cutBeforeOpaque: 0 },
+  foliageOrderControl: { cut: 0, opaque: 0, cutBeforeOpaque: 0 },
+  foliageOrderChangedPixels: 0,
+  textureBiasReducedShare: 0,
+  textureBiasTopShare: 0,
   sceneryProbeBudget: 0,
   sceneryDrawnTop: 0,
   sceneryDrawnBudgeted: 0,
@@ -4166,6 +4214,47 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const sceneryDrawnBudgeted = sceneryDrawnOf(view);
   view.setQuality(top);
 
+  // #619. ⚠️ Every comparison below reads two frames of ONE settled hand-over
+  // (#617 walks a tree between levels over ten frames): the frame is rendered
+  // until it has settled, and after that each change is one more render of the
+  // same pose, so a difference is the lever and never a tree mid-way. Settling
+  // is paid twice — once here and once after the rung change below, whose
+  // budget re-ranks the trees — because this load is already the browser
+  // gate's longest (#644).
+  const settle = (frame: SceneFrame): void => {
+    for (let at = 0; at < 11; at += 1) view.render(frame);
+  };
+  const drawnOnce = (): Uint8Array => {
+    view.render(wooded);
+    return whole();
+  };
+  // #619 lever 1: the canopy after every opaque draw — then the control, the
+  // order three chose unasked, which must interleave and draw the same picture.
+  // `drawOrderOf` draws the frame it reports, so its pixels are read after it.
+  settle(wooded);
+  const foliageOrder = foliageOrderOf(drawOrderOf(view, wooded));
+  const orderedPixels = whole();
+  foliageOrderedOf(view, false);
+  const foliageOrderControl = foliageOrderOf(drawOrderOf(view, wooded));
+  const unorderedPixels = whole();
+  foliageOrderedOf(view, true);
+  const foliageOrderChangedPixels = pixelsChanged(orderedPixels, unorderedPixels);
+  // #619 lever 2: a rung's frame against the same rung with its bias taken to
+  // 0. Only the bias differs between the two, so no budget moves between them.
+  const shareChanged = (a: Uint8Array, b: Uint8Array): number =>
+    a.length === 0 ? 0 : pixelsChanged(a, b) / (a.length / 4);
+  // The top rung first, where the frame is already settled: the CONTROL.
+  const topPixels = drawnOnce();
+  view.setQuality({ ...top, textureLodBias: 0 });
+  const textureBiasTopShare = shareChanged(topPixels, drawnOnce());
+  const reduced = REALISTIC_LADDER[1] as QualitySettings;
+  view.setQuality(reduced);
+  settle(wooded);
+  const reducedPixels = drawnOnce();
+  view.setQuality({ ...reduced, textureLodBias: 0 });
+  const textureBiasReducedShare = shareChanged(reducedPixels, drawnOnce());
+  view.setQuality(top);
+
   const frameAt = (distance: number, build: FrameBuild): SceneFrame =>
     riding(valleyRoute(), 800 + distance, build);
   const realisticFrameMs = timeFrames(view, frameAt, gl);
@@ -4174,6 +4263,12 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   // #475: each view's last frame was its own world's. @see waterSkyOf
   const waterSkyRealistic = waterSkyOf(view);
   const waterSkyStylised = waterSkyOf(plain);
+  // #619: there is deliberately no "stylised view forced to a bias" frame
+  // here. `render` writes 0 into the one shared bias uniform whenever a view
+  // draws the stylised world, so a stylised view at a rung of 1 never reaches
+  // a shader and such a comparison could not fail. What guards the stylised
+  // world is `realistic-renderer.test.ts` §"biases nothing the stylised world
+  // draws", at the material.
   plain.destroy();
 
   // D-3's step down: the stylised ladder's top, whole.
@@ -4221,6 +4316,11 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     crankTurnPixels: pixelsChanged(atRest, turned),
     crankHeldPixels: pixelsChanged(turned, held),
     worldChangedShare,
+    foliageOrder,
+    foliageOrderControl,
+    foliageOrderChangedPixels,
+    textureBiasReducedShare,
+    textureBiasTopShare,
     sceneryProbeBudget: REALISTIC_PROBE_BUDGET,
     sceneryDrawnTop,
     sceneryDrawnBudgeted,

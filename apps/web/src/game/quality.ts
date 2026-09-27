@@ -335,6 +335,31 @@ export interface QualitySettings {
    */
   readonly surfaceDetail: boolean;
   /**
+   * How many mip levels coarser the realistic world's photographs are sampled
+   * on this rung — [#619](https://github.com/openzigs/onyourleft/issues/619)
+   * lever 2: **0** everywhere but {@link REALISTIC_LADDER}'s second rung, which
+   * takes **1**, so a hot tablet sheds texture bandwidth before it sheds the
+   * world.
+   *
+   * It is a level-of-detail BIAS, added to the mip level the GPU would pick,
+   * so every photograph is read one level smaller — a quarter of the texels —
+   * and nothing is re-uploaded and no shader is compiled when a rung changes
+   * it: `three-renderer.ts` §`REALISTIC_TEXTURE_LOD_BIAS` is one uniform the
+   * view sets before it draws.
+   *
+   * ⚠️ **Read by the realistic world only.** Every stylised rung carries 0 and
+   * no stylised material reads it, so no rung of {@link QUALITY_LADDER} can
+   * change a stylised pixel through it — `game.browser.spec.ts` §"#619" holds
+   * a stylised frame at a bias of 1 identical to the same frame at 0.
+   *
+   * ## ⚠️ Provenance — the issue's own figure, not a measurement
+   *
+   * #619 names "one mip lower". What it saves on the Pixel Tablet is the
+   * owner's to read, by validation 0002 Part AH, with the owner's page's
+   * `?levers=-texture-bias` as the control.
+   */
+  readonly textureLodBias: number;
+  /**
    * Which of the two worlds this rung draws — [ADR 0026](../../../../docs/adr/0026-realistic-game-world.md)
    * D-3 and D-10.
    *
@@ -497,6 +522,7 @@ const REDUCED_AT_DISPLAY_RATE: QualitySettings = {
   water: 'flat',
   structureItems: 120,
   surfaceDetail: false,
+  textureLodBias: 0,
   shading: 'lit',
   riderShadows: 'contact',
   world: 'stylised',
@@ -592,6 +618,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     water: 'shaded',
     structureItems: STRUCTURE_MAX_ITEMS,
     surfaceDetail: true,
+    textureLodBias: 0,
     shading: 'lit',
     riderShadows: 'contact',
     world: 'stylised',
@@ -622,6 +649,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     water: 'flat',
     structureItems: 60,
     surfaceDetail: false,
+    textureLodBias: 0,
     shading: 'lit',
     riderShadows: 'contact',
     world: 'stylised',
@@ -648,6 +676,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     water: 'flat',
     structureItems: 40,
     surfaceDetail: false,
+    textureLodBias: 0,
     shading: 'flat',
     riderShadows: 'contact',
     world: 'stylised',
@@ -983,6 +1012,8 @@ export const REALISTIC_LADDER: readonly QualitySettings[] = [
     // already a whole village (at most 22 buildings and two signposts) and a
     // few walls, so a cut here would start taking houses.
     structureItems: REALISTIC_STRUCTURE_ITEMS,
+    // #619 lever 2: one mip coarser, the only rung that is. @see QualitySettings.textureLodBias
+    textureLodBias: 1,
     world: 'realistic',
     label: 'realistic, reduced resolution and scenery',
   },
