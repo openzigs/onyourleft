@@ -47,7 +47,14 @@
  * product's: the tablet ending the pairing as `not-our-phone` because the
  * engine had dropped the phone's `hello`, sent from inside `ondatachannel`
  * (#568; `side-link.ts` §"Why the phone waits to be spoken to"). It read as
- * `framing: not seen … "ended":"not-our-phone"`.
+ * `framing: not seen … "ended":"not-our-phone"`. And a FOURTH, about once in
+ * 650 pairings after that fix: the phone's channel heard the tablet and
+ * carried nothing back, and the tablet waited out its connect limit (#568's
+ * second mode, `side-link.ts` §"A channel that hears and cannot answer").
+ * That now ends in three seconds and reads as `never connected: phone …,
+ * tablet {… "ended":"unanswered"}` — a pairing the rider has to scan again,
+ * reported as one rather than retried here, because a gate that paired
+ * twice would pass over a product that needed two scans every time.
  *
  * ## What this does NOT prove
  *

@@ -83,7 +83,12 @@ assert_violation() {
     fail=$((fail + 1))
     return
   fi
-  if printf '%s' "${output}" | grep -qF "${needle}"; then
+  # A here-string, not `printf | grep -q` (#651): `grep -q` closes the pipe at
+  # its first match, and under this script's `pipefail` a producer that is
+  # still writing then turns a MATCH into a failure. It happened on the runner
+  # when #651 ran this suite beside other commands; check-repo-rules.test.sh
+  # §"A LONG ADR" records the same trap in the checker it tests.
+  if grep -qF -- "${needle}" <<<"${output}"; then
     printf 'ok   %s\n' "${name}"
     pass=$((pass + 1))
   else

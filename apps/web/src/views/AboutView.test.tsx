@@ -105,6 +105,12 @@ describe('the About page', () => {
     );
     expect(credits, 'the About page does not link to the credits').toHaveLength(1);
     expect(credits[0]?.textContent ?? '').toMatch(/credits/i);
+    // #664: the same link is the way to the third-party software notices, and
+    // the sentence around it says so — a rider looking for a licence notice
+    // has no other reason to open a page called Credits.
+    expect(credits[0]?.closest('p')?.textContent ?? '').toMatch(
+      /software.*every software licence notice in full/s,
+    );
     mounted.unmount();
   });
 });

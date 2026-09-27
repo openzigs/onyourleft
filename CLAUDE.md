@@ -164,7 +164,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         (ADR 0023 D-3), and there is none in the tree yet — so a
                         screen rendering nothing would look correct, and
                         `CreditsView.test.tsx` renders a fixture manifest for
-                        exactly that reason
+                        exactly that reason. Since #664 it also lists the
+                        SOFTWARE the app includes, read from the contents of
+                        the third-party notices `check:notices` generates and
+                        gates (§4g), and links the full document
     src/design/         design tokens, theme.css and the primitives (#48), and since
                         #307 the two systems those tokens now form — the elevation
                         ramp, which is a surface COLOUR because a shadow is invisible
@@ -1297,6 +1300,19 @@ bash scripts/check-doc-links.sh
 # Test that checker. Fixture-driven; 28 cases.
 bash scripts/check-doc-links.test.sh
 
+# Run several commands at once and fail if ANY of them fails (#651). Not a
+# check: it is how CI runs the checks, in one of its steps — see §4c. Every
+# line is labelled with its command as it arrives, each process is waited on by
+# itself, and a failing command's whole output is printed again at the end.
+# No commands at all is exit 2, not a pass. Bash only, so it runs on a bare
+# clone, and any §4a command can be handed to it as a string:
+bash scripts/run-concurrently.sh 'lint' 'pnpm run lint' 'typecheck' 'pnpm run typecheck'
+
+# Its own suite. Fixture-driven; 29 cases, most of them a failure the runner
+# must NOT swallow — in every position, ending before and after a success —
+# plus a rendezvous that fails if the commands were quietly run one at a time.
+bash scripts/run-concurrently.test.sh
+
 # The same two digests, printed for reading by eye.
 shasum -a 256 LICENSE LICENSES/Apache-2.0.txt
 ```
@@ -1432,8 +1448,10 @@ pnpm run build
 # them in a real headless Chromium through Playwright. ⚠️ **Two builds and two
 # preview servers since #408**: an offline claim about the PRODUCT cannot be
 # measured against the harness, so `playwright.config.ts` serves `dist` on 4320
-# beside `browser/dist` on 4319. One Playwright project and one CI job, because
-# a second job reports under a different context and could not block a merge.
+# beside `browser/dist` on 4319. One CI job, because a second job reports under
+# a different context and could not block a merge. ⚠️ Two Playwright PROJECTS
+# since #651 — `chromium`, and `game` LAST — in one run and one browser; §4c
+# says why the game spec is last and why it is not split further.
 # This is the ONLY place in the
 # repository where a browser runs: jsdom implements no WebGL, so MapLibre
 # cannot be constructed in the Vitest suite at all, and three things are
@@ -1544,6 +1562,32 @@ pnpm run check:licences
 # Its own suite. Fixture-driven; 56 cases, every policy branch with a case that
 # FAILS as well as one that passes. Needs Node, so also not in `check:repo`.
 bash scripts/check-dependency-licences.test.sh
+
+# The third-party notices gate (#664). Admitted is not the same as noticed: the
+# check above decides which licences may ship, this one that their notices do.
+# Runs its own `pnpm install --frozen-lockfile` (#298's reason, section 4k),
+# regenerates apps/web/public/licences/third-party.txt and
+# apps/web/src/credits/third-party-contents.txt from the union of every
+# workspace package's distributed closure, and fails (NOT001-NOT008) when either
+# committed file is not what it writes. About 2 s on a warm install locally and
+# 4 s in CI, measured 2026-09-27 (this line said twenty until #676's review
+# measured it). `notices:generate`
+# is the same run with --write, and is how a dependency bump is repaired: run
+# it, then READ the diff. See section 4g.
+pnpm run check:notices
+pnpm run notices:generate
+
+# Its own suite. Fixture-driven, with a fake `pnpm` on PATH so the real
+# union code is what runs; the count is what the run prints (96 on 2026-09-27;
+# 68 before #676's review).
+# Needs Node, so not in `check:repo`.
+bash scripts/check-third-party-notices.test.sh
+
+# What the APK links, from Gradle, written where
+# apps/mobile/src/android/native-closure.test.ts reads it (#664). NOT a gate
+# and NOT in CI: it needs a JDK and an Android SDK. Without its report that
+# test skips loudly, naming this command; with a stale one it fails.
+pnpm --filter @onyourleft/mobile run native:closure
 
 # All eight bare-clone script checks in one command.
 pnpm run check:repo
@@ -1880,7 +1924,8 @@ making a client's typecheck depend on another package's authoring-time directory
 ### 4c. What CI runs, and what it deliberately does not
 
 [`.github/workflows/rules.yml`](.github/workflows/rules.yml) runs on every pull request and on every
-push to `main`. It runs **exactly** the §4a commands and nothing else: the eight bare-clone script
+push to `main`. It runs **exactly** the §4a commands and nothing else: `bash
+scripts/run-concurrently.test.sh`, the eight bare-clone script
 checks (`check-repo-rules`, `check-licence-hashes`, `check-env-example` and `check-doc-links`, each
 with its own fixture suite), `shellcheck scripts/*.sh`, then `pnpm install --frozen-lockfile`, `format:check`, `lint`,
 `typecheck`, `test:coverage`, `check:a11y-suite`,
@@ -1888,16 +1933,49 @@ with its own fixture suite), `shellcheck scripts/*.sh`, then `pnpm install --fro
 `bash scripts/check-wiring.test.sh`, `check:capacitor`,
 `bash scripts/check-capacitor-generated.test.sh`, `check:cost-model`,
 `bash scripts/check-cost-model.test.sh`, `bash scripts/coverage-summary.test.sh`, `build`,
-`playwright install --with-deps chromium`, `test:browser`, `bash scripts/check-dependency-licences.test.sh` and `check:licences` — then
+`playwright install --with-deps chromium`, `test:browser`, `bash scripts/check-dependency-licences.test.sh`, `check:licences`,
+`bash scripts/check-third-party-notices.test.sh` and `check:notices` — then
 publishes the coverage table to the run summary and uploads the HTML report as an artefact.
 Those last two carry `if: always()` and cannot fail the job: the run where coverage moved
 unexpectedly is exactly the one whose table you want, and a reporting step that can fail a
-build is a percentage floor arriving by the back door, which §5 forbids. If CI ever needs a step this file does not list, **this
+build is a percentage floor arriving by the back door, which §5 forbids.
+
+⚠️ **Since [#651](https://github.com/openzigs/onyourleft/issues/651) one step, `Checks,
+concurrently`, runs twenty-two of those commands AT ONCE, and a reviewer who remembers one step per
+command is reading the old file.** It runs the eight bare-clone script checks, `shellcheck`,
+`format:check`, `lint`, `typecheck`, `check:wiring`, `check:cost-model`, `check:licences`, `build`,
+the browser install and five checker suites, after the install — the bare-clone checks need none
+of it, but on their own before it they took 48 s with the runner otherwise idle. It goes through
+`scripts/run-concurrently.sh` (§4a), which labels every line with its command, waits on each
+process by itself and fails the step if **any** command failed — its own suite runs first, because
+a runner that swallowed a failure would make that step twenty-two gates removed and still look
+green, and #651's pull request proved it red on the runner with one formatting defect (run
+36325105846: `format:check` FAILED, the other twelve then in that step finished, the job failed).
+⚠️ **Anything that runs Vitest stays out of it**, and so do `check:capacitor` and `check:notices`,
+which each run their own install under the tree the linter is walking: Vitest's 5 s case
+timeout is already within a second of several cases on the slower runner, and beside other work
+three of them passed it (run 36324592730) — `test:a11y` and `test:coverage` each run alone. And
+`test:coverage` and `test:browser` are **not** run together, though they are the two longest steps:
+run 36323764725 did it and both went red, because each is CPU-bound on its own.
+
+⚠️ **The runner is two cores, not four, and that is what bounds all of this.** `ubuntu-latest`
+reports four vCPUs, and `lscpu` on it reads `Thread(s) per core: 2`, `Core(s) per socket: 2` (run
+36333257690, an AMD EPYC 7763). So a fourth Vitest worker made the suite no faster — 336 s to
+334 s — while its summed test time rose from 676 s to 807 s and one case passed its timeout, and
+Playwright keeps its default of two workers. The job is CPU-bound from end to end: running more
+things at once moves time around, and only doing less work removes it. #651 measured what the
+browser gate's game loads spent their time on and removed the probes each load ran for nobody
+(§4f); it split the near-field rides into files of their own and started the heaviest Vitest files
+first, measured no gain (346 s against 336 s — the suite is not waiting on a tail), and reverted
+both.
+
+If CI ever needs a step this file does not list, **this
 file is wrong and gets fixed in the same PR**; CI must not accumulate private knowledge, because
 that is how a contributor's local green becomes CI's red with no explanation.
 
 ⚠️ **There is exactly one step that is not a §4a command, and this is it:
-`sudo rm -f /etc/apt/sources.list.d/google-chrome.*` immediately before the browser install.**
+`sudo rm -f /etc/apt/sources.list.d/google-chrome.*`, before the browser install** — which since
+#651 means before `Checks, concurrently`, the step the browser install runs in.
 It is recorded here rather than left as private CI knowledge, which is what the paragraph above
 forbids. `playwright install --with-deps` runs `apt-get update` across **every** source the runner
 image configures, and the image configures Google's own Chrome apt repository for the Chrome it
@@ -1956,6 +2034,36 @@ past its 150 s, which turned `main` red. Their own load also asserts the realist
 (`trees.drawnWorld`), which the shared load had asserted for them. Every phase of a harness run is
 printed as it ends (`game-harness.ts` §`phaseEnds`) and never asserted; read those lines before
 raising a budget.
+⚠️ **Since [#651](https://github.com/openzigs/onyourleft/issues/651) every load has a budget of
+its own, every describe pays for the load it reads, the game spec runs LAST, and the whole gate
+has a `globalTimeout`** — a reviewer who remembers the plain page and `?shadow-map` loaded inside a
+case's 60 s, or "at most three budgets, inside the job's twenty", is reading the old file. That
+sentence counted the budgets and not the job, and was false. The budgets are 50 s for the plain
+page, 65 s for `?shadow-map`, 120 s for `?realistic` and 120 s for `?realistic&trees` — each at least
+1.5 times what its load took alone on the slower runner — and a cross-worker ledger
+(`game.browser.spec.ts` §`loadLedger`) makes a hung load cost ONE of them per run, with every other
+describe that reads it failing at once in its hook and naming the describe that paid. The
+arithmetic that fits all four hanging inside the gate's own 580 s (`playwright.config.ts`
+§`GATE_BUDGET_MS`), and the gate inside the job's twenty, is `game.browser.spec.ts`
+§`paysForTheRealisticLoad`, with the local run that demonstrated it. ⚠️ And the two default loads
+no longer run the same probes: each case reads one load's copy, so each load runs only what its
+own cases read (`game-harness.ts` §`SHADOW_MAP_LOAD`) — measured on the runner, that was 12.6 s of
+the plain page's 34 and about 16 s of `?shadow-map`'s 55 spent for nobody. A new case on either
+load reads a field the OTHER load no longer measures at its "nothing measured" value, which fails
+rather than passes; move the probe, do not read across.
+⚠️ **What #651 bought, and what it did not.** It asked for a green job of 12 minutes or less. On
+`main` before it, green runs took 1005 s, 1009 s and 1039 s on an AMD EPYC 7763 runner and 723 s on
+a faster runner whose CPU no run printed; on #651's pull request, on the 7763, 933 s (run 36337270885): 141 s of
+concurrent checks, 28 s of `test:a11y`, 347 s of Vitest with coverage and 390 s of browser gate.
+**It is not twelve minutes on that runner, and what is left to cut is a gate or its instrumentation**:
+removing or weakening a gate, or running the heaviest files outside coverage — and coverage is
+reported, not gated (§5), so that last one would change what the report says rather than what
+fails. #651 did none of them. The
+job is CPU-bound on two cores (above), Vitest with coverage alone is 347 s of the 933, and its two
+largest files — the #545 near-field rides at 216 s and the FIT fuzz at 99 s — are slowed about
+three times by coverage's instrumentation of their hot loops (2.8 times for the rides, measured as
+CPU time locally; 3.3 times for the fuzz, `decode-fuzz.test.ts`'s own measurement). Which runner a job lands
+on is not something this repository can choose without paying for a larger one, which §8 forbids.
 
 ⚠️ **The browser is pinned by the lockfile, not by the install command.** `@playwright/test`
 **1.63.0** ships Chromium revision **1243**, and `playwright install chromium` fetches whatever the
@@ -2236,7 +2344,7 @@ browser runs**.
 | `bend.html`, `bend-harness.ts`, `bend.browser.spec.ts` | since #543, a planner-sampled 20 m bend drawn by the real renderer and read back from **straight above** — a heading of nothing puts `cameraRig`'s eye over its target — with the road isolated the #440 way. Rays from the bend's centre find each edge; the edge is walked in 2 m chords and what is held to `MAXIMUM_CORRIDOR_JOINT_DEGREES` is the **kink**, a turn less its neighbours' mean, because a smooth inner edge turns 7° every two metres anyway. Its control is the road as drawn before #543 (`roadCorridor`'s `unsmoothed`), which must kink. `with-corridor.ts` rebuilds the ground and water around a swapped corridor, which the loop page needs too since #543: ground shaped for one road over another split 32 rows of it. ⚠️ Since #583 the sweep of rays starts on a ray that MISSES the road: it started at 0°, and #583's mirrored bend straddled 0° and read as two short edges (81.7° and 73.3° of turn) with nothing else wrong |
 | `reflow.html`, `reflow-harness.tsx`, `reflow.browser.spec.ts` | since [#660](https://github.com/openzigs/onyourleft/issues/660), WCAG 2.2 SC 1.4.10 (Reflow) on **every** route: the real `AppShell` over in-memory ports that are either empty or populated (forty rides with long and unbreakable names, a ride with a chart, laps, a map and a side-camera report, a segment with efforts, a route, a workout), opened at 320×256, 390×844 and 844×390. The routes come from `ALL_ROUTES` — imported, never listed — and the PAGE reads the same table and reports any route it was never asked to render, so a walk over a hand list fails; a parameterised route the harness has no fixture id for is a failure, not a skip. Each route must render its own `h1` and raise no uncaught error or unhandled rejection, the document must not scroll sideways, and every box that DOES scroll sideways must take focus, be a `region` and have a name. ⚠️ **Every route declares what its fixture puts on the page** — `reflow-harness.tsx` §`POPULATED`, a `Record` over `RouteId`, present when populated and ABSENT when empty — or why nothing on it comes from one; a route with no entry fails both walks. Until #683's review it was a `Partial` list of five, and emptying the routes, workouts and analysis fixtures left every walk green. ⚠️ **Five controls**: an over-wide element in `main` must fail at all three viewports; a region that cannot take focus, a region with no name and a focusable named box whose role is `group` must each fail; and the real `design/ScrollTable.tsx`, wider than the phone with visually hidden text at its far end, must pass — which is what caught that an absolutely positioned descendant escapes a scroll container that is not its containing block (`theme.css` §`.oyl-scroll-region`). It prints every route's margin. ⚠️ Not a real phone's fonts, not a text size above 100 %, and not the dark theme (#654 P1-f) |
 | `insets.ts` | since #439, edge-to-edge safe-area insets applied to the ENGINE through `Emulation.setSafeAreaInsetsOverride`, so `env()` itself reports them, plus the one inset reading taken off the owner's tablet. Every #439 case also reads the insets back, so a Playwright bump that drops the protocol call fails rather than measuring a page with none |
-| `../playwright.config.ts` | Chromium only, no retries, the SwiftShader flags without which a GPU-less runner gives MapLibre no context at all — and since #408 **two `webServer` entries**, because the product and the harness are different builds |
+| `../playwright.config.ts` | Chromium only, no retries, the SwiftShader flags without which a GPU-less runner gives MapLibre no context at all — and since #408 **two `webServer` entries**, because the product and the harness are different builds. ⚠️ Since [#651](https://github.com/openzigs/onyourleft/issues/651) **two projects, `game` listed LAST**, so its four loads run alone after everything else — run beside the other specs they slowed by half or more, because SwiftShader draws on the CPU — and a `globalTimeout` (`GATE_BUDGET_MS`, 580 s) so the gate stops itself and names what was running before the job's `timeout-minutes` cancels it in silence. Playwright's default of two workers stays: the runner is two cores (§4c). A reviewer who remembers one `chromium` project is reading the old file. `playwright.config.ts` §`projects` says why, and what splitting the game further did |
 | `../vite.browser.config.ts` | the harness build. A second Vite config, so the harness cannot reach a shipped bundle |
 
 **Why it exists at all**, given that #48's suite already renders every route: **jsdom implements no
@@ -2560,6 +2668,37 @@ separately rather than being subsumed here.
 not. Its own suite is `bash scripts/check-dependency-licences.test.sh` — 56 cases, and every policy
 branch has a case that goes **red** as well as one that passes. ⚠️ That said 49 here while §4a said
 50; the number is what the suite prints, so read the run rather than either line.
+
+#### Admitted is not the same as noticed — #664
+
+⚠️ **Everything above decides which licences may SHIP. None of it says whether their notices ship
+with them**, and until [#664](https://github.com/openzigs/onyourleft/issues/664) none did: MIT, ISC,
+the BSDs and Apache-2.0 all ask for their copyright and permission notice — and Apache-2.0 for any
+`NOTICE` file — to travel with copies, and `dist` carried only the Apache-2.0 text #597 added for
+two assets. `DEP001` reads a manifest's `license` field, which names a licence and carries none of
+its text, so it could never have seen this. The second half is a separate gate:
+
+| | |
+|---|---|
+| The document | `apps/web/public/licences/third-party.txt`, served from `dist`, precached, and in the APK. Every package in the app's distributed closure with the **verbatim** text of every licence and notice file it ships — any root file whose name contains `licence`/`license`, `notice` or `copying` (so `ThirdPartyNotices.txt` and tslib's `CopyrightNotice.txt` too, since #676's review), and every file in a root `LICENSES/` directory, source files excepted; every native library the APK links; the files the build copies out of a package (`pose/`'s WebAssembly runtime); and the code the **bundler** writes into the build (Part 4) |
+| Where it comes from | `scripts/check-third-party-notices.mjs`, over the **same** `discoverPackages`/`readClosure` `check:licences` uses — imported, not re-derived — so what is admitted and what is noticed are one list. The union, not `--filter @onyourleft/web`, for the reason above: `dexie` reaches the app only through `@onyourleft/store` |
+| The gate | `check:notices` (NOT001–NOT008) and its suite, in the one `Repository rules` job. Shape (b) of #664: **committed and regenerated-and-diffed**, with its own frozen install — the script's header says why not built at build time |
+| What fails closed | a package with no licence file (NOT003). Three in today's closure ship none — `@mediapipe/tasks-vision`, `murmurhash-js`, `pmtiles` — and each has a reviewed entry in `apps/web/third-party-notices.json`, keyed by **name and version**, saying where its notice comes from instead; an entry nothing uses is NOT004 |
+| The native half | `apps/mobile/native-closure.json`, a **reviewed** list, because CI cannot run Gradle. `apps/mobile/src/android/native-closure.test.ts` holds it to `./gradlew :app:dependencies --configuration releaseRuntimeClasspath` in both directions wherever `native:closure` has written a report, and **skips loudly** elsewhere — #318's shape, and like it **not a CI gate** |
+| Code no closure lists | ⚠️ **Vite's module-preload polyfill and `__vitePreload` helper are in the entry chunk, and Rolldown's CommonJS-interop runtime is `assets/rolldown-runtime-*.js`** — both MIT, both shipped, and both from **devDependencies**, so `--prod` never lists them (#676's review, read off a real `dist`). `WRITTEN_BY_THE_BUNDLER` in the script names the two, resolved from `apps/web` as Node resolves them, and each needs a reviewed `writtenByTheBundler` entry at its **installed** version — so a Vite or Rolldown bump fails closed (NOT008) until somebody re-reads what it writes. A new bundler is a new line there, and nothing finds one for you |
+| Files copied out of a package | `copiedIntoBuild` is a reviewed list; what holds it complete is the **build**, not `check:notices`, which deliberately needs no build. `apps/web/tools/notices/copied-into-build.ts` is a plugin in the product's `vite.config.ts` that fails `pnpm run build` when the bundle holds a non-code asset (not `.js`/`.css`/`.html`/`.map`) that came from a package — no origin module at all, which is how a plugin's `emitFile` arrives, or one under `node_modules` — and the list does not name it; and when the list names a file the build did not write. ⚠️ **Its limits**: it reads the one product build, so the service-worker sub-build and the harness build are not read; `public/` is not in the bundle and is `ASSETS.toml`'s; and a package's bytes passed off as this repository's own source (copied into `src/` and imported from there) look like ours, which is `ASSET001`'s to catch |
+| Where a rider reads it | Credits §"Software this app includes", reached from About. The screen inlines the document's **contents** (the list, ~5 KiB) rather than the document (~125 KiB); both are the generator's output and `check:notices` compares both |
+
+⚠️ **The text is read from the files, never from the manifest.** `lucide-react`'s manifest says
+`ISC`; its `LICENSE` is ISC **and** MIT, for the icons derived from Feather. The field is printed as
+what a package declares, and the notice is every licence file it ships — the fixture suite's
+Lucide/Feather case is the proof. ⚠️ And like `DEP001` it **cannot see what a package vendors**:
+MediaPipe's bundle is one binary built from many projects, and is noticed only as far as that
+package's own files notice it.
+
+⚠️ **A dependency bump now fails CI until somebody regenerates**, on purpose: `pnpm run
+notices:generate`, then read the licence text in the diff before committing it. A Dependabot pull
+request goes red at `Third-party notices` for exactly that reason.
 
 ### 4i. Route planning has an interface and no engine, deliberately
 
@@ -3748,7 +3887,8 @@ top of an issue **supersedes its body**.
 | How two efforts recorded at different rates are compared without truncating either | `packages/domain/src/segment/comparison.ts`, §`overlayEfforts` |
 | Why an effort stores no sample indices, and where they come from instead | `apps/web/src/efforts/load.ts` §`sampleIndexAt` |
 | Why a bend is drawn as a curve rather than as the route's own straight pieces, what it cuts off a corner, and what it does not move | `apps/web/src/game/terrain.ts` §`BEND_SMOOTHING_METRES`, §`CORRIDOR_STEP_METRES`, §`CORRIDOR_DENSE_AHEAD_METRES`, `apps/web/browser/bend-harness.ts`, [#543](https://github.com/openzigs/onyourleft/issues/543) |
-| Why the scenery, the field boundaries and the buildings stand beside the DRAWN road rather than the route, and why the scenery is held off ANY stretch of it since a corner sharper than 110° folded a band across the other leg | `apps/web/src/game/terrain.ts` §`drawnRoadFrame`, `apps/web/src/game/road-grid.ts` §`roadGrid`, §`distanceToDrawnRoad`, `apps/web/src/game/corner-placement.test.ts`, [#571](https://github.com/openzigs/onyourleft/issues/571), [#613](https://github.com/openzigs/onyourleft/issues/613) |
+| Why the scenery, the field boundaries and the buildings stand beside the DRAWN road rather than the route, and why the scenery is held off ANY stretch of it since a corner sharper than 110° folded a band across the other leg | `apps/web/src/game/terrain.ts` §`drawnRoadFrame`, `apps/web/src/game/road-grid.ts` §`roadGrid`, §`distanceToDrawnRoad`, §`leastSquaredNearRoad` (the one cell search `settlements.ts` §`structureClearance` shares since #602), `apps/web/src/game/corner-placement.test.ts`, [#571](https://github.com/openzigs/onyourleft/issues/571), [#613](https://github.com/openzigs/onyourleft/issues/613) |
+| What holds a wall, hedge, fence or signpost inside the footprint the placement keeps clear of the road, and why the fence's end posts are not centred on its ends | `apps/web/src/game/boundary-footprint.test.ts`, `apps/web/src/game/three-renderer.ts` §`FENCE_END_POST_Z`, [#602](https://github.com/openzigs/onyourleft/issues/602) |
 | Why a loop's closing gap is part of the lap, and what a route saved before that still carries | `packages/domain/src/route/profile.ts` §`LOOP_CLOSURE_METRES`, `apps/web/browser/loop-harness.ts`, [#440](https://github.com/openzigs/onyourleft/issues/440) |
 | Why a route's gradient is three windows rather than one smoothing pass, and what each costs | `packages/domain/src/route/profile.ts`, [`docs/architecture.md`](docs/architecture.md) §"The route profile" |
 | Why a lone bad elevation reading never reaches the trainer, and the case where two do | `packages/domain/src/route/profile.ts` §`DESPIKE_WINDOW_METRES`, `profile.test.ts` §"where the despike stage stops working" |
@@ -4088,6 +4228,7 @@ top of an issue **supersedes its body**.
 | Where the ride's sounds are decided, why a dropped sensor is silence, and where the audio context is created | `apps/web/src/game/audio-cues.ts`, `apps/web/src/game/web-audio.ts`, [#400](https://github.com/openzigs/onyourleft/issues/400) |
 | How the tablet and the side-camera phone pair with no server, and what a pairing code may carry | `apps/web/src/camera/side-link-code.ts`, `apps/web/src/camera/side-link-sdp.ts`, [ADR 0033](docs/adr/0033-side-camera-link.md) D-1, D-4, [#529](https://github.com/openzigs/onyourleft/issues/529) |
 | Why the side link calls itself lost after three seconds, and why a deliberate end waits for the channel to close | `apps/web/src/camera/side-link.ts` §`SILENCE_IS_LOST_MILLISECONDS`, §`CLOSE_GRACE_MILLISECONDS` |
+| Why the phone never speaks first on the side link, why it keeps its secret on a channel that says it cannot send, and why an unanswered pairing ends in three seconds as `unanswered` rather than as no path | `apps/web/src/camera/side-link.ts` §"Why the phone waits to be spoken to", §"A channel that hears and cannot answer", `apps/web/src/camera/testing.ts` §`strandsHandedChannels`, [ADR 0033](docs/adr/0033-side-camera-link.md) §Amendments 2026-09-27, [#568](https://github.com/openzigs/onyourleft/issues/568) |
 | The one place the client names a WebRTC peer connection, and what the no-network gate can and cannot see of it | `apps/web/src/camera/side-link-transport.ts`, `apps/web/src/privacy/no-network.test.ts` §`PERMITTED_NETWORK_CALLS`, [ADR 0033](docs/adr/0033-side-camera-link.md) D-9 |
 | Why the side camera's pose model runs behind a network fence, and what it would send without one | `apps/web/src/camera/pose-runtime.ts` §`fenceWorkerNetwork`, `apps/web/browser/pose.browser.spec.ts`, [#530](https://github.com/openzigs/onyourleft/issues/530) |
 | What the tablet keeps of a side-camera picture, and for how long | `apps/web/src/camera/side-analysis.ts`, [ADR 0033](docs/adr/0033-side-camera-link.md) D-3, D-6 |

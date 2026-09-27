@@ -355,6 +355,182 @@ describe('tabbableElements', () => {
   });
 });
 
+/**
+ * The tab order through a `<details>` disclosure (#665).
+ *
+ * A closed `<details>` renders its first `<summary>` and nothing else, so no
+ * browser tabs to a link inside it. Each fixture below names its elements by
+ * `id` so a failure says which one the model got wrong.
+ */
+describe('tabbableElements and the <details> disclosure (#665)', () => {
+  function tabOrder(body: string): string[] {
+    return tabbableElements(documentWith(body)).map((element) => element.id);
+  }
+
+  it('keeps a closed details’ summary and drops the link inside it', () => {
+    expect(
+      tabOrder(`
+        <button id="before" type="button">Before</button>
+        <details><summary id="summary">Why</summary><p><a id="link" href="#/">More</a></p></details>
+        <button id="after" type="button">After</button>
+      `),
+    ).toEqual(['before', 'summary', 'after']);
+  });
+
+  it('keeps a link inside a closed details’ summary, which is rendered with it', () => {
+    expect(
+      tabOrder(
+        '<details><summary id="s">Why <a id="l" href="#/">x</a></summary><a id="c" href="#/">c</a></details>',
+      ),
+    ).toEqual(['s', 'l']);
+  });
+
+  it('keeps both the summary and the link when the details is open', () => {
+    expect(
+      tabOrder(`
+        <details open><summary id="summary">Why</summary><p><a id="link" href="#/">More</a></p></details>
+      `),
+    ).toEqual(['summary', 'link']);
+  });
+
+  it('drops everything inside an open details that is itself inside a closed one', () => {
+    expect(
+      tabOrder(`
+        <details>
+          <summary id="outer">Outer</summary>
+          <details open>
+            <summary id="inner">Inner</summary>
+            <a id="link" href="#/">More</a>
+          </details>
+        </details>
+      `),
+    ).toEqual(['outer']);
+  });
+
+  it('drops the summary of a closed details nested inside a closed one', () => {
+    expect(
+      tabOrder(`
+        <details>
+          <summary id="outer">Outer</summary>
+          <details><summary id="inner">Inner</summary></details>
+        </details>
+      `),
+    ).toEqual(['outer']);
+  });
+
+  it('reaches a nested disclosure’s summary once the outer one is open', () => {
+    expect(
+      tabOrder(`
+        <details open>
+          <summary id="outer">Outer</summary>
+          <details>
+            <summary id="inner">Inner</summary>
+            <a id="link" href="#/">More</a>
+          </details>
+        </details>
+      `),
+    ).toEqual(['outer', 'inner']);
+  });
+
+  it('treats only the FIRST summary as the exception; a second is ordinary content', () => {
+    expect(
+      tabOrder(`
+        <details>
+          <summary id="first">First</summary>
+          <summary id="second" tabindex="0">Second</summary>
+        </details>
+      `),
+    ).toEqual(['first']);
+  });
+
+  it('does not count a second summary as a tab stop even when the details is open', () => {
+    // The HTML standard's focusable areas include "the summary for its parent
+    // details" and no other summary; a second one has no activation behaviour.
+    expect(
+      tabOrder(`
+        <details open>
+          <summary id="first">First</summary>
+          <summary id="second">Second</summary>
+        </details>
+      `),
+    ).toEqual(['first']);
+  });
+
+  it('does not count a summary with no details parent as a tab stop', () => {
+    expect(tabOrder('<div><summary id="stray">Stray</summary></div>')).toEqual([]);
+  });
+
+  it('does not report a link tucked in a closed details as unreachable by keyboard', () => {
+    // It is reached by opening the summary first; `interactive-role-is-focusable`
+    // asks about the page with its disclosures open.
+    expect(
+      rulesFiredBy(
+        CLEAN_BODY.replace(
+          '<p>Nothing paired.</p>',
+          '<details><summary>Why</summary><p><a href="#/help">More</a></p></details>',
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it('still reports a fake button tucked in a closed details that no key could reach', () => {
+    expect(
+      rulesFiredBy(
+        CLEAN_BODY.replace(
+          '<p>Nothing paired.</p>',
+          '<details><summary>Why</summary><div role="button">Pair</div></details>',
+        ),
+      ),
+    ).toContain('interactive-role-is-focusable');
+  });
+
+  it('does not demand a tab stop or a name for a second summary, which is not a control', () => {
+    expect(
+      rulesFiredBy(
+        CLEAN_BODY.replace(
+          '<p>Nothing paired.</p>',
+          '<details open><summary>Why</summary><summary></summary></details>',
+        ),
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe('a summary that is not its details’ own (#665 review)', () => {
+  it('still reports a stray summary that claims role="button" and cannot be reached', () => {
+    expect(
+      rulesFiredBy(
+        CLEAN_BODY.replace(
+          '<p>Nothing paired.</p>',
+          '<div><summary role="button">Pair</summary></div>',
+        ),
+      ),
+    ).toContain('interactive-role-is-focusable');
+  });
+
+  it('does not call a second summary under aria-hidden focusable, which no browser does', () => {
+    expect(
+      rulesFiredBy(
+        CLEAN_BODY.replace(
+          '<p>Nothing paired.</p>',
+          '<details open aria-hidden="true"><summary tabindex="-1">Why</summary><summary>Also</summary></details>',
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it('still reports a second summary under aria-hidden that was given a tabindex', () => {
+    expect(
+      rulesFiredBy(
+        CLEAN_BODY.replace(
+          '<p>Nothing paired.</p>',
+          '<div aria-hidden="true"><summary tabindex="0">Also</summary></div>',
+        ),
+      ),
+    ).toContain('aria-hidden-not-focusable');
+  });
+});
+
 describe('accessibleName', () => {
   it('prefers aria-labelledby over the element’s own text', () => {
     const doc = documentWith(

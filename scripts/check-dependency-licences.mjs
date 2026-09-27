@@ -87,7 +87,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
@@ -285,7 +285,7 @@ function runPnpm(root, args) {
  * cannot disagree with the globs in `pnpm-workspace.yaml`. The root importer
  * has no `name` we care about and is dropped by the tree filter below.
  */
-function discoverPackages(root) {
+export function discoverPackages(root) {
   const raw = runPnpm(root, ['list', '--recursive', '--depth', '-1', '--json']);
   const entries = JSON.parse(raw);
   return entries
@@ -299,8 +299,17 @@ function discoverPackages(root) {
 /** How pnpm says a closure has nothing in it. Prose, on stdout, exit 0. */
 const EMPTY_CLOSURE = /No licenses in packages found/;
 
-/** One closure of one package, as `{ name, license }[]`. */
-function readClosure(root, packageName, production) {
+/**
+ * One closure of one package, as `{ name, license, versions, paths }[]`.
+ *
+ * `versions` and `paths` are pnpm's own, index for index, and nothing in this
+ * file reads them: they are kept since #664 because
+ * `scripts/check-third-party-notices.mjs` builds the app's licence notices
+ * from the SAME closure this gate judges, and needs to know where each
+ * package's own licence file is on disk. One reader of pnpm's answer rather
+ * than two that could disagree about which packages ship.
+ */
+export function readClosure(root, packageName, production) {
   const args = ['licenses', 'list', '--json', '--filter', packageName];
   if (production) args.push('--prod');
   let raw;
@@ -323,7 +332,12 @@ function readClosure(root, packageName, production) {
   const found = [];
   for (const group of Object.values(byLicence)) {
     for (const entry of group) {
-      found.push({ name: entry.name, license: entry.license });
+      found.push({
+        name: entry.name,
+        license: entry.license,
+        versions: entry.versions ?? [],
+        paths: entry.paths ?? [],
+      });
     }
   }
   return found;
@@ -467,4 +481,13 @@ function main(argv) {
   return 0;
 }
 
-process.exitCode = main(process.argv.slice(2));
+// Run only when invoked, not when imported: since #664,
+// `check-third-party-notices.mjs` imports `discoverPackages` and `readClosure`
+// from here. Compared through `realpathSync` for the reason
+// check-capacitor-generated.mjs records — a fixture tree behind macOS's
+// `/var` → `/private/var` symlink would otherwise make this exit 0 having
+// checked nothing.
+const invoked = process.argv[1];
+if (invoked !== undefined && import.meta.filename === realpathSync(invoked)) {
+  process.exitCode = main(process.argv.slice(2));
+}
