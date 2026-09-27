@@ -651,3 +651,35 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   before it was built; the tablet's own model stays the default for that reason. D-6, D-7 and
   D-8 are unchanged: the tablet still keeps no picture, and the numbers are held and reported
   exactly as they are from the tablet's model.
+- **2026-09-27** — **A pairing whose phone has not proved itself three seconds after `control`
+  opened is ended, and a phone does not answer on a channel that says it cannot carry the answer.
+  D-4 is unchanged.** [#568](https://github.com/openzigs/onyourleft/issues/568)'s second mode,
+  about one CI pairing in 650 after the 2026-09-26 fix above: the phone heard the tablet and
+  answered, and nothing it sent reached the tablet while the tablet's pings went on arriving. The
+  tablet then neither proved the phone nor ended until its fifteen-second connect limit, and said
+  the devices *could not reach each other*, which they had. Read in Blink and libwebrtc, the likely
+  cause is the same window as the first mode: Blink calls a channel the other end opened `open`
+  without asking the engine, then asks the engine a task later, and the engine's older
+  `connecting` can be applied after its own `open`, leaving the page's channel `connecting` for
+  good. It receives, and refuses every send. **That is a reading of the source, made deterministic
+  in `camera/testing.ts`, and not caught in the real engine**: 1 800 bare loopback pairings in the
+  pinned Chromium on 2026-09-27 stranded no channel, while the same run lost the first mode's send
+  inside `ondatachannel` twice. `camera/side-link.ts` §"A channel that hears and cannot answer" is
+  the record. What changes:
+  - **The phone keeps its secret** while its `control` channel says it cannot carry it, and sends
+    it in answer to the next ping heard on a channel that can. It is still the phone's first
+    message. If the channel still cannot answer three seconds after the tablet was first heard
+    on it, the phone ends the link.
+  - **The tablet ends a pairing** whose `control` opened and whose phone has not sent the secret
+    three seconds later (`SILENCE_IS_LOST_MILLISECONDS`, the silence a proved link is called lost
+    after), with a new reason, *unanswered*. A failure after `control` opened is never reported as
+    no path. This is a new way for a pairing to end before it starts; D-4's *"What a pairing
+    lasts"* is otherwise unchanged.
+  - **The fifteen-second connect limit now starts when the tablet accepts the answer**, not once
+    the engine has applied it. The offer's own bound stops counting at acceptance, so an engine
+    that never settled `setRemoteDescription` left an answered pairing with no bound at all. Not
+    seen on a device; found by reading what bounds an unproved pairing.
+  - **Considered and not done**: recovering inside the pairing on a channel the phone opens
+    itself, which this defect cannot strand. D-3 lists two channels, both made by the tablet, and
+    the tablet accepts none from the phone; changing that is D-3's to decide, not an amendment's.
+    The rider pairs again.
