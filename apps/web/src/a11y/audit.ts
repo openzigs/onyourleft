@@ -168,6 +168,18 @@ function isDetailsSummary(element: Element): boolean {
 }
 
 /**
+ * A `<summary>` that is not its `<details>`' own and has no `tabindex`: it
+ * matches `FOCUSABLE_SELECTOR` by tag, and no browser can focus it (#665).
+ */
+function isInertSummary(element: Element): boolean {
+  return (
+    element.tagName === 'SUMMARY' &&
+    !isDetailsSummary(element) &&
+    element.getAttribute('tabindex') === null
+  );
+}
+
+/**
  * Whether a closed `<details>` somewhere above this element leaves it
  * unrendered (#665).
  *
@@ -210,10 +222,7 @@ function tabStops(root: Document | Element, disclosed: boolean): HTMLElement[] {
     if (tabindex !== null && Number.parseInt(tabindex, 10) < 0) {
       return false;
     }
-    if (tabindex === null && element.tagName === 'SUMMARY' && !isDetailsSummary(element)) {
-      return false;
-    }
-    return true;
+    return !isInertSummary(element);
   });
 }
 
@@ -367,11 +376,13 @@ function landmarkName(element: Element): string {
 /** Every element that claims to be a control, native or ARIA. */
 function interactiveElements(root: Document | Element): Element[] {
   return [...root.querySelectorAll('*')].filter((element) => {
-    if (element.tagName === 'SUMMARY') {
-      // Only a `<details>`' own summary is a control; any other is text.
-      return isDetailsSummary(element);
+    if (isDetailsSummary(element)) {
+      return true;
     }
-    if (NATIVELY_INTERACTIVE.has(element.tagName)) {
+    // Any other summary is text by its tag, and is a control only if it CLAIMS
+    // to be one: `<summary role="button">` outside a `<details>` is as
+    // unreachable as `<span role="button">`, so it falls through to its role.
+    if (element.tagName !== 'SUMMARY' && NATIVELY_INTERACTIVE.has(element.tagName)) {
       return true;
     }
     if (element.tagName === 'A' && element.hasAttribute('href')) {
@@ -557,6 +568,9 @@ const ariaHiddenNotFocusable: Rule = (doc) =>
       const tabindex = element.getAttribute('tabindex');
       return (tabindex === null || Number.parseInt(tabindex, 10) >= 0) && !isDisabled(element);
     })
+    // The tab-order model's rule: a summary that is not its details' own is not
+    // focusable, so it cannot put focus anywhere under `aria-hidden` either.
+    .filter((element) => !isInertSummary(element))
     .map((element) => ({
       rule: 'aria-hidden-not-focusable',
       message:

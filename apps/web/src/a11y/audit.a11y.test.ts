@@ -370,6 +370,14 @@ describe('tabbableElements and the <details> disclosure (#665)', () => {
     ).toEqual(['before', 'summary', 'after']);
   });
 
+  it('keeps a link inside a closed details’ summary, which is rendered with it', () => {
+    expect(
+      tabOrder(
+        '<details><summary id="s">Why <a id="l" href="#/">x</a></summary><a id="c" href="#/">c</a></details>',
+      ),
+    ).toEqual(['s', 'l']);
+  });
+
   it('keeps both the summary and the link when the details is open', () => {
     expect(
       tabOrder(`
@@ -478,6 +486,41 @@ describe('tabbableElements and the <details> disclosure (#665)', () => {
         ),
       ),
     ).toEqual([]);
+  });
+});
+
+describe('a summary that is not its details’ own (#665 review)', () => {
+  it('still reports a stray summary that claims role="button" and cannot be reached', () => {
+    expect(
+      rulesFiredBy(
+        CLEAN_BODY.replace(
+          '<p>Nothing paired.</p>',
+          '<div><summary role="button">Pair</summary></div>',
+        ),
+      ),
+    ).toContain('interactive-role-is-focusable');
+  });
+
+  it('does not call a second summary under aria-hidden focusable, which no browser does', () => {
+    expect(
+      rulesFiredBy(
+        CLEAN_BODY.replace(
+          '<p>Nothing paired.</p>',
+          '<details open aria-hidden="true"><summary tabindex="-1">Why</summary><summary>Also</summary></details>',
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it('still reports a second summary under aria-hidden that was given a tabindex', () => {
+    expect(
+      rulesFiredBy(
+        CLEAN_BODY.replace(
+          '<p>Nothing paired.</p>',
+          '<div aria-hidden="true"><summary tabindex="0">Also</summary></div>',
+        ),
+      ),
+    ).toContain('aria-hidden-not-focusable');
   });
 });
 
