@@ -207,7 +207,8 @@ describe('the ground meets the road — #458, and #440’s lesson', () => {
 
     expect(ground.rows).toBe(corridor.centre.length);
     for (let row = 0; row < ground.rows; row += 1) {
-      // Left side against the road's column 0, right against its column 5.
+      // Side 0 — the normal's, the right since #583 — against the road's
+      // column 0, side 1 against its column 5.
       expect(groundVertex(ground, row, 0, 0)).toEqual(roadVertex(corridor, row, 0));
       expect(groundVertex(ground, row, 1, 0)).toEqual(roadVertex(corridor, row, ROAD_COLUMNS - 1));
     }
@@ -289,7 +290,9 @@ describe('the ground never rises into the carriageway — #458', () => {
   }, 30_000);
 
   it('folds the inside of a bend in, on the correct side', () => {
-    // `hairpinRoute` turns RIGHT, so its right side (side 1) is the inside.
+    // `hairpinRoute` turns RIGHT, so its right side is the inside — side 0,
+    // the normal's, since #583. Until then the world was a mirror of its map,
+    // this hairpin was drawn turning left, and side 1 was the inside.
     const radius = 25;
     const profile = hairpinRoute(radius);
     const rider = 400 + (Math.PI * radius) / 2;
@@ -307,8 +310,8 @@ describe('the ground never rises into the carriageway — #458', () => {
       const centre = corridor.centre[mid];
       return Math.hypot(x - (centre?.x ?? 0), z - (centre?.z ?? 0));
     };
-    expect(reachOf(1)).toBeLessThanOrEqual(radius * BEND_FOLD_SHARE * 1.5);
-    expect(reachOf(0)).toBeCloseTo(TERRAIN_COLUMN_OFFSETS[outermost] as number, 3);
+    expect(reachOf(0)).toBeLessThanOrEqual(radius * BEND_FOLD_SHARE * 1.5);
+    expect(reachOf(1)).toBeCloseTo(TERRAIN_COLUMN_OFFSETS[outermost] as number, 3);
   });
 });
 
@@ -355,8 +358,10 @@ describe('the gradient shows beside the road — #458', () => {
     for (let along = 420; along < 800; along += 7.3) {
       for (const lateral of [6.5, 9, 13.7, 17, 21.5, -8, -15, -21]) {
         // The route runs due north from the projection's origin, so a point
-        // `lateral` to the LEFT of it is `lateral` metres WEST: x = −lateral,
-        // and z is the distance along it.
+        // `lateral` along its normal — to the RIGHT — is `lateral` metres EAST:
+        // x = −lateral, and z is the distance along it. (#583 renamed both:
+        // until then this said LEFT and WEST, of a world that was a mirror of
+        // its map. The arithmetic did not change.)
         const height = meshHeightAt(ground, -lateral, along);
         if (height === undefined) continue;
         // @see STANDING_TOLERANCE_METRES — measured at up to 15.5 cm here.

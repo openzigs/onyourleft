@@ -2,7 +2,15 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { configQuery, DEFAULT_CONFIG, LAYERS, parseConfig, percentiles } from './config';
+import {
+  configQuery,
+  DEFAULT_CONFIG,
+  LAYERS,
+  LEVERS,
+  parseConfig,
+  percentiles,
+  rungWithLevers,
+} from './config';
 
 describe('the realistic page’s configuration — ADR 0026 D-12', () => {
   it('rides the realistic world with the ladder running when given no query', () => {
@@ -14,7 +22,7 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
   it('reads every parameter', () => {
     expect(
       parseConfig(
-        '?world=stylised&rung=1&ladder=0&seconds=60&soak=20&at=900&panel=0&layers=-water,-sky',
+        '?world=stylised&rung=1&ladder=0&seconds=60&soak=20&at=900&panel=0&layers=-water,-sky&levers=-texture-bias',
       ),
     ).toEqual({
       world: 'stylised',
@@ -25,7 +33,28 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
       at: 900,
       panel: false,
       layersOff: ['sky', 'water'],
+      leversOff: ['texture-bias'],
     });
+  });
+
+  it('switches off each of #619’s levers by name, once, in a fixed order, and refuses any other', () => {
+    for (const lever of LEVERS) {
+      expect(parseConfig(`?levers=-${lever}`).leversOff).toEqual([lever]);
+    }
+    expect(parseConfig('?levers=-texture-bias,-foliage-order,-texture-bias').leversOff).toEqual([
+      'foliage-order',
+      'texture-bias',
+    ]);
+    expect(parseConfig('').leversOff).toEqual([]);
+    expect(() => parseConfig('?levers=-texture')).toThrow(/levers is a comma-separated list/);
+    expect(() => parseConfig('?levers=texture-bias')).toThrow(/levers is a comma-separated list/);
+  });
+
+  it('takes the rung’s texture bias out when that lever is off, and leaves the rung alone otherwise — #619', () => {
+    const rung = { label: 'realistic, reduced', textureLodBias: 1 };
+    expect(rungWithLevers(rung, [])).toBe(rung);
+    expect(rungWithLevers(rung, ['foliage-order'])).toBe(rung);
+    expect(rungWithLevers(rung, ['texture-bias'])).toEqual({ ...rung, textureLodBias: 0 });
   });
 
   it('switches off each layer by name, once, in a fixed order — #616', () => {
@@ -63,6 +92,7 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
       '?rung=1&ladder=0&soak=20',
       '?at=900&panel=0',
       '?layers=-impostors,-vegetation',
+      '?rung=1&ladder=0&levers=-foliage-order,-texture-bias',
     ]) {
       const config = parseConfig(search);
       expect(parseConfig(configQuery(config))).toEqual(config);

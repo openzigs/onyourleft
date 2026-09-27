@@ -3196,6 +3196,17 @@ published figures (its run predates `oyl.txt`).
 | #616 | baseline 1 | `f91a5fb` + `realistic:stage` | — | 16.63 / 16.66 / **16.68** / 16.76 | 0.09 | 705.6 / 701 / 848 | 20.9 / 24.5 / 30.7 | 92.6 / 77.7 / **170.3** | 423.0 / 311.9 | 266 739 | 33 (32–37) |
 | #616 | baseline 2 | `f91a5fb` + `realistic:stage` | — | 16.63 / 16.66 / **16.68** / 16.75 | 0.11 | 707.7 / 701 / 848 | 25.8 / 29.1 / 32.3 | 92.6 / 74.8 / **167.4** | 419.5 / 308.4 | 266 741 | 33 (32–37) |
 | #616 | **spread** (\|1 − 2\|) | | | 0 / 0 / **0** / 0.01 | 0.02 | 2.1 (0.3 %) / 0 / 0 | 4.9 / 4.6 / **1.6** | 0 / 2.9 / **2.9** | 3.5 / 3.5 | 2 | 0 |
+| #619 | layer share | | `-sky` | | | | | | | | |
+| #619 | layer share | | `-surfaces` | | | | | | | | |
+| #619 | layer share | | `-vegetation` | | | | | | | | |
+| #619 | layer share | | `-impostors` | | | | | | | | |
+| #619 | layer share | | `-structures` | | | | | | | | |
+| #619 | layer share | | `-water` | | | | | | | | |
+| #619 | layer share | | `-riders` | | | | | | | | |
+| #619 | lever 1 before | | — ; `levers=-foliage-order` | | | | | | | | |
+| #619 | lever 1 after | | — | | | | | | | | |
+| #619 | lever 2 before | | — ; `rung=1`, `levers=-texture-bias` | | | | | | | | |
+| #619 | lever 2 after | | — ; `rung=1` | | | | | | | | |
 
 **Phone (OEM, model, Android, WebView):** Google Pixel Tablet, build `CP2A.260705.006`, Android 17,
 WebView 153.0.8010.36  **Build:** debug, `main` at **`f91a5fb`** (before #617's tree LODs, PR #637)
@@ -3237,3 +3248,27 @@ sampler output, `before.txt` and `oyl.txt` for each run are committed under
   20 s after the page opened. So `soak=21` yields at most minutes 1–19; waiting about 40 s more
   before AH6's `logcat -d` would capture minute 20.
 - `adb` saw the tablet twice (USB and Wi-Fi), so every `"$ADB"` command needed `-s <serial>`.
+
+#### The #619 rows — what the realistic world costs the GPU, lever by lever
+
+[#619](https://github.com/openzigs/onyourleft/issues/619) is read with this Part's instrument and
+nothing else. Every row is AH1–AH7 on the #619 branch (or a `main` with it merged), on the top rung
+with the ladder held (`ladder=0`) unless the row says `rung=1`.
+
+- **The layer shares.** Seven runs, one layer off each. A layer's share of the GPU clock is
+  *all-on mean − that row's mean*, against #616's baseline rows; name the two largest in #619.
+- **Lever 1, the canopy after the opaque world.** The **before** row switches the lever off with
+  `&levers=-foliage-order` (three's own order: the leaves drawn into an empty depth buffer); the
+  **after** row is the product. The picture is the same either way — the browser gate reads it back
+  identical — so the GPU mean is the whole of the question.
+- **Lever 2, one mip coarser on the second rung.** Both rows add `&rung=1` (the second realistic
+  rung, held by `ladder=0`); the **before** row also switches the lever off with
+  `&levers=-texture-bias`. It changes nothing on the top rung, which carries no bias. Look at the
+  after row's trees, bark and road by eye: the photographs are one mip softer on this rung, which
+  a tablet reaches only when it is already hot.
+- **Target** (#619): the GPU DVFS mean at least 10 % below #616's baseline with no visible loss.
+  If no kept lever reaches it, the numbers are the finding.
+- **Levers 3, 4 and 5 have no rows**: 3 and 4 were recorded as not worth it from arithmetic on
+  `main` (#619's pull request gives the numbers), and 5 — the top rung's render scale — waits for
+  the owner's ruling.
+

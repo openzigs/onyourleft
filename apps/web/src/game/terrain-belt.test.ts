@@ -440,6 +440,7 @@ describe('the water and the bridges a view draws — #459', () => {
       onBeforeCompile: (shader: {
         uniforms: Record<string, { value: number }>;
         vertexShader: string;
+        fragmentShader: string;
       }) => void;
     };
     expect(dressed.map).toBe(stone.colour);
@@ -450,6 +451,7 @@ describe('the water and the bridges a view draws — #459', () => {
     const shader = {
       uniforms: {} as Record<string, { value: number }>,
       vertexShader: '#include <common>\n#include <project_vertex>',
+      fragmentShader: '#include <common>\n#include <map_fragment>',
     };
     dressed.onBeforeCompile(shader);
     expect(shader.uniforms['tileMetres']?.value).toBe(
@@ -457,6 +459,8 @@ describe('the water and the bridges a view draws — #459', () => {
     );
     expect(shader.vertexShader).toContain('vMapUv = oylStone');
     expect(shader.vertexShader).toContain('instanceMatrix * oylWorld');
+    // #619 lever 2: the stone is a photograph, so it reads the rung's bias too.
+    expect(shader.fragmentShader).toContain('texture(oylSampler, oylUv, oylTextureLodBias)');
     // The same maps again build nothing new.
     belt.setWorld('realistic', stone);
     expect(belt.mesh.material).toBe(dressed);

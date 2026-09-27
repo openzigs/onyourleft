@@ -70,9 +70,12 @@ const UNBOUNDED: ScatterBudget = { maxItems: 100_000, riderMetres: 0 };
  *
  * ⚠️ It runs **east** for the reason `world.test.ts`'s fixture does — every
  * point carries exactly the latitude asked for — and with one further payoff
- * here: the projection makes local `x` equal to route distance, so an assertion
- * about *where along the road* an item is can be written about `x` without
- * `ScatterItem` having to carry a route distance it has no other use for.
+ * here: the projection makes local `−x` equal to route distance, so an
+ * assertion about *where along the road* an item is can be written about `x`
+ * without `ScatterItem` having to carry a route distance it has no other use
+ * for. ⚠️ **`−x`, since #583**: east is `−x` in a world drawn the right way
+ * round (`terrain.ts` §`localGroundPosition`). {@link routeDistanceOf} divides
+ * by the far end's own `x`, so it did not have to change.
  */
 function eastRoute(options: {
   readonly latitude: number;
@@ -210,7 +213,8 @@ function circuitCentre(
 /**
  * The route distance an `x` on {@link eastRoute} stands at.
  *
- * ⚠️ **`x` is *proportional* to route distance on that fixture, not equal to
+ * ⚠️ **`x` is *proportional* to route distance on that fixture — negatively,
+ * since #583 — not equal to
  * it**, and the difference matters here where it does not elsewhere. Route
  * distance is summed along the geodesic and `localGroundPosition` projects
  * equirectangularly, so the two differ by a constant factor of about one part
@@ -1162,17 +1166,18 @@ describe('the budget', () => {
     // `found.slice(0, maxItems)`: taking the first N in cell order keeps
     // everything behind the rider and stops dead at whatever distance the
     // budget ran out, which reads as a wall across the road. On this fixture
-    // `x` is the route distance, so the far end of the view is simply large `x`.
+    // `−x` is the route distance (east is `−x` since #583), so the far end of
+    // the view is simply large `−x`.
     const unbounded = place(profile, from, from + span);
     const bounded = place(profile, from, from + span, {
       maxItems: SCATTER_MAX_ITEMS,
       riderMetres: from + 60,
     });
     const furthest = (items: readonly ScatterItem[]): number =>
-      items.reduce((widest, item) => Math.max(widest, item.x), 0);
+      items.reduce((widest, item) => Math.max(widest, -item.x), 0);
 
     expect(furthest(bounded)).toBeGreaterThan(furthest(unbounded) - 20);
-    expect(bounded.filter((item) => item.x > from + span * 0.75).length).toBeGreaterThan(10);
+    expect(bounded.filter((item) => -item.x > from + span * 0.75).length).toBeGreaterThan(10);
   });
 
   it('draws nothing at all when there is no budget to draw with', () => {

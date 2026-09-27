@@ -602,6 +602,16 @@ describe('the realistic world is a ladder above the stylised one — ADR 0026 D-
     });
   });
 
+  it('samples its photographs one mip coarser on its second rung only, and no stylised rung is biased — #619', () => {
+    // Lever 2: a hot tablet sheds texture bandwidth before it sheds the world.
+    expect(REALISTIC_LADDER.map((rung) => rung.textureLodBias)).toEqual([0, 1]);
+    // No stylised rung carries a bias, so none can move a stylised pixel
+    // through it — the browser gate also renders one with the bias forced on.
+    for (const rung of [...QUALITY_LADDER, RIDER_SHADOW_MAP_RUNG]) {
+      expect(rung.textureLodBias, rung.label).toBe(0);
+    }
+  });
+
   it('carries fewer structures than the stylised rungs it copies, on both rungs — #506', () => {
     // Since #500 a realistic building costs up to 640 triangles, and the
     // stylised top's 240 of them put the worst realistic frame about half as
@@ -718,11 +728,16 @@ describe('the extra display-rate step — the owner’s ruling, #482', () => {
 
   it('keeps D-3: the realistic rungs are stylised 0 and 1 with the world swapped, and realism goes two steps before any frame rate', () => {
     REALISTIC_LADDER.forEach((rung, level) => {
-      // The structures apart — #506, asserted on their own above.
-      expect({ ...rung, world: 'stylised', label: '', structureItems: 0 }, rung.label).toEqual({
+      // The structures apart — #506 — and the texture bias — #619 — each
+      // asserted on its own.
+      expect(
+        { ...rung, world: 'stylised', label: '', structureItems: 0, textureLodBias: 0 },
+        rung.label,
+      ).toEqual({
         ...QUALITY_LADDER[level],
         label: '',
         structureItems: 0,
+        textureLodBias: 0,
       });
     });
     let state: WorldQualityState = INITIAL_REALISTIC_QUALITY;

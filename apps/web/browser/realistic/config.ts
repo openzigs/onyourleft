@@ -21,6 +21,7 @@
  * | `at` | hold the rider still this far along the route, for a screenshot | metres |
  * | `panel` | the on-screen controls | `1` (default), `0` for a clean screenshot |
  * | `layers` | layers switched OFF, for their share of the GPU (#616) | `-sky`, `-surfaces`, `-vegetation`, `-impostors`, `-structures`, `-water`, `-riders`, comma-separated; default none |
+ * | `levers` | #619's levers switched OFF, for a before/after pair at one rung | `-foliage-order`, `-texture-bias`, comma-separated; default none |
  *
  * ⚠️ **Unknown parameters and values are REFUSED**, as #457's page refused
  * them: a typo in a soak URL would otherwise measure the default under another
@@ -45,6 +46,24 @@ export const LAYERS = [
 /** One of {@link LAYERS}. */
 export type Layer = (typeof LAYERS)[number];
 
+/**
+ * #619's levers that `?levers=` can switch off — each a before/after pair the
+ * owner runs at one rung (validation 0002 Part AH), the product's setting
+ * being the one with every lever on.
+ *
+ * - `foliage-order` — lever 1: the canopy drawn after the opaque world
+ *   (`three-renderer.ts` §`FOLIAGE_RENDER_ORDER`). Off puts every vegetation
+ *   mesh back where three draws it unasked. The picture is the same either way.
+ * - `texture-bias` — lever 2: the second realistic rung's one-mip-coarser
+ *   photographs (`quality.ts` §`QualitySettings.textureLodBias`). Off samples
+ *   them at the top rung's detail. It changes nothing on the top rung, which
+ *   carries no bias: pair it with `rung=1&ladder=0`.
+ */
+export const LEVERS = ['foliage-order', 'texture-bias'] as const;
+
+/** One of {@link LEVERS}. */
+export type Lever = (typeof LEVERS)[number];
+
 /** One configuration of the page. */
 export interface RealisticPageConfig {
   readonly world: 'realistic' | 'stylised';
@@ -56,6 +75,8 @@ export interface RealisticPageConfig {
   readonly panel: boolean;
   /** The layers switched off, in {@link LAYERS}' order, each at most once — #616. */
   readonly layersOff: readonly Layer[];
+  /** #619's levers switched off, in {@link LEVERS}' order, each at most once. */
+  readonly leversOff: readonly Lever[];
 }
 
 /** The ride the owner is asked to look at: the realistic world, the ladder running. */
@@ -68,9 +89,20 @@ export const DEFAULT_CONFIG: RealisticPageConfig = {
   at: undefined,
   panel: true,
   layersOff: [],
+  leversOff: [],
 };
 
-const KNOWN = new Set(['world', 'rung', 'ladder', 'seconds', 'soak', 'at', 'panel', 'layers']);
+const KNOWN = new Set([
+  'world',
+  'rung',
+  'ladder',
+  'seconds',
+  'soak',
+  'at',
+  'panel',
+  'layers',
+  'levers',
+]);
 
 /**
  * `?layers=-vegetation,-water` as the layers it switches off — #616.
@@ -82,19 +114,48 @@ const KNOWN = new Set(['world', 'rung', 'ladder', 'seconds', 'soak', 'at', 'pane
  * every layer is on unless the URL says otherwise.
  */
 function layersFrom(value: string | null): readonly Layer[] {
+  return switchedOff('layers', LAYERS, value);
+}
+
+/**
+ * `?levers=-texture-bias` as the levers it switches off — #619, refused on the
+ * same terms as {@link layersFrom} and for the same reason.
+ */
+function leversFrom(value: string | null): readonly Lever[] {
+  return switchedOff('levers', LEVERS, value);
+}
+
+/** A `-name,-name` list of `names` switched off, in `names`' order; anything else refused. */
+function switchedOff<T extends string>(
+  key: string,
+  names: readonly T[],
+  value: string | null,
+): readonly T[] {
   if (value === null) return [];
-  const off = new Set<Layer>();
+  const off = new Set<T>();
   for (const entry of value.split(',')) {
     const name = entry.startsWith('-') ? entry.slice(1) : undefined;
-    const layer = LAYERS.find((each) => each === name);
-    if (layer === undefined) {
+    const found = names.find((each) => each === name);
+    if (found === undefined) {
       throw new Error(
-        `realistic: layers is a comma-separated list of -${LAYERS.join(', -')}, not "${value}"`,
+        `realistic: ${key} is a comma-separated list of -${names.join(', -')}, not "${value}"`,
       );
     }
-    off.add(layer);
+    off.add(found);
   }
-  return LAYERS.filter((layer) => off.has(layer));
+  return names.filter((each) => off.has(each));
+}
+
+/**
+ * A rung as this run draws it: the product's own, with a lever that works
+ * through the rung taken back out — #619. Only `texture-bias` does; the
+ * foliage order is the view's, and `realistic-harness.ts` switches it there.
+ */
+export function rungWithLevers<R extends { readonly textureLodBias: number }>(
+  rung: R,
+  leversOff: readonly Lever[],
+): R {
+  return leversOff.includes('texture-bias') ? { ...rung, textureLodBias: 0 } : rung;
 }
 
 /** A configuration from a query string. @see RealisticPageConfig */
@@ -132,6 +193,7 @@ export function parseConfig(search: string): RealisticPageConfig {
     at: params.has('at') ? atLeast('at', 0, 0) : undefined,
     panel: oneOf('panel', ['1', '0'] as const, '1') === '1',
     layersOff: layersFrom(params.get('layers')),
+    leversOff: leversFrom(params.get('levers')),
   };
 }
 
@@ -147,6 +209,9 @@ export function configQuery(config: RealisticPageConfig): string {
   if (!config.panel) params.set('panel', '0');
   if (config.layersOff.length > 0) {
     params.set('layers', config.layersOff.map((layer) => `-${layer}`).join(','));
+  }
+  if (config.leversOff.length > 0) {
+    params.set('levers', config.leversOff.map((lever) => `-${lever}`).join(','));
   }
   const query = params.toString();
   return query === '' ? '' : `?${query}`;

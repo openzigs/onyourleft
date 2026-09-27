@@ -520,7 +520,8 @@ function markerAt(
   // camera's — #349. @see RiderMarker.headingX
   const heading = headingAt(corridor, at.index);
   // #499: across the road along its own normal, `(−headingZ, headingX)` —
-  // the side `terrain.ts` §`ribbonNormals` calls left — and at the road's
+  // the rider's right, on the screen and since #583 on the map (it was called
+  // the left until then) — and at the road's
   // height, which is flat across its width (`ribbonNormals` says why).
   return {
     kind,
