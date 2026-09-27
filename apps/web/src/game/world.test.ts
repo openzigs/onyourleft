@@ -32,7 +32,7 @@ import {
 
 import { relativeLuminance } from '../design/contrast';
 import { CAMERA_BEHIND_METRES } from './camera';
-import { VIEW_AHEAD_METRES } from './terrain';
+import { VIEW_AHEAD_METRES, localGroundPosition } from './terrain';
 import {
   FOG_OCCLUSION_AT_VIEW_END,
   HORIZON_HAZE,
@@ -482,7 +482,23 @@ describe('the sun', () => {
     expect(Math.abs(sun.z) / across).toBeGreaterThan(0.2);
     // And it is the azimuth this file names rather than some other bearing:
     // atan2(east, north), which is a compass bearing clockwise from north.
-    const bearing = (Math.atan2(sun.x, sun.z) * 180) / Math.PI;
+    //
+    // ⚠️ **East and north are read off the PROJECTION, not assumed**, since
+    // #583: until then this took east as `+x`, which was true of a world drawn
+    // as a mirror of its map, and a sun stated in the compass has to move with
+    // the projection or it lights every route from the mirrored side.
+    const origin = { latitude: 51, longitude: -0.12, elevation: 0 };
+    const east = localGroundPosition(
+      origin,
+      geographicPosition(degreesLatitude(51), degreesLongitude(-0.119)),
+    );
+    const north = localGroundPosition(
+      origin,
+      geographicPosition(degreesLatitude(51.001), degreesLongitude(-0.12)),
+    );
+    const onto = (axis: { x: number; z: number }): number =>
+      (sun.x * axis.x + sun.z * axis.z) / Math.hypot(axis.x, axis.z);
+    const bearing = (Math.atan2(onto(east), onto(north)) * 180) / Math.PI;
     expect(((bearing % 360) + 360) % 360).toBeCloseTo(SUN_AZIMUTH_DEGREES, 9);
   });
 

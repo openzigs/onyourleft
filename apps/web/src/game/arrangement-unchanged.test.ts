@@ -77,8 +77,8 @@ const LATITUDE_DEGREES = 51.5;
 const METRES_PER_DEGREE_LATITUDE = 111_320;
 
 /**
- * A 3 km route that bends one way the whole time, runs level, then climbs and
- * descends.
+ * A 3 km route that bends one way the whole time — to the left, west of north
+ * — runs level, then climbs and descends.
  *
  * Deliberately not straight and not level: `scatter.ts` reads the route's own
  * latitude and altitude for the tree line, and a flat straight fixture would
@@ -101,7 +101,15 @@ function bendingRoute(): RoutePoint[] {
   for (let along = 0; along <= 3000; along += 10) {
     const turned = along / radius;
     const north = radius * Math.sin(turned);
-    const east = radius * (1 - Math.cos(turned));
+    // ⚠️ WEST since #583, and the digests below did not move. Until #583 the
+    // world was drawn as a mirror of its map, so the route that bent EAST was
+    // drawn — and placed — exactly as this one, bending west, is now. #583
+    // mirrored the projection and nothing that places; the mirrored fixture
+    // reproducing every digest and anchor to the millimetre is the evidence.
+    // Left bending east, the sweep is a different one (6 954 natural items
+    // rather than 6 952, a different first house), which is the mirror
+    // showing, not the arrangement moving.
+    const east = -radius * (1 - Math.cos(turned));
     points.push({
       position: geographicPosition(
         degreesLatitude(LATITUDE_DEGREES + north / METRES_PER_DEGREE_LATITUDE),

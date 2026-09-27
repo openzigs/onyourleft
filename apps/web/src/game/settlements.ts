@@ -573,7 +573,7 @@ const NO_SEGMENTS: readonly number[] = [];
 interface Frame {
   readonly x: number;
   readonly z: number;
-  /** The left normal, `terrain.ts`'s convention. */
+  /** The normal, `terrain.ts`'s convention — the road's RIGHT since #583, called its left before. */
   readonly normalX: number;
   readonly normalZ: number;
 }

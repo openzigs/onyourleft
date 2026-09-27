@@ -123,7 +123,9 @@ export interface WorldStyle {
 export interface SunStyle {
   /**
    * A unit vector from the ground **toward** the sun, in the corridor's frame
-   * — `x` east, `y` up, `z` north, exactly as `terrain.ts` builds it.
+   * — `x` WEST, `y` up, `z` north, exactly as `terrain.ts` builds it. ⚠️ **`x`
+   * was east until #583**, which drew the world as a mirror of its map; a
+   * reviewer who remembers `x` east here is reading the old file.
    */
   readonly x: number;
   readonly y: number;
@@ -353,7 +355,9 @@ function sunFor(warmth: number): SunStyle {
   const azimuthRadians = SUN_AZIMUTH_DEGREES * DEGREES_TO_RADIANS;
   const horizontal = Math.cos(elevationRadians);
   return {
-    x: horizontal * Math.sin(azimuthRadians),
+    // East is `−x` (`terrain.ts` §`localGroundPosition`, #583), so a bearing's
+    // east component is negated here and its north one is not.
+    x: -horizontal * Math.sin(azimuthRadians),
     y: Math.sin(elevationRadians),
     z: horizontal * Math.cos(azimuthRadians),
     ambient: SUN_AMBIENT_SHARE,

@@ -31,7 +31,8 @@
  * authors' reference implementation was not opened (CLAUDE.md §6).
  *
  * Each profile sample `i` is moved sideways by `offset[i]` along the road's
- * own left normal `Nᵢ`, so the line's point is `Pᵢ = Cᵢ + offset[i]·Nᵢ`, and
+ * own normal `Nᵢ` — its RIGHT, on the map and on the screen, since #583 — so
+ * the line's point is `Pᵢ = Cᵢ + offset[i]·Nᵢ`, and
  * `κₖ` is the line's own curvature at `Pₖ` — the turn between its two chords
  * over their mean length. What is minimised is
  *
@@ -177,17 +178,20 @@ const LINE_SETTLE_METRES = 50;
  * Which side of the road a rider keeps to, as a sign on the road's own normal:
  * **+1**, the normal's side — the owner's *"right side, for now"* (#546).
  *
- * ⚠️ **The normal's side is the rider's RIGHT on the screen**, although
- * `terrain.ts` calls it left. The corridor puts east on `+x` and north on
- * `+z` with `+y` up, which is a mirror of a map in a right-handed renderer:
- * a camera behind a rider heading north sees `−x`, west, on its right, and the
- * normal `(−headingZ, headingX)` there is `(−1, 0)`. So the side named here is
- * held to what the owner sees by `game.browser.spec.ts` §"#546", which reads
- * the rider back on a straight and requires it right of the frame's middle —
- * not by this comment, which is an argument about a handedness. ⚠️ The same
- * handedness draws every route as a MIRROR of its map — #583, filed from this
- * issue — and whichever way #583 is fixed, that browser case is what says this
- * constant still names the screen's right.
+ * ⚠️ **The normal's side is the rider's RIGHT — on the screen and, since #583,
+ * on the map.** A camera behind a rider heading north with `+y` up has `−x` on
+ * its right in a right-handed renderer, and the normal `(−headingZ, headingX)`
+ * there is `(−1, 0)`. Since #583 `−x` is EAST (`terrain.ts`
+ * §`localGroundPosition`), which is the map's right going north. ⚠️ **Until
+ * #583 `−x` was WEST**: the corridor put east on `+x`, the world was drawn as a
+ * mirror of its map, and this comment said the normal was the screen's right
+ * "although `terrain.ts` calls it left" — a reviewer who remembers that is
+ * reading the old file. #583 moved the projection and not this constant: the
+ * normal was always the screen's right, and is now the map's too. What holds
+ * it to what the owner sees is `game.browser.spec.ts` §"#546", which reads the
+ * rider back on a straight right of the frame's middle, and §"#583", which
+ * reads a bend to the right on the map turning right on the screen — not this
+ * comment, which is an argument about a handedness.
  */
 export const ROAD_SIDE: 1 | -1 = 1;
 
@@ -692,7 +696,8 @@ function solveLine(profile: RouteProfile, steps: number): RacingLine {
 }
 
 /**
- * The road's left normal at each sample, from the two samples either side.
+ * The road's normal at each sample — its right, since #583 — from the two
+ * samples either side.
  * A sample with no direction — two identical positions — keeps the last one.
  */
 function sampleNormals(xs: Float64Array, zs: Float64Array, loop: boolean): Float64Array {
