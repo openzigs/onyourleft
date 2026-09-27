@@ -86,7 +86,14 @@ apps/                 AGPL-3.0-or-later, without exception
                         sidecamera.html and sidecamera-harness.tsx — the
                         tripod phone's filming sign at a phone's size, driven
                         through the real shell with a scripted link, because
-                        the real one (#529) does not exist yet
+                        the real one (#529) does not exist yet. Since #660 it
+                        also holds reflow.html and reflow-harness.tsx — the
+                        real shell over EMPTY and POPULATED in-memory ports,
+                        which `reflow.browser.spec.ts` walks route by route
+                        from `ALL_ROUTES` (parameterised routes included) at
+                        320×256, 390×844 and 844×390, failing any route whose
+                        document scrolls sideways and any box that scrolls
+                        sideways without being a focusable, named region
     public/             what Vite copies verbatim into `dist` (#405) — the web app
                         manifest and the three icons it names. A `.webmanifest`
                         is on neither LIC001's nor LIC002's extension list and
@@ -170,7 +177,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         actually paints with it. Since #316 `.oyl-button` DECLARES its
                         touch target rather than arriving at one: the height used to
                         be a by-product of two spacing tokens, a type token and a
-                        border, landing 0.8 px clear of 44 — see §4f
+                        border, landing 0.8 px clear of 44 — see §4f. Since #660
+                        `ScrollTable.tsx` is the only way a table is rendered: a
+                        focusable, named region the table scrolls inside, so a
+                        phone's PAGE never scrolls sideways (SC 1.4.10)
     src/camera/side-report*.ts
                         the side camera's post-ride report (#388) — the pose
                         numbers of one session reduced to SENTENCES, first third
@@ -203,7 +213,9 @@ apps/                 AGPL-3.0-or-later, without exception
                         fitness line carried to today, and the empty state a
                         new rider sees first. ⚠️ `#/` is Home since #428 and
                         the Ride screen is `#/ride`
-    src/library/        the activity library's row model, its port and its stub (#62)
+    src/library/        the activity library's row model, its port and its stub (#62),
+                        and since #660 `layout.ts` — whether it is a table or a
+                        list of cards, from the width the library is GIVEN
     src/map/            the ride map (#63) — the basemap configuration and the proof
                         it reaches no other origin, the GeoJSON conversion, the
                         once-per-application protocol registration, and the one
@@ -519,7 +531,45 @@ apps/                 AGPL-3.0-or-later, without exception
                         opening stall (a 4 950 ms GPU frame on the tablet) is
                         paid in `three-renderer.ts` §`prepare`, which draws the
                         first frame into one pixel before any is shown. Part
-                        T5 (20 minutes with the map on) is still owed
+                        T5 (20 minutes with the map on) is still owed.
+                        ⚠️ **Since #620 its sun projection is SHARED**:
+                        `sunThrowPerMetre` is the one place `world.ts`'s sun
+                        becomes a shadow on the ground, and the scenery's
+                        blobs read it too rather than a copy
+    src/game/ground-blob.ts
+                        where the realistic scenery darkens the ground it
+                        stands on (#620) — a soft blob under every tree,
+                        shrub, rock and structure the realistic world draws
+                        as a mesh, thrown from the ONE sun through
+                        `contact-shadow.ts` §`sunThrowPerMetre`, lying on the
+                        landform TRIANGLE under its middle
+                        (`groundUnderBlob`, the triangles the renderer draws;
+                        where a hairpin's two sheets overlap, the one nearest
+                        the caster's foot, and a middle thrown over the road
+                        lies in the foot's plane rather than being dropped),
+                        and clipped at the road's edge by two half-planes, one
+                        per stretch of road in reach (`roadClip`; a third
+                        folds into one of them). ⚠️ **What gates the clip is
+                        two things, and the unit test alone is not one of
+                        them**: `ground-blob.test.ts` holds `roadClip`'s
+                        planes through `keptByRoadClip`, a TypeScript twin of
+                        the GLSL; the SHIPPED shader is held by
+                        `game.browser.spec.ts` §"#620", which forces a plane
+                        through a blob's middle in the harness and reads one
+                        half dark and the other not, with a no-op control
+                        (`game-harness.ts` §`groundBlobClip`). #686's review
+                        inverted the shader's offset and dropped its planes
+                        with every gate green before that. `three-renderer.ts` §`GroundBlobBelt` draws
+                        them: ONE draw call, two triangles a blob, no texture,
+                        no shadow state, realistic rungs only, at most
+                        `realistic-budget.ts` §`REALISTIC_GROUND_BLOBS` (62) —
+                        counted in the frame's triangles. ⚠️ **A blob is
+                        blended over the ENCODED pixel** (three tone-maps and
+                        encodes inside each material's shader), so its 0.3
+                        takes 0.3 off the displayed ground, and the browser
+                        gate holds that from both sides. ⚠️ The furthest tree
+                        with a blob FADES it toward the next tree back: #617's
+                        hand-over measured it popping on in one frame
     src/game/terrain.ts the road as geometry (#91), and since #242 as a road: two
                         edge lines and a broken centre line built into the same
                         vertex buffer, and a surface tinted by signed gradient.
@@ -2247,7 +2297,7 @@ percentage.
 
 | File | What it decides |
 |---|---|
-| `audit.ts` | fifteen structural rules over a rendered DOM (it said fourteen until #394; `landmarks-are-distinguishable` is the fifteenth — count `ACCESSIBILITY_RULES` rather than this cell) — an unnamed control, a control not in the tab order, a broken heading order, a dangling ARIA reference, a positive `tabindex`, and so on. `tabbableElements` is the tab-order model the keyboard tests rest on |
+| `audit.ts` | sixteen structural rules over a rendered DOM (it said fourteen until #394 and fifteen until #660; `table-in-scroll-region` is the sixteenth — every table the child of a focusable, named scroll region, `design/ScrollTable.tsx`, because SC 1.4.10 lets a table keep its columns on a phone only there — count `ACCESSIBILITY_RULES` rather than this cell) — an unnamed control, a control not in the tab order, a broken heading order, a dangling ARIA reference, a positive `tabindex`, and so on. `tabbableElements` is the tab-order model the keyboard tests rest on |
 | `audit.a11y.test.ts` | a violating fixture for **every** rule, plus an assertion that every rule in `ACCESSIBILITY_RULES` has one. A rule added without a failing fixture fails the build |
 | `routes.a11y.test.tsx` | renders every entry in `shell/routes.ts` and audits it. A route added to the table is audited without anyone editing this file |
 | `contrast.a11y.test.ts` | WCAG 2.2 AA contrast for every declared token pair, and that every token appears in a pair |
@@ -2315,7 +2365,7 @@ browser runs**.
 | `hosted-archive.ts` | what that third block decides **without** a network: which archive, which origins it may then reach, and where to put the ride inside whatever coverage the archive's own header declares. Pure, with `hosted-archive.test.ts` beside it in the Vitest suite — which is the answer to "a skipped block rots unseen" |
 | `pmtiles-fixture.ts` | a PMTiles v3 archive written from arithmetic, so the gate has a basemap to render. Emitted into `browser/dist` by `vite.browser.config.ts`, never committed, and carrying no OpenStreetMap data. ⚠️ It used to be the **only** file here with a Vitest test beside it; `hosted-archive.ts` is the second, and `apps/web/vitest.config.ts`'s `browser/**/*.test.ts` covers both |
 | `game.html`, `game-harness.ts` | since #91, the same idea for the renderer: a page that builds a scene through the **real** `game/three-renderer.ts` and the **real** `terrain.ts` |
-| `game.browser.spec.ts` | its spec — the renderer constructs against a live context, the geometry is one a driver accepts, and a frame reaches the drawing buffer (read back with `readPixels`, because `render` not throwing is a weaker claim). ⚠️ Since #430's pull request it also has §"the realistic world", on **one** extra load, `game.html?realistic`: the D-7 fallback, D-11 over a live scene, the one-call road, the gradient tint's contrast read off the drawing buffer **after the light and AgX**, the realistic rider's legs against the cranks, and the step down — and that the DEFAULT load fetches none of the realistic set. Since #499 it also reads the rider back off-centre and ROLLED at a 20 m hairpin's apex, through the centreline's camera held still, with the same rider drawn upright at the same place and the centreline rider as its two controls (`game-harness.ts` §`lineProbe`). Since #546 it also reads the rider on a STRAIGHT right of the frame's middle, with the centreline rider — #499's straight — as the control that must fail. ⚠️ **Since #546 the harness's `inTheFrame` and `onTheRoad` take the screen's right as the road's normal `(−headingZ, headingX)`** — they took `(headingZ, −headingX)`, the screen's LEFT, and every probe was symmetric about a camera on the centreline, so nothing noticed until #546 moved the camera 1.75 m right with the rider. ⚠️ **Since #583 it reads which way a bend TURNS** (`game-harness.ts` §`bendProbe`): `hairpinRoute(20)`, a right-hand bend on the map, must draw its far road right of its near road, and its mirror — which is, point for point, what every build before #583 drew for it — must draw it left. The #499 case also requires that hairpin's apex rider on the RIGHT of the frame; it read 22.1 % before #583 and passed, because its sign checks were symmetric |
+| `game.browser.spec.ts` | its spec — the renderer constructs against a live context, the geometry is one a driver accepts, and a frame reaches the drawing buffer (read back with `readPixels`, because `render` not throwing is a weaker claim). ⚠️ Since #430's pull request it also has §"the realistic world", on **one** extra load, `game.html?realistic`: the D-7 fallback, D-11 over a live scene, the one-call road, the gradient tint's contrast read off the drawing buffer **after the light and AgX**, the realistic rider's legs against the cranks, and the step down — and that the DEFAULT load fetches none of the realistic set. Since #499 it also reads the rider back off-centre and ROLLED at a 20 m hairpin's apex, through the centreline's camera held still, with the same rider drawn upright at the same place and the centreline rider as its two controls (`game-harness.ts` §`lineProbe`). Since #546 it also reads the rider on a STRAIGHT right of the frame's middle, with the centreline rider — #499's straight — as the control that must fail. ⚠️ **Since #546 the harness's `inTheFrame` and `onTheRoad` take the screen's right as the road's normal `(−headingZ, headingX)`** — they took `(headingZ, −headingX)`, the screen's LEFT, and every probe was symmetric about a camera on the centreline, so nothing noticed until #546 moved the camera 1.75 m right with the rider. ⚠️ **Since #583 it reads which way a bend TURNS** (`game-harness.ts` §`bendProbe`): `hairpinRoute(20)`, a right-hand bend on the map, must draw its far road right of its near road, and its mirror — which is, point for point, what every build before #583 drew for it — must draw it left. The #499 case also requires that hairpin's apex rider on the RIGHT of the frame; it read 22.1 % before #583 and passed, because its sign checks were symmetric. Since #620 the `?realistic` load also reads the ground in a tree's blob against the ground 5 m away (`game-harness.ts` §`groundBlobProbe`), blobs drawn and hidden, and holds the darkening to 0.3 ± 0.05 of the encoded pixel — a floor AND a ceiling, #621's review — with the hidden pair as the control. ⚠️ **It reads a tree 7 m ahead, not 25**: on a 640 × 360 canvas ground 30 m from a 2 m eye is under a pixel a metre, and the first version read half the darkening for that reason alone. Since #686's review it also reads the SHIPPED shader's road clip (`game-harness.ts` §`groundBlobClip`): the harness swaps the blob mesh's clip attributes for its own copies — nothing in the product can force a plane — puts a plane through that tree's blob, and requires the kept half to darken by the blob's alpha there and the clipped half by under 0.02, with both halves darkening under a no-op control |
 | `hud.html`, `hud-harness.tsx` | since #266, the ride HUD: the **real** `game/hud/HudPanel.tsx` under the **real** `design/theme.css`, on the **real** stage `GameView` gives it, with every field populated and all three of #259's settled outcome words. ⚠️ **Until #423 that was the `oyl-shell` → `oyl-main` → `oyl-game` chain, and a reviewer who remembers it is reading the old file**: the HUD is laid over a `position: fixed` stage now, so its containing block is the viewport whatever is above it, and the old chain would have gone on measuring a stacked layout a rider only gets at 320×256. One thing on this page is the harness's own and it says so: each stage is `position: relative` and `100vh` tall, because six fixed stages are six panels on top of one another. A **`.tsx`**, and the first React in this directory |
 | `hud.browser.spec.ts` | its spec — no `.oyl-hud__value` overflows its grid track at a phone in either orientation, at **360 px** (where #423's first layout ran the third primary reading off the screen) and at a landscape tablet, read back from the browser's own layout. Its **control panels** are the half that makes a green run mean something; ⚠️ since #423 the control moves the words into the primary list as well as stripping #259's class, because every word is a secondary reading now and at 1.5 rem it would spill by under three pixels, which is not a control |
 | `shell.html`, `shell-harness.tsx` | since #307's review, the app **shell**: the **real** `shell/AppShell.tsx` with the **real** `ROUTES` table under the **real** `design/theme.css`. The second `.tsx` here. ⚠️ Its spacer goes **inside `.oyl-main`** and the file says why at length — after `.oyl-shell` the header scrolls out of its own sticky containing block and measures 0 px, and inside `.oyl-shell` `main` stays shorter than the viewport so a focus scroll never consults `scroll-margin-top`. Each mistake made a different assertion pass over nothing. ⚠️ Since #316 it also renders the **real** `design/Button.tsx` in both variants, with `RideView`'s own labels, because a shell handed no ports renders **zero** controls on all eleven routes and a size assertion over an empty list passes. Since #667, `?controls=specimens` adds the native form controls — a file input, checkbox and radio rows in both markups the views use, a `<select>`, a range and a progress bar — and `&base-select=off` deletes the `@supports (appearance: base-select)` block through the CSSOM, which is the select's control |
@@ -2330,6 +2380,7 @@ browser runs**.
 | `sidecamera.html`, `sidecamera-harness.tsx`, `sidecamera.browser.spec.ts` | since [#528](https://github.com/openzigs/onyourleft/issues/528), the tripod phone's **filming sign**, driven into the filming state through the real `AppShell` and the screen's own controls, with the scripted link the unit tests use handed in through `AppShellProps.sideCameraLink` (there is no production link: #529, held by ADR 0033 D-0). At five phone viewports, both ways up, down to 320 px: the stage's box is the viewport and a 7 × 7 hit-test grid finds nothing but the sign and the shell's own camera indicator; the shell's header and navigation are absent; the word's em is at least 15 % of the short side and twice any other visible text, on one line; and exactly **one** control is on the page, 44 × 44, inside the viewport and topmost at its centre — also with the link lost and the countdown showing. Its **control** strips the stage's class from the live element and requires the same markup NOT to cover the screen. ⚠️ It measures CSS pixels, not a doorway: `theme.css` §"THE SIDE CAMERA" says what the floor comes to in millimetres on a typical phone, and that the legibility rule it is set against was read second-hand |
 | `sidelink.html`, `sidelink-harness.ts`, `sidelink.browser.spec.ts` | since #529, the side-camera link paired end to end in the real engine: two peer connections in one page through the real offer and answer codes and the SDP `camera/side-link-sdp.ts` rebuilds, a start and a stop acknowledged across, and the offer drawn on a canvas and read back by the real reader. ⚠️ `playwright.config.ts` passes `--disable-features=WebRtcHideLocalIpsWithMdns` so the candidates are raw private addresses — the path spike 0012 found both Android WebViews take — rather than `.local` names a CI container may have no responder for. ⚠️ **Not two devices**, and not #541's packet capture |
 | `bend.html`, `bend-harness.ts`, `bend.browser.spec.ts` | since #543, a planner-sampled 20 m bend drawn by the real renderer and read back from **straight above** — a heading of nothing puts `cameraRig`'s eye over its target — with the road isolated the #440 way. Rays from the bend's centre find each edge; the edge is walked in 2 m chords and what is held to `MAXIMUM_CORRIDOR_JOINT_DEGREES` is the **kink**, a turn less its neighbours' mean, because a smooth inner edge turns 7° every two metres anyway. Its control is the road as drawn before #543 (`roadCorridor`'s `unsmoothed`), which must kink. `with-corridor.ts` rebuilds the ground and water around a swapped corridor, which the loop page needs too since #543: ground shaped for one road over another split 32 rows of it. ⚠️ Since #583 the sweep of rays starts on a ray that MISSES the road: it started at 0°, and #583's mirrored bend straddled 0° and read as two short edges (81.7° and 73.3° of turn) with nothing else wrong |
+| `reflow.html`, `reflow-harness.tsx`, `reflow.browser.spec.ts` | since [#660](https://github.com/openzigs/onyourleft/issues/660), WCAG 2.2 SC 1.4.10 (Reflow) on **every** route: the real `AppShell` over in-memory ports that are either empty or populated (forty rides with long and unbreakable names, a ride with a chart, laps, a map and a side-camera report, a segment with efforts, a route, a workout), opened at 320×256, 390×844 and 844×390. The routes come from `ALL_ROUTES` — imported, never listed — and the PAGE reads the same table and reports any route it was never asked to render, so a walk over a hand list fails; a parameterised route the harness has no fixture id for is a failure, not a skip. Each route must render its own `h1` and raise no uncaught error or unhandled rejection, the document must not scroll sideways, and every box that DOES scroll sideways must take focus, be a `region` and have a name. ⚠️ **Every route declares what its fixture puts on the page** — `reflow-harness.tsx` §`POPULATED`, a `Record` over `RouteId`, present when populated and ABSENT when empty — or why nothing on it comes from one; a route with no entry fails both walks. Until #683's review it was a `Partial` list of five, and emptying the routes, workouts and analysis fixtures left every walk green. ⚠️ **Five controls**: an over-wide element in `main` must fail at all three viewports; a region that cannot take focus, a region with no name and a focusable named box whose role is `group` must each fail; and the real `design/ScrollTable.tsx`, wider than the phone with visually hidden text at its far end, must pass — which is what caught that an absolutely positioned descendant escapes a scroll container that is not its containing block (`theme.css` §`.oyl-scroll-region`). It prints every route's margin. ⚠️ Not a real phone's fonts, not a text size above 100 %, and not the dark theme (#654 P1-f) |
 | `insets.ts` | since #439, edge-to-edge safe-area insets applied to the ENGINE through `Emulation.setSafeAreaInsetsOverride`, so `env()` itself reports them, plus the one inset reading taken off the owner's tablet. Every #439 case also reads the insets back, so a Playwright bump that drops the protocol call fails rather than measuring a page with none |
 | `../playwright.config.ts` | Chromium only, no retries, the SwiftShader flags without which a GPU-less runner gives MapLibre no context at all — and since #408 **two `webServer` entries**, because the product and the harness are different builds. ⚠️ Since [#651](https://github.com/openzigs/onyourleft/issues/651) **two projects, `game` listed LAST**, so its four loads run alone after everything else — run beside the other specs they slowed by half or more, because SwiftShader draws on the CPU — and a `globalTimeout` (`GATE_BUDGET_MS`, 580 s) so the gate stops itself and names what was running before the job's `timeout-minutes` cancels it in silence. Playwright's default of two workers stays: the runner is two cores (§4c). A reviewer who remembers one `chromium` project is reading the old file. `playwright.config.ts` §`projects` says why, and what splitting the game further did |
 | `../vite.browser.config.ts` | the harness build. A second Vite config, so the harness cannot reach a shipped bundle |
@@ -2460,13 +2511,15 @@ command and its own CI step.
 ⚠️ **`vite.browser.config.ts` names every entry explicitly, and must.** Vite's multi-page mode
 discovers only `index.html`; a page added without a line in `build.rollupOptions.input` is simply
 not built, and the failure is a 404 while the spec runs rather than a build error — which reads
-like a server fault and sends the next person to `playwright.config.ts`. There are **twelve** entries
+like a server fault and sends the next person to `playwright.config.ts`. There are **fifteen** entries
 today, not two — the map, the game, the HUD, the app shell, the game's stage (#373, #423), the
-Ride screen (#422), the loop start (#440), the home screen (#428), the side camera's filming sign
-(#528), the side-camera link (#529), the owner's realistic page (ADR 0026 D-12) and the capture
-tool — and this sentence said *four* until #373, *seven* until #430's pull request, when it had
-been stale for two entries already, *ten* until #528 and *eleven* until #529, so read
-`build.rollupOptions.input` rather than this line. ⚠️ Since that pull request the harness build's
+Ride screen (#422), the loop start (#440), the bend (#543), the home screen (#428), the side
+camera's filming sign (#528), the side-camera link (#529), the pose model (#530), the owner's
+realistic page (ADR 0026 D-12), the capture tool and the reflow walk (#660) — and this sentence
+said *four* until #373, *seven* until #430's pull request, when it had been stale for two entries
+already, *ten* until #528, *eleven* until #529 and *twelve* until #660, when it had been stale for
+two entries again (the bend and the pose model), so read `build.rollupOptions.input` rather than
+this line. ⚠️ Since that pull request the harness build's
 `publicDir` is the app's own `public/`, so the realistic world is served to both builds at the
 same path. #266 confirmed the trap by
 deleting its own line — the run died sixty seconds later inside `waitForFunction` with no mention
@@ -4019,6 +4072,8 @@ top of an issue **supersedes its body**.
 | When a pedal would strike the road, and why the rider's own cranks are parked outside-pedal-down in a tight bend whatever the cadence | `apps/web/src/game/bicycle.ts` §`PEDAL_STRIKE_LEAN_RADIANS`, §`drawnCrankAngle`, §`advanceCrank` |
 | Whether the camera's near plane cuts the scenery it passes, what riding the fixture routes found, and what the renderer drops | `apps/web/src/game/near-field.ts`, `apps/web/src/game/near-field.test.ts` §"a ride", `apps/web/src/game/camera.ts` §`NEAR_PLANE_METRES`, `apps/web/browser/game-harness.ts` §`nearFieldProbe`, [#545](https://github.com/openzigs/onyourleft/issues/545) |
 | Why the near-plane cull asks a shape's triangles and never only its box | `apps/web/src/game/near-field.ts` §"How it is answered", `apps/web/src/game/near-field.test.ts` §"why the cull reads the triangles" |
+| Where the realistic scenery darkens the ground, from which sun, on which ground, and what keeps it off the road | `apps/web/src/game/ground-blob.ts`, `apps/web/src/game/three-renderer.ts` §`GroundBlobBelt`, `apps/web/src/game/ground-blob.test.ts` §"never lies on the carriageway" (the planes), `apps/web/browser/game-harness.ts` §`groundBlobClip` (the shipped shader), [#620](https://github.com/openzigs/onyourleft/issues/620) |
+| Why the rock's occlusion is a per-VERTEX bake against a ground plane, and what a per-corner one cost | `apps/web/tools/realistic/blender/process_rock.py`, `apps/web/src/game/realistic-budget.test.ts` §"#620" |
 | Why the riders cast a contact shadow, from which sun, and why the ghost casts none | `apps/web/src/game/contact-shadow.ts` §`CASTS_CONTACT_SHADOW`, `apps/web/src/game/three-renderer.ts` §`ContactShadowBelt`, [#426](https://github.com/openzigs/onyourleft/issues/426) |
 | Why the scene-free frame is six draw calls since #426, and what the shadow map would cost instead | `apps/web/browser/game.browser.spec.ts` §`SCENE_DRAW_CALLS`, §`SHADOW_MAP_EXTRA_DRAW_CALLS`, §"measures what the shading costs" |
 | Why the shadow map is a rung above the ladder that every stylised ride starts on, which rungs keep it, and how a device is measured with it off | `apps/web/src/game/quality.ts` §`RIDER_SHADOW_MAP_RUNG`, §`RIDER_SHADOW_MAP_STORAGE_KEY`, [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part T, [#547](https://github.com/openzigs/onyourleft/issues/547) |
@@ -4045,6 +4100,8 @@ top of an issue **supersedes its body**.
 | Why a link is four tokens rather than `accent`, which surfaces each is paired with, and what a dark palette would owe | `apps/web/src/design/tokens.ts` §`LINK_SURFACES`, §`LINK_CONTRAST_MEASURED`, `apps/web/src/design/theme.css` §"A link — #661", `apps/web/browser/links.browser.spec.ts` |
 | Why a contrast pair records what it measures as well as what it must clear | `apps/web/src/design/tokens.ts` §`ContrastRequirement.measured` |
 | How far a `<select>` may be styled before it stops being one, and why its picker is styled since #667 | `apps/web/src/design/theme.css` §`select`, §`@supports (appearance: base-select)`, `apps/web/src/a11y/theme.a11y.test.ts`, [#307](https://github.com/openzigs/onyourleft/issues/307) / PR [#311](https://github.com/openzigs/onyourleft/pull/311) (discussed in [#308](https://github.com/openzigs/onyourleft/issues/308)), reversed by the owner in [#654](https://github.com/openzigs/onyourleft/issues/654) and [#667](https://github.com/openzigs/onyourleft/issues/667) |
+| Why no route may scroll sideways on a phone, what a table does instead, and what walks every route to check | `apps/web/src/design/ScrollTable.tsx`, `apps/web/src/a11y/audit.ts` §`table-in-scroll-region`, `apps/web/browser/reflow.browser.spec.ts`, [#660](https://github.com/openzigs/onyourleft/issues/660) |
+| When the activity library is a card list and when it is a table, and why the width it is given decides rather than the window | `apps/web/src/library/layout.ts` §`TABLE_FROM_REM`, `apps/web/src/views/ActivitiesView.tsx` §`useLibraryLayout` |
 | Why the button's 44 px touch target is declared rather than emergent, and why a floor is not enough on its own | `apps/web/src/design/theme.css` §`.oyl-button`, `apps/web/browser/shell.browser.spec.ts` §`TOUCH_TARGET_PIXELS` |
 | When the header sticks, when it deliberately does not, and the measurement that decides | `apps/web/src/design/theme.css` §`@media (min-width: 64rem) and (min-height: 40rem)`, `apps/web/browser/shell.browser.spec.ts` |
 | Where the trainer status line is, why it is in the HUD rather than under it, and why #373 did not make it visible in landscape | `apps/web/src/game/hud/fields.ts` §`TrainerLine`, `apps/web/src/game/hud/HudPanel.tsx`, `apps/web/browser/ride.browser.spec.ts`, [#373](https://github.com/openzigs/onyourleft/issues/373), [#422](https://github.com/openzigs/onyourleft/issues/422) |

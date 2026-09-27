@@ -714,6 +714,42 @@ const landmarksAreDistinguishable: Rule = (doc) => {
 };
 
 /**
+ * #660 — WCAG 2.2 SC 1.4.10 (Reflow). A data table may keep its columns on a
+ * 320 px phone only inside a box of its own that scrolls, and a box that
+ * scrolls must be reachable by keyboard: it takes focus, it has a role, it has
+ * a name (#654's re-review). `design/ScrollTable.tsx` is that box.
+ *
+ * ⚠️ **Structural, not measured.** jsdom performs no layout, so this cannot
+ * know whether a table overflows — it requires every table to be ready to.
+ * `browser/reflow.browser.spec.ts` is the half that measures: it finds every
+ * box that actually scrolls sideways in a real engine and requires the same
+ * three things of it, which also covers a scroller that is not a table.
+ *
+ * The region must be the table's PARENT, so a page-wide region somewhere up
+ * the tree cannot stand in for one around the table.
+ */
+const tableInScrollRegion: Rule = (doc) =>
+  [...doc.querySelectorAll('table')]
+    .filter((table) => !isHiddenFromAssistiveTechnology(table))
+    .filter((table) => {
+      const region = table.parentElement;
+      return (
+        region === null ||
+        region.getAttribute('role') !== 'region' ||
+        region.getAttribute('tabindex') !== '0' ||
+        landmarkName(region) === ''
+      );
+    })
+    .map((table) => ({
+      rule: 'table-in-scroll-region',
+      message:
+        'A table that is not the child of a focusable, named scroll region. On a phone its ' +
+        'columns either widen the whole page — SC 1.4.10 — or scroll inside a box a keyboard ' +
+        'cannot reach. Render it with `design/ScrollTable.tsx`.',
+      html: snippet(table),
+    }));
+
+/**
  * Every rule, in the order a failure is most useful to read.
  *
  * Exported so `audit.a11y.test.ts` can assert that each one is exercised — a rule
@@ -736,6 +772,7 @@ export const ACCESSIBILITY_RULES: readonly (readonly [string, Rule])[] = [
   ['unique-id', uniqueIds],
   ['list-structure', listStructure],
   ['landmarks-are-distinguishable', landmarksAreDistinguishable],
+  ['table-in-scroll-region', tableInScrollRegion],
 ];
 
 /** Run every rule against a rendered document. Empty means clean. */

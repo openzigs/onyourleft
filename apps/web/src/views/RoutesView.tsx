@@ -17,6 +17,7 @@ import { ROUTES_IMPORT_MEANS } from '../routes/two-importers';
 import { hrefFor, routeById, ROUTE_BUILDER_ROUTE } from '../shell/routes';
 import { useUnits } from '../units/context';
 import { formatDistance, formatSmallDistance, measurementText } from '../units/format';
+import { ScrollTable } from '../design/ScrollTable';
 
 /**
  * Routes (#73) — the ones this device holds, and importing one from a file.
@@ -338,8 +339,9 @@ export function RoutesView({ port, now, save }: RoutesViewProps): JSX.Element {
       ) : routes.length === 0 ? (
         <p>You have no saved routes yet. Import a GPX file above to add one.</p>
       ) : (
-        <table>
-          <caption>Your saved routes, newest first. At most {ROUTE_LIST_LIMIT} are shown.</caption>
+        <ScrollTable
+          caption={<>Your saved routes, newest first. At most {ROUTE_LIST_LIMIT} are shown.</>}
+        >
           <thead>
             <tr>
               <th scope="col">Name</th>
@@ -403,7 +405,7 @@ export function RoutesView({ port, now, save }: RoutesViewProps): JSX.Element {
               </tr>
             ))}
           </tbody>
-        </table>
+        </ScrollTable>
       )}
 
       <h2>Before you share a route</h2>

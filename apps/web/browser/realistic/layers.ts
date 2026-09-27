@@ -64,6 +64,7 @@ import { SCENERY_KINDS, type SceneryKind } from '../../src/game/scatter';
 import {
   BridgeBelt,
   ContactShadowBelt,
+  GroundBlobBelt,
   HorizonRing,
   RealisticRiderBelt,
   RealisticStructureBelts,
@@ -139,6 +140,7 @@ export const LAYER_OWNERS: ReadonlyMap<{ prototype: object }, Ownership> = new M
   [RiderBelt, 'riders'],
   [RealisticRiderBelt, 'riders'],
   [ContactShadowBelt, 'riders'],
+  [GroundBlobBelt, 'grounding'],
   [WorldLamps, 'always'],
   // Its four inner belts are `ScatterBelt`s; this, the outer call, owns them.
   [RealisticStructureBelts, 'structures'],

@@ -31,9 +31,17 @@ import {
 } from '@onyourleft/store/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { TABLE_FROM_REM } from '../library/layout';
 import { PAGE_SIZE } from '../library/rows';
 import { stubLibrary } from '../library/testing';
-import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
+import {
+  activateWithKeyboard,
+  chooseOption,
+  mount,
+  queryAll,
+  settle,
+  type Mounted,
+} from '../testing/mount';
 
 import { ActivitiesView } from './ActivitiesView';
 
@@ -69,6 +77,14 @@ function summary(id: string, overrides: Partial<ActivitySummary> = {}): Activity
 
 function rowText(): string[] {
   return queryAll(document.body, 'tbody tr').map((row) => row.textContent ?? '');
+}
+
+function sortControl(): HTMLSelectElement {
+  const select = document.querySelector<HTMLSelectElement>('select#oyl-library-sort');
+  if (select === null) {
+    throw new Error('the library has no sort control');
+  }
+  return select;
 }
 
 function buttonNamed(text: string): HTMLButtonElement | undefined {
@@ -338,10 +354,146 @@ describe('#62 — the local activity library', () => {
     mounted = await mount(<ActivitiesView library={library} />);
     await settle();
 
-    await activateWithKeyboard(buttonNamed('Sort by distance') as HTMLElement);
+    await chooseOption(sortControl(), 'distance:descending');
     await settle();
 
     expect(library.reads.at(-1)?.orderBy).toBe('distance');
+    expect(library.reads.at(-1)?.direction).toBe('descending');
     expect(rowText()[0]).toContain('Long');
+
+    await chooseOption(sortControl(), 'distance:ascending');
+    await settle();
+
+    expect(library.reads.at(-1)?.direction).toBe('ascending');
+    expect(rowText()[0]).toContain('Short');
+    // The caption says the order the list is in, in the control's own words.
+    expect(document.querySelector('caption')?.textContent).toBe(
+      'Rides on this device, shortest first',
+    );
+  });
+
+  it('sorts with a labelled select, not with filled buttons — #660', async () => {
+    // #654's button-hierarchy finding: the sort was two filled PRIMARY buttons,
+    // the look this client gives to the one thing a page is for. It is a
+    // choice among four orders, which is what a select is.
+    mounted = await mount(<ActivitiesView library={stubLibrary(OWNER, [summary('a')])} />);
+    await settle();
+
+    const select = sortControl();
+    expect(document.querySelector(`label[for="${select.id}"]`)?.textContent).toBe('Sort');
+    expect([...select.options].map((option) => option.textContent)).toStrictEqual([
+      'Newest first',
+      'Oldest first',
+      'Longest first',
+      'Shortest first',
+    ]);
+    expect(select.value).toBe('startedAt:descending');
+    expect(queryAll(document.body, '.oyl-library-controls button')).toHaveLength(0);
+  });
+});
+
+/**
+ * A `ResizeObserver` that reports one width, once, when asked to observe —
+ * which is what a browser does on the first frame. jsdom has none, and with
+ * none the library stays a table (`library/layout.ts`).
+ */
+function observerReporting(width: number): void {
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      readonly #callback: ResizeObserverCallback;
+      constructor(callback: ResizeObserverCallback) {
+        this.#callback = callback;
+      }
+      observe(): void {
+        this.#callback([{ contentRect: { width } } as unknown as ResizeObserverEntry], this);
+      }
+      disconnect(): void {
+        // Nothing to release.
+      }
+      unobserve(): void {
+        // Nothing to release.
+      }
+    },
+  );
+}
+
+/** jsdom's root font size, which is the browser default. */
+const REM = 16;
+
+describe('#660 — a card list on a phone, a table where it fits', () => {
+  const rides = [
+    summary('outdoor', {
+      name: 'Tuesday hills',
+      averagePower: watts(212),
+      startedAt: unixSeconds(1_700_000_100),
+    }),
+    summary('indoor', { name: 'Zwift hour', hasPosition: false }),
+  ];
+
+  it('is a list of cards, one per ride, below the width the columns need', async () => {
+    observerReporting(TABLE_FROM_REM * REM - 1);
+    mounted = await mount(<ActivitiesView library={stubLibrary(OWNER, rides)} />);
+    await settle();
+
+    expect(document.querySelector('table')).toBeNull();
+    const cards = queryAll(document.body, '.oyl-activity-cards > li');
+    expect(cards).toHaveLength(2);
+    const first = cards[0]?.textContent ?? '';
+    // Every fact the table's columns carry, with the unit a column heading
+    // would have given it.
+    expect(first).toContain('Tuesday hills');
+    expect(first).toContain('1:02:05');
+    expect(first).toContain('42.2 km');
+    expect(first).toContain('212 W');
+    expect(cards[1]?.textContent).toContain('indoor');
+    expect(cards[0]?.querySelector('a')?.getAttribute('href')).toBe('#/activities/outdoor');
+    // Named by the same words the table's caption would have said.
+    const list = document.querySelector('.oyl-activity-cards');
+    const label = document.getElementById(list?.getAttribute('aria-labelledby') ?? '');
+    expect(label?.textContent).toBe('Rides on this device, newest first');
+  });
+
+  it('is a table from the width the columns need', async () => {
+    observerReporting(TABLE_FROM_REM * REM);
+    mounted = await mount(<ActivitiesView library={stubLibrary(OWNER, rides)} />);
+    await settle();
+
+    expect(queryAll(document.body, '.oyl-activity-cards')).toHaveLength(0);
+    expect(rowText()).toHaveLength(2);
+  });
+
+  it('keeps delete confirmation working in the card list', async () => {
+    observerReporting(300);
+    const library = stubLibrary(OWNER, rides);
+    mounted = await mount(<ActivitiesView library={library} />);
+    await settle();
+
+    await activateWithKeyboard(buttonNamed('Delete') as HTMLElement);
+    await settle();
+    expect(library.deleted).toStrictEqual([]);
+    await activateWithKeyboard(buttonNamed('Confirm delete') as HTMLElement);
+    await settle();
+    expect(library.deleted).toStrictEqual(['outdoor']);
+  });
+
+  it('says there is nothing yet, in the card layout too', async () => {
+    observerReporting(300);
+    mounted = await mount(<ActivitiesView library={stubLibrary(OWNER, [])} />);
+    await settle();
+
+    expect(document.body.textContent).toContain('Nothing recorded yet');
+    expect(queryAll(document.body, '.oyl-activity-cards')).toHaveLength(0);
+  });
+
+  it('puts the table in a focusable region named by its caption', async () => {
+    mounted = await mount(<ActivitiesView library={stubLibrary(OWNER, rides)} />);
+    await settle();
+
+    const region = document.querySelector('table')?.parentElement;
+    expect(region?.getAttribute('role')).toBe('region');
+    expect(region?.getAttribute('tabindex')).toBe('0');
+    const caption = document.querySelector('caption');
+    expect(region?.getAttribute('aria-labelledby')).toBe(caption?.id);
   });
 });

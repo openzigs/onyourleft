@@ -1,15 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useCallback, useEffect, useState, type JSX } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type JSX,
+  type RefObject,
+} from 'react';
 
 import type { ActivityOrder, ActivitySummary, SortDirection } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
+import { ScrollTable } from '../design/ScrollTable';
 import { StatusMessage } from '../design/StatusMessage';
 import { VisuallyHidden } from '../design/VisuallyHidden';
 import { POWER_UNIT } from '../format';
 import { useUnits } from '../units/context';
 import { distanceUnit } from '../units/format';
+import { libraryLayout, type LibraryLayout } from '../library/layout';
 import { orderedRows, PAGE_SIZE, type LibraryRow } from '../library/rows';
 import type { LibraryPort } from '../library/store-port';
 import { hrefFor, hrefForActivity, routeById } from '../shell/routes';
@@ -65,6 +76,115 @@ export interface ActivitiesViewProps {
   readonly library?: LibraryPort | undefined;
 }
 
+/** The sort control's `id`, for its `<label>`. One library per page. */
+const SORT_ID = 'oyl-library-sort';
+
+/** One order the library can be read in. */
+interface SortOption {
+  readonly value: string;
+  readonly label: string;
+  readonly orderBy: ActivityOrder;
+  readonly direction: SortDirection;
+}
+
+/**
+ * The four orders, as the choices of one control — #660.
+ *
+ * They were two filled primary buttons that each toggled half of the state,
+ * labelled with the order you would get rather than the one you had. A choice
+ * among four named orders is what a `<select>` is, and the label of the chosen
+ * option is also the caption, so what the control says and what the list says
+ * cannot disagree.
+ */
+const SORT_OPTIONS: readonly SortOption[] = [
+  {
+    value: 'startedAt:descending',
+    label: 'Newest first',
+    orderBy: 'startedAt',
+    direction: 'descending',
+  },
+  {
+    value: 'startedAt:ascending',
+    label: 'Oldest first',
+    orderBy: 'startedAt',
+    direction: 'ascending',
+  },
+  {
+    value: 'distance:descending',
+    label: 'Longest first',
+    orderBy: 'distance',
+    direction: 'descending',
+  },
+  {
+    value: 'distance:ascending',
+    label: 'Shortest first',
+    orderBy: 'distance',
+    direction: 'ascending',
+  },
+];
+
+function sortOptionFor(orderBy: ActivityOrder, direction: SortDirection): SortOption {
+  return (
+    SORT_OPTIONS.find((option) => option.orderBy === orderBy && option.direction === direction) ??
+    (SORT_OPTIONS[0] as SortOption)
+  );
+}
+
+/**
+ * Table or cards, from the width the library is given — `library/layout.ts`.
+ *
+ * ⚠️ **Measured once, synchronously, before the first paint, and then watched.**
+ * A `ResizeObserver` alone is not enough: its first notification does arrive
+ * before the first paint, but a state update from inside it is not flushed by
+ * React until after that paint, so a phone drew one frame of the table and
+ * then swapped it — sampled per animation frame in #683's review, three runs
+ * of three. An update made in a LAYOUT effect is flushed before the browser
+ * paints, so the width is read here first and the observer only follows later
+ * changes. `reflow.browser.spec.ts` §"the first frame" samples every frame
+ * from navigation and fails on a table before cards.
+ *
+ * Where there is no `ResizeObserver` — jsdom — nothing is measured and it
+ * stays a table. A width of nought is read as "not laid out" rather than as a
+ * phone, because jsdom reports nought for every box and a real container of
+ * nought width has nothing to lay out.
+ */
+function useLibraryLayout(present: boolean): [RefObject<HTMLDivElement | null>, LibraryLayout] {
+  const container = useRef<HTMLDivElement | null>(null);
+  const [layout, setLayout] = useState<LibraryLayout>('table');
+  useLayoutEffect(() => {
+    const element = container.current;
+    if (element === null || typeof ResizeObserver !== 'function') {
+      return undefined;
+    }
+    const rem = (): number =>
+      Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
+    const initial = contentWidth(element);
+    if (initial > 0) {
+      setLayout(libraryLayout(initial, rem()));
+    }
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[entries.length - 1]?.contentRect.width;
+      setLayout(libraryLayout(width, rem()));
+    });
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+    };
+    // Re-attached when a library arrives: with none, there is no container.
+  }, [present]);
+  return [container, layout];
+}
+
+/** The content-box width a `ResizeObserver` would report as `contentRect.width`. */
+function contentWidth(element: HTMLElement): number {
+  const style = getComputedStyle(element);
+  const edges = ['paddingLeft', 'paddingRight', 'borderLeftWidth', 'borderRightWidth'] as const;
+  return edges.reduce(
+    (width, edge) => width - (Number.parseFloat(style[edge]) || 0),
+    element.getBoundingClientRect().width,
+  );
+}
+
 type LoadState =
   | { readonly kind: 'idle' }
   | { readonly kind: 'loading' }
@@ -79,6 +199,8 @@ export function ActivitiesView({ library }: ActivitiesViewProps): JSX.Element {
   const [armed, setArmed] = useState<string | undefined>(undefined);
   const [reloads, setReloads] = useState(0);
   const units = useUnits();
+  const [container, layout] = useLibraryLayout(library !== undefined);
+  const listCaptionId = useId();
 
   const load = useCallback(async (): Promise<void> => {
     if (library === undefined) {
@@ -142,23 +264,56 @@ export function ActivitiesView({ library }: ActivitiesViewProps): JSX.Element {
     );
   }
 
+  const sort = sortOptionFor(orderBy, direction);
+  const caption = `Rides on this device, ${sort.label.toLowerCase()}`;
+  const rows = state.kind === 'ready' ? state.rows : [];
+  const nothingYet =
+    state.kind === 'loading' || state.kind === 'idle'
+      ? 'Reading the rides on this device…'
+      : 'Nothing recorded yet. A ride appears here the moment you finish one.';
+  const deleteButton = (row: LibraryRow): JSX.Element => (
+    <Button
+      onClick={() => {
+        void remove(row.id);
+      }}
+    >
+      {armed === row.id ? 'Confirm delete' : 'Delete'}
+      <VisuallyHidden> {row.name}</VisuallyHidden>
+    </Button>
+  );
+  // In words, not a colour or an icon. #48's criterion is that anything
+  // meaning-bearing has a non-visual equivalent, and an indoor ride is the
+  // common case here rather than the odd one.
+  const indoor = (row: LibraryRow): JSX.Element | undefined =>
+    row.hasPosition ? undefined : <span className="oyl-muted"> · indoor</span>;
+
   return (
-    <>
+    <div className="oyl-library" data-layout={layout} ref={container}>
       <div className="oyl-library-controls">
-        <Button
-          onClick={() => {
-            setOrderBy(orderBy === 'startedAt' ? 'distance' : 'startedAt');
+        {/*
+          A native select rather than two filled buttons (#660, #654's
+          button-hierarchy finding): the sort is a CHOICE between four
+          orders, and a primary button says "the thing this page is for".
+          It inherits `theme.css` §`select`'s 44 px target.
+        */}
+        <label htmlFor={SORT_ID}>Sort</label>
+        <select
+          id={SORT_ID}
+          value={sort.value}
+          onChange={(event) => {
+            const chosen = SORT_OPTIONS.find((option) => option.value === event.target.value);
+            if (chosen !== undefined) {
+              setOrderBy(chosen.orderBy);
+              setDirection(chosen.direction);
+            }
           }}
         >
-          Sort by {orderBy === 'startedAt' ? 'distance' : 'date'}
-        </Button>
-        <Button
-          onClick={() => {
-            setDirection(direction === 'descending' ? 'ascending' : 'descending');
-          }}
-        >
-          {direction === 'descending' ? 'Show oldest first' : 'Show newest first'}
-        </Button>
+          {SORT_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       {state.kind === 'failed' ? (
@@ -167,61 +322,84 @@ export function ActivitiesView({ library }: ActivitiesViewProps): JSX.Element {
         </StatusMessage>
       ) : undefined}
 
-      <table className="oyl-table">
-        <caption>
-          Rides on this device, {orderBy === 'startedAt' ? 'by date' : 'by distance'},{' '}
-          {direction === 'descending' ? 'newest first' : 'oldest first'}
-        </caption>
-        <thead>
-          <tr>
-            <th scope="col">Ride</th>
-            <th scope="col">Started</th>
-            <th scope="col">Duration</th>
-            <th scope="col">Distance ({distanceUnit(units)})</th>
-            <th scope="col">Avg power ({POWER_UNIT})</th>
-            <th scope="col">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {state.kind === 'ready' && state.rows.length > 0 ? (
-            state.rows.map((row) => (
-              <tr key={row.id}>
-                <th scope="row">
-                  <a href={hrefForActivity(row.id)}>{row.name}</a>
-                  {/*
-                    In words, not a colour or an icon. #48's criterion is that
-                    anything meaning-bearing has a non-visual equivalent, and an
-                    indoor ride is the common case here rather than the odd one.
-                  */}
-                  {row.hasPosition ? undefined : <span className="oyl-muted"> · indoor</span>}
-                </th>
-                <td>{row.startedAt}</td>
-                <td>{row.duration}</td>
-                <td>{row.distance}</td>
-                <td>{row.averagePower ?? '—'}</td>
-                <td>
-                  <Button
-                    onClick={() => {
-                      void remove(row.id);
-                    }}
-                  >
-                    {armed === row.id ? 'Confirm delete' : 'Delete'}
-                    <VisuallyHidden> {row.name}</VisuallyHidden>
-                  </Button>
-                </td>
-              </tr>
-            ))
+      {layout === 'cards' ? (
+        <>
+          <p className="oyl-muted" id={listCaptionId}>
+            {caption}
+          </p>
+          {rows.length === 0 ? (
+            <p>{nothingYet}</p>
           ) : (
-            <tr>
-              <td colSpan={6}>
-                {state.kind === 'loading' || state.kind === 'idle'
-                  ? 'Reading the rides on this device…'
-                  : 'Nothing recorded yet. A ride appears here the moment you finish one.'}
-              </td>
-            </tr>
+            <ul className="oyl-activity-cards" aria-labelledby={listCaptionId}>
+              {rows.map((row) => (
+                <li key={row.id} className="oyl-panel oyl-activity-card">
+                  <p className="oyl-activity-card__name oyl-library__name">
+                    <a href={hrefForActivity(row.id)}>{row.name}</a>
+                    {indoor(row)}
+                  </p>
+                  <dl className="oyl-activity-card__facts">
+                    <div>
+                      <dt>Started</dt>
+                      <dd>{row.startedAt}</dd>
+                    </div>
+                    <div>
+                      <dt>Duration</dt>
+                      <dd>{row.duration}</dd>
+                    </div>
+                    <div>
+                      <dt>Distance</dt>
+                      <dd>
+                        {row.distance} {distanceUnit(units)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Avg power</dt>
+                      <dd>
+                        {row.averagePower === undefined ? '—' : `${row.averagePower} ${POWER_UNIT}`}
+                      </dd>
+                    </div>
+                  </dl>
+                  {deleteButton(row)}
+                </li>
+              ))}
+            </ul>
           )}
-        </tbody>
-      </table>
+        </>
+      ) : (
+        <ScrollTable className="oyl-table" caption={caption}>
+          <thead>
+            <tr>
+              <th scope="col">Ride</th>
+              <th scope="col">Started</th>
+              <th scope="col">Duration</th>
+              <th scope="col">Distance ({distanceUnit(units)})</th>
+              <th scope="col">Avg power ({POWER_UNIT})</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length > 0 ? (
+              rows.map((row) => (
+                <tr key={row.id}>
+                  <th scope="row" className="oyl-library__name">
+                    <a href={hrefForActivity(row.id)}>{row.name}</a>
+                    {indoor(row)}
+                  </th>
+                  <td>{row.startedAt}</td>
+                  <td>{row.duration}</td>
+                  <td>{row.distance}</td>
+                  <td>{row.averagePower ?? '—'}</td>
+                  <td>{deleteButton(row)}</td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={6}>{nothingYet}</td>
+              </tr>
+            )}
+          </tbody>
+        </ScrollTable>
+      )}
 
       {armed === undefined ? undefined : (
         <StatusMessage tone="warning" live>
@@ -240,6 +418,6 @@ export function ActivitiesView({ library }: ActivitiesViewProps): JSX.Element {
         {' · '}
         <a href={hrefFor(routeById('transfer'))}>Import or export files</a>
       </p>
-    </>
+    </div>
   );
 }

@@ -233,6 +233,13 @@ describe('each rule rejects the failure it is for', () => {
       `${CLEAN_BODY}<nav><ul><li><a href="#/about">About</a></li></ul></nav>`,
     );
   });
+
+  it('table-in-scroll-region: a table a phone can only fit by widening the page', () => {
+    expectRule(
+      'table-in-scroll-region',
+      `${CLEAN_BODY}<table><caption>Laps</caption><tr><td>1</td></tr></table>`,
+    );
+  });
 });
 
 describe('the rules that are easy to get right for the wrong reason', () => {
@@ -589,6 +596,44 @@ describe('landmark naming follows ARIA rather than the generic name algorithm', 
          <nav aria-labelledby="blank" aria-label="Secondary"><ul><li><a href="#/about">About</a></li></ul></nav>`,
       ),
     ).toEqual([]);
+  });
+});
+
+describe('table-in-scroll-region asks for all three, and of the parent — #660', () => {
+  const table = '<table id="t"><caption id="c">Laps</caption><tr><td>1</td></tr></table>';
+
+  it('accepts a table inside a focusable region named by its caption', () => {
+    expect(
+      rulesFiredBy(
+        `${CLEAN_BODY}<div role="region" tabindex="0" aria-labelledby="c">${table}</div>`,
+      ),
+    ).toEqual([]);
+  });
+
+  it('fires on a region that cannot take focus', () => {
+    expect(
+      rulesFiredBy(`${CLEAN_BODY}<div role="region" aria-labelledby="c">${table}</div>`),
+    ).toContain('table-in-scroll-region');
+  });
+
+  it('fires on a focusable box with no role', () => {
+    expect(
+      rulesFiredBy(`${CLEAN_BODY}<div tabindex="0" aria-labelledby="c">${table}</div>`),
+    ).toContain('table-in-scroll-region');
+  });
+
+  it('fires on a focusable region with no name, even though the table has one', () => {
+    expect(rulesFiredBy(`${CLEAN_BODY}<div role="region" tabindex="0">${table}</div>`)).toContain(
+      'table-in-scroll-region',
+    );
+  });
+
+  it('fires when the region is an ancestor further up rather than the parent', () => {
+    expect(
+      rulesFiredBy(
+        `${CLEAN_BODY}<div role="region" tabindex="0" aria-label="Everything"><div>${table}</div></div>`,
+      ),
+    ).toContain('table-in-scroll-region');
   });
 });
 

@@ -55,6 +55,7 @@ import {
   surfaceSummary,
   unresolvedSentence,
 } from '../routing/present';
+import { ScrollTable } from '../design/ScrollTable';
 
 /**
  * The route drawing canvas — [#71](https://github.com/openzigs/onyourleft/issues/71)
@@ -410,11 +411,14 @@ export function RouteBuilderView({
       {draft.legs.length === 0 ? (
         <p>A route needs two waypoints before it has a leg.</p>
       ) : (
-        <table>
-          <caption>
-            Each leg runs from one waypoint to the next. A freehand leg is a straight line you drew
-            yourself, so its distance is a lower bound and nothing knows its surface.
-          </caption>
+        <ScrollTable
+          caption={
+            <>
+              Each leg runs from one waypoint to the next. A freehand leg is a straight line you
+              drew yourself, so its distance is a lower bound and nothing knows its surface.
+            </>
+          }
+        >
           <thead>
             <tr>
               <th scope="col">Leg</th>
@@ -454,7 +458,7 @@ export function RouteBuilderView({
               </tr>
             ))}
           </tbody>
-        </table>
+        </ScrollTable>
       )}
       {unresolved === undefined ? null : (
         <StatusMessage tone="warning" label="Some legs have no route">
@@ -506,11 +510,14 @@ export function RouteBuilderView({
       ) : (
         <>
           <p>{elevationSentence(elevation, units)}</p>
-          <table>
-            <caption>
-              The gradient along the route. Each row names its band, so nothing here is carried by
-              colour alone. Bands: {GRADE_BANDS.map((band) => band.name).join(', ')}.
-            </caption>
+          <ScrollTable
+            caption={
+              <>
+                The gradient along the route. Each row names its band, so nothing here is carried by
+                colour alone. Bands: {GRADE_BANDS.map((band) => band.name).join(', ')}.
+              </>
+            }
+          >
             {/*
               ⚠️ **The unit is in the column heading, not beside every number,
               and that is a decision rather than a side effect of the #238
@@ -547,7 +554,7 @@ export function RouteBuilderView({
                 </tr>
               ))}
             </tbody>
-          </table>
+          </ScrollTable>
         </>
       )}
     </>

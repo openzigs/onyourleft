@@ -20,7 +20,7 @@
  * | `soak` | minutes to keep riding, one sample a minute | default 0 |
  * | `at` | hold the rider still this far along the route, for a screenshot | metres |
  * | `panel` | the on-screen controls | `1` (default), `0` for a clean screenshot |
- * | `layers` | layers switched OFF, for their share of the GPU (#616) | `-sky`, `-surfaces`, `-vegetation`, `-impostors`, `-structures`, `-water`, `-riders`, comma-separated; default none |
+ * | `layers` | layers switched OFF, for their share of the GPU (#616) | `-sky`, `-surfaces`, `-vegetation`, `-impostors`, `-structures`, `-water`, `-riders`, `-grounding`, comma-separated; default none |
  * | `levers` | #619's levers switched OFF, for a before/after pair at one rung | `-foliage-order`, `-texture-bias`, comma-separated; default none |
  *
  * ⚠️ **Unknown parameters and values are REFUSED**, as #457's page refused
@@ -41,6 +41,11 @@ export const LAYERS = [
   'structures',
   'water',
   'riders',
+  // #620: the ground blobs under the scenery — one mesh for trees, shrubs,
+  // rocks and structures alike, so a layer of its own rather than a share of
+  // two. Off, it is #620's "before": the rock's baked occlusion is in the file
+  // and has no switch.
+  'grounding',
 ] as const;
 
 /** One of {@link LAYERS}. */
