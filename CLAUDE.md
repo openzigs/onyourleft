@@ -1286,7 +1286,7 @@ bash scripts/check-doc-links.sh
 bash scripts/check-doc-links.test.sh
 
 # Run several commands at once and fail if ANY of them fails (#651). Not a
-# check: it is how CI runs the checks, in three of its steps — see §4c. Every
+# check: it is how CI runs the checks, in one of its steps — see §4c. Every
 # line is labelled with its command as it arrives, each process is waited on by
 # itself, and a failing command's whole output is printed again at the end.
 # No commands at all is exit 2, not a pass. Bash only, so it runs on a bare
@@ -1435,8 +1435,8 @@ pnpm run build
 # measured against the harness, so `playwright.config.ts` serves `dist` on 4320
 # beside `browser/dist` on 4319. One CI job, because a second job reports under
 # a different context and could not block a merge. ⚠️ Two Playwright PROJECTS
-# since #651 — `game`, first, and `chromium` — in one run and one browser; §4c
-# says why the game spec is first and why it is not split further.
+# since #651 — `chromium`, and `game` LAST — in one run and one browser; §4c
+# says why the game spec is last and why it is not split further.
 # This is the ONLY place in the
 # repository where a browser runs: jsdom implements no WebGL, so MapLibre
 # cannot be constructed in the Vitest suite at all, and three things are
@@ -1898,28 +1898,41 @@ Those last two carry `if: always()` and cannot fail the job: the run where cover
 unexpectedly is exactly the one whose table you want, and a reporting step that can fail a
 build is a percentage floor arriving by the back door, which §5 forbids.
 
-⚠️ **Since [#651](https://github.com/openzigs/onyourleft/issues/651) two steps run several of those
-commands AT ONCE, and a reviewer who remembers one step per command is reading the old file.**
-`Bare-clone checks, concurrently` runs the eight script checks and `shellcheck`;
-`Workspace checks, concurrently` runs `format:check`, `lint`, `typecheck`, `check:wiring`,
-`check:cost-model`, `check:licences`, `build`, the browser install and five checker suites. Both go
-through `scripts/run-concurrently.sh` (§4a), which labels every line with its command, waits on
-each process by itself and fails the step if **any** command failed — its own suite runs first,
-because a runner that swallowed a failure would make each of those steps a gate removed and still
-look green, and #651's pull request proved it red on the runner with one formatting defect (run
-36325105846: `format:check` FAILED, the other twelve finished, the job failed). ⚠️ **Anything that
-runs Vitest stays out of both**, and so does `check:capacitor`: Vitest's 5 s case timeout is already
-within a second of several cases on the slower runner, and beside other work three of them passed
-it (run 36324592730) — `test:a11y` and `test:coverage` each run alone. And `test:coverage` and
-`test:browser` are **not** run together, though they are the two longest steps: run 36323764725 did
-it and both went red, because each is CPU-bound on its own.
+⚠️ **Since [#651](https://github.com/openzigs/onyourleft/issues/651) one step, `Checks,
+concurrently`, runs twenty-two of those commands AT ONCE, and a reviewer who remembers one step per
+command is reading the old file.** It runs the eight bare-clone script checks, `shellcheck`,
+`format:check`, `lint`, `typecheck`, `check:wiring`, `check:cost-model`, `check:licences`, `build`,
+the browser install and five checker suites, after the install — the bare-clone checks need none
+of it, but on their own before it they took 48 s with the runner otherwise idle. It goes through
+`scripts/run-concurrently.sh` (§4a), which labels every line with its command, waits on each
+process by itself and fails the step if **any** command failed — its own suite runs first, because
+a runner that swallowed a failure would make that step twenty-two gates removed and still look
+green, and #651's pull request proved it red on the runner with one formatting defect (run
+36325105846: `format:check` FAILED, the other twelve then in that step finished, the job failed).
+⚠️ **Anything that runs Vitest stays out of it**, and so does `check:capacitor`: Vitest's 5 s case
+timeout is already within a second of several cases on the slower runner, and beside other work
+three of them passed it (run 36324592730) — `test:a11y` and `test:coverage` each run alone. And
+`test:coverage` and `test:browser` are **not** run together, though they are the two longest steps:
+run 36323764725 did it and both went red, because each is CPU-bound on its own.
+
+⚠️ **The runner is two cores, not four, and that is what bounds all of this.** `ubuntu-latest`
+reports four vCPUs, and `lscpu` on it reads `Thread(s) per core: 2`, `Core(s) per socket: 2` (run
+36333257690, an AMD EPYC 7763). So a fourth Vitest worker made the suite no faster — 336 s to
+334 s — while its summed test time rose from 676 s to 807 s and one case passed its timeout, and
+Playwright keeps its default of two workers. The job is CPU-bound from end to end: running more
+things at once moves time around, and only doing less work removes it. #651 measured what the
+browser gate's game loads spent their time on and removed the probes each load ran for nobody
+(§4f); it split the near-field rides into files of their own and started the heaviest Vitest files
+first, measured no gain (346 s against 336 s — the suite is not waiting on a tail), and reverted
+both.
 
 If CI ever needs a step this file does not list, **this
 file is wrong and gets fixed in the same PR**; CI must not accumulate private knowledge, because
 that is how a contributor's local green becomes CI's red with no explanation.
 
 ⚠️ **There is exactly one step that is not a §4a command, and this is it:
-`sudo rm -f /etc/apt/sources.list.d/google-chrome.*` immediately before the browser install.**
+`sudo rm -f /etc/apt/sources.list.d/google-chrome.*`, before the browser install** — which since
+#651 means before `Checks, concurrently`, the step the browser install runs in.
 It is recorded here rather than left as private CI knowledge, which is what the paragraph above
 forbids. `playwright install --with-deps` runs `apt-get update` across **every** source the runner
 image configures, and the image configures Google's own Chrome apt repository for the Chrome it
@@ -1978,6 +1991,23 @@ past its 150 s, which turned `main` red. Their own load also asserts the realist
 (`trees.drawnWorld`), which the shared load had asserted for them. Every phase of a harness run is
 printed as it ends (`game-harness.ts` §`phaseEnds`) and never asserted; read those lines before
 raising a budget.
+⚠️ **Since [#651](https://github.com/openzigs/onyourleft/issues/651) every load has a budget of
+its own, every describe pays for the load it reads, the game spec runs LAST, and the whole gate
+has a `globalTimeout`** — a reviewer who remembers the plain page and `?shadow-map` loaded inside a
+case's 60 s, or "at most three budgets, inside the job's twenty", is reading the old file. That
+sentence counted the budgets and not the job, and was false. The budgets are 60 s for the plain
+page, 75 s for `?shadow-map`, 110 s for `?realistic` and 120 s for `?realistic&trees` — each at least
+1.5 times what its load took alone on the slower runner — and a cross-worker ledger
+(`game.browser.spec.ts` §`loadLedger`) makes a hung load cost ONE of them per run, with every other
+describe that reads it failing at once in its hook and naming the describe that paid. The
+arithmetic that fits all four hanging inside the gate's own ten minutes (`playwright.config.ts`
+§`GATE_BUDGET_MS`), and the gate inside the job's twenty, is `game.browser.spec.ts`
+§`paysForTheRealisticLoad`, with the local run that demonstrated it. ⚠️ And the two default loads
+no longer run the same probes: each case reads one load's copy, so each load runs only what its
+own cases read (`game-harness.ts` §`SHADOW_MAP_LOAD`) — measured on the runner, that was 12.6 s of
+the plain page's 34 and about 16 s of `?shadow-map`'s 55 spent for nobody. A new case on either
+load reads a field the OTHER load no longer measures at its "nothing measured" value, which fails
+rather than passes; move the probe, do not read across.
 
 ⚠️ **The browser is pinned by the lockfile, not by the install command.** `@playwright/test`
 **1.63.0** ships Chromium revision **1243**, and `playwright install chromium` fetches whatever the
@@ -2257,7 +2287,7 @@ browser runs**.
 | `sidelink.html`, `sidelink-harness.ts`, `sidelink.browser.spec.ts` | since #529, the side-camera link paired end to end in the real engine: two peer connections in one page through the real offer and answer codes and the SDP `camera/side-link-sdp.ts` rebuilds, a start and a stop acknowledged across, and the offer drawn on a canvas and read back by the real reader. ⚠️ `playwright.config.ts` passes `--disable-features=WebRtcHideLocalIpsWithMdns` so the candidates are raw private addresses — the path spike 0012 found both Android WebViews take — rather than `.local` names a CI container may have no responder for. ⚠️ **Not two devices**, and not #541's packet capture |
 | `bend.html`, `bend-harness.ts`, `bend.browser.spec.ts` | since #543, a planner-sampled 20 m bend drawn by the real renderer and read back from **straight above** — a heading of nothing puts `cameraRig`'s eye over its target — with the road isolated the #440 way. Rays from the bend's centre find each edge; the edge is walked in 2 m chords and what is held to `MAXIMUM_CORRIDOR_JOINT_DEGREES` is the **kink**, a turn less its neighbours' mean, because a smooth inner edge turns 7° every two metres anyway. Its control is the road as drawn before #543 (`roadCorridor`'s `unsmoothed`), which must kink. `with-corridor.ts` rebuilds the ground and water around a swapped corridor, which the loop page needs too since #543: ground shaped for one road over another split 32 rows of it. ⚠️ Since #583 the sweep of rays starts on a ray that MISSES the road: it started at 0°, and #583's mirrored bend straddled 0° and read as two short edges (81.7° and 73.3° of turn) with nothing else wrong |
 | `insets.ts` | since #439, edge-to-edge safe-area insets applied to the ENGINE through `Emulation.setSafeAreaInsetsOverride`, so `env()` itself reports them, plus the one inset reading taken off the owner's tablet. Every #439 case also reads the insets back, so a Playwright bump that drops the protocol call fails rather than measuring a page with none |
-| `../playwright.config.ts` | Chromium only, no retries, the SwiftShader flags without which a GPU-less runner gives MapLibre no context at all — and since #408 **two `webServer` entries**, because the product and the harness are different builds. ⚠️ Since [#651](https://github.com/openzigs/onyourleft/issues/651) **two projects, `game` listed first**, and a `globalTimeout` (`GATE_BUDGET_MS`, ten minutes) so the gate stops itself and names what was running before the job's `timeout-minutes` cancels it in silence — a reviewer who remembers one `chromium` project is reading the old file. §4c says why, and what splitting the game further did |
+| `../playwright.config.ts` | Chromium only, no retries, the SwiftShader flags without which a GPU-less runner gives MapLibre no context at all — and since #408 **two `webServer` entries**, because the product and the harness are different builds. ⚠️ Since [#651](https://github.com/openzigs/onyourleft/issues/651) **two projects, `game` listed LAST**, so its four loads run alone after everything else — run beside the other specs they slowed by half or more, because SwiftShader draws on the CPU — and a `globalTimeout` (`GATE_BUDGET_MS`, ten minutes) so the gate stops itself and names what was running before the job's `timeout-minutes` cancels it in silence. Playwright's default of two workers stays: the runner is two cores (§4c). A reviewer who remembers one `chromium` project is reading the old file. `playwright.config.ts` §`projects` says why, and what splitting the game further did |
 | `../vite.browser.config.ts` | the harness build. A second Vite config, so the harness cannot reach a shipped bundle |
 
 **Why it exists at all**, given that #48's suite already renders every route: **jsdom implements no

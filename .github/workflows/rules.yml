@@ -88,13 +88,6 @@ jobs:
           # .git/config where a later step could reach it.
           persist-credentials: false
 
-      # TEMPORARY (#651 measurement): which runner this was. Removed before merge.
-      - name: Runner CPU
-        run: |
-          nproc
-          lscpu | grep -E 'Model name|^CPU\(s\)|Thread|Core|MHz' || true
-          free -g
-
       # CLAUDE.md section 4a. Every command below is one that file documents;
       # CI accumulating private knowledge is how a contributor's local green
       # becomes CI's red with no explanation.
@@ -196,11 +189,11 @@ jobs:
       # single-threaded; one after another they left most of the runner idle.
       #
       # ⚠️ The bare-clone checks are here too since #651, AFTER the install,
-      # though they need none of it. They were a concurrent step of their own
-      # before the install and took 48 s (run 36326756014), with the runner
-      # otherwise idle; here they run under the 106 s that lint, which is this
-      # step's longest command, takes anyway. They still need nothing but bash
-      # and coreutils, and `check:repo` still runs them on a bare clone.
+      # though they need none of it. As a concurrent step of their own before
+      # the install they took 48 s and this one 106 s (run 36326756014); here,
+      # together, 136 s and 139 s (runs 36333257690 and 36334163962), all on the
+      # same AMD EPYC 7763 runner. They still need nothing but bash and
+      # coreutils, and `check:repo` still runs them on a bare clone.
       #
       #   check-repo-rules -- LIC001-4, LIC006, SCOPE001, WF001, ADR001-4,
       #   SPIKE001-3, REL001-2, XML001-4 and ASSET001-7, and its fixture suite.
