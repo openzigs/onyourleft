@@ -56,6 +56,20 @@ export interface StatusMessageProps {
    */
   readonly live?: boolean;
   readonly id?: string;
+  /**
+   * What a rider may open to read the rest — #605. The sentence in
+   * `children` stays on the screen; this is a `<details>` inside the same
+   * surface, under it, closed until pressed.
+   *
+   * ⚠️ **For what FOLLOWS a message, never for the message.** The owner's
+   * ruling on #605 is that safety text is not tucked away: a message whose
+   * point is "this is why the trainer is not holding your target" says that in
+   * `children`, and only its explanation may be here.
+   *
+   * With it the root is a `<div>` rather than a `<p>`, because a `<details>`
+   * is flow content and a paragraph may not hold one.
+   */
+  readonly more?: { readonly summary: string; readonly detail: ReactNode };
 }
 
 /**
@@ -72,7 +86,31 @@ export function StatusMessage({
   label,
   live = false,
   id,
+  more,
 }: StatusMessageProps): JSX.Element {
+  if (more !== undefined) {
+    return (
+      <div
+        className={`oyl-status oyl-status--${tone}`}
+        id={id}
+        {...(live ? { role: 'status' } : {})}
+      >
+        <span className="oyl-status__glyph" aria-hidden="true">
+          {GLYPH[tone]}
+        </span>
+        <div>
+          <p className="oyl-status__sentence">
+            <span className="oyl-status__label">{label ?? DEFAULT_LABEL[tone]}: </span>
+            {children}
+          </p>
+          <details className="oyl-status__more">
+            <summary>{more.summary}</summary>
+            <p>{more.detail}</p>
+          </details>
+        </div>
+      </div>
+    );
+  }
   return (
     <p className={`oyl-status oyl-status--${tone}`} id={id} {...(live ? { role: 'status' } : {})}>
       <span className="oyl-status__glyph" aria-hidden="true">

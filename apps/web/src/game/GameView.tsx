@@ -105,6 +105,7 @@ import { speedUnit, spokenDistanceUnit } from '../units/format';
 import {
   EASED_SPOKEN_PREFIX,
   isEasedAnnouncement,
+  workoutRescueHeadline,
   workoutRescueText,
 } from '../workout/rescue-text';
 import {
@@ -1433,7 +1434,8 @@ export function GameView(props: GameViewProps): JSX.Element {
   const gradient = gradientRef.current?.state();
   // #585: read during render, like `sensors` above — the tick's `setState` is
   // what schedules this render, so it is as fresh as the frame.
-  const eased = easedText(props.trainer?.workoutRescue());
+  const rescue = props.trainer?.workoutRescue();
+  const eased = easedText(rescue);
   // ⚠️ **ONE notice cell on a phone, so the Eased notice takes it from the
   // road notice while a rescue is in force** — PR #599's review, finding B1.
   // A running workout ALWAYS has a road notice, and on a phone both sentences
@@ -1571,9 +1573,23 @@ export function GameView(props: GameViewProps): JSX.Element {
           // itself — the rescue clears on a whole window of steady cadence, or
           // the workout is ended — and the route panel comes back with it.
           // The road notice gives way to it meanwhile: see `roadNotice` above.
-          eased === undefined ? undefined : (
+          //
+          // ⚠️ #605: ONE sentence on the HUD — the rescue's own reason, which
+          // is the safety half (why the trainer is not holding the target) —
+          // and NO disclosure, unlike the Ride screen. Measured in the pinned
+          // Chromium at 360×752, the smallest column layout: the whole
+          // sentence left 20 px between the notice and the leaning rider's box
+          // (2 px on the CI runner); the headline with *How the target comes
+          // back* under it left 31, because a disclosure is a 44 px control;
+          // and OPENED it ran 46 px into the rider. A HUD whose layout a
+          // press can push onto the rider is the thing `ride.browser.spec.ts`
+          // exists to refuse. The rest is not lost: the HUD's one region still
+          // SAYS the whole sentence (`easedText`, above), and the Ride screen
+          // shows it behind its disclosure. `ride.browser.spec.ts` §"#585"
+          // publishes the margin.
+          rescue === undefined ? undefined : (
             <StatusMessage key="workout-eased" tone="warning" label="Eased">
-              {eased}
+              {workoutRescueHeadline(rescue)}
             </StatusMessage>
           ),
           // #551: the side camera's link lost, in the notice slot the HUD

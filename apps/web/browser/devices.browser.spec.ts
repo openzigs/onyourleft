@@ -127,6 +127,9 @@ test(`on a ${String(PHONE.width)}×${String(PHONE.height)} phone the first pairi
   await open(page);
   await page.getByRole('link', { name: 'Pair a sensor or a smart trainer' }).click();
   await expect(page).toHaveURL(/#\/devices$/);
+  // The hash moves before the route renders; measure the screen, not the gap.
+  // `toBeVisible` does not scroll, so this also says nothing about the fold.
+  await expect(page.getByRole('button', { name: 'Pair a smart trainer' })).toBeVisible();
 
   const measured = await page.evaluate(() => {
     const buttons = [...document.querySelectorAll<HTMLElement>('.oyl-pairing__row .oyl-button')];

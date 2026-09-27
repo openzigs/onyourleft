@@ -3043,7 +3043,7 @@ describe('a running workout owns the ERG target — #542’s review', () => {
     const snapshot = rig.controller.getSnapshot();
     expect(snapshot.workout).toBeDefined();
     expect(snapshot.trainer.requested).toBeUndefined();
-    expect(snapshot.trainer.refusal).toMatch(/workout is setting the trainer’s target/);
+    expect(snapshot.trainer.refusal).toMatch(/^End the workout to set a target by hand\.$/);
     rig.controller.dispose();
   });
 

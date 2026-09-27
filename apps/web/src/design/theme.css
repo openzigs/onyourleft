@@ -819,6 +819,59 @@ a.oyl-button {
   font-weight: 700;
 }
 
+/*
+ * A message with more to read — #605, `StatusMessage` §`more`. The sentence
+ * stays on the screen; the rest is a `<details>` in the same surface, under it.
+ *
+ * The summary is a CONTROL and is held to the 44 px target every control here
+ * declares (§`.oyl-button`, SC 2.5.5) rather than arriving at one: it is a
+ * line of text, 25 px tall on its own. ⚠️ That is 19 px a rider pays on every
+ * notice that has one, and it is the whole reason the Ride screen's Eased
+ * notice is not shorter still — `rideview.browser.spec.ts` §"#605" publishes
+ * the margin it leaves, and #669's 48 px would cost 4 px more of it.
+ *
+ * Its own marker, because `display: flex` (which is what centres one line in
+ * 44 px) takes the browser's away. `/ ''` gives the glyph no text alternative:
+ * `<details>` already tells a screen reader whether it is open.
+ *
+ * The focus ring is the message's own ink, not `--oyl-color-focus`: the ring
+ * lands on the tone's surface, and ink-on-surface is the pair
+ * `contrast.a11y.test.ts` already checks for every tone.
+ */
+.oyl-status__sentence {
+  margin: 0;
+}
+
+.oyl-status__more > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--oyl-space-xs);
+  min-height: 2.75rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.oyl-status__more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.oyl-status__more > summary::before {
+  content: '▸' / '';
+}
+
+.oyl-status__more[open] > summary::before {
+  content: '▾' / '';
+}
+
+.oyl-status__more > summary:focus-visible {
+  outline-color: currentColor;
+}
+
+.oyl-status__more > p {
+  margin: 0;
+}
+
 .oyl-status--info {
   background: var(--oyl-color-info-surface);
   color: var(--oyl-color-info-ink);
@@ -1089,7 +1142,8 @@ a.oyl-button {
  *   control. It does not touch the popup, the keyboard model, the typeahead or
  *   the accessibility tree — the element is still a `<select>` and every one of
  *   those is the platform's. That is the line between styling one and building
- *   a listbox out of `<div>`s, which #305 is the record of not doing.
+ *   a listbox out of `<div>`s, which #307 (PR #311, and the discussion in
+ *   #308) is the record of not doing.
  * - The chevron is two linear gradients, not an image and not an icon font.
  *   There is no asset directory, no icon set to license, and nothing here is
  *   anybody's get-up (ADR 0009 L1).
@@ -1101,6 +1155,11 @@ a.oyl-button {
  * replacement skin is then flattened to two system colours is a control with no
  * affordance at all, and that is the state a high-contrast user would have been
  * left in.
+ *
+ * ⚠️ Since #667 this is the FALLBACK skin, and a reviewer who remembers it as
+ * the whole of the select's styling is reading the old file. Where the engine
+ * supports `appearance: base-select` the block after `select option` below opts
+ * in, and the picker is styled from the tokens as well.
  */
 select {
   appearance: none;
@@ -1143,17 +1202,181 @@ select:disabled {
 }
 
 /*
- * ⚠️ The options themselves are drawn by the operating system, and everything
- * above stops at the edge of the closed control. These two declarations are the
- * only ones that reach the popup and they exist because they are the two that
- * go WRONG: a dark-mode platform popup inherits neither, and an option with no
- * colours of its own is white-on-white on Windows. Nothing else is attempted
- * here — a styled popup is a listbox, and that is the thing #305 says not to
- * build.
+ * ⚠️ Outside the `@supports` block below, the options are drawn by the
+ * operating system, and everything above stops at the edge of the closed
+ * control. These two declarations are the only ones that reach a platform
+ * popup and they exist because they are the two that go WRONG: a dark-mode
+ * platform popup inherits neither, and an option with no colours of its own is
+ * white-on-white on Windows.
  */
 select option {
   background-color: var(--oyl-color-canvas);
   color: var(--oyl-color-ink);
+}
+
+/*
+ * The styled picker — #667, and it REVERSES a rule this file used to state.
+ *
+ * Until 2026-09-27 this comment said a styled popup is a listbox and that #307
+ * (PR #311, mutation M11; discussed in #308) is the record of not building one,
+ * and `theme.a11y.test.ts` refused `base-select` anywhere in the file. The
+ * owner reversed that in #654: `appearance: base-select` is not a listbox built
+ * out of `<div>`s. The element is still a `<select>`; the keyboard model, the
+ * typeahead and the accessibility tree are still the platform's, and only the
+ * drawing of the picker becomes ours. Chrome ships it from 135, the pinned
+ * Chromium is 153, and the Android WebView is Chromium.
+ *
+ * Three things about the shape are load-bearing:
+ *
+ * - **Only inside `@supports (appearance: base-select)`.** An engine without it
+ *   keeps the `appearance: none` skin above, unchanged. `theme.a11y.test.ts`
+ *   refuses the value anywhere else in the file.
+ * - **Every colour is a token.** A dark theme (#672) re-points the custom
+ *   properties and must reach the picker without editing this block;
+ *   `theme.a11y.test.ts` refuses a literal colour inside it.
+ * - **Forced colours still wins.** The `@media (forced-colors: active)` block
+ *   at the end of this file sets `select { appearance: auto; }` AFTER this one
+ *   at the same specificity, so a high-contrast user gets the platform's
+ *   control whether or not the engine supports `base-select`.
+ *   `shell.browser.spec.ts` §"#667" emulates forced colours and reads it back.
+ *
+ * Each option is a 44 px target — SC 2.5.5 (AAA), not SC 2.5.8 — because a
+ * picker is tapped on a phone as readily as the closed control is.
+ *
+ * `::picker-icon` is hidden because the closed skin already draws its chevron
+ * from two gradients; leaving both would draw two.
+ */
+@supports (appearance: base-select) {
+  select,
+  ::picker(select) {
+    appearance: base-select;
+  }
+
+  select::picker-icon {
+    display: none;
+  }
+
+  ::picker(select) {
+    background-color: var(--oyl-color-canvas);
+    border: 1px solid var(--oyl-color-border);
+    border-radius: var(--oyl-radius);
+    color: var(--oyl-color-ink);
+    padding: var(--oyl-space-xs) 0;
+  }
+
+  select option {
+    align-items: center;
+    min-height: 2.75rem;
+    padding: var(--oyl-space-xs) var(--oyl-space-sm);
+  }
+
+  select option:hover,
+  select option:focus-visible {
+    background-color: var(--oyl-color-surface-raised);
+    color: var(--oyl-color-ink);
+  }
+
+  select option:checked {
+    background-color: var(--oyl-color-accent);
+    color: var(--oyl-color-accent-ink);
+  }
+}
+
+/*
+ * Checkboxes, radios, a range and a progress bar, in the accent — #667.
+ *
+ * Until #667 none of them was styled at all: 13×13 px in the browser's own
+ * blue, a colour no token supplies and so one the contrast suite could not see.
+ * `accent-color` is the whole of it — the controls stay native, and the
+ * platform draws the check mark in a light or dark glyph chosen against the
+ * accent. `design/tokens.ts` declares the two pairs that paints (the accent on
+ * the page, and the mark on the accent) at SC 1.4.11's 3:1.
+ *
+ * ⚠️ A token, never a literal: #672's dark theme re-points
+ * `--oyl-color-accent`, and a hex here would be the one control it missed.
+ */
+input[type='checkbox'],
+input[type='radio'],
+input[type='range'],
+progress {
+  accent-color: var(--oyl-color-accent);
+}
+
+/*
+ * A checkbox or radio ROW is the target — #667. The box itself stays the
+ * platform's size; the `<label>` that toggles it is what a thumb lands on, so
+ * the label carries the 44 px (SC 2.5.5, AAA — not SC 2.5.8, which is 24 px).
+ * Two markups ship: a label wrapping its control (Settings, the trainer game),
+ * and a label beside it (Routes' "It is a loop"). Both are covered.
+ *
+ * `inline-flex` because `min-height` does not apply to an inline box. A run of
+ * text inside the label stays one anonymous flex item, so a sentence still
+ * wraps as a sentence. `browser/shell.browser.spec.ts` §"#667" measures the
+ * shipped row, the declaration, and the row with its floor stripped off.
+ */
+label:has(> input[type='checkbox']),
+label:has(> input[type='radio']),
+label:has(+ input[type='checkbox']),
+label:has(+ input[type='radio']) {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oyl-space-xs);
+  min-height: 2.75rem;
+}
+
+/*
+ * ⚠️ The box keeps its size when the label wraps. A flex item shrinks by
+ * default, and a label whose sentence wraps on a phone squeezed Settings' 24 px
+ * announcement switch to 22.6 px on the CI runner's fonts — found by
+ * `shell.browser.spec.ts` §"#397" on #667's own pull request.
+ */
+label > input[type='checkbox'],
+label > input[type='radio'] {
+  flex-shrink: 0;
+}
+
+/*
+ * The file input's button, drawn as `.oyl-button--secondary` — #667. Until then
+ * it was the platform's own grey button butted against its label ("GPX
+ * fileChoose File"). The same tokens as the secondary button, and the same
+ * declared 44 px floor. Hover lightens to `surface` rather than copying
+ * `.oyl-button:hover`, whose accent-hover fill is not a pair the secondary
+ * button's accent text is declared against.
+ */
+/* The input's own font first: a form control does not inherit one, and the
+   button's `font: inherit` would otherwise take the platform's 13.33 px.
+   `:where()` holds it at zero specificity, so a class on the input still sets
+   its size — `.oyl-input--file` below, on Transfer's two file inputs. As a
+   plain `input[type='file']` (0,1,1) it outranked that class (0,1,0) and the
+   class's `font-size` was dead.
+   ⚠️ `max-width` is #660's rule meeting this one: the page's font and the
+   44 px button made the input wider than a 320 px phone, and
+   `reflow.browser.spec.ts` measured Routes and Workouts scrolling sideways by
+   37 px until it was here. */
+:where(input[type='file']) {
+  font: inherit;
+  max-width: 100%;
+}
+
+input[type='file']::file-selector-button {
+  font: inherit;
+  cursor: pointer;
+  min-height: 2.75rem;
+  margin-inline-end: var(--oyl-space-sm);
+  padding: var(--oyl-space-sm) var(--oyl-space-md);
+  border: 2px solid var(--oyl-color-accent);
+  border-radius: var(--oyl-radius);
+  background: var(--oyl-color-canvas);
+  color: var(--oyl-color-accent);
+}
+
+input[type='file']::file-selector-button:hover {
+  background: var(--oyl-color-surface);
+}
+
+/* A token's gap between a file input and the label before it. */
+p > label + input[type='file'] {
+  margin-inline-start: var(--oyl-space-sm);
 }
 
 .oyl-input {
@@ -2373,11 +2596,15 @@ select option {
  * and it ends by itself. `ride.browser.spec.ts` §"#585" measures it at every
  * overlay viewport, with the two notices together as its control.
  *
- * ⚠️ **One limit, stated rather than gated.** Upright on a phone at the very
- * bottom of the column layout's range — 752 px tall — a notice of the longest
- * kind ends within a few pixels of the top of the rider's helmet, and on a
- * font with wider glyphs than this machine's it may touch it.
- * `ride.browser.spec.ts` measures 390×844 and 360×800, which clear it.
+ * ⚠️ **Since #605 the Eased notice is ONE sentence on the HUD**, and a
+ * reviewer who remembers this comment ending on "a limit, stated rather than
+ * gated" is reading the old file. Upright at 360×752, the bottom of the column
+ * layout's range, #585's four sentences ended 20 px above the leaning rider's
+ * box in the pinned Chromium on a Mac and 2 px on the CI runner; the headline
+ * alone ends 89 px above it on the Mac. `ride.browser.spec.ts` §"#585" now
+ * holds every upright viewport to 50 px (`EASED_RIDER_CLEARANCE_PIXELS`), with
+ * the whole sentence put back at 360×752 as the control that must fail it.
+ * The rest of the sentence is spoken, and shown on the Ride screen.
  */
 @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem),
   (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
@@ -2606,11 +2833,11 @@ select option {
  *   motion in this stylesheet. Until #307 the `prefers-reduced-motion` block
  *   had nothing to suppress and said so.
  *
- * `prefers-contrast` and `@supports` are deliberately NOT here. Nothing in this
- * design system has a low-contrast state for the first to raise — every pair is
- * gated at AA already — and there is no progressive enhancement for the second
- * to guard. A block that changes nothing is a claim that a preference is
- * honoured, which is worse than not making it.
+ * `prefers-contrast` is deliberately NOT here. Nothing in this design system
+ * has a low-contrast state for it to raise — every pair is gated at AA already
+ * — and a block that changes nothing is a claim that a preference is honoured,
+ * which is worse than not making it. (This sentence also said `@supports` had
+ * nothing to guard until #667, which is what gave it the styled picker.)
  */
 
 /*
@@ -2621,6 +2848,12 @@ select option {
  * draws it in the user's own colours — including a chevron, which is why the
  * gradient one is removed rather than recoloured. `padding-right` goes back
  * because the room it was reserving was for a chevron that is no longer there.
+ *
+ * ⚠️ Since #667 this also undoes `appearance: base-select`. It must stay AFTER
+ * the `@supports (appearance: base-select)` block: the two rules have the same
+ * specificity, so the later one wins, and a high-contrast user gets the
+ * platform's own control and picker in either engine. `theme.a11y.test.ts`
+ * holds the order.
  *
  * Everything else in this stylesheet already survives forced colours: the
  * elevation ramp flattens to a single `Canvas`, and every boundary that mattered

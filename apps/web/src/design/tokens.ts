@@ -585,6 +585,29 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     measured: 11.01,
     where: 'the label of a primary button under a pointer',
   },
+  /*
+   * #667: `accent-color` paints checkboxes, radios, a range and a progress bar
+   * in `accent`, so two non-text pairs (WCAG 2.2 SC 1.4.11, 3:1) are new even
+   * though both colours already meet here as text. The fill against the page
+   * is what says "on"; the mark against the fill is the check itself. The
+   * platform picks the mark's colour — a light or a dark glyph by the accent's
+   * luminance — and `browser/shell.browser.spec.ts` §"#667" reads the pixels
+   * back to confirm it drew `accentInk`'s white rather than assuming it.
+   */
+  {
+    foreground: 'accent',
+    background: 'canvas',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: 7.85,
+    where: 'a checked checkbox or radio, a range and a progress bar (SC 1.4.11, #667)',
+  },
+  {
+    foreground: 'accentInk',
+    background: 'accent',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: 7.85,
+    where: 'the check mark on a checked checkbox, drawn on the accent (SC 1.4.11, #667)',
+  },
   {
     foreground: 'hudInk',
     background: 'hudSurface',

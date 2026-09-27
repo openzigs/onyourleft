@@ -22,7 +22,7 @@ import { TREND_WINDOW, watts } from '@onyourleft/domain';
 
 import { mount, type Mounted } from '../testing/mount';
 
-import type { TrainerSnapshot } from './controller';
+import { MANUAL_ERG_DURING_WORKOUT, type TrainerSnapshot } from './controller';
 import { TrainerPanel } from './TrainerPanel';
 
 let mounted: Mounted | undefined;
@@ -49,13 +49,14 @@ const snapshot = (overrides: Partial<TrainerSnapshot> = {}): TrainerSnapshot => 
   ...overrides,
 });
 
-async function render(trainer: TrainerSnapshot): Promise<string> {
+async function render(trainer: TrainerSnapshot, workoutOwnsTarget = false): Promise<string> {
   mounted = await mount(
     <TrainerPanel
       trainer={trainer}
       onRequestControl={() => undefined}
       onSetTargetPower={() => undefined}
       onClearTarget={() => undefined}
+      workoutOwnsTarget={workoutOwnsTarget}
     />,
   );
   return (mounted.container.textContent ?? '').replace(/\s+/g, ' ');
@@ -272,6 +273,63 @@ describe('control is its own step, and ERG is one thing to do with it — #503',
     expect(text).toContain('may still be holding 250 W');
     expect(text).toContain('Ask the trainer for control');
     expect(mounted?.container.querySelector('#oyl-erg-target')).toBeNull();
+  });
+});
+
+describe('a workout owns the target — #605', () => {
+  const held = snapshot({
+    controllable: true,
+    canSetPower: true,
+    hasControl: true,
+    powerRange: { minimum: 0, maximum: 2000, increment: 5 } as TrainerSnapshot['powerRange'],
+    target: { kind: 'confirmed', target: 225 } as TrainerSnapshot['target'],
+  });
+
+  it('offers no ERG form, and says why before anything is pressed', async () => {
+    const text = await render(held, true);
+    // #605's review: the FORM is replaced, the target sentence is not.
+    expect(text).toContain('ERG, optional: Holding 225 W.');
+    expect(text).toContain(MANUAL_ERG_DURING_WORKOUT);
+    expect(mounted?.container.querySelector('#oyl-erg-target')).toBeNull();
+    expect(mounted?.container.querySelectorAll('button')).toHaveLength(0);
+  });
+
+  /**
+   * #605's review, B1 — a safety finding. A workout survives a lost link
+   * (`controller.ts` §`onControlLost`), and what it leaves on the machine is
+   * the one thing this panel must never stop saying.
+   */
+  const linkLost = snapshot({
+    controllable: true,
+    canSetPower: true,
+    hasControl: false,
+    lost: 'link-lost',
+    powerRange: held.powerRange,
+    target: { kind: 'unknown', attempted: 225 } as TrainerSnapshot['target'],
+  });
+
+  it('still says the trainer may be holding the target when the link is lost', async () => {
+    const text = await render(linkLost, true);
+    expect(text).toContain(
+      'ERG, optional: The trainer may still be holding 225 W — this app can no longer tell.',
+    );
+    // A workout whose link has gone is setting nothing, so the refusal would
+    // be false here.
+    expect(text).not.toContain(MANUAL_ERG_DURING_WORKOUT);
+  });
+
+  it('says the same with no workout — the control', async () => {
+    const text = await render(linkLost, false);
+    expect(text).toContain('The trainer may still be holding 225 W — this app can no longer tell.');
+  });
+
+  it('offers the form with no workout — the control', async () => {
+    const text = await render(held, false);
+    expect(text).not.toContain(MANUAL_ERG_DURING_WORKOUT);
+    expect(mounted?.container.querySelector('#oyl-erg-target')).not.toBeNull();
+    expect(
+      [...(mounted?.container.querySelectorAll('button') ?? [])].map((each) => each.textContent),
+    ).toEqual(['Set target', 'End ERG']);
   });
 });
 

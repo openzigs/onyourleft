@@ -50,21 +50,49 @@ const WAY_OUT: Readonly<Record<RescueTextPlace, string>> = {
 };
 
 /**
- * The sentence for a workout's stall rescue.
+ * What a rider presses to read the rest — #605. The HEADLINE is on the screen;
+ * this opens {@link workoutRescueDetail} under it.
+ */
+export const EASED_DETAIL_SUMMARY = 'How the target comes back';
+
+/**
+ * The one sentence a rider SEES while a workout is eased — #605.
+ *
+ * ⚠️ **The rescue's own reason, and nothing else**, because it is the safety
+ * half: why the trainer is not holding the rider's target. The owner's ruling
+ * on #605 (2026-09-27) is that this stays visible beside the ride controls and
+ * is never tucked away; what follows it — the way back and the way out — may
+ * be, behind {@link EASED_DETAIL_SUMMARY}. That is what bought the room: four
+ * sentences were 205 px of the Ride screen's trainer column at 1280×800 and
+ * pushed *End workout* 233 px under the fold inside the Android shell.
+ */
+export function workoutRescueHeadline(rescue: WorkoutRescue): string {
+  return rescue.reason;
+}
+
+/**
+ * Everything after the headline: the way back, and the way out — #605.
  *
  * The window is read off {@link TREND_WINDOW} rather than typed, for
  * `TrainerPanel.tsx` §`rescueSentence`'s reason (PR #582's review).
  */
-export function workoutRescueText(rescue: WorkoutRescue, place: RescueTextPlace): string {
+export function workoutRescueDetail(rescue: WorkoutRescue, place: RescueTextPlace): string {
   const steady = `your cadence has held steady for ${String(TREND_WINDOW)} seconds`;
   // From the floor the way back is two steps, as on the manual ERG panel:
   // a lighter target once the rider pedals, the workout's own once that holds.
   const lighterFirst =
     rescue.kind === 'floor'
-      ? ' Once you are pedalling again it steps up to a lighter target first.'
+      ? 'Once you are pedalling again it steps up to a lighter target first. '
       : '';
-  return (
-    `${rescue.reason}${lighterFirst} The workout’s own target comes back by itself once ` +
-    `${steady}. ${WAY_OUT[place]}`
-  );
+  return `${lighterFirst}The workout’s own target comes back by itself once ${steady}. ${WAY_OUT[place]}`;
+}
+
+/**
+ * The WHOLE sentence for a workout's stall rescue — headline and detail — as
+ * it is SPOKEN. A screen shows {@link workoutRescueHeadline} with the detail
+ * behind a disclosure since #605; an announcement has no disclosure, so it
+ * says all of it.
+ */
+export function workoutRescueText(rescue: WorkoutRescue, place: RescueTextPlace): string {
+  return `${workoutRescueHeadline(rescue)} ${workoutRescueDetail(rescue, place)}`;
 }

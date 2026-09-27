@@ -81,7 +81,11 @@ import type { CueOutput } from '../game/audio-port';
 import { readCuePreference, writeCuePreference, type CuePreference } from '../game/cue-preference';
 import { SoundControls } from '../game/SoundControls';
 import { sharedCueOutput } from '../game/web-audio';
-import { workoutRescueText } from '../workout/rescue-text';
+import {
+  EASED_DETAIL_SUMMARY,
+  workoutRescueDetail,
+  workoutRescueHeadline,
+} from '../workout/rescue-text';
 import { durationText, workoutRow } from '../workouts/library';
 
 import { RideAnnouncer } from './RideAnnouncer';
@@ -258,22 +262,40 @@ export function WorkoutPanel({
     return (
       <section>
         <h3>Workout: {workout.name}</h3>
-        <p>
-          {STATUS_TEXT[workout.status]} — {durationText(workout.elapsedSeconds)} of{' '}
-          {durationText(workout.totalSeconds)}
-        </p>
-        {workout.nowRiding === undefined ? null : <p>Now: {workout.nowRiding}</p>}
-        <p>
-          {workout.holdingWatts === undefined
-            ? 'The trainer has not confirmed a target yet.'
-            : `Holding ${String(workout.holdingWatts)} W.`}
-        </p>
+        {/*
+          ⚠️ #605: what to PRESS first, then what is WRONG, then what is merely
+          read — where in the workout, what the trainer holds. Measured at
+          1280×800 inside the Android shell with a workout eased: in the old
+          order *End workout* was last, and cleared the fold by 5 px even with
+          the Eased notice cut to one sentence and the ERG form gone, because
+          three lines of reading (123 px) and the notice stood between the
+          heading and the only control that ends what is holding a stalled
+          rider. First, it also stays put when the rider opens *How the target
+          comes back* under the notice, which a control after the notice would
+          not. The owner's ruling on #605 is that the Eased sentence stays
+          VISIBLE beside the ride controls, so it is the reading that moves, not
+          the notice. `rideview.browser.spec.ts` §"#605" publishes the margin.
+        */}
+        <Button type="button" onClick={onEnd}>
+          End workout
+        </Button>
         {workout.rescue === undefined ? null : (
           // #585: the stall rescue's reason, which the workout path used to
           // compute and never show. Not `live`, for the fault's reason below:
           // `RideAnnouncer` speaks it when it appears or changes.
-          <StatusMessage tone="warning" label="Eased">
-            {workoutRescueText(workout.rescue, 'ride-screen')}
+          //
+          // ⚠️ #605: ONE sentence on the screen, the rescue's own reason, and
+          // the way back and the way out behind a disclosure under it — the
+          // owner's ruling. `rideview.browser.spec.ts` §"#605" measures it.
+          <StatusMessage
+            tone="warning"
+            label="Eased"
+            more={{
+              summary: EASED_DETAIL_SUMMARY,
+              detail: workoutRescueDetail(workout.rescue, 'ride-screen'),
+            }}
+          >
+            {workoutRescueHeadline(workout.rescue)}
           </StatusMessage>
         )}
         {workout.fault === undefined ? null : (
@@ -281,9 +303,26 @@ export function WorkoutPanel({
           <StatusMessage tone="warning">{workout.fault}</StatusMessage>
         )}
         {sound.enabled ? <SoundControls preference={sound} onChange={changeSound} /> : null}
-        <Button type="button" onClick={onEnd}>
-          End workout
-        </Button>
+        <p>
+          {STATUS_TEXT[workout.status]} — {durationText(workout.elapsedSeconds)} of{' '}
+          {durationText(workout.totalSeconds)}
+        </p>
+        {workout.nowRiding === undefined ? null : <p>Now: {workout.nowRiding}</p>}
+        {/*
+          ⚠️ #605's review: `holdingWatts` is the writer's last ACKNOWLEDGED
+          write, and it outlives a lost link — the workout does too
+          (`controller.ts` §`onControlLost`). Once control is gone this app
+          cannot say what the machine holds, so the line says what was last set
+          rather than "Holding", and `TrainerPanel`'s "may still be holding …
+          can no longer tell" beside it is the statement about the machine.
+        */}
+        <p>
+          {workout.holdingWatts === undefined
+            ? 'The trainer has not confirmed a target yet.'
+            : trainer.hasControl
+              ? `Holding ${String(workout.holdingWatts)} W.`
+              : `The trainer was last set to ${String(workout.holdingWatts)} W.`}
+        </p>
       </section>
     );
   }

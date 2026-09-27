@@ -66,7 +66,7 @@ import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
 
 import { hrefFor, routeById } from '../shell/routes';
-import type { TrainerSnapshot } from './controller';
+import { MANUAL_ERG_DURING_WORKOUT, type TrainerSnapshot } from './controller';
 import type { ManualErgRescue } from './manual-erg';
 
 /**
@@ -137,6 +137,26 @@ export interface TrainerPanelProps {
   readonly onRequestControl: () => void;
   readonly onSetTargetPower: (target: Watts) => void;
   readonly onClearTarget: () => void;
+  /**
+   * A workout is loaded and owns the trainer's target — #605. The ERG form is
+   * then not offered: every *Set target* would be refused
+   * ({@link MANUAL_ERG_DURING_WORKOUT}) and *End ERG* would end the workout,
+   * which *End workout* already does. "Offering a control the trainer will
+   * refuse is worse than not offering it" (the *No ERG* branch below) applies
+   * as much to a control THIS app will refuse.
+   *
+   * ⚠️ **Measured, and it is why this is here rather than a tidy-up.** With a
+   * workout running the form was 248 px of the trainer column, and with the
+   * workout eased it put *End workout* 233 px under the fold at 1280×800
+   * inside the Android shell — a stalled rider could not see the control that
+   * ends what is holding them. Without a rescue it cleared the fold by 24 px,
+   * under §4f's 50. `rideview.browser.spec.ts` §"#605".
+   *
+   * Required rather than optional, so a screen that forgets it is a compile
+   * error rather than a form that comes back (CLAUDE.md §4j's §Limits: an
+   * optional prop nobody supplies is invisible to the wiring gate).
+   */
+  readonly workoutOwnsTarget: boolean;
 }
 
 export function TrainerPanel({
@@ -144,6 +164,7 @@ export function TrainerPanel({
   onRequestControl,
   onSetTargetPower,
   onClearTarget,
+  workoutOwnsTarget,
 }: TrainerPanelProps): JSX.Element {
   const [draft, setDraft] = useState('150');
   /** A target this app refused before writing it. See {@link submit}. */
@@ -211,6 +232,9 @@ export function TrainerPanel({
    */
   const ergShown =
     trainer.hasControl || trainer.requested !== undefined || trainer.target.kind !== 'none';
+
+  /** #605: a workout owns the target while control is held, so no form. */
+  const refuseByHand = workoutOwnsTarget && trainer.hasControl;
 
   return (
     <>
@@ -318,10 +342,26 @@ export function TrainerPanel({
         // label says the same thing — ERG is optional, one thing control is
         // for — in the line the target sentence already took.
         <div>
+          {/*
+            ⚠️ #605's review (B1): a loaded workout replaces the FORM and
+            nothing else. The target sentence stays in every state it was shown
+            in before — above all "may still be holding N W — this app can no
+            longer tell", which is what a workout whose link dropped leaves on
+            the machine (`controller.ts` §`onControlLost` keeps the workout).
+            The refusal is said only while control is held, because with the
+            link gone the workout is setting nothing and it would be false.
+            It rides in the same paragraph rather than its own, which is
+            measured: a paragraph of its own cost the Eased notice 41 px of its
+            margin to the fold at 1280×800 in the shell. Since #605's re-review
+            it is short enough to cost NO line upright, where the paragraph is
+            above the notice in one column — `controller.ts`
+            §`MANUAL_ERG_DURING_WORKOUT`, held by `rideview.browser.spec.ts`.
+          */}
           <p className="oyl-trainer__erg">
             <strong>ERG, optional:</strong> {targetSentence(trainer)}
+            {refuseByHand ? ` ${MANUAL_ERG_DURING_WORKOUT}` : null}
           </p>
-          {trainer.hasControl ? (
+          {!trainer.hasControl || refuseByHand ? null : (
             <form className="oyl-trainer__form" onSubmit={submit}>
               <label htmlFor="oyl-erg-target">ERG target (W)</label>
               <input
@@ -346,7 +386,7 @@ export function TrainerPanel({
                 </p>
               )}
             </form>
-          ) : null}
+          )}
         </div>
       )}
     </>
