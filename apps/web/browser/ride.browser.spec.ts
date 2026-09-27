@@ -711,9 +711,20 @@ test.describe('a ride with a workout eased — #585', () => {
   }
 
   // #605's control: the whole sentence back in the same notice, at the
-  // viewport #605 was about. It must fall under the clearance again — which is
-  // #585 as it shipped, 2 px on the CI runner — or the floor above is being
-  // held over a notice that could never have been near the rider.
+  // viewport #605 was about. It must fall under the clearance again, or the
+  // floor above is being held over a notice that could never have been near
+  // the rider.
+  //
+  // ⚠️ What it models, and how closely (#605's review). It rewrites the live
+  // notice's words and nothing else — same `<p>`, same glyph, same label, same
+  // cell — so it is the HUD as #585 shipped it only if `StatusMessage`'s
+  // plain (no-`more`) markup is what `GameView` still renders, which the
+  // exact-text assertion below and the a11y suite hold. Measured 2026-09-27 on
+  // a Mac: this rewrite and `GameView` itself rendering the whole sentence
+  // (mutation M5) both printed 20 px at 360×752, with byte-identical notice
+  // markup, run three times each. A 6 px reading of this control was reported
+  // in review and did NOT reproduce. The CI runner's own figure is what the
+  // run prints; it is not asserted to match any other machine's.
   for (const viewport of OVERLAY_VIEWPORTS.filter((each) => each.height === 752)) {
     test(`the control — the whole sentence comes within ${String(EASED_RIDER_CLEARANCE_PIXELS)} px of the rider — ${viewport.name}`, async ({
       page,
@@ -721,7 +732,9 @@ test.describe('a ride with a workout eased — #585', () => {
       await openRide(page, viewport, QUERY);
       await restoreWholeEasedSentence(page);
       const seen = await measure(page);
-      expect(await noticeText(page)).toContain('comes back by itself');
+      // The whole cell is the one notice, glyph and label and the whole
+      // sentence — nothing added and nothing left over from the headline.
+      expect(await noticeText(page)).toBe(`!Eased: ${WHOLE_EASED_SENTENCE}`);
       const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
       const clearance = riderBox(viewport).top - (notice?.box.bottom ?? Infinity);
       console.log(

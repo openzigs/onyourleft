@@ -188,6 +188,22 @@ describe('while one is running', () => {
     expect(text).not.toContain('Holding');
   });
 
+  it('does not say "Holding" once the link is lost — #605 review', async () => {
+    // `holdingWatts` is the writer's last acknowledged write and outlives a
+    // lost link; with control gone this app cannot say what the machine holds.
+    const view = await render({
+      workout: running(),
+      trainer: trainer({
+        hasControl: false,
+        lost: 'link-lost',
+        target: { kind: 'unknown', attempted: watts(150) } as TrainerSnapshot['target'],
+      }),
+    });
+    const text = view.container.querySelector('section')?.textContent ?? '';
+    expect(text).toContain('The trainer was last set to 150 W.');
+    expect(text).not.toContain('Holding');
+  });
+
   it('tells a paused rider it will pick up, not that it stopped', async () => {
     // A paused workout keeps every offset. Telling a rider it stopped would
     // invite them to restart a session they have not lost.
@@ -245,7 +261,26 @@ describe('why the target is eased — #585', () => {
    * region is rendered first inside it and says the stall too, so a
    * container-wide "does not contain" would read the region's LAST sentence.
    */
-  const shown = (root: ParentNode): string => root.querySelector('section')?.textContent ?? '';
+  const shown = (root: ParentNode): string => {
+    const section = root.querySelector('section');
+    if (section === null) return '';
+    // ⚠️ Since #605 the way back and the way out sit in a CLOSED `<details>`
+    // under the sentence, and `textContent` reads a closed disclosure's body
+    // as though it were on screen. What is SHOWN is the summary alone, so a
+    // closed disclosure is read as its summary here (#605's review).
+    const copy = section.cloneNode(true) as HTMLElement;
+    for (const details of queryAll<HTMLDetailsElement>(copy, 'details')) {
+      if (details.open) continue;
+      for (const child of [...details.children]) {
+        if (child.tagName !== 'SUMMARY') child.remove();
+      }
+    }
+    return copy.textContent ?? '';
+  };
+
+  /** What the rider reads once they open *How the target comes back*. */
+  const disclosed = (root: ParentNode): string =>
+    root.querySelector('section details')?.textContent ?? '';
 
   const easedNotice = (root: ParentNode) =>
     queryAll<HTMLElement>(root, '*').find((element) =>
@@ -271,9 +306,12 @@ describe('why the target is eased — #585', () => {
     );
     let text = shown(view.container);
     expect(text).toContain(stalled.reason);
-    // The floor's way back is two steps, and the way out is the panel's button.
-    expect(text).toContain('steps up to a lighter target first');
-    expect(text).toContain('Press End workout to leave it.');
+    // The floor's way back is two steps, and the way out is the panel's button
+    // — both behind the disclosure since #605, so NOT shown until it is opened.
+    expect(text).not.toContain('steps up to a lighter target first');
+    expect(text).not.toContain('Press End workout to leave it.');
+    expect(disclosed(view.container)).toContain('steps up to a lighter target first');
+    expect(disclosed(view.container)).toContain('Press End workout to leave it.');
     expect(easedNotice(view.container)).toBeDefined();
 
     await view.rerender(

@@ -287,9 +287,40 @@ describe('a workout owns the target — #605', () => {
 
   it('offers no ERG form, and says why before anything is pressed', async () => {
     const text = await render(held, true);
-    expect(text).toContain(`ERG, optional: ${MANUAL_ERG_DURING_WORKOUT}`);
+    // #605's review: the FORM is replaced, the target sentence is not.
+    expect(text).toContain('ERG, optional: Holding 225 W.');
+    expect(text).toContain(MANUAL_ERG_DURING_WORKOUT);
     expect(mounted?.container.querySelector('#oyl-erg-target')).toBeNull();
     expect(mounted?.container.querySelectorAll('button')).toHaveLength(0);
+  });
+
+  /**
+   * #605's review, B1 — a safety finding. A workout survives a lost link
+   * (`controller.ts` §`onControlLost`), and what it leaves on the machine is
+   * the one thing this panel must never stop saying.
+   */
+  const linkLost = snapshot({
+    controllable: true,
+    canSetPower: true,
+    hasControl: false,
+    lost: 'link-lost',
+    powerRange: held.powerRange,
+    target: { kind: 'unknown', attempted: 225 } as TrainerSnapshot['target'],
+  });
+
+  it('still says the trainer may be holding the target when the link is lost', async () => {
+    const text = await render(linkLost, true);
+    expect(text).toContain(
+      'ERG, optional: The trainer may still be holding 225 W — this app can no longer tell.',
+    );
+    // A workout whose link has gone is setting nothing, so the refusal would
+    // be false here.
+    expect(text).not.toContain(MANUAL_ERG_DURING_WORKOUT);
+  });
+
+  it('says the same with no workout — the control', async () => {
+    const text = await render(linkLost, false);
+    expect(text).toContain('The trainer may still be holding 225 W — this app can no longer tell.');
   });
 
   it('offers the form with no workout — the control', async () => {

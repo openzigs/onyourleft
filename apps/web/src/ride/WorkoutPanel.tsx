@@ -308,10 +308,20 @@ export function WorkoutPanel({
           {durationText(workout.totalSeconds)}
         </p>
         {workout.nowRiding === undefined ? null : <p>Now: {workout.nowRiding}</p>}
+        {/*
+          ⚠️ #605's review: `holdingWatts` is the writer's last ACKNOWLEDGED
+          write, and it outlives a lost link — the workout does too
+          (`controller.ts` §`onControlLost`). Once control is gone this app
+          cannot say what the machine holds, so the line says what was last set
+          rather than "Holding", and `TrainerPanel`'s "may still be holding …
+          can no longer tell" beside it is the statement about the machine.
+        */}
         <p>
           {workout.holdingWatts === undefined
             ? 'The trainer has not confirmed a target yet.'
-            : `Holding ${String(workout.holdingWatts)} W.`}
+            : trainer.hasControl
+              ? `Holding ${String(workout.holdingWatts)} W.`
+              : `The trainer was last set to ${String(workout.holdingWatts)} W.`}
         </p>
       </section>
     );

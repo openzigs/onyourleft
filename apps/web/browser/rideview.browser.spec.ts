@@ -477,7 +477,23 @@ function foldMargin(bottom: number, viewport: Viewport): number {
   return viewport.height - insetsOf(viewport).bottom - bottom;
 }
 
-for (const viewport of TABLETS) {
+/**
+ * #605's review: the four TABLETS are all landscape, where *Pause* and *Stop*
+ * sit in another column from the trainer group — so "opening the detail moves
+ * no control" was partly true by construction. The upright tablet is the one
+ * layout where they share a column with the notice, so it is measured too.
+ *
+ * ⚠️ **What that measured, said plainly.** Upright, the live group stacks
+ * ABOVE the trainer group, and the notice is the last control-bearing thing
+ * in the page — so there too nothing that can move sits below it, and "moves
+ * no control" holds by the ORDER. What the case guards is that order: putting
+ * *End workout* back after the notice (as #585 shipped it) turns it red here
+ * as at the landscape sizes, and the fold case with it. The upright notice's
+ * margin to the fold is the smallest of the five (105 px on a Mac).
+ */
+const EASED_VIEWPORTS: readonly Viewport[] = [...TABLETS, TABLET_UPRIGHT_IN_THE_SHELL];
+
+for (const viewport of EASED_VIEWPORTS) {
   test.describe(`a workout eased — #605 — ${viewport.name}`, () => {
     /**
      * ⚠️ The apparatus. A page that rendered the chooser, or a running
@@ -564,6 +580,12 @@ for (const viewport of TABLETS) {
       for (const name of ['Pause', 'Stop', 'End workout', 'How the target comes back']) {
         expect(at(opened, name), name).toBe(at(closed, name));
       }
+      // #605's review: and the page did not jump, and no ride control went
+      // off the screen — the opened text's own end is unbounded (below), what
+      // the rider needs to press is not.
+      expect(opened.scrollY).toBe(0);
+      const during = opened.controls.filter((each) => each.group !== 'sensors');
+      expect(during.filter((each) => !onScreen(each, viewport)).map(describeControl)).toEqual([]);
       const note = `the opened notice ends ${foldMargin(opened.eased?.box.bottom ?? Infinity, viewport).toFixed(1)} px above the fold`;
       testInfo.annotations.push({ type: 'workout eased, detail open', description: note });
       console.log(`workout eased, detail open — ${viewport.name} — ${note}`);

@@ -809,6 +809,26 @@ describe('a running workout owns the target — #605', () => {
     );
   });
 
+  it('still says what the trainer may be holding when a workout loses its link — #605 review', async () => {
+    const riding = ridingSnapshot();
+    const stub = stubRideController({
+      ...riding,
+      workout,
+      trainer: {
+        ...riding.trainer,
+        hasControl: false,
+        lost: 'link-lost',
+        target: { kind: 'unknown', attempted: 150 } as typeof riding.trainer.target,
+      },
+    });
+    await show(stub);
+
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('The trainer may still be holding 150 W — this app can no longer tell.');
+    expect(text).not.toContain(MANUAL_ERG_DURING_WORKOUT);
+    expect(text).not.toContain('Holding 150 W.');
+  });
+
   it('offers it again once the workout is gone — the control', async () => {
     const stub = stubRideController({ ...ridingSnapshot(), workout });
     await show(stub);
