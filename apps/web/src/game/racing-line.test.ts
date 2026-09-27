@@ -22,6 +22,7 @@ import {
 } from '@onyourleft/domain';
 
 import {
+  GAUSS_NEWTON_STEPS,
   LINE_HOME_OFFSET_METRES,
   LINE_LIMIT_METRES,
   MAXIMUM_LEAN_RADIANS,
@@ -182,37 +183,24 @@ describe('it is a racing line — #499 criterion 3', () => {
   });
 
   it('has stopped moving by the last step', () => {
-    // ⚠️ The LEFT-hand stadium: it is the one this case rode before #583, drawn
-    // then as the right-hand one is named now. The right-hand one does NOT
-    // converge in the shipped steps — #640, pinned below.
-    for (const route of [hairpin, sBend, hairpinRoute(10), stadiumRoute(30, 'left')]) {
+    // Both stadiums since #640. The right-hand one — home on the INSIDE of its
+    // bends — cycled at 40 steps rather than settling, and its line moved
+    // 1.48 m on the 41st; `racing-line.ts` §`GAUSS_NEWTON_STEPS` has the
+    // measurement. The shipped count is read from there, so this is always
+    // "the shipped steps and one more".
+    for (const route of [
+      hairpin,
+      sBend,
+      hairpinRoute(10),
+      stadiumRoute(30),
+      stadiumRoute(30, 'left'),
+    ]) {
       const settled = racingLine(route).offsets;
-      const oneMore = solvedLine(route, 41).offsets;
+      const oneMore = solvedLine(route, GAUSS_NEWTON_STEPS + 1).offsets;
       for (let index = 0; index < settled.length; index += 1) {
         expect(Math.abs((oneMore[index] ?? 0) - (settled[index] ?? 0))).toBeLessThan(1e-3);
       }
     }
-  });
-
-  it('has NOT stopped moving on a loop that turns toward the home side — #640, a known limit', () => {
-    // Pinned so the limit cannot become a false claim, and so fixing #640
-    // turns this red: the right-hand stadium moves 1.48 m between the shipped
-    // step count and one more (measured 2026-09-27), 0.008 m at 60 steps and
-    // nothing measurable by 100. So the shipped line is held against a solve
-    // of 200 steps, which does not depend on what the shipped count is: raise
-    // it to 100, as #640 might, and this goes red (measured).
-    // Found by #583: until then the world was a mirror of its map, and every
-    // fixture that turns right had the home on its bend's OUTSIDE.
-    const route = stadiumRoute(30);
-    const shipped = racingLine(route).offsets;
-    const converged = solvedLine(route, 200).offsets;
-    let apart = 0;
-    for (let index = 0; index < shipped.length; index += 1) {
-      apart = Math.max(apart, Math.abs((converged[index] ?? 0) - (shipped[index] ?? 0)));
-    }
-    expect(apart).toBeGreaterThan(0.5);
-    // …and it is still on the road, which is what a rider would see.
-    expect(peak(Array.from(shipped))).toBeLessThanOrEqual(LINE_LIMIT_METRES + 1e-9);
   });
 
   it('is computed once per route and handed back after', () => {
@@ -221,24 +209,27 @@ describe('it is a racing line — #499 criterion 3', () => {
 });
 
 describe('a loop — #499 criterion 4', () => {
-  it('has no step in the line where a lap wraps', () => {
-    // The LEFT-hand stadium, for the reason "has stopped moving" gives: the
-    // right-hand one fails this too until #640, because its line has not
-    // converged (2.50 m across the wrap at 40 steps, 2.10 m converged).
-    const route = stadiumRoute(30, 'left');
-    const offsets = racingLine(route).offsets;
-    const last = offsets.length - 1;
-    // The last sample IS the first place (`LOOP_CLOSURE_METRES`)…
-    expect(offsets[last]).toBe(offsets[0]);
-    // …and the change across the wrap, from the last sample of the lap to the
-    // first, is no bigger than the change across its neighbours either side.
-    // Solved as a point-to-point route instead, each end is free of the other
-    // and the step measured here was 5.5 m, where its neighbours moved 2.6 and 0.6.
-    const across = Math.abs((offsets[last - 1] ?? 0) - (offsets[0] ?? 0));
-    const before = Math.abs((offsets[last - 2] ?? 0) - (offsets[last - 1] ?? 0));
-    const after = Math.abs((offsets[0] ?? 0) - (offsets[1] ?? 0));
-    expect(across).toBeLessThanOrEqual(Math.max(before, after) * 1.5 + 0.05);
-  });
+  it.each(['right', 'left'] as const)(
+    'has no step in the line where a lap wraps — the %s-hand stadium',
+    (hand) => {
+      // Both hands since #640. The right-hand one failed this at 40 steps —
+      // 2.50 m across the wrap where its neighbours moved 1.54 m — because its
+      // line had not converged; converged it is 2.10 m against 1.41 m.
+      const route = stadiumRoute(30, hand);
+      const offsets = racingLine(route).offsets;
+      const last = offsets.length - 1;
+      // The last sample IS the first place (`LOOP_CLOSURE_METRES`)…
+      expect(offsets[last]).toBe(offsets[0]);
+      // …and the change across the wrap, from the last sample of the lap to the
+      // first, is no bigger than the change across its neighbours either side.
+      // Solved as a point-to-point route instead, each end is free of the other
+      // and the step measured here was 5.5 m, where its neighbours moved 2.6 and 0.6.
+      const across = Math.abs((offsets[last - 1] ?? 0) - (offsets[0] ?? 0));
+      const before = Math.abs((offsets[last - 2] ?? 0) - (offsets[last - 1] ?? 0));
+      const after = Math.abs((offsets[0] ?? 0) - (offsets[1] ?? 0));
+      expect(across).toBeLessThanOrEqual(Math.max(before, after) * 1.5 + 0.05);
+    },
+  );
 
   it('reads the same place on lap two as on lap one', () => {
     const route = stadiumRoute(30);
@@ -373,7 +364,7 @@ describe('its cost — #499', () => {
   it('solves a 1 000 km route once, in bounded time, and keeps it on the road', () => {
     const route = longWindingRoute();
     const started = performance.now();
-    const line = solvedLine(route, 40);
+    const line = solvedLine(route, GAUSS_NEWTON_STEPS);
     const took = performance.now() - started;
     // Printed, because it is the figure #499 asks to be recorded. It said
     // "about 0.8 s"; re-measured for #588 with this case run alone, median of
@@ -381,6 +372,8 @@ describe('its cost — #499', () => {
     // from 30 to 40, and 0.69 s since #588 — under the coverage run 2.90 s,
     // 3.74 s and 2.80 s, and 13.1 s on CI's coverage run for #546's merge.
     // Re-measured for #586 the same way: 0.67 s (0.667–0.679 s over five).
+    // #640 took the steps from 40 to 80: 0.69 s (0.66–0.71 s) at 40 and
+    // 1.29 s (1.28–1.42 s) at 80, median of five, run alone, 2026-09-27.
     // The bound is a hang detector, not a performance claim.
     console.info(`racing line: ${String(route.positions.length)} samples in ${took.toFixed(0)} ms`);
     expect(took).toBeLessThan(30_000);
@@ -411,15 +404,28 @@ describe('its cost — #499', () => {
    * is the evidence that #583 moved the projection and nothing in the solver.
    * The "10 m left-hand corner" is the one #588 took, drawn left-handed then;
    * it is the right-hand fixture now for the same reason.
+   *
+   * ⚠️ **Re-taken by #640, and every one of them moved — on purpose.** #640
+   * took the solve from 40 steps to 80, so each fixture is drawn nearer its
+   * converged line. None of these five was the fixture #640 was about (the
+   * right-hand stadium, whose line moved 1.25 m and its lean up to 18°), and
+   * each moved by far less than anything drawn — measured between 40 and 80
+   * steps, as the most any offset, any curvature and any of the three leans
+   * moved: the 10 m hairpin 0.005 mm, 6·10⁻⁸ per metre, 0.00005°; the 20 m
+   * hairpin 0.04 mm, 4·10⁻⁷, 0.0004°; the S-bend 0.17 mm, 2·10⁻⁶, 0.003°; the
+   * 10 m corner 1.5 mm, 2·10⁻⁵, 0.02°; the stadium 0.04 mm, 7·10⁻⁷, 0.0007°.
+   * A digest fixed to a tenth of a millimetre and a millionth sees all of them.
+   * The case name said "exactly as main did before #588" until then; the
+   * argument above about #588 and #583 still holds of the digests it had.
    */
   it.each([
-    ['a 10 m hairpin', () => hairpinRoute(10, 'left'), 'bd14b29f', 'db209abb'],
-    ['the 20 m hairpin', () => hairpinRoute(HAIRPIN_RADIUS, 'left'), '357049c6', '25daa5dc'],
-    ['the S-bend', () => sBendRoute(S_RADIUS, 'left'), 'bef6fc52', '359e3337'],
-    ['a 10 m corner drawn left-handed', () => cornerRoute(10, 90, 'right'), '976368df', '9a0ed418'],
-    ['the stadium, a loop', () => stadiumRoute(30, 'left'), '7ba899f0', '14d8d5d5'],
+    ['a 10 m hairpin', () => hairpinRoute(10, 'left'), '1bce7fb0', '577f5128'],
+    ['the 20 m hairpin', () => hairpinRoute(HAIRPIN_RADIUS, 'left'), '4221e52b', 'b8fdcafb'],
+    ['the S-bend', () => sBendRoute(S_RADIUS, 'left'), '2f2e3ed7', '58cf2dd9'],
+    ['a 10 m corner drawn left-handed', () => cornerRoute(10, 90, 'right'), '79bcdfa3', '63dfb82e'],
+    ['the stadium, a loop', () => stadiumRoute(30, 'left'), '9c23170c', 'f2c0d419'],
   ] as const)(
-    'draws the line and the lean on %s exactly as main did before #588',
+    'draws the line and the lean on %s exactly as the digest taken for #640',
     (_, make, lineDigest, leanDigest) => {
       // A fresh profile, so the line is solved here rather than read from a cache
       // an earlier case filled.
