@@ -398,7 +398,15 @@ function Camera({
               I have read what happens to anyone else in the room.
             </label>
           </p>
-          <Button onClick={agree}>Allow the camera on this device</Button>
+          {/*
+            #668: one primary per view. Where the side camera is offered its
+            link above is the primary — the way in, #557 — and the consent
+            steps down beside it; with no side camera, agreeing is the step
+            this screen is for.
+          */}
+          <Button variant={sidePairing === undefined ? 'primary' : 'secondary'} onClick={agree}>
+            Allow the camera on this device
+          </Button>
           {refusal === undefined ? null : (
             <StatusMessage tone="warning" live>
               {CONSENT_REFUSAL_TEXT[refusal]}
@@ -437,7 +445,9 @@ function Camera({
               Turn the camera off
             </Button>
           ) : (
-            <Button onClick={turnOn}>Turn the camera on</Button>
+            <Button variant={sidePairing === undefined ? 'primary' : 'secondary'} onClick={turnOn}>
+              Turn the camera on
+            </Button>
           )}{' '}
           <Button
             variant="secondary"
@@ -817,7 +827,9 @@ function AnalysisSection({
             Send pictures to this computer when I ask
           </label>
         </p>
-        <Button type="submit">Save this computer</Button>{' '}
+        <Button variant="secondary" type="submit">
+          Save this computer
+        </Button>{' '}
         {saved === undefined && !configured ? null : (
           <Button
             variant="secondary"

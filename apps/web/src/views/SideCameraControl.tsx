@@ -131,7 +131,7 @@ export function SideCameraControl({ controller, pairing }: SideCameraControlProp
       </p>
       {current === undefined ? (
         <>
-          <Button onClick={pair} disabled={busy}>
+          <Button variant="secondary" onClick={pair} disabled={busy}>
             Pair a phone
           </Button>
           {refusal === undefined ? null : (
@@ -168,7 +168,7 @@ function Paired({
         </StatusMessage>
         <PhoneState state={state} />
         {pairing.analysis === undefined ? null : <Analysis analysis={pairing.analysis} />}
-        <Button onClick={again} disabled={busy}>
+        <Button variant="secondary" onClick={again} disabled={busy}>
           Pair a phone
         </Button>
       </>
@@ -492,7 +492,7 @@ function Offer({
           </Button>
         </>
       ) : (
-        <Button onClick={startScanning} describedBy={NEXT_STEP_ID} focusOnMount>
+        <Button variant="secondary" onClick={startScanning} describedBy={NEXT_STEP_ID} focusOnMount>
           Read the phone’s code
         </Button>
       )}
@@ -544,6 +544,7 @@ function Controls({
       */}
       {state.phone === 'framing' ? (
         <Button
+          variant="secondary"
           onClick={() => {
             control.commandSideCamera('start');
           }}
@@ -553,6 +554,7 @@ function Controls({
       ) : null}
       {state.phone === 'filming' || state.phone === 'lost' ? (
         <Button
+          variant="secondary"
           onClick={() => {
             control.commandSideCamera('stop');
           }}

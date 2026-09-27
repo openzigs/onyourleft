@@ -269,8 +269,10 @@ describe('criterion 3 — toggling a series changes what is rendered', () => {
     const port = indoorRide();
     mounted = await open(port);
     const hide = queryAll<HTMLButtonElement>(document, 'button').find(
-      (button) => button.textContent?.trim() === 'Hide power',
+      (button) => button.textContent?.trim() === 'Show power',
     );
+    // #668: a toggle, whose name is stable and whose state is aria-pressed.
+    expect(hide?.getAttribute('aria-pressed')).toBe('true');
     await activateWithKeyboard(hide as HTMLButtonElement);
     await settle();
 
@@ -290,8 +292,9 @@ describe('criterion 3 — toggling a series changes what is rendered', () => {
         (button) => button.textContent?.trim() === text,
       ) as HTMLButtonElement;
 
-    await activateWithKeyboard(buttonNamed('Hide power'));
+    await activateWithKeyboard(buttonNamed('Show power'));
     await settle();
+    expect(buttonNamed('Show power').getAttribute('aria-pressed')).toBe('false');
     await activateWithKeyboard(buttonNamed('Show power'));
     await settle();
     await settle();

@@ -51,6 +51,7 @@ import { syntheticCourseGpx, syntheticGpx } from './testing';
 import { FILES_IMPORT_MEANS } from '../routes/two-importers';
 import type { AccountExportReport } from './export-everything';
 import { everythingSentence, TransferView } from './TransferView';
+import { buttonsByView, onePrimaryViolations } from '../a11y/button-hierarchy';
 
 let mounted: Mounted | undefined;
 let harness: StoreHarness | undefined;
@@ -498,6 +499,37 @@ describe('TransferView — exporting', () => {
     expect(saved).toHaveLength(0);
     expect(document.body.textContent).toContain('was not exported');
     expect(mounted.caughtErrors).toHaveLength(0);
+  });
+});
+
+describe('TransferView — one primary on the screen (#668)', () => {
+  it('draws importing as the one primary, with every section rendered', async () => {
+    // The route walk in `a11y/button-hierarchy.a11y.test.tsx` hands this
+    // screen no port, so its four sections — import, export one, export
+    // everything, erase — are held to the rule here, over a real store.
+    const port = await openPort();
+    const ride = rideFor(ATHLETE_A, { name: 'One', hasPosition: true });
+    await (harness ?? never()).write(async (store) => {
+      await store.putActivity(ride);
+      await store.putStreamSet(streamSetFor(ride, { sampleCount: 30 }));
+    });
+
+    mounted = await mount(
+      <main>
+        <TransferView port={port} />
+      </main>,
+    );
+    await runToCompletion(
+      () =>
+        document.querySelector('#oyl-everything-format') !== null &&
+        document.querySelector('#oyl-export-format') !== null,
+      'the export panels to render',
+    );
+
+    const [view] = buttonsByView(document);
+    expect(view?.buttons, 'the transfer screen rendered too few buttons').toBeGreaterThanOrEqual(4);
+    expect(view?.primaries.map((element) => element.textContent?.trim())).toEqual(['Import']);
+    expect(onePrimaryViolations(document)).toEqual([]);
   });
 });
 

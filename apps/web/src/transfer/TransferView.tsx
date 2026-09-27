@@ -624,6 +624,7 @@ function ExportPanel({
         </select>
 
         <Button
+          variant="secondary"
           onClick={() => {
             void run();
           }}
@@ -801,6 +802,7 @@ function TakeEverythingPanel({
           ))}
         </select>
         <Button
+          variant="secondary"
           disabled={running}
           onClick={() => {
             void run();
@@ -810,6 +812,7 @@ function TakeEverythingPanel({
         </Button>
         {running ? (
           <Button
+            variant="secondary"
             onClick={() => {
               cancel.current?.abort();
             }}
@@ -823,6 +826,7 @@ function TakeEverythingPanel({
           // the one thing a partial archive is missing is a manifest that
           // describes all of it.
           <Button
+            variant="secondary"
             onClick={() => {
               setResumeFrom(undefined);
               setResumedRun(false);
@@ -1032,6 +1036,7 @@ function ErasePanel({
           }}
         />
         <Button
+          variant="secondary"
           onClick={() => {
             void run();
           }}

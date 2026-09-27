@@ -1,0 +1,427 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * The three kinds of button and the segmented control, as the pinned Chromium
+ * draws them — #668, and #688's hovered secondary.
+ *
+ * jsdom resolves no stylesheet and performs no layout (CLAUDE.md §4e), so
+ * `contrast.a11y.test.ts` can only check the pairs `design/tokens.ts` DECLARES.
+ * #688 is what that leaves open: a state nobody meant to draw is a pair nobody
+ * declared, and the secondary's hover drew `accent` on `accentHover` — 1.40:1 —
+ * through every gate. So this spec reads back what each state is ACTUALLY
+ * painted with, and holds it both ways: the colours equal the tokens the rule
+ * names, AND that token pair is one `CONTRAST_REQUIREMENTS` declares and that
+ * clears its threshold. A read-back that equalled some other pair, or a pair
+ * that was declared and not drawn, fails.
+ *
+ * It drives `shell.html?hierarchy=specimens` — `shell-harness.tsx`
+ * §`HierarchySpecimens` — because no route this page renders without ports
+ * has a toggle or a segmented control on it.
+ *
+ * ## The controls
+ *
+ * - `&hover-rule=off` deletes the rule #688 added; the hovered secondary must
+ *   then read back as #688 found it, under 4.5:1. Without it the positive
+ *   case could be reading a page that never hovered.
+ * - The segment floor is stripped, #316's third measurement: with no
+ *   `min-height` a segment is shorter than 44 px, so the declaration is what
+ *   holds the target.
+ * - An off toggle and an unchecked segment carry no inner ring, so the ring
+ *   the on ones carry is a difference and not a style everything has.
+ */
+
+import { expect, test, type Locator, type Page } from '@playwright/test';
+
+import { AA_TEXT, contrastRatio } from '../src/design/contrast';
+import { COLOUR_TOKENS, CONTRAST_REQUIREMENTS, type ColourToken } from '../src/design/tokens';
+
+const PAGE = '/shell.html?hierarchy=specimens';
+const WITHOUT_HOVER_RULE = `${PAGE}&hover-rule=off`;
+const READY = 'html[data-oyl-shell-ready]';
+
+/** SC 2.5.5 (AAA). Not SC 2.5.8, which is 24 px. */
+const TOUCH_TARGET_PIXELS = 44;
+
+/** The buttons' own transition is 120 ms; this is what a read waits past. */
+const TRANSITION_WAIT_MS = 400;
+
+/** Every kind and state `shell-harness.tsx` renders, by `data-oyl-kind`. */
+const KINDS = [
+  'primary',
+  'secondary',
+  'toggle-off',
+  'toggle-on',
+  'primary-disabled',
+  'secondary-disabled',
+  'toggle-on-disabled',
+] as const;
+
+const SEGMENTS = ['Kilometres', 'Miles', 'Nautical miles'] as const;
+
+/** A token as Chromium reports a computed colour. */
+function rgbOf(token: ColourToken): string {
+  const hex = COLOUR_TOKENS[token];
+  const channel = (at: number): number => Number.parseInt(hex.slice(at, at + 2), 16);
+  return `rgb(${String(channel(1))}, ${String(channel(3))}, ${String(channel(5))})`;
+}
+
+/**
+ * ⚠️ A computed colour is compared with the token EXPECTED, never looked up:
+ * several tokens share a value (`ink` and `focus`, `canvas` and `accentInk`,
+ * `accent` and `link`), so a reverse lookup names whichever comes first and
+ * reads `accentInk` back as `canvas`.
+ */
+function expectToken(rgb: string, token: ColourToken, where: string): void {
+  expect(rgb, `${where}: expected ${token} (${COLOUR_TOKENS[token]})`).toBe(rgbOf(token));
+}
+
+/** Whether `fg` on `bg` is declared at `minimum` or stricter. */
+function declared(fg: ColourToken, bg: ColourToken, minimum: number): boolean {
+  return CONTRAST_REQUIREMENTS.some(
+    (pair) => pair.foreground === fg && pair.background === bg && pair.minimum >= minimum,
+  );
+}
+
+async function open(page: Page, url = PAGE): Promise<void> {
+  await page.goto(url);
+  await page.waitForSelector(READY);
+  const kinds = await page
+    .locator('[data-oyl-hierarchy] [data-oyl-kind]')
+    .evaluateAll((all) => all.map((element) => (element as HTMLElement).dataset['oylKind']));
+  expect(kinds, 'the specimens did not render — see shell-harness.tsx §HierarchySpecimens').toEqual(
+    KINDS,
+  );
+  expect(await page.locator('[data-oyl-segment]').count()).toBe(SEGMENTS.length);
+}
+
+function kind(page: Page, name: (typeof KINDS)[number]): Locator {
+  return page.locator(`[data-oyl-kind="${name}"]`);
+}
+
+interface Painted {
+  readonly color: string;
+  readonly background: string;
+  readonly border: string;
+  readonly shadow: string;
+  readonly outline: string;
+  readonly outlineColor: string;
+}
+
+async function painted(locator: Locator): Promise<Painted> {
+  return locator.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      color: style.color,
+      background: style.backgroundColor,
+      border: style.borderTopColor,
+      shadow: style.boxShadow,
+      outline: style.outlineStyle,
+      outlineColor: style.outlineColor,
+    };
+  });
+}
+
+/**
+ * The label on its fill, as tokens, and whether that pair is a declared text
+ * pair clearing AA. Both halves are asserted: equality to the tokens the rule
+ * names, and the declaration — so the read cannot be green for a colour that
+ * is merely legible, nor for a declaration nothing draws.
+ */
+function expectLabelPair(
+  read: Painted,
+  expected: { readonly fg: ColourToken; readonly bg: ColourToken },
+  where: string,
+): void {
+  expectToken(read.color, expected.fg, `${where}, its label`);
+  expectToken(read.background, expected.bg, `${where}, its fill`);
+  expect(declared(expected.fg, expected.bg, AA_TEXT), `${where}: not a declared text pair`).toBe(
+    true,
+  );
+  expect(
+    contrastRatio(COLOUR_TOKENS[expected.fg], COLOUR_TOKENS[expected.bg]),
+  ).toBeGreaterThanOrEqual(AA_TEXT);
+}
+
+test.describe('#688 — a hovered secondary button', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test('draws its label on a light fill, a declared pair that clears 4.5:1', async ({ page }) => {
+    await open(page);
+    const secondary = kind(page, 'secondary');
+    await secondary.hover();
+    await page.waitForTimeout(TRANSITION_WAIT_MS);
+    expect(await secondary.evaluate((element) => element.matches(':hover'))).toBe(true);
+    const read = await painted(secondary);
+    expectLabelPair(read, { fg: 'accentHover', bg: 'surface' }, 'a hovered secondary');
+    expectToken(read.border, 'accentHover', 'a hovered secondary, its border');
+  });
+
+  test('the control — without the rule it is #688’s pair again, under 4.5:1', async ({ page }) => {
+    await open(page, WITHOUT_HOVER_RULE);
+    expect(
+      await page.evaluate(() => document.documentElement.dataset['oylHoverRuleRemoved']),
+      'the hover rule was not found to remove, so this control measures nothing',
+    ).toBe('1');
+    const secondary = kind(page, 'secondary');
+    await secondary.hover();
+    await page.waitForTimeout(TRANSITION_WAIT_MS);
+    const read = await painted(secondary);
+    expectToken(read.color, 'accent', 'without the rule, the label');
+    expectToken(read.background, 'accentHover', 'without the rule, the fill');
+    expect(contrastRatio(COLOUR_TOKENS.accent, COLOUR_TOKENS.accentHover)).toBeLessThan(AA_TEXT);
+    expect(declared('accent', 'accentHover', AA_TEXT)).toBe(false);
+  });
+});
+
+test.describe('#668 — a link drawn as a button', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test('is painted as the button it is drawn as, and not underlined as a link', async ({
+    page,
+  }) => {
+    await open(page);
+    const link = page.locator('[data-oyl-link-button]');
+    const decoration = (): Promise<string> =>
+      link.evaluate((element) => getComputedStyle(element).textDecorationLine);
+    expectLabelPair(await painted(link), { fg: 'accent', bg: 'canvas' }, 'a button-link');
+    expect(await decoration()).toBe('none');
+    await link.hover();
+    await page.waitForTimeout(TRANSITION_WAIT_MS);
+    expectLabelPair(await painted(link), { fg: 'accentHover', bg: 'surface' }, 'a hovered one');
+    expect(await decoration()).toBe('none');
+  });
+});
+
+test.describe('#668 — every state of every kind is a declared pair', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  const AT_REST: Readonly<Record<(typeof KINDS)[number], { fg: ColourToken; bg: ColourToken }>> = {
+    primary: { fg: 'accentInk', bg: 'accent' },
+    secondary: { fg: 'accent', bg: 'canvas' },
+    'toggle-off': { fg: 'accent', bg: 'canvas' },
+    'toggle-on': { fg: 'accentHover', bg: 'selected' },
+    'primary-disabled': { fg: 'inkMuted', bg: 'surface' },
+    'secondary-disabled': { fg: 'inkMuted', bg: 'surface' },
+    'toggle-on-disabled': { fg: 'inkMuted', bg: 'surface' },
+  };
+
+  const UNDER_A_POINTER: Partial<
+    Record<(typeof KINDS)[number], { fg: ColourToken; bg: ColourToken }>
+  > = {
+    primary: { fg: 'accentInk', bg: 'accentHover' },
+    secondary: { fg: 'accentHover', bg: 'surface' },
+    'toggle-off': { fg: 'accentHover', bg: 'surface' },
+    'toggle-on': { fg: 'accentHover', bg: 'selected' },
+  };
+
+  test('at rest', async ({ page }) => {
+    await open(page);
+    for (const name of KINDS) {
+      expectLabelPair(await painted(kind(page, name)), AT_REST[name], `${name} at rest`);
+    }
+  });
+
+  test('under a pointer, and while pressed', async ({ page }) => {
+    await open(page);
+    for (const [name, expected] of Object.entries(UNDER_A_POINTER)) {
+      const button = kind(page, name as (typeof KINDS)[number]);
+      await button.hover();
+      await page.waitForTimeout(TRANSITION_WAIT_MS);
+      expectLabelPair(await painted(button), expected, `${name} under a pointer`);
+      await page.mouse.down();
+      await page.waitForTimeout(TRANSITION_WAIT_MS);
+      expect(await button.evaluate((element) => element.matches(':active'))).toBe(true);
+      expectLabelPair(await painted(button), expected, `${name} pressed`);
+      await page.mouse.up();
+    }
+  });
+
+  test('focused from the keyboard: the ring is the focus token, offset onto the page', async ({
+    page,
+  }) => {
+    await open(page);
+    for (const name of ['primary', 'secondary', 'toggle-off', 'toggle-on'] as const) {
+      const button = kind(page, name);
+      await button.focus();
+      expect(await button.evaluate((element) => element.matches(':focus-visible'))).toBe(true);
+      const read = await painted(button);
+      expect(read.outline, `${name} focused`).toBe('solid');
+      expectToken(read.outlineColor, 'focus', `${name} focused, its ring`);
+      // Offset by 2 px, the ring lands on the page behind the button.
+      expect(declared('focus', 'canvas', 3)).toBe(true);
+      // And the label keeps its own declared pair while focused.
+      expectLabelPair(read, AT_REST[name], `${name} focused`);
+    }
+  });
+
+  test('an on toggle is told apart by weight as well as colour (SC 1.4.1)', async ({ page }) => {
+    await open(page);
+    const on = await painted(kind(page, 'toggle-on'));
+    const off = await painted(kind(page, 'toggle-off'));
+    // The doubled border: an inset ring inside the 2 px border, in the accent.
+    expect(off.shadow).toBe('none');
+    expect(on.shadow).toMatch(/inset/);
+    expect(on.shadow).toContain(rgbOf('accent'));
+    expect(on.shadow).toMatch(/0px 0px 0px 2px/);
+    expect(await kind(page, 'toggle-on').getAttribute('aria-pressed')).toBe('true');
+    expect(await kind(page, 'toggle-off').getAttribute('aria-pressed')).toBe('false');
+    // And the weight survives a disabled on toggle, in the disabled border.
+    const disabledOn = await painted(kind(page, 'toggle-on-disabled'));
+    expect(disabledOn.shadow).toContain(rgbOf('border'));
+    expect(declared('border', 'surface', 3)).toBe(true);
+  });
+
+  test('pressing does not move the layout: an on toggle is the same size as an off one', async ({
+    page,
+  }) => {
+    await open(page);
+    const box = (name: (typeof KINDS)[number]) =>
+      kind(page, name).evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return rect.height;
+      });
+    expect(await box('toggle-on')).toBe(await box('toggle-off'));
+  });
+});
+
+const SEGMENT_VIEWPORTS = [
+  { name: '320×256', width: 320, height: 256 },
+  { name: '390×844', width: 390, height: 844 },
+  { name: '1280×800', width: 1280, height: 800 },
+] as const;
+
+async function segmentBoxes(
+  page: Page,
+  stripped: boolean,
+): Promise<readonly { label: string; height: number; width: number; minHeight: string }[]> {
+  return page.evaluate((strip) => {
+    // ⚠️ Every floor comes off BEFORE any box is read: the segments share a
+    // flex row that stretches each to the tallest, so one stripped segment
+    // beside two with their floors measures 44 px and proves nothing.
+    const segments = [...document.querySelectorAll<HTMLElement>('[data-oyl-segment]')];
+    const before = segments.map((segment) => segment.style.cssText);
+    if (strip) for (const segment of segments) segment.style.minHeight = '0px';
+    const read = segments.map((segment) => {
+      const box = segment.getBoundingClientRect();
+      return {
+        label: segment.dataset['oylSegment'] ?? '',
+        height: box.height,
+        width: box.width,
+        minHeight: getComputedStyle(segment).minHeight,
+      };
+    });
+    segments.forEach((segment, index) => {
+      segment.style.cssText = before[index] ?? '';
+    });
+    return read;
+  }, stripped);
+}
+
+for (const viewport of SEGMENT_VIEWPORTS) {
+  test.describe(`#668 — a segmented control at ${viewport.name}`, () => {
+    test.use({ viewport: { width: viewport.width, height: viewport.height } });
+
+    test('each segment is at least a 44×44 target as Chromium lays it out', async ({ page }) => {
+      await open(page);
+      const segments = await segmentBoxes(page, false);
+      expect(segments.map((segment) => segment.label)).toEqual(SEGMENTS);
+      for (const segment of segments) {
+        expect(segment.height, `${segment.label}'s height`).toBeGreaterThanOrEqual(
+          TOUCH_TARGET_PIXELS,
+        );
+        expect(segment.width, `${segment.label}'s width`).toBeGreaterThanOrEqual(
+          TOUCH_TARGET_PIXELS,
+        );
+      }
+    });
+  });
+}
+
+test.describe('#668 — the segment target is declared, and nothing else holds it', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test('the 44 px minimum is a declaration on every segment', async ({ page }) => {
+    await open(page);
+    for (const segment of await segmentBoxes(page, false)) {
+      expect(Number.parseFloat(segment.minHeight), segment.label).toBeGreaterThanOrEqual(
+        TOUCH_TARGET_PIXELS,
+      );
+    }
+  });
+
+  test('with the floor stripped off, a segment falls short — the floor is what holds it', async ({
+    page,
+  }) => {
+    await open(page);
+    const segments = await segmentBoxes(page, true);
+    expect(segments.length).toBe(SEGMENTS.length);
+    for (const segment of segments) {
+      expect(segment.minHeight, 'the floor was not taken off').toBe('0px');
+      expect(segment.height, segment.label).toBeGreaterThan(0);
+      expect(segment.height, segment.label).toBeLessThan(TOUCH_TARGET_PIXELS);
+    }
+  });
+});
+
+test.describe('#668 — a segmented control, painted and operated', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  const segment = (page: Page, label: string): Locator =>
+    page.locator(`[data-oyl-segment="${label}"]`);
+
+  test('checked and unchecked are declared pairs, and checked is told by weight too', async ({
+    page,
+  }) => {
+    await open(page);
+    const checked = await painted(segment(page, 'Miles'));
+    const unchecked = await painted(segment(page, 'Kilometres'));
+    expectLabelPair(checked, { fg: 'accentHover', bg: 'selected' }, 'the checked segment');
+    expectLabelPair(unchecked, { fg: 'accent', bg: 'canvas' }, 'an unchecked segment');
+    expect(unchecked.shadow).toBe('none');
+    expect(checked.shadow).toMatch(/inset/);
+    expect(checked.shadow).toContain(rgbOf('accent'));
+    expect(declared('accent', 'selected', 3)).toBe(true);
+    // The radio itself: checked, drawn in the accent, on the segment's fill.
+    const radio = segment(page, 'Miles').locator('input');
+    expect(await radio.isChecked()).toBe(true);
+    expect(await radio.evaluate((input) => getComputedStyle(input).accentColor)).toBe(
+      rgbOf('accent'),
+    );
+  });
+
+  test('an unchecked segment under a pointer is a declared pair', async ({ page }) => {
+    await open(page);
+    const kilometres = segment(page, 'Kilometres');
+    await kilometres.hover();
+    expectLabelPair(
+      await painted(kilometres),
+      { fg: 'accentHover', bg: 'surface' },
+      'a hovered segment',
+    );
+  });
+
+  test('the arrow keys move the choice — the platform’s radio group, not a rebuilt one', async ({
+    page,
+  }) => {
+    await open(page);
+    const miles = segment(page, 'Miles').locator('input');
+    await miles.focus();
+    const ring = await miles.evaluate((input) => {
+      const style = getComputedStyle(input);
+      return { style: style.outlineStyle, colour: style.outlineColor };
+    });
+    expect(ring.style).toBe('solid');
+    expectToken(ring.colour, 'focus', 'the focused radio, its ring');
+    expect(declared('focus', 'selected', 3)).toBe(true);
+    await page.keyboard.press('ArrowRight');
+    expect(await segment(page, 'Nautical miles').locator('input').isChecked()).toBe(true);
+    expect(await miles.isChecked()).toBe(false);
+    // The fill follows the check, not the focus.
+    expectToken(
+      (await painted(segment(page, 'Nautical miles'))).background,
+      'selected',
+      'now checked',
+    );
+    expectToken((await painted(segment(page, 'Miles'))).background, 'canvas', 'now unchecked');
+  });
+});

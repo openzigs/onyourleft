@@ -273,6 +273,7 @@ export function ActivitiesView({ library }: ActivitiesViewProps): JSX.Element {
       : 'Nothing recorded yet. A ride appears here the moment you finish one.';
   const deleteButton = (row: LibraryRow): JSX.Element => (
     <Button
+      variant="secondary"
       onClick={() => {
         void remove(row.id);
       }}

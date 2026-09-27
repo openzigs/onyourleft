@@ -391,7 +391,9 @@ export function WorkoutsView({ port, now, save }: WorkoutsViewProps): JSX.Elemen
             onChange={(event) => setDraft({ ...draft, label: event.target.value })}
           />
         </p>
-        <Button type="submit">Add block</Button>
+        <Button variant="secondary" type="submit">
+          Add block
+        </Button>
       </form>
 
       <h3>This workout</h3>
@@ -403,6 +405,7 @@ export function WorkoutsView({ port, now, save }: WorkoutsViewProps): JSX.Elemen
             <li key={`${block.kind}-${String(index)}`}>
               {blockText(block)}{' '}
               <Button
+                variant="secondary"
                 type="button"
                 onClick={() => {
                   onRemoveBlock(index);
@@ -438,7 +441,9 @@ export function WorkoutsView({ port, now, save }: WorkoutsViewProps): JSX.Elemen
           <label htmlFor="workout-file">Workout file</label>
           <input id="workout-file" name="file" type="file" accept=".json,application/json" />
         </p>
-        <Button type="submit">Import workout</Button>
+        <Button variant="secondary" type="submit">
+          Import workout
+        </Button>
       </form>
 
       {fileFault === undefined ? null : (
@@ -483,6 +488,7 @@ export function WorkoutsView({ port, now, save }: WorkoutsViewProps): JSX.Elemen
                 <td>
                   {save === undefined ? null : (
                     <Button
+                      variant="secondary"
                       type="button"
                       onClick={() => {
                         onExport(record);
@@ -492,6 +498,7 @@ export function WorkoutsView({ port, now, save }: WorkoutsViewProps): JSX.Elemen
                     </Button>
                   )}
                   <Button
+                    variant="secondary"
                     type="button"
                     onClick={() => {
                       setPendingDelete(row);
@@ -514,6 +521,7 @@ export function WorkoutsView({ port, now, save }: WorkoutsViewProps): JSX.Elemen
             recorded.
           </p>
           <Button
+            variant="secondary"
             type="button"
             onClick={() => {
               void onDelete(pendingDelete);
@@ -522,6 +530,7 @@ export function WorkoutsView({ port, now, save }: WorkoutsViewProps): JSX.Elemen
             Delete “{pendingDelete.name}”
           </Button>
           <Button
+            variant="secondary"
             type="button"
             onClick={() => {
               setPendingDelete(undefined);

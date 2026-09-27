@@ -110,15 +110,19 @@ describe('every control works from the keyboard', () => {
     expect(view.container.textContent).toContain('Waypoint 3');
   });
 
-  it('selects one, and says which is selected in words', async () => {
+  it('selects one, and says which is selected with aria-pressed', async () => {
     await open({ provider: scriptedProvider() });
     await place(2);
+    const pressed = (label: string): string | null =>
+      buttonNamed(label).getAttribute('aria-pressed');
+    expect([pressed('Waypoint 1'), pressed('Waypoint 2')]).toEqual(['false', 'false']);
     await press('Waypoint 1');
-    expect(present('Waypoint 1, selected')).toBe(true);
-    // Selection is not colour: the label itself changes, which is the only
-    // channel a screen reader has.
-    await press('Waypoint 1, selected');
-    expect(present('Waypoint 1')).toBe(true);
+    // Selection is not colour: since #668 the button is a toggle, whose state
+    // a screen reader reads from `aria-pressed`, and whose NAME stays the same
+    // so it is not announced as a different control on every press.
+    expect([pressed('Waypoint 1'), pressed('Waypoint 2')]).toEqual(['true', 'false']);
+    await press('Waypoint 1');
+    expect([pressed('Waypoint 1'), pressed('Waypoint 2')]).toEqual(['false', 'false']);
   });
 
   it('moves one in each of the four directions', async () => {

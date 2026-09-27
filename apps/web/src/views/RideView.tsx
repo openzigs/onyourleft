@@ -355,6 +355,7 @@ function RecoveryOffer({
             <p>{offerText(ride)}</p>
             {ride.canContinue ? (
               <Button
+                variant="secondary"
                 onClick={() => {
                   void controller.continueRecovered(ride.id);
                 }}
@@ -364,6 +365,7 @@ function RecoveryOffer({
             ) : null}
             {ride.alreadySaved ? null : (
               <Button
+                variant="secondary"
                 onClick={() => {
                   void controller.saveRecovered(ride.id);
                 }}
@@ -372,6 +374,7 @@ function RecoveryOffer({
               </Button>
             )}
             <Button
+              variant="secondary"
               onClick={() => {
                 void controller.discardRecovered(ride.id);
               }}
@@ -493,7 +496,12 @@ function RideControls({
           Pause
         </Button>
       ) : (
+        // #668: the ride screen's one primary is the step that moves the
+        // ride on. While a stop is armed that is the confirmation, so a
+        // paused rider's Resume steps down beside it rather than being a
+        // second heaviest control.
         <Button
+          variant={snapshot.stopArmed ? 'secondary' : 'primary'}
           onClick={() => {
             void controller.resume();
           }}
