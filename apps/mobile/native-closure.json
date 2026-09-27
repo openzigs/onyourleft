@@ -1,0 +1,289 @@
+{
+  "$comment": [
+    "The native half of the Android app's licence notices -- #664. A REVIEWED list, not a derivation: CI does not build Android, so",
+    "nothing in CI can ask Gradle what the APK links. apps/mobile/src/android/native-closure.ts holds this file to Gradle's own answer",
+    "(./gradlew :app:dependencies --configuration releaseRuntimeClasspath) wherever Gradle has run, and skips loudly elsewhere.",
+    "scripts/check-third-party-notices.mjs renders it into apps/web/public/licences/third-party.txt. Read on 2026-09-27 from Gradle's",
+    "resolution on a developer machine; 'pom' is the licence each artefact's own POM declares, read from the Gradle cache."
+  ],
+  "reviewed": "2026-09-27",
+  "libraries": [
+    {
+      "coordinate": "androidx.activity:activity:1.11.0",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.annotation:annotation-experimental:1.4.1",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.annotation:annotation-jvm:1.8.1",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.annotation:annotation:1.8.1",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.appcompat:appcompat-resources:1.7.1",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.appcompat:appcompat:1.7.1",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.arch.core:core-common:2.2.0",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.arch.core:core-runtime:2.2.0",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.collection:collection-jvm:1.4.2",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.collection:collection:1.4.2",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.concurrent:concurrent-futures:1.1.0",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.coordinatorlayout:coordinatorlayout:1.3.0",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.core:core-ktx:1.17.0",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.core:core-splashscreen:1.2.0",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.core:core-viewtree:1.0.0",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.core:core:1.17.0",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.cursoradapter:cursoradapter:1.0.0",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.customview:customview:1.0.0",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.drawerlayout:drawerlayout:1.0.0",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.emoji2:emoji2-views-helper:1.3.0",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.emoji2:emoji2:1.3.0",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.fragment:fragment:1.8.9",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.interpolator:interpolator:1.0.0",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.lifecycle:lifecycle-common:2.6.2",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.lifecycle:lifecycle-livedata-core:2.6.2",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.lifecycle:lifecycle-livedata:2.6.2",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.lifecycle:lifecycle-process:2.6.2",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.lifecycle:lifecycle-runtime:2.6.2",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.lifecycle:lifecycle-viewmodel-savedstate:2.6.2",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.lifecycle:lifecycle-viewmodel:2.6.2",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.loader:loader:1.0.0",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.profileinstaller:profileinstaller:1.4.0",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.resourceinspection:resourceinspection-annotation:1.0.1",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.savedstate:savedstate:1.2.1",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.startup:startup-runtime:1.1.1",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.tracing:tracing:1.2.0",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.vectordrawable:vectordrawable-animated:1.1.0",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.vectordrawable:vectordrawable:1.1.0",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.versionedparcelable:versionedparcelable:1.1.1",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.viewpager:viewpager:1.0.0",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "androidx.webkit:webkit:1.14.0",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "com.google.guava:listenablefuture:1.0",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0 (declared by its parent POM, com.google.guava:guava-parent:26.0-android)"
+    },
+    {
+      "coordinate": "org.apache.cordova:framework:14.0.1",
+      "licence": "Apache-2.0",
+      "pom": "Apache License, Version 2.0",
+      "notice": {
+        "source": "https://github.com/apache/cordova-android/blob/rel/14.0.1/NOTICE",
+        "read": "2026-09-27",
+        "text": "Apache Cordova\nCopyright 2015-2020 The Apache Software Foundation\n\nThis product includes software developed at\nThe Apache Software Foundation (http://www.apache.org/).\n"
+      }
+    },
+    {
+      "coordinate": "org.jetbrains:annotations:23.0.0",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "org.jetbrains.kotlin:kotlin-stdlib:2.2.20",
+      "licence": "Apache-2.0",
+      "pom": "Apache-2.0",
+      "notice": {
+        "source": "https://github.com/JetBrains/kotlin/blob/v2.2.20/license/NOTICE.txt",
+        "read": "2026-09-27",
+        "text": "   =========================================================================\n   ==  NOTICE file corresponding to the section 4 d of                    ==\n   ==  the Apache License, Version 2.0,                                   ==\n   ==  in this case for the Kotlin Compiler distribution.                 ==\n   =========================================================================\n\n   Kotlin Compiler\n   Copyright 2010-2024 JetBrains s.r.o and respective authors and developers\n"
+      }
+    },
+    {
+      "coordinate": "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "org.jetbrains.kotlinx:kotlinx-coroutines-bom:1.8.1",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.8.1",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1",
+      "licence": "Apache-2.0",
+      "pom": "The Apache Software License, Version 2.0"
+    },
+    {
+      "coordinate": "org.jspecify:jspecify:1.0.0",
+      "licence": "Apache-2.0",
+      "pom": "The Apache License, Version 2.0"
+    }
+  ],
+  "projects": [
+    {
+      "project": ":capacitor-android",
+      "package": "@capacitor/android",
+      "why": "Capacitor's Android runtime. Gradle builds it from the npm package's own source, so its notice is that package's LICENSE, in the web half of the document."
+    },
+    {
+      "project": ":capacitor-community-bluetooth-le",
+      "package": "@capacitor-community/bluetooth-le",
+      "why": "The Bluetooth LE plugin's native code, built from the npm package's own source; its notice is that package's LICENSE, in the web half."
+    },
+    {
+      "project": ":capacitor-cordova-android-plugins",
+      "package": null,
+      "why": "Written by `cap sync` and holding no Cordova plugin, because this app uses none. It contributes no third-party code of its own; the Cordova framework it depends on is listed above."
+    }
+  ]
+}

@@ -357,6 +357,54 @@ test.describe('the web app manifest, in the built output', () => {
   });
 });
 
+test.describe('the third-party notices, in the built output — #664', () => {
+  /**
+   * The document `scripts/check-third-party-notices.mjs` writes into
+   * `public/licences/`, asserted in `dist` as the product server serves it —
+   * the same "a file in `public/` that is not copied is the wrong-storage
+   * defect" argument #405's manifest case makes.
+   *
+   * ⚠️ **The control sends the same `Accept` header as the request it
+   * controls, and the header is load-bearing.** This server previews a
+   * single-page app (`playwright.config.ts` §`PRODUCT_PORT`), so a request that
+   * accepts HTML for a path that does not exist is answered `200` with
+   * `index.html`: a check that the notices URL answers `200` would pass over a
+   * build with no notices in it at all. Asked as `text/plain` — which is what
+   * the document is — a missing path is a `404`, measured, so the pair tells
+   * a served document from the fallback. The third request pins the fallback
+   * itself, so a server that stopped rewriting would be noticed here rather
+   * than read as this control getting stronger.
+   */
+  const AS_TEXT = { headers: { Accept: 'text/plain' } };
+
+  test('answers 200 with the notices, and a path beside it that does not exist answers 404', async ({
+    page,
+  }) => {
+    const served = await page.request.get(`${PRODUCT_ORIGIN}/licences/third-party.txt`, AS_TEXT);
+    expect(served.status()).toBe(200);
+    expect(served.headers()['content-type']).toMatch(/^text\/plain/);
+    const body = await served.text();
+    expect(body.startsWith('THIRD-PARTY SOFTWARE IN ON YOUR LEFT')).toBe(true);
+    // Named packages from both halves, with their licence text rather than a
+    // list of names: React's MIT notice and the Android runtime's Apache one.
+    expect(body).toContain('Name: react\n');
+    expect(body).toContain('Permission is hereby granted, free of charge');
+    expect(body).toContain('Name: org.jetbrains.kotlin:kotlin-stdlib\n');
+
+    const missing = await page.request.get(
+      `${PRODUCT_ORIGIN}/licences/no-such-notices.txt`,
+      AS_TEXT,
+    );
+    expect(missing.status(), 'the control was answered by something').toBe(404);
+
+    const fallback = await page.request.get(`${PRODUCT_ORIGIN}/licences/no-such-notices.txt`, {
+      headers: { Accept: 'text/html' },
+    });
+    expect(fallback.status()).toBe(200);
+    expect(await fallback.text()).toContain('id="root"');
+  });
+});
+
 test.describe('the harness origin', () => {
   test('has no service worker at all — a cache there would poison every other spec', async ({
     page,
@@ -504,6 +552,35 @@ test.describe('a cold start with the network off', () => {
       expect(body, 'the navigation was answered with something other than the licence').toMatch(
         /^\s*Apache License\s+Version 2\.0, January 2004/,
       );
+    } finally {
+      await second.close();
+    }
+  });
+
+  test('opens the third-party notices the credits screen links, offline — #664', async () => {
+    // The same shape as the #597 case above, for the software notices: the
+    // link is read off the rendered screen, opening it is a navigation, and
+    // the worker must answer it with the document rather than the shell. The
+    // notices sit in `public/licences/`, which `precache.ts` does not exclude,
+    // so they are precached like the Apache-2.0 text beside them — ~125 KiB,
+    // and a licence notice a rider can read with the network off.
+    const second = await session(profile);
+    await second.context.setOffline(true);
+    try {
+      await second.page.goto(`${PRODUCT_ORIGIN}/#/about/credits`);
+      await expect(second.page.locator('h1')).toHaveText('Credits');
+      const link = second.page.locator('[data-terms="software"] a', {
+        hasText: 'the full third-party notices',
+      });
+      await expect(link).toBeVisible();
+      await expect(second.page.locator('[data-terms="software"] li').first()).toBeVisible();
+      const href = await link.evaluate((anchor) => (anchor as HTMLAnchorElement).href);
+      expect(href).toBe(`${PRODUCT_ORIGIN}/licences/third-party.txt`);
+
+      const opened = await second.page.goto(href);
+      expect(opened?.status(), 'the notices did not open offline').toBe(200);
+      expect(opened?.fromServiceWorker(), 'the notices were not served by the worker').toBe(true);
+      expect((await opened?.text()) ?? '').toMatch(/^THIRD-PARTY SOFTWARE IN ON YOUR LEFT/);
     } finally {
       await second.close();
     }

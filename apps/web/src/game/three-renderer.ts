@@ -373,7 +373,12 @@ import {
   type ShapeTriangles,
   type ShapesOf,
 } from './near-field';
-import { FIELD_DEPTH_METRES, FIELD_EDGE_LATERAL_METRES, STRUCTURE_FOOTPRINTS } from './settlements';
+import {
+  BOUNDARY_PIECE_METRES,
+  FIELD_DEPTH_METRES,
+  FIELD_EDGE_LATERAL_METRES,
+  STRUCTURE_FOOTPRINTS,
+} from './settlements';
 import {
   MAXIMUM_BRIDGE_PARTS,
   waterSurfaceIsCurrent,
@@ -889,6 +894,19 @@ const STRUCTURE_STYLE: Readonly<Record<StylisedBuiltKind, Readonly<Record<Buildi
     },
   };
 
+/** The side of a fence post's square section, in metres. */
+const FENCE_POST_METRES = 0.12;
+
+/**
+ * Where a fence's end posts stand along its run: their OUTER faces on the ends
+ * of the {@link BOUNDARY_PIECE_METRES} piece, so the fence stays inside
+ * `settlements.ts` §`STRUCTURE_FOOTPRINTS` — #602. They were centred on the
+ * ends until then and reached 6 cm past the footprint `structureClearance`
+ * holds from the road; moving the posts rather than the footprint leaves the
+ * placement, and the arrangement digest, as they were.
+ */
+const FENCE_END_POST_Z = BOUNDARY_PIECE_METRES / 2 - FENCE_POST_METRES / 2;
+
 /**
  * The field boundaries and the signpost #460 adds, each built from numbers
  * typed here — nothing is downloaded and nothing traced, ADR 0009. The
@@ -905,7 +923,9 @@ const BOUNDARY_STYLE = {
       colour: 0x8a6f4f,
       geometry: () =>
         merged([
-          ...[-4, -2, 0, 2, 4].map((z) => block(0.12, 1.3 + 0.4, 0.12, 0, -0.4, z)),
+          ...[-FENCE_END_POST_Z, -2, 0, 2, FENCE_END_POST_Z].map((z) =>
+            block(FENCE_POST_METRES, 1.3 + 0.4, FENCE_POST_METRES, 0, -0.4, z),
+          ),
           block(0.06, 0.1, 8, 0, 0.5),
           block(0.06, 0.1, 8, 0, 0.95),
         ]),

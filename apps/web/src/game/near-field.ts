@@ -182,12 +182,20 @@ const STRUCTURE_FOUNDATION_METRES = 0.6;
 /**
  * How far past its footprint a structure is taken to reach, in plan: **0.1 m**.
  *
- * ⚠️ **Because the footprint is not quite true.** A fence's end posts are
- * 0.12 m square and centred on the ends of its 8 m run, so they stand 6 cm past
+ * ⚠️ **A reviewer who remembers this margin covering a fence that pokes out of
+ * its footprint is reading the old file.** Until #602 a fence's end posts were
+ * 0.12 m square and centred on the ends of its 8 m run, so they stood 6 cm past
  * the `±4` that `settlements.ts` §`STRUCTURE_FOOTPRINTS` records — found by
  * `near-field.test.ts` §"the bounds", which reads every shape both worlds build.
- * The footprint is the placement's to own, and moving it moves the arrangement
- * digest; this file only needs a box nothing pokes out of.
+ * #602 moved the posts inward (`three-renderer.ts` §`FENCE_END_POST_Z`), and
+ * `boundary-footprint.test.ts` now holds every wall, hedge, fence and signpost
+ * inside its footprint, so today every structure fits its footprint exactly.
+ *
+ * The margin stays as belt and braces: this file only needs a box nothing pokes
+ * out of, and a tenth of a metre means a shape that one day strays a few
+ * centimetres is still inside it here while `boundary-footprint.test.ts` says
+ * so. Taking it to nought, so the near-field bounds are exact, is a separate
+ * change rather than part of #602.
  */
 const STRUCTURE_PLAN_MARGIN_METRES = 0.1;
 
