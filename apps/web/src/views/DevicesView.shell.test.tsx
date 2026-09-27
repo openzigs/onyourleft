@@ -269,6 +269,22 @@ describe('#659 — inside the shell, Devices pairs through the Capacitor transpo
     controller.dispose();
   });
 
+  it('keeps "no silent reconnect" visible on a phone, and claims no background limit it does not have', async () => {
+    const { port, controller } = shellPlatform();
+    mounted = await mount(
+      <DevicesView capabilities={WEBVIEW} shell={port} controller={controller} />,
+    );
+    await settle();
+    const visible = [...document.querySelectorAll('p')].filter(
+      (p) => p.closest('details') === null,
+    );
+    expect(visible.some((p) => p.textContent?.includes('There is no silent reconnect'))).toBe(true);
+    expect(document.body.textContent).not.toContain(
+      'Recording does not continue in the background',
+    );
+    controller.dispose();
+  });
+
   it('offers no pairing control in any unusable state, even with a controller', async () => {
     for (const kind of ['not-permitted', 'adapter-unavailable', 'unsupported'] as const) {
       const { port } = shellPort({ kind });

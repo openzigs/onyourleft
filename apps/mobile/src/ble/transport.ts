@@ -414,11 +414,18 @@ export function createCapacitorTransport(options: CapacitorTransportOptions): Se
       }
       const device = adopt(found, request.capabilities);
       seen.add(found.deviceId);
-      links.set(device.identity.id, {
-        session: createDeviceSession(device),
-        pluginId: found.deviceId,
-        notifying: new Map(),
-      });
+      // ⚠️ Only a device this transport does not already hold (#659's
+      // review). Chosen again while it is connected — the ride controller's
+      // "already paired" path — an overwrite put a fresh `disconnected`
+      // session over the live one and orphaned every observer of the old,
+      // so the link said *disconnected* while its notifications ran on.
+      if (!links.has(device.identity.id)) {
+        links.set(device.identity.id, {
+          session: createDeviceSession(device),
+          pluginId: found.deviceId,
+          notifying: new Map(),
+        });
+      }
       return device;
     },
 

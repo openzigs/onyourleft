@@ -231,6 +231,27 @@ describe('in a browser that can pair — #659, pairing lives here', () => {
     expect(sentence?.closest('details')).toBeNull();
   });
 
+  it('keeps "no silent reconnect" and "no background recording" visible too — ADR 0003 D-7 rule 5', async () => {
+    const { container } = await withController();
+    for (const phrase of [
+      'There is no silent reconnect',
+      'Recording does not continue in the background',
+    ]) {
+      const sentence = [...container.querySelectorAll('p')].find((p) =>
+        p.textContent?.includes(phrase),
+      );
+      expect(sentence, phrase).toBeDefined();
+      expect(sentence?.closest('details'), phrase).toBeNull();
+    }
+  });
+
+  it('says what forgetting the trainer does to ERG and to a workout', async () => {
+    const { container } = await withController();
+    expect(container.querySelector('details')?.textContent).toContain(
+      'Forgetting the trainer lets it go first, as End ERG does, and ends a workout that is running.',
+    );
+  });
+
   it('says how many more connections, in the singular when it is one', async () => {
     const stub = stubRideController(idleSnapshot());
     stub.set({ connectionsRemaining: 1 });

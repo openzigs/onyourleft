@@ -89,8 +89,12 @@ test('a new rider pairs a trainer from Home, and Ride and Home both see it', asy
   await page.evaluate(() => {
     window.location.hash = '#/';
   });
-  await expect(page.getByRole('region', { name: 'Trainer' })).not.toContainText(
-    'No trainer paired',
+  // ⚠️ Positive, not `not.toContainText('No trainer paired')` — a negated
+  // matcher passes over a Home that rendered no Trainer region at all (#659's
+  // review). This is `HomeView.tsx` §`FromTheRide`'s sentence for a trainer
+  // that is paired and has not been given control.
+  await expect(page.getByRole('region', { name: 'Trainer' })).toContainText(
+    'Paired, and this app has not been given control.',
   );
 });
 
@@ -159,6 +163,19 @@ test(`on a ${String(PHONE.width)}×${String(PHONE.height)} phone the first pairi
   expect(measured.detailsOpen).toBe(false);
   // "One user gesture per device" is on the page, visible, not tucked away.
   await expect(page.getByText('one user gesture per device')).toBeVisible();
+  // …and so are the other two working-path constraints, ADR 0003 D-7 rule 5.
+  // Exact, because the closed disclosure holds the longer wording of each too.
+  await expect(
+    page.getByText('There is no silent reconnect: after a reload, each device is chosen again.', {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      'Recording does not continue in the background: keep this tab open and in front while you ride.',
+      { exact: true },
+    ),
+  ).toBeVisible();
 });
 
 test('the control — today’s dead end fails the same walk, on the pairing control', async ({

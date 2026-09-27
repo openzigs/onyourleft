@@ -37,9 +37,14 @@ import {
   decodeSupportedPowerRange,
   FITNESS_MACHINE_CONTROL_POINT,
   FITNESS_MACHINE_SERVICE,
+  HEART_RATE_MEASUREMENT,
+  HEART_RATE_SERVICE,
+  heartRateProfile,
   type TrainerControl,
   type TrainerControlChoice,
 } from '@onyourleft/sensors/protocol';
+import { createWebBluetoothTransport } from '@onyourleft/sensors/web-bluetooth';
+import { createFakeBluetooth } from '@onyourleft/sensors/web-bluetooth/testing';
 import {
   createSimulator,
   ftmsTrainer,
@@ -1587,6 +1592,201 @@ describe('a release is one Stop, and it is not a loss — #372', () => {
     await rig.controller.requestTrainerControl();
     expect(rig.controller.getSnapshot().trainer.releaseFault).toBeUndefined();
     rig.controller.dispose();
+  });
+});
+
+describe('forgetting the trainer lets it go first — #659’s review', () => {
+  // ⚠️ `detach` unsubscribes `onControlLost` and then closes the client, and
+  // `close()` writes nothing. Forget used to detach first, so a workout kept
+  // its clock running against a machine still holding its last ERG target,
+  // with no Stop on the wire — and on Web Bluetooth the forget then revoked
+  // the grant the app would need to reach the machine again.
+  const THRESHOLD = watts(250);
+  const twoIntervals = (): WorkoutRecord => ({
+    id: workoutId('w-forget'),
+    createdBy: ATHLETE_A,
+    name: 'Two',
+    workout: {
+      name: 'Two',
+      blocks: [
+        { kind: 'steady', seconds: seconds(60), target: thresholdShare(0.8) },
+        { kind: 'steady', seconds: seconds(60), target: thresholdShare(0.9) },
+      ],
+    },
+    createdAt: unixSeconds(1),
+    updatedAt: unixSeconds(1),
+  });
+
+  async function riding(options: BenchOptions = {}): Promise<Bench> {
+    const rig = benchWith({ machine: { retainsTargetsThroughStop: true }, ...options });
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    return rig;
+  }
+
+  it('ends a running workout and sends the one Stop before the trainer is forgotten', async () => {
+    const rig = await riding();
+    rig.controller.startWorkout(twoIntervals(), THRESHOLD);
+    await ride(rig, 5);
+    await flushMicrotasks();
+    expect(rig.controller.getSnapshot().workout?.status).toBe('running');
+    const before = rig.written.length;
+
+    await rig.controller.unpair(TRAINER);
+    await ride(rig, 5);
+    await flushMicrotasks(20);
+
+    const snapshot = rig.controller.getSnapshot();
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(snapshot.workout).toBeUndefined();
+    expect(snapshot.trainer.paired).toBe(false);
+    expect(snapshot.trainer.lost).toBeUndefined();
+    expect(snapshot.trainer.releaseFault).toBeUndefined();
+    expect(snapshot.pairingError).toBeUndefined();
+    // The ride is the rider's, and carries on.
+    expect(snapshot.phase).toBe('recording');
+    rig.controller.dispose();
+  });
+
+  it('releases a hand-set ERG target with a Stop before the trainer is forgotten', async () => {
+    const rig = await riding();
+    await rig.controller.setTargetPower(watts(210));
+    expect(rig.targetOnTheTrainer()).toBe(210);
+    const before = rig.written.length;
+
+    await rig.controller.unpair(TRAINER);
+    await ride(rig, 3);
+    await flushMicrotasks(20);
+
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(rig.controller.getSnapshot().trainer.paired).toBe(false);
+    expect(rig.controller.getSnapshot().pairingError).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('releases a game ride’s gradient, and refuses the game’s next write', async () => {
+    const rig = await riding();
+    const handle = rig.controller.simulationControl();
+    await handle?.setSimulationParameters({ grade: gradePercent(6) });
+    const before = rig.written.length;
+
+    const forgetting = rig.controller.unpair(TRAINER);
+    // A gradient offered while the release is on the wire must not follow the
+    // Stop onto the machine.
+    const late = handle?.setSimulationParameters({ grade: gradePercent(8) });
+    await forgetting;
+    await expect(late).rejects.toThrow('the trainer is being forgotten');
+    await flushMicrotasks(20);
+
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(rig.controller.getSnapshot().trainer.paired).toBe(false);
+    rig.controller.dispose();
+  });
+
+  it('keeps the trainer, and says why, when its Stop does not land', async () => {
+    const rig = await riding({ refuseStop: true });
+    await rig.controller.setTargetPower(watts(210));
+
+    await rig.controller.unpair(TRAINER);
+    await flushMicrotasks(20);
+
+    const snapshot = rig.controller.getSnapshot();
+    expect(snapshot.trainer.paired).toBe(true);
+    expect(snapshot.sensors.map((sensor) => sensor.id)).toContain(TRAINER);
+    expect(snapshot.pairingError).toBe(
+      'KICKR 1F2A was not forgotten: it did not confirm that it let go, so it may still be holding resistance. Try Forget again.',
+    );
+    rig.controller.dispose();
+  });
+
+  it('writes nothing when this app never held the trainer', async () => {
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    const before = rig.written.length;
+
+    await rig.controller.unpair(TRAINER);
+
+    expect(rig.written.slice(before)).toStrictEqual([]);
+    expect(rig.controller.getSnapshot().trainer.paired).toBe(false);
+    rig.controller.dispose();
+  });
+});
+
+describe('a pairing that fails part-way — #659’s review', () => {
+  it('lets the transport forget the device, so it holds no record of it', async () => {
+    const { transport } = createSimulator({
+      devices: [hrsStrap({ id: 'strap', name: 'HRM 04B1' })],
+    });
+    let refuseConnect = true;
+    const flaky: SensorTransport = {
+      ...transport,
+      connect: (id) =>
+        refuseConnect
+          ? Promise.reject(new Error('the link would not come up'))
+          : transport.connect(id),
+    };
+    const controller = createRideController({
+      transport: flaky,
+      store: harnessStore(),
+      athleteId: ATHLETE_A,
+      newSessionId: () => recordingSessionId('attach-failed'),
+      now: () => unixSeconds(1),
+    });
+
+    await controller.pair('heart-rate');
+
+    expect(controller.getSnapshot().pairingError).toBe('the link would not come up');
+    let refused: unknown;
+    try {
+      transport.connectionState(STRAP);
+    } catch (error) {
+      refused = error;
+    }
+    expect(isSensorError(refused, 'device-not-found')).toBe(true);
+    // And the chooser brings it back.
+    refuseConnect = false;
+    await controller.pair('heart-rate');
+    expect(controller.getSnapshot().sensors.map((sensor) => sensor.id)).toEqual([STRAP]);
+    controller.dispose();
+  });
+});
+
+describe('a browser that refuses to forget — #659’s review', () => {
+  it('says the browser still lists the device, rather than only "Not paired"', async () => {
+    const fake = createFakeBluetooth({
+      devices: [
+        {
+          id: 'strap',
+          name: 'HRM 04B1',
+          services: [{ uuid: HEART_RATE_SERVICE, characteristics: [HEART_RATE_MEASUREMENT] }],
+          forgetRejects: true,
+        },
+      ],
+    });
+    const transport = createWebBluetoothTransport({
+      profiles: [heartRateProfile],
+      bluetooth: fake.bluetooth,
+      hasUserActivation: () => true,
+    });
+    const controller = createRideController({
+      transport,
+      store: harnessStore(),
+      athleteId: ATHLETE_A,
+      newSessionId: () => recordingSessionId('forget-refused'),
+      now: () => unixSeconds(1),
+    });
+    await controller.pair('heart-rate');
+    expect(controller.getSnapshot().sensors).toHaveLength(1);
+
+    await controller.unpair(STRAP);
+
+    expect(fake.bench.device('strap').forgets).toBe(1);
+    expect(controller.getSnapshot().sensors).toHaveLength(0);
+    expect(controller.getSnapshot().pairingError).toBe(
+      "HRM 04B1 is forgotten here, but your browser still lists it. To remove it there too, remove it in this site's settings.",
+    );
+    controller.dispose();
   });
 });
 

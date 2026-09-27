@@ -24,9 +24,12 @@
  *
  * The owner's ruling 3 on #654: the pairing list and its buttons come first,
  * and the paragraphs on what Bluetooth here cannot do go beneath them in a
- * native `<details>`. One sentence stays visible outside it — **one user
- * gesture per device** — because it is what explains why there are four
- * buttons rather than one (CLAUDE.md §8).
+ * native `<details>`. Three things stay visible outside it, one line each,
+ * because ADR 0003 D-7 rule 5 says the working path's constraints are not to
+ * be hidden: **one user gesture per device** — which is also what explains why
+ * there are four buttons rather than one (CLAUDE.md §8) — and, where the
+ * platform has them, **no silent reconnect** and **no background recording**
+ * ({@link PairingPanelProps.limits}). The longer prose stays inside.
  *
  * ⚠️ **No control goes inside that `<details>`.** Every control a rider needs
  * to pair is above it, which is the ruling. `a11y/audit.ts`
@@ -41,7 +44,9 @@
  * WCAG 2.2 SC 1.4.1. Every row says what it is in text — *Connected*, *Not
  * paired* — and nothing here paints a state with a colour at all, so the dark
  * theme (#654 P1-f) has nothing of this file's to re-check.
- * `SensorPairing.test.tsx` fails if a row's state is missing from its text.
+ * `views/DevicesView.test.tsx` fails if a row's state is missing from its
+ * text — *"names … in the row's own text"* and *"gives every state different
+ * words"*.
  */
 
 import type { JSX, ReactNode } from 'react';
@@ -101,6 +106,13 @@ export interface PairingPanelProps {
   /** The disclosure's label — "this browser" or "this phone". */
   readonly summary: string;
   /**
+   * The working path's constraints beyond the one gesture, one short sentence
+   * each, rendered VISIBLY beside it — ADR 0003 D-7 rule 5. Per platform,
+   * because they differ: a browser has no silent reconnect and no background
+   * recording, and the shell's own list is `ShellSupportNotice`'s.
+   */
+  readonly limits: readonly string[];
+  /**
    * What goes inside the disclosure ahead of the connection count. ⚠️ Must
    * render nothing focusable — see this file's header.
    */
@@ -108,7 +120,12 @@ export interface PairingPanelProps {
 }
 
 /** The Devices screen's pairing block. */
-export function PairingPanel({ controller, summary, children }: PairingPanelProps): JSX.Element {
+export function PairingPanel({
+  controller,
+  summary,
+  limits,
+  children,
+}: PairingPanelProps): JSX.Element {
   const snapshot = useRideSnapshot(controller);
   return (
     <>
@@ -131,6 +148,9 @@ export function PairingPanel({ controller, summary, children }: PairingPanelProp
         Bluetooth needs one user gesture per device: each one is its own button and its own prompt,
         and there is no way to pair them all at once.
       </p>
+      {limits.map((limit) => (
+        <p key={limit}>{limit}</p>
+      ))}
       <details className="oyl-details">
         <summary>{summary}</summary>
         {children}
@@ -141,7 +161,8 @@ export function PairingPanel({ controller, summary, children }: PairingPanelProp
         </p>
         <p>
           Forget drops the connection and lets go of the device, so it has to be chosen again to
-          come back. A ride that is recording carries on without it.
+          come back. A ride that is recording carries on without it. Forgetting the trainer lets it
+          go first, as End ERG does, and ends a workout that is running.
         </p>
       </details>
     </>

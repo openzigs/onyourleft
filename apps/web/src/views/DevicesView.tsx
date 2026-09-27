@@ -92,6 +92,25 @@ export function DevicesView({ capabilities, shell, controller }: DevicesViewProp
 }
 
 /** Said where the platform can pair and this build was given no controller. */
+/**
+ * What stays visible beside *one user gesture per device* in a browser — ADR
+ * 0003 D-7 rule 5 (#659's review): the constraints of the working path are
+ * not to be hidden, and a closed `<details>` is one press from hidden.
+ */
+const BROWSER_LIMITS: readonly string[] = [
+  'There is no silent reconnect: after a reload, each device is chosen again.',
+  'Recording does not continue in the background: keep this tab open and in front while you ride.',
+];
+
+/**
+ * The shell's equivalent. No background sentence: the Android shell keeps a
+ * ride alive with its foreground service (#524), so saying it cannot would be
+ * false there.
+ */
+const PHONE_LIMITS: readonly string[] = [
+  'There is no silent reconnect: after the app is closed, each device is chosen again.',
+];
+
 function NoController(): JSX.Element {
   return (
     <StatusMessage tone="warning" label="Not available">
@@ -115,7 +134,11 @@ function BrowserDevices({
     return (
       <>
         <h2>Your trainer and sensors</h2>
-        <PairingPanel controller={controller} summary="What this browser can and cannot do">
+        <PairingPanel
+          controller={controller}
+          summary="What this browser can and cannot do"
+          limits={BROWSER_LIMITS}
+        >
           {notice}
         </PairingPanel>
       </>
@@ -178,7 +201,11 @@ function ShellDevices({
     return (
       <>
         <h2>Your trainer and sensors</h2>
-        <PairingPanel controller={controller} summary="What this phone can and cannot do">
+        <PairingPanel
+          controller={controller}
+          summary="What this phone can and cannot do"
+          limits={PHONE_LIMITS}
+        >
           {notice}
         </PairingPanel>
       </>

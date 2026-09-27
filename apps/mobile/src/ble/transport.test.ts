@@ -459,6 +459,22 @@ describe('connecting', () => {
   });
 });
 
+describe('choosing a device it already holds (#659’s review)', () => {
+  it('keeps the live link, rather than putting a disconnected one over it', async () => {
+    const { transport, device } = await connected();
+    const heard: string[] = [];
+    transport.observeConnectionState(device.identity.id, (state) => heard.push(state));
+
+    const again = await transport.discover({ capabilities: [] });
+
+    expect(again.identity.id).toBe(device.identity.id);
+    expect(transport.connectionState(device.identity.id)).toBe('connected');
+    // And the observer registered on the live session still hears it go.
+    await transport.disconnect(device.identity.id);
+    expect(heard).toContain('disconnected');
+  });
+});
+
 describe('forgetting a device (#659)', () => {
   it('drops the link through the plugin and stops issuing the id', async () => {
     const { plugin, transport, device } = await connected();
@@ -499,6 +515,53 @@ describe('forgetting a device (#659)', () => {
     await transport.forget(device.identity.id);
     expect(plugin.calls.length).toBe(before);
     expect(() => transport.connectionState(device.identity.id)).toThrow();
+  });
+
+  it('gives the connection budget back, where a disconnect held it for the session', async () => {
+    // #659's review, and the rider-visible half of the defect: the budget is
+    // counted over the transport's RECORDS, so a device that was only
+    // disconnected went on counting, and the fourth pairing of the session was
+    // refused. Each chooser pick here is a different peripheral, as five real
+    // sensors picked in turn would be.
+    const cycle = async (letGo: 'disconnect' | 'forget'): Promise<string[]> => {
+      const base = scriptedPort({});
+      let picked = 0;
+      const plugin: typeof base = {
+        ...base,
+        requestDevice: async (request) => {
+          const device = await base.requestDevice(request);
+          picked += 1;
+          return { ...device, deviceId: `AA:BB:CC:DD:EE:0${String(picked)}` };
+        },
+      };
+      const transport = createCapacitorTransport({
+        plugin,
+        profiles: [compositeProfile],
+        now: () => AT,
+      });
+      const outcomes: string[] = [];
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const device = await transport.discover({ capabilities: [] });
+        try {
+          await transport.connect(device.identity.id);
+          outcomes.push('ok');
+        } catch (error) {
+          outcomes.push((error as { code?: string }).code ?? String(error));
+        }
+        await transport[letGo](device.identity.id);
+      }
+      return outcomes;
+    };
+
+    // The control: what `unpair` did before #659 — refused from the fourth on.
+    expect(await cycle('disconnect')).toEqual([
+      'ok',
+      'ok',
+      'ok',
+      'connection-budget-exceeded',
+      'connection-budget-exceeded',
+    ]);
+    expect(await cycle('forget')).toEqual(['ok', 'ok', 'ok', 'ok', 'ok']);
   });
 
   it('can be chosen again, and connects', async () => {
