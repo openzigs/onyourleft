@@ -1451,6 +1451,8 @@ interface RowBox {
   readonly height: number;
   readonly width: number;
   readonly minHeight: string;
+  /** The checkbox or radio inside or beside the row, as laid out. */
+  readonly control: { readonly width: number; readonly height: number };
 }
 
 async function rowBoxes(page: Page, stripped: boolean): Promise<readonly RowBox[]> {
@@ -1460,7 +1462,12 @@ async function rowBoxes(page: Page, stripped: boolean): Promise<readonly RowBox[
         const before = row.style.cssText;
         if (strip) row.style.minHeight = '0px';
         const box = row.getBoundingClientRect();
+        const control =
+          row.querySelector('input') ??
+          (row.nextElementSibling instanceof HTMLInputElement ? row.nextElementSibling : null);
+        const controlBox = control?.getBoundingClientRect();
         const measured = {
+          control: { width: controlBox?.width ?? 0, height: controlBox?.height ?? 0 },
           markup: row.dataset['oylNativeRow'] ?? '',
           height: box.height,
           width: box.width,
@@ -1493,6 +1500,41 @@ for (const viewport of VIEWPORTS) {
           row.width,
           `a ${row.markup} row is ${row.width.toFixed(1)}px wide`,
         ).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+        // A flex row squeezes its box when the sentence beside it wraps, which
+        // is how #667 first shipped Settings' switch at 22.6 px on CI's fonts.
+        // A squeezed box is narrower than it is tall.
+        expect(row.control.height, `the box in a ${row.markup} row`).toBeGreaterThan(0);
+        expect(
+          row.control.width,
+          `the box in a ${row.markup} row is ${row.control.width.toFixed(1)}×` +
+            `${row.control.height.toFixed(1)}px — squeezed by its row`,
+        ).toBe(row.control.height);
+      }
+    });
+
+    test('a real Settings row keeps its box square and its size when the sentence wraps', async ({
+      page,
+    }) => {
+      // Settings' announcement switches are the rows with a box sized by the
+      // stylesheet (24 px), which is the box a flex row can squeeze — #667's
+      // first CI run found one at 22.6 px through §"#397" below. Read on the
+      // real route, not a specimen, at every viewport including 320 px.
+      await page.goto('/shell.html#/settings');
+      await page.waitForSelector('html[data-oyl-shell-ready]');
+      const boxes = await page.evaluate(() =>
+        [...document.querySelectorAll('.oyl-announce label > input[type="checkbox"]')].map(
+          (input) => {
+            const box = input.getBoundingClientRect();
+            const row = input.parentElement?.getBoundingClientRect();
+            return { width: box.width, height: box.height, row: row?.height ?? 0 };
+          },
+        ),
+      );
+      expect(boxes.length, 'no announcement switch on Settings to measure').toBeGreaterThan(0);
+      for (const box of boxes) {
+        expect(box.row).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+        expect(box.width, 'a switch squeezed by its row').toBe(box.height);
+        expect(box.height).toBeGreaterThanOrEqual(24);
       }
     });
 

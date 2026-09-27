@@ -245,6 +245,9 @@ function LinkSpecimens(): JSX.Element {
  * red build rather than an empty loop.
  *
  * The options are chosen for the typeahead case: exactly one starts with "f".
+ * And the one checkbox label that is NOT copied is long on purpose: it wraps
+ * at a phone's width, which is when a flex row squeezes its box (#667's CI run
+ * found Settings' switch at 22.6 px that way).
  */
 const CONTROL_SPECIMENS = 'specimens';
 
@@ -289,8 +292,8 @@ function NativeControls(): JSX.Element {
       </p>
       <p>
         <label data-oyl-native-row="wrapping">
-          <input data-oyl-native-control="checkbox" type="checkbox" defaultChecked /> Ride against a
-          pacer
+          <input data-oyl-native-control="checkbox" type="checkbox" defaultChecked /> Race your own
+          best attempt, and ride against a pacer at the intensity you set below
         </label>
       </p>
       <fieldset className="oyl-fieldset">

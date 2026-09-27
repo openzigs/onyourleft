@@ -1270,6 +1270,17 @@ label:has(+ input[type='radio']) {
 }
 
 /*
+ * ⚠️ The box keeps its size when the label wraps. A flex item shrinks by
+ * default, and a label whose sentence wraps on a phone squeezed Settings' 24 px
+ * announcement switch to 22.6 px on the CI runner's fonts — found by
+ * `shell.browser.spec.ts` §"#397" on #667's own pull request.
+ */
+label > input[type='checkbox'],
+label > input[type='radio'] {
+  flex-shrink: 0;
+}
+
+/*
  * The file input's button, drawn as `.oyl-button--secondary` — #667. Until then
  * it was the platform's own grey button butted against its label ("GPX
  * fileChoose File"). The same tokens as the secondary button, and the same
