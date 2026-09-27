@@ -3093,14 +3093,19 @@ measured.
 Spike 0015's, with its corrections. `$ADB` as Part Z; the host commands run from the repository
 root. `RUN` names the run, for example `616-baseline-1`.
 
+⚠️ **If `adb devices` lists the tablet twice** — over USB and over Wi-Fi, which it does when
+`adb tcpip` has been used — every command fails with `more than one device/emulator`. Name one:
+`ADB="/path/to/adb -s <serial>"`, with `<serial>` the first column of `adb devices`. Do not write
+the serial or the address into a result row.
+
 | Step | What to do |
 |---|---|
 | AH1 | **Landscape, on charge, full brightness**, and the device awake with `"$ADB" shell svc power stayon true` |
 | AH2 | **Stop every other app**: close recent apps, and `"$ADB" shell am force-stop` any that `top` shows busy. The WebView renderer's CPU is read from `top` and cannot tell whose renderer it is |
-| AH3 | **Cool to ≤ 26 °C skin**: app stopped, screen OFF (on charge with the screen on, the skin settles near 26.5 °C), checking `VIRTUAL-SKIN` under `Current temperatures from HAL` every 30 s. Record how long it took |
-| AH4 | Record the skin **before** the app starts, start it, and open `realistic.html?world=realistic&panel=0&ladder=0&seconds=30&soak=21` — plus the run's `&layers=…` when a layer is off. `soak=21` because the page publishes minute N's line during minute N + 1 |
+| AH3 | **Start every run at 25–26 °C skin**: app stopped, screen OFF (on charge with the screen on, the skin settles near 26.5 °C), checking `VIRTUAL-SKIN` under `Current temperatures from HAL` every 30 s. Record how long it took. ⚠️ **A band, not a ceiling, since the #616 baselines**: this step said "≤ 26 °C", and the two baselines started at 20.9 °C (a tablet idle for hours) and 25.8 °C. Every other column agreed; skin at minute 20 differed by 1.6 °C because it follows the start. A tablet cooler than 25 °C is warmed first — screen on, app stopped, on charge — until it reads 25–26 °C |
+| AH4 | Record the skin **before** the app starts, **enlarge the log buffer** (`logcat -G 16M`, then `logcat -c`), start the app, and open `realistic.html?world=realistic&panel=0&ladder=0&seconds=30&soak=21` — plus the run's `&layers=…` when a layer is off. `soak=21` because the page publishes minute N's line during minute N + 1. ⚠️ The default buffer rolled over during the #616 baselines: one run kept minutes 1–19, the other 3–19, and neither kept the 30-second `OYL-REALISTIC` line |
 | AH5 | After 20 s, start the sampler for **1 200 s**. It takes `dumpsys meminfo` itself at 600 s (minute 10) |
-| AH6 | When it writes `done`, pull it, collect the page's lines, and summarise |
+| AH6 | When it writes `done`, **wait 60 s more**, then pull it, collect the page's lines, and summarise. In baseline 1 the page published minute 1 at 07:18:11 and minute 19 at 07:36:11, and the sampler wrote `done` just before 07:37:03, so minute 20 (due about 07:37:11) was never collected. Without the wait, `oyl.txt` stops at minute 19 |
 | AH7 | **Cool again (AH3) before the next run.** Two runs of the same configuration are two cool-downs |
 
 ```bash
@@ -3111,6 +3116,7 @@ OUT=runs/$RUN && mkdir -p "$OUT"
 "$ADB" shell dumpsys thermalservice > "$OUT/before.txt"
 # AH4: start the app and open the page.
 "$ADB" shell input keyevent KEYCODE_WAKEUP && "$ADB" shell wm dismiss-keyguard
+"$ADB" logcat -G 16M   # the default buffer loses the page's early lines over twenty minutes
 "$ADB" logcat -c
 "$ADB" shell monkey -p dev.openzigs.onyourleft -c android.intent.category.LAUNCHER 1
 PID=$("$ADB" shell pidof dev.openzigs.onyourleft)
@@ -3124,6 +3130,7 @@ sleep 20
 "$ADB" shell "nohup sh /data/local/tmp/realistic-sampler.sh 1200 'VRI-dev\.openzigs\.onyourleft/' /data/local/tmp/oyl/$RUN $PID > /dev/null 2>&1 &"
 # AH6: after twenty minutes and a little.
 until "$ADB" shell test -f "/data/local/tmp/oyl/$RUN/done"; do sleep 10; done
+sleep 60   # minute 20's page line is published a minute after the sampler stops
 "$ADB" pull "/data/local/tmp/oyl/$RUN/." "$OUT/"
 "$ADB" logcat -d | grep 'OYL-REALISTIC' > "$OUT/oyl.txt"
 node apps/mobile/tools/realistic-summary.mjs "$OUT"
@@ -3134,6 +3141,21 @@ node apps/mobile/tools/realistic-summary.mjs "$OUT"
 nothing: check `"$ADB" shell dumpsys SurfaceFlinger --list | grep onyourleft` and fix the pattern.
 ⚠️ The page's lines reach `logcat` under `Capacitor/Console`, not `chromium` (Part Z's correction):
 grep the whole log.
+
+**#506's AE1 and AE2 in the same session.** Both need the build this Part installs (the owner's page
+staged), which is why Part AE could not take them. Take them **after** the last AH run, so their load
+does not disturb a cool-down, and before the tablet is restored:
+
+- **AE1 can be taken here.** Hold the ride beside the first farmstead with
+  `location.href = '/harness/realistic.html?world=realistic&panel=0&ladder=0&at=1045'` (AA2's hold),
+  wait 30 s, and take Z6's `dumpsys` block. Record draw calls, triangles (the page's `OYL-REALISTIC`
+  line) and GPU p50 / p90 / p99 against AA3's 35 calls and 5 / 8 / 12 ms.
+- ⚠️ **AE2 cannot be taken on this page.** Its route has no village. `structuresAt` over the whole
+  route, run on `f91a5fb`, finds buildings at only two places: a house, a barn and a shed at
+  1 050–1 100 m, and a shed, a house and a barn at 3 700–3 800 m. Both are farmsteads, with no church
+  and no shops. AE2 needs a route with a village in the product, ridden with the realistic world
+  chosen in Settings, or a harness route that has one. That is a change to the page, not something
+  a session can do.
 
 ### What each column is
 
