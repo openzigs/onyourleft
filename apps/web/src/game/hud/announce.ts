@@ -28,6 +28,7 @@
  * | 4 | the next workout block, ahead of it | event (#398) | safety | no |
  * | 5 | a climb or a descent ahead | event (#399) | attested | no |
  * | 5a | the side camera's link lost | event (#551) | ADR 0033 D-5 | **yes** — #551 |
+ * | 5b | the ride may stop if the screen goes off | event (#647) | #524 | no |
  * | 6 | power off an acknowledged target | ≥ 10 % for ≥ 5 s | attested | no |
  * | 7 | distance to go | a distance tick | attested | no |
  * | 8 | power | a time cadence | attested | no |
@@ -48,6 +49,7 @@
  * | `interval-ahead` | `ride/RideAnnouncer.tsx` | `ride/lookahead.ts` |
  * | `climb-ahead` | `GameView` | `hud/climb-ahead.ts` |
  * | `side-camera-lost` | `GameView` and `ride/RideAnnouncer.tsx` | `ride/side-camera.ts` §`sideCameraLostEvent` |
+ * | `screen-off-risk` | `GameView` and `ride/RideAnnouncer.tsx` | `RideSnapshot.keepAliveFailed` (#647) |
  * | readings | `GameView` | `fields.ts` §`hudReadings` |
  *
  * ⚠️ **Rank 1 is broader than its name**, and the name was kept rather than
@@ -83,6 +85,17 @@
  * (ADR 0033 D-5) — and a routine power sentence holding it up would be
  * spending that clock. It is numbered 5a rather than renumbering 6 to 8,
  * because those numbers are quoted in #395 and in the pull requests since.
+ *
+ * ⚠️ **Rank 5b is #647's**: the platform refused to keep the ride alive, so
+ * it may stop if the screen goes off. BELOW the side camera, because that has
+ * a 30-second clock on it and this has none — the ride is not lost until the
+ * screen goes off, and the rider can see the notice before that. Above every
+ * reading, because it is a fact about the whole recording. Said ONCE, when it
+ * appears (and once at the start of a game ride it stands over, the road
+ * notice's rule), never per window while it persists. ⚠️ **Not in
+ * {@link ALWAYS_SPOKEN}**: #647 asks for it "when announcements are on", and
+ * nothing about it is the machine under the rider. A rider with announcements
+ * off reads it on both screens, where it is never put away.
  *
  * ## ⚠️ Four kinds are spoken with announcements OFF — {@link ALWAYS_SPOKEN}
  *
@@ -141,7 +154,8 @@ export type AnnouncementEvent =
   | { readonly kind: 'interval-now'; readonly text: string }
   | { readonly kind: 'interval-ahead'; readonly text: string }
   | { readonly kind: 'climb-ahead'; readonly text: string }
-  | { readonly kind: 'side-camera-lost'; readonly text: string };
+  | { readonly kind: 'side-camera-lost'; readonly text: string }
+  | { readonly kind: 'screen-off-risk'; readonly text: string };
 
 /** Every kind of sentence, events and readings together. */
 export type AnnouncementKind =
@@ -158,6 +172,7 @@ export const PRIORITY: readonly AnnouncementKind[] = [
   'interval-ahead',
   'climb-ahead',
   'side-camera-lost',
+  'screen-off-risk',
   'power-off-target',
   'distance-tick',
   'power',

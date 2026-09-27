@@ -58,6 +58,8 @@ import type { AnalysisPort } from '../analysis/store-port';
 import type { RecoverableRide } from '../recording/recovery';
 import {
   canStartNewRide,
+  KEEP_SCREEN_ON_LABEL,
+  RIDE_MAY_STOP_WITH_SCREEN_OFF,
   type PairingRole,
   type RideController,
   type RideSnapshot,
@@ -245,6 +247,8 @@ function LiveRide({
           thresholdPower={thresholdPower}
           // #551: the ride's one region says the side camera's link going.
           sideCamera={sideCamera.state}
+          // #647: …and, once, that the ride may stop if the screen goes off.
+          keepAliveFailed={snapshot.keepAliveFailed}
           onStart={(record) => {
             // ⚠️ Guarded rather than defaulted. The panel does not render a Start
             // control without a threshold, so this is unreachable through the UI
@@ -533,6 +537,18 @@ function RideControls({
           Stop
         </Button>
       )}
+      {snapshot.keepAliveFailed ? (
+        // #647: the platform would not keep this ride alive, so it may be
+        // stopped with the screen off. AFTER Pause / Stop rather than before
+        // them — #436's review measured what a line above those costs on a
+        // tablet — and never put away: it is a safety sentence (the owner's
+        // ruling on #654's re-review), so it is the whole message and there
+        // is no disclosure. Not `live`: the ride's one region says it once
+        // (`RideAnnouncer.tsx`). Gone the moment a later ask succeeds.
+        <StatusMessage tone="warning" label={KEEP_SCREEN_ON_LABEL}>
+          {RIDE_MAY_STOP_WITH_SCREEN_OFF}
+        </StatusMessage>
+      ) : null}
     </>
   );
 }

@@ -2556,6 +2556,16 @@ p > label + input[type='file'] {
  * holds every upright viewport to 50 px (`EASED_RIDER_CLEARANCE_PIXELS`), with
  * the whole sentence put back at 360×752 as the control that must fail it.
  * The rest of the sentence is spoken, and shown on the Ride screen.
+ *
+ * ⚠️ **#647's "Keep the screen on" notice is the third that is never put
+ * away** — the ride being recorded may stop with the screen off, and that is a
+ * safety sentence (the owner's ruling on #654's re-review). So on a phone the
+ * elevation strip and the plan view are not shown for as long as the platform
+ * refuses the recording service; it stops being true the moment a later ask
+ * succeeds (`ride/controller.ts` §`askAgainIfRefused`). Beside the road notice
+ * the pair ran over an upright rider (−14 px at 360×752), so `GameView`
+ * §`noticeOpen` starts the road notice put away while this one stands.
+ * `ride.browser.spec.ts` §"#647" measures both at every overlay viewport.
  */
 @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem),
   (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {

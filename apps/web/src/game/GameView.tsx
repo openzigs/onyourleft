@@ -43,6 +43,11 @@ import {
   sideCameraStoppable,
 } from '../ride/side-camera';
 import { useSideCamera, type SideCameraOnRideState } from '../ride/useSideCamera';
+import {
+  KEEP_SCREEN_ON_LABEL,
+  RIDE_MAY_STOP_SPOKEN,
+  RIDE_MAY_STOP_WITH_SCREEN_OFF,
+} from '../ride/controller';
 import { BROWSER_THERMAL, type ThermalPort } from './thermal-port';
 import { everyInterval, forecastForFrame, watchThermalHeadroom } from './thermal';
 import { StatusMessage } from '../design/StatusMessage';
@@ -536,6 +541,15 @@ export function GameView(props: GameViewProps): JSX.Element {
    */
   const easedRef = useRef<string | undefined>(undefined);
   /**
+   * Whether the recording may stop with the screen off, as the loop last saw
+   * it — #647, `GameTrainerPort.recordingMayStop`. Cleared when a ride starts,
+   * so a refusal already standing is said ONCE as the ride begins, on the
+   * frame after the road notice's (the eased sentence's reason), and then not
+   * again while it stands: the road notice's rule for a condition the ride
+   * starts under, which the rider may not have heard on the Ride screen.
+   */
+  const mayStopRef = useRef(false);
+  /**
    * The side camera — #551. The hook is what re-renders the HUD when the
    * phone's state changes, including while the ride is paused and the loop is
    * not running; the ref is what the loop reads, so `tick` does not re-run
@@ -886,6 +900,7 @@ export function GameView(props: GameViewProps): JSX.Element {
         notice === undefined ? undefined : `The road is not reaching your trainer: ${notice}`;
       gradientFaultRef.current = undefined;
       easedRef.current = undefined;
+      mayStopRef.current = false;
       gradientRef.current =
         found.control === undefined
           ? undefined
@@ -1165,6 +1180,22 @@ export function GameView(props: GameViewProps): JSX.Element {
           announcerRef.current = withdrawPending(announcerRef.current, isEasedAnnouncement);
         }
       }
+      // #647: the ride may stop if the screen goes off — said when it appears,
+      // not per window while it stands, and taken back if the service comes up
+      // while the sentence waits. Not on the road notice's frame, for the
+      // eased sentence's reason above.
+      const mayStop = trainerPortRef.current?.recordingMayStop() ?? false;
+      if (!noticeThisFrame && mayStop !== mayStopRef.current) {
+        mayStopRef.current = mayStop;
+        if (mayStop) {
+          events.push({ kind: 'screen-off-risk', text: RIDE_MAY_STOP_SPOKEN });
+        } else {
+          announcerRef.current = withdrawPending(
+            announcerRef.current,
+            (event) => event.kind === 'screen-off-risk',
+          );
+        }
+      }
       if (slope.event !== undefined) events.push(slope.event);
       // #551: the side camera's link going, once, when it goes.
       //
@@ -1436,6 +1467,9 @@ export function GameView(props: GameViewProps): JSX.Element {
   // what schedules this render, so it is as fresh as the frame.
   const rescue = props.trainer?.workoutRescue();
   const eased = easedText(rescue);
+  // #647: read during render, like `rescue` — a later successful ask for the
+  // recording service clears it mid-ride.
+  const mayStop = props.trainer?.recordingMayStop() ?? false;
   // ⚠️ **ONE notice cell on a phone, so the Eased notice takes it from the
   // road notice while a rescue is in force** — PR #599's review, finding B1.
   // A running workout ALWAYS has a road notice, and on a phone both sentences
@@ -1455,9 +1489,17 @@ export function GameView(props: GameViewProps): JSX.Element {
   // #437: open for the first STANDING_NOTICE_SECONDS of ride, then out of the
   // way unless the rider asks for it — on the RIDE's clock, so a paused ride
   // does not put away a notice nobody has had time to read.
+  //
+  // ⚠️ #647: **and not at all on its own while the ride may stop with the
+  // screen off.** That notice is never put away, and on an upright phone the
+  // two together ran over the rider — 2 px at 360×800, 14 px at 360×752 in the
+  // pinned Chromium (`ride.browser.spec.ts` §"#647"). So the road notice starts
+  // put away beside it, its *Trainer notice* control still on the HUD, and
+  // opens only when the rider asks: it was said at the start of the ride, and
+  // it is about the hills rather than about the ride being lost.
   const noticeOpen =
     noticeChoice === 'open' ||
-    (noticeChoice === 'auto' && (state?.elapsed ?? 0) < STANDING_NOTICE_SECONDS);
+    (noticeChoice === 'auto' && !mayStop && (state?.elapsed ?? 0) < STANDING_NOTICE_SECONDS);
   return (
     // ⚠️ **`oyl-game--riding` is the stage — #423.** `theme.css` makes it fill
     // the viewport and lays the HUD over the world. It is a modifier rather
@@ -1605,6 +1647,24 @@ export function GameView(props: GameViewProps): JSX.Element {
           sideCameraLostNotice(sideCamera.state) ? (
             <StatusMessage key="side-camera" tone="warning" label={SIDE_CAMERA_LABEL}>
               {SIDE_CAMERA_ON_RIDE_TEXT.lost}
+            </StatusMessage>
+          ) : undefined,
+          // #647: the ride being recorded may stop if the screen goes off.
+          // After the side camera, in `announce.ts`'s order (`screen-off-risk`
+          // is rank 5b). Not `live`: the HUD's one region says it.
+          //
+          // ⚠️ **A safety sentence, so it is never put away** — no disclosure
+          // and no *Trainer notice* toggle (the owner's ruling on #654's
+          // re-review). On a phone it therefore takes the route panel's cell
+          // for as long as it stands, the trade #551 and #585 made, and for
+          // their reason: it stops being true the moment the service comes up
+          // (`ride/controller.ts` §`askAgainIfRefused`), and a rider who lost
+          // the elevation strip for that has not lost a ride.
+          // `ride.browser.spec.ts` §"#647" measures it at every overlay
+          // viewport, with and without the road notice beside it.
+          mayStop ? (
+            <StatusMessage key="keep-alive" tone="warning" label={KEEP_SCREEN_ON_LABEL}>
+              {RIDE_MAY_STOP_WITH_SCREEN_OFF}
             </StatusMessage>
           ) : undefined,
           // #475, ADR 0026 D-7's "and says so". For STANDING_NOTICE_SECONDS of

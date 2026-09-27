@@ -2628,6 +2628,188 @@ describe('#526 — the ride asks once whether it may show its notification', () 
   });
 });
 
+// --- #647: a refused keep-alive is on the ride's state -----------------------
+
+/**
+ * #647 — `quietly` used to swallow a refused keep-alive with no trace: the
+ * ride recorded (#524's "degraded, not broken"), and nothing told the rider it
+ * might stop with the screen off. These drive the controller with a port that
+ * refuses — the way `RecordingServicePlugin.java` refuses on Android 14+ with
+ * no Bluetooth permission — and read `keepAliveFailed` off the snapshot a
+ * screen reads.
+ */
+describe('#647 — a refused keep-alive is on the ride’s state, and clears', () => {
+  /** A port whose answers are scripted call by call: `true` refuses. */
+  function scripted(refusals: readonly boolean[]): RideKeepAlivePort & {
+    readonly calls: string[];
+  } {
+    const calls: string[] = [];
+    let asked = 0;
+    return {
+      calls,
+      keepRideAlive: () => {
+        calls.push('keep');
+        const refuse = refusals[asked] ?? false;
+        asked += 1;
+        return refuse
+          ? Promise.reject(new Error('The Bluetooth permission is not granted'))
+          : Promise.resolve();
+      },
+      letRideSleep: () => {
+        calls.push('sleep');
+        return Promise.resolve();
+      },
+    };
+  }
+
+  async function settled(): Promise<void> {
+    for (let turn = 0; turn < 10; turn += 1) {
+      await Promise.resolve();
+    }
+  }
+
+  it('is false while the platform keeps the ride alive', async () => {
+    const rig = benchWith({ keepAlive: scripted([false]) });
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(false);
+    await rig.controller.start();
+    await settled();
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(false);
+    rig.controller.dispose();
+  });
+
+  it('is true once the platform refuses, and the ride records anyway', async () => {
+    const rig = benchWith({ keepAlive: scripted([true]) });
+    await rig.controller.start();
+    await settled();
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(true);
+    await rig.controller.pause();
+    await rig.controller.resume();
+    await ride(rig, 3);
+    // A pause is not a transition, and nothing is asked per tick.
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(true);
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    expect(rig.controller.getSnapshot().sampleCount).toBeGreaterThan(0);
+    rig.controller.dispose();
+  });
+
+  it('is true when the port throws before it returns a promise', async () => {
+    const rig = benchWith({
+      keepAlive: {
+        keepRideAlive: () => {
+          throw new Error('RecordingService is not implemented on this platform');
+        },
+        letRideSleep: () => Promise.resolve(),
+      },
+    });
+    await rig.controller.start();
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(true);
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    rig.controller.dispose();
+  });
+
+  it('tells a listener when it changes, so a screen re-renders', async () => {
+    const rig = benchWith({ keepAlive: scripted([true]) });
+    const seen: boolean[] = [];
+    rig.controller.subscribe(() => {
+      seen.push(rig.controller.getSnapshot().keepAliveFailed);
+    });
+    await rig.controller.start();
+    await settled();
+    expect(seen.at(-1)).toBe(true);
+    rig.controller.dispose();
+  });
+
+  it('asks again when a sensor pairs during the ride, and clears when that succeeds', async () => {
+    // A rider who presses Start before pairing anything has not been asked for
+    // the Bluetooth permission yet; pairing is when they are.
+    const port = scripted([true, false]);
+    const rig = benchWith({ keepAlive: port });
+    await rig.controller.start();
+    await settled();
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(true);
+
+    await rig.controller.pair('trainer');
+    await settled();
+    expect(port.calls).toEqual(['keep', 'keep']);
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(false);
+    rig.controller.dispose();
+  });
+
+  it('stays true when the second ask is refused too', async () => {
+    const port = scripted([true, true]);
+    const rig = benchWith({ keepAlive: port });
+    await rig.controller.start();
+    await rig.controller.pair('trainer');
+    await settled();
+    expect(port.calls).toEqual(['keep', 'keep']);
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(true);
+    rig.controller.dispose();
+  });
+
+  it('asks nothing extra when a sensor pairs and nothing was refused, or outside a ride', async () => {
+    const port = scripted([]);
+    const rig = benchWith({ devices: 'trainer+strap', keepAlive: port });
+    await rig.controller.pair('trainer');
+    expect(port.calls).toEqual([]);
+    await rig.controller.start();
+    await rig.controller.pair('heart-rate');
+    await settled();
+    expect(port.calls).toEqual(['keep']);
+    rig.controller.dispose();
+  });
+
+  it('clears when a granted notification re-starts the service — #526', async () => {
+    const port = scripted([true, false]);
+    const rig = benchWith({
+      keepAlive: port,
+      notificationPermission: {
+        notificationPermission: () => Promise.resolve('prompt'),
+        askForNotificationPermission: () => Promise.resolve('granted'),
+      },
+    });
+    await rig.controller.start();
+    await settled();
+    expect(port.calls).toEqual(['keep', 'keep']);
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(false);
+    rig.controller.dispose();
+  });
+
+  it('is false again once the ride stops, and a late refusal does not reach the next ride', async () => {
+    let refuseLate: (reason: Error) => void = () => undefined;
+    const rig = benchWith({
+      keepAlive: {
+        keepRideAlive: () =>
+          new Promise<void>((_resolve, reject) => {
+            refuseLate = reject;
+          }),
+        letRideSleep: () => Promise.resolve(),
+      },
+      rideSave: storeSavePort(),
+    });
+    await rig.controller.start();
+    await ride(rig, 3);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    refuseLate(new Error('Android did not allow the recording service to start'));
+    await settled();
+    expect(rig.controller.getSnapshot().phase).toBe('stopped');
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(false);
+    rig.controller.dispose();
+  });
+
+  it('clears when the refused ride stops', async () => {
+    const rig = benchWith({ keepAlive: scripted([true]), rideSave: storeSavePort() });
+    await rig.controller.start();
+    await settled();
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(true);
+    await ride(rig, 3);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(false);
+    rig.controller.dispose();
+  });
+});
+
 // --- #548: a stopped ride is not a dead end -----------------------------------
 
 /**

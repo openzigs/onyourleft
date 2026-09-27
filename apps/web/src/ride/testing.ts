@@ -97,6 +97,7 @@ export function idleSnapshot(): RideSnapshot {
     recoverable: [],
     connectionsRemaining: 3,
     notificationNotice: undefined,
+    keepAliveFailed: false,
     stopping: false,
   };
 }

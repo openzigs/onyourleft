@@ -273,11 +273,21 @@ const SIDE_PAIRING =
       ? scriptedSidePairing({ phone: 'lost', ended: 'link-lost' })
       : undefined;
 
+/**
+ * `ride.html?keepalive=failed` — #647: the ride being recorded may stop if
+ * the screen goes off, because the platform refused the recording service.
+ * `GameView` reads it from the port on every frame, as it reads the rescue, and
+ * puts its one sentence in the notice cell. Combines with `?trainer=workout`,
+ * whose road notice stands beside it for the first minute of a ride.
+ */
+const MAY_STOP = new URLSearchParams(window.location.search).get('keepalive') === 'failed';
+
 /** A trainer that accepts every gradient, so the trainer line is on the screen. */
 const TRAINER: GameTrainerPort = {
   // #503: the Ride press's request for control — this double changes nothing.
   askForControlOnRide: () => Promise.resolve(),
   workoutRescue: () => RESCUE,
+  recordingMayStop: () => MAY_STOP,
   readTrainer: () =>
     WITH_A_NOTICE
       ? { kind: 'workout', control: undefined }
@@ -520,6 +530,14 @@ async function run(): Promise<void> {
     await until('the Eased notice', () =>
       [...document.querySelectorAll('.oyl-hud__notices')].find((each) =>
         (each.textContent ?? '').includes('Eased'),
+      ),
+    );
+  }
+  // #647: the keep-the-screen-on notice, when this page was asked for one.
+  if (MAY_STOP) {
+    await until('the keep-the-screen-on notice', () =>
+      [...document.querySelectorAll('.oyl-hud__notices')].find((each) =>
+        (each.textContent ?? '').includes('Keep the screen on'),
       ),
     );
   }

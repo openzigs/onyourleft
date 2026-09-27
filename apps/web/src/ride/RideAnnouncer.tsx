@@ -29,6 +29,7 @@
  * | `RideWorkoutSnapshot.nowRiding`, when it changes | `interval-now` | "Now: …" (#394) |
  * | the next block, `lead` seconds before it | `interval-ahead` | #398's sentence |
  * | the side camera's link, when it goes (#551) | `side-camera-lost` | `side-camera.ts` §`SIDE_CAMERA_LOST_SENTENCE` |
+ * | `RideSnapshot.keepAliveFailed`, when it appears (#647) | `screen-off-risk` | `controller.ts` §`RIDE_MAY_STOP_SPOKEN` |
  *
  * **When something APPEARS or CHANGES, never when it is first rendered** —
  * #394's rule, kept: a screen a rider navigates back to, with control already
@@ -75,7 +76,7 @@ import {
   workoutRescueText,
 } from '../workout/rescue-text';
 
-import type { RideWorkoutSnapshot, TrainerSnapshot } from './controller';
+import { RIDE_MAY_STOP_SPOKEN, type RideWorkoutSnapshot, type TrainerSnapshot } from './controller';
 import { upcomingBlock } from './lookahead';
 import { sideCameraLost, sideCameraLostEvent } from './side-camera';
 import { LOSS_REASON, rescueSentence } from './TrainerPanel';
@@ -97,6 +98,17 @@ export interface RideAnnouncerProps {
    * reads the region, which is what pins it.
    */
   readonly sideCamera?: SideControlState | undefined;
+  /**
+   * #647: whether the platform refused to keep the ride alive
+   * (`RideSnapshot.keepAliveFailed`). Said once, when it becomes true — not
+   * on a first render, and not again while it stays true.
+   *
+   * ⚠️ Optional, so a caller that stops passing it is green in
+   * `check:wiring` (§Limits' third entry); `views/RideView.test.tsx` §"#647"
+   * drives a refused keep-alive through the real controller and reads this
+   * region, which is what pins it.
+   */
+  readonly keepAliveFailed?: boolean | undefined;
   /** Where the rider's announcement choice is read from. This device's, by default. */
   readonly storage?: PreferenceStorage | undefined;
   /**
@@ -140,12 +152,14 @@ interface Seen {
   readonly manualEased: string | undefined;
   readonly nowRiding: string | undefined;
   readonly sideCamera: SideControlState | undefined;
+  readonly keepAliveFailed: boolean;
 }
 
 function seenIn(
   trainer: TrainerSnapshot,
   workout: RideWorkoutSnapshot | undefined,
   sideCamera: SideControlState | undefined,
+  keepAliveFailed: boolean,
 ): Seen {
   return {
     lost: trainer.lost,
@@ -157,6 +171,7 @@ function seenIn(
     manualEased: trainer.ergRescue === undefined ? undefined : rescueSentence(trainer.ergRescue),
     nowRiding: workout?.nowRiding,
     sideCamera,
+    keepAliveFailed,
   };
 }
 
@@ -203,6 +218,11 @@ function changes(before: Seen, now: Seen): AnnouncementEvent[] {
   if (side !== undefined) {
     events.push(side);
   }
+  // #647: when the refusal APPEARS. Not while it stands — the notice stays on
+  // the screen for that — and not again until it has cleared and come back.
+  if (now.keepAliveFailed && !before.keepAliveFailed) {
+    events.push({ kind: 'screen-off-risk', text: RIDE_MAY_STOP_SPOKEN });
+  }
   return events;
 }
 
@@ -210,6 +230,7 @@ export function RideAnnouncer({
   trainer,
   workout,
   sideCamera,
+  keepAliveFailed = false,
   storage,
   onEvent,
   clock,
@@ -221,7 +242,7 @@ export function RideAnnouncer({
     readAnnouncementPreference(storage === undefined ? deviceStorage() : storage),
   );
   const announcer = useRef<AnnouncerState>(INITIAL_ANNOUNCER);
-  const seen = useRef<Seen>(seenIn(trainer, workout, sideCamera));
+  const seen = useRef<Seen>(seenIn(trainer, workout, sideCamera, keepAliveFailed));
   /** The boundary last offered, so one change is announced once. */
   const offered = useRef<number | undefined>(undefined);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -274,6 +295,7 @@ export function RideAnnouncer({
     trainer,
     workout,
     sideCamera,
+    keepAliveFailed,
   );
 
   useEffect(() => {
@@ -286,6 +308,7 @@ export function RideAnnouncer({
       manualEased,
       nowRiding,
       sideCamera,
+      keepAliveFailed,
     });
     // Cleared while its sentence was still waiting for the window: take it
     // back, or "Eased" is said after the full target is back (PR #599's
@@ -299,6 +322,14 @@ export function RideAnnouncer({
     ) {
       announcer.current = withdrawPending(announcer.current, isEasedAnnouncement);
     }
+    // #647: the service came up while its sentence waited — it is no longer
+    // true, so it is not said.
+    if (seen.current.keepAliveFailed && !keepAliveFailed) {
+      announcer.current = withdrawPending(
+        announcer.current,
+        (event) => event.kind === 'screen-off-risk',
+      );
+    }
     seen.current = {
       lost,
       releaseFault,
@@ -308,6 +339,7 @@ export function RideAnnouncer({
       manualEased,
       nowRiding,
       sideCamera,
+      keepAliveFailed,
     };
     if (
       preference.enabled &&
@@ -332,6 +364,7 @@ export function RideAnnouncer({
     manualEased,
     nowRiding,
     sideCamera,
+    keepAliveFailed,
     preference,
     lead,
     timeline,
