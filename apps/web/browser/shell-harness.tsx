@@ -230,6 +230,113 @@ function LinkSpecimens(): JSX.Element {
 }
 
 /**
+ * `?controls=specimens` renders the native form controls #667 styles — opt-in
+ * for `CAMERA_LIVE`'s reason, so every pre-existing case loads the page it was
+ * written against.
+ *
+ * ⚠️ **Why specimens.** Handed no ports, the shell's routes render a
+ * `StatusMessage` where their forms would be (see {@link TouchTargets}), so no
+ * route here draws a file input, a radio or a `<select>` with options to open.
+ * The markup is copied from the views that ship it — Routes' file input and its
+ * loop box with the label BESIDE the control, Settings' radios and the trainer
+ * game's boxes with the label WRAPPING it, Settings' "Say your power" select —
+ * and the stylesheet and the layout box are the shipping ones.
+ * `data-oyl-native-control` is what the spec counts, so a missing specimen is a
+ * red build rather than an empty loop.
+ *
+ * The options are chosen for the typeahead case: exactly one starts with "f".
+ * And the one checkbox label that is NOT copied is long on purpose: it wraps
+ * at a phone's width, which is when a flex row squeezes its box (#667's CI run
+ * found Settings' switch at 22.6 px that way).
+ */
+const CONTROL_SPECIMENS = 'specimens';
+
+/**
+ * `&base-select=off` is the select's CONTROL (#667): the same page with every
+ * `@supports (appearance: base-select)` block deleted from the shipping sheet
+ * through the CSSOM, which is the stylesheet an engine without `base-select`
+ * would apply. The spec requires the closed skin only there, and requires the
+ * option-height assertion to FAIL — which is what proves the positive case
+ * measured the styled picker. It publishes how many blocks it removed, and the
+ * spec requires one.
+ */
+const BASE_SELECT_OFF = 'off';
+
+function removeBaseSelect(): number {
+  let removed = 0;
+  for (const sheet of [...document.styleSheets]) {
+    const rules = sheet.cssRules;
+    for (let index = rules.length - 1; index >= 0; index -= 1) {
+      const rule = rules[index];
+      if (rule instanceof CSSSupportsRule && rule.conditionText.includes('base-select')) {
+        sheet.deleteRule(index);
+        removed += 1;
+      }
+    }
+  }
+  return removed;
+}
+
+function NativeControls(): JSX.Element {
+  return (
+    <section data-oyl-native-controls="true" aria-label="Native control specimens">
+      <p>
+        <label htmlFor="specimen-file">GPX file</label>
+        <input data-oyl-native-control="file" id="specimen-file" type="file" />
+      </p>
+      <p>
+        <label data-oyl-native-row="beside" htmlFor="specimen-loop">
+          This route is a loop
+        </label>
+        <input data-oyl-native-control="checkbox" id="specimen-loop" type="checkbox" />
+      </p>
+      <p>
+        <label data-oyl-native-row="wrapping">
+          <input data-oyl-native-control="checkbox" type="checkbox" defaultChecked /> Race your own
+          best attempt, and ride against a pacer at the intensity you set below
+        </label>
+      </p>
+      <fieldset className="oyl-fieldset">
+        <legend>Which units do you ride in?</legend>
+        <p>
+          <label data-oyl-native-row="wrapping">
+            <input
+              data-oyl-native-control="radio"
+              type="radio"
+              name="specimen-units"
+              defaultChecked
+            />{' '}
+            Metric — kilometres and kilograms
+          </label>
+        </p>
+        <p>
+          <label data-oyl-native-row="wrapping">
+            <input data-oyl-native-control="radio" type="radio" name="specimen-units" /> Imperial —
+            miles and pounds
+          </label>
+        </p>
+      </fieldset>
+      <p>
+        <label htmlFor="specimen-select">Say your power</label>{' '}
+        <select data-oyl-native-control="select" id="specimen-select" defaultValue="never">
+          <option value="never">never</option>
+          <option value="15">every 15 seconds</option>
+          <option value="30">every 30 seconds</option>
+          <option value="45">forty-five seconds</option>
+        </select>
+      </p>
+      <p>
+        <label htmlFor="specimen-range">Volume</label>{' '}
+        <input data-oyl-native-control="range" id="specimen-range" type="range" />
+      </p>
+      <p>
+        <progress data-oyl-native-control="progress" max={10} value={4} aria-label="Progress" />
+      </p>
+    </section>
+  );
+}
+
+/**
  * The camera half of this page — #382, and it is **opt-in through the query
  * string**.
  *
@@ -396,6 +503,7 @@ function main(): void {
     throw new Error('shell harness: #shell is missing from shell.html');
   }
 
+  const params = new URLSearchParams(globalThis.location.search);
   const wantsCamera = new URLSearchParams(globalThis.location.search).get('camera') === CAMERA_LIVE;
   const wantsPairing =
     new URLSearchParams(globalThis.location.search).get('pairing') === PAIRING_ON;
@@ -462,6 +570,21 @@ function main(): void {
       </StrictMode>,
     );
   });
+
+  if (params.get('controls') === CONTROL_SPECIMENS) {
+    const controls = document.createElement('div');
+    region.append(controls);
+    flushSync(() => {
+      createRoot(controls).render(
+        <StrictMode>
+          <NativeControls />
+        </StrictMode>,
+      );
+    });
+    if (params.get('base-select') === BASE_SELECT_OFF) {
+      document.documentElement.dataset['oylBaseSelectRemoved'] = String(removeBaseSelect());
+    }
+  }
 
   if (wantsLinkSpecimens) {
     const links = document.createElement('div');

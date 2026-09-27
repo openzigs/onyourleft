@@ -193,9 +193,13 @@ describe('a workout’s stall rescue on the game’s HUD — #585', () => {
 
     rescue = STALLED;
     await pump(1);
-    expect(notices()).toContain('Pedalling has stopped');
-    // The game has no End workout button, so it says where the button is.
-    expect(notices()).toContain('End the workout on the Ride screen to leave it.');
+    // #605: ONE sentence on the HUD — the rescue's own reason — and nothing
+    // after it: no way back, no way out, no disclosure. The region says those
+    // (the next case). @see GameView.tsx §"#605: ONE sentence on the HUD"
+    expect(notices()).toBe(
+      '!Eased: Pedalling has stopped, so the target has been dropped to the trainer’s lowest.',
+    );
+    expect(document.querySelector('.oyl-hud__notices details')).toBeNull();
 
     rescue = SILENT;
     await pump(1);
@@ -215,6 +219,9 @@ describe('a workout’s stall rescue on the game’s HUD — #585', () => {
     rescue = STALLED;
     await pump(1);
     expect(region()).toMatch(/^Eased: Pedalling has stopped/);
+    // #605: the HUD SHOWS the headline alone, so the region is where the rest
+    // is — the game has no End workout button, so it says where the button is.
+    expect(region()).toContain('End the workout on the Ride screen to leave it.');
 
     rescue = SILENT;
     // The window is three seconds of RIDE: six half-second frames and a spare.

@@ -560,9 +560,9 @@ describe('#307 — a chooser on a route is a native select, not a listbox', () =
       const handmade = queryAll(document, '[role="listbox"], [role="combobox"], [role="option"]');
       expect(
         handmade.map((element) => element.outerHTML.slice(0, 120)),
-        'a control with one of these roles is a chooser built out of generic elements. #305 ' +
-          'records why this product uses the platform one, and #307 styles it rather than ' +
-          'replacing it.',
+        'a control with one of these roles is a chooser built out of generic elements. #307 ' +
+          '(PR #311, discussed in #308) records why this product uses the platform one, and ' +
+          'styles it — since #667 with `appearance: base-select` — rather than replacing it.',
       ).toEqual([]);
     });
   }
