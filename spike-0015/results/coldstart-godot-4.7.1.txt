@@ -1,0 +1,10 @@
+probing https://localhost/
+"{\"kind\":\"godot\",\"fcp\":120,\"first\":3719.869873046875}"
+probing https://localhost/
+"{\"kind\":\"godot\",\"fcp\":120,\"first\":3457.130126953125}"
+probing https://localhost/
+"{\"kind\":\"godot\",\"fcp\":64,\"first\":3776.699951171875}"
+probing https://localhost/
+"{\"kind\":\"godot\",\"fcp\":104,\"first\":3762.239990234375}"
+probing https://localhost/
+"{\"kind\":\"godot\",\"fcp\":112,\"first\":3716.7900390625}"

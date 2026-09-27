@@ -1,0 +1,13 @@
+android.widget.FrameLayout '' '' [704,492][1856,1116] 
+android.widget.FrameLayout '' '' [704,492][1856,1116] 
+android.widget.FrameLayout '' '' [704,492][1856,1116] 
+android.widget.ScrollView '' '' [704,492][1856,1116] 
+android.widget.LinearLayout '' '' [704,492][1856,1116] clickable
+android.widget.LinearLayout '' '' [704,492][1856,1116] clickable
+android.widget.LinearLayout '' '' [736,524][1824,836] 
+android.widget.LinearLayout '' '' [784,572][1776,788] 
+android.widget.ImageView '' '' [1248,572][1312,636] 
+android.widget.TextView 'Allow Android Accessibility Suite to sen' '' [784,660][1776,788] 
+android.widget.LinearLayout '' '' [736,836][1824,1084] 
+android.widget.Button 'Allow' '' [784,836][1776,932] clickable
+android.widget.Button 'Don’t allow' '' [784,948][1776,1044] clickable

@@ -1,0 +1,3 @@
+#!/bin/bash
+# adb for the one tablet this spike measured; set ANDROID_SERIAL.
+exec "${ANDROID_HOME}/platform-tools/adb" -s "$ANDROID_SERIAL" "$@"

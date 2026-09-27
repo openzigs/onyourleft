@@ -1,0 +1,38 @@
+{
+ "boulder_01.glb": {
+  "oyl_scan_height": 0.9980704188346863,
+  "oyl_scan_width": 1.8306351900100708
+ },
+ "fir_sapling_medium_a.glb": {
+  "oyl_impostor_frames": 8,
+  "oyl_impostor_scale": 10.762781295776367,
+  "oyl_scan_height": 8.826326370239258,
+  "oyl_scan_width": 5.275873184204102
+ },
+ "fir_sapling_medium_b.glb": {
+  "oyl_impostor_frames": 8,
+  "oyl_impostor_scale": 8.707974128723144,
+  "oyl_scan_height": 7.795253276824951,
+  "oyl_scan_width": 4.268614768981934
+ },
+ "island_tree_02.glb": {
+  "oyl_impostor_frames": 8,
+  "oyl_impostor_scale": 8.583800926208497,
+  "oyl_scan_height": 3.4066057205200195,
+  "oyl_scan_width": 4.207745552062988
+ },
+ "shrub_02_a.glb": {
+  "oyl_scan_height": 1.6889771223068237,
+  "oyl_scan_width": 1.6410069465637207
+ },
+ "shrub_02_c.glb": {
+  "oyl_scan_height": 1.3147666454315186,
+  "oyl_scan_width": 2.285062313079834
+ },
+ "tree_small_02.glb": {
+  "oyl_impostor_frames": 8,
+  "oyl_impostor_scale": 8.756653347015382,
+  "oyl_scan_height": 4.556740760803223,
+  "oyl_scan_width": 4.292477130889893
+ }
+}

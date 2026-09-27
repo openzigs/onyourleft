@@ -1,0 +1,10 @@
+probing https://localhost/
+"{\"kind\":\"three\",\"fcp\":1636,\"first\":1626}"
+probing https://localhost/
+"{\"kind\":\"three\",\"fcp\":1596,\"first\":1577.0999999642372}"
+probing https://localhost/
+"{\"kind\":\"three\",\"fcp\":1900,\"first\":1872.2000000476837}"
+probing https://localhost/
+"{\"kind\":\"three\",\"fcp\":1776,\"first\":1749.3999999761581}"
+probing https://localhost/
+"{\"kind\":\"three\",\"fcp\":1732,\"first\":1712}"
