@@ -205,12 +205,10 @@ export default defineConfig({
   ],
   // ⚠️ **A backstop, not a budget — #651.** @see GATE_BUDGET_MS
   globalTimeout: GATE_BUDGET_MS,
-  // ⚠️ **Every core the runner has — #651.** Playwright's default is half of
-  // them, which on the four-vCPU `ubuntu-latest` runner is two: the pages that
-  // measure a layout left the other two idle for about three minutes of every
-  // run. One worker per core instead. The game spec does not use them — it is
-  // one group (below) — so this is the other specs' speed-up and nothing else.
-  workers: '100%',
+  // ⚠️ **Playwright's default of half the cores, and that is measured — #651.**
+  // The `ubuntu-latest` runner's four vCPUs are two cores' hyperthreads
+  // (`lscpu`, run 36333257690), and a fourth Vitest worker on it added nothing
+  // but contention (`vitest.config.ts` §`sequence`). Two workers is one a core.
   // ⚠️ **Two projects, one browser, one run — #651, and the game spec is
   // LAST.** Playwright queues a project's groups in the order the projects are
   // listed, and the game spec is one group — its shared harness (#456) is a
