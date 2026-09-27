@@ -273,6 +273,65 @@ function baseSelectBlocks(): {
 }
 
 /**
+ * Every CSS named colour (CSS Color 4 §6.1), lower-cased. A value naming one is
+ * a literal colour exactly as `#ff0000` is.
+ */
+const NAMED_COLOURS = new Set(
+  (
+    'aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue ' +
+    'blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk ' +
+    'crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki ' +
+    'darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen ' +
+    'darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue ' +
+    'dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite ' +
+    'gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki ' +
+    'lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan ' +
+    'lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen ' +
+    'lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen ' +
+    'magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen ' +
+    'mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream ' +
+    'mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid ' +
+    'palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum ' +
+    'powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown ' +
+    'seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen ' +
+    'steelblue tan teal thistle tomato turquoise violet wheat white whitesmoke yellow ' +
+    'yellowgreen'
+  ).split(' '),
+);
+
+/**
+ * Every literal colour in the declarations of `css`, as `property: value` —
+ * #667's review. ANY property, not only the ones named like a colour: a
+ * `box-shadow: 0 0 2px #ff0000` is as much a colour #672's dark theme cannot
+ * re-point as a `background` is. What is allowed: a `var(--oyl-…)` token,
+ * `currentColor`, `transparent`, the CSS-wide keywords, and the forced-colours
+ * system colours — none of which is a named colour, so they need no list.
+ */
+function colourLiteralsIn(css: string): string[] {
+  const declarations = css.replaceAll(/\/\*[\s\S]*?\*\//g, '');
+  const found: string[] = [];
+  for (const [, property, value] of declarations.matchAll(/([a-z-]+)\s*:\s*([^;{}]+);/gi)) {
+    const bare = (value ?? '').replaceAll(/var\(--oyl-[a-z0-9-]+\)/g, '');
+    const literal =
+      /#[0-9a-f]{3,8}\b/i.test(bare) ||
+      /\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|color-mix|light-dark)\(/i.test(bare) ||
+      [...bare.matchAll(/(?<![\w-])[a-z][a-z-]*/gi)].some(([word]) =>
+        NAMED_COLOURS.has(word.toLowerCase()),
+      );
+    if (literal) found.push(`${property ?? ''}: ${(value ?? '').trim()}`);
+  }
+  return found;
+}
+
+/** Every rule in `css` whose selector list includes `fragment`, comments stripped. */
+function rulesMentioning(css: string, fragment: string): { selector: string; body: string }[] {
+  const stripped = css.replaceAll(/\/\*[\s\S]*?\*\//g, '');
+  return [...stripped.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .map(([, selector, body]) => ({ selector: (selector ?? '').trim(), body: body ?? '' }))
+    .filter(({ selector }) => selector.includes(fragment));
+}
+
+/**
  * #307's third criterion, and the ⚠️ attached to it: the native controls are
  * styled *"without replacing them"*.
  *
@@ -352,21 +411,14 @@ describe('the native select is styled and still native', () => {
     // #672's dark theme re-points the custom properties. A literal colour here
     // would be the one part of the picker it could not reach.
     const block = baseSelectBlocks()[0]?.text ?? '';
-    const colourDeclarations = [
-      ...block.matchAll(/\n\s*((?:background|border|outline|color|accent)[a-z-]*)\s*:\s*([^;]+);/g),
-    ];
-    expect(colourDeclarations.length, 'no colour declarations found to check').toBeGreaterThan(3);
-    for (const [, property, value] of colourDeclarations) {
-      const residue = (value ?? '')
-        .replaceAll(/var\(--oyl-[a-z0-9-]+\)/g, '')
-        .replaceAll(/\b\d+(?:\.\d+)?(?:px|rem)?\b/g, '')
-        .replaceAll(/\b(?:solid|none)\b/g, '')
-        .trim();
-      expect(residue, `\`${property ?? ''}: ${value ?? ''}\` is not a token`).toBe('');
-      if (property === 'color' || property?.endsWith('-color') === true) {
-        expect(value).toMatch(/^var\(--oyl-color-[a-z-]+\)$/);
-      }
-    }
+    // Every declaration in the block, whatever its property — #667's review
+    // found a literal `box-shadow` colour here passing a check that read only
+    // properties named like a colour.
+    expect(
+      [...block.matchAll(/[a-z-]+\s*:\s*[^;{}]+;/g)].length,
+      'no declarations found to check',
+    ).toBeGreaterThan(3);
+    expect(colourLiteralsIn(block), 'a literal colour inside the styled picker').toEqual([]);
     const picker = [...block.matchAll(/\n {2}::picker\(select\) \{([^}]*)\}/g)]
       .map((match) => match[1] ?? '')
       .join('');
@@ -447,6 +499,96 @@ describe('the other native controls are styled from tokens (#667)', () => {
     expect(
       declarationsOf(bodyOf("p > label + input[type='file']")).get('margin-inline-start'),
     ).toMatch(/^var\(--oyl-space-[a-z]+\)$/);
+  });
+
+  it('paints every rule #667 added with tokens, whatever the property or the state', () => {
+    // #667's review changed the file button's `:hover` fill to `#abcdef` and
+    // every gate stayed green: the picker's check covered the `@supports` block
+    // and nothing else, and #672's dark theme would have missed the literal.
+    // So every rule #667 added is read here, and the file button's rules are
+    // found by selector rather than listed, so a `:focus-visible` or `:active`
+    // state added later is covered without an edit.
+    const fileButton = rulesMentioning(themeCss, '::file-selector-button');
+    expect(
+      fileButton.map(({ selector }) => selector),
+      'the file button rules were not found',
+    ).toEqual(
+      expect.arrayContaining([
+        "input[type='file']::file-selector-button",
+        "input[type='file']::file-selector-button:hover",
+      ]),
+    );
+    const bodies = [
+      ...fileButton.map(({ body }) => body),
+      bodyOf("input[type='checkbox'],\ninput[type='radio'],\ninput[type='range'],\nprogress"),
+      bodyOf(
+        "label:has(> input[type='checkbox']),\nlabel:has(> input[type='radio']),\n" +
+          "label:has(+ input[type='checkbox']),\nlabel:has(+ input[type='radio'])",
+      ),
+      bodyOf("label > input[type='checkbox'],\nlabel > input[type='radio']"),
+      bodyOf(":where(input[type='file'])"),
+      bodyOf("p > label + input[type='file']"),
+      baseSelectBlocks()[0]?.text ?? '',
+    ];
+    for (const body of bodies) {
+      expect(colourLiteralsIn(body), 'a literal colour in a rule #667 added').toEqual([]);
+    }
+  });
+
+  it('can find a literal colour, so the check above is not vacuous', () => {
+    // The fixtures the review's two mutations produced, and the spellings a
+    // literal can take; and the values that must NOT be read as one.
+    for (const literal of [
+      'box-shadow: 0 0 2px #ff0000;',
+      'background: #abcdef;',
+      'outline: 2px solid rgb(0 0 0);',
+      'border-color: oklch(70% 0.1 200);',
+      'color: color-mix(in srgb, var(--oyl-color-ink), white);',
+      'text-decoration-color: Red;',
+      'box-shadow: inset 0 0 0 1px hsl(0 0% 0% / 50%);',
+    ]) {
+      expect(colourLiteralsIn(`a {\n  ${literal}\n}`), literal).toHaveLength(1);
+    }
+    for (const token of [
+      'background: var(--oyl-color-surface);',
+      'border: 2px solid var(--oyl-color-accent);',
+      'color: currentColor;',
+      'background: transparent;',
+      'color: inherit;',
+      'forced-color-adjust: none;',
+      'border-color: ButtonText;',
+      'display: inline-flex;',
+      'cursor: pointer;',
+      'appearance: base-select;',
+      'padding: var(--oyl-space-sm) var(--oyl-space-md);',
+    ]) {
+      expect(colourLiteralsIn(`a {\n  ${token}\n}`), token).toEqual([]);
+    }
+  });
+
+  it("lets a class on a file input set its size, which a bare `input[type='file']` did not", () => {
+    // #667's review: `input[type='file'] { font: inherit }` is (0,1,1) and beat
+    // `.oyl-input--file { font-size }` (0,1,0) wherever it sat in the file, so
+    // Transfer's two file inputs ignored their class. Held at `:where()`, the
+    // element rule has no specificity and any class wins.
+    const sized = rulesMentioning(themeCss, '.oyl-input--file').filter(
+      ({ selector }) => selector === '.oyl-input--file',
+    );
+    expect(sized).toHaveLength(1);
+    expect(declarationsOf(`\n${sized[0]?.body ?? ''}`).get('font-size')).toMatch(
+      /^var\(--oyl-font-size-[a-z]+\)$/,
+    );
+    const fontRules = rulesMentioning(themeCss, "input[type='file']").filter(
+      ({ selector, body }) =>
+        !selector.includes('::file-selector-button') &&
+        /(?:^|[\s;])font(?:-[a-z]+)?\s*:/.test(body),
+    );
+    expect(fontRules.length, 'no rule sets a file input’s font').toBeGreaterThan(0);
+    for (const { selector } of fontRules) {
+      for (const one of selector.split(',').map((part) => part.trim())) {
+        expect(one, 'a file input font rule that outranks a class').toMatch(/^:where\(.*\)$/);
+      }
+    }
   });
 });
 

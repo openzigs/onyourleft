@@ -1289,8 +1289,12 @@ label > input[type='radio'] {
  * button's accent text is declared against.
  */
 /* The input's own font first: a form control does not inherit one, and the
-   button's `font: inherit` would otherwise take the platform's 13.33 px. */
-input[type='file'] {
+   button's `font: inherit` would otherwise take the platform's 13.33 px.
+   `:where()` holds it at zero specificity, so a class on the input still sets
+   its size — `.oyl-input--file` below, on Transfer's two file inputs. As a
+   plain `input[type='file']` (0,1,1) it outranked that class (0,1,0) and the
+   class's `font-size` was dead. */
+:where(input[type='file']) {
   font: inherit;
 }
 
