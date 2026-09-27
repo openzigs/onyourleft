@@ -3028,3 +3028,151 @@ it. Choose the realistic world in Settings.
 | AG5 | | |
 
 **Phone (OEM, model, Android, WebView):** ______________  **Build:** ______________
+
+---
+
+## Part AH — the realistic world's 20-minute measurement, on `main` ([#616](https://github.com/openzigs/onyourleft/issues/616), for every issue in [#615](https://github.com/openzigs/onyourleft/issues/615))
+
+**Why this part exists.** #615 makes the three.js realistic world more realistic while adding
+little or no load, and every one of its issues is judged by a before and after on the Pixel Tablet.
+Spike 0015 took the baseline (`T20-three-realistic`, 2026-09-26) with instruments that lived only
+on the unmerged branch `spike/issue-433-godot-realistic-code`: a triangle count patched into the
+page, a sampler on the tablet, and a Python summary. This Part puts that procedure on `main`, so
+every row below is taken with the same instrument, and it is where each #615 issue records its
+row.
+
+**What is on `main` since #616:**
+
+- **The page counts triangles.** `realistic.html` publishes `trianglesPerFrame` beside
+  `drawCalls` in `window.__oylRealistic` and in every `OYL-REALISTIC` and `OYL-REALISTIC-SOAK`
+  line, counted at the WebGL draw calls (`browser/realistic/draws.ts`). The browser gate
+  (`realistic.browser.spec.ts`) holds it to three's own `renderer.info.render.triangles` within
+  1 %: in the pinned Chromium on 2026-09-26 the two were **identical**, 272 196 each.
+- **The page switches layers off.** `?layers=-vegetation` (a comma-separated list) turns a layer
+  off without moving the rung: the view places everything as it would, spends every budget as it
+  would, and draws nothing of that layer, in either world (`browser/realistic/layers.ts` has the
+  table of what each layer holds). A layer's share of the GPU clock is the difference between a
+  run with it and a run without it. In the pinned Chromium, `-vegetation` took the held frame from
+  272 196 to 39 560 triangles.
+
+  | `?layers=` | Turns off |
+  |---|---|
+  | `-sky` | the photographed sky as background **and** as the environment map that lights every PBR material |
+  | `-surfaces` | the road, the ground beside it, the hills on the horizon |
+  | `-vegetation` | trees, shrubs and rocks — the realistic world's near meshes |
+  | `-impostors` | the far trees' billboards |
+  | `-structures` | buildings, walls, hedges, fences, signposts |
+  | `-water` | streams, lakes and bridges |
+  | `-riders` | the three riders and their shadows |
+
+- **The sampler and its summary are committed** under `apps/mobile/tools/`:
+  `realistic-sampler.sh` runs on the tablet, and `realistic-summary.mjs` turns a run directory into
+  one row of the table below. Both are spike 0015's, unchanged in what they measure; the summary
+  adds present **p95** and the skin before the app starts. Run over spike 0015's own raw
+  `T20-three-realistic` files, it reproduces every figure the spike published for that run (present
+  p50 / p90 / p99 16.63 / 16.66 / 16.75 ms, 0.12 % over 20 ms, GPU 707.8 / 701 / 848 MHz, skin
+  32.8 °C, CPU 87.8 % and 74.9 %, `Graphics` 419.3 MiB). That is the reference row below.
+
+⚠️ **DVFS is the governor's choice of clock, not a count of work** (spike 0015 §1). It is still the
+right before-and-after instrument: a lower mean clock that still makes every vsync is less GPU work
+per frame. The utilisation counters are permission-denied on this tablet.
+
+⚠️ **The WebView renderer's CPU counts every `sandboxed_process` in the busiest twelve.** Spike
+0015's T20 run had the product app (`dev.openzigs.onyourleft`) and several other apps running beside
+the spike's package, so its WebView column may hold another app's renderer. Step AH2 stops every
+other app for that reason.
+
+### Build and install
+
+Part Z §"Build and install", unchanged: a local debug APK with the owner's page staged
+(`realistic:stage`), from a `main` that has #616 in it, or from the branch of the #615 issue being
+measured.
+
+### The procedure
+
+Spike 0015's, with its corrections. `$ADB` as Part Z; the host commands run from the repository
+root. `RUN` names the run, for example `616-baseline-1`.
+
+| Step | What to do |
+|---|---|
+| AH1 | **Landscape, on charge, full brightness**, and the device awake with `"$ADB" shell svc power stayon true` |
+| AH2 | **Stop every other app**: close recent apps, and `"$ADB" shell am force-stop` any that `top` shows busy. The WebView renderer's CPU is read from `top` and cannot tell whose renderer it is |
+| AH3 | **Cool to ≤ 26 °C skin**: app stopped, screen OFF (on charge with the screen on, the skin settles near 26.5 °C), checking `VIRTUAL-SKIN` under `Current temperatures from HAL` every 30 s. Record how long it took |
+| AH4 | Record the skin **before** the app starts, start it, and open `realistic.html?world=realistic&panel=0&ladder=0&seconds=30&soak=21` — plus the run's `&layers=…` when a layer is off. `soak=21` because the page publishes minute N's line during minute N + 1 |
+| AH5 | After 20 s, start the sampler for **1 200 s**. It takes `dumpsys meminfo` itself at 600 s (minute 10) |
+| AH6 | When it writes `done`, pull it, collect the page's lines, and summarise |
+| AH7 | **Cool again (AH3) before the next run.** Two runs of the same configuration are two cool-downs |
+
+```bash
+RUN=616-baseline-1
+OUT=runs/$RUN && mkdir -p "$OUT"
+# AH3: cool, then AH4's "before".
+"$ADB" shell dumpsys thermalservice | awk '/Current temperatures from HAL/{f=1;next} /Current cooling/{f=0} f' | grep VIRTUAL-SKIN
+"$ADB" shell dumpsys thermalservice > "$OUT/before.txt"
+# AH4: start the app and open the page.
+"$ADB" shell input keyevent KEYCODE_WAKEUP && "$ADB" shell wm dismiss-keyguard
+"$ADB" logcat -c
+"$ADB" shell monkey -p dev.openzigs.onyourleft -c android.intent.category.LAUNCHER 1
+PID=$("$ADB" shell pidof dev.openzigs.onyourleft)
+"$ADB" forward tcp:9222 localabstract:webview_devtools_remote_"$PID"
+node apps/mobile/tools/webview-probe.mjs \
+  "location.href = '/harness/realistic.html?world=realistic&panel=0&ladder=0&seconds=30&soak=21'"
+# AH5: the sampler, on the tablet. The layer pattern's `/` keeps any other package out.
+sleep 20
+"$ADB" push apps/mobile/tools/realistic-sampler.sh /data/local/tmp/realistic-sampler.sh
+"$ADB" shell rm -rf "/data/local/tmp/oyl/$RUN"
+"$ADB" shell "nohup sh /data/local/tmp/realistic-sampler.sh 1200 'VRI-dev\.openzigs\.onyourleft/' /data/local/tmp/oyl/$RUN $PID > /dev/null 2>&1 &"
+# AH6: after twenty minutes and a little.
+until "$ADB" shell test -f "/data/local/tmp/oyl/$RUN/done"; do sleep 10; done
+"$ADB" pull "/data/local/tmp/oyl/$RUN/." "$OUT/"
+"$ADB" logcat -d | grep 'OYL-REALISTIC' > "$OUT/oyl.txt"
+node apps/mobile/tools/realistic-summary.mjs "$OUT"
+"$ADB" shell am force-stop dev.openzigs.onyourleft
+```
+
+⚠️ If `$OUT/error.txt` exists, the sampler found no SurfaceFlinger layer for the app and measured
+nothing: check `"$ADB" shell dumpsys SurfaceFlinger --list | grep onyourleft` and fix the pattern.
+⚠️ The page's lines reach `logcat` under `Capacitor/Console`, not `chromium` (Part Z's correction):
+grep the whole log.
+
+### What each column is
+
+`realistic-summary.mjs`' header is the authority; in short:
+
+- **present p50 / p90 / p95 / p99, > 20 ms**: from SurfaceFlinger's present times. An interval of
+  250 ms or more is a hole in the sampling, not a frame.
+- **GPU mean / p50 / p90**: the Mali DVFS clock, once a second.
+- **skin before**: the cooled tablet, before the app starts. **skin start**: the sampler's first
+  block, about 20 s into the ride. **skin min 20**: the block nearest 20 minutes after that.
+  ⚠️ #615's baseline table reads "25.57 → 32.8 °C": that is skin *before* → skin *min 20*, and
+  those two columns are what compare with it.
+- **CPU app / WebView / both**: mean `%CPU` of one core over the 30-second blocks. #615's "CPU" is
+  **both**.
+- **Graphics / GL mtrack**: `dumpsys meminfo` at minute 10, MiB. `GL mtrack` is what #615 calls
+  texture memory as the driver holds it (Z8).
+- **triangles / frame, draw calls**: the median of the page's soak minutes. Deterministic for a
+  given build and route, so a change here is a change, not noise.
+
+### The spread, and what "no measurable increase" means
+
+#615's rule 1: an issue may not measurably increase GPU DVFS mean, CPU, skin at minute 20, present
+p95, triangles, draw calls or texture memory. **This Part's first two rows are two baseline runs on
+the same `main`, cooled between.** Their difference, column by column, **is** that threshold from
+then on, and it replaces #615's placeholder (±5 % GPU DVFS mean, ±10 points of a core CPU, ±0.5 °C
+skin, +0.2 ms present p95). Write the spread in the third row.
+
+### AH results
+
+One row per run. `issue` is the #615 issue the row is for; `layers` is `?layers=`, empty for all
+on. The reference row is spike 0015's, re-read from its raw files by `realistic-summary.mjs`: it is
+**not** on `main` and not a baseline, and its `triangles` and `draw calls` are the spike's own
+published figures (its run predates `oyl.txt`).
+
+| issue | run | build | layers | present p50 / p90 / **p95** / p99 ms | > 20 ms % | GPU mean / p50 / p90 MHz | skin before / start / min 20 °C | CPU app / WebView / **both** % | Graphics / GL mtrack MiB | triangles / frame | draw calls |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| spike 0015 | T20-three-realistic | `46c80c9` + spike patch | — | 16.63 / 16.66 / **16.68** / 16.75 | 0.12 | 707.8 / 701 / 848 | 25.6 / 27.2 / 32.8 | 87.8 / 74.9 / **162.7** | 419.3 / 308.2 | 266 742 | 32–37 |
+| #616 | baseline 1 | | | | | | | | | | |
+| #616 | baseline 2 | | | | | | | | | | |
+| #616 | **spread** (\|1 − 2\|) | | | | | | | | | | |
+
+**Phone (OEM, model, Android, WebView):** ______________  **Build:** ______________

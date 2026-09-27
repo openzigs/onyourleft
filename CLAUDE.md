@@ -74,7 +74,15 @@ apps/                 AGPL-3.0-or-later, without exception
                         the one place ADR 0026 D-12 let the realistic world be
                         reached until #475 offered it in Settings, staged into
                         a local debug APK by `realistic:stage`. The gate is
-                        game.html?realistic. Since #528 it also holds
+                        game.html?realistic. Since #616 the page counts
+                        triangles at the WebGL draw calls and takes
+                        `?layers=-vegetation` and the like, and
+                        realistic.browser.spec.ts is the gate on THOSE two
+                        instruments only — the counter against three's own
+                        `renderer.info`, and a control that must count 100 000
+                        fewer. ⚠️ The layer switch changes nothing the product
+                        ships: it wraps each belt class's `addTo` from the
+                        harness (`browser/realistic/layers.ts`). Since #528 it also holds
                         sidecamera.html and sidecamera-harness.tsx — the
                         tripod phone's filming sign at a phone's size, driven
                         through the real shell with a scripted link, because
@@ -919,7 +927,14 @@ apps/                 AGPL-3.0-or-later, without exception
                         repository check. ⚠️ It asks nothing — the questions
                         live in `docs/validation/0002` Part P as expressions, so
                         the tool has no opinion to go stale and nothing
-                        decidable to test
+                        decidable to test. Since #616 it also holds
+                        `realistic-sampler.sh`, which runs ON the tablet (GPU
+                        DVFS clock, SurfaceFlinger present times, skin, CPU,
+                        meminfo), and `realistic-summary.mjs`, which turns its
+                        output into a row of validation 0002 Part AH — the one
+                        instrument every #615 issue is measured with. The
+                        summary's arithmetic IS decidable, so it has a Vitest
+                        suite (`tools/**/*.test.mjs`, in the mobile project)
 
 packages/             Apache-2.0, without exception
   domain/             units, core types, validation, signing, analysis (#25)
@@ -3853,6 +3868,7 @@ top of an issue **supersedes its body**.
 | Whether the APK really cold-starts with no network, and the four ways that measurement goes wrongly green | [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part P, [ADR 0024](docs/adr/0024-offline-and-caching-posture.md) D-4 |
 | Why `navigator.onLine` is `true` inside the shell with no network at all, and what still reads it | [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part P §"What Part P found along the way" |
 | How to read the origin, `crypto.subtle` or a service-worker registration inside the shell's WebView | [`apps/mobile/tools/webview-probe.mjs`](apps/mobile/tools/webview-probe.mjs) |
+| How the realistic world's cost is measured on the tablet, which layer is which, and what "no measurable increase" means for #615 | [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part AH, `apps/mobile/tools/realistic-summary.mjs`, `apps/web/browser/realistic/layers.ts`, [#616](https://github.com/openzigs/onyourleft/issues/616) |
 | Why a rider with no heart rate strap is not told their strap has dropped | `apps/web/src/game/sensors.ts`, `apps/web/src/ride/metrics.ts` |
 | Which previous attempt a ghost races, and why it is the fastest rather than the latest | `apps/web/src/game/ghost-source.ts` §`fastestAttempt` |
 | Why a corridor point carries two distances, and which one a marker is placed by | `apps/web/src/game/terrain.ts` §`CorridorPoint.along`, `apps/web/src/game/scene.ts` §`nearestPoint` |

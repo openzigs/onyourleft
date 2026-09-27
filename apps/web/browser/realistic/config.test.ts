@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { configQuery, DEFAULT_CONFIG, parseConfig, percentiles } from './config';
+import { configQuery, DEFAULT_CONFIG, LAYERS, parseConfig, percentiles } from './config';
 
 describe('the realistic page’s configuration — ADR 0026 D-12', () => {
   it('rides the realistic world with the ladder running when given no query', () => {
@@ -13,7 +13,9 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
 
   it('reads every parameter', () => {
     expect(
-      parseConfig('?world=stylised&rung=1&ladder=0&seconds=60&soak=20&at=900&panel=0'),
+      parseConfig(
+        '?world=stylised&rung=1&ladder=0&seconds=60&soak=20&at=900&panel=0&layers=-water,-sky',
+      ),
     ).toEqual({
       world: 'stylised',
       rung: 1,
@@ -22,7 +24,24 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
       soakMinutes: 20,
       at: 900,
       panel: false,
+      layersOff: ['sky', 'water'],
     });
+  });
+
+  it('switches off each layer by name, once, in a fixed order — #616', () => {
+    for (const layer of LAYERS) {
+      expect(parseConfig(`?layers=-${layer}`).layersOff).toEqual([layer]);
+    }
+    expect(parseConfig('?layers=-riders,-sky,-riders').layersOff).toEqual(['sky', 'riders']);
+    expect(parseConfig('').layersOff).toEqual([]);
+  });
+
+  it('refuses a layer it does not know, or one not written as switched off — #616', () => {
+    // A typo would otherwise measure every layer ON under the name of one that was off.
+    expect(() => parseConfig('?layers=-vegtation')).toThrow(/layers is a comma-separated list/);
+    expect(() => parseConfig('?layers=vegetation')).toThrow(/layers is a comma-separated list/);
+    expect(() => parseConfig('?layers=')).toThrow(/layers is a comma-separated list/);
+    expect(() => parseConfig('?layers=-water,')).toThrow(/layers is a comma-separated list/);
   });
 
   it('refuses a parameter it does not know, rather than measuring the default under its name', () => {
@@ -38,7 +57,13 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
   });
 
   it('writes back a query that reads as the same configuration', () => {
-    for (const search of ['', '?world=stylised', '?rung=1&ladder=0&soak=20', '?at=900&panel=0']) {
+    for (const search of [
+      '',
+      '?world=stylised',
+      '?rung=1&ladder=0&soak=20',
+      '?at=900&panel=0',
+      '?layers=-impostors,-vegetation',
+    ]) {
       const config = parseConfig(search);
       expect(parseConfig(configQuery(config))).toEqual(config);
     }

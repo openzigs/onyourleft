@@ -20,7 +20,10 @@
  *
  * It is **not** a gate: nothing asserts on what it measures, because the
  * numbers that matter come from the tablet's GPU. `game.browser.spec.ts`
- * §"the realistic world" is the gate, on its own page. It is **not** the
+ * §"the realistic world" is the gate, on its own page. ⚠️ Since #616
+ * `realistic.browser.spec.ts` loads THIS page — to hold its instruments to
+ * account (the triangle counter against three's own, and the layer switch
+ * against a control), never to hold the world to a number. It is **not** the
  * product: the product's build never sees this directory, and the tablet
  * reaches it only through a debug APK staged with
  * `tools/realistic/stage-into-apk.ts` — validation 0002 Part Z has the steps.
@@ -29,10 +32,14 @@
  *
  * `window.__oylRealistic` — the configuration, the load's outcome and the
  * notice, which world is drawn and at which rung, and after `?seconds=` of
- * riding the frame-time percentiles and the draw calls; with `?soak=20`, one
- * sample a minute for twenty minutes. Each is also one console line,
- * `OYL-REALISTIC {json}` and `OYL-REALISTIC-SOAK {json}`, which `adb logcat`
- * shows under the `chromium` tag — so the numbers come off the device with no
+ * riding the frame-time percentiles, the draw calls and — since #616 — the
+ * triangles submitted per frame; with `?soak=20`, one sample a minute for
+ * twenty minutes. Since #616, `?layers=-vegetation` (or any of
+ * `realistic/config.ts` §`LAYERS`) turns a layer off without moving the rung,
+ * so a layer's share of the tablet's GPU clock is the difference between two
+ * runs; `realistic/layers.ts` says what each layer is, in both worlds.
+ * Each is also one console line, `OYL-REALISTIC {json}` and
+ * `OYL-REALISTIC-SOAK {json}`, which `adb logcat` shows under the `chromium` tag — so the numbers come off the device with no
  * debugger attached, as #457's did.
  */
 
@@ -52,8 +59,16 @@ import {
   loadSceneryModels,
   threeGameRenderer,
 } from '../src/game/three-renderer';
-import { configQuery, parseConfig, percentiles, type Percentiles } from './realistic/config';
+import {
+  configQuery,
+  parseConfig,
+  percentiles,
+  type Layer,
+  type Percentiles,
+} from './realistic/config';
+import { drawCounter } from './realistic/draws';
 import { rideFrame, RIDE_METRES_PER_SECOND } from './realistic/frame';
+import { installLayerSwitch, type LayerCensus } from './realistic/layers';
 import { describe, guarded, MAXIMUM_FRAME_GAP_MS, MeasurementClock } from './realistic/loop';
 import { readoutLine, takeOverReporting } from './realistic/reporting';
 import { realisticRoute } from './realistic/route';
@@ -77,6 +92,23 @@ export interface RealisticSample {
   /** The time between DRAWN frames — at a capped rung, at least the cap's interval. */
   readonly frameMs: Percentiles;
   readonly drawCalls: number;
+  /**
+   * Triangles submitted per drawn frame over the window, counted at the WebGL
+   * draw calls — #616. @see realistic/draws.ts
+   */
+  readonly trianglesPerFrame: number;
+  /**
+   * The window's LAST frame, counted two ways: at the draw calls, and by
+   * three's own `renderer.info.render.triangles` for the same `render` — the
+   * browser gate holds them within 1 % of each other (#616). `undefined` for
+   * three's when no frame has been drawn through the switch yet.
+   */
+  readonly lastFrame: {
+    readonly triangles: number;
+    readonly rendererTriangles: number | undefined;
+  };
+  /** The layers switched off for this run — #616. Empty for an ordinary ride. */
+  readonly layersOff: readonly Layer[];
   readonly drawingBuffer: readonly [number, number];
   readonly devicePixelRatio: number;
   readonly stalls: number;
@@ -114,6 +146,8 @@ declare global {
       readonly notice: string | undefined;
       readonly result: RealisticSample | undefined;
       readonly soak: readonly (RealisticSample & { readonly minute: number })[];
+      /** What the layer switch found in the scene, by layer — #616. @see LayerCensus */
+      readonly layers: LayerCensus | undefined;
     };
   }
 }
@@ -138,39 +172,13 @@ let published: NonNullable<Window['__oylRealistic']> = {
   notice: undefined,
   result: undefined,
   soak: [],
+  layers: undefined,
 };
 window.__oylRealistic = published;
 const publish = (patch: Partial<NonNullable<Window['__oylRealistic']>>): void => {
   published = { ...published, ...patch };
   window.__oylRealistic = published;
 };
-
-/** Counts the driver's draw calls for the life of the page, one frame at a time. */
-function drawCallCounter(): () => number {
-  const gl = WebGL2RenderingContext.prototype;
-  let calls = 0;
-  for (const name of [
-    'drawElements',
-    'drawArrays',
-    'drawElementsInstanced',
-    'drawArraysInstanced',
-  ] as const) {
-    // eslint-disable-next-line @typescript-eslint/unbound-method
-    const original: (...args: never[]) => unknown = gl[name];
-    (gl as unknown as Record<string, unknown>)[name] = function counted(
-      this: WebGL2RenderingContext,
-      ...args: never[]
-    ): unknown {
-      calls += 1;
-      return original.apply(this, args);
-    };
-  }
-  return () => {
-    const taken = calls;
-    calls = 0;
-    return taken;
-  };
-}
 
 /** The controls: which world, which rung, the ladder, and a line of numbers. */
 function panel(config: ReturnType<typeof parseConfig>): { box: HTMLElement; line: HTMLElement } {
@@ -204,7 +212,10 @@ function panel(config: ReturnType<typeof parseConfig>): { box: HTMLElement; line
 
 async function run(): Promise<void> {
   const config = parseConfig(location.search);
-  const takeCalls = drawCallCounter();
+  // #478's draw calls and #616's triangles, counted at the WebGL entry points.
+  const counter = drawCounter(WebGL2RenderingContext.prototype);
+  // #616: installed before the view exists, so it sees every belt join the scene.
+  const layerSwitch = installLayerSwitch(config.layersOff);
   await loadSceneryModels();
   let outcome: RealisticWorldOutcome | undefined;
   if (config.world === 'realistic') {
@@ -237,7 +248,10 @@ async function run(): Promise<void> {
   let windowFrom = 0;
   let minute = 0;
   let callsInWindow = 0;
+  let trianglesInWindow = 0;
   let framesInWindow = 0;
+  let lastFrameTriangles = 0;
+  let lastFrameRendererTriangles: number | undefined;
   let shownAt = 0;
   const soak: (RealisticSample & { minute: number })[] = [];
 
@@ -247,6 +261,9 @@ async function run(): Promise<void> {
     frameCap: worldRung(state).frameCap === DISPLAY_RATE ? 'display' : worldRung(state).frameCap,
     frameMs: percentiles(frames),
     drawCalls: framesInWindow === 0 ? 0 : Math.round(callsInWindow / framesInWindow),
+    trianglesPerFrame: framesInWindow === 0 ? 0 : Math.round(trianglesInWindow / framesInWindow),
+    lastFrame: { triangles: lastFrameTriangles, rendererTriangles: lastFrameRendererTriangles },
+    layersOff: config.layersOff,
     drawingBuffer: [gl?.drawingBufferWidth ?? 0, gl?.drawingBufferHeight ?? 0],
     devicePixelRatio,
     stalls,
@@ -294,7 +311,12 @@ async function run(): Promise<void> {
         rung: worldRung(state),
       }),
     );
-    callsInWindow += takeCalls();
+    callsInWindow += counter.takeCalls();
+    lastFrameTriangles = counter.takeTriangles();
+    trianglesInWindow += lastFrameTriangles;
+    // three resets its own count at the start of every `render`, so after the
+    // view's one `render` it holds exactly this frame's.
+    lastFrameRendererTriangles = layerSwitch.renderer()?.info.render.triangles;
     framesInWindow += 1;
     if (!published.ready) publish({ ready: true });
     if (!measured && clock.windowFull(config.seconds)) {
@@ -303,9 +325,19 @@ async function run(): Promise<void> {
       const taken = clock.take();
       const result = sample(taken.samples, taken.stalls);
       callsInWindow = 0;
+      trianglesInWindow = 0;
       framesInWindow = 0;
-      publish({ result });
+      const layers = layerSwitch.census();
+      publish({ result, layers });
       console.log(`OYL-REALISTIC ${JSON.stringify(result)}`);
+      // #616: a share read with something the switch could not place still on
+      // is a share of an unknown thing, so a run that switched a layer off says so.
+      if (config.layersOff.length > 0 && layers.unplaced.length > 0) {
+        fail(
+          `realistic: the layer switch could not place ${layers.unplaced.join(', ')}; ` +
+            'a layer it leaves on is not a layer switched off',
+        );
+      }
     } else if (
       measured &&
       config.soakMinutes > 0 &&
@@ -316,6 +348,7 @@ async function run(): Promise<void> {
       const taken = clock.take();
       const each = { ...sample(taken.samples, taken.stalls), minute };
       callsInWindow = 0;
+      trianglesInWindow = 0;
       framesInWindow = 0;
       soak.push(each);
       publish({ soak: [...soak] });

@@ -13,6 +13,8 @@ export default {
   test: {
     name: 'mobile',
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    // `tools/` since #616: the realistic-world summary is a Node module with
+    // decidable arithmetic, unlike `webview-probe.mjs`, which asks nothing.
+    include: ['src/**/*.test.ts', 'tools/**/*.test.mjs'],
   },
 };
