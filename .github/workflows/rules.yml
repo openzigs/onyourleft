@@ -95,6 +95,13 @@ jobs:
       # before anything is trusted to it: a runner that swallowed a failure
       # would turn every concurrent step below into a gate removed, and a green
       # step would look exactly the same. Bash only, like the checks after it.
+      # TEMPORARY (#651 measurement): which runner this was. Removed before merge.
+      - name: Runner CPU
+        run: |
+          nproc
+          lscpu | grep -E 'Model name|^CPU\(s\)|MHz' || true
+          free -g
+
       - name: Concurrency runner tests
         run: bash scripts/run-concurrently.test.sh
 
