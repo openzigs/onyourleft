@@ -28,7 +28,8 @@ import {
   REALISTIC_NEAR_MESHES,
   REALISTIC_TREE_LEVELS,
 } from './realistic-budget';
-import { bandFade, treeSlots } from './tree-levels';
+import { bandFade, treeSlots, type TreeLevels } from './tree-levels';
+import { CAMERA_BEHIND_METRES } from './camera';
 import {
   PHOTOGRAPHIC_STRUCTURE_SURFACES,
   REALISTIC_SKY,
@@ -479,7 +480,83 @@ describe('the trees’ three levels and the dithered hand-over — #617', () => 
     expect(levelsOfZ(belt, 55)).toEqual(['full']);
     expect(levelsOfZ(belt, 65)).toEqual(['impostor']);
   });
+
+  it('ranks only the trees the camera can see — #617’s review', () => {
+    // Two trees BEHIND the camera, which is 4.5 m behind the rider, and one
+    // ahead: the one ahead is the nearest tree in the picture.
+    const passed = [item('tree-broadleaf', -8, 0), item('tree-conifer', -12, 0)];
+    const ahead = item('tree-broadleaf', 15, 2);
+    const belt = beltWith();
+    belt.update([...passed, ahead], POSE);
+    expect(levelsOfZ(belt, 15)).toEqual(['full']);
+    // Still drawn, as the impostor nothing sees — the cull is `inView`'s.
+    expect(levelsOfZ(belt, -8)).toEqual(['impostor']);
+    expect(belt.drawnItems).toBe(3);
+    // The control is the ranking before the review: the two passed trees take
+    // the full slot and the band, and the tree in the picture is middle.
+    const before = beltWith({ ...REALISTIC_TREE_LEVELS, rankOnly: 'in-view' });
+    before.update([...passed, ahead], POSE);
+    expect(levelsOfZ(before, 15)).toEqual(['middle']);
+    expect(levelsOfZ(before, -8)).toEqual(['full']);
+  });
+
+  it('changes no tree’s shape in one frame as the rider passes trees — #617’s review', () => {
+    // Every tree the rider passes leaves the ranked set, and every tree
+    // behind it moves up a rank. A rider at 6 m/s and 60 frames a second.
+    const road = [5, 8, 12, 17, 23, 30, 38, 47, 57, 68, 80].map((z, index) =>
+      item(index % 2 === 0 ? 'tree-broadleaf' : 'tree-conifer', z, 2),
+    );
+    const largestStep = (levels: TreeLevels): number => {
+      const belt = beltWith(levels);
+      let last = new Map<number, readonly [number, number]>();
+      let largest = 0;
+      for (let at = 0; at <= 140; at += 1) {
+        const riderZ = at * 0.1;
+        belt.update(road, { ...POSE, z: riderZ });
+        const now = new Map<number, readonly [number, number]>();
+        // Only trees still well ahead of the camera: one that has left the
+        // picture may go to its impostor at once.
+        for (const tree of road) {
+          if (tree.z - riderZ > -CAMERA_BEHIND_METRES + 1.5)
+            now.set(tree.z, splitOfZ(belt, tree.z));
+        }
+        for (const [z, [low, high]] of now) {
+          const was = last.get(z);
+          if (was !== undefined) {
+            largest = Math.max(largest, Math.abs(low - was[0]), Math.abs(high - was[1]));
+          }
+        }
+        last = now;
+      }
+      return largest;
+    };
+    const paced = largestStep(REALISTIC_TREE_LEVELS);
+    const unpaced = largestStep({ ...REALISTIC_TREE_LEVELS, handOverFrames: 1 });
+    // A step a frame, plus what the rider's own motion moves a band's fade.
+    expect(paced).toBeLessThanOrEqual(1 / REALISTIC_TREE_LEVELS.handOverFrames + 0.02);
+    expect(unpaced).toBeGreaterThan(0.3);
+  });
 });
+
+/**
+ * Where a tree at `z` splits the screen between its levels, `[low, high]`, read
+ * back off the keeps the belt wrote: the impostor keeps `[0, low)`, the middle
+ * level `[low, high)`, the full mesh `[high, 1)`.
+ */
+function splitOfZ(belt: RealisticVegetationBelt, z: number): readonly [number, number] {
+  const decode = (one: { low: number; high: number }): readonly [number, number] =>
+    one.low === 0 && one.high === 0 ? [0, 1] : [Math.max(0, one.low), Math.min(1, one.high)];
+  let low = 0;
+  let high = 1;
+  for (const kind of ['tree-broadleaf', 'tree-conifer'] as const) {
+    const each = submitted(belt, kind);
+    const full = each.full.find((one) => Math.abs(one.z - z) < 1e-6);
+    const impostor = each.impostor.find((one) => Math.abs(one.z - z) < 1e-6);
+    if (full !== undefined) high = decode(full)[0];
+    if (impostor !== undefined) low = decode(impostor)[1];
+  }
+  return [low, high];
+}
 
 describe('the realistic world’s primitives belt — ADR 0026 D-3', () => {
   it('builds no mesh for a kind the vegetation or the structure belts draw', () => {

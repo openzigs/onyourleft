@@ -3,7 +3,18 @@
 import { describe, expect, it } from 'vitest';
 
 import { HARD_SWAP_TREE_LEVELS, REALISTIC_TREE_LEVELS } from './realistic-budget';
-import { bandFade, treeLevelAt, treeSlots, writeKeep, type TreeLevel } from './tree-levels';
+import {
+  bandFade,
+  HAND_OVER_PATIENCE_FRAMES,
+  highBound,
+  lowBound,
+  treeLevelAt,
+  treeSlots,
+  TreeHandOver,
+  writeInterval,
+  type TreeLevel,
+  type TreeLevels,
+} from './tree-levels';
 
 /** The level at every rank from 0 to `ranks − 1`. */
 function levels(ranks: number, of = REALISTIC_TREE_LEVELS): TreeLevel[] {
@@ -76,38 +87,247 @@ describe('a band tree’s fade — #617', () => {
 });
 
 describe('what a level keeps of the screen — #617', () => {
-  const kept = (keep: 'all' | 'nearer' | 'further', fade: number): ((h: number) => boolean) => {
+  const kept = (from: number, to: number): ((h: number) => boolean) => {
     const into = new Float32Array(3);
-    writeKeep(into, 0, keep, fade);
+    writeInterval(into, 0, from, to);
     const [low, high] = [into[0] ?? 0, into[1] ?? 0];
     // The shader's rule: low >= high keeps everything.
     return (h) => !(high > low) || (h >= low && h < high);
   };
 
   it('keeps every fragment for a tree at one level', () => {
-    for (const h of [0, 0.3, 0.999]) expect(kept('all', 0.4)(h)).toBe(true);
+    for (const h of [0, 0.3, 0.999]) expect(kept(0, 1)(h)).toBe(true);
   });
 
-  it('splits the screen between a band tree’s two levels, exactly once each', () => {
-    for (const fade of [0, 0.25, 0.5, 0.9, 1]) {
-      const nearer = kept('nearer', fade);
-      const further = kept('further', fade);
+  it('splits the screen between a tree’s levels, exactly once each', () => {
+    for (const [low, high] of [
+      [0, 0.25],
+      [0.5, 1],
+      [0.2, 0.7],
+      [0, 0],
+      [1, 1],
+      [0.3, 0.3],
+    ] as const) {
+      const levels = [kept(0, low), kept(low, high), kept(high, 1)];
+      const present = [low > 0, high > low, high < 1];
       for (let h = 0; h < 1; h += 1 / 64) {
-        expect(nearer(h) !== further(h), `fade ${String(fade)}, hash ${String(h)}`).toBe(true);
+        const owners = levels.filter((keeps, at) => present[at] === true && keeps(h)).length;
+        expect(owners, `[${String(low)}, ${String(high)}), hash ${String(h)}`).toBe(1);
       }
     }
   });
 
-  it('draws the nearer level whole at a fade of 0 and the further one whole at 1', () => {
-    for (let h = 0; h < 1; h += 1 / 16) {
-      expect(kept('nearer', 0)(h)).toBe(true);
-      expect(kept('further', 1)(h)).toBe(true);
-    }
+  it('writes a band tree’s keeps as the shader has always read them', () => {
+    const into = new Float32Array(9).fill(7);
+    writeInterval(into, 1, 0.25, 1);
+    expect([...into]).toEqual([7, 7, 7, 0.25, 2, 0, 7, 7, 7]);
+    writeInterval(into, 1, 0, 0.25);
+    expect([...into]).toEqual([7, 7, 7, -1, 0.25, 0, 7, 7, 7]);
+    writeInterval(into, 1, 0, 1);
+    expect([...into]).toEqual([7, 7, 7, 0, 0, 0, 7, 7, 7]);
   });
 
-  it('writes into its own instance and no other', () => {
-    const into = new Float32Array(9).fill(7);
-    writeKeep(into, 1, 'nearer', 0.25);
-    expect([...into]).toEqual([7, 7, 7, 0.25, 2, 0, 7, 7, 7]);
+  it('puts each level’s split where the table says', () => {
+    expect([lowBound('full', 0.3), highBound('full', 0.3)]).toEqual([0, 0]);
+    expect([lowBound('full-middle', 0.3), highBound('full-middle', 0.3)]).toEqual([0, 0.3]);
+    expect([lowBound('middle', 0.3), highBound('middle', 0.3)]).toEqual([0, 1]);
+    expect([lowBound('middle-impostor', 0.3), highBound('middle-impostor', 0.3)]).toEqual([0.3, 1]);
+    expect([lowBound('impostor', 0.3), highBound('impostor', 0.3)]).toEqual([1, 1]);
+  });
+});
+
+/** A tree in a {@link frame}: its name, which stands in for its position, and its distance. */
+interface Tree {
+  readonly id: number;
+  readonly d: number;
+}
+
+/**
+ * One frame of the belt's own sequence, without the belt: rank the trees
+ * nearest first, aim each ranked one at its level, carry the rest, settle.
+ * Returns every tree's split, `[low, high]`, by name.
+ */
+function frame(
+  handOver: TreeHandOver,
+  trees: readonly Tree[],
+  levels: TreeLevels = REALISTIC_TREE_LEVELS,
+): Map<number, readonly [number, number]> {
+  const sorted = [...trees].sort((a, b) => a.d - b.d);
+  const { ranked } = treeSlots(levels);
+  const ranks = sorted.slice(0, ranked);
+  const distances = ranks.map((tree) => tree.d);
+  handOver.begin();
+  const entries = ranks.map((tree, rank) => {
+    const level = treeLevelAt(rank, levels);
+    const fade =
+      level === 'full-middle' || level === 'middle-impostor'
+        ? bandFade(rank, distances, distances.length)
+        : 0;
+    return handOver.aim(tree.id, 0, lowBound(level, fade), highBound(level, fade));
+  });
+  for (const tree of sorted.slice(ranked)) handOver.carry(tree.id, 0);
+  handOver.settle();
+  const out = new Map<number, readonly [number, number]>();
+  sorted.forEach((tree, at) => {
+    const entry = at < ranked ? (entries[at] ?? -1) : handOver.find(tree.id, 0);
+    out.set(tree.id, entry < 0 ? [1, 1] : [handOver.low(entry), handOver.high(entry)]);
+  });
+  return out;
+}
+
+/** The largest change in any tree's split between two frames, over the trees in both. */
+function largestChange(
+  before: Map<number, readonly [number, number]>,
+  after: Map<number, readonly [number, number]>,
+): number {
+  let largest = 0;
+  for (const [id, [low, high]] of after) {
+    const was = before.get(id);
+    if (was === undefined) continue;
+    largest = Math.max(largest, Math.abs(low - was[0]), Math.abs(high - was[1]));
+  }
+  return largest;
+}
+
+/** How many trees draw the full mesh, and how many the middle one. */
+function using(splits: Map<number, readonly [number, number]>): {
+  full: number;
+  middle: number;
+} {
+  let full = 0;
+  let middle = 0;
+  for (const [low, high] of splits.values()) {
+    if (high < 1) full += 1;
+    if (high > low) middle += 1;
+  }
+  return { full, middle };
+}
+
+const handOverFor = (levels: TreeLevels = REALISTIC_TREE_LEVELS): TreeHandOver => {
+  const slots = treeSlots(levels);
+  return new TreeHandOver(slots, 2 * slots.ranked, levels.handOverFrames);
+};
+const STEP = 1 / REALISTIC_TREE_LEVELS.handOverFrames + 1e-9;
+
+describe('the hand-over when the ranked SET changes — #617’s review', () => {
+  // The review's own example: the 8 m tree is band A at (8 − 5)/(12 − 5).
+  const trees: Tree[] = [5, 8, 12, 17, 23, 30, 38, 47, 57].map((d) => ({ id: d, d }));
+  const withoutNearest = trees.slice(1);
+
+  it('walks every tree to its new level when the nearest leaves, a step a frame', () => {
+    const handOver = handOverFor();
+    let last = frame(handOver, trees);
+    expect(last.get(8)?.[1]).toBeCloseTo(3 / 7, 12);
+    let largest = 0;
+    for (let at = 0; at < 40; at += 1) {
+      const next = frame(handOver, withoutNearest);
+      largest = Math.max(largest, largestChange(last, next));
+      last = next;
+    }
+    expect(largest).toBeLessThanOrEqual(STEP);
+    // And it arrives: the 8 m tree is the full mesh, the 12 m one the band.
+    expect(last.get(8)).toEqual([0, 0]);
+    expect(last.get(12)?.[1]).toBeCloseTo((12 - 8) / (17 - 8), 12);
+  });
+
+  it('jumps in one frame when it is not paced, which is the control', () => {
+    const control = { ...REALISTIC_TREE_LEVELS, handOverFrames: 1 };
+    const handOver = handOverFor(control);
+    const first = frame(handOver, trees, control);
+    const next = frame(handOver, withoutNearest, control);
+    expect(largestChange(first, next)).toBeGreaterThan(0.4);
+  });
+
+  it('walks a tree in when one appears nearest, inside the slots', () => {
+    const handOver = handOverFor();
+    const slots = treeSlots(REALISTIC_TREE_LEVELS);
+    let last = frame(handOver, trees);
+    let largest = 0;
+    for (let at = 0; at < 80; at += 1) {
+      const next = frame(handOver, [{ id: 3, d: 3 }, ...trees]);
+      largest = Math.max(largest, largestChange(last, next));
+      const { full, middle } = using(next);
+      expect(full).toBeLessThanOrEqual(slots.full);
+      expect(middle).toBeLessThanOrEqual(slots.middle);
+      last = next;
+    }
+    expect(largest).toBeLessThanOrEqual(STEP);
+    // A tree seen for the first time mid-ride starts as its impostor, and
+    // walks in to the full mesh…
+    expect(last.get(3)).toEqual([0, 0]);
+    // …and the tree it displaced has reached the band.
+    expect(last.get(5)?.[1]).toBeCloseTo((5 - 3) / (8 - 3), 12);
+  });
+
+  it('keeps walking a tree out after it has been pushed past the ranks', () => {
+    // Two trees appear nearest at once, so the band-B tree — 38 m, part
+    // middle — is pushed two ranks out, past the last one ranked.
+    const handOver = handOverFor();
+    let last = frame(handOver, trees);
+    expect(last.get(38)?.[0]).toBeGreaterThan(0);
+    expect(last.get(38)?.[1]).toBe(1);
+    const crowded = [{ id: 3, d: 3 }, { id: 4, d: 4 }, ...trees];
+    let largest = 0;
+    for (let at = 0; at < 80; at += 1) {
+      const next = frame(handOver, crowded);
+      largest = Math.max(largest, largestChange(last, next));
+      last = next;
+    }
+    expect(largest).toBeLessThanOrEqual(STEP);
+    expect(last.get(38)).toEqual([1, 1]);
+  });
+
+  it('starts every tree where it belongs on a view’s first frame', () => {
+    const first = frame(handOverFor(), trees);
+    expect(first.get(5)).toEqual([0, 0]);
+    expect(first.get(12)).toEqual([0, 1]);
+    expect(first.get(57)).toEqual([1, 1]);
+  });
+
+  it('never draws more trees at a level than its slots, on a road that keeps changing', () => {
+    const slots = treeSlots(REALISTIC_TREE_LEVELS);
+    const handOver = handOverFor();
+    // A seeded road: every tree closes 0.3 m a frame and leaves at 2 m; new
+    // ones appear anywhere from 3 m to 80 m.
+    let seed = 617;
+    const random = (): number => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return seed / 2_147_483_648;
+    };
+    let next = 1;
+    let road: Tree[] = Array.from({ length: 12 }, () => ({ id: next++, d: 3 + random() * 77 }));
+    let last = frame(handOver, road);
+    let largest = 0;
+    for (let at = 0; at < 600; at += 1) {
+      road = road.map((tree) => ({ ...tree, d: tree.d - 0.3 })).filter((tree) => tree.d > 2);
+      if (random() < 0.15) road.push({ id: next++, d: 3 + random() * 77 });
+      const splits = frame(handOver, road);
+      const { full, middle } = using(splits);
+      expect(full, `frame ${String(at)}`).toBeLessThanOrEqual(slots.full);
+      expect(middle, `frame ${String(at)}`).toBeLessThanOrEqual(slots.middle);
+      largest = Math.max(largest, largestChange(last, splits));
+      last = splits;
+    }
+    expect(largest).toBeLessThanOrEqual(STEP);
+  });
+
+  it('ends a wait on a slot another tree waits on, through the impostor', () => {
+    // One full slot and one middle slot: A holds the full mesh and wants the
+    // middle one, B the other way round. Each waits on the other.
+    const handOver = new TreeHandOver(
+      { full: 1, middle: 1 },
+      4,
+      REALISTIC_TREE_LEVELS.handOverFrames,
+    );
+    const aim = (a: readonly [number, number], b: readonly [number, number]): void => {
+      handOver.begin();
+      handOver.aim(1, 0, a[0], a[1]);
+      handOver.aim(2, 0, b[0], b[1]);
+      handOver.settle();
+    };
+    aim([0, 0], [0, 1]);
+    for (let at = 0; at < HAND_OVER_PATIENCE_FRAMES + 60; at += 1) aim([0, 1], [0, 0]);
+    expect([handOver.low(0), handOver.high(0)]).toEqual([0, 1]);
+    expect([handOver.low(1), handOver.high(1)]).toEqual([0, 0]);
   });
 });

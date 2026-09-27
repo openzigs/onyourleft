@@ -274,10 +274,12 @@ import {
 import { REALISTIC_NEAR_MESHES, REALISTIC_TREE_LEVELS } from './realistic-budget';
 import {
   bandFade,
+  highBound,
+  lowBound,
   treeLevelAt,
   treeSlots,
-  writeKeep,
-  type Keep,
+  TreeHandOver,
+  writeInterval,
   type TreeLevels,
 } from './tree-levels';
 import {
@@ -319,6 +321,7 @@ import {
   type StructureKind,
 } from './scatter';
 import {
+  CAMERA_ABOVE_METRES,
   CAMERA_BEHIND_METRES,
   CAMERA_FIELD_OF_VIEW_DEGREES,
   FRUSTUM_SPREAD,
@@ -4841,6 +4844,65 @@ function inView(item: ScatterItem, pose: CameraPose): boolean {
   return Math.abs(across) <= lateralReachMetres(along);
 }
 
+/** How far a point beside a cone's axis may stand from it for a sphere there to reach the cone. */
+const FRUSTUM_SLANT = Math.hypot(1, FRUSTUM_SPREAD);
+
+/**
+ * Whether any part of a tree `radius` metres across from its trunk can be in
+ * the camera's view — #617's review, and what the trees are RANKED by.
+ *
+ * {@link inView} is not that: it keeps items down to {@link VIEW_BEHIND_METRES}
+ * behind the rider, and a floor of {@link SCATTER_LATERAL_METRES} to the side
+ * however near the camera, because it is a cull that must never drop what is
+ * on screen. Ranking by it spent the one full slot on a tree the rider had
+ * just passed. This is the other side of the same bound: a tree it refuses is
+ * never on screen, so it can be ranked out without anything a rider sees
+ * changing.
+ *
+ * - **Ahead of the camera.** `camera.ts` §`cameraRig` puts the eye
+ *   {@link CAMERA_BEHIND_METRES} behind the rider looking along their
+ *   heading, and pitched far less than the view is tall is wide — so every ray
+ *   the camera sees has a forward part along the heading, and a point level
+ *   with or behind the eye is never on screen. A tree is visible only if its
+ *   crown reaches past that plane: `ahead + radius > 0`.
+ * - **Inside the cone.** The horizontal half-tangent is
+ *   {@link FRUSTUM_SPREAD}, the WIDEST any frame can produce
+ *   (`camera.ts` §`WORST_CASE_ASPECT`), measured at the item's depth along the
+ *   view — which on a pitched camera is deeper, for a point below the eye, by
+ *   up to its height below the eye; that is added in full, which errs wide.
+ *   A sphere of `radius` reaches the cone if its centre is within `radius`
+ *   of the cone's side, which is `radius × √(1 + spread²)` measured across.
+ *
+ * Both err towards ranking a tree, never towards ranking out one that shows.
+ */
+function treeCanBeSeen(item: ScatterItem, pose: CameraPose, radius: number): boolean {
+  const dx = item.x - pose.x;
+  const dz = item.z - pose.z;
+  const ahead = dx * pose.headingX + dz * pose.headingZ + CAMERA_BEHIND_METRES;
+  if (ahead + radius <= 0) return false;
+  const below = Math.max(0, pose.eyeRoadY + CAMERA_ABOVE_METRES - item.y);
+  const across = Math.abs(dx * pose.headingZ - dz * pose.headingX);
+  return across - radius * FRUSTUM_SLANT <= FRUSTUM_SPREAD * Math.max(0, ahead + below);
+}
+
+/** How far a shape reaches from its trunk, in its own units — the largest of its parts'. */
+function horizontalReach(parts: readonly RealisticPart[]): number {
+  let reach = 0;
+  for (const { geometry } of parts) {
+    if (geometry.boundingBox === null) geometry.computeBoundingBox();
+    const box = geometry.boundingBox;
+    if (box === null) continue;
+    reach = Math.max(
+      reach,
+      Math.hypot(
+        Math.max(Math.abs(box.min.x), Math.abs(box.max.x)),
+        Math.max(Math.abs(box.min.z), Math.abs(box.max.z)),
+      ),
+    );
+  }
+  return reach;
+}
+
 /**
  * The realistic world's trees, shrubs and rocks — ADR 0026 D-12 layer 2, #474.
  *
@@ -4866,9 +4928,14 @@ function inView(item: ScatterItem, pose: CameraPose): boolean {
  * quad drawn from the eight views the pipeline rendered of the full scan
  * (`realistic-budget.ts` §`REALISTIC_TREE_LEVELS` counts them). At each
  * hand-over ONE tree is submitted at both levels, and each keeps its half of a
- * screen-space dither ({@link withTreeDither}): no alpha blending, no sorting,
- * and no tree changes shape in one frame. The three levels of one item are
- * drawn with ONE matrix.
+ * screen-space dither ({@link withTreeDither}): no alpha blending and no
+ * sorting. The three levels of one item are drawn with ONE matrix.
+ *
+ * Since #617's review only trees the camera can see are ranked
+ * ({@link treeCanBeSeen}), and `tree-levels.ts` §`TreeHandOver` paces each
+ * tree's move between levels, so a tree does not change shape in one frame
+ * when the ranked SET changes — a tree passing out of view, one coming in —
+ * as well as when two trees swap. What it still cannot hold is written there.
  *
  * ⚠️ **Nothing is allocated per frame.** The ranking is written into typed
  * arrays sized once, every instanced mesh is built with its capacity in the
@@ -4888,6 +4955,12 @@ export class RealisticVegetationBelt {
   readonly #levels: TreeLevels;
   /** Both tree kinds' one ranking. @see REALISTIC_TREE_LEVELS */
   readonly #trees: Ranking;
+  /** Where each tree's hand-over is, frame to frame. @see TreeHandOver */
+  readonly #handOver: TreeHandOver;
+  /** Each ranked tree's entry in the hand-over, by rank. */
+  readonly #rankEntry: Int32Array;
+  /** Which of this frame's items are trees the camera can see — grown, never per frame. */
+  #seen = new Uint8Array(SCATTER_INSTANCE_CAPACITY);
   #shown = true;
   /**
    * The rung's scenery budget — #245's, shared with the primitives belt (#478).
@@ -4911,6 +4984,8 @@ export class RealisticVegetationBelt {
     this.#levels = levels;
     const slots = treeSlots(levels);
     this.#trees = ranking(slots.ranked);
+    this.#handOver = new TreeHandOver(slots, 2 * slots.ranked, levels.handOverFrames);
+    this.#rankEntry = new Int32Array(slots.ranked);
     for (const kind of REALISTIC_VEGETATION_KINDS) {
       const shapes = vegetation.get(kind) ?? [];
       const tree = kind === 'tree-broadleaf' || kind === 'tree-conifer';
@@ -4949,6 +5024,7 @@ export class RealisticVegetationBelt {
         ),
         ranking: tree ? this.#trees : ranking(nearCap),
         fit: sceneryFitMetres(kind),
+        reach: shapes.map((shape) => horizontalReach(shape.parts)),
       });
     }
   }
@@ -4986,7 +5062,11 @@ export class RealisticVegetationBelt {
   /** Hides every mesh, for a frame drawn in the stylised world. */
   setShown(on: boolean): void {
     this.#shown = on;
-    if (!on) for (const mesh of this.meshes) mesh.visible = false;
+    if (!on) {
+      for (const mesh of this.meshes) mesh.visible = false;
+      // Nothing is drawn meanwhile, so nothing is mid-way anywhere after.
+      this.#handOver.reset();
+    }
   }
 
   /**
@@ -5047,13 +5127,49 @@ export class RealisticVegetationBelt {
         admitted += 1;
       }
     }
-    // Pass 1: the nearest of each ranking, by distance from the rider.
+    // Pass 1: the nearest of each ranking, by distance from the rider — a tree
+    // only if the camera can see it (#617's review), unless the levels are the
+    // control that ranks as before it.
+    if (this.#seen.length < end) this.#seen = new Uint8Array(end);
+    const visibleOnly = this.#levels.rankOnly === 'visible';
     for (let index = 0; index < end; index += 1) {
       const item = items[index] as ScatterItem;
       const each = this.#slotFor(item);
+      this.#seen[index] = 0;
       if (each === undefined || !inView(item, pose)) continue;
+      if (each.tree && each.shapes.length > 0 && visibleOnly) {
+        const variant = variantOf(item.variant, each.shapes.length);
+        const shape = each.shapes[variant] as RealisticShape;
+        const radius = ((each.reach[variant] ?? 0) * each.fit * item.scale) / shape.extent;
+        if (!treeCanBeSeen(item, pose, radius)) continue;
+      }
+      this.#seen[index] = 1;
       rankInto(each.ranking, index, Math.hypot(item.x - pose.x, item.z - pose.z));
     }
+    // Where each tree is going, and where it is drawn this frame. @see TreeHandOver
+    const order = this.#trees;
+    const handOver = this.#handOver;
+    handOver.begin();
+    for (let rank = 0; rank < order.count; rank += 1) {
+      const item = items[order.chosen[rank] ?? 0] as ScatterItem;
+      const level = treeLevelAt(rank, this.#levels);
+      const fade =
+        level === 'full-middle' || level === 'middle-impostor'
+          ? bandFade(rank, order.distances, order.count)
+          : 0;
+      this.#rankEntry[rank] = handOver.aim(
+        item.x,
+        item.z,
+        lowBound(level, fade),
+        highBound(level, fade),
+      );
+    }
+    for (let index = 0; index < end; index += 1) {
+      if (this.#seen[index] !== 1 || rankOf(order, index) < order.count) continue;
+      const item = items[index] as ScatterItem;
+      if (this.#slotFor(item)?.tree === true) handOver.carry(item.x, item.z);
+    }
+    handOver.settle();
     // Pass 2: every item into the meshes of the levels it is drawn at.
     for (let index = 0; index < end; index += 1) {
       const item = items[index] as ScatterItem;
@@ -5061,14 +5177,7 @@ export class RealisticVegetationBelt {
       if (each === undefined || each.shapes.length === 0 || !inView(item, pose)) continue;
       const variant = variantOf(item.variant, each.shapes.length);
       const shape = each.shapes[variant] as RealisticShape;
-      const order = each.ranking;
-      let rank = order.count;
-      for (let slot = 0; slot < order.count; slot += 1) {
-        if (order.chosen[slot] === index) {
-          rank = slot;
-          break;
-        }
-      }
+      const rank = rankOf(each.ranking, index);
       const size = (each.fit * item.scale) / shape.extent;
       this.#position.set(item.x, item.y, item.z);
       this.#quaternion.setFromAxisAngle(this.#up, item.rotation);
@@ -5076,43 +5185,30 @@ export class RealisticVegetationBelt {
       this.#matrix.compose(this.#position, this.#quaternion, this.#scale);
       let drawn = false;
       if (!each.tree) {
-        if (rank < order.count) drawn = this.#put(each.near[variant], 'all', 0);
+        if (rank < each.ranking.count) drawn = this.#put(each.near[variant], 0, 1);
       } else {
-        const level = treeLevelAt(rank, this.#levels);
-        const fade =
-          level === 'full-middle' || level === 'middle-impostor'
-            ? bandFade(rank, order.distances, order.count)
-            : 0;
+        // A tree with no entry — out of the camera's view, or beyond the ranks
+        // and not walking out of them — is its impostor.
+        const entry =
+          rank < order.count
+            ? (this.#rankEntry[rank] ?? -1)
+            : this.#seen[index] === 1
+              ? handOver.find(item.x, item.z)
+              : -1;
+        const low = entry < 0 ? 1 : handOver.low(entry);
+        const high = entry < 0 ? 1 : handOver.high(entry);
         const middle = each.middle[variant];
         const impostor = each.far[variant];
-        // A tree with no middle level — a fixture, or a pack that shipped none —
-        // is drawn at its impostor where the middle level would be.
-        switch (level) {
-          case 'full':
-            drawn = this.#put(each.near[variant], 'all', 0);
-            break;
-          case 'full-middle':
-            drawn = this.#put(each.near[variant], 'nearer', fade);
-            drawn =
-              (middle === undefined
-                ? this.#putOne(impostor, 'further', fade)
-                : this.#put(middle, 'further', fade)) || drawn;
-            break;
-          case 'middle':
-            drawn =
-              middle === undefined ? this.#putOne(impostor, 'all', 0) : this.#put(middle, 'all', 0);
-            break;
-          case 'middle-impostor':
-            if (middle === undefined) {
-              drawn = this.#putOne(impostor, 'all', 0);
-              break;
-            }
-            drawn = this.#put(middle, 'nearer', fade);
-            drawn = this.#putOne(impostor, 'further', fade) || drawn;
-            break;
-          case 'impostor':
-            drawn = this.#putOne(impostor, 'all', 0);
-            break;
+        // The impostor keeps [0, low), the middle level [low, high) and the
+        // full mesh [high, 1). A tree with no middle level — a fixture, or a
+        // pack that shipped none — is drawn at its impostor where the middle
+        // level would be.
+        if (high < 1) drawn = this.#put(each.near[variant], high, 1);
+        if (middle === undefined) {
+          if (high > 0) drawn = this.#putOne(impostor, 0, high) || drawn;
+        } else {
+          if (high > low) drawn = this.#put(middle, low, high) || drawn;
+          if (low > 0) drawn = this.#putOne(impostor, 0, low) || drawn;
         }
       }
       if (drawn) this.#drawn += 1;
@@ -5126,21 +5222,21 @@ export class RealisticVegetationBelt {
     }
   }
 
-  /** This frame's matrix into every part of one level, with its keep. */
-  #put(meshes: readonly InstancedMesh[] | undefined, keep: Keep, fade: number): boolean {
+  /** This frame's matrix into every part of one level, keeping `[from, to)` of the dither. */
+  #put(meshes: readonly InstancedMesh[] | undefined, from: number, to: number): boolean {
     if (meshes === undefined || meshes.length === 0) return false;
-    for (const mesh of meshes) this.#putOne(mesh, keep, fade);
+    for (const mesh of meshes) this.#putOne(mesh, from, to);
     return true;
   }
 
-  /** This frame's matrix into one mesh, with its keep, if it has room. */
-  #putOne(mesh: InstancedMesh | undefined, keep: Keep, fade: number): boolean {
+  /** This frame's matrix into one mesh, keeping `[from, to)`, if it has room. */
+  #putOne(mesh: InstancedMesh | undefined, from: number, to: number): boolean {
     if (mesh === undefined) return false;
     const capacity = mesh.instanceMatrix.count;
     if (mesh.count >= capacity) return false;
     mesh.setMatrixAt(mesh.count, this.#matrix);
     if (mesh.instanceColor !== null) {
-      writeKeep(mesh.instanceColor.array as Float32Array, mesh.count, keep, fade);
+      writeInterval(mesh.instanceColor.array as Float32Array, mesh.count, from, to);
     }
     mesh.count += 1;
     return true;
@@ -5174,6 +5270,14 @@ function ranking(capacity: number): Ranking {
   };
 }
 
+/** Where item `index` is in a ranking, or its count if it is not ranked. */
+function rankOf(order: Ranking, index: number): number {
+  for (let slot = 0; slot < order.count; slot += 1) {
+    if (order.chosen[slot] === index) return slot;
+  }
+  return order.count;
+}
+
 /** Insertion into a sorted list of at most its capacity, dropping the furthest. */
 function rankInto(order: Ranking, index: number, distance: number): void {
   const cap = order.chosen.length;
@@ -5205,6 +5309,8 @@ interface VegetationSlot {
   /** Both tree kinds share one; a shrub's and a rock's are their own. */
   readonly ranking: Ranking;
   readonly fit: number;
+  /** Per shape, how far it reaches from its trunk, in its own units. @see treeCanBeSeen */
+  readonly reach: readonly number[];
 }
 
 /** An instanced mesh of a fixed capacity, empty, never frustum-culled. */

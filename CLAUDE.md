@@ -687,7 +687,14 @@ apps/                 AGPL-3.0-or-later, without exception
                         count, and the arithmetic for why it is not per kind.
                         The middle GLBs carry no image and wear the near file's
                         materials, paired by name (`three-renderer.ts`
-                        §`prepareMiddleLevel`)
+                        §`prepareMiddleLevel`). ⚠️ Since #617's review only
+                        trees the CAMERA can see are ranked
+                        (`three-renderer.ts` §`treeCanBeSeen`) — a tree behind
+                        the camera used to take the one full slot — and
+                        `TreeHandOver` paces each tree's move between levels
+                        inside the same slots, because a swap of ranks is
+                        continuous and the ranked SET changing is not; the
+                        cases it still cannot hold are in its comment
     src/game/realistic-*.ts
                         the realistic world (ADR 0026, #425, #474, #369) — its
                         asset table, its D-6 budget (re-set from validation

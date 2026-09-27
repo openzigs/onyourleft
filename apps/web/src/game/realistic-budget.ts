@@ -245,7 +245,16 @@ export const REALISTIC_NEAR_MESHES: Readonly<
  * figure nobody measured. The frame's worst case now sits 65 350 under
  * {@link REALISTIC_FRAME_TRIANGLES}; spending them is the change after the row.
  */
-export const REALISTIC_TREE_LEVELS: TreeLevels = { near: 1, middle: 4, dithered: true };
+export const REALISTIC_TREE_LEVELS: TreeLevels = {
+  near: 1,
+  middle: 4,
+  dithered: true,
+  // Ten frames a level: a sixth of a second at 60 frames a second, a third at
+  // 30. Long enough that a rank jump is a fade rather than a pop, short enough
+  // that a tree the rider closes on at 12 m/s is at its level within 2 to 4 m.
+  handOverFrames: 10,
+  rankOnly: 'visible',
+};
 
 /**
  * The trees as they were drawn before #617 — the nearest six as full meshes,
@@ -256,7 +265,13 @@ export const REALISTIC_TREE_LEVELS: TreeLevels = { near: 1, middle: 4, dithered:
  * view with it, whose triangles must be at least 60 000 more, and whose
  * hand-over must jump; the product never draws with it
  */
-export const HARD_SWAP_TREE_LEVELS: TreeLevels = { near: 6, middle: 0, dithered: false };
+export const HARD_SWAP_TREE_LEVELS: TreeLevels = {
+  near: 6,
+  middle: 0,
+  dithered: false,
+  handOverFrames: 1,
+  rankOnly: 'visible',
+};
 
 /**
  * How many structures a realistic frame may carry: **36** — on both

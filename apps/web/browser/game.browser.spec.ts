@@ -2489,28 +2489,68 @@ test.describe('the realistic world — ADR 0026', () => {
     );
   });
 
-  test('hands a tree over between levels with no jump in what it covers — #617', async ({
+  test('hands a tree over between levels with no jump in the picture — #617', async ({
     harnessRun,
   }) => {
     const measured = await realistic(harnessRun);
-    const { product, control } = {
-      product: largestStep(measured.handOver),
-      control: largestStep(measured.handOverControl),
-    };
+    // Band B — middle and impostor — as the seventh tree beside the road walks
+    // out past the watched one (the control's swap is at the fifth, since it
+    // has no band), and band A — full and middle — as the first does.
+    // @see treeLevelProbe
+    const bands = [
+      { name: 'B', from: 0.5, to: 4 },
+      { name: 'A', from: 5.5, to: 8 },
+    ] as const;
+    // Non-vacuity: the seven trees beside the road are not in the picture, so
+    // what changes in it is the watched tree…
+    expect(measured.handOverOffScreenCovered).toBe(0);
+    // …which is on screen in every frame.
+    expect(Math.min(...measured.handOver.covered)).toBeGreaterThan(200);
     console.log(
-      `#617: the largest one-frame change in a tree's covered area is ` +
-        `${(100 * product.share).toFixed(1)} % dithered (at ${product.ahead.toFixed(1)} m), ` +
-        `${(100 * control.share).toFixed(1)} % with the hard swap (at ${control.ahead.toFixed(1)} m); ` +
-        `covered ${JSON.stringify(measured.handOver.covered)} / ${JSON.stringify(measured.handOverControl.covered)}`,
+      `#617: colour moved a frame ${JSON.stringify(measured.handOver.changed)} dithered, ` +
+        `${JSON.stringify(measured.handOverControl.changed)} with the hard swap; covered ` +
+        `${JSON.stringify(measured.handOver.covered)} / ${JSON.stringify(measured.handOverControl.covered)}`,
     );
-    // Non-vacuity: the tree is on screen in every frame, and grows as it nears.
-    expect(Math.min(...measured.handOver.covered)).toBeGreaterThan(300);
-    expect(measured.handOver.covered.at(-1)).toBeGreaterThan(
-      5 * (measured.handOver.covered[0] ?? 0),
+    for (const band of bands) {
+      const product = largestMove(measured.handOver, band.from, band.to);
+      const control = largestMove(measured.handOverControl, band.from, band.to);
+      console.log(
+        `#617: band ${band.name}: the largest one-frame change in the picture is ` +
+          `${String(product.moved)} dithered (at ${product.out.toFixed(1)} m), ` +
+          `${String(control.moved)} with the hard swap (at ${control.out.toFixed(1)} m), ` +
+          `${(100 * (product.moved / Math.max(1, control.moved))).toFixed(1)} % of it`,
+      );
+      // The control swaps the tree whole in one frame, at THIS band — so each
+      // band is shown to be crossed, not only one — and the paced, dithered
+      // hand-over spreads that over many.
+      expect(control.moved, `band ${band.name}`).toBeGreaterThan(MINIMUM_SWAP_MOVE);
+      expect(product.moved, `band ${band.name}`).toBeLessThanOrEqual(
+        MAXIMUM_HAND_OVER_SHARE * control.moved,
+      );
+    }
+  });
+
+  test('draws the nearest tree IN THE PICTURE at full detail — #617’s review', async ({
+    harnessRun,
+  }) => {
+    const measured = await realistic(harnessRun);
+    console.log(
+      `#617: a tree 12 m ahead, with two behind the camera, adds ` +
+        `${String(measured.nearestVisibleTriangles)} triangles; ` +
+        `${String(measured.nearestVisibleTrianglesControl)} ranked as before the review`,
     );
-    expect(product.share).toBeLessThanOrEqual(MAXIMUM_HAND_OVER_STEP);
-    // The control: the same approach with the hand-over a hard swap jumps.
-    expect(control.share).toBeGreaterThan(MAXIMUM_HAND_OVER_STEP * 2);
+    // It is the full mesh — 24 000 to 28 000 triangles — and nothing else
+    // moves: the two behind the camera are impostors either way.
+    expect(measured.nearestVisibleTriangles).toBeGreaterThan(20_000);
+    // The control: ranked with the two behind the camera it is NOT the full
+    // mesh alone. It lands in band A (full and middle) and pushes the 14 m
+    // tree behind the camera from the band's full mesh down to the middle
+    // level, so the frame gains about 12 000 — measured 11 980 on
+    // 2026-09-26 — where the product's gains a whole full tree.
+    expect(measured.nearestVisibleTrianglesControl).toBeGreaterThan(1_000);
+    expect(
+      measured.nearestVisibleTriangles - measured.nearestVisibleTrianglesControl,
+    ).toBeGreaterThan(10_000);
   });
 
   test('steps down to the stylised world whole, and publishes what realism costs', async ({
@@ -2544,34 +2584,55 @@ test.describe('the realistic world — ADR 0026', () => {
 const TRIANGLES_FALL_AT_LEAST = 60_000;
 
 /**
- * The largest change in one tree's covered pixels from one frame to the next,
- * across both of its hand-overs, as a share of what it covered: **8 %** —
- * #617's "no single-frame jump", stated as a number.
+ * The most the picture may change in one frame of a hand-over, as a share of
+ * how much it changes in the one frame the hard swap takes: **0.2**. #617's
+ * "no single-frame jump", stated as a number, and measured against the swap
+ * itself so it holds for band B too — where the middle mesh and the impostor
+ * cover much the same pixels in different colours, which a covered-area count
+ * cannot see (it measured 2.5 % a frame dithered AND swapped).
  *
- * Measured on 2026-09-26 in the pinned Chromium: **5.7 %** dithered, against
- * **36.9 %** at the hard swap in the control. Part of every step is the tree
- * growing as the rider closes on it — about 3 % a frame at 6 m/s, from 16 m
- * to 6 m, in both — and part is the alpha-tested leaf cards aliasing at 400 to
- * 3 000 pixels; the dither itself adds a little over a percent a frame. The
- * control is held to twice the bound, so a bound loosened to pass a pop would
- * turn the control's side red first.
+ * Measured on 2026-09-26 in the pinned Chromium, with the rest of the picture
+ * still (every frame outside a hand-over moves nothing at all): band B
+ * **10.5 %** (12 642 against 120 906), band A **12.1 %** (11 601 against
+ * 95 689). The dithered hand-over takes ten frames either way, and the swap
+ * one. A little under twice the larger: a middle level drawn whole across band
+ * B, not dithered, measured 22.7 % and fails it.
+ *
+ * ⚠️ Until #617's review this was 8 % of a tree's COVERED AREA, measured as
+ * the tree moved; a reviewer who remembers that is reading the old file.
  */
-const MAXIMUM_HAND_OVER_STEP = 0.08;
+const MAXIMUM_HAND_OVER_SHARE = 0.2;
 
-/** The largest frame-to-frame change in a hand-over's covered area, as a share, and where. */
-function largestStep(handOver: TreeHandOver): { readonly share: number; readonly ahead: number } {
-  let share = 0;
-  let ahead = Number.NaN;
-  for (let at = 1; at < handOver.covered.length; at += 1) {
-    const before = handOver.covered[at - 1] ?? 0;
-    const after = handOver.covered[at] ?? 0;
-    const step = Math.abs(after - before) / Math.max(1, Math.max(before, after));
-    if (step > share) {
-      share = step;
-      ahead = handOver.ahead[at] ?? Number.NaN;
+/**
+ * The least the hard swap must move the picture in one frame for the control
+ * to be a swap at all: summed absolute 8-bit differences over every channel,
+ * **50 000** — measured 95 689 and 120 906 on 2026-09-26, about half the
+ * smaller.
+ */
+const MINIMUM_SWAP_MOVE = 50_000;
+
+/**
+ * The largest frame-to-frame change in the picture across a hand-over, and
+ * where — over the frames whose other trees have walked out `from` to `to`
+ * metres.
+ */
+function largestMove(
+  handOver: TreeHandOver,
+  from: number,
+  to: number,
+): { readonly moved: number; readonly out: number } {
+  let moved = 0;
+  let out = Number.NaN;
+  for (let at = 1; at < handOver.changed.length; at += 1) {
+    const where = handOver.out[at] ?? Number.NaN;
+    if (!(where >= from && where < to)) continue;
+    const step = handOver.changed[at] ?? 0;
+    if (step > moved) {
+      moved = step;
+      out = where;
     }
   }
-  return { share, ahead };
+  return { moved, out };
 }
 
 /**
