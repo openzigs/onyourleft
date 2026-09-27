@@ -18,16 +18,17 @@
  * the polyline the road's own vertices are built on — and never to the route,
  * because measuring to the route is the mistake this file exists to catch.
  *
- * ⚠️ **Up to 110° and not beyond, and that is a measured limit rather than a
- * choice.** Against the placement before #571 the nearest item at a 90°
- * corner was 0.18 m from the drawn centreline, at 110° 1.87 m and at 120°
- * 0.27 m. Since #571
- * everything up to 110° clears the carriageway in both hands (the least is
- * 4.55 m), but at 120° a scatter item still stands 2.73 m from it: `scatter.ts`
- * guards the inside of a bend only through `bandsAt`'s 30 m curvature window,
- * which reads a corner that sharp as a wider bend than the one drawn, and a
- * band folds across the other leg. That fold predates #543 — it was 1.2 m from
- * the route's own leg — and is #613, which carries the figures.
+ * ⚠️ **Up to 150° since #613, and 110° was a measured limit until then.**
+ * Against the placement before #571 the nearest item at a 90° corner was
+ * 0.18 m from the drawn centreline, at 110° 1.87 m and at 120° 0.27 m. #571
+ * cleared everything up to 110°, but beyond it a scatter item still stood in
+ * the road — 2.73 m from the centreline at 120°, 0.14 m at 135° and 150° —
+ * because `scatter.ts` guarded the inside of a bend only through `bandsAt`'s
+ * 30 m curvature window, which reads a corner that sharp as a wider bend than
+ * the one drawn, and a band folded across the other leg. #613 gave scatter the
+ * whole-road check structures already had (`road-grid.ts`
+ * §`distanceToDrawnRoad`), and its block at the end of this file holds every
+ * scatter item the full verge off the drawn road, not only off the carriageway.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -35,7 +36,7 @@ import { describe, expect, it } from 'vitest';
 import { positionAt, type RouteProfile } from '@onyourleft/domain';
 
 import { plannerCornerRoute } from './route-fixtures-testing';
-import { scatterAt, scatterSeed, type ScatterItem } from './scatter';
+import { SCATTER_VERGE_METRES, scatterAt, scatterSeed, type ScatterItem } from './scatter';
 import { BOUNDARY_PIECE_METRES, FIELD_EDGE_LATERAL_METRES, structuresAt } from './settlements';
 import {
   ROAD_WIDTH_METRES,
@@ -56,6 +57,12 @@ const NEAR_CORNER_METRES = 40;
 
 /** Half the carriageway: what "in the road" means. */
 const HALF_CARRIAGEWAY = ROAD_WIDTH_METRES / 2;
+
+/**
+ * How far inside the verge a scatter item may be measured, in metres: the
+ * chord a two-metre sample cuts off a ~10 m radius (4 cm), rounded up.
+ */
+const VERGE_TOLERANCE_METRES = 0.05;
 
 const BOUNDARIES = new Set(['wall', 'hedge', 'fence']);
 
@@ -162,6 +169,35 @@ function measure(profile: RouteProfile): Measured {
   };
 }
 
+/**
+ * The nearest any SCATTER item — a tree, a shrub, a rock or a post, nothing
+ * `settlements.ts` stands — comes to the drawn road's centreline near the
+ * corner, and how many there are.
+ */
+function scatterNearCorner(profile: RouteProfile): {
+  readonly near: number;
+  readonly closest: number;
+} {
+  const origin = corridorOrigin(profile);
+  const corridor = roadCorridor(profile, origin, CORNER_METRES, {
+    behindMetres: REACH_METRES + 20,
+    aheadMetres: REACH_METRES + 20,
+  });
+  const vertex = localGroundPosition(origin, positionAt(profile, CORNER_METRES));
+  const items = scatterAt(
+    profile,
+    origin,
+    scatterSeed(profile),
+    CORNER_METRES - REACH_METRES,
+    CORNER_METRES + REACH_METRES,
+    { maxItems: 1_000_000, riderMetres: CORNER_METRES },
+  ).filter((item) => Math.hypot(item.x - vertex.x, item.z - vertex.z) < NEAR_CORNER_METRES);
+  return {
+    near: items.length,
+    closest: Math.min(...items.map((item) => toRibbon(corridor.centre, item))),
+  };
+}
+
 describe('scenery and field boundaries at a sharp corner — #571', () => {
   const corners = [
     [45, 'right'],
@@ -215,6 +251,45 @@ describe('scenery and field boundaries at a sharp corner — #571', () => {
       for (const distance of roadside) {
         expect(distance).toBeCloseTo(FIELD_EDGE_LATERAL_METRES, 1);
       }
+    });
+  }
+});
+
+describe('scenery at a corner sharper than 110° — #613', () => {
+  // ⚠️ **The corners #571 could not hold.** Before #613 a band folded across
+  // the other leg here — 2.73 m from the drawn centreline at 120° right-hand,
+  // 0.14 m at 135° and 0.45 m at 150° — because `scatter.ts` §`bandsAt` reads
+  // a corner drawn over 20 m through a 30 m curvature window, as a wider bend
+  // than the one a rider sees.
+  const corners = [
+    [120, 'right'],
+    [120, 'left'],
+    [135, 'right'],
+    [135, 'left'],
+    [150, 'right'],
+    [150, 'left'],
+  ] as const;
+
+  for (const [degrees, hand] of corners) {
+    it(`keeps everything out of the drawn carriageway at a ${degrees}° ${hand}-hand corner`, () => {
+      const measured = measure(plannerCornerRoute(degrees, hand));
+      // Not vacuous: the corner still carries scenery after the refusal.
+      expect(measured.near).toBeGreaterThan(5);
+      expect(measured.closest).toBeGreaterThan(HALF_CARRIAGEWAY);
+      expect(measured.closestBoundary).toBeGreaterThan(HALF_CARRIAGEWAY);
+    });
+
+    it(`holds every scatter item the full verge off the drawn road at a ${degrees}° ${hand}-hand corner`, () => {
+      // ⚠️ **The verge, not only the carriageway** — the clearance a straight
+      // road gives (`scatter.ts` §`SCATTER_VERGE_METRES`), which is what the
+      // whole-road check promises. Less a centimetre: the check measures to
+      // the drawn road in two-metre chords, and a chord lies up to 4 cm inside
+      // the arc it cuts at the ~10 m radius these corners are drawn at.
+      const { near, closest } = scatterNearCorner(plannerCornerRoute(degrees, hand));
+      expect(near).toBeGreaterThan(5);
+      expect(closest).toBeGreaterThan(
+        HALF_CARRIAGEWAY + SCATTER_VERGE_METRES - VERGE_TOLERANCE_METRES,
+      );
     });
   }
 });

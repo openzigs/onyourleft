@@ -161,8 +161,10 @@ export const CORRIDOR_DENSE_AHEAD_METRES = 150;
  * corner it did not — a conifer 0.18 m from the drawn centreline, measured
  * by `corner-placement.test.ts`. The scenery, the field boundaries and the
  * buildings stand beside the DRAWN road since (see {@link drawnRoadFrame}),
- * and are clear of its carriageway to 110°; beyond that the scatter still
- * folds across the corner's other leg, which predates #543 and is #613.
+ * and are clear of its carriageway to 110°. Beyond that the scatter folded
+ * across the corner's other leg — which predated #543 — until #613 held every
+ * scatter item off ANY stretch of the drawn road (`road-grid.ts`
+ * §`distanceToDrawnRoad`); `corner-placement.test.ts` holds 150°.
  *
  * ⚠️ **The DRAWN road, never the ridden one.** A point keeps the route
  * distance it was built for (`CorridorPoint.distance`), and its height and
