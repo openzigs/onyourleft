@@ -11,10 +11,13 @@
  * package and an import back would be a workspace cycle — `camera/camera.ts`
  * gives the same reason.
  *
- * ⚠️ `capacitorRecordingServicePlugin()` runs only on a device, and the Java
- * has never run: there is no Android SDK where this was written. Validation
- * 0002 A5 (the notification) and Part C (sixty minutes with the screen off)
- * are where it is first seen working.
+ * ⚠️ `capacitorRecordingServicePlugin()` runs only on a device, so no test
+ * here reaches the Java. It HAS run since: validation 0002 A5 (the
+ * notification) and Part C (a ten-hour ride with the screen off) passed on a
+ * Pixel Tablet on 2026-09-25 — with Part C on USB power, where Doze never
+ * starts, so the battery run is still owed. `apps/web/src/ride/
+ * shell-ride-controller.test.ts` drives these adapters from the ride
+ * controller down to a scripted plugin.
  */
 
 import { registerPlugin } from '@capacitor/core';

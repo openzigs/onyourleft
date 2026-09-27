@@ -3557,6 +3557,7 @@ top of an issue **supersedes its body**.
 | Which GPX/TCX schema versions are targeted, what each format loses, and how XXE is refused | [`packages/fit/README.md`](packages/fit/README.md) §7 |
 | Why a client must create its athlete row before its first write, and why `putAthlete` is the wrong call | `apps/web/src/local-athlete.ts`, [`packages/store/README.md`](packages/store/README.md) §"`ensureAthlete`", [#184](https://github.com/openzigs/onyourleft/issues/184) |
 | How a finished ride becomes an activity, and why the checkpoint is discarded only after it is durable | `apps/web/src/recording/finish.ts`, `apps/web/src/ride/controller.ts` §`saveTheRide` |
+| What keeps an Android ride alive with the screen off, what a refused or throwing plugin does to the ride, and what proves `main.tsx` still hands the service over | `apps/web/src/ride/keep-alive-port.ts`, `apps/web/src/ride/controller.ts` §`syncKeepAlive`, §`quietly`, `apps/web/src/ride/shell-ride-controller.ts`, [#524](https://github.com/openzigs/onyourleft/issues/524) |
 | How a rider records a second ride after stopping one, and when that is refused | `apps/web/src/ride/controller.ts` §`canStartNewRide`, §`startNewRide`, [#548](https://github.com/openzigs/onyourleft/issues/548) |
 | Why a ride the rider already stopped is not offered back to be continued | `apps/web/src/recording/recovery.ts`, `apps/web/src/ride/controller.ts` §`continueRecovered` |
 | Why the offer says "up to" a length rather than a length | `apps/web/src/recording/recovery.ts` §"What this deliberately does not read" |
