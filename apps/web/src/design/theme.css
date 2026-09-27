@@ -30,6 +30,11 @@
   --oyl-color-accent: #0b5c55;
   --oyl-color-accent-hover: #07443f;
   --oyl-color-accent-ink: #ffffff;
+  /* A link in running text, one per state (#661) — see the `a` rules below. */
+  --oyl-color-link: #0b5c55;
+  --oyl-color-link-visited: #5b3a8c;
+  --oyl-color-link-hover: #07443f;
+  --oyl-color-link-active: #042e2a;
   --oyl-color-focus: #141b1a;
 
   /* The ride HUD (#94). Opaque, so its contrast does not depend on the 3D
@@ -191,6 +196,50 @@ h3:first-child {
   outline: 3px solid var(--oyl-color-focus);
   outline-offset: 2px;
   border-radius: var(--oyl-radius);
+}
+
+/*
+ * A link — #661. Until this block there was no rule for a plain `a`, so every
+ * link in running text was the browser's own `rgb(0, 0, 238)`: a colour no
+ * token supplies, and so a colour the contrast suite could never check.
+ *
+ * ⚠️ **`:where()`, so every selector here has no specificity at all.** A link
+ * that is something else — `.oyl-button`, `.oyl-nav-link`, `.oyl-skip-link`,
+ * `.oyl-subnav-link` — is painted by its own class, and a bare `a:visited` or
+ * `a:hover` is (0,1,1), which beats a single class: a visited "Ride" button
+ * would have turned purple on a teal fill. Written this way, any class wins.
+ *
+ * The order is the one the cascade needs when specificity ties — visited,
+ * then hover and keyboard focus, then a press — so a visited link still
+ * darkens under a pointer and a press always shows.
+ *
+ * ⚠️ **Underlined in every state, and never only coloured** (WCAG 2.2 SC
+ * 1.4.1). Inside a status message a link is within a shade of the message's
+ * own ink — `link` beside `infoInk` is a hue a reader cannot be asked to tell
+ * apart — so the line is what says "link" and the colour only confirms it.
+ * Hover and focus thicken the line rather than remove it.
+ *
+ * `browser/links.browser.spec.ts` reads the computed colour of every link on
+ * every route, and its control is this block taken out of the stylesheet.
+ */
+:where(a) {
+  color: var(--oyl-color-link);
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.15em;
+}
+
+:where(a:visited) {
+  color: var(--oyl-color-link-visited);
+}
+
+:where(a:hover, a:focus-visible) {
+  color: var(--oyl-color-link-hover);
+  text-decoration-thickness: 2px;
+}
+
+:where(a:active) {
+  color: var(--oyl-color-link-active);
 }
 
 /*

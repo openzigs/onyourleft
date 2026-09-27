@@ -98,12 +98,42 @@ export const COLOUR_TOKENS = {
   ink: '#141b1a',
   /** Secondary text: captions, helper text, the "nothing here yet" line. */
   inkMuted: '#4a5b5c',
-  /** The one accent: primary buttons, links, the active navigation item. */
+  /**
+   * The one accent: primary buttons, the active navigation item. A link in
+   * running text is `link` since #661, which has the same value today.
+   */
   accent: '#0b5c55',
   /** The accent under a pointer or a press. */
   accentHover: '#07443f',
   /** Text and glyphs drawn on `accent` or `accentHover`. */
   accentInk: '#ffffff',
+
+  /*
+   * A link in running text, one token per state (#661).
+   *
+   * ⚠️ Until #661 there were none. `accent`'s comment said it was for links
+   * while no rule in `theme.css` painted a plain `a` at all, so every inline
+   * link was the browser's own `rgb(0, 0, 238)` — a colour no token supplies,
+   * which is why the contrast suite, a walk over token pairs, could not see it.
+   *
+   * Four tokens rather than `accent` reused, so that a second palette (#654's
+   * dark theme) can give links values of their own without also moving every
+   * primary button. `link` and `linkHover` carry `accent`'s and `accentHover`'s
+   * values today; they are separate names, not aliases.
+   *
+   * Colour is never the only signal: `theme.css` underlines a link in every
+   * state (WCAG 2.2 SC 1.4.1), because inside a status message a link's colour
+   * is within a shade of the message's own ink. Each of the four is paired with
+   * every surface in `LINK_SURFACES` — see `LINK_CONTRAST_MEASURED`.
+   */
+  /** An unvisited link at rest. */
+  link: '#0b5c55',
+  /** A link to somewhere this browser has been. */
+  linkVisited: '#5b3a8c',
+  /** A link under a pointer, or focused from the keyboard. */
+  linkHover: '#07443f',
+  /** A link while it is being pressed. */
+  linkActive: '#042e2a',
   /**
    * The focus indicator.
    *
@@ -367,6 +397,130 @@ export interface ContrastRequirement {
   readonly where: string;
 }
 
+/** The four states a link in running text is painted in (#661). */
+export const LINK_STATE_TOKENS = ['link', 'linkVisited', 'linkHover', 'linkActive'] as const;
+
+/** A link state's token. */
+export type LinkStateToken = (typeof LINK_STATE_TOKENS)[number];
+
+/**
+ * Every surface a link in running text can sit on (#661).
+ *
+ * The four rungs of the elevation ramp and the four status messages, which is
+ * every light surface `theme.css` paints. ⚠️ **Not `hudSurface`, and not the
+ * `ink` the ride stage and the camera's picture are drawn on**: no link is
+ * rendered on either today, and `browser/links.browser.spec.ts` reads the
+ * surface behind every link it renders and fails on a pair not declared in
+ * {@link CONTRAST_REQUIREMENTS} — so the first link that lands on a dark
+ * surface is a red build naming the pair to add, rather than a pair declared
+ * here for a link nobody drew.
+ */
+export const LINK_SURFACES = [
+  'canvas',
+  'surface',
+  'surfaceRaised',
+  'surfaceOverlay',
+  'infoSurface',
+  'successSurface',
+  'warningSurface',
+  'dangerSurface',
+] as const satisfies readonly ColourToken[];
+
+/** A surface a link can sit on. */
+export type LinkSurface = (typeof LINK_SURFACES)[number];
+
+/**
+ * What each link state measures on each surface, to two decimal places — the
+ * {@link ContrastRequirement.measured} of thirty-two pairs, written as a table
+ * because thirty-two object literals would bury the one column that differs.
+ *
+ * The same erosion gate applies: `contrast.a11y.test.ts` requires every cell
+ * to equal the computed ratio in both directions. The tightest is `link` on
+ * `surfaceOverlay`, at 5.90 — what `accent` on `surfaceOverlay` already
+ * recorded, because it is the same value.
+ *
+ * ## What a dark palette would owe here
+ *
+ * #654's dark theme would be a second set of values for these same token
+ * names, applied by a `prefers-color-scheme` block and a manual override in
+ * `theme.css`. It would need its own copy of this table — every state against
+ * every surface of the dark palette — because a ratio is a property of a pair
+ * of VALUES, and these are the light palette's. Nothing here is shaped to stop
+ * that: the states and the surfaces are names, and only the numbers are light.
+ */
+export const LINK_CONTRAST_MEASURED: Readonly<
+  Record<LinkStateToken, Readonly<Record<LinkSurface, number>>>
+> = {
+  link: {
+    canvas: 7.85,
+    surface: 7.15,
+    surfaceRaised: 6.48,
+    surfaceOverlay: 5.9,
+    infoSurface: 6.74,
+    successSurface: 6.77,
+    warningSurface: 6.9,
+    dangerSurface: 6.65,
+  },
+  linkVisited: {
+    canvas: 8.65,
+    surface: 7.88,
+    surfaceRaised: 7.14,
+    surfaceOverlay: 6.51,
+    infoSurface: 7.43,
+    successSurface: 7.46,
+    warningSurface: 7.6,
+    dangerSurface: 7.33,
+  },
+  linkHover: {
+    canvas: 11.01,
+    surface: 10.03,
+    surfaceRaised: 9.09,
+    surfaceOverlay: 8.28,
+    infoSurface: 9.45,
+    successSurface: 9.49,
+    warningSurface: 9.68,
+    dangerSurface: 9.34,
+  },
+  linkActive: {
+    canvas: 14.69,
+    surface: 13.39,
+    surfaceRaised: 12.13,
+    surfaceOverlay: 11.06,
+    infoSurface: 12.62,
+    successSurface: 12.67,
+    warningSurface: 12.92,
+    dangerSurface: 12.46,
+  },
+};
+
+/** How a failure names a link state. */
+const LINK_STATE_WORDS: Readonly<Record<LinkStateToken, string>> = {
+  link: 'link text',
+  linkVisited: 'a visited link',
+  linkHover: 'a link under a pointer or focused from the keyboard',
+  linkActive: 'a link being pressed',
+};
+
+/**
+ * {@link LINK_CONTRAST_MEASURED} as requirements, one per state and surface.
+ *
+ * ⚠️ It spreads whatever the table holds rather than every state by every
+ * surface, so a cell deleted from the table (a type error, and an `undefined`
+ * under a runner that does not typecheck) is a pair missing from the list —
+ * which `contrast.a11y.test.ts` §"every link state is paired with every link
+ * surface" is what notices.
+ */
+const LINK_CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = LINK_STATE_TOKENS.flatMap(
+  (state) =>
+    LINK_SURFACES.filter((surface) => surface in LINK_CONTRAST_MEASURED[state]).map((surface) => ({
+      foreground: state,
+      background: surface,
+      minimum: AA_TEXT,
+      measured: LINK_CONTRAST_MEASURED[state][surface],
+      where: `${LINK_STATE_WORDS[state]} on ${surface}`,
+    })),
+);
+
 /**
  * Every foreground/background pair the design system actually places together.
  *
@@ -626,4 +780,41 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     measured: 6.63,
     where: 'the edge of an error message',
   },
+
+  /*
+   * The focus ring on a status message (#661). A link inside a message is
+   * focusable, and its ring is offset onto the message's own surface — a pair
+   * nothing declared until a link in a message was painted on purpose.
+   */
+  {
+    foreground: 'focus',
+    background: 'infoSurface',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: 15.01,
+    where: 'the focus ring round a link in an info message (WCAG 2.2 SC 2.4.13)',
+  },
+  {
+    foreground: 'focus',
+    background: 'successSurface',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: 15.07,
+    where: 'the focus ring round a link in a success message (WCAG 2.2 SC 2.4.13)',
+  },
+  {
+    foreground: 'focus',
+    background: 'warningSurface',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: 15.37,
+    where: 'the focus ring round a link in a warning message (WCAG 2.2 SC 2.4.13)',
+  },
+  {
+    foreground: 'focus',
+    background: 'dangerSurface',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: 14.82,
+    where: 'the focus ring round a link in an error message (WCAG 2.2 SC 2.4.13)',
+  },
+
+  // #661: every link state on every link surface.
+  ...LINK_CONTRAST_REQUIREMENTS,
 ];
