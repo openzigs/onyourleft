@@ -920,6 +920,18 @@ apps/                 AGPL-3.0-or-later, without exception
                         this file's too; the stylised one is still Kenney's
     src/game/seeded.ts  the hash every seeded, stateless placement draws from —
                         moved out of `scatter.ts` by #458, unchanged to the bit
+    src/game/instance-tint.ts
+                        the realistic world's seeded per-instance tint (#621) —
+                        hue, saturation and brightness drawn from `seeded.ts`,
+                        keyed by where an item stands, bounded HERE because
+                        `SCENERY_PALETTE` does not cover the realistic path
+                        (ADR 0026 D-10), and carried as ONE float in the
+                        instance colour's third channel. ⚠️ A tree's first two
+                        channels are its #617 hand-over keep, so
+                        `three-renderer.ts` §`withInstanceChannels` takes
+                        three's own tint by the instance colour out of every
+                        realistic material; the stylised belt allocates no
+                        instance colour at all
     src/game/route-fixtures-testing.ts
                         routes built from arithmetic for the landform, the water
                         and the settlements to be asserted over — a hill, a
@@ -4042,6 +4054,7 @@ top of an issue **supersedes its body**.
 | How bright the HDRI's environment is, and which way its sun faces | `apps/web/src/game/realistic-light.ts` §`environmentIntensity`, §`skyRotation` |
 | Why the realistic world's far hills and fog meet the photographed sky rather than the stylised haze, and why the ridge is lifted above the photograph's own skyline and so moves up and down with the rider on nearly every frame | `apps/web/src/game/realistic-light.ts` §`drawnHorizonColour`, §`REALISTIC_SKYLINE_DEGREES`, §`skylineCrestFloor`, §`ridgeLift`, `apps/web/src/game/three-renderer.ts` §`HorizonRing`, `game.browser.spec.ts` §"#544", [#544](https://github.com/openzigs/onyourleft/issues/544) |
 | Why the realistic bicycle is built from numbers, and how the MakeHuman body pedals | `apps/web/src/game/bicycle.ts` §"Two riders now", §`riderJoints`, `three-renderer.ts` §`RealisticRiderBelt` |
+| Why two realistic trees or houses of one shape are not the same colour, how far the tint may move, and why a tree's levels cannot disagree about it | `apps/web/src/game/instance-tint.ts` §`FOLIAGE_TINT`, §`MASONRY_TINT`, `three-renderer.ts` §`withInstanceChannels`, `apps/web/browser/game-harness.ts` §`tintProbe`, [#621](https://github.com/openzigs/onyourleft/issues/621) |
 | Why the realistic structures are built from numbers and wear CC0 photographs, and why a house is two belts | `apps/web/src/game/realistic-assets.ts` §`REALISTIC_STRUCTURE_SURFACES`, `three-renderer.ts` §`RealisticStructureBelts`, [#475](https://github.com/openzigs/onyourleft/issues/475) |
 | Why the water stays a shader in the realistic world, and what it reflects there | `apps/web/src/game/three-renderer.ts` §`WaterBelt.update`, `realistic-light.ts` §`reflectedSkyColour` |
 | What frame rate each rung of the quality ladder draws at, and why the top TWO are the display's own | `apps/web/src/game/quality.ts` §`QUALITY_LADDER` "The owner's rulings", [#476](https://github.com/openzigs/onyourleft/issues/476), [#482](https://github.com/openzigs/onyourleft/issues/482) |
