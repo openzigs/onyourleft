@@ -150,17 +150,57 @@ export function isHiddenFromAssistiveTechnology(element: Element): boolean {
 }
 
 /**
- * The keyboard tab order of a document, in order.
+ * Whether this is the summary of its parent `<details>` — the FIRST `<summary>`
+ * child, which the HTML standard calls "the summary for its parent details".
  *
- * Only `tabindex="0"` and the natively focusable elements appear. A positive
- * `tabindex` would reorder the sequence, so rather than model that here it is
- * simply banned by `no-positive-tabindex` — WCAG's own advice, and the reason
- * this function can return document order and be right.
+ * That one element is the disclosure's control: it is focusable with no
+ * `tabindex`, it opens and closes the element, and it is rendered whether the
+ * `<details>` is open or closed. Any other `<summary>` — a second one, or one
+ * with no `<details>` parent — is ordinary content with no activation
+ * behaviour, and is not in the HTML standard's list of focusable areas.
  */
-export function tabbableElements(root: Document | Element): HTMLElement[] {
+function isDetailsSummary(element: Element): boolean {
+  const parent = element.parentElement;
+  if (element.tagName !== 'SUMMARY' || parent?.tagName !== 'DETAILS') {
+    return false;
+  }
+  return [...parent.children].find((child) => child.tagName === 'SUMMARY') === element;
+}
+
+/**
+ * Whether a closed `<details>` somewhere above this element leaves it
+ * unrendered (#665).
+ *
+ * A `<details>` without the `open` attribute renders its own first `<summary>`
+ * and nothing else: the rest of its content is not laid out, so no browser can
+ * tab to it. The walk goes all the way up, because a link inside an OPEN
+ * `<details>` that is itself inside a closed one is not rendered either, and
+ * nor is the summary of that inner `<details>`. The one exception at each level
+ * is the closed element's own first summary — and anything inside that summary,
+ * which is rendered with it.
+ */
+function collapsedByDetails(element: Element): boolean {
+  for (let node: Element = element; node.parentElement !== null; node = node.parentElement) {
+    const parent = node.parentElement;
+    if (parent.tagName === 'DETAILS' && !parent.hasAttribute('open') && !isDetailsSummary(node)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * The tab stops of a document, in order, with or without every `<details>`
+ * taken as it is. `disclosed` answers "if the rider opened every disclosure",
+ * which is the question `interactive-role-is-focusable` asks.
+ */
+function tabStops(root: Document | Element, disclosed: boolean): HTMLElement[] {
   const candidates = [...root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)];
   return candidates.filter((element) => {
     if (removedFromTabOrder(element) || isHiddenFromAssistiveTechnology(element)) {
+      return false;
+    }
+    if (!disclosed && collapsedByDetails(element)) {
       return false;
     }
     if (element.tagName === 'INPUT' && element.getAttribute('type') === 'hidden') {
@@ -170,8 +210,43 @@ export function tabbableElements(root: Document | Element): HTMLElement[] {
     if (tabindex !== null && Number.parseInt(tabindex, 10) < 0) {
       return false;
     }
+    if (tabindex === null && element.tagName === 'SUMMARY' && !isDetailsSummary(element)) {
+      return false;
+    }
     return true;
   });
+}
+
+/**
+ * The keyboard tab order of a document, in order.
+ *
+ * Only `tabindex="0"` and the natively focusable elements appear. A positive
+ * `tabindex` would reorder the sequence, so rather than model that here it is
+ * simply banned by `no-positive-tabindex` — WCAG's own advice, and the reason
+ * this function can return document order and be right.
+ *
+ * Two rules sit beside #255's `aria-disabled` note in
+ * {@link removedFromTabOrder}, and they have the same reason: it is the tab
+ * order a real browser produces that is being modelled, and a model that
+ * disagrees with the browser makes every keyboard test built on it describe a
+ * page nobody can use, and pass.
+ *
+ * - **A closed `<details>` hides its content from the tab order (#665).**
+ *   Everything inside a `<details>` without `open` is excluded except that
+ *   element's own FIRST `<summary>` child (and what is inside it), however
+ *   deeply nested — see {@link collapsedByDetails}. The content slot of a
+ *   closed disclosure is not rendered, so no browser tabs into it. ⚠️ This is a
+ *   TAB-ORDER question only: {@link isHiddenFromAssistiveTechnology} is
+ *   deliberately unchanged, and `interactive-role-is-focusable` asks whether a
+ *   control would be reachable once its disclosures are opened, because a link
+ *   tucked in a closed `<details>` is reached by opening the summary first.
+ * - **Only a `<details>`' first `<summary>` is focusable by its tag.** A second
+ *   `<summary>`, or one outside any `<details>`, is ordinary content per the
+ *   HTML standard's list of focusable areas, and is excluded unless it carries
+ *   a `tabindex` of its own — see {@link isDetailsSummary}.
+ */
+export function tabbableElements(root: Document | Element): HTMLElement[] {
+  return tabStops(root, false);
 }
 
 function textOf(element: Element): string {
@@ -292,6 +367,10 @@ function landmarkName(element: Element): string {
 /** Every element that claims to be a control, native or ARIA. */
 function interactiveElements(root: Document | Element): Element[] {
   return [...root.querySelectorAll('*')].filter((element) => {
+    if (element.tagName === 'SUMMARY') {
+      // Only a `<details>`' own summary is a control; any other is text.
+      return isDetailsSummary(element);
+    }
     if (NATIVELY_INTERACTIVE.has(element.tagName)) {
       return true;
     }
@@ -452,7 +531,9 @@ const noPositiveTabindex: Rule = (doc) =>
     }));
 
 const interactiveRoleIsFocusable: Rule = (doc) => {
-  const tabbable = new Set<Element>(tabbableElements(doc));
+  // Reachable once every disclosure is opened: a control tucked in a closed
+  // `<details>` is reached through its summary, and is not a keyboard trap.
+  const tabbable = new Set<Element>(tabStops(doc, true));
   return interactiveElements(doc)
     .filter((element) => !isHiddenFromAssistiveTechnology(element))
     .filter((element) => !isDisabled(element))
