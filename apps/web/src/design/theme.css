@@ -1295,9 +1295,14 @@ label > input[type='radio'] {
    `:where()` holds it at zero specificity, so a class on the input still sets
    its size — `.oyl-input--file` below, on Transfer's two file inputs. As a
    plain `input[type='file']` (0,1,1) it outranked that class (0,1,0) and the
-   class's `font-size` was dead. */
+   class's `font-size` was dead.
+   ⚠️ `max-width` is #660's rule meeting this one: the page's font and the
+   44 px button made the input wider than a 320 px phone, and
+   `reflow.browser.spec.ts` measured Routes and Workouts scrolling sideways by
+   37 px until it was here. */
 :where(input[type='file']) {
   font: inherit;
+  max-width: 100%;
 }
 
 input[type='file']::file-selector-button {
