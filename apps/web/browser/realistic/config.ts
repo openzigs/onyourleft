@@ -20,11 +20,30 @@
  * | `soak` | minutes to keep riding, one sample a minute | default 0 |
  * | `at` | hold the rider still this far along the route, for a screenshot | metres |
  * | `panel` | the on-screen controls | `1` (default), `0` for a clean screenshot |
+ * | `layers` | layers switched OFF, for their share of the GPU (#616) | `-sky`, `-surfaces`, `-vegetation`, `-impostors`, `-structures`, `-water`, `-riders`, comma-separated; default none |
  *
  * ⚠️ **Unknown parameters and values are REFUSED**, as #457's page refused
  * them: a typo in a soak URL would otherwise measure the default under another
  * name, and a table of numbers cannot show that it did.
  */
+
+/**
+ * The layers `?layers=` can switch off — #616. What each one holds, in both
+ * worlds, is `layers.ts` §`LAYER_OWNERS`; turning one off hides it in whichever
+ * world is drawn and replaces it with nothing, and never moves the rung.
+ */
+export const LAYERS = [
+  'sky',
+  'surfaces',
+  'vegetation',
+  'impostors',
+  'structures',
+  'water',
+  'riders',
+] as const;
+
+/** One of {@link LAYERS}. */
+export type Layer = (typeof LAYERS)[number];
 
 /** One configuration of the page. */
 export interface RealisticPageConfig {
@@ -35,6 +54,8 @@ export interface RealisticPageConfig {
   readonly soakMinutes: number;
   readonly at: number | undefined;
   readonly panel: boolean;
+  /** The layers switched off, in {@link LAYERS}' order, each at most once — #616. */
+  readonly layersOff: readonly Layer[];
 }
 
 /** The ride the owner is asked to look at: the realistic world, the ladder running. */
@@ -46,9 +67,35 @@ export const DEFAULT_CONFIG: RealisticPageConfig = {
   soakMinutes: 0,
   at: undefined,
   panel: true,
+  layersOff: [],
 };
 
-const KNOWN = new Set(['world', 'rung', 'ladder', 'seconds', 'soak', 'at', 'panel']);
+const KNOWN = new Set(['world', 'rung', 'ladder', 'seconds', 'soak', 'at', 'panel', 'layers']);
+
+/**
+ * `?layers=-vegetation,-water` as the layers it switches off — #616.
+ *
+ * ⚠️ Every entry is a `-` and a name from {@link LAYERS}, and anything else is
+ * REFUSED, for the reason every other parameter here is: a typo in a layer's
+ * name would otherwise measure every layer on under the name of one that was
+ * off, and a row of numbers cannot show that it did. Only `-` exists, because
+ * every layer is on unless the URL says otherwise.
+ */
+function layersFrom(value: string | null): readonly Layer[] {
+  if (value === null) return [];
+  const off = new Set<Layer>();
+  for (const entry of value.split(',')) {
+    const name = entry.startsWith('-') ? entry.slice(1) : undefined;
+    const layer = LAYERS.find((each) => each === name);
+    if (layer === undefined) {
+      throw new Error(
+        `realistic: layers is a comma-separated list of -${LAYERS.join(', -')}, not "${value}"`,
+      );
+    }
+    off.add(layer);
+  }
+  return LAYERS.filter((layer) => off.has(layer));
+}
 
 /** A configuration from a query string. @see RealisticPageConfig */
 export function parseConfig(search: string): RealisticPageConfig {
@@ -84,6 +131,7 @@ export function parseConfig(search: string): RealisticPageConfig {
     soakMinutes: atLeast('soak', 0, 0),
     at: params.has('at') ? atLeast('at', 0, 0) : undefined,
     panel: oneOf('panel', ['1', '0'] as const, '1') === '1',
+    layersOff: layersFrom(params.get('layers')),
   };
 }
 
@@ -97,6 +145,9 @@ export function configQuery(config: RealisticPageConfig): string {
   if (config.soakMinutes !== 0) params.set('soak', String(config.soakMinutes));
   if (config.at !== undefined) params.set('at', String(config.at));
   if (!config.panel) params.set('panel', '0');
+  if (config.layersOff.length > 0) {
+    params.set('layers', config.layersOff.map((layer) => `-${layer}`).join(','));
+  }
   const query = params.toString();
   return query === '' ? '' : `?${query}`;
 }
