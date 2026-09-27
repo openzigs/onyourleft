@@ -51,8 +51,17 @@
  * of a 1.7 m blob is 8 cm under the road surface and the depth test hides it —
  * which is where the wheel is buried too. And it is one ellipse for a shape
  * that is not one: a rider's shadow has a head and two wheels in it. The shadow
- * MAP rung (`quality.ts` §`RIDER_SHADOW_MAP_RUNG`) is what draws the real shape,
- * and it is off by default.
+ * MAP rung (`quality.ts` §`RIDER_SHADOW_MAP_RUNG`) is what draws the real shape.
+ *
+ * ## ⚠️ The FALLBACK since #547
+ *
+ * A reviewer who remembers the blob as what every ride draws is reading the old
+ * file. The owner ruled *"use bike shaped shadow over blob"* after validation
+ * 0002 Part T, so a STYLISED ride starts on the map rung and draws this only
+ * after the ladder's first step down, which takes the map for the rest of that
+ * ride (`quality.ts` §`keepsShadowMap`). It is still what every other rung
+ * draws, what the realistic world draws, and what a device that turned the map
+ * off draws.
  *
  * Pure: no `three`, no clock, no DOM. `three-seam.test.ts` keeps it that way.
  */
@@ -70,6 +79,13 @@ import type { SunStyle } from './world';
  * Which riders cast a contact shadow. ⚠️ The ghost does not — see the module
  * note §"Who casts one". Keyed by kind, so a fourth marker kind is a compile
  * error here rather than a rider that silently casts or does not.
+ *
+ * ⚠️ **Since #547 it is the shadow MAP's rule too**, read by
+ * `three-renderer.ts` §`RiderBelt`, which hands the map's pass the casters
+ * only. Until then the ghost cast a real shadow on the map rung — it shares
+ * the rider's meshes, and `castShadow` belongs to a mesh — and nobody saw it,
+ * because the map was a rung only a device that asked for it drew. The name
+ * is kept because #93's rule is older than the map.
  */
 export const CASTS_CONTACT_SHADOW: Readonly<Record<RiderMarker['kind'], boolean>> = {
   rider: true,

@@ -223,10 +223,13 @@ export interface QualitySettings {
    *   quad a few hundred pixels across is not what a throttling phone is
    *   short of, and a rider floating over the road is the defect #426 is.
    * - `'map'` — a real shadow map, cast by the riders only, received by a
-   *   shadow-catching plane under them. **On no rung of the ladder**: it is
-   *   {@link RIDER_SHADOW_MAP_RUNG}, above the top, which a rider has to ask
-   *   for and the ladder takes away first. #426 says ship it only as a rung,
-   *   off by default on the device floor, until it is measured there.
+   *   shadow-catching plane under them. **On no rung of the ladder itself**:
+   *   it is {@link RIDER_SHADOW_MAP_RUNG}, the full rung with the map, which
+   *   every STYLISED ride starts on since #547 and the ladder takes away
+   *   first. ⚠️ A reviewer who remembers "a rider has to ask for it" is
+   *   reading the old file: the owner ruled *"use bike shaped shadow over
+   *   blob"* after validation 0002 Part T, and a device now has to ask for it
+   *   to be OFF ({@link RIDER_SHADOW_MAP_STORAGE_KEY}).
    * - `'none'` — nothing. On no rung either; it is what the browser gate
    *   renders to prove the contact shadow is what darkened the road, and what
    *   a probe that measures the RIDER uses so the shadow is not counted as
@@ -791,29 +794,43 @@ export function qualitySettings(level: QualityLevel): QualitySettings {
 }
 
 /**
- * The top rung with a real shadow map for the riders — #426's second half.
+ * The top rung with a real shadow map for the riders — #426's second half, and
+ * since #547 **what every stylised ride starts on**.
+ *
+ * ## Which rungs keep the map — #547's decision
+ *
+ * **This one, and no other.** A stylised ride starts here unless the device
+ * has turned the map off ({@link readShadowMapChoice}); the first reduction
+ * the ladder takes — thermal or frame time, the same two signals as every
+ * other rung — lands on level 1, which has no map, and {@link keepsShadowMap}
+ * keeps it off for the rest of that ride however cool the device gets. So the
+ * map is still the FIRST thing given up, which is where #426 put it, and
+ * #547's owner ruling moves only where a ride starts. Level 1 does not keep
+ * it, on the evidence rather than against it: Part T measured the map as
+ * costing nothing in steady state on the Pixel Tablet, and nothing on any
+ * device where the ladder has already stepped down once — T5, twenty minutes
+ * with the map on, is not run yet. A device warm enough to step down is the
+ * device that measurement has not spoken for.
  *
  * ## Why it is above the ladder rather than on it
  *
- * #426: *"Measure (2) and ship it only as a rung on `quality.ts`'s ladder,
- * off by default on the device floor."* {@link QUALITY_LADDER} starts every
- * ride at level 0 and climbs back to it whenever a device runs cool, so a
- * shadow map at level 0 would be ON by default everywhere, and one inserted
- * above it would be climbed to by any cool device, the floor included. So it
- * is a rung the ladder never reaches by itself: a rider who asks for it
- * starts here, and the first reduction the ladder takes — thermal or frame
- * time, the same two signals as every other rung — is to level 1, which has
- * no shadow map. It is the first thing given up, which is where #426 puts it.
+ * {@link QUALITY_LADDER} climbs back to level 0 whenever a device runs cool,
+ * so a map ON level 0 would be re-entered by every cool device after a step
+ * down — each entry a rebuild of every lit program, which is a stall, which is
+ * a frame-time spike that pushes the ladder down again (#448's review). A rung
+ * the ladder never climbs to by itself is what makes the drop one-way: a ride
+ * starts here, and leaves at its first step down for good.
  *
  * ⚠️ **It is the full rung with one field changed**, so a measurement of it
  * against level 0 is a measurement of the shadow map and nothing else.
  *
- * ⚠️ **Nothing measured it on a device yet.** The browser gate publishes what
- * it costs in the pinned Chromium on a software rasteriser, which says nothing
- * about a phone; `docs/validation/0002-android-shell-and-game.md` Part T is
- * the procedure, with its tables empty. Whether this stays, becomes a default
- * on some devices, or is removed as "measured, not worth it" is that
- * measurement's to decide. How a rider asks for it: {@link rungFor}.
+ * ⚠️ **The start of a ride used to stall with it**: Part T's first 12 s on the
+ * tablet had a GPU 99th percentile of 4 950 ms. `three-renderer.ts`
+ * §`prepare` compiles every program the rung draws with — the shadow pass's
+ * included — before the ride's first frame, and `GameView` draws no world
+ * until it has; `game.browser.spec.ts` §"#547" counts the programs linked in
+ * the first frames with and without it. How a rider turns it off: nowhere on a
+ * screen — {@link RIDER_SHADOW_MAP_STORAGE_KEY} says why.
  */
 export const RIDER_SHADOW_MAP_RUNG: QualitySettings = {
   ...(QUALITY_LADDER[0] as QualitySettings),
@@ -823,7 +840,7 @@ export const RIDER_SHADOW_MAP_RUNG: QualitySettings = {
 
 /**
  * The settings a ride draws with at a level — {@link qualitySettings}, except
- * that a rider who asked for the shadow map gets {@link RIDER_SHADOW_MAP_RUNG}
+ * that a ride that still has the shadow map gets {@link RIDER_SHADOW_MAP_RUNG}
  * in place of level 0, and loses it the moment the ladder steps down.
  * Whether it ever comes back that ride is {@link keepsShadowMap}'s: it does not.
  */
@@ -832,7 +849,7 @@ export function rungFor(level: QualityLevel, shadowMap: boolean): QualitySetting
 }
 
 /**
- * Whether a ride that wanted the shadow map still wants it at this level —
+ * Whether a ride that started with the shadow map still has it at this level —
  * the LATCH that makes "the first thing given up" stay given up.
  *
  * ⚠️ **{@link rungFor} alone would flap, and did until #448's review.** The
@@ -844,6 +861,10 @@ export function rungFor(level: QualityLevel, shadowMap: boolean): QualitySetting
  * again. So once any step down has been seen, the answer is `false` for the
  * rest of the ride, whatever the level does next.
  *
+ * ⚠️ **Unchanged by #547**, and it matters more now: the map being the default
+ * makes every stylised ride one that can lose it, where before #547 only a
+ * device that asked could.
+ *
  * Fed its own previous answer on every level change — `GameView` holds it in
  * a ref and re-reads the device's choice only when a ride STARTS, which is
  * what resets the latch. Pure: the state is the caller's.
@@ -853,26 +874,39 @@ export function keepsShadowMap(wanted: boolean, level: QualityLevel): boolean {
 }
 
 /**
- * Where a rider's request for the shadow map is kept: THIS device's
+ * Where a device that does NOT want the shadow map says so: THIS device's
  * `localStorage`, the way `hud/announce-preference.ts` keeps announcements —
  * a GPU is a property of the device, not of the athlete.
  *
+ * ⚠️ **Inverted by #547, and a reviewer who remembers `"on"` asking for the map
+ * is reading the old file.** The map is the stylised world's default now, and
+ * only the value {@link SHADOW_MAP_OFF} turns it off; `"on"`, which Part T of
+ * validation 0002 used to set, is simply the default again. The key is kept,
+ * name and all, because Part T3 still has to measure the map OFF on the same
+ * build, and a device that set `"on"` for Part T4 must not find it off.
+ *
  * ⚠️ **There is no control for it on any screen, deliberately.** It exists to
- * be MEASURED (Part T of validation 0002 sets it through
- * `apps/mobile/tools/webview-probe.mjs`), and a Settings switch offering a
- * rider a feature nobody has measured on their device would be offering them
- * a hot phone. A control is the measurement's to add.
+ * be MEASURED (validation 0002 Part T sets it through
+ * `apps/mobile/tools/webview-probe.mjs`). A Settings switch is a product
+ * decision #547 did not ask for.
  */
 export const RIDER_SHADOW_MAP_STORAGE_KEY = 'oyl.game.riderShadowMap';
 
-/** Whether this device has asked for the shadow map. Any failure to read is "no". */
+/** The one value of {@link RIDER_SHADOW_MAP_STORAGE_KEY} that turns the map off — #547. */
+export const SHADOW_MAP_OFF = 'off';
+
+/**
+ * Whether this device draws the shadow map on a stylised ride — yes, unless it
+ * stored {@link SHADOW_MAP_OFF}. Any failure to read is the default, which is
+ * yes: a storage a browser has blocked is not a device asking for less.
+ */
 export function readShadowMapChoice(
   storage: { getItem(key: string): string | null } | undefined,
 ): boolean {
   try {
-    return storage?.getItem(RIDER_SHADOW_MAP_STORAGE_KEY) === 'on';
+    return storage?.getItem(RIDER_SHADOW_MAP_STORAGE_KEY) !== SHADOW_MAP_OFF;
   } catch {
-    return false;
+    return true;
   }
 }
 

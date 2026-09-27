@@ -37,7 +37,7 @@
  * would pass against a renderer that never set it.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   altitudeMetres,
@@ -104,7 +104,10 @@ import {
   loadSceneryModels,
   prepareSceneryGeometry,
   RealisticStructureBelts,
+  PREPARE_FENCE_LIMIT_MS,
   RiderBelt,
+  gpuFinished,
+  programsLinked,
   SCATTER_INSTANCE_CAPACITY,
   sceneryFitMetres,
   SCATTER_LATERAL_METRES,
@@ -2684,6 +2687,49 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
     belt.dispose();
   });
 
+  it('leaves the ghost out of the shadow map’s pass, and in the picture — #547', () => {
+    // #93 and `contact-shadow.ts` §`CASTS_CONTACT_SHADOW`: the ghost casts no
+    // shadow. It is an instance in the same four meshes as the rider and the
+    // pacer and `castShadow` is a mesh's, so the pass is handed the casters —
+    // placed first, whatever order the frame carries them in — and nothing else.
+    const belt = new RiderBelt();
+    const { bodies, torsos, cranksets, limbs } = belt.meshes;
+    belt.place([riderAt({ z: 80 }, {}, 0, 'ghost')]);
+    const ghostTint = tintOf(bodies, 0);
+    belt.place([riderAt({ z: 80 }, {}, 0, 'ghost'), riderAt(), riderAt({ z: 40 }, {}, 0, 'bot')]);
+    // The ghost is in the LAST slot, whatever slot the frame gave it.
+    expect(tintOf(bodies, 2)).toEqual(ghostTint);
+    expect(tintOf(bodies, 0)).not.toEqual(ghostTint);
+    for (const [mesh, perRider] of [
+      [bodies, 1],
+      [torsos, 1],
+      [cranksets, 1],
+      [limbs, LEG_BONE_COUNT],
+    ] as const) {
+      const shadowPass = (): number => {
+        mesh.onBeforeShadow(...([] as unknown as Parameters<typeof mesh.onBeforeShadow>));
+        const counted = mesh.count;
+        mesh.onAfterShadow(...([] as unknown as Parameters<typeof mesh.onAfterShadow>));
+        return counted;
+      };
+      expect(shadowPass()).toBe(2 * perRider);
+      // …and the picture still draws all three.
+      expect(mesh.count).toBe(3 * perRider);
+    }
+    // A frame with the ghost alone casts nothing at all; the control, without
+    // it, casts both.
+    belt.place([riderAt({ z: 80 }, {}, 0, 'ghost')]);
+    bodies.onBeforeShadow(...([] as unknown as Parameters<typeof bodies.onBeforeShadow>));
+    expect(bodies.count).toBe(0);
+    bodies.onAfterShadow(...([] as unknown as Parameters<typeof bodies.onAfterShadow>));
+    expect(bodies.count).toBe(1);
+    belt.place([riderAt(), riderAt({ z: 40 }, {}, 0, 'bot')]);
+    bodies.onBeforeShadow(...([] as unknown as Parameters<typeof bodies.onBeforeShadow>));
+    expect(bodies.count).toBe(2);
+    bodies.onAfterShadow(...([] as unknown as Parameters<typeof bodies.onAfterShadow>));
+    belt.dispose();
+  });
+
   it('draws no rider for a kind the tint table does not hold', () => {
     // ⚠️ **`RIDER_TINTS` is an object literal, so `in` reaches its
     // prototype** — `'toString' in RIDER_TINTS` is true, and a marker that got
@@ -3335,5 +3381,215 @@ describe('the riders lean into a bend — #499', () => {
       Array.from(belt.meshes.bodies.instanceMatrix.array.slice(0, 16)),
     );
     belt.dispose();
+  });
+});
+
+describe('waiting for the GPU after the warm-up draw — #547', () => {
+  /** Just enough of a WebGL 2 context to hold a fence, with its answers scripted. */
+  function fencing(opts: {
+    signalAfterLooks?: number;
+    lostAfterLooks?: number;
+    noFence?: boolean;
+  }) {
+    let looks = 0;
+    const calls: string[] = [];
+    const fence = {};
+    const gl = {
+      SYNC_GPU_COMMANDS_COMPLETE: 0x9117,
+      SYNC_STATUS: 0x9114,
+      SIGNALED: 0x9119,
+      UNSIGNALED: 0x9118,
+      fenceSync: () => {
+        calls.push('fenceSync');
+        return opts.noFence === true ? null : fence;
+      },
+      flush: () => calls.push('flush'),
+      isContextLost: () => opts.lostAfterLooks !== undefined && looks > opts.lostAfterLooks,
+      getSyncParameter: () => {
+        looks += 1;
+        return opts.signalAfterLooks !== undefined && looks > opts.signalAfterLooks
+          ? 0x9119
+          : 0x9118;
+      },
+      deleteSync: () => calls.push('deleteSync'),
+    };
+    return { gl: gl as unknown as WebGL2RenderingContext, calls, looks: () => looks };
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('settles only once the fence is signalled, polling rather than blocking', async () => {
+    vi.useFakeTimers();
+    const { gl, calls, looks } = fencing({ signalAfterLooks: 3 });
+    let settled = false;
+    void gpuFinished(gl).then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(false);
+    // The commands are flushed, or a fence can wait on work never submitted.
+    expect(calls.slice(0, 2)).toEqual(['fenceSync', 'flush']);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(settled).toBe(true);
+    expect(looks()).toBe(4);
+    expect(calls).toContain('deleteSync');
+  });
+
+  it('gives up after the limit, so a warm-up that never finishes does not leave the ride dark', async () => {
+    vi.useFakeTimers();
+    const { gl } = fencing({});
+    let settled = false;
+    void gpuFinished(gl).then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(PREPARE_FENCE_LIMIT_MS - 100);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(settled).toBe(true);
+  });
+
+  it('settles when the context is lost while it waits, and touches the fence no more', async () => {
+    vi.useFakeTimers();
+    const { gl, calls } = fencing({ lostAfterLooks: 1 });
+    let settled = false;
+    void gpuFinished(gl).then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(settled).toBe(true);
+    expect(calls).not.toContain('deleteSync');
+  });
+
+  it('settles at once where there is no fence to make', async () => {
+    const { gl } = fencing({ noFence: true });
+    await expect(gpuFinished(gl)).resolves.toBeUndefined();
+    const webgl1 = { isContextLost: () => false } as unknown as WebGLRenderingContext;
+    await expect(gpuFinished(webgl1)).resolves.toBeUndefined();
+  });
+
+  /**
+   * Just enough of a context with `KHR_parallel_shader_compile` to answer
+   * `COMPLETION_STATUS_KHR`: `true` once a program has been looked at more
+   * than `linkAfterLooks` times, and `null` — what a LOST context answers —
+   * once `lostAfterLooks` is passed. #606's review.
+   */
+  function linking(opts: {
+    linkAfterLooks?: number;
+    lostAfterLooks?: number;
+    noParallel?: boolean;
+  }) {
+    let looks = 0;
+    const COMPLETION_STATUS_KHR = 0x91b1;
+    const gl = {
+      getExtension: (name: string) =>
+        name === 'KHR_parallel_shader_compile' && opts.noParallel !== true
+          ? { COMPLETION_STATUS_KHR }
+          : null,
+      isContextLost: () => opts.lostAfterLooks !== undefined && looks > opts.lostAfterLooks,
+      getProgramParameter: (_program: unknown, name: number) => {
+        expect(name).toBe(COMPLETION_STATUS_KHR);
+        looks += 1;
+        if (opts.lostAfterLooks !== undefined && looks > opts.lostAfterLooks) {
+          return null;
+        }
+        return opts.linkAfterLooks !== undefined && looks > opts.linkAfterLooks;
+      },
+    };
+    return { gl: gl as unknown as WebGL2RenderingContext, looks: () => looks };
+  }
+
+  it('settles once every program has linked, polling rather than blocking', async () => {
+    vi.useFakeTimers();
+    const { gl, looks } = linking({ linkAfterLooks: 3 });
+    let settled = false;
+    void programsLinked(
+      gl,
+      () => [{ program: {} }],
+      () => false,
+    ).then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(settled).toBe(true);
+    expect(looks()).toBe(4);
+  });
+
+  it('stops polling when the view is destroyed while it waits', async () => {
+    vi.useFakeTimers();
+    const { gl, looks } = linking({});
+    let destroyed = false;
+    let settled = false;
+    void programsLinked(
+      gl,
+      () => [{ program: {} }],
+      () => destroyed,
+    ).then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(settled).toBe(false);
+    destroyed = true;
+    await vi.advanceTimersByTimeAsync(20);
+    expect(settled).toBe(true);
+    const after = looks();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(looks()).toBe(after);
+  });
+
+  it('settles when the context is lost, where the status reads null for ever', async () => {
+    vi.useFakeTimers();
+    const { gl } = linking({ lostAfterLooks: 2 });
+    let settled = false;
+    void programsLinked(
+      gl,
+      () => [{ program: {} }],
+      () => false,
+    ).then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(settled).toBe(true);
+  });
+
+  it('gives up after the limit, so a link that never finishes does not leave the ride dark', async () => {
+    vi.useFakeTimers();
+    const { gl } = linking({});
+    let settled = false;
+    void programsLinked(
+      gl,
+      () => [{ program: {} }],
+      () => false,
+    ).then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(PREPARE_FENCE_LIMIT_MS - 100);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(settled).toBe(true);
+  });
+
+  it('settles at once with no parallel-compile extension, and counts a deleted program as linked', async () => {
+    const without = linking({ noParallel: true });
+    await expect(
+      programsLinked(
+        without.gl,
+        () => [{ program: {} }],
+        () => false,
+      ),
+    ).resolves.toBeUndefined();
+    expect(without.looks()).toBe(0);
+    const deleted = linking({});
+    await expect(
+      programsLinked(
+        deleted.gl,
+        () => [{ program: undefined }],
+        () => false,
+      ),
+    ).resolves.toBeUndefined();
+    expect(deleted.looks()).toBe(0);
   });
 });

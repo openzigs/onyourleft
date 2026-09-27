@@ -72,6 +72,7 @@ function capturingRenderer(frames: SceneFrame[]): GameRenderer {
     loadRealisticWorld: () => Promise.reject(new Error('no realistic world was chosen')),
     create: () => ({
       hasContext: true,
+      prepare: () => Promise.resolve(),
       render: (frame: SceneFrame) => {
         frames.push(frame);
       },

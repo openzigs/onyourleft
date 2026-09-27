@@ -276,6 +276,7 @@ describe('two realistic rides in one mount — #475’s review', () => {
         told.push(mine);
         return {
           hasContext: true,
+          prepare: () => Promise.resolve(),
           render: () => undefined,
           setQuality: (next) => {
             mine.push(next);

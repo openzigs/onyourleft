@@ -29,6 +29,7 @@ import type {
   LineMeasurement,
   NearFieldMeasurement,
   PresenceCostMeasurement,
+  RideStartMeasurement,
   HorizonReading,
   RealisticMeasurement,
   RiderExtent,
@@ -194,9 +195,12 @@ interface GameHarnessResult {
     readonly contactDrawCalls: number;
     readonly mapDrawCalls: number;
     readonly shadowPixels: number;
+    readonly ghostShadowPixels: number;
   };
   /** #390 — measured only by the `?shadow-map` load. */
   readonly presenceCost: PresenceCostMeasurement;
+  /** #547 — measured only by the `?shadow-map` load. */
+  readonly rideStart: RideStartMeasurement;
   /** ADR 0026 — measured only by the `?realistic` load. */
   readonly realistic: RealisticMeasurement;
   readonly errors: readonly string[];
@@ -276,6 +280,16 @@ const CHANNELS = ['red', 'green', 'blue'] as const;
 const RIDER_BOX_TOLERANCE = 0.02;
 
 /**
+ * How much cheaper than the control's first frame every prepared frame must be
+ * — #547. **4**, where the pinned Chromium measured about 60 (≈ 9 ms against
+ * ≈ 540 ms): wide enough that a busy runner does not flip it, and narrow enough
+ * that a `prepare` which built the programs without the ride's first frame
+ * staged — ≈ 600 ms left in the first frame, measured while it was written —
+ * fails it, and so does one that does not wait for the GPU (≈ 560 ms). `game-harness.ts` §`rideStartProbe`.
+ */
+const RIDE_START_STALL_FACTOR = 4;
+
+/**
  * What one frame of the harness route costs, with the scenery taken out: **9**.
  *
  * | | calls |
@@ -333,8 +347,30 @@ const RIDER_BOX_TOLERANCE = 0.02;
  * body — arms, torso, helmet — is its own instanced mesh (`bicycle.ts`
  * §`RIDER_UPPER_BODY_PARTS`), rolled about the hips: one call for all three
  * riders, and a ghost still adds none.
+ *
+ * ⚠️ **Unchanged by #547, and no longer the frame a stylised ride STARTS on.**
+ * It is measured at level 0, the contact rung, which is still what every ride
+ * draws after its first step down and what the realistic world falls back to.
+ * A stylised ride starts on `quality.ts` §`RIDER_SHADOW_MAP_RUNG` since #547,
+ * and that frame is this one plus {@link SHADOW_MAP_EXTRA_DRAW_CALLS}.
  */
 const SCENE_DRAW_CALLS = 1 + 1 + 1 + 1 + 4 + 1;
+
+/**
+ * What the shadow map rung draws beyond the contact rung — #426, and since
+ * #547 the difference between a stylised ride's first frame and
+ * {@link SCENE_DRAW_CALLS}:
+ *
+ * | | calls |
+ * |---|--:|
+ * | the contact shadows, which the map rung does not draw | −1 |
+ * | the shadow catcher under the riders | +1 |
+ * | the shadow pass: each of the four rider meshes into the map | +4 |
+ *
+ * Written as a sum for {@link SCENE_DRAW_CALLS}' reason. The riders' term is
+ * that constant's riders' term: a fifth rider mesh costs a call twice.
+ */
+const SHADOW_MAP_EXTRA_DRAW_CALLS = -1 + 1 + 4;
 
 /**
  * The most meshes the scenery belt may ever hold: **24**.
@@ -1379,14 +1415,18 @@ test.describe('the world is lit, and can stop being — #286', () => {
     // ------------------------------------------ the shadow map — #426
     //
     // ⚠️ **Published, not bounded.** A software rasteriser on a GPU-less runner
-    // says nothing about a phone, which is why the rung is off by default and
-    // `docs/validation/0002-android-shell-and-game.md` Part T is the procedure
-    // that decides it. What is asserted is only that there WAS a measurement:
-    // a shadow reached the buffer, and the rung drew its shadow pass.
+    // says nothing about a phone; `docs/validation/0002-android-shell-and-game.md`
+    // Part T is what made the rung the stylised default (#547), on the tablet.
+    // What is asserted is that there WAS a measurement — a shadow reached the
+    // buffer — and exactly which calls the rung adds.
     const map = result.shadowMap;
     expect(map.measured).toBe(true);
     expect(map.shadowPixels).toBeGreaterThan(0);
-    expect(map.mapDrawCalls).toBeGreaterThan(map.contactDrawCalls);
+    // #547, and #93's rule on the map rung: the SAME frame with the rider made
+    // the ghost changes no pixel. `map.shadowPixels` above is its control — the
+    // rider, in the same place, on the same rung, does cast.
+    expect(map.ghostShadowPixels).toBe(0);
+    expect(map.mapDrawCalls).toBe(map.contactDrawCalls + SHADOW_MAP_EXTRA_DRAW_CALLS);
     expect(map.contactFrameMs).toBeGreaterThan(0);
     expect(map.mapFrameMs).toBeGreaterThan(0);
     const mapCost = map.mapFrameMs - map.contactFrameMs;
@@ -1401,6 +1441,50 @@ test.describe('the world is lit, and can stop being — #286', () => {
       description: shadowMeasured,
     });
     console.log(`frame cost of the rider shadow map — ${shadowMeasured}`);
+  });
+
+  /**
+   * **No start-of-ride stall with the shadow map — #547.** Part T measured a
+   * GPU frame of 4 950 ms in the first seconds of a ride on the map rung on
+   * the Pixel Tablet. `game-harness.ts` §`rideStartProbe` draws the first
+   * frames of a ride on that rung twice: at once, as before #547 — the control,
+   * which must build programs inside those frames — and after `prepare`, as
+   * `GameView` does now, which must build none.
+   *
+   * ⚠️ **Both halves are asserted, and neither is a phone.** No program is
+   * linked in the prepared frames, and none of them costs a
+   * {@link RIDE_START_STALL_FACTOR}th of the control's first. What the tablet
+   * pays at the start of a ride is validation 0002 Part T's to re-take.
+   */
+  test('builds no GPU program in the first frames of a ride on the shadow map rung — #547', async ({
+    harnessRun,
+  }, testInfo) => {
+    const result = await harness(harnessRun, '?shadow-map');
+    const start = result.rideStart;
+    expect(start.measured, result.errors.join('; ')).toBe(true);
+    // The control reproduces the stall's cause: the first frames build programs.
+    expect(start.unpreparedLinks).toBeGreaterThan(0);
+    // And `prepare` is where they went — not somewhere nobody measured.
+    expect(start.linksInPrepare).toBeGreaterThanOrEqual(start.unpreparedLinks);
+    expect(start.preparedLinks).toBe(0);
+    expect(start.preparedFrameMs).toHaveLength(start.unpreparedFrameMs.length);
+    // And the first frame's COST went, not only its links: no prepared frame
+    // costs a quarter of the control's first. Measured on this machine, about
+    // 9 ms against 540. `rideStartProbe` says why links alone were not enough.
+    const [controlFirst = 0] = start.unpreparedFrameMs;
+    expect(Math.max(...start.preparedFrameMs)).toBeLessThan(controlFirst / RIDE_START_STALL_FACTOR);
+    const list = (values: readonly number[]) => values.map((each) => each.toFixed(1)).join(' / ');
+    const measured =
+      `without prepare: ${String(start.unpreparedLinks)} programs linked in the first ` +
+      `${String(start.unpreparedFrameMs.length)} frames, ms ${list(start.unpreparedFrameMs)}; ` +
+      `with prepare (${start.prepareMs.toFixed(1)} ms, ${String(start.linksInPrepare)} programs, ` +
+      `KHR_parallel_shader_compile ${start.parallelCompile ? 'offered' : 'absent'}): ` +
+      `${String(start.preparedLinks)} linked in those frames, ms ${list(start.preparedFrameMs)}`;
+    testInfo.annotations.push({
+      type: 'first frames of a ride on the shadow map',
+      description: measured,
+    });
+    console.log(`first frames of a ride on the shadow map — ${measured}`);
   });
 
   /**
