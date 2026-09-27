@@ -34,6 +34,7 @@ import type {
   RealisticMeasurement,
   RiderExtent,
   TreeHandOver,
+  TreeLevelMeasurement,
 } from './game-harness';
 import { MINIMUM_TINT_CONTRAST_RATIO } from '../src/game/terrain';
 import {
@@ -204,6 +205,8 @@ interface GameHarnessResult {
   readonly rideStart: RideStartMeasurement;
   /** ADR 0026 — measured only by the `?realistic` load. */
   readonly realistic: RealisticMeasurement;
+  /** #617 — measured only by the `?realistic&trees` load (#644). */
+  readonly trees: TreeLevelMeasurement;
   readonly errors: readonly string[];
 }
 
@@ -460,9 +463,10 @@ const DESKTOP_CHROME = { viewport, userAgent, deviceScaleFactor, isMobile, hasTo
  * Playwright replaces a worker after any failing case, and this memo lives in
  * the worker, so the case after a failure loads the page afresh: with the road
  * taken out of the scene nine cases went red and the file took 49 s rather
- * than 13. A green run pays three loads — the plain page, `?shadow-map` and,
- * since ADR 0026, `?realistic`, which #607 pays for in a hook of its own
- * (§`paysForTheRealisticLoad`) — and nothing here retries a load that failed,
+ * than 13. A green run pays four loads — the plain page, `?shadow-map`,
+ * since ADR 0026 `?realistic`, which #607 pays for in a hook of its own
+ * (§`paysForTheRealisticLoad`), and since #644 `?realistic&trees`, which the
+ * same hook pays for — and nothing here retries a load that failed,
  * which is the flake-hiding `playwright.config.ts` refuses.
  */
 const test = base.extend<object, { harnessRun: (query?: string) => Promise<HarnessRun> }>({
@@ -477,10 +481,16 @@ const test = base.extend<object, { harnessRun: (query?: string) => Promise<Harne
           page.on('request', (request) => requested.push(request.url()));
           const shaderErrors: string[] = [];
           page.on('console', (message) => {
+            // #644: each phase as it ends, so a load its budget kills still
+            // says in the CI log how far it got.
+            if (message.text().startsWith('harness phase: ')) {
+              console.log(`game.html${query} ${message.text()}`);
+            }
             if (message.type() === 'error' && message.text().includes('THREE.WebGLProgram')) {
               shaderErrors.push(message.text().slice(0, 400));
             }
           });
+          const loadStarted = Date.now();
           await page.goto(`${HARNESS_ORIGIN}/game.html${query}`);
           // The harness publishes at the end of `run()` and nowhere else, so
           // waiting on the property existing is waiting on the run having
@@ -489,6 +499,10 @@ const test = base.extend<object, { harnessRun: (query?: string) => Promise<Harne
           // anything, exactly as `main.tsx` does.
           await page.waitForFunction(() => window.__oylGameHarness !== undefined);
           const result = await page.evaluate(() => window.__oylGameHarness as GameHarnessResult);
+          // #644: the phases are printed as they end (above); this is the total.
+          console.log(
+            `game.html${query}: loaded in ${String(Math.round((Date.now() - loadStarted) / 1000))} s`,
+          );
           return { result, requested, shaderErrors };
         } finally {
           await context.close();
@@ -521,6 +535,19 @@ async function harness(
  * 31 MiB of textures and a prefiltered sky, then #545's sweep of the hairpin.
  * On CI it took 33 s, 36 s and 48 s on green runs and over 60 s on two red
  * ones — a spread, on the same commit, that is the runner rather than the code.
+ *
+ * ⚠️ **#644: #617 took that load past this budget, and the answer was to move
+ * the cost rather than raise the number.** Timed phase by phase on the CI
+ * runner (ubuntu-latest, run 36318760634, 2026-09-27, `95b4ab8` with the
+ * budget lifted so the load could finish): **182 s**, of which #617's tree
+ * probes were 117.7 s — the triangle counts 25.6, the hand-over 25.5, its
+ * control 25.4 and the nearest tree 41.2 — and everything else 64 s. The
+ * trees are a load of their own now (`?realistic&trees`, §`TREES_QUERY`),
+ * paying for it in this same hook under this same budget, and cheaper: the
+ * product's three measurements share one view, and the two that only count
+ * draw calls draw a sixteenth of the pixels. The harness prints every phase
+ * as it ends (`game-harness.ts` §`phaseEnds`), so the next load that outgrows
+ * this says which phase grew.
  */
 const REALISTIC_LOAD_BUDGET_MS = 150_000;
 
@@ -547,15 +574,19 @@ const REALISTIC_LOAD_BUDGET_MS = 150_000;
  * Every case still asks `harnessRun('?realistic')` for its result; this only
  * decides when the load is paid for and what it may take. No retry: the load
  * runs once per worker, exactly as before, and `playwright.config.ts` refuses
- * retries on purpose. Two describes call this, so a load that never finishes
- * costs at most two budgets — five minutes, inside the job's twenty.
+ * retries on purpose. Two describes call this for `?realistic` and one for
+ * `?realistic&trees` (#644), so loads that never finish cost at most three
+ * budgets — seven and a half minutes, inside the job's twenty.
  */
-function paysForTheRealisticLoad(): void {
+function paysForTheRealisticLoad(query = '?realistic'): void {
   test.beforeAll(async ({ harnessRun }) => {
     test.setTimeout(REALISTIC_LOAD_BUDGET_MS);
-    await harnessRun('?realistic');
+    await harnessRun(query);
   });
 }
+
+/** #617's trees' own load — #644. @see TreeLevelMeasurement */
+const TREES_QUERY = '?realistic&trees';
 
 test.describe('the game renderer in a real browser', () => {
   test('constructs against a live WebGL context', async ({ harnessRun }) => {
@@ -2512,10 +2543,58 @@ test.describe('the realistic world — ADR 0026', () => {
     }
   });
 
-  test('submits at least 60 000 fewer triangles with the trees’ middle level — #617', async ({
+  test('steps down to the stylised world whole, and publishes what realism costs', async ({
     harnessRun,
   }) => {
     const measured = await realistic(harnessRun);
+    expect(measured.afterStepDownWorld).toBe('stylised');
+    expect(measured.afterStepDownStandard).toBe(0);
+    // #501's review: the bridge wore the loaded stone on the realistic rung —
+    // `#applyWorld`'s one line nothing else here could see — and, the
+    // control, gave it up with the rest of the realistic world.
+    expect(measured.bridgesWearStone).toBe(true);
+    expect(measured.bridgesWearStoneAfterStepDown).toBe(false);
+    // Published, never asserted: SwiftShader on a desktop says nothing about a
+    // Mali GPU. Validation 0002 Part Z is the tablet.
+    console.log(
+      `realistic world: loaded in ${measured.loadMs.toFixed(0)} ms; ` +
+        `${measured.realisticFrameMs.toFixed(1)} ms a frame against ${measured.stylisedFrameMs.toFixed(1)} ms stylised ` +
+        `(SwiftShader, not a phone); ${String(measured.drawCalls)} draw calls; scenery drawn ` +
+        `${String(measured.sceneryDrawnTop)} at the top rung, ${String(measured.sceneryDrawnBudgeted)} ` +
+        `at a budget of ${String(measured.sceneryProbeBudget)}; ${LENT_FRAMES_NOTE}`,
+    );
+  });
+});
+
+/**
+ * #617's trees, in the realistic world, on a load of their own — #644.
+ *
+ * ⚠️ **These three cases read `?realistic&trees`, not `?realistic`**, and a
+ * reviewer who remembers them in the describe above is reading the old file.
+ * #617 put their probes inside the shared `?realistic` run, which took that
+ * load from 33–48 s on the CI runner to past its 150 s budget and turned `main`
+ * red. Moved whole: every assertion and control is unchanged. What a load of
+ * their own owes that the shared one did not is the check that the realistic
+ * world actually loaded ON IT — without `drawnWorld`, a page that fell back to
+ * the stylised world would be measuring trees with no middle level at all.
+ */
+test.describe('the trees’ levels of detail in the realistic world — #617', () => {
+  paysForTheRealisticLoad(TREES_QUERY);
+
+  const trees = async (
+    run: (query?: string) => Promise<HarnessRun>,
+  ): Promise<TreeLevelMeasurement> => {
+    const { result } = await run(TREES_QUERY);
+    expect(result.errors).toEqual([]);
+    expect(result.trees.measured).toBe(true);
+    expect(result.trees.drawnWorld).toBe('realistic');
+    return result.trees;
+  };
+
+  test('submits at least 60 000 fewer triangles with the trees’ middle level — #617', async ({
+    harnessRun,
+  }) => {
+    const measured = await trees(harnessRun);
     console.log(
       `#617: ${String(measured.trianglesSubmitted)} triangles a frame, ` +
         `${String(measured.trianglesHardSwap)} with the hard swap; ` +
@@ -2534,7 +2613,7 @@ test.describe('the realistic world — ADR 0026', () => {
   test('hands a tree over between levels with no jump in the picture — #617', async ({
     harnessRun,
   }) => {
-    const measured = await realistic(harnessRun);
+    const measured = await trees(harnessRun);
     // Band B — middle and impostor — as the seventh tree beside the road walks
     // out past the watched one (the control's swap is at the fifth, since it
     // has no band), and band A — full and middle — as the first does.
@@ -2590,7 +2669,7 @@ test.describe('the realistic world — ADR 0026', () => {
   test('draws the nearest tree IN THE PICTURE at full detail — #617’s review', async ({
     harnessRun,
   }) => {
-    const measured = await realistic(harnessRun);
+    const measured = await trees(harnessRun);
     console.log(
       `#617: a tree 12 m ahead, with two behind the camera, adds ` +
         `${String(measured.nearestVisibleTriangles)} triangles; ` +
@@ -2608,28 +2687,6 @@ test.describe('the realistic world — ADR 0026', () => {
     expect(
       measured.nearestVisibleTriangles - measured.nearestVisibleTrianglesControl,
     ).toBeGreaterThan(10_000);
-  });
-
-  test('steps down to the stylised world whole, and publishes what realism costs', async ({
-    harnessRun,
-  }) => {
-    const measured = await realistic(harnessRun);
-    expect(measured.afterStepDownWorld).toBe('stylised');
-    expect(measured.afterStepDownStandard).toBe(0);
-    // #501's review: the bridge wore the loaded stone on the realistic rung —
-    // `#applyWorld`'s one line nothing else here could see — and, the
-    // control, gave it up with the rest of the realistic world.
-    expect(measured.bridgesWearStone).toBe(true);
-    expect(measured.bridgesWearStoneAfterStepDown).toBe(false);
-    // Published, never asserted: SwiftShader on a desktop says nothing about a
-    // Mali GPU. Validation 0002 Part Z is the tablet.
-    console.log(
-      `realistic world: loaded in ${measured.loadMs.toFixed(0)} ms; ` +
-        `${measured.realisticFrameMs.toFixed(1)} ms a frame against ${measured.stylisedFrameMs.toFixed(1)} ms stylised ` +
-        `(SwiftShader, not a phone); ${String(measured.drawCalls)} draw calls; scenery drawn ` +
-        `${String(measured.sceneryDrawnTop)} at the top rung, ${String(measured.sceneryDrawnBudgeted)} ` +
-        `at a budget of ${String(measured.sceneryProbeBudget)}; ${LENT_FRAMES_NOTE}`,
-    );
   });
 });
 
