@@ -197,19 +197,22 @@ describe('it is a racing line — #499 criterion 3', () => {
   it('has NOT stopped moving on a loop that turns toward the home side — #640, a known limit', () => {
     // Pinned so the limit cannot become a false claim, and so fixing #640
     // turns this red: the right-hand stadium moves 1.48 m between the shipped
-    // step count and one more (measured 2026-09-27), and 0.008 m at 60 steps.
+    // step count and one more (measured 2026-09-27), 0.008 m at 60 steps and
+    // nothing measurable by 100. So the shipped line is held against a solve
+    // of 200 steps, which does not depend on what the shipped count is: raise
+    // it to 100, as #640 might, and this goes red (measured).
     // Found by #583: until then the world was a mirror of its map, and every
     // fixture that turns right had the home on its bend's OUTSIDE.
     const route = stadiumRoute(30);
-    const settled = racingLine(route).offsets;
-    const oneMore = solvedLine(route, 41).offsets;
-    let moved = 0;
-    for (let index = 0; index < settled.length; index += 1) {
-      moved = Math.max(moved, Math.abs((oneMore[index] ?? 0) - (settled[index] ?? 0)));
+    const shipped = racingLine(route).offsets;
+    const converged = solvedLine(route, 200).offsets;
+    let apart = 0;
+    for (let index = 0; index < shipped.length; index += 1) {
+      apart = Math.max(apart, Math.abs((converged[index] ?? 0) - (shipped[index] ?? 0)));
     }
-    expect(moved).toBeGreaterThan(0.5);
+    expect(apart).toBeGreaterThan(0.5);
     // …and it is still on the road, which is what a rider would see.
-    expect(peak(Array.from(settled))).toBeLessThanOrEqual(LINE_LIMIT_METRES + 1e-9);
+    expect(peak(Array.from(shipped))).toBeLessThanOrEqual(LINE_LIMIT_METRES + 1e-9);
   });
 
   it('is computed once per route and handed back after', () => {
