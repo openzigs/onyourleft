@@ -20,6 +20,7 @@ import react from '@vitejs/plugin-react';
 import { build, defineConfig, type Plugin } from 'vite';
 
 import { POSE_DIRECTORY, POSE_WORKER_CHUNK } from './src/camera/pose-files';
+import { copiedIntoBuild } from './tools/notices/copied-into-build';
 import { poseRuntime } from './tools/pose/pose-runtime-plugin';
 import { cacheVersion, precacheEntries, type PrecacheFile } from './tools/precache/precache';
 
@@ -176,7 +177,9 @@ export default defineConfig({
   // worker's plugin, which is `enforce: 'post'` anyway, so the file it emits
   // is in the list the precache is derived from — and excluded from it by
   // `tools/precache/precache.ts` §`PRECACHE_EXCLUSIONS`.
-  plugins: [react(), poseRuntime(), serviceWorker()],
+  // #664: and a file the build copies out of a package that the third-party
+  // notices do not name fails the build — `tools/notices/copied-into-build.ts`.
+  plugins: [react(), poseRuntime(), serviceWorker(), copiedIntoBuild(ROOT)],
   worker: {
     rolldownOptions: {
       output: {

@@ -7,7 +7,8 @@
   "description": "Android shell \u2014 the connectedDevice foreground service, the BLE permission flow, and the Capacitor transport (#87).",
   "scripts": {
     "typecheck": "tsc --noEmit --project tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "native:closure": "node tools/native-closure.mjs"
   },
   "dependencies": {
     "@capacitor-community/bluetooth-le": "8.3.0",
