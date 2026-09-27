@@ -29,8 +29,10 @@ import {
   REALISTIC_VEGETATION_KINDS,
   realisticFiles,
 } from './realistic-assets';
+import { treeSlots, type TreeLevels } from './tree-levels';
 import {
   environmentMapBytes,
+  HARD_SWAP_TREE_LEVELS,
   estimatedTextureBytes,
   REALISTIC_BUILD_BYTES,
   REALISTIC_FRAME_TRIANGLES,
@@ -39,6 +41,7 @@ import {
   REALISTIC_TEXTURE_CEILING_PIXELS,
   REALISTIC_TEXTURE_MEMORY_BYTES,
   REALISTIC_TEXTURE_PIXELS,
+  REALISTIC_TREE_LEVELS,
   REALISTIC_TRIANGLES,
 } from './realistic-budget';
 import { readGlb } from './model-bytes-testing';
@@ -58,6 +61,43 @@ const SHIPPED = fileURLToPath(new URL('../../public/realistic/', import.meta.url
 const at = (file: string): string => join(SHIPPED, file);
 
 const riderTriangles = modelFacts(at(REALISTIC_RIDER)).triangles;
+
+const TREE_KINDS = ['tree-broadleaf', 'tree-conifer'] as const;
+
+/** The heaviest committed file of a kind's near level, or of the trees' middle level. */
+function heaviestNear(kind: (typeof REALISTIC_VEGETATION_KINDS)[number]): number {
+  return Math.max(
+    ...REALISTIC_VEGETATION[kind].map((model) => modelFacts(at(model.file)).triangles),
+  );
+}
+function heaviestMiddle(): number {
+  return Math.max(
+    ...TREE_KINDS.flatMap((kind) =>
+      REALISTIC_VEGETATION[kind].map((model) =>
+        model.middle === undefined
+          ? Number.POSITIVE_INFINITY
+          : modelFacts(at(model.middle)).triangles,
+      ),
+    ),
+  );
+}
+
+/**
+ * The worst vegetation a frame can submit — #617: every tree slot
+ * (`tree-levels.ts` §`treeSlots`, a band tree counted at BOTH its levels)
+ * filled with the heaviest file of EITHER tree kind, and the nearest shrubs and
+ * rocks as before.
+ */
+function worstVegetation(levels: TreeLevels = REALISTIC_TREE_LEVELS): number {
+  const slots = treeSlots(levels);
+  const heaviestTree = Math.max(...TREE_KINDS.map(heaviestNear));
+  return (
+    slots.full * heaviestTree +
+    (slots.middle > 0 ? slots.middle * heaviestMiddle() : 0) +
+    REALISTIC_NEAR_MESHES.shrub * heaviestNear('shrub') +
+    REALISTIC_NEAR_MESHES.rock * heaviestNear('rock')
+  );
+}
 
 describe('each committed file inside its class’s budget — ADR 0026 D-6', () => {
   it('keeps every model at or under its kind’s triangles', () => {
@@ -122,6 +162,30 @@ describe('each committed file inside its class’s budget — ADR 0026 D-6', () 
     expect(REALISTIC_TEXTURE_CEILING_PIXELS).toBe(2048);
   });
 
+  it('keeps every tree’s middle level under its ceiling, carrying no map at all — #617', () => {
+    for (const kind of TREE_KINDS) {
+      for (const model of REALISTIC_VEGETATION[kind]) {
+        const file = model.middle;
+        expect(file, model.name).toBeDefined();
+        if (file === undefined) continue;
+        const facts = modelFacts(at(file));
+        expect(facts.triangles, file).toBeGreaterThan(REALISTIC_TRIANGLES['tree-middle'] / 2);
+        expect(facts.triangles, file).toBeLessThanOrEqual(REALISTIC_TRIANGLES['tree-middle']);
+        // It wears the near file's maps, so it adds no texture memory.
+        expect(facts.images, file).toEqual([]);
+        expect(facts.skinned, file).toBe(false);
+        // …and every material it names is one the near file has, which is
+        // what the runtime pairs its parts by.
+        const names = (path: string): string[] =>
+          ((readGlb(path).json as { materials?: { name?: string }[] }).materials ?? []).map(
+            (material) => material.name ?? '',
+          );
+        const near = names(at(model.file));
+        for (const name of names(at(file))) expect(near, `${file} wears ${name}`).toContain(name);
+      }
+    }
+  });
+
   it('gives the rider a skin and nothing else one', () => {
     expect(modelFacts(at(REALISTIC_RIDER)).skinned).toBe(true);
     for (const kind of REALISTIC_VEGETATION_KINDS) {
@@ -149,13 +213,8 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     readonly structureItems: number;
     readonly heaviestStructure: number;
   } => {
-    const heaviest = (kind: (typeof REALISTIC_VEGETATION_KINDS)[number]): number =>
-      Math.max(...REALISTIC_VEGETATION[kind].map((model) => modelFacts(at(model.file)).triangles));
     return {
-      vegetation: REALISTIC_VEGETATION_KINDS.reduce(
-        (sum, kind) => sum + REALISTIC_NEAR_MESHES[kind] * heaviest(kind),
-        0,
-      ),
+      vegetation: worstVegetation(),
       // Three riders: the rider, the pacer and the ghost, each a body and a bicycle.
       riders: 3 * (riderTriangles + realisticBicycleTriangles()),
       // The most structures ANY realistic rung lets a frame carry, each the
@@ -186,6 +245,36 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
     // And the figure the rungs spend is the one `realistic-budget.ts` states.
     expect(structureItems).toBe(REALISTIC_STRUCTURE_ITEMS);
+  });
+
+  it('falls by at least 60 000 triangles with the trees’ middle level — #617', () => {
+    // The worst frame as it was summed before #617: the nearest THREE of each
+    // tree kind as full meshes, a hard swap, no middle level.
+    const before =
+      3 * heaviestNear('tree-broadleaf') +
+      3 * heaviestNear('tree-conifer') +
+      REALISTIC_NEAR_MESHES.shrub * heaviestNear('shrub') +
+      REALISTIC_NEAR_MESHES.rock * heaviestNear('rock');
+    const now = worstVegetation();
+    console.log(
+      `#617: worst vegetation ${String(now)} triangles, ${String(before)} before — ` +
+        `${String(before - now)} fewer; the heaviest middle tree ${String(heaviestMiddle())}`,
+    );
+    expect(before - now).toBeGreaterThanOrEqual(60_000);
+    // The frame's figure is unchanged: what fell is the worst case under it.
+    expect(REALISTIC_FRAME_TRIANGLES).toBe(300_000);
+    // And the hard swap the browser gate draws as its control is no lighter
+    // than what it replaced, so a green control is not a lighter frame.
+    expect(worstVegetation(HARD_SWAP_TREE_LEVELS) - now).toBeGreaterThanOrEqual(60_000);
+  });
+
+  it('counts a band tree at BOTH its levels in that worst case — #617', () => {
+    // Non-vacuity for the sum above: the dithered hand-over costs a full tree
+    // and two middle ones over the same counts with no band.
+    const bandless = worstVegetation({ ...REALISTIC_TREE_LEVELS, dithered: false });
+    expect(worstVegetation() - bandless).toBe(
+      Math.max(...TREE_KINDS.map(heaviestNear)) + 2 * heaviestMiddle(),
+    );
   });
 
   it('holds the estimated texture memory under its ceiling', () => {

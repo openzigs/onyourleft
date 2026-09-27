@@ -70,7 +70,7 @@ import {
 } from '@onyourleft/domain';
 
 import { NEAR_PLANE_METRES, cameraRig, verticalHalfTangent } from '../src/game/camera';
-import type { CameraPose, SceneFrame } from '../src/game/port';
+import type { CameraPose, GameView, SceneFrame } from '../src/game/port';
 import type { WorldStyle } from '../src/game/world';
 
 import { sceneFrame as builtSceneFrame } from '../src/game/scene';
@@ -107,6 +107,7 @@ import {
   sceneMaterialsOf,
   sceneryDrawnOf,
   setBuildingOpenings,
+  setTreeLevels,
   threeGameRenderer,
   waterSkyOf,
   filterWaterRipplesOf,
@@ -115,6 +116,9 @@ import {
 } from '../src/game/three-renderer';
 import { clearOfTheCamera, nearPyramid, sceneryReach } from '../src/game/near-field';
 import { realisticWorldNotice } from '../src/game/realistic-assets';
+import { HARD_SWAP_TREE_LEVELS, REALISTIC_TREE_LEVELS } from '../src/game/realistic-budget';
+import type { TreeLevels } from '../src/game/tree-levels';
+import { COUNTED_DRAWS, trianglesInDraw } from './realistic/draws';
 import {
   scatterSeed,
   STRUCTURE_KINDS,
@@ -1456,6 +1460,32 @@ function countingIndices(body: (indices: () => number) => void): void {
     for (const name of Object.keys(submitted)) {
       (gl as unknown as Record<string, unknown>)[name] = originals.get(name);
     }
+  }
+}
+
+/**
+ * Runs `body` with a count of the triangles every draw call submitted, as
+ * `realistic/draws.ts` counts them — #617, and #616's instrument on the
+ * product's own page rather than only the owner's. Patched and restored for
+ * `countingIndices`' reason.
+ */
+function countingTriangles(body: (triangles: () => number) => void): void {
+  const gl = WebGL2RenderingContext.prototype as unknown as Record<string, unknown>;
+  const originals = new Map<string, (...args: unknown[]) => unknown>();
+  let triangles = 0;
+  for (const name of COUNTED_DRAWS) {
+    const original = gl[name] as ((...args: unknown[]) => unknown) | undefined;
+    if (original === undefined) continue;
+    originals.set(name, original);
+    gl[name] = function counted(this: unknown, ...args: unknown[]): unknown {
+      triangles += trianglesInDraw(name, args);
+      return original.apply(this, args);
+    };
+  }
+  try {
+    body(() => triangles);
+  } finally {
+    for (const [name, original] of originals) gl[name] = original;
   }
 }
 
@@ -3532,6 +3562,31 @@ export interface RealisticMeasurement {
    * light, so the gate pins that the control really is today's band.
    */
   readonly horizonControlExpected: readonly number[];
+  /**
+   * #617: the triangles one frame of the wooded view submits at the WebGL draw
+   * calls (`realistic/draws.ts` §`trianglesInDraw`), as the product draws its
+   * trees and — the control — with the hard swap and no middle level
+   * (`realistic-budget.ts` §`HARD_SWAP_TREE_LEVELS`), on the same view.
+   */
+  readonly trianglesSubmitted: number;
+  readonly trianglesHardSwap: number;
+  /** How many scenery items the wooded view drew, so a view with no trees is not a saving. */
+  readonly woodedScenery: number;
+  /** @see TreeHandOver */
+  readonly handOver: TreeHandOver;
+  readonly handOverControl: TreeHandOver;
+}
+
+/**
+ * One tree's covered area across a hand-over, frame by frame — #617. The
+ * pixels that differ from the same view without the tree, one entry per
+ * consecutive frame at a rider's 6 m/s and 60 frames a second.
+ * @see treeHandOver
+ */
+export interface TreeHandOver {
+  /** The tree's distance ahead of the rider in each frame, in metres. */
+  readonly ahead: readonly number[];
+  readonly covered: readonly number[];
 }
 
 /**
@@ -3597,6 +3652,11 @@ const NO_REALISTIC: RealisticMeasurement = {
   horizonColours: { fog: [], foot: [] },
   horizonColoursControl: { fog: [], foot: [] },
   horizonControlExpected: [],
+  trianglesSubmitted: 0,
+  trianglesHardSwap: 0,
+  woodedScenery: 0,
+  handOver: { ahead: [], covered: [] },
+  handOverControl: { ahead: [], covered: [] },
 };
 
 /** Relative luminance of an sRGB pixel, WCAG 2.2's own formula. */
@@ -4008,6 +4068,9 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
       ? pixelsChanged(stylisedPixels, realisticPixels) / (canvas.width * canvas.height)
       : 0;
 
+  // #617: the trees' levels of detail, on views of their own.
+  const trees = treeLevelProbe(wooded, { ...riding(level, 400), markers: [] }, WIDTH, HEIGHT, top);
+
   // #478: the same frame at the top rung and at a rung with a budget of six.
   // Only the budget differs, so the world is not rebuilt between the two.
   view.render(wooded);
@@ -4093,6 +4156,109 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     horizonColours,
     horizonColoursControl,
     horizonControlExpected,
+    ...trees,
+  };
+}
+
+/**
+ * The trees' levels of detail in a real engine — #617.
+ *
+ * - **Triangles**: the wooded frame on a view drawing the product's levels and
+ *   on one drawing the hard swap with no middle level, counted at the draw
+ *   calls. Each frame is drawn twice and the second counted, for
+ *   `sceneryIndicesByKind`'s reason.
+ * - **The hand-over**: one broadleaf tree 6 m off the road, approached from
+ *   16 m to 6 m ahead of the rider in 0.1 m steps — consecutive frames at
+ *   6 m/s — with two more trees BEHIND the camera, 10 m and 14 m back, where
+ *   they are ranked and never drawn on screen. So the watched tree is the
+ *   third-nearest at first (the middle level), passes into the band as it
+ *   closes on the 14 m tree, and is the nearest (the full mesh) past 10 m;
+ *   and it is the only tree in the picture, so its covered area is every pixel
+ *   that differs from the same view without it. The control is the same
+ *   counts with no band, which swaps it from middle to full in one frame.
+ */
+function treeLevelProbe(
+  wooded: SceneFrame,
+  level: SceneFrame,
+  width: number,
+  height: number,
+  top: QualitySettings,
+): Pick<
+  RealisticMeasurement,
+  'trianglesSubmitted' | 'trianglesHardSwap' | 'woodedScenery' | 'handOver' | 'handOverControl'
+> {
+  const withLevels = <T>(
+    levels: TreeLevels,
+    body: (view: GameView, gl: WebGL2RenderingContext) => T,
+  ): T => {
+    setTreeLevels(levels);
+    const canvas = document.createElement('canvas');
+    let view: GameView;
+    try {
+      view = threeGameRenderer.create(canvas, top);
+    } finally {
+      // Only the view just built draws with them: every later one is the product's.
+      setTreeLevels(REALISTIC_TREE_LEVELS);
+    }
+    try {
+      view.resize(width, height);
+      const gl = canvas.getContext('webgl2');
+      if (gl === null) throw new Error('#617: no WebGL 2 context for the tree levels');
+      return body(view, gl);
+    } finally {
+      view.destroy();
+    }
+  };
+  const trianglesOf = (levels: TreeLevels): { triangles: number; trees: number } =>
+    withLevels(levels, (view) => {
+      let triangles = 0;
+      countingTriangles((counted) => {
+        view.render(wooded);
+        const before = counted();
+        view.render(wooded);
+        triangles = counted() - before;
+      });
+      return { triangles, trees: sceneryDrawnOf(view) };
+    });
+  const product = trianglesOf(REALISTIC_TREE_LEVELS);
+  const hardSwap = trianglesOf(HARD_SWAP_TREE_LEVELS);
+
+  // A broadleaf: a conifer's needles are thin enough that its covered area
+  // shimmers by 7 % a frame at one level, which would bury the hand-over.
+  const tree = (ahead: number, across: number): ScatterItem => ({
+    kind: 'tree-broadleaf',
+    ...onTheRoad(level, ahead, across),
+    rotation: 0,
+    scale: 1,
+    variant: 0,
+  });
+  const behind = [tree(-10, 0), tree(-14, 0)];
+  const steps = Array.from({ length: 101 }, (_, index) => 16 - index * 0.1);
+  const handOverOf = (levels: TreeLevels): TreeHandOver =>
+    withLevels(levels, (view, gl) => {
+      const empty: SceneFrame = { ...level, scatter: behind };
+      view.render(empty);
+      view.render(empty);
+      const background = readRegion(gl, 0, 0, width, height);
+      const covered = steps.map((ahead) => {
+        view.render({ ...level, scatter: [...behind, tree(ahead, 6)] });
+        return pixelsChanged(background, readRegion(gl, 0, 0, width, height));
+      });
+      return { ahead: steps, covered };
+    });
+  const handOver = handOverOf(REALISTIC_TREE_LEVELS);
+  const handOverControl = handOverOf({ ...REALISTIC_TREE_LEVELS, dithered: false });
+  console.log(
+    `#617: the wooded view submits ${String(product.triangles)} triangles against ` +
+      `${String(hardSwap.triangles)} with the hard swap (${String(hardSwap.triangles - product.triangles)} fewer), ` +
+      `${String(product.trees)} scenery items drawn`,
+  );
+  return {
+    trianglesSubmitted: product.triangles,
+    trianglesHardSwap: hardSwap.triangles,
+    woodedScenery: product.trees,
+    handOver,
+    handOverControl,
   };
 }
 

@@ -271,7 +271,15 @@ import {
   type RealisticWorldOutcome,
   type StructureSurface,
 } from './realistic-assets';
-import { REALISTIC_NEAR_MESHES } from './realistic-budget';
+import { REALISTIC_NEAR_MESHES, REALISTIC_TREE_LEVELS } from './realistic-budget';
+import {
+  bandFade,
+  treeLevelAt,
+  treeSlots,
+  writeKeep,
+  type Keep,
+  type TreeLevels,
+} from './tree-levels';
 import {
   drawnHorizonColour,
   environmentIntensity,
@@ -4115,6 +4123,12 @@ export interface RealisticShape {
   readonly triangles: number;
   /** The far band's billboard, for a tree. */
   readonly impostor?: { readonly material: ShaderMaterial; readonly texture: Texture };
+  /**
+   * The middle level of detail, for a tree — #617. Its parts wear the near
+   * parts' OWN materials, paired by material name, so it adds no material, no
+   * program and no texture. @see prepareMiddleLevel
+   */
+  readonly middle?: { readonly parts: readonly RealisticPart[]; readonly triangles: number };
 }
 
 /** The sky: the HDR itself, and what was read off it. @see realistic-light.ts */
@@ -4256,9 +4270,14 @@ export async function loadRealisticWorld(
     }));
     const shapes = REALISTIC_VEGETATION_KINDS.map((kind) => ({
       kind,
-      models: REALISTIC_VEGETATION[kind].map(({ name, file, impostor }) => ({
+      models: REALISTIC_VEGETATION[kind].map(({ name, file, impostor, middle }) => ({
         name,
         scene: model(() => loaders.model(realisticUrl(file))),
+        // #617: the tree's middle level, loaded and settled with everything else.
+        middle:
+          middle === undefined
+            ? Promise.resolve(undefined)
+            : model(() => loaders.model(realisticUrl(middle))),
         strip:
           impostor === undefined
             ? Promise.resolve(undefined)
@@ -4279,7 +4298,7 @@ export async function loadRealisticWorld(
       ground.normal,
       rider,
       ...structureMaps.flatMap((each) => [each.colour, each.normal]),
-      ...shapes.flatMap((each) => each.models.flatMap((one) => [one.scene, one.strip])),
+      ...shapes.flatMap((each) => each.models.flatMap((one) => [one.scene, one.strip, one.middle])),
     ]);
     for (const outcome of settled) {
       if (outcome.status === 'rejected') throw outcome.reason;
@@ -4288,8 +4307,12 @@ export async function loadRealisticWorld(
     for (const each of shapes) {
       const prepared: RealisticShape[] = [];
       for (const one of each.models) {
-        const shape = prepareRealisticShape(await one.scene, one.name, await one.strip);
-        loaded.shapes.push(shape);
+        const near = prepareRealisticShape(await one.scene, one.name, await one.strip);
+        loaded.shapes.push(near);
+        const middleScene = await one.middle;
+        const shape =
+          middleScene === undefined ? near : prepareMiddleLevel(near, middleScene, one.name);
+        if (shape !== near) loaded.shapes[loaded.shapes.length - 1] = shape;
         prepared.push(shape);
       }
       vegetation.set(each.kind, prepared);
@@ -4440,6 +4463,8 @@ function releaseRealisticShape(shape: RealisticShape): void {
   }
   shape.impostor?.texture.dispose();
   shape.impostor?.material.dispose();
+  // #617: the middle level's geometry is its own; its materials are the near parts'.
+  for (const part of shape.middle?.parts ?? []) part.geometry.dispose();
 }
 
 /**
@@ -4538,6 +4563,8 @@ export function prepareRealisticShape(
         transparent: false,
       }),
     );
+    // #617: the name the middle level's parts are paired by. @see prepareMiddleLevel
+    material.name = typeof loaded.name === 'string' ? loaded.name : '';
     loaded.dispose();
     const index = geometry.getIndex();
     triangles += (index?.count ?? geometry.getAttribute('position').count) / 3;
@@ -4556,6 +4583,63 @@ export function prepareRealisticShape(
 }
 
 /**
+ * A tree's middle level of detail, added to its prepared near shape — #617.
+ *
+ * The middle file carries no image (`tools/realistic/sources.ts` §`middle`):
+ * each of its meshes is taken into the model's own frame as the near file's
+ * are, and paired with the near part whose loaded material had the SAME NAME —
+ * the scan's own material names survive both runs of the pipeline — and wears
+ * that part's material, maps and all. So the level costs no texture memory,
+ * no material and no shader program, and a leaf card is cut at the same alpha
+ * in both levels.
+ *
+ * It is sized by the NEAR shape's recorded extent, so the two levels of one
+ * item are drawn with one matrix; a middle file recording a different scan
+ * size is refused, because it would be a different scan.
+ *
+ * The loader's middle materials are disposed here. Throws when a part names a
+ * material the near file does not have.
+ */
+export function prepareMiddleLevel(
+  near: RealisticShape,
+  source: Object3D,
+  name: string,
+): RealisticShape {
+  source.updateWorldMatrix(false, true);
+  const byName = new Map<string, MeshStandardMaterial>();
+  for (const part of near.parts) byName.set(part.material.name, part.material);
+  const parts: RealisticPart[] = [];
+  let triangles = 0;
+  let extent = Number.NaN;
+  source.traverse((node) => {
+    const extra = (node as Partial<{ userData: Record<string, unknown> }>).userData;
+    if (extra !== undefined && typeof extra['oyl_scan_height'] === 'number') {
+      extent = Math.max(Number(extra['oyl_scan_height']), Number(extra['oyl_scan_width']));
+    }
+    const mesh = node as Partial<Mesh>;
+    if (mesh.isMesh !== true || mesh.geometry === undefined) return;
+    const loaded = mesh.material;
+    if (loaded === undefined || Array.isArray(loaded)) {
+      throw new Error(`${name}: a middle part declares no material, or more than one`);
+    }
+    const wears = typeof loaded.name === 'string' ? loaded.name : '';
+    const material = byName.get(wears);
+    if (material === undefined) {
+      throw new Error(`${name}: the middle level wears ${wears}, which the near file does not`);
+    }
+    loaded.dispose();
+    const geometry = mesh.geometry.clone().applyMatrix4(node.matrixWorld);
+    triangles += (geometry.getIndex()?.count ?? geometry.getAttribute('position').count) / 3;
+    parts.push({ geometry, material });
+  });
+  if (parts.length === 0) throw new Error(`${name}: the middle level holds no mesh`);
+  if (!(Math.abs(extent - near.extent) <= 1e-6 * near.extent)) {
+    throw new Error(`${name}: the middle level records a different scan size from the near one`);
+  }
+  return { ...near, middle: { parts, triangles } };
+}
+
+/**
  * The roughness every realistic surface wears: **0.85**. The pipeline drops
  * the scans' roughness maps (a third of their texture memory, for a term a
  * chase camera barely resolves on foliage and bark), so one figure stands in —
@@ -4565,6 +4649,75 @@ const REALISTIC_ROUGHNESS = 0.85;
 
 /** Where an alpha-tested leaf card is cut: half coverage, glTF's own default for MASK. */
 const REALISTIC_ALPHA_CUTOFF = 0.5;
+
+/**
+ * The hand-over between a tree's levels of detail — #617: a fragment is kept
+ * only where a screen-space hash falls inside the `[low, high)` its instance
+ * carries in `vOylKeep` (`tree-levels.ts` §`writeKeep`), and `low >= high`
+ * keeps every fragment. The two levels of one band tree carry complementary
+ * halves, so at every pixel exactly one of them is drawn.
+ *
+ * The hash is interleaved gradient noise (Jimenez, 2014) — a function of the
+ * pixel alone, so both levels read the same value at the same pixel, and one
+ * that spreads a fade's pixels evenly rather than in blocks.
+ */
+const TREE_DITHER_DISCARD = /* glsl */ `
+  if (vOylKeep.y > vOylKeep.x) {
+    float oylDither = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    if (oylDither < vOylKeep.x || oylDither >= vOylKeep.y) discard;
+  }
+`;
+
+/** The line of three's `color_vertex` chunk that tints by the instance colour. */
+const INSTANCE_TINT = 'vColor.rgb *= instanceColor.rgb;';
+
+/** The materials {@link withTreeDither} has already taught. */
+const TREE_DITHERED = new WeakSet<Material>();
+
+/**
+ * Teaches a realistic tree's material the hand-over dither — #617.
+ *
+ * The keep interval travels in the instance COLOUR, which a tree otherwise
+ * never uses: an `InstancedMesh`'s `instanceColor` is the mesh's own attribute
+ * rather than its geometry's, so the full and the middle meshes of one part can
+ * share a material and a geometry's buffers while each carries its own keeps,
+ * and nothing is allocated per view. So three's tint by it is taken out of
+ * `color_vertex` and the value is handed to the fragment instead.
+ *
+ * ⚠️ **Throws if three's chunk no longer holds the tint line**, rather than
+ * compiling a tree tinted by its keep interval — a three bump that reworded the
+ * chunk is a red test, not a tree drawn in a false colour.
+ *
+ * Idempotent: a material several views share is taught once.
+ */
+function withTreeDither(material: MeshStandardMaterial): void {
+  if (TREE_DITHERED.has(material)) return;
+  TREE_DITHERED.add(material);
+  if (!ShaderChunk.color_vertex.includes(INSTANCE_TINT)) {
+    throw new Error('three’s color_vertex no longer tints by instanceColor as the dither expects');
+  }
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec2 vOylKeep;')
+      .replace(
+        '#include <color_vertex>',
+        `vOylKeep = vec2(0.0);\n${ShaderChunk.color_vertex.replace(
+          INSTANCE_TINT,
+          'vOylKeep = instanceColor.xy;',
+        )}`,
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec2 vOylKeep;')
+      .replace(
+        '#include <clipping_planes_fragment>',
+        `#include <clipping_planes_fragment>\n${TREE_DITHER_DISCARD}`,
+      );
+  };
+  material.customProgramCacheKey = () => `${earlierKey}|oyl-tree-dither`;
+}
 
 /** A unit quad standing on its bottom edge: x in [−0.5, 0.5], y in [0, 1]. */
 function impostorQuad(): BufferGeometry {
@@ -4613,7 +4766,13 @@ function impostorMaterial(
       #include <common>
       #include <fog_pars_vertex>
       varying vec2 vStripUv;
+      varying vec2 vOylKeep;
       void main() {
+        #ifdef USE_INSTANCING_COLOR
+          vOylKeep = instanceColor.xy;
+        #else
+          vOylKeep = vec2(0.0);
+        #endif
         vec3 centre = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
         vec3 across = (instanceMatrix * vec4(1.0, 0.0, 0.0, 0.0)).xyz;
         vec3 along = (instanceMatrix * vec4(0.0, 0.0, 1.0, 0.0)).xyz;
@@ -4638,7 +4797,9 @@ function impostorMaterial(
       #include <fog_pars_fragment>
       uniform sampler2D strip;
       varying vec2 vStripUv;
+      varying vec2 vOylKeep;
       void main() {
+        ${TREE_DITHER_DISCARD}
         vec4 texel = texture2D(strip, vStripUv);
         if (texel.a < ${REALISTIC_ALPHA_CUTOFF.toFixed(2)}) discard;
         gl_FragColor = vec4(texel.rgb, 1.0);
@@ -4693,16 +4854,26 @@ function inView(item: ScatterItem, pose: CameraPose): boolean {
  *
  * ## Near meshes by COUNT, far impostors, and what is not drawn
  *
- * For each kind, the `realistic-budget.ts` §`REALISTIC_NEAR_MESHES` items
- * nearest the rider are drawn as meshes — the whole of the frame's triangle
- * budget, whatever the road. Every other TREE is its impostor, a quad drawn
- * from the eight views the pipeline rendered of the full scan; every other
- * shrub and rock is not drawn at all, because a 1.5 m shrub beyond the nearest
- * eight is a handful of pixels the fog is already taking.
+ * For a shrub or a rock, the `realistic-budget.ts` §`REALISTIC_NEAR_MESHES`
+ * nearest of its kind are drawn as meshes and every other is not drawn at
+ * all, because a 1.5 m shrub beyond the nearest eight is a handful of pixels
+ * the fog is already taking.
  *
- * ⚠️ **Nothing is allocated per frame.** The nearest-N selection is written
- * into typed arrays sized once, and every instanced mesh is built with its
- * capacity in the constructor, as #240's NFR-3 requires of every belt here.
+ * ## Trees: three levels, and a dithered hand-over — #617
+ *
+ * The trees of both kinds are ranked together, and `tree-levels.ts` says what
+ * each rank is drawn as: the full mesh, the middle one, or the impostor, a
+ * quad drawn from the eight views the pipeline rendered of the full scan
+ * (`realistic-budget.ts` §`REALISTIC_TREE_LEVELS` counts them). At each
+ * hand-over ONE tree is submitted at both levels, and each keeps its half of a
+ * screen-space dither ({@link withTreeDither}): no alpha blending, no sorting,
+ * and no tree changes shape in one frame. The three levels of one item are
+ * drawn with ONE matrix.
+ *
+ * ⚠️ **Nothing is allocated per frame.** The ranking is written into typed
+ * arrays sized once, every instanced mesh is built with its capacity in the
+ * constructor, as #240's NFR-3 requires of every belt here, and a keep is
+ * written straight into its mesh's instance attribute.
  *
  * Exported for `three-renderer.test.ts`, for {@link ScatterBelt}'s reasons.
  */
@@ -4714,6 +4885,9 @@ export class RealisticVegetationBelt {
   readonly #quaternion = new Quaternion();
   readonly #scale = new Vector3();
   readonly #up = new Vector3(0, 1, 0);
+  readonly #levels: TreeLevels;
+  /** Both tree kinds' one ranking. @see REALISTIC_TREE_LEVELS */
+  readonly #trees: Ranking;
   #shown = true;
   /**
    * The rung's scenery budget — #245's, shared with the primitives belt (#478).
@@ -4722,27 +4896,58 @@ export class RealisticVegetationBelt {
    * belt is a mechanism and a rung is a policy.
    */
   #budget = Number.POSITIVE_INFINITY;
-  /** How many items the last frame drew, as meshes or impostors. @see drawnItems */
+  /** How many items the last frame drew, at any level. @see drawnItems */
   #drawn = 0;
 
-  constructor(vegetation: ReadonlyMap<RealisticVegetationKind, readonly RealisticShape[]>) {
+  /**
+   * @param levels how the trees are drawn: the product's, unless a caller is
+   *   the browser gate building its hard-swap control
+   *   (`realistic-budget.ts` §`HARD_SWAP_TREE_LEVELS`).
+   */
+  constructor(
+    vegetation: ReadonlyMap<RealisticVegetationKind, readonly RealisticShape[]>,
+    levels: TreeLevels = REALISTIC_TREE_LEVELS,
+  ) {
+    this.#levels = levels;
+    const slots = treeSlots(levels);
+    this.#trees = ranking(slots.ranked);
     for (const kind of REALISTIC_VEGETATION_KINDS) {
       const shapes = vegetation.get(kind) ?? [];
-      const cap = REALISTIC_NEAR_MESHES[kind];
+      const tree = kind === 'tree-broadleaf' || kind === 'tree-conifer';
+      const nearCap = tree ? slots.full : REALISTIC_NEAR_MESHES[kind];
+      const keeps = (mesh: InstancedMesh, capacity: number): InstancedMesh => {
+        if (!tree) return mesh;
+        mesh.instanceColor = new InstancedBufferAttribute(new Float32Array(capacity * 3), 3);
+        mesh.instanceColor.setUsage(DynamicDrawUsage);
+        return mesh;
+      };
+      if (tree)
+        for (const shape of shapes) for (const part of shape.parts) withTreeDither(part.material);
       this.#kinds.push({
         kind,
+        tree,
         shapes,
         near: shapes.map((shape) =>
-          shape.parts.map((part) => instanced(part.geometry, part.material, cap)),
+          shape.parts.map((part) =>
+            keeps(instanced(part.geometry, part.material, nearCap), nearCap),
+          ),
+        ),
+        middle: shapes.map((shape) =>
+          tree && shape.middle !== undefined && slots.middle > 0
+            ? shape.middle.parts.map((part) =>
+                keeps(instanced(part.geometry, part.material, slots.middle), slots.middle),
+              )
+            : undefined,
         ),
         far: shapes.map((shape) =>
           shape.impostor === undefined
             ? undefined
-            : instanced(this.#quad, shape.impostor.material, SCATTER_INSTANCE_CAPACITY),
+            : keeps(
+                instanced(this.#quad, shape.impostor.material, SCATTER_INSTANCE_CAPACITY),
+                SCATTER_INSTANCE_CAPACITY,
+              ),
         ),
-        chosen: new Int32Array(cap),
-        distances: new Float64Array(cap),
-        count: 0,
+        ranking: tree ? this.#trees : ranking(nearCap),
         fit: sceneryFitMetres(kind),
       });
     }
@@ -4752,8 +4957,26 @@ export class RealisticVegetationBelt {
   get meshes(): readonly InstancedMesh[] {
     return this.#kinds.flatMap((each) => [
       ...each.near.flat(),
+      ...each.middle.flatMap((meshes) => meshes ?? []),
       ...each.far.filter((mesh): mesh is InstancedMesh => mesh !== undefined),
     ]);
+  }
+
+  /**
+   * Each tree kind's meshes by level — the full, the middle and the impostor —
+   * for `three-renderer.test.ts`, which asserts which level an item was
+   * submitted at.
+   *
+   * @test-facing held by `three-renderer.test.ts` §"#617", which reads which
+   * levels one item was submitted at; the renderer draws `meshes`
+   */
+  levelsOf(kind: RealisticVegetationKind): {
+    readonly full: readonly (readonly InstancedMesh[])[];
+    readonly middle: readonly (readonly InstancedMesh[] | undefined)[];
+    readonly impostor: readonly (InstancedMesh | undefined)[];
+  } {
+    const each = this.#kinds.find((slot) => slot.kind === kind);
+    return { full: each?.near ?? [], middle: each?.middle ?? [], impostor: each?.far ?? [] };
   }
 
   addTo(scene: Scene): void {
@@ -4779,18 +5002,17 @@ export class RealisticVegetationBelt {
    * more. Until #478 this belt had no budget at all, and the second realistic
    * rung's reduction landed on the posts and never on the trees.
    *
-   * What it admits is then drawn by this belt's own rule: the nearest of each
-   * kind as meshes, the rest of the trees as impostors, the rest of the shrubs
-   * and rocks not at all. So it is a ceiling on what is drawn, never a count of
-   * it. Allocates nothing.
+   * What it admits is then drawn by this belt's own rule: the trees at their
+   * levels, the nearest shrubs and rocks as meshes and the rest not at all. So
+   * it is a ceiling on what is drawn, never a count of it. Allocates nothing.
    */
   setBudget(items: number): void {
     this.#budget = items;
   }
 
   /**
-   * How many scenery items the last frame drew — as a mesh or as an impostor,
-   * one per item however many parts its shape has.
+   * How many scenery items the last frame drew — at any level, one per item
+   * however many parts its shape has and whether or not it is in a hand-over.
    *
    * @test-facing held by `realistic-renderer.test.ts` and, through
    * `sceneryDrawnOf`, by the browser gate: what a rung's budget is checked
@@ -4800,13 +5022,15 @@ export class RealisticVegetationBelt {
     return this.#drawn;
   }
 
-  /** This frame's vegetation: the nearest of each kind as meshes, the rest of the trees as impostors. */
+  /** This frame's vegetation: the trees at their levels, the nearest shrubs and rocks as meshes. */
   update(items: readonly ScatterItem[], pose: CameraPose): void {
     this.#drawn = 0;
     if (!this.#shown) return;
+    this.#trees.count = 0;
     for (const each of this.#kinds) {
-      each.count = 0;
+      each.ranking.count = 0;
       for (const meshes of each.near) for (const mesh of meshes) mesh.count = 0;
+      for (const meshes of each.middle) for (const mesh of meshes ?? []) mesh.count = 0;
       for (const mesh of each.far) if (mesh !== undefined) mesh.count = 0;
     }
     // Pass 0: where the budget runs out — the first item in the frame's order,
@@ -4823,62 +5047,103 @@ export class RealisticVegetationBelt {
         admitted += 1;
       }
     }
-    // Pass 1: the nearest N of each kind, by distance from the rider.
+    // Pass 1: the nearest of each ranking, by distance from the rider.
     for (let index = 0; index < end; index += 1) {
       const item = items[index] as ScatterItem;
       const each = this.#slotFor(item);
       if (each === undefined || !inView(item, pose)) continue;
-      const distance = Math.hypot(item.x - pose.x, item.z - pose.z);
-      const cap = each.chosen.length;
-      if (each.count === cap && distance >= (each.distances[cap - 1] ?? Infinity)) continue;
-      // Insertion into a sorted list of at most `cap`, dropping the worst.
-      let at = Math.min(each.count, cap - 1);
-      while (at > 0 && (each.distances[at - 1] ?? 0) > distance) {
-        each.distances[at] = each.distances[at - 1] ?? 0;
-        each.chosen[at] = each.chosen[at - 1] ?? 0;
-        at -= 1;
-      }
-      each.distances[at] = distance;
-      each.chosen[at] = index;
-      each.count = Math.min(cap, each.count + 1);
+      rankInto(each.ranking, index, Math.hypot(item.x - pose.x, item.z - pose.z));
     }
-    // Pass 2: every item into the mesh or the impostor it is drawn with.
+    // Pass 2: every item into the meshes of the levels it is drawn at.
     for (let index = 0; index < end; index += 1) {
       const item = items[index] as ScatterItem;
       const each = this.#slotFor(item);
       if (each === undefined || each.shapes.length === 0 || !inView(item, pose)) continue;
       const variant = variantOf(item.variant, each.shapes.length);
       const shape = each.shapes[variant] as RealisticShape;
-      let near = false;
-      for (let slot = 0; slot < each.count; slot += 1) {
-        if (each.chosen[slot] === index) {
-          near = true;
+      const order = each.ranking;
+      let rank = order.count;
+      for (let slot = 0; slot < order.count; slot += 1) {
+        if (order.chosen[slot] === index) {
+          rank = slot;
           break;
         }
       }
-      const target = near ? undefined : each.far[variant];
-      if (!near && target === undefined) continue;
       const size = (each.fit * item.scale) / shape.extent;
       this.#position.set(item.x, item.y, item.z);
       this.#quaternion.setFromAxisAngle(this.#up, item.rotation);
       this.#scale.setScalar(size);
       this.#matrix.compose(this.#position, this.#quaternion, this.#scale);
-      if (near) {
-        for (const mesh of each.near[variant] ?? []) {
-          mesh.setMatrixAt(mesh.count, this.#matrix);
-          mesh.count += 1;
+      let drawn = false;
+      if (!each.tree) {
+        if (rank < order.count) drawn = this.#put(each.near[variant], 'all', 0);
+      } else {
+        const level = treeLevelAt(rank, this.#levels);
+        const fade =
+          level === 'full-middle' || level === 'middle-impostor'
+            ? bandFade(rank, order.distances, order.count)
+            : 0;
+        const middle = each.middle[variant];
+        const impostor = each.far[variant];
+        // A tree with no middle level — a fixture, or a pack that shipped none —
+        // is drawn at its impostor where the middle level would be.
+        switch (level) {
+          case 'full':
+            drawn = this.#put(each.near[variant], 'all', 0);
+            break;
+          case 'full-middle':
+            drawn = this.#put(each.near[variant], 'nearer', fade);
+            drawn =
+              (middle === undefined
+                ? this.#putOne(impostor, 'further', fade)
+                : this.#put(middle, 'further', fade)) || drawn;
+            break;
+          case 'middle':
+            drawn =
+              middle === undefined ? this.#putOne(impostor, 'all', 0) : this.#put(middle, 'all', 0);
+            break;
+          case 'middle-impostor':
+            if (middle === undefined) {
+              drawn = this.#putOne(impostor, 'all', 0);
+              break;
+            }
+            drawn = this.#put(middle, 'nearer', fade);
+            drawn = this.#putOne(impostor, 'further', fade) || drawn;
+            break;
+          case 'impostor':
+            drawn = this.#putOne(impostor, 'all', 0);
+            break;
         }
-        this.#drawn += 1;
-      } else if (target !== undefined && target.count < SCATTER_INSTANCE_CAPACITY) {
-        target.setMatrixAt(target.count, this.#matrix);
-        target.count += 1;
-        this.#drawn += 1;
       }
+      if (drawn) this.#drawn += 1;
     }
     for (const mesh of this.meshes) {
-      if (mesh.count > 0) mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.count > 0) {
+        mesh.instanceMatrix.needsUpdate = true;
+        if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
+      }
       mesh.visible = mesh.count > 0;
     }
+  }
+
+  /** This frame's matrix into every part of one level, with its keep. */
+  #put(meshes: readonly InstancedMesh[] | undefined, keep: Keep, fade: number): boolean {
+    if (meshes === undefined || meshes.length === 0) return false;
+    for (const mesh of meshes) this.#putOne(mesh, keep, fade);
+    return true;
+  }
+
+  /** This frame's matrix into one mesh, with its keep, if it has room. */
+  #putOne(mesh: InstancedMesh | undefined, keep: Keep, fade: number): boolean {
+    if (mesh === undefined) return false;
+    const capacity = mesh.instanceMatrix.count;
+    if (mesh.count >= capacity) return false;
+    mesh.setMatrixAt(mesh.count, this.#matrix);
+    if (mesh.instanceColor !== null) {
+      writeKeep(mesh.instanceColor.array as Float32Array, mesh.count, keep, fade);
+    }
+    mesh.count += 1;
+    return true;
   }
 
   /** Releases the belt's own buffers. The shapes are the loaded world's and outlive it. */
@@ -4893,18 +5158,52 @@ export class RealisticVegetationBelt {
   }
 }
 
-/** One realistic kind's meshes and its nearest-N selection. @see RealisticVegetationBelt */
-interface VegetationSlot {
-  readonly kind: RealisticVegetationKind;
-  readonly shapes: readonly RealisticShape[];
-  /** Per shape, one instanced mesh per part. */
-  readonly near: readonly (readonly InstancedMesh[])[];
-  /** Per shape, its impostor, for a tree. */
-  readonly far: readonly (InstancedMesh | undefined)[];
-  /** The nearest items' indices and distances, best first. */
+/** The nearest items of one ranking, best first. @see rankInto */
+interface Ranking {
+  /** The items' indices in the frame, and their distances from the rider. */
   readonly chosen: Int32Array;
   readonly distances: Float64Array;
   count: number;
+}
+
+function ranking(capacity: number): Ranking {
+  return {
+    chosen: new Int32Array(capacity),
+    distances: new Float64Array(capacity),
+    count: 0,
+  };
+}
+
+/** Insertion into a sorted list of at most its capacity, dropping the furthest. */
+function rankInto(order: Ranking, index: number, distance: number): void {
+  const cap = order.chosen.length;
+  if (cap === 0) return;
+  if (order.count === cap && distance >= (order.distances[cap - 1] ?? Infinity)) return;
+  let at = Math.min(order.count, cap - 1);
+  while (at > 0 && (order.distances[at - 1] ?? 0) > distance) {
+    order.distances[at] = order.distances[at - 1] ?? 0;
+    order.chosen[at] = order.chosen[at - 1] ?? 0;
+    at -= 1;
+  }
+  order.distances[at] = distance;
+  order.chosen[at] = index;
+  order.count = Math.min(cap, order.count + 1);
+}
+
+/** One realistic kind's meshes and the ranking it is drawn by. @see RealisticVegetationBelt */
+interface VegetationSlot {
+  readonly kind: RealisticVegetationKind;
+  /** Whether it has levels and an impostor — the two tree kinds. */
+  readonly tree: boolean;
+  readonly shapes: readonly RealisticShape[];
+  /** Per shape, one instanced mesh per part: the full level. */
+  readonly near: readonly (readonly InstancedMesh[])[];
+  /** Per shape, one instanced mesh per middle part, for a tree with a middle level. */
+  readonly middle: readonly (readonly InstancedMesh[] | undefined)[];
+  /** Per shape, its impostor, for a tree. */
+  readonly far: readonly (InstancedMesh | undefined)[];
+  /** Both tree kinds share one; a shrub's and a rock's are their own. */
+  readonly ranking: Ranking;
   readonly fit: number;
 }
 
@@ -6085,6 +6384,26 @@ export class RealisticStructureBelts {
 }
 
 /**
+ * How the trees are drawn in every view built after {@link setTreeLevels} —
+ * the product's levels, unless the browser gate is building its control.
+ */
+let treeLevels: TreeLevels = REALISTIC_TREE_LEVELS;
+
+/**
+ * Builds every view created after this call with its trees drawn at `levels`
+ * — #617's browser-gate controls: the hard swap with no middle level
+ * (`realistic-budget.ts` §`HARD_SWAP_TREE_LEVELS`), whose frame must submit at
+ * least 60 000 more triangles, and the same levels with no band, whose
+ * hand-over must jump. Pass `REALISTIC_TREE_LEVELS` to put it back.
+ *
+ * @test-facing `apps/web/browser/game-harness.ts` §`treeLevelProbe` builds its
+ * controls with it; the product never changes how its trees are drawn
+ */
+export function setTreeLevels(levels: TreeLevels): void {
+  treeLevels = levels;
+}
+
+/**
  * What one view builds to draw the realistic world — ADR 0026 D-10's second
  * path, beside the stylised one in this same file.
  *
@@ -6127,7 +6446,7 @@ class RealisticDrawing {
     ]) {
       texture.anisotropy = anisotropy;
     }
-    this.vegetation = new RealisticVegetationBelt(world.vegetation);
+    this.vegetation = new RealisticVegetationBelt(world.vegetation, treeLevels);
     this.structures = new RealisticStructureBelts(world.structures);
     this.primitives = new ScatterBelt(new Map(), {
       skip: REALISTIC_PRIMITIVE_SKIP,
@@ -6222,6 +6541,7 @@ function evictRealisticWorldFromGpu(): void {
         part.material.map?.dispose();
         part.material.normalMap?.dispose();
       }
+      for (const part of shape.middle?.parts ?? []) part.geometry.dispose();
       shape.impostor?.texture.dispose();
     }
   }

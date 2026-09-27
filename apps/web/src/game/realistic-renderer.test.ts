@@ -22,7 +22,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { isBuiltKind } from './buildings';
 import { REALISTIC_LADDER, type QualitySettings } from './quality';
-import { REALISTIC_BICYCLE_TRIANGLES, REALISTIC_NEAR_MESHES } from './realistic-budget';
+import {
+  HARD_SWAP_TREE_LEVELS,
+  REALISTIC_BICYCLE_TRIANGLES,
+  REALISTIC_NEAR_MESHES,
+  REALISTIC_TREE_LEVELS,
+} from './realistic-budget';
+import { bandFade, treeSlots } from './tree-levels';
 import {
   PHOTOGRAPHIC_STRUCTURE_SURFACES,
   REALISTIC_SKY,
@@ -39,6 +45,7 @@ import { STRUCTURE_KINDS, type ScatterItem, type SceneryKind } from './scatter';
 import {
   isConstructedMaterial,
   loadRealisticWorld,
+  prepareMiddleLevel,
   prepareRealisticShape,
   realisticBicycleTriangles,
   REALISTIC_PRIMITIVE_SKIP,
@@ -229,23 +236,26 @@ function drawn(belt: RealisticVegetationBelt): { readonly near: number; readonly
 }
 
 describe('the vegetation belt — #474', () => {
-  it('draws the nearest trees of a kind as meshes, and every other as its impostor', () => {
+  it('draws the nearest trees as meshes, and every other as its impostor', () => {
     const belt = aBelt();
     // Far ones FIRST in the frame's order, so a belt that took the first N
-    // rather than the nearest N is caught.
+    // rather than the nearest N is caught. The fixture tree has no middle
+    // level, so the middle ranks are drawn as the impostor (#617).
     const items = [150, 120, 90, 60, 40, 30, 20, 10].map((z) => item('tree-broadleaf', z));
     belt.update(items, POSE);
-    const cap = REALISTIC_NEAR_MESHES['tree-broadleaf'];
+    const cap = treeSlots(REALISTIC_TREE_LEVELS).full;
     // Each tree mesh is drawn once per part, and the fixture tree has two.
     const meshes = belt.meshes.filter((mesh) => typeOf(mesh) !== 'ShaderMaterial');
     const drawnNear = Math.max(...meshes.map((mesh) => mesh.count));
     expect(drawnNear).toBe(cap);
-    expect(drawn(belt).far).toBe(items.length - cap);
-    // …and the near ones ARE the nearest: every near instance is within 30 m.
+    // Every tree but the nearest is an impostor — the band's included, whose
+    // other half is its impostor where a middle level would be.
+    expect(drawn(belt).far).toBe(items.length - 1);
+    // …and the near ones ARE the nearest: every near instance is within 20 m.
     for (const mesh of meshes) {
       for (let slot = 0; slot < mesh.count; slot += 1) {
         // The z of the translation, read straight out of the instance buffer.
-        expect(mesh.instanceMatrix.array[slot * 16 + 14]).toBeLessThanOrEqual(30);
+        expect(mesh.instanceMatrix.array[slot * 16 + 14]).toBeLessThanOrEqual(20);
       }
     }
   });
@@ -284,6 +294,190 @@ describe('the vegetation belt — #474', () => {
     for (const mesh of belt.meshes) {
       expect(isConstructedMaterial(mesh.material as never), typeOf(mesh)).toBe(true);
     }
+  });
+});
+
+/** A tree with a middle level, as the loader would hand both files over. */
+function aTreeWithMiddle(): RealisticShape {
+  const extras = {
+    oyl_scan_height: 8,
+    oyl_scan_width: 4,
+    oyl_impostor_scale: 8.2,
+    oyl_impostor_frames: 8,
+  };
+  const near = prepareRealisticShape(
+    aScene(
+      [
+        { material: loaderMaterial({ name: 'bark' }) },
+        { material: loaderMaterial({ name: 'leaves', transparent: true }) },
+      ],
+      extras,
+    ),
+    'tree',
+    { image: { width: 2048, height: 512 } } as unknown as Parameters<
+      typeof prepareRealisticShape
+    >[2],
+  );
+  return prepareMiddleLevel(
+    near,
+    aScene(
+      [
+        { material: loaderMaterial({ name: 'leaves', map: null }) },
+        { material: loaderMaterial({ name: 'bark', map: null }) },
+      ],
+      { oyl_scan_height: 8, oyl_scan_width: 4 },
+    ),
+    'tree',
+  );
+}
+
+/** Where each level of one kind was submitted: the z of every instance, and its keep. */
+function submitted(
+  belt: RealisticVegetationBelt,
+  kind: 'tree-broadleaf' | 'tree-conifer',
+): Record<'full' | 'middle' | 'impostor', { z: number; low: number; high: number; m: number[] }[]> {
+  const levels = belt.levelsOf(kind);
+  const read = (mesh: RealisticVegetationBelt['meshes'][number] | undefined) => {
+    const out: { z: number; low: number; high: number; m: number[] }[] = [];
+    if (mesh === undefined) return out;
+    for (let slot = 0; slot < mesh.count; slot += 1) {
+      const keep = mesh.instanceColor?.array;
+      out.push({
+        z: mesh.instanceMatrix.array[slot * 16 + 14] ?? Number.NaN,
+        low: keep?.[slot * 3] ?? Number.NaN,
+        high: keep?.[slot * 3 + 1] ?? Number.NaN,
+        m: Array.from(mesh.instanceMatrix.array.slice(slot * 16, slot * 16 + 16)),
+      });
+    }
+    return out;
+  };
+  // One part is enough: every part of a level carries the same instances.
+  return {
+    full: read(levels.full[0]?.[0]),
+    middle: read(levels.middle[0]?.[0]),
+    impostor: read(levels.impostor[0]),
+  };
+}
+
+describe('the trees’ three levels and the dithered hand-over — #617', () => {
+  const beltWith = (levels = REALISTIC_TREE_LEVELS): RealisticVegetationBelt => {
+    const tree = aTreeWithMiddle();
+    return new RealisticVegetationBelt(
+      new Map([
+        ['tree-broadleaf', [tree]],
+        ['tree-conifer', [tree]],
+      ] as const),
+      levels,
+    );
+  };
+  // Far first, both kinds interleaved: the ranking is over the trees together.
+  const zs = [95, 85, 75, 65, 55, 45, 35, 25, 18, 10];
+  const trees = zs.map((z, index) =>
+    item(index % 2 === 0 ? 'tree-broadleaf' : 'tree-conifer', z, 0),
+  );
+  const levelsOfZ = (belt: RealisticVegetationBelt, z: number): string[] => {
+    const found: string[] = [];
+    for (const kind of ['tree-broadleaf', 'tree-conifer'] as const) {
+      const each = submitted(belt, kind);
+      for (const level of ['full', 'middle', 'impostor'] as const) {
+        if (each[level].some((one) => Math.abs(one.z - z) < 1e-6)) found.push(level);
+      }
+    }
+    return found;
+  };
+
+  it('submits a band tree at BOTH levels, and every other tree at one', () => {
+    const belt = beltWith();
+    belt.update(trees, POSE);
+    // Nearest first: 10 full; 18 the band; 25–55 middle; 65 the band; beyond, impostors.
+    expect(levelsOfZ(belt, 10)).toEqual(['full']);
+    expect(levelsOfZ(belt, 18)).toEqual(['full', 'middle']);
+    for (const z of [25, 35, 45, 55]) expect(levelsOfZ(belt, z), String(z)).toEqual(['middle']);
+    expect(levelsOfZ(belt, 65)).toEqual(['middle', 'impostor']);
+    for (const z of [75, 85, 95]) expect(levelsOfZ(belt, z), String(z)).toEqual(['impostor']);
+    // Every tree counted once, however many levels it was submitted at.
+    expect(belt.drawnItems).toBe(trees.length);
+  });
+
+  it('draws a band tree’s levels with ONE matrix and complementary keeps', () => {
+    const belt = beltWith();
+    belt.update(trees, POSE);
+    const kindOf18 = 'tree-broadleaf';
+    const at = submitted(belt, kindOf18);
+    const full = at.full.find((one) => one.z === 18);
+    const middle = at.middle.find((one) => one.z === 18);
+    expect(full?.m).toEqual(middle?.m);
+    // Its fade is where 18 sits between 10 and 25.
+    const fade = bandFade(1, [10, 18, 25], 3);
+    expect(fade).toBeCloseTo(8 / 15, 6);
+    expect([full?.low, full?.high]).toEqual([Math.fround(fade), 2]);
+    expect([middle?.low, middle?.high]).toEqual([-1, Math.fround(fade)]);
+    // And a tree at one level keeps everything.
+    const nearest = submitted(belt, 'tree-conifer').full.find((one) => one.z === 10);
+    expect([nearest?.low, nearest?.high]).toEqual([0, 0]);
+    // Band B, the other way round: 65 sits half-way between 55 and 75, so the
+    // middle level keeps the upper half and the impostor the lower.
+    const outer = submitted(belt, 'tree-conifer');
+    const outerMiddle = outer.middle.find((one) => one.z === 65);
+    const outerImpostor = outer.impostor.find((one) => one.z === 65);
+    expect([outerMiddle?.low, outerMiddle?.high]).toEqual([0.5, 2]);
+    expect([outerImpostor?.low, outerImpostor?.high]).toEqual([-1, 0.5]);
+    expect(outerMiddle?.m).toEqual(outerImpostor?.m);
+  });
+
+  it('never submits more than the slots allow, however wooded the road', () => {
+    const belt = beltWith();
+    const forest = Array.from({ length: 60 }, (_, index) =>
+      item(index % 2 === 0 ? 'tree-broadleaf' : 'tree-conifer', 5 + index * 2, 0),
+    );
+    belt.update(forest, POSE);
+    const slots = treeSlots(REALISTIC_TREE_LEVELS);
+    let full = 0;
+    let middle = 0;
+    for (const kind of ['tree-broadleaf', 'tree-conifer'] as const) {
+      full += submitted(belt, kind).full.length;
+      middle += submitted(belt, kind).middle.length;
+    }
+    expect(full).toBe(slots.full);
+    expect(middle).toBe(slots.middle);
+  });
+
+  it('wears the near parts’ own materials at the middle level — no second map', () => {
+    const tree = aTreeWithMiddle();
+    const nearMaterials = tree.parts.map((part) => part.material);
+    expect(tree.middle?.parts).toHaveLength(2);
+    for (const part of tree.middle?.parts ?? []) expect(nearMaterials).toContain(part.material);
+    // Paired by NAME, not by order: the middle file lists them the other way round.
+    expect(tree.middle?.parts[0]?.material.name).toBe('leaves');
+    expect(tree.middle?.parts[0]?.material.map).not.toBeNull();
+  });
+
+  it('refuses a middle level that wears a material the near file has not, or is another scan', () => {
+    const near = aTreeShape();
+    expect(() =>
+      prepareMiddleLevel(near, aScene([{ material: loaderMaterial({ name: 'moss' }) }]), 'tree'),
+    ).toThrow(/does not/);
+    const named = aTreeWithMiddle();
+    expect(() =>
+      prepareMiddleLevel(
+        named,
+        aScene([{ material: loaderMaterial({ name: 'bark' }) }], {
+          oyl_scan_height: 9,
+          oyl_scan_width: 4,
+        }),
+        'tree',
+      ),
+    ).toThrow(/different scan size/);
+  });
+
+  it('hard-swaps with no band and no middle level in the control', () => {
+    const belt = beltWith(HARD_SWAP_TREE_LEVELS);
+    belt.update(trees, POSE);
+    for (const z of zs) {
+      expect(levelsOfZ(belt, z), String(z)).toHaveLength(1);
+    }
+    expect(levelsOfZ(belt, 55)).toEqual(['full']);
+    expect(levelsOfZ(belt, 65)).toEqual(['impostor']);
   });
 });
 
@@ -390,7 +584,8 @@ describe('the rung’s scenery budget, spent by both realistic belts together �
         found.push(mesh.instanceMatrix.array[slot * 16 + 14] as number);
       }
     }
-    return found;
+    // #617: a band tree is submitted at two levels and is still one tree.
+    return [...new Set(found)];
   }
 
   const rungBudget = (rung: QualitySettings): number => rung.scatterItems + rung.structureItems;

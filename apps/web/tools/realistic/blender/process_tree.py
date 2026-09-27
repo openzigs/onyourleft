@@ -5,11 +5,16 @@ One photoscanned plant, cut down to what a phone can draw -- #430, #474.
 Run by `process-assets.ts`, never by hand:
 
     Blender -b --factory-startup --python process_tree.py -- \
-        <in.gltf> <out.glb> <report.json> <object> <target-tris> <impostor|none> <auto|all>
+        <in.gltf> <out.glb> <report.json> <object> <target-tris> <impostor|none> <auto|all> \
+        [<maps|nomaps>]
 
 `impostor` also writes `<out>-impostor.png` beside the GLB (the `.glb` suffix
 swapped for `-impostor.png`). `all` treats every face as foliage, for a shrub
 whose leaves are its whole shape; `auto` splits wood from foliage by material.
+`nomaps` exports the materials with no image at all -- #617's middle level of
+detail, which wears the near file's maps at runtime rather than carrying a
+second copy of them (so it costs no texture memory); `maps`, the default, is
+every other file.
 
 ## Why this is a script and not a pull request's worth of hand edits
 
@@ -65,6 +70,10 @@ IN_GLTF, OUT_GLB, OUT_REPORT, OBJECT = args[:4]
 TARGET_TRIS = int(args[4])
 WANT_IMPOSTOR = args[5] == "impostor"
 ALL_FOLIAGE = args[6] == "all"
+# #617: a middle level borrows the near file's maps, so it ships none.
+WANT_MAPS = len(args) < 8 or args[7] == "maps"
+if len(args) >= 8 and args[7] not in ("maps", "nomaps"):
+    raise SystemExit(f"maps|nomaps expected, not {args[7]}")
 OUT_IMPOSTOR = OUT_GLB[: -len(".glb")] + "-impostor.png"
 
 # The strip: eight views, each FRAME_W x FRAME_H. The far band starts where a
@@ -248,6 +257,60 @@ if 0 < len(foliage_slots) < len(plant.material_slots) and source_wood > 0:
         modifier = wood.modifiers.new("collapse", "DECIMATE")
         modifier.ratio = 0.97 * wood_budget / triangles(wood)
         bpy.ops.object.modifier_apply(modifier="collapse")
+
+# If the collapse stalls with the wood holding more than half the budget, the
+# foliage would be starved, so the wood is THINNED by whole pieces instead,
+# the largest kept first -- the trunk and the main limbs -- while they fit its
+# share. #617: `tree_small_02`'s branches stall at about 7 800 triangles, which
+# is more than its whole 6 000-triangle middle level. No near file reaches this
+# (their wood is at most a third of 24 000 or 28 000), so their bytes do not
+# move.
+def islands_of(bm, faces):
+    """Connected pieces of `faces` by shared vertices, in face-index order."""
+    parent = {}
+
+    def root(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for face in faces:
+        parent.setdefault(face.index, face.index)
+    owner = {}
+    for face in faces:
+        for vert in face.verts:
+            other = owner.get(vert.index)
+            if other is None:
+                owner[vert.index] = face.index
+            else:
+                a, b = root(face.index), root(other)
+                if a != b:
+                    parent[a] = b
+    pieces = {}
+    for face in faces:
+        pieces.setdefault(root(face.index), []).append(face)
+    return pieces
+
+
+if wood is not None and triangles(wood) > TARGET_TRIS // 2:
+    wood_bm = bmesh.new()
+    wood_bm.from_mesh(wood.data)
+    wood_bm.faces.ensure_lookup_table()
+    pieces = islands_of(wood_bm, list(wood_bm.faces))
+    by_size = sorted(pieces, key=lambda key: (-sum(len(f.verts) - 2 for f in pieces[key]), key))
+    kept_wood, dropped = 0, []
+    for key in by_size:
+        size = sum(len(f.verts) - 2 for f in pieces[key])
+        if kept_wood + size <= wood_budget:
+            kept_wood += size
+        else:
+            dropped.extend(pieces[key])
+    bmesh.ops.delete(wood_bm, geom=dropped, context="FACES_ONLY")
+    bmesh.ops.delete(wood_bm, geom=[v for v in wood_bm.verts if not v.link_faces], context="VERTS")
+    wood_bm.to_mesh(wood.data)
+    wood_bm.free()
+    report["woodThinnedByPieces"] = True
 wood_tris = triangles(wood) if wood is not None else 0
 
 # --- 4. thin the foliage to exactly what is left: whole cards, seeded -----------
@@ -409,7 +472,7 @@ for image in bpy.data.images:
         factor = TEXTURE_PIXELS / side
         image.scale(max(1, round(image.size[0] * factor)), max(1, round(image.size[1] * factor)))
     shipped_images.append([image.name, image.size[0], image.size[1]])
-report["images"] = sorted(shipped_images)
+report["images"] = sorted(shipped_images) if WANT_MAPS else []
 report["materials"] = len(plant.material_slots)
 
 # --- 8. export -------------------------------------------------------------------
@@ -421,7 +484,10 @@ bpy.ops.export_scene.gltf(
     use_selection=True,
     export_vertex_color="ACTIVE",
     export_all_vertex_colors=False,
-    export_image_format="AUTO",
+    # "NONE" keeps each material, its name, factors and texture coordinates,
+    # and writes no image: the runtime pairs a middle part with the near
+    # file's part of the same material name and wears its maps (#617).
+    export_image_format="AUTO" if WANT_MAPS else "NONE",
     export_jpeg_quality=85,
     export_extras=True,
     export_yup=True,

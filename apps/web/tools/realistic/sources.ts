@@ -276,6 +276,11 @@ export const OUTPUTS: readonly OutputSpec[] = [
   tree('tree_small_02', 'tree_small_02', 'tree_small_02', '28000'),
   tree('fir_sapling_medium_a', 'fir_sapling_medium', 'fir_sapling_medium_a', '24000'),
   tree('fir_sapling_medium_b', 'fir_sapling_medium', 'fir_sapling_medium_b', '24000'),
+  // #617: each tree's middle level of detail, from the same pinned input.
+  middle('island_tree_02', 'island_tree_02', 'island_tree_02', '6000'),
+  middle('tree_small_02', 'tree_small_02', 'tree_small_02', '6000'),
+  middle('fir_sapling_medium_a', 'fir_sapling_medium', 'fir_sapling_medium_a', '6000'),
+  middle('fir_sapling_medium_b', 'fir_sapling_medium', 'fir_sapling_medium_b', '6000'),
   plant('shrub_02_a', 'shrub_02', 'shrub_02_a', '6000'),
   plant('shrub_02_c', 'shrub_02', 'shrub_02_c', '6000'),
   {
@@ -336,6 +341,27 @@ function tree(name: string, from: string, object: string, triangles: string): Ou
       alsoWrites: [`${name}-impostor.png`],
     },
     modified: `one object of the pack (${object}); foliage thinned by whole cards and each survivor grown, wood collapse-decimated, textures downsized to 512 px and roughness maps dropped, ambient occlusion baked into a vertex colour; an eight-view impostor strip rendered from the full scan before any of that`,
+  };
+}
+
+/**
+ * A tree's middle level of detail — #617. The same script on the same pinned
+ * input as {@link tree}, a second time at a lower budget, with no impostor and
+ * **no images**: the runtime pairs each part with the near file's part of the
+ * same material name and wears that part's maps, so the level costs no texture
+ * memory and no second copy of a map in the build. Its cards are thinned from
+ * the same seeded order as the near file's, so it keeps a subset of them.
+ */
+function middle(name: string, from: string, object: string, triangles: string): OutputSpec {
+  return {
+    file: `${name}-middle.glb`,
+    from,
+    recipe: {
+      how: 'blender',
+      script: TREE_SCRIPT,
+      args: [object, triangles, 'none', 'auto', 'nomaps'],
+    },
+    modified: `one object of the pack (${object}), as the tree's middle level of detail: foliage thinned by whole cards and each survivor grown, wood collapse-decimated or, where that stalls, thinned by whole pieces with the largest kept, to at most ${triangles} triangles in all; ambient occlusion baked into a vertex colour, and every image dropped — it wears the near file's maps`,
   };
 }
 

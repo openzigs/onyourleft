@@ -33,6 +33,7 @@ import type {
   HorizonReading,
   RealisticMeasurement,
   RiderExtent,
+  TreeHandOver,
 } from './game-harness';
 import { MINIMUM_TINT_CONTRAST_RATIO } from '../src/game/terrain';
 import {
@@ -2469,6 +2470,49 @@ test.describe('the realistic world — ADR 0026', () => {
     }
   });
 
+  test('submits at least 60 000 fewer triangles with the trees’ middle level — #617', async ({
+    harnessRun,
+  }) => {
+    const measured = await realistic(harnessRun);
+    console.log(
+      `#617: ${String(measured.trianglesSubmitted)} triangles a frame, ` +
+        `${String(measured.trianglesHardSwap)} with the hard swap; ` +
+        `${String(measured.woodedScenery)} scenery items drawn`,
+    );
+    // Non-vacuity: a real frame with scenery in it, counted at the draw calls.
+    expect(measured.woodedScenery).toBeGreaterThan(10);
+    expect(measured.trianglesSubmitted).toBeGreaterThan(50_000);
+    // The control is the same view with the six nearest trees full and no
+    // middle level — what a frame drew before #617.
+    expect(measured.trianglesHardSwap - measured.trianglesSubmitted).toBeGreaterThanOrEqual(
+      TRIANGLES_FALL_AT_LEAST,
+    );
+  });
+
+  test('hands a tree over between levels with no jump in what it covers — #617', async ({
+    harnessRun,
+  }) => {
+    const measured = await realistic(harnessRun);
+    const { product, control } = {
+      product: largestStep(measured.handOver),
+      control: largestStep(measured.handOverControl),
+    };
+    console.log(
+      `#617: the largest one-frame change in a tree's covered area is ` +
+        `${(100 * product.share).toFixed(1)} % dithered (at ${product.ahead.toFixed(1)} m), ` +
+        `${(100 * control.share).toFixed(1)} % with the hard swap (at ${control.ahead.toFixed(1)} m); ` +
+        `covered ${JSON.stringify(measured.handOver.covered)} / ${JSON.stringify(measured.handOverControl.covered)}`,
+    );
+    // Non-vacuity: the tree is on screen in every frame, and grows as it nears.
+    expect(Math.min(...measured.handOver.covered)).toBeGreaterThan(300);
+    expect(measured.handOver.covered.at(-1)).toBeGreaterThan(
+      5 * (measured.handOver.covered[0] ?? 0),
+    );
+    expect(product.share).toBeLessThanOrEqual(MAXIMUM_HAND_OVER_STEP);
+    // The control: the same approach with the hand-over a hard swap jumps.
+    expect(control.share).toBeGreaterThan(MAXIMUM_HAND_OVER_STEP * 2);
+  });
+
   test('steps down to the stylised world whole, and publishes what realism costs', async ({
     harnessRun,
   }) => {
@@ -2491,6 +2535,44 @@ test.describe('the realistic world — ADR 0026', () => {
     );
   });
 });
+
+/**
+ * The least #617's middle level must take off the wooded view's frame, against
+ * the same view drawn as before it: **60 000** triangles — the issue's own
+ * figure, which `realistic-budget.test.ts` also holds the worst case to.
+ */
+const TRIANGLES_FALL_AT_LEAST = 60_000;
+
+/**
+ * The largest change in one tree's covered pixels from one frame to the next,
+ * across both of its hand-overs, as a share of what it covered: **8 %** —
+ * #617's "no single-frame jump", stated as a number.
+ *
+ * Measured on 2026-09-26 in the pinned Chromium: **5.7 %** dithered, against
+ * **36.9 %** at the hard swap in the control. Part of every step is the tree
+ * growing as the rider closes on it — about 3 % a frame at 6 m/s, from 16 m
+ * to 6 m, in both — and part is the alpha-tested leaf cards aliasing at 400 to
+ * 3 000 pixels; the dither itself adds a little over a percent a frame. The
+ * control is held to twice the bound, so a bound loosened to pass a pop would
+ * turn the control's side red first.
+ */
+const MAXIMUM_HAND_OVER_STEP = 0.08;
+
+/** The largest frame-to-frame change in a hand-over's covered area, as a share, and where. */
+function largestStep(handOver: TreeHandOver): { readonly share: number; readonly ahead: number } {
+  let share = 0;
+  let ahead = Number.NaN;
+  for (let at = 1; at < handOver.covered.length; at += 1) {
+    const before = handOver.covered[at - 1] ?? 0;
+    const after = handOver.covered[at] ?? 0;
+    const step = Math.abs(after - before) / Math.max(1, Math.max(before, after));
+    if (step > share) {
+      share = step;
+      ahead = handOver.ahead[at] ?? Number.NaN;
+    }
+  }
+  return { share, ahead };
+}
 
 /**
  * How far from the ground toward the sky a distant ridge must be drawn, as a

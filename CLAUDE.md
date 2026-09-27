@@ -674,6 +674,20 @@ apps/                 AGPL-3.0-or-later, without exception
                         refusal (#237) — the one place in the client a
                         BotPacerPlan is built, and therefore the only place the
                         rider's own mass could get into one
+    src/game/tree-levels.ts
+                        the realistic trees' three levels of detail (#617) —
+                        full, middle and impostor by RANK, both tree kinds
+                        ranked together, and at each hand-over one tree drawn
+                        at both levels with a screen-space dither whose fade is
+                        continuous across a swap of ranks. ⚠️ **Since #617 the
+                        trees are not in `REALISTIC_NEAR_MESHES`**, and a
+                        reviewer who remembers "the nearest 3 broadleaf and 3
+                        conifer" is reading the old file:
+                        `realistic-budget.ts` §`REALISTIC_TREE_LEVELS` is the
+                        count, and the arithmetic for why it is not per kind.
+                        The middle GLBs carry no image and wear the near file's
+                        materials, paired by name (`three-renderer.ts`
+                        §`prepareMiddleLevel`)
     src/game/realistic-*.ts
                         the realistic world (ADR 0026, #425, #474, #369) — its
                         asset table, its D-6 budget (re-set from validation
@@ -3961,6 +3975,8 @@ top of an issue **supersedes its body**.
 | How a realistic asset is made, where its input came from, and how to make it again byte for byte | `apps/web/tools/realistic/sources.ts`, `inputs.lock.json`, `process-assets.ts` §"`--check`", `ASSETS.toml` §derived keys, `scripts/check-repo-rules.sh` §`ASSET007` |
 | Why the Blender scripts run on one thread, and what an unordered set did to a shrub | `apps/web/tools/realistic/blender/process_tree.py` §"ONE thread" and §"An ordered de-duplication" |
 | What the realistic world may cost, what the soak re-set it from, and why nothing moved | `apps/web/src/game/realistic-budget.ts`, validation 0002 Part Z |
+| Why the realistic trees have a middle level, why the near and middle counts are for both kinds together, and why the triangles it freed are not spent yet | `apps/web/src/game/realistic-budget.ts` §`REALISTIC_TREE_LEVELS`, `apps/web/src/game/tree-levels.ts`, [#617](https://github.com/openzigs/onyourleft/issues/617) |
+| How a tree hands over between levels without a pop, and what the browser gate measures of it | `apps/web/src/game/three-renderer.ts` §`withTreeDither`, `apps/web/browser/game-harness.ts` §`treeLevelProbe` |
 | Why a realistic frame carries 36 structures where the stylised one carries 240, and what the frame's triangle sum used to leave out | `apps/web/src/game/realistic-budget.ts` §`REALISTIC_STRUCTURE_ITEMS`, `realistic-budget.test.ts` §"structures included", validation 0002 Part AE, [#506](https://github.com/openzigs/onyourleft/issues/506) |
 | Why the photographic road barely shines, and what the full sheen did to the gradient cue | `apps/web/src/game/three-renderer.ts` §`ROAD_SHEEN`, `game.browser.spec.ts` §"the realistic world" |
 | Why every face of the photographic road is lit as facing up | `apps/web/src/game/three-renderer.ts` §`photographicRoadMaterial`, `terrain.ts` §`roadIndices` |
