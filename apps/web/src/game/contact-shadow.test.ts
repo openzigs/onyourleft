@@ -44,10 +44,11 @@ const marker = (kind: RiderMarker['kind'], x = 0, z = 0, lean = 0): RiderMarker 
 });
 
 /**
- * A sun 60° up, at an azimuth of 150°. ⚠️ Deliberately NOT `world.ts`'s 135°:
- * at 135° the east and north components are equal in size, so a mutation that
- * flips only one of them leaves the offset exactly perpendicular to the sun
- * and the "away from the sun" assertion passing — measured, not guessed.
+ * A sun 60° up, at an azimuth of 150°. ⚠️ Deliberately NOT `world.ts`'s 225°
+ * (135° until #583): at either, the `x` and `z` components are equal in size,
+ * so a mutation that flips only one of them leaves the offset exactly
+ * perpendicular to the sun and the "away from the sun" assertion passing —
+ * measured, not guessed.
  */
 const SUN = (() => {
   const elevation = (60 * Math.PI) / 180;

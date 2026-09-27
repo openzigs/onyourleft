@@ -251,7 +251,20 @@ export const SUN_ELEVATION_AT_EQUATOR_DEGREES = 70;
 export const SUN_ELEVATION_AT_POLE_DEGREES = 55;
 
 /**
- * Where the sun is in the compass, in degrees clockwise from north: **135**.
+ * Where the sun is in the compass, in degrees clockwise from north: **225**,
+ * the south-west.
+ *
+ * ⚠️ **It was 135 until #583, and the sun did not move.** Until #583 the world
+ * was drawn as a mirror of its map (`terrain.ts` §`localGroundPosition`), so
+ * the vector 135° named was drawn in the SOUTH-WEST of every route: a rider
+ * heading north had it behind them on their left. #583 drew the map the right
+ * way round and renamed the bearing to where that same world vector now is,
+ * rather than moving the light. Moving it would have been a free choice and
+ * not a free change: the realistic world turns its photographed sky to put the
+ * photograph's sun here (`realistic-light.ts` §`skyRotation`), and at 135° the
+ * photograph's darker half lies ahead of a northbound rider, where #544's one
+ * horizon colour is brighter than the sky behind it — #643. A reviewer who
+ * remembers 135 is reading the old file.
  *
  * **This repository's own**, with one requirement: it is not along an axis of
  * the corridor's own frame, so a road running due north and a road running due
@@ -267,7 +280,7 @@ export const SUN_ELEVATION_AT_POLE_DEGREES = 55;
  * frame, and #240's NFR-2 is that the frame's cost must not grow with the
  * route.
  */
-export const SUN_AZIMUTH_DEGREES = 135;
+export const SUN_AZIMUTH_DEGREES = 225;
 
 /**
  * The share of a horizontal surface's light that comes from the sky: **0.4**.

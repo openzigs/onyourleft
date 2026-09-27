@@ -546,7 +546,9 @@ apps/                 AGPL-3.0-or-later, without exception
                         east `−x`, which is what a right-handed renderer needs
                         for a map to be drawn as a map rather than its mirror.
                         Anything written in the compass follows the projection
-                        — `world.ts`'s sun negates its east component — and
+                        — `world.ts`'s sun negates its east component, and is
+                        named 225° where it was 135°: the same light, which
+                        under the mirror stood in the south-west — and
                         nothing measured along the road can move, because none
                         of it is read off `x`
     src/game/world.ts   the ground, the sky and the depth cue (#241), and since
