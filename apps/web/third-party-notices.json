@@ -1,0 +1,69 @@
+{
+  "$comment": [
+    "Reviewed inputs to the app's third-party notices -- #664. scripts/check-third-party-notices.mjs reads this file; nothing else does.",
+    "noLicenceFile: packages in the app's distributed closure whose installed tarball carries NO licence file. The generator fails closed on",
+    "such a package unless an entry here, keyed by name@version, says where its notice comes from instead. A version bump therefore fails",
+    "closed again until somebody re-reads the new version. 'excerpt' is read from a file INSIDE the installed package; 'upstream' is text",
+    "read from the project's own repository at a named commit, because the package carries none at all. 'licenceText' adds the licence's",
+    "canonical text, which this repository already pins (LIC005). copiedIntoBuild: files the build copies verbatim out of a package into dist,",
+    "named so the notice says which package each came from.",
+    "writtenByTheBundler: packages whose OWN code the bundler writes into dist, which no closure lists because they are build tools -- see WRITTEN_BY_THE_BUNDLER in the generator. Keyed by the INSTALLED name@version, so a bump fails closed (NOT008). 'files' are read verbatim from the installed package; 'from'/'through' cut a file down to the part that covers the code that ships."
+  ],
+  "noLicenceFile": {
+    "@mediapipe/tasks-vision@1.0.1": {
+      "why": "The tarball holds its bundles, its types and its WebAssembly and no LICENSE. Its manifest says Apache-2.0, and its type declarations open with the project's Apache-2.0 header, which is the notice it does ship.",
+      "excerpt": {
+        "file": "vision.d.ts",
+        "from": "/**",
+        "through": " */"
+      },
+      "licenceText": "Apache-2.0"
+    },
+    "murmurhash-js@1.0.0": {
+      "why": "The tarball holds no LICENSE file; its README ends with the MIT licence and its copyright line, which is the notice it does ship.",
+      "excerpt": {
+        "file": "README.md",
+        "from": "## License (MIT)"
+      }
+    },
+    "pmtiles@4.5.0": {
+      "why": "The tarball holds its source, its build and its README and no licence text at all. The text below is the repository's own LICENSE at the commit that released js v4.5.0 (its message ends 'js v4.5.0'), byte-identical to the file at the repository's HEAD on the day it was read.",
+      "upstream": {
+        "url": "https://github.com/protomaps/PMTiles/blob/3b10e67edb65c6b04549f74c0279cef8328d859c/LICENSE",
+        "read": "2026-09-27",
+        "text": "The below license (BSD-3) applies to the reference implementations in this repository.\n\nThe PMTiles specification itself is public domain, or CC0 where applicable.\n\nSample tilesets available in this repository are subject to their own license terms.\n\n---\n\nCopyright 2021 Protomaps LLC\n\nRedistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:\n\n1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.\n\n2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.\n\n3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.\n\nTHIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS \"AS IS\" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE."
+      }
+    }
+  },
+  "copiedIntoBuild": [
+    {
+      "path": "pose/vision_wasm_module_internal.wasm",
+      "package": "@mediapipe/tasks-vision",
+      "file": "wasm/vision_wasm_module_internal.wasm",
+      "by": "apps/web/tools/pose/pose-runtime-plugin.ts"
+    }
+  ],
+  "writtenByTheBundler": {
+    "rolldown@1.2.6": {
+      "what": "its CommonJS-interop runtime (the __commonJS, __toESM and __export helpers), in the assets/rolldown-runtime-*.js chunk",
+      "files": [
+        {
+          "file": "LICENSE"
+        },
+        {
+          "file": "THIRD-PARTY-LICENSE"
+        }
+      ]
+    },
+    "vite@8.3.0": {
+      "what": "its module-preload polyfill and its __vitePreload helper, in the entry chunk",
+      "files": [
+        {
+          "file": "LICENSE.md",
+          "from": "# Vite core license",
+          "through": "SOFTWARE."
+        }
+      ]
+    }
+  }
+}
