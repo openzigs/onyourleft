@@ -29,6 +29,7 @@ import {
   type RideController,
 } from './ride/controller';
 import { openCapacitorTrainer, openWebBluetoothTrainer } from './ride/trainer';
+import { createShellRideController } from './ride/shell-ride-controller';
 import { gameSensors } from './game/sensors';
 import { fastestAttempt, ghostFromSpeed } from './game/ghost-source';
 import { isNativeShell, platformCapacitor } from './support/capacitor';
@@ -277,19 +278,14 @@ async function buildPlatform(
       notice: mobile.permissionNotice,
       mayShowDeviceList: mobile.mayShowDeviceList,
     });
-    const recordingService = mobile.capacitorRecordingServicePlugin();
-    const rideController = createRideController({
+    // #524. The shell's controller, which adds the connectedDevice foreground
+    // service — asked for while a ride is active — and #526's POST_NOTIFICATIONS
+    // question beside it. Built in `ride/shell-ride-controller.ts` rather than
+    // here because both are optional options, which `check:wiring` cannot see
+    // supplied and nothing tests in this file; see that module's header.
+    const rideController = createShellRideController(mobile, {
       ...shared,
       transport,
-      // #524. The connectedDevice foreground service, asked for while a ride
-      // is active. Until this line nothing started it, so no ride on Android
-      // ran with the service that keeps it alive with the screen off.
-      keepAlive: mobile.recordingServiceKeepAlive(recordingService),
-      // #526. POST_NOTIFICATIONS, asked for once, just before the first ride's
-      // service starts — `ride/controller.ts` §`askAboutTheNotification` says
-      // why then. Without it the service above runs and its notification is
-      // never shown on Android 13+.
-      notificationPermission: mobile.recordingServiceNotificationPermission(recordingService),
       // ⚠️ The **same** `plugin` object the transport holds, deliberately.
       // Building a second one would give the trainer control path its own
       // subscriptions and its own view of which links are up, and the first
