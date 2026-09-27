@@ -273,6 +273,15 @@ import {
 } from './realistic-assets';
 import { REALISTIC_NEAR_MESHES, REALISTIC_TREE_LEVELS } from './realistic-budget';
 import {
+  FOLIAGE_TINT,
+  MASONRY_TINT,
+  packedInstanceTint,
+  TINT_CODEC_RANGE,
+  TINT_CODEC_STEPS,
+  TINT_CODEC_ZERO,
+  type TintBound,
+} from './instance-tint';
+import {
   bandFade,
   highBound,
   lowBound,
@@ -1904,6 +1913,9 @@ export class ScatterBelt {
    */
   #variants = MAXIMUM_SCENERY_VARIANTS;
 
+  /** #621: which bound this belt's tints are drawn inside, if it tints at all. */
+  readonly #tint: RealisticTintClass | undefined;
+
   /**
    * @param models the shapes to draw, by kind, in variant order. Defaults to
    * whatever {@link loadSceneryModels} has loaded, which is what the shipped
@@ -1930,12 +1942,20 @@ export class ScatterBelt {
        * textured pair, which the belt then owns and releases.
        */
       readonly materials?: ShadedMaterials;
+      /**
+       * #621: which bound each item's seeded tint is drawn inside — the
+       * realistic structures' belts only, whose `materials` are taught to
+       * read it. The stylised belt is handed none, and allocates no instance
+       * colour at all.
+       */
+      readonly tint?: RealisticTintClass;
     } = {},
   ) {
     this.#materials =
       options.materials ??
       (options.physical === true ? physicalMaterials() : vertexColouredMaterials());
     this.#skip = options.skip ?? new Set();
+    this.#tint = options.tint;
     for (const kind of SCENERY_KINDS) {
       if (options.skip?.has(kind) === true) {
         continue;
@@ -1975,6 +1995,7 @@ export class ScatterBelt {
         // The buffer is rewritten every frame, so tell the driver that rather
         // than letting it hint STATIC_DRAW for something that never is.
         mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+        if (this.#tint !== undefined) tintChannels(mesh);
         // three's constructor fills every slot with the identity matrix and
         // sets `count` to the capacity. A belt that drew before its first frame
         // would draw the whole capacity stacked at the origin.
@@ -2181,6 +2202,7 @@ export class ScatterBelt {
     }
     for (const [key, mesh] of this.#meshes) {
       reserve(mesh, this.#counts.get(key) ?? 0);
+      if (this.#tint !== undefined) tintChannels(mesh);
       // Rewound here rather than tracked in a second map: the next loop uses
       // `mesh.count` as its write cursor and this is where it starts.
       mesh.count = 0;
@@ -2203,6 +2225,15 @@ export class ScatterBelt {
       this.#scale.setScalar(item.scale);
       this.#matrix.compose(this.#position, this.#quaternion, this.#scale);
       mesh.setMatrixAt(mesh.count, this.#matrix);
+      if (this.#tint !== undefined && mesh.instanceColor !== null) {
+        // #621: the tint alone; the dither's two channels stay nought, which
+        // a structure's material does not read. @see withInstanceChannels
+        (mesh.instanceColor.array as Float32Array)[mesh.count * 3 + 2] = packedInstanceTint(
+          item.x,
+          item.z,
+          realisticTints[this.#tint],
+        );
+      }
       mesh.count += 1;
     }
     for (const mesh of this.#meshes.values()) {
@@ -2211,6 +2242,7 @@ export class ScatterBelt {
         // to upload when there is anything to draw. Comparing sixteen floats an
         // instance to sometimes skip this would cost more than the upload.
         mesh.instanceMatrix.needsUpdate = true;
+        if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
         // three caches a bounding sphere until it is asked to recompute one,
         // and the instances move every frame. Without this the belt is culled
         // against where it stood when the sphere was first needed, and the
@@ -2994,6 +3026,19 @@ function physicalMaterials(): ShadedMaterials {
     ),
     flat: constructed(new MeshBasicMaterial({ vertexColors: true })),
   };
+}
+
+/**
+ * Gives a tinted belt's mesh an instance colour as long as its matrix buffer —
+ * #621. At construction, and after {@link reserve} has grown the matrices, so
+ * a tint is never written past the end of its buffer.
+ */
+function tintChannels(mesh: InstancedMesh): void {
+  const needed = mesh.instanceMatrix.count;
+  if (mesh.instanceColor !== null && mesh.instanceColor.count >= needed) return;
+  const channels = new InstancedBufferAttribute(new Float32Array(needed * 3), 3);
+  channels.setUsage(DynamicDrawUsage);
+  mesh.instanceColor = channels;
 }
 
 /**
@@ -4803,52 +4848,135 @@ const TREE_DITHER_DISCARD = /* glsl */ `
 /** The line of three's `color_vertex` chunk that tints by the instance colour. */
 const INSTANCE_TINT = 'vColor.rgb *= instanceColor.rgb;';
 
-/** The materials {@link withTreeDither} has already taught. */
-const TREE_DITHERED = new WeakSet<Material>();
+/**
+ * A realistic instance's seeded tint, in GLSL — #621. `instance-tint.ts` is
+ * the arithmetic's home and says why each step is what it is: `oylTintOf`
+ * reads the one float `packedInstanceTint` writes (every value an integer
+ * below 2²⁴, so exact in a float), and `oylTinted` is `tintedLinear`, step for
+ * step — the hue turned about the grey axis, the saturation scaled about the
+ * luminance, the brightness scaled. `.x` is radians.
+ */
+const TINT_DECODE_GLSL = /* glsl */ `
+  vec3 oylTintOf(float stored) {
+    float whole = stored + ${TINT_CODEC_ZERO.toFixed(1)};
+    float brightness = floor(whole / 65536.0);
+    float rest = whole - brightness * 65536.0;
+    float saturation = floor(rest / 256.0);
+    float hue = rest - saturation * 256.0;
+    return (vec3(hue, saturation, brightness) - ${TINT_CODEC_STEPS.toFixed(1)})
+      / ${TINT_CODEC_STEPS.toFixed(1)}
+      * vec3(
+        ${((TINT_CODEC_RANGE.hueDegrees * Math.PI) / 180).toFixed(8)},
+        ${TINT_CODEC_RANGE.saturation.toFixed(8)},
+        ${TINT_CODEC_RANGE.brightness.toFixed(8)}
+      );
+  }
+`;
+
+/** @see TINT_DECODE_GLSL */
+const TINT_APPLY_GLSL = /* glsl */ `
+  vec3 oylTinted(vec3 colour, vec3 tint) {
+    float turnCos = cos(tint.x);
+    float turnSin = sin(tint.x);
+    vec3 grey = vec3(0.57735027);
+    vec3 turned = colour * turnCos + cross(grey, colour) * turnSin
+      + grey * dot(grey, colour) * (1.0 - turnCos);
+    float luminance = dot(turned, vec3(0.2126, 0.7152, 0.0722));
+    return max((vec3(luminance) + (1.0 + tint.y) * (turned - vec3(luminance))) * (1.0 + tint.z), 0.0);
+  }
+`;
 
 /**
- * Teaches a realistic tree's material the hand-over dither — #617.
+ * What each material {@link withInstanceChannels} has taught reads: `true`
+ * for a tree, which also keeps its half of the hand-over dither.
+ */
+const INSTANCE_TAUGHT = new WeakMap<Material, boolean>();
+
+/**
+ * Whether a material reads a realistic instance's seeded tint — #621.
  *
- * The keep interval travels in the instance COLOUR, which a tree otherwise
- * never uses: an `InstancedMesh`'s `instanceColor` is the mesh's own attribute
- * rather than its geometry's, so the full and the middle meshes of one part can
- * share a material and a geometry's buffers while each carries its own keeps,
- * and nothing is allocated per view. So three's tint by it is taken out of
- * `color_vertex` and the value is handed to the fragment instead.
+ * @test-facing held by `realistic-renderer.test.ts` §"#621", which asserts
+ * every realistic vegetation and structure material is taught it and no
+ * stylised one is
+ */
+export function readsInstanceTint(material: Material): boolean {
+  return INSTANCE_TAUGHT.has(material);
+}
+
+/**
+ * Teaches a realistic material what its instance colour carries — #617, #621.
+ *
+ * The instance COLOUR is never a colour here: three's own tint by it is taken
+ * out of `color_vertex`, and its channels are handed on instead. The third
+ * (`.z`) is the item's seeded tint (`instance-tint.ts`), applied to the
+ * surface's colour after its map and its vertex colour and before its light.
+ * For a tree (`dither`), the first two are its hand-over keep interval
+ * (`tree-levels.ts` §`writeInterval`), and a fragment outside it is discarded.
+ *
+ * The attribute is the mesh's own rather than its geometry's, so the full and
+ * the middle meshes of one part share a material and a geometry's buffers
+ * while each carries its own keeps and tints, and nothing is allocated per
+ * view.
  *
  * ⚠️ **Throws if three's chunk no longer holds the tint line**, rather than
  * compiling a tree tinted by its keep interval — a three bump that reworded the
- * chunk is a red test, not a tree drawn in a false colour.
+ * chunk is a red test, not a tree drawn in a false colour. And throws if a
+ * material is taught twice with and without the dither, which would be one
+ * shape drawn by two belts that disagree about it.
  *
  * Idempotent: a material several views share is taught once.
  */
-function withTreeDither(material: MeshStandardMaterial): void {
-  if (TREE_DITHERED.has(material)) return;
-  TREE_DITHERED.add(material);
+function withInstanceChannels<M extends Material>(material: M, dither: boolean): M {
+  const taught = INSTANCE_TAUGHT.get(material);
+  if (taught !== undefined) {
+    if (taught !== dither) throw new Error('a material taught its instance channels two ways');
+    return material;
+  }
+  INSTANCE_TAUGHT.set(material, dither);
   if (!ShaderChunk.color_vertex.includes(INSTANCE_TINT)) {
-    throw new Error('three’s color_vertex no longer tints by instanceColor as the dither expects');
+    throw new Error('three’s color_vertex no longer tints by instanceColor as the tint expects');
   }
   const earlier = material.onBeforeCompile.bind(material);
   const earlierKey = material.customProgramCacheKey();
+  const keep = dither ? 'varying vec2 vOylKeep;\n' : '';
   material.onBeforeCompile = (shader, renderer) => {
     earlier(shader, renderer);
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec2 vOylKeep;')
+      .replace(
+        '#include <common>',
+        `#include <common>\n${keep}varying vec3 vOylTint;\n${TINT_DECODE_GLSL}`,
+      )
       .replace(
         '#include <color_vertex>',
-        `vOylKeep = vec2(0.0);\n${ShaderChunk.color_vertex.replace(
+        `${dither ? 'vOylKeep = vec2(0.0);\n' : ''}vOylTint = vec3(0.0);\n${ShaderChunk.color_vertex.replace(
           INSTANCE_TINT,
-          'vOylKeep = instanceColor.xy;',
+          `${dither ? 'vOylKeep = instanceColor.xy;\n' : ''}vOylTint = oylTintOf(instanceColor.z);`,
         )}`,
       );
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec2 vOylKeep;')
       .replace(
+        '#include <common>',
+        `#include <common>\n${keep}varying vec3 vOylTint;\n${TINT_APPLY_GLSL}`,
+      )
+      .replace(
+        '#include <color_fragment>',
+        '#include <color_fragment>\ndiffuseColor.rgb = oylTinted(diffuseColor.rgb, vOylTint);',
+      );
+    if (dither) {
+      shader.fragmentShader = shader.fragmentShader.replace(
         '#include <clipping_planes_fragment>',
         `#include <clipping_planes_fragment>\n${TREE_DITHER_DISCARD}`,
       );
+    }
   };
-  material.customProgramCacheKey = () => `${earlierKey}|oyl-tree-dither`;
+  material.customProgramCacheKey = () =>
+    `${earlierKey}|${dither ? 'oyl-tree-dither' : 'oyl-instance-tint'}`;
+  return material;
+}
+
+/** A tree's material: its seeded tint and its hand-over dither. @see withInstanceChannels */
+function withTreeDither(material: MeshStandardMaterial): void {
+  withInstanceChannels(material, true);
 }
 
 /** A unit quad standing on its bottom edge: x in [−0.5, 0.5], y in [0, 1]. */
@@ -4899,11 +5027,15 @@ function impostorMaterial(
       #include <fog_pars_vertex>
       varying vec2 vStripUv;
       varying vec2 vOylKeep;
+      varying vec3 vOylTint;
+      ${TINT_DECODE_GLSL}
       void main() {
         #ifdef USE_INSTANCING_COLOR
           vOylKeep = instanceColor.xy;
+          vOylTint = oylTintOf(instanceColor.z);
         #else
           vOylKeep = vec2(0.0);
+          vOylTint = vec3(0.0);
         #endif
         vec3 centre = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
         vec3 across = (instanceMatrix * vec4(1.0, 0.0, 0.0, 0.0)).xyz;
@@ -4930,11 +5062,14 @@ function impostorMaterial(
       uniform sampler2D strip;
       varying vec2 vStripUv;
       varying vec2 vOylKeep;
+      varying vec3 vOylTint;
+      ${TINT_APPLY_GLSL}
       void main() {
         ${TREE_DITHER_DISCARD}
         vec4 texel = texture2D(strip, vStripUv);
         if (texel.a < ${REALISTIC_ALPHA_CUTOFF.toFixed(2)}) discard;
-        gl_FragColor = vec4(texel.rgb, 1.0);
+        // #621: the same tint the tree's meshes wear, on the light it was baked with.
+        gl_FragColor = vec4(oylTinted(texel.rgb, vOylTint), 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
         #include <fog_fragment>
@@ -5126,6 +5261,8 @@ export class RealisticVegetationBelt {
   #budget = Number.POSITIVE_INFINITY;
   /** How many items the last frame drew, at any level. @see drawnItems */
   #drawn = 0;
+  /** The item being placed's packed tint — #621. @see packedInstanceTint */
+  #tint = 0;
 
   /**
    * @param levels how the trees are drawn: the product's, unless a caller is
@@ -5145,14 +5282,19 @@ export class RealisticVegetationBelt {
       const shapes = vegetation.get(kind) ?? [];
       const tree = kind === 'tree-broadleaf' || kind === 'tree-conifer';
       const nearCap = tree ? slots.full : REALISTIC_NEAR_MESHES[kind];
+      // Every level of every kind carries its items' tints (#621); a tree's
+      // carries its keeps as well (#617). @see withInstanceChannels
       const keeps = (mesh: InstancedMesh, capacity: number): InstancedMesh => {
-        if (!tree) return mesh;
         mesh.instanceColor = new InstancedBufferAttribute(new Float32Array(capacity * 3), 3);
         mesh.instanceColor.setUsage(DynamicDrawUsage);
         return mesh;
       };
-      if (tree)
-        for (const shape of shapes) for (const part of shape.parts) withTreeDither(part.material);
+      for (const shape of shapes) {
+        for (const part of shape.parts) {
+          if (tree) withTreeDither(part.material);
+          else withInstanceChannels(part.material, false);
+        }
+      }
       this.#kinds.push({
         kind,
         tree,
@@ -5184,6 +5326,7 @@ export class RealisticVegetationBelt {
               ),
         ),
         ranking: tree ? this.#trees : ranking(nearCap),
+        tint: kind === 'rock' ? 'masonry' : 'foliage',
         fit: sceneryFitMetres(kind),
         reach: shapes.map((shape) => treeReach(shape.parts)),
       });
@@ -5364,6 +5507,8 @@ export class RealisticVegetationBelt {
       this.#quaternion.setFromAxisAngle(this.#up, item.rotation);
       this.#scale.setScalar(size);
       this.#matrix.compose(this.#position, this.#quaternion, this.#scale);
+      // #621: one tint for every level the item is drawn at this frame.
+      this.#tint = packedInstanceTint(item.x, item.z, realisticTints[each.tint]);
       let drawn = false;
       if (!each.tree) {
         if (rank < each.ranking.count) drawn = this.#put(each.near[variant], 0, 1);
@@ -5417,7 +5562,9 @@ export class RealisticVegetationBelt {
     if (mesh.count >= capacity) return false;
     mesh.setMatrixAt(mesh.count, this.#matrix);
     if (mesh.instanceColor !== null) {
-      writeInterval(mesh.instanceColor.array as Float32Array, mesh.count, from, to);
+      const channels = mesh.instanceColor.array as Float32Array;
+      writeInterval(channels, mesh.count, from, to);
+      channels[mesh.count * 3 + 2] = this.#tint;
     }
     mesh.count += 1;
     return true;
@@ -5489,6 +5636,8 @@ interface VegetationSlot {
   readonly far: readonly (InstancedMesh | undefined)[];
   /** Both tree kinds share one; a shrub's and a rock's are their own. */
   readonly ranking: Ranking;
+  /** Which of #621's bounds its tints are drawn inside: a rock's is masonry's. */
+  readonly tint: RealisticTintClass;
   readonly fit: number;
   /** Per shape, how far it reaches from its trunk and above its base, in its own units. @see treeCanBeSeen */
   readonly reach: readonly { readonly across: number; readonly up: number }[];
@@ -6556,8 +6705,9 @@ function structureMaterials(
   // boundary's does not). @see projectedInMetres
   // #619 lever 2: a photographed surface reads the rung's bias; painted and
   // glass sample no texture and are left as they were.
+  // #621: and every one reads its structure's seeded tint.
   const biased = <M extends Material>(material: M): M =>
-    maps === undefined ? material : withTextureLodBias(material);
+    withInstanceChannels(maps === undefined ? material : withTextureLodBias(material), false);
   return {
     lit: biased(
       constructed(
@@ -6632,6 +6782,7 @@ export class RealisticStructureBelts {
       const belt = new ScatterBelt(models, {
         skip: new Set(SCENERY_KINDS.filter((kind) => !models.has(kind))),
         materials: structureMaterials(surface, textures),
+        tint: 'masonry',
       });
       // The belt wears copies. @see ScatterBelt's constructor
       for (const shapes of models.values()) for (const geometry of shapes) geometry.dispose();
@@ -6678,6 +6829,34 @@ export class RealisticStructureBelts {
   dispose(): void {
     for (const { belt } of this.#belts) belt.dispose();
   }
+}
+
+/** Which of #621's bounds a realistic item's tint is drawn inside. @see realisticTints */
+type RealisticTintClass = 'foliage' | 'masonry';
+
+/**
+ * The bounds every realistic item's seeded tint is drawn inside — #621:
+ * `instance-tint.ts`'s, unless the browser gate is drawing its control.
+ * Read by the belts on every frame, so a change reaches the next frame of a
+ * view that already exists.
+ */
+let realisticTints: Readonly<Record<RealisticTintClass, TintBound>> = {
+  foliage: FOLIAGE_TINT,
+  masonry: MASONRY_TINT,
+};
+
+/**
+ * Draws every realistic tree, shrub, rock and structure inside these bounds
+ * from the next frame on — #621's browser-gate control, which sets both to
+ * `instance-tint.ts` §`NO_TINT` and requires two instances of one shape to
+ * read back alike. Pass `FOLIAGE_TINT` and `MASONRY_TINT` to put it back.
+ *
+ * @test-facing `apps/web/browser/game-harness.ts` §`tintProbe` draws its
+ * control with it, and `realistic-renderer.test.ts` §"#621" its zero-bound case;
+ * the product never changes its bounds
+ */
+export function setRealisticTints(foliage: TintBound, masonry: TintBound): void {
+  realisticTints = { foliage, masonry };
 }
 
 /**

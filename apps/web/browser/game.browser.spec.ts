@@ -585,6 +585,21 @@ function paysForTheRealisticLoad(query = '?realistic'): void {
   });
 }
 
+/**
+ * #621's margins, read back off the drawing buffer. The control's is the
+ * issue's own: two instances of one shape drawn untinted differ by under 2 %
+ * in their widest channel. The product's is set under what the pinned Chromium
+ * measured on 2026-09-27 — the two trees 11.2 % apart (0.7 % untinted), the
+ * two houses' walls 7.1 % (0.2 % untinted) — and twice the control's.
+ */
+const TINT_CONTROL_MAXIMUM = 0.02;
+const TINT_PRODUCT_MINIMUM = 0.04;
+/**
+ * The fewest pixels a tree in #621's probe may cover and still be a tree: the
+ * middle-level broadleaf 20 m ahead covered 313 and 321 on the pinned Chromium.
+ */
+const TINT_TREE_MINIMUM_PIXELS = 150;
+
 /** #617's trees' own load — #644. @see TreeLevelMeasurement */
 const TREES_QUERY = '?realistic&trees';
 
@@ -2387,6 +2402,44 @@ test.describe('the realistic world — ADR 0026', () => {
     // warm, and well under half the wall's brightness.
     expect(luminance(glass)).toBeLessThan(luminance(control) / 2);
     expect(glass[2] ?? 0).toBeGreaterThan(glass[0] ?? 0);
+  });
+
+  test('tells two instances of one shape apart by their seeded tints, and not without them — #621', async ({
+    harnessRun,
+  }) => {
+    // Two broadleaf trees of one variant at the middle level, drawn one after
+    // the other where they are seen alike, and two houses of one shape in one
+    // frame, turned alike — each pair placed where `instance-tint.ts` gives
+    // them the most different brightness. @see tintProbe
+    const { tint } = await realistic(harnessRun);
+    /** The largest channel's difference, as a share of the pair's mean there. */
+    const apart = (pair: readonly (readonly number[])[]): number => {
+      const [a, b] = pair;
+      let widest = 0;
+      for (const channel of [0, 1, 2]) {
+        const [x, y] = [a?.[channel] ?? 0, b?.[channel] ?? 0];
+        widest = Math.max(widest, Math.abs(x - y) / Math.max(1, (x + y) / 2));
+      }
+      return widest;
+    };
+    console.log(
+      `#621: trees ${JSON.stringify(tint.trees)} against ${JSON.stringify(tint.treesControl)} ` +
+        `untinted over ${JSON.stringify(tint.treePixels)} pixels — ${(100 * apart(tint.trees)).toFixed(1)} % ` +
+        `against ${(100 * apart(tint.treesControl)).toFixed(1)} %; houses ${JSON.stringify(tint.houses)} ` +
+        `against ${JSON.stringify(tint.housesControl)} — ${(100 * apart(tint.houses)).toFixed(1)} % ` +
+        `against ${(100 * apart(tint.housesControl)).toFixed(1)} %; tints ` +
+        JSON.stringify([...tint.treeTints, ...tint.houseTints]),
+    );
+    // Non-vacuity: both trees were drawn, and big enough for a mean to mean something.
+    for (const pixels of tint.treePixels) expect(pixels).toBeGreaterThan(TINT_TREE_MINIMUM_PIXELS);
+    // THE CONTROL: with every bound at nothing, the two of each pair read back
+    // alike — so what separates them below is the tint, not the light, the
+    // fog or the side each is seen from.
+    expect(apart(tint.treesControl)).toBeLessThan(TINT_CONTROL_MAXIMUM);
+    expect(apart(tint.housesControl)).toBeLessThan(TINT_CONTROL_MAXIMUM);
+    // The product: the same pairs, told apart.
+    expect(apart(tint.trees)).toBeGreaterThan(TINT_PRODUCT_MINIMUM);
+    expect(apart(tint.houses)).toBeGreaterThan(TINT_PRODUCT_MINIMUM);
   });
 
   test('compiles every shader it draws with, in both worlds — #501', async ({ harnessRun }) => {
