@@ -259,6 +259,25 @@ export const LAKE_BANK_METRES = 14;
  */
 const BANK_RELEASE = 3;
 
+/**
+ * How far along the road from a crossing its channel shapes the ground at
+ * all, in metres: the flat bottom, the bank, and the {@link BANK_RELEASE}
+ * banks the ceiling lets go over — **96**. Past it {@link bankCeiling} has
+ * let go and a crossing is skipped.
+ *
+ * ⚠️ **ONE number read by two functions, and they are only correct together**
+ * (#581). {@link waterShaping} skips a crossing past it, and
+ * {@link waterNearRoute} answers "dry" for a whole row past it, so
+ * `landform.ts` never asks `waterShaping` there at all. It was written out
+ * twice until #581: narrowing `waterNearRoute`'s copy was caught by one test,
+ * and widening `waterShaping`'s was caught by nothing — the ground would have
+ * skipped water shaping on rows that needed it. `waterways.test.ts`
+ * §"#581" sweeps a crossing and requires every non-dry answer to fall on a row
+ * `waterNearRoute` calls wet.
+ */
+const STREAM_ALONG_REACH_METRES =
+  CHANNEL_FLAT_METRES + (CHANNEL_BANK_METRES - CHANNEL_FLAT_METRES) * (1 + BANK_RELEASE);
+
 /** How much the ceiling rises over its release, in metres: more than any relief can reach. */
 const CEILING_RELEASE_METRES = 50;
 
@@ -399,10 +418,7 @@ export function waterShaping(
   const lateral = Math.abs(signedLateral);
   for (const crossing of ways.crossings) {
     const u = Math.abs(routeOffset(profile, wrapped, crossing.distance));
-    if (
-      u > CHANNEL_FLAT_METRES + (CHANNEL_BANK_METRES - CHANNEL_FLAT_METRES) * (1 + BANK_RELEASE) ||
-      lateral > STREAM_REACH_METRES + CHANNEL_BANK_METRES
-    ) {
+    if (u > STREAM_ALONG_REACH_METRES || lateral > STREAM_REACH_METRES + CHANNEL_BANK_METRES) {
       continue;
     }
     const bed = crossing.waterElevation - STREAM_DEPTH_METRES - origin.elevation;
@@ -446,9 +462,7 @@ export function waterShaping(
 export function waterNearRoute(ways: Waterways, profile: RouteProfile, wrapped: number): boolean {
   for (const crossing of ways.crossings) {
     const u = Math.abs(routeOffset(profile, wrapped, crossing.distance));
-    if (
-      !(u > CHANNEL_FLAT_METRES + (CHANNEL_BANK_METRES - CHANNEL_FLAT_METRES) * (1 + BANK_RELEASE))
-    ) {
+    if (!(u > STREAM_ALONG_REACH_METRES)) {
       return true;
     }
   }

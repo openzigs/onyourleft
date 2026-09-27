@@ -65,8 +65,10 @@ import {
   STREAM_DEPTH_METRES,
   STREAM_SURFACE_HALF_WIDTH_METRES,
   WET_REACH_METRES,
+  DRY,
   bridgeParts,
   inWater,
+  waterNearRoute,
   waterShaping,
   waterSurface,
   waterways,
@@ -740,5 +742,68 @@ describe('where two waters are in reach of one point, the nearer one wins — #5
     }
     // And beyond the reach of either, the point is dry.
     expect(waterShaping(ways, profile, origin, 500 + WET_REACH_METRES * 4, 200, 0).shore).toBe(0);
+  });
+});
+
+describe('a row waterNearRoute calls dry is one waterShaping leaves dry — #581', () => {
+  // `landform.ts` asks `waterNearRoute` once a row and skips `waterShaping` on
+  // every vertex of a row it calls dry, so the two must agree on how far along
+  // the road a crossing reaches. They read one constant since #581; this is
+  // what fails if either stops reading it. A stream crossing by hand, on level
+  // ground, and every point along the route out to the widest lateral reach.
+  const profile = northRoute(1_500, () => 100);
+  const origin = corridorOrigin(profile);
+  const CROSSING = 750;
+  const ways: Waterways = { crossings: [{ distance: CROSSING, waterElevation: 96 }], lakes: [] };
+  const LATERALS = [0, -6, 20, -60, 150, 449];
+  const STEP = 0.25;
+
+  function shapedAt(along: number): boolean {
+    return LATERALS.some((lateral) => {
+      const shaping = waterShaping(ways, profile, origin, along, lateral, 0);
+      return (
+        shaping.ceiling !== DRY.ceiling ||
+        shaping.relief !== DRY.relief ||
+        shaping.level !== DRY.level ||
+        shaping.shore !== DRY.shore
+      );
+    });
+  }
+
+  it('never shapes the ground on a row it would skip', () => {
+    const missed: number[] = [];
+    for (let along = 0; along <= 1_500; along += STEP) {
+      if (shapedAt(along) && !waterNearRoute(ways, profile, along)) {
+        missed.push(along);
+      }
+    }
+    // Widening `waterShaping`'s reach alone puts rows here, and landform would
+    // leave their banks out.
+    expect(missed).toEqual([]);
+  });
+
+  it('calls a row wet only where the ground is shaped — the reach is not padded', () => {
+    let wetFrom = Number.POSITIVE_INFINITY;
+    let wetTo = Number.NEGATIVE_INFINITY;
+    let shapedFrom = Number.POSITIVE_INFINITY;
+    let shapedTo = Number.NEGATIVE_INFINITY;
+    for (let along = 0; along <= 1_500; along += STEP) {
+      if (waterNearRoute(ways, profile, along)) {
+        wetFrom = Math.min(wetFrom, along);
+        wetTo = Math.max(wetTo, along);
+      }
+      if (shapedAt(along)) {
+        shapedFrom = Math.min(shapedFrom, along);
+        shapedTo = Math.max(shapedTo, along);
+      }
+    }
+    // The apparatus: a crossing shapes a finite stretch either side of itself,
+    // and the rest of the route is dry — or the case above holds vacuously.
+    expect(shapedFrom).toBeGreaterThan(CROSSING - CHANNEL_BANK_METRES * 10);
+    expect(shapedFrom).toBeLessThan(CROSSING - CHANNEL_BANK_METRES);
+    expect(shapedTo).toBeGreaterThan(CROSSING + CHANNEL_BANK_METRES);
+    expect(shapedTo).toBeLessThan(CROSSING + CHANNEL_BANK_METRES * 10);
+    expect(wetFrom).toBe(shapedFrom);
+    expect(wetTo).toBe(shapedTo);
   });
 });
