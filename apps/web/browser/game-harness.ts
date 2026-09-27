@@ -4175,32 +4175,45 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const sceneryDrawnBudgeted = sceneryDrawnOf(view);
   view.setQuality(top);
 
-  // #619: every comparison below renders its frame until #617's hand-over has
-  // settled (ten frames), so a difference is the lever and not a tree walking
-  // between its levels.
-  const settled = (frame: SceneFrame): Uint8Array => {
-    for (let at = 0; at < 12; at += 1) view.render(frame);
+  // #619. ⚠️ Every comparison below reads two frames of ONE settled hand-over
+  // (#617 walks a tree between levels over ten frames): the frame is rendered
+  // until it has settled, and after that each change is one more render of the
+  // same pose, so a difference is the lever and never a tree mid-way. Settling
+  // is paid twice — once here and once after the rung change below, whose
+  // budget re-ranks the trees — because this load is already the browser
+  // gate's longest (#644).
+  const settle = (frame: SceneFrame): void => {
+    for (let at = 0; at < 11; at += 1) view.render(frame);
+  };
+  const drawnOnce = (): Uint8Array => {
+    view.render(wooded);
     return whole();
   };
   // #619 lever 1: the canopy after every opaque draw — then the control, the
   // order three chose unasked, which must interleave and draw the same picture.
-  const orderedPixels = settled(wooded);
+  // `drawOrderOf` draws the frame it reports, so its pixels are read after it.
+  settle(wooded);
   const foliageOrder = foliageOrderOf(drawOrderOf(view, wooded));
+  const orderedPixels = whole();
   foliageOrderedOf(view, false);
-  const unorderedPixels = settled(wooded);
   const foliageOrderControl = foliageOrderOf(drawOrderOf(view, wooded));
+  const unorderedPixels = whole();
   foliageOrderedOf(view, true);
   const foliageOrderChangedPixels = pixelsChanged(orderedPixels, unorderedPixels);
-  // #619 lever 2: a rung's frame against the same rung with its bias taken to 0.
-  const biasShare = (rung: QualitySettings): number => {
-    view.setQuality(rung);
-    const product = settled(wooded);
-    view.setQuality({ ...rung, textureLodBias: 0 });
-    const unbiased = settled(wooded);
-    return product.length === 0 ? 0 : pixelsChanged(product, unbiased) / (product.length / 4);
-  };
-  const textureBiasReducedShare = biasShare(REALISTIC_LADDER[1] as QualitySettings);
-  const textureBiasTopShare = biasShare(top);
+  // #619 lever 2: a rung's frame against the same rung with its bias taken to
+  // 0. Only the bias differs between the two, so no budget moves between them.
+  const shareChanged = (a: Uint8Array, b: Uint8Array): number =>
+    a.length === 0 ? 0 : pixelsChanged(a, b) / (a.length / 4);
+  // The top rung first, where the frame is already settled: the CONTROL.
+  const topPixels = drawnOnce();
+  view.setQuality({ ...top, textureLodBias: 0 });
+  const textureBiasTopShare = shareChanged(topPixels, drawnOnce());
+  const reduced = REALISTIC_LADDER[1] as QualitySettings;
+  view.setQuality(reduced);
+  settle(wooded);
+  const reducedPixels = drawnOnce();
+  view.setQuality({ ...reduced, textureLodBias: 0 });
+  const textureBiasReducedShare = shareChanged(reducedPixels, drawnOnce());
   view.setQuality(top);
 
   const frameAt = (distance: number, build: FrameBuild): SceneFrame =>
