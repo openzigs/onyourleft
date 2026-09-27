@@ -29,7 +29,14 @@ import {
   REALISTIC_TREE_LEVELS,
 } from './realistic-budget';
 import { bandFade, treeSlots, type TreeLevels } from './tree-levels';
-import { CAMERA_BEHIND_METRES } from './camera';
+import {
+  CAMERA_BEHIND_METRES,
+  FRUSTUM_SPREAD,
+  NEAR_PLANE_METRES,
+  WORST_CASE_ASPECT,
+  cameraRig,
+  verticalHalfTangent,
+} from './camera';
 import {
   PHOTOGRAPHIC_STRUCTURE_SURFACES,
   REALISTIC_SKY,
@@ -49,6 +56,7 @@ import {
   prepareMiddleLevel,
   prepareRealisticShape,
   realisticBicycleTriangles,
+  treeCanBeSeen,
   REALISTIC_PRIMITIVE_SKIP,
   realisticResourceUrl,
   RealisticStructureBelts,
@@ -557,6 +565,114 @@ function splitOfZ(belt: RealisticVegetationBelt, z: number): readonly [number, n
   }
   return [low, high];
 }
+
+/**
+ * Whether the camera can see any of a tree, sampled — the frustum itself, at
+ * the widest frame there is, for `treeCanBeSeen` to be held to. A trunk of
+ * `radius` and `height` sampled at three radii, sixteen bearings and eight
+ * heights.
+ */
+function frustumSees(tree: ScatterItem, pose: CameraPose, radius: number, height: number): boolean {
+  const { eye, target } = cameraRig(pose);
+  const f = { x: target.x - eye.x, y: target.y - eye.y, z: target.z - eye.z };
+  const length = Math.hypot(f.x, f.y, f.z);
+  f.x /= length;
+  f.y /= length;
+  f.z /= length;
+  // three's lookAt with +Y up: right = forward × up, up' = right × forward.
+  const across = Math.hypot(f.z, f.x);
+  const right = { x: -f.z / across, y: 0, z: f.x / across };
+  const up = {
+    x: right.y * f.z - right.z * f.y,
+    y: right.z * f.x - right.x * f.z,
+    z: right.x * f.y - right.y * f.x,
+  };
+  const spread = FRUSTUM_SPREAD;
+  const tall = verticalHalfTangent(WORST_CASE_ASPECT);
+  for (const share of [0, 0.5, 1]) {
+    for (let bearing = 0; bearing < 16; bearing += 1) {
+      const angle = (bearing / 16) * 2 * Math.PI;
+      for (let step = 0; step <= 7; step += 1) {
+        const px = tree.x + share * radius * Math.cos(angle) - eye.x;
+        const py = tree.y + (step / 7) * height - eye.y;
+        const pz = tree.z + share * radius * Math.sin(angle) - eye.z;
+        const depth = px * f.x + py * f.y + pz * f.z;
+        if (depth <= NEAR_PLANE_METRES) continue;
+        const x = px * right.x + py * right.y + pz * right.z;
+        const y = px * up.x + py * up.y + pz * up.z;
+        if (Math.abs(x) <= spread * depth && Math.abs(y) <= tall * depth) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** A pose at the origin looking up +Z whose camera looks at a road `rise` metres up 29.5 m on. */
+const pitched = (rise: number): CameraPose => ({ ...POSE, eyeRoadY: 0, targetRoadY: rise });
+
+describe('treeCanBeSeen — #617’s review', () => {
+  const at = (along: number, across: number, y: number): ScatterItem => ({
+    ...item('tree-broadleaf', along, across),
+    y,
+  });
+
+  it('never ranks out a tree the widest frame sees, climbing or descending', () => {
+    let seed = 617;
+    const random = (): number => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return seed / 2_147_483_648;
+    };
+    let seen = 0;
+    let refused = 0;
+    for (let sample = 0; sample < 6000; sample += 1) {
+      // Pitch from about −17° (a steep descent) to about +11° (a steep climb).
+      const pose = pitched(-8 + 16 * random());
+      const radius = 0.3 + 3.7 * random();
+      const height = 1 + 11 * random();
+      const along = -12 + 40 * random();
+      const edge = FRUSTUM_SPREAD * Math.max(0, along + CAMERA_BEHIND_METRES);
+      const tree = at(along, edge - 10 + 25 * random(), -14 + 28 * random());
+      if (!frustumSees(tree, pose, radius, height)) continue;
+      seen += 1;
+      if (!treeCanBeSeen(tree, pose, radius, height)) refused += 1;
+    }
+    // Non-vacuity: most of these stand near the cone's edge, and many are seen.
+    expect(seen).toBeGreaterThan(1000);
+    expect(refused).toBe(0);
+  });
+
+  it('ranks a tree whose trunk is outside the cone and whose crown reaches in', () => {
+    // At eye level, 1 m in front of the camera: the cone is 4.2 m wide there.
+    const tree = at(1 - CAMERA_BEHIND_METRES, FRUSTUM_SPREAD + 0.4, 2);
+    expect(frustumSees(tree, POSE, 0.6, 0.1)).toBe(true);
+    expect(treeCanBeSeen(tree, POSE, 0.6, 0.1)).toBe(true);
+  });
+
+  it('ranks a tree far below the eye on a descent, near the frame’s edge', () => {
+    const pose = pitched(-8);
+    const tree = at(10 - CAMERA_BEHIND_METRES, 50, -12);
+    expect(frustumSees(tree, pose, 0.3, 3)).toBe(true);
+    expect(treeCanBeSeen(tree, pose, 0.3, 3)).toBe(true);
+  });
+
+  it('ranks a tree whose crown stands above the eye on a steep climb', () => {
+    // The camera pitched up about 4.7° — a climb of about 15 % — and a 14 m
+    // tree standing at the eye's height 20 m ahead of it, a metre further out
+    // than the cone and its crown's slack reach at the trunk's own depth. Its
+    // top is deeper in the view than its trunk, by 14 m × sin 4.7°, and
+    // that is where it shows.
+    const pose = pitched(2 + 29.5 * Math.tan((4.7 * Math.PI) / 180));
+    const across = FRUSTUM_SPREAD * 20 + Math.hypot(1, FRUSTUM_SPREAD) + 1;
+    const tree = at(20 - CAMERA_BEHIND_METRES, across, 2);
+    expect(frustumSees(tree, pose, 1, 14)).toBe(true);
+    expect(treeCanBeSeen(tree, pose, 1, 14)).toBe(true);
+  });
+
+  it('ranks out a tree wholly behind the camera, and one far outside the cone', () => {
+    expect(treeCanBeSeen(at(-8, 0, 0), POSE, 2, 8)).toBe(false);
+    expect(treeCanBeSeen(at(10, 200, 0), POSE, 2, 8)).toBe(false);
+  });
+});
 
 describe('the realistic world’s primitives belt — ADR 0026 D-3', () => {
   it('builds no mesh for a kind the vegetation or the structure belts draw', () => {

@@ -2511,23 +2511,38 @@ test.describe('the realistic world — ADR 0026', () => {
         `${JSON.stringify(measured.handOverControl.changed)} with the hard swap; covered ` +
         `${JSON.stringify(measured.handOver.covered)} / ${JSON.stringify(measured.handOverControl.covered)}`,
     );
+    // The product's largest one-frame change ANYWHERE in the ride, not only in
+    // the windows: every frame outside a hand-over moves nothing, so this
+    // costs nothing and does not rest on where the windows were drawn.
+    const anywhere = largestMove(measured.handOver, -Infinity, Infinity);
+    let smallestSwap = Infinity;
     for (const band of bands) {
       const product = largestMove(measured.handOver, band.from, band.to);
       const control = largestMove(measured.handOverControl, band.from, band.to);
+      const walked = movesWithin(measured.handOver, band.from, band.to);
       console.log(
         `#617: band ${band.name}: the largest one-frame change in the picture is ` +
           `${String(product.moved)} dithered (at ${product.out.toFixed(1)} m), ` +
           `${String(control.moved)} with the hard swap (at ${control.out.toFixed(1)} m), ` +
-          `${(100 * (product.moved / Math.max(1, control.moved))).toFixed(1)} % of it`,
+          `${(100 * (product.moved / Math.max(1, control.moved))).toFixed(1)} % of it; ` +
+          `${String(walked.total)} in all over ${String(walked.frames)} frames`,
       );
       // The control swaps the tree whole in one frame, at THIS band — so each
-      // band is shown to be crossed, not only one — and the paced, dithered
-      // hand-over spreads that over many.
+      // band is shown to be crossed, not only one…
       expect(control.moved, `band ${band.name}`).toBeGreaterThan(MINIMUM_SWAP_MOVE);
-      expect(product.moved, `band ${band.name}`).toBeLessThanOrEqual(
-        MAXIMUM_HAND_OVER_SHARE * control.moved,
-      );
+      smallestSwap = Math.min(smallestSwap, control.moved);
+      // …and the product DOES hand over there — a product that never changed
+      // level would move nothing and pass the bound below — spread over
+      // several frames rather than one.
+      expect(walked.total, `band ${band.name}`).toBeGreaterThan(0.5 * control.moved);
+      expect(walked.frames, `band ${band.name}`).toBeGreaterThanOrEqual(3);
     }
+    expect(anywhere.moved).toBeLessThanOrEqual(MAXIMUM_HAND_OVER_SHARE * smallestSwap);
+    // And it arrives where the swap does: the same tree covering the same
+    // pixels at the start and at the end — the impostor first, the full mesh last.
+    expect(measured.handOver.covered[0]).toBe(measured.handOverControl.covered[0]);
+    expect(measured.handOver.covered.at(-1)).toBe(measured.handOverControl.covered.at(-1));
+    expect(measured.handOver.covered.at(-1)).not.toBe(measured.handOver.covered[0]);
   });
 
   test('draws the nearest tree IN THE PICTURE at full detail — #617’s review', async ({
@@ -2600,6 +2615,14 @@ const TRIANGLES_FALL_AT_LEAST = 60_000;
  *
  * ⚠️ Until #617's review this was 8 % of a tree's COVERED AREA, measured as
  * the tree moved; a reviewer who remembers that is reading the old file.
+ *
+ * ⚠️ **It is a bound from above, and a bound from above passes a product
+ * that never hands over at all** — the second review measured exactly that
+ * (a pace of nought: nothing moved in 91 frames, and the case was green). So
+ * since then the case also holds the product to a FLOOR in each band — its
+ * summed change at least half the swap's, over three frames or more — and to
+ * the swap's own covered area at both ends, and this bound is taken over
+ * every frame against the smaller swap (12 642 against 95 689, 13.2 %).
  */
 const MAXIMUM_HAND_OVER_SHARE = 0.2;
 
@@ -2610,6 +2633,28 @@ const MAXIMUM_HAND_OVER_SHARE = 0.2;
  * smaller.
  */
 const MINIMUM_SWAP_MOVE = 50_000;
+
+/**
+ * How much the picture changed in all across the frames whose other trees
+ * have walked out `from` to `to` metres, and in how many of them it changed
+ * at all — what a hand-over that happened has and one that never did has not.
+ */
+function movesWithin(
+  handOver: TreeHandOver,
+  from: number,
+  to: number,
+): { readonly total: number; readonly frames: number } {
+  let total = 0;
+  let frames = 0;
+  for (let at = 1; at < handOver.changed.length; at += 1) {
+    const where = handOver.out[at] ?? Number.NaN;
+    if (!(where >= from && where < to)) continue;
+    const step = handOver.changed[at] ?? 0;
+    total += step;
+    if (step > 0) frames += 1;
+  }
+  return { total, frames };
+}
 
 /**
  * The largest frame-to-frame change in the picture across a hand-over, and

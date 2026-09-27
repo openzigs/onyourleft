@@ -4848,8 +4848,9 @@ function inView(item: ScatterItem, pose: CameraPose): boolean {
 const FRUSTUM_SLANT = Math.hypot(1, FRUSTUM_SPREAD);
 
 /**
- * Whether any part of a tree `radius` metres across from its trunk can be in
- * the camera's view — #617's review, and what the trees are RANKED by.
+ * Whether any part of a tree — `radius` metres across from its trunk and
+ * `height` metres tall from its base — can be in the camera's view: #617's
+ * review, and what the trees are RANKED by.
  *
  * {@link inView} is not that: it keeps items down to {@link VIEW_BEHIND_METRES}
  * behind the rider, and a floor of {@link SCATTER_LATERAL_METRES} to the side
@@ -4860,47 +4861,71 @@ const FRUSTUM_SLANT = Math.hypot(1, FRUSTUM_SPREAD);
  * changing.
  *
  * - **Ahead of the camera.** `camera.ts` §`cameraRig` puts the eye
- *   {@link CAMERA_BEHIND_METRES} behind the rider looking along their
- *   heading, and pitched far less than the view is tall is wide — so every ray
- *   the camera sees has a forward part along the heading, and a point level
- *   with or behind the eye is never on screen. A tree is visible only if its
- *   crown reaches past that plane: `ahead + radius > 0`.
+ *   {@link CAMERA_BEHIND_METRES} behind the rider, looking along their heading
+ *   at the road 29.5 m on — so it never turns aside and never rolls, and it
+ *   pitches up on a climb and down on a descent by far less than 90° less the
+ *   view's vertical half-angle. So every ray the camera sees has a forward
+ *   part along the heading, and a point level with or behind the eye's
+ *   vertical plane is never on screen, whichever way it pitches. A tree is
+ *   visible only if its crown reaches past that plane: `ahead + radius > 0`.
  * - **Inside the cone.** The horizontal half-tangent is
  *   {@link FRUSTUM_SPREAD}, the WIDEST any frame can produce
- *   (`camera.ts` §`WORST_CASE_ASPECT`), measured at the item's depth along the
- *   view — which on a pitched camera is deeper, for a point below the eye, by
- *   up to its height below the eye; that is added in full, which errs wide.
- *   A sphere of `radius` reaches the cone if its centre is within `radius`
- *   of the cone's side, which is `radius × √(1 + spread²)` measured across.
+ *   (`camera.ts` §`WORST_CASE_ASPECT`), measured at a point's depth along the
+ *   view. A pitched camera sees a point deeper than it stands ahead, by up to
+ *   its height off the eye's level: BELOW the eye when it pitches down, which
+ *   is a descent and the level road, and ABOVE it when it pitches up, which
+ *   is a climb steeper than about 2 m in 29.5 m. The larger of the tree's two
+ *   — its base under the eye, its crown over it — is added in full, which
+ *   errs wide. ⚠️ Until the second review only the first was, and a tree at
+ *   a 6 : 1 frame's edge on a steep climb, its crown above the eye, was
+ *   ranked out while it showed. A disc of `radius` reaches the cone if its
+ *   centre is within `radius` of the cone's side, which is
+ *   `radius × √(1 + spread²)` measured across.
  *
- * Both err towards ranking a tree, never towards ranking out one that shows.
+ * Both err towards ranking a tree, never towards ranking out one that shows:
+ * `realistic-renderer.test.ts` §"treeCanBeSeen" holds it to a sampled
+ * frustum at pitches both ways, and that is why it is exported.
  */
-function treeCanBeSeen(item: ScatterItem, pose: CameraPose, radius: number): boolean {
+export function treeCanBeSeen(
+  item: ScatterItem,
+  pose: CameraPose,
+  radius: number,
+  height: number,
+): boolean {
   const dx = item.x - pose.x;
   const dz = item.z - pose.z;
   const ahead = dx * pose.headingX + dz * pose.headingZ + CAMERA_BEHIND_METRES;
   if (ahead + radius <= 0) return false;
-  const below = Math.max(0, pose.eyeRoadY + CAMERA_ABOVE_METRES - item.y);
+  const eye = pose.eyeRoadY + CAMERA_ABOVE_METRES;
+  const offLevel = Math.max(0, eye - item.y, item.y + height - eye);
   const across = Math.abs(dx * pose.headingZ - dz * pose.headingX);
-  return across - radius * FRUSTUM_SLANT <= FRUSTUM_SPREAD * Math.max(0, ahead + below);
+  return across - radius * FRUSTUM_SLANT <= FRUSTUM_SPREAD * Math.max(0, ahead + offLevel);
 }
 
-/** How far a shape reaches from its trunk, in its own units — the largest of its parts'. */
-function horizontalReach(parts: readonly RealisticPart[]): number {
-  let reach = 0;
+/**
+ * How far a shape reaches from its trunk, and how far above its base, in its
+ * own units — the largest of its parts'.
+ */
+function treeReach(parts: readonly RealisticPart[]): {
+  readonly across: number;
+  readonly up: number;
+} {
+  let across = 0;
+  let up = 0;
   for (const { geometry } of parts) {
     if (geometry.boundingBox === null) geometry.computeBoundingBox();
     const box = geometry.boundingBox;
     if (box === null) continue;
-    reach = Math.max(
-      reach,
+    across = Math.max(
+      across,
       Math.hypot(
         Math.max(Math.abs(box.min.x), Math.abs(box.max.x)),
         Math.max(Math.abs(box.min.z), Math.abs(box.max.z)),
       ),
     );
+    up = Math.max(up, box.max.y);
   }
-  return reach;
+  return { across, up };
 }
 
 /**
@@ -5024,7 +5049,7 @@ export class RealisticVegetationBelt {
         ),
         ranking: tree ? this.#trees : ranking(nearCap),
         fit: sceneryFitMetres(kind),
-        reach: shapes.map((shape) => horizontalReach(shape.parts)),
+        reach: shapes.map((shape) => treeReach(shape.parts)),
       });
     }
   }
@@ -5140,8 +5165,10 @@ export class RealisticVegetationBelt {
       if (each.tree && each.shapes.length > 0 && visibleOnly) {
         const variant = variantOf(item.variant, each.shapes.length);
         const shape = each.shapes[variant] as RealisticShape;
-        const radius = ((each.reach[variant] ?? 0) * each.fit * item.scale) / shape.extent;
-        if (!treeCanBeSeen(item, pose, radius)) continue;
+        const reach = each.reach[variant];
+        const size = (each.fit * item.scale) / shape.extent;
+        const radius = (reach?.across ?? 0) * size;
+        if (!treeCanBeSeen(item, pose, radius, (reach?.up ?? 0) * size)) continue;
       }
       this.#seen[index] = 1;
       rankInto(each.ranking, index, Math.hypot(item.x - pose.x, item.z - pose.z));
@@ -5309,8 +5336,8 @@ interface VegetationSlot {
   /** Both tree kinds share one; a shrub's and a rock's are their own. */
   readonly ranking: Ranking;
   readonly fit: number;
-  /** Per shape, how far it reaches from its trunk, in its own units. @see treeCanBeSeen */
-  readonly reach: readonly number[];
+  /** Per shape, how far it reaches from its trunk and above its base, in its own units. @see treeCanBeSeen */
+  readonly reach: readonly { readonly across: number; readonly up: number }[];
 }
 
 /** An instanced mesh of a fixed capacity, empty, never frustum-culled. */

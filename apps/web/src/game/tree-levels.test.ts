@@ -331,3 +331,136 @@ describe('the hand-over when the ranked SET changes — #617’s review', () => 
     expect([handOver.low(1), handOver.high(1)]).toEqual([0, 0]);
   });
 });
+
+describe('the hand-over’s promises, over seeded roads — #617’s second review', () => {
+  /** A seeded stream in [0, 1). */
+  const stream = (seed: number): (() => number) => {
+    let state = seed;
+    return () => {
+      state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return state / 2_147_483_648;
+    };
+  };
+  const slots = treeSlots(REALISTIC_TREE_LEVELS);
+
+  it('keeps inside the slots, keeps its edges in order and steps at most a step', () => {
+    // 300 roads of 400 frames: trees closing, jumping ±30 m at random (a rank
+    // jump), appearing anywhere and leaving — every kind of change to the
+    // ranked set, and the patience escape reached over and over.
+    const failures: string[] = [];
+    for (let seed = 1; seed <= 300; seed += 1) {
+      const random = stream(seed);
+      const handOver = handOverFor();
+      let next = 1;
+      let road: Tree[] = Array.from({ length: 4 + Math.floor(random() * 14) }, () => ({
+        id: next++,
+        d: 2 + random() * 60,
+      }));
+      let last = frame(handOver, road);
+      for (let at = 0; at < 400; at += 1) {
+        road = road
+          .map((tree) => {
+            const jump = random() < 0.02 ? (random() - 0.5) * 60 : 0;
+            return { ...tree, d: Math.max(0.1, tree.d - 0.2 + jump) };
+          })
+          .filter(() => random() > 0.01);
+        if (random() < 0.1) road.push({ id: next++, d: 2 + random() * 60 });
+        const splits = frame(handOver, road);
+        // Plain comparisons, and one assertion at the end: 120 000 frames.
+        const { full, middle } = using(splits);
+        let broken = full > slots.full ? `${String(full)} full` : '';
+        if (middle > slots.middle) broken = `${String(middle)} middle`;
+        for (const [low, high] of splits.values()) {
+          if (!(low >= 0 && low <= high && high <= 1)) broken = `[${String(low)}, ${String(high)}]`;
+        }
+        const step = largestChange(last, splits);
+        if (step > STEP) broken = `a step of ${String(step)}`;
+        if (broken !== '') failures.push(`seed ${String(seed)}, frame ${String(at)}: ${broken}`);
+        last = splits;
+      }
+    }
+    expect(failures.slice(0, 5)).toEqual([]);
+  }, 60_000);
+
+  it('arrives where the rank says once the ranking stands still', () => {
+    const failures: string[] = [];
+    for (let seed = 1; seed <= 300; seed += 1) {
+      const random = stream(seed);
+      const handOver = handOverFor();
+      const road = (): Tree[] =>
+        Array.from({ length: 12 }, (_, id) => ({ id, d: 2 + random() * 60 }));
+      // Two unrelated rankings in turn, so every tree starts somewhere else.
+      frame(handOver, road());
+      const settled = road();
+      let splits = frame(handOver, settled);
+      for (let at = 0; at < 200; at += 1) splits = frame(handOver, settled);
+      const sorted = [...settled].sort((a, b) => a.d - b.d);
+      const distances = sorted.slice(0, slots.ranked).map((tree) => tree.d);
+      sorted.forEach((tree, rank) => {
+        const level = treeLevelAt(rank, REALISTIC_TREE_LEVELS);
+        const fade =
+          level === 'full-middle' || level === 'middle-impostor'
+            ? bandFade(rank, distances, distances.length)
+            : 0;
+        const want: readonly [number, number] =
+          rank < slots.ranked ? [lowBound(level, fade), highBound(level, fade)] : [1, 1];
+        const got = splits.get(tree.id) ?? [Number.NaN, Number.NaN];
+        if (!(Math.abs(got[0] - want[0]) < 1e-12 && Math.abs(got[1] - want[1]) < 1e-12)) {
+          failures.push(
+            `seed ${String(seed)}, rank ${String(rank)}: ${String(got)} for ${String(want)}`,
+          );
+        }
+      });
+    }
+    expect(failures.slice(0, 5)).toEqual([]);
+  }, 60_000);
+
+  it('waits as its impostor, and takes no slot, when refused both levels for good', () => {
+    // A holds the one full slot and B the one middle slot, and neither lets
+    // go; C wants a band between the two. Past its patience C must stay its
+    // impostor — the escape never walks it into the slots it was refused.
+    const handOver = new TreeHandOver({ full: 1, middle: 1 }, 4, 10);
+    const aimAll = (withC: boolean): void => {
+      handOver.begin();
+      handOver.aim(1, 0, 0, 0);
+      handOver.aim(2, 0, 0, 1);
+      if (withC) handOver.aim(3, 0, 0, 0.5);
+      handOver.settle();
+    };
+    aimAll(false);
+    for (let at = 0; at < HAND_OVER_PATIENCE_FRAMES + 40; at += 1) {
+      aimAll(true);
+      const splits = [0, 1, 2].map((entry) => [handOver.low(entry), handOver.high(entry)]);
+      expect(splits.filter(([, high]) => (high ?? 1) < 1).length).toBeLessThanOrEqual(1);
+      expect(splits.filter(([low, high]) => (high ?? 1) > (low ?? 1)).length).toBeLessThanOrEqual(
+        1,
+      );
+    }
+    expect([handOver.low(2), handOver.high(2)]).toEqual([1, 1]);
+  });
+
+  it('tells two trees at one place apart, frame to frame', () => {
+    // The scatter keeps trees apart, so this is belt and braces: each entry
+    // of the frame before is claimed once, so a second tree at the same place
+    // does not take the first one's split — and its slot.
+    const handOver = new TreeHandOver({ full: 1, middle: 1 }, 4, 10);
+    const both = (): [number, number][] => {
+      handOver.begin();
+      const a = handOver.aim(7, 0, 0, 0);
+      const b = handOver.aim(7, 0, 1, 1);
+      handOver.settle();
+      return [
+        [handOver.low(a), handOver.high(a)],
+        [handOver.low(b), handOver.high(b)],
+      ];
+    };
+    expect(both()).toEqual([
+      [0, 0],
+      [1, 1],
+    ]);
+    expect(both()).toEqual([
+      [0, 0],
+      [1, 1],
+    ]);
+  });
+});
