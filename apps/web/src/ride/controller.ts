@@ -428,13 +428,13 @@ export const RIDE_NOTIFICATION_REFUSED =
  *
  * ⚠️ **A safety sentence, so it is never behind a disclosure** — the owner's
  * ruling on #654's re-review of #647. It is short so that it fits where it is
- * shown: under *Pause* / *Stop* on the Ride screen and in the HUD's notice cell
+ * shown: beside the Live heading on the Ride screen and in the HUD's notice cell
  * (`ride.browser.spec.ts` and `rideview.browser.spec.ts` §"#647" measure both).
  */
 export const KEEP_SCREEN_ON_LABEL = 'Keep the screen on';
 
 /** @see KEEP_SCREEN_ON_LABEL */
-export const RIDE_MAY_STOP_WITH_SCREEN_OFF = 'Your ride may stop if the screen goes off.';
+export const RIDE_MAY_STOP_WITH_SCREEN_OFF = 'your ride may stop if the screen goes off.';
 
 /**
  * The same, as the ride's one announcement region says it (#647) — the label
@@ -856,8 +856,9 @@ export function createRideController(options: RideControllerOptions): RideContro
   /**
    * Call a keep-alive method and let neither of its failures reach the ride —
    * #524's third criterion. Since #647 only `letRideSleep` comes through here:
-   * a refused `keepRideAlive` is recorded by {@link askToKeepAlive} instead. `.catch` on the returned promise is not enough on
-   * its own: a port that throws BEFORE it returns a promise would throw out of
+   * a refused `keepRideAlive` is recorded by {@link askToKeepAlive} instead.
+   * `.catch` on the returned promise is not enough on its own: a port that
+   * throws BEFORE it returns a promise would throw out of
    * {@link changed}, which is inside `start()` and `confirmStop()`, and so fail
    * a ride because a notification could not be posted. `controller.test.ts`
    * §"#524" holds both halves.
@@ -892,10 +893,19 @@ export function createRideController(options: RideControllerOptions): RideContro
    * guess, because a notice that the service failed when it may have started
    * is a false sentence on the one screen a rider trusts mid-ride.
    *
-   * ⚠️ **A throw before the promise is a refusal too**, which the flag is
-   * raised for synchronously: the caller is already inside {@link changed}.
+   * ⚠️ **A throw before the promise is a refusal too.** From
+   * {@link syncKeepAlive} the flag is raised synchronously and nothing else,
+   * because that caller is already inside {@link changed} and a second
+   * `changed()` would re-enter it. From anywhere else — the re-ask after a
+   * granted notification, the re-ask after a pairing — it goes through
+   * `answered`, which publishes it: #693's review found the re-ask after a
+   * granted notification raising the flag on a snapshot nobody rebuilt.
    */
-  const askToKeepAlive = (keepAlive: RideKeepAlivePort, generation: number): void => {
+  const askToKeepAlive = (
+    keepAlive: RideKeepAlivePort,
+    generation: number,
+    insideChanged = false,
+  ): void => {
     const sameRide = (): boolean => generation === keepAliveGeneration;
     const answered = (failed: boolean): void => {
       if (!sameRide() || keepAliveFailed === failed) {
@@ -908,10 +918,12 @@ export function createRideController(options: RideControllerOptions): RideContro
     try {
       asked = keepAlive.keepRideAlive();
     } catch {
-      // Degraded, not broken: the ride records without the service. Raised
-      // here rather than through `answered`, because this runs inside
-      // `changed()` already and a second `changed()` would re-enter it.
-      keepAliveFailed = true;
+      // Degraded, not broken: the ride records without the service.
+      if (insideChanged) {
+        keepAliveFailed = true;
+      } else {
+        answered(true);
+      }
       return;
     }
     asked.then(
@@ -976,7 +988,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       quietly(() => keepAlive.letRideSleep());
       return;
     }
-    askToKeepAlive(keepAlive, generation);
+    askToKeepAlive(keepAlive, generation, true);
     const permission = options.notificationPermission;
     if (permission !== undefined) {
       void askAboutTheNotification(permission, keepAlive, generation);

@@ -1104,6 +1104,57 @@ a.oyl-button {
   }
 }
 
+/*
+ * #647's "Keep the screen on", beside the Live group's heading — #693's
+ * review.
+ *
+ * The notice is a safety sentence and is never put away, so where it goes is
+ * a question of room, and on a landscape tablet there is very little of it
+ * below the metrics. Measured in the pinned Chromium, its own margin to the
+ * fold (§4f holds both to 50 px):
+ *
+ *                          1280×800 in the shell   1024×720
+ *   under Pause / Stop     notice 15.7              notice 3.7
+ *   above Pause / Stop     Pause −0.3               Pause −12.3
+ *   beside Pause / Stop    notice 7.7 (it wraps)    notice 23.7 (three lines)
+ *   beside "Live"          published by `rideview.browser.spec.ts` §"#647"
+ *
+ * Beside the heading it sits in the one run of empty width the column has —
+ * "Live" is four letters — so what it costs everything under it is its height
+ * less the heading's, rather than its whole height and a gap. Hence the
+ * tighter padding: `--oyl-space-sm` rather than a status's `--oyl-space-md`
+ * top and bottom is what keeps that difference under the room *Pause* and
+ * *Stop* have to the floor at 1024×720. It also comes FIRST in the group, so
+ * a screen reader meets it before the numbers, and before the controls.
+ *
+ * With no notice the wrapper is the heading and its margin, so nothing on the
+ * screen moves; on a phone the notice wraps under the heading, where the page
+ * scrolls anyway.
+ */
+.oyl-ride__heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--oyl-space-sm) var(--oyl-space-md);
+  margin-bottom: var(--oyl-space-sm);
+}
+
+.oyl-ride__heading > h2 {
+  margin: 0;
+}
+
+.oyl-ride__heading > .oyl-status {
+  flex: 1 1 14rem;
+  min-width: 0;
+  margin: 0;
+  padding: var(--oyl-space-xs) var(--oyl-space-md);
+  line-height: 1.35;
+}
+
+.oyl-ride__heading > .oyl-status > .oyl-status__glyph {
+  line-height: 1.35;
+}
+
 .oyl-trainer__state {
   font-size: var(--oyl-font-size-lg);
 }
@@ -2563,9 +2614,11 @@ p > label + input[type='file'] {
  * elevation strip and the plan view are not shown for as long as the platform
  * refuses the recording service; it stops being true the moment a later ask
  * succeeds (`ride/controller.ts` §`askAgainIfRefused`). Beside the road notice
- * the pair ran over an upright rider (−14 px at 360×752), so `GameView`
- * §`noticeOpen` starts the road notice put away while this one stands.
- * `ride.browser.spec.ts` §"#647" measures both at every overlay viewport.
+ * the pair ran over an upright rider on the narrowest phones (27 px into the
+ * rider's box at 360×752), so there, and only there, `GameView`
+ * §`ONE_NOTICE_ONLY_QUERY` takes the road notice and its control off the HUD
+ * while this one stands — #693's review. `ride.browser.spec.ts` §"#647"
+ * measures both at every overlay viewport.
  */
 @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem),
   (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {

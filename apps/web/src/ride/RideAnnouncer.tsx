@@ -104,9 +104,10 @@ export interface RideAnnouncerProps {
    * on a first render, and not again while it stays true.
    *
    * ⚠️ Optional, so a caller that stops passing it is green in
-   * `check:wiring` (§Limits' third entry); `views/RideView.test.tsx` §"#647"
-   * drives a refused keep-alive through the real controller and reads this
-   * region, which is what pins it.
+   * `check:wiring` (§Limits' third entry);
+   * `ride/keep-alive-notice.a11y.test.tsx` §"the Ride screen — #647" drives
+   * a refused keep-alive through the real controller and reads this region,
+   * which is what pins it.
    */
   readonly keepAliveFailed?: boolean | undefined;
   /** Where the rider's announcement choice is read from. This device's, by default. */
@@ -131,6 +132,9 @@ export interface RideAnnouncerProps {
   /** The throttle's clock, in seconds. The wall clock unless a test hands one in. */
   readonly clock?: (() => number) | undefined;
 }
+
+/** #647's one sentence, as an event. */
+const SCREEN_OFF_RISK: AnnouncementEvent = { kind: 'screen-off-risk', text: RIDE_MAY_STOP_SPOKEN };
 
 /** What each watched value last was, so a change is told from a first render. */
 interface Seen {
@@ -221,7 +225,7 @@ function changes(before: Seen, now: Seen): AnnouncementEvent[] {
   // #647: when the refusal APPEARS. Not while it stands — the notice stays on
   // the screen for that — and not again until it has cleared and come back.
   if (now.keepAliveFailed && !before.keepAliveFailed) {
-    events.push({ kind: 'screen-off-risk', text: RIDE_MAY_STOP_SPOKEN });
+    events.push(SCREEN_OFF_RISK);
   }
   return events;
 }
@@ -250,6 +254,21 @@ export function RideAnnouncer({
   now.current = clock ?? wallSeconds;
   const told = useRef(onEvent);
   told.current = onEvent;
+  const keepAlive = useRef(keepAliveFailed);
+  keepAlive.current = keepAliveFailed;
+  /**
+   * Whether *"Keep the screen on: …"* has been SPOKEN while the refusal
+   * stands — #647. A refusal already standing when the screen appears counts
+   * as said: #394's rule, never on a first render.
+   *
+   * ⚠️ **Spoken, not offered — #693's review.** `announce.ts` holds one
+   * pending event, and a higher one arriving (a climb, the next block, the
+   * side camera) replaces it; offered once, on the render it appeared, it
+   * could be displaced and never said. So {@link hear} offers it on every call
+   * until the core returns it, and asks again after each window while it is
+   * owed.
+   */
+  const screenOffSaid = useRef(keepAliveFailed);
 
   /**
    * One call of the core. ⚠️ The only place this component writes the region,
@@ -260,11 +279,18 @@ export function RideAnnouncer({
     // Told BEFORE the core decides what is said, so a sound bound to an event
     // follows the event rather than the window. @see RideAnnouncerProps.onEvent
     for (const event of events) told.current?.(event.kind);
+    // #647: owed until said. Only with announcements on — off, the core drops
+    // it on every call, and a timer re-asking for ever would say nothing.
+    const owed = (): boolean => preference.enabled && keepAlive.current && !screenOffSaid.current;
+    const offered =
+      owed() && !events.some((event) => event.kind === 'screen-off-risk')
+        ? [...events, SCREEN_OFF_RISK]
+        : events;
     const at = now.current();
     const heard = announce(announcer.current, {
       now: at,
       readings: [],
-      events,
+      events: offered,
       // Nothing here is a reading: the Ride screen's numbers are `MetricGrid`'s
       // own per-cell sentences, and a cadence left at its default would say
       // "No power reading" every minute.
@@ -274,10 +300,14 @@ export function RideAnnouncer({
     if (heard.sentence !== undefined) {
       setSaid(heard.sentence);
     }
+    if (heard.kind === 'screen-off-risk') {
+      screenOffSaid.current = true;
+    }
     // A sentence that is WAITING for the window has no render to carry it — a
     // paused workout re-renders nothing — so ask again when the window opens.
+    // #647's, too, when a higher sentence took the window it was offered in.
     const last = heard.state.lastSpokenAt;
-    if (heard.state.pending !== undefined && last !== undefined) {
+    if ((heard.state.pending !== undefined || owed()) && last !== undefined) {
       const wait = Math.max(0, ANNOUNCE_WINDOW_SECONDS - (at - last)) * 1000;
       timer.current = setTimeout(() => {
         hear.current([]);
@@ -325,6 +355,7 @@ export function RideAnnouncer({
     // #647: the service came up while its sentence waited — it is no longer
     // true, so it is not said.
     if (seen.current.keepAliveFailed && !keepAliveFailed) {
+      screenOffSaid.current = false;
       announcer.current = withdrawPending(
         announcer.current,
         (event) => event.kind === 'screen-off-risk',

@@ -1252,21 +1252,34 @@ test.describe('#439 — a ride with edge-to-edge insets does not scroll', () => 
 /**
  * #647 — the ride being recorded may stop if the screen goes off, because the
  * platform refused the recording service. `?keepalive=failed` puts
- * *"Keep the screen on: Your ride may stop if the screen goes off."* in the
+ * *"Keep the screen on: your ride may stop if the screen goes off."* in the
  * HUD's notice cell, where it stays for as long as the refusal does: it is a
  * safety sentence, so there is no toggle and no disclosure (the owner's ruling
  * on #654's re-review).
  *
- * `&trainer=workout` adds the longest road notice, which on its own stands
- * open for a ride's first minute. Beside this one it starts PUT AWAY
- * (`GameView` §`noticeOpen`), its *Trainer notice* control still on the HUD —
- * and the control below opens it, as a rider's press does, and requires the
- * two together to run over the rider on an upright phone, which is what they
- * did before that rule.
+ * `&trainer=workout` adds the longest road notice, which stands open for a
+ * ride's first seconds and has a *Trainer notice* control. ⚠️ **Since #693's
+ * review (N2) the refusal changes that on upright phones under 25 rem wide
+ * and nowhere else**: there (`GameView` §`ONE_NOTICE_ONLY_QUERY` — 360×800,
+ * 360×752 and 390×844 here) the road notice and its control are off the HUD
+ * while the refusal stands, because the two together ran over the rider, or
+ * up to it, however the road notice got open; everywhere else it opens, and
+ * is put away, exactly as it does without the refusal — and the pair is held
+ * over nothing, clear of the rider's box by `EASED_RIDER_CLEARANCE_PIXELS`
+ * upright.
+ *
+ * The control takes the rule away — `matchMedia` answering "no" to that one
+ * query before the page loads — and requires the pair, open, to come within
+ * the clearance of the rider at the two 360 px phones. Not at 390×844, where
+ * the pair ended 51 px above the rider on a Mac: inside the rule for the CI
+ * runner's tighter fonts, not because it collides there.
  */
-async function keepScreenOnNotice(
-  page: Page,
-): Promise<{ text: string; inDisclosure: boolean; roadNoticeShown: boolean }> {
+async function keepScreenOnNotice(page: Page): Promise<{
+  text: string;
+  inDisclosure: boolean;
+  roadNoticeShown: boolean;
+  roadNoticeOnHud: boolean;
+}> {
   return page.evaluate(() => {
     const label = [...document.querySelectorAll('.oyl-hud__notices .oyl-status__label')].find(
       (each) => each.textContent?.startsWith('Keep the screen on'),
@@ -1277,6 +1290,7 @@ async function keepScreenOnNotice(
       text: (notice?.textContent ?? '').replace(/\s+/g, ' '),
       inDisclosure: (notice?.closest('details') ?? null) !== null,
       roadNoticeShown: road !== null && !road.classList.contains('oyl-visually-hidden'),
+      roadNoticeOnHud: road !== null,
     };
   });
 }
@@ -1303,12 +1317,16 @@ async function keepScreenOnLaidOut(
   return { collisions: easedCollisions(seen, viewport), clearance };
 }
 
-const KEEP_SCREEN_ON_SEEN = '!Keep the screen on: Your ride may stop if the screen goes off.';
+const KEEP_SCREEN_ON_SEEN = '!Keep the screen on: your ride may stop if the screen goes off.';
+
+/** `GameView` §`ONE_NOTICE_ONLY_QUERY`'s phones: the column layout under 25 rem wide. */
+const oneNoticeOnly = (viewport: Viewport): boolean =>
+  viewport.width >= 360 && viewport.width < 400 && viewport.height >= 752;
 
 test.describe('a ride that may stop with the screen off — #647', () => {
   for (const [query, what] of [
     ['?keepalive=failed', 'alone'],
-    ['?keepalive=failed&trainer=workout', 'with the road notice put away'],
+    ['?keepalive=failed&trainer=workout', 'with the road notice'],
   ] as const) {
     for (const viewport of OVERLAY_VIEWPORTS) {
       test(`the notice, ${what}, whole and over nothing — ${viewport.name}`, async ({ page }) => {
@@ -1316,13 +1334,23 @@ test.describe('a ride that may stop with the screen off — #647', () => {
         const found = await keepScreenOnNotice(page);
         expect(found.text).toBe(KEEP_SCREEN_ON_SEEN);
         expect(found.inDisclosure).toBe(false);
-        expect(found.roadNoticeShown).toBe(false);
-        if (query.includes('trainer=workout')) {
-          // Put away, not gone: its control is on the HUD, where a rider reaches it.
+        const withRoad = query.includes('trainer=workout');
+        if (withRoad && !oneNoticeOnly(viewport)) {
+          // As without the refusal: open for the ride's first seconds, beside
+          // it, with its control on the HUD.
+          expect(found.roadNoticeShown).toBe(true);
           const toggle = named((await measure(page)).items, 'control: Trainer notice');
           expect(inside(toggle.box, viewport) && toggle.onTop, describeItem(toggle)).toBe(true);
+        } else {
+          // Alone — and at the two narrowest upright phones, the road notice
+          // and its control are not on the HUD while the refusal stands.
+          expect(found.roadNoticeOnHud).toBe(false);
+          expect(
+            (await measure(page)).items.some((each) => each.name === 'control: Trainer notice'),
+          ).toBe(false);
         }
-        const { collisions, clearance } = await keepScreenOnLaidOut(page, viewport, what);
+        const described = withRoad && oneNoticeOnly(viewport) ? 'road notice off the HUD' : what;
+        const { collisions, clearance } = await keepScreenOnLaidOut(page, viewport, described);
         expect(collisions).toEqual([]);
         if (viewport.height > viewport.width) {
           expect(clearance).toBeGreaterThanOrEqual(EASED_RIDER_CLEARANCE_PIXELS);
@@ -1331,26 +1359,28 @@ test.describe('a ride that may stop with the screen off — #647', () => {
     }
   }
 
-  // The control: the road notice opened beside it, as the rider's press on
-  // *Trainer notice* does — the HUD as it was before `GameView` put the road
-  // notice away. On the two narrowest upright phones it must come within the
-  // clearance of the rider, or the rule above is being held over a pair that
-  // always fitted.
+  // The control: the rule taken away. `matchMedia` answers "no" to
+  // ONE_NOTICE_ONLY_QUERY before the page loads, so at the two 360 px
+  // upright phones the road notice opens beside it as it does elsewhere — and
+  // must come within the clearance of the rider, or the rule is being held
+  // over a pair that always fitted.
   for (const viewport of OVERLAY_VIEWPORTS.filter((each) => each.width === 360)) {
-    test(`the control — the road notice open beside it comes within the clearance of the rider — ${viewport.name}`, async ({
+    test(`the control — without the rule, the road notice open beside it comes within the clearance of the rider — ${viewport.name}`, async ({
       page,
     }) => {
+      await page.addInitScript(() => {
+        const real = window.matchMedia.bind(window);
+        // `not all` matches nothing, in the browser's own MediaQueryList.
+        window.matchMedia = (query: string): MediaQueryList =>
+          real(query.includes('width < 25rem') ? 'not all' : query);
+      });
       await openRide(page, viewport, '?keepalive=failed&trainer=workout');
-      await page.getByRole('button', { name: 'Trainer notice' }).click();
       await expect.poll(async () => (await keepScreenOnNotice(page)).roadNoticeShown).toBe(true);
       const { collisions, clearance } = await keepScreenOnLaidOut(
         page,
         viewport,
-        'with the road notice opened',
+        'without the rule, the road notice open',
       );
-      // Under the clearance the cases above hold at both, and ON the rider at
-      // the smallest column layout (−14 px there, 11 px at 360×800, in the
-      // pinned Chromium on a Mac).
       expect(clearance).toBeLessThan(EASED_RIDER_CLEARANCE_PIXELS);
       if (viewport.height === 752) {
         expect(collisions).not.toEqual([]);

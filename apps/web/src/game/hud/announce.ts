@@ -92,7 +92,10 @@
  * screen goes off, and the rider can see the notice before that. Above every
  * reading, because it is a fact about the whole recording. Said ONCE, when it
  * appears (and once at the start of a game ride it stands over, the road
- * notice's rule), never per window while it persists. ⚠️ **Not in
+ * notice's rule), never per window while it persists. ⚠️ **"Once" means
+ * SPOKEN once, since #693's review**: this core drops a lower event behind a
+ * higher one, so its two callers offer it on every call until it comes back
+ * as `kind` — offered once, a climb in the same window made it never. ⚠️ **Not in
  * {@link ALWAYS_SPOKEN}**: #647 asks for it "when announcements are on", and
  * nothing about it is the machine under the rider. A rider with announcements
  * off reads it on both screens, where it is never put away.

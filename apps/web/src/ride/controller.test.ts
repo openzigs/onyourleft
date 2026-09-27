@@ -2775,12 +2775,14 @@ describe('#647 — a refused keep-alive is on the ride’s state, and clears', (
   });
 
   it('is false again once the ride stops, and a late refusal does not reach the next ride', async () => {
-    let refuseLate: (reason: Error) => void = () => undefined;
+    // Every ask hangs until the test answers it, so the first ride's refusal
+    // can be delivered while the SECOND ride is in progress.
+    const refusals: ((reason: Error) => void)[] = [];
     const rig = benchWith({
       keepAlive: {
         keepRideAlive: () =>
           new Promise<void>((_resolve, reject) => {
-            refuseLate = reject;
+            refusals.push(reject);
           }),
         letRideSleep: () => Promise.resolve(),
       },
@@ -2790,10 +2792,56 @@ describe('#647 — a refused keep-alive is on the ride’s state, and clears', (
     await ride(rig, 3);
     rig.controller.armStop();
     await rig.controller.confirmStop();
-    refuseLate(new Error('Android did not allow the recording service to start'));
-    await settled();
     expect(rig.controller.getSnapshot().phase).toBe('stopped');
     expect(rig.controller.getSnapshot().keepAliveFailed).toBe(false);
+
+    expect(await rig.controller.startNewRide()).toBe(true);
+    await rig.controller.start();
+    expect(refusals).toHaveLength(2);
+    // The FIRST ride's ask is refused now, with the second ride recording.
+    refusals[0]?.(new Error('Android did not allow the recording service to start'));
+    await settled();
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(false);
+    // …and this ride's own refusal still raises it.
+    refusals[1]?.(new Error('Android did not allow the recording service to start'));
+    await settled();
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(true);
+    rig.controller.dispose();
+  });
+
+  it('is published when the re-ask after a granted notification throws — #693’s review', async () => {
+    // The first ask succeeds; the re-start after `granted` throws before it
+    // returns a promise. That throw is NOT inside `changed()`, so the flag has
+    // to be published — a snapshot built before it would never show it.
+    let asked = 0;
+    const rig = benchWith({
+      keepAlive: {
+        keepRideAlive: () => {
+          asked += 1;
+          if (asked === 1) {
+            return Promise.resolve();
+          }
+          throw new Error('RecordingService could not be started again');
+        },
+        letRideSleep: () => Promise.resolve(),
+      },
+      notificationPermission: {
+        notificationPermission: () => Promise.resolve('prompt'),
+        askForNotificationPermission: () => Promise.resolve('granted'),
+      },
+    });
+    const seen: boolean[] = [];
+    rig.controller.subscribe(() => {
+      seen.push(rig.controller.getSnapshot().keepAliveFailed);
+    });
+    await rig.controller.start();
+    // A snapshot taken now is cached; only `changed()` drops it.
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(false);
+    await settled();
+    expect(asked).toBe(2);
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(true);
+    expect(seen.at(-1)).toBe(true);
     rig.controller.dispose();
   });
 

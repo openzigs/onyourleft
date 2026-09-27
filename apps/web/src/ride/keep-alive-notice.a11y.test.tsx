@@ -12,9 +12,9 @@
  * with no Bluetooth permission, and then accepts — so what is read off the
  * screen is what that refusal produces, not a snapshot this file typed.
  *
- * - the Ride screen (`#/ride`, `views/RideView.tsx`) shows ONE sentence under
- *   *Pause* / *Stop*, in no `<details>`, and says it once through the ride's
- *   one region when announcements are on;
+ * - the Ride screen (`#/ride`, `views/RideView.tsx`) shows ONE sentence beside
+ *   the Live group's heading, in no `<details>`, and says it once through the
+ *   ride's one region when announcements are on;
  * - the game's HUD shows the same sentence in its notice cell, through the
  *   REAL `gameTrainerPortOver`, and says it once through the HUD's region;
  * - both clear once a sensor pairs and the second ask succeeds.
@@ -24,7 +24,7 @@
  * fresh install — that is the owner's hardware step on #647.
  */
 
-import { act } from 'react';
+import { act, type JSX } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -36,12 +36,13 @@ import {
   seconds,
   watts,
   type RoutePoint,
+  type WorkoutRescue,
 } from '@onyourleft/domain';
 import { createSimulator, ftmsTrainer, type SimulatorBench } from '@onyourleft/sensors/simulator';
 import { athleteId, recordingSessionId } from '@onyourleft/store';
 
 import { auditAccessibility, formatViolations } from '../a11y/audit';
-import type { GamePort, RidableRoute } from '../game/GameView';
+import { GameView, type GamePort, type RidableRoute } from '../game/GameView';
 import * as core from '../game/hud/announce';
 import {
   ANNOUNCEMENTS_STORAGE_KEY,
@@ -49,13 +50,19 @@ import {
   writeAnnouncementPreference,
 } from '../game/hud/announce-preference';
 import type { GameRenderer } from '../game/port';
-import { gameTrainerPortOver } from '../game/trainer-port';
+import {
+  gameTrainerFrom,
+  gameTrainerPortOver,
+  type GameTrainerPort,
+  type GradientTrainer,
+} from '../game/trainer-port';
 import type { RecordingCheckpointStore } from '../recording/recorder';
 import { AppShell } from '../shell/AppShell';
 import { hrefFor, routeById } from '../shell/routes';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 
+import { RideAnnouncer } from './RideAnnouncer';
 import { ridingSnapshot, stubRideController } from './testing';
 import {
   createRideController,
@@ -63,6 +70,7 @@ import {
   RIDE_MAY_STOP_SPOKEN,
   RIDE_MAY_STOP_WITH_SCREEN_OFF,
   type RideController,
+  type TrainerSnapshot,
 } from './controller';
 
 vi.mock('../game/hud/announce', async (importOriginal) => {
@@ -128,6 +136,7 @@ afterEach(() => {
   rig?.controller.dispose();
   rig = undefined;
   globalThis.location.hash = '';
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   localStorage.clear();
@@ -144,6 +153,18 @@ const handedOver = (): number =>
     .mocked(core.announce)
     .mock.calls.filter(([, input]) =>
       (input.events ?? []).some((event) => event.kind === 'screen-off-risk'),
+    ).length;
+
+/**
+ * How many times the core SAID it — #693's review. Not how many times it was
+ * offered: since that review it is offered until it is said, so "said once"
+ * is the claim and this is what reads it.
+ */
+const spokenTimes = (): number =>
+  vi
+    .mocked(core.announce)
+    .mock.results.filter(
+      (result) => result.type === 'return' && result.value.kind === 'screen-off-risk',
     ).length;
 
 async function press(label: string): Promise<void> {
@@ -203,11 +224,14 @@ describe('the Ride screen — #647', () => {
     expect(notice?.classList.contains('oyl-status--warning')).toBe(true);
     expect(notice?.closest('details')).toBeNull();
     expect(notice?.querySelector('details')).toBeNull();
-    // After Pause / Stop in the document, so it costs them nothing on screen.
+    // Beside the Live group's heading (#693's review): first in the group,
+    // before the numbers and before Pause / Stop — `rideview.browser.spec.ts`
+    // §"#647" measures what that costs them, and what under them cost it.
+    expect(notice?.parentElement?.classList.contains('oyl-ride__heading')).toBe(true);
     const pause = queryAll<HTMLButtonElement>(document.body, 'button').find(
       (each) => each.textContent === 'Pause',
     );
-    expect(pause?.compareDocumentPosition(notice as Node)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(pause?.compareDocumentPosition(notice as Node)).toBe(Node.DOCUMENT_POSITION_PRECEDING);
   });
 
   it('says it through the ride’s one region, once, when announcements are on', async () => {
@@ -287,6 +311,55 @@ describe('the Ride screen — #647', () => {
     expect(current.asked).toHaveLength(2);
     expect(keepScreenOn()).toBeUndefined();
     expect(current.controller.getSnapshot().phase).toBe('recording');
+  });
+
+  it('is said once a higher sentence that took its window has been said — #693’s review', async () => {
+    // `announce.ts` holds ONE pending event and a higher one replaces it. Until
+    // #693's review this sentence was offered once, on the render it appeared,
+    // so a "Not released" arriving while it waited displaced it for good.
+    announcementsOn();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let now = 100;
+    const trainer = ridingSnapshot().trainer;
+    const region = (t: TrainerSnapshot, keepAliveFailed: boolean): JSX.Element => (
+      <RideAnnouncer
+        trainer={t}
+        workout={undefined}
+        keepAliveFailed={keepAliveFailed}
+        clock={() => now}
+      />
+    );
+    mounted = await mount(region(trainer, false));
+    // t = 100: something outranking it is said, and the window closes.
+    await mounted.rerender(region({ ...trainer, releaseFault: 'first' }, false));
+    expect(rideRegion()).toBe('Not released: first');
+    // t = 101: the refusal appears, and waits for the window.
+    now = 101;
+    await mounted.rerender(region({ ...trainer, releaseFault: 'first' }, true));
+    expect(rideRegion()).toBe('Not released: first');
+    // t = 102: a higher sentence arrives and takes its place.
+    now = 102;
+    await mounted.rerender(region({ ...trainer, releaseFault: 'second' }, true));
+    now = 103.5;
+    await act(async () => {
+      vi.advanceTimersByTime(3_000);
+      await Promise.resolve();
+    });
+    expect(rideRegion()).toBe('Not released: second');
+    // The next window: it is said now, and once.
+    now = 106.6;
+    await act(async () => {
+      vi.advanceTimersByTime(3_200);
+      await Promise.resolve();
+    });
+    expect(rideRegion()).toBe(RIDE_MAY_STOP_SPOKEN);
+    expect(spokenTimes()).toBe(1);
+    now = 120;
+    await act(async () => {
+      vi.advanceTimersByTime(20_000);
+      await Promise.resolve();
+    });
+    expect(spokenTimes()).toBe(1);
   });
 
   it('passes the accessibility audit with the notice standing', async () => {
@@ -411,18 +484,158 @@ describe('the game’s HUD — #647', () => {
       heard.push(hudRegion());
     }
     expect(heard).toContain(RIDE_MAY_STOP_SPOKEN);
-    // Handed over once — from the Ride screen's region never (it was not
-    // mounted), and from the HUD's once, not per window while it stands.
+    // SAID once — from the Ride screen's region never (it was not mounted),
+    // and from the HUD's once, not per window while it stands. Offered on
+    // every frame until then (#693's review), so the offers are not counted.
     await pump(20);
-    expect(handedOver()).toBe(1);
+    expect(spokenTimes()).toBe(1);
   });
 
   it('is not said with announcements off', async () => {
     await rideTheGame();
     await pump(20);
     expect(hudNotice()).toBeDefined();
-    expect(handedOver()).toBe(1);
+    // Offered — the apparatus — and never said.
+    expect(handedOver()).toBeGreaterThan(0);
+    expect(spokenTimes()).toBe(0);
     expect(hudRegion()).not.toContain(RIDE_MAY_STOP_WITH_SCREEN_OFF);
+  });
+
+  /**
+   * The HUD over a stub trainer port, for the two cases the real controller
+   * cannot stage: a higher sentence arriving on a frame of our choosing, and a
+   * second ride over a refusal that never clears. A workout owns the trainer,
+   * so each ride's first frame carries the road notice.
+   */
+  function refusedForGood(rescue: { current: WorkoutRescue | undefined }): GameTrainerPort {
+    return {
+      askForControlOnRide: () => Promise.resolve(),
+      workoutRescue: () => rescue.current,
+      recordingMayStop: () => true,
+      readTrainer: () =>
+        gameTrainerFrom(
+          { paired: true, controllable: true, canSimulate: true, hasControl: true },
+          {
+            setSimulationParameters: () => Promise.resolve(),
+            letGo: () => Promise.resolve({ kind: 'stopped' as const }),
+          } satisfies GradientTrainer,
+          true,
+        ),
+    };
+  }
+
+  const STALLED: WorkoutRescue = {
+    kind: 'floor',
+    reason: 'Pedalling has stopped, so the target has been dropped to the trainer’s lowest.',
+  };
+
+  async function rideOnce(): Promise<void> {
+    await press('Ride ');
+    await pump(1);
+  }
+
+  /** The region's text after each of `frames` frames. */
+  async function listen(frames: number): Promise<string[]> {
+    const heard: string[] = [];
+    for (let frame = 0; frame < frames; frame += 1) {
+      await pump(1);
+      heard.push(hudRegion());
+    }
+    return heard;
+  }
+
+  it('is said once a higher sentence that took its window has been said — #693’s review', async () => {
+    // `announce.ts` holds ONE pending event and a higher one replaces it.
+    // Until #693's review the HUD offered this once, on the frame after the
+    // road notice, so an "Eased" arriving while it waited displaced it for
+    // good and the ride never heard it.
+    announcementsOn();
+    const rescue: { current: WorkoutRescue | undefined } = { current: undefined };
+    mounted = await mount(
+      <GameView
+        port={PORT}
+        trainer={refusedForGood(rescue)}
+        renderer={() => Promise.resolve(RENDERER)}
+      />,
+    );
+    await settle();
+    await rideOnce();
+    expect(hudRegion()).toMatch(/^The road is not reaching your trainer/);
+    // The next frame offers it; the window is still closed, so it waits.
+    await pump(1);
+    rescue.current = STALLED;
+    // …and a workout's rescue, which outranks it, arrives behind it.
+    const heard = await listen(24);
+    const eased = heard.findIndex((each) => each.startsWith('Eased'));
+    const said = heard.indexOf(RIDE_MAY_STOP_SPOKEN);
+    expect(eased, heard.join(' | ')).toBeGreaterThanOrEqual(0);
+    expect(said, heard.join(' | ')).toBeGreaterThan(eased);
+    expect(spokenTimes()).toBe(1);
+  });
+
+  it('is said again on the next ride while the refusal still stands', async () => {
+    // A ride's start clears what the last ride said: a rider who ends one ride
+    // and starts another with the recording still refused has not been told
+    // on THIS ride. The refusal here never clears, so nothing else resets it.
+    announcementsOn();
+    mounted = await mount(
+      <GameView
+        port={PORT}
+        trainer={refusedForGood({ current: undefined })}
+        renderer={() => Promise.resolve(RENDERER)}
+      />,
+    );
+    await settle();
+    await rideOnce();
+    expect(await listen(12)).toContain(RIDE_MAY_STOP_SPOKEN);
+    expect(spokenTimes()).toBe(1);
+
+    await press('End ride');
+    await rideOnce();
+    expect(await listen(12)).toContain(RIDE_MAY_STOP_SPOKEN);
+    expect(spokenTimes()).toBe(2);
+  });
+
+  it('takes the road notice and its control off the HUD on the narrowest upright phones only — #693’s review', async () => {
+    // jsdom lays nothing out, so which window this is comes from `matchMedia`:
+    // `ride.browser.spec.ts` §"#647" measures why, and where the line is.
+    const narrow = { matches: true };
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query.includes('width < 25rem') && narrow.matches,
+      media: query,
+    }));
+    const refused = { current: true };
+    const port: GameTrainerPort = {
+      ...refusedForGood({ current: undefined }),
+      recordingMayStop: () => refused.current,
+    };
+    mounted = await mount(
+      <GameView port={PORT} trainer={port} renderer={() => Promise.resolve(RENDERER)} />,
+    );
+    await settle();
+    await rideOnce();
+    const toggle = (): HTMLButtonElement | undefined =>
+      queryAll<HTMLButtonElement>(document.body, 'button').find(
+        (each) => each.textContent === 'Trainer notice',
+      );
+    const road = (): Element | null => document.querySelector('#oyl-hud-standing-notice');
+    expect(hudNotice()?.textContent).toBe(SHOWN);
+    expect(road()).toBeNull();
+    expect(toggle()).toBeUndefined();
+
+    // The service comes up: the road notice is back, control and all.
+    refused.current = false;
+    await pump(1);
+    expect(road()).not.toBeNull();
+    expect(toggle()).toBeDefined();
+
+    // Refused again, on a wider window: nothing is taken off.
+    refused.current = true;
+    narrow.matches = false;
+    await pump(1);
+    expect(hudNotice()?.textContent).toBe(SHOWN);
+    expect(road()).not.toBeNull();
+    expect(toggle()).toBeDefined();
   });
 
   it('clears mid-ride once a sensor pairs and the second ask succeeds', async () => {

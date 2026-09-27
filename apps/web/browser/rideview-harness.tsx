@@ -141,11 +141,12 @@ const FLOOR: WorkoutRescue = {
 
 /**
  * `rideview.html?keepalive=failed` — #647: the platform refused to keep the
- * ride alive, so `RideControls` shows *"Keep the screen on: Your ride may stop
- * if the screen goes off."* under *Pause* / *Stop*. Through the stub's
+ * ride alive, so `RideView` shows *"Keep the screen on: your ride may stop if
+ * the screen goes off."* beside the Live group's heading. Through the stub's
  * snapshot for the reason {@link WORKOUT_STATE} is: this page measures where
- * the sentence lands; `RideView.test.tsx` §"#647" drives the real controller
- * with a refusing port and reads the same sentence off the screen.
+ * the sentence lands; `ride/keep-alive-notice.a11y.test.tsx` §"the Ride
+ * screen — #647" drives the real controller with a refusing port and reads the
+ * same sentence off the screen.
  */
 const KEEP_ALIVE_FAILED = new URLSearchParams(window.location.search).get('keepalive') === 'failed';
 
@@ -245,6 +246,8 @@ declare global {
       readonly growControlsTo: (pixels: number) => void;
       /** #647's control: the notice moved above Pause / Stop. @see noticeAboveControls */
       readonly noticeAboveControls: () => void;
+      /** #647's control: the notice moved under Pause / Stop. @see noticeUnderControls */
+      readonly noticeUnderControls: () => void;
     };
   }
 }
@@ -360,19 +363,39 @@ function growControlsTo(pixels: number): void {
 }
 
 /**
- * #647's control: the notice where `notificationNotice` sits — ABOVE *Pause* /
- * *Stop* — on the live element. #436's review measured what a line there
- * costs those two on a tablet; this is that cost, for this sentence.
+ * #647's first control: the notice where `notificationNotice` sits — ABOVE
+ * *Pause* / *Stop* — on the live element. #436's review measured what a line
+ * there costs those two on a tablet; this is that cost, for this sentence.
  */
 function noticeAboveControls(): void {
-  const notice = keepScreenOnElement();
-  const pause = [...document.querySelectorAll('.oyl-ride__group--live button')].find(
-    (each) => textOf(each) === 'Pause',
-  );
-  if (notice === undefined || pause === undefined) {
-    throw new Error('rideview harness: there is no keep-the-screen-on notice and Pause to move');
-  }
+  const { notice, pause } = keepScreenOnParts();
   pause.before(notice);
+}
+
+/**
+ * #647's second control — #693's review: the notice as that pull request
+ * first shipped it, UNDER *Pause* / *Stop*. Moved out of
+ * `.oyl-ride__heading` it is an ordinary status again, padding and all, and
+ * its own margin to the fold is the one the review found under 50 px.
+ */
+function noticeUnderControls(): void {
+  const { notice, stop } = keepScreenOnParts();
+  stop.after(notice);
+}
+
+function keepScreenOnParts(): {
+  readonly notice: Element;
+  readonly pause: Element;
+  readonly stop: Element;
+} {
+  const notice = keepScreenOnElement();
+  const buttons = [...document.querySelectorAll('.oyl-ride__group--live button')];
+  const pause = buttons.find((each) => textOf(each) === 'Pause');
+  const stop = buttons.find((each) => textOf(each) === 'Stop');
+  if (notice === undefined || pause === undefined || stop === undefined) {
+    throw new Error('rideview harness: there is no keep-the-screen-on notice, Pause and Stop');
+  }
+  return { notice, pause, stop };
 }
 
 /** The Eased notice's surface: the status with its disclosure, as laid out. */
@@ -535,6 +558,7 @@ async function run(): Promise<void> {
     restoreAsShipped,
     growControlsTo,
     noticeAboveControls,
+    noticeUnderControls,
   };
 }
 
@@ -550,5 +574,6 @@ run().catch((error: unknown) => {
     restoreAsShipped,
     growControlsTo,
     noticeAboveControls,
+    noticeUnderControls,
   };
 });

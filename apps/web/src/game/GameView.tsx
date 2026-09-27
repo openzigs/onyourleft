@@ -370,6 +370,36 @@ const WIND_PROBLEM_ID = 'oyl-game-wind-problem';
  */
 export const STANDING_NOTICE_SECONDS = 15;
 
+/**
+ * The upright phones whose ONE notice cell cannot hold #647's *"Keep the
+ * screen on"* and the road notice together — #693's review, finding N2.
+ *
+ * The column layout (`theme.css` §"WHERE THERE IS NO FREE CELL", 22.5 rem wide
+ * and up, 47 rem tall and up) narrower than 25 rem: 360×800, 360×752 and
+ * 390×844 among the viewports `ride.browser.spec.ts` measures. At the two
+ * 360s the pair, open, ran up to or over the leaning rider — between 11 px
+ * above and 2 px into the rider's box at 360×800, and 14 to 27 px into it at
+ * 360×752, across runs in the pinned Chromium on a Mac; 6 and 31 px into it
+ * on the CI runner. At 390×844 it ended 51 px above on the Mac: 1 px
+ * over the 50 px clearance, with the runner's fonts measured tighter than the
+ * Mac's at the 360s, so it is inside the line rather than argued over. At the
+ * tablet upright and on every landscape layout the pair clears everything,
+ * so there the road notice behaves exactly as it does without the refusal.
+ * `ride.browser.spec.ts` §"#647" measures both sides of this line, with the
+ * rule taken away as the control.
+ *
+ * A query rather than a measurement, because what decides it is the layout
+ * the stylesheet chose, and this is that layout's own condition narrowed.
+ */
+const ONE_NOTICE_ONLY_QUERY = '(min-width: 22.5rem) and (width < 25rem) and (min-height: 47rem)';
+
+/** Whether this window is one {@link ONE_NOTICE_ONLY_QUERY} names. `false` with no `matchMedia`. */
+function oneNoticeOnly(): boolean {
+  return (
+    typeof window.matchMedia === 'function' && window.matchMedia(ONE_NOTICE_ONLY_QUERY).matches
+  );
+}
+
 /** A ride on the stylised ladder, at its top — every ride that did not choose realism. */
 const STYLISED_START: WorldQualityState = { realistic: false, quality: INITIAL_QUALITY };
 
@@ -541,14 +571,19 @@ export function GameView(props: GameViewProps): JSX.Element {
    */
   const easedRef = useRef<string | undefined>(undefined);
   /**
-   * Whether the recording may stop with the screen off, as the loop last saw
-   * it — #647, `GameTrainerPort.recordingMayStop`. Cleared when a ride starts,
-   * so a refusal already standing is said ONCE as the ride begins, on the
-   * frame after the road notice's (the eased sentence's reason), and then not
-   * again while it stands: the road notice's rule for a condition the ride
-   * starts under, which the rider may not have heard on the Ride screen.
+   * Whether *"Keep the screen on: …"* has been SPOKEN on this ride while the
+   * refusal stands — #647, `GameTrainerPort.recordingMayStop`. Cleared when a
+   * ride starts, so a refusal already standing is said once as the ride
+   * begins (the road notice's rule for a condition the ride starts under,
+   * which the rider may not have heard on the Ride screen), and cleared when
+   * the refusal does, so one that comes back is said again.
+   *
+   * ⚠️ **SPOKEN, not offered — #693's review.** `announce.ts` holds one
+   * pending event and a higher one arriving replaces it, so a sentence offered
+   * once, on the frame it appeared, could be displaced by a climb ahead and
+   * never said. It is offered on every frame until the core returns it.
    */
-  const mayStopRef = useRef(false);
+  const mayStopSaidRef = useRef(false);
   /**
    * The side camera — #551. The hook is what re-renders the HUD when the
    * phone's state changes, including while the ride is paused and the loop is
@@ -900,7 +935,7 @@ export function GameView(props: GameViewProps): JSX.Element {
         notice === undefined ? undefined : `The road is not reaching your trainer: ${notice}`;
       gradientFaultRef.current = undefined;
       easedRef.current = undefined;
-      mayStopRef.current = false;
+      mayStopSaidRef.current = false;
       gradientRef.current =
         found.control === undefined
           ? undefined
@@ -1180,21 +1215,20 @@ export function GameView(props: GameViewProps): JSX.Element {
           announcerRef.current = withdrawPending(announcerRef.current, isEasedAnnouncement);
         }
       }
-      // #647: the ride may stop if the screen goes off — said when it appears,
-      // not per window while it stands, and taken back if the service comes up
-      // while the sentence waits. Not on the road notice's frame, for the
-      // eased sentence's reason above.
+      // #647: the ride may stop if the screen goes off — offered on every
+      // frame until it has been SAID once (@see mayStopSaidRef), never again
+      // while it stands, and taken back if the service comes up while the
+      // sentence waits. Not on the road notice's frame, for the eased
+      // sentence's reason above.
       const mayStop = trainerPortRef.current?.recordingMayStop() ?? false;
-      if (!noticeThisFrame && mayStop !== mayStopRef.current) {
-        mayStopRef.current = mayStop;
-        if (mayStop) {
-          events.push({ kind: 'screen-off-risk', text: RIDE_MAY_STOP_SPOKEN });
-        } else {
-          announcerRef.current = withdrawPending(
-            announcerRef.current,
-            (event) => event.kind === 'screen-off-risk',
-          );
-        }
+      if (!mayStop) {
+        mayStopSaidRef.current = false;
+        announcerRef.current = withdrawPending(
+          announcerRef.current,
+          (event) => event.kind === 'screen-off-risk',
+        );
+      } else if (!noticeThisFrame && !mayStopSaidRef.current) {
+        events.push({ kind: 'screen-off-risk', text: RIDE_MAY_STOP_SPOKEN });
       }
       if (slope.event !== undefined) events.push(slope.event);
       // #551: the side camera's link going, once, when it goes.
@@ -1222,6 +1256,9 @@ export function GameView(props: GameViewProps): JSX.Element {
       announcerRef.current = heard.state;
       if (heard.sentence !== undefined) {
         setAnnouncement(heard.sentence);
+      }
+      if (heard.kind === 'screen-off-risk') {
+        mayStopSaidRef.current = true;
       }
       // #400: the distance sound plays on the frame its SENTENCE is said and
       // on no other, so it is never the only carrier of a mark passed.
@@ -1485,21 +1522,27 @@ export function GameView(props: GameViewProps): JSX.Element {
   // the road notice was said at the start of the ride, and a target held at
   // the trainer's lowest is not a road being felt either way.
   // `ride.browser.spec.ts` §"#585" measures it at every overlay viewport.
-  const roadNotice = eased === undefined ? trainerRoadNotice(trainer, 'riding') : undefined;
+  //
+  // ⚠️ #647 — #693's review, N2: **the same, on the narrowest upright
+  // phones, while the ride may stop with the screen off.** That notice is
+  // never put away, and there the two together ran over the rider however the
+  // road notice got open — on its own for the first seconds of a ride, or by
+  // the rider's *Trainer notice* press. So there, and only there
+  // (@see ONE_NOTICE_ONLY_QUERY), the road notice and its control are off the
+  // HUD while the refusal stands, #585's trade: it was said at the start of
+  // the ride, it is about the hills rather than about the ride being lost, and
+  // it comes back the moment the recording service does. Everywhere else it
+  // behaves exactly as it does without the refusal.
+  const roadNotice =
+    eased === undefined && !(mayStop && oneNoticeOnly())
+      ? trainerRoadNotice(trainer, 'riding')
+      : undefined;
   // #437: open for the first STANDING_NOTICE_SECONDS of ride, then out of the
   // way unless the rider asks for it — on the RIDE's clock, so a paused ride
   // does not put away a notice nobody has had time to read.
-  //
-  // ⚠️ #647: **and not at all on its own while the ride may stop with the
-  // screen off.** That notice is never put away, and on an upright phone the
-  // two together ran over the rider — 2 px at 360×800, 14 px at 360×752 in the
-  // pinned Chromium (`ride.browser.spec.ts` §"#647"). So the road notice starts
-  // put away beside it, its *Trainer notice* control still on the HUD, and
-  // opens only when the rider asks: it was said at the start of the ride, and
-  // it is about the hills rather than about the ride being lost.
   const noticeOpen =
     noticeChoice === 'open' ||
-    (noticeChoice === 'auto' && !mayStop && (state?.elapsed ?? 0) < STANDING_NOTICE_SECONDS);
+    (noticeChoice === 'auto' && (state?.elapsed ?? 0) < STANDING_NOTICE_SECONDS);
   return (
     // ⚠️ **`oyl-game--riding` is the stage — #423.** `theme.css` makes it fill
     // the viewport and lays the HUD over the world. It is a modifier rather

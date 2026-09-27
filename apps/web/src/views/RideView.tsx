@@ -59,6 +59,7 @@ import type { RecoverableRide } from '../recording/recovery';
 import {
   canStartNewRide,
   KEEP_SCREEN_ON_LABEL,
+  rideInProgress,
   RIDE_MAY_STOP_WITH_SCREEN_OFF,
   type PairingRole,
   type RideController,
@@ -188,7 +189,24 @@ function LiveRide({
     // screen reader and the tab key meet everything in the order they did.
     <div className="oyl-ride">
       <div className="oyl-ride__group oyl-ride__group--live">
-        <h2>Live</h2>
+        <div className="oyl-ride__heading">
+          <h2>Live</h2>
+          {snapshot.keepAliveFailed && rideInProgress(snapshot.phase) ? (
+            // #647: the platform would not keep this ride alive, so it may be
+            // stopped with the screen off. BESIDE the heading rather than under
+            // Pause / Stop — #693's review measured the notice there ending
+            // 15.7 px above the fold on the owner's tablet in the shell and
+            // 3.7 px at 1024×720, and above them it put Pause under the fold;
+            // `theme.css` §`.oyl-ride__heading` has the table. Never put away:
+            // it is a safety sentence (the owner's ruling on #654's
+            // re-review), so it is the whole message and there is no
+            // disclosure. Not `live`: the ride's one region says it
+            // (`RideAnnouncer.tsx`). Gone the moment a later ask succeeds.
+            <StatusMessage tone="warning" label={KEEP_SCREEN_ON_LABEL}>
+              {RIDE_MAY_STOP_WITH_SCREEN_OFF}
+            </StatusMessage>
+          ) : null}
+        </div>
         <MetricGrid metrics={snapshot.metrics} />
 
         {/*
@@ -537,18 +555,6 @@ function RideControls({
           Stop
         </Button>
       )}
-      {snapshot.keepAliveFailed ? (
-        // #647: the platform would not keep this ride alive, so it may be
-        // stopped with the screen off. AFTER Pause / Stop rather than before
-        // them — #436's review measured what a line above those costs on a
-        // tablet — and never put away: it is a safety sentence (the owner's
-        // ruling on #654's re-review), so it is the whole message and there
-        // is no disclosure. Not `live`: the ride's one region says it once
-        // (`RideAnnouncer.tsx`). Gone the moment a later ask succeeds.
-        <StatusMessage tone="warning" label={KEEP_SCREEN_ON_LABEL}>
-          {RIDE_MAY_STOP_WITH_SCREEN_OFF}
-        </StatusMessage>
-      ) : null}
     </>
   );
 }
