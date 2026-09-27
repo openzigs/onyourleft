@@ -82,6 +82,7 @@ import { deviceStorage, type PreferenceStorage } from '../game/hud/announce-pref
 import type { MapPort } from '../map/port';
 import { trackGeometry, type TrackGeometry } from '../map/track';
 import { hrefFor, routeById } from '../shell/routes';
+import { ScrollTable } from '../design/ScrollTable';
 
 /**
  * The chart, loaded on demand.
@@ -493,8 +494,7 @@ export function ActivityDetailView({
       {laps.length === 0 ? (
         <p className="oyl-muted">This ride has no laps recorded.</p>
       ) : (
-        <table className="oyl-table">
-          <caption>Laps, in the order they were ridden</caption>
+        <ScrollTable className="oyl-table" caption="Laps, in the order they were ridden">
           <thead>
             <tr>
               <th scope="col">Lap</th>
@@ -515,7 +515,7 @@ export function ActivityDetailView({
               </tr>
             ))}
           </tbody>
-        </table>
+        </ScrollTable>
       )}
 
       {/*

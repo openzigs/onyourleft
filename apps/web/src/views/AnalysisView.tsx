@@ -35,6 +35,7 @@ import { StatusMessage } from '../design/StatusMessage';
 import { VisuallyHidden } from '../design/VisuallyHidden';
 import { formatDuration, formatPowerValue, formatStartedAt, POWER_UNIT } from '../format';
 import { hrefFor, routeById } from '../shell/routes';
+import { ScrollTable } from '../design/ScrollTable';
 
 /**
  * Training zones and duration personal bests (#78).
@@ -441,10 +442,14 @@ function ZoneTable({
           them mean anything about you.
         </StatusMessage>
       ) : undefined}
-      <table className="oyl-table">
-        <caption>
-          {heading}, from {thresholdLabel}. {ZONE_BOUNDARY_NOTE}
-        </caption>
+      <ScrollTable
+        className="oyl-table"
+        caption={
+          <>
+            {heading}, from {thresholdLabel}. {ZONE_BOUNDARY_NOTE}
+          </>
+        }
+      >
         <thead>
           <tr>
             <th scope="col">Zone</th>
@@ -475,7 +480,7 @@ function ZoneTable({
             </tr>
           ))}
         </tbody>
-      </table>
+      </ScrollTable>
       <p className="oyl-muted">
         Shares are of the {formatDuration(breakdown.time.covered)} the sensor actually reported.
         {coverage === undefined ? '' : ` ${coverage}`}
@@ -496,11 +501,15 @@ function BestsTable({ bests }: { readonly bests: LibraryBests }): JSX.Element {
   }
   return (
     <>
-      <table className="oyl-table">
-        <caption>
-          Best average power over each duration, across {String(bests.activitiesWithPower)} of the{' '}
-          {String(bests.activitiesRead)} rides on this device.
-        </caption>
+      <ScrollTable
+        className="oyl-table"
+        caption={
+          <>
+            Best average power over each duration, across {String(bests.activitiesWithPower)} of the{' '}
+            {String(bests.activitiesRead)} rides on this device.
+          </>
+        }
+      >
         <thead>
           <tr>
             <th scope="col">Duration</th>
@@ -518,7 +527,7 @@ function BestsTable({ bests }: { readonly bests: LibraryBests }): JSX.Element {
             </tr>
           ))}
         </tbody>
-      </table>
+      </ScrollTable>
       {bests.truncated ? (
         <StatusMessage tone="info">
           These are your bests across the {String(bests.activitiesRead)} most recent rides on this

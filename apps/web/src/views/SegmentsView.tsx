@@ -30,6 +30,7 @@ import {
 import { hrefForSegment } from '../shell/routes';
 import { useUnits } from '../units/context';
 import { formatSmallDistance, measurementText } from '../units/format';
+import { ScrollTable } from '../design/ScrollTable';
 
 /**
  * One text field of a submitted form.
@@ -368,8 +369,7 @@ export function SegmentsView({ port, match }: SegmentsViewProps): JSX.Element {
         ) : segments.length === 0 ? (
           <p className="oyl-muted">No segments yet. Make one from a ride above.</p>
         ) : (
-          <table className="oyl-data-table">
-            <caption>Segments on this device, newest first</caption>
+          <ScrollTable className="oyl-data-table" caption="Segments on this device, newest first">
             <thead>
               <tr>
                 <th scope="col">Name</th>
@@ -405,7 +405,7 @@ export function SegmentsView({ port, match }: SegmentsViewProps): JSX.Element {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </ScrollTable>
         )}
       </section>
 

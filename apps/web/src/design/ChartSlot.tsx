@@ -28,6 +28,8 @@
 
 import { Component, type ErrorInfo, type JSX, type ReactNode } from 'react';
 
+import { ScrollTable } from './ScrollTable';
+
 interface RenderBoundaryProps {
   readonly fallback: ReactNode;
   readonly children: ReactNode;
@@ -124,8 +126,7 @@ function DataTable({
     );
   }
   return (
-    <table className="oyl-data-table">
-      <caption>{caption}</caption>
+    <ScrollTable className="oyl-data-table" caption={caption}>
       <thead>
         <tr>
           {columns.map((column, index) => (
@@ -173,7 +174,7 @@ function DataTable({
           </tr>
         ))}
       </tbody>
-    </table>
+    </ScrollTable>
   );
 }
 

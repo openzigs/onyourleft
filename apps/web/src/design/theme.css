@@ -1125,6 +1125,8 @@ select {
      citation was not — a default-height select clears the AA minimum easily
      and is still a poor target on a phone in gloves, which is the device this
      product is used on. */
+  /* #660: an option as long as a ride's name must not widen the page. */
+  max-width: 100%;
   min-height: 2.75rem;
   padding: var(--oyl-space-sm) 2rem var(--oyl-space-sm) var(--oyl-space-sm);
   transition: border-color 120ms ease;
@@ -1237,6 +1239,90 @@ select option {
   flex-wrap: wrap;
   gap: var(--oyl-space-sm);
   margin: var(--oyl-space-md) 0;
+}
+
+/* The sort control's label sits beside it, centred on its 44 px box. */
+.oyl-library-controls:has(> select) {
+  align-items: center;
+}
+
+/*
+ * #660 — WCAG 2.2 SC 1.4.10 (Reflow). A data table may keep its columns on a
+ * phone only inside a box of its own that scrolls, never by making the page
+ * scroll sideways; `design/ScrollTable.tsx` is that box, and it is focusable
+ * and named so a keyboard can scroll it. `max-width` is what stops the table's
+ * minimum width pushing `main` wider than the window.
+ */
+.oyl-scroll-region {
+  max-width: 100%;
+  overflow-x: auto;
+  /* ⚠️ Load-bearing. A delete button's visually hidden ride name is
+     `position: absolute`, and an absolutely positioned box is clipped by a
+     scroll container only if that container is its containing block. Without
+     this the hidden text escaped the region and widened the PAGE — 137 px at
+     844×390, measured on this branch while the activity library was still a
+     table of unbreakable names, with the table itself scrolling correctly.
+     ⚠️ That figure does NOT reproduce on the shipped tree: with this line
+     removed every route in `reflow.browser.spec.ts`'s walk stays green,
+     because nothing it renders now puts hidden text past a region's edge. What
+     guards this line is that spec's POSITIVE control alone — the real
+     `ScrollTable` with hidden text at the far end of a 1200 px row — which
+     goes red with it removed (the page scrolls 966 px at 320×256, #683). */
+  position: relative;
+}
+
+/*
+ * A ride's name may break inside a word when nothing else fits — a place name
+ * like Llanfairpwllgwyngyll… is one word 480 px wide. `anywhere` rather than
+ * `break-word` because only `anywhere` lowers the cell's MINIMUM width, which
+ * is what lets the column give way instead of the table growing.
+ */
+.oyl-library__name {
+  overflow-wrap: anywhere;
+}
+
+/*
+ * The library on a narrow width — #660. One card per ride, in the order the
+ * table would list them; `library/layout.ts` says when. A `dl` of the four
+ * facts, each name above its value, two to a row where they fit.
+ */
+.oyl-activity-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oyl-space-sm);
+  list-style: none;
+  margin: var(--oyl-space-md) 0;
+  padding: 0;
+}
+
+.oyl-activity-card__name {
+  font-weight: 600;
+  margin: 0 0 var(--oyl-space-xs);
+}
+
+.oyl-activity-card__facts {
+  display: grid;
+  gap: var(--oyl-space-xs) var(--oyl-space-md);
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  margin: 0 0 var(--oyl-space-sm);
+}
+
+.oyl-activity-card__facts dt {
+  color: var(--oyl-color-ink-muted);
+  font-size: var(--oyl-font-size-sm);
+}
+
+.oyl-activity-card__facts dd {
+  margin: 0;
+}
+
+/*
+ * #660. Credits lists every shipped file by its path in `code`, and a path is
+ * one unbreakable word — 595 px of it in a 320 px phone. Any `code` in a view
+ * may break where it must rather than widen the page.
+ */
+.oyl-main code {
+  overflow-wrap: anywhere;
 }
 
 /*
