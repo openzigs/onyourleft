@@ -3093,14 +3093,19 @@ measured.
 Spike 0015's, with its corrections. `$ADB` as Part Z; the host commands run from the repository
 root. `RUN` names the run, for example `616-baseline-1`.
 
+⚠️ **If `adb devices` lists the tablet twice** — over USB and over Wi-Fi, which it does when
+`adb tcpip` has been used — every command fails with `more than one device/emulator`. Name one:
+`ADB="/path/to/adb -s <serial>"`, with `<serial>` the first column of `adb devices`. Do not write
+the serial or the address into a result row.
+
 | Step | What to do |
 |---|---|
 | AH1 | **Landscape, on charge, full brightness**, and the device awake with `"$ADB" shell svc power stayon true` |
 | AH2 | **Stop every other app**: close recent apps, and `"$ADB" shell am force-stop` any that `top` shows busy. The WebView renderer's CPU is read from `top` and cannot tell whose renderer it is |
-| AH3 | **Cool to ≤ 26 °C skin**: app stopped, screen OFF (on charge with the screen on, the skin settles near 26.5 °C), checking `VIRTUAL-SKIN` under `Current temperatures from HAL` every 30 s. Record how long it took |
-| AH4 | Record the skin **before** the app starts, start it, and open `realistic.html?world=realistic&panel=0&ladder=0&seconds=30&soak=21` — plus the run's `&layers=…` when a layer is off. `soak=21` because the page publishes minute N's line during minute N + 1 |
+| AH3 | **Start every run at 25–26 °C skin**: app stopped, screen OFF (on charge with the screen on, the skin settles near 26.5 °C), checking `VIRTUAL-SKIN` under `Current temperatures from HAL` every 30 s. Record how long it took. ⚠️ **A band, not a ceiling, since the #616 baselines**: this step said "≤ 26 °C", and the two baselines started at 20.9 °C (a tablet idle for hours) and 25.8 °C. Every other column agreed; skin at minute 20 differed by 1.6 °C because it follows the start. A tablet cooler than 25 °C is warmed first — screen on, app stopped, on charge — until it reads 25–26 °C |
+| AH4 | Record the skin **before** the app starts, **enlarge the log buffer** (`logcat -G 16M`, then `logcat -c`), start the app, and open `realistic.html?world=realistic&panel=0&ladder=0&seconds=30&soak=21` — plus the run's `&layers=…` when a layer is off. `soak=21` because the page publishes minute N's line during minute N + 1. ⚠️ The default buffer rolled over during the #616 baselines: one run kept minutes 1–19, the other 3–19, and neither kept the 30-second `OYL-REALISTIC` line |
 | AH5 | After 20 s, start the sampler for **1 200 s**. It takes `dumpsys meminfo` itself at 600 s (minute 10) |
-| AH6 | When it writes `done`, pull it, collect the page's lines, and summarise |
+| AH6 | When it writes `done`, **wait 60 s more**, then pull it, collect the page's lines, and summarise. In baseline 1 the page published minute 1 at 07:18:11 and minute 19 at 07:36:11, and the sampler wrote `done` just before 07:37:03, so minute 20 (due about 07:37:11) was never collected. Without the wait, `oyl.txt` stops at minute 19 |
 | AH7 | **Cool again (AH3) before the next run.** Two runs of the same configuration are two cool-downs |
 
 ```bash
@@ -3111,6 +3116,7 @@ OUT=runs/$RUN && mkdir -p "$OUT"
 "$ADB" shell dumpsys thermalservice > "$OUT/before.txt"
 # AH4: start the app and open the page.
 "$ADB" shell input keyevent KEYCODE_WAKEUP && "$ADB" shell wm dismiss-keyguard
+"$ADB" logcat -G 16M   # the default buffer loses the page's early lines over twenty minutes
 "$ADB" logcat -c
 "$ADB" shell monkey -p dev.openzigs.onyourleft -c android.intent.category.LAUNCHER 1
 PID=$("$ADB" shell pidof dev.openzigs.onyourleft)
@@ -3124,6 +3130,7 @@ sleep 20
 "$ADB" shell "nohup sh /data/local/tmp/realistic-sampler.sh 1200 'VRI-dev\.openzigs\.onyourleft/' /data/local/tmp/oyl/$RUN $PID > /dev/null 2>&1 &"
 # AH6: after twenty minutes and a little.
 until "$ADB" shell test -f "/data/local/tmp/oyl/$RUN/done"; do sleep 10; done
+sleep 60   # minute 20's page line is published a minute after the sampler stops
 "$ADB" pull "/data/local/tmp/oyl/$RUN/." "$OUT/"
 "$ADB" logcat -d | grep 'OYL-REALISTIC' > "$OUT/oyl.txt"
 node apps/mobile/tools/realistic-summary.mjs "$OUT"
@@ -3134,6 +3141,21 @@ node apps/mobile/tools/realistic-summary.mjs "$OUT"
 nothing: check `"$ADB" shell dumpsys SurfaceFlinger --list | grep onyourleft` and fix the pattern.
 ⚠️ The page's lines reach `logcat` under `Capacitor/Console`, not `chromium` (Part Z's correction):
 grep the whole log.
+
+**#506's AE1 and AE2 in the same session.** Both need the build this Part installs (the owner's page
+staged), which is why Part AE could not take them. Take them **after** the last AH run, so their load
+does not disturb a cool-down, and before the tablet is restored:
+
+- **AE1 can be taken here.** Hold the ride beside the first farmstead with
+  `location.href = '/harness/realistic.html?world=realistic&panel=0&ladder=0&at=1045'` (AA2's hold),
+  wait 30 s, and take Z6's `dumpsys` block. Record draw calls, triangles (the page's `OYL-REALISTIC`
+  line) and GPU p50 / p90 / p99 against AA3's 35 calls and 5 / 8 / 12 ms.
+- ⚠️ **AE2 cannot be taken on this page.** Its route has no village. `structuresAt` over the whole
+  route, run on `f91a5fb`, finds buildings at only two places: a house, a barn and a shed at
+  1 050–1 100 m, and a shed, a house and a barn at 3 700–3 800 m. Both are farmsteads, with no church
+  and no shops. AE2 needs a route with a village in the product, ridden with the realistic world
+  chosen in Settings, or a harness route that has one. That is a change to the page, not something
+  a session can do.
 
 ### What each column is
 
@@ -3171,9 +3193,9 @@ published figures (its run predates `oyl.txt`).
 | issue | run | build | layers | present p50 / p90 / **p95** / p99 ms | > 20 ms % | GPU mean / p50 / p90 MHz | skin before / start / min 20 °C | CPU app / WebView / **both** % | Graphics / GL mtrack MiB | triangles / frame | draw calls |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | spike 0015 | T20-three-realistic | `46c80c9` + spike patch | — | 16.63 / 16.66 / **16.68** / 16.75 | 0.12 | 707.8 / 701 / 848 | 25.6 / 27.2 / 32.8 | 87.8 / 74.9 / **162.7** | 419.3 / 308.2 | 266 742 | 32–37 |
-| #616 | baseline 1 | | | | | | | | | | |
-| #616 | baseline 2 | | | | | | | | | | |
-| #616 | **spread** (\|1 − 2\|) | | | | | | | | | | |
+| #616 | baseline 1 | `f91a5fb` + `realistic:stage` | — | 16.63 / 16.66 / **16.68** / 16.76 | 0.09 | 705.6 / 701 / 848 | 20.9 / 24.5 / 30.7 | 92.6 / 77.7 / **170.3** | 423.0 / 311.9 | 266 739 | 33 (32–37) |
+| #616 | baseline 2 | `f91a5fb` + `realistic:stage` | — | 16.63 / 16.66 / **16.68** / 16.75 | 0.11 | 707.7 / 701 / 848 | 25.8 / 29.1 / 32.3 | 92.6 / 74.8 / **167.4** | 419.5 / 308.4 | 266 741 | 33 (32–37) |
+| #616 | **spread** (\|1 − 2\|) | | | 0 / 0 / **0** / 0.01 | 0.02 | 2.1 (0.3 %) / 0 / 0 | 4.9 / 4.6 / **1.6** | 0 / 2.9 / **2.9** | 3.5 / 3.5 | 2 | 0 |
 | #619 | layer share | | `-sky` | | | | | | | | |
 | #619 | layer share | | `-surfaces` | | | | | | | | |
 | #619 | layer share | | `-vegetation` | | | | | | | | |
@@ -3186,7 +3208,46 @@ published figures (its run predates `oyl.txt`).
 | #619 | lever 2 before | | — ; `rung=1`, `levers=-texture-bias` | | | | | | | | |
 | #619 | lever 2 after | | — ; `rung=1` | | | | | | | | |
 
-**Phone (OEM, model, Android, WebView):** ______________  **Build:** ______________
+**Phone (OEM, model, Android, WebView):** Google Pixel Tablet, build `CP2A.260705.006`, Android 17,
+WebView 153.0.8010.36  **Build:** debug, `main` at **`f91a5fb`** (before #617's tree LODs, PR #637)
+with the owner's page staged, installed 2026-09-27. Baseline 1 ran 07:16–07:37, baseline 2
+07:39–07:59, taken by an agent over adb with nobody at the tablet and no trainer connected. Raw
+sampler output, `before.txt` and `oyl.txt` for each run are committed under
+[`runs/616-baseline-1/`](../../runs/616-baseline-1/) and [`runs/616-baseline-2/`](../../runs/616-baseline-2/).
+
+**What the two rows say, and what the spread is.**
+
+- **Present time, GPU clock, CPU, memory, triangles and draw calls agree.** Present p95 is
+  identical (16.68 ms), the GPU DVFS mean differs by 2.1 MHz (0.3 %), CPU *both* by 2.9 points of
+  a core, `GL mtrack` by 3.5 MiB. Every one of those is well inside #615's placeholder (±5 % GPU,
+  ±10 points CPU, +0.2 ms p95), so those placeholders are loose rather than tight: the measured
+  spread is the threshold from here on, as this Part says.
+- **Triangles and draw calls are a sequence by minute, not a constant**, and the sequence
+  reproduces: the per-minute `trianglesPerFrame` values of the two runs are the same numbers to
+  within two triangles (251 150, 257 3xx, … 271 389), and draw calls run 32–37 in both. The median
+  is 266 739 / 266 741, one pair of triangles apart. A change of more than a few triangles in this
+  column is therefore a change, as this Part claims — but "deterministic" holds per minute, and a
+  median over a different set of minutes (see the logcat finding below) could move by thousands.
+- ⚠️ **Skin is the one column that does not agree, and the spread in it is not noise.** Baseline 1
+  started from a tablet that had been idle for hours (20.9 °C); baseline 2 was cooled after
+  baseline 1 only to AH3's ≤ 26 °C (25.8 °C, 90 s screen-off). Skin at minute 20 then differs by
+  1.6 °C (30.7 against 32.3), and the rise over the run by 3.3 °C (9.8 against 6.5). AH3's
+  "≤ 26 °C" admits a 5 °C range of starting points, and minute-20 skin follows the start. A later
+  row should record its *skin before* and be compared against the baseline with the nearer start;
+  or AH3 should cool to a narrower band (for example 25–26 °C) than it does now.
+
+**What did not work as written.**
+
+- ⚠️ **`logcat` lost the page's early lines.** `oyl.txt` holds minutes 1–19 for baseline 1 and
+  only minutes 3–19 for baseline 2, and neither holds the 30-second `OYL-REALISTIC` line: the
+  default log buffer rolled over during twenty minutes. The per-minute figures reproduce, so the
+  medians still agree here, but a run should enlarge the buffer (`"$ADB" logcat -G 16M` before
+  `logcat -c`) or stream `logcat` to a file from the start.
+- **Minute 20 is never in `oyl.txt`.** The page publishes minute N during minute N + 1, counted from
+  when the page opened, and AH6 reads `logcat` as soon as the sampler writes `done`, about 20 min
+  20 s after the page opened. So `soak=21` yields at most minutes 1–19; waiting about 40 s more
+  before AH6's `logcat -d` would capture minute 20.
+- `adb` saw the tablet twice (USB and Wi-Fi), so every `"$ADB"` command needed `-s <serial>`.
 
 #### The #619 rows — what the realistic world costs the GPU, lever by lever
 
