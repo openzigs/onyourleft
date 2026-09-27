@@ -1421,8 +1421,10 @@ pnpm run build
 # them in a real headless Chromium through Playwright. ⚠️ **Two builds and two
 # preview servers since #408**: an offline claim about the PRODUCT cannot be
 # measured against the harness, so `playwright.config.ts` serves `dist` on 4320
-# beside `browser/dist` on 4319. One Playwright project and one CI job, because
-# a second job reports under a different context and could not block a merge.
+# beside `browser/dist` on 4319. One CI job, because a second job reports under
+# a different context and could not block a merge. ⚠️ Two Playwright PROJECTS
+# since #651 — `game`, first, and `chromium` — in one run and one browser; §4c
+# says why the game spec is first and why it is not split further.
 # This is the ONLY place in the
 # repository where a browser runs: jsdom implements no WebGL, so MapLibre
 # cannot be constructed in the Vitest suite at all, and three things are
@@ -1861,7 +1863,8 @@ making a client's typecheck depend on another package's authoring-time directory
 ### 4c. What CI runs, and what it deliberately does not
 
 [`.github/workflows/rules.yml`](.github/workflows/rules.yml) runs on every pull request and on every
-push to `main`. It runs **exactly** the §4a commands and nothing else: the eight bare-clone script
+push to `main`. It runs **exactly** the §4a commands and nothing else: `bash
+scripts/run-concurrently.test.sh`, the eight bare-clone script
 checks (`check-repo-rules`, `check-licence-hashes`, `check-env-example` and `check-doc-links`, each
 with its own fixture suite), `shellcheck scripts/*.sh`, then `pnpm install --frozen-lockfile`, `format:check`, `lint`,
 `typecheck`, `test:coverage`, `check:a11y-suite`,
@@ -1873,7 +1876,25 @@ with its own fixture suite), `shellcheck scripts/*.sh`, then `pnpm install --fro
 publishes the coverage table to the run summary and uploads the HTML report as an artefact.
 Those last two carry `if: always()` and cannot fail the job: the run where coverage moved
 unexpectedly is exactly the one whose table you want, and a reporting step that can fail a
-build is a percentage floor arriving by the back door, which §5 forbids. If CI ever needs a step this file does not list, **this
+build is a percentage floor arriving by the back door, which §5 forbids.
+
+⚠️ **Since [#651](https://github.com/openzigs/onyourleft/issues/651) two steps run several of those
+commands AT ONCE, and a reviewer who remembers one step per command is reading the old file.**
+`Bare-clone checks, concurrently` runs the eight script checks and `shellcheck`;
+`Workspace checks, concurrently` runs `format:check`, `lint`, `typecheck`, `check:wiring`,
+`check:cost-model`, `check:licences`, `build`, the browser install and five checker suites. Both go
+through `scripts/run-concurrently.sh` (§4a), which labels every line with its command, waits on
+each process by itself and fails the step if **any** command failed — its own suite runs first,
+because a runner that swallowed a failure would make each of those steps a gate removed and still
+look green, and #651's pull request proved it red on the runner with one formatting defect (run
+36325105846: `format:check` FAILED, the other twelve finished, the job failed). ⚠️ **Anything that
+runs Vitest stays out of both**, and so does `check:capacitor`: Vitest's 5 s case timeout is already
+within a second of several cases on the slower runner, and beside other work three of them passed
+it (run 36324592730) — `test:a11y` and `test:coverage` each run alone. And `test:coverage` and
+`test:browser` are **not** run together, though they are the two longest steps: run 36323764725 did
+it and both went red, because each is CPU-bound on its own.
+
+If CI ever needs a step this file does not list, **this
 file is wrong and gets fixed in the same PR**; CI must not accumulate private knowledge, because
 that is how a contributor's local green becomes CI's red with no explanation.
 
@@ -2215,7 +2236,7 @@ browser runs**.
 | `sidelink.html`, `sidelink-harness.ts`, `sidelink.browser.spec.ts` | since #529, the side-camera link paired end to end in the real engine: two peer connections in one page through the real offer and answer codes and the SDP `camera/side-link-sdp.ts` rebuilds, a start and a stop acknowledged across, and the offer drawn on a canvas and read back by the real reader. ⚠️ `playwright.config.ts` passes `--disable-features=WebRtcHideLocalIpsWithMdns` so the candidates are raw private addresses — the path spike 0012 found both Android WebViews take — rather than `.local` names a CI container may have no responder for. ⚠️ **Not two devices**, and not #541's packet capture |
 | `bend.html`, `bend-harness.ts`, `bend.browser.spec.ts` | since #543, a planner-sampled 20 m bend drawn by the real renderer and read back from **straight above** — a heading of nothing puts `cameraRig`'s eye over its target — with the road isolated the #440 way. Rays from the bend's centre find each edge; the edge is walked in 2 m chords and what is held to `MAXIMUM_CORRIDOR_JOINT_DEGREES` is the **kink**, a turn less its neighbours' mean, because a smooth inner edge turns 7° every two metres anyway. Its control is the road as drawn before #543 (`roadCorridor`'s `unsmoothed`), which must kink. `with-corridor.ts` rebuilds the ground and water around a swapped corridor, which the loop page needs too since #543: ground shaped for one road over another split 32 rows of it. ⚠️ Since #583 the sweep of rays starts on a ray that MISSES the road: it started at 0°, and #583's mirrored bend straddled 0° and read as two short edges (81.7° and 73.3° of turn) with nothing else wrong |
 | `insets.ts` | since #439, edge-to-edge safe-area insets applied to the ENGINE through `Emulation.setSafeAreaInsetsOverride`, so `env()` itself reports them, plus the one inset reading taken off the owner's tablet. Every #439 case also reads the insets back, so a Playwright bump that drops the protocol call fails rather than measuring a page with none |
-| `../playwright.config.ts` | Chromium only, no retries, the SwiftShader flags without which a GPU-less runner gives MapLibre no context at all — and since #408 **two `webServer` entries**, because the product and the harness are different builds |
+| `../playwright.config.ts` | Chromium only, no retries, the SwiftShader flags without which a GPU-less runner gives MapLibre no context at all — and since #408 **two `webServer` entries**, because the product and the harness are different builds. ⚠️ Since [#651](https://github.com/openzigs/onyourleft/issues/651) **two projects, `game` listed first**, and a `globalTimeout` (`GATE_BUDGET_MS`, ten minutes) so the gate stops itself and names what was running before the job's `timeout-minutes` cancels it in silence — a reviewer who remembers one `chromium` project is reading the old file. §4c says why, and what splitting the game further did |
 | `../vite.browser.config.ts` | the harness build. A second Vite config, so the harness cannot reach a shipped bundle |
 
 **Why it exists at all**, given that #48's suite already renders every route: **jsdom implements no

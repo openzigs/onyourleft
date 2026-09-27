@@ -205,25 +205,32 @@ export default defineConfig({
   ],
   // ⚠️ **A backstop, not a budget — #651.** @see GATE_BUDGET_MS
   globalTimeout: GATE_BUDGET_MS,
+  // ⚠️ **Every core the runner has — #651.** Playwright's default is half of
+  // them, which on the four-vCPU `ubuntu-latest` runner is two: the pages that
+  // measure a layout left the other two idle for about three minutes of every
+  // run. One worker per core instead. The game spec does not use them — it is
+  // one group (below) — so this is the other specs' speed-up and nothing else.
+  workers: '100%',
   // ⚠️ **Two projects, one browser, one run — #651, and the game spec is
-  // FIRST.** Playwright queues a project's groups in the order the projects
-  // are listed, and the game spec is one group — its shared harness (#456) is
-  // a worker fixture, so its four loads run one after another in one worker.
-  // Listed last, as it was, those loads came after everything else, so if they
-  // hung their budgets were added to the whole of the rest of the gate. Listed
-  // first, they run beside it, in the other worker, and a gate where every
-  // one of them hangs still ends inside `GATE_BUDGET_MS` naming each describe.
+  // LAST.** Playwright queues a project's groups in the order the projects are
+  // listed, and the game spec is one group — its shared harness (#456) is a
+  // worker fixture, so its four loads run one after another in one worker.
   //
-  // ⚠️ It does NOT make a green gate faster, and it was not for want of trying
-  // (#651): SwiftShader draws on the CPU and one load already uses every core
-  // the runner has. Splitting the four loads across two workers doubled each
-  // of them — `?realistic` 64 s to 145 s, `?realistic&trees` 79 s to 146 s,
-  // run 36325068145 — and made the plain page's load a second time besides.
+  // ⚠️ Last, because its loads draw on the CPU: SwiftShader rasterises there
+  // and one load already keeps every core busy. Listed FIRST, #651 ran them
+  // beside the other specs and they slowed by half or more — the plain page
+  // 34 s to 58 s, and `?shadow-map` past its 120 s budget (run 36326756014) —
+  // and splitting the four loads across two workers doubled each of them —
+  // `?realistic` 64 s to 145 s, `?realistic&trees` 79 s to 146 s, run
+  // 36325068145 — and made the plain page's load a second time besides. So
+  // they run after everything else, alone, and `game.browser.spec.ts`
+  // §`paysForTheRealisticLoad` is the arithmetic that fits a gate where every
+  // one of them hangs inside `GATE_BUDGET_MS`.
   //
   // Not a second browser and not a second job — one `playwright test`, one
   // Chromium, the one `Repository rules` check (CLAUDE.md §4c).
   projects: [
-    { name: 'game', testMatch: GAME_SPEC, use: devices['Desktop Chrome'] },
     { name: 'chromium', testIgnore: GAME_SPEC, use: devices['Desktop Chrome'] },
+    { name: 'game', testMatch: GAME_SPEC, use: devices['Desktop Chrome'] },
   ],
 });

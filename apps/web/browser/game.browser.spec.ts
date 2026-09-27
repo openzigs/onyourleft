@@ -648,8 +648,16 @@ async function harness(
  * draw calls draw a sixteenth of the pixels. The harness prints every phase
  * as it ends (`game-harness.ts` §`phaseEnds`), so the next load that outgrows
  * this says which phase grew.
+ *
+ * ⚠️ **It is 110 s since #651, not 150, and a reviewer who remembers 150 is
+ * reading the old file.** #651's issue asked for exactly this — "if the sum
+ * can't fit, lower the budgets" — and §`paysForTheRealisticLoad` is the sum.
+ * On the slower of the two runners CI lands on (an AMD EPYC 7763) the load
+ * took 64 s alone (run 36320822283), so 110 s is 1.7 times it.
  */
-const REALISTIC_LOAD_BUDGET_MS = 150_000;
+const REALISTIC_LOAD_BUDGET_MS = 110_000;
+/** `?realistic&trees` — 79 s alone on the same runner and run, so 1.5 times. */
+const TREES_LOAD_BUDGET_MS = 120_000;
 
 /**
  * Pays for the `?realistic` load in a `beforeAll` with its own budget — #607.
@@ -685,25 +693,33 @@ const REALISTIC_LOAD_BUDGET_MS = 150_000;
  * load no hook paid for: a hung one cost 60 s a case, down forty-five cases.
  *
  * What a hang costs now, and why it fits. The ledger (§`loadLedger`) makes a
- * hung load cost ONE budget per query per run, whichever describe paid it:
- * the plain page 90 s and `?shadow-map` 120 s (§`PLAIN_LOAD_BUDGET_MS`),
- * `?realistic` 150 s and `?realistic&trees` 150 s. The game spec is a project
- * of its own, listed first (`playwright.config.ts` §`projects`), so those
- * four run one after another in ONE worker from the start of the gate while
- * the other worker runs everything else: 90 + 120 + 150 + 150 = 510 s if
- * every one of them hung, plus a few seconds each to replace the worker
- * (measured below), inside the gate's own 600 s (`GATE_BUDGET_MS`). And the
- * gate cannot outlive the job: it starts 8m47s in on the slowest runner
- * measured, so 600 s ends it by 18m47s, inside `timeout-minutes: 20`.
+ * hung load cost ONE budget per query per run, whichever describe paid it.
+ * The game spec is a Playwright project of its own, listed LAST
+ * (`playwright.config.ts` §`projects`), so its four loads run one after
+ * another in one worker once the rest of the gate is done — about 200 s into
+ * it on the EPYC 7763. If every one of them hung:
+ *
+ *     75 + 100 + 110 + 120   the four budgets: plain, `?shadow-map`,
+ *                            `?realistic`, `?realistic&trees`
+ *   = 405 s
+ *   +  18 s                  replacing the worker four times (measured below)
+ *   + 200 s                  the rest of the gate, first
+ *   = 623 s                  inside the gate's own 630 (`GATE_BUDGET_MS`)
+ *
+ * and the gate cannot outlive the job: on that runner it starts 538 s in
+ * (run 36326756014), so 630 s ends it at 1 168 s — 32 s inside
+ * `timeout-minutes: 20`, with only the coverage upload after it. Each budget
+ * is still 1.5 to 2.2 times what its load took alone there.
+ *
  * Measured with every load made to hang and every budget cut to a tenth
  * (locally, `--project game`): 54 s of budgets took 71.7 s in all — four
  * `beforeAll` timeouts, each under its own describe, and every other case
  * failed at once by the ledger or marked "did not run". About eighteen
  * seconds of that is starting the servers and replacing the worker four
- * times, which does not shrink with the budgets: 510 + 18 is 528 of 600.
+ * times, which does not shrink with the budgets.
  */
-function paysForTheRealisticLoad(query = '?realistic'): void {
-  paysForTheLoad(query, REALISTIC_LOAD_BUDGET_MS);
+function paysForTheRealisticLoad(): void {
+  paysForTheLoad('?realistic', REALISTIC_LOAD_BUDGET_MS);
 }
 
 /**
@@ -711,14 +727,18 @@ function paysForTheRealisticLoad(query = '?realistic'): void {
  *
  * ⚠️ **Until #651 these two loads were paid inside the first case that asked,
  * under that case's 60 s**, which was a budget for a CASE standing in for one
- * for a LOAD. On the runner (run 36320822283) the plain load took 33.5 s and
- * `?shadow-map` 54.6 s — 5.4 s from its case's timeout. They are paid in hooks
- * of their own now, for #607's reason, at a little under three and a little
- * over two times what they took; the realistic loads keep #607's 150 s.
+ * for a LOAD. On the EPYC 7763 (run 36320822283) the plain load took 33.5 s
+ * and `?shadow-map` 54.6 s — 5.4 s from its case's timeout. They are paid in
+ * hooks of their own now, for #607's reason: 2.2 and 1.8 times those.
+ *
+ * ⚠️ **Alone, and that is measured**: the game spec runs after everything
+ * else (`playwright.config.ts` §`projects`). Run beside the rest of the gate,
+ * as #651 tried, the plain load took 58 s and `?shadow-map` passed 120 s
+ * (run 36326756014) — SwiftShader draws on the CPU the other worker is using.
  */
-const PLAIN_LOAD_BUDGET_MS = 90_000;
+const PLAIN_LOAD_BUDGET_MS = 75_000;
 /** @see PLAIN_LOAD_BUDGET_MS */
-const SHADOW_MAP_LOAD_BUDGET_MS = 120_000;
+const SHADOW_MAP_LOAD_BUDGET_MS = 100_000;
 
 /**
  * Pays for a load in a `beforeAll` under its own budget — #607, generalised by
@@ -2780,7 +2800,7 @@ test.describe('the realistic world — ADR 0026', () => {
  * the stylised world would be measuring trees with no middle level at all.
  */
 test.describe('the trees’ levels of detail in the realistic world — #617', () => {
-  paysForTheRealisticLoad(TREES_QUERY);
+  paysForTheLoad(TREES_QUERY, TREES_LOAD_BUDGET_MS);
 
   const trees = async (
     run: (query?: string) => Promise<HarnessRun>,

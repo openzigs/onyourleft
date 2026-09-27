@@ -9,6 +9,11 @@ export default defineConfig({
     // and `pnpm test` then run the same thing. Vitest 4 removed the separate
     // workspace file in favour of this field.
     projects: ['packages/*', 'apps/*'],
+    // ⚠️ **One worker per core — #651.** Vitest's default for `run` is one
+    // fewer than the cores, which on the four-vCPU `ubuntu-latest` runner is
+    // three, and the fourth core sat under a main process that is idle while
+    // the tests run. Measured on the runner before and after; see #651.
+    maxWorkers: '100%',
     coverage: {
       provider: 'v8',
       // `json-summary` is what the CI step renders into the run summary; `html`

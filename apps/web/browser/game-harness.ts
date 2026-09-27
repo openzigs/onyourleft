@@ -5160,6 +5160,7 @@ async function run(): Promise<void> {
           roadOnDescentPixel = readPixel(gl, at.x, at.y);
         }
         resourcesAfterAllFrames = resources();
+        phaseEnds('default: first sweep and read-backs');
 
         // ⚠️ **The same hundred frames again**, and the frames of this second
         // pass are deliberately not counted into {@link framesDrawn}. @see
@@ -5169,6 +5170,7 @@ async function run(): Promise<void> {
         view.render(withoutScenery);
         view.render(frameAt(ON_THE_DESCENT_METRES));
         resourcesAfterSecondSweep = resources();
+        phaseEnds('default: second sweep');
 
         // ------------------------------------------------ the light — #286
         //
@@ -5341,6 +5343,7 @@ async function run(): Promise<void> {
         // every later one whichever shading it was, and that is a warm-up, not
         // a cost. Throwing one away at each shading is what makes the rounds
         // below comparable to each other.
+        phaseEnds('default: light and pedalling');
         for (const settings of [lit, flat]) {
           view.setQuality(settings);
           void timeFrames(view, frameAt, gl);
@@ -5373,6 +5376,7 @@ async function run(): Promise<void> {
         // shading — see `frameMsNoise`. The larger of the two groups, because
         // the question is how much this measurement moves on its own.
         frameMsNoise = Math.max(range(litRounds), range(flatRounds));
+        phaseEnds('default: shading timing');
 
         view.destroy();
       });
@@ -5401,6 +5405,7 @@ async function run(): Promise<void> {
       // same browser, on the same frame, through the same view.
       await loadSceneryModels(() => Promise.reject(new Error('cleared for the control')));
       sceneryIndicesPlain = sceneryIndicesByKind(frame);
+      phaseEnds('default: models');
       await loadSceneryModels();
     }
   } catch (error: unknown) {
@@ -5416,6 +5421,7 @@ async function run(): Promise<void> {
     if (variantFrame !== null) {
       variantIndices = variantIndicesByKind(variantFrame);
       sceneryCallsByVariants = sceneryCallsAcrossRungs(variantFrame);
+      phaseEnds('default: variants');
     }
   } catch (error: unknown) {
     errors.push(error instanceof Error ? error.message : String(error));
@@ -5445,18 +5451,25 @@ async function run(): Promise<void> {
       }
     }
     // #458, on a canvas of its own. @see gradientProbe
+    phaseEnds('default: colours and shadow map');
     gradient = gradientProbe();
+    phaseEnds('default: gradient');
     // #459. @see waterProbe
     water = waterProbe();
+    phaseEnds('default: water');
     // #460. @see settlementProbe
     settlement = settlementProbe();
+    phaseEnds('default: settlement');
     // #424, on canvases of their own — @see riderExtent. 16 : 9 is the
     // criterion's own frame; 10 : 16 is a tablet held upright.
     riderFrame = { landscape: riderExtent(640, 360), portrait: riderExtent(400, 640) };
+    phaseEnds('default: rider extent');
     // #499, on a canvas of its own. @see lineProbe
     line = lineProbe(640, 360);
+    phaseEnds('default: line');
     // #583, on a canvas of its own. @see bendProbe
     bend = bendProbe(640, 360);
+    phaseEnds('default: bend');
   } catch (error: unknown) {
     errors.push(error instanceof Error ? error.message : String(error));
   }
@@ -5466,6 +5479,7 @@ async function run(): Promise<void> {
   try {
     if (probeFrame !== null && new URLSearchParams(location.search).has('shadow-map')) {
       presenceCost = await presenceCostProbe(probeFrame);
+      phaseEnds('default: presence cost');
     }
   } catch (error: unknown) {
     errors.push(error instanceof Error ? error.message : String(error));
@@ -5476,6 +5490,7 @@ async function run(): Promise<void> {
   try {
     if (new URLSearchParams(location.search).has('shadow-map')) {
       rideStart = await rideStartProbe();
+      phaseEnds('default: ride start');
     }
   } catch (error: unknown) {
     errors.push(error instanceof Error ? error.message : String(error));

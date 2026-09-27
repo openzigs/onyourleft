@@ -92,54 +92,25 @@ jobs:
       - name: Runner CPU
         run: |
           nproc
-          lscpu | grep -E 'Model name|^CPU\(s\)|MHz' || true
+          lscpu | grep -E 'Model name|^CPU\(s\)|Thread|Core|MHz' || true
           free -g
 
       # CLAUDE.md section 4a. Every command below is one that file documents;
       # CI accumulating private knowledge is how a contributor's local green
       # becomes CI's red with no explanation.
       #
-      # ⚠️ Three steps below run several §4a commands AT ONCE, through
-      # scripts/run-concurrently.sh (#651), and a reviewer who remembers one
-      # step per command is reading the old file. The job is one job on purpose
+      # ⚠️ One step below, `Checks, concurrently`, runs twenty-two §4a commands
+      # AT ONCE through scripts/run-concurrently.sh (#651), and a reviewer who
+      # remembers one step per command is reading the old file. The job is one job on purpose
       # -- see the Browser gate step -- so using more than one of the runner's
       # four CPUs means running commands side by side INSIDE a step. The runner
       # labels every line with the command it came from, waits on every process
       # by itself, fails the step if ANY command failed, and prints each failed
       # command's whole output again at the end. Its own suite runs first,
       # before anything is trusted to it: a runner that swallowed a failure
-      # would make every concurrent step a gate removed, and look green.
+      # would make that step twenty-two gates removed, and look green.
       - name: Concurrency runner tests
         run: bash scripts/run-concurrently.test.sh
-
-      # The bare-clone checks: bash and coreutils, no toolchain, all
-      # single-threaded, so they run side by side.
-      #
-      #   check-repo-rules -- LIC001-4, LIC006, SCOPE001, WF001, ADR001-4,
-      #   SPIKE001-3, REL001-2, XML001-4 and ASSET001-7, and its fixture suite.
-      #   check-licence-hashes -- LIC005. A silent edit to a licence text is a
-      #   licensing incident, not a typo, and it is the shape of diff a human
-      #   reviewer scrolls past.
-      #   check-env-example -- ENV001.
-      #   check-doc-links -- DOC001/DOC002. Relative links only: an external
-      #   URL is not checked, because that would need the network and turn a
-      #   bare-clone gate into one that fails on an aeroplane (CLAUDE.md §4a).
-      #   shellcheck -- preinstalled on the standard Ubuntu runner image (0.9.0
-      #   on ubuntu-24.04, which `ubuntu-latest` currently resolves to), so
-      #   there is nothing to install. The version is printed because the
-      #   runner's is older than a typical developer's and the two can disagree.
-      - name: Bare-clone checks, concurrently
-        run: >-
-          bash scripts/run-concurrently.sh
-          'check-repo-rules' 'bash scripts/check-repo-rules.sh'
-          'check-repo-rules tests' 'bash scripts/check-repo-rules.test.sh'
-          'check-licence-hashes' 'bash scripts/check-licence-hashes.sh'
-          'check-licence-hashes tests' 'bash scripts/check-licence-hashes.test.sh'
-          'check-env-example' 'bash scripts/check-env-example.sh'
-          'check-env-example tests' 'bash scripts/check-env-example.test.sh'
-          'check-doc-links' 'bash scripts/check-doc-links.sh'
-          'check-doc-links tests' 'bash scripts/check-doc-links.test.sh'
-          'shellcheck' 'shellcheck --version && shellcheck scripts/*.sh'
 
       # --- The workspace toolchain, from here down (CLAUDE.md section 4a) ------
 
@@ -220,10 +191,30 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
                      /etc/apt/sources.list.d/google-chrome.sources
 
-      # Every command here needs the install and none of them makes a timing
-      # assertion, so they run side by side (#651). Formatting, lint, the
-      # typecheck and most checkers are single-threaded; one after another they
-      # left most of the runner idle.
+      # None of these commands makes a timing assertion, so they run side by
+      # side (#651). Formatting, lint, the typecheck and most checkers are
+      # single-threaded; one after another they left most of the runner idle.
+      #
+      # ⚠️ The bare-clone checks are here too since #651, AFTER the install,
+      # though they need none of it. They were a concurrent step of their own
+      # before the install and took 48 s (run 36326756014), with the runner
+      # otherwise idle; here they run under the 106 s that lint, which is this
+      # step's longest command, takes anyway. They still need nothing but bash
+      # and coreutils, and `check:repo` still runs them on a bare clone.
+      #
+      #   check-repo-rules -- LIC001-4, LIC006, SCOPE001, WF001, ADR001-4,
+      #   SPIKE001-3, REL001-2, XML001-4 and ASSET001-7, and its fixture suite.
+      #   check-licence-hashes -- LIC005. A silent edit to a licence text is a
+      #   licensing incident, not a typo, and it is the shape of diff a human
+      #   reviewer scrolls past.
+      #   check-env-example -- ENV001.
+      #   check-doc-links -- DOC001/DOC002. Relative links only: an external
+      #   URL is not checked, because that would need the network and turn a
+      #   bare-clone gate into one that fails on an aeroplane (CLAUDE.md §4a).
+      #   shellcheck -- preinstalled on the standard Ubuntu runner image (0.9.0
+      #   on ubuntu-24.04, which `ubuntu-latest` currently resolves to), so
+      #   there is nothing to install. The version is printed because the
+      #   runner's is older than a typical developer's and the two can disagree.
       #
       #   format:check, lint, typecheck -- CLAUDE.md §4a.
       #
@@ -285,9 +276,18 @@ jobs:
       # is the Capacitor gate: it runs its own install and creates and removes
       # directories under apps/mobile/android, which does not belong under a
       # linter walking the same tree.
-      - name: Workspace checks, concurrently
+      - name: Checks, concurrently
         run: >-
           bash scripts/run-concurrently.sh
+          'check-repo-rules' 'bash scripts/check-repo-rules.sh'
+          'check-repo-rules tests' 'bash scripts/check-repo-rules.test.sh'
+          'check-licence-hashes' 'bash scripts/check-licence-hashes.sh'
+          'check-licence-hashes tests' 'bash scripts/check-licence-hashes.test.sh'
+          'check-env-example' 'bash scripts/check-env-example.sh'
+          'check-env-example tests' 'bash scripts/check-env-example.test.sh'
+          'check-doc-links' 'bash scripts/check-doc-links.sh'
+          'check-doc-links tests' 'bash scripts/check-doc-links.test.sh'
+          'shellcheck' 'shellcheck --version && shellcheck scripts/*.sh'
           'format:check' 'pnpm run format:check'
           'lint' 'pnpm run lint'
           'typecheck' 'pnpm run typecheck'
