@@ -3544,8 +3544,6 @@ export interface RealisticMeasurement {
    */
   readonly textureBiasReducedShare: number;
   readonly textureBiasTopShare: number;
-  /** #619: the same, for a stylised view forced to a bias of 1 — no stylised pixel may move. */
-  readonly textureBiasStylisedShare: number;
   /**
    * #478: the scenery items the realistic world drew for the same frame at the
    * top rung, and at a rung whose budget is `sceneryProbeBudget` — the line in
@@ -3703,7 +3701,6 @@ const NO_REALISTIC: RealisticMeasurement = {
   foliageOrderChangedPixels: 0,
   textureBiasReducedShare: 0,
   textureBiasTopShare: 0,
-  textureBiasStylisedShare: 0,
   sceneryProbeBudget: 0,
   sceneryDrawnTop: 0,
   sceneryDrawnBudgeted: 0,
@@ -4223,22 +4220,12 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   // #475: each view's last frame was its own world's. @see waterSkyOf
   const waterSkyRealistic = waterSkyOf(view);
   const waterSkyStylised = waterSkyOf(plain);
-  // #619: a stylised view forced to the bias the realistic world uses must
-  // draw the very same frame — no stylised material reads it.
-  const stylisedAt = (bias: number): Uint8Array => {
-    plain.setQuality({ ...qualitySettings(0), textureLodBias: bias });
-    plain.render(wooded);
-    plain.render(wooded);
-    return plainGl === null
-      ? new Uint8Array(0)
-      : readRegion(plainGl, 0, 0, plainCanvas.width, plainCanvas.height);
-  };
-  const stylisedUnbiased = stylisedAt(0);
-  const stylisedBiased = stylisedAt(1);
-  const textureBiasStylisedShare =
-    stylisedUnbiased.length === 0
-      ? 0
-      : pixelsChanged(stylisedUnbiased, stylisedBiased) / (stylisedUnbiased.length / 4);
+  // #619: there is deliberately no "stylised view forced to a bias" frame
+  // here. `render` writes 0 into the one shared bias uniform whenever a view
+  // draws the stylised world, so a stylised view at a rung of 1 never reaches
+  // a shader and such a comparison could not fail. What guards the stylised
+  // world is `realistic-renderer.test.ts` §"biases nothing the stylised world
+  // draws", at the material.
   plain.destroy();
 
   // D-3's step down: the stylised ladder's top, whole.
@@ -4290,7 +4277,6 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     foliageOrderChangedPixels,
     textureBiasReducedShare,
     textureBiasTopShare,
-    textureBiasStylisedShare,
     sceneryProbeBudget: REALISTIC_PROBE_BUDGET,
     sceneryDrawnTop,
     sceneryDrawnBudgeted,

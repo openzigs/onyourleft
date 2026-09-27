@@ -53,6 +53,8 @@ import { STRUCTURE_KINDS, type ScatterItem, type SceneryKind } from './scatter';
 import {
   isConstructedMaterial,
   loadRealisticWorld,
+  photographicGroundMaterial,
+  photographicRoadMaterial,
   prepareMiddleLevel,
   prepareRealisticShape,
   readsTextureLodBias,
@@ -1456,6 +1458,27 @@ describe('what the realistic world costs the GPU, lever by lever — #619', () =
     );
     expect(meshes.length).toBeGreaterThan(0);
     for (const mesh of meshes) expect(readsTextureLodBias(mesh.material as never)).toBe(false);
+  });
+
+  it('biases the photographic road and ground, the largest photographs in the world — lever 2', () => {
+    // A stand-in photograph: neither builder reads a texture before it compiles.
+    const photograph = { isTexture: true } as never;
+    const road = photographicRoadMaterial(photograph, photograph);
+    const ground = photographicGroundMaterial(photograph, photograph, { value: 1 }, { value: 1 });
+    for (const [name, material] of [
+      ['road', road],
+      ['ground', ground],
+    ] as const) {
+      expect(readsTextureLodBias(material), name).toBe(true);
+      // Taught in the shader too, not only recorded: the bias is the last
+      // thing the fragment is given, after the road's sheen and the ground's
+      // patchwork.
+      const { fragment, uniforms } = compiledFragment(material);
+      expect(fragment, name).toContain(
+        '#define texture2D(oylSampler, oylUv) texture(oylSampler, oylUv, oylTextureLodBias)',
+      );
+      expect(uniforms['oylTextureLodBias'], name).toBeDefined();
+    }
   });
 });
 

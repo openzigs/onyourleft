@@ -5542,7 +5542,7 @@ function variantOf(variant: number, shapes: number): number {
  * unfiltered texture shimmers (#425). Whether it does on the tablet is the
  * owner's check, in validation 0002 Part Z; nothing in CI can see shimmer.
  */
-function photographicRoadMaterial(colour: Texture, normal: Texture): MeshStandardMaterial {
+export function photographicRoadMaterial(colour: Texture, normal: Texture): MeshStandardMaterial {
   const material = constructed(
     new MeshStandardMaterial({
       vertexColors: true,
@@ -5644,7 +5644,7 @@ const PLANAR_UV = /* glsl */ `
  * for a tiling that reads as a grid at 150 m, and it keeps #460's field
  * patchwork (`withSurfaceDetail`) on top.
  */
-function photographicGroundMaterial(
+export function photographicGroundMaterial(
   colour: Texture,
   normal: Texture,
   fieldSpan: { value: number },
@@ -7598,7 +7598,6 @@ class ThreeGameView implements GameView {
     return this.#water.reflectedSky;
   }
 
-  /** Every mesh in the scene and what it wears — for the harness's D-11 check. @see sceneMaterialsOf */
   /** @see foliageOrderedOf */
   foliageOrdered(on: boolean): void {
     this.#realistic?.vegetation.setFoliageOrdered(on);
@@ -7648,6 +7647,7 @@ class ThreeGameView implements GameView {
     return drawn;
   }
 
+  /** Every mesh in the scene and what it wears — for the harness's D-11 check. @see sceneMaterialsOf */
   sceneMaterials(): readonly SceneMaterial[] {
     const found: SceneMaterial[] = [];
     this.#scene.traverse((node) => {

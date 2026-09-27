@@ -2430,7 +2430,7 @@ test.describe('the realistic world — ADR 0026', () => {
     expect(measured.foliageOrderChangedPixels).toBe(0);
   });
 
-  test('samples the photographs one mip coarser on the second rung only, and never the stylised world — #619 lever 2', async ({
+  test('samples the photographs one mip coarser on the second rung only — #619 lever 2', async ({
     harnessRun,
   }) => {
     const measured = await realistic(harnessRun);
@@ -2439,9 +2439,10 @@ test.describe('the realistic world — ADR 0026', () => {
     expect(measured.textureBiasReducedShare).toBeGreaterThan(0.01);
     // THE CONTROL: the top rung carries none, so taking it away changes nothing.
     expect(measured.textureBiasTopShare).toBe(0);
-    // And a stylised view forced to the realistic world's bias draws the same
-    // frame: no stylised pixel can move through it.
-    expect(measured.textureBiasStylisedShare).toBe(0);
+    // The stylised world is not checked here and cannot be: a view drawing it
+    // writes 0 into the shared bias, so forcing its rung to 1 reaches no
+    // shader. `realistic-renderer.test.ts` §"biases nothing the stylised world
+    // draws" holds it, at the material.
     console.log(
       `#619: a mip coarser changes ${(measured.textureBiasReducedShare * 100).toFixed(1)} % of the ` +
         `second realistic rung's wooded frame; foliage ${String(measured.foliageOrder.cut)} cut draws ` +
