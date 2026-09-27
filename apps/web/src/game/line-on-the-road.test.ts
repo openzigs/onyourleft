@@ -118,7 +118,9 @@ describe('the rider rides the line — #499', () => {
     const frame = frameOf(hairpin, stateAt(hairpin, APEX, 8));
     const rider = markerOf(frame, 'rider');
     const expected = lineOffsetAt(racingLine(hairpin), APEX);
-    expect(expected).toBeLessThan(-2);
+    // The hairpin turns right, and the apex is on its inside: the normal's
+    // side since #583, the other one before it.
+    expect(expected).toBeGreaterThan(2);
     expect(across(frame, rider, APEX)).toBeCloseTo(expected, 6);
   });
 
@@ -131,7 +133,8 @@ describe('the rider rides the line — #499', () => {
       leanAt(racingLine(hairpin), APEX, 8),
       12,
     );
-    expect(rider.lean).toBeLessThan(-0.1);
+    // Into a right-hand bend: toward the normal, positive, since #583.
+    expect(rider.lean).toBeGreaterThan(0.1);
   });
 
   it('is upright at rest, whatever the bend', () => {

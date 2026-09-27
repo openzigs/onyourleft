@@ -283,7 +283,10 @@ export interface TerrainMesh {
   /**
    * How many cross-sections there are: the corridor's own centreline points.
    * Vertex `(row, side, column)` is at `row · 2 · columns + side · columns +
-   * column`, side 0 the left and 1 the right, column 0 the road's edge.
+   * column`, side 0 the normal's — the RIGHT, since #583 — and 1 the left,
+   * column 0 the road's edge. ⚠️ Side 0 was called the left until #583, when
+   * the world was a mirror of its map and the normal pointed at the map's
+   * left; on the screen it was always the right.
    */
   readonly rows: number;
   /** Indices a band spends, both sides, every row: for a draw range. */
@@ -372,8 +375,9 @@ const HORIZON_SAMPLE_LIMIT = 256;
  * there stands on.
  *
  * `routeDistance` is where on the route the point is BESIDE, and
- * `signedLateral` how far from the centreline, left positive — the frame
- * `terrain.ts` builds the road's columns in. Piecewise-linear across
+ * `signedLateral` how far from the centreline, positive on the normal's side
+ * — the RIGHT, since #583 — the frame `terrain.ts` builds the road's columns
+ * in. Piecewise-linear across
  * {@link TERRAIN_COLUMN_OFFSETS}, which is what the mesh is, so a tree placed at
  * this height stands on the triangles the renderer draws rather than on a
  * smoother surface nobody sees. `landform.test.ts` samples the mesh itself to
@@ -763,7 +767,7 @@ function groundHeight(
 
 /**
  * How far each row's ground may reach on each side before a bend folds it —
- * two numbers a row, left then right.
+ * two numbers a row, the normal's side (the right, since #583) then the other.
  *
  * The turn is read from the corridor's own normals either side of the row, so
  * it is the bend the road is actually drawn round.
@@ -794,17 +798,19 @@ function foldReach(
     const az = normals[row * 2 + 1] as number;
     const bx = normals[(row + 1) * 2] as number;
     const bz = normals[(row + 1) * 2 + 1] as number;
-    // Positive when the road turns toward its left normal: the left is inside.
+    // Positive when the road turns toward its normal: that side is inside.
     const turn = Math.atan2(ax * bz - az * bx, ax * bx + az * bz);
     const curvature = turn / apart;
     if (curvature === 0) {
       continue;
     }
     const limit = BEND_FOLD_SHARE / Math.abs(curvature);
-    // ⚠️ The sign convention is `terrain.ts`'s: the normal is the LEFT one, and
-    // a left-hand bend turns it anticlockwise in this x-east, z-north plane —
-    // a POSITIVE cross product, so the left side is the inside.
-    // `landform.test.ts` folds a left and a right bend to pin which is which.
+    // ⚠️ The sign convention is `terrain.ts`'s: the normal is `(−z, x)` of
+    // the heading — the rider's RIGHT, on the screen and, since #583, on the
+    // map — and a bend toward it is a POSITIVE cross product, so side 0 is the
+    // inside. It was called the LEFT normal until #583, when the world was a
+    // mirror of its map. `landform.test.ts` §"folds the inside of a bend in,
+    // on the correct side" pins which is which.
     // Written on the pair's first row only: {@link steadied} takes each row's
     // reach down to the least of its neighbours', which carries it to the
     // second.
@@ -1030,7 +1036,8 @@ function terrainIndices(rows: number): Uint32Array {
         const c = a + perRow;
         const d = c + 1;
         // ⚠️ **Wound per side, so every triangle faces UP.** The two sides are
-        // mirror images — the columns run left on one and right on the other —
+        // mirror images — the columns run one way on one and the other way on
+        // the other —
         // so one winding for both puts one side's faces towards the ground,
         // where a front-face-culled material does not draw them at all. The
         // first browser run of #458 found exactly that: the left hillside hid

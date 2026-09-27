@@ -131,8 +131,10 @@ export interface RiderMarker {
   readonly headingZ: number;
   /**
    * How far the BICYCLE leans, in radians from upright — #499. Positive leans
-   * its top toward the road's own normal, `(−headingZ, headingX)` — the side
-   * `terrain.ts` calls left — which is the side a bend toward that normal
+   * its top toward the road's own normal, `(−headingZ, headingX)` — the
+   * rider's RIGHT, on the screen and, since #583, on the map (it was called
+   * the left until #583 made the map agree) — which is the side a bend toward
+   * that normal
    * turns to, so a rider always leans INTO the bend. The renderer rolls the
    * bicycle and whoever is on it about the line between its two tyre contacts.
    *

@@ -29,6 +29,7 @@ import { HARNESS_ORIGIN } from '../playwright.config';
 import { MINIMUM_RIDER_FRAME_SHARE, riderFrameBox } from '../src/game/camera';
 
 import type {
+  BendMeasurement,
   LineMeasurement,
   NearFieldMeasurement,
   PresenceCostMeasurement,
@@ -95,6 +96,7 @@ interface GameHarnessResult {
     readonly straightOn: LineMeasurement;
     readonly straightOff: LineMeasurement;
   };
+  readonly bend: { readonly right: BendMeasurement; readonly mirrored: BendMeasurement };
   readonly nearField: NearFieldMeasurement;
   readonly resourcesAfterFirstFrame: number;
   readonly resourcesAfterAllFrames: number;
@@ -2378,6 +2380,11 @@ test.describe('the rider rides a line and leans on it — #499', () => {
     const roll = on.topShift - onUpright.topShift;
     expect(Math.abs(roll)).toBeGreaterThan(0.01);
     expect(Math.sign(roll)).toBe(Math.sign(on.centre - 0.5));
+    // #583: the hairpin turns RIGHT on the map, so its inside — where the apex
+    // puts the rider — is the RIGHT of the screen. Until #583 the world was a
+    // mirror of its map and this read 22.1 %, on the left; the sign checks
+    // above are symmetric and passed either way.
+    expect(on.centre).toBeGreaterThan(0.6);
   });
 
   /**
@@ -2405,6 +2412,48 @@ test.describe('the rider rides a line and leans on it — #499', () => {
     expect(Math.abs(straightOff.centre - 0.5)).toBeLessThan(0.02);
     // The rider on the line: right of the middle, by a lane's worth.
     expect(straightOn.centre - 0.5).toBeGreaterThan(0.08);
+  });
+});
+
+/**
+ * Which way a bend turns on the screen — #583.
+ *
+ * `plan-agrees-with-world.test.ts` holds the arithmetic: the drawn road put
+ * through the camera's own axes turns the way the HUD's plan does. What it
+ * cannot say is how THREE draws those axes — which side of a frame is a
+ * camera's right is the renderer's handedness, and a world stated in one
+ * handedness and drawn in the other is a mirror with every unit test green.
+ * That is exactly how #583 happened, so it is read here off a drawing buffer.
+ */
+test.describe('a bend to the right on the map is a bend to the right on the screen — #583', () => {
+  test('draws the right-hand hairpin turning right, and its mirror — the pre-#583 drawing — turning left', async ({
+    harnessRun,
+  }) => {
+    const { right, mirrored } = (await harness(harnessRun)).bend;
+    const describeBend = (name: string, bend: typeof right): string =>
+      `${name}: near road at ${(bend.nearCentre * 100).toFixed(1)} %, far road at ` +
+      `${(bend.farCentre * 100).toFixed(1)} % of the width, ${String(bend.pixels)} road pixels`;
+    console.info(
+      `#583 ${describeBend('right-hand', right)}; ${describeBend('mirrored', mirrored)}`,
+    );
+    // Non-vacuity: a frame with no road "turns" nowhere.
+    for (const each of [right, mirrored]) {
+      expect(each.pixels).toBeGreaterThan(5_000);
+    }
+    // The right-hand bend: its far road is right of its near road, and right
+    // of the frame's middle.
+    expect(right.farCentre - right.nearCentre, describeBend('right-hand', right)).toBeGreaterThan(
+      0.05,
+    );
+    expect(right.farCentre).toBeGreaterThan(0.5);
+    // The control — the same bend drawn as every build before #583 drew it —
+    // turns LEFT. Without it, the two assertions above would be equally true
+    // of a measure that could not tell a mirror from a map.
+    expect(
+      mirrored.farCentre - mirrored.nearCentre,
+      describeBend('mirrored', mirrored),
+    ).toBeLessThan(-0.05);
+    expect(mirrored.farCentre).toBeLessThan(0.5);
   });
 });
 
@@ -2590,6 +2639,48 @@ test.describe('the realistic world — ADR 0026', () => {
     );
     // And the photograph reached the GPU: this world samples textures.
     expect(measured.texturesCreated).toBeGreaterThan(5);
+  });
+
+  test('draws the canopy after the opaque world, and the frame is the same picture — #619 lever 1', async ({
+    harnessRun,
+  }) => {
+    const measured = await realistic(harnessRun);
+    const { foliageOrder: ordered, foliageOrderControl: control } = measured;
+    // Non-vacuity: the wooded frame has leaves AND an opaque world to order.
+    expect(ordered.cut).toBeGreaterThan(0);
+    expect(ordered.opaque).toBeGreaterThan(0);
+    // Every alpha-tested leaf and billboard after the last opaque draw…
+    expect(ordered.cutBeforeOpaque).toBe(0);
+    // …where the CONTROL — the order three chose unasked, materials first —
+    // drew some of the canopy before the ground, the road or a house. Without
+    // it, "no leaf before the opaque world" could be a frame that happened to
+    // put them there anyway.
+    expect(control.cutBeforeOpaque).toBeGreaterThan(0);
+    expect(control.cut).toBe(ordered.cut);
+    // And the order is a cost, never a picture: the depth test keeps the
+    // nearest fragment whichever arrives first.
+    expect(measured.foliageOrderChangedPixels).toBe(0);
+  });
+
+  test('samples the photographs one mip coarser on the second rung only — #619 lever 2', async ({
+    harnessRun,
+  }) => {
+    const measured = await realistic(harnessRun);
+    // The second realistic rung carries the bias, and the shaders read it:
+    // taking it away changes the picture.
+    expect(measured.textureBiasReducedShare).toBeGreaterThan(0.01);
+    // THE CONTROL: the top rung carries none, so taking it away changes nothing.
+    expect(measured.textureBiasTopShare).toBe(0);
+    // The stylised world is not checked here and cannot be: a view drawing it
+    // writes 0 into the shared bias, so forcing its rung to 1 reaches no
+    // shader. `realistic-renderer.test.ts` §"biases nothing the stylised world
+    // draws" holds it, at the material.
+    console.log(
+      `#619: a mip coarser changes ${(measured.textureBiasReducedShare * 100).toFixed(1)} % of the ` +
+        `second realistic rung's wooded frame; foliage ${String(measured.foliageOrder.cut)} cut draws ` +
+        `after ${String(measured.foliageOrder.opaque)} opaque, against ` +
+        `${String(measured.foliageOrderControl.cutBeforeOpaque)} before an opaque draw unasked`,
+    );
   });
 
   test('turns the realistic rider’s legs with the cranks, and holds them when the cadence goes — #369, #349', async ({

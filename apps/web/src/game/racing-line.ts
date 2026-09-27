@@ -31,7 +31,8 @@
  * authors' reference implementation was not opened (CLAUDE.md §6).
  *
  * Each profile sample `i` is moved sideways by `offset[i]` along the road's
- * own left normal `Nᵢ`, so the line's point is `Pᵢ = Cᵢ + offset[i]·Nᵢ`, and
+ * own normal `Nᵢ` — its RIGHT, on the map and on the screen, since #583 — so
+ * the line's point is `Pᵢ = Cᵢ + offset[i]·Nᵢ`, and
  * `κₖ` is the line's own curvature at `Pₖ` — the turn between its two chords
  * over their mean length. What is minimised is
  *
@@ -177,17 +178,20 @@ const LINE_SETTLE_METRES = 50;
  * Which side of the road a rider keeps to, as a sign on the road's own normal:
  * **+1**, the normal's side — the owner's *"right side, for now"* (#546).
  *
- * ⚠️ **The normal's side is the rider's RIGHT on the screen**, although
- * `terrain.ts` calls it left. The corridor puts east on `+x` and north on
- * `+z` with `+y` up, which is a mirror of a map in a right-handed renderer:
- * a camera behind a rider heading north sees `−x`, west, on its right, and the
- * normal `(−headingZ, headingX)` there is `(−1, 0)`. So the side named here is
- * held to what the owner sees by `game.browser.spec.ts` §"#546", which reads
- * the rider back on a straight and requires it right of the frame's middle —
- * not by this comment, which is an argument about a handedness. ⚠️ The same
- * handedness draws every route as a MIRROR of its map — #583, filed from this
- * issue — and whichever way #583 is fixed, that browser case is what says this
- * constant still names the screen's right.
+ * ⚠️ **The normal's side is the rider's RIGHT — on the screen and, since #583,
+ * on the map.** A camera behind a rider heading north with `+y` up has `−x` on
+ * its right in a right-handed renderer, and the normal `(−headingZ, headingX)`
+ * there is `(−1, 0)`. Since #583 `−x` is EAST (`terrain.ts`
+ * §`localGroundPosition`), which is the map's right going north. ⚠️ **Until
+ * #583 `−x` was WEST**: the corridor put east on `+x`, the world was drawn as a
+ * mirror of its map, and this comment said the normal was the screen's right
+ * "although `terrain.ts` calls it left" — a reviewer who remembers that is
+ * reading the old file. #583 moved the projection and not this constant: the
+ * normal was always the screen's right, and is now the map's too. What holds
+ * it to what the owner sees is `game.browser.spec.ts` §"#546", which reads the
+ * rider back on a straight right of the frame's middle, and §"#583", which
+ * reads a bend to the right on the map turning right on the screen — not this
+ * comment, which is an argument about a handedness.
  */
 export const ROAD_SIDE: 1 | -1 = 1;
 
@@ -255,13 +259,48 @@ const LENGTH_WEIGHT = 1e-4;
 const PEAK_EXPONENT = 8;
 
 /**
- * How many Gauss-Newton steps the line takes: **40**. Every fixture in
- * `racing-line.test.ts` has stopped moving by then, and a test holds a 41st
+ * How many Gauss-Newton steps the line takes: **80**. Every fixture in
+ * `racing-line.test.ts` has stopped moving by then, and a test holds one more
  * step to under a millimetre. It was 30 until #546: with the late-apex weights
  * a 31st step still moved a fixture's line by 1.6 mm; at 20 (#499) a 10 m
  * hairpin was still settling.
+ *
+ * ⚠️ **It was 40 until #640, and 40 was not converged on a loop whose bends
+ * turn toward the home side.** On `stadiumRoute(30)` — two right-hand 180°
+ * bends, home on their INSIDE — the steps do not settle, they CYCLE: from the
+ * seventh step to the forty-sixth the line moves 1.1 to 1.9 m a step, round a
+ * cycle of about four steps whose peak curvature sits at 0.037 per metre, with
+ * the peak hopping between the two bends. At the forty-seventh it leaves the
+ * cycle and settles geometrically on a line whose peak is 0.032, the one a
+ * 400-step solve reaches. The line drawn at 40 was a point on that cycle:
+ * 1.48 m from the 41st step's, and 1.2 m from the 400-step line. Measured
+ * 2026-09-27; nothing before #583 rode that fixture this way round, because
+ * the world was a mirror of its map until then.
+ *
+ * ⚠️ **What 80 rests on is a sweep, not a proof.** 88 fixtures — stadiums
+ * of 8 to 80 m, circuits of 20 to 100 m, corners of 45°, 90° and 135° at 8
+ * to 40 m, hairpins and S-bends of 10 to 30 m and the planner route, each in
+ * both hands — were solved at 40, at 80 and at 600 steps. At 40, seven of them
+ * moved more than a millimetre on the next step; at 80, none did, the worst
+ * moving 0.26 mm (a 20 m right-hand S-bend) and none lying further than
+ * 0.14 mm from its 600-step line. Where the cycle ends is not something this
+ * solve controls, so a route that stays on one longer than 80 steps would
+ * still be drawn from the cycle — on the road and within the limit, but not
+ * the least-peak line.
+ *
+ * ⚠️ **A damped step was tried and lost.** Halving the step whenever it moved
+ * the line no less than the one before (down to a quarter, or a half) settled
+ * this stadium inside 40 steps, but the rule also fired on fixtures that were
+ * converging, left six of the 88 still moving at 40, and sent a 12 m stadium
+ * to a line 4.1 m from where the undamped solve settles. Doubling the steps
+ * doubles the cost instead: the 1 000 km route in `racing-line.test.ts`
+ * §"its cost" went from 0.69 s to 1.29 s.
+ *
+ * Exported so that `racing-line.test.ts` takes a solve of this many steps and
+ * one more, and times a solve of this many: a change here is the change it
+ * measures, rather than a literal the test keeps apart.
  */
-const GAUSS_NEWTON_STEPS = 40;
+export const GAUSS_NEWTON_STEPS = 80;
 
 /**
  * How many active-set rounds one Gauss-Newton step may take: **3**. The set is
@@ -692,7 +731,8 @@ function solveLine(profile: RouteProfile, steps: number): RacingLine {
 }
 
 /**
- * The road's left normal at each sample, from the two samples either side.
+ * The road's normal at each sample — its right, since #583 — from the two
+ * samples either side.
  * A sample with no direction — two identical positions — keeps the last one.
  */
 function sampleNormals(xs: Float64Array, zs: Float64Array, loop: boolean): Float64Array {
@@ -709,7 +749,7 @@ function sampleNormals(xs: Float64Array, zs: Float64Array, loop: boolean): Float
     const length = Math.hypot(dx, dz);
     if (length > 0) {
       // The same perpendicular `terrain.ts` §`ribbonNormals` takes, so the
-      // line's "left" and the road's are one side.
+      // line's positive side and the road's are one side — the right.
       normalX = -dz / length;
       normalZ = dx / length;
       if (firstReal === -1) firstReal = index;

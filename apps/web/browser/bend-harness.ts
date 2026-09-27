@@ -120,8 +120,13 @@ function overTheBend(unsmoothed: boolean): SceneFrame {
     // A heading of nothing puts the eye straight over the target — `camera.ts`
     // §`cameraRig` offsets both along the heading — so the camera looks
     // straight down on the bend's centre. The fixture is level at 0 m.
+    // ⚠️ `x` is WEST since #583 (`terrain.ts` §`localGroundPosition`), and the
+    // fixture's origin is its start, so a centre `centreEast` metres east of
+    // it stands at `x = −centreEast`. With the sign left positive, it looks down on
+    // a field 2·centreEast metres from the bend and the rays find no road —
+    // which is what `bend.browser.spec.ts`'s chord counts would say.
     camera: {
-      x: BEND.centreEast,
+      x: -BEND.centreEast,
       y: 0,
       z: BEND.centreNorth,
       headingX: 0,
@@ -214,7 +219,13 @@ function edges(
     if (column < 0 || row < 0 || column >= SIZE || row >= SIZE) return undefined;
     return mask[row * SIZE + column] === 1;
   };
-  for (let ray = 0; ray < 360 * RAYS_PER_DEGREE; ray += 1) {
+  const rays = 360 * RAYS_PER_DEGREE;
+  /** Where ray `ray` enters and leaves the road, or `undefined` if it did not cross it cleanly. */
+  const crossing = (
+    ray: number,
+  ):
+    | { readonly dx: number; readonly dy: number; readonly entered: number; readonly left: number }
+    | undefined => {
     const angle = (ray / RAYS_PER_DEGREE) * (Math.PI / 180);
     const dx = Math.cos(angle);
     const dy = Math.sin(angle);
@@ -236,9 +247,27 @@ function edges(
       across < 0.5 * ROAD_WIDTH_METRES * pixelsPerMetre ||
       across > 1.5 * ROAD_WIDTH_METRES * pixelsPerMetre
     ) {
+      return undefined;
+    }
+    return { dx, dy, entered, left };
+  };
+  // ⚠️ **The sweep starts on a ray that does NOT cross the road** — #583. It
+  // started at 0° until then, and a run of rays that straddles 0° was closed
+  // at 360° and read as two edges, each turned less than the bend: the turn
+  // across the join was lost. Nothing noticed because the bend on this page
+  // happened to lie clear of 0°; #583 drew it the right way round, which is
+  // its mirror, and it read 81.7° and 73.3° against 94.7° and 89.7°. Where
+  // the sweep starts is not a property of the road, so it is chosen where it
+  // cannot cut one.
+  let start = 0;
+  while (start < rays && crossing(start) !== undefined) start += 1;
+  for (let step = 0; step < rays; step += 1) {
+    const found = crossing((start + step) % rays);
+    if (found === undefined) {
       close();
       continue;
     }
+    const { dx, dy, entered, left } = found;
     innerRun.push([centre + dx * entered, centre + dy * entered]);
     outerRun.push([centre + dx * left, centre + dy * left]);
   }

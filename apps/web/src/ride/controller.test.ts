@@ -2357,6 +2357,57 @@ describe('#524 — the ride keeps the process alive while it is active', () => {
     expect(port.calls).toEqual(['keep', 'sleep']);
     rig.controller.dispose();
   });
+
+  it('records the ride anyway when the platform throws instead of rejecting', async () => {
+    // The port's methods return a promise, and `.catch` on that promise is no
+    // guard against a call that throws before it returns one. That throw used
+    // to escape `changed()` — out of `start()` before any listener heard of
+    // the ride, and out of `confirmStop()` before the ride was saved.
+    const calls: string[] = [];
+    const throwing: RideKeepAlivePort = {
+      keepRideAlive: () => {
+        calls.push('keep');
+        throw new Error('RecordingService is not implemented on this platform');
+      },
+      letRideSleep: () => {
+        calls.push('sleep');
+        throw new Error('RecordingService is not implemented on this platform');
+      },
+    };
+    const rig = benchWith({ keepAlive: throwing, rideSave: storeSavePort() });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 5);
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().phase).toBe('stopped');
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+    expect(calls).toEqual(['keep', 'sleep']);
+    rig.controller.dispose();
+  });
+
+  it('asks again for a second ride started after the first was saved — #548', async () => {
+    const port = recordingPort();
+    const rig = benchWith({ keepAlive: port, rideSave: storeSavePort() });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 3);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(await rig.controller.startNewRide()).toBe(true);
+    // Idle between the two rides: nothing to keep alive yet.
+    expect(port.calls).toEqual(['keep', 'sleep']);
+
+    await rig.controller.start();
+    expect(port.calls).toEqual(['keep', 'sleep', 'keep']);
+    await ride(rig, 3);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(port.calls).toEqual(['keep', 'sleep', 'keep', 'sleep']);
+    rig.controller.dispose();
+    expect(port.calls).toEqual(['keep', 'sleep', 'keep', 'sleep']);
+  });
 });
 
 /**

@@ -22,6 +22,7 @@ import {
 } from '@onyourleft/domain';
 
 import {
+  GAUSS_NEWTON_STEPS,
   LINE_HOME_OFFSET_METRES,
   LINE_LIMIT_METRES,
   MAXIMUM_LEAN_RADIANS,
@@ -57,14 +58,17 @@ const hairpin = hairpinRoute(HAIRPIN_RADIUS);
 const BEND_START = 400;
 const BEND_LENGTH = Math.PI * HAIRPIN_RADIUS;
 
-/** The S-bend: 30 m each way. Its first bend is right-handed, its second left. */
+/**
+ * The S-bend: 30 m each way. Its first bend is right-handed, its second left —
+ * on the map and, since #583, on the screen.
+ */
 const S_RADIUS = 30;
 const sBend = sBendRoute(S_RADIUS);
 const QUARTER = (Math.PI * S_RADIUS) / 2;
 
 /**
  * The signed curvature of a path through the profile's samples, each moved
- * `offsets[i]` along the centreline's own left normal — this test's own
+ * `offsets[i]` along the centreline's own normal (its right, since #583) — this test's own
  * reading of what `racing-line.ts` computes, so the two are independent.
  */
 function curvaturesOf(profile: RouteProfile, offsets: ArrayLike<number>): number[] {
@@ -129,27 +133,30 @@ describe('the line stays on the road — #499 criterion 2', () => {
 
 describe('it is a racing line — #499 criterion 3', () => {
   it('enters a hairpin wide, apexes on the inside and exits wide', () => {
-    // `hairpinRoute` bends RIGHT, and right is the normal's negative side: the
-    // inside is negative and the outside positive.
+    // `hairpinRoute` bends RIGHT, and since #583 right is the normal's
+    // POSITIVE side — on the map and on the screen alike. Until #583 the world
+    // was a mirror of the map and this case read the other way round, with the
+    // inside negative: a reviewer who remembers that is reading the old file.
     const line = racingLine(hairpin);
     const entry = lineOffsetAt(line, BEND_START - 0.2 * BEND_LENGTH);
     const apex = lineOffsetAt(line, BEND_START + 0.5 * BEND_LENGTH);
     const exit = lineOffsetAt(line, BEND_START + 1.2 * BEND_LENGTH);
-    expect(entry).toBeGreaterThan(2);
-    expect(apex).toBeLessThan(-2);
-    expect(exit).toBeGreaterThan(2);
+    expect(entry).toBeLessThan(-2);
+    expect(apex).toBeGreaterThan(2);
+    expect(exit).toBeLessThan(-2);
   });
 
   it('crosses an S-bend from one apex to the other, wide in and wide out', () => {
     const line = racingLine(sBend);
+    // Right is the normal's positive side since #583.
     // Before the right-hander: wide, on its left.
-    expect(lineOffsetAt(line, BEND_START - 20)).toBeGreaterThan(2);
+    expect(lineOffsetAt(line, BEND_START - 20)).toBeLessThan(-2);
     // The right-hander's apex: on its inside, the right.
-    expect(lineOffsetAt(line, BEND_START + 0.5 * QUARTER)).toBeLessThan(-2);
+    expect(lineOffsetAt(line, BEND_START + 0.5 * QUARTER)).toBeGreaterThan(2);
     // The left-hander's apex: on ITS inside, the left.
-    expect(lineOffsetAt(line, BEND_START + 1.5 * QUARTER)).toBeGreaterThan(2);
+    expect(lineOffsetAt(line, BEND_START + 1.5 * QUARTER)).toBeLessThan(-2);
     // After it: wide of the left-hander, on its right.
-    expect(lineOffsetAt(line, BEND_START + 2 * QUARTER + 20)).toBeLessThan(-2);
+    expect(lineOffsetAt(line, BEND_START + 2 * QUARTER + 20)).toBeGreaterThan(2);
   });
 
   it.each([
@@ -176,9 +183,20 @@ describe('it is a racing line — #499 criterion 3', () => {
   });
 
   it('has stopped moving by the last step', () => {
-    for (const route of [hairpin, sBend, hairpinRoute(10), stadiumRoute(30)]) {
+    // Both stadiums since #640. The right-hand one — home on the INSIDE of its
+    // bends — cycled at 40 steps rather than settling, and its line moved
+    // 1.48 m on the 41st; `racing-line.ts` §`GAUSS_NEWTON_STEPS` has the
+    // measurement. The shipped count is read from there, so this is always
+    // "the shipped steps and one more".
+    for (const route of [
+      hairpin,
+      sBend,
+      hairpinRoute(10),
+      stadiumRoute(30),
+      stadiumRoute(30, 'left'),
+    ]) {
       const settled = racingLine(route).offsets;
-      const oneMore = solvedLine(route, 41).offsets;
+      const oneMore = solvedLine(route, GAUSS_NEWTON_STEPS + 1).offsets;
       for (let index = 0; index < settled.length; index += 1) {
         expect(Math.abs((oneMore[index] ?? 0) - (settled[index] ?? 0))).toBeLessThan(1e-3);
       }
@@ -191,21 +209,27 @@ describe('it is a racing line — #499 criterion 3', () => {
 });
 
 describe('a loop — #499 criterion 4', () => {
-  it('has no step in the line where a lap wraps', () => {
-    const route = stadiumRoute(30);
-    const offsets = racingLine(route).offsets;
-    const last = offsets.length - 1;
-    // The last sample IS the first place (`LOOP_CLOSURE_METRES`)…
-    expect(offsets[last]).toBe(offsets[0]);
-    // …and the change across the wrap, from the last sample of the lap to the
-    // first, is no bigger than the change across its neighbours either side.
-    // Solved as a point-to-point route instead, each end is free of the other
-    // and the step measured here was 5.5 m, where its neighbours moved 2.6 and 0.6.
-    const across = Math.abs((offsets[last - 1] ?? 0) - (offsets[0] ?? 0));
-    const before = Math.abs((offsets[last - 2] ?? 0) - (offsets[last - 1] ?? 0));
-    const after = Math.abs((offsets[0] ?? 0) - (offsets[1] ?? 0));
-    expect(across).toBeLessThanOrEqual(Math.max(before, after) * 1.5 + 0.05);
-  });
+  it.each(['right', 'left'] as const)(
+    'has no step in the line where a lap wraps — the %s-hand stadium',
+    (hand) => {
+      // Both hands since #640. The right-hand one failed this at 40 steps —
+      // 2.50 m across the wrap where its neighbours moved 1.54 m — because its
+      // line had not converged; converged it is 2.10 m against 1.41 m.
+      const route = stadiumRoute(30, hand);
+      const offsets = racingLine(route).offsets;
+      const last = offsets.length - 1;
+      // The last sample IS the first place (`LOOP_CLOSURE_METRES`)…
+      expect(offsets[last]).toBe(offsets[0]);
+      // …and the change across the wrap, from the last sample of the lap to the
+      // first, is no bigger than the change across its neighbours either side.
+      // Solved as a point-to-point route instead, each end is free of the other
+      // and the step measured here was 5.5 m, where its neighbours moved 2.6 and 0.6.
+      const across = Math.abs((offsets[last - 1] ?? 0) - (offsets[0] ?? 0));
+      const before = Math.abs((offsets[last - 2] ?? 0) - (offsets[last - 1] ?? 0));
+      const after = Math.abs((offsets[0] ?? 0) - (offsets[1] ?? 0));
+      expect(across).toBeLessThanOrEqual(Math.max(before, after) * 1.5 + 0.05);
+    },
+  );
 
   it('reads the same place on lap two as on lap one', () => {
     const route = stadiumRoute(30);
@@ -241,19 +265,20 @@ describe('the lean — #499 criterion 5', () => {
   });
 
   it('leans INTO the bend: right on the right-hander, left on the left-hander', () => {
-    // Right is the normal's negative side, and so is a lean to the right.
-    expect(leanAt(racingLine(hairpin), BEND_START + 0.5 * BEND_LENGTH, 8)).toBeLessThan(
-      -10 * DEGREES,
+    // Right is the normal's positive side since #583, and so is a lean to the
+    // right.
+    expect(leanAt(racingLine(hairpin), BEND_START + 0.5 * BEND_LENGTH, 8)).toBeGreaterThan(
+      10 * DEGREES,
     );
     const s = racingLine(sBend);
-    expect(leanAt(s, BEND_START + 0.5 * QUARTER, 8)).toBeLessThan(-5 * DEGREES);
-    expect(leanAt(s, BEND_START + 1.5 * QUARTER, 8)).toBeGreaterThan(5 * DEGREES);
+    expect(leanAt(s, BEND_START + 0.5 * QUARTER, 8)).toBeGreaterThan(5 * DEGREES);
+    expect(leanAt(s, BEND_START + 1.5 * QUARTER, 8)).toBeLessThan(-5 * DEGREES);
   });
 
   it('is read from the LINE’s curvature, which is gentler than the centreline’s', () => {
     // At the apex of a 20 m hairpin at 8 m/s the centreline asks for
     // atan(64 / (9.80665·20)) = 18.1°; the line is a wider arc and asks less.
-    const lean = -leanAt(racingLine(hairpin), BEND_START + 0.5 * BEND_LENGTH, 8);
+    const lean = leanAt(racingLine(hairpin), BEND_START + 0.5 * BEND_LENGTH, 8);
     expect(lean).toBeGreaterThan(10 * DEGREES);
     expect(lean).toBeLessThan(steadyTurnLean(8, 1 / HAIRPIN_RADIUS));
   });
@@ -339,7 +364,7 @@ describe('its cost — #499', () => {
   it('solves a 1 000 km route once, in bounded time, and keeps it on the road', () => {
     const route = longWindingRoute();
     const started = performance.now();
-    const line = solvedLine(route, 40);
+    const line = solvedLine(route, GAUSS_NEWTON_STEPS);
     const took = performance.now() - started;
     // Printed, because it is the figure #499 asks to be recorded. It said
     // "about 0.8 s"; re-measured for #588 with this case run alone, median of
@@ -347,6 +372,8 @@ describe('its cost — #499', () => {
     // from 30 to 40, and 0.69 s since #588 — under the coverage run 2.90 s,
     // 3.74 s and 2.80 s, and 13.1 s on CI's coverage run for #546's merge.
     // Re-measured for #586 the same way: 0.67 s (0.667–0.679 s over five).
+    // #640 took the steps from 40 to 80: 0.69 s (0.66–0.71 s) at 40 and
+    // 1.29 s (1.28–1.42 s) at 80, median of five, run alone, 2026-09-27.
     // The bound is a hang detector, not a performance claim.
     console.info(`racing line: ${String(route.positions.length)} samples in ${took.toFixed(0)} ms`);
     expect(took).toBeLessThan(30_000);
@@ -368,15 +395,37 @@ describe('its cost — #499', () => {
    * A red digest here means the line or the lean MOVED. If that was the point
    * of the change, re-take these and say so in its pull request; if it was
    * meant to be a speed-up, it was not one.
+   *
+   * ⚠️ **Since #583 each fixture here is the MIRROR of the one the digest was
+   * taken on, and the digests did not move.** Until #583 the world was drawn
+   * as a mirror of its map, so the hairpin turning east was drawn turning the
+   * way the one turning west is drawn now. The line and the lean are computed
+   * from what is drawn, so the mirrored fixture reproduces every digit — which
+   * is the evidence that #583 moved the projection and nothing in the solver.
+   * The "10 m left-hand corner" is the one #588 took, drawn left-handed then;
+   * it is the right-hand fixture now for the same reason.
+   *
+   * ⚠️ **Re-taken by #640, and every one of them moved — on purpose.** #640
+   * took the solve from 40 steps to 80, so each fixture is drawn nearer its
+   * converged line. None of these five was the fixture #640 was about (the
+   * right-hand stadium, whose line moved 1.25 m and its lean up to 18°), and
+   * each moved by far less than anything drawn — measured between 40 and 80
+   * steps, as the most any offset, any curvature and any of the three leans
+   * moved: the 10 m hairpin 0.005 mm, 6·10⁻⁸ per metre, 0.00005°; the 20 m
+   * hairpin 0.04 mm, 4·10⁻⁷, 0.0004°; the S-bend 0.17 mm, 2·10⁻⁶, 0.003°; the
+   * 10 m corner 1.5 mm, 2·10⁻⁵, 0.02°; the stadium 0.04 mm, 7·10⁻⁷, 0.0007°.
+   * A digest fixed to a tenth of a millimetre and a millionth sees all of them.
+   * The case name said "exactly as main did before #588" until then; the
+   * argument above about #588 and #583 still holds of the digests it had.
    */
   it.each([
-    ['a 10 m hairpin', () => hairpinRoute(10), 'bd14b29f', 'db209abb'],
-    ['the 20 m hairpin', () => hairpinRoute(HAIRPIN_RADIUS), '357049c6', '25daa5dc'],
-    ['the S-bend', () => sBendRoute(S_RADIUS), 'bef6fc52', '359e3337'],
-    ['a 10 m left-hand corner', () => cornerRoute(10, 90, 'left'), '976368df', '9a0ed418'],
-    ['the stadium, a loop', () => stadiumRoute(30), '7ba899f0', '14d8d5d5'],
+    ['a 10 m hairpin', () => hairpinRoute(10, 'left'), '1bce7fb0', '577f5128'],
+    ['the 20 m hairpin', () => hairpinRoute(HAIRPIN_RADIUS, 'left'), '4221e52b', 'b8fdcafb'],
+    ['the S-bend', () => sBendRoute(S_RADIUS, 'left'), '2f2e3ed7', '58cf2dd9'],
+    ['a 10 m corner drawn left-handed', () => cornerRoute(10, 90, 'right'), '79bcdfa3', '63dfb82e'],
+    ['the stadium, a loop', () => stadiumRoute(30, 'left'), '9c23170c', 'f2c0d419'],
   ] as const)(
-    'draws the line and the lean on %s exactly as main did before #588',
+    'draws the line and the lean on %s exactly as the digest taken for #640',
     (_, make, lineDigest, leanDigest) => {
       // A fresh profile, so the line is solved here rather than read from a cache
       // an earlier case filled.
@@ -435,7 +484,12 @@ interface Bend {
   readonly radius: number;
   readonly turn: number;
   readonly start: number;
-  /** −1 for a bend toward the normal's negative side (right), +1 for the other. */
+  /**
+   * +1 for a bend toward the normal's positive side — the right, on the map and
+   * on the screen — and −1 for a left-hander. ⚠️ **It was the other way round
+   * until #583**, when the world was a mirror of the map and a right-hand map
+   * corner was drawn turning left.
+   */
   readonly inside: -1 | 1;
 }
 
@@ -447,7 +501,7 @@ const BENDS: readonly Bend[] = [
       radius,
       turn: Math.PI / 2,
       start: 400,
-      inside: -1,
+      inside: 1,
     },
     {
       name: `a ${String(radius)} m left-hand corner`,
@@ -455,7 +509,7 @@ const BENDS: readonly Bend[] = [
       radius,
       turn: Math.PI / 2,
       start: 400,
-      inside: 1,
+      inside: -1,
     },
   ]),
   {
@@ -464,7 +518,7 @@ const BENDS: readonly Bend[] = [
     radius: HAIRPIN_RADIUS,
     turn: Math.PI,
     start: BEND_START,
-    inside: -1,
+    inside: 1,
   },
 ];
 
@@ -541,9 +595,16 @@ describe('a closed road: the whole carriageway through a bend, and a late apex �
    * |---|--:|
    * | 10 m corner, either hand | +0.1 m |
    * | 20 m corner, either hand | +0.7 m |
-   * | 40 m corner, right / left | +3.5 / +3.3 m |
-   * | 20 m hairpin | +5.3 m |
+   * | 40 m corner, right / left | +3.3 / +3.5 m |
+   * | 20 m hairpin | +5.2 m |
    *
+   * ⚠️ **Right and left are the other way round from how #546 measured them,
+   * and that is #583 rather than a re-measurement.** #546 measured a world
+   * that was a mirror of its map, so its "right-hand" corner was the one drawn
+   * turning left; the figures belong to what is drawn, and so they moved with
+   * the label. The hairpin is the one figure re-taken (2026-09-27): it turns
+   * right, which since #583 is toward the home side, and #546 measured it
+   * turning the other way, at +5.3 m.
    * ⚠️ **The 10 m corner is where the resolution bites**: its arc is 15.7 m,
    * a sample and a half of a 10 m profile, and it is the case the late-apex
    * gain was raised to 40 for (at 10 its apex was 0.1 m BEFORE the bisector).
@@ -585,13 +646,15 @@ describe('a closed road: the whole carriageway through a bend, and a late apex �
 
   /**
    * The line's tightest radius, from this file's own curvature of its offsets,
-   * against the closed form — measured 2026-09-26, right / left-hand:
+   * against the closed form — measured 2026-09-26, right / left-hand (swapped
+   * by #583, for the reason the apex table above gives; the hairpin re-taken
+   * 2026-09-27 and unchanged at the precision printed):
    *
    * | bend | tightest | closed form |
    * |---|--:|--:|
-   * | 10 m corner | 26.2 / 26.3 m | 26.9 m |
-   * | 20 m corner | 34.4 / 34.5 m | 36.9 m |
-   * | 40 m corner | 53.2 / 53.3 m | 56.9 m |
+   * | 10 m corner | 26.3 / 26.2 m | 26.9 m |
+   * | 20 m corner | 34.5 / 34.4 m | 36.9 m |
+   * | 40 m corner | 53.3 / 53.2 m | 56.9 m |
    * | 20 m hairpin | 21.0 m | 22.9 m |
    *
    * Tighter than the closed form everywhere, which is the late apex: the way in
@@ -661,9 +724,10 @@ describe('never leans OUT of a bend it is turning into — #546', () => {
    * road it needs, and a line that moves across the road curves away from the
    * bend to do it; the lean is `tan φ = v²/(g·R)` of THAT curve. Measured
    * 2026-09-26 on the 20 m corners, 30 m before the bend: 0.5° at 8 m/s and
-   * 1.8° at 16 m/s where the home is already the outside (right-hand), and
-   * 1.5° and 5.9° where the line crosses the whole road to get there
-   * (left-hand). The owner's "true to physics" is why it is drawn.
+   * 1.8° at 16 m/s where the home is already the outside (left-hand since
+   * #583, which swapped the hands), and 1.5° and 5.9° where the line crosses
+   * the whole road to get there (right-hand). The owner's "true to physics" is
+   * why it is drawn.
    */
   it.each(BENDS)('from the line’s turn-in to the end of $name', (bend) => {
     const line = racingLine(bend.route);
@@ -747,7 +811,7 @@ describe('rolls in over time, not only over distance — #546', () => {
     // …and at that speed the hairpin still leans the rider well into it:
     // not to the cap, because rolled in over 50 m a 63 m bend is too short to
     // hold it, which is the per-second bound doing its job.
-    expect(-leanAt(line, BEND_START + BEND_LENGTH / 2, 100)).toBeGreaterThan(
+    expect(leanAt(line, BEND_START + BEND_LENGTH / 2, 100)).toBeGreaterThan(
       0.9 * MAXIMUM_LEAN_RADIANS,
     );
   });

@@ -557,8 +557,24 @@ const RIDES: Readonly<Record<string, () => RouteProfile>> = {
   'a level road through villages': () => northRoute(4_000, () => 50),
   'a 20 m hairpin': () => hairpinRoute(20),
   'an S-bend of 30 m': () => sBendRoute(30),
+  // ⚠️ Both hands since #583. Until then the world was a mirror of its map, so
+  // the two fixtures above were drawn as these two are now, and the control
+  // below — a conifer's branches cut at 8 : 1 — was found on THEIR frames. The
+  // right-handed ones place the scenery the other way round, and on those the
+  // stylised world finds no cut at 8 : 1 at all; the mirrored pair keeps the
+  // control finding one and keeps both hands measured.
+  'a 20 m left-hand hairpin': () => hairpinRoute(20, 'left'),
+  'an S-bend of 30 m, left first': () => sBendRoute(30, 'left'),
   "a planner's route": () => plannerRoute(),
   'a 300 m circuit': () => circuitRoute(300, () => 20),
+  // ⚠️ Both hands of these two since #583. Until then the world was a mirror
+  // of its map, so the two above were drawn as these two are now — and the
+  // control below, a conifer's branches cut at 8 : 1 in the STYLISED world,
+  // was found on those frames and on no other ride. Drawn the right way round
+  // the stylised world finds no cut at 8 : 1 on any ride here; the mirrored
+  // pair keeps the control able to find one, and both hands measured.
+  "a planner's route, mirrored": () => plannerRoute({ mirrored: true }),
+  'a 300 m right-hand circuit': () => circuitRoute(300, () => 20, 'right'),
 };
 
 /**
