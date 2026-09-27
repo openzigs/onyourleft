@@ -58,12 +58,10 @@ describe('the notices document in public/', () => {
     // `tools/pose/pose-runtime-plugin.ts` emits this file into `dist` from the
     // installed package. Its name is the constant the plugin and the worker
     // both read, so renaming the runtime without the notices is red here.
-    expect(DOCUMENT).toMatch(
-      new RegExp(
-        `^ {2}${`${POSE_DIRECTORY}${POSE_RUNTIME_WASM_FILE}`.replace(/\./g, '\\.')} — from @mediapipe/tasks-vision `,
-        'm',
-      ),
-    );
+    // Compared as text rather than built into a pattern, so nothing in the
+    // file name has to be escaped.
+    const copied = `  ${POSE_DIRECTORY}${POSE_RUNTIME_WASM_FILE} — from @mediapipe/tasks-vision `;
+    expect(DOCUMENT.split('\n').some((line) => line.startsWith(copied))).toBe(true);
   });
 });
 
