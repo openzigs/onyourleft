@@ -3174,5 +3174,40 @@ published figures (its run predates `oyl.txt`).
 | #616 | baseline 1 | | | | | | | | | | |
 | #616 | baseline 2 | | | | | | | | | | |
 | #616 | **spread** (\|1 − 2\|) | | | | | | | | | | |
+| #619 | layer share | | `-sky` | | | | | | | | |
+| #619 | layer share | | `-surfaces` | | | | | | | | |
+| #619 | layer share | | `-vegetation` | | | | | | | | |
+| #619 | layer share | | `-impostors` | | | | | | | | |
+| #619 | layer share | | `-structures` | | | | | | | | |
+| #619 | layer share | | `-water` | | | | | | | | |
+| #619 | layer share | | `-riders` | | | | | | | | |
+| #619 | lever 1 before | | — ; `levers=-foliage-order` | | | | | | | | |
+| #619 | lever 1 after | | — | | | | | | | | |
+| #619 | lever 2 before | | — ; `rung=1`, `levers=-texture-bias` | | | | | | | | |
+| #619 | lever 2 after | | — ; `rung=1` | | | | | | | | |
 
 **Phone (OEM, model, Android, WebView):** ______________  **Build:** ______________
+
+#### The #619 rows — what the realistic world costs the GPU, lever by lever
+
+[#619](https://github.com/openzigs/onyourleft/issues/619) is read with this Part's instrument and
+nothing else. Every row is AH1–AH7 on the #619 branch (or a `main` with it merged), on the top rung
+with the ladder held (`ladder=0`) unless the row says `rung=1`.
+
+- **The layer shares.** Seven runs, one layer off each. A layer's share of the GPU clock is
+  *all-on mean − that row's mean*, against #616's baseline rows; name the two largest in #619.
+- **Lever 1, the canopy after the opaque world.** The **before** row switches the lever off with
+  `&levers=-foliage-order` (three's own order: the leaves drawn into an empty depth buffer); the
+  **after** row is the product. The picture is the same either way — the browser gate reads it back
+  identical — so the GPU mean is the whole of the question.
+- **Lever 2, one mip coarser on the second rung.** Both rows add `&rung=1` (the second realistic
+  rung, held by `ladder=0`); the **before** row also switches the lever off with
+  `&levers=-texture-bias`. It changes nothing on the top rung, which carries no bias. Look at the
+  after row's trees, bark and road by eye: the photographs are one mip softer on this rung, which
+  a tablet reaches only when it is already hot.
+- **Target** (#619): the GPU DVFS mean at least 10 % below #616's baseline with no visible loss.
+  If no kept lever reaches it, the numbers are the finding.
+- **Levers 3, 4 and 5 have no rows**: 3 and 4 were recorded as not worth it from arithmetic on
+  `main` (#619's pull request gives the numbers), and 5 — the top rung's render scale — waits for
+  the owner's ruling.
+

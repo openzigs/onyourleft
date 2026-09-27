@@ -55,6 +55,7 @@ import {
   loadRealisticWorld,
   prepareMiddleLevel,
   prepareRealisticShape,
+  readsTextureLodBias,
   realisticBicycleTriangles,
   treeCanBeSeen,
   REALISTIC_PRIMITIVE_SKIP,
@@ -1324,6 +1325,137 @@ describe('a failed load releases everything it loaded, including what arrives la
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+/** A material's fragment shader after its `onBeforeCompile`, from a stand-in three would hand it. */
+function compiledFragment(material: unknown): {
+  fragment: string;
+  uniforms: Record<string, unknown>;
+} {
+  const shader = {
+    uniforms: {} as Record<string, unknown>,
+    vertexShader: '#include <common>\n#include <begin_vertex>\n#include <color_vertex>',
+    fragmentShader:
+      '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <color_fragment>',
+  };
+  (material as { onBeforeCompile: (shader: unknown, renderer: unknown) => void }).onBeforeCompile(
+    shader,
+    undefined,
+  );
+  return { fragment: shader.fragmentShader, uniforms: shader.uniforms };
+}
+
+describe('what the realistic world costs the GPU, lever by lever — #619', () => {
+  const beltWithMiddle = (): RealisticVegetationBelt => {
+    const tree = aTreeWithMiddle();
+    const rock = prepareRealisticShape(aScene([{ material: loaderMaterial() }]), 'rock');
+    const shrub = prepareRealisticShape(
+      aScene([{ material: loaderMaterial({ transparent: true }) }]),
+      'shrub',
+    );
+    return new RealisticVegetationBelt(
+      new Map([
+        ['tree-broadleaf', [tree]],
+        ['tree-conifer', [tree]],
+        ['shrub', [shrub]],
+        ['rock', [rock]],
+      ] as const),
+    );
+  };
+  const alphaTested = (mesh: RealisticVegetationBelt['meshes'][number]): boolean =>
+    typeOf(mesh) === 'ShaderMaterial' ||
+    (mesh.material as unknown as { alphaTest: number }).alphaTest > 0;
+
+  it('draws every alpha-tested leaf after the opaque world, nearest level first — lever 1', () => {
+    const belt = beltWithMiddle();
+    const levels = belt.levelsOf('tree-broadleaf');
+    const orderOf = (meshes: readonly (RealisticVegetationBelt['meshes'][number] | undefined)[]) =>
+      meshes
+        .filter((mesh) => mesh !== undefined && alphaTested(mesh))
+        .map((mesh) => mesh?.renderOrder);
+    const near = orderOf(levels.full.flat());
+    const middle = orderOf((levels.middle[0] ?? []).slice());
+    const impostor = orderOf(levels.impostor);
+    // Non-vacuity: each level has a cut mesh to order.
+    expect(near.length).toBeGreaterThan(0);
+    expect(middle.length).toBeGreaterThan(0);
+    expect(impostor.length).toBeGreaterThan(0);
+    // After everything opaque, which three draws at 0…
+    for (const order of [...near, ...middle, ...impostor]) expect(order).toBeGreaterThan(0);
+    // …and near before middle before the far band.
+    expect(Math.max(...(near as number[]))).toBeLessThan(Math.min(...(middle as number[])));
+    expect(Math.max(...(middle as number[]))).toBeLessThan(Math.min(...(impostor as number[])));
+    // A shrub's cut leaves are foliage too.
+    const shrubs = belt.meshes.filter(
+      (mesh) => alphaTested(mesh) && !belt.levelsOf('tree-broadleaf').full.flat().includes(mesh),
+    );
+    expect(shrubs.length).toBeGreaterThan(0);
+  });
+
+  it('puts every mesh back where three draws it unasked for the control, and restores the order — lever 1', () => {
+    const belt = beltWithMiddle();
+    const product = belt.meshes.map((mesh) => mesh.renderOrder);
+    // Non-vacuity: the product order is not already all nought.
+    expect(product.some((order) => order > 0)).toBe(true);
+    belt.setFoliageOrdered(false);
+    for (const mesh of belt.meshes) expect(mesh.renderOrder).toBe(0);
+    belt.setFoliageOrdered(true);
+    expect(belt.meshes.map((mesh) => mesh.renderOrder)).toEqual(product);
+  });
+
+  it('leaves bark and rock with the opaque world, where three sorts them by material and depth', () => {
+    const belt = beltWithMiddle();
+    const opaque = belt.meshes.filter((mesh) => !alphaTested(mesh));
+    // Bark at two levels of two kinds, and the rock.
+    expect(opaque.length).toBeGreaterThanOrEqual(3);
+    for (const mesh of opaque) expect(mesh.renderOrder).toBe(0);
+  });
+
+  it('teaches every photograph the realistic world samples the rung’s texture bias — lever 2', () => {
+    const belt = beltWithMiddle();
+    for (const mesh of belt.meshes) {
+      expect(readsTextureLodBias(mesh.material as never), typeOf(mesh)).toBe(true);
+    }
+    const structures = aStructureBelt();
+    for (const surface of [...PHOTOGRAPHIC_STRUCTURE_SURFACES, 'painted', 'glass'] as const) {
+      for (const mesh of STRUCTURE_KINDS.flatMap(
+        (kind) => structures.beltOf(surface)?.meshesOf(kind) ?? [],
+      )) {
+        // Painted and glass sample no photograph, so they are left alone.
+        const photographic = surface !== 'painted' && surface !== 'glass';
+        expect(readsTextureLodBias(mesh.material as never), surface).toBe(photographic);
+      }
+    }
+  });
+
+  it('turns every texture read the bias’s way in the fragment, with the one shared uniform', () => {
+    const tree = aTreeWithMiddle();
+    const bark = tree.parts[0]?.material;
+    const impostor = tree.impostor?.material;
+    const barkShader = compiledFragment(bark);
+    const impostorShader = compiledFragment(impostor);
+    for (const { fragment } of [barkShader, impostorShader]) {
+      expect(fragment).toContain('uniform float oylTextureLodBias;');
+      expect(fragment).toContain('#undef texture2D');
+      expect(fragment).toContain(
+        '#define texture2D(oylSampler, oylUv) texture(oylSampler, oylUv, oylTextureLodBias)',
+      );
+    }
+    // One object, so a view setting the rung's value once reaches every program.
+    expect(barkShader.uniforms['oylTextureLodBias']).toBeDefined();
+    expect(barkShader.uniforms['oylTextureLodBias']).toBe(
+      impostorShader.uniforms['oylTextureLodBias'],
+    );
+  });
+
+  it('biases nothing the stylised world draws', () => {
+    const stylised = new ScatterBelt(new Map());
+    const meshes = STRUCTURE_KINDS.flatMap((kind) => stylised.meshesOf(kind)).concat(
+      stylised.meshesOf('rock'),
+    );
+    expect(meshes.length).toBeGreaterThan(0);
+    for (const mesh of meshes) expect(readsTextureLodBias(mesh.material as never)).toBe(false);
   });
 });
 

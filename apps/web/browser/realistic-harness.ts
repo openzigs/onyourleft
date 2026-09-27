@@ -37,7 +37,10 @@
  * twenty minutes. Since #616, `?layers=-vegetation` (or any of
  * `realistic/config.ts` §`LAYERS`) turns a layer off without moving the rung,
  * so a layer's share of the tablet's GPU clock is the difference between two
- * runs; `realistic/layers.ts` says what each layer is, in both worlds.
+ * runs; `realistic/layers.ts` says what each layer is, in both worlds. Since
+ * #619, `?levers=-foliage-order` or `-texture-bias` switches one of that
+ * issue's kept levers off, so its saving is a before/after pair at one rung;
+ * `realistic/config.ts` §`LEVERS` says which rung each one needs.
  * Each is also one console line, `OYL-REALISTIC {json}` and
  * `OYL-REALISTIC-SOAK {json}`, which `adb logcat` shows under the `chromium` tag — so the numbers come off the device with no
  * debugger attached, as #457's did.
@@ -55,6 +58,7 @@ import { realisticWorldNotice, type RealisticWorldOutcome } from '../src/game/re
 import { corridorOrigin } from '../src/game/terrain';
 import {
   drawnWorldOf,
+  foliageOrderedOf,
   loadRealisticWorld,
   loadSceneryModels,
   threeGameRenderer,
@@ -63,7 +67,9 @@ import {
   configQuery,
   parseConfig,
   percentiles,
+  rungWithLevers,
   type Layer,
+  type Lever,
   type Percentiles,
 } from './realistic/config';
 import { drawCounter } from './realistic/draws';
@@ -109,6 +115,8 @@ export interface RealisticSample {
   };
   /** The layers switched off for this run — #616. Empty for an ordinary ride. */
   readonly layersOff: readonly Layer[];
+  /** #619's levers switched off for this run. Empty for an ordinary ride. */
+  readonly leversOff: readonly Lever[];
   readonly drawingBuffer: readonly [number, number];
   readonly devicePixelRatio: number;
   readonly stalls: number;
@@ -237,7 +245,14 @@ async function run(): Promise<void> {
     realistic: config.world === 'realistic',
     quality: { ...INITIAL_QUALITY, level: config.rung },
   };
-  const view = threeGameRenderer.create(canvas, worldRung(state));
+  // #619: the rung the view draws with, a lever that works through the rung
+  // taken back out; the label, cap and scenery the page reports are the rung's.
+  const drawnRung = (at: WorldQualityState) => rungWithLevers(worldRung(at), config.leversOff);
+  const view = threeGameRenderer.create(canvas, drawnRung(state));
+  // #619 lever 1's control. The view builds its realistic belts when a rung
+  // first asks for them, so it is applied again after every rung change.
+  const foliageOrdered = !config.leversOff.includes('foliage-order');
+  foliageOrderedOf(view, foliageOrdered);
   const resize = (): void => view.resize(canvas.clientWidth, canvas.clientHeight);
   resize();
   addEventListener('resize', resize);
@@ -264,6 +279,7 @@ async function run(): Promise<void> {
     trianglesPerFrame: framesInWindow === 0 ? 0 : Math.round(trianglesInWindow / framesInWindow),
     lastFrame: { triangles: lastFrameTriangles, rendererTriangles: lastFrameRendererTriangles },
     layersOff: config.layersOff,
+    leversOff: config.leversOff,
     drawingBuffer: [gl?.drawingBufferWidth ?? 0, gl?.drawingBufferHeight ?? 0],
     devicePixelRatio,
     stalls,
@@ -287,7 +303,8 @@ async function run(): Promise<void> {
     ) {
       const next = nextWorldQuality(state, { frameMs: paced.frameMs });
       if (next.realistic !== state.realistic || next.quality.level !== state.quality.level) {
-        view.setQuality(worldRung(next));
+        view.setQuality(drawnRung(next));
+        foliageOrderedOf(view, foliageOrdered);
       }
       state = next;
     }
