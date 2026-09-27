@@ -65,6 +65,7 @@ import { TREND_WINDOW, watts, type Watts } from '@onyourleft/domain';
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
 
+import { hrefFor, routeById } from '../shell/routes';
 import type { TrainerSnapshot } from './controller';
 import type { ManualErgRescue } from './manual-erg';
 
@@ -151,7 +152,9 @@ export function TrainerPanel({
   if (!trainer.paired) {
     return (
       <StatusMessage tone="info" label="No trainer">
-        Pair a smart trainer to control it from here.
+        Pair a smart trainer to control it from here — pairing is on{' '}
+        {/* #659: the Pair buttons moved to Devices; this sentence says where. */}
+        <a href={hrefFor(routeById('devices'))}>Devices</a>.
       </StatusMessage>
     );
   }

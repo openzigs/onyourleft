@@ -459,6 +459,57 @@ describe('connecting', () => {
   });
 });
 
+describe('forgetting a device (#659)', () => {
+  it('drops the link through the plugin and stops issuing the id', async () => {
+    const { plugin, transport, device } = await connected();
+    const id = device.identity.id;
+    const seen: string[] = [];
+    await transport.subscribe(id, 'power', (measurement) => {
+      seen.push(measurement.capability);
+    });
+    const before = plugin.calls.length;
+
+    await transport.forget(id);
+
+    expect(plugin.calls.slice(before)).toContain(`disconnect:${id}`);
+    expect(() => transport.connectionState(id)).toThrow(
+      expect.objectContaining({ code: 'device-not-found' }),
+    );
+    await expect(transport.connect(id)).rejects.toMatchObject({ code: 'device-not-found' });
+    // Nothing is left started for a late frame to reach.
+    try {
+      plugin.notify(POWER_SERVICE, POWER_CHARACTERISTIC, new DataView(new ArrayBuffer(4)));
+    } catch {
+      // No subscription is started, which is the scripted plugin's way of
+      // saying the same thing.
+    }
+    expect(seen).toEqual([]);
+  });
+
+  it('resolves a second time, and for an id it never issued', async () => {
+    const { transport, device } = await connected();
+    await transport.forget(device.identity.id);
+    await transport.forget(device.identity.id);
+  });
+
+  it('asks the plugin nothing for a device that was never connected', async () => {
+    const { plugin, transport } = build();
+    const device = await transport.discover({ capabilities: [] });
+    const before = plugin.calls.length;
+    await transport.forget(device.identity.id);
+    expect(plugin.calls.length).toBe(before);
+    expect(() => transport.connectionState(device.identity.id)).toThrow();
+  });
+
+  it('can be chosen again, and connects', async () => {
+    const { transport, device } = await connected();
+    await transport.forget(device.identity.id);
+    const again = await transport.discover({ capabilities: [] });
+    await transport.connect(again.identity.id);
+    expect(transport.connectionState(again.identity.id)).toBe('connected');
+  });
+});
+
 describe('measurements', () => {
   it('delivers only the capability that was subscribed to from a composite frame', async () => {
     const { plugin, transport, device } = await connected();

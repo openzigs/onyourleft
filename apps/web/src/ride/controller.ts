@@ -521,7 +521,11 @@ export interface RideController {
    * {@link RideSnapshot.pairingError} with everything else.
    */
   pair(role: PairingRole): Promise<void>;
-  /** Drop a paired device. Recording continues; its channels go unpaired. */
+  /**
+   * Forget a paired device — the Devices screen's *Forget* (#659). Recording
+   * continues; its channels go unpaired. The transport's `forget`, so the
+   * device has to be chosen again to come back.
+   */
   unpair(id: DeviceId): Promise<void>;
 
   start(): Promise<void>;
@@ -1454,10 +1458,18 @@ export function createRideController(options: RideControllerOptions): RideContro
       sensors.delete(id);
       changed();
       try {
-        await transport.disconnect(id);
+        // #659: FORGET, not disconnect. The Devices screen's control is
+        // *Forget*, and a device that was only disconnected stayed in the
+        // transport's own records — on Web Bluetooth with the origin's grant
+        // still held, and in the Capacitor transport counted against its
+        // connection budget for the rest of the session. `forget` drops the
+        // link as `disconnect` did and then lets go of the device.
+        await transport.forget(id);
       } catch {
-        // A device that is already gone is the ordinary case here. There is
-        // nothing left to tell the rider and nothing left to do.
+        // A device that is already gone is the ordinary case here, and a
+        // browser that refuses to revoke its grant has still had the device
+        // dropped. There is nothing left to tell the rider and nothing left
+        // to do.
       }
       changed();
     },

@@ -1498,6 +1498,35 @@ export function createWebBluetoothTransport(
       });
     },
 
+    async forget(id: DeviceId): Promise<void> {
+      const record = records.get(id);
+      if (record === undefined) {
+        return;
+      }
+      // The record goes FIRST, and synchronously: once this has been called no
+      // id-keyed method may reach the device, whatever the browser then says
+      // about the permission. The listener goes with it, so a
+      // `gattserverdisconnected` that arrives in a later task finds no record
+      // to drive rather than a stale one.
+      records.delete(id);
+      record.native.removeEventListener('gattserverdisconnected', record.onDisconnected);
+      dropLink(
+        record,
+        new SensorError('not-connected', 'this device was forgotten', { deviceId: id }),
+      );
+      try {
+        record.native.gatt?.disconnect();
+      } catch {
+        // Already gone — `disconnect`'s own reason, above.
+      }
+      // ⚠️ Feature-detected, and called through the record's own object. A
+      // browser without `forget()` keeps the grant, and the only thing a page
+      // can do about that is not hold the device, which the line above did.
+      if (typeof record.native.forget === 'function') {
+        await record.native.forget();
+      }
+    },
+
     connectionState(id: DeviceId): ConnectionState {
       return recordFor(id).session.state;
     },

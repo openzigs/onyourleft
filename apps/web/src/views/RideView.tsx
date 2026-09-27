@@ -7,16 +7,18 @@
  * machine is `ride/controller.ts` and the reasons it is not in here are at the
  * top of that file.
  *
- * ## Pairing is a sequence of gestures, and the screen says so
+ * ## Pairing is on Devices, and this screen says what is connected (#659)
  *
- * `requestDevice()` requires a user activation and cannot be called
- * programmatically, so a trainer plus a heart rate strap is **two clicks** and
- * there is no arrangement of this component that makes it one. Rather than
- * hiding that, the pairing block names each device separately and the note
- * under it says why. The trainer button comes first and asks for power, cadence
- * and speed together, because #49's revision block asks for the trainer's own
- * FTMS stream to be the path of least resistance rather than an expert option —
- * one connection of about three, instead of three.
+ * ⚠️ **The pairing buttons used to be here**, and a reviewer who remembers
+ * them is reading the old file. The owner ruled (2026-09-27) that pairing
+ * lives on the Devices screen, because Home and the More tab both sent a new
+ * rider there and it had no control. The block moved to
+ * `ride/SensorPairing.tsx` §`PairingPanel`, unchanged in what it drives: the
+ * same controller, the same `pair(role)`, one gesture per device. This screen
+ * renders §`ConnectedSensors` — each device and its state in words, and a link
+ * to Devices. There is no quick-pair button here, on purpose: the controller is
+ * above the router, so Devices and back is one tap with the connection intact,
+ * and a second set of pairing buttons is a second pairing surface.
  *
  * ## The clock and the unload guard are **not** here
  *
@@ -56,12 +58,8 @@ import { WorkoutPanel } from '../ride/WorkoutPanel';
 import type { WorkoutPort } from '../workouts/store-port';
 import type { AnalysisPort } from '../analysis/store-port';
 import type { RecoverableRide } from '../recording/recovery';
-import {
-  canStartNewRide,
-  type PairingRole,
-  type RideController,
-  type RideSnapshot,
-} from '../ride/controller';
+import { canStartNewRide, type RideController, type RideSnapshot } from '../ride/controller';
+import { ConnectedSensors } from '../ride/SensorPairing';
 import { useRideSnapshot } from '../ride/useRideController';
 import { SideCameraOnRide } from '../ride/SideCameraOnRide';
 import { useSideCamera } from '../ride/useSideCamera';
@@ -113,14 +111,6 @@ export interface RideViewProps {
    */
   readonly sidePairing?: SidePairingPort | undefined;
 }
-
-/** The pairing buttons, in the order the revision block asks for. */
-const PAIRING_STEPS: readonly { readonly role: PairingRole; readonly label: string }[] = [
-  { role: 'trainer', label: 'Pair a smart trainer' },
-  { role: 'heart-rate', label: 'Pair a heart rate strap' },
-  { role: 'power-meter', label: 'Pair a power meter' },
-  { role: 'speed-cadence', label: 'Pair a speed or cadence sensor' },
-];
 
 export function RideView({
   controller,
@@ -261,7 +251,7 @@ function LiveRide({
 
       <div className="oyl-ride__group oyl-ride__group--sensors">
         <h2>Sensors</h2>
-        <SensorList controller={controller} snapshot={snapshot} />
+        <ConnectedSensors snapshot={snapshot} />
       </div>
     </div>
   );
@@ -427,8 +417,8 @@ function RideControls({
         </Button>
         {snapshot.sensors.length === 0 ? (
           <StatusMessage tone="info" label="No sensors">
-            A ride with no sensors records elapsed time and nothing else. Pair something below
-            first.
+            A ride with no sensors records elapsed time and nothing else.{' '}
+            <a href={hrefFor(routeById('devices'))}>Pair something on Devices</a> first.
           </StatusMessage>
         ) : null}
       </>
@@ -646,84 +636,6 @@ function StorageNotice({ snapshot }: { readonly snapshot: RideSnapshot }): JSX.E
       will try again.
     </StatusMessage>
   );
-}
-
-function SensorList({
-  controller,
-  snapshot,
-}: {
-  readonly controller: RideController;
-  readonly snapshot: RideSnapshot;
-}): JSX.Element {
-  return (
-    <>
-      {snapshot.pairingError === undefined ? null : (
-        <StatusMessage tone="warning" label="Pairing" live>
-          {snapshot.pairingError}
-        </StatusMessage>
-      )}
-
-      {snapshot.sensors.length === 0 ? (
-        <p className="oyl-muted">Nothing is paired yet.</p>
-      ) : (
-        <ul className="oyl-sensor-list">
-          {snapshot.sensors.map((sensor) => (
-            <li key={sensor.id}>
-              <span>
-                {sensor.name} — {connectionWords(sensor.state)}
-              </span>{' '}
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  void controller.unpair(sensor.id);
-                }}
-              >
-                Forget {sensor.name}
-              </Button>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <ul className="oyl-pairing-steps">
-        {PAIRING_STEPS.map((step) => (
-          <li key={step.role}>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                void controller.pair(step.role);
-              }}
-            >
-              {step.label}
-            </Button>
-          </li>
-        ))}
-      </ul>
-      <p className="oyl-muted">
-        Bluetooth asks for one device at a time, so each sensor is its own button and its own prompt
-        — there is no way to pair them all at once. This browser will hold about{' '}
-        {snapshot.connectionsRemaining} more connection
-        {snapshot.connectionsRemaining === 1 ? '' : 's'}. A trainer usually reports power and
-        cadence itself, so pairing one is often all you need.
-      </p>
-    </>
-  );
-}
-
-/** What a connection state means to somebody on a bike. */
-function connectionWords(state: string): string {
-  switch (state) {
-    case 'connected':
-      return 'connected';
-    case 'connecting':
-      return 'connecting';
-    case 'reconnecting':
-      return 'reconnecting';
-    case 'unavailable':
-      return 'unavailable — Bluetooth is off or blocked';
-    default:
-      return 'disconnected — reconnecting needs a tap, this browser cannot do it silently';
-  }
 }
 
 /**

@@ -187,6 +187,15 @@ export interface BluetoothDevicePort {
   readonly gatt?: GattServerPort | undefined;
   addEventListener(type: 'gattserverdisconnected', listener: () => void): void;
   removeEventListener(type: 'gattserverdisconnected', listener: () => void): void;
+  /**
+   * Revoke this origin's permission to use the device — #659.
+   *
+   * Optional because it is optional in the wild: `BluetoothDevice.forget()`
+   * shipped in Chrome 101, and a browser, a polyfill or a shim that predates it
+   * still exposes a device without it. `transport.ts` §`forget` feature-detects
+   * it rather than assuming.
+   */
+  readonly forget?: (() => Promise<void>) | undefined;
 }
 
 /** `navigator.bluetooth`, as this adapter uses it. */

@@ -117,6 +117,11 @@ export default defineConfig({
         // sticky header taking 70% of a 320×256 viewport passed every gate.
         // `shell-harness.tsx` says what it does and does not prove.
         shell: 'browser/shell.html',
+        // #659. Pairing on the Devices screen, walked Home → Devices → Pair
+        // against the scripted Web Bluetooth stack, through the real shell and
+        // the real ride controller. `devices-harness.tsx` says what it does not
+        // prove, and why its control is today's dead end.
+        devices: 'browser/devices.html',
         // #373. The ride screen's own layout — the trainer status line, which
         // is the only rider-visible evidence that a gradient is reaching the
         // machine, and which fell outside the viewport in landscape while every

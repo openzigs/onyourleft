@@ -130,6 +130,14 @@ export interface FakeDeviceSpec {
    * swallows the NEXT genuine disconnect rather than the one it was raised for.
    */
   readonly disconnectThrows?: boolean;
+  /**
+   * The device has no `forget()` — #659. What a browser that predates
+   * Chrome 101 hands a page, and the branch `transport.ts` §`forget`
+   * feature-detects.
+   */
+  readonly withoutForget?: boolean;
+  /** `forget()` rejects, as a browser refusing to revoke the grant would. */
+  readonly forgetRejects?: boolean;
 }
 
 export interface FakeDeviceHandle {
@@ -159,6 +167,8 @@ export interface FakeDeviceHandle {
   listeners(service: GattUuid | number, characteristic: GattUuid | number): number;
   /** How many `gattserverdisconnected` listeners are attached right now. */
   readonly disconnectListeners: number;
+  /** How many times `forget()` was called on this device — #659. */
+  readonly forgets: number;
   notifying(service: GattUuid | number, characteristic: GattUuid | number): boolean;
   /**
    * The Client Characteristic Configuration value the browser wrote, or
@@ -364,6 +374,8 @@ interface DeviceState {
   /** Services the device has but is not serving right now. See `setServiceVisible`. */
   readonly hidden: Set<GattUuid>;
   connected: boolean;
+  /** Calls to `forget()` — #659. */
+  forgets: number;
 }
 
 function inspect(options: RequestDevicePortOptions | undefined): RequestInspection {
@@ -445,6 +457,7 @@ export function createFakeBluetooth(options: FakeBluetoothOptions): FakeBluetoot
       allowed: new Set(),
       hidden: new Set(),
       connected: false,
+      forgets: 0,
       native: undefined as unknown as BluetoothDevicePort,
     };
 
@@ -606,6 +619,27 @@ export function createFakeBluetooth(options: FakeBluetoothOptions): FakeBluetoot
         removeEventListener(_type: 'gattserverdisconnected', listener: () => void) {
           state.disconnectListeners.delete(listener);
         },
+        // What the specification says `forget()` does: the origin's grant for
+        // this device is gone — so a later `getPrimaryService` is refused with
+        // `SecurityError` until `requestDevice` grants it again — and a live
+        // link is dropped, with its event in a later task like any other.
+        ...(spec.withoutForget === true
+          ? {}
+          : {
+              forget: () => {
+                operations.push(`${spec.id}:forget`);
+                state.forgets += 1;
+                if (spec.forgetRejects === true) {
+                  return Promise.reject(domError('InvalidStateError', 'forget refused'));
+                }
+                state.allowed.clear();
+                if (state.connected) {
+                  state.connected = false;
+                  queueDisconnect(state);
+                }
+                return Promise.resolve();
+              },
+            }),
       } satisfies BluetoothDevicePort,
     });
 
@@ -821,6 +855,9 @@ export function createFakeBluetooth(options: FakeBluetoothOptions): FakeBluetoot
         },
         get disconnectListeners() {
           return state.disconnectListeners.size;
+        },
+        get forgets() {
+          return state.forgets;
         },
         get allowedServices() {
           return [...state.allowed];

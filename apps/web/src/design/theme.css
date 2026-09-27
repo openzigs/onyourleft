@@ -1196,12 +1196,61 @@ select option {
 }
 
 .oyl-sensor-list,
-.oyl-pairing-steps {
+.oyl-pairing {
   display: flex;
   flex-direction: column;
   gap: var(--oyl-space-sm);
   list-style: none;
   padding: 0;
+}
+
+/*
+ * The Devices screen's pairing block — #659. One row per kind of device: its
+ * name, what is paired in it and in what state (in WORDS, WCAG 2.2 SC 1.4.1,
+ * so nothing here paints a state with a colour), and its Pair button. The
+ * row's own heading is a label rather than a section title, so it takes the
+ * body size: four large headings above the first control would push it down a
+ * phone for no gain, and `browser/devices.browser.spec.ts` measures that the
+ * first control is above the fold at 390×844.
+ */
+.oyl-pairing {
+  gap: var(--oyl-space-md);
+}
+
+.oyl-pairing__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-pairing__kind {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: var(--oyl-font-size-md);
+}
+
+.oyl-pairing__state {
+  margin: 0;
+}
+
+.oyl-pairing__row > .oyl-sensor-list {
+  flex: 1 1 100%;
+  margin: 0;
+}
+
+/*
+ * What the platform cannot do, beneath the controls (#654 ruling 3). The
+ * summary is the one control in it, and it gets the same 44 × 44 floor
+ * `.oyl-button` declares (SC 2.5.5), declared rather than left to its line
+ * height for the reason that rule gives.
+ */
+.oyl-details > summary {
+  /* Left a list item, so the browser's own disclosure marker stays. */
+  min-height: 2.75rem;
+  padding-block: var(--oyl-space-sm);
+  box-sizing: border-box;
+  cursor: pointer;
 }
 
 /* --- The activity library (#62) and the ride detail view (#50) ------------- */

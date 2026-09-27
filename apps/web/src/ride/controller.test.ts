@@ -31,7 +31,7 @@ import {
   type Watts,
   type WorkoutBlock,
 } from '@onyourleft/domain';
-import { deviceId } from '@onyourleft/sensors';
+import { deviceId, isSensorError, type SensorTransport } from '@onyourleft/sensors';
 import {
   createTrainerControl,
   decodeSupportedPowerRange,
@@ -129,6 +129,8 @@ function harnessStore(): RecordingCheckpointStore {
 interface Bench {
   readonly controller: RideController;
   readonly bench: SimulatorBench;
+  /** The transport the controller was handed — read back to see what it holds (#659). */
+  readonly transport: SensorTransport;
   readonly trainerControl: () => TrainerControl | undefined;
   /** What the trainer itself is holding, read from the device. */
   readonly targetOnTheTrainer: () => Watts | undefined;
@@ -298,6 +300,7 @@ function benchWith(options: BenchOptions = {}): Bench {
   });
 
   return {
+    transport,
     controller,
     bench,
     sessionIds,
@@ -449,6 +452,33 @@ describe('criterion 3 — a disconnected sensor goes unavailable, and does not f
     // assertion either way: whatever the state is, it carries no number.
     expect(after.kind).not.toBe('live');
     expect(JSON.stringify(after)).not.toContain(String(lastValue));
+    rig.controller.dispose();
+  });
+
+  it('forgets the device on the transport, so the chooser brings it back (#659)', async () => {
+    const rig = benchWith({ devices: 'trainer+strap' });
+    await rig.controller.pair('trainer');
+    await rig.controller.pair('heart-rate');
+    await ride(rig, 3);
+
+    await rig.controller.unpair(STRAP);
+
+    // Read back through the transport, which is what a consumer asks: the id
+    // is not issued any more, where a bare disconnect left it held.
+    let refused: unknown;
+    try {
+      rig.transport.connectionState(STRAP);
+    } catch (error) {
+      refused = error;
+    }
+    expect(isSensorError(refused, 'device-not-found')).toBe(true);
+
+    // And the way back is the ordinary one, with no "already paired".
+    await rig.controller.pair('heart-rate');
+    await ride(rig, 3);
+    expect(rig.controller.getSnapshot().pairingError).toBeUndefined();
+    expect(rig.controller.getSnapshot().sensors.map((sensor) => sensor.id)).toContain(STRAP);
+    expect(metric(rig, 'heartRate').kind).toBe('live');
     rig.controller.dispose();
   });
 

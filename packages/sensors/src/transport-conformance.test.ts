@@ -184,6 +184,17 @@ function createMemoryTransport(options: MemoryTransportOptions): MemoryTransport
       });
     },
 
+    forget(id: DeviceId) {
+      return attempt(() => {
+        const session = sessions.get(id);
+        if (session === undefined) {
+          return;
+        }
+        session.transitionTo('disconnected');
+        sessions.delete(id);
+      });
+    },
+
     connectionState(id: DeviceId): ConnectionState {
       return sessionFor(id).state;
     },

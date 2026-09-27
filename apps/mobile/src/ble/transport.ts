@@ -500,6 +500,30 @@ export function createCapacitorTransport(options: CapacitorTransportOptions): Se
       await plugin.disconnect(link.pluginId);
     },
 
+    /**
+     * #659. The plugin holds no permission this program could give back —
+     * there is no `forget` on `BleClient`, and on Android this program never
+     * bonds — so forgetting is dropping the link and the record. After it,
+     * `linkFor` answers `device-not-found`, and `discover` is the way back.
+     *
+     * ⚠️ The record goes FIRST, for Web Bluetooth's reason: a notification or
+     * a disconnect callback the plugin delivers after this must find no link
+     * to drive. `seen` keeps the plugin id, because `knownDevices` asking the
+     * plugin about a peripheral is not reaching it.
+     */
+    async forget(id: DeviceId): Promise<void> {
+      const link = links.get(id);
+      if (link === undefined) {
+        return;
+      }
+      links.delete(id);
+      if (link.session.state === 'disconnected') {
+        return;
+      }
+      await teardown(link, 'disconnected');
+      await plugin.disconnect(link.pluginId);
+    },
+
     connectionState(id: DeviceId) {
       return linkFor(id).session.state;
     },

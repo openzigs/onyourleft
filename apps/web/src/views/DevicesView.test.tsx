@@ -20,9 +20,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import type { BluetoothPort } from '@onyourleft/sensors/web-bluetooth';
 
+import { deviceId, type ConnectionState } from '@onyourleft/sensors';
+
 import { tabbableElements } from '../a11y/audit';
+import type { RideSnapshot } from '../ride/controller';
+import { connectionWords } from '../ride/SensorPairing';
+import { idleSnapshot, ridingSnapshot, stubRideController } from '../ride/testing';
 import type { CapabilityProbe } from '../support/bluetooth-support';
-import { mount, settle, type Mounted } from '../testing/mount';
+import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
 
 import { DevicesView } from './DevicesView';
 
@@ -136,18 +141,159 @@ describe('in a browser whose radio is merely off', () => {
   });
 });
 
-describe('in a browser that can pair', () => {
-  it('says plainly that pairing is not built yet rather than showing a dead button', async () => {
-    // #49 owns the pairing flow. Until it lands, a control here would be the
-    // very thing criterion 1 rejects — so the page says so in words.
+describe('in a browser that can pair, handed no controller', () => {
+  // The dead end #659 is about, still reachable in one shape: the platform can
+  // pair and this build was given nothing to pair with. It must stay honest —
+  // no control — and it is the browser gate's control for the walk below.
+  it('offers no pairing control and says why', async () => {
     const { container } = await open(CAPABLE);
     expect(pairingControls(container)).toEqual([]);
-    expect(container.textContent).toContain('Not built yet');
+    expect(container.textContent).toContain('Pairing is not available in this build');
   });
 
   it('states the working-path constraints instead of implying there are none', async () => {
     const { container } = await open(CAPABLE);
     expect(container.textContent).toContain('one press per device');
     expect(container.textContent).toContain('no silent reconnect');
+  });
+});
+
+describe('in a browser that can pair — #659, pairing lives here', () => {
+  async function withController(snapshot: RideSnapshot = idleSnapshot()) {
+    const stub = stubRideController(snapshot);
+    mounted = await mount(<DevicesView capabilities={CAPABLE} controller={stub.controller} />);
+    await settle();
+    return { stub, container: mounted.container };
+  }
+
+  function button(container: HTMLElement, label: string): HTMLButtonElement {
+    const found = [...container.querySelectorAll('button')].find(
+      (each) => each.textContent?.trim() === label,
+    );
+    if (found === undefined) throw new Error(`no button labelled "${label}"`);
+    return found;
+  }
+
+  it('offers one control per kind of device, in the order #49 asks for', async () => {
+    const { container } = await withController();
+    expect(
+      [...container.querySelectorAll('button')]
+        .map((each) => each.textContent?.trim())
+        .filter((label) => label?.startsWith('Pair')),
+    ).toEqual([
+      'Pair a smart trainer',
+      'Pair a heart rate strap',
+      'Pair a power meter',
+      'Pair a speed or cadence sensor',
+    ]);
+  });
+
+  it('passes the role straight to the ride controller, from the keyboard', async () => {
+    const { stub, container } = await withController();
+    await activateWithKeyboard(button(container, 'Pair a heart rate strap'));
+    expect(stub.calls.pair).toEqual(['heart-rate']);
+  });
+
+  it('forgets a paired device through the same controller', async () => {
+    const { stub, container } = await withController(ridingSnapshot());
+    await activateWithKeyboard(button(container, 'Forget KICKR 1F2A'));
+    expect(stub.calls.unpair).toEqual(['kickr']);
+  });
+
+  it('puts the controls first and the limits after them, in a closed disclosure', async () => {
+    const { container } = await withController();
+    const details = container.querySelector('details');
+    const firstPair = button(container, 'Pair a smart trainer');
+    expect(details).not.toBeNull();
+    expect(details?.open).toBe(false);
+    if (details === null) return;
+    // Document order: the first pairing control PRECEDES the disclosure.
+    expect(
+      firstPair.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // What Bluetooth cannot do is in there…
+    expect(details.textContent).toContain('no silent reconnect');
+    expect(details.textContent).toContain('3 more connections');
+    // …and no control is in there: the disclosure is prose, and every control
+    // a rider needs to pair is outside it. The summary is the one tab stop.
+    expect(details.querySelectorAll('a[href], button, input, select, textarea')).toHaveLength(0);
+    expect(tabbableElements(details).map((each) => each.tagName)).toEqual(['SUMMARY']);
+    // No heading in the summary: its exposure varies by browser and reader.
+    expect(details.querySelector('summary h1, summary h2, summary h3, summary h4')).toBeNull();
+  });
+
+  it('keeps "one user gesture per device" visible, outside the disclosure', async () => {
+    const { container } = await withController();
+    const sentence = [...container.querySelectorAll('p')].find((p) =>
+      p.textContent?.includes('one user gesture per device'),
+    );
+    expect(sentence).toBeDefined();
+    expect(sentence?.closest('details')).toBeNull();
+  });
+
+  it('says how many more connections, in the singular when it is one', async () => {
+    const stub = stubRideController(idleSnapshot());
+    stub.set({ connectionsRemaining: 1 });
+    mounted = await mount(<DevicesView capabilities={CAPABLE} controller={stub.controller} />);
+    await settle();
+    expect(mounted.container.textContent).toContain('1 more connection.');
+  });
+
+  it('shows a pairing failure where the rider pressed', async () => {
+    const stub = stubRideController(idleSnapshot());
+    stub.set({ pairingError: 'KICKR 1F2A is already paired.' });
+    mounted = await mount(<DevicesView capabilities={CAPABLE} controller={stub.controller} />);
+    await settle();
+    expect(mounted.container.textContent).toContain('KICKR 1F2A is already paired.');
+  });
+});
+
+describe('each device’s state is in words, not colour or an icon alone (WCAG 2.2 SC 1.4.1)', () => {
+  const STATES: readonly ConnectionState[] = [
+    'connected',
+    'connecting',
+    'reconnecting',
+    'disconnected',
+    'unavailable',
+  ];
+
+  it('says "Not paired" in every row with nothing in it', async () => {
+    const stub = stubRideController(idleSnapshot());
+    mounted = await mount(<DevicesView capabilities={CAPABLE} controller={stub.controller} />);
+    await settle();
+    const rows = [...mounted.container.querySelectorAll('.oyl-pairing__row')];
+    expect(rows).toHaveLength(4);
+    for (const row of rows) {
+      expect(row.querySelector('.oyl-pairing__state')?.textContent).toBe('Not paired');
+    }
+  });
+
+  for (const state of STATES) {
+    it(`names "${state}" in the row's own text`, async () => {
+      const stub = stubRideController(idleSnapshot());
+      stub.set({
+        sensors: [
+          {
+            id: deviceId('kickr'),
+            name: 'KICKR 1F2A',
+            role: 'trainer',
+            capabilities: ['power'],
+            state,
+          },
+        ],
+      });
+      mounted = await mount(<DevicesView capabilities={CAPABLE} controller={stub.controller} />);
+      await settle();
+      const line = mounted.container.querySelector('.oyl-sensor-list .oyl-pairing__state');
+      // The words, in the text a screen reader reads and a colour-blind rider
+      // sees — never carried by a class or an icon alone.
+      expect(line?.textContent).toBe(`KICKR 1F2A: ${connectionWords(state)}`);
+      expect(connectionWords(state)).toMatch(/^[A-Z][a-z]+/);
+    });
+  }
+
+  it('gives every state different words', () => {
+    const words = STATES.map(connectionWords);
+    expect(new Set(words).size).toBe(STATES.length);
   });
 });
