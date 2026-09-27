@@ -1870,7 +1870,7 @@ reloads a harness that takes ten seconds" is reading the old file.** They did re
 the whole critical path: 43 cases at 9.1 s each, run in one worker, came to 6.0 to 7.3 minutes of a
 browser gate that took 271 to 449 s, in a job that ran 8m40s to 13m44s on `main`. The harness does
 all of its work in one `run()` and publishes one object, so a worker-scoped fixture now loads it
-once per query (`''` and `?shadow-map`) and every case reads that result, with every assertion
+once per query (`''`, `?shadow-map`, `?realistic` and `?realistic&trees`) and every case reads that result, with every assertion
 unchanged. On #456's pull request that made the game spec 32 s, the browser gate 88 s and the job
 **7m44s**. The browser gate's slowest spec is now `ride.browser.spec.ts` at about 45 s of case time,
 and the job's largest step is Vitest with coverage at about 150 s. ⚠️ **What this does NOT change**:
@@ -1886,6 +1886,14 @@ case replaced the worker, so every later realistic case reloaded and timed out i
 was cancelled at 20 minutes. A failed `beforeAll` marks the rest of its describe "did not run"
 instead, which was measured both ways round. A new case that needs a slow load of its own takes the
 same shape rather than a longer global `timeout`.
+⚠️ **Since [#644](https://github.com/openzigs/onyourleft/issues/644) #617's three tree cases read a
+load of their own, `game.html?realistic&trees`, under the same hook and budget, and a reviewer who
+remembers them reading `?realistic` is reading the old file.** #617 put their probes inside the
+shared realistic run and took it from 33–48 s to **182 s** on the runner — 117.7 s of it the trees —
+past its 150 s, which turned `main` red. Their own load also asserts the realistic world drew
+(`trees.drawnWorld`), which the shared load had asserted for them. Every phase of a harness run is
+printed as it ends (`game-harness.ts` §`phaseEnds`) and never asserted; read those lines before
+raising a budget.
 
 ⚠️ **The browser is pinned by the lockfile, not by the install command.** `@playwright/test`
 **1.63.0** ships Chromium revision **1243**, and `playwright install chromium` fetches whatever the
