@@ -135,6 +135,12 @@ export const ERASE_REMOVES: readonly string[] = [
   // read off pictures of them — with each ride, and says it goes with the
   // athlete. `deleteAthlete`'s cascade is what makes the line true.
   'what the side camera’s report said about each ride it filmed',
+  // #518. Not a store row: the address, model name and key of a hosted model
+  // the rider set up are kept in `localStorage` (`camera/hosted-model.ts`),
+  // where `deleteAthlete` cannot see them. A key to the rider's own account at
+  // somebody else's service is the last thing an erase should leave behind.
+  // {@link eraseDevice} is what makes the line true.
+  'the address, model name and key you entered for a hosted model',
 ];
 
 /**
@@ -149,22 +155,24 @@ export const ERASE_REMOVES: readonly string[] = [
 export const ERASE_CANNOT_REACH: readonly string[] = [
   'files you have already exported — they are yours, and they are wherever you put them',
   'a ride you have already shared with somebody, which is a copy they hold',
-  // ⚠️ **ADR 0029 D-4's first line, verbatim, since #387 — and NOT its second.**
-  // This list said until #387 that neither was here, because nothing in the
-  // build could send a picture anywhere, and that #387 *"lands both lines"*.
-  // It lands one. #387 sends a picture to the rider's OWN computer, at an
-  // address they typed and switched on (`camera/analysis-endpoint.ts`), so the
-  // first line is now true and is said before the rider presses anything:
+  // ⚠️ **ADR 0029 D-4's first line, verbatim, since #387.** #387 sends a
+  // picture to the rider's OWN computer, at an address they typed and switched
+  // on (`camera/analysis-endpoint.ts`), so this is true and is said before the
+  // rider presses anything:
   //
   //   > a photograph you sent to your own machine to be analysed, which is a
   //   > copy that machine holds
   //
-  // The second — *"a photograph you sent to a hosted model"* — is still false:
-  // the hosted path is not built, because ADR 0029's 2026-09-23 amendment left
-  // whether the policy may cover it to the owner, and the address rule refuses
-  // anything off the rider's own network. Putting it here would be this list
-  // ageing into a lie in the frightening direction, which the header forbids.
+  // D-4's SECOND line — *"a photograph you sent to a hosted model"* — is still
+  // not here, and now for a different reason: #518 built the hosted path, and
+  // the owner ruled it is sent NUMBERS ONLY and never a picture (ADR 0029's
+  // 2026-09-28 amendment). So the line that ships is the one after this, about
+  // what does leave; a line about a photograph would be false in the direction
+  // that frightens.
   'a photograph you sent to your own machine to be analysed, which is a copy that machine holds',
+  // #518, ADR 0029's 2026-09-28 amendment. The hosted service is a third party
+  // and keeps what it keeps; this project cannot compel a deletion.
+  'a question you sent to a service you chose, on your own key, which is a copy that service holds',
   'a photograph you copied off this device yourself, which is wherever you copied it to',
 ];
 
@@ -288,12 +296,15 @@ export async function eraseDevice(
     readonly drafts?: EraseSideStores | undefined;
     /** The palette choice (#672) — `design/theme-selection.ts` §`themeEraser`. */
     readonly theme?: EraseSideStores | undefined;
+    /** The hosted model and its key (#518) — `camera/hosted-model.ts` §`hostedModelEraser`. */
+    readonly hostedModel?: EraseSideStores | undefined;
     readonly athlete?: AthleteRecord | undefined;
   } = {},
 ): Promise<EraseOutcome> {
   const counts = await store.deleteAthlete(athleteId);
   options.drafts?.forget();
   options.theme?.forget();
+  options.hostedModel?.forget();
   if (options.athlete !== undefined) {
     await store.ensureAthlete(options.athlete);
   }

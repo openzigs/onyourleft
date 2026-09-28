@@ -282,6 +282,7 @@ function transferPort(): TransferPort {
     save: () => undefined,
     drafts: { forget: () => undefined },
     theme: { forget: () => undefined },
+    hostedModel: { forget: () => undefined },
     athleteRow: localAthleteRecord(now),
   };
 }

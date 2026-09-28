@@ -142,9 +142,25 @@ describe('what the rider is told before they press it', () => {
     expect(ERASE_CANNOT_REACH).toContain(
       'a photograph you sent to your own machine to be analysed, which is a copy that machine holds',
     );
-    expect(text).not.toContain('hosted');
+    // D-4's second line is about a PHOTOGRAPH sent to a hosted model, and the
+    // owner ruled the hosted path is never sent one (#518) — so that line is
+    // still not here, in either wording.
+    expect(text).not.toContain('photograph you sent to a hosted');
+    expect(text).not.toMatch(/hosted[^,]*photograph|photograph[^,]*hosted/);
     // And what was already true: a picture the rider copied off the device.
     expect(text).toContain('copied off this device');
+  });
+
+  it('names the copy a hosted service holds of a question — #518, and it is not a picture', () => {
+    // ADR 0029's 2026-09-28 amendment writes the line: what leaves on the
+    // hosted path is a question, so what an erase cannot reach is that.
+    expect(ERASE_CANNOT_REACH).toContain(
+      'a question you sent to a service you chose, on your own key, which is a copy that service holds',
+    );
+  });
+
+  it('names the hosted service’s key among what an erase removes — #518', () => {
+    expect(ERASE_REMOVES.join(' ')).toContain('key you entered for a hosted model');
   });
 
   it('says an exported file is out of reach, and that a shared ride is a copy', () => {
@@ -157,7 +173,8 @@ describe('what the rider is told before they press it', () => {
     // The list is short on purpose and every entry is a fact about the
     // architecture. If it ever grows a "we will ask other instances" line, that
     // line must arrive with the instance that makes it true.
-    expect(ERASE_CANNOT_REACH.length).toBeLessThanOrEqual(4);
+    // Five since #518, whose hosted path made the fifth true.
+    expect(ERASE_CANNOT_REACH.length).toBeLessThanOrEqual(5);
   });
 });
 
@@ -298,6 +315,32 @@ describe('erasing, against the real store', () => {
       }),
     );
     expect(forgotten).toStrictEqual(['draft', 'theme']);
+  });
+
+  it('forgets the hosted model and its key after the cascade (#518)', async () => {
+    await seedAthletes(harness);
+    await seed(ATHLETE_A, 1);
+    const forgotten: string[] = [];
+    await harness.write(async (store) =>
+      eraseDevice(store, ATHLETE_A, {
+        hostedModel: { forget: () => void forgotten.push('hosted-model') },
+      }),
+    );
+    expect(forgotten).toStrictEqual(['hosted-model']);
+  });
+
+  it('does not forget the hosted key when the cascade threw (#518)', async () => {
+    const forgotten: string[] = [];
+    const refusing = {
+      deleteAthlete: () => Promise.reject(new Error('refused')),
+      ensureAthlete: () => Promise.reject(new Error('unreachable')),
+    };
+    await expect(
+      eraseDevice(refusing, ATHLETE_A, {
+        hostedModel: { forget: () => void forgotten.push('hosted-model') },
+      }),
+    ).rejects.toThrow('refused');
+    expect(forgotten).toStrictEqual([]);
   });
 
   it('does not forget the palette choice when the cascade threw (#672)', async () => {

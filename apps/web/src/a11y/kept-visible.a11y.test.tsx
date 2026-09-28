@@ -56,7 +56,7 @@ import { mount, settle, type Mounted } from '../testing/mount';
 import { sentencesIn } from '../testing/route-sentences';
 import { emptyTransferPort } from '../testing/transfer-port';
 import { FILES_KEPT_VISIBLE } from '../transfer/TransferView';
-import { ANALYSIS_WHAT_IS_SENT, CAMERA_KEPT_VISIBLE, CameraView } from '../views/CameraView';
+import { CAMERA_AGREED_KEPT_VISIBLE, CAMERA_KEPT_VISIBLE, CameraView } from '../views/CameraView';
 import { DEVICES_KEPT_VISIBLE, DevicesView } from '../views/DevicesView';
 import { RideView } from '../views/RideView';
 import { SETTINGS_KEPT_VISIBLE } from '../views/SettingsView';
@@ -122,10 +122,12 @@ const RIDE_UNCONTROLLED_KEPT_VISIBLE: readonly string[] = [
 const KEPT: Record<RouteId, Kept> = {
   settings: { sentences: SETTINGS_KEPT_VISIBLE },
   camera: {
-    sentences: CAMERA_KEPT_VISIBLE.filter((sentence) => sentence !== ANALYSIS_WHAT_IS_SENT),
-    elsewhere: [ANALYSIS_WHAT_IS_SENT],
+    sentences: CAMERA_KEPT_VISIBLE.filter(
+      (sentence) => !CAMERA_AGREED_KEPT_VISIBLE.includes(sentence),
+    ),
+    elsewhere: CAMERA_AGREED_KEPT_VISIBLE,
     reason:
-      '“Your own computer” renders only once the camera is agreed to, which the walk never does; it is mounted agreed below',
+      '“Your own computer” and the hosted model (#518) render only once the camera is agreed to, which the walk never does; it is mounted agreed below',
   },
   'side-camera': { sentences: SIDE_CAMERA_KEPT_VISIBLE },
   // The walk hands Files a store holding one ride, so its export panel — and

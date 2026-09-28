@@ -37,8 +37,13 @@ import {
   verifyRecordSignature,
   watts,
 } from '@onyourleft/domain';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  HOSTED_MODEL_STORAGE_KEY,
+  readHostedModel,
+  writeHostedModel,
+} from '../camera/hosted-model';
 import { coordinatesIn, insideZone } from '../privacy/boundaries';
 
 import {
@@ -151,6 +156,39 @@ function manifestOf(files: readonly DownloadableFile[]): Record<string, unknown>
     unknown
   >;
 }
+
+describe('the hosted model’s key is in no file the export writes — #518', () => {
+  const KEY = 'fixture-hosted-key-DO-NOT-LEAK-0123456789';
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('exports a whole account from a device holding a key, and the key is not in it', async () => {
+    const rows = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => rows.get(key) ?? null,
+      setItem: (key: string, value: string) => void rows.set(key, value),
+      removeItem: (key: string) => void rows.delete(key),
+    });
+    expect(
+      writeHostedModel({ address: 'https://models.example.invalid', model: 'm', key: KEY }),
+    ).toBe(true);
+    // The device really holds it, through the path the Camera screen reads —
+    // or this would pass over an empty `localStorage`.
+    expect(rows.has(HOSTED_MODEL_STORAGE_KEY)).toBe(true);
+    expect(readHostedModel()?.key).toBe(KEY);
+
+    await seedLibrary(2);
+    const { files } = await runExport();
+    expect(files.length).toBeGreaterThan(2);
+    for (const file of files) {
+      const text = new TextDecoder().decode(file.bytes);
+      expect(text, file.fileName).not.toContain(KEY);
+      expect(text, file.fileName).not.toContain('models.example.invalid');
+    }
+  });
+});
 
 describe('exporting everything', () => {
   it('produces one file per ride plus a manifest', async () => {

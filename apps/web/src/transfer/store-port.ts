@@ -253,6 +253,12 @@ export interface TransferPort {
    */
   readonly theme: DraftStore;
   /**
+   * The hosted model's address, model name and key in `localStorage` (#518),
+   * so an erase can forget them. Required for `theme`'s reason: a caller
+   * cannot build an erase that silently leaves a key behind.
+   */
+  readonly hostedModel: DraftStore;
+  /**
    * The row to recreate after an erase.
    *
    * Erasing removes the athlete row every write path checks, and

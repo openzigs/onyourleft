@@ -78,7 +78,10 @@ describe('the published privacy policy', () => {
     // pins the section AND the count it made false.
     const text = readFileSync(POLICY, 'utf8');
     expect(text).toContain('A second phone you pair as a side camera');
-    expect(text).toContain('exactly **two** network calls');
+    // ⚠️ Three since #518, whose hosted question is the third; the count it
+    // made false is pinned gone as the one before it was.
+    expect(text).toContain('exactly **three** network calls');
+    expect(text).not.toContain('exactly **two** network calls');
     expect(text).not.toContain('exactly **one** network call');
     expect(text).toContain('A pairing lasts one session');
     expect(text).toContain('keeps filming for up to 30 seconds, then stops');
