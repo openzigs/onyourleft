@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DRAWN_FROM,
   inputDigest,
   licenceVerdict,
   encodingWords,
@@ -170,9 +171,17 @@ describe('the input digest — ADR 0026 D-5', () => {
 });
 
 describe('the pipeline’s own table', () => {
-  it('makes every shipped file from a source it names', () => {
+  it('makes every shipped file from a source it names — or draws it, and says so (#624)', () => {
     const ids = new Set(SOURCES.map((source) => source.id));
-    for (const output of OUTPUTS) expect(ids, output.file).toContain(output.from);
+    for (const output of OUTPUTS) {
+      if (output.recipe.how === 'drawn') {
+        expect(output.from, output.file).toBe(DRAWN_FROM);
+        continue;
+      }
+      expect(ids, output.file).toContain(output.from);
+    }
+    // Non-vacuity: the four bicycle maps, and only they, are drawn.
+    expect(OUTPUTS.filter((output) => output.recipe.how === 'drawn')).toHaveLength(4);
   });
 
   it('downloads nothing it does not use', () => {
@@ -255,10 +264,15 @@ describe('the KTX2 step — #618, ADR 0026 D-8', () => {
     expect(normal).not.toContain('--normal-mode');
     const alpha = ktxCreateArguments({ encoding: 'colour-alpha', origin: 'top-left' }, 'i', 'o');
     expect(alpha).toContain('R8G8B8A8_SRGB');
+    // #624: a data map — the bicycle's roughness — is encoded as a normal map
+    // is, linear, and never as sRGB colour, which would bend every value.
+    const data = ktxCreateArguments({ encoding: 'data', origin: 'top-left' }, 'in.png', 'o');
+    expect(data).toEqual(normal.map((arg) => (arg === 'in.jpg' ? 'in.png' : arg)));
+    expect(data).not.toContain('R8G8B8_SRGB');
   });
 
   it('asks for the full mipmap chain, one thread and no silent colour conversion, every time', () => {
-    for (const encoding of ['colour', 'colour-alpha', 'normal'] as const) {
+    for (const encoding of ['colour', 'colour-alpha', 'normal', 'data'] as const) {
       const args = ktxCreateArguments({ encoding, origin: 'top-left' }, 'in', 'out');
       expect(args[0]).toBe('create');
       expect(args).toEqual(
@@ -285,6 +299,9 @@ describe('the KTX2 step — #618, ADR 0026 D-8', () => {
     for (const output of OUTPUTS) {
       const recipe = output.recipe;
       if (recipe.how === 'ktx2') expect(recipe.ktx2.origin, output.file).toBe('bottom-left');
+      // #624: a drawn map is drawn the way its coordinates read it, row 0 at
+      // v = 0, and never went through TextureLoader — so it is not flipped.
+      if (recipe.how === 'drawn') expect(recipe.ktx2.origin, output.file).toBe('top-left');
       if (recipe.how === 'blender') {
         if (recipe.ktx2 !== undefined) expect(recipe.ktx2.origin, output.file).toBe('bottom-left');
         for (const also of recipe.alsoWrites ?? []) expect(also.ktx2.origin).toBe('bottom-left');
@@ -301,11 +318,15 @@ describe('the KTX2 step — #618, ADR 0026 D-8', () => {
     // A colour map is colour, a normal map is normal, never the other way.
     for (const output of OUTPUTS) {
       const recipe = output.recipe;
-      const step =
-        recipe.how === 'ktx2' ? recipe.ktx2 : recipe.how === 'blender' ? recipe.ktx2 : undefined;
+      const step = recipe.how === 'verbatim' ? undefined : recipe.ktx2;
       if (step === undefined) continue;
+      // #624: a roughness map is data — linear, never sRGB colour.
       expect(step.encoding, output.file).toBe(
-        output.file.includes('_nor_gl_') ? 'normal' : 'colour',
+        output.file.includes('_nor_gl_')
+          ? 'normal'
+          : output.file.includes('_rough_')
+            ? 'data'
+            : 'colour',
       );
     }
   });

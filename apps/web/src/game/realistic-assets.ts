@@ -38,6 +38,8 @@
  * - {@link REALISTIC_RIDER} is the body; the bicycle under it is built in
  *   `three-renderer.ts` from `bicycle.ts`'s own parts, because no road bicycle
  *   whose own page states CC0 or CC-BY-4.0 was found (spike 0005).
+ * - {@link REALISTIC_BICYCLE_MAPS} are that bicycle's surfaces since #624:
+ *   four small maps this repository draws, on the geometry it already had.
  *
  * `realistic-assets.test.ts` holds these tables to the pipeline's own list of
  * what it ships, in both directions.
@@ -333,6 +335,37 @@ export function isRealisticVegetation(kind: string): kind is RealisticVegetation
 export const REALISTIC_RIDER = 'rider.glb';
 
 /**
+ * The realistic bicycle's four small maps — #624: drawn from arithmetic by
+ * `tools/realistic/draw-bicycle-maps.ts`, nothing downloaded (ADR 0026 D-4,
+ * ADR 0032 D-1), dedicated `CC0-1.0` as this repository's icons are. What each
+ * part samples on them is `bicycle-surfaces.ts`.
+ *
+ * - `rubberNormal` — the tyres' tread, shoulder and sidewall, and the bar tape;
+ * - `metalNormal` and `metalRoughness` — the chainring's teeth and chain, and
+ *   the cassette on the rear hub's drive side;
+ * - `paintRoughness` — the frame's clear coat, as roughness alone: not
+ *   `MeshPhysicalMaterial`, whose clear-coat term is a second specular lobe on
+ *   every fragment the frame covers.
+ */
+export const REALISTIC_BICYCLE_MAPS = {
+  rubberNormal: 'bicycle_rubber_nor_gl_256.ktx2',
+  metalNormal: 'bicycle_metal_nor_gl_256.ktx2',
+  metalRoughness: 'bicycle_metal_rough_256.ktx2',
+  paintRoughness: 'bicycle_paint_rough_128.ktx2',
+} as const;
+
+/** Which of the bicycle's maps. */
+export type RealisticBicycleMap = keyof typeof REALISTIC_BICYCLE_MAPS;
+
+/** The bicycle's maps, in a fixed order. */
+export const REALISTIC_BICYCLE_MAP_NAMES: readonly RealisticBicycleMap[] = [
+  'rubberNormal',
+  'metalNormal',
+  'metalRoughness',
+  'paintRoughness',
+];
+
+/**
  * Every file the tables above name, once.
  *
  * @test-facing held by `realistic-assets.test.ts`, `realistic-budget.test.ts`
@@ -357,6 +390,7 @@ export function realisticFiles(): readonly string[] {
       REALISTIC_STRUCTURE_SURFACES[surface].normal,
     ]),
     REALISTIC_RIDER,
+    ...REALISTIC_BICYCLE_MAP_NAMES.map((map) => REALISTIC_BICYCLE_MAPS[map]),
   ];
 }
 

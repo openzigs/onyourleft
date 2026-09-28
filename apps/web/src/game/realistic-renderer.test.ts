@@ -66,6 +66,8 @@ import {
 } from './camera';
 import {
   PHOTOGRAPHIC_STRUCTURE_SURFACES,
+  REALISTIC_BICYCLE_MAPS,
+  REALISTIC_BICYCLE_MAP_NAMES,
   REALISTIC_SKY,
   REALISTIC_BOUNDARY_PARTS,
   REALISTIC_BUILDING_SURFACES,
@@ -91,6 +93,7 @@ import {
   prepareRealisticShape,
   readsInstanceTint,
   readsTextureLodBias,
+  realisticBicycleMeshes,
   realisticBicycleTriangles,
   SCATTER_INSTANCE_CAPACITY,
   setRealisticTints,
@@ -107,9 +110,20 @@ import {
   realisticWorldLoaded,
   ScatterBelt,
   WaterBelt,
+  type RealisticBicycleMaps,
   type RealisticLoaders,
   type RealisticShape,
 } from './three-renderer';
+import { CRANK_AXIS_Z, RIDER_BICYCLE_PARTS, RIDER_CRANK_PARTS } from './bicycle';
+import {
+  bandV,
+  CASSETTE_BAND,
+  CHAINRING_BAND,
+  PLAIN_METAL_UV,
+  PLAIN_RUBBER_UV,
+  TAPE_BAND,
+  TYRE_BAND,
+} from './bicycle-surfaces';
 
 /** A mesh's one material's three `type`. */
 function typeOf(mesh: { readonly material: unknown } | undefined): string | undefined {
@@ -1200,6 +1214,17 @@ describe('loading the realistic world — ADR 0026 D-7', () => {
     expect(outcome.loaded ? '' : outcome.detail).toMatch(/old_stone_wall_nor_gl/);
   });
 
+  it('loads the bicycle’s four drawn maps with everything else, and none of it without them — #624', async () => {
+    const reading = loaders();
+    await expect(loadRealisticWorld(reading)).resolves.toEqual({ loaded: true });
+    for (const map of REALISTIC_BICYCLE_MAP_NAMES) {
+      expect(reading.asked).toContain(realisticUrl(REALISTIC_BICYCLE_MAPS[map]));
+    }
+    const outcome = await loadRealisticWorld(loaders('bicycle_rubber_nor_gl'));
+    expect(outcome).toMatchObject({ loaded: false });
+    expect(outcome.loaded ? '' : outcome.detail).toMatch(/bicycle_rubber_nor_gl/);
+  });
+
   it('says it was offline when the browser says so, which is the fallback D-7 names', async () => {
     vi.stubGlobal('navigator', { onLine: false });
     const outcome = await loadRealisticWorld(loaders('farm_field'));
@@ -1521,6 +1546,9 @@ describe('what the realistic world costs the GPU, lever by lever — #619', () =
   });
 });
 
+/** The realistic bicycle as built when #624 gave it surfaces: 5 308 triangles. */
+const BICYCLE_TRIANGLES_BEFORE_SURFACES = 5_308;
+
 describe('the realistic bicycle — #369', () => {
   it('is built from bicycle.ts’s own parts inside its budget', () => {
     // ⚠️ **This is the only reader of `realisticBicycleTriangles`, and it has
@@ -1537,6 +1565,155 @@ describe('the realistic bicycle — #369', () => {
     const triangles = realisticBicycleTriangles();
     expect(triangles).toBeGreaterThan(1_000);
     expect(triangles).toBeLessThanOrEqual(REALISTIC_BICYCLE_TRIANGLES);
+    // #624: surfaces as maps, not triangles — the bicycle as built stays at
+    // the 5 308 #506's frame sum counts, or under it. The ceiling above is
+    // 12 000 and would let 6 000 more through, every one of them out of the
+    // frame's 1 350 spare.
+    expect(triangles).toBeLessThanOrEqual(BICYCLE_TRIANGLES_BEFORE_SURFACES);
+  });
+});
+
+describe('the realistic bicycle’s surfaces — #624', () => {
+  /** Stand-in textures: what matters is which one each material wears. */
+  const maps: RealisticBicycleMaps = {
+    rubberNormal: { name: 'rubberNormal' } as never,
+    metalNormal: { name: 'metalNormal' } as never,
+    metalRoughness: { name: 'metalRoughness' } as never,
+    paintRoughness: { name: 'paintRoughness' } as never,
+  };
+  const built = realisticBicycleMeshes(maps, 3);
+  type Built = typeof built.frame;
+  /** A mesh's one material, as the fields this reads. */
+  const materialOf = (mesh: Built): Record<string, unknown> =>
+    mesh.material as unknown as Record<string, unknown>;
+  /** Every vertex of a mesh's geometry: where it is and where it samples. */
+  const verticesOf = (
+    mesh: Built,
+  ): readonly { x: number; y: number; z: number; u: number; v: number }[] => {
+    const position = mesh.geometry.getAttribute('position');
+    const uv = mesh.geometry.getAttribute('uv');
+    expect(uv, 'a uv attribute').toBeDefined();
+    expect(uv.count).toBe(position.count);
+    return Array.from({ length: position.count }, (_, at) => ({
+      x: position.getX(at),
+      y: position.getY(at),
+      z: position.getZ(at),
+      u: uv.getX(at),
+      v: uv.getY(at),
+    }));
+  };
+  const close = (a: number, b: number): boolean => Math.abs(a - b) < 1e-6;
+
+  it('wears only materials this file constructs, on the three meshes the bicycle already was — D-11', () => {
+    for (const mesh of [built.frame, built.rubber, built.metal, built.cranks]) {
+      expect(typeOf(mesh)).toBe('MeshStandardMaterial');
+      expect(isConstructedMaterial(mesh.material as never)).toBe(true);
+      // No colour map: the per-instance tint (#368) multiplies the colour alone.
+      expect(materialOf(mesh)['map'] ?? null).toBeNull();
+    }
+    // The cranks share the metal's material, as they did: no new draw state.
+    expect(built.cranks.material).toBe(built.metal.material);
+  });
+
+  it('puts each map on the material it was drawn for', () => {
+    expect(materialOf(built.rubber)['normalMap']).toBe(maps.rubberNormal);
+    expect(materialOf(built.metal)['normalMap']).toBe(maps.metalNormal);
+    expect(materialOf(built.metal)['roughnessMap']).toBe(maps.metalRoughness);
+    expect(materialOf(built.frame)['roughnessMap']).toBe(maps.paintRoughness);
+    // The paint is roughness ALONE — no normal map, and not a clear-coat lobe.
+    expect(materialOf(built.frame)['normalMap'] ?? null).toBeNull();
+    expect(typeOf(built.frame)).not.toBe('MeshPhysicalMaterial');
+  });
+
+  it('samples the tread at the crown of each tyre, and a whole number of tread tiles round it', () => {
+    const wheels = RIDER_BICYCLE_PARTS.filter((part) => part.solid.shape === 'ring');
+    expect(wheels).toHaveLength(2);
+    const rubber = verticesOf(built.rubber);
+    for (const wheel of wheels) {
+      if (wheel.solid.shape !== 'ring') continue;
+      const outer = wheel.solid.radius + wheel.solid.thickness;
+      const crown = rubber.filter((vertex) =>
+        close(Math.hypot(vertex.y - wheel.y, vertex.z - wheel.z), outer),
+      );
+      // Non-vacuity: the crown ring of the torus, 49 vertices a side of each seam.
+      expect(crown.length, wheel.name).toBeGreaterThan(40);
+      for (const vertex of crown) {
+        expect(
+          close(vertex.v, bandV(TYRE_BAND, 0)) || close(vertex.v, bandV(TYRE_BAND, 1)),
+          `${wheel.name} ${String(vertex.v)}`,
+        ).toBe(true);
+      }
+      const tiles = Math.max(...crown.map((vertex) => vertex.u));
+      expect(tiles, wheel.name).toBeGreaterThan(5);
+      expect(Number.isInteger(Math.round(tiles * 1e6) / 1e6), wheel.name).toBe(true);
+    }
+  });
+
+  it('tapes the bar along its length, and puts the saddle on the flat bead', () => {
+    const rubber = verticesOf(built.rubber);
+    const tape = rubber.filter(
+      (vertex) => vertex.v >= bandV(TAPE_BAND, 0) - 1e-6 && vertex.v <= bandV(TAPE_BAND, 1) + 1e-6,
+    );
+    expect(tape.length).toBeGreaterThan(100);
+    // Along the bar the tape repeats: a coordinate that ran 0 to 1 would
+    // stretch one tile over every part.
+    expect(Math.max(...tape.map((vertex) => vertex.u))).toBeGreaterThan(2);
+    const saddle = RIDER_BICYCLE_PARTS.find((part) => part.solid.shape === 'box');
+    const onSaddle = rubber.filter(
+      (vertex) =>
+        saddle !== undefined &&
+        close(vertex.u, PLAIN_RUBBER_UV[0]) &&
+        close(vertex.v, PLAIN_RUBBER_UV[1]),
+    );
+    expect(onSaddle.length).toBe(36);
+  });
+
+  it('puts the chainring’s teeth at its crown and the cassette across the REAR hub only, drive side out', () => {
+    const chainring = RIDER_CRANK_PARTS.find((part) => part.solid.shape === 'ring');
+    if (chainring === undefined || chainring.solid.shape !== 'ring')
+      throw new Error('no chainring');
+    const crownRadius = chainring.solid.radius + chainring.solid.thickness / 2;
+    const cranks = verticesOf(built.cranks);
+    const crown = cranks.filter((vertex) => close(Math.hypot(vertex.y, vertex.z), crownRadius));
+    expect(crown.length).toBeGreaterThan(30);
+    for (const vertex of crown) {
+      expect(
+        close(vertex.v, bandV(CHAINRING_BAND, 0)) || close(vertex.v, bandV(CHAINRING_BAND, 1)),
+      ).toBe(true);
+    }
+    // 48 teeth, eight to a tile: six tiles round the ring, so it closes.
+    expect(Math.max(...crown.map((vertex) => vertex.u))).toBeCloseTo(6, 6);
+    const metal = verticesOf(built.metal);
+    const cassette = metal.filter(
+      (vertex) =>
+        vertex.v >= bandV(CASSETTE_BAND, 0) - 1e-6 && vertex.v <= bandV(CASSETTE_BAND, 1) + 1e-6,
+    );
+    expect(cassette.length).toBeGreaterThan(20);
+    const rear = RIDER_BICYCLE_PARTS.filter(
+      (part) => part.solid.shape === 'ring' && part.z < CRANK_AXIS_Z,
+    );
+    expect(rear).toHaveLength(1);
+    for (const vertex of cassette) {
+      // On the rear hub — the wheel behind the bottom bracket — and nowhere else.
+      expect(Math.hypot(vertex.y - (rear[0]?.y ?? 0), vertex.z - (rear[0]?.z ?? 0))).toBeLessThan(
+        0.021,
+      );
+      // The drive side, +x, is the band's far end; the other side its near end.
+      const across =
+        (vertex.v - bandV(CASSETTE_BAND, 0)) / (bandV(CASSETTE_BAND, 1) - bandV(CASSETTE_BAND, 0));
+      expect(across).toBeCloseTo(0.5 + vertex.x / 0.1, 6);
+    }
+    // Everything else metal is plain.
+    const plain = metal.filter((vertex) => close(vertex.v, PLAIN_METAL_UV[1]));
+    expect(plain.length + cassette.length).toBe(metal.length);
+  });
+
+  it('paints the frame by the metre, round each tube and along it', () => {
+    const frame = verticesOf(built.frame);
+    expect(Math.min(...frame.map((vertex) => vertex.u))).toBeGreaterThanOrEqual(0);
+    expect(Math.max(...frame.map((vertex) => vertex.u))).toBeLessThanOrEqual(1);
+    // The longest tube is over two paint tiles long.
+    expect(Math.max(...frame.map((vertex) => vertex.v))).toBeGreaterThan(2);
   });
 });
 

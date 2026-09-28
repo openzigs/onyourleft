@@ -23,6 +23,8 @@ import { TRANSCODER_FILES, transcoderSource } from '../../tools/basis/transcoder
 
 import {
   PHOTOGRAPHIC_STRUCTURE_SURFACES,
+  REALISTIC_BICYCLE_MAPS,
+  REALISTIC_BICYCLE_MAP_NAMES,
   REALISTIC_RIDER,
   REALISTIC_SKY,
   REALISTIC_STRUCTURE_SURFACES,
@@ -37,6 +39,7 @@ import {
   environmentMapBytes,
   HARD_SWAP_TREE_LEVELS,
   estimatedTextureBytes,
+  REALISTIC_BICYCLE_SURFACES,
   REALISTIC_BUILD_BYTES,
   REALISTIC_FRAME_TRIANGLES,
   REALISTIC_GROUND_BLOBS,
@@ -381,9 +384,14 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
    * each a KTX2 file, whose own header says its size and encoding.
    */
   const textures = (): readonly {
-    readonly role: 'surface' | 'structure' | 'model' | 'impostor';
+    readonly role: 'surface' | 'structure' | 'model' | 'impostor' | 'bicycle';
     readonly facts: Ktx2Facts;
   }[] => [
+    // #624: the bicycle's four drawn maps.
+    ...REALISTIC_BICYCLE_MAP_NAMES.map((map) => ({
+      role: 'bicycle' as const,
+      facts: fileKtx2Facts(at(REALISTIC_BICYCLE_MAPS[map])),
+    })),
     ...[REALISTIC_SURFACES.road, REALISTIC_SURFACES.ground].flatMap((maps) =>
       [maps.colour, maps.normal].map((file) => ({
         role: 'surface' as const,
@@ -498,6 +506,34 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
         expect(strip, model.impostor).toMatchObject({ scheme: 'etc1s', alpha: true });
         expect(onTheTablet(strip)).toBe(1);
       }
+    }
+  });
+
+  it('adds the bicycle’s surfaces inside #624’s own ceiling, texture memory and build alike', () => {
+    const bicycle = textures().filter((each) => each.role === 'bicycle');
+    // Non-vacuity: all four, read.
+    expect(bicycle).toHaveLength(REALISTIC_BICYCLE_MAP_NAMES.length);
+    const memory = bicycle.reduce(
+      (sum, { facts }) =>
+        sum +
+        estimatedTextureBytes({ ...facts, bytesPerTexel: onTheTablet(facts), mipmapped: true }),
+      0,
+    );
+    const build = REALISTIC_BICYCLE_MAP_NAMES.reduce(
+      (sum, map) => sum + statSync(at(REALISTIC_BICYCLE_MAPS[map])).size,
+      0,
+    );
+    console.log(
+      `#624: the bicycle's maps are ${String(Math.round(memory))} bytes estimated on the tablet, ${String(build)} bytes in the build`,
+    );
+    expect(memory).toBeLessThanOrEqual(REALISTIC_BICYCLE_SURFACES.textureBytes);
+    expect(build).toBeLessThanOrEqual(REALISTIC_BICYCLE_SURFACES.buildBytes);
+    // Every one of them at or under its class's size, and priced as UASTC.
+    for (const { facts } of bicycle) {
+      expect(Math.max(facts.width, facts.height)).toBeLessThanOrEqual(
+        REALISTIC_TEXTURE_PIXELS.bicycle,
+      );
+      expect(onTheTablet(facts)).toBe(DEVICE_BYTES_PER_TEXEL.uastc);
     }
   });
 

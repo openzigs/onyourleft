@@ -93,6 +93,10 @@ export const REALISTIC_TEXTURE_CEILING_PIXELS = 2048;
  *   about a tenth of the screen's height, and 512 px over Poly Haven's 2 m
  *   repeat is 4 mm a texel, which is finer than the tablet can show there.
  *   Chosen, like every figure here, not measured on a device.
+ * - `bicycle` 256 — #624: the realistic bicycle's drawn maps. A tyre at the
+ *   chase camera is a dozen pixels across on the tablet, and a 256-texel tile
+ *   of tread is 0.6 mm a texel; the maps are drawn at this size and never
+ *   downsized, because there is no source larger than they are.
  *
  * @test-facing held by `realistic-budget.test.ts`, which reads every committed
  * realistic file back off disk against it; the renderer spends it only on the
@@ -104,6 +108,7 @@ export const REALISTIC_TEXTURE_PIXELS = {
   model: 512,
   impostor: 2048,
   structure: 512,
+  bicycle: 256,
 } as const;
 
 /**
@@ -481,6 +486,28 @@ export const DEVICE_BYTES_PER_TEXEL = {
   etc1s: 0.5,
   'etc1s-alpha': 1,
   uastc: 1,
+} as const;
+
+/**
+ * What the realistic bicycle's surfaces may add — #624's own ceiling, inside
+ * {@link REALISTIC_TEXTURE_MEMORY_BYTES} and {@link REALISTIC_BUILD_BYTES}:
+ * **2 MiB** of texture memory as the tablet is handed it, and **0.5 MiB** of
+ * build. What the four maps spend is 283 989 bytes estimated — three 256²
+ * UASTC maps at a byte a texel and a 128² one, each a third again for its
+ * mipmaps — and about 35 KB of KTX2 in the build; `realistic-budget.test.ts`
+ * reads both off the committed files and prints them.
+ *
+ * ⚠️ **No triangles and no draw calls**: the maps go on the three meshes the
+ * bicycle already was, so the frame's triangle sum and #506's 1 350 spare are
+ * unchanged.
+ *
+ * @test-facing held by `realistic-budget.test.ts`, which reads the committed
+ * bicycle maps back off disk against it; the renderer spends it only on the
+ * realistic path
+ */
+export const REALISTIC_BICYCLE_SURFACES = {
+  textureBytes: 2 * MEBIBYTE,
+  buildBytes: MEBIBYTE / 2,
 } as const;
 
 /**

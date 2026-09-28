@@ -31,6 +31,12 @@
  * step or the upstream wrote — `encode-ktx2.ts` is that step. Any other
  * version is refused, for Blender's reason.
  *
+ * ## Some maps are drawn, not downloaded — #624
+ *
+ * The realistic bicycle's four maps have no upstream: `draw-bicycle-maps.ts`
+ * draws them from arithmetic, this writes each as a PNG into the scratch
+ * stage, and the pinned `ktx` encodes it like any other picture.
+ *
  * ## `--check`: the reproducibility assertion
  *
  * #430's criterion is that re-running the pipeline reproduces the committed
@@ -56,6 +62,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { encodePng } from '../icons/generate-icons';
+
+import { drawBicycleMap, pixelDigest } from './draw-bicycle-maps';
 import { encodeKtx2, pinnedImageEncoder, requirePinnedKtx, withKtx2Images } from './encode-ktx2';
 import { LOCK, RAW } from './fetch-assets';
 import {
@@ -127,6 +136,16 @@ function make(output: OutputSpec, into: string, stage: string): unknown {
   if (recipe.how === 'ktx2') {
     encodeKtx2(recipe.ktx2, join(RAW, output.from, recipe.file), join(into, output.file));
     return undefined;
+  }
+  if (recipe.how === 'drawn') {
+    // #624: drawn here, written as a PNG into the scratch stage, and encoded.
+    // The PNG's own bytes are never compared — zlib's may drift — only the
+    // KTX2 the encoder makes of its pixels, and those pixels' digest.
+    const drawn = drawBicycleMap(recipe.map);
+    const picture = join(stage, `${output.file}.png`);
+    writeFileSync(picture, encodePng(drawn.size, drawn.pixels));
+    encodeKtx2(recipe.ktx2, picture, join(into, output.file));
+    return { pixels: pixelDigest(drawn) };
   }
   const made = recipe.made ?? output.file;
   const report = join(stage, `${output.file}.report.json`);

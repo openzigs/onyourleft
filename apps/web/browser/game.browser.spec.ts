@@ -52,6 +52,7 @@ import {
 } from '../src/camera/presence';
 import {
   PHOTOGRAPHIC_STRUCTURE_SURFACES,
+  REALISTIC_BICYCLE_MAP_NAMES,
   REALISTIC_VEGETATION,
   REALISTIC_VEGETATION_KINDS,
 } from '../src/game/realistic-assets';
@@ -906,6 +907,21 @@ function shiftMissedBy(
   return Math.sqrt(miss) / Math.max(1e-6, Math.sqrt(shift));
 }
 
+/**
+ * The luma variance the front tyre's tread must read back between — #624, in
+ * 8-bit luma squared over `game-harness.ts` §`treadProbe`'s 27 pixels.
+ *
+ * Measured on the pinned Chromium on 2026-09-27: **23.4** as the product draws
+ * it and **4.3** with the rubber's normal map off. The variance a normal map
+ * adds grows about as the square of its strength, so at half strength the
+ * tread reads about 4.3 + 19.1 / 4 ≈ 9 and at twice it about 4.3 + 19.1 × 4 ≈
+ * 81: the floor sits between the half and the product, the ceiling between
+ * the product and the double. The mutations in #624's pull request are what
+ * checked it.
+ */
+const TREAD_VARIANCE_FLOOR = 14;
+const TREAD_VARIANCE_CEILING = 45;
+
 /** #617's trees' own load — #644. @see TreeLevelMeasurement */
 const TREES_QUERY = '?realistic&trees';
 
@@ -914,7 +930,8 @@ const REALISTIC_PUBLIC = fileURLToPath(new URL('../public/realistic/', import.me
 
 /**
  * How many images the realistic world holds, once per image — #618's review:
- * four surface maps, two a photographic structure surface, and every image in
+ * four surface maps, two a photographic structure surface, the bicycle's four
+ * (#624), and every image in
  * a vegetation model plus its impostor, read off the committed files exactly as
  * `realistic-textures.test.ts` reads them.
  */
@@ -923,6 +940,8 @@ function realisticImageCount(): number {
   return (
     4 +
     2 * PHOTOGRAPHIC_STRUCTURE_SURFACES.length +
+    // #624: the bicycle's four drawn maps.
+    REALISTIC_BICYCLE_MAP_NAMES.length +
     models.reduce(
       (sum, model) =>
         sum +
@@ -3167,6 +3186,56 @@ test.describe('the realistic world — ADR 0026', () => {
         `after ${String(measured.foliageOrder.opaque)} opaque, against ` +
         `${String(measured.foliageOrderControl.cutBeforeOpaque)} before an opaque draw unasked`,
     );
+  });
+
+  test('reads the front tyre’s tread back between a floor and a ceiling, and the control under the floor — #624', async ({
+    harnessRun,
+  }) => {
+    // A square of the front tyre's tread, facing a camera brought low, as the
+    // product draws it and with the rubber's normal map off. @see treadProbe
+    const { tread } = await realistic(harnessRun);
+    console.log(
+      `#624: the front tyre's tread, ${String(tread.pixels)} pixels ${tread.distanceMetres.toFixed(2)} m ` +
+        `from the eye — luma variance ${tread.variance.toFixed(2)} (mean ${tread.mean.toFixed(1)}), ` +
+        `${tread.controlVariance.toFixed(2)} with the normal map off, against a floor of ` +
+        `${String(TREAD_VARIANCE_FLOOR)} and a ceiling of ${String(TREAD_VARIANCE_CEILING)}; ` +
+        `the same square with no bicycle ${tread.emptyMean.toFixed(1)}`,
+    );
+    // Non-vacuity: the square is the tyre — dark rubber where the empty frame
+    // is road — and it is the square the probe says it is.
+    expect(tread.pixels).toBe(27);
+    expect(tread.mean).toBeLessThan(tread.emptyMean / 2);
+    expect(tread.mean).toBeGreaterThan(5);
+    // THE CONTROL: the tyre's own curve and the light across it, with no
+    // tread, fall under the floor — so what clears it below is the tread.
+    expect(tread.controlVariance).toBeLessThan(TREAD_VARIANCE_FLOOR);
+    // The product, bounded BOTH ways (#621's lesson): a tread drawn at half
+    // strength is under the floor, and one drawn at twice it over the ceiling.
+    expect(tread.variance).toBeGreaterThan(TREAD_VARIANCE_FLOOR);
+    expect(tread.variance).toBeLessThan(TREAD_VARIANCE_CEILING);
+  });
+
+  test('still tells the three realistic bicycles apart by their tints, on the paint that now has a roughness map — #624, #368', async ({
+    harnessRun,
+  }) => {
+    // The same bicycle, the same place and light, drawn as each rider in turn;
+    // a square of its fork leg read back. @see treadProbe
+    const {
+      tread: { forks },
+    } = await realistic(harnessRun);
+    console.log(`#624: the fork as the rider, the bot and the ghost — ${JSON.stringify(forks)}`);
+    const channelsApart = (a: readonly number[], b: readonly number[]): number =>
+      Math.max(...[0, 1, 2].map((channel) => Math.abs((a[channel] ?? 0) - (b[channel] ?? 0))));
+    for (const colour of [forks.rider, forks.bot, forks.ghost]) expect(colour).toHaveLength(3);
+    // Non-vacuity: the pale paint is there, not the road or the sky.
+    expect(Math.min(...forks.rider)).toBeGreaterThan(60);
+    expect(channelsApart(forks.rider, forks.bot)).toBeGreaterThan(30);
+    expect(channelsApart(forks.rider, forks.ghost)).toBeGreaterThan(30);
+    expect(channelsApart(forks.bot, forks.ghost)).toBeGreaterThan(30);
+    // Each in its own hue: the bot's orange is red over blue, the ghost's slate
+    // blue over red, and the rider's white tint leaves the paint's own grey.
+    expect((forks.bot[0] ?? 0) - (forks.bot[2] ?? 0)).toBeGreaterThan(30);
+    expect((forks.ghost[2] ?? 0) - (forks.ghost[0] ?? 0)).toBeGreaterThan(5);
   });
 
   test('turns the realistic rider’s legs with the cranks, and holds them when the cadence goes — #369, #349', async ({
