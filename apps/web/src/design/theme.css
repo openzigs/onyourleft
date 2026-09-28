@@ -1334,9 +1334,32 @@ a.oyl-button {
  * is what they do during one. The spec holds the first two groups to "no
  * scrolling" at both tablet viewports and the third at the wider one only.
  *
- * Width rather than `orientation`, for `.oyl-game--riding`'s reason: a tablet
- * held upright is 800 px wide and gets one column because 800 px is one
- * column's worth, not because it is upright.
+ * ## Room for a standing notice — #692
+ *
+ * ⚠️ **The table above is the old file since #692, and a reviewer who
+ * remembers *Pause* / *Stop* under the four cards is reading it.** A notice
+ * that stands for the rest of a ride — #526's *No notification*, a storage
+ * failure, #551's lost side camera — had never been rendered by the gate, and
+ * measured it took the controls under the fold: *No notification* stood above
+ * *Pause* and put it at −77.9 px in the shell, and upright a notice anywhere
+ * in the Live group put the workout's *Ride* at −36.3. Two changes, one rule —
+ * nothing whose height changes during a ride sits above a ride control in its
+ * column:
+ *
+ *   - `RideView.tsx` §`LiveRide` puts the ride controls straight after the
+ *     Live heading, then the side camera, then the notices, then the cards and
+ *     the clock. The cards are what a notice moves now, and they tighten while
+ *     one stands (below).
+ *   - A tablet held upright is two columns, by the second media query here.
+ *
+ * ⚠️ **"Width rather than orientation" used to end this comment, and it still
+ * holds for the phone**: a phone on its side is 844 px wide and 390 tall, and
+ * gets one column. What admits the upright tablet is its HEIGHT — 60rem of it
+ * — beside a width of 48rem, which is two columns of 19 to 20rem once the
+ * rail and the padding are taken off; the landscape tablets already ran
+ * 22.5rem columns.
+ * With both columns starting at the top, nothing the Live group gains can move
+ * the trainer group, at any size.
  */
 .oyl-ride {
   display: grid;
@@ -1350,7 +1373,35 @@ a.oyl-button {
   margin-top: 0;
 }
 
-@media (min-width: 60rem) {
+/*
+ * #692: while a notice stands in the Live group, the metric cards tighten.
+ *
+ * Since #692 the ride controls come first in that group and a standing notice
+ * after them (`RideView.tsx` §`LiveRide`), so what a notice pushes down is the
+ * four cards rather than *Pause* / *Stop*. A 156 px notice put their lower row
+ * 45.9 px under the fold on the owner's tablet in the Android shell; this takes
+ * the card padding, the gap between them and the space above them to the
+ * small step — 40 px off two rows, and 8 more above them, because that margin
+ * collapses with the notice's own — and leaves the numbers themselves —
+ * `MetricGrid.tsx` §`MINIMUM_PRIMARY_METRIC_REM` — exactly the size they were.
+ * Measured in the pinned Chromium on a Mac: the cards end 2.1 px above that
+ * fold rather than 45.9 under it. `rideview.browser.spec.ts` §"#692"
+ * publishes where they end at every tablet, and holds the tightening.
+ *
+ * A notice beside the heading (#647's) is not a child of the group and does
+ * not count: it costs the cards its height less the heading's, which is what
+ * it always cost them.
+ */
+.oyl-ride__group--live:has(> .oyl-status, > .oyl-ride__side-camera) > .oyl-metric-grid {
+  gap: var(--oyl-space-sm);
+  margin-top: var(--oyl-space-sm);
+}
+
+.oyl-ride__group--live:has(> .oyl-status, > .oyl-ride__side-camera) .oyl-metric {
+  padding: var(--oyl-space-sm);
+}
+
+@media (min-width: 60rem), (min-width: 48rem) and (min-height: 60rem) {
   .oyl-ride {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
