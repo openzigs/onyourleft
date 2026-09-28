@@ -16,6 +16,7 @@ import { BYSTANDER_SENTENCE } from '../camera/consent';
 import {
   HOSTED_CONSENT,
   HOSTED_MODEL_STORAGE_KEY,
+  HOSTED_MODEL_REFUSAL_TEXT,
   readHostedModel,
   writeHostedModel,
 } from '../camera/hosted-model';
@@ -1140,6 +1141,34 @@ describe('a hosted model, on your own key — #518', () => {
     expect(sent[0]?.init.body as string).not.toContain('image');
     expect(camera.calls).not.toContain('capture');
     expect(document.body.textContent).toContain('understood the question');
+  });
+
+  it('never sends a saved key to a different address typed with the key box blank — #760 review', async () => {
+    const { send, sent } = hostedSend();
+    await wired(send);
+    await saveService();
+    await typeInto(field('oyl-hosted-address'), 'https://other.example.invalid');
+    const form = field('oyl-hosted-address').form;
+    if (form === null) {
+      throw new Error('the address box is in no form');
+    }
+    await submitForm(form);
+    expect(document.body.textContent).toContain(
+      HOSTED_MODEL_REFUSAL_TEXT['key-for-another-address'],
+    );
+    expect(readHostedModel()?.address).toBe('https://models.example.invalid');
+    hostedBox()?.click();
+    await settle();
+    const ask = button('Send a test question');
+    if (ask === undefined) {
+      expect.unreachable('no send control once turned on');
+      return;
+    }
+    await activateWithKeyboard(ask);
+    await settle();
+    for (const request of sent) {
+      expect(request.url).not.toContain('other.example.invalid');
+    }
   });
 
   it('forgets the service and its key, and turns the hosted model off', async () => {

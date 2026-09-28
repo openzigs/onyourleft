@@ -19,6 +19,7 @@ import {
   HOSTED_MODEL_STORAGE_KEY,
   hostedCompletionsUrl,
   hostedModelDecision,
+  hostedModelDecisionKeepingKey,
   hostedModelEraser,
   MAXIMUM_KEY_LENGTH,
   readHostedModel,
@@ -134,6 +135,55 @@ describe('what the rider typed', () => {
       expect(text).not.toContain(FIXTURE_KEY);
       expect(text).not.toContain('fixture');
     }
+  });
+});
+
+describe('a blank key box keeps the saved key for its own address only — #760 review', () => {
+  const OTHER = 'https://other.example.invalid';
+
+  it('keeps the saved key when only the model name changes', () => {
+    const decision = hostedModelDecisionKeepingKey(
+      { ...GOOD, model: 'another-model', key: '' },
+      GOOD,
+    );
+    expect(decision.model).toStrictEqual({ ...GOOD, model: 'another-model' });
+  });
+
+  it('treats /v1 and a trailing slash after the same host as the same address', () => {
+    const decision = hostedModelDecisionKeepingKey(
+      { ...GOOD, address: `${GOOD.address}/v1/`, key: '' },
+      GOOD,
+    );
+    expect(decision.model?.key).toBe(GOOD.key);
+  });
+
+  it('refuses a blank key for a different address rather than sending the saved key there', () => {
+    const decision = hostedModelDecisionKeepingKey({ ...GOOD, address: OTHER, key: '' }, GOOD);
+    expect(decision.model).toBeUndefined();
+    expect(decision.refusal).toBe('key-for-another-address');
+  });
+
+  it('takes a typed key for a different address', () => {
+    const decision = hostedModelDecisionKeepingKey(
+      { ...GOOD, address: OTHER, key: 'a-new-key-for-the-other-service' },
+      GOOD,
+    );
+    expect(decision.model).toStrictEqual({
+      address: OTHER,
+      model: GOOD.model,
+      key: 'a-new-key-for-the-other-service',
+    });
+  });
+
+  it('asks for a key when none is saved', () => {
+    expect(hostedModelDecisionKeepingKey({ ...GOOD, key: '' }, undefined).refusal).toBe('no-key');
+  });
+
+  it('reports an address refusal before the key one', () => {
+    expect(
+      hostedModelDecisionKeepingKey({ ...GOOD, address: 'http://x.invalid', key: '' }, GOOD)
+        .refusal,
+    ).toBe('not-https');
   });
 });
 

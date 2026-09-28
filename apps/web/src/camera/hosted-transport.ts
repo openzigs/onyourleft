@@ -103,6 +103,15 @@ function failed(failure: HostedFailure): HostedOutcome {
  * the rider's own computer; these are the same facts about a service.
  */
 function hostedOutcomeOf(status: number, body: string): HostedOutcome {
+  // Read before `readAnalysisReply`, whose wording is for the rider's own
+  // computer: there a 404 or a 429 means the address is wrong, and on a paid
+  // hosted service they are the quota and the model name (#760 review).
+  if (status === 429) {
+    return failed('over-limit');
+  }
+  if (status === 400 || status === 404 || status === 422) {
+    return failed('request-refused');
+  }
   const read = readAnalysisReply({ status, body });
   if (read.kind === 'described') {
     return read;

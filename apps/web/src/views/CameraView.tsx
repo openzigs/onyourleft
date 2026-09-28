@@ -94,7 +94,7 @@ import {
   forgetHostedModel,
   HOSTED_CONSENT,
   HOSTED_MODEL_REFUSAL_TEXT,
-  hostedModelDecision,
+  hostedModelDecisionKeepingKey,
   readHostedModel,
   writeHostedModel,
   type HostedModelRefusal,
@@ -1010,11 +1010,9 @@ function HostedSection({ controller }: { readonly controller: CameraController }
   const sentence = hostedSentence(state);
 
   const save = (): void => {
-    // A blank key box keeps the saved key: it is never filled back in, so a
-    // rider changing the model name would otherwise have to paste it again.
-    const stored = readHostedModel();
-    const typedKey = key === '' && stored !== undefined ? stored.key : key;
-    const decision = hostedModelDecision({ address, model, key: typedKey });
+    // A blank key box keeps the saved key, for the address it was saved with
+    // and no other — `hostedModelDecisionKeepingKey` says why.
+    const decision = hostedModelDecisionKeepingKey({ address, model, key }, readHostedModel());
     setRefusal(decision.refusal);
     if (decision.model === undefined) {
       setMessage(undefined);

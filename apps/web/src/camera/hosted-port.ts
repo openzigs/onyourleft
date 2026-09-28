@@ -75,6 +75,18 @@ export type HostedFailure =
   | 'no-answer'
   /** The service refused the key. */
   | 'key-refused'
+  /**
+   * The service said too many requests, or the account is over its limit —
+   * an HTTP 429. On a paid service this is among the likeliest failures, and
+   * the address is right, so it is not `not-a-model-service` (#760 review).
+   */
+  | 'over-limit'
+  /**
+   * The service turned the question down — an HTTP 400, 404 or 422. From an
+   * OpenAI-compatible service at the one path this client uses, that is most
+   * often a model name it does not know or the account cannot use.
+   */
+  | 'request-refused'
   /** Something answered, and it is not a model service this client can talk to. */
   | 'not-a-model-service'
   /** The service answered with an error of its own. */
@@ -102,6 +114,10 @@ export const HOSTED_FAILURE_TEXT: Readonly<Record<HostedFailure, string>> = {
     'The service could not be reached. Check the address, that this device is online, and that the service accepts requests from an app like this one.',
   'no-answer': 'The service has not answered yet. If it answers, this will change by itself.',
   'key-refused': 'The service refused your key. Check that it is right and still valid.',
+  'over-limit':
+    'The service said there have been too many requests, or that your account is over its limit. Try again later, or check your account with the service.',
+  'request-refused':
+    'The service turned the question down. Check the model name, that your account can use that model, and the address.',
   'not-a-model-service':
     'Something answered at that address, but it is not a model service this app can talk to. Check the address.',
   'failed-on-service':

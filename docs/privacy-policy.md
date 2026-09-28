@@ -244,8 +244,8 @@ built in, suggested or named.
 
 ## Questions sent to a service you chose, on your own key
 
-This is the only way this app's own code sends anything to a service on the internet, and it is off
-until you turn it on — and off again whenever the app is opened. **It is never sent a picture.**
+This is the only way this app's own code sends anything to a service you chose on the internet, and it
+is off until you turn it on — and off again whenever the app is opened. **It is never sent a picture.**
 
 - **What is sent:** a question written into the app, and the model name you typed. Today the only
   question is a test that asks the service to reply with one word; it carries no numbers from your

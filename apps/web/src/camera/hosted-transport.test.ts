@@ -178,8 +178,11 @@ describe('when the other end misbehaves', () => {
   it.each([
     [401, 'key-refused'],
     [403, 'key-refused'],
-    [404, 'not-a-model-service'],
-    [429, 'not-a-model-service'],
+    [400, 'request-refused'],
+    [404, 'request-refused'],
+    [422, 'request-refused'],
+    [405, 'not-a-model-service'],
+    [429, 'over-limit'],
     [500, 'failed-on-service'],
     [413, 'failed-on-service'],
   ] as const)('reads a %i as %s', async (status, failure) => {

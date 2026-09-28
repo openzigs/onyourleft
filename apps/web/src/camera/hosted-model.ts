@@ -134,6 +134,7 @@ export type HostedModelRefusal =
   | 'no-model'
   | 'model-too-long'
   | 'no-key'
+  | 'key-for-another-address'
   | 'key-too-long'
   | 'key-not-printable';
 
@@ -156,6 +157,8 @@ export const HOSTED_MODEL_REFUSAL_TEXT: Readonly<Record<HostedModelRefusal, stri
   'no-model': 'Enter the name of the model the service should use. There is no default.',
   'model-too-long': 'That model name is too long.',
   'no-key': 'Enter your key for the service. This app has none of its own.',
+  'key-for-another-address':
+    'The key saved on this device is for a different address. Enter the key for this one.',
   'key-too-long': 'That key is too long to be a key.',
   'key-not-printable':
     'That key has a space or a character a key cannot have in it. Paste it again without the spaces.',
@@ -235,6 +238,34 @@ export function hostedModelDecision(answers: HostedModelAnswers): HostedModelDec
     return refuse('key-not-printable');
   }
   return { model: { address: url.origin, model, key }, refusal: undefined };
+}
+
+/**
+ * {@link hostedModelDecision}, where a blank key box keeps the saved key —
+ * **but only for the address that key was saved with**.
+ *
+ * The key box is never filled back in, so a rider changing only the model
+ * name leaves it blank and keeps their key. ⚠️ A rider who changes the
+ * ADDRESS and leaves it blank must not: the saved key belongs to the old
+ * service, and reusing it would send it to the new one in the
+ * `Authorization` header — against the consent sentence *"sent only to the
+ * address you entered"*. So a blank key with a different origin is refused
+ * as {@link HostedModelRefusal} `key-for-another-address`, and nothing is
+ * saved. The comparison is on the normalised origin, so `/v1` or a trailing
+ * slash after the same host is the same address.
+ */
+export function hostedModelDecisionKeepingKey(
+  answers: HostedModelAnswers,
+  stored: HostedModel | undefined,
+): HostedModelDecision {
+  if (answers.key.trim() !== '' || stored === undefined) {
+    return hostedModelDecision(answers);
+  }
+  const decision = hostedModelDecision({ ...answers, key: stored.key });
+  if (decision.model !== undefined && decision.model.address !== stored.address) {
+    return refuse('key-for-another-address');
+  }
+  return decision;
 }
 
 /** The URL a request goes to. */
