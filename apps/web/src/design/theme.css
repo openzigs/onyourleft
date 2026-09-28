@@ -761,6 +761,28 @@ h3:first-child {
 }
 
 /*
+ * THE RIDE-TIME SIZE — #669. The owner's ruling of 2026-09-27: the controls a
+ * rider presses DURING a ride — *Start*, *Pause*, *End* and *Set target*, by
+ * name in `design/ride-time-controls.ts` §`RIDE_TIME_CONTROLS` — get a 48 px
+ * target, and every other button stays at the 44 declared above.
+ *
+ * 48 × 48 is Android's accessibility guidance (48 dp; in a WebView one CSS px
+ * is one dp), for a rider reaching with a moving body, sometimes in gloves, at
+ * a mounted device. It is not a WCAG number: 44 is already SC 2.5.5's (AAA).
+ *
+ * Declared, in both axes, for the reason `.oyl-button`'s floor is. After that
+ * rule and of the same specificity, so it wins where both apply and nowhere
+ * else. `browser/ride-targets.browser.spec.ts` measures every control on the
+ * list three ways — the shipped box, this declaration, and the box with it
+ * stripped, which must fall under 48 — and an ordinary button beside them,
+ * which must still declare exactly 44.
+ */
+.oyl-button--ride {
+  min-height: 3rem;
+  min-width: 3rem;
+}
+
+/*
  * A LINK drawn as a button — #566's review. A `<button>` is inline-block by
  * default and an `<a>` is inline, and `min-height`/`min-width` do not apply to
  * a non-replaced inline box: its vertical padding takes no line space either,
@@ -1311,6 +1333,20 @@ a.oyl-button {
   line-height: 1.35;
 }
 
+/*
+ * #669: the ride controls that stand side by side — Pause and Stop, and the
+ * stop confirmation's pair — as one row with an 8 px gap between boxes,
+ * Android's 8 dp between targets. Until #669 they were inline buttons with
+ * nothing between them (0 px, measured). A gap rather than a margin, so a row
+ * that wraps on a narrow phone keeps it between its lines as well.
+ */
+.oyl-ride__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oyl-space-sm);
+}
+
 .oyl-trainer__state {
   font-size: var(--oyl-font-size-lg);
 }
@@ -1333,6 +1369,24 @@ a.oyl-button {
   flex-wrap: wrap;
   gap: var(--oyl-space-sm);
   align-items: center;
+}
+
+/*
+ * #669: the ERG form's own sentence — "This trainer accepts … W to … W in steps
+ * of … W" — under its row, 8 px below the controls it describes (the row's own
+ * gap) rather than a paragraph's 1rem either side. In a flex container margins
+ * do not collapse, so that paragraph spent 24 px above itself and 16 below,
+ * and on the tablet held upright — one column — every one of them is between
+ * *Set target* and the workout's *Ride*. With #669's 48 px controls that
+ * *Ride* ended 29.3 px above the fold in the Android shell on the CI runner's
+ * fonts, under §4f's 50 px floor; `rideview.browser.spec.ts` §"#669 — the
+ * workout chooser" publishes the margin and holds the floor. Scoped to the
+ * Ride screen's trainer group: Settings and Analysis use the same row class
+ * for forms of their own.
+ */
+.oyl-ride__group--trainer form.oyl-trainer__form > p {
+  flex-basis: 100%;
+  margin: 0;
 }
 
 /*

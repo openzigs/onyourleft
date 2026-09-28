@@ -13,7 +13,9 @@
  *
  * Both are 44×44 CSS px at least — the mute is an `.oyl-button`, which declares
  * that (#316), and the slider declares the same floor in `theme.css`
- * §`.oyl-sound`. That clears **SC 2.5.8 (Target Size (Minimum), Level AA),
+ * §`.oyl-sound`. ⚠️ Since #669 the MUTE is 48×48: it is a ride-time control
+ * on the owner's list (`design/ride-time-controls.ts`), so it carries
+ * `size="ride"`; the slider stays at 44. That clears **SC 2.5.8 (Target Size (Minimum), Level AA),
  * which is 24×24**, with room, and it is **SC 2.5.5 (Enhanced, AAA)**'s 44 —
  * chosen for gloves on a handlebar, not read off a table. The browser gate
  * measures both the three ways #316 does (`hud.browser.spec.ts`).
@@ -52,6 +54,7 @@ export function SoundControls({ preference, onChange }: SoundControlsProps): JSX
       <Button
         variant="toggle"
         pressed={preference.muted}
+        size="ride"
         className="oyl-sound__mute"
         onClick={() => {
           onChange({ ...preference, muted: !preference.muted });

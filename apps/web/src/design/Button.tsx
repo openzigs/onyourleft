@@ -82,6 +82,20 @@ interface ButtonCommonProps {
    * a caller that repaints a button has made a fourth kind nobody declared.
    */
   readonly className?: string;
+  /**
+   * `ride` for a control a rider presses DURING a ride — #669, the owner's
+   * ruling of 2026-09-27: *Start*, *Pause*, *End* and *Set target* get a
+   * **48 px** target, and everything else stays at `.oyl-button`'s 44.
+   *
+   * Declared, not arrived at: it adds `oyl-button--ride`, whose `min-height`
+   * and `min-width` are 3rem (`theme.css` §`.oyl-button--ride`). 48 × 48 is
+   * Android's own accessibility guidance (48 dp, and one CSS px is one dp in a
+   * WebView), above WCAG 2.2 SC 2.5.5's 44 (AAA). Which controls carry it is
+   * ONE list, `design/ride-time-controls.ts` §`RIDE_TIME_CONTROLS`, and
+   * `browser/ride-targets.browser.spec.ts` walks it. A control not on that list
+   * does not get this size — the list, not a caller's taste, is the ruling.
+   */
+  readonly size?: 'ride';
 }
 
 export type ButtonProps = ButtonCommonProps & ButtonKind;
@@ -92,6 +106,14 @@ const VARIANT_CLASS: Readonly<Record<ButtonVariant, string>> = {
   secondary: 'oyl-button oyl-button--secondary',
   toggle: 'oyl-button oyl-button--toggle',
 };
+
+/**
+ * The ride-time size's class — #669. Exported because the ride HUD's own
+ * *Pause* and *End ride* are not `Button`s (they are drawn in the HUD's
+ * colours, at `game/hud/HudPanel.tsx` §`CONTROL_MINIMUM_PIXELS`) and
+ * carry it too, so every control on the list wears the one declaration.
+ */
+export const RIDE_SIZE_CLASS = 'oyl-button--ride';
 
 /**
  * A real `<button>`, with the project's styling and nothing else.
@@ -110,6 +132,7 @@ export function Button({
   focusOnMount = false,
   ref,
   className,
+  size,
 }: ButtonProps): JSX.Element {
   const element = useRef<HTMLButtonElement>(null);
   // Both #557's `focusOnMount` (which needs the element here) and #548's `ref`
@@ -131,8 +154,9 @@ export function Button({
     }
     // On mount only: a prop that turns on later has not replaced anything.
   }, []);
-  const classes =
-    className === undefined ? VARIANT_CLASS[variant] : `${VARIANT_CLASS[variant]} ${className}`;
+  const sized =
+    size === 'ride' ? `${VARIANT_CLASS[variant]} ${RIDE_SIZE_CLASS}` : VARIANT_CLASS[variant];
+  const classes = className === undefined ? sized : `${sized} ${className}`;
   // `type` is passed straight through. It used to go through a ternary that
   // returned its own argument (#143) — which read like a guard against a third
   // value and was not one, because the prop is `'button' | 'submit'` and is
