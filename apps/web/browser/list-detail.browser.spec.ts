@@ -25,6 +25,14 @@
  *   are required above it and why the rest cannot be.
  * - **Rotating** from two panes to one with focus on a list link moves focus
  *   to the chosen item's heading rather than dropping it to `<body>`.
+ * - **At two panes each pane scrolls on its own** (#723): the wheel over one
+ *   moves neither the page nor the other, choosing an item low in a long list
+ *   with Enter leaves `window.scrollY` where it was and lands focus — ring
+ *   included — visibly inside the detail pane, and every pane lies between
+ *   the header and the bottom inset at the top of the page and at its
+ *   furthest scroll. `?panes=page` puts the layout before #723 back as that
+ *   block's control. A primary a pane clips is not on screen, so since #723
+ *   a primary's margin is to its pane's bottom where that is above the fold.
  *
  * ## The control
  *
@@ -231,9 +239,22 @@ function primaryLines(
   return seen.primaries.map(
     (primary) =>
       `${route.id} @ ${viewport.name}: “${primary.text}” (${primary.pane ?? 'no'} pane) ` +
-      `y ${primary.top.toFixed(0)}–${primary.bottom.toFixed(0)}, fold ${seen.fold.toFixed(0)}, ` +
-      `margin ${(seen.fold - primary.bottom).toFixed(0)} px`,
+      `y ${primary.top.toFixed(0)}–${primary.bottom.toFixed(0)}, fold ${seen.fold.toFixed(0)}` +
+      (primary.clipBottom === null ? '' : `, pane ends ${primary.clipBottom.toFixed(0)}`) +
+      `, margin ${(seenLine(seen, primary) - primary.bottom).toFixed(0)} px`,
   );
+}
+
+/**
+ * The line a primary must clear: the fold, or — since #723, where a pane at
+ * two panes scrolls on its own and clips what is below it — the bottom of its
+ * pane, whichever is higher.
+ */
+function seenLine(
+  seen: ReflowMeasurement,
+  primary: ReflowMeasurement['primaries'][number],
+): number {
+  return Math.min(seen.fold, primary.clipBottom ?? Number.POSITIVE_INFINITY);
 }
 
 test.describe('#670 — two panes on a landscape tablet', () => {
@@ -393,7 +414,7 @@ test.describe('#670 — each primary action’s place, published', () => {
         lines.push(...primaryLines(route, viewport, arrival).map((line) => `${line} [arrival]`));
         if ((PRIMARY_ON_ARRIVAL[route.id] ?? []).includes(viewport.name)) {
           const first = arrival.primaries[0];
-          if (first === undefined || arrival.fold - first.bottom <= margin) {
+          if (first === undefined || seenLine(arrival, first) - first.bottom <= margin) {
             faults.push(
               `${route.id} @ ${viewport.name}: its primary must clear the fold by more than ` +
                 `${String(margin)} px — ${primaryLines(route, viewport, arrival).join('; ')}`,
@@ -412,7 +433,7 @@ test.describe('#670 — each primary action’s place, published', () => {
             faults.push(`${route.id} @ ${viewport.name}, selected: no primary on screen`);
           }
           for (const primary of selected.primaries) {
-            if (selected.fold - primary.bottom <= margin) {
+            if (seenLine(selected, primary) - primary.bottom <= margin) {
               faults.push(
                 `${route.id} @ ${viewport.name}, selected: “${primary.text}” must clear the fold ` +
                   `by more than ${String(margin)} px — ` +
@@ -426,4 +447,679 @@ test.describe('#670 — each primary action’s place, published', () => {
       expect(faults).toEqual([]);
     });
   }
+});
+
+/**
+ * #723 — at two panes, the list and the detail scroll ON THEIR OWN.
+ *
+ * Measured with real input: the wheel over a pane, and Enter on a list link.
+ * Choosing an item low in the list must not move the page (`window.scrollY`),
+ * and scrolling one pane must not move the other. Every pane's top must be
+ * below the header and the status bar's band, and its bottom above the bottom
+ * inset — the margins are published.
+ *
+ * The control is `reflow.html?panes=page`, the layout #723 replaced, over the
+ * same routes: the wheel over the list must then scroll the page, and
+ * choosing a low item must move it.
+ */
+
+/** What a pane is doing, read off the live page. */
+interface PaneState {
+  readonly top: number;
+  readonly bottom: number;
+  readonly scrollTop: number;
+  /** How far the pane could scroll: `scrollHeight − clientHeight`. */
+  readonly scrollRange: number;
+  readonly overflowY: string;
+  /** The content box's left and right edges: the border box less the padding. */
+  readonly contentLeft: number;
+  readonly contentRight: number;
+}
+
+interface PageState {
+  readonly scrollY: number;
+  /** How far the DOCUMENT could scroll. */
+  readonly documentRange: number;
+  readonly innerHeight: number;
+  /** The header's bottom edge, or `null` where there is none. */
+  readonly headerBottom: number | null;
+  /** The list–detail grid's own left and right edges. */
+  readonly gridLeft: number;
+  readonly gridRight: number;
+  readonly list: PaneState | null;
+  readonly detail: PaneState | null;
+}
+
+async function pageState(page: Page): Promise<PageState> {
+  return page.evaluate(() => {
+    const pane = (name: string): PaneState | null => {
+      const element = document.querySelector<HTMLElement>(`[data-oyl-pane="${name}"]`);
+      if (element === null || element.hidden) return null;
+      const box = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return {
+        top: box.top,
+        bottom: box.bottom,
+        scrollTop: element.scrollTop,
+        scrollRange: element.scrollHeight - element.clientHeight,
+        overflowY: style.overflowY,
+        contentLeft: box.left + Number.parseFloat(style.paddingLeft),
+        contentRight: box.right - Number.parseFloat(style.paddingRight),
+      };
+    };
+    const root = document.documentElement;
+    return {
+      scrollY: window.scrollY,
+      documentRange: root.scrollHeight - root.clientHeight,
+      innerHeight: window.innerHeight,
+      headerBottom: document.querySelector('.oyl-header')?.getBoundingClientRect().bottom ?? null,
+      gridLeft: document.querySelector('.oyl-list-detail')?.getBoundingClientRect().left ?? 0,
+      gridRight: document.querySelector('.oyl-list-detail')?.getBoundingClientRect().right ?? 0,
+      list: pane('list'),
+      detail: pane('detail'),
+    };
+  });
+}
+
+/** Longer than Chromium keeps a wheel gesture latched to the scroller it began on. */
+const WHEEL_LATCH_MS = 800;
+
+/**
+ * How long a wheel may take to reach the page, or to start the scroll it was
+ * expected to start, before the case gives up waiting and lets its assertions
+ * say what did not happen. A BOUND, never a sleep: every wait below returns the
+ * moment its evidence arrives.
+ */
+const INPUT_LANDS_WITHIN_MS = 5_000;
+
+/**
+ * ⚠️ #731's review: after a synthetic wheel, `settleScroll` alone could return
+ * BEFORE the scroll had started — two samples 60 ms apart agree just as well
+ * when nothing has happened yet, and under load Chromium took longer than that
+ * to begin. A positive case then read "the detail did not scroll" (3 in 64 under
+ * a ten-worker stress run), and a negative one — "the wheel over a list at its
+ * end did not move the page", which is #723's `overscroll-behavior` check —
+ * could pass having measured nothing at all. So every wheel is followed by
+ * EVIDENCE that it landed before anything settles:
+ *
+ * - the page's own `wheel` event, counted by a passive listener, which says the
+ *   input reached the renderer — the only evidence a gesture expected to move
+ *   nothing can give; and
+ * - where something IS expected to move, that movement itself: `moved` is
+ *   polled until it holds, so settling starts from a scroll in progress rather
+ *   than from before one.
+ *
+ * `page.evaluate` of a SYNCHRONOUS function throughout, never a
+ * `waitForFunction` with an async predicate, which resolves on its first poll
+ * (§4f).
+ */
+async function wheelOver(
+  page: Page,
+  name: 'list' | 'detail',
+  deltaY: number,
+  moved?: (before: PageState, now: PageState) => boolean,
+): Promise<void> {
+  const box = await page.locator(`[data-oyl-pane="${name}"]`).boundingBox();
+  if (box === null) throw new Error(`the ${name} pane has no box to wheel over`);
+  // Aim at the part of the pane that is ON SCREEN. Under the control the page
+  // scrolls, and a point taken from the pane's box alone was above the viewport
+  // once the page had scrolled to its end: that wheel reached nothing, which
+  // nothing noticed until the wheel's arrival was waited for.
+  const viewport = page.viewportSize();
+  const top = Math.max(box.y, 0);
+  const bottom = Math.min(box.y + box.height, viewport?.height ?? box.y + box.height);
+  if (bottom - top < 20) {
+    throw new Error(`no part of the ${name} pane is on screen to wheel over`);
+  }
+  await page.mouse.move(box.x + box.width / 2, top + Math.min((bottom - top) / 2, 200));
+  await page.evaluate(() => {
+    const counted = window as unknown as { __oylWheels?: number };
+    if (counted.__oylWheels === undefined) {
+      window.addEventListener(
+        'wheel',
+        () => {
+          counted.__oylWheels = (counted.__oylWheels ?? 0) + 1;
+        },
+        { passive: true, capture: true },
+      );
+    }
+    counted.__oylWheels = 0;
+  });
+  const before = await pageState(page);
+  await page.mouse.wheel(0, deltaY);
+  await expect
+    .poll(
+      () => page.evaluate(() => (window as unknown as { __oylWheels?: number }).__oylWheels ?? 0),
+      {
+        message: `the wheel over the ${name} pane never reached the page`,
+        timeout: INPUT_LANDS_WITHIN_MS,
+      },
+    )
+    .toBeGreaterThan(0);
+  if (moved !== undefined) {
+    const deadline = Date.now() + INPUT_LANDS_WITHIN_MS;
+    while (!moved(before, await pageState(page)) && Date.now() < deadline) {
+      await page.waitForTimeout(30);
+    }
+  }
+  await settleScroll(page);
+}
+
+/** Anything the wheel could have scrolled: the page, or either pane. */
+function anythingScrolled(before: PageState, now: PageState): boolean {
+  return (
+    now.scrollY !== before.scrollY ||
+    now.list?.scrollTop !== before.list?.scrollTop ||
+    now.detail?.scrollTop !== before.detail?.scrollTop
+  );
+}
+
+/** Two animation frames: whatever the compositor was going to draw next is drawn. */
+async function nextFrames(page: Page): Promise<void> {
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            resolve();
+          });
+        });
+      }),
+  );
+}
+
+/**
+ * Until neither the page nor either pane has moved across three samples, each
+ * two FRAMES and 60 ms apart — frames rather than time alone, so a loaded
+ * machine that draws slowly is waited for rather than out-waited. Settles a
+ * movement already evidenced; it is not, on its own, evidence one happened.
+ */
+async function settleScroll(page: Page): Promise<void> {
+  let last = '';
+  let same = 0;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const now = JSON.stringify(await pageState(page));
+    same = now === last ? same + 1 : 0;
+    if (same >= 2) return;
+    last = now;
+    await nextFrames(page);
+    await page.waitForTimeout(60);
+  }
+}
+
+/** Where a pane must lie, as faults and one published line. */
+function paneBoundsFaults(
+  where: string,
+  state: PageState,
+  insets: Insets,
+): { faults: string[]; line: string } {
+  const faults: string[] = [];
+  const ceiling = Math.max(state.headerBottom ?? 0, insets.top);
+  const floor = state.innerHeight - insets.bottom;
+  const parts: string[] = [];
+  for (const [name, box] of [
+    ['list', state.list],
+    ['detail', state.detail],
+  ] as const) {
+    if (box === null) {
+      faults.push(`${where}: the ${name} pane is not on screen`);
+      continue;
+    }
+    parts.push(
+      `${name} ${box.top.toFixed(0)}–${box.bottom.toFixed(0)} ` +
+        `(top +${(box.top - ceiling).toFixed(0)}, bottom +${(floor - box.bottom).toFixed(0)}, ` +
+        `scrolls ${box.scrollRange.toFixed(0)} px)`,
+    );
+    if (box.overflowY !== 'auto') {
+      faults.push(
+        `${where}: the ${name} pane does not scroll on its own (overflow-y ${box.overflowY})`,
+      );
+    }
+    if (box.top < ceiling) {
+      faults.push(
+        `${where}: the ${name} pane starts at ${box.top.toFixed(0)}, under the header or the ` +
+          `inset band (${ceiling.toFixed(0)})`,
+      );
+    }
+    // The room a pane keeps for a focus ring costs its content nothing: the
+    // list's content starts at the grid's left edge and the detail's ends at
+    // its right, where they were before the panes scrolled on their own.
+    const edge =
+      name === 'list' ? box.contentLeft - state.gridLeft : state.gridRight - box.contentRight;
+    if (Math.abs(edge) > 0.5) {
+      faults.push(
+        `${where}: the ${name} pane's content is ${edge.toFixed(1)} px in from the grid's ` +
+          `${name === 'list' ? 'left' : 'right'} edge`,
+      );
+    }
+    // ⚠️ Held to the fold, NOT to §4f's 50 px floor, and on the tablet it
+    // publishes about +9 px. That is not a missed floor. The floor is for a
+    // CONTROL whose place depends on fonts, which moved by 49 px between a Mac
+    // and the CI runner. A pane's bottom is set by `.oyl-main`'s padding and the
+    // shell's `min-height`, which is built from `env(safe-area-inset-bottom)`
+    // and does not depend on fonts. What lies between the pane's content and
+    // the fold is the pane's own 8 px ring padding and `main`'s bottom padding,
+    // and nothing in it can be tapped. A control at a pane's end scrolls up to
+    // that edge and no further, so it stays clear of the gesture bar for as
+    // long as `env()` reports the real inset. (#731's review.)
+    if (box.bottom > floor) {
+      faults.push(
+        `${where}: the ${name} pane ends at ${box.bottom.toFixed(0)}, past the bottom inset ` +
+          `(${floor.toFixed(0)})`,
+      );
+    }
+  }
+  return {
+    faults,
+    line:
+      `${where} at scrollY ${String(state.scrollY)} of ${state.documentRange.toFixed(0)}: header ` +
+      `ends ${state.headerBottom?.toFixed(0) ?? '—'}, band ${String(insets.top)}, fold ` +
+      `${floor.toFixed(0)}; ${parts.join('; ')}`,
+  };
+}
+
+/**
+ * {@link paneBoundsFaults} at the top of the page AND at its furthest scroll:
+ * since #723 the page scrolls by the footer's one line, and a pane must not
+ * slide under the header when it does.
+ */
+async function paneBoundsAtBothEnds(
+  page: Page,
+  where: string,
+  insets: Insets,
+): Promise<{ faults: string[]; lines: string[] }> {
+  const faults: string[] = [];
+  const lines: string[] = [];
+  for (const to of ['top', 'bottom'] as const) {
+    await page.evaluate((end) => {
+      window.scrollTo(0, end === 'top' ? 0 : document.documentElement.scrollHeight);
+    }, to);
+    await settleScroll(page);
+    const measured = paneBoundsFaults(where, await pageState(page), insets);
+    faults.push(...measured.faults);
+    lines.push(measured.line);
+    if (to === 'bottom') {
+      // The footer's line, which since #723 is below the fold, must come
+      // clear of the bottom inset when the page is scrolled to it.
+      const footer = await page.evaluate(() => {
+        const text = document.querySelector('.oyl-footer p')?.firstChild;
+        if (text === null || text === undefined) return null;
+        const range = document.createRange();
+        range.selectNodeContents(text);
+        return { bottom: range.getBoundingClientRect().bottom, innerHeight: window.innerHeight };
+      });
+      const floor = (footer?.innerHeight ?? 0) - insets.bottom;
+      lines.push(
+        `${where}: the footer's line ends at ${footer?.bottom.toFixed(0) ?? '—'}, fold ${floor.toFixed(0)}`,
+      );
+      if (footer === null || footer.bottom > floor) {
+        faults.push(
+          `${where}: scrolled to the end, the footer's line ends at ` +
+            `${footer?.bottom.toFixed(0) ?? '—'}, under the bottom inset (${floor.toFixed(0)})`,
+        );
+      }
+    }
+  }
+  await page.evaluate(() => {
+    window.scrollTo(0, 0);
+  });
+  return { faults, lines };
+}
+
+/**
+ * Wheel the list, then choose an item from low in it with Enter — everything
+ * wrong with what that did, as sentences. Empty is a pass. `undefined` when the
+ * route's list is too short to scroll, so there is no "low" item to choose.
+ */
+async function independentScrollFaults(
+  page: Page,
+  route: RouteDefinition,
+  lines: string[],
+): Promise<string[] | undefined> {
+  await visit(page, route, hrefFor(route));
+  await page.evaluate(() => {
+    window.scrollTo(0, 0);
+  });
+  const before = await pageState(page);
+  const listRange =
+    before.list?.overflowY === 'visible' ? before.documentRange : before.list?.scrollRange;
+  if (before.list === null || listRange === undefined || listRange < 200) {
+    return undefined;
+  }
+  const faults: string[] = [];
+
+  // 1. The wheel over the list scrolls the list, and nothing else.
+  await wheelOver(page, 'list', 100_000, anythingScrolled);
+  const wheeled = await pageState(page);
+  if (wheeled.scrollY !== before.scrollY) {
+    faults.push(
+      `${route.id}: the wheel over the list moved the page, scrollY ${String(before.scrollY)} → ` +
+        `${String(wheeled.scrollY)}`,
+    );
+  }
+  if ((wheeled.list?.scrollTop ?? 0) <= before.list.scrollTop) {
+    faults.push(`${route.id}: the wheel over the list did not scroll the list`);
+  }
+  // …and a list already at its end does not hand the wheel on to the page,
+  // which since #723 can scroll by the footer's line. NEW gestures, and two
+  // of them: measured with `overscroll-behavior` taken away, Chromium keeps a
+  // gesture latched to the list, and the first new one after the list reached
+  // its end did not chain either — the second scrolled the page by 52 px.
+  for (let gesture = 0; gesture < 2; gesture += 1) {
+    await page.waitForTimeout(WHEEL_LATCH_MS);
+    await wheelOver(page, 'list', 2_000);
+  }
+  const beyond = await pageState(page);
+  if (beyond.scrollY !== wheeled.scrollY) {
+    faults.push(
+      `${route.id}: the wheel over a list at its end moved the page, scrollY ` +
+        `${String(wheeled.scrollY)} → ${String(beyond.scrollY)}`,
+    );
+  }
+  if (
+    wheeled.detail === null ||
+    before.detail === null ||
+    Math.abs(wheeled.detail.top - before.detail.top) > 0.5 ||
+    wheeled.detail.scrollTop !== before.detail.scrollTop
+  ) {
+    faults.push(
+      `${route.id}: scrolling the list moved the detail pane, top ` +
+        `${before.detail?.top.toFixed(0) ?? '—'} → ${wheeled.detail?.top.toFixed(0) ?? '—'}`,
+    );
+  }
+
+  // 2. Choose the lowest item with Enter — a keyboard user's choice.
+  const low = page.locator('[data-oyl-pane="list"] a[data-oyl-select]').last();
+  await low.focus();
+  await settleScroll(page);
+  const chosenFrom = await pageState(page);
+  await page.keyboard.press('Enter');
+  const heading = page.locator('[data-oyl-pane="detail"] #oyl-selected-heading');
+  await expect(heading, `${route.id}: focus did not move to the chosen item`).toBeFocused();
+  await settleScroll(page);
+  const chosen = await pageState(page);
+  if (chosen.scrollY !== chosenFrom.scrollY) {
+    faults.push(
+      `${route.id}: choosing a low item moved the page, scrollY ${String(chosenFrom.scrollY)} → ` +
+        `${String(chosen.scrollY)}`,
+    );
+  }
+  if (Math.abs((chosen.list?.scrollTop ?? 0) - (chosenFrom.list?.scrollTop ?? 0)) > 1) {
+    faults.push(`${route.id}: choosing an item scrolled the list away from it`);
+  }
+  // Focus lands VISIBLY inside the detail pane: its heading — AND the focus
+  // ring drawn around it, which a pane that clips its overflow cuts off at
+  // the edge — is inside the pane's box, and the heading is what is drawn at
+  // its own centre.
+  const landed = await heading.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    const ring =
+      style.outlineStyle === 'none'
+        ? 0
+        : Number.parseFloat(style.outlineWidth) + Number.parseFloat(style.outlineOffset);
+    const pane = element.closest('[data-oyl-pane]')?.getBoundingClientRect();
+    const hit = document.elementFromPoint(box.left + 4, (box.top + box.bottom) / 2);
+    return {
+      top: box.top - ring,
+      bottom: box.bottom + ring,
+      left: box.left - ring,
+      right: box.right + ring,
+      ring,
+      paneTop: pane?.top ?? Number.NaN,
+      paneBottom: pane?.bottom ?? Number.NaN,
+      paneLeft: pane?.left ?? Number.NaN,
+      paneRight: pane?.right ?? Number.NaN,
+      drawn: hit !== null && element.contains(hit),
+    };
+  });
+  const inside =
+    landed.top >= landed.paneTop &&
+    landed.bottom <= landed.paneBottom &&
+    landed.left >= landed.paneLeft &&
+    landed.right <= landed.paneRight;
+  if (landed.ring <= 0) {
+    faults.push(`${route.id}: the focused heading draws no focus ring`);
+  }
+  if (!inside || !landed.drawn) {
+    faults.push(
+      `${route.id}: the focused heading and its ring (${landed.left.toFixed(0)},` +
+        `${landed.top.toFixed(0)})–(${landed.right.toFixed(0)},${landed.bottom.toFixed(0)}) are ` +
+        `not visibly inside the detail pane (${landed.paneLeft.toFixed(0)},` +
+        `${landed.paneTop.toFixed(0)})–(${landed.paneRight.toFixed(0)},` +
+        `${landed.paneBottom.toFixed(0)}), drawn: ${String(landed.drawn)}`,
+    );
+  }
+  lines.push(
+    `${route.id}: list scrolled ${String(before.list.scrollTop)} → ` +
+      `${String(wheeled.list?.scrollTop ?? '—')} of ${listRange.toFixed(0)}, page scrollY ` +
+      `${String(before.scrollY)} → ${String(wheeled.scrollY)}; chose the last item: scrollY ` +
+      `${String(chosenFrom.scrollY)} → ${String(chosen.scrollY)}, heading and its ` +
+      `${String(landed.ring)} px ring ${landed.top.toFixed(0)}–${landed.bottom.toFixed(0)} ` +
+      `(x ${landed.left.toFixed(0)}–${landed.right.toFixed(0)}) in a detail pane ` +
+      `${landed.paneTop.toFixed(0)}–${landed.paneBottom.toFixed(0)} ` +
+      `(x ${landed.paneLeft.toFixed(0)}–${landed.paneRight.toFixed(0)})`,
+  );
+  return faults;
+}
+
+/** The document scrolled as far as it goes, and at rest. */
+async function scrollPageToEnd(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    window.scrollTo(0, document.documentElement.scrollHeight);
+  });
+  await settleScroll(page);
+}
+
+/** Where `main`'s h1 is, against the header (or the inset band) and the fold. */
+async function h1Landing(page: Page): Promise<{
+  top: number;
+  bottom: number;
+  ceiling: number;
+  floor: number;
+  scrollY: number;
+}> {
+  const read = await page.evaluate(() => {
+    const h1 = document.querySelector('main h1')?.getBoundingClientRect();
+    return {
+      top: h1?.top ?? Number.NaN,
+      bottom: h1?.bottom ?? Number.NaN,
+      header: document.querySelector('.oyl-header')?.getBoundingClientRect().bottom ?? 0,
+      innerHeight: window.innerHeight,
+      scrollY: window.scrollY,
+    };
+  });
+  return {
+    top: read.top,
+    bottom: read.bottom,
+    ceiling: Math.max(read.header, TABLET_IN_THE_SHELL.insets.top),
+    floor: read.innerHeight - TABLET_IN_THE_SHELL.insets.bottom,
+    scrollY: read.scrollY,
+  };
+}
+
+test.describe('#723 — two panes scroll on their own', () => {
+  for (const viewport of TWO_PANES) {
+    test(`each pane lies between the header and the bottom inset at ${viewport.name}`, async ({
+      page,
+    }) => {
+      await open(page, viewport);
+      const faults: string[] = [];
+      const lines: string[] = [];
+      for (const route of LIST_DETAIL) {
+        for (const hash of [
+          hrefFor(route),
+          hrefForSelection(route, await selectionOf(page, route)),
+        ]) {
+          await visit(page, route, hash);
+          const measured = await paneBoundsAtBothEnds(page, hash, viewport.insets);
+          faults.push(...measured.faults);
+          lines.push(...measured.lines);
+        }
+      }
+      console.log(`[#723] panes @ ${viewport.name}\n  ${lines.join('\n  ')}`);
+      expect(faults).toEqual([]);
+    });
+
+    test(`the list and the detail scroll separately at ${viewport.name}`, async ({ page }) => {
+      await open(page, viewport);
+      const faults: string[] = [];
+      const lines: string[] = [];
+      let measured = 0;
+      for (const route of LIST_DETAIL) {
+        const found = await independentScrollFaults(page, route, lines);
+        if (found !== undefined) {
+          measured += 1;
+          faults.push(...found);
+        }
+      }
+      console.log(`[#723] scrolling @ ${viewport.name}\n  ${lines.join('\n  ')}`);
+      // The populated Activities list is forty rides: a walk that found no
+      // list long enough to scroll measured nothing.
+      expect(measured, 'no list–detail route had a list long enough to scroll').toBeGreaterThan(0);
+      expect(faults).toEqual([]);
+    });
+
+    test(`the control — the layout before #723 fails both at ${viewport.name}`, async ({
+      page,
+    }) => {
+      await open(page, viewport, 'data=populated&panes=page');
+      expect(
+        await page.locator('style[data-oyl-control="panes=page"]').count(),
+        'the control stylesheet is not on the page',
+      ).toBe(1);
+      const lines: string[] = [];
+      let measured = 0;
+      for (const route of LIST_DETAIL) {
+        const selected = hrefForSelection(route, await selectionOf(page, route));
+        await visit(page, route, selected);
+        const bounds = await paneBoundsAtBothEnds(page, selected, viewport.insets);
+        expect(
+          bounds.faults.some((fault) => fault.includes('does not scroll on its own')),
+          `${route.id}: the pre-#723 panes passed the bounds assertion — ${bounds.lines.join('; ')}`,
+        ).toBe(true);
+        const found = await independentScrollFaults(page, route, lines);
+        if (found === undefined) continue;
+        measured += 1;
+        console.log(`[#723] control ${route.id} @ ${viewport.name}: ${found.join('; ')}`);
+        expect(
+          found.some((fault) => fault.includes('the wheel over the list moved the page')),
+          `${route.id}: under the pre-#723 layout the wheel over the list did not move the page`,
+        ).toBe(true);
+        expect(
+          found.some((fault) => fault.includes('choosing a low item moved the page')),
+          `${route.id}: under the pre-#723 layout choosing a low item did not move the page`,
+        ).toBe(true);
+      }
+      expect(measured, 'the control found no list long enough to scroll').toBeGreaterThan(0);
+    });
+  }
+
+  test('scrolling the detail pane does not move the list, on the tablet', async ({ page }) => {
+    await open(page, TABLET_IN_THE_SHELL);
+    const lines: string[] = [];
+    let measured = 0;
+    for (const route of LIST_DETAIL) {
+      for (const hash of [
+        hrefFor(route),
+        hrefForSelection(route, await selectionOf(page, route)),
+      ]) {
+        await visit(page, route, hash);
+        const before = await pageState(page);
+        if (before.detail === null || before.list === null || before.detail.scrollRange < 50) {
+          continue;
+        }
+        measured += 1;
+        await wheelOver(
+          page,
+          'detail',
+          100_000,
+          (from, now) => now.detail?.scrollTop !== from.detail?.scrollTop,
+        );
+        const after = await pageState(page);
+        lines.push(
+          `${hash}: detail ${String(before.detail.scrollTop)} → ` +
+            `${String(after.detail?.scrollTop ?? '—')} of ${before.detail.scrollRange.toFixed(0)}, ` +
+            `list top ${before.list.top.toFixed(0)} → ${after.list?.top.toFixed(0) ?? '—'}, ` +
+            `scrollY ${String(before.scrollY)} → ${String(after.scrollY)}`,
+        );
+        expect(after.detail?.scrollTop, `${hash}: the detail did not scroll`).toBeGreaterThan(
+          before.detail.scrollTop,
+        );
+        expect(after.scrollY, `${hash}: the wheel over the detail moved the page`).toBe(
+          before.scrollY,
+        );
+        expect(after.list?.top, `${hash}: the list moved`).toBeCloseTo(before.list.top, 0);
+        expect(after.list?.scrollTop, `${hash}: the list scrolled`).toBe(before.list.scrollTop);
+      }
+    }
+    console.log(`[#723] detail scrolling @ ${TABLET_IN_THE_SHELL.name}\n  ${lines.join('\n  ')}`);
+    expect(measured, 'no detail pane was long enough to scroll').toBeGreaterThan(0);
+  });
+
+  test('“Skip to main content” still lands the h1 in view, on the tablet', async ({ page }) => {
+    await open(page, TABLET_IN_THE_SHELL);
+    const lines: string[] = [];
+    for (const route of LIST_DETAIL) {
+      await visit(page, route, hrefForSelection(route, await selectionOf(page, route)));
+      // From the page's furthest scroll, so the skip link has the 52 px of
+      // footer line to undo rather than landing where the page already was.
+      await scrollPageToEnd(page);
+      await page.locator('.oyl-skip-link').focus();
+      await page.keyboard.press('Enter');
+      await expect(page.locator('main')).toBeFocused();
+      await settleScroll(page);
+      const landed = await h1Landing(page);
+      lines.push(
+        `${route.id}: h1 ${landed.top.toFixed(0)}–${landed.bottom.toFixed(0)}, ` +
+          `clear of the header by ${(landed.top - landed.ceiling).toFixed(0)} px`,
+      );
+      expect(landed.top, `${route.id}: the h1 is under the header`).toBeGreaterThanOrEqual(
+        landed.ceiling,
+      );
+      expect(landed.bottom, `${route.id}: the h1 is below the fold`).toBeLessThanOrEqual(
+        landed.floor,
+      );
+    }
+    console.log(`[#723] skip link @ ${TABLET_IN_THE_SHELL.name}\n  ${lines.join('\n  ')}`);
+  });
+
+  /*
+   * The skip-link case's control (#731's review). On #723's layout the page
+   * scrolls by one footer line, so "the h1 is in view" would be true of almost
+   * anything. Under the pre-#723 layout, where the page scrolls the whole list,
+   * the SAME measurement taken from the page's end must find the h1 out of view
+   * — which shows the assertions above can go red — and the skip link must
+   * then still bring it back.
+   */
+  test('the control — from the end of a page that scrolls, the h1 is out of view until the skip link', async ({
+    page,
+  }) => {
+    await open(page, TABLET_IN_THE_SHELL, 'data=populated&panes=page');
+    let measured = 0;
+    for (const route of LIST_DETAIL) {
+      await visit(page, route, hrefForSelection(route, await selectionOf(page, route)));
+      await scrollPageToEnd(page);
+      const before = await h1Landing(page);
+      if (before.scrollY < 200) continue;
+      measured += 1;
+      expect(
+        before.top < before.ceiling || before.bottom > before.floor,
+        `${route.id}: scrolled ${String(before.scrollY)} px, the h1 at ` +
+          `${before.top.toFixed(0)}–${before.bottom.toFixed(0)} still read as in view`,
+      ).toBe(true);
+      await page.locator('.oyl-skip-link').focus();
+      await page.keyboard.press('Enter');
+      await expect(page.locator('main')).toBeFocused();
+      await settleScroll(page);
+      const landed = await h1Landing(page);
+      expect(landed.top, `${route.id}: the h1 is under the header`).toBeGreaterThanOrEqual(
+        landed.ceiling,
+      );
+    }
+    expect(
+      measured,
+      'no page under the control scrolled far enough to hide its h1',
+    ).toBeGreaterThan(0);
+  });
 });

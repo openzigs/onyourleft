@@ -39,6 +39,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
+import type { JSX } from 'react';
 
 import { unixSeconds } from '@onyourleft/domain';
 import { recordingSessionId } from '@onyourleft/store';
@@ -227,6 +228,22 @@ describe('#670 — one primary per pane on a list–detail route', () => {
     }
   }
 
+  // #723: nothing chosen as well — at one pane that is where both panes are on
+  // the page at once (the Workouts builder under its list), so it is the state
+  // the whole-view count at one pane actually has something to count in.
+  for (const route of listDetail) {
+    for (const wide of [false, true]) {
+      it(`${route.id}, nothing selected, ${wide ? 'two panes' : 'one pane'}`, async () => {
+        restorePanes = answerTwoPanes(wide, THEME);
+        mounted = await openRoute(route, true);
+        expect(document.querySelector('[data-oyl-panes]')?.getAttribute('data-oyl-panes')).toBe(
+          wide ? '2' : '1',
+        );
+        expect(onePrimaryViolations(document), `${route.id}`).toEqual([]);
+      });
+    }
+  }
+
   it('is what lets Activities show two primaries at once — one per pane', async () => {
     // Without the per-pane rule this screen would be a violation: the list's
     // *Start a ride* and the selected ride's *Open ride details* are both on
@@ -258,13 +275,15 @@ describe('#670 — one primary per pane on a list–detail route', () => {
   it('the control — two primaries in ONE pane are still reported, and the pane is named', async () => {
     mounted = await mount(
       <main className="oyl-main oyl-main--list-detail">
-        <section data-oyl-pane="list">
-          <Button>Start a ride</Button>
-          <Button>Import route</Button>
-        </section>
-        <section data-oyl-pane="detail">
-          <Button>Open ride details</Button>
-        </section>
+        <div data-oyl-panes="2">
+          <section data-oyl-pane="list">
+            <Button>Start a ride</Button>
+            <Button>Import route</Button>
+          </section>
+          <section data-oyl-pane="detail">
+            <Button>Open ride details</Button>
+          </section>
+        </div>
       </main>,
     );
     expect(onePrimaryViolations(document)).toEqual([
@@ -277,13 +296,77 @@ describe('#670 — one primary per pane on a list–detail route', () => {
       <main className="oyl-main oyl-main--list-detail">
         <Button>Save everything</Button>
         <Button>Save it all again</Button>
-        <section data-oyl-pane="list">
-          <Button>Start a ride</Button>
-        </section>
+        <div data-oyl-panes="2">
+          <section data-oyl-pane="list">
+            <Button>Start a ride</Button>
+          </section>
+        </div>
       </main>,
     );
     expect(onePrimaryViolations(document)).toEqual([
       '2 primary buttons in one view (main, outside its panes): “Save everything”, “Save it all again”',
+    ]);
+  });
+});
+
+/**
+ * #723: below the breakpoint the panes are stacked and a phone scrolls them as
+ * ONE view, so the per-pane rule applies only at two panes.
+ */
+describe('#723 — at one pane, the panes are one view', () => {
+  /** The same two panes, one primary in each, under a layout of `panes` panes. */
+  function splitPrimaries(panes: '1' | '2', listHidden = false): JSX.Element {
+    return (
+      <main className="oyl-main oyl-main--list-detail">
+        <div data-oyl-panes={panes}>
+          <section data-oyl-pane="list" hidden={listHidden}>
+            <Button>Build a workout</Button>
+          </section>
+          <section data-oyl-pane="detail">
+            <Button>Save workout</Button>
+          </section>
+        </div>
+      </main>
+    );
+  }
+
+  it('the control — two primaries split across the panes of ONE pane are reported', async () => {
+    mounted = await mount(splitPrimaries('1'));
+    expect(onePrimaryViolations(document)).toEqual([
+      '2 primary buttons in one view: “Build a workout”, “Save workout”',
+    ]);
+  });
+
+  it('the same markup at two panes passes — which is all the per-pane rule ever asked, at any width', async () => {
+    // What #670's rule said of the fixture above: one primary per pane, so no
+    // finding. Counting per pane regardless of width is the rule this control
+    // exists to catch coming back.
+    mounted = await mount(splitPrimaries('2'));
+    expect(primaryUnits(document).map((unit) => unit.primaries.length)).toEqual([0, 1, 1]);
+    expect(onePrimaryViolations(document)).toEqual([]);
+  });
+
+  it('leaves a pane the layout has hidden out of the one view', async () => {
+    // One pane with an item chosen: the list is hidden, and its primary is not
+    // on the page a rider scrolls.
+    mounted = await mount(splitPrimaries('1', true));
+    expect(primaryUnits(document).map((unit) => unit.primaries.length)).toEqual([1]);
+    expect(onePrimaryViolations(document)).toEqual([]);
+  });
+
+  it('fails closed — a list–detail main that does not say how many panes it has is one view', async () => {
+    mounted = await mount(
+      <main className="oyl-main oyl-main--list-detail">
+        <section data-oyl-pane="list">
+          <Button>Build a workout</Button>
+        </section>
+        <section data-oyl-pane="detail">
+          <Button>Save workout</Button>
+        </section>
+      </main>,
+    );
+    expect(onePrimaryViolations(document)).toEqual([
+      '2 primary buttons in one view: “Build a workout”, “Save workout”',
     ]);
   });
 });

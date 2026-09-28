@@ -113,6 +113,21 @@
   --oyl-safe-right: var(--safe-area-inset-right, env(safe-area-inset-right, 0px));
   --oyl-safe-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
   --oyl-safe-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
+
+  /*
+   * The app header's two numbers (#671), written once so that the band under
+   * the status bar and the header can never be two colours, and so that a
+   * layout that has to allow for a sticky header (#723) reads a declared
+   * height rather than measuring one.
+   *
+   * `--oyl-header-surface` is an ALIAS, not a token — the token is elevation
+   * 3, `surfaceOverlay`, and #672's dark theme re-points the header by
+   * re-pointing this one line. `--oyl-header-height` is the header's box, the
+   * border included; it is `0px` below the rail breakpoint, where the
+   * wordmark is folded away (see `.oyl-header` below).
+   */
+  --oyl-header-surface: var(--oyl-color-surface-overlay);
+  --oyl-header-height: 3rem;
 }
 
 *,
@@ -321,18 +336,93 @@ h3:first-child {
  * That is what the darkest surface is for. With `--oyl-color-surface` the
  * header and a panel scrolling past it were the same colour and the boundary
  * disappeared at exactly the moment it mattered.
+ *
+ * ⚠️ **One line tall, and declared rather than emergent — #671.** Since #427
+ * moved the navigation into a bar and a rail the header held only the
+ * wordmark, and it was 72 px of padding, a line of `lg` type and the margin
+ * that used to separate the wordmark from eleven links: on a phone, a third
+ * header above the section row and the `h1` while the bar already says where
+ * you are. It is now `--oyl-header-height`, the wordmark centred in it.
+ * `shell.browser.spec.ts` §"#671" measures it and carries the old rule back as
+ * the control that must fail.
  */
 .oyl-header {
-  background: var(--oyl-color-surface-overlay);
+  display: flex;
+  align-items: center;
+  min-height: var(--oyl-header-height);
+  background: var(--oyl-header-surface);
   border-bottom: 1px solid var(--oyl-color-border);
-  padding: var(--oyl-space-md);
+  padding: 0 var(--oyl-space-md);
 }
 
 .oyl-wordmark {
   font-size: var(--oyl-font-size-lg);
   font-weight: 700;
   letter-spacing: -0.01em;
-  margin: 0 0 var(--oyl-space-sm);
+  margin: 0;
+}
+
+/*
+ * The top safe-area inset, painted in the header's surface — #671.
+ *
+ * `body` is padded by the inset, so the header starts BELOW the status bar and
+ * the band above it was the canvas: on the owner's tablet edge-to-edge, a white
+ * strip 36 px tall under the status bar while the rail beside it painted to
+ * y = 0. Capacitor's status-bar `backgroundColor` does nothing on Android 16,
+ * which enforces edge-to-edge, so the page paints the band itself.
+ *
+ * ⚠️ A pseudo-element of the HEADER, fixed to the viewport, and both halves of
+ * that are load-bearing. Of the header, because the header is absent mid-ride
+ * (#423) and so is this — the ride's world runs under the status bar on
+ * purpose. Fixed, because the band is the platform's rather than the page's:
+ * content scrolling up passes beneath it at every width, whether or not the
+ * header sticks. `z-index` 5 is the sticky header's, below the skip link's 10
+ * (the skip link is absolutely placed in the same band). It is `0px` tall on
+ * every desktop browser, so it paints nothing there.
+ */
+.oyl-header::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  height: var(--oyl-safe-top);
+  background: var(--oyl-header-surface);
+}
+
+/*
+ * Below the rail breakpoint the wordmark bar is FOLDED AWAY — #671. The bar at
+ * the bottom already says where you are, and the section row and the `h1` are
+ * the page's own; a 72 px wordmark above them was the third header in a row.
+ *
+ * ⚠️ Folded, not deleted, and the app's name is still there for assistive
+ * technology: the document `<title>` carries it on every route, and the header
+ * is a `banner` landmark labelled "On Your Left" (`AppShell.tsx`). The
+ * wordmark is taken off the SCREEN only — the visually-hidden pattern this
+ * stylesheet already uses, which is safe for a paragraph because it is not a
+ * control and so cannot mislead the tab-order model (CLAUDE.md §4e). The
+ * header's box is then zero tall: its band above still paints the inset.
+ */
+@media (max-width: 37.49rem) {
+  :root {
+    --oyl-header-height: 0px;
+  }
+
+  .oyl-header {
+    border-bottom: 0;
+  }
+
+  .oyl-wordmark {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
 }
 
 /*
@@ -541,6 +631,108 @@ h3:first-child {
 .oyl-list-detail__detail {
   position: relative;
   min-width: 0;
+}
+
+/*
+ * Two panes that scroll ON THEIR OWN — #723.
+ *
+ * Until #723 the panes scrolled with the page, so choosing the fortieth ride
+ * moved focus to the detail's heading at the top of the page and the page
+ * scrolled away from the list to show it. Now, at two panes, `main` is a
+ * column and the list–detail grid takes whatever of it is left under the
+ * page's title and summary: each pane is its own scroll container, and
+ * choosing an item or scrolling one pane moves neither the page nor the other
+ * pane.
+ *
+ * ⚠️ **What bounds the panes is `.oyl-shell`'s own `min-height`** — one
+ * viewport less the insets, #439's arithmetic — and not a height declared
+ * here. The grid's flex basis is 0 and its minimum 0, so however long a list
+ * is it adds nothing to how tall `main` wants to be; the shell is then its
+ * minimum, and `main`'s `flex: 1` hands the grid what the shell has left.
+ *
+ * ⚠️ **Why the header is allowed for by the layout and not by a number.** A
+ * sticky pane would have to stick under the sticky header, so it would need
+ * the header's height — emergent on `main` today, declared as
+ * `--oyl-header-height` by #671, and irrelevant wherever the header does not
+ * stick (below 64rem × 40rem). Filling the column instead puts the panes
+ * BELOW the header in flow, whatever it measures and whether or not it
+ * sticks, and nothing here names the header at all — so this is correct
+ * before #671 and after it. The browser gate measures the pane tops against
+ * the header's bottom and the inset band rather than trusting that.
+ *
+ * ⚠️ **The footer is BELOW the fold, and that is measured rather than
+ * preferred.** Inside the viewport it came out of the panes, and the Routes
+ * import's *Import route* then ended 23 px above the bottom of its pane on the
+ * owner's tablet, where #439's floor is 50 and the CI runner lays that page
+ * out about 50 px lower (`list-detail.browser.spec.ts` §"#670 — each primary
+ * action's place"). So it takes no height in the column — a zero-height box
+ * whose line overflows beneath it — and the page scrolls by exactly its line.
+ * That scroll can never put a pane under the header: the title and summary
+ * above the panes are taller than the footer, and the spec measures the pane
+ * tops at the page's furthest scroll as well as at its top.
+ *
+ * ⚠️ **Only on a window at least 40rem tall** — the sticky header's own height
+ * floor. Below it (a phone on its side is 844 × 390, and two panes) the
+ * header, the section row, the title and the summary would leave the panes a
+ * strip, so there the panes scroll with the page as they did. `rem`, so a
+ * reader's larger default text raises the floor with the text.
+ *
+ * `browser/list-detail.browser.spec.ts` §"#723" measures all of it on the
+ * owner's tablet with its insets applied to the engine, with the pre-#723
+ * layout put back as the control that must fail.
+ */
+@media (min-height: 40rem) {
+  .oyl-main--list-detail:has(.oyl-list-detail--two) {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding-bottom: var(--oyl-space-md);
+  }
+
+  .oyl-shell:has(.oyl-list-detail--two) > .oyl-footer {
+    flex: 0 0 0;
+    height: 0;
+    padding-block: 0;
+  }
+
+  /*
+   * The bottom inset under the line, or the page cannot scroll it clear of a
+   * gesture bar: `body`'s own bottom padding is the inset, and a line that
+   * overflows INTO it adds nothing to how far the page scrolls.
+   */
+  .oyl-shell:has(.oyl-list-detail--two) > .oyl-footer p {
+    margin: 0;
+    padding-block: var(--oyl-space-md) calc(var(--oyl-space-md) + var(--oyl-safe-bottom));
+  }
+
+  .oyl-list-detail--two {
+    flex: 1 1 0;
+    min-height: 0;
+    grid-template-rows: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .oyl-list-detail--two > .oyl-list-detail__list,
+  .oyl-list-detail--two > .oyl-list-detail__detail {
+    overflow-y: auto;
+    /* A pane scrolled to its end does not start scrolling the page instead. */
+    overscroll-behavior: contain;
+    /*
+     * ⚠️ Room for a focus ring. A pane that scrolls clips what overflows it,
+     * and `:focus-visible`'s ring is drawn 5 px OUTSIDE its element (3 px
+     * wide, 2 px out) — so the chosen item's heading, flush with the pane's
+     * top and left edges, had its ring cut off on both the moment focus moved
+     * to it, and so did every button at a pane's left edge. The padding is
+     * room for the ring, and the equal negative margin keeps the CONTENT
+     * where the grid put it: a padding alone narrowed the detail by 16 px,
+     * wrapped a line of the Routes import and brought its *Import route*
+     * 40 px nearer the bottom of its pane. `sm` is 8 px: the ring and a
+     * little air. `list-detail.browser.spec.ts` §"#723" measures the ring
+     * inside the pane and the content on the grid's own edges.
+     */
+    padding: var(--oyl-space-sm);
+    margin: calc(-1 * var(--oyl-space-sm));
+  }
 }
 
 /*
@@ -771,11 +963,23 @@ h3:first-child {
  * header ever grows past 112px this margin stops clamping and starts tucking.
  * `shell.browser.spec.ts` re-takes the clearance on every CI run and fails with
  * it in the message, so this number cannot rot quietly the way the 5rem did.
+ *
+ * ⚠️ **Since #671 the header is `--oyl-header-height` — 48 px, declared — and
+ * the measurements above are the old file's**: #427 took the links out of it
+ * and #671 took out the padding and the margin they needed. 7rem clears 48 px
+ * by more than it cleared 97, so the margin still clamps; it is left as it is
+ * because the clearance is measured, and the table is kept because it is the
+ * argument for the query.
  */
 @media (min-width: 64rem) and (min-height: 40rem) {
   .oyl-header {
     position: sticky;
-    top: 0;
+    /*
+     * Under the status bar's band rather than behind it (#671): with the
+     * insets applied the header used to stick at y = 0, its wordmark beneath
+     * the status bar's icons.
+     */
+    top: var(--oyl-safe-top);
     /*
      * ⚠️ BELOW the skip link's 10, and that ordering is not a preference. The
      * skip link is earlier in the DOM than the header, so at equal z-index the
