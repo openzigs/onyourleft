@@ -321,7 +321,7 @@ export function TrainerPanel({
       )}
 
       {trainer.hasControl ? null : (
-        <Button variant="secondary" onClick={onRequestControl}>
+        <Button variant="secondary" size="ride" onClick={onRequestControl}>
           Ask the trainer for control
         </Button>
       )}
@@ -377,7 +377,7 @@ export function TrainerPanel({
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
               />
-              <Button variant="secondary" type="submit">
+              <Button variant="secondary" size="ride" type="submit">
                 Set target
               </Button>
               <Button variant="secondary" onClick={onClearTarget}>

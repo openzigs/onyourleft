@@ -441,6 +441,7 @@ function RideControls({
       <>
         <Button
           ref={startRecording}
+          size="ride"
           onClick={() => {
             void controller.start();
           }}
@@ -502,61 +503,80 @@ function RideControls({
           {snapshot.notificationNotice}
         </StatusMessage>
       )}
-      {snapshot.phase === 'recording' ? (
-        <Button
-          variant="secondary"
-          onClick={() => {
-            void controller.pause();
-          }}
-        >
-          Pause
-        </Button>
-      ) : (
-        // #668: the ride screen's one primary is the step that moves the
-        // ride on. While a stop is armed that is the confirmation, so a
-        // paused rider's Resume steps down beside it rather than being a
-        // second heaviest control.
-        <Button
-          variant={snapshot.stopArmed ? 'secondary' : 'primary'}
-          onClick={() => {
-            void controller.resume();
-          }}
-        >
-          Resume
-        </Button>
-      )}
+      {/*
+        #669: the ride-time controls side by side are a ROW with a gap, so two
+        of them are never closer than 8 px (Android's 8 dp between targets).
+        Until then Pause and Stop — and Yes, stop the ride and Keep riding —
+        were inline buttons with nothing between their boxes: 0 px, measured
+        by `browser/ride-targets.browser.spec.ts`. A wrapper rather than a
+        margin, so a row that wraps on a narrow phone keeps the gap between
+        its lines too. The document order is unchanged.
+      */}
+      <div className="oyl-ride__actions">
+        {snapshot.phase === 'recording' ? (
+          <Button
+            variant="secondary"
+            size="ride"
+            onClick={() => {
+              void controller.pause();
+            }}
+          >
+            Pause
+          </Button>
+        ) : (
+          // #668: the ride screen's one primary is the step that moves the
+          // ride on. While a stop is armed that is the confirmation, so a
+          // paused rider's Resume steps down beside it rather than being a
+          // second heaviest control.
+          <Button
+            variant={snapshot.stopArmed ? 'secondary' : 'primary'}
+            size="ride"
+            onClick={() => {
+              void controller.resume();
+            }}
+          >
+            Resume
+          </Button>
+        )}
+        {snapshot.stopArmed ? null : (
+          <Button
+            variant="secondary"
+            size="ride"
+            onClick={() => {
+              controller.armStop();
+            }}
+          >
+            Stop
+          </Button>
+        )}
+      </div>
 
       {snapshot.stopArmed ? (
         <>
           <StatusMessage tone="warning" label="Confirm" live>
             Stopping ends this ride. It stays on this device either way.
           </StatusMessage>
-          <Button
-            onClick={() => {
-              void controller.confirmStop();
-            }}
-          >
-            Yes, stop the ride
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => {
-              controller.cancelStop();
-            }}
-          >
-            Keep riding
-          </Button>
+          <div className="oyl-ride__actions">
+            <Button
+              size="ride"
+              onClick={() => {
+                void controller.confirmStop();
+              }}
+            >
+              Yes, stop the ride
+            </Button>
+            <Button
+              variant="secondary"
+              size="ride"
+              onClick={() => {
+                controller.cancelStop();
+              }}
+            >
+              Keep riding
+            </Button>
+          </div>
         </>
-      ) : (
-        <Button
-          variant="secondary"
-          onClick={() => {
-            controller.armStop();
-          }}
-        >
-          Stop
-        </Button>
-      )}
+      ) : null}
     </>
   );
 }

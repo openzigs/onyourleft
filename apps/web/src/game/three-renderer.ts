@@ -5662,8 +5662,18 @@ export function readsTextureLodBias(material: Material): boolean {
  *   (#629's reflections, or a post pass #701 decides on), `fogColor` goes
  *   linear, the table does not, and even a FLAT table stops being the fog it
  *   was blended from. That change owes a table per target space, written per
- *   pass. `realistic-renderer.test.ts` §"#703" fails the build when this file
- *   first binds or builds a target, so it cannot happen unnoticed.
+ *   pass. `realistic-renderer.test.ts` §"#703" fails the build when THIS FILE's
+ *   code (parsed, so a comment does not count — #708) reaches
+ *   `setRenderTarget` as a member however it is spelled (`.x`, `?.x`,
+ *   `['x']`, destructured), constructs a `…RenderTarget`, an `EffectComposer`,
+ *   a `Reflector`, a `Refractor` or a `CubeCamera`, or names a material's
+ *   `transmission`, whose hidden pass three draws into a target. It does not
+ *   follow a name held in a value or a constructor under an alias. ⚠️ That is
+ *   a tripwire on this file, not a proof about the frame: a
+ *   target bound by another module is not seen, and three already binds two of
+ *   its own that it cannot see — `PMREMGenerator` (which draws only the
+ *   equirectangular sky, never a fogged material) and the shadow map (drawn
+ *   with three's depth materials, which take no fog).
  * - `oylFogShare`: `realistic-light.ts` §`REALISTIC_FOG_DIRECTION_SHARE`, or 0
  *   where the horizon is not the photographed sky's (#544's control).
  * - `oylSkyTurn`: `realistic-light.ts` §`skyRotation`, so a direction in the

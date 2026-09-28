@@ -119,6 +119,23 @@ describe('Button', () => {
     );
   });
 
+  it('adds the ride-time size only when asked, before a caller’s class (#669)', async () => {
+    mounted = await mount(
+      <>
+        <Button size="ride">Pause</Button>
+        <Button variant="toggle" pressed={false} size="ride" className="oyl-sound__mute">
+          Mute
+        </Button>
+        <Button variant="secondary">End ERG</Button>
+      </>,
+    );
+    expect([...mounted.container.querySelectorAll('button')].map((b) => b.className)).toEqual([
+      'oyl-button oyl-button--ride',
+      'oyl-button oyl-button--toggle oyl-button--ride oyl-sound__mute',
+      'oyl-button oyl-button--secondary',
+    ]);
+  });
+
   it('will not compile a toggle that does not say which way it stands (#668)', () => {
     // §5 "Verifying a compile-time guarantee": each directive below is the
     // guarantee. Make `pressed` optional on the toggle arm of `ButtonKind`, or
