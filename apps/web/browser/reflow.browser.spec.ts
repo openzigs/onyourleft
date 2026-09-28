@@ -165,29 +165,28 @@ function reflowFaults(
 }
 
 /*
- * #672: the walk runs under a light device and a dark one (the dark one at
- * {@link DARK_VIEWPORTS}). Colour moves no box,
- * so what the dark walk can find is a route that throws, or lays out
- * differently, only in the dark palette — a `color-scheme: dark` scrollbar is
- * one thing that is not the same width everywhere. Parametrised rather than
- * copied, so a check added to the walk reaches both.
+ * #672: the walk runs under a light device and a dark one, at every viewport
+ * in both. Colour moves no box, so what the dark walk can find is a route that
+ * throws, or lays out differently, only in the dark palette — a
+ * `color-scheme: dark` scrollbar is one thing that is not the same width
+ * everywhere. Parametrised rather than copied, so a check added to the walk
+ * reaches both.
+ *
+ * ⚠️ For one commit the dark walk ran at 320×256 alone, because #672's first
+ * CI run (36422201251) finished 12 s inside the job's then 20-minute stop. #682
+ * made that stop 25 minutes and the gate's own 840 s, and the whole dark set
+ * came back. What it costs is six cases here and in `controls-first` (every
+ * viewport but 320×256 and the phone): about 5.7 s each and 17 s of wall time
+ * over two workers locally, and about 50 s of summed test time on that CI run.
+ * CLAUDE.md §4f records the job and gate times it costs on the runner.
  */
-/**
- * The viewports the dark walk runs at — SC 1.4.10's 320×256 alone, measured
- * rather than guessed: on #672's first CI run the dark walks of this spec and
- * `controls-first`'s added 64 s of test time to a job that finished 12 s inside
- * its 20-minute stop. What a dark walk can find that a light one cannot is a
- * route that fails in the dark palette, and 320×256 is where a
- * `color-scheme: dark` scrollbar or a wider box would show first.
- */
-const DARK_VIEWPORTS = VIEWPORTS.filter(([width]) => width === 320);
 
 for (const theme of THEMES) {
   test.describe(`${theme} palette`, () => {
     test.use({ colorScheme: theme });
 
     for (const data of DATASETS) {
-      for (const [width, height] of theme === 'light' ? VIEWPORTS : DARK_VIEWPORTS) {
+      for (const [width, height] of VIEWPORTS) {
         test(`every route in the route table reflows at ${String(width)}×${String(height)}, ${data}, ${theme}`, async ({
           page,
         }) => {
