@@ -211,10 +211,24 @@ describe('each picture, as it arrives', () => {
   it('counts a picture with nobody in it, and one that would not read, apart', async () => {
     const { link, model, analysis } = setUp();
     link.picture();
-    await model.answer({ kind: 'no-rider' });
+    await model.answer({ kind: 'no-rider', cause: 'said-nobody' });
     link.picture();
     await model.answer({ kind: 'unreadable' });
     expect(analysis.sideAnalysisState()).toMatchObject({ posed: 0, noRider: 1, unreadable: 1 });
+    expect(analysis.poseSamples()).toEqual([]);
+  });
+
+  it('counts each picture with nobody in it by why, and the causes sum to the count — #761', async () => {
+    const { link, model, analysis } = setUp();
+    for (const cause of ['said-nobody', 'implausible', 'implausible', 'too-few-points'] as const) {
+      link.picture();
+      await model.answer({ kind: 'no-rider', cause });
+    }
+    expect(analysis.sideAnalysisState()).toMatchObject({
+      posed: 0,
+      noRider: 4,
+      noRiderBecause: { 'said-nobody': 1, 'too-few-points': 1, implausible: 2 },
+    });
     expect(analysis.poseSamples()).toEqual([]);
   });
 });

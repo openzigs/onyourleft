@@ -140,9 +140,20 @@ picture — and counts that picture as unreadable; a fenced ```` ```json ```` bl
 is the one wrapping it accepts. It may also be a program of your own that answers this directly
 instead of a model.
 
-⚠️ **Whether a general vision model answers this well has not been measured.** Asking a model for
-coordinates is not the same as running a pose model, and the tablet's own pose model is the one
-this app was measured with. That is why this switch is off by default.
+**A pose also has to be one a person on a bicycle could make.** The shoulder, hip, knee and ankle
+must all be given; the head above the shoulder, the shoulder above the hip, and the ankle below
+the hip and the knee; the knee bent; and thigh, shin and trunk in proportion. A pose that fails is
+not used, and the side-camera screen counts it apart from a picture your computer said was empty
+and one where it found too little to use.
+
+⚠️ **A general vision model does not answer this well, measured.** Asking a model for coordinates
+is not the same as running a pose model. On 2026-09-28, `gemma3:4b` placed a whole rider in blank
+and noise pictures when the question said a rider was there, and put the hip above the shoulder in
+19 of the 22 poses it gave for a drawn rider; none of them passes the check above
+([spike 0016](spikes/0016-live-in-ride-coaching.md) §5.4, #761). With that model the side camera's
+report will say its pictures could not be read. The tablet's own pose model is the one this app was
+measured with, which is why this switch is off by default; a pose program of your own that answers
+the shape above is what it is for.
 
 If your computer cannot be reached, refuses, or is not a model server, the tablet stops sending
 for the rest of that session and says so on the side-camera screen. It does the same when two

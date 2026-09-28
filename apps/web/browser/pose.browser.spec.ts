@@ -80,7 +80,7 @@ test.describe('the pose model, in a real engine', () => {
   });
 
   test('finds nobody in a blank picture — the control for the one above', () => {
-    expect(measurement.blank).toEqual({ kind: 'no-rider' });
+    expect(measurement.blank).toEqual({ kind: 'no-rider', cause: 'said-nobody' });
   });
 
   test('answers unreadable for bytes that are not a picture, and goes on working', () => {

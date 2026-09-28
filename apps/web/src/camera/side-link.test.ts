@@ -1025,7 +1025,7 @@ describe('pictures, phone → tablet — #530, ADR 0033 D-3 and D-4', () => {
           estimator: () => ({
             estimateSidePose: async (picture) => {
               looked.push(picture);
-              return Promise.resolve({ kind: 'no-rider' });
+              return Promise.resolve({ kind: 'no-rider', cause: 'said-nobody' });
             },
             closeSidePoseModel: () => {
               closed += 1;

@@ -120,7 +120,7 @@ describe('what the tablet keeps of one picture', () => {
 
 describe('when there is nobody to keep', () => {
   it('is no-rider when the model found nobody', () => {
-    expect(sidePoseFromModel(256, 256, [])).toEqual({ kind: 'no-rider' });
+    expect(sidePoseFromModel(256, 256, [])).toEqual({ kind: 'no-rider', cause: 'said-nobody' });
   });
 
   it('is no-rider with fewer sure points than a placement needs', () => {
@@ -128,7 +128,7 @@ describe('when there is nobody to keep', () => {
       { name: 'hip', side: 'left' },
       { name: 'knee', side: 'left' },
     ]);
-    expect(sidePoseFromModel(256, 256, two)).toEqual({ kind: 'no-rider' });
+    expect(sidePoseFromModel(256, 256, two)).toEqual({ kind: 'no-rider', cause: 'too-few-points' });
   });
 });
 
