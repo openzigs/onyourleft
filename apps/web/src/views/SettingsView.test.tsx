@@ -41,8 +41,7 @@ import {
   ANNOUNCEMENTS_SAVED,
   KIT_NO_ATHLETE,
   KIT_KEPT,
-  KIT_KEPT_NOWHERE,
-  KIT_NOT_KEPT,
+  KIT_NO_STORE,
   KIT_SAVED,
   APPEARANCE_STAYS_HERE,
 } from './SettingsView';
@@ -1210,31 +1209,35 @@ describe('the kit colour — #623', () => {
     mounted.unmount();
   });
 
-  it('with no store, still dresses this visit’s rides, and says it will not be kept', async () => {
-    const told: (KitColour | undefined)[] = [];
-    const mounted = await mountWith({}, told);
+  /*
+   * The owner's ruling of 2026-09-28: with no store the control is ABSENT, as
+   * the units' and the weight's are, and nothing is offered "for this visit".
+   * The two cases are each other's control: the same markup must render the
+   * five radios with a port and none without it.
+   */
+  it('with no store, offers no choice at all and says why, as the units and the weight do', async () => {
+    const mounted = await mountWith({}, []);
 
-    await act(async () => {
-      kitRadios(mounted.container)
-        .find((radio) => radio.value === 'magenta')
-        ?.click();
-      await Promise.resolve();
-    });
-    await settle();
-
-    expect(told).toEqual(['magenta']);
-    expect(mounted.container.textContent).toContain(KIT_NOT_KEPT);
-    expect(mounted.container.textContent).not.toContain(KIT_SAVED);
-    // #623's review (F2): the explanation says so too, and never "kept".
-    expect(mounted.container.textContent).toContain(KIT_KEPT_NOWHERE);
-    expect(mounted.container.textContent).not.toContain(KIT_KEPT);
+    expect(kitRadios(mounted.container)).toEqual([]);
+    expect(mounted.container.querySelector('fieldset.oyl-kit')).toBeNull();
+    const heading = mounted.container.querySelector('#oyl-kit-heading');
+    expect(heading?.textContent).toBe('Your kit');
+    const warning = [...mounted.container.querySelectorAll('.oyl-status--warning')].find(
+      (element) => (element.textContent ?? '').includes(KIT_NO_STORE),
+    );
+    expect(warning).toBeDefined();
+    const text = mounted.container.textContent ?? '';
+    // No "More about" explaining a choice that is not on offer, and never "kept".
+    expect(text).not.toContain('More about your kit');
+    expect(text).not.toContain(KIT_KEPT);
     mounted.unmount();
   });
 
-  it('with a store, says the choice is kept with the rider’s rides', async () => {
+  it('with a store, offers the five and says the choice is kept with the rider’s rides', async () => {
     const mounted = await mountWith({ kit: kitPort('row', []) }, []);
+    expect(kitRadios(mounted.container)).toHaveLength(KIT_COLOURS.length);
     expect(mounted.container.textContent).toContain(KIT_KEPT);
-    expect(mounted.container.textContent).not.toContain(KIT_KEPT_NOWHERE);
+    expect(mounted.container.textContent).not.toContain(KIT_NO_STORE);
     mounted.unmount();
   });
 });

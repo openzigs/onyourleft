@@ -346,12 +346,10 @@ export interface AppShellProps {
    * The settings screen's write of the rider's kit colour (#623).
    *
    * A port of its own for the reason `athlete/kit-colour-port.ts` gives, and
-   * optional like every other port here. ⚠️ Unlike the two above, the screen
-   * offers the choice WITHOUT a port too — for this visit only, and it says so
-   * (`views/SettingsView.tsx` §`KIT_NOT_KEPT`) — because a kit colour, like
-   * the announcement choice, is still worth something that lasts until the
-   * page closes, and a choice that changes only a colour loses nothing by not
-   * being kept.
+   * optional like every other port here. Like the two above, the screen offers
+   * no choice WITHOUT a port and says why (`views/SettingsView.tsx`
+   * §`KIT_NO_STORE`) — the owner's ruling of 2026-09-28, which removed a
+   * choice that lasted only for the visit.
    */
   readonly athleteKit?: AthleteKitColourPort | undefined;
   /**

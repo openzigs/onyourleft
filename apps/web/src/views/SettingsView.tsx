@@ -233,24 +233,22 @@ export const KIT_SAVED = 'Saved. You ride in this colour from your next ride.';
 /**
  * Said when there is nothing to write the kit colour to — #623.
  *
- * ⚠️ **The choice still applies, for this visit**, unlike the units and the
- * weight: a kit colour decides only what a jersey looks like, so a choice that
- * lasts until the page closes is still worth making, and the announcement
- * choice already makes the same trade on a device that will not keep it. It
- * says so rather than implying it was kept.
+ * ⚠️ **The control is absent, exactly as the units' and the weight's are** —
+ * the owner's ruling of 2026-09-28, which removed a "for this visit only"
+ * choice. A choice that could not be kept is not offered; the rider rides in
+ * the house kit and is told so.
  */
-export const KIT_NOT_KEPT =
-  'This browser has no local store, so this colour lasts until the page closes.';
+export const KIT_NO_STORE =
+  'This browser has no local store, so a colour chosen here would be forgotten as soon as the ' +
+  'page reloaded. You ride in the house kit.';
 
 /**
- * Where the choice is kept, said under "More about your kit" — one sentence
- * with a store and the other without, so the explanation never contradicts
- * {@link KIT_NOT_KEPT} beside it (#623's review, F2).
+ * Where the choice is kept, said under "More about your kit". Rendered only
+ * where there is a store to keep it in: with none there is no choice to
+ * explain, and {@link KIT_NO_STORE} says why.
  */
 export const KIT_KEPT =
   'It is kept with your rides and goes with them when you take everything with you.';
-export const KIT_KEPT_NOWHERE =
-  'With no local store in this browser, it is not kept with your rides.';
 
 /** Said when the write failed. Names the failure rather than swallowing it. */
 export function kitSaveFailure(reason: string): string {
@@ -303,7 +301,7 @@ export interface SettingsViewProps {
    * does not hold.
    */
   readonly onRiderMassChange: (mass: Kilograms | undefined) => void;
-  /** The kit colour's write (#623). `undefined` offers it for this visit only — see {@link KIT_NOT_KEPT}. */
+  /** The kit colour's write (#623). `undefined` where this browser has no local store — see {@link KIT_NO_STORE}. */
   readonly kit?: AthleteKitColourPort | undefined;
   /**
    * The rider's kit colour, or `undefined` where they have never chosen —
@@ -311,9 +309,8 @@ export interface SettingsViewProps {
    */
   readonly kitColour?: KitColour | undefined;
   /**
-   * Told when the rider's choice should be ridden in: after the store has
-   * answered with a written row, or at once where there is no store (for
-   * this visit, and said). Never on the store's `undefined`, for
+   * Told when the rider's choice should be ridden in: only after the store
+   * has answered with a written row. Never on the store's `undefined`, for
    * {@link SettingsViewProps.onUnitsChange}'s reason.
    */
   readonly onKitColourChange?: ((kitColour: KitColour | undefined) => void) | undefined;
@@ -1193,12 +1190,7 @@ function KitPanel({
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
 
   async function choose(chosen: KitColour): Promise<void> {
-    if (chosen === current) {
-      return;
-    }
-    if (port === undefined) {
-      onKitColourChange?.(chosen);
-      setMessage({ tone: 'warning', text: KIT_NOT_KEPT });
+    if (port === undefined || chosen === current) {
       return;
     }
     try {
@@ -1222,33 +1214,19 @@ function KitPanel({
   return (
     <section className="oyl-panel" aria-labelledby="oyl-kit-heading">
       <h2 id="oyl-kit-heading">Your kit</h2>
-      <fieldset className="oyl-kit">
-        <legend>What colour is your kit in the trainer game?</legend>
-        <div className="oyl-kit__options">
-          {KIT_COLOURS.map((option) => (
-            <label key={option} htmlFor={`oyl-kit-${option}`}>
-              <input
-                type="radio"
-                id={`oyl-kit-${option}`}
-                name="oyl-kit"
-                value={option}
-                checked={current === option}
-                onChange={() => {
-                  void choose(option);
-                }}
-              />
-              <span
-                className="oyl-kit__swatch"
-                aria-hidden="true"
-                style={{
-                  backgroundColor: `#${KIT_PALETTE[option].kit.jersey.toString(16).padStart(6, '0')}`,
-                }}
-              />
-              {KIT_PALETTE[option].name}
-            </label>
-          ))}
-        </div>
-      </fieldset>
+      {/*
+        ⚠️ **Absent rather than disabled where there is nothing to write to** —
+        the units' and the weight's rule, and the owner's ruling of 2026-09-28.
+        There is no "for this visit" choice: the explanation takes its place,
+        and so does the "More about", which explains a choice not on offer.
+      */}
+      {port === undefined ? (
+        <StatusMessage tone="warning" label="No local store">
+          {KIT_NO_STORE}
+        </StatusMessage>
+      ) : (
+        <KitChoice current={current} choose={choose} />
+      )}
 
       {message === undefined ? null : (
         <StatusMessage tone={message.tone} live>
@@ -1256,14 +1234,55 @@ function KitPanel({
         </StatusMessage>
       )}
 
-      <MoreAbout about="your kit">
-        <p className="oyl-muted">
-          The pacer rides in orange and your own best in grey-blue, so there is no red, orange or
-          blue here: a rider in either could be taken for one of them at a glance.
-        </p>
-        <p className="oyl-muted">{port === undefined ? KIT_KEPT_NOWHERE : KIT_KEPT}</p>
-      </MoreAbout>
+      {port === undefined ? null : (
+        <MoreAbout about="your kit">
+          <p className="oyl-muted">
+            The pacer rides in orange and your own best in grey-blue, so there is no red, orange or
+            blue here: a rider in either could be taken for one of them at a glance.
+          </p>
+          <p className="oyl-muted">{KIT_KEPT}</p>
+        </MoreAbout>
+      )}
     </section>
+  );
+}
+
+/** The five named options — #623. Only ever rendered with a store to write to. */
+function KitChoice({
+  current,
+  choose,
+}: {
+  readonly current: KitColour;
+  readonly choose: (chosen: KitColour) => Promise<void>;
+}): JSX.Element {
+  return (
+    <fieldset className="oyl-kit">
+      <legend>What colour is your kit in the trainer game?</legend>
+      <div className="oyl-kit__options">
+        {KIT_COLOURS.map((option) => (
+          <label key={option} htmlFor={`oyl-kit-${option}`}>
+            <input
+              type="radio"
+              id={`oyl-kit-${option}`}
+              name="oyl-kit"
+              value={option}
+              checked={current === option}
+              onChange={() => {
+                void choose(option);
+              }}
+            />
+            <span
+              className="oyl-kit__swatch"
+              aria-hidden="true"
+              style={{
+                backgroundColor: `#${KIT_PALETTE[option].kit.jersey.toString(16).padStart(6, '0')}`,
+              }}
+            />
+            {KIT_PALETTE[option].name}
+          </label>
+        ))}
+      </div>
+    </fieldset>
   );
 }
 
