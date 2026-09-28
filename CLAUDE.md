@@ -867,7 +867,35 @@ apps/                 AGPL-3.0-or-later, without exception
                         OFF by default everywhere (D-3), set by Settings'
                         Game world switch and read by `GameView.tsx` when a ride
                         starts. `realistic-offered.test.ts` now fails the build
-                        if any OTHER module the product ships names a way in
+                        if any OTHER module the product ships names a way in.
+                        ⚠️ **Since #623 the realistic rider is DRESSED, and a
+                        reviewer who remembers a body "coloured by dominant
+                        bone" under a sphere cap is reading the old file**: the
+                        On Your Left house kit, drawn by
+                        `tools/realistic/blender/process_rider.py` from the
+                        numbers in `rider_kit.py` (dedicated CC0-1.0, no text,
+                        no mark but the app's own chevrons from
+                        `tools/icons/`), MakeHuman's CC0 skin detail and brows
+                        (ADR 0026's 2026-09-28 amendment: MakeHuman's own
+                        system assets pack IS the D-4 MakeHuman row; the
+                        site's community packs are not), an athletic build
+                        from MakeHuman's own targets, a baked normal map with
+                        procedural creases (no cloth simulation), and a
+                        modelled helmet and glasses — all inside the old
+                        8 998 triangles. ⚠️ The jersey's main colour is in NO
+                        map: `orm`'s blue channel is its share, premultiplied,
+                        and the renderer ADDS `share × ` the body's own kit
+                        colour, from `three-renderer.ts` §`RIDER_KITS`: the
+                        rider's is `bicycle.ts` §`HOUSE_KIT`'s jersey — the
+                        app's `accent` in BOTH worlds since #623 — and the
+                        pacer's and the ghost's is `PACER_KIT`'s blue. ⚠️ The
+                        #368 tint MULTIPLIES the kit a kind wears, and orange
+                        over teal was near-black with green leading red while
+                        every gate stayed green (#742's review): the stylised
+                        belt writes the kit per INSTANCE over vertices marked
+                        `oylKit`, at no draw call. Multiplying a white shade by
+                        a 0/1 mask instead drew a pale halo on every hem; do
+                        not go back to it
     src/game/gradient.ts
                         the gradient control loop (#362) — where #90's driver
                         meets a real trainer, and the answer to "the game
@@ -4426,6 +4454,9 @@ top of an issue **supersedes its body**.
 | How bright the HDRI's environment is, and which way its sun faces | `apps/web/src/game/realistic-light.ts` §`environmentIntensity`, §`skyRotation` |
 | Why the realistic world's far hills and fog meet the photographed sky rather than the stylised haze, and why the ridge is lifted above the photograph's own skyline and so moves up and down with the rider on nearly every frame | `apps/web/src/game/realistic-light.ts` §`drawnHorizonColour`, §`REALISTIC_SKYLINE_DEGREES`, §`skylineCrestFloor`, §`ridgeLift`, `apps/web/src/game/three-renderer.ts` §`HorizonRing`, `game.browser.spec.ts` §"#544", [#544](https://github.com/openzigs/onyourleft/issues/544) |
 | Why the realistic bicycle is built from numbers, and how the MakeHuman body pedals | `apps/web/src/game/bicycle.ts` §"Two riders now", §`riderJoints`, `three-renderer.ts` §`RealisticRiderBelt` |
+| What the realistic rider wears, where every number of the house kit is, and why its main colour is in no map | `apps/web/tools/realistic/blender/rider_kit.py`, `process_rider.py`, `three-renderer.ts` §`riderBodyMaterial`, [#623](https://github.com/openzigs/onyourleft/issues/623) |
+| Which MakeHuman asset packs the pipeline may read, and why the site's community skins are not among them | [ADR 0026](docs/adr/0026-realistic-game-world.md) §Amendments 2026-09-28, `apps/web/tools/realistic/sources.ts` §`systemAssetVerdict`, §`SYSTEM_ASSETS_PAGE` |
+| Where the rider's creases are, and what proves the baked normal map has them | `rider_kit.py` §`CREASES`, `apps/web/src/game/realistic-textures.test.ts` §"the dressed rider — #623" |
 | Why two realistic trees or houses of one shape are not the same colour, how far the tint may move, and why a tree's levels cannot disagree about it | `apps/web/src/game/instance-tint.ts` §`FOLIAGE_TINT`, §`MASONRY_TINT`, `three-renderer.ts` §`withInstanceChannels`, `apps/web/browser/game-harness.ts` §`tintProbe`, [#621](https://github.com/openzigs/onyourleft/issues/621) |
 | Why the realistic structures are built from numbers and wear CC0 photographs, and why a house is two belts | `apps/web/src/game/realistic-assets.ts` §`REALISTIC_STRUCTURE_SURFACES`, `three-renderer.ts` §`RealisticStructureBelts`, [#475](https://github.com/openzigs/onyourleft/issues/475) |
 | Why the water stays a shader in the realistic world, and what it reflects there | `apps/web/src/game/three-renderer.ts` §`WaterBelt.update`, `realistic-light.ts` §`reflectedSkyColour` |

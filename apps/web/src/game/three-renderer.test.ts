@@ -73,7 +73,9 @@ import {
   BICYCLE_LENGTH_METRES,
   CRANK_AXIS_Y,
   CRANK_AXIS_Z,
+  HOUSE_KIT,
   LEG_BONE_COUNT,
+  PACER_KIT,
   UPPER_BODY_PIVOT,
 } from './bicycle';
 import { MAXIMUM_SCENERY_VARIANTS, SCENERY_MODELS } from './scenery-models';
@@ -2672,6 +2674,76 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
       expect(mesh.instanceColor?.count).toBe(3);
     }
     expect(belt.meshes.limbs.instanceColor?.count).toBe(3 * LEG_BONE_COUNT);
+    belt.dispose();
+  });
+
+  it('dresses each rider in the kit its KIND wears, under its tint — #623 keeping #368', () => {
+    // The tint MULTIPLIES, so orange over the house kit's teal was near-black
+    // with green leading red (#742's review). The pacer and the ghost wear
+    // `PACER_KIT`, the blue they were told apart in; the rider the house kit.
+    const belt = new RiderBelt();
+    const { bodies, torsos, cranksets, limbs } = belt.meshes;
+    belt.place([riderAt(), riderAt({ z: 40 }, {}, 0, 'bot'), riderAt({ z: 80 }, {}, 0, 'ghost')]);
+    const linear = (hex: number): readonly number[] =>
+      [(hex >> 16) & 0xff, (hex >> 8) & 0xff, hex & 0xff].map((byte) => {
+        const c = byte / 255;
+        return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      });
+    const kitAt = (
+      mesh: typeof bodies,
+      name: 'oylKitJersey' | 'oylKitLimb',
+      index: number,
+    ): readonly number[] => {
+      const channels = mesh.geometry.getAttribute(name);
+      return [channels.getX(index), channels.getY(index), channels.getZ(index)];
+    };
+    const expectKit = (actual: readonly number[], hex: number): void => {
+      linear(hex).forEach((channel, at) => {
+        expect(actual[at]).toBeCloseTo(channel, 5);
+      });
+    };
+    for (const [slot, kit] of [
+      [0, HOUSE_KIT],
+      [1, PACER_KIT],
+      [2, PACER_KIT],
+    ] as const) {
+      for (const mesh of [bodies, torsos]) {
+        expectKit(kitAt(mesh, 'oylKitJersey', slot), kit.jersey);
+        expectKit(kitAt(mesh, 'oylKitLimb', slot), kit.limb);
+      }
+      for (let bone = 0; bone < LEG_BONE_COUNT; bone += 1) {
+        expectKit(kitAt(limbs, 'oylKitLimb', slot * LEG_BONE_COUNT + bone), kit.limb);
+      }
+    }
+    // Which vertices ARE the kit: the jersey on the upper body, every leg
+    // vertex as the limb, and the frame and tyres none of it.
+    const roles = (mesh: typeof bodies): Set<number> => {
+      const role = mesh.geometry.getAttribute('oylKit');
+      return new Set(Array.from({ length: role.count }, (_, at) => role.getX(at)));
+    };
+    expect(roles(torsos).has(1)).toBe(true);
+    expect([...roles(limbs)]).toEqual([2]);
+    expect(roles(bodies).has(0)).toBe(true);
+    expect([...roles(cranksets)]).toEqual([0]);
+    // The shader puts the instance's kit there, times its tint, for a kit
+    // vertex only — in both of the belt's materials.
+    const material = bodies.material as unknown as {
+      onBeforeCompile: (shader: { vertexShader: string; uniforms: object }) => void;
+    };
+    const shader = {
+      vertexShader: '#include <common>\nvoid main() {\n#include <color_vertex>\n}',
+      uniforms: {},
+    };
+    material.onBeforeCompile(shader);
+    expect(shader.vertexShader).toContain('attribute vec3 oylKitJersey;');
+    expect(shader.vertexShader).toContain(
+      'vColor.rgb = (oylKit > 1.5 ? oylKitLimb : oylKitJersey) * instanceColor.rgb;',
+    );
+    belt.setShading('flat');
+    const flat = bodies.material as unknown as typeof material;
+    const flatShader = { ...shader, vertexShader: '#include <common>\n#include <color_vertex>' };
+    flat.onBeforeCompile(flatShader);
+    expect(flatShader.vertexShader).toContain('oylKitJersey');
     belt.dispose();
   });
 

@@ -13,9 +13,12 @@ import {
   PINNED_KTX_VERSION_LINE,
   polyHavenAuthors,
   polyHavenFiles,
+  RIDER_BUILD_TARGETS,
   safeRelativePath,
   shippedFiles,
   SOURCES,
+  sourcesDigest,
+  systemAssetVerdict,
   STRUCTURE_TEXTURES,
   structureMapFiles,
   TEXTURE_SCRIPT,
@@ -23,6 +26,7 @@ import {
   type Ktx2Step,
 } from './sources';
 import { sameFiles } from './fetch-assets';
+import { REALISTIC_RIDER } from '../../src/game/realistic-assets';
 
 const polyHaven = SOURCES.find((source) => source.id === 'farm_field') as AssetSource;
 const makeHuman = SOURCES.find((source) => source.id === 'makehuman') as AssetSource;
@@ -65,14 +69,22 @@ describe('what the pipeline keeps — #430, ADR 0026 D-4', () => {
     for (const source of SOURCES) expect(['CC0-1.0', 'CC-BY-4.0']).toContain(source.licence);
   });
 
-  it('reads from the two hosts ADR 0026 D-4 names, and no third', () => {
+  it('reads from the hosts ADR 0026 names, and no other', () => {
     // A new host is a change to that ADR, not to this table — so a row from
-    // anywhere else is a red test rather than a review note.
+    // anywhere else is a red test rather than a review note. ⚠️ Since #623
+    // MakeHuman's own site is one of them: ADR 0026's 2026-09-28 amendment
+    // records the owner's ruling that MakeHuman's CC0 system assets pack, from
+    // the same author under the same grant, falls under D-4's MakeHuman row.
     for (const source of SOURCES) {
       expect(new URL(source.licencePage).hostname, source.id).toMatch(
-        /^(?:polyhaven\.com|raw\.githubusercontent\.com)$/,
+        /^(?:polyhaven\.com|raw\.githubusercontent\.com|static\.makehumancommunity\.org)$/,
       );
     }
+    // And only MakeHuman's own pack is read from MakeHuman's site.
+    const fromMakeHumanSite = SOURCES.filter(
+      (source) => new URL(source.licencePage).hostname === 'static.makehumancommunity.org',
+    );
+    expect(fromMakeHumanSite.map((source) => source.id)).toEqual(['makehuman-system-assets']);
   });
 
   it('pins MakeHuman to one commit and checks the mesh’s own CC0 header', () => {
@@ -185,7 +197,12 @@ describe('the pipeline’s own table', () => {
   });
 
   it('downloads nothing it does not use', () => {
-    const used = new Set(OUTPUTS.map((output) => output.from));
+    const used = new Set(
+      OUTPUTS.flatMap((output) => [
+        output.from,
+        ...(output.recipe.how === 'blender' ? (output.recipe.alsoReads ?? []) : []),
+      ]),
+    );
     for (const source of SOURCES) expect(used, source.id).toContain(source.id);
   });
 
@@ -304,7 +321,13 @@ describe('the KTX2 step — #618, ADR 0026 D-8', () => {
       if (recipe.how === 'drawn') expect(recipe.ktx2.origin, output.file).toBe('top-left');
       if (recipe.how === 'blender') {
         if (recipe.ktx2 !== undefined) expect(recipe.ktx2.origin, output.file).toBe('bottom-left');
-        for (const also of recipe.alsoWrites ?? []) expect(also.ktx2.origin).toBe('bottom-left');
+        // #623: the rider's maps are read at the body's own glTF texture
+        // coordinates, which `GLTFLoader` never flips, and `process_rider.py`
+        // writes them top row first as those coordinates read them.
+        const glTF = output.file === REALISTIC_RIDER;
+        for (const also of recipe.alsoWrites ?? []) {
+          expect(also.ktx2.origin, also.file).toBe(glTF ? 'top-left' : 'bottom-left');
+        }
       }
     }
   });
@@ -335,5 +358,105 @@ describe('the KTX2 step — #618, ADR 0026 D-8', () => {
     expect(PINNED_KTX).toBe('KTX-Software v4.4.2');
     expect(PINNED_KTX_VERSION_LINE).toBe('ktx version: v4.4.2');
     expect(encodingWords(colour)).toContain(PINNED_KTX);
+  });
+});
+
+describe('MakeHuman’s CC0 system assets — #623, ADR 0026’s 2026-09-28 amendment', () => {
+  const row = (type: string, name: string, author: string, licence: string): string =>
+    `<tr>\n<td>${type}</td>\n<td><a href="#x"><img alt="${name}.png"></a></td>\n<td>${name}</td>\n<td>${author}</td>\n<td><a href="http://www.makehumancommunity.org">asset repo</a></td>\n<td>${licence}</td>\n</tr>`;
+  const page = (...rows: string[]): string => `<table>${rows.join('')}</table>`;
+  const skin = { type: 'skins', name: 'young_caucasian_male' };
+
+  it('keeps an asset whose OWN row names MakeHuman’s own author and CC0', () => {
+    expect(
+      systemAssetVerdict(
+        page(row('skins', 'young_caucasian_male', 'makehuman_system', 'CC0')),
+        skin,
+      ),
+    ).toMatchObject({ kept: true, licence: 'CC0-1.0' });
+  });
+
+  it('refuses a community author, whatever the licence — the ruling’s premise is the same author', () => {
+    expect(
+      systemAssetVerdict(page(row('skins', 'young_caucasian_male', 'Mindfront', 'CC0')), skin),
+    ).toMatchObject({ kept: false });
+  });
+
+  it('refuses any licence but CC0 on the asset’s own row', () => {
+    for (const licence of ['CC-BY', 'AGPL', 'CC-BY-NC', '']) {
+      expect(
+        systemAssetVerdict(
+          page(row('skins', 'young_caucasian_male', 'makehuman_system', licence)),
+          skin,
+        ),
+        licence,
+      ).toMatchObject({ kept: false });
+    }
+  });
+
+  it('never lets another asset’s CC0 row vouch for this one', () => {
+    // A page on which the NEXT skin is CC0 and this one is not listed at all.
+    expect(
+      systemAssetVerdict(
+        page(row('skins', 'young_caucasian_male2', 'makehuman_system', 'CC0')),
+        skin,
+      ),
+    ).toMatchObject({ kept: false });
+    // Nor an eyebrow of the same name under another type.
+    expect(
+      systemAssetVerdict(
+        page(row('eyebrows', 'young_caucasian_male', 'makehuman_system', 'CC0')),
+        skin,
+      ),
+    ).toMatchObject({ kept: false });
+  });
+
+  it('takes its files out of the pack’s one archive, each naming its asset, the text ones checked for the CC0 header', () => {
+    const system = SOURCES.find((source) => source.id === 'makehuman-system-assets');
+    expect(system?.origin.from).toBe('archive');
+    if (system?.origin.from !== 'archive') return;
+    expect(new URL(system.origin.url).hostname).toBe('files.makehumancommunity.org');
+    expect(system.licence).toBe('CC0-1.0');
+    for (const member of system.origin.members) {
+      expect(safeRelativePath(member.path), member.path).toBe(true);
+      expect(
+        member.path.startsWith(`${member.asset.type}/${member.asset.name}/`),
+        member.path,
+      ).toBe(true);
+      if (!/\.png$/.test(member.path)) expect(member.mustContain, member.path).toMatch(/CC0/);
+    }
+  });
+
+  it('fetches every build target from the pinned MakeHuman commit, checking each one’s CC0 header', () => {
+    if (makeHuman.origin.from !== 'urls') throw new Error('MakeHuman is fetched by URL');
+    const targets = makeHuman.origin.files.filter((file) => file.path.startsWith('targets/'));
+    expect(targets.map((file) => file.path.slice('targets/'.length))).toEqual(RIDER_BUILD_TARGETS);
+    for (const file of targets) {
+      expect(file.url).toMatch(/\/[0-9a-f]{40}\/makehuman\/data\/targets\/macrodetails\//);
+      expect(file.mustContain).toMatch(/CC0/);
+    }
+  });
+});
+
+describe('the digest of a run that reads two sources — #623', () => {
+  const one = { id: 'a', files: [{ path: 'x', sha256: '1' }] };
+  const two = { id: 'b', files: [{ path: 'y', sha256: '2' }] };
+
+  it('is the input digest over both, each path under its source’s id', () => {
+    expect(sourcesDigest([one, two])).toBe(
+      inputDigest([
+        { path: 'a/x', sha256: '1' },
+        { path: 'b/y', sha256: '2' },
+      ]),
+    );
+  });
+
+  it('moves when a file moves from one source to the other', () => {
+    expect(sourcesDigest([one, two])).not.toBe(
+      sourcesDigest([
+        { id: 'a', files: [] },
+        { id: 'b', files: [...two.files, { path: 'x', sha256: '1' }] },
+      ]),
+    );
   });
 });

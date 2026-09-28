@@ -26,6 +26,8 @@ import {
   REALISTIC_BICYCLE_MAPS,
   REALISTIC_BICYCLE_MAP_NAMES,
   REALISTIC_RIDER,
+  REALISTIC_RIDER_MAP_NAMES,
+  REALISTIC_RIDER_MAPS,
   REALISTIC_SKY,
   REALISTIC_STRUCTURE_SURFACES,
   REALISTIC_SURFACES,
@@ -40,6 +42,7 @@ import {
   HARD_SWAP_TREE_LEVELS,
   estimatedTextureBytes,
   REALISTIC_BICYCLE_SURFACES,
+  REALISTIC_RIDER_SURFACES,
   REALISTIC_BUILD_BYTES,
   REALISTIC_FRAME_TRIANGLES,
   REALISTIC_GROUND_BLOBS,
@@ -384,9 +387,14 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
    * each a KTX2 file, whose own header says its size and encoding.
    */
   const textures = (): readonly {
-    readonly role: 'surface' | 'structure' | 'model' | 'impostor' | 'bicycle';
+    readonly role: 'surface' | 'structure' | 'model' | 'impostor' | 'bicycle' | 'rider';
     readonly facts: Ktx2Facts;
   }[] => [
+    // #623: the rider's kit, relief and occlusion.
+    ...REALISTIC_RIDER_MAP_NAMES.map((map) => ({
+      role: 'rider' as const,
+      facts: fileKtx2Facts(at(REALISTIC_RIDER_MAPS[map])),
+    })),
     // #624: the bicycle's four drawn maps.
     ...REALISTIC_BICYCLE_MAP_NAMES.map((map) => ({
       role: 'bicycle' as const,
@@ -535,6 +543,37 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
       );
       expect(onTheTablet(facts)).toBe(DEVICE_BYTES_PER_TEXEL.uastc);
     }
+  });
+
+  it('dresses the rider inside #623’s own ceiling, texture memory and build alike', () => {
+    const rider = textures().filter((each) => each.role === 'rider');
+    // Non-vacuity: all three, read.
+    expect(rider).toHaveLength(REALISTIC_RIDER_MAP_NAMES.length);
+    const memory = rider.reduce(
+      (sum, { facts }) =>
+        sum +
+        estimatedTextureBytes({ ...facts, bytesPerTexel: onTheTablet(facts), mipmapped: true }),
+      0,
+    );
+    const build = [
+      REALISTIC_RIDER,
+      ...REALISTIC_RIDER_MAP_NAMES.map((map) => REALISTIC_RIDER_MAPS[map]),
+    ].reduce((sum, file) => sum + statSync(at(file)).size, 0);
+    const added = build - REALISTIC_RIDER_SURFACES.buildBefore;
+    console.log(
+      `#623: the rider's maps are ${(memory / 2 ** 20).toFixed(2)} MiB estimated on the tablet; ` +
+        `the rider is ${String(build)} bytes in the build, ${String(added)} against the ${String(REALISTIC_RIDER_SURFACES.buildBefore)} before`,
+    );
+    expect(memory).toBeLessThanOrEqual(REALISTIC_RIDER_SURFACES.textureBytes);
+    expect(added).toBeLessThanOrEqual(REALISTIC_RIDER_SURFACES.buildBytes);
+    for (const { facts } of rider) {
+      expect(Math.max(facts.width, facts.height)).toBeLessThanOrEqual(
+        REALISTIC_TEXTURE_PIXELS.rider,
+      );
+    }
+    // The kit is colour, ETC1S; the relief and the occlusion/roughness/mask
+    // are data, UASTC.
+    expect(rider.map(({ facts }) => facts.scheme).sort()).toEqual(['etc1s', 'uastc', 'uastc']);
   });
 
   it('adds no more to the build than its share, the transcoder included — #618', () => {

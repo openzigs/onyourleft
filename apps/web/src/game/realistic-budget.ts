@@ -97,6 +97,11 @@ export const REALISTIC_TEXTURE_CEILING_PIXELS = 2048;
  *   chase camera is a dozen pixels across on the tablet, and a 256-texel tile
  *   of tread is 0.6 mm a texel; the maps are drawn at this size and never
  *   downsized, because there is no source larger than they are.
+ * - `rider` 1024 — #623: the rider's kit, relief and occlusion maps, over the
+ *   whole body's texture coordinates. The torso is about 600 texels round,
+ *   under 2 mm a texel, which is finer than the chase camera shows; 1024 is
+ *   what #618's compression makes affordable inside the 6 MiB #623 allows,
+ *   where RGBA8 would have been 16 MiB for the three.
  *
  * @test-facing held by `realistic-budget.test.ts`, which reads every committed
  * realistic file back off disk against it; the renderer spends it only on the
@@ -109,6 +114,7 @@ export const REALISTIC_TEXTURE_PIXELS = {
   impostor: 2048,
   structure: 512,
   bicycle: 256,
+  rider: 1024,
 } as const;
 
 /**
@@ -545,6 +551,33 @@ export const DEVICE_BYTES_PER_TEXEL = {
 export const REALISTIC_BICYCLE_SURFACES = {
   textureBytes: 2 * MEBIBYTE,
   buildBytes: MEBIBYTE / 2,
+} as const;
+
+/**
+ * What dressing the realistic rider may add — #623's own ceiling, inside
+ * {@link REALISTIC_TEXTURE_MEMORY_BYTES} and {@link REALISTIC_BUILD_BYTES}:
+ * **6 MiB** of texture memory as the tablet is handed it, and **1 MiB** of
+ * build over what the rider was before (`buildBefore`, the undressed
+ * `rider.glb`). What the three maps spend is 3.3 MiB estimated — a 1024²
+ * ETC1S colour map at half a byte a texel and two 1024² UASTC maps at a byte,
+ * each a third again for its mipmaps — and the build FALLS: the body is
+ * smooth-shaded since #623, which stopped every vertex being split three ways,
+ * and that saves more than the three maps cost. `realistic-budget.test.ts`
+ * reads both off the committed files and prints them.
+ *
+ * ⚠️ **No triangles and no draw calls**: the helmet and glasses are paid for
+ * inside {@link REALISTIC_TRIANGLES}' `rider`, which the body is decimated to
+ * make room for, and they are the one instanced mesh the sphere cap was.
+ *
+ * @test-facing held by `realistic-budget.test.ts`, which reads the committed
+ * rider files back off disk against it; the renderer spends it only on the
+ * realistic path
+ */
+export const REALISTIC_RIDER_SURFACES = {
+  textureBytes: 6 * MEBIBYTE,
+  buildBytes: MEBIBYTE,
+  /** The undressed `rider.glb`, bytes, as #623 found it. */
+  buildBefore: 1_789_800,
 } as const;
 
 /**

@@ -75,7 +75,7 @@ import {
   cameraRig,
   verticalHalfTangent,
 } from '../src/game/camera';
-import { RIDER_BICYCLE_PARTS } from '../src/game/bicycle';
+import { emptyRiderJoints, RIDER_BICYCLE_PARTS, riderJoints } from '../src/game/bicycle';
 import type { CameraPose, GameView, SceneFrame } from '../src/game/port';
 import type { WorldStyle } from '../src/game/world';
 
@@ -111,6 +111,7 @@ import { srgbByteToLinear } from '../src/game/scenery-palette';
 import { buildingPlan, onFace, OPENING_RECESS_METRES } from '../src/game/buildings';
 import {
   bicycleTreadOf,
+  riderKitOf,
   compressedRealisticLoaders,
   drawnWorldOf,
   bridgesWearStoneOf,
@@ -4158,6 +4159,162 @@ function treadProbe(
   };
 }
 
+/**
+ * The realistic rider's back, read back — #623. Luma is the 8-bit
+ * `luminanceOf` of each pixel of a square of the back; `variance` is over it.
+ */
+export interface KitMeasurement {
+  /** How many pixels the square is. */
+  readonly pixels: number;
+  /** As the product draws it. */
+  readonly variance: number;
+  /** THE CONTROL: the same frame with the kit drawn in its own mean colour. */
+  readonly controlVariance: number;
+  /** The same square with no rider — what says the square is the rider's back. */
+  readonly emptyMean: number;
+  readonly mean: number;
+  /**
+   * The mean sRGB of the square, the same rider drawn as each of the three in
+   * turn — #368's measure, on a textured body.
+   */
+  readonly backs: Readonly<Record<'rider' | 'bot' | 'ghost', readonly number[]>>;
+}
+
+const NO_KIT: KitMeasurement = {
+  pixels: 0,
+  variance: 0,
+  controlVariance: 0,
+  emptyMean: 0,
+  mean: 0,
+  backs: { rider: [], bot: [], ghost: [] },
+};
+
+/**
+ * Where the rider's back is read — #623: the camera brought to KIT_PROBE_EYE
+ * metres above the road, KIT_PROBE_BEHIND behind the rider, looking down at
+ * the middle of the back, where the kit's mark and the pockets' seams are. The
+ * square is KIT_PROBE_HALF either side of that point, so it takes in the
+ * mark's edges, the jersey round it and a seam, never one flat panel alone.
+ */
+const KIT_PROBE_EYE_METRES = 1.75;
+const KIT_PROBE_BEHIND_METRES = 1.6;
+const KIT_PROBE_HALF = 8;
+/** How far the back's surface stands off the line from hips to shoulders. */
+const KIT_PROBE_BACK_METRES = 0.1;
+
+/**
+ * The realistic rider's back, read back — #623.
+ *
+ * One rider, from behind, on a bare level road, with a camera brought close; a
+ * square of pixels on the middle of its back, aimed from `bicycle.ts`
+ * §`riderJoints` — the hips and the shoulders the renderer poses the body to —
+ * through the frame's own camera ({@link pixelFor}). Its luma variance is the
+ * kit's pattern and relief.
+ *
+ * **The control** is the same frame with the kit drawn in its own mean colour
+ * (`three-renderer.ts` §`riderKitOf`): what is left is the body's shape, its
+ * relief and the light, and that must fall below the floor the kit is held
+ * above. **The empty frame** says the square was the rider.
+ */
+function kitProbe(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  base: SceneFrame,
+): KitMeasurement {
+  const [rider] = base.markers.filter((marker) => marker.kind === 'rider');
+  if (rider === undefined) return NO_KIT;
+  const pose = base.camera;
+  const roadY = pose.y;
+  const heading = { x: pose.headingX, z: pose.headingZ };
+  const camera: CameraPose = {
+    ...pose,
+    eyeRoadY: roadY + KIT_PROBE_EYE_METRES - CAMERA_ABOVE_METRES,
+    targetRoadY: roadY + 1,
+  };
+  const { eye } = cameraRig(camera);
+  const joints = riderJoints(0, emptyRiderJoints(), 0);
+  // The rider faces the way the camera looks, its hips KIT_PROBE_BEHIND ahead.
+  const ahead = KIT_PROBE_BEHIND_METRES - joints.hips.z;
+  const marker = {
+    ...rider,
+    x: eye.x + heading.x * ahead,
+    y: roadY,
+    z: eye.z + heading.z * ahead,
+    headingX: heading.x,
+    headingZ: heading.z,
+    lean: 0,
+    bodyLean: 0,
+    crankAngle: 0,
+  };
+  // The middle of the back: between the hips and the shoulders, stood off the
+  // line between them towards the sky and the tail.
+  const dy = joints.shoulders.y - joints.hips.y;
+  const dz = joints.shoulders.z - joints.hips.z;
+  const length = Math.hypot(dy, dz);
+  const local = {
+    y: joints.hips.y + 0.5 * dy + (KIT_PROBE_BACK_METRES * dz) / length,
+    z: joints.hips.z + 0.5 * dz - (KIT_PROBE_BACK_METRES * dy) / length,
+  };
+  const point = {
+    x: marker.x + local.z * heading.x,
+    y: roadY + local.y,
+    z: marker.z + local.z * heading.z,
+  };
+  const frame: SceneFrame = { ...base, camera, markers: [marker], scatter: [] };
+  const centre = pixelFor(frame, canvas, point);
+  const side = KIT_PROBE_HALF * 2 + 1;
+  const read = (scene: SceneFrame): Uint8Array => {
+    view.render(scene);
+    view.render(scene);
+    return readRegion(
+      gl,
+      Math.round(centre.x) - KIT_PROBE_HALF,
+      Math.round(centre.y) - KIT_PROBE_HALF,
+      side,
+      side,
+    );
+  };
+  const lumas = (pixels: Uint8Array): number[] => {
+    const out: number[] = [];
+    for (let at = 0; at < pixels.length; at += 4) {
+      out.push(luminanceOf([pixels[at] ?? 0, pixels[at + 1] ?? 0, pixels[at + 2] ?? 0, 255]));
+    }
+    return out;
+  };
+  const meanOf = (values: readonly number[]): number =>
+    values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length);
+  const varianceOf = (values: readonly number[]): number => {
+    const mean = meanOf(values);
+    return meanOf(values.map((value) => (value - mean) ** 2));
+  };
+  const rgbOf = (pixels: Uint8Array): number[] =>
+    [0, 1, 2].map((channel) => {
+      let sum = 0;
+      for (let at = channel; at < pixels.length; at += 4) sum += pixels[at] ?? 0;
+      return sum / (pixels.length / 4);
+    });
+  const product = lumas(read(frame));
+  let control: number[];
+  try {
+    riderKitOf(view, false);
+    control = lumas(read(frame));
+  } finally {
+    riderKitOf(view, true);
+  }
+  const emptied = lumas(read({ ...frame, markers: [] }));
+  const backOf = (kind: 'rider' | 'bot' | 'ghost'): number[] =>
+    rgbOf(read({ ...frame, markers: [{ ...marker, kind }] }));
+  return {
+    pixels: product.length,
+    variance: varianceOf(product),
+    controlVariance: varianceOf(control),
+    emptyMean: meanOf(emptied),
+    mean: meanOf(product),
+    backs: { rider: backOf('rider'), bot: backOf('bot'), ghost: backOf('ghost') },
+  };
+}
+
 /** What the `?realistic` run measures — ADR 0026. @see realisticProbe */
 export interface RealisticMeasurement {
   readonly measured: boolean;
@@ -4278,6 +4435,8 @@ export interface RealisticMeasurement {
   readonly grounding: GroundBlobMeasurement;
   /** #624: the front tyre's tread, read back, with and without its normal map. @see treadProbe */
   readonly tread: TreadMeasurement;
+  /** #623: the rider's back, read back, with the kit and in its mean colour. @see kitProbe */
+  readonly kit: KitMeasurement;
   /**
    * #544: the distant hills against the sky, read off the drawing buffer — as
    * the product draws them, and (the control) with the view's horizon put back
@@ -4483,6 +4642,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   },
   grounding: NO_GROUNDING,
   tread: NO_TREAD,
+  kit: NO_KIT,
   horizon: [],
   horizonControl: [],
   horizonColours: { fog: [], foot: [] },
@@ -5794,6 +5954,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const tread = treadProbe(view, gl, canvas, riding(level, 400));
   phaseEnds('realistic: the tread — #624');
 
+  // #623, on the same view and the same road.
+  const kit = kitProbe(view, gl, canvas, riding(level, 400));
+  phaseEnds('realistic: the kit — #623');
+
   // #620, on the same view and the same road; then what a whole wooded frame
   // spends on its blobs.
   const groundingProbe = groundBlobProbe(view, gl, canvas, riding(level, 400));
@@ -5979,6 +6143,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     tint,
     grounding,
     tread,
+    kit,
     horizon,
     horizonControl,
     horizonColours,

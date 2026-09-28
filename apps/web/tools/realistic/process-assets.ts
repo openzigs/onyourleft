@@ -37,6 +37,14 @@
  * draws them from arithmetic, this writes each as a PNG into the scratch
  * stage, and the pinned `ktx` encodes it like any other picture.
  *
+ * ## The rider reads a second source and a drawn mark — #623
+ *
+ * `process_rider.py` reads MakeHuman's repository AND MakeHuman's CC0 system
+ * assets pack (a recipe's `alsoReads`), and the app's own two chevrons, which
+ * this draws with `tools/icons/generate-icons.ts` §`drawMark` and hands it as a
+ * PNG (a recipe's `mark`). `--only <file>` makes one output and whatever its
+ * run also writes, for working on one asset; a pull request quotes a full run.
+ *
  * ## `--check`: the reproducibility assertion
  *
  * #430's criterion is that re-running the pipeline reproduces the committed
@@ -62,7 +70,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { encodePng } from '../icons/generate-icons';
+import { drawMark, encodePng } from '../icons/generate-icons';
 
 import { drawBicycleMap, pixelDigest } from './draw-bicycle-maps';
 import { encodeKtx2, pinnedImageEncoder, requirePinnedKtx, withKtx2Images } from './encode-ktx2';
@@ -112,7 +120,7 @@ function blender(script: string, args: readonly string[]): string {
 
 /** The input a script reads: a Poly Haven glTF, MakeHuman's directory, or a texture's (#475). */
 function inputFor(output: OutputSpec): string {
-  if (output.from === 'makehuman') return join(RAW, 'makehuman');
+  if (output.from.startsWith('makehuman')) return join(RAW, output.from);
   if (output.recipe.how === 'blender' && output.recipe.script === TEXTURE_SCRIPT) {
     return join(RAW, output.from);
   }
@@ -149,7 +157,14 @@ function make(output: OutputSpec, into: string, stage: string): unknown {
   }
   const made = recipe.made ?? output.file;
   const report = join(stage, `${output.file}.report.json`);
-  blender(recipe.script, [inputFor(output), join(stage, made), report, ...recipe.args]);
+  // #623: the other sources' downloads, and the app's mark drawn for the run.
+  const extra = (recipe.alsoReads ?? []).map((id) => join(RAW, id));
+  if (recipe.mark !== undefined) {
+    const mark = join(stage, `${output.file}.mark.png`);
+    writeFileSync(mark, encodePng(recipe.mark, drawMark(recipe.mark)));
+    extra.push(mark);
+  }
+  blender(recipe.script, [inputFor(output), join(stage, made), report, ...recipe.args, ...extra]);
   if (recipe.ktx2 !== undefined) {
     encodeKtx2(recipe.ktx2, join(stage, made), join(into, output.file));
   } else if (recipe.images === 'ktx2') {
@@ -185,6 +200,29 @@ function main(): void {
     return;
   }
   const check = process.argv.includes('--check');
+  // `--only <file>`: make, and write or compare, only the output that ships
+  // that file and whatever else its run writes. For working on one asset; a
+  // pull request quotes a full `--check`.
+  const onlyAt = process.argv.indexOf('--only');
+  const only = onlyAt === -1 ? undefined : process.argv[onlyAt + 1];
+  const outputs =
+    only === undefined
+      ? OUTPUTS
+      : OUTPUTS.filter(
+          (output) =>
+            output.file === only ||
+            (output.recipe.how === 'blender' &&
+              (output.recipe.alsoWrites ?? []).some((also) => also.file === only)),
+        );
+  if (outputs.length === 0) throw new Error(`no output makes ${only ?? ''}`);
+  const files = shippedFiles().filter((file) =>
+    outputs.some(
+      (output) =>
+        output.file === file ||
+        (output.recipe.how === 'blender' &&
+          (output.recipe.alsoWrites ?? []).some((also) => also.file === file)),
+    ),
+  );
   const version = blenderVersion();
   if (version !== PINNED_BLENDER) {
     throw new Error(`${BLENDER} is ${version}; the pipeline is pinned to ${PINNED_BLENDER}`);
@@ -195,7 +233,7 @@ function main(): void {
   mkdirSync(stage);
   const different: string[] = [];
   try {
-    for (const output of OUTPUTS) {
+    for (const output of outputs) {
       const started = Date.now();
       const report = make(output, scratch, stage);
       const seconds = ((Date.now() - started) / 1000).toFixed(1);
@@ -203,7 +241,7 @@ function main(): void {
         `${output.file}: ${seconds} s ${report === undefined ? '' : JSON.stringify(report)}`,
       );
     }
-    for (const file of shippedFiles()) {
+    for (const file of files) {
       const made = join(scratch, file);
       const digest = sha256(made);
       const committed = join(SHIPPED, file);

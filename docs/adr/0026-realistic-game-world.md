@@ -487,3 +487,33 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   - **D-8's wording "plain images first" is therefore history**, and its decision was not reversed:
     it named the trigger, and the trigger was met. The HDR sky stays half-float; a compressed sky is
     its own issue. Nothing in D-2 moved: `three` is still 0.185.1.
+
+- **2026-09-28** — **MakeHuman's own asset packs are MakeHuman, under D-4's existing row.** D-4's
+  row reads *"MakeHuman, exports only"*, and until
+  [#623](https://github.com/openzigs/onyourleft/issues/623) every MakeHuman input came from one
+  place, the MakeHuman repository pinned at `a8bc2d54…`. On 2026-09-27 the owner ruled, on #623,
+  that MakeHuman's own CC0 skin, eyebrow and pose packs come from **the same author, under the same
+  CC0 grant**, as the files that row already admits, and so fall under it. That is the fact this
+  entry records; it admits no new source. ⚠️ **"Exports only" has always been read as "MakeHuman's
+  CC0-released data"**, not as "files an export wrote": `base.obj`, the mesh the row first admitted,
+  is MakeHuman's released data rather than an export, and so are the skin image and the eyebrow
+  files here — so the phrase is not to be read as excluding these packs. What #623's pull request
+  found and relied on:
+  - **The host** is MakeHuman's own asset site: the pack's page at
+    `static.makehumancommunity.org/assets/assetpacks/makehuman_system_assets.html` and its archive
+    at `files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip`,
+    pinned in `inputs.lock.json` by its SHA-256 with every file taken out of it.
+  - **The pack** is *"Makehuman system assets"*, and from it the rider takes **one skin,
+    `young_caucasian_male`**, and **one eyebrow, `eyebrow001`**. The page lists each asset with its
+    author and licence; both read **author `makehuman_system`, licence CC0**, read 2026-09-28, and
+    the pipeline refuses a file unless its own asset's row does (`sources.ts`
+    §`systemAssetVerdict`). Each text file among them carries the same header as the repository's
+    `base.obj` — *"This asset was explicitly released as CC0 in september 2020"* — naming the same
+    copyright holders.
+  - **Pose packs** are within the same ruling and no pose pack is used, so none is pinned.
+  - ⚠️ **The site's other skin and eyebrow packs are NOT under this row.** *"Skins 01"*, *"Skins
+    02"*, *"Skins 03"* and *"Eyebrows 01"*, read 2026-09-28, are by community authors — Mindfront,
+    MargaretToigo, jartur69 and others — so the ruling's premise, the same author, is false of them.
+    None is taken, and admitting one would be the superseding ADR this section's own D-4 names.
+  - **Clothes packs** were not ruled in: the rider's kit is this repository's own drawing, dedicated
+    `CC0-1.0` as the app icons are (ADR 0024 D-5).
