@@ -160,6 +160,12 @@ function distinctiveAltitude(count: number): (number | undefined)[] {
   );
 }
 
+/**
+ * A base height for {@link hillRoute} nowhere near any other figure a ride's
+ * input carries, so a height found in one cannot be a coincidence.
+ */
+const DISTINCTIVE_BASE_METRES = 2717.4;
+
 /** Every key and every leaf value in a structure, with its path. */
 function walk(
   value: unknown,
@@ -193,6 +199,62 @@ const POSE: SideSessionSummary = {
   differences: { knee: -3.25, torso: 1.5 },
 };
 
+/**
+ * What an input carries that it must not. Heights are matched to within a
+ * metre and coordinates to within a hundredth of a degree, because a ROUNDED
+ * height or position locates the rider as well as an exact one (#814 review).
+ */
+interface Located {
+  readonly heights: readonly number[];
+  readonly coordinates: readonly number[];
+  readonly instants: readonly number[];
+}
+
+const HEIGHT_TOLERANCE_METRES = 1;
+const COORDINATE_TOLERANCE_DEGREES = 0.01;
+
+/** Keys that name a place, a height, a time or an identity. */
+const FORBIDDEN_KEYS =
+  /latitude|longitude|altitude|elevation|height|position|coordinate|name|date|time ?zone|startedAt|createdAt|^id$|Id$|key|signature|record/i;
+/** The one height key that is allowed, because it is relative to the section's start. */
+const ALLOWED_HEIGHT_KEYS = new Set(['elevationGainMetres']);
+
+function leaksIn(input: unknown, located: Located): { keys: string[]; numbers: number[] } {
+  const found = walk(input);
+  const near = (values: readonly number[], tolerance: number, number: number): boolean =>
+    values.some((value) => Math.abs(value - number) <= tolerance);
+  return {
+    keys: found.keys.filter((key) => FORBIDDEN_KEYS.test(key) && !ALLOWED_HEIGHT_KEYS.has(key)),
+    numbers: found.numbers.filter(
+      (number) =>
+        near(located.heights, HEIGHT_TOLERANCE_METRES, number) ||
+        near(located.coordinates, COORDINATE_TOLERANCE_DEGREES, number) ||
+        located.instants.includes(number),
+    ),
+  };
+}
+
+function presentSamples(values: readonly (number | undefined)[] | undefined): number[] {
+  return (values ?? []).filter((sample): sample is number => sample !== undefined);
+}
+
+/** Every height, coordinate and instant a saved ride, its streams and its route hold. */
+function locatedIn(from: Saved): Located {
+  const channels = from.streams?.channels;
+  const profile = from.route?.profile;
+  return {
+    heights: [...presentSamples(channels?.altitude), ...(profile?.elevations ?? [])],
+    coordinates: [
+      ...presentSamples(channels?.latitude),
+      ...presentSamples(channels?.longitude),
+      ...(profile?.positions ?? []).flatMap((position) => [position.latitude, position.longitude]),
+    ],
+    instants: [from.ride.startedAt, from.ride.createdAt, from.streams?.startedAt].filter(
+      (instant): instant is NonNullable<typeof instant> => instant !== undefined,
+    ),
+  };
+}
+
 describe('what never leaves: nothing that locates or identifies the rider', () => {
   it('carries no coordinate, no altitude, no identity and no string but its own', async () => {
     const ride = rideFor(ATHLETE_A, {
@@ -208,52 +270,86 @@ describe('what never leaves: nothing that locates or identifies the rider', () =
     });
     const input = inputFor(from, { pose: POSE, cameraConsented: true });
     const found = walk(input);
+    const located = locatedIn(from);
+    expect(located.heights.length).toBeGreaterThan(100);
+    expect(located.coordinates.length).toBeGreaterThan(100);
 
-    // No key that names a place, a time or an identity.
-    const forbiddenKeys =
-      /latitude|longitude|altitude|position|coordinate|name|date|time ?zone|startedAt|createdAt|^id$|Id$|key|signature|record/i;
-    expect(found.keys.filter((key) => forbiddenKeys.test(key))).toStrictEqual([]);
+    // No key that names a place, a height, a time or an identity; no number
+    // within rounding of a height, a coordinate or an instant.
+    expect(leaksIn(input, located)).toStrictEqual({ keys: [], numbers: [] });
 
     // No string but an enumeration member or the template version.
     const allowed = new Set<string>([TEMPLATE, ...SECTION_KINDS, ...SIDE_POSE_SOURCES]);
     expect(found.strings.filter((text) => !allowed.has(text))).toStrictEqual([]);
 
-    // No number that equals a coordinate, an altitude sample or an instant.
-    const located = new Set<number>();
-    for (const channel of ['latitude', 'longitude', 'altitude'] as const) {
-      for (const sample of from.streams?.channels[channel] ?? []) {
-        if (sample !== undefined) {
-          located.add(sample);
-        }
-      }
-    }
-    expect(located.size).toBeGreaterThan(100);
-    for (const instant of [from.ride.startedAt, from.ride.createdAt, from.streams?.startedAt]) {
-      if (instant !== undefined) {
-        located.add(instant);
-      }
-    }
-    expect(found.numbers.filter((number) => located.has(number))).toStrictEqual([]);
-
     // And the privacy module's own walk finds no position anywhere.
     expect(coordinatesIn(input)).toStrictEqual([]);
   });
 
-  it('holds the absent-altitude seed honest: the walk DOES find an altitude sample when one leaks', async () => {
-    // The control: the same walk over an input with an altitude sample planted
-    // in it must fail, or the assertion above could be passing over nothing.
-    const ride = rideFor(ATHLETE_A);
-    const streams = withChannel(
-      streamSetFor(ride, { sampleCount: 900 }),
-      'altitude',
-      distinctiveAltitude(900),
+  it('carries no height of the ROUTE when the sections follow a saved route', async () => {
+    // The route's heights, not the ride's: a route-sectioned input reads its
+    // profile from `elevationAt`, which no altitude channel ever held.
+    const route = hillRoute(DISTINCTIVE_BASE_METRES);
+    const { ride, streams } = rideOverTheHill(route);
+    const from = await saved(ride, streams, { route });
+    const input = inputFor(from, { pose: POSE, cameraConsented: true });
+    expect(input.sections.map((section) => section.kind)).toContain('climb');
+    const located = locatedIn(from);
+    expect(located.heights.length).toBeGreaterThan(100);
+    expect(leaksIn(input, located)).toStrictEqual({ keys: [], numbers: [] });
+    expect(coordinatesIn(input)).toStrictEqual([]);
+  });
+
+  it('holds the walk honest: it DOES find a leaked height, exact, rounded or under an innocent key', async () => {
+    // The controls: each leak planted in a real input must be found, or the
+    // assertions above could be passing over nothing.
+    const route = hillRoute(DISTINCTIVE_BASE_METRES);
+    const { ride, streams } = rideOverTheHill(route);
+    const from = await saved(ride, streams, {
+      route,
+      laps: [lapFor(ride, 0), lapFor(ride, 1), lapFor(ride, 2)],
+    });
+    const input = inputFor(from);
+    const located = locatedIn(from);
+    const height = route.profile.elevations[40] ?? 0;
+    const withSections = (extra: Record<string, number>): unknown => ({
+      ...input,
+      sections: input.sections.map((section) => ({ ...section, ...extra })),
+    });
+
+    // The #814 review's mutation: an absolute height, rounded, on each route section.
+    const named = leaksIn(withSections({ startElevationMetres: Math.round(height) }), located);
+    expect(named.keys).toContain('startElevationMetres');
+    expect(named.numbers).toContain(Math.round(height));
+    // The same number under a key no pattern names is still found by its value.
+    expect(leaksIn(withSections({ offset: Math.round(height) }), located).numbers).toStrictEqual(
+      input.sections.map(() => Math.round(height)),
     );
-    const from = await saved(ride, streams);
-    const leaked = { ...inputFor(from), leaked: from.streams?.channels.altitude?.[5] };
-    const located = new Set<number>(
-      (from.streams?.channels.altitude ?? []).filter((sample) => sample !== undefined),
-    );
-    expect(walk(leaked).numbers.some((number) => located.has(number))).toBe(true);
+    // A height key of any spelling.
+    expect(leaksIn(withSections({ heightAtStart: 1 }), located).keys).toContain('heightAtStart');
+    // A ride's own altitude sample, exact, is found too.
+    const altitudeFrom = await (async () => {
+      await theHarness().destroy();
+      harness = createStoreHarness();
+      const plain = rideFor(ATHLETE_A);
+      return saved(
+        plain,
+        withChannel(
+          streamSetFor(plain, { sampleCount: 900 }),
+          'altitude',
+          distinctiveAltitude(900),
+        ),
+      );
+    })();
+    const sample = altitudeFrom.streams?.channels.altitude?.[5];
+    expect(
+      leaksIn({ ...inputFor(altitudeFrom), leaked: sample }, locatedIn(altitudeFrom)).numbers,
+    ).toStrictEqual([sample]);
+    // A rounded coordinate is found — one no point of the route holds exactly.
+    const latitude = route.profile.positions[100]?.latitude ?? 0;
+    const rounded = Math.round(latitude * 100) / 100;
+    expect(located.coordinates).not.toContain(rounded);
+    expect(leaksIn({ ...input, at: rounded }, located).numbers).toStrictEqual([rounded]);
   });
 
   it('never uses a registered metric name in any key (CLAUDE.md §6)', async () => {
@@ -329,14 +425,14 @@ describe('the rider', () => {
 });
 
 /** A straight road north: flat, a 5 % climb, a 5 % descent, flat — 10 km. */
-function hillRoute(): RouteRecord {
+function hillRoute(base = 100): RouteRecord {
   const points: RoutePoint[] = [];
   for (let metre = 0; metre <= 10_000; metre += 50) {
-    let height = 100;
+    let height = base;
     if (metre > 2_000 && metre <= 5_000) {
-      height = 100 + (metre - 2_000) * 0.05;
+      height = base + (metre - 2_000) * 0.05;
     } else if (metre > 5_000 && metre <= 8_000) {
-      height = 250 - (metre - 5_000) * 0.05;
+      height = base + 150 - (metre - 5_000) * 0.05;
     }
     points.push({
       position: geographicPosition(degreesLatitude(51 + metre / 111_195), degreesLongitude(-0.5)),

@@ -15,10 +15,14 @@
  *
  * {@link rideAnalysisInput} reads no clock, no store and no network. Its
  * parameters are `Pick`s of the store's records rather than the records, so
- * the function cannot even SEE a ride's name, its start time, its time zone,
- * its id or the athlete's id — the absence is a property of the signature, not
- * of care taken inside it. The one absolute instant it is handed is the stream
- * set's `startedAt`, which it subtracts from each lap's start and never copies.
+ * the function cannot NAME a ride's name, its start time, its time zone, its
+ * id or the athlete's id without a compile error. ⚠️ That holds at compile
+ * time only: callers pass whole records, which a `Pick` still admits, so at
+ * run time those fields ARE on the objects it is handed. What keeps them out
+ * of the input is that nothing here spreads `ride`, `streams` or `athlete` —
+ * every field is copied by name — and `input.test.ts` walks a built input to
+ * hold that. The one absolute instant it reads is the stream set's
+ * `startedAt`, which it subtracts from each lap's start and never copies.
  *
  * ## What is never in the input
  *

@@ -58,12 +58,13 @@ export const KILOGRAMS_PER_POUND = 0.45359237;
  * could each write as `power / mass` is a ratio they could each get wrong in a
  * different way — a mass in pounds, a mass with the bicycle added — and the
  * disagreement would be invisible. Both arguments are branded, so a bare
- * number, a bpm or a total mass from `packages/physics` cannot be handed in by
- * mistake.
+ * number or a bpm cannot be handed in by mistake.
  *
- * ⚠️ **The rider's own mass, never rider plus bicycle.** That is what
- * `AthleteRecord.mass` holds, and a watts-per-kilogram figure is quoted
- * against it.
+ * ⚠️ **The rider's own mass, never rider plus bicycle — and the type does NOT
+ * enforce that.** `packages/physics`' `RideConditions.totalMass` is branded
+ * `Kilograms` too, so a total mass type-checks here. `AthleteRecord.mass` is
+ * the rider's own, and a watts-per-kilogram figure is quoted against it; pass
+ * that.
  *
  * ⚠️ **Not a quantity type.** It is a ratio a model or a screen reads, and
  * nothing converts it further; a brand of its own would be a type with no
