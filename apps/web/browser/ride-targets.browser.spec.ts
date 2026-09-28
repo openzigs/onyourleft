@@ -29,7 +29,7 @@
  *   because of its padding would stay 48 and go red here, with the floor then
  *   decorative. ⚠️ It measures HEIGHT only: every listed control is wider
  *   than 48 by its label, so what shows the declared `min-width` doing any
- *   work is a one-glyph specimen of the real *Stop* (#710's review).
+ *   work is an unlabelled specimen of the real *Stop* (#710's review).
  *
  * And the two halves the issue adds: an ORDINARY button beside them — *End
  * ERG*, in the same form as *Set target* — still declares exactly 44 and is
@@ -368,11 +368,16 @@ for (const viewport of VIEWPORTS) {
      * 70 px — so the floor-stripped measurement above leaves every WIDTH where
      * it was and says nothing about `min-width: 3rem`. No listed control can
      * show it doing anything, so a specimen does: the real *Stop*, `Button`'s
-     * own output with `size="ride"` under the real stylesheet, copied with a
-     * one-glyph label no listed control has. It must be 48 wide as shipped and
-     * fall under 48 with its `min-width` taken away.
+     * own output with `size="ride"` under the real stylesheet, copied with NO
+     * label, so its width is its padding and border and nothing a font
+     * decides. It must be 48 wide as shipped and fall under 48 with its
+     * `min-width` taken away.
+     *
+     * ⚠️ Not a one-glyph label, which the first version used: "×" measured
+     * 45.8 px stripped on a Mac and 49.4 on the CI runner (run 36376010134),
+     * because the two set that glyph in different fonts.
      */
-    test('min-width does the work: a one-glyph ride-time button is 48 wide only because of it', async ({
+    test('min-width does the work: an empty ride-time button is 48 wide only because of it', async ({
       page,
     }, testInfo) => {
       const scene = SCENES[1];
@@ -385,7 +390,6 @@ for (const viewport of VIEWPORTS) {
         );
         if (source === undefined) throw new Error('no ride-time Stop to copy');
         const specimen = source.cloneNode(false) as HTMLButtonElement;
-        specimen.textContent = '×';
         document.body.append(specimen);
         const declared = Number.parseFloat(getComputedStyle(specimen).minWidth);
         const shipped = specimen.getBoundingClientRect().width;
@@ -394,12 +398,12 @@ for (const viewport of VIEWPORTS) {
         specimen.remove();
         return { className: specimen.className, declared, shipped, stripped };
       }, RIDE_CLASS);
-      const note = `“×” specimen (${reading.className}): ${reading.shipped.toFixed(1)} wide, ${reading.stripped.toFixed(1)} with min-width stripped`;
+      const note = `empty specimen (${reading.className}): ${reading.shipped.toFixed(1)} wide, ${reading.stripped.toFixed(1)} with min-width stripped`;
       testInfo.annotations.push({ type: 'ride-time min-width', description: note });
       console.log(`#669 ride-time min-width — ${viewport.name} — ${note}`);
       expect(reading.className).toContain(RIDE_CLASS);
       // The box first: it is what a thumb lands on, and what goes red first
-      // when `min-width: 3rem` is deleted (45.8 px wide on the owner's Mac).
+      // when `min-width: 3rem` is deleted (`.oyl-button`'s 44 then holds it).
       expect(reading.shipped, `${note}: under the 48 px ride-time target`).toBeGreaterThanOrEqual(
         RIDE_TIME_TARGET_PIXELS - SUBPIXEL_TOLERANCE,
       );
