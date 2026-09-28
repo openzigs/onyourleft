@@ -222,7 +222,9 @@ function LiveRide({
           164 px under that fold, and upright each came off the workout's
           *Ride*. Now the metric cards are what a notice moves — readings, not
           controls. With any one notice they are still on the screen in the
-          pinned Chromium (2.1 px above that fold at the least, on a Mac); with
+          pinned Chromium (2.1 px above that fold at the least, on a Mac, and
+          −22.7 px on the CI runner's fonts until #671's header — +1.3 px
+          since; #740 holds their FIRST row to the 50 px floor); with
           every notice this screen can stand at once they are not, and neither
           is the last notice. `rideview.browser.spec.ts` §"#692" publishes both,
           and `theme.css` §`.oyl-ride` has the table.

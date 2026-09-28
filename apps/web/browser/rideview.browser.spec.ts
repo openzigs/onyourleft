@@ -856,16 +856,28 @@ for (const viewport of EASED_VIEWPORTS) {
         const controlMargin = foldMargin(lowest.box.bottom, viewport);
         const standing = seen.notices.filter((each) => state.labels.includes(each.label));
         const metricsMargin = foldMargin(seen.metrics?.bottom ?? Infinity, viewport);
+        const topRowMargin = foldMargin(seen.metricsTopRow?.bottom ?? Infinity, viewport);
         const note =
           `lowest control ${controlMargin.toFixed(1)} px (${describeControl(lowest)}); ` +
           `${standing.map((each) => describeNotice(each, viewport)).join('; ')}; ` +
-          `the metric cards end ${metricsMargin.toFixed(1)} px above the fold ` +
+          `the metric cards end ${metricsMargin.toFixed(1)} px above the fold, ` +
+          `their first row ${topRowMargin.toFixed(1)} px ` +
           `— at ${String(viewport.width)}×${String(viewport.height)}`;
         testInfo.annotations.push({ type: '#692 margins to the fold', description: note });
         console.log(`#692 — ${state.name} — ${viewport.name} — ${note}`);
 
         expect(during.filter((each) => !onScreen(each, viewport)).map(describeControl)).toEqual([]);
         expect(controlMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+        // #740 (#692's review): with ONE notice standing, the metric cards'
+        // first row — the readings a rider looks at first — clears the fold
+        // by the same floor. The whole list is published and not bounded: on
+        // the CI runner's fonts its second row ended 1.3 px above the fold at
+        // 1280×800 in the shell with *No notification* (run 36450645172), and
+        // −22.7 px before #671's smaller header (run 36416451402).
+        if (alone) {
+          expect(seen.metricsTopRow, 'no metric cards on the page').toBeDefined();
+          expect(topRowMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+        }
 
         // The rule itself, in the Live column: no standing notice starts above
         // a ride control's end. Two are not standing in that column: #647's is
@@ -950,6 +962,63 @@ for (const viewport of IN_THE_SHELL) {
   });
 }
 
+/**
+ * #740 (#655's review, N1): a HAND-SET target the stall rescue has eased, with
+ * the rider's next *Set* held. #655 put a *Held* line between the *Eased*
+ * notice and the ERG form, which pushes *End ERG* — the control the Eased
+ * sentence itself names — down, and no fixture rendered a manual rescue:
+ * `?workout=eased` is a workout's, where the form is absent. `?erg=held` is,
+ * and *End ERG* is held to the floor at every tablet, its margin published.
+ */
+for (const viewport of EASED_VIEWPORTS) {
+  test(`#740 — a manual rescue with a Set held — End ERG clears the fold — ${viewport.name}`, async ({
+    page,
+  }, testInfo) => {
+    await open(page, viewport, '?erg=held');
+    const seen = await measure(page);
+    expect(seen.scrollY).toBe(0);
+    // The apparatus: both notices this state is about are on the page.
+    expect(seen.notices.map((each) => each.label)).toEqual(
+      expect.arrayContaining(['Eased:', 'Held:']),
+    );
+    const end = seen.controls.find((each) => each.group === 'trainer' && each.name === 'End ERG');
+    expect(end, 'no End ERG on the page').toBeDefined();
+    const held = seen.notices.find((each) => each.label === 'Held:');
+    const margin = foldMargin(end?.box.bottom ?? Infinity, viewport);
+    const note =
+      `End ERG ${margin.toFixed(1)} px above the fold; the Held line ` +
+      `${held?.box.height.toFixed(0) ?? '?'} px tall — at ` +
+      `${String(viewport.width)}×${String(viewport.height)}`;
+    testInfo.annotations.push({ type: '#740 End ERG', description: note });
+    console.log(`#740 — End ERG — ${viewport.name} — ${note}`);
+    expect(end?.onTop, 'End ERG is covered').toBe(true);
+    expect(margin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+  });
+}
+
+test(`#740 — the control — the Held line above the form puts End ERG under the floor — ${TABLET_IN_THE_SHELL.name}`, async ({
+  page,
+}, testInfo) => {
+  const viewport = TABLET_IN_THE_SHELL;
+  await open(page, viewport, '?erg=held');
+  const endMargin = (seen: RideViewMeasurement): number =>
+    foldMargin(
+      seen.controls.find((each) => each.group === 'trainer' && each.name === 'End ERG')?.box
+        .bottom ?? -Infinity,
+      viewport,
+    );
+  const fixed = endMargin(await measure(page));
+  await page.evaluate(() => {
+    window.__oylRideView?.heldAboveTheForm();
+  });
+  const reverted = endMargin(await measure(page));
+  const note = `End ERG ${fixed.toFixed(1)} px → ${reverted.toFixed(1)} px with the Held line above the form`;
+  testInfo.annotations.push({ type: '#740 control', description: note });
+  console.log(`#740 — the control — ${note}`);
+  expect(fixed, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+  expect(reverted, note).toBeLessThan(FOLD_MARGIN_PIXELS);
+});
+
 /** Two rows of cards at the small step rather than the medium one, and the gap. */
 const CARDS_TIGHTEN_BY_PIXELS = 30;
 
@@ -992,6 +1061,45 @@ test.describe(`#692 — ${TABLET_UPRIGHT_IN_THE_SHELL.name}`, () => {
     expect(groups.trainer?.left ?? 0).toBeGreaterThanOrEqual(groups.live?.right ?? Infinity);
   });
 });
+
+/**
+ * #740 (#692's review): the NARROWEST two-column Ride screen — 768 px, the
+ * `48rem` of `(min-width: 48rem) and (min-height: 60rem)`, which a 768×1024
+ * tablet held upright is — measured rather than probed. With every standing
+ * notice at once: the trainer beside the live group, no sideways scroll, and
+ * every control inside the viewport. The control is one pixel narrower, where
+ * the same page must be ONE column — so a green run says the two columns were
+ * the breakpoint's doing, at its edge.
+ */
+for (const width of [768, 767] as const) {
+  test(`#740 — ${String(width)}×1024 upright is ${width === 768 ? 'two columns, the narrowest there is' : 'one column (the control)'}`, async ({
+    page,
+  }) => {
+    const viewport = { name: `${String(width)}×1024 upright`, width, height: 1024 };
+    await open(page, viewport, EVERY_NOTICE.query);
+    const seen = await measure(page);
+    const sideways = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    const { live, trainer } = seen.groups;
+    const beside = (trainer?.left ?? 0) >= (live?.right ?? Infinity);
+    console.log(
+      `#740 — ${String(width)}×1024 — live ${live?.width.toFixed(0) ?? '?'} px, trainer ${trainer?.width.toFixed(0) ?? '?'} px, ${beside ? 'beside' : 'under'}`,
+    );
+    if (width === 767) {
+      expect(beside, 'one pixel under the breakpoint is still two columns').toBe(false);
+      return;
+    }
+    expect(beside, 'the trainer is not beside the live group').toBe(true);
+    expect(trainer?.top).toBeCloseTo(live?.top ?? -1, 0);
+    expect(sideways, 'the page scrolls sideways').toBeLessThanOrEqual(0);
+    expect(
+      seen.controls
+        .filter((each) => each.box.left < 0 || each.box.right > width)
+        .map((each) => each.name),
+    ).toEqual([]);
+  });
+}
 
 /**
  * #669 — the workout chooser on the tablet held upright, inside the shell.
