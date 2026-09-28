@@ -2126,8 +2126,9 @@ browser gate is what grew (6.8 minutes on main, 8.0 with the ride-stage and Ride
 ⚠️ **It is 25 since [#682](https://github.com/openzigs/onyourleft/issues/682), and a reviewer who
 remembers 20 is reading the old file.** Thirteen green runs on `main` on 2026-09-28 (36370135206 to
 36405580515, job `started_at` to `completed_at`, which excludes queueing) took **699 s to 1 128 s**,
-in two clusters — 699–888 s and 1 005–1 128 s — and the slower one is the runner #651 read as an AMD
-EPYC 7763 (no run prints its CPU; the cluster is the evidence). The slowest, 36405580515, was
+in two clusters — 699–888 s and 1 005–1 128 s — and the slower one is an AMD EPYC 7763, two cores
+of two threads: no `main` run prints its CPU, but #651's `lscpu` read it so and so did a temporary
+step on #682's own pull request, for a 1 113 s job (run 36412215912). The slowest, 36405580515, was
 **18m48s — 72 s from twenty minutes**. Run 36396660625's 28 minutes of wall clock was 11m36s of
 waiting for the concurrency group before its job was created and a 16m45s job. Twenty-five leaves a
 green job 372 s clear and pays for the browser gate's own stop to grow with it (below); it is still
