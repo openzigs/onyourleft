@@ -39,10 +39,16 @@ import {
   type FakeDeviceSpec,
   type FakeServiceSpec,
 } from '@onyourleft/sensors/web-bluetooth/testing';
+import { watts } from '@onyourleft/domain';
 import { deviceId } from '@onyourleft/sensors';
 import { describe, expect, it, vi } from 'vitest';
 
-import { browserTimeouts, openWebBluetoothTrainer, TRAINER_PROCEDURE_TIMEOUT } from './trainer';
+import {
+  browserTimeouts,
+  openCapacitorTrainer,
+  openWebBluetoothTrainer,
+  TRAINER_PROCEDURE_TIMEOUT,
+} from './trainer';
 
 const TRAINER = deviceId('kickr');
 
@@ -252,6 +258,100 @@ describe('opening trainer control on a real transport', () => {
  * `docs/validation/0002-android-shell-and-game.md` Part M is the step for
  * somebody who has one.
  */
+describe('the client’s own Request Control on a 0xFF — #721', () => {
+  async function afterPermissionLost(options?: { mayReacquireControl: () => boolean }) {
+    const fake = createFakeBluetooth({ devices: [completeTrainer()] });
+    const transport = createWebBluetoothTransport({
+      profiles: [createIndoorBikeDataProfile()],
+      bluetooth: fake.bluetooth,
+    });
+    await transport.discover({ capabilities: ['power'] });
+    await transport.connect(TRAINER);
+    const { connection } = await openWebBluetoothTrainer(transport, {
+      scheduleTimeout: () => () => undefined,
+    })(TRAINER, options);
+    const turns = async (): Promise<void> => {
+      for (let turn = 0; turn < 10; turn += 1) {
+        await new Promise<void>((resolve) => void setTimeout(resolve, 0));
+      }
+    };
+    // Control first — the channel binds the status characteristic on its
+    // first procedure — answered as a machine answers it.
+    const granted = connection?.control.requestControl();
+    await turns();
+    fake.bench
+      .device('kickr')
+      .notify(
+        FITNESS_MACHINE_SERVICE,
+        FITNESS_MACHINE_CONTROL_POINT,
+        Uint8Array.from([0x80, 0x00, 0x01]),
+      );
+    await granted;
+    fake.bench
+      .device('kickr')
+      .notify(FITNESS_MACHINE_SERVICE, FITNESS_MACHINE_STATUS, Uint8Array.from([0xff]));
+    await turns();
+    const written = fake.bench
+      .device('kickr')
+      .writes(FITNESS_MACHINE_SERVICE, FITNESS_MACHINE_CONTROL_POINT)
+      .map((bytes) => bytes[0]);
+    connection?.control.close();
+    return written;
+  }
+
+  it('is sent when nothing says otherwise, as the protocol defaults', async () => {
+    expect(await afterPermissionLost()).toEqual([0x00, 0x00]);
+  });
+
+  it('is not sent when the ride controller says it may not', async () => {
+    expect(await afterPermissionLost({ mayReacquireControl: () => false })).toEqual([0x00]);
+  });
+
+  it('is not sent inside the Android shell either, when the ride controller says it may not', async () => {
+    const statusListeners: Array<(value: DataView) => void> = [];
+    const written: number[] = [];
+    const open = openCapacitorTrainer(
+      {
+        resolvedUuids: () => Promise.resolve([]),
+        readMachine: () =>
+          Promise.resolve({
+            powerRange: { minimum: watts(0), maximum: watts(2000), increment: watts(5) },
+            resistanceRange: undefined,
+            features: undefined,
+          }),
+        openChannel: () => ({
+          enableControlPointIndications: () => Promise.resolve(),
+          onControlPointIndication: () => () => undefined,
+          onStatus: (listener) => {
+            statusListeners.push(listener);
+            return () => undefined;
+          },
+          writeControlPoint: (value) => {
+            written.push(value[0] ?? -1);
+            return Promise.resolve();
+          },
+        }),
+      },
+      { scheduleTimeout: () => () => undefined },
+    );
+    for (const [options, expected] of [
+      [{ mayReacquireControl: () => false }, []],
+      [undefined, [0x00]],
+    ] as const) {
+      written.length = 0;
+      statusListeners.length = 0;
+      const { connection } = await open(TRAINER, options);
+      for (const listener of statusListeners) {
+        listener(new DataView(Uint8Array.from([0xff]).buffer));
+      }
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(written).toEqual(expected);
+      connection?.control.close();
+    }
+  });
+});
+
 describe('what the machine offers — #370', () => {
   /** Wahoo's control characteristic lives inside the standard power service. */
   function vendorOnlyTrainer(): FakeDeviceSpec {

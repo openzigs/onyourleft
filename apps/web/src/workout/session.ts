@@ -448,6 +448,13 @@ function faultText(error: unknown): string {
   if (message.includes('timed out') || message.includes('timeout')) {
     return 'The trainer did not answer. The next target will be sent again.';
   }
+  // #721: the ride controller, not the machine, held the target back while a
+  // trainer is being forgotten (`ride/controller.ts` §`mustWaitForForget`),
+  // so this does not say the trainer refused anything. Its own sentence says
+  // why and what ends it.
+  if (message.includes('still finishing forgetting a trainer')) {
+    return message;
+  }
   return 'The trainer refused that target. The next one will be sent again.';
 }
 

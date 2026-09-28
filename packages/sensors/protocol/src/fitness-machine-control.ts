@@ -688,8 +688,16 @@ export interface TrainerControlOptions {
    *
    * ⚠️ Never after a **Reset**: this client's own reset deliberately gives
    * control up, and silently taking it back would defeat the procedure.
+   *
+   * A function is asked each time a `0xFF` Control Permission Lost arrives,
+   * and nothing is requested when it answers `false` — #721. The ride
+   * controller holds EVERY Request Control back while a trainer's forget is
+   * in progress or still running late, the rider's and this one alike, and
+   * this is how it reaches the one it does not send itself. Control lost
+   * while it answers `false` stays lost: taking it back later is
+   * {@link TrainerControl.requestControl}, which is a thing the rider does.
    */
-  readonly reacquireControl?: boolean | undefined;
+  readonly reacquireControl?: boolean | (() => boolean) | undefined;
   /** See {@link ScheduleTimeout}. Omitted, procedures are not timed out. */
   readonly scheduleTimeout?: ScheduleTimeout | undefined;
 }
@@ -932,7 +940,9 @@ export function createTrainerControl(
       }
       target = { kind: 'none' };
       loseControl('permission-lost');
-      if (reacquireControl && linkUp && !closed) {
+      const reacquire =
+        typeof reacquireControl === 'function' ? reacquireControl() : reacquireControl;
+      if (reacquire && linkUp && !closed) {
         void requestControl().catch(() => undefined);
       }
     }

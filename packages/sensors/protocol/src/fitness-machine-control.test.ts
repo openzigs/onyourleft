@@ -716,6 +716,32 @@ describe('losing control', () => {
     expect(trainer.targetPower()).toStrictEqual({ kind: 'confirmed', target: 250 });
   });
 
+  it('asks a reacquire function on every 0xFF, and requests nothing while it says no — #721', async () => {
+    let may = false;
+    const trainer = control({ reacquireControl: () => may });
+    await trainer.requestControl();
+
+    machine.status(Uint8Array.from([0xff]));
+    await Promise.resolve();
+    expect(trainer.hasControl()).toBe(false);
+    expect(machine.writes.map((write) => write[0])).toStrictEqual([FTMS_OP_CODE.requestControl]);
+
+    // Held back is not deferred: nothing is asked for when the answer changes.
+    may = true;
+    await Promise.resolve();
+    expect(machine.writes).toHaveLength(1);
+
+    // The next 0xFF asks again, and now it is answered yes.
+    await trainer.requestControl();
+    machine.status(Uint8Array.from([0xff]));
+    await Promise.resolve();
+    expect(machine.writes.map((write) => write[0])).toStrictEqual([
+      FTMS_OP_CODE.requestControl,
+      FTMS_OP_CODE.requestControl,
+      FTMS_OP_CODE.requestControl,
+    ]);
+  });
+
   it('treats a Control Not Permitted result as a loss too, not only the 0xFF status', async () => {
     // The routine case on a phone that reconnected: no status notification
     // arrives, the trainer simply answers 0x05. A client that only watched the
