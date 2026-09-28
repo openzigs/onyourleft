@@ -80,7 +80,7 @@ export interface FixedFile {
 
 /**
  * One file taken out of an archive — #623: MakeHuman's CC0 system assets pack
- * is published as ONE zip, and the rider reads four of its files.
+ * is published as ONE zip, and the rider reads six of its files.
  */
 export interface ArchiveMember {
   /** The path inside the archive, and under `build/raw/<id>/`. */

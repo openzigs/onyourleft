@@ -39,6 +39,9 @@ import {
   OUTPUTS,
   PINNED_BLENDER,
   PINNED_KTX,
+  PIPELINE_DIRECTORY,
+  RIDER_KIT,
+  RIDER_SCRIPT,
   shippedFiles,
   SOURCES,
   sourcesDigest,
@@ -132,6 +135,29 @@ describe('the realistic files and the pipeline that makes them', () => {
     // And a row that did not pass through the encoder does not claim it did.
     for (const entry of manifest.entries.filter((each) => each.tool === PINNED_BLENDER)) {
       expect(entry.modified ?? '', entry.path).not.toContain(KTX2_SCRIPT_PATH);
+    }
+  });
+
+  it('names the kit’s numbers in every row the rider’s kit is drawn into — #623, #742’s review', () => {
+    // ASSET007 checks one `script`, so `process_rider.py` is the rider's; the
+    // kit's numbers live in a second committed file it imports, and every map
+    // that file decides names it in `modified`, from the pipeline's own table.
+    // `rider.glb` is not one of them: its helmet colours are the script's own.
+    const rider = OUTPUTS.find(
+      (output) => output.recipe.how === 'blender' && output.recipe.script === RIDER_SCRIPT,
+    );
+    if (rider?.recipe.how !== 'blender') throw new Error('no rider in the pipeline table');
+    const maps = rider.recipe.alsoWrites ?? [];
+    expect(maps).toHaveLength(3);
+    expect(readFileSync(join(REPOSITORY, RIDER_KIT), 'utf8')).toMatch(
+      /SPDX-License-Identifier: AGPL-3.0-or-later/,
+    );
+    for (const map of maps) {
+      const entry = manifest.entries.find(
+        (each) => each.path === `${OUTPUT_DIRECTORY}/${map.file}`,
+      );
+      expect(entry?.script, map.file).toBe(`${PIPELINE_DIRECTORY}${RIDER_SCRIPT}`);
+      expect(entry?.modified, map.file).toContain(RIDER_KIT);
     }
   });
 

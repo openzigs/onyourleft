@@ -494,7 +494,11 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   place, the MakeHuman repository pinned at `a8bc2d54…`. On 2026-09-27 the owner ruled, on #623,
   that MakeHuman's own CC0 skin, eyebrow and pose packs come from **the same author, under the same
   CC0 grant**, as the files that row already admits, and so fall under it. That is the fact this
-  entry records; it admits no new source. What #623's pull request found and relied on:
+  entry records; it admits no new source. ⚠️ **"Exports only" has always been read as "MakeHuman's
+  CC0-released data"**, not as "files an export wrote": `base.obj`, the mesh the row first admitted,
+  is MakeHuman's released data rather than an export, and so are the skin image and the eyebrow
+  files here — so the phrase is not to be read as excluding these packs. What #623's pull request
+  found and relied on:
   - **The host** is MakeHuman's own asset site: the pack's page at
     `static.makehumancommunity.org/assets/assetpacks/makehuman_system_assets.html` and its archive
     at `files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip`,
