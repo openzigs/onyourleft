@@ -293,7 +293,8 @@ export const REALISTIC_TREE_LEVELS: TreeLevels = {
  *
  * @test-facing held by `game.browser.spec.ts` §"#639", which counts the wooded
  * view's calls at the WebGL entry points against it, with the same view drawn
- * with each tree's layers apart as the control that must exceed it
+ * with each tree's layers apart as the control that must exceed it; and by
+ * `realistic.browser.spec.ts`, which holds the owner's page at `at=2550` to it
  */
 export const REALISTIC_WOODED_DRAW_CALLS = 35;
 

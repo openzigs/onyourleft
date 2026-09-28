@@ -5628,6 +5628,19 @@ export function materialLayers(material: Material): number {
  * transforms. A shape with one material is returned as it is. The parts it
  * replaces — their geometries and constructed materials — are released here;
  * their textures are not, because the merged material samples the same images.
+ *
+ * ## ⚠️ A merged tree must not cast a shadow as things stand
+ *
+ * The material's own `map` is LAYER 0's colour map, read through the BAKED
+ * coordinates, and nothing else of the layers is visible to three outside this
+ * shader. Three's shadow depth pass builds its own material from `map` and
+ * `alphaTest` alone (`WebGLShadowMap`'s depth material), so a merged tree that
+ * cast would cut every layer against layer 0's picture: a bark-first scan
+ * would throw solid leaf quads, a leaf-first one would cut its bark into
+ * holes. Nothing casts from the vegetation today — `three-seam.test.ts` §"lets
+ * only the sun and the riders cast a shadow" counts every `castShadow` write
+ * in this file, and a third is a red build — so whoever lifts that rule for
+ * the trees owes them a depth material that reads `oylLayer` first.
  */
 export function mergeShapeMaterials(shape: RealisticShape, name: string): RealisticShape {
   const layers = [...new Set(shape.parts.map((part) => part.material))];
@@ -8946,8 +8959,12 @@ function isStructureKind(kind: SceneryKind): kind is StructureKind {
  * objects: three uploads a disposed texture again if anything draws it, so a
  * later view that asks for realism still can, while a phone that stepped down
  * holds none of it meanwhile.
+ *
+ * Exported because a view reaches it only with a live context, which jsdom has
+ * none of: `realistic-renderer.test.ts` §"#639's review" calls it directly to
+ * hold every layer of a merged tree to being freed ({@link texturesOf}).
  */
-function evictRealisticWorldFromGpu(): void {
+export function evictRealisticWorldFromGpu(): void {
   const world = realisticWorld;
   if (world === undefined) return;
   world.sky.texture.dispose();

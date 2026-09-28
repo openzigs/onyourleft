@@ -825,7 +825,9 @@ apps/                 AGPL-3.0-or-later, without exception
                         moved — so the wooded view is 27 calls, not 37, over
                         the same triangles and the same pixels
                         (`realistic-budget.ts` §`REALISTIC_WOODED_DRAW_CALLS`,
-                        whose browser-gate control loads the world unmerged). ⚠️ Since #617's review only
+                        whose browser-gate control loads the world unmerged,
+                        and which the owner's page at `at=2550` is held to
+                        as well). ⚠️ Since #617's review only
                         trees the CAMERA can see are ranked
                         (`three-renderer.ts` §`treeCanBeSeen`) — a tree behind
                         the camera used to take the one full slot — and

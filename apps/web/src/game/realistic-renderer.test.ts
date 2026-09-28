@@ -88,6 +88,7 @@ import {
   breathesTheAir,
   ContactShadowBelt,
   isConstructedMaterial,
+  evictRealisticWorldFromGpu,
   loadRealisticWorld,
   materialLayers,
   mergeShapeMaterials,
@@ -978,6 +979,100 @@ describe('a tree is one material a level, its scan’s materials its layers — 
     for (const mesh of [...(levels.full[0] ?? []), ...(levels.middle[0] ?? [])]) {
       expect(mesh.renderOrder).toBeGreaterThan(0);
     }
+  });
+});
+
+/**
+ * Loaders whose every model is a scan of TWO materials — tiled bark and cut
+ * leaves, each with a colour and a normal map — so every tree the load
+ * prepares is merged (#639), and every map it wears is a {@link FakeMap} whose
+ * clones this remembers.
+ */
+function twoMaterialLoaders(): RealisticLoaders & { readonly clones: FakeMap[] } {
+  const clones: FakeMap[] = [];
+  const remembered = (map: FakeMap): FakeMap => {
+    const clone = map.clone;
+    map.clone = () => {
+      const copy = remembered(clone());
+      clones.push(copy);
+      return copy;
+    };
+    return map;
+  };
+  const extras = {
+    oyl_scan_height: 8,
+    oyl_scan_width: 4,
+    oyl_impostor_scale: 8.2,
+    oyl_impostor_frames: 8,
+  };
+  const texture = (): unknown => ({ image: { width: 512, height: 512 }, dispose: () => undefined });
+  const sky = (): unknown => {
+    const data = new Float32Array(16 * 8 * 4).fill(1);
+    data[(1 * 16 + 5) * 4] = 50;
+    data[(1 * 16 + 5) * 4 + 1] = 50;
+    data[(1 * 16 + 5) * 4 + 2] = 50;
+    return { image: { width: 16, height: 8, data }, type: 'float', dispose: () => undefined };
+  };
+  const scene = (): unknown => ({
+    ...aScene(
+      [
+        {
+          material: loaderMaterial({
+            name: 'bark',
+            map: remembered(aMap(BARK_TILING)),
+            normalMap: remembered(aMap(BARK_TILING)),
+          }),
+        },
+        {
+          material: loaderMaterial({
+            name: 'leaves',
+            transparent: true,
+            map: remembered(aMap()),
+            normalMap: remembered(aMap()),
+          }),
+        },
+      ],
+      extras,
+    ),
+    userData: extras,
+  });
+  return {
+    clones,
+    sky: () => Promise.resolve(sky() as never),
+    texture: () => Promise.resolve(texture() as never),
+    model: () => Promise.resolve(scene() as never),
+  };
+}
+
+describe('every layer of a merged tree is freed — #639’s review', () => {
+  /** How many of `maps` were never disposed — a count, so a failure reads as one. */
+  const leaked = (maps: readonly FakeMap[]): number => maps.filter((map) => !map.disposed).length;
+
+  /** The world loaded from two-material scans, and every texture its merged trees sample. */
+  async function mergedWorld(): Promise<readonly FakeMap[]> {
+    const reading = twoMaterialLoaders();
+    await expect(loadRealisticWorld(reading)).resolves.toEqual({ loaded: true });
+    // What the merge made: a second texture over each layer's image, and
+    // nothing else — so this is exactly what the merged materials sample.
+    const sampled = [...reading.clones];
+    // Non-vacuity: two layers a tree, two maps a layer, so HALF of what a
+    // merged material samples is beyond its own `map` and `normalMap`.
+    expect(sampled.length).toBeGreaterThanOrEqual(4);
+    expect(sampled.length % 4).toBe(0);
+    expect(sampled.every((map) => !map.disposed)).toBe(true);
+    return sampled;
+  }
+
+  it('releases every layer’s maps when another world replaces it, not one layer in two', async () => {
+    const sampled = await mergedWorld();
+    await expect(loadRealisticWorld(twoMaterialLoaders())).resolves.toEqual({ loaded: true });
+    expect(leaked(sampled), `of ${String(sampled.length)} sampled`).toBe(0);
+  });
+
+  it('frees every layer’s maps from the GPU when a view leaves the realistic world', async () => {
+    const sampled = await mergedWorld();
+    evictRealisticWorldFromGpu();
+    expect(leaked(sampled), `of ${String(sampled.length)} sampled`).toBe(0);
   });
 });
 
