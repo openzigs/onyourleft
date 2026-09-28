@@ -552,7 +552,7 @@ describe('a gap is not a zero', () => {
     expect(first).toStrictEqual({ coverage: 0.2 });
   });
 
-  it('counts a genuine zero as a reading', async () => {
+  it('averages a channel with no gap over every sample', async () => {
     const ride = rideFor(ATHLETE_A);
     const set = withChannel(
       streamSetFor(ride, { sampleCount: 300 }),
