@@ -14,6 +14,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createGradientSession } from './gradient';
 import type { GradientTrainer } from './trainer-port';
+import { TargetHeldBack } from '../ride/held-back';
 import {
   MAX_SIMULATED_GRADE_PERCENT,
   altitudeMetres,
@@ -78,6 +79,19 @@ const drain = async (): Promise<void> => {
     await Promise.resolve();
   }
 };
+
+/** What a rider is told when the ride controller held a gradient back. */
+const HELD_BACK =
+  'The hills are not being sent yet: Bluetooth is still finishing forgetting a trainer. The next gradient will be sent again.';
+
+/** The fault a session reports when its one gradient is refused with `error`. */
+async function faultFor(error: Error): Promise<string> {
+  const trainer = recordingTrainer({ reject: error });
+  const session = createGradientSession({ profile: hill(), control: trainer.control });
+  session.sample(seconds(0), 500);
+  await drain();
+  return session.state().fault ?? '';
+}
 
 describe('a gradient session drives a trainer from a route', () => {
   it('writes the gradient at the rider, through #90s driver', async () => {
@@ -322,31 +336,42 @@ describe('a gradient session drives a trainer from a route', () => {
   });
 
   it('words each refusal for the road rather than for a target', async () => {
-    // Four distinct sentences, because a rider reading "the trainer refused
+    // Five distinct sentences, because a rider reading "the trainer refused
     // that target" while looking at a hill would go looking for a workout they
     // are not riding.
     const said = new Set<string>();
-    for (const message of [
-      'control-not-permitted',
-      'control-not-held',
-      'timed out',
-      'nonsense',
-      // `ride/controller.ts` §`askedForByTheRider` — the app held it back (#718).
-      'a trainer is still being forgotten',
+    for (const error of [
+      new Error('control-not-permitted'),
+      new Error('control-not-held'),
+      new Error('timed out'),
+      new Error('nonsense'),
+      // `ride/controller.ts` §`mustWaitForForget` — the app held it back (#718).
+      new TargetHeldBack('a trainer is still being forgotten'),
     ]) {
-      const trainer = recordingTrainer({ reject: new Error(message) });
-      const session = createGradientSession({ profile: hill(), control: trainer.control });
-      session.sample(seconds(0), 500);
-      await drain();
-      said.add(session.state().fault ?? '');
+      said.add(await faultFor(error));
     }
     expect(said.size).toBe(5);
-    expect(said).toContain(
-      'The hills are not being sent yet: Bluetooth is still finishing forgetting a trainer. The next gradient will be sent again.',
-    );
+    expect(said).toContain(HELD_BACK);
     for (const text of said) {
       expect(text).toMatch(/road|hill|gradient/);
     }
+  });
+
+  describe('a gradient the ride controller held back (#724)', () => {
+    it('is recognised by its class, whatever its reason says', async () => {
+      // A reworded reason, and one that says what a machine that did not
+      // answer would: neither is told as anything but the hold.
+      expect(await faultFor(new TargetHeldBack('forget pending'))).toBe(HELD_BACK);
+      expect(await faultFor(new TargetHeldBack('the forget timed out'))).toBe(HELD_BACK);
+    });
+
+    it('is not recognised by its words', async () => {
+      // The words without the class are a refusal like any other: nothing
+      // here reads the sentence any more.
+      expect(await faultFor(new Error('a trainer is still being forgotten'))).toBe(
+        'The trainer refused that gradient. The next one will be sent again.',
+      );
+    });
   });
 
   it('counts what a slow machine cost, rather than queueing it', async () => {

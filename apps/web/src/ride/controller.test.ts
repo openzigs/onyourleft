@@ -21,13 +21,19 @@
  */
 
 import {
+  altitudeMetres,
+  degreesLatitude,
+  degreesLongitude,
+  geographicPosition,
   gradePercent,
   metresPerSecond,
+  routeProfile,
   revolutionsPerMinute,
   seconds,
   thresholdShare,
   unixSeconds,
   watts,
+  type RouteProfile,
   type Watts,
   type WorkoutBlock,
 } from '@onyourleft/domain';
@@ -96,6 +102,8 @@ import {
   type RideSavePort,
 } from './controller';
 import { gameTrainerFrom } from '../game/trainer-port';
+import { createGradientSession } from '../game/gradient';
+import { TargetHeldBack } from './held-back';
 
 import { METRIC_STALE_AFTER_SECONDS } from './metrics';
 import { targetSentence } from './TrainerPanel';
@@ -466,6 +474,19 @@ function benchWith(options: BenchOptions = {}): Bench {
  * has happened delivers the indication to nobody, and the test then times out
  * waiting for an answer that was sent one tick too early.
  */
+/** A kilometre rising at a steady 4 %, for a gradient session to ride. */
+function risingRoad(): RouteProfile {
+  return routeProfile(
+    Array.from({ length: 101 }, (_, index) => ({
+      position: geographicPosition(
+        degreesLatitude(51.5 + (index * 10) / 111_320),
+        degreesLongitude(-0.12),
+      ),
+      elevation: altitudeMetres(index * 0.4),
+    })),
+  );
+}
+
 async function flushMicrotasks(times = 8): Promise<void> {
   for (let index = 0; index < times; index += 1) {
     await Promise.resolve();
@@ -4223,10 +4244,20 @@ describe('no trainer control while a timed-out forget is still running — #718'
       if (road === undefined) {
         throw new Error('no simulation control');
       }
-      await expect(road.setSimulationParameters({ grade: gradePercent(6) })).rejects.toThrow(
-        /still being forgotten/u,
+      await expect(road.setSimulationParameters({ grade: gradePercent(6) })).rejects.toBeInstanceOf(
+        TargetHeldBack,
       );
       await flushMicrotasks(20);
+      expect(opcodes(rig)).not.toContain(SIMULATION);
+
+      // #724: what the game's own loop, over the real handle, tells the rider —
+      // the hold, by its class, and not "the trainer refused that gradient".
+      const session = createGradientSession({ profile: risingRoad(), control: road });
+      session.sample(seconds(0), 500);
+      await flushMicrotasks(20);
+      expect(session.state().fault).toBe(
+        'The hills are not being sent yet: Bluetooth is still finishing forgetting a trainer. The next gradient will be sent again.',
+      );
       expect(opcodes(rig)).not.toContain(SIMULATION);
 
       // ⚠️ The gate never holds back a release: a refused Stop is resistance
@@ -4465,8 +4496,8 @@ describe('no trainer control while a timed-out forget is still running — #718'
       if (road === undefined) {
         throw new Error('no simulation control');
       }
-      await expect(road.setSimulationParameters({ grade: gradePercent(6) })).rejects.toThrow(
-        /still being forgotten/u,
+      await expect(road.setSimulationParameters({ grade: gradePercent(6) })).rejects.toBeInstanceOf(
+        TargetHeldBack,
       );
       await road.letGo();
       expect(opcodes(rig)).toEqual([STOP]);
@@ -4477,8 +4508,8 @@ describe('no trainer control while a timed-out forget is still running — #718'
       await unpairing;
       await flushMicrotasks(20);
       await rig.controller.setTargetPower(watts(250));
-      await expect(road.setSimulationParameters({ grade: gradePercent(6) })).rejects.toThrow(
-        /still being forgotten/u,
+      await expect(road.setSimulationParameters({ grade: gradePercent(6) })).rejects.toBeInstanceOf(
+        TargetHeldBack,
       );
       await rig.controller.clearTargetPower();
       await flushMicrotasks(20);

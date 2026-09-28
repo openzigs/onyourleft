@@ -44,6 +44,7 @@ import {
   RELEASE_INCOMPLETE,
   type WorkoutSession,
 } from './session';
+import { TargetHeldBack } from '../ride/held-back';
 
 /** Control point op codes, FTMS Table 4.15 — written out so a test reads the wire. */
 const RESET = 0x01;
@@ -705,6 +706,31 @@ describe('a refused write is reported and retried, not thrown', () => {
     const writes = trainer.wire.filter((entry) => entry.direction === 'write');
     expect(writes.slice(before).map((entry) => entry.bytes)).toStrictEqual([targetWrite(250)]);
     expect(trainer.targetPowerOnTheTrainer()).toBe(250);
+  });
+});
+
+describe('a target the ride controller held back — #721, #724', () => {
+  // By class, never by wording: the controller's reason is told verbatim,
+  // whatever it says — including words a refusal by the machine would use.
+  it.each([
+    'Nothing was sent to the trainer: a forget is still running.',
+    'Held back: the forget timed out and is still running.',
+  ])('tells the rider the reason verbatim: %s', async (reason) => {
+    const { trainer } = await loop();
+    const session = createWorkoutSession({
+      timeline: expandWorkout(workout([steady(60, 1.0)])),
+      thresholdPower: THRESHOLD,
+      powerFloor: watts(FLOOR_WATTS),
+      control: {
+        setTargetPower: () => Promise.reject(new TargetHeldBack(reason)),
+        stop: () => trainer.control.stop(),
+        letGo: () => trainer.control.letGo(),
+      },
+    });
+    session.start(seconds(0));
+    session.tick(seconds(0));
+    await flush();
+    expect(session.state().lastFault).toBe(reason);
   });
 });
 

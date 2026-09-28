@@ -112,12 +112,8 @@ import type { RiderPresence, RiderPresencePort } from './presence-port';
 import type { RideKeepAlivePort } from './keep-alive-port';
 import type { RideNotificationPermissionPort } from './notification-permission-port';
 import { NO_TRAINER_CONTROL, type OpenTrainer, type TrainerConnection } from './trainer';
-import {
-  createWorkoutSession,
-  RELEASE_INCOMPLETE,
-  TargetHeldBack,
-  type WorkoutSession,
-} from '../workout/session';
+import { createWorkoutSession, RELEASE_INCOMPLETE, type WorkoutSession } from '../workout/session';
+import { TargetHeldBack } from './held-back';
 import { createManualErg, type ManualErg, type ManualErgRescue } from './manual-erg';
 import { blockText } from '../workouts/library';
 
@@ -584,8 +580,11 @@ export const CONTROL_WAITS_FOR_FORGET = `Control was not asked for: ${STILL_FORG
 export const TARGET_WAITS_FOR_FORGET = `Nothing was sent to the trainer: ${STILL_FORGETTING}`;
 
 /**
- * Why a game ride's gradient is refused in the same state — matched by
- * `game/gradient.ts` §`faultText`, which words it for the road.
+ * Why a game ride's gradient is refused in the same state. Thrown as a
+ * {@link TargetHeldBack}, which is what `game/gradient.ts` §`faultText`
+ * recognises — by class, not by these words (#724) — before wording it for
+ * the road. So this sentence is for a log, and rewording it changes nothing a
+ * rider reads.
  */
 const GRADIENT_WAITS_FOR_FORGET = 'a trainer is still being forgotten';
 
@@ -2857,7 +2856,7 @@ export function createRideController(options: RideControllerOptions): RideContro
           // like a workout's targets, because the game holds this for the
           // whole ride and a forget can begin during one.
           if (mustWaitForForget(client, 'gradient')) {
-            return Promise.reject(new Error(GRADIENT_WAITS_FOR_FORGET));
+            return Promise.reject(new TargetHeldBack(GRADIENT_WAITS_FOR_FORGET));
           }
           // #567: a gradient takes the machine out of ERG, so a hand-set
           // target's rescue writing a 0x05 under a game ride would put it back.

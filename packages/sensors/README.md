@@ -789,7 +789,7 @@ asked for.
 |---|---|
 | `none` | nothing is set, or control was lost and whoever took it may change it |
 | `confirmed` | the machine answered this exact value with `0x01` |
-| `unknown` | a procedure timed out, or the link dropped while a target was held — the machine may or may not be holding it, and **this client can no longer change it** |
+| `unknown` | the machine may or may not be holding `attempted`, and this client cannot vouch for it. Four ways in: a Set Target Power **timed out** (`attempted` is the value written); the **link dropped** while a target was confirmed — and then **this client can no longer change it** until the link and control come back; an **acknowledged Stop** (`stop()` or `letGo()`) after a confirmed target, because the trainer #372 measured kept its ERG target through one (`targetAfterStop`); and, since #722, a Set Indoor Bike Simulation Parameters **attempted** over a confirmed target — a gradient takes the machine out of ERG, and the downgrade happens once the write passes its checks and before it goes on the wire, so a gradient that times out or is refused still leaves `unknown` rather than a stale `confirmed` |
 
 `unknown` is the state a UI has to be able to show. It is the honest answer to *"what happens on
 disconnect mid-ERG?"*: the trainer keeps applying whatever it last accepted, nothing this program
