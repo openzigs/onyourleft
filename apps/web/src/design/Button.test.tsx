@@ -62,4 +62,82 @@ describe('Button', () => {
     mounted.container.querySelector('button')?.click();
     expect(onClick).not.toHaveBeenCalled();
   });
+
+  it('draws each kind with its own class, so the one-primary gate can count them (#668)', async () => {
+    mounted = await mount(
+      <>
+        <Button>Start</Button>
+        <Button variant="secondary">Pause</Button>
+        <Button variant="toggle" pressed={false}>
+          Mute sounds
+        </Button>
+      </>,
+    );
+    expect([...mounted.container.querySelectorAll('button')].map((b) => b.className)).toEqual([
+      'oyl-button',
+      'oyl-button oyl-button--secondary',
+      'oyl-button oyl-button--toggle',
+    ]);
+  });
+
+  it('says which way a toggle stands with aria-pressed, in both states (#668)', async () => {
+    mounted = await mount(
+      <>
+        <Button variant="toggle" pressed>
+          Mute sounds
+        </Button>
+        <Button variant="toggle" pressed={false}>
+          Show oldest first
+        </Button>
+      </>,
+    );
+    expect(
+      [...mounted.container.querySelectorAll('button')].map((b) => b.getAttribute('aria-pressed')),
+    ).toEqual(['true', 'false']);
+  });
+
+  it('never calls a primary or a secondary "not pressed" (#668)', async () => {
+    mounted = await mount(
+      <>
+        <Button>Start</Button>
+        <Button variant="secondary">Pause</Button>
+      </>,
+    );
+    for (const button of mounted.container.querySelectorAll('button')) {
+      expect(button.hasAttribute('aria-pressed'), button.outerHTML).toBe(false);
+    }
+  });
+
+  it('adds a caller’s layout class after the variant’s', async () => {
+    mounted = await mount(
+      <Button variant="toggle" pressed={false} className="oyl-sound__mute">
+        Mute
+      </Button>,
+    );
+    expect(mounted.container.querySelector('button')?.className).toBe(
+      'oyl-button oyl-button--toggle oyl-sound__mute',
+    );
+  });
+
+  it('will not compile a toggle that does not say which way it stands (#668)', () => {
+    // §5 "Verifying a compile-time guarantee": each directive below is the
+    // guarantee. Make `pressed` optional on the toggle arm of `ButtonKind`, or
+    // allow it on the other two, and the directive it documents becomes
+    // TS2578 "Unused '@ts-expect-error' directive", which fails the typecheck.
+    const elements = [
+      // @ts-expect-error — a toggle must say whether it is pressed.
+      <Button key="a" variant="toggle">
+        Mute sounds
+      </Button>,
+      // @ts-expect-error — only a toggle has a pressed state.
+      <Button key="b" variant="secondary" pressed>
+        Pause
+      </Button>,
+      // @ts-expect-error — nor does a primary, including by default.
+      <Button key="c" pressed={false}>
+        Start
+      </Button>,
+    ];
+    expect(elements).toHaveLength(3);
+  });
 });

@@ -321,7 +321,9 @@ export function TrainerPanel({
       )}
 
       {trainer.hasControl ? null : (
-        <Button onClick={onRequestControl}>Ask the trainer for control</Button>
+        <Button variant="secondary" onClick={onRequestControl}>
+          Ask the trainer for control
+        </Button>
       )}
 
       {!ergShown ? null : !trainer.canSetPower ? (
@@ -375,7 +377,9 @@ export function TrainerPanel({
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
               />
-              <Button type="submit">Set target</Button>
+              <Button variant="secondary" type="submit">
+                Set target
+              </Button>
               <Button variant="secondary" onClick={onClearTarget}>
                 End ERG
               </Button>

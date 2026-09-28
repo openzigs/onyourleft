@@ -133,6 +133,35 @@ describe('SettingsView', () => {
     mounted.unmount();
   });
 
+  it('draws the choice as a segmented control of native radios, with a visible legend (#668)', async () => {
+    const { port } = recordingPort();
+    const mounted = await mount(
+      <SettingsView
+        port={port}
+        units="imperial"
+        onUnitsChange={() => undefined}
+        onRiderMassChange={() => undefined}
+      />,
+    );
+
+    const group = mounted.container.querySelector('fieldset.oyl-segmented');
+    expect(group, 'the units choice is not a segmented control').not.toBeNull();
+    expect(group?.querySelector(':scope > legend')?.textContent).toBe(
+      'Which units do you ride in?',
+    );
+    // Each segment is a label wrapping its own native radio, which is what the
+    // stylesheet draws and what gives the 44 px row.
+    const segments = [...(group?.querySelectorAll('.oyl-segmented__options > label') ?? [])];
+    expect(segments.map((label) => label.textContent?.trim())).toEqual(['Kilometres', 'Miles']);
+    for (const segment of segments) {
+      expect(segment.querySelector(':scope > input[type="radio"]')).not.toBeNull();
+    }
+    // The chosen option's meaning is said, and the group points at it.
+    const detail = document.getElementById(group?.getAttribute('aria-describedby') ?? '');
+    expect(detail?.textContent).toBe('Distance in mi, speed in mph, climbing in ft.');
+    mounted.unmount();
+  });
+
   it('writes the choice to the store, scoped to the athlete', async () => {
     const { port, writes } = recordingPort();
     const mounted = await mount(

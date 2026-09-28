@@ -30,6 +30,7 @@
   --oyl-color-accent: #0b5c55;
   --oyl-color-accent-hover: #07443f;
   --oyl-color-accent-ink: #ffffff;
+  --oyl-color-selected: #d4ebe7;
   /* A link in running text, one per state (#661) — see the `a` rules below. */
   --oyl-color-link: #0b5c55;
   --oyl-color-link-visited: #5b3a8c;
@@ -771,14 +772,43 @@ h3:first-child {
  * `inline-block` rather than `inline-flex`, and on links only: it is what a
  * `<button>` already is, so every `<button class="oyl-button">` is untouched,
  * and it does not turn a label's text and inline children into flex items.
- * `browser/shell.browser.spec.ts` §"a link drawn as a button" measures it,
- * with this declaration taken away as its control.
+ * `browser/button-hierarchy.browser.spec.ts` §"#668 — a link drawn as a
+ * button" measures it, with this declaration taken away as its control.
  */
 a.oyl-button {
   display: inline-block;
+  /* #668: a link drawn as a button is told by its border and fill, like the
+     button it is drawn as. `:where(a)`'s underline (#661) is for a link in
+     running text; its colour already lost to this class, and until #668 its
+     underline did not, so every button-link was underlined inside its box. */
+  text-decoration: none;
 }
 
-.oyl-button:hover:not(:disabled) {
+/*
+ * THE THREE KINDS OF BUTTON — #668. `design/Button.tsx` §`ButtonVariant` says
+ * when each is used; this is how each is drawn, in every state.
+ *
+ * - **Primary** is the only FILLED one, so it is the heaviest control on any
+ *   screen, and `a11y/button-hierarchy.a11y.test.tsx` holds every view to at
+ *   most one of it.
+ * - **Secondary** is an outline: the accent's border and label on the page.
+ * - **Toggle** is drawn as a secondary when off. When on (`aria-pressed`) it
+ *   takes the `selected` fill AND a second ring inside its border — a border
+ *   twice as heavy — because a state told by colour alone fails WCAG 2.2 SC
+ *   1.4.1. The ring is an inset `box-shadow`, not a wider border, so a press
+ *   does not move a pixel of the layout around it (the ride HUD's row is
+ *   measured to the pixel).
+ *
+ * Every state of every kind is a pair declared in `design/tokens.ts`
+ * §`CONTRAST_REQUIREMENTS`, and every colour here is a token so #672's dark
+ * theme can re-point it.
+ *
+ * ⚠️ The touch-target floor stays declared ONCE, on `.oyl-button` above; no
+ * kind redeclares it. #669 raises it for the ride-time controls with a
+ * modifier of its own.
+ */
+.oyl-button:hover:not(:disabled),
+.oyl-button:active:not(:disabled) {
   background: var(--oyl-color-accent-hover);
   border-color: var(--oyl-color-accent-hover);
 }
@@ -788,11 +818,137 @@ a.oyl-button {
   color: var(--oyl-color-accent);
 }
 
+.oyl-button--toggle {
+  background: var(--oyl-color-canvas);
+  color: var(--oyl-color-accent);
+}
+
+/*
+ * #688: a lighter button under a pointer or a press. Until this rule the
+ * primary's hover above won on specificity and drew the secondary's `accent`
+ * label on the `accent-hover` fill — 1.40:1. It lightens instead: the `surface`
+ * fill with the label darkened to `accent-hover`, the pair the file input's
+ * button (#667) already used. The border keeps the hover's `accent-hover`.
+ * `browser/button-hierarchy.browser.spec.ts` §"#688 — a hovered secondary
+ * button" reads the pair back after the
+ * transition, with this rule taken away as its control.
+ */
+.oyl-button--secondary:hover:not(:disabled),
+.oyl-button--secondary:active:not(:disabled),
+.oyl-button--toggle:hover:not(:disabled),
+.oyl-button--toggle:active:not(:disabled) {
+  background: var(--oyl-color-surface);
+  color: var(--oyl-color-accent-hover);
+}
+
+/* A toggle that is on: the `selected` fill and a doubled border (SC 1.4.1). */
+.oyl-button--toggle[aria-pressed='true'] {
+  background: var(--oyl-color-selected);
+  color: var(--oyl-color-accent-hover);
+  box-shadow: inset 0 0 0 2px var(--oyl-color-accent);
+}
+
+/* On, under a pointer: the fill stays `selected`, so the pointer never makes
+   an on toggle look off. The ring follows the border to `accent-hover`. */
+.oyl-button--toggle[aria-pressed='true']:hover:not(:disabled),
+.oyl-button--toggle[aria-pressed='true']:active:not(:disabled) {
+  background: var(--oyl-color-selected);
+  box-shadow: inset 0 0 0 2px var(--oyl-color-accent-hover);
+}
+
 .oyl-button:disabled {
   cursor: not-allowed;
   border-color: var(--oyl-color-border);
   background: var(--oyl-color-surface);
   color: var(--oyl-color-ink-muted);
+}
+
+/* On and disabled: the disabled colours, and the doubled border kept in the
+   disabled border's colour, so which way it stands is still told by weight. */
+.oyl-button--toggle[aria-pressed='true']:disabled {
+  background: var(--oyl-color-surface);
+  color: var(--oyl-color-ink-muted);
+  box-shadow: inset 0 0 0 2px var(--oyl-color-border);
+}
+
+/*
+ * A SEGMENTED CONTROL — #668. An exclusive choice of two or three that changes
+ * how something is shown: a `fieldset` of NATIVE radios (#667's), each inside
+ * its own `label`, drawn as one row of joined segments. The platform supplies
+ * the keyboard (arrow keys move the choice), the grouping and the state; this
+ * only draws it.
+ *
+ * The legend stays visible — the question is part of the control.
+ *
+ * Each segment is a label wrapping its radio, so the 44 px floor is the one
+ * `label:has(> input[type='radio'])` declares above (SC 2.5.5, measured the
+ * #316 way by `browser/button-hierarchy.browser.spec.ts` §"#668 — a segmented
+ * control at …" and §"#668 — the segment target is declared"). The radio
+ * itself stays drawn: its dot is the state told by SHAPE, beside the
+ * `selected` fill and the doubled border (SC 1.4.1). Keyboard focus rings the radio with the one focus
+ * style; the ring lands on the segment's own fill, a declared pair.
+ *
+ * Four or more options are not a segmented control: they are a `<select>`
+ * (Activities' sort, #660).
+ */
+.oyl-segmented {
+  border: 0;
+  margin: 0 0 var(--oyl-space-md);
+  padding: 0;
+  min-width: 0;
+}
+
+.oyl-segmented > legend {
+  padding: 0;
+  margin-bottom: var(--oyl-space-xs);
+}
+
+/*
+ * Joined: every segment shares its border with the one before it AND with
+ * the row above, by a −2px margin on both start edges, and the row takes the
+ * two pixels back as padding. So when three options do not fit a 320 px phone
+ * and the row wraps, the segment that starts the second row lines up with the
+ * first rather than hanging two pixels outside it, and the two rows share one
+ * border like tiles. Only the group's first and last segments are rounded.
+ * `button-hierarchy.browser.spec.ts` §"#668 — a segmented control at 320×256"
+ * wraps the three-option specimen and measures every segment inside the row.
+ */
+.oyl-segmented__options {
+  display: flex;
+  flex-wrap: wrap;
+  padding-block-start: 2px;
+  padding-inline-start: 2px;
+}
+
+.oyl-segmented__options > label {
+  cursor: pointer;
+  padding: 0 var(--oyl-space-md);
+  border: 2px solid var(--oyl-color-accent);
+  background: var(--oyl-color-canvas);
+  color: var(--oyl-color-accent);
+  margin-block-start: -2px;
+  margin-inline-start: -2px;
+}
+
+.oyl-segmented__options > label:first-child {
+  border-start-start-radius: var(--oyl-radius);
+  border-end-start-radius: var(--oyl-radius);
+}
+
+.oyl-segmented__options > label:last-child {
+  border-start-end-radius: var(--oyl-radius);
+  border-end-end-radius: var(--oyl-radius);
+}
+
+.oyl-segmented__options > label:hover {
+  background: var(--oyl-color-surface);
+  color: var(--oyl-color-accent-hover);
+}
+
+.oyl-segmented__options > label:has(> input:checked) {
+  background: var(--oyl-color-selected);
+  color: var(--oyl-color-accent-hover);
+  box-shadow: inset 0 0 0 2px var(--oyl-color-accent);
 }
 
 /*
@@ -2866,6 +3022,17 @@ p > label + input[type='file'] {
     appearance: auto;
     background-image: none;
     padding-right: var(--oyl-space-sm);
+  }
+
+  /* #668: a forced palette flattens the `selected` fill and removes every
+     box-shadow — two of the three ways an on toggle is told apart. The third
+     is drawn in a way the forced palette keeps: a double border, two pixels
+     wider, with the padding taking the two back so the box does not move. A
+     segment keeps its radio's dot, which the platform draws in system colours. */
+  .oyl-button--toggle[aria-pressed='true'] {
+    border-style: double;
+    border-width: 4px;
+    padding: calc(var(--oyl-space-sm) - 2px) calc(var(--oyl-space-md) - 2px);
   }
 }
 

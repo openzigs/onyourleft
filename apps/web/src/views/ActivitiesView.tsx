@@ -255,10 +255,18 @@ export function ActivitiesView({ library }: ActivitiesViewProps): JSX.Element {
           No local store on this browser. Rides are kept in this browser&rsquo;s own storage and
           this page cannot reach it — a private window or blocked site data is the usual reason.
         </StatusMessage>
+        {/*
+          #668: both next steps are actions, so both are drawn as buttons
+          rather than links in a sentence. Starting a ride is the primary —
+          it is what this screen exists to show the result of.
+        */}
         <p>
-          <a href={hrefFor(routeById('ride'))}>Start a ride</a>
-          {' · '}
-          <a href={hrefFor(routeById('transfer'))}>Import or export files</a>
+          <a className="oyl-button" href={hrefFor(routeById('ride'))}>
+            Start a ride
+          </a>{' '}
+          <a className="oyl-button oyl-button--secondary" href={hrefFor(routeById('transfer'))}>
+            Import or export files
+          </a>
         </p>
       </>
     );
@@ -273,6 +281,7 @@ export function ActivitiesView({ library }: ActivitiesViewProps): JSX.Element {
       : 'Nothing recorded yet. A ride appears here the moment you finish one.';
   const deleteButton = (row: LibraryRow): JSX.Element => (
     <Button
+      variant="secondary"
       onClick={() => {
         void remove(row.id);
       }}
@@ -413,10 +422,19 @@ export function ActivitiesView({ library }: ActivitiesViewProps): JSX.Element {
         Rides are stored on this device and nowhere else. There is no account and no server, so
         clearing this browser&rsquo;s site data deletes them — export anything you want to keep.
       </p>
+      {/*
+        #668: the next steps are actions, so they are drawn as buttons rather
+        than links in a sentence — on an empty library they are the only
+        thing to do. *Start a ride* is this screen's one primary; every row's
+        *Delete* is secondary.
+      */}
       <p>
-        <a href={hrefFor(routeById('ride'))}>Start a ride</a>
-        {' · '}
-        <a href={hrefFor(routeById('transfer'))}>Import or export files</a>
+        <a className="oyl-button" href={hrefFor(routeById('ride'))}>
+          Start a ride
+        </a>{' '}
+        <a className="oyl-button oyl-button--secondary" href={hrefFor(routeById('transfer'))}>
+          Import or export files
+        </a>
       </p>
     </div>
   );

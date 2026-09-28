@@ -9,6 +9,7 @@ import {
 } from '@onyourleft/domain';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { buttonsByView, onePrimaryViolations } from '../a11y/button-hierarchy';
 import { addWaypoint, emptyDraft, type RouteDraft } from '../routing/draft';
 import type { DraftStorage } from '../routing/draft-storage';
 import { scriptedProvider, type ScriptedProvider } from '../routing/testing';
@@ -110,15 +111,19 @@ describe('every control works from the keyboard', () => {
     expect(view.container.textContent).toContain('Waypoint 3');
   });
 
-  it('selects one, and says which is selected in words', async () => {
+  it('selects one, and says which is selected with aria-pressed', async () => {
     await open({ provider: scriptedProvider() });
     await place(2);
+    const pressed = (label: string): string | null =>
+      buttonNamed(label).getAttribute('aria-pressed');
+    expect([pressed('Waypoint 1'), pressed('Waypoint 2')]).toEqual(['false', 'false']);
     await press('Waypoint 1');
-    expect(present('Waypoint 1, selected')).toBe(true);
-    // Selection is not colour: the label itself changes, which is the only
-    // channel a screen reader has.
-    await press('Waypoint 1, selected');
-    expect(present('Waypoint 1')).toBe(true);
+    // Selection is not colour: since #668 the button is a toggle, whose state
+    // a screen reader reads from `aria-pressed`, and whose NAME stays the same
+    // so it is not announced as a different control on every press.
+    expect([pressed('Waypoint 1'), pressed('Waypoint 2')]).toEqual(['true', 'false']);
+    await press('Waypoint 1');
+    expect([pressed('Waypoint 1'), pressed('Waypoint 2')]).toEqual(['false', 'false']);
   });
 
   it('moves one in each of the four directions', async () => {
@@ -148,6 +153,28 @@ describe('every control works from the keyboard', () => {
     await place(3);
     await press('Delete waypoint 2');
     expect(view.container.textContent).not.toContain('Waypoint 3');
+  });
+});
+
+describe('one primary on the builder (#668)', () => {
+  // The route walk in `a11y/button-hierarchy.a11y.test.tsx` sees this screen
+  // with nothing drawn, where only *Add a waypoint* renders. Undo, Reverse,
+  // Clear and its confirmation, and a row of buttons per waypoint only appear
+  // once a route exists, so they are held to the rule here.
+  it('keeps Add a waypoint the only primary once waypoints, undo and a confirmation are on screen', async () => {
+    await open({ provider: scriptedProvider() });
+    await place(2);
+    await press('Waypoint 1');
+    const primaries = (): (string | undefined)[] =>
+      (buttonsByView(document)[0]?.primaries ?? []).map((element) => element.textContent?.trim());
+    expect(buttons().length, 'the builder rendered too few buttons').toBeGreaterThanOrEqual(10);
+    expect(primaries()).toEqual(['Add a waypoint']);
+    expect(onePrimaryViolations(document)).toEqual([]);
+
+    await press('Clear');
+    expect(present('Yes, clear the route')).toBe(true);
+    expect(primaries()).toEqual(['Add a waypoint']);
+    expect(onePrimaryViolations(document)).toEqual([]);
   });
 });
 

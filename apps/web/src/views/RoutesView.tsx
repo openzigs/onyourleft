@@ -261,9 +261,17 @@ export function RoutesView({ port, now, save }: RoutesViewProps): JSX.Element {
   return (
     <section>
       <h2>Draw a route</h2>
+      {/*
+        #668: the next step is an action, so it is drawn as a button rather
+        than left as a link in a sentence. Secondary, because this screen's
+        one primary is *Import route* below.
+      */}
       <p>
-        <a href={hrefFor(ROUTE_BUILDER_ROUTE)}>Draw a route on this device</a> — place waypoints and
-        have the roads between them worked out. A half-drawn route survives closing the tab.
+        <a className="oyl-button oyl-button--secondary" href={hrefFor(ROUTE_BUILDER_ROUTE)}>
+          Draw a route on this device
+        </a>{' '}
+        — place waypoints and have the roads between them worked out. A half-drawn route survives
+        closing the tab.
       </p>
 
       <h2>Import a route</h2>
@@ -367,6 +375,7 @@ export function RoutesView({ port, now, save }: RoutesViewProps): JSX.Element {
                   ) : (
                     ROUTE_FILE_FORMATS.map((format) => (
                       <Button
+                        variant="secondary"
                         key={format}
                         type="button"
                         onClick={() => {
@@ -396,9 +405,11 @@ export function RoutesView({ port, now, save }: RoutesViewProps): JSX.Element {
                       <option value="followers">People who follow me</option>
                       <option value="public">Anyone</option>
                     </select>
-                    <Button type="submit">Save changes</Button>
+                    <Button variant="secondary" type="submit">
+                      Save changes
+                    </Button>
                   </form>
-                  <Button type="button" onClick={() => setPendingDelete(route)}>
+                  <Button variant="secondary" type="button" onClick={() => setPendingDelete(route)}>
                     Delete
                   </Button>
                 </td>
@@ -418,10 +429,10 @@ export function RoutesView({ port, now, save }: RoutesViewProps): JSX.Element {
             “{pendingDelete.name}” will be removed from this device, including the line itself. This
             cannot be undone.
           </p>
-          <Button type="button" onClick={() => void onDelete(pendingDelete)}>
+          <Button variant="secondary" type="button" onClick={() => void onDelete(pendingDelete)}>
             Delete “{pendingDelete.name}”
           </Button>
-          <Button type="button" onClick={() => setPendingDelete(undefined)}>
+          <Button variant="secondary" type="button" onClick={() => setPendingDelete(undefined)}>
             Keep it
           </Button>
         </section>

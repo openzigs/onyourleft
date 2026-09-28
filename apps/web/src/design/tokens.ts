@@ -107,6 +107,21 @@ export const COLOUR_TOKENS = {
   accentHover: '#07443f',
   /** Text and glyphs drawn on `accent` or `accentHover`. */
   accentInk: '#ffffff',
+  /**
+   * The fill of a toggle that is ON and of the checked segment of a segmented
+   * control (#668) — a light tint of the accent.
+   *
+   * ⚠️ **It is not the signal on its own, and cannot be**: against the page it
+   * is 1.25:1, nowhere near SC 1.4.11's 3:1, and a state told by colour alone
+   * fails SC 1.4.1 whatever the ratio. The state is the doubled border drawn
+   * inside the control's own (`theme.css` §"THE THREE KINDS OF BUTTON"), and
+   * a segment's radio dot. What this tint must clear is the text and the ring
+   * drawn ON it, which are the pairs below.
+   *
+   * Its own token rather than `surfaceRaised` reused, so #672's dark theme can
+   * give "on" a value of its own without moving every card.
+   */
+  selected: '#d4ebe7',
 
   /*
    * A link in running text, one token per state (#661).
@@ -584,6 +599,104 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     minimum: AA_TEXT,
     measured: 11.01,
     where: 'the label of a primary button under a pointer',
+  },
+  /*
+   * Every state of the three kinds of button and of a segmented control —
+   * #668, and #688's hovered secondary. A state a button can be drawn in that
+   * is not a pair here is a state nothing checks; #688 was exactly that — the
+   * secondary's `accent` label left on the primary's `accentHover` hover fill,
+   * 1.40:1, because nobody had meant to draw it and so nobody declared it.
+   *
+   * Some of these pairs are ALSO declared above for another use (link text is
+   * `accent` on `canvas`, a disabled label is `inkMuted` on `surface`). They
+   * are repeated here, named for the button state, so that the list of a
+   * button's states is complete in one place and a change to either use has
+   * to face both.
+   */
+  {
+    foreground: 'accentInk',
+    background: 'accent',
+    minimum: AA_TEXT,
+    measured: 7.85,
+    where: 'a primary button at rest (#668)',
+  },
+  {
+    foreground: 'accentInk',
+    background: 'accentHover',
+    minimum: AA_TEXT,
+    measured: 11.01,
+    where: 'a primary button under a pointer or a press (#668)',
+  },
+  {
+    foreground: 'accent',
+    background: 'canvas',
+    minimum: AA_TEXT,
+    measured: 7.85,
+    where: 'the label of a secondary button, an off toggle and an unchecked segment (#668)',
+  },
+  {
+    foreground: 'accent',
+    background: 'canvas',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: 7.85,
+    where: 'the border of a secondary button, a toggle and a segment, on the page (#668)',
+  },
+  {
+    foreground: 'accentHover',
+    background: 'surface',
+    minimum: AA_TEXT,
+    measured: 10.03,
+    where: 'a secondary button, an off toggle or a segment under a pointer or a press (#688)',
+  },
+  {
+    foreground: 'accentHover',
+    background: 'canvas',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: 11.01,
+    where: 'the border of a button under a pointer, on the page (#668, #688)',
+  },
+  {
+    foreground: 'accentHover',
+    background: 'selected',
+    minimum: AA_TEXT,
+    measured: 8.83,
+    where: 'the label of an on toggle and of the checked segment (#668)',
+  },
+  {
+    foreground: 'accent',
+    background: 'selected',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: 6.29,
+    where:
+      'the doubled border of an on toggle and a checked segment, and the checked radio, on the `selected` fill (SC 1.4.1, 1.4.11, #668)',
+  },
+  {
+    foreground: 'accentHover',
+    background: 'selected',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: 8.83,
+    where: 'the doubled border of an on toggle under a pointer (#668)',
+  },
+  {
+    foreground: 'focus',
+    background: 'selected',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: 14.01,
+    where: "the focus ring on a checked segment's radio, landing on the segment's fill (#668)",
+  },
+  {
+    foreground: 'inkMuted',
+    background: 'surface',
+    minimum: AA_TEXT,
+    measured: 6.51,
+    where: 'the label of a disabled button of any kind (#668)',
+  },
+  {
+    foreground: 'border',
+    background: 'surface',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: 3.79,
+    where: 'the border of a disabled button, and the doubled border of a disabled on toggle (#668)',
   },
   /*
    * #667: `accent-color` paints checkboxes, radios, a range and a progress bar

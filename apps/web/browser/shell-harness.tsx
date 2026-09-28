@@ -337,6 +337,93 @@ function NativeControls(): JSX.Element {
 }
 
 /**
+ * `?hierarchy=specimens` renders one button of each kind, in each state a
+ * rider can see, and a segmented control — #668 and #688, opt-in for
+ * `CAMERA_LIVE`'s reason.
+ *
+ * ⚠️ **Why specimens.** This page hands the shell no ports, and measured on it
+ * no route renders a toggle, a pressed toggle or a segmented control at all;
+ * `button-hierarchy.browser.spec.ts` would read colours off nothing. What is
+ * real: the shipping {@link Button} and the shipping stylesheet, and the
+ * segmented control's markup is Settings' own (a `fieldset` of labels each
+ * wrapping a native radio). What the harness supplies is the labels, and a
+ * third segment, so the middle segment — joined on both sides — is measured.
+ *
+ * `data-oyl-kind` names each button's kind and state for the spec, and
+ * `data-oyl-segment` each segment; the spec counts both before it measures.
+ */
+const HIERARCHY_SPECIMENS = 'specimens';
+
+/**
+ * `&hover-rule=off` is #688's CONTROL: the same page with the rule that gives
+ * a secondary and a toggle their own hover deleted from the shipping sheet
+ * through the CSSOM. The spec requires the pair read back there to be the one
+ * #688 found — `accent` on `accentHover`, under 4.5:1 — which is what proves
+ * the positive case measured the rule rather than something else. It
+ * publishes how many rules it removed, and the spec requires one.
+ */
+const HOVER_RULE_OFF = 'off';
+
+function removeLighterHover(): number {
+  let removed = 0;
+  for (const sheet of [...document.styleSheets]) {
+    const rules = sheet.cssRules;
+    for (let index = rules.length - 1; index >= 0; index -= 1) {
+      const rule = rules[index];
+      if (
+        rule instanceof CSSStyleRule &&
+        rule.selectorText.startsWith('.oyl-button--secondary:hover')
+      ) {
+        sheet.deleteRule(index);
+        removed += 1;
+      }
+    }
+  }
+  return removed;
+}
+
+function HierarchySpecimens(): JSX.Element {
+  return (
+    <section data-oyl-hierarchy="true" aria-label="Button hierarchy specimens">
+      <p>
+        <Button>Start recording</Button> <Button variant="secondary">Pause</Button>{' '}
+        <Button variant="toggle" pressed={false}>
+          Mute sounds
+        </Button>{' '}
+        <Button variant="toggle" pressed>
+          Show power
+        </Button>
+      </p>
+      <p>
+        <Button disabled>Save</Button>{' '}
+        <Button variant="secondary" disabled>
+          Keep riding
+        </Button>{' '}
+        <Button variant="toggle" pressed disabled>
+          Show heart rate
+        </Button>
+      </p>
+      <p>
+        {/* A link drawn as a secondary button, as Routes' empty state draws one. */}
+        <a data-oyl-link-button="true" className="oyl-button oyl-button--secondary" href="#/routes">
+          Draw a route on this device
+        </a>
+      </p>
+      <fieldset className="oyl-segmented">
+        <legend>Which units do you ride in?</legend>
+        <div className="oyl-segmented__options">
+          {(['Kilometres', 'Miles', 'Nautical miles'] as const).map((label, index) => (
+            <label key={label} data-oyl-segment={label}>
+              <input type="radio" name="specimen-segmented" defaultChecked={index === 1} /> {label}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+    </section>
+  );
+}
+
+/**
  * The camera half of this page — #382, and it is **opt-in through the query
  * string**.
  *
@@ -583,6 +670,31 @@ function main(): void {
     });
     if (params.get('base-select') === BASE_SELECT_OFF) {
       document.documentElement.dataset['oylBaseSelectRemoved'] = String(removeBaseSelect());
+    }
+  }
+
+  if (params.get('hierarchy') === HIERARCHY_SPECIMENS) {
+    const hierarchy = document.createElement('div');
+    region.append(hierarchy);
+    flushSync(() => {
+      createRoot(hierarchy).render(
+        <StrictMode>
+          <HierarchySpecimens />
+        </StrictMode>,
+      );
+    });
+    // Each specimen's kind and state, from the class and attribute the real
+    // `Button` rendered — never from what this file asked for.
+    for (const button of hierarchy.querySelectorAll<HTMLButtonElement>('button.oyl-button')) {
+      const kind = button.classList.contains('oyl-button--toggle')
+        ? `toggle-${button.getAttribute('aria-pressed') === 'true' ? 'on' : 'off'}`
+        : button.classList.contains('oyl-button--secondary')
+          ? 'secondary'
+          : 'primary';
+      button.dataset['oylKind'] = button.disabled ? `${kind}-disabled` : kind;
+    }
+    if (params.get('hover-rule') === HOVER_RULE_OFF) {
+      document.documentElement.dataset['oylHoverRuleRemoved'] = String(removeLighterHover());
     }
   }
 
