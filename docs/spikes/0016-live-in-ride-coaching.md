@@ -23,15 +23,19 @@
 > (20 requests) and **8 114.1 ms** cold, over loopback whose own overhead was **0.2 ms p50**. The
 > tablet's legs — capture, the side link, the Wi-Fi request, the sentence reaching a rider — are a
 > procedure in §6 with **empty cells**. And the measurement found something that matters more than
-> the latency: **on one identical picture, twenty answers put the rider's elbow anywhere from 0.18 to
-> 0.71 of the picture's width, and a picture of random noise with nobody in it produced a pose the
-> product's own reader accepted in four of six answers** (§5.4). Separately, a live coach
-> collides with two rules the owner has already made: [ADR 0033](../adr/0033-side-camera-link.md)
-> D-6 says pose numbers _"never reach the HUD, the ride screen, an announcement or a trainer"_, and
-> [ADR 0030](../adr/0030-what-the-app-may-say-about-a-body.md) R7 forbids _"a notification fired on
-> a reading"_ — which is what an in-ride utterance is (§3.1). **Recommendation (§8): proceed to
-> measurement and to two owner rulings only. Build nothing** until the §6 cells are filled and both
-> rulings are made.
+> the latency: **on one identical picture, the 17 poses the product's reader accepted out of 21
+> answers put the rider's elbow anywhere from 0.18 to 0.71 of the picture's width, and a picture of
+> random noise with nobody in it produced a pose that reader accepted in four of six answers**
+> (§5.4). Separately, a live coach meets two rules that need an owner's word first:
+> [ADR 0033](../adr/0033-side-camera-link.md) D-6 says pose numbers _"never reach the HUD, the ride
+> screen, an announcement or a trainer"_ — a constraint on this path that defers #389 by name rather
+> than refusing it — and [ADR 0030](../adr/0030-what-the-app-may-say-about-a-body.md)'s 2026-09-23
+> amendment says _"a feature that emitted a notification on a reading"_ would breach its condition 5,
+> while the same amendment keeps D-7's live silence rule _"unchanged"_ and says condition 2 _"obliges
+> D-7's S1 and S4"_ for _"a live utterance"_. Whether a gated, opted-in utterance is such a
+> notification is an open question for the owner (§3.1): a live coach **may conflict with** R7 as
+> amended. **Recommendation (§8): proceed to measurement and to two owner rulings only. Build
+> nothing** until the §6 cells are filled and both rulings are made.
 
 ---
 
@@ -63,7 +67,7 @@ Everything in this section was read on `main` at `ca300c9` on 2026-09-28.
 | The number gate | `side-report.ts` §`MEASURED_SPREAD_DEGREES` | **`undefined`**, so `renderableChanges` returns nothing: no degree figure is rendered anywhere, because #385's accuracy half — the measured spread — **was never done** ([spike 0010](0010-on-device-pose-model-cost.md)'s own warning box) |
 | The tablet's pose model | `camera/pose-runtime.ts`, `camera/pose-worker.ts`, `apps/web/tools/pose/` | MediaPipe Pose Landmarker lite in a Web Worker, served from the app's origin, behind a network fence (`fenceWorkerNetwork`) that refuses MediaPipe's usage logger. Spike 0010 §5.4: **65.8 / 80.9 ms p50 / p95** per picture over a ten-minute soak beside the stylised game, **no frame over 20 ms** in 36 071 |
 | The analysis on the tablet | `camera/side-analysis.ts` | Looks at each picture as it arrives, keeps at most one waiting (the newest survives), keeps pose numbers and never a picture. **Its header: _"Nothing is said about a body during the ride (D-6)"_** |
-| The one network primitive | `camera/analysis-transport.ts` | One `POST` to an OpenAI-compatible `/v1/chat/completions` on the rider's own machine: four keys (model, prompt, picture, `max_tokens: 400`), `cache: 'no-store'`, `redirect: 'error'`, `credentials: 'omit'`. No `temperature` is sent |
+| The one network primitive | `camera/analysis-transport.ts` | One `POST` to an OpenAI-compatible `/v1/chat/completions` on the rider's own machine. The body's JSON keys are `model`, `stream` (`false`), `max_tokens` (400) and `messages` (one user message carrying the prompt and the picture) — the file's own words, _"model name, prompt, picture, and two limits"_; `cache: 'no-store'`, `redirect: 'error'`, `credentials: 'omit'`. No `temperature` is sent |
 | The address rule | `camera/analysis-endpoint.ts` | Refuses any address not on the rider's own network (a public name, which is what a tunnel's is, is refused). Plain `http:` on the LAN is ADR 0029 D-6's adopted default |
 | The Android path | `apps/mobile/src/http/analysis-http.ts` (#553) | The same request through Capacitor's native HTTP, because the WebView blocked it as mixed content (validation 0002 Part AF). `connectTimeout` 10 s, `readTimeout` 120 s. **A native request cannot be aborted from the web side** |
 | The computer as pose model | `camera/computer-pose.ts`, `camera/side-analyser.ts` (#553) | A second `SidePoseEstimator` that sends each side-camera picture to the rider's computer with the fixed `side-pose` prompt (`analysis-port.ts` §`ANALYSIS_PROMPTS`) and reads the answer with `sidePoseFromAnswer` — numbers or `unreadable`. Off by default, its own consent sentence. Per-picture deadline `COMPUTER_POSE_DEADLINE_MILLISECONDS` = 30 000; two deadlines in a row stop the session |
@@ -91,8 +95,10 @@ Everything in this section was read on `main` at `ca300c9` on 2026-09-28.
 
 Under ADR 0030 D-1 and D-2, and with no number (the spread is unmeasured), **a live coach could say
 exactly the report's five kinds of observation, in the report's shape, and nothing else.** The one
-thing it adds is **timing**: _"Your upper body was possibly lower in the last ten minutes than in
-the first ten"_ said at minute 45 rather than read on the sofa. #389's own body reaches the same
+thing it adds is **timing**: the vocabulary's own _"Your upper body was possibly lower late in the
+session than early in it."_ (`side-report-wording.ts`), said at minute 45 rather than read on the
+sofa — and a live coach would need its own wording for "late" and "early", since mid-ride the
+session has not ended (§8, D). #389's own body reaches the same
 place: a within-session difference needs two windows, so the first half-hour of a ride has nothing
 to say, and "rocking hips" — the example #389 was filed with — was dropped from the vocabulary by
 the owner on 2026-09-26 because it is frontal (D-4).
@@ -115,24 +121,41 @@ is worth an interruption is the question §3.1 argues cannot be answered by engi
 
 ---
 
-## 3. Two rulings already stand in the way
+## 3. Two rules that need an owner's word first
 
-### 3.1 ADR 0030 R7 and the carve-out's condition 5
+### 3.1 ADR 0030 R7 and the carve-out's condition 5 — an open question, not a standing prohibition
 
 ADR 0030 D-2 **R7**: _"No prompt to act, medically or otherwise, and no alert. A report is read; it
 does not interrupt."_ Forbidden, illustrating: _"a notification fired on a reading"_. Its 2026-09-23
 amendment made R7 load-bearing for the general-wellness position, under condition 5 (_"do not
-include claims, **functionality**, or outputs that prompt or guide specific clinical action"_), and
-wrote: _"a feature that emitted a notification on a reading would breach it even with a permitted
-sentence in it"_.
+include claims, functionality, or outputs that prompt or guide specific clinical action or medical
+management"_), and wrote: _"Note the word **functionality**: the condition reaches what the software
+*does*, not only what it says, so a feature that emitted a notification on a reading would breach it
+even with a permitted sentence in it"_.
 
-An in-ride utterance under D-7 is, by D-7's own S3, **emitted because an observation persisted** —
-that is a notification fired on a reading. D-7 was written before the amendment and assumes an
-utterance can exist; the amendment then described one as a breach. **The two do not agree inside the
-same ADR, and resolving that is the owner's**, not this spike's. Two shapes the owner could rule on:
+**The same amendment reads the other way in two places**, and both have to be quoted:
 
-- **Push** (what #389 imagined): the coach speaks when S1–S6 hold. On the amendment's reading, this
-  breaches condition 5 whatever the sentence says.
+- Its condition-2 row: _"It also obliges D-7's S1 and S4: a live utterance to somebody at 400 W is an
+  intervention aimed at a person holding a bicycle"_ — which only makes sense if a live utterance
+  gated by S1 and S4 is expected to exist.
+- Its §"What Q1 does NOT license", listing rules that _"stand exactly as written above"_: _"**D-7's
+  silence rule** — all six conditions, unchanged, with no relaxation for brevity."_
+
+So the amendment's author re-affirmed D-7 — a rule about **when an in-ride coach says nothing** —
+in the same entry that described a notification on a reading as a breach. The tension is real: an
+utterance under D-7 is, by S3, **emitted because an observation persisted**, and condition 5 reaches
+_functionality_. But the amendment evidently did not read a D-7 utterance as forbidden. **This
+spike does not resolve it; the owner does.** The question to put:
+
+> Is an in-ride utterance that is switched on for the ride by the rider (S5), silent unless every
+> one of S1–S6 holds, and worded only from the vocabulary (S6), a _"notification fired on a
+> reading"_ under R7 and condition 5?
+
+Two shapes the owner could rule on:
+
+- **Push** (what #389 imagined): the coach speaks when S1–S6 hold. If the owner reads such an
+  utterance as a notification on a reading, this may conflict with condition 5 whatever the
+  sentence says; if not, D-7 already describes when it must be silent.
 - **Pull**: nothing is ever spoken unprompted. A rider who presses _"How has my position changed?"_
   during an easy block gets the report-so-far, subject to S1–S6 — which is R7's permitted example,
   _"a report the rider opens"_, opened early. It is not a coach, and it may be all that is permitted.
@@ -141,9 +164,12 @@ same ADR, and resolving that is the owner's**, not this spike's. Two shapes the 
 
 _"It runs **during** the ride, and **nothing is shown until after it** (owner). ⚠️ That is not live
 coaching […] Pose numbers never reach the HUD, the ride screen, an announcement or a trainer.
-[#389] remains a separate decision."_ That is an owner rule about this exact path. Any live coach
-reading side-camera pose numbers needs it changed first, by an owner ruling recorded as an appended
-amendment to ADR 0033 (or a superseding ADR if it is read as reversing a decision).
+[#389] remains a separate decision."_ And ADR 0033's consequences table gives #389 as _"Unchanged,
+and still separate. Analysis during a ride that says nothing is not coaching (D-6)"_. So D-6 is a
+**constraint on this path that defers #389 explicitly** — it describes what the side camera does
+today, not an earlier owner refusal of a coach. It is still the rule as written: any live coach
+reading side-camera pose numbers needs it amended first, by an owner ruling recorded as an appended
+amendment to ADR 0033 (or a superseding ADR if the owner reads the change as reversing a decision).
 
 ---
 
@@ -197,8 +223,8 @@ applies.** The argument, from what is already built:
   every existing kind is either safety or a reading the rider chose, and a sentence about posture
   outranks none of them. So a coach sentence that meets a busy window is dropped. It is not
   re-offered: the next chance is the next five-minute slot, from a fresh window (§4.3).
-- `audio-cues.ts`: _"a short sound plays only with its sentence"_, and a sound is never the only
-  carrier. A coach sentence gets **no sound**: a tone that means "the camera noticed your body" is
+- `audio-cues.ts`: _"A sound is never the only carrier"_ (its module note) and _"One short sound —
+  only alongside its sentence"_. A coach sentence gets **no sound**: a tone that means "the camera noticed your body" is
   exactly the alert R7 forbids.
 - S2's five minutes is D-7's and is marked there as _"an engineering choice, not a measurement"_. It
   is kept rather than re-derived: nothing measured since gives a reason to move it, and #389 owns
@@ -400,7 +426,11 @@ Afterwards both models were unloaded with `keep_alive: 0` and `/api/ps` read emp
 warm and 8 s cold**, of which the HTTP itself is under a millisecond. At the side camera's five
 pictures a second, `computer-pose.ts` keeps one in flight and `side-analysis.ts` drops the rest, so
 the computer path looks at **roughly one picture in eleven** (the 2.25 s p50 against 200 ms), about
-**27 in a 60 s window** — under the report's own `MINIMUM_POSES_PER_THIRD` of 30.
+**27 requests in a 60 s window**, and since 17 of 21 answers were accepted as poses (§5.4), about
+**22 usable poses per 60 s**. That is **not** a shortfall for the report: `MINIMUM_POSES_PER_THIRD`
+(30) is a floor per third of a session of at least `MINIMUM_SESSION_MILLISECONDS` (six minutes), so
+a third is at least 2 minutes — about 53 requests and 43 usable poses at these rates. It matters only
+if a coach reused 30 as the floor for D-7 S3's **60 s** window, where about 22 would fall short.
 
 ### 5.4 What the answers said — read by the product's own reader
 
@@ -426,18 +456,30 @@ Over the 17 accepted poses of **one identical picture**, the range of each landm
 | hip | 0.13 – 0.59 | 0.08 – 0.45 |
 | knee | 0.21 – 0.59 | 0.08 – 0.70 |
 | ankle | 0.00 – 0.73 | 0.05 – 0.90 |
+| heel | 0.07 – 0.84 | 0.00 – 0.95 |
+| toe (15 of the 17 gave one) | 0.09 – 0.94 | 0.00 – 1.00 |
 
 Three findings, each stated as what it is:
 
-1. **Repeatability on identical input is poor.** The same picture, twenty times, put the elbow
-   across half the picture's width. The transport sends no `temperature`, so the server's default
+1. **Repeatability on identical input is poor.** The same picture, over the 17 poses accepted from
+   its 21 answers (one cold, twenty warm), put the elbow across half the picture's width. The transport sends no `temperature`, so the server's default
    sampling applies; whether a fixed temperature narrows it was **not** measured.
-2. **It is not near the drawn rider.** The drawn head is at x 0.66; no accepted answer put the ear
-   above x 0.54. This is one drawn picture, not a photograph, and proves nothing about photographs —
+2. **The head and shoulder were never placed where they were drawn.** The drawn head is at x 0.66
+   and the shoulder at x 0.63; no accepted answer put the ear above x 0.54 or the shoulder above
+   x 0.54. The drawn hip (x 0.41) and knee (x 0.53) do fall inside those landmarks' x ranges, which
+   are wide enough to hold almost anything. This is one drawn picture, not a photograph, and proves nothing about photographs —
    but a stick figure is the easy case.
 3. **Pictures with nobody in them produced poses the reader accepted** — one of six blank, four of
    six noise. `sidePoseFromAnswer` checks shape, keys and range, which is all it can check; a
-   fluent wrong answer passes. A post-ride report built on such poses would compare hallucinations.
+   fluent wrong answer passes. ⚠️ **Not one of the twelve blank and noise answers said
+   `{"rider":false}`**: every one said `"rider":true`, and the six counted `no-rider` were
+   `"rider":true` with every landmark `null`, which the reader turns into `no-rider` because fewer
+   than `MINIMUM_SHARED_LANDMARKS` (3) points were given. So the `no-rider` column mixes "the model
+   said nobody" (never, here) with "the model said somebody and located nothing". The `side-pose`
+   prompt (`analysis-port.ts` §`ANALYSIS_PROMPTS`) opens _"This picture shows a person riding a
+   bicycle on an indoor trainer"_, which presupposes the answer. The PR's reviewer re-ran the noise
+   case independently: 6 of 6 answers said `"rider":true`, 2 with full landmark sets (which the
+   reader would accept) and 4 all-null. A post-ride report built on such poses would compare hallucinations.
    ⚠️ **This is a finding about #553's shipped path, not only about a coach**, and §8 lists it
    separately.
 
@@ -450,31 +492,189 @@ one the owner named, and the owner should say which is wanted (§8, A).
 
 ### 5.5 Reproduce
 
-The three scripts are short and were run from a scratch directory outside the repository; they are
-reproduced here so the figures can be re-taken without the scratch directory.
+The three scripts below are the ones that produced §5.2–§5.3's figures, copied byte for byte from
+the scratch directory they ran in, outside the repository. Every figure in §5.3 was re-derived on
+2026-09-28 from the answers `roundtrip.py` saved (`out-*.json`), and §5.4's counts and ranges were
+re-derived by re-running the reader harness below over those same saved answers; both reproduced
+the published figures exactly. The models were **not** re-run for this revision, and a re-run will
+not reproduce the answers: the transport sends no `temperature`, so the server samples.
+
+**`make_frames.py`** — the drawing. The drawn landmarks §5.2 quotes are read off its coordinates:
+the head is the ellipse at (158–180, 32–54), centre (169, 43) → (0.66, 0.22); the shoulder is the
+torso's top end (160, 55) → (0.63, 0.29); the hip its bottom end (105, 85) → (0.41, 0.44); the knee
+the leg's bend (135, 110) → (0.53, 0.57).
+
+```python
+# Draws a side-view stick rider on a bicycle, 256x192, and a blank control, as JPEG.
+import io, time, statistics
+from PIL import Image, ImageDraw
+W, H = 256, 192
+def rider():
+    im = Image.new('RGB', (W, H), (200, 200, 205))
+    d = ImageDraw.Draw(im)
+    d.rectangle([0, 170, W, H], fill=(90, 90, 95))          # floor
+    d.ellipse([40, 110, 100, 170], outline=(20, 20, 20), width=3)   # rear wheel
+    d.ellipse([160, 110, 220, 170], outline=(20, 20, 20), width=3)  # front wheel
+    d.line([70, 140, 125, 140, 105, 95, 70, 140], fill=(180, 30, 30), width=4)  # frame
+    d.line([125, 140, 190, 140, 180, 90, 105, 95], fill=(180, 30, 30), width=4)
+    d.line([95, 88, 115, 88], fill=(10, 10, 10), width=4)     # saddle
+    d.line([175, 88, 190, 92], fill=(10, 10, 10), width=4)    # bars
+    skin = (230, 190, 160); kit = (30, 60, 160)
+    d.line([105, 85, 160, 55], fill=kit, width=9)             # torso hip->shoulder
+    d.ellipse([158, 32, 180, 54], fill=skin)                  # head
+    d.line([160, 55, 172, 75, 186, 90], fill=skin, width=6)   # arm
+    d.line([105, 85, 135, 110, 128, 150], fill=(20, 20, 20), width=8)  # leg
+    d.line([122, 152, 142, 152], fill=(20, 20, 20), width=5)  # shoe
+    return im
+def blank():
+    return Image.new('RGB', (W, H), (200, 200, 205))
+def enc(im, q=80):
+    b = io.BytesIO(); im.save(b, 'JPEG', quality=q); return b.getvalue()
+for name, f in (('rider', rider), ('blank', blank)):
+    im = f()
+    times = []
+    for _ in range(200):
+        t = time.perf_counter(); data = enc(im); times.append((time.perf_counter() - t) * 1000)
+    open(f'{name}.jpg', 'wb').write(data)
+    times.sort()
+    print(f'{name}: {len(data)} bytes; encode p50 {statistics.median(times):.3f} ms p95 {times[int(0.95*len(times))-1]:.3f} ms (n=200)')
+```
+
+The noise picture was made by one line, not by this script, and is **not reproducible byte for
+byte** because it reads `os.urandom`:
+`Image.frombytes('RGB', (256, 192), os.urandom(256 * 192 * 3)).filter(ImageFilter.GaussianBlur(0.6)).save('noise.jpg', 'JPEG', quality=80)`.
+
+**`echo_server.py`** — the no-model control, started and stopped by this measurement only.
+
+```python
+# A trivial local HTTP server that reads the POST body and answers a fixed JSON reply, like a
+# model server that had already decided. Started and stopped by this measurement only.
+import http.server, json, sys
+REPLY = json.dumps({"choices":[{"message":{"content":"{\"rider\":false}"}}]}).encode()
+class H(http.server.BaseHTTPRequestHandler):
+    protocol_version = 'HTTP/1.1'
+    def do_POST(self):
+        self.rfile.read(int(self.headers['Content-Length']))
+        self.send_response(200); self.send_header('Content-Type','application/json'); self.send_header('Content-Length', str(len(REPLY))); self.end_headers(); self.wfile.write(REPLY)
+    def log_message(self, *a): pass
+http.server.HTTPServer(('127.0.0.1', int(sys.argv[1])), H).serve_forever()
+```
+
+**`roundtrip.py`** — one request at a time, as `computer-pose.ts` sends them. The prompt is
+`analysis-port.ts` §`ANALYSIS_PROMPTS` `side-pose`, copied verbatim. ⚠️ **How the percentiles are
+taken**: the **first** request of a run is reported alone (the cold one, for a model not yet
+loaded) and the rest are summarised — p50 is `statistics.median` (for the 20 warm rider requests,
+the mean of the 10th and 11th), and p95 is the nearest-rank value at index `round(0.95 × (n − 1))`
+of the sorted list (for n = 20, index 18: the second-largest).
+
+```python
+import base64, json, sys, time, statistics, urllib.request, os
+PROMPT = ('This picture shows a person riding a bicycle on an indoor trainer, filmed from the side. '
+ 'Find the side of their body nearest the camera. Reply with JSON only, with no other text, '
+ 'in exactly this form: {"rider":true,"nearSide":"left","landmarks":{"ear":[x,y],'
+ '"shoulder":[x,y],"elbow":[x,y],"wrist":[x,y],"hip":[x,y],"knee":[x,y],"ankle":[x,y],'
+ '"heel":[x,y],"toe":[x,y]}} where x and y are the point as fractions of the picture from its '
+ 'top-left corner, each between 0 and 1, "toe" is the tip of the shoe, "nearSide" is the '
+ 'person’s own left or right, and a point you cannot see is null. If nobody is riding in the '
+ 'picture, reply {"rider":false}')
+def body(model, jpg):
+    return {"model": model, "stream": False, "max_tokens": 400, "messages": [{"role": "user", "content": [
+        {"type": "text", "text": PROMPT},
+        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(jpg).decode()}}]}]}
+def post(url, payload):
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(url, data=data, method='POST', headers={'Content-Type': 'application/json'})
+    t = time.perf_counter()
+    with urllib.request.urlopen(req, timeout=300) as r:
+        text = r.read()
+    return (time.perf_counter() - t) * 1000, text, len(data)
+def pct(v, p):
+    s = sorted(v); return s[min(len(s)-1, max(0, int(round(p*(len(s)-1)))))]
+if __name__ == '__main__':
+    url, model, image, n = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+    jpg = open(image, 'rb').read()
+    out = []
+    for i in range(n):
+        ms, text, size = post(url, body(model, jpg))
+        try:
+            j = json.loads(text); content = j['choices'][0]['message']['content']; usage = j.get('usage', {})
+        except Exception:
+            content, usage = text.decode(errors='replace')[:80], {}
+        out.append({'ms': ms, 'content': content, 'usage': usage, 'request_bytes': size})
+        print(f'{i}: {ms:.1f} ms req={size}B usage={usage} content={content[:160]!r}', flush=True)
+    json.dump(out, open(f'out-{os.path.basename(image)}-{model.replace(":","_")}.json', 'w'))
+    rest = [o['ms'] for o in out[1:]] if n > 1 else []
+    if rest:
+        print(f'first {out[0]["ms"]:.1f} ms; rest n={len(rest)} p50 {statistics.median(rest):.1f} p95 {pct(rest,0.95):.1f} min {min(rest):.1f} max {max(rest):.1f}')
+```
+
+The run, in the order it was made:
 
 ```bash
-# 1. The pictures (writes rider.jpg, blank.jpg; prints encode times). noise.jpg:
-#    Image.frombytes('RGB',(256,192),os.urandom(256*192*3)).filter(GaussianBlur(0.6)), quality 80.
-python3 make_frames.py
-# 2. Loopback overhead: start a fixed-answer server, measure, stop it.
+python3 make_frames.py                      # rider.jpg, blank.jpg, and the encode times in §5.2
 python3 echo_server.py 18765 & SP=$!
 python3 roundtrip.py http://127.0.0.1:18765/v1/chat/completions null rider.jpg 201
+python3 roundtrip.py http://127.0.0.1:18765/v1/chat/completions null noise.jpg 201
 kill $SP
-# 3. The model: first request is the cold one (check `curl -s 127.0.0.1:11434/api/ps` is empty).
+curl -s 127.0.0.1:11434/api/ps              # empty: the first model request is the cold one
 python3 roundtrip.py http://127.0.0.1:11434/v1/chat/completions gemma3:4b rider.jpg 21
 python3 roundtrip.py http://127.0.0.1:11434/v1/chat/completions gemma3:4b blank.jpg 6
 python3 roundtrip.py http://127.0.0.1:11434/v1/chat/completions gemma3:4b noise.jpg 6
 python3 roundtrip.py http://127.0.0.1:11434/v1/chat/completions gemma4:12b rider.jpg 11
-# 4. Unload: curl -s 127.0.0.1:11434/api/generate -d '{"model":"gemma3:4b","keep_alive":0}'
+curl -s 127.0.0.1:11434/api/generate -d '{"model":"gemma3:4b","keep_alive":0}'
+curl -s 127.0.0.1:11434/api/generate -d '{"model":"gemma4:12b","keep_alive":0}'
 ```
 
-`roundtrip.py` builds `{"model", "stream": false, "max_tokens": 400, "messages": [{"role": "user",
-"content": [{"type": "text", "text": <the side-pose prompt>}, {"type": "image_url", "image_url":
-{"url": "data:image/jpeg;base64,…"}}]}]}`, posts it with `urllib.request`, and records wall-clock
-milliseconds, the `usage` block and the answer's `content`. The reader check calls
-`sidePoseFromAnswer(content, 256 / 192)` on each saved answer from a temporary test under
-`apps/web/src/camera/`, deleted after the run.
+**The reader harness** — a throwaway Vitest file placed at
+`apps/web/src/camera/zz-spike-reader.test.ts`, run with
+`pnpm --filter @onyourleft/web exec vitest run src/camera/zz-spike-reader.test.ts --silent=false`,
+and deleted afterwards; it was never committed. `DIR` is the scratch directory holding the saved
+answers.
+
+```ts
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Throwaway: spike 0016 §5.4. Deleted after the run; never committed.
+import { readFileSync } from 'node:fs';
+import { it } from 'vitest';
+import { sidePoseFromAnswer } from './computer-pose';
+import { SIDE_POSE_LANDMARKS } from './side-analysis-port';
+
+const DIR = '<the scratch directory>';
+const FILES = [
+  'out-rider.jpg-gemma3_4b.json',
+  'out-blank.jpg-gemma3_4b.json',
+  'out-noise.jpg-gemma3_4b.json',
+  'out-rider.jpg-gemma4_12b.json',
+];
+
+it('reads every saved answer with the product reader', () => {
+  for (const file of FILES) {
+    const answers = JSON.parse(readFileSync(`${DIR}/${file}`, 'utf8')) as { content: string }[];
+    const kinds: Record<string, number> = {};
+    const seen = new Map<string, { x: number[]; y: number[] }>();
+    for (const { content } of answers) {
+      const outcome = sidePoseFromAnswer(content as never, 256 / 192);
+      kinds[outcome.kind] = (kinds[outcome.kind] ?? 0) + 1;
+      if (outcome.kind !== 'pose') continue;
+      for (const mark of outcome.pose.landmarks) {
+        const s = seen.get(mark.name) ?? { x: [], y: [] };
+        s.x.push(mark.x);
+        s.y.push(mark.y);
+        seen.set(mark.name, s);
+      }
+    }
+    console.log(file, JSON.stringify(kinds));
+    for (const name of SIDE_POSE_LANDMARKS) {
+      const s = seen.get(name);
+      if (s)
+        console.log(
+          `   ${name} n=${s.x.length} x ${Math.min(...s.x).toFixed(2)}-${Math.max(...s.x).toFixed(2)} ` +
+            `y ${Math.min(...s.y).toFixed(2)}-${Math.max(...s.y).toFixed(2)}`,
+        );
+    }
+  }
+});
+```
 
 ---
 
@@ -483,8 +683,9 @@ milliseconds, the `usage` block and the answer's `content`. The reader check cal
 These need the owner's tablet, the tripod phone and a rider, so they belong in the owner's device
 session, [#733](https://github.com/openzigs/onyourleft/issues/733). This document does not edit that
 issue; the owner adds the rows if the recommendation is accepted. **Every result cell is empty until
-somebody runs it.** A debug build is needed for T3–T5, because `apps/mobile/tools/webview-probe.mjs`
-only attaches to one.
+somebody runs it.** A debug build is needed for T1, T2, T4 and T5 (and T7 if the probe is used
+there), because `apps/mobile/tools/webview-probe.mjs` only attaches to one; T3 is already filled
+from spike 0010.
 
 | # | Leg | Transport, model, hardware | How to measure it | Result |
 | --- | --- | --- | --- | --- |
@@ -525,10 +726,13 @@ _"They must be met before anything is built"_ — is not met: the end-to-end rou
 the Mac's side only, and T1, T2, T4–T7 are empty. And two things this spike found would decide the
 matter before any latency does:
 
-1. **The rules as they stand forbid it.** ADR 0033 D-6 (pose numbers never reach an announcement)
-   and ADR 0030 R7 with condition 5 (no notification fired on a reading) both have to move, by the
-   owner, before a push coach can exist. A **pull** shape — the report-so-far, opened by the rider
-   during an easy block — may fit R7 as written, but it still needs D-6 changed.
+1. **D-6 has to change, and R7 with condition 5 needs an owner reading.** ADR 0033 D-6 (pose
+   numbers never reach an announcement) is a constraint on this path that defers #389; a coach
+   needs it amended. ADR 0030's 2026-09-23 amendment both calls a notification on a reading a
+   breach of condition 5 and keeps D-7's live silence rule unchanged (§3.1), so a push coach **may
+   conflict with** R7 as amended, and whether it does is the owner's reading to give. A **pull**
+   shape — the report-so-far, opened by the rider during an easy block — may fit R7 as written, but
+   it still needs D-6 changed.
 2. **The rider's-computer pose source is not fit for a live sentence.** On one identical picture it
    scattered landmarks across half the frame, and it gave poses for pictures of nobody (§5.4). A
    coach would read the tablet's own model — whose accuracy is also unmeasured (#385).
@@ -589,5 +793,14 @@ order to do it in. **None is filed.** Each is a title, a scope and its acceptanc
 - **The side camera's pose model is on no quality rung** (§2.2, §4.6). A question for #530/#553's
   owners: may a hot tablet stop looking at side-camera pictures, at the cost of the report's data?
 - **`sidePoseFromAnswer` accepts a fluent answer about a picture with nobody in it** (§5.4). On
-  #553's shipped path that feeds the post-ride report. Worth its own issue: whether the computer path
-  should stay offered while this is so, and whether the report should say it came from the computer.
+  #553's shipped path that feeds the post-ride report. Worth its own issue, covering three things,
+  not only the reader: (1) the `side-pose` prompt (`analysis-port.ts` §`ANALYSIS_PROMPTS`) asserts
+  _"This picture shows a person riding a bicycle"_, which presupposes the answer and invites this
+  failure — none of the twelve no-rider answers here said `"rider":false`, and the reviewer's
+  independent re-run on noise got `"rider":true` six times in six, two of them with full landmark
+  sets the reader would accept; (2) `"rider":true` with every landmark `null` becomes `no-rider`, so
+  that outcome mixes "the model said nobody" with "the model said somebody and located nothing",
+  and a diagnostic cannot tell them apart; (3) whether the computer path should stay offered while
+  this is so, and whether the report should say it came from the computer. ⚠️ **The severity is
+  lower than it reads**: the computer path is off by default (ADR 0033 D-11, its own consent
+  sentence), so only a rider who switched it on is affected.
