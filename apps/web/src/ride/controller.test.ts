@@ -3584,7 +3584,6 @@ describe('a forget the browser answers AFTER the device was paired again — #71
     // The browser answers the OLD forget now. It withdraws the grant the new
     // pairing is using and drops its link: this is what #717 suspected.
     answer();
-    await new Promise<void>((resolve) => void setTimeout(resolve, 0));
     await flushMicrotasks(20);
     expect(fake.bench.device('strap').connected).toBe(false);
     expect(fake.bench.device('strap').allowedServices).toEqual([]);
@@ -3609,9 +3608,99 @@ describe('a forget the browser answers AFTER the device was paired again — #71
     passTheBound();
     await unpairing;
     const before = controller.getSnapshot().pairingError;
+    // #722's review: a negative assertion after a bounded flush passes just as
+    // well if the late call's step in the controller never ran. That step
+    // emits a snapshot either way, so seeing one is what makes "nothing was
+    // said" a finding rather than an early look.
+    let seen = 0;
+    const unsubscribe = controller.subscribe(() => {
+      seen += 1;
+    });
 
     answer();
-    await new Promise<void>((resolve) => void setTimeout(resolve, 0));
+    await flushMicrotasks(20);
+    unsubscribe();
+    expect(seen).toBeGreaterThan(0);
+    expect(controller.getSnapshot().pairingError).toBe(before);
+    controller.dispose();
+  });
+
+  // #722's review, R3: names are not unique, so the name match is narrowed to
+  // a device listed AFTER the forget began. Each case lists a device the
+  // sentence must NOT be about, and lands the late call.
+  function lateOnTheSimulator(devices: Array<{ id: string; name: string }>) {
+    const { transport } = createSimulator({ devices: devices.map((device) => hrsStrap(device)) });
+    const controller = createRideController({
+      transport,
+      store: harnessStore(),
+      athleteId: ATHLETE_A,
+      newSessionId: () => recordingSessionId('names'),
+      now: () => unixSeconds(1),
+    });
+    const choose = (id: string) => {
+      const discover = transport.discover.bind(transport);
+      vi.spyOn(transport, 'discover').mockImplementationOnce(async (request) => {
+        const chosen = (await transport.knownDevices()).find(
+          (device) => device.identity.id === deviceId(id),
+        );
+        return chosen ?? discover(request);
+      });
+      return controller.pair('heart-rate');
+    };
+    const forget = transport.forget.bind(transport);
+    let land: () => void = () => undefined;
+    const stillRunning = new Promise<void>((resolve) => {
+      land = resolve;
+    });
+    const nextForgetRunsLate = () =>
+      vi.spyOn(transport, 'forget').mockImplementationOnce(async (id) => {
+        await forget(id);
+        throw new ForgetUnconfirmedError('forget-timed-out', 'late', {
+          deviceId: id,
+          holding: 'permission',
+          stillRunning,
+        });
+      });
+    return { controller, choose, nextForgetRunsLate, land: () => land() };
+  }
+
+  it('says nothing when a differently named device is paired in the window', async () => {
+    const { controller, choose, nextForgetRunsLate, land } = lateOnTheSimulator([
+      { id: 'strap', name: 'HRM 04B1' },
+      { id: 'tickr', name: 'TICKR 9C3E' },
+    ]);
+    await choose('strap');
+    nextForgetRunsLate();
+    await controller.unpair(STRAP);
+    await choose('tickr');
+    expect(controller.getSnapshot().sensors.map((sensor) => sensor.id)).toEqual([
+      deviceId('tickr'),
+    ]);
+    const before = controller.getSnapshot().pairingError;
+
+    land();
+    await flushMicrotasks(20);
+    expect(controller.getSnapshot().pairingError).toBe(before);
+    controller.dispose();
+  });
+
+  it('says nothing about a device of the same name that was already listed when the forget began', async () => {
+    // Two straps that both advertise "HRM": forgetting one cannot make the
+    // other one "paired again" — it never left the list.
+    const { controller, choose, nextForgetRunsLate, land } = lateOnTheSimulator([
+      { id: 'strap', name: 'HRM' },
+      { id: 'strap-2', name: 'HRM' },
+    ]);
+    await choose('strap');
+    await choose('strap-2');
+    nextForgetRunsLate();
+    await controller.unpair(STRAP);
+    expect(controller.getSnapshot().sensors.map((sensor) => sensor.id)).toEqual([
+      deviceId('strap-2'),
+    ]);
+    const before = controller.getSnapshot().pairingError;
+
+    land();
     await flushMicrotasks(20);
     expect(controller.getSnapshot().pairingError).toBe(before);
     controller.dispose();
@@ -3691,7 +3780,6 @@ describe('a forget the browser answers AFTER the device was paired again — #71
 
     // It lands: the link goes, with nothing ever written to the machine.
     answer();
-    await new Promise<void>((resolve) => void setTimeout(resolve, 0));
     await flushMicrotasks(20);
     expect(fake.bench.device('kickr').connected).toBe(false);
     expect(controlPoint()).toEqual([]);
@@ -4308,6 +4396,46 @@ describe('no trainer control while a timed-out forget is still running — #718'
       await rig.controller.requestTrainerControl();
       expect(opcodes(rig)).toEqual([REQUEST_CONTROL]);
       expect(rig.trainerControl()?.hasControl()).toBe(true);
+      rig.controller.dispose();
+    });
+
+    // #722's review, R1: "no gap between in progress and late" is an ORDER —
+    // the late set is filled inside the forget's `catch`, before the
+    // `finally` empties the in-progress set and emits a snapshot. A listener
+    // of THAT snapshot is the one place a gap of a single microtask shows.
+    it('holds control back through a listener of the forget’s own snapshot when it runs out of time', async () => {
+      const rig = twoTrainers();
+      await rig.controller.pair('trainer');
+      const neo = await neoPairedAsAPowerMeter(rig);
+      const held = forgetHeld(rig.transport);
+      const unpairing = rig.controller.unpair(neo);
+      await flushMicrotasks(20);
+      rig.written.length = 0;
+
+      // Every snapshot from here asks for control at once, synchronously —
+      // the fastest a screen could react. Not re-entered by its own snapshot.
+      let inside = false;
+      let asked = 0;
+      const unsubscribe = rig.controller.subscribe(() => {
+        if (inside) {
+          return;
+        }
+        inside = true;
+        asked += 1;
+        void rig.controller.requestTrainerControl();
+        inside = false;
+      });
+      held.timeOut();
+      await unpairing;
+      await flushMicrotasks(20);
+      unsubscribe();
+
+      // The forget's end was seen (the snapshot that empties the in-progress
+      // set), and not one Request Control went out.
+      expect(asked).toBeGreaterThan(0);
+      expect(opcodes(rig)).toEqual([]);
+      expect(rig.trainerControl()?.hasControl()).toBe(false);
+      expect(rig.controller.getSnapshot().trainer.refusal).toBe(CONTROL_WAITS_FOR_FORGET);
       rig.controller.dispose();
     });
 

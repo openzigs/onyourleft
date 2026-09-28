@@ -1240,6 +1240,20 @@ export function createTrainerControl(
             )} m/s`,
           );
         }
+        // ⚠️ #722's review: a gradient takes the machine out of ERG, so an ERG
+        // target this client had CONFIRMED is no longer one it can vouch for.
+        // Until then `targetPower()` went on saying `confirmed 250 W` while the
+        // machine simulated a hill, and a caller comparing a new ERG target
+        // against it — `ride/controller.ts` §`mustWaitForForget`'s ease — could
+        // read a raise above a gentle grade as an ease below 250 W. `unknown`,
+        // not `none`: on the trainer #372 measured, a Stop left an ERG target
+        // applied, so nothing here says the machine dropped it either
+        // (@see targetAfterStop). Set when the write is ATTEMPTED, before the
+        // wire, so a gradient that times out, or is refused once its bytes
+        // went, cannot leave a stale `confirmed` behind either.
+        if (target.kind === 'confirmed') {
+          target = { kind: 'unknown', attempted: target.target };
+        }
         await runProcedure({
           opCode: 'set-simulation-parameters',
           parameters: {

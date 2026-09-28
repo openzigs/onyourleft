@@ -1122,6 +1122,64 @@ describe('the simulation gradient', () => {
     expect(view.getInt16(3, true)).toBe(-620);
   });
 
+  // #722's review: a gradient takes the machine out of ERG, so a CONFIRMED ERG
+  // target must not survive it — `ride/controller.ts` §`mustWaitForForget`
+  // reads a write below a confirmed target as an ease.
+  it('no longer vouches for a confirmed ERG target once a gradient is sent', async () => {
+    const trainer = control();
+    await trainer.requestControl();
+    await trainer.setTargetPower(watts(250));
+    expect(trainer.targetPower()).toStrictEqual({ kind: 'confirmed', target: 250 });
+
+    await trainer.setSimulationParameters({ grade: gradePercent(2) });
+
+    expect(trainer.targetPower()).toStrictEqual({ kind: 'unknown', attempted: 250 });
+  });
+
+  it('nor once a gradient is only ATTEMPTED — refused by the machine, or never answered', async () => {
+    const refused = control();
+    await refused.requestControl();
+    await refused.setTargetPower(watts(250));
+    machine.answer(
+      FTMS_OP_CODE.setIndoorBikeSimulationParameters,
+      FTMS_RESULT_CODE.operationFailed,
+    );
+    await expect(refused.setSimulationParameters({ grade: gradePercent(2) })).rejects.toThrow(
+      SensorError,
+    );
+    expect(refused.targetPower()).toStrictEqual({ kind: 'unknown', attempted: 250 });
+
+    machine = scriptedMachine();
+    const fire: Array<() => void> = [];
+    const silent = control({
+      scheduleTimeout: (_after, run) => {
+        fire.push(run);
+        return () => {
+          fire.splice(fire.indexOf(run), 1);
+        };
+      },
+    });
+    await silent.requestControl();
+    await silent.setTargetPower(watts(250));
+    machine.goSilent();
+    const pending = silent.setSimulationParameters({ grade: gradePercent(2) });
+    await inFlight();
+    fire.forEach((run) => {
+      run();
+    });
+    await pending.catch(() => undefined);
+    expect(silent.targetPower()).toStrictEqual({ kind: 'unknown', attempted: 250 });
+  });
+
+  it('leaves no target as no target: a gradient invents none', async () => {
+    const trainer = control();
+    await trainer.requestControl();
+
+    await trainer.setSimulationParameters({ grade: gradePercent(2) });
+
+    expect(trainer.targetPower()).toStrictEqual({ kind: 'none' });
+  });
+
   it('refuses a gradient no road has, rather than writing it to a brake', async () => {
     const trainer = control();
     await trainer.requestControl();
