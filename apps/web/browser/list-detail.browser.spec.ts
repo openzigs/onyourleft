@@ -100,9 +100,10 @@ const LIST_DETAIL = ALL_ROUTES.filter((route) => route.layout === 'list-detail')
  *   and summary and the pane's heading already fill the 256 px (it starts at
  *   y ≈ 426).
  * - **Routes** on the tablet both ways up. On a phone the one pane puts the
- *   saved list first and the import's button ends a form with a file box, a
- *   tick box and a paragraph on closing a loop — about 1,060 px down; first on
- *   the page it would still end below a 781 px fold.
+ *   list first — the way into drawing a route, then the saved routes — and
+ *   the import's button ends a form with a file box, a tick box and a
+ *   paragraph on closing a loop: about 1,200 px down against a 781 px fold.
+ *   The phone's FIRST control, *Draw a route on this device*, is at y ≈ 311.
  * - **Workouts** on the tablet both ways up, since #670 put the workout, its
  *   name and *Save workout* ahead of the block form (below it, the button was
  *   72 px under the landscape fold). On a phone it starts about 6 px under the
