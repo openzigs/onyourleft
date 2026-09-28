@@ -129,9 +129,9 @@ export { MAX_RECOMMENDED_CONCURRENT_CONNECTIONS, planCapabilitySources } from '.
 
 // --- Errors -----------------------------------------------------------------
 
-export type { SensorErrorCode } from './errors';
+export type { ForgetHold, SensorErrorCode } from './errors';
 
-export { isSensorError, SensorError } from './errors';
+export { ForgetUnconfirmedError, isSensorError, SensorError } from './errors';
 
 // --- Subscriptions ----------------------------------------------------------
 

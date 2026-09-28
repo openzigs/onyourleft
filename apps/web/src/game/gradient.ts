@@ -286,5 +286,11 @@ function faultText(error: unknown): string {
   if (message.includes('timed out') || message.includes('timeout')) {
     return 'The trainer did not answer. The next gradient will be sent again.';
   }
+  // `ride/controller.ts` §`askedForByTheRider` (#718's second review): the
+  // app, not the machine, held the gradient back, so this does not say the
+  // trainer refused anything.
+  if (message.includes('still being forgotten')) {
+    return 'The hills are not being sent yet: Bluetooth is still finishing forgetting a trainer. The next gradient will be sent again.';
+  }
   return 'The trainer refused that gradient. The next one will be sent again.';
 }
