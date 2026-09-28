@@ -22,9 +22,26 @@ const END_OF_CENTRAL_DIRECTORY = 0x06054b50;
 const CENTRAL_DIRECTORY_ENTRY = 0x02014b50;
 const LOCAL_FILE_HEADER = 0x04034b50;
 
+/**
+ * The most a member may be, whatever its directory entry claims: 256 MiB. The
+ * largest the rider reads is a skin image of a few MiB; a directory's 32-bit
+ * size alone would let one member ask for 4 GiB before its CRC is checked.
+ */
+export const MAXIMUM_MEMBER_BYTES = 256 * 1024 * 1024;
+
 /** The bytes of the member at `path`, decompressed and checked. Throws when it cannot. */
 export function zipMember(archive: Uint8Array, path: string): Uint8Array {
   const view = new DataView(archive.buffer, archive.byteOffset, archive.byteLength);
+  // Every offset the archive states is checked against its length before it
+  // is read, so a broken one is a sentence rather than a bare RangeError, and
+  // never a silently clamped `subarray`.
+  const within = (from: number, length: number, what: string): void => {
+    if (from < 0 || length < 0 || from + length > archive.length) {
+      throw new Error(
+        `${what} runs past the end of the archive (${String(from)} + ${String(length)} of ${String(archive.length)} bytes)`,
+      );
+    }
+  };
   // The end record is the last 22 bytes, unless the archive carries a comment.
   let end = -1;
   for (let at = archive.length - 22; at >= Math.max(0, archive.length - 22 - 0xffff); at -= 1) {
@@ -41,6 +58,7 @@ export function zipMember(archive: Uint8Array, path: string): Uint8Array {
   }
   let at = directory;
   for (let entry = 0; entry < entries; entry += 1) {
+    within(at, 46, `the central directory's entry ${String(entry)}`);
     if (view.getUint32(at, true) !== CENTRAL_DIRECTORY_ENTRY) {
       throw new Error(`the central directory is broken at entry ${String(entry)}`);
     }
@@ -53,20 +71,29 @@ export function zipMember(archive: Uint8Array, path: string): Uint8Array {
     const extraLength = view.getUint16(at + 30, true);
     const commentLength = view.getUint16(at + 32, true);
     const local = view.getUint32(at + 42, true);
+    within(at + 46, nameLength, `the name of entry ${String(entry)}`);
     const name = new TextDecoder().decode(archive.subarray(at + 46, at + 46 + nameLength));
     at += 46 + nameLength + extraLength + commentLength;
     if (name !== path) continue;
     if ((flags & 1) !== 0) throw new Error(`${path} is encrypted`);
+    if (size > MAXIMUM_MEMBER_BYTES) {
+      throw new Error(
+        `${path}: the directory says ${String(size)} bytes, over the ${String(MAXIMUM_MEMBER_BYTES)} this reader takes`,
+      );
+    }
+    within(local, 30, `${path}'s local header`);
     if (view.getUint32(local, true) !== LOCAL_FILE_HEADER) {
       throw new Error(`${path}: no local header where the directory says`);
     }
     const start = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true);
+    within(start, compressed, `${path}'s compressed bytes`);
     const body = archive.subarray(start, start + compressed);
     let bytes: Uint8Array;
     if (method === 0) bytes = Uint8Array.from(body);
     else if (method === 8) {
       // Bounded by the size the directory states, so a member cannot inflate
-      // past what it claims before that claim is checked.
+      // past what it claims before that claim is checked — and that claim is
+      // itself under MAXIMUM_MEMBER_BYTES, so the bound is absolute.
       bytes = new Uint8Array(inflateRawSync(body, { maxOutputLength: Math.max(1, size) }));
     } else
       throw new Error(

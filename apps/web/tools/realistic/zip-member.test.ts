@@ -4,7 +4,7 @@ import { crc32, deflateRawSync } from 'node:zlib';
 
 import { describe, expect, it } from 'vitest';
 
-import { zipMember } from './zip-member';
+import { MAXIMUM_MEMBER_BYTES, zipMember } from './zip-member';
 
 /** A ZIP of `files`, each stored or deflated, written by hand to the format's own layout. */
 function zipOf(
@@ -81,6 +81,50 @@ describe('one file out of a ZIP — #623', () => {
   it('refuses a member whose bytes do not match its CRC-32', () => {
     const broken = zipOf([{ name: 'x', body: text('bytes'), deflate: false, crc: 1 }]);
     expect(() => zipMember(broken, 'x')).toThrow(/CRC-32/);
+  });
+
+  /** `archive` with one little-endian 32-bit field overwritten. */
+  const patched = (bytes: Uint8Array, at: number, value: number): Uint8Array => {
+    const copy = Uint8Array.from(bytes);
+    new DataView(copy.buffer).setUint32(at, value, true);
+    return copy;
+  };
+  const one = zipOf([{ name: 'x', body: text('some bytes'), deflate: false }]);
+  // Where its fields are: a 31-byte local header and 10 bytes of body, then
+  // the 47-byte directory entry, then the 22-byte end record.
+  const entryAt = 31 + 10;
+  const endAt = one.length - 22;
+
+  it('refuses a directory that the end record puts past the end of the archive', () => {
+    expect(() => zipMember(patched(one, endAt + 16, one.length), 'x')).toThrow(
+      /central directory's entry 0 runs past the end/,
+    );
+  });
+
+  it('refuses an entry whose name runs past the end', () => {
+    const copy = Uint8Array.from(one);
+    new DataView(copy.buffer).setUint16(entryAt + 28, 0xffff, true);
+    expect(() => zipMember(copy, 'x')).toThrow(/name of entry 0 runs past the end/);
+  });
+
+  it('refuses a local header, and compressed bytes, that run past the end', () => {
+    expect(() => zipMember(patched(one, entryAt + 42, one.length - 4), 'x')).toThrow(
+      /x's local header runs past the end/,
+    );
+    expect(() => zipMember(patched(one, entryAt + 20, one.length), 'x')).toThrow(
+      /x's compressed bytes runs past the end/,
+    );
+  });
+
+  it('refuses a member whose stated size is over the absolute cap, before inflating it', () => {
+    expect(() => zipMember(patched(one, entryAt + 24, MAXIMUM_MEMBER_BYTES + 1), 'x')).toThrow(
+      /over the 268435456 this reader takes/,
+    );
+    // At the cap exactly it is not refused for its size — it is refused for
+    // not being that size, which is the check after it.
+    expect(() => zipMember(patched(one, entryAt + 24, MAXIMUM_MEMBER_BYTES), 'x')).toThrow(
+      /the directory says 268435456/,
+    );
   });
 
   it('refuses something that is not a ZIP at all', () => {
