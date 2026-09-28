@@ -22,6 +22,7 @@ import {
 } from '@onyourleft/store';
 
 import './design/theme.css';
+import { themeEraser } from './design/theme-selection';
 import {
   browserClock,
   createRideController,
@@ -642,6 +643,7 @@ function buildTransferPort(): TransferPort | undefined {
     digest: webCryptoDigest,
     save: saveWithAnchor,
     drafts: browserDraftStorage(typeof localStorage === 'undefined' ? undefined : localStorage),
+    theme: themeEraser(window),
     athleteRow: localAthleteRecord(unixSeconds(Math.floor(Date.now() / 1000))),
   };
 }

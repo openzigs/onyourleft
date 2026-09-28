@@ -95,6 +95,12 @@ export const ERASE_REMOVES: readonly string[] = [
   // nothing. It is listed here because it goes, and {@link eraseDevice} is
   // what makes that true.
   'a route you were part-way through drawing',
+  // #672. Not a store row either: whether this device shows the app light or
+  // dark is kept in `localStorage` so it can be read before the first paint.
+  // It says nothing about where anybody rides, and it goes all the same —
+  // "this device now holds nothing about you" includes a preference.
+  // {@link eraseDevice} is what makes the line true.
+  'whether you chose a light or a dark appearance on this device',
   // ⚠️ **ADR 0029 D-4, by name, and the second half is the half that is easy to
   // drop.** The ADR spells the line out:
   //
@@ -255,7 +261,7 @@ export interface EraseOutcome {
  * Thin on purpose where the store is concerned: the cascade, its transaction
  * and its exhaustiveness are `packages/store`'s, and duplicating any of that
  * here would be a second place for the table list to be wrong. What this adds
- * is the decision, the words, the two things `deleteAthlete` cannot reach, and
+ * is the decision, the words, the things on this device `deleteAthlete` cannot reach (a half-drawn route, the palette choice), and
  * the row that has to exist afterwards.
  *
  * The order matters. The drafts are forgotten **after** the cascade, so a
@@ -279,11 +285,14 @@ export async function eraseDevice(
   athleteId: AthleteId,
   options: {
     readonly drafts?: EraseSideStores | undefined;
+    /** The palette choice (#672) — `design/theme-selection.ts` §`themeEraser`. */
+    readonly theme?: EraseSideStores | undefined;
     readonly athlete?: AthleteRecord | undefined;
   } = {},
 ): Promise<EraseOutcome> {
   const counts = await store.deleteAthlete(athleteId);
   options.drafts?.forget();
+  options.theme?.forget();
   if (options.athlete !== undefined) {
     await store.ensureAthlete(options.athlete);
   }

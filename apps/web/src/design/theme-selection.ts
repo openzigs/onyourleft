@@ -66,6 +66,18 @@ export interface ThemeStorage {
   removeItem(key: string): void;
 }
 
+/**
+ * This device's `localStorage`, or `undefined` where reaching for it throws —
+ * a private window, or site data blocked.
+ */
+export function deviceThemeStorage(): ThemeStorage | undefined {
+  try {
+    return typeof localStorage === 'undefined' ? undefined : localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
 /** The stored choice. Never throws; anything unreadable is `device`. */
 export function readThemeChoice(storage: ThemeStorage | undefined): ThemeChoice {
   try {
@@ -92,6 +104,18 @@ export function writeThemeChoice(storage: ThemeStorage | undefined, choice: Them
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * What an erase does to the choice (#672): removes the key, so the device is
+ * followed again. `transfer/erase-device.ts` §`ERASE_REMOVES` names it.
+ */
+export function forgetThemeChoice(storage: ThemeStorage | undefined): void {
+  try {
+    storage?.removeItem(THEME_STORAGE_KEY);
+  } catch {
+    // Nothing kept is nothing to forget, and an erase must not fail on it.
   }
 }
 
@@ -197,3 +221,17 @@ export const THEME_SELECTION_SCRIPT = `(function () {
   if (query && query.addEventListener) query.addEventListener('change', apply);
   document.addEventListener('DOMContentLoaded', apply);
 })();`;
+
+/**
+ * The erase's half (#672): forget the choice and put THIS page back on the
+ * device's palette at once, so an erased device is not left showing the
+ * palette a rider chose until the next reload.
+ */
+export function themeEraser(win: ThemeWindow): { forget(): void } {
+  return {
+    forget: () => {
+      forgetThemeChoice(storageOf(win));
+      applyThemeChoice(win);
+    },
+  };
+}

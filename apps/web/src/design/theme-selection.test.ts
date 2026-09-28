@@ -20,6 +20,7 @@ import {
   THEME_STORAGE_KEY,
   applyThemeChoice,
   readThemeChoice,
+  themeEraser,
   resolveTheme,
   writeThemeChoice,
   type ThemeStorage,
@@ -234,5 +235,27 @@ describe('the script is one a page can inline', () => {
   it('cannot end the script element it is inlined in, and uses no module syntax', () => {
     expect(THEME_SELECTION_SCRIPT).not.toMatch(/<\/script/i);
     expect(THEME_SELECTION_SCRIPT).not.toMatch(/\b(?:import|export)\b/);
+  });
+});
+
+describe('an erase forgets the choice and puts the page back on the device (#672)', () => {
+  it('removes the key and follows the device at once, with no reload', () => {
+    const page = freshPage('light', 'dark');
+    runScript(page);
+    expect(state().theme).toBe('light');
+    themeEraser(page.window).forget();
+    expect(page.storage.values.has(THEME_STORAGE_KEY)).toBe(false);
+    expect(state().theme).toBe('dark');
+    expect(state().media).toEqual([
+      '(prefers-color-scheme: light)',
+      '(prefers-color-scheme: dark)',
+    ]);
+  });
+
+  it('does not throw where the device refuses', () => {
+    const page = freshPage('throws', 'dark');
+    expect(() => {
+      themeEraser(page.window).forget();
+    }).not.toThrow();
   });
 });
