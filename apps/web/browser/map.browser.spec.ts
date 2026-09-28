@@ -807,6 +807,13 @@ test.describe('the dark map — #672', () => {
     const darkTiles = [MAP_COLOURS.dark.earth, MAP_COLOURS.dark.water, MAP_COLOURS.dark.road];
     expect(load.samples.some((sample) => darkTiles.includes(sample))).toBe(true);
     const navigations = seen.requests.filter((url) => new URL(url).pathname === '/').length;
+    // "Keeping its tiles": a paint-only diff keeps the vector source, so the
+    // flip fetches nothing from the archive. A map rebuilt to change colour
+    // (`setStyle(…, { diff: false })`) asks for it again — measured 3 → 5.
+    const fromTheArchive = (): number =>
+      seen.requests.filter((url) => url.startsWith(FIXTURE_URL)).length;
+    const archiveBefore = fromTheArchive();
+    expect(archiveBefore).toBeGreaterThan(0);
 
     // The device turns light. Nothing else is touched: the inline script
     // hears it, sets `data-theme`, and the map's one watch repaints it.
@@ -830,6 +837,8 @@ test.describe('the dark map — #672', () => {
     expect(seen.requests.filter((url) => new URL(url).pathname === '/').length).toBe(navigations);
     expect(after.registrations).toBe(1);
     expect(after.centreColours).not.toContain(MAP_COLOURS.dark.track);
+    // Not one archive request across the flip.
+    expect(fromTheArchive()).toBe(archiveBefore);
   });
 });
 

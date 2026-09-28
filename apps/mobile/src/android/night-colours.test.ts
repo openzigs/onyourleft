@@ -81,12 +81,20 @@ describe('the shell before the page paints is the page’s canvas — #672', () 
   it('paints the WebView’s own background with it, after the bridge exists', () => {
     const activity = read('java/dev/openzigs/onyourleft/MainActivity.java');
     const created = activity.indexOf('super.onCreate(savedInstanceState);');
+    const fetched = activity.indexOf('Bridge bridge = getBridge();');
+    const guarded = activity.indexOf('if (bridge != null && bridge.getWebView() != null) {');
     const painted = activity.indexOf(
-      'getBridge().getWebView().setBackgroundColor(ContextCompat.getColor(this, R.color.oyl_canvas));',
+      'bridge.getWebView().setBackgroundColor(ContextCompat.getColor(this, R.color.oyl_canvas));',
     );
     expect(created).toBeGreaterThan(0);
     // After: the bridge, and with it the WebView, is built inside onCreate.
-    expect(painted).toBeGreaterThan(created);
+    expect(fetched).toBeGreaterThan(created);
+    // Guarded: on Capacitor's no_webview path onCreate returns before load(), so there is no
+    // bridge, and an unguarded call crashes the one screen that tells a rider to install a WebView.
+    expect(guarded).toBeGreaterThan(fetched);
+    expect(painted).toBeGreaterThan(guarded);
+    // Nothing reaches the WebView through getBridge() unguarded.
+    expect(activity).not.toMatch(/getBridge\(\)\s*\.\s*getWebView\(\)/);
   });
 });
 

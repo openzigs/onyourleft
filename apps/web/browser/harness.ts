@@ -800,17 +800,23 @@ function run(): void {
   let latest: CurrentStyle | undefined;
   // What `MapPanel.tsx` hands `createThemedMap`, plus the harness's own
   // `?glyphs=` and `?style=` switches. Every style the map is handed passes
-  // through here, so `latest` is always what is on the map.
-  const optionsFor = (pageTheme: Theme): MapViewOptions => {
+  // through `optionsFor`, so `latest` is always what is on the map; `styleFor`
+  // builds one and records nothing, so a read can never change what `latest` says.
+  const styleFor = (pageTheme: Theme): CurrentStyle => {
     const theme = forced ?? pageTheme;
-    const options: MapViewOptions = {
-      style: withGlyphsParameter(basemapStyle(config, { tiles, theme })),
-      trackColour: MAP_COLOURS[theme].track,
+    return {
+      theme,
+      options: {
+        style: withGlyphsParameter(basemapStyle(config, { tiles, theme })),
+        trackColour: MAP_COLOURS[theme].track,
+      },
     };
-    latest = { theme, options };
-    return options;
   };
-  const current = (): CurrentStyle => latest ?? { theme: 'light', options: optionsFor('light') };
+  const optionsFor = (pageTheme: Theme): MapViewOptions => {
+    latest = styleFor(pageTheme);
+    return latest.options;
+  };
+  const current = (): CurrentStyle => latest ?? styleFor(documentTheme(document));
   optionsFor(documentTheme(document));
   const errors: string[] = [];
   let created = false;

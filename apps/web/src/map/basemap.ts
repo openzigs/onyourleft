@@ -352,8 +352,9 @@ export const MAP_COLOURS: Readonly<Record<Theme, MapColours>> = {
     road: '#3a4543',
     labelInk: '#d3dbd8',
     labelHalo: '#101614',
-    // The light palette's `#b5341f` is 2.3 : 1 on the dark land, under
-    // SC 1.4.11's 3 : 1 for a graphic a rider needs; this is 5.75.
+    // The light palette's `#b5341f` is 2.65 : 1 on the dark land (2.20 over
+    // the water, 2.89 on the background, 1.65 on a road), under SC 1.4.11's
+    // 3 : 1 for a graphic a rider needs on every one of them; this is 5.75.
     track: '#f0785c',
   },
 };
