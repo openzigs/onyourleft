@@ -145,7 +145,13 @@ apps/                 AGPL-3.0-or-later, without exception
                         and `--check`, which re-makes them byte for byte. ⚠️ The
                         first `.py` in the tree, which is why LIC001/LIC002 scan
                         `.py` now. ⚠️ Blender is a TOOL: nothing in CI runs it,
-                        and a version other than the pinned 4.4.3 is refused
+                        and a version other than the pinned 4.4.3 is refused.
+                        Since #624 it also DRAWS the realistic bicycle's four
+                        maps from arithmetic (`draw-bicycle-maps.ts`, CC0-1.0,
+                        nothing downloaded): no lock entry, and a drawn row's
+                        `inputsha256` is the digest of the pixels drawn, which
+                        `provenance.test.ts` redraws in CI. What each bicycle
+                        part samples on them is `src/game/bicycle-surfaces.ts`
     tools/glyphs/       the map's label glyphs (#578) — a committed Roboto
                         v2.138, the LAST Apache-2.0 Roboto (v3 is OFL, which no
                         list here admits), and the reader, the signed-distance

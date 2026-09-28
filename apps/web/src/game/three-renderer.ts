@@ -178,6 +178,7 @@ import {
   PlaneGeometry,
   PMREMGenerator,
   Quaternion,
+  ClampToEdgeWrapping,
   RepeatWrapping,
   Scene,
   ShaderMaterial,
@@ -255,6 +256,18 @@ import {
   type RiderPart,
 } from './bicycle';
 import {
+  cassetteUv,
+  chainringUv,
+  HUB_RADIUS_METRES,
+  HUB_WIDTH_METRES,
+  paintUv,
+  PLAIN_METAL_UV,
+  PLAIN_RUBBER_UV,
+  tapeUv,
+  tyreUv,
+  type Uv,
+} from './bicycle-surfaces';
+import {
   CASTS_CONTACT_SHADOW,
   CONTACT_SHADOW_DARKNESS,
   CONTACT_SHADOW_LIFT_METRES,
@@ -288,6 +301,8 @@ import type { QualitySettings } from './quality';
 import {
   isRealisticVegetation,
   PHOTOGRAPHIC_STRUCTURE_SURFACES,
+  REALISTIC_BICYCLE_MAPS,
+  REALISTIC_BICYCLE_MAP_NAMES,
   REALISTIC_RIDER,
   REALISTIC_SKY,
   REALISTIC_BOUNDARY_PARTS,
@@ -298,6 +313,7 @@ import {
   REALISTIC_VEGETATION,
   REALISTIC_VEGETATION_KINDS,
   realisticUrl,
+  type RealisticBicycleMap,
   type RealisticVegetationKind,
   type RealisticWorldOutcome,
   type StructureSurface,
@@ -1066,12 +1082,16 @@ function paintedBuilding(kind: StylisedBuiltKind, variant: number): BufferGeomet
   return joined;
 }
 
-/** Several solids as one geometry: position and normal only, flat-shaded. */
-function merged(parts: readonly BufferGeometry[]): BufferGeometry {
+/**
+ * Several solids as one geometry: position and normal only, flat-shaded — and
+ * any attribute named in `keep`, which the realistic bicycle's texture
+ * coordinates are since #624.
+ */
+function merged(parts: readonly BufferGeometry[], keep: readonly string[] = []): BufferGeometry {
   const flat = parts.map((part) => {
     const each = part.index === null ? part : part.toNonIndexed();
     for (const name of Object.keys(each.attributes)) {
-      if (name !== 'position' && name !== 'normal') {
+      if (name !== 'position' && name !== 'normal' && !keep.includes(name)) {
         each.deleteAttribute(name);
       }
     }
@@ -4691,6 +4711,8 @@ interface RealisticWorld {
   >;
   /** The rider's body, as the loader left it: a scene holding one skinned mesh. */
   readonly body: Object3D;
+  /** The bicycle's four drawn maps — #624. */
+  readonly bicycle: RealisticBicycleMaps;
 }
 
 /**
@@ -4897,7 +4919,7 @@ const BLOCK_FORMATS: ReadonlyMap<number, RealisticTextureFormat> = new Map([
 
 /** One realistic texture, as the GPU is handed it. */
 interface RealisticTextureReport {
-  readonly role: 'road' | 'ground' | 'structure' | 'model' | 'impostor' | 'sky';
+  readonly role: 'road' | 'ground' | 'structure' | 'model' | 'impostor' | 'bicycle' | 'sky';
   readonly format: RealisticTextureFormat;
   /** Whether the GPU holds it in a block format — never true of a fallback. */
   readonly compressed: boolean;
@@ -4976,6 +4998,7 @@ export function realisticTextureReport(): readonly RealisticTextureReport[] {
     add(maps.colour, 'structure');
     add(maps.normal, 'structure');
   }
+  for (const map of REALISTIC_BICYCLE_MAP_NAMES) add(world.bicycle[map], 'bicycle');
   for (const shapes of world.vegetation.values()) {
     for (const shape of shapes) {
       // #639: every layer of a merged material, not only its own two maps.
@@ -5008,6 +5031,7 @@ export function uploadRealisticTexturesOf(view: GameView, textures?: readonly Te
           world.ground.colour,
           world.ground.normal,
           ...[...world.structures.values()].flatMap((maps) => [maps.colour, maps.normal]),
+          ...REALISTIC_BICYCLE_MAP_NAMES.map((map) => world.bicycle[map]),
           ...[...world.vegetation.values()].flatMap((shapes) =>
             shapes.flatMap((shape) => [
               ...shape.parts.flatMap((part) => texturesOf(part.material)),
@@ -5072,6 +5096,11 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       normal: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.ground.normal))),
     };
     const rider = model(() => loaders.model(realisticUrl(REALISTIC_RIDER)));
+    // #624: the bicycle's drawn maps, loaded and settled with everything else.
+    const bicycleMaps = REALISTIC_BICYCLE_MAP_NAMES.map((map) => ({
+      map,
+      texture: texture(() => loaders.texture(realisticUrl(REALISTIC_BICYCLE_MAPS[map]))),
+    }));
     // #475: the structures' surfaces, loaded with everything else and settled
     // with it — a world whose buildings could not load is half a world.
     const structureMaps = PHOTOGRAPHIC_STRUCTURE_SURFACES.map((surface) => ({
@@ -5112,6 +5141,7 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       ground.colour,
       ground.normal,
       rider,
+      ...bicycleMaps.map((each) => each.texture),
       ...structureMaps.flatMap((each) => [each.colour, each.normal]),
       ...shapes.flatMap((each) => each.models.flatMap((one) => [one.scene, one.strip, one.middle])),
     ]);
@@ -5160,6 +5190,16 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       colour.colorSpace = SRGBColorSpace;
       structures.set(each.surface, { colour, normal });
     }
+    const bicycle = {} as Record<RealisticBicycleMap, Texture>;
+    for (const each of bicycleMaps) {
+      const map = await each.texture;
+      // Along a part repeats; across a band never does (`bicycle-surfaces.ts`).
+      // The paint's map is one tile both ways.
+      map.wrapS = RepeatWrapping;
+      map.wrapT = each.map === 'paintRoughness' ? RepeatWrapping : ClampToEdgeWrapping;
+      map.minFilter = LinearMipmapLinearFilter;
+      bicycle[each.map] = map;
+    }
     skyTexture.mapping = EquirectangularReflectionMapping;
     const pixels = skyPixelsOf(skyTexture);
     const directions = skyHorizonTable(
@@ -5193,6 +5233,7 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       vegetation,
       structures,
       body,
+      bicycle,
     };
     // #545: the near-plane cull's shapes, built now rather than on a frame.
     warmNearFieldShapes('realistic');
@@ -5338,6 +5379,7 @@ function releaseRealisticWorld(world: RealisticWorld): void {
     maps.colour.dispose();
     maps.normal.dispose();
   }
+  for (const map of REALISTIC_BICYCLE_MAP_NAMES) world.bicycle[map].dispose();
   releaseLoadedScene(world.body);
 }
 
@@ -7502,6 +7544,8 @@ export class RealisticRiderBelt {
   readonly #cranks: InstancedMesh;
   readonly #helmets: InstancedMesh;
   readonly #materials: readonly MeshStandardMaterial[];
+  /** The rubber's normal map, for {@link setTread}. */
+  readonly #treadMap: Texture;
   /** The body's scale: its rest leg, stretched to `bicycle.ts`'s thigh and shin. */
   readonly #scale: number;
   readonly #joints = emptyRiderJoints();
@@ -7524,29 +7568,20 @@ export class RealisticRiderBelt {
   readonly #unit = new Vector3(1, 1, 1);
   #shown = true;
 
-  constructor(body: Object3D) {
-    const bike = realisticBicycle();
-    const frameMaterial = withAtmosphere(
-      constructed(
-        new MeshStandardMaterial({ color: RIDER_PALETTE.frame, roughness: 0.35, metalness: 0.3 }),
-      ),
-    );
-    const rubberMaterial = withAtmosphere(
-      constructed(
-        new MeshStandardMaterial({ color: RIDER_PALETTE.tyre, roughness: 0.85, metalness: 0 }),
-      ),
-    );
-    const metalMaterial = withAtmosphere(
-      constructed(new MeshStandardMaterial({ color: 0xb8b8bc, roughness: 0.3, metalness: 0.9 })),
-    );
+  constructor(body: Object3D, maps: RealisticBicycleMaps) {
     const helmetMaterial = withAtmosphere(
       constructed(new MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.4, metalness: 0 })),
     );
     const riders = RIDDEN_KINDS.length;
-    this.#frame = tintable(bike.frame, frameMaterial, riders);
-    this.#rubber = tintable(bike.rubber, rubberMaterial, riders);
-    this.#metal = tintable(bike.metal, metalMaterial, riders);
-    this.#cranks = tintable(realisticCrankset(), metalMaterial, riders);
+    const bicycle = realisticBicycleMeshes(maps, riders);
+    this.#frame = bicycle.frame;
+    this.#rubber = bicycle.rubber;
+    this.#metal = bicycle.metal;
+    this.#cranks = bicycle.cranks;
+    this.#treadMap = maps.rubberNormal;
+    const frameMaterial = bicycle.frame.material as MeshStandardMaterial;
+    const rubberMaterial = bicycle.rubber.material as MeshStandardMaterial;
+    const metalMaterial = bicycle.metal.material as MeshStandardMaterial;
     this.#helmets = tintable(
       new SphereGeometry(0.13, 16, 10, 0, Math.PI * 2, 0, Math.PI / 1.8),
       helmetMaterial,
@@ -7631,6 +7666,15 @@ export class RealisticRiderBelt {
   setShown(on: boolean): void {
     this.#shown = on;
     if (!on) this.#group.visible = false;
+  }
+
+  /** Whether the rubber wears its normal map — #624's control. @see bicycleTreadOf */
+  setTread(on: boolean): void {
+    const rubber = this.#rubber.material as MeshStandardMaterial;
+    const wanted = on ? this.#treadMap : null;
+    if (rubber.normalMap === wanted) return;
+    rubber.normalMap = wanted;
+    rubber.needsUpdate = true;
   }
 
   /** This frame's riders, posed from their own crank angles. @see RiderBelt.place */
@@ -7855,6 +7899,97 @@ function twoBoneJoint(
   );
 }
 
+/**
+ * The realistic bicycle's four maps, as loaded — #624. @see REALISTIC_BICYCLE_MAPS
+ */
+export type RealisticBicycleMaps = Readonly<Record<RealisticBicycleMap, Texture>>;
+
+/**
+ * How strongly the bicycle's normal maps bend the light: **1**, as drawn.
+ *
+ * The maps are drawn from height fields in metres at the parts' own sizes
+ * (`tools/realistic/draw-bicycle-maps.ts`), so a groove's walls already lean
+ * as a 0.6 mm groove's do and there is nothing to exaggerate. The browser gate
+ * holds the tyre's read-back between a floor and a ceiling
+ * (`game.browser.spec.ts` §"#624"), so doubling this or halving it is red.
+ */
+const BICYCLE_NORMAL_SCALE = 1;
+
+/**
+ * The realistic bicycle's meshes — the paint, the rubber and the metal, and
+ * the cranks in the metal — each wearing a material this file constructs
+ * (ADR 0026 D-11), empty and tinted per instance for {@link RIDER_TINTS}.
+ *
+ * ## #624: surfaces on the same geometry, in the same three materials
+ *
+ * - **the paint** keeps its colour and metalness and takes its roughness from
+ *   `paintRoughness` — a clear coat's gloss with a faint mottle. ⚠️ **Not
+ *   `MeshPhysicalMaterial`**, whose clear-coat term is a second specular lobe
+ *   on every fragment the frame covers; #616's row has not shown it free.
+ * - **the rubber** takes `rubberNormal`: tread and sidewall on the tyres,
+ *   tape on the bar, the flat bead under the saddle.
+ * - **the metal** takes `metalNormal` and `metalRoughness`: teeth and chain on
+ *   the chainring, the cassette on the rear hub, plain metal everywhere else
+ *   at the roughness it had before, 0.3.
+ *
+ * No colour map: a per-instance tint multiplies the material's colour, and a
+ * normal or roughness map touches neither, which is what keeps #368's three
+ * bicycles apart exactly as before. The meshes are the three they were, so
+ * the draw calls are too.
+ */
+export function realisticBicycleMeshes(
+  maps: RealisticBicycleMaps,
+  capacity: number,
+): {
+  readonly frame: InstancedMesh;
+  readonly rubber: InstancedMesh;
+  readonly metal: InstancedMesh;
+  readonly cranks: InstancedMesh;
+} {
+  const bike = realisticBicycle();
+  const bent = new Vector2(BICYCLE_NORMAL_SCALE, BICYCLE_NORMAL_SCALE);
+  const frameMaterial = withAtmosphere(
+    constructed(
+      new MeshStandardMaterial({
+        color: RIDER_PALETTE.frame,
+        // The map holds the roughness itself; the factor multiplies it.
+        roughness: 1,
+        roughnessMap: maps.paintRoughness,
+        metalness: 0.3,
+      }),
+    ),
+  );
+  const rubberMaterial = withAtmosphere(
+    constructed(
+      new MeshStandardMaterial({
+        color: RIDER_PALETTE.tyre,
+        roughness: 0.85,
+        metalness: 0,
+        normalMap: maps.rubberNormal,
+        normalScale: bent,
+      }),
+    ),
+  );
+  const metalMaterial = withAtmosphere(
+    constructed(
+      new MeshStandardMaterial({
+        color: 0xb8b8bc,
+        roughness: 1,
+        roughnessMap: maps.metalRoughness,
+        metalness: 0.9,
+        normalMap: maps.metalNormal,
+        normalScale: bent.clone(),
+      }),
+    ),
+  );
+  return {
+    frame: tintable(bike.frame, frameMaterial, capacity),
+    rubber: tintable(bike.rubber, rubberMaterial, capacity),
+    metal: tintable(bike.metal, metalMaterial, capacity),
+    cranks: tintable(realisticCrankset(), metalMaterial, capacity),
+  };
+}
+
 /** An instanced mesh with a per-instance tint, empty. @see RiderBelt */
 function tintable(geometry: BufferGeometry, material: Material, capacity: number): InstancedMesh {
   const mesh = new InstancedMesh(geometry, material, capacity);
@@ -7913,8 +8048,49 @@ function placedPart(geometry: BufferGeometry, part: RiderPart): BufferGeometry {
 }
 
 /**
+ * Rewrites a built part's texture coordinates, vertex by vertex, from what
+ * three gave it and where the vertex is — #624. Called BEFORE the part is
+ * turned and moved, so `x`, `y` and `z` are the part's own, and on a
+ * primitive whose `uv` is three's: `u` along a torus's ring or round a
+ * cylinder, `v` round a torus's section or up a cylinder.
+ */
+function withUvs(
+  geometry: BufferGeometry,
+  place: (u: number, v: number, x: number, y: number, z: number) => Uv,
+): BufferGeometry {
+  const uv = geometry.getAttribute('uv');
+  const position = geometry.getAttribute('position');
+  for (let at = 0; at < uv.count; at += 1) {
+    const [u, v] = place(
+      uv.getX(at),
+      uv.getY(at),
+      position.getX(at),
+      position.getY(at),
+      position.getZ(at),
+    );
+    uv.setXY(at, u, v);
+  }
+  return geometry;
+}
+
+/** Every vertex of a part at one point of a map: a part with nothing drawn on it. */
+function uniformUv(geometry: BufferGeometry, at: Uv): BufferGeometry {
+  return withUvs(geometry, () => at);
+}
+
+/**
  * The realistic bicycle: `bicycle.ts`'s parts, drawn round — frame, rubber
  * and metal, one merged geometry each.
+ *
+ * ## Texture coordinates — #624
+ *
+ * Every part carries a `uv`, made from the same numbers that build it:
+ * `bicycle-surfaces.ts` says where on its material's map each kind of part
+ * samples, and this gives each vertex its place — along a tyre by the fraction
+ * of its circumference and round it by the fraction of its section, along a
+ * taped bar or a painted tube in METRES of its own length, across the rear hub
+ * by where the vertex is. Texture coordinates add no triangle: the counts
+ * `realisticBicycleTriangles` reads are the ones #506 summed.
  */
 function realisticBicycle(): {
   readonly frame: BufferGeometry;
@@ -7930,30 +8106,57 @@ function realisticBicycle(): {
       // A wheel in the bicycle's YZ plane at its hub: tyre, rim, hub, spokes.
       const radius = solid.radius + solid.thickness;
       const tyre = solid.thickness;
+      // #624: the tread's circumference, so the tyre carries a whole number of
+      // tread tiles round it.
+      const circumference = 2 * Math.PI * radius;
       rubber.push(
-        new TorusGeometry(radius - tyre, tyre, 10, 48)
+        withUvs(new TorusGeometry(radius - tyre, tyre, 10, 48), (u, v) =>
+          tyreUv(u, v, circumference),
+        )
           .rotateY(Math.PI / 2)
           .translate(0, part.y, part.z),
       );
+      // The wheel the chain drives is the one behind the bottom bracket, and
+      // its hub carries the cassette on the drive side, `+x`, where the
+      // chainring is (`bicycle.ts` §`RIDER_CRANK_PARTS`).
+      const driven = part.z < CRANK_AXIS_Z;
+      const hub = new CylinderGeometry(HUB_RADIUS_METRES, HUB_RADIUS_METRES, HUB_WIDTH_METRES, 10);
       metal.push(
-        new TorusGeometry(radius - tyre * 2.2, tyre * 0.45, 6, 48)
+        uniformUv(new TorusGeometry(radius - tyre * 2.2, tyre * 0.45, 6, 48), PLAIN_METAL_UV)
           .rotateY(Math.PI / 2)
           .translate(0, part.y, part.z),
-        new CylinderGeometry(0.02, 0.02, 0.1, 10).rotateZ(Math.PI / 2).translate(0, part.y, part.z),
+        (driven
+          ? // A quarter turn about `+Z` takes the cylinder's `+y` to `−x`, so
+            // across it from the far side to the drive side is `−y`.
+            withUvs(hub, (u, _v, _x, y) => cassetteUv(u, 0.5 - y / HUB_WIDTH_METRES))
+          : uniformUv(hub, PLAIN_METAL_UV)
+        )
+          .rotateZ(Math.PI / 2)
+          .translate(0, part.y, part.z),
       );
       const spokes = 20;
       const length = radius - tyre * 2.2;
       for (let spoke = 0; spoke < spokes; spoke += 1) {
         metal.push(
-          new CylinderGeometry(0.0015, 0.0015, length, 3)
+          uniformUv(new CylinderGeometry(0.0015, 0.0015, length, 3), PLAIN_METAL_UV)
             .translate(0, length / 2, 0)
             .rotateX((spoke / spokes) * Math.PI * 2)
             .translate(spoke % 2 === 0 ? 0.02 : -0.02, part.y, part.z),
         );
       }
     } else if (solid.shape === 'tube') {
-      softly(part, frame, rubber).push(
-        placedPart(new CylinderGeometry(solid.radius, solid.radius, solid.length, 12), part),
+      const into = softly(part, frame, rubber);
+      const length = solid.length;
+      // three's cylinder: `u` round it, `v` up it from its foot.
+      const uvs =
+        into === rubber
+          ? (u: number, v: number): Uv => tapeUv(v * length, u)
+          : (u: number, v: number): Uv => paintUv(u, v * length);
+      into.push(
+        placedPart(
+          withUvs(new CylinderGeometry(solid.radius, solid.radius, solid.length, 12), uvs),
+          part,
+        ),
       );
     } else if (solid.shape === 'bend') {
       // ⚠️ **The drops come from `bicycle.ts` since #369, and a reviewer who
@@ -7961,15 +8164,33 @@ function realisticBicycle(): {
       // here is reading the old file.** They were four literals in this
       // function while the hands were placed from two more in `bicycle.ts`,
       // which is why the two never met.
-      softly(part, frame, rubber).push(
+      const into = softly(part, frame, rubber);
+      const arc = solid.radius * solid.sweep;
+      // three's torus: `u` along the arc, `v` round its section.
+      const uvs =
+        into === rubber
+          ? (u: number, v: number): Uv => tapeUv(u * arc, v)
+          : (u: number, v: number): Uv => paintUv(v, u * arc);
+      into.push(
         placedPart(
-          new TorusGeometry(solid.radius, solid.thickness, 8, 16, solid.sweep).rotateZ(solid.start),
+          withUvs(
+            new TorusGeometry(solid.radius, solid.thickness, 8, 16, solid.sweep),
+            uvs,
+          ).rotateZ(solid.start),
           part,
         ),
       );
     } else if (solid.shape === 'box') {
-      softly(part, frame, rubber).push(
-        placedPart(new BoxGeometry(solid.width * 0.8, solid.height, solid.depth), part),
+      // The saddle: nothing drawn on it, so the rubber's flat bead.
+      const into = softly(part, frame, rubber);
+      into.push(
+        placedPart(
+          uniformUv(
+            new BoxGeometry(solid.width * 0.8, solid.height, solid.depth),
+            into === rubber ? PLAIN_RUBBER_UV : paintUv(0.5, 0),
+          ),
+          part,
+        ),
       );
     } else if (solid.shape === 'ball') {
       // Only the helmet is a ball and the filter above dropped it, so this is
@@ -7989,7 +8210,11 @@ function realisticBicycle(): {
       throw new Error(`the realistic bicycle cannot draw a ${JSON.stringify(unreachable)}`);
     }
   }
-  return { frame: merged(frame), rubber: merged(rubber), metal: merged(metal) };
+  return {
+    frame: merged(frame, ['uv']),
+    rubber: merged(rubber, ['uv']),
+    metal: merged(metal, ['uv']),
+  };
 }
 
 /** The realistic crankset, in the bottom bracket's own frame. */
@@ -7998,13 +8223,19 @@ function realisticCrankset(): BufferGeometry {
   for (const part of RIDER_CRANK_PARTS) {
     const solid = part.solid;
     if (solid.shape === 'ring') {
+      // #624: the teeth and the chain, round the ring and round its section.
       parts.push(
-        new TorusGeometry(solid.radius, solid.thickness / 2, 6, 40)
+        withUvs(new TorusGeometry(solid.radius, solid.thickness / 2, 6, 40), chainringUv)
           .rotateY(Math.PI / 2)
           .translate(part.x, part.y, part.z),
       );
     } else if (solid.shape === 'box') {
-      parts.push(placedPart(new BoxGeometry(solid.width, solid.height, solid.depth), part));
+      parts.push(
+        placedPart(
+          uniformUv(new BoxGeometry(solid.width, solid.height, solid.depth), PLAIN_METAL_UV),
+          part,
+        ),
+      );
     } else {
       // ⚠️ **The same refusal as `realisticBicycle` above, for the same
       // reason.** This chain kept the silent skip after #369 fixed its
@@ -8019,7 +8250,7 @@ function realisticCrankset(): BufferGeometry {
       throw new Error(`the realistic crankset cannot draw a ${solid.shape}`);
     }
   }
-  return merged(parts);
+  return merged(parts, ['uv']);
 }
 
 /**
@@ -8572,7 +8803,7 @@ class RealisticDrawing {
       skip: REALISTIC_PRIMITIVE_SKIP,
       physical: true,
     });
-    this.riders = new RealisticRiderBelt(world.body);
+    this.riders = new RealisticRiderBelt(world.body, world.bicycle);
     this.grounding = new GroundBlobBelt();
     this.#casterLists = [this.vegetation.grounded, this.#structureCasters];
     this.road = photographicRoadMaterial(world.road.colour, world.road.normal);
@@ -8995,6 +9226,20 @@ function warmNearFieldShapes(world: DrawnWorld): void {
  */
 export function horizonFromSkyOf(view: GameView, on: boolean): void {
   if (view instanceof ThreeGameView) view.horizonFromSky(on);
+}
+
+/**
+ * Takes the realistic bicycle's rubber normal map off, or puts it back — #624.
+ * The browser gate's control: with the tread off, the front tyre must read
+ * back flatter than the floor the product's tread is held above, or the
+ * variance the gate measured was the tyre's curve and the light rather than
+ * the tread.
+ *
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`;
+ * the product never takes the tread off.
+ */
+export function bicycleTreadOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.bicycleTread(on);
 }
 
 /**
@@ -9591,6 +9836,11 @@ class ThreeGameView implements GameView {
   /** @see horizonFromSkyOf */
   horizonFromSky(on: boolean): void {
     this.#horizonFromSky = on;
+  }
+
+  /** @see bicycleTreadOf */
+  bicycleTread(on: boolean): void {
+    this.#realistic?.riders.setTread(on);
   }
 
   /** @see atmosphereOf */

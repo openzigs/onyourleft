@@ -38,6 +38,7 @@ import { TRANSCODER_FILES, transcoderSource } from '../../tools/basis/transcoder
 
 import {
   PHOTOGRAPHIC_STRUCTURE_SURFACES,
+  REALISTIC_BICYCLE_MAP_NAMES,
   REALISTIC_VEGETATION,
   REALISTIC_VEGETATION_KINDS,
 } from './realistic-assets';
@@ -263,12 +264,14 @@ describe('the realistic textures stay compressed on the GPU — #618', () => {
     const report = renderer.realisticTextureReport();
     const worn = report.filter((texture) => texture.role !== 'sky');
     // Non-vacuity: the whole set — four surface maps, fourteen structure maps,
-    // four impostors and every map inside a tree, shrub and rock — ONCE PER
-    // IMAGE, read off the committed files: a fir's live and dead branches are
-    // two textures over one image, which three uploads once.
+    // the bicycle's four (#624), four impostors and every map inside a tree,
+    // shrub and rock — ONCE PER IMAGE, read off the committed files: a fir's
+    // live and dead branches are two textures over one image, which three
+    // uploads once.
     const images =
       4 +
       2 * PHOTOGRAPHIC_STRUCTURE_SURFACES.length +
+      REALISTIC_BICYCLE_MAP_NAMES.length +
       REALISTIC_VEGETATION_KINDS.flatMap((kind) => REALISTIC_VEGETATION[kind]).reduce(
         (sum, model) =>
           sum +
@@ -279,7 +282,7 @@ describe('the realistic textures stay compressed on the GPU — #618', () => {
     expect(worn.length).toBeGreaterThanOrEqual(40);
     expect(worn.length).toBe(images);
     expect(new Set(worn.map((texture) => texture.role))).toEqual(
-      new Set(['road', 'ground', 'structure', 'model', 'impostor']),
+      new Set(['road', 'ground', 'structure', 'model', 'impostor', 'bicycle']),
     );
     expect(everyTextureCompressed(report)).toBe(true);
     for (const texture of worn) {
@@ -291,6 +294,14 @@ describe('the realistic textures stay compressed on the GPU — #618', () => {
     // road's and ground's normal maps are UASTC, so ASTC; their colour, ETC2.
     for (const texture of worn.filter((each) => each.role === 'impostor')) {
       expect(texture.format).toBe('ETC2 RGBA');
+    }
+    // #624: the bicycle's maps are all data a shader reads raw — two normal
+    // maps and two roughness maps — so all four are UASTC, so ASTC, and small.
+    const bicycle = worn.filter((each) => each.role === 'bicycle');
+    expect(bicycle).toHaveLength(REALISTIC_BICYCLE_MAP_NAMES.length);
+    for (const texture of bicycle) {
+      expect(texture.format, JSON.stringify(texture)).toBe('ASTC 4x4');
+      expect(texture.width, JSON.stringify(texture)).toBeLessThanOrEqual(256);
     }
     const counts = new Map<string, number>();
     for (const texture of worn) counts.set(texture.format, (counts.get(texture.format) ?? 0) + 1);

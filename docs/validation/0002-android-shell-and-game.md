@@ -3214,6 +3214,8 @@ published figures (its run predates `oyl.txt`).
 | #618 | after (KTX2) | #618's merge | — | | | | | | | | |
 | #622 | before (one colour) | the first parent of #622's merge | — | | | | | | | | |
 | #622 | after (the air) | #622's merge | — | | | | | | | | |
+| #624 | before (plain materials) | the first parent of #624's merge | — | | | | | | | | |
+| #624 | after (the drawn maps) | #624's merge | — | | | | | | | | |
 | #639 | before (a call a material) | the first parent of #639's merge | — | | | | | | | | |
 | #639 | after (a call a tree level) | #639's merge | — | | | | | | | | |
 
@@ -3288,6 +3290,36 @@ blobs, and the rock's cost is a vertex attribute the GPU already reads for the t
 | Buildings stand in the ground | |
 | Any blob on the road, on water, or floating | |
 | The boulder is darker at its foot and in its crevices | |
+
+#### The #624 rows — the realistic bicycle's surfaces
+
+[#624](https://github.com/openzigs/onyourleft/issues/624) puts four small maps this repository draws
+(`apps/web/tools/realistic/draw-bicycle-maps.ts`) on the realistic bicycle's three existing
+materials: tread, sidewall and bar tape as a normal map on the rubber, the chainring's teeth and
+chain and the cassette as a normal and a roughness map on the metal, and the paint's clear coat as
+a roughness map alone. Its ceiling is **zero** triangles and draw calls, at most **2 MiB** of
+texture memory (the estimate is 283 989 bytes) and **0.5 MiB** of build (35 112 bytes), and no
+measurable increase in the measured columns. The browser gate reads the front tyre's tread back
+between a floor and a ceiling, with the normal map off as its control. That gate uses a camera
+0.8 m from the tyre, closer than any camera a rider has. Whether the tread, the tape and the chain
+can be seen at all from the chase camera is a question only the tablet can answer.
+
+| Step | What to do |
+|---|---|
+| AH-624-1 | **Before**: AH1–AH7 on the first parent of #624's merge, for **five minutes** as #624 asks: `soak=6` in AH4's URL and the sampler for 300 s in AH5. `RUN=624-before` |
+| AH-624-2 | **Cool again (AH3, 25–26 °C)**, then **after**: the same on #624's merge. `RUN=624-after` |
+| AH-624-3 | Write both rows into the table above. **Triangles / frame** and **draw calls** must not move between them; the measured columns are held to #616's spread |
+| AH-624-4 | **By eye**, on the after build: `realistic.html?world=realistic` at the chase camera, then held at `&at=900`. Look at the rider's bicycle, and at the bot's if one is shown. Can you see tread on the tyres, tape on the bar, teeth or chain on the chainring, and sprockets on the rear hub? Does the frame's paint catch a sharper highlight than before? Does anything on the bicycle shimmer or crawl while it rides? |
+
+| #624 by eye | Answer |
+|---|---|
+| Tread on the tyres, at the chase camera | |
+| Tread on the tyres, held at `&at=900` | |
+| Tape on the bar | |
+| Teeth or chain on the chainring; sprockets on the rear hub | |
+| The paint's highlight, before against after | |
+| Shimmer or crawl on the bicycle while it rides | |
+| The three riders still told apart by colour | |
 
 #### The #619 rows — what the realistic world costs the GPU, lever by lever
 
