@@ -113,11 +113,6 @@ jobs:
       # command's whole output again at the end. Its own suite runs first,
       # before anything is trusted to it: a runner that swallowed a failure
       # would make that step twenty-two gates removed, and look green.
-      # TEMPORARY (#682's measurement, reverted before merge): which CPU this
-      # job landed on, so the per-case timings of this run can be attributed.
-      - name: Runner CPU (temporary, #682)
-        run: lscpu | grep -E 'Model name|Thread|Core|Socket' || true
-
       - name: Concurrency runner tests
         run: bash scripts/run-concurrently.test.sh
 
