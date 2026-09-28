@@ -667,10 +667,18 @@ bound: past it the device is forgotten here and the rider is told what went unco
 browser that it may still be listed, in the Android shell that it may still be connected
 (`ForgetUnconfirmedError.holding`, #718's review). And while that late call is still running no
 trainer is asked for control: when it lands it drops the link of whatever pairing of the device is
-current, and a trainer holding a target with no link cannot be sent a Stop. Asking is not the only
-way a client comes to hold control — the FTMS client asks again by itself on a `0xFF` — so while
-that call runs a trainer the rider did not ask for is sent no ERG target, no workout and no
-gradient either (`ride/controller.ts` §`askedForByTheRider`); a release is never held back.
+current, and a trainer holding a target with no link cannot be sent a Stop. ⚠️ **Since #721 the
+hold covers the whole of a trainer's forget, from the moment it begins, and not only its late
+half** — a reader who remembers control waiting only once the thirty seconds had passed is reading
+the old paragraph; inside them it rested on refusing the device by id, which is unmeasured on Web
+Bluetooth (`ride/controller.ts` §`holdsTrainerControlBack`). Asking is not the only way a client
+comes to hold control — the FTMS client asks again by itself on a `0xFF` — and since #721 that
+Request Control is held back too (`mayReacquireControl`). A trainer the rider did not ask for is
+sent no raise, no workout interval and no gradient while the hold lasts, through ONE rule checked
+on every write (`ride/controller.ts` §`mustWaitForForget`); an ease to a lower target still goes,
+and a release is never held back. When a late call lands on a device the rider has paired again
+in the meantime, the rider is told it may have dropped that connection and how to mend it — #717
+chose telling over making the pairing wait (`ride/controller.ts` §`pairedAgainBeforeForgetLanded`).
 Since #713 a Forget pressed while that device's pairing is still wiring ends the pairing quietly,
 and whatever the pairing acquired after the press — a subscription, a trainer's control client — is
 let go. `apps/web/browser/devices.browser.spec.ts` walks Home → Devices → Pair

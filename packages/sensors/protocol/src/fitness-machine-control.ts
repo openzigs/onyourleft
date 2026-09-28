@@ -688,8 +688,16 @@ export interface TrainerControlOptions {
    *
    * ⚠️ Never after a **Reset**: this client's own reset deliberately gives
    * control up, and silently taking it back would defeat the procedure.
+   *
+   * A function is asked each time a `0xFF` Control Permission Lost arrives,
+   * and nothing is requested when it answers `false` — #721. The ride
+   * controller holds EVERY Request Control back while a trainer's forget is
+   * in progress or still running late, the rider's and this one alike, and
+   * this is how it reaches the one it does not send itself. Control lost
+   * while it answers `false` stays lost: taking it back later is
+   * {@link TrainerControl.requestControl}, which is a thing the rider does.
    */
-  readonly reacquireControl?: boolean | undefined;
+  readonly reacquireControl?: boolean | (() => boolean) | undefined;
   /** See {@link ScheduleTimeout}. Omitted, procedures are not timed out. */
   readonly scheduleTimeout?: ScheduleTimeout | undefined;
 }
@@ -932,7 +940,9 @@ export function createTrainerControl(
       }
       target = { kind: 'none' };
       loseControl('permission-lost');
-      if (reacquireControl && linkUp && !closed) {
+      const reacquire =
+        typeof reacquireControl === 'function' ? reacquireControl() : reacquireControl;
+      if (reacquire && linkUp && !closed) {
         void requestControl().catch(() => undefined);
       }
     }
@@ -1229,6 +1239,20 @@ export function createTrainerControl(
               MAX_ENCODABLE_WIND_SPEED_METRES_PER_SECOND,
             )} m/s`,
           );
+        }
+        // ⚠️ #722's review: a gradient takes the machine out of ERG, so an ERG
+        // target this client had CONFIRMED is no longer one it can vouch for.
+        // Until then `targetPower()` went on saying `confirmed 250 W` while the
+        // machine simulated a hill, and a caller comparing a new ERG target
+        // against it — `ride/controller.ts` §`mustWaitForForget`'s ease — could
+        // read a raise above a gentle grade as an ease below 250 W. `unknown`,
+        // not `none`: on the trainer #372 measured, a Stop left an ERG target
+        // applied, so nothing here says the machine dropped it either
+        // (@see targetAfterStop). Set when the write is ATTEMPTED, before the
+        // wire, so a gradient that times out, or is refused once its bytes
+        // went, cannot leave a stale `confirmed` behind either.
+        if (target.kind === 'confirmed') {
+          target = { kind: 'unknown', attempted: target.target };
         }
         await runProcedure({
           opCode: 'set-simulation-parameters',

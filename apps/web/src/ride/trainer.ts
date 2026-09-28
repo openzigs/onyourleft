@@ -83,8 +83,23 @@ export interface TrainerAttachment {
   readonly connection: TrainerConnection | undefined;
 }
 
+/** What the ride controller hands {@link OpenTrainer} along with the id — #721. */
+export interface OpenTrainerOptions {
+  /**
+   * Asked on every `0xFF` Control Permission Lost, before the client requests
+   * control again by itself. Omitted, it always may — the protocol's default.
+   * `ride/controller.ts` §`holdsTrainerControlBack` answers it: no Request
+   * Control reaches a trainer while a trainer's forget is in progress or
+   * still running late, whoever would have sent it.
+   */
+  readonly mayReacquireControl?: (() => boolean) | undefined;
+}
+
 /** Open trainer control on a connected device. */
-export type OpenTrainer = (id: DeviceId) => Promise<TrainerAttachment>;
+export type OpenTrainer = (
+  id: DeviceId,
+  options?: OpenTrainerOptions,
+) => Promise<TrainerAttachment>;
 
 /**
  * Nothing known about the machine.
@@ -152,7 +167,7 @@ export function openWebBluetoothTrainer(
   options: WebBluetoothTrainerOptions = {},
 ): OpenTrainer {
   const scheduleTimeout = options.scheduleTimeout ?? browserTimeouts;
-  return async (id) => {
+  return async (id, opened = {}) => {
     const choice = await controlChoice(async () => transport.resolvedUuids(id));
     if (choice.kind === 'vendor-not-implemented') {
       // ⚠️ The Fitness Machine Service was not in what the link resolved, so
@@ -183,6 +198,7 @@ export function openWebBluetoothTrainer(
           powerRange,
           deviceId: id,
           scheduleTimeout,
+          reacquireControl: opened.mayReacquireControl ?? true,
           ...(machine.resistanceRange === undefined
             ? {}
             : { resistanceRange: machine.resistanceRange }),
@@ -240,7 +256,7 @@ export function openCapacitorTrainer(
   options: WebBluetoothTrainerOptions = {},
 ): OpenTrainer {
   const scheduleTimeout = options.scheduleTimeout ?? browserTimeouts;
-  return async (id) => {
+  return async (id, opened = {}) => {
     const choice = await controlChoice(async () => ports.resolvedUuids(id));
     if (choice.kind === 'vendor-not-implemented') {
       return { choice, connection: undefined };
@@ -264,6 +280,7 @@ export function openCapacitorTrainer(
           powerRange,
           deviceId: id,
           scheduleTimeout,
+          reacquireControl: opened.mayReacquireControl ?? true,
           ...(machine.resistanceRange === undefined
             ? {}
             : { resistanceRange: machine.resistanceRange }),

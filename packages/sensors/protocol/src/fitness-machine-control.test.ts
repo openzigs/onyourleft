@@ -716,6 +716,32 @@ describe('losing control', () => {
     expect(trainer.targetPower()).toStrictEqual({ kind: 'confirmed', target: 250 });
   });
 
+  it('asks a reacquire function on every 0xFF, and requests nothing while it says no — #721', async () => {
+    let may = false;
+    const trainer = control({ reacquireControl: () => may });
+    await trainer.requestControl();
+
+    machine.status(Uint8Array.from([0xff]));
+    await Promise.resolve();
+    expect(trainer.hasControl()).toBe(false);
+    expect(machine.writes.map((write) => write[0])).toStrictEqual([FTMS_OP_CODE.requestControl]);
+
+    // Held back is not deferred: nothing is asked for when the answer changes.
+    may = true;
+    await Promise.resolve();
+    expect(machine.writes).toHaveLength(1);
+
+    // The next 0xFF asks again, and now it is answered yes.
+    await trainer.requestControl();
+    machine.status(Uint8Array.from([0xff]));
+    await Promise.resolve();
+    expect(machine.writes.map((write) => write[0])).toStrictEqual([
+      FTMS_OP_CODE.requestControl,
+      FTMS_OP_CODE.requestControl,
+      FTMS_OP_CODE.requestControl,
+    ]);
+  });
+
   it('treats a Control Not Permitted result as a loss too, not only the 0xFF status', async () => {
     // The routine case on a phone that reconnected: no status notification
     // arrives, the trainer simply answers 0x05. A client that only watched the
@@ -1094,6 +1120,64 @@ describe('the simulation gradient', () => {
     const view = new DataView(written.buffer, written.byteOffset, written.byteLength);
 
     expect(view.getInt16(3, true)).toBe(-620);
+  });
+
+  // #722's review: a gradient takes the machine out of ERG, so a CONFIRMED ERG
+  // target must not survive it — `ride/controller.ts` §`mustWaitForForget`
+  // reads a write below a confirmed target as an ease.
+  it('no longer vouches for a confirmed ERG target once a gradient is sent', async () => {
+    const trainer = control();
+    await trainer.requestControl();
+    await trainer.setTargetPower(watts(250));
+    expect(trainer.targetPower()).toStrictEqual({ kind: 'confirmed', target: 250 });
+
+    await trainer.setSimulationParameters({ grade: gradePercent(2) });
+
+    expect(trainer.targetPower()).toStrictEqual({ kind: 'unknown', attempted: 250 });
+  });
+
+  it('nor once a gradient is only ATTEMPTED — refused by the machine, or never answered', async () => {
+    const refused = control();
+    await refused.requestControl();
+    await refused.setTargetPower(watts(250));
+    machine.answer(
+      FTMS_OP_CODE.setIndoorBikeSimulationParameters,
+      FTMS_RESULT_CODE.operationFailed,
+    );
+    await expect(refused.setSimulationParameters({ grade: gradePercent(2) })).rejects.toThrow(
+      SensorError,
+    );
+    expect(refused.targetPower()).toStrictEqual({ kind: 'unknown', attempted: 250 });
+
+    machine = scriptedMachine();
+    const fire: Array<() => void> = [];
+    const silent = control({
+      scheduleTimeout: (_after, run) => {
+        fire.push(run);
+        return () => {
+          fire.splice(fire.indexOf(run), 1);
+        };
+      },
+    });
+    await silent.requestControl();
+    await silent.setTargetPower(watts(250));
+    machine.goSilent();
+    const pending = silent.setSimulationParameters({ grade: gradePercent(2) });
+    await inFlight();
+    fire.forEach((run) => {
+      run();
+    });
+    await pending.catch(() => undefined);
+    expect(silent.targetPower()).toStrictEqual({ kind: 'unknown', attempted: 250 });
+  });
+
+  it('leaves no target as no target: a gradient invents none', async () => {
+    const trainer = control();
+    await trainer.requestControl();
+
+    await trainer.setSimulationParameters({ grade: gradePercent(2) });
+
+    expect(trainer.targetPower()).toStrictEqual({ kind: 'none' });
   });
 
   it('refuses a gradient no road has, rather than writing it to a brake', async () => {
