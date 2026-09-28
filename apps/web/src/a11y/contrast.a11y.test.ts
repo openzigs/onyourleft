@@ -13,12 +13,13 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { contrastRatio } from '../design/contrast';
+import { AA_LARGE_TEXT_OR_NON_TEXT, contrastRatio } from '../design/contrast';
 import {
   COLOUR_TOKENS,
   CONTRAST_REQUIREMENTS,
   LINK_STATE_TOKENS,
   LINK_SURFACES,
+  PLATFORM_CHECK_MARK,
   THEMES,
   paletteColours,
 } from '../design/tokens';
@@ -97,6 +98,22 @@ describe.each(THEMES)(
     });
   },
 );
+
+/**
+ * The check mark on a checked box is the platform's glyph, not a token (#667,
+ * #672 — #744's review found the dark palette's is Chromium's own grey, not
+ * `accentInk`), so it is not in `CONTRAST_REQUIREMENTS`. It is held here the
+ * same way: its ratio on the palette's `accent`, exactly, and at least 3:1.
+ * `browser/shell.browser.spec.ts` §"#667" reads the colour off the pixels.
+ */
+describe.each(THEMES)('the platform check mark on the %s accent', (theme) => {
+  it('measures what was recorded, in both directions, and clears SC 1.4.11', () => {
+    const { colour, measured } = PLATFORM_CHECK_MARK[theme];
+    const ratio = Number(contrastRatio(colour, paletteColours(theme).accent).toFixed(2));
+    expect(ratio).toBe(measured);
+    expect(measured).toBeGreaterThanOrEqual(AA_LARGE_TEXT_OR_NON_TEXT);
+  });
+});
 
 describe('the HUD measures the same in both palettes (#672)', () => {
   it('records one margin for a pair whose colours are both HUD tokens', () => {

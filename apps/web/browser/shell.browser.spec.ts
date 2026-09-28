@@ -50,7 +50,14 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { AA_LARGE_TEXT_OR_NON_TEXT, contrastRatio } from '../src/design/contrast';
-import { COLOUR_TOKENS, type ColourToken } from '../src/design/tokens';
+import {
+  COLOUR_TOKENS,
+  PLATFORM_CHECK_MARK,
+  THEMES,
+  paletteColours,
+  type ColourToken,
+  type Theme,
+} from '../src/design/tokens';
 import { decodePng } from '../src/game/model-bytes-testing';
 import {
   applyInsets,
@@ -1688,16 +1695,20 @@ const CONTROLS_WITHOUT_BASE_SELECT = `${CONTROLS_PAGE}&base-select=off`;
 const ROW_SELECTOR = '[data-oyl-native-row]';
 const ROW_COUNT = 4;
 
-/** A token as Chromium reports a computed colour. */
-function rgbOf(token: ColourToken): string {
-  const hex = COLOUR_TOKENS[token];
+/** A token, in a palette, as Chromium reports a computed colour. */
+function rgbOf(token: ColourToken, theme: Theme = 'light'): string {
+  const hex = paletteColours(theme)[token];
   const channel = (at: number): number => Number.parseInt(hex.slice(at, at + 2), 16);
   return `rgb(${String(channel(1))}, ${String(channel(3))}, ${String(channel(5))})`;
 }
 
-async function openControls(page: Page, url = CONTROLS_PAGE): Promise<void> {
+async function openControls(page: Page, url = CONTROLS_PAGE, theme?: Theme): Promise<void> {
   await page.goto(url);
   await page.waitForSelector('html[data-oyl-shell-ready]');
+  if (theme !== undefined) {
+    // #672: the palette under test is really the one painting.
+    expect(await page.evaluate(() => document.documentElement.dataset['theme'])).toBe(theme);
+  }
   expect(
     await page.locator('[data-oyl-native-control]').count(),
     'the native control specimens did not render — see shell-harness.tsx §NativeControls',
@@ -1838,110 +1849,120 @@ test.describe('#667 — the row target is declared, and nothing else holds it', 
   });
 });
 
-test.describe('#667 — the file input, the boxes and the accent', () => {
-  test.use({ viewport: { width: 1280, height: 800 } });
+// #672: in both palettes. The file button, the accent and the check mark are
+// what `accent-color` and `color-scheme` hand the platform, so each palette's
+// is read back rather than assumed.
+for (const theme of THEMES) {
+  test.describe(`#667 — the file input, the boxes and the accent (${theme})`, () => {
+    test.use({ viewport: { width: 1280, height: 800 }, colorScheme: theme });
 
-  test('draws the file button as the secondary button, a token clear of its label', async ({
-    page,
-  }) => {
-    await openControls(page);
-    const read = await page.evaluate(() => {
-      const pick = (style: CSSStyleDeclaration) => ({
-        color: style.color,
-        backgroundColor: style.backgroundColor,
-        borderTopColor: style.borderTopColor,
-        borderTopWidth: style.borderTopWidth,
-        borderTopLeftRadius: style.borderTopLeftRadius,
-        paddingTop: style.paddingTop,
-        paddingLeft: style.paddingLeft,
-        fontSize: style.fontSize,
-        minHeight: style.minHeight,
+    test('draws the file button as the secondary button, a token clear of its label', async ({
+      page,
+    }) => {
+      await openControls(page, CONTROLS_PAGE, theme);
+      const read = await page.evaluate(() => {
+        const pick = (style: CSSStyleDeclaration) => ({
+          color: style.color,
+          backgroundColor: style.backgroundColor,
+          borderTopColor: style.borderTopColor,
+          borderTopWidth: style.borderTopWidth,
+          borderTopLeftRadius: style.borderTopLeftRadius,
+          paddingTop: style.paddingTop,
+          paddingLeft: style.paddingLeft,
+          fontSize: style.fontSize,
+          minHeight: style.minHeight,
+        });
+        const input = document.querySelector('[data-oyl-native-control="file"]');
+        const label = document.querySelector('label[for="specimen-file"]');
+        const secondary = document.querySelector('[data-oyl-touch-target] .oyl-button--secondary');
+        if (input === null || label === null || secondary === null) return undefined;
+        return {
+          file: pick(getComputedStyle(input, '::file-selector-button')),
+          secondary: pick(getComputedStyle(secondary)),
+          gap: input.getBoundingClientRect().left - label.getBoundingClientRect().right,
+        };
       });
-      const input = document.querySelector('[data-oyl-native-control="file"]');
-      const label = document.querySelector('label[for="specimen-file"]');
-      const secondary = document.querySelector('[data-oyl-touch-target] .oyl-button--secondary');
-      if (input === null || label === null || secondary === null) return undefined;
-      return {
-        file: pick(getComputedStyle(input, '::file-selector-button')),
-        secondary: pick(getComputedStyle(secondary)),
-        gap: input.getBoundingClientRect().left - label.getBoundingClientRect().right,
-      };
+      expect(read, 'the file input, its label or a secondary button is missing').toBeDefined();
+      expect(read?.file).toEqual(read?.secondary);
+      expect(read?.file.color).toBe(rgbOf('accent', theme));
+      expect(read?.file.backgroundColor).toBe(rgbOf('canvas', theme));
+      // `--oyl-space-sm`, 8 px: "GPX fileChoose File" is the defect.
+      expect(read?.gap).toBe(8);
     });
-    expect(read, 'the file input, its label or a secondary button is missing').toBeDefined();
-    expect(read?.file).toEqual(read?.secondary);
-    expect(read?.file.color).toBe(rgbOf('accent'));
-    expect(read?.file.backgroundColor).toBe(rgbOf('canvas'));
-    // `--oyl-space-sm`, 8 px: "GPX fileChoose File" is the defect.
-    expect(read?.gap).toBe(8);
-  });
 
-  test('paints checkboxes, radios, a range and a progress bar in the accent token', async ({
-    page,
-  }) => {
-    await openControls(page);
-    const accents = await page.evaluate(() =>
-      [
-        ...document.querySelectorAll(
-          '[data-oyl-native-control="checkbox"], [data-oyl-native-control="radio"], ' +
-            '[data-oyl-native-control="range"], [data-oyl-native-control="progress"]',
-        ),
-      ].map((control) => getComputedStyle(control).accentColor),
-    );
-    expect(accents.length).toBe(6);
-    for (const accent of accents) {
-      expect(accent).toBe(rgbOf('accent'));
-    }
-  });
+    test('paints checkboxes, radios, a range and a progress bar in the accent token', async ({
+      page,
+    }) => {
+      await openControls(page, CONTROLS_PAGE, theme);
+      const accents = await page.evaluate(() =>
+        [
+          ...document.querySelectorAll(
+            '[data-oyl-native-control="checkbox"], [data-oyl-native-control="radio"], ' +
+              '[data-oyl-native-control="range"], [data-oyl-native-control="progress"]',
+          ),
+        ].map((control) => getComputedStyle(control).accentColor),
+      );
+      expect(accents.length).toBe(6);
+      for (const accent of accents) {
+        expect(accent).toBe(rgbOf('accent', theme));
+      }
+    });
 
-  test('a checked box is filled with the accent and its mark is the accent ink', async ({
-    page,
-  }, info) => {
-    // The two pairs `tokens.ts` declares for #667, read off the pixels rather
-    // than trusted: the platform chooses the mark's colour, not the stylesheet.
-    await openControls(page);
-    const path = info.outputPath('checked-box.png');
-    await page
-      .locator('[data-oyl-native-row="wrapping"] [data-oyl-native-control="checkbox"]')
-      .screenshot({ path });
-    const png = decodePng(path);
-    const hex = (at: number): string =>
-      `#${[0, 1, 2]
-        .map((channel) => (png.data[at + channel] ?? 0).toString(16).padStart(2, '0'))
-        .join('')}`;
-    const accent = COLOUR_TOKENS.accent;
-    // The box is found by its fill, and only its interior is read, so the page
-    // around a 13 px box cannot supply the "mark".
-    let left = png.width;
-    let right = -1;
-    let top = png.height;
-    let bottom = -1;
-    for (let y = 0; y < png.height; y += 1) {
-      for (let x = 0; x < png.width; x += 1) {
-        if (hex((y * png.width + x) * 4) === accent) {
-          left = Math.min(left, x);
-          right = Math.max(right, x);
-          top = Math.min(top, y);
-          bottom = Math.max(bottom, y);
+    test('a checked box is filled with the accent and its mark is the platform’s recorded glyph', async ({
+      page,
+    }, info) => {
+      // The two pairs `tokens.ts` declares for #667, read off the pixels rather
+      // than trusted: the platform chooses the mark's colour, not the stylesheet.
+      await openControls(page, CONTROLS_PAGE, theme);
+      const path = info.outputPath('checked-box.png');
+      await page
+        .locator('[data-oyl-native-row="wrapping"] [data-oyl-native-control="checkbox"]')
+        .screenshot({ path });
+      const png = decodePng(path);
+      const hex = (at: number): string =>
+        `#${[0, 1, 2]
+          .map((channel) => (png.data[at + channel] ?? 0).toString(16).padStart(2, '0'))
+          .join('')}`;
+      const accent = paletteColours(theme).accent;
+      const mark = PLATFORM_CHECK_MARK[theme];
+      // The box is found by its fill, and only its interior is read, so the page
+      // around a 13 px box cannot supply the "mark".
+      let left = png.width;
+      let right = -1;
+      let top = png.height;
+      let bottom = -1;
+      for (let y = 0; y < png.height; y += 1) {
+        for (let x = 0; x < png.width; x += 1) {
+          if (hex((y * png.width + x) * 4) === accent) {
+            left = Math.min(left, x);
+            right = Math.max(right, x);
+            top = Math.min(top, y);
+            bottom = Math.max(bottom, y);
+          }
         }
       }
-    }
-    expect(right, `no pixel of the checked box is ${accent}, the accent token`).toBeGreaterThan(
-      left,
-    );
-    const inside = new Map<string, number>();
-    for (let y = top + 2; y <= bottom - 2; y += 1) {
-      for (let x = left + 2; x <= right - 2; x += 1) {
-        const colour = hex((y * png.width + x) * 4);
-        inside.set(colour, (inside.get(colour) ?? 0) + 1);
+      expect(right, `no pixel of the checked box is ${accent}, the accent token`).toBeGreaterThan(
+        left,
+      );
+      const inside = new Map<string, number>();
+      for (let y = top + 2; y <= bottom - 2; y += 1) {
+        for (let x = left + 2; x <= right - 2; x += 1) {
+          const colour = hex((y * png.width + x) * 4);
+          inside.set(colour, (inside.get(colour) ?? 0) + 1);
+        }
       }
-    }
-    expect(inside.get(accent) ?? 0, 'the fill').toBeGreaterThan(10);
-    expect(inside.get(COLOUR_TOKENS.accentInk) ?? 0, 'the mark, in accentInk').toBeGreaterThan(5);
-    expect(contrastRatio(COLOUR_TOKENS.accentInk, accent)).toBeGreaterThanOrEqual(
-      AA_LARGE_TEXT_OR_NON_TEXT,
-    );
+      expect(inside.get(accent) ?? 0, 'the fill').toBeGreaterThan(10);
+      // The platform's glyph, which `tokens.ts` §`PLATFORM_CHECK_MARK` records
+      // per palette: `accentInk`'s white in light, Chromium's own dark glyph
+      // (not `accentInk`) in dark.
+      expect(
+        inside.get(mark.colour) ?? 0,
+        `the mark, in ${mark.colour}; inside the box: ${JSON.stringify([...inside])}`,
+      ).toBeGreaterThan(5);
+      expect(contrastRatio(mark.colour, accent)).toBeGreaterThanOrEqual(AA_LARGE_TEXT_OR_NON_TEXT);
+    });
   });
-});
+}
 
 test.describe('#667 — the select opts into a styled picker and stays a select', () => {
   test.use({ viewport: { width: 1280, height: 800 } });
@@ -2044,35 +2065,40 @@ test.describe('#667 — the select opts into a styled picker and stays a select'
     ]);
   });
 
-  test('paints the picker and its options with the tokens, exactly', async ({ page }) => {
-    await openControls(page);
-    await page.locator('[data-oyl-native-control="select"]').focus();
-    await page.keyboard.press('Space');
-    await expect.poll(async () => (await state(page)).open).toBe(true);
-    // Move the pointer and the focus away from any option, so each is read at
-    // rest: the focused option is the checked one, which wins on colour.
-    await page.mouse.move(1270, 790);
-    const read = await state(page);
-    expect(read.picker).toEqual({
-      appearance: 'base-select',
-      color: rgbOf('ink'),
-      backgroundColor: rgbOf('canvas'),
-      borderTopColor: rgbOf('border'),
-    });
-    const checked = read.options.filter((option) => option.checked);
-    expect(checked.length).toBe(1);
-    expect(checked[0]).toMatchObject({
-      color: rgbOf('accentInk'),
-      backgroundColor: rgbOf('accent'),
-    });
-    for (const option of read.options.filter((each) => !each.checked)) {
-      expect(option, option.label).toMatchObject({
-        color: rgbOf('ink'),
-        backgroundColor: rgbOf('canvas'),
+  for (const theme of THEMES) {
+    test.describe(theme, () => {
+      test.use({ colorScheme: theme });
+      test('paints the picker and its options with the tokens, exactly', async ({ page }) => {
+        await openControls(page, CONTROLS_PAGE, theme);
+        await page.locator('[data-oyl-native-control="select"]').focus();
+        await page.keyboard.press('Space');
+        await expect.poll(async () => (await state(page)).open).toBe(true);
+        // Move the pointer and the focus away from any option, so each is read at
+        // rest: the focused option is the checked one, which wins on colour.
+        await page.mouse.move(1270, 790);
+        const read = await state(page);
+        expect(read.picker).toEqual({
+          appearance: 'base-select',
+          color: rgbOf('ink', theme),
+          backgroundColor: rgbOf('canvas', theme),
+          borderTopColor: rgbOf('border', theme),
+        });
+        const checked = read.options.filter((option) => option.checked);
+        expect(checked.length).toBe(1);
+        expect(checked[0]).toMatchObject({
+          color: rgbOf('accentInk', theme),
+          backgroundColor: rgbOf('accent', theme),
+        });
+        for (const option of read.options.filter((each) => !each.checked)) {
+          expect(option, option.label).toMatchObject({
+            color: rgbOf('ink', theme),
+            backgroundColor: rgbOf('canvas', theme),
+          });
+        }
+        await page.keyboard.press('Escape');
       });
-    }
-    await page.keyboard.press('Escape');
-  });
+    });
+  }
 
   test('the control — without the @supports block it is the closed skin, and no option is 44 px', async ({
     page,

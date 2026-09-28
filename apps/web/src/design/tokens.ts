@@ -550,6 +550,29 @@ export interface ContrastRequirement {
   readonly where: string;
 }
 
+/**
+ * The check mark on a checked checkbox (#667, #672) — the PLATFORM's glyph,
+ * not a token, recorded per palette with its ratio on that palette's `accent`.
+ *
+ * `accent-color` hands Chromium the fill, and Chromium chooses the mark: a
+ * light or a dark glyph by the accent's luminance and the `color-scheme`. In
+ * the light palette it draws white, which happens to be `accentInk`; in the
+ * dark palette it draws its own dark grey, which is NOT the dark `accentInk`
+ * (#744's review). So this is what the platform paints, read back off the
+ * pixels in both palettes by `browser/shell.browser.spec.ts` §"#667", and
+ * `contrast.a11y.test.ts` holds each `measured` exactly — below is erosion,
+ * above is an unrecorded change — and at least SC 1.4.11's 3:1.
+ *
+ * ⚠️ A Chromium bump can change the dark glyph. The browser read fails then,
+ * naming what it found inside the box; record the new colour and ratio here.
+ */
+export const PLATFORM_CHECK_MARK: Readonly<
+  Record<Theme, { readonly colour: string; readonly measured: number }>
+> = {
+  light: { colour: '#ffffff', measured: 7.85 },
+  dark: { colour: '#3b3b3b', measured: 5.72 },
+};
+
 /** The four states a link in running text is painted in (#661). */
 export const LINK_STATE_TOKENS = ['link', 'linkVisited', 'linkHover', 'linkActive'] as const;
 
@@ -891,8 +914,10 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
    * though both colours already meet here as text. The fill against the page
    * is what says "on"; the mark against the fill is the check itself. The
    * platform picks the mark's colour — a light or a dark glyph by the accent's
-   * luminance — and `browser/shell.browser.spec.ts` §"#667" reads the pixels
-   * back to confirm it drew `accentInk`'s white rather than assuming it.
+   * luminance — so the mark is NOT a token and is not a pair here: it is
+   * {@link PLATFORM_CHECK_MARK}, recorded per palette and read back off the
+   * pixels by `browser/shell.browser.spec.ts` §"#667" (#744's review found the
+   * dark palette's mark is Chromium's own glyph, not `accentInk`).
    */
   {
     foreground: 'accent',
@@ -900,13 +925,6 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
     measured: { light: 7.85, dark: 9.18 },
     where: 'a checked checkbox or radio, a range and a progress bar (SC 1.4.11, #667)',
-  },
-  {
-    foreground: 'accentInk',
-    background: 'accent',
-    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 7.85, dark: 8.72 },
-    where: 'the check mark on a checked checkbox, drawn on the accent (SC 1.4.11, #667)',
   },
   {
     foreground: 'hudInk',
