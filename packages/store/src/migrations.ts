@@ -102,7 +102,17 @@ export type AnyRecordMigration = RecordMigration<unknown, unknown>;
  * over version-12 rows cannot see.** A version-12 row has nowhere to hold one,
  * so a report kept at version 13 with a summary loses it on the way back; its
  * sentences survive. The runtime path back is still export → downgrade →
- * re-import (the file comment), and the export is what carries the summary.
+ * re-import (the file comment). ⚠️ The account export does NOT carry the
+ * summary yet — `export-everything.ts` names a report's fields one by one and
+ * `pose` is not among them until #801 — so today a downgrade loses it either way.
+ *
+ * ⚠️ **Both halves are total over whatever is on disk, not only over the
+ * declared shape** (#815's review). `up` runs inside Dexie's versionchange
+ * transaction: a throw there aborts the upgrade and the database never opens,
+ * so one hand-edited row whose `observations` is not an array would make every
+ * ride on the device unreadable, with no downgrade to go back to. A malformed
+ * value is therefore carried across unchanged, and that one report's read
+ * fails with `StoreDecodeError` at version 13 exactly as it did at version 12.
  */
 export const SIDE_REPORT_POSE_SUMMARY: RecordMigration<
   PersistedSideCameraReportV12,
@@ -117,7 +127,7 @@ export const SIDE_REPORT_POSE_SUMMARY: RecordMigration<
       activityId: before.activityId,
       athleteId: before.athleteId,
       summary: before.summary,
-      observations: [...before.observations],
+      observations: copiedIfArray(before.observations),
       pose: null,
     };
   },
@@ -126,10 +136,22 @@ export const SIDE_REPORT_POSE_SUMMARY: RecordMigration<
       activityId: after.activityId,
       athleteId: after.athleteId,
       summary: after.summary,
-      observations: [...after.observations],
+      observations: copiedIfArray(after.observations),
     };
   },
 };
+
+/**
+ * A copy of `value` when it is an array, and `value` itself when it is not.
+ *
+ * The rows a migration reads were written by an earlier build or edited by
+ * hand, so their declared type is a claim rather than a fact; see
+ * `SIDE_REPORT_POSE_SUMMARY` for why a migration must not throw on one.
+ */
+function copiedIfArray<T>(value: T[]): T[] {
+  const onDisk: unknown = value;
+  return Array.isArray(onDisk) ? [...(onDisk as T[])] : value;
+}
 
 /**
  * Every migration this build knows how to apply, in ascending `toVersion`.

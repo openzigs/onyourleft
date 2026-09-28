@@ -38,6 +38,7 @@ import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { openActivityStore } from './activity-store';
+import { StoreDecodeError } from './errors';
 import { activityId, athleteId, recordingSessionId, routeId } from './ids';
 
 import {
@@ -848,5 +849,37 @@ describe('version 12 to version 13 — #800, the first record migration', () => 
     expect(onDisk).toStrictEqual(V12_REPORTS.map((row) => ({ ...row, pose: null })));
     expect(migrateDown(SIDE_REPORT_POSE_SUMMARY, onDisk)).toStrictEqual(V12_REPORTS);
     expect(writeUps).toBe(1);
+  });
+
+  /**
+   * #815's review: `up` runs inside Dexie's versionchange transaction, so a
+   * throw there aborts the upgrade and the database never opens — every ride
+   * on the device unreadable, with no downgrade to go back to. At version 12 a
+   * malformed report failed its own read and nothing else, and it must still.
+   */
+  it('a malformed version-12 report does not stop the database opening — only its own read fails', async () => {
+    const v12 = new Dexie(databaseName);
+    SCHEMA_VERSIONS.slice(0, 12).forEach((stores, index) => {
+      v12.version(index + 1).stores(stores);
+    });
+    await v12.table(TABLE.athletes).put({ id: 'athlete-a', displayName: 'A', createdAt: 1 });
+    await v12.table(TABLE.sideCameraReports).bulkPut([
+      V12_REPORTS[0]!,
+      // Hand-edited: observations is not an array, so not iterable either.
+      { activityId: 'ride-bad', athleteId: 'athlete-a', summary: 'Edited.', observations: 42 },
+    ]);
+    v12.close();
+
+    const owner = athleteId('athlete-a');
+    const store = openActivityStore(databaseName);
+    try {
+      expect((await store.getAthlete(owner))?.id).toBe('athlete-a');
+      expect((await store.getSideCameraReport(owner, activityId('ride-1')))?.pose).toBeNull();
+      await expect(store.getSideCameraReport(owner, activityId('ride-bad'))).rejects.toBeInstanceOf(
+        StoreDecodeError,
+      );
+    } finally {
+      store.close();
+    }
   });
 });

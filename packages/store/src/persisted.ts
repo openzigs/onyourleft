@@ -1578,6 +1578,12 @@ const TEMPLATE_FIELD = /^[A-Za-z0-9._-]+$/;
  * Every control character but a newline: C0 (tab and carriage return
  * included), DEL and C1. The write-up is shown as plain text (#798), and a
  * newline is the one control a paragraph needs.
+ *
+ * ⚠️ **It does NOT refuse the format characters** — the bidi embeddings and
+ * overrides (U+202A–U+202E), the isolates (U+2066–U+2069) and the zero-width
+ * characters — which can reorder or hide what the stored text displays as. The
+ * store admits them on purpose; screening what a rider is shown is #798's job,
+ * and #798 has been told (#815's review).
  */
 // eslint-disable-next-line no-control-regex -- matching control characters is the point
 const CONTROL_BUT_NEWLINE = /[\u0000-\u0009\u000B-\u001F\u007F-\u009F]/;
