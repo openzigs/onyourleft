@@ -241,6 +241,8 @@ import {
 import {
   BICYCLE_COLOURS,
   CRANK_AXIS_Y,
+  HOUSE_KIT,
+  PACER_KIT,
   CRANK_AXIS_Z,
   LEG_BONE_COUNT,
   LIMB_RADIUS_METRES,
@@ -253,6 +255,7 @@ import {
   legBones,
   riderJoints,
   type JointPoint,
+  type RiderKit,
   type RiderPart,
 } from './bicycle';
 import {
@@ -455,11 +458,18 @@ import type { SunStyle, WorldStyle } from './world';
  *
  * ## What is left to tell them apart, since the shape no longer does
  *
- * A **multiplier** on the rider's own four colours, applied per instance. The
- * bot's orange and the ghost's grey are the hues #93 already settled on and
- * they are unchanged; what changed is that they now tint a whole bicycle
- * instead of filling a solid, so the bot reads as an orange machine and the
- * ghost as a colourless one against the rider's blue-and-silver.
+ * A **multiplier** on a rider's colours, applied per instance. The bot's
+ * orange and the ghost's grey are the hues #93 already settled on and they are
+ * unchanged; what changed is that they now tint a whole bicycle instead of
+ * filling a solid, so the bot reads as an orange machine and the ghost as a
+ * colourless one against the rider's teal-and-silver.
+ *
+ * ⚠️ **Since #623 a tint multiplies the kit its kind WEARS
+ * ({@link RIDER_KITS}), not the rider's.** The rider's jersey became the app's
+ * teal accent, and orange times teal is near-black with green leading red —
+ * #742's review, 7,9,1 against main's 20,11,5. The pacer and the ghost wear
+ * `bicycle.ts` §`PACER_KIT`, the blue they were told apart in, so each keeps
+ * the colour it had on main.
  *
  * ⚠️ **The rider's entry is white, which is no tint at all**, and that is what
  * keeps `bicycle.ts`'s palette the literal thing a rider sees. It is written
@@ -493,6 +503,24 @@ const RIDER_TINTS: Record<RiderMarker['kind'], number> = {
  * error rather than being silently undrawn.
  */
 const RIDDEN_KINDS = Object.keys(RIDER_TINTS) as readonly RiderMarker['kind'][];
+
+/**
+ * The kit each kind wears UNDER its tint — #623. The rider wears the house kit
+ * (`bicycle.ts` §`HOUSE_KIT`, the app's accent); the pacer and the ghost wear
+ * `bicycle.ts` §`PACER_KIT`, the blue #368 told them apart in, because
+ * {@link RIDER_TINTS} multiplies and cannot put back a hue the kit lacks.
+ *
+ * ⚠️ **Read per rider by both worlds**: {@link RiderBelt} writes it per
+ * instance over the jersey and leg vertices (@see withKitPerInstance), and
+ * {@link RealisticRiderBelt} into each body's own kit uniform. A rider's own
+ * colour choice (#623's second half) replaces the `rider` entry and nothing
+ * else, at no draw call.
+ */
+const RIDER_KITS: Record<RiderMarker['kind'], RiderKit> = {
+  rider: HOUSE_KIT,
+  bot: PACER_KIT,
+  ghost: PACER_KIT,
+};
 
 /**
  * Everything one rider's leg pose depends on, in the order {@link RiderBelt}
@@ -2502,6 +2530,9 @@ export class RiderBelt {
 
   constructor() {
     const riders = RIDDEN_KINDS.length;
+    // #623: each rider wears its own kind's kit under its tint. @see RIDER_KITS
+    withKitPerInstance(this.#materials.lit);
+    withKitPerInstance(this.#materials.flat);
     this.#bodies = new InstancedMesh(mergedParts(RIDER_BICYCLE_PARTS), this.#materials.lit, riders);
     this.#torsos = new InstancedMesh(
       mergedParts(RIDER_UPPER_BODY_PARTS),
@@ -2523,6 +2554,8 @@ export class RiderBelt {
       for (let slot = 0; slot < mesh.count; slot += 1) {
         mesh.setColorAt(slot, this.#tint.setHex(0xffffff));
       }
+      // The kit per instance, sized from the same capacity, for the same reason.
+      kitChannels(mesh);
       // three's constructor sets `count` to the capacity and fills every slot
       // with the identity matrix. A belt that drew before its first frame would
       // draw three bicycles stacked at the origin.
@@ -2739,6 +2772,13 @@ export class RiderBelt {
     this.#stretch.setScalar(1);
     this.#rider.compose(this.#position, this.#turn, this.#stretch);
     this.#bodies.setMatrixAt(slot, this.#rider);
+    // #623: the kit this kind wears, under the tint. Written before the tint,
+    // because `writeKit` borrows the same scratch colour.
+    const kit = RIDER_KITS[marker.kind];
+    for (const mesh of [this.#bodies, this.#torsos]) writeKit(mesh, slot, kit, this.#tint);
+    for (let bone = 0; bone < LEG_BONE_COUNT; bone += 1) {
+      writeKit(this.#limbs, slot * LEG_BONE_COUNT + bone, kit, this.#tint);
+    }
     this.#bodies.setColorAt(slot, this.#tint.setHex(RIDER_TINTS[marker.kind]));
 
     // #546: the upper body, rolled against the bicycle about the hips — the
@@ -3298,6 +3338,7 @@ attribute float blobStrength;${varyings}`,
 function riderPartGeometry(each: RiderPart): BufferGeometry {
   const geometry = solidGeometry(each.solid);
   paintEveryVertex(geometry, each.colour);
+  markKit(geometry, kitRoleOf(each.colour));
   geometry.rotateX(each.pitch).rotateY(each.yaw).rotateZ(each.roll);
   geometry.translate(each.x, each.y, each.z);
   return geometry;
@@ -3334,7 +3375,110 @@ const LIMB_SEGMENTS = 6;
 function limbGeometry(): BufferGeometry {
   const geometry = new CylinderGeometry(LIMB_RADIUS_METRES, LIMB_RADIUS_METRES, 1, LIMB_SEGMENTS);
   paintEveryVertex(geometry, RIDER_PALETTE.limb);
+  markKit(geometry, KIT_LIMB);
   return geometry;
+}
+
+/** A vertex that is not the kit: it keeps the colour baked into it. @see markKit */
+const KIT_NONE = 0;
+/** A vertex of the jersey, which a rider's kit colours. @see markKit */
+const KIT_JERSEY = 1;
+/** A vertex of the legs or the helmet, in the kit's darker colour. @see markKit */
+const KIT_LIMB = 2;
+
+/**
+ * Which part of the kit a part painted `colour` is — #623. The stylised
+ * rider's parts are painted from `bicycle.ts` §`RIDER_PALETTE`, so a part in
+ * its jersey or limb colour IS the kit, and every other colour (the frame, the
+ * tyres) is the bicycle's own.
+ */
+function kitRoleOf(colour: number): number {
+  if (colour === RIDER_PALETTE.jersey) return KIT_JERSEY;
+  if (colour === RIDER_PALETTE.limb) return KIT_LIMB;
+  return KIT_NONE;
+}
+
+/**
+ * Marks every vertex of a rider geometry with its part of the kit — #623, the
+ * attribute {@link withKitPerInstance} reads to put each rider's own kit there.
+ */
+function markKit(geometry: BufferGeometry, role: number): void {
+  const vertices = geometry.getAttribute('position').count;
+  geometry.setAttribute(
+    KIT_ROLE_ATTRIBUTE,
+    new BufferAttribute(new Float32Array(vertices).fill(role), 1),
+  );
+}
+
+/** The vertex attribute {@link markKit} writes. */
+const KIT_ROLE_ATTRIBUTE = 'oylKit';
+/** The per-instance jersey colour, linear. @see withKitPerInstance */
+const KIT_JERSEY_ATTRIBUTE = 'oylKitJersey';
+/** The per-instance limb colour, linear. @see withKitPerInstance */
+const KIT_LIMB_ATTRIBUTE = 'oylKitLimb';
+
+/**
+ * Gives an instanced rider mesh a jersey and a limb colour per instance — #623.
+ * Six floats a rider, in the geometry the mesh already has, so no draw call.
+ */
+function kitChannels(mesh: InstancedMesh): void {
+  for (const name of [KIT_JERSEY_ATTRIBUTE, KIT_LIMB_ATTRIBUTE]) {
+    const channels = new InstancedBufferAttribute(new Float32Array(mesh.count * 3), 3);
+    channels.setUsage(DynamicDrawUsage);
+    mesh.geometry.setAttribute(name, channels);
+  }
+}
+
+/**
+ * Writes one instance's kit into {@link kitChannels}' buffers, linear, as a
+ * vertex colour is. `into` is scratch, so this allocates nothing.
+ */
+function writeKit(mesh: InstancedMesh, slot: number, kit: RiderKit, into: Color): void {
+  for (const [name, colour] of [
+    [KIT_JERSEY_ATTRIBUTE, kit.jersey],
+    [KIT_LIMB_ATTRIBUTE, kit.limb],
+  ] as const) {
+    const channels = mesh.geometry.getAttribute(name) as InstancedBufferAttribute;
+    into.setHex(colour);
+    channels.setXYZ(slot, into.r, into.g, into.b);
+    channels.needsUpdate = true;
+  }
+}
+
+/**
+ * The stylised rider's two materials, taught to put each INSTANCE's own kit
+ * where {@link markKit} marked the kit — #623, so that {@link RIDER_TINTS}
+ * multiplies the kit its kind wears ({@link RIDER_KITS}) rather than the
+ * rider's. Three's `color_vertex` has already done `vColor = color ×
+ * instanceColor`; for a kit vertex the line spliced after it replaces the
+ * baked colour with the instance's kit, still times its tint. A vertex marked
+ * {@link KIT_NONE} — the frame, the tyres, the cranks — is untouched.
+ *
+ * ⚠️ Rider materials only: they are the belt's own pair, never shared.
+ */
+function withKitPerInstance(material: Material): void {
+  const spliced = "#623's kit per rider";
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.vertexShader,
+        '#include <common>',
+        `#include <common>\nattribute float ${KIT_ROLE_ATTRIBUTE};\nattribute vec3 ${KIT_JERSEY_ATTRIBUTE};\nattribute vec3 ${KIT_LIMB_ATTRIBUTE};`,
+        'vertex',
+        spliced,
+      ),
+      '#include <color_vertex>',
+      /* glsl */ `#include <color_vertex>
+#ifdef USE_INSTANCING_COLOR
+if (${KIT_ROLE_ATTRIBUTE} > 0.5) {
+  vColor.rgb = (${KIT_ROLE_ATTRIBUTE} > 1.5 ? ${KIT_LIMB_ATTRIBUTE} : ${KIT_JERSEY_ATTRIBUTE}) * instanceColor.rgb;
+}
+#endif`,
+      'vertex',
+      spliced,
+    );
+  };
+  material.customProgramCacheKey = () => 'oyl-rider-kit-per-instance';
 }
 
 /**
@@ -7578,10 +7722,12 @@ const REALISTIC_ANISOTROPY = 8;
  * pipeline draws and bakes onto its own texture coordinates
  * (`tools/realistic/blender/process_rider.py`), in ONE constructed material a
  * rider — {@link riderBodyMaterial}. The jersey's main colour is not in the
- * maps: it is {@link RealisticRiderBelt.kitColour}, one uniform every rider's
- * body reads, `bicycle.ts` §`RIDER_PALETTE`'s jersey, which is the colour the
- * stylised rider wears too. The tint still multiplies the whole body after it,
- * so #368's three riders stay three.
+ * maps: it is each body's own kit uniform, set every frame from
+ * {@link RIDER_KITS} — the rider's is `bicycle.ts` §`HOUSE_KIT`'s jersey, the
+ * colour the stylised rider wears too, and the pacer's and the ghost's is
+ * `PACER_KIT`'s blue. The tint still multiplies the whole body after it, and
+ * it multiplies the kit THAT kind wears, so #368's three stay three: orange
+ * times teal was a jersey whose green led its red (#742's review).
  *
  * The helmet and glasses are the file's own mesh since #623 — a plain shell
  * with vents and straps, and glasses, built round the head's own vertices and
@@ -7610,11 +7756,6 @@ export class RealisticRiderBelt {
   readonly #matrix = new Matrix4();
   readonly #local = new Matrix4();
   readonly #helmetLocal = new Matrix4();
-  /**
-   * The kit's main colour, in the working (linear) space — #623. ONE object
-   * every rider's body material reads, so setting it once dresses all three.
-   */
-  readonly kitColour = { value: new Color(RIDER_PALETTE.jersey) };
   /**
    * 1 while the kit is drawn in one colour, its own mean — the browser gate's
    * control. @see setKitPattern
@@ -7668,7 +7809,8 @@ export class RealisticRiderBelt {
       });
       if (skinned === undefined) throw new Error('the rider model holds no skinned mesh');
       const source = skinned.material as Material;
-      const material = riderBodyMaterial(dressed, this.kitColour, this.#kitPlain);
+      const kit = { value: new Color(RIDER_KITS.rider.jersey) };
+      const material = riderBodyMaterial(dressed, kit, this.#kitPlain);
       if (slot === 0) source.dispose();
       skinned.material = material;
       skinned.frustumCulled = false;
@@ -7706,6 +7848,7 @@ export class RealisticRiderBelt {
         root,
         body: skinned,
         material,
+        kit,
         bones,
         ordered,
         restQuaternions: ordered.map((bone) => bone.quaternion.clone()),
@@ -7754,6 +7897,11 @@ export class RealisticRiderBelt {
   /** Every rider's body. For the tests. */
   get bodies(): readonly SkinnedMesh[] {
     return this.#riders.map((rider) => rider.body);
+  }
+
+  /** Each body's kit colour, linear, as its shader reads it — #623. For the tests. */
+  get kitColours(): readonly Color[] {
+    return this.#riders.map((rider) => rider.kit.value);
   }
 
   /** Whether the rubber wears its normal map — #624's control. @see bicycleTreadOf */
@@ -7811,6 +7959,8 @@ export class RealisticRiderBelt {
     // ⚠️ A frame that carries no angle HOLDS the one this rider had: no
     // cadence is no rotation, which is #349's rule and `advanceCrank`'s.
     rider.angle = marker.crankAngle ?? rider.angle;
+    // #623: the kit this kind wears, under its tint. @see RIDER_KITS
+    rider.kit.value.setHex(RIDER_KITS[marker.kind].jersey);
     const tint = this.#tint.setHex(RIDER_TINTS[marker.kind]);
     rider.material.color.copy(tint);
     rider.root.updateMatrixWorld(true);
@@ -7922,6 +8072,8 @@ interface RealisticRiderSlot {
   readonly root: Group;
   readonly body: SkinnedMesh;
   readonly material: MeshStandardMaterial;
+  /** This body's kit colour, linear — #623. Set per frame from {@link RIDER_KITS}. */
+  readonly kit: { value: Color };
   readonly bones: ReadonlyMap<string, Bone>;
   readonly restQuaternions: readonly Quaternion[];
   readonly restPositions: readonly Vector3[];
@@ -8019,7 +8171,7 @@ function helmetOf(scene: Object3D): Mesh {
  * - Its BLUE channel, which three does not read, is how much of the kit's
  *   main colour a texel is — a SHADE, premultiplied: the colour map is black
  *   there. The one line spliced after `map_fragment` ADDS `blue × kit × color`,
- *   where `kit` is {@link RealisticRiderBelt.kitColour} and `color` the #368
+ *   where `kit` is the body's own kit uniform ({@link RIDER_KITS}) and `color` the #368
  *   tint, so the albedo is `(map + blue × kit) × tint`. ⚠️ Added rather than
  *   multiplied, because both maps are filtered: a white shade in the colour
  *   map times a 0/1 mask drew a pale halo half-way across every hem and cuff,

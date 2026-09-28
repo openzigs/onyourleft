@@ -534,9 +534,10 @@ describe('the dressed rider — #623', () => {
       expect(material['roughness']).toBe(1);
       expect(material['vertexColors']).toBe(false);
     }
-    // One kit colour object, read by all three, in the app's accent.
-    const hex = riders.kitColour.value.getHexString();
-    expect(hex).toBe('0b5c55');
+    // Each body has its own kit colour (#623 keeping #368), the rider's the
+    // app's accent until a frame says otherwise.
+    expect(new Set(riders.kitColours).size).toBe(riders.bodies.length);
+    for (const kit of riders.kitColours) expect(kit.getHexString()).toBe('0b5c55');
     // The helmet and glasses are coloured per vertex, and tinted per instance.
     const helmet = riders.helmets;
     expect(helmet.geometry.getAttribute('color')).toBeDefined();
@@ -571,20 +572,29 @@ describe('the dressed rider — #623', () => {
       { ...at, kind: 'bot' },
       { ...at, kind: 'ghost' },
     ] as never);
-    // The jersey's albedo on each: its tint times the kit's main colour, as
+    // The jersey's albedo on each: its tint times the kit ITS KIND wears, as
     // the shader multiplies them, in sRGB bytes.
     // (`getHex` answers in sRGB; the product is taken in linear, as the
     // shader takes it.)
-    const colourOf = (body: (typeof riders.bodies)[number]): typeof riders.kitColour.value =>
-      (body.material as unknown as { color: typeof riders.kitColour.value }).color;
-    const jersey = riders.bodies.map((body) => {
-      const hex = colourOf(body).clone().multiply(riders.kitColour.value).getHex();
+    type Colour = (typeof riders.kitColours)[number];
+    const colourOf = (body: (typeof riders.bodies)[number]): Colour =>
+      (body.material as unknown as { color: Colour }).color;
+    const jersey = riders.bodies.map((body, slot) => {
+      const hex = colourOf(body)
+        .clone()
+        .multiply(riders.kitColours[slot] as Colour)
+        .getHex();
       return [(hex >> 16) & 0xff, (hex >> 8) & 0xff, hex & 0xff];
     });
     const apart = (a: readonly number[], b: readonly number[]): number =>
       Math.max(...[0, 1, 2].map((c) => Math.abs((a[c] ?? 0) - (b[c] ?? 0))));
     console.log(`#623: the jersey as the rider, the bot and the ghost — ${JSON.stringify(jersey)}`);
     const [rider, bot, ghost] = jersey as [number[], number[], number[]];
+    // #368's hues, which a multiplier over the teal lost (#742's review: the
+    // bot's jersey was [6,17,1]): the pacer's RED leads its green, and the
+    // ghost's BLUE leads its green.
+    expect(bot[0]! - bot[1]!).toBeGreaterThan(5);
+    expect(ghost[2]! - ghost[1]!).toBeGreaterThan(8);
     expect(apart(rider, bot)).toBeGreaterThan(30);
     expect(apart(rider, ghost)).toBeGreaterThan(30);
     expect(apart(bot, ghost)).toBeGreaterThan(30);

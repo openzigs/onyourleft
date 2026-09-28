@@ -2476,11 +2476,33 @@ const KIT_DARKEST = 40;
 /**
  * #368 on the textured body: each pair of the three backs at least this far
  * apart in their furthest channel. Measured 70 (rider and bot), 52 (rider and
- * ghost) and 33 (bot and ghost); #624's fork holds 30 on the paint, and the
+ * ghost) and 33 (bot and ghost) on #742's first head, and 72, 36 and 92 since
+ * the pacer and the ghost wear `PACER_KIT`; #624's fork holds 30 on the paint, and the
  * back is held to 25 because the kit's white mark and the skin in the square
  * are tinted too, which pulls the three together.
  */
 const KIT_TINTS_APART = 25;
+
+/**
+ * #368's hues, which #742's review found a multiplier over the teal house kit
+ * had taken away with every assertion green — the stylised silhouettes' own
+ * ratios, bounded both ways. @see the case "draws each of the three in its own
+ * colour"
+ */
+const BOT_RED_OVER_GREEN = { floor: 1.3, ceiling: 4 } as const;
+const GHOST_BLUE_OVER_GREEN = { floor: 1.5, ceiling: 6 } as const;
+/** The rider's own teal silhouette, in bytes of green over red. */
+const RIDER_GREEN_OVER_RED = { floor: 30, ceiling: 100 } as const;
+/**
+ * The same two hues on the realistic rider's BACK (`kitProbe`'s square), in
+ * bytes, bounded both ways. Measured in this Chromium: the bot's red over its
+ * green 24.1 with #623's `PACER_KIT` and 17.6 on #742's first head, whose teal
+ * jersey under the orange had green leading red (the white mark and the skin
+ * in the square are tinted too, which is why the gap is narrow); the ghost's
+ * blue over its green 53.5, and 7.3 on that head.
+ */
+const BACK_BOT_RED_OVER_GREEN = { floor: 21, ceiling: 45 } as const;
+const BACK_GHOST_BLUE_OVER_GREEN = { floor: 30, ceiling: 90 } as const;
 
 /**
  * The bot and the ghost are bicycles, and a rider can still tell them apart —
@@ -2553,22 +2575,47 @@ test.describe('the pacer and the ghost are bicycles — #368', () => {
     // ⚠️ **Three of them being different is not the claim; each PAIR being
     // told apart is, and the two pairs are told apart by different
     // properties.** That is a finding rather than a design, and it falls out of
-    // `instanceColor` multiplying: a tint can only ever darken the rider's own
-    // palette towards itself, so no tint can wash a mostly-blue palette out
-    // into a pale grey. What is available is hue and value, and they land on
-    // the two pairs differently.
+    // `instanceColor` multiplying: a tint can only ever darken the kit it
+    // multiplies, so no tint can wash a kit out into a pale grey. What is
+    // available is hue and value, and they land on the pairs differently.
+    //
+    // ⚠️ **Since #623 a tint multiplies the kit its KIND wears**
+    // (`three-renderer.ts` §`RIDER_KITS`): the rider wears the teal house kit,
+    // the pacer and the ghost the blue `PACER_KIT` they were told apart in.
+    // Orange times TEAL was near-black with green over red (#742's review: 7,9,1
+    // where main drew 20,11,5) while every assertion here stayed green, because
+    // the only one about the bot's hue was red over BLUE.
     //
     // **Bot against the other two: HUE.** Its orange is the only tint that
     // suppresses blue, so it is the only one of the three whose red channel
-    // leads. Stated as an ordering for the reason the rest of this file uses
-    // them — every step between a colour and a read-back byte is monotone per
-    // channel, so an ordering survives where a value does not.
+    // leads — over blue AND over green, which is what "orange" says and the
+    // first of these alone did not. Stated as orderings and ratios for the
+    // reason the rest of this file uses them — every step between a colour and
+    // a read-back byte is monotone per channel, so an ordering survives where a
+    // value does not.
     expect(bot?.[0] ?? 0).toBeGreaterThan(bot?.[2] ?? 255);
+    // Red over green, bounded both ways: main drew 20 over 11, a ratio of 1.8;
+    // teal under the tint read 7 over 9. At least 1.3 and at most 4, so a bot
+    // gone green is red and so is one gone to a pure red.
+    expect(bot?.[0] ?? 0).toBeGreaterThan((bot?.[1] ?? 255) * BOT_RED_OVER_GREEN.floor);
+    expect(bot?.[0] ?? 255).toBeLessThan((bot?.[1] ?? 0) * BOT_RED_OVER_GREEN.ceiling);
     expect(rider?.[2] ?? 0).toBeGreaterThan(rider?.[0] ?? 255);
+    // The rider's teal house kit (#623), bounded both ways: 12,59,56 measured,
+    // green over red by 47. A kit left unwritten per instance is black under
+    // the rider's white tint and read 8,22,22 — which every ordering here and
+    // the value ratios below passed.
+    expect((rider?.[1] ?? 0) - (rider?.[0] ?? 255)).toBeGreaterThan(RIDER_GREEN_OVER_RED.floor);
+    expect((rider?.[1] ?? 255) - (rider?.[0] ?? 0)).toBeLessThan(RIDER_GREEN_OVER_RED.ceiling);
     expect(ghost?.[2] ?? 0).toBeGreaterThan(ghost?.[0] ?? 255);
+    // The ghost's slate: blue well over green, bounded both ways — main drew
+    // 71 over 24, a ratio of 3.0; teal under the grey read 26 over 22. At least
+    // 1.5 and at most 6, so a ghost gone teal is red and so is one gone to a
+    // pure blue.
+    expect(ghost?.[2] ?? 0).toBeGreaterThan((ghost?.[1] ?? 255) * GHOST_BLUE_OVER_GREEN.floor);
+    expect(ghost?.[2] ?? 255).toBeLessThan((ghost?.[1] ?? 0) * GHOST_BLUE_OVER_GREEN.ceiling);
 
-    // **Rider against ghost: VALUE.** Both lead on blue, because the rider's
-    // jersey is blue and the ghost's cool grey cannot take that away. What
+    // **Rider against ghost: VALUE.** Both lead on blue over red, because the
+    // rider's jersey is teal and the ghost's cool grey cannot take that away. What
     // separates them is that the ghost is a great deal darker — a shadow of
     // the attempt rather than a second rider — and the margin is stated as a
     // ratio because an absolute difference in bytes says nothing about a scene
@@ -3383,6 +3430,14 @@ test.describe('the realistic world — ADR 0026', () => {
     expect(apart(kit.backs.rider, kit.backs.bot)).toBeGreaterThan(KIT_TINTS_APART);
     expect(apart(kit.backs.rider, kit.backs.ghost)).toBeGreaterThan(KIT_TINTS_APART);
     expect(apart(kit.backs.bot, kit.backs.ghost)).toBeGreaterThan(KIT_TINTS_APART);
+    // …and each in #368's own hue, which the pairwise distances above could
+    // not see go: the pacer's red over its green, the ghost's blue over its.
+    const [botRed, botGreen] = kit.backs.bot as [number, number, number];
+    expect(botRed - botGreen).toBeGreaterThan(BACK_BOT_RED_OVER_GREEN.floor);
+    expect(botRed - botGreen).toBeLessThan(BACK_BOT_RED_OVER_GREEN.ceiling);
+    const [, ghostGreen, ghostBlue] = kit.backs.ghost as [number, number, number];
+    expect(ghostBlue - ghostGreen).toBeGreaterThan(BACK_GHOST_BLUE_OVER_GREEN.floor);
+    expect(ghostBlue - ghostGreen).toBeLessThan(BACK_GHOST_BLUE_OVER_GREEN.ceiling);
   });
 
   test('turns the realistic rider’s legs with the cranks, and holds them when the cadence goes — #369, #349', async ({

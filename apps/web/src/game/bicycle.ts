@@ -197,6 +197,9 @@
  *   multiplies {@link RIDER_PALETTE} per instance, so the bot is an orange
  *   machine and the ghost a colourless one against the rider's teal — the
  *   app's accent since #623 — and silver — a whole-vehicle hue rather than one patch of one.
+ *   ⚠️ **Since #623 the pacer and the ghost do not wear the rider's kit under
+ *   their tints**: they wear {@link PACER_KIT}, the blue #368 was measured in,
+ *   because a multiplier cannot pull orange out of a teal jersey.
  * - The **cost** argument is reversed rather than merely accepted:
  *   `RiderBelt` instances all three, so three bicycles cost three draw calls
  *   where one bicycle and two solids cost five. (Four since #546, which split
@@ -257,6 +260,37 @@ export const RIDER_PALETTE = {
   tyre: 0x22262b,
 } as const;
 
+/** A kit: the jersey, and the darker colour of the legs and the helmet. */
+export interface RiderKit {
+  readonly jersey: number;
+  readonly limb: number;
+}
+
+/**
+ * The kit the PACER and the GHOST wear under their tints — #623, keeping #368.
+ *
+ * ⚠️ **Not the rider's kit, and that is the point.** `three-renderer.ts`
+ * §`RIDER_TINTS` MULTIPLIES a kit, so a tint can only keep what the kit
+ * already has: the bot's orange, `0xc2410c`, times the house kit's teal left a
+ * near-black bicycle whose green led its red (#742's review measured the
+ * silhouette at 7,9,1 where main drew 20,11,5), and #368's "the bot is the one
+ * whose red channel leads" stopped being true with every assertion green.
+ * The owner ruled on the RIDER's kit (#623, 2026-09-27) and on nobody else's,
+ * so the other two keep the blue they were told apart in — the sphere's
+ * `0x2f6fed` and its darker `0x1b3f8f`, `RIDER_PALETTE` until #623, which is
+ * what validation 0002 Part N's distances were read against. Both worlds read
+ * it: the stylised belt per instance, the realistic body per rider
+ * (`three-renderer.ts` §`RIDER_KITS`).
+ *
+ * ⚠️ A rider's own colour choice (#623's second half) replaces the RIDER's
+ * entry in `RIDER_KITS` and never this one — and a choice this kit's tints
+ * would confuse with the pacer's is that PR's distinguishability test to fail.
+ */
+export const PACER_KIT: RiderKit = { jersey: 0x2f6fed, limb: 0x1b3f8f };
+
+/** The rider's own kit, out of {@link RIDER_PALETTE}: the house kit (#623). */
+export const HOUSE_KIT: RiderKit = { jersey: RIDER_PALETTE.jersey, limb: RIDER_PALETTE.limb };
+
 /**
  * The palette as a list, for the light budget.
  *
@@ -264,7 +298,12 @@ export const RIDER_PALETTE = {
  * lands in the brightness bound automatically — the same property that file's
  * own comment claims for the scenery and marker tables.
  */
-export const BICYCLE_COLOURS: readonly number[] = Object.values(RIDER_PALETTE);
+export const BICYCLE_COLOURS: readonly number[] = [
+  ...Object.values(RIDER_PALETTE),
+  // The pacer's kit is drawn too, per instance, so it is bounded as well.
+  PACER_KIT.jersey,
+  PACER_KIT.limb,
+];
 
 /** One of the four solids the rider is built out of. */
 export type RiderSolid =

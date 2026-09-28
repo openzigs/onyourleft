@@ -884,11 +884,18 @@ apps/                 AGPL-3.0-or-later, without exception
                         modelled helmet and glasses — all inside the old
                         8 998 triangles. ⚠️ The jersey's main colour is in NO
                         map: `orm`'s blue channel is its share, premultiplied,
-                        and the renderer ADDS `share × kitColour`, which is
-                        `bicycle.ts` §`RIDER_PALETTE`'s jersey — the app's
-                        `accent` in BOTH worlds since #623. Multiplying a white
-                        shade by a 0/1 mask instead drew a pale halo on every
-                        hem; do not go back to it
+                        and the renderer ADDS `share × ` the body's own kit
+                        colour, from `three-renderer.ts` §`RIDER_KITS`: the
+                        rider's is `bicycle.ts` §`HOUSE_KIT`'s jersey — the
+                        app's `accent` in BOTH worlds since #623 — and the
+                        pacer's and the ghost's is `PACER_KIT`'s blue. ⚠️ The
+                        #368 tint MULTIPLIES the kit a kind wears, and orange
+                        over teal was near-black with green leading red while
+                        every gate stayed green (#742's review): the stylised
+                        belt writes the kit per INSTANCE over vertices marked
+                        `oylKit`, at no draw call. Multiplying a white shade by
+                        a 0/1 mask instead drew a pale halo on every hem; do
+                        not go back to it
     src/game/gradient.ts
                         the gradient control loop (#362) — where #90's driver
                         meets a real trainer, and the answer to "the game
