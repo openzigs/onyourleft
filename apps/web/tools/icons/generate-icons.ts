@@ -132,6 +132,37 @@ function distanceToMark(px: number, py: number): number {
   return best;
 }
 
+/**
+ * How much of a pixel the mark covers, 0 to 1, at a point in unit coordinates
+ * (y running down), for a pixel `pixel` units wide — the coverage
+ * {@link drawIcon} blends its two colours by.
+ */
+function markCoverage(ux: number, uy: number, pixel: number): number {
+  return Math.max(0, Math.min(1, (STROKE_HALF_WIDTH - distanceToMark(ux, uy)) / pixel + 0.5));
+}
+
+/**
+ * The mark alone, as a square of 8-bit RGB whose every channel is its
+ * coverage: white where the chevrons are, black where they are not, top row
+ * first.
+ *
+ * #623: the house kit's one mark. `tools/realistic/process-assets.ts` writes
+ * this for `process_rider.py`, which lays it on the jersey's back — so the
+ * kit's chevrons are these chevrons, from this arithmetic, and never a second
+ * drawing of them that could drift.
+ */
+export function drawMark(size: number): Uint8Array {
+  const pixel = 1 / size;
+  const pixels = new Uint8Array(size * size * 3);
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const value = Math.round(markCoverage((x + 0.5) * pixel, (y + 0.5) * pixel, pixel) * 255);
+      pixels.fill(value, (y * size + x) * 3, (y * size + x) * 3 + 3);
+    }
+  }
+  return pixels;
+}
+
 export interface IconSpec {
   /** The file, relative to `apps/web/public/`. */
   readonly file: string;
@@ -177,11 +208,7 @@ export function drawIcon(spec: IconSpec): Uint8Array {
       // drawing serves both variants.
       const ux = ((x + 0.5) * pixel - 0.5) / scale + 0.5;
       const uy = ((y + 0.5) * pixel - 0.5) / scale + 0.5;
-      const distance = distanceToMark(ux, uy);
-      const coverage = Math.max(
-        0,
-        Math.min(1, (STROKE_HALF_WIDTH - distance) / (pixel / scale) + 0.5),
-      );
+      const coverage = markCoverage(ux, uy, pixel / scale);
       const offset = (y * spec.size + x) * 3;
       pixels[offset] = Math.round(background.r + (foreground.r - background.r) * coverage);
       pixels[offset + 1] = Math.round(background.g + (foreground.g - background.g) * coverage);

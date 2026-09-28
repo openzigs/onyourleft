@@ -41,6 +41,7 @@ import {
   PINNED_KTX,
   shippedFiles,
   SOURCES,
+  sourcesDigest,
   type InputLock,
 } from './sources';
 
@@ -86,7 +87,18 @@ describe('the realistic files and the pipeline that makes them', () => {
       const entry = manifest.entries.find(
         (each) => each.path === `${OUTPUT_DIRECTORY}/${output.file}`,
       );
-      expect(entry?.inputsha256, output.file).toBe(inputDigest(source?.files ?? []));
+      // #623: a run that reads a second source digests both, path by source.
+      const also = output.recipe.how === 'blender' ? (output.recipe.alsoReads ?? []) : [];
+      expect(entry?.inputsha256, output.file).toBe(
+        also.length === 0
+          ? inputDigest(source?.files ?? [])
+          : sourcesDigest(
+              [output.from, ...also].map((id) => ({
+                id,
+                files: lock.sources.find((each) => each.id === id)?.files ?? [],
+              })),
+            ),
+      );
       // #618: a file that passed through the encoder names BOTH pinned tools
       // (or the encoder alone, for an upstream picture encoded); one that did
       // not — a tree's middle level, the rider — names Blender alone.

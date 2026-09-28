@@ -2407,6 +2407,37 @@ test.describe('a kind is drawn as several shapes, and it is measured — #367', 
 });
 
 /**
+ * The rider's back — #623: the luma variance of `game-harness.ts` §`kitProbe`'s
+ * 17 × 17 square, 8-bit, as the product draws the kit and with the kit in its
+ * own mean colour.
+ *
+ * Measured on 2026-09-28 in this Chromium: **1 226** with the kit and **6.4**
+ * in its mean colour. The floor, **200**, is thirty times the control and a
+ * sixth of the product; the ceiling, **5 000**, four times the product — so a
+ * kit drawn in a sixth of its contrast is red, and so is one drawn as a
+ * checkerboard.
+ */
+const KIT_VARIANCE_FLOOR = 200;
+const KIT_VARIANCE_CEILING = 5_000;
+/**
+ * The kit's own colour on the back, bounded both ways, 8-bit sRGB means of
+ * the same square: the accent is a dark teal, so green and blue lead red
+ * (measured 120 and 118 against 84, the white mark and the skin of the arms
+ * in the square with it), and nothing is washed out or black.
+ */
+const KIT_HUE_MARGIN = 20;
+const KIT_BRIGHTEST = 190;
+const KIT_DARKEST = 40;
+/**
+ * #368 on the textured body: each pair of the three backs at least this far
+ * apart in their furthest channel. Measured 70 (rider and bot), 52 (rider and
+ * ghost) and 33 (bot and ghost); #624's fork holds 30 on the paint, and the
+ * back is held to 25 because the kit's white mark and the skin in the square
+ * are tinted too, which pulls the three together.
+ */
+const KIT_TINTS_APART = 25;
+
+/**
  * The bot and the ghost are bicycles, and a rider can still tell them apart —
  * #368.
  *
@@ -3269,6 +3300,44 @@ test.describe('the realistic world — ADR 0026', () => {
     // blue over red, and the rider's white tint leaves the paint's own grey.
     expect((forks.bot[0] ?? 0) - (forks.bot[2] ?? 0)).toBeGreaterThan(30);
     expect((forks.ghost[2] ?? 0) - (forks.ghost[0] ?? 0)).toBeGreaterThan(5);
+  });
+
+  test('reads the kit’s pattern on the rider’s back, over its floor and under its ceiling, and its mean colour under the floor — #623', async ({
+    harnessRun,
+  }) => {
+    // A square of the middle of the rider's back, from a camera brought close
+    // behind, as the product draws it and with the kit in its own mean colour.
+    // @see kitProbe
+    const { kit } = await realistic(harnessRun);
+    console.log(
+      `#623: the rider's back, ${String(kit.pixels)} pixels — luma variance ${kit.variance.toFixed(2)} ` +
+        `(mean ${kit.mean.toFixed(1)}), ${kit.controlVariance.toFixed(2)} in the kit's mean colour, ` +
+        `against a floor of ${String(KIT_VARIANCE_FLOOR)} and a ceiling of ${String(KIT_VARIANCE_CEILING)}; ` +
+        `the same square with no rider ${kit.emptyMean.toFixed(1)}; the back as the rider, the bot ` +
+        `and the ghost ${JSON.stringify(kit.backs)}`,
+    );
+    // Non-vacuity: the square is the rider — it reads differently from the
+    // road behind it — and it is the size the probe says.
+    expect(kit.pixels).toBe(289);
+    expect(Math.abs(kit.mean - kit.emptyMean)).toBeGreaterThan(10);
+    // THE CONTROL: the body's shape, relief and light alone, in one colour.
+    expect(kit.controlVariance).toBeLessThan(KIT_VARIANCE_FLOOR);
+    // The product, bounded BOTH ways.
+    expect(kit.variance).toBeGreaterThan(KIT_VARIANCE_FLOOR);
+    expect(kit.variance).toBeLessThan(KIT_VARIANCE_CEILING);
+    // The kit's own colour, bounded both ways: the jersey is the app's accent,
+    // a dark teal — green and blue over red — and never washed out to white.
+    const [r, g, b] = kit.backs.rider as [number, number, number];
+    expect(g - r).toBeGreaterThan(KIT_HUE_MARGIN);
+    expect(b - r).toBeGreaterThan(KIT_HUE_MARGIN);
+    expect(Math.max(r, g, b)).toBeLessThan(KIT_BRIGHTEST);
+    expect(Math.min(r, g, b)).toBeGreaterThan(KIT_DARKEST);
+    // #368 on a textured body: each pair of the three told apart.
+    const apart = (x: readonly number[], y: readonly number[]): number =>
+      Math.max(...[0, 1, 2].map((channel) => Math.abs((x[channel] ?? 0) - (y[channel] ?? 0))));
+    expect(apart(kit.backs.rider, kit.backs.bot)).toBeGreaterThan(KIT_TINTS_APART);
+    expect(apart(kit.backs.rider, kit.backs.ghost)).toBeGreaterThan(KIT_TINTS_APART);
+    expect(apart(kit.backs.bot, kit.backs.ghost)).toBeGreaterThan(KIT_TINTS_APART);
   });
 
   test('turns the realistic rider’s legs with the cranks, and holds them when the cadence goes — #369, #349', async ({

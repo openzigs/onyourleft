@@ -304,6 +304,9 @@ import {
   REALISTIC_BICYCLE_MAPS,
   REALISTIC_BICYCLE_MAP_NAMES,
   REALISTIC_RIDER,
+  REALISTIC_RIDER_KIT_MEAN,
+  REALISTIC_RIDER_MAPS,
+  REALISTIC_RIDER_MAP_NAMES,
   REALISTIC_SKY,
   REALISTIC_BOUNDARY_PARTS,
   REALISTIC_BUILDING_SURFACES,
@@ -314,6 +317,7 @@ import {
   REALISTIC_VEGETATION_KINDS,
   realisticUrl,
   type RealisticBicycleMap,
+  type RealisticRiderMap,
   type RealisticVegetationKind,
   type RealisticWorldOutcome,
   type StructureSurface,
@@ -4709,8 +4713,13 @@ interface RealisticWorld {
     Exclude<StructureSurface, 'painted'>,
     { readonly colour: Texture; readonly normal: Texture }
   >;
-  /** The rider's body, as the loader left it: a scene holding one skinned mesh. */
+  /**
+   * The rider's body, as the loader left it: a scene holding one skinned mesh
+   * and, since #623, the helmet and glasses as one mesh beside it.
+   */
   readonly body: Object3D;
+  /** The rider's kit, skin and relief — #623. */
+  readonly rider: RealisticRiderMaps;
   /** The bicycle's four drawn maps — #624. */
   readonly bicycle: RealisticBicycleMaps;
 }
@@ -4919,7 +4928,8 @@ const BLOCK_FORMATS: ReadonlyMap<number, RealisticTextureFormat> = new Map([
 
 /** One realistic texture, as the GPU is handed it. */
 interface RealisticTextureReport {
-  readonly role: 'road' | 'ground' | 'structure' | 'model' | 'impostor' | 'bicycle' | 'sky';
+  readonly role:
+    'road' | 'ground' | 'structure' | 'model' | 'impostor' | 'bicycle' | 'rider' | 'sky';
   readonly format: RealisticTextureFormat;
   /** Whether the GPU holds it in a block format — never true of a fallback. */
   readonly compressed: boolean;
@@ -4999,6 +5009,7 @@ export function realisticTextureReport(): readonly RealisticTextureReport[] {
     add(maps.normal, 'structure');
   }
   for (const map of REALISTIC_BICYCLE_MAP_NAMES) add(world.bicycle[map], 'bicycle');
+  for (const map of REALISTIC_RIDER_MAP_NAMES) add(world.rider[map], 'rider');
   for (const shapes of world.vegetation.values()) {
     for (const shape of shapes) {
       // #639: every layer of a merged material, not only its own two maps.
@@ -5032,6 +5043,7 @@ export function uploadRealisticTexturesOf(view: GameView, textures?: readonly Te
           world.ground.normal,
           ...[...world.structures.values()].flatMap((maps) => [maps.colour, maps.normal]),
           ...REALISTIC_BICYCLE_MAP_NAMES.map((map) => world.bicycle[map]),
+          ...REALISTIC_RIDER_MAP_NAMES.map((map) => world.rider[map]),
           ...[...world.vegetation.values()].flatMap((shapes) =>
             shapes.flatMap((shape) => [
               ...shape.parts.flatMap((part) => texturesOf(part.material)),
@@ -5096,6 +5108,11 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       normal: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.ground.normal))),
     };
     const rider = model(() => loaders.model(realisticUrl(REALISTIC_RIDER)));
+    // #623: the rider's three maps, loaded and settled with everything else.
+    const riderMaps = REALISTIC_RIDER_MAP_NAMES.map((map) => ({
+      map,
+      texture: texture(() => loaders.texture(realisticUrl(REALISTIC_RIDER_MAPS[map]))),
+    }));
     // #624: the bicycle's drawn maps, loaded and settled with everything else.
     const bicycleMaps = REALISTIC_BICYCLE_MAP_NAMES.map((map) => ({
       map,
@@ -5141,6 +5158,7 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       ground.colour,
       ground.normal,
       rider,
+      ...riderMaps.map((each) => each.texture),
       ...bicycleMaps.map((each) => each.texture),
       ...structureMaps.flatMap((each) => [each.colour, each.normal]),
       ...shapes.flatMap((each) => each.models.flatMap((one) => [one.scene, one.strip, one.middle])),
@@ -5190,6 +5208,14 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       colour.colorSpace = SRGBColorSpace;
       structures.set(each.surface, { colour, normal });
     }
+    const riderTextures = {} as Record<RealisticRiderMap, Texture>;
+    for (const each of riderMaps) {
+      const map = await each.texture;
+      // The body's own texture coordinates, which never repeat.
+      map.minFilter = LinearMipmapLinearFilter;
+      if (each.map === 'colour') map.colorSpace = SRGBColorSpace;
+      riderTextures[each.map] = map;
+    }
     const bicycle = {} as Record<RealisticBicycleMap, Texture>;
     for (const each of bicycleMaps) {
       const map = await each.texture;
@@ -5233,6 +5259,7 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       vegetation,
       structures,
       body,
+      rider: riderTextures,
       bicycle,
     };
     // #545: the near-plane cull's shapes, built now rather than on a frame.
@@ -5380,6 +5407,7 @@ function releaseRealisticWorld(world: RealisticWorld): void {
     maps.normal.dispose();
   }
   for (const map of REALISTIC_BICYCLE_MAP_NAMES) world.bicycle[map].dispose();
+  for (const map of REALISTIC_RIDER_MAP_NAMES) world.rider[map].dispose();
   releaseLoadedScene(world.body);
 }
 
@@ -7544,6 +7572,22 @@ const REALISTIC_ANISOTROPY = 8;
  * (a skinned mesh is not instanceable), the frame, the rubber and the metal,
  * the cranksets and the helmets.
  *
+ * ## Dressed — #623
+ *
+ * The body wears the On Your Left house kit and a skin: three maps the
+ * pipeline draws and bakes onto its own texture coordinates
+ * (`tools/realistic/blender/process_rider.py`), in ONE constructed material a
+ * rider — {@link riderBodyMaterial}. The jersey's main colour is not in the
+ * maps: it is {@link RealisticRiderBelt.kitColour}, one uniform every rider's
+ * body reads, `bicycle.ts` §`RIDER_PALETTE`'s jersey, which is the colour the
+ * stylised rider wears too. The tint still multiplies the whole body after it,
+ * so #368's three riders stay three.
+ *
+ * The helmet and glasses are the file's own mesh since #623 — a plain shell
+ * with vents and straps, and glasses, built round the head's own vertices and
+ * coloured per vertex — carried on the head bone in the one instanced mesh the
+ * sphere cap was, so they cost no draw call.
+ *
  * ⚠️ **One allocation a rider a frame, and it is `legBones`'**: the knee solve
  * returns a two-number object, as it already does for the stylised rider.
  * Everything else is written into objects made in the constructor.
@@ -7566,6 +7610,16 @@ export class RealisticRiderBelt {
   readonly #matrix = new Matrix4();
   readonly #local = new Matrix4();
   readonly #helmetLocal = new Matrix4();
+  /**
+   * The kit's main colour, in the working (linear) space — #623. ONE object
+   * every rider's body material reads, so setting it once dresses all three.
+   */
+  readonly kitColour = { value: new Color(RIDER_PALETTE.jersey) };
+  /**
+   * 1 while the kit is drawn in one colour, its own mean — the browser gate's
+   * control. @see setKitPattern
+   */
+  readonly #kitPlain = { value: 0 };
   readonly #turn = new Quaternion();
   readonly #world = new Quaternion();
   readonly #parent = new Quaternion();
@@ -7581,10 +7635,12 @@ export class RealisticRiderBelt {
   readonly #unit = new Vector3(1, 1, 1);
   #shown = true;
 
-  constructor(body: Object3D, maps: RealisticBicycleMaps) {
+  constructor(body: Object3D, maps: RealisticBicycleMaps, dressed: RealisticRiderMaps) {
+    // #623: the helmet and glasses are the file's own, coloured per vertex.
     const helmetMaterial = withAtmosphere(
-      constructed(new MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.4, metalness: 0 })),
+      constructed(new MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0 })),
     );
+    const helmetSource = helmetOf(body);
     const riders = RIDDEN_KINDS.length;
     const bicycle = realisticBicycleMeshes(maps, riders);
     this.#frame = bicycle.frame;
@@ -7595,11 +7651,7 @@ export class RealisticRiderBelt {
     const frameMaterial = bicycle.frame.material as MeshStandardMaterial;
     const rubberMaterial = bicycle.rubber.material as MeshStandardMaterial;
     const metalMaterial = bicycle.metal.material as MeshStandardMaterial;
-    this.#helmets = tintable(
-      new SphereGeometry(0.13, 16, 10, 0, Math.PI * 2, 0, Math.PI / 1.8),
-      helmetMaterial,
-      riders,
-    );
+    this.#helmets = tintable(helmetSource.geometry.clone(), helmetMaterial, riders);
     this.#materials = [frameMaterial, rubberMaterial, metalMaterial, helmetMaterial];
     for (const mesh of [this.#frame, this.#rubber, this.#metal, this.#cranks, this.#helmets]) {
       this.#group.add(mesh);
@@ -7608,17 +7660,15 @@ export class RealisticRiderBelt {
     let scale = 1;
     for (let slot = 0; slot < riders; slot += 1) {
       const holder = cloneSkinned(body);
+      // The clone's own helmet is dropped: the instanced one is drawn instead.
+      const ownHelmet = helmetOf(holder);
       let skinned: SkinnedMesh | undefined;
       holder.traverse((node) => {
         if ((node as Partial<SkinnedMesh>).isSkinnedMesh === true) skinned = node as SkinnedMesh;
       });
       if (skinned === undefined) throw new Error('the rider model holds no skinned mesh');
       const source = skinned.material as Material;
-      const material = withAtmosphere(
-        constructed(
-          new MeshStandardMaterial({ vertexColors: true, roughness: 0.65, metalness: 0 }),
-        ),
-      );
+      const material = riderBodyMaterial(dressed, this.kitColour, this.#kitPlain);
       if (slot === 0) source.dispose();
       skinned.material = material;
       skinned.frustumCulled = false;
@@ -7639,6 +7689,16 @@ export class RealisticRiderBelt {
       holder.scale.setScalar(scale);
       const root = new Group();
       root.add(holder);
+      if (slot === 0) {
+        // Where the helmet sits on the head bone, read off the file's rest
+        // pose at the body's scale — never a number typed here.
+        root.updateMatrixWorld(true);
+        this.#helmetLocal
+          .copy(boneOf(bones, 'head').matrixWorld)
+          .invert()
+          .multiply(ownHelmet.matrixWorld);
+      }
+      ownHelmet.removeFromParent();
       root.visible = false;
       this.#group.add(root);
       const ordered = skinned.skeleton.bones;
@@ -7654,10 +7714,6 @@ export class RealisticRiderBelt {
       });
     }
     this.#scale = scale;
-    // The helmet sits on the head bone, a little up and forward of its joint.
-    this.#helmetLocal.makeTranslation(0, 0.06 / scale, 0.01 / scale);
-    this.#helmetLocal.scale(this.#unit.setScalar(1 / scale));
-    this.#unit.set(1, 1, 1);
     this.#group.visible = false;
   }
 
@@ -7679,6 +7735,25 @@ export class RealisticRiderBelt {
   setShown(on: boolean): void {
     this.#shown = on;
     if (!on) this.#group.visible = false;
+  }
+
+  /**
+   * Whether the body wears the kit's pattern, or one colour — the kit's own
+   * mean, from `realistic-assets.ts` §`REALISTIC_RIDER_KIT_MEAN` — everywhere.
+   * #623's control. @see riderKitOf
+   */
+  setKitPattern(on: boolean): void {
+    this.#kitPlain.value = on ? 0 : 1;
+  }
+
+  /** The helmet and glasses' one instanced mesh. For the tests. */
+  get helmets(): InstancedMesh {
+    return this.#helmets;
+  }
+
+  /** Every rider's body. For the tests. */
+  get bodies(): readonly SkinnedMesh[] {
+    return this.#riders.map((rider) => rider.body);
   }
 
   /** Whether the rubber wears its normal map — #624's control. @see bicycleTreadOf */
@@ -7916,6 +7991,115 @@ function twoBoneJoint(
  * The realistic bicycle's four maps, as loaded — #624. @see REALISTIC_BICYCLE_MAPS
  */
 export type RealisticBicycleMaps = Readonly<Record<RealisticBicycleMap, Texture>>;
+
+/** The realistic rider's three maps, as loaded — #623. @see REALISTIC_RIDER_MAPS */
+export type RealisticRiderMaps = Readonly<Record<RealisticRiderMap, Texture>>;
+
+/**
+ * The rider's helmet and glasses: the mesh the file carries beside the body,
+ * named `helmet` by `process_rider.py` — #623.
+ */
+function helmetOf(scene: Object3D): Mesh {
+  let helmet: Mesh | undefined;
+  scene.traverse((node) => {
+    if ((node as Partial<Mesh>).isMesh === true && node.name === 'helmet') helmet = node as Mesh;
+  });
+  if (helmet === undefined) throw new Error('the rider model holds no helmet');
+  return helmet;
+}
+
+/**
+ * The material a realistic rider's body wears — #623, ADR 0026 D-11:
+ * constructed here, physically based, and one a rider.
+ *
+ * - `map` is the kit and the skin; `normalMap` the body's baked relief with
+ *   the kit's seams and the riding pose's creases; `orm` is three's own
+ *   channel order, so it is BOTH the `aoMap` (red) and the `roughnessMap`
+ *   (green), with `roughness` at 1 so the map's value is the roughness.
+ * - Its BLUE channel, which three does not read, is how much of the kit's
+ *   main colour a texel is — a SHADE, premultiplied: the colour map is black
+ *   there. The one line spliced after `map_fragment` ADDS `blue × kit × color`,
+ *   where `kit` is {@link RealisticRiderBelt.kitColour} and `color` the #368
+ *   tint, so the albedo is `(map + blue × kit) × tint`. ⚠️ Added rather than
+ *   multiplied, because both maps are filtered: a white shade in the colour
+ *   map times a 0/1 mask drew a pale halo half-way across every hem and cuff,
+ *   which the browser gate's first picture of the kit showed.
+ * - `plain` at 1 draws the whole body in one colour, the kit's mean under the
+ *   same main colour (`REALISTIC_RIDER_KIT_MEAN`), still tinted — the browser
+ *   gate's control for the pattern (#623).
+ */
+function riderBodyMaterial(
+  maps: RealisticRiderMaps,
+  kit: { value: Color },
+  plain: { value: number },
+): MeshStandardMaterial {
+  const material = constructed(
+    new MeshStandardMaterial({
+      map: maps.colour,
+      normalMap: maps.normal,
+      aoMap: maps.orm,
+      roughnessMap: maps.orm,
+      roughness: 1,
+      metalness: 0,
+    }),
+  );
+  const mean = REALISTIC_RIDER_KIT_MEAN;
+  const spliced = "#623's kit colour";
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms['oylKitColour'] = kit;
+    shader.uniforms['oylKitPlain'] = plain;
+    shader.fragmentShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.fragmentShader,
+        '#include <common>',
+        '#include <common>\nuniform vec3 oylKitColour;\nuniform float oylKitPlain;',
+        'fragment',
+        spliced,
+      ),
+      '#include <map_fragment>',
+      /* glsl */ `#include <map_fragment>
+#ifdef USE_ROUGHNESSMAP
+diffuseColor.rgb += diffuse * oylKitColour * texture2D(roughnessMap, vRoughnessMapUv).b;
+#endif
+diffuseColor.rgb = mix(
+  diffuseColor.rgb,
+  diffuse * (vec3(${glslFloat(mean.unmasked[0])}, ${glslFloat(mean.unmasked[1])}, ${glslFloat(mean.unmasked[2])}) + ${glslFloat(mean.shade)} * oylKitColour),
+  oylKitPlain
+);`,
+      'fragment',
+      spliced,
+    );
+  };
+  material.customProgramCacheKey = () => 'oyl-rider-kit';
+  return withAtmosphere(material);
+}
+
+/**
+ * The three realistic riders, built from the loaded world as a view builds
+ * them — #623. `undefined` when no world is loaded.
+ *
+ * @test-facing `realistic-textures.test.ts` builds them from a real load of
+ * the committed files and reads their meshes, materials and tints; a view
+ * builds its own in `RealisticDrawing`
+ */
+export function realisticRidersOfLoadedWorld(): RealisticRiderBelt | undefined {
+  const world = realisticWorld;
+  return world === undefined
+    ? undefined
+    : new RealisticRiderBelt(world.body, world.bicycle, world.rider);
+}
+
+/**
+ * Draws a view's realistic riders in their kit's pattern, or in one colour —
+ * #623. The browser gate's control: with the pattern off, the rider's back
+ * must read back flatter than the floor the kit is held above.
+ *
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`;
+ * the product always draws the pattern.
+ */
+export function riderKitOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.riderKit(on);
+}
 
 /**
  * How strongly the bicycle's normal maps bend the light: **1**, as drawn.
@@ -8816,7 +9000,7 @@ class RealisticDrawing {
       skip: REALISTIC_PRIMITIVE_SKIP,
       physical: true,
     });
-    this.riders = new RealisticRiderBelt(world.body, world.bicycle);
+    this.riders = new RealisticRiderBelt(world.body, world.bicycle, world.rider);
     this.grounding = new GroundBlobBelt();
     this.#casterLists = [this.vegetation.grounded, this.#structureCasters];
     this.road = photographicRoadMaterial(world.road.colour, world.road.normal);
@@ -9858,6 +10042,11 @@ class ThreeGameView implements GameView {
   /** @see bicycleTreadOf */
   bicycleTread(on: boolean): void {
     this.#realistic?.riders.setTread(on);
+  }
+
+  /** @see riderKitOf */
+  riderKit(on: boolean): void {
+    this.#realistic?.riders.setKitPattern(on);
   }
 
   /** @see atmosphereOf */

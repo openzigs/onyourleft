@@ -220,11 +220,15 @@ describe('the rider is a bicycle with somebody on it', () => {
     expect(BICYCLE_COLOURS).toContain(RIDER_PALETTE.jersey);
   });
 
-  it("keeps the sphere's own blue, because #93 is about telling three apart", () => {
-    // The shape changed; the hue deliberately did not. A rider who has ridden
-    // this before finds themselves by colour before they find themselves by
-    // silhouette.
-    expect(RIDER_PALETTE.jersey).toBe(0x2f6fed);
+  it('wears the app’s own accent, and legs darker than it — #623', () => {
+    // The owner's ruling: the house kit is in the app's colours. It was the
+    // sphere's blue, 0x2f6fed, until #623.
+    expect(RIDER_PALETTE.jersey).toBe(0x0b5c55);
+    expect(RIDER_PALETTE.limb).toBe(0x07443f);
+    // The legs stay darker than the jersey, so the pedalling reads as motion.
+    const luminance = (hex: number): number =>
+      0.2126 * ((hex >> 16) & 0xff) + 0.7152 * ((hex >> 8) & 0xff) + 0.0722 * (hex & 0xff);
+    expect(luminance(RIDER_PALETTE.limb)).toBeLessThan(luminance(RIDER_PALETTE.jersey));
   });
 
   it('gives every part a solid something can actually be built from', () => {
