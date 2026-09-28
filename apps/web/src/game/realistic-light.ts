@@ -605,6 +605,16 @@ export function directionalFogColour(
  * optical depth (`FogExp2` squares it), which makes a valley floor seen from
  * above read as further away without taking a ridge at the same distance with
  * it. 1 is the realistic fog before #622.
+ *
+ * ⚠️ **"Below the middle" is the MIDPOINT of the route's elevation range
+ * (`landform.ts` §`HorizonRelief.middle`), not the MEAN elevation #622's text
+ * names** — a choice, made so the haze and #544's ridge stand on one number,
+ * and one the owner may reverse. The two differ most on the routes where it
+ * shows: on a flat route with one 200 m climb the midpoint stands 100 m above
+ * the flat, so the whole flat is 50 m or more below it and takes the FULL
+ * 1.25× haze, where the mean would sit near the flat and haze almost nothing
+ * but the dip below it. Validation 0002 Part AH §"#622's rows" asks the owner
+ * to judge exactly that route shape.
  */
 export const REALISTIC_VALLEY_HAZE = 1.25;
 
@@ -618,8 +628,10 @@ export const REALISTIC_VALLEY_DEPTH_METRES = 50;
 
 /**
  * The factor the realistic fog's density is multiplied by at a height, in local
- * metres — #622: 1 at or above `middle` (the middle of the route's own
- * elevation range, `landform.ts` §`HorizonRelief.middle`), rising linearly to
+ * metres — #622: 1 at or above `middle` (the MIDPOINT of the route's own
+ * elevation range, `landform.ts` §`HorizonRelief.middle` — not its mean, and
+ * {@link REALISTIC_VALLEY_HAZE} says what that costs a flat route with one
+ * climb), rising linearly to
  * `haze` at `depth` metres below it and no further. The same arithmetic
  * `three-renderer.ts` §`ATMOSPHERE_FRAGMENT` does on the GPU.
  *

@@ -5612,6 +5612,16 @@ export function readsTextureLodBias(material: Material): boolean {
  *   intensity), in the OUTPUT colour space — the one three hands a fog colour
  *   to a shader in (`WebGLMaterials.js` §`refreshFogUniforms`), so that a flat
  *   table is exactly the `fogColor` it is blended from. 16 `vec3`s, 192 bytes.
+ *   ⚠️ **Only while nothing fogged by the air draws into a render target.**
+ *   three converts `fogColor` with `getUnlitUniformColorSpace`: the output
+ *   space with the canvas bound, the LINEAR working space with a target bound.
+ *   This table is converted once, to the output space, and every program
+ *   shares it — so the day a realistic fogged material draws into a target
+ *   (#629's reflections, or a post pass #701 decides on), `fogColor` goes
+ *   linear, the table does not, and even a FLAT table stops being the fog it
+ *   was blended from. That change owes a table per target space, written per
+ *   pass. `realistic-renderer.test.ts` §"#703" fails the build when this file
+ *   first binds or builds a target, so it cannot happen unnoticed.
  * - `oylFogShare`: `realistic-light.ts` §`REALISTIC_FOG_DIRECTION_SHARE`, or 0
  *   where the horizon is not the photographed sky's (#544's control).
  * - `oylSkyTurn`: `realistic-light.ts` §`skyRotation`, so a direction in the
@@ -5648,23 +5658,46 @@ const ATMOSPHERE_VERTEX = /* glsl */ `
  *
  * 1. **The colour leans towards the sky in the direction looked**:
  *    `realistic-light.ts` §`directionalFogColour`, the same interpolation
- *    between the two nearest bins, wrapping. ⚠️ The bin index is taken on a
- *    POSITIVE number before `%`, because GLSL ES 3.00 leaves `%` of a
- *    negative operand undefined; `+ 64.0` clears the lowest `oylAt` can be
- *    (about −25, at a turn of −2π).
+ *    between the two nearest bins, wrapping. ⚠️ The bin index is made
+ *    POSITIVE before `%`, because GLSL ES 3.00 leaves the integer `%` of a
+ *    negative operand undefined, and `oylAt` is negative whenever the azimuth
+ *    plus the turn is under −π: `skyRotation` lies in (−2π, 2π), so the sum
+ *    lies in (−3π, 3π) and `oylAt` in (−N − 0.5, 2N − 0.5) for N bins —
+ *    (−16.5, 31.5) at 16. The offset added is {@link ATMOSPHERE_BIN_OFFSET},
+ *    4N: a MULTIPLE of N, so it moves no bin, and larger than N + 1, so it
+ *    clears the lowest. #703's review found the literal `64` it replaced
+ *    right only while N divided 64 — at 12 or 24 bins every read would have
+ *    shifted. Not the float `mod`: a GPU may divide by a reciprocal, and
+ *    `floor(24.0 / 12.0)` coming out 1 would index one past the table.
  * 2. **The density rises below the middle of the route's elevation**:
  *    `realistic-light.ts` §`valleyHazeFactor`, at the fragment's own height.
  *
  * About a dozen ALU on a fragment every realistic material already fogs; no
  * texture, no pass, no draw.
  */
+/**
+ * What {@link ATMOSPHERE_FRAGMENT} adds to a bin index before it wraps it with
+ * `%`: **4 ×** {@link HORIZON_AZIMUTH_BINS}, derived so it stays a multiple of
+ * the bin count whatever that becomes — see the fragment's note 1.
+ */
+export const ATMOSPHERE_BIN_OFFSET = 4 * HORIZON_AZIMUTH_BINS;
+
+/**
+ * The GLSL of {@link ATMOSPHERE_FRAGMENT}'s bin wrap, as it is spliced —
+ * exported, with {@link ATMOSPHERE_BIN_OFFSET}, so `realistic-renderer.test.ts`
+ * can hold the offset to a multiple of the bin count, evaluate the wrap at
+ * every index the shader can reach, and find it in a compiled material
+ * (#703's review).
+ */
+export const ATMOSPHERE_BIN_WRAP = `(int(oylLower) + ${String(ATMOSPHERE_BIN_OFFSET)}) % ${String(HORIZON_AZIMUTH_BINS)}`;
+
 const ATMOSPHERE_FRAGMENT = /* glsl */ `
 #ifdef USE_FOG
 {
   float oylAzimuth = atan(vOylFogRay.z, vOylFogRay.x) + oylSkyTurn;
   float oylAt = (oylAzimuth * RECIPROCAL_PI2 + 0.5) * ${HORIZON_AZIMUTH_BINS.toFixed(1)} - 0.5;
   float oylLower = floor(oylAt);
-  int oylFrom = int(oylLower + 64.0) % ${String(HORIZON_AZIMUTH_BINS)};
+  int oylFrom = ${ATMOSPHERE_BIN_WRAP};
   int oylTo = (oylFrom + 1) % ${String(HORIZON_AZIMUTH_BINS)};
   vec3 oylToward = mix(oylFogTable[oylFrom], oylFogTable[oylTo], oylAt - oylLower);
   vec3 oylFogColour = mix(fogColor, oylToward, oylFogShare);
@@ -9293,6 +9326,11 @@ class ThreeGameView implements GameView {
    * (`Color.getRGB`, as `WebGLMaterials.js` hands `fogColor` over), so a flat
    * table is the `fogColor` it is blended from. Converted only when the table
    * or the intensity changes, which on a ride is once.
+   *
+   * ⚠️ Converted with `outputColorSpace` UNCONDITIONALLY, where three picks the
+   * fog's space by the bound render target — the same only while none is bound
+   * when a realistic fogged material draws. See {@link ATMOSPHERE} before
+   * adding one (#629, #701).
    */
   #airFor(sky: RealisticSky, intensity: number, turn: number): RealisticAir {
     const source = this.#airTable === 'flattened' ? sky.flatDirections : sky.directions;

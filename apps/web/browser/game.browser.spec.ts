@@ -3299,14 +3299,36 @@ test.describe('the realistic world — ADR 0026', () => {
     }
     // And the two probes differ in the direction the HDR's own band says: in
     // every channel where the band's two colours differ by more than a byte
-    // at this fog, the drawn pixels differ the same way round.
+    // at this fog, the drawn difference is that way round AND the size the
+    // prediction says, from both sides (#621's lesson).
+    //
+    // ⚠️ The difference compared is each probe's SHIFT — its directional read
+    // less its own flattened read — never the raw pixels (#703's review). The
+    // raw pixels differ by about two bytes, which is less than the control
+    // above allows the two frames' LIGHTING to differ (2 % of ~140 is 2.8), so
+    // a lighting change the control accepts could flip or fake a raw sign on
+    // its own: dimming the toward frame's direct light by a fifth (B11) did
+    // not turn the control red. Fog mixes last and linearly, so a shift is
+    // `f · (F_directional − F_flattened)` whatever lit the surface under it,
+    // and the difference of two shifts carries no lighting at all.
     let compared = 0;
     for (let channel = 0; channel < 3; channel += 1) {
       const band = ((air.fogToward[channel] ?? 0) - (air.fogAway[channel] ?? 0)) * air.fogFactor;
       if (Math.abs(band) * 255 < 1) continue;
       compared += 1;
-      const drawn = (air.toward.directional[channel] ?? 0) - (air.away.directional[channel] ?? 0);
+      const drawn =
+        (air.toward.directional[channel] ?? 0) -
+        (air.toward.flattened[channel] ?? 0) -
+        ((air.away.directional[channel] ?? 0) - (air.away.flattened[channel] ?? 0));
+      const want = (air.predictedToward[channel] ?? 0) - (air.predictedAway[channel] ?? 0);
       expect(Math.sign(drawn), `channel ${String(channel)}`).toBe(Math.sign(band));
+      expect(
+        Math.abs(drawn - want),
+        `towards less away, channel ${String(channel)}: ${(drawn * 255).toFixed(2)} against ` +
+          `${(want * 255).toFixed(2)} predicted`,
+      ).toBeLessThanOrEqual(
+        AIR_DIFFERENCE_TOLERANCE.bytes / 255 + AIR_DIFFERENCE_TOLERANCE.share * Math.abs(want),
+      );
     }
     expect(compared).toBeGreaterThan(0);
 
@@ -3590,6 +3612,17 @@ const AIR_CONTROL_AGREEMENT = 0.02;
  * whole prediction, and one that leans twice as far by all of it again.
  */
 const AIR_SHIFT_TOLERANCE = { bytes: 1.5, share: 0.25 } as const;
+
+/**
+ * How far the drawn difference between the two #622 probes' shifts — towards
+ * the sun less away from it — may stand from the predicted one: **0.75 bytes
+ * plus a quarter of the prediction**, per channel. Tighter in bytes than
+ * {@link AIR_SHIFT_TOLERANCE} because a difference of two shifts is ~1.6 bytes
+ * where the band is compared at all, and a bound of 1.5 bytes around that would
+ * admit the wrong sign. The CI runner read 1.5/1.8 against 1.6/1.6 predicted
+ * (#703, run 36368471971), so the margin is about four times what it used.
+ */
+const AIR_DIFFERENCE_TOLERANCE = { bytes: 0.75, share: 0.25 } as const;
 
 /**
  * The least a #622 prediction must move a pixel for its comparison to mean

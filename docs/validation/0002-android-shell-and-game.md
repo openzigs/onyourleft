@@ -3388,6 +3388,14 @@ colour towards the sky in the direction looked; 0 is the fog before #622), **`RE
 **`REALISTIC_VALLEY_DEPTH_METRES`** (50: how far below the middle that is reached). There is **no
 grade**: AgX alone is kept, and the same file says why.
 
+⚠️ **"The middle" is the MIDPOINT of the route's elevation range, not its mean**, which is what
+#622's text names — a choice, so the haze stands on the same number as #544's ridge
+(`landform.ts` §`HorizonRelief.middle`), and `REALISTIC_VALLEY_HAZE`'s declaration says so. It matters
+most on a route that is flat but for one big climb: with a 200 m climb the midpoint stands 100 m
+above the flat, so the WHOLE flat takes the full 1.25× haze, where the mean would haze almost none of
+it. AH-622-6 asks for exactly that route, and a "too hazy on the flat" answer there is a vote for the
+mean rather than a smaller `REALISTIC_VALLEY_HAZE`.
+
 ⚠️ **This waits for Part AG.** #622 changes the colour everything distant converges on, which is the
 colour #544 set, and whether a directional fog helps or fights #544's lifted ridge can only be judged
 by eye after AG's rows say how #544 itself reads. Take AG first.
@@ -3416,9 +3424,10 @@ realistic world chosen in Settings. Giving the page a way to face the sun is
 |---|---|
 | AH-622-1 | **Before**: build the first parent of #622's merge with the owner's page staged, and run AH1–AH7 with AH4's URL unchanged. `RUN=622-before` |
 | AH-622-2 | **Cool again (AH3, 25–26 °C)**, install #622's merge the same way, then **after**: AH1–AH7, AH4's URL unchanged. `RUN=622-after` |
-| AH-622-3 | Write both rows into the table above. **Triangles / frame** and **draw calls** should not change at all between them (the page's draw-call column is an average over a window that also holds draws made outside a frame, so at equal draws a frame it can round one apart when the frame rate differs); the measured columns against #616's spread |
+| AH-622-3 | Write both rows into the table above. **Triangles / frame** and **draw calls** should not change at all between them (the page's draw-call column is `calls / frames` over a window, rounded, so read it beside the browser gate's `#616 all layers on` line, which printed **38 on both `main` and #622's head** in CI; if the two builds' columns differ here, say so rather than explain it); the measured columns against #616's spread |
 | AH-622-4 | **By eye, away from the sun**, on the after build, before the tablet is restored: hold at `realistic.html?world=realistic&panel=0&ladder=0&at=2550` and look at the distant ground and hills ahead and to either side; then add `&levers=-air` (the fog as it was before #622, one colour for every direction and no valley haze) and look again. Then hold at `&at=1650`, on the route's valley floor, and compare the two the same way. ⚠️ That floor is only 15 m below the middle of the route's elevation, so the haze there is 1.075×, not the full 1.25× — the valley half of this step is weak on this route, and AH-622-5's own route is the better test of it |
 | AH-622-5 | **By eye, towards the sun**, in the product (realistic world chosen in Settings): ride a stretch of your own saved route that runs **south-west** on the map, looking at the horizon ahead, then a stretch running north-east. Then the same two stretches on a valley floor, if the route has one |
+| AH-622-6 | **By eye, the valley haze on a flat route with one big climb**, in the product: a saved route that is mostly flat with a single climb of 150 m or more. Ride the flat and look at the distance, then ride the same stretch on a local build with `REALISTIC_VALLEY_HAZE` set to 1 (the product has no lever for it; the page's `-air` has one, but the page's route is not this shape). Because the haze starts below the MIDPOINT of the elevation range (above), the whole flat is hazed at the full 1.25× |
 
 | #622 by eye | Answer |
 |---|---|
@@ -3426,5 +3435,6 @@ realistic world chosen in Settings. Giving the page a way to face the sun is
 | Does the directional fog help #544's lifted ridge sit in the sky, or fight it (a band, a seam, a colour the sky behind does not have)? | |
 | Towards the sun (AH-622-5): is the far distance warmer and brighter than away from it, and does it read as the sun's side of the sky? | |
 | A valley floor seen from above: hazier than a ridge at the same distance, and not so hazy it reads as fog? | |
+| The flat of a one-climb route (AH-622-6): is the full valley haze there right, or should the haze start below the route's MEAN elevation instead of the midpoint of its range? | |
 | Anything to re-tune — `REALISTIC_FOG_DIRECTION_SHARE`, `REALISTIC_VALLEY_HAZE`, `REALISTIC_VALLEY_DEPTH_METRES` — and which way | |
 

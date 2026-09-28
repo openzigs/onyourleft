@@ -18,6 +18,8 @@
  * same posture `three-renderer.test.ts` takes for `prepareSceneryGeometry`.
  */
 
+import { readFileSync } from 'node:fs';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { isBuiltKind } from './buildings';
@@ -73,9 +75,12 @@ import {
   realisticUrl,
   type StructureSurface,
 } from './realistic-assets';
+import { HORIZON_AZIMUTH_BINS } from './realistic-light';
 import type { CameraPose } from './port';
 import { STRUCTURE_KINDS, type ScatterItem, type SceneryKind } from './scatter';
 import {
+  ATMOSPHERE_BIN_OFFSET,
+  ATMOSPHERE_BIN_WRAP,
   breathesTheAir,
   ContactShadowBelt,
   isConstructedMaterial,
@@ -2362,7 +2367,8 @@ describe('the realistic world breathes one air, and the stylised world none of i
       expect(shader.fragmentShader).toContain(
         'float oylAzimuth = atan(vOylFogRay.z, vOylFogRay.x) + oylSkyTurn;',
       );
-      expect(shader.fragmentShader).toContain('int oylFrom = int(oylLower + 64.0) % 16;');
+      expect(shader.fragmentShader).toContain('int oylFrom = (int(oylLower) + 64) % 16;');
+      expect(shader.fragmentShader).toContain(`int oylFrom = ${ATMOSPHERE_BIN_WRAP};`);
       expect(shader.fragmentShader).toContain(
         'vec3 oylFogColour = mix(fogColor, oylToward, oylFogShare);',
       );
@@ -2389,6 +2395,44 @@ describe('the realistic world breathes one air, and the stylised world none of i
       tree.parts[0]?.material as unknown as { customProgramCacheKey: () => string }
     ).customProgramCacheKey();
     expect(key).toContain('|oyl-atmosphere');
+  });
+
+  it('wraps a bin index at ANY bin count, because its offset is derived from the count — #703', () => {
+    // The wrap as spliced, read back rather than restated: an offset typed as
+    // a literal would pass the line above at 16 bins and read the wrong
+    // direction at 12 or 24.
+    const wrap = /^\(int\(oylLower\) \+ (\d+)\) % (\d+)$/u.exec(ATMOSPHERE_BIN_WRAP);
+    expect(wrap, ATMOSPHERE_BIN_WRAP).not.toBeNull();
+    const offset = Number(wrap?.[1]);
+    const bins = Number(wrap?.[2]);
+    expect(bins).toBe(HORIZON_AZIMUTH_BINS);
+    expect(offset).toBe(ATMOSPHERE_BIN_OFFSET);
+    expect(offset % bins).toBe(0);
+    // `skyRotation` lies in (−2π, 2π), so `oylAt` lies in (−N − 0.5, 2N − 0.5)
+    // and its floor in [−N − 1, 2N − 1]: every one of those must land on the
+    // bin a true modulo gives, and never on a negative operand of `%`.
+    for (let lower = -bins - 1; lower <= 2 * bins - 1; lower += 1) {
+      expect(lower + offset, String(lower)).toBeGreaterThanOrEqual(0);
+      expect((lower + offset) % bins, String(lower)).toBe(((lower % bins) + bins) % bins);
+    }
+  });
+
+  it('draws nothing into a render target, which is what keeps the table in the fog’s colour space — #703', () => {
+    // `three-renderer.ts` §`ATMOSPHERE`: the table is converted to the OUTPUT
+    // colour space once, while three converts `fogColor` to the LINEAR working
+    // space whenever a render target is bound. The two agree only while the
+    // renderer never binds or builds one — so the first that does (#629's
+    // reflections, #701's post pass) is a red build here, not a fog that
+    // quietly stops matching its own flat table. Code, not prose: the pattern
+    // needs a call or a constructor.
+    const renderer = readFileSync(new URL('./three-renderer.ts', import.meta.url), 'utf8');
+    const binds =
+      /\.setRenderTarget\s*\(|new\s+(?:WebGL\w*RenderTarget|RenderTarget|EffectComposer)\b/gu;
+    expect(
+      renderer.match(binds) ?? [],
+      'a render target in three-renderer.ts: convert #622’s fog table with the space three ' +
+        'converts fogColor with (getUnlitUniformColorSpace), per pass — see §ATMOSPHERE',
+    ).toEqual([]);
   });
 
   it('throws, naming #622, where three’s program no longer holds a fog include', () => {
