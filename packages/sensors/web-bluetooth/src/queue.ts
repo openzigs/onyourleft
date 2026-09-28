@@ -116,7 +116,8 @@ export interface GattQueueOptions {
   readonly schedule?: ((callback: () => void, after: Seconds) => () => void) | undefined;
 }
 
-function defaultSchedule(callback: () => void, after: Seconds): () => void {
+/** `setTimeout`, as the shape `GattQueueOptions.schedule` takes. Shared with `forget` (#716). */
+export function defaultSchedule(callback: () => void, after: Seconds): () => void {
   const handle = setTimeout(callback, after * 1000);
   return () => {
     clearTimeout(handle);

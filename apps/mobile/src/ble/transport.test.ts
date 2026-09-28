@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { beatsPerMinute, revolutionsPerMinute, unixSeconds, watts } from '@onyourleft/domain';
+import {
+  beatsPerMinute,
+  revolutionsPerMinute,
+  seconds,
+  unixSeconds,
+  watts,
+  type Seconds,
+} from '@onyourleft/domain';
 import {
   ANDROID_BLE,
   isSensorError,
@@ -16,9 +23,10 @@ import {
   heartRateProfile,
   type GattProfile,
 } from '@onyourleft/sensors/protocol';
+import { DEFAULT_GATT_OPERATION_TIMEOUT } from '@onyourleft/sensors/web-bluetooth';
 import { describe, expect, it } from 'vitest';
 
-import { createCapacitorTransport } from './transport';
+import { createCapacitorTransport, FORGET_DEADLINE } from './transport';
 import {
   NOT_INITIALIZED_MESSAGE,
   SCRIPTED_DEVICE,
@@ -570,6 +578,121 @@ describe('forgetting a device (#659)', () => {
     const again = await transport.discover({ capabilities: [] });
     await transport.connect(again.identity.id);
     expect(transport.connectionState(again.identity.id)).toBe('connected');
+  });
+});
+
+describe('a forget the plugin never answers — #716', () => {
+  function manualClock() {
+    const pending: { readonly fire: () => void; readonly after: Seconds }[] = [];
+    return {
+      pending,
+      schedule: (callback: () => void, after: Seconds) => {
+        const entry = { fire: callback, after };
+        pending.push(entry);
+        return () => {
+          const index = pending.indexOf(entry);
+          if (index !== -1) {
+            pending.splice(index, 1);
+          }
+        };
+      },
+    };
+  }
+
+  /**
+   * A plugin whose `disconnect` never settles while `stick` is in force. Not
+   * from the start: `connect` disconnects first, as the plugin's own advice is.
+   */
+  function stuckDisconnect(clock: ReturnType<typeof manualClock>, forgetDeadline?: Seconds) {
+    const base = scriptedPort({});
+    let stuck = false;
+    const plugin: typeof base = {
+      ...base,
+      disconnect: (deviceId) =>
+        stuck ? new Promise<void>(() => undefined) : base.disconnect(deviceId),
+    };
+    const transport = createCapacitorTransport({
+      plugin,
+      profiles: [compositeProfile],
+      now: () => AT,
+      schedule: clock.schedule,
+      ...(forgetDeadline === undefined ? {} : { forgetDeadline }),
+    });
+    return {
+      transport,
+      stick: () => {
+        stuck = true;
+      },
+      unstick: () => {
+        stuck = false;
+      },
+    };
+  }
+
+  const flush = async (): Promise<void> => {
+    for (let index = 0; index < 20; index += 1) {
+      await Promise.resolve();
+    }
+  };
+
+  it('gives up at its bound, rejecting forget-timed-out, with the device forgotten here', async () => {
+    const clock = manualClock();
+    const { transport, stick } = stuckDisconnect(clock, seconds(7));
+    const device = await transport.discover({ capabilities: [] });
+    await transport.connect(device.identity.id);
+    stick();
+
+    let outcome: unknown = 'pending';
+    const forgetting = transport.forget(device.identity.id).then(
+      () => 'resolved',
+      (error: unknown) => error,
+    );
+    void forgetting.then((settled) => {
+      outcome = settled;
+    });
+    await flush();
+    expect(outcome).toBe('pending');
+    expect(clock.pending.map((deadline) => deadline.after)).toEqual([seconds(7)]);
+
+    clock.pending[0]?.fire();
+    await forgetting;
+    expect(isSensorError(outcome, 'forget-timed-out')).toBe(true);
+    expect(() => transport.connectionState(device.identity.id)).toThrow(
+      expect.objectContaining({ code: 'device-not-found' }),
+    );
+  });
+
+  it('can be chosen again, and connects, once the bound has passed', async () => {
+    const clock = manualClock();
+    const { transport, stick, unstick } = stuckDisconnect(clock);
+    const first = await transport.discover({ capabilities: [] });
+    await transport.connect(first.identity.id);
+    stick();
+    const forgetting = transport.forget(first.identity.id).catch((error: unknown) => error);
+    await flush();
+    expect(clock.pending.map((deadline) => deadline.after)).toEqual([FORGET_DEADLINE]);
+    clock.pending[0]?.fire();
+    expect(isSensorError(await forgetting, 'forget-timed-out')).toBe(true);
+
+    unstick();
+    const again = await transport.discover({ capabilities: [] });
+    await transport.connect(again.identity.id);
+    expect(transport.connectionState(again.identity.id)).toBe('connected');
+  });
+
+  it('leaves no deadline behind when the plugin answers', async () => {
+    const clock = manualClock();
+    const { transport } = stuckDisconnect(clock);
+    const device = await transport.discover({ capabilities: [] });
+    await transport.connect(device.identity.id);
+    await transport.forget(device.identity.id);
+    expect(clock.pending).toEqual([]);
+  });
+
+  it('waits exactly as long as the Web Bluetooth adapter does', () => {
+    // Restated rather than imported, so the Android shell does not depend on
+    // the browser adapter — and held equal here, where both are in reach.
+    expect(FORGET_DEADLINE).toBe(DEFAULT_GATT_OPERATION_TIMEOUT);
   });
 });
 

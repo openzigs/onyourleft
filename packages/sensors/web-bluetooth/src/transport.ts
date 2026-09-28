@@ -101,7 +101,7 @@ import type {
   RequestDevicePortOptions,
 } from './gatt';
 import { canonicalUuid, type GattProfile, type MeasurementSink } from './profile';
-import { createGattQueue } from './queue';
+import { createGattQueue, DEFAULT_GATT_OPERATION_TIMEOUT, defaultSchedule } from './queue';
 
 export interface WebBluetoothTransportOptions {
   /**
@@ -447,6 +447,14 @@ export function createWebBluetoothTransport(
     ...(options.operationTimeout === undefined ? {} : { timeout: options.operationTimeout }),
     ...(options.schedule === undefined ? {} : { schedule: options.schedule }),
   });
+  /**
+   * The bound on `BluetoothDevice.forget()` — #716. The queue's own bound and
+   * the queue's own clock, read from the same two options, because it answers
+   * the same hazard: Web Bluetooth specifies no timeout for `forget()` either,
+   * and it is not a GATT operation, so the queue never sees it.
+   */
+  const forgetTimeout = options.operationTimeout ?? DEFAULT_GATT_OPERATION_TIMEOUT;
+  const schedule = options.schedule ?? defaultSchedule;
 
   /**
    * Turn a synchronous throw into a rejection — `../../src/transport.ts`'s
@@ -1522,9 +1530,37 @@ export function createWebBluetoothTransport(
       // ⚠️ Feature-detected, and called through the record's own object. A
       // browser without `forget()` keeps the grant, and the only thing a page
       // can do about that is not hold the device, which the line above did.
-      if (typeof record.native.forget === 'function') {
-        await record.native.forget();
+      const native = record.native;
+      const revoke = native.forget;
+      if (typeof revoke !== 'function') {
+        return;
       }
+      // ⚠️ Bounded (#716). A `forget()` that never settles used to keep this
+      // promise pending for the session, and the caller with it — which is
+      // what refuses a re-pairing while a forget is in progress. At the bound
+      // the device is forgotten HERE (the record went above) and the caller is
+      // told the browser has not confirmed its half. The browser's call is left
+      // running: nothing can cancel it, and when it lands it revokes the grant
+      // of whatever pairing of this device is current then.
+      await new Promise<void>((resolve, reject) => {
+        const cancel = schedule(() => {
+          reject(
+            new SensorError('forget-timed-out', 'the browser did not confirm the forget in time', {
+              deviceId: id,
+            }),
+          );
+        }, forgetTimeout);
+        attempt(() => revoke.call(native)).then(
+          () => {
+            cancel();
+            resolve();
+          },
+          (error: unknown) => {
+            cancel();
+            reject(error instanceof Error ? error : new Error(String(error)));
+          },
+        );
+      });
     },
 
     connectionState(id: DeviceId): ConnectionState {

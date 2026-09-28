@@ -138,6 +138,12 @@ export interface FakeDeviceSpec {
   readonly withoutForget?: boolean;
   /** `forget()` rejects, as a browser refusing to revoke the grant would. */
   readonly forgetRejects?: boolean;
+  /**
+   * `forget()` never settles, and revokes nothing — #716. Web Bluetooth
+   * specifies no timeout for it, so this is a browser the specification
+   * permits.
+   */
+  readonly forgetNeverSettles?: boolean;
 }
 
 export interface FakeDeviceHandle {
@@ -631,6 +637,9 @@ export function createFakeBluetooth(options: FakeBluetoothOptions): FakeBluetoot
                 state.forgets += 1;
                 if (spec.forgetRejects === true) {
                   return Promise.reject(domError('InvalidStateError', 'forget refused'));
+                }
+                if (spec.forgetNeverSettles === true) {
+                  return new Promise<void>(() => undefined);
                 }
                 state.allowed.clear();
                 if (state.connected) {

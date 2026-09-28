@@ -243,6 +243,12 @@ export interface SensorTransport {
    * is already forgotten is the ordinary result of a second press. It rejects
    * only when the stack itself refused to revoke a permission, and the record
    * is gone either way.
+   *
+   * ⚠️ **Bounded** (#716): a stack that has not answered within the
+   * transport's bound — the one its GATT operations are held to — is left to
+   * finish on its own and this rejects with `forget-timed-out`. The record is
+   * gone by then too, so the device can be chosen again; what is unknown is
+   * only whether the stack still holds its permission.
    */
   forget(id: DeviceId): Promise<void>;
 

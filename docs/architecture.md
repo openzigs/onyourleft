@@ -635,7 +635,11 @@ Devices. The controls come first and what the platform cannot do is beneath them
 `<details>`, with *"one user gesture per device"* kept outside it. *Forget* is
 `SensorTransport.forget`: `BluetoothDevice.forget()` in a browser that has it, which gives the
 origin's permission back, and in every transport the id stops being issued until the chooser
-returns the device again. `apps/web/browser/devices.browser.spec.ts` walks Home → Devices → Pair
+returns the device again. Since #716 both transports hold it to the GATT queue's thirty-second
+bound: past it the device is forgotten here and the rider is told the browser may still list it.
+Since #713 a Forget pressed while that device's pairing is still wiring ends the pairing quietly,
+and whatever the pairing acquired after the press — a subscription, a trainer's control client — is
+let go. `apps/web/browser/devices.browser.spec.ts` walks Home → Devices → Pair
 against the scripted Web Bluetooth stack, with today's dead end as its control.
 
 **Controls first, detail tucked** (#666, the owner's ruling on #654). Settings, Segments, Files and

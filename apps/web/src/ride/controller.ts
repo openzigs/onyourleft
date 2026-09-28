@@ -498,6 +498,15 @@ function forgottenButStillListed(name: string): string {
 }
 
 /**
+ * What a rider is told when *Forget* removed a device and the browser did not
+ * say, within the transport's bound, whether it gave up its permission — #716.
+ * "May", because nothing here knows: the browser may yet finish, or may never.
+ */
+function forgottenButMayStillBeListed(name: string): string {
+  return `${name} is forgotten here. Your browser did not confirm it, so it may still list it. If it does, remove it in this site's settings.`;
+}
+
+/**
  * What a rider is told when *Forget* removed a device but one of this app's
  * subscriptions to it would not let go — #706. The device is gone from the
  * list and from the transport either way; the sentence is so the rider is not
@@ -507,6 +516,19 @@ function forgottenButStillListed(name: string): string {
  */
 function forgottenButStillListening(name: string): string {
   return `${name} is forgotten, but this app could not stop listening to it cleanly. If its readings still appear, reload the page, or close the app and open it again.`;
+}
+
+/**
+ * What `wire` throws when the entry it is wiring has left the sensor list —
+ * #713: Forget was pressed, or the controller disposed, while the pairing was
+ * still in progress. `attach` ends such a pairing quietly, and tells it apart
+ * by the list rather than by this class, so a connect that FAILED because the
+ * device had just been forgotten ends the same way.
+ */
+class PairingAbandoned extends Error {
+  constructor() {
+    super('the pairing was abandoned');
+  }
 }
 
 /** Why a game ride's gradient is refused while its trainer is being let go. */
@@ -1412,6 +1434,23 @@ export function createRideController(options: RideControllerOptions): RideContro
     try {
       await wire(entry);
     } catch (error) {
+      if (sensors.get(id) !== entry) {
+        // #713: Forget was pressed (or the controller disposed) while this
+        // pairing was still wiring. `unpair` has detached the entry, taken the
+        // row away and forgotten the device, so there is nothing left to
+        // undo but whatever `wire` acquired since — and no pairing error to
+        // report: the rider asked for this. A connect or a subscribe that
+        // FAILED because the transport had just forgotten the device lands
+        // here too, and neither forgets it a second time nor names a fault.
+        // ⚠️ And `sensors.delete` is not called: by now the id may belong to
+        // a newer pairing of the same device.
+        try {
+          detach(entry);
+        } catch {
+          // Every step has run; the entry is unlisted, and nobody asked.
+        }
+        return;
+      }
       // A connect or a subscribe that failed leaves nothing on screen. Half a
       // sensor — listed, named, and delivering nothing — is the state a rider
       // cannot tell from a working one.
@@ -1442,9 +1481,33 @@ export function createRideController(options: RideControllerOptions): RideContro
     changed();
   };
 
-  /** Everything that needs a link. Separated so `attach` can undo all of it. */
+  /**
+   * Everything that needs a link. Separated so `attach` can undo all of it.
+   *
+   * ⚠️ **The entry is listed before this finishes, so Forget can land between
+   * any two of its awaits** (#713). `unpair` then detaches the entry and
+   * deletes the row, and whatever an await here hands back afterwards — a
+   * subscription, a control client and its `onControlLost` — would be pushed
+   * onto an entry nothing will ever detach again. So after every await the
+   * entry is checked against the list, and one that has left it ends with
+   * {@link PairingAbandoned}: `attach` detaches it once more, which lets go of
+   * exactly what arrived late, and reports nothing.
+   *
+   * A control client that arrives late is CLOSED, not released: it has never
+   * held control. Control is asked for by a separate press
+   * (`requestTrainerControl`, a thing the rider does — rule 2 at the top of
+   * the file), which reaches only a LISTED entry's trainer, and opening a
+   * client asks for nothing — so it cannot be holding resistance, and a Stop
+   * would be a write to a machine this app never told anything. The #713 test
+   * reads the control point's writes to hold that.
+   */
   const wire = async (entry: SensorEntry): Promise<void> => {
     const id = entry.device.identity.id;
+    const stillWanted = (): void => {
+      if (sensors.get(id) !== entry) {
+        throw new PairingAbandoned();
+      }
+    };
     entry.release.push(
       transport.observeConnectionState(id, (state) => {
         const previous = entry.state;
@@ -1464,6 +1527,7 @@ export function createRideController(options: RideControllerOptions): RideContro
     );
 
     await transport.connect(id);
+    stillWanted();
     entry.state = transport.connectionState(id);
 
     for (const capability of entry.device.capabilities) {
@@ -1471,6 +1535,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         continue;
       }
       entry.measurements.push(await transport.subscribe(id, capability, onMeasurement));
+      stillWanted();
     }
 
     if (entry.role === 'trainer' && openTrainer !== undefined) {
@@ -1505,6 +1570,7 @@ export function createRideController(options: RideControllerOptions): RideContro
           }),
         );
       }
+      stillWanted();
     }
   };
 
@@ -1941,6 +2007,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         sensors.delete(id);
         changed();
         let refused = false;
+        let unconfirmed = false;
         try {
           // #659: FORGET, not disconnect. The Devices screen's control is
           // *Forget*, and a device that was only disconnected stayed in the
@@ -1949,17 +2016,24 @@ export function createRideController(options: RideControllerOptions): RideContro
           // connection budget for the rest of the session. `forget` drops the
           // link as `disconnect` did and then lets go of the device.
           await transport.forget(id);
-        } catch {
+        } catch (error) {
           // `forget` resolves for a device that is already gone, so a
-          // rejection means one thing: the stack refused to give up its
-          // permission. The device is gone from this app, and the browser
-          // still lists it — which the row saying *Not paired* would hide.
-          refused = true;
+          // rejection means the stack refused to give up its permission — or,
+          // since #716, did not answer within the transport's bound. Either
+          // way the device is gone from this app, the mark below is cleared
+          // so it can be paired again, and the browser still lists it (or may)
+          // — which the row saying *Not paired* would hide.
+          if (isSensorError(error, 'forget-timed-out')) {
+            unconfirmed = true;
+          } else {
+            refused = true;
+          }
         }
         // Both, when both went wrong: each names a different thing to do.
         const said = [
           stillListening ? forgottenButStillListening(name) : undefined,
           refused ? forgottenButStillListed(name) : undefined,
+          unconfirmed ? forgottenButMayStillBeListed(name) : undefined,
         ].filter((sentence) => sentence !== undefined);
         // #712: through `tell`, so a Pair that failed while `forget` was
         // pending keeps its error; a clean forget writes nothing at all.

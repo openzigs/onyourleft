@@ -162,7 +162,17 @@ export type SensorErrorCode =
    * OS-wide and shared with whatever else the athlete has paired, so this is a
    * routine outcome rather than an edge case.
    */
-  | 'connection-budget-exceeded';
+  | 'connection-budget-exceeded'
+  /**
+   * `forget` let go of the device here, and the stack did not say within the
+   * transport's bound whether it gave up its own hold on it — #716. Web
+   * Bluetooth specifies no timeout for `BluetoothDevice.forget()` any more than
+   * for a GATT operation, and a forget that never settled used to leave the
+   * device unpairable for the rest of the session. Its own code rather than
+   * the refusal a stack reports, because "unknown" is a different state from
+   * "refused": the browser MAY still list the device, and may not.
+   */
+  | 'forget-timed-out';
 
 /**
  * The one error this package raises.
