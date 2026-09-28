@@ -56,6 +56,7 @@ import {
   REALISTIC_VEGETATION_KINDS,
 } from '../src/game/realistic-assets';
 import { modelFacts } from '../src/game/realistic-bytes-testing';
+import { REALISTIC_WOODED_DRAW_CALLS } from '../src/game/realistic-budget';
 
 /**
  * Said beside every frame time this spec publishes — #473. Since #473 the
@@ -3414,7 +3415,7 @@ test.describe('the trees’ levels of detail in the realistic world — #617', (
     console.log(
       `#617: ${String(measured.trianglesSubmitted)} triangles a frame, ` +
         `${String(measured.trianglesHardSwap)} with the hard swap; ` +
-        `${String(measured.woodedScenery)} scenery items drawn`,
+        `${String(measured.woodedScenery)} scenery items drawn in ${String(measured.drawCallsSubmitted)} draw calls`,
     );
     // Non-vacuity: a real frame with scenery in it, counted at the draw calls.
     expect(measured.woodedScenery).toBeGreaterThan(10);
@@ -3424,6 +3425,32 @@ test.describe('the trees’ levels of detail in the realistic world — #617', (
     expect(measured.trianglesHardSwap - measured.trianglesSubmitted).toBeGreaterThanOrEqual(
       TRIANGLES_FALL_AT_LEAST,
     );
+  });
+
+  test('draws the wooded view in at most 35 calls, into the same picture — #639', async ({
+    harnessRun,
+  }) => {
+    const measured = await trees(harnessRun);
+    console.log(
+      `#639: the wooded view makes ${String(measured.drawCallsSubmitted)} draw calls ` +
+        `(${String(measured.trianglesSubmitted)} triangles); from a world loaded one part a ` +
+        `material, as before #639, ${String(measured.drawCallsUnmerged)} ` +
+        `(${String(measured.trianglesUnmerged)} triangles); ${String(measured.unmergedPixelsChanged)} ` +
+        `of ${String(measured.pixelsCompared)} pixels differ`,
+    );
+    // Non-vacuity: a real frame with scenery in it, counted at the draw calls.
+    expect(measured.woodedScenery).toBeGreaterThan(10);
+    expect(measured.drawCallsSubmitted).toBeGreaterThan(0);
+    expect(measured.drawCallsSubmitted).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
+    // THE CONTROL: the same frame from a world loaded one part a material, as
+    // every load was before #639, must be OVER the ceiling — so the count
+    // above is a count of merged trees, not of a frame that happened to hold
+    // few. The same triangles, so the saving is calls and not geometry…
+    expect(measured.drawCallsUnmerged).toBeGreaterThan(REALISTIC_WOODED_DRAW_CALLS);
+    expect(measured.trianglesUnmerged).toBe(measured.trianglesSubmitted);
+    // …and the same picture: the layers are read as the materials were.
+    expect(measured.pixelsCompared).toBe(640 * 360);
+    expect(measured.unmergedPixelsChanged).toBeLessThanOrEqual(MERGED_PIXELS_CHANGED);
   });
 
   test('hands a tree over between levels with no jump in the picture — #617', async ({
@@ -3505,6 +3532,16 @@ test.describe('the trees’ levels of detail in the realistic world — #617', (
     ).toBeGreaterThan(10_000);
   });
 });
+
+/**
+ * How many of the wooded frame's pixels may differ between the product's trees
+ * and the same trees loaded one part a material, as before #639: **none**. The
+ * layered shader reads each layer's own maps, factor and normal scale through
+ * explicit gradients scaled by the rung's bias, which is the level of detail
+ * `texture(s, uv, bias)` picks; SwiftShader drew the two frames identically
+ * on 2026-09-28.
+ */
+const MERGED_PIXELS_CHANGED = 0;
 
 /**
  * The least #617's middle level must take off the wooded view's frame, against

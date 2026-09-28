@@ -124,6 +124,7 @@ import {
   sceneryDrawnOf,
   setBuildingOpenings,
   setRealisticTints,
+  setRealisticMaterialsMerged,
   setTreeLevels,
   threeGameRenderer,
   waterSkyOf,
@@ -1641,21 +1642,28 @@ function countingIndices(body: (indices: () => number) => void): void {
  * product's own page rather than only the owner's. Patched and restored for
  * `countingIndices`' reason.
  */
-function countingTriangles(body: (triangles: () => number) => void): void {
+function countingTriangles(body: (triangles: () => number, calls: () => number) => void): void {
   const gl = WebGL2RenderingContext.prototype as unknown as Record<string, unknown>;
   const originals = new Map<string, (...args: unknown[]) => unknown>();
   let triangles = 0;
+  // #639: the draw calls too, at the same entry points — #616's counter, as
+  // the owner's page counts them (`realistic-harness.ts`).
+  let calls = 0;
   for (const name of COUNTED_DRAWS) {
     const original = gl[name] as ((...args: unknown[]) => unknown) | undefined;
     if (original === undefined) continue;
     originals.set(name, original);
     gl[name] = function counted(this: unknown, ...args: unknown[]): unknown {
       triangles += trianglesInDraw(name, args);
+      calls += 1;
       return original.apply(this, args);
     };
   }
   try {
-    body(() => triangles);
+    body(
+      () => triangles,
+      () => calls,
+    );
   } finally {
     for (const [name, original] of originals) gl[name] = original;
   }
@@ -4116,6 +4124,22 @@ export interface TreeLevelMeasurement {
    */
   readonly trianglesSubmitted: number;
   readonly trianglesHardSwap: number;
+  /**
+   * #639: the draw calls the same frame of the wooded view makes, counted at
+   * the same entry points (#616's counter), as the product draws its trees.
+   */
+  readonly drawCallsSubmitted: number;
+  /**
+   * #639's control: the same frame from a world loaded with each tree's parts
+   * kept one per material, as every load was before #639
+   * (`three-renderer.ts` §`setRealisticMaterialsMerged`) — its draw calls and
+   * triangles, and how many of the frame's pixels differ from the product's,
+   * of how many compared.
+   */
+  readonly drawCallsUnmerged: number;
+  readonly trianglesUnmerged: number;
+  readonly unmergedPixelsChanged: number;
+  readonly pixelsCompared: number;
   /** How many scenery items the wooded view drew, so a view with no trees is not a saving. */
   readonly woodedScenery: number;
   /** @see TreeHandOver */
@@ -4268,6 +4292,11 @@ const NO_TREES: TreeLevelMeasurement = {
   drawnWorld: '',
   trianglesSubmitted: 0,
   trianglesHardSwap: 0,
+  drawCallsSubmitted: 0,
+  drawCallsUnmerged: 0,
+  trianglesUnmerged: 0,
+  unmergedPixelsChanged: 0,
+  pixelsCompared: 0,
   woodedScenery: 0,
   handOver: { out: [], covered: [], changed: [] },
   handOverControl: { out: [], covered: [], changed: [] },
@@ -5750,6 +5779,40 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   };
 }
 
+/** One frame's draw calls and triangles, and its pixels when asked. @see woodedFrameOf */
+interface WoodedFrame {
+  readonly triangles: number;
+  readonly calls: number;
+  readonly pixels?: Uint8Array;
+}
+
+/**
+ * Draws `frame` twice and counts the SECOND, for `sceneryIndicesByKind`'s
+ * reason, at #616's entry points — and reads it back at `size` when asked.
+ */
+function woodedFrameOf(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  frame: SceneFrame,
+  size?: { readonly width: number; readonly height: number },
+): WoodedFrame {
+  let triangles = 0;
+  let calls = 0;
+  countingTriangles((counted, called) => {
+    view.render(frame);
+    const before = counted();
+    const callsBefore = called();
+    view.render(frame);
+    triangles = counted() - before;
+    calls = called() - callsBefore;
+  });
+  return {
+    triangles,
+    calls,
+    ...(size === undefined ? {} : { pixels: readRegion(gl, 0, 0, size.width, size.height) }),
+  };
+}
+
 /**
  * The trees' levels of detail in a real engine — #617.
  *
@@ -5788,13 +5851,14 @@ function treeLevelProbe(
   | 'drawnWorld'
   | 'trianglesSubmitted'
   | 'trianglesHardSwap'
+  | 'drawCallsSubmitted'
   | 'woodedScenery'
   | 'handOver'
   | 'handOverControl'
   | 'handOverOffScreenCovered'
   | 'nearestVisibleTriangles'
   | 'nearestVisibleTrianglesControl'
-> {
+> & { readonly woodedPicture: Uint8Array } {
   const build = (levels: TreeLevels): { view: GameView; gl: WebGL2RenderingContext } => {
     setTreeLevels(levels);
     const canvas = document.createElement('canvas');
@@ -5840,22 +5904,22 @@ function treeLevelProbe(
       if (!shared) view.destroy();
     }
   };
-  const trianglesOf = (levels: TreeLevels): { triangles: number; trees: number; world: string } =>
+  const trianglesOf = (
+    levels: TreeLevels,
+    picture = false,
+  ): WoodedFrame & { trees: number; world: string } =>
     withLevels(
       levels,
-      (view) => {
-        let triangles = 0;
-        countingTriangles((counted) => {
-          view.render(wooded);
-          const before = counted();
-          view.render(wooded);
-          triangles = counted() - before;
-        });
-        return { triangles, trees: sceneryDrawnOf(view), world: drawnWorldOf(view) };
-      },
-      COUNTED,
+      (view, gl) => ({
+        ...woodedFrameOf(view, gl, wooded, picture ? { width, height } : undefined),
+        trees: sceneryDrawnOf(view),
+        world: drawnWorldOf(view),
+      }),
+      // #639: the product's frame is also READ BACK, at full size, as the
+      // picture #639's control must reproduce; the shared view is fresh here.
+      picture ? { width, height } : COUNTED,
     );
-  const product = trianglesOf(REALISTIC_TREE_LEVELS);
+  const product = trianglesOf(REALISTIC_TREE_LEVELS, true);
   const hardSwap = trianglesOf(HARD_SWAP_TREE_LEVELS);
   phaseEnds('trees: triangles');
 
@@ -5959,12 +6023,14 @@ function treeLevelProbe(
   console.log(
     `#617: the wooded view submits ${String(product.triangles)} triangles against ` +
       `${String(hardSwap.triangles)} with the hard swap (${String(hardSwap.triangles - product.triangles)} fewer), ` +
-      `${String(product.trees)} scenery items drawn`,
+      `${String(product.trees)} scenery items drawn, in ${String(product.calls)} draw calls`,
   );
   return {
     drawnWorld: product.world,
     trianglesSubmitted: product.triangles,
     trianglesHardSwap: hardSwap.triangles,
+    drawCallsSubmitted: product.calls,
+    woodedPicture: product.pixels ?? new Uint8Array(0),
     woodedScenery: product.trees,
     handOver,
     handOverControl,
@@ -6008,7 +6074,42 @@ async function treeLevelRun(): Promise<TreeLevelMeasurement> {
     ),
     markers: [],
   };
-  return { measured: true, ...treeLevelProbe(wooded, level, 640, 360, top) };
+  const { woodedPicture, ...probed } = treeLevelProbe(wooded, level, 640, 360, top);
+  // #639's control: the world loaded as it was before #639, each tree's parts
+  // one per material, and the same wooded frame on a fresh view at the same
+  // size, drawn twice as the product's was.
+  setRealisticMaterialsMerged(false);
+  let unmerged: WoodedFrame;
+  try {
+    // `loadRealisticWorld` itself, which REPLACES the loaded world: the port's
+    // is `loadRealisticWorldOnce`, which answers with the world already loaded.
+    const outcome = await loadRealisticWorld();
+    if (!outcome.loaded)
+      throw new Error(`#639: the control's world did not load: ${outcome.detail}`);
+    const canvas = document.createElement('canvas');
+    const view = threeGameRenderer.create(canvas, top);
+    const gl = canvas.getContext('webgl2');
+    try {
+      if (gl === null) throw new Error('#639: no WebGL 2 context for the control');
+      view.resize(640, 360);
+      unmerged = woodedFrameOf(view, gl, wooded, { width: 640, height: 360 });
+    } finally {
+      view.destroy();
+    }
+  } finally {
+    setRealisticMaterialsMerged(true);
+  }
+  phaseEnds('trees: unmerged control');
+  const pixels = unmerged.pixels ?? new Uint8Array(0);
+  return {
+    measured: true,
+    ...probed,
+    drawCallsUnmerged: unmerged.calls,
+    trianglesUnmerged: unmerged.triangles,
+    unmergedPixelsChanged:
+      pixels.length === woodedPicture.length ? pixelsChanged(woodedPicture, pixels) : Number.NaN,
+    pixelsCompared: woodedPicture.length / 4,
+  };
 }
 
 function emptyHarness(errors: readonly string[]): NonNullable<Window['__oylGameHarness']> {

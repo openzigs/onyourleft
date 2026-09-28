@@ -3214,6 +3214,8 @@ published figures (its run predates `oyl.txt`).
 | #618 | after (KTX2) | #618's merge | — | | | | | | | | |
 | #622 | before (one colour) | the first parent of #622's merge | — | | | | | | | | |
 | #622 | after (the air) | #622's merge | — | | | | | | | | |
+| #639 | before (a call a material) | the first parent of #639's merge | — | | | | | | | | |
+| #639 | after (a call a tree level) | #639's merge | — | | | | | | | | |
 
 **Phone (OEM, model, Android, WebView):** Google Pixel Tablet, build `CP2A.260705.006`, Android 17,
 WebView 153.0.8010.36  **Build:** debug, `main` at **`f91a5fb`** (before #617's tree LODs, PR #637)
@@ -3438,3 +3440,30 @@ realistic world chosen in Settings. Giving the page a way to face the sun is
 | The flat of a one-climb route (AH-622-6): is the full valley haze there right, or should the haze start below the route's MEAN elevation instead of the midpoint of its range? | |
 | Anything to re-tune — `REALISTIC_FOG_DIRECTION_SHARE`, `REALISTIC_VALLEY_HAZE`, `REALISTIC_VALLEY_DEPTH_METRES` — and which way | |
 
+### #639's rows — a tree drawn in one call a level
+
+[#639](https://github.com/openzigs/onyourleft/issues/639) wins back the draw calls #617's middle
+level cost. Every realistic tree carried three materials, so each of its levels was three calls; now
+each level is **one material whose layers are the scan's materials**
+(`apps/web/src/game/three-renderer.ts` §`mergeShapeMaterials`), read per fragment in the shader. No
+committed file changes. Deterministic figures, from the browser gate in the pinned Chromium on
+2026-09-28: the gate's wooded view **37 → 27** draw calls, the owner's page at `at=2550` (#616's
+counter) **39 → 31**, and **0** triangles, **0** texture bytes and **0 of 230 400 pixels** changed.
+
+**Cost ceiling** (#615's rule 1): fewer draw calls, and **no measurable increase** against this
+Part's spread — GPU DVFS mean, CPU *both*, skin at minute 20 and present p95. ⚠️ **Two things could
+cost GPU time, and only this row can say whether they do.** Each tree fragment chooses its layer's
+maps in a branch and reads them with explicit gradients (`textureGrad`), where it used to read one
+material's maps unconditionally; and a tree's bark is now drawn in the canopy's place in the order
+(after the opaque world) rather than with it, because it shares the leaves' alpha-tested material.
+
+| Step | What to do |
+|---|---|
+| AH-639-1 | **Before**: build the first parent of #639's merge with the owner's page staged, and run AH1–AH7 with AH4's URL unchanged. `RUN=639-before` |
+| AH-639-2 | **Cool again (AH3, 25–26 °C)**, install #639's merge the same way, then **after**: AH1–AH7, AH4's URL unchanged. `RUN=639-after` |
+| AH-639-3 | Write both rows into the table above. **Triangles / frame** should not change at all; **draw calls** should fall (the page's column is `calls / frames` over a window, rounded — read it beside the browser gate's `#616 all layers on` line); the measured columns against #616's spread |
+| AH-639-4 | **By eye**, on the after build: hold at `realistic.html?world=realistic&panel=0&ladder=0&at=2550` and look at the nearest trees' bark and leaves. Do they look exactly as they did — the bark tiled as before, no leaf gone solid, no bark cut away? |
+
+| #639 by eye | Answer |
+|---|---|
+| Do the trees look the same as before #639 (AH-639-4)? | |
