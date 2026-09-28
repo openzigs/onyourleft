@@ -3292,8 +3292,8 @@ test.describe('the realistic world — ADR 0026', () => {
         );
       }
     }
-    // Not vacuous: the table does lean the fog by more than the tolerance
-    // somewhere at each probe.
+    // Not vacuous: the table leans the fog far enough at each probe that a
+    // lean at half strength would fail the comparison above (AIR_SHIFT_FLOOR).
     for (const predicted of [air.predictedToward, air.predictedAway]) {
       expect(Math.max(...predicted.map(Math.abs))).toBeGreaterThan(AIR_SHIFT_FLOOR / 255);
     }
@@ -3625,6 +3625,12 @@ const AIR_CONTROL_AGREEMENT = 0.02;
 const AIR_SHIFT_TOLERANCE = { bytes: 1.5, share: 0.1 } as const;
 
 /**
+ * How far, as a share of the prediction, an effect drawn at HALF strength
+ * misses it: **0.5**. The mutation {@link AIR_SHIFT_FLOOR} is sized against.
+ */
+const HALVED_EFFECT_MISS = 0.5;
+
+/**
  * How far the drawn difference between the two #622 probes' shifts — towards
  * the sun less away from it — may stand from the predicted one: **0.75 bytes
  * plus a quarter of the prediction**, per channel. Tighter in bytes than
@@ -3637,9 +3643,22 @@ const AIR_DIFFERENCE_TOLERANCE = { bytes: 0.75, share: 0.25 } as const;
 
 /**
  * The least a #622 prediction must move a pixel for its comparison to mean
- * anything: **3 bytes**, twice the tolerance's fixed part.
+ * anything: **4 bytes today, derived rather than typed (#711's review).**
+ *
+ * The comparison is `|drawn − predicted| ≤ bytes + share · |predicted|`. A
+ * build whose effect is scaled by `k` draws `k · predicted`, and misses by
+ * `|1 − k| · |predicted|`; that is past the bound only once
+ * `|predicted| > bytes / (|1 − k| − share)`. The floor is that threshold for
+ * an effect at HALF strength — `ceil(1.5 / (0.5 − 0.1)) = ceil(3.75) = 4` —
+ * so a green floor says the largest prediction is big enough for a halved fog
+ * lean (or a halved valley haze, which the valley check holds to the same
+ * tolerance and the same floor) to fail somewhere, not merely an absent one.
+ * The 3 bytes typed here before proved only the latter. Tightening or
+ * loosening {@link AIR_SHIFT_TOLERANCE} moves this with it.
  */
-const AIR_SHIFT_FLOOR = 3;
+const AIR_SHIFT_FLOOR = Math.ceil(
+  AIR_SHIFT_TOLERANCE.bytes / (HALVED_EFFECT_MISS - AIR_SHIFT_TOLERANCE.share),
+);
 
 /**
  * How much brighter the drawn sky 30° up must be with the world's sun behind

@@ -2466,6 +2466,23 @@ describe('the realistic world breathes one air, and the stylised world none of i
       'transmission',
     ]);
     expect(renderTargetsIn('material.transmission = 1;')).toEqual(['transmission']);
+    // #711's review: the spellings the first parsed version let through.
+    expect(renderTargetsIn("renderer['setRenderTarget'](target);")).toEqual(['.setRenderTarget']);
+    expect(renderTargetsIn('renderer[`setRenderTarget`](target);')).toEqual(['.setRenderTarget']);
+    expect(renderTargetsIn('const { setRenderTarget } = renderer;')).toEqual(['.setRenderTarget']);
+    expect(renderTargetsIn('const { setRenderTarget: bind } = renderer;')).toEqual([
+      '.setRenderTarget',
+    ]);
+    expect(renderTargetsIn("material['transmission'] = 1;")).toEqual(['transmission']);
+    expect(renderTargetsIn("make({ ['transmission']: 1 });")).toEqual(['transmission']);
+    expect(renderTargetsIn("make({ 'transmission': 1 });")).toEqual(['transmission']);
+    expect(renderTargetsIn('const r = new Reflector(geometry);')).toEqual(['new Reflector']);
+    expect(renderTargetsIn('const r = new Refractor(geometry);')).toEqual(['new Refractor']);
+    expect(renderTargetsIn('const c = new THREE.CubeCamera(1, 100, target);')).toEqual([
+      'new CubeCamera',
+    ]);
+    // What it deliberately does not claim to follow: a name held in a value.
+    expect(renderTargetsIn('renderer[method](target);')).toEqual([]);
   });
 
   it('throws, naming #622, where three’s program no longer holds a fog include', () => {
@@ -2499,12 +2516,25 @@ describe('the realistic world breathes one air, and the stylised world none of i
  * code since #708. The parser's tree holds no comment and no string contents,
  * so a sentence naming a call is not the call.
  *
- * Three shapes: any `.setRenderTarget` (a call, an optional call, or the
- * method handed on); a `new` of anything ending `RenderTarget`, or an
- * `EffectComposer`; and a `transmission` property — in an object literal or
- * read or written on an object — because three renders a material with
- * `transmission` above nought through a hidden pass into a render target of its
- * own (`WebGLRenderer.js` §`renderTransmissionPass`).
+ * Three shapes:
+ *
+ * - `setRenderTarget` reached as a member however it is spelled — `.name`,
+ *   `?.name`, `['name']`, or pulled out by destructuring
+ *   (`const { setRenderTarget } = renderer`, renamed or not);
+ * - a `new` of anything ending `RenderTarget`, an `EffectComposer`, or one of
+ *   the three objects in `examples/jsm` and core that render the scene into a
+ *   target of their own: `Reflector`, `Refractor` and `CubeCamera`;
+ * - a `transmission` property, spelled any of those ways or as an object
+ *   literal's key (plain, quoted, shorthand or `['transmission']`), because
+ *   three renders a material with `transmission` above nought through a hidden
+ *   pass into a render target of its own (`WebGLRenderer.js`
+ *   §`renderTransmissionPass`).
+ *
+ * ⚠️ What it cannot see, stated rather than chased: a name reached through a
+ * value rather than a literal (`renderer[method]`, a template with a
+ * substitution), and a constructor under another name
+ * (`const RT = WebGLRenderTarget; new RT(1, 1)`) — the parser knows the text of
+ * the `new`, not what the identifier was bound to.
  *
  * ⚠️ It reads ONE file. A target bound by another module, or by a three
  * feature named nowhere here, is not seen; `three-renderer.ts` §`ATMOSPHERE`
@@ -2513,11 +2543,34 @@ describe('the realistic world breathes one air, and the stylised world none of i
 function renderTargetsIn(source: string): readonly string[] {
   const file = ts.createSourceFile('source.ts', source, ts.ScriptTarget.Latest, true);
   const found: string[] = [];
+  const MEMBERS: Readonly<Record<string, string>> = {
+    setRenderTarget: '.setRenderTarget',
+    transmission: 'transmission',
+  };
+  /** The literal text a name is spelled with, or nothing when it is computed. */
+  const literalName = (name: ts.Node | undefined): string | undefined => {
+    if (name === undefined) return undefined;
+    if (ts.isComputedPropertyName(name)) return literalName(name.expression);
+    if (
+      ts.isIdentifier(name) ||
+      ts.isStringLiteral(name) ||
+      ts.isNoSubstitutionTemplateLiteral(name)
+    ) {
+      return name.text;
+    }
+    return undefined;
+  };
+  const member = (name: string | undefined): void => {
+    const label = name === undefined ? undefined : MEMBERS[name];
+    if (label !== undefined) found.push(label);
+  };
   const visit = (node: ts.Node): void => {
     if (ts.isPropertyAccessExpression(node)) {
-      const name = node.name.text;
-      if (name === 'setRenderTarget') found.push('.setRenderTarget');
-      if (name === 'transmission') found.push('transmission');
+      member(node.name.text);
+    } else if (ts.isElementAccessExpression(node)) {
+      member(literalName(node.argumentExpression));
+    } else if (ts.isBindingElement(node) && ts.isObjectBindingPattern(node.parent)) {
+      member(literalName(node.propertyName ?? node.name));
     } else if (ts.isNewExpression(node)) {
       const callee = node.expression;
       const name = ts.isPropertyAccessExpression(callee)
@@ -2525,11 +2578,12 @@ function renderTargetsIn(source: string): readonly string[] {
         : ts.isIdentifier(callee)
           ? callee.text
           : '';
-      if (/RenderTarget$|^EffectComposer$/u.test(name)) found.push(`new ${name}`);
+      if (/RenderTarget$|^(?:EffectComposer|Reflector|Refractor|CubeCamera)$/u.test(name)) {
+        found.push(`new ${name}`);
+      }
     } else if (
       (ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node)) &&
-      (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name)) &&
-      node.name.text === 'transmission'
+      literalName(node.name) === 'transmission'
     ) {
       found.push('transmission');
     }
