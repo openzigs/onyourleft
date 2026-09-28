@@ -54,6 +54,7 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { THEMES } from '../src/design/tokens';
 import { ALL_ROUTES, hrefFor, type RouteDefinition } from '../src/shell/routes';
 
 import type { ReflowMeasurement } from './reflow-harness';
@@ -163,43 +164,60 @@ function reflowFaults(
   return faults;
 }
 
-for (const data of DATASETS) {
-  for (const [width, height] of VIEWPORTS) {
-    test(`every route in the route table reflows at ${String(width)}×${String(height)}, ${data}`, async ({
-      page,
-    }) => {
-      test.setTimeout(180_000);
-      await open(page, width, height, `data=${data}`);
-      const faults: string[] = [];
-      const margins: string[] = [];
-      for (const route of ALL_ROUTES) {
-        const hash = await hashFor(page, route);
-        if (typeof hash !== 'string') {
-          faults.push(hash.fault);
-          continue;
-        }
-        const seen = await visit(page, hash);
-        faults.push(...reflowFaults(route, seen, data === 'populated'));
-        margins.push(
-          `${route.id}: ${seen.spare.toFixed(1)} px spare` +
-            (seen.scrollBoxes.length === 0
-              ? ''
-              : ` (scroll boxes: ${seen.scrollBoxes.map((box) => `${box.description} +${String(box.overflow)}`).join(', ')})`),
-        );
+/*
+ * #672: the walk runs under a light device and a dark one. Colour moves no box,
+ * so what the dark walk can find is a route that throws, or lays out
+ * differently, only in the dark palette — a `color-scheme: dark` scrollbar is
+ * one thing that is not the same width everywhere. Parametrised rather than
+ * copied, so a check added to the walk reaches both.
+ */
+for (const theme of THEMES) {
+  test.describe(`${theme} palette`, () => {
+    test.use({ colorScheme: theme });
+
+    for (const data of DATASETS) {
+      for (const [width, height] of VIEWPORTS) {
+        test(`every route in the route table reflows at ${String(width)}×${String(height)}, ${data}, ${theme}`, async ({
+          page,
+        }) => {
+          test.setTimeout(180_000);
+          await open(page, width, height, `data=${data}`);
+          // #672: the dark walk is dark — not a light page walked twice.
+          expect(await page.evaluate(() => document.documentElement.dataset['theme'])).toBe(theme);
+          const faults: string[] = [];
+          const margins: string[] = [];
+          for (const route of ALL_ROUTES) {
+            const hash = await hashFor(page, route);
+            if (typeof hash !== 'string') {
+              faults.push(hash.fault);
+              continue;
+            }
+            const seen = await visit(page, hash);
+            faults.push(...reflowFaults(route, seen, data === 'populated'));
+            margins.push(
+              `${route.id}: ${seen.spare.toFixed(1)} px spare` +
+                (seen.scrollBoxes.length === 0
+                  ? ''
+                  : ` (scroll boxes: ${seen.scrollBoxes.map((box) => `${box.description} +${String(box.overflow)}`).join(', ')})`),
+            );
+          }
+          // Asked of the PAGE, which reads `ALL_ROUTES` for itself: a walk over a
+          // hand list, or one that dropped a route, leaves the page holding a
+          // route it never rendered.
+          const unvisited = await page.evaluate(() => window.__oylReflow?.unvisited());
+          expect(unvisited, 'routes in ALL_ROUTES the walk never opened').toEqual([]);
+          console.log(
+            `reflow ${data} ${String(width)}×${String(height)}\n  ${margins.join('\n  ')}`,
+          );
+          expect(faults).toEqual([]);
+          // Per route above, which names the route; this catches one raised after
+          // the last route was measured.
+          const raised = await page.evaluate(() => window.__oylReflow?.errors);
+          expect(raised, 'errors the page raised during the walk').toEqual([]);
+        });
       }
-      // Asked of the PAGE, which reads `ALL_ROUTES` for itself: a walk over a
-      // hand list, or one that dropped a route, leaves the page holding a
-      // route it never rendered.
-      const unvisited = await page.evaluate(() => window.__oylReflow?.unvisited());
-      expect(unvisited, 'routes in ALL_ROUTES the walk never opened').toEqual([]);
-      console.log(`reflow ${data} ${String(width)}×${String(height)}\n  ${margins.join('\n  ')}`);
-      expect(faults).toEqual([]);
-      // Per route above, which names the route; this catches one raised after
-      // the last route was measured.
-      const raised = await page.evaluate(() => window.__oylReflow?.errors);
-      expect(raised, 'errors the page raised during the walk').toEqual([]);
-    });
-  }
+    }
+  });
 }
 
 /**

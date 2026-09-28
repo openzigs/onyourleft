@@ -674,3 +674,34 @@ describe('the other native controls are styled from tokens (#667)', () => {
 // `check-repo-rules.test.sh` too, and it enforces an ADR rather than anything
 // in #48 — so it is left to the issue that owns ADR 0009's enforcement. The
 // grep was run over this change by hand and is clean.
+
+/**
+ * #672: what is drawn over the world or a camera's picture — and the pairing
+ * code a phone's camera has to read — does not change with the page's palette.
+ *
+ * Found by building the dark palette: `ink` was the backdrop of the ride stage
+ * and of every camera picture, and `canvas`/`ink` were the pairing code's paper
+ * and modules. The dark palette swaps those two, which would have put a
+ * near-white box behind the world and drawn the code light on dark. Each rule
+ * below now paints with a HUD token, which the dark block does not redeclare.
+ */
+describe('what sits over a picture is the same in both palettes (#672)', () => {
+  it.each([
+    ['.oyl-game__world', 'background'],
+    ['.oyl-game--riding', 'background'],
+    ['.oyl-framing__picture', 'background'],
+    ['.oyl-scan-viewfinder__video', 'background'],
+    ['.oyl-framing__guide *', 'stroke'],
+    ['.oyl-pairing-code__paper', 'fill'],
+    ['.oyl-pairing-code__ink', 'fill'],
+  ])('`%s` paints its %s with a HUD token', (selector, property) => {
+    const css = themeCss.replaceAll(/\/\*[\s\S]*?\*\//g, '');
+    const escaped = selector.replaceAll(/[()[\]:.,*+?^$|\\]/g, '\\$&');
+    const bodies = [...css.matchAll(new RegExp(`\\n${escaped} \\{([^}]*)\\}`, 'g'))].map(
+      (match) => match[1] ?? '',
+    );
+    expect(bodies, `theme.css has no \`${selector}\` rule`).toHaveLength(1);
+    const value = new RegExp(`\\n\\s*${property}:\\s*([^;]+);`).exec(bodies[0] ?? '')?.[1];
+    expect(value).toMatch(/^var\(--oyl-color-hud-[a-z-]+\)$/);
+  });
+});
