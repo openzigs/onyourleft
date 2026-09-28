@@ -94,7 +94,13 @@ import { GRADIENT_TINT_FULL_SCALE_PERCENT } from '../src/game/terrain';
 import { structuresAt } from '../src/game/settlements';
 import { waterways } from '../src/game/waterways';
 import { HORIZON_RADIUS_METRES, HORIZON_SEGMENTS, VERGE_DROP_METRES } from '../src/game/landform';
-import { ridgeLift, skylineCrestFloor } from '../src/game/realistic-light';
+import {
+  directionalFogColour,
+  ridgeLift,
+  skylineCrestFloor,
+  valleyHazeFactor,
+  type LinearColour,
+} from '../src/game/realistic-light';
 import { srgbByteToLinear } from '../src/game/scenery-palette';
 import { buildingPlan, onFace, OPENING_RECESS_METRES } from '../src/game/buildings';
 import {
@@ -106,6 +112,9 @@ import {
   realisticTextureReport,
   uploadRealisticTexturesOf,
   loadSceneryModels,
+  airOf,
+  atmosphereOf,
+  type AirReading,
   horizonColoursOf,
   horizonFromSkyOf,
   drawOrderOf,
@@ -3944,6 +3953,21 @@ async function textureProbe(canvasOf: () => HTMLCanvasElement): Promise<TextureM
 /** What the `?realistic` run measures — ADR 0026. @see realisticProbe */
 export interface RealisticMeasurement {
   readonly measured: boolean;
+  /** #622: the air, read and predicted. @see airProbe */
+  readonly air: AirMeasurement;
+  /**
+   * #622: visible meshes that three fogs, in the realistic frame and in the
+   * same frame drawn stylised — how many breathe the realistic air, and how
+   * many are fogged and do not, apart from the two both worlds share (the
+   * water, #629, and the riders' contact shadows).
+   */
+  readonly atmosphere: {
+    readonly realisticTaught: number;
+    readonly realisticUntaught: number;
+    readonly realisticShared: number;
+    readonly stylisedTaught: number;
+    readonly stylisedFogged: number;
+  };
   /** #618: what the textures were handed to the GPU as, and the RGBA8 control. @see textureProbe */
   readonly textures: TextureMeasurement;
   /**
@@ -4152,8 +4176,34 @@ export interface HorizonReading {
   readonly darkestAboveRelief: number;
 }
 
+/** What {@link airProbe} reports when it did not run. */
+const NO_AIR: AirMeasurement = {
+  measured: false,
+  toward: { directional: [0, 0, 0], flattened: [0, 0, 0] },
+  away: { directional: [0, 0, 0], flattened: [0, 0, 0] },
+  predictedToward: [0, 0, 0],
+  predictedAway: [0, 0, 0],
+  fogToward: [0, 0, 0],
+  fogAway: [0, 0, 0],
+  fogFactor: 0,
+  fogFactorWithoutValley: 0,
+  valleyFactor: 0,
+  valleyOff: [0, 0, 0],
+  valleyPredicted: [0, 0, 0],
+  skyToward: 0,
+  skyAway: 0,
+};
+
 const NO_REALISTIC: RealisticMeasurement = {
   measured: false,
+  air: NO_AIR,
+  atmosphere: {
+    realisticTaught: 0,
+    realisticUntaught: 0,
+    realisticShared: 0,
+    stylisedTaught: 0,
+    stylisedFogged: 0,
+  },
   textures: NO_TEXTURES,
   firstFrameMs: 0,
   fallbackWorld: '',
@@ -4347,6 +4397,265 @@ function horizonReading(
       pixelFor(frame, canvas, { ...beside, y: beside.y - VERGE_DROP_METRES }),
       2,
     ),
+  };
+}
+
+/** An output-space colour, each channel 0 to 1: the mean of a region's bytes over 255. */
+type OutputRgb = readonly [number, number, number];
+
+/**
+ * What #622's probes read back. Every colour is in the OUTPUT space — the
+ * bytes over 255 — because that is where three's fog is mixed
+ * (`fog_fragment` runs after the tone map and the colour-space conversion), so
+ * a fog's effect on a pixel is linear THERE and can be predicted exactly.
+ */
+export interface AirMeasurement {
+  readonly measured: boolean;
+  /**
+   * The probe region with the sun turned TOWARDS it and AWAY from it — the
+   * same point, the same distance and height, one frame each — with the
+   * direction table as the product draws it and flattened to its mean.
+   */
+  readonly toward: { readonly directional: OutputRgb; readonly flattened: OutputRgb };
+  readonly away: { readonly directional: OutputRgb; readonly flattened: OutputRgb };
+  /**
+   * What the table says the directional fog adds at each probe over the
+   * flattened one: `f · (F_directional − F_flattened)`, from the numbers the
+   * view handed its shader (`airOf`) and the fog factor at the probe's depth.
+   */
+  readonly predictedToward: OutputRgb;
+  readonly predictedAway: OutputRgb;
+  /** The directional fog's own colour at each probe, from the table — the HDR's band, as the fog carries it. */
+  readonly fogToward: OutputRgb;
+  readonly fogAway: OutputRgb;
+  /** The fog factor at the probe, with the valley haze, and without it. */
+  readonly fogFactor: number;
+  readonly fogFactorWithoutValley: number;
+  /** The valley haze's factor on the fog's density at the probe. */
+  readonly valleyFactor: number;
+  /** The probe with the valley haze off (flattened table), and what the haze should make of it. */
+  readonly valleyOff: OutputRgb;
+  readonly valleyPredicted: OutputRgb;
+  /** The drawn SKY 30° up, with the sun turned towards the camera's heading and away: luminance. */
+  readonly skyToward: number;
+  readonly skyAway: number;
+}
+
+/**
+ * A route that drops 150 m into a wide, flat valley — #622's probe. The rims
+ * set the middle of the route's elevation 75 m above the floor, a full
+ * `REALISTIC_VALLEY_DEPTH_METRES` and more, so the floor hazes at the whole
+ * `REALISTIC_VALLEY_HAZE`; the camera, 120 m down the descent
+ * ({@link AIR_RIDER_ALONG_METRES}), stands above the middle and looks down onto
+ * the floor, well clear of the horizon, where the fog has taken about 70 % of
+ * the road without the haze and 85 % with it — so the road under it still
+ * counts, and the control means something.
+ */
+function airValleyRoute(): ReturnType<typeof northRoute> {
+  return northRoute(2_000, (along) => {
+    if (along <= 400) return 150;
+    if (along <= 700) return 150 - ((along - 400) / 300) * 150;
+    if (along <= 1_300) return 0;
+    if (along <= 1_600) return ((along - 1_300) / 300) * 150;
+    return 150;
+  });
+}
+
+/** Where on the valley's floor the air is read: the road's middle, this far along the route. */
+const AIR_PROBE_ALONG_METRES = 760;
+
+/** Where the rider is for #622's probe: on the descent, above the middle of the route's elevation. */
+const AIR_RIDER_ALONG_METRES = 520;
+
+/** The mean output-space colour of a square of the drawing buffer. */
+function outputAround(
+  gl: WebGL2RenderingContext,
+  centre: { readonly x: number; readonly y: number },
+  half: number,
+): OutputRgb {
+  const side = half * 2 + 1;
+  const pixels = readRegion(
+    gl,
+    Math.round(centre.x) - half,
+    Math.round(centre.y) - half,
+    side,
+    side,
+  );
+  const sum = [0, 0, 0];
+  for (let at = 0; at < pixels.length; at += 4) {
+    for (let channel = 0; channel < 3; channel += 1) {
+      sum[channel] = (sum[channel] ?? 0) + (pixels[at + channel] ?? 0) / 255;
+    }
+  }
+  const count = side * side;
+  return [(sum[0] ?? 0) / count, (sum[1] ?? 0) / count, (sum[2] ?? 0) / count];
+}
+
+/** A table read back from `airOf`, three floats a direction, as colours. */
+function tableOf(flat: readonly number[]): LinearColour[] {
+  const table: LinearColour[] = [];
+  for (let at = 0; at + 2 < flat.length; at += 3) {
+    table.push([flat[at] ?? 0, flat[at + 1] ?? 0, flat[at + 2] ?? 0]);
+  }
+  return table;
+}
+
+/**
+ * The realistic air, read off a real drawing buffer — #622.
+ *
+ * One point on a valley floor — the road's middle, 240 m ahead of a rider on
+ * the descent and about 90 m below the eye — read in two frames that differ ONLY in which way the sun
+ * stands: turned towards the point, and turned away from it, at the same
+ * elevation. The road there is lit as facing straight up
+ * (`photographicRoadMaterial`), so a sun turned about the vertical lights it
+ * the same, and the one thing the turn changes on that pixel is which part of
+ * the sky's horizon the fog leans towards — the flattened table is the
+ * control that shows it.
+ *
+ * ⚠️ **Predicted, not only compared.** three mixes its fog in the output space
+ * after everything else (`fog_fragment` is the last chunk), so on any surface
+ * `directional − flattened = f · (F_directional − F_flattened)` exactly, with
+ * `f` the fog factor at the point's view depth. Both `F`s come from the numbers
+ * the view handed its shader (`airOf`) through `realistic-light.ts`
+ * §`directionalFogColour` — so the gate holds the SHADER to the arithmetic, from
+ * both sides, rather than asking only that something moved. Likewise the
+ * valley haze: with it off the pixel gives the surface under the fog, and with
+ * it on it must be that surface under a fog `REALISTIC_VALLEY_HAZE` times as
+ * dense.
+ */
+function airProbe(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  riding: (profile: ReturnType<typeof northRoute>, distance: number) => SceneFrame,
+): AirMeasurement {
+  const base = riding(airValleyRoute(), AIR_RIDER_ALONG_METRES);
+  const point = onTheRoad(base, AIR_PROBE_ALONG_METRES - AIR_RIDER_ALONG_METRES, 0);
+  const { eye, target } = cameraRig(base.camera);
+  const toPoint = { x: point.x - eye.x, z: point.z - eye.z };
+  const azimuth = Math.atan2(toPoint.z, toPoint.x);
+  const withSun = (frame: SceneFrame, bearing: number): SceneFrame => {
+    const sun = frame.world.sun;
+    const across = Math.hypot(sun.x, sun.z);
+    return {
+      ...frame,
+      markers: [],
+      scatter: [],
+      world: {
+        ...frame.world,
+        sun: { ...sun, x: Math.cos(bearing) * across, z: Math.sin(bearing) * across },
+      },
+    };
+  };
+  const toward = withSun(base, azimuth);
+  const away = withSun(base, azimuth + Math.PI);
+  const at = pixelFor(base, canvas, point);
+  const read = (frame: SceneFrame): OutputRgb => {
+    view.render(frame);
+    view.render(frame);
+    return outputAround(gl, at, 1);
+  };
+  const reading = (
+    frame: SceneFrame,
+    table: 'directional' | 'flattened',
+    valley = true,
+  ): { rgb: OutputRgb; air: AirReading | undefined } => {
+    atmosphereOf(view, { table, valley });
+    const rgb = read(frame);
+    return { rgb, air: airOf(view) };
+  };
+  const towardDirectional = reading(toward, 'directional');
+  const towardFlattened = reading(toward, 'flattened');
+  const awayDirectional = reading(away, 'directional');
+  const awayFlattened = reading(away, 'flattened');
+  const valleyOff = reading(toward, 'flattened', false);
+  atmosphereOf(view, { table: 'directional', valley: true });
+  const air = towardDirectional.air;
+  if (air === undefined) return NO_AIR;
+
+  // The fog factor at the point, as `ATMOSPHERE_FRAGMENT` works it out.
+  const axis = { x: target.x - eye.x, y: target.y - eye.y, z: target.z - eye.z };
+  const length = Math.hypot(axis.x, axis.y, axis.z);
+  const depth =
+    ((point.x - eye.x) * axis.x + (point.y - eye.y) * axis.y + (point.z - eye.z) * axis.z) / length;
+  const valleyFactor = valleyHazeFactor(point.y, air.valleyMiddle, air.valleyHaze);
+  const factor = (density: number): number => 1 - Math.exp(-density * density * depth * depth);
+  const fogFactor = factor(air.density * valleyFactor);
+  const fogFactorWithoutValley = factor(air.density);
+
+  const fogAt = (
+    reading: AirReading | undefined,
+    bearing: number,
+  ): readonly [number, number, number] =>
+    reading === undefined
+      ? [0, 0, 0]
+      : directionalFogColour(
+          reading.base,
+          tableOf(reading.table),
+          reading.share,
+          bearing,
+          reading.turn,
+        );
+  const shift = (
+    directional: AirReading | undefined,
+    flattened: AirReading | undefined,
+  ): OutputRgb => {
+    const on = fogAt(directional, azimuth);
+    const off = fogAt(flattened, azimuth);
+    return [0, 1, 2].map(
+      (channel) => fogFactor * ((on[channel] ?? 0) - (off[channel] ?? 0)),
+    ) as unknown as OutputRgb;
+  };
+  // The valley: the surface under the fog, from the frame with the haze off,
+  // under the denser fog.
+  const flatFog = fogAt(valleyOff.air, azimuth);
+  const valleyPredicted = [0, 1, 2].map((channel) => {
+    const fog = flatFog[channel] ?? 0;
+    const seen = valleyOff.rgb[channel] ?? 0;
+    const surface = (seen - fogFactorWithoutValley * fog) / (1 - fogFactorWithoutValley);
+    return surface + fogFactor * (fog - surface);
+  }) as unknown as OutputRgb;
+
+  // #622's first consumer of `skyRotation` from the world's side: the sky DRAWN
+  // 30° up, straight ahead, with the sun turned to the camera's heading and
+  // away from it. The committed photograph is twice as bright 30° up on its
+  // sun's side (1.44 against 0.67, read off the file on 2026-09-27), so a sky
+  // turned the wrong way round reads darker towards the sun.
+  const level = riding(
+    northRoute(2_000, () => 10),
+    400,
+  );
+  const heading = Math.atan2(level.camera.headingZ, level.camera.headingX);
+  const levelRig = cameraRig(level.camera);
+  const up30 = {
+    x: levelRig.eye.x + level.camera.headingX * 100,
+    y: levelRig.eye.y + 100 * Math.tan((30 * Math.PI) / 180),
+    z: levelRig.eye.z + level.camera.headingZ * 100,
+  };
+  const skyPixel = pixelFor(level, canvas, up30);
+  const skyLuminance = (frame: SceneFrame): number => {
+    view.render(frame);
+    view.render(frame);
+    return meanLuminanceAround(gl, skyPixel, 2);
+  };
+  const skyToward = skyLuminance(withSun(level, heading));
+  const skyAway = skyLuminance(withSun(level, heading + Math.PI));
+
+  return {
+    measured: true,
+    toward: { directional: towardDirectional.rgb, flattened: towardFlattened.rgb },
+    away: { directional: awayDirectional.rgb, flattened: awayFlattened.rgb },
+    predictedToward: shift(towardDirectional.air, towardFlattened.air),
+    predictedAway: shift(awayDirectional.air, awayFlattened.air),
+    fogToward: fogAt(towardDirectional.air, azimuth),
+    fogAway: fogAt(awayDirectional.air, azimuth),
+    fogFactor,
+    fogFactorWithoutValley,
+    valleyFactor,
+    valleyOff: valleyOff.rgb,
+    valleyPredicted,
+    skyToward,
+    skyAway,
   };
 }
 
@@ -5135,6 +5444,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   horizonFromSkyOf(view, true);
   phaseEnds('realistic: horizon');
 
+  // #622: the air — towards the sun and away, the table flattened, the valley.
+  const air = airProbe(view, gl, canvas, riding);
+  phaseEnds('realistic: air — #622');
+
   const climbLuminance = roadLuminance(riding(climb, 400));
   const descentLuminance = roadLuminance(riding(descent, 400));
   const levelClimbLuminance = roadLuminance(riding(level, 400));
@@ -5275,6 +5588,18 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     stylisedPixels.length === realisticPixels.length
       ? pixelsChanged(stylisedPixels, realisticPixels) / (canvas.width * canvas.height)
       : 0;
+  // #622: which of each world's fogged meshes breathe the realistic air.
+  const fogged = (list: ReturnType<typeof sceneMaterialsOf>) =>
+    list.filter((each) => each.visible && each.fogged);
+  const realisticFogged = fogged(sceneMaterialsOf(view));
+  const stylisedFogged = fogged(sceneMaterialsOf(plain));
+  const atmosphere = {
+    realisticTaught: realisticFogged.filter((each) => each.atmospheric).length,
+    realisticUntaught: realisticFogged.filter((each) => !each.atmospheric && !each.shared).length,
+    realisticShared: realisticFogged.filter((each) => each.shared).length,
+    stylisedTaught: stylisedFogged.filter((each) => each.atmospheric).length,
+    stylisedFogged: stylisedFogged.length,
+  };
   phaseEnds('realistic: stylised comparison');
 
   // #478: the same frame at the top rung and at a rung with a budget of six.
@@ -5394,6 +5719,8 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     crankTurnPixels: pixelsChanged(atRest, turned),
     crankHeldPixels: pixelsChanged(turned, held),
     worldChangedShare,
+    air,
+    atmosphere,
     foliageOrder,
     foliageOrderControl,
     foliageOrderChangedPixels,

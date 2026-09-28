@@ -76,6 +76,8 @@ import {
 import type { CameraPose } from './port';
 import { STRUCTURE_KINDS, type ScatterItem, type SceneryKind } from './scatter';
 import {
+  breathesTheAir,
+  ContactShadowBelt,
   isConstructedMaterial,
   loadRealisticWorld,
   photographicGroundMaterial,
@@ -1368,9 +1370,10 @@ function compiledFragment(material: unknown): {
 } {
   const shader = {
     uniforms: {} as Record<string, unknown>,
-    vertexShader: '#include <common>\n#include <begin_vertex>\n#include <color_vertex>',
+    vertexShader:
+      '#include <common>\n#include <begin_vertex>\n#include <color_vertex>\n#include <fog_pars_vertex>\n#include <fog_vertex>',
     fragmentShader:
-      '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <color_fragment>',
+      '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <color_fragment>\n#include <fog_pars_fragment>\n#include <fog_fragment>',
   };
   (material as { onBeforeCompile: (shader: unknown, renderer: unknown) => void }).onBeforeCompile(
     shader,
@@ -1536,9 +1539,10 @@ describe('the realistic bicycle — #369', () => {
 function compiledBoth(material: unknown): { vertex: string; fragment: string } {
   const shader = {
     uniforms: {} as Record<string, unknown>,
-    vertexShader: '#include <common>\n#include <begin_vertex>\n#include <color_vertex>',
+    vertexShader:
+      '#include <common>\n#include <begin_vertex>\n#include <color_vertex>\n#include <fog_pars_vertex>\n#include <fog_vertex>',
     fragmentShader:
-      '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <color_fragment>',
+      '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <color_fragment>\n#include <fog_pars_fragment>\n#include <fog_fragment>',
   };
   (material as { onBeforeCompile: (shader: unknown, renderer: unknown) => void }).onBeforeCompile(
     shader,
@@ -1834,8 +1838,10 @@ describe('every realistic tree, shrub, rock and building wears a seeded tint —
     const compile = shrub.parts[0]?.material as unknown as {
       onBeforeCompile: (shader: unknown, renderer: unknown) => void;
     };
-    const vertex = '#include <common>\n#include <begin_vertex>\n#include <color_vertex>';
-    const fragment = '#include <common>\n#include <map_fragment>\n#include <color_fragment>';
+    const vertex =
+      '#include <common>\n#include <begin_vertex>\n#include <color_vertex>\n#include <fog_pars_vertex>\n#include <fog_vertex>';
+    const fragment =
+      '#include <common>\n#include <map_fragment>\n#include <color_fragment>\n#include <fog_pars_fragment>\n#include <fog_fragment>';
     const cases = [
       ['vertex', '#include <common>'],
       ['vertex', '#include <color_vertex>'],
@@ -2235,8 +2241,10 @@ describe('the ground blob belt — #620', () => {
     const compile = belt.mesh.material as unknown as {
       onBeforeCompile: (shader: unknown, renderer: unknown) => void;
     };
-    const vertex = '#include <common>\n#include <begin_vertex>';
-    const fragment = '#include <common>\n#include <color_fragment>';
+    const vertex =
+      '#include <common>\n#include <begin_vertex>\n#include <fog_pars_vertex>\n#include <fog_vertex>';
+    const fragment =
+      '#include <common>\n#include <color_fragment>\n#include <fog_pars_fragment>\n#include <fog_fragment>';
     const shader = { uniforms: {}, vertexShader: vertex, fragmentShader: fragment };
     compile.onBeforeCompile(shader, undefined);
     expect(shader.fragmentShader).toContain(`${String(GROUND_BLOB_DARKNESS)} * vBlobStrength *`);
@@ -2260,6 +2268,150 @@ describe('the ground blob belt — #620', () => {
       };
       expect(() => compile.onBeforeCompile(broken, undefined)).toThrow(
         `three's ${stage} shader no longer holds ${include}, where #620's ground blob is spliced in`,
+      );
+    }
+  });
+});
+
+describe('the realistic world breathes one air, and the stylised world none of it — #622', () => {
+  const vegetation = (): RealisticVegetationBelt => {
+    const tree = aTreeWithMiddle();
+    const rock = prepareRealisticShape(aScene([{ material: loaderMaterial() }]), 'rock');
+    const shrub = prepareRealisticShape(
+      aScene([{ material: loaderMaterial({ transparent: true }) }]),
+      'shrub',
+    );
+    return new RealisticVegetationBelt(
+      new Map([
+        ['tree-broadleaf', [tree]],
+        ['shrub', [shrub]],
+        ['rock', [rock]],
+      ] as const),
+    );
+  };
+  const fogged = {
+    vertex:
+      '#include <common>\n#include <begin_vertex>\n#include <color_vertex>\n#include <fog_pars_vertex>\n#include <fog_vertex>',
+    fragment:
+      '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <color_fragment>\n#include <fog_pars_fragment>\n#include <fog_fragment>',
+  };
+  const compile = (
+    material: unknown,
+    shader = { uniforms: {}, vertexShader: fogged.vertex, fragmentShader: fogged.fragment },
+  ): { uniforms: Record<string, unknown>; vertexShader: string; fragmentShader: string } => {
+    (material as { onBeforeCompile: (shader: unknown, renderer: unknown) => void }).onBeforeCompile(
+      shader,
+      undefined,
+    );
+    return shader;
+  };
+
+  it('teaches every material the realistic world fogs', () => {
+    const belt = vegetation();
+    expect(belt.meshes.length).toBeGreaterThan(0);
+    for (const mesh of belt.meshes) {
+      expect(breathesTheAir(mesh.material as never), typeOf(mesh)).toBe(true);
+    }
+    const structures = aStructureBelt();
+    for (const surface of [...PHOTOGRAPHIC_STRUCTURE_SURFACES, 'painted', 'glass'] as const) {
+      for (const mesh of STRUCTURE_KINDS.flatMap(
+        (kind) => structures.beltOf(surface)?.meshesOf(kind) ?? [],
+      )) {
+        expect(breathesTheAir(mesh.material as never), surface).toBe(true);
+      }
+    }
+    const photograph = { isTexture: true } as never;
+    expect(breathesTheAir(photographicRoadMaterial(photograph, photograph))).toBe(true);
+    expect(
+      breathesTheAir(
+        photographicGroundMaterial(photograph, photograph, { value: 1 }, { value: 1 }),
+      ),
+    ).toBe(true);
+    expect(breathesTheAir(new GroundBlobBelt().mesh.material as never)).toBe(true);
+    const primitives = new ScatterBelt(new Map(), { physical: true });
+    for (const mesh of primitives.meshesOf('rock')) {
+      expect(breathesTheAir(mesh.material as never)).toBe(true);
+    }
+  });
+
+  it('teaches nothing the stylised world draws, so its fog is three’s own', () => {
+    const stylised = new ScatterBelt(new Map());
+    const meshes = STRUCTURE_KINDS.flatMap((kind) => stylised.meshesOf(kind)).concat(
+      stylised.meshesOf('rock'),
+    );
+    expect(meshes.length).toBeGreaterThan(0);
+    for (const mesh of meshes) expect(breathesTheAir(mesh.material as never)).toBe(false);
+    // The water and the riders' contact shadows are drawn in both worlds, so
+    // they are never taught: #629, and the fog has nothing to take under a rider.
+    expect(breathesTheAir(new WaterBelt().mesh.material as never)).toBe(false);
+    expect(breathesTheAir(new ContactShadowBelt().mesh.material as never)).toBe(false);
+  });
+
+  it('puts the air in place of three’s fog, from the world ray and ONE set of uniforms', () => {
+    const tree = aTreeWithMiddle();
+    new RealisticVegetationBelt(new Map([['tree-broadleaf', [tree]]]));
+    const photograph = { isTexture: true } as never;
+    const bark = compile(tree.parts[0]?.material);
+    const road = compile(photographicRoadMaterial(photograph, photograph));
+    for (const shader of [bark, road]) {
+      expect(shader.vertexShader).toContain(
+        '#include <fog_vertex>\n#ifdef USE_FOG\n  vOylFogRay = (vec4(mvPosition.xyz, 0.0) * viewMatrix).xyz;',
+      );
+      expect(shader.fragmentShader).not.toContain('#include <fog_fragment>');
+      expect(shader.fragmentShader).toContain('uniform vec3 oylFogTable[16];');
+      expect(shader.fragmentShader).toContain(
+        'float oylAzimuth = atan(vOylFogRay.z, vOylFogRay.x) + oylSkyTurn;',
+      );
+      expect(shader.fragmentShader).toContain('int oylFrom = int(oylLower + 64.0) % 16;');
+      expect(shader.fragmentShader).toContain(
+        'vec3 oylFogColour = mix(fogColor, oylToward, oylFogShare);',
+      );
+      expect(shader.fragmentShader).toContain(
+        'float oylDensity = fogDensity * (1.0 + (oylValleyHaze - 1.0) * oylBelow);',
+      );
+      expect(shader.fragmentShader).toContain(
+        'gl_FragColor.rgb = mix(gl_FragColor.rgb, oylFogColour, fogFactor);',
+      );
+    }
+    // One object each, so a view writing its air once reaches every program.
+    for (const name of [
+      'oylFogTable',
+      'oylFogShare',
+      'oylSkyTurn',
+      'oylValleyMiddle',
+      'oylValleyHaze',
+      'oylValleyDepth',
+    ]) {
+      expect(bark.uniforms[name], name).toBeDefined();
+      expect(bark.uniforms[name], name).toBe(road.uniforms[name]);
+    }
+    const key = (
+      tree.parts[0]?.material as unknown as { customProgramCacheKey: () => string }
+    ).customProgramCacheKey();
+    expect(key).toContain('|oyl-atmosphere');
+  });
+
+  it('throws, naming #622, where three’s program no longer holds a fog include', () => {
+    const material = photographicRoadMaterial(
+      { isTexture: true } as never,
+      {
+        isTexture: true,
+      } as never,
+    );
+    for (const [stage, include] of [
+      ['vertex', '#include <fog_pars_vertex>'],
+      ['vertex', '#include <fog_vertex>'],
+      ['fragment', '#include <fog_pars_fragment>'],
+      ['fragment', '#include <fog_fragment>'],
+    ] as const) {
+      const broken = {
+        uniforms: {},
+        vertexShader: stage === 'vertex' ? fogged.vertex.replace(include, '') : fogged.vertex,
+        fragmentShader:
+          stage === 'fragment' ? fogged.fragment.replace(include, '') : fogged.fragment,
+      };
+      expect(() => compile(material, broken)).toThrow(
+        `three's ${stage} shader no longer holds ${include}, where #622's air is spliced in`,
       );
     }
   });

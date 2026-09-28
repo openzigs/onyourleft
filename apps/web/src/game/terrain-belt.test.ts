@@ -21,7 +21,12 @@ import {
 } from './landform';
 import { hillRoute, northRoute, valleyRoute } from './route-fixtures-testing';
 import { cameraRig } from './camera';
-import { REALISTIC_HORIZON_HAZE_SHARE, ridgeLift, skylineCrestFloor } from './realistic-light';
+import {
+  directionalFogColour,
+  REALISTIC_HORIZON_HAZE_SHARE,
+  ridgeLift,
+  skylineCrestFloor,
+} from './realistic-light';
 import { scatterSeed, type SceneryKind } from './scatter';
 import { corridorOrigin, roadCorridor } from './terrain';
 import {
@@ -51,6 +56,7 @@ import {
   SkyDome,
   TerrainBelt,
   WaterBelt,
+  breathesTheAir,
   isConstructedMaterial,
   skyShare,
 } from './three-renderer';
@@ -276,6 +282,58 @@ describe('the distant hills a view draws — #458', () => {
     });
   });
 
+  it('leans each segment’s foot towards the sky in its own direction, as the fog does — #622', () => {
+    // A table bright to +X and dim to −X, turned a quarter: the world's +Z
+    // reads the table's +X.
+    const table = Array.from({ length: 16 }, (_, bin) => {
+      const azimuth = ((bin + 0.5) / 16 - 0.5) * 2 * Math.PI;
+      const light = 0.5 + 0.4 * Math.cos(azimuth);
+      return [light, light * 0.9, 0.3] as const;
+    });
+    const air = { table, share: 0.5, turn: -Math.PI / 2 };
+    const base = [HORIZON.r, HORIZON.g, HORIZON.b] as const;
+    const ring = new HorizonRing();
+    ring.update(relief, world, pose, HORIZON, Number.NEGATIVE_INFINITY, 0.8, air);
+    const colours = ring.mesh.geometry.getAttribute('color') as unknown as Attribute;
+    const feet: number[] = [];
+    for (let segment = 0; segment <= HORIZON_SEGMENTS; segment += 1) {
+      const expected = directionalFogColour(
+        base,
+        table,
+        0.5,
+        (segment / HORIZON_SEGMENTS) * 2 * Math.PI,
+        air.turn,
+      );
+      for (const row of [0, 1]) {
+        const vertex = segment * 3 + row;
+        [colours.getX(vertex), colours.getY(vertex), colours.getZ(vertex)].forEach(
+          (channel, index) => expect(channel).toBeCloseTo(expected[index] as number, 6),
+        );
+      }
+      expect(ring.footAt(segment)[0]).toBeCloseTo(expected[0], 6);
+      feet.push(colours.getX(segment * 3 + 1));
+      // And the ridge above it hazes towards THAT foot, not the one colour.
+      const ground = [16, 8, 0].map((shift) => srgbToLinear((world.groundColour >> shift) & 0xff));
+      expect(colours.getX(segment * 3 + 2)).toBeCloseTo(
+        (ground[0] as number) + (expected[0] - (ground[0] as number)) * 0.8,
+        6,
+      );
+    }
+    // Not vacuous: the feet differ round the ring, brightest at the world's +Z.
+    expect(Math.max(...feet) - Math.min(...feet)).toBeGreaterThan(0.15);
+    const quarter = HORIZON_SEGMENTS / 4;
+    expect(feet[quarter]).toBeCloseTo(Math.max(...feet), 2);
+    // The foot the view reports is still the one colour it was handed — the
+    // fog's own `fogColor`, which every direction is blended from.
+    expect(ring.foot).toEqual(base);
+    // With no air — the stylised world, and #544's control — every foot is
+    // the one colour again.
+    ring.update(relief, world, pose, HORIZON);
+    for (let segment = 0; segment <= HORIZON_SEGMENTS; segment += 1) {
+      expect(colours.getX(segment * 3 + 1)).toBeCloseTo(HORIZON.r, 6);
+    }
+  });
+
   it('lifts the WHOLE ridge to a crest floor, keeping its shape — #544', () => {
     const ring = new HorizonRing();
     const lowest = Math.min(...relief.tops);
@@ -446,12 +504,18 @@ describe('the water and the bridges a view draws — #459', () => {
     expect(dressed.map).toBe(stone.colour);
     expect(dressed.normalMap).toBe(stone.normal);
     expect(isConstructedMaterial(belt.mesh.material as never)).toBe(true);
+    // #622: the realistic bridge breathes the realistic air, and the stylised
+    // one three's own fog.
+    expect(breathesTheAir(belt.mesh.material as never)).toBe(true);
+    expect(breathesTheAir(stylised as never)).toBe(false);
     // Projected in the world's metres, at the stone's own tile — not the unit
     // cube's 0-to-1, which would stretch one photograph along a parapet.
     const shader = {
       uniforms: {} as Record<string, { value: number }>,
-      vertexShader: '#include <common>\n#include <project_vertex>',
-      fragmentShader: '#include <common>\n#include <map_fragment>',
+      vertexShader:
+        '#include <common>\n#include <project_vertex>\n#include <fog_pars_vertex>\n#include <fog_vertex>',
+      fragmentShader:
+        '#include <common>\n#include <map_fragment>\n#include <fog_pars_fragment>\n#include <fog_fragment>',
     };
     dressed.onBeforeCompile(shader);
     expect(shader.uniforms['tileMetres']?.value).toBe(
@@ -466,6 +530,7 @@ describe('the water and the bridges a view draws — #459', () => {
     expect(belt.mesh.material).toBe(dressed);
     // No photograph to wear: the plain physical stone, with no map.
     belt.setWorld('realistic');
+    expect(breathesTheAir(belt.mesh.material as never)).toBe(true);
     expect((belt.mesh.material as unknown as { readonly map: unknown }).map).toBeNull();
     // And the stylised world keeps its own, whatever it is handed.
     belt.setWorld('stylised', stone);

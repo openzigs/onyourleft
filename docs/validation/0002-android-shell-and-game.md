@@ -3212,6 +3212,8 @@ published figures (its run predates `oyl.txt`).
 | #620 | after | | — | | | | | | | | |
 | #618 | before (RGBA8) | the commit before #618's merge | — | | | | | | | | |
 | #618 | after (KTX2) | #618's merge | — | | | | | | | | |
+| #622 | before (one colour) | the first parent of #622's merge | — | | | | | | | | |
+| #622 | after (the air) | #622's merge | — | | | | | | | | |
 
 **Phone (OEM, model, Android, WebView):** Google Pixel Tablet, build `CP2A.260705.006`, Android 17,
 WebView 153.0.8010.36  **Build:** debug, `main` at **`f91a5fb`** (before #617's tree LODs, PR #637)
@@ -3373,4 +3375,56 @@ either way), where SwiftShader decodes ETC2 and ASTC in software, which a Mali G
 |---|---|---|---|---|---|
 | before | first parent of the merge, with the patch above | | | | — (RGBA8 by construction) |
 | after | #618's merge | | | | |
+
+### #622's rows — the air: fog by direction, and a valley haze
+
+[#622](https://github.com/openzigs/onyourleft/issues/622) tints the realistic world's fog by
+direction, from the HDR sky's own band just above its skyline, and thickens it below the middle of
+the route's elevation. Three constants, each with its reason at its declaration in
+`apps/web/src/game/realistic-light.ts`, are the owner's to re-tune from what is seen here, with no
+search needed: **`REALISTIC_FOG_DIRECTION_SHARE`** (0.5: how far the fog leans from #544's one
+colour towards the sky in the direction looked; 0 is the fog before #622), **`REALISTIC_VALLEY_HAZE`**
+(1.25: the fog's density at the valley floor, against 1 on a ridge; 1 is before #622) with
+**`REALISTIC_VALLEY_DEPTH_METRES`** (50: how far below the middle that is reached). There is **no
+grade**: AgX alone is kept, and the same file says why.
+
+⚠️ **This waits for Part AG.** #622 changes the colour everything distant converges on, which is the
+colour #544 set, and whether a directional fog helps or fights #544's lifted ridge can only be judged
+by eye after AG's rows say how #544 itself reads. Take AG first.
+
+**Cost ceiling** (#615's rule 1): **0** triangles, draw calls and render passes — nothing is drawn
+that was not drawn before — **0 texture bytes** (the table is 16 `vec3` uniforms, 192 bytes, not a
+texture; the browser gate's exact texture count and bytes from #618 are unchanged), and **no
+measurable increase** in GPU DVFS mean, CPU *both*, skin at minute 20 or present p95 against this
+Part's spread. The shader cost is about a dozen ALU in the fog chunk every realistic material
+already runs.
+
+⚠️ **The cost pair is two builds**, #618's shape and for the same reason: the page's `-air` lever
+(below) puts the PICTURE back as it was, but the shader runs either way, so it cannot measure what
+the shader costs. The before build is the first parent of #622's merge commit, the after build the
+merge, each with the owner's page staged; cool to AH3's band between them.
+
+⚠️ **The soak route never faces the sun.** The sun stands at a fixed azimuth in the world
+(`world.ts` §`SUN_AZIMUTH_DEGREES`: in the south-west of the map), and every stretch of the owner's
+page's route, measured for #622 at every 50 m from 300 to 3 800 m, heads between 110° and 160°
+away from it — so the page shows only the side AWAY from the sun. The side TOWARDS it needs a
+stretch of the owner's own saved route that runs south-west, ridden in the product with the
+realistic world chosen in Settings. Giving the page a way to face the sun is
+[#702](https://github.com/openzigs/onyourleft/issues/702).
+
+| Step | What to do |
+|---|---|
+| AH-622-1 | **Before**: build the first parent of #622's merge with the owner's page staged, and run AH1–AH7 with AH4's URL unchanged. `RUN=622-before` |
+| AH-622-2 | **Cool again (AH3, 25–26 °C)**, install #622's merge the same way, then **after**: AH1–AH7, AH4's URL unchanged. `RUN=622-after` |
+| AH-622-3 | Write both rows into the table above. **Triangles / frame** and **draw calls** should not change at all between them (the page's draw-call column is an average over a window that also holds draws made outside a frame, so at equal draws a frame it can round one apart when the frame rate differs); the measured columns against #616's spread |
+| AH-622-4 | **By eye, away from the sun**, on the after build, before the tablet is restored: hold at `realistic.html?world=realistic&panel=0&ladder=0&at=2550` and look at the distant ground and hills ahead and to either side; then add `&levers=-air` (the fog as it was before #622, one colour for every direction and no valley haze) and look again. Then hold at `&at=1650`, on the route's valley floor, and compare the two the same way. ⚠️ That floor is only 15 m below the middle of the route's elevation, so the haze there is 1.075×, not the full 1.25× — the valley half of this step is weak on this route, and AH-622-5's own route is the better test of it |
+| AH-622-5 | **By eye, towards the sun**, in the product (realistic world chosen in Settings): ride a stretch of your own saved route that runs **south-west** on the map, looking at the horizon ahead, then a stretch running north-east. Then the same two stretches on a valley floor, if the route has one |
+
+| #622 by eye | Answer |
+|---|---|
+| Away from the sun (AH-622-4): does the distance look more like air with the fog by direction than with `-air`? | |
+| Does the directional fog help #544's lifted ridge sit in the sky, or fight it (a band, a seam, a colour the sky behind does not have)? | |
+| Towards the sun (AH-622-5): is the far distance warmer and brighter than away from it, and does it read as the sun's side of the sky? | |
+| A valley floor seen from above: hazier than a ridge at the same distance, and not so hazy it reads as fog? | |
+| Anything to re-tune — `REALISTIC_FOG_DIRECTION_SHARE`, `REALISTIC_VALLEY_HAZE`, `REALISTIC_VALLEY_DEPTH_METRES` — and which way | |
 

@@ -5,18 +5,27 @@ import { describe, expect, it } from 'vitest';
 import { AA_LARGE_TEXT_OR_NON_TEXT, relativeLuminance } from '../design/contrast';
 import {
   AGX_WHITE_INPUT,
+  directionalFogColour,
   drawnHorizonColour,
   environmentIntensity,
+  flattenedTable,
   halfToFloat,
+  HORIZON_AZIMUTH_BINS,
   PHOTOGRAPHIC_ROAD_GRAIN,
+  REALISTIC_FOG_DIRECTION_SHARE,
   REALISTIC_HORIZON_BAND,
   REALISTIC_SKYLINE_DEGREES,
+  REALISTIC_VALLEY_DEPTH_METRES,
+  REALISTIC_VALLEY_HAZE,
   reflectedSkyColour,
   skyBandRadiance,
+  skyHorizonTable,
   ridgeLift,
   skylineCrestFloor,
   skyRotation,
   skySunU,
+  tableColourAt,
+  valleyHazeFactor,
   WATER_HORIZON_BAND,
   WATER_ZENITH_BAND,
   upwardRadiance,
@@ -278,5 +287,158 @@ describe('what the realistic world’s far end converges on — #544', () => {
     expect(ridgeLift([40, 10, 90], 5)).toBe(0);
     expect(ridgeLift([40, 10, 90], Number.NEGATIVE_INFINITY)).toBe(0);
     expect(ridgeLift([], 60)).toBe(0);
+  });
+});
+
+describe('the air leans towards the sky in the direction looked — #622', () => {
+  /** A picture whose band is a colour a column, from `colour(column)`, and black elsewhere. */
+  const banded = (
+    width: number,
+    colour: (column: number) => readonly [number, number, number],
+  ): SkyPixels => {
+    const height = 180;
+    return {
+      width,
+      height,
+      channel: (index) => {
+        const texel = Math.floor(index / 4);
+        const row = Math.floor(texel / width);
+        const elevation = 90 - (row + 0.5);
+        const inBand =
+          elevation >= REALISTIC_HORIZON_BAND[0] && elevation <= REALISTIC_HORIZON_BAND[1];
+        const channel = index % 4;
+        if (channel === 3) return 1;
+        return inBand ? (colour(texel % width)[channel] as number) : 0;
+      },
+    };
+  };
+  const band = REALISTIC_HORIZON_BAND;
+
+  it('reads the band in sixteen directions, each the mean of its own columns', () => {
+    expect(HORIZON_AZIMUTH_BINS).toBe(16);
+    // 64 columns: four a bin. Column c is red c, so bin i is the mean of 4i…4i+3.
+    const table = skyHorizonTable(
+      banded(64, (column) => [column, 0, 1]),
+      band[0],
+      band[1],
+      16,
+      1,
+    );
+    expect(table).toHaveLength(16);
+    table.forEach(([r, g, b], bin) => {
+      expect(r).toBeCloseTo(4 * bin + 1.5, 10);
+      expect(g).toBe(0);
+      expect(b).toBeCloseTo(1, 10);
+    });
+  });
+
+  it('reads only the band, so the field below the skyline and the sky above it are not in it', () => {
+    const picture = coloured(64, 180, (row) => {
+      const elevation = 90 - (row + 0.5);
+      return elevation < band[0] ? [0, 0, 0] : elevation > band[1] ? [9, 9, 9] : [1, 2, 3];
+    });
+    for (const each of skyHorizonTable(picture, band[0], band[1], 16, 1)) {
+      each.forEach((channel, index) => expect(channel).toBeCloseTo([1, 2, 3][index] ?? 0, 10));
+    }
+  });
+
+  it('has as its mean the ONE colour the fog had before #622, so flattening it is the fog as it was', () => {
+    const picture = banded(128, (column) => [
+      1 + Math.sin(column / 9),
+      0.5 + column / 200,
+      2 - column / 128,
+    ]);
+    const table = skyHorizonTable(picture, band[0], band[1]);
+    const one = skyBandRadiance(picture, band[0], band[1]);
+    for (const each of flattenedTable(table)) {
+      each.forEach((channel, index) => expect(channel).toBeCloseTo(one[index] ?? 0, 10));
+    }
+  });
+
+  it('refuses a direction with nothing finite in it', () => {
+    const picture = banded(64, (column) => (column < 4 ? [Number.NaN, 0, 0] : [1, 1, 1]));
+    expect(() => skyHorizonTable(picture, band[0], band[1], 16, 1)).toThrow(/direction 0 of 16/);
+  });
+
+  it('reads a bin exactly at its centre, and between two centres linearly', () => {
+    const table = Array.from({ length: 16 }, (_, bin) => [bin, 2 * bin, 0] as const);
+    const centre = (bin: number): number => ((bin + 0.5) / 16 - 0.5) * 2 * Math.PI;
+    for (const bin of [0, 3, 15]) {
+      expect(tableColourAt(table, centre(bin))[0]).toBeCloseTo(bin, 10);
+    }
+    const between = (centre(6) + centre(7)) / 2;
+    expect(tableColourAt(table, between)[0]).toBeCloseTo(6.5, 10);
+    expect(tableColourAt(table, between)[1]).toBeCloseTo(13, 10);
+    expect(tableColourAt(table, centre(6) + (centre(7) - centre(6)) / 4)[0]).toBeCloseTo(6.25, 10);
+  });
+
+  it('wraps from the last direction to the first, at both ends of the picture', () => {
+    const table = Array.from({ length: 16 }, (_, bin) => [bin === 15 ? 10 : 0, 0, 0] as const);
+    // The picture's edge, u = 0 = 1, is half-way between bin 15 and bin 0.
+    expect(tableColourAt(table, -Math.PI)[0]).toBeCloseTo(5, 10);
+    expect(tableColourAt(table, Math.PI)[0]).toBeCloseTo(5, 10);
+    // And a whole turn either way is the same direction.
+    for (const turns of [-2, -1, 1, 3]) {
+      expect(tableColourAt(table, 0.3 + turns * 2 * Math.PI)[0]).toBeCloseTo(
+        tableColourAt(table, 0.3)[0],
+        9,
+      );
+    }
+  });
+
+  it('blends from the one colour by the share, and a flat table changes nothing', () => {
+    const table = Array.from({ length: 16 }, (_, bin) => [bin, 1, 0] as const);
+    const base = [2, 1, 0.5] as const;
+    expect(directionalFogColour(base, table, 0, 1.2, 0.4)).toEqual([2, 1, 0.5]);
+    const full = directionalFogColour(base, table, 1, 1.2, 0.4);
+    expect(full).toEqual(tableColourAt(table, 1.6));
+    const half = directionalFogColour(base, table, 0.5, 1.2, 0.4);
+    half.forEach((channel, index) =>
+      expect(channel).toBeCloseTo(((base[index] ?? 0) + (full[index] ?? 0)) / 2, 12),
+    );
+    const flat = flattenedTable(table);
+    const mean = flat[0] as readonly [number, number, number];
+    for (const azimuth of [-3, -1, 0, 2, 3]) {
+      expect(directionalFogColour(mean, flat, REALISTIC_FOG_DIRECTION_SHARE, azimuth, 0.7)).toEqual(
+        mean,
+      );
+    }
+  });
+
+  it('leans towards the SUN’s column looking along the world sun, through skyRotation’s turn', () => {
+    // A band bright and warm in one column range, dim and blue opposite: the
+    // world direction toward `world.ts`'s sun must read the bright side.
+    const sun = worldStyle(harnessRoute()).sun;
+    for (const sunColumn of [5, 40, 100]) {
+      const picture = banded(128, (column) => {
+        const off = Math.abs(((column - sunColumn + 64 + 128) % 128) - 64);
+        return off < 16 ? [3, 2, 1] : [0.5, 0.6, 1];
+      });
+      const table = skyHorizonTable(picture, band[0], band[1]);
+      const turn = skyRotation((sunColumn + 0.5) / 128, sun.x, sun.z);
+      const toward = Math.atan2(sun.z, sun.x);
+      const [sunR, , sunB] = directionalFogColour([1, 1, 1], table, 1, toward, turn);
+      const [awayR, , awayB] = directionalFogColour([1, 1, 1], table, 1, toward + Math.PI, turn);
+      expect(sunR).toBeGreaterThan(2);
+      expect(sunR / sunB).toBeGreaterThan(2);
+      expect(awayR).toBeCloseTo(0.5, 10);
+      expect(awayB).toBeCloseTo(1, 10);
+    }
+  });
+
+  it('thickens the fog below the middle of the route, deepening across a valley and no further', () => {
+    expect(REALISTIC_VALLEY_HAZE).toBeGreaterThan(1);
+    expect(valleyHazeFactor(120, 100)).toBe(1);
+    expect(valleyHazeFactor(100, 100)).toBe(1);
+    expect(valleyHazeFactor(100 - REALISTIC_VALLEY_DEPTH_METRES / 2, 100)).toBeCloseTo(
+      1 + (REALISTIC_VALLEY_HAZE - 1) / 2,
+      12,
+    );
+    expect(valleyHazeFactor(100 - REALISTIC_VALLEY_DEPTH_METRES, 100)).toBeCloseTo(
+      REALISTIC_VALLEY_HAZE,
+      12,
+    );
+    expect(valleyHazeFactor(-400, 100)).toBeCloseTo(REALISTIC_VALLEY_HAZE, 12);
+    expect(valleyHazeFactor(0, 100, 2, 200)).toBeCloseTo(1.5, 12);
   });
 });
