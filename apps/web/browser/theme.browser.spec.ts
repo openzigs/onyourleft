@@ -26,9 +26,17 @@
  *    header's surface (#671's alias), every link in running text and every
  *    primary button. **Control:** the dark block deleted through the CSSOM,
  *    after which the same reads must fail on every route.
- * 4. **The HUD is untouched**: `hud.html` read under a light and a dark
- *    device, every panel's surface, ink and border identical — with the page
- *    around it shown to have changed, so "identical" is not two light reads.
+ * 4. **The HUD is untouched**: `hud.html`, and a ride carrying every control
+ *    and notice the HUD can (`ride.html?trainer=workout&sounds=on&side=lost`),
+ *    each read under a light device and then a dark one — every computed
+ *    colour of `.oyl-hud` and of EVERY descendant and pseudo-element
+ *    (buttons, the range, status messages, SVG fill and stroke) identical,
+ *    each panel the HUD's own surface, and on the ride the mute toggle, the
+ *    volume, the side camera's Stop and the warning notice the same PIXELS —
+ *    with the page around it shown to have changed, so "identical" is not two
+ *    light reads. **Control:** the pin (`theme.css` §`.oyl-hud`) deleted
+ *    through the CSSOM, after which the mute toggle and the warning notice
+ *    must follow the page, which is what #744's review measured.
  *
  * ## What this does NOT prove
  *
@@ -330,17 +338,127 @@ test.describe('#672 — every route is painted from the dark palette under a dar
   });
 });
 
-test.describe('#672 — the HUD is the same in both palettes', () => {
-  interface HudPaint {
-    readonly theme: string | null;
-    readonly page: string;
-    readonly panels: readonly string[];
-    readonly values: readonly string[];
-    readonly labels: readonly string[];
-  }
+/** Every computed colour property the HUD walk reads, on an element and its pseudo-elements. */
+const HUD_COLOUR_PROPERTIES = [
+  'color',
+  'background-color',
+  'border-top-color',
+  'border-right-color',
+  'border-bottom-color',
+  'border-left-color',
+  'outline-color',
+  'text-decoration-color',
+  'caret-color',
+  'accent-color',
+  'fill',
+  'stroke',
+  'box-shadow',
+  'color-scheme',
+] as const;
 
-  async function readHud(page: Page, scheme: Theme): Promise<HudPaint> {
-    await page.emulateMedia({ colorScheme: scheme });
+/** One element's (or pseudo-element's) paint inside the HUD. */
+interface HudEntry {
+  /** Where it is: its index in the walk, its tag and its classes, and a pseudo-element. */
+  readonly at: string;
+  readonly paint: string;
+}
+
+/** What the HUD paints, and the page behind it. */
+interface HudPaint {
+  readonly theme: string | null;
+  readonly page: string;
+  readonly entries: readonly HudEntry[];
+  readonly panels: readonly string[];
+}
+
+/**
+ * Every computed colour of `.oyl-hud` and EVERY descendant — buttons, inputs,
+ * status messages, SVG fill and stroke — and of each one's `::before`,
+ * `::after` and `::marker`. #744's review measured the mute toggle and a
+ * warning notice following the page while the panels did not; a read of the
+ * panels alone could not see that half.
+ */
+async function readHudPaint(page: Page): Promise<HudPaint> {
+  return page.evaluate((properties) => {
+    const hud = document.querySelector('.oyl-hud');
+    if (hud === null) throw new Error('no .oyl-hud on the page');
+    const entries: { at: string; paint: string }[] = [];
+    [hud, ...hud.querySelectorAll('*')].forEach((element, index) => {
+      const name = `${String(index)} ${element.tagName.toLowerCase()}.${[...element.classList].join('.')}`;
+      for (const pseudo of [null, '::before', '::after', '::marker']) {
+        const style = getComputedStyle(element, pseudo);
+        entries.push({
+          at: pseudo === null ? name : `${name}${pseudo}`,
+          paint: properties
+            .map((property) => `${property}=${style.getPropertyValue(property)}`)
+            .join('; '),
+        });
+      }
+    });
+    return {
+      theme: document.documentElement.getAttribute('data-theme'),
+      page: getComputedStyle(document.body).backgroundColor,
+      entries,
+      panels: [...document.querySelectorAll('.oyl-hud__panel')].map(
+        (panel) => getComputedStyle(panel).backgroundColor,
+      ),
+    };
+  }, HUD_COLOUR_PROPERTIES);
+}
+
+/** Switch the device's palette under a loaded page, which the inline script follows. */
+async function deviceBecomes(page: Page, scheme: Theme): Promise<void> {
+  await page.emulateMedia({ colorScheme: scheme });
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.getAttribute('data-theme')))
+    .toBe(scheme);
+}
+
+/** The entries whose paint differs between two reads of the same page. */
+function moved(light: HudPaint, dark: HudPaint): string[] {
+  expect(dark.entries.map((entry) => entry.at)).toEqual(light.entries.map((entry) => entry.at));
+  return light.entries.flatMap((entry, index) =>
+    entry.paint === dark.entries[index]?.paint
+      ? []
+      : [`${entry.at}\n  light: ${entry.paint}\n  dark:  ${String(dark.entries[index]?.paint)}`],
+  );
+}
+
+/** The page behind the HUD did change, so an equal HUD is not two reads of an unswitched page. */
+function expectThePageSwitched(light: HudPaint, dark: HudPaint): void {
+  expect(light.theme).toBe('light');
+  expect(dark.theme).toBe('dark');
+  expect(light.page).toBe(rgb('light', 'canvas'));
+  expect(dark.page).toBe(rgb('dark', 'canvas'));
+}
+
+/**
+ * The pin (`theme.css` §`.oyl-hud`) deleted through the CSSOM — the control.
+ * Returns how many declarations were removed.
+ */
+async function unpinTheHud(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    let removed = 0;
+    for (const sheet of document.styleSheets) {
+      for (const rule of sheet.cssRules) {
+        if (!(rule instanceof CSSStyleRule) || rule.selectorText !== '.oyl-hud') continue;
+        for (const property of [...rule.style]) {
+          if (property.startsWith('--oyl-color-') || property === 'color-scheme') {
+            rule.style.removeProperty(property);
+            removed += 1;
+          }
+        }
+      }
+    }
+    return removed;
+  });
+}
+
+test.describe('#672 — the HUD is the same in both palettes', () => {
+  test('hud.html: every descendant of the HUD paints the same in light and dark', async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme: 'light' });
     const response = await page.goto('/hud.html');
     expect(response?.status()).toBe(200);
     await page.waitForFunction(
@@ -348,39 +466,89 @@ test.describe('#672 — the HUD is the same in both palettes', () => {
         (window as { __oylHudHarness?: { readonly ready: boolean } }).__oylHudHarness?.ready ===
         true,
     );
-    return page.evaluate(() => {
-      const read = (selector: string, property: 'backgroundColor' | 'color' | 'borderTopColor') =>
-        [...document.querySelectorAll(selector)].map((element) => {
-          const style = getComputedStyle(element);
-          return property === 'backgroundColor'
-            ? `${style.backgroundColor} / ${style.color} / ${style.borderTopColor}`
-            : style[property];
-        });
-      return {
-        theme: document.documentElement.getAttribute('data-theme'),
-        page: getComputedStyle(document.body).backgroundColor,
-        panels: read('.oyl-hud__panel', 'backgroundColor'),
-        values: read('.oyl-hud__value', 'color'),
-        labels: read('.oyl-hud dt', 'color'),
-      };
-    });
-  }
-
-  test('its surfaces, its ink and its borders do not move with the page', async ({ page }) => {
-    const light = await readHud(page, 'light');
-    const dark = await readHud(page, 'dark');
-    // The page around the HUD DID change, so an equal read below is not two
-    // light reads of a page nothing switched.
-    expect(light.theme).toBe('light');
-    expect(dark.theme).toBe('dark');
-    expect(light.page).toBe(rgb('light', 'canvas'));
-    expect(dark.page).toBe(rgb('dark', 'canvas'));
+    const light = await readHudPaint(page);
+    await deviceBecomes(page, 'dark');
+    const dark = await readHudPaint(page);
+    expectThePageSwitched(light, dark);
     expect(light.panels.length).toBeGreaterThan(0);
-    expect(light.values.length).toBeGreaterThan(0);
-    expect(light.labels.length).toBeGreaterThan(0);
-    expect(dark.panels).toEqual(light.panels);
-    expect(dark.values).toEqual(light.values);
-    expect(dark.labels).toEqual(light.labels);
-    expect(light.panels[0]).toContain(rgb('light', 'hudSurface'));
+    // Absolute as well as relative: a panel painted with a PAGE token would
+    // read the same in both palettes now that the pin holds page tokens light.
+    for (const panel of light.panels) expect(panel).toBe(rgb('light', 'hudSurface'));
+    expect(moved(light, dark)).toEqual([]);
+  });
+
+  test.describe('a ride with every control and notice the HUD can carry', () => {
+    // The mute toggle and the volume (`sounds=on`), the side camera's Stop and
+    // its lost-link notice (`side=lost`), the workout's warning notice
+    // (`trainer=workout`), paused so nothing on the HUD ticks between reads.
+    test.use({ viewport: { width: 844, height: 390 } });
+
+    const QUERY = '?trainer=workout&sounds=on&side=lost&paused=yes';
+
+    const PIXEL_TARGETS = [
+      '.oyl-sound__mute',
+      '.oyl-sound__volume input',
+      '.oyl-hud__side-camera-stop',
+      '.oyl-hud__notices .oyl-status--warning',
+    ] as const;
+
+    async function pixels(page: Page): Promise<Buffer[]> {
+      const shots: Buffer[] = [];
+      for (const selector of PIXEL_TARGETS) {
+        shots.push(await page.locator(selector).first().screenshot({ animations: 'disabled' }));
+      }
+      return shots;
+    }
+
+    test('every computed colour and every control’s pixels are identical; unpinned, they move', async ({
+      page,
+    }) => {
+      await page.emulateMedia({ colorScheme: 'light' });
+      const response = await page.goto(`/ride.html${QUERY}`);
+      expect(response?.status()).toBe(200);
+      await page.waitForFunction(
+        () => (window as { __oylRide?: { readonly ready: boolean } }).__oylRide !== undefined,
+      );
+      const published = await page.evaluate(
+        () =>
+          (window as { __oylRide?: { readonly ready: boolean; readonly errors: string[] } })
+            .__oylRide,
+      );
+      expect(published?.errors).toEqual([]);
+      expect(published?.ready).toBe(true);
+
+      // What the walk must find, so a HUD that rendered none of them fails.
+      for (const selector of PIXEL_TARGETS) {
+        await expect(page.locator(selector).first(), `no ${selector} on the HUD`).toBeVisible();
+      }
+      // An SVG is in the walk too, though at this size the profile is not shown.
+      expect(await page.locator('.oyl-hud svg').count(), 'no SVG in the HUD').toBeGreaterThan(0);
+
+      const light = await readHudPaint(page);
+      const lightPixels = await pixels(page);
+      await deviceBecomes(page, 'dark');
+      const dark = await readHudPaint(page);
+      const darkPixels = await pixels(page);
+
+      expectThePageSwitched(light, dark);
+      for (const panel of light.panels) expect(panel).toBe(rgb('light', 'hudSurface'));
+      expect(moved(light, dark)).toEqual([]);
+      PIXEL_TARGETS.forEach((selector, index) => {
+        expect(
+          darkPixels[index]?.equals(lightPixels[index] ?? Buffer.alloc(0)),
+          `${selector} is not the same pixels in light and dark`,
+        ).toBe(true);
+      });
+
+      // The control: the pin deleted, the SAME reads must see the mute toggle
+      // and the warning notice follow the page — what #744's review measured.
+      expect(await unpinTheHud(page), 'the pin was not found to delete').toBe(29);
+      const unpinned = await readHudPaint(page);
+      const unpinnedPixels = await pixels(page);
+      const movedWithoutThePin = moved(light, unpinned).join('\n');
+      expect(movedWithoutThePin).toContain('oyl-sound__mute');
+      expect(movedWithoutThePin).toContain('oyl-status--warning');
+      expect(unpinnedPixels[0]?.equals(lightPixels[0] ?? Buffer.alloc(0))).toBe(false);
+    });
   });
 });

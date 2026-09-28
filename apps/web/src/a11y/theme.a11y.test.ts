@@ -58,6 +58,12 @@ function blockOf(selector: string): string {
 const LIGHT_BLOCK = ':root';
 /** The dark palette's block (#672). */
 const DARK_BLOCK = ":root[data-theme='dark']";
+/**
+ * The ride HUD's rule, which restates the LIGHT value of every page colour
+ * token so nothing inside the HUD follows the page's palette (#672, #744's
+ * review).
+ */
+const HUD_BLOCK = '.oyl-hud';
 
 /** `--oyl-color-ink-muted: #4a5b5c;` → `['inkMuted', '#4a5b5c']`, in `css`. */
 function declarationsWithPrefix(prefix: string, css: string): Map<string, string> {
@@ -106,8 +112,29 @@ describe('theme.css and tokens.ts cannot drift', () => {
     const outside = themeCss
       .replaceAll(/\/\*[\s\S]*?\*\//g, '')
       .replace(blockOf(LIGHT_BLOCK), '')
-      .replace(blockOf(DARK_BLOCK), '');
+      .replace(blockOf(DARK_BLOCK), '')
+      .replace(blockOf(HUD_BLOCK), '');
     expect([...outside.matchAll(/--oyl-(?:color|space|font-size)-[a-z0-9-]+\s*:/g)]).toEqual([]);
+  });
+
+  it('pins the HUD to the light palette: every page colour token, at its light value (#672)', () => {
+    // The owner's ruling: the in-ride HUD is left alone. Its panels paint with
+    // the HUD's own tokens, but the mute toggle, the volume, the side camera's
+    // Stop and a notice's status tones paint with PAGE tokens — so this rule
+    // restates every one of them, and nothing else. A token missing here
+    // follows the page inside the HUD; a HUD token here is a second value for
+    // a theme-independent one; a value that is not the light one is a colour
+    // no contrast pair measured.
+    const declared = declarationsWithPrefix('color', blockOf(HUD_BLOCK));
+    const expected = Object.fromEntries(
+      Object.keys(DARK_COLOUR_TOKENS)
+        .sort()
+        .map((token) => [token, COLOUR_TOKENS[token as keyof typeof DARK_COLOUR_TOKENS]]),
+    );
+    expect(Object.fromEntries([...declared].sort())).toEqual(expected);
+    // And what the platform draws itself inside it — a range's track, a check
+    // mark — is the light platform's.
+    expect(blockOf(HUD_BLOCK)).toMatch(/\n\s*color-scheme: light;/);
   });
 
   it('tells the platform which palette each block is (#672)', () => {

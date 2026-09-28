@@ -2624,6 +2624,46 @@ p > label + input[type='file'] {
  * The two overlay layouts are the media queries at the end of this block.
  */
 .oyl-hud {
+  /* ⚠️ #672 (the review of #744): the HUD KEEPS THE LIGHT PALETTE, whatever
+     the page is in — the owner's ruling that the in-ride HUD is left alone.
+     Its panels paint with the theme-independent `--oyl-color-hud-*` tokens,
+     but what sits inside them — the mute toggle and the volume (#400), the
+     side camera's Stop (#551), a notice's status tones — paints with PAGE
+     tokens, and on a dark page those followed it. So every page colour token
+     is restated here with its LIGHT value, and `color-scheme` pins what the
+     platform draws itself (a range's track, a check mark). `theme.a11y.test.ts`
+     holds this list to `tokens.ts` §`COLOUR_TOKENS`, key for key, and
+     `theme.browser.spec.ts` reads every descendant in both palettes. */
+  color-scheme: light;
+  --oyl-color-canvas: #ffffff;
+  --oyl-color-surface: #f2f5f4;
+  --oyl-color-surface-raised: #e7eae9;
+  --oyl-color-surface-overlay: #dde0df;
+  --oyl-color-border: #767e7e;
+  --oyl-color-ink: #141b1a;
+  --oyl-color-ink-muted: #4a5b5c;
+  --oyl-color-accent: #0b5c55;
+  --oyl-color-accent-hover: #07443f;
+  --oyl-color-accent-ink: #ffffff;
+  --oyl-color-selected: #d4ebe7;
+  --oyl-color-link: #0b5c55;
+  --oyl-color-link-visited: #5b3a8c;
+  --oyl-color-link-hover: #07443f;
+  --oyl-color-link-active: #042e2a;
+  --oyl-color-focus: #141b1a;
+  --oyl-color-info-surface: #e3f0f4;
+  --oyl-color-info-ink: #0e4a57;
+  --oyl-color-info-border: #2c7288;
+  --oyl-color-success-surface: #e2f2e9;
+  --oyl-color-success-ink: #14513a;
+  --oyl-color-success-border: #2a7a58;
+  --oyl-color-warning-surface: #fbefda;
+  --oyl-color-warning-ink: #654100;
+  --oyl-color-warning-border: #8a6212;
+  --oyl-color-danger-surface: #fbe8e8;
+  --oyl-color-danger-ink: #7a1d1d;
+  --oyl-color-danger-border: #a83232;
+
   color: var(--oyl-color-hud-ink);
   display: flex;
   flex-direction: column;
