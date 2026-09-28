@@ -476,6 +476,91 @@ generate
 assert_exit 'a copied file its package no longer has fails' 1
 assert_says 'as NOT005' 'NOT005 pose/runtime.wasm is copied out of react@19.0.0/wasm/runtime.wasm'
 
+# --- A copied file that is somebody else's work, vendored in its package (#618) --
+#
+# three is MIT and vendors Binomial's Apache-2.0 transcoder, so the copied file's
+# notice cannot be its package's: the entry carries its own, once per work.
+
+new_fixture
+mkdir -p "${REACT}/basis"
+printf 'js' > "${REACT}/basis/t.js"
+printf 'wasm' > "${REACT}/basis/t.wasm"
+VENDORED='"vendored":{"name":"Transcoder","version":"1.50","licence":"Apache-2.0 AND BSD-3-Clause","what":"the transcoder","licenceText":"Apache-2.0","upstream":[{"url":"https://example.invalid/zstd/LICENSE","read":"2026-09-27","text":"Zstandard fixture BSD notice"}]}'
+inputs "{\"noLicenceFile\":{},\"copiedIntoBuild\":[{\"path\":\"realistic/t.js\",\"package\":\"react\",\"file\":\"basis/t.js\",\"by\":\"a plugin\",${VENDORED}},{\"path\":\"realistic/t.wasm\",\"package\":\"react\",\"file\":\"basis/t.wasm\",\"by\":\"a plugin\",${VENDORED}}]}"
+generate
+assert_exit 'a copied file vendored in its package renders' 0
+assert_document_has 'naming the work it is, not only its package' 'realistic/t.wasm — from react 19.0.0 (a plugin); it is Transcoder 1.50, vendored there — Apache-2.0 AND BSD-3-Clause'
+assert_document_has 'with the vendored work'\''s own notice' 'Zstandard fixture BSD notice'
+assert_document_has 'as a copied part' 'Part: copied'
+assert_document_has 'and the licence text it asks for, as an appendix' 'Appendix: Apache-2.0'
+if [ "$(grep -c '^Name: Transcoder$' "${tmp}/${DOCUMENT}")" = 1 ]; then
+  ok 'once, however many of its files are copied'
+else
+  bad 'once, however many of its files are copied' "$(grep -c '^Name: Transcoder$' "${tmp}/${DOCUMENT}")"
+fi
+
+new_fixture
+mkdir -p "${REACT}/basis"
+printf 'wasm' > "${REACT}/basis/t.wasm"
+inputs '{"noLicenceFile":{},"copiedIntoBuild":[{"path":"realistic/t.wasm","package":"react","file":"basis/t.wasm","by":"a plugin","vendored":{"name":"Transcoder","version":"1.50","licence":"Apache-2.0","what":"the transcoder"}}]}'
+generate
+assert_exit 'a vendored work with no licence text fails' 1
+assert_says 'as NOT005' 'NOT005 realistic/t.wasm is Transcoder@1.50, vendored in react'
+
+new_fixture
+mkdir -p "${REACT}/basis"
+printf 'wasm' > "${REACT}/basis/t.wasm"
+inputs '{"noLicenceFile":{},"copiedIntoBuild":[{"path":"realistic/t.wasm","package":"react","file":"basis/t.wasm","by":"a plugin","vendored":{"name":"Transcoder","version":"1.50","licence":"EPL-2.0","what":"the transcoder","licenceText":"EPL-2.0"}}]}'
+generate
+assert_exit 'a vendored work asking for a licence text this generator lacks fails' 1
+assert_says 'as NOT005' 'NOT005 realistic/t.wasm is Transcoder@1.50, which asks for the text of EPL-2.0'
+
+# --- A vendored file the bundler writes into the app's own code (#618's review) --
+#
+# three vendors KTX-Parse and zstddec under examples/jsm/libs/ and KTX2Loader
+# imports both into the renderer chunk: nothing is copied, yet somebody else's
+# MIT code ships, so it is listed and noticed as its own work.
+
+new_fixture
+mkdir -p "${REACT}/libs"
+printf 'js' > "${REACT}/libs/parse.js"
+inputs '{"noLicenceFile":{},"copiedIntoBuild":[],"vendoredIntoBundle":[{"package":"react","file":"libs/parse.js","in":"the renderer chunk","vendored":{"name":"Parse","version":"1.1.0","licence":"MIT","what":"the parser","upstream":[{"url":"https://example.invalid/parse/LICENSE","read":"2026-09-27","text":"Parse fixture MIT notice"}]}}]}'
+generate
+assert_exit 'a vendored file bundled into a chunk renders' 0
+assert_document_has 'naming the work it is, and where it ships' 'libs/parse.js — in react 19.0.0, bundled into the renderer chunk; it is Parse 1.1.0, vendored there — MIT'
+assert_document_has 'with the vendored work'\''s own notice' 'Parse fixture MIT notice'
+if [ "$(grep -c '^Name: Parse$' "${tmp}/${DOCUMENT}")" = 1 ]; then
+  ok 'as an entry of its own'
+else
+  bad 'as an entry of its own' "$(grep -c '^Name: Parse$' "${tmp}/${DOCUMENT}")"
+fi
+rm "${REACT}/libs/parse.js"
+generate
+assert_exit 'a bundled vendored file its package no longer has fails' 1
+assert_says 'as NOT005' 'NOT005 libs/parse.js is bundled out of react@19.0.0'
+
+new_fixture
+mkdir -p "${REACT}/libs"
+printf 'js' > "${REACT}/libs/parse.js"
+inputs '{"noLicenceFile":{},"copiedIntoBuild":[],"vendoredIntoBundle":[{"package":"react","file":"libs/parse.js","in":"the renderer chunk","vendored":{"name":"Parse","version":"1.1.0","licence":"MIT","what":"the parser"}}]}'
+generate
+assert_exit 'a bundled vendored work with no licence text fails' 1
+assert_says 'as NOT005' 'NOT005 react/libs/parse.js is Parse@1.1.0, vendored in react'
+
+new_fixture
+mkdir -p "${REACT}/libs"
+printf 'js' > "${REACT}/libs/parse.js"
+inputs '{"noLicenceFile":{},"copiedIntoBuild":[],"vendoredIntoBundle":[{"package":"react","file":"libs/parse.js","in":"the renderer chunk"}]}'
+generate
+assert_exit 'a bundled vendored file that says nothing of whose it is fails' 1
+assert_says 'as NOT005' 'NOT005 react/libs/parse.js is in apps/web/third-party-notices.json §vendoredIntoBundle and says nothing'
+
+new_fixture
+inputs '{"noLicenceFile":{},"copiedIntoBuild":[],"vendoredIntoBundle":[{"package":"not-in-the-closure","file":"libs/parse.js","in":"the renderer chunk","vendored":{"name":"Parse","version":"1.1.0","licence":"MIT","what":"the parser","upstream":[{"url":"u","read":"r","text":"t"}]}}]}'
+generate
+assert_exit 'a bundled vendored file from a package that does not ship fails' 1
+assert_says 'as NOT005' 'NOT005 libs/parse.js is bundled out of not-in-the-closure, which is not in the closure'
+
 # --- Code the bundler writes into the build (#676's review) ------------------------
 #
 # vite and rolldown are in no closure -- vite is a devDependency -- and their

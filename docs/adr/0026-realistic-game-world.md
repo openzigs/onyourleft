@@ -457,3 +457,33 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   still draws the contact blob** — #547 left it there deliberately, because its rider casts into
   no map and D-6's budget and Part Z's soak were both taken with the blob. The realistic world
   remains the one set of rungs a rider must choose. Nothing in this ADR's decisions changes.
+
+- **2026-09-27** — **D-8's condition is met, and the realistic textures are KTX2.** D-8 shipped the
+  first realistic layer as plain images and made KTX2/Basis *"measured by #457 before deciding"*,
+  on the argument that *"likely"* is not a measurement. The measurements now exist:
+  [validation 0002](../validation/0002-android-shell-and-game.md) Part Z8 read **310 MiB** under
+  the tablet's `GL mtrack` at minute 10 of the soak, against 136 MiB estimated for the set as three
+  decoded it — every JPEG and PNG to RGBA8 — and
+  [spike 0015](../spikes/0015-godot-realistic-world.md) §4 drew **the same committed files**
+  ETC2-compressed in **81.0 MiB** and ran the GPU clock about 30 % lower. On those, the owner ruled
+  on [#618](https://github.com/openzigs/onyourleft/issues/618) on 2026-09-27: keep the realistic
+  textures GPU-compressed as KTX2/Basis, transcoded on the device to ASTC or ETC2, with no decode to
+  RGBA8. [#618](https://github.com/openzigs/onyourleft/issues/618)'s pull request did it. What is
+  now true of the tree, and was not when D-8 was written:
+  - **Every realistic texture but the sky is KTX2**, made by D-5's pipeline with a second pinned
+    tool, KTX-Software `ktx` v4.4.2 (Apache-2.0), measured byte-stable, so
+    `realistic:process --check` still compares byte for byte and D-5's texel-digest fallback is not
+    used. Colour maps are Basis ETC1S, normal maps UASTC, and a GLB's maps are KTX2 inside it under
+    `KHR_texture_basisu`. The JPEG and PNG originals are gone from `apps/web/public/realistic/`.
+  - **The transcoder is copied out of the pinned `three@0.185.1`**, not committed, into
+    `realistic/basis/`, under D-7's own precache exclusion. D-8's hand check of its notice was made:
+    it is Basis Universal v1.50, Apache-2.0 with Zstandard's BSD-3-Clause decoder compiled in, and
+    v1.50 carries no `NOTICE` file. The credits screen and the third-party notices name it. It needs
+    no `ASSETS.toml` row, because it is not committed, which is the case D-8's last sentence left open.
+  - **The estimate is 59.3 MiB**, of which the sky (half-float, with its prefiltered environment,
+    out of #618's scope) is 40.0 MiB and every other texture 19.3 MiB, where it was 136 MiB.
+    `realistic-budget.ts` states the formats it assumes. What the tablet holds under `GL mtrack`
+    is Part AH's #618 rows, which the owner takes.
+  - **D-8's wording "plain images first" is therefore history**, and its decision was not reversed:
+    it named the trigger, and the trigger was met. The HDR sky stays half-float; a compressed sky is
+    its own issue. Nothing in D-2 moved: `three` is still 0.185.1.

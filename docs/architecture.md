@@ -1159,7 +1159,7 @@ on every device** (D-3). Where each part lives:
 | Part | Where | What holds it |
 |---|---|---|
 | The pipeline (#430) | `apps/web/tools/realistic/` — the sources and their licence pages, the input lock, headless-Blender scripts, `realistic:fetch` / `realistic:process [--check]` / `realistic:stage` | `ASSET007` (a derived asset records its input, input digest, script and pinned tool), `provenance.test.ts` (every committed file is the pipeline's, with the manifest entry its recipe produces), and `--check`, run by hand: every file reproduced **byte for byte** by Blender 4.4.3 twice running — which took one thread for Cycles and an ordered sum in the thinning to get to |
-| The assets | `apps/web/public/realistic/` → `dist/realistic/` — 17 files, 30.8 MiB when layers 1, 2 and 4 landed; 31 files, 33 264 450 bytes (31.7 MiB) with layer 3's structure surfaces, measured for #475 | `ASSETS.toml` rows, `ASSET001`–`ASSET007`; `realistic-assets.test.ts` in both directions |
+| The assets | `apps/web/public/realistic/` → `dist/realistic/` — 17 files, 30.8 MiB when layers 1, 2 and 4 landed; 31 files, 33 264 450 bytes (31.7 MiB) with layer 3's structure surfaces, measured for #475. ⚠️ **Since [#618](https://github.com/openzigs/onyourleft/issues/618) every texture but the sky is KTX2** (35 files, 33 723 127 bytes, where #617's middle trees had taken it to 35 529 214) and the Basis transcoder, 584 862 bytes, is copied beside them into `dist/realistic/basis/` — see below | `ASSETS.toml` rows, `ASSET001`–`ASSET007`; `realistic-assets.test.ts` in both directions |
 | The budget (D-6) | `apps/web/src/game/realistic-budget.ts`, set from #457's 30-second device windows and **re-set from validation 0002 Part Z's twenty-minute soak by #475 — every figure stood**, and the driver's 310 MiB against a 136 MiB estimate is recorded there as the open finding | `realistic-budget.test.ts`, reading the committed bytes through `realistic-bytes-testing.ts` |
 | The ladder (D-3) | `quality.ts` §`REALISTIC_LADDER`, §`nextWorldQuality` — above the stylised ladder, left for the stylised ladder's top and never re-entered | `quality.test.ts` |
 | The renderer (D-9–D-11) | `three-renderer.ts` — both paths in one file: the HDRI as background and PMREM environment, solved against `world.ts`'s ambient share (`realistic-light.ts`); photographic road (the photograph a bounded grain on the gradient tint) and ground; `RealisticVegetationBelt` (nearest-N shrubs and rocks; since #617 the trees at three levels — full, middle, impostor — ranked together by `tree-levels.ts` — only the trees the camera can see — each hand-over one tree drawn at both levels and dithered in screen space, and each tree's move between levels paced over frames when the ranked set changes; since #621 every tree, shrub and rock — and every realistic structure — wears a seeded tint from `instance-tint.ts`, keyed by where it stands and carried in the instance colour's third channel, the same at every level of one tree); `RealisticRiderBelt` (MakeHuman body posed from `bicycle.ts` §`riderJoints`, bicycle built from `bicycle.ts`'s parts) | `realistic-renderer.test.ts` (jsdom), `game.browser.spec.ts` §"the realistic world" (a real engine: fallback, D-11 over a live scene, one-call road, the tint's contrast after AgX, the legs and the cranks, the step down; since #617 the triangles a frame submits against the hard swap, and — since #617's review — a still tree's frame-to-frame change in the picture across BOTH hand-overs, held to a fraction of the hard swap's from above and to a real hand-over from below, and the nearest tree in the picture drawn at full detail against the ranking before the review; since #621 two trees and two houses of one shape read back apart by their tints, and alike with every bound at nothing) |
@@ -1231,6 +1231,32 @@ wall is reading the old file. Two changes, both near-free:
 material's shader when it draws to the canvas, so a blob of alpha 0.3 takes 0.3 off the displayed
 pixel, not off the light. `game.browser.spec.ts` §"#620" reads that back and holds it from both
 sides.
+
+**The textures stay compressed on the GPU since
+[#618](https://github.com/openzigs/onyourleft/issues/618)** (ADR 0026 D-8's 2026-09-27 amendment),
+and a reader who remembers the realistic set as JPEGs and PNGs that three decoded to RGBA8 is
+reading the old file. Every realistic texture but the HDR sky is **KTX2 (Basis Universal)**: colour
+maps ETC1S, normal maps UASTC, a GLB's maps inside it under `KHR_texture_basisu`, all made by the
+D-5 pipeline with a second pinned tool, KTX-Software `ktx` v4.4.2 (`tools/realistic/sources.ts`
+§`PINNED_KTX`, `encode-ktx2.ts`), byte-stable, so `realistic:process --check` still reproduces every
+byte. `three-renderer.ts` §`compressedRealisticLoaders` hands them to three's `KTX2Loader`, which
+transcodes each in a worker to what the device's GPU samples — **ETC2 RGB, ETC2 RGBA and ASTC 4×4
+on the owner's tablet**; BC7 on a Linux desktop, where `KTX2Loader` itself turns ASTC and ETC off;
+RGBA8 only where nothing compressed is offered, which `realisticTextureFormat` labels a fallback.
+The world is loaded before any view exists, so the device's formats are read off a throwaway WebGL 2
+context. The transcoder — Binomial's Apache-2.0 v1.50, with Zstandard's BSD-3-Clause decoder
+compiled in, vendored inside the MIT `three` where `DEP001` cannot see it — is **copied out of the
+pinned `three` into `dist/realistic/basis/`** by `tools/basis/transcoder-plugin.ts`, under the
+realistic set's own precache exclusion, never committed and never from a CDN; the same plugin takes
+`KTX2Loader`'s two default `new URL(…, import.meta.url)` expressions out of the build, which would
+otherwise have put a second copy in `assets/` and so in the precache. The credits screen's
+licence-copy section and the third-party notices name it. Estimated texture memory
+(`realistic-budget.ts`) is **59.3 MiB** where it was 136: the sky and its prefiltered environment
+40.0 of it, out of #618's scope, and everything else 19.3. What the tablet's driver holds is
+validation 0002 Part AH's #618 rows. Held by `realistic-textures.test.ts` (the real loader, the
+real `.wasm` and every committed file, on a device offering ASTC and ETC and — the control — one
+offering nothing) and `game.browser.spec.ts` §"#618" (the upload formats read off the GL calls,
+with an RGBA8 control).
 
 ## Spike write-ups
 

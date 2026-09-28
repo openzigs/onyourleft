@@ -48,7 +48,7 @@ afterEach(() => {
 async function render(manifest?: string, notices?: string): Promise<Mounted> {
   const result = await mount(
     <CreditsView
-      {...(manifest === undefined ? {} : { manifest })}
+      {...(manifest === undefined ? {} : { manifest, copied: [] })}
       {...(notices === undefined ? {} : { notices })}
     />,
   );
@@ -249,6 +249,19 @@ describe('the gate: every attribution-requiring row in ASSETS.toml reaches the s
 });
 
 describe('the gate: no credit in ASSETS.toml renders without the licence it asks for — #597', () => {
+  it('names the Basis transcoder the build copies in, with its Apache-2.0 copy — #618', async () => {
+    // It is in no ASSETS.toml row (nothing is committed) and three's own
+    // licence field says MIT, so without `COPIED_WORKS` nothing on this screen
+    // would name it — ADR 0026 D-8's hand check, made visible.
+    await render();
+    const section = mounted?.container.querySelector('[data-terms="licence-copy"]');
+    expect(section?.textContent).toContain('Binomial LLC');
+    expect(section?.textContent).toContain('realistic/basis/basis_transcoder.wasm');
+    const links = [...(section?.querySelectorAll('a') ?? [])].map((a) => a.getAttribute('href'));
+    expect(links).toContain('./licences/Apache-2.0.txt');
+    expect(links).toContain('https://github.com/BinomialLLC/basis_universal');
+  });
+
   it('links every Apache-2.0 credit to the licence copy this app ships', async () => {
     const { licenceCopy } = creditsFrom(parseAssetManifest(ASSET_MANIFEST_SOURCE));
     // Not vacuous: the Roboto glyphs and the pose model are both credited.

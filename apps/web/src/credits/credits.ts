@@ -235,14 +235,58 @@ function workKey(entry: AssetEntry): string {
   return [entry.creator ?? '', entry.url ?? '', entry.licence, entry.modified ?? ''].join('"');
 }
 
+/**
+ * Works the build COPIES into the app rather than committing — #618 — so no
+ * `ASSETS.toml` row can credit them, and whose licence is not the one their
+ * package declares, so no closure does either.
+ *
+ * The one today is Binomial's **Basis Universal** transcoder, v1.50, which
+ * `three@0.185.1` (MIT) vendors under `examples/jsm/libs/basis/` and
+ * `tools/basis/transcoder-plugin.ts` copies into `realistic/basis/` for the
+ * realistic world's KTX2 textures. It is **Apache-2.0** — its README and
+ * upstream's `LICENSE` at the v1.50 tag, read by hand on 2026-09-27 because
+ * `DEP001` reads only three's MIT (ADR 0026 D-8) — so §4(a)'s copy of the
+ * licence travels with it, and it is listed with the works that ask for that.
+ * v1.50 carries no `NOTICE` (upstream added one in February 2026, after it),
+ * so §4(d) asks for nothing more. Zstandard's decoder, compiled into the
+ * `.wasm`, is BSD-3-Clause; its notice is reproduced in the third-party
+ * notices, which the last section of the screen links.
+ *
+ * ⚠️ The paths are where the files are in the BUILD, not in the repository:
+ * there is no repository path, because nothing is committed. *
+ * ⚠️ **KTX-Parse and zstddec are deliberately NOT here** (#618's review). three
+ * vendors them too and `KTX2Loader` bundles both into the renderer chunk, but
+ * they are MIT — zstddec's inlined Zstandard decoder BSD-3-Clause — and
+ * neither licence is in {@link LICENCE_COPY_LICENCES} or
+ * {@link ATTRIBUTION_LICENCES}: they ask for their notice to travel with the
+ * code, exactly as three's own MIT does, and three is not listed here either.
+ * Their notices are in the third-party notices (`third-party-notices.json`
+ * §`vendoredIntoBundle`), which the screen's last section links. The rule
+ * this list follows is the licence's, not the file's route into the build.
+ */
+export const COPIED_WORKS: readonly AssetEntry[] = [
+  'basis_transcoder.js',
+  'basis_transcoder.wasm',
+].map((file) => ({
+  path: `realistic/basis/${file}`,
+  source: 'Basis Universal v1.50, as three 0.185.1 vendors it, copied into the build',
+  licence: 'Apache-2.0',
+  read: '2026-09-27',
+  sha256: '',
+  creator:
+    'Binomial LLC — Basis Universal’s transcoder, v1.50, with Zstandard’s BSD-3-Clause decoder compiled in',
+  url: 'https://github.com/BinomialLLC/basis_universal',
+  modified: 'no',
+}));
+
 /** The credits a manifest yields, and everything that got in the way. */
-export function creditsFrom(manifest: ParsedManifest): Credits {
+export function creditsFrom(manifest: ParsedManifest, copied: readonly AssetEntry[] = []): Credits {
   const problems = manifest.problems.map(
     (problem) => `ASSETS.toml line ${String(problem.line)}: ${problem.message}`,
   );
   const works = new Map<string, { first: AssetEntry; files: string[] }>();
 
-  for (const entry of manifest.entries) {
+  for (const entry of [...manifest.entries, ...copied]) {
     const required = requiresAttribution(entry.licence);
     if (!required && entry.creator === undefined) {
       continue;

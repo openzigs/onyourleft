@@ -7,7 +7,9 @@
     "read from the project's own repository at a named commit, because the package carries none at all. 'licenceText' adds the licence's",
     "canonical text, which this repository already pins (LIC005). copiedIntoBuild: files the build copies verbatim out of a package into dist,",
     "named so the notice says which package each came from.",
-    "writtenByTheBundler: packages whose OWN code the bundler writes into dist, which no closure lists because they are build tools -- see WRITTEN_BY_THE_BUNDLER in the generator. Keyed by the INSTALLED name@version, so a bump fails closed (NOT008). 'files' are read verbatim from the installed package; 'from'/'through' cut a file down to the part that covers the code that ships."
+    "writtenByTheBundler: packages whose OWN code the bundler writes into dist, which no closure lists because they are build tools -- see WRITTEN_BY_THE_BUNDLER in the generator. Keyed by the INSTALLED name@version, so a bump fails closed (NOT008). 'files' are read verbatim from the installed package; 'from'/'through' cut a file down to the part that covers the code that ships.",
+    "A copiedIntoBuild entry may carry 'vendored' (#618): the copied file is somebody else's work that its package vendors -- Binomial's Apache-2.0 transcoder inside the MIT three -- so its notice is written here, once per work, because the package's own licence field cannot say it.",
+    "vendoredIntoBundle (#618's review): files a package vendors from somebody else that the bundler writes into the app's OWN chunks -- three's examples/jsm/libs/ copies of KTX-Parse and zstddec, which KTX2Loader imports into the renderer chunk. Same 'vendored' shape as copiedIntoBuild; 'file' is the path inside the package and 'in' says which chunk carries it. apps/web/tools/notices/copied-into-build.ts fails the build over a bundled file from a VENDORED_DIRECTORIES directory this list does not name, and over a name the build no longer bundles."
   ],
   "noLicenceFile": {
     "@mediapipe/tasks-vision@1.0.1": {
@@ -41,6 +43,94 @@
       "package": "@mediapipe/tasks-vision",
       "file": "wasm/vision_wasm_module_internal.wasm",
       "by": "apps/web/tools/pose/pose-runtime-plugin.ts"
+    },
+    {
+      "path": "realistic/basis/basis_transcoder.js",
+      "package": "three",
+      "file": "examples/jsm/libs/basis/basis_transcoder.js",
+      "by": "apps/web/tools/basis/transcoder-plugin.ts",
+      "vendored": {
+        "name": "Basis Universal transcoder",
+        "version": "1.50",
+        "licence": "Apache-2.0 AND BSD-3-Clause",
+        "what": "basis_transcoder.js and basis_transcoder.wasm, in realistic/basis/: the transcoder of Basis Universal v1.50, by Binomial LLC, as three 0.185.1 vendors it under examples/jsm/libs/basis/ (three.js took v1.50 in mrdoob/three.js#29418, its last change to these files). The realistic world's KTX2 textures are transcoded by it, on the device, to the GPU's own block formats. The WebAssembly has Zstandard's decoder compiled in, under BSD-3-Clause, which is how it reads a UASTC texture's Zstandard supercompression. Upstream v1.50 carries no NOTICE file (one was added in February 2026, after this version), so Apache-2.0 section 4(d) asks for none; the copy of the licence section 4(a) asks for is the appendix. three's own licence field says MIT and cannot say any of this, which is why it is written here.",
+        "licenceText": "Apache-2.0",
+        "upstream": [
+          {
+            "url": "https://github.com/BinomialLLC/basis_universal/blob/051ad6d8a64bb95a79e8601c317055fd1782ad3e/.reuse/dep5",
+            "read": "2026-09-27",
+            "text": "Files: *\nCopyright: 2019-2024 Binomial LLC\n           2016 The Android Open Source Project\nLicense: Apache-2.0\n\nFiles: zstd/*\nCopyright: 2016-present Facebook, Inc.\nLicense: BSD-3-Clause\n"
+          },
+          {
+            "url": "https://github.com/BinomialLLC/basis_universal/blob/051ad6d8a64bb95a79e8601c317055fd1782ad3e/zstd/LICENSE",
+            "read": "2026-09-27",
+            "text": "BSD License\n\nFor Zstandard software\n\nCopyright (c) 2016-present, Facebook, Inc. All rights reserved.\n\nRedistribution and use in source and binary forms, with or without modification,\nare permitted provided that the following conditions are met:\n\n * Redistributions of source code must retain the above copyright notice, this\n   list of conditions and the following disclaimer.\n\n * Redistributions in binary form must reproduce the above copyright notice,\n   this list of conditions and the following disclaimer in the documentation\n   and/or other materials provided with the distribution.\n\n * Neither the name Facebook nor the names of its contributors may be used to\n   endorse or promote products derived from this software without specific\n   prior written permission.\n\nTHIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS \"AS IS\" AND\nANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED\nWARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE\nDISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR\nANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES\n(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;\nLOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON\nANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT\n(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS\nSOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.\n"
+          }
+        ]
+      }
+    },
+    {
+      "path": "realistic/basis/basis_transcoder.wasm",
+      "package": "three",
+      "file": "examples/jsm/libs/basis/basis_transcoder.wasm",
+      "by": "apps/web/tools/basis/transcoder-plugin.ts",
+      "vendored": {
+        "name": "Basis Universal transcoder",
+        "version": "1.50",
+        "licence": "Apache-2.0 AND BSD-3-Clause",
+        "what": "basis_transcoder.js and basis_transcoder.wasm, in realistic/basis/: the transcoder of Basis Universal v1.50, by Binomial LLC, as three 0.185.1 vendors it under examples/jsm/libs/basis/ (three.js took v1.50 in mrdoob/three.js#29418, its last change to these files). The realistic world's KTX2 textures are transcoded by it, on the device, to the GPU's own block formats. The WebAssembly has Zstandard's decoder compiled in, under BSD-3-Clause, which is how it reads a UASTC texture's Zstandard supercompression. Upstream v1.50 carries no NOTICE file (one was added in February 2026, after this version), so Apache-2.0 section 4(d) asks for none; the copy of the licence section 4(a) asks for is the appendix. three's own licence field says MIT and cannot say any of this, which is why it is written here.",
+        "licenceText": "Apache-2.0",
+        "upstream": [
+          {
+            "url": "https://github.com/BinomialLLC/basis_universal/blob/051ad6d8a64bb95a79e8601c317055fd1782ad3e/.reuse/dep5",
+            "read": "2026-09-27",
+            "text": "Files: *\nCopyright: 2019-2024 Binomial LLC\n           2016 The Android Open Source Project\nLicense: Apache-2.0\n\nFiles: zstd/*\nCopyright: 2016-present Facebook, Inc.\nLicense: BSD-3-Clause\n"
+          },
+          {
+            "url": "https://github.com/BinomialLLC/basis_universal/blob/051ad6d8a64bb95a79e8601c317055fd1782ad3e/zstd/LICENSE",
+            "read": "2026-09-27",
+            "text": "BSD License\n\nFor Zstandard software\n\nCopyright (c) 2016-present, Facebook, Inc. All rights reserved.\n\nRedistribution and use in source and binary forms, with or without modification,\nare permitted provided that the following conditions are met:\n\n * Redistributions of source code must retain the above copyright notice, this\n   list of conditions and the following disclaimer.\n\n * Redistributions in binary form must reproduce the above copyright notice,\n   this list of conditions and the following disclaimer in the documentation\n   and/or other materials provided with the distribution.\n\n * Neither the name Facebook nor the names of its contributors may be used to\n   endorse or promote products derived from this software without specific\n   prior written permission.\n\nTHIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS \"AS IS\" AND\nANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED\nWARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE\nDISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR\nANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES\n(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;\nLOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON\nANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT\n(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS\nSOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.\n"
+          }
+        ]
+      }
+    }
+  ],
+  "vendoredIntoBundle": [
+    {
+      "package": "three",
+      "file": "examples/jsm/libs/ktx-parse.module.js",
+      "in": "the game renderer chunk (assets/three-renderer-*.js), imported by three's KTX2Loader",
+      "vendored": {
+        "name": "KTX-Parse",
+        "version": "1.1.0",
+        "licence": "MIT",
+        "what": "ktx-parse.module.js, bundled into the game renderer's chunk: KTX-Parse by Don McCurdy, as three 0.185.1 vendors it under examples/jsm/libs/. three.js took it in mrdoob/three.js#31621 (commit c06699ee2549, 2025-08-10, 'Update to ktx-parse v1.1'), its last change to that file, the same day KTX-Parse tagged v1.1.0. The vendored build is minified by three, so it cannot be compared byte for byte; it carries v1.1.0's levelCount handling, which v1.0.1 does not have, while its KTXwriter string still reads 'KTX-Parse v1.0.1' -- a build constant, not the source. The licence is the same MIT text at both tags and in the npm tarball of 1.1.0. It reads a KTX2 container's header, levels and key/value data before the transcoder is given the payload. three's own licence field says MIT for three.js authors and is not this notice, which is why it is written here.",
+        "upstream": [
+          {
+            "url": "https://github.com/donmccurdy/KTX-Parse/blob/d47bd1767d8ad50a6fccf1a7bfebd493a915fc93/LICENSE",
+            "read": "2026-09-27",
+            "text": "The MIT License (MIT)\n\nCopyright (c) 2020 Don McCurdy\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n"
+          }
+        ]
+      }
+    },
+    {
+      "package": "three",
+      "file": "examples/jsm/libs/zstddec.module.js",
+      "in": "the game renderer chunk (assets/three-renderer-*.js), imported by three's KTX2Loader",
+      "vendored": {
+        "name": "zstddec",
+        "version": "0.0.2",
+        "licence": "MIT AND BSD-3-Clause",
+        "what": "zstddec.module.js, bundled into the game renderer's chunk: zstddec by Don McCurdy, as three 0.185.1 vendors it under examples/jsm/libs/. Its code is byte-identical, once the source-map comment is set aside, to dist/zstddec.modern.js in the npm tarballs of zstddec 0.0.2 (and 0.0.1, whose file is the same), both published 2020-07-27, the day three.js last rebuilt it (commit d5bb0336242e); 0.1.0 differs. It inlines, as a base64 data: URL, a WebAssembly build of Zstandard's decoder, which is Zstandard's work under BSD-3-Clause; KTX2Loader uses it to undo a texture's Zstandard supercompression. zstddec's own manifest declares 'MIT AND BSD-3-Clause' and its LICENSE, below, carries both notices. three's own licence field says MIT for three.js authors and is not this notice, which is why it is written here.",
+        "upstream": [
+          {
+            "url": "https://github.com/donmccurdy/zstddec/blob/06a6f6b30f7052bdf5d2b887a6b0916f9a9ba45e/LICENSE",
+            "read": "2026-09-27",
+            "text": "The MIT License (MIT)\n\nCopyright (c) 2020 Don McCurdy\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n\n***\n\nBSD License\n\nFor Zstandard software\n\nCopyright (c) 2016-present, Yann Collet, Facebook, Inc. All rights reserved.\n\nRedistribution and use in source and binary forms, with or without modification,\nare permitted provided that the following conditions are met:\n\n * Redistributions of source code must retain the above copyright notice, this\n list of conditions and the following disclaimer.\n\n * Redistributions in binary form must reproduce the above copyright notice,\n this list of conditions and the following disclaimer in the documentation\n and/or other materials provided with the distribution.\n\n * Neither the name Facebook nor the names of its contributors may be used to\n endorse or promote products derived from this software without specific\n prior written permission.\n\nTHIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS \"AS IS\" AND\nANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED\nWARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE\nDISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR\nANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES\n(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;\nLOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON\nANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT\n(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS\nSOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.\n"
+          }
+        ]
+      }
     }
   ],
   "writtenByTheBundler": {

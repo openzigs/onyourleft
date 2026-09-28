@@ -24,6 +24,13 @@
  * different Blender may decimate differently and the committed bytes would
  * then describe a run nobody can repeat — `sources.ts` §`PINNED_BLENDER`.
  *
+ * ## KTX-Software is a tool too — #618
+ *
+ * Every committed texture is KTX2, made by the pinned `ktx` (`KTX` names it;
+ * `sources.ts` §`PINNED_KTX` says how it was installed) from what the Blender
+ * step or the upstream wrote — `encode-ktx2.ts` is that step. Any other
+ * version is refused, for Blender's reason.
+ *
  * ## `--check`: the reproducibility assertion
  *
  * #430's criterion is that re-running the pipeline reproduces the committed
@@ -36,11 +43,20 @@
 
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { encodeKtx2, pinnedImageEncoder, requirePinnedKtx, withKtx2Images } from './encode-ktx2';
 import { LOCK, RAW } from './fetch-assets';
 import {
   assetRecord,
@@ -48,6 +64,7 @@ import {
   OUTPUT_DIRECTORY,
   OUTPUTS,
   PINNED_BLENDER,
+  PINNED_KTX,
   shippedFiles,
   TEXTURE_SCRIPT,
   type InputLock,
@@ -93,14 +110,40 @@ function inputFor(output: OutputSpec): string {
   return join(RAW, output.from, `${output.from}_1k.gltf`);
 }
 
-function make(output: OutputSpec, into: string): unknown {
+/**
+ * Makes one output, and whatever else its run writes, into `into`.
+ *
+ * #618: a Blender run writes into `stage`, a directory of its own, the very
+ * files it wrote before KTX2 — a GLB with JPEG and PNG maps, a PNG impostor, a
+ * JPEG structure map — and the encoder turns each into what ships. So the
+ * Blender half is the step `--check` already proved byte-stable, unchanged.
+ */
+function make(output: OutputSpec, into: string, stage: string): unknown {
   const recipe = output.recipe;
   if (recipe.how === 'verbatim') {
     copyFileSync(join(RAW, output.from, recipe.file), join(into, output.file));
     return undefined;
   }
-  const report = join(into, `${output.file}.report.json`);
-  blender(recipe.script, [inputFor(output), join(into, output.file), report, ...recipe.args]);
+  if (recipe.how === 'ktx2') {
+    encodeKtx2(recipe.ktx2, join(RAW, output.from, recipe.file), join(into, output.file));
+    return undefined;
+  }
+  const made = recipe.made ?? output.file;
+  const report = join(stage, `${output.file}.report.json`);
+  blender(recipe.script, [inputFor(output), join(stage, made), report, ...recipe.args]);
+  if (recipe.ktx2 !== undefined) {
+    encodeKtx2(recipe.ktx2, join(stage, made), join(into, output.file));
+  } else if (recipe.images === 'ktx2') {
+    writeFileSync(
+      join(into, output.file),
+      withKtx2Images(new Uint8Array(readFileSync(join(stage, made))), pinnedImageEncoder),
+    );
+  } else {
+    copyFileSync(join(stage, made), join(into, output.file));
+  }
+  for (const also of recipe.alsoWrites ?? []) {
+    encodeKtx2(also.ktx2, join(stage, also.made), join(into, also.file));
+  }
   return JSON.parse(readFileSync(report, 'utf8')) as unknown;
 }
 
@@ -127,12 +170,15 @@ function main(): void {
   if (version !== PINNED_BLENDER) {
     throw new Error(`${BLENDER} is ${version}; the pipeline is pinned to ${PINNED_BLENDER}`);
   }
+  requirePinnedKtx();
   const scratch = mkdtempSync(join(tmpdir(), 'oyl-realistic-'));
+  const stage = join(scratch, 'stage');
+  mkdirSync(stage);
   const different: string[] = [];
   try {
     for (const output of OUTPUTS) {
       const started = Date.now();
-      const report = make(output, scratch);
+      const report = make(output, scratch, stage);
       const seconds = ((Date.now() - started) / 1000).toFixed(1);
       console.log(
         `${output.file}: ${seconds} s ${report === undefined ? '' : JSON.stringify(report)}`,
@@ -157,7 +203,7 @@ function main(): void {
     if (different.length > 0) {
       throw new Error(`not reproduced:\n${different.join('\n')}`);
     }
-    console.log(`every file reproduced byte for byte by ${PINNED_BLENDER}`);
+    console.log(`every file reproduced byte for byte by ${PINNED_BLENDER} and ${PINNED_KTX}`);
   }
 }
 

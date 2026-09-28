@@ -145,9 +145,19 @@ export function structureMapFiles(id: string): {
   readonly normal: string;
 } {
   return {
-    colour: `${id}_diff_${String(STRUCTURE_TEXTURE_PIXELS)}.jpg`,
-    normal: `${id}_nor_gl_${String(STRUCTURE_TEXTURE_PIXELS)}.jpg`,
+    colour: `${id}_diff_${String(STRUCTURE_TEXTURE_PIXELS)}.ktx2`,
+    normal: `${id}_nor_gl_${String(STRUCTURE_TEXTURE_PIXELS)}.ktx2`,
   };
+}
+
+/**
+ * The JPEG `process_texture.py` writes for one of {@link structureMapFiles} —
+ * #618: the Blender step is unchanged and still writes the downsized JPEG it
+ * always did, into the pipeline's scratch directory, and the committed file is
+ * that JPEG encoded as KTX2.
+ */
+export function structureMapMade(file: string): string {
+  return file.replace(/\.ktx2$/, '.jpg');
 }
 
 /**
@@ -223,6 +233,163 @@ export const SOURCES: readonly AssetSource[] = [
 /** The Blender version every derived asset was made with, and the one a re-run must use. */
 export const PINNED_BLENDER = 'Blender 4.4.3';
 
+/**
+ * The KTX-Software release every KTX2 file was encoded with, and the one a
+ * re-run must use — #618, ADR 0026 D-8 and its 2026-09-27 amendment.
+ *
+ * ⚠️ **A tool, never a dependency**, exactly as Blender is (D-5): nothing in
+ * the product or in CI runs it, and its output is committed with a digest.
+ * KTX-Software is **Apache-2.0** (its own `LICENSE.md`, read 2026-09-27, and
+ * the licence the notarised macOS installer shows), and like Blender's GPL its
+ * licence does not reach what it writes.
+ *
+ * ⚠️ **Pinned to one release and a different one is refused**, because a
+ * different encoder makes different blocks and the committed bytes would then
+ * describe a run nobody can repeat. `ktx create` at this version, with
+ * `--threads 1`, was measured byte-stable across two runs on 2026-09-27 — for
+ * Basis ETC1S and for UASTC with Zstandard alike — so `--check` compares the
+ * KTX2 files byte for byte like every other derived file, and D-5's fallback
+ * (a digest over decoded texels) is not needed.
+ *
+ * How it was installed on the machine that made the committed files, so it can
+ * be installed again: the release's own macOS package,
+ * `KTX-Software-4.4.2-Darwin-arm64.pkg`, SHA-256
+ * `500bd8f9d63358c3f3a0d83b724c8574436a72c37dc0e4bad90ec1ca38032c3c`,
+ * notarised and signed "Developer ID Installer: The Khronos Group, Inc.
+ * (TD2656HYNK)", expanded with `pkgutil --expand-full` rather than installed,
+ * and `ktx` run from there with `libktx.4.dylib` beside it in `../lib` — the
+ * binary's own `@executable_path/../lib` rpath. `KTX` names the binary; the
+ * default is `ktx` on the `PATH`, which is where the package installs it.
+ */
+export const PINNED_KTX = 'KTX-Software v4.4.2';
+
+/** What `ktx --version` prints at {@link PINNED_KTX}, the whole line. */
+export const PINNED_KTX_VERSION_LINE = 'ktx version: v4.4.2';
+
+/**
+ * How a picture is encoded as KTX2 — #618.
+ *
+ * - `colour` — a colour map with no alpha: **Basis Universal ETC1S**, sRGB.
+ *   On the tablet three's `KTX2Loader` transcodes ETC1S to **ETC2 RGB**, half
+ *   a byte a texel; the photographs are what the owner looked at already,
+ *   and ETC1S is what spike 0015's Godot build drew them as, ETC2.
+ * - `colour-alpha` — a colour map whose alpha is a cut-out (a leaf card, an
+ *   impostor strip): ETC1S with its alpha slice, which transcodes to **ETC2
+ *   RGBA**, a byte a texel.
+ * - `normal` — a tangent-space normal map: **UASTC**, linear, with Zstandard,
+ *   which transcodes to **ASTC 4×4** where the device has it, a byte a texel.
+ *   UASTC rather than ETC1S because ETC1S's shared endpoints band a normal
+ *   map's smooth gradients, which is the one map where banding is lighting.
+ *   ⚠️ **Three channels, not the encoder's `--normal-mode`**: that mode stores
+ *   X and Y in RGB and A and needs a shader to rebuild Z, and three's
+ *   `normalMap` reads RGB. Nothing here changes a shader.
+ */
+export type TextureEncoding = 'colour' | 'colour-alpha' | 'normal';
+
+/**
+ * Which corner of the picture a texture coordinate of (0, 0) names.
+ *
+ * ⚠️ **three cannot flip a compressed texture** — `flipY` is refused for one —
+ * so a picture that was loaded with `TextureLoader`, whose `flipY` is `true`,
+ * is encoded with its rows reversed (`bottom-left`), which puts every texel
+ * at the texture coordinate it had before. A glTF's own maps are read
+ * unflipped by `GLTFLoader` and are encoded as they are (`top-left`).
+ */
+export type TextureOrigin = 'top-left' | 'bottom-left';
+
+/** One picture encoded as KTX2. */
+export interface Ktx2Step {
+  readonly encoding: TextureEncoding;
+  readonly origin: TextureOrigin;
+}
+
+/**
+ * The `ktx create` arguments for one encoding — the whole recipe, so that the
+ * committed bytes follow from this table and the pinned tool alone.
+ *
+ * - `--threads 1` — measured byte-stable at it (see {@link PINNED_KTX}).
+ * - `--generate-mipmap` — the full chain, made by the encoder: three cannot
+ *   generate mipmaps for a compressed texture, and a texture sampled with a
+ *   mipmapped filter and no chain is incomplete and draws black.
+ * - `--fail-on-color-conversions` — a colour map is taken as the sRGB it is,
+ *   and a normal map is ASSIGNED linear rather than converted, so a picture
+ *   the encoder wanted to convert is a refusal rather than a quietly
+ *   different map.
+ * - ETC1S at `--clevel 4 --qlevel 255`, the encoder's best quality short of
+ *   its slowest level; UASTC at `--uastc-quality 2` with `--zstd 18`.
+ */
+export function ktxCreateArguments(
+  step: Ktx2Step,
+  input: string,
+  output: string,
+): readonly string[] {
+  const encoded =
+    step.encoding === 'normal'
+      ? [
+          '--format',
+          'R8G8B8_UNORM',
+          '--assign-tf',
+          'linear',
+          '--encode',
+          'uastc',
+          '--uastc-quality',
+          '2',
+          '--zstd',
+          '18',
+        ]
+      : [
+          '--format',
+          step.encoding === 'colour-alpha' ? 'R8G8B8A8_SRGB' : 'R8G8B8_SRGB',
+          '--encode',
+          'basis-lz',
+          '--clevel',
+          '4',
+          '--qlevel',
+          '255',
+        ];
+  return [
+    'create',
+    ...encoded,
+    '--generate-mipmap',
+    '--threads',
+    '1',
+    '--fail-on-color-conversions',
+    ...(step.origin === 'bottom-left' ? ['--convert-texcoord-origin', 'bottom-left'] : []),
+    input,
+    output,
+  ];
+}
+
+/** What {@link ktxCreateArguments} does, in words — the `modified` a record carries. */
+export function encodingWords(step: Ktx2Step): string {
+  const codec =
+    step.encoding === 'normal'
+      ? 'Basis Universal UASTC with Zstandard, linear'
+      : step.encoding === 'colour-alpha'
+        ? 'Basis Universal ETC1S with alpha, sRGB'
+        : 'Basis Universal ETC1S, sRGB';
+  const flipped =
+    step.origin === 'bottom-left'
+      ? ', its rows reversed so that it samples as the upright picture did'
+      : '';
+  return `encoded as KTX2 (${codec}, with its full mipmap chain${flipped}) by ${PINNED_KTX}`;
+}
+
+/** What encoding a GLB's embedded maps does, in words — `encode-ktx2.ts` §`embeddedImages` chooses each map's encoding. */
+export const GLB_IMAGES_WORDS = `its embedded maps encoded as KTX2 (KHR_texture_basisu) by ${PINNED_KTX} — colour maps as Basis Universal ETC1S, with alpha where the map has it, and normal maps as UASTC with Zstandard, each with its full mipmap chain`;
+
+/** Where {@link OutputRecipe} `ktx2` recipes' encoder step lives — #618. */
+export const KTX2_SCRIPT = 'encode-ktx2.ts';
+
+/** Where the pipeline's scripts are, relative to the repository — what a row's `script` begins with. */
+export const PIPELINE_DIRECTORY = 'apps/web/tools/realistic/';
+
+/** The encoder's script as a two-step row's `modified` names it — #618's review. */
+export const KTX2_SCRIPT_PATH = `${PIPELINE_DIRECTORY}${KTX2_SCRIPT}`;
+
+/** What a two-step row's `modified` ends with, before {@link KTX2_SCRIPT_PATH}. */
+export const KTX2_STEP_WORDS = '; the KTX2 step is made by ';
+
 /** Where the product's realistic files are committed, repository-relative. */
 export const OUTPUT_DIRECTORY = 'apps/web/public/realistic';
 
@@ -230,15 +397,44 @@ export const OUTPUT_DIRECTORY = 'apps/web/public/realistic';
 export type OutputRecipe =
   /** Copied byte for byte: its `source` and `sha256` describe the same file. */
   | { readonly how: 'verbatim'; readonly file: string }
+  /**
+   * An upstream picture encoded as KTX2 by {@link KTX2_SCRIPT} — #618. The
+   * road's and the ground's maps, which were committed verbatim until then.
+   */
+  | { readonly how: 'ktx2'; readonly file: string; readonly ktx2: Ktx2Step }
   /** Made by a Blender script: {@link inputDigest} of the source's locked files is its input. */
   | {
       readonly how: 'blender';
       readonly script: string;
       /** The arguments after the input and output paths — which object, what budget. */
       readonly args: readonly string[];
+      /**
+       * The name the script writes, where the shipped file is not what it
+       * writes but that file encoded as KTX2 (#618) — with {@link ktx2}.
+       */
+      readonly made?: string;
+      /** How {@link made} becomes the shipped file. */
+      readonly ktx2?: Ktx2Step;
+      /**
+       * Whether the GLB the script writes has its embedded maps encoded as
+       * KTX2 (`KHR_texture_basisu`) before it ships — #618. A GLB with no
+       * maps (a tree's middle level, the rider) is shipped as Blender wrote it.
+       */
+      readonly images?: 'ktx2';
       /** The other files the same run writes, beside {@link OutputSpec.file}. */
-      readonly alsoWrites?: readonly string[];
+      readonly alsoWrites?: readonly AlsoWritten[];
     };
+
+/**
+ * A second file a Blender run writes — a tree's impostor strip — and, since
+ * #618, what it ships as: {@link made} is the PNG the script writes, and
+ * {@link file} is that PNG encoded as KTX2.
+ */
+export interface AlsoWritten {
+  readonly file: string;
+  readonly made: string;
+  readonly ktx2: Ktx2Step;
+}
 
 /** One file the product ships. */
 export interface OutputSpec {
@@ -253,6 +449,13 @@ export interface OutputSpec {
 
 const TREE_SCRIPT = 'blender/process_tree.py';
 
+/**
+ * How an impostor strip is encoded — #618: ETC1S with its alpha, because the
+ * strip is a cut-out; and flipped, because `TextureLoader` read the PNG with
+ * `flipY` and the shader's `vStripUv` was written against that.
+ */
+const IMPOSTOR_KTX2: Ktx2Step = { encoding: 'colour-alpha', origin: 'bottom-left' };
+
 /** Where {@link structureMap}'s script lives — #475. */
 export const TEXTURE_SCRIPT = 'blender/process_texture.py';
 
@@ -265,11 +468,25 @@ export const TEXTURE_SCRIPT = 'blender/process_texture.py';
  * them to `realistic-budget.ts`, so a recipe that asked for more fails there.
  */
 export const OUTPUTS: readonly OutputSpec[] = [
+  // ⚠️ The sky stays the upstream HDR, at half-float, on purpose — #618 left it
+  // out of scope: `PMREMGenerator` prefilters it, and a compressed HDR sky is
+  // its own issue (#615 §"Deliberately not filed").
   { file: 'farm_field_2k.hdr', from: 'farm_field', recipe: verbatim('farm_field_2k.hdr') },
+  // #618: the road's and the ground's maps, which were the upstream JPEGs
+  // committed verbatim, are those JPEGs encoded as KTX2.
   ...['asphalt_02', 'sparse_grass'].flatMap((id) =>
-    ['diff', 'nor_gl'].map((map) => {
-      const file = `${id}_${map}_1k.jpg`;
-      return { file, from: id, recipe: verbatim(file) };
+    ['diff', 'nor_gl'].map((map): OutputSpec => {
+      const upstream = `${id}_${map}_1k.jpg`;
+      const ktx2: Ktx2Step = {
+        encoding: map === 'diff' ? 'colour' : 'normal',
+        origin: 'bottom-left',
+      };
+      return {
+        file: `${id}_${map}_1k.ktx2`,
+        from: id,
+        recipe: { how: 'ktx2', file: upstream, ktx2 },
+        modified: `one map of the texture (${upstream}), ${encodingWords(ktx2)}`,
+      };
     }),
   ),
   tree('island_tree_02', 'island_tree_02', 'island_tree_02', '28000'),
@@ -286,7 +503,12 @@ export const OUTPUTS: readonly OutputSpec[] = [
   {
     file: 'boulder_01.glb',
     from: 'boulder_01',
-    recipe: { how: 'blender', script: 'blender/process_rock.py', args: ['boulder_01', '2400'] },
+    recipe: {
+      how: 'blender',
+      script: 'blender/process_rock.py',
+      args: ['boulder_01', '2400'],
+      images: 'ktx2',
+    },
     modified:
       'collapse-decimated from 66 122 to about 2 400 triangles, its colour and normal maps downsized to 512 px and its roughness map dropped; stood on its base; ambient occlusion baked into a vertex colour against a ground plane',
   },
@@ -306,13 +528,21 @@ export const OUTPUTS: readonly OutputSpec[] = [
   },
 ];
 
-/** One structure map: a Poly Haven 1K map downsized — #475. */
+/**
+ * One structure map: a Poly Haven 1K map downsized — #475 — and since #618
+ * encoded as KTX2. The Blender step writes the JPEG it always wrote
+ * ({@link structureMapMade}), into the pipeline's scratch directory.
+ */
 function structureMap(
   file: string,
   from: string,
   mapFile: string,
   kind: 'colour' | 'data',
 ): OutputSpec {
+  const ktx2: Ktx2Step = {
+    encoding: kind === 'colour' ? 'colour' : 'normal',
+    origin: 'bottom-left',
+  };
   return {
     file,
     from,
@@ -320,8 +550,10 @@ function structureMap(
       how: 'blender',
       script: TEXTURE_SCRIPT,
       args: [mapFile, String(STRUCTURE_TEXTURE_PIXELS), kind],
+      made: structureMapMade(file),
+      ktx2,
     },
-    modified: `one map of the texture (${mapFile}), downsized from 1024 to ${String(STRUCTURE_TEXTURE_PIXELS)} px and re-encoded as JPEG`,
+    modified: `one map of the texture (${mapFile}), downsized from 1024 to ${String(STRUCTURE_TEXTURE_PIXELS)} px and re-encoded as JPEG; then ${encodingWords(ktx2)}`,
   };
 }
 
@@ -338,9 +570,16 @@ function tree(name: string, from: string, object: string, triangles: string): Ou
       how: 'blender',
       script: TREE_SCRIPT,
       args: [object, triangles, 'impostor', 'auto'],
-      alsoWrites: [`${name}-impostor.png`],
+      images: 'ktx2',
+      alsoWrites: [
+        {
+          file: `${name}-impostor.ktx2`,
+          made: `${name}-impostor.png`,
+          ktx2: IMPOSTOR_KTX2,
+        },
+      ],
     },
-    modified: `one object of the pack (${object}); foliage thinned by whole cards and each survivor grown, wood collapse-decimated, textures downsized to 512 px and roughness maps dropped, ambient occlusion baked into a vertex colour; an eight-view impostor strip rendered from the full scan before any of that`,
+    modified: `one object of the pack (${object}); foliage thinned by whole cards and each survivor grown, wood collapse-decimated, textures downsized to 512 px and roughness maps dropped, ambient occlusion baked into a vertex colour; an eight-view impostor strip rendered from the full scan before any of that; then ${GLB_IMAGES_WORDS}`,
   };
 }
 
@@ -370,8 +609,13 @@ function plant(name: string, from: string, object: string, triangles: string): O
   return {
     file: `${name}.glb`,
     from,
-    recipe: { how: 'blender', script: TREE_SCRIPT, args: [object, triangles, 'none', 'all'] },
-    modified: `one object of the pack (${object}); foliage thinned by whole cards and each survivor grown, textures downsized to 512 px and roughness maps dropped, ambient occlusion baked into a vertex colour`,
+    recipe: {
+      how: 'blender',
+      script: TREE_SCRIPT,
+      args: [object, triangles, 'none', 'all'],
+      images: 'ktx2',
+    },
+    modified: `one object of the pack (${object}); foliage thinned by whole cards and each survivor grown, textures downsized to 512 px and roughness maps dropped, ambient occlusion baked into a vertex colour; then ${GLB_IMAGES_WORDS}`,
   };
 }
 
@@ -379,7 +623,7 @@ function plant(name: string, from: string, object: string, triangles: string): O
 export function shippedFiles(): readonly string[] {
   return OUTPUTS.flatMap((output) =>
     output.recipe.how === 'blender'
-      ? [output.file, ...(output.recipe.alsoWrites ?? [])]
+      ? [output.file, ...(output.recipe.alsoWrites ?? []).map((also) => also.file)]
       : [output.file],
   );
 }
@@ -579,7 +823,8 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
   const output = OUTPUTS.find(
     (each) =>
       each.file === file ||
-      (each.recipe.how === 'blender' && (each.recipe.alsoWrites ?? []).includes(file)),
+      (each.recipe.how === 'blender' &&
+        (each.recipe.alsoWrites ?? []).some((also) => also.file === file)),
   );
   if (output === undefined) throw new Error(`${file}: no pipeline output makes it`);
   const source = lock.sources.find((each) => each.id === output.from);
@@ -601,7 +846,33 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
       ['sha256', sha256],
     ];
   }
-  const impostor = file !== output.file;
+  const recipe = output.recipe;
+  const impostor =
+    recipe.how === 'blender'
+      ? (recipe.alsoWrites ?? []).find((also) => also.file === file)
+      : undefined;
+  // #618: a file that passed through the encoder names it as well as Blender.
+  const encoded =
+    recipe.how === 'ktx2' ||
+    impostor !== undefined ||
+    (recipe.how === 'blender' && (recipe.ktx2 !== undefined || recipe.images === 'ktx2'));
+  const tool =
+    recipe.how === 'ktx2'
+      ? PINNED_KTX
+      : encoded
+        ? `${PINNED_BLENDER}, then ${PINNED_KTX}`
+        : PINNED_BLENDER;
+  // #618's review: `script` is ONE path — ASSET007 checks a single committed
+  // file, and the manifest's two readers (`check-repo-rules.sh` and
+  // `credits/manifest.ts`) hold no list — so a two-step row names its first
+  // step there, the Blender script that read the recorded input, and its
+  // second in `modified`, where a reader making it again looks for what was
+  // done. `provenance.test.ts` holds that the file named is committed.
+  const second = recipe.how === 'blender' && encoded ? `${KTX2_STEP_WORDS}${KTX2_SCRIPT_PATH}` : '';
+  const described =
+    impostor !== undefined
+      ? `an eight-view impostor strip of one object of the pack, rendered from the full scan; then ${encodingWords(impostor.ktx2)}`
+      : (output.modified ?? '');
   return [
     ['path', path],
     [
@@ -611,16 +882,11 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
     ['licence', source.licence],
     ['read', source.read],
     ['sha256', sha256],
-    [
-      'modified',
-      impostor
-        ? `an eight-view impostor strip of one object of the pack, rendered from the full scan`
-        : (output.modified ?? ''),
-    ],
+    ['modified', `${described}${second}`],
     ['input', source.licencePage],
     ['inputsha256', inputDigest(source.files)],
-    ['script', `apps/web/tools/realistic/${output.recipe.script}`],
-    ['tool', PINNED_BLENDER],
+    ['script', `${PIPELINE_DIRECTORY}${recipe.how === 'ktx2' ? KTX2_SCRIPT : recipe.script}`],
+    ['tool', tool],
   ];
 }
 

@@ -5,7 +5,11 @@ import { describe, expect, it } from 'vitest';
 import {
   inputDigest,
   licenceVerdict,
+  encodingWords,
+  ktxCreateArguments,
   OUTPUTS,
+  PINNED_KTX,
+  PINNED_KTX_VERSION_LINE,
   polyHavenAuthors,
   polyHavenFiles,
   safeRelativePath,
@@ -15,6 +19,7 @@ import {
   structureMapFiles,
   TEXTURE_SCRIPT,
   type AssetSource,
+  type Ktx2Step,
 } from './sources';
 import { sameFiles } from './fetch-assets';
 
@@ -177,7 +182,7 @@ describe('the pipeline’s own table', () => {
 
   it('says in words what a derived file had done to it', () => {
     for (const output of OUTPUTS) {
-      if (output.recipe.how === 'blender') expect(output.modified, output.file).toBeTruthy();
+      if (output.recipe.how !== 'verbatim') expect(output.modified, output.file).toBeTruthy();
     }
   });
 
@@ -234,5 +239,80 @@ describe('the structures’ surfaces — #475, ADR 0026 D-12 layer 3', () => {
         );
       }
     }
+  });
+});
+
+describe('the KTX2 step — #618, ADR 0026 D-8', () => {
+  const colour: Ktx2Step = { encoding: 'colour', origin: 'bottom-left' };
+
+  it('encodes a colour map as ETC1S in sRGB, a normal map as UASTC assigned linear', () => {
+    const colourArgs = ktxCreateArguments(colour, 'in.jpg', 'out.ktx2');
+    expect(colourArgs).toEqual(expect.arrayContaining(['--encode', 'basis-lz', 'R8G8B8_SRGB']));
+    const normal = ktxCreateArguments({ encoding: 'normal', origin: 'top-left' }, 'in.jpg', 'o');
+    expect(normal).toEqual(
+      expect.arrayContaining(['--encode', 'uastc', 'R8G8B8_UNORM', '--assign-tf', 'linear']),
+    );
+    expect(normal).not.toContain('--normal-mode');
+    const alpha = ktxCreateArguments({ encoding: 'colour-alpha', origin: 'top-left' }, 'i', 'o');
+    expect(alpha).toContain('R8G8B8A8_SRGB');
+  });
+
+  it('asks for the full mipmap chain, one thread and no silent colour conversion, every time', () => {
+    for (const encoding of ['colour', 'colour-alpha', 'normal'] as const) {
+      const args = ktxCreateArguments({ encoding, origin: 'top-left' }, 'in', 'out');
+      expect(args[0]).toBe('create');
+      expect(args).toEqual(
+        expect.arrayContaining([
+          '--generate-mipmap',
+          '--threads',
+          '1',
+          '--fail-on-color-conversions',
+        ]),
+      );
+      expect(args.slice(-2)).toEqual(['in', 'out']);
+    }
+  });
+
+  it('reverses the rows of exactly the pictures TextureLoader used to flip', () => {
+    expect(ktxCreateArguments(colour, 'i', 'o')).toEqual(
+      expect.arrayContaining(['--convert-texcoord-origin', 'bottom-left']),
+    );
+    expect(ktxCreateArguments({ ...colour, origin: 'top-left' }, 'i', 'o')).not.toContain(
+      '--convert-texcoord-origin',
+    );
+    // Every standalone texture was a TextureLoader picture, so every one is
+    // flipped; a GLB's own maps never are (`encode-ktx2.ts` §`pinnedImageEncoder`).
+    for (const output of OUTPUTS) {
+      const recipe = output.recipe;
+      if (recipe.how === 'ktx2') expect(recipe.ktx2.origin, output.file).toBe('bottom-left');
+      if (recipe.how === 'blender') {
+        if (recipe.ktx2 !== undefined) expect(recipe.ktx2.origin, output.file).toBe('bottom-left');
+        for (const also of recipe.alsoWrites ?? []) expect(also.ktx2.origin).toBe('bottom-left');
+      }
+    }
+  });
+
+  it('ships every texture as KTX2 and the sky as the upstream HDR, nothing else verbatim', () => {
+    const verbatim = OUTPUTS.filter((output) => output.recipe.how === 'verbatim');
+    expect(verbatim.map((output) => output.file)).toEqual(['farm_field_2k.hdr']);
+    const pictures = shippedFiles().filter((file) => !/\.(?:glb|hdr)$/.test(file));
+    expect(pictures.length).toBeGreaterThanOrEqual(22);
+    for (const file of pictures) expect(file).toMatch(/\.ktx2$/);
+    // A colour map is colour, a normal map is normal, never the other way.
+    for (const output of OUTPUTS) {
+      const recipe = output.recipe;
+      const step =
+        recipe.how === 'ktx2' ? recipe.ktx2 : recipe.how === 'blender' ? recipe.ktx2 : undefined;
+      if (step === undefined) continue;
+      expect(step.encoding, output.file).toBe(
+        output.file.includes('_nor_gl_') ? 'normal' : 'colour',
+      );
+    }
+  });
+
+  it('pins one KTX-Software release', () => {
+    expect(PINNED_KTX).toBe('KTX-Software v4.4.2');
+    expect(PINNED_KTX_VERSION_LINE).toBe('ktx version: v4.4.2');
+    expect(encodingWords(colour)).toContain(PINNED_KTX);
   });
 });

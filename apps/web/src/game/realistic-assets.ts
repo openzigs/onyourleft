@@ -81,13 +81,13 @@ export interface SurfaceMaps {
 
 export const REALISTIC_SURFACES: { readonly road: SurfaceMaps; readonly ground: SurfaceMaps } = {
   road: {
-    colour: 'asphalt_02_diff_1k.jpg',
-    normal: 'asphalt_02_nor_gl_1k.jpg',
+    colour: 'asphalt_02_diff_1k.ktx2',
+    normal: 'asphalt_02_nor_gl_1k.ktx2',
     tileMetres: 3,
   },
   ground: {
-    colour: 'sparse_grass_diff_1k.jpg',
-    normal: 'sparse_grass_nor_gl_1k.jpg',
+    colour: 'sparse_grass_diff_1k.ktx2',
+    normal: 'sparse_grass_nor_gl_1k.ktx2',
     tileMetres: 4,
   },
 };
@@ -157,7 +157,7 @@ export const REALISTIC_STRUCTURE_SURFACES: Readonly<Record<PhotographicSurface, 
 };
 
 function structureMaps(id: string, tileMetres: number): SurfaceMaps {
-  return { colour: `${id}_diff_512.jpg`, normal: `${id}_nor_gl_512.jpg`, tileMetres };
+  return { colour: `${id}_diff_512.ktx2`, normal: `${id}_nor_gl_512.ktx2`, tileMetres };
 }
 
 /**
@@ -283,13 +283,13 @@ export const REALISTIC_VEGETATION: Readonly<
     {
       name: 'island_tree_02',
       file: 'island_tree_02.glb',
-      impostor: 'island_tree_02-impostor.png',
+      impostor: 'island_tree_02-impostor.ktx2',
       middle: 'island_tree_02-middle.glb',
     },
     {
       name: 'tree_small_02',
       file: 'tree_small_02.glb',
-      impostor: 'tree_small_02-impostor.png',
+      impostor: 'tree_small_02-impostor.ktx2',
       middle: 'tree_small_02-middle.glb',
     },
   ],
@@ -297,13 +297,13 @@ export const REALISTIC_VEGETATION: Readonly<
     {
       name: 'fir_sapling_medium_a',
       file: 'fir_sapling_medium_a.glb',
-      impostor: 'fir_sapling_medium_a-impostor.png',
+      impostor: 'fir_sapling_medium_a-impostor.ktx2',
       middle: 'fir_sapling_medium_a-middle.glb',
     },
     {
       name: 'fir_sapling_medium_b',
       file: 'fir_sapling_medium_b.glb',
-      impostor: 'fir_sapling_medium_b-impostor.png',
+      impostor: 'fir_sapling_medium_b-impostor.ktx2',
       middle: 'fir_sapling_medium_b-middle.glb',
     },
   ],

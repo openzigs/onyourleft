@@ -7,8 +7,9 @@ the packages themselves ship them.
 Part 1 is everything in the app itself: the web build a browser downloads,
 which the Android app carries too. Part 2 is the native libraries only the
 Android app contains. Part 3 names the files the build copies whole out of a
-package in part 1. Part 4 is code the build tools write into the app, which
-no package in part 1 accounts for.
+package in part 1, and the files a package there vendors from somebody else
+that the build bundles into the app's own code. Part 4 is code the build
+tools write into the app, which no package in part 1 accounts for.
 
 Generated from the installed dependency tree by
 scripts/check-third-party-notices.mjs. Do not edit it by hand.
@@ -114,6 +115,12 @@ Part 2 — in the Android app only (50 libraries)
 
 Part 3 — files copied out of a package into the build
   pose/vision_wasm_module_internal.wasm — from @mediapipe/tasks-vision 1.0.1 (apps/web/tools/pose/pose-runtime-plugin.ts)
+  realistic/basis/basis_transcoder.js — from three 0.185.1 (apps/web/tools/basis/transcoder-plugin.ts); it is Basis Universal transcoder 1.50, vendored there — Apache-2.0 AND BSD-3-Clause
+  realistic/basis/basis_transcoder.wasm — from three 0.185.1 (apps/web/tools/basis/transcoder-plugin.ts); it is Basis Universal transcoder 1.50, vendored there — Apache-2.0 AND BSD-3-Clause
+
+  Bundled into the app's own code, out of a package that vendors them:
+  examples/jsm/libs/ktx-parse.module.js — in three 0.185.1, bundled into the game renderer chunk (assets/three-renderer-*.js), imported by three's KTX2Loader; it is KTX-Parse 1.1.0, vendored there — MIT
+  examples/jsm/libs/zstddec.module.js — in three 0.185.1, bundled into the game renderer chunk (assets/three-renderer-*.js), imported by three's KTX2Loader; it is zstddec 0.0.2, vendored there — MIT AND BSD-3-Clause
 
 Part 4 — code the build tools write into the app
   vite 8.3.0 — MIT: its module-preload polyfill and its __vitePreload helper, in the entry chunk

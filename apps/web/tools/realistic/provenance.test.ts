@@ -14,7 +14,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -24,9 +24,12 @@ import { parseAssetManifest } from '../../src/credits/manifest';
 import {
   assetRecord,
   inputDigest,
+  KTX2_SCRIPT,
+  KTX2_SCRIPT_PATH,
   OUTPUT_DIRECTORY,
   OUTPUTS,
   PINNED_BLENDER,
+  PINNED_KTX,
   shippedFiles,
   SOURCES,
   type InputLock,
@@ -68,24 +71,62 @@ describe('the realistic files and the pipeline that makes them', () => {
   it('records a derived file’s input as the digest of what the lock downloaded', () => {
     // The one number in a derived row nothing else in CI recomputes.
     for (const output of OUTPUTS) {
-      if (output.recipe.how !== 'blender') continue;
+      if (output.recipe.how === 'verbatim') continue;
       const source = lock.sources.find((each) => each.id === output.from);
       const entry = manifest.entries.find(
         (each) => each.path === `${OUTPUT_DIRECTORY}/${output.file}`,
       );
       expect(entry?.inputsha256, output.file).toBe(inputDigest(source?.files ?? []));
-      expect(entry?.tool).toBe(PINNED_BLENDER);
+      // #618: a file that passed through the encoder names BOTH pinned tools
+      // (or the encoder alone, for an upstream picture encoded); one that did
+      // not — a tree's middle level, the rider — names Blender alone.
+      const recipe = output.recipe;
+      const encoded =
+        recipe.how === 'ktx2' || recipe.ktx2 !== undefined || recipe.images === 'ktx2';
+      expect(entry?.tool, output.file).toBe(
+        recipe.how === 'ktx2'
+          ? PINNED_KTX
+          : encoded
+            ? `${PINNED_BLENDER}, then ${PINNED_KTX}`
+            : PINNED_BLENDER,
+      );
     }
+  });
+
+  it('names BOTH scripts in a row made by Blender and then the encoder — #618’s review', () => {
+    // ASSET007 checks one `script`, and the two manifest readers hold no list,
+    // so the first step is `script` and the encoder is named in `modified`.
+    // Without it, "can it be made again from the row" needs a reader to know
+    // about a second file the row never mentions.
+    const twoStep = manifest.entries.filter(
+      (entry) => entry.tool === `${PINNED_BLENDER}, then ${PINNED_KTX}`,
+    );
+    expect(twoStep.length).toBeGreaterThan(0);
+    expect(existsSync(join(REPOSITORY, KTX2_SCRIPT_PATH))).toBe(true);
+    for (const entry of twoStep) {
+      expect(entry.script, entry.path).toMatch(/\/blender\/[a-z_]+\.py$/);
+      expect(entry.modified, entry.path).toContain(KTX2_SCRIPT_PATH);
+    }
+    // And a row that did not pass through the encoder does not claim it did.
+    for (const entry of manifest.entries.filter((each) => each.tool === PINNED_BLENDER)) {
+      expect(entry.modified ?? '', entry.path).not.toContain(KTX2_SCRIPT_PATH);
+    }
+  });
+
+  it('ships no JPEG or PNG in the realistic set since #618: every texture is KTX2', () => {
+    // The originals are REMOVED, not shipped beside the KTX2. The sky is the
+    // one picture left, an HDR, out of #618's scope.
+    const pictures = committed.filter((file) => /\.(?:jpe?g|png)$/i.test(file));
+    expect(pictures).toEqual([]);
+    expect(committed.filter((file) => file.endsWith('.ktx2')).length).toBeGreaterThanOrEqual(22);
   });
 
   it('names a committed script, carrying its header, for every derived file', () => {
     for (const output of OUTPUTS) {
-      if (output.recipe.how !== 'blender') continue;
-      const script = readFileSync(
-        join(REPOSITORY, 'apps/web/tools/realistic', output.recipe.script),
-        'utf8',
-      );
-      expect(script.split('\n').slice(0, 5).join('\n'), output.recipe.script).toContain(
+      if (output.recipe.how === 'verbatim') continue;
+      const name = output.recipe.how === 'ktx2' ? KTX2_SCRIPT : output.recipe.script;
+      const script = readFileSync(join(REPOSITORY, 'apps/web/tools/realistic', name), 'utf8');
+      expect(script.split('\n').slice(0, 5).join('\n'), name).toContain(
         'SPDX-License-Identifier: AGPL-3.0-or-later',
       );
     }
