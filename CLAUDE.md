@@ -178,7 +178,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         becomes a kilogram, and the narrow write that puts it on
                         the athlete row. ⚠️ The mass here is the ATHLETE's; the
                         bicycle is added by `game/rider.ts` and only there,
-                        because `RideConditions.totalMass` is both of them
+                        because `RideConditions.totalMass` is both of them.
+                        Since #623 also `kit-colour-port.ts`, the write of the
+                        rider's kit colour — a KEY into `game/bicycle.ts`
+                        §`KIT_PALETTE`, stored on the athlete row
     src/analysis/       zones and duration personal bests (#78) — the port, the one
                         place a threshold default is substituted, the bounded
                         library read, and the wording
@@ -4443,6 +4446,7 @@ top of an issue **supersedes its body**.
 | Why the athlete's mass and the physics' `totalMass` are different numbers, and where the bicycle is added | `apps/web/src/game/rider.ts` §`BICYCLE_MASS_KILOGRAMS`, `packages/store/src/records.ts` §`AthleteRecord.mass` |
 | What keeps the bot at 75 kg once the rider's mass can move, and the assertion that replaced the old one | `apps/web/src/game/rider.test.ts` §"#325 criterion 4", `apps/web/src/game/simulation.ts` §`botCourseFor` |
 | Why a weight box remounts when the rider switches units | `apps/web/src/views/SettingsView.tsx` §`WeightPanel` |
+| Where the rider's kit colour is chosen and stored, why it is a key into a fixed palette of five rather than a colour, and what holds every entry apart from the pacer and the ghost | `packages/store/src/kit-colour.ts`, `apps/web/src/game/bicycle.ts` §`KIT_PALETTE`, §`riderKitFor`, `apps/web/src/game/kit-palette-testing.ts`, `apps/web/src/views/SettingsView.tsx` §`KitPanel`, [#623](https://github.com/openzigs/onyourleft/issues/623) |
 | What a change of weight does NOT do to a segment effort already on the board | `packages/store/src/activity-store.ts` §`setAthleteMass`, `packages/store/src/activity-store.mass.test.ts` |
 | Why the unit preference is on the athlete and not on the device, and what that costs a rider with two | [ADR 0020](docs/adr/0020-display-units.md) D-2, `packages/store/src/unit-system.ts` |
 | Why a narrow athlete write's `undefined` has to be branched on, and what discarding it reports | `apps/web/src/units/store-port.ts` §`UnitsStore`, `apps/web/src/views/SettingsView.tsx` §`UNITS_NO_ATHLETE`, `packages/store/src/testing/fakes.ts` §`staleUnitsStoreFactory` |

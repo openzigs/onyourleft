@@ -199,6 +199,9 @@ const CONSENT_BEFORE_CONTROL: readonly RouteId[] = ['side-camera'];
  * is pinned deliberately.
  */
 const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
+  // #623: 'Your kit' is not here. The walk renders Settings with no kit port,
+  // where the owner's ruling of 2026-09-28 leaves the kit control ABSENT and
+  // with it the "More about your kit" that explained the choice.
   settings: ['Units', 'Your weight', 'Announcements', 'Sounds', 'Game world'],
   segments: ['Make a segment', 'Find your efforts'],
   transfer: ['Import'],

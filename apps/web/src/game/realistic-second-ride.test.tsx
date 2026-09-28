@@ -281,6 +281,7 @@ describe('two realistic rides in one mount — #475’s review', () => {
           setQuality: (next) => {
             mine.push(next);
           },
+          setRiderKit: () => undefined,
           resize: () => undefined,
           destroy: () => undefined,
         };

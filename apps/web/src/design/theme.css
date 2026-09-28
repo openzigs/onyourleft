@@ -1329,6 +1329,39 @@ a.oyl-button {
 }
 
 /*
+ * THE RIDER'S KIT COLOUR — #623. A column of #667's radio ROWS (each label is
+ * the 44 px target declared above), because five options are not a segmented
+ * control (#668 stops at three). The swatch is decoration and is hidden from
+ * assistive technology: each option is its NAME. Its border is the one token
+ * declared at 3:1 against the page, so a dark swatch still has an edge.
+ */
+.oyl-kit {
+  border: 0;
+  margin: 0 0 var(--oyl-space-md);
+  padding: 0;
+  min-width: 0;
+}
+
+.oyl-kit > legend {
+  padding: 0;
+  margin-bottom: var(--oyl-space-xs);
+}
+
+.oyl-kit__options {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.oyl-kit__swatch {
+  flex-shrink: 0;
+  inline-size: 1.25rem;
+  block-size: 1.25rem;
+  border: 1px solid var(--oyl-color-border);
+  border-radius: var(--oyl-radius);
+}
+
+/*
  * A status message carries its meaning in three places: the glyph, the word
  * before the message, and the colour. Remove the colour and the message still
  * reads correctly, which is the whole of criterion 6.

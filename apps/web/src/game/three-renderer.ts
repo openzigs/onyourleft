@@ -229,6 +229,8 @@ import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 
+import type { KitColour } from '@onyourleft/store';
+
 import {
   BUILDING_ROLES,
   BUILDING_VARIANTS,
@@ -252,6 +254,7 @@ import {
   RIDER_CRANK_PARTS,
   RIDER_PALETTE,
   emptyRiderJoints,
+  riderKitFor,
   legBones,
   riderJoints,
   type JointPoint,
@@ -516,11 +519,21 @@ const RIDDEN_KINDS = Object.keys(RIDER_TINTS) as readonly RiderMarker['kind'][];
  * colour choice (#623's second half) replaces the `rider` entry and nothing
  * else, at no draw call.
  */
-const RIDER_KITS: Record<RiderMarker['kind'], RiderKit> = {
+const RIDER_KITS: Readonly<Record<RiderMarker['kind'], RiderKit>> = {
   rider: HOUSE_KIT,
   bot: PACER_KIT,
   ghost: PACER_KIT,
 };
+
+/**
+ * {@link RIDER_KITS} with the rider's own entry replaced by the kit they chose
+ * — #623's second half. The pacer's and the ghost's are never replaced: the
+ * owner ruled on the rider's kit and on nobody else's, and #368 tells the
+ * three apart by the kit their KIND wears.
+ */
+function kitsWith(riderKit: RiderKit): Readonly<Record<RiderMarker['kind'], RiderKit>> {
+  return { ...RIDER_KITS, rider: riderKit };
+}
 
 /**
  * Everything one rider's leg pose depends on, in the order {@link RiderBelt}
@@ -2508,6 +2521,8 @@ export class RiderBelt {
   readonly #posed = new Float64Array(RIDDEN_KINDS.length * POSE_KEY.length).fill(Number.NaN);
   /** Which kind is in which slot, as one string, so a change is one compare. */
   #layout = '';
+  /** The kit each kind wears, the rider's their own choice. @see setRiderKit */
+  #kits = RIDER_KITS;
   /**
    * How many of the placed slots cast a shadow — #547. They are the first ones:
    * `place` puts every caster before every rider that does not. @see #castersOnly
@@ -2695,6 +2710,20 @@ export class RiderBelt {
     this.#group.visible = slot > 0;
   }
 
+  /**
+   * Dresses the rider — and only the rider — in the kit they chose (#623).
+   * Written into each instance's kit on the next {@link place}, which writes
+   * every drawn rider's kit every frame, so there is nothing to invalidate.
+   */
+  setRiderKit(kit: RiderKit): void {
+    this.#kits = kitsWith(kit);
+  }
+
+  /** The kit the rider is dressed in. @see riderKitsOf */
+  get riderKit(): RiderKit {
+    return this.#kits.rider;
+  }
+
   /** Draws no rider at all, for a frame that carries none. */
   hide(): void {
     this.place([]);
@@ -2774,7 +2803,7 @@ export class RiderBelt {
     this.#bodies.setMatrixAt(slot, this.#rider);
     // #623: the kit this kind wears, under the tint. Written before the tint,
     // because `writeKit` borrows the same scratch colour.
-    const kit = RIDER_KITS[marker.kind];
+    const kit = this.#kits[marker.kind];
     for (const mesh of [this.#bodies, this.#torsos]) writeKit(mesh, slot, kit, this.#tint);
     for (let bone = 0; bone < LEG_BONE_COUNT; bone += 1) {
       writeKit(this.#limbs, slot * LEG_BONE_COUNT + bone, kit, this.#tint);
@@ -7761,6 +7790,8 @@ export class RealisticRiderBelt {
    * control. @see setKitPattern
    */
   readonly #kitPlain = { value: 0 };
+  /** The kit each kind wears, the rider's their own choice. @see setRiderKit */
+  #kits = RIDER_KITS;
   readonly #turn = new Quaternion();
   readonly #world = new Quaternion();
   readonly #parent = new Quaternion();
@@ -7904,6 +7935,11 @@ export class RealisticRiderBelt {
     return this.#riders.map((rider) => rider.kit.value);
   }
 
+  /** Dresses the rider — and only the rider — in the kit they chose (#623). @see RiderBelt.setRiderKit */
+  setRiderKit(kit: RiderKit): void {
+    this.#kits = kitsWith(kit);
+  }
+
   /** Whether the rubber wears its normal map — #624's control. @see bicycleTreadOf */
   setTread(on: boolean): void {
     const rubber = this.#rubber.material as MeshStandardMaterial;
@@ -7960,7 +7996,7 @@ export class RealisticRiderBelt {
     // cadence is no rotation, which is #349's rule and `advanceCrank`'s.
     rider.angle = marker.crankAngle ?? rider.angle;
     // #623: the kit this kind wears, under its tint. @see RIDER_KITS
-    rider.kit.value.setHex(RIDER_KITS[marker.kind].jersey);
+    rider.kit.value.setHex(this.#kits[marker.kind].jersey);
     const tint = this.#tint.setHex(RIDER_TINTS[marker.kind]);
     rider.material.color.copy(tint);
     rider.root.updateMatrixWorld(true);
@@ -8239,6 +8275,20 @@ export function realisticRidersOfLoadedWorld(): RealisticRiderBelt | undefined {
   return world === undefined
     ? undefined
     : new RealisticRiderBelt(world.body, world.bicycle, world.rider);
+}
+
+/**
+ * The kit a view holds for the rider, and the one its stylised belt draws the
+ * rider in — #623.
+ *
+ * @test-facing `kit-palette.test.ts` reads it to hold `ThreeGameView.setRiderKit`
+ * to its belts in jsdom, where no realistic world can load; the browser gate
+ * reads the realistic rider's back off the drawing buffer.
+ */
+export function riderKitsOf(
+  view: GameView,
+): { readonly held: RiderKit; readonly stylised: RiderKit } | undefined {
+  return view instanceof ThreeGameView ? view.riderKits : undefined;
 }
 
 /**
@@ -9136,6 +9186,12 @@ class RealisticDrawing {
     world: RealisticWorld,
     renderer: WebGLRenderer,
     fields: { readonly span: { value: number }; readonly count: { value: number } },
+    /**
+     * The kit the rider chose — #623. Required, so a view whose world arrives
+     * after the rider was dressed cannot build a realistic rider in the house
+     * kit by forgetting to pass it on.
+     */
+    riderKit: RiderKit,
   ) {
     const anisotropy = Math.min(REALISTIC_ANISOTROPY, renderer.capabilities.getMaxAnisotropy());
     for (const texture of [
@@ -9153,6 +9209,7 @@ class RealisticDrawing {
       physical: true,
     });
     this.riders = new RealisticRiderBelt(world.body, world.bicycle, world.rider);
+    this.riders.setRiderKit(riderKit);
     this.grounding = new GroundBlobBelt();
     this.#casterLists = [this.vegetation.grounded, this.#structureCasters];
     this.road = photographicRoadMaterial(world.road.colour, world.road.normal);
@@ -9746,6 +9803,12 @@ class ThreeGameView implements GameView {
    * second collection to hold.
    */
   readonly #riders = new RiderBelt();
+  /**
+   * The kit the rider chose, as {@link riderKitFor} answered for it — #623.
+   * Held here as well as on the belts because the realistic belt is built
+   * later, when a world has loaded, and must be dressed then too.
+   */
+  #riderKit: RiderKit = RIDER_KITS.rider;
   /** The riders' contact shadows — #426. One draw for all of them. */
   readonly #contactShadows = new ContactShadowBelt();
   /**
@@ -10148,7 +10211,12 @@ class ThreeGameView implements GameView {
     const realistic = world === 'realistic';
     if (realistic && loaded !== undefined && this.#renderer !== undefined) {
       if (this.#realistic === undefined) {
-        this.#realistic = new RealisticDrawing(loaded, this.#renderer, this.#terrain.fields);
+        this.#realistic = new RealisticDrawing(
+          loaded,
+          this.#renderer,
+          this.#terrain.fields,
+          this.#riderKit,
+        );
         this.#realistic.addTo(this.#scene);
         this.#realistic.setBudget(this.#quality.scatterItems + this.#quality.structureItems);
       }
@@ -10194,6 +10262,25 @@ class ThreeGameView implements GameView {
   /** @see bicycleTreadOf */
   bicycleTread(on: boolean): void {
     this.#realistic?.riders.setTread(on);
+  }
+
+  /**
+   * The rider's own kit colour — #623. @see GameView.setRiderKit
+   *
+   * ⚠️ **Through {@link riderKitFor}, whatever the type says**: the value came
+   * off an athlete row, and anything that is not a palette key is drawn as the
+   * house kit rather than handed to a shader.
+   */
+  setRiderKit(chosen: KitColour | undefined): void {
+    const kit = riderKitFor(chosen);
+    this.#riderKit = kit;
+    this.#riders.setRiderKit(kit);
+    this.#realistic?.riders.setRiderKit(kit);
+  }
+
+  /** @see riderKitsOf */
+  get riderKits(): { readonly held: RiderKit; readonly stylised: RiderKit } {
+    return { held: this.#riderKit, stylised: this.#riders.riderKit };
   }
 
   /** @see riderKitOf */

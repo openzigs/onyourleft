@@ -29,6 +29,8 @@
 
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 
+import type { KitColour } from '@onyourleft/store';
+
 import { riderMassFor } from '../athlete/mass';
 import type { CameraThrottle } from '../camera/session';
 import type { SidePairingPort } from '../camera/side-pairing-port';
@@ -250,6 +252,16 @@ export interface GameViewProps {
    * half.
    */
   readonly riderMass?: Kilograms | undefined;
+  /**
+   * The main colour of the rider's kit, from the athlete row (#623).
+   *
+   * `undefined` is a rider who has never chosen, and is drawn as the house
+   * kit — by `bicycle.ts` §`riderKitFor`, the one place that substitutes it,
+   * which the renderer calls. A prop from the shell's live value for
+   * {@link riderMass}'s reason: a rider who changes it in Settings and then
+   * opens the game rides in it without a reload.
+   */
+  readonly kitColour?: KitColour | undefined;
   /**
    * The trainer this ride may send the road to — #362.
    *
@@ -505,6 +517,12 @@ export function GameView(props: GameViewProps): JSX.Element {
    * loop feeds; for a ride that did not choose realism it IS `nextQuality`.
    */
   const qualityRef = useRef<WorldQualityState>(STYLISED_START);
+  /**
+   * The kit colour THIS ride is drawn in — #623. Read when the ride starts, as
+   * the mass is, and handed to the view when the view exists: the view may be
+   * built after `start`, because `three` arrives asynchronously.
+   */
+  const kitColourRef = useRef<KitColour | undefined>(undefined);
   /**
    * Whether THIS ride asked for the realistic world — read from the device at
    * the start of the ride (`world-preference.ts`), off unless the rider chose
@@ -893,6 +911,11 @@ export function GameView(props: GameViewProps): JSX.Element {
       // with the blob. Giving it the map is its own measurement.
       const realistic = readRealisticWorldChoice(deviceStorage());
       realisticWantedRef.current = realistic;
+      // #623: the rider's kit colour, read at the start of the ride and held
+      // for it, like the mass below. A view left from a previous ride is
+      // dressed now; a view not yet built is dressed when it is.
+      kitColourRef.current = props.kitColour;
+      viewRef.current?.setRiderKit(props.kitColour);
       qualityRef.current = realistic ? INITIAL_REALISTIC_QUALITY : STYLISED_START;
       setQualityLevel(INITIAL_QUALITY.level);
       setRealisticRung(realistic);
@@ -996,7 +1019,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       }
       lockRef.current = lock;
     },
-    [port, props.screenLock, props.riderMass, props.trainer, soundsOut],
+    [port, props.screenLock, props.riderMass, props.kitColour, props.trainer, soundsOut],
   );
 
   const start = useCallback(
@@ -1083,6 +1106,8 @@ export function GameView(props: GameViewProps): JSX.Element {
         if (viewRef.current === undefined) {
           const view = renderer.create(canvas, rungOf(qualityRef.current, shadowMapRef.current));
           viewRef.current = view;
+          // #623: dressed before its first frame. @see kitColourRef
+          view.setRiderKit(kitColourRef.current);
           view.resize(canvas.clientWidth || 320, canvas.clientHeight || 180);
           // #475: the realistic world, for a ride that asked for it — AFTER
           // the view exists, so the rider rides the stylised world while ~33

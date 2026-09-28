@@ -32,7 +32,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type JSX } from 'react';
 
-import type { ActivityId, ActivitySummary, UnitSystem } from '@onyourleft/store';
+import type { ActivityId, ActivitySummary, KitColour, UnitSystem } from '@onyourleft/store';
 import type { Kilograms } from '@onyourleft/domain';
 
 import { Button } from '../design/Button';
@@ -150,9 +150,21 @@ export interface TransferViewProps {
    * substituted is `athlete/mass.ts`.
    */
   readonly onMassReset?: ((mass: Kilograms | undefined) => void) | undefined;
+  /**
+   * Told what the rider's kit colour has become after an erase (#623), for
+   * {@link onMassReset}'s reason: `undefined` is what the recreated row
+   * carries, and the one place it becomes the house kit is `game/bicycle.ts`
+   * §`riderKitFor`.
+   */
+  readonly onKitColourReset?: ((kitColour: KitColour | undefined) => void) | undefined;
 }
 
-export function TransferView({ port, onUnitsReset, onMassReset }: TransferViewProps): JSX.Element {
+export function TransferView({
+  port,
+  onUnitsReset,
+  onMassReset,
+  onKitColourReset,
+}: TransferViewProps): JSX.Element {
   /**
    * Bumped whenever the import panel has written to the store.
    *
@@ -220,6 +232,7 @@ export function TransferView({ port, onUnitsReset, onMassReset }: TransferViewPr
           port={port}
           {...(onUnitsReset === undefined ? {} : { onUnitsReset })}
           {...(onMassReset === undefined ? {} : { onMassReset })}
+          {...(onKitColourReset === undefined ? {} : { onKitColourReset })}
           storeRevision={storeRevision}
           onStoreChanged={() => {
             setStoreRevision((previous) => previous + 1);
@@ -947,12 +960,14 @@ function ErasePanel({
   onStoreChanged,
   onUnitsReset,
   onMassReset,
+  onKitColourReset,
 }: {
   readonly port: TransferPort;
   readonly storeRevision: number;
   readonly onStoreChanged: () => void;
   readonly onUnitsReset?: ((units: UnitSystem | undefined) => void) | undefined;
   readonly onMassReset?: ((mass: Kilograms | undefined) => void) | undefined;
+  readonly onKitColourReset?: ((kitColour: KitColour | undefined) => void) | undefined;
 }): JSX.Element {
   const [typed, setTyped] = useState('');
   const [holds, setHolds] = useState(false);
@@ -1014,6 +1029,8 @@ function ErasePanel({
       // The same, for the recorded mass (#325). Read off the row that was put
       // back rather than assumed absent, for the reason above.
       onMassReset?.(port.athleteRow.mass);
+      // And the kit colour (#623), for the same reason.
+      onKitColourReset?.(port.athleteRow.kitColour);
       // The panels above list what the store holds. Without this they go on
       // offering rides that are no longer there, and a rider who presses Export
       // on one is told their own ride does not exist.

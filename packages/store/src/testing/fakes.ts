@@ -7,15 +7,15 @@
  * observing the test go red. A harness that passes against a no-op write is
  * worthless, and this is the only way to know it does not."*
  *
- * There are **seventeen** fakes here, and there are seventeen on purpose: a harness
+ * There are **eighteen** fakes here, and there are eighteen on purpose: a harness
  * that catches one failure shape is calibrated to that shape. They stand for the
  * causes CLAUDE.md section 5 names, and they fail for different reasons at
  * different points in the read. The fourth arrived with #46's write path, the
  * fifth with #61's, the sixth with #64's, the seventh with #66's, the eighth
  * with #89's, the ninth with #73's, the tenth with #14's, the eleventh with
  * #93's, the twelfth with #238's, the thirteenth with #325's, the
- * fourteenth with #384's, the fifteenth with #528's, the sixteenth with #530's and the
- * seventeenth with #388's, which is the rule this file exists to enforce: a new
+ * fourteenth with #384's, the fifteenth with #528's, the sixteenth with #530's, the
+ * seventeenth with #388's and the eighteenth with #623's, which is the rule this file exists to enforce: a new
  * path may not ship without a fake proving the harness catches its failure.
  *
  * ⚠️ **The fourteenth breaks a DELETE, and every one before it breaks a write
@@ -46,6 +46,7 @@
  * | `unscopedAttemptStoreFactory` | *cross-athlete exposure* — a **read** that matched on route and forgot the rider | every ride is written and read back correctly, and the ghost list contains a stranger's ride |
  * | `staleUnitsStoreFactory` | *wrong layer* — the narrow write computed the row and returned it without persisting it | the call answers with a row saying `imperial`, and a fresh connection still says metric |
  * | `roundedMassStoreFactory` | *wrong layer* — a layer above tidied a mass to a whole kilogram on its way in | the row comes back with a mass, a plausible one, and a pound reading that is no longer what the rider typed |
+ * | `misfiledKitColourStoreFactory` | *wrong storage* — the right table and the right row, under a key the reader does not use | the call answers with the chosen colour, and a fresh connection reads the house kit |
  * | `survivingFrameStoreFactory` | *wrong time* — a **delete** that reports how many it removed and removes nothing | the erase says "2 pictures removed", and a fresh connection still has both |
  * | `firstReferenceStoreFactory` | *wrong time* — a put that kept the row already there instead of replacing it | every put succeeds and the reference comes back well-formed — **from the first session**, not the last |
  * | `lastSentenceDroppedReportStoreFactory` | *wrong layer* — a layer above dropped the last sentence of the side camera's report on its way in | the report comes back for the right ride, with the right summary and a plausible list — **one observation short**, and nothing on the page says so |
@@ -86,8 +87,9 @@ import type {
   SegmentRecord,
   WorkoutRecord,
 } from '../records';
-import { fromPersistedActivity, type PersistedActivity } from '../persisted';
+import { fromPersistedActivity, type PersistedActivity, type PersistedAthlete } from '../persisted';
 import type { PersistedStreamBlob } from '../stream-persisted';
+import type { KitColour } from '../kit-colour';
 import type { UnitSystem } from '../unit-system';
 import {
   STREAM_CHANNELS,
@@ -121,6 +123,7 @@ function bindStore(real: ActivityStore): PersistentStore {
     setAthleteThresholds: async (id, thresholds) => real.setAthleteThresholds(id, thresholds),
     setAthleteUnits: async (id, units) => real.setAthleteUnits(id, units),
     setAthleteMass: async (id, mass) => real.setAthleteMass(id, mass),
+    setAthleteKitColour: async (id, colour) => real.setAthleteKitColour(id, colour),
     setActivityLoadSummary: async (owner, activity, summary) =>
       real.setActivityLoadSummary(owner, activity, summary),
     getAthlete: async (id) => real.getAthlete(id),
@@ -843,6 +846,62 @@ export function roundedMassStoreFactory(): StoreFactory {
           // Clearing is left alone: the defect this stands for is a tidy
           // applied to a number, and there is no number to tidy.
           real.setAthleteMass(id, mass === undefined ? undefined : kilograms(Math.round(mass))),
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A repository that **writes the kit colour where the reader does not look**.
+ *
+ * The eighteenth fake, for #623's narrow athlete write, and it is
+ * `misroutedBlobStoreFactory`'s shape rather than `staleUnitsStoreFactory`'s:
+ * the write really happens, to the real athlete row, inside a real
+ * transaction that really commits — under `kitColor`, a key
+ * `fromPersistedAthlete` never reads. A spelling is exactly how that happens
+ * to a field named in two dialects. The call answers with the record a correct
+ * implementation would have answered with, so every caller trusting the return
+ * is satisfied; a fresh connection reads a row with no choice on it, which the
+ * client draws as the house kit.
+ *
+ * ⚠️ **Which is why the assertion it calibrates must not accept the house
+ * colour as a pass.** The round trip that reads it back has to choose an entry
+ * that is NOT the default, or the misfiled write and a correct one read alike.
+ *
+ * The red/green pair is in `activity-store.kit-colour.test.ts`, beside the
+ * property it is about, for `staleUnitsStoreFactory`'s reason.
+ */
+export function misfiledKitColourStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      const raw = new Dexie(name);
+      SCHEMA_VERSIONS.forEach((stores, index) => {
+        raw.version(index + 1).stores(stores);
+      });
+      const athletes = raw.table<PersistedAthlete & { kitColor?: string }, string>(TABLE.athletes);
+      return {
+        ...bindStore(real),
+        close: () => {
+          real.close();
+          raw.close();
+        },
+        setAthleteKitColour: async (id: AthleteId, kitColour: KitColour) => {
+          const existing = await real.getAthlete(id);
+          if (existing === undefined) {
+            return undefined;
+          }
+          await raw.transaction('rw', athletes, async () => {
+            const row = await athletes.get(id);
+            if (row !== undefined) {
+              await athletes.put({ ...row, kitColor: kitColour });
+            }
+          });
+          return { ...existing, kitColour };
+        },
       };
     },
     destroy: async (name) => {

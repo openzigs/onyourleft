@@ -928,6 +928,52 @@ describe('TransferView — what it may say about another platform', () => {
     expect(reset).toEqual([undefined]);
   });
 
+  it('tells the shell what the kit colour has become, and the store holds none after — #623', async () => {
+    // The erase takes the colour with the row (`AthleteRecord.kitColour`), and
+    // the shell must follow the disk rather than dress the next ride in it.
+    const port = await openPort();
+    await (harness ?? never()).write(async (store) => {
+      await store.putActivity(rideFor(ATHLETE_A, { name: 'Last one' }));
+      await store.setAthleteKitColour(ATHLETE_A, 'magenta');
+    });
+    expect(
+      await (harness ?? never()).write(
+        async (store) => (await store.getAthlete(ATHLETE_A))?.kitColour,
+      ),
+    ).toBe('magenta');
+
+    const reset: (string | undefined)[] = [];
+    mounted = await mount(
+      <TransferView
+        port={port}
+        onKitColourReset={(kitColour) => {
+          reset.push(kitColour);
+        }}
+      />,
+    );
+    await runToCompletion(
+      () => document.querySelector('#oyl-erase-confirm') !== null,
+      'the erase panel to render',
+    );
+    const box = document.querySelector<HTMLInputElement>('#oyl-erase-confirm');
+    if (box === null) {
+      throw new Error('the confirmation box is not on the page');
+    }
+    await typeInto(box, 'erase everything');
+    await activateWithKeyboard(buttonNamed('Erase everything'));
+    await runToCompletion(
+      () => (document.body.textContent ?? '').includes('holds nothing about you'),
+      'the erase to finish',
+    );
+
+    expect(reset).toEqual([undefined]);
+    expect(
+      await (harness ?? never()).write(
+        async (store) => (await store.getAthlete(ATHLETE_A))?.kitColour,
+      ),
+    ).toBeUndefined();
+  });
+
   it('says what erasing cannot reach, and names the signing key, before the button', async () => {
     const port = await openPort();
     mounted = await mount(<TransferView port={port} />);

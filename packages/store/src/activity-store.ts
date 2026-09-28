@@ -135,6 +135,7 @@ import type {
   RouteRecord,
   WorkoutRecord,
 } from './records';
+import { parseKitColour, type KitColour } from './kit-colour';
 import type { UnitSystem } from './unit-system';
 import type {
   NewRecordingChunk,
@@ -633,6 +634,44 @@ export class ActivityStore {
         return undefined;
       }
       const updated: AthleteRecord = { ...fromPersistedAthlete(row), units };
+      await this.#athletes.put(toPersistedAthlete(updated));
+      return updated;
+    });
+  }
+
+  /**
+   * Replaces the main colour of the athlete's kit in the trainer game, leaving
+   * every other field alone (#623).
+   *
+   * Narrow for {@link setAthleteThresholds}' reason, and shaped like
+   * {@link setAthleteUnits} rather than {@link setAthleteMass}: the colour is
+   * one of a fixed palette and a rider going back to the house kit is
+   * *choosing* `house`, so there is no "clear it" case and the parameter is a
+   * {@link KitColour} rather than an optional one.
+   *
+   * ⚠️ **What is written is always a palette key.** The value goes through
+   * `parseKitColour` on its way in as well as on its way out, so a caller
+   * that got past the type with a cast writes the house colour rather than
+   * whatever it was handed — the same answer a hand-edited row decodes to.
+   *
+   * Read and write in one transaction, for {@link ensureAthlete}'s reason.
+   *
+   * @returns the stored record, or `undefined` if there is no such athlete —
+   * which is not an error, for {@link setAthleteThresholds}' reason.
+   */
+  async setAthleteKitColour(
+    id: AthleteId,
+    kitColour: KitColour,
+  ): Promise<AthleteRecord | undefined> {
+    return this.#db.transaction('rw', [this.#athletes], async () => {
+      const row = await this.#athletes.get(id);
+      if (row === undefined) {
+        return undefined;
+      }
+      const updated: AthleteRecord = {
+        ...fromPersistedAthlete(row),
+        kitColour: parseKitColour(kitColour),
+      };
       await this.#athletes.put(toPersistedAthlete(updated));
       return updated;
     });

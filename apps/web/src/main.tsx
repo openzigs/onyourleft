@@ -88,6 +88,7 @@ import type { MapPort } from './map/port';
 import type { LibraryPort } from './library/store-port';
 import type { TransferPort } from './transfer/store-port';
 import type { UnitsPort } from './units/store-port';
+import type { AthleteKitColourPort } from './athlete/kit-colour-port';
 import type { AthleteMassPort } from './athlete/store-port';
 
 const found = document.getElementById('root');
@@ -677,6 +678,17 @@ function buildAthleteMassPort(): AthleteMassPort {
 }
 
 /**
+ * The settings screen's third write: the rider's kit colour (#623).
+ *
+ * An eleventh port over the same connection, separate from
+ * {@link buildAthleteMassPort} for the reason `athlete/kit-colour-port.ts`
+ * gives.
+ */
+function buildAthleteKitColourPort(): AthleteKitColourPort {
+  return { store: localStore(), athleteId: LOCAL_ATHLETE };
+}
+
+/**
  * Watch for a new version of the app, or not (#407).
  *
  * `undefined` wherever `registerServiceWorker` did not register one — inside
@@ -897,6 +909,10 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           // undefaulted: `athlete/mass.ts` is the one place a missing one is
           // substituted, and a default applied here would be a second.
           {...(athlete?.mass === undefined ? {} : { riderMass: athlete.mass })}
+          athleteKit={buildAthleteKitColourPort()}
+          // #623: the stored kit colour, undefaulted — `game/bicycle.ts`
+          // §`riderKitFor` is the one place a missing one becomes the house kit.
+          {...(athlete?.kitColour === undefined ? {} : { kitColour: athlete.kitColour })}
           // ⚠️ The **stored** preference, read before the first paint. The
           // fallback is `DEFAULT_UNIT_SYSTEM` and it is applied in exactly one
           // place — `AppShell`'s own default — so "a row with no setting" and

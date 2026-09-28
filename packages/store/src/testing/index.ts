@@ -81,6 +81,7 @@ export {
   droppedFlushStoreFactory,
   gapFillingStoreFactory,
   memoryWriteStoreFactory,
+  misfiledKitColourStoreFactory,
   misroutedBlobStoreFactory,
   roundedClaimStoreFactory,
   appendingEffortStoreFactory,

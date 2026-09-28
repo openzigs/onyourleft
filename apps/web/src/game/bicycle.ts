@@ -210,6 +210,8 @@
  *   {@link advanceCrank} settles for the rider.
  */
 
+import type { KitColour } from '@onyourleft/store';
+
 import { DEFAULT_RIDER_MASS_KILOGRAMS } from '../athlete/mass';
 import { COLOUR_TOKENS } from '../design/tokens';
 import type { SensorReading } from './hud/fields';
@@ -231,9 +233,11 @@ const TAU = Math.PI * 2;
  * remembers "the blue the sphere wore", `0x2f6fed`, is reading the old file.**
  * The owner ruled on 2026-09-27 (#623) that the rider's kit is an On Your Left
  * house kit in the app's colours, and the realistic rider's jersey is drawn
- * from THIS value (`three-renderer.ts` §`RealisticRiderBelt.kitColour`), so
- * both worlds wear one colour and a rider's own choice — #623's second half —
- * is one value to replace. `limb` is `accentHover`, the accent's darker named
+ * from the same kit (`three-renderer.ts` §`RIDER_KITS`, the `rider` entry), so
+ * both worlds wear one colour. Since #623's second half the rider may choose
+ * another from {@link KIT_PALETTE}, whose first entry is this one; what the
+ * rider wears is {@link riderKitFor}'s answer, handed to the view with
+ * `GameView.setRiderKit`, and it replaces the `rider` entry and nothing else. `limb` is `accentHover`, the accent's darker named
  * variant, so the legs and helmet stay darker than the jersey and the
  * pedalling still reads as motion. #93's third criterion is unchanged and is
  * still what the three tints are measured against (`game.browser.spec.ts`
@@ -282,27 +286,91 @@ export interface RiderKit {
  * it: the stylised belt per instance, the realistic body per rider
  * (`three-renderer.ts` §`RIDER_KITS`).
  *
- * ⚠️ A rider's own colour choice (#623's second half) replaces the RIDER's
- * entry in `RIDER_KITS` and never this one — and a choice this kit's tints
- * would confuse with the pacer's is that PR's distinguishability test to fail.
+ * ⚠️ A rider's own colour choice (#623's second half, {@link KIT_PALETTE})
+ * replaces the RIDER's entry in `RIDER_KITS` and never this one — and a
+ * choice this kit's tints would confuse with the pacer's is what
+ * `kit-palette.test.ts` fails.
  */
 export const PACER_KIT: RiderKit = { jersey: 0x2f6fed, limb: 0x1b3f8f };
 
 /** The rider's own kit, out of {@link RIDER_PALETTE}: the house kit (#623). */
 export const HOUSE_KIT: RiderKit = { jersey: RIDER_PALETTE.jersey, limb: RIDER_PALETTE.limb };
 
+/** One entry of {@link KIT_PALETTE}: what a rider reads, and what they wear. */
+export interface KitPaletteEntry {
+  /** The option's name on the settings screen — never a swatch alone. */
+  readonly name: string;
+  readonly kit: RiderKit;
+}
+
+/**
+ * The colours a rider may choose for their kit — #623's second half.
+ *
+ * ⚠️ **A fixed, named palette, never a free picker**, and the owner's ruling
+ * of 2026-09-27 is why: a free colour would escape the brightness bound
+ * (`three-renderer.ts` §`LIT_COLOURS`, which folds {@link BICYCLE_COLOURS} in)
+ * and #368's rule that the rider, the pacer and the ghost are told apart by
+ * colour. Keyed by `@onyourleft/store`'s `KitColour` through a `Record`, so a
+ * key the store accepts with no colour here, or a colour here with no key
+ * there, is a compile error rather than a rider in a `NaN` jersey. The store
+ * holds the KEY (`packages/store/src/kit-colour.ts` says why), and this file
+ * holds the colours, because only the client knows what a colour is drawn as.
+ *
+ * ⚠️ **No red, orange or blue.** The pacer wears orange over
+ * {@link PACER_KIT}'s blue and the ghost slate over it (`three-renderer.ts`
+ * §`RIDER_TINTS`), so a jersey in either hue is a rider who could be taken for
+ * one of them. `kit-palette.test.ts` runs every entry through both worlds'
+ * tints and holds each to 40° of hue from both, and an entry equal to the
+ * bot's tint is its control. Each `limb` is the entry's own darker shade,
+ * because the stylised rider's legs and helmet must stay darker than the
+ * jersey for the pedalling to read (#349).
+ *
+ * Every hue was chosen here, from nothing: no team's, sponsor's or product's
+ * palette (ADR 0009 L1).
+ */
+export const KIT_PALETTE: Readonly<Record<KitColour, KitPaletteEntry>> = {
+  house: { name: 'Teal, the On Your Left house kit', kit: HOUSE_KIT },
+  green: { name: 'Green', kit: { jersey: 0x2e7d32, limb: 0x1b5e20 } },
+  lime: { name: 'Lime', kit: { jersey: 0x689f38, limb: 0x33691e } },
+  purple: { name: 'Purple', kit: { jersey: 0x6a1b9a, limb: 0x4a148c } },
+  magenta: { name: 'Magenta', kit: { jersey: 0xad1457, limb: 0x880e4f } },
+};
+
+/**
+ * The kit a rider wears, from what their athlete row says — #623.
+ *
+ * ⚠️ **The one place an absent or unrecognised choice becomes the house kit
+ * (`KIT_PALETTE.house`, the store's `DEFAULT_KIT_COLOUR`),
+ * and it becomes the house kit and nothing else.** `undefined` is a rider who
+ * has never chosen; anything that is not one of the palette's OWN keys — a
+ * hand-edited row the store let through, a value off a future build, a
+ * prototype name like `"toString"` — is the house kit too, so nothing that is
+ * not a palette colour can reach a shader (CLAUDE.md §6: the stored value is
+ * untrusted on read). `Object.hasOwn`, never `in`, for `RIDER_TINTS`' reason.
+ */
+export function riderKitFor(chosen: unknown): RiderKit {
+  return typeof chosen === 'string' && Object.hasOwn(KIT_PALETTE, chosen)
+    ? KIT_PALETTE[chosen as KitColour].kit
+    : KIT_PALETTE.house.kit;
+}
+
 /**
  * The palette as a list, for the light budget.
  *
  * `three-renderer.ts` folds this into `LIT_COLOURS`, so a colour added above
  * lands in the brightness bound automatically — the same property that file's
- * own comment claims for the scenery and marker tables.
+ * own comment claims for the scenery and marker tables. Once each: the house
+ * kit is `RIDER_PALETTE`'s own two, and `LIT_COLOURS` is required to be a set.
  */
 export const BICYCLE_COLOURS: readonly number[] = [
-  ...Object.values(RIDER_PALETTE),
-  // The pacer's kit is drawn too, per instance, so it is bounded as well.
-  PACER_KIT.jersey,
-  PACER_KIT.limb,
+  ...new Set([
+    ...Object.values(RIDER_PALETTE),
+    // The pacer's kit is drawn too, per instance, so it is bounded as well.
+    PACER_KIT.jersey,
+    PACER_KIT.limb,
+    // #623: every kit a rider may choose.
+    ...Object.values(KIT_PALETTE).flatMap((entry) => [entry.kit.jersey, entry.kit.limb]),
+  ]),
 ];
 
 /** One of the four solids the rider is built out of. */

@@ -236,6 +236,16 @@ quietly rewrites history whenever somebody edits their profile".
 `activity-store.mass.test.ts` reads an effort back either side of a mass change to prove it rather
 than to assert it.
 
+`setAthleteKitColour(id, kitColour)` ([#623](https://github.com/openzigs/onyourleft/issues/623)) is
+the fourth, and it follows `setAthleteUnits`: the value is one of a fixed palette and going back to
+the house kit is *choosing* `house`, so there is no clearing branch. ⚠️ **What it stores is a palette
+KEY, never a colour** (`kit-colour.ts` says why): the colours are `apps/web/src/game/bicycle.ts`
+§`KIT_PALETTE`, keyed by this package's `KitColour` through a `Record`, because this package may not
+import the client and the client may import this package. The value goes through `parseKitColour`
+on the way in and on the way out, so neither a cast at a call site nor a hand-edited row can put
+anything but a key on the record. `misfiledKitColourStoreFactory` is its fake — the right row, a key
+the reader does not use — and `activity-store.kit-colour.test.ts` holds the red/green pair.
+
 `setActivityLoadSummary(owner, id, summary)` (#77) is the same shape again, for a ride: it writes
 the threshold-independent half of a ride's load and touches nothing else, and it is **athlete-scoped**
 — a ride id alone must never be enough to modify a row (CLAUDE.md §6). ⚠️ The *load* is deliberately
@@ -263,14 +273,18 @@ means "nobody has chosen", and exactly one place in `apps/web` substitutes the d
 its three values could publish a private ride, so refusing the row is right there; a unit preference
 outside its two decides only whether a number reads `km` or `mi`, and taking a rider's whole library
 away over a hand-edited setting is not a trade worth making.
+`AthleteRecord.kitColour` (#623) lands the same way and is the second field decoded unfaithfully,
+for the same reason: a stored value that is not a palette key decodes as `house`, the default, and
+never as another entry — a jersey colour is not worth an athlete row.
 
 ⚠️ **A narrow write must be built from the row it read, not from a list of the fields it knows
 about.** `setAthleteThresholds` rebuilt the record from `id`, `displayName` and `createdAt` until
 #238, so saving a threshold silently erased `mass` — and would have erased `units`. The write it was
 *about* landed and the read for it agreed, which is why nothing noticed: it is CLAUDE.md §5's "a
 write that reports success while the read cannot see it", applied to the field nobody was looking
-at. All three narrow athlete writes now build from the decoded record, and
-`activity-store.units.test.ts` and `activity-store.mass.test.ts` hold it. ⚠️ `setAthleteMass` needs
+at. All four narrow athlete writes now build from the decoded record, and
+`activity-store.units.test.ts`, `activity-store.mass.test.ts` and
+`activity-store.kit-colour.test.ts` hold it. ⚠️ `setAthleteMass` needs
 a `delete` on a copy rather than a spread for its *clearing* branch, because
 `exactOptionalPropertyTypes` makes `{ ...row, mass: undefined }` a type error — `withoutMass` is the
 same device `withoutThresholds` is, and the clear is the branch a hand-written field list would get

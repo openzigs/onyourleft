@@ -34,8 +34,18 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { KIT_COLOURS } from '@onyourleft/store';
+
 import { TRANSCODER_FILES, transcoderSource } from '../../tools/basis/transcoder-plugin';
 
+import { KIT_PALETTE, PACER_KIT, type RiderKit } from './bicycle';
+import {
+  albedoBytes,
+  toldApartFaults,
+  toldApartFigures,
+  type Bytes,
+  type ThreeJerseys,
+} from './kit-palette-testing';
 import {
   PHOTOGRAPHIC_STRUCTURE_SURFACES,
   REALISTIC_BICYCLE_MAP_NAMES,
@@ -606,5 +616,44 @@ describe('the dressed rider — #623', () => {
     ] as never);
     const same = riders.bodies.map((body) => colourOf(body).getHex());
     expect(new Set(same).size).toBe(1);
+  }, 120_000);
+
+  it('#623 — every palette entry: the rider in it told from the pacer and the ghost, each in its own hue, and a jersey in the bot’s tint not', async () => {
+    const renderer = await loadedOn(TABLET);
+    const riders = renderer.realisticRidersOfLoadedWorld();
+    if (riders === undefined) throw new Error('no world');
+    const at = { x: 0, y: 0, z: 0, headingX: 0, headingZ: 1, lean: 0, bodyLean: 0, crankAngle: 0 };
+    type Colour = (typeof riders.kitColours)[number];
+    // The jersey as the body's shader multiplies it: the tint (the material's
+    // colour) times the kit uniform, both linear. @see riderBodyMaterial
+    const jerseys = (kit: RiderKit): ThreeJerseys => {
+      riders.setRiderKit(kit);
+      riders.place([
+        { ...at, kind: 'rider' },
+        { ...at, kind: 'bot' },
+        { ...at, kind: 'ghost' },
+      ] as never);
+      const [rider, bot, ghost] = riders.bodies.map((body, slot) => {
+        const tint = (body.material as unknown as { color: Colour }).color;
+        const uniform = riders.kitColours[slot] as Colour;
+        return albedoBytes([uniform.r, uniform.g, uniform.b], [tint.r, tint.g, tint.b]);
+      }) as [Bytes, Bytes, Bytes];
+      return { rider, bot, ghost, chosen: kit.jersey };
+    };
+    for (const key of KIT_COLOURS) {
+      const drawn = jerseys(KIT_PALETTE[key].kit);
+      console.log(`#623 realistic, ${key}: ${toldApartFigures(drawn)}`);
+      expect(toldApartFaults(drawn), key).toEqual([]);
+      // The uniform IS the entry: the pacer's and the ghost's stay PACER_KIT.
+      expect(riders.kitColours[0]?.getHex()).toBe(KIT_PALETTE[key].kit.jersey);
+      expect(riders.kitColours[1]?.getHex()).toBe(PACER_KIT.jersey);
+      expect(riders.kitColours[2]?.getHex()).toBe(PACER_KIT.jersey);
+    }
+    // THE CONTROL: a jersey in the bot's own tint.
+    const control = jerseys({ jersey: 0xc2410c, limb: 0x8a2e08 });
+    console.log(`#623 realistic, the control: ${toldApartFigures(control)}`);
+    expect(toldApartFaults(control).some((fault) => fault.includes('of hue from the bot'))).toBe(
+      true,
+    );
   }, 120_000);
 });

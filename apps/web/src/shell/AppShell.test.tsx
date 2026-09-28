@@ -21,16 +21,18 @@ import {
   type Kilograms,
   type RoutePoint,
 } from '@onyourleft/domain';
-import { athleteId, type AthleteRecord } from '@onyourleft/store';
+import { athleteId, type AthleteRecord, type KitColour } from '@onyourleft/store';
 
+import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
 import type { AthleteMassPort } from '../athlete/store-port';
 import type { GamePort, RidableRoute } from '../game/GameView';
+import type { GameRenderer } from '../game/port';
 import type { ThermalPort } from '../game/thermal-port';
 import { activateWithKeyboard, mount, settle, typeInto, type Mounted } from '../testing/mount';
 import { idleSnapshot, stubRideController } from '../ride/testing';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import type { ShellSupport } from '../support/shell-support-port';
-import { MASS_CLEARED, MASS_SAVED } from '../views/SettingsView';
+import { KIT_SAVED, MASS_CLEARED, MASS_SAVED } from '../views/SettingsView';
 
 import { AppShell } from './AppShell';
 import { hrefFor, routeById } from './routes';
@@ -600,6 +602,118 @@ describe('the thermal forecast reaches the ride (#247)', () => {
     await settle();
 
     expect(asked).toBeGreaterThan(0);
+    shell.unmount();
+    vi.unstubAllGlobals();
+  });
+});
+
+/**
+ * The rider's kit colour, from the settings screen to the ride — #623.
+ *
+ * ⚠️ **The half `check:wiring` cannot see**, for #325's reason above: deleting
+ * `kitColour={kit.colour}` from the shell's `<GameView>`, or the settings
+ * screen's `onKitColourChange`, leaves `GameView.test.tsx` and the settings
+ * tests green, because each supplies its own prop. So this chooses a colour on
+ * the settings screen, opens the game in the same shell, rides, and reads what
+ * the view was handed.
+ */
+describe('the kit colour reaches the ride (#623)', () => {
+  it('rides in the colour chosen on the settings screen, without a reload', async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal('cancelAnimationFrame', () => undefined);
+    const writes: KitColour[] = [];
+    const athleteKit: AthleteKitColourPort = {
+      athleteId: athleteId('local'),
+      store: {
+        setAthleteKitColour: (id, kitColour): Promise<AthleteRecord | undefined> => {
+          writes.push(kitColour);
+          return Promise.resolve({
+            id,
+            displayName: 'You',
+            createdAt: 0 as AthleteRecord['createdAt'],
+            kitColour,
+          });
+        },
+      },
+    };
+    const handed: (KitColour | undefined)[] = [];
+    const renderer: GameRenderer = {
+      loadRealisticWorld: () => Promise.reject(new Error('not chosen')),
+      create: () => ({
+        hasContext: true,
+        prepare: () => Promise.resolve(),
+        render: () => undefined,
+        setQuality: () => undefined,
+        setRiderKit: (chosen) => {
+          handed.push(chosen);
+        },
+        resize: () => undefined,
+        destroy: () => undefined,
+      }),
+    };
+    const route: RidableRoute = {
+      id: 'route-1',
+      name: 'Flat',
+      profile: routeProfile(
+        [0, 1, 2].map((index) => ({
+          position: geographicPosition(
+            degreesLatitude(51.5 + (index * 500) / 111_320),
+            degreesLongitude(-0.12),
+          ),
+          elevation: altitudeMetres(0),
+        })),
+      ),
+      attempts: 0,
+    };
+    const game: GamePort = {
+      listRoutes: () => Promise.resolve([route]),
+      loadGhost: () => Promise.resolve(undefined),
+      readSensors: () => ({
+        rider: { power: watts(200), live: true, paired: true },
+        cadence: { value: 85, live: true, paired: true },
+        heartRate: { value: 140, live: true, paired: true },
+      }),
+    };
+
+    globalThis.location.hash = '#/settings';
+    const shell = await mount(
+      <AppShell
+        capabilities={NO_BLUETOOTH}
+        game={game}
+        gameRenderer={() => Promise.resolve(renderer)}
+        athleteKit={athleteKit}
+      />,
+    );
+    await settle();
+    // Nobody has chosen: the house kit is the one shown chosen.
+    expect(document.querySelector<HTMLInputElement>('#oyl-kit-house')?.checked).toBe(true);
+    await act(async () => {
+      document.querySelector<HTMLInputElement>('#oyl-kit-magenta')?.click();
+      await Promise.resolve();
+    });
+    await settle();
+    expect(writes).toEqual(['magenta']);
+    expect(document.body.textContent).toContain(KIT_SAVED);
+    expect(document.querySelector<HTMLInputElement>('#oyl-kit-magenta')?.checked).toBe(true);
+
+    globalThis.location.hash = '#/game';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    await settle();
+    const ride = [...document.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
+      (button.textContent ?? '').startsWith('Ride '),
+    );
+    await act(async () => {
+      ride?.click();
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect(handed.length).toBeGreaterThan(0);
+    expect(handed.every((chosen) => chosen === 'magenta')).toBe(true);
     shell.unmount();
     vi.unstubAllGlobals();
   });

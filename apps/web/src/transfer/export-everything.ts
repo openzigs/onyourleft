@@ -424,6 +424,8 @@ export function accountManifest(input: {
         readonly mass?: number | undefined;
         /** #238's display preference. ADR 0020 D-2 puts it on the athlete so it travels here. */
         readonly units?: string | undefined;
+        /** #623's kit colour: a palette key, on the athlete for ADR 0020 D-2's reason. */
+        readonly kitColour?: string | undefined;
       }
     | undefined;
   readonly deviceKey: { readonly algorithm: string; readonly publicKey: string } | undefined;
@@ -468,6 +470,10 @@ export function accountManifest(input: {
       // distance in every activity beside it is in the canonical unit, and
       // that is true whichever way this reads.
       units: input.athlete?.units,
+      // #623. The rider's kit colour, a palette KEY and never a colour — on the
+      // athlete for the reason `units` is, and named here for the reason every
+      // field is.
+      kitColour: input.athlete?.kitColour,
     },
     // The public half only. See the file header: the private half is a handle
     // and would serialise to `{}`, which reads as "exported" and is not.
