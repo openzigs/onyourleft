@@ -91,6 +91,8 @@ import {
 } from './insets';
 import type { RideViewControl, RideViewMeasurement } from './rideview-harness';
 
+import { RIDE_TIME_TARGET_PIXELS } from '../src/design/ride-time-controls';
+
 /** Sub-pixel layout, not slack. @see ride.browser.spec.ts */
 const SUBPIXEL_TOLERANCE = 1;
 
@@ -473,7 +475,7 @@ for (const viewport of [TABLET_IN_THE_SHELL, TABLET_UPRIGHT_IN_THE_SHELL]) {
  *   - the Eased notice is ONE sentence on the screen, the rest behind *How
  *     the target comes back* (`workout/rescue-text.ts` §`workoutRescueHeadline`,
  *     the owner's ruling on #605) — 55 px, which is the headroom #669's 48 px
- *     controls will spend.
+ *     controls spent (4 px each for *Pause* / *Stop* and *End workout*).
  *
  * The control puts the section back as #585 shipped it — the whole sentence,
  * and *End workout* last — and requires *End workout* to fall under the
@@ -500,10 +502,9 @@ function foldMargin(bottom: number, viewport: Viewport): number {
  * *End workout* back after the notice (as #585 shipped it) turns it red here
  * as at the landscape sizes, and the fold case with it. The upright notice's
  * margin to the fold is the smallest of the five, and its figure is the one
- * #669's larger controls will spend: *Pause* / *Stop* and *End workout* sit
- * above it in the same column, about 4 px each at 48 px, while #669 leaves
- * the disclosure's summary alone. Published, not bounded beyond the floor —
- * #669 is not merged, and a bound on a projection is a bound on a guess.
+ * #669's larger controls spent: *Pause* / *Stop* and *End workout* sit
+ * above it in the same column, 4 px each at 48 px, while #669 leaves the
+ * disclosure's summary alone. Published, and held to the floor.
  */
 const EASED_VIEWPORTS: readonly Viewport[] = [...TABLETS, TABLET_UPRIGHT_IN_THE_SHELL];
 
@@ -672,10 +673,10 @@ for (const viewport of EASED_VIEWPORTS) {
  * `<details>` (the owner's ruling on #654's re-review — it is a safety
  * sentence); every ride control is still on the screen; and at every tablet
  * BOTH the notice's own bottom and *Pause* / *Stop* clear
- * {@link FOLD_MARGIN_PIXELS} — landscape, every ride control does — as
- * shipped AND with every live and trainer button held to 48 px: #669's larger
- * controls, which are not merged, applied in the harness as a what-if rather
- * than argued from a margin.
+ * {@link FOLD_MARGIN_PIXELS} — landscape, every ride control does. ⚠️ Until
+ * #669 merged this also ran with every live and trainer button held to 48 px
+ * as a what-if in the harness; #669's 48 px ride controls are what ships now,
+ * so the what-if is gone and "as shipped" is that layout.
  *
  * ⚠️ **The notice's floor is §4f's 50 px and it was 0 until #693's review**,
  * and a reviewer who remembers the notice being "bounded only by being on the
@@ -689,8 +690,8 @@ for (const viewport of EASED_VIEWPORTS) {
  * *Stop* and on the notice, and the chooser's margin is published and held to
  * be on the screen. Beside the heading the notice is one line upright and
  * costs the chooser its height less the heading's; #692 is the room a
- * standing notice needs there, and #669's 48 px alone spend most of what main
- * leaves it.
+ * standing notice needs there. The chooser's own floor is held since #669, by
+ * §"#669 — the workout chooser" below.
  *
  * ⚠️ **Two controls, and they fail for different reasons.** Put back UNDER
  * *Pause* / *Stop* — the review's finding — the notice's own margin must fall
@@ -718,27 +719,25 @@ for (const viewport of EASED_VIEWPORTS) {
       expect((await measure(page)).keepScreenOn).toBeUndefined();
     });
 
-    for (const grown of [undefined, 48] as const) {
-      const what = grown === undefined ? 'as shipped' : `with #669's ${String(grown)} px controls`;
+    {
+      // #669: the ride controls ARE 48 px now, so the what-if this loop ran
+      // beside the shipped layout is the shipped layout.
+      const what = 'as shipped, with #669’s 48 px ride controls';
       test(`the notice${upright ? ', Pause and Stop clear' : ' and every ride control clear'} the fold by a margin — ${what}`, async ({
         page,
       }, testInfo) => {
         await open(page, viewport, KEEP_ALIVE_FAILED);
-        if (grown !== undefined) {
-          await page.evaluate((pixels) => {
-            window.__oylRideView?.growControlsTo(pixels);
-          }, grown);
-        }
         const seen = await measure(page);
 
         expect(seen.scrollY).toBe(0);
         const during = seen.controls.filter((each) => each.group !== 'sensors');
         expect(during.map((each) => each.name)).toEqual(expect.arrayContaining(['Pause', 'Stop']));
-        if (grown !== undefined) {
-          // The what-if took: Pause is the height #669 gives it.
-          const pause = during.find((each) => each.name === 'Pause');
-          expect(pause?.box.height ?? 0).toBeGreaterThanOrEqual(grown - SUBPIXEL_TOLERANCE);
-        }
+        // The apparatus: Pause is the height #669 gives it, so the margins
+        // below are taken over the controls a rider gets.
+        const pause = during.find((each) => each.name === 'Pause');
+        expect(pause?.box.height ?? 0).toBeGreaterThanOrEqual(
+          RIDE_TIME_TARGET_PIXELS - SUBPIXEL_TOLERANCE,
+        );
         // Upright, the controls that END a recording; landscape, every ride
         // control. @see the note above this block
         const held = upright
@@ -812,3 +811,80 @@ for (const viewport of EASED_VIEWPORTS) {
     }
   });
 }
+
+/**
+ * #669 — the workout chooser on the tablet held upright, inside the shell.
+ *
+ * ⚠️ **Nothing asserted this before #669, and it was already under the floor.**
+ * Upright the screen is one column, the trainer group is under the live one,
+ * and the workout's *Ride* is the last ride control in it. The #647 block
+ * above held only *Pause* / *Stop* there and published this margin: on the CI
+ * runner it read **38.9 px** on `main` before #669 and **29.3 px** with #669's
+ * 48 px controls — under {@link FOLD_MARGIN_PIXELS} both times; on a Mac 63.7
+ * and 54.1, one wrapped line of text apart. What #669 did about it is
+ * `theme.css` §`.oyl-ride__group--trainer form.oyl-trainer__form > p`: the ERG
+ * form's own sentence sits the row's 8 px under its controls instead of a
+ * paragraph's margins either side of it, which a flex container does not
+ * collapse.
+ *
+ * The control puts those margins back and requires *Ride* to move down by at
+ * least {@link CHOOSER_FIX_PIXELS}. It does not require the reverted page to
+ * be under the floor, because on a Mac's fonts it is not — that is the
+ * one-line difference above — and a control that is red on one machine only is
+ * a control of the fonts.
+ */
+const CHOOSER_FIX_PIXELS = 24;
+
+test.describe(`#669 — the workout chooser — ${TABLET_UPRIGHT_IN_THE_SHELL.name}`, () => {
+  const viewport = TABLET_UPRIGHT_IN_THE_SHELL;
+
+  async function rideMargin(page: Page): Promise<number> {
+    const seen = await measure(page);
+    const ride = seen.controls.find((each) => each.name === STARTS_A_WORKOUT);
+    expect(ride, 'the chooser rendered no Ride control').toBeDefined();
+    expect(ride?.box.height ?? 0).toBeGreaterThanOrEqual(
+      RIDE_TIME_TARGET_PIXELS - SUBPIXEL_TOLERANCE,
+    );
+    return foldMargin(ride?.box.bottom ?? Infinity, viewport);
+  }
+
+  test('its Ride clears the fold by a margin, and says by how much', async ({ page }, testInfo) => {
+    await open(page, viewport);
+    const seen = await measure(page);
+    expect(seen.scrollY).toBe(0);
+    const during = seen.controls.filter((each) => each.group !== 'sensors');
+    expect(during.filter((each) => !onScreen(each, viewport)).map(describeControl)).toEqual([]);
+    // The apparatus: Ride is the lowest ride control upright, so this is the
+    // screen's own fold margin and not a margin over a control higher up.
+    const lowest = during.reduce((low, each) => (each.box.bottom > low.box.bottom ? each : low));
+    expect(lowest.name).toBe(STARTS_A_WORKOUT);
+
+    const margin = await rideMargin(page);
+    const note = `${margin.toFixed(1)} px under ${describeControl(lowest)} at ${String(viewport.width)}×${String(viewport.height)}`;
+    testInfo.annotations.push({
+      type: '#669 workout chooser, margin to the fold',
+      description: note,
+    });
+    console.log(`#669 workout chooser, margin to the fold — ${note}`);
+    expect(margin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+  });
+
+  test('the control — with the ERG sentence spaced as before #669, Ride is lower', async ({
+    page,
+  }, testInfo) => {
+    await open(page, viewport);
+    const fixed = await rideMargin(page);
+    await page.addStyleTag({
+      content:
+        '.oyl-ride__group--trainer form.oyl-trainer__form > p { margin: 1rem 0 !important; }',
+    });
+    const reverted = await rideMargin(page);
+    const note = `Ride ${fixed.toFixed(1)} px → ${reverted.toFixed(1)} px`;
+    testInfo.annotations.push({
+      type: 'control, ERG sentence spaced as before',
+      description: note,
+    });
+    console.log(`#669 workout chooser, as before — ${note}`);
+    expect(fixed - reverted, note).toBeGreaterThanOrEqual(CHOOSER_FIX_PIXELS);
+  });
+});

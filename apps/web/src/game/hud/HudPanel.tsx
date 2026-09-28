@@ -57,6 +57,7 @@
 
 import type { JSX, ReactNode } from 'react';
 
+import { RIDE_SIZE_CLASS } from '../../design/Button';
 import { useUnits } from '../../units/context';
 
 import {
@@ -258,7 +259,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
         <div className="oyl-hud__controls">
           <button
             type="button"
-            className="oyl-hud__control"
+            className={`oyl-hud__control ${RIDE_SIZE_CLASS}`}
             onClick={props.onPause}
             style={{ minWidth: CONTROL_MINIMUM_PIXELS, minHeight: CONTROL_MINIMUM_PIXELS }}
           >
@@ -266,7 +267,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
           </button>
           <button
             type="button"
-            className="oyl-hud__control"
+            className={`oyl-hud__control ${RIDE_SIZE_CLASS}`}
             onClick={props.onEnd}
             style={{ minWidth: CONTROL_MINIMUM_PIXELS, minHeight: CONTROL_MINIMUM_PIXELS }}
           >
