@@ -29,6 +29,7 @@ import {
   typeInto,
   type Mounted,
 } from '../testing/mount';
+import { liveRegionsSaying, timesSaid } from '../testing/said-once';
 import type { DownloadableFile } from '../transfer/store-port';
 import { WORKOUT_LIST_LIMIT } from '../workouts/store-port';
 import { workoutStub, type WorkoutStub } from '../workouts/testing';
@@ -289,8 +290,11 @@ describe('deleting a workout asks first', () => {
     await activateWithKeyboard(buttonSaying(view.container, 'Delete Sweet spot') as HTMLElement);
     await activateWithKeyboard(buttonSaying(view.container, 'Delete “Sweet spot”') as HTMLElement);
     await settle();
-
     expect(stub.rows()).toEqual([]);
+    // What the shell does when the delete moves the hash back to the list:
+    // the builder is drawn again, and the sentence with it.
+    await view.rerender(<WorkoutsView port={stub} now={() => 1_700_000_500} />);
+    await settle();
     expect(view.container.textContent).toContain('Deleted “Sweet spot”');
   });
 });
@@ -363,8 +367,31 @@ describe('#670 — a selected workout', () => {
     expect(view.container.querySelector('#oyl-selected-heading')?.textContent).toBe(
       'Workout not found',
     );
-    // And the builder is still there beneath it.
-    expect(view.container.textContent).toContain('Build a workout');
+    // #670's review (N1): the builder is not drawn under a chosen workout;
+    // the list's *Build a workout* is the way back to it, and the primary.
+    expect(view.container.querySelector('#workout-name')).toBeNull();
+    const build = view.container.querySelector('[data-oyl-pane="list"] a[data-oyl-create]');
+    expect(build?.textContent).toBe('Build a workout');
+    expect(build?.getAttribute('href')).toBe('#/workouts');
+    expect(build?.className).toBe('oyl-button');
+  });
+
+  it('says another athlete’s workout is not found, even though this device holds it', async () => {
+    // #670's review (N3): the id is on the device, under somebody else.
+    const stub = workoutStub(ATHLETE, [workout({ createdBy: toAthleteId('athlete-b') })]);
+    const view = await render(stub, undefined, 'workout-1');
+    await settle();
+    expect(view.container.querySelector('#oyl-selected-heading')?.textContent).toBe(
+      'Workout not found',
+    );
+    expect(view.container.textContent).not.toContain('Sweet spot');
+  });
+
+  it('with nothing chosen, draws the builder, and the list’s way to it is secondary', async () => {
+    const view = await render(workoutStub(ATHLETE, [workout()]));
+    expect(view.container.querySelector('#workout-name')).not.toBeNull();
+    const build = view.container.querySelector('[data-oyl-pane="list"] a[data-oyl-create]');
+    expect(build?.className).toBe('oyl-button oyl-button--secondary');
   });
 
   it('goes back to the list once the chosen workout is deleted', async () => {
@@ -376,5 +403,56 @@ describe('#670 — a selected workout', () => {
     await settle();
     expect(globalThis.location.hash).toBe('#/workouts');
     globalThis.location.hash = '';
+  });
+});
+
+/**
+ * #670's review (B1): a message rendered twice is invisible to `toContain`;
+ * these count what is said, and in how many live regions.
+ */
+describe('each message is said once, in one live region', () => {
+  function saidOnce(root: Element, text: string): void {
+    expect(timesSaid(root, text), `“${text}” is on the screen`).toBe(1);
+    expect(liveRegionsSaying(root, text), `“${text}” is in live regions`).toBe(1);
+  }
+
+  it('after a delete', async () => {
+    const stub = workoutStub(ATHLETE, [workout()]);
+    const view = await render(stub, undefined, 'workout-1');
+    await activateWithKeyboard(buttonSaying(view.container, 'Delete Sweet spot') as HTMLElement);
+    await activateWithKeyboard(buttonSaying(view.container, 'Delete “Sweet spot”') as HTMLElement);
+    await settle();
+    await view.rerender(<WorkoutsView port={stub} now={() => 1_700_000_500} />);
+    await settle();
+    saidOnce(view.container, 'Deleted “Sweet spot”.');
+  });
+
+  it('after a refused import', async () => {
+    const view = await render(workoutStub(ATHLETE));
+    await submitForm(formOf(field(view.container, 'workout-file')));
+    saidOnce(view.container, 'Choose a workout file to import.');
+  });
+
+  it('after a save', async () => {
+    const view = await render(workoutStub(ATHLETE));
+    await typeInto(field(view.container, 'block-minutes'), '10');
+    await typeInto(field(view.container, 'block-percent'), '65');
+    await activateWithKeyboard(buttonSaying(view.container, 'Add block') as HTMLElement);
+    await typeInto(field(view.container, 'workout-name'), 'Tempo');
+    await activateWithKeyboard(buttonSaying(view.container, 'Save workout') as HTMLElement);
+    await settle();
+    saidOnce(view.container, 'Saved “Tempo”.');
+  });
+
+  it('after a refused save', async () => {
+    const view = await render(workoutStub(ATHLETE));
+    await typeInto(field(view.container, 'workout-name'), 'Empty');
+    await activateWithKeyboard(buttonSaying(view.container, 'Save workout') as HTMLElement);
+    await settle();
+    const refusal = queryAll(view.container, '.oyl-status')
+      .map((element) => element.textContent ?? '')
+      .find((text) => text.includes('Add at least one block'));
+    expect(refusal).toBeDefined();
+    saidOnce(view.container, 'Add at least one block');
   });
 });

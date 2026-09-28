@@ -52,6 +52,7 @@ import {
   typeInto,
   type Mounted,
 } from '../testing/mount';
+import { liveRegionsSaying, timesSaid } from '../testing/said-once';
 import { RoutesView } from './RoutesView';
 
 const ATHLETE = toAthleteId('athlete-a');
@@ -501,13 +502,34 @@ describe('#670 — a selected route', () => {
     );
   });
 
-  it('says a route this device does not hold is not found, and still offers the import', async () => {
+  it('says a route this device does not hold is not found, and offers the import from the list', async () => {
     const view = await render(routeStub(ATHLETE, [route()]), 'nobody-knows');
     await settle();
     expect(view.container.querySelector('#oyl-selected-heading')?.textContent).toBe(
       'Route not found',
     );
-    expect(buttonSaying(view.container, 'Import route')).toBeDefined();
+    // #670's review (N1): with a route chosen the import form is not drawn
+    // under it; the list's own *Import a route* is the way back to it.
+    expect(buttonSaying(view.container, 'Import route')).toBeUndefined();
+    const importLink = queryAll<HTMLAnchorElement>(
+      view.container.querySelector('[data-oyl-pane="list"]') as Element,
+      'a[data-oyl-create]',
+    );
+    expect(importLink.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
+      ['Import a route', '#/routes'],
+    ]);
+  });
+
+  it('says another athlete’s route is not found, even though this device holds it', async () => {
+    // #670's review (N3): an id that exists for nobody proves nothing about
+    // scoping. This one is on the device, under somebody else.
+    const stub = routeStub(ATHLETE, [route({ createdBy: toAthleteId('athlete-b') })]);
+    const view = await render(stub, 'route-1');
+    await settle();
+    expect(view.container.querySelector('#oyl-selected-heading')?.textContent).toBe(
+      'Route not found',
+    );
+    expect(view.container.textContent).not.toContain('Box Hill loop');
   });
 
   it('puts Import route first in the detail pane (#668), and drawing one at the head of the list', async () => {
@@ -516,7 +538,11 @@ describe('#670 — a selected route', () => {
     const headings = queryAll(detail as Element, 'h2').map((heading) => heading.textContent);
     expect(headings[0]).toBe('Import a route');
     const list = view.container.querySelector('[data-oyl-pane="list"]');
-    const draw = queryAll(list as Element, 'a.oyl-button')[0];
+    const [importLink, draw] = queryAll(list as Element, 'a.oyl-button');
+    // With nothing chosen the form's own submit is the primary, so the list's
+    // way to it is secondary.
+    expect(importLink?.textContent).toBe('Import a route');
+    expect(importLink?.className).toBe('oyl-button oyl-button--secondary');
     expect(draw?.textContent).toBe('Draw a route on this device');
     // Before the saved routes: on one pane, a phone's first control.
     expect(
@@ -524,5 +550,70 @@ describe('#670 — a selected route', () => {
         list?.querySelector('[data-oyl-select]') as Element,
       ) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+
+  it('with a route chosen, draws the route alone in the detail and makes the list’s import the primary', async () => {
+    const view = await render(routeStub(ATHLETE, [route()]), 'route-1');
+    const detail = view.container.querySelector('[data-oyl-pane="detail"]') as Element;
+    expect(queryAll(detail, 'h2').map((heading) => heading.textContent)).toEqual([
+      'Box Hill loop',
+      'Before you share a route',
+    ]);
+    expect(detail.querySelector('#route-file')).toBeNull();
+    const importLink = view.container.querySelector('[data-oyl-pane="list"] a[data-oyl-create]');
+    expect(importLink?.className).toBe('oyl-button');
+  });
+});
+
+/**
+ * #670's review (B1): every message was rendered twice, in two live regions,
+ * so a screen reader announced it twice. `toContain` cannot see that; these
+ * count.
+ */
+describe('each message is said once, in one live region', () => {
+  function saidOnce(root: Element, text: string): void {
+    expect(timesSaid(root, text), `“${text}” is on the screen`).toBe(1);
+    expect(liveRegionsSaying(root, text), `“${text}” is in live regions`).toBe(1);
+  }
+
+  it('after a delete', async () => {
+    const stub = routeStub(ATHLETE, [route()]);
+    const view = await render(stub, 'route-1');
+    await activateWithKeyboard(buttonSaying(view.container, 'Delete') as HTMLElement);
+    await settle();
+    await activateWithKeyboard(
+      buttonSaying(view.container, 'Delete “Box Hill loop”') as HTMLElement,
+    );
+    await settle();
+    // What the shell does when the delete moves the hash back to the list.
+    await view.rerender(<RoutesView port={stub} now={() => 1_700_000_500} />);
+    await settle();
+    saidOnce(view.container, 'Deleted “Box Hill loop”.');
+  });
+
+  it('after a refused import', async () => {
+    const view = await render(routeStub(ATHLETE));
+    const field = view.container.querySelector<HTMLInputElement>('#route-file');
+    await submitForm(field?.closest('form') as HTMLFormElement);
+    saidOnce(view.container, 'Choose a GPX file to import.');
+  });
+
+  it('after a save', async () => {
+    const view = await render(routeStub(ATHLETE, [route()]), 'route-1');
+    const field = view.container.querySelector<HTMLInputElement>('#name-route-1');
+    await typeInto(field as HTMLInputElement, 'Ranmore');
+    await activateWithKeyboard(buttonSaying(view.container, 'Save changes') as HTMLElement);
+    await settle();
+    saidOnce(view.container, 'Saved “Ranmore”.');
+  });
+
+  it('and a list that cannot be read says so once, not live, in the list', async () => {
+    const stub = routeStub(ATHLETE);
+    stub.failNextList();
+    const view = await render(stub);
+    const fault = 'Your saved routes could not be read on this device.';
+    expect(timesSaid(view.container, fault)).toBe(1);
+    expect(liveRegionsSaying(view.container, fault)).toBe(0);
+    expect(view.container.querySelector('[data-oyl-pane="list"]')?.textContent).toContain(fault);
   });
 });

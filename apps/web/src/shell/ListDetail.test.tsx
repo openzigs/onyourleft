@@ -14,14 +14,14 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import type { JSX } from 'react';
+import { act, type JSX } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { mount, settle, type Mounted } from '../testing/mount';
-import { answerTwoPanes } from '../testing/panes';
+import { answerTwoPanes, rotatablePanes } from '../testing/panes';
 
-import { ListDetail, SELECTED_HEADING_ID } from './ListDetail';
-import { routeById } from './routes';
+import { CREATE_HEADING_ID, CreateLink, ListDetail, SELECTED_HEADING_ID } from './ListDetail';
+import { matchHash, routeById } from './routes';
 
 // `join` rather than `new URL(…, import.meta.url)`, which Vite rewrites into an asset URL.
 const THEME = readFileSync(
@@ -156,6 +156,19 @@ describe('two panes, at the breakpoint theme.css declares', () => {
     expect(document.activeElement).toBe(pane('detail'));
     expect(globalThis.location.hash).toBe('#/activities');
   });
+
+  it('gives the skip link this page’s own address, so a new tab opens this page rather than not-found', async () => {
+    // #670's review (N5): it was `#<pane id>`, which the router reads as a
+    // route — middle-click, or open in a new tab, was the not-found page.
+    restore = answerTwoPanes(true, THEME);
+    mounted = await mount(layout(undefined));
+    const skip = pane('list').querySelector<HTMLAnchorElement>('.oyl-pane-skip');
+    expect(skip?.getAttribute('href')).toBe('#/activities');
+    expect(matchHash(skip?.getAttribute('href') ?? '').route.id).toBe('activities');
+    await mounted.rerender(layout('b'));
+    expect(skip?.getAttribute('href')).toBe('#/activities/selected/b');
+    expect(matchHash(skip?.getAttribute('href') ?? '').route.id).toBe('activities');
+  });
 });
 
 describe('focus', () => {
@@ -211,5 +224,150 @@ describe('focus', () => {
     await mounted.rerender(layout('a'));
     await settle();
     expect(document.activeElement?.id).toBe(SELECTED_HEADING_ID);
+  });
+});
+
+/** #670's review (N4): a tablet turned upright with focus in the list. */
+describe('rotating from two panes to one', () => {
+  it('moves focus from a list link to the chosen item’s heading, not to <body>', async () => {
+    const panes = rotatablePanes(true, THEME);
+    restore = panes.restore;
+    mounted = await mount(layout('a'));
+    const link = pane('list').querySelector<HTMLElement>('[data-oyl-select="b"]');
+    link?.focus();
+    expect(document.activeElement).toBe(link);
+    act(() => {
+      panes.rotate(false);
+    });
+    await settle();
+    expect(pane('list').hidden).toBe(true);
+    expect(document.activeElement?.id).toBe(SELECTED_HEADING_ID);
+    expect(document.activeElement?.textContent).toBe('Ride a');
+  });
+
+  it('leaves focus on the list when nothing is chosen, because the list stays', async () => {
+    const panes = rotatablePanes(true, THEME);
+    restore = panes.restore;
+    mounted = await mount(layout(undefined));
+    const link = pane('list').querySelector<HTMLElement>('[data-oyl-select="b"]');
+    link?.focus();
+    act(() => {
+      panes.rotate(false);
+    });
+    await settle();
+    expect(pane('list').hidden).toBe(false);
+    expect(document.activeElement).toBe(link);
+  });
+
+  it('hands no focus to a rider who had focused nothing', async () => {
+    const panes = rotatablePanes(true, THEME);
+    restore = panes.restore;
+    mounted = await mount(layout('a'));
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(document.activeElement).toBe(document.body);
+    act(() => {
+      panes.rotate(false);
+    });
+    await settle();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('leaves focus alone when it was outside the list, which is not hidden', async () => {
+    const panes = rotatablePanes(true, THEME);
+    restore = panes.restore;
+    mounted = await mount(layout('a'));
+    const outside = document.createElement('button');
+    document.body.append(outside);
+    outside.focus();
+    act(() => {
+      panes.rotate(false);
+    });
+    await settle();
+    expect(document.activeElement).toBe(outside);
+    outside.remove();
+  });
+});
+
+/** #670's review (N1): the way from a chosen item to the form beside the list. */
+describe('the create link', () => {
+  function withForm(selection: string | undefined): JSX.Element {
+    return (
+      <main>
+        <ListDetail
+          route={routeById('routes')}
+          selection={selection}
+          listLabel="Saved routes"
+          detailLabel="Route"
+          backLabel="All routes"
+          detailWithoutSelection
+          list={
+            <>
+              <p>
+                <CreateLink route={routeById('routes')} selection={selection}>
+                  Import a route
+                </CreateLink>
+              </p>
+              <a href="#/routes/selected/a" data-oyl-select="a">
+                Route a
+              </a>
+            </>
+          }
+          detail={
+            selection === undefined ? (
+              <h2 id={CREATE_HEADING_ID} tabIndex={-1}>
+                Import a route
+              </h2>
+            ) : (
+              <h2 id={SELECTED_HEADING_ID} tabIndex={-1}>
+                Route {selection}
+              </h2>
+            )
+          }
+        />
+      </main>
+    );
+  }
+
+  it('is the primary with an item chosen, and leads to the list’s own address', async () => {
+    restore = answerTwoPanes(true, THEME);
+    mounted = await mount(withForm('a'));
+    const link = pane('list').querySelector('[data-oyl-create]');
+    expect(link?.className).toBe('oyl-button');
+    expect(link?.getAttribute('href')).toBe('#/routes');
+  });
+
+  it('moves focus to the form’s heading when it lets the selection go, not to the item', async () => {
+    restore = answerTwoPanes(true, THEME);
+    mounted = await mount(withForm('a'));
+    const link = pane('list').querySelector<HTMLAnchorElement>('[data-oyl-create]');
+    link?.click();
+    // What the shell does on the hashchange the link causes.
+    await mounted.rerender(withForm(undefined));
+    await settle();
+    expect(document.activeElement?.id).toBe(CREATE_HEADING_ID);
+  });
+
+  it('is secondary with nothing chosen, and moves focus to the form without routing', async () => {
+    restore = answerTwoPanes(false, THEME);
+    globalThis.location.hash = '#/routes';
+    mounted = await mount(withForm(undefined));
+    const link = pane('list').querySelector<HTMLAnchorElement>('[data-oyl-create]');
+    expect(link?.className).toBe('oyl-button oyl-button--secondary');
+    link?.click();
+    await settle();
+    expect(document.activeElement?.id).toBe(CREATE_HEADING_ID);
+    expect(globalThis.location.hash).toBe('#/routes');
+  });
+
+  it('does not steer a later back to the list away from the item', async () => {
+    // The note a create link leaves is spent by the next change of selection.
+    restore = answerTwoPanes(true, THEME);
+    mounted = await mount(withForm(undefined));
+    pane('list').querySelector<HTMLAnchorElement>('[data-oyl-create]')?.click();
+    await mounted.rerender(withForm('a'));
+    await settle();
+    await mounted.rerender(withForm(undefined));
+    await settle();
+    expect(document.activeElement?.getAttribute('data-oyl-select')).toBe('a');
   });
 });

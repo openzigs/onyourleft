@@ -56,3 +56,49 @@ export function answerTwoPanes(wide: boolean, themeCss: string): () => void {
     }
   };
 }
+
+/** A window whose width can change under a mounted layout — #670's rotation. */
+export interface RotatablePanes {
+  /** Answer the breakpoint query with `wide` from now on, and tell every listener. */
+  readonly rotate: (wide: boolean) => void;
+  /** Undo the stub, as {@link answerTwoPanes}'s return does. */
+  readonly restore: () => void;
+}
+
+/**
+ * {@link answerTwoPanes}, but the answer can change after mounting: its
+ * `MediaQueryList` keeps its `change` listeners and {@link RotatablePanes.rotate}
+ * calls them, which is what a browser does when a tablet is turned.
+ */
+export function rotatablePanes(wide: boolean, themeCss: string): RotatablePanes {
+  const restore = answerTwoPanes(false, themeCss);
+  const expected = `(min-width: ${declaredBreakpoint(themeCss)})`;
+  let now = wide;
+  const listeners = new Set<() => void>();
+  window.matchMedia = (query: string): MediaQueryList =>
+    ({
+      get matches() {
+        return now && query === expected;
+      },
+      media: query,
+      onchange: null,
+      addEventListener: (_type: string, listener: () => void) => {
+        listeners.add(listener);
+      },
+      removeEventListener: (_type: string, listener: () => void) => {
+        listeners.delete(listener);
+      },
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    }) as unknown as MediaQueryList;
+  return {
+    rotate: (next) => {
+      now = next;
+      for (const listener of [...listeners]) {
+        listener();
+      }
+    },
+    restore,
+  };
+}

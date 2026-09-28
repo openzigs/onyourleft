@@ -34,14 +34,18 @@ export function stubLibrary(owner: AthleteId, summaries: readonly ActivitySummar
   const gets: string[] = [];
 
   const store: LibraryStore = {
-    listActivitySummaries: (_owner: AthleteId, options: ListActivitiesOptions = {}) => {
+    listActivitySummaries: (requester: AthleteId, options: ListActivitiesOptions = {}) => {
       reads.push(options);
       const { orderBy = 'startedAt', direction = 'descending', offset = 0, limit } = options;
       const key = (summary: ActivitySummary): number =>
         orderBy === 'distance' ? summary.distance : summary.startedAt;
-      const sorted = [...held].sort((left, right) =>
-        direction === 'descending' ? key(right) - key(left) : key(left) - key(right),
-      );
+      // Scoped, like `getActivity` below — #670's review: unscoped, the page
+      // itself handed another athlete's ride to the screen.
+      const sorted = held
+        .filter((summary) => summary.athleteId === requester)
+        .sort((left, right) =>
+          direction === 'descending' ? key(right) - key(left) : key(left) - key(right),
+        );
       const from = sorted.slice(offset);
       return Promise.resolve(limit === undefined ? from : from.slice(0, limit));
     },

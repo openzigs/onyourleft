@@ -18,7 +18,12 @@ import {
 import { blockText, workoutRow, type WorkoutRow } from '../workouts/library';
 import { WORKOUT_LIST_LIMIT, type WorkoutPort } from '../workouts/store-port';
 import { exportedWorkout, workoutFromFile } from '../workouts/transfer';
-import { ListDetail, SELECTED_HEADING_ID } from '../shell/ListDetail';
+import {
+  CREATE_HEADING_ID,
+  CreateLink,
+  ListDetail,
+  SELECTED_HEADING_ID,
+} from '../shell/ListDetail';
 import { hrefFor, hrefForSelection, routeById } from '../shell/routes';
 
 /**
@@ -332,7 +337,7 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
         ? fetched
         : undefined;
 
-  const list =
+  const listed =
     entries === undefined ? (
       <p>Reading your workouts…</p>
     ) : (
@@ -365,6 +370,17 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
         )}
       </>
     );
+
+  const list = (
+    <>
+      <p>
+        <CreateLink route={routeById('workouts')} selection={selected}>
+          Build a workout
+        </CreateLink>
+      </p>
+      {listed}
+    </>
+  );
 
   const chosen =
     selected === undefined ? null : shown === undefined ? (
@@ -470,46 +486,60 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
       detailWithoutSelection
       list={list}
       detail={
-        <>
-          {chosen}
-          <h2>Build a workout</h2>
+        chosen ?? (
+          <>
+            <h2 id={CREATE_HEADING_ID} tabIndex={-1}>
+              Build a workout
+            </h2>
 
-          <h3>This workout</h3>
-          {blocks.length === 0 ? (
-            <p>No blocks yet. Add one below.</p>
-          ) : (
-            <ol>
-              {blocks.map((block, index) => (
-                <li key={`${block.kind}-${String(index)}`}>
-                  {blockText(block)}{' '}
-                  <Button
-                    variant="secondary"
-                    type="button"
-                    onClick={() => {
-                      onRemoveBlock(index);
-                    }}
-                  >
-                    Remove block {String(index + 1)}
-                  </Button>
-                </li>
-              ))}
-            </ol>
-          )}
+            <h3>This workout</h3>
+            {blocks.length === 0 ? (
+              <p>No blocks yet. Add one below.</p>
+            ) : (
+              <ol>
+                {blocks.map((block, index) => (
+                  <li key={`${block.kind}-${String(index)}`}>
+                    {blockText(block)}{' '}
+                    <Button
+                      variant="secondary"
+                      type="button"
+                      onClick={() => {
+                        onRemoveBlock(index);
+                      }}
+                    >
+                      Remove block {String(index + 1)}
+                    </Button>
+                  </li>
+                ))}
+              </ol>
+            )}
 
-          <form aria-label="Save this workout" onSubmit={(event) => void onSave(event)}>
-            <p>
-              <label htmlFor="workout-name">Name</label>
-              <input id="workout-name" name="name" type="text" />
-            </p>
-            <Button type="submit">Save workout</Button>
-          </form>
+            <form aria-label="Save this workout" onSubmit={(event) => void onSave(event)}>
+              <p>
+                <label htmlFor="workout-name">Name</label>
+                <input id="workout-name" name="name" type="text" />
+              </p>
+              <Button type="submit">Save workout</Button>
+            </form>
 
-          {refusal === undefined ? null : (
-            <StatusMessage tone="warning">{refusal.message}</StatusMessage>
-          )}
-          {saved === undefined ? null : <StatusMessage tone="success">{saved}</StatusMessage>}
+            {/*
+            Live since #670's review: each appears because the rider pressed
+            *Save workout*, *Add block* or confirmed a delete, which is what
+            `StatusMessage` §`live` is for — and without it the one sentence
+            saying a save happened was never announced.
+          */}
+            {refusal === undefined ? null : (
+              <StatusMessage tone="warning" live>
+                {refusal.message}
+              </StatusMessage>
+            )}
+            {saved === undefined ? null : (
+              <StatusMessage tone="success" live>
+                {saved}
+              </StatusMessage>
+            )}
 
-          {/*
+            {/*
             #670: the workout, its name and *Save workout* come BEFORE the
             form that adds a block, so the pane's one primary is on screen on
             arrival on a landscape tablet — below the block form it was 72 px
@@ -518,158 +548,159 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
             phone's one pane it put the first control under the fold on the
             CI runner's fonts.
           */}
-          {/*
+            {/*
             Every form here is named: #670's audit of a populated screen —
             the first, since the route loop renders it with no store — found
             three unnamed forms, which a landmark list cannot tell apart.
           */}
-          <form aria-label="Add a block" onSubmit={onAddBlock}>
-            <h3>Add a block</h3>
-            <p>
-              Targets are a percentage of your own threshold power, so the same workout works
-              whatever shape you are in. A free-ride block releases the trainer instead of holding a
-              target.
-            </p>
-            <p>
-              <label htmlFor="block-kind">Kind</label>
-              <select
-                id="block-kind"
-                name="kind"
-                value={draft.kind}
-                onChange={(event) =>
-                  setDraft({ ...draft, kind: event.target.value as WorkoutBlock['kind'] })
-                }
-              >
-                {BLOCK_KINDS.map((entry) => (
-                  <option key={entry.kind} value={entry.kind}>
-                    {entry.label}
-                  </option>
-                ))}
-              </select>
-            </p>
-            <p>
-              <label htmlFor="block-minutes">
-                {draft.kind === 'intervals' ? 'Hard interval, minutes' : 'Minutes'}
-              </label>
-              <input
-                id="block-minutes"
-                name="minutes"
-                type="text"
-                inputMode="decimal"
-                value={draft.minutes}
-                onChange={(event) => setDraft({ ...draft, minutes: event.target.value })}
-              />
-            </p>
-            {needsTarget ? (
+            <form aria-label="Add a block" onSubmit={onAddBlock}>
+              <h3>Add a block</h3>
               <p>
-                <label htmlFor="block-percent">
-                  {draft.kind === 'ramp'
-                    ? 'Starting target, % of threshold'
-                    : draft.kind === 'intervals'
-                      ? 'Hard target, % of threshold'
-                      : 'Target, % of threshold'}
+                Targets are a percentage of your own threshold power, so the same workout works
+                whatever shape you are in. A free-ride block releases the trainer instead of holding
+                a target.
+              </p>
+              <p>
+                <label htmlFor="block-kind">Kind</label>
+                <select
+                  id="block-kind"
+                  name="kind"
+                  value={draft.kind}
+                  onChange={(event) =>
+                    setDraft({ ...draft, kind: event.target.value as WorkoutBlock['kind'] })
+                  }
+                >
+                  {BLOCK_KINDS.map((entry) => (
+                    <option key={entry.kind} value={entry.kind}>
+                      {entry.label}
+                    </option>
+                  ))}
+                </select>
+              </p>
+              <p>
+                <label htmlFor="block-minutes">
+                  {draft.kind === 'intervals' ? 'Hard interval, minutes' : 'Minutes'}
                 </label>
                 <input
-                  id="block-percent"
-                  name="percent"
+                  id="block-minutes"
+                  name="minutes"
                   type="text"
                   inputMode="decimal"
-                  value={draft.percent}
-                  onChange={(event) => setDraft({ ...draft, percent: event.target.value })}
+                  value={draft.minutes}
+                  onChange={(event) => setDraft({ ...draft, minutes: event.target.value })}
                 />
               </p>
-            ) : null}
-            {draft.kind === 'ramp' ? (
+              {needsTarget ? (
+                <p>
+                  <label htmlFor="block-percent">
+                    {draft.kind === 'ramp'
+                      ? 'Starting target, % of threshold'
+                      : draft.kind === 'intervals'
+                        ? 'Hard target, % of threshold'
+                        : 'Target, % of threshold'}
+                  </label>
+                  <input
+                    id="block-percent"
+                    name="percent"
+                    type="text"
+                    inputMode="decimal"
+                    value={draft.percent}
+                    onChange={(event) => setDraft({ ...draft, percent: event.target.value })}
+                  />
+                </p>
+              ) : null}
+              {draft.kind === 'ramp' ? (
+                <p>
+                  <label htmlFor="block-to-percent">Finishing target, % of threshold</label>
+                  <input
+                    id="block-to-percent"
+                    name="toPercent"
+                    type="text"
+                    inputMode="decimal"
+                    value={draft.toPercent}
+                    onChange={(event) => setDraft({ ...draft, toPercent: event.target.value })}
+                  />
+                </p>
+              ) : null}
+              {draft.kind === 'intervals' ? (
+                <>
+                  <p>
+                    <label htmlFor="block-repeats">How many times</label>
+                    <input
+                      id="block-repeats"
+                      name="repeats"
+                      type="text"
+                      inputMode="numeric"
+                      value={draft.repeats}
+                      onChange={(event) => setDraft({ ...draft, repeats: event.target.value })}
+                    />
+                  </p>
+                  <p>
+                    <label htmlFor="block-easy-minutes">Recovery, minutes</label>
+                    <input
+                      id="block-easy-minutes"
+                      name="easyMinutes"
+                      type="text"
+                      inputMode="decimal"
+                      value={draft.easyMinutes}
+                      onChange={(event) => setDraft({ ...draft, easyMinutes: event.target.value })}
+                    />
+                  </p>
+                  <p>
+                    <label htmlFor="block-easy-percent">Recovery target, % of threshold</label>
+                    <input
+                      id="block-easy-percent"
+                      name="easyPercent"
+                      type="text"
+                      inputMode="decimal"
+                      value={draft.easyPercent}
+                      onChange={(event) => setDraft({ ...draft, easyPercent: event.target.value })}
+                    />
+                  </p>
+                </>
+              ) : null}
               <p>
-                <label htmlFor="block-to-percent">Finishing target, % of threshold</label>
+                <label htmlFor="block-label">Label, optional</label>
                 <input
-                  id="block-to-percent"
-                  name="toPercent"
+                  id="block-label"
+                  name="label"
                   type="text"
-                  inputMode="decimal"
-                  value={draft.toPercent}
-                  onChange={(event) => setDraft({ ...draft, toPercent: event.target.value })}
+                  value={draft.label}
+                  onChange={(event) => setDraft({ ...draft, label: event.target.value })}
                 />
               </p>
-            ) : null}
-            {draft.kind === 'intervals' ? (
-              <>
-                <p>
-                  <label htmlFor="block-repeats">How many times</label>
-                  <input
-                    id="block-repeats"
-                    name="repeats"
-                    type="text"
-                    inputMode="numeric"
-                    value={draft.repeats}
-                    onChange={(event) => setDraft({ ...draft, repeats: event.target.value })}
-                  />
-                </p>
-                <p>
-                  <label htmlFor="block-easy-minutes">Recovery, minutes</label>
-                  <input
-                    id="block-easy-minutes"
-                    name="easyMinutes"
-                    type="text"
-                    inputMode="decimal"
-                    value={draft.easyMinutes}
-                    onChange={(event) => setDraft({ ...draft, easyMinutes: event.target.value })}
-                  />
-                </p>
-                <p>
-                  <label htmlFor="block-easy-percent">Recovery target, % of threshold</label>
-                  <input
-                    id="block-easy-percent"
-                    name="easyPercent"
-                    type="text"
-                    inputMode="decimal"
-                    value={draft.easyPercent}
-                    onChange={(event) => setDraft({ ...draft, easyPercent: event.target.value })}
-                  />
-                </p>
-              </>
-            ) : null}
-            <p>
-              <label htmlFor="block-label">Label, optional</label>
-              <input
-                id="block-label"
-                name="label"
-                type="text"
-                value={draft.label}
-                onChange={(event) => setDraft({ ...draft, label: event.target.value })}
-              />
-            </p>
-            <Button variant="secondary" type="submit">
-              Add block
-            </Button>
-          </form>
+              <Button variant="secondary" type="submit">
+                Add block
+              </Button>
+            </form>
 
-          <h2>Import a workout</h2>
-          <p>
-            A workout file written by On Your Left. The file is read on this device and never sent
-            anywhere. Files from other training apps are not read yet.
-          </p>
-          <form aria-label="Import a workout" onSubmit={(event) => void onImport(event)}>
+            <h2>Import a workout</h2>
             <p>
-              <label htmlFor="workout-file">Workout file</label>
-              <input id="workout-file" name="file" type="file" accept=".json,application/json" />
+              A workout file written by On Your Left. The file is read on this device and never sent
+              anywhere. Files from other training apps are not read yet.
             </p>
-            <Button variant="secondary" type="submit">
-              Import workout
-            </Button>
-          </form>
+            <form aria-label="Import a workout" onSubmit={(event) => void onImport(event)}>
+              <p>
+                <label htmlFor="workout-file">Workout file</label>
+                <input id="workout-file" name="file" type="file" accept=".json,application/json" />
+              </p>
+              <Button variant="secondary" type="submit">
+                Import workout
+              </Button>
+            </form>
 
-          {fileFault === undefined ? null : (
-            <StatusMessage tone="warning" live>
-              {fileFault}
-            </StatusMessage>
-          )}
-          {fileNote === undefined ? null : (
-            <StatusMessage tone="success" live>
-              {fileNote}
-            </StatusMessage>
-          )}
-        </>
+            {fileFault === undefined ? null : (
+              <StatusMessage tone="warning" live>
+                {fileFault}
+              </StatusMessage>
+            )}
+            {fileNote === undefined ? null : (
+              <StatusMessage tone="success" live>
+                {fileNote}
+              </StatusMessage>
+            )}
+          </>
+        )
       }
     />
   );

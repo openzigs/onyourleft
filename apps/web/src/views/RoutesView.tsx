@@ -14,7 +14,12 @@ import { exportedFrom, ROUTE_FILE_FORMATS, type RouteFileFormat } from '../route
 import type { DownloadableFile } from '../transfer/store-port';
 import { ROUTE_LIST_LIMIT, type RoutePort } from '../routes/store-port';
 import { ROUTES_IMPORT_MEANS } from '../routes/two-importers';
-import { ListDetail, SELECTED_HEADING_ID } from '../shell/ListDetail';
+import {
+  CREATE_HEADING_ID,
+  CreateLink,
+  ListDetail,
+  SELECTED_HEADING_ID,
+} from '../shell/ListDetail';
 import { hrefFor, hrefForSelection, routeById, ROUTE_BUILDER_ROUTE } from '../shell/routes';
 import { useUnits } from '../units/context';
 import { formatDistance, formatSmallDistance, measurementText } from '../units/format';
@@ -318,9 +323,10 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
 
   /*
    * #668: the next step is an action, so it is drawn as a button rather than
-   * left as a link in a sentence — secondary, because the detail pane's
-   * *Import route* is the primary. At the head of the LIST since #670: on one
-   * pane the list comes first, and this is where a phone's first control is.
+   * left as a link in a sentence — secondary, because the primary is the
+   * detail pane's *Import route* or, with a route chosen, the list's own
+   * *Import a route* above this. At the head of the LIST since #670: on one
+   * pane the list comes first, and this is where a phone's first controls are.
    */
   const drawOne = (
     <p>
@@ -369,6 +375,11 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
 
   const list = (
     <>
+      <p>
+        <CreateLink route={routeById('routes')} selection={selected}>
+          Import a route
+        </CreateLink>
+      </p>
       {drawOne}
       {listed}
     </>
@@ -415,28 +426,31 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
       list={list}
       detail={
         <>
-          {chosen}
-          <h2>Import a route</h2>
-          <p>
-            A GPX file from a route planner. The file is read on this device and never sent
-            anywhere.
-          </p>
-          {/*
+          {chosen ?? (
+            <>
+              <h2 id={CREATE_HEADING_ID} tabIndex={-1}>
+                Import a route
+              </h2>
+              <p>
+                A GPX file from a route planner. The file is read on this device and never sent
+                anywhere.
+              </p>
+              {/*
         #232's third criterion. The wording is a constant in
         `routes/two-importers.ts`, shared with the Files screen and the Trainer
         game's empty picker, so one distinction is not explained three ways.
       */}
-          <p>
-            {ROUTES_IMPORT_MEANS} <a href={hrefFor(routeById('transfer'))}>Files</a> is where those
-            go.
-          </p>
-          {/* Named: #670's audit of a populated screen found two unnamed forms. */}
-          <form aria-label="Import a route" onSubmit={(event) => void onImport(event)}>
-            <p>
-              <label htmlFor="route-file">GPX file</label>
-              <input id="route-file" name={FILE_FIELD} type="file" />
-            </p>
-            {/*
+              <p>
+                {ROUTES_IMPORT_MEANS} <a href={hrefFor(routeById('transfer'))}>Files</a> is where
+                those go.
+              </p>
+              {/* Named: #670's audit of a populated screen found two unnamed forms. */}
+              <form aria-label="Import a route" onSubmit={(event) => void onImport(event)}>
+                <p>
+                  <label htmlFor="route-file">GPX file</label>
+                  <input id="route-file" name={FILE_FIELD} type="file" />
+                </p>
+                {/*
           #296. Until this box existed, nothing in this product could produce a
           route with `loop: true` — so the game's lap counting, its wrapped road
           markers and the plan view's "on lap 2" were all correct, all tested
@@ -448,38 +462,34 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
           same car park would start wrapping, a lap of a lake ending 30 m along
           the towpath would not, and neither screen would say which happened.
         */}
-            <p>
-              <label htmlFor="route-loop">{LOOP_CHECKBOX_LABEL}</label>
-              <input id="route-loop" name={LOOP_FIELD} type="checkbox" />
-            </p>
-            {/*
+                <p>
+                  <label htmlFor="route-loop">{LOOP_CHECKBOX_LABEL}</label>
+                  <input id="route-loop" name={LOOP_FIELD} type="checkbox" />
+                </p>
+                {/*
           ⚠️ The threshold is shown in the rider's own units (#238) while the
           refusal quotes the importer's metres, because the refusal's numbers
           come from `packages/domain`, which has no unit preference and must not
           acquire one — a profile is arithmetic and a rider's choice of units is
           a client's. Both name the same distance.
         */}
-            <p>
-              Tick it for a circuit that finishes where it starts, so riding past the finish begins
-              another lap. The file has to close: if its two ends are more than{' '}
-              {measurementText(formatSmallDistance(LOOP_CLOSURE_METRES, units))} apart, nothing is
-              saved and the import says how far apart they are.
-            </p>
-            <Button type="submit">Import route</Button>
-          </form>
-
-          {refusal !== undefined && (
-            <StatusMessage tone="warning" live>
-              {refusal.message}
-            </StatusMessage>
+                <p>
+                  Tick it for a circuit that finishes where it starts, so riding past the finish
+                  begins another lap. The file has to close: if its two ends are more than{' '}
+                  {measurementText(formatSmallDistance(LOOP_CLOSURE_METRES, units))} apart, nothing
+                  is saved and the import says how far apart they are.
+                </p>
+                <Button type="submit">Import route</Button>
+              </form>
+            </>
           )}
-          {saved !== undefined && (
-            <StatusMessage tone="success" live>
-              {saved}
-            </StatusMessage>
-          )}
-          {loadFault !== undefined && <StatusMessage tone="warning">{loadFault}</StatusMessage>}
 
+          {/*
+            Once, whichever of the two is on screen: an edit's refusal and a
+            save are said under the chosen route, an import's under the form,
+            and a delete's under the form the list goes back to. #670's review
+            found this block rendered twice, in two live regions.
+          */}
           {refusal !== undefined && (
             <StatusMessage tone="warning" live>
               {refusal.message}

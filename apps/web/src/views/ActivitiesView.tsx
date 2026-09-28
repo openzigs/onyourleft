@@ -203,7 +203,7 @@ function contentWidth(element: HTMLElement): number {
 
 /** The selected ride, when it is not in the page the list read. */
 type Fetched =
-  | { readonly id: string; readonly kind: 'found'; readonly row: LibraryRow }
+  | { readonly id: string; readonly kind: 'found'; readonly summary: ActivitySummary }
   | { readonly id: string; readonly kind: 'missing' }
   | { readonly id: string; readonly kind: 'failed' };
 
@@ -263,32 +263,44 @@ export function ActivitiesView({ library, selected }: ActivitiesViewProps): JSX.
     inPage === undefined &&
     (state.kind === 'ready' || state.kind === 'failed');
   const [fetched, setFetched] = useState<Fetched | undefined>(undefined);
+  /*
+   * ⚠️ ONCE per selected id (and once more after a delete reloads the list),
+   * which `store-port.ts` §`getActivity` promises and #670's review found
+   * broken: with the load state in this effect's dependencies, every sort
+   * change passed through `loading` and back and read the ride — original
+   * file bytes included — again. The key is what has been asked for; the
+   * row is derived at render, so a change of units needs no read either.
+   */
+  const asked = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (!readAlone || library === undefined || selected === undefined) {
-      return undefined;
+      return;
     }
-    let live = true;
+    const key = `${String(reloads)}\u0000${selected}`;
+    if (asked.current === key) {
+      return;
+    }
+    asked.current = key;
+    const settleWith = (next: Fetched): void => {
+      // Only the newest question's answer is shown: a slow read for a ride
+      // the rider has already moved on from is dropped.
+      if (asked.current === key) {
+        setFetched(next);
+      }
+    };
     library.store.getActivity(library.athleteId, selected as ActivityId).then(
-      (record) => {
-        if (live) {
-          setFetched(
-            record === undefined
-              ? { id: selected, kind: 'missing' }
-              : { id: selected, kind: 'found', row: rowFor(record, units) },
-          );
-        }
+      (summary) => {
+        settleWith(
+          summary === undefined
+            ? { id: selected, kind: 'missing' }
+            : { id: selected, kind: 'found', summary },
+        );
       },
       () => {
-        if (live) {
-          setFetched({ id: selected, kind: 'failed' });
-        }
+        settleWith({ id: selected, kind: 'failed' });
       },
     );
-    return () => {
-      live = false;
-    };
-    // `state` is here so a reload — after a delete — reads the ride again.
-  }, [readAlone, library, selected, units, state]);
+  }, [readAlone, library, selected, reloads]);
 
   const remove = useCallback(
     async (id: string): Promise<void> => {
@@ -507,12 +519,17 @@ export function ActivitiesView({ library, selected }: ActivitiesViewProps): JSX.
     </div>
   );
 
-  const shown: Fetched | { readonly kind: 'found'; readonly row: LibraryRow } | undefined =
+  const shown:
+    | { readonly kind: 'found'; readonly row: LibraryRow }
+    | { readonly kind: 'missing' | 'failed' }
+    | undefined =
     inPage !== undefined
       ? { kind: 'found', row: inPage }
-      : fetched?.id === selected
-        ? fetched
-        : undefined;
+      : fetched?.id !== selected || fetched === undefined
+        ? undefined
+        : fetched.kind === 'found'
+          ? { kind: 'found', row: rowFor(fetched.summary, units) }
+          : fetched;
 
   return (
     <ListDetail

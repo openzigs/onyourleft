@@ -20,8 +20,11 @@
  * - **The URL round-trips**: a FRESH page opened at a selection shows that
  *   item, and at an id the device does not hold says "not found".
  * - **Each primary action's place** is published at all four viewports #670
- *   names, with its margin to the fold; see {@link PRIMARY_ON_ARRIVAL} for
- *   which are required above it and why the rest cannot be.
+ *   names, with its margin to the fold, on arrival AND with the item selected;
+ *   see {@link PRIMARY_ON_ARRIVAL} and {@link PRIMARY_WHEN_SELECTED} for which
+ *   are required above it and why the rest cannot be.
+ * - **Rotating** from two panes to one with focus on a list link moves focus
+ *   to the chosen item's heading rather than dropping it to `<body>`.
  *
  * ## The control
  *
@@ -100,21 +103,46 @@ const LIST_DETAIL = ALL_ROUTES.filter((route) => route.layout === 'list-detail')
  *   and summary and the pane's heading already fill the 256 px (it starts at
  *   y ≈ 426).
  * - **Routes** on the tablet both ways up. On a phone the one pane puts the
- *   list first — the way into drawing a route, then the saved routes — and
- *   the import's button ends a form with a file box, a tick box and a
- *   paragraph on closing a loop: about 1,200 px down against a 781 px fold.
- *   The phone's FIRST control, *Draw a route on this device*, is at y ≈ 311.
+ *   list first — the ways into importing and drawing a route, then the saved
+ *   routes — and the import's button ends a form with a file box, a tick box
+ *   and a paragraph on closing a loop: about 1,260 px down against a 781 px
+ *   fold. The phone's FIRST control is the list's *Import a route*, which
+ *   moves focus to that form (`shell/ListDetail.tsx` §`CreateLink`).
  * - **Workouts** on the tablet both ways up, since #670 put the workout, its
  *   name and *Save workout* ahead of the block form (below it, the button was
- *   72 px under the landscape fold). On a phone, after the one-pane list, it
- *   ends 65 px above the fold in this Chromium on a Mac — and the CI runner's
- *   fonts put this page's text about 50 px lower, which is too near the line
- *   to hold.
+ *   72 px under the landscape fold). On a phone, after the one-pane list —
+ *   headed since #670's review by *Build a workout*, which moves focus to the
+ *   builder — it ends about 4 px above the fold in this Chromium on a Mac, and
+ *   the CI runner's fonts put this page's text about 50 px lower.
  */
 const PRIMARY_ON_ARRIVAL: Readonly<Record<string, readonly string[]>> = {
   activities: [TABLET_IN_THE_SHELL.name, TABLET_UPRIGHT.name, PHONE.name],
   routes: [TABLET_IN_THE_SHELL.name, TABLET_UPRIGHT.name],
   workouts: [TABLET_IN_THE_SHELL.name, TABLET_UPRIGHT.name],
+};
+
+/**
+ * Where every primary on screen is REQUIRED to clear the fold WITH THE
+ * FIXTURE'S ITEM SELECTED — #670's review (N1), which found this state never
+ * measured and *Save workout* 48 px from the tablet's fold, *Import route*
+ * 413 px under it. Since then a chosen item has the detail pane to itself:
+ * the form that was under it is reached from the head of the list, where the
+ * list's *Import a route* / *Build a workout* is the pane's one primary
+ * (`shell/ListDetail.tsx` §`CreateLink`).
+ *
+ * Held at the two-pane tablet, where the insets are the shell's, for all
+ * three; and for Activities on one pane too, where *Open ride details* ends
+ * 665 px above the upright tablet's fold and 180 px above a phone's (measured
+ * on #670's review branch, on a Mac). On one pane the list is hidden with an
+ * item chosen, so Routes and Workouts have NO primary on screen: the item's
+ * own actions — download, change, export, delete — are all secondary (#668),
+ * and the way back to the form is the one-pane back link to the list. That is
+ * published as "no primary on screen", not held.
+ */
+const PRIMARY_WHEN_SELECTED: Readonly<Record<string, readonly string[]>> = {
+  activities: [TABLET_IN_THE_SHELL.name, TABLET_UPRIGHT.name, PHONE.name],
+  routes: [TABLET_IN_THE_SHELL.name],
+  workouts: [TABLET_IN_THE_SHELL.name],
 };
 
 async function open(page: Page, viewport: Viewport, query = 'data=populated'): Promise<void> {
@@ -337,33 +365,60 @@ test.describe('#670 — a selection in the URL', () => {
       const wide = await visit(page, route, hash);
       expect(wide.listDetail?.panes).toBe('2');
       const title = await page.locator('#oyl-selected-heading').textContent();
+      // Focus on a list link, which the rotation is about to hide (N4).
+      await page.locator('[data-oyl-pane="list"] a[data-oyl-select]').first().focus();
       await page.setViewportSize({ width: 800, height: 1280 });
       await expect(page.locator('[data-oyl-panes]')).toHaveAttribute('data-oyl-panes', '1');
       await expect(page.locator('[data-oyl-pane="detail"] #oyl-selected-heading')).toHaveText(
         title ?? '',
       );
+      await expect(
+        page.locator('[data-oyl-pane="detail"] #oyl-selected-heading'),
+        `${route.id}: focus did not follow the chosen item when the list was hidden`,
+      ).toBeFocused();
       expect(new URL(page.url()).hash).toBe(hash);
     }
   });
 });
 
-test.describe('#670 — each primary action’s place on arrival, published', () => {
+test.describe('#670 — each primary action’s place, published', () => {
   for (const viewport of [TABLET_IN_THE_SHELL, TABLET_UPRIGHT, PHONE, REFLOW]) {
-    test(`at ${viewport.name}`, async ({ page }) => {
+    test(`at ${viewport.name}, on arrival and with an item selected`, async ({ page }) => {
       await open(page, viewport);
       const margin = viewport.insets === NO_INSETS ? 0 : FOLD_MARGIN_PIXELS;
       const lines: string[] = [];
       const faults: string[] = [];
       for (const route of LIST_DETAIL) {
-        const seen = await visit(page, route, hrefFor(route));
-        lines.push(...primaryLines(route, viewport, seen));
+        const arrival = await visit(page, route, hrefFor(route));
+        lines.push(...primaryLines(route, viewport, arrival).map((line) => `${line} [arrival]`));
         if ((PRIMARY_ON_ARRIVAL[route.id] ?? []).includes(viewport.name)) {
-          const first = seen.primaries[0];
-          if (first === undefined || seen.fold - first.bottom <= margin) {
+          const first = arrival.primaries[0];
+          if (first === undefined || arrival.fold - first.bottom <= margin) {
             faults.push(
               `${route.id} @ ${viewport.name}: its primary must clear the fold by more than ` +
-                `${String(margin)} px — ${primaryLines(route, viewport, seen).join('; ')}`,
+                `${String(margin)} px — ${primaryLines(route, viewport, arrival).join('; ')}`,
             );
+          }
+        }
+
+        const selected = await visit(
+          page,
+          route,
+          hrefForSelection(route, await selectionOf(page, route)),
+        );
+        lines.push(...primaryLines(route, viewport, selected).map((line) => `${line} [selected]`));
+        if ((PRIMARY_WHEN_SELECTED[route.id] ?? []).includes(viewport.name)) {
+          if (selected.primaries.length === 0) {
+            faults.push(`${route.id} @ ${viewport.name}, selected: no primary on screen`);
+          }
+          for (const primary of selected.primaries) {
+            if (selected.fold - primary.bottom <= margin) {
+              faults.push(
+                `${route.id} @ ${viewport.name}, selected: “${primary.text}” must clear the fold ` +
+                  `by more than ${String(margin)} px — ` +
+                  primaryLines(route, viewport, selected).join('; '),
+              );
+            }
           }
         }
       }

@@ -35,15 +35,37 @@
  *   heading. Not on first render: a reload or a shared link leaves focus where
  *   the browser put it, `AppShell`'s own rule.
  * - Going back to no selection moves focus to the list link of the item that
- *   WAS selected (`data-oyl-select`), so a keyboard user is where they left.
- * - A skip link at the head of the list pane moves focus to the detail pane
- *   when both are on screen, so a keyboard user need not tab through forty
- *   rides. Each pane is also a region with its own name.
+ *   WAS selected (`data-oyl-select`), so a keyboard user is where they left —
+ *   unless it was a link carrying {@link CREATE_ATTRIBUTE} that let it go
+ *   ("Import a route", "Build a workout"), in which case focus moves to the
+ *   element with id {@link CREATE_HEADING_ID}: the rider asked for the form,
+ *   not for the item they had been looking at.
+ * - Rotating from two panes to one with an item chosen hides the list. If
+ *   focus was in it — on a list link, say — it would otherwise fall to
+ *   `<body>`, so it moves to the chosen item's heading, which is what the one
+ *   pane now shows. With nothing chosen the list stays, and so does focus.
+ * - At two panes a skip link at the head of the list pane moves focus to the
+ *   detail pane, so a keyboard user need not tab through forty rides. It goes
+ *   ONE way: from the detail, the list is where Shift+Tab already leads, and
+ *   at one pane there is only one pane to be in. Each pane is also a region
+ *   with its own name.
+ *
+ * ## History
+ *
+ * Every selection is a link, so at BOTH widths choosing an item pushes a
+ * history entry and back steps through the items chosen before it. That is
+ * deliberate, not a side effect: each selection is an address a rider can
+ * reload or share, a middle-click on a list link opens that item in a new tab,
+ * and a window that rotates from two panes to one keeps a history whose back
+ * button means the same thing either way. `replace` at two panes would need
+ * every list link to intercept its own click, and back would then leave the
+ * screen from a tablet but return to the list from a phone.
  */
 
 import {
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type JSX,
@@ -51,7 +73,7 @@ import {
   type ReactNode,
 } from 'react';
 
-import { hrefFor, type RouteDefinition } from './routes';
+import { hrefFor, hrefForSelection, type RouteDefinition } from './routes';
 
 /** The custom property `theme.css` declares the two-pane width in. */
 export const LIST_DETAIL_FROM_PROPERTY = '--oyl-list-detail-from';
@@ -64,6 +86,16 @@ export const SELECTED_HEADING_ID = 'oyl-selected-heading';
 
 /** The attribute a list link carries, naming the item it selects. */
 export const SELECT_ATTRIBUTE = 'data-oyl-select';
+
+/**
+ * The attribute a link carries when following it lets go of the selection in
+ * order to show what the detail pane holds with nothing chosen — a builder or
+ * an import form. Focus then moves to {@link CREATE_HEADING_ID}.
+ */
+export const CREATE_ATTRIBUTE = 'data-oyl-create';
+
+/** The id of the heading of what the detail pane holds with nothing chosen. */
+export const CREATE_HEADING_ID = 'oyl-create-heading';
 
 /** The media query two panes need, or `undefined` where it cannot be read. */
 function twoPaneQuery(): string | undefined {
@@ -146,6 +178,9 @@ export function ListDetail({
   const started = useRef(false);
   const focusDetail = useRef(false);
   const focusItem = useRef<string | undefined>(undefined);
+  const createPressed = useRef(false);
+  const focusCreate = useRef(false);
+  const wasTwo = useRef(two);
 
   useEffect(() => {
     if (!started.current) {
@@ -157,14 +192,41 @@ export function ListDetail({
       return;
     }
     if (selection === undefined) {
-      focusItem.current = previous.current;
+      focusCreate.current = createPressed.current;
+      focusItem.current = createPressed.current ? undefined : previous.current;
       focusDetail.current = false;
     } else {
       focusDetail.current = true;
       focusItem.current = undefined;
+      focusCreate.current = false;
     }
+    createPressed.current = false;
     previous.current = selection;
   }, [selection]);
+
+  // Two panes to one: a list that has just been hidden takes focus with it.
+  // A layout effect, so focus is read before the browser's own fix-up moves
+  // it to `<body>`.
+  useLayoutEffect(() => {
+    const rotatedToOne = wasTwo.current && !two;
+    wasTwo.current = two;
+    if (!rotatedToOne || selection === undefined) {
+      return;
+    }
+    // Only focus that WAS in the list: a rider who had focused nothing is
+    // not handed a focused heading by turning the tablet.
+    const active = document.activeElement;
+    if (active === null || listRef.current?.contains(active) !== true) {
+      return;
+    }
+    const heading = detailRef.current?.querySelector(`#${SELECTED_HEADING_ID}`);
+    if (heading instanceof HTMLElement) {
+      heading.focus();
+    } else {
+      // The heading has not arrived yet; the every-render effect waits for it.
+      focusDetail.current = true;
+    }
+  }, [two, selection]);
 
   // Every render: the detail may arrive after a read, and the list after a load.
   useEffect(() => {
@@ -172,6 +234,13 @@ export function ListDetail({
       const heading = detailRef.current?.querySelector(`#${SELECTED_HEADING_ID}`);
       if (heading instanceof HTMLElement) {
         focusDetail.current = false;
+        heading.focus();
+      }
+    }
+    if (focusCreate.current) {
+      const heading = detailRef.current?.querySelector(`#${CREATE_HEADING_ID}`);
+      if (heading instanceof HTMLElement) {
+        focusCreate.current = false;
         heading.focus();
       }
     }
@@ -195,11 +264,28 @@ export function ListDetail({
     detailRef.current?.focus();
   }
 
-  const detailId = `${listHeadingId}-detail`;
+  function noteCreate(event: MouseEvent<HTMLDivElement>): void {
+    if (event.target instanceof Element && event.target.closest(`[${CREATE_ATTRIBUTE}]`) !== null) {
+      createPressed.current = true;
+    }
+  }
+
+  /*
+   * The skip link's href is this page's OWN address, not a fragment naming the
+   * pane: the shell routes on the hash (`AppShell` §"The skip link cannot be an
+   * ordinary fragment link"), so `#<pane id>` opened in a new tab — a middle
+   * click — was the not-found page. A plain click is prevented and moves focus
+   * itself, as the shell's own skip link does; any other way of following it
+   * opens this same list and item.
+   */
+  const here = selection === undefined ? hrefFor(route) : hrefForSelection(route, selection);
   return (
+    // The capture listener is not an interaction: it only NOTES that a create
+    // link was followed. Enter on a link fires `click`, so a keyboard counts.
     <div
       className={two ? 'oyl-list-detail oyl-list-detail--two' : 'oyl-list-detail'}
       data-oyl-panes={two ? '2' : '1'}
+      onClickCapture={noteCreate}
     >
       <section
         className="oyl-list-detail__list"
@@ -209,7 +295,7 @@ export function ListDetail({
         ref={listRef}
       >
         {two ? (
-          <a className="oyl-pane-skip" href={`#${detailId}`} onClick={skipToDetail}>
+          <a className="oyl-pane-skip" href={here} onClick={skipToDetail}>
             Skip to {detailLabel.toLowerCase()}
           </a>
         ) : null}
@@ -218,7 +304,6 @@ export function ListDetail({
       </section>
       <section
         className="oyl-list-detail__detail"
-        id={detailId}
         aria-label={detailLabel}
         data-oyl-pane="detail"
         tabIndex={-1}
@@ -233,5 +318,48 @@ export function ListDetail({
         {detail}
       </section>
     </div>
+  );
+}
+
+export interface CreateLinkProps {
+  /** The list route: following the link lets go of the selection. */
+  readonly route: RouteDefinition;
+  readonly selection: string | undefined;
+  /** What the link says, e.g. "Import a route". */
+  readonly children: ReactNode;
+}
+
+/**
+ * The way to what the detail pane holds with nothing chosen — a builder or an
+ * import form — from the head of the list pane. #670's review (N1).
+ *
+ * With an item chosen that form is not on screen, and this is the pane's one
+ * primary: following it lets go of the selection and {@link ListDetail} moves
+ * focus to the form's heading ({@link CREATE_HEADING_ID}). With nothing
+ * chosen the form IS on screen and its own submit is the primary, so this is
+ * secondary and moves focus to the form without changing the route — on a
+ * phone's one pane the form is under the whole list.
+ *
+ * Rendered in both states, so choosing an item does not move the list under
+ * the pointer that chose it: only the emphasis changes.
+ */
+export function CreateLink({ route, selection, children }: CreateLinkProps): JSX.Element {
+  const chosen = selection !== undefined;
+  function jumpToForm(event: MouseEvent<HTMLAnchorElement>): void {
+    const heading = document.getElementById(CREATE_HEADING_ID);
+    if (heading !== null) {
+      event.preventDefault();
+      heading.focus();
+    }
+  }
+  return (
+    <a
+      className={chosen ? 'oyl-button' : 'oyl-button oyl-button--secondary'}
+      href={hrefFor(route)}
+      data-oyl-create=""
+      onClick={chosen ? undefined : jumpToForm}
+    >
+      {children}
+    </a>
   );
 }
