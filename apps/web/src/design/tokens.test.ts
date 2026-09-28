@@ -58,7 +58,7 @@ describe('the dark palette (#672)', () => {
     // Every themed token differs, so a dark block that quietly repeated a
     // light value would be seen here rather than as a light patch on a dark page.
     const same = Object.entries(DARK_COLOUR_TOKENS).filter(
-      ([token, value]) => COLOUR_TOKENS[token as keyof typeof COLOUR_TOKENS] === value,
+      ([token, value]) => (COLOUR_TOKENS as Record<string, string>)[token] === value,
     );
     expect(same).toEqual([]);
   });

@@ -23,6 +23,7 @@ import { POSE_DIRECTORY, POSE_WORKER_CHUNK } from './src/camera/pose-files';
 import { copiedIntoBuild } from './tools/notices/copied-into-build';
 import { basisTranscoder } from './tools/basis/transcoder-plugin';
 import { poseRuntime } from './tools/pose/pose-runtime-plugin';
+import { themeSelection } from './tools/theme/theme-selection-plugin';
 import { cacheVersion, precacheEntries, type PrecacheFile } from './tools/precache/precache';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
@@ -184,7 +185,14 @@ export default defineConfig({
   // out of the pinned `three` into `realistic/basis/` — excluded from the
   // precache by the realistic set's own rule — and `KTX2Loader`'s default
   // URLs taken out, which would otherwise put it in `assets/` and the precache.
-  plugins: [react(), poseRuntime(), basisTranscoder(), serviceWorker(), copiedIntoBuild(ROOT)],
+  plugins: [
+    react(),
+    themeSelection(),
+    poseRuntime(),
+    basisTranscoder(),
+    serviceWorker(),
+    copiedIntoBuild(ROOT),
+  ],
   worker: {
     rolldownOptions: {
       output: {
