@@ -177,8 +177,8 @@ function reflowFaults(
  * made that stop 25 minutes and the gate's own 840 s, and the whole dark set
  * came back. What it costs is six cases here and in `controls-first` (every
  * viewport but 320×256 and the phone): about 5.7 s each and 17 s of wall time
- * over two workers locally, and about 50 s of summed test time on that CI run.
- * CLAUDE.md §4f records the job and gate times it costs on the runner.
+ * over two workers locally, and 38.7 s summed on the runner (run 36427026037).
+ * CLAUDE.md §4f records the job and gate times it was measured at.
  */
 
 for (const theme of THEMES) {
