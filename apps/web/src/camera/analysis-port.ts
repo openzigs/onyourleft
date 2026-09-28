@@ -116,15 +116,23 @@ export const ANALYSIS_PROMPTS: Readonly<Record<AnalysisQuestion, string>> = {
   // names are `side-analysis-port.ts` §`SIDE_POSE_LANDMARKS`, in that order;
   // `computer-pose.test.ts` holds this text to that list, so a tenth landmark
   // there is a red test here rather than a question nobody asks.
+  //
+  // ⚠️ **#761: the question does not say a rider is there.** It used to open
+  // "This picture shows a person riding a bicycle…", which presupposes the
+  // answer, and on spike 0016 §5.4's twelve pictures of nobody not one answer
+  // said `{"rider":false}`. It now asks first, and says what to answer when
+  // unsure. `computer-pose.test.ts` holds the opening to that.
   'side-pose':
-    'This picture shows a person riding a bicycle on an indoor trainer, filmed from the side. ' +
-    'Find the side of their body nearest the camera. Reply with JSON only, with no other text, ' +
+    'First decide whether this picture shows a person riding a bicycle, filmed from the side. ' +
+    'It may show nobody at all: an empty room, a blank picture or noise. If it does not clearly ' +
+    'show a person on a bicycle, or you are not sure, reply with JSON only: {"rider":false} ' +
+    'Only if it clearly does, find the side of their body nearest the camera and reply with ' +
+    'JSON only, with no other text, ' +
     'in exactly this form: {"rider":true,"nearSide":"left","landmarks":{"ear":[x,y],' +
     '"shoulder":[x,y],"elbow":[x,y],"wrist":[x,y],"hip":[x,y],"knee":[x,y],"ankle":[x,y],' +
     '"heel":[x,y],"toe":[x,y]}} where x and y are the point as fractions of the picture from its ' +
     'top-left corner, each between 0 and 1, "toe" is the tip of the shoe, "nearSide" is the ' +
-    'person’s own left or right, and a point you cannot see is null. If nobody is riding in the ' +
-    'picture, reply {"rider":false}',
+    'person’s own left or right, and a point you cannot see is null.',
 };
 
 /** One picture and one question, which is everything the port is given. */

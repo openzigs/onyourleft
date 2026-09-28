@@ -87,7 +87,8 @@ export interface SidePose {
  *
  * - `pose` — a rider, with at least `framing.ts` §`MINIMUM_SHARED_LANDMARKS`
  *   landmarks the model was sure of.
- * - `no-rider` — the picture was looked at and nobody usable was in it.
+ * - `no-rider` — the picture was looked at and nobody usable was in it, for
+ *   the {@link NoRiderCause} it carries.
  * - `unreadable` — the picture could not be decoded, or the model failed on
  *   it. The next one is tried.
  * - `unavailable` — the model could not be loaded at all. Nothing more is
@@ -95,9 +96,28 @@ export interface SidePose {
  */
 export type SidePoseOutcome =
   | { readonly kind: 'pose'; readonly pose: SidePose }
-  | { readonly kind: 'no-rider' }
+  | { readonly kind: 'no-rider'; readonly cause: NoRiderCause }
   | { readonly kind: 'unreadable' }
   | { readonly kind: 'unavailable' };
+
+/**
+ * Why a picture came to `no-rider` — [#761](https://github.com/openzigs/onyourleft/issues/761).
+ *
+ * Until #761 these were one outcome, so "the model said nobody" and "the model
+ * said somebody and placed nothing" could not be told apart — and on spike
+ * 0016's pictures with nobody in them, every one of the rider's computer's
+ * answers was the second, never the first.
+ *
+ * - `said-nobody` — the model said nobody was there: the computer answered
+ *   `{"rider":false}`, or the tablet's model found no person at all.
+ * - `too-few-points` — the model said somebody was there and placed too few
+ *   points to use: fewer than `framing.ts` §`MINIMUM_SHARED_LANDMARKS`, or,
+ *   from the computer, fewer than `pose-plausibility.ts` checks.
+ * - `implausible` — the computer placed the points, and they could not be a
+ *   person on a bicycle (`pose-plausibility.ts`). The tablet's model is not
+ *   held to that check and never answers this.
+ */
+export type NoRiderCause = 'said-nobody' | 'too-few-points' | 'implausible';
 
 /** A pose model the tablet runs. */
 export interface SidePoseEstimator {
@@ -142,6 +162,8 @@ export interface SideAnalysisState {
   readonly posed: number;
   /** Pictures looked at with nobody usable in them. */
   readonly noRider: number;
+  /** {@link noRider}, by why (#761). The three always sum to it. */
+  readonly noRiderBecause: Readonly<Record<NoRiderCause, number>>;
   /** Pictures that could not be read. */
   readonly unreadable: number;
   /** Pictures dropped unexamined because a newer one arrived while the model was busy (D-6). */

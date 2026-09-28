@@ -251,6 +251,7 @@ export class SideAnalysis implements SideAnalysisPort {
     model: 'waiting',
     posed: 0,
     noRider: 0,
+    noRiderBecause: { 'said-nobody': 0, 'too-few-points': 0, implausible: 0 },
     unreadable: 0,
     skipped: 0,
     framing: 'checking',
@@ -383,7 +384,14 @@ export class SideAnalysis implements SideAnalysisPort {
         this.#check();
         return;
       case 'no-rider':
-        this.#set({ model: 'ready', noRider: this.#state.noRider + 1 });
+        this.#set({
+          model: 'ready',
+          noRider: this.#state.noRider + 1,
+          noRiderBecause: {
+            ...this.#state.noRiderBecause,
+            [outcome.cause]: this.#state.noRiderBecause[outcome.cause] + 1,
+          },
+        });
         return;
       case 'unreadable':
         this.#set({ model: 'ready', unreadable: this.#state.unreadable + 1 });
