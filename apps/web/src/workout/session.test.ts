@@ -734,6 +734,38 @@ describe('a target the ride controller held back — #721, #724', () => {
   });
 });
 
+describe('a target held back by one of the game handle’s holds — #729', () => {
+  // Unreachable from a workout today (`gatedTargets` throws only
+  // `'forget-running'`), but if one arrives the rider reads a sentence, not
+  // the controller's log reason, and not that the trainer was let go.
+  it.each([
+    [
+      'letting-go-to-forget',
+      'That target was held back: this app asked the trainer to let go so it can be forgotten.',
+    ],
+    ['let-go', 'No more targets are being sent: this app has stopped driving the trainer.'],
+  ] as const)('words %s for the rider', async (hold, sentence) => {
+    const { trainer } = await loop();
+    const reason = 'the ride controller has let the trainer go';
+    const session = createWorkoutSession({
+      timeline: expandWorkout(workout([steady(60, 1.0)])),
+      thresholdPower: THRESHOLD,
+      powerFloor: watts(FLOOR_WATTS),
+      control: {
+        setTargetPower: () => Promise.reject(new TargetHeldBack(hold, reason)),
+        stop: () => trainer.control.stop(),
+        letGo: () => trainer.control.letGo(),
+      },
+    });
+    session.start(seconds(0));
+    session.tick(seconds(0));
+    await flush();
+    const fault = session.state().lastFault;
+    expect(fault).toBe(sentence);
+    expect(fault).not.toMatch(/has let|let the trainer go|released|refused/);
+  });
+});
+
 describe('an acknowledged, unchanged target is written once — #542', () => {
   // ⚠️ Validation 0002 Part S, 2026-09-25: `05 C8 00` written fourteen times in
   // sixteen seconds, every one acknowledged `80 05 01`. The player refreshed an

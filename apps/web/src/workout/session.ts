@@ -433,6 +433,14 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
 export const RELEASE_INCOMPLETE =
   'The trainer did not confirm it let go. It may still be holding resistance — ease off and check before you get off.';
 
+/** A target held back while the trainer is let go so it can be forgotten (#729). */
+const HELD_WHILE_LETTING_GO =
+  'That target was held back: this app asked the trainer to let go so it can be forgotten.';
+
+/** A target held back once the ride controller was disposed (#729). Says nothing about resistance. */
+const HELD_AFTER_LETTING_GO =
+  'No more targets are being sent: this app has stopped driving the trainer.';
+
 /**
  * What a rider is told about a refused write.
  *
@@ -449,8 +457,23 @@ function faultText(error: unknown): string {
   // FIRST since #724: checked after the substrings below, a reworded reason
   // that happened to say "timed out" would have been told as a machine that
   // did not answer.
+  //
+  // #729's review: only `'forget-running'` reaches this today — the workout's
+  // targets go through `ride/controller.ts` §`gatedTargets`, which throws no
+  // other kind. The other two are the game handle's, and their messages are
+  // log sentences ("the ride controller has let the trainer go"), so a
+  // session that ever received one says its own words rather than the reason,
+  // and neither claims the release completed: both are thrown while its Stop
+  // may still be in flight, and it may be refused.
   if (error instanceof TargetHeldBack) {
-    return error.message;
+    switch (error.hold) {
+      case 'forget-running':
+        return error.message;
+      case 'letting-go-to-forget':
+        return HELD_WHILE_LETTING_GO;
+      case 'let-go':
+        return HELD_AFTER_LETTING_GO;
+    }
   }
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes('control-not-permitted') || message.includes('Control Not Permitted')) {

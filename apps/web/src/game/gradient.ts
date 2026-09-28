@@ -274,19 +274,35 @@ const HELD_FOR_A_FORGET =
 /**
  * This trainer is being let go so it can be forgotten — #728. Promises nothing
  * about the next gradient: once the forget goes through the trainer is gone.
+ *
+ * ⚠️ Claims only what the app did — held THIS gradient back and ASKED for the
+ * release — because the fault outlives the hold (#729's review). The hold is
+ * thrown only while the Stop is on the wire, but the sentence stays on screen
+ * until the next sample replaces it, and by then the Stop may have landed or
+ * been refused. "The trainer is being let go" was false in the second case,
+ * where the machine may still be holding resistance and
+ * `ride/controller.ts` §`unpair` tells the rider so.
  */
 const HELD_WHILE_LETTING_GO =
-  'The hills are not being sent: the trainer is being let go so it can be forgotten.';
+  'That gradient was held back: this app asked the trainer to let go so it can be forgotten.';
 
 /**
- * The ride controller has let the trainer go — #728, #695. Permanent, so it
- * promises nothing either. ⚠️ Nothing in production disposes the controller
- * today (it lives as long as the page), so a rider is not expected to read
- * this; it is worded truthfully all the same, because the fallback said the
- * trainer refused a gradient it never received.
+ * The ride controller was disposed and will write nothing again — #728, #695.
+ * Permanent, so it promises nothing either. ⚠️ Nothing in production disposes
+ * the controller today (it lives as long as the page), so a rider is not
+ * expected to read this; it is worded truthfully all the same, because the
+ * fallback said the trainer refused a gradient it never received.
+ *
+ * ⚠️ **It says nothing about resistance, on purpose** (#729's review). The
+ * hold is thrown from the moment `dispose()` is called, while its Stop is
+ * still on the wire, and the Stop can be refused — so "this app has let the
+ * trainer go" would tell a rider on a machine that may still be holding
+ * resistance that it had been released, which is the one thing
+ * {@link RELEASE_INCOMPLETE_ROAD} exists to warn about. What is true in every
+ * one of those states is that this app has stopped driving the trainer.
  */
 const HELD_AFTER_LETTING_GO =
-  'The hills are no longer being sent: this app has let the trainer go.';
+  'The hills are no longer being sent: this app has stopped driving the trainer.';
 
 /**
  * What a rider is told about a refused gradient.

@@ -86,11 +86,11 @@ const HELD_BACK =
 
 /** What a rider is told while the trainer is being let go to be forgotten (#728). */
 const HELD_WHILE_LETTING_GO =
-  'The hills are not being sent: the trainer is being let go so it can be forgotten.';
+  'That gradient was held back: this app asked the trainer to let go so it can be forgotten.';
 
-/** What a rider is told once the ride controller has let the trainer go (#728). */
+/** What a rider is told once the ride controller was disposed (#728, #729). */
 const HELD_AFTER_LETTING_GO =
-  'The hills are no longer being sent: this app has let the trainer go.';
+  'The hills are no longer being sent: this app has stopped driving the trainer.';
 
 /** The fault a session reports when its one gradient is refused with `error`. */
 async function faultFor(error: Error): Promise<string> {
@@ -400,6 +400,9 @@ describe('a gradient session drives a trainer from a route', () => {
       for (const hold of ['letting-go-to-forget', 'let-go'] as const) {
         const text = await faultFor(new TargetHeldBack(hold, 'held'));
         expect(text).not.toMatch(/sent again|refused/);
+        // #729's review: each is on screen while the release's Stop is in
+        // flight and after it was refused, so neither says it completed.
+        expect(text).not.toMatch(/has let|is being let go|let the trainer go|released/);
       }
     });
 
