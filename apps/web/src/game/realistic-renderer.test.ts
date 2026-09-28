@@ -887,8 +887,9 @@ describe('a tree is one material a level, its scan’s materials its layers — 
     expect(fragment).not.toContain('mapN.xy *= normalScale;');
     // #619's bias, as a gradient scale: 2^bias moves the level by exactly bias.
     expect(fragment).toContain('float oylGrow = exp2(oylTextureLodBias);');
-    expect(fragment).toContain('vec2 oylDx = dFdx(uv) * oylGrow;');
-    expect(fragment).toContain('vec2 oylDy = dFdy(uv) * oylGrow;');
+    // In BOTH helpers — the colour read's and the normal read's.
+    expect(fragment.split('vec2 oylDx = dFdx(uv) * oylGrow;')).toHaveLength(3);
+    expect(fragment.split('vec2 oylDy = dFdy(uv) * oylGrow;')).toHaveLength(3);
     // Bark keeps every fragment; the leaves are cut.
     expect(fragment).toContain('if ( oylLayerCut[ oylLayerOf() ] < 0.5 ) diffuseColor.a = 1.0;');
     expect(uniforms['oylLayerCut']?.value).toEqual([0, 1]);
