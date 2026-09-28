@@ -11,14 +11,16 @@
  *
  * ## Sizes, and which criterion
  *
- * Both are 44×44 CSS px at least — the mute is an `.oyl-button`, which declares
- * that (#316), and the slider declares the same floor in `theme.css`
- * §`.oyl-sound`. ⚠️ Since #669 the MUTE is 48×48: it is a ride-time control
- * on the owner's list (`design/ride-time-controls.ts`), so it carries
- * `size="ride"`; the slider stays at 44. That clears **SC 2.5.8 (Target Size (Minimum), Level AA),
- * which is 24×24**, with room, and it is **SC 2.5.5 (Enhanced, AAA)**'s 44 —
- * chosen for gloves on a handlebar, not read off a table. The browser gate
- * measures both the three ways #316 does (`hud.browser.spec.ts`).
+ * The MUTE is 48×48 CSS px at least since #669: it is a ride-time control on
+ * the owner's list (`design/ride-time-controls.ts`, the ruling of
+ * 2026-09-27), so it carries `size="ride"` — Android's 48 dp, which is not a
+ * WCAG number. The SLIDER stays 44×44, the floor `.oyl-button` declares
+ * (#316) and `theme.css` §`.oyl-sound` repeats for it. 44 is **SC 2.5.5
+ * (Target Size (Enhanced), AAA)**; ⚠️ not SC 2.5.8, which is the AA criterion
+ * and is 24×24, and which both sizes clear with room. Neither was read off a
+ * table: they are for gloves on a handlebar. The browser gate measures the
+ * two the three ways #316 does (`hud.browser.spec.ts`, and
+ * `ride-targets.browser.spec.ts` for the mute's 48).
  *
  * ## One name each, and a state
  *

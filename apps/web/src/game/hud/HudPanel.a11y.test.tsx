@@ -375,6 +375,12 @@ describe('the mid-ride controls are usable with gloves on', () => {
     mounted = await mount(inRideScreen(<HudPanel {...props({})} paused />));
 
     expect(document.body.textContent).toContain('Resume');
+    // #710's review: Resume is on the ride-time list too, and is the same
+    // element, so it wears the same declared size while paused.
+    const resume = [...document.querySelectorAll<HTMLElement>('.oyl-hud__control')].find(
+      (each) => each.textContent === 'Resume',
+    );
+    expect(resume?.classList.contains(RIDE_SIZE_CLASS), resume?.outerHTML).toBe(true);
   });
 });
 

@@ -27,7 +27,9 @@
  *   flex items that stretch to the taller of the pair), which must fall UNDER
  *   48. That is what proves the floor is doing the work: a control that is 48
  *   because of its padding would stay 48 and go red here, with the floor then
- *   decorative.
+ *   decorative. ⚠️ It measures HEIGHT only: every listed control is wider
+ *   than 48 by its label, so what shows the declared `min-width` doing any
+ *   work is a one-glyph specimen of the real *Stop* (#710's review).
  *
  * And the two halves the issue adds: an ORDINARY button beside them — *End
  * ERG*, in the same form as *Set target* — still declares exactly 44 and is
@@ -117,6 +119,14 @@ const SCENES: readonly Scene[] = [
     surfaces: RIDE_SCREEN,
   },
   { name: 'the game, sounds on', page: 'ride', query: '?sounds=on', surfaces: ['game-hud'] },
+  // #710's review: while paused the HUD's Pause reads Resume — the same
+  // element, on the list under that name, and measured here in that state.
+  {
+    name: 'the game, paused, sounds on',
+    page: 'ride',
+    query: '?sounds=on&paused=yes',
+    surfaces: ['game-hud'],
+  },
 ];
 
 interface Box {
@@ -159,18 +169,15 @@ async function open(page: Page, scene: Scene): Promise<void> {
 
 /**
  * Every button on the page, as laid out and with the floors of `strip` taken
- * away. `strip` is the ride-time controls this page carries, found by name.
+ * away. `strip` is the ride-time controls this page carries; they are matched
+ * by name INSIDE the one evaluation that strips them (#710's review), so a HUD
+ * that re-renders between a read and a strip cannot shift which element an
+ * index names.
  */
 async function readButtons(
   page: Page,
-  isRideTime: (name: string) => boolean,
+  strip: readonly RideTimeControl[],
 ): Promise<readonly ButtonReading[]> {
-  const names = await page.evaluate(() =>
-    [...document.querySelectorAll('button')].map((each) =>
-      (each.textContent ?? '').replace(/\s+/g, ' ').trim(),
-    ),
-  );
-  const strip = names.map(isRideTime);
   return page.evaluate(
     ({ strip, rideClass }) => {
       const boxOf = (element: Element): Box => {
@@ -184,6 +191,11 @@ async function readButtons(
           height: rect.height,
         };
       };
+      // `namesControl`, restated: this runs in the page, which cannot import.
+      const listed = (name: string): boolean =>
+        strip.some((entry) =>
+          entry.match === 'exact' ? name === entry.name : name.startsWith(entry.name),
+        );
       const buttons = [...document.querySelectorAll<HTMLElement>('button')];
       const shipped = buttons.map((each) => {
         const style = getComputedStyle(each);
@@ -197,7 +209,7 @@ async function readButtons(
       });
       const before = buttons.map((each) => each.style.cssText);
       buttons.forEach((each, index) => {
-        if (strip[index] === true) {
+        if (listed(shipped[index]?.name ?? '')) {
           each.style.minHeight = '0px';
           each.style.minWidth = '0px';
         }
@@ -250,7 +262,7 @@ for (const viewport of VIEWPORTS) {
       const found = new Set<RideTimeControl>();
       for (const scene of SCENES) {
         await open(page, scene);
-        const names = (await readButtons(page, () => false)).map((each) => each.name);
+        const names = (await readButtons(page, [])).map((each) => each.name);
         for (const entry of entriesOf(scene)) {
           if (names.some((name) => namesControl(entry, name))) found.add(entry);
         }
@@ -267,7 +279,7 @@ for (const viewport of VIEWPORTS) {
           page,
         }, testInfo) => {
           await open(page, scene);
-          const readings = await readButtons(page, rideTimeIn(scene));
+          const readings = await readButtons(page, entriesOf(scene));
           const ride = readings.filter((each) => rideTimeIn(scene)(each.name));
           expect(ride.length, 'no ride-time control on this scene').toBeGreaterThan(0);
 
@@ -312,7 +324,7 @@ for (const viewport of VIEWPORTS) {
 
         test('no two ride-time controls are closer than 8 px', async ({ page }, testInfo) => {
           await open(page, scene);
-          const ride = (await readButtons(page, () => false)).filter(
+          const ride = (await readButtons(page, [])).filter(
             (each) => rideTimeIn(scene)(each.name) && each.box.width > 0,
           );
           const tooClose: string[] = [];
@@ -338,9 +350,7 @@ for (const viewport of VIEWPORTS) {
             page,
           }) => {
             await open(page, scene);
-            const reading = (await readButtons(page, () => false)).find(
-              (each) => each.name === ordinary,
-            );
+            const reading = (await readButtons(page, [])).find((each) => each.name === ordinary);
             expect(reading, `no “${ordinary}” on this scene`).toBeDefined();
             expect(reading?.ride).toBe(false);
             expect(reading?.minHeight).toBe(ORDINARY_TARGET_PIXELS);
@@ -351,6 +361,54 @@ for (const viewport of VIEWPORTS) {
         }
       });
     }
+
+    /**
+     * #710's review: the declared `min-width`. Every control on the list is
+     * wider than 48 by its label alone — the narrowest, *Stop*, is about
+     * 70 px — so the floor-stripped measurement above leaves every WIDTH where
+     * it was and says nothing about `min-width: 3rem`. No listed control can
+     * show it doing anything, so a specimen does: the real *Stop*, `Button`'s
+     * own output with `size="ride"` under the real stylesheet, copied with a
+     * one-glyph label no listed control has. It must be 48 wide as shipped and
+     * fall under 48 with its `min-width` taken away.
+     */
+    test('min-width does the work: a one-glyph ride-time button is 48 wide only because of it', async ({
+      page,
+    }, testInfo) => {
+      const scene = SCENES[1];
+      if (scene === undefined) throw new Error('no mid-ride scene');
+      await open(page, scene);
+      const reading = await page.evaluate((rideClass) => {
+        const source = [...document.querySelectorAll('button')].find(
+          (each) =>
+            (each.textContent ?? '').trim() === 'Stop' && each.classList.contains(rideClass),
+        );
+        if (source === undefined) throw new Error('no ride-time Stop to copy');
+        const specimen = source.cloneNode(false) as HTMLButtonElement;
+        specimen.textContent = '×';
+        document.body.append(specimen);
+        const declared = Number.parseFloat(getComputedStyle(specimen).minWidth);
+        const shipped = specimen.getBoundingClientRect().width;
+        specimen.style.minWidth = '0px';
+        const stripped = specimen.getBoundingClientRect().width;
+        specimen.remove();
+        return { className: specimen.className, declared, shipped, stripped };
+      }, RIDE_CLASS);
+      const note = `“×” specimen (${reading.className}): ${reading.shipped.toFixed(1)} wide, ${reading.stripped.toFixed(1)} with min-width stripped`;
+      testInfo.annotations.push({ type: 'ride-time min-width', description: note });
+      console.log(`#669 ride-time min-width — ${viewport.name} — ${note}`);
+      expect(reading.className).toContain(RIDE_CLASS);
+      // The box first: it is what a thumb lands on, and what goes red first
+      // when `min-width: 3rem` is deleted (45.8 px wide on the owner's Mac).
+      expect(reading.shipped, `${note}: under the 48 px ride-time target`).toBeGreaterThanOrEqual(
+        RIDE_TIME_TARGET_PIXELS - SUBPIXEL_TOLERANCE,
+      );
+      expect(reading.declared).toBeGreaterThanOrEqual(RIDE_TIME_TARGET_PIXELS);
+      expect(
+        reading.stripped,
+        'the specimen is 48 wide without its min-width, so it shows nothing about the floor',
+      ).toBeLessThan(RIDE_TIME_TARGET_PIXELS);
+    });
 
     test('the control — without the modifier, Set target falls under 48', async ({ page }) => {
       const scene = SCENES[1];
@@ -363,9 +421,7 @@ for (const viewport of VIEWPORTS) {
         if (target === undefined) throw new Error('no Set target');
         target.classList.remove(rideClass);
       }, RIDE_CLASS);
-      const reading = (await readButtons(page, () => false)).find(
-        (each) => each.name === 'Set target',
-      );
+      const reading = (await readButtons(page, [])).find((each) => each.name === 'Set target');
       expect(reading?.ride).toBe(false);
       expect(reading?.minHeight ?? Infinity).toBeLessThan(RIDE_TIME_TARGET_PIXELS);
       expect(reading?.box.height ?? Infinity).toBeLessThan(RIDE_TIME_TARGET_PIXELS);

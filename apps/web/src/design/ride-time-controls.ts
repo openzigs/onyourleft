@@ -72,6 +72,8 @@ export const RIDE_TIME_CONTROLS: readonly RideTimeControl[] = [
   { surface: 'workout-panel', name: 'End workout', match: 'exact' },
   // `game/hud/HudPanel.tsx` and `game/SoundControls.tsx`.
   { surface: 'game-hud', name: 'Pause', match: 'exact' },
+  // The same HUD control while the ride is paused (#710's review).
+  { surface: 'game-hud', name: 'Resume', match: 'exact' },
   { surface: 'game-hud', name: 'End ride', match: 'exact' },
   { surface: 'game-hud', name: 'Mute sounds', match: 'exact' },
 ];

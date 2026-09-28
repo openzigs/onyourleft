@@ -879,7 +879,13 @@ test.describe(`#669 — the workout chooser — ${TABLET_UPRIGHT_IN_THE_SHELL.na
         '.oyl-ride__group--trainer form.oyl-trainer__form > p { margin: 1rem 0 !important; }',
     });
     const reverted = await rideMargin(page);
-    const note = `Ride ${fixed.toFixed(1)} px → ${reverted.toFixed(1)} px`;
+    // Published against the floor and never asserted under it (#710's
+    // review): as reverted it read 54.1 on a Mac and 29.3 on the CI runner,
+    // a whole wrapped line apart, so which side of the floor it lands on is
+    // the fonts' and not this control's.
+    const note =
+      `Ride ${fixed.toFixed(1)} px → ${reverted.toFixed(1)} px; as before #669 it is ` +
+      `${reverted >= FOLD_MARGIN_PIXELS ? 'clear of' : 'under'} the ${String(FOLD_MARGIN_PIXELS)} px floor`;
     testInfo.annotations.push({
       type: 'control, ERG sentence spaced as before',
       description: note,
