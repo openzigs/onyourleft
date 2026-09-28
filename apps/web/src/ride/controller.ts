@@ -431,13 +431,16 @@ export const RIDE_NOTIFICATION_REFUSED =
  * shown: beside the Live heading on the Ride screen and in the HUD's notice cell
  * (`ride.browser.spec.ts` and `rideview.browser.spec.ts` §"#647" measure both).
  *
- * ⚠️ **Short enough for ONE line in the HUD's notice cell at 360 px** — #693's
- * re-review, B2. It used to be *"your ride may stop if the screen goes off."*,
- * two lines there, and beside *Eased* (#585) the cell ended 38 px above the
- * leaning rider's box at 360×752 in the pinned Chromium, under #605's 50 px
- * floor. Neither notice may be put away, so the sentence got shorter: *"it"*
- * is the screen the label has just named. `ride.browser.spec.ts` §"keep the
- * screen on, beside every notice that stays" publishes the clearance.
+ * ⚠️ **Shortened for the HUD's notice cell at 360 px** — #693's re-review,
+ * B2. It used to be *"your ride may stop if the screen goes off."*, and beside
+ * *Eased* (#585) the cell ended 38 px above the leaning rider's box at 360×752
+ * in the pinned Chromium on a Mac, under #605's 50 px floor. Neither notice may
+ * be put away, so the sentence got shorter: *"it"* is the screen the label has
+ * just named. It is ONE line there on a Mac and still TWO on the CI runner,
+ * whose fonts are wider — so on the runner the clearance comes from the cell's
+ * tighter padding (`theme.css` §"Two notices in the one cell") rather than
+ * from the sentence. `ride.browser.spec.ts` §"keep the screen on, beside every
+ * notice that stays" publishes the clearance.
  */
 export const KEEP_SCREEN_ON_LABEL = 'Keep the screen on';
 
@@ -496,6 +499,9 @@ function forgottenButStillListed(name: string): string {
 
 /** Why a game ride's gradient is refused while its trainer is being let go. */
 const TRAINER_BEING_FORGOTTEN = 'the trainer is being forgotten';
+
+/** Why a game's gradient is refused once the controller has let go (#695). */
+const RIDE_CONTROLLER_DISPOSED = 'the ride controller has let the trainer go';
 
 /**
  * What a finished ride needs to become an activity — #14's fourth criterion,
@@ -754,7 +760,15 @@ export interface RideController {
    * samples with.
    */
   tickNow(): Promise<void>;
-  /** Unsubscribe from everything. Does not stop or discard a recording. */
+  /**
+   * Unsubscribe from everything. Does not stop or discard a recording.
+   *
+   * #695: a trainer this app holds is let go first, through the one release
+   * (an FTMS Stop, joined with any already in flight), and a running workout
+   * is ended. Returns at once; the sensors are detached when that release
+   * settles, whichever way it went, so the Stop reaches the wire before the
+   * client is closed. Idempotent.
+   */
   dispose(): void;
 }
 
@@ -1399,6 +1413,10 @@ export function createRideController(options: RideControllerOptions): RideContro
    * rather than sending a second. A hand-set target and a game ride's
    * gradient are let go by the same call — `releaseTrainer` ends the first,
    * and {@link leaving} refuses the second's further writes.
+   *
+   * Since #695 `dispose` lets its trainer go through this too, for the same
+   * reasons and in the same order; it ignores the answer, because a disposed
+   * controller has nobody left to tell.
    */
   const letGoBeforeForgetting = async (entry: SensorEntry): Promise<boolean> => {
     const client = entry.trainer?.control;
@@ -2068,6 +2086,10 @@ export function createRideController(options: RideControllerOptions): RideContro
           if (leaving.has(client)) {
             return Promise.reject(new Error(TRAINER_BEING_FORGOTTEN));
           }
+          // #695: the same after `dispose`, whose release outlives this call.
+          if (disposed) {
+            return Promise.reject(new Error(RIDE_CONTROLLER_DISPOSED));
+          }
           // #567: a gradient takes the machine out of ERG, so a hand-set
           // target's rescue writing a 0x05 under a game ride would put it back.
           endManualErg();
@@ -2132,11 +2154,35 @@ export function createRideController(options: RideControllerOptions): RideContro
       disposed = true;
       // #524: the controller that asked for the service is gone.
       syncKeepAlive();
-      for (const entry of sensors.values()) {
-        detach(entry);
-      }
+      // #695: a held trainer is let go through the ONE release BEFORE anything
+      // is detached. `detach` closes the client, `close()` writes nothing, and
+      // a Stop still queued behind it is refused as "not connected" — so a
+      // dispose that detached first sent no Stop, and one that detached while
+      // a Stop was already on the wire (Stop pressed, then disposed) cut that
+      // one off too. `letGoBeforeForgetting` ends a running workout (whose
+      // session releases through `releaseTrainer`), joins a release already in
+      // flight rather than sending a second, ends a hand-set target and its
+      // rescue (`releaseTrainer` does), sends nothing when nothing is held, and
+      // never rejects.
+      //
+      // ⚠️ Synchronous, fire-and-forget: the release is started here and the
+      // sensors are detached only once it SETTLES, so `close()` cannot cut the
+      // Stop off. Emptied now, though, so every command from here on finds no
+      // trainer to write to; a game's gradient handle, which holds the client
+      // itself, is refused by `disposed` in `simulationControl`.
+      const entries = [...sensors.values()];
+      const trainer = trainerEntry();
+      const released =
+        trainer === undefined ? Promise.resolve(true) : letGoBeforeForgetting(trainer);
       sensors.clear();
       listeners.clear();
+      void released
+        .catch(() => false)
+        .then(() => {
+          for (const entry of entries) {
+            detach(entry);
+          }
+        });
     },
   };
 
