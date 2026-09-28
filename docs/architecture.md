@@ -635,7 +635,18 @@ Devices. The controls come first and what the platform cannot do is beneath them
 `<details>`, with *"one user gesture per device"* kept outside it. *Forget* is
 `SensorTransport.forget`: `BluetoothDevice.forget()` in a browser that has it, which gives the
 origin's permission back, and in every transport the id stops being issued until the chooser
-returns the device again. `apps/web/browser/devices.browser.spec.ts` walks Home → Devices → Pair
+returns the device again. Since #716 both transports hold it to the GATT queue's thirty-second
+bound: past it the device is forgotten here and the rider is told what went unconfirmed — in a
+browser that it may still be listed, in the Android shell that it may still be connected
+(`ForgetUnconfirmedError.holding`, #718's review). And while that late call is still running no
+trainer is asked for control: when it lands it drops the link of whatever pairing of the device is
+current, and a trainer holding a target with no link cannot be sent a Stop. Asking is not the only
+way a client comes to hold control — the FTMS client asks again by itself on a `0xFF` — so while
+that call runs a trainer the rider did not ask for is sent no ERG target, no workout and no
+gradient either (`ride/controller.ts` §`askedForByTheRider`); a release is never held back.
+Since #713 a Forget pressed while that device's pairing is still wiring ends the pairing quietly,
+and whatever the pairing acquired after the press — a subscription, a trainer's control client — is
+let go. `apps/web/browser/devices.browser.spec.ts` walks Home → Devices → Pair
 against the scripted Web Bluetooth stack, with today's dead end as its control.
 
 **Controls first, detail tucked** (#666, the owner's ruling on #654). Settings, Segments, Files and

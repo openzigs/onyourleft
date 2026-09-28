@@ -68,6 +68,8 @@ import {
   type WorkoutRescue,
 } from '@onyourleft/domain';
 import {
+  deviceProvides,
+  ForgetUnconfirmedError,
   isSensorError,
   type ConnectionState,
   type DeviceId,
@@ -492,10 +494,90 @@ function notForgottenStillHolding(name: string): string {
  * What a rider is told when a device is gone from this app and the browser
  * refused to give up its permission — #659's review. Without it the row says
  * *Not paired* while the browser still lists the device as allowed.
+ *
+ * ⚠️ **Web Bluetooth only** (#718's review): it is chosen for a refusal that
+ * is about a grant, and the Capacitor transport's refusals say `link` —
+ * {@link forgottenButMayStillBeConnected} is the shell's. The shell has no
+ * browser the rider sees and no site settings.
  */
 function forgottenButStillListed(name: string): string {
   return `${name} is forgotten here, but your browser still lists it. To remove it there too, remove it in this site's settings.`;
 }
+
+/**
+ * What a rider is told when *Forget* removed a device and the browser did not
+ * say, within the transport's bound, whether it gave up its permission — #716.
+ * "May", because nothing here knows: the browser may yet finish, or may never.
+ *
+ * ⚠️ **Web Bluetooth only**, for {@link forgottenButStillListed}'s reason.
+ */
+function forgottenButMayStillBeListed(name: string): string {
+  return `${name} is forgotten here. Your browser did not confirm it, so it may still list it. If it does, remove it in this site's settings.`;
+}
+
+/**
+ * What a rider is told when *Forget* removed a device and Bluetooth did not
+ * confirm it let go of the LINK — the Android shell's half of the two
+ * sentences above (#718's review). The Capacitor plugin holds no permission
+ * this program could give back; what its forget stops is the notifications
+ * and the connection, so what is unknown when it refuses or runs out of time
+ * is whether the device is still connected. Turning Bluetooth off and on drops
+ * every link the phone holds, which is the one thing a rider can do about it.
+ * One sentence for a refusal and a time-out: "did not confirm" is true of both.
+ */
+function forgottenButMayStillBeConnected(name: string): string {
+  return `${name} is forgotten here, but Bluetooth did not confirm it let go, so it may still be connected. If it still appears connected, turn Bluetooth off and on.`;
+}
+
+/**
+ * The half of the two sentences below that says why, and what to do — #718's
+ * reviews. ⚠️ **"A trainer's connection", not "this trainer's"**: the wait is
+ * global (@see CONTROL_WAITS_FOR_FORGET), so when the late forget belongs to a
+ * different trainer the sentence is over-cautious, and it has to stay true
+ * then. ⚠️ **No "in a minute"**: if the stack's call never lands — a Web
+ * Bluetooth `forget()` that never answers, a plugin whose teardown or
+ * disconnect hangs — the wait lasts the session, and a promised minute would
+ * be false after the first one. Reloading the page, or closing the app and
+ * opening it again, starts a session with no forget in progress; that is the
+ * wording `forgottenButStillListening` already uses, and it is true on both
+ * transports.
+ */
+const STILL_FORGETTING =
+  "Bluetooth is still finishing forgetting a trainer, and could drop a trainer's connection when it does. Try again in a moment. If this does not clear, reload the page, or close the app and open it again.";
+
+/**
+ * What a rider is told when they ask for trainer control while a forget that
+ * ran out of time is still running on a trainer — #718's review. When that
+ * call lands it drops the link of whatever pairing of the device is current
+ * then (it revokes the grant on Web Bluetooth, and disconnects the plugin id
+ * in the Android shell), and a trainer that loses its link while holding a
+ * target cannot be sent the Stop that lets it go. So control waits.
+ *
+ * "A trainer", not a name: on Web Bluetooth a device chosen again after its
+ * grant is withdrawn may come back under a new id, so nothing here can say
+ * whether the trainer being forgotten is this one. Cleared by itself when the
+ * call lands, either way — and never on a timer: a call that never lands holds
+ * control back for the rest of the session, which is the safe way to fail
+ * (#718's second review), and the sentence says what ends it.
+ */
+export const CONTROL_WAITS_FOR_FORGET = `Control was not asked for: ${STILL_FORGETTING}`;
+
+/**
+ * What a rider is told when they set an ERG target, or start a workout, on a
+ * trainer that holds control this program never asked for while a trainer's
+ * forget is still running late — #718's second review. The machine can come
+ * to hold control without {@link RideController.requestTrainerControl}: on a
+ * `0xFF` Control Permission Lost, `createTrainerControl` sends its own Request
+ * Control (`reacquireControl`, on by default), whether or not it ever held
+ * control. @see askedForByTheRider
+ */
+export const TARGET_WAITS_FOR_FORGET = `Nothing was sent to the trainer: ${STILL_FORGETTING}`;
+
+/**
+ * Why a game ride's gradient is refused in the same state — matched by
+ * `game/gradient.ts` §`faultText`, which words it for the road.
+ */
+const GRADIENT_WAITS_FOR_FORGET = 'a trainer is still being forgotten';
 
 /**
  * What a rider is told when *Forget* removed a device but one of this app's
@@ -507,6 +589,19 @@ function forgottenButStillListed(name: string): string {
  */
 function forgottenButStillListening(name: string): string {
   return `${name} is forgotten, but this app could not stop listening to it cleanly. If its readings still appear, reload the page, or close the app and open it again.`;
+}
+
+/**
+ * What `wire` throws when the entry it is wiring has left the sensor list —
+ * #713: Forget was pressed, or the controller disposed, while the pairing was
+ * still in progress. `attach` ends such a pairing quietly, and tells it apart
+ * by the list rather than by this class, so a connect that FAILED because the
+ * device had just been forgotten ends the same way.
+ */
+class PairingAbandoned extends Error {
+  constructor() {
+    super('the pairing was abandoned');
+  }
 }
 
 /** Why a game ride's gradient is refused while its trainer is being let go. */
@@ -869,6 +964,100 @@ export function createRideController(options: RideControllerOptions): RideContro
    * record its own chooser made. @see startForgetting
    */
   const forgetting = new Map<DeviceId, Set<Promise<void>>>();
+  /**
+   * The stack calls still running under a trainer's forget that ran out of
+   * time — #718's review. While there is one, {@link RideController.requestTrainerControl}
+   * asks the machine for nothing.
+   *
+   * ⚠️ **This is what keeps #716 from leaving resistance on.** Before #716 a
+   * forget that never settled kept the device unpairable, which was safe. Now
+   * the device can be paired again at the transport's bound while the stack's
+   * own call is still running, and when that call lands it drops the link of
+   * whatever pairing is current then — `ForgetUnconfirmedError.stillRunning`.
+   * A trainer re-paired, put under control and given an ERG target in that
+   * window would lose its link with the target on it, and the trainer this
+   * program was measured on keeps its target through a Stop and a Reset alike
+   * (CLAUDE.md §4h) — with no link, not even a Stop can be sent. So pairing
+   * goes on (#716), and control waits for the call to land, either way.
+   *
+   * ⚠️ **A set of calls, not a set of device ids.** On Web Bluetooth a device
+   * chosen again after its grant is withdrawn may come back under a new id, so
+   * an id cannot say whether the trainer being paired is the one still being
+   * forgotten. Holding back EVERY trainer's control is the version that cannot
+   * guess wrong, and it costs only while a stack is thirty seconds late.
+   */
+  const lateTrainerForgets = new Set<Promise<void>>();
+  /**
+   * The control clients the rider asked for control through
+   * {@link RideController.requestTrainerControl}, and got it — #718's second
+   * review.
+   *
+   * ⚠️ **Asking is not the only way a client comes to hold control.**
+   * `createTrainerControl` sends its own Request Control on a `0xFF` Control
+   * Permission Lost (`reacquireControl`, on by default and not overridden by
+   * `ride/trainer.ts`), and it does so whether or not it ever held control. So
+   * a trainer paired again while a late forget runs — whose Request Control
+   * {@link lateTrainerForgets} refuses — can still come to hold control if
+   * another app takes the machine and lets it go. The Request Control itself
+   * writes no setpoint; what must not follow it is a target or a gradient.
+   * So every write path that TAKES the machine somewhere refuses, while a late
+   * forget runs, a client that is not in here: {@link RideController.setTargetPower},
+   * {@link RideController.startWorkout} and the gradient
+   * {@link RideController.simulationControl} hands out. A release never
+   * checks it — a refused Stop is resistance left on — and neither does an
+   * ease, which lowers the target and can only follow a target that was
+   * allowed.
+   *
+   * ⚠️ **A client in here goes on writing while a late forget runs, and that
+   * is deliberate.** It was asked for before the forget began, so it is a
+   * different device from the one being forgotten: a device already paired is
+   * refused a second pairing ("already paired"), and the device a late forget
+   * belongs to was let go and detached before its forget started (Stop →
+   * detach → forget). The late call drops that device's link, not this one's.
+   * Releasing it pre-emptively would end the rider's workout or game ride for
+   * a hazard it does not face — and on the trainer measured a Stop keeps its
+   * target anyway (CLAUDE.md §4h), so it would buy nothing where it is needed.
+   *
+   * A WeakSet because a client is dropped with its pairing; one re-paired is a
+   * new client, which has to be asked for again.
+   */
+  const askedForByTheRider = new WeakSet<TrainerControl>();
+  /**
+   * Whether a write that takes the machine somewhere must wait — see
+   * {@link askedForByTheRider}.
+   */
+  const mustWaitForForget = (client: TrainerControl): boolean =>
+    lateTrainerForgets.size > 0 && !askedForByTheRider.has(client);
+  /**
+   * Note a forget's rejection — #718's review. Holds control back (@see
+   * lateTrainerForgets) when the forget ran out of time on something that is,
+   * or may be, a trainer: paired as one, or offering the control point.
+   */
+  const lateForget = (
+    error: unknown,
+    forgotten: { readonly device: SensorDevice; readonly role: PairingRole },
+  ): void => {
+    if (!(error instanceof ForgetUnconfirmedError) || error.stillRunning === undefined) {
+      return;
+    }
+    if (forgotten.role !== 'trainer' && !deviceProvides(forgotten.device, 'trainer-control')) {
+      return;
+    }
+    const call = error.stillRunning;
+    lateTrainerForgets.add(call);
+    void call.then(() => {
+      lateTrainerForgets.delete(call);
+      if (
+        lateTrainerForgets.size === 0 &&
+        (refusal === CONTROL_WAITS_FOR_FORGET || refusal === TARGET_WAITS_FOR_FORGET)
+      ) {
+        // The reason is gone, so the sentence goes with it; the rider asks
+        // again. Nothing is asked for them — control is a thing the rider does.
+        refusal = undefined;
+      }
+      changed();
+    });
+  };
   /**
    * One set per {@link RideController.pair} whose chooser is open — #712.
    * Every device a forget STARTS on while that chooser is open is added to
@@ -1397,7 +1586,13 @@ export function createRideController(options: RideControllerOptions): RideContro
 
   // --- Pairing --------------------------------------------------------------
 
-  const attach = async (device: SensorDevice, role: PairingRole): Promise<void> => {
+  /**
+   * Pair `device` as `role`. Resolves `true` when it paired, and `false` when
+   * the pairing was abandoned under it (#713) — Forget pressed, or the
+   * controller disposed — so `pair` does not go on as though a sensor had
+   * paired (#718's review). Rejects with what went wrong otherwise.
+   */
+  const attach = async (device: SensorDevice, role: PairingRole): Promise<boolean> => {
     const id = device.identity.id;
     const entry: SensorEntry = {
       device,
@@ -1412,6 +1607,23 @@ export function createRideController(options: RideControllerOptions): RideContro
     try {
       await wire(entry);
     } catch (error) {
+      if (sensors.get(id) !== entry) {
+        // #713: Forget was pressed (or the controller disposed) while this
+        // pairing was still wiring. `unpair` has detached the entry, taken the
+        // row away and forgotten the device, so there is nothing left to
+        // undo but whatever `wire` acquired since — and no pairing error to
+        // report: the rider asked for this. A connect or a subscribe that
+        // FAILED because the transport had just forgotten the device lands
+        // here too, and neither forgets it a second time nor names a fault.
+        // ⚠️ And `sensors.delete` is not called: by now the id may belong to
+        // a newer pairing of the same device.
+        try {
+          detach(entry);
+        } catch {
+          // Every step has run; the entry is unlisted, and nobody asked.
+        }
+        return false;
+      }
       // A connect or a subscribe that failed leaves nothing on screen. Half a
       // sensor — listed, named, and delivering nothing — is the state a rider
       // cannot tell from a working one.
@@ -1433,18 +1645,47 @@ export function createRideController(options: RideControllerOptions): RideContro
       // marks it — a second Pair choosing it now would be revoked by this.
       const forgotten = startForgetting(id);
       try {
-        await transport.forget(id).catch(() => undefined);
+        // #718's review: a trainer whose clean-up forget runs out of time
+        // holds control back like one the rider forgot.
+        await transport.forget(id).catch((failure: unknown) => {
+          lateForget(failure, entry);
+        });
       } finally {
         forgotten();
       }
       throw error;
     }
     changed();
+    return true;
   };
 
-  /** Everything that needs a link. Separated so `attach` can undo all of it. */
+  /**
+   * Everything that needs a link. Separated so `attach` can undo all of it.
+   *
+   * ⚠️ **The entry is listed before this finishes, so Forget can land between
+   * any two of its awaits** (#713). `unpair` then detaches the entry and
+   * deletes the row, and whatever an await here hands back afterwards — a
+   * subscription, a control client and its `onControlLost` — would be pushed
+   * onto an entry nothing will ever detach again. So after every await the
+   * entry is checked against the list, and one that has left it ends with
+   * {@link PairingAbandoned}: `attach` detaches it once more, which lets go of
+   * exactly what arrived late, and reports nothing.
+   *
+   * A control client that arrives late is CLOSED, not released: it has never
+   * held control. Control is asked for by a separate press
+   * (`requestTrainerControl`, a thing the rider does — rule 2 at the top of
+   * the file), which reaches only a LISTED entry's trainer, and opening a
+   * client asks for nothing — so it cannot be holding resistance, and a Stop
+   * would be a write to a machine this app never told anything. The #713 test
+   * reads the control point's writes to hold that.
+   */
   const wire = async (entry: SensorEntry): Promise<void> => {
     const id = entry.device.identity.id;
+    const stillWanted = (): void => {
+      if (sensors.get(id) !== entry) {
+        throw new PairingAbandoned();
+      }
+    };
     entry.release.push(
       transport.observeConnectionState(id, (state) => {
         const previous = entry.state;
@@ -1464,6 +1705,7 @@ export function createRideController(options: RideControllerOptions): RideContro
     );
 
     await transport.connect(id);
+    stillWanted();
     entry.state = transport.connectionState(id);
 
     for (const capability of entry.device.capabilities) {
@@ -1471,6 +1713,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         continue;
       }
       entry.measurements.push(await transport.subscribe(id, capability, onMeasurement));
+      stillWanted();
     }
 
     if (entry.role === 'trainer' && openTrainer !== undefined) {
@@ -1505,6 +1748,7 @@ export function createRideController(options: RideControllerOptions): RideContro
           }),
         );
       }
+      stillWanted();
     }
   };
 
@@ -1875,7 +2119,9 @@ export function createRideController(options: RideControllerOptions): RideContro
           const forgotten = startForgetting(id);
           try {
             await inProgress;
-            await transport.forget(id).catch(() => undefined);
+            await transport.forget(id).catch((failure: unknown) => {
+              lateForget(failure, { device, role });
+            });
           } finally {
             forgotten();
           }
@@ -1889,9 +2135,12 @@ export function createRideController(options: RideControllerOptions): RideContro
           tell(`${device.name ?? 'That sensor'} is already paired.`);
           return;
         }
-        await attach(device, role);
-        // #647: a sensor that paired is a Bluetooth permission granted.
-        askAgainIfRefused();
+        // #647: a sensor that paired is a Bluetooth permission granted. Only
+        // one that DID pair (#718's review): a pairing abandoned by Forget
+        // ends here with nothing listed.
+        if (await attach(device, role)) {
+          askAgainIfRefused();
+        }
       } catch (error) {
         tell(describe(error));
       } finally {
@@ -1941,6 +2190,8 @@ export function createRideController(options: RideControllerOptions): RideContro
         sensors.delete(id);
         changed();
         let refused = false;
+        let unconfirmed = false;
+        let mayStillBeConnected = false;
         try {
           // #659: FORGET, not disconnect. The Devices screen's control is
           // *Forget*, and a device that was only disconnected stayed in the
@@ -1949,17 +2200,32 @@ export function createRideController(options: RideControllerOptions): RideContro
           // connection budget for the rest of the session. `forget` drops the
           // link as `disconnect` did and then lets go of the device.
           await transport.forget(id);
-        } catch {
+        } catch (error) {
           // `forget` resolves for a device that is already gone, so a
-          // rejection means one thing: the stack refused to give up its
-          // permission. The device is gone from this app, and the browser
-          // still lists it — which the row saying *Not paired* would hide.
-          refused = true;
+          // rejection means the stack refused to let go — or, since #716, did
+          // not answer within the transport's bound. Either way the device is
+          // gone from this app and the mark below is cleared so it can be
+          // paired again; what the rider is told depends on WHAT the stack may
+          // still hold (#718's review). A grant is the browser's, and it still
+          // lists the device (or may); a link is the Android shell's, and the
+          // device may still be connected. An error that names neither is the
+          // Web Bluetooth adapter's own refusal to revoke a grant, which is the
+          // one kind of rejection `forget` had before either was named.
+          lateForget(error, entry);
+          if (error instanceof ForgetUnconfirmedError && error.holding === 'link') {
+            mayStillBeConnected = true;
+          } else if (isSensorError(error, 'forget-timed-out')) {
+            unconfirmed = true;
+          } else {
+            refused = true;
+          }
         }
         // Both, when both went wrong: each names a different thing to do.
         const said = [
           stillListening ? forgottenButStillListening(name) : undefined,
           refused ? forgottenButStillListed(name) : undefined,
+          unconfirmed ? forgottenButMayStillBeListed(name) : undefined,
+          mayStillBeConnected ? forgottenButMayStillBeConnected(name) : undefined,
         ].filter((sentence) => sentence !== undefined);
         // #712: through `tell`, so a Pair that failed while `forget` was
         // pending keeps its error; a clean forget writes nothing at all.
@@ -2200,6 +2466,13 @@ export function createRideController(options: RideControllerOptions): RideContro
       if (connection === undefined || client === undefined || !client.hasControl()) {
         return false;
       }
+      // #718's second review: control this client took back by itself while
+      // a trainer's forget runs late is not control the rider asked for.
+      if (mustWaitForForget(client)) {
+        refusal = TARGET_WAITS_FOR_FORGET;
+        changed();
+        return false;
+      }
       endWorkoutSession('replace');
       // #567: the workout owns the target from here. A hand-set target's rescue
       // left running would be a second writer on one control point.
@@ -2240,10 +2513,23 @@ export function createRideController(options: RideControllerOptions): RideContro
       if (client === undefined) {
         return;
       }
+      // ⚠️ #718's review: nothing is asked of the machine while a trainer's
+      // timed-out forget is still running — see {@link lateTrainerForgets}.
+      // Pairing is not refused — #716 — only control. ⚠️ This is the one
+      // place the RIDER asks for control, and not the only way a client comes
+      // to hold it: `createTrainerControl` asks again by itself on a `0xFF`
+      // (#718's second review). So the setpoint paths check too — see
+      // {@link askedForByTheRider}.
+      if (lateTrainerForgets.size > 0) {
+        refusal = CONTROL_WAITS_FOR_FORGET;
+        changed();
+        return;
+      }
       refusal = undefined;
       changed();
       try {
         await client.requestControl();
+        askedForByTheRider.add(client);
         controlLost = undefined;
         // Control is the rider's again; a notice about the last release would
         // now be describing a machine this client is driving.
@@ -2269,6 +2555,13 @@ export function createRideController(options: RideControllerOptions): RideContro
       }
       const connection = trainerEntry()?.trainer;
       if (connection === undefined) {
+        return;
+      }
+      // #718's second review — @see askedForByTheRider. Here, where the write
+      // is, like the workout's refusal above.
+      if (mustWaitForForget(client)) {
+        refusal = TARGET_WAITS_FOR_FORGET;
+        changed();
         return;
       }
       requested = target;
@@ -2319,6 +2612,12 @@ export function createRideController(options: RideControllerOptions): RideContro
           // forgotten, and a gradient after that Stop would take it back.
           if (leaving.has(client)) {
             return Promise.reject(new Error(TRAINER_BEING_FORGOTTEN));
+          }
+          // #718's second review — @see askedForByTheRider. Checked per write
+          // rather than when the object is handed out, because the game holds
+          // it for the whole ride and a late forget can begin during one.
+          if (mustWaitForForget(client)) {
+            return Promise.reject(new Error(GRADIENT_WAITS_FOR_FORGET));
           }
           // #567: a gradient takes the machine out of ERG, so a hand-set
           // target's rescue writing a 0x05 under a game ride would put it back.

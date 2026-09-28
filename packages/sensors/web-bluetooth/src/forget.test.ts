@@ -11,10 +11,12 @@
  * grant exactly as the specification says.
  */
 
+import { seconds, type Seconds } from '@onyourleft/domain';
 import { describe, expect, it } from 'vitest';
 
-import { isSensorError } from '../../src/errors';
+import { ForgetUnconfirmedError, isSensorError } from '../../src/errors';
 
+import { DEFAULT_GATT_OPERATION_TIMEOUT } from './queue';
 import { createWebBluetoothTransport } from './transport';
 import { createFakeBluetooth, type FakeDeviceSpec } from './testing/fake-bluetooth';
 import {
@@ -117,5 +119,139 @@ describe('forgetting a device on Web Bluetooth', () => {
 
     expect(transport.connectionState(again.identity.id)).toBe('connected');
     expect(heard.length).toBeGreaterThan(0);
+  });
+});
+
+describe('a forget the browser never answers — #716', () => {
+  /** Deadlines the test fires by hand, so the bound is a decision and not a race. */
+  function manualClock() {
+    const pending: { readonly fire: () => void; readonly after: Seconds }[] = [];
+    return {
+      pending,
+      schedule: (callback: () => void, after: Seconds) => {
+        const entry = { fire: callback, after };
+        pending.push(entry);
+        return () => {
+          const index = pending.indexOf(entry);
+          if (index !== -1) {
+            pending.splice(index, 1);
+          }
+        };
+      },
+    };
+  }
+
+  function bounded(spec: FakeDeviceSpec, operationTimeout?: Seconds) {
+    const fake = createFakeBluetooth({ devices: [spec] });
+    const clock = manualClock();
+    const transport = createWebBluetoothTransport({
+      profiles: [stubMultiProfile],
+      bluetooth: fake.bluetooth,
+      hasUserActivation: () => true,
+      schedule: clock.schedule,
+      ...(operationTimeout === undefined ? {} : { operationTimeout }),
+    });
+    return { ...fake, transport, clock };
+  }
+
+  it('gives up at the queue’s own bound, and the device is forgotten here', async () => {
+    const { transport, clock } = bounded(
+      { ...stubTrainerDevice(), forgetNeverSettles: true },
+      seconds(12),
+    );
+    const device = await transport.discover({ capabilities: ['power'] });
+    await transport.connect(device.identity.id);
+
+    let outcome: unknown = 'pending';
+    const forgetting = transport.forget(device.identity.id).then(
+      () => 'resolved',
+      (error: unknown) => error,
+    );
+    void forgetting.then((settled) => {
+      outcome = settled;
+    });
+    await flush();
+    // Still waiting on the browser, and bounded by the SAME number the queue
+    // holds a GATT operation to — the option, not a second constant.
+    expect(outcome).toBe('pending');
+    expect(clock.pending.map((deadline) => deadline.after)).toEqual([seconds(12)]);
+
+    clock.pending[0]?.fire();
+    await forgetting;
+
+    expect(isSensorError(outcome, 'forget-timed-out')).toBe(true);
+    expect(() => transport.connectionState(device.identity.id)).toThrow(
+      expect.objectContaining({ code: 'device-not-found' }),
+    );
+  });
+
+  it('can be chosen again and connects after the bound has passed', async () => {
+    const { transport, clock } = bounded({ ...stubTrainerDevice(), forgetNeverSettles: true });
+    const first = await transport.discover({ capabilities: ['power'] });
+    await transport.connect(first.identity.id);
+    const forgetting = transport.forget(first.identity.id).catch((error: unknown) => error);
+    await flush();
+    clock.pending.find((deadline) => deadline.after === DEFAULT_GATT_OPERATION_TIMEOUT)?.fire();
+    expect(isSensorError(await forgetting, 'forget-timed-out')).toBe(true);
+
+    const again = await transport.discover({ capabilities: ['power'] });
+    await transport.connect(again.identity.id);
+    expect(transport.connectionState(again.identity.id)).toBe('connected');
+  });
+
+  it('defaults to the queue’s default bound', async () => {
+    const { transport, clock } = bounded({ ...stubTrainerDevice(), forgetNeverSettles: true });
+    const device = await transport.discover({ capabilities: ['power'] });
+    void transport.forget(device.identity.id).catch(() => undefined);
+    await flush();
+    expect(clock.pending.map((deadline) => deadline.after)).toEqual([
+      DEFAULT_GATT_OPERATION_TIMEOUT,
+    ]);
+  });
+
+  it('says the GRANT is unconfirmed, and carries the browser’s call until it lands — #718', async () => {
+    let answer: () => void = () => undefined;
+    const late = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    const { transport, clock, bench } = bounded({ ...stubTrainerDevice(), forgetWaitsFor: late });
+    const device = await transport.discover({ capabilities: ['power'] });
+    await transport.connect(device.identity.id);
+    const forgetting = transport.forget(device.identity.id).catch((error: unknown) => error);
+    await flush();
+    clock.pending[0]?.fire();
+    const error = await forgetting;
+
+    expect(error).toBeInstanceOf(ForgetUnconfirmedError);
+    const unconfirmed = error as ForgetUnconfirmedError;
+    expect(unconfirmed.code).toBe('forget-timed-out');
+    expect(unconfirmed.holding).toBe('permission');
+
+    let landed = false;
+    void unconfirmed.stillRunning?.then(() => {
+      landed = true;
+    });
+    await flush();
+    expect(unconfirmed.stillRunning).toBeDefined();
+    expect(landed).toBe(false);
+    expect(bench.device('stub-trainer').allowedServices.length).toBeGreaterThan(0);
+
+    // The browser answers: the grant goes, and the carried call says so.
+    answer();
+    await flush();
+    expect(landed).toBe(true);
+    expect(bench.device('stub-trainer').allowedServices).toEqual([]);
+  });
+
+  it('leaves no deadline behind when the browser answers, either way', async () => {
+    const answered = bounded(stubTrainerDevice());
+    const one = await answered.transport.discover({ capabilities: ['power'] });
+    await answered.transport.forget(one.identity.id);
+    expect(answered.clock.pending).toEqual([]);
+
+    const refused = bounded({ ...stubTrainerDevice(), forgetRejects: true });
+    const two = await refused.transport.discover({ capabilities: ['power'] });
+    await expect(refused.transport.forget(two.identity.id)).rejects.toThrow('forget refused');
+    expect(refused.clock.pending).toEqual([]);
   });
 });

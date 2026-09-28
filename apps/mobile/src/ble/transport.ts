@@ -36,6 +36,7 @@ import {
   ANDROID_BLE,
   createDeviceSession,
   deviceId as toDeviceId,
+  ForgetUnconfirmedError,
   isSensorError,
   MAX_RECOMMENDED_CONCURRENT_CONNECTIONS,
   SensorError,
@@ -102,6 +103,20 @@ import type { CapacitorBlePort, PluginDevice } from './plugin-port';
 export const INITIALIZE_ANSWER_WINDOW: Seconds = seconds(8);
 
 /**
+ * How long `forget` waits for the plugin before it gives up on it — #716.
+ *
+ * ⚠️ **The Web Bluetooth adapter's own bound, restated rather than imported.**
+ * That adapter holds `BluetoothDevice.forget()` to the GATT queue's bound,
+ * `DEFAULT_GATT_OPERATION_TIMEOUT` in `packages/sensors/web-bluetooth`: thirty
+ * seconds, "a bound on a hang, not a performance target". This transport must
+ * not depend on the browser adapter, so the number is written here and
+ * `transport.test.ts` asserts the two are equal — they answer the same hazard,
+ * a platform call nothing specifies a timeout for, and a rider on Android
+ * should wait no longer than one in a browser.
+ */
+export const FORGET_DEADLINE: Seconds = seconds(30);
+
+/**
  * Run `callback` after `after` seconds, and return a way to cancel it.
  *
  * The shape `createGattQueue` uses in `packages/sensors/web-bluetooth`, and
@@ -145,6 +160,8 @@ export interface CapacitorTransportOptions {
   readonly initializeAnswerWindow?: Seconds | undefined;
   /** Defaults to `setTimeout`. @see Schedule */
   readonly schedule?: Schedule | undefined;
+  /** How long `forget` waits for the plugin. Defaults to {@link FORGET_DEADLINE}. */
+  readonly forgetDeadline?: Seconds | undefined;
 }
 
 /**
@@ -219,6 +236,7 @@ export function createCapacitorTransport(options: CapacitorTransportOptions): Se
   const { plugin, profiles, now } = options;
   const answerWindow = options.initializeAnswerWindow ?? INITIALIZE_ANSWER_WINDOW;
   const schedule = options.schedule ?? defaultSchedule;
+  const forgetDeadline = options.forgetDeadline ?? FORGET_DEADLINE;
   const links = new Map<DeviceId, Link>();
   /** Plugin ids seen this session, so `knownDevices` has something to ask for. */
   const seen = new Set<string>();
@@ -517,6 +535,18 @@ export function createCapacitorTransport(options: CapacitorTransportOptions): Se
      * a disconnect callback the plugin delivers after this must find no link
      * to drive. `seen` keeps the plugin id, because `knownDevices` asking the
      * plugin about a peripheral is not reaching it.
+     *
+     * ⚠️ Bounded (#716), by {@link FORGET_DEADLINE}: a plugin that never
+     * answers the stop or the disconnect used to keep this pending for the
+     * session, and the caller with it — which is what refuses a re-pairing
+     * while a forget is in progress. At the bound the record is already gone,
+     * so the device is forgotten here; the rejection says the plugin has not
+     * confirmed its half, and its call is left to finish on its own.
+     *
+     * ⚠️ Every rejection is a {@link ForgetUnconfirmedError} holding `link`
+     * (#718's review) — a refused disconnect as well as a timed-out one — so
+     * the ride controller can say "may still be connected" here and "your
+     * browser still lists it" only where that is true.
      */
     async forget(id: DeviceId): Promise<void> {
       const link = links.get(id);
@@ -527,8 +557,51 @@ export function createCapacitorTransport(options: CapacitorTransportOptions): Se
       if (link.session.state === 'disconnected') {
         return;
       }
-      await teardown(link, 'disconnected');
-      await plugin.disconnect(link.pluginId);
+      const letGo = (async () => {
+        await teardown(link, 'disconnected');
+        await plugin.disconnect(link.pluginId);
+      })();
+      // ⚠️ What went unconfirmed here is the LINK, never a grant — #718's
+      // review. The rejection says so (`holding: 'link'`), because the Web
+      // Bluetooth adapter's is about a permission, and a rider told to "remove
+      // it in this site's settings" inside the shell has no site settings.
+      await new Promise<void>((resolve, reject) => {
+        const cancel = schedule(() => {
+          reject(
+            new ForgetUnconfirmedError(
+              'forget-timed-out',
+              'the device did not confirm the forget in time',
+              {
+                deviceId: id,
+                holding: 'link',
+                // When it lands it disconnects `pluginId` — the id a NEW
+                // pairing of this device is using by then (`toDeviceId` is
+                // minted from it). A caller handing out trainer control waits.
+                stillRunning: letGo.then(
+                  () => undefined,
+                  () => undefined,
+                ),
+              },
+            ),
+          );
+        }, forgetDeadline);
+        letGo.then(
+          () => {
+            cancel();
+            resolve();
+          },
+          (error: unknown) => {
+            cancel();
+            reject(
+              new ForgetUnconfirmedError('forget-refused', 'the device did not let go', {
+                deviceId: id,
+                holding: 'link',
+                cause: error,
+              }),
+            );
+          },
+        );
+      });
     },
 
     connectionState(id: DeviceId) {
