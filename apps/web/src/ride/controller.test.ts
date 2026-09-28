@@ -31,7 +31,7 @@ import {
   type Watts,
   type WorkoutBlock,
 } from '@onyourleft/domain';
-import { deviceId, isSensorError, type SensorTransport } from '@onyourleft/sensors';
+import { type DeviceId, deviceId, isSensorError, type SensorTransport } from '@onyourleft/sensors';
 import {
   createTrainerControl,
   decodeSupportedPowerRange,
@@ -2460,6 +2460,311 @@ describe('an unsubscribe that throws does not leave half a sensor listed — #70
       "HRM 04B1 is forgotten, but this app could not stop listening to it cleanly. If its readings still appear, reload the page, or close the app and open it again. HRM 04B1 is forgotten here, but your browser still lists it. To remove it there too, remove it in this site's settings.",
     );
     controller.dispose();
+  });
+});
+
+describe('a Forget still waiting on the transport — #712', () => {
+  // `unpair` takes the row away before `transport.forget` has finished
+  // (#659's order), so a Pair in that window used to pass the already-paired
+  // check, attach, and then be revoked under the rider when the forget
+  // landed. And the Pair buttons stay live meanwhile, so a Pair that failed in
+  // that window had its error replaced by the Forget's late sentence.
+
+  const STILL_BEING_FORGOTTEN = 'HRM 04B1 is still being forgotten. Pair it again in a moment.';
+  const STILL_LISTED =
+    "HRM 04B1 is forgotten here, but your browser still lists it. To remove it there too, remove it in this site's settings.";
+  const STILL_LISTENING =
+    'HRM 04B1 is forgotten, but this app could not stop listening to it cleanly. If its readings still appear, reload the page, or close the app and open it again.';
+
+  /**
+   * Hold every `transport.forget` open until the returned function is called.
+   * `rejects` answers each as a browser that refused to give up its grant.
+   */
+  function holdForget(
+    transport: SensorTransport,
+    rejects = false,
+  ): { readonly letGo: () => void; readonly asked: () => number } {
+    const forget = transport.forget.bind(transport);
+    const held: Array<() => void> = [];
+    let asked = 0;
+    vi.spyOn(transport, 'forget').mockImplementation(
+      (id) =>
+        new Promise<void>((resolve, reject) => {
+          asked += 1;
+          held.push(() => {
+            if (rejects) {
+              reject(new Error('the browser kept its grant'));
+            } else {
+              forget(id).then(resolve, reject);
+            }
+          });
+        }),
+    );
+    return {
+      letGo: () => {
+        for (const letGo of held.splice(0)) {
+          letGo();
+        }
+      },
+      asked: () => asked,
+    };
+  }
+
+  /** Hold the next chooser open until the returned function is called. */
+  function holdChooser(transport: SensorTransport): () => void {
+    const discover = transport.discover.bind(transport);
+    let answer: () => void = () => undefined;
+    vi.spyOn(transport, 'discover').mockImplementationOnce(
+      (request) =>
+        new Promise((resolve, reject) => {
+          answer = () => {
+            discover(request).then(resolve, reject);
+          };
+        }),
+    );
+    return () => {
+      answer();
+    };
+  }
+
+  /** The next chooser is closed without a choice. */
+  function chooserClosed(transport: SensorTransport): void {
+    vi.spyOn(transport, 'discover').mockImplementationOnce(() =>
+      Promise.reject(new Error('No sensor was chosen.')),
+    );
+  }
+
+  function throwingObserver(transport: SensorTransport): void {
+    const observe = transport.observeConnectionState.bind(transport);
+    vi.spyOn(transport, 'observeConnectionState').mockImplementation((id, listener) => {
+      const unobserve = observe(id, listener);
+      return () => {
+        unobserve();
+        throw new Error('the transport would not let go');
+      };
+    });
+  }
+
+  function forgottenBy(transport: SensorTransport, id: typeof STRAP): boolean {
+    try {
+      transport.connectionState(id);
+    } catch (error) {
+      return isSensorError(error, 'device-not-found');
+    }
+    return false;
+  }
+
+  const listed = (rig: Bench): DeviceId[] =>
+    rig.controller.getSnapshot().sensors.map((sensor) => sensor.id);
+
+  it('refuses to pair the device again, and the pending forget revokes no newer pairing', async () => {
+    const rig = benchWith({ devices: 'trainer+strap' });
+    await rig.controller.pair('trainer');
+    await rig.controller.pair('heart-rate');
+    const { letGo, asked } = holdForget(rig.transport);
+
+    const unpairing = rig.controller.unpair(STRAP);
+    await flushMicrotasks(20);
+    await rig.controller.pair('heart-rate');
+
+    expect(rig.controller.getSnapshot().pairingError).toBe(STILL_BEING_FORGOTTEN);
+    expect(listed(rig)).toEqual([TRAINER]);
+
+    letGo();
+    await expect(unpairing).resolves.toBeUndefined();
+
+    // A clean forget writes nothing, so the refusal is still what is shown —
+    // and nothing is listed that the transport has just let go of.
+    expect(rig.controller.getSnapshot().pairingError).toBe(STILL_BEING_FORGOTTEN);
+    expect(listed(rig)).toEqual([TRAINER]);
+    expect(asked()).toBe(1);
+
+    // And once the forget is done, the chooser brings it back — connected,
+    // and still known to the transport.
+    await rig.controller.pair('heart-rate');
+    const snapshot = rig.controller.getSnapshot();
+    expect(snapshot.pairingError).toBeUndefined();
+    expect(snapshot.sensors.find((sensor) => sensor.id === STRAP)?.state).toBe('connected');
+    expect(forgottenBy(rig.transport, STRAP)).toBe(false);
+    expect(asked()).toBe(1);
+    rig.controller.dispose();
+  });
+
+  it('refuses a device the chooser returned after a forget begun while it was open had finished', async () => {
+    const rig = benchWith({ devices: 'trainer+strap' });
+    await rig.controller.pair('trainer');
+    await rig.controller.pair('heart-rate');
+    const { letGo } = holdForget(rig.transport);
+
+    // The chooser is open BEFORE the Forget is pressed, and answers only after
+    // the forget has finished — so nothing is being forgotten when it answers.
+    const answer = holdChooser(rig.transport);
+    const pairing = rig.controller.pair('heart-rate');
+    await flushMicrotasks(20);
+    const unpairing = rig.controller.unpair(STRAP);
+    await flushMicrotasks(20);
+    letGo();
+    await unpairing;
+    answer();
+    await pairing;
+
+    // The chooser may have granted the device before the forget withdrew it;
+    // nothing here can tell which came first, so it is refused.
+    expect(rig.controller.getSnapshot().pairingError).toBe(STILL_BEING_FORGOTTEN);
+    expect(listed(rig)).toEqual([TRAINER]);
+
+    await rig.controller.pair('heart-rate');
+    expect(listed(rig)).toContain(STRAP);
+    expect(forgottenBy(rig.transport, STRAP)).toBe(false);
+    rig.controller.dispose();
+  });
+
+  it('refuses the device while a failed pairing is still forgetting it', async () => {
+    const { transport } = createSimulator({
+      devices: [hrsStrap({ id: 'strap', name: 'HRM 04B1' })],
+    });
+    const { letGo, asked } = holdForget(transport);
+    let refuseConnect = true;
+    const flaky: SensorTransport = {
+      ...transport,
+      connect: (id) =>
+        refuseConnect
+          ? Promise.reject(new Error('the link would not come up.'))
+          : transport.connect(id),
+    };
+    const controller = createRideController({
+      transport: flaky,
+      store: harnessStore(),
+      athleteId: ATHLETE_A,
+      newSessionId: () => recordingSessionId('attach-failed-forget-pending'),
+      now: () => unixSeconds(1),
+    });
+
+    const failing = controller.pair('heart-rate');
+    await flushMicrotasks(20);
+    expect(asked()).toBe(1);
+    refuseConnect = false;
+    await controller.pair('heart-rate');
+    expect(controller.getSnapshot().pairingError).toBe(STILL_BEING_FORGOTTEN);
+
+    letGo();
+    await failing;
+    const snapshot = controller.getSnapshot();
+    expect(snapshot.sensors).toEqual([]);
+    // Both, the newer first: the refusal was said while the failure waited.
+    expect(snapshot.pairingError).toBe(`${STILL_BEING_FORGOTTEN} the link would not come up.`);
+
+    await controller.pair('heart-rate');
+    expect(controller.getSnapshot().sensors.map((sensor) => sensor.id)).toEqual([STRAP]);
+    expect(forgottenBy(transport, STRAP)).toBe(false);
+    controller.dispose();
+  });
+
+  it('keeps a Pair error that landed while the forget waited, when the browser refuses the forget', async () => {
+    const rig = benchWith({ devices: 'trainer+strap' });
+    await rig.controller.pair('trainer');
+    await rig.controller.pair('heart-rate');
+    const { letGo } = holdForget(rig.transport, true);
+    const unpairing = rig.controller.unpair(STRAP);
+    await flushMicrotasks(20);
+
+    chooserClosed(rig.transport);
+    await rig.controller.pair('heart-rate');
+    expect(rig.controller.getSnapshot().pairingError).toBe('No sensor was chosen.');
+
+    letGo();
+    await expect(unpairing).resolves.toBeUndefined();
+
+    expect(rig.controller.getSnapshot().pairingError).toBe(`No sensor was chosen. ${STILL_LISTED}`);
+    rig.controller.dispose();
+  });
+
+  it('keeps a Pair error that landed while the forget waited, when an unsubscribe threw', async () => {
+    const rig = benchWith({ devices: 'trainer+strap' });
+    throwingObserver(rig.transport);
+    await rig.controller.pair('trainer');
+    await rig.controller.pair('heart-rate');
+    const { letGo } = holdForget(rig.transport);
+    const unpairing = rig.controller.unpair(STRAP);
+    await flushMicrotasks(20);
+
+    chooserClosed(rig.transport);
+    await rig.controller.pair('heart-rate');
+
+    letGo();
+    await expect(unpairing).resolves.toBeUndefined();
+
+    expect(rig.controller.getSnapshot().pairingError).toBe(
+      `No sensor was chosen. ${STILL_LISTENING}`,
+    );
+    rig.controller.dispose();
+  });
+
+  it('a forget that finishes cleanly does not clear a newer Pair error', async () => {
+    const rig = benchWith({ devices: 'trainer+strap' });
+    await rig.controller.pair('trainer');
+    await rig.controller.pair('heart-rate');
+    const { letGo } = holdForget(rig.transport);
+    const unpairing = rig.controller.unpair(STRAP);
+    await flushMicrotasks(20);
+
+    chooserClosed(rig.transport);
+    await rig.controller.pair('heart-rate');
+    letGo();
+    await unpairing;
+
+    expect(rig.controller.getSnapshot().pairingError).toBe('No sensor was chosen.');
+    rig.controller.dispose();
+  });
+
+  it('a held trainer is Stopped before it is detached, and cannot be re-paired until it is forgotten', async () => {
+    const rig = benchWith({ machine: { retainsTargetsThroughStop: true } });
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.setTargetPower(watts(210));
+    const before = rig.written.length;
+    const { letGo, asked } = holdForget(rig.transport);
+
+    const unpairing = rig.controller.unpair(TRAINER);
+    await flushMicrotasks(40);
+    // The Stop is on the wire before the transport was asked to forget.
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(asked()).toBe(1);
+
+    await rig.controller.pair('trainer');
+    expect(rig.controller.getSnapshot().pairingError).toBe(
+      'KICKR 1F2A is still being forgotten. Pair it again in a moment.',
+    );
+    expect(rig.controller.getSnapshot().trainer.paired).toBe(false);
+
+    letGo();
+    await unpairing;
+    expect(rig.controller.getSnapshot().trainer.paired).toBe(false);
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    rig.controller.dispose();
+  });
+
+  it('keeps a Pair error that landed while a refused Stop was on the wire', async () => {
+    const rig = benchWith({ machine: { retainsTargetsThroughStop: true }, refuseStop: true });
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.setTargetPower(watts(210));
+
+    let settled = false;
+    const unpairing = rig.controller.unpair(TRAINER).then(() => {
+      settled = true;
+    });
+    chooserClosed(rig.transport);
+    await rig.controller.pair('heart-rate');
+    // The Pair's error landed while the release was still in flight — the
+    // case this test is about, not one it only happens to pass over.
+    expect(settled).toBe(false);
+    await unpairing;
+
+    expect(rig.controller.getSnapshot().pairingError).toBe(
+      'No sensor was chosen. KICKR 1F2A was not forgotten: it did not confirm that it let go, so it may still be holding resistance. Try Forget again.',
+    );
+    rig.controller.dispose();
   });
 });
 
