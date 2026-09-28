@@ -39,7 +39,8 @@
  * so a layer's share of the tablet's GPU clock is the difference between two
  * runs; `realistic/layers.ts` says what each layer is, in both worlds. Since
  * #619, `?levers=-foliage-order` or `-texture-bias` switches one of that
- * issue's kept levers off, so its saving is a before/after pair at one rung;
+ * issue's kept levers off, so its saving is a before/after pair at one rung —
+ * and since #622 `-air` puts the fog back as it was, for a by-eye pair only;
  * `realistic/config.ts` §`LEVERS` says which rung each one needs.
  * Each is also one console line, `OYL-REALISTIC {json}` and
  * `OYL-REALISTIC-SOAK {json}`, which `adb logcat` shows under the `chromium` tag — so the numbers come off the device with no
@@ -58,6 +59,7 @@ import { realisticWorldNotice, type RealisticWorldOutcome } from '../src/game/re
 import { corridorOrigin } from '../src/game/terrain';
 import {
   drawnWorldOf,
+  atmosphereOf,
   foliageOrderedOf,
   loadRealisticWorld,
   loadSceneryModels,
@@ -294,6 +296,10 @@ async function run(): Promise<void> {
   // first asks for them, so it is applied again after every rung change.
   const foliageOrdered = !config.leversOff.includes('foliage-order');
   foliageOrderedOf(view, foliageOrdered);
+  // #622's by-eye pair: the air as the product breathes it, or as it was
+  // before #622. A setting of the view's, so it survives a rung change.
+  const airOn = !config.leversOff.includes('air');
+  atmosphereOf(view, { table: airOn ? 'directional' : 'flattened', valley: airOn });
   const resize = (): void => view.resize(canvas.clientWidth, canvas.clientHeight);
   resize();
   addEventListener('resize', resize);

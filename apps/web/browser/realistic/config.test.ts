@@ -45,6 +45,8 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
       'foliage-order',
       'texture-bias',
     ]);
+    // #622's by-eye lever, in the same list.
+    expect(parseConfig('?levers=-texture-bias,-air').leversOff).toEqual(['air', 'texture-bias']);
     expect(parseConfig('').leversOff).toEqual([]);
     expect(() => parseConfig('?levers=-texture')).toThrow(/levers is a comma-separated list/);
     expect(() => parseConfig('?levers=texture-bias')).toThrow(/levers is a comma-separated list/);
@@ -54,6 +56,7 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     const rung = { label: 'realistic, reduced', textureLodBias: 1 };
     expect(rungWithLevers(rung, [])).toBe(rung);
     expect(rungWithLevers(rung, ['foliage-order'])).toBe(rung);
+    expect(rungWithLevers(rung, ['air'])).toBe(rung);
     expect(rungWithLevers(rung, ['texture-bias'])).toEqual({ ...rung, textureLodBias: 0 });
   });
 

@@ -345,6 +345,12 @@ export interface HorizonRelief {
   readonly tops: Float32Array;
   /** Just below the lowest point of the route: where the ridge's haze ends. */
   readonly foot: number;
+  /**
+   * The middle of the route's own elevation range, in local metres — what the
+   * ridge stands above, and since #622 where the realistic world's valley haze
+   * begins (`realistic-light.ts` §`valleyHazeFactor`).
+   */
+  readonly middle: number;
   /** Far below everything: where the ring's skirt ends. */
   readonly base: number;
 }
@@ -601,7 +607,7 @@ export function horizonRelief(
     const fine = uniformFrom(slotHash(seed, segment, RELIEF_KEY + 9), 0);
     tops[segment] = middle + rise + (most - rise) * (0.8 * coarse + 0.2 * fine);
   }
-  return { tops, foot: low - 20, base: low - 1_000 };
+  return { tops, foot: low - 20, middle, base: low - 1_000 };
 }
 
 /** Relief fields that contribute nothing — for the clear band, where there is none. */

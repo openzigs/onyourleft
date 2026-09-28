@@ -155,6 +155,37 @@ export const WATER_ZENITH_BAND: readonly [number, number] = [30, 90];
 export const WATER_HORIZON_BAND: readonly [number, number] = [0, 10];
 
 /**
+ * The rows of an equirectangular sky whose centres lie between two
+ * elevations, in degrees — or, for a sky too coarse to have a row inside the
+ * band at all, the one row nearest its middle. Every row: a band ten degrees
+ * deep is only fifty-odd rows of a 2K sky, and skipping rows could miss it
+ * entirely. Shared by {@link skyBandRadiance} and {@link skyHorizonTable}, so
+ * the table and the one colour it is blended towards are read off the same
+ * rows.
+ */
+function bandRows(sky: SkyPixels, fromDegrees: number, toDegrees: number): readonly number[] {
+  const from = (fromDegrees * Math.PI) / 180;
+  const to = (toDegrees * Math.PI) / 180;
+  const inBand = (row: number): boolean => {
+    const elevation = elevationOf(row, sky.height);
+    return elevation >= from && elevation <= to;
+  };
+  const rows = Array.from({ length: sky.height }, (_, row) => row).filter(inBand);
+  if (rows.length > 0) return rows;
+  const middle = (from + to) / 2;
+  let nearest = 0;
+  for (let row = 1; row < sky.height; row += 1) {
+    if (
+      Math.abs(elevationOf(row, sky.height) - middle) <
+      Math.abs(elevationOf(nearest, sky.height) - middle)
+    ) {
+      nearest = row;
+    }
+  }
+  return [nearest];
+}
+
+/**
  * The mean radiance of the sky between two elevations, in degrees, as linear
  * RGB — every column of each row, each row weighted by the cosine of its
  * elevation, which is the solid angle an equirectangular row covers. So it is
@@ -170,33 +201,9 @@ export function skyBandRadiance(
   toDegrees: number,
   step = 4,
 ): LinearColour {
-  const from = (fromDegrees * Math.PI) / 180;
-  const to = (toDegrees * Math.PI) / 180;
   const sum = [0, 0, 0];
   let weights = 0;
-  // Every ROW, and every `step`-th column: a band ten degrees deep is only
-  // fifty-odd rows of a 2K sky, and skipping rows could miss it entirely. A
-  // sky too coarse to have a row inside the band at all is read at the one
-  // row nearest its middle.
-  const inBand = (row: number): boolean => {
-    const elevation = elevationOf(row, sky.height);
-    return elevation >= from && elevation <= to;
-  };
-  let rows = Array.from({ length: sky.height }, (_, row) => row).filter(inBand);
-  if (rows.length === 0) {
-    const middle = (from + to) / 2;
-    let nearest = 0;
-    for (let row = 1; row < sky.height; row += 1) {
-      if (
-        Math.abs(elevationOf(row, sky.height) - middle) <
-        Math.abs(elevationOf(nearest, sky.height) - middle)
-      ) {
-        nearest = row;
-      }
-    }
-    rows = [nearest];
-  }
-  for (const row of rows) {
+  for (const row of bandRows(sky, fromDegrees, toDegrees)) {
     const elevation = elevationOf(row, sky.height);
     const weight = Math.cos(elevation);
     for (let column = 0; column < sky.width; column += step) {
@@ -440,3 +447,233 @@ export function environmentIntensity(ambientShare: number, skyUpwardRadiance: nu
  * to it is measured in the browser.
  */
 export const PHOTOGRAPHIC_ROAD_GRAIN = ROAD_SURFACE_GRAIN;
+
+/* ============================================================================
+ * THE AIR — #622
+ * ========================================================================== */
+
+/**
+ * How many directions the realistic sky's horizon is read in: **16**, one every
+ * 22.5° of azimuth — #622.
+ *
+ * Enough to carry the one thing a direction changes in `farm_field_2k.hdr`'s
+ * band just above its skyline — warmer and brighter on the sun's side, bluer
+ * and darker where the treeline stands in the photograph — and few enough to be
+ * 16 `vec3` uniforms, 192 bytes, rather than a texture. Read on 2026-09-27
+ * off the committed file, bin by bin: luminance 0.46 to 1.82 against a mean of
+ * 0.97, blue over red 0.98 on the sun's side against 1.05 opposite it.
+ */
+export const HORIZON_AZIMUTH_BINS = 16;
+
+/**
+ * The sky just above its skyline, read in {@link HORIZON_AZIMUTH_BINS}
+ * directions — #622. Bin `i` is the mean of the picture's columns
+ * `[i, i + 1) · width / bins`, over the rows {@link skyBandRadiance} reads and
+ * weighted as it weights them, so its centre is the picture's column
+ * `(i + 0.5) / bins` and — by three's equirectangular convention
+ * (@see skyRotation) — the PICTURE's azimuth `((i + 0.5) / bins − 0.5) · 2π`.
+ * Read once, at load, off the HDR's own texels; nothing samples the sky per
+ * frame.
+ *
+ * With the same `step`, on a sky at least `step · bins` wide whose width they
+ * divide — the committed one is 2 048 — every bin holds the same number of
+ * columns, so the mean of the table IS {@link skyBandRadiance} over the same band — which is what
+ * makes {@link flattenedTable} the one colour the realistic fog had before
+ * #622, and the browser gate's control exactly that.
+ *
+ * Throws when a bin holds no finite texel, for {@link skyBandRadiance}'s reason.
+ */
+export function skyHorizonTable(
+  sky: SkyPixels,
+  fromDegrees: number,
+  toDegrees: number,
+  bins: number = HORIZON_AZIMUTH_BINS,
+  step = 4,
+): LinearColour[] {
+  const sums = Array.from({ length: bins }, () => [0, 0, 0, 0]);
+  // Never so coarse that a direction is skipped: a sky only a few texels wider
+  // than there are bins is read column by column.
+  const stride = Math.max(1, Math.min(step, Math.floor(sky.width / bins)));
+  for (const row of bandRows(sky, fromDegrees, toDegrees)) {
+    const weight = Math.cos(elevationOf(row, sky.height));
+    for (let column = 0; column < sky.width; column += stride) {
+      const at = (row * sky.width + column) * 4;
+      const r = sky.channel(at);
+      const g = sky.channel(at + 1);
+      const b = sky.channel(at + 2);
+      if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) continue;
+      const sum = sums[Math.floor((column * bins) / sky.width)] as number[];
+      sum[0] = (sum[0] as number) + weight * r;
+      sum[1] = (sum[1] as number) + weight * g;
+      sum[2] = (sum[2] as number) + weight * b;
+      sum[3] = (sum[3] as number) + weight;
+    }
+  }
+  return sums.map(([r = 0, g = 0, b = 0, weights = 0], bin) => {
+    if (!(weights > 0)) {
+      throw new Error(`the sky has no texel in direction ${String(bin)} of ${String(bins)}`);
+    }
+    return [r / weights, g / weights, b / weights] as const;
+  });
+}
+
+/**
+ * A table with every direction set to the table's own mean — the browser
+ * gate's control for #622, and the realistic fog as it was before it: one
+ * colour for every direction. @see skyHorizonTable
+ */
+export function flattenedTable(table: readonly LinearColour[]): LinearColour[] {
+  const mean = [0, 1, 2].map(
+    (channel) => table.reduce((sum, each) => sum + each[channel as 0 | 1 | 2], 0) / table.length,
+  ) as unknown as LinearColour;
+  return table.map(() => mean);
+}
+
+/**
+ * The table's colour at a PICTURE azimuth, in radians — linearly between the
+ * two bins whose centres stand either side of it, wrapping from the last bin to
+ * the first. Exactly what `three-renderer.ts` §`ATMOSPHERE_FRAGMENT` does on the
+ * GPU, written again here so the browser gate can predict a pixel from it.
+ */
+export function tableColourAt(
+  table: readonly LinearColour[],
+  pictureAzimuth: number,
+): LinearColour {
+  const bins = table.length;
+  const at = (pictureAzimuth / (2 * Math.PI) + 0.5) * bins - 0.5;
+  const lower = Math.floor(at);
+  const share = at - lower;
+  const from = table[((lower % bins) + bins) % bins] as LinearColour;
+  const to = table[(((lower + 1) % bins) + bins) % bins] as LinearColour;
+  return [
+    from[0] + (to[0] - from[0]) * share,
+    from[1] + (to[1] - from[1]) * share,
+    from[2] + (to[2] - from[2]) * share,
+  ];
+}
+
+/**
+ * How far the realistic fog's colour leans from the one horizon colour towards
+ * the sky's own colour in the direction a rider looks: **0.5** — #622.
+ *
+ * ⚠️ **This repository's own choice, and the owner's to re-tune** after
+ * validation 0002 Part AG and #622's own row: whether a directional fog helps
+ * or fights #544's lifted ridge is judged by eye on the tablet, and nothing in
+ * CI can. Not 1, because a 22.5° bin of a photograph taken in a field is not
+ * all air: where the photograph's treeline stands above its own skyline (17 %
+ * of its columns, @see REALISTIC_SKYLINE_DEGREES) a bin carries trees, and the
+ * darkest bins, 0.46 against a mean of 0.97, are exactly those. Half keeps the
+ * sun's side warmer and brighter than the far side, as the band says, without
+ * painting a treeline into the air. 0 is the realistic fog before #622.
+ */
+export const REALISTIC_FOG_DIRECTION_SHARE = 0.5;
+
+/**
+ * The realistic fog's colour looking along a WORLD azimuth, in radians
+ * (`atan2(z, x)` of the view ray in three's world), in whatever space `base`
+ * and `table` are in — #622: `base` blended towards the table's colour at that
+ * direction by `share`.
+ *
+ * `turn` is {@link skyRotation}'s: the picture's azimuth is the world's plus
+ * it, by the same convention the background and the environment are sampled
+ * with, so the fog in a direction is the sky DRAWN in that direction.
+ */
+export function directionalFogColour(
+  base: LinearColour,
+  table: readonly LinearColour[],
+  share: number,
+  worldAzimuth: number,
+  turn: number,
+): LinearColour {
+  const toward = tableColourAt(table, worldAzimuth + turn);
+  return [
+    base[0] + (toward[0] - base[0]) * share,
+    base[1] + (toward[1] - base[1]) * share,
+    base[2] + (toward[2] - base[2]) * share,
+  ];
+}
+
+/**
+ * How much denser the realistic fog is at the bottom of a valley than on a
+ * ridge: **1.25** times the density, reached {@link REALISTIC_VALLEY_DEPTH_METRES}
+ * below the middle of the route's own elevation range — #622.
+ *
+ * ⚠️ **This repository's own choice, and the owner's to re-tune** with
+ * {@link REALISTIC_FOG_DIRECTION_SHARE}. Still air pools in low ground and holds
+ * its haze there; how much is a property of a morning, not a constant anybody
+ * publishes. A quarter more density is about half as much again of the fog's
+ * optical depth (`FogExp2` squares it), which makes a valley floor seen from
+ * above read as further away without taking a ridge at the same distance with
+ * it. 1 is the realistic fog before #622.
+ *
+ * ⚠️ **"Below the middle" is the MIDPOINT of the route's elevation range
+ * (`landform.ts` §`HorizonRelief.middle`), not the MEAN elevation #622's text
+ * names** — a choice, made so the haze and #544's ridge stand on one number,
+ * and one the owner may reverse. The two differ most on the routes where it
+ * shows: on a flat route with one 200 m climb the midpoint stands 100 m above
+ * the flat, so the whole flat is 50 m or more below it and takes the FULL
+ * 1.25× haze, where the mean would sit near the flat and haze almost nothing
+ * but the dip below it. Validation 0002 Part AH §"#622's rows" asks the owner
+ * to judge exactly that route shape.
+ */
+export const REALISTIC_VALLEY_HAZE = 1.25;
+
+/**
+ * How far below the middle of the route's elevation the valley haze reaches
+ * its full {@link REALISTIC_VALLEY_HAZE}, in metres: **50** — about the depth of
+ * `valleyRoute`'s own valley, so the haze deepens across a valley rather than
+ * switching on at its rim.
+ */
+export const REALISTIC_VALLEY_DEPTH_METRES = 50;
+
+/**
+ * The factor the realistic fog's density is multiplied by at a height, in local
+ * metres — #622: 1 at or above `middle` (the MIDPOINT of the route's own
+ * elevation range, `landform.ts` §`HorizonRelief.middle` — not its mean, and
+ * {@link REALISTIC_VALLEY_HAZE} says what that costs a flat route with one
+ * climb), rising linearly to
+ * `haze` at `depth` metres below it and no further. The same arithmetic
+ * `three-renderer.ts` §`ATMOSPHERE_FRAGMENT` does on the GPU.
+ *
+ * @test-facing the shader's arithmetic written again, so `realistic-light.test.ts`
+ * can state it and the browser gate's harness can predict a pixel from it;
+ * the product does it in GLSL and never calls this
+ */
+export function valleyHazeFactor(
+  height: number,
+  middle: number,
+  haze: number = REALISTIC_VALLEY_HAZE,
+  depth: number = REALISTIC_VALLEY_DEPTH_METRES,
+): number {
+  const below = Math.min(Math.max((middle - height) / depth, 0), 1);
+  return 1 + (haze - 1) * below;
+}
+
+/*
+ * ## The grade #622 offered, and why AgX alone is kept
+ *
+ * #622 offers a grade inside `tonemapping_fragment` — contrast, saturation and
+ * white balance — or a written decision that AgX alone is kept. **AgX alone is
+ * kept**, for three reasons, and the owner can reverse it:
+ *
+ * 1. **Every colour gate the realistic world has was measured through AgX.**
+ *    The road's climb and descent (`MINIMUM_TINT_CONTRAST_RATIO`, information,
+ *    #242), #544's ridge between ground and sky, #621's tints, #620's ground
+ *    darkening and the window glass are each held to bounds taken on this
+ *    tone map. A grade moves every one of them at once, and for no reason a
+ *    rider asked for.
+ * 2. **There is nothing to grade TOWARDS.** ADR 0009 forbids matching another
+ *    product's pictures, and the one reference this project may use — the
+ *    owner's eye on the tablet — has not looked yet: validation 0002 Part AG's
+ *    rows are empty. Three or four constants chosen now would be taste with no
+ *    measurement behind them, and they would change the colours #544 set
+ *    before anybody has judged #544.
+ * 3. **A grade inside the tone map is global and a fog is not.** The fog above
+ *    is patched on the realistic world's own materials. A grade would have to
+ *    reach three's own background material too — or the sky would be ungraded
+ *    behind a graded world, the seam #544 removed — and three builds that one.
+ *
+ * So there is no grade constant here, deliberately: the grade is
+ * [#701](https://github.com/openzigs/onyourleft/issues/701), to be decided
+ * after Part AG and #622's own by-eye rows.
+ */

@@ -21,7 +21,7 @@
  * | `at` | hold the rider still this far along the route, for a screenshot | metres |
  * | `panel` | the on-screen controls | `1` (default), `0` for a clean screenshot |
  * | `layers` | layers switched OFF, for their share of the GPU (#616) | `-sky`, `-surfaces`, `-vegetation`, `-impostors`, `-structures`, `-water`, `-riders`, `-grounding`, comma-separated; default none |
- * | `levers` | #619's levers switched OFF, for a before/after pair at one rung | `-foliage-order`, `-texture-bias`, comma-separated; default none |
+ * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — and since #622 its air, for a by-eye pair | `-foliage-order`, `-texture-bias`, `-air`, comma-separated; default none |
  *
  * ⚠️ **Unknown parameters and values are REFUSED**, as #457's page refused
  * them: a typo in a soak URL would otherwise measure the default under another
@@ -63,8 +63,13 @@ export type Layer = (typeof LAYERS)[number];
  *   photographs (`quality.ts` §`QualitySettings.textureLodBias`). Off samples
  *   them at the top rung's detail. It changes nothing on the top rung, which
  *   carries no bias: pair it with `rung=1&ladder=0`.
+ * - `air` — #622: the fog leaning towards the sky in the direction looked, and
+ *   the valley haze. Off flattens the direction table to its mean and turns the
+ *   haze off, which is the picture before #622 — for the owner's BY-EYE
+ *   comparison only. ⚠️ **Not a cost pair**: the shader runs either way, so
+ *   #622's cost is two builds (validation 0002 Part AH §"The #622 rows").
  */
-export const LEVERS = ['foliage-order', 'texture-bias'] as const;
+export const LEVERS = ['air', 'foliage-order', 'texture-bias'] as const;
 
 /** One of {@link LEVERS}. */
 export type Lever = (typeof LEVERS)[number];

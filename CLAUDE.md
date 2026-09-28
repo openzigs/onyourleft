@@ -818,7 +818,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         the realistic world (ADR 0026, #425, #474, #369) — its
                         asset table, its D-6 budget (re-set from validation
                         0002 Part Z's soak by #475; every figure stood), and
-                        the arithmetic that makes its sky and sun one sky.
+                        the arithmetic that makes its sky and sun one sky —
+                        and since #622 its air: the fog leaning towards the
+                        sky in the direction looked, a valley haze, and why
+                        there is no grade.
                         ⚠️ **Since #618 its textures stay compressed on the
                         GPU** (ADR 0026 D-8's 2026-09-27 amendment): KTX2,
                         transcoded by three's `KTX2Loader` to ETC2 and ASTC on
@@ -4297,6 +4300,8 @@ top of an issue **supersedes its body**.
 | How a realistic asset is made, where its input came from, and how to make it again byte for byte | `apps/web/tools/realistic/sources.ts`, `inputs.lock.json`, `process-assets.ts` §"`--check`", `ASSETS.toml` §derived keys, `scripts/check-repo-rules.sh` §`ASSET007` |
 | Why the Blender scripts run on one thread, and what an unordered set did to a shrub | `apps/web/tools/realistic/blender/process_tree.py` §"ONE thread" and §"An ordered de-duplication" |
 | Why the realistic canopy is drawn after the opaque world, why the second realistic rung reads its photographs a mip coarser, and how the owner's page switches either off | `apps/web/src/game/three-renderer.ts` §`FOLIAGE_RENDER_ORDER`, §`REALISTIC_TEXTURE_LOD_BIAS`, `apps/web/src/game/quality.ts` §`QualitySettings.textureLodBias`, `apps/web/browser/realistic/config.ts` §`LEVERS`, [#619](https://github.com/openzigs/onyourleft/issues/619) |
+| Why the realistic fog is not one colour, where its sixteen directions come from, and which two fogged materials keep three's own fog | `apps/web/src/game/realistic-light.ts` §`skyHorizonTable`, §`REALISTIC_FOG_DIRECTION_SHARE`, §`REALISTIC_VALLEY_HAZE`, `apps/web/src/game/three-renderer.ts` §`withAtmosphere`, `apps/web/browser/game.browser.spec.ts` §"#622", [#622](https://github.com/openzigs/onyourleft/issues/622) |
+| Why the realistic world has no colour grade inside AgX | `apps/web/src/game/realistic-light.ts` §"The grade #622 offered, and why AgX alone is kept" |
 | What the realistic world may cost, what the soak re-set it from, and why nothing moved | `apps/web/src/game/realistic-budget.ts`, validation 0002 Part Z |
 | Why the realistic textures are KTX2, what a device is handed, and what labels a fallback as one | `apps/web/src/game/three-renderer.ts` §`compressedRealisticLoaders`, §`realisticTextureFormat`, `apps/web/src/game/realistic-textures.test.ts`, [ADR 0026](docs/adr/0026-realistic-game-world.md) §Amendments 2026-09-27, [#618](https://github.com/openzigs/onyourleft/issues/618) |
 | How a KTX2 texture is made again byte for byte, which KTX-Software is pinned, and why a picture is flipped before it is encoded | `apps/web/tools/realistic/sources.ts` §`PINNED_KTX`, §`ktxCreateArguments`, §`TextureOrigin`, `apps/web/tools/realistic/encode-ktx2.ts` |

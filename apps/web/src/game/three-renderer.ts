@@ -329,15 +329,22 @@ import {
   type TreeLevels,
 } from './tree-levels';
 import {
+  directionalFogColour,
   drawnHorizonColour,
   environmentIntensity,
+  flattenedTable,
   halfToFloat,
+  HORIZON_AZIMUTH_BINS,
   PHOTOGRAPHIC_ROAD_GRAIN,
   REALISTIC_EXPOSURE,
+  REALISTIC_FOG_DIRECTION_SHARE,
   REALISTIC_HORIZON_BAND,
   REALISTIC_HORIZON_HAZE_SHARE,
+  REALISTIC_VALLEY_DEPTH_METRES,
+  REALISTIC_VALLEY_HAZE,
   reflectedSkyColour,
   skyBandRadiance,
+  skyHorizonTable,
   ridgeLift,
   skylineCrestFloor,
   skyRotation,
@@ -2848,6 +2855,15 @@ export class ContactShadowBelt {
   readonly #up = new Vector3(0, 1, 0);
   #shown = true;
 
+  /**
+   * Whether a material is this belt's — #622: drawn in both worlds, so the
+   * realistic air is not taught it, for {@link WaterBelt.wears}' reason. It
+   * lies under a rider, where the fog has taken next to nothing.
+   */
+  wears(material: Material): boolean {
+    return material === this.#material;
+  }
+
   constructor() {
     this.#mesh = new InstancedMesh(contactShadowGeometry(), this.#material, RIDDEN_KINDS.length);
     this.#mesh.instanceMatrix.setUsage(DynamicDrawUsage);
@@ -3000,15 +3016,18 @@ function contactShadowGeometry(): BufferGeometry {
  * Exported for `three-renderer.test.ts`, for {@link RiderBelt}'s reasons.
  */
 export class GroundBlobBelt {
-  readonly #material = withGroundBlobShading(
-    new MeshBasicMaterial({
-      color: 0x000000,
-      transparent: true,
-      depthWrite: false,
-      polygonOffset: true,
-      polygonOffsetFactor: -1,
-      polygonOffsetUnits: -4,
-    }),
+  // #622: the realistic world's only belt, so it breathes the realistic air.
+  readonly #material = withAtmosphere(
+    withGroundBlobShading(
+      new MeshBasicMaterial({
+        color: 0x000000,
+        transparent: true,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -4,
+      }),
+    ),
   );
   readonly #mesh: InstancedMesh;
   /** The two clip planes of every instance, three floats each. @see roadClip */
@@ -3362,10 +3381,10 @@ function vertexColouredMaterials(): ShadedMaterials {
  */
 function physicalMaterials(): ShadedMaterials {
   return {
-    lit: constructed(
-      new MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 }),
+    lit: withAtmosphere(
+      constructed(new MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 })),
     ),
-    flat: constructed(new MeshBasicMaterial({ vertexColors: true })),
+    flat: withAtmosphere(constructed(new MeshBasicMaterial({ vertexColors: true }))),
   };
 }
 
@@ -3611,6 +3630,17 @@ export class TerrainBelt {
 }
 
 /**
+ * The realistic world's air in the linear light the horizon ring is coloured
+ * in — #622: the sky's horizon table AS DRAWN, how far the fog leans towards
+ * it, and the sky's turn. @see ATMOSPHERE
+ */
+export interface RealisticAir {
+  readonly table: readonly LinearColour[];
+  readonly share: number;
+  readonly turn: number;
+}
+
+/**
  * The hills on the horizon — #458's "distant relief silhouette". One ring of
  * {@link HORIZON_SEGMENTS} quads round the camera, one draw call.
  *
@@ -3648,6 +3678,13 @@ export class HorizonRing {
   readonly #colours = new Float32Array((HORIZON_SEGMENTS + 1) * 3 * 3);
   readonly #haze = new Color();
   readonly #horizon = new Color();
+  /** #622: one segment's foot, while its colours are written. */
+  readonly #footColour = new Color();
+  /** #622: every segment's foot for the last air, three floats each. @see #footsFor */
+  readonly #foots = new Float32Array((HORIZON_SEGMENTS + 1) * 3);
+  #footKey:
+    | { readonly air: RealisticAir; readonly r: number; readonly g: number; readonly b: number }
+    | undefined;
   /** The relief the positions were last built for, so a frame that did not change it costs nothing. */
   #built: HorizonRelief | undefined;
   /** The crest floor they were last built for. @see update */
@@ -3679,9 +3716,56 @@ export class HorizonRing {
     return this.#mesh;
   }
 
-  /** The colour the foot was last drawn in, linear. @see horizonColoursOf */
+  /**
+   * The colour the foot was last drawn in, linear. @see horizonColoursOf
+   *
+   * ⚠️ Since #622, in the realistic world, the colour every direction's foot
+   * is BLENDED FROM — the fog's own `fogColor` — rather than the colour of
+   * any one segment, each of which leans towards the sky in its own direction
+   * exactly as the fog does. @see footAt
+   */
   get foot(): readonly [number, number, number] {
     return [this.#horizon.r, this.#horizon.g, this.#horizon.b];
+  }
+
+  /**
+   * The colour a segment's foot was last drawn in, linear — #622, for
+   * `terrain-belt.test.ts`: in the realistic world it is the fog's colour in
+   * that segment's direction.
+   */
+  footAt(segment: number): readonly [number, number, number] {
+    const at = (segment % (HORIZON_SEGMENTS + 1)) * 3 * 3;
+    return [
+      this.#colours[at] as number,
+      this.#colours[at + 1] as number,
+      this.#colours[at + 2] as number,
+    ];
+  }
+
+  /** Every segment's foot for this air, into {@link #foots}, unless it is the air they were worked out for. */
+  #footsFor(air: RealisticAir): void {
+    const h = this.#horizon;
+    const key = this.#footKey;
+    if (
+      key !== undefined &&
+      key.air.table === air.table &&
+      key.air.share === air.share &&
+      key.air.turn === air.turn &&
+      key.r === h.r &&
+      key.g === h.g &&
+      key.b === h.b
+    ) {
+      return;
+    }
+    this.#footKey = { air: { ...air }, r: h.r, g: h.g, b: h.b };
+    const base: LinearColour = [h.r, h.g, h.b];
+    for (let segment = 0; segment <= HORIZON_SEGMENTS; segment += 1) {
+      const angle = (segment / HORIZON_SEGMENTS) * Math.PI * 2;
+      const colour = directionalFogColour(base, air.table, air.share, angle, air.turn);
+      this.#foots[segment * 3] = colour[0];
+      this.#foots[segment * 3 + 1] = colour[1];
+      this.#foots[segment * 3 + 2] = colour[2];
+    }
   }
 
   /**
@@ -3696,6 +3780,11 @@ export class HorizonRing {
    * lifted ridge moves up and down with the rider. `hazeShare`
    * is how much of `horizon` the ridge carries: {@link HORIZON_HAZE_SHARE},
    * or in the realistic world `realistic-light.ts` §`REALISTIC_HORIZON_HAZE_SHARE`.
+   * `air`, since #622, is the realistic world's air: with it each segment's
+   * foot is the fog's colour in that segment's direction
+   * (`realistic-light.ts` §`directionalFogColour`) and its ridge hazes
+   * towards that; without it — the stylised world, and #544's control — every
+   * segment is `horizon`, exactly as before.
    */
   update(
     relief: HorizonRelief,
@@ -3704,6 +3793,7 @@ export class HorizonRing {
     horizon: { readonly r: number; readonly g: number; readonly b: number },
     crestFloor = Number.NEGATIVE_INFINITY,
     hazeShare = HORIZON_HAZE_SHARE,
+    air?: RealisticAir,
   ): void {
     if (this.#built !== relief || this.#floor !== crestFloor) {
       this.#built = relief;
@@ -3728,14 +3818,38 @@ export class HorizonRing {
       (this.#geometry.getAttribute('position') as BufferAttribute).needsUpdate = true;
     }
     this.#horizon.setRGB(horizon.r, horizon.g, horizon.b);
-    this.#haze.setHex(world.groundColour).lerp(this.#horizon, hazeShare);
-    for (let segment = 0; segment <= HORIZON_SEGMENTS; segment += 1) {
-      for (let row = 0; row < 3; row += 1) {
-        const colour = row === 2 ? this.#haze : this.#horizon;
-        const at = (segment * 3 + row) * 3;
-        this.#colours[at] = colour.r;
-        this.#colours[at + 1] = colour.g;
-        this.#colours[at + 2] = colour.b;
+    if (air === undefined) {
+      this.#haze.setHex(world.groundColour).lerp(this.#horizon, hazeShare);
+      for (let segment = 0; segment <= HORIZON_SEGMENTS; segment += 1) {
+        for (let row = 0; row < 3; row += 1) {
+          const colour = row === 2 ? this.#haze : this.#horizon;
+          const at = (segment * 3 + row) * 3;
+          this.#colours[at] = colour.r;
+          this.#colours[at + 1] = colour.g;
+          this.#colours[at + 2] = colour.b;
+        }
+      }
+    } else {
+      // #622: each segment's foot is the fog's colour in that segment's
+      // direction, so where the corridor's fogged ground ends the ring is
+      // still the fog's colour, whichever way the rider looks. Worked out only
+      // when the air changes, which on a ride is once.
+      this.#footsFor(air);
+      for (let segment = 0; segment <= HORIZON_SEGMENTS; segment += 1) {
+        const foot = segment * 3;
+        this.#footColour.setRGB(
+          this.#foots[foot] as number,
+          this.#foots[foot + 1] as number,
+          this.#foots[foot + 2] as number,
+        );
+        this.#haze.setHex(world.groundColour).lerp(this.#footColour, hazeShare);
+        for (let row = 0; row < 3; row += 1) {
+          const colour = row === 2 ? this.#haze : this.#footColour;
+          const at = (segment * 3 + row) * 3;
+          this.#colours[at] = colour.r;
+          this.#colours[at + 1] = colour.g;
+          this.#colours[at + 2] = colour.b;
+        }
       }
     }
     (this.#geometry.getAttribute('color') as BufferAttribute).needsUpdate = true;
@@ -4164,6 +4278,15 @@ export class WaterBelt {
   }
 
   /** The one mesh. For `three-renderer.test.ts`. */
+  /**
+   * Whether a material is one of the water's own — #622: the one fogged
+   * surface both worlds share, and so the one the realistic air is not taught.
+   * @see withAtmosphere
+   */
+  wears(material: Material): boolean {
+    return material === this.#shaded || material === this.#flat;
+  }
+
   get mesh(): Mesh {
     return this.#mesh;
   }
@@ -4274,8 +4397,8 @@ export class BridgeBelt {
    * The realistic world's bridge when it has no photograph to wear — ADR 0026
    * D-10, and a world a test built without textures. @see physicalMaterials
    */
-  readonly #physical = constructed(
-    new MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 }),
+  readonly #physical = withAtmosphere(
+    constructed(new MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 })),
   );
   /** The realistic world's photographed stone, once it has been handed one — #501. */
   #stone: { readonly maps: StoneMaps; readonly material: MeshStandardMaterial } | undefined;
@@ -4458,8 +4581,8 @@ function stoneBridgeMaterial(maps: StoneMaps): MeshStandardMaterial {
       .replace('#include <project_vertex>', `#include <project_vertex>\n${STONE_UV}`);
   };
   material.customProgramCacheKey = () => 'oyl-stone-bridge';
-  // #619 lever 2. Chained last, after the assignment above.
-  return withTextureLodBias(material);
+  // #619 lever 2 and #622's air, chained after the assignment above.
+  return withAtmosphere(withTextureLodBias(material));
 }
 
 /* ============================================================================
@@ -4545,6 +4668,13 @@ interface RealisticSky {
    * @see REALISTIC_HORIZON_BAND
    */
   readonly skyline: LinearColour;
+  /**
+   * The same band in `realistic-light.ts` §`HORIZON_AZIMUTH_BINS` directions —
+   * what the fog leans towards in each (#622) — and the same table flattened
+   * to its mean, the browser gate's control. @see skyHorizonTable
+   */
+  readonly directions: readonly LinearColour[];
+  readonly flatDirections: readonly LinearColour[];
 }
 
 /** Everything the realistic world is drawn from, loaded once per tab. */
@@ -5028,6 +5158,11 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     }
     skyTexture.mapping = EquirectangularReflectionMapping;
     const pixels = skyPixelsOf(skyTexture);
+    const directions = skyHorizonTable(
+      pixels,
+      REALISTIC_HORIZON_BAND[0],
+      REALISTIC_HORIZON_BAND[1],
+    );
     const skyRead = {
       texture: skyTexture,
       upward: upwardRadiance(pixels),
@@ -5037,6 +5172,9 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       horizon: skyBandRadiance(pixels, WATER_HORIZON_BAND[0], WATER_HORIZON_BAND[1]),
       // #544. @see ThreeGameView.#updateWorld
       skyline: skyBandRadiance(pixels, REALISTIC_HORIZON_BAND[0], REALISTIC_HORIZON_BAND[1]),
+      // #622: read once, here, and never per frame.
+      directions,
+      flatDirections: flattenedTable(directions),
     };
     // ⚠️ Swapped in only once the new world is whole, and the old one released
     // only after the swap: a reload that failed half-way, or whose release
@@ -5250,6 +5388,8 @@ export function prepareRealisticShape(
     material.name = typeof loaded.name === 'string' ? loaded.name : '';
     // #619 lever 2. The middle level wears this same material, so it is taught too.
     withTextureLodBias(material);
+    // #622, and for the same reason.
+    withAtmosphere(material);
     loaded.dispose();
     const index = geometry.getIndex();
     triangles += (index?.count ?? geometry.getAttribute('position').count) / 3;
@@ -5459,6 +5599,205 @@ const TEXTURE_BIASED = new WeakSet<Material>();
  */
 export function readsTextureLodBias(material: Material): boolean {
   return TEXTURE_BIASED.has(material);
+}
+
+/**
+ * The realistic world's air — #622. One set of uniforms every realistic
+ * material that fogs reads, written by the view that is about to draw
+ * ({@link ThreeGameView.render}), for {@link REALISTIC_TEXTURE_LOD_BIAS}'s
+ * reason: several views share these materials.
+ *
+ * - `oylFogTable`: the sky just above its skyline in
+ *   {@link HORIZON_AZIMUTH_BINS} directions, as DRAWN (times the background's
+ *   intensity), in the OUTPUT colour space — the one three hands a fog colour
+ *   to a shader in (`WebGLMaterials.js` §`refreshFogUniforms`), so that a flat
+ *   table is exactly the `fogColor` it is blended from. 16 `vec3`s, 192 bytes.
+ *   ⚠️ **Only while nothing fogged by the air draws into a render target.**
+ *   three converts `fogColor` with `getUnlitUniformColorSpace`: the output
+ *   space with the canvas bound, the LINEAR working space with a target bound.
+ *   This table is converted once, to the output space, and every program
+ *   shares it — so the day a realistic fogged material draws into a target
+ *   (#629's reflections, or a post pass #701 decides on), `fogColor` goes
+ *   linear, the table does not, and even a FLAT table stops being the fog it
+ *   was blended from. That change owes a table per target space, written per
+ *   pass. `realistic-renderer.test.ts` §"#703" fails the build when this file
+ *   first binds or builds a target, so it cannot happen unnoticed.
+ * - `oylFogShare`: `realistic-light.ts` §`REALISTIC_FOG_DIRECTION_SHARE`, or 0
+ *   where the horizon is not the photographed sky's (#544's control).
+ * - `oylSkyTurn`: `realistic-light.ts` §`skyRotation`, so a direction in the
+ *   world reads the sky DRAWN in that direction.
+ * - `oylValleyMiddle`, `oylValleyHaze`, `oylValleyDepth`: the valley haze —
+ *   `realistic-light.ts` §`valleyHazeFactor`.
+ */
+const ATMOSPHERE = {
+  oylFogTable: { value: new Float32Array(HORIZON_AZIMUTH_BINS * 3) },
+  oylFogShare: { value: 0 },
+  oylSkyTurn: { value: 0 },
+  oylValleyMiddle: { value: 0 },
+  oylValleyHaze: { value: 1 },
+  oylValleyDepth: { value: REALISTIC_VALLEY_DEPTH_METRES },
+};
+
+/**
+ * What the realistic fog adds to three's own, in the vertex shader: the WORLD
+ * vector from the camera to the vertex. `mvPosition` times the view matrix as a
+ * row vector is the view matrix's transpose applied to it, which for its
+ * rotation is its inverse, and a `w` of 0 leaves its translation out. Linear
+ * in position, so interpolating it across a triangle is exact.
+ */
+const ATMOSPHERE_VERTEX = /* glsl */ `
+#ifdef USE_FOG
+  vOylFogRay = (vec4(mvPosition.xyz, 0.0) * viewMatrix).xyz;
+#endif
+`;
+
+/**
+ * The realistic fog, in place of three's `fog_fragment` — #622. Three's own
+ * arithmetic (`fog_fragment.glsl.js` in 0.185.1) with two changes and nothing
+ * else:
+ *
+ * 1. **The colour leans towards the sky in the direction looked**:
+ *    `realistic-light.ts` §`directionalFogColour`, the same interpolation
+ *    between the two nearest bins, wrapping. ⚠️ The bin index is made
+ *    POSITIVE before `%`, because GLSL ES 3.00 leaves the integer `%` of a
+ *    negative operand undefined, and `oylAt` is negative whenever the azimuth
+ *    plus the turn is under −π: `skyRotation` lies in (−2π, 2π), so the sum
+ *    lies in (−3π, 3π) and `oylAt` in (−N − 0.5, 2N − 0.5) for N bins —
+ *    (−16.5, 31.5) at 16. The offset added is {@link ATMOSPHERE_BIN_OFFSET},
+ *    4N: a MULTIPLE of N, so it moves no bin, and larger than N + 1, so it
+ *    clears the lowest. #703's review found the literal `64` it replaced
+ *    right only while N divided 64 — at 12 or 24 bins every read would have
+ *    shifted. Not the float `mod`: a GPU may divide by a reciprocal, and
+ *    `floor(24.0 / 12.0)` coming out 1 would index one past the table.
+ * 2. **The density rises below the middle of the route's elevation**:
+ *    `realistic-light.ts` §`valleyHazeFactor`, at the fragment's own height.
+ *
+ * About a dozen ALU on a fragment every realistic material already fogs; no
+ * texture, no pass, no draw.
+ */
+/**
+ * What {@link ATMOSPHERE_FRAGMENT} adds to a bin index before it wraps it with
+ * `%`: **4 ×** {@link HORIZON_AZIMUTH_BINS}, derived so it stays a multiple of
+ * the bin count whatever that becomes — see the fragment's note 1.
+ */
+export const ATMOSPHERE_BIN_OFFSET = 4 * HORIZON_AZIMUTH_BINS;
+
+/**
+ * The GLSL of {@link ATMOSPHERE_FRAGMENT}'s bin wrap, as it is spliced —
+ * exported, with {@link ATMOSPHERE_BIN_OFFSET}, so `realistic-renderer.test.ts`
+ * can hold the offset to a multiple of the bin count, evaluate the wrap at
+ * every index the shader can reach, and find it in a compiled material
+ * (#703's review).
+ */
+export const ATMOSPHERE_BIN_WRAP = `(int(oylLower) + ${String(ATMOSPHERE_BIN_OFFSET)}) % ${String(HORIZON_AZIMUTH_BINS)}`;
+
+const ATMOSPHERE_FRAGMENT = /* glsl */ `
+#ifdef USE_FOG
+{
+  float oylAzimuth = atan(vOylFogRay.z, vOylFogRay.x) + oylSkyTurn;
+  float oylAt = (oylAzimuth * RECIPROCAL_PI2 + 0.5) * ${HORIZON_AZIMUTH_BINS.toFixed(1)} - 0.5;
+  float oylLower = floor(oylAt);
+  int oylFrom = ${ATMOSPHERE_BIN_WRAP};
+  int oylTo = (oylFrom + 1) % ${String(HORIZON_AZIMUTH_BINS)};
+  vec3 oylToward = mix(oylFogTable[oylFrom], oylFogTable[oylTo], oylAt - oylLower);
+  vec3 oylFogColour = mix(fogColor, oylToward, oylFogShare);
+  float oylBelow = clamp(
+    (oylValleyMiddle - (cameraPosition.y + vOylFogRay.y)) / oylValleyDepth, 0.0, 1.0);
+  #ifdef FOG_EXP2
+    float oylDensity = fogDensity * (1.0 + (oylValleyHaze - 1.0) * oylBelow);
+    float fogFactor = 1.0 - exp(- oylDensity * oylDensity * vFogDepth * vFogDepth);
+  #else
+    float fogFactor = smoothstep(fogNear, fogFar, vFogDepth);
+  #endif
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, oylFogColour, fogFactor);
+}
+#endif
+`;
+
+/**
+ * Teaches a realistic material the air — #622: {@link ATMOSPHERE_FRAGMENT} in
+ * place of three's `fog_fragment`, and the world ray it needs.
+ *
+ * ⚠️ **The realistic world's materials only** — ADR 0026 D-3, no rung mixes
+ * the two worlds. The stylised world's materials are never taught, so its fog
+ * is three's own, byte for byte; `realistic-renderer.test.ts` and the browser
+ * gate both check which materials are. The fogged materials the realistic
+ * world draws that are NOT taught are the two it shares with the stylised
+ * world, where teaching them would change the stylised world: the WATER's
+ * (`WaterBelt`) — #629 is where the water meets the realistic sky — and the
+ * riders' CONTACT SHADOWS (`ContactShadowBelt`), which lie under a rider where
+ * the fog has taken next to nothing. The horizon ring is not
+ * fogged at all and takes the same directional colour on the CPU instead
+ * (`HorizonRing.update`).
+ *
+ * Chained after whatever the material already does before it compiles, and
+ * keyed apart, for {@link withSurfaceDetail}'s reason; every replacement
+ * throws if three's chunk is not there, so a three bump that moved one is a
+ * red build rather than a fog that quietly stopped. Idempotent.
+ */
+function withAtmosphere<M extends Material>(material: M): M {
+  if (ATMOSPHERIC.has(material)) return material;
+  ATMOSPHERIC.add(material);
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  const spliced = "#622's air";
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    Object.assign(shader.uniforms, ATMOSPHERE);
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.vertexShader,
+        '#include <fog_pars_vertex>',
+        '#include <fog_pars_vertex>\n#ifdef USE_FOG\nvarying vec3 vOylFogRay;\n#endif',
+        'vertex',
+        spliced,
+      ),
+      '#include <fog_vertex>',
+      `#include <fog_vertex>${ATMOSPHERE_VERTEX}`,
+      'vertex',
+      spliced,
+    );
+    shader.fragmentShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.fragmentShader,
+        '#include <fog_pars_fragment>',
+        `#include <fog_pars_fragment>
+#ifdef USE_FOG
+varying vec3 vOylFogRay;
+uniform vec3 oylFogTable[${String(HORIZON_AZIMUTH_BINS)}];
+uniform float oylFogShare;
+uniform float oylSkyTurn;
+uniform float oylValleyMiddle;
+uniform float oylValleyHaze;
+uniform float oylValleyDepth;
+#endif`,
+        'fragment',
+        spliced,
+      ),
+      '#include <fog_fragment>',
+      ATMOSPHERE_FRAGMENT,
+      'fragment',
+      spliced,
+    );
+  };
+  material.customProgramCacheKey = () => `${earlierKey}|oyl-atmosphere`;
+  return material;
+}
+
+/** Reused by `ThreeGameView.#airFor` to convert a colour, so the conversion allocates nothing. */
+const AIR_SCRATCH = new Color();
+
+/** The materials {@link withAtmosphere} has taught. */
+const ATMOSPHERIC = new WeakSet<Material>();
+
+/**
+ * Whether a material breathes the realistic air — #622.
+ *
+ * @test-facing held by `realistic-renderer.test.ts`, which asserts every
+ * realistic material that fogs is taught and no stylised one is
+ */
+export function breathesTheAir(material: Material): boolean {
+  return ATMOSPHERIC.has(material);
 }
 
 /**
@@ -5745,7 +6084,8 @@ function impostorMaterial(
   });
   (material.uniforms['strip'] as { value: Texture | null }).value = strip;
   // #619 lever 2: the strip is mipmapped, so the far band sheds with the rest.
-  return constructed(withTextureLodBias(material));
+  // #622: its fog is three's chunk like any other, so it breathes the same air.
+  return constructed(withAtmosphere(withTextureLodBias(material)));
 }
 
 /**
@@ -6510,8 +6850,8 @@ material.specularF90 *= ${ROAD_SHEEN.toFixed(3)};`,
       );
   };
   material.customProgramCacheKey = () => 'oyl-photographic-road';
-  // #619 lever 2. Chained last, after the assignment above.
-  return withTextureLodBias(material);
+  // #619 lever 2 and #622's air, chained after the assignment above.
+  return withAtmosphere(withTextureLodBias(material));
 }
 
 /**
@@ -6599,7 +6939,9 @@ export function photographicGroundMaterial(
   material.customProgramCacheKey = () => 'oyl-photographic-ground';
   // #460's patchwork, chained after the photograph rather than replacing it,
   // and #619 lever 2's bias after both.
-  return withTextureLodBias(withSurfaceDetail(material, 'ground', fieldSpan, fieldCount));
+  return withAtmosphere(
+    withTextureLodBias(withSurfaceDetail(material, 'ground', fieldSpan, fieldCount)),
+  );
 }
 
 /**
@@ -6683,17 +7025,21 @@ export class RealisticRiderBelt {
 
   constructor(body: Object3D) {
     const bike = realisticBicycle();
-    const frameMaterial = constructed(
-      new MeshStandardMaterial({ color: RIDER_PALETTE.frame, roughness: 0.35, metalness: 0.3 }),
+    const frameMaterial = withAtmosphere(
+      constructed(
+        new MeshStandardMaterial({ color: RIDER_PALETTE.frame, roughness: 0.35, metalness: 0.3 }),
+      ),
     );
-    const rubberMaterial = constructed(
-      new MeshStandardMaterial({ color: RIDER_PALETTE.tyre, roughness: 0.85, metalness: 0 }),
+    const rubberMaterial = withAtmosphere(
+      constructed(
+        new MeshStandardMaterial({ color: RIDER_PALETTE.tyre, roughness: 0.85, metalness: 0 }),
+      ),
     );
-    const metalMaterial = constructed(
-      new MeshStandardMaterial({ color: 0xb8b8bc, roughness: 0.3, metalness: 0.9 }),
+    const metalMaterial = withAtmosphere(
+      constructed(new MeshStandardMaterial({ color: 0xb8b8bc, roughness: 0.3, metalness: 0.9 })),
     );
-    const helmetMaterial = constructed(
-      new MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.4, metalness: 0 }),
+    const helmetMaterial = withAtmosphere(
+      constructed(new MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.4, metalness: 0 })),
     );
     const riders = RIDDEN_KINDS.length;
     this.#frame = tintable(bike.frame, frameMaterial, riders);
@@ -6719,8 +7065,10 @@ export class RealisticRiderBelt {
       });
       if (skinned === undefined) throw new Error('the rider model holds no skinned mesh');
       const source = skinned.material as Material;
-      const material = constructed(
-        new MeshStandardMaterial({ vertexColors: true, roughness: 0.65, metalness: 0 }),
+      const material = withAtmosphere(
+        constructed(
+          new MeshStandardMaterial({ vertexColors: true, roughness: 0.65, metalness: 0 }),
+        ),
       );
       if (slot === 0) source.dispose();
       skinned.material = material;
@@ -7476,7 +7824,9 @@ function structureMaterials(
   // shares; masonry's bound is small enough that glass stays glass, and the
   // browser gate's window-glass assertions are unchanged by it.
   const biased = <M extends Material>(material: M): M =>
-    withInstanceChannels(maps === undefined ? material : withTextureLodBias(material), false);
+    withAtmosphere(
+      withInstanceChannels(maps === undefined ? material : withTextureLodBias(material), false),
+    );
   return {
     lit: biased(
       constructed(
@@ -7906,6 +8256,15 @@ export interface SceneMaterial {
   readonly type: string;
   /** ADR 0026 D-11: whether this file constructed it. */
   readonly constructed: boolean;
+  /** #622: whether three fogs it at all. */
+  readonly fogged: boolean;
+  /** #622: whether it breathes the realistic air. @see breathesTheAir */
+  readonly atmospheric: boolean;
+  /**
+   * #622: whether it is drawn in BOTH worlds — the water's and the riders'
+   * contact shadows' — and so is never taught the realistic air. @see withAtmosphere
+   */
+  readonly shared: boolean;
 }
 
 /**
@@ -8139,6 +8498,50 @@ export function horizonFromSkyOf(view: GameView, on: boolean): void {
 }
 
 /**
+ * Flattens a view's realistic air to one colour for every direction, or turns
+ * its valley haze off — #622. The browser gate's controls: with the table
+ * flattened, a probe towards the sun and one away must agree; with the haze
+ * off, a valley floor must read as it did before #622.
+ *
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`;
+ * the product always breathes the directional air.
+ */
+export function atmosphereOf(
+  view: GameView,
+  air: { readonly table: 'directional' | 'flattened'; readonly valley: boolean },
+): void {
+  if (view instanceof ThreeGameView) view.atmosphere(air);
+}
+
+/**
+ * What a view's last frame fogged with — #622. @see airOf
+ *
+ * @test-facing the shape `game-harness.ts` reads the view's air in; nothing in
+ * the render path asks
+ */
+export interface AirReading {
+  /** The fog's own colour, `fogColor`, in the output colour space. */
+  readonly base: readonly [number, number, number];
+  /** The table the shader read, in the output colour space, three floats a direction. */
+  readonly table: readonly number[];
+  readonly share: number;
+  readonly turn: number;
+  readonly density: number;
+  readonly valleyMiddle: number;
+  readonly valleyHaze: number;
+}
+
+/**
+ * What a view's last frame fogged with — #622, so the browser gate predicts a
+ * pixel from the same numbers the shader was handed.
+ *
+ * @test-facing read by `game-harness.ts`; nothing in the render path asks.
+ */
+export function airOf(view: GameView): AirReading | undefined {
+  return view instanceof ThreeGameView ? view.airReading : undefined;
+}
+
+/**
  * Puts a view's realistic foliage back in the order three would draw it
  * unasked, or in #619's order again — lever 1's control. With it off, the
  * canopy is drawn among the opaque world rather than after it, and the frame
@@ -8290,6 +8693,24 @@ class ThreeGameView implements GameView {
   #horizonFromSky = true;
   /** Whether this frame's horizon is the photographed sky's. Set by `#updateWorld`. */
   #horizonIsSky = false;
+  /**
+   * #622: whether the fog leans towards the sky's own colour in each direction
+   * or towards one mean for all of them — the product's only setting is
+   * `'directional'`; `'flattened'` is the browser gate's control. @see atmosphereOf
+   */
+  #airTable: 'directional' | 'flattened' = 'directional';
+  /** #622: whether the valley haze is on — always, but for the browser gate's control. */
+  #valleyHaze = true;
+  /** #622: this frame's air, linear, for the horizon ring; `undefined` off the realistic sky. */
+  #air: RealisticAir | undefined;
+  /** #622: the table {@link #airOutput} was last converted from, and at what intensity. */
+  #airFrom: { readonly table: readonly LinearColour[]; readonly intensity: number } | undefined;
+  /** #622: the last table {@link #airFor} worked out, linear and drawn. */
+  #airLinear: readonly LinearColour[] = [];
+  /** #622: this frame's table in the output colour space, as the shader reads it. @see ATMOSPHERE */
+  readonly #airOutput = new Float32Array(HORIZON_AZIMUTH_BINS * 3);
+  /** #622: the middle of this route's elevation, local metres. @see HorizonRelief.middle */
+  #valleyMiddle = 0;
   /** The ground beside the road — #458. @see TerrainBelt */
   readonly #terrain = new TerrainBelt();
   /** The hills on the horizon — #458. @see HorizonRing */
@@ -8421,6 +8842,15 @@ class ThreeGameView implements GameView {
     // those materials. @see REALISTIC_TEXTURE_LOD_BIAS
     REALISTIC_TEXTURE_LOD_BIAS.value =
       this.#drawing === 'realistic' ? this.#quality.textureLodBias : 0;
+    // #622, for the same reason. Only the realistic world's materials read
+    // these, so a stylised frame has nothing to write.
+    if (this.#drawing === 'realistic') {
+      ATMOSPHERE.oylFogTable.value.set(this.#airOutput);
+      ATMOSPHERE.oylFogShare.value = this.#air?.share ?? 0;
+      ATMOSPHERE.oylSkyTurn.value = this.#air?.turn ?? 0;
+      ATMOSPHERE.oylValleyMiddle.value = this.#valleyMiddle;
+      ATMOSPHERE.oylValleyHaze.value = this.#valleyHaze ? REALISTIC_VALLEY_HAZE : 1;
+    }
     this.#renderer.render(this.#scene, this.#camera);
   }
 
@@ -8443,7 +8873,10 @@ class ThreeGameView implements GameView {
         ? skylineCrestFloor(rig.eye.y, HORIZON_RADIUS_METRES)
         : Number.NEGATIVE_INFINITY,
       this.#horizonIsSky ? REALISTIC_HORIZON_HAZE_SHARE : HORIZON_HAZE_SHARE,
+      // #622: and its foot leans towards the sky in each direction as the fog does.
+      this.#air,
     );
+    this.#valleyMiddle = frame.terrain.horizon.middle;
     this.#water.update(
       frame.water.surface,
       frame.world,
@@ -8660,6 +9093,27 @@ class ThreeGameView implements GameView {
     this.#horizonFromSky = on;
   }
 
+  /** @see atmosphereOf */
+  atmosphere(air: { readonly table: 'directional' | 'flattened'; readonly valley: boolean }): void {
+    this.#airTable = air.table;
+    this.#valleyHaze = air.valley;
+  }
+
+  /** @see airOf */
+  get airReading(): AirReading {
+    const output = { r: 0, g: 0, b: 0 };
+    this.#fog.color.getRGB(output, this.#renderer?.outputColorSpace ?? SRGBColorSpace);
+    return {
+      base: [output.r, output.g, output.b],
+      table: Array.from(ATMOSPHERE.oylFogTable.value),
+      share: ATMOSPHERE.oylFogShare.value,
+      turn: ATMOSPHERE.oylSkyTurn.value,
+      density: this.#fog.density,
+      valleyMiddle: ATMOSPHERE.oylValleyMiddle.value,
+      valleyHaze: ATMOSPHERE.oylValleyHaze.value,
+    };
+  }
+
   /** @see horizonColoursOf */
   get horizonColours(): {
     readonly fog: readonly [number, number, number];
@@ -8767,7 +9221,14 @@ class ThreeGameView implements GameView {
         if (!at.visible) visible = false;
       }
       for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
-        found.push({ visible, type: material.type, constructed: isConstructedMaterial(material) });
+        found.push({
+          visible,
+          type: material.type,
+          constructed: isConstructedMaterial(material),
+          fogged: (material as Partial<MeshBasicMaterial>).fog === true,
+          atmospheric: breathesTheAir(material),
+          shared: this.#water.wears(material) || this.#contactShadows.wears(material),
+        });
       }
     });
     return found;
@@ -8859,6 +9320,36 @@ class ThreeGameView implements GameView {
   }
 
   /**
+   * The realistic sky's air for a frame — #622: the horizon table as DRAWN
+   * (times the background's `intensity`) for the ring, and the same in the
+   * output colour space for the shader. The conversion is three's own
+   * (`Color.getRGB`, as `WebGLMaterials.js` hands `fogColor` over), so a flat
+   * table is the `fogColor` it is blended from. Converted only when the table
+   * or the intensity changes, which on a ride is once.
+   *
+   * ⚠️ Converted with `outputColorSpace` UNCONDITIONALLY, where three picks the
+   * fog's space by the bound render target — the same only while none is bound
+   * when a realistic fogged material draws. See {@link ATMOSPHERE} before
+   * adding one (#629, #701).
+   */
+  #airFor(sky: RealisticSky, intensity: number, turn: number): RealisticAir {
+    const source = this.#airTable === 'flattened' ? sky.flatDirections : sky.directions;
+    if (this.#airFrom?.table !== source || this.#airFrom.intensity !== intensity) {
+      this.#airFrom = { table: source, intensity };
+      this.#airLinear = source.map((each) => drawnHorizonColour(each, intensity));
+      const space = this.#renderer?.outputColorSpace ?? SRGBColorSpace;
+      const output = { r: 0, g: 0, b: 0 };
+      this.#airLinear.forEach((each, bin) => {
+        AIR_SCRATCH.setRGB(each[0], each[1], each[2]).getRGB(output, space);
+        this.#airOutput[bin * 3] = output.r;
+        this.#airOutput[bin * 3 + 1] = output.g;
+        this.#airOutput[bin * 3 + 2] = output.b;
+      });
+    }
+    return { table: this.#airLinear, share: REALISTIC_FOG_DIRECTION_SHARE, turn };
+  }
+
+  /**
    * Applies the world `world.ts` derived from the route — #241.
    *
    * ⚠️ **This method is the whole of what makes `SceneFrame.world` real.** A
@@ -8883,6 +9374,7 @@ class ThreeGameView implements GameView {
     this.#sky.setHex(world.skyColour);
     this.#horizonColour.setHex(world.horizonColour);
     this.#horizonIsSky = false;
+    this.#air = undefined;
     this.#fog.density = world.fogDensity;
     // ⚠️ Every frame, like the fog and for the same reason: the world is a
     // function of the route and a renderer is handed a frame, not a route. A
@@ -8908,6 +9400,7 @@ class ThreeGameView implements GameView {
       if (this.#horizonFromSky) {
         this.#horizonColour.setRGB(...drawnHorizonColour(loaded.sky.skyline, intensity));
         this.#horizonIsSky = true;
+        this.#air = this.#airFor(loaded.sky, intensity, turn);
       }
     } else {
       this.#lighting.apply(world.sun);

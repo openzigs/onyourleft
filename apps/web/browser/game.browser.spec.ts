@@ -44,6 +44,7 @@ import type {
 import { MINIMUM_TINT_CONTRAST_RATIO } from '../src/game/terrain';
 import { type InstanceTint, NO_TINT, tintedLinear } from '../src/game/instance-tint';
 import { GROUND_BLOB_DARKNESS } from '../src/game/ground-blob';
+import { REALISTIC_VALLEY_HAZE } from '../src/game/realistic-light';
 import {
   PRESENCE_CHECK_MILLISECONDS,
   PRESENCE_GRID_COLUMNS,
@@ -3044,6 +3045,15 @@ test.describe('the realistic world — ADR 0026', () => {
     expect(measured.drawCalls - measured.drawCallsWithoutRoad).toBe(1);
     const contrast = (a: number, b: number): number =>
       (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+    // #622 publishes the margin: the fog and its valley haze now reach this
+    // pixel too, so a change to either is read against it here.
+    console.log(
+      `the realistic road's gradient after the light and AgX — climb ${measured.climbLuminance.toFixed(4)}, ` +
+        `descent ${measured.descentLuminance.toFixed(4)}: ` +
+        `${contrast(measured.climbLuminance, measured.descentLuminance).toFixed(3)}:1 against ` +
+        `${String(MINIMUM_TINT_CONTRAST_RATIO)}:1; the level control ` +
+        `${contrast(measured.levelClimbLuminance, measured.levelDescentLuminance).toFixed(4)}:1`,
+    );
     // The criterion, read off the drawing buffer: the tint still separates the
     // steepest climb from the steepest descent over the photographic road.
     expect(measured.descentLuminance).toBeGreaterThan(measured.climbLuminance);
@@ -3218,6 +3228,135 @@ test.describe('the realistic world — ADR 0026', () => {
       expect(crestContrast(each), describe(each)).toBeGreaterThan(MAXIMUM_CREST_CONTRAST);
       expect(each.darkestAboveRelief, describe(each)).toBeLessThan(each.ground);
     }
+  });
+
+  test('leans the fog towards the sky in the direction looked, and hazes a valley floor — #622', async ({
+    harnessRun,
+  }) => {
+    const { air, atmosphere } = await realistic(harnessRun);
+    const bytes = (rgb: readonly number[]): string =>
+      rgb.map((channel) => (channel * 255).toFixed(1)).join('/');
+    const shifted = (probe: { directional: readonly number[]; flattened: readonly number[] }) =>
+      [0, 1, 2].map(
+        (channel) => (probe.directional[channel] ?? 0) - (probe.flattened[channel] ?? 0),
+      );
+    console.log(
+      `#622 air: fog factor ${air.fogFactor.toFixed(3)} (${air.fogFactorWithoutValley.toFixed(3)} ` +
+        `without the valley's ×${air.valleyFactor.toFixed(3)}); towards the sun ${bytes(air.toward.directional)} ` +
+        `(flattened ${bytes(air.toward.flattened)}, shift ${bytes(shifted(air.toward))} against ` +
+        `${bytes(air.predictedToward)} predicted, fog ${bytes(air.fogToward)}); away ` +
+        `${bytes(air.away.directional)} (flattened ${bytes(air.away.flattened)}, shift ` +
+        `${bytes(shifted(air.away))} against ${bytes(air.predictedAway)} predicted, fog ${bytes(air.fogAway)}); ` +
+        `valley off ${bytes(air.valleyOff)}, on ${bytes(air.toward.flattened)} against ` +
+        `${bytes(air.valleyPredicted)} predicted; sky 30° up ${air.skyToward.toFixed(4)} towards the sun, ` +
+        `${air.skyAway.toFixed(4)} away | materials: realistic ${String(atmosphere.realisticTaught)} taught, ` +
+        `${String(atmosphere.realisticUntaught)} not, ${String(atmosphere.realisticShared)} shared; stylised ` +
+        `${String(atmosphere.stylisedTaught)} of ${String(atmosphere.stylisedFogged)} taught`,
+    );
+    expect(air.measured).toBe(true);
+
+    // ADR 0026 D-3: every mesh the realistic world fogs breathes its air but
+    // the two materials both worlds share — the water (#629) and the riders'
+    // contact shadows — and nothing the stylised world draws does.
+    expect(atmosphere.realisticTaught).toBeGreaterThan(0);
+    expect(atmosphere.realisticUntaught).toBe(0);
+    expect(atmosphere.stylisedFogged).toBeGreaterThan(0);
+    expect(atmosphere.stylisedTaught).toBe(0);
+
+    // The CONTROL: with the table flattened to its mean, the probe with the
+    // sun turned towards it and the one with the sun turned away agree — so
+    // turning the sun changes nothing else on that pixel.
+    for (let channel = 0; channel < 3; channel += 1) {
+      const towards = air.toward.flattened[channel] ?? 0;
+      const away = air.away.flattened[channel] ?? 0;
+      expect(Math.abs(towards - away), `channel ${String(channel)}`).toBeLessThanOrEqual(
+        AIR_CONTROL_AGREEMENT * Math.max(towards, away),
+      );
+    }
+
+    // Each probe's directional shift is the one the table predicts at the
+    // probe's depth — from BOTH sides, so a fog that leans too far fails as
+    // surely as one that does not lean at all (#621's lesson).
+    for (const [name, probe, predicted] of [
+      ['towards the sun', air.toward, air.predictedToward],
+      ['away from the sun', air.away, air.predictedAway],
+    ] as const) {
+      const measured = shifted(probe);
+      for (let channel = 0; channel < 3; channel += 1) {
+        const want = predicted[channel] ?? 0;
+        expect(
+          Math.abs((measured[channel] ?? 0) - want),
+          `${name}, channel ${String(channel)}: ${bytes(measured)} against ${bytes(predicted)}`,
+        ).toBeLessThanOrEqual(
+          AIR_SHIFT_TOLERANCE.bytes / 255 + AIR_SHIFT_TOLERANCE.share * Math.abs(want),
+        );
+      }
+    }
+    // Not vacuous: the table does lean the fog by more than the tolerance
+    // somewhere at each probe.
+    for (const predicted of [air.predictedToward, air.predictedAway]) {
+      expect(Math.max(...predicted.map(Math.abs))).toBeGreaterThan(AIR_SHIFT_FLOOR / 255);
+    }
+    // And the two probes differ in the direction the HDR's own band says: in
+    // every channel where the band's two colours differ by more than a byte
+    // at this fog, the drawn difference is that way round AND the size the
+    // prediction says, from both sides (#621's lesson).
+    //
+    // ⚠️ The difference compared is each probe's SHIFT — its directional read
+    // less its own flattened read — never the raw pixels (#703's review). The
+    // raw pixels differ by about two bytes, which is less than the control
+    // above allows the two frames' LIGHTING to differ (2 % of ~140 is 2.8), so
+    // a lighting change the control accepts could flip or fake a raw sign on
+    // its own: dimming the toward frame's direct light by a fifth (B11) did
+    // not turn the control red. Fog mixes last and linearly, so a shift is
+    // `f · (F_directional − F_flattened)` whatever lit the surface under it,
+    // and the difference of two shifts carries no lighting at all.
+    let compared = 0;
+    for (let channel = 0; channel < 3; channel += 1) {
+      const band = ((air.fogToward[channel] ?? 0) - (air.fogAway[channel] ?? 0)) * air.fogFactor;
+      if (Math.abs(band) * 255 < 1) continue;
+      compared += 1;
+      const drawn =
+        (air.toward.directional[channel] ?? 0) -
+        (air.toward.flattened[channel] ?? 0) -
+        ((air.away.directional[channel] ?? 0) - (air.away.flattened[channel] ?? 0));
+      const want = (air.predictedToward[channel] ?? 0) - (air.predictedAway[channel] ?? 0);
+      expect(Math.sign(drawn), `channel ${String(channel)}`).toBe(Math.sign(band));
+      expect(
+        Math.abs(drawn - want),
+        `towards less away, channel ${String(channel)}: ${(drawn * 255).toFixed(2)} against ` +
+          `${(want * 255).toFixed(2)} predicted`,
+      ).toBeLessThanOrEqual(
+        AIR_DIFFERENCE_TOLERANCE.bytes / 255 + AIR_DIFFERENCE_TOLERANCE.share * Math.abs(want),
+      );
+    }
+    expect(compared).toBeGreaterThan(0);
+
+    // The valley: the floor under a fog REALISTIC_VALLEY_HAZE times as dense,
+    // predicted from the same pixel with the haze off, from both sides.
+    expect(air.valleyFactor).toBeCloseTo(REALISTIC_VALLEY_HAZE, 6);
+    for (let channel = 0; channel < 3; channel += 1) {
+      const want = air.valleyPredicted[channel] ?? 0;
+      const moved = want - (air.valleyOff[channel] ?? 0);
+      expect(
+        Math.abs((air.toward.flattened[channel] ?? 0) - want),
+        `valley, channel ${String(channel)}`,
+      ).toBeLessThanOrEqual(
+        AIR_SHIFT_TOLERANCE.bytes / 255 + AIR_SHIFT_TOLERANCE.share * Math.abs(moved),
+      );
+    }
+    expect(
+      Math.max(
+        ...[0, 1, 2].map((channel) =>
+          Math.abs((air.valleyPredicted[channel] ?? 0) - (air.valleyOff[channel] ?? 0)),
+        ),
+      ),
+    ).toBeGreaterThan(AIR_SHIFT_FLOOR / 255);
+
+    // The sky the fog leans towards is the sky drawn: 30° up, the committed
+    // photograph is about twice as bright on its sun's side, so the drawn sky
+    // turned towards the world's sun must be brighter there than turned away.
+    expect(air.skyToward).toBeGreaterThan(air.skyAway * SKY_SUN_SIDE_RATIO);
   });
 
   test('steps down to the stylised world whole, and publishes what realism costs', async ({
@@ -3455,6 +3594,50 @@ function largestMove(
   }
   return { moved, out };
 }
+
+/**
+ * How far the two #622 probes may differ with the direction table flattened —
+ * the sun turned towards the point and away from it, at the same elevation:
+ * **2 %** of the brighter, per channel, #622's own control figure. The road
+ * there is lit as facing straight up, so the turn should change nothing.
+ */
+const AIR_CONTROL_AGREEMENT = 0.02;
+
+/**
+ * How far a #622 probe's drawn shift may stand from the predicted one: **1.5
+ * bytes plus a quarter of the prediction**, per channel. The bytes are the
+ * read-back's own quantisation over a 3 × 3 mean; the quarter is the fog
+ * factor's spread across those nine pixels' depths and the table's
+ * interpolation across their azimuths. A fog that does not lean misses by the
+ * whole prediction, and one that leans twice as far by all of it again.
+ */
+const AIR_SHIFT_TOLERANCE = { bytes: 1.5, share: 0.25 } as const;
+
+/**
+ * How far the drawn difference between the two #622 probes' shifts — towards
+ * the sun less away from it — may stand from the predicted one: **0.75 bytes
+ * plus a quarter of the prediction**, per channel. Tighter in bytes than
+ * {@link AIR_SHIFT_TOLERANCE} because a difference of two shifts is ~1.6 bytes
+ * where the band is compared at all, and a bound of 1.5 bytes around that would
+ * admit the wrong sign. The CI runner read 1.5/1.8 against 1.6/1.6 predicted
+ * (#703, run 36368471971), so the margin is about four times what it used.
+ */
+const AIR_DIFFERENCE_TOLERANCE = { bytes: 0.75, share: 0.25 } as const;
+
+/**
+ * The least a #622 prediction must move a pixel for its comparison to mean
+ * anything: **3 bytes**, twice the tolerance's fixed part.
+ */
+const AIR_SHIFT_FLOOR = 3;
+
+/**
+ * How much brighter the drawn sky 30° up must be with the world's sun behind
+ * it than with the sun turned away: **1.3 ×**. The committed photograph reads
+ * 1.44 against 0.67 there (off the file, 2026-09-27); after the tone map the
+ * ratio shrinks, and 1.3 is under what AgX leaves of it but far over what a
+ * sky turned the wrong way round would give — darker towards the sun.
+ */
+const SKY_SUN_SIDE_RATIO = 1.3;
 
 /**
  * How far from the ground toward the sky a distant ridge must be drawn, as a

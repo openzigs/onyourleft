@@ -1268,6 +1268,27 @@ real `.wasm` and every committed file, on a device offering ASTC and ETC and —
 offering nothing) and `game.browser.spec.ts` §"#618" (the upload formats read off the GL calls,
 with an RGBA8 control).
 
+**The realistic fog leans towards the sky in the direction a rider looks, and thickens in a valley,
+since [#622](https://github.com/openzigs/onyourleft/issues/622)** — and a reader who remembers #544's
+fog as *one colour for every direction* is reading the old file. At load, `realistic-light.ts`
+§`skyHorizonTable` reads the HDR's band just above its skyline (#544's `REALISTIC_HORIZON_BAND`) in
+16 directions; nothing reads the sky per frame. `three-renderer.ts` §`withAtmosphere` replaces three's
+`fog_fragment` on the **realistic materials only** (ADR 0026 D-3): the fog's colour is the one #544
+colour blended by `REALISTIC_FOG_DIRECTION_SHARE` (0.5) towards the table at the fragment's world
+azimuth plus `skyRotation`'s turn, and its density rises by up to `REALISTIC_VALLEY_HAZE` (1.25×)
+below the middle of the route's elevation (`landform.ts` §`HorizonRelief.middle`). 16 `vec3`
+uniforms, 192 bytes, and about a dozen ALU in a chunk every realistic material already runs: **no
+texture, no pass, no draw call, no triangle**. The horizon ring takes the same directional colour on
+the CPU, segment by segment, so it still meets the fog. Two fogged materials are shared by both
+worlds and keep three's own fog — the water's (#629 is where the water meets the realistic sky) and
+the riders' contact shadows. **No grade**: AgX alone is kept, `realistic-light.ts` says why, and the grade is [#701](https://github.com/openzigs/onyourleft/issues/701), after Part AG.
+Held by `realistic-light.test.ts` (the table, the wrap, the turn, the haze), `realistic-renderer.test.ts`
+(which materials are taught, and what is spliced) and `game.browser.spec.ts` §"#622", which predicts
+each probe's pixel from the numbers the shader was handed — three mixes fog in the output space
+after everything else, so the prediction is exact — and holds it from both sides, with the table
+flattened as the control. Whether it helps or fights #544's lifted ridge is the owner's, by eye, in
+validation 0002 Part AH §"The #622 rows", after Part AG.
+
 ## Spike write-ups
 
 A spike is **not a decision**. It is a dated measurement that a decision may rest on, and it ages the
