@@ -23,7 +23,12 @@
  * under a paragraph — Settings on `main`, 4,377 px tall with its first control
  * above the fold. So every section that tucks its explanation into a "More
  * about" disclosure may lay out at most {@link SECTION_PROSE_BUDGET_PIXELS} of
- * prose between its heading and its own first control.
+ * prose between its heading and its own first control. ⚠️ The harness finds a
+ * section BY its disclosure, so a section whose explanation was put back and
+ * its disclosure deleted used to drop out of the measurement silently (#699's
+ * review, B2) — Settings' only guard. {@link TUCKING_SECTIONS} pins which
+ * sections tuck, route by route, and the walk fails a pinned one it did not
+ * measure.
  *
  * ## Text the owner ruled must stay
  *
@@ -31,7 +36,30 @@
  * says the text was read. So a first control below the fold passes when
  * everything in its way is a heading or is marked `data-oyl-kept-visible`
  * (`design/MoreAbout.tsx` §`KeptVisible`) — and fails the moment one ordinary
- * paragraph is added there. The spec prints which routes pass that way.
+ * paragraph is added there — ON THE ROUTES {@link CONSENT_BEFORE_CONTROL}
+ * NAMES, and nowhere else. #699's review found the exemption unbounded: with
+ * Camera's reorder reverted and the mark added to one intro paragraph, Camera
+ * passed "behind kept-visible text only" with its first control at 1,252 px on
+ * a 781 px fold. So the set of routes that pass that way is asserted EQUAL to
+ * that list over the viewports, and `a11y/kept-visible.a11y.test.tsx` requires
+ * every marked sentence to be one its view lists as safety or privacy text.
+ * The spec prints which routes pass that way.
+ *
+ * ## Devices, where a browser can pair
+ *
+ * The walk's fixture hands Devices a browser with no Bluetooth, which renders
+ * no pairing row and so no control to measure (#699's review, N4). The last
+ * case of the fold block opens Devices alone with `?bluetooth=available` — a
+ * Bluetooth that answers "available" and is never asked to pair — at every
+ * viewport. `devices.browser.spec.ts` measures the same state over the real
+ * transport at the phone only.
+ *
+ * ## What counts as in the way
+ *
+ * `reflow-harness.tsx` §`PROSE_SELECTOR`: text blocks, and since #699's
+ * review (N7) tables, figures, pictures, charts, canvases, and a bare `div` or
+ * `section` holding text of its own. Not a label or a legend, which name a
+ * control, and not a heading.
  *
  * ## The controls
  *
@@ -67,7 +95,13 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { ALL_ROUTES, hrefFor, routeById, type RouteDefinition } from '../src/shell/routes';
+import {
+  ALL_ROUTES,
+  hrefFor,
+  routeById,
+  type RouteDefinition,
+  type RouteId,
+} from '../src/shell/routes';
 
 import {
   applyInsets,
@@ -91,9 +125,21 @@ interface Viewport {
   readonly insets?: Insets;
   /** The least a first control must clear the fold by. */
   readonly margin: number;
+  /**
+   * Which of {@link CONSENT_BEFORE_CONTROL}'s routes are measured to need the
+   * exemption here — on a taller screen the consent text can end above the
+   * fold, and then the route passes without it. Held exactly, both ways.
+   */
+  readonly consentBelowFold: readonly RouteId[];
 }
 
-const PHONE: Viewport = { name: 'phone 390×844', width: 390, height: 844, margin: 0 };
+const PHONE: Viewport = {
+  name: 'phone 390×844',
+  width: 390,
+  height: 844,
+  margin: 0,
+  consentBelowFold: ['side-camera'],
+};
 
 /** The owner's tablet in the shell, both ways up (#439). */
 const TABLETS: readonly Viewport[] = [
@@ -103,6 +149,7 @@ const TABLETS: readonly Viewport[] = [
     height: 800,
     insets: PIXEL_TABLET_LANDSCAPE_INSETS,
     margin: FOLD_MARGIN_PIXELS,
+    consentBelowFold: ['side-camera'],
   },
   {
     name: 'tablet in the shell 800×1280, insets 36/32 (assumed)',
@@ -110,6 +157,8 @@ const TABLETS: readonly Viewport[] = [
     height: 1280,
     insets: PIXEL_TABLET_PORTRAIT_INSETS_ASSUMED,
     margin: FOLD_MARGIN_PIXELS,
+    // Measured: the side camera's first control clears this fold by 347 px.
+    consentBelowFold: [],
   },
 ];
 
@@ -123,6 +172,36 @@ const TABLETS: readonly Viewport[] = [
  * Files is here in its place: it is the other route #654 measured by height.
  */
 const MUST_FAIL_INLINE = ['segments', 'settings', 'transfer'] as const;
+
+/**
+ * The routes whose first control may sit below the fold behind text marked
+ * `data-oyl-kept-visible` — and the only ones (#699's review, B1).
+ *
+ * The side camera's own page asks this phone's consent before it offers
+ * anything to press: ADR 0029 D-5 (anyone else in the room) and ADR 0033 (what
+ * the phone films, where the pictures go, what a lost link does) are the text
+ * the box says was read, so the box cannot come first. Measured on this
+ * branch: its first control at y ≈ 1,175 against a fold of 781 on the phone,
+ * and ≈ 901 against 768 on the tablet in landscape. A deviation from #666's
+ * "first control above the fold on every route", put to the owner in the pull
+ * request rather than decided here.
+ */
+const CONSENT_BEFORE_CONTROL: readonly RouteId[] = ['side-camera'];
+
+/**
+ * The sections that tuck their explanation, by heading, route by route —
+ * #699's review, B2. The harness measures a section only where it finds a
+ * "More about" disclosure, so a section put back the way it was before #666 —
+ * its paragraph above its control and its disclosure deleted — is simply not
+ * measured. Pinning the list turns that into a fault. A route not named here
+ * tucks nothing, and a disclosure found on one is a fault too, so a new one
+ * is pinned deliberately.
+ */
+const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
+  settings: ['Units', 'Your weight', 'Announcements', 'Sounds', 'Game world'],
+  segments: ['Make a segment', 'Find your efforts'],
+  transfer: ['Import'],
+};
 
 async function open(page: Page, viewport: Viewport, query: string): Promise<void> {
   await page.setViewportSize({ width: viewport.width, height: viewport.height });
@@ -179,7 +258,12 @@ function judge(
   route: RouteDefinition,
   seen: ReflowMeasurement,
   margin: number,
-): { readonly line: string; readonly faults: readonly string[] } {
+): {
+  readonly line: string;
+  readonly faults: readonly string[];
+  /** Whether the first control passed below the fold, behind kept-visible text only. */
+  readonly exempted: boolean;
+} {
   const faults: string[] = [];
   const control = seen.firstControl;
   const sections = seen.sections
@@ -190,6 +274,15 @@ function judge(
     )
     .join(', ');
   const sectionNote = sections === '' ? '' : `; prose above a section’s control: ${sections}`;
+  const measured = seen.sections.map((section) => section.heading);
+  const pinned = TUCKING_SECTIONS[route.id] ?? [];
+  if (measured.join('|') !== pinned.join('|')) {
+    faults.push(
+      `${route.id}: the sections measured as tucking are [${measured.join(', ')}], ` +
+        `and TUCKING_SECTIONS pins [${pinned.join(', ')}] — a pinned section with no ` +
+        `“More about” disclosure is one whose explanation was put back above its control`,
+    );
+  }
   for (const section of seen.sections) {
     // A section with no control of its own (an empty state) has nothing to
     // put first; its explanation is tucked for the page's length alone.
@@ -201,7 +294,7 @@ function judge(
     }
   }
   if (control === null) {
-    return { line: `${route.id}: no control${sectionNote}`, faults };
+    return { line: `${route.id}: no control${sectionNote}`, faults, exempted: false };
   }
   const clearance = seen.fold - control.top;
   const onlyKept = seen.proseBeforeFirstControl.length === 0;
@@ -216,15 +309,27 @@ function judge(
         seen.proseBeforeFirstControl.map((text) => `“${text}”`).join(', '),
     );
   }
-  return { line, faults };
+  const exempted = clearance <= margin && onlyKept;
+  if (exempted && !CONSENT_BEFORE_CONTROL.includes(route.id)) {
+    faults.push(
+      `${line} — and ${route.id} is not in CONSENT_BEFORE_CONTROL, the only routes whose ` +
+        'first control may wait behind kept-visible text',
+    );
+  }
+  return { line, faults, exempted };
 }
 
 async function walk(
   page: Page,
   viewport: Viewport,
-): Promise<{ readonly lines: string[]; readonly faults: Map<string, readonly string[]> }> {
+): Promise<{
+  readonly lines: string[];
+  readonly faults: Map<string, readonly string[]>;
+  readonly exempted: readonly RouteId[];
+}> {
   const lines: string[] = [];
   const faults = new Map<string, readonly string[]>();
+  const exempted: RouteId[] = [];
   for (const route of ALL_ROUTES) {
     const seen = await visit(page, route);
     const verdict = judge(route, seen, viewport.margin);
@@ -232,10 +337,13 @@ async function walk(
     if (verdict.faults.length > 0) {
       faults.set(route.id, verdict.faults);
     }
+    if (verdict.exempted) {
+      exempted.push(route.id);
+    }
   }
   const unvisited = await page.evaluate(() => window.__oylReflow?.unvisited());
   expect(unvisited, 'routes in ALL_ROUTES the walk never opened').toEqual([]);
-  return { lines, faults };
+  return { lines, faults, exempted };
 }
 
 test.describe('#666 — the first control is above the fold on every route', () => {
@@ -243,9 +351,12 @@ test.describe('#666 — the first control is above the fold on every route', () 
     test(`at a ${PHONE.name}, ${data}`, async ({ page }) => {
       test.setTimeout(180_000);
       await open(page, PHONE, `data=${data}`);
-      const { lines, faults } = await walk(page, PHONE);
+      const { lines, faults, exempted } = await walk(page, PHONE);
       console.log(`controls first, ${PHONE.name}, ${data}\n  ${lines.join('\n  ')}`);
       expect([...faults.values()].flat()).toEqual([]);
+      // Equal, not only within: a listed route that stops needing the
+      // exemption on a phone is one to take off the list.
+      expect(exempted, 'routes behind kept-visible text only').toEqual(CONSENT_BEFORE_CONTROL);
       // The routes the control must fail on have something to measure, so
       // none of them passes by having no control.
       for (const id of MUST_FAIL_INLINE) {
@@ -260,10 +371,28 @@ test.describe('#666 — the first control is above the fold on every route', () 
     }) => {
       test.setTimeout(180_000);
       await open(page, viewport, 'data=empty');
-      const { lines, faults } = await walk(page, viewport);
+      const { lines, faults, exempted } = await walk(page, viewport);
       console.log(`controls first, ${viewport.name}\n  ${lines.join('\n  ')}`);
+      console.log(`  behind kept-visible text only: [${exempted.join(', ')}]`);
       test.info().annotations.push({ type: 'margins', description: lines.join('; ') });
       expect([...faults.values()].flat()).toEqual([]);
+      expect(exempted, 'routes behind kept-visible text only').toEqual(
+        CONSENT_BEFORE_CONTROL.filter((id) => viewport.consentBelowFold.includes(id)),
+      );
+    });
+  }
+
+  for (const viewport of [PHONE, ...TABLETS]) {
+    test(`Devices where a browser can pair, on a ${viewport.name}`, async ({ page }) => {
+      await open(page, viewport, 'data=empty&bluetooth=available');
+      const seen = await visit(page, routeById('devices'));
+      const verdict = judge(routeById('devices'), seen, viewport.margin);
+      console.log(`controls first, Bluetooth available, ${viewport.name}\n  ${verdict.line}`);
+      // The state is the one with the pairing rows, or this measured the
+      // no-Bluetooth page again.
+      expect(seen.firstControl?.text).toMatch(/^Pair /u);
+      expect(verdict.faults).toEqual([]);
+      expect(verdict.exempted).toBe(false);
     });
   }
 

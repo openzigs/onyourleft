@@ -1691,19 +1691,23 @@ p > label + input[type='file'] {
  * its colour was the UA's, which no contrast pair could name. `accent` on the
  * page and on a panel's `surface` are declared non-text pairs (SC 1.4.11).
  * `/ ''` gives the glyph no text alternative: `<details>` already tells a
- * screen reader whether it is open. `controls-first.browser.spec.ts` reads the
- * painted colour back.
+ * screen reader whether it is open. The plain `content` before each is the
+ * fallback for an engine that does not parse the alternative-text form, which
+ * drops that declaration whole and would leave no marker at all.
+ * `controls-first.browser.spec.ts` reads the painted colour back.
  */
 .oyl-details > summary::-webkit-details-marker {
   display: none;
 }
 
 .oyl-details > summary::before {
+  content: '▸';
   content: '▸' / '';
   color: var(--oyl-color-accent);
 }
 
 .oyl-details[open] > summary::before {
+  content: '▾';
   content: '▾' / '';
 }
 

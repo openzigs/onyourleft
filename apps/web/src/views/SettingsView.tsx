@@ -161,6 +161,9 @@ export const MASS_CLEARED = 'Cleared. The trainer game rides you at the assumed 
 export const WEIGHT_STAYS_HERE =
   'Nothing is sent anywhere — it is stored on this device with your rides.';
 
+/** Where the announcement choice is kept — on the screen, beside the switch (#699's review, N9). */
+export const ANNOUNCEMENTS_STAY_HERE = 'Off unless you turn it on, and kept on this device only.';
+
 /**
  * The sentences on this screen that are never tucked into a "More about"
  * disclosure — #666. They are about what leaves the device and to whom, and
@@ -171,9 +174,12 @@ export const WEIGHT_STAYS_HERE =
  */
 export const SETTINGS_KEPT_VISIBLE: readonly string[] = [
   WEIGHT_STAYS_HERE,
+  ANNOUNCEMENTS_STAY_HERE,
+  'opening a ride that has GPS asks',
   'sends the map area and your device’s IP address to',
   'It sends no ride data.',
   'keeps a record of each map request',
+  'We don’t use it or share it.',
   'the app asks',
   CLEARING_STILL_REMOVES,
 ];
@@ -535,11 +541,18 @@ function AnnouncementsPanel({
           {message.text}
         </StatusMessage>
       )}
+      {/*
+        #699's review (N9): where the choice is kept stays on the screen, as
+        "Your weight" keeps WEIGHT_STAYS_HERE there; how the announcements behave
+        is what is tucked.
+      */}
+      <KeptVisible>
+        <p className="oyl-muted">{ANNOUNCEMENTS_STAY_HERE}</p>
+      </KeptVisible>
       <MoreAbout about="announcements">
         <p className="oyl-muted">
           During a ride in the trainer game, your screen reader is given a short sentence now and
-          then — never more than one every few seconds, and nothing you have not chosen above. Off
-          unless you turn it on, and kept on this device only.
+          then — never more than one every few seconds, and nothing you have not chosen above.
         </p>
       </MoreAbout>
     </section>

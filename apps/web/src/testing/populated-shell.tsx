@@ -373,14 +373,23 @@ function gamePort(populated: boolean): GamePort {
  * and a transfer port, which needs a real store (#666) — or replaces: the ride controller, for a state of the ride screen neither
  * fixture reaches (the one-primary gate's paused-with-a-stop-armed case).
  */
+/**
+ * What a caller may hand the shell in place of the fixture's own. Since #699's
+ * review (N4) that includes `capabilities`: the fixture's browser has no
+ * Bluetooth, which leaves the Devices screen's pairing rows — the state where
+ * its controls are — out of every walk, so the controls-first gate hands it a
+ * Bluetooth that answers "available" to measure that state's fold too.
+ */
 export type PopulatedShellExtras = Pick<
   AppShellProps,
   'map' | 'basemap' | 'rideController' | 'transfer'
->;
+> &
+  Partial<Pick<AppShellProps, 'capabilities'>>;
 
 /** The real `AppShell` over the empty or the populated fixture. */
 export function PopulatedShell({
   populated,
+  capabilities = NO_BLUETOOTH,
   ...extras
 }: { readonly populated: boolean } & PopulatedShellExtras): JSX.Element {
   const rides = populated
@@ -394,7 +403,7 @@ export function PopulatedShell({
   ];
   return (
     <AppShell
-      capabilities={NO_BLUETOOTH}
+      capabilities={capabilities}
       camera={quietCamera()}
       rideController={stubRideController(populated ? ridingSnapshot() : idleSnapshot()).controller}
       settings={settingsPort()}

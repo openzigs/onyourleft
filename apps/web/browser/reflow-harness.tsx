@@ -60,6 +60,7 @@ import { OSM_ATTRIBUTION } from '../src/map/basemap';
 import type { MapPort } from '../src/map/port';
 import { LOCAL_ATHLETE, localAthleteRecord } from '../src/local-athlete';
 import { ALL_ROUTES, matchHash, type RouteId } from '../src/shell/routes';
+import type { CapabilityProbe } from '../src/support/bluetooth-support';
 import { webCryptoDigest } from '../src/transfer/browser';
 import type { TransferPort } from '../src/transfer/store-port';
 import {
@@ -226,10 +227,26 @@ function transferPort(): TransferPort {
   };
 }
 
+/**
+ * A Bluetooth that answers "available" and is never asked to pair — #699's
+ * review, N4. `?bluetooth=available` hands it to the shell so the Devices
+ * screen renders its pairing rows, which the fixture's no-Bluetooth browser
+ * leaves out of every other walk.
+ */
+const AVAILABLE_BLUETOOTH: CapabilityProbe = {
+  bluetooth: {
+    getAvailability: async () => Promise.resolve(true),
+    requestDevice: async () => Promise.reject(new Error('the reflow harness pairs nothing')),
+  },
+  secureContext: true,
+};
+
 function shell(populated: boolean): JSX.Element {
+  const bluetooth = new URLSearchParams(window.location.search).get('bluetooth') === 'available';
   return (
     <PopulatedShell
       populated={populated}
+      {...(bluetooth ? { capabilities: AVAILABLE_BLUETOOTH } : {})}
       transfer={transferPort()}
       map={realMap}
       basemap={{
@@ -484,7 +501,47 @@ function laidOut(element: Element): boolean {
   return element.checkVisibility() && (box.width > 0 || box.height > 0);
 }
 
+/**
+ * What counts as prose — or anything else a rider reads or looks at — in the
+ * way of a control. Text blocks; and since #699's review (N7) a table, a
+ * figure, a picture, a chart and a canvas, which have a box of their own
+ * however little text they hold; and a bare `div`, `section`, `article` or
+ * `aside` whose OWN text is not in any of those, which is text a view wrote
+ * without a paragraph around it. Not a label or a legend (a control's own
+ * name), not a heading, and nothing inside a control, a link or a summary.
+ */
 const PROSE_SELECTOR = 'p, li, dd, dt, .oyl-status, figcaption, blockquote';
+const MEDIA_SELECTOR = 'table, figure, img, svg, canvas, [role="img"]';
+const BARE_TEXT_SELECTOR = 'div, section, article, aside';
+const NOT_PROSE = 'label, legend, h1, h2, h3, h4, h5, h6, button, a, summary, [aria-hidden="true"]';
+
+function ownText(element: Element): string {
+  return [...element.childNodes]
+    .filter((node) => node.nodeType === Node.TEXT_NODE)
+    .map((node) => node.textContent ?? '')
+    .join('')
+    .trim();
+}
+
+/** A block `proseBetween` counts, and the words it reports it by. */
+function proseWords(element: Element): string | undefined {
+  if (element.closest(NOT_PROSE) !== null) {
+    return undefined;
+  }
+  if (element.matches(PROSE_SELECTOR)) {
+    const text = textOf(element);
+    return text === '' ? undefined : text;
+  }
+  if (element.matches(MEDIA_SELECTOR)) {
+    const name =
+      element.getAttribute('aria-label') ?? element.getAttribute('alt') ?? textOf(element);
+    return `[${element.tagName.toLowerCase()}] ${name}`.trim();
+  }
+  if (element.matches(BARE_TEXT_SELECTOR) && ownText(element) !== '') {
+    return ownText(element);
+  }
+  return undefined;
+}
 
 function inOrder(first: Node, second: Node): boolean {
   return (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
@@ -507,10 +564,12 @@ function laidOutControls(main: Element): Element[] {
  * outermost of each, so a list is counted once and not again for its items.
  */
 function proseBetween(main: Element, after: Element | null, before: Element | null): Element[] {
-  const blocks = [...main.querySelectorAll(PROSE_SELECTOR)].filter(
+  const blocks = [
+    ...main.querySelectorAll(`${PROSE_SELECTOR}, ${MEDIA_SELECTOR}, ${BARE_TEXT_SELECTOR}`),
+  ].filter(
     (element) =>
       laidOut(element) &&
-      textOf(element) !== '' &&
+      proseWords(element) !== undefined &&
       element.closest('[data-oyl-kept-visible], summary') === null &&
       element.querySelector(CONTROL_SELECTOR) === null &&
       (after === null || inOrder(after, element)) &&
@@ -530,7 +589,9 @@ function proseBeforeFirstControl(): string[] {
   // The route's own summary is the shell's (#48), under its `h1`, and is the
   // one sentence every route keeps.
   const summary = main.querySelector(':scope > h1 + p');
-  return proseBetween(main, summary, control).map((element) => textOf(element).slice(0, 80));
+  return proseBetween(main, summary, control).map((element) =>
+    (proseWords(element) ?? '').slice(0, 80),
+  );
 }
 
 /**

@@ -71,21 +71,26 @@ const TITLE_ID = 'oyl-side-camera-title';
  * ADR 0033 D-3 and D-6. The consent screen changes in the pull request that
  * sends the first picture, which is the only order in which it stays true.
  */
-/**
- * The sentences on the phone's page that are never tucked — #666, ADR 0029
- * D-5 and ADR 0033. `a11y/kept-visible.a11y.test.tsx` holds them.
- */
-export const SIDE_CAMERA_KEPT_VISIBLE: readonly string[] = [
-  BYSTANDER_SENTENCE,
-  LINK_LOSS_SENTENCE,
-  'This phone keeps nothing about you once the session ends',
-];
-
 export const SIDE_PICTURES_GO_SENTENCE =
   'While it is filming, it sends about five small pictures a second to the tablet you paired it ' +
   'with — directly, over your own Wi-Fi, encrypted — and nowhere else. The tablet looks at each ' +
   'one and throws it away at once. It keeps where you were in the picture, as numbers, and never ' +
   'the picture.';
+
+/**
+ * The sentences on the phone's page that are never tucked — #666, ADR 0029
+ * D-5 and ADR 0033: anyone else in the room, what a lost link does, where the
+ * pictures go and what is kept. `a11y/kept-visible.a11y.test.tsx` holds them.
+ */
+export const SIDE_CAMERA_KEPT_VISIBLE: readonly string[] = [
+  BYSTANDER_SENTENCE,
+  LINK_LOSS_SENTENCE,
+  SIDE_PICTURES_GO_SENTENCE,
+  'This phone stands on a tripod beside the bike and takes pictures of you from the side while you ride, only while the “Camera on” sign is showing.',
+  'While you set it up, it shows you its own picture so you can line the bike up.',
+  'That picture is not kept.',
+  'This phone keeps nothing about you once the session ends',
+];
 
 /**
  * The one big word the filming sign carries.

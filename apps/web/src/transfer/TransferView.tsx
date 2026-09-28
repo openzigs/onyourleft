@@ -72,22 +72,26 @@ import {
   type EraseRefusal,
 } from './erase-device';
 
-/** The ADR that explains why import is a file rather than a connection. */
 /**
  * The sentences on the Files screen that are never tucked into a "More about"
  * disclosure — #666: what an erase takes and what it cannot reach (#35,
  * ADR 0014 D-7), that the signing key cannot come back, and that an export
  * and the whole-account archive carry the REAL track and the privacy zones
- * (ADR 0004). `a11y/kept-visible.a11y.test.tsx` holds the ones an empty
- * device renders; the export's own two render only beside a ride, and are
- * marked `data-oyl-kept-visible` where they are.
+ * (ADR 0004). `a11y/kept-visible.a11y.test.tsx` holds them, over a store
+ * holding one ride — the export's own sentence renders only beside a ride.
  */
 export const FILES_KEPT_VISIBLE: readonly string[] = [
   ...ERASE_REMOVES,
   ...ERASE_CANNOT_REACH,
   'Erasing the signing key cannot be undone, and it cannot be recreated.',
+  'An exported file carries your real track — the ride as it was recorded, with nothing removed.',
+  'Privacy zones exist for what gets published, and this is your own copy of your own data.',
+  'The archive holds your real tracks and the centres of your privacy zones.',
+  'That is what makes it a complete copy, and it is why it deserves the same care as the rides themselves.',
+  'Your private key is never written to any of it.',
 ];
 
+/** The ADR that explains why import is a file rather than a connection. */
 const CLEAN_ROOM_ADR =
   'https://github.com/openzigs/onyourleft/blob/main/docs/adr/0009-clean-room-posture.md';
 

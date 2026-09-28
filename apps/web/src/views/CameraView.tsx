@@ -172,13 +172,29 @@ export const SIDE_CAMERA_UNAVAILABLE =
   'between two devices that pairing needs. This device’s own camera, below, still works.';
 
 /**
+ * What "Your own computer" says is sent, to where, and unencrypted — ADR 0029's
+ * amendment, Q1. Rendered only once the camera is agreed to; never tucked
+ * (#666), and listed in {@link CAMERA_KEPT_VISIBLE}.
+ */
+export const ANALYSIS_WHAT_IS_SENT =
+  'A computer of yours on the same network can look at your pictures, running a model server ' +
+  'you install on it. Nothing is set up to begin with, and nothing is sent until you enter its ' +
+  'address and switch it on. A picture then goes to that one address, only when you press the ' +
+  'button, and is not kept here afterwards unless this ride’s keep is on. It goes over your own ' +
+  'network, and is not encrypted on the way unless your computer’s address starts with https://.';
+
+/**
  * The sentences on this screen that are never tucked into a "More about"
  * disclosure — #666: what the camera captures, where a picture goes and what
  * is kept (ADR 0029, #382's consent statement), anyone else in the room (ADR
  * 0029 D-5), and what is sent to the rider's own computer, unencrypted
  * (ADR 0029's amendment, Q1). `a11y/kept-visible.a11y.test.tsx` holds them.
  */
-export const CAMERA_KEPT_VISIBLE: readonly string[] = [...CONSENT_STATEMENT, BYSTANDER_SENTENCE];
+export const CAMERA_KEPT_VISIBLE: readonly string[] = [
+  ...CONSENT_STATEMENT,
+  BYSTANDER_SENTENCE,
+  ANALYSIS_WHAT_IS_SENT,
+];
 
 export function CameraView({ controller, sidePairing }: CameraViewProps): JSX.Element {
   if (controller === undefined) {
@@ -798,14 +814,7 @@ function AnalysisSection({
     <section aria-labelledby="oyl-camera-analysis">
       <h3 id="oyl-camera-analysis">Your own computer</h3>
       {/* #666: what is sent, to where, and unencrypted — never tucked (ADR 0029 §Q1). */}
-      <p data-oyl-kept-visible="">
-        A computer of yours on the same network can look at your pictures, running a model server
-        you install on it. Nothing is set up to begin with, and nothing is sent until you enter its
-        address and switch it on. A picture then goes to that one address, only when you press the
-        button, and is not kept here afterwards unless this ride’s keep is on. It goes over your own
-        network, and is not encrypted on the way unless your computer’s address starts with
-        https://.
-      </p>
+      <p data-oyl-kept-visible="">{ANALYSIS_WHAT_IS_SENT}</p>
       <form
         onSubmit={(event) => {
           event.preventDefault();

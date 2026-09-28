@@ -20,6 +20,7 @@ import {
   ATHLETE_A,
   createStoreHarness,
   seedAthletes,
+  seedRide,
   type StoreHarness,
 } from '@onyourleft/store/testing';
 
@@ -31,13 +32,21 @@ import type {
   TransferStore,
 } from '../transfer/store-port';
 
-/** An empty store behind a Files screen, and the harness to destroy after. */
-export async function emptyTransferPort(): Promise<{
+/**
+ * An empty store behind a Files screen, and the harness to destroy after —
+ * or, with `withRide`, one holding a single ride of the athlete's, which is
+ * what puts the Export panel's form and its privacy sentence on the screen
+ * (#699's review, N2).
+ */
+export async function emptyTransferPort(options: { readonly withRide?: boolean } = {}): Promise<{
   readonly port: TransferPort;
   readonly harness: StoreHarness;
 }> {
   const harness = createStoreHarness();
   await seedAthletes(harness);
+  if (options.withRide === true) {
+    await seedRide(harness, ATHLETE_A);
+  }
   const store: TransferStore & AccountStore & CourseStore = await harness.write((handle) =>
     Promise.resolve(handle),
   );
