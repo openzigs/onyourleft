@@ -622,7 +622,10 @@ export interface RideController {
    * {@link RideSnapshot.pairingError} with everything else.
    *
    * A device chosen while its *Forget* is still in progress is refused with a
-   * sentence rather than attached, because that forget would revoke it (#712).
+   * sentence rather than attached, because that forget would revoke it (#712),
+   * and the transport record its chooser made is forgotten too, once every
+   * forget of that device already in progress is done (#714's review) — so a
+   * refused Pair resolves only then.
    */
   pair(role: PairingRole): Promise<void>;
   /**
@@ -856,8 +859,16 @@ export function createRideController(options: RideControllerOptions): RideContro
    * Stop would take the machine straight back into simulation mode. Since #712
    * a device in here is also refused by {@link RideController.pair}, and a
    * failed pairing's own clean-up forget marks it here too.
+   *
+   * ⚠️ One promise per forget in progress, not one flag per device (#714's
+   * review). A device can have two at once — `unpair` and a failed pairing's
+   * clean-up, or a refused Pair's — and with a flag the first to finish
+   * cleared it while the other still had the transport's record in hand, so a
+   * Pair in that window was not refused. Each promise settles when its forget
+   * is done, which is also what a refused Pair waits on before it forgets the
+   * record its own chooser made. @see startForgetting
    */
-  const forgetting = new Set<DeviceId>();
+  const forgetting = new Map<DeviceId, Set<Promise<void>>>();
   /**
    * One set per {@link RideController.pair} whose chooser is open — #712.
    * Every device a forget STARTS on while that chooser is open is added to
@@ -1210,25 +1221,50 @@ export function createRideController(options: RideControllerOptions): RideContro
    *
    * Every pairing and every Forget CLEARS the error when it starts, and writes
    * its own only when it finishes, after an `await`. So whatever is there when
-   * a sentence lands was written by something that finished in between — a
-   * newer answer, never a stale one — and it is kept, with this sentence after
-   * it. A Pair that failed while a Forget waited on the transport keeps its
-   * error when the Forget's sentence lands; the rider reads both, each naming
-   * a different thing to do. A Forget that finishes cleanly writes nothing,
-   * so it cannot clear a newer error either.
+   * a sentence lands was written by something that FINISHED in between, and
+   * it is kept, with this sentence after it. That is order of finishing, not
+   * of pressing: a Pair whose chooser opened before a Forget was pressed can
+   * fail after the Forget's sentence landed, and then the older action's
+   * sentence comes second. Either way nothing is lost — each sentence names a
+   * different thing to do, and the rider reads both. A Forget that finishes
+   * cleanly writes nothing, so it cannot clear anybody's error.
    */
   const tell = (sentence: string): void => {
     pairingError = pairingError === undefined ? sentence : `${pairingError} ${sentence}`;
     changed();
   };
 
-  /** A device a forget is starting on — @see forgetting, @see choosing. */
-  const startForgetting = (id: DeviceId): void => {
-    forgetting.add(id);
+  /**
+   * A device a forget is starting on — @see forgetting, @see choosing. Returns
+   * the function that says this forget is done; calling it twice is harmless.
+   */
+  const startForgetting = (id: DeviceId): (() => void) => {
+    let settle: () => void = () => undefined;
+    const pending = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    let marks = forgetting.get(id);
+    if (marks === undefined) {
+      marks = new Set();
+      forgetting.set(id, marks);
+    }
+    const own = marks;
+    own.add(pending);
     for (const overlapped of choosing) {
       overlapped.add(id);
     }
+    return () => {
+      settle();
+      own.delete(pending);
+      if (own.size === 0 && forgetting.get(id) === own) {
+        forgetting.delete(id);
+      }
+    };
   };
+
+  /** Every forget of `id` in progress now, settled — they never reject. */
+  const forgetsInProgress = (id: DeviceId): Promise<unknown> =>
+    Promise.all([...(forgetting.get(id) ?? [])]);
 
   const describe = (error: unknown): string => {
     if (isSensorError(error)) {
@@ -1395,11 +1431,11 @@ export function createRideController(options: RideControllerOptions): RideContro
       // and the way back is the chooser either way.
       // #712: marked as being forgotten while it is, for the reason `unpair`
       // marks it — a second Pair choosing it now would be revoked by this.
-      startForgetting(id);
+      const forgotten = startForgetting(id);
       try {
         await transport.forget(id).catch(() => undefined);
       } finally {
-        forgetting.delete(id);
+        forgotten();
       }
       throw error;
     }
@@ -1794,7 +1830,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       changed();
       // Every forget in progress now, and every one that starts before the
       // chooser answers — #712. Read below, where the device is refused.
-      const overlapped = new Set(forgetting);
+      const overlapped = new Set(forgetting.keys());
       choosing.add(overlapped);
       try {
         const device = await transport.discover({
@@ -1824,6 +1860,25 @@ export function createRideController(options: RideControllerOptions): RideContro
           tell(
             `${device.name ?? 'That sensor'} is still being forgotten. Pair it again in a moment.`,
           );
+          // ⚠️ And the transport is told to let go of what the chooser just
+          // made (#714's review). Both real transports drop their record at
+          // the START of `forget` and then await, so a chooser answering in
+          // that window made a NEW record — `register` on Web Bluetooth,
+          // `links.set` in the Capacitor transport — which the forget in
+          // progress will never see. Left there it holds the grant, and in the
+          // Capacitor transport it counts against the connection budget for
+          // the rest of the session: #659's review ruled that leftover out in
+          // `attach`. Marked first, so a Pair meanwhile is refused too; then
+          // after every forget already in progress, so this one is the last
+          // word on the record. The rider presses Pair again either way.
+          const inProgress = forgetsInProgress(id);
+          const forgotten = startForgetting(id);
+          try {
+            await inProgress;
+            await transport.forget(id).catch(() => undefined);
+          } finally {
+            forgotten();
+          }
           return;
         }
         if (sensors.has(id)) {
@@ -1849,8 +1904,11 @@ export function createRideController(options: RideControllerOptions): RideContro
       if (entry === undefined || forgetting.has(id)) {
         return;
       }
-      startForgetting(id);
+      const forgotten = startForgetting(id);
       pairingError = undefined;
+      // #714's review: said, not only cleared — with a slow Stop, the old
+      // error stayed on screen for the whole release.
+      changed();
       try {
         // ⚠️ BEFORE `detach`, and that order is the whole fix (#659's
         // review). `detach` unsubscribes `onControlLost` and then closes the
@@ -1911,7 +1969,7 @@ export function createRideController(options: RideControllerOptions): RideContro
           changed();
         }
       } finally {
-        forgetting.delete(id);
+        forgotten();
       }
     },
 
