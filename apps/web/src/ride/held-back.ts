@@ -35,8 +35,29 @@
  * holds it back (`ride/controller.ts` §`releaseTrainer`).
  */
 export class TargetHeldBack extends Error {
-  constructor(reason: string) {
+  /**
+   * Which hold this is — #728. A typed field rather than the message, for the
+   * reason the class exists at all: a loop that words the hold for its rider
+   * must not depend on the controller's sentence.
+   *
+   * - `'forget-running'` — `mustWaitForForget`: a forget is in progress or
+   *   still running late, and the hold lifts by itself when it lands.
+   * - `'letting-go-to-forget'` — the trainer this handle drives is being let
+   *   go so it can be forgotten (#659's review). The hold lifts only if the
+   *   Stop does not land and the forget is abandoned; otherwise the trainer is
+   *   gone.
+   * - `'let-go'` — the ride controller was disposed and has let the trainer go
+   *   (#695). Permanent: nothing this controller handed out writes again.
+   *
+   * `game/gradient.ts` §`faultText` words each one for the road;
+   * `workout/session.ts` §`faultText` still says the message, and only ever
+   * receives `'forget-running'`.
+   */
+  readonly hold: 'forget-running' | 'letting-go-to-forget' | 'let-go';
+
+  constructor(hold: TargetHeldBack['hold'], reason: string) {
     super(reason);
     this.name = 'TargetHeldBack';
+    this.hold = hold;
   }
 }

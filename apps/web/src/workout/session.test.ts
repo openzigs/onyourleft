@@ -722,7 +722,7 @@ describe('a target the ride controller held back — #721, #724', () => {
       thresholdPower: THRESHOLD,
       powerFloor: watts(FLOOR_WATTS),
       control: {
-        setTargetPower: () => Promise.reject(new TargetHeldBack(reason)),
+        setTargetPower: () => Promise.reject(new TargetHeldBack('forget-running', reason)),
         stop: () => trainer.control.stop(),
         letGo: () => trainer.control.letGo(),
       },

@@ -267,6 +267,27 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
 const RELEASE_INCOMPLETE_ROAD =
   'The trainer did not confirm it let go of the road. It may still be holding resistance — ease off before you get off.';
 
+/** A forget is running (`ride/controller.ts` §`mustWaitForForget`), and lifts by itself. */
+const HELD_FOR_A_FORGET =
+  'The hills are not being sent yet: Bluetooth is still finishing forgetting a trainer. The next gradient will be sent again.';
+
+/**
+ * This trainer is being let go so it can be forgotten — #728. Promises nothing
+ * about the next gradient: once the forget goes through the trainer is gone.
+ */
+const HELD_WHILE_LETTING_GO =
+  'The hills are not being sent: the trainer is being let go so it can be forgotten.';
+
+/**
+ * The ride controller has let the trainer go — #728, #695. Permanent, so it
+ * promises nothing either. ⚠️ Nothing in production disposes the controller
+ * today (it lives as long as the page), so a rider is not expected to read
+ * this; it is worded truthfully all the same, because the fallback said the
+ * trainer refused a gradient it never received.
+ */
+const HELD_AFTER_LETTING_GO =
+  'The hills are no longer being sent: this app has let the trainer go.';
+
 /**
  * What a rider is told about a refused gradient.
  *
@@ -283,8 +304,21 @@ function faultText(error: unknown): string {
   // (#724): until then this matched the substring "still being forgotten", so
   // rewording the controller's reason would have told the rider "The trainer
   // refused that gradient" with nothing going red.
+  //
+  // #728: the controller's other two holds are the app too, and each is worded
+  // for what it is. Only a forget that is running lifts by itself, so only it
+  // promises the next gradient: a trainer being let go to be forgotten is
+  // usually gone once it has been, and a disposed controller writes nothing
+  // again.
   if (error instanceof TargetHeldBack) {
-    return 'The hills are not being sent yet: Bluetooth is still finishing forgetting a trainer. The next gradient will be sent again.';
+    switch (error.hold) {
+      case 'forget-running':
+        return HELD_FOR_A_FORGET;
+      case 'letting-go-to-forget':
+        return HELD_WHILE_LETTING_GO;
+      case 'let-go':
+        return HELD_AFTER_LETTING_GO;
+    }
   }
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes('control-not-permitted') || message.includes('Control Not Permitted')) {

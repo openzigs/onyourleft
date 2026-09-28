@@ -84,6 +84,14 @@ const drain = async (): Promise<void> => {
 const HELD_BACK =
   'The hills are not being sent yet: Bluetooth is still finishing forgetting a trainer. The next gradient will be sent again.';
 
+/** What a rider is told while the trainer is being let go to be forgotten (#728). */
+const HELD_WHILE_LETTING_GO =
+  'The hills are not being sent: the trainer is being let go so it can be forgotten.';
+
+/** What a rider is told once the ride controller has let the trainer go (#728). */
+const HELD_AFTER_LETTING_GO =
+  'The hills are no longer being sent: this app has let the trainer go.';
+
 /** The fault a session reports when its one gradient is refused with `error`. */
 async function faultFor(error: Error): Promise<string> {
   const trainer = recordingTrainer({ reject: error });
@@ -336,7 +344,7 @@ describe('a gradient session drives a trainer from a route', () => {
   });
 
   it('words each refusal for the road rather than for a target', async () => {
-    // Five distinct sentences, because a rider reading "the trainer refused
+    // Seven distinct sentences, because a rider reading "the trainer refused
     // that target" while looking at a hill would go looking for a workout they
     // are not riding.
     const said = new Set<string>();
@@ -346,12 +354,17 @@ describe('a gradient session drives a trainer from a route', () => {
       new Error('timed out'),
       new Error('nonsense'),
       // `ride/controller.ts` §`mustWaitForForget` — the app held it back (#718).
-      new TargetHeldBack('a trainer is still being forgotten'),
+      new TargetHeldBack('forget-running', 'a trainer is still being forgotten'),
+      // The controller's other two holds (#728).
+      new TargetHeldBack('letting-go-to-forget', 'the trainer is being forgotten'),
+      new TargetHeldBack('let-go', 'the ride controller has let the trainer go'),
     ]) {
       said.add(await faultFor(error));
     }
-    expect(said.size).toBe(5);
+    expect(said.size).toBe(7);
     expect(said).toContain(HELD_BACK);
+    expect(said).toContain(HELD_WHILE_LETTING_GO);
+    expect(said).toContain(HELD_AFTER_LETTING_GO);
     for (const text of said) {
       expect(text).toMatch(/road|hill|gradient/);
     }
@@ -361,8 +374,33 @@ describe('a gradient session drives a trainer from a route', () => {
     it('is recognised by its class, whatever its reason says', async () => {
       // A reworded reason, and one that says what a machine that did not
       // answer would: neither is told as anything but the hold.
-      expect(await faultFor(new TargetHeldBack('forget pending'))).toBe(HELD_BACK);
-      expect(await faultFor(new TargetHeldBack('the forget timed out'))).toBe(HELD_BACK);
+      expect(await faultFor(new TargetHeldBack('forget-running', 'forget pending'))).toBe(
+        HELD_BACK,
+      );
+      expect(await faultFor(new TargetHeldBack('forget-running', 'the forget timed out'))).toBe(
+        HELD_BACK,
+      );
+    });
+
+    it('words each hold by its kind, never by its reason (#728)', async () => {
+      // The same words under each kind: only the kind decides the sentence.
+      const reason = 'a trainer is still being forgotten';
+      expect(await faultFor(new TargetHeldBack('forget-running', reason))).toBe(HELD_BACK);
+      expect(await faultFor(new TargetHeldBack('letting-go-to-forget', reason))).toBe(
+        HELD_WHILE_LETTING_GO,
+      );
+      expect(await faultFor(new TargetHeldBack('let-go', reason))).toBe(HELD_AFTER_LETTING_GO);
+    });
+
+    it('promises the next gradient only for the hold that lifts by itself (#728)', async () => {
+      // A forget that is running lands and the hold lifts; a trainer let go to
+      // be forgotten is gone once it has been, and a disposed controller
+      // writes nothing again — so neither may say the next one will be sent.
+      expect(HELD_BACK).toContain('will be sent again');
+      for (const hold of ['letting-go-to-forget', 'let-go'] as const) {
+        const text = await faultFor(new TargetHeldBack(hold, 'held'));
+        expect(text).not.toMatch(/sent again|refused/);
+      }
     });
 
     it('is not recognised by its words', async () => {
