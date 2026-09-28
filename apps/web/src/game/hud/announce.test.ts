@@ -351,6 +351,34 @@ describe('priority is an ORDER, not a politeness', () => {
   });
 });
 
+describe('a Set the stall rescue held, answered — #655', () => {
+  const held = { kind: 'erg-held', text: 'Held: your new target of 180 W will be set.' } as const;
+
+  it('is the last event, and above every reading', () => {
+    const rank = PRIORITY.indexOf('erg-held');
+    expect(rank).toBe(PRIORITY.indexOf('screen-off-risk') + 1);
+    for (const reading of ['power-off-target', 'distance-tick', 'power'] as const) {
+      expect(rank).toBeLessThan(PRIORITY.indexOf(reading));
+    }
+  });
+
+  it('is not said with announcements off — the form answers the press then', () => {
+    expect(ALWAYS_SPOKEN).not.toContain('erg-held');
+    const { said } = run([{ now: 0, events: [held] }], { ...DEFAULT_ANNOUNCEMENTS });
+    expect(said).toEqual([undefined]);
+  });
+
+  it('is said with announcements on, and never displaces a safety sentence', () => {
+    const alone = run([{ now: 0, events: [held] }], { ...ON, powerEverySeconds: 'never' });
+    expect(alone.said).toEqual([held.text]);
+    const beside = run(
+      [{ now: 0, events: [held, { kind: 'side-camera-lost', text: 'Side camera link lost.' }] }],
+      { ...ON, powerEverySeconds: 'never' },
+    );
+    expect(beside.said).toEqual(['Side camera link lost.']);
+  });
+});
+
 describe('the side camera’s link lost — #551', () => {
   it('ranks below the climb and above every reading', () => {
     const lost = PRIORITY.indexOf('side-camera-lost');

@@ -413,6 +413,7 @@ describe('a workout — #400', () => {
     refusal: undefined,
     releaseFault: undefined,
     ergRescue: undefined,
+    ergHeld: undefined,
   };
 
   function riding(overrides: Partial<RideWorkoutSnapshot> = {}): RideWorkoutSnapshot {

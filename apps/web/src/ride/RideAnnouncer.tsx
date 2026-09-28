@@ -30,6 +30,7 @@
  * | the next block, `lead` seconds before it | `interval-ahead` | #398's sentence |
  * | the side camera's link, when it goes (#551) | `side-camera-lost` | `side-camera.ts` §`SIDE_CAMERA_LOST_SENTENCE` |
  * | `RideSnapshot.keepAliveFailed`, when it appears (#647) | `screen-off-risk` | `controller.ts` §`RIDE_MAY_STOP_SPOKEN` |
+ * | `TrainerSnapshot.ergHeld`, per press, announcements ON only (#655) | `erg-held` | "Held: …", `TrainerPanel` §`heldSentence` |
  *
  * **When something APPEARS or CHANGES, never when it is first rendered** —
  * #394's rule, kept: a screen a rider navigates back to, with control already
@@ -47,6 +48,27 @@
  * workout's own clock (`lookahead.ts`), which is correct for it; only the
  * one-sentence-per-window throttle moved. And because a waiting sentence may
  * have no render to carry it, a timer re-asks the core when the window opens.
+ *
+ * ## A *Set* the stall rescue held — #655
+ *
+ * The one sentence here that answers the rider's own press. #445 keeps such
+ * answers on the form, `live`, where *Refused* is; this region takes this one
+ * only when the rider turned announcements ON, and `TrainerPanel` then shows
+ * it without `live` — so one voice answers, whichever the rider chose. It is
+ * OWED until spoken, as #647's sentence is: `announce.ts` ranks it last of
+ * the events (rank 5c) so it never costs a safety sentence its place, and a
+ * sentence that is only offered once can be displaced and never said. It is
+ * withdrawn, and no longer owed, the moment it stops being true — the rescue
+ * handed back and wrote the target, or another press replaced it.
+ *
+ * ## The same sentence twice is said twice
+ *
+ * Each sentence the core returns is rendered as a NEW node inside the region,
+ * keyed on a count. A region whose text is set to the text it already holds
+ * changes nothing a screen reader can hear, so a second *Set* of the same
+ * number (#655) — or a second "Control lost" for the same reason — would
+ * otherwise be answered by silence. The core decides what is said; this only
+ * stops the DOM deciding that it was not.
  *
  * Visually hidden by CLIP (`oyl-visually-hidden`), never `display: none`,
  * `hidden` or `aria-hidden`, any of which would silence it.
@@ -79,7 +101,7 @@ import {
 import { RIDE_MAY_STOP_SPOKEN, type RideWorkoutSnapshot, type TrainerSnapshot } from './controller';
 import { upcomingBlock } from './lookahead';
 import { sideCameraLost, sideCameraLostEvent } from './side-camera';
-import { LOSS_REASON, rescueSentence } from './TrainerPanel';
+import { HELD_LABEL, heldSentence, LOSS_REASON, rescueSentence } from './TrainerPanel';
 
 /** The wall clock, in seconds. */
 const wallSeconds = (): number => performance.now() / 1000;
@@ -148,15 +170,20 @@ interface Seen {
    * change, and the sentence the panel shows, which is what is said. Keyed on
    * the reason, as #598 asks, rather than on the sentence: the sentence also
    * names a target the rider set during the rescue, and re-saying the whole
-   * rescue for that is not what the issue asked for. ⚠️ **That press is then
-   * said by nothing** — a deferred *Set* sets no `refusal` and the panel's
-   * sentence is not `live` — which is #655.
+   * rescue for that is not what the issue asked for. That press is answered on
+   * its own, by {@link Seen.heldPress} (#655).
    */
   readonly manualReason: string | undefined;
   readonly manualEased: string | undefined;
   readonly nowRiding: string | undefined;
   readonly sideCamera: SideControlState | undefined;
   readonly keepAliveFailed: boolean;
+  /**
+   * #655: which *Set* the rescue last held, by its press number — a second
+   * press of the same target is a new number — and what answers it.
+   */
+  readonly heldPress: number | undefined;
+  readonly heldText: string | undefined;
 }
 
 function seenIn(
@@ -176,6 +203,11 @@ function seenIn(
     nowRiding: workout?.nowRiding,
     sideCamera,
     keepAliveFailed,
+    heldPress: trainer.ergHeld?.press,
+    heldText:
+      trainer.ergHeld === undefined
+        ? undefined
+        : `${HELD_LABEL}: ${heldSentence(trainer.ergHeld.target)}`,
   };
 }
 
@@ -239,7 +271,8 @@ export function RideAnnouncer({
   onEvent,
   clock,
 }: RideAnnouncerProps): JSX.Element {
-  const [said, setSaid] = useState('');
+  /** The last sentence, and how many have been said — @see the module note. */
+  const [said, setSaid] = useState({ text: '', count: 0 });
   // Read once, when the screen appears: a preference is a setting, not a live
   // value, and a rider changes it on Settings rather than mid-interval.
   const [preference] = useState(() =>
@@ -269,6 +302,11 @@ export function RideAnnouncer({
    * owed.
    */
   const screenOffSaid = useRef(keepAliveFailed);
+  /**
+   * The answer to a held *Set* not yet SPOKEN — #655, with announcements on.
+   * Owed like {@link screenOffSaid}'s sentence, and for the same reason.
+   */
+  const heldOwed = useRef<AnnouncementEvent | undefined>(undefined);
 
   /**
    * One call of the core. ⚠️ The only place this component writes the region,
@@ -285,7 +323,11 @@ export function RideAnnouncer({
     const offered =
       owed() && !events.some((event) => event.kind === 'screen-off-risk')
         ? [...events, SCREEN_OFF_RISK]
-        : events;
+        : [...events];
+    const heldAnswer = heldOwed.current;
+    if (heldAnswer !== undefined && !offered.some((event) => event.kind === 'erg-held')) {
+      offered.push(heldAnswer);
+    }
     const at = now.current();
     const heard = announce(announcer.current, {
       now: at,
@@ -298,16 +340,23 @@ export function RideAnnouncer({
     });
     announcer.current = heard.state;
     if (heard.sentence !== undefined) {
-      setSaid(heard.sentence);
+      const sentence = heard.sentence;
+      setSaid((last) => ({ text: sentence, count: last.count + 1 }));
     }
     if (heard.kind === 'screen-off-risk') {
       screenOffSaid.current = true;
+    }
+    if (heard.kind === 'erg-held') {
+      heldOwed.current = undefined;
     }
     // A sentence that is WAITING for the window has no render to carry it — a
     // paused workout re-renders nothing — so ask again when the window opens.
     // #647's, too, when a higher sentence took the window it was offered in.
     const last = heard.state.lastSpokenAt;
-    if ((heard.state.pending !== undefined || owed()) && last !== undefined) {
+    if (
+      (heard.state.pending !== undefined || owed() || heldOwed.current !== undefined) &&
+      last !== undefined
+    ) {
       const wait = Math.max(0, ANNOUNCE_WINDOW_SECONDS - (at - last)) * 1000;
       timer.current = setTimeout(() => {
         hear.current([]);
@@ -321,12 +370,17 @@ export function RideAnnouncer({
   const timeline = workout?.timeline;
   const elapsedSeconds = workout?.elapsedSeconds;
   const status = workout?.status;
-  const { lost, releaseFault, fault, eased, manualReason, manualEased, nowRiding } = seenIn(
-    trainer,
-    workout,
-    sideCamera,
-    keepAliveFailed,
-  );
+  const {
+    lost,
+    releaseFault,
+    fault,
+    eased,
+    manualReason,
+    manualEased,
+    nowRiding,
+    heldPress,
+    heldText,
+  } = seenIn(trainer, workout, sideCamera, keepAliveFailed);
 
   useEffect(() => {
     const events = changes(seen.current, {
@@ -339,7 +393,19 @@ export function RideAnnouncer({
       nowRiding,
       sideCamera,
       keepAliveFailed,
+      heldPress,
+      heldText,
     });
+    // #655: a new press held, or the held one no longer true. Whatever was
+    // owed or waiting for the last press is taken back first — a hand-back
+    // wrote that target, and a newer press is the one to answer.
+    if (heldPress !== seen.current.heldPress) {
+      heldOwed.current = undefined;
+      announcer.current = withdrawPending(announcer.current, (event) => event.kind === 'erg-held');
+      if (preference.enabled && heldPress !== undefined && heldText !== undefined) {
+        heldOwed.current = { kind: 'erg-held', text: heldText };
+      }
+    }
     // Cleared while its sentence was still waiting for the window: take it
     // back, or "Eased" is said after the full target is back (PR #599's
     // review, N1).
@@ -371,6 +437,8 @@ export function RideAnnouncer({
       nowRiding,
       sideCamera,
       keepAliveFailed,
+      heldPress,
+      heldText,
     };
     if (
       preference.enabled &&
@@ -396,6 +464,8 @@ export function RideAnnouncer({
     nowRiding,
     sideCamera,
     keepAliveFailed,
+    heldPress,
+    heldText,
     preference,
     lead,
     timeline,
@@ -405,7 +475,8 @@ export function RideAnnouncer({
 
   return (
     <p className="oyl-visually-hidden" role="status" data-oyl-announcer="ride">
-      {said}
+      {/* A new node per sentence — @see the module note §"said twice". */}
+      <span key={said.count}>{said.text}</span>
     </p>
   );
 }
