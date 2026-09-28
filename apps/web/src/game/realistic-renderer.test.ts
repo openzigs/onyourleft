@@ -88,7 +88,10 @@ import {
   breathesTheAir,
   ContactShadowBelt,
   isConstructedMaterial,
+  evictRealisticWorldFromGpu,
   loadRealisticWorld,
+  materialLayers,
+  mergeShapeMaterials,
   photographicGroundMaterial,
   photographicRoadMaterial,
   prepareMiddleLevel,
@@ -666,6 +669,412 @@ function frustumSees(tree: ScatterItem, pose: CameraPose, radius: number, height
 
 /** A pose at the origin looking up +Z whose camera looks at a road `rise` metres up 29.5 m on. */
 const pitched = (rise: number): CameraPose => ({ ...POSE, eyeRoadY: 0, targetRoadY: rise });
+
+/**
+ * A map as `GLTFLoader` leaves one: an image, a transform and the coordinate
+ * set it reads, and a `clone` over the same `source` — #639's merge reads all
+ * of it, and the fixtures above carry none of it.
+ */
+interface FakeMap {
+  readonly image: { width: number; height: number };
+  source: object;
+  channel: number;
+  matrixAutoUpdate: boolean;
+  readonly matrix: { elements: number[]; identity: () => unknown };
+  readonly updateMatrix: () => void;
+  disposed: boolean;
+  dispose: () => void;
+  clone: () => FakeMap;
+  cloneOf?: FakeMap;
+}
+
+function aMap(elements: readonly number[] = [1, 0, 0, 0, 1, 0, 0, 0, 1], channel = 0): FakeMap {
+  const matrix = {
+    elements: [...elements],
+    identity: () => {
+      matrix.elements = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+      return matrix;
+    },
+  };
+  const map: FakeMap = {
+    image: { width: 512, height: 512 },
+    source: {},
+    channel,
+    matrixAutoUpdate: false,
+    matrix,
+    updateMatrix: () => undefined,
+    disposed: false,
+    dispose: () => {
+      map.disposed = true;
+    },
+    clone: () => {
+      const copy = aMap(elements, channel);
+      copy.source = map.source;
+      copy.cloneOf = map;
+      return copy;
+    },
+  };
+  return map;
+}
+
+/** Bark's tiling, as `KHR_texture_transform` gives it: ×3 across, ×0.5 up, 0.25 along. */
+const BARK_TILING = [3, 0, 0, 0, 0.5, 0, 0.25, 0.1, 1] as const;
+
+/** A tree of two materials — tiled bark and cut leaves — with a middle level. */
+function aTreeOfTwoMaterials(): {
+  shape: RealisticShape;
+  bark: { map: FakeMap; normalMap: FakeMap };
+  leaves: { map: FakeMap; normalMap: FakeMap };
+} {
+  const bark = { map: aMap(BARK_TILING), normalMap: aMap(BARK_TILING) };
+  const leaves = { map: aMap(), normalMap: aMap() };
+  const extras = {
+    oyl_scan_height: 8,
+    oyl_scan_width: 4,
+    oyl_impostor_scale: 8.2,
+    oyl_impostor_frames: 8,
+  };
+  const near = prepareRealisticShape(
+    aScene(
+      [
+        { material: loaderMaterial({ name: 'bark', ...bark }) },
+        { material: loaderMaterial({ name: 'leaves', transparent: true, ...leaves }) },
+      ],
+      extras,
+    ),
+    'tree',
+    { image: { width: 2048, height: 512 } } as unknown as Parameters<
+      typeof prepareRealisticShape
+    >[2],
+  );
+  const shape = prepareMiddleLevel(
+    near,
+    aScene(
+      [
+        { material: loaderMaterial({ name: 'leaves', map: null }) },
+        { material: loaderMaterial({ name: 'bark', map: null }) },
+      ],
+      { oyl_scan_height: 8, oyl_scan_width: 4 },
+    ),
+    'tree',
+  );
+  return { shape, bark, leaves };
+}
+
+/** A fragment and a vertex shader holding every include #639 splices at. */
+function compiledLayers(material: unknown): {
+  vertex: string;
+  fragment: string;
+  uniforms: Record<string, { value: unknown }>;
+} {
+  const shader = {
+    uniforms: {} as Record<string, { value: unknown }>,
+    vertexShader:
+      '#include <common>\n#include <begin_vertex>\n#include <color_vertex>\n#include <fog_pars_vertex>\n#include <fog_vertex>',
+    fragmentShader: [
+      '#include <common>',
+      '#include <map_pars_fragment>',
+      '#include <normalmap_pars_fragment>',
+      '#include <fog_pars_fragment>',
+      '#include <clipping_planes_fragment>',
+      '#include <map_fragment>',
+      '#include <color_fragment>',
+      '#include <normal_fragment_maps>',
+      '#include <fog_fragment>',
+    ].join('\n'),
+  };
+  (material as { onBeforeCompile: (shader: unknown, renderer: unknown) => void }).onBeforeCompile(
+    shader,
+    undefined,
+  );
+  return {
+    vertex: shader.vertexShader,
+    fragment: shader.fragmentShader,
+    uniforms: shader.uniforms,
+  };
+}
+
+describe('a tree is one material a level, its scan’s materials its layers — #639', () => {
+  it('draws each level as ONE part wearing ONE constructed material, the same at both levels', () => {
+    const { shape } = aTreeOfTwoMaterials();
+    expect(shape.parts).toHaveLength(2);
+    const merged = mergeShapeMaterials(shape, 'tree');
+    expect(merged.parts).toHaveLength(1);
+    expect(merged.middle?.parts).toHaveLength(1);
+    const material = merged.parts[0]?.material;
+    expect(merged.middle?.parts[0]?.material).toBe(material);
+    expect(isConstructedMaterial(material as never)).toBe(true);
+    expect(materialLayers(material as never)).toBe(2);
+    // Every lever the materials it replaces were taught.
+    expect(readsTextureLodBias(material as never)).toBe(true);
+    expect(breathesTheAir(material as never)).toBe(true);
+    // Cut, because one of its layers is leaves.
+    expect(material?.alphaTest).toBeGreaterThan(0);
+    expect(material?.transparent).toBe(false);
+  });
+
+  it('keeps every triangle, each layer one run of the index, every vertex naming its layer', () => {
+    const { shape } = aTreeOfTwoMaterials();
+    const triangles = (parts: RealisticShape['parts']): number =>
+      parts.reduce(
+        (sum, part) =>
+          sum + (part.geometry.getIndex()?.count ?? part.geometry.getAttribute('position').count),
+        0,
+      ) / 3;
+    const nearTriangles = triangles(shape.parts);
+    const middleTriangles = triangles(shape.middle?.parts ?? []);
+    const barkVertices = shape.parts[0]?.geometry.getAttribute('position').count ?? 0;
+    const merged = mergeShapeMaterials(shape, 'tree');
+    expect(triangles(merged.parts)).toBe(nearTriangles);
+    expect(triangles(merged.middle?.parts ?? [])).toBe(middleTriangles);
+    expect(merged.triangles).toBe(shape.triangles);
+    /** The layer of every triangle's first vertex, in index order. */
+    const layersOf = (part: RealisticShape['parts'][number] | undefined): number[] => {
+      const layer = part?.geometry.getAttribute('oylLayer');
+      const index = part?.geometry.getIndex();
+      const out: number[] = [];
+      for (let slot = 0; slot < (index?.count ?? 0); slot += 3) {
+        const corners = [0, 1, 2].map((corner) => layer?.getX(index?.getX(slot + corner) ?? -1));
+        // A triangle is in ONE layer, which is what a flat varying needs.
+        expect(new Set(corners).size).toBe(1);
+        out.push(corners[0] ?? -1);
+      }
+      return out;
+    };
+    const runs = (layers: number[]): number[] =>
+      layers.filter((layer, at) => at === 0 || layers[at - 1] !== layer);
+    // Bark (0) then leaves (1), each one run — and the middle file, which
+    // lists leaves first, comes out in the same order.
+    const near = layersOf(merged.parts[0]);
+    expect(runs(near)).toEqual([0, 1]);
+    expect(near.filter((layer) => layer === 0)).toHaveLength(nearTriangles / 2);
+    expect(runs(layersOf(merged.middle?.parts[0]))).toEqual([0, 1]);
+    // Every vertex of the first part is bark's, every later one the leaves'.
+    const layer = merged.parts[0]?.geometry.getAttribute('oylLayer');
+    expect(layer?.getX(0)).toBe(0);
+    expect(layer?.getX(barkVertices - 1)).toBe(0);
+    expect(layer?.getX(barkVertices)).toBe(1);
+  });
+
+  it('bakes each layer’s texture transform into its coordinates, and wears maps with none', () => {
+    const { shape, bark } = aTreeOfTwoMaterials();
+    const source = aGeometry().getAttribute('uv');
+    const merged = mergeShapeMaterials(shape, 'tree');
+    const uv = merged.parts[0]?.geometry.getAttribute('uv');
+    const [a, b, , c, d, , e, f] = BARK_TILING;
+    // Vertex 0 is bark's: tiled. The first vertex of the leaves' group is not.
+    expect(uv?.getX(0)).toBeCloseTo(a * source.getX(0) + c * source.getY(0) + e, 6);
+    expect(uv?.getY(0)).toBeCloseTo(b * source.getX(0) + d * source.getY(0) + f, 6);
+    const leavesAt = source.count;
+    expect(uv?.getX(leavesAt)).toBeCloseTo(source.getX(0), 6);
+    expect(uv?.getY(leavesAt)).toBeCloseTo(source.getY(0), 6);
+    // So the maps it wears carry no transform — a second transform on top of
+    // the baked one would tile the bark twice — over the SAME image.
+    const map = merged.parts[0]?.material.map as unknown as FakeMap;
+    expect(map.cloneOf).toBe(bark.map);
+    expect(map.source).toBe(bark.map.source);
+    expect(map.matrixAutoUpdate).toBe(false);
+    expect(map.matrix.elements).toEqual([1, 0, 0, 0, 1, 0, 0, 0, 1]);
+    expect(map.channel).toBe(0);
+  });
+
+  it('reads each fragment’s own layer in the shader, with the rung’s bias kept', () => {
+    const { shape, leaves } = aTreeOfTwoMaterials();
+    const material = mergeShapeMaterials(shape, 'tree').parts[0]?.material;
+    const { vertex, fragment, uniforms } = compiledLayers(material);
+    expect(vertex).toContain('attribute float oylLayer;');
+    expect(vertex).toContain('flat varying float vOylLayer;');
+    expect(vertex).toContain('vOylLayer = oylLayer;');
+    expect(fragment).toContain('flat varying float vOylLayer;');
+    // Layer 1 reads its own maps; layer 0 reads the material's.
+    expect(fragment).toContain(
+      'if (oylAt == 1) return textureGrad(oylLayerMap1, uv, oylDx, oylDy);',
+    );
+    expect(fragment).toContain('return textureGrad(map, uv, oylDx, oylDy);');
+    expect(fragment).toContain(
+      'if (oylAt == 1) return textureGrad(oylLayerNormalMap1, uv, oylDx, oylDy);',
+    );
+    expect(fragment).toContain('return textureGrad(normalMap, uv, oylDx, oylDy);');
+    // Three's own reads are gone, and the normal scale is the layer's.
+    expect(fragment).not.toContain('texture2D( map, vMapUv )');
+    expect(fragment).not.toContain('texture2D( normalMap, vNormalMapUv )');
+    expect(fragment).toContain('mapN.xy *= oylLayerNormalScale[ oylLayerOf() ];');
+    expect(fragment).not.toContain('mapN.xy *= normalScale;');
+    // #619's bias, as a gradient scale: 2^bias moves the level by exactly bias.
+    expect(fragment).toContain('float oylGrow = exp2(oylTextureLodBias);');
+    // In BOTH helpers — the colour read's and the normal read's.
+    expect(fragment.split('vec2 oylDx = dFdx(uv) * oylGrow;')).toHaveLength(3);
+    expect(fragment.split('vec2 oylDy = dFdy(uv) * oylGrow;')).toHaveLength(3);
+    // Bark keeps every fragment; the leaves are cut.
+    expect(fragment).toContain('if ( oylLayerCut[ oylLayerOf() ] < 0.5 ) diffuseColor.a = 1.0;');
+    expect(uniforms['oylLayerCut']?.value).toEqual([0, 1]);
+    expect((uniforms['oylLayerMap1']?.value as FakeMap | undefined)?.cloneOf).toBe(leaves.map);
+    expect((uniforms['oylLayerNormalMap1']?.value as FakeMap | undefined)?.cloneOf).toBe(
+      leaves.normalMap,
+    );
+    // The normal helper reads `normalMap`, so it follows three's declaration of it.
+    expect(fragment.indexOf('vec4 oylLayerNormalTexel')).toBeGreaterThan(
+      fragment.indexOf('#include <normalmap_pars_fragment>'),
+    );
+    const key = (material as unknown as { customProgramCacheKey: () => string })
+      .customProgramCacheKey;
+    expect(key()).toContain('|oyl-layers-2');
+  });
+
+  it('throws, naming #639, where three’s program no longer holds an include it splices at', () => {
+    const material = mergeShapeMaterials(aTreeOfTwoMaterials().shape, 'tree').parts[0]?.material;
+    // The #619 skeleton holds no `map_pars_fragment`.
+    expect(() => compiledFragment(material)).toThrow(/#639/);
+  });
+
+  it('returns a shape of one material as it is', () => {
+    const single = prepareRealisticShape(aScene([{ material: loaderMaterial() }]), 'rock');
+    expect(mergeShapeMaterials(single, 'rock')).toBe(single);
+  });
+
+  it('refuses a layer whose colour and normal maps are read differently, or with no normal map', () => {
+    const skewed = prepareRealisticShape(
+      aScene([
+        { material: loaderMaterial({ name: 'bark', map: aMap(BARK_TILING), normalMap: aMap() }) },
+        { material: loaderMaterial({ name: 'leaves', map: aMap(), normalMap: aMap() }) },
+      ]),
+      'tree',
+    );
+    expect(() => mergeShapeMaterials(skewed, 'tree')).toThrow(/read differently/);
+    const bare = prepareRealisticShape(
+      aScene([
+        { material: loaderMaterial({ name: 'bark', map: aMap(), normalMap: null }) },
+        { material: loaderMaterial({ name: 'leaves', map: aMap(), normalMap: aMap() }) },
+      ]),
+      'tree',
+    );
+    expect(() => mergeShapeMaterials(bare, 'tree')).toThrow(/no normal map/);
+  });
+
+  it('refuses more layers than one draw can sample', () => {
+    const many = prepareRealisticShape(
+      aScene(
+        ['a', 'b', 'c', 'd', 'e'].map((name) => ({
+          material: loaderMaterial({ name, map: aMap(), normalMap: aMap() }),
+        })),
+      ),
+      'tree',
+    );
+    expect(() => mergeShapeMaterials(many, 'tree')).toThrow(/more than one draw can layer/);
+  });
+
+  it('draws a merged tree in one mesh a level, in the canopy’s place in the order', () => {
+    const merged = mergeShapeMaterials(aTreeOfTwoMaterials().shape, 'tree');
+    const belt = new RealisticVegetationBelt(
+      new Map([
+        ['tree-broadleaf', [merged]],
+        ['tree-conifer', [merged]],
+      ] as const),
+    );
+    const levels = belt.levelsOf('tree-broadleaf');
+    expect(levels.full[0]).toHaveLength(1);
+    expect(levels.middle[0]).toHaveLength(1);
+    // Its bark is in the one cut material now, so the whole tree is drawn
+    // after the opaque world (#619 lever 1).
+    for (const mesh of [...(levels.full[0] ?? []), ...(levels.middle[0] ?? [])]) {
+      expect(mesh.renderOrder).toBeGreaterThan(0);
+    }
+  });
+});
+
+/**
+ * Loaders whose every model is a scan of TWO materials — tiled bark and cut
+ * leaves, each with a colour and a normal map — so every tree the load
+ * prepares is merged (#639), and every map it wears is a {@link FakeMap} whose
+ * clones this remembers.
+ */
+function twoMaterialLoaders(): RealisticLoaders & { readonly clones: FakeMap[] } {
+  const clones: FakeMap[] = [];
+  const remembered = (map: FakeMap): FakeMap => {
+    const clone = map.clone;
+    map.clone = () => {
+      const copy = remembered(clone());
+      clones.push(copy);
+      return copy;
+    };
+    return map;
+  };
+  const extras = {
+    oyl_scan_height: 8,
+    oyl_scan_width: 4,
+    oyl_impostor_scale: 8.2,
+    oyl_impostor_frames: 8,
+  };
+  const texture = (): unknown => ({ image: { width: 512, height: 512 }, dispose: () => undefined });
+  const sky = (): unknown => {
+    const data = new Float32Array(16 * 8 * 4).fill(1);
+    data[(1 * 16 + 5) * 4] = 50;
+    data[(1 * 16 + 5) * 4 + 1] = 50;
+    data[(1 * 16 + 5) * 4 + 2] = 50;
+    return { image: { width: 16, height: 8, data }, type: 'float', dispose: () => undefined };
+  };
+  const scene = (): unknown => ({
+    ...aScene(
+      [
+        {
+          material: loaderMaterial({
+            name: 'bark',
+            map: remembered(aMap(BARK_TILING)),
+            normalMap: remembered(aMap(BARK_TILING)),
+          }),
+        },
+        {
+          material: loaderMaterial({
+            name: 'leaves',
+            transparent: true,
+            map: remembered(aMap()),
+            normalMap: remembered(aMap()),
+          }),
+        },
+      ],
+      extras,
+    ),
+    userData: extras,
+  });
+  return {
+    clones,
+    sky: () => Promise.resolve(sky() as never),
+    texture: () => Promise.resolve(texture() as never),
+    model: () => Promise.resolve(scene() as never),
+  };
+}
+
+describe('every layer of a merged tree is freed — #639’s review', () => {
+  /** How many of `maps` were never disposed — a count, so a failure reads as one. */
+  const leaked = (maps: readonly FakeMap[]): number => maps.filter((map) => !map.disposed).length;
+
+  /** The world loaded from two-material scans, and every texture its merged trees sample. */
+  async function mergedWorld(): Promise<readonly FakeMap[]> {
+    const reading = twoMaterialLoaders();
+    await expect(loadRealisticWorld(reading)).resolves.toEqual({ loaded: true });
+    // What the merge made: a second texture over each layer's image, and
+    // nothing else — so this is exactly what the merged materials sample.
+    const sampled = [...reading.clones];
+    // Non-vacuity: two layers a tree, two maps a layer, so HALF of what a
+    // merged material samples is beyond its own `map` and `normalMap`.
+    expect(sampled.length).toBeGreaterThanOrEqual(4);
+    expect(sampled.length % 4).toBe(0);
+    expect(sampled.every((map) => !map.disposed)).toBe(true);
+    return sampled;
+  }
+
+  it('releases every layer’s maps when another world replaces it, not one layer in two', async () => {
+    const sampled = await mergedWorld();
+    await expect(loadRealisticWorld(twoMaterialLoaders())).resolves.toEqual({ loaded: true });
+    expect(leaked(sampled), `of ${String(sampled.length)} sampled`).toBe(0);
+  });
+
+  it('frees every layer’s maps from the GPU when a view leaves the realistic world', async () => {
+    const sampled = await mergedWorld();
+    evictRealisticWorldFromGpu();
+    expect(leaked(sampled), `of ${String(sampled.length)} sampled`).toBe(0);
+  });
+});
 
 describe('treeCanBeSeen — #617’s review', () => {
   const at = (along: number, across: number, y: number): ScatterItem => ({
@@ -2660,6 +3069,11 @@ describe('the realistic world breathes one air, and the stylised world none of i
     ]);
     // What it deliberately does not claim to follow: a name held in a value.
     expect(renderTargetsIn('renderer[method](target);')).toEqual([]);
+    // #639: a member the table INHERITS is not in it. `array.constructor` read
+    // as `Object`, a render target, and turned #639's geometry merge red.
+    expect(
+      renderTargetsIn('new (array.constructor as never)(8); map.toString(); x.hasOwnProperty;'),
+    ).toEqual([]);
   });
 
   it('throws, naming #622, where three’s program no longer holds a fog include', () => {
@@ -2738,7 +3152,9 @@ function renderTargetsIn(source: string): readonly string[] {
     return undefined;
   };
   const member = (name: string | undefined): void => {
-    const label = name === undefined ? undefined : MEMBERS[name];
+    // #639: OWN keys only — `MEMBERS['constructor']` is `Object`, inherited, and
+    // a `.constructor` anywhere in the file used to read as a render target.
+    const label = name === undefined || !Object.hasOwn(MEMBERS, name) ? undefined : MEMBERS[name];
     if (label !== undefined) found.push(label);
   };
   const visit = (node: ts.Node): void => {

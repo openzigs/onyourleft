@@ -28,6 +28,8 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { REALISTIC_WOODED_DRAW_CALLS } from '../src/game/realistic-budget';
+
 import { LAYERS } from './realistic/config';
 import type { RealisticSample } from './realistic-harness';
 
@@ -87,6 +89,13 @@ test.describe('the realistic page’s instruments — #616', () => {
         `layers ${JSON.stringify(all.page.layers)}`,
     );
     expect(all.result.layersOff).toEqual([]);
+    // #639's own criterion, on the page it names and the load this already
+    // pays for: the wooded view at `at=2550`, counted at the draw calls, is at
+    // or under the budget. The rider and the ladder are held, so the window's
+    // mean is one frame's count repeated. Each tree's materials drawn apart —
+    // `three-renderer.ts` §`setRealisticMaterialsMerged` — puts it at 39.
+    expect(all.result.drawCalls).toBeGreaterThan(0);
+    expect(all.result.drawCalls).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
     expect(rendererTriangles, 'three drew no frame through the switch').toBeDefined();
     expect(triangles).toBeGreaterThan(0);
     expect(all.result.trianglesPerFrame).toBeGreaterThan(0);

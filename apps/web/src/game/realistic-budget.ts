@@ -262,6 +262,43 @@ export const REALISTIC_TREE_LEVELS: TreeLevels = {
 };
 
 /**
+ * The most draw calls the wooded view may make: **35** — #639, the 33 it made
+ * before #617 and the +2 #617 allowed its middle level.
+ *
+ * ## Where the calls went, and where they came back
+ *
+ * An instanced mesh is a call per level per variant per MATERIAL, and every
+ * committed tree carries three. #617's middle level, drawn beside the full
+ * meshes and the impostors, took #617's wooded view from 33 to 39 (PR #637,
+ * against `86cfa5c`); on `main` at `553ce05` the same view made 37, and the
+ * owner's page at `at=2550` (#616's counter) 39. Since #639 each tree level
+ * is ONE material with its scan's materials as layers
+ * (`three-renderer.ts` §`mergeShapeMaterials`), so a level of a variant is one
+ * call whatever the scan was made of, and the frame's triangles and texture
+ * memory are what they were.
+ *
+ * | Wooded view, pinned Chromium, 2026-09-28 | Before #639 (`553ce05`) | After |
+ * |---|--:|--:|
+ * | `game-harness.ts` §`treeLevelProbe`, 900 m of the valley route | 37 | **27** |
+ * | The owner's page, `realistic.html?at=2550` (#616's counter) | 39 | **31** |
+ * | The gate's wooded view, triangles submitted | 181 606 | 181 606 |
+ * | The gate's wooded view, pixels that differ (640 × 360) | — | 0 |
+ *
+ * So the wooded view is 6 under #617's 33 + 2, and 2 under the 33 it made
+ * before #617 at all.
+ *
+ * ⚠️ **A browser-gate figure, not a device measurement.** The call count does
+ * not depend on the GPU, so SwiftShader counts what the tablet would; what the
+ * calls COST there is validation 0002 Part AH's row, which is the owner's.
+ *
+ * @test-facing held by `game.browser.spec.ts` §"#639", which counts the wooded
+ * view's calls at the WebGL entry points against it, with the same view drawn
+ * with each tree's layers apart as the control that must exceed it; and by
+ * `realistic.browser.spec.ts`, which holds the owner's page at `at=2550` to it
+ */
+export const REALISTIC_WOODED_DRAW_CALLS = 35;
+
+/**
  * The trees as they were drawn before #617 — the nearest six as full meshes,
  * a hard swap to the impostor, no middle level and no band — ranked together,
  * as {@link REALISTIC_TREE_LEVELS} ranks them.

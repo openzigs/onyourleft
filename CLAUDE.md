@@ -826,7 +826,18 @@ apps/                 AGPL-3.0-or-later, without exception
                         count, and the arithmetic for why it is not per kind.
                         The middle GLBs carry no image and wear the near file's
                         materials, paired by name (`three-renderer.ts`
-                        §`prepareMiddleLevel`). ⚠️ Since #617's review only
+                        §`prepareMiddleLevel`). ⚠️ **Since #639 a tree is ONE
+                        material a level**, and a reviewer who remembers a call
+                        per scan material is reading the old file: the scan's
+                        materials are LAYERS of it (`mergeShapeMaterials`), a
+                        byte a vertex says which, the texture transforms are
+                        baked into the coordinates, and no committed file
+                        moved — so the wooded view is 27 calls, not 37, over
+                        the same triangles and the same pixels
+                        (`realistic-budget.ts` §`REALISTIC_WOODED_DRAW_CALLS`,
+                        whose browser-gate control loads the world unmerged,
+                        and which the owner's page at `at=2550` is held to
+                        as well). ⚠️ Since #617's review only
                         trees the CAMERA can see are ranked
                         (`three-renderer.ts` §`treeCanBeSeen`) — a tree behind
                         the camera used to take the one full slot — and

@@ -4664,7 +4664,8 @@ export interface RealisticShape {
   /**
    * The middle level of detail, for a tree — #617. Its parts wear the near
    * parts' OWN materials, paired by material name, so it adds no material, no
-   * program and no texture. @see prepareMiddleLevel
+   * program and no texture. @see prepareMiddleLevel — and since #639 both
+   * levels are one part wearing one merged material. @see mergeShapeMaterials
    */
   readonly middle?: { readonly parts: readonly RealisticPart[]; readonly triangles: number };
 }
@@ -5000,10 +5001,9 @@ export function realisticTextureReport(): readonly RealisticTextureReport[] {
   for (const map of REALISTIC_BICYCLE_MAP_NAMES) add(world.bicycle[map], 'bicycle');
   for (const shapes of world.vegetation.values()) {
     for (const shape of shapes) {
-      for (const part of shape.parts) {
-        add(part.material.map, 'model');
-        add(part.material.normalMap, 'model');
-      }
+      // #639: every layer of a merged material, not only its own two maps.
+      for (const part of shape.parts)
+        for (const map of texturesOf(part.material)) add(map, 'model');
       add(shape.impostor?.texture, 'impostor');
     }
   }
@@ -5034,7 +5034,7 @@ export function uploadRealisticTexturesOf(view: GameView, textures?: readonly Te
           ...REALISTIC_BICYCLE_MAP_NAMES.map((map) => world.bicycle[map]),
           ...[...world.vegetation.values()].flatMap((shapes) =>
             shapes.flatMap((shape) => [
-              ...shape.parts.flatMap((part) => [part.material.map, part.material.normalMap]),
+              ...shape.parts.flatMap((part) => texturesOf(part.material)),
               shape.impostor?.texture ?? null,
             ]),
           ),
@@ -5155,9 +5155,13 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
         const near = prepareRealisticShape(await one.scene, one.name, await one.strip);
         loaded.shapes.push(near);
         const middleScene = await one.middle;
-        const shape =
+        const levelled =
           middleScene === undefined ? near : prepareMiddleLevel(near, middleScene, one.name);
-        if (shape !== near) loaded.shapes[loaded.shapes.length - 1] = shape;
+        loaded.shapes[loaded.shapes.length - 1] = levelled;
+        // #639: one material a level, so one draw call a level — unless this
+        // is the browser gate loading its control. @see setRealisticMaterialsMerged
+        const shape = realisticMaterialsMerged ? mergeShapeMaterials(levelled, one.name) : levelled;
+        loaded.shapes[loaded.shapes.length - 1] = shape;
         prepared.push(shape);
       }
       vegetation.set(each.kind, prepared);
@@ -5258,6 +5262,24 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
   }
 }
 
+/** Whether the next realistic load merges each shape's materials. @see setRealisticMaterialsMerged */
+let realisticMaterialsMerged = true;
+
+/**
+ * Makes the NEXT realistic load keep each tree's parts one per material, as
+ * every load did before #639 — or, with `true`, merge them, as the product
+ * does. The browser gate's control for #639: the same wooded view drawn from
+ * a world loaded that way must make more draw calls than
+ * `realistic-budget.ts` §`REALISTIC_WOODED_DRAW_CALLS`, over the same
+ * triangles, into the same picture.
+ *
+ * @test-facing `apps/web/browser/game-harness.ts` §`treeLevelRun` loads its
+ * control with it; the product always merges
+ */
+export function setRealisticMaterialsMerged(on: boolean): void {
+  realisticMaterialsMerged = on;
+}
+
 /** The load a ride is waiting on, if one is in flight. @see loadRealisticWorldOnce */
 let realisticLoading: Promise<RealisticWorldOutcome> | undefined;
 
@@ -5319,8 +5341,8 @@ function attempt(release: () => void): void {
 function releaseRealisticShape(shape: RealisticShape): void {
   for (const part of shape.parts) {
     part.geometry.dispose();
-    part.material.map?.dispose();
-    part.material.normalMap?.dispose();
+    // #639: every layer's maps, which a merged material holds beyond its own two.
+    for (const map of texturesOf(part.material)) map.dispose();
     part.material.dispose();
   }
   shape.impostor?.texture.dispose();
@@ -5507,6 +5529,484 @@ export function prepareMiddleLevel(
 }
 
 /**
+ * The most layers one merged realistic material may hold: **4** — #639. Every
+ * committed tree has three (its bark, its branches and its leaves, or a fir's
+ * live and dead branches and its twigs), and a layer past the first costs two
+ * samplers: four layers is six of the sixteen texture units WebGL 2 promises,
+ * beside the colour map, the normal map, the environment map and three's own
+ * lookup table. A scan with more is refused rather than drawn in fewer calls
+ * and more units than a phone may have.
+ */
+const MAXIMUM_MATERIAL_LAYERS = 4;
+
+/**
+ * What a merged material samples beyond its own `map` and `normalMap` — #639:
+ * layer 1's colour and normal maps, then layer 2's, and so on. Keyed by the
+ * material, so that every place that releases, evicts, uploads or reports a
+ * realistic material's textures reaches them ({@link texturesOf}); a reader
+ * of `map` and `normalMap` alone would see one layer in three.
+ */
+const LAYER_TEXTURES = new WeakMap<Material, readonly Texture[]>();
+
+/**
+ * Every texture a realistic vegetation material samples: its colour and normal
+ * maps and, for a merged one, every other layer's — #639. @see LAYER_TEXTURES
+ */
+function texturesOf(material: MeshStandardMaterial): readonly Texture[] {
+  const out: Texture[] = [];
+  if (material.map !== null) out.push(material.map);
+  if (material.normalMap !== null) out.push(material.normalMap);
+  out.push(...(LAYER_TEXTURES.get(material) ?? []));
+  return out;
+}
+
+/**
+ * How many layers a material was merged from — 1 for one that was not.
+ *
+ * @test-facing held by `realistic-renderer.test.ts` §"#639", which asserts a
+ * merged tree's one material holds every layer its parts wore
+ */
+export function materialLayers(material: Material): number {
+  const extra = LAYER_TEXTURES.get(material);
+  return extra === undefined ? 1 : 1 + extra.length / 2;
+}
+
+/**
+ * A realistic shape whose parts are drawn as ONE part — one geometry and one
+ * material per level — rather than one per material the scan carried. #639.
+ *
+ * ## Why
+ *
+ * An instanced mesh is a draw call per level per variant per MATERIAL, and
+ * every committed tree carries three: so #617's middle level, drawn beside the
+ * full meshes and the impostors, took the wooded view from 33 calls to 39
+ * where #617 allowed 35. One material a tree makes the full and the middle
+ * level one call each, whatever the scan was made of.
+ *
+ * ## How: layers, not an atlas
+ *
+ * #639 suggested an atlas — every map of a tree packed into one image — and it
+ * is not what this does, for three reasons read off the committed files. The
+ * bark is TILED: `KHR_texture_transform` repeats `island_tree_02`'s branches
+ * 15 × 3.4 times, `tree_small_02`'s 3 × 0.6, a fir's 1.2 × 0.1, and a tiled
+ * map inside an atlas needs the wrap done in the shader anyway, with the seams
+ * bleeding across mip levels unless every read names its gradients — which is
+ * this function's shader and more. Three 512 px maps do not pack into a
+ * power-of-two image without a quarter of it empty (a 1024² atlas holds four),
+ * which is texture memory #639 forbids spending, or a smaller copy of each,
+ * which is a loss of detail it did not ask for. And an atlas moves every
+ * derived model's bytes, where this moves none: the committed files, their
+ * `ASSETS.toml` rows and `realistic:process --check` are untouched.
+ *
+ * So each material the scan carried becomes a LAYER of one material: the
+ * geometry carries which layer a vertex belongs to (`oylLayer`, one byte), and
+ * the fragment shader reads that layer's colour and normal maps
+ * ({@link withMaterialLayers}). The maps are the same textures over the same
+ * images — three uploads an image once, whatever reads it — so the GPU holds
+ * exactly what it held before.
+ *
+ * ## What is baked, and what is kept per layer
+ *
+ * - **The texture transform is baked into the coordinates**, which is exactly
+ *   what three did per vertex: `vMapUv = transform · uv`. A layer's colour and
+ *   normal maps must share one transform and one coordinate set, as every
+ *   committed scan's do; one that does not is refused.
+ * - **Per layer, in uniforms**: the colour factor, the normal scale (a scan's
+ *   branches may be 0.5), and whether it is cut. A layer that was not
+ *   alpha-tested — bark — keeps every fragment, as it did.
+ *
+ * ## ⚠️ What changes, and it is not the picture
+ *
+ * A tree with leaves is ONE alpha-tested material now, so its bark is drawn in
+ * the canopy's place in the order (`FOLIAGE_RENDER_ORDER`) rather than with the
+ * opaque world. Every realistic tree's program already carried #617's dither
+ * `discard`, so no bark lost an early depth rejection it had; and the depth
+ * test keeps the nearest fragment whatever arrives first.
+ *
+ * The middle level, which wore the near parts' own materials (#617), wears the
+ * one merged material too, and its coordinates are baked with the SAME layers'
+ * transforms. A shape with one material is returned as it is. The parts it
+ * replaces — their geometries and constructed materials — are released here;
+ * their textures are not, because the merged material samples the same images.
+ *
+ * ## ⚠️ A merged tree must not cast a shadow as things stand
+ *
+ * The material's own `map` is LAYER 0's colour map, read through the BAKED
+ * coordinates, and nothing else of the layers is visible to three outside this
+ * shader. Three's shadow depth pass builds its own material from `map` and
+ * `alphaTest` alone (`WebGLShadowMap`'s depth material), so a merged tree that
+ * cast would cut every layer against layer 0's picture: a bark-first scan
+ * would throw solid leaf quads, a leaf-first one would cut its bark into
+ * holes. Nothing casts from the vegetation today — `three-seam.test.ts` §"lets
+ * only the sun and the riders cast a shadow" counts every `castShadow` write
+ * in this file, and a third is a red build — so whoever lifts that rule for
+ * the trees owes them a depth material that reads `oylLayer` first.
+ */
+export function mergeShapeMaterials(shape: RealisticShape, name: string): RealisticShape {
+  const layers = [...new Set(shape.parts.map((part) => part.material))];
+  if (layers.length < 2) return shape;
+  if (layers.length > MAXIMUM_MATERIAL_LAYERS) {
+    throw new Error(`${name}: ${String(layers.length)} materials, more than one draw can layer`);
+  }
+  const vertexColours = layers.map((material) => material.vertexColors);
+  if (new Set(vertexColours).size !== 1) {
+    throw new Error(`${name}: some of its parts carry vertex colours and some do not`);
+  }
+  const transforms = layers.map((material) => layerTransform(material, name));
+  const plain = (texture: Texture): Texture => {
+    // A second texture object over the SAME image — `Source` — so three
+    // uploads nothing twice, with the transform it no longer needs taken off.
+    const copy = texture.clone();
+    copy.matrixAutoUpdate = false;
+    copy.matrix.identity();
+    copy.channel = 0;
+    return copy;
+  };
+  const maps = layers.map((material) => ({
+    colour: plain(material.map as Texture),
+    normal: plain(material.normalMap as Texture),
+  }));
+  const first = maps[0] as (typeof maps)[number];
+  const cut = layers.map((material) => material.alphaTest > 0);
+  const material = constructed(
+    new MeshStandardMaterial({
+      color: new Color(0xffffff),
+      map: first.colour,
+      normalMap: first.normal,
+      vertexColors: vertexColours[0] === true,
+      roughness: REALISTIC_ROUGHNESS,
+      metalness: 0,
+      side: DoubleSide,
+      alphaTest: cut.some((each) => each) ? REALISTIC_ALPHA_CUTOFF : 0,
+      transparent: false,
+    }),
+  );
+  material.name = name;
+  LAYER_TEXTURES.set(
+    material,
+    maps.slice(1).flatMap((each) => [each.colour, each.normal]),
+  );
+  withTextureLodBias(material);
+  withAtmosphere(material);
+  withMaterialLayers(material, {
+    colours: layers.map((each) => each.color.clone()),
+    normalScales: layers.map((each) => each.normalScale.clone()),
+    cut,
+  });
+  const layerOf = (part: RealisticPart): number => {
+    const layer = layers.indexOf(part.material);
+    if (layer < 0) throw new Error(`${name}: a part wears a material the shape does not`);
+    return layer;
+  };
+  const near = layeredGeometry(shape.parts, layerOf, transforms, name);
+  const middle =
+    shape.middle === undefined
+      ? undefined
+      : {
+          parts: [
+            {
+              geometry: layeredGeometry(shape.middle.parts, layerOf, transforms, name),
+              material,
+            },
+          ],
+          triangles: shape.middle.triangles,
+        };
+  for (const part of [...shape.parts, ...(shape.middle?.parts ?? [])]) part.geometry.dispose();
+  for (const each of layers) each.dispose();
+  return {
+    ...shape,
+    parts: [{ geometry: near, material }],
+    ...(middle === undefined ? {} : { middle }),
+  };
+}
+
+/** One layer's texture transform and coordinate set. @see mergeShapeMaterials */
+interface LayerTransform {
+  /** three's `Matrix3` elements, column-major: `uv' = M · (u, v, 1)`. */
+  readonly elements: readonly number[];
+  readonly channel: number;
+}
+
+/**
+ * The transform a layer's maps are read through — which its colour and normal
+ * maps must share, or the layer cannot be baked into one set of coordinates.
+ */
+function layerTransform(material: MeshStandardMaterial, name: string): LayerTransform {
+  const { map, normalMap } = material;
+  if (map === null || normalMap === null) {
+    throw new Error(`${name}: ${material.name} has no colour map or no normal map to layer`);
+  }
+  if (map.matrixAutoUpdate) map.updateMatrix();
+  if (normalMap.matrixAutoUpdate) normalMap.updateMatrix();
+  const elements = [...map.matrix.elements];
+  const same = normalMap.matrix.elements.every(
+    (value, index) => Math.abs(value - (elements[index] ?? Number.NaN)) <= 1e-9,
+  );
+  if (!same || map.channel !== normalMap.channel) {
+    throw new Error(`${name}: ${material.name}'s colour and normal maps are read differently`);
+  }
+  return { elements, channel: map.channel };
+}
+
+/**
+ * The parts of one level as ONE geometry — #639: positions, normals, the
+ * vertex colours in the files' own type, the coordinates with each layer's
+ * transform baked in, and `oylLayer`, a byte a vertex. The parts are put in
+ * layer order, so the triangles of a layer are one run of the index.
+ */
+function layeredGeometry(
+  parts: readonly RealisticPart[],
+  layerOf: (part: RealisticPart) => number,
+  transforms: readonly LayerTransform[],
+  name: string,
+): BufferGeometry {
+  const ordered = parts
+    .map((part) => ({ part, layer: layerOf(part) }))
+    .sort((a, b) => a.layer - b.layer);
+  let vertices = 0;
+  let indices = 0;
+  for (const { part } of ordered) {
+    const count = part.geometry.getAttribute('position').count;
+    vertices += count;
+    indices += part.geometry.getIndex()?.count ?? count;
+  }
+  const colour = ordered[0]?.part.geometry.getAttribute('color') as BufferAttribute | undefined;
+  const position = new Float32Array(vertices * 3);
+  const normal = new Float32Array(vertices * 3);
+  const uv = new Float32Array(vertices * 2);
+  const layer = new Uint8Array(vertices);
+  const colours =
+    colour === undefined
+      ? undefined
+      : new (colour.array.constructor as new (length: number) => BufferAttribute['array'])(
+          vertices * colour.itemSize,
+        );
+  const index = vertices > 0xffff ? new Uint32Array(indices) : new Uint16Array(indices);
+  const merged = new BufferGeometry();
+  let base = 0;
+  let at = 0;
+  for (const { part, layer: which } of ordered) {
+    const geometry = part.geometry;
+    const transform = transforms[which] as LayerTransform;
+    const from = {
+      position: geometry.getAttribute('position'),
+      normal: geometry.getAttribute('normal') as BufferAttribute | undefined,
+      uv: geometry.getAttribute(
+        transform.channel === 0 ? 'uv' : `uv${String(transform.channel)}`,
+      ) as BufferAttribute | undefined,
+      colour: geometry.getAttribute('color') as BufferAttribute | undefined,
+    };
+    if (from.normal === undefined || from.uv === undefined) {
+      throw new Error(`${name}: a part has no normals, or no coordinates for its maps`);
+    }
+    if (
+      (from.colour === undefined) !== (colour === undefined) ||
+      (colour !== undefined &&
+        (from.colour?.itemSize !== colour.itemSize ||
+          from.colour.normalized !== colour.normalized ||
+          from.colour.array.constructor !== colour.array.constructor))
+    ) {
+      throw new Error(`${name}: its parts carry vertex colours of different kinds`);
+    }
+    const [a, b, , c, d, , e, f] = transform.elements as number[];
+    const count = from.position.count;
+    for (let vertex = 0; vertex < count; vertex += 1) {
+      const out = base + vertex;
+      position[out * 3] = from.position.getX(vertex);
+      position[out * 3 + 1] = from.position.getY(vertex);
+      position[out * 3 + 2] = from.position.getZ(vertex);
+      normal[out * 3] = from.normal.getX(vertex);
+      normal[out * 3 + 1] = from.normal.getY(vertex);
+      normal[out * 3 + 2] = from.normal.getZ(vertex);
+      const u = from.uv.getX(vertex);
+      const v = from.uv.getY(vertex);
+      uv[out * 2] = (a ?? 1) * u + (c ?? 0) * v + (e ?? 0);
+      uv[out * 2 + 1] = (b ?? 0) * u + (d ?? 1) * v + (f ?? 0);
+      layer[out] = which;
+    }
+    if (colours !== undefined && from.colour !== undefined) {
+      // The files' own values, copied as they are: so the colours must be the
+      // attribute's whole array, which an interleaved one is not.
+      if (from.colour.array.length !== count * from.colour.itemSize) {
+        throw new Error(`${name}: a part's vertex colours are not an array of their own`);
+      }
+      colours.set(from.colour.array, base * from.colour.itemSize);
+    }
+    const own = geometry.getIndex();
+    if (own === null) {
+      for (let vertex = 0; vertex < count; vertex += 1) index[at++] = base + vertex;
+    } else {
+      for (let slot = 0; slot < own.count; slot += 1) index[at++] = base + own.getX(slot);
+    }
+    base += count;
+  }
+  merged.setAttribute('position', new BufferAttribute(position, 3));
+  merged.setAttribute('normal', new BufferAttribute(normal, 3));
+  merged.setAttribute('uv', new BufferAttribute(uv, 2));
+  if (colours !== undefined && colour !== undefined) {
+    merged.setAttribute('color', new BufferAttribute(colours, colour.itemSize, colour.normalized));
+  }
+  merged.setAttribute('oylLayer', new BufferAttribute(layer, 1));
+  merged.setIndex(new BufferAttribute(index, 1));
+  merged.computeBoundingBox();
+  merged.computeBoundingSphere();
+  return merged;
+}
+
+/** What {@link withMaterialLayers} hands the shader, per layer. */
+interface MaterialLayers {
+  readonly colours: readonly Color[];
+  readonly normalScales: readonly Vector2[];
+  readonly cut: readonly boolean[];
+}
+
+/**
+ * Teaches a merged material to read each fragment's own layer — #639.
+ *
+ * The vertex shader hands `oylLayer` on as a FLAT varying: every vertex of a
+ * triangle is in one layer, so the value is the triangle's. The fragment shader
+ * then reads the colour and the normal map of that layer, times its colour
+ * factor and its normal scale, and a layer that was never cut keeps an alpha
+ * of 1, so the material's alpha test passes it.
+ *
+ * ⚠️ **Every read names its gradients** (`textureGrad`), taken once before the
+ * layer is chosen: a texture read with implicit derivatives inside a branch is
+ * undefined in GLSL ES 3.00 wherever the branch is not uniform, and although a
+ * flat varying is uniform across one triangle's pixels the specification does
+ * not say so. #619's bias is kept by scaling the gradients by `2^bias`, which
+ * moves the level of detail by exactly `bias` — the one lever `texture(s, uv,
+ * bias)` pulls. So this is taught AFTER {@link withTextureLodBias}, and throws
+ * if the program does not hold its uniform.
+ *
+ * Every replacement throws where three's program no longer holds the text it
+ * replaces, for {@link replacedOrThrown}'s reason. Keyed by the layer count,
+ * which is all the program's text depends on.
+ */
+function withMaterialLayers(material: MeshStandardMaterial, layers: MaterialLayers): void {
+  const count = layers.colours.length;
+  const extra = LAYER_TEXTURES.get(material) ?? [];
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  const spliced = "#639's layers";
+  const others = Array.from({ length: count - 1 }, (_, index) => index + 1);
+  const read = (sampler: (layer: number) => string, own: string): string =>
+    `${others
+      .map(
+        (layer) =>
+          `  if (oylAt == ${String(layer)}) return textureGrad(${sampler(layer)}, uv, oylDx, oylDy);\n`,
+      )
+      .join('')}  return textureGrad(${own}, uv, oylDx, oylDy);`;
+  const helpers = /* glsl */ `
+flat varying float vOylLayer;
+uniform vec3 oylLayerColour[${String(count)}];
+uniform vec2 oylLayerNormalScale[${String(count)}];
+uniform float oylLayerCut[${String(count)}];
+${others
+  .map(
+    (layer) =>
+      `uniform sampler2D oylLayerMap${String(layer)};\nuniform sampler2D oylLayerNormalMap${String(layer)};`,
+  )
+  .join('\n')}
+int oylLayerOf() { return int(vOylLayer + 0.5); }
+vec4 oylLayerTexel(vec2 uv) {
+  float oylGrow = exp2(oylTextureLodBias);
+  vec2 oylDx = dFdx(uv) * oylGrow;
+  vec2 oylDy = dFdy(uv) * oylGrow;
+  int oylAt = oylLayerOf();
+${read((layer) => `oylLayerMap${String(layer)}`, 'map')}
+}
+`;
+  // After three's `normalMap` is declared, which is later than `map` is.
+  const normalHelper = /* glsl */ `
+vec4 oylLayerNormalTexel(vec2 uv) {
+  float oylGrow = exp2(oylTextureLodBias);
+  vec2 oylDx = dFdx(uv) * oylGrow;
+  vec2 oylDy = dFdy(uv) * oylGrow;
+  int oylAt = oylLayerOf();
+${read((layer) => `oylLayerNormalMap${String(layer)}`, 'normalMap')}
+}
+`;
+  const mapChunk = `${replacedOrThrown(
+    ShaderChunk.map_fragment,
+    'texture2D( map, vMapUv )',
+    'oylLayerTexel( vMapUv )',
+    'fragment',
+    spliced,
+  )}
+diffuseColor.rgb *= oylLayerColour[ oylLayerOf() ];
+if ( oylLayerCut[ oylLayerOf() ] < 0.5 ) diffuseColor.a = 1.0;
+`;
+  const normalChunk = replacedOrThrown(
+    replacedOrThrown(
+      ShaderChunk.normal_fragment_maps,
+      'texture2D( normalMap, vNormalMapUv )',
+      'oylLayerNormalTexel( vNormalMapUv )',
+      'fragment',
+      spliced,
+    ).replaceAll('texture2D( normalMap, vNormalMapUv )', 'oylLayerNormalTexel( vNormalMapUv )'),
+    'mapN.xy *= normalScale;',
+    'mapN.xy *= oylLayerNormalScale[ oylLayerOf() ];',
+    'fragment',
+    spliced,
+  );
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    if (!shader.fragmentShader.includes('uniform float oylTextureLodBias;')) {
+      throw new Error(`${spliced} are taught after #619's texture bias, which this program lacks`);
+    }
+    shader.uniforms['oylLayerColour'] = { value: layers.colours };
+    shader.uniforms['oylLayerNormalScale'] = { value: layers.normalScales };
+    shader.uniforms['oylLayerCut'] = { value: layers.cut.map((each) => (each ? 1 : 0)) };
+    for (const layer of others) {
+      shader.uniforms[`oylLayerMap${String(layer)}`] = { value: extra[2 * (layer - 1)] ?? null };
+      shader.uniforms[`oylLayerNormalMap${String(layer)}`] = {
+        value: extra[2 * (layer - 1) + 1] ?? null,
+      };
+    }
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.vertexShader,
+        '#include <common>',
+        '#include <common>\nattribute float oylLayer;\nflat varying float vOylLayer;',
+        'vertex',
+        spliced,
+      ),
+      '#include <begin_vertex>',
+      '#include <begin_vertex>\nvOylLayer = oylLayer;',
+      'vertex',
+      spliced,
+    );
+    shader.fragmentShader = replacedOrThrown(
+      replacedOrThrown(
+        replacedOrThrown(
+          shader.fragmentShader,
+          '#include <map_pars_fragment>',
+          `#include <map_pars_fragment>\n${helpers}`,
+          'fragment',
+          spliced,
+        ),
+        '#include <map_fragment>',
+        mapChunk,
+        'fragment',
+        spliced,
+      ),
+      '#include <normalmap_pars_fragment>',
+      `#include <normalmap_pars_fragment>\n${normalHelper}`,
+      'fragment',
+      spliced,
+    );
+    shader.fragmentShader = replacedOrThrown(
+      shader.fragmentShader,
+      '#include <normal_fragment_maps>',
+      normalChunk,
+      'fragment',
+      spliced,
+    );
+  };
+  material.customProgramCacheKey = () => `${earlierKey}|oyl-layers-${String(count)}`;
+}
+
+/**
  * The roughness every realistic surface wears: **0.85**. The pipeline drops
  * the scans' roughness maps (a third of their texture memory, for a term a
  * chase camera barely resolves on foliage and bark), so one figure stands in —
@@ -5543,8 +6043,12 @@ const REALISTIC_ALPHA_CUTOFF = 0.5;
  * **The picture.** The depth test keeps the nearest fragment whatever order
  * they arrive in, and #617's two levels of one tree keep complementary pixels,
  * so there is no tie for the order to break — `game.browser.spec.ts` §"#619"
- * reads a frame back both ways and requires them identical. Bark, rocks and
- * anything else opaque stay at 0, with the rest of the opaque world. Shadow
+ * reads a frame back both ways and requires them identical. Rocks and
+ * anything else opaque stay at 0, with the rest of the opaque world.
+ * ⚠️ **A tree's bark does not, since #639**, and a reviewer who remembers
+ * "bark stays at 0" is reading the old file: a tree is one alpha-tested
+ * material a level now (`mergeShapeMaterials`), its bark a layer of it, so the
+ * whole tree is drawn in its level's place. Shadow
  * passes do not sort by it. Within one level the instances are in the frame's
  * own order, which is not nearest first; the full level holds only the few
  * nearest trees, and re-sorting instances each frame is left unmeasured.
@@ -8455,8 +8959,12 @@ function isStructureKind(kind: SceneryKind): kind is StructureKind {
  * objects: three uploads a disposed texture again if anything draws it, so a
  * later view that asks for realism still can, while a phone that stepped down
  * holds none of it meanwhile.
+ *
+ * Exported because a view reaches it only with a live context, which jsdom has
+ * none of: `realistic-renderer.test.ts` §"#639's review" calls it directly to
+ * hold every layer of a merged tree to being freed ({@link texturesOf}).
  */
-function evictRealisticWorldFromGpu(): void {
+export function evictRealisticWorldFromGpu(): void {
   const world = realisticWorld;
   if (world === undefined) return;
   world.sky.texture.dispose();
@@ -8472,8 +8980,7 @@ function evictRealisticWorldFromGpu(): void {
     for (const shape of shapes) {
       for (const part of shape.parts) {
         part.geometry.dispose();
-        part.material.map?.dispose();
-        part.material.normalMap?.dispose();
+        for (const map of texturesOf(part.material)) map.dispose();
       }
       for (const part of shape.middle?.parts ?? []) part.geometry.dispose();
       shape.impostor?.texture.dispose();
