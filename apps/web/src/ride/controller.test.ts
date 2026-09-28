@@ -6679,6 +6679,49 @@ describe('#567 — a hand-set ERG target gets the workout’s stall rescue', () 
     rig.controller.dispose();
   });
 
+  it('answers each Set the rescue holds on the snapshot, and writes nothing — #655', async () => {
+    const rig = await manualRig();
+    await pedalAt(rig, PART_S);
+    expect(rig.targetOnTheTrainer()).toBe(100);
+    expect(rig.controller.getSnapshot().trainer.ergHeld).toBeUndefined();
+    const before = rig.written.length;
+
+    await rig.controller.setTargetPower(watts(180));
+    await flushMicrotasks(20);
+    const first = rig.controller.getSnapshot().trainer.ergHeld;
+    expect(first).toEqual({ target: 180, press: expect.any(Number) as number });
+
+    // The same number again is a second press, and a second answer.
+    await rig.controller.setTargetPower(watts(180));
+    await flushMicrotasks(20);
+    const second = rig.controller.getSnapshot().trainer.ergHeld;
+    expect(second?.target).toBe(180);
+    expect(second?.press).not.toBe(first?.press);
+
+    // ⚠️ The answer is words, never a write: nothing at all went to the
+    // trainer for either press, and the machine still holds the ease.
+    expect(rig.written.slice(before)).toStrictEqual([]);
+    expect(rig.targetOnTheTrainer()).toBe(100);
+
+    // The rescue hands back and writes 180 W, so "held" is no longer true.
+    await pedalAt(
+      rig,
+      Array.from({ length: 20 }, () => 85),
+    );
+    expect(rig.targetOnTheTrainer()).toBe(180);
+    expect(rig.controller.getSnapshot().trainer.ergHeld).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('answers a Set outside a rescue with no held answer — #655', async () => {
+    const rig = await manualRig();
+    await rig.controller.setTargetPower(watts(170));
+    await flushMicrotasks(20);
+    expect(rig.targetOnTheTrainer()).toBe(170);
+    expect(rig.controller.getSnapshot().trainer.ergHeld).toBeUndefined();
+    rig.controller.dispose();
+  });
+
   it('forgets a rescue when the trainer is unpaired', async () => {
     const rig = await manualRig();
     await pedalAt(rig, PART_S);

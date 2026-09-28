@@ -65,6 +65,12 @@ describe('two consecutive frames share their storage — #469', () => {
     expect(second.lease).not.toBe(first.lease);
   });
 
+  // ⚠️ **10 s, a ceiling rather than a budget — #682.** Vitest's default 5 s was nobody's choice
+  // for this case: under coverage on CI it took 1.6 s to 3.2 s over thirteen green `main` runs on
+  // 2026-09-28 (36370135206 to 36405580515), the slowest on 36405580515 (the slower of the two
+  // runners, a job over 1 000 s) — 65 % of that default. 10 s is about three times the slowest, so
+  // a slow-down is red. It is not a hang guard: this case is synchronous and Vitest cannot
+  // interrupt one, so a genuine hang is caught only by the job’s own stop (CLAUDE.md §4c).
   it('keeps lending the same ground over a whole climb and descent, not only for two frames', () => {
     // The storage is sized to the corridor's row count, so a row count that
     // wavered between frames would reallocate on every change. Ten seconds of
@@ -76,7 +82,7 @@ describe('two consecutive frames share their storage — #469', () => {
       if (riding(profile, 300 + frame * 0.15).terrain.mesh.vertices !== lent) reallocated += 1;
     }
     expect(reallocated).toBe(0);
-  });
+  }, 10_000);
 
   it('lends the water views of the same storage, frame after frame', () => {
     const profile = lakeValleyRoute();

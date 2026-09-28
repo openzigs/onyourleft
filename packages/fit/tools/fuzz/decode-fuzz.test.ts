@@ -16,8 +16,11 @@
  * `invariants.ts` states the three properties and why the first is not enough
  * on its own. In short: the right error type, no message reporting bytes from
  * outside the data section, and no output larger than the input could encode.
- * A hang is caught by the test timeout below rather than by an assertion,
- * because a wedged loop never reaches one.
+ * A slow-down is caught by the test timeout below rather than by an
+ * assertion. A genuine hang is not caught by either: a wedged loop never
+ * reaches an assertion, and the fuzz cases are synchronous, which Vitest
+ * cannot interrupt — its timer is only read once the case returns — so a hang
+ * here is caught only by the CI job's own stop (CLAUDE.md §4c).
  *
  * ## Budget
  *
@@ -256,9 +259,13 @@ describe('the FIT decoder survives a seeded corpus fuzz', () => {
     'produces a decode or a FitDecodeError for every case, and nothing else',
     // 180 s, and the number is measured rather than chosen.
     //
-    // This is a HANG GUARD, not a performance budget: a wedged record loop never
-    // terminates, so any finite ceiling catches it and the only question is how
-    // much honest work fits underneath. 60 s did not, and it failed on `main`
+    // This is a ceiling, not a performance budget. ⚠️ It was called a HANG
+    // GUARD here until #682's review, on the reasoning that a wedged record loop
+    // never terminates and so any finite ceiling catches it — which is not
+    // true: this case is synchronous, Vitest cannot interrupt a synchronous
+    // case, and a wedged loop is caught only by the CI job's own stop. What the
+    // ceiling does catch is a slow-down, and the only question is how much
+    // honest work fits underneath. 60 s did not, and it failed on `main`
     // rather than on the pull request that broke it.
     //
     // What the original 60 s missed is that CI runs `test:coverage`, not `test`.
@@ -280,10 +287,18 @@ describe('the FIT decoder survives a seeded corpus fuzz', () => {
     // reproducible; a stride would keep the runtime and lose the property. The
     // sweep is ~75% of this file's cost (6.4 s of 8.1 s uninstrumented, measured
     // by zeroing the other knobs) and it is the part worth paying for.
-    { timeout: 180_000 },
+    //
+    // ⚠️ 300 s since #682, and a reviewer who remembers 180 s is reading the
+    // old file. Under coverage on CI this case took 52.5 s to 96.6 s over
+    // thirteen green `main` runs on 2026-09-28 (36370135206 to 36405580515) —
+    // 54 % of 180 s, the slowest on 36405580515, the slower of the two runners
+    // (a job over 1 000 s; 82.4 s to 96.6 s on that runner, 52.5 s to 67.1 s on
+    // the other). 300 s is about three times the slowest.
+    { timeout: 300_000 },
     () => {
-      // The timeout is the hang guard: a wedged record loop never reaches an
-      // assertion, so the only thing that can catch it is the runner.
+      // A wedged record loop never reaches an assertion, and the timeout cannot
+      // stop a synchronous case either, so the only thing that catches it is
+      // the CI job's own stop. The timeout turns a slow-down red.
       for (const fuzzCase of cases) runFitCase(fuzzCase, FUZZ_SEED);
     },
   );
@@ -304,7 +319,9 @@ describe('the GPX and TCX readers survive the same fuzz', () => {
 
     it(
       `produces a decode or an ActivityXmlError for every mutated ${extension} case`,
-      // Same ceiling as the FIT arm above, for the same reason. This arm has no
+      // The ceiling the FIT arm above had until #682, for the same reason (at
+      // most 5.7 s here on the thirteen runs #682 read, 3 % of it, so it did not
+      // move with the FIT arm's). This arm has no
       // byte sweep and costs a fraction of it, so 60 s was not close to failing
       // here -- but it was calibrated against `pnpm run test` exactly as the
       // other one was, and the 3.3x coverage multiplier applies to both. Leaving

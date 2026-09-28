@@ -70,6 +70,7 @@ const trainer: TrainerSnapshot = {
   refusal: undefined,
   releaseFault: undefined,
   ergRescue: undefined,
+  ergHeld: undefined,
 };
 
 const running = (overrides: Partial<RideWorkoutSnapshot> = {}): RideWorkoutSnapshot => ({

@@ -46,6 +46,7 @@ const snapshot = (overrides: Partial<TrainerSnapshot> = {}): TrainerSnapshot => 
   refusal: undefined,
   releaseFault: undefined,
   ergRescue: undefined,
+  ergHeld: undefined,
   ...overrides,
 });
 
@@ -57,6 +58,7 @@ async function render(trainer: TrainerSnapshot, workoutOwnsTarget = false): Prom
       onSetTargetPower={() => undefined}
       onClearTarget={() => undefined}
       workoutOwnsTarget={workoutOwnsTarget}
+      announcementsOn={false}
     />,
   );
   return (mounted.container.textContent ?? '').replace(/\s+/g, ' ');

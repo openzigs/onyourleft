@@ -157,7 +157,21 @@ export interface TrainerPanelProps {
    * optional prop nobody supplies is invisible to the wiring gate).
    */
   readonly workoutOwnsTarget: boolean;
+  /**
+   * Whether the rider turned announcements on — #655. It decides WHICH voice
+   * answers a *Set* the stall rescue held ({@link HELD_LABEL}): on, the ride's
+   * one region (`RideAnnouncer.tsx`, `erg-held`), in its order; off, this
+   * panel's own message, `live`, as *Refused* is. One of the two and never
+   * both, so a screen reader hears the answer once. Read from the same place,
+   * at mount, as `RideAnnouncer` reads it.
+   *
+   * Required, for {@link workoutOwnsTarget}'s reason.
+   */
+  readonly announcementsOn: boolean;
 }
+
+/** The word a held *Set* is answered with — #655. Shown and spoken. */
+export const HELD_LABEL = 'Held';
 
 export function TrainerPanel({
   trainer,
@@ -165,8 +179,15 @@ export function TrainerPanel({
   onSetTargetPower,
   onClearTarget,
   workoutOwnsTarget,
+  announcementsOn,
 }: TrainerPanelProps): JSX.Element {
   const [draft, setDraft] = useState('150');
+  /**
+   * The held answer standing when this panel appeared, which is not said — a
+   * screen a rider comes back to answers no press they made on it (#394's
+   * rule). A press made here has a new number and is.
+   */
+  const [heldAtMount] = useState(() => trainer.ergHeld?.press);
   /** A target this app refused before writing it. See {@link submit}. */
   const [problem, setProblem] = useState<string | undefined>(undefined);
 
@@ -308,6 +329,27 @@ export function TrainerPanel({
         rider did not ask for; putting an answer they did ask for behind a
         routine sentence's window would delay it for no one's benefit.
       */}
+      {/*
+        #655: a *Set* the stall rescue held — the answer to the rider's own
+        press, in the slot *Refused* takes (the two never stand together: a
+        press clears the refusal). Keyed on the press, so a second *Set* of
+        the same number is a new message rather than no change. `live` only
+        with announcements off: on, the ride's one region says it
+        (`RideAnnouncer.tsx`), and a second voice would say it twice. The
+        rescue notice above names the pending target too; this line is what
+        answers the press.
+      */}
+      {trainer.ergHeld === undefined ? null : (
+        <StatusMessage
+          key={trainer.ergHeld.press}
+          tone="info"
+          label={HELD_LABEL}
+          live={!announcementsOn && trainer.ergHeld.press !== heldAtMount}
+        >
+          {heldSentence(trainer.ergHeld.target)}
+        </StatusMessage>
+      )}
+
       {trainer.refusal === undefined ? null : (
         <StatusMessage tone="danger" label="Refused" live>
           {trainer.refusal}
@@ -441,6 +483,9 @@ export function targetSentence(trainer: TrainerSnapshot): string {
   }
 }
 
+/** How long cadence must hold before a rescue hands back, in words. */
+const STEADY = `your cadence has held steady for ${String(TREND_WINDOW)} seconds`;
+
 /**
  * What the panel says while a hand-set target is eased — #567.
  *
@@ -455,7 +500,6 @@ export function targetSentence(trainer: TrainerSnapshot): string {
  * the panel hears the words it shows, not a second wording of them.
  */
 export function rescueSentence(rescue: ManualErgRescue): string {
-  const steady = `your cadence has held steady for ${String(TREND_WINDOW)} seconds`;
   // PR #582's third review: the number named is only ever one the machine
   // ACCEPTED. A target the rider set during the rescue is not written until it
   // ends — the rescue is the only writer — and is said as that, separately.
@@ -471,7 +515,19 @@ export function rescueSentence(rescue: ManualErgRescue): string {
       : '';
   const back =
     rescue.pending !== undefined
-      ? `${lighterFirst} Your new target of ${String(rescue.pending)} W will be set once ${steady}.`
-      : `${lighterFirst} Your ${String(rescue.target)} W comes back by itself once ${steady}.`;
+      ? `${lighterFirst} ${heldSentence(rescue.pending)}`
+      : `${lighterFirst} Your ${String(rescue.target)} W comes back by itself once ${STEADY}.`;
   return `${rescue.reason}${back} Press End ERG to leave it off.`;
+}
+
+/**
+ * The answer to a *Set* the stall rescue held — #655. ONE sentence, and the
+ * same one {@link rescueSentence} carries while a target is pending, so the
+ * press answer and the notice cannot drift apart: the answer is that sentence
+ * alone, not the whole rescue said again.
+ *
+ * Exported because `RideAnnouncer.tsx` speaks it, after {@link HELD_LABEL}.
+ */
+export function heldSentence(target: Watts): string {
+  return `Your new target of ${String(target)} W will be set once ${STEADY}.`;
 }

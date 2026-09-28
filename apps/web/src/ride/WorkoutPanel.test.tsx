@@ -76,6 +76,7 @@ const trainer = (overrides: Partial<TrainerSnapshot> = {}): TrainerSnapshot => (
   refusal: undefined,
   releaseFault: undefined,
   ergRescue: undefined,
+  ergHeld: undefined,
   ...overrides,
 });
 
