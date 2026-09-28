@@ -2123,6 +2123,16 @@ job, not a budget. ⚠️ **It is 20 since
 the old file.** A stop has to be clear of the thing it stops: main was taking 9 to 13 minutes, and the
 first run of #423's pull request ran for **14m19s** with nothing hung — 41 seconds from being killed. The
 browser gate is what grew (6.8 minutes on main, 8.0 with the ride-stage and Ride-screen specs).
+⚠️ **It is 25 since [#682](https://github.com/openzigs/onyourleft/issues/682), and a reviewer who
+remembers 20 is reading the old file.** Thirteen green runs on `main` on 2026-09-28 (36370135206 to
+36405580515, job `started_at` to `completed_at`, which excludes queueing) took **699 s to 1 128 s**,
+in two clusters — 699–888 s and 1 005–1 128 s — and the slower one is an AMD EPYC 7763, two cores
+of two threads: no `main` run prints its CPU, but #651's `lscpu` read it so and so did a temporary
+step on #682's own pull request, for a 1 113 s job (run 36412215912). The slowest, 36405580515, was
+**18m48s — 72 s from twenty minutes**. Run 36396660625's 28 minutes of wall clock was 11m36s of
+waiting for the concurrency group before its job was created and a 16m45s job. Twenty-five leaves a
+green job 372 s clear and pays for the browser gate's own stop to grow with it (below); it is still
+a stop and not a budget.
 ⚠️ **Since [#456](https://github.com/openzigs/onyourleft/issues/456) the cases in
 `game.browser.spec.ts` share ONE load of their harness, and a reviewer who remembers "every case
 reloads a harness that takes ten seconds" is reading the old file.** They did reload it, and that was
@@ -2164,7 +2174,46 @@ page, 65 s for `?shadow-map`, 120 s for `?realistic` and 120 s for `?realistic&t
 describe that reads it failing at once in its hook and naming the describe that paid. The
 arithmetic that fits all four hanging inside the gate's own 580 s (`playwright.config.ts`
 §`GATE_BUDGET_MS`), and the gate inside the job's twenty, is `game.browser.spec.ts`
-§`paysForTheRealisticLoad`, with the local run that demonstrated it. ⚠️ And the two default loads
+§`paysForTheRealisticLoad`, with the local run that demonstrated it. ⚠️ **Those figures are
+#651's and are the old file since [#682](https://github.com/openzigs/onyourleft/issues/682).** A
+day later green loads on the slower runner reached 39 s, 45 s, 111 s and 105 s — 78 %, 69 %, 93 %
+and 88 % of their budgets — and a green gate took 547 s of its 580 (run 36405580515), so the budgets
+are **60 s, 70 s, 165 s and 160 s** and the gate's stop **840 s**, each about 1.5 times the slowest
+green figure. If every game load hangs, and `realistic.browser.spec.ts`' page with them:
+
+| | seconds |
+|---|---|
+| the four budgets, 60 + 70 + 165 + 160 | 455 |
+| 21 describes failing, each replacing the worker, and the two servers starting (#651's figure) | 30 |
+| the rest of the gate before the game spec's first load, slowest green (36395959573, 36405580515) | 245 |
+| `realistic.browser.spec.ts`' instruments case waiting its own 150 s where green took at most 66 s | 84 |
+| **inside the gate's 840** | **814** |
+
+and the gate's step starts at most 592 s into the job and builds for 9 s (36395959573), so 840 s
+ends it by **1 441 s — 59 s inside the job's 1 500**, with only the coverage publish and upload after
+it. ⚠️ **Nothing re-checks either margin** (26 s and 59 s): a spec added to the gate eats the first
+and a step added before it eats the second. Before #682 the second was **19 s** once the 9 s build
+the old sum left out is counted (592 + 9 + 580 against 1 200). ⚠️ **That 84 s assumes the
+instruments case's FIRST load is the one that hangs**, and until #736's review nothing here said so. If the first load is green and its control load hangs instead, the case takes
+about 180 s where green took 66 s — **114 s**, and the column sums to **844 s, 4 s past the gate's
+840**. The table keeps 84 because the linear sum over-counts: that spec runs on the `chromium`
+project in one of the two workers, so while it waits the other worker carries on through the
+remaining specs and then takes the game group (`playwright.config.ts` §`projects`: nothing waits for
+`chromium` to finish), and its wait overlaps the rest of the gate and the game loads rather than
+adding to them in a line. ⚠️ **That overlap is reasoned, not measured**: no run has hung every game
+load and that control load together, and if one did and the overlap were smaller than 4 s, the gate
+would stop itself at 840 s with the last game describe interrupted — still inside the job, still
+naming what was running. ⚠️ **A Vitest hang is bounded by nothing short of the job's own stop**, and
+a sentence #736 first wrote here said it ended the step by about 892 s — a reviewer who remembers
+that is reading this pull request's first draft. Vitest cannot stop a synchronous case:
+`@vitest/runner` 4.1.11's `withTimeout` arms a timer that cannot fire while the case holds the
+thread, and otherwise compares the elapsed time only once the case RETURNS. The #545 near-field
+rides and the FIT fuzz arm are both synchronous, so a genuine hang in the Vitest step runs until the
+job's 1 500 s cancel, which names nothing. The per-case timeouts turn a slow-down red, not a hang —
+and even a slow-down is not bounded by one of them: the nine near-field rides run one after another
+in one file, so a cull that slows every ride can cost up to 9 × 230 s = 2 070 s before the last goes
+red. That is not new with #682: 9 × 120 s after a start about 222 s in already overran twenty
+minutes. ⚠️ And the two default loads
 no longer run the same probes: each case reads one load's copy, so each load runs only what its
 own cases read (`game-harness.ts` §`SHADOW_MAP_LOAD`) — measured on the runner, that was 12.6 s of
 the plain page's 34 and about 16 s of `?shadow-map`'s 55 spent for nobody. A new case on either
@@ -2183,6 +2232,24 @@ largest files — the #545 near-field rides at 216 s and the FIT fuzz at 99 s �
 three times by coverage's instrumentation of their hot loops (2.8 times for the rides, measured as
 CPU time locally; 3.3 times for the fuzz, `decode-fuzz.test.ts`'s own measurement). Which runner a job lands
 on is not something this repository can choose without paying for a larger one, which §8 forbids.
+
+⚠️ **A Vitest case's timeout is judged against its time under coverage ON CI, and since
+[#682](https://github.com/openzigs/onyourleft/issues/682) no case runs above half of it.** The
+measurement needs nothing added: Vitest's default reporter prints, beneath its file, every case
+slower than 300 ms, so every job log already holds per-case times for the `Tests and coverage
+report` step. Read over thirteen green `main` runs on 2026-09-28 (36370135206 to 36405580515),
+eighteen cases ran at 45 % or more of their timeout (#682 asks for 50 %; the five points are
+margin on one day's sample), fifteen of them on Vitest's default 5 s — the slowest,
+`no-network.test.ts`' MediaPipe scan, at **4.8 s, 96 %** — and #682's own cull sweep, given 15 s by
+#651, had fallen to 38 %. Seventeen of them now carry an explicit timeout of about three times their
+slowest CI figure, with the figures and the run ids beside it; none of them is a
+performance claim, and none of their assertions or inputs changed. The #545 near-field rides went
+from 120 s to 230 s (75.2 s, 63 %) and the FIT fuzz from 180 s to 300 s (96.6 s, 54 %). A new case
+that is slow under coverage takes the same shape: measure it in a CI log, write the numbers beside
+it, never trim what it sweeps. ⚠️ **One in-test timing bound is also near its line and is NOT
+changed here**: `racing-line.test.ts`' 1 000 km solve asserts under 30 s and took 12.2 s to 27.2 s
+on the same runs (36374954481), which is an assertion rather than a timeout and so is its own
+issue, [#734](https://github.com/openzigs/onyourleft/issues/734).
 
 ⚠️ **The browser is pinned by the lockfile, not by the install command.** `@playwright/test`
 **1.63.0** ships Chromium revision **1243**, and `playwright install chromium` fetches whatever the
@@ -2470,7 +2537,7 @@ browser runs**.
 | `controls-first.browser.spec.ts` | since [#666](https://github.com/openzigs/onyourleft/issues/666), controls first, detail tucked, on `reflow.html` (`reflow-harness.tsx` gained a first-control reading, a fold line, a section-prose reading and a store behind the Files screen): every route in `ALL_ROUTES`, over both fixtures at 390×844 and on the owner's tablet in the shell both ways up with the #439 insets and the 50 px floor, must START its first control (a button, a form control or a link drawn as a button) above the fold — the viewport less its bottom inset, or the top of a bottom navigation bar — unless everything in the way is a heading or marked `data-oyl-kept-visible` (`design/MoreAbout.tsx` §`KeptVisible`, the consent text a consent screen's box follows); and every section that tucks its explanation lays out at most 130 px of prose above its own first control. ⚠️ **Its control, `?disclosures=inline`, puts every "More about" back under its heading, open**, and Segments, Settings and Files must then fail — Camera is not among them because it tucks nothing: its first control came up by ORDER. It also presses the real Tab key through Settings and compares the sequence with `tabbableElements` over the live DOM, and measures a summary's 44 px row #316's three ways and its token-painted marker. ⚠️ **Two things it found**: Chromium gives the content of a CLOSED `<details>` a full-size `getBoundingClientRect()` (the slot is `content-visibility: hidden`), so "has a box" is not "is drawn" — `checkVisibility()` is; and a browser stops once per named radio group where the model stops on every radio ([#698](https://github.com/openzigs/onyourleft/issues/698)), pinned apart from the sequence |
 | `list-detail.browser.spec.ts` | since [#670](https://github.com/openzigs/onyourleft/issues/670), the list beside its detail on `reflow.html` (`reflow-harness.tsx` gained the panes' boxes, the rail's edge and every primary's place, keeps a hash it is opened with, and takes `?layout=prose`): every `list-detail` route of `ALL_ROUTES`, with the fixture's item chosen and not, lays out two panes side by side inside the viewport and spanning at least 80 % of what the rail leaves at 1280×800 with the #439 insets and at 1280×720; one pane, no sideways scroll, and Enter-then-back returning focus to the item at 800×1280, 390×844 and 320×256; a FRESH page at a selection shows it and at an unknown id says "not found"; rotating keeps the selection. ⚠️ **Its control, `?layout=prose`, switches the same routes of the real table back to the reading measure before anything renders, and the width assertion must fail on every one.** It publishes each primary action's place and margin to the fold at the four viewports #670 names, on arrival AND with the item chosen, and holds it above the fold only where `PRIMARY_ON_ARRIVAL` and `PRIMARY_WHEN_SELECTED` say the layout allows, with the reason for every gap — the selected state was unmeasured until #670's review, which found *Import route* 413 px under the tablet's fold there. It also rotates with focus on a list link and requires focus on the chosen item's heading after the rotation. ⚠️ **Since [#723](https://github.com/openzigs/onyourleft/issues/723) it also measures that the two panes scroll ON THEIR OWN** on the tablet with its insets and at 1280×720: the wheel over one moves neither the page nor the other (a list at its end included, over two new gestures, because Chromium does not chain the first), Enter on the lowest of forty rides leaves `window.scrollY` at 0 and lands focus — its ring too — inside the detail pane, and every pane lies between the header and the bottom inset at the page's top and at its furthest scroll, margins published. Its control is `reflow.html?panes=page`, the pre-#723 layout put back by a stylesheet of the harness's own. And a primary's margin is now to its pane's bottom where that clips it (`PrimaryPlace.clipBottom`): with the footer inside the viewport, *Import route* ended 23 px above the bottom of its pane and the fold said 125 |
 | `insets.ts` | since #439, edge-to-edge safe-area insets applied to the ENGINE through `Emulation.setSafeAreaInsetsOverride`, so `env()` itself reports them, plus the one inset reading taken off the owner's tablet. Every #439 case also reads the insets back, so a Playwright bump that drops the protocol call fails rather than measuring a page with none |
-| `../playwright.config.ts` | Chromium only, no retries, the SwiftShader flags without which a GPU-less runner gives MapLibre no context at all — and since #408 **two `webServer` entries**, because the product and the harness are different builds. ⚠️ Since [#651](https://github.com/openzigs/onyourleft/issues/651) **two projects, `game` listed LAST**, so its four loads run alone after everything else — run beside the other specs they slowed by half or more, because SwiftShader draws on the CPU — and a `globalTimeout` (`GATE_BUDGET_MS`, 580 s) so the gate stops itself and names what was running before the job's `timeout-minutes` cancels it in silence. Playwright's default of two workers stays: the runner is two cores (§4c). A reviewer who remembers one `chromium` project is reading the old file. `playwright.config.ts` §`projects` says why, and what splitting the game further did |
+| `../playwright.config.ts` | Chromium only, no retries, the SwiftShader flags without which a GPU-less runner gives MapLibre no context at all — and since #408 **two `webServer` entries**, because the product and the harness are different builds. ⚠️ Since [#651](https://github.com/openzigs/onyourleft/issues/651) **two projects, `game` listed LAST**, so its four loads run alone after everything else — run beside the other specs they slowed by half or more, because SwiftShader draws on the CPU — and a `globalTimeout` (`GATE_BUDGET_MS`, **840 s since #682** — a reviewer who remembers 580 s is reading the old file) so the gate stops itself and names what was running before the job's `timeout-minutes` cancels it in silence. Playwright's default of two workers stays: the runner is two cores (§4c). A reviewer who remembers one `chromium` project is reading the old file. `playwright.config.ts` §`projects` says why, and what splitting the game further did |
 | `../vite.browser.config.ts` | the harness build. A second Vite config, so the harness cannot reach a shipped bundle |
 
 **Why it exists at all**, given that #48's suite already renders every route: **jsdom implements no

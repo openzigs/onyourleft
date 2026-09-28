@@ -1020,15 +1020,18 @@ describe('the cull against what `scene.ts` actually hands it', () => {
    * the bound's error is worst where the road bends hardest and a sweep that
    * stopped at 200 m would have called the box correct too.
    *
-   * ⚠️ **Fifteen seconds, and it is a hang guard rather than a budget — #651,
+   * ⚠️ **Fifteen seconds, and it is a ceiling rather than a budget — #651,
    * #682.** It had Vitest's default of five, which nobody chose for it: ten
    * sweeps of thirty-two whole scene frames each. Under coverage on the CI
    * runner it took 4.2 s to 5.0 s on green runs (runs 36326090778,
    * 36334163962, 36337270885 and 36338736850's first attempt) and 5.6 s on the
    * red second attempt of that last run, on the same commit — the runner, not
    * the code; #682 is that flake. Fifteen is three times the slowest green
-   * run: clear of the runner's spread, and still red for a cull that stops
-   * terminating or for a real threefold slowdown, which thirty would hide.
+   * run: clear of the runner's spread, and still red for a real threefold
+   * slowdown, which thirty would hide. ⚠️ This used to say it was also red
+   * "for a cull that stops terminating", and it is not: the case is
+   * synchronous, Vitest cannot interrupt a synchronous case, and a cull that
+   * never returns is caught only by the CI job's own stop (CLAUDE.md §4c).
    */
   it('never drops an item that is on screen and not yet fogged out', { timeout: 15_000 }, () => {
     let clear = 0;
