@@ -424,6 +424,33 @@ function observerReporting(width: number): void {
   );
 }
 
+/**
+ * A `ResizeObserver` that reports each width in turn, once each, when asked to
+ * observe — a list shown at one width and then hidden (#738).
+ */
+function observerReportingInTurn(widths: readonly number[]): void {
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      readonly #callback: ResizeObserverCallback;
+      constructor(callback: ResizeObserverCallback) {
+        this.#callback = callback;
+      }
+      observe(): void {
+        for (const width of widths) {
+          this.#callback([{ contentRect: { width } } as unknown as ResizeObserverEntry], this);
+        }
+      }
+      disconnect(): void {
+        // Nothing to release.
+      }
+      unobserve(): void {
+        // Nothing to release.
+      }
+    },
+  );
+}
+
 /** jsdom's root font size, which is the browser default. */
 const REM = 16;
 
@@ -492,6 +519,18 @@ describe('#660 — a card list on a phone, a table where it fits', () => {
 
     expect(document.body.textContent).toContain('Nothing recorded yet');
     expect(queryAll(document.body, '.oyl-activity-cards')).toHaveLength(0);
+  });
+
+  // #738: on one pane the list is `hidden` while a ride is chosen, and a
+  // hidden box measures nothing. Read as a narrow list it became cards, and on
+  // the way back the table was drawn again after focus had returned to a card.
+  it('keeps its layout when the list is hidden and measures a width of nothing — #738', async () => {
+    observerReportingInTurn([TABLE_FROM_REM * REM, 0]);
+    mounted = await mount(<ActivitiesView library={stubLibrary(OWNER, rides)} />);
+    await settle();
+
+    expect(queryAll(document.body, '.oyl-activity-cards')).toHaveLength(0);
+    expect(rowText()).toHaveLength(2);
   });
 
   it('puts the table in a focusable region named by its caption', async () => {

@@ -180,6 +180,16 @@ function useLibraryLayout(present: boolean): [RefObject<HTMLDivElement | null>, 
     }
     const observer = new ResizeObserver((entries) => {
       const width = entries[entries.length - 1]?.contentRect.width;
+      // ⚠️ #738: a width of NOTHING is a hidden list, not a narrow one, and is
+      // ignored as the first measurement above ignores it. On one pane the
+      // list is `hidden` while an item is chosen; the observer reported 0,
+      // the list became cards, and on the way back it was drawn as cards and
+      // then as a table once the observer saw its width again — re-creating
+      // the item's link after `ListDetail` had already focused it, so focus
+      // fell to the page (list-detail.browser.spec.ts, 800×1280, CI run
+      // 36412215912). Keeping the last layout means the link focus returns
+      // to is the one that stays.
+      if (width === undefined || !(width > 0)) return;
       setLayout(libraryLayout(width, rem()));
     });
     observer.observe(element);
