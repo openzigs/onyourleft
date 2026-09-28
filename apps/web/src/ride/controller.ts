@@ -1449,17 +1449,46 @@ export function createRideController(options: RideControllerOptions): RideContro
     }
   };
 
-  /** Stop listening to a sensor's readings. Idempotent. */
-  const unsubscribeMeasurements = (entry: SensorEntry): void => {
-    for (const release of entry.measurements.splice(0)) {
-      release();
+  /**
+   * Call every one of `releases`, and empty the list, even when one of them
+   * throws; the first throw is rethrown once they have all run (#704).
+   *
+   * ⚠️ `splice(0)` takes them all out of the entry BEFORE the first is called,
+   * so a loop that stopped at a throw lost the rest for good: nothing left in
+   * the entry could reach them again, and they went on listening.
+   */
+  const releaseEach = (releases: Unsubscribe[]): void => {
+    let failure: { readonly error: unknown } | undefined;
+    for (const release of releases.splice(0)) {
+      try {
+        release();
+      } catch (error) {
+        failure ??= { error };
+      }
+    }
+    if (failure !== undefined) {
+      throw failure.error;
     }
   };
 
+  /** Stop listening to a sensor's readings. Idempotent. */
+  const unsubscribeMeasurements = (entry: SensorEntry): void => {
+    releaseEach(entry.measurements);
+  };
+
+  /**
+   * Drop every subscription and close the client. Every step runs even when
+   * an unsubscribe throws (#704); that throw is rethrown after the client is
+   * closed, so a caller that reports it still reports it.
+   */
   const detach = (entry: SensorEntry): void => {
-    unsubscribeMeasurements(entry);
-    for (const release of entry.release.splice(0)) {
-      release();
+    let failure: { readonly error: unknown } | undefined;
+    for (const releases of [entry.measurements, entry.release]) {
+      try {
+        releaseEach(releases);
+      } catch (error) {
+        failure ??= { error };
+      }
     }
     if (manual !== undefined && manual.client === entry.trainer?.control) {
       endManualErg();
@@ -1467,6 +1496,9 @@ export function createRideController(options: RideControllerOptions): RideContro
     entry.trainer?.control.close();
     entry.trainer = undefined;
     entry.controlChoice = NO_TRAINER_CONTROL;
+    if (failure !== undefined) {
+      throw failure.error;
+    }
   };
 
   /**
@@ -2214,8 +2246,18 @@ export function createRideController(options: RideControllerOptions): RideContro
       // first so a link that drops mid-Stop rejects it rather than leaving it
       // waiting, the second so the Stop runs against the same listeners the
       // 0xFF-before-the-answer test pins.
+      //
+      // Each entry on its own, as the detach below is (#704): a throw here used
+      // to leave `dispose` before that chain was attached, so the Stop went
+      // out and no sensor was ever detached or closed. `releaseEach` has
+      // already called the rest of this entry's unsubscribes by the time the
+      // throw arrives, and nobody is left to tell.
       for (const entry of entries) {
-        unsubscribeMeasurements(entry);
+        try {
+          unsubscribeMeasurements(entry);
+        } catch {
+          // The next entry still stops listening, and the detach still runs.
+        }
       }
       void released
         .catch(() => false)
