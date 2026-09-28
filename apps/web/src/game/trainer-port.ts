@@ -253,6 +253,20 @@ export interface GameTrainerPort {
    * controller caches its snapshot, so this is a property access per frame.
    */
   workoutRescue(): WorkoutRescue | undefined;
+  /**
+   * Whether the ride being RECORDED may stop if the screen goes off — #647,
+   * `RideSnapshot.keepAliveFailed`: the platform refused the recording
+   * service. `false` with no ride controller, and with no recording.
+   *
+   * ⚠️ Not about the trainer at all, and on this port anyway: it is the
+   * game's one view of the ride controller, which `RideSession` keeps
+   * recording above the router while the rider is in the game. Read on every
+   * frame, like {@link workoutRescue}, and for its reason — it decides no
+   * write, and a later successful ask clears it mid-ride. On the port rather
+   * than a prop so that `WIRE003` (§4j) goes red if `GameView` stops reading
+   * it; named so that nothing else in production calls a method of that name.
+   */
+  recordingMayStop(): boolean;
 }
 
 /** What {@link gameTrainerFrom} reads of the ride screen's `TrainerSnapshot`. */
@@ -275,6 +289,8 @@ interface GameTrainerSource {
     readonly trainer: TrainerFacts;
     readonly workout:
       { readonly status: string; readonly rescue: WorkoutRescue | undefined } | undefined;
+    /** #647. Optional here only so a source with no recording need not say. */
+    readonly keepAliveFailed?: boolean;
   };
   simulationControl(): GradientTrainer | undefined;
   requestTrainerControl(): Promise<void>;
@@ -316,6 +332,7 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
       await controller.requestTrainerControl();
     },
     workoutRescue: () => controller?.getSnapshot().workout?.rescue,
+    recordingMayStop: () => controller?.getSnapshot().keepAliveFailed ?? false,
   };
 }
 

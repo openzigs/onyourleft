@@ -360,6 +360,19 @@ export interface RideSnapshot {
    * `undefined` otherwise, which is every ride where nothing was asked.
    */
   readonly notificationNotice: string | undefined;
+  /**
+   * #647: the platform refused to keep this ride alive — on Android, the
+   * recording service did not start — so the ride records but may be stopped
+   * if the screen goes off. The Ride screen and the game's HUD show
+   * {@link RIDE_MAY_STOP_WITH_SCREEN_OFF} while it is `true`.
+   *
+   * Raised only by a REFUSAL (a rejected or thrown `keepRideAlive`) on the
+   * ride in progress; cleared by the next `keepRideAlive` that resolves on the
+   * same ride, and by the ride ending. What asks again is
+   * {@link RideController.pair} succeeding and a granted notification (#526) —
+   * `syncKeepAlive` says why those two.
+   */
+  readonly keepAliveFailed: boolean;
 }
 
 /**
@@ -406,6 +419,37 @@ export function canStartNewRide(
  */
 export const RIDE_NOTIFICATION_REFUSED =
   'Your ride is still recording. Android will not show its “Recording ride” notification, because notifications are not allowed for On Your Left. You can allow them in the app’s settings.';
+
+/**
+ * #647 — what a rider is told while the ride may be stopped with the screen
+ * off ({@link RideSnapshot.keepAliveFailed}). The label says what to do and
+ * the sentence says why; neither carries a cause or an error, because the
+ * rider can act on "keep the screen on" and on nothing else.
+ *
+ * ⚠️ **A safety sentence, so it is never behind a disclosure** — the owner's
+ * ruling on #654's re-review of #647. It is short so that it fits where it is
+ * shown: beside the Live heading on the Ride screen and in the HUD's notice cell
+ * (`ride.browser.spec.ts` and `rideview.browser.spec.ts` §"#647" measure both).
+ *
+ * ⚠️ **Short enough for ONE line in the HUD's notice cell at 360 px** — #693's
+ * re-review, B2. It used to be *"your ride may stop if the screen goes off."*,
+ * two lines there, and beside *Eased* (#585) the cell ended 38 px above the
+ * leaning rider's box at 360×752 in the pinned Chromium, under #605's 50 px
+ * floor. Neither notice may be put away, so the sentence got shorter: *"it"*
+ * is the screen the label has just named. `ride.browser.spec.ts` §"keep the
+ * screen on, beside every notice that stays" publishes the clearance.
+ */
+export const KEEP_SCREEN_ON_LABEL = 'Keep the screen on';
+
+/** @see KEEP_SCREEN_ON_LABEL */
+export const RIDE_MAY_STOP_WITH_SCREEN_OFF = 'your ride may stop without it.';
+
+/**
+ * The same, as the ride's one announcement region says it (#647) — the label
+ * and the sentence, once, when the notice appears. `game/hud/announce.ts`
+ * §`screen-off-risk`.
+ */
+export const RIDE_MAY_STOP_SPOKEN = `${KEEP_SCREEN_ON_LABEL}: ${RIDE_MAY_STOP_WITH_SCREEN_OFF}`;
 
 /**
  * What a rider who sets an ERG target by hand during a workout is told (#542's
@@ -788,6 +832,8 @@ export function createRideController(options: RideControllerOptions): RideContro
   let keepAliveGeneration = 0;
   /** @see RideSnapshot.notificationNotice */
   let notificationNotice: string | undefined;
+  /** @see RideSnapshot.keepAliveFailed */
+  let keepAliveFailed = false;
 
   /**
    * #526 — ask for `POST_NOTIFICATIONS` at most once, BESIDE the first ride's
@@ -844,8 +890,9 @@ export function createRideController(options: RideControllerOptions): RideContro
         return;
       }
       if (answer === 'granted') {
-        // Re-start so the service posts the notification it could not.
-        await keepAlive.keepRideAlive();
+        // Re-start so the service posts the notification it could not — and,
+        // #647, so a service that was refused gets another chance.
+        askToKeepAlive(keepAlive, generation);
         return;
       }
       notificationNotice = RIDE_NOTIFICATION_REFUSED;
@@ -857,8 +904,10 @@ export function createRideController(options: RideControllerOptions): RideContro
 
   /**
    * Call a keep-alive method and let neither of its failures reach the ride —
-   * #524's third criterion. `.catch` on the returned promise is not enough on
-   * its own: a port that throws BEFORE it returns a promise would throw out of
+   * #524's third criterion. Since #647 only `letRideSleep` comes through here:
+   * a refused `keepRideAlive` is recorded by {@link askToKeepAlive} instead.
+   * `.catch` on the returned promise is not enough on its own: a port that
+   * throws BEFORE it returns a promise would throw out of
    * {@link changed}, which is inside `start()` and `confirmStop()`, and so fail
    * a ride because a notification could not be posted. `controller.test.ts`
    * §"#524" holds both halves.
@@ -869,6 +918,88 @@ export function createRideController(options: RideControllerOptions): RideContro
     } catch {
       // Degraded, not broken: the ride records without the service.
     }
+  };
+
+  /**
+   * Ask the platform to keep this ride alive, and record whether it would —
+   * #647. Until #647 the answer went to {@link quietly} and nowhere else, so a
+   * ride running WITHOUT its foreground service looked exactly like one with
+   * it, and the rider was not told that turning the screen off might end it.
+   *
+   * Still never thrown into the ride (#524's third criterion): a refusal is a
+   * flag on the snapshot, a sentence on two screens and one announcement, and
+   * the ride records either way.
+   *
+   * ⚠️ **Only an answer for THIS ride moves the flag.** Every way into or out
+   * of a ride bumps the generation, so a refusal arriving after the ride
+   * stopped cannot put a notice on the next one, and a late success cannot
+   * clear a later ride's.
+   *
+   * ⚠️ **A hang leaves the flag down.** The port's contract is a promise that
+   * settles; `RecordingServicePlugin.java` §`start` resolves or rejects
+   * synchronously on the main thread, and nothing it does waits on the rider.
+   * A promise that never settled would say nothing either way — this does not
+   * guess, because a notice that the service failed when it may have started
+   * is a false sentence on the one screen a rider trusts mid-ride.
+   *
+   * ⚠️ **A throw before the promise is a refusal too.** From
+   * {@link syncKeepAlive} the flag is raised synchronously and nothing else,
+   * because that caller is already inside {@link changed} and a second
+   * `changed()` would re-enter it. From anywhere else — the re-ask after a
+   * granted notification, the re-ask after a pairing — it goes through
+   * `answered`, which publishes it: #693's review found the re-ask after a
+   * granted notification raising the flag on a snapshot nobody rebuilt.
+   */
+  const askToKeepAlive = (
+    keepAlive: RideKeepAlivePort,
+    generation: number,
+    insideChanged = false,
+  ): void => {
+    const sameRide = (): boolean => generation === keepAliveGeneration;
+    const answered = (failed: boolean): void => {
+      if (!sameRide() || keepAliveFailed === failed) {
+        return;
+      }
+      keepAliveFailed = failed;
+      changed();
+    };
+    let asked: Promise<void>;
+    try {
+      asked = keepAlive.keepRideAlive();
+    } catch {
+      // Degraded, not broken: the ride records without the service.
+      if (insideChanged) {
+        keepAliveFailed = true;
+      } else {
+        answered(true);
+      }
+      return;
+    }
+    asked.then(
+      () => {
+        answered(false);
+      },
+      () => {
+        answered(true);
+      },
+    );
+  };
+
+  /**
+   * #647: ask again, on this ride, for a service that was refused — called
+   * where the refusal's likeliest cause has just gone away. On Android 14+
+   * `RecordingServicePlugin.java` refuses the service while the Bluetooth
+   * permission is not granted, and a rider may press Start before pairing
+   * anything, which is before anything asked for it; a sensor paired since is
+   * that permission granted. Nothing is asked when nothing failed, and nothing
+   * outside a ride in progress.
+   */
+  const askAgainIfRefused = (): void => {
+    const keepAlive = options.keepAlive;
+    if (!keepAliveFailed || !keptAlive || keepAlive === undefined) {
+      return;
+    }
+    askToKeepAlive(keepAlive, keepAliveGeneration);
   };
 
   /**
@@ -901,10 +1032,12 @@ export function createRideController(options: RideControllerOptions): RideContro
     if (!wanted) {
       // #526: told on the ride that asked, and not carried into the next.
       notificationNotice = undefined;
+      // #647: the same — a ride that has ended has nothing to keep alive.
+      keepAliveFailed = false;
       quietly(() => keepAlive.letRideSleep());
       return;
     }
-    quietly(() => keepAlive.keepRideAlive());
+    askToKeepAlive(keepAlive, generation, true);
     const permission = options.notificationPermission;
     if (permission !== undefined) {
       void askAboutTheNotification(permission, keepAlive, generation);
@@ -1092,6 +1225,7 @@ export function createRideController(options: RideControllerOptions): RideContro
           [...sensors.values()].filter((entry) => entry.state === 'connected').length,
       ),
       notificationNotice,
+      keepAliveFailed,
     };
   };
 
@@ -1542,6 +1676,8 @@ export function createRideController(options: RideControllerOptions): RideContro
           return;
         }
         await attach(device, role);
+        // #647: a sensor that paired is a Bluetooth permission granted.
+        askAgainIfRefused();
       } catch (error) {
         pairingError = describe(error);
         changed();
