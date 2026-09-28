@@ -408,9 +408,14 @@ describe('its cost — #499', () => {
    * The 100 km route is solved TWICE and the second is used, so the ratio is
    * not flattered by the smaller solve paying for the JIT's warm-up.
    * `MAXIMUM_COST_RATIO` is 25: two and a half times linear, and at least
-   * twice every ratio CI has printed under coverage (the figures are in the
-   * pull request that set it, and the case prints its own on every run, with
-   * the CPU it ran on).
+   * twice every ratio CI has printed under coverage. Measured on #751's pull
+   * request, `test:coverage` on the slower runner (AMD EPYC 7763), run
+   * 36467880376: **9.54** on attempt 1 (15 462 ms against 1 621 ms) and
+   * **9.13** on attempt 2 (15 601 ms against 1 709 ms) — 38 % and 37 % of the
+   * bound. Locally on an Apple M4 Pro: 9.3 to 10.0, with and without coverage.
+   * The 1 000 km solve itself took 12.2 s to 27.2 s under coverage on CI
+   * before #734 and 15.5 s on both of those runs. The case prints its own
+   * figures on every run, with the CPU it ran on.
    *
    * ⚠️ **What it no longer catches: a uniform slow-down.** A change that made
    * every sample three times dearer leaves the ratio at 10. The old bound could
