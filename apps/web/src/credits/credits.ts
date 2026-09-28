@@ -253,7 +253,16 @@ function workKey(entry: AssetEntry): string {
  * notices, which the last section of the screen links.
  *
  * ⚠️ The paths are where the files are in the BUILD, not in the repository:
- * there is no repository path, because nothing is committed.
+ * there is no repository path, because nothing is committed. *
+ * ⚠️ **KTX-Parse and zstddec are deliberately NOT here** (#618's review). three
+ * vendors them too and `KTX2Loader` bundles both into the renderer chunk, but
+ * they are MIT — zstddec's inlined Zstandard decoder BSD-3-Clause — and
+ * neither licence is in {@link LICENCE_COPY_LICENCES} or
+ * {@link ATTRIBUTION_LICENCES}: they ask for their notice to travel with the
+ * code, exactly as three's own MIT does, and three is not listed here either.
+ * Their notices are in the third-party notices (`third-party-notices.json`
+ * §`vendoredIntoBundle`), which the screen's last section links. The rule
+ * this list follows is the licence's, not the file's route into the build.
  */
 export const COPIED_WORKS: readonly AssetEntry[] = [
   'basis_transcoder.js',

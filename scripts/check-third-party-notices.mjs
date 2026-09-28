@@ -100,10 +100,11 @@
  *           entry supplies one
  *   NOT004  a reviewed entry is stale: its package is not in the closure, now
  *           ships its own licence file, or its excerpt marker is not there
- *   NOT005  the native list or the copied-file list names something this
- *           generator cannot render: a licence with no text here, a project
- *           whose package is not in the closure, a copied file not in its
- *           package
+ *   NOT005  the native list, the copied-file list or the vendored-into-bundle
+ *           list names something this generator cannot render: a licence with
+ *           no text here, a project whose package is not in the closure, a
+ *           copied or bundled file not in its package, a vendored work with no
+ *           licence text
  *   NOT006  the committed document is not what the generator writes
  *   NOT007  the committed document is not there
  *   NOT008  a package whose code the bundler writes into the build (Vite's
@@ -121,6 +122,12 @@
  *   `apps/web/tools/notices/copied-into-build.ts`, a plugin in the product's
  *   `vite.config.ts`, fails `pnpm run build` over a package's non-code asset
  *   the list does not name. It reads the product build only.
+ * - `vendoredIntoBundle` (#618's review) is the same kind of list for a file a
+ *   package vendors from somebody else that the bundler writes into one of the
+ *   app's own chunks — three's `examples/jsm/libs/`. The same plugin holds it
+ *   to what the build bundles, for the directories it names in
+ *   `VENDORED_DIRECTORIES`; a package that vendors code anywhere else is the
+ *   next limit's.
  * - `WRITTEN_BY_THE_BUNDLER` is written down, not discovered: a second bundler,
  *   or a plugin that injects its own runtime, is noticed only once somebody
  *   adds it there.
@@ -570,6 +577,49 @@ export function renderNotices(root) {
   // MIT `three` — carries its own notice, rendered once per work however many
   // of its files are copied. Its package's own licence field cannot say it.
   const vendoredEntries = new Map();
+  /** One notice per vendored work, however many of its files ship. */
+  function noticeVendored(label, source, vendored) {
+    const key = `${vendored.name}@${vendored.version}`;
+    if (vendoredEntries.has(key)) return;
+    const sections = [{ heading: 'What the build carries', text: vendored.what }];
+    for (const upstream of vendored.upstream ?? []) {
+      sections.push({
+        heading: `from ${upstream.url}, read ${upstream.read}`,
+        text: normalised(upstream.text),
+      });
+    }
+    if (vendored.licenceText !== undefined) {
+      if (licenceText(root, vendored.licenceText) === undefined) {
+        problems.push(
+          `NOT005 ${label} is ${key}, which asks for the text of ${vendored.licenceText}, ` +
+            'which this generator does not hold.',
+        );
+        return;
+      }
+      appendices.add(vendored.licenceText);
+      sections.push({
+        heading: vendored.licenceText,
+        text: `The full text of ${vendored.licenceText} is reproduced once, at the end of this document.`,
+      });
+    }
+    if (sections.length === 1) {
+      problems.push(
+        `NOT005 ${label} is ${key}, vendored in ${source.name}, and its entry in ${WEB_INPUTS} ` +
+          'supplies no licence text for it.',
+      );
+      return;
+    }
+    vendoredEntries.set(
+      key,
+      entry({
+        name: vendored.name,
+        version: vendored.version,
+        licence: vendored.licence,
+        part: 'copied',
+        sections,
+      }),
+    );
+  }
   for (const file of web.copiedIntoBuild ?? []) {
     const source = union.find((dependency) => dependency.name === file.package);
     if (source === undefined) {
@@ -590,50 +640,46 @@ export function renderNotices(root) {
       copied.push(`  ${file.path} — from ${source.name} ${source.version} (${file.by})`);
       continue;
     }
-    const key = `${vendored.name}@${vendored.version}`;
     copied.push(
       `  ${file.path} — from ${source.name} ${source.version} (${file.by}); ` +
         `it is ${vendored.name} ${vendored.version}, vendored there — ${vendored.licence}`,
     );
-    if (vendoredEntries.has(key)) continue;
-    const sections = [{ heading: 'What the build carries', text: vendored.what }];
-    for (const upstream of vendored.upstream ?? []) {
-      sections.push({
-        heading: `from ${upstream.url}, read ${upstream.read}`,
-        text: normalised(upstream.text),
-      });
-    }
-    if (vendored.licenceText !== undefined) {
-      if (licenceText(root, vendored.licenceText) === undefined) {
-        problems.push(
-          `NOT005 ${file.path} is ${key}, which asks for the text of ${vendored.licenceText}, ` +
-            'which this generator does not hold.',
-        );
-        continue;
-      }
-      appendices.add(vendored.licenceText);
-      sections.push({
-        heading: vendored.licenceText,
-        text: `The full text of ${vendored.licenceText} is reproduced once, at the end of this document.`,
-      });
-    }
-    if (sections.length === 1) {
+    noticeVendored(file.path, source, vendored);
+  }
+
+  // #618's review: a file a package VENDORS that the bundler writes into one of
+  // the app's own chunks — three's copies of KTX-Parse and zstddec, which
+  // `KTX2Loader` imports — is somebody else's work in the shipped code, and
+  // three's MIT notice is not its notice. `tools/notices/copied-into-build.ts`
+  // holds this list to what the build actually bundles.
+  const bundledVendored = [];
+  for (const file of web.vendoredIntoBundle ?? []) {
+    const source = union.find((dependency) => dependency.name === file.package);
+    if (source === undefined) {
       problems.push(
-        `NOT005 ${file.path} is ${key}, vendored in ${source.name}, and its entry in ${WEB_INPUTS} ` +
-          'supplies no licence text for it.',
+        `NOT005 ${file.file} is bundled out of ${file.package}, which is not in the closure.`,
       );
       continue;
     }
-    vendoredEntries.set(
-      key,
-      entry({
-        name: vendored.name,
-        version: vendored.version,
-        licence: vendored.licence,
-        part: 'copied',
-        sections,
-      }),
+    if (!existsSync(join(source.directory, file.file))) {
+      problems.push(
+        `NOT005 ${file.file} is bundled out of ${source.name}@${source.version}, ` +
+          'which the installed package does not have.',
+      );
+      continue;
+    }
+    if (file.vendored === undefined) {
+      problems.push(
+        `NOT005 ${source.name}/${file.file} is in ${WEB_INPUTS} §vendoredIntoBundle and says ` +
+          'nothing about whose work it is.',
+      );
+      continue;
+    }
+    bundledVendored.push(
+      `  ${file.file} — in ${source.name} ${source.version}, bundled into ${file.in}; ` +
+        `it is ${file.vendored.name} ${file.vendored.version}, vendored there — ${file.vendored.licence}`,
     );
+    noticeVendored(`${source.name}/${file.file}`, source, file.vendored);
   }
 
   const nativeEntries = [];
@@ -717,8 +763,9 @@ export function renderNotices(root) {
     'Part 1 is everything in the app itself: the web build a browser downloads,',
     'which the Android app carries too. Part 2 is the native libraries only the',
     'Android app contains. Part 3 names the files the build copies whole out of a',
-    'package in part 1. Part 4 is code the build tools write into the app, which',
-    'no package in part 1 accounts for.',
+    'package in part 1, and the files a package there vendors from somebody else',
+    "that the build bundles into the app's own code. Part 4 is code the build",
+    'tools write into the app, which no package in part 1 accounts for.',
     '',
     'Generated from the installed dependency tree by',
     'scripts/check-third-party-notices.mjs. Do not edit it by hand.',
@@ -735,6 +782,13 @@ export function renderNotices(root) {
     '',
     'Part 3 — files copied out of a package into the build',
     ...(copied.length > 0 ? copied : ['  (none)']),
+    ...(bundledVendored.length > 0
+      ? [
+          '',
+          "  Bundled into the app's own code, out of a package that vendors them:",
+          ...bundledVendored,
+        ]
+      : []),
     '',
     'Part 4 — code the build tools write into the app',
     ...(bundlerLines.length > 0 ? bundlerLines : ['  (none)']),

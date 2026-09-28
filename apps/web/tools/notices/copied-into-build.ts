@@ -35,6 +35,20 @@
  *
  * A named file the build no longer writes is reported too, `LIC006`'s reason:
  * an entry that has stopped meaning something stops the build.
+ *
+ * ## Code a package vendors from somebody else — #618's review
+ *
+ * "Code is not this rule's" has one exception. A package can ship somebody
+ * else's code inside itself, under its own licence field: `three` carries
+ * Don McCurdy's KTX-Parse and zstddec (MIT) under `examples/jsm/libs/`, and
+ * `KTX2Loader` imports both, so the bundler writes them into the renderer's
+ * chunk where Part 1's `three — MIT` is not their notice. So a module bundled
+ * from a directory in {@link VENDORED_DIRECTORIES} must be named in
+ * `third-party-notices.json` §`vendoredIntoBundle`, and a name there the build
+ * no longer bundles is stale. The directories are written down rather than
+ * discovered — a package that vendors elsewhere is the generator's stated
+ * limit — and this reads the modules Rolldown says each chunk holds, which is
+ * the one place that knows.
  */
 
 import { readFileSync } from 'node:fs';
@@ -51,6 +65,54 @@ export interface BuiltAsset {
 /** An entry of `copiedIntoBuild`, as far as this rule reads it. */
 export interface CopiedFile {
   readonly path: string;
+}
+
+/** An entry of `vendoredIntoBundle`, as far as this rule reads it. */
+export interface VendoredFile {
+  readonly package: string;
+  readonly file: string;
+}
+
+/**
+ * The directories inside a package that hold somebody else's code. Only three's
+ * today: every file under `examples/jsm/libs/` is a third party's build.
+ */
+export const VENDORED_DIRECTORIES: readonly {
+  readonly package: string;
+  readonly directory: string;
+}[] = [{ package: 'three', directory: 'examples/jsm/libs/' }];
+
+/** The package and in-package path of a bundled module from a vendored directory, if it is one. */
+export function vendoredModule(id: string): VendoredFile | undefined {
+  const path = id.replace(/\\/g, '/').replace(/\?.*$/, '');
+  for (const { package: name, directory } of VENDORED_DIRECTORIES) {
+    const marker = `/node_modules/${name}/${directory}`;
+    const at = path.lastIndexOf(marker);
+    if (at !== -1) return { package: name, file: directory + path.slice(at + marker.length) };
+  }
+  return undefined;
+}
+
+/**
+ * The vendored modules a build bundled that the list does not name, and the
+ * names on the list the build did not bundle.
+ */
+export function unnoticedVendored(
+  moduleIds: readonly string[],
+  noticed: readonly VendoredFile[],
+): { readonly unnamed: readonly string[]; readonly stale: readonly string[] } {
+  const key = (file: VendoredFile): string => `${file.package}/${file.file}`;
+  const named = new Set(noticed.map(key));
+  const bundled = new Set(
+    moduleIds.flatMap((id) => {
+      const found = vendoredModule(id);
+      return found === undefined ? [] : [key(found)];
+    }),
+  );
+  return {
+    unnamed: [...bundled].filter((file) => !named.has(file)).sort(),
+    stale: [...named].filter((file) => !bundled.has(file)).sort(),
+  };
 }
 
 /** Code: noticed through the closure, this repository or the bundler, never here. */
@@ -99,6 +161,7 @@ export function copiedIntoBuild(root: string): Plugin {
     generateBundle(_options, bundle) {
       const inputs = JSON.parse(readFileSync(join(root, NOTICES_INPUTS), 'utf8')) as {
         copiedIntoBuild?: CopiedFile[];
+        vendoredIntoBundle?: VendoredFile[];
       };
       const assets = Object.values(bundle).flatMap((output) =>
         output.type === 'asset'
@@ -106,6 +169,10 @@ export function copiedIntoBuild(root: string): Plugin {
           : [],
       );
       const { unnamed, stale } = unnoticedCopies(assets, inputs.copiedIntoBuild ?? []);
+      const moduleIds = Object.values(bundle).flatMap((output) =>
+        output.type === 'chunk' ? Object.keys(output.modules) : [],
+      );
+      const vendored = unnoticedVendored(moduleIds, inputs.vendoredIntoBundle ?? []);
       const problems = [
         ...unnamed.map(
           (file) =>
@@ -114,6 +181,15 @@ export function copiedIntoBuild(root: string): Plugin {
         ...stale.map(
           (file) =>
             `${file} is in ${NOTICES_INPUTS} §copiedIntoBuild and the build did not write it`,
+        ),
+        ...vendored.unnamed.map(
+          (file) =>
+            `${file} is somebody else's code its package vendors, bundled into a chunk, and is ` +
+            `not in ${NOTICES_INPUTS} §vendoredIntoBundle`,
+        ),
+        ...vendored.stale.map(
+          (file) =>
+            `${file} is in ${NOTICES_INPUTS} §vendoredIntoBundle and the build did not bundle it`,
         ),
       ];
       if (problems.length > 0) {

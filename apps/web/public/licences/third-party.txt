@@ -7,8 +7,9 @@ the packages themselves ship them.
 Part 1 is everything in the app itself: the web build a browser downloads,
 which the Android app carries too. Part 2 is the native libraries only the
 Android app contains. Part 3 names the files the build copies whole out of a
-package in part 1. Part 4 is code the build tools write into the app, which
-no package in part 1 accounts for.
+package in part 1, and the files a package there vendors from somebody else
+that the build bundles into the app's own code. Part 4 is code the build
+tools write into the app, which no package in part 1 accounts for.
 
 Generated from the installed dependency tree by
 scripts/check-third-party-notices.mjs. Do not edit it by hand.
@@ -116,6 +117,10 @@ Part 3 — files copied out of a package into the build
   pose/vision_wasm_module_internal.wasm — from @mediapipe/tasks-vision 1.0.1 (apps/web/tools/pose/pose-runtime-plugin.ts)
   realistic/basis/basis_transcoder.js — from three 0.185.1 (apps/web/tools/basis/transcoder-plugin.ts); it is Basis Universal transcoder 1.50, vendored there — Apache-2.0 AND BSD-3-Clause
   realistic/basis/basis_transcoder.wasm — from three 0.185.1 (apps/web/tools/basis/transcoder-plugin.ts); it is Basis Universal transcoder 1.50, vendored there — Apache-2.0 AND BSD-3-Clause
+
+  Bundled into the app's own code, out of a package that vendors them:
+  examples/jsm/libs/ktx-parse.module.js — in three 0.185.1, bundled into the game renderer chunk (assets/three-renderer-*.js), imported by three's KTX2Loader; it is KTX-Parse 1.1.0, vendored there — MIT
+  examples/jsm/libs/zstddec.module.js — in three 0.185.1, bundled into the game renderer chunk (assets/three-renderer-*.js), imported by three's KTX2Loader; it is zstddec 0.0.2, vendored there — MIT AND BSD-3-Clause
 
 Part 4 — code the build tools write into the app
   vite 8.3.0 — MIT: its module-preload polyfill and its __vitePreload helper, in the entry chunk
@@ -2166,6 +2171,107 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 --- Apache-2.0 ---
 
 The full text of Apache-2.0 is reproduced once, at the end of this document.
+
+========================================================================
+Name: KTX-Parse
+Version: 1.1.0
+Licence: MIT
+Part: copied
+
+--- What the build carries ---
+
+ktx-parse.module.js, bundled into the game renderer's chunk: KTX-Parse by Don McCurdy, as three 0.185.1 vendors it under examples/jsm/libs/. three.js took it in mrdoob/three.js#31621 (commit c06699ee2549, 2025-08-10, 'Update to ktx-parse v1.1'), its last change to that file, the same day KTX-Parse tagged v1.1.0. The vendored build is minified by three, so it cannot be compared byte for byte; it carries v1.1.0's levelCount handling, which v1.0.1 does not have, while its KTXwriter string still reads 'KTX-Parse v1.0.1' -- a build constant, not the source. The licence is the same MIT text at both tags and in the npm tarball of 1.1.0. It reads a KTX2 container's header, levels and key/value data before the transcoder is given the payload. three's own licence field says MIT for three.js authors and is not this notice, which is why it is written here.
+
+--- from https://github.com/donmccurdy/KTX-Parse/blob/d47bd1767d8ad50a6fccf1a7bfebd493a915fc93/LICENSE, read 2026-09-27 ---
+
+The MIT License (MIT)
+
+Copyright (c) 2020 Don McCurdy
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+========================================================================
+Name: zstddec
+Version: 0.0.2
+Licence: MIT AND BSD-3-Clause
+Part: copied
+
+--- What the build carries ---
+
+zstddec.module.js, bundled into the game renderer's chunk: zstddec by Don McCurdy, as three 0.185.1 vendors it under examples/jsm/libs/. Its code is byte-identical, once the source-map comment is set aside, to dist/zstddec.modern.js in the npm tarballs of zstddec 0.0.2 (and 0.0.1, whose file is the same), both published 2020-07-27, the day three.js last rebuilt it (commit d5bb0336242e); 0.1.0 differs. It inlines, as a base64 data: URL, a WebAssembly build of Zstandard's decoder, which is Zstandard's work under BSD-3-Clause; KTX2Loader uses it to undo a texture's Zstandard supercompression. zstddec's own manifest declares 'MIT AND BSD-3-Clause' and its LICENSE, below, carries both notices. three's own licence field says MIT for three.js authors and is not this notice, which is why it is written here.
+
+--- from https://github.com/donmccurdy/zstddec/blob/06a6f6b30f7052bdf5d2b887a6b0916f9a9ba45e/LICENSE, read 2026-09-27 ---
+
+The MIT License (MIT)
+
+Copyright (c) 2020 Don McCurdy
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+***
+
+BSD License
+
+For Zstandard software
+
+Copyright (c) 2016-present, Yann Collet, Facebook, Inc. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+ * Redistributions of source code must retain the above copyright notice, this
+ list of conditions and the following disclaimer.
+
+ * Redistributions in binary form must reproduce the above copyright notice,
+ this list of conditions and the following disclaimer in the documentation
+ and/or other materials provided with the distribution.
+
+ * Neither the name Facebook nor the names of its contributors may be used to
+ endorse or promote products derived from this software without specific
+ prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ========================================================================
 Name: vite
