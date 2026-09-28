@@ -293,7 +293,18 @@ const SEGMENT_VIEWPORTS = [
 async function segmentBoxes(
   page: Page,
   stripped: boolean,
-): Promise<readonly { label: string; height: number; width: number; minHeight: string }[]> {
+): Promise<
+  readonly {
+    label: string;
+    height: number;
+    width: number;
+    top: number;
+    left: number;
+    right: number;
+    rowLeft: number;
+    minHeight: string;
+  }[]
+> {
   return page.evaluate((strip) => {
     // ⚠️ Every floor comes off BEFORE any box is read: the segments share a
     // flex row that stretches each to the tallest, so one stripped segment
@@ -307,6 +318,10 @@ async function segmentBoxes(
         label: segment.dataset['oylSegment'] ?? '',
         height: box.height,
         width: box.width,
+        top: box.top,
+        left: box.left,
+        right: box.right,
+        rowLeft: segment.parentElement?.getBoundingClientRect().left ?? Number.NaN,
         minHeight: getComputedStyle(segment).minHeight,
       };
     });
@@ -325,12 +340,26 @@ for (const viewport of SEGMENT_VIEWPORTS) {
       await open(page);
       const segments = await segmentBoxes(page, false);
       expect(segments.map((segment) => segment.label)).toEqual(SEGMENTS);
+      // The three-option specimen wraps on a phone and not on a tablet, so the
+      // row-start check below is measured on a wrapped row, not passed over one.
+      const rows = new Set(segments.map((segment) => segment.top)).size;
+      expect(rows > 1, `${String(rows)} rows at ${viewport.name}`).toBe(viewport.width < 400);
       for (const segment of segments) {
         expect(segment.height, `${segment.label}'s height`).toBeGreaterThanOrEqual(
           TOUCH_TARGET_PIXELS,
         );
         expect(segment.width, `${segment.label}'s width`).toBeGreaterThanOrEqual(
           TOUCH_TARGET_PIXELS,
+        );
+        // Inside the viewport, and — where three options wrap on a phone —
+        // the segment that starts a row lines up with the row rather than
+        // hanging outside it on the join's −2px (theme.css
+        // §`.oyl-segmented__options`, #694's review).
+        expect(segment.right, `${segment.label} runs past the viewport`).toBeLessThanOrEqual(
+          viewport.width,
+        );
+        expect(segment.left, `${segment.label} starts outside its row`).toBeGreaterThanOrEqual(
+          segment.rowLeft,
         );
       }
     });
@@ -423,5 +452,126 @@ test.describe('#668 — a segmented control, painted and operated', () => {
       'now checked',
     );
     expectToken((await painted(segment(page, 'Miles'))).background, 'canvas', 'now unchecked');
+  });
+});
+
+/**
+ * The SHIPPED segmented control — Settings' units choice, laid out by the
+ * reflow harness (`reflow.html`, the real `AppShell` over the empty fixture).
+ * The cases above measure the specimen, whose markup differs from Settings'
+ * (a `htmlFor`/`id` pair, a text node before the label, a description inside
+ * the fieldset); this is the box a rider actually taps.
+ */
+for (const viewport of SEGMENT_VIEWPORTS) {
+  test.describe(`#668 — Settings' units choice at ${viewport.name}`, () => {
+    test.use({ viewport: { width: viewport.width, height: viewport.height } });
+
+    test('each segment is a 44×44 target on one row, inside the viewport', async ({ page }) => {
+      await page.goto('/reflow.html?data=empty');
+      await page.waitForFunction(() => window.__oylReflow?.ready === true);
+      const seen = await page.evaluate(async () => window.__oylReflow?.visit('#/settings'));
+      expect(seen?.h1).toBe('Settings');
+      const segments = await page
+        .locator('fieldset.oyl-segmented .oyl-segmented__options > label')
+        .evaluateAll((all) =>
+          all.map((label) => {
+            const box = label.getBoundingClientRect();
+            return {
+              label: (label.textContent ?? '').trim(),
+              top: box.top,
+              right: box.right,
+              width: box.width,
+              height: box.height,
+            };
+          }),
+        );
+      expect(segments, 'Settings rendered no units segments').toHaveLength(2);
+      const first = segments[0];
+      for (const segment of segments) {
+        expect(segment.height, `${segment.label}'s height`).toBeGreaterThanOrEqual(
+          TOUCH_TARGET_PIXELS,
+        );
+        expect(segment.width, `${segment.label}'s width`).toBeGreaterThanOrEqual(
+          TOUCH_TARGET_PIXELS,
+        );
+        // One row: the join and the end radii only mean anything on one.
+        expect(segment.top, `${segment.label} wrapped to a second row`).toBe(first?.top);
+        expect(segment.right, `${segment.label} runs past the viewport`).toBeLessThanOrEqual(
+          viewport.width,
+        );
+      }
+    });
+  });
+}
+
+/**
+ * An on toggle under a forced palette — Windows High Contrast and its kin.
+ * The forced palette flattens the `selected` fill and removes every
+ * box-shadow, so the `@media (forced-colors: active)` rule in `theme.css`
+ * draws the on state as a double border instead, with the padding taking the
+ * two wider pixels back. The control deletes that one rule through the CSSOM
+ * and requires the on toggle to be drawn exactly as the off one — the state
+ * lost — so the positive read cannot be a page where forcing never applied.
+ */
+test.describe('#668 — an on toggle under forced colours', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  async function borders(page: Page) {
+    const read = (name: 'toggle-on' | 'toggle-off') =>
+      kind(page, name).evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          style: style.borderTopStyle,
+          width: Number.parseFloat(style.borderTopWidth),
+          shadow: style.boxShadow,
+          height: element.getBoundingClientRect().height,
+        };
+      });
+    return { on: await read('toggle-on'), off: await read('toggle-off') };
+  }
+
+  test('is told by a double border, and the box does not move', async ({ page }) => {
+    await page.emulateMedia({ forcedColors: 'active' });
+    await open(page);
+    expect(await page.evaluate(() => matchMedia('(forced-colors: active)').matches)).toBe(true);
+    const { on, off } = await borders(page);
+    expect(on.shadow, 'a forced palette keeps no shadow').toBe('none');
+    expect(on.style).toBe('double');
+    expect(on.width).toBe(4);
+    expect(off.style).toBe('solid');
+    expect(off.width).toBe(2);
+    expect(on.height).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+    expect(on.height).toBe(off.height);
+  });
+
+  test('the control — without the rule, on and off are drawn alike', async ({ page }) => {
+    await page.emulateMedia({ forcedColors: 'active' });
+    await open(page);
+    const removed = await page.evaluate(() => {
+      let count = 0;
+      for (const sheet of document.styleSheets) {
+        for (const rule of [...sheet.cssRules]) {
+          if (!(rule instanceof CSSMediaRule) || !rule.conditionText.includes('forced-colors')) {
+            continue;
+          }
+          for (let index = rule.cssRules.length - 1; index >= 0; index -= 1) {
+            const inner = rule.cssRules[index];
+            if (
+              inner instanceof CSSStyleRule &&
+              inner.selectorText.includes('.oyl-button--toggle[aria-pressed')
+            ) {
+              rule.deleteRule(index);
+              count += 1;
+            }
+          }
+        }
+      }
+      return count;
+    });
+    expect(removed, 'the forced-colours toggle rule was not found to remove').toBe(1);
+    const { on, off } = await borders(page);
+    expect(on.shadow).toBe('none');
+    expect(on.style).toBe(off.style);
+    expect(on.width).toBe(off.width);
   });
 });

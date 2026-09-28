@@ -12,6 +12,7 @@
 import { StrictMode } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { PRIMARY_BUTTON_SELECTOR } from '../a11y/button-hierarchy';
 import { CameraController } from '../camera/session';
 import {
   SIDE_PAIRING_END_TEXT,
@@ -477,6 +478,39 @@ describe('driving the phone, on the tablet', () => {
     await settle();
     return { ...context, phone, heard };
   }
+
+  it('draws no primary of its own in any state, because the Camera screen’s is its way in (#668)', async () => {
+    // `CameraView` puts this section under its one primary, the link to the
+    // phone's screen (#557). Every button here is therefore secondary, and a
+    // primary appearing in any state would be the view's second.
+    const primaries = (): string[] =>
+      queryAll(document, PRIMARY_BUTTON_SELECTOR).map((each) => each.textContent?.trim() ?? '');
+    const context = await tablet();
+    expect(button('Pair a phone')).toBeDefined();
+    expect(primaries(), 'not paired').toEqual([]);
+    await press('Pair a phone');
+    const phone = await context.phoneReads();
+    expect(button('Read the phone’s code')).toBeDefined();
+    expect(primaries(), 'offer up').toEqual([]);
+    await press('Read the phone’s code');
+    expect(button('Stop looking')).toBeDefined();
+    expect(primaries(), 'reading the code').toEqual([]);
+    await scanOnce();
+    phone.link.reportToTablet({ state: 'framing' });
+    await flushSideLink();
+    await settle();
+    expect(button('Start filming')).toBeDefined();
+    expect(primaries(), 'framing').toEqual([]);
+    await press('Start filming');
+    phone.link.reportToTablet({ state: 'filming' });
+    await flushSideLink();
+    await settle();
+    expect(button('Stop filming')).toBeDefined();
+    expect(primaries(), 'filming').toEqual([]);
+    await press('End pairing');
+    expect(button('Pair a phone')).toBeDefined();
+    expect(primaries(), 'ended').toEqual([]);
+  });
 
   it('offers Start only while the phone is framing, and says when it is confirmed', async () => {
     const { phone, heard } = await paired();

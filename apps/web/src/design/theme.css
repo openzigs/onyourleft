@@ -772,8 +772,8 @@ h3:first-child {
  * `inline-block` rather than `inline-flex`, and on links only: it is what a
  * `<button>` already is, so every `<button class="oyl-button">` is untouched,
  * and it does not turn a label's text and inline children into flex items.
- * `browser/shell.browser.spec.ts` §"a link drawn as a button" measures it,
- * with this declaration taken away as its control.
+ * `browser/button-hierarchy.browser.spec.ts` §"#668 — a link drawn as a
+ * button" measures it, with this declaration taken away as its control.
  */
 a.oyl-button {
   display: inline-block;
@@ -829,7 +829,8 @@ a.oyl-button {
  * label on the `accent-hover` fill — 1.40:1. It lightens instead: the `surface`
  * fill with the label darkened to `accent-hover`, the pair the file input's
  * button (#667) already used. The border keeps the hover's `accent-hover`.
- * `browser/shell.browser.spec.ts` §"#688" reads the pair back after the
+ * `browser/button-hierarchy.browser.spec.ts` §"#688 — a hovered secondary
+ * button" reads the pair back after the
  * transition, with this rule taken away as its control.
  */
 .oyl-button--secondary:hover:not(:disabled),
@@ -881,9 +882,10 @@ a.oyl-button {
  *
  * Each segment is a label wrapping its radio, so the 44 px floor is the one
  * `label:has(> input[type='radio'])` declares above (SC 2.5.5, measured the
- * #316 way by `shell.browser.spec.ts` §"#668"). The radio itself stays drawn:
- * its dot is the state told by SHAPE, beside the `selected` fill and the
- * doubled border (SC 1.4.1). Keyboard focus rings the radio with the one focus
+ * #316 way by `browser/button-hierarchy.browser.spec.ts` §"#668 — a segmented
+ * control at …" and §"#668 — the segment target is declared"). The radio
+ * itself stays drawn: its dot is the state told by SHAPE, beside the
+ * `selected` fill and the doubled border (SC 1.4.1). Keyboard focus rings the radio with the one focus
  * style; the ring lands on the segment's own fill, a declared pair.
  *
  * Four or more options are not a segmented control: they are a `<select>`
@@ -901,9 +903,21 @@ a.oyl-button {
   margin-bottom: var(--oyl-space-xs);
 }
 
+/*
+ * Joined: every segment shares its border with the one before it AND with
+ * the row above, by a −2px margin on both start edges, and the row takes the
+ * two pixels back as padding. So when three options do not fit a 320 px phone
+ * and the row wraps, the segment that starts the second row lines up with the
+ * first rather than hanging two pixels outside it, and the two rows share one
+ * border like tiles. Only the group's first and last segments are rounded.
+ * `button-hierarchy.browser.spec.ts` §"#668 — a segmented control at 320×256"
+ * wraps the three-option specimen and measures every segment inside the row.
+ */
 .oyl-segmented__options {
   display: flex;
   flex-wrap: wrap;
+  padding-block-start: 2px;
+  padding-inline-start: 2px;
 }
 
 .oyl-segmented__options > label {
@@ -912,10 +926,7 @@ a.oyl-button {
   border: 2px solid var(--oyl-color-accent);
   background: var(--oyl-color-canvas);
   color: var(--oyl-color-accent);
-}
-
-/* Joined: each segment after the first shares the border before it. */
-.oyl-segmented__options > label + label {
+  margin-block-start: -2px;
   margin-inline-start: -2px;
 }
 

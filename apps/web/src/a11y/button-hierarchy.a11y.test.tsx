@@ -24,10 +24,14 @@
  *    and must NOT show it empty — the reflow harness's own rule, so a fixture
  *    that stopped reaching its view fails here rather than being counted twice
  *    as an empty page.
- * 2. Across the walk, buttons and primaries must both have been seen. A client
- *    whose buttons all disappeared would otherwise pass every route.
- * 3. The control: a view with two primaries, rendered with the real `Button`,
- *    must be reported.
+ * 2. Somewhere on the walk, buttons and a primary must both be seen — its own
+ *    walk, so it holds under any order or filter. A client whose buttons all
+ *    disappeared would otherwise pass every route.
+ * 3. The control: `button-hierarchy.control.a11y.test.tsx` gives a route of
+ *    the real table a view drawing two primaries, walks it through the same
+ *    `testing/hierarchy-walk.tsx` §`walkRoute` every route here goes through,
+ *    and requires it to be reported. The bare `main`s at the end of this file
+ *    pin the counting rule itself.
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -38,9 +42,10 @@ import { recordingSessionId } from '@onyourleft/store';
 import { Button } from '../design/Button';
 import type { RideController, RideSnapshot } from '../ride/controller';
 import { idleSnapshot, ridingSnapshot, stubRideController } from '../ride/testing';
-import { ALL_ROUTES, hrefFor, routeById, type RouteDefinition } from '../shell/routes';
+import { ALL_ROUTES, routeById, type RouteDefinition } from '../shell/routes';
+import { openRoute, walkRoute } from '../testing/hierarchy-walk';
 import { mount, settle, type Mounted } from '../testing/mount';
-import { PARAMETERS, POPULATED, PopulatedShell } from '../testing/populated-shell';
+import { ActivitiesView } from '../views/ActivitiesView';
 
 import { buttonsByView, onePrimaryViolations } from './button-hierarchy';
 
@@ -52,76 +57,44 @@ afterEach(() => {
   globalThis.location.hash = '';
 });
 
-function hashFor(route: RouteDefinition): string {
-  if (!route.path.split('/').some((segment) => segment.startsWith(':'))) {
-    return hrefFor(route);
-  }
-  const parameter = PARAMETERS[route.id];
-  if (parameter === undefined) {
-    throw new Error(`${route.id} is parameterised and populated-shell.tsx names no fixture id`);
-  }
-  return hrefFor(route, parameter);
-}
-
-/** Settle until the page stops changing, because every view reads a port. */
-async function settled(): Promise<void> {
-  let before = '';
-  for (let round = 0; round < 40; round += 1) {
-    await settle();
-    const now = document.body.innerHTML;
-    if (now === before) return;
-    before = now;
-  }
-}
-
 async function open(
   route: RouteDefinition,
   populated: boolean,
   rideController?: RideController,
 ): Promise<void> {
-  globalThis.location.hash = hashFor(route);
-  mounted = await mount(
-    <PopulatedShell
-      populated={populated}
-      {...(rideController === undefined ? {} : { rideController })}
-    />,
-  );
-  await settled();
+  mounted = await openRoute(route, populated, rideController);
 }
-
-const seen = { buttons: 0, primaries: 0 };
 
 describe('#668 — at most one primary button per view, on every route', () => {
   for (const data of ['empty', 'populated'] as const) {
     for (const route of ALL_ROUTES) {
       it(`${route.id} (${route.path}), ${data}`, async () => {
-        await open(route, data === 'populated');
-        expect(document.querySelector('h1')?.textContent).toBe(route.title);
-
-        const expectation = POPULATED[route.id];
-        if (expectation.kind === 'fixture') {
-          expect(
-            document.querySelector(expectation.marker) !== null,
-            `${route.id}: the fixture marker ${expectation.marker} should be ` +
-              (data === 'populated' ? 'present' : 'absent'),
-          ).toBe(data === 'populated');
-        }
-
-        const views = buttonsByView(document);
-        expect(views, 'the shell renders exactly one main').toHaveLength(1);
-        for (const view of views) {
-          seen.buttons += view.buttons;
-          seen.primaries += view.primaries.length;
-        }
-        expect(onePrimaryViolations(document), `${route.id}, ${data}`).toEqual([]);
+        const walked = await walkRoute(route, data === 'populated');
+        mounted = walked.mounted;
+        expect(walked.violations, `${route.id}, ${data}`).toEqual([]);
       });
     }
   }
 
-  it('saw buttons and primaries on the walk, so the loop above counted something', () => {
-    // ⚠️ Runs after the loop in file order, which Vitest keeps within a file.
-    expect(seen.buttons, 'no route rendered a single .oyl-button').toBeGreaterThan(0);
-    expect(seen.primaries, 'no route rendered a primary button at all').toBeGreaterThan(0);
+  it('finds buttons and a primary somewhere on the walk, so the loop above counts something', async () => {
+    // Its own walk rather than a tally the cases above leave behind, so it
+    // holds whatever order the cases run in and whichever of them a filter
+    // selects. It stops at the first route that shows both, so a green run
+    // costs a route or two; a client whose buttons all disappeared walks
+    // every route and fails.
+    let buttons = 0;
+    let primaries = 0;
+    for (const route of ALL_ROUTES) {
+      const walked = await walkRoute(route, true);
+      walked.mounted.unmount();
+      for (const view of walked.views) {
+        buttons += view.buttons;
+        primaries += view.primaries.length;
+      }
+      if (buttons > 0 && primaries > 0) break;
+    }
+    expect(buttons, 'no route rendered a single .oyl-button').toBeGreaterThan(0);
+    expect(primaries, 'no route rendered a primary button at all').toBeGreaterThan(0);
   });
 });
 
@@ -177,6 +150,8 @@ describe('#668 — an empty state offers its next step as a button', () => {
     ['routes', 'Draw a route on this device'],
     ['game', 'Import a GPX file on the Routes screen'],
     ['game', 'Draw one on this device'],
+    ['activities', 'Start a ride'],
+    ['activities', 'Import or export files'],
   ] as const;
   for (const [id, label] of cases) {
     it(`${id}: “${label}”`, async () => {
@@ -186,8 +161,27 @@ describe('#668 — an empty state offers its next step as a button', () => {
       );
       expect(control, `no control named “${label}” on ${id}`).toBeDefined();
       expect(control?.classList.contains('oyl-button'), control?.outerHTML).toBe(true);
+      expect(onePrimaryViolations(document)).toEqual([]);
     });
   }
+
+  it('activities with no local store: “Start a ride” is the one primary, and importing is secondary', async () => {
+    // The walk hands every route a store, so the no-store branch is mounted
+    // on its own, inside a `main` as the shell would put it.
+    mounted = await mount(
+      <main>
+        <ActivitiesView />
+      </main>,
+    );
+    await settle();
+    expect(document.body.textContent).toContain('No local store on this browser');
+    const named = (label: string): Element | undefined =>
+      [...document.querySelectorAll('main a')].find(
+        (element) => (element.textContent ?? '').trim() === label,
+      );
+    expect(buttonsByView(document)[0]?.primaries).toEqual([named('Start a ride')]);
+    expect(named('Import or export files')?.classList.contains('oyl-button--secondary')).toBe(true);
+  });
 });
 
 describe('the control — a view with two primaries is reported', () => {

@@ -8,6 +8,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { PRIMARY_BUTTON_SELECTOR } from '../a11y/button-hierarchy';
 import { ANALYSIS_ENDPOINT_STORAGE_KEY, readAnalysisEndpoint } from '../camera/analysis-endpoint';
 import type { AnalysisPort } from '../camera/analysis-port';
 import { riderAnalysisPort, type AnalysisSend } from '../camera/analysis-transport';
@@ -102,6 +103,37 @@ describe('the way in — #557', () => {
 
     expect(document.body.textContent).toContain(SINGLE_PICTURE_PURPOSE);
     expect(document.body.textContent).not.toContain(SIDE_CAMERA_UNAVAILABLE);
+  });
+
+  it('keeps the way in the one primary, before and after the rider agrees (#668)', async () => {
+    // The route walk hands this screen no pairing port, so the states where
+    // the link, the consent step and the camera's own switch meet are held to
+    // the rule here.
+    const primaries = (): string[] =>
+      queryAll(document, PRIMARY_BUTTON_SELECTOR).map((each) => each.textContent?.trim() ?? '');
+    for (const agreed of [false, true]) {
+      const controller = controllerFor(scriptedCamera());
+      if (agreed) {
+        controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+      }
+      mounted = await mount(
+        <CameraView
+          controller={controller}
+          sidePairing={sidePairingPort({ peer: () => undefined })}
+        />,
+      );
+      await settle();
+      expect(
+        button(agreed ? 'Turn the camera on' : 'Allow the camera on this device'),
+        `agreed: ${String(agreed)}`,
+      ).toBeDefined();
+      expect(primaries(), `agreed: ${String(agreed)}`).toHaveLength(1);
+      expect(queryAll(document, PRIMARY_BUTTON_SELECTOR)[0]?.getAttribute('href')).toBe(
+        '#/camera/side',
+      );
+      mounted.unmount();
+      mounted = undefined;
+    }
   });
 
   it('says plainly that a side camera cannot be paired here, and points nowhere, when this device cannot pair — #566’s review', async () => {

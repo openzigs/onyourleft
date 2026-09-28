@@ -589,12 +589,14 @@ panels meet, and fails a `main` holding two `.oyl-button`s that are neither seco
 Where it is used: the Activities sort is #660's `<select>` of four orders; Settings' units choice is
 the one segmented control; *Mute sounds*, a waypoint's selection in the route builder and a ride's
 *Show power* / *Show heart rate* are the toggles. An empty state whose next step is an action draws it
-as a button (Routes' *Draw a route on this device*, the game's *Import a GPX file*). A toggle that is
+as a button (Routes' *Draw a route on this device*, the game's *Import a GPX file*, Activities'
+*Start a ride* and *Import or export files*). A toggle that is
 on is told by a doubled border as well as the `selected` fill (WCAG 2.2 SC 1.4.1), and every state of
 every kind — rest, pointer, press, focus, disabled, on — is a pair in `tokens.ts`
 §`CONTRAST_REQUIREMENTS` that `browser/button-hierarchy.browser.spec.ts` reads back from the pinned
-Chromium. That read-back is what found [#688](https://github.com/openzigs/onyourleft/issues/688)'s
-hovered secondary at 1.40:1: a state nobody meant to draw is a pair nobody declared.
+Chromium. That read-back is what now holds [#688](https://github.com/openzigs/onyourleft/issues/688)'s
+hovered secondary, found at 1.40:1 on the shell harness's specimens while #667 was being built: a
+state nobody meant to draw is a pair nobody declared.
 
 ⚠️ **#307's review added a fourth thing, and it is a gate rather than a system.** The first three are
 all checkable *without a browser* — a colour ratio, a number against a ratio, a `var()` against a
