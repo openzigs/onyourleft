@@ -114,7 +114,7 @@ import type { RideNotificationPermissionPort } from './notification-permission-p
 import { NO_TRAINER_CONTROL, type OpenTrainer, type TrainerConnection } from './trainer';
 import { createWorkoutSession, RELEASE_INCOMPLETE, type WorkoutSession } from '../workout/session';
 import { TargetHeldBack } from './held-back';
-import { createManualErg, type ManualErg, type ManualErgRescue } from './manual-erg';
+import { answersHeld, createManualErg, type ManualErg, type ManualErgRescue } from './manual-erg';
 import { blockText } from '../workouts/library';
 
 /** Which channel each metric on the screen reads from. */
@@ -2842,9 +2842,10 @@ export function createRideController(options: RideControllerOptions): RideContro
         const outcome = await manualErgFor(client, connection).set(target);
         if (outcome.kind === 'failed') {
           refusal = describe(outcome.error);
-        } else if (outcome.kind === 'deferred') {
+        } else if (answersHeld(outcome)) {
           // #655: the press is answered. Nothing is written here — the writer
-          // has already kept it as the pending target.
+          // has already kept it as the pending target. Not a *Set* that was
+          // waiting when the rescue began (#740): the rescue's notice names it.
           heldPresses += 1;
           held = { target, press: heldPresses };
         }

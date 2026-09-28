@@ -165,9 +165,26 @@ export interface ManualErgRescue {
 /**
  * What became of a rider's *Set*: the writer's own outcome, or `deferred` —
  * kept as the pending target because a rescue owns the machine.
+ *
+ * `beforeTheRescue` is true when the *Set* was already WAITING on the wire
+ * when the rescue began (PR #582's third review, probe C): the rescue then
+ * starts with it as its pending target, so its first notice already names it
+ * — *"Your new target of N W will be set once …"*. @see answersHeld
  */
 export type ManualErgSetOutcome =
-  ErgWriteOutcome | { readonly kind: 'deferred'; readonly target: Watts };
+  | ErgWriteOutcome
+  | { readonly kind: 'deferred'; readonly target: Watts; readonly beforeTheRescue: boolean };
+
+/**
+ * Whether a *Set* is answered with #655's *Held* line — deferred by a rescue
+ * that was ALREADY holding when the rider pressed. ⚠️ #740 (#655's review,
+ * N4): a *Set* waiting on the wire when the rescue began is deferred too, but
+ * the rescue's own notice, said as it began, already carries its pending
+ * clause; answering it as well said that clause twice.
+ */
+export function answersHeld(outcome: ManualErgSetOutcome): boolean {
+  return outcome.kind === 'deferred' && !outcome.beforeTheRescue;
+}
 
 export interface ManualErg {
   /**
@@ -368,14 +385,14 @@ export function createManualErg(options: {
         // The rescue owns the machine: recorded, not written.
         pending = value;
         onChange();
-        return Promise.resolve({ kind: 'deferred', target: value });
+        return Promise.resolve({ kind: 'deferred', target: value, beforeTheRescue: false });
       }
       const { entry, outcome } = ask(value, true, 'caller');
       // Superseded by an ease and kept as the pending target: say so, rather
       // than "superseded", which reads as though a newer target replaced it.
       return outcome.then((settled): ManualErgSetOutcome =>
         settled.kind === 'superseded' && entry.deferred
-          ? { kind: 'deferred', target: value }
+          ? { kind: 'deferred', target: value, beforeTheRescue: true }
           : settled,
       );
     },
