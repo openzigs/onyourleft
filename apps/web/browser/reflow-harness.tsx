@@ -53,6 +53,9 @@
  * real table are switched back to `prose`, which is the reading measure #670
  * replaced. And a page opened WITH a hash keeps it, so a fresh load of
  * `#/activities/selected/<id>` is a fresh load of that selection.
+ *
+ * `?panes=page` is #723's control: the layout before the two panes scrolled
+ * on their own, put back over the shipping stylesheet ({@link applyPanesControl}).
  */
 
 import { StrictMode, type JSX } from 'react';
@@ -114,6 +117,13 @@ export interface PrimaryPlace {
   readonly bottom: number;
   /** Which pane holds it, or `null` outside any. */
   readonly pane: string | null;
+  /**
+   * The bottom of the pane holding it, in CSS px from the top of the document,
+   * when that pane scrolls on its own and so CLIPS what is below its bottom —
+   * #723. `null` when the pane scrolls with the page. A primary below it is
+   * not on screen however far above the fold it is.
+   */
+  readonly clipBottom: number | null;
 }
 
 /** One box that scrolls sideways inside itself, and what a keyboard user gets. */
@@ -802,8 +812,18 @@ function primaries(): PrimaryPlace[] {
       top: box.top + window.scrollY,
       bottom: box.bottom + window.scrollY,
       pane: element.closest('[data-oyl-pane]')?.getAttribute('data-oyl-pane') ?? null,
+      clipBottom: clipBottomOf(element),
     };
   });
+}
+
+/** {@link PrimaryPlace.clipBottom}: the bottom of a pane that scrolls on its own. */
+function clipBottomOf(element: Element): number | null {
+  const pane = element.closest('[data-oyl-pane]');
+  if (pane === null || getComputedStyle(pane).overflowY === 'visible') {
+    return null;
+  }
+  return pane.getBoundingClientRect().bottom + window.scrollY;
 }
 
 async function visit(hash: string): Promise<ReflowMeasurement> {
@@ -879,6 +899,29 @@ function applyLayoutControl(): void {
   }
 }
 
+/**
+ * `?panes=page` — #723's control. The layout #723 replaced, put back by a
+ * stylesheet of the harness's own after the shipping one: the shell as tall as
+ * its content, `main` a block, and the panes growing with what they hold, so
+ * they scroll with the page again. Every rule it undoes is one #723 added, so
+ * the spec's "the panes scroll on their own" assertions must FAIL under it.
+ */
+function applyPanesControl(): void {
+  if (new URLSearchParams(window.location.search).get('panes') !== 'page') {
+    return;
+  }
+  const style = document.createElement('style');
+  style.setAttribute('data-oyl-control', 'panes=page');
+  style.textContent = `
+    .oyl-shell:has(.oyl-list-detail--two) { height: auto !important; }
+    .oyl-main--list-detail:has(.oyl-list-detail--two) { display: block !important; }
+    .oyl-list-detail--two { grid-template-rows: none !important; align-items: start !important; }
+    .oyl-list-detail--two > .oyl-list-detail__list,
+    .oyl-list-detail--two > .oyl-list-detail__detail { overflow-y: visible !important; }
+  `;
+  document.head.append(style);
+}
+
 function main(): void {
   const host = document.querySelector('#shell');
   if (host === null) {
@@ -889,6 +932,7 @@ function main(): void {
     throw new Error(`reflow harness: ?data must be "empty" or "populated", not ${String(data)}`);
   }
   applyLayoutControl();
+  applyPanesControl();
   // A page opened with a hash keeps it (#670: a fresh load of a selection).
   if (window.location.hash === '') {
     window.location.hash = '#/';

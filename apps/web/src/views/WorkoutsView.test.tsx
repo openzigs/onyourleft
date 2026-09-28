@@ -441,6 +441,70 @@ describe('#670 — a selected workout', () => {
     expect(queryAll(view.container, '[role="status"], [aria-live]').length).toBe(0);
   });
 
+  it('does not carry one workout’s confirmation or export note to the next one chosen — #723', async () => {
+    // Two panes let a rider go straight from one list link to another, with no
+    // stop at the list between. The "Delete …?" and "… is ready" belonged to
+    // the first workout and were drawn on the second's page.
+    const stub = workoutStub(ATHLETE, [
+      workout(),
+      workout({ id: workoutId('workout-2'), name: 'Threshold', createdAt: unixSeconds(1) }),
+    ]);
+    const files: DownloadableFile[] = [];
+    const saveFile = (file: DownloadableFile): void => {
+      files.push(file);
+    };
+    const view = await renderWithSave(stub, files);
+    await activateWithKeyboard(buttonSaying(view.container, 'Export Sweet spot') as HTMLElement);
+    await activateWithKeyboard(buttonSaying(view.container, 'Delete Sweet spot') as HTMLElement);
+    expect(view.container.textContent).toContain('Delete “Sweet spot”?');
+    expect(view.container.textContent).toContain('Sweet spot.oylworkout.json is ready');
+
+    await view.rerender(
+      <WorkoutsView port={stub} now={() => 1_700_000_500} selected="workout-2" save={saveFile} />,
+    );
+    await settle();
+    expect(view.container.querySelector('#oyl-selected-heading')?.textContent).toBe('Threshold');
+    expect(view.container.textContent).not.toContain('Delete “Sweet spot”?');
+    expect(view.container.textContent).not.toContain('is ready');
+    expect(buttonSaying(view.container, 'Delete “Sweet spot”')).toBeUndefined();
+
+    // And coming back to the first does not bring them back either.
+    await view.rerender(
+      <WorkoutsView port={stub} now={() => 1_700_000_500} selected="workout-1" save={saveFile} />,
+    );
+    await settle();
+    expect(view.container.textContent).not.toContain('Delete “Sweet spot”?');
+    expect(view.container.textContent).not.toContain('is ready');
+    expect(stub.rows()).toHaveLength(2);
+  });
+
+  it('empties the name box with the blocks once a workout is saved — #723', async () => {
+    // Decided in #723: the builder is a fresh workout after a save. A name
+    // left in the box would be inherited by the next workout built here.
+    const stub = workoutStub(ATHLETE);
+    const view = await render(stub);
+    await typeInto(field(view.container, 'block-minutes'), '10');
+    await typeInto(field(view.container, 'block-percent'), '65');
+    await activateWithKeyboard(buttonSaying(view.container, 'Add block') as HTMLElement);
+    await typeInto(field(view.container, 'workout-name'), 'Tempo');
+    await activateWithKeyboard(buttonSaying(view.container, 'Save workout') as HTMLElement);
+    await settle();
+    expect(stub.rows().map((row) => row.name)).toEqual(['Tempo']);
+    expect(field(view.container, 'workout-name').value).toBe('');
+    expect(view.container.textContent).toContain('No blocks yet.');
+    expect(view.container.textContent).toContain('Saved “Tempo”.');
+  });
+
+  it('keeps the name when a save is refused, so the rider can fix what was wrong — #723', async () => {
+    const stub = workoutStub(ATHLETE);
+    const view = await render(stub);
+    await typeInto(field(view.container, 'workout-name'), 'Tempo');
+    await activateWithKeyboard(buttonSaying(view.container, 'Save workout') as HTMLElement);
+    await settle();
+    expect(stub.rows()).toEqual([]);
+    expect(field(view.container, 'workout-name').value).toBe('Tempo');
+  });
+
   it('goes back to the list once the chosen workout is deleted', async () => {
     globalThis.location.hash = '#/workouts/selected/workout-1';
     const stub = workoutStub(ATHLETE, [workout()]);
