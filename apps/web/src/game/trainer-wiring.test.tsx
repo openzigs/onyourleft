@@ -569,6 +569,7 @@ describe('the Ride press asks the trainer for control — #503', () => {
         return fails ? Promise.reject(new Error('Control Not Permitted')) : Promise.resolve();
       },
       workoutRescue: () => undefined,
+      recordingMayStop: () => false,
     };
   }
 
@@ -871,6 +872,7 @@ describe('a press on Ride while the trainer is being asked — #509', () => {
           });
         },
         workoutRescue: () => undefined,
+        recordingMayStop: () => false,
       },
       grant: () => {
         granted = true;

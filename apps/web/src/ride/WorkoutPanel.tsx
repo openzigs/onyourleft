@@ -135,6 +135,12 @@ export interface WorkoutPanelProps {
    * a camera's state passes through a workout panel.
    */
   readonly sideCamera?: SideControlState | undefined;
+  /**
+   * #647: the ride may stop if the screen goes off
+   * (`RideSnapshot.keepAliveFailed`), for the ride's one region — the same
+   * reason {@link sideCamera} passes through this panel.
+   */
+  readonly keepAliveFailed?: boolean | undefined;
 }
 
 export function WorkoutPanel({
@@ -149,6 +155,7 @@ export function WorkoutPanel({
   sounds,
   announcerClock,
   sideCamera,
+  keepAliveFailed,
 }: WorkoutPanelProps): JSX.Element {
   const [saved, setSaved] = useState<readonly WorkoutRecord[]>([]);
   const [loadFault, setLoadFault] = useState<string | undefined>(undefined);
@@ -236,6 +243,7 @@ export function WorkoutPanel({
       trainer={trainer}
       workout={workout}
       sideCamera={sideCamera}
+      keepAliveFailed={keepAliveFailed}
       storage={announcements}
       clock={announcerClock}
       // #400: the interval sound, on the block CHANGE — not on the sentence

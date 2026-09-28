@@ -304,6 +304,7 @@ describe('a notice is laid out by the HUD — #423', () => {
     // #503: the Ride press's request for control — this double changes nothing.
     askForControlOnRide: () => Promise.resolve(),
     workoutRescue: () => undefined,
+    recordingMayStop: () => false,
     readTrainer: () => ({ kind: 'no-control', control: undefined }),
   };
 

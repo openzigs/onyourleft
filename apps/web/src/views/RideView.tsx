@@ -58,7 +58,14 @@ import { WorkoutPanel } from '../ride/WorkoutPanel';
 import type { WorkoutPort } from '../workouts/store-port';
 import type { AnalysisPort } from '../analysis/store-port';
 import type { RecoverableRide } from '../recording/recovery';
-import { canStartNewRide, type RideController, type RideSnapshot } from '../ride/controller';
+import {
+  canStartNewRide,
+  KEEP_SCREEN_ON_LABEL,
+  rideInProgress,
+  RIDE_MAY_STOP_WITH_SCREEN_OFF,
+  type RideController,
+  type RideSnapshot,
+} from '../ride/controller';
 import { ConnectedSensors } from '../ride/SensorPairing';
 import { useRideSnapshot } from '../ride/useRideController';
 import { SideCameraOnRide } from '../ride/SideCameraOnRide';
@@ -176,7 +183,24 @@ function LiveRide({
     // screen reader and the tab key meet everything in the order they did.
     <div className="oyl-ride">
       <div className="oyl-ride__group oyl-ride__group--live">
-        <h2>Live</h2>
+        <div className="oyl-ride__heading">
+          <h2>Live</h2>
+          {snapshot.keepAliveFailed && rideInProgress(snapshot.phase) ? (
+            // #647: the platform would not keep this ride alive, so it may be
+            // stopped with the screen off. BESIDE the heading rather than under
+            // Pause / Stop — #693's review measured the notice there ending
+            // 15.7 px above the fold on the owner's tablet in the shell and
+            // 3.7 px at 1024×720, and above them it put Pause under the fold;
+            // `theme.css` §`.oyl-ride__heading` has the table. Never put away:
+            // it is a safety sentence (the owner's ruling on #654's
+            // re-review), so it is the whole message and there is no
+            // disclosure. Not `live`: the ride's one region says it
+            // (`RideAnnouncer.tsx`). Gone the moment a later ask succeeds.
+            <StatusMessage tone="warning" label={KEEP_SCREEN_ON_LABEL}>
+              {RIDE_MAY_STOP_WITH_SCREEN_OFF}
+            </StatusMessage>
+          ) : null}
+        </div>
         <MetricGrid metrics={snapshot.metrics} />
 
         {/*
@@ -235,6 +259,8 @@ function LiveRide({
           thresholdPower={thresholdPower}
           // #551: the ride's one region says the side camera's link going.
           sideCamera={sideCamera.state}
+          // #647: …and, once, that the ride may stop if the screen goes off.
+          keepAliveFailed={snapshot.keepAliveFailed}
           onStart={(record) => {
             // ⚠️ Guarded rather than defaulted. The panel does not render a Start
             // control without a threshold, so this is unreachable through the UI
