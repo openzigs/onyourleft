@@ -922,6 +922,32 @@ function shiftMissedBy(
 const TREAD_VARIANCE_FLOOR = 14;
 const TREAD_VARIANCE_CEILING = 45;
 
+/**
+ * How many times the control's luma variance the product's must be — #624,
+ * #715's review. The window above is the right shape for catching a tread
+ * drawn at half or double strength, and the WRONG shape for anything else:
+ *
+ * ⚠️ **The absolute floor and ceiling are valid for this pose and this sun
+ * only.** They are 8-bit luma, so they move with everything that lights the
+ * square — the sun's elevation or intensity, the exposure, the tone mapping,
+ * the environment map, `TREAD_PROBE_ROUND_DEGREES`. #715's reviewer moved the
+ * probe round the wheel and read (product / control): 75° 33.92 / 9.27, 90°
+ * 23.25 / 4.32, 105° 13.39 / 2.68 — the tread plainly there at 105° and the
+ * window red. If the lighting moves and this goes red with no change to the
+ * bicycle, re-measure at the new light, re-derive the window from the new
+ * product and control exactly as the note above does, and restate both
+ * figures here. Do NOT widen the window to make it pass: a window wide enough
+ * for every light is too wide to see half a tread.
+ *
+ * This ratio is the half that does not move with the light, because the light
+ * scales the product and its control together. Measured ratios: **3.66** at
+ * 75°, **5.38** at 90°, **5.00** at 105°; a tread at half strength at 90°
+ * reads about 9 / 4.3 ≈ **2.1**. Three sits under every measured pose and over
+ * the half-strength tread. What it cannot see is a DOUBLED tread (a larger
+ * ratio passes), which is why the ceiling stays.
+ */
+const TREAD_VARIANCE_OVER_CONTROL = 3;
+
 /** #617's trees' own load — #644. @see TreeLevelMeasurement */
 const TREES_QUERY = '?realistic&trees';
 
@@ -3188,7 +3214,7 @@ test.describe('the realistic world — ADR 0026', () => {
     );
   });
 
-  test('reads the front tyre’s tread back between a floor and a ceiling, and the control under the floor — #624', async ({
+  test('reads the front tyre’s tread back between a floor and a ceiling and over three times its control, and the control under the floor — #624', async ({
     harnessRun,
   }) => {
     // A square of the front tyre's tread, facing a camera brought low, as the
@@ -3198,7 +3224,9 @@ test.describe('the realistic world — ADR 0026', () => {
       `#624: the front tyre's tread, ${String(tread.pixels)} pixels ${tread.distanceMetres.toFixed(2)} m ` +
         `from the eye — luma variance ${tread.variance.toFixed(2)} (mean ${tread.mean.toFixed(1)}), ` +
         `${tread.controlVariance.toFixed(2)} with the normal map off, against a floor of ` +
-        `${String(TREAD_VARIANCE_FLOOR)} and a ceiling of ${String(TREAD_VARIANCE_CEILING)}; ` +
+        `${String(TREAD_VARIANCE_FLOOR)} and a ceiling of ${String(TREAD_VARIANCE_CEILING)}, ` +
+        `${(tread.variance / Math.max(1e-6, tread.controlVariance)).toFixed(2)}× the control against ` +
+        `${String(TREAD_VARIANCE_OVER_CONTROL)}×; ` +
         `the same square with no bicycle ${tread.emptyMean.toFixed(1)}`,
     );
     // Non-vacuity: the square is the tyre — dark rubber where the empty frame
@@ -3213,6 +3241,10 @@ test.describe('the realistic world — ADR 0026', () => {
     // strength is under the floor, and one drawn at twice it over the ceiling.
     expect(tread.variance).toBeGreaterThan(TREAD_VARIANCE_FLOOR);
     expect(tread.variance).toBeLessThan(TREAD_VARIANCE_CEILING);
+    // And relative to the control, which does not move with the light: the
+    // tread must add at least twice the variance the bare curve has.
+    // @see TREAD_VARIANCE_OVER_CONTROL
+    expect(tread.variance).toBeGreaterThan(TREAD_VARIANCE_OVER_CONTROL * tread.controlVariance);
   });
 
   test('still tells the three realistic bicycles apart by their tints, on the paint that now has a roughness map — #624, #368', async ({

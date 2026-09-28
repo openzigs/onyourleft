@@ -4009,6 +4009,10 @@ const NO_TREAD: TreadMeasurement = {
  *
  * The square is 3 × 9: narrow ACROSS the tyre, where its own curve turns the
  * light fastest, and long ALONG it, over about one tread period.
+ *
+ * ⚠️ Moving any of these moves the light on the square, and so the absolute
+ * window `game.browser.spec.ts` holds the tread to — read
+ * §`TREAD_VARIANCE_OVER_CONTROL` there before changing one.
  */
 const TREAD_PROBE_EYE_METRES = 0.45;
 const TREAD_PROBE_DISTANCE_METRES = 0.8;

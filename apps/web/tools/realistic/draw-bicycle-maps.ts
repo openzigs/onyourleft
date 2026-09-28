@@ -461,6 +461,15 @@ export function drawBicycleMap(map: RealisticBicycleMap): DrawnMap {
  * The digest of a drawn map's pixels: SHA-256 over `<size>x<size>x3\n` and
  * then the texels, top row first. What `ASSETS.toml`'s `inputsha256` records
  * for a drawn map — the picture the encoder read.
+ *
+ * ⚠️ **These digests rest on V8's `Math.cos`, `Math.exp` and `Math.hypot`**,
+ * which ECMAScript leaves implementation-approximated. They reproduce across
+ * macOS and Linux on today's pinned Node, which is what makes a digest recorded
+ * on one machine checkable on the other. If a Node upgrade moves one of those
+ * functions by an ulp and flips a byte, `provenance.test.ts` fails loudly —
+ * and the fix is to REDRAW the maps and update the four bicycle rows of
+ * `ASSETS.toml` in the same commit, NOT to loosen the test into a tolerance:
+ * a digest that tolerates a changed picture records no picture at all.
  */
 export function pixelDigest(map: DrawnMap): string {
   return createHash('sha256')

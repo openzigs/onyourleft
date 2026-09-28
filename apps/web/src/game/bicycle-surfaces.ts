@@ -28,6 +28,16 @@
  * ALONG direction — the columns — is a tile repeated as often as the part is
  * long, so each map is sampled with `RepeatWrapping` across and clamped down.
  *
+ * ⚠️ **Bleed-free at the full-size level ONLY.** A mip level averages
+ * neighbouring rows, so at the small levels a band's edge rows are mixed with
+ * the band beside it: the tyre's with the bar tape's in the rubber atlas, and
+ * the cassette's with plain metal's roughness in the metal one. At the
+ * distances those levels are chosen at, the mixed rows are probably under a
+ * pixel on screen, and nothing here has measured otherwise. If the owner's
+ * tablet check (AH-624-4) sees a shimmer or a seam along a band edge, the
+ * remedy is a one-texel gap between bands — padding each band by a row that
+ * repeats its own edge — not a change to {@link bandV}.
+ *
  * ⚠️ **Every along figure is a whole number of the map's own period.** A tyre is
  * given a whole number of tread tiles round its circumference and a chainring a
  * whole number of teeth, so neither has a seam where its ring closes.
