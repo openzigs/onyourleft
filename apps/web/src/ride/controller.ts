@@ -502,9 +502,11 @@ function forgottenButStillListed(name: string): string {
  * subscriptions to it would not let go — #706. The device is gone from the
  * list and from the transport either way; the sentence is so the rider is not
  * left with a reading that seems to come from nowhere, and knows what clears it.
+ * "Close the app and open it again" because the Android shell has no reload
+ * control — the wording `camera/usePairingScan.ts` already uses.
  */
 function forgottenButStillListening(name: string): string {
-  return `${name} is forgotten, but this app could not stop listening to it cleanly. If its readings still appear, reload this page.`;
+  return `${name} is forgotten, but this app could not stop listening to it cleanly. If its readings still appear, reload the page, or close the app and open it again.`;
 }
 
 /** Why a game ride's gradient is refused while its trainer is being let go. */
@@ -1799,11 +1801,12 @@ export function createRideController(options: RideControllerOptions): RideContro
           stillListening = true;
         }
         const name = entry.device.name ?? 'That device';
-        if (stillListening) {
-          pairingError = forgottenButStillListening(name);
-        }
+        // The row goes now (#659's order); the sentence waits for `forget`
+        // below — #706's review. Set here, `changed()` rendered "is
+        // forgotten" while the transport had not let go yet.
         sensors.delete(id);
         changed();
+        let refused = false;
         try {
           // #659: FORGET, not disconnect. The Devices screen's control is
           // *Forget*, and a device that was only disconnected stayed in the
@@ -1817,11 +1820,15 @@ export function createRideController(options: RideControllerOptions): RideContro
           // rejection means one thing: the stack refused to give up its
           // permission. The device is gone from this app, and the browser
           // still lists it — which the row saying *Not paired* would hide.
-          const refused = forgottenButStillListed(name);
-          // Both, when both went wrong: each names a different thing to do.
-          pairingError = stillListening
-            ? `${forgottenButStillListening(name)} ${refused}`
-            : refused;
+          refused = true;
+        }
+        // Both, when both went wrong: each names a different thing to do.
+        const said = [
+          stillListening ? forgottenButStillListening(name) : undefined,
+          refused ? forgottenButStillListed(name) : undefined,
+        ].filter((sentence) => sentence !== undefined);
+        if (said.length > 0) {
+          pairingError = said.join(' ');
         }
         changed();
       } finally {

@@ -396,7 +396,7 @@ describe('Forget when an unsubscribe throws — #706', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(mounted.container.textContent).toContain(
-        'HRM 04B1 is forgotten, but this app could not stop listening to it cleanly. If its readings still appear, reload this page.',
+        'HRM 04B1 is forgotten, but this app could not stop listening to it cleanly. If its readings still appear, reload the page, or close the app and open it again.',
       );
       expect(mounted.container.textContent).not.toContain('HRM 04B1: ');
       expect(mounted.container.textContent).not.toContain('the transport would not let go');

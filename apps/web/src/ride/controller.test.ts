@@ -2364,11 +2364,42 @@ describe('an unsubscribe that throws does not leave half a sensor listed — #70
     expect(snapshot.sensors.map((sensor) => sensor.id)).toEqual([TRAINER]);
     expect(forgottenBy(rig.transport, STRAP)).toBe(true);
     expect(snapshot.pairingError).toBe(
-      'HRM 04B1 is forgotten, but this app could not stop listening to it cleanly. If its readings still appear, reload this page.',
+      'HRM 04B1 is forgotten, but this app could not stop listening to it cleanly. If its readings still appear, reload the page, or close the app and open it again.',
     );
     // And the chooser brings it back.
     await rig.controller.pair('heart-rate');
     expect(rig.controller.getSnapshot().sensors.map((sensor) => sensor.id)).toContain(STRAP);
+    rig.controller.dispose();
+  });
+
+  it('says the device is forgotten only once the transport has let go — #706 review', async () => {
+    const rig = benchWith({ devices: 'trainer+strap' });
+    throwingObserver(rig.transport);
+    await rig.controller.pair('trainer');
+    await rig.controller.pair('heart-rate');
+    const forget = rig.transport.forget.bind(rig.transport);
+    let letGo: () => void = () => undefined;
+    vi.spyOn(rig.transport, 'forget').mockImplementation(
+      (id) =>
+        new Promise<void>((resolve, reject) => {
+          letGo = () => {
+            forget(id).then(resolve, reject);
+          };
+        }),
+    );
+
+    const unpairing = rig.controller.unpair(STRAP);
+    await flushMicrotasks(20);
+
+    // The row is gone (#659's order) — and nothing yet claims it is forgotten.
+    expect(rig.controller.getSnapshot().sensors.map((sensor) => sensor.id)).toEqual([TRAINER]);
+    expect(rig.controller.getSnapshot().pairingError).toBeUndefined();
+
+    letGo();
+    await expect(unpairing).resolves.toBeUndefined();
+    expect(rig.controller.getSnapshot().pairingError).toBe(
+      'HRM 04B1 is forgotten, but this app could not stop listening to it cleanly. If its readings still appear, reload the page, or close the app and open it again.',
+    );
     rig.controller.dispose();
   });
 
@@ -2389,7 +2420,7 @@ describe('an unsubscribe that throws does not leave half a sensor listed — #70
     expect(snapshot.sensors).toEqual([]);
     expect(forgottenBy(rig.transport, TRAINER)).toBe(true);
     expect(snapshot.pairingError).toBe(
-      'KICKR 1F2A is forgotten, but this app could not stop listening to it cleanly. If its readings still appear, reload this page.',
+      'KICKR 1F2A is forgotten, but this app could not stop listening to it cleanly. If its readings still appear, reload the page, or close the app and open it again.',
     );
     rig.controller.dispose();
   });
@@ -2426,7 +2457,7 @@ describe('an unsubscribe that throws does not leave half a sensor listed — #70
     expect(fake.bench.device('strap').forgets).toBe(1);
     expect(controller.getSnapshot().sensors).toHaveLength(0);
     expect(controller.getSnapshot().pairingError).toBe(
-      "HRM 04B1 is forgotten, but this app could not stop listening to it cleanly. If its readings still appear, reload this page. HRM 04B1 is forgotten here, but your browser still lists it. To remove it there too, remove it in this site's settings.",
+      "HRM 04B1 is forgotten, but this app could not stop listening to it cleanly. If its readings still appear, reload the page, or close the app and open it again. HRM 04B1 is forgotten here, but your browser still lists it. To remove it there too, remove it in this site's settings.",
     );
     controller.dispose();
   });
