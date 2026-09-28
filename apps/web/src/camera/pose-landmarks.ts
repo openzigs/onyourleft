@@ -87,7 +87,7 @@ export function sidePoseFromModel(
     return { kind: 'unreadable' };
   }
   if (values.length === 0) {
-    return { kind: 'no-rider' };
+    return { kind: 'no-rider', cause: 'said-nobody' };
   }
   if (
     values.length !== MODEL_LANDMARK_COUNT * MODEL_VALUES_PER_LANDMARK ||
@@ -112,7 +112,7 @@ export function sidePoseFromModel(
     }
   }
   if (landmarks.length < MINIMUM_SHARED_LANDMARKS) {
-    return { kind: 'no-rider' };
+    return { kind: 'no-rider', cause: 'too-few-points' };
   }
   return { kind: 'pose', pose: { aspect: width / height, nearSide, landmarks } };
 }

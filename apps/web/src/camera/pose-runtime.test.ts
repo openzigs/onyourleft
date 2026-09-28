@@ -150,7 +150,7 @@ describe('what the worker says back', () => {
   it('turns a reply into an outcome', () => {
     expect(
       poseOutcomeOf({ id: 1, kind: 'landmarks', width: 256, height: 256, values: [] }),
-    ).toEqual({ kind: 'no-rider' });
+    ).toEqual({ kind: 'no-rider', cause: 'said-nobody' });
     expect(poseOutcomeOf({ id: 1, kind: 'unreadable' })).toEqual({ kind: 'unreadable' });
     expect(poseOutcomeOf({ id: 1, kind: 'unavailable' })).toEqual({ kind: 'unavailable' });
   });

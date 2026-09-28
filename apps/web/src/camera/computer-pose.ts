@@ -54,6 +54,7 @@
 import type { AnalysisCall, AnalysisFailure, AnalysisPort, UntrustedText } from './analysis-port';
 import { capturedFrame, FRAME_MEDIA_TYPE } from './frame';
 import { MINIMUM_SHARED_LANDMARKS } from './framing';
+import { implausibility } from './pose-plausibility';
 import {
   SIDE_POSE_LANDMARKS,
   type SidePoseEstimator,
@@ -200,13 +201,21 @@ function isShare(value: unknown): value is number {
 /**
  * What the computer's answer comes to, for a picture of shape `aspect`.
  *
- * - `{"rider":false}` and nothing else is `no-rider`.
+ * - `{"rider":false}` and nothing else is `no-rider`, `said-nobody`.
  * - `{"rider":true,"nearSide":…,"landmarks":{…}}` with exactly those keys,
  *   `nearSide` `left` or `right`, and `landmarks` holding **every one** of
  *   `SIDE_POSE_LANDMARKS` and nothing else, each `null` or `[x, y]` with both
- *   inside the picture, is a pose — or `no-rider` when fewer than
- *   `MINIMUM_SHARED_LANDMARKS` points were given.
+ *   inside the picture, is a pose — or `no-rider`:
+ *   - `too-few-points` when fewer than `MINIMUM_SHARED_LANDMARKS` points were
+ *     given, or any of `pose-plausibility.ts` §`PLAUSIBILITY_LANDMARKS` is
+ *     missing, so the pose cannot be checked;
+ *   - `implausible` when the points could not be a person on a bicycle
+ *     (`pose-plausibility.ts`, #761).
  * - Everything else is `unreadable`, and nothing of it is kept.
+ *
+ * ⚠️ **Until #761 a pose passed on shape alone**, and spike 0016 §5.4 found
+ * the rider's computer placing whole riders in blank and noise pictures; the
+ * plausibility check is what those answers now fail.
  */
 export function sidePoseFromAnswer(answer: UntrustedText, aspect: number): SidePoseOutcome {
   const unreadable: SidePoseOutcome = { kind: 'unreadable' };
@@ -224,7 +233,7 @@ export function sidePoseFromAnswer(answer: UntrustedText, aspect: number): SideP
   }
   const keys = Object.keys(parsed);
   if (parsed.rider === false) {
-    return keys.length === 1 ? { kind: 'no-rider' } : unreadable;
+    return keys.length === 1 ? { kind: 'no-rider', cause: 'said-nobody' } : unreadable;
   }
   // Every key one this file names. The three it needs are each checked below.
   if (parsed.rider !== true || !keys.every((key) => TOP_KEYS_WITH_RIDER.has(key))) {
@@ -257,9 +266,17 @@ export function sidePoseFromAnswer(answer: UntrustedText, aspect: number): SideP
     marks.push({ name: name satisfies SidePoseLandmark, x, y, visibility: 1 });
   }
   if (marks.length < MINIMUM_SHARED_LANDMARKS) {
-    return { kind: 'no-rider' };
+    return { kind: 'no-rider', cause: 'too-few-points' };
   }
-  return { kind: 'pose', pose: { aspect, nearSide, landmarks: marks } };
+  const pose = { aspect, nearSide, landmarks: marks } as const;
+  switch (implausibility(pose)) {
+    case undefined:
+      return { kind: 'pose', pose };
+    case 'missing-landmark':
+      return { kind: 'no-rider', cause: 'too-few-points' };
+    default:
+      return { kind: 'no-rider', cause: 'implausible' };
+  }
 }
 
 /**

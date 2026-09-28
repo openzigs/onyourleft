@@ -37,9 +37,22 @@ function answer(value: unknown): UntrustedText {
   return (typeof value === 'string' ? value : JSON.stringify(value)) as UntrustedText;
 }
 
-const ALL_SEEN = Object.fromEntries(
-  SIDE_POSE_LANDMARKS.map((name, index) => [name, [0.1 + index * 0.05, 0.2 + index * 0.06]]),
-);
+/**
+ * Every landmark placed, on a rider who could be one: spike 0016's drawn
+ * rider, rounded (#761 — a pose now has to pass `pose-plausibility.ts`, and
+ * the straight diagonal line this used to be does not).
+ */
+const ALL_SEEN: Readonly<Record<string, readonly [number, number]>> = {
+  ear: [0.1, 0.2],
+  shoulder: [0.62, 0.29],
+  elbow: [0.67, 0.39],
+  wrist: [0.73, 0.47],
+  hip: [0.41, 0.44],
+  knee: [0.53, 0.57],
+  ankle: [0.5, 0.78],
+  heel: [0.48, 0.79],
+  toe: [0.55, 0.79],
+};
 
 describe('the question — #553', () => {
   it('names every landmark the tablet keeps, in order, and asks for no angle or length', () => {
@@ -52,6 +65,18 @@ describe('the question — #553', () => {
     }
     expect(prompt.match(/":\[x,y\]/g)).toHaveLength(SIDE_POSE_LANDMARKS.length);
     expect(prompt).not.toMatch(/angle|degree|length|°/i);
+  });
+
+  it('does not say a rider is there, and asks whether one is before asking where — #761', () => {
+    const prompt = ANALYSIS_PROMPTS['side-pose'];
+    // #553's question opened "This picture shows a person riding a bicycle".
+    expect(prompt).not.toMatch(/^this picture shows/i);
+    expect(prompt).toMatch(/^First decide whether/);
+    // The answer for nobody comes before the form for somebody, and covers "not sure".
+    const nobody = prompt.indexOf('{"rider":false}');
+    expect(nobody).toBeGreaterThan(0);
+    expect(nobody).toBeLessThan(prompt.indexOf('{"rider":true'));
+    expect(prompt).toMatch(/not sure/);
   });
 });
 
@@ -105,6 +130,7 @@ describe('sidePoseFromAnswer — the answer is untrusted input', () => {
     expect(outcome.pose.nearSide).toBe('right');
     expect(outcome.pose.landmarks.map((mark) => mark.name)).toEqual([...SIDE_POSE_LANDMARKS]);
     expect(outcome.pose.landmarks[0]).toEqual({ name: 'ear', x: 0.1, y: 0.2, visibility: 1 });
+    expect(outcome.pose.landmarks[4]).toEqual({ name: 'hip', x: 0.41, y: 0.44, visibility: 1 });
   });
 
   it('unwraps one fenced block, as a model commonly writes it', () => {
@@ -130,11 +156,30 @@ describe('sidePoseFromAnswer — the answer is untrusted input', () => {
     );
     expect(
       sidePoseFromAnswer(answer({ rider: true, nearSide: 'left', landmarks: few }), 1),
-    ).toEqual({ kind: 'no-rider' });
+    ).toEqual({ kind: 'no-rider', cause: 'too-few-points' });
+  });
+
+  it('calls a pose missing a point the check needs too few points, not a rider — #761', () => {
+    // Eight points, more than enough to be a pose before #761, and no hip.
+    const noHip = { ...ALL_SEEN, hip: null };
+    expect(
+      sidePoseFromAnswer(answer({ rider: true, nearSide: 'left', landmarks: noHip }), 4 / 3),
+    ).toEqual({ kind: 'no-rider', cause: 'too-few-points' });
+  });
+
+  it('calls a whole pose that could not be a rider implausible, and keeps none of it — #761', () => {
+    // Every landmark in range and in shape; the hip above the shoulder.
+    const upsideDown = { ...ALL_SEEN, ear: null, shoulder: [0.62, 0.6], hip: [0.41, 0.3] };
+    expect(
+      sidePoseFromAnswer(answer({ rider: true, nearSide: 'left', landmarks: upsideDown }), 4 / 3),
+    ).toEqual({ kind: 'no-rider', cause: 'implausible' });
   });
 
   it('reads {"rider":false} as nobody, and nothing beside it', () => {
-    expect(sidePoseFromAnswer(answer({ rider: false }), 1)).toEqual({ kind: 'no-rider' });
+    expect(sidePoseFromAnswer(answer({ rider: false }), 1)).toEqual({
+      kind: 'no-rider',
+      cause: 'said-nobody',
+    });
     expect(sidePoseFromAnswer(answer({ rider: false, note: 'x' }), 1)).toEqual({
       kind: 'unreadable',
     });

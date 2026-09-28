@@ -73,7 +73,8 @@ function setUp() {
       new SideAnalysis({
         control,
         estimator: () => ({
-          estimateSidePose: async () => Promise.resolve({ kind: 'no-rider' as const }),
+          estimateSidePose: async () =>
+            Promise.resolve({ kind: 'no-rider' as const, cause: 'said-nobody' as const }),
           closeSidePoseModel: () => undefined,
         }),
       }),
