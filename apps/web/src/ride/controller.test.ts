@@ -82,6 +82,7 @@ import type { RecordingCheckpointStore } from '../recording/recorder';
 import {
   canStartNewRide,
   CONTROL_WAITS_FOR_FORGET,
+  TARGET_WAITS_FOR_FORGET,
   createRideController,
   PAIRING_ROLE_CAPABILITIES,
   RIDE_NOTIFICATION_REFUSED,
@@ -162,10 +163,16 @@ interface Bench {
    * answer (#713). A no-op when nothing is held.
    */
   readonly answerOpenTrainer: () => void;
+  /**
+   * Notify `0xFF` Control Permission Lost to every control client built so
+   * far, as a machine does when another app takes it (#718's second review).
+   */
+  readonly permissionLost: () => void;
 }
 
 interface BenchOptions {
-  readonly devices?: 'trainer' | 'trainer+strap' | 'strap';
+  /** `two-trainers` adds a second FTMS machine, `NEO 2T`, after the KICKR (#718). */
+  readonly devices?: 'trainer' | 'trainer+strap' | 'strap' | 'two-trainers';
   readonly withTrainerControl?: boolean;
   /** Never answer a control point write, so a procedure stays outstanding. */
   readonly silentTrainer?: boolean;
@@ -225,6 +232,12 @@ interface BenchOptions {
    * wiring.
    */
   readonly holdOpenTrainer?: boolean;
+  /**
+   * Build the control client with `reacquireControl` on, as `ride/trainer.ts`
+   * does in production — #718's second review. Off by default here so the
+   * older cases' write lists stay what they assert.
+   */
+  readonly reacquireControl?: boolean;
 }
 
 function benchWith(options: BenchOptions = {}): Bench {
@@ -237,6 +250,7 @@ function benchWith(options: BenchOptions = {}): Bench {
       ...(which === 'trainer+strap' || which === 'strap'
         ? [hrsStrap({ id: 'strap', name: 'HRM 04B1' })]
         : []),
+      ...(which === 'two-trainers' ? [ftmsTrainer({ id: 'neo', name: 'NEO 2T' })] : []),
     ],
   });
 
@@ -332,7 +346,11 @@ function benchWith(options: BenchOptions = {}): Bench {
             return Promise.resolve();
           },
         },
-        { powerRange, reacquireControl: options.permissionLostBeforeStopAnswer === true },
+        {
+          powerRange,
+          reacquireControl:
+            options.permissionLostBeforeStopAnswer === true || options.reacquireControl === true,
+        },
       ),
       canSetPower: true,
       canSimulate: true,
@@ -387,6 +405,11 @@ function benchWith(options: BenchOptions = {}): Bench {
       const answer = heldOpenTrainer;
       heldOpenTrainer = undefined;
       answer?.();
+    },
+    permissionLost: () => {
+      for (const listener of [...statusListeners]) {
+        listener(viewOf([0xff]));
+      }
     },
   };
 }
@@ -3673,6 +3696,186 @@ describe('no trainer control while a timed-out forget is still running — #718'
     expect(rig.controller.getSnapshot().trainer.refusal).toBeUndefined();
     expect(asked(rig)).toBe(1);
     rig.controller.dispose();
+  });
+
+  // #718's second review, finding B: the role half of the check is not
+  // enough on its own. A trainer paired as a power meter is exactly the device
+  // the late call will disconnect once it is paired again as the trainer.
+  it('holds control back after a late forget of a trainer that was paired as a power meter', async () => {
+    const rig = benchWith({ machine: { retainsTargetsThroughStop: true } });
+    await rig.controller.pair('power-meter');
+    expect(rig.controller.getSnapshot().sensors.map((sensor) => sensor.role)).toEqual([
+      'power-meter',
+    ]);
+    const late = timesOutOnce(rig.transport, 'permission');
+    await rig.controller.unpair(TRAINER);
+
+    await rig.controller.pair('trainer');
+    expect(rig.controller.getSnapshot().trainer.paired).toBe(true);
+    await rig.controller.requestTrainerControl();
+    expect(rig.controller.getSnapshot().trainer.refusal).toBe(CONTROL_WAITS_FOR_FORGET);
+    expect(asked(rig)).toBe(0);
+
+    late.land();
+    await flushMicrotasks(20);
+    await rig.controller.requestTrainerControl();
+    expect(asked(rig)).toBe(1);
+    rig.controller.dispose();
+  });
+
+  // Finding C: a call that never lands. Nothing unblocks control on a timer,
+  // and the sentence stays true however long it lasts.
+  it('keeps holding control back while the call never lands, and never promises a minute', async () => {
+    const rig = benchWith({ machine: { retainsTargetsThroughStop: true } });
+    await rig.controller.pair('trainer');
+    timesOutOnce(rig.transport, 'link'); // never landed
+    await rig.controller.unpair(TRAINER);
+    await rig.controller.pair('trainer');
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await ride(rig, 120);
+      await rig.controller.requestTrainerControl();
+      expect(rig.controller.getSnapshot().trainer.refusal).toBe(CONTROL_WAITS_FOR_FORGET);
+    }
+    expect(asked(rig)).toBe(0);
+    expect(rig.trainerControl()?.hasControl()).toBe(false);
+    expect(CONTROL_WAITS_FOR_FORGET).not.toMatch(/minute/u);
+    expect(CONTROL_WAITS_FOR_FORGET).toMatch(
+      /reload the page, or close the app and open it again/u,
+    );
+    // Finding D: the wait is global, so it cannot name THIS trainer.
+    expect(CONTROL_WAITS_FOR_FORGET).not.toMatch(/this trainer/u);
+    rig.controller.dispose();
+  });
+
+  // Finding A: the client asks for control by itself on a 0xFF, whether or
+  // not it ever held it, so a trainer re-paired in the window can come to hold
+  // control without the rider's Request Control. What must not follow is a
+  // setpoint — and a release must still go out.
+  describe('control the client took back by itself — #718’s second review', () => {
+    const TARGET_POWER = 0x05;
+    const SIMULATION = 0x11;
+    const STOP = 0x08;
+    const opcodes = (rig: Bench): number[] => rig.written.map((octets) => octets[0] ?? -1);
+
+    async function reacquiredInTheWindow() {
+      const rig = benchWith({
+        machine: { retainsTargetsThroughStop: true },
+        reacquireControl: true,
+      });
+      await rig.controller.pair('trainer');
+      const late = timesOutOnce(rig.transport, 'permission');
+      await rig.controller.unpair(TRAINER);
+      await rig.controller.pair('trainer');
+      rig.written.length = 0;
+
+      // Another app takes the machine and lets it go: the client asks again.
+      rig.permissionLost();
+      await flushMicrotasks(20);
+      expect(opcodes(rig)).toEqual([REQUEST_CONTROL]);
+      expect(rig.trainerControl()?.hasControl()).toBe(true);
+      rig.written.length = 0;
+      return { rig, late };
+    }
+
+    it('sends no ERG target to it', async () => {
+      const { rig } = await reacquiredInTheWindow();
+      await rig.controller.setTargetPower(watts(250));
+      await flushMicrotasks(20);
+      expect(opcodes(rig)).not.toContain(TARGET_POWER);
+      expect(rig.targetOnTheTrainer()).toBeUndefined();
+      expect(rig.controller.getSnapshot().trainer.refusal).toBe(TARGET_WAITS_FOR_FORGET);
+      rig.controller.dispose();
+    });
+
+    it('starts no workout on it', async () => {
+      const { rig } = await reacquiredInTheWindow();
+      const workout: WorkoutRecord = {
+        id: workoutId('w718'),
+        createdBy: ATHLETE_A,
+        name: 'Late forget',
+        workout: {
+          name: 'Late forget',
+          blocks: [{ kind: 'steady', seconds: seconds(6), target: thresholdShare(0.8) }],
+        },
+        createdAt: unixSeconds(1),
+        updatedAt: unixSeconds(1),
+      };
+      expect(rig.controller.startWorkout(workout, watts(250))).toBe(false);
+      expect(rig.controller.getSnapshot().workout).toBeUndefined();
+      await ride(rig, 3);
+      expect(opcodes(rig)).not.toContain(TARGET_POWER);
+      expect(rig.controller.getSnapshot().trainer.refusal).toBe(TARGET_WAITS_FOR_FORGET);
+      rig.controller.dispose();
+    });
+
+    it('sends no gradient to it, but lets it go when asked', async () => {
+      const { rig } = await reacquiredInTheWindow();
+      const road = rig.controller.simulationControl();
+      if (road === undefined) {
+        throw new Error('no simulation control');
+      }
+      await expect(road.setSimulationParameters({ grade: gradePercent(6) })).rejects.toThrow(
+        /still being forgotten/u,
+      );
+      await flushMicrotasks(20);
+      expect(opcodes(rig)).not.toContain(SIMULATION);
+
+      // ⚠️ The gate never holds back a release: a refused Stop is resistance
+      // left on.
+      await road.letGo();
+      expect(opcodes(rig)).toEqual([STOP]);
+      rig.controller.dispose();
+    });
+
+    it('drives it once the call lands and the rider asks', async () => {
+      const { rig, late } = await reacquiredInTheWindow();
+      await rig.controller.setTargetPower(watts(250));
+      expect(rig.controller.getSnapshot().trainer.refusal).toBe(TARGET_WAITS_FOR_FORGET);
+      late.land();
+      await flushMicrotasks(20);
+      // The reason is gone, so the sentence goes with it.
+      expect(rig.controller.getSnapshot().trainer.refusal).toBeUndefined();
+      await rig.controller.requestTrainerControl();
+      await rig.controller.setTargetPower(watts(250));
+      await flushMicrotasks(20);
+      expect(opcodes(rig)).toEqual([REQUEST_CONTROL, TARGET_POWER]);
+      expect(rig.controller.getSnapshot().trainer.refusal).toBeUndefined();
+      rig.controller.dispose();
+    });
+
+    it('lets a trainer the rider asked for BEFORE the late forget keep writing, and releases it', async () => {
+      // A different device: the one being forgotten was let go and detached
+      // before its forget began, and one device cannot be paired twice.
+      const rig = benchWith({
+        devices: 'two-trainers',
+        machine: { retainsTargetsThroughStop: true },
+        reacquireControl: true,
+      });
+      await rig.controller.pair('trainer');
+      await rig.controller.requestTrainerControl();
+      // A second FTMS machine, paired as a power meter and forgotten late —
+      // which holds every trainer's Request Control back.
+      const discover = rig.transport.discover.bind(rig.transport);
+      vi.spyOn(rig.transport, 'discover').mockImplementationOnce((request) =>
+        discover({ ...request, namePrefix: 'NEO' }),
+      );
+      await rig.controller.pair('power-meter');
+      const neo = deviceId('neo');
+      expect(rig.controller.getSnapshot().sensors.map((sensor) => sensor.id)).toContain(neo);
+      timesOutOnce(rig.transport, 'permission');
+      await rig.controller.unpair(neo);
+      await rig.controller.requestTrainerControl();
+      expect(rig.controller.getSnapshot().trainer.refusal).toBe(CONTROL_WAITS_FOR_FORGET);
+      rig.written.length = 0;
+
+      await rig.controller.setTargetPower(watts(200));
+      await flushMicrotasks(20);
+      expect(opcodes(rig)).toEqual([TARGET_POWER]);
+      await rig.controller.clearTargetPower();
+      expect(opcodes(rig)).toEqual([TARGET_POWER, STOP]);
+      rig.controller.dispose();
+    });
   });
 });
 

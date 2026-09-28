@@ -530,6 +530,22 @@ function forgottenButMayStillBeConnected(name: string): string {
 }
 
 /**
+ * The half of the two sentences below that says why, and what to do — #718's
+ * reviews. ⚠️ **"A trainer's connection", not "this trainer's"**: the wait is
+ * global (@see CONTROL_WAITS_FOR_FORGET), so when the late forget belongs to a
+ * different trainer the sentence is over-cautious, and it has to stay true
+ * then. ⚠️ **No "in a minute"**: if the stack's call never lands — a Web
+ * Bluetooth `forget()` that never answers, a plugin whose teardown or
+ * disconnect hangs — the wait lasts the session, and a promised minute would
+ * be false after the first one. Reloading the page, or closing the app and
+ * opening it again, starts a session with no forget in progress; that is the
+ * wording `forgottenButStillListening` already uses, and it is true on both
+ * transports.
+ */
+const STILL_FORGETTING =
+  "Bluetooth is still finishing forgetting a trainer, and could drop a trainer's connection when it does. Try again in a moment. If this does not clear, reload the page, or close the app and open it again.";
+
+/**
  * What a rider is told when they ask for trainer control while a forget that
  * ran out of time is still running on a trainer — #718's review. When that
  * call lands it drops the link of whatever pairing of the device is current
@@ -540,10 +556,28 @@ function forgottenButMayStillBeConnected(name: string): string {
  * "A trainer", not a name: on Web Bluetooth a device chosen again after its
  * grant is withdrawn may come back under a new id, so nothing here can say
  * whether the trainer being forgotten is this one. Cleared by itself when the
- * call lands, either way.
+ * call lands, either way — and never on a timer: a call that never lands holds
+ * control back for the rest of the session, which is the safe way to fail
+ * (#718's second review), and the sentence says what ends it.
  */
-export const CONTROL_WAITS_FOR_FORGET =
-  "Control was not asked for: Bluetooth is still finishing forgetting a trainer, and could drop this trainer's connection when it does. Try again in a minute.";
+export const CONTROL_WAITS_FOR_FORGET = `Control was not asked for: ${STILL_FORGETTING}`;
+
+/**
+ * What a rider is told when they set an ERG target, or start a workout, on a
+ * trainer that holds control this program never asked for while a trainer's
+ * forget is still running late — #718's second review. The machine can come
+ * to hold control without {@link RideController.requestTrainerControl}: on a
+ * `0xFF` Control Permission Lost, `createTrainerControl` sends its own Request
+ * Control (`reacquireControl`, on by default), whether or not it ever held
+ * control. @see askedForByTheRider
+ */
+export const TARGET_WAITS_FOR_FORGET = `Nothing was sent to the trainer: ${STILL_FORGETTING}`;
+
+/**
+ * Why a game ride's gradient is refused in the same state — matched by
+ * `game/gradient.ts` §`faultText`, which words it for the road.
+ */
+const GRADIENT_WAITS_FOR_FORGET = 'a trainer is still being forgotten';
 
 /**
  * What a rider is told when *Forget* removed a device but one of this app's
@@ -954,6 +988,47 @@ export function createRideController(options: RideControllerOptions): RideContro
    */
   const lateTrainerForgets = new Set<Promise<void>>();
   /**
+   * The control clients the rider asked for control through
+   * {@link RideController.requestTrainerControl}, and got it — #718's second
+   * review.
+   *
+   * ⚠️ **Asking is not the only way a client comes to hold control.**
+   * `createTrainerControl` sends its own Request Control on a `0xFF` Control
+   * Permission Lost (`reacquireControl`, on by default and not overridden by
+   * `ride/trainer.ts`), and it does so whether or not it ever held control. So
+   * a trainer paired again while a late forget runs — whose Request Control
+   * {@link lateTrainerForgets} refuses — can still come to hold control if
+   * another app takes the machine and lets it go. The Request Control itself
+   * writes no setpoint; what must not follow it is a target or a gradient.
+   * So every write path that TAKES the machine somewhere refuses, while a late
+   * forget runs, a client that is not in here: {@link RideController.setTargetPower},
+   * {@link RideController.startWorkout} and the gradient
+   * {@link RideController.simulationControl} hands out. A release never
+   * checks it — a refused Stop is resistance left on — and neither does an
+   * ease, which lowers the target and can only follow a target that was
+   * allowed.
+   *
+   * ⚠️ **A client in here goes on writing while a late forget runs, and that
+   * is deliberate.** It was asked for before the forget began, so it is a
+   * different device from the one being forgotten: a device already paired is
+   * refused a second pairing ("already paired"), and the device a late forget
+   * belongs to was let go and detached before its forget started (Stop →
+   * detach → forget). The late call drops that device's link, not this one's.
+   * Releasing it pre-emptively would end the rider's workout or game ride for
+   * a hazard it does not face — and on the trainer measured a Stop keeps its
+   * target anyway (CLAUDE.md §4h), so it would buy nothing where it is needed.
+   *
+   * A WeakSet because a client is dropped with its pairing; one re-paired is a
+   * new client, which has to be asked for again.
+   */
+  const askedForByTheRider = new WeakSet<TrainerControl>();
+  /**
+   * Whether a write that takes the machine somewhere must wait — see
+   * {@link askedForByTheRider}.
+   */
+  const mustWaitForForget = (client: TrainerControl): boolean =>
+    lateTrainerForgets.size > 0 && !askedForByTheRider.has(client);
+  /**
    * Note a forget's rejection — #718's review. Holds control back (@see
    * lateTrainerForgets) when the forget ran out of time on something that is,
    * or may be, a trainer: paired as one, or offering the control point.
@@ -972,7 +1047,10 @@ export function createRideController(options: RideControllerOptions): RideContro
     lateTrainerForgets.add(call);
     void call.then(() => {
       lateTrainerForgets.delete(call);
-      if (lateTrainerForgets.size === 0 && refusal === CONTROL_WAITS_FOR_FORGET) {
+      if (
+        lateTrainerForgets.size === 0 &&
+        (refusal === CONTROL_WAITS_FOR_FORGET || refusal === TARGET_WAITS_FOR_FORGET)
+      ) {
         // The reason is gone, so the sentence goes with it; the rider asks
         // again. Nothing is asked for them — control is a thing the rider does.
         refusal = undefined;
@@ -2388,6 +2466,13 @@ export function createRideController(options: RideControllerOptions): RideContro
       if (connection === undefined || client === undefined || !client.hasControl()) {
         return false;
       }
+      // #718's second review: control this client took back by itself while
+      // a trainer's forget runs late is not control the rider asked for.
+      if (mustWaitForForget(client)) {
+        refusal = TARGET_WAITS_FOR_FORGET;
+        changed();
+        return false;
+      }
       endWorkoutSession('replace');
       // #567: the workout owns the target from here. A hand-set target's rescue
       // left running would be a second writer on one control point.
@@ -2430,10 +2515,11 @@ export function createRideController(options: RideControllerOptions): RideContro
       }
       // ⚠️ #718's review: nothing is asked of the machine while a trainer's
       // timed-out forget is still running — see {@link lateTrainerForgets}.
-      // Here because this is the ONE place control is asked for: every
-      // setpoint (a workout, a hand-set target, the game's gradient) needs a
-      // machine that granted it, so a trainer never asked writes nothing that
-      // takes. Pairing is not refused — #716 — only control.
+      // Pairing is not refused — #716 — only control. ⚠️ This is the one
+      // place the RIDER asks for control, and not the only way a client comes
+      // to hold it: `createTrainerControl` asks again by itself on a `0xFF`
+      // (#718's second review). So the setpoint paths check too — see
+      // {@link askedForByTheRider}.
       if (lateTrainerForgets.size > 0) {
         refusal = CONTROL_WAITS_FOR_FORGET;
         changed();
@@ -2443,6 +2529,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       changed();
       try {
         await client.requestControl();
+        askedForByTheRider.add(client);
         controlLost = undefined;
         // Control is the rider's again; a notice about the last release would
         // now be describing a machine this client is driving.
@@ -2468,6 +2555,13 @@ export function createRideController(options: RideControllerOptions): RideContro
       }
       const connection = trainerEntry()?.trainer;
       if (connection === undefined) {
+        return;
+      }
+      // #718's second review — @see askedForByTheRider. Here, where the write
+      // is, like the workout's refusal above.
+      if (mustWaitForForget(client)) {
+        refusal = TARGET_WAITS_FOR_FORGET;
+        changed();
         return;
       }
       requested = target;
@@ -2518,6 +2612,12 @@ export function createRideController(options: RideControllerOptions): RideContro
           // forgotten, and a gradient after that Stop would take it back.
           if (leaving.has(client)) {
             return Promise.reject(new Error(TRAINER_BEING_FORGOTTEN));
+          }
+          // #718's second review — @see askedForByTheRider. Checked per write
+          // rather than when the object is handed out, because the game holds
+          // it for the whole ride and a late forget can begin during one.
+          if (mustWaitForForget(client)) {
+            return Promise.reject(new Error(GRADIENT_WAITS_FOR_FORGET));
           }
           // #567: a gradient takes the machine out of ERG, so a hand-set
           // target's rescue writing a 0x05 under a game ride would put it back.

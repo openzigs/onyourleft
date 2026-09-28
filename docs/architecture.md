@@ -640,7 +640,10 @@ bound: past it the device is forgotten here and the rider is told what went unco
 browser that it may still be listed, in the Android shell that it may still be connected
 (`ForgetUnconfirmedError.holding`, #718's review). And while that late call is still running no
 trainer is asked for control: when it lands it drops the link of whatever pairing of the device is
-current, and a trainer holding a target with no link cannot be sent a Stop.
+current, and a trainer holding a target with no link cannot be sent a Stop. Asking is not the only
+way a client comes to hold control — the FTMS client asks again by itself on a `0xFF` — so while
+that call runs a trainer the rider did not ask for is sent no ERG target, no workout and no
+gradient either (`ride/controller.ts` §`askedForByTheRider`); a release is never held back.
 Since #713 a Forget pressed while that device's pairing is still wiring ends the pairing quietly,
 and whatever the pairing acquired after the press — a subscription, a trainer's control client — is
 let go. `apps/web/browser/devices.browser.spec.ts` walks Home → Devices → Pair

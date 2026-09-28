@@ -326,14 +326,24 @@ describe('a gradient session drives a trainer from a route', () => {
     // that target" while looking at a hill would go looking for a workout they
     // are not riding.
     const said = new Set<string>();
-    for (const message of ['control-not-permitted', 'control-not-held', 'timed out', 'nonsense']) {
+    for (const message of [
+      'control-not-permitted',
+      'control-not-held',
+      'timed out',
+      'nonsense',
+      // `ride/controller.ts` §`askedForByTheRider` — the app held it back (#718).
+      'a trainer is still being forgotten',
+    ]) {
       const trainer = recordingTrainer({ reject: new Error(message) });
       const session = createGradientSession({ profile: hill(), control: trainer.control });
       session.sample(seconds(0), 500);
       await drain();
       said.add(session.state().fault ?? '');
     }
-    expect(said.size).toBe(4);
+    expect(said.size).toBe(5);
+    expect(said).toContain(
+      'The hills are not being sent yet: Bluetooth is still finishing forgetting a trainer. The next gradient will be sent again.',
+    );
     for (const text of said) {
       expect(text).toMatch(/road|hill|gradient/);
     }
