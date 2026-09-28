@@ -42,6 +42,8 @@ import { createHash } from 'node:crypto';
 import {
   REALISTIC_BICYCLE_MAPS,
   REALISTIC_BICYCLE_MAP_NAMES,
+  REALISTIC_RIDER,
+  REALISTIC_RIDER_MAPS,
   type RealisticBicycleMap,
 } from '../../src/game/realistic-assets';
 
@@ -76,6 +78,22 @@ export interface FixedFile {
   readonly mustContain?: string | undefined;
 }
 
+/**
+ * One file taken out of an archive — #623: MakeHuman's CC0 system assets pack
+ * is published as ONE zip, and the rider reads six of its files.
+ */
+export interface ArchiveMember {
+  /** The path inside the archive, and under `build/raw/<id>/`. */
+  readonly path: string;
+  /**
+   * The asset it belongs to, as the pack's own page lists it: its type column
+   * and its name. {@link systemAssetVerdict} reads that asset's OWN row.
+   */
+  readonly asset: { readonly type: string; readonly name: string };
+  /** A phrase the file itself must contain, where it is text. */
+  readonly mustContain?: string | undefined;
+}
+
 /** One upstream asset, before its files are resolved. */
 export interface AssetSource {
   /** A stable name: the directory under `build/raw/` and the key in the lock. */
@@ -93,7 +111,13 @@ export interface AssetSource {
   readonly author?: string;
   readonly origin:
     | { readonly from: 'polyhaven'; readonly select: PolyHavenSelection }
-    | { readonly from: 'urls'; readonly files: readonly FixedFile[] };
+    | { readonly from: 'urls'; readonly files: readonly FixedFile[] }
+    | {
+        /** An archive downloaded whole, pinned by its digest, and only `members` taken out. */
+        readonly from: 'archive';
+        readonly url: string;
+        readonly members: readonly ArchiveMember[];
+      };
 }
 
 /**
@@ -102,6 +126,95 @@ export interface AssetSource {
  */
 export const MAKEHUMAN_COMMIT = 'a8bc2d54ff0ac92e78ff71431b1023eda42bf482';
 const MAKEHUMAN_RAW = `https://raw.githubusercontent.com/makehumancommunity/makehuman/${MAKEHUMAN_COMMIT}`;
+
+/**
+ * The MakeHuman targets the rider's build is made from — #623. Their weights
+ * are `blender/process_rider.py` §`macro_targets`, MakeHuman's own macro
+ * arithmetic over its own sliders; this is which files that arithmetic names at
+ * the build `process_rider.py` §`BUILD` states, and the run fails if it names
+ * one this list does not fetch.
+ */
+export const RIDER_BUILD_TARGETS: readonly string[] = [
+  ...['female', 'male'].flatMap((sex) => [
+    ...['averagemuscle', 'maxmuscle'].flatMap((muscle) =>
+      ['averageweight', 'minweight'].map(
+        (weight) => `universal-${sex}-young-${muscle}-${weight}.target`,
+      ),
+    ),
+    ...['african', 'asian', 'caucasian'].map((ethnic) => `${ethnic}-${sex}-young.target`),
+  ]),
+];
+
+/**
+ * MakeHuman's CC0 system assets pack — #623, and ADR 0026's 2026-09-28
+ * amendment: the owner's ruling that MakeHuman's own asset packs come from the
+ * same author under the same CC0 grant as the pinned repository, and so fall
+ * under D-4's existing MakeHuman row.
+ *
+ * - **Its page** lists every asset the pack holds with its author and licence;
+ *   {@link systemAssetVerdict} reads the row of EACH asset taken, and refuses
+ *   one whose author is not `makehuman_system` or whose licence is not CC0.
+ *   ⚠️ The site's other skin and eyebrow packs ("Skins 01/02", "Eyebrows 01")
+ *   are by community authors — Mindfront, MargaretToigo and others, read
+ *   2026-09-28 — and are NOT taken: the ruling's premise, the same author, is
+ *   false of them.
+ * - **Its archive** is the one file downloaded, pinned by its SHA-256 in the
+ *   lock with each member taken out of it.
+ * - **Each member that is text** states the same CC0 release, in the same
+ *   words and with the same copyright holders, as the repository's `base.obj`.
+ */
+export const SYSTEM_ASSETS_PAGE =
+  'https://static.makehumancommunity.org/assets/assetpacks/makehuman_system_assets.html';
+export const SYSTEM_ASSETS_ARCHIVE =
+  'https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip';
+/** The sentence every MakeHuman asset file's header carries — the repository's `base.obj` too. */
+const MAKEHUMAN_CC0_HEADER = 'This asset was explicitly released as CC0 in september 2020';
+
+/**
+ * Whether one asset on a MakeHuman asset pack's page is CC0 and MakeHuman's
+ * own — #623. The page is a table, one `<tr>` an asset: its type, a
+ * thumbnail, its name, its author, its source and its licence. Only a row
+ * whose type and name are exactly the asset's is read, so another asset's
+ * CC0 cannot vouch for this one.
+ */
+export function systemAssetVerdict(
+  pageHtml: string,
+  asset: { readonly type: string; readonly name: string },
+): LicenceVerdict {
+  const text = (cell: string): string =>
+    cell
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  const rows = pageHtml.split(/<tr\b/i).slice(1);
+  for (const row of rows) {
+    const cells = [...row.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gi)].map((match) =>
+      text(match[1] ?? ''),
+    );
+    if (cells.length < 6 || cells[0] !== asset.type || cells[2] !== asset.name) continue;
+    if (cells[3] !== 'makehuman_system') {
+      return {
+        kept: false,
+        reason: `${asset.type} ${asset.name}: its author is ${cells[3] ?? 'nobody'}, not MakeHuman's own makehuman_system`,
+      };
+    }
+    if (cells[5] !== 'CC0') {
+      return {
+        kept: false,
+        reason: `${asset.type} ${asset.name}: its own entry reads ${cells[5] ?? 'nothing'}, not CC0`,
+      };
+    }
+    return {
+      kept: true,
+      licence: 'CC0-1.0',
+      evidence: `${asset.type} ${asset.name} makehuman_system CC0`,
+    };
+  }
+  return {
+    kept: false,
+    reason: `${asset.type} ${asset.name}: the pack's page lists no such asset`,
+  };
+}
 
 /** What Poly Haven's page for an asset says in its structured data, verbatim. */
 const POLY_HAVEN_PHRASE = 'CC0 1.0 Universal - public domain dedication, no attribution required';
@@ -238,6 +351,53 @@ export const SOURCES: readonly AssetSource[] = [
           url: `${MAKEHUMAN_RAW}/makehuman/data/rigs/default_weights.mhw`,
         },
         { path: 'LICENSE.ASSETS.md', url: `${MAKEHUMAN_RAW}/LICENSE.ASSETS.md` },
+        // #623: the build's targets, from the same commit.
+        ...RIDER_BUILD_TARGETS.map((name) => ({
+          path: `targets/${name}`,
+          url: `${MAKEHUMAN_RAW}/makehuman/data/targets/macrodetails/${name}`,
+          mustContain: MAKEHUMAN_CC0_HEADER,
+        })),
+      ],
+    },
+  },
+  {
+    id: 'makehuman-system-assets',
+    licencePage: SYSTEM_ASSETS_PAGE,
+    licencePhrase: 'Makehuman system assets',
+    licence: 'CC0-1.0',
+    author: 'The MakeHuman team (makehuman_system)',
+    origin: {
+      from: 'archive',
+      url: SYSTEM_ASSETS_ARCHIVE,
+      members: [
+        {
+          path: 'skins/young_caucasian_male/young_lightskinned_male_diffuse.png',
+          asset: { type: 'skins', name: 'young_caucasian_male' },
+        },
+        {
+          path: 'skins/young_caucasian_male/young_caucasian_male.mhmat',
+          asset: { type: 'skins', name: 'young_caucasian_male' },
+          mustContain: MAKEHUMAN_CC0_HEADER,
+        },
+        {
+          path: 'eyebrows/eyebrow001/eyebrow001.png',
+          asset: { type: 'eyebrows', name: 'eyebrow001' },
+        },
+        {
+          path: 'eyebrows/eyebrow001/eyebrow001.obj',
+          asset: { type: 'eyebrows', name: 'eyebrow001' },
+          mustContain: MAKEHUMAN_CC0_HEADER,
+        },
+        {
+          path: 'eyebrows/eyebrow001/eyebrow001.mhclo',
+          asset: { type: 'eyebrows', name: 'eyebrow001' },
+          mustContain: MAKEHUMAN_CC0_HEADER,
+        },
+        {
+          path: 'eyebrows/eyebrow001/eyebrow001.mhmat',
+          asset: { type: 'eyebrows', name: 'eyebrow001' },
+          mustContain: MAKEHUMAN_CC0_HEADER,
+        },
       ],
     },
   },
@@ -448,6 +608,17 @@ export type OutputRecipe =
       readonly images?: 'ktx2';
       /** The other files the same run writes, beside {@link OutputSpec.file}. */
       readonly alsoWrites?: readonly AlsoWritten[];
+      /**
+       * Other sources the run reads, beside {@link OutputSpec.from} — #623:
+       * their `build/raw/` directories follow the recipe's own arguments, and
+       * their files are in every output's input digest.
+       */
+      readonly alsoReads?: readonly string[];
+      /**
+       * #623: the app's mark, drawn by `tools/icons/generate-icons.ts`
+       * §`drawMark` at this many pixels and handed to the run as a PNG, last.
+       */
+      readonly mark?: number;
     };
 
 /**
@@ -459,6 +630,8 @@ export interface AlsoWritten {
   readonly file: string;
   readonly made: string;
   readonly ktx2: Ktx2Step;
+  /** What it is, in words, where it is not a tree's impostor strip — #623. */
+  readonly modified?: string;
 }
 
 /** One file the product ships. */
@@ -495,6 +668,20 @@ export const DRAWN_TOOL = `Node.js 24 (.nvmrc), then ${PINNED_KTX}`;
 
 /** The date #624's maps were drawn and dedicated — a drawn row's `read`. */
 export const DRAWN_ON = '2026-09-27';
+
+/** The rider's script, and the one file its kit's numbers are in — #623. */
+export const RIDER_SCRIPT = 'blender/process_rider.py';
+export const RIDER_KIT = `${PIPELINE_DIRECTORY}blender/rider_kit.py`;
+/** The side of each of the rider's three maps, in texels — #623. */
+export const RIDER_TEXTURE_PIXELS = 1024;
+/** The side of the mark's picture `process_rider.py` samples. */
+export const RIDER_MARK_PIXELS = 256;
+/** The PNGs the rider's run writes, which the encoder turns into {@link REALISTIC_RIDER_MAPS}. */
+export const RIDER_MADE = {
+  colour: 'rider_kit_colour.png',
+  normal: 'rider_nor_gl.png',
+  orm: 'rider_orm.png',
+} as const;
 
 /** Where {@link structureMap}'s script lives — #475. */
 export const TEXTURE_SCRIPT = 'blender/process_texture.py';
@@ -560,11 +747,43 @@ export const OUTPUTS: readonly OutputSpec[] = [
     ];
   }),
   {
-    file: 'rider.glb',
+    file: REALISTIC_RIDER,
     from: 'makehuman',
-    recipe: { how: 'blender', script: 'blender/process_rider.py', args: ['9000'] },
+    recipe: {
+      how: 'blender',
+      script: RIDER_SCRIPT,
+      args: [
+        '9000',
+        String(RIDER_TEXTURE_PIXELS),
+        RIDER_MADE.colour,
+        RIDER_MADE.normal,
+        RIDER_MADE.orm,
+      ],
+      alsoReads: ['makehuman-system-assets'],
+      mark: RIDER_MARK_PIXELS,
+      alsoWrites: [
+        {
+          file: REALISTIC_RIDER_MAPS.colour,
+          made: RIDER_MADE.colour,
+          ktx2: { encoding: 'colour', origin: 'top-left' },
+          modified: `the On Your Left house kit's colour map, drawn by ${PIPELINE_DIRECTORY}${RIDER_SCRIPT} from the numbers in ${RIDER_KIT} onto the rider's own texture coordinates — jersey panels (black where the kit's main colour is, which the renderer adds from the occlusion map's blue channel), seams, a zip, cuffs, bib shorts, grippers, socks and shoes, and this app's own two-chevron mark from apps/web/tools/icons/generate-icons.ts, with no text and no other mark — and the skin: MakeHuman's CC0 system skin young_caucasian_male's detail divided by its own mean, on the rider's existing tone, flat round the eyes, with MakeHuman's CC0 eyebrow001 laid on through its own fit. The kit is this repository's own design, derived from no other product (ADR 0009) and dedicated CC0-1.0 as the app icons are (ADR 0024 D-5)`,
+        },
+        {
+          file: REALISTIC_RIDER_MAPS.normal,
+          made: RIDER_MADE.normal,
+          ktx2: { encoding: 'normal', origin: 'top-left' },
+          modified: `a tangent-space normal map baked by Cycles on one thread from the full-resolution body onto the decimated one's texture coordinates, with the kit's relief (seams, zip, bib straps, pockets, cuffs, chamois, shoe straps) and procedural folds at the hip, knee, elbow and shoulder added from the numbers in ${RIDER_KIT}; no cloth simulation`,
+        },
+        {
+          file: REALISTIC_RIDER_MAPS.orm,
+          made: RIDER_MADE.orm,
+          ktx2: { encoding: 'data', origin: 'top-left' },
+          modified: `ambient occlusion baked by Cycles on one thread from the full-resolution body with the helmet in the scene (red), each garment's and the skin's roughness (green) and how much of the renderer's main kit colour each texel is, premultiplied (blue), drawn by ${PIPELINE_DIRECTORY}${RIDER_SCRIPT} from the numbers in ${RIDER_KIT}`,
+        },
+      ],
+    },
     modified:
-      'the body mesh only, its skeleton reduced from 163 bones to 24 with each dropped bone’s weights merged into its nearest kept ancestor, coloured as cycling kit by dominant bone, collapse-decimated to about 9 000 triangles, in its rest pose',
+      'the body mesh only, in an athletic, lean build — MakeHuman’s own macro targets at its default gender, age and ethnic mix with muscle at 85 % and weight at 25 % — its skeleton reduced from 163 bones to 24 with each dropped bone’s weights merged into its nearest kept ancestor, smooth-shaded, collapse-decimated to what a modelled helmet and glasses leave of 9 000 triangles, with texture coordinates and tangents and no colour of its own; and the helmet (a plain shell with vents and straps) and glasses built round the head’s own vertices, one mesh coloured per vertex; in its rest pose',
   },
   // #624: the bicycle's four maps, drawn here. ⚠️ `top-left`: they are drawn
   // in the orientation the bicycle's texture coordinates read them — row 0 is
@@ -724,7 +943,9 @@ export function licenceVerdict(source: AssetSource, pageText: string): LicenceVe
 }
 
 function fixedUrls(source: AssetSource): readonly string[] {
-  return source.origin.from === 'urls' ? source.origin.files.map((file) => file.url) : [];
+  if (source.origin.from === 'urls') return source.origin.files.map((file) => file.url);
+  if (source.origin.from === 'archive') return [source.origin.url];
+  return [];
 }
 
 /** A file resolved to a URL, with whatever integrity check its origin offers. */
@@ -850,6 +1071,24 @@ export function inputDigest(files: readonly Pick<LockedFile, 'path' | 'sha256'>[
 }
 
 /**
+ * {@link inputDigest} over several sources' files at once — #623, for a run
+ * that reads more than one: each path is prefixed with its source's id, so a
+ * file of one source cannot stand in for the same path in another.
+ */
+export function sourcesDigest(
+  sources: readonly {
+    readonly id: string;
+    readonly files: readonly Pick<LockedFile, 'path' | 'sha256'>[];
+  }[],
+): string {
+  return inputDigest(
+    sources.flatMap((source) =>
+      source.files.map((file) => ({ path: `${source.id}/${file.path}`, sha256: file.sha256 })),
+    ),
+  );
+}
+
+/**
  * Poly Haven's `/info/{id}` `authors` field — name to role — as one line:
  * `Rob Tuytel (scanning, processing); Rico Cilliers (cleanup, processing)`.
  * Throws when there is none: an asset whose maker nobody recorded is one whose
@@ -906,6 +1145,15 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
   if (source === undefined) throw new Error(`${file}: ${output.from} is not in the lock`);
   const path = `${OUTPUT_DIRECTORY}/${file}`;
   const origin = source.id === 'makehuman' ? 'MakeHuman' : 'Poly Haven';
+  // #623: a run that reads a second source names it, and digests it too.
+  const also =
+    output.recipe.how === 'blender'
+      ? (output.recipe.alsoReads ?? []).map((id) => {
+          const read = lock.sources.find((each) => each.id === id);
+          if (read === undefined) throw new Error(`${file}: ${id} is not in the lock`);
+          return read;
+        })
+      : [];
   if (output.recipe.how === 'verbatim') {
     const recipe = output.recipe;
     const upstream = source.files.find((each) => each.path === recipe.file);
@@ -945,21 +1193,32 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
   // done. `provenance.test.ts` holds that the file named is committed.
   const second = recipe.how === 'blender' && encoded ? `${KTX2_STEP_WORDS}${KTX2_SCRIPT_PATH}` : '';
   const described =
-    impostor !== undefined
-      ? `an eight-view impostor strip of one object of the pack, rendered from the full scan; then ${encodingWords(impostor.ktx2)}`
-      : (output.modified ?? '');
+    impostor === undefined
+      ? (output.modified ?? '')
+      : impostor.modified === undefined
+        ? `an eight-view impostor strip of one object of the pack, rendered from the full scan; then ${encodingWords(impostor.ktx2)}`
+        : `${impostor.modified}; then ${encodingWords(impostor.ktx2)}`;
+  const alsoFrom = also
+    .map(
+      (each) =>
+        `, and ${each.id} by ${each.authors}, its licence read on ${each.read} at ${each.licencePage}`,
+    )
+    .join('');
   return [
     ['path', path],
     [
       'source',
-      `${origin}, ${source.id} by ${source.authors}; made by this repository's asset pipeline (#430) from the files inputs.lock.json records`,
+      `${origin}, ${source.id} by ${source.authors}${alsoFrom}; made by this repository's asset pipeline (#430) from the files inputs.lock.json records`,
     ],
     ['licence', source.licence],
     ['read', source.read],
     ['sha256', sha256],
     ['modified', `${described}${second}`],
-    ['input', source.licencePage],
-    ['inputsha256', inputDigest(source.files)],
+    ['input', [source, ...also].map((each) => each.licencePage).join(' and ')],
+    [
+      'inputsha256',
+      also.length === 0 ? inputDigest(source.files) : sourcesDigest([source, ...also]),
+    ],
     ['script', `${PIPELINE_DIRECTORY}${recipe.how === 'ktx2' ? KTX2_SCRIPT : recipe.script}`],
     ['tool', tool],
   ];

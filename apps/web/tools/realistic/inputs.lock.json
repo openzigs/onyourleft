@@ -509,7 +509,7 @@
       "licence": "CC0-1.0",
       "licencePage": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/LICENSE.md",
       "evidence": "These assets have been released under CC0 1.0 Universal",
-      "read": "2026-09-22",
+      "read": "2026-09-28",
       "authors": "The MakeHuman team",
       "files": [
         {
@@ -535,6 +535,142 @@
           "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/LICENSE.ASSETS.md",
           "bytes": 6962,
           "sha256": "f6089cba01cb570a24712b41ab8a586ccd3cc5ef53dc266ca50b95c288956d2c"
+        },
+        {
+          "path": "targets/universal-female-young-averagemuscle-averageweight.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/macrodetails/universal-female-young-averagemuscle-averageweight.target",
+          "bytes": 604,
+          "sha256": "4ba5396ddabda448ece15650a566fbebfbb10239256ccb201e8f883429e12249"
+        },
+        {
+          "path": "targets/universal-female-young-averagemuscle-minweight.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/macrodetails/universal-female-young-averagemuscle-minweight.target",
+          "bytes": 147131,
+          "sha256": "e53a4afc87ac2703460a59e8290b1111478aeee5c02ece6735328c1f8c62eb63"
+        },
+        {
+          "path": "targets/universal-female-young-maxmuscle-averageweight.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/macrodetails/universal-female-young-maxmuscle-averageweight.target",
+          "bytes": 138225,
+          "sha256": "2e56b09b44a8497b927585447fdaac5ea7293521d1f3a3df1059495873c53f4e"
+        },
+        {
+          "path": "targets/universal-female-young-maxmuscle-minweight.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/macrodetails/universal-female-young-maxmuscle-minweight.target",
+          "bytes": 147219,
+          "sha256": "05351f0063429f4e1e484501b73997a6fb129b93939db355d108f98d5479fb10"
+        },
+        {
+          "path": "targets/african-female-young.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/macrodetails/african-female-young.target",
+          "bytes": 411735,
+          "sha256": "92d61eeb3c164b421fd5a7c3537ee45e7e1a51de4d49bf312e19c3df2be1d8fc"
+        },
+        {
+          "path": "targets/asian-female-young.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/macrodetails/asian-female-young.target",
+          "bytes": 435553,
+          "sha256": "095fe79694fa19e1fe98d93009ec116199bd524e081c640351a10eccf2cca1eb"
+        },
+        {
+          "path": "targets/caucasian-female-young.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/macrodetails/caucasian-female-young.target",
+          "bytes": 420559,
+          "sha256": "118379f6e8ba9266247fdb8788a20e1df40a239f97ced0b9905bcbcc74f6e820"
+        },
+        {
+          "path": "targets/universal-male-young-averagemuscle-averageweight.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/macrodetails/universal-male-young-averagemuscle-averageweight.target",
+          "bytes": 604,
+          "sha256": "4ba5396ddabda448ece15650a566fbebfbb10239256ccb201e8f883429e12249"
+        },
+        {
+          "path": "targets/universal-male-young-averagemuscle-minweight.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/macrodetails/universal-male-young-averagemuscle-minweight.target",
+          "bytes": 147071,
+          "sha256": "fac0d53b7051f4d1f06230d0b419e916eb5bae5ce67c031a9998fdde05229755"
+        },
+        {
+          "path": "targets/universal-male-young-maxmuscle-averageweight.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/macrodetails/universal-male-young-maxmuscle-averageweight.target",
+          "bytes": 147110,
+          "sha256": "c171ff9cc95e96273beb3e3b1969a01988c2d4982ebc6fe04bf81cf72ee3b295"
+        },
+        {
+          "path": "targets/universal-male-young-maxmuscle-minweight.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/macrodetails/universal-male-young-maxmuscle-minweight.target",
+          "bytes": 150179,
+          "sha256": "5873f11edc96fde72a79ec35fa1d292a6a1a594b5eadfd82d59faf48834561de"
+        },
+        {
+          "path": "targets/african-male-young.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/macrodetails/african-male-young.target",
+          "bytes": 406170,
+          "sha256": "894abc1fbb3d28543a51fef16f89d5d4bdf9aa2e1534413339811a3d47818b7d"
+        },
+        {
+          "path": "targets/asian-male-young.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/macrodetails/asian-male-young.target",
+          "bytes": 421040,
+          "sha256": "ed2e8c191cb6b87b4a2d97c80486acb2604fa549316c7aa2a738a5d5a14334dc"
+        },
+        {
+          "path": "targets/caucasian-male-young.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/macrodetails/caucasian-male-young.target",
+          "bytes": 396479,
+          "sha256": "70e228ba7164737dae664454394536fc5935fa48d333c1a97d77e2dc6eacc5f5"
+        }
+      ]
+    },
+    {
+      "id": "makehuman-system-assets",
+      "licence": "CC0-1.0",
+      "licencePage": "https://static.makehumancommunity.org/assets/assetpacks/makehuman_system_assets.html",
+      "evidence": "Makehuman system assets",
+      "read": "2026-09-28",
+      "authors": "The MakeHuman team (makehuman_system)",
+      "files": [
+        {
+          "path": "makehuman_system_assets_cc0.zip",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip",
+          "bytes": 280737770,
+          "sha256": "b542127a8e25547c7c29c19f2d1d2adb9a664c80396ecd694095dbc8028a0107"
+        },
+        {
+          "path": "skins/young_caucasian_male/young_lightskinned_male_diffuse.png",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#skins/young_caucasian_male/young_lightskinned_male_diffuse.png",
+          "bytes": 3693828,
+          "sha256": "862a26e335e958b70534cb5f0d7c47ef30ab148a56c42b3e9da969cf76f12963"
+        },
+        {
+          "path": "skins/young_caucasian_male/young_caucasian_male.mhmat",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#skins/young_caucasian_male/young_caucasian_male.mhmat",
+          "bytes": 1462,
+          "sha256": "6eda60b07ff2afbde078a2535ef3913593d84e9de92b2eb76c30f396a181fe2e"
+        },
+        {
+          "path": "eyebrows/eyebrow001/eyebrow001.png",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#eyebrows/eyebrow001/eyebrow001.png",
+          "bytes": 89619,
+          "sha256": "9940f7d0b1b223709a19b05156ba6f6e9e4dbdbced02d7574f4d51d72c58967b"
+        },
+        {
+          "path": "eyebrows/eyebrow001/eyebrow001.obj",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#eyebrows/eyebrow001/eyebrow001.obj",
+          "bytes": 8227,
+          "sha256": "88b13146395133f3901715e11706cdfd293e5d6087ad7c5e01efe1485a26b513"
+        },
+        {
+          "path": "eyebrows/eyebrow001/eyebrow001.mhclo",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#eyebrows/eyebrow001/eyebrow001.mhclo",
+          "bytes": 9141,
+          "sha256": "54c8892c2ba577f4152d779ce1f20f7cd323beb8cbd9cb701796165c221b4f5b"
+        },
+        {
+          "path": "eyebrows/eyebrow001/eyebrow001.mhmat",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#eyebrows/eyebrow001/eyebrow001.mhmat",
+          "bytes": 1098,
+          "sha256": "976e5f4f1d3922d7a11c6e2db233f8b4584b068d00619d5749687e81c92d61fc"
         }
       ]
     }

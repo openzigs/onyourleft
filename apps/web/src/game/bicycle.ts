@@ -195,8 +195,11 @@
  * - Colour carries it, which is what the old bullet's own phrasing conceded
  *   ("three bicycles in three colours"). `three-renderer.ts` §`RIDER_TINTS`
  *   multiplies {@link RIDER_PALETTE} per instance, so the bot is an orange
- *   machine and the ghost a colourless one against the rider's blue and
- *   silver — a whole-vehicle hue rather than one patch of one.
+ *   machine and the ghost a colourless one against the rider's teal — the
+ *   app's accent since #623 — and silver — a whole-vehicle hue rather than one patch of one.
+ *   ⚠️ **Since #623 the pacer and the ghost do not wear the rider's kit under
+ *   their tints**: they wear {@link PACER_KIT}, the blue #368 was measured in,
+ *   because a multiplier cannot pull orange out of a teal jersey.
  * - The **cost** argument is reversed rather than merely accepted:
  *   `RiderBelt` instances all three, so three bicycles cost three draw calls
  *   where one bicycle and two solids cost five. (Four since #546, which split
@@ -208,8 +211,15 @@
  */
 
 import { DEFAULT_RIDER_MASS_KILOGRAMS } from '../athlete/mass';
+import { COLOUR_TOKENS } from '../design/tokens';
 import type { SensorReading } from './hud/fields';
 import { BICYCLE_MASS_KILOGRAMS, DEFAULT_RIDING_POSITION, type RidingPosition } from './rider';
+
+/** A design token's `#rrggbb` as the number three's colours take. */
+function hexColour(token: string): number {
+  if (!/^#[0-9a-f]{6}$/i.test(token)) throw new Error(`${token} is not a six-digit colour`);
+  return Number.parseInt(token.slice(1), 16);
+}
 
 /** A turn, in radians. Written out once so that no call site spells `2 * PI`. */
 const TAU = Math.PI * 2;
@@ -217,10 +227,17 @@ const TAU = Math.PI * 2;
 /**
  * Every colour the rider is drawn in.
  *
- * ⚠️ **`jersey` is the blue the sphere wore** — `0x2f6fed`, unchanged — because
- * #93's third criterion is about telling the three apart and the rider's own
- * hue is half of how a rider already reads the frame. The shape is what
- * changed; the colour deliberately did not.
+ * ⚠️ **`jersey` is the app's own `accent` since #623, and a reviewer who
+ * remembers "the blue the sphere wore", `0x2f6fed`, is reading the old file.**
+ * The owner ruled on 2026-09-27 (#623) that the rider's kit is an On Your Left
+ * house kit in the app's colours, and the realistic rider's jersey is drawn
+ * from THIS value (`three-renderer.ts` §`RealisticRiderBelt.kitColour`), so
+ * both worlds wear one colour and a rider's own choice — #623's second half —
+ * is one value to replace. `limb` is `accentHover`, the accent's darker named
+ * variant, so the legs and helmet stay darker than the jersey and the
+ * pedalling still reads as motion. #93's third criterion is unchanged and is
+ * still what the three tints are measured against (`game.browser.spec.ts`
+ * §"the pacer and the ghost are bicycles").
  *
  * ⚠️ **No skin tone appears here, and that is a decision rather than an
  * oversight.** At eight metres behind, on a phone, it conveys nothing, and it
@@ -233,15 +250,46 @@ const TAU = Math.PI * 2;
  * test red, which is the intended way to find out.
  */
 export const RIDER_PALETTE = {
-  /** The rider's body: jersey, tights and arms. */
-  jersey: 0x2f6fed,
-  /** Legs and helmet — darker than the jersey, so the pedalling reads as motion. */
-  limb: 0x1b3f8f,
+  /** The rider's body: jersey, tights and arms. The app's `accent` (#623). */
+  jersey: hexColour(COLOUR_TOKENS.accent),
+  /** Legs and helmet — darker than the jersey, so the pedalling reads as motion. `accentHover`. */
+  limb: hexColour(COLOUR_TOKENS.accentHover),
   /** The machine's tubes. Pale, so the frame is a silhouette against the road. */
   frame: 0xd8dee3,
   /** Tyres, saddle and cranks. Near-black, so the wheels read as wheels. */
   tyre: 0x22262b,
 } as const;
+
+/** A kit: the jersey, and the darker colour of the legs and the helmet. */
+export interface RiderKit {
+  readonly jersey: number;
+  readonly limb: number;
+}
+
+/**
+ * The kit the PACER and the GHOST wear under their tints — #623, keeping #368.
+ *
+ * ⚠️ **Not the rider's kit, and that is the point.** `three-renderer.ts`
+ * §`RIDER_TINTS` MULTIPLIES a kit, so a tint can only keep what the kit
+ * already has: the bot's orange, `0xc2410c`, times the house kit's teal left a
+ * near-black bicycle whose green led its red (#742's review measured the
+ * silhouette at 7,9,1 where main drew 20,11,5), and #368's "the bot is the one
+ * whose red channel leads" stopped being true with every assertion green.
+ * The owner ruled on the RIDER's kit (#623, 2026-09-27) and on nobody else's,
+ * so the other two keep the blue they were told apart in — the sphere's
+ * `0x2f6fed` and its darker `0x1b3f8f`, `RIDER_PALETTE` until #623, which is
+ * what validation 0002 Part N's distances were read against. Both worlds read
+ * it: the stylised belt per instance, the realistic body per rider
+ * (`three-renderer.ts` §`RIDER_KITS`).
+ *
+ * ⚠️ A rider's own colour choice (#623's second half) replaces the RIDER's
+ * entry in `RIDER_KITS` and never this one — and a choice this kit's tints
+ * would confuse with the pacer's is that PR's distinguishability test to fail.
+ */
+export const PACER_KIT: RiderKit = { jersey: 0x2f6fed, limb: 0x1b3f8f };
+
+/** The rider's own kit, out of {@link RIDER_PALETTE}: the house kit (#623). */
+export const HOUSE_KIT: RiderKit = { jersey: RIDER_PALETTE.jersey, limb: RIDER_PALETTE.limb };
 
 /**
  * The palette as a list, for the light budget.
@@ -250,7 +298,12 @@ export const RIDER_PALETTE = {
  * lands in the brightness bound automatically — the same property that file's
  * own comment claims for the scenery and marker tables.
  */
-export const BICYCLE_COLOURS: readonly number[] = Object.values(RIDER_PALETTE);
+export const BICYCLE_COLOURS: readonly number[] = [
+  ...Object.values(RIDER_PALETTE),
+  // The pacer's kit is drawn too, per instance, so it is bounded as well.
+  PACER_KIT.jersey,
+  PACER_KIT.limb,
+];
 
 /** One of the four solids the rider is built out of. */
 export type RiderSolid =

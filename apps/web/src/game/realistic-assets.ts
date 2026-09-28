@@ -330,9 +330,56 @@ export function isRealisticVegetation(kind: string): kind is RealisticVegetation
 }
 
 /**
- * The rider's body — MakeHuman's CC0 base mesh, rigged and cut down (#369).
+ * The rider's body — MakeHuman's CC0 base mesh, rigged and cut down (#369) —
+ * and since #623 the helmet and glasses beside it, one mesh coloured per vertex.
  */
 export const REALISTIC_RIDER = 'rider.glb';
+
+/**
+ * The rider's three maps — #623, drawn and baked by
+ * `tools/realistic/blender/process_rider.py` onto the body's own texture
+ * coordinates, dedicated `CC0-1.0` with the MakeHuman skin and eyebrow they
+ * carry:
+ *
+ * - `colour` — the On Your Left house kit and the skin, BLACK where the kit's
+ *   main colour is: that colour is not in any map. `orm`'s blue channel holds
+ *   how much of it each texel is, and the renderer adds that share of one
+ *   colour, which is what lets a rider's own colour (#623's second half) be
+ *   one uniform;
+ * - `normal` — baked from the full-resolution body, with the kit's seams and
+ *   the riding pose's creases added;
+ * - `orm` — three's own channel order: occlusion R, roughness G, and in B the
+ *   main colour's share, which three does not read (no metalness map is set).
+ */
+export const REALISTIC_RIDER_MAPS = {
+  colour: 'rider_kit_1024.ktx2',
+  normal: 'rider_nor_gl_1024.ktx2',
+  orm: 'rider_orm_1024.ktx2',
+} as const;
+
+/**
+ * The rider's maps, averaged over every texel, in linear light — #623:
+ * `unmasked` the colour map's mean (skin, bib, white, shoes; black where the
+ * main colour is), and `shade` the mean of `orm`'s blue channel, the main
+ * colour's share. The kit's mean under a main colour `c` is
+ * `unmasked + shade · c`.
+ *
+ * It is what the browser gate's control draws the whole body in
+ * (`three-renderer.ts` §`riderBodyMaterial`), so the kit's pattern is compared
+ * with its own mean colour rather than with some other flat colour. Read off
+ * the pipeline's pictures; `realistic-textures.test.ts` decodes the committed
+ * maps and holds these to what they carry.
+ */
+export const REALISTIC_RIDER_KIT_MEAN = {
+  unmasked: [0.2169, 0.1493, 0.1163],
+  shade: 0.1776,
+} as const;
+
+/** Which of the rider's maps. */
+export type RealisticRiderMap = keyof typeof REALISTIC_RIDER_MAPS;
+
+/** The rider's maps, in a fixed order. */
+export const REALISTIC_RIDER_MAP_NAMES: readonly RealisticRiderMap[] = ['colour', 'normal', 'orm'];
 
 /**
  * The realistic bicycle's four small maps — #624: drawn from arithmetic by
@@ -390,6 +437,7 @@ export function realisticFiles(): readonly string[] {
       REALISTIC_STRUCTURE_SURFACES[surface].normal,
     ]),
     REALISTIC_RIDER,
+    ...REALISTIC_RIDER_MAP_NAMES.map((map) => REALISTIC_RIDER_MAPS[map]),
     ...REALISTIC_BICYCLE_MAP_NAMES.map((map) => REALISTIC_BICYCLE_MAPS[map]),
   ];
 }
