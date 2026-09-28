@@ -1403,7 +1403,7 @@ bash scripts/check-licence-hashes.test.sh
 # a template that is not there documents nothing.
 bash scripts/check-env-example.sh
 
-# Test that checker. Fixture-driven; 21 cases.
+# Test that checker. Fixture-driven; 22 cases.
 bash scripts/check-env-example.test.sh
 
 # Every relative link in the documentation points at something. RELATIVE ONLY —
