@@ -50,6 +50,7 @@ import type { Watts } from '@onyourleft/domain';
 
 import { Button } from '../design/Button';
 import { formatDuration } from '../format';
+import { deviceStorage, readAnnouncementPreference } from '../game/hud/announce-preference';
 import { StatusMessage } from '../design/StatusMessage';
 import { MetricGrid } from '../ride/MetricGrid';
 import { isReadable } from '../ride/metrics';
@@ -161,6 +162,10 @@ function LiveRide({
   const snapshot = useRideSnapshot(controller);
   const thresholdPower = useThresholdPower(analysis);
   const sideCamera = useSideCamera(sidePairing);
+  // #655: read once, at mount, from the device — as `RideAnnouncer` reads it
+  // (`WorkoutPanel` hands it no other storage here), so the two agree on
+  // which of them answers a held *Set*.
+  const [announcementsOn] = useState(() => readAnnouncementPreference(deviceStorage()).enabled);
 
   // ⚠️ On mount, because #212's whole point is that a rider who lost a tab is
   // *told* — the recording was always on the device and nothing looked for it.
@@ -248,6 +253,9 @@ function LiveRide({
           // #605: while a workout is loaded it owns the target, finished or not
           // — `controller.ts` §`setTargetPower` refuses on exactly this.
           workoutOwnsTarget={snapshot.workout !== undefined}
+          // #655: which voice answers a held *Set* — the form's, or the
+          // ride's one region. Read where `RideAnnouncer` reads it.
+          announcementsOn={announcementsOn}
         />
         <WorkoutPanel
           trainer={snapshot.trainer}
