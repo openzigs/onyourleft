@@ -24,7 +24,8 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { COLOUR_TOKENS } from '../design/tokens';
+import { THEME_META_ATTRIBUTE } from '../design/theme-selection';
+import { COLOUR_TOKENS, THEMES, paletteColours, themeColour } from '../design/tokens';
 
 const PUBLIC_DIRECTORY = new URL('../../public/', import.meta.url);
 
@@ -112,16 +113,52 @@ describe('the manifest and the design tokens cannot drift', () => {
   });
 });
 
+/** Every `theme-color` meta in `index.html`, as its attributes (#672). */
+function themeColourMetas(): Map<string, string>[] {
+  return [...indexHtml.matchAll(/<meta\s+name="theme-color"([^>]*)\/>/g)].map(
+    ([, attributes]) =>
+      new Map(
+        [...(attributes ?? '').matchAll(/([a-z-]+)="([^"]*)"/g)].map(([, name, value]) => [
+          name ?? '',
+          value ?? '',
+        ]),
+      ),
+  );
+}
+
 describe('index.html and the manifest', () => {
   it('links the manifest, which is what makes the browser fetch it at all', () => {
     expect(indexHtml).toMatch(/<link\s+rel="manifest"\s+href="\/manifest\.webmanifest"\s*\/>/);
   });
 
-  it('states the same theme colour the manifest does', () => {
+  it('states the same theme colour the manifest does, for the light palette', () => {
     // Two documents, one colour. A browser reads the meta tag for the tab strip
     // and the manifest for the installed window, and a rider who installs the
-    // app should not watch the chrome change colour.
-    const meta = /<meta\s+name="theme-color"\s+content="([^"]*)"/.exec(indexHtml)?.[1];
-    expect(meta).toBe(manifest.theme_color);
+    // app should not watch the chrome change colour. The manifest has ONE
+    // `theme_color` and no media query, so it is the light palette's.
+    const light = themeColourMetas().find((meta) => meta.get(THEME_META_ATTRIBUTE) === 'light');
+    expect(light?.get('content')).toBe(manifest.theme_color);
+  });
+});
+
+describe('index.html states a theme colour per palette (#672)', () => {
+  it('carries exactly one meta per palette, each from its palette’s token', () => {
+    // It read only the first meta until #672, so a second, drifted one would
+    // have passed. Every meta is read, and each palette has exactly one.
+    const metas = themeColourMetas();
+    expect(metas.map((meta) => meta.get(THEME_META_ATTRIBUTE)).sort()).toEqual([...THEMES].sort());
+    for (const theme of THEMES) {
+      const meta = metas.find((candidate) => candidate.get(THEME_META_ATTRIBUTE) === theme);
+      expect(meta?.get('content'), theme).toBe(themeColour(theme));
+      // A token of THAT palette, so a dark meta cannot carry a light colour.
+      expect(Object.values(paletteColours(theme))).toContain(meta?.get('content'));
+      // Following the device until the script says otherwise.
+      expect(meta?.get('media'), theme).toBe(`(prefers-color-scheme: ${theme})`);
+    }
+  });
+
+  it('tells the browser the page has both palettes, before any stylesheet', () => {
+    expect(indexHtml).toMatch(/<meta\s+name="color-scheme"\s+content="light dark"\s*\/>/);
+    expect(indexHtml.indexOf('name="color-scheme"')).toBeLessThan(indexHtml.indexOf('</head>'));
   });
 });

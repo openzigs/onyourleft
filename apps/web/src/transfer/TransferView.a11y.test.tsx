@@ -88,6 +88,7 @@ async function openBusyScreen(): Promise<void> {
     digest: webCryptoDigest,
     save: (file) => saved.push(file),
     drafts: { forget: () => forgotten.push('draft') },
+    theme: { forget: () => forgotten.push('theme') },
     athleteRow: { id: ATHLETE_A, displayName: 'You', createdAt: unixSeconds(1_760_000_000) },
   };
 

@@ -13,25 +13,32 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { contrastRatio } from '../design/contrast';
+import { AA_LARGE_TEXT_OR_NON_TEXT, contrastRatio } from '../design/contrast';
 import {
   COLOUR_TOKENS,
   CONTRAST_REQUIREMENTS,
   LINK_STATE_TOKENS,
   LINK_SURFACES,
+  PLATFORM_CHECK_MARK,
+  THEMES,
+  paletteColours,
 } from '../design/tokens';
 
-describe('every declared pair meets WCAG 2.2 AA', () => {
+/*
+ * #672: every pair below is walked in BOTH palettes. The owner's ruling is that
+ * every colour pair passes in both themes, and a pair is a pair of values — so
+ * the dark palette is not "the light one, inverted", it is a second set of
+ * measurements, each held to its own threshold and its own recorded margin.
+ */
+describe.each(THEMES)('every declared pair meets WCAG 2.2 AA — the %s palette', (theme) => {
+  const colours = paletteColours(theme);
   for (const requirement of CONTRAST_REQUIREMENTS) {
     it(`${requirement.foreground} on ${requirement.background} — ${requirement.where}`, () => {
-      const ratio = contrastRatio(
-        COLOUR_TOKENS[requirement.foreground],
-        COLOUR_TOKENS[requirement.background],
-      );
+      const ratio = contrastRatio(colours[requirement.foreground], colours[requirement.background]);
       expect(
         Number(ratio.toFixed(2)),
-        `${requirement.foreground} (${COLOUR_TOKENS[requirement.foreground]}) on ` +
-          `${requirement.background} (${COLOUR_TOKENS[requirement.background]}) is ` +
+        `${theme}: ${requirement.foreground} (${colours[requirement.foreground]}) on ` +
+          `${requirement.background} (${colours[requirement.background]}) is ` +
           `${ratio.toFixed(2)}:1, below the ${String(requirement.minimum)}:1 this pair needs`,
       ).toBeGreaterThanOrEqual(requirement.minimum);
     });
@@ -48,42 +55,77 @@ describe('every declared pair meets WCAG 2.2 AA', () => {
  * while leaving the next edit nothing to spend. So the margin itself is
  * recorded, and it is checked in both directions.
  */
-describe('no pair has eroded since the margin was last recorded', () => {
-  for (const requirement of CONTRAST_REQUIREMENTS) {
-    it(`${requirement.foreground} on ${requirement.background} still measures ${String(
-      requirement.measured,
-    )}`, () => {
-      const ratio = Number(
-        contrastRatio(
-          COLOUR_TOKENS[requirement.foreground],
-          COLOUR_TOKENS[requirement.background],
-        ).toFixed(2),
-      );
-      expect(
-        ratio,
-        `this pair now measures ${String(ratio)}:1 where ${String(requirement.measured)}:1 was ` +
-          'recorded. That is erosion: the pair may still clear its threshold, but the margin ' +
-          'it had is gone and #307 forbids spending it silently.',
-      ).toBeGreaterThanOrEqual(requirement.measured);
-      expect(
-        ratio,
-        `this pair now measures ${String(ratio)}:1 where ${String(requirement.measured)}:1 was ` +
-          'recorded — an improvement, which is welcome and has to be written down. Update ' +
-          '`measured` in tokens.ts so the next change is checked against the new margin and ' +
-          'not the old one.',
-      ).toBeLessThanOrEqual(requirement.measured);
-    });
-  }
-
-  it('records a margin that is itself above the threshold', () => {
-    // Without this, `measured` could be set below `minimum` and the erosion
-    // floor would sit under the standard — a floor that permits a failure.
+describe.each(THEMES)(
+  'no pair has eroded since the margin was last recorded — the %s palette',
+  (theme) => {
+    const colours = paletteColours(theme);
     for (const requirement of CONTRAST_REQUIREMENTS) {
-      expect(
-        requirement.measured,
-        `${requirement.foreground} on ${requirement.background} records a margin below its own ` +
-          'threshold',
-      ).toBeGreaterThanOrEqual(requirement.minimum);
+      it(`${requirement.foreground} on ${requirement.background} still measures ${String(
+        requirement.measured[theme],
+      )}`, () => {
+        const recorded = requirement.measured[theme];
+        const ratio = Number(
+          contrastRatio(colours[requirement.foreground], colours[requirement.background]).toFixed(
+            2,
+          ),
+        );
+        expect(
+          ratio,
+          `${theme}: this pair now measures ${String(ratio)}:1 where ${String(recorded)}:1 was ` +
+            'recorded. That is erosion: the pair may still clear its threshold, but the margin ' +
+            'it had is gone and #307 forbids spending it silently.',
+        ).toBeGreaterThanOrEqual(recorded);
+        expect(
+          ratio,
+          `${theme}: this pair now measures ${String(ratio)}:1 where ${String(recorded)}:1 was ` +
+            'recorded — an improvement, which is welcome and has to be written down. Update ' +
+            '`measured` in tokens.ts so the next change is checked against the new margin and ' +
+            'not the old one.',
+        ).toBeLessThanOrEqual(recorded);
+      });
+    }
+
+    it('records a margin that is itself above the threshold', () => {
+      // Without this, `measured` could be set below `minimum` and the erosion
+      // floor would sit under the standard — a floor that permits a failure.
+      for (const requirement of CONTRAST_REQUIREMENTS) {
+        expect(
+          requirement.measured[theme],
+          `${theme}: ${requirement.foreground} on ${requirement.background} records a margin ` +
+            'below its own threshold',
+        ).toBeGreaterThanOrEqual(requirement.minimum);
+      }
+    });
+  },
+);
+
+/**
+ * The check mark on a checked box is the platform's glyph, not a token (#667,
+ * #672 — #744's review found the dark palette's is Chromium's own grey, not
+ * `accentInk`), so it is not in `CONTRAST_REQUIREMENTS`. It is held here the
+ * same way: its ratio on the palette's `accent`, exactly, and at least 3:1.
+ * `browser/shell.browser.spec.ts` §"#667" reads the colour off the pixels.
+ */
+describe.each(THEMES)('the platform check mark on the %s accent', (theme) => {
+  it('measures what was recorded, in both directions, and clears SC 1.4.11', () => {
+    const { colour, measured } = PLATFORM_CHECK_MARK[theme];
+    const ratio = Number(contrastRatio(colour, paletteColours(theme).accent).toFixed(2));
+    expect(ratio).toBe(measured);
+    expect(measured).toBeGreaterThanOrEqual(AA_LARGE_TEXT_OR_NON_TEXT);
+  });
+});
+
+describe('the HUD measures the same in both palettes (#672)', () => {
+  it('records one margin for a pair whose colours are both HUD tokens', () => {
+    // The HUD is theme-independent, so a HUD pair recorded differently in the
+    // two palettes is a HUD token that moved with the page.
+    const hud = CONTRAST_REQUIREMENTS.filter(
+      (requirement) =>
+        requirement.foreground.startsWith('hud') && requirement.background.startsWith('hud'),
+    );
+    expect(hud.length).toBeGreaterThan(0);
+    for (const requirement of hud) {
+      expect(requirement.measured.dark, requirement.where).toBe(requirement.measured.light);
     }
   });
 });

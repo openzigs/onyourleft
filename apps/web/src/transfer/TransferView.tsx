@@ -1013,6 +1013,7 @@ function ErasePanel({
     try {
       const outcome = await eraseDevice(port.store, port.athleteId, {
         drafts: port.drafts,
+        theme: port.theme,
         athlete: port.athleteRow,
       });
       setDone(eraseSentence(outcome));

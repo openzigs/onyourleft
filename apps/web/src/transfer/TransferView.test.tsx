@@ -96,6 +96,7 @@ async function openPort(): Promise<TransferPort> {
     digest: webCryptoDigest,
     save: (file) => saved.push(file),
     drafts: { forget: () => forgotten.push('draft') },
+    theme: { forget: () => forgotten.push('theme') },
     athleteRow: { id: ATHLETE_A, displayName: 'You', createdAt: unixSeconds(1_760_000_000) },
   };
 }
@@ -805,12 +806,16 @@ describe('TransferView — what it may say about another platform', () => {
     // `typeInto` rather than assigning `.value`: React tracks a controlled
     // input through its own value setter, so a direct assignment updates the
     // DOM and leaves the component's state behind.
+    expect(forgotten, 'nothing is forgotten before the phrase is typed').toStrictEqual([]);
     await typeInto(box, 'erase everything');
     await activateWithKeyboard(buttonNamed('Erase everything'));
     await runToCompletion(
       () => (document.body.textContent ?? '').includes('holds nothing about you'),
       'the erase to finish',
     );
+    // #672: the palette choice is on this device outside the store, as the
+    // half-drawn route is, and the erase forgets both through the port.
+    expect([...forgotten].sort()).toStrictEqual(['draft', 'theme']);
 
     // Now, and only now, read back through a connection nothing on the page
     // is holding — the ride has to be gone from disk rather than from a

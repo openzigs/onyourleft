@@ -8,8 +8,10 @@
  * one unit a module inside a four-module quiet zone, which is the margin the
  * QR specification asks for and what a reader needs to find the corners.
  *
- * ⚠️ **Dark on light, and never themed.** The colours are the canvas and ink
- * tokens, and `forced-color-adjust: none` keeps a high-contrast mode from
+ * ⚠️ **Dark on light, and never themed.** The colours are the HUD's ink and
+ * surface tokens, which are the same in both palettes — they were `canvas` and
+ * `ink` until #672's dark palette swapped those, which would have drawn the code
+ * light on dark — and `forced-color-adjust: none` keeps a high-contrast mode from
  * repainting a code into something a camera cannot read (`theme.css`
  * §"THE PAIRING CODE"). A code has no text alternative a person could use —
  * the credentials in it are for a camera — so the image is named for what it

@@ -16,6 +16,12 @@
  */
 
 :root {
+  /* #672: the light palette. `color-scheme` is what reaches the controls this
+     file does not draw itself — a scrollbar, the date picker, a `base-select`
+     picker's platform parts, `accent-color`'s check mark — and the canvas the
+     browser paints before this file has loaded. */
+  color-scheme: light;
+
   /* The elevation ramp, lightest first. `tokens.ts` §ELEVATION_SURFACES says
      why depth is a colour here and not a shadow: a shadow is invisible to
      every gate this repository has, and a surface colour arrives inside the
@@ -128,6 +134,63 @@
    */
   --oyl-header-surface: var(--oyl-color-surface-overlay);
   --oyl-header-height: 3rem;
+}
+
+/*
+ * THE DARK PALETTE — #672. The owner's ruling of 2026-09-27: the page follows
+ * the device, with an override in Settings, and every pair passes the contrast
+ * gate in both palettes.
+ *
+ * Which block paints is `data-theme` on the root element, which the inline
+ * script `design/theme-selection.ts` writes into every page's `<head>` sets
+ * BEFORE this file is applied — so there is no first frame in the wrong
+ * palette. Two blocks of six-digit hex and not `light-dark()`: every
+ * `--oyl-color-*` here is compared, block by block and in both directions, to
+ * `tokens.ts` §`DARK_COLOUR_TOKENS` by `theme.a11y.test.ts`, and
+ * `contrast.ts` reads six-digit hex and nothing else, so `light-dark()` would
+ * blind both gates.
+ *
+ * ⚠️ **No `--oyl-color-hud-*` here, on purpose.** The ride HUD is an opaque
+ * panel over the world and is the same in both palettes; the test above fails
+ * this block if it redeclares one. Everything else — the header's surface
+ * (`--oyl-header-surface`, #671) included — follows by `var()`.
+ */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* The elevation ramp, darkest first: a raised surface is LIGHTER here. */
+  --oyl-color-canvas: #121816;
+  --oyl-color-surface: #19201f;
+  --oyl-color-surface-raised: #222a29;
+  --oyl-color-surface-overlay: #2b3433;
+  --oyl-color-border: #869391;
+  --oyl-color-ink: #e4ebe9;
+  --oyl-color-ink-muted: #a9b7b5;
+  --oyl-color-accent: #6cc9bd;
+  --oyl-color-accent-hover: #9ddcd3;
+  --oyl-color-accent-ink: #0d1f1c;
+  --oyl-color-selected: #1d4540;
+  --oyl-color-link: #6cc9bd;
+  --oyl-color-link-visited: #c4a8f0;
+  --oyl-color-link-hover: #9ddcd3;
+  --oyl-color-link-active: #c6ede7;
+  --oyl-color-focus: #e4ebe9;
+
+  --oyl-color-info-surface: #12303a;
+  --oyl-color-info-ink: #a9dcec;
+  --oyl-color-info-border: #4f9db5;
+
+  --oyl-color-success-surface: #13301f;
+  --oyl-color-success-ink: #a7e0c1;
+  --oyl-color-success-border: #4ea77e;
+
+  --oyl-color-warning-surface: #33280f;
+  --oyl-color-warning-ink: #f1d08f;
+  --oyl-color-warning-border: #b98c31;
+
+  --oyl-color-danger-surface: #3a1818;
+  --oyl-color-danger-ink: #f4b8b8;
+  --oyl-color-danger-border: #d46a6a;
 }
 
 *,
@@ -2357,7 +2420,10 @@ p > label + input[type='file'] {
  */
 .oyl-game__world {
   aspect-ratio: 16 / 9;
-  background: var(--oyl-color-ink);
+  /* #672: behind the world or a camera's picture, which do not change with the
+     page's palette — so neither does this. `ink` was this until the dark
+     palette made `ink` a near-white. */
+  background: var(--oyl-color-hud-surface);
   display: block;
   margin-inline: auto;
   max-height: 40vh;
@@ -2442,7 +2508,10 @@ p > label + input[type='file'] {
  * here can.
  */
 .oyl-game--riding {
-  background: var(--oyl-color-ink);
+  /* #672: behind the world or a camera's picture, which do not change with the
+     page's palette — so neither does this. `ink` was this until the dark
+     palette made `ink` a near-white. */
+  background: var(--oyl-color-hud-surface);
   inset: 0;
   overflow-x: hidden;
   overflow-y: auto;
@@ -2588,6 +2657,46 @@ p > label + input[type='file'] {
  * The two overlay layouts are the media queries at the end of this block.
  */
 .oyl-hud {
+  /* ⚠️ #672 (the review of #744): the HUD KEEPS THE LIGHT PALETTE, whatever
+     the page is in — the owner's ruling that the in-ride HUD is left alone.
+     Its panels paint with the theme-independent `--oyl-color-hud-*` tokens,
+     but what sits inside them — the mute toggle and the volume (#400), the
+     side camera's Stop (#551), a notice's status tones — paints with PAGE
+     tokens, and on a dark page those followed it. So every page colour token
+     is restated here with its LIGHT value, and `color-scheme` pins what the
+     platform draws itself (a range's track, a check mark). `theme.a11y.test.ts`
+     holds this list to `tokens.ts` §`COLOUR_TOKENS`, key for key, and
+     `theme.browser.spec.ts` reads every descendant in both palettes. */
+  color-scheme: light;
+  --oyl-color-canvas: #ffffff;
+  --oyl-color-surface: #f2f5f4;
+  --oyl-color-surface-raised: #e7eae9;
+  --oyl-color-surface-overlay: #dde0df;
+  --oyl-color-border: #767e7e;
+  --oyl-color-ink: #141b1a;
+  --oyl-color-ink-muted: #4a5b5c;
+  --oyl-color-accent: #0b5c55;
+  --oyl-color-accent-hover: #07443f;
+  --oyl-color-accent-ink: #ffffff;
+  --oyl-color-selected: #d4ebe7;
+  --oyl-color-link: #0b5c55;
+  --oyl-color-link-visited: #5b3a8c;
+  --oyl-color-link-hover: #07443f;
+  --oyl-color-link-active: #042e2a;
+  --oyl-color-focus: #141b1a;
+  --oyl-color-info-surface: #e3f0f4;
+  --oyl-color-info-ink: #0e4a57;
+  --oyl-color-info-border: #2c7288;
+  --oyl-color-success-surface: #e2f2e9;
+  --oyl-color-success-ink: #14513a;
+  --oyl-color-success-border: #2a7a58;
+  --oyl-color-warning-surface: #fbefda;
+  --oyl-color-warning-ink: #654100;
+  --oyl-color-warning-border: #8a6212;
+  --oyl-color-danger-surface: #fbe8e8;
+  --oyl-color-danger-ink: #7a1d1d;
+  --oyl-color-danger-border: #a83232;
+
   color: var(--oyl-color-hud-ink);
   display: flex;
   flex-direction: column;
@@ -3818,7 +3927,10 @@ p > label + input[type='file'] {
 }
 
 .oyl-framing__picture {
-  background: var(--oyl-color-ink);
+  /* #672: behind the world or a camera's picture, which do not change with the
+     page's palette — so neither does this. `ink` was this until the dark
+     palette made `ink` a near-white. */
+  background: var(--oyl-color-hud-surface);
   max-block-size: 70vh;
   max-inline-size: 100%;
   position: relative;
@@ -3844,7 +3956,9 @@ p > label + input[type='file'] {
 
 /* The guide is SOLID and the ghost is DASHED: the dash, not the colour, is what tells them apart. */
 .oyl-framing__guide * {
-  stroke: var(--oyl-color-canvas);
+  /* #672: drawn over the camera's picture, so the same in both palettes. It
+     was `canvas`, which the dark palette makes a near-black. */
+  stroke: var(--oyl-color-hud-ink);
 }
 
 .oyl-framing__ghost * {
@@ -3866,7 +3980,10 @@ p > label + input[type='file'] {
 }
 
 .oyl-scan-viewfinder__video {
-  background: var(--oyl-color-ink);
+  /* #672: behind the world or a camera's picture, which do not change with the
+     page's palette — so neither does this. `ink` was this until the dark
+     palette made `ink` a near-white. */
+  background: var(--oyl-color-hud-surface);
   block-size: auto;
   display: block;
   inline-size: 100%;
@@ -3894,10 +4011,14 @@ p > label + input[type='file'] {
   margin: 0 0 var(--oyl-space-md);
 }
 
+/* ⚠️ #672: dark on light in BOTH palettes. These were `canvas` and `ink`, which
+   the dark palette swaps, and a code drawn light on dark is one a phone's
+   camera reader may refuse. The HUD's pair is the theme-independent one, at
+   17.07:1. */
 .oyl-pairing-code__paper {
-  fill: var(--oyl-color-canvas);
+  fill: var(--oyl-color-hud-ink);
 }
 
 .oyl-pairing-code__ink {
-  fill: var(--oyl-color-ink);
+  fill: var(--oyl-color-hud-surface);
 }

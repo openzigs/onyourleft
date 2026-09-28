@@ -35,6 +35,7 @@ import {
 } from './browser/pmtiles-fixture';
 import { basisTranscoder } from './tools/basis/transcoder-plugin';
 import { poseRuntime } from './tools/pose/pose-runtime-plugin';
+import { themeSelection } from './tools/theme/theme-selection-plugin';
 
 /**
  * Emit the PMTiles archive the gate renders from (#63).
@@ -77,7 +78,8 @@ export default defineConfig({
   // the same bytes a rider's tablet would.
   // #618: and the Basis transcoder, so the realistic world's KTX2 textures are
   // transcoded in the gate by the files the product ships.
-  plugins: [pmtilesFixture(), poseRuntime(), basisTranscoder()],
+  // #672: every harness page selects its palette the way the product's page does.
+  plugins: [pmtilesFixture(), themeSelection(), poseRuntime(), basisTranscoder()],
   root: 'browser',
   // ⚠️ The APP's `public/`, not a `browser/public/` of the harness's own —
   // since ADR 0026. The realistic world's files are committed there and served

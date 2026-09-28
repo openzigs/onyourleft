@@ -58,6 +58,7 @@ your own action:
 | Health and fitness data — heart rate, power, cadence | a Bluetooth heart-rate strap, power meter or smart trainer |
 | Routes, segments, efforts and workouts | drawn in the app, or imported from a file you choose |
 | A threshold power and a unit preference | typed by you in Settings |
+| Whether the app is shown light or dark, if you chose one | chosen by you in Settings, and kept in this device's browser storage; *Erase everything* removes it |
 | A signing keypair, used to sign your own activity records | generated on the device the first time it is needed |
 | Pictures from the camera — only the ones you chose to keep | the camera, if you turn it on and then turn on "keep the pictures from this ride" for that ride. Otherwise a picture is thrown away as soon as it has been looked at |
 | The address and model name of your own computer, if you set one up | typed by you on the Camera page, and kept in this device's browser storage |
