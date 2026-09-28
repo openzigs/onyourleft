@@ -194,6 +194,10 @@ interface BenchOptions {
    * microtasks and no tick can land while the Stop is on the wire. On a real
    * trainer that answer takes time, and whatever is queued or ticked in that
    * window is exactly what a dispose has to keep off the control point.
+   *
+   * ⚠️ It holds back a **Pause** answer (`0x80 0x08 …` to a `0x08 0x02`) as
+   * well: Stop and Pause share opcode `0x08`, and the match is on the opcode
+   * alone (#704).
    */
   readonly holdStopAnswer?: boolean;
   /** Refuse every `0x05` below this many watts at the ATT layer — a refused ease (#567). */
@@ -1999,6 +2003,116 @@ describe('disposing the controller lets a held trainer go first — #695', () =>
     expect(() => {
       rig.controller.dispose();
     }).not.toThrow();
+    await flushMicrotasks(20);
+
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(await closed(rig)).toBe(true);
+  });
+
+  /**
+   * A bench whose trainer and strap are both paired, with every measurement
+   * and connection-state subscription tracked, and the FIRST measurement
+   * unsubscribe of `thrower` throwing (#704).
+   */
+  async function throwingUnsubscribe(thrower: typeof TRAINER): Promise<{
+    readonly rig: Bench;
+    readonly live: Set<string>;
+  }> {
+    const rig = benchWith({
+      devices: 'trainer+strap',
+      machine: { retainsTargetsThroughStop: true },
+    });
+    const live = new Set<string>();
+    let thrown = false;
+    const subscribe = rig.transport.subscribe.bind(rig.transport);
+    vi.spyOn(rig.transport, 'subscribe').mockImplementation(async (id, capability, listener) => {
+      const unsubscribe = await subscribe(id, capability, listener);
+      const key = `${id}:${capability}`;
+      live.add(key);
+      return () => {
+        live.delete(key);
+        unsubscribe();
+        if (id === thrower && !thrown) {
+          thrown = true;
+          throw new Error('the transport would not let go');
+        }
+      };
+    });
+    const observe = rig.transport.observeConnectionState.bind(rig.transport);
+    vi.spyOn(rig.transport, 'observeConnectionState').mockImplementation((id, listener) => {
+      const unobserve = observe(id, listener);
+      const key = `${id}:connection`;
+      live.add(key);
+      return () => {
+        live.delete(key);
+        unobserve();
+      };
+    });
+    // The strap first, so it is the first entry `dispose` walks.
+    await rig.controller.pair('heart-rate');
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.setTargetPower(watts(200));
+    expect([...live].some((key) => key.startsWith(`${STRAP}:`))).toBe(true);
+    expect([...live].filter((key) => key.startsWith(`${TRAINER}:`)).length).toBeGreaterThan(2);
+    return { rig, live };
+  }
+
+  it('detaches and closes every sensor when the FIRST sensor’s measurement unsubscribe throws — #704', async () => {
+    // #704: the loop that drops the readings at once had no catch, so this
+    // throw left `dispose` before the detach chain was attached — the Stop
+    // was on the wire, and no sensor was ever detached or closed.
+    const { rig, live } = await throwingUnsubscribe(STRAP);
+    const before = rig.written.length;
+
+    // Swallowed, like a throw in the detach chain: nobody is left to tell.
+    expect(() => {
+      rig.controller.dispose();
+    }).not.toThrow();
+    await flushMicrotasks(20);
+
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect([...live]).toStrictEqual([]);
+    expect(await closed(rig)).toBe(true);
+  });
+
+  it('drops every one of a sensor’s subscriptions when its first unsubscribe throws — #704', async () => {
+    // A catch per SENSOR is not enough on its own: `splice(0)` had already
+    // taken the rest of that sensor's unsubscribes out of the entry, so a
+    // throw on the first left the others listening for ever — and the
+    // detach, finding the list empty, could not reach them either.
+    const { rig, live } = await throwingUnsubscribe(TRAINER);
+    const before = rig.written.length;
+
+    expect(() => {
+      rig.controller.dispose();
+    }).not.toThrow();
+    await flushMicrotasks(20);
+
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect([...live]).toStrictEqual([]);
+    expect(await closed(rig)).toBe(true);
+  });
+
+  it('closes the trainer’s client even when the trainer’s own connection observer throws — #704', async () => {
+    // The test above throws on the STRAP, whose entry has no client. On the
+    // trainer, `detach` threw before it reached `close()`, so the one client
+    // that matters was never closed.
+    const rig = benchWith({ machine: { retainsTargetsThroughStop: true } });
+    const observe = rig.transport.observeConnectionState.bind(rig.transport);
+    vi.spyOn(rig.transport, 'observeConnectionState').mockImplementation((id, listener) => {
+      const unobserve = observe(id, listener);
+      return () => {
+        unobserve();
+        throw new Error('the transport would not let go');
+      };
+    });
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.setTargetPower(watts(200));
+    const before = rig.written.length;
+
+    rig.controller.dispose();
     await flushMicrotasks(20);
 
     expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
