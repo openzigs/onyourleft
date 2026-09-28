@@ -16,14 +16,17 @@
  * such control on the page at all**, and there is prose saying why instead.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { BluetoothPort } from '@onyourleft/sensors/web-bluetooth';
 
 import { deviceId, type ConnectionState } from '@onyourleft/sensors';
+import { createSimulator, hrsStrap } from '@onyourleft/sensors/simulator';
+import { unixSeconds } from '@onyourleft/domain';
+import { athleteId, recordingSessionId } from '@onyourleft/store';
 
 import { tabbableElements } from '../a11y/audit';
-import type { RideSnapshot } from '../ride/controller';
+import { createRideController, type RideSnapshot } from '../ride/controller';
 import { connectionWords } from '../ride/SensorPairing';
 import { idleSnapshot, ridingSnapshot, stubRideController } from '../ride/testing';
 import type { CapabilityProbe } from '../support/bluetooth-support';
@@ -336,5 +339,71 @@ describe('each device’s state is in words, not colour or an icon alone (WCAG 2
   it('gives every state different words', () => {
     const words = STATES.map(connectionWords);
     expect(new Set(words).size).toBe(STATES.length);
+  });
+});
+
+describe('Forget when an unsubscribe throws — #706', () => {
+  it('removes the device, says so in a sentence, and lets no rejection reach the page', async () => {
+    // The REAL controller over the simulator, because the defect was in the
+    // controller and the `void` call on this screen together: `unpair`
+    // rejected, the button's handler discarded the promise, and the rider saw
+    // nothing while the page got an unhandled rejection.
+    const { transport } = createSimulator({
+      devices: [hrsStrap({ id: 'strap', name: 'HRM 04B1' })],
+    });
+    const observe = transport.observeConnectionState.bind(transport);
+    vi.spyOn(transport, 'observeConnectionState').mockImplementation((id, listener) => {
+      const unobserve = observe(id, listener);
+      return () => {
+        unobserve();
+        throw new Error('the transport would not let go');
+      };
+    });
+    const controller = createRideController({
+      transport,
+      store: {
+        putRecordingSession: (record) => Promise.resolve(record.id),
+        appendRecordingChunk: () => Promise.resolve(0),
+        listRecordingSessions: () => Promise.resolve([]),
+        recoverRecording: () => Promise.resolve(undefined),
+        deleteRecordingSession: () => Promise.resolve(false),
+      },
+      athleteId: athleteId('devices'),
+      newSessionId: () => recordingSessionId('devices-ride'),
+      now: () => unixSeconds(0),
+    });
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      mounted = await mount(<DevicesView capabilities={CAPABLE} controller={controller} />);
+      await settle();
+      const press = async (label: string): Promise<void> => {
+        const found = [...mounted!.container.querySelectorAll('button')].find(
+          (each) => each.textContent?.trim() === label,
+        );
+        if (found === undefined) throw new Error(`no button labelled "${label}"`);
+        await activateWithKeyboard(found);
+        await settle();
+      };
+      await press('Pair a heart rate strap');
+      expect(mounted.container.textContent).toContain('HRM 04B1: Connected');
+
+      await press('Forget HRM 04B1');
+      // A macrotask, so a rejection nobody handled has been reported by now.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(mounted.container.textContent).toContain(
+        'HRM 04B1 is forgotten, but this app could not stop listening to it cleanly. If its readings still appear, reload the page, or close the app and open it again.',
+      );
+      expect(mounted.container.textContent).not.toContain('HRM 04B1: ');
+      expect(mounted.container.textContent).not.toContain('the transport would not let go');
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+      controller.dispose();
+    }
   });
 });
