@@ -37,6 +37,7 @@ import type { Kilograms } from '@onyourleft/domain';
 
 import { Button } from '../design/Button';
 import { ChartSlot } from '../design/ChartSlot';
+import { MoreAbout } from '../design/MoreAbout';
 import { StatusMessage, type StatusTone } from '../design/StatusMessage';
 import { useUnits } from '../units/context';
 import { formatDistance, measurementText } from '../units/format';
@@ -70,6 +71,25 @@ import {
   eraseSentence,
   type EraseRefusal,
 } from './erase-device';
+
+/**
+ * The sentences on the Files screen that are never tucked into a "More about"
+ * disclosure — #666: what an erase takes and what it cannot reach (#35,
+ * ADR 0014 D-7), that the signing key cannot come back, and that an export
+ * and the whole-account archive carry the REAL track and the privacy zones
+ * (ADR 0004). `a11y/kept-visible.a11y.test.tsx` holds them, over a store
+ * holding one ride — the export's own sentence renders only beside a ride.
+ */
+export const FILES_KEPT_VISIBLE: readonly string[] = [
+  ...ERASE_REMOVES,
+  ...ERASE_CANNOT_REACH,
+  'Erasing the signing key cannot be undone, and it cannot be recreated.',
+  'An exported file carries your real track — the ride as it was recorded, with nothing removed.',
+  'Privacy zones exist for what gets published, and this is your own copy of your own data.',
+  'The archive holds your real tracks and the centres of your privacy zones.',
+  'That is what makes it a complete copy, and it is why it deserves the same care as the rides themselves.',
+  'Your private key is never written to any of it.',
+];
 
 /** The ADR that explains why import is a file rather than a connection. */
 const CLEAN_ROOM_ADR =
@@ -292,19 +312,7 @@ function ImportPanel({
   return (
     <>
       <p className="oyl-muted">
-        Import a FIT, GPX or TCX file — including the bulk export from your Strava account. Choose
-        as many as you like; each one is reported on its own, and one file that cannot be read does
-        not stop the rest.
-      </p>
-      {/*
-        #232's third criterion: the two importers' distinct purposes are stated
-        where a rider chooses, not only in the code. The wording is a constant
-        in `routes/two-importers.ts` so that this screen, the routes screen and
-        the trainer game's empty picker cannot drift into three paraphrases of
-        one distinction.
-      */}
-      <p className="oyl-muted">
-        {FILES_IMPORT_MEANS} <a href={hrefFor(routeById('routes'))}>Routes</a> is where they live.
+        Import a FIT, GPX or TCX file — including the bulk export from your Strava account.
       </p>
       <div className="oyl-transfer__form">
         <label htmlFor="oyl-import-files">Activity files</label>
@@ -390,6 +398,25 @@ function ImportPanel({
       />
 
       <CoursePanel port={port} offers={courseOffers(chosen, outcomes)} />
+
+      <MoreAbout about="importing">
+        <p className="oyl-muted">
+          Choose as many as you like; each one is reported on its own, and one file that cannot be
+          read does not stop the rest.
+        </p>
+        {/*
+          #232's third criterion: the two importers' distinct purposes are
+          stated where a rider chooses, not only in the code. The wording is a
+          constant in `routes/two-importers.ts` so that this screen, the routes
+          screen and the trainer game's empty picker cannot drift into three
+          paraphrases of one distinction. ⚠️ Tucked since #666 — it is an
+          explanation of where a route lives, not a safety sentence — and still
+          on this screen, beneath the picker, where #232 asked for it.
+        */}
+        <p className="oyl-muted">
+          {FILES_IMPORT_MEANS} <a href={hrefFor(routeById('routes'))}>Routes</a> is where they live.
+        </p>
+      </MoreAbout>
     </>
   );
 }
@@ -585,7 +612,7 @@ function ExportPanel({
   const lossy = LOSSY_CHANNELS[format];
   return (
     <>
-      <p className="oyl-muted">
+      <p className="oyl-muted" data-oyl-kept-visible="">
         An exported file carries your <strong>real</strong> track — the ride as it was recorded,
         with nothing removed. Privacy zones exist for what gets published, and this is your own copy
         of your own data.
@@ -765,7 +792,7 @@ function TakeEverythingPanel({
         One file per ride plus <code>{MANIFEST_FILE_NAME}</code>, which carries your thresholds,
         privacy zones, routes, workouts and the public half of this device&rsquo;s signing key.
       </p>
-      <p className="oyl-muted">
+      <p className="oyl-muted" data-oyl-kept-visible="">
         The archive holds your <strong>real</strong> tracks and the centres of your privacy zones.
         That is what makes it a complete copy, and it is why it deserves the same care as the rides
         themselves. Your private key is never written to any of it.

@@ -43,6 +43,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore, type JSX } from 'react';
 
 import { Button } from '../design/Button';
+import { KeptVisible } from '../design/MoreAbout';
 import { StatusMessage } from '../design/StatusMessage';
 import { BYSTANDER_SENTENCE, CONSENT_REFUSAL_TEXT } from '../camera/consent';
 import { FRAMING_VERDICT_TEXT } from '../camera/framing';
@@ -75,6 +76,21 @@ export const SIDE_PICTURES_GO_SENTENCE =
   'with — directly, over your own Wi-Fi, encrypted — and nowhere else. The tablet looks at each ' +
   'one and throws it away at once. It keeps where you were in the picture, as numbers, and never ' +
   'the picture.';
+
+/**
+ * The sentences on the phone's page that are never tucked — #666, ADR 0029
+ * D-5 and ADR 0033: anyone else in the room, what a lost link does, where the
+ * pictures go and what is kept. `a11y/kept-visible.a11y.test.tsx` holds them.
+ */
+export const SIDE_CAMERA_KEPT_VISIBLE: readonly string[] = [
+  BYSTANDER_SENTENCE,
+  LINK_LOSS_SENTENCE,
+  SIDE_PICTURES_GO_SENTENCE,
+  'This phone stands on a tripod beside the bike and takes pictures of you from the side while you ride, only while the “Camera on” sign is showing.',
+  'While you set it up, it shows you its own picture so you can line the bike up.',
+  'That picture is not kept.',
+  'This phone keeps nothing about you once the session ends',
+];
 
 /**
  * The one big word the filming sign carries.
@@ -303,27 +319,37 @@ function SessionScreen({
       {state.phase === 'off' ? (
         <section aria-labelledby="oyl-side-camera-what">
           <h3 id="oyl-side-camera-what">Before the camera is on</h3>
-          <ul>
-            <li>
-              This phone stands on a tripod beside the bike and takes pictures of you from the side
-              while you ride, only while the &ldquo;Camera on&rdquo; sign is showing.
-            </li>
-            <li>
-              While you set it up, it shows you its own picture so you can line the bike up. That
-              picture is not kept.
-            </li>
-            <li>{SIDE_PICTURES_GO_SENTENCE}</li>
-            <li>
-              This phone keeps nothing about you once the session ends — no picture, no outline, no
-              record of the session.
-            </li>
-          </ul>
-          <StatusMessage tone="warning" label="Anyone else in the room">
-            {BYSTANDER_SENTENCE}
-          </StatusMessage>
-          <StatusMessage tone="warning" label="If the tablet loses touch">
-            {LINK_LOSS_SENTENCE}
-          </StatusMessage>
+          {/*
+            #666: all of it stays on the screen, before the box that says it
+            was read — what this phone does, anyone else in the room (ADR 0029
+            D-5) and what it does if the tablet loses touch (ADR 0033). There
+            is nothing here to tuck, so the first control follows the consent
+            text rather than a fold line: the browser gate's fold rule lets
+            `data-oyl-kept-visible` text stand before it, and nothing else.
+          */}
+          <KeptVisible>
+            <ul>
+              <li>
+                This phone stands on a tripod beside the bike and takes pictures of you from the
+                side while you ride, only while the &ldquo;Camera on&rdquo; sign is showing.
+              </li>
+              <li>
+                While you set it up, it shows you its own picture so you can line the bike up. That
+                picture is not kept.
+              </li>
+              <li>{SIDE_PICTURES_GO_SENTENCE}</li>
+              <li>
+                This phone keeps nothing about you once the session ends — no picture, no outline,
+                no record of the session.
+              </li>
+            </ul>
+            <StatusMessage tone="warning" label="Anyone else in the room">
+              {BYSTANDER_SENTENCE}
+            </StatusMessage>
+            <StatusMessage tone="warning" label="If the tablet loses touch">
+              {LINK_LOSS_SENTENCE}
+            </StatusMessage>
+          </KeptVisible>
           <p>
             <label>
               <input

@@ -4,7 +4,7 @@ import type { JSX } from 'react';
 
 import { StatusMessage } from '../design/StatusMessage';
 import type { RideController } from '../ride/controller';
-import { PairingPanel } from '../ride/SensorPairing';
+import { ONE_GESTURE_PER_DEVICE, PairingPanel } from '../ride/SensorPairing';
 import { BluetoothSupportNotice } from '../support/BluetoothSupportNotice';
 import { ShellSupportNotice } from '../support/ShellSupportNotice';
 import type { CapabilityProbe } from '../support/bluetooth-support';
@@ -101,6 +101,13 @@ const BROWSER_LIMITS: readonly string[] = [
   'There is no silent reconnect: after a reload, each device is chosen again.',
   'Recording does not continue in the background: keep this tab open and in front while you ride.',
 ];
+
+/**
+ * The sentences the Devices screen never tucks into its disclosure where a
+ * browser can pair — #666, ADR 0003 D-7 rule 5 and CLAUDE.md §8.
+ * `a11y/kept-visible.a11y.test.tsx` holds them.
+ */
+export const DEVICES_KEPT_VISIBLE: readonly string[] = [ONE_GESTURE_PER_DEVICE, ...BROWSER_LIMITS];
 
 /**
  * The shell's equivalent. No background sentence: the Android shell keeps a

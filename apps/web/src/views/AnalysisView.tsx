@@ -226,10 +226,19 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
           No local store on this browser. Rides are kept in this browser&rsquo;s own storage and
           this page cannot reach it — a private window or blocked site data is the usual reason.
         </StatusMessage>
+        {/*
+          #666, finishing #668's fifth criterion here: the two next steps are
+          drawn as buttons rather than as links in a sentence, the way the
+          Activities screen's own no-store state draws them. The rides are the
+          primary — this screen is about them — and importing steps down.
+        */}
         <p>
-          <a href={hrefFor(routeById('activities'))}>Your rides</a>
-          {' · '}
-          <a href={hrefFor(routeById('transfer'))}>Import or export files</a>
+          <a className="oyl-button" href={hrefFor(routeById('activities'))}>
+            Your rides
+          </a>{' '}
+          <a className="oyl-button oyl-button--secondary" href={hrefFor(routeById('transfer'))}>
+            Import or export files
+          </a>
         </p>
       </>
     );
