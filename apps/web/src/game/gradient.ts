@@ -267,6 +267,43 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
 const RELEASE_INCOMPLETE_ROAD =
   'The trainer did not confirm it let go of the road. It may still be holding resistance — ease off before you get off.';
 
+/** A forget is running (`ride/controller.ts` §`mustWaitForForget`), and lifts by itself. */
+const HELD_FOR_A_FORGET =
+  'The hills are not being sent yet: Bluetooth is still finishing forgetting a trainer. The next gradient will be sent again.';
+
+/**
+ * This trainer is being let go so it can be forgotten — #728. Promises nothing
+ * about the next gradient: once the forget goes through the trainer is gone.
+ *
+ * ⚠️ Claims only what the app did — held THIS gradient back and ASKED for the
+ * release — because the fault outlives the hold (#729's review). The hold is
+ * thrown only while the Stop is on the wire, but the sentence stays on screen
+ * until the next sample replaces it, and by then the Stop may have landed or
+ * been refused. "The trainer is being let go" was false in the second case,
+ * where the machine may still be holding resistance and
+ * `ride/controller.ts` §`unpair` tells the rider so.
+ */
+const HELD_WHILE_LETTING_GO =
+  'That gradient was held back: this app asked the trainer to let go so it can be forgotten.';
+
+/**
+ * The ride controller was disposed and will write nothing again — #728, #695.
+ * Permanent, so it promises nothing either. ⚠️ Nothing in production disposes
+ * the controller today (it lives as long as the page), so a rider is not
+ * expected to read this; it is worded truthfully all the same, because the
+ * fallback said the trainer refused a gradient it never received.
+ *
+ * ⚠️ **It says nothing about resistance, on purpose** (#729's review). The
+ * hold is thrown from the moment `dispose()` is called, while its Stop is
+ * still on the wire, and the Stop can be refused — so "this app has let the
+ * trainer go" would tell a rider on a machine that may still be holding
+ * resistance that it had been released, which is the one thing
+ * {@link RELEASE_INCOMPLETE_ROAD} exists to warn about. What is true in every
+ * one of those states is that this app has stopped driving the trainer.
+ */
+const HELD_AFTER_LETTING_GO =
+  'The hills are no longer being sent: this app has stopped driving the trainer.';
+
 /**
  * What a rider is told about a refused gradient.
  *
@@ -283,8 +320,21 @@ function faultText(error: unknown): string {
   // (#724): until then this matched the substring "still being forgotten", so
   // rewording the controller's reason would have told the rider "The trainer
   // refused that gradient" with nothing going red.
+  //
+  // #728: the controller's other two holds are the app too, and each is worded
+  // for what it is. Only a forget that is running lifts by itself, so only it
+  // promises the next gradient: a trainer being let go to be forgotten is
+  // usually gone once it has been, and a disposed controller writes nothing
+  // again.
   if (error instanceof TargetHeldBack) {
-    return 'The hills are not being sent yet: Bluetooth is still finishing forgetting a trainer. The next gradient will be sent again.';
+    switch (error.hold) {
+      case 'forget-running':
+        return HELD_FOR_A_FORGET;
+      case 'letting-go-to-forget':
+        return HELD_WHILE_LETTING_GO;
+      case 'let-go':
+        return HELD_AFTER_LETTING_GO;
+    }
   }
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes('control-not-permitted') || message.includes('Control Not Permitted')) {

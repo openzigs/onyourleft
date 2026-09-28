@@ -644,10 +644,18 @@ class PairingAbandoned extends Error {
   }
 }
 
-/** Why a game ride's gradient is refused while its trainer is being let go. */
+/**
+ * Why a game ride's gradient is refused while its trainer is being let go.
+ * Thrown as a {@link TargetHeldBack} since #728 — the app held it back, and
+ * the machine refused nothing — so, like {@link GRADIENT_WAITS_FOR_FORGET},
+ * this sentence is for a log and the rider reads `game/gradient.ts`'s.
+ */
 const TRAINER_BEING_FORGOTTEN = 'the trainer is being forgotten';
 
-/** Why a game's gradient is refused once the controller has let go (#695). */
+/**
+ * Why a game's gradient is refused once the controller has let go (#695).
+ * A {@link TargetHeldBack} since #728, for the same reason as the one above.
+ */
 const RIDE_CONTROLLER_DISPOSED = 'the ride controller has let the trainer go';
 
 /**
@@ -1206,7 +1214,7 @@ export function createRideController(options: RideControllerOptions): RideContro
   ): Pick<TrainerControl, 'setTargetPower'> => ({
     setTargetPower: (target) =>
       mustWaitForForget(client, { target, floor })
-        ? Promise.reject(new TargetHeldBack(TARGET_WAITS_FOR_FORGET))
+        ? Promise.reject(new TargetHeldBack('forget-running', TARGET_WAITS_FOR_FORGET))
         : client.setTargetPower(target),
   });
   /**
@@ -2845,18 +2853,20 @@ export function createRideController(options: RideControllerOptions): RideContro
           // `letGoBeforeForgetting` too and nothing is being forgotten — the
           // reason has to say what actually happened (#695's review).
           if (disposed) {
-            return Promise.reject(new Error(RIDE_CONTROLLER_DISPOSED));
+            return Promise.reject(new TargetHeldBack('let-go', RIDE_CONTROLLER_DISPOSED));
           }
           // #659's review: the trainer is being let go so it can be
           // forgotten, and a gradient after that Stop would take it back.
           if (leaving.has(client)) {
-            return Promise.reject(new Error(TRAINER_BEING_FORGOTTEN));
+            return Promise.reject(
+              new TargetHeldBack('letting-go-to-forget', TRAINER_BEING_FORGOTTEN),
+            );
           }
           // #718's second review, #721 — @see mustWaitForForget. Per write,
           // like a workout's targets, because the game holds this for the
           // whole ride and a forget can begin during one.
           if (mustWaitForForget(client, 'gradient')) {
-            return Promise.reject(new TargetHeldBack(GRADIENT_WAITS_FOR_FORGET));
+            return Promise.reject(new TargetHeldBack('forget-running', GRADIENT_WAITS_FOR_FORGET));
           }
           // #567: a gradient takes the machine out of ERG, so a hand-set
           // target's rescue writing a 0x05 under a game ride would put it back.

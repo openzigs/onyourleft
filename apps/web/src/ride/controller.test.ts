@@ -466,14 +466,6 @@ function benchWith(options: BenchOptions = {}): Bench {
   };
 }
 
-/**
- * Let the promise chain inside `createTrainerControl` run to its write.
- *
- * A procedure is `enqueue` → `enableControlPointIndications` → the write, and
- * every link is a microtask. Advancing the simulator's clock before the write
- * has happened delivers the indication to nobody, and the test then times out
- * waiting for an answer that was sent one tick too early.
- */
 /** A kilometre rising at a steady 4 %, for a gradient session to ride. */
 function risingRoad(): RouteProfile {
   return routeProfile(
@@ -487,6 +479,14 @@ function risingRoad(): RouteProfile {
   );
 }
 
+/**
+ * Let the promise chain inside `createTrainerControl` run to its write.
+ *
+ * A procedure is `enqueue` → `enableControlPointIndications` → the write, and
+ * every link is a microtask. Advancing the simulator's clock before the write
+ * has happened delivers the indication to nobody, and the test then times out
+ * waiting for an answer that was sent one tick too early.
+ */
 async function flushMicrotasks(times = 8): Promise<void> {
   for (let index = 0; index < times; index += 1) {
     await Promise.resolve();
@@ -1841,10 +1841,70 @@ describe('forgetting the trainer lets it go first — #659’s review', () => {
     const late = handle?.setSimulationParameters({ grade: gradePercent(8) });
     await forgetting;
     await expect(late).rejects.toThrow('the trainer is being forgotten');
+    // #728: the app held it back, and says so by class and by kind.
+    await expect(late).rejects.toBeInstanceOf(TargetHeldBack);
+    await expect(late).rejects.toHaveProperty('hold', 'letting-go-to-forget');
     await flushMicrotasks(20);
 
     expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
     expect(rig.controller.getSnapshot().trainer.paired).toBe(false);
+    rig.controller.dispose();
+  });
+
+  it('tells a game ride the app asked the trainer to let go, not that it refused the gradient (#728)', async () => {
+    const rig = await riding();
+    const handle = rig.controller.simulationControl();
+    if (handle === undefined) {
+      throw new Error('no simulation control');
+    }
+    await handle.setSimulationParameters({ grade: gradePercent(6) });
+    const before = rig.written.length;
+    // The game's own loop, over the real handle, sampling while the release
+    // that precedes the forget is on the wire.
+    const session = createGradientSession({ profile: risingRoad(), control: handle });
+
+    const forgetting = rig.controller.unpair(TRAINER);
+    session.sample(seconds(0), 500);
+    await forgetting;
+    await session.settled();
+
+    expect(session.state().fault).toBe(
+      'That gradient was held back: this app asked the trainer to let go so it can be forgotten.',
+    );
+    // Nothing but the release reached the machine.
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    rig.controller.dispose();
+  });
+
+  it('says nothing a refused Stop would make false, to a game ride sampling while the trainer is forgotten (#729)', async () => {
+    // #729's review: the fault outlives the hold. It is set while the Stop is
+    // on the wire and stays until the next sample, and here the Stop is refused
+    // — the machine may still be holding resistance, and the forget is
+    // abandoned. "The trainer is being let go" would be false by then.
+    const rig = await riding({ refuseStop: true });
+    const handle = rig.controller.simulationControl();
+    if (handle === undefined) {
+      throw new Error('no simulation control');
+    }
+    await handle.setSimulationParameters({ grade: gradePercent(6) });
+    const before = rig.written.length;
+    const session = createGradientSession({ profile: risingRoad(), control: handle });
+
+    const forgetting = rig.controller.unpair(TRAINER);
+    session.sample(seconds(0), 500);
+    await forgetting;
+    await session.settled();
+    await flushMicrotasks(20);
+
+    // The Stop was refused and the trainer kept: the state the sentence must survive.
+    expect(rig.controller.getSnapshot().trainer.paired).toBe(true);
+    const fault = session.state().fault;
+    expect(fault).toBe(
+      'That gradient was held back: this app asked the trainer to let go so it can be forgotten.',
+    );
+    expect(fault).not.toMatch(/has let|is being let go|let the trainer go|released/);
+    // Only the refused release reached the machine: no gradient followed it.
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
     rig.controller.dispose();
   });
 
@@ -2261,6 +2321,9 @@ describe('disposing the controller lets a held trainer go first — #695', () =>
     // During the release as well as after it, and with the dispose's own
     // reason: nothing is being forgotten here (#695's review).
     await expect(late).rejects.toThrow('the ride controller has let the trainer go');
+    // #728: the app held it back, and says so by class and by kind.
+    await expect(late).rejects.toBeInstanceOf(TargetHeldBack);
+    await expect(late).rejects.toHaveProperty('hold', 'let-go');
     await flushMicrotasks(20);
     // And once the release has settled, refused by the controller rather than
     // left to whatever the closed client happens to say.
@@ -2272,6 +2335,56 @@ describe('disposing the controller lets a held trainer go first — #695', () =>
     await handle?.letGo().catch(() => undefined);
     await flushMicrotasks(20);
 
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+  });
+
+  it('tells a game ride the app has stopped driving the trainer, not that it refused the gradient (#728)', async () => {
+    const rig = await riding();
+    const handle = rig.controller.simulationControl();
+    if (handle === undefined) {
+      throw new Error('no simulation control');
+    }
+    await handle.setSimulationParameters({ grade: gradePercent(6) });
+    const before = rig.written.length;
+    const session = createGradientSession({ profile: risingRoad(), control: handle });
+
+    rig.controller.dispose();
+    session.sample(seconds(0), 500);
+    await session.settled();
+    await flushMicrotasks(20);
+
+    expect(session.state().fault).toBe(
+      'The hills are no longer being sent: this app has stopped driving the trainer.',
+    );
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+  });
+
+  it('does not tell a game ride the trainer was let go when the dispose’s Stop is refused (#729)', async () => {
+    // #729's review, probed: `riding({ refuseStop: true })` → `dispose()` →
+    // one sample. The machine did not confirm the Stop and may still be
+    // holding resistance, so the rider must not read that it was let go.
+    const rig = await riding({ refuseStop: true });
+    const handle = rig.controller.simulationControl();
+    if (handle === undefined) {
+      throw new Error('no simulation control');
+    }
+    await handle.setSimulationParameters({ grade: gradePercent(6) });
+    const before = rig.written.length;
+    const session = createGradientSession({ profile: risingRoad(), control: handle });
+
+    rig.controller.dispose();
+    await flushMicrotasks(20);
+    // After the refusal has settled, not only while the Stop is in flight.
+    session.sample(seconds(0), 500);
+    await session.settled();
+    await flushMicrotasks(20);
+
+    const fault = session.state().fault;
+    expect(fault).toBe(
+      'The hills are no longer being sent: this app has stopped driving the trainer.',
+    );
+    expect(fault).not.toMatch(/has let|let the trainer go|released/);
+    // The refused Stop and nothing else: no gradient reached the machine.
     expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
   });
 
