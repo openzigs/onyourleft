@@ -43,20 +43,17 @@
  * so {@link CameraConsent} has two independent members and
  * {@link consentDecision} never infers one from the other.
  *
- * ⚠️ **The hosted answer is modelled here and is NOT offered on any screen,
- * deliberately.** There is no hosted path. ⚠️ **This paragraph said #387 owned
- * it, and #387 did not build it**: ADR 0029's 2026-09-23 amendment found that
- * the owner's amended promise — *"no network except a LOCAL endpoint the rider
- * configured and switched on"* — does not cover a hosted model, and left
- * whether the policy may gain a second exception to the owner. #387 built the
- * local path only, and its address rule refuses anything off the rider's own
- * network, so `hosted` has nothing to grant. A control granting something
- * no code can act on is a control that *"looks like the way in and is not"*,
- * which is #48's first criterion; and D-7's own consent wording is quoted in
- * the ADR precisely so that the issue which ships the path implements the
- * sentence somebody ruled on. Writing that screen now, ahead of the path, is
- * ADR 0029's own *"a policy amended in advance, so it is ready, is a false
- * statement about a shipped app"* one layer down.
+ * ⚠️ **Since #518 the hosted answer IS offered, and a reviewer who remembers
+ * "modelled here and NOT offered on any screen" is reading the old file.** The
+ * owner ruled on 2026-09-28 (ADR 0029's amendment of that date): a hosted
+ * model on the rider's own key, **numbers only and never a picture**, off by
+ * default and separately consented. So `hosted` is set by
+ * `session.ts` §`CameraController.agreeToHosted` — its own switch on the Camera
+ * screen, beside the wording `hosted-model.ts` §`HOSTED_CONSENT` quotes from
+ * that amendment — and by nothing else: the camera's own consent control still
+ * passes `allowHosted: false`. What it grants is a question sent to a service
+ * the rider typed; it grants no picture anywhere, and the name `CameraConsent`
+ * is historical rather than a claim that the hosted path carries one.
  */
 
 /**
@@ -119,13 +116,11 @@ export interface CameraConsent {
    */
   readonly local: boolean;
   /**
-   * Send a picture to a service the rider has chosen — owner decision D-B,
-   * ADR 0029 D-7.
-   *
-   * ⚠️ **Always `false` in this build and there is no way to set it from a
-   * screen.** It is modelled so that the two answers are separable *by
-   * construction* rather than by a later refactor, which is #382's own
-   * criterion; see this file's header for why no control offers it yet.
+   * Send a question to a service the rider has chosen — owner decision D-B,
+   * ADR 0029 D-7, narrowed by the owner's 2026-09-28 *"numbers only"* ruling:
+   * the hosted path is never sent a picture. Set only by
+   * `CameraController.agreeToHosted`, and separable from `local` *by
+   * construction*, which is #382's own criterion.
    */
   readonly hosted: boolean;
 }
@@ -170,7 +165,7 @@ export interface ConsentAnswers {
    */
   readonly acknowledgedBystanders: boolean;
   readonly allowLocal: boolean;
-  /** @see CameraConsent.hosted — nothing sets this to `true` in this build. */
+  /** @see CameraConsent.hosted — only `CameraController.agreeToHosted` passes `true`. */
   readonly allowHosted: boolean;
 }
 

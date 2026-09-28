@@ -40,15 +40,15 @@
  * read (`camera/ScanViewfinder.tsx`, ADR 0033's 2026-09-26 amendment). No
  * frame is taken for it and nothing of it is kept.
  *
- * ⚠️ **No hosted-model control.** `camera/consent.ts` says why at length: there
- * is no hosted path, and a control granting something no code can act on is one
- * that *"looks like the way in and is not"* — #48's first criterion. Since
- * [#387](https://github.com/openzigs/onyourleft/issues/387) there IS a way for a
- * picture to leave — to the rider's OWN computer, at an address they type and
- * switch on — and {@link AnalysisSection} is where. Its address box refuses
- * anything not on the rider's own network (`camera/analysis-endpoint.ts`), which
- * is what keeps a hosted model out of it: ADR 0029's 2026-09-23 amendment leaves
- * whether the hosted path may be built to the owner.
+ * ⚠️ **Two ways off the device, and only one of them carries a picture.** Since
+ * [#387](https://github.com/openzigs/onyourleft/issues/387) a picture can go to
+ * the rider's OWN computer, at an address they type and switch on —
+ * {@link AnalysisSection} — and its address box still refuses anything not on
+ * the rider's own network (`camera/analysis-endpoint.ts`). Since
+ * [#518](https://github.com/openzigs/onyourleft/issues/518) a QUESTION, and
+ * never a picture, can go to a hosted model on the rider's own key —
+ * {@link HostedSection} — under the owner's *"numbers only"* ruling (ADR 0029's
+ * 2026-09-28 amendment), with its own consent, off whenever the app is opened.
  *
  * ⚠️ **No claim about a body anywhere on this screen.**
  * [ADR 0030](../../../../docs/adr/0030-what-the-app-may-say-about-a-body.md)
@@ -89,6 +89,17 @@ import {
   writeSideAnalyserOnComputer,
 } from '../camera/side-analyser';
 import { useAnalysis, type AnalysisState } from '../camera/useAnalysis';
+import { HOSTED_FAILURE_TEXT } from '../camera/hosted-port';
+import {
+  forgetHostedModel,
+  HOSTED_CONSENT,
+  HOSTED_MODEL_REFUSAL_TEXT,
+  hostedModelDecisionKeepingKey,
+  readHostedModel,
+  writeHostedModel,
+  type HostedModelRefusal,
+} from '../camera/hosted-model';
+import { useHostedCheck, type HostedCheckState } from '../camera/useHostedCheck';
 import { presenceSentence } from '../camera/presence';
 import type { CameraController, CaptureOutcome } from '../camera/session';
 import type { SidePairingPort } from '../camera/side-pairing-port';
@@ -190,10 +201,23 @@ export const ANALYSIS_WHAT_IS_SENT =
  * 0029 D-5), and what is sent to the rider's own computer, unencrypted
  * (ADR 0029's amendment, Q1). `a11y/kept-visible.a11y.test.tsx` holds them.
  */
+/**
+ * The kept-visible sentences that render only once the camera is agreed to:
+ * "Your own computer" and, since #518, the hosted model's consent — what
+ * leaves, to where, on whose key.
+ */
+export const CAMERA_AGREED_KEPT_VISIBLE: readonly string[] = [
+  ANALYSIS_WHAT_IS_SENT,
+  HOSTED_CONSENT.headline,
+  ...HOSTED_CONSENT.paragraphs,
+  HOSTED_CONSENT.notNeeded,
+  HOSTED_CONSENT.offUntilOn,
+];
+
 export const CAMERA_KEPT_VISIBLE: readonly string[] = [
   ...CONSENT_STATEMENT,
   BYSTANDER_SENTENCE,
-  ANALYSIS_WHAT_IS_SENT,
+  ...CAMERA_AGREED_KEPT_VISIBLE,
 ];
 
 export function CameraView({ controller, sidePairing }: CameraViewProps): JSX.Element {
@@ -597,6 +621,8 @@ function Camera({
 
       {agreed ? <AnalysisSection controller={controller} live={live} /> : null}
 
+      {agreed ? <HostedSection controller={controller} /> : null}
+
       {/*
         ⚠️ **A COUNT, and never a picture.** ADR 0029 D-11 keeps a kept frame
         off every screen somebody who did not take it could meet by accident,
@@ -914,6 +940,216 @@ function AnalysisSection({
             }}
           >
             Send one picture to check the connection
+          </Button>
+        </p>
+      ) : null}
+      {sentence === undefined ? null : (
+        <StatusMessage
+          tone={
+            state.kind === 'failed'
+              ? 'warning'
+              : state.kind === 'answered' && state.understood
+                ? 'success'
+                : 'info'
+          }
+          live
+        >
+          {sentence}
+        </StatusMessage>
+      )}
+    </section>
+  );
+}
+
+/** What the screen says about the hosted connection check. None carries what was said. */
+export function hostedSentence(state: HostedCheckState): string | undefined {
+  switch (state.kind) {
+    case 'idle':
+      return undefined;
+    case 'asking':
+      return 'A test question was sent to the service. No picture and no numbers were sent. Waiting for its answer…';
+    case 'answered':
+      return state.understood
+        ? 'The service answered, and understood the question.'
+        : `The service answered (${String(state.characters)} characters), but not with the one word it was asked for. What it said is not shown.`;
+    case 'failed':
+      return HOSTED_FAILURE_TEXT[state.failure];
+  }
+}
+
+/**
+ * A hosted model on the rider's own key — #518.
+ *
+ * ⚠️ **Its consent is its own**: the switch here calls
+ * `CameraController.agreeToHosted`, and nothing else on this screen can turn
+ * it on — agreeing to the camera above passes `allowHosted: false`. It is off
+ * whenever the app is opened, because the controller keeps consent in memory.
+ *
+ * ⚠️ **The key box is a password field and is never filled back in.** A saved
+ * key is not shown again — the screen says one is saved — so it is not in the
+ * DOM for a screenshot, a screen reader or a shoulder to read; typing a new
+ * one replaces it, and Forget removes it.
+ *
+ * ⚠️ **Nothing is pre-filled**, ADR 0031 D-4 condition 2: no address, no
+ * model, no placeholder, no list of services.
+ */
+function HostedSection({ controller }: { readonly controller: CameraController }): JSX.Element {
+  const consented = useSyncExternalStore(
+    (listener) => controller.subscribe(listener),
+    () => controller.state().consent.hosted,
+    () => false,
+  );
+  const saved = readHostedModel();
+  const [address, setAddress] = useState(saved?.address ?? '');
+  const [model, setModel] = useState(saved?.model ?? '');
+  const [key, setKey] = useState('');
+  const [hasKey, setHasKey] = useState(saved !== undefined);
+  const [refusal, setRefusal] = useState<HostedModelRefusal | undefined>(undefined);
+  const [message, setMessage] = useState<string | undefined>(undefined);
+  const { state, ask } = useHostedCheck(controller);
+  const sentence = hostedSentence(state);
+
+  const save = (): void => {
+    // A blank key box keeps the saved key, for the address it was saved with
+    // and no other — `hostedModelDecisionKeepingKey` says why.
+    const decision = hostedModelDecisionKeepingKey({ address, model, key }, readHostedModel());
+    setRefusal(decision.refusal);
+    if (decision.model === undefined) {
+      setMessage(undefined);
+      return;
+    }
+    const kept = writeHostedModel(decision.model);
+    setKey('');
+    setHasKey(kept);
+    setMessage(
+      kept
+        ? 'Saved. Nothing is sent until you turn the hosted model on below and press the button.'
+        : 'This device would not keep the service, so nothing is sent.',
+    );
+  };
+
+  return (
+    <section aria-labelledby="oyl-camera-hosted">
+      <h3 id="oyl-camera-hosted">A hosted model, on your own key</h3>
+      {/* #666: what leaves, to where, on whose key — never tucked. */}
+      <p data-oyl-kept-visible="">
+        <strong>{HOSTED_CONSENT.headline}</strong>
+      </p>
+      {HOSTED_CONSENT.paragraphs.map((paragraph) => (
+        <p key={paragraph} data-oyl-kept-visible="">
+          {paragraph}
+        </p>
+      ))}
+      <p data-oyl-kept-visible="">
+        <strong>{HOSTED_CONSENT.notNeeded}</strong>
+      </p>
+      <p id="oyl-hosted-consent" data-oyl-kept-visible="">
+        {HOSTED_CONSENT.offUntilOn}
+      </p>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          save();
+        }}
+      >
+        <p>
+          <label htmlFor="oyl-hosted-address">The service’s address</label>{' '}
+          <input
+            id="oyl-hosted-address"
+            className="oyl-input"
+            type="url"
+            inputMode="url"
+            autoComplete="off"
+            spellCheck={false}
+            value={address}
+            onChange={(event) => {
+              setAddress(event.target.value);
+            }}
+          />
+        </p>
+        <p>
+          <label htmlFor="oyl-hosted-model">The model’s name at that service</label>{' '}
+          <input
+            id="oyl-hosted-model"
+            className="oyl-input"
+            type="text"
+            autoComplete="off"
+            spellCheck={false}
+            value={model}
+            onChange={(event) => {
+              setModel(event.target.value);
+            }}
+          />
+        </p>
+        <p>
+          <label htmlFor="oyl-hosted-key">
+            {hasKey ? 'Your key (one is saved; type a new one to replace it)' : 'Your key'}
+          </label>{' '}
+          <input
+            id="oyl-hosted-key"
+            className="oyl-input"
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            value={key}
+            onChange={(event) => {
+              setKey(event.target.value);
+            }}
+          />
+        </p>
+        <Button variant="secondary" type="submit">
+          Save this service
+        </Button>{' '}
+        {!hasKey ? null : (
+          <Button
+            variant="secondary"
+            onClick={() => {
+              forgetHostedModel();
+              controller.agreeToHosted(false);
+              setAddress('');
+              setModel('');
+              setKey('');
+              setHasKey(false);
+              setRefusal(undefined);
+              setMessage('Forgotten, key and all. Nothing is sent.');
+            }}
+          >
+            Forget this service and key
+          </Button>
+        )}
+      </form>
+      {refusal === undefined ? null : (
+        <StatusMessage tone="warning" live>
+          {HOSTED_MODEL_REFUSAL_TEXT[refusal]}
+        </StatusMessage>
+      )}
+      {message === undefined ? null : (
+        <StatusMessage tone="info" live>
+          {message}
+        </StatusMessage>
+      )}
+      <p>
+        <label className="oyl-announce__switch">
+          <input
+            type="checkbox"
+            checked={consented}
+            aria-describedby="oyl-hosted-consent"
+            onChange={(event) => {
+              controller.agreeToHosted(event.target.checked);
+            }}
+          />{' '}
+          Turn the hosted model on until this app is closed
+        </label>
+      </p>
+      {consented && hasKey ? (
+        <p>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              ask('connection-check');
+            }}
+          >
+            Send a test question to the service
           </Button>
         </p>
       ) : null}

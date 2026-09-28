@@ -174,10 +174,19 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     why: 'heart rate from a BLE strap, stored locally. In scope of the Health apps policy because it advances gameplay (#85); not collected because nothing transmits it',
   },
   {
+    // ⚠️ **#518: the row the hosted path would move, and it has not moved
+    // yet.** The owner's ruling lets a hosted model on the rider's own key be
+    // sent ride data and pose numbers the tablet has already computed — which
+    // is fitness info, sent to a third party: `collected: true, shared: true`.
+    // The one question #518 built is a connection check that carries NO ride
+    // or pose numbers, so nothing here is transmitted yet, and answering
+    // `true` would be filing a feature the app does not have. ADR 0029's
+    // 2026-09-28 amendment says the issue that adds a numbers question re-files
+    // this row in the same pull request.
     dataType: 'Health and fitness — fitness info',
     collected: false,
     shared: false,
-    why: 'power, cadence, speed and distance from BLE sensors and the trainer, stored locally',
+    why: 'power, cadence, speed and distance from BLE sensors and the trainer, stored locally. A hosted model the rider sets up on their own key (#518) is sent only a fixed test question today, carrying none of it',
   },
   {
     dataType: 'Personal info',
@@ -216,9 +225,14 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     // exempts a transfer *"based on a specific user-initiated action, where
     // the user reasonably expects the data to be shared"*, which a press of
     // "Send one picture" to an address the rider typed is. ⚠️ **ADR 0029's
-    // amendment names `shared: yes` for the HOSTED path**, which is a third
-    // party by any reading — that path is not built (the address rule refuses
-    // anything off the rider's own network), and building it re-files this row.
+    // body names `shared: yes` for a HOSTED path carrying pictures, and since
+    // #518 there IS a hosted path — which is never sent a picture.** The owner
+    // ruled on 2026-09-28 (ADR 0029's amendment of that date): a hosted model
+    // on the rider's own key, *"NUMBERS ONLY and never a picture"*, and in
+    // terms that Photos and videos stays `shared: false`.
+    // `apps/web/src/camera/hosted-transport.test.ts` §"a picture cannot reach
+    // it" holds that by type, at run time and by what the modules can name, so
+    // this row is unchanged by the hosted path, and its `why` says so.
     //
     // **`optional: true`**: off until the rider sets up a computer and
     // switches it on, and the app works in full without it.
@@ -264,7 +278,7 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     shared: false,
     optional: true,
     purposes: ['App functionality'],
-    why: 'a still picture from the camera (#382, #383) is sent — only when the rider presses the button that sends it — to one computer the rider configured at an address on their own network and switched on (#387). Nothing is set up by default and nothing is sent until it is. It is not sent to this project, which runs no server, and not to any third party: an address that is not on the rider’s own network is refused. A picture is otherwise discarded after it has been looked at unless the rider turns on this ride’s keep (ADR 0029 D-2). Separately, a side-camera phone the rider paired by scanning sends its pictures to the rider’s own tablet over an end-to-end encrypted WebRTC data channel with no relay (#530, ADR 0033 D-1), where each is analysed on the tablet and discarded at once, never stored, shown or sent on (ADR 0033 D-6) — end-to-end encrypted transfer between the rider’s own devices, which Play exempts, and so not what makes this row collected. The one exception is a stream the rider switches on (#553, ADR 0033 D-11): with a second switch, off by default, ticked beside a sentence saying so, every side-camera picture — about five a second while the side camera films — is sent on to that same computer of the rider’s instead of being analysed on the tablet, over the same path as above, and is still not kept on the tablet',
+    why: 'a still picture from the camera (#382, #383) is sent — only when the rider presses the button that sends it — to one computer the rider configured at an address on their own network and switched on (#387). Nothing is set up by default and nothing is sent until it is. It is not sent to this project, which runs no server, and not to any third party: an address that is not on the rider’s own network is refused. A picture is otherwise discarded after it has been looked at unless the rider turns on this ride’s keep (ADR 0029 D-2). Separately, a side-camera phone the rider paired by scanning sends its pictures to the rider’s own tablet over an end-to-end encrypted WebRTC data channel with no relay (#530, ADR 0033 D-1), where each is analysed on the tablet and discarded at once, never stored, shown or sent on (ADR 0033 D-6) — end-to-end encrypted transfer between the rider’s own devices, which Play exempts, and so not what makes this row collected. The one exception is a stream the rider switches on (#553, ADR 0033 D-11): with a second switch, off by default, ticked beside a sentence saying so, every side-camera picture — about five a second while the side camera films — is sent on to that same computer of the rider’s instead of being analysed on the tablet, over the same path as above, and is still not kept on the tablet. A hosted model the rider sets up on their own key (#518) is never sent a picture, nor anything made from one',
   },
   {
     dataType: 'Device or other IDs',

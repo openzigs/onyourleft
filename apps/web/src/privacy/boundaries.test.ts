@@ -62,6 +62,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { analysisRequestBody } from '../camera/analysis-transport';
 import { capturedFrame } from '../camera/frame';
+import { hostedRequestBody } from '../camera/hosted-transport';
 import { controlMessageText, phoneMessageFrom } from '../camera/side-link-messages';
 import { cleanFrameBytes } from '../camera/testing';
 import { sharedTrack } from '../detail/privacy';
@@ -131,6 +132,16 @@ const BOUNDARIES: readonly Boundary[] = [
     // inside the picture, which is why D-9 re-encodes it at capture — see
     // `boundaries.ts`' own header, and `analysis-transport.test.ts` for the key
     // set the body is pinned to.
+    direction: 'departing',
+  },
+  {
+    module: 'camera/hosted-transport.ts',
+    what: 'a fixed question, never a picture, sent to a service the rider chose on their own key (#518)',
+    // ⚠️ Departing, and to a THIRD PARTY — the first boundary here whose
+    // other end is neither the rider's nor ours. ADR 0029's 2026-09-28
+    // amendment: numbers only, never a picture. The walk below finds no
+    // coordinate in the body, and `camera/hosted-transport.test.ts` pins its
+    // key set and that no image part is in it.
     direction: 'departing',
   },
   {
@@ -357,6 +368,22 @@ describe('the picture sent to the rider’s own computer carries no coordinate b
     });
     const body = {
       ...analysisRequestBody('a-model', { frame, question: 'connection-check' }),
+      where: { latitude: 51.5, longitude: -0.12 },
+    };
+    expect(coordinatesIn(body)).toHaveLength(1);
+  });
+});
+
+describe('the hosted question carries no coordinate at all — #518', () => {
+  it('has none in any field of the body', () => {
+    expect(
+      coordinatesIn(hostedRequestBody('a-model', { question: 'connection-check' })),
+    ).toStrictEqual([]);
+  });
+
+  it('would find one if a field carried it', () => {
+    const body = {
+      ...hostedRequestBody('a-model', { question: 'connection-check' }),
       where: { latitude: 51.5, longitude: -0.12 },
     };
     expect(coordinatesIn(body)).toHaveLength(1);

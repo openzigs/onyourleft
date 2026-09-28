@@ -60,6 +60,7 @@ import type {
 } from './camera-port';
 import { CameraCaptureError } from './camera-port';
 import { consentDecision, NO_CONSENT, type CameraConsent, type ConsentAnswers } from './consent';
+import type { HostedCall, HostedFailure, HostedPort, HostedQuestion } from './hosted-port';
 import type {
   AnalysisCall,
   AnalysisFailure,
@@ -357,6 +358,16 @@ export interface CameraControllerOptions {
    */
   readonly analysis?: (() => AnalysisPort | undefined) | undefined;
   /**
+   * The rider's hosted service, looked up afresh on every press — #518.
+   *
+   * A function for {@link analysis}'s reason. `main.tsx` passes
+   * `hosted-transport.ts` §`hostedModelPort` over the stored service. It is
+   * reached only after {@link CameraController.askHostedModel} has found
+   * `consent.hosted`, so a saved key sends nothing until the rider has turned
+   * the hosted model on since the app was opened.
+   */
+  readonly hosted?: (() => HostedPort | undefined) | undefined;
+  /**
    * How the pairing-code reader is loaded — #529. Defaults to
    * {@link loadPairingCodeReader}, the lazy chunk; a test's way to make that
    * load fail. Production leaves it alone.
@@ -415,6 +426,7 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
   readonly #clock: () => number;
   readonly #wait: (milliseconds: number) => Promise<void>;
   readonly #analysis: (() => AnalysisPort | undefined) | undefined;
+  readonly #hosted: (() => HostedPort | undefined) | undefined;
   readonly #loadCodeReader: () => Promise<PairingCodeReader>;
   readonly #listeners = new Set<() => void>();
 
@@ -456,6 +468,7 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
     this.#clock = options.clock ?? Date.now;
     this.#wait = options.wait ?? browserWait;
     this.#analysis = options.analysis;
+    this.#hosted = options.hosted;
     this.#loadCodeReader = options.loadCodeReader ?? loadPairingCodeReader;
   }
 
@@ -499,6 +512,65 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
       this.#announce();
     }
     return decision;
+  }
+
+  /**
+   * Turn the hosted model on or off — #518, the owner's *"separately
+   * consented"*.
+   *
+   * ⚠️ **Its own answer, never inferred from the camera's.** The decision is
+   * `consent.ts` §`consentDecision` over the local answer already recorded and
+   * this one, so a hosted answer without the camera agreed to is refused
+   * (`hosted-without-local`) and turning it off leaves the camera's consent as
+   * it was. Agreeing to the camera — {@link agree} with `allowHosted: false`,
+   * which is all the Camera screen ever passes there — leaves this `false`.
+   *
+   * The bystander acknowledgement is the one already given: `consent.local` is
+   * recorded only after it, so the local answer carries it.
+   *
+   * ⚠️ **Held in memory, like the camera's consent**, so it is off again
+   * whenever the app is opened — which the consent wording says.
+   */
+  agreeToHosted(allow: boolean): ReturnType<typeof consentDecision> {
+    const decision = consentDecision({
+      acknowledgedBystanders: this.#consent.local,
+      allowLocal: this.#consent.local,
+      allowHosted: allow,
+    });
+    if (decision.consent !== undefined) {
+      this.#consent = decision.consent;
+      this.#announce();
+    }
+    return decision;
+  }
+
+  /**
+   * Ask the rider's hosted service one question — #518.
+   *
+   * The order refuses without doing the next step: **consent** —
+   * `consent.hosted`, which only {@link agreeToHosted} sets; then
+   * **configuration**, looked up now. Neither step touches the camera: this
+   * path is never sent a picture, so there is no capture to refuse.
+   *
+   * ⚠️ **The port's method is called lexically here**, for `check:wiring`'s
+   * sake — see {@link askAboutPicture}.
+   *
+   * Nothing the service said reaches this controller's state; the outcome is
+   * returned and not stored, for the reason {@link askAboutPicture} gives.
+   */
+  askHostedModel(question: HostedQuestion): HostedCall {
+    const refused = (failure: HostedFailure): HostedCall => ({
+      outcome: Promise.resolve({ kind: 'failed', failure }),
+      cancel: () => undefined,
+    });
+    if (!this.#consent.hosted) {
+      return refused('not-consented');
+    }
+    const port = this.#hosted?.();
+    if (port === undefined) {
+      return refused('not-configured');
+    }
+    return port.sendHostedQuestion({ question });
   }
 
   /**

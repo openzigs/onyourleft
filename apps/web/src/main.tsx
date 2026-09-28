@@ -55,6 +55,8 @@ import {
 } from './camera/browser-camera';
 import { readAnalysisEndpoint } from './camera/analysis-endpoint';
 import { riderAnalysisPort, riderAnalysisSource } from './camera/analysis-transport';
+import { hostedModelEraser, readHostedModel } from './camera/hosted-model';
+import { hostedModelPort } from './camera/hosted-transport';
 import { keepThisRide } from './camera/keep';
 import { shellCameraNotice } from './camera/shell-camera';
 import { CameraController } from './camera/session';
@@ -645,6 +647,7 @@ function buildTransferPort(): TransferPort | undefined {
     save: saveWithAnchor,
     drafts: browserDraftStorage(typeof localStorage === 'undefined' ? undefined : localStorage),
     theme: themeEraser(window),
+    hostedModel: hostedModelEraser(),
     athleteRow: localAthleteRecord(unixSeconds(Math.floor(Date.now() / 1000))),
   };
 }
@@ -813,8 +816,14 @@ async function buildCameraController(
   // #387. The rider's own computer — `analysis` is looked up on every press
   // rather than once, so switching it off on the Camera screen stops the next
   // request. With nothing saved it answers `undefined` and nothing can be sent.
+  // #518. The rider's hosted service, looked up on every press as well, and
+  // reached only after the rider has turned it on since the app was opened —
+  // `CameraController.askHostedModel` checks that first. It is sent a
+  // question, never a picture, and it is an `https:` origin, so the WebView's
+  // own `fetch` carries it on both platforms.
+  const hosted = (): ReturnType<typeof hostedModelPort> => hostedModelPort(readHostedModel());
   if (!isNativeShell(platformCapacitor())) {
-    return new CameraController({ port, keep, analysis });
+    return new CameraController({ port, keep, analysis, hosted });
   }
   // #383. The **only** thing the shell changes is what a rider is told when
   // Android refuses: "open this device's settings" is right for a browser and
@@ -830,6 +839,7 @@ async function buildCameraController(
     port,
     keep,
     analysis,
+    hosted,
     notices: (kind) => shellCameraNotice(kind, mobile.ANDROID_CAMERA_DENIED),
   });
 }

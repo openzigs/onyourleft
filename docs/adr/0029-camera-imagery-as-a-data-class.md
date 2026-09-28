@@ -760,3 +760,62 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   module there and nowhere else. The privacy policy, the rider-facing document and the Data Safety
   row moved in the same pull request. ⚠️ Part AF has not been re-run on the tablet over the native
   route; until it is, "works in the Android app" is not established.
+- **2026-09-28** — **The owner answered the hosted-model question exclusion 2 of §Q1 left open, and
+  the answer is yes, NUMBERS ONLY and never a picture.**
+  [#518](https://github.com/openzigs/onyourleft/issues/518) carries the ruling verbatim: *"a hosted
+  model on the rider's own key, with NUMBERS ONLY and never a picture"*, off by default, separately
+  consented, and consenting to local analysis does not enable it. It may receive ride data and pose
+  numbers the tablet has already computed; it must **never** receive a camera frame or any
+  image-derived bitmap. The rider's key never reaches a log, an error, an export or
+  `packages/store` in plaintext, and no vendor is named or defaulted
+  ([ADR 0031](0031-model-licences-and-the-hosted-model-hole.md) D-3, D-4).
+
+  **What that changes above, and what it does not.** D-7's first row — *"The frame, and a fixed
+  prompt"* — is **narrowed by the owner, not by this entry**: on the hosted path the frame is gone,
+  and what may leave is a fixed prompt this repository's source contains, the model name and key
+  the rider typed, and numbers. D-7's other rows stand: the origin is the one the rider typed, the
+  key is the rider's own and stored on the device, a request is made only on a press, and what
+  comes back is untrusted input under D-8. D-4's second `ERASE_CANNOT_REACH` line is written for a
+  photograph and is therefore **not** the line that ships; the one that ships says what does leave.
+  ⚠️ **D-7's quoted consent wording describes a photograph and is not the wording a rider reads.**
+  It is not edited — an ADR body never is — and the wording below replaces it for the path that was
+  actually built, quoted here for the reason D-7's was: so the screen implements a sentence somebody
+  ruled on, and `camera/hosted-model.test.ts` compares the two word for word.
+
+  **The consent screen's words for the hosted path:**
+
+  > **This sends questions to a service you have chosen, using your own key.**
+  >
+  > If you turn this on, each time you press the button below a question written into this app is
+  > sent to the address you entered, using the key you entered. That is a company or a computer
+  > that is not yours and not ours, and we cannot see what they do with it or how long they keep
+  > it. We cannot delete it for you afterwards. Like any service you connect to, it also sees your
+  > internet address.
+  >
+  > It is never sent a picture — not a photograph of you, and nothing made from one. Today it is
+  > sent only a test question, with no numbers from your rides. It is not sent your name, your
+  > rides, or where you were.
+  >
+  > Your key is kept on this device, is sent only to the address you entered, and is never put in
+  > a file this app exports.
+  >
+  > **You do not need this.** Everything else in the app works without it.
+  >
+  > This is off. It stays off until you turn it on, it is off again whenever the app is opened, and
+  > you can turn it off at any time.
+
+  **What was built, and the one thing deliberately not built.** The path has one question: a
+  connection check that sends a fixed prompt and **no** ride or pose numbers, and whose answer is
+  reduced to "understood" or not before anything renders, as #387's is. A question that carries
+  ride or pose numbers is permitted by this ruling and is **not** built here, because nothing may
+  show a model's words about a rider's body outside [ADR 0030](0030-what-the-app-may-say-about-a-body.md)'s
+  vocabularies, so a numbers question would have an answer with nowhere to go. The issue that adds
+  one owes, in the same pull request: the wording above changed by a further amendment, and the
+  Play Data Safety fitness rows re-filed as shared.
+
+  | Artefact | What changed in the same pull request |
+  |---|---|
+  | `apps/web/src/privacy/no-network.test.ts` | One more permitted call: one `fetch` in `camera/hosted-transport.ts`, with its own three fixtures, and a scan that fails if the hosted modules can name a picture |
+  | [`docs/privacy-policy.md`](../privacy-policy.md) | A second named exception, worded as numbers only: a question sent to a service the rider chose, on their own key |
+  | `apps/mobile/src/android/data-safety.ts` | **Photos and videos stays `shared: false`** — the hosted path is never sent one. The rows the hosted path touches say so, and the fitness rows stay `collected: false` while no question carries ride numbers |
+  | `apps/web/src/transfer/erase-device.ts` | `ERASE_CANNOT_REACH` gains the hosted line — *"a question you sent to a service you chose, on your own key, which is a copy that service holds"* — and `ERASE_REMOVES` gains the key, which an erase now forgets |

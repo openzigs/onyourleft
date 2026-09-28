@@ -164,6 +164,17 @@ const IMPORTERS: Readonly<
   [join('camera', 'side-link-code.ts')]: 'reuses the address rule',
   [join('views', 'CameraView.tsx')]: 'holds an answer',
   'main.tsx': 'builds the port',
+  // #518: the hosted model on the rider's own key. It reads its answer with
+  // `analysis-response.ts`, the one reader of a model's reply, and holds it
+  // exactly as the picture path does — reduced in `useHostedCheck.ts` to
+  // "understood" and a length. The check below holds all three to importing no
+  // trainer module.
+  [join('camera', 'hosted-port.ts')]: 'holds an answer',
+  [join('camera', 'hosted-transport.ts')]: 'holds an answer',
+  [join('camera', 'useHostedCheck.ts')]: 'holds an answer',
+  // It takes the request path and the model-name bound from the endpoint rule,
+  // so the two paths cannot disagree about either; it can hold no answer.
+  [join('camera', 'hosted-model.ts')]: 'reuses the address rule',
 };
 
 /** The modules through which anything reaches a trainer's control point. */
@@ -208,13 +219,19 @@ describe('2. in the module graph, an answer cannot reach a trainer', () => {
 });
 
 describe('3. in the text, an answer is reduced before anything renders', () => {
-  it('reads `.description` in two production places, and neither is a view', () => {
+  it('reads `.description` in three production places, and none is a view', () => {
     // ⚠️ It said ONE until #553: `computer-pose.ts` is the second, and it
     // reduces the answer to image-plane numbers or to `unreadable` before
     // anything else sees it — the test below runs a hostile answer through it.
+    // ⚠️ And TWO until #518: `useHostedCheck.ts` reduces the hosted model's
+    // answer to "understood" and a length, as `useAnalysis.ts` does.
     const readers = sources().filter((path) => /\.description\b/.test(code(path)));
     expect([...readers].sort()).toStrictEqual(
-      [join('camera', 'computer-pose.ts'), join('camera', 'useAnalysis.ts')].sort(),
+      [
+        join('camera', 'computer-pose.ts'),
+        join('camera', 'useAnalysis.ts'),
+        join('camera', 'useHostedCheck.ts'),
+      ].sort(),
     );
   });
 
@@ -237,6 +254,7 @@ describe('3. in the text, an answer is reduced before anything renders', () => {
       join('camera', 'useAnalysis.ts'),
       join('views', 'CameraView.tsx'),
       join('camera', 'computer-pose.ts'),
+      join('camera', 'useHostedCheck.ts'),
     ]) {
       expect(code(path), path).not.toMatch(/new URL\(|createObjectURL|download=|href=\{/);
     }

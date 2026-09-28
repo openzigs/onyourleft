@@ -247,6 +247,11 @@ export const PERMITTED_NETWORK_CALLS: readonly {
   // dependency needs fencing at all. An exact count, so deleting the fence
   // is a red run here as well as in `browser/pose.browser.spec.ts`.
   { module: join('camera', 'pose-fence.ts'), primitive: 'XMLHttpRequest', count: 1 },
+  // #518, ADR 0029's 2026-09-28 amendment: the hosted model on the rider's own
+  // key — a question and never a picture — which the privacy policy names as
+  // its second exception. Its own module, so that `camera/hosted-transport.test.ts`
+  // can read off the imports that it cannot name a picture.
+  { module: join('camera', 'hosted-transport.ts'), primitive: 'fetch', count: 1 },
 ];
 
 /** One source file, by its path relative to `apps/web/src`. */
@@ -317,11 +322,16 @@ describe('the narrowed gate itself — #387', () => {
     path: FENCE,
     source: 'const scope = globalThis as unknown as { readonly XMLHttpRequest?: unknown };',
   };
+  const HOSTED = join('camera', 'hosted-transport.ts');
+  const hosted: ScannedFile = {
+    path: HOSTED,
+    source: 'const send: HostedSend = options.send ?? (async (url, init) => fetch(url, init));',
+  };
   const quiet: ScannedFile = { path: join('views', 'CameraView.tsx'), source: 'const x = 1;' };
 
   it('is clean over a tree that is exactly what the policy describes', () => {
     expect(
-      networkFindingsOutside([transport, link, quiet, fence], PERMITTED_NETWORK_CALLS),
+      networkFindingsOutside([hosted, transport, link, quiet, fence], PERMITTED_NETWORK_CALLS),
     ).toEqual([]);
   });
 
@@ -333,7 +343,7 @@ describe('the narrowed gate itself — #387', () => {
       source: "const r = await fetch('https://example.invalid/upload', { method: 'POST' });",
     };
     const findings = networkFindingsOutside(
-      [transport, link, elsewhere, fence],
+      [hosted, transport, link, elsewhere, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -347,7 +357,7 @@ describe('the narrowed gate itself — #387', () => {
       source: 'void fetch(url);',
     };
     expect(
-      networkFindingsOutside([transport, link, sibling, fence], PERMITTED_NETWORK_CALLS),
+      networkFindingsOutside([hosted, transport, link, sibling, fence], PERMITTED_NETWORK_CALLS),
     ).toHaveLength(1);
   });
 
@@ -356,7 +366,9 @@ describe('the narrowed gate itself — #387', () => {
       path: TRANSPORT,
       source: `${transport.source}\nvoid fetch('https://example.invalid/telemetry');`,
     };
-    expect(networkFindingsOutside([twice, link, fence], PERMITTED_NETWORK_CALLS)).toHaveLength(1);
+    expect(
+      networkFindingsOutside([hosted, twice, link, fence], PERMITTED_NETWORK_CALLS),
+    ).toHaveLength(1);
   });
 
   it('goes red for a different primitive inside the permitted module', () => {
@@ -364,14 +376,17 @@ describe('the narrowed gate itself — #387', () => {
       path: TRANSPORT,
       source: `${transport.source}\nconst s = new WebSocket(url);`,
     };
-    const findings = networkFindingsOutside([socket, link, fence], PERMITTED_NETWORK_CALLS);
+    const findings = networkFindingsOutside([hosted, socket, link, fence], PERMITTED_NETWORK_CALLS);
     expect(findings).toHaveLength(1);
     expect(findings[0]).toContain('WebSocket');
   });
 
   it('goes red when the permitted call is gone, so the list cannot outlive it', () => {
     const emptied: ScannedFile = { path: TRANSPORT, source: 'const send = options.send;' };
-    const findings = networkFindingsOutside([emptied, link, fence], PERMITTED_NETWORK_CALLS);
+    const findings = networkFindingsOutside(
+      [hosted, emptied, link, fence],
+      PERMITTED_NETWORK_CALLS,
+    );
     expect(findings).toHaveLength(1);
     expect(findings[0]).toContain('0 fetch');
   });
@@ -383,7 +398,10 @@ describe('the narrowed gate itself — #387', () => {
       path: LINK,
       source: `${link.source}\nconst another = new RTCPeerConnection(config);`,
     };
-    const findings = networkFindingsOutside([transport, twice, fence], PERMITTED_NETWORK_CALLS);
+    const findings = networkFindingsOutside(
+      [hosted, transport, twice, fence],
+      PERMITTED_NETWORK_CALLS,
+    );
     expect(findings).toHaveLength(1);
     expect(findings[0]).toContain('2 RTCPeerConnection');
   });
@@ -393,7 +411,10 @@ describe('the narrowed gate itself — #387', () => {
       path: LINK,
       source: `${link.source}\nvoid fetch('https://stun.example.invalid');`,
     };
-    const findings = networkFindingsOutside([transport, fetched, fence], PERMITTED_NETWORK_CALLS);
+    const findings = networkFindingsOutside(
+      [hosted, transport, fetched, fence],
+      PERMITTED_NETWORK_CALLS,
+    );
     expect(findings).toHaveLength(1);
     expect(findings[0]).toContain('fetch');
   });
@@ -404,7 +425,7 @@ describe('the narrowed gate itself — #387', () => {
       source: 'const peer = new webkitRTCPeerConnection({});',
     };
     const findings = networkFindingsOutside(
-      [transport, link, elsewhere, fence],
+      [hosted, transport, link, elsewhere, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -414,7 +435,7 @@ describe('the narrowed gate itself — #387', () => {
   // #530: the pose worker's fence, pinned like a call so that deleting it is
   // a red run.
   it('goes red when the pose worker’s fence is gone', () => {
-    const findings = networkFindingsOutside([transport, link], PERMITTED_NETWORK_CALLS);
+    const findings = networkFindingsOutside([hosted, transport, link], PERMITTED_NETWORK_CALLS);
     expect(findings).toHaveLength(1);
     expect(findings[0]).toContain('0 XMLHttpRequest');
   });
@@ -425,16 +446,57 @@ describe('the narrowed gate itself — #387', () => {
       source: 'const request = new XMLHttpRequest();',
     };
     const findings = networkFindingsOutside(
-      [transport, link, fence, elsewhere],
+      [hosted, transport, link, fence, elsewhere],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
     expect(findings[0]).toContain(join('camera', 'pose-worker.ts'));
   });
 
+  // #518: the hosted transport's three, as #387's.
+  it('goes red for a second fetch inside the hosted transport', () => {
+    const twice: ScannedFile = {
+      path: HOSTED,
+      source: `${hosted.source}\nvoid fetch('https://example.invalid/telemetry');`,
+    };
+    const findings = networkFindingsOutside(
+      [transport, link, fence, twice],
+      PERMITTED_NETWORK_CALLS,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain('2 fetch');
+  });
+
+  it('goes red for a different primitive inside the hosted transport', () => {
+    const socket: ScannedFile = {
+      path: HOSTED,
+      source: `${hosted.source}\nconst s = new WebSocket(url);`,
+    };
+    const findings = networkFindingsOutside(
+      [transport, link, fence, socket],
+      PERMITTED_NETWORK_CALLS,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain('WebSocket');
+  });
+
+  it('goes red when the hosted transport’s fetch is gone', () => {
+    const emptied: ScannedFile = { path: HOSTED, source: 'const send = options.send;' };
+    const findings = networkFindingsOutside(
+      [transport, link, fence, emptied],
+      PERMITTED_NETWORK_CALLS,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain(HOSTED);
+    expect(findings[0]).toContain('0 fetch');
+  });
+
   it('goes red when the side link’s peer connection is gone', () => {
     const emptied: ScannedFile = { path: LINK, source: 'const Peer = undefined;' };
-    const findings = networkFindingsOutside([transport, emptied, fence], PERMITTED_NETWORK_CALLS);
+    const findings = networkFindingsOutside(
+      [hosted, transport, emptied, fence],
+      PERMITTED_NETWORK_CALLS,
+    );
     expect(findings).toHaveLength(1);
     expect(findings[0]).toContain('0 RTCPeerConnection');
   });
@@ -456,8 +518,9 @@ describe('the client', () => {
     expect(
       networkFindingsOutside(files, PERMITTED_NETWORK_CALLS),
       'docs/privacy-policy.md says this client sends nothing except one picture to a computer the ' +
-        'rider configured and switched on, and a start and a stop to a side-camera phone the rider ' +
-        'paired by scanning; that is now false, and the policy and the Data Safety form are what ' +
+        'rider configured and switched on, a start and a stop to a side-camera phone the rider ' +
+        'paired by scanning, and a question — never a picture — to a hosted service on the ' +
+        'rider’s own key; that is now false, and the policy and the Data Safety form are what ' +
         'must change',
     ).toEqual([]);
   });
