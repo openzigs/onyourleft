@@ -358,6 +358,13 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
         HUD carried three while a notice stood. `GameView` feeds both into the
         announcer as rank-1 events, so this is the only thing on the stage that
         speaks by itself.
+
+        ⚠️ **It sets its text IN PLACE, unlike the Ride screen's region since
+        #655**, which inserts a node per sentence (`RideAnnouncer.tsx` §"said
+        twice", held by `ride-announcer.a11y.test.tsx` §"#740"). So the same
+        sentence twice in a row is set to the text it already holds and is
+        not heard the second time here. Recorded as a known difference
+        (#740), not claimed by any test of this region.
       */}
       <p className="oyl-visually-hidden" role="status" data-oyl-announcer="hud">
         {props.announcement}
