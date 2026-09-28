@@ -1376,10 +1376,11 @@ test.describe('a ride that may stop with the screen off — #647', () => {
       });
       await openRide(page, viewport, '?keepalive=failed&trainer=workout');
       await expect.poll(async () => (await keepScreenOnNotice(page)).roadNoticeShown).toBe(true);
-      // ⚠️ Clearance only, since #693's re-review shortened the sentence to
-      // one line: the pair open now ends 26 px (360×800) and 1 px (360×752)
-      // ABOVE the rider's box on a Mac, where the longer one ran 27 px into
-      // it — under the clearance still, and so still the rule's reason.
+      // ⚠️ Clearance only, since #693's re-review shortened the sentence (to
+      // one line on a Mac; the CI runner still wraps it): the pair open now
+      // ends 26 px (360×800) and 1 px (360×752) ABOVE the rider's box on a
+      // Mac, where the longer one ran 27 px into it — under the clearance
+      // still, and so still the rule's reason.
       const { clearance } = await keepScreenOnLaidOut(
         page,
         viewport,
@@ -1404,8 +1405,10 @@ test.describe('a ride that may stop with the screen off — #647', () => {
  * than only to "no collision". Each prints its clearance.
  *
  * What gets it there: *"Keep the screen on: your ride may stop without it."*
- * is one line at 360 px, and two notices sharing the cell give up half their
- * vertical padding (`theme.css` §"Two notices in the one cell"). As round one
+ * is shorter — one line at 360 px on a Mac, though still two on the CI runner,
+ * whose fonts are wider — and two notices sharing the cell give up half their
+ * vertical padding (`theme.css` §"Two notices in the one cell"), which on the
+ * runner is what clears the floor. As round one
  * of #693 shipped it — the longer sentence, full padding — the pair beside
  * Eased ended 38 px above the rider at 360×752; the control below puts both
  * back and requires the same measurement to fall under the floor.
