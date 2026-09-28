@@ -14,7 +14,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -25,6 +25,7 @@ import {
   assetRecord,
   inputDigest,
   KTX2_SCRIPT,
+  KTX2_SCRIPT_PATH,
   OUTPUT_DIRECTORY,
   OUTPUTS,
   PINNED_BLENDER,
@@ -89,6 +90,26 @@ describe('the realistic files and the pipeline that makes them', () => {
             ? `${PINNED_BLENDER}, then ${PINNED_KTX}`
             : PINNED_BLENDER,
       );
+    }
+  });
+
+  it('names BOTH scripts in a row made by Blender and then the encoder — #618’s review', () => {
+    // ASSET007 checks one `script`, and the two manifest readers hold no list,
+    // so the first step is `script` and the encoder is named in `modified`.
+    // Without it, "can it be made again from the row" needs a reader to know
+    // about a second file the row never mentions.
+    const twoStep = manifest.entries.filter(
+      (entry) => entry.tool === `${PINNED_BLENDER}, then ${PINNED_KTX}`,
+    );
+    expect(twoStep.length).toBeGreaterThan(0);
+    expect(existsSync(join(REPOSITORY, KTX2_SCRIPT_PATH))).toBe(true);
+    for (const entry of twoStep) {
+      expect(entry.script, entry.path).toMatch(/\/blender\/[a-z_]+\.py$/);
+      expect(entry.modified, entry.path).toContain(KTX2_SCRIPT_PATH);
+    }
+    // And a row that did not pass through the encoder does not claim it did.
+    for (const entry of manifest.entries.filter((each) => each.tool === PINNED_BLENDER)) {
+      expect(entry.modified ?? '', entry.path).not.toContain(KTX2_SCRIPT_PATH);
     }
   });
 

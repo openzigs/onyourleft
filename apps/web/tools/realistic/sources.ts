@@ -381,6 +381,15 @@ export const GLB_IMAGES_WORDS = `its embedded maps encoded as KTX2 (KHR_texture_
 /** Where {@link OutputRecipe} `ktx2` recipes' encoder step lives — #618. */
 export const KTX2_SCRIPT = 'encode-ktx2.ts';
 
+/** Where the pipeline's scripts are, relative to the repository — what a row's `script` begins with. */
+export const PIPELINE_DIRECTORY = 'apps/web/tools/realistic/';
+
+/** The encoder's script as a two-step row's `modified` names it — #618's review. */
+export const KTX2_SCRIPT_PATH = `${PIPELINE_DIRECTORY}${KTX2_SCRIPT}`;
+
+/** What a two-step row's `modified` ends with, before {@link KTX2_SCRIPT_PATH}. */
+export const KTX2_STEP_WORDS = '; the KTX2 step is made by ';
+
 /** Where the product's realistic files are committed, repository-relative. */
 export const OUTPUT_DIRECTORY = 'apps/web/public/realistic';
 
@@ -853,6 +862,17 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
       : encoded
         ? `${PINNED_BLENDER}, then ${PINNED_KTX}`
         : PINNED_BLENDER;
+  // #618's review: `script` is ONE path — ASSET007 checks a single committed
+  // file, and the manifest's two readers (`check-repo-rules.sh` and
+  // `credits/manifest.ts`) hold no list — so a two-step row names its first
+  // step there, the Blender script that read the recorded input, and its
+  // second in `modified`, where a reader making it again looks for what was
+  // done. `provenance.test.ts` holds that the file named is committed.
+  const second = recipe.how === 'blender' && encoded ? `${KTX2_STEP_WORDS}${KTX2_SCRIPT_PATH}` : '';
+  const described =
+    impostor !== undefined
+      ? `an eight-view impostor strip of one object of the pack, rendered from the full scan; then ${encodingWords(impostor.ktx2)}`
+      : (output.modified ?? '');
   return [
     ['path', path],
     [
@@ -862,15 +882,10 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
     ['licence', source.licence],
     ['read', source.read],
     ['sha256', sha256],
-    [
-      'modified',
-      impostor !== undefined
-        ? `an eight-view impostor strip of one object of the pack, rendered from the full scan; then ${encodingWords(impostor.ktx2)}`
-        : (output.modified ?? ''),
-    ],
+    ['modified', `${described}${second}`],
     ['input', source.licencePage],
     ['inputsha256', inputDigest(source.files)],
-    ['script', `apps/web/tools/realistic/${recipe.how === 'ktx2' ? KTX2_SCRIPT : recipe.script}`],
+    ['script', `${PIPELINE_DIRECTORY}${recipe.how === 'ktx2' ? KTX2_SCRIPT : recipe.script}`],
     ['tool', tool],
   ];
 }

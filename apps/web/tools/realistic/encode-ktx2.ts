@@ -44,19 +44,23 @@ const KTX_FROM_ENV = process.env.KTX;
 /** The `ktx` binary the pipeline runs: `KTX`, or `ktx` on the `PATH`. */
 export const KTX = KTX_FROM_ENV !== undefined && KTX_FROM_ENV !== '' ? KTX_FROM_ENV : 'ktx';
 
-/** What `ktx --version` prints, or throws when it cannot be run. */
-export function ktxVersion(): string {
-  const run = spawnSync(KTX, ['--version'], { encoding: 'utf8' });
-  if (run.status !== 0) throw new Error(`${KTX} --version failed; set KTX to KTX-Software's ktx`);
+/**
+ * What `ktx --version` prints, or throws when it cannot be run. `binary` is
+ * {@link KTX} but for `encode-ktx2.test.ts`, which hands it stand-ins.
+ */
+export function ktxVersion(binary: string = KTX): string {
+  const run = spawnSync(binary, ['--version'], { encoding: 'utf8' });
+  if (run.status !== 0)
+    throw new Error(`${binary} --version failed; set KTX to KTX-Software's ktx`);
   return run.stdout.split('\n')[0]?.trim() ?? '';
 }
 
 /** Refuses any `ktx` but the pinned one. @see PINNED_KTX_VERSION_LINE */
-export function requirePinnedKtx(): void {
-  const version = ktxVersion();
+export function requirePinnedKtx(binary: string = KTX): void {
+  const version = ktxVersion(binary);
   if (version !== PINNED_KTX_VERSION_LINE) {
     throw new Error(
-      `${KTX} is "${version}"; the pipeline is pinned to "${PINNED_KTX_VERSION_LINE}"`,
+      `${binary} is "${version}"; the pipeline is pinned to "${PINNED_KTX_VERSION_LINE}"`,
     );
   }
 }

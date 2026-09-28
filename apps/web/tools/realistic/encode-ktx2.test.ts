@@ -7,21 +7,24 @@
  * and what three makes of it is `realistic-textures.test.ts`'.
  */
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 
 import {
   BASISU_EXTENSION,
   embeddedImages,
   pngHasAlpha,
   readGlbBytes,
+  requirePinnedKtx,
   withKtx2Images,
   writeGlbBytes,
   type GltfJson,
 } from './encode-ktx2';
+import { PINNED_KTX_VERSION_LINE } from './sources';
 
 const SHIPPED = fileURLToPath(new URL('../../public/realistic/', import.meta.url));
 
@@ -149,5 +152,56 @@ describe('a GLB with its maps encoded as KTX2 — #618', () => {
       }
     }
     expect(withMaps).toBe(7);
+  });
+});
+
+describe('the encoder is refused unless it is the pinned one — ADR 0026 D-5, #618’s review', () => {
+  // Stand-in `ktx` binaries: shell scripts answering `--version` as the real
+  // one does. A different encoder is a silent byte drift that `--check` would
+  // only report as "not reproduced", so the refusal is what names the cause.
+  const scratch = mkdtempSync(join(tmpdir(), 'oyl-ktx-version-'));
+  afterAll(() => {
+    rmSync(scratch, { recursive: true, force: true });
+  });
+  function standIn(name: string, body: string): string {
+    const path = join(scratch, name);
+    writeFileSync(path, `#!/bin/sh\n${body}\n`);
+    chmodSync(path, 0o755);
+    return path;
+  }
+
+  it('accepts the pinned version', () => {
+    const pinned = standIn('pinned', `echo '${PINNED_KTX_VERSION_LINE}'`);
+    expect(() => {
+      requirePinnedKtx(pinned);
+    }).not.toThrow();
+  });
+
+  it('refuses a different version, naming both', () => {
+    const older = standIn('older', "echo 'ktx version: v4.4.1'");
+    expect(() => {
+      requirePinnedKtx(older);
+    }).toThrow(/is "ktx version: v4\.4\.1"; the pipeline is pinned to "ktx version: v4\.4\.2"/);
+  });
+
+  it('refuses a version line with the pinned one only as a prefix', () => {
+    const later = standIn('later', `echo '${PINNED_KTX_VERSION_LINE}-rc1'`);
+    expect(() => {
+      requirePinnedKtx(later);
+    }).toThrow(/pinned to/);
+  });
+
+  it('refuses a binary that answers nothing', () => {
+    const silent = standIn('silent', 'true');
+    expect(() => {
+      requirePinnedKtx(silent);
+    }).toThrow(/is ""; the pipeline is pinned to/);
+  });
+
+  it('refuses a binary that fails, saying so', () => {
+    const failing = standIn('failing', 'exit 3');
+    expect(() => {
+      requirePinnedKtx(failing);
+    }).toThrow(/--version failed/);
   });
 });
