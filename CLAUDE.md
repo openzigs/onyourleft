@@ -274,7 +274,21 @@ apps/                 AGPL-3.0-or-later, without exception
                         `glyphs` URL so they add no origin. ⚠️ MapLibre 6.10
                         draws text in the device's font when a range cannot be
                         fetched, so a label painting proves nothing about the
-                        glyphs — the browser gate asserts the requests
+                        glyphs — the browser gate asserts the requests. Since
+                        #672 every colour the map paints is in `basemap.ts`
+                        §`MAP_COLOURS`, one table per palette, CHECKED against
+                        the palette tokens rather than derived from them (the
+                        map is cartography: `map-colours.a11y.test.ts` holds
+                        its background and land within one elevation step of
+                        `canvas`, on the palette's side, and every
+                        `MAP_CONTRAST_REQUIREMENTS` pair to its recorded
+                        margin both ways). The dark style is BUILT by the same
+                        `basemapStyle`, so `styleOrigins` is unchanged; and
+                        `themed-map.ts` is the ONE watch per map
+                        (`theme-selection.ts` §`watchDocumentTheme`, a
+                        `MutationObserver` on `data-theme`) that repaints a
+                        live map through `MapView.setStyle` when the page
+                        changes palette, ended by the map's `destroy`
     src/recording/      the recorder: engine + durable checkpoints + recovery (#46),
                         and since #14's fourth criterion the step that turns a
                         finished recording into an activity — the write order,
@@ -1145,7 +1159,16 @@ apps/                 AGPL-3.0-or-later, without exception
                         manifest itself; plus the two facts about a
                         tag-triggered workflow no pull request could otherwise
                         check, the target API floor being one number in three
-                        languages and every action being pinned to a commit
+                        languages and every action being pinned to a commit.
+                        Since #672 `resources.ts` reads a `res/values*` file
+                        the same way, and `night-colours.test.ts` holds
+                        `oyl_canvas` in `res/values` and `res/values-night` to
+                        `apps/web`'s two `canvas` tokens — imported by a
+                        relative path, app to app, which the boundary rule
+                        permits and the workspace cannot spell otherwise
+                        (`@onyourleft/web` already depends on this package) —
+                        and the launch theme, the window and `MainActivity`'s
+                        WebView background to use it
     src/index.ts        what the shell offers the client that runs inside it —
                         the reason this package is no longer an island (§4h)
     src/ble/            the Capacitor transport against #39's interface,
@@ -1404,7 +1427,9 @@ rejected when it names a file that is not there, names a **directory**, is absol
 **The one reason to be on that list is "verbatim output of a third-party generator, whose own
 licence notice we reproduce instead".** `apps/mobile/README.md` §2 reproduces Capacitor's. "The
 header is awkward here" is not a reason: a file this repository authors *or edits* carries the
-header, which is why four of the twenty `cap add` wrote are deliberately absent from the list.
+header, which is why five of the twenty `cap add` wrote are deliberately absent from the list —
+`res/values/styles.xml` since #672, which paints the launch window and the window behind the
+WebView in the page's canvas colour.
 
 ⚠️ Three Capacitor trees are **pruned rather than exempted** — the copied web build under
 `android/app/src/main/assets/public`, `android/app/src/main/res/xml/config.xml`, and
@@ -2559,8 +2584,8 @@ browser runs**.
 
 | File | What it is |
 |---|---|
-| `index.html`, `harness.ts` | a page that builds a map through the **real** `map/maplibre.ts` and the **real** `basemapStyle`, and publishes what happened on `window.__oylHarness` — and, since the fixture archive, what reached the drawing buffer and when, on `window.__oylMapLoad` |
-| `map.browser.spec.ts` | the Playwright spec that drives it. Three blocks: the routing, the fixture archive, and — since #63's hosted measurement — a real archive over the internet, which is **skipped unless `OYL_HOSTED_BASEMAP_URL` is set** |
+| `index.html`, `harness.ts` | a page that builds a map through the **real** `map/maplibre.ts` and the **real** `basemapStyle`, and publishes what happened on `window.__oylHarness` — and, since the fixture archive, what reached the drawing buffer and when, on `window.__oylMapLoad`. ⚠️ Since #672 it builds the map through the product's `map/themed-map.ts`, in the palette the theme script gave the page, and `window.__oylMapProbe()` reads the buffer NOW, for the case that changes the page's palette after `__oylMapLoad` is published; `?style=light` forces a palette for the control |
+| `map.browser.spec.ts` | the Playwright spec that drives it. Three blocks: the routing, the fixture archive, and — since #63's hosted measurement — a real archive over the internet, which is **skipped unless `OYL_HOSTED_BASEMAP_URL` is set**. Since #672, §"the dark map": under a dark device the dark background is read off the buffer, the LIGHT style under the same dark page must fail that read (the control), and a live map with the fixture's tiles is followed from dark to light by `emulateMedia` alone — tiles and the ride's line repainted in the light palette, no reload, the protocol registered once |
 | `hosted-archive.ts` | what that third block decides **without** a network: which archive, which origins it may then reach, and where to put the ride inside whatever coverage the archive's own header declares. Pure, with `hosted-archive.test.ts` beside it in the Vitest suite — which is the answer to "a skipped block rots unseen" |
 | `pmtiles-fixture.ts` | a PMTiles v3 archive written from arithmetic, so the gate has a basemap to render. Emitted into `browser/dist` by `vite.browser.config.ts`, never committed, and carrying no OpenStreetMap data. ⚠️ It used to be the **only** file here with a Vitest test beside it; `hosted-archive.ts` is the second, and `apps/web/vitest.config.ts`'s `browser/**/*.test.ts` covers both |
 | `game.html`, `game-harness.ts` | since #91, the same idea for the renderer: a page that builds a scene through the **real** `game/three-renderer.ts` and the **real** `terrain.ts` |
@@ -4061,6 +4086,9 @@ top of an issue **supersedes its body**.
 | Why the label glyphs are precached when the tiles under them are not | `apps/web/tools/precache/precache.ts` §`PRECACHE_EXCLUSIONS` |
 | Where the basemap URL is configured, what a build with nothing set draws, and how to turn the map off | `apps/web/src/map/basemap.ts` §`PUBLISHED_BASEMAP_URL`, `.env.example` §`VITE_BASEMAP_PMTILES_URL`, [#534](https://github.com/openzigs/onyourleft/issues/534) |
 | How a rider turns map tiles off, why that is a style with no source rather than a hidden layer, and what proves "off" contacts nothing | `apps/web/src/map/tiles-preference.ts`, `apps/web/src/map/basemap.ts` §`basemapStyle`, `apps/web/browser/map.browser.spec.ts` §"with map tiles turned off" |
+| Why the map has its own colour table per palette rather than the palette tokens, and what holds it to the page | `apps/web/src/map/basemap.ts` §`MAP_COLOURS`, §`MAP_CONTRAST_REQUIREMENTS`, `apps/web/src/map/map-colours.a11y.test.ts`, [#672](https://github.com/openzigs/onyourleft/issues/672) |
+| How a live map follows a change of palette without a reload, and why it watches `data-theme` rather than subscribing to Settings | `apps/web/src/map/themed-map.ts`, `apps/web/src/design/theme-selection.ts` §`watchDocumentTheme`, `apps/web/browser/map.browser.spec.ts` §"the dark map" |
+| What colour the Android shell is before the page paints, in each palette, and why it is not `capacitor.config.ts`'s `backgroundColor` | `apps/mobile/android/app/src/main/res/values/colors.xml`, `res/values-night/colors.xml`, `MainActivity.java`, `apps/mobile/src/android/night-colours.test.ts` |
 | Why a published basemap archive must never be deleted while a shipped build names it, and what a release re-checks about its host | `apps/web/src/map/basemap.ts` §`PUBLISHED_BASEMAP_URL`, [`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §8 "Before every release tag" |
 | What a rider outside the basemap's coverage sees, and what proves it is quiet | `apps/web/src/map/MapPanel.tsx` §"A ride outside the archive's coverage", `apps/web/browser/map.browser.spec.ts` §"a ride outside the archive’s coverage" |
 | Why the default tile host is named in the privacy policy, why approximate location is declared collected (the host's analytics keep each request up to 7 days), and what stops a "keeps no record" claim coming back | `apps/web/src/privacy/no-network.test.ts` §"the default basemap is disclosed", §"nothing claims the tile host keeps nothing", `apps/mobile/src/android/data-safety.ts` §Location, [#558](https://github.com/openzigs/onyourleft/issues/558) |

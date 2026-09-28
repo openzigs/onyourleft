@@ -56,6 +56,16 @@ export interface MapView {
    * refetch every tile.
    */
   setTrack(track: TrackFeature | undefined, bounds: TrackBounds | undefined): void;
+  /**
+   * Repaint the same map in another basemap style — the other palette's,
+   * when the page changes palette (#672).
+   *
+   * The map is not rebuilt: the ride's line it holds stays on it, the
+   * `pmtiles://` protocol stays registered (it is the application's, not the
+   * map's), and MapLibre applies a style that differs only in colour as
+   * paint changes against the source it already has.
+   */
+  setStyle(options: MapViewOptions): void;
   /** Release the map and everything it holds. Idempotent. */
   destroy(): void;
 }
@@ -72,6 +82,12 @@ export interface MapView {
  */
 export interface MapViewOptions {
   readonly style: BasemapStyle;
+  /**
+   * The ride's line colour (#672), which is the adapter's layer rather than
+   * the style's — `basemap.ts` §`MAP_COLOURS`' `track`, for the same palette
+   * as {@link style}.
+   */
+  readonly trackColour: string;
 }
 
 export interface MapRenderer {

@@ -10,9 +10,11 @@
 #
 # NOT a reason to be on this list: "the header is awkward here", "it is only
 # config", "we will add it later". A file this repository authors or edits
-# carries the header, and four of the twenty `cap add` wrote are therefore
+# carries the header, and five of the twenty `cap add` wrote are therefore
 # absent from this list -- AndroidManifest.xml, app/build.gradle, strings.xml
-# and MainActivity.java all name this application and are all ours to maintain.
+# and MainActivity.java all name this application and are all ours to maintain,
+# and since #672 res/values/styles.xml paints the launch window and the window
+# behind the WebView in the page's own canvas colour, per palette.
 #
 # Two template files are absent from this list and are NOT oversights:
 # `apps/mobile/android/gradlew` and `gradlew.bat` are Gradle's own launcher
@@ -46,5 +48,4 @@ apps/mobile/android/app/src/main/res/values/ic_launcher_background.xml
 apps/mobile/android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
 apps/mobile/android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
 apps/mobile/android/app/src/main/res/layout/activity_main.xml
-apps/mobile/android/app/src/main/res/values/styles.xml
 apps/mobile/android/app/src/main/res/xml/file_paths.xml

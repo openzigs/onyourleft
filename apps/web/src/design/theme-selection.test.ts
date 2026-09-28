@@ -22,9 +22,11 @@ import {
   applyThemeChoice,
   chooseTheme,
   currentThemeChoice,
+  documentTheme,
   readThemeChoice,
   themeEraser,
   resolveTheme,
+  watchDocumentTheme,
   writeThemeChoice,
   type ThemeStorage,
   type ThemeWindow,
@@ -398,5 +400,49 @@ describe('an erase forgets the choice and puts the page back on the device (#672
     expect(() => {
       themeEraser(page.window).forget();
     }).not.toThrow();
+  });
+});
+
+describe('what a map reads and watches — #672 part b', () => {
+  afterEach(() => {
+    document.documentElement.removeAttribute('data-theme');
+  });
+
+  it.each([
+    ['dark', 'dark'],
+    ['light', 'light'],
+    [null, 'light'],
+    ['sepia', 'light'],
+  ] as const)('reads data-theme %s as the %s palette, as theme.css paints it', (value, theme) => {
+    if (value === null) document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', value);
+    expect(documentTheme(document)).toBe(theme);
+  });
+
+  it('hears every change of palette, whoever writes it, until it is stopped', async () => {
+    const page = freshPage('absent', 'light');
+    runScript(page);
+    const heard: string[] = [];
+    const stop = watchDocumentTheme(document, (theme) => heard.push(theme));
+
+    // The device, through the inline script's own listener.
+    deviceBecomesDark(page, true);
+    await Promise.resolve();
+    // Settings.
+    chooseTheme(page.window, 'light');
+    await Promise.resolve();
+    // Another tab, through the script's `storage` listener.
+    page.storage.values.set(THEME_STORAGE_KEY, 'dark');
+    storageEvent(page, THEME_STORAGE_KEY);
+    await Promise.resolve();
+    // An erase, back to the device — which is dark: no change, nothing heard.
+    themeEraser(page.window).forget();
+    await Promise.resolve();
+    expect(heard).toEqual(['dark', 'light', 'dark']);
+
+    stop();
+    chooseTheme(page.window, 'light');
+    await Promise.resolve();
+    expect(heard).toEqual(['dark', 'light', 'dark']);
   });
 });

@@ -15,9 +15,16 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 
-import { OSM_ATTRIBUTION, styleOrigins, type BasemapConfig, type BasemapStyle } from './basemap';
+import {
+  basemapStyle,
+  MAP_COLOURS,
+  OSM_ATTRIBUTION,
+  styleOrigins,
+  type BasemapConfig,
+  type BasemapStyle,
+} from './basemap';
 import { MapPanel } from './MapPanel';
-import { stubMapPort, type StubMapPort } from './testing';
+import { countingMutationObservers, stubMapPort, type StubMapPort } from './testing';
 import { trackGeometry, type TrackGeometry } from './track';
 import type { TrackSegment } from '../detail/privacy';
 
@@ -260,5 +267,65 @@ describe('what the map is handed', () => {
     // No coordinate, and no place name. The label says how the track is shaped,
     // never where it is.
     expect(label).not.toMatch(/\d+\.\d{3}/);
+  });
+});
+
+describe('in the page’s palette, following it — #672', () => {
+  afterEach(() => {
+    document.documentElement.removeAttribute('data-theme');
+  });
+
+  it('builds the map in the dark style on a dark page, with the dark line', async () => {
+    document.documentElement.setAttribute('data-theme', 'dark');
+    const port = stubMapPort();
+    mounted = await mount(<MapPanel port={port} basemap={BASEMAP} track={aTrack()} />);
+    await settle();
+    expect(port.created[0]?.options.style).toEqual(basemapStyle(BASEMAP, { theme: 'dark' }));
+    expect(port.created[0]?.options.trackColour).toBe(MAP_COLOURS.dark.track);
+  });
+
+  it('repaints the same map when the page changes palette, with tiles still off', async () => {
+    document.documentElement.setAttribute('data-theme', 'light');
+    const port = stubMapPort();
+    mounted = await mount(
+      <MapPanel port={port} basemap={BASEMAP} track={aTrack()} tiles={false} />,
+    );
+    await settle();
+    document.documentElement.setAttribute('data-theme', 'dark');
+    await settle();
+    expect(port.created).toHaveLength(1);
+    expect(port.created[0]?.styles.map((options) => options.style)).toEqual([
+      basemapStyle(BASEMAP, { tiles: false, theme: 'dark' }),
+    ]);
+  });
+
+  it('holds one watch for its one map through every re-render, and none once unmounted', async () => {
+    const observers = countingMutationObservers();
+    try {
+      const port = stubMapPort();
+      const view = await mount(<MapPanel port={port} basemap={BASEMAP} track={aTrack()} />);
+      await settle();
+      expect(observers.live()).toBe(1);
+
+      // A new line is not a new map, so not a new watch.
+      const other = trackGeometry([segment([52.5, -1.9], [52.51, -1.9])]) as TrackGeometry;
+      await view.rerender(<MapPanel port={port} basemap={BASEMAP} track={other} />);
+      await settle();
+      expect(observers.live()).toBe(1);
+
+      // Turning tiles off IS a new map: the old one's watch ends with it.
+      await view.rerender(<MapPanel port={port} basemap={BASEMAP} track={other} tiles={false} />);
+      await settle();
+      expect(port.created).toHaveLength(2);
+      expect(observers.live()).toBe(1);
+
+      view.unmount();
+      expect(observers.live()).toBe(0);
+      document.documentElement.setAttribute('data-theme', 'dark');
+      await settle();
+      expect(port.created.every((map) => map.styles.length === 0)).toBe(true);
+    } finally {
+      observers.restore();
+    }
   });
 });

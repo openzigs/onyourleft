@@ -55,6 +55,14 @@
  * which is what keeps it out of the tab order rather than sitting in it as an
  * unlabelled stop.
  *
+ * ## In the page's palette, following it (#672)
+ *
+ * The style is the page's palette's (`basemap.ts` §`MAP_COLOURS`), and a
+ * change of palette while the map is open repaints it in place rather than
+ * rebuilding it: `themed-map.ts` holds the one watch per map, and ends it
+ * when the map is released. The palette is deliberately NOT a dependency of
+ * the effect below — a map rebuilt to change colour would refetch every tile.
+ *
  * ⚠️ **The description names no place.** ADR 0004 decision D: a message about a
  * coordinate names the field and the constraint and never the value. The label
  * says how many parts the track has, not where any of them is.
@@ -62,8 +70,9 @@
 
 import { useEffect, useRef, type JSX } from 'react';
 
-import { basemapStyle, type BasemapConfig } from './basemap';
+import { basemapStyle, MAP_COLOURS, type BasemapConfig } from './basemap';
 import type { MapPort, MapView } from './port';
+import { createThemedMap } from './themed-map';
 import { trackBounds, trackFeature, type TrackGeometry } from './track';
 
 export interface MapPanelProps {
@@ -133,9 +142,17 @@ export function MapPanel({
     // See that file for why `release()` is not called here.
     port.protocol.ensure();
 
-    const created = port.renderer.create(container.current, {
-      style: basemapStyle(basemap, { tiles }),
-    });
+    // In the page's palette, and repainted in the other one when the page
+    // changes (#672) — by one watch that `destroy` below ends with the map.
+    const created = createThemedMap(
+      port.renderer,
+      container.current,
+      container.current.ownerDocument,
+      (theme) => ({
+        style: basemapStyle(basemap, { tiles, theme }),
+        trackColour: MAP_COLOURS[theme].track,
+      }),
+    );
     view.current = created;
     return () => {
       created.destroy();

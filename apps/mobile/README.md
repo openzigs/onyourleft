@@ -60,11 +60,13 @@ the thing it forbids, pointed the other way.
 
 The exemption list is [`.spdx-exempt`](../../.spdx-exempt) at the repository root, enforced by rule
 `LIC006`: exact paths only, no globs, no directories, and an entry naming a file that is not there
-is a violation. **Thirteen files are exempt and four are not.** The four that carry the header —
+is a violation. **Twelve files are exempt and five are not.** The five that carry the header —
 `android/app/src/main/AndroidManifest.xml`, `android/app/build.gradle`,
-`android/app/src/main/res/values/strings.xml` and
+`android/app/src/main/res/values/strings.xml`, `android/app/src/main/res/values/styles.xml` and
 `android/app/src/main/java/dev/openzigs/onyourleft/MainActivity.java` — all name this application
-and are all ours to maintain from here.
+and are all ours to maintain from here. ⚠️ This said *thirteen and four* until #672, which edited
+`styles.xml` to paint the launch and the window behind the WebView with the page's canvas, and so
+took it off the list: a file this repository edits carries the header (`CLAUDE.md` §3a).
 
 ⚠️ **A file `cap add` or a Capacitor upgrade writes under a NEW name lands outside that list and
 fails `LIC002`.** That is the intended direction: the build stops until somebody reads the new file

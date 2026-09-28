@@ -67,6 +67,8 @@
  * so in words rather than rendering an empty grey grid.
  */
 
+import type { Theme } from '../design/tokens';
+
 /**
  * The attribution OpenStreetMap's licence requires.
  *
@@ -247,12 +249,6 @@ export interface BasemapLayer {
 /** The id the ride's own trace is added under, so the adapter and the tests agree on one string. */
 export const TRACK_SOURCE_ID = 'oyl-track';
 export const TRACK_LAYER_ID = 'oyl-track-line';
-/**
- * The ride's line colour. Here rather than inline in `maplibre.ts` so the
- * browser harness can look for the line on the drawing buffer without
- * importing a second copy of it — the `paletteOf` argument in `harness.ts`.
- */
-export const TRACK_LINE_COLOUR = '#b5341f';
 /** The vector source the basemap tiles arrive on. */
 export const BASEMAP_SOURCE_ID = 'basemap';
 
@@ -287,31 +283,193 @@ export const GLYPHS_URL = './glyphs/{fontstack}/{range}.pbf';
 export const LABEL_FONT = 'Roboto-Regular';
 
 /**
- * The labels' ink and halo.
+ * Every colour the map paints, in one table per palette (#672).
  *
- * The ink is checked against **every** colour the style can put behind a
- * label — the background, each fill and each line — for WCAG 2.2 AA text
- * contrast in `labels.a11y.test.ts`, which derives that list from the style
- * rather than keeping one. The halo is a lift, not the thing contrast rests
- * on. Exported so the browser harness can find the ink on the drawing buffer
- * without a second copy of it.
+ * ## Why a table of its own, and not the palette tokens
+ *
+ * The map is **cartography**, not interface: water is blue and roads are a
+ * line lighter than the land in every palette, and neither is a role
+ * `design/tokens.ts` has or should grow. So the colours are declared here, per
+ * palette, and **checked against** the palette rather than derived from it —
+ * `map-colours.a11y.test.ts` holds three things:
+ *
+ * 1. **The map sits on the page it is in.** The background and the land fill
+ *    are each within one elevation step (`tokens.ts`
+ *    §`MAXIMUM_ELEVATION_STEP`) of that palette's `canvas`, and on the side
+ *    of it `tokens.ts` §`ELEVATION_DIRECTION` names — darker in the light
+ *    palette, lighter in the dark. A light map under a dark page, which is
+ *    what #672 found here, is 12 : 1 away from its canvas.
+ * 2. **Every pair in {@link MAP_CONTRAST_REQUIREMENTS} measures what was
+ *    recorded**, in both directions, per palette — #307's erosion gate, the
+ *    shape `CONTRAST_REQUIREMENTS` has since #744.
+ * 3. The existing #578 check, that the label ink clears AA text contrast
+ *    against every colour the style can put behind a label, now run over
+ *    both styles.
+ *
+ * Deriving the map from the tokens was the alternative and it was rejected:
+ * the light map's `#f5f3ef` is not `canvas` (`#ffffff`) and was never meant to
+ * be — the map is a warm surface ON the page — and making it one would repaint
+ * every light map to satisfy a rule the dark one needed.
+ *
+ * ⚠️ **Six-digit hex only**, so `design/contrast.ts` can read every value. And
+ * no pure black or white in the dark table, `DARK_COLOUR_TOKENS`' rule.
  */
-export const LABEL_TEXT_COLOUR = '#3a3731';
-export const LABEL_HALO_COLOUR = '#ffffff';
+export interface MapColours {
+  /** The `background` layer: what shows with no tile, and with tiles off. */
+  readonly background: string;
+  /** The land fill, which covers most of a map that has tiles. */
+  readonly earth: string;
+  readonly water: string;
+  /** Roads, as a line one step from the land. */
+  readonly road: string;
+  /** The labels' ink (#578). */
+  readonly labelInk: string;
+  /** The halo round a label: a lift, not what its contrast rests on. */
+  readonly labelHalo: string;
+  /** The ride's own line, which `maplibre.ts` draws over everything else. */
+  readonly track: string;
+}
+
+/**
+ * The two tables. The light one is the map as it was before #672, colour for
+ * colour; the dark one is new. Exported so the browser harness can look for
+ * each on the drawing buffer without a second copy of any of them.
+ */
+export const MAP_COLOURS: Readonly<Record<Theme, MapColours>> = {
+  light: {
+    background: '#f5f3ef',
+    earth: '#eeece7',
+    water: '#b9d4e8',
+    road: '#ffffff',
+    labelInk: '#3a3731',
+    labelHalo: '#ffffff',
+    track: '#b5341f',
+  },
+  dark: {
+    background: '#151b19',
+    earth: '#1c2321',
+    water: '#1a3242',
+    road: '#3a4543',
+    labelInk: '#d3dbd8',
+    labelHalo: '#101614',
+    // The light palette's `#b5341f` is 2.65 : 1 on the dark land (2.20 over
+    // the water, 2.89 on the background, 1.65 on a road), under SC 1.4.11's
+    // 3 : 1 for a graphic a rider needs on every one of them; this is 5.75.
+    track: '#f0785c',
+  },
+};
+
+/** One pair of map colours that end up against each other. `tokens.ts` §`ContrastRequirement`'s shape. */
+export interface MapContrastRequirement {
+  readonly foreground: keyof MapColours;
+  readonly background: keyof MapColours;
+  /** `AA_TEXT` or `AA_LARGE_TEXT_OR_NON_TEXT`, from `design/contrast.ts`. */
+  readonly minimum: number;
+  /** What it measures in each palette, to two places: below is erosion, above is unrecorded. */
+  readonly measured: Readonly<Record<Theme, number>>;
+  readonly where: string;
+}
+
+/**
+ * The pairs the map places together, per palette (#672).
+ *
+ * The label ink on its halo is the pair #672 names; the ink on each layer it
+ * can sit over is #578's check made an erosion gate; and the ride's line on
+ * each fill is SC 1.4.11, which nothing here checked before the dark map made
+ * the light line unreadable. The line on a road is 3.57 in the dark map and is
+ * recorded because a ride follows roads.
+ */
+export const MAP_CONTRAST_REQUIREMENTS: readonly MapContrastRequirement[] = [
+  {
+    foreground: 'labelInk',
+    background: 'labelHalo',
+    minimum: 4.5,
+    measured: { light: 11.86, dark: 12.99 },
+    where: 'a label on its own halo',
+  },
+  {
+    foreground: 'labelInk',
+    background: 'background',
+    minimum: 4.5,
+    measured: { light: 10.7, dark: 12.38 },
+    where: 'a label with no tile under it',
+  },
+  {
+    foreground: 'labelInk',
+    background: 'earth',
+    minimum: 4.5,
+    measured: { light: 10.05, dark: 11.35 },
+    where: 'a label on land',
+  },
+  {
+    foreground: 'labelInk',
+    background: 'water',
+    minimum: 4.5,
+    measured: { light: 7.71, dark: 9.43 },
+    where: 'a label on water',
+  },
+  {
+    foreground: 'labelInk',
+    background: 'road',
+    minimum: 4.5,
+    measured: { light: 11.86, dark: 7.05 },
+    where: 'a road name on its road',
+  },
+  {
+    foreground: 'track',
+    background: 'background',
+    minimum: 3,
+    measured: { light: 5.45, dark: 6.27 },
+    where: 'the ride’s line with no tile under it (SC 1.4.11)',
+  },
+  {
+    foreground: 'track',
+    background: 'earth',
+    minimum: 3,
+    measured: { light: 5.12, dark: 5.75 },
+    where: 'the ride’s line on land (SC 1.4.11)',
+  },
+  {
+    foreground: 'track',
+    background: 'water',
+    minimum: 3,
+    measured: { light: 3.93, dark: 4.78 },
+    where: 'the ride’s line over water (SC 1.4.11)',
+  },
+  {
+    foreground: 'track',
+    background: 'road',
+    minimum: 3,
+    measured: { light: 6.04, dark: 3.57 },
+    where: 'the ride’s line along a road (SC 1.4.11)',
+  },
+];
 
 /** One paint for both label layers, so the contrast check covers both by covering one. */
-const LABEL_PAINT: Readonly<Record<string, unknown>> = {
-  'text-color': LABEL_TEXT_COLOUR,
-  'text-halo-color': LABEL_HALO_COLOUR,
-  'text-halo-width': 1.5,
-};
+function labelPaint(colours: MapColours): Readonly<Record<string, unknown>> {
+  return {
+    'text-color': colours.labelInk,
+    'text-halo-color': colours.labelHalo,
+    'text-halo-width': 1.5,
+  };
+}
 
 /** The layer that needs no tile, and so the whole of a style with tiles turned off. */
-const BACKGROUND_LAYER: BasemapLayer = {
-  id: 'background',
-  type: 'background',
-  paint: { 'background-color': '#f5f3ef' },
-};
+function backgroundLayer(colours: MapColours): BasemapLayer {
+  return {
+    id: 'background',
+    type: 'background',
+    paint: { 'background-color': colours.background },
+  };
+}
+
+/** What {@link basemapStyle} is asked for besides the configuration. */
+export interface BasemapStyleOptions {
+  /** `false` is the rider's Settings switch turned off (`tiles-preference.ts`). */
+  readonly tiles?: boolean;
+  /** The palette the page is in (#672). Light when not given. */
+  readonly theme?: Theme;
+}
 
 /**
  * The style, built from the configuration.
@@ -340,13 +498,20 @@ const BACKGROUND_LAYER: BasemapLayer = {
  * asserts, and `map.browser.spec.ts` intercepts the network to say the same
  * of a real engine. The ride's own line is added by the adapter, not by this
  * style, so it is drawn either way.
+ *
+ * **`theme` picks the colours and nothing else** (#672). The dark style is
+ * this same function over {@link MAP_COLOURS}' dark table — built, never
+ * fetched — so it has exactly the light style's sources, layers and `glyphs`,
+ * and {@link styleOrigins} reports the same one origin for both, which
+ * `basemap.test.ts` asserts for both with tiles on and off.
  */
 export function basemapStyle(
   config: BasemapConfig,
-  options: { readonly tiles?: boolean } = {},
+  options: BasemapStyleOptions = {},
 ): BasemapStyle {
+  const colours = MAP_COLOURS[options.theme ?? 'light'];
   if (options.tiles === false) {
-    return { version: 8, sources: {}, layers: [BACKGROUND_LAYER] };
+    return { version: 8, sources: {}, layers: [backgroundLayer(colours)] };
   }
   return {
     version: 8,
@@ -362,27 +527,27 @@ export function basemapStyle(
       },
     },
     layers: [
-      BACKGROUND_LAYER,
+      backgroundLayer(colours),
       {
         id: 'earth',
         type: 'fill',
         source: BASEMAP_SOURCE_ID,
         'source-layer': 'earth',
-        paint: { 'fill-color': '#eeece7' },
+        paint: { 'fill-color': colours.earth },
       },
       {
         id: 'water',
         type: 'fill',
         source: BASEMAP_SOURCE_ID,
         'source-layer': 'water',
-        paint: { 'fill-color': '#b9d4e8' },
+        paint: { 'fill-color': colours.water },
       },
       {
         id: 'roads',
         type: 'line',
         source: BASEMAP_SOURCE_ID,
         'source-layer': 'roads',
-        paint: { 'line-color': '#ffffff', 'line-width': 1 },
+        paint: { 'line-color': colours.road, 'line-width': 1 },
       },
       {
         // Road names only from zoom 13, where a street is long enough on
@@ -401,7 +566,7 @@ export function basemapStyle(
           'text-font': [LABEL_FONT],
           'text-size': 12,
         },
-        paint: LABEL_PAINT,
+        paint: labelPaint(colours),
       },
       {
         // Above the road names, so where the two collide the place wins.
@@ -417,7 +582,7 @@ export function basemapStyle(
           'text-size': ['interpolate', ['linear'], ['zoom'], 8, 12, 16, 15],
           'text-max-width': 8,
         },
-        paint: LABEL_PAINT,
+        paint: labelPaint(colours),
       },
     ],
   };
