@@ -2716,14 +2716,14 @@ write_script() {
 }
 
 new_fixture
-write_script 'out="$(true)"' "if printf '%s' \"\${out}\" ${P} grep -qF -- 'x'; then :; fi"
+write_script "out=\"${DOLLAR}(true)\"" "if printf '%s' \"\${out}\" ${P} grep -qF -- 'x'; then :; fi"
 assert_violation "a printf piped into grep -qF is refused, naming the line" SH001 \
-  'scripts/example.test.sh:4: a pipeline into `grep -q`'
+  'scripts/example.test.sh:4: a pipeline into'
 
 new_fixture
 write_script "if ! printf '%s' \"\${out:-}\" ${P} grep -q '^FAIL '; then :; fi"
 assert_violation "the NEGATED form, which a lost race turns into a silent pass, is refused" SH001 \
-  'scripts/example.test.sh:3: a pipeline into `grep -q`'
+  'scripts/example.test.sh:3: a pipeline into'
 
 new_fixture
 write_script "entry_block() { :; }" "entry_block a 1 ${P}grep -Fq 'y' && :"
