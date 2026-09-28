@@ -150,8 +150,31 @@ const FLOOR: WorkoutRescue = {
  */
 const KEEP_ALIVE_FAILED = new URLSearchParams(window.location.search).get('keepalive') === 'failed';
 
+/**
+ * `rideview.html?ride=idle` and `?ride=armed` — #669. The ride-time controls
+ * that the fullest state does not render: *Start recording* and *Ask the
+ * trainer for control* before a ride (a trainer paired, control not yet
+ * granted), and *Resume*, *Yes, stop the ride* and *Keep riding* on a paused
+ * ride with its stop armed. `ride-targets.browser.spec.ts` measures them; the
+ * geometry cases in `rideview.browser.spec.ts` never ask for either.
+ */
+const RIDE_STATE = new URLSearchParams(window.location.search).get('ride');
+
 function snapshot(): RideSnapshot {
   const riding = { ...ridingSnapshot(), keepAliveFailed: KEEP_ALIVE_FAILED };
+  if (RIDE_STATE === 'idle') {
+    return {
+      ...riding,
+      phase: 'idle',
+      elapsedSeconds: 0,
+      movingSeconds: 0,
+      sampleCount: 0,
+      trainer: { ...riding.trainer, hasControl: false, target: { kind: 'none' } },
+    };
+  }
+  if (RIDE_STATE === 'armed') {
+    return { ...riding, phase: 'paused', stopArmed: true };
+  }
   if (WORKOUT_STATE !== 'eased' && WORKOUT_STATE !== 'running') {
     return riding;
   }
@@ -242,8 +265,6 @@ declare global {
       readonly openEasedDetail: () => void;
       /** #605's control: the running workout as #585 shipped it. @see restoreAsShipped */
       readonly restoreAsShipped: () => void;
-      /** #647's what-if: the ride controls at #669's 48 px. @see growControlsTo */
-      readonly growControlsTo: (pixels: number) => void;
       /** #647's control: the notice moved above Pause / Stop. @see noticeAboveControls */
       readonly noticeAboveControls: () => void;
       /** #647's control: the notice moved under Pause / Stop. @see noticeUnderControls */
@@ -357,27 +378,15 @@ function keepScreenOnNotice(): RideViewMeasurement['keepScreenOn'] {
 }
 
 /**
- * #647's what-if for #669, which is still open: every button in the two
- * groups a rider uses DURING a ride held to `pixels` tall, as #669 will hold
- * *Start*, *Pause*, *End* and *Set target* to 48. All of them rather than those
- * four, so the figure is the conservative one.
- */
-function growControlsTo(pixels: number): void {
-  const style = document.createElement('style');
-  style.textContent =
-    `.oyl-ride__group--live .oyl-button, .oyl-ride__group--trainer .oyl-button ` +
-    `{ min-height: ${String(pixels)}px; }`;
-  document.head.append(style);
-}
-
-/**
  * #647's first control: the notice where `notificationNotice` sits — ABOVE
  * *Pause* / *Stop* — on the live element. #436's review measured what a line
  * there costs those two on a tablet; this is that cost, for this sentence.
  */
 function noticeAboveControls(): void {
   const { notice, pause } = keepScreenOnParts();
-  pause.before(notice);
+  // #669: Pause and Stop are one row (`.oyl-ride__actions`); the notice goes
+  // above the row, where it went above the two buttons before.
+  (pause.closest('.oyl-ride__actions') ?? pause).before(notice);
 }
 
 /**
@@ -388,7 +397,7 @@ function noticeAboveControls(): void {
  */
 function noticeUnderControls(): void {
   const { notice, stop } = keepScreenOnParts();
-  stop.after(notice);
+  (stop.closest('.oyl-ride__actions') ?? stop).after(notice);
 }
 
 function keepScreenOnParts(): {
@@ -535,7 +544,14 @@ async function run(): Promise<void> {
   // #605: with a workout running there is no such control — `WorkoutPanel`
   // shows the running workout instead, so the wait is for *End workout* and,
   // when this page was asked for one, the Eased notice.
-  if (WORKOUT_STATE === 'eased' || WORKOUT_STATE === 'running') {
+  if (RIDE_STATE === 'idle' || RIDE_STATE === 'armed') {
+    const awaited = RIDE_STATE === 'idle' ? 'Start recording' : 'Keep riding';
+    await until(awaited, () =>
+      [...document.querySelectorAll('.oyl-ride__group--live button')].find(
+        (each) => textOf(each) === awaited,
+      ),
+    );
+  } else if (WORKOUT_STATE === 'eased' || WORKOUT_STATE === 'running') {
     await until('the running workout', () =>
       [...document.querySelectorAll('.oyl-ride__group--trainer button')].find(
         (each) => textOf(each) === 'End workout',
@@ -564,7 +580,6 @@ async function run(): Promise<void> {
     restoreFullHeightShell,
     openEasedDetail,
     restoreAsShipped,
-    growControlsTo,
     noticeAboveControls,
     noticeUnderControls,
   };
@@ -580,7 +595,6 @@ run().catch((error: unknown) => {
     restoreFullHeightShell,
     openEasedDetail,
     restoreAsShipped,
-    growControlsTo,
     noticeAboveControls,
     noticeUnderControls,
   };

@@ -14,6 +14,7 @@ import type React from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { HudPanel, CONTROL_MINIMUM_PIXELS } from './HudPanel';
+import { RIDE_SIZE_CLASS } from '../../design/Button';
 import { NO_READING, type HudInput } from './fields';
 import { atStartLine } from '../simulation';
 import { auditAccessibility, formatViolations, tabbableElements } from '../../a11y/audit';
@@ -355,6 +356,10 @@ describe('the mid-ride controls are usable with gloves on', () => {
       expect(Number.parseInt(control.style.minWidth, 10)).toBeGreaterThanOrEqual(
         CONTROL_MINIMUM_PIXELS,
       );
+      // #669: both are on the owner's ride-time list, so both also wear the
+      // one declared ride-time size — under the 72 px above, a floor that
+      // holds if the inline style is ever taken away.
+      expect(control.classList.contains(RIDE_SIZE_CLASS), control.outerHTML).toBe(true);
     }
   });
 
@@ -370,6 +375,12 @@ describe('the mid-ride controls are usable with gloves on', () => {
     mounted = await mount(inRideScreen(<HudPanel {...props({})} paused />));
 
     expect(document.body.textContent).toContain('Resume');
+    // #710's review: Resume is on the ride-time list too, and is the same
+    // element, so it wears the same declared size while paused.
+    const resume = [...document.querySelectorAll<HTMLElement>('.oyl-hud__control')].find(
+      (each) => each.textContent === 'Resume',
+    );
+    expect(resume?.classList.contains(RIDE_SIZE_CLASS), resume?.outerHTML).toBe(true);
   });
 });
 

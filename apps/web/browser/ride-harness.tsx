@@ -295,6 +295,14 @@ const MAY_STOP = new URLSearchParams(window.location.search).get('keepalive') ==
  */
 const REFUSED = new URLSearchParams(window.location.search).get('gradient') === 'refused';
 
+/**
+ * `ride.html?paused=yes` — #710's review: the ride PAUSED, by pressing the
+ * HUD's own *Pause*, so that control reads *Resume*. It is the same element
+ * with a different word, and a ride-time control the owner's ruling (#669)
+ * names, so `ride-targets.browser.spec.ts` measures it in this state too.
+ */
+const PAUSED = new URLSearchParams(window.location.search).get('paused') === 'yes';
+
 /** A trainer that accepts every gradient, so the trainer line is on the screen. */
 const TRAINER: GameTrainerPort = {
   // #503: the Ride press's request for control — this double changes nothing.
@@ -573,6 +581,20 @@ async function run(): Promise<void> {
         : [...document.querySelectorAll('.oyl-hud button')].find(
             (each) => each.textContent === 'Stop side camera',
           ),
+    );
+  }
+  // #710's review: the paused HUD, reached the way a rider reaches it.
+  if (PAUSED) {
+    const pause = await until('the HUD’s Pause', () =>
+      [...document.querySelectorAll<HTMLButtonElement>('.oyl-hud__control')].find(
+        (each) => each.textContent === 'Pause',
+      ),
+    );
+    pause.click();
+    await until('the HUD’s Resume', () =>
+      [...document.querySelectorAll('.oyl-hud__control')].find(
+        (each) => each.textContent === 'Resume',
+      ),
     );
   }
   // ⚠️ Before anything is measured. @see hud-harness.tsx
