@@ -1267,7 +1267,13 @@ packages/             Apache-2.0, without exception
                       segment, effort and route store, and the round-trip harness
                       (#26-#28, #46, #61, #64, #66, #89); since #388 the side
                       camera's post-ride report at schema version 12 —
-                      sentences only, one per ride
+                      sentences only, one per ride; and since #800, at
+                      version 13, that report's pose summary (differences
+                      only, `null` where none was kept) and one model
+                      write-up per ride. ⚠️ Version 13 is the FIRST record
+                      migration: `SCHEMA_MIGRATIONS` is not empty and
+                      `ActivityStore` runs `upgradeWith` as a version's
+                      `.upgrade()`
 
 docs/
   architecture.md     layout, component boundaries, ADR index

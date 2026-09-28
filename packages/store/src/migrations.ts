@@ -34,18 +34,22 @@
  * answer to that, and it is why `down` must be **total over the records `up`
  * produced** rather than merely plausible.
  *
- * ## The registry is empty, and that is the honest state
+ * ## The registry, and its first entry
  *
- * `SCHEMA_MIGRATIONS` below is empty. Schema version 1 is the initial schema of
- * a store that has never shipped, so there is no prior shape to return to and
- * no migration to roll back. Writing a speculative one to have something to
- * demonstrate would put a schema change into the athlete's upgrade path that no
- * issue asked for. The machinery is here, tested end to end through a real
- * Dexie version bump in `migrations.test.ts`, so the first real migration is an
- * entry in an array rather than a design exercise.
+ * `SCHEMA_MIGRATIONS` below was empty until schema version 13 (#800), and the
+ * reason was honest: versions 2 to 12 added stores or indexes and changed no
+ * record's shape, so there was nothing to transform and a `down` would have
+ * been an identity function. Version 13 is the first that changes an existing
+ * record — every side-camera report gains a **required** `pose` — so it is the
+ * first entry, and `ActivityStore` is the first caller of {@link upgradeWith}.
+ * `migrations.test.ts` rolls it back on a fixture and opens a real version-12
+ * database with rows in it at version 13.
  */
 
 import type { Transaction } from 'dexie';
+
+import type { PersistedSideCameraReport, PersistedSideCameraReportV12 } from './persisted';
+import { TABLE } from './schema';
 
 /**
  * One schema change, as a reversible pure transformation of one table's
@@ -87,11 +91,53 @@ export interface RecordMigration<Before, After> {
 export type AnyRecordMigration = RecordMigration<unknown, unknown>;
 
 /**
+ * Version 13 — #800: every side-camera report gains its pose summary field.
+ *
+ * `up` sets `pose: null` on every report written at version 12: none of them
+ * kept a summary, because the owner's ruling to keep one (#795, ruling 1) came
+ * after them. `null` is "this report keeps no pose summary", which is exactly
+ * what they are — nothing is invented.
+ *
+ * ⚠️ **`down` drops the pose summary, and that is data loss the round trip
+ * over version-12 rows cannot see.** A version-12 row has nowhere to hold one,
+ * so a report kept at version 13 with a summary loses it on the way back; its
+ * sentences survive. The runtime path back is still export → downgrade →
+ * re-import (the file comment), and the export is what carries the summary.
+ */
+export const SIDE_REPORT_POSE_SUMMARY: RecordMigration<
+  PersistedSideCameraReportV12,
+  PersistedSideCameraReport
+> = {
+  toVersion: 13,
+  table: TABLE.sideCameraReports,
+  description:
+    'gave every side-camera report a pose summary field, null for every report written before; down drops a kept summary',
+  up(before: PersistedSideCameraReportV12): PersistedSideCameraReport {
+    return {
+      activityId: before.activityId,
+      athleteId: before.athleteId,
+      summary: before.summary,
+      observations: [...before.observations],
+      pose: null,
+    };
+  },
+  down(after: PersistedSideCameraReport): PersistedSideCameraReportV12 {
+    return {
+      activityId: after.activityId,
+      athleteId: after.athleteId,
+      summary: after.summary,
+      observations: [...after.observations],
+    };
+  },
+};
+
+/**
  * Every migration this build knows how to apply, in ascending `toVersion`.
  *
- * Empty: schema version 1 is the initial schema. See the file comment.
+ * `ActivityStore` hands each one to Dexie as the `.upgrade()` of the version it
+ * produces, so adding an entry here is the whole of wiring it in.
  */
-export const SCHEMA_MIGRATIONS: readonly AnyRecordMigration[] = [];
+export const SCHEMA_MIGRATIONS: readonly AnyRecordMigration[] = [SIDE_REPORT_POSE_SUMMARY];
 
 /**
  * Applies `up` to every record. Pure; returns a new array.

@@ -193,6 +193,12 @@ version-1 database, opens it at version 2, and checks every record survived and 
 The `up`/`down` machinery is tested end to end through a real Dexie version bump, so the first
 record-shape change is an entry in an array.
 
+⚠️ **That first change has happened, and a reviewer who remembers "`SCHEMA_MIGRATIONS` is empty" or
+"`upgradeWith` is never called from `ActivityStore`" is reading the old file.** Schema version 13
+(#800) gives every side-camera report a required `pose`, so the registry holds
+`SIDE_REPORT_POSE_SUMMARY`, and `ActivityStore` hands every entry to Dexie as the `.upgrade()` of the
+version it names. See §"The pose summary and one write-up per ride — #800".
+
 ### `ensureAthlete`, and why `putAthlete` is the wrong call at start-up
 
 Every write path that carries an owner — `putActivity`, `putRecordingSession`, `putPrivacyZone`,
@@ -696,7 +702,7 @@ somebody's knee was in a photograph of them (ADR 0029 D-8).
 
 ## The side camera's post-ride report — #388
 
-`sideCameraReports` is schema version 12: at most one row per **ride**, keyed by `activityId`, and
+`sideCameraReports` arrived at schema version 12: at most one row per **ride**, keyed by `activityId`, and
 every read goes through `[athleteId+activityId]` — `getSideCameraReport(owner, activity)` cannot
 answer for a ride without being told whose it is. A second put for the same ride replaces the first.
 
@@ -706,6 +712,9 @@ observations."* So the record is a `summary` and a list of `observations`, strin
 (`MAXIMUM_SIDE_REPORT_OBSERVATIONS`) and length (`MAXIMUM_SIDE_REPORT_SENTENCE`), refused on the way
 in and on the way out by one rule. **This package does not check the wording** — it cannot import
 the client's vocabulary file — and the detail view renders only sentences that file can produce.
+⚠️ **"Nothing they were made from" held at version 12 and not since**: owner ruling 1 on #795 keeps
+the session's pose **differences** on the report too, as `pose` — §"The pose summary and one
+write-up per ride — #800".
 
 `putSideCameraReport` **refuses a report on a ride that is not the athlete's**, inside the same
 transaction as the write. The report goes with `deleteActivity` (it is about that ride and nothing
@@ -715,6 +724,54 @@ else) and with `deleteAthlete` (ADR 0029 D-4's *"everything derived from one"*),
 `lastSentenceDroppedReportStoreFactory` is the seventeenth fake: a put that drops the last
 observation. The report comes back for the right ride with the right summary and a well-formed list,
 one sentence short; `side-camera-report-store.test.ts` is the red/green pair.
+
+## The pose summary and one write-up per ride — #800
+
+Schema version 13, and **the first record migration this store has run**. Two things arrive, for
+epic #795's after-ride write-up.
+
+**The side camera's pose summary is a field on the report, not a store of its own.**
+`SideCameraReportRecord.pose` is a `SideSessionSummaryRecord` — late-minus-early **differences** per
+sagittal kind (`torso`, `knee`, `elbow`, `head`, `saddle`; a kind not compared is absent, never
+`0`), the three picture counts, and which model read the poses — or `null` where none was kept.
+Owner ruling 1 on #795: differences only, erasable, exported and in the policy. It is a field
+because it is one per session, one session per report, written by the same writer at the same
+moment: a second store would be a second key to keep in step with the first, a second cascade and a
+second scoped read, for a row that can never exist without the report.
+
+⚠️ **It is required and nullable, which is the opposite of §"An optional field is not a
+migration", on purpose.** An optional field lets a writer that rebuilds the record from the fields
+it knew drop the summary with every check green — `setAthleteThresholds` erasing `mass` was that
+defect. A required field makes forgetting it a compile error, and it cost the migration:
+`migrations.ts` §`SIDE_REPORT_POSE_SUMMARY`'s `up` puts `pose: null` on every report written at
+version 12, and its `down` removes the field — **dropping a kept summary**, which its description
+says. `migrations.test.ts` runs `up` then `down` on a version-12 fixture and requires the version-12
+shape back exactly, and opens a real version-12 database with reports in it at version 13. A
+version-13 row with no `pose` at all is refused on the way out: nothing this package writes has none.
+
+**`rideWriteUps` is a new store: at most one row per ride, keyed by `activityId`**, so a new
+analysis replaces the saved one (ruling 7) by construction. `getRideWriteUp(owner, activity)` reads
+through `[athleteId+activityId]`; `putRideWriteUp` refuses a write-up on a ride that is not the
+athlete's, inside the write's own transaction. The row goes with `deleteActivity` and with
+`deleteAthlete` (counted as `rideWriteUps`). ⚠️ **It carries no model name, no address, no key and
+no raw reply** (ADR 0031 D-3/D-4): `toPersistedRideWriteUp` writes the record's nine fields and
+nothing else, and a test puts an object carrying all four and reads the row's keys off disk.
+
+The text is **untrusted** (ADR 0029 D-8). The client screens its wording (#798) before it arrives;
+this package holds it to plain text — no control character but a newline, at most
+`MAXIMUM_WRITE_UP_CHARACTERS` (16 000) — and holds `missingSections` to distinct, ascending indices
+below `MAXIMUM_WRITE_UP_SECTIONS` (8), on the way in and on the way out by one rule, so a hand-edited
+row is refused like a bad record. `MAXIMUM_WRITE_UP_CHARACTERS` is exported so the screen uses **this**
+number rather than a second one. Markup and a URL are kept as the characters they are: refusing or
+rendering them is the screen's and the view's job.
+
+Two fakes: `poselessReportStoreFactory` (the eighteenth) writes every report's summary as `null`, a
+real state that only a field-by-field comparison notices; `firstWriteUpStoreFactory` (the
+nineteenth) acknowledges a second write-up and keeps the first — CLAUDE.md §5's *wrong time*.
+`ride-write-up-store.test.ts` holds both red/green pairs.
+
+⚠️ **Nothing writes either yet.** `side-report-keeper.ts` writes `pose: null` until #801 computes
+the summary, and the write-up's writer and reader are #804's.
 
 ## Not in this package
 

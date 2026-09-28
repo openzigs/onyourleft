@@ -1003,6 +1003,16 @@ export const FRAMING_CHECK_RECORDS: readonly FramingCheckRecord[] = [
  * vocabulary file ADR 0030 D-8 asks for; the detail view renders only
  * sentences that file can produce. What this package checks is the shape and
  * the bounds, so a hand-edited row cannot hand the view a page of text.
+ *
+ * ## Since schema version 13 it may also carry numbers — the pose summary
+ *
+ * ⚠️ **"No number of any kind" above was true at version 12 and is not since
+ * #800**, and a reviewer who remembers it is reading the old record. The
+ * owner's ruling 1 on #795 (2026-09-28): keep a pose summary with the ride,
+ * **differences only** — erasable, exported and listed in the policy. It is
+ * {@link SideCameraReportRecord.pose}, and what it may hold is
+ * {@link SideSessionSummaryRecord}. The amendment to ADR 0033 D-6 that ruling
+ * makes is #796's.
  */
 export interface SideCameraReportRecord {
   /** The ride this report is about. It is also the primary key. */
@@ -1020,4 +1030,115 @@ export interface SideCameraReportRecord {
    * which the summary then says in words.
    */
   readonly observations: readonly string[];
+  /**
+   * The session's pose summary, differences only — or `null` when none was
+   * kept (#800).
+   *
+   * ⚠️ **Required and nullable, not optional, on purpose.** README
+   * §"An optional field is not a migration" is the easy path and it is the
+   * wrong one here: an optional field lets a writer that rebuilds the record
+   * from the fields it knows (`setAthleteThresholds` erasing `mass`, #238)
+   * drop the summary with every check green. A required field makes forgetting
+   * it a compile error. `null` is "this report keeps no pose summary", which
+   * is what every report written before version 13 becomes on upgrade
+   * (`migrations.ts` §`SIDE_REPORT_POSE_SUMMARY`).
+   */
+  readonly pose: SideSessionSummaryRecord | null;
+}
+
+/**
+ * The five sagittal kinds a side-camera session compares — #388's owner list
+ * (torso, knee at the bottom of the stroke, elbow, head fore and aft, fore and
+ * aft on the saddle) — and the only keys a {@link SideSessionSummaryRecord}'s
+ * `differences` may have. Nothing across the rider: ADR 0030 D-4.
+ */
+export const SIDE_SESSION_KINDS = ['torso', 'knee', 'elbow', 'head', 'saddle'] as const;
+
+/** One of {@link SIDE_SESSION_KINDS}. */
+export type SideSessionKind = (typeof SIDE_SESSION_KINDS)[number];
+
+/** Which model read the session's poses: the tablet's own, or the rider's computer (#553). */
+export type SideSessionSourceRecord = 'tablet' | 'computer';
+
+/** Every {@link SideSessionSourceRecord}, for a decoder that refuses anything else. */
+export const SIDE_SESSION_SOURCES: readonly SideSessionSourceRecord[] = ['tablet', 'computer'];
+
+/**
+ * What a side-camera session measured, reduced to **differences** — #800, the
+ * owner's ruling 1 on #795.
+ *
+ * ⚠️ **Late minus early, per sagittal kind, and never a per-third absolute
+ * value.** A kind that was not compared is **absent**, never `0`: a zero says
+ * "compared, and nothing moved", which is a different claim. The unit is
+ * whatever the client measured the kind in; this package checks only that a
+ * difference is a finite number and that its key is one of
+ * {@link SIDE_SESSION_KINDS}.
+ *
+ * ⚠️ **No time, and no alignment to the ride.** ADR 0033 D-3: pose numbers are
+ * never aligned to a moment in the ride, so this is one summary per session
+ * and carries no timestamp.
+ */
+export interface SideSessionSummaryRecord {
+  readonly differences: Readonly<Partial<Record<SideSessionKind, number>>>;
+  /** Pictures in which a rider was posed. A non-negative whole number. */
+  readonly posed: number;
+  /** Pictures in which no rider was found. A non-negative whole number. */
+  readonly noRider: number;
+  /** Pictures the model could not read. A non-negative whole number. */
+  readonly unreadable: number;
+  readonly source: SideSessionSourceRecord;
+}
+
+/** Where a ride's write-up was written: the rider's own computer, or a model on the rider's key. */
+export type RideWriteUpSourceRecord = 'computer' | 'hosted';
+
+/** Every {@link RideWriteUpSourceRecord}, for a decoder that refuses anything else. */
+export const RIDE_WRITE_UP_SOURCES: readonly RideWriteUpSourceRecord[] = ['computer', 'hosted'];
+
+/**
+ * A model's write-up of one ride, as it passed the runtime screen — #800,
+ * epic #795.
+ *
+ * ## One per ride, and the newest replaces it
+ *
+ * The owner's ruling 7 on #795: *"a new analysis replaces the saved one"*.
+ * Keyed on the activity, so a second put for the same ride replaces the row
+ * rather than adding one — the key says it, not a rule a writer has to
+ * remember.
+ *
+ * ## What it deliberately does not carry
+ *
+ * ⚠️ **No model name, no address, no key and no raw reply.** ADR 0031 D-3/D-4:
+ * no vendor is named or defaulted, and a stored address or key is a hole in
+ * the account export. `toPersistedRideWriteUp` writes the fields below and
+ * nothing else, so a caller that spread a richer object in still puts none of
+ * it on disk.
+ *
+ * ## The text is untrusted, and this package checks its shape
+ *
+ * ADR 0029 D-8: model output is untrusted input. The wording is screened by
+ * the client before it is kept (#798); what this package holds it to is plain
+ * text — no control character but a newline, and at most
+ * `MAXIMUM_WRITE_UP_CHARACTERS` — so a hand-edited row is refused on the way
+ * out exactly as a bad record is on the way in.
+ */
+export interface RideWriteUpRecord {
+  /** The ride this write-up is about. It is also the primary key. */
+  readonly activityId: ActivityId;
+  /** Whose ride. **Every read of this record filters on it.** */
+  readonly athleteId: AthleteId;
+  /** The screened write-up, plain text. */
+  readonly text: string;
+  /** Which of the app's templates produced it, and which version of that template. */
+  readonly templateId: string;
+  readonly templateVersion: string;
+  readonly source: RideWriteUpSourceRecord;
+  /** Whether the side camera's pose summary was part of what the model was sent. */
+  readonly includedPose: boolean;
+  /**
+   * The template's sections that are not in the text because their step
+   * failed — zero-based, distinct, ascending. Empty when nothing was left out.
+   */
+  readonly missingSections: readonly number[];
+  readonly writtenAt: UnixSeconds;
 }

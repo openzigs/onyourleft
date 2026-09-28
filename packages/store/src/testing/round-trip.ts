@@ -41,6 +41,7 @@ import type {
   CameraFrameRecord,
   FramingReferenceRecord,
   SideCameraReportRecord,
+  RideWriteUpRecord,
   RouteRecord,
   SegmentEndpointRecord,
   SegmentRecord,
@@ -717,6 +718,95 @@ export async function assertSideCameraReportRoundTrip(
         `sideCameraReport.observations[${String(index)}]: is not the sentence kept`,
       );
     }
+  }
+  assertSamePose(report.pose, read.pose);
+  return read;
+}
+
+/**
+ * The pose summary, field by field — #800. `fakes.ts`
+ * §`poselessReportStoreFactory` returns `null`, which is a real state, so a
+ * check that only asked whether a report came back cannot see it.
+ *
+ * ⚠️ Names the field and never the number: it is a measurement of a body.
+ */
+function assertSamePose(
+  kept: SideCameraReportRecord['pose'],
+  read: SideCameraReportRecord['pose'],
+): void {
+  if (kept === null || read === null) {
+    if (kept !== read) {
+      throw new RoundTripFailure(
+        kept === null
+          ? 'sideCameraReport.pose: a summary came back where none was kept'
+          : 'sideCameraReport.pose: the summary kept did not come back',
+      );
+    }
+    return;
+  }
+  const keptKinds = Object.keys(kept.differences).sort();
+  const readKinds = Object.keys(read.differences).sort();
+  if (keptKinds.join() !== readKinds.join()) {
+    throw new RoundTripFailure('sideCameraReport.pose.differences: different kinds came back');
+  }
+  for (const kind of keptKinds as (keyof typeof kept.differences)[]) {
+    if (!Object.is(read.differences[kind], kept.differences[kind])) {
+      throw new RoundTripFailure(
+        `sideCameraReport.pose.differences.${kind}: is not the difference kept`,
+      );
+    }
+  }
+  for (const field of ['posed', 'noRider', 'unreadable', 'source'] as const) {
+    if (read[field] !== kept[field]) {
+      throw new RoundTripFailure(`sideCameraReport.pose.${field}: is not the value kept`);
+    }
+  }
+}
+
+/**
+ * Keeps a ride's write-up, closes every connection, and reads it back through
+ * `getRideWriteUp` — the read the ride detail screen uses (#800, #804).
+ *
+ * ⚠️ **Run it on a harness that already holds a write-up for the same ride**
+ * and it is also the test of "a new analysis replaces the saved one": `fakes.ts`
+ * §`firstWriteUpStoreFactory` answers the second put with success and keeps the
+ * first, and every field is compared so that nothing of the first can pass.
+ *
+ * ⚠️ The failure names the field, never the text: it is a model's words about
+ * somebody's ride.
+ *
+ * @throws {RoundTripFailure}
+ */
+export async function assertRideWriteUpRoundTrip(
+  harness: StoreHarness,
+  writeUp: RideWriteUpRecord,
+): Promise<RideWriteUpRecord> {
+  const read = await harness.roundTrip(
+    async (store) => store.putRideWriteUp(writeUp),
+    async (store) => store.getRideWriteUp(writeUp.athleteId, writeUp.activityId),
+  );
+  if (read === undefined) {
+    throw new RoundTripFailure(
+      `the write-up for ${writeUp.activityId} was kept and reported success, and a fresh connection cannot see it`,
+    );
+  }
+  if (read.athleteId !== writeUp.athleteId || read.activityId !== writeUp.activityId) {
+    throw new RoundTripFailure('rideWriteUp: the write-up that came back is for another ride');
+  }
+  for (const field of [
+    'text',
+    'templateId',
+    'templateVersion',
+    'source',
+    'includedPose',
+    'writtenAt',
+  ] as const) {
+    if (read[field] !== writeUp[field]) {
+      throw new RoundTripFailure(`rideWriteUp.${field}: is not the value kept`);
+    }
+  }
+  if (read.missingSections.join() !== writeUp.missingSections.join()) {
+    throw new RoundTripFailure('rideWriteUp.missingSections: is not the list kept');
   }
   return read;
 }

@@ -250,6 +250,7 @@ function detailPort(populated: boolean): ReturnType<typeof stubDetail> {
         SIDE_OBSERVATION_SENTENCES.torso.decreased,
         SIDE_OBSERVATION_SENTENCES.knee.increased,
       ],
+      pose: null,
     },
   });
 }
