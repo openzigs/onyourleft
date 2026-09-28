@@ -61,6 +61,7 @@ import {
   foliageOrderedOf,
   loadRealisticWorld,
   loadSceneryModels,
+  realisticTextureReport,
   threeGameRenderer,
 } from '../src/game/three-renderer';
 import {
@@ -141,6 +142,32 @@ export interface EarlyRecord {
   report: ((message: string) => void) | undefined;
 }
 
+/** What Part AH's #618 row records of the textures a load chose. @see realisticTextureReport */
+interface TextureSummary {
+  /** How many textures a material wears, once per image, by the format each was handed to the GPU as. */
+  readonly formats: Readonly<Record<string, number>>;
+  /** Their GPU bytes, every mip level. */
+  readonly bytes: number;
+  /** The sky's format, which #618 leaves at half-float. */
+  readonly sky: string;
+}
+
+/** The loaded world's textures, summarised for the tablet's row. */
+function textureSummary(): TextureSummary {
+  const formats: Record<string, number> = {};
+  let bytes = 0;
+  let sky = '';
+  for (const texture of realisticTextureReport()) {
+    if (texture.role === 'sky') {
+      sky = texture.format;
+      continue;
+    }
+    formats[texture.format] = (formats[texture.format] ?? 0) + 1;
+    bytes += texture.bytes;
+  }
+  return { formats, bytes, sky };
+}
+
 declare global {
   interface Window {
     __oylRealisticEarly?: EarlyRecord;
@@ -152,6 +179,14 @@ declare global {
        * rows, whose ceiling is +500 ms. Absent until that frame.
        */
       readonly firstFrameMs?: number;
+      /**
+       * #618's review: the formats the load CHOSE, not only the ones the
+       * WebView offers — `KTX2Loader`'s own rules can turn an offered format
+       * off, as its Linux rule does. Every texture a material wears, by
+       * format, and their GPU bytes; the sky is apart. Absent until the first
+       * frame. @see realisticTextureReport
+       */
+      readonly textures?: TextureSummary;
       readonly errors: readonly string[];
       /** What the first script saw of Capacitor's bridge, and what the shell sent it. @see EarlyRecord */
       readonly bridge: Omit<EarlyRecord, 'errors' | 'report'> | undefined;
@@ -342,8 +377,10 @@ async function run(): Promise<void> {
     lastFrameRendererTriangles = layerSwitch.renderer()?.info.render.triangles;
     framesInWindow += 1;
     if (!published.ready) {
-      publish({ ready: true, firstFrameMs: performance.now() });
+      const textures = textureSummary();
+      publish({ ready: true, firstFrameMs: performance.now(), textures });
       console.log(`OYL-REALISTIC-FIRST-FRAME ${performance.now().toFixed(0)}`);
+      console.log(`OYL-REALISTIC-TEXTURES ${JSON.stringify(textures)}`);
     }
     if (!measured && clock.windowFull(config.seconds)) {
       measured = true;

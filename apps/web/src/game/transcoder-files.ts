@@ -15,7 +15,9 @@
  * sits where `tools/precache/precache.ts` §`PRECACHE_EXCLUSIONS` already
  * excludes the realistic set (ADR 0026 D-7, ADR 0024): not precached in a
  * browser, and in the APK with everything else in `dist`.
- * `realistic-assets.test.ts` holds it inside that directory.
+ * `tools/precache/precache.test.ts` §"#618" holds it inside that directory
+ * and out of the precache, and `tools/basis/transcoder-plugin.test.ts` pins
+ * the directory the plugin writes to.
  */
 
 /** The transcoder's directory, relative to the build's root. */

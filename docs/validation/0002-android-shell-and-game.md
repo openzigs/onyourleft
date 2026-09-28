@@ -3338,14 +3338,39 @@ finding for [#619](https://github.com/openzigs/onyourleft/issues/619), written h
 away. Also record the **time to the first realistic frame** from the page opening, which #618's
 ceiling puts at no more than 500 ms later than before: since #618 the page logs it as
 `OYL-REALISTIC-FIRST-FRAME <ms>` (and publishes `firstFrameMs`), so it is in `oyl.txt` with AH6's
-grep. ⚠️ The *before* build predates that line; read it there from the first `OYL-REALISTIC-SOAK`
-line's timestamp against the page opening, or take the before row on a checkout with the one-line
-change applied. For reference, the browser gate measured it in SwiftShader
+grep.
+
+⚠️ **The before row is taken the same way, and there is no other way** (#618's review). The
+*before* build predates that line, and a logcat timestamp of the first `OYL-REALISTIC-SOAK` line
+against "the page opening" is a different quantity from `performance.now()` at the first frame —
+with a 500 ms ceiling and SwiftShader's own noise near a second, a definitional offset between the
+two rows could decide the result. So the before build is **the first parent of #618's merge commit
+on `main`** (`git rev-parse <merge>^1`; write the SHA in the row), checked out with exactly this
+patch to `apps/web/browser/realistic-harness.ts` and nothing else:
+
+```diff
+-    if (!published.ready) publish({ ready: true });
++    if (!published.ready) {
++      publish({ ready: true });
++      console.log(`OYL-REALISTIC-FIRST-FRAME ${performance.now().toFixed(0)}`);
++    }
+```
+
+which is the line #618 added, at the place #618 added it, so both rows read the same clock at the
+same moment. A before row measured any other way is left empty rather than filled.
+
+The *after* build also logs `OYL-REALISTIC-TEXTURES {"formats":…,"bytes":…,"sky":…}` at the same
+moment — the formats the load **chose** and their GPU bytes, which is not the same as the formats
+the WebView offers: `KTX2Loader`'s own rules can turn an offered one off, as its Linux rule does in
+the browser gate. Copy the line into the last column; `ASTC 4x4` and `ETC2 RGB`/`ETC2 RGBA` there,
+and no `RGBA8 (fallback)`, is what the after row's `GL mtrack` is a measurement of.
+
+For reference, the browser gate measured it in SwiftShader
 at a median of 2 041 ms before and 2 499 ms after (+458 ms, ten and eleven runs, noisy by a second
 either way), where SwiftShader decodes ETC2 and ASTC in software, which a Mali GPU does not.
 
-| #618 | first realistic frame, ms | `GL mtrack` at minute 10, MiB | the tablet offers ASTC and ETC |
-|---|---|---|---|
-| before | | | |
-| after | | | |
+| #618 | build (SHA) | first realistic frame, ms | `GL mtrack` at minute 10, MiB | the tablet offers ASTC and ETC | `OYL-REALISTIC-TEXTURES` |
+|---|---|---|---|---|---|
+| before | first parent of the merge, with the patch above | | | | — (RGBA8 by construction) |
+| after | #618's merge | | | | |
 

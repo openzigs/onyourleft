@@ -3786,6 +3786,9 @@ export interface TextureMeasurement {
     readonly role: string;
     readonly format: string;
     readonly bytes: number;
+    /** The base level's size, which the spec derives each block chain's bytes from. */
+    readonly width: number;
+    readonly height: number;
   }[];
   /** The sky, which #618 leaves at half-float. */
   readonly sky: { readonly format: string; readonly bytes: number };
@@ -3927,7 +3930,7 @@ async function textureProbe(canvasOf: () => HTMLCanvasElement): Promise<TextureM
       desktopRule,
       worn: report
         .filter((each) => each.role !== 'sky')
-        .map(({ role, format, bytes }) => ({ role, format, bytes })),
+        .map(({ role, format, bytes, width, height }) => ({ role, format, bytes, width, height })),
       sky: { format: sky?.format ?? '', bytes: sky?.bytes ?? 0 },
       uploads,
       uploaded,

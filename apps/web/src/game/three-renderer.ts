@@ -4679,9 +4679,10 @@ function probedCompressionExtensions(): CompressionExtensions {
  * caller says otherwise: the loader's own default is a URL inside `three`,
  * which `tools/basis/transcoder-plugin.ts` takes out of the build.
  *
- * The product reaches it through {@link THREE_LOADERS}, over the device's own
- * extensions; `realistic-textures.test.ts` drives it with a device that does
- * and does not offer ASTC and ETC, and the browser gate's control with none.
+ * The product reaches it through {@link productRealisticLoaders}, over the
+ * device's own extensions; `realistic-textures.test.ts` drives it with a
+ * device that does and does not offer ASTC and ETC, and the browser gate's
+ * control with none.
  */
 export function compressedRealisticLoaders(
   extensions: CompressionExtensions,
@@ -4709,6 +4710,13 @@ export function compressedRealisticLoaders(
  * The product's loaders: {@link compressedRealisticLoaders} over the device's
  * own extensions, built when a load first asks and released by its `dispose`,
  * so a world that is already loaded probes nothing.
+ *
+ * ⚠️ **One set per LOAD, not one per module** (#618's review): `built` is
+ * mutable and `dispose` releases it, so two overlapping loads sharing one set
+ * would share one `KTX2Loader`, and whichever settled first would release its
+ * workers under the other. {@link loadRealisticWorld} therefore builds a fresh
+ * set each time it is called without one — `loadRealisticWorldOnce` serialises
+ * a ride's loads anyway, but the owner's page calls the raw loader directly.
  */
 function productRealisticLoaders(): RealisticLoaders {
   let built: ReturnType<typeof compressedRealisticLoaders> | undefined;
@@ -4724,8 +4732,6 @@ function productRealisticLoaders(): RealisticLoaders {
     },
   };
 }
-
-const THREE_LOADERS: RealisticLoaders = productRealisticLoaders();
 
 /**
  * What a realistic texture is held as on the GPU — #618. A block format by
@@ -4808,8 +4814,9 @@ export function realisticTextureFormat(texture: Texture): {
  * Every texture the loaded realistic world holds, once per image, and how the
  * GPU is handed it — #618. Empty when no world is loaded.
  *
- * @test-facing `realistic-textures.test.ts` holds a load to it, and the
- * browser gate publishes it from the one shared `?realistic` load
+ * @test-facing `realistic-textures.test.ts` holds a load to it, the
+ * browser gate publishes it from the one shared `?realistic` load, and the
+ * owner's page (`realistic-harness.ts`) logs it for validation 0002 Part AH
  */
 export function realisticTextureReport(): readonly RealisticTextureReport[] {
   const world = realisticWorld;
@@ -4895,7 +4902,7 @@ export function uploadRealisticTexturesOf(view: GameView, textures?: readonly Te
  * §`realisticWorldNotice` is the sentence.
  */
 export async function loadRealisticWorld(
-  loaders: RealisticLoaders = THREE_LOADERS,
+  loaders: RealisticLoaders = productRealisticLoaders(),
 ): Promise<RealisticWorldOutcome> {
   try {
     return await loadEveryRealisticFile(loaders);
@@ -5098,9 +5105,7 @@ let realisticLoading: Promise<RealisticWorldOutcome> | undefined;
  * @param loaders the same seam `loadRealisticWorld` takes; only the call that
  *   starts a load uses it, and a call that joins or finds a world ignores it.
  */
-export function loadRealisticWorldOnce(
-  loaders: RealisticLoaders = THREE_LOADERS,
-): Promise<RealisticWorldOutcome> {
+export function loadRealisticWorldOnce(loaders?: RealisticLoaders): Promise<RealisticWorldOutcome> {
   if (realisticWorld !== undefined) {
     return Promise.resolve({ loaded: true });
   }
