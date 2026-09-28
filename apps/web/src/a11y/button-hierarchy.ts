@@ -26,6 +26,18 @@
  * `main` outside the panes as one more unit. **Only there**: a pane marker in
  * any other `main` is ignored and that `main` is still one view, so the rule
  * is not loosened by an attribute a view could add to itself.
+ *
+ * ## …and only at TWO panes — #723
+ *
+ * Below the breakpoint `ListDetail` stacks the panes and a phone scrolls them
+ * as ONE view: the list's primary and the detail's primary are two heavy
+ * controls on one page, which is exactly what the rule exists to stop. So the
+ * panes are counted apart only while the layout says it has two
+ * (`[data-oyl-panes="2"]`, written by `ListDetail`). At one pane — or where no
+ * layout says how many it has, which fails closed — the `main` is one unit
+ * again, and a pane the layout has `hidden` is left out of it, because it is
+ * not on the page a rider scrolls: at one pane with an item chosen the list is
+ * hidden and its *Build a workout* is not a second primary beside the item's.
  */
 
 /** Every element drawn as a primary button. */
@@ -60,6 +72,9 @@ export const LIST_DETAIL_MAIN_CLASS = 'oyl-main--list-detail';
 /** A pane of a list–detail layout — `shell/ListDetail.tsx`. */
 export const PANE_SELECTOR = '[data-oyl-pane]';
 
+/** A list–detail layout that has decided it shows two panes side by side — `shell/ListDetail.tsx`. */
+export const TWO_PANES_SELECTOR = '[data-oyl-panes="2"]';
+
 /** One unit the rule counts: a whole `main`, or one pane of a list–detail `main`. */
 export interface PrimaryUnit {
   /** `main`, or `main, list pane` and the like, for a failure message. */
@@ -75,6 +90,16 @@ export function primaryUnits(root: ParentNode): PrimaryUnit[] {
       return [{ where: 'main', primaries: all }];
     }
     const panes = [...main.querySelectorAll(PANE_SELECTOR)];
+    if (main.querySelector(TWO_PANES_SELECTOR) === null) {
+      // One pane: one page, scrolled as one. A hidden pane is not on it.
+      const hidden = panes.filter((pane) => pane.closest('[hidden]') !== null);
+      return [
+        {
+          where: 'main',
+          primaries: all.filter((element) => !hidden.some((pane) => pane.contains(element))),
+        },
+      ];
+    }
     const inPane = (element: Element): boolean => panes.some((pane) => pane.contains(element));
     return [
       { where: 'main, outside its panes', primaries: all.filter((element) => !inPane(element)) },

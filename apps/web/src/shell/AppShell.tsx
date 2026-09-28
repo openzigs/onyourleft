@@ -104,6 +104,12 @@ import { useRoute } from './useRoute';
 /** The id `main` carries, and the only place it is written. */
 const MAIN_ID = 'oyl-main';
 
+/**
+ * The app's name: the wordmark, the header landmark's label and the document
+ * title's suffix (#671). One constant, so the three cannot disagree.
+ */
+const APP_NAME = 'On Your Left';
+
 /** The id of the `h1`, which names the `main` landmark through `aria-labelledby`. */
 const VIEW_TITLE_ID = 'oyl-view-title';
 
@@ -569,7 +575,7 @@ export function AppShell(props: AppShellProps): JSX.Element {
     // The document title is the first thing a screen reader announces after a
     // page change and the only thing a tab strip shows, so it moves with the
     // route rather than staying on whatever index.html said.
-    document.title = `${route.title} — On Your Left`;
+    document.title = `${route.title} — ${APP_NAME}`;
   }, [route.title]);
 
   function skipToContent(event: MouseEvent<HTMLAnchorElement>): void {
@@ -626,12 +632,24 @@ export function AppShell(props: AppShellProps): JSX.Element {
         */}
         {props.update === undefined || immersive ? null : <UpdateOffer watcher={props.update} />}
 
+        {/*
+          #671: the header is the wordmark and nothing else. The navigation is
+          its own landmark beside it rather than inside it — a bar or a rail
+          since #427, so it was never in the header's box on any screen but the
+          shortest, where it made the header 191 px of 256.
+
+          ⚠️ The label is what keeps the app's name available to assistive
+          technology below the rail breakpoint, where `theme.css` folds the
+          wordmark off the screen. It is the same string as the wordmark and
+          the document title's suffix.
+        */}
         {immersive ? null : (
-          <header className="oyl-header">
-            <p className="oyl-wordmark">On Your Left</p>
-            <PrimaryNav route={route} />
+          <header className="oyl-header" aria-label={APP_NAME}>
+            <p className="oyl-wordmark">{APP_NAME}</p>
           </header>
         )}
+
+        {immersive ? null : <PrimaryNav route={route} />}
 
         {immersive ? null : <SectionNav route={route} />}
 

@@ -621,9 +621,23 @@ thing on a tablet and on a phone — `replace` at two panes would need every lis
 own click. With an item chosen the detail pane holds that item alone; Workouts' builder and Routes'
 import are reached from the head of the list (`ListDetail.tsx` §`CreateLink`), which is that pane's
 one primary then and secondary when the form is already on screen. The one-primary rule counts
-**per pane** on a `list-detail` `main`, and only there. `browser/list-detail.browser.spec.ts`
+**per pane** on a `list-detail` `main` **at two panes**, and only there: at one pane a phone scrolls
+both panes as one page, so they are one view again, less a pane the layout has `hidden`
+([#723](https://github.com/openzigs/onyourleft/issues/723)). `browser/list-detail.browser.spec.ts`
 measures the panes side by side on a landscape tablet, with the routes switched back to `prose` as
 its control, and publishes each primary action's place on arrival and with the item chosen.
+
+⚠️ **At two panes, on a window at least 40rem tall, each pane scrolls on its own** (#723). `main` is
+a column and the grid takes what the shell's one-viewport `min-height` leaves under the page's title
+and summary, so choosing the fortieth ride no longer scrolls the page to the detail's heading. The
+header is allowed for by the layout rather than by a number — the panes are below it in flow,
+whatever it measures and whether or not it sticks — so the rule does not depend on #671's
+`--oyl-header-height`. The footer takes no height in that column and the page scrolls by its one
+line, which the title and summary above the panes are taller than, so no pane can slide under the
+header. Each pane keeps 8 px of padding for a focus ring, which a pane that clips its overflow would
+otherwise cut off, and an equal negative margin so the content stays on the grid's edges.
+`list-detail.browser.spec.ts` §"#723" measures it on the owner's tablet with its insets, with the
+pre-#723 layout (`reflow.html?panes=page`) as the control that must fail.
 
 ⚠️ **#307's review added a fourth thing, and it is a gate rather than a system.** The first three are
 all checkable *without a browser* — a colour ratio, a number against a ratio, a `var()` against a

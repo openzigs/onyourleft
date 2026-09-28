@@ -181,6 +181,21 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
     setFileFault(undefined);
   }, [selected]);
 
+  /*
+   * #723: what the chosen workout's own page last said goes with it. The
+   * "Delete …?" confirmation and the "….json is ready" note belong to ONE
+   * workout, and moving straight from it to another — a second list link, at
+   * two panes, with no stop at the list between — kept both, so the next
+   * workout's page asked to delete the previous one by name. Cleared on EVERY
+   * change of `selected`, unlike the builder's messages above: nothing here is
+   * set in the same turn as a change of selection that should survive it
+   * (`onDelete` clears both itself before it lets the selection go).
+   */
+  useEffect(() => {
+    setPendingDelete(undefined);
+    setExported(undefined);
+  }, [selected]);
+
   const inList =
     selected === undefined ? undefined : entries?.find((entry) => entry.row.id === selected);
   const readAlone = selected !== undefined && entries !== undefined && inList === undefined;
@@ -258,6 +273,14 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
       setSaved(`Saved “${outcome.value.name}”.`);
       setBlocks([]);
       setDraft(EMPTY_DRAFT);
+      /*
+       * #723: the name goes with the blocks. The builder is a fresh workout
+       * after a save — no blocks, the default draft — and a name left in the
+       * box read as a workout of that name with nothing in it, which the next
+       * one built here would silently inherit: two different workouts under
+       * one name in the list. "Saved “…”." below still says what was saved.
+       */
+      setName('');
       await reload();
     },
     [blocks, clock, name, port, reload],
