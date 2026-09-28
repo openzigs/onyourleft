@@ -423,7 +423,7 @@ export function SegmentsView({ port, match }: SegmentsViewProps): JSX.Element {
             to, so pressing it again carries on rather than starting over. Running it after making a
             segment is what finds that segment in rides you have already stored.
           </p>
-          <Button onClick={() => void runSweep()} disabled={matching}>
+          <Button variant="secondary" onClick={() => void runSweep()} disabled={matching}>
             {matching ? 'Matching…' : 'Match my rides'}
           </Button>
           {sweepFailure === undefined ? null : (

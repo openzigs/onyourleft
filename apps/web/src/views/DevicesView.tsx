@@ -3,6 +3,8 @@
 import type { JSX } from 'react';
 
 import { StatusMessage } from '../design/StatusMessage';
+import type { RideController } from '../ride/controller';
+import { PairingPanel } from '../ride/SensorPairing';
 import { BluetoothSupportNotice } from '../support/BluetoothSupportNotice';
 import { ShellSupportNotice } from '../support/ShellSupportNotice';
 import type { CapabilityProbe } from '../support/bluetooth-support';
@@ -26,25 +28,43 @@ export interface DevicesViewProps {
    * the same choice it already makes for the transport.
    */
   readonly shell?: ShellSupportPort | undefined;
+  /**
+   * The ride controller, mounted above the router — #659. Pairing on this
+   * screen is its `pair` and its `unpair`, so a device paired here is the
+   * device the Ride screen shows.
+   *
+   * ⚠️ **Optional, and absent is a real state as well as the accessibility
+   * suite's**: `main.tsx` builds no controller where this browser cannot pair,
+   * and the screen then explains. Absent where the platform CAN pair is
+   * today's dead end — the browser gate's control renders exactly that.
+   */
+  readonly controller?: RideController | undefined;
 }
 
 /**
- * The page where an athlete finds out whether this browser can pair a sensor.
+ * The page where an athlete pairs, checks and forgets their trainer and each
+ * sensor — #659.
  *
- * ## There is deliberately no pairing button here
+ * ## Until #659 there was deliberately no pairing button here
  *
- * #48's first acceptance criterion says a *"silently non-functional pairing
- * control fails this criterion"*, and the issue's own guidance adds that this
- * holds *"even if the button is disabled"*. Pairing is
- * [#49](https://github.com/openzigs/onyourleft/issues/49), which is explicitly
- * not in this change. A button rendered here now would be exactly the control
- * the criterion rejects — it would look like the way in, do nothing, and leave
- * the reason in a console nobody opens.
+ * #48's first criterion rejects *"a silently non-functional pairing control"*,
+ * and pairing was #49's, on the Ride screen — so this page said "Not built
+ * yet" and offered nothing, while Home and the More tab both sent a new rider
+ * here to pair. The owner ruled (2026-09-27) that pairing lives HERE. The
+ * block moved from the Ride screen to `ride/SensorPairing.tsx` §`PairingPanel`
+ * and drives the same controller; it is shown only behind the same check that
+ * guarded the old message — `support.canPair` — and only with a controller, so
+ * #48's rule still holds: no control is rendered that cannot work.
  *
- * So the page says what it can honestly say: whether the browser is capable,
- * what to do if it is not, and that the pairing flow itself is still to come.
- * When #49 lands, the button goes where the second `StatusMessage` is, behind
- * the same `support.canPair` check that guards it now.
+ * ## Controls first
+ *
+ * #654's ruling 3: where pairing works, the pairing list comes first and what
+ * the platform cannot do is beneath it in a `<details>` — the support notice
+ * in its can-pair state included, because that state renders no control (see
+ * `SensorPairing.tsx`'s header).
+ * Every OTHER state keeps its notice visible, first, as before: a radio that
+ * is off or a permission not granted is the thing to read, and its *Check
+ * again* must not be inside a disclosure.
  *
  * ## Two platforms, two questions, and why they are two components
  *
@@ -55,44 +75,90 @@ export interface DevicesViewProps {
  * taken once, in the one place that may read a global.
  *
  * It is two components rather than one with a conditional because each holds a
- * hook, and a hook cannot be called behind an `if`. That is a React rule and
- * not a preference, and it is worth the extra function: the browser half below
- * is byte-for-byte what it was, which is #284's third acceptance criterion
- * (`DevicesView.test.tsx` is untouched by that change).
+ * hook, and a hook cannot be called behind an `if`.
+ *
+ * ⚠️ **The notice keeps its place in the tree across every state but the
+ * pairing one.** `DevicesView.shell.a11y.test.tsx` asserts the live region's
+ * node IDENTITY from "Checking" to "unanswered" (#322), so the notice is the
+ * same element at the same index in both, and only the can-pair branch moves
+ * it.
  */
-export function DevicesView({ capabilities, shell }: DevicesViewProps): JSX.Element {
+export function DevicesView({ capabilities, shell, controller }: DevicesViewProps): JSX.Element {
   return shell === undefined ? (
-    <BrowserDevices capabilities={capabilities} />
+    <BrowserDevices capabilities={capabilities} controller={controller} />
   ) : (
-    <ShellDevices port={shell} />
+    <ShellDevices port={shell} controller={controller} />
   );
 }
 
-/** The Devices screen in a browser — Web Bluetooth's answer, unchanged. */
-function BrowserDevices({ capabilities }: { readonly capabilities: CapabilityProbe }): JSX.Element {
+/** Said where the platform can pair and this build was given no controller. */
+/**
+ * What stays visible beside *one user gesture per device* in a browser — ADR
+ * 0003 D-7 rule 5 (#659's review): the constraints of the working path are
+ * not to be hidden, and a closed `<details>` is one press from hidden.
+ */
+const BROWSER_LIMITS: readonly string[] = [
+  'There is no silent reconnect: after a reload, each device is chosen again.',
+  'Recording does not continue in the background: keep this tab open and in front while you ride.',
+];
+
+/**
+ * The shell's equivalent. No background sentence: the Android shell keeps a
+ * ride alive with its foreground service (#524), so saying it cannot would be
+ * false there.
+ */
+const PHONE_LIMITS: readonly string[] = [
+  'There is no silent reconnect: after the app is closed, each device is chosen again.',
+];
+
+function NoController(): JSX.Element {
+  return (
+    <StatusMessage tone="warning" label="Not available">
+      Pairing is not available in this build of the app, so there is nothing to list.
+    </StatusMessage>
+  );
+}
+
+/** The Devices screen in a browser — Web Bluetooth's answer. */
+function BrowserDevices({
+  capabilities,
+  controller,
+}: {
+  readonly capabilities: CapabilityProbe;
+  readonly controller: RideController | undefined;
+}): JSX.Element {
   const { support, recheck } = useBluetoothSupport(capabilities);
+  const notice = <BluetoothSupportNotice support={support} onRecheck={recheck} />;
+
+  if (support?.canPair === true && controller !== undefined) {
+    return (
+      <>
+        <h2>Your trainer and sensors</h2>
+        <PairingPanel
+          controller={controller}
+          summary="What this browser can and cannot do"
+          limits={BROWSER_LIMITS}
+        >
+          {notice}
+        </PairingPanel>
+      </>
+    );
+  }
 
   return (
     <>
       <h2>This browser</h2>
-      <BluetoothSupportNotice support={support} onRecheck={recheck} />
-
+      {notice}
       <h2>Paired sensors</h2>
       {support === undefined ? (
         // Three states, not two. `support` is `undefined` while the probe is in
         // flight, and `support?.canPair === true` collapses that into the same
         // branch as a browser that genuinely cannot pair -- so the page told the
         // athlete "Sensors cannot be paired in this browser" *while the notice
-        // above it still said "Checking"*. A contradiction on screen is bad; a
-        // false negative delivered before the answer is known is worse, because
-        // criterion 1 of this issue exists to stop exactly that kind of
-        // dishonesty about what the browser can do.
+        // above it still said "Checking"*.
         <p className="oyl-muted">Waiting for the browser check to finish.</p>
       ) : support.canPair ? (
-        <StatusMessage tone="info" label="Not built yet">
-          Nothing is paired. Choosing and connecting a sensor is the next change; this page reports
-          what the browser can do so that it never offers a control that cannot work.
-        </StatusMessage>
+        <NoController />
       ) : (
         <p className="oyl-muted">
           Sensors cannot be paired in this browser, so there is nothing to list.
@@ -116,15 +182,40 @@ function BrowserDevices({ capabilities }: { readonly capabilities: CapabilityPro
  * is bounded, so "not known yet" now has a successor that is still not a
  * verdict. `unanswered` is that successor and it needs its own sentence for
  * exactly the reason the `undefined` branch needed one.
+ *
+ * ⚠️ **And since #659 the can-pair state pairs**, with the Capacitor
+ * transport `main.tsx` built for the same controller — it used to say
+ * "Sensors are paired on the Ride screen".
  */
-function ShellDevices({ port }: { readonly port: ShellSupportPort }): JSX.Element {
+function ShellDevices({
+  port,
+  controller,
+}: {
+  readonly port: ShellSupportPort;
+  readonly controller: RideController | undefined;
+}): JSX.Element {
   const { support, recheck } = useShellSupport(port);
+  const notice = <ShellSupportNotice support={support} onRecheck={recheck} />;
+
+  if (support?.canPair === true && controller !== undefined) {
+    return (
+      <>
+        <h2>Your trainer and sensors</h2>
+        <PairingPanel
+          controller={controller}
+          summary="What this phone can and cannot do"
+          limits={PHONE_LIMITS}
+        >
+          {notice}
+        </PairingPanel>
+      </>
+    );
+  }
 
   return (
     <>
       <h2>This phone</h2>
-      <ShellSupportNotice support={support} onRecheck={recheck} />
-
+      {notice}
       <h2>Paired sensors</h2>
       {support === undefined ? (
         <p className="oyl-muted">Waiting for the check to finish.</p>
@@ -133,17 +224,12 @@ function ShellDevices({ port }: { readonly port: ShellSupportPort }): JSX.Elemen
         // overclaim (#322). `canPair` is false for an unanswered check, so
         // without this the screen would say "Sensors cannot be paired on this
         // phone" — a verdict — on the strength of a question that got no reply.
-        // That is the same dishonesty the `undefined` branch above exists to
-        // avoid, one state further along.
         <p className="oyl-muted">
           The check did not finish, so there is nothing to list. This says nothing about the sensors
           themselves.
         </p>
       ) : support.canPair ? (
-        <StatusMessage tone="info" label="Not listed here">
-          Sensors are paired on the Ride screen, where the recording that needs them is. This page
-          reports what this phone can do, so that it never offers a control that cannot work.
-        </StatusMessage>
+        <NoController />
       ) : (
         <p className="oyl-muted">
           Sensors cannot be paired on this phone right now, so there is nothing to list.

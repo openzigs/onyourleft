@@ -301,6 +301,7 @@ export function RouteBuilderView({
         <Button onClick={place}>Add a waypoint</Button>
         {canUndo(history) ? (
           <Button
+            variant="secondary"
             onClick={() => {
               setHistory(undo(history));
             }}
@@ -310,6 +311,7 @@ export function RouteBuilderView({
         ) : null}
         {canRedo(history) ? (
           <Button
+            variant="secondary"
             onClick={() => {
               setHistory(redo(history));
             }}
@@ -319,6 +321,7 @@ export function RouteBuilderView({
         ) : null}
         {draft.waypoints.length >= 2 ? (
           <Button
+            variant="secondary"
             onClick={() => {
               apply(reverse(draft));
             }}
@@ -329,6 +332,7 @@ export function RouteBuilderView({
         {clearArmed ? (
           <>
             <Button
+              variant="secondary"
               onClick={() => {
                 apply(clear(draft));
                 setSelected(undefined);
@@ -338,6 +342,7 @@ export function RouteBuilderView({
               Yes, clear the route
             </Button>
             <Button
+              variant="secondary"
               onClick={() => {
                 setClearArmed(false);
               }}
@@ -347,6 +352,7 @@ export function RouteBuilderView({
           </>
         ) : isEmpty(draft) ? null : (
           <Button
+            variant="secondary"
             onClick={() => {
               setClearArmed(true);
             }}
@@ -368,14 +374,21 @@ export function RouteBuilderView({
         <ol>
           {draft.waypoints.map((waypoint, index) => (
             <li key={waypoint.id}>
+              {/*
+                #668: selecting a waypoint changes what the nudges act on, not
+                the route, so it is a toggle. Its name stays "Waypoint N" and
+                `aria-pressed` says whether it is the selected one — a name
+                that changed with the state would be announced as a different
+                control on every press.
+              */}
               <Button
+                variant="toggle"
+                pressed={waypoint.id === selected}
                 onClick={() => {
                   setSelected(waypoint.id === selected ? undefined : waypoint.id);
                 }}
               >
-                {waypoint.id === selected
-                  ? `Waypoint ${String(index + 1)}, selected`
-                  : `Waypoint ${String(index + 1)}`}
+                {`Waypoint ${String(index + 1)}`}
               </Button>
               {(
                 [
@@ -386,6 +399,7 @@ export function RouteBuilderView({
                 ] as const
               ).map(([label, north, east]) => (
                 <Button
+                  variant="secondary"
                   key={label}
                   onClick={() => {
                     nudge(waypoint.id, north, east);
@@ -395,6 +409,7 @@ export function RouteBuilderView({
                 </Button>
               ))}
               <Button
+                variant="secondary"
                 onClick={() => {
                   apply(deleteWaypoint(draft, waypoint.id));
                   if (selected === waypoint.id) setSelected(undefined);
@@ -444,6 +459,7 @@ export function RouteBuilderView({
                 </td>
                 <td>
                   <Button
+                    variant="secondary"
                     onClick={() => {
                       apply(
                         setLegMode(draft, index, leg.mode === 'snapped' ? 'freehand' : 'snapped'),

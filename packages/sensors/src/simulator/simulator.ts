@@ -411,6 +411,22 @@ export function createSimulator(options: SimulatorOptions): Simulator {
     return record;
   };
 
+  /**
+   * Ids the athlete forgot (#659). The catalogue is the room, so a forgotten
+   * device is still in it — the bench can still reach it — but the transport
+   * does not issue its id again until `discover` returns it, which is
+   * `SensorTransport.forget`'s contract.
+   */
+  const forgotten = new Set<DeviceId>();
+
+  /** {@link recordFor}, for the transport's own id-keyed methods. */
+  const issued = (id: DeviceId): DeviceRecord => {
+    if (forgotten.has(id)) {
+      throw new SensorError('device-not-found', 'this device was forgotten', { deviceId: id });
+    }
+    return recordFor(id);
+  };
+
   /** Turn a synchronous throw into a rejection — `../transport.ts`'s contract clause. */
   const attempt = <T>(operation: () => T): Promise<T> => {
     try {
@@ -614,17 +630,22 @@ export function createSimulator(options: SimulatorOptions): Simulator {
         if (match === undefined) {
           throw new SensorError('no-device-selected', 'the chooser closed without a device');
         }
+        forgotten.delete(match.device.identity.id);
         return match.device;
       });
     },
 
     knownDevices() {
-      return attempt(() => [...records.values()].map((record) => record.device));
+      return attempt(() =>
+        [...records.values()]
+          .map((record) => record.device)
+          .filter((device) => !forgotten.has(device.identity.id)),
+      );
     },
 
     connect(id: DeviceId) {
       return attempt(() => {
-        const record = recordFor(id);
+        const record = issued(id);
         requireAvailable();
         if (record.session.state === 'connected') {
           return;
@@ -651,7 +672,7 @@ export function createSimulator(options: SimulatorOptions): Simulator {
 
     disconnect(id: DeviceId) {
       return attempt(() => {
-        const record = recordFor(id);
+        const record = issued(id);
         if (record.session.state === 'unavailable') {
           return;
         }
@@ -660,12 +681,26 @@ export function createSimulator(options: SimulatorOptions): Simulator {
       });
     },
 
+    forget(id: DeviceId) {
+      return attempt(() => {
+        const record = records.get(id);
+        if (record === undefined || forgotten.has(id)) {
+          return;
+        }
+        if (record.session.state !== 'unavailable') {
+          record.session.transitionTo('disconnected');
+          linkLost(record);
+        }
+        forgotten.add(id);
+      });
+    },
+
     connectionState(id: DeviceId): ConnectionState {
-      return recordFor(id).session.state;
+      return issued(id).session.state;
     },
 
     observeConnectionState(id: DeviceId, listener: Listener<ConnectionState>): Unsubscribe {
-      return recordFor(id).session.onStateChange(listener);
+      return issued(id).session.onStateChange(listener);
     },
 
     subscribe<Capability extends MeasurementCapability>(
@@ -674,7 +709,7 @@ export function createSimulator(options: SimulatorOptions): Simulator {
       listener: Listener<MeasurementFor<Capability>>,
     ): Promise<Unsubscribe> {
       return attempt(() => {
-        const record = recordFor(id);
+        const record = issued(id);
         if (record.session.state !== 'connected') {
           throw new SensorError('not-connected', 'enabling notifications needs a connection', {
             deviceId: id,

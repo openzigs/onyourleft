@@ -1926,14 +1926,23 @@ function RoutePicker(props: {
       <div className="oyl-game__picker">
         <h2>Choose a route</h2>
         <p>{NO_ROUTES_YET}</p>
+        {/*
+          #668: both next steps are actions, so both are drawn as buttons
+          rather than links in sentences. Importing is the primary — it is
+          the one a rider with a course from a planner, the common case, takes.
+        */}
         <ul>
           <li>
-            <a href={hrefFor(routeById('routes'))}>Import a GPX file on the Routes screen</a> — a
-            course from a route planner, read on this device.
+            <a className="oyl-button" href={hrefFor(routeById('routes'))}>
+              Import a GPX file on the Routes screen
+            </a>{' '}
+            — a course from a route planner, read on this device.
           </li>
           <li>
-            <a href={hrefFor(ROUTE_BUILDER_ROUTE)}>Draw one on this device</a> — place waypoints and
-            have the roads between them worked out.
+            <a className="oyl-button oyl-button--secondary" href={hrefFor(ROUTE_BUILDER_ROUTE)}>
+              Draw one on this device
+            </a>{' '}
+            — place waypoints and have the roads between them worked out.
           </li>
         </ul>
       </div>

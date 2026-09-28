@@ -268,10 +268,12 @@ describe('criterion 3 — toggling a series changes what is rendered', () => {
   it('removes a trace from the page when it is switched off', async () => {
     const port = indoorRide();
     mounted = await open(port);
-    const hide = queryAll<HTMLButtonElement>(document, 'button').find(
-      (button) => button.textContent?.trim() === 'Hide power',
+    const showPower = queryAll<HTMLButtonElement>(document, 'button').find(
+      (button) => button.textContent?.trim() === 'Show power',
     );
-    await activateWithKeyboard(hide as HTMLButtonElement);
+    // #668: a toggle, whose name is stable and whose state is aria-pressed.
+    expect(showPower?.getAttribute('aria-pressed')).toBe('true');
+    await activateWithKeyboard(showPower as HTMLButtonElement);
     await settle();
 
     expect(queryAll(document, 'svg.oyl-trace')).toHaveLength(1);
@@ -290,8 +292,9 @@ describe('criterion 3 — toggling a series changes what is rendered', () => {
         (button) => button.textContent?.trim() === text,
       ) as HTMLButtonElement;
 
-    await activateWithKeyboard(buttonNamed('Hide power'));
+    await activateWithKeyboard(buttonNamed('Show power'));
     await settle();
+    expect(buttonNamed('Show power').getAttribute('aria-pressed')).toBe('false');
     await activateWithKeyboard(buttonNamed('Show power'));
     await settle();
     await settle();

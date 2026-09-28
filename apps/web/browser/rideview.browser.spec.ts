@@ -99,6 +99,8 @@ const UNSTYLED = 'rgba(0, 0, 0, 0)';
 
 /** The control the owner could not see. @see rideview-harness.tsx §WORKOUT */
 const STARTS_A_WORKOUT = 'Ride Sweet spot, three by twelve';
+/** The sensors group's one control since #659 — `ride/SensorPairing.tsx` §`ConnectedSensors`. */
+const DEVICES_LINK = 'Pair or forget devices on Devices';
 
 interface Viewport {
   readonly name: string;
@@ -240,7 +242,11 @@ for (const viewport of TABLETS) {
       const names = seen.controls.map((each) => each.name);
       expect(names).toEqual(expect.arrayContaining(['Pause', 'Stop', 'Set target', 'End ERG']));
       expect(names).toContain(STARTS_A_WORKOUT);
-      expect(seen.controls.filter((each) => each.group === 'sensors').length).toBeGreaterThan(3);
+      // #659: pairing is on Devices, so what the sensors group offers is the
+      // way there — the link, and no pairing button.
+      expect(
+        seen.controls.filter((each) => each.group === 'sensors').map((each) => each.name),
+      ).toEqual([DEVICES_LINK]);
     });
 
     test('is not held to the prose reading measure', async ({ page }) => {
@@ -367,7 +373,8 @@ for (const viewport of [TABLET, TABLET_IN_THE_SHELL]) {
       const seen = await measure(page);
 
       const pairing = seen.controls.filter((each) => each.group === 'sensors');
-      expect(pairing.length).toBeGreaterThan(3);
+      // #659: one control, the link to Devices, where pairing now is.
+      expect(pairing.map((each) => each.name)).toEqual([DEVICES_LINK]);
       expect(pairing.filter((each) => !onScreen(each, viewport)).map(describeControl)).toEqual([]);
     });
   });
@@ -388,7 +395,10 @@ for (const viewport of [
       await open(page, viewport);
       const seen = await measure(page);
 
-      expect(seen.controls.length).toBeGreaterThan(8);
+      // Six in the live and trainer groups, and the link to Devices. It was
+      // more than eight until #659 moved the four Pair buttons and the Forget
+      // off this screen; the count is the apparatus, not the claim.
+      expect(seen.controls.length).toBeGreaterThanOrEqual(7);
       const wide = seen.controls.filter(
         (each) => each.box.right > viewport.width + SUBPIXEL_TOLERANCE || each.box.left < 0,
       );

@@ -19,6 +19,7 @@
 import { describe, expect, it, afterEach } from 'vitest';
 
 import { expandWorkout, seconds, thresholdShare, watts } from '@onyourleft/domain';
+import { deviceId } from '@onyourleft/sensors';
 import { createSimulator } from '@onyourleft/sensors/simulator';
 import { recordingSessionId, type UnitSystem } from '@onyourleft/store';
 import {
@@ -340,38 +341,48 @@ describe('criterion 6 — one click cannot end a ride', () => {
 // on `RideView` alone would pass while the shipping app let a tab close mid-ride
 // from any other page.
 
-describe('pairing is one gesture per device, and the screen says so', () => {
-  it('offers a separate control for each kind of sensor', async () => {
-    const stub = stubRideController(idleSnapshot());
-    await show(stub);
+describe('pairing is on Devices; this screen says what is connected (#659)', () => {
+  it('offers no pairing control at all, and links to Devices instead', async () => {
+    // The owner's ruling: pairing lives on Devices. A button here would be a
+    // second pairing surface, and the Ride screen's own buttons are exactly
+    // what #659 moved.
+    await show(stubRideController(idleSnapshot()));
 
-    for (const label of [
-      'Pair a smart trainer',
-      'Pair a heart rate strap',
-      'Pair a power meter',
-      'Pair a speed or cadence sensor',
-    ]) {
-      expect(buttonNamed(label)).toBeDefined();
-    }
-    expect(document.body.textContent).toContain('one device at a time');
-    expect(document.body.textContent).toContain('no way to pair them all at once');
+    const buttons = queryAll<HTMLButtonElement>(document, 'button').map((button) =>
+      (button.textContent ?? '').trim(),
+    );
+    expect(buttons.filter((label) => /^(pair|forget)/i.test(label))).toEqual([]);
+    const links = queryAll<HTMLAnchorElement>(document, '.oyl-ride__group--sensors a');
+    expect(links.map((link) => link.getAttribute('href'))).toContain('#/devices');
   });
 
-  it('passes the role straight through', async () => {
-    const stub = stubRideController(idleSnapshot());
+  it('says each connected device and its state in words', async () => {
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({
+      sensors: [
+        ...ridingSnapshot().sensors,
+        {
+          id: deviceId('strap'),
+          name: 'HRM 04B1',
+          role: 'heart-rate',
+          capabilities: ['heart-rate'],
+          state: 'disconnected',
+        },
+      ],
+    });
     await show(stub);
 
-    await activateWithKeyboard(buttonNamed('Pair a smart trainer'));
-    expect(stub.calls.pair).toEqual(['trainer']);
+    const rows = queryAll(document, '.oyl-ride__group--sensors li').map((row) => row.textContent);
+    expect(rows).toEqual([
+      'KICKR 1F2A: Connected',
+      'HRM 04B1: Disconnected — forget it and pair it again to reconnect',
+    ]);
   });
 
-  it('says how many more connections this browser will take', async () => {
-    const stub = stubRideController(idleSnapshot());
-    stub.set({ connectionsRemaining: 1 });
-    await show(stub);
-
-    // Singular, because "1 more connections" reads as a bug in the app.
-    expect(document.body.textContent).toContain('1 more connection.');
+  it('sends a rider with nothing paired to Devices from the idle notice', async () => {
+    await show(stubRideController(idleSnapshot()));
+    const notice = queryAll(document, '.oyl-ride__group--live a');
+    expect(notice.map((link) => link.getAttribute('href'))).toContain('#/devices');
   });
 });
 
@@ -740,11 +751,13 @@ describe('the screen is three groups, in the order it always was (#422)', () => 
     expect(trainer?.querySelector('.oyl-trainer__state')).not.toBeNull();
   });
 
-  it('keeps pairing in a group of its own', async () => {
+  it('keeps what is connected in a group of its own', async () => {
     await show(stubRideController(ridingSnapshot()));
 
     expect(headingsIn('.oyl-ride__group--sensors')).toEqual(['Sensors']);
-    expect(queryAll(document, '.oyl-ride__group--sensors button').length).toBeGreaterThanOrEqual(4);
+    // #659: a list and a link, not buttons — pairing moved to Devices.
+    expect(queryAll(document, '.oyl-ride__group--sensors li')).toHaveLength(1);
+    expect(queryAll(document, '.oyl-ride__group--sensors a[href="#/devices"]')).toHaveLength(1);
   });
 
   it('leaves nothing outside the three, and leaves them in document order', async () => {

@@ -31,6 +31,8 @@
 
 import type { JSX } from 'react';
 
+import { Button } from '../design/Button';
+
 import { steppedVolume, type CuePreference } from './cue-preference';
 
 export interface SoundControlsProps {
@@ -42,10 +44,15 @@ export interface SoundControlsProps {
 export function SoundControls({ preference, onChange }: SoundControlsProps): JSX.Element {
   return (
     <div className="oyl-sound" role="group" aria-label="Sounds">
-      <button
-        type="button"
-        className="oyl-button oyl-button--secondary oyl-sound__mute"
-        aria-pressed={preference.muted}
+      {/*
+        #668: the design system's toggle rather than a hand-built button
+        carrying the secondary's class. Until then the pressed state was
+        `aria-pressed` and nothing a sighted rider could see.
+      */}
+      <Button
+        variant="toggle"
+        pressed={preference.muted}
+        className="oyl-sound__mute"
         onClick={() => {
           onChange({ ...preference, muted: !preference.muted });
         }}
@@ -57,7 +64,7 @@ export function SoundControls({ preference, onChange }: SoundControlsProps): JSX
           name stays "Mute sounds" and begins with what is seen (SC 2.5.3).
         */}
         Mute<span className="oyl-sound__mute-more"> sounds</span>
-      </button>
+      </Button>
       <label className="oyl-sound__volume">
         {/*
           The label's WORDS are clipped inside the ride HUD (theme.css

@@ -478,6 +478,26 @@ export const RIDE_MAY_STOP_SPOKEN = `${KEEP_SCREEN_ON_LABEL}: ${RIDE_MAY_STOP_WI
 export const MANUAL_ERG_DURING_WORKOUT = 'End the workout to set a target by hand.';
 
 /**
+ * What a rider is told when *Forget* on a trainer was refused, because its
+ * release did not land and this app still holds control — #659's review.
+ */
+function notForgottenStillHolding(name: string): string {
+  return `${name} was not forgotten: it did not confirm that it let go, so it may still be holding resistance. Try Forget again.`;
+}
+
+/**
+ * What a rider is told when a device is gone from this app and the browser
+ * refused to give up its permission — #659's review. Without it the row says
+ * *Not paired* while the browser still lists the device as allowed.
+ */
+function forgottenButStillListed(name: string): string {
+  return `${name} is forgotten here, but your browser still lists it. To remove it there too, remove it in this site's settings.`;
+}
+
+/** Why a game ride's gradient is refused while its trainer is being let go. */
+const TRAINER_BEING_FORGOTTEN = 'the trainer is being forgotten';
+
+/**
  * What a finished ride needs to become an activity — #14's fourth criterion,
  * and the "store it" in `CLAUDE.md` §1's description of the milestone.
  *
@@ -584,7 +604,19 @@ export interface RideController {
    * {@link RideSnapshot.pairingError} with everything else.
    */
   pair(role: PairingRole): Promise<void>;
-  /** Drop a paired device. Recording continues; its channels go unpaired. */
+  /**
+   * Forget a paired device — the Devices screen's *Forget* (#659). Recording
+   * continues; its channels go unpaired. The transport's `forget`, so the
+   * device has to be chosen again to come back.
+   *
+   * ⚠️ **A trainer this app controls is let go FIRST**, through the one
+   * release (#372): a running workout is ended, not paused, and a hand-set
+   * target or a game ride's gradient is released with an FTMS Stop. If that
+   * Stop does not land and control is still held, the trainer is NOT
+   * forgotten and {@link RideSnapshot.pairingError} says why — forgetting it
+   * then would leave the machine holding resistance with nothing in this app
+   * able to reach it again. Never throws.
+   */
   unpair(id: DeviceId): Promise<void>;
 
   start(): Promise<void>;
@@ -781,6 +813,15 @@ export function createRideController(options: RideControllerOptions): RideContro
   let manual: { readonly client: TrainerControl; readonly erg: ManualErg } | undefined;
   /** The release on the wire, if one is. @see releaseTrainer */
   let releasing: Promise<TrainerRelease> | undefined;
+  /**
+   * Devices whose *Forget* is in progress — #659's review. The trainer's is
+   * awaiting its release, so a second press must not start a second one, and
+   * the game's gradient handle must stop writing: a gradient landing after the
+   * Stop would take the machine straight back into simulation mode.
+   */
+  const forgetting = new Set<DeviceId>();
+  /** The control clients being let go before their device is forgotten. */
+  const leaving = new Set<TrainerControl>();
   let clock: UnixSeconds = now();
   let snapshot: RideSnapshot | undefined;
   let disposed = false;
@@ -1268,6 +1309,12 @@ export function createRideController(options: RideControllerOptions): RideContro
       // cannot tell from a working one.
       detach(entry);
       sensors.delete(id);
+      // And the transport lets go of it too (#659's review). Nothing here
+      // holds control yet — that is a separate press — so there is nothing to
+      // release. A record left behind would go on counting against the
+      // Capacitor transport's connection budget for the rest of the session,
+      // and the way back is the chooser either way.
+      await transport.forget(id).catch(() => undefined);
       throw error;
     }
     changed();
@@ -1336,6 +1383,43 @@ export function createRideController(options: RideControllerOptions): RideContro
           }),
         );
       }
+    }
+  };
+
+  /**
+   * Let a trainer about to be forgotten go, through the ONE release — #659's
+   * review, and CLAUDE.md §4h (#372). Resolves `true` when it may be
+   * forgotten: it holds nothing of this app's, or the Stop landed, or control
+   * has gone anyway. `false` only when the Stop did not land and control is
+   * still held — the machine may be holding resistance, and this app is the
+   * only thing that can try again.
+   *
+   * A workout is ENDED rather than paused: its session's `stop()` releases
+   * through {@link releaseTrainer}, and the release below joins that Stop
+   * rather than sending a second. A hand-set target and a game ride's
+   * gradient are let go by the same call — `releaseTrainer` ends the first,
+   * and {@link leaving} refuses the second's further writes.
+   */
+  const letGoBeforeForgetting = async (entry: SensorEntry): Promise<boolean> => {
+    const client = entry.trainer?.control;
+    if (client === undefined) {
+      return true;
+    }
+    leaving.add(client);
+    try {
+      endWorkoutSession();
+      if (releasing === undefined && !client.hasControl()) {
+        return true;
+      }
+      let outcome: TrainerRelease | undefined;
+      try {
+        outcome = await releaseTrainer(client);
+      } catch {
+        // Recorded on `releaseFault` by `releaseTrainer`.
+      }
+      return outcome?.kind === 'stopped' || !client.hasControl();
+    } finally {
+      leaving.delete(client);
     }
   };
 
@@ -1602,19 +1686,46 @@ export function createRideController(options: RideControllerOptions): RideContro
 
     async unpair(id): Promise<void> {
       const entry = sensors.get(id);
-      if (entry === undefined) {
+      if (entry === undefined || forgetting.has(id)) {
         return;
       }
-      detach(entry);
-      sensors.delete(id);
-      changed();
+      forgetting.add(id);
+      pairingError = undefined;
       try {
-        await transport.disconnect(id);
-      } catch {
-        // A device that is already gone is the ordinary case here. There is
-        // nothing left to tell the rider and nothing left to do.
+        // ⚠️ BEFORE `detach`, and that order is the whole fix (#659's
+        // review). `detach` unsubscribes `onControlLost` and then closes the
+        // client, and `close()` writes nothing — so a Forget that detached
+        // first left a running workout's clock advancing against a machine
+        // still holding its last ERG target, with no Stop on the wire. On Web
+        // Bluetooth the forget then revokes the grant, and the app can no
+        // longer reach the machine to let it go at all.
+        if (!(await letGoBeforeForgetting(entry))) {
+          pairingError = notForgottenStillHolding(entry.device.name ?? 'The trainer');
+          changed();
+          return;
+        }
+        detach(entry);
+        sensors.delete(id);
+        changed();
+        try {
+          // #659: FORGET, not disconnect. The Devices screen's control is
+          // *Forget*, and a device that was only disconnected stayed in the
+          // transport's own records — on Web Bluetooth with the origin's grant
+          // still held, and in the Capacitor transport counted against its
+          // connection budget for the rest of the session. `forget` drops the
+          // link as `disconnect` did and then lets go of the device.
+          await transport.forget(id);
+        } catch {
+          // `forget` resolves for a device that is already gone, so a
+          // rejection means one thing: the stack refused to give up its
+          // permission. The device is gone from this app, and the browser
+          // still lists it — which the row saying *Not paired* would hide.
+          pairingError = forgottenButStillListed(entry.device.name ?? 'That device');
+        }
+        changed();
+      } finally {
+        forgetting.delete(id);
       }
-      changed();
     },
 
     async start(): Promise<void> {
@@ -1952,6 +2063,11 @@ export function createRideController(options: RideControllerOptions): RideContro
       }
       return {
         setSimulationParameters: (parameters) => {
+          // #659's review: the trainer is being let go so it can be
+          // forgotten, and a gradient after that Stop would take it back.
+          if (leaving.has(client)) {
+            return Promise.reject(new Error(TRAINER_BEING_FORGOTTEN));
+          }
           // #567: a gradient takes the machine out of ERG, so a hand-set
           // target's rescue writing a 0x05 under a game ride would put it back.
           endManualErg();

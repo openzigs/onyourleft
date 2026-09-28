@@ -65,6 +65,7 @@ import { TREND_WINDOW, watts, type Watts } from '@onyourleft/domain';
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
 
+import { hrefFor, routeById } from '../shell/routes';
 import { MANUAL_ERG_DURING_WORKOUT, type TrainerSnapshot } from './controller';
 import type { ManualErgRescue } from './manual-erg';
 
@@ -172,7 +173,9 @@ export function TrainerPanel({
   if (!trainer.paired) {
     return (
       <StatusMessage tone="info" label="No trainer">
-        Pair a smart trainer to control it from here.
+        Pair a smart trainer to control it from here — pairing is on{' '}
+        {/* #659: the Pair buttons moved to Devices; this sentence says where. */}
+        <a href={hrefFor(routeById('devices'))}>Devices</a>.
       </StatusMessage>
     );
   }
@@ -318,7 +321,9 @@ export function TrainerPanel({
       )}
 
       {trainer.hasControl ? null : (
-        <Button onClick={onRequestControl}>Ask the trainer for control</Button>
+        <Button variant="secondary" onClick={onRequestControl}>
+          Ask the trainer for control
+        </Button>
       )}
 
       {!ergShown ? null : !trainer.canSetPower ? (
@@ -372,7 +377,9 @@ export function TrainerPanel({
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
               />
-              <Button type="submit">Set target</Button>
+              <Button variant="secondary" type="submit">
+                Set target
+              </Button>
               <Button variant="secondary" onClick={onClearTarget}>
                 End ERG
               </Button>

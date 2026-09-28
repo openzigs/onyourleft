@@ -572,6 +572,32 @@ accessibility tree. The forced-colours revert comes after it and undoes it. Chec
 range and a progress bar take `accent-color` from the accent token, the file input's button is the
 secondary button, and a checkbox or radio row is a declared 44 px target.
 
+**Three kinds of button, and one primary per view** ([#668](https://github.com/openzigs/onyourleft/issues/668)).
+A rider tells the action from the setting by weight, so `design/Button.tsx` §`ButtonVariant` has
+three kinds with one rule each:
+
+| Kind | Use | Drawn as |
+|---|---|---|
+| **Primary** | The one action a view exists for. **At most one per view** | `Button` (default) or `a.oyl-button` — the only filled button |
+| **Secondary** | Every other action | `variant="secondary"` — an outline |
+| **Toggle** | Changes how something is shown or heard, not what happens | A single on/off: `variant="toggle"`, which **requires** `pressed` and renders `aria-pressed` (a toggle without it does not compile). An exclusive choice of two or three: native radios in a `fieldset.oyl-segmented`. Four or more: a native `<select>` |
+
+"One primary per view" is a **gate**, not a guideline: `a11y/button-hierarchy.a11y.test.tsx` renders
+every route in `ALL_ROUTES` through the real `AppShell` over both of `testing/populated-shell.tsx`'s
+fixtures — the ones the reflow walk (#660) lays out — plus the ride screen in the states where its
+panels meet, and fails a `main` holding two `.oyl-button`s that are neither secondary nor a toggle.
+Where it is used: the Activities sort is #660's `<select>` of four orders; Settings' units choice is
+the one segmented control; *Mute sounds*, a waypoint's selection in the route builder and a ride's
+*Show power* / *Show heart rate* are the toggles. An empty state whose next step is an action draws it
+as a button (Routes' *Draw a route on this device*, the game's *Import a GPX file*, Activities'
+*Start a ride* and *Import or export files*). A toggle that is
+on is told by a doubled border as well as the `selected` fill (WCAG 2.2 SC 1.4.1), and every state of
+every kind — rest, pointer, press, focus, disabled, on — is a pair in `tokens.ts`
+§`CONTRAST_REQUIREMENTS` that `browser/button-hierarchy.browser.spec.ts` reads back from the pinned
+Chromium. That read-back is what now holds [#688](https://github.com/openzigs/onyourleft/issues/688)'s
+hovered secondary, found at 1.40:1 on the shell harness's specimens while #667 was being built: a
+state nobody meant to draw is a pair nobody declared.
+
 ⚠️ **#307's review added a fourth thing, and it is a gate rather than a system.** The first three are
 all checkable *without a browser* — a colour ratio, a number against a ratio, a `var()` against a
 declaration — and that is exactly why the one part of #307 nothing could check went wrong. It made
@@ -598,6 +624,19 @@ and the adapter is unusable, and a page served over plain HTTP, where the object
 browser gets the blame. Where the browser cannot pair, **no pairing control is rendered at all** —
 a disabled one is out of the tab order and announces no reason, which is the silent failure the
 issue exists to prevent.
+
+**Where the browser or the phone CAN pair, the Devices screen is where it happens** (#659). Until
+then that screen said *"Not built yet"* while Home and the More tab sent a new rider to it, and the
+pairing buttons were on the Ride screen. `ride/SensorPairing.tsx` §`PairingPanel` is that block,
+moved rather than copied: it drives the one ride controller `main.tsx` builds — mounted above the
+router, so a device paired on Devices is the device Ride and Home show — through whichever
+transport §4h of CLAUDE.md chose. The Ride screen says what is connected, in words, and links to
+Devices. The controls come first and what the platform cannot do is beneath them in a closed
+`<details>`, with *"one user gesture per device"* kept outside it. *Forget* is
+`SensorTransport.forget`: `BluetoothDevice.forget()` in a browser that has it, which gives the
+origin's permission back, and in every transport the id stops being issued until the chooser
+returns the device again. `apps/web/browser/devices.browser.spec.ts` walks Home → Devices → Pair
+against the scripted Web Bluetooth stack, with today's dead end as its control.
 
 ### `apps/web/src/transfer`: import and export, and the sample grid nobody else owns
 

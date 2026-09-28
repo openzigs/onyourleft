@@ -453,6 +453,10 @@ function viewFor(
         <DevicesView
           capabilities={props.capabilities}
           {...(props.shell === undefined ? {} : { shell: props.shell })}
+          // #659: pairing lives on Devices, through the controller the Ride
+          // screen reads — mounted above this router, so what is paired here is
+          // what Ride shows.
+          controller={props.rideController}
         />
       );
     case 'transfer':

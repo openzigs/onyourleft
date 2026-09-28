@@ -311,11 +311,17 @@ export function SettingsView({
             {UNITS_NO_STORE}
           </StatusMessage>
         ) : (
-          <fieldset className="oyl-fieldset">
+          // #668: a segmented control — the choice changes how numbers are
+          // SHOWN, not what happens, and there are two options. Still native
+          // radios in a fieldset, so the arrow keys and the grouping are the
+          // platform's. The option's detail moved out of its label, where two
+          // sentences made each segment several lines tall on a phone, into
+          // the description below, which says what the CHOSEN one means.
+          <fieldset className="oyl-segmented" aria-describedby="oyl-units-detail">
             <legend>Which units do you ride in?</legend>
-            {UNIT_SYSTEMS.map((option) => (
-              <p key={option}>
-                <label htmlFor={`oyl-units-${option}`}>
+            <div className="oyl-segmented__options">
+              {UNIT_SYSTEMS.map((option) => (
+                <label key={option} htmlFor={`oyl-units-${option}`}>
                   <input
                     type="radio"
                     id={`oyl-units-${option}`}
@@ -326,10 +332,13 @@ export function SettingsView({
                       void choose(option);
                     }}
                   />{' '}
-                  {CHOICES[option].label} — {CHOICES[option].detail}
+                  {CHOICES[option].label}
                 </label>
-              </p>
-            ))}
+              ))}
+            </div>
+            <p id="oyl-units-detail" className="oyl-muted">
+              {CHOICES[units].detail}
+            </p>
           </fieldset>
         )}
 

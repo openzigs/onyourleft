@@ -2,13 +2,41 @@
 
 import { useCallback, useEffect, useRef, type JSX, type ReactNode, type Ref } from 'react';
 
-/** Primary for the one action a view is for; secondary for everything else. */
-export type ButtonVariant = 'primary' | 'secondary';
+/**
+ * The three kinds of button — #668. A rider tells the action from the setting
+ * by weight, so each kind has one job:
+ *
+ * - **`primary`** — the one action a view exists for. **At most one per
+ *   view**, and that is a gate: `a11y/button-hierarchy.a11y.test.tsx` renders
+ *   every route over a populated and an empty fixture and fails a `main` that
+ *   holds two.
+ * - **`secondary`** — every other action.
+ * - **`toggle`** — a single on/off that changes how something is shown or
+ *   heard rather than what happens, such as *Mute sounds*. It carries
+ *   `aria-pressed`, and it cannot be written without saying which way it
+ *   stands: {@link ButtonProps} makes `pressed` required for it and forbidden
+ *   for the other two. An exclusive choice of two or more is not a toggle
+ *   button at all but a native radio group styled `.oyl-segmented` (or, for
+ *   four or more options, a native `<select>` — Activities' sort, #660).
+ */
+export type ButtonVariant = 'primary' | 'secondary' | 'toggle';
 
-export interface ButtonProps {
+/**
+ * Which way a toggle stands, required exactly when the variant is `toggle`.
+ *
+ * ⚠️ A union rather than an optional `pressed`: an optional one would let a
+ * toggle be written without it, and a toggle whose state is not said renders
+ * no `aria-pressed` — a screen reader then announces a plain button and the
+ * rider cannot hear whether sound is on. `Button.test.tsx` holds this with a
+ * `@ts-expect-error`, which goes red (TS2578) the day it compiles.
+ */
+export type ButtonKind =
+  | { readonly variant?: 'primary' | 'secondary'; readonly pressed?: never }
+  | { readonly variant: 'toggle'; readonly pressed: boolean };
+
+interface ButtonCommonProps {
   readonly children: ReactNode;
   readonly onClick?: () => void;
-  readonly variant?: ButtonVariant;
   /**
    * Always `button` unless a form genuinely needs a submit.
    *
@@ -48,7 +76,22 @@ export interface ButtonProps {
    * *Start a new ride* hands focus to *Start recording* this way.
    */
   readonly ref?: Ref<HTMLButtonElement>;
+  /**
+   * A class of the caller's own, added after the variant's — for layout only
+   * (the HUD's mute keeps its one line with `oyl-sound__mute`). Never a colour:
+   * a caller that repaints a button has made a fourth kind nobody declared.
+   */
+  readonly className?: string;
 }
+
+export type ButtonProps = ButtonCommonProps & ButtonKind;
+
+/** The classes each kind is drawn with. */
+const VARIANT_CLASS: Readonly<Record<ButtonVariant, string>> = {
+  primary: 'oyl-button',
+  secondary: 'oyl-button oyl-button--secondary',
+  toggle: 'oyl-button oyl-button--toggle',
+};
 
 /**
  * A real `<button>`, with the project's styling and nothing else.
@@ -60,11 +103,13 @@ export function Button({
   children,
   onClick,
   variant = 'primary',
+  pressed,
   type = 'button',
   disabled = false,
   describedBy,
   focusOnMount = false,
   ref,
+  className,
 }: ButtonProps): JSX.Element {
   const element = useRef<HTMLButtonElement>(null);
   // Both #557's `focusOnMount` (which needs the element here) and #548's `ref`
@@ -86,7 +131,8 @@ export function Button({
     }
     // On mount only: a prop that turns on later has not replaced anything.
   }, []);
-  const className = variant === 'primary' ? 'oyl-button' : 'oyl-button oyl-button--secondary';
+  const classes =
+    className === undefined ? VARIANT_CLASS[variant] : `${VARIANT_CLASS[variant]} ${className}`;
   // `type` is passed straight through. It used to go through a ternary that
   // returned its own argument (#143) — which read like a guard against a third
   // value and was not one, because the prop is `'button' | 'submit'` and is
@@ -94,11 +140,14 @@ export function Button({
   return (
     <button
       ref={setElement}
-      className={className}
+      className={classes}
       type={type}
       onClick={onClick}
       disabled={disabled}
       aria-describedby={describedBy}
+      // Only a toggle says which way it stands. `undefined` renders nothing,
+      // so a primary or secondary is never announced as "not pressed".
+      aria-pressed={variant === 'toggle' ? pressed : undefined}
     >
       {children}
     </button>

@@ -419,14 +419,19 @@ export function ActivityDetailView({
           </p>
           <div className="oyl-library-controls">
             {chartable.map((series) => (
+              // #668: showing a trace changes what is drawn, not the ride, so
+              // it is a toggle. It was a PRIMARY when on, which put one filled
+              // button per trace on this screen. The name is stable — "Show
+              // power" — and `aria-pressed` says whether it is shown.
               <Button
                 key={series.channel}
-                variant={enabled.includes(series.channel) ? 'primary' : 'secondary'}
+                variant="toggle"
+                pressed={enabled.includes(series.channel)}
                 onClick={() => {
                   toggle(series.channel);
                 }}
               >
-                {enabled.includes(series.channel) ? 'Hide' : 'Show'} {series.label.toLowerCase()}
+                Show {series.label.toLowerCase()}
               </Button>
             ))}
           </div>

@@ -728,7 +728,7 @@ function BackfillControl({
         {missing === 1 ? 'it' : 'them'} reads each ride&rsquo;s samples once and stores the result,
         so it only has to happen once.
       </StatusMessage>
-      <Button onClick={onBackfill} disabled={backfilling}>
+      <Button variant="secondary" onClick={onBackfill} disabled={backfilling}>
         {backfilling ? 'Measuring…' : `Measure ${String(missing)} more`}
       </Button>
     </>

@@ -284,7 +284,7 @@ export function WorkoutPanel({
           VISIBLE beside the ride controls, so it is the reading that moves, not
           the notice. `rideview.browser.spec.ts` §"#605" publishes the margin.
         */}
-        <Button type="button" onClick={onEnd}>
+        <Button variant="secondary" type="button" onClick={onEnd}>
           End workout
         </Button>
         {workout.rescue === undefined ? null : (
@@ -368,6 +368,7 @@ export function WorkoutPanel({
                 <li key={record.id}>
                   {row.name} — {row.duration}, {row.shape}{' '}
                   <Button
+                    variant="secondary"
                     type="button"
                     onClick={() => {
                       // ⚠️ #400: inside the press and before anything else — the
