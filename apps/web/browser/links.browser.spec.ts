@@ -75,10 +75,12 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import { AA_TEXT } from '../src/design/contrast';
 import {
-  COLOUR_TOKENS,
   CONTRAST_REQUIREMENTS,
+  THEMES,
+  paletteColours,
   type ColourToken,
   type LinkStateToken,
+  type Theme,
 } from '../src/design/tokens';
 import { ALL_ROUTES, hrefFor } from '../src/shell/routes';
 
@@ -94,11 +96,23 @@ function computedForm(hex: string): string {
  * so a colour names a SET of tokens and a pair is declared if any combination
  * of the two sets is.
  */
-const TOKENS_BY_COLOUR = new Map<string, ColourToken[]>();
-for (const [token, hex] of Object.entries(COLOUR_TOKENS) as [ColourToken, string][]) {
-  const key = computedForm(hex);
-  TOKENS_BY_COLOUR.set(key, [...(TOKENS_BY_COLOUR.get(key) ?? []), token]);
+function tokensByColour(theme: Theme): Map<string, ColourToken[]> {
+  const found = new Map<string, ColourToken[]>();
+  for (const [token, hex] of Object.entries(paletteColours(theme)) as [ColourToken, string][]) {
+    const key = computedForm(hex);
+    found.set(key, [...(found.get(key) ?? []), token]);
+  }
+  return found;
 }
+
+/**
+ * #672: each palette's colours, because the walks below run under a light and
+ * a dark device, and a colour is a token of the palette in force or of none.
+ */
+const TOKENS_BY_COLOUR: Readonly<Record<Theme, Map<string, ColourToken[]>>> = {
+  light: tokensByColour('light'),
+  dark: tokensByColour('dark'),
+};
 
 /**
  * Whether a link's (colour, surface) is a pair declared AS TEXT. A link is
@@ -107,9 +121,9 @@ for (const [token, hex] of Object.entries(COLOUR_TOKENS) as [ColourToken, string
  * values (`link` is `accent`'s teal, `ink` is `focus`'s) a pair declared for a
  * ring could otherwise admit a link that nothing held to the text threshold.
  */
-function isDeclaredPair(foreground: string, background: string): boolean {
-  const fronts = TOKENS_BY_COLOUR.get(foreground) ?? [];
-  const backs = TOKENS_BY_COLOUR.get(background) ?? [];
+function isDeclaredPair(theme: Theme, foreground: string, background: string): boolean {
+  const fronts = TOKENS_BY_COLOUR[theme].get(foreground) ?? [];
+  const backs = TOKENS_BY_COLOUR[theme].get(background) ?? [];
   return CONTRAST_REQUIREMENTS.some(
     (requirement) =>
       requirement.minimum >= AA_TEXT &&
@@ -118,8 +132,8 @@ function isDeclaredPair(foreground: string, background: string): boolean {
   );
 }
 
-function stateColour(token: LinkStateToken): string {
-  return computedForm(COLOUR_TOKENS[token]);
+function stateColour(theme: Theme, token: LinkStateToken): string {
+  return computedForm(paletteColours(theme)[token]);
 }
 
 /** The browser's own link colour, which is what #661 found on every inline link. */
@@ -219,6 +233,7 @@ async function openRouteForDriving(page: Page, route: (typeof ALL_ROUTES)[number
  * really applied, and record every colour that is not the state's own token.
  */
 async function driveLink(
+  theme: Theme,
   page: Page,
   link: Locator,
   where: string,
@@ -233,7 +248,7 @@ async function driveLink(
     underline: getComputedStyle(element).textDecorationLine,
   }));
   expect(hovered.state, `${name} never came under the pointer`).toBe(true);
-  if (hovered.colour !== stateColour('linkHover')) {
+  if (hovered.colour !== stateColour(theme, 'linkHover')) {
     faults.push(`${name} under a pointer is ${hovered.colour}`);
   }
   if (!hovered.underline.includes('underline')) {
@@ -249,7 +264,7 @@ async function driveLink(
     }));
     await page.mouse.up();
     expect(pressed.state, `${name} was never pressed`).toBe(true);
-    if (pressed.colour !== stateColour('linkActive')) {
+    if (pressed.colour !== stateColour(theme, 'linkActive')) {
       faults.push(`${name} while pressed is ${pressed.colour}`);
     }
   }
@@ -268,7 +283,7 @@ async function driveLink(
   }));
   expect(focused.state, `${name} never matched :focus-visible`).toBe(true);
   expect(focused.hovered, `${name} was still under the pointer`).toBe(false);
-  if (focused.colour !== stateColour('linkHover')) {
+  if (focused.colour !== stateColour(theme, 'linkHover')) {
     faults.push(`${name} focused from the keyboard is ${focused.colour}`);
   }
   if (!focused.underline.includes('underline')) {
@@ -299,129 +314,145 @@ const LINK_RULES_IN_THEME = (
  * every route was visited.
  */
 test.describe('links — #661', () => {
-  test.describe('every link on every route paints with a token, over a declared pair', () => {
-    test.describe.configure({ mode: 'serial' });
+  /*
+   * #672: both walks run in each palette — under a device that prefers dark,
+   * the inline theme script `shell.html` carries like every page makes the
+   * page dark, and every link must then paint with the DARK palette's tokens
+   * over a pair declared for it. Parametrised, so a new check reaches both.
+   */
+  for (const theme of THEMES) {
+    test.describe(`${theme} palette`, () => {
+      test.use({ colorScheme: theme });
 
-    let measured = 0;
-    let inline = 0;
-    let routes = 0;
-    const specimenSurfaces = new Set<ColourToken>();
+      test.describe('every link on every route paints with a token, over a declared pair', () => {
+        test.describe.configure({ mode: 'serial' });
 
-    for (const route of ALL_ROUTES) {
-      test(route.id, async ({ page }) => {
-        const faults: string[] = [];
-        await openRoute(page, route);
-        routes += 1;
-        for (const link of await measureLinks(page)) {
-          measured += 1;
-          if (link.specimen) {
-            for (const token of TOKENS_BY_COLOUR.get(link.surface) ?? []) {
-              specimenSurfaces.add(token);
+        let measured = 0;
+        let inline = 0;
+        let routes = 0;
+        const specimenSurfaces = new Set<ColourToken>();
+
+        for (const route of ALL_ROUTES) {
+          test(route.id, async ({ page }) => {
+            const faults: string[] = [];
+            await openRoute(page, route);
+            routes += 1;
+            for (const link of await measureLinks(page)) {
+              measured += 1;
+              if (link.specimen) {
+                for (const token of TOKENS_BY_COLOUR[theme].get(link.surface) ?? []) {
+                  specimenSurfaces.add(token);
+                }
+              } else if (link.className === '') {
+                inline += 1;
+              }
+              if (link.className === '') {
+                if (link.colour !== stateColour(theme, 'link')) {
+                  faults.push(
+                    `${route.id}: "${link.text}" at rest is ${link.colour}, not \`link\``,
+                  );
+                }
+              }
+              const where = `${route.id}: "${link.text}"${link.className === '' ? '' : ` (.${link.className})`}`;
+              if (!TOKENS_BY_COLOUR[theme].has(link.colour)) {
+                faults.push(`${where} is ${link.colour}, which is no token`);
+              }
+              if (!TOKENS_BY_COLOUR[theme].has(link.underlineColour)) {
+                faults.push(`${where} is underlined in ${link.underlineColour}, which is no token`);
+              }
+              if (!TOKENS_BY_COLOUR[theme].has(link.surface)) {
+                faults.push(`${where} sits on ${link.surface}, which is no token surface`);
+              } else if (!isDeclaredPair(theme, link.colour, link.surface)) {
+                faults.push(
+                  `${where} is ${link.colour} on ${link.surface}, a pair CONTRAST_REQUIREMENTS does not declare as text`,
+                );
+              }
+              if (link.className === '' && !link.underline.includes('underline')) {
+                faults.push(`${where} is not underlined, so only its colour says it is a link`);
+              }
             }
-          } else if (link.className === '') {
-            inline += 1;
-          }
-          if (link.className === '') {
-            if (link.colour !== stateColour('link')) {
-              faults.push(`${route.id}: "${link.text}" at rest is ${link.colour}, not \`link\``);
+            expect(faults).toEqual([]);
+          });
+        }
+
+        test('measured every route, and measured something', () => {
+          // Every assertion above is true of an empty list: a derivation that
+          // produced no routes, or a harness that rendered no link in running
+          // text on any of them, would pass it. So the walk is counted.
+          console.log(
+            `#661: ${String(measured)} links, ${String(inline)} in running text, over ${String(routes)} routes`,
+          );
+          expect(ALL_ROUTES.length).toBeGreaterThan(0);
+          expect(routes).toBe(ALL_ROUTES.length);
+          expect(measured).toBeGreaterThan(0);
+          expect(inline, 'no route rendered a link in running text of its own').toBeGreaterThan(0);
+          // The specimens are only worth their place if each one really sat on its
+          // message's surface: a StatusMessage that stopped painting one would put
+          // all four on the canvas, and every pair would still be declared.
+          expect([...STATUS_SURFACES].filter((surface) => !specimenSurfaces.has(surface))).toEqual(
+            [],
+          );
+        });
+      });
+
+      test.describe('a link under a pointer, focused from the keyboard and pressed paints its own token', () => {
+        test.describe.configure({ mode: 'serial' });
+
+        let driven = 0;
+        let routes = 0;
+
+        // The route's OWN links in running text, route by route. The four status
+        // specimens are the same on every route, so they are driven once, below,
+        // rather than re-driven nineteen times.
+        for (const route of ALL_ROUTES) {
+          test(route.id, async ({ page }) => {
+            const faults: string[] = [];
+            await openRouteForDriving(page, route);
+            routes += 1;
+            const links = page.locator(INLINE_LINK);
+            const count = await links.count();
+            for (let index = 0; index < count; index += 1) {
+              const link = links.nth(index);
+              if (!(await link.isVisible()) || (await isSpecimen(link))) {
+                continue;
+              }
+              await driveLink(theme, page, link, route.id, faults);
+              driven += 1;
             }
-          }
-          const where = `${route.id}: "${link.text}"${link.className === '' ? '' : ` (.${link.className})`}`;
-          if (!TOKENS_BY_COLOUR.has(link.colour)) {
-            faults.push(`${where} is ${link.colour}, which is no token`);
-          }
-          if (!TOKENS_BY_COLOUR.has(link.underlineColour)) {
-            faults.push(`${where} is underlined in ${link.underlineColour}, which is no token`);
-          }
-          if (!TOKENS_BY_COLOUR.has(link.surface)) {
-            faults.push(`${where} sits on ${link.surface}, which is no token surface`);
-          } else if (!isDeclaredPair(link.colour, link.surface)) {
-            faults.push(
-              `${where} is ${link.colour} on ${link.surface}, a pair CONTRAST_REQUIREMENTS does not declare as text`,
-            );
-          }
-          if (link.className === '' && !link.underline.includes('underline')) {
-            faults.push(`${where} is not underlined, so only its colour says it is a link`);
-          }
+            expect(faults).toEqual([]);
+          });
         }
-        expect(faults).toEqual([]);
-      });
-    }
 
-    test('measured every route, and measured something', () => {
-      // Every assertion above is true of an empty list: a derivation that
-      // produced no routes, or a harness that rendered no link in running
-      // text on any of them, would pass it. So the walk is counted.
-      console.log(
-        `#661: ${String(measured)} links, ${String(inline)} in running text, over ${String(routes)} routes`,
-      );
-      expect(ALL_ROUTES.length).toBeGreaterThan(0);
-      expect(routes).toBe(ALL_ROUTES.length);
-      expect(measured).toBeGreaterThan(0);
-      expect(inline, 'no route rendered a link in running text of its own').toBeGreaterThan(0);
-      // The specimens are only worth their place if each one really sat on its
-      // message's surface: a StatusMessage that stopped painting one would put
-      // all four on the canvas, and every pair would still be declared.
-      expect([...STATUS_SURFACES].filter((surface) => !specimenSurfaces.has(surface))).toEqual([]);
-    });
-  });
-
-  test.describe('a link under a pointer, focused from the keyboard and pressed paints its own token', () => {
-    test.describe.configure({ mode: 'serial' });
-
-    let driven = 0;
-    let routes = 0;
-
-    // The route's OWN links in running text, route by route. The four status
-    // specimens are the same on every route, so they are driven once, below,
-    // rather than re-driven nineteen times.
-    for (const route of ALL_ROUTES) {
-      test(route.id, async ({ page }) => {
-        const faults: string[] = [];
-        await openRouteForDriving(page, route);
-        routes += 1;
-        const links = page.locator(INLINE_LINK);
-        const count = await links.count();
-        for (let index = 0; index < count; index += 1) {
-          const link = links.nth(index);
-          if (!(await link.isVisible()) || (await isSpecimen(link))) {
-            continue;
+        test('the four status-message specimens', async ({ page }) => {
+          const first = ALL_ROUTES[0];
+          expect(first, 'the route table is empty').toBeDefined();
+          if (first === undefined) {
+            return;
           }
-          await driveLink(page, link, route.id, faults);
-          driven += 1;
-        }
-        expect(faults).toEqual([]);
+          await openRouteForDriving(page, first);
+          const faults: string[] = [];
+          const specimens = page.locator(`[data-oyl-link-specimen] ${INLINE_LINK}`);
+          const count = await specimens.count();
+          let drivenSpecimens = 0;
+          for (let index = 0; index < count; index += 1) {
+            await driveLink(theme, page, specimens.nth(index), 'specimen', faults);
+            drivenSpecimens += 1;
+          }
+          expect(drivenSpecimens).toBe(STATUS_SURFACES.length);
+          expect(faults).toEqual([]);
+        });
+
+        test('drove every route, and drove a link of a route’s own', () => {
+          console.log(
+            `#661: ${String(driven)} route links driven through hover, press and focus, over ${String(routes)} routes`,
+          );
+          expect(ALL_ROUTES.length).toBeGreaterThan(0);
+          expect(routes).toBe(ALL_ROUTES.length);
+          expect(driven, 'no route rendered a link in running text of its own').toBeGreaterThan(0);
+        });
       });
-    }
-
-    test('the four status-message specimens', async ({ page }) => {
-      const first = ALL_ROUTES[0];
-      expect(first, 'the route table is empty').toBeDefined();
-      if (first === undefined) {
-        return;
-      }
-      await openRouteForDriving(page, first);
-      const faults: string[] = [];
-      const specimens = page.locator(`[data-oyl-link-specimen] ${INLINE_LINK}`);
-      const count = await specimens.count();
-      let drivenSpecimens = 0;
-      for (let index = 0; index < count; index += 1) {
-        await driveLink(page, specimens.nth(index), 'specimen', faults);
-        drivenSpecimens += 1;
-      }
-      expect(drivenSpecimens).toBe(STATUS_SURFACES.length);
-      expect(faults).toEqual([]);
     });
-
-    test('drove every route, and drove a link of a route’s own', () => {
-      console.log(
-        `#661: ${String(driven)} route links driven through hover, press and focus, over ${String(routes)} routes`,
-      );
-      expect(ALL_ROUTES.length).toBeGreaterThan(0);
-      expect(routes).toBe(ALL_ROUTES.length);
-      expect(driven, 'no route rendered a link in running text of its own').toBeGreaterThan(0);
-    });
-  });
+  }
 
   test('the control — with the `a` rules taken out, a link is the browser’s blue again', async ({
     page,
@@ -445,7 +476,7 @@ test.describe('links — #661', () => {
         return removed;
       });
       for (const link of await measureLinks(page)) {
-        if (!TOKENS_BY_COLOUR.has(link.colour)) {
+        if (!TOKENS_BY_COLOUR.light.has(link.colour)) {
           offToken.push(link.colour);
         }
       }

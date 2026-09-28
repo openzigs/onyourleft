@@ -38,7 +38,13 @@ import {
   UNITS_SAVED,
   ANNOUNCEMENTS_NOT_KEPT,
   ANNOUNCEMENTS_SAVED,
+  APPEARANCE_STAYS_HERE,
 } from './SettingsView';
+import {
+  THEME_OVERRIDE_ATTRIBUTE,
+  THEME_STORAGE_KEY,
+  type ThemeStorage,
+} from '../design/theme-selection';
 import {
   readAnnouncementPreference,
   type PreferenceStorage,
@@ -80,7 +86,7 @@ function recordingPort(options: { readonly fail?: string } = {}): Recorded {
 }
 
 function radios(container: HTMLElement): HTMLInputElement[] {
-  return queryAll<HTMLInputElement>(container, 'input[type="radio"]');
+  return queryAll<HTMLInputElement>(container, 'input[type="radio"][name="oyl-units"]');
 }
 
 describe('SettingsView', () => {
@@ -1054,6 +1060,155 @@ describe('the ride map’s tiles — the owner’s decision of 2026-09-25', () =
       await Promise.resolve();
     });
     expect(mounted.container.textContent).toContain(ANNOUNCEMENTS_NOT_KEPT);
+    mounted.unmount();
+  });
+});
+
+describe('appearance — #672', () => {
+  /** A device's `localStorage`, with the third method the palette needs. */
+  function themeDisk(): {
+    readonly store: ThemeStorage;
+    readonly values: Map<string, string>;
+    refuse: boolean;
+  } {
+    const values = new Map<string, string>();
+    const disk = {
+      values,
+      refuse: false,
+      store: {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => {
+          if (disk.refuse) throw new DOMException('full', 'QuotaExceededError');
+          values.set(key, value);
+        },
+        removeItem: (key: string) => {
+          if (disk.refuse) throw new DOMException('full', 'QuotaExceededError');
+          values.delete(key);
+        },
+      },
+    };
+    return disk;
+  }
+
+  async function mountWith(
+    store: ThemeStorage,
+    options: { readonly keepHeld?: boolean } = {},
+  ): Promise<Awaited<ReturnType<typeof mount>>> {
+    document.documentElement.removeAttribute('data-theme');
+    if (options.keepHeld !== true) {
+      document.documentElement.removeAttribute(THEME_OVERRIDE_ATTRIBUTE);
+    }
+    return mount(
+      <SettingsView
+        units="metric"
+        onUnitsChange={() => undefined}
+        onRiderMassChange={() => undefined}
+        themeStorage={store}
+      />,
+    );
+  }
+
+  function radio(container: HTMLElement, label: string): HTMLInputElement {
+    const found = [...container.querySelectorAll<HTMLInputElement>('input[name="oyl-theme"]')].find(
+      (input) => input.closest('label')?.textContent?.trim() === label,
+    );
+    if (found === undefined) throw new Error(`no "${label}" choice`);
+    return found;
+  }
+
+  it('offers three choices as native radios in one group, following the device by default', async () => {
+    const { store } = themeDisk();
+    const mounted = await mountWith(store);
+    const radios = [
+      ...mounted.container.querySelectorAll<HTMLInputElement>('input[name="oyl-theme"]'),
+    ];
+    expect(radios.map((input) => input.closest('label')?.textContent?.trim())).toEqual([
+      'Match this device',
+      'Light',
+      'Dark',
+    ]);
+    expect(radios.every((input) => input.type === 'radio')).toBe(true);
+    expect(radios.find((input) => input.checked)?.value).toBe('device');
+    expect(radios[0]?.closest('fieldset')?.querySelector('legend')?.textContent).toBe(
+      'Light or dark?',
+    );
+    mounted.unmount();
+  });
+
+  it('applies a choice to this page at once and keeps it on the device', async () => {
+    const { store, values } = themeDisk();
+    const mounted = await mountWith(store);
+    await act(async () => {
+      radio(mounted.container, 'Dark').click();
+      await Promise.resolve();
+    });
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    expect(values.get(THEME_STORAGE_KEY)).toBe('dark');
+    expect(mounted.container.textContent).toContain(ANNOUNCEMENTS_SAVED);
+
+    await act(async () => {
+      radio(mounted.container, 'Light').click();
+      await Promise.resolve();
+    });
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+    expect(values.get(THEME_STORAGE_KEY)).toBe('light');
+
+    // Following the device again is NO stored value, not a third word.
+    await act(async () => {
+      radio(mounted.container, 'Match this device').click();
+      await Promise.resolve();
+    });
+    expect(values.has(THEME_STORAGE_KEY)).toBe(false);
+    mounted.unmount();
+  });
+
+  it('reads a stored choice back when the screen is opened again', async () => {
+    const { store, values } = themeDisk();
+    values.set(THEME_STORAGE_KEY, 'dark');
+    const mounted = await mountWith(store);
+    expect(radio(mounted.container, 'Dark').checked).toBe(true);
+    mounted.unmount();
+  });
+
+  it('still changes this page where the device will not keep it, and says so', async () => {
+    const disk = themeDisk();
+    disk.refuse = true;
+    const mounted = await mountWith(disk.store);
+    await act(async () => {
+      radio(mounted.container, 'Dark').click();
+      await Promise.resolve();
+    });
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    expect(mounted.container.textContent).toContain(ANNOUNCEMENTS_NOT_KEPT);
+    mounted.unmount();
+  });
+
+  it('holds a refused choice for the page’s life, over an OLDER stored one (#744’s review)', async () => {
+    // A full quota: the device still holds Light from before, and will not
+    // take Dark. The page is Dark, and says so again when the screen reopens,
+    // because the inline script and the module both read the held choice
+    // before storage (`theme-selection.test.ts` holds the device-change half).
+    const disk = themeDisk();
+    disk.values.set(THEME_STORAGE_KEY, 'light');
+    disk.refuse = true;
+    const mounted = await mountWith(disk.store);
+    await act(async () => {
+      radio(mounted.container, 'Dark').click();
+      await Promise.resolve();
+    });
+    expect(document.documentElement.getAttribute(THEME_OVERRIDE_ATTRIBUTE)).toBe('dark');
+    expect(disk.values.get(THEME_STORAGE_KEY)).toBe('light');
+    mounted.unmount();
+
+    const reopened = await mountWith(disk.store, { keepHeld: true });
+    expect(radio(reopened.container, 'Dark').checked).toBe(true);
+    reopened.unmount();
+    document.documentElement.removeAttribute(THEME_OVERRIDE_ATTRIBUTE);
+  });
+
+  it('says the ride screen does not change, beside the control', async () => {
+    const mounted = await mountWith(themeDisk().store);
+    expect(mounted.container.textContent).toContain(APPEARANCE_STAYS_HERE);
     mounted.unmount();
   });
 });

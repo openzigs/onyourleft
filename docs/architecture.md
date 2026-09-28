@@ -547,7 +547,13 @@ it did not have, and each is checkable rather than a matter of taste:
   colours, jsdom performs no layout, and the browser gate renders a map and a 3D scene and no
   chrome — so a shadow-based system would be the one part of the design system nothing could check.
   `tokens.test.ts` requires the ramp to be monotone and every adjacent step to fall inside a stated
-  band, which is what a token set to a nonsense value breaks.
+  band, which is what a token set to a nonsense value breaks. ⚠️ **"Darkening with height" is the
+  LIGHT palette's direction since [#672](https://github.com/openzigs/onyourleft/issues/672)**: the
+  dark palette (`tokens.ts` §`DARK_COLOUR_TOKENS`) goes LIGHTER with height, `tokens.ts`
+  §`ELEVATION_DIRECTION` states the direction per palette and `tokens.test.ts` holds each ramp to
+  its own, and which palette paints is decided before the first paint by
+  `design/theme-selection.ts`'s inline script, which `tools/theme/` writes into every page. The ride
+  HUD keeps the light palette in both (`theme.css` §`.oyl-hud`).
 - **The type scale has a ratio**: base 1 rem, ratio 1.25, steps −1 to 3 for reading and 6 for a live
   ride metric. The sizes are literals and `tokens.test.ts` re-derives them — a ladder computed from
   its own ratio agrees by construction and could not fail.

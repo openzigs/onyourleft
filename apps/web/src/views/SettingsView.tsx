@@ -67,6 +67,14 @@ import { DEFAULT_RIDER_MASS_KILOGRAMS, massToSave, riderMassFor } from '../athle
 import type { AthleteMassPort } from '../athlete/store-port';
 import { Button } from '../design/Button';
 import { KeptVisible, MoreAbout } from '../design/MoreAbout';
+import {
+  THEME_CHOICES,
+  chooseTheme,
+  currentThemeChoice,
+  deviceThemeStorage,
+  type ThemeChoice,
+  type ThemeStorage,
+} from '../design/theme-selection';
 import { StatusMessage } from '../design/StatusMessage';
 import { CLEARING_STILL_REMOVES, PersistenceNotice } from '../support/PersistenceNotice';
 import type { StorageManagerLike } from '../support/persistent-storage';
@@ -273,6 +281,13 @@ export interface SettingsViewProps {
    * whatever the switch says.
    */
   readonly basemap?: BasemapConfig | undefined;
+  /**
+   * Where the palette choice is kept (#672) — this DEVICE's `localStorage`
+   * unless a test hands in a double, for the reason the announcements are:
+   * the choice has to be read before the first paint, which the athlete row
+   * cannot be. `design/theme-selection.ts` argues it.
+   */
+  readonly themeStorage?: ThemeStorage | undefined;
 }
 
 export function SettingsView({
@@ -285,6 +300,7 @@ export function SettingsView({
   storage,
   announcements,
   basemap,
+  themeStorage,
 }: SettingsViewProps): JSX.Element {
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
 
@@ -410,6 +426,8 @@ export function SettingsView({
         onRiderMassChange={onRiderMassChange}
       />
 
+      <AppearancePanel storage={themeStorage === undefined ? deviceThemeStorage() : themeStorage} />
+
       {/*
         #409. Last, because it is the one panel a rider reads rather than
         acts on — and it is on this screen rather than About because About is
@@ -432,6 +450,95 @@ export function SettingsView({
 
       <PersistenceNotice {...(storage === undefined ? {} : { storage })} />
     </>
+  );
+}
+
+/** What each palette choice is called, and what it means (#672). */
+const THEME_CHOICE_TEXT: Readonly<
+  Record<ThemeChoice, { readonly label: string; readonly detail: string }>
+> = {
+  device: {
+    label: 'Match this device',
+    detail: 'Light or dark as this device is set, and it changes when the device does.',
+  },
+  light: { label: 'Light', detail: 'Light, whatever this device is set to.' },
+  dark: { label: 'Dark', detail: 'Dark, whatever this device is set to.' },
+};
+
+/** Said beside the choice: where it is kept. */
+export const APPEARANCE_STAYS_HERE = 'Kept on this device only. The ride screen does not change.';
+
+/**
+ * Light or dark — #672, the owner's ruling of 2026-09-27: the page follows
+ * the device, with an override here.
+ *
+ * ⚠️ **Three choices, as a segmented control of native radios (#668, #667),
+ * and not a switch**: a switch has two states, and "follow the device" is the
+ * third — the default, and the one most riders never leave.
+ *
+ * Applied at once, to this page, through the same rules the inline script
+ * uses before the first paint (`design/theme-selection.ts`); a reload is then
+ * painted in the chosen palette from its first frame. The ride's HUD is the
+ * same in both palettes, which the sentence beside the control says.
+ */
+function AppearancePanel({ storage }: { readonly storage: ThemeStorage | undefined }): JSX.Element {
+  const [choice, setChoice] = useState<ThemeChoice>(() => currentThemeChoice(document, storage));
+  const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
+
+  function choose(next: ThemeChoice): void {
+    setChoice(next);
+    // The page follows what was CHOSEN even where the device would not keep
+    // it — held on the page for its life, so a device change later does not
+    // undo it — and the message says it will not survive a reload.
+    const kept = chooseTheme(
+      {
+        document,
+        localStorage: storage,
+        matchMedia:
+          typeof window.matchMedia === 'function' ? window.matchMedia.bind(window) : undefined,
+      },
+      next,
+    );
+    setMessage(
+      kept
+        ? { tone: 'success', text: ANNOUNCEMENTS_SAVED }
+        : { tone: 'warning', text: ANNOUNCEMENTS_NOT_KEPT },
+    );
+  }
+
+  return (
+    <section className="oyl-panel" aria-labelledby="oyl-appearance-heading">
+      <h2 id="oyl-appearance-heading">Appearance</h2>
+      <fieldset className="oyl-segmented" aria-describedby="oyl-appearance-detail">
+        <legend>Light or dark?</legend>
+        <div className="oyl-segmented__options">
+          {THEME_CHOICES.map((option) => (
+            <label key={option} htmlFor={`oyl-theme-${option}`}>
+              <input
+                type="radio"
+                id={`oyl-theme-${option}`}
+                name="oyl-theme"
+                value={option}
+                checked={choice === option}
+                onChange={() => {
+                  choose(option);
+                }}
+              />{' '}
+              {THEME_CHOICE_TEXT[option].label}
+            </label>
+          ))}
+        </div>
+        <p id="oyl-appearance-detail" className="oyl-muted">
+          {THEME_CHOICE_TEXT[choice].detail}
+        </p>
+      </fieldset>
+      <p className="oyl-muted">{APPEARANCE_STAYS_HERE}</p>
+      {message === undefined ? null : (
+        <StatusMessage tone={message.tone} live>
+          {message.text}
+        </StatusMessage>
+      )}
+    </section>
   );
 }
 

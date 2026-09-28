@@ -287,6 +287,31 @@ describe('erasing, against the real store', () => {
     expect(forgotten).toStrictEqual(['draft']);
   });
 
+  it('forgets the palette choice after the cascade, as it does the draft (#672)', async () => {
+    await seedAthletes(harness);
+    await seed(ATHLETE_A, 1);
+    const forgotten: string[] = [];
+    await harness.write(async (store) =>
+      eraseDevice(store, ATHLETE_A, {
+        drafts: { forget: () => void forgotten.push('draft') },
+        theme: { forget: () => void forgotten.push('theme') },
+      }),
+    );
+    expect(forgotten).toStrictEqual(['draft', 'theme']);
+  });
+
+  it('does not forget the palette choice when the cascade threw (#672)', async () => {
+    const forgotten: string[] = [];
+    const refusing = {
+      deleteAthlete: () => Promise.reject(new Error('refused')),
+      ensureAthlete: () => Promise.reject(new Error('unreachable')),
+    };
+    await expect(
+      eraseDevice(refusing, ATHLETE_A, { theme: { forget: () => void forgotten.push('theme') } }),
+    ).rejects.toThrow('refused');
+    expect(forgotten).toStrictEqual([]);
+  });
+
   it('does not forget the draft when the cascade threw', async () => {
     // Ordered so a failed delete does not lose a half-drawn route for nothing.
     const forgotten: string[] = [];

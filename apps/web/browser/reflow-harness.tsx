@@ -281,6 +281,7 @@ function transferPort(): TransferPort {
     digest: webCryptoDigest,
     save: () => undefined,
     drafts: { forget: () => undefined },
+    theme: { forget: () => undefined },
     athleteRow: localAthleteRecord(now),
   };
 }

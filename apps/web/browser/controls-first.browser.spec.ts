@@ -95,6 +95,7 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { THEMES } from '../src/design/tokens';
 import {
   ALL_ROUTES,
   hrefFor,
@@ -347,38 +348,49 @@ async function walk(
 }
 
 test.describe('#666 — the first control is above the fold on every route', () => {
-  for (const data of ['empty', 'populated'] as const) {
-    test(`at a ${PHONE.name}, ${data}`, async ({ page }) => {
-      test.setTimeout(180_000);
-      await open(page, PHONE, `data=${data}`);
-      const { lines, faults, exempted } = await walk(page, PHONE);
-      console.log(`controls first, ${PHONE.name}, ${data}\n  ${lines.join('\n  ')}`);
-      expect([...faults.values()].flat()).toEqual([]);
-      // Equal, not only within: a listed route that stops needing the
-      // exemption on a phone is one to take off the list.
-      expect(exempted, 'routes behind kept-visible text only').toEqual(CONSENT_BEFORE_CONTROL);
-      // The routes the control must fail on have something to measure, so
-      // none of them passes by having no control.
-      for (const id of MUST_FAIL_INLINE) {
-        expect(lines.some((line) => line.startsWith(`${id}: no control`))).toBe(false);
-      }
-    });
-  }
+  // #672: the walks run under a light device and a dark one — parametrised, so
+  // a check added reaches both. Colour moves no box; what a dark walk can find
+  // is a route that renders or fails differently in the dark palette.
+  for (const theme of THEMES) {
+    test.describe(`${theme} palette`, () => {
+      test.use({ colorScheme: theme });
 
-  for (const viewport of TABLETS) {
-    test(`on a ${viewport.name}, with a ${String(FOLD_MARGIN_PIXELS)} px margin`, async ({
-      page,
-    }) => {
-      test.setTimeout(180_000);
-      await open(page, viewport, 'data=empty');
-      const { lines, faults, exempted } = await walk(page, viewport);
-      console.log(`controls first, ${viewport.name}\n  ${lines.join('\n  ')}`);
-      console.log(`  behind kept-visible text only: [${exempted.join(', ')}]`);
-      test.info().annotations.push({ type: 'margins', description: lines.join('; ') });
-      expect([...faults.values()].flat()).toEqual([]);
-      expect(exempted, 'routes behind kept-visible text only').toEqual(
-        CONSENT_BEFORE_CONTROL.filter((id) => viewport.consentBelowFold.includes(id)),
-      );
+      for (const data of ['empty', 'populated'] as const) {
+        test(`at a ${PHONE.name}, ${data}`, async ({ page }) => {
+          test.setTimeout(180_000);
+          await open(page, PHONE, `data=${data}`);
+          expect(await page.evaluate(() => document.documentElement.dataset['theme'])).toBe(theme);
+          const { lines, faults, exempted } = await walk(page, PHONE);
+          console.log(`controls first, ${PHONE.name}, ${data}\n  ${lines.join('\n  ')}`);
+          expect([...faults.values()].flat()).toEqual([]);
+          // Equal, not only within: a listed route that stops needing the
+          // exemption on a phone is one to take off the list.
+          expect(exempted, 'routes behind kept-visible text only').toEqual(CONSENT_BEFORE_CONTROL);
+          // The routes the control must fail on have something to measure, so
+          // none of them passes by having no control.
+          for (const id of MUST_FAIL_INLINE) {
+            expect(lines.some((line) => line.startsWith(`${id}: no control`))).toBe(false);
+          }
+        });
+      }
+
+      for (const viewport of TABLETS) {
+        test(`on a ${viewport.name}, with a ${String(FOLD_MARGIN_PIXELS)} px margin`, async ({
+          page,
+        }) => {
+          test.setTimeout(180_000);
+          await open(page, viewport, 'data=empty');
+          expect(await page.evaluate(() => document.documentElement.dataset['theme'])).toBe(theme);
+          const { lines, faults, exempted } = await walk(page, viewport);
+          console.log(`controls first, ${viewport.name}\n  ${lines.join('\n  ')}`);
+          console.log(`  behind kept-visible text only: [${exempted.join(', ')}]`);
+          test.info().annotations.push({ type: 'margins', description: lines.join('; ') });
+          expect([...faults.values()].flat()).toEqual([]);
+          expect(exempted, 'routes behind kept-visible text only').toEqual(
+            CONSENT_BEFORE_CONTROL.filter((id) => viewport.consentBelowFold.includes(id)),
+          );
+        });
+      }
     });
   }
 

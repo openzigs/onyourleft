@@ -1,0 +1,302 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * Which palette paints — #672, the owner's ruling of 2026-09-27: the page
+ * follows the device (`prefers-color-scheme`), with an override in Settings.
+ *
+ * ## Decided before the first paint, by a script that cannot import this file
+ *
+ * A module runs after the stylesheet has been applied and a frame may already
+ * have been drawn, so a rider in a dark room would see one frame of white. The
+ * choice is therefore made by {@link THEME_SELECTION_SCRIPT}: a few lines of
+ * classic, synchronous script that `tools/theme/theme-selection-plugin.ts`
+ * writes into the `<head>` of every page Vite builds — the product's and every
+ * browser-gate harness's — ahead of any stylesheet. It sets `data-theme` on
+ * the root element, which is what `theme.css`'s dark block keys on, and points
+ * the two `theme-color` metas at the palette in force.
+ *
+ * The script is a string written HERE, beside the key and the values it reads,
+ * so the key is written once (§`THEME_STORAGE_KEY`). The same rules are
+ * implemented a second time below, as functions the Settings screen calls; a
+ * string cannot be called and the page cannot import a module before it paints.
+ * `theme-selection.test.ts` runs the script and the functions over every
+ * combination of stored choice, device preference and failure, and requires
+ * them to leave the page in the same state — which is what stops the two
+ * copies drifting.
+ *
+ * ## `localStorage`, not the athlete row
+ *
+ * IndexedDB is asynchronous, so a choice kept on the athlete row (where the
+ * unit preference lives, ADR 0020 D-2) could never be read before a paint. A
+ * display preference of THIS device goes where `game/world-preference.ts` and
+ * the sound and announcement choices already go, and an erase removes it
+ * (`transfer/erase-device.ts`). A private window or blocked site data reads as
+ * "follow the device", and never takes the page down.
+ *
+ * ## A choice the device refused, and a choice made in another tab
+ *
+ * Where the device will not keep a choice (a private window, a full quota
+ * with an OLDER choice still stored), the page still takes it, and holds it
+ * for the page's life on the root element ({@link THEME_OVERRIDE_ATTRIBUTE}),
+ * which the script and {@link applyThemeChoice} both read BEFORE storage — so
+ * a later device change does not put the page back on a choice the rider
+ * replaced (#744's review). A choice another tab keeps reaches this one
+ * through the `storage` event, which clears the held choice and applies the
+ * stored one: the newest choice wins, whichever tab made it.
+ */
+
+import type { Theme } from './tokens';
+
+/** Namespaced, because the origin is shared. The `v1` is the value's. */
+export const THEME_STORAGE_KEY = 'oyl.theme.v1';
+
+/**
+ * The three things a rider can choose. `device` is kept as NO stored value,
+ * so a rider who never opens Settings and one who chose "Match this device"
+ * are the same device.
+ */
+export const THEME_CHOICES = ['device', 'light', 'dark'] as const;
+
+/** A rider's choice. */
+export type ThemeChoice = (typeof THEME_CHOICES)[number];
+
+/** The media query a device's own preference is read from. */
+export const DEVICE_DARK_QUERY = '(prefers-color-scheme: dark)';
+
+/**
+ * The attribute on each `theme-color` meta naming the palette its colour is
+ * for. `index.html` carries two, and `offline/manifest.test.ts` holds each to
+ * `tokens.ts` §`themeColour`.
+ */
+export const THEME_META_ATTRIBUTE = 'data-oyl-theme';
+
+/**
+ * The root element's attribute that holds, for this page's life only, a choice
+ * the device refused to keep — `device`, `light` or `dark`. Read before
+ * storage by the script and by {@link applyThemeChoice}.
+ */
+export const THEME_OVERRIDE_ATTRIBUTE = 'data-oyl-theme-override';
+
+/** What this module needs of `localStorage`. */
+export interface ThemeStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+}
+
+/**
+ * This device's `localStorage`, or `undefined` where reaching for it throws —
+ * a private window, or site data blocked.
+ */
+export function deviceThemeStorage(): ThemeStorage | undefined {
+  try {
+    return typeof localStorage === 'undefined' ? undefined : localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The stored choice. Never throws; anything unreadable is `device`. */
+export function readThemeChoice(storage: ThemeStorage | undefined): ThemeChoice {
+  try {
+    const stored = storage?.getItem(THEME_STORAGE_KEY);
+    return stored === 'light' || stored === 'dark' ? stored : 'device';
+  } catch {
+    return 'device';
+  }
+}
+
+/**
+ * Keep the choice. `device` removes the key rather than storing a word, for
+ * {@link THEME_CHOICES}' reason. `false` when the device refused, so the screen
+ * can say the choice will not survive a reload rather than pretend.
+ */
+export function writeThemeChoice(storage: ThemeStorage | undefined, choice: ThemeChoice): boolean {
+  if (storage === undefined) return false;
+  try {
+    if (choice === 'device') {
+      storage.removeItem(THEME_STORAGE_KEY);
+    } else {
+      storage.setItem(THEME_STORAGE_KEY, choice);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * What an erase does to the choice (#672): removes the key, so the device is
+ * followed again. `transfer/erase-device.ts` §`ERASE_REMOVES` names it.
+ */
+export function forgetThemeChoice(storage: ThemeStorage | undefined): void {
+  try {
+    storage?.removeItem(THEME_STORAGE_KEY);
+  } catch {
+    // Nothing kept is nothing to forget, and an erase must not fail on it.
+  }
+}
+
+/** The palette a choice comes to on a device that does or does not prefer dark. */
+export function resolveTheme(choice: ThemeChoice, devicePrefersDark: boolean): Theme {
+  if (choice !== 'device') return choice;
+  return devicePrefersDark ? 'dark' : 'light';
+}
+
+/** The choice this page holds because the device would not keep it, if any. */
+function heldThemeChoice(doc: Document): ThemeChoice | undefined {
+  const held = doc.documentElement.getAttribute(THEME_OVERRIDE_ATTRIBUTE);
+  return held === 'device' || held === 'light' || held === 'dark' ? held : undefined;
+}
+
+/**
+ * The choice in force on this page: one it holds because the device refused
+ * to keep it, or else the stored one. What Settings shows as chosen.
+ */
+export function currentThemeChoice(doc: Document, storage: ThemeStorage | undefined): ThemeChoice {
+  return heldThemeChoice(doc) ?? readThemeChoice(storage);
+}
+
+/** What {@link applyThemeChoice} needs of `window`. */
+export interface ThemeWindow {
+  readonly document: Document;
+  readonly localStorage?: ThemeStorage | undefined;
+  matchMedia?: ((query: string) => { readonly matches: boolean }) | undefined;
+}
+
+/** Whether the device prefers dark. Never throws; no answer is "no". */
+function devicePrefersDark(win: ThemeWindow): boolean {
+  try {
+    return win.matchMedia?.(DEVICE_DARK_QUERY).matches === true;
+  } catch {
+    return false;
+  }
+}
+
+/** `window.localStorage`, which itself throws where site data is blocked. */
+function storageOf(win: ThemeWindow): ThemeStorage | undefined {
+  try {
+    return win.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Put the page in the palette the stored choice comes to — the Settings
+ * screen's half of {@link THEME_SELECTION_SCRIPT}, and the same rules.
+ *
+ * Sets `data-theme` on the root element, and points the `theme-color` metas:
+ * while following the device each keeps its own `prefers-color-scheme` media
+ * query, so the browser switches them itself; under an override the chosen
+ * palette's meta applies to `all` and the other to `not all`.
+ */
+export function applyThemeChoice(win: ThemeWindow): Theme {
+  const choice = currentThemeChoice(win.document, storageOf(win));
+  const theme = resolveTheme(choice, devicePrefersDark(win));
+  const root = win.document.documentElement;
+  root.setAttribute('data-theme', theme);
+  for (const meta of win.document.querySelectorAll(
+    `meta[name="theme-color"][${THEME_META_ATTRIBUTE}]`,
+  )) {
+    const palette = meta.getAttribute(THEME_META_ATTRIBUTE);
+    meta.setAttribute(
+      'media',
+      choice === 'device'
+        ? `(prefers-color-scheme: ${String(palette)})`
+        : palette === theme
+          ? 'all'
+          : 'not all',
+    );
+  }
+  return theme;
+}
+
+/**
+ * A rider's choice, from Settings: kept on the device where it will keep it,
+ * held on the page for its life where it will not, and applied at once.
+ * `false` when the device refused, so the screen can say the choice will not
+ * survive a reload.
+ */
+export function chooseTheme(win: ThemeWindow, choice: ThemeChoice): boolean {
+  const kept = writeThemeChoice(storageOf(win), choice);
+  const root = win.document.documentElement;
+  if (kept) {
+    root.removeAttribute(THEME_OVERRIDE_ATTRIBUTE);
+  } else {
+    root.setAttribute(THEME_OVERRIDE_ATTRIBUTE, choice);
+  }
+  applyThemeChoice(win);
+  return kept;
+}
+
+/**
+ * The script that runs before the first paint. ES5 and no module syntax,
+ * because it is inlined as a classic `<script>`; every name it reads is one of
+ * the constants above, interpolated, so none is typed twice.
+ *
+ * It re-reads the stored choice on every device change, so a rider who chose
+ * a palette in Settings is not moved by the device afterwards, and one who
+ * went back to "Match this device" is followed again with no reload. A choice
+ * the page holds ({@link THEME_OVERRIDE_ATTRIBUTE}) is read before storage.
+ * Another tab's choice arrives as a `storage` event for the key — or with no
+ * key, which is a `clear()` — and replaces any held one. It runs once more
+ * when the document has been parsed, because it runs ahead of the
+ * `theme-color` metas it points.
+ */
+export const THEME_SELECTION_SCRIPT = `(function () {
+  var key = ${JSON.stringify(THEME_STORAGE_KEY)};
+  var attribute = ${JSON.stringify(THEME_META_ATTRIBUTE)};
+  var held = ${JSON.stringify(THEME_OVERRIDE_ATTRIBUTE)};
+  var query = null;
+  try { query = window.matchMedia(${JSON.stringify(DEVICE_DARK_QUERY)}); } catch (error) {}
+  function stored() {
+    var holding = document.documentElement.getAttribute(held);
+    if (holding === 'light' || holding === 'dark') return holding;
+    if (holding === 'device') return null;
+    try {
+      var value = window.localStorage.getItem(key);
+      return value === 'light' || value === 'dark' ? value : null;
+    } catch (error) {
+      return null;
+    }
+  }
+  function apply() {
+    var choice = stored();
+    var theme = choice || (query && query.matches ? 'dark' : 'light');
+    document.documentElement.setAttribute('data-theme', theme);
+    var metas = document.querySelectorAll('meta[name="theme-color"][' + attribute + ']');
+    for (var index = 0; index < metas.length; index += 1) {
+      var palette = metas[index].getAttribute(attribute);
+      metas[index].setAttribute(
+        'media',
+        choice ? (palette === theme ? 'all' : 'not all') : '(prefers-color-scheme: ' + palette + ')'
+      );
+    }
+  }
+  apply();
+  if (query && query.addEventListener) query.addEventListener('change', apply);
+  if (window.addEventListener) {
+    window.addEventListener('storage', function (event) {
+      if (event.key !== key && event.key !== null) return;
+      document.documentElement.removeAttribute(held);
+      apply();
+    });
+  }
+  document.addEventListener('DOMContentLoaded', apply);
+})();`;
+
+/**
+ * The erase's half (#672): forget the choice and put THIS page back on the
+ * device's palette at once, so an erased device is not left showing the
+ * palette a rider chose until the next reload.
+ */
+export function themeEraser(win: ThemeWindow): { forget(): void } {
+  return {
+    forget: () => {
+      forgetThemeChoice(storageOf(win));
+      win.document.documentElement.removeAttribute(THEME_OVERRIDE_ATTRIBUTE);
+      applyThemeChoice(win);
+    },
+  };
+}

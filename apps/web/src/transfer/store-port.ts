@@ -247,6 +247,12 @@ export interface TransferPort {
    */
   readonly drafts: DraftStore;
   /**
+   * The palette choice in `localStorage` (#672), so an erase can forget it and
+   * put the page back on the device's palette. Required rather than optional,
+   * so a caller cannot build an erase that silently leaves it behind.
+   */
+  readonly theme: DraftStore;
+  /**
    * The row to recreate after an erase.
    *
    * Erasing removes the athlete row every write path checks, and
