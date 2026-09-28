@@ -64,8 +64,11 @@ export function zipMember(archive: Uint8Array, path: string): Uint8Array {
     const body = archive.subarray(start, start + compressed);
     let bytes: Uint8Array;
     if (method === 0) bytes = Uint8Array.from(body);
-    else if (method === 8) bytes = new Uint8Array(inflateRawSync(body));
-    else
+    else if (method === 8) {
+      // Bounded by the size the directory states, so a member cannot inflate
+      // past what it claims before that claim is checked.
+      bytes = new Uint8Array(inflateRawSync(body, { maxOutputLength: Math.max(1, size) }));
+    } else
       throw new Error(
         `${path} is compressed by method ${String(method)}, which this reader refuses`,
       );
