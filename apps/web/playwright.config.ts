@@ -160,7 +160,11 @@ export const LAUNCH_ARGS = [
  *
  * Every load the gate pays for has a budget of its own, and the arithmetic
  * that fits the four game loads inside this one is `game.browser.spec.ts`
- * §`paysForTheRealisticLoad`. This is what still reports when something with no
+ * §`paysForTheRealisticLoad` — 814 s of 840 summed in a line, or 844 s if
+ * `realistic.browser.spec.ts`' control load is the one that hangs rather than
+ * its first; that spec's wait overlaps the game loads on the other worker, so
+ * the line over-counts, and it is reasoned rather than measured. This stop
+ * ends the gate either way. This is what still reports when something with no
  * budget of its own hangs: Playwright stops, marks what was running as
  * interrupted and what had not started as not run, and exits non-zero.
  */

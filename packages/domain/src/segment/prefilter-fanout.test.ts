@@ -155,11 +155,12 @@ function fanOut(city: readonly GeographicPosition[][], ride: ReadonlySet<number>
 }
 
 describe('the fan-out the padding changes (#291)', () => {
-  // ⚠️ **10 s, a hang guard rather than a budget — #682.** Vitest's default 5 s was nobody's choice
+  // ⚠️ **10 s, a ceiling rather than a budget — #682.** Vitest's default 5 s was nobody's choice
   // for this case: under coverage on CI it took 1.7 s to 3.3 s over thirteen green `main` runs on
   // 2026-09-28 (36370135206 to 36405580515), the slowest on 36387309239 (the slower of the two
   // runners, a job over 1 000 s) — 66 % of that default. 10 s is about three times the slowest, so
-  // a hang is still red.
+  // a slow-down is red. It is not a hang guard: this case is synchronous and Vitest cannot
+  // interrupt one, so a genuine hang is caught only by the job’s own stop (CLAUDE.md §4c).
   it('is still bounded by the ride’s footprint rather than by the corpus size', () => {
     // Spike 0001 §3's headline, re-established on the padded index: a corpus a
     // hundred times larger puts the same candidates into stage 2, because the

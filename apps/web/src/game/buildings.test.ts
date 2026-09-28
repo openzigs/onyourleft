@@ -577,11 +577,12 @@ describe('the supporting detail, each where it has to be — #500', () => {
       return (qu - pu) * (v - pv) - (qv - pv) * (u - pu) > 1e-6;
     });
 
-  // ⚠️ **12 s, a hang guard rather than a budget — #682.** Vitest's default 5 s was nobody's choice
+  // ⚠️ **12 s, a ceiling rather than a budget — #682.** Vitest's default 5 s was nobody's choice
   // for this case: under coverage on CI it took 1.5 s to 3.9 s over thirteen green `main` runs on
   // 2026-09-28 (36370135206 to 36405580515), the slowest on 36387309239 (the slower of the two
   // runners, a job over 1 000 s) — 78 % of that default. 12 s is about three times the slowest, so
-  // a hang is still red.
+  // a slow-down is red. It is not a hang guard: this case is synchronous and Vitest cannot
+  // interrupt one, so a genuine hang is caught only by the job’s own stop (CLAUDE.md §4c).
   it('closes the wall over an arch, and leaves the arch itself open', () => {
     // An arched opening is cut as its rectangle and the two corners above the
     // arch filled back in. Without the fill, each corner is a hole through

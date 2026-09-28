@@ -81,7 +81,12 @@ jobs:
     # end inside it too: a green gate took 547 s of its 580. Twenty-five leaves a
     # green job 372 s clear and lets that stop grow to 840 s, which still ends
     # 59 s inside the job with every game load hung -- the arithmetic is
-    # game.browser.spec.ts paysForTheRealisticLoad and CLAUDE.md section 4c.
+    # game.browser.spec.ts paysForTheRealisticLoad and CLAUDE.md section 4c,
+    # which also say where that arithmetic sums past 840 (by 4 s, if
+    # realistic.browser.spec.ts' control load hangs) and why the gate then
+    # stops itself at 840 rather than overrunning the job. This stop is NOT a
+    # bound on a Vitest hang: Vitest cannot interrupt a synchronous case, so
+    # one that never returns runs until this cancels the job.
     # Still a stop, not a budget: nothing here waits for it.
     timeout-minutes: 25
     steps:

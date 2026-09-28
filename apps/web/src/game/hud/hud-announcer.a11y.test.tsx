@@ -221,11 +221,12 @@ describe('the HUD’s one live region — #397', () => {
     expect(region()?.textContent).toBe('Power 230 watts');
   });
 
-  // ⚠️ **7 s, a hang guard rather than a budget — #682.** Vitest's default 5 s was nobody's choice
-  // for this case: under coverage on CI it took 1.3 s to 2.3 s over thirteen green `main` runs on
+  // ⚠️ **7 s, a ceiling rather than a budget — #682.** Vitest's default 5 s was nobody's choice for
+  // this case: under coverage on CI it took 1.3 s to 2.3 s over thirteen green `main` runs on
   // 2026-09-28 (36370135206 to 36405580515), the slowest on 36387309239 (the slower of the two
   // runners, a job over 1 000 s) — 45 % of that default. 7 s is about three times the slowest, so a
-  // hang is still red.
+  // slow-down is red, and so is a case left waiting on something that never settles. A loop that
+  // never yields is caught only by the job’s own stop (CLAUDE.md §4c).
   it('says nothing to a rider who has chosen nothing — OFF by default', async () => {
     await startRide();
     await pump(200);
@@ -285,11 +286,12 @@ describe('the road ahead, through the same region — #399', () => {
     expect(said).toMatch(/^Climb in 250 metres, [5-7] percent$/);
   });
 
-  // ⚠️ **14 s, a hang guard rather than a budget — #682.** Vitest's default 5 s was nobody's choice
+  // ⚠️ **14 s, a ceiling rather than a budget — #682.** Vitest's default 5 s was nobody's choice
   // for this case: under coverage on CI it took 2.1 s to 4.4 s over thirteen green `main` runs on
   // 2026-09-28 (36370135206 to 36405580515), the slowest on 36371441351 (the slower of the two
   // runners, a job over 1 000 s) — 87 % of that default. 14 s is about three times the slowest, so
-  // a hang is still red.
+  // a slow-down is red, and so is a case left waiting on something that never settles. A loop that
+  // never yields is caught only by the job’s own stop (CLAUDE.md §4c).
   it('says nothing about a climb when that row is never', async () => {
     routes = [hillyRoute()];
     chooseAnnouncements({

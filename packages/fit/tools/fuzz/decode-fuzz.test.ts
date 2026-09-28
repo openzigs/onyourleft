@@ -16,8 +16,11 @@
  * `invariants.ts` states the three properties and why the first is not enough
  * on its own. In short: the right error type, no message reporting bytes from
  * outside the data section, and no output larger than the input could encode.
- * A hang is caught by the test timeout below rather than by an assertion,
- * because a wedged loop never reaches one.
+ * A slow-down is caught by the test timeout below rather than by an
+ * assertion. A genuine hang is not caught by either: a wedged loop never
+ * reaches an assertion, and the fuzz cases are synchronous, which Vitest
+ * cannot interrupt — its timer is only read once the case returns — so a hang
+ * here is caught only by the CI job's own stop (CLAUDE.md §4c).
  *
  * ## Budget
  *
@@ -256,9 +259,13 @@ describe('the FIT decoder survives a seeded corpus fuzz', () => {
     'produces a decode or a FitDecodeError for every case, and nothing else',
     // 180 s, and the number is measured rather than chosen.
     //
-    // This is a HANG GUARD, not a performance budget: a wedged record loop never
-    // terminates, so any finite ceiling catches it and the only question is how
-    // much honest work fits underneath. 60 s did not, and it failed on `main`
+    // This is a ceiling, not a performance budget. ⚠️ It was called a HANG
+    // GUARD here until #682's review, on the reasoning that a wedged record loop
+    // never terminates and so any finite ceiling catches it — which is not
+    // true: this case is synchronous, Vitest cannot interrupt a synchronous
+    // case, and a wedged loop is caught only by the CI job's own stop. What the
+    // ceiling does catch is a slow-down, and the only question is how much
+    // honest work fits underneath. 60 s did not, and it failed on `main`
     // rather than on the pull request that broke it.
     //
     // What the original 60 s missed is that CI runs `test:coverage`, not `test`.
@@ -289,8 +296,9 @@ describe('the FIT decoder survives a seeded corpus fuzz', () => {
     // the other). 300 s is about three times the slowest.
     { timeout: 300_000 },
     () => {
-      // The timeout is the hang guard: a wedged record loop never reaches an
-      // assertion, so the only thing that can catch it is the runner.
+      // A wedged record loop never reaches an assertion, and the timeout cannot
+      // stop a synchronous case either, so the only thing that catches it is
+      // the CI job's own stop. The timeout turns a slow-down red.
       for (const fuzzCase of cases) runFitCase(fuzzCase, FUZZ_SEED);
     },
   );

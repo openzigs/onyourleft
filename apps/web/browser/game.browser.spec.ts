@@ -759,6 +759,17 @@ const TREES_LOAD_BUDGET_MS = 160_000;
  *                            for a load that took at most 66 s green
  *   = 814 s                  inside the gate's own 840 (`GATE_BUDGET_MS`)
  *
+ * ⚠️ **The 84 s assumes that case's FIRST load hangs.** If the first is green
+ * and its control load hangs instead, the case takes about 180 s where green
+ * took 66 s — 114 s — and the sum is 844 s, 4 s past 840. The linear sum
+ * over-counts: that spec runs on the `chromium` project in one of the two
+ * workers, and while it waits the other worker finishes the remaining specs
+ * and takes this group (`playwright.config.ts` §`projects`: nothing waits for
+ * `chromium` to finish), so the wait overlaps the rest of the gate and these
+ * loads rather than adding to them in a line. That is reasoned, not measured;
+ * if the overlap were ever under 4 s, the gate would stop itself at 840 s with
+ * the last describe here interrupted — inside the job, naming what ran.
+ *
  * and the gate cannot outlive the job: on that runner the step starts as late
  * as 592 s in (run 36395959573) and builds for 9 s before Playwright starts,
  * so 840 s ends it by 1 441 s — 59 s inside `timeout-minutes: 25`'s 1 500,
