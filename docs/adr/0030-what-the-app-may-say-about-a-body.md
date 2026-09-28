@@ -657,3 +657,14 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   limb angle, torso angle, segment length or body dimension is ever rendered as a number.** D-4,
   R1, R2, D-6 and D-7 also stand exactly as written. The ruling widens which two observations may
   be compared. It does not change what may be said about them.
+- **2026-09-28** — **D-2, D-3 as a rule of wording, and D-8's third bullet are superseded by
+  [ADR 0035](0035-model-written-ride-write-ups.md) for text a MODEL writes, and for nothing
+  else.** The owner ruled on [#795](https://github.com/openzigs/onyourleft/issues/795) that the
+  model a rider chooses may write a full, free-text write-up of a ride, riding position included,
+  and accepted the risk [spike 0008](../spikes/0008-eu-uk-medical-device-read.md) and this ADR's
+  2026-09-23 entry describe. ⚠️ **Every rule above still binds every string this app writes**,
+  including the framing, the headings and the failure sentences around a write-up, and
+  `camera/side-report.ts` and `side-report-wording.ts` are unchanged. D-3's degree rule and D-4's
+  frontal-plane rule survive as a runtime screen on model text: a write-up that fails is withheld
+  whole, never redacted. D-7 is untouched, because nothing on that path is live. ADR 0035 D-2 is
+  the table of what applies to which text.
