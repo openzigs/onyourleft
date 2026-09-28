@@ -20,6 +20,8 @@
 
 import { readFileSync } from 'node:fs';
 
+import ts from 'typescript';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { isBuiltKind } from './buildings';
@@ -2423,16 +2425,47 @@ describe('the realistic world breathes one air, and the stylised world none of i
     // space whenever a render target is bound. The two agree only while the
     // renderer never binds or builds one — so the first that does (#629's
     // reflections, #701's post pass) is a red build here, not a fog that
-    // quietly stops matching its own flat table. Code, not prose: the pattern
-    // needs a call or a constructor.
+    // quietly stops matching its own flat table.
     const renderer = readFileSync(new URL('./three-renderer.ts', import.meta.url), 'utf8');
-    const binds =
-      /\.setRenderTarget\s*\(|new\s+(?:WebGL\w*RenderTarget|RenderTarget|EffectComposer)\b/gu;
     expect(
-      renderer.match(binds) ?? [],
+      renderTargetsIn(renderer),
       'a render target in three-renderer.ts: convert #622’s fog table with the space three ' +
         'converts fogColor with (getUnlitUniformColorSpace), per pass — see §ATMOSPHERE',
     ).toEqual([]);
+  });
+
+  it('reads the tripwire above off the parsed code: a comment is not a target, and transmission is — #708', () => {
+    // #708: the tripwire used to match the file's TEXT, so a sentence naming
+    // the call was a red build and a `transmission` material — whose hidden
+    // pass three renders into a target of its own — was green.
+    expect(
+      renderTargetsIn(
+        [
+          '// renderer.setRenderTarget(target) would bind one',
+          '/** new WebGLRenderTarget(1, 1), new EffectComposer(renderer), m.transmission = 1 */',
+          "const note = 'renderer.setRenderTarget(target); new WebGLRenderTarget(1, 1)';",
+          'const transmissionless = { transmissive: 1 };',
+        ].join('\n'),
+      ),
+    ).toEqual([]);
+    expect(renderTargetsIn('renderer.setRenderTarget(target);')).toEqual(['.setRenderTarget']);
+    expect(renderTargetsIn('this.#renderer?.setRenderTarget(null);')).toEqual(['.setRenderTarget']);
+    expect(renderTargetsIn('const t = new WebGLRenderTarget(1, 1);')).toEqual([
+      'new WebGLRenderTarget',
+    ]);
+    expect(renderTargetsIn('const t = new THREE.WebGLCubeRenderTarget(8);')).toEqual([
+      'new WebGLCubeRenderTarget',
+    ]);
+    expect(renderTargetsIn('const c = new EffectComposer(renderer);')).toEqual([
+      'new EffectComposer',
+    ]);
+    expect(renderTargetsIn('new MeshPhysicalMaterial({ transmission: 0.5 });')).toEqual([
+      'transmission',
+    ]);
+    expect(renderTargetsIn('const transmission = 1; make({ transmission });')).toEqual([
+      'transmission',
+    ]);
+    expect(renderTargetsIn('material.transmission = 1;')).toEqual(['transmission']);
   });
 
   it('throws, naming #622, where three’s program no longer holds a fog include', () => {
@@ -2460,3 +2493,48 @@ describe('the realistic world breathes one air, and the stylised world none of i
     }
   });
 });
+
+/**
+ * What in `source` binds or builds a render target — #703, read off the parsed
+ * code since #708. The parser's tree holds no comment and no string contents,
+ * so a sentence naming a call is not the call.
+ *
+ * Three shapes: any `.setRenderTarget` (a call, an optional call, or the
+ * method handed on); a `new` of anything ending `RenderTarget`, or an
+ * `EffectComposer`; and a `transmission` property — in an object literal or
+ * read or written on an object — because three renders a material with
+ * `transmission` above nought through a hidden pass into a render target of its
+ * own (`WebGLRenderer.js` §`renderTransmissionPass`).
+ *
+ * ⚠️ It reads ONE file. A target bound by another module, or by a three
+ * feature named nowhere here, is not seen; `three-renderer.ts` §`ATMOSPHERE`
+ * names the two three already binds internally and why neither draws the air.
+ */
+function renderTargetsIn(source: string): readonly string[] {
+  const file = ts.createSourceFile('source.ts', source, ts.ScriptTarget.Latest, true);
+  const found: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isPropertyAccessExpression(node)) {
+      const name = node.name.text;
+      if (name === 'setRenderTarget') found.push('.setRenderTarget');
+      if (name === 'transmission') found.push('transmission');
+    } else if (ts.isNewExpression(node)) {
+      const callee = node.expression;
+      const name = ts.isPropertyAccessExpression(callee)
+        ? callee.name.text
+        : ts.isIdentifier(callee)
+          ? callee.text
+          : '';
+      if (/RenderTarget$|^EffectComposer$/u.test(name)) found.push(`new ${name}`);
+    } else if (
+      (ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node)) &&
+      (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name)) &&
+      node.name.text === 'transmission'
+    ) {
+      found.push('transmission');
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return found;
+}

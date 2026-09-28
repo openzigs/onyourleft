@@ -3605,13 +3605,23 @@ const AIR_CONTROL_AGREEMENT = 0.02;
 
 /**
  * How far a #622 probe's drawn shift may stand from the predicted one: **1.5
- * bytes plus a quarter of the prediction**, per channel. The bytes are the
- * read-back's own quantisation over a 3 × 3 mean; the quarter is the fog
- * factor's spread across those nine pixels' depths and the table's
- * interpolation across their azimuths. A fog that does not lean misses by the
- * whole prediction, and one that leans twice as far by all of it again.
+ * bytes plus a tenth of the prediction**, per channel. The bytes are the
+ * read-back's own quantisation: a shift is the difference of two 3 × 3 means.
+ *
+ * ⚠️ **A tenth, not the quarter #703 shipped with (#708), and the tenth is
+ * measured rather than chosen.** The largest residual on the unmutated build is
+ * **0.3 bytes** (towards the sun, channel 2: 3.8 drawn against 3.5 predicted;
+ * the valley's worst is 0.2), and three local runs and #703's CI run printed
+ * the same figures to the tenth of a byte — so the fixed part alone covers the
+ * residual five times over and the share is headroom, not the fit. At a quarter
+ * a fog leaning at HALF strength missed by 3.64 bytes against a bound of 3.30
+ * on one channel of six and passed the other five: #621's lesson from below.
+ * At a tenth the same mutation misses channels 0 and 1 towards the sun and
+ * channel 0 away by about 1.4, 1.0 and 0.7 bytes past their bounds (3.64
+ * against 2.22 the worst), and a fog leaning TWICE as far misses by 7.4
+ * against 2.22. Loosen this only with a residual measured past the fixed part.
  */
-const AIR_SHIFT_TOLERANCE = { bytes: 1.5, share: 0.25 } as const;
+const AIR_SHIFT_TOLERANCE = { bytes: 1.5, share: 0.1 } as const;
 
 /**
  * How far the drawn difference between the two #622 probes' shifts — towards
