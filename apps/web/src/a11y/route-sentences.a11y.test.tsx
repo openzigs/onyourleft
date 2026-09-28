@@ -29,6 +29,20 @@
  * follows *Save workout* now), and the Workouts table's "Actions" column
  * heading is gone with the table.
  *
+ * ⚠️ **Re-recorded by #746, with the reader made the recorder's collection.**
+ * A sentence is now found only as a sentence the collection produced — not as
+ * a substring of any block, which the reader used to accept — and the record
+ * must EQUAL what the recorder would write here. The re-record reordered the
+ * sentences #666 and #670 moved and added what the screens had gained since
+ * (the "More about" summaries, the Appearance section, the Activities
+ * list–detail prompt, the Basis transcoder's credit). It dropped two lines,
+ * each still said in other words it records: "Draw a route", the `<h2>` #670
+ * removed when the drawing link moved to the head of the list ("Draw a route on
+ * this device — …" is recorded), which the old reader passed only as a
+ * substring of that sentence; and #745's hand-edited kit sentence, which
+ * renders after its warning's "No local store:" label in one block and is
+ * recorded so.
+ *
  * ## What it does not check
  *
  * That a sentence is in the same ORDER, or visible — `kept-visible.a11y.test`
@@ -41,14 +55,14 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import type { StoreHarness } from '@onyourleft/store/testing';
 
 import { ALL_ROUTES, type RouteDefinition } from '../shell/routes';
 import { openRoute, selectFixtureItem } from '../testing/hierarchy-walk';
 import type { Mounted } from '../testing/mount';
-import { sentencesIn, textBlocks } from '../testing/route-sentences';
+import { sentencesIn } from '../testing/route-sentences';
 import { emptyTransferPort } from '../testing/transfer-port';
 
 /** `{ "<route id> <empty|populated>": [sentence, …] }`, in first-seen order. */
@@ -87,26 +101,66 @@ function readRecord(): Record_ {
   return JSON.parse(readFileSync(SNAPSHOT, 'utf8')) as Record_;
 }
 
+/**
+ * Every sentence one route says over one fixture — the ONE collection the
+ * recorder writes and the reader checks against (#746).
+ *
+ * ⚠️ **Until #746 they collected differently, and a reviewer who remembers the
+ * reader matching a sentence anywhere in the page's text is reading the old
+ * file.** The recorder took the list's sentences only; the reader also read the
+ * list–detail route with its fixture's item selected (#670) and accepted a
+ * sentence found as a SUBSTRING of any block. So a re-record on `main` dropped
+ * 121 lines the reader was still holding — every sentence that moved from a
+ * list's columns into its selected item — and nothing said so. Both now read
+ * the list and, where there is one, the selected item, and keep each distinct
+ * sentence once, in first-seen order.
+ */
+async function sentencesFor(
+  route: RouteDefinition,
+  data: 'empty' | 'populated',
+): Promise<string[]> {
+  const main = await open(route, data === 'populated');
+  const sentences = sentencesIn(main);
+  // #670: on a list–detail route an item's own sentences — its facts, its
+  // actions — render on the SAME route once it is selected, where they used
+  // to be columns of the list. The union is what the route renders.
+  if (data === 'populated' && (await selectFixtureItem(route))) {
+    for (const sentence of sentencesIn(main)) {
+      if (!sentences.includes(sentence)) sentences.push(sentence);
+    }
+  }
+  return sentences;
+}
+
+/** Every route over both fixtures, collected by {@link sentencesFor}. */
+async function recordNow(): Promise<Record<string, string[]>> {
+  const record: Record<string, string[]> = {};
+  for (const data of ['empty', 'populated'] as const) {
+    for (const route of ALL_ROUTES) {
+      record[key(route, data)] = await sentencesFor(route, data);
+      mounted?.unmount();
+      mounted = undefined;
+      await harness?.destroy();
+      harness = undefined;
+    }
+  }
+  return record;
+}
+
 describe('#666 — every sentence a route rendered on main still renders on it', () => {
   if (RECORDING) {
     it('records every route’s sentences', async () => {
-      const record: Record<string, string[]> = {};
-      for (const data of ['empty', 'populated'] as const) {
-        for (const route of ALL_ROUTES) {
-          const main = await open(route, data === 'populated');
-          record[key(route, data)] = sentencesIn(main);
-          mounted?.unmount();
-          mounted = undefined;
-          await harness?.destroy();
-          harness = undefined;
-        }
-      }
-      writeFileSync(SNAPSHOT, `${JSON.stringify(record, null, 2)}\n`);
+      writeFileSync(SNAPSHOT, `${JSON.stringify(await recordNow(), null, 2)}\n`);
     });
     return;
   }
 
   const record = readRecord();
+  let now: Record<string, string[]> = {};
+
+  beforeAll(async () => {
+    now = await recordNow();
+  });
 
   it('the record covers every route in the table, both ways, and holds sentences', () => {
     // #142: a route added to the table after the record was taken is not
@@ -119,22 +173,23 @@ describe('#666 — every sentence a route rendered on main still renders on it',
 
   for (const data of ['empty', 'populated'] as const) {
     for (const route of ALL_ROUTES) {
-      it(`${route.id} (${route.path}), ${data}`, async () => {
-        const main = await open(route, data === 'populated');
-        const blocks = textBlocks(main);
-        // #670: on a list–detail route an item's own sentences — its facts,
-        // its actions — render on the SAME route once it is selected, where
-        // they used to be columns of the list. The union is what the route
-        // renders.
-        if (data === 'populated' && (await selectFixtureItem(route))) {
-          blocks.push(...textBlocks(main));
-        }
-        const rendered = blocks.join(' \n ');
-        const lost = (record[key(route, data)] ?? []).filter(
-          (sentence) => !rendered.includes(sentence),
-        );
-        expect(lost, `sentences ${route.id} rendered on main and no longer does`).toEqual([]);
+      it(`${route.id} (${route.path}), ${data}`, () => {
+        const rendered = new Set(now[key(route, data)]);
+        const lost = (record[key(route, data)] ?? []).filter((sentence) => !rendered.has(sentence));
+        expect(
+          lost,
+          `sentences ${route.id} rendered on main and no longer does: ${JSON.stringify(lost)}`,
+        ).toEqual([]);
       });
     }
   }
+
+  // #746: the recorder and the reader are one collection, so a re-record
+  // on this tree writes exactly the committed file. A sentence ADDED to a
+  // route is red here until the record is taken again — which is the point:
+  // a record that lags the screens stops protecting what they gained, and a
+  // re-record that would quietly drop a line is seen in the same diff.
+  it('is exactly what the recorder would write on this tree', () => {
+    expect(now).toEqual(record);
+  });
 });
