@@ -206,34 +206,55 @@ function LiveRide({
             </StatusMessage>
           ) : null}
         </div>
-        <MetricGrid metrics={snapshot.metrics} />
-
         {/*
-          ⚠️ **The controls come BEFORE the clock, and until #436's review they
-          came after it.** A reviewer who remembers the clock sitting between
-          the metrics and Pause / Stop is reading the old file. The clock is
-          one line on a wide column and two on a narrow one, in a font this
-          repository does not choose, so everything beneath it moved with it —
-          and what was beneath it was the one pair of controls that ends a
-          recording. Measured in the pinned Chromium at 1280×720, which is
-          about what a landscape tablet's WebView is left once the system bars
-          are taken off the display's 800: Pause / Stop ended at y = 737, below
-          the fold. `theme.css` §`.oyl-ride` has the table. Nothing focusable
-          moved relative to anything else focusable, so the tab order is what
-          it was.
+          ⚠️ **The controls come FIRST — before the metrics since #692, and
+          before the clock since #436's review.** A reviewer who remembers
+          *Pause* / *Stop* under the four metric cards is reading the old file.
+
+          The rule is one sentence: nothing whose height changes during a ride
+          sits above a ride control in its column. The clock is one line on a
+          wide column and two on a narrow one (#436). A standing notice is
+          three to five lines: #526's *No notification* stood ABOVE *Pause* and
+          put it 77.9 px under the fold on the owner's tablet in the Android
+          shell; #551's side camera and a storage notice stood after the clock,
+          where *Stop side camera* and *Device full* themselves ran 150 px and
+          164 px under that fold, and upright each came off the workout's
+          *Ride*. Now the metric cards are what a notice moves — readings, not
+          controls. With any one notice they are still on the screen in the
+          pinned Chromium (2.1 px above that fold at the least, on a Mac); with
+          every notice this screen can stand at once they are not, and neither
+          is the last notice. `rideview.browser.spec.ts` §"#692" publishes both,
+          and `theme.css` §`.oyl-ride` has the table.
+
+          The side camera comes straight after the controls because it is one:
+          *Stop side camera*. The notices come after it, then the numbers.
+          Nothing focusable changed its order relative to anything else
+          focusable, so the tab order is what it was; a screen reader now meets
+          Pause / Stop before the numbers, as it met the keep-the-screen-on
+          notice before them since #647.
         */}
         <RideControls controller={controller} snapshot={snapshot} />
+        <SideCameraOnRide state={sideCamera.state} onStop={sideCamera.stop} />
+        {snapshot.notificationNotice !== undefined && rideInProgress(snapshot.phase) ? (
+          // #526: set once, on the ride where the rider refused the permission,
+          // and it stands for the rest of that ride. ⚠️ AFTER every ride
+          // control since #692 — the side camera's *Stop side camera* too —
+          // and a reviewer who remembers it above *Pause*, inside
+          // `RideControls`, is reading the old file: there, on the owner's
+          // tablet in the Android shell, its 156 px put *Pause* / *Stop*
+          // 77.9 px UNDER the fold — the controls that end a recording, off
+          // the screen, on the one platform that shows this sentence.
+          // `rideInProgress` is the branch of `RideControls` it rendered in.
+          <StatusMessage tone="info" label="No notification" live>
+            {snapshot.notificationNotice}
+          </StatusMessage>
+        ) : null}
+        <StorageNotice snapshot={snapshot} />
+        <MetricGrid metrics={snapshot.metrics} />
         <p className="oyl-ride__clock">
           {formatDuration(snapshot.elapsedSeconds)} elapsed ·{' '}
           {formatDuration(snapshot.movingSeconds)} moving · {snapshot.sampleCount} seconds recorded
         </p>
-        <StorageNotice snapshot={snapshot} />
-        {/*
-          #551: after the clock rather than before the controls — #436's
-          review measured what a line above Pause / Stop costs them on a
-          tablet — and rendered only while a phone is paired.
-        */}
-        <SideCameraOnRide state={sideCamera.state} onStop={sideCamera.stop} />
         <RecoveryOffer controller={controller} snapshot={snapshot} />
       </div>
 
@@ -505,12 +526,6 @@ function RideControls({
 
   return (
     <>
-      {snapshot.notificationNotice === undefined ? null : (
-        // #526: set once, on the ride where the rider refused the permission.
-        <StatusMessage tone="info" label="No notification" live>
-          {snapshot.notificationNotice}
-        </StatusMessage>
-      )}
       {/*
         #669: the ride-time controls side by side are a ROW with a gap, so two
         of them are never closer than 8 px (Android's 8 dp between targets).

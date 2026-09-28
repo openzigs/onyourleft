@@ -303,6 +303,39 @@ describe('#422 — the controls that end a recording come before the clock', () 
   });
 });
 
+describe('#692 — nothing whose height changes during a ride sits above Pause and Stop', () => {
+  it('renders Pause and Stop ahead of the metric cards and of every standing notice in the Live group', async () => {
+    // ⚠️ The ORDER, asserted where no layout happens; what it is worth is
+    // `browser/rideview.browser.spec.ts` §"#692" — #526's notice above
+    // Pause put it 77.9 px under the fold on the owner's tablet in the shell.
+    const stub = stubRideController(ridingSnapshot());
+    await show(stub);
+    stub.set({ notificationNotice: RIDE_NOTIFICATION_REFUSED, storage: 'quota-exceeded' });
+    await settle();
+
+    const live = document.querySelector('.oyl-ride__group--live');
+    const cards = live?.querySelector('.oyl-metric-grid');
+    // Direct children only: #647's notice stands BESIDE the heading, above
+    // everything, and it is one line upright and two in landscape by design.
+    const notices = [...(live?.querySelectorAll(':scope > .oyl-status') ?? [])];
+    if (cards === null || cards === undefined) {
+      throw new Error('the live group renders no metric cards');
+    }
+    expect(notices.map((each) => each.querySelector('.oyl-status__label')?.textContent)).toEqual([
+      'No notification: ',
+      'Device full: ',
+    ]);
+    for (const label of ['Pause', 'Stop']) {
+      for (const after of [cards, ...notices]) {
+        const position = buttonNamed(label).compareDocumentPosition(after);
+        expect(position & Node.DOCUMENT_POSITION_FOLLOWING, label).toBe(
+          Node.DOCUMENT_POSITION_FOLLOWING,
+        );
+      }
+    }
+  });
+});
+
 describe('criterion 6 — one click cannot end a ride', () => {
   it('arms a confirmation instead of stopping', async () => {
     const stub = stubRideController(ridingSnapshot());

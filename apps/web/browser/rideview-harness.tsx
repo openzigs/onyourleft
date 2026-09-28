@@ -79,7 +79,8 @@ import {
 import { athleteId, workoutId, type AthleteRecord, type WorkoutRecord } from '@onyourleft/store';
 
 import { stubAnalysis } from '../src/analysis/testing';
-import type { RideSnapshot } from '../src/ride/controller';
+import { scriptedSidePairing } from '../src/camera/testing';
+import { RIDE_NOTIFICATION_REFUSED, type RideSnapshot } from '../src/ride/controller';
 import { ridingSnapshot, stubRideController } from '../src/ride/testing';
 import { AppShell } from '../src/shell/AppShell';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
@@ -160,8 +161,35 @@ const KEEP_ALIVE_FAILED = new URLSearchParams(window.location.search).get('keepa
  */
 const RIDE_STATE = new URLSearchParams(window.location.search).get('ride');
 
+/**
+ * #692 — the standing notices this screen can hold during a ride, each on
+ * its own query so a case can stand one alone or every one at once:
+ *
+ *   `?notification=refused`  #526's *No notification* — Android only, for the
+ *                            rest of the ride, and until #692 ABOVE *Pause*
+ *   `?storage=full`          the recorder's *Device full*, the longer of its
+ *                            two sentences
+ *   `?side=lost`             #551's lost side-camera link, with its own
+ *                            control, *Stop side camera*, through the
+ *                            scripted pairing the unit tests use
+ *
+ * Through the stub's snapshot for the reason {@link WORKOUT_STATE} is: this
+ * page measures where the sentences land, not who raises them.
+ */
+const QUERY = new URLSearchParams(window.location.search);
+const NOTIFICATION_REFUSED = QUERY.get('notification') === 'refused';
+const STORAGE_FULL = QUERY.get('storage') === 'full';
+const SIDE = QUERY.get('side');
+const SIDE_PAIRING =
+  SIDE === 'filming' || SIDE === 'lost' ? scriptedSidePairing({ phone: SIDE }) : undefined;
+
 function snapshot(): RideSnapshot {
-  const riding = { ...ridingSnapshot(), keepAliveFailed: KEEP_ALIVE_FAILED };
+  const riding = {
+    ...ridingSnapshot(),
+    keepAliveFailed: KEEP_ALIVE_FAILED,
+    notificationNotice: NOTIFICATION_REFUSED ? RIDE_NOTIFICATION_REFUSED : undefined,
+    storage: STORAGE_FULL ? ('quota-exceeded' as const) : ('ok' as const),
+  };
   if (RIDE_STATE === 'idle') {
     return {
       ...riding,
@@ -249,6 +277,23 @@ export interface RideViewMeasurement {
         readonly onTop: boolean;
       }
     | undefined;
+  /**
+   * #692: every standing notice in the live and trainer groups — its label
+   * (the words a rider reads first), its box, and whether it is the topmost
+   * thing at its own centre. Found by `.oyl-status`, so a notice this page
+   * was not written to expect is measured too.
+   */
+  readonly notices: readonly RideViewNotice[];
+  /** #692: the four metric cards' list, which is what moves now instead. */
+  readonly metrics: Box | undefined;
+}
+
+/** One standing notice. @see RideViewMeasurement.notices */
+export interface RideViewNotice {
+  readonly group: 'live' | 'trainer';
+  readonly label: string;
+  readonly box: Box;
+  readonly onTop: boolean;
 }
 
 declare global {
@@ -265,10 +310,8 @@ declare global {
       readonly openEasedDetail: () => void;
       /** #605's control: the running workout as #585 shipped it. @see restoreAsShipped */
       readonly restoreAsShipped: () => void;
-      /** #647's control: the notice moved above Pause / Stop. @see noticeAboveControls */
-      readonly noticeAboveControls: () => void;
-      /** #647's control: the notice moved under Pause / Stop. @see noticeUnderControls */
-      readonly noticeUnderControls: () => void;
+      /** #692's control: the screen as it was laid out before #692. @see asBefore692 */
+      readonly asBefore692: () => void;
     };
   }
 }
@@ -337,6 +380,7 @@ function measure(): RideViewMeasurement {
   const card = document.querySelector('.oyl-metric');
   const title = document.querySelector('main > h1');
   const summary = document.querySelector('main > h1 + p');
+  const metricGrid = document.querySelector('.oyl-ride__group--live .oyl-metric-grid');
   return {
     viewport: { width: window.innerWidth, height: window.innerHeight },
     controls,
@@ -352,7 +396,83 @@ function measure(): RideViewMeasurement {
     cardBackground: card === null ? '' : window.getComputedStyle(card).backgroundColor,
     eased: easedNotice(),
     keepScreenOn: keepScreenOnNotice(),
+    notices: standingNotices(),
+    metrics: metricGrid === null ? undefined : boxOf(metricGrid),
   };
+}
+
+function standingNotices(): RideViewNotice[] {
+  const notices: RideViewNotice[] = [];
+  for (const group of ['live', 'trainer'] as const) {
+    for (const notice of document.querySelectorAll(`.oyl-ride__group--${group} .oyl-status`)) {
+      const box = boxOf(notice);
+      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      notices.push({
+        group,
+        label: textOf(notice.querySelector('.oyl-status__label') ?? notice),
+        box,
+        onTop: hit !== null && (hit === notice || notice.contains(hit)),
+      });
+    }
+  }
+  return notices;
+}
+
+/**
+ * #692's control: the screen as it was laid out before #692, rewritten on the
+ * live elements under the same stylesheet — every part of the change, because
+ * each is what one orientation or one notice needed:
+ *
+ *   - in the Live group, the metric cards back ABOVE the ride controls, *No
+ *     notification* back above *Pause*, and the clock, the storage notice and
+ *     the side camera back in their old order after the controls;
+ *   - on a tablet held upright, ONE column again, the trainer group under the
+ *     live one, which is what the width-only rule gave an 800 px screen; and
+ *   - the metric cards at their old size under a standing notice.
+ *
+ * The spec requires the lowest ride control to fall under the floor with a
+ * standing notice on the page; without that, "every control clears the fold"
+ * is just as true of a page that measured nothing.
+ */
+function asBefore692(): void {
+  const live = document.querySelector('.oyl-ride__group--live');
+  const heading = live?.querySelector('.oyl-ride__heading');
+  const grid = live?.querySelector('.oyl-metric-grid');
+  const actions = live?.querySelector('.oyl-ride__actions');
+  const clock = live?.querySelector('.oyl-ride__clock');
+  if (!live || !heading || !grid || !actions || !clock) {
+    throw new Error('rideview harness: the Live group is not laid out as #692 left it');
+  }
+  heading.after(grid);
+  const statusLabelled = (label: string): Element | undefined =>
+    [...live.querySelectorAll('.oyl-status')].find(
+      (each) => textOf(each.querySelector('.oyl-status__label') ?? each) === label,
+    );
+  const noNotification = statusLabelled('No notification:');
+  if (noNotification !== undefined) {
+    actions.before(noNotification);
+  }
+  // Before #692: the controls, the clock, the storage notice, the side camera.
+  const storage = statusLabelled('Device full:') ?? statusLabelled('Save failed:');
+  const side = live.querySelector('.oyl-ride__side-camera');
+  const last = [...live.querySelectorAll('.oyl-ride__actions')].at(-1) ?? actions;
+  last.after(clock);
+  if (storage !== undefined) {
+    clock.after(storage);
+  }
+  if (side !== null) {
+    (storage ?? clock).after(side);
+  }
+  const style = document.createElement('style');
+  // One column upright, and the metric cards at the size they always had —
+  // the tightening under a standing notice is #692's too.
+  style.textContent = [
+    '@media (max-width: 59.99rem) { .oyl-ride { grid-template-columns: minmax(0, 1fr); } }',
+    '.oyl-ride__group--live > .oyl-metric-grid { gap: var(--oyl-space-md) !important;',
+    '  margin-top: var(--oyl-space-lg) !important; }',
+    '.oyl-ride__group--live .oyl-metric { padding: var(--oyl-space-md) !important; }',
+  ].join('\n');
+  document.head.append(style);
 }
 
 /** #647's notice, found by its label — the words a rider reads first. */
@@ -375,44 +495,6 @@ function keepScreenOnNotice(): RideViewMeasurement['keepScreenOn'] {
     inDisclosure: notice.closest('details') !== null || notice.querySelector('details') !== null,
     onTop: hit !== null && (hit === notice || notice.contains(hit)),
   };
-}
-
-/**
- * #647's first control: the notice where `notificationNotice` sits — ABOVE
- * *Pause* / *Stop* — on the live element. #436's review measured what a line
- * there costs those two on a tablet; this is that cost, for this sentence.
- */
-function noticeAboveControls(): void {
-  const { notice, pause } = keepScreenOnParts();
-  // #669: Pause and Stop are one row (`.oyl-ride__actions`); the notice goes
-  // above the row, where it went above the two buttons before.
-  (pause.closest('.oyl-ride__actions') ?? pause).before(notice);
-}
-
-/**
- * #647's second control — #693's review: the notice as that pull request
- * first shipped it, UNDER *Pause* / *Stop*. Moved out of
- * `.oyl-ride__heading` it is an ordinary status again, padding and all, and
- * its own margin to the fold is the one the review found under 50 px.
- */
-function noticeUnderControls(): void {
-  const { notice, stop } = keepScreenOnParts();
-  (stop.closest('.oyl-ride__actions') ?? stop).after(notice);
-}
-
-function keepScreenOnParts(): {
-  readonly notice: Element;
-  readonly pause: Element;
-  readonly stop: Element;
-} {
-  const notice = keepScreenOnElement();
-  const buttons = [...document.querySelectorAll('.oyl-ride__group--live button')];
-  const pause = buttons.find((each) => textOf(each) === 'Pause');
-  const stop = buttons.find((each) => textOf(each) === 'Stop');
-  if (notice === undefined || pause === undefined || stop === undefined) {
-    throw new Error('rideview harness: there is no keep-the-screen-on notice, Pause and Stop');
-  }
-  return { notice, pause, stop };
 }
 
 /** The Eased notice's surface: the status with its disclosure, as laid out. */
@@ -531,6 +613,7 @@ async function run(): Promise<void> {
           rideController={stubRideController(snapshot()).controller}
           workouts={workoutStub(ATHLETE, [WORKOUT])}
           analysis={stubAnalysis(ATHLETE, [], RIDER)}
+          {...(SIDE_PAIRING === undefined ? {} : { sidePairing: SIDE_PAIRING })}
         />
       </StrictMode>,
     );
@@ -570,6 +653,14 @@ async function run(): Promise<void> {
   if (KEEP_ALIVE_FAILED) {
     await until('the keep-the-screen-on notice', keepScreenOnElement);
   }
+  // #692: each standing notice this page was asked for, before anything is
+  // measured — a margin taken before the side camera's line arrives is a
+  // margin over a screen without it.
+  if (SIDE_PAIRING !== undefined) {
+    await until('the side camera on the Ride screen', () =>
+      document.querySelector('.oyl-ride__group--live .oyl-ride__side-camera'),
+    );
+  }
   await document.fonts.ready;
 
   window.__oylRideView = {
@@ -580,8 +671,7 @@ async function run(): Promise<void> {
     restoreFullHeightShell,
     openEasedDetail,
     restoreAsShipped,
-    noticeAboveControls,
-    noticeUnderControls,
+    asBefore692,
   };
 }
 
@@ -595,7 +685,6 @@ run().catch((error: unknown) => {
     restoreFullHeightShell,
     openEasedDetail,
     restoreAsShipped,
-    noticeAboveControls,
-    noticeUnderControls,
+    asBefore692,
   };
 });
