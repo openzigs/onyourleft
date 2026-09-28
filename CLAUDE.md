@@ -2324,7 +2324,11 @@ that is slow under coverage takes the same shape: measure it in a CI log, write 
 it, never trim what it sweeps. ⚠️ **One in-test timing bound is also near its line and is NOT
 changed here**: `racing-line.test.ts`' 1 000 km solve asserts under 30 s and took 12.2 s to 27.2 s
 on the same runs (36374954481), which is an assertion rather than a timeout and so is its own
-issue, [#734](https://github.com/openzigs/onyourleft/issues/734).
+issue, [#734](https://github.com/openzigs/onyourleft/issues/734). ⚠️ **Since #734 that case asserts no
+seconds at all**, and a reviewer who remembers "under 30 s" is reading the old file: it times a
+1 000 km solve against a 100 km solve of the same road in the same process and holds the RATIO
+under 25 (linear is 10), so the runner and coverage's counters divide out, and the solve itself is
+about a third cheaper under coverage, to the bit (`racing-line.test.ts` §"its cost").
 
 ⚠️ **The browser is pinned by the lockfile, not by the install command.** `@playwright/test`
 **1.63.0** ships Chromium revision **1243**, and `playwright install chromium` fetches whatever the

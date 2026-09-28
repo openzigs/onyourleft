@@ -705,7 +705,7 @@ function solveLine(profile: RouteProfile, steps: number): RacingLine {
   // the last one's only while building its own system, before solving it.
   const work = workspace(size);
   const solved = work.solution;
-  const pinned = new Int8Array(size);
+  const pinned: ActiveSet = { side: new Int8Array(size), at: new Int32Array(size), count: 0 };
   // The curvature of the line at every row, kept from one step to the next: a
   // step's peak is measured from it, and the next step linearises about the
   // same offsets, so it is the curvature that step would otherwise recompute.
@@ -934,8 +934,6 @@ interface Workspace {
   /** The line's curvature and mean chord at each row of {@link solution}. @see measure */
   readonly curvature: Float64Array;
   readonly chord: Float64Array;
-  /** The three slopes of one row's curvature. */
-  readonly slopes: Float64Array;
 }
 
 /** A {@link Workspace} for a system of `size` unknowns, the answer starting at nought. */
@@ -959,7 +957,6 @@ function workspace(size: number): Workspace {
     length: array(),
     curvature: array(),
     chord: array(),
-    slopes: new Float64Array(3),
   };
 }
 
@@ -982,7 +979,7 @@ const SLOPE_STEP_METRES = 1e-4;
  */
 function linearise(road: PaddedRoad, current: Float64Array, peak: number, work: Workspace): void {
   const { index, xs, zs, normals } = road;
-  const { diagonal, first, second, rhs, slopes, x, z, length } = work;
+  const { diagonal, first, second, rhs, x, z, length } = work;
   const size = current.length;
   const h = road.resolution;
   const settle = h / LINE_SETTLE_METRES ** 4;
@@ -1057,32 +1054,38 @@ function linearise(road: PaddedRoad, current: Float64Array, peak: number, work: 
     const b1z = z2 - nz1;
     const b2x = nx2 - x1;
     const b2z = nz2 - z1;
-    slopes[0] =
+    // ⚠️ **Three locals and the three-by-three written out — #734.** This was
+    // a loop over the three members and a nested loop over the band with a
+    // branch per entry, which under coverage is a counter per entry per row per
+    // step. Each diagonal, band and right-hand-side slot below still receives
+    // exactly one term per row, in the same arithmetic, so the order they are
+    // written in changes no bit (`racing-line.test.ts` §"the digests").
+    const j0 =
       (curvatureOfChords(a0x, a0z, bx, bz, Math.hypot(a0x, a0z), bLength) - here) /
       SLOPE_STEP_METRES;
-    slopes[1] =
+    const j1 =
       (curvatureOfChords(a1x, a1z, b1x, b1z, Math.hypot(a1x, a1z), Math.hypot(b1x, b1z)) - here) /
       SLOPE_STEP_METRES;
-    slopes[2] =
+    const j2 =
       (curvatureOfChords(ax, az, b2x, b2z, aLength, Math.hypot(b2x, b2z)) - here) /
       SLOPE_STEP_METRES;
     let target = here / (1 + q);
-    for (let member = 0; member < 3; member += 1) {
-      target -= (slopes[member] as number) * (current[row - 1 + member] as number);
-    }
+    target -= j0 * (current[row - 1] as number);
+    target -= j1 * (current[row] as number);
+    target -= j2 * (current[row + 1] as number);
     // Minimising w·(Σ jᵢ·oᵢ + target)² adds w·j·jᵀ to H and −w·j·target to b.
-    for (let left = 0; left < 3; left += 1) {
-      const padded = row - 1 + left;
-      const jl = slopes[left] as number;
-      rhs[padded] = (rhs[padded] as number) - weight * jl * target;
-      for (let right = left; right < 3; right += 1) {
-        const value = weight * jl * (slopes[right] as number);
-        const band = right - left;
-        if (band === 0) diagonal[padded] = (diagonal[padded] as number) + value;
-        else if (band === 1) first[padded] = (first[padded] as number) + value;
-        else second[padded] = (second[padded] as number) + value;
-      }
-    }
+    const w0 = weight * j0;
+    const w1 = weight * j1;
+    const w2 = weight * j2;
+    rhs[row - 1] = (rhs[row - 1] as number) - w0 * target;
+    diagonal[row - 1] = (diagonal[row - 1] as number) + w0 * j0;
+    first[row - 1] = (first[row - 1] as number) + w0 * j1;
+    second[row - 1] = (second[row - 1] as number) + w0 * j2;
+    rhs[row] = (rhs[row] as number) - w1 * target;
+    diagonal[row] = (diagonal[row] as number) + w1 * j1;
+    first[row] = (first[row] as number) + w1 * j2;
+    rhs[row + 1] = (rhs[row + 1] as number) - w2 * target;
+    diagonal[row + 1] = (diagonal[row + 1] as number) + w2 * j2;
   }
 }
 
@@ -1091,7 +1094,7 @@ function linearise(road: PaddedRoad, current: Float64Array, peak: number, work: 
  * ±{@link LINE_LIMIT_METRES}: an active set of samples pinned at an edge. The
  * answer is written into the workspace's `solution`.
  *
- * `pinned` is 0 for a free sample and ±1 for one held at the edge, and it is
+ * `pinned.side` is 0 for a free sample and ±1 for one held at the edge, and it is
  * CARRIED from one Gauss-Newton step to the next rather than started empty,
  * with at most {@link ACTIVE_SET_ROUNDS_PER_STEP} rounds each: consecutive
  * steps pin nearly the same samples, so the set is refined across the steps
@@ -1101,29 +1104,37 @@ function linearise(road: PaddedRoad, current: Float64Array, peak: number, work: 
  * one step was pushed back out by the next, and a 10 m hairpin's line still
  * moved by 3.4 m between the 30th step and the 31st.
  */
-function solveOnRoad(work: Workspace, pinned: Int8Array): void {
+function solveOnRoad(work: Workspace, pinned: ActiveSet): void {
   const solution = work.solution;
   const size = solution.length;
+  const sides = pinned.side;
   solvePinned(work, pinned);
   for (let round = 1; round < ACTIVE_SET_ROUNDS_PER_STEP; round += 1) {
     let changed = false;
+    let count = 0;
     for (let index = 0; index < size; index += 1) {
       const value = solution[index] as number;
-      const side = pinned[index] as number;
+      const side = sides[index] as number;
       if (side === 0) {
         if (Math.abs(value) > LINE_LIMIT_METRES) {
-          pinned[index] = value > 0 ? 1 : -1;
+          sides[index] = value > 0 ? 1 : -1;
           changed = true;
         }
       } else {
         // Released when the energy would fall by moving it inward.
         const gradient = residualAt(work, solution, index);
         if ((side > 0 && gradient > 0) || (side < 0 && gradient < 0)) {
-          pinned[index] = 0;
+          sides[index] = 0;
           changed = true;
         }
       }
+      // The pinned samples, listed as they are decided, in ascending order.
+      if (sides[index] !== 0) {
+        pinned.at[count] = index;
+        count += 1;
+      }
     }
+    pinned.count = count;
     if (!changed) {
       break;
     }
@@ -1154,28 +1165,34 @@ function residualAt(system: Workspace, o: Float64Array, index: number): number {
  * is factorised is still symmetric and still five-diagonal. Works on the
  * workspace's `pinned*` copies, so the system itself is left as it was built.
  */
-function solvePinned(work: Workspace, pinned: Int8Array): void {
+function solvePinned(work: Workspace, pinned: ActiveSet): void {
   const {
     pinnedDiagonal: diagonal,
     pinnedFirst: first,
     pinnedSecond: second,
     pinnedRhs: rhs,
   } = work;
-  const size = diagonal.length;
   diagonal.set(work.diagonal);
   first.set(work.first);
   second.set(work.second);
   rhs.set(work.rhs);
-  for (let index = 0; index < size; index += 1) {
-    const side = pinned[index] as number;
-    if (side === 0) continue;
+  // ⚠️ **The pinned samples are LISTED, in ascending order — #734.** This
+  // loop used to visit every sample and skip the free ones: three times a
+  // step, over the route's length, for a set that is a small fraction of it,
+  // and under coverage that skip was the costliest line of the solve. The list
+  // is visited in the same order the scan visited them, so every right-hand
+  // side receives its terms in the same order and no bit moves.
+  const sides = pinned.side;
+  for (let listed = 0; listed < pinned.count; listed += 1) {
+    const index = pinned.at[listed] as number;
+    const side = sides[index] as number;
     const value = side * LINE_LIMIT_METRES;
     // Move this column to the right-hand side of every free row it touches —
     // the two before it and the two after, in that order.
-    unpin(rhs, pinned, index - 2, index >= 2 ? work.second[index - 2] : undefined, value);
-    unpin(rhs, pinned, index - 1, index >= 1 ? work.first[index - 1] : undefined, value);
-    unpin(rhs, pinned, index + 1, work.first[index], value);
-    unpin(rhs, pinned, index + 2, work.second[index], value);
+    unpin(rhs, sides, index - 2, index >= 2 ? work.second[index - 2] : undefined, value);
+    unpin(rhs, sides, index - 1, index >= 1 ? work.first[index - 1] : undefined, value);
+    unpin(rhs, sides, index + 1, work.first[index], value);
+    unpin(rhs, sides, index + 2, work.second[index], value);
     diagonal[index] = 1;
     rhs[index] = value;
     if (index >= 1) first[index - 1] = 0;
@@ -1184,6 +1201,17 @@ function solvePinned(work: Workspace, pinned: Int8Array): void {
     second[index] = 0;
   }
   bandedSolve(diagonal, first, second, rhs, work);
+}
+
+/**
+ * The active set: each sample's side (0 free, ±1 held at that edge), and the
+ * held samples listed in ascending order, which is how {@link solvePinned}
+ * visits them. Both are carried from one Gauss-Newton step to the next.
+ */
+interface ActiveSet {
+  readonly side: Int8Array;
+  readonly at: Int32Array;
+  count: number;
 }
 
 /** Moves a pinned column's `coefficient · value` onto a free row's right-hand side. */
@@ -1212,34 +1240,50 @@ function bandedSolve(
 ): void {
   const size = diagonal.length;
   const { d, l1, l2, solution: x } = work;
-  for (let i = 0; i < size; i += 1) {
-    const b2 = i >= 2 ? (second[i - 2] as number) / (d[i - 2] as number) : 0;
+  // ⚠️ **The first two rows and the last two are peeled out of each loop —
+  // #734.** They are the only rows with a neighbour missing, and testing for
+  // one on every row put a branch in each of the four hottest loops of the
+  // solve: 80 steps and up to three solves a step, over the route's length.
+  // Under coverage every such branch is a counter, and that is where a
+  // 1 000 km solve spent most of its 27 s on CI. What a peeled row computes
+  // is what the old loop computed for it with the missing terms as nought,
+  // and subtracting nought changes no bit, so the line is the same to the bit
+  // — `racing-line.test.ts` §"the digests" holds it to that.
+  // A solve is only asked of five samples or more (`solveLine`).
+  l2[0] = 0;
+  l1[0] = 0;
+  d[0] = diagonal[0] as number;
+  const b1First = (first[0] as number) / d[0];
+  l2[1] = 0;
+  l1[1] = b1First;
+  d[1] = (diagonal[1] as number) - b1First * b1First * d[0];
+  for (let i = 2; i < size; i += 1) {
+    const b2 = (second[i - 2] as number) / (d[i - 2] as number);
     const b1 =
-      i >= 1
-        ? ((first[i - 1] as number) -
-            (i >= 2 ? b2 * (d[i - 2] as number) * (l1[i - 1] as number) : 0)) /
-          (d[i - 1] as number)
-        : 0;
+      ((first[i - 1] as number) - b2 * (d[i - 2] as number) * (l1[i - 1] as number)) /
+      (d[i - 1] as number);
     l2[i] = b2;
     l1[i] = b1;
     d[i] =
-      (diagonal[i] as number) -
-      (i >= 2 ? b2 * b2 * (d[i - 2] as number) : 0) -
-      (i >= 1 ? b1 * b1 * (d[i - 1] as number) : 0);
+      (diagonal[i] as number) - b2 * b2 * (d[i - 2] as number) - b1 * b1 * (d[i - 1] as number);
   }
-  for (let i = 0; i < size; i += 1) {
+  x[0] = rhs[0] as number;
+  x[1] = (rhs[1] as number) - l1[1] * x[0];
+  for (let i = 2; i < size; i += 1) {
     x[i] =
       (rhs[i] as number) -
-      (i >= 1 ? (l1[i] as number) * (x[i - 1] as number) : 0) -
-      (i >= 2 ? (l2[i] as number) * (x[i - 2] as number) : 0);
+      (l1[i] as number) * (x[i - 1] as number) -
+      (l2[i] as number) * (x[i - 2] as number);
   }
   for (let i = 0; i < size; i += 1) {
     x[i] = (x[i] as number) / (d[i] as number);
   }
-  for (let i = size - 1; i >= 0; i -= 1) {
+  const last = size - 1;
+  x[last - 1] = (x[last - 1] as number) - (l1[last] as number) * (x[last] as number);
+  for (let i = last - 2; i >= 0; i -= 1) {
     x[i] =
       (x[i] as number) -
-      (i + 1 < size ? (l1[i + 1] as number) * (x[i + 1] as number) : 0) -
-      (i + 2 < size ? (l2[i + 2] as number) * (x[i + 2] as number) : 0);
+      (l1[i + 1] as number) * (x[i + 1] as number) -
+      (l2[i + 2] as number) * (x[i + 2] as number);
   }
 }
