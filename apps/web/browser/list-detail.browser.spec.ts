@@ -524,22 +524,125 @@ async function pageState(page: Page): Promise<PageState> {
 /** Longer than Chromium keeps a wheel gesture latched to the scroller it began on. */
 const WHEEL_LATCH_MS = 800;
 
-/** Wheel over a pane's middle, then wait for the scroll to come to rest. */
-async function wheelOver(page: Page, name: 'list' | 'detail', deltaY: number): Promise<void> {
+/**
+ * How long a wheel may take to reach the page, or to start the scroll it was
+ * expected to start, before the case gives up waiting and lets its assertions
+ * say what did not happen. A BOUND, never a sleep: every wait below returns the
+ * moment its evidence arrives.
+ */
+const INPUT_LANDS_WITHIN_MS = 5_000;
+
+/**
+ * ⚠️ #731's review: after a synthetic wheel, `settleScroll` alone could return
+ * BEFORE the scroll had started — two samples 60 ms apart agree just as well
+ * when nothing has happened yet, and under load Chromium took longer than that
+ * to begin. A positive case then read "the detail did not scroll" (3 in 64 under
+ * a ten-worker stress run), and a negative one — "the wheel over a list at its
+ * end did not move the page", which is #723's `overscroll-behavior` check —
+ * could pass having measured nothing at all. So every wheel is followed by
+ * EVIDENCE that it landed before anything settles:
+ *
+ * - the page's own `wheel` event, counted by a passive listener, which says the
+ *   input reached the renderer — the only evidence a gesture expected to move
+ *   nothing can give; and
+ * - where something IS expected to move, that movement itself: `moved` is
+ *   polled until it holds, so settling starts from a scroll in progress rather
+ *   than from before one.
+ *
+ * `page.evaluate` of a SYNCHRONOUS function throughout, never a
+ * `waitForFunction` with an async predicate, which resolves on its first poll
+ * (§4f).
+ */
+async function wheelOver(
+  page: Page,
+  name: 'list' | 'detail',
+  deltaY: number,
+  moved?: (before: PageState, now: PageState) => boolean,
+): Promise<void> {
   const box = await page.locator(`[data-oyl-pane="${name}"]`).boundingBox();
   if (box === null) throw new Error(`the ${name} pane has no box to wheel over`);
-  await page.mouse.move(box.x + box.width / 2, box.y + Math.min(box.height / 2, 200));
+  // Aim at the part of the pane that is ON SCREEN. Under the control the page
+  // scrolls, and a point taken from the pane's box alone was above the viewport
+  // once the page had scrolled to its end: that wheel reached nothing, which
+  // nothing noticed until the wheel's arrival was waited for.
+  const viewport = page.viewportSize();
+  const top = Math.max(box.y, 0);
+  const bottom = Math.min(box.y + box.height, viewport?.height ?? box.y + box.height);
+  if (bottom - top < 20) {
+    throw new Error(`no part of the ${name} pane is on screen to wheel over`);
+  }
+  await page.mouse.move(box.x + box.width / 2, top + Math.min((bottom - top) / 2, 200));
+  await page.evaluate(() => {
+    const counted = window as unknown as { __oylWheels?: number };
+    if (counted.__oylWheels === undefined) {
+      window.addEventListener(
+        'wheel',
+        () => {
+          counted.__oylWheels = (counted.__oylWheels ?? 0) + 1;
+        },
+        { passive: true, capture: true },
+      );
+    }
+    counted.__oylWheels = 0;
+  });
+  const before = await pageState(page);
   await page.mouse.wheel(0, deltaY);
+  await expect
+    .poll(
+      () => page.evaluate(() => (window as unknown as { __oylWheels?: number }).__oylWheels ?? 0),
+      {
+        message: `the wheel over the ${name} pane never reached the page`,
+        timeout: INPUT_LANDS_WITHIN_MS,
+      },
+    )
+    .toBeGreaterThan(0);
+  if (moved !== undefined) {
+    const deadline = Date.now() + INPUT_LANDS_WITHIN_MS;
+    while (!moved(before, await pageState(page)) && Date.now() < deadline) {
+      await page.waitForTimeout(30);
+    }
+  }
   await settleScroll(page);
 }
 
-/** Until neither the page nor either pane has moved for a few frames. */
+/** Anything the wheel could have scrolled: the page, or either pane. */
+function anythingScrolled(before: PageState, now: PageState): boolean {
+  return (
+    now.scrollY !== before.scrollY ||
+    now.list?.scrollTop !== before.list?.scrollTop ||
+    now.detail?.scrollTop !== before.detail?.scrollTop
+  );
+}
+
+/** Two animation frames: whatever the compositor was going to draw next is drawn. */
+async function nextFrames(page: Page): Promise<void> {
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            resolve();
+          });
+        });
+      }),
+  );
+}
+
+/**
+ * Until neither the page nor either pane has moved across three samples, each
+ * two FRAMES and 60 ms apart — frames rather than time alone, so a loaded
+ * machine that draws slowly is waited for rather than out-waited. Settles a
+ * movement already evidenced; it is not, on its own, evidence one happened.
+ */
 async function settleScroll(page: Page): Promise<void> {
   let last = '';
-  for (let attempt = 0; attempt < 40; attempt += 1) {
+  let same = 0;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
     const now = JSON.stringify(await pageState(page));
-    if (now === last) return;
+    same = now === last ? same + 1 : 0;
+    if (same >= 2) return;
     last = now;
+    await nextFrames(page);
     await page.waitForTimeout(60);
   }
 }
@@ -589,6 +692,16 @@ function paneBoundsFaults(
           `${name === 'list' ? 'left' : 'right'} edge`,
       );
     }
+    // ⚠️ Held to the fold, NOT to §4f's 50 px floor, and on the tablet it
+    // publishes about +9 px. That is not a missed floor. The floor is for a
+    // CONTROL whose place depends on fonts, which moved by 49 px between a Mac
+    // and the CI runner. A pane's bottom is set by `.oyl-main`'s padding and the
+    // shell's `min-height`, which is built from `env(safe-area-inset-bottom)`
+    // and does not depend on fonts. What lies between the pane's content and
+    // the fold is the pane's own 8 px ring padding and `main`'s bottom padding,
+    // and nothing in it can be tapped. A control at a pane's end scrolls up to
+    // that edge and no further, so it stays clear of the gesture bar for as
+    // long as `env()` reports the real inset. (#731's review.)
     if (box.bottom > floor) {
       faults.push(
         `${where}: the ${name} pane ends at ${box.bottom.toFixed(0)}, past the bottom inset ` +
@@ -676,7 +789,7 @@ async function independentScrollFaults(
   const faults: string[] = [];
 
   // 1. The wheel over the list scrolls the list, and nothing else.
-  await wheelOver(page, 'list', 100_000);
+  await wheelOver(page, 'list', 100_000, anythingScrolled);
   const wheeled = await pageState(page);
   if (wheeled.scrollY !== before.scrollY) {
     faults.push(
@@ -790,6 +903,41 @@ async function independentScrollFaults(
   return faults;
 }
 
+/** The document scrolled as far as it goes, and at rest. */
+async function scrollPageToEnd(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    window.scrollTo(0, document.documentElement.scrollHeight);
+  });
+  await settleScroll(page);
+}
+
+/** Where `main`'s h1 is, against the header (or the inset band) and the fold. */
+async function h1Landing(page: Page): Promise<{
+  top: number;
+  bottom: number;
+  ceiling: number;
+  floor: number;
+  scrollY: number;
+}> {
+  const read = await page.evaluate(() => {
+    const h1 = document.querySelector('main h1')?.getBoundingClientRect();
+    return {
+      top: h1?.top ?? Number.NaN,
+      bottom: h1?.bottom ?? Number.NaN,
+      header: document.querySelector('.oyl-header')?.getBoundingClientRect().bottom ?? 0,
+      innerHeight: window.innerHeight,
+      scrollY: window.scrollY,
+    };
+  });
+  return {
+    top: read.top,
+    bottom: read.bottom,
+    ceiling: Math.max(read.header, TABLET_IN_THE_SHELL.insets.top),
+    floor: read.innerHeight - TABLET_IN_THE_SHELL.insets.bottom,
+    scrollY: read.scrollY,
+  };
+}
+
 test.describe('#723 — two panes scroll on their own', () => {
   for (const viewport of TWO_PANES) {
     test(`each pane lies between the header and the bottom inset at ${viewport.name}`, async ({
@@ -882,7 +1030,12 @@ test.describe('#723 — two panes scroll on their own', () => {
           continue;
         }
         measured += 1;
-        await wheelOver(page, 'detail', 100_000);
+        await wheelOver(
+          page,
+          'detail',
+          100_000,
+          (from, now) => now.detail?.scrollTop !== from.detail?.scrollTop,
+        );
         const after = await pageState(page);
         lines.push(
           `${hash}: detail ${String(before.detail.scrollTop)} → ` +
@@ -909,29 +1062,64 @@ test.describe('#723 — two panes scroll on their own', () => {
     const lines: string[] = [];
     for (const route of LIST_DETAIL) {
       await visit(page, route, hrefForSelection(route, await selectionOf(page, route)));
+      // From the page's furthest scroll, so the skip link has the 52 px of
+      // footer line to undo rather than landing where the page already was.
+      await scrollPageToEnd(page);
       await page.locator('.oyl-skip-link').focus();
       await page.keyboard.press('Enter');
       await expect(page.locator('main')).toBeFocused();
       await settleScroll(page);
-      const landed = await page.evaluate(() => {
-        const h1 = document.querySelector('main h1')?.getBoundingClientRect();
-        return {
-          top: h1?.top ?? Number.NaN,
-          bottom: h1?.bottom ?? Number.NaN,
-          header: document.querySelector('.oyl-header')?.getBoundingClientRect().bottom ?? 0,
-          innerHeight: window.innerHeight,
-        };
-      });
-      const ceiling = Math.max(landed.header, TABLET_IN_THE_SHELL.insets.top);
+      const landed = await h1Landing(page);
       lines.push(
         `${route.id}: h1 ${landed.top.toFixed(0)}–${landed.bottom.toFixed(0)}, ` +
-          `clear of the header by ${(landed.top - ceiling).toFixed(0)} px`,
+          `clear of the header by ${(landed.top - landed.ceiling).toFixed(0)} px`,
       );
-      expect(landed.top, `${route.id}: the h1 is under the header`).toBeGreaterThanOrEqual(ceiling);
+      expect(landed.top, `${route.id}: the h1 is under the header`).toBeGreaterThanOrEqual(
+        landed.ceiling,
+      );
       expect(landed.bottom, `${route.id}: the h1 is below the fold`).toBeLessThanOrEqual(
-        landed.innerHeight - TABLET_IN_THE_SHELL.insets.bottom,
+        landed.floor,
       );
     }
     console.log(`[#723] skip link @ ${TABLET_IN_THE_SHELL.name}\n  ${lines.join('\n  ')}`);
+  });
+
+  /*
+   * The skip-link case's control (#731's review). On #723's layout the page
+   * scrolls by one footer line, so "the h1 is in view" would be true of almost
+   * anything. Under the pre-#723 layout, where the page scrolls the whole list,
+   * the SAME measurement taken from the page's end must find the h1 out of view
+   * — which shows the assertions above can go red — and the skip link must
+   * then still bring it back.
+   */
+  test('the control — from the end of a page that scrolls, the h1 is out of view until the skip link', async ({
+    page,
+  }) => {
+    await open(page, TABLET_IN_THE_SHELL, 'data=populated&panes=page');
+    let measured = 0;
+    for (const route of LIST_DETAIL) {
+      await visit(page, route, hrefForSelection(route, await selectionOf(page, route)));
+      await scrollPageToEnd(page);
+      const before = await h1Landing(page);
+      if (before.scrollY < 200) continue;
+      measured += 1;
+      expect(
+        before.top < before.ceiling || before.bottom > before.floor,
+        `${route.id}: scrolled ${String(before.scrollY)} px, the h1 at ` +
+          `${before.top.toFixed(0)}–${before.bottom.toFixed(0)} still read as in view`,
+      ).toBe(true);
+      await page.locator('.oyl-skip-link').focus();
+      await page.keyboard.press('Enter');
+      await expect(page.locator('main')).toBeFocused();
+      await settleScroll(page);
+      const landed = await h1Landing(page);
+      expect(landed.top, `${route.id}: the h1 is under the header`).toBeGreaterThanOrEqual(
+        landed.ceiling,
+      );
+    }
+    expect(
+      measured,
+      'no page under the control scrolled far enough to hide its h1',
+    ).toBeGreaterThan(0);
   });
 });
