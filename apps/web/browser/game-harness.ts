@@ -68,6 +68,7 @@ import {
   routeProfile,
   type RoutePoint,
 } from '@onyourleft/domain';
+import type { KitColour } from '@onyourleft/store';
 
 import {
   CAMERA_ABOVE_METRES,
@@ -4178,6 +4179,14 @@ export interface KitMeasurement {
    * turn — #368's measure, on a textured body.
    */
   readonly backs: Readonly<Record<'rider' | 'bot' | 'ghost', readonly number[]>>;
+  /**
+   * #623's second half: the rider's back in a CHOSEN kit colour
+   * ({@link KIT_PROBE_CHOICE}), and — the control — the same frame after the
+   * view is told the house kit again. The mean sRGB of the same square, as
+   * {@link backs}. A renderer that ignored the choice reads the two alike.
+   */
+  readonly chosen: { readonly colour: KitColour; readonly back: readonly number[] };
+  readonly house: readonly number[];
 }
 
 const NO_KIT: KitMeasurement = {
@@ -4187,7 +4196,17 @@ const NO_KIT: KitMeasurement = {
   emptyMean: 0,
   mean: 0,
   backs: { rider: [], bot: [], ghost: [] },
+  chosen: { colour: 'house', back: [] },
+  house: [],
 };
+
+/**
+ * The non-default palette entry the rider's back is read in — #623. Magenta,
+ * because its hue is the furthest of the palette's from the house teal's, so a
+ * renderer that drew the house kit instead reads green over red where magenta
+ * reads red over green: the two cannot be mistaken for each other.
+ */
+const KIT_PROBE_CHOICE: KitColour = 'magenta';
 
 /**
  * Where the rider's back is read — #623: the camera brought to KIT_PROBE_EYE
@@ -4305,13 +4324,26 @@ function kitProbe(
   const emptied = lumas(read({ ...frame, markers: [] }));
   const backOf = (kind: 'rider' | 'bot' | 'ghost'): number[] =>
     rgbOf(read({ ...frame, markers: [{ ...marker, kind }] }));
+  const backs = { rider: backOf('rider'), bot: backOf('bot'), ghost: backOf('ghost') };
+  // #623: the same frame in the chosen colour, then — the control — told the
+  // house kit again, through the product's own `setRiderKit`.
+  let chosen: number[];
+  try {
+    view.setRiderKit(KIT_PROBE_CHOICE);
+    chosen = rgbOf(read(frame));
+  } finally {
+    view.setRiderKit('house');
+  }
+  const house = rgbOf(read(frame));
   return {
     pixels: product.length,
     variance: varianceOf(product),
     controlVariance: varianceOf(control),
     emptyMean: meanOf(emptied),
     mean: meanOf(product),
-    backs: { rider: backOf('rider'), bot: backOf('bot'), ghost: backOf('ghost') },
+    backs,
+    chosen: { colour: KIT_PROBE_CHOICE, back: chosen },
+    house,
   };
 }
 

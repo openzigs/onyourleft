@@ -90,6 +90,7 @@ const RENDERER: GameRenderer = {
       setQuality: (next) => {
         told.push(next);
       },
+      setRiderKit: () => undefined,
       resize: () => undefined,
       destroy: () => undefined,
     };

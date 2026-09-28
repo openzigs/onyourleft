@@ -404,6 +404,7 @@ describe('the game’s HUD — #647', () => {
       prepare: () => Promise.resolve(),
       render: () => undefined,
       setQuality: () => undefined,
+      setRiderKit: () => undefined,
       resize: () => undefined,
       destroy: () => undefined,
     }),

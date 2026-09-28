@@ -38,7 +38,7 @@
 
 import { useEffect, useRef, useState, type JSX, type MouseEvent } from 'react';
 
-import { DEFAULT_UNIT_SYSTEM, type UnitSystem } from '@onyourleft/store';
+import { DEFAULT_UNIT_SYSTEM, type KitColour, type UnitSystem } from '@onyourleft/store';
 import type { Kilograms } from '@onyourleft/domain';
 
 import { GameView } from '../game/GameView';
@@ -64,6 +64,7 @@ import { RideSession } from '../ride/RideSession';
 import { SettingsView } from '../views/SettingsView';
 import { UnitsProvider } from '../units/context';
 import type { UnitsPort } from '../units/store-port';
+import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
 import type { AthleteMassPort } from '../athlete/store-port';
 import type { RideController } from '../ride/controller';
 import type { CapabilityProbe } from '../support/bluetooth-support';
@@ -342,6 +343,26 @@ export interface AppShellProps {
    */
   readonly riderMass?: Kilograms | undefined;
   /**
+   * The settings screen's write of the rider's kit colour (#623).
+   *
+   * A port of its own for the reason `athlete/kit-colour-port.ts` gives, and
+   * optional like every other port here. ⚠️ Unlike the two above, the screen
+   * offers the choice WITHOUT a port too — for this visit only, and it says so
+   * (`views/SettingsView.tsx` §`KIT_NOT_KEPT`) — because a kit colour, like
+   * the announcement choice, is still worth something that lasts until the
+   * page closes, and a choice that changes only a colour loses nothing by not
+   * being kept.
+   */
+  readonly athleteKit?: AthleteKitColourPort | undefined;
+  /**
+   * The rider's kit colour, read from the athlete row at start-up (#623).
+   *
+   * ⚠️ **The initial value only**, exactly like {@link riderMass}, and passed
+   * on undefaulted: `game/bicycle.ts` §`riderKitFor` is the one place a
+   * missing or unrecognised one becomes the house kit.
+   */
+  readonly kitColour?: KitColour | undefined;
+  /**
    * Which units this client starts in, read from the athlete row at start-up.
    *
    * ⚠️ **The initial value only.** The shell owns the live value from here on,
@@ -374,6 +395,10 @@ function viewFor(
   riderMass: Kilograms | undefined,
   onMassChange: (mass: Kilograms | undefined) => void,
   onImmersive: (immersive: boolean) => void,
+  kit: {
+    readonly colour: KitColour | undefined;
+    readonly onChange: (colour: KitColour | undefined) => void;
+  },
 ): JSX.Element {
   switch (match.route.id) {
     case 'home':
@@ -429,6 +454,8 @@ function viewFor(
           // reload. `GameViewProps.riderMass` says why this is threaded rather
           // than read from the store.
           riderMass={riderMass}
+          // #623: the live value, for `riderMass`' reason above.
+          kitColour={kit.colour}
           // #423. A ride takes the screen over; this is how the shell hears.
           onImmersive={onImmersive}
           // #382. The quality ladder's fifth figure reaches the camera through
@@ -495,6 +522,9 @@ function viewFor(
           // row says, and `athlete/mass.ts` is the one place in this client that
           // answers what to ride instead.
           onMassReset={onMassChange}
+          // #623, the same argument again: the recreated row carries no kit
+          // colour, and `undefined` is what the game should then be told.
+          onKitColourReset={kit.onChange}
         />
       );
     case 'settings':
@@ -506,6 +536,9 @@ function viewFor(
           mass={props.athleteMass}
           riderMass={riderMass}
           onRiderMassChange={onMassChange}
+          {...(props.athleteKit === undefined ? {} : { kit: props.athleteKit })}
+          kitColour={kit.colour}
+          onKitColourChange={kit.onChange}
           {...(props.storage === undefined ? {} : { storage: props.storage })}
           basemap={props.basemap}
         />
@@ -533,6 +566,8 @@ export function AppShell(props: AppShellProps): JSX.Element {
   // default belongs to `athlete/mass.ts`, so what the shell holds is the honest
   // `undefined`. See `AppShellProps.riderMass`.
   const [riderMass, setRiderMass] = useState<Kilograms | undefined>(props.riderMass);
+  // #623. Seeded from the prop and then owned here, undefaulted, like the mass.
+  const [kitColour, setKitColour] = useState<KitColour | undefined>(props.kitColour);
   /**
    * Whether a ride has the screen — #423.
    *
@@ -666,7 +701,10 @@ export function AppShell(props: AppShellProps): JSX.Element {
             {route.title}
           </h1>
           {immersive ? null : <p className="oyl-muted">{route.summary}</p>}
-          {viewFor(match, props, units, setUnits, riderMass, setRiderMass, setImmersive)}
+          {viewFor(match, props, units, setUnits, riderMass, setRiderMass, setImmersive, {
+            colour: kitColour,
+            onChange: setKitColour,
+          })}
         </main>
 
         {immersive ? null : (

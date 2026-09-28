@@ -2484,6 +2484,20 @@ const KIT_DARKEST = 40;
 const KIT_TINTS_APART = 25;
 
 /**
+ * #623's second half: the rider's back in the CHOSEN kit colour (magenta,
+ * `game-harness.ts` §`KIT_PROBE_CHOICE`), 8-bit sRGB means of `kitProbe`'s
+ * square, in bytes, bounded both ways. Measured on 2026-09-28 in this
+ * Chromium: 167.9, 97.8, 119.9 — red over green by 70.0 and blue over green
+ * by 22.1 (the white mark and the skin in the square pull both in). The same
+ * frame in the house kit read 83.6, 120.3, 117.6: red UNDER green by 36.7, so
+ * a renderer that ignored the choice fails the first floor by over 70 bytes.
+ */
+const CHOSEN_BACK_RED_OVER_GREEN = { floor: 35, ceiling: 120 } as const;
+const CHOSEN_BACK_BLUE_OVER_GREEN = { floor: 10, ceiling: 60 } as const;
+/** The control's own ceiling: the house teal's green over its red (36.7 measured). */
+const HOUSE_BACK_GREEN_OVER_RED_CEILING = 80;
+
+/**
  * #368's hues, which #742's review found a multiplier over the teal house kit
  * had taken away with every assertion green — the stylised silhouettes' own
  * ratios, bounded both ways. @see the case "draws each of the three in its own
@@ -3438,6 +3452,44 @@ test.describe('the realistic world — ADR 0026', () => {
     const [, ghostGreen, ghostBlue] = kit.backs.ghost as [number, number, number];
     expect(ghostBlue - ghostGreen).toBeGreaterThan(BACK_GHOST_BLUE_OVER_GREEN.floor);
     expect(ghostBlue - ghostGreen).toBeLessThan(BACK_GHOST_BLUE_OVER_GREEN.ceiling);
+  });
+
+  test('dresses the rider’s back in the kit colour the rider chose, and in the house kit when told the house kit — #623', async ({
+    harnessRun,
+  }) => {
+    // The same square as the case above, the same frame, drawn after the view
+    // was told a non-default palette entry through the product's own
+    // `setRiderKit` — and then, the control, told the house kit again. A
+    // renderer that ignored the choice reads both as the house teal, and the
+    // chosen magenta's red over its green is then negative. @see kitProbe
+    const { kit } = await realistic(harnessRun);
+    const [red, green, blue] = kit.chosen.back as [number, number, number];
+    const [houseRed, houseGreen, houseBlue] = kit.house as [number, number, number];
+    console.log(
+      `#623: the rider's back in ${kit.chosen.colour} ${JSON.stringify(kit.chosen.back)}, ` +
+        `and told the house kit again ${JSON.stringify(kit.house)} ` +
+        `(the product's house back ${JSON.stringify(kit.backs.rider)})`,
+    );
+    expect(kit.chosen.colour).toBe('magenta');
+    // Magenta: red over green AND blue over green, each bounded both ways.
+    expect(red - green).toBeGreaterThan(CHOSEN_BACK_RED_OVER_GREEN.floor);
+    expect(red - green).toBeLessThan(CHOSEN_BACK_RED_OVER_GREEN.ceiling);
+    expect(blue - green).toBeGreaterThan(CHOSEN_BACK_BLUE_OVER_GREEN.floor);
+    expect(blue - green).toBeLessThan(CHOSEN_BACK_BLUE_OVER_GREEN.ceiling);
+    expect(red).toBeGreaterThan(blue);
+    // THE CONTROL: told the house kit, the same frame reads the house teal —
+    // green over red within the house kit's own band — and matches the
+    // product's own house back to within a byte or two.
+    expect(houseGreen - houseRed).toBeGreaterThan(KIT_HUE_MARGIN);
+    expect(houseBlue - houseRed).toBeGreaterThan(KIT_HUE_MARGIN);
+    expect(houseGreen - houseRed).toBeLessThan(HOUSE_BACK_GREEN_OVER_RED_CEILING);
+    for (const channel of [0, 1, 2]) {
+      expect(Math.abs((kit.house[channel] ?? 0) - (kit.backs.rider[channel] ?? 255))).toBeLessThan(
+        3,
+      );
+    }
+    // And the two are not one colour.
+    expect(Math.abs(red - houseRed)).toBeGreaterThan(KIT_TINTS_APART);
   });
 
   test('turns the realistic rider’s legs with the cranks, and holds them when the cadence goes — #369, #349', async ({

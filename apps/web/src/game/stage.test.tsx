@@ -73,6 +73,7 @@ function sizingRenderer(sizes: [number, number][]): GameRenderer {
       prepare: () => Promise.resolve(),
       render: () => undefined,
       setQuality: () => undefined,
+      setRiderKit: () => undefined,
       resize: (width: number, height: number) => {
         sizes.push([width, height]);
       },

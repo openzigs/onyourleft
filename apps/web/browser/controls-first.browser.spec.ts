@@ -198,7 +198,7 @@ const CONSENT_BEFORE_CONTROL: readonly RouteId[] = ['side-camera'];
  * is pinned deliberately.
  */
 const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
-  settings: ['Units', 'Your weight', 'Announcements', 'Sounds', 'Game world'],
+  settings: ['Units', 'Your weight', 'Your kit', 'Announcements', 'Sounds', 'Game world'],
   segments: ['Make a segment', 'Find your efforts'],
   transfer: ['Import'],
 };

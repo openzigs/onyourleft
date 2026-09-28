@@ -120,6 +120,7 @@ function capturingRenderer(frames: SceneFrame[]): GameRenderer {
         frames.push(frame);
       },
       setQuality: () => undefined,
+      setRiderKit: () => undefined,
       resize: () => undefined,
       destroy: () => undefined,
     }),

@@ -88,6 +88,7 @@ const RENDERER: GameRenderer = {
     prepare: () => Promise.resolve(),
     render: () => undefined,
     setQuality: () => undefined,
+    setRiderKit: () => undefined,
     resize: () => undefined,
     destroy: () => undefined,
   }),

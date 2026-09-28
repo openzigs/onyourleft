@@ -56,6 +56,7 @@ import {
   type Kilograms,
   type RoutePoint,
 } from '@onyourleft/domain';
+import type { KitColour } from '@onyourleft/store';
 
 import { DEFAULT_RIDER_MASS_KILOGRAMS } from '../athlete/mass';
 
@@ -152,11 +153,20 @@ function capturingRenderer(frames: SceneFrame[]): GameRenderer {
       setQuality: (settings: QualitySettings) => {
         rungs.push(settings);
       },
+      setRiderKit: (chosen: KitColour | undefined) => {
+        kitsHanded.push({ chosen, framesBefore: frames.length });
+      },
       resize: () => undefined,
       destroy: () => undefined,
     }),
   };
 }
+
+/**
+ * Every kit colour a view was told this test, and how many frames it had
+ * drawn by then — #623. @see capturingRenderer
+ */
+let kitsHanded: { readonly chosen: KitColour | undefined; readonly framesBefore: number }[] = [];
 
 let pending: FrameRequestCallback[] = [];
 let nowMs = 0;
@@ -171,6 +181,7 @@ let rungs: QualitySettings[] = [];
 let sensorReads = 0;
 
 beforeEach(() => {
+  kitsHanded = [];
   pending = [];
   rungs = [];
   sensorReads = 0;
@@ -843,7 +854,10 @@ const NO_RENDERER: GameRenderer = {
  * Deleting `riderMass={…}` from the simulation's `conditions` turns this red and
  * leaves the rest of this file green.
  */
-async function rideAtMass(riderMass: Kilograms | undefined): Promise<SceneFrame[]> {
+async function rideAtMass(
+  riderMass: Kilograms | undefined,
+  kitColour?: KitColour,
+): Promise<SceneFrame[]> {
   // ⚠️ Both runs start from the same clock and an empty frame queue. `nowMs`
   // and `pending` are module state reset per *test*, and this helper is called
   // twice inside one — without this the second ride starts wherever the first
@@ -857,6 +871,7 @@ async function rideAtMass(riderMass: Kilograms | undefined): Promise<SceneFrame[
       renderer={() => Promise.resolve(capturingRenderer(frames))}
       now={() => nowMs}
       {...(riderMass === undefined ? {} : { riderMass })}
+      {...(kitColour === undefined ? {} : { kitColour })}
     />,
   );
   await settle();
@@ -910,6 +925,31 @@ describe('the ride is at the athlete’s own weight (#325)', () => {
     const stated = await rideAtMass(kilograms(DEFAULT_RIDER_MASS_KILOGRAMS));
 
     expect(finishedAt(assumed)).toBe(finishedAt(stated));
+  });
+});
+
+/**
+ * The rider's kit colour reaches the renderer (#623) — the wiring, driven from
+ * the prop through a real ride, read off what the view was handed. Deleting
+ * `view.setRiderKit(…)` from `GameView.tsx` turns both red.
+ */
+describe('the ride is in the athlete’s own kit colour (#623)', () => {
+  it('dresses the view in the chosen colour before it draws the first frame', async () => {
+    const frames = await rideAtMass(undefined, 'magenta');
+
+    expect(frames.length).toBeGreaterThan(10);
+    expect(kitsHanded.length).toBeGreaterThan(0);
+    expect(kitsHanded.every((handed) => handed.chosen === 'magenta')).toBe(true);
+    expect(kitsHanded[0]?.framesBefore).toBe(0);
+  });
+
+  it('hands a rider who never chose nothing at all, which the renderer draws as the house kit', async () => {
+    // `undefined`, not a default the component invented: `bicycle.ts`
+    // §`riderKitFor` is the one place it becomes the house kit.
+    await rideAtMass(undefined);
+
+    expect(kitsHanded.length).toBeGreaterThan(0);
+    expect(kitsHanded.every((handed) => handed.chosen === undefined)).toBe(true);
   });
 });
 

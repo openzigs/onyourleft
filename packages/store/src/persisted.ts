@@ -70,6 +70,7 @@ import type {
   WorkoutRecord,
 } from './records';
 import { FRAMING_CHECK_RECORDS } from './records';
+import { parseKitColour } from './kit-colour';
 import { parseUnitSystem } from './unit-system';
 import { DEFAULT_VISIBILITY, parseVisibility } from './visibility';
 
@@ -85,6 +86,8 @@ export interface PersistedAthlete {
   mass?: number;
   /** @see AthleteRecord.units — a display preference, stored as its bare word. */
   units?: string;
+  /** @see AthleteRecord.kitColour — a palette key, stored as its bare word. */
+  kitColour?: string;
 }
 
 /** @see ActivityRecord */
@@ -378,6 +381,9 @@ export function toPersistedAthlete(record: AthleteRecord): PersistedAthlete {
   if (record.units !== undefined) {
     row.units = record.units;
   }
+  if (record.kitColour !== undefined) {
+    row.kitColour = record.kitColour;
+  }
   return row;
 }
 
@@ -430,6 +436,14 @@ export function fromPersistedAthlete(row: PersistedAthlete): AthleteRecord {
   // display preference is not worth taking a rider's library away over.
   if (row.units !== undefined) {
     record.units = parseUnitSystem(row.units);
+  }
+  // #623. Absent stays absent, and present but off the palette becomes the
+  // house colour rather than a `StoreDecodeError`, for `units`' reason above —
+  // `kit-colour.ts` §"An unrecognised value falls back rather than throwing".
+  // ⚠️ This is also the security boundary for a hand-edited row (CLAUDE.md
+  // §6): nothing that is not a palette key leaves this function.
+  if (row.kitColour !== undefined) {
+    record.kitColour = parseKitColour(row.kitColour);
   }
   return record;
 }

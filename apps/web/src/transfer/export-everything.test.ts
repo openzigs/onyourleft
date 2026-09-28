@@ -432,6 +432,24 @@ describe('exporting everything', () => {
 });
 
 describe('the manifest names its fields rather than spreading the row', () => {
+  it('carries the kit colour the rider chose — #623', async () => {
+    // Through the store's own narrow write and the export's own read, so a
+    // manifest that dropped the field — or a store that misfiled it — is red.
+    // Magenta, not the house colour, which an absent field also reads as.
+    await seedLibrary(1);
+    await harness.write(async (store) => store.setAthleteKitColour(ATHLETE_A, 'magenta'));
+    const athlete = manifestOf((await runExport()).files)['athlete'] as Record<string, unknown>;
+
+    expect(athlete['kitColour']).toBe('magenta');
+  });
+
+  it('carries no kit colour for a rider who never chose one', async () => {
+    await seedLibrary(1);
+    const athlete = manifestOf((await runExport()).files)['athlete'] as Record<string, unknown>;
+
+    expect(athlete['kitColour']).toBeUndefined();
+  });
+
   it('omits a field the record grew that nobody added here', () => {
     // The behaviour the file header argues for, asserted: an export that spread
     // the athlete row would carry whatever it grows next.

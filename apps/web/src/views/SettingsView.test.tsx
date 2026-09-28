@@ -15,7 +15,8 @@
  *   separate label that could drift from it.
  */
 
-import type { AthleteId, AthleteRecord, UnitSystem } from '@onyourleft/store';
+import type { AthleteId, AthleteRecord, KitColour, UnitSystem } from '@onyourleft/store';
+import { KIT_COLOURS } from '@onyourleft/store';
 import { athleteId } from '@onyourleft/store';
 import { act } from 'react';
 import { describe, expect, it } from 'vitest';
@@ -38,7 +39,12 @@ import {
   UNITS_SAVED,
   ANNOUNCEMENTS_NOT_KEPT,
   ANNOUNCEMENTS_SAVED,
+  KIT_NO_ATHLETE,
+  KIT_NOT_KEPT,
+  KIT_SAVED,
 } from './SettingsView';
+import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
+import { KIT_PALETTE } from '../game/bicycle';
 import {
   readAnnouncementPreference,
   type PreferenceStorage,
@@ -79,8 +85,12 @@ function recordingPort(options: { readonly fail?: string } = {}): Recorded {
   };
 }
 
+/**
+ * The UNITS radios. ⚠️ Scoped by name since #623 put a second radio group — the
+ * kit colour — on this screen; `kitRadios` below reads that one.
+ */
 function radios(container: HTMLElement): HTMLInputElement[] {
-  return queryAll<HTMLInputElement>(container, 'input[type="radio"]');
+  return queryAll<HTMLInputElement>(container, 'input[type="radio"][name="oyl-units"]');
 }
 
 describe('SettingsView', () => {
@@ -1054,6 +1064,159 @@ describe('the ride map’s tiles — the owner’s decision of 2026-09-25', () =
       await Promise.resolve();
     });
     expect(mounted.container.textContent).toContain(ANNOUNCEMENTS_NOT_KEPT);
+    mounted.unmount();
+  });
+});
+
+/**
+ * The rider's kit colour — #623's second half.
+ *
+ * A radio group of the fixed palette, each option its NAME, the current choice
+ * always shown (ADR 0020 D-3), and the narrow write's `undefined` branched on
+ * the way `UNITS_NO_ATHLETE` is.
+ */
+describe('the kit colour — #623', () => {
+  function kitPort(answer: 'row' | 'nobody' | 'throws', writes: KitColour[]): AthleteKitColourPort {
+    return {
+      athleteId: OWNER,
+      store: {
+        setAthleteKitColour: (id, kitColour): Promise<AthleteRecord | undefined> => {
+          writes.push(kitColour);
+          if (answer === 'throws') return Promise.reject(new Error('the disk is full'));
+          return Promise.resolve(
+            answer === 'nobody'
+              ? undefined
+              : { id, displayName: 'You', createdAt: 0 as AthleteRecord['createdAt'], kitColour },
+          );
+        },
+      },
+    };
+  }
+
+  function kitRadios(container: HTMLElement): HTMLInputElement[] {
+    return queryAll<HTMLInputElement>(container, 'input[type="radio"][name="oyl-kit"]');
+  }
+
+  async function mountWith(
+    props: { kit?: AthleteKitColourPort; kitColour?: KitColour },
+    told: (KitColour | undefined)[],
+  ) {
+    return mount(
+      <SettingsView
+        units="metric"
+        onUnitsChange={() => undefined}
+        onRiderMassChange={() => undefined}
+        {...props}
+        onKitColourChange={(chosen) => {
+          told.push(chosen);
+        }}
+      />,
+    );
+  }
+
+  it('offers every palette entry by name, in the palette’s order, the house kit first', async () => {
+    const mounted = await mountWith({ kit: kitPort('row', []) }, []);
+    const options = kitRadios(mounted.container);
+
+    expect(options.map((radio) => radio.value)).toEqual([...KIT_COLOURS]);
+    for (const radio of options) {
+      const label = radio.closest('label');
+      // A NAME, not only a swatch — and the swatch is hidden from assistive technology.
+      expect(label?.textContent).toContain(KIT_PALETTE[radio.value as KitColour].name);
+      expect(label?.querySelector('.oyl-kit__swatch')?.getAttribute('aria-hidden')).toBe('true');
+    }
+    expect(mounted.container.querySelector('legend')?.textContent).toBeTruthy();
+    mounted.unmount();
+  });
+
+  it('shows the house kit chosen for a rider who never chose, and the stored choice otherwise', async () => {
+    const unchosen = await mountWith({ kit: kitPort('row', []) }, []);
+    expect(
+      kitRadios(unchosen.container)
+        .filter((radio) => radio.checked)
+        .map((r) => r.value),
+    ).toEqual(['house']);
+    unchosen.unmount();
+
+    const chosen = await mountWith({ kit: kitPort('row', []), kitColour: 'purple' }, []);
+    expect(
+      kitRadios(chosen.container)
+        .filter((radio) => radio.checked)
+        .map((r) => r.value),
+    ).toEqual(['purple']);
+    chosen.unmount();
+  });
+
+  it('writes the choice, then tells the shell what landed, and says it was saved', async () => {
+    const writes: KitColour[] = [];
+    const told: (KitColour | undefined)[] = [];
+    const mounted = await mountWith({ kit: kitPort('row', writes) }, told);
+
+    await act(async () => {
+      kitRadios(mounted.container)
+        .find((radio) => radio.value === 'lime')
+        ?.click();
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect(writes).toEqual(['lime']);
+    expect(told).toEqual(['lime']);
+    expect(mounted.container.textContent).toContain(KIT_SAVED);
+    mounted.unmount();
+  });
+
+  it('does not tell the shell when the store wrote nothing, and says so', async () => {
+    const told: (KitColour | undefined)[] = [];
+    const mounted = await mountWith({ kit: kitPort('nobody', []) }, told);
+
+    await act(async () => {
+      kitRadios(mounted.container)
+        .find((radio) => radio.value === 'green')
+        ?.click();
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect(told).toEqual([]);
+    const text = mounted.container.textContent ?? '';
+    expect(text).toContain(KIT_NO_ATHLETE);
+    expect(text).not.toContain(KIT_SAVED);
+    mounted.unmount();
+  });
+
+  it('names a failed write rather than swallowing it', async () => {
+    const told: (KitColour | undefined)[] = [];
+    const mounted = await mountWith({ kit: kitPort('throws', []) }, told);
+
+    await act(async () => {
+      kitRadios(mounted.container)
+        .find((radio) => radio.value === 'green')
+        ?.click();
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect(told).toEqual([]);
+    expect(mounted.container.textContent).toContain('the disk is full');
+    mounted.unmount();
+  });
+
+  it('with no store, still dresses this visit’s rides, and says it will not be kept', async () => {
+    const told: (KitColour | undefined)[] = [];
+    const mounted = await mountWith({}, told);
+
+    await act(async () => {
+      kitRadios(mounted.container)
+        .find((radio) => radio.value === 'magenta')
+        ?.click();
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect(told).toEqual(['magenta']);
+    expect(mounted.container.textContent).toContain(KIT_NOT_KEPT);
+    expect(mounted.container.textContent).not.toContain(KIT_SAVED);
     mounted.unmount();
   });
 });

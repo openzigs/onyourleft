@@ -34,6 +34,8 @@
  * hardware, and it is recorded as outstanding in `README.md` beside this file.
  */
 
+import type { KitColour } from '@onyourleft/store';
+
 import type { HorizonRelief, TerrainMesh } from './landform';
 import type { QualitySettings } from './quality';
 import type { RealisticWorldOutcome } from './realistic-assets';
@@ -291,6 +293,18 @@ export interface GameView {
   prepare(frame: SceneFrame): Promise<void>;
   /** Apply a new quality level. @see QualitySettings */
   setQuality(settings: QualitySettings): void;
+  /**
+   * Dress the rider in the kit colour they chose — #623's second half. The
+   * pacer and the ghost are not dressed by it; the view keeps what it was last
+   * told for every frame after, in whichever world it draws.
+   *
+   * ⚠️ **A palette KEY, never a colour**, so nothing that is not a palette
+   * colour can reach a shader; the renderer maps it through `bicycle.ts`
+   * §`riderKitFor`, which draws `undefined` (a rider who never chose) and
+   * anything it does not recognise as the house kit. Required rather than optional, on {@link RiderMarker.crankAngle}'s
+   * reasoning; `GameView.test.tsx` §"#623" reads what a view was handed.
+   */
+  setRiderKit(chosen: KitColour | undefined): void;
   /** Tell the renderer the canvas changed size. */
   resize(widthCssPixels: number, heightCssPixels: number): void;
   /** Release the GL context and every buffer. */

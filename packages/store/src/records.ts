@@ -53,6 +53,7 @@ import type {
   RouteId,
   WorkoutId,
 } from './ids';
+import type { KitColour } from './kit-colour';
 import type { UnitSystem } from './unit-system';
 import type { Visibility } from './visibility';
 
@@ -153,6 +154,21 @@ export interface AthleteRecord {
    * a defect to be worked around with a device override.
    */
   readonly units?: UnitSystem;
+
+  /**
+   * The main colour of this athlete's kit in the trainer game (#623).
+   *
+   * Optional, so it stays off the migration path for the reason
+   * `thresholdPower` gives above: a row written before #623 reads back with no
+   * choice, and the one place that substitutes the house colour is
+   * `apps/web/src/game/bicycle.ts` §`riderKitFor`.
+   *
+   * ⚠️ **A key into a fixed palette, never a colour** — `kit-colour.ts` says
+   * why — and on the athlete rather than the device, for ADR 0020 D-2's reason
+   * `units` gives above: it is the rider's own appearance, not a property of
+   * the machine drawing it.
+   */
+  readonly kitColour?: KitColour;
 }
 
 /** One recorded or imported ride. */
