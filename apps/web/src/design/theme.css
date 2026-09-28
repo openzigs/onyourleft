@@ -2571,8 +2571,10 @@ p > label + input[type='file'] {
  *   the longer sentence, this padding                   53 px
  *   both, as shipped                                    69 px
  *
- * Either half alone clears #605's 50 px by a few pixels, which is a font away
- * from not clearing it, so both are kept. `ride.browser.spec.ts` §"keep the
+ * On the CI runner, whose fonts are wider, the sentence takes two lines at
+ * 360 px after all, and the pair clears the rider by 54 px, which is this rule
+ * alone. Either half alone clears #605's 50 px by a few pixels, which is a
+ * font away from not clearing it, so both are kept. `ride.browser.spec.ts` §"keep the
  * screen on, beside every notice that stays" holds every pair to 50 and puts
  * round one back as its control.
  *
