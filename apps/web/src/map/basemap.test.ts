@@ -23,11 +23,13 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FONT_STACK, GLYPH_RANGE_STARTS, rangeName } from '../../tools/glyphs/font-source';
+import { THEMES } from '../design/tokens';
 
 import {
   BASEMAP_SOURCE_ID,
   GLYPHS_URL,
   LABEL_FONT,
+  MAP_COLOURS,
   basemapOrigin,
   basemapStyle,
   browserBasemapConfig,
@@ -36,6 +38,7 @@ import {
   readBasemapConfig,
   styleOrigins,
   type BasemapStyle,
+  type MapColours,
 } from './basemap';
 
 const ARCHIVE = 'https://tiles.example.org/basemap.pmtiles';
@@ -276,5 +279,74 @@ describe('styleOrigins — criterion 3, the $950/month guard', () => {
       layers: [{ id: 'x', type: 'background', paint: { 'background-color': '#https://no' } }],
     };
     expect(styleOrigins(style)).toEqual([]);
+  });
+});
+
+/** A style with every colour in every paint replaced by one word, so two palettes' structures compare. */
+function withoutColours(style: BasemapStyle): BasemapStyle {
+  return {
+    ...style,
+    layers: style.layers.map((layer) =>
+      layer.paint === undefined
+        ? layer
+        : {
+            ...layer,
+            paint: Object.fromEntries(
+              Object.entries(layer.paint).map(([key, value]) => [
+                key,
+                key.endsWith('-color') ? 'colour' : value,
+              ]),
+            ),
+          },
+    ),
+  };
+}
+
+/** Every colour any paint in the style names. */
+function coloursOf(style: BasemapStyle): string[] {
+  return style.layers.flatMap((layer) =>
+    Object.entries(layer.paint ?? {})
+      .filter(([key]) => key.endsWith('-color'))
+      .map(([, value]) => String(value)),
+  );
+}
+
+describe('the dark style — built the same way, never fetched (#672)', () => {
+  const config = { archiveUrl: ARCHIVE, attribution: OSM_ATTRIBUTION };
+
+  it.each([true, false])(
+    'differs from the light style in colour and nothing else, with tiles %s',
+    (tiles) => {
+      const light = basemapStyle(config, { tiles, theme: 'light' });
+      const dark = basemapStyle(config, { tiles, theme: 'dark' });
+      expect(withoutColours(dark)).toEqual(withoutColours(light));
+      expect(styleOrigins(dark)).toEqual(styleOrigins(light));
+      // And the colours really are different — a `theme` the builder ignored
+      // would pass the line above.
+      expect(coloursOf(dark)).not.toEqual(coloursOf(light));
+    },
+  );
+
+  it('reaches the configured archive and nothing else, exactly as the light one does', () => {
+    expect(styleOrigins(basemapStyle(config, { theme: 'dark' }))).toEqual([
+      'https://tiles.example.org',
+    ]);
+    expect(styleOrigins(basemapStyle(config, { tiles: false, theme: 'dark' }))).toEqual([]);
+  });
+
+  it('is light when nobody says', () => {
+    expect(basemapStyle(config)).toEqual(basemapStyle(config, { theme: 'light' }));
+  });
+
+  it.each(THEMES)('paints only colours the %s table declares — no loose literal', (theme) => {
+    const table = MAP_COLOURS[theme];
+    const declared = new Set<string>(
+      (Object.keys(table) as (keyof MapColours)[]).map((key) => table[key]),
+    );
+    for (const tiles of [true, false]) {
+      for (const colour of coloursOf(basemapStyle(config, { tiles, theme }))) {
+        expect(declared, `${theme}: ${colour} is painted and declared nowhere`).toContain(colour);
+      }
+    }
   });
 });

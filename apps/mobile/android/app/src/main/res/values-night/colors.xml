@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!--
+  The same resources in the device's dark mode (#672): the dark palette's
+  canvas, apps/web/src/design/tokens.ts DARK_COLOUR_TOKENS canvas, so a rider
+  in a dark room is not shown a white window before the page paints.
+
+  The launch background is the canvas itself rather than Capacitor's splash
+  picture, which is white. On Android 12 and later the system splash screen
+  draws this colour with the app's icon on it instead.
+-->
+<resources>
+    <color name="oyl_canvas">#121816</color>
+    <drawable name="oyl_launch_background">@color/oyl_canvas</drawable>
+</resources>

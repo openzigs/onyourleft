@@ -51,7 +51,7 @@ import {
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { Protocol } from 'pmtiles';
 
-import { TRACK_LAYER_ID, TRACK_LINE_COLOUR, TRACK_SOURCE_ID } from './basemap';
+import { TRACK_LAYER_ID, TRACK_SOURCE_ID } from './basemap';
 import type { MapPort, MapRenderer, MapView, MapViewOptions } from './port';
 import { createProtocolRegistry } from './protocol';
 import type { TrackBounds, TrackFeature } from './track';
@@ -117,34 +117,49 @@ function fit(map: MapLibreMap, bounds: TrackBounds | undefined): void {
   );
 }
 
+/**
+ * The style MapLibre is handed: the basemap, with the ride's line on top.
+ *
+ * The line's data is part of it, so a style handed over again (#672's
+ * {@link MapView.setStyle}) carries the line the map already shows. Against
+ * a loaded style MapLibre applies the difference — here, paint colours — and
+ * against one still loading it rebuilds from this, and either way the line
+ * is in it rather than waiting on a `setData` somebody has to remember.
+ */
+function fullStyle(options: MapViewOptions, track: TrackFeature | undefined): StyleSpecification {
+  return {
+    ...options.style,
+    sources: {
+      ...options.style.sources,
+      [TRACK_SOURCE_ID]: { type: 'geojson', data: sourceDataFor(track) },
+    },
+    layers: [
+      ...options.style.layers,
+      {
+        id: TRACK_LAYER_ID,
+        type: 'line',
+        source: TRACK_SOURCE_ID,
+        // Round joins and caps so a one-point run renders as a dot rather
+        // than as nothing — the same choice `detail/TraceChart.tsx` makes,
+        // and `track.ts` explains why a lone fix is kept at all.
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': options.trackColour, 'line-width': 3 },
+      },
+    ],
+  } as StyleSpecification;
+}
+
 const renderer: MapRenderer = {
   create(container: HTMLElement, options: MapViewOptions): MapView {
+    /** The line the map shows, so a new style is handed it too. */
+    let current: TrackFeature | undefined;
     const map = new MapLibreMap({
       container,
       // The style is built by `basemap.ts` from configuration and is never
       // fetched from a URL. `basemap.test.ts` asserts every origin it names is
       // the configured one; a `style: 'https://…/style.json'` here would put
       // that back outside the assertion's reach.
-      style: {
-        ...options.style,
-        sources: {
-          ...options.style.sources,
-          [TRACK_SOURCE_ID]: { type: 'geojson', data: EMPTY_TRACK },
-        },
-        layers: [
-          ...options.style.layers,
-          {
-            id: TRACK_LAYER_ID,
-            type: 'line',
-            source: TRACK_SOURCE_ID,
-            // Round joins and caps so a one-point run renders as a dot rather
-            // than as nothing — the same choice `detail/TraceChart.tsx` makes,
-            // and `track.ts` explains why a lone fix is kept at all.
-            layout: { 'line-cap': 'round', 'line-join': 'round' },
-            paint: { 'line-color': TRACK_LINE_COLOUR, 'line-width': 3 },
-          },
-        ],
-      } as StyleSpecification,
+      style: fullStyle(options, current),
       interactive: false,
       attributionControl: false,
     });
@@ -194,8 +209,17 @@ const renderer: MapRenderer = {
 
     return {
       setTrack(track: TrackFeature | undefined, bounds: TrackBounds | undefined): void {
+        current = track;
         waiting = draw(track) ? undefined : { track };
         fit(map, bounds);
+      },
+      setStyle(next: MapViewOptions): void {
+        // `setStyle` diffs against the loaded style, so a change of palette
+        // is a set of paint-property writes and the archive source, the same
+        // URL, is kept rather than rebuilt. Before the first
+        // style has loaded MapLibre cannot diff, warns once, and rebuilds
+        // from this object instead — which still carries the line.
+        map.setStyle(fullStyle(next, current));
       },
       destroy(): void {
         map.remove();

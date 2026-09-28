@@ -64,16 +64,19 @@
  * what the loopback half does and does not prove, which is unchanged.
  */
 
+import { documentTheme } from '../src/design/theme-selection';
+import type { Theme } from '../src/design/tokens';
 import {
   basemapStyle,
   BASEMAP_SOURCE_ID,
-  LABEL_TEXT_COLOUR,
+  MAP_COLOURS,
   OSM_ATTRIBUTION,
-  TRACK_LINE_COLOUR,
   type BasemapConfig,
   type BasemapStyle,
 } from '../src/map/basemap';
 import { mapLibrePort } from '../src/map/maplibre';
+import type { MapViewOptions } from '../src/map/port';
+import { createThemedMap } from '../src/map/themed-map';
 import { trackBounds, trackFeature, type TrackGeometry } from '../src/map/track';
 import { parseTrackParameter } from './hosted-archive';
 
@@ -142,6 +145,8 @@ export interface ArchiveRequestTiming {
  * first. The spec waits on this object rather than on a duration.
  */
 export interface MapLoadResult {
+  /** The palette of the style on the map when this was published (#672). */
+  readonly theme: Theme;
   /** A colour that can only have come from a tile reached the drawing buffer. */
   readonly painted: boolean;
   /**
@@ -223,8 +228,31 @@ export interface LabelLoadResult {
   readonly glyphs: string | undefined;
 }
 
+/**
+ * What the drawing buffer shows NOW, and what the map's current style paints
+ * with (#672). A function rather than a published object, because the case
+ * that reads it flips the page's palette after {@link MapLoadResult} has been
+ * published and polls until the map follows.
+ */
+export interface MapProbe {
+  /** `data-theme` on the root element: the page's palette. */
+  readonly pageTheme: Theme;
+  /** The palette of the style the map was last handed. */
+  readonly styleTheme: Theme;
+  readonly backgroundColour: string | undefined;
+  readonly basemapColours: readonly string[];
+  readonly trackColour: string;
+  /** The probe points, `#rrggbb`. Empty when there was no canvas to read. */
+  readonly samples: readonly string[];
+  /** The distinct colours in the box at the frame's centre, where the line is. */
+  readonly centreColours: readonly string[];
+  /** `addProtocol` calls so far, read from the shipping registry. */
+  readonly registrations: number;
+}
+
 declare global {
   interface Window {
+    __oylMapProbe?: () => MapProbe;
     __oylHarness?: HarnessResult;
     __oylMapLoad?: MapLoadResult;
     __oylLabels?: LabelLoadResult;
@@ -259,20 +287,16 @@ function parseHex(colour: unknown): readonly [number, number, number] | undefine
  * says nothing about tiles. That distinction is the whole of the control case.
  */
 function paletteOf(style: BasemapStyle): {
-  basemap: readonly (readonly [number, number, number])[];
   background: string | undefined;
   basemapNames: readonly string[];
 } {
-  const basemap: (readonly [number, number, number])[] = [];
   const basemapNames: string[] = [];
   let background: string | undefined;
   for (const layer of style.layers) {
     const paint = layer.paint ?? {};
     if (layer.source === BASEMAP_SOURCE_ID) {
       for (const key of ['fill-color', 'line-color']) {
-        const parsed = parseHex(paint[key]);
-        if (parsed !== undefined) {
-          basemap.push(parsed);
+        if (parseHex(paint[key]) !== undefined) {
           basemapNames.push(String(paint[key]));
         }
       }
@@ -280,7 +304,7 @@ function paletteOf(style: BasemapStyle): {
       background = paint['background-color'];
     }
   }
-  return { basemap, background, basemapNames };
+  return { background, basemapNames };
 }
 
 /** `#rrggbb`, so a sample reads the same way the style writes a colour. */
@@ -398,6 +422,77 @@ function preserveTheDrawingBuffer(): void {
   HTMLCanvasElement.prototype.getContext = patched as typeof HTMLCanvasElement.prototype.getContext;
 }
 
+/** The style the map was last handed, and the palette it was built for (#672). */
+interface CurrentStyle {
+  readonly theme: Theme;
+  readonly options: MapViewOptions;
+}
+
+/** What one read of the drawing buffer found. */
+interface BufferRead {
+  readonly samples: string[];
+  readonly centreColours: string[];
+  readonly canvasSize: string;
+}
+
+/**
+ * Read the probe points and the box at the frame's centre off the drawing
+ * buffer, or `undefined` when there is no canvas with a context to read.
+ */
+function readBuffer(container: HTMLDivElement): BufferRead | undefined {
+  const canvas = container.querySelector('canvas');
+  const gl = canvas?.getContext('webgl2') ?? canvas?.getContext('webgl') ?? null;
+  if (canvas === null || gl === null || canvas.width === 0 || canvas.height === 0) {
+    return undefined;
+  }
+  // MapLibre binds its own framebuffers during a render and does not
+  // guarantee what is bound when one ends. Reading the default one is the
+  // only thing that answers "what would the rider see"; MapLibre re-binds
+  // whatever it needs at the start of its next frame, so leaving this bound
+  // costs nothing.
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  const samples: string[] = [];
+  // `readPixels` has its origin at the bottom left, where CSS has it at the
+  // top left. Nothing here depends on which row is which — two rows exist so
+  // that one of them landing on the ride trace cannot be the whole evidence.
+  for (const row of PROBE_ROWS) {
+    const y = Math.min(canvas.height - 1, Math.max(0, Math.round(canvas.height * row)));
+    const strip = new Uint8Array(canvas.width * 4);
+    gl.readPixels(0, y, canvas.width, 1, gl.RGBA, gl.UNSIGNED_BYTE, strip);
+    for (const column of PROBE_COLUMNS) {
+      const x = Math.min(canvas.width - 1, Math.max(0, Math.round(canvas.width * column)));
+      samples.push(hex([strip[x * 4] ?? 0, strip[x * 4 + 1] ?? 0, strip[x * 4 + 2] ?? 0]));
+    }
+  }
+  // The line, in a small box at the centre — see `MapLoadResult.trackPainted`.
+  const box = 9;
+  const left = Math.max(0, Math.round(canvas.width / 2) - (box >> 1));
+  const bottom = Math.max(0, Math.round(canvas.height / 2) - (box >> 1));
+  const centre = new Uint8Array(box * box * 4);
+  gl.readPixels(left, bottom, box, box, gl.RGBA, gl.UNSIGNED_BYTE, centre);
+  const seen = new Set<string>();
+  for (let offset = 0; offset < centre.length; offset += 4) {
+    seen.add(hex([centre[offset] ?? 0, centre[offset + 1] ?? 0, centre[offset + 2] ?? 0]));
+  }
+  return {
+    samples,
+    centreColours: [...seen],
+    canvasSize: `${String(canvas.width)}x${String(canvas.height)}`,
+  };
+}
+
+/** Whether any of `colours` is within {@link COLOUR_TOLERANCE} of `target`. */
+function anyMatches(colours: readonly string[], target: string): boolean {
+  const wanted = parseHex(target);
+  return (
+    wanted !== undefined &&
+    colours.some((colour) => {
+      const channels = parseHex(colour);
+      return channels !== undefined && matches(channels, wanted);
+    })
+  );
+}
+
 /**
  * Watch the drawing buffer until a tile paints, and time it.
  *
@@ -420,8 +515,11 @@ function preserveTheDrawingBuffer(): void {
  * also identical on both pages, so the fixture and the control are comparable
  * even though neither is a clean-room frame time.
  */
-function watchForPaint(container: HTMLDivElement, style: BasemapStyle, archive: string): void {
-  const palette = paletteOf(style);
+function watchForPaint(
+  container: HTMLDivElement,
+  current: () => CurrentStyle,
+  archive: string,
+): void {
   const deadline = paintDeadlineMs();
   const createdAt = performance.now();
   let frames = 0;
@@ -430,14 +528,16 @@ function watchForPaint(container: HTMLDivElement, style: BasemapStyle, archive: 
   let trackPainted = false;
   let centreColours: string[] = [];
   let done = false;
-  const trackColour = parseHex(TRACK_LINE_COLOUR);
 
   const publish = (painted: boolean, at: number | undefined): void => {
     if (done) {
       return;
     }
     done = true;
+    const { theme, options } = current();
+    const palette = paletteOf(options.style);
     window.__oylMapLoad = {
+      theme,
       painted,
       firstPaintMs: at === undefined ? undefined : at - createdAt,
       firstPaintSinceNavigationMs: at,
@@ -455,56 +555,19 @@ function watchForPaint(container: HTMLDivElement, style: BasemapStyle, archive: 
 
   /** Read the probe points. Returns whether a tile colour was among them. */
   const probe = (): boolean => {
-    const canvas = container.querySelector('canvas');
-    const gl = canvas?.getContext('webgl2') ?? canvas?.getContext('webgl') ?? null;
-    if (canvas === null || gl === null || canvas.width === 0 || canvas.height === 0) {
+    const read = readBuffer(container);
+    if (read === undefined) {
       return false;
     }
     frames += 1;
-    canvasSize = `${String(canvas.width)}x${String(canvas.height)}`;
-    // MapLibre binds its own framebuffers during a render and does not
-    // guarantee what is bound when one ends. Reading the default one is the
-    // only thing that answers "what would the rider see"; MapLibre re-binds
-    // whatever it needs at the start of its next frame, so leaving this bound
-    // costs nothing.
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    const read: string[] = [];
-    // `readPixels` has its origin at the bottom left, where CSS has it at the
-    // top left. Nothing here depends on which row is which — two rows exist so
-    // that one of them landing on the ride trace cannot be the whole evidence.
-    for (const row of PROBE_ROWS) {
-      const y = Math.min(canvas.height - 1, Math.max(0, Math.round(canvas.height * row)));
-      const strip = new Uint8Array(canvas.width * 4);
-      gl.readPixels(0, y, canvas.width, 1, gl.RGBA, gl.UNSIGNED_BYTE, strip);
-      for (const column of PROBE_COLUMNS) {
-        const x = Math.min(canvas.width - 1, Math.max(0, Math.round(canvas.width * column)));
-        read.push(hex([strip[x * 4] ?? 0, strip[x * 4 + 1] ?? 0, strip[x * 4 + 2] ?? 0]));
-      }
+    canvasSize = read.canvasSize;
+    samples = read.samples;
+    centreColours = read.centreColours;
+    const { options } = current();
+    if (anyMatches(read.centreColours, options.trackColour)) {
+      trackPainted = true;
     }
-    samples = read;
-    // The line, in a small box at the centre — see `MapLoadResult.trackPainted`.
-    const box = 9;
-    const left = Math.max(0, Math.round(canvas.width / 2) - (box >> 1));
-    const bottom = Math.max(0, Math.round(canvas.height / 2) - (box >> 1));
-    const centre = new Uint8Array(box * box * 4);
-    gl.readPixels(left, bottom, box, box, gl.RGBA, gl.UNSIGNED_BYTE, centre);
-    const seenHere = new Set<string>();
-    for (let offset = 0; offset < centre.length && trackColour !== undefined; offset += 4) {
-      const pixel = [
-        centre[offset] ?? 0,
-        centre[offset + 1] ?? 0,
-        centre[offset + 2] ?? 0,
-      ] as const;
-      seenHere.add(hex(pixel));
-      if (matches(pixel, trackColour)) {
-        trackPainted = true;
-      }
-    }
-    centreColours = [...seenHere];
-    return read.some((sample) => {
-      const channels = parseHex(sample);
-      return channels !== undefined && palette.basemap.some((target) => matches(channels, target));
-    });
+    return paletteOf(options.style).basemapNames.some((colour) => anyMatches(read.samples, colour));
   };
 
   const tick = (): void => {
@@ -567,9 +630,9 @@ function glyphRequests(): GlyphRequest[] {
  * {@link watchForPaint} uses, so a control that can never paint a label waits
  * exactly as long as one that can never paint a tile.
  */
-function watchForLabels(container: HTMLDivElement, style: BasemapStyle): void {
+function watchForLabels(container: HTMLDivElement, current: () => CurrentStyle): void {
   const deadline = paintDeadlineMs();
-  const ink = parseHex(LABEL_TEXT_COLOUR);
+  const inkOf = (): string => MAP_COLOURS[current().theme].labelInk;
   let frames = 0;
   let inkPixels = 0;
   let done = false;
@@ -583,15 +646,16 @@ function watchForLabels(container: HTMLDivElement, style: BasemapStyle): void {
       painted: inkPixels >= LABEL_INK_PIXELS,
       inkPixels,
       frames,
-      ink: LABEL_TEXT_COLOUR,
+      ink: inkOf(),
       glyphRequests: glyphRequests(),
-      glyphs: style.glyphs,
+      glyphs: current().options.style.glyphs,
     };
   };
 
   const probe = (): void => {
     const canvas = container.querySelector('canvas');
     const gl = canvas?.getContext('webgl2') ?? canvas?.getContext('webgl') ?? null;
+    const ink = parseHex(inkOf());
     if (canvas === null || gl === null || canvas.width === 0 || ink === undefined) {
       return;
     }
@@ -704,6 +768,17 @@ function tilesDrawn(): boolean {
   return new URL(window.location.href).searchParams.get('tiles') !== 'off';
 }
 
+/**
+ * The palette to build the style in regardless of the page's — `?style=light`
+ * or `?style=dark` — or `undefined` to follow the page the way `MapPanel.tsx`
+ * does (#672). It exists for the control: a LIGHT style under a dark page must
+ * fail the read the dark style passes, or that read proves nothing.
+ */
+function forcedStyleTheme(): Theme | undefined {
+  const configured = new URL(window.location.href).searchParams.get('style');
+  return configured === 'light' || configured === 'dark' ? configured : undefined;
+}
+
 function archiveUrl(): string {
   const configured = new URL(window.location.href).searchParams.get('archive');
   // Same origin as the page by default, so the "zero third-party requests"
@@ -720,7 +795,23 @@ function run(): void {
 
   const archive = archiveUrl();
   const config: BasemapConfig = { archiveUrl: archive, attribution: OSM_ATTRIBUTION };
-  const style = withGlyphsParameter(basemapStyle(config, { tiles: tilesDrawn() }));
+  const tiles = tilesDrawn();
+  const forced = forcedStyleTheme();
+  let latest: CurrentStyle | undefined;
+  // What `MapPanel.tsx` hands `createThemedMap`, plus the harness's own
+  // `?glyphs=` and `?style=` switches. Every style the map is handed passes
+  // through here, so `latest` is always what is on the map.
+  const optionsFor = (pageTheme: Theme): MapViewOptions => {
+    const theme = forced ?? pageTheme;
+    const options: MapViewOptions = {
+      style: withGlyphsParameter(basemapStyle(config, { tiles, theme })),
+      trackColour: MAP_COLOURS[theme].track,
+    };
+    latest = { theme, options };
+    return options;
+  };
+  const current = (): CurrentStyle => latest ?? { theme: 'light', options: optionsFor('light') };
+  optionsFor(documentTheme(document));
   const errors: string[] = [];
   let created = false;
 
@@ -728,8 +819,23 @@ function run(): void {
   // first of them: MapLibre asks for its context inside the constructor, and a
   // context's attributes cannot be changed afterwards.
   preserveTheDrawingBuffer();
-  watchForPaint(container, style, archive);
-  watchForLabels(container, style);
+  watchForPaint(container, current, archive);
+  watchForLabels(container, current);
+  window.__oylMapProbe = (): MapProbe => {
+    const { theme, options } = current();
+    const palette = paletteOf(options.style);
+    const read = readBuffer(container);
+    return {
+      pageTheme: documentTheme(document),
+      styleTheme: theme,
+      backgroundColour: palette.background,
+      basemapColours: palette.basemapNames,
+      trackColour: options.trackColour,
+      samples: read?.samples ?? [],
+      centreColours: read?.centreColours ?? [],
+      registrations: mapLibrePort.protocol.registrations,
+    };
+  };
 
   try {
     // Registered before the map is created, exactly as `MapPanel.tsx` does it.
@@ -742,7 +848,9 @@ function run(): void {
     if (registerProtocol()) {
       mapLibrePort.protocol.ensure();
     }
-    const view = mapLibrePort.renderer.create(container, { style });
+    // Through the same function `MapPanel.tsx` uses, so the palette the map
+    // is drawn in, and the watch that repaints it, are the product's (#672).
+    const view = createThemedMap(mapLibrePort.renderer, container, document, optionsFor);
     created = true;
     const track = trackFor();
     view.setTrack(trackFeature(track), trackBounds(track));

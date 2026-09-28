@@ -300,3 +300,45 @@ export function themeEraser(win: ThemeWindow): { forget(): void } {
     },
   };
 }
+
+/**
+ * The palette the page is in now, read off the root element: `dark` when
+ * `data-theme` says so, and `light` otherwise — which is what `theme.css`
+ * paints for any other value, so this and the stylesheet cannot disagree.
+ */
+export function documentTheme(doc: Document): Theme {
+  return doc.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+}
+
+/**
+ * Call `listener` with the new palette each time the page changes palette,
+ * until the returned function is called (#672 part b — the map follows).
+ *
+ * ## Why it watches the attribute rather than offering a subscribe call
+ *
+ * `data-theme` has four writers: the inline script's device listener and its
+ * `storage` listener (another tab), {@link chooseTheme} (Settings) and
+ * {@link themeEraser} (erase). Two of them are a classic script that runs
+ * before any module exists and cannot call one, so a subscription list here
+ * would hear Settings and miss the device and every other tab. The attribute
+ * is the one place all four meet, and it is what `theme.css` keys on, so a
+ * `MutationObserver` over it follows exactly what the page's own colours
+ * follow. It hears a change of VALUE only: a write of the palette already in
+ * force calls nothing.
+ *
+ * One observer per call, disconnected by the returned function, so its owner
+ * — `map/themed-map.ts`, one per map — decides its lifetime.
+ */
+export function watchDocumentTheme(doc: Document, listener: (theme: Theme) => void): () => void {
+  let current = documentTheme(doc);
+  const observer = new MutationObserver(() => {
+    const next = documentTheme(doc);
+    if (next === current) return;
+    current = next;
+    listener(next);
+  });
+  observer.observe(doc.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  return () => {
+    observer.disconnect();
+  };
+}

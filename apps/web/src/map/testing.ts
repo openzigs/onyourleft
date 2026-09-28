@@ -30,6 +30,8 @@ export interface RecordedMap {
   /** Every `setTrack`, in order. A map is created empty, so this is the whole history. */
   readonly tracks: (TrackFeature | undefined)[];
   readonly bounds: (TrackBounds | undefined)[];
+  /** Every `setStyle`, in order (#672): the palettes it was repainted in. */
+  readonly styles: MapViewOptions[];
   destroyed: boolean;
 }
 
@@ -71,6 +73,7 @@ export function stubMapPort(): StubMapPort {
         options,
         tracks: [],
         bounds: [],
+        styles: [],
         destroyed: false,
       };
       created.push(record);
@@ -78,6 +81,9 @@ export function stubMapPort(): StubMapPort {
         setTrack(track: TrackFeature | undefined, bounds: TrackBounds | undefined): void {
           record.tracks.push(track);
           record.bounds.push(bounds);
+        },
+        setStyle(next: MapViewOptions): void {
+          record.styles.push(next);
         },
         destroy(): void {
           record.destroyed = true;
@@ -110,4 +116,45 @@ export function everyCoordinateHandedTo(map: RecordedMap): readonly (readonly [n
  */
 export function coordinatesNowOn(map: RecordedMap): readonly (readonly [number, number])[] {
   return map.tracks.at(-1)?.geometry.coordinates.flat() ?? [];
+}
+
+/** What {@link countingMutationObservers} reports. */
+export interface ObserverCount {
+  /** Observers that are observing now: `observe` called and not yet disconnected. */
+  live(): number;
+  /** Every `observe` call so far. */
+  observed(): number;
+  /** Put the real `MutationObserver` back. */
+  restore(): void;
+}
+
+/**
+ * Replace `globalThis.MutationObserver` with a subclass that counts, so a test
+ * can say how many watches a map holds (#672 — exactly one per map, and none
+ * once it is gone). The subclass is the real observer: it still hears every
+ * change it would have heard.
+ */
+export function countingMutationObservers(): ObserverCount {
+  const Real = globalThis.MutationObserver;
+  const live = new Set<MutationObserver>();
+  let observed = 0;
+  class Counting extends Real {
+    override observe(target: Node, options?: MutationObserverInit): void {
+      observed += 1;
+      live.add(this);
+      super.observe(target, options);
+    }
+    override disconnect(): void {
+      live.delete(this);
+      super.disconnect();
+    }
+  }
+  globalThis.MutationObserver = Counting;
+  return {
+    live: () => live.size,
+    observed: () => observed,
+    restore: () => {
+      globalThis.MutationObserver = Real;
+    },
+  };
 }

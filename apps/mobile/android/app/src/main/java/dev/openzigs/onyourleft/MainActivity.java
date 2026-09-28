@@ -2,6 +2,7 @@
 
 package dev.openzigs.onyourleft;
 
+import androidx.core.content.ContextCompat;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
@@ -18,5 +19,10 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(RecordingServicePlugin.class);
         registerPlugin(ThermalPlugin.class);
         super.onCreate(savedInstanceState);
+        // #672: the WebView draws white until the page paints, which in the device's dark mode is a
+        // white frame in a dark room. The page's canvas instead, per palette -- res/values and
+        // res/values-night colors.xml. Not capacitor.config.ts's backgroundColor, which is ONE colour
+        // for both palettes and so would be the wrong one in one of them.
+        getBridge().getWebView().setBackgroundColor(ContextCompat.getColor(this, R.color.oyl_canvas));
     }
 }

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!--
+  The colour the app is before its page paints (#672): the launch window, the
+  window behind the WebView, and the WebView's own background.
+
+  It is the page's canvas token, apps/web/src/design/tokens.ts COLOUR_TOKENS
+  canvas, so a cold start in the light palette is one colour from the first
+  frame to the page. values-night/colors.xml is the dark palette's.
+  apps/mobile/src/android/night-colours.test.ts holds both equal to the tokens.
+-->
+<resources>
+    <color name="oyl_canvas">#ffffff</color>
+    <!--
+      The launch window's background on Android 7 to 11, where the system splash
+      screen does not exist: Capacitor's splash picture, as it was before #672.
+    -->
+    <drawable name="oyl_launch_background">@drawable/splash</drawable>
+</resources>

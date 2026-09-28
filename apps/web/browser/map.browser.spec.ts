@@ -61,7 +61,8 @@ import { expect, test } from '@playwright/test';
 import { PMTiles } from 'pmtiles';
 
 import { HARNESS_ORIGIN } from '../playwright.config';
-import type { HarnessResult, LabelLoadResult, MapLoadResult } from './harness';
+import { MAP_COLOURS } from '../src/map/basemap';
+import type { HarnessResult, LabelLoadResult, MapLoadResult, MapProbe } from './harness';
 import {
   centreTrack,
   coldLoadReport,
@@ -722,6 +723,113 @@ test.describe('with map tiles turned off — the owner’s choice of 2026-09-25'
         new URL(url).origin !== HARNESS_ORIGIN,
     );
     expect(foreign, `requests left the page's origin: ${foreign.join(', ')}`).toEqual([]);
+  });
+});
+
+/** What the drawing buffer shows now, and what the map's style paints with (#672). */
+async function probeNow(page: import('@playwright/test').Page): Promise<MapProbe> {
+  const probe = await page.evaluate(() => window.__oylMapProbe?.());
+  if (probe === undefined) {
+    throw new Error('the harness published no map probe');
+  }
+  return probe;
+}
+
+/**
+ * #672 part b: the map in the dark palette, and following the page.
+ *
+ * The page's palette comes from the device through the theme script
+ * `tools/theme/theme-selection-plugin.ts` writes into every harness page, so
+ * `emulateMedia({ colorScheme })` is the device, and the map is built through
+ * `map/themed-map.ts`, the function `MapPanel.tsx` uses.
+ *
+ * ⚠️ **A background read proves little on its own**, and the control is what
+ * makes this one mean something: the SAME page, under the SAME dark device,
+ * handed the light style (`?style=light`), must fail it. A probe reading a
+ * cleared buffer, or a style the builder quietly ignored the palette of, is
+ * what that control would otherwise not rule out.
+ */
+/**
+ * How long the two background reads below wait before the page publishes.
+ *
+ * Shorter than {@link CONTROL_DEADLINE_MS} because neither is a negative
+ * assertion about tiles: each requires a colour to BE on the buffer, and the
+ * background paints on the first frame after the style loads (under 300 ms
+ * here). Too short a box turns these red, never green.
+ */
+const THEME_READ_DEADLINE_MS = 1500;
+
+test.describe('the dark map — #672', () => {
+  test('paints the dark background under a dark page, with no archive to paint over it', async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.goto(`/?tiles=off&paintDeadline=${String(THEME_READ_DEADLINE_MS)}`);
+    const load = await mapLoad(page);
+
+    expect(load.theme).toBe('dark');
+    expect(load.backgroundColour).toBe(MAP_COLOURS.dark.background);
+    expect(load.frames).toBeGreaterThan(0);
+    expect(
+      load.samples,
+      `the dark background did not reach the drawing buffer: read ${load.samples.join(', ')}`,
+    ).toContain(MAP_COLOURS.dark.background);
+    expect(load.samples).not.toContain(MAP_COLOURS.light.background);
+    // The ride's line, in the dark palette's colour, on top of it.
+    expect(load.trackPainted, `centre read ${load.centreColours.join(', ')}`).toBe(true);
+  });
+
+  test('fails that read with the light style under the same dark page — the control', async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.goto(`/?tiles=off&style=light&paintDeadline=${String(THEME_READ_DEADLINE_MS)}`);
+    const load = await mapLoad(page);
+
+    // The page IS dark; only the style is not.
+    expect((await probeNow(page)).pageTheme).toBe('dark');
+    expect(load.theme).toBe('light');
+    expect(load.frames).toBeGreaterThan(0);
+    expect(load.samples).toContain(MAP_COLOURS.light.background);
+    expect(load.samples).not.toContain(MAP_COLOURS.dark.background);
+  });
+
+  test('follows the device from dark to light without a reload, keeping its tiles and its line', async ({
+    page,
+  }) => {
+    const seen = watch(page);
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.goto(`/?archive=${encodeURIComponent(FIXTURE_URL)}`);
+    const load = await mapLoad(page);
+    expect(load.theme).toBe('dark');
+    expect(load.painted, `read ${load.samples.join(', ')}`).toBe(true);
+    // Tiles painted in the DARK palette's own colours.
+    const darkTiles = [MAP_COLOURS.dark.earth, MAP_COLOURS.dark.water, MAP_COLOURS.dark.road];
+    expect(load.samples.some((sample) => darkTiles.includes(sample))).toBe(true);
+    const navigations = seen.requests.filter((url) => new URL(url).pathname === '/').length;
+
+    // The device turns light. Nothing else is touched: the inline script
+    // hears it, sets `data-theme`, and the map's one watch repaints it.
+    await page.emulateMedia({ colorScheme: 'light' });
+    const lightTiles = [MAP_COLOURS.light.earth, MAP_COLOURS.light.water, MAP_COLOURS.light.road];
+    await expect
+      .poll(async () => {
+        const now = await probeNow(page);
+        return (
+          now.pageTheme === 'light' &&
+          now.styleTheme === 'light' &&
+          now.samples.some((sample) => lightTiles.includes(sample)) &&
+          !now.samples.some((sample) => darkTiles.includes(sample)) &&
+          now.centreColours.includes(MAP_COLOURS.light.track)
+        );
+      })
+      .toBe(true);
+
+    const after = await probeNow(page);
+    // The same page, not a reloaded one, and the protocol registered once.
+    expect(seen.requests.filter((url) => new URL(url).pathname === '/').length).toBe(navigations);
+    expect(after.registrations).toBe(1);
+    expect(after.centreColours).not.toContain(MAP_COLOURS.dark.track);
   });
 });
 
