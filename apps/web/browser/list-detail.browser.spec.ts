@@ -106,8 +106,10 @@ const LIST_DETAIL = ALL_ROUTES.filter((route) => route.layout === 'list-detail')
  *   The phone's FIRST control, *Draw a route on this device*, is at y ≈ 311.
  * - **Workouts** on the tablet both ways up, since #670 put the workout, its
  *   name and *Save workout* ahead of the block form (below it, the button was
- *   72 px under the landscape fold). On a phone it starts about 6 px under the
- *   fold, after the one-pane list.
+ *   72 px under the landscape fold). On a phone, after the one-pane list, it
+ *   ends 65 px above the fold in this Chromium on a Mac — and the CI runner's
+ *   fonts put this page's text about 50 px lower, which is too near the line
+ *   to hold.
  */
 const PRIMARY_ON_ARRIVAL: Readonly<Record<string, readonly string[]>> = {
   activities: [TABLET_IN_THE_SHELL.name, TABLET_UPRIGHT.name, PHONE.name],

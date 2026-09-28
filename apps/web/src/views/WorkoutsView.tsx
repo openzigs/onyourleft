@@ -473,10 +473,6 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
         <>
           {chosen}
           <h2>Build a workout</h2>
-          <p>
-            Targets are a percentage of your own threshold power, so the same workout works whatever
-            shape you are in. A free-ride block releases the trainer instead of holding a target.
-          </p>
 
           <h3>This workout</h3>
           {blocks.length === 0 ? (
@@ -517,7 +513,10 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
             #670: the workout, its name and *Save workout* come BEFORE the
             form that adds a block, so the pane's one primary is on screen on
             arrival on a landscape tablet — below the block form it was 72 px
-            under the fold there.
+            under the fold there. The sentence about targets goes with the
+            form whose boxes take them, and not above the name box: on a
+            phone's one pane it put the first control under the fold on the
+            CI runner's fonts.
           */}
           {/*
             Every form here is named: #670's audit of a populated screen —
@@ -526,6 +525,11 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
           */}
           <form aria-label="Add a block" onSubmit={onAddBlock}>
             <h3>Add a block</h3>
+            <p>
+              Targets are a percentage of your own threshold power, so the same workout works
+              whatever shape you are in. A free-ride block releases the trainer instead of holding a
+              target.
+            </p>
             <p>
               <label htmlFor="block-kind">Kind</label>
               <select
