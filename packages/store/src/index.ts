@@ -78,10 +78,13 @@ export {
   workoutId,
 } from './ids';
 
-// --- Visibility (ADR 0004 decision A) ---------------------------------------
+// --- The rider's kit colour (#623) ------------------------------------------
 
 export type { KitColour } from './kit-colour';
 export { DEFAULT_KIT_COLOUR, isKitColour, KIT_COLOURS, parseKitColour } from './kit-colour';
+
+// --- Visibility (ADR 0004 decision A) ---------------------------------------
+
 export type { UnitSystem } from './unit-system';
 export { DEFAULT_UNIT_SYSTEM, isUnitSystem, parseUnitSystem, UNIT_SYSTEMS } from './unit-system';
 export type { Visibility } from './visibility';

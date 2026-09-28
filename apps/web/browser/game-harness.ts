@@ -77,7 +77,7 @@ import {
   verticalHalfTangent,
 } from '../src/game/camera';
 import { emptyRiderJoints, RIDER_BICYCLE_PARTS, riderJoints } from '../src/game/bicycle';
-import type { CameraPose, GameView, SceneFrame } from '../src/game/port';
+import type { CameraPose, GameView, RiderMarker, SceneFrame } from '../src/game/port';
 import type { WorldStyle } from '../src/game/world';
 
 import { sceneFrame as builtSceneFrame } from '../src/game/scene';
@@ -4187,6 +4187,17 @@ export interface KitMeasurement {
    */
   readonly chosen: { readonly colour: KitColour; readonly back: readonly number[] };
   readonly house: readonly number[];
+  /**
+   * #623's review (B1): the same square after the view was dressed in
+   * {@link KIT_PROBE_CHOICE} while it held NO realistic drawing — stepped down
+   * to the stylised world — and then stepped back, which builds the drawing
+   * again. On a ride that is the only way the kit reaches the realistic
+   * rider: `GameView` dresses the view straight after `create`, before its
+   * first realistic render builds the drawing, and a step down and back
+   * builds it anew. Both go through the drawing's CONSTRUCTOR, where
+   * {@link chosen} dresses a drawing that already exists and cannot see it.
+   */
+  readonly dressedWithNoDrawing: readonly number[];
 }
 
 const NO_KIT: KitMeasurement = {
@@ -4198,6 +4209,7 @@ const NO_KIT: KitMeasurement = {
   backs: { rider: [], bot: [], ghost: [] },
   chosen: { colour: 'house', back: [] },
   house: [],
+  dressedWithNoDrawing: [],
 };
 
 /**
@@ -4235,14 +4247,9 @@ const KIT_PROBE_BACK_METRES = 0.1;
  * relief and the light, and that must fall below the floor the kit is held
  * above. **The empty frame** says the square was the rider.
  */
-function kitProbe(
-  view: GameView,
-  gl: WebGL2RenderingContext,
-  canvas: HTMLCanvasElement,
-  base: SceneFrame,
-): KitMeasurement {
+function kitSquare(base: SceneFrame, canvas: HTMLCanvasElement): KitSquare | undefined {
   const [rider] = base.markers.filter((marker) => marker.kind === 'rider');
-  if (rider === undefined) return NO_KIT;
+  if (rider === undefined) return undefined;
   const pose = base.camera;
   const roadY = pose.y;
   const heading = { x: pose.headingX, z: pose.headingZ };
@@ -4281,19 +4288,55 @@ function kitProbe(
     z: marker.z + local.z * heading.z,
   };
   const frame: SceneFrame = { ...base, camera, markers: [marker], scatter: [] };
-  const centre = pixelFor(frame, canvas, point);
+  return { frame, marker, centre: pixelFor(frame, canvas, point) };
+}
+
+/** The frame {@link kitProbe} reads the rider's back in, and where. */
+interface KitSquare {
+  readonly frame: SceneFrame;
+  readonly marker: RiderMarker;
+  readonly centre: { readonly x: number; readonly y: number };
+}
+
+/** A {@link KitSquare}'s pixels, `scene` drawn twice first. */
+function readKitSquare(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  square: KitSquare,
+  scene: SceneFrame = square.frame,
+): Uint8Array {
+  view.render(scene);
+  view.render(scene);
   const side = KIT_PROBE_HALF * 2 + 1;
-  const read = (scene: SceneFrame): Uint8Array => {
-    view.render(scene);
-    view.render(scene);
-    return readRegion(
-      gl,
-      Math.round(centre.x) - KIT_PROBE_HALF,
-      Math.round(centre.y) - KIT_PROBE_HALF,
-      side,
-      side,
-    );
-  };
+  return readRegion(
+    gl,
+    Math.round(square.centre.x) - KIT_PROBE_HALF,
+    Math.round(square.centre.y) - KIT_PROBE_HALF,
+    side,
+    side,
+  );
+}
+
+/** The mean 8-bit sRGB of a square of pixels. */
+function meanRgbOf(pixels: Uint8Array): number[] {
+  return [0, 1, 2].map((channel) => {
+    let sum = 0;
+    for (let at = channel; at < pixels.length; at += 4) sum += pixels[at] ?? 0;
+    return sum / (pixels.length / 4);
+  });
+}
+
+/** @see kitSquare */
+function kitProbe(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  base: SceneFrame,
+): KitMeasurement {
+  const square = kitSquare(base, canvas);
+  if (square === undefined) return NO_KIT;
+  const { frame, marker } = square;
+  const read = (scene: SceneFrame): Uint8Array => readKitSquare(view, gl, square, scene);
   const lumas = (pixels: Uint8Array): number[] => {
     const out: number[] = [];
     for (let at = 0; at < pixels.length; at += 4) {
@@ -4307,12 +4350,7 @@ function kitProbe(
     const mean = meanOf(values);
     return meanOf(values.map((value) => (value - mean) ** 2));
   };
-  const rgbOf = (pixels: Uint8Array): number[] =>
-    [0, 1, 2].map((channel) => {
-      let sum = 0;
-      for (let at = channel; at < pixels.length; at += 4) sum += pixels[at] ?? 0;
-      return sum / (pixels.length / 4);
-    });
+  const rgbOf = meanRgbOf;
   const product = lumas(read(frame));
   let control: number[];
   try {
@@ -4344,6 +4382,7 @@ function kitProbe(
     backs,
     chosen: { colour: KIT_PROBE_CHOICE, back: chosen },
     house,
+    dressedWithNoDrawing: NO_KIT.dressedWithNoDrawing,
   };
 }
 
@@ -6112,8 +6151,20 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const afterStepDownStandard = sceneMaterialsOf(view).filter(
     (each) => each.visible && each.type === 'MeshStandardMaterial',
   ).length;
-  view.destroy();
   phaseEnds('realistic: step down');
+
+  // #623's review (B1): dressed while the view holds no realistic drawing —
+  // as `GameView` dresses a new view — then stepped back, which builds the
+  // drawing again. @see KitMeasurement.dressedWithNoDrawing
+  const kitSquareOnce = kitSquare(riding(level, 400), canvas);
+  let dressedWithNoDrawing: number[] = [];
+  if (kitSquareOnce !== undefined) {
+    view.setRiderKit(KIT_PROBE_CHOICE);
+    view.setQuality(top);
+    dressedWithNoDrawing = meanRgbOf(readKitSquare(view, gl, kitSquareOnce));
+  }
+  view.destroy();
+  phaseEnds('realistic: the kit, dressed with no drawing — #623');
 
   console.log(
     `realistic: loaded in ${loadMs.toFixed(0)} ms; a frame ${realisticFrameMs.toFixed(1)} ms against ` +
@@ -6175,7 +6226,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     tint,
     grounding,
     tread,
-    kit,
+    kit: { ...kit, dressedWithNoDrawing },
     horizon,
     horizonControl,
     horizonColours,

@@ -234,6 +234,16 @@ export const KIT_SAVED = 'Saved. You ride in this colour from your next ride.';
 export const KIT_NOT_KEPT =
   'This browser has no local store, so this colour lasts until the page closes.';
 
+/**
+ * Where the choice is kept, said under "More about your kit" — one sentence
+ * with a store and the other without, so the explanation never contradicts
+ * {@link KIT_NOT_KEPT} beside it (#623's review, F2).
+ */
+export const KIT_KEPT =
+  'It is kept with your rides and goes with them when you take everything with you.';
+export const KIT_KEPT_NOWHERE =
+  'With no local store in this browser, it is not kept with your rides.';
+
 /** Said when the write failed. Names the failure rather than swallowing it. */
 export function kitSaveFailure(reason: string): string {
   return `That could not be saved, so you still ride in the colour you had: ${reason}`;
@@ -1144,9 +1154,7 @@ function KitPanel({
           The pacer rides in orange and your own best in grey-blue, so there is no red, orange or
           blue here: a rider in either could be taken for one of them at a glance.
         </p>
-        <p className="oyl-muted">
-          It is kept with your rides and goes with them when you take everything with you.
-        </p>
+        <p className="oyl-muted">{port === undefined ? KIT_KEPT_NOWHERE : KIT_KEPT}</p>
       </MoreAbout>
     </section>
   );

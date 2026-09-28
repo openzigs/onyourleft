@@ -40,6 +40,8 @@ import {
   ANNOUNCEMENTS_NOT_KEPT,
   ANNOUNCEMENTS_SAVED,
   KIT_NO_ATHLETE,
+  KIT_KEPT,
+  KIT_KEPT_NOWHERE,
   KIT_NOT_KEPT,
   KIT_SAVED,
 } from './SettingsView';
@@ -1217,6 +1219,16 @@ describe('the kit colour — #623', () => {
     expect(told).toEqual(['magenta']);
     expect(mounted.container.textContent).toContain(KIT_NOT_KEPT);
     expect(mounted.container.textContent).not.toContain(KIT_SAVED);
+    // #623's review (F2): the explanation says so too, and never "kept".
+    expect(mounted.container.textContent).toContain(KIT_KEPT_NOWHERE);
+    expect(mounted.container.textContent).not.toContain(KIT_KEPT);
+    mounted.unmount();
+  });
+
+  it('with a store, says the choice is kept with the rider’s rides', async () => {
+    const mounted = await mountWith({ kit: kitPort('row', []) }, []);
+    expect(mounted.container.textContent).toContain(KIT_KEPT);
+    expect(mounted.container.textContent).not.toContain(KIT_KEPT_NOWHERE);
     mounted.unmount();
   });
 });

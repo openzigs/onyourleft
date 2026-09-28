@@ -3488,6 +3488,23 @@ test.describe('the realistic world — ADR 0026', () => {
         3,
       );
     }
+    // #623's review (B1): on a ride the realistic rider is dressed ONLY by the
+    // realistic drawing's constructor — `GameView` dresses a new view before its
+    // first realistic render builds the drawing, and a step down and back builds
+    // it again. The view dressed magenta while stepped down, then stepped back,
+    // must read magenta's two bands; the house read above is the control that
+    // the same square in the house kit reads otherwise.
+    // @see KitMeasurement.dressedWithNoDrawing
+    const dressed = kit.dressedWithNoDrawing;
+    console.log(
+      `#623: dressed while the view held no realistic drawing, then drawn ${JSON.stringify(dressed)}`,
+    );
+    expect(dressed).toHaveLength(3);
+    const [dressedRed, dressedGreen, dressedBlue] = dressed as [number, number, number];
+    expect(dressedRed - dressedGreen).toBeGreaterThan(CHOSEN_BACK_RED_OVER_GREEN.floor);
+    expect(dressedRed - dressedGreen).toBeLessThan(CHOSEN_BACK_RED_OVER_GREEN.ceiling);
+    expect(dressedBlue - dressedGreen).toBeGreaterThan(CHOSEN_BACK_BLUE_OVER_GREEN.floor);
+    expect(dressedBlue - dressedGreen).toBeLessThan(CHOSEN_BACK_BLUE_OVER_GREEN.ceiling);
     // And the two are not one colour.
     expect(Math.abs(red - houseRed)).toBeGreaterThan(KIT_TINTS_APART);
   });

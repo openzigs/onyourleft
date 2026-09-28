@@ -46,10 +46,10 @@
  * | `unscopedAttemptStoreFactory` | *cross-athlete exposure* — a **read** that matched on route and forgot the rider | every ride is written and read back correctly, and the ghost list contains a stranger's ride |
  * | `staleUnitsStoreFactory` | *wrong layer* — the narrow write computed the row and returned it without persisting it | the call answers with a row saying `imperial`, and a fresh connection still says metric |
  * | `roundedMassStoreFactory` | *wrong layer* — a layer above tidied a mass to a whole kilogram on its way in | the row comes back with a mass, a plausible one, and a pound reading that is no longer what the rider typed |
+ * | `misfiledKitColourStoreFactory` | *wrong storage* — the right table and the right row, under a key the reader does not use | the call answers with the chosen colour, and a fresh connection reads the house kit |
  * | `survivingFrameStoreFactory` | *wrong time* — a **delete** that reports how many it removed and removes nothing | the erase says "2 pictures removed", and a fresh connection still has both |
  * | `firstReferenceStoreFactory` | *wrong time* — a put that kept the row already there instead of replacing it | every put succeeds and the reference comes back well-formed — **from the first session**, not the last |
  * | `lastSentenceDroppedReportStoreFactory` | *wrong layer* — a layer above dropped the last sentence of the side camera's report on its way in | the report comes back for the right ride, with the right summary and a plausible list — **one observation short**, and nothing on the page says so |
- * | `misfiledKitColourStoreFactory` | *wrong storage* — the right table and the right row, under a key the reader does not use | the call answers with the chosen colour, and a fresh connection reads the house kit |
  * | `verdictlessReferenceStoreFactory` | *wrong layer* — a layer above copied the reference's numbers and dropped whether the framing check passed | every landmark comes back exact, and the session's verdict is **gone**, so no later report may compare it with anything |
  *
  * The second and third are the ones a naive harness misses. Both write to the
