@@ -86,7 +86,7 @@ assert_violation() {
   out="$(bash "${CHECKER}" "${fixture_root}" 2>&1)"
   status=$?
   if [ "${status}" -ne 0 ] \
-     && printf '%s' "${out}" | grep "^${rule}: " | grep -qF -- "${needle}"; then
+     && grep -qF -- "${needle}" <<< "$(grep "^${rule}: " <<< "${out}")"; then
     pass=$((pass + 1))
     printf 'ok   %s\n' "${name}"
   else
@@ -124,7 +124,7 @@ assert_violation_all() {
     [ -n "${line}" ] || continue
     missing=""
     for needle in "$@"; do
-      printf '%s' "${line}" | grep -qF -- "${needle}" || missing="${missing} \"${needle}\""
+      grep -qF -- "${needle}" <<< "${line}" || missing="${missing} \"${needle}\""
     done
     if [ -z "${missing}" ]; then
       matched="${line}"
@@ -165,7 +165,7 @@ assert_violations() {
     rule="$1"
     needle="$2"
     shift 2
-    printf '%s\n' "${out}" | grep "^${rule}: " | grep -qF -- "${needle}" \
+    grep -qF -- "${needle}" <<< "$(grep "^${rule}: " <<< "${out}")" \
       || missing="${missing} ${rule}/\"${needle}\""
   done
   if [ "${status}" -ne 0 ] && [ -z "${missing}" ]; then
@@ -201,7 +201,7 @@ assert_violation_and_silence() {
   # `printf` dead of SIGPIPE, the pipeline then fails, and `!` turns a FOUND
   # line into a pass. Every negated read in this file takes this form.
   if [ "${status}" -ne 0 ] \
-     && printf '%s' "${out}" | grep "^${rule}: " | grep -qF -- "${needle}" \
+     && grep -qF -- "${needle}" <<< "$(grep "^${rule}: " <<< "${out}")" \
      && ! grep -q "^${silent}: " <<< "${out}"; then
     pass=$((pass + 1))
     printf 'ok   %s\n' "${name}"
@@ -233,7 +233,7 @@ assert_helper_fails() {
   local name="$1" out
   shift
   out="$("$@" 2>&1)"
-  if printf '%s\n' "${out}" | grep -q '^FAIL '; then
+  if grep -q '^FAIL ' <<< "${out}"; then
     pass=$((pass + 1))
     printf 'ok   %s\n' "${name}"
   else
@@ -253,7 +253,7 @@ assert_helper_passes() {
   local name="$1" out
   shift
   out="$("$@" 2>&1)"
-  if printf '%s\n' "${out}" | grep -q '^FAIL '; then
+  if grep -q '^FAIL ' <<< "${out}"; then
     fail=$((fail + 1))
     printf 'FAIL %s\n     %s rejected it; expected the helper to pass\n%s\n' \
       "${name}" "$1" "${out}"
@@ -471,9 +471,9 @@ printf '# ADR 0002\n' > "${fixture_root}/docs/adr/0002-local-first-architecture.
 out="$(bash "${CHECKER}" "${fixture_root}" 2>&1)"
 status=$?
 if [ "${status}" -ne 0 ] \
-   && printf '%s' "${out}" | grep -q '^ADR001: ' \
+   && grep -q '^ADR001: ' <<< "${out}" \
    && ! grep -qF 'is already taken' <<< "${out}" \
-   && printf '%s' "${out}" | grep -qF 'docs/architecture.md'; then
+   && grep -qF 'docs/architecture.md' <<< "${out}"; then
   pass=$((pass + 1))
   printf 'ok   ADR001 points at the ownership table instead of naming a file to renumber\n'
 else
@@ -779,7 +779,7 @@ out="$(bash "${CHECKER}" "${fixture_root}" 2>&1)"
 status=$?
 if [ "${status}" -ne 0 ] \
    && [ ! -e "${canary}" ] \
-   && printf '%s' "${out}" | grep -q '^ADR003: '; then
+   && grep -q '^ADR003: ' <<< "${out}"; then
   pass=$((pass + 1))
   printf 'ok   a command substitution in an amendment entry is reported, not executed\n'
 else
@@ -894,7 +894,7 @@ out="$(bash "${CHECKER}" "${fixture_root}" 2>&1)"
 status=$?
 if [ "${status}" -ne 0 ] \
    && [ ! -e "${canary}" ] \
-   && printf '%s' "${out}" | grep -q 'dated 2026-09-05 follows one dated 2026-09-09'; then
+   && grep -q 'dated 2026-09-05 follows one dated 2026-09-09' <<< "${out}"; then
   pass=$((pass + 1))
   printf 'ok   a command substitution in a DATED entry is reported, not executed\n'
 else
@@ -1047,7 +1047,7 @@ new_fixture
 out="$(bash "${CHECKER}" "${fixture_root}" 2>&1)"
 status=$?
 if [ "${status}" -ne 0 ] \
-   && printf '%s' "${out}" | grep -q '^ADR003: ' \
+   && grep -q '^ADR003: ' <<< "${out}" \
    && ! grep -q '^ADR004: ' <<< "${out}"; then
   pass=$((pass + 1))
   printf 'ok   an unclosed fence is ADR003 alone, not a misleading ADR004\n'
@@ -1062,8 +1062,10 @@ cleanup_fixture
 # not have found on the machine it was written on.
 #
 # The first version of ADR004 asked `printf '%s\n' "${body}" | grep -q ...`.
-# `grep -q` exits at the first match and closes the pipe; a document bigger than
-# the pipe buffer then gives the producer EPIPE, and this script runs under
+# `grep -q` exits at the first match and closes the pipe; a producer still
+# writing then gets EPIPE -- and on Linux ANY multi-line producer can be, since
+# bash's `printf` writes one line per `write(2)` (#743; a large document makes
+# the race near-certain, not possible), and this script runs under
 # `set -o pipefail`, so the whole pipeline reports a failure for a document that
 # MATCHED. On the Ubuntu runner that printed `printf: write error: Broken pipe`
 # and reported six real ADRs as having no Status. On macOS, where `printf` is a
@@ -2699,6 +2701,60 @@ write_good_app web
 write_binary_asset apps/web/src/models/rider.glb
 assert_violation "the same binary one directory across from a pruned one is found" ASSET001 \
   "apps/web/src/models/rider.glb: a committed binary"
+
+# --- SH001: no shell pipeline into `grep -q` (#743) --------------------------
+#
+# Every planted line is ASSEMBLED from `${P}`, a pipe held in a variable, so
+# that this file carries no line SH001 would report -- "this repository passes
+# its own rules" below walks it too. The planted script lands under scripts/,
+# which LIC001/LIC002 do not scan, so SH001 is the only rule it can trip.
+P='|'
+write_script() {
+  mkdir -p "${fixture_root}/scripts"
+  printf '%s\n' '#!/usr/bin/env bash' 'set -uo pipefail' "$@" \
+    > "${fixture_root}/scripts/example.test.sh"
+}
+
+new_fixture
+write_script 'out="$(true)"' "if printf '%s' \"\${out}\" ${P} grep -qF -- 'x'; then :; fi"
+assert_violation "a printf piped into grep -qF is refused, naming the line" SH001 \
+  'scripts/example.test.sh:4: a pipeline into `grep -q`'
+
+new_fixture
+write_script "if ! printf '%s' \"\${out:-}\" ${P} grep -q '^FAIL '; then :; fi"
+assert_violation "the NEGATED form, which a lost race turns into a silent pass, is refused" SH001 \
+  'scripts/example.test.sh:3: a pipeline into `grep -q`'
+
+new_fixture
+write_script "entry_block() { :; }" "entry_block a 1 ${P}grep -Fq 'y' && :"
+assert_violation "a function piped into grep with q bundled after another flag is refused" SH001 \
+  'scripts/example.test.sh:4:'
+
+new_fixture
+write_script "printf '%s' \"\${out:-}\" ${P} grep --quiet z || :"
+assert_violation "--quiet is the same flag and is refused" SH001 \
+  'scripts/example.test.sh:3:'
+
+new_fixture
+write_script "printf '%s' a ${P} grep \"^R: \" ${P} grep -qF -- 'n' || :"
+assert_violation "the three-stage form is refused: the middle grep can die of SIGPIPE too" SH001 \
+  'scripts/example.test.sh:3:'
+
+new_fixture
+mkdir -p "${fixture_root}/tools"
+printf '%s\n' '#!/usr/bin/env bash' "printf x ${P} grep -q x" > "${fixture_root}/tools/probe.sh"
+assert_violation "a shell script outside scripts/ is walked as well" SH001 'tools/probe.sh:2:'
+
+new_fixture
+write_script \
+  "# printf '%s' \"\${out}\" ${P} grep -q x -- a comment may name the pipeline" \
+  "  # and so may an indented one: printf a ${P} grep -q a" \
+  "grep -qF -- 'x' <<< \"\${out:-}\" || :" \
+  "grep -q '^R: ' <<< \"\$(printf '%s' a ${P} grep 'R')\" || :" \
+  "true || grep -q never <<< ''" \
+  "n=0; printf '%s' \"\${#n}\" ${P} grep -c x || :" \
+  "printf '%s' a ${P} grep -v q || :"
+assert_clean "a here-string, a comment, \`|| grep -q\`, and a grep without -q all pass"
 
 # --- The real repository must pass -------------------------------------------
 

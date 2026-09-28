@@ -89,7 +89,7 @@ assert_red() {
 
 assert_says() {
   local name="$1" expected="$2"
-  if printf '%s' "${out}" | grep -qF -- "${expected}"; then
+  if grep -qF -- "${expected}" <<< "${out}"; then
     pass=$((pass + 1))
   else
     fail=$((fail + 1))
@@ -270,7 +270,7 @@ else
   fail=$((fail + 1))
   printf 'FAIL: the checker exits 0 from a path containing a space\n  output:\n%s\n' "${spaced_out}"
 fi
-if printf '%s' "${spaced_out}" | grep -qF 'audit.test.ts'; then
+if grep -qF 'audit.test.ts' <<< "${spaced_out}"; then
   pass=$((pass + 1))
 else
   fail=$((fail + 1))

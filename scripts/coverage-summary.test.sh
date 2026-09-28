@@ -50,7 +50,7 @@ file_entry() {
 
 assert() {
   local name="$1" expected="$2" actual="$3"
-  if printf '%s' "${actual}" | grep -qF -- "${expected}"; then
+  if grep -qF -- "${expected}" <<< "${actual}"; then
     pass=$((pass + 1))
   else
     fail=$((fail + 1))
@@ -60,7 +60,7 @@ assert() {
 
 assert_absent() {
   local name="$1" unexpected="$2" actual="$3"
-  if printf '%s' "${actual}" | grep -qF -- "${unexpected}"; then
+  if grep -qF -- "${unexpected}" <<< "${actual}"; then
     fail=$((fail + 1))
     printf 'FAIL: %s\n  expected NOT to contain: %s\n  got:\n%s\n\n' "${name}" "${unexpected}" "${actual}"
   else
