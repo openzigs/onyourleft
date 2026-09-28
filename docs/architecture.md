@@ -598,6 +598,24 @@ Chromium. That read-back is what now holds [#688](https://github.com/openzigs/on
 hovered secondary, found at 1.40:1 on the shell harness's specimens while #667 was being built: a
 state nobody meant to draw is a pair nobody declared.
 
+**A list beside its detail** ([#670](https://github.com/openzigs/onyourleft/issues/670)). Activities,
+Workouts and Routes declare `layout: 'list-detail'` on the route table (`shell/routes.ts`
+§`RouteLayout`), Material 3's list–detail canonical layout taken as a pattern (ADR 0009): at an
+expanded window — `theme.css` §`--oyl-list-detail-from`, 52.5rem, the one place the width is
+written — the list sits in a 22.5rem pane and the detail takes the rest; below it there is one pane.
+`shell/ListDetail.tsx` decides the panes by reading that property back and asking `matchMedia`, and
+writes `hidden` on the pane that is not shown rather than styling it away, because the audit loads no
+stylesheet (§4e of CLAUDE.md). A selection lives in the URL — `#/<list>/selected/<id>`, a route's
+`selection` path, which `matchHash` matches to the LIST route with the id as its parameter — so the
+view stays mounted, and back, reload and a shared link land on the same item; `#/activities/<id>`
+is still a ride's own full page. An id the list did not read is read on its own (`getActivity`,
+`getWorkout`, `getRoute`), and one the device does not hold is a stated "not found". Choosing an item
+moves focus to the detail's heading; letting it go returns focus to the item; each pane is a named
+region, and a skip link moves between them. The one-primary rule counts **per pane** on a
+`list-detail` `main`, and only there. `browser/list-detail.browser.spec.ts` measures the panes side
+by side on a landscape tablet, with the routes switched back to `prose` as its control, and publishes
+each primary action's place on arrival.
+
 ⚠️ **#307's review added a fourth thing, and it is a gate rather than a system.** The first three are
 all checkable *without a browser* — a colour ratio, a number against a ratio, a `var()` against a
 declaration — and that is exactly why the one part of #307 nothing could check went wrong. It made
