@@ -89,16 +89,25 @@ describe('the drawn maps — #624', () => {
   });
 
   it('stores every normal as a unit vector facing out of the surface', () => {
+    // The extremes over every texel, asserted once: an expect per texel is
+    // 400 000 calls, and under coverage on the CI runner that timed out.
+    let shortest = Number.POSITIVE_INFINITY;
+    let longest = 0;
+    let lowestZ = Number.POSITIVE_INFINITY;
     for (const map of [rubber, metal]) {
       for (let at = 0; at < map.pixels.length; at += 3) {
-        const [x, y, z] = [0, 1, 2].map(
-          (channel) => ((map.pixels[at + channel] ?? 0) / 255) * 2 - 1,
-        );
-        expect(Math.hypot(x ?? 0, y ?? 0, z ?? 0)).toBeGreaterThan(0.98);
-        expect(Math.hypot(x ?? 0, y ?? 0, z ?? 0)).toBeLessThan(1.02);
-        expect(z).toBeGreaterThan(0.3);
+        const x = ((map.pixels[at] ?? 0) / 255) * 2 - 1;
+        const y = ((map.pixels[at + 1] ?? 0) / 255) * 2 - 1;
+        const z = ((map.pixels[at + 2] ?? 0) / 255) * 2 - 1;
+        const length = Math.hypot(x, y, z);
+        shortest = Math.min(shortest, length);
+        longest = Math.max(longest, length);
+        lowestZ = Math.min(lowestZ, z);
       }
     }
+    expect(shortest).toBeGreaterThan(0.98);
+    expect(longest).toBeLessThan(1.02);
+    expect(lowestZ).toBeGreaterThan(0.3);
   });
 
   it('draws tread at the tyre’s crown and nothing on its bead, where the saddle samples', () => {
