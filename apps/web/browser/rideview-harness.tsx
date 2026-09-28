@@ -141,8 +141,8 @@ const FLOOR: WorkoutRescue = {
 
 /**
  * `rideview.html?keepalive=failed` — #647: the platform refused to keep the
- * ride alive, so `RideView` shows *"Keep the screen on: your ride may stop if
- * the screen goes off."* beside the Live group's heading. Through the stub's
+ * ride alive, so `RideView` shows *"Keep the screen on: your ride may stop
+ * without it."* beside the Live group's heading. Through the stub's
  * snapshot for the reason {@link WORKOUT_STATE} is: this page measures where
  * the sentence lands; `ride/keep-alive-notice.a11y.test.tsx` §"the Ride
  * screen — #647" drives the real controller with a refusing port and reads the

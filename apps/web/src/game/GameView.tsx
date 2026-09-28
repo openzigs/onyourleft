@@ -388,6 +388,12 @@ export const STANDING_NOTICE_SECONDS = 15;
  * `ride.browser.spec.ts` §"#647" measures both sides of this line, with the
  * rule taken away as the control.
  *
+ * ⚠️ Those figures are for the sentence as it was. Since #693's re-review it
+ * is one line there (`ride/controller.ts` §`RIDE_MAY_STOP_WITH_SCREEN_OFF`),
+ * and the pair, open, ends 26 px above the rider's box at 360×800 and 1 px
+ * above it at 360×752 on a Mac — clear of it, and still under the 50 px
+ * clearance, so the rule stands.
+ *
  * A query rather than a measurement, because what decides it is the layout
  * the stylesheet chose, and this is that layout's own condition narrowed.
  */
@@ -398,6 +404,35 @@ function oneNoticeOnly(): boolean {
   return (
     typeof window.matchMedia === 'function' && window.matchMedia(ONE_NOTICE_ONLY_QUERY).matches
   );
+}
+
+/**
+ * {@link oneNoticeOnly}, kept current — #693's re-review.
+ *
+ * ⚠️ **Subscribed, not read during render.** A running ride re-renders on
+ * every frame, but a PAUSED one does not, so a rider who paused and turned a
+ * tablet-width window into a 360 px upright phone kept the road notice open
+ * beside the refusal until the ride resumed — the pair this rule exists to
+ * keep off the rider. The `change` event re-renders the HUD by itself.
+ */
+function useOneNoticeOnly(): boolean {
+  const [matches, setMatches] = useState(oneNoticeOnly);
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') {
+      return undefined;
+    }
+    const list = window.matchMedia(ONE_NOTICE_ONLY_QUERY);
+    const changed = (): void => {
+      setMatches(list.matches);
+    };
+    // A change between the first render and this effect is not missed.
+    changed();
+    list.addEventListener('change', changed);
+    return () => {
+      list.removeEventListener('change', changed);
+    };
+  }, []);
+  return matches;
 }
 
 /** A ride on the stylised ladder, at its top — every ride that did not choose realism. */
@@ -584,6 +619,8 @@ export function GameView(props: GameViewProps): JSX.Element {
    * never said. It is offered on every frame until the core returns it.
    */
   const mayStopSaidRef = useRef(false);
+  /** @see useOneNoticeOnly */
+  const narrowUpright = useOneNoticeOnly();
   /**
    * The side camera — #551. The hook is what re-renders the HUD when the
    * phone's state changes, including while the ride is paused and the loop is
@@ -1534,7 +1571,7 @@ export function GameView(props: GameViewProps): JSX.Element {
   // it comes back the moment the recording service does. Everywhere else it
   // behaves exactly as it does without the refusal.
   const roadNotice =
-    eased === undefined && !(mayStop && oneNoticeOnly())
+    eased === undefined && !(mayStop && narrowUpright)
       ? trainerRoadNotice(trainer, 'riding')
       : undefined;
   // #437: open for the first STANDING_NOTICE_SECONDS of ride, then out of the

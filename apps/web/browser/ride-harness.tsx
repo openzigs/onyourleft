@@ -282,6 +282,19 @@ const SIDE_PAIRING =
  */
 const MAY_STOP = new URLSearchParams(window.location.search).get('keepalive') === 'failed';
 
+/**
+ * `ride.html?gradient=refused` — a trainer that refuses every gradient, so the
+ * HUD carries the *Trainer* fault in its notice cell (#693's re-review: the
+ * cell stacks every notice that is never put away, and keep-the-screen-on is
+ * measured beside each of them). The refusal is `control-not-permitted`,
+ * whose sentence is the longest of `gradient.ts` §`faultText`'s four.
+ *
+ * ⚠️ The fault is cleared as each new gradient is offered and set again when
+ * it is refused, so it can be absent for a frame. A measurement that needs it
+ * checks for it in the same evaluation.
+ */
+const REFUSED = new URLSearchParams(window.location.search).get('gradient') === 'refused';
+
 /** A trainer that accepts every gradient, so the trainer line is on the screen. */
 const TRAINER: GameTrainerPort = {
   // #503: the Ride press's request for control — this double changes nothing.
@@ -294,7 +307,8 @@ const TRAINER: GameTrainerPort = {
       : {
           kind: 'ready',
           control: {
-            setSimulationParameters: async () => Promise.resolve(),
+            setSimulationParameters: async () =>
+              REFUSED ? Promise.reject(new Error('control-not-permitted')) : Promise.resolve(),
             letGo: async () => Promise.resolve({ kind: 'stopped' as const }),
           },
         },
@@ -522,8 +536,10 @@ async function run(): Promise<void> {
   // The trainer line appears once the gradient session has written once, which
   // is a frame or two in. Waiting for it is what makes it part of every
   // measurement rather than of whichever ones happened to run late.
-  await until(WITH_A_NOTICE ? 'the notice' : 'the trainer line', () =>
-    document.querySelector(WITH_A_NOTICE ? '.oyl-hud__notices' : '.oyl-hud__trainer'),
+  // A refusing trainer never shows the line for long: its fault replaces it.
+  const noticeFirst = WITH_A_NOTICE || REFUSED;
+  await until(noticeFirst ? 'the notice' : 'the trainer line', () =>
+    document.querySelector(noticeFirst ? '.oyl-hud__notices' : '.oyl-hud__trainer'),
   );
   // #585: the Eased notice, when this page was asked for a rescue.
   if (RESCUE !== undefined) {
@@ -538,6 +554,14 @@ async function run(): Promise<void> {
     await until('the keep-the-screen-on notice', () =>
       [...document.querySelectorAll('.oyl-hud__notices')].find((each) =>
         (each.textContent ?? '').includes('Keep the screen on'),
+      ),
+    );
+  }
+  // The trainer's fault, when this page was asked for a refusing trainer.
+  if (REFUSED) {
+    await until('the trainer fault', () =>
+      [...document.querySelectorAll('.oyl-hud__notices')].find((each) =>
+        (each.textContent ?? '').includes('stopped accepting the road'),
       ),
     );
   }

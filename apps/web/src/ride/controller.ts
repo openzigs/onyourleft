@@ -430,11 +430,19 @@ export const RIDE_NOTIFICATION_REFUSED =
  * ruling on #654's re-review of #647. It is short so that it fits where it is
  * shown: beside the Live heading on the Ride screen and in the HUD's notice cell
  * (`ride.browser.spec.ts` and `rideview.browser.spec.ts` §"#647" measure both).
+ *
+ * ⚠️ **Short enough for ONE line in the HUD's notice cell at 360 px** — #693's
+ * re-review, B2. It used to be *"your ride may stop if the screen goes off."*,
+ * two lines there, and beside *Eased* (#585) the cell ended 38 px above the
+ * leaning rider's box at 360×752 in the pinned Chromium, under #605's 50 px
+ * floor. Neither notice may be put away, so the sentence got shorter: *"it"*
+ * is the screen the label has just named. `ride.browser.spec.ts` §"keep the
+ * screen on, beside every notice that stays" publishes the clearance.
  */
 export const KEEP_SCREEN_ON_LABEL = 'Keep the screen on';
 
 /** @see KEEP_SCREEN_ON_LABEL */
-export const RIDE_MAY_STOP_WITH_SCREEN_OFF = 'your ride may stop if the screen goes off.';
+export const RIDE_MAY_STOP_WITH_SCREEN_OFF = 'your ride may stop without it.';
 
 /**
  * The same, as the ride's one announcement region says it (#647) — the label

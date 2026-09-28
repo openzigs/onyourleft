@@ -596,14 +596,36 @@ describe('the game’s HUD — #647', () => {
     expect(spokenTimes()).toBe(2);
   });
 
+  /**
+   * A window `ONE_NOTICE_ONLY_QUERY` does or does not name, as a
+   * `MediaQueryList` that fires `change` when {@link turn} moves it — which is
+   * what a rotation does.
+   */
+  function narrowWindow(initially: boolean): { turn: (narrow: boolean) => void } {
+    let narrow = initially;
+    const listeners = new Set<() => void>();
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      get matches() {
+        return query.includes('width < 25rem') && narrow;
+      },
+      media: query,
+      addEventListener: (_type: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
+    }));
+    return {
+      turn: (next) => {
+        narrow = next;
+        act(() => {
+          for (const listener of listeners) listener();
+        });
+      },
+    };
+  }
+
   it('takes the road notice and its control off the HUD on the narrowest upright phones only — #693’s review', async () => {
     // jsdom lays nothing out, so which window this is comes from `matchMedia`:
     // `ride.browser.spec.ts` §"#647" measures why, and where the line is.
-    const narrow = { matches: true };
-    vi.stubGlobal('matchMedia', (query: string) => ({
-      matches: query.includes('width < 25rem') && narrow.matches,
-      media: query,
-    }));
+    const narrow = narrowWindow(true);
     const refused = { current: true };
     const port: GameTrainerPort = {
       ...refusedForGood({ current: undefined }),
@@ -631,11 +653,38 @@ describe('the game’s HUD — #647', () => {
 
     // Refused again, on a wider window: nothing is taken off.
     refused.current = true;
-    narrow.matches = false;
+    narrow.turn(false);
     await pump(1);
     expect(hudNotice()?.textContent).toBe(SHOWN);
     expect(road()).not.toBeNull();
     expect(toggle()).toBeDefined();
+  });
+
+  it('takes the road notice off when a PAUSED ride is turned into a narrow phone — #693’s re-review', async () => {
+    // A paused ride draws no frame, so nothing re-renders the HUD on its own:
+    // the window's own `change` has to. No `pump` after the turn, on purpose.
+    const narrow = narrowWindow(false);
+    mounted = await mount(
+      <GameView
+        port={PORT}
+        trainer={refusedForGood({ current: undefined })}
+        renderer={() => Promise.resolve(RENDERER)}
+      />,
+    );
+    await settle();
+    await rideOnce();
+    const road = (): Element | null => document.querySelector('#oyl-hud-standing-notice');
+    expect(hudNotice()?.textContent).toBe(SHOWN);
+    expect(road()).not.toBeNull();
+
+    await press('Pause');
+    narrow.turn(true);
+    expect(road()).toBeNull();
+    expect(hudNotice()?.textContent).toBe(SHOWN);
+
+    // And back, still paused.
+    narrow.turn(false);
+    expect(road()).not.toBeNull();
   });
 
   it('clears mid-ride once a sensor pairs and the second ask succeeds', async () => {

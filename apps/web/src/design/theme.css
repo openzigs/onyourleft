@@ -2348,6 +2348,37 @@ p > label + input[type='file'] {
 }
 
 /*
+ * Two notices in the one cell, set tighter — #693's re-review, B2.
+ *
+ * The cell stacks every notice that is never put away (the Trainer fault,
+ * Eased, the side camera lost, Keep the screen on), and on an upright phone
+ * it is over the sky with the rider under it: a pair is the same rider under
+ * a taller cell. So when two statuses share it each gives up half its
+ * vertical padding. The words, their size and their line-height are
+ * untouched, and each notice's left rule still separates it from the next.
+ *
+ * Measured in the pinned Chromium on a Mac at 360×752, the smallest column
+ * layout, with Keep the screen on beside Eased, the side camera lost or the
+ * Trainer fault — the leaning rider's box, less the cell's bottom:
+ *
+ *   round one of #693 (longer sentence, full padding)   38 px
+ *   the one-line sentence, full padding                 54 px
+ *   the longer sentence, this padding                   53 px
+ *   both, as shipped                                    69 px
+ *
+ * Either half alone clears #605's 50 px by a few pixels, which is a font away
+ * from not clearing it, so both are kept. `ride.browser.spec.ts` §"keep the
+ * screen on, beside every notice that stays" holds every pair to 50 and puts
+ * round one back as its control.
+ *
+ * Only statuses that are the cell's own children: the road notice is wrapped
+ * (`HudPanel.tsx` §`STANDING_NOTICE_ID`) and keeps its padding.
+ */
+.oyl-hud__notices:has(> .oyl-status + .oyl-status) > .oyl-status {
+  padding-block: var(--oyl-space-xs);
+}
+
+/*
  * THE OVERLAY, both layouts — what they share (#423).
  *
  * The world fills the stage and the HUD is a grid laid over it, holding four

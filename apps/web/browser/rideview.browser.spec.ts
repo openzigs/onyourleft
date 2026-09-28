@@ -690,7 +690,7 @@ for (const viewport of EASED_VIEWPORTS) {
  * notice was never measured against the controls at all.
  */
 const KEEP_ALIVE_FAILED = '?keepalive=failed';
-const KEEP_SCREEN_ON_TEXT = '!Keep the screen on: your ride may stop if the screen goes off.';
+const KEEP_SCREEN_ON_TEXT = '!Keep the screen on: your ride may stop without it.';
 
 for (const viewport of EASED_VIEWPORTS) {
   const upright = viewport.height > viewport.width;
