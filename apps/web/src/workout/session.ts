@@ -85,6 +85,7 @@ import {
   type WorkoutTimeline,
 } from '@onyourleft/domain';
 import { createErgWriter, type ErgWriter, type TrainerControl } from '@onyourleft/sensors/protocol';
+import { TargetHeldBack } from '../ride/held-back';
 
 /** How long a cadence history is kept for the ERG rule. */
 export const CADENCE_HISTORY_SECONDS = 30;
@@ -433,22 +434,6 @@ export const RELEASE_INCOMPLETE =
   'The trainer did not confirm it let go. It may still be holding resistance — ease off and check before you get off.';
 
 /**
- * A target the ride controller held back rather than sent — #721, #722's
- * review. Its message is the sentence the rider is told, and it is told
- * verbatim (@see faultText): the machine refused nothing, so "The trainer
- * refused that target" would be a false statement about it.
- *
- * Here rather than in `ride/controller.ts` because the controller imports this
- * file, and this file must recognise the refusal without importing it back.
- */
-export class TargetHeldBack extends Error {
-  constructor(sentence: string) {
-    super(sentence);
-    this.name = 'TargetHeldBack';
-  }
-}
-
-/**
  * What a rider is told about a refused write.
  *
  * Deliberately not the raw error: a `SensorError` message names a GATT
@@ -457,21 +442,22 @@ export class TargetHeldBack extends Error {
  * more than it does.
  */
 function faultText(error: unknown): string {
+  // #721: the ride controller, not the machine, held the target back while a
+  // trainer is being forgotten (`ride/controller.ts` §`mustWaitForForget`),
+  // so this does not say the trainer refused anything. Its own sentence says
+  // why and what ends it. By class, not by wording — #722's review — and
+  // FIRST since #724: checked after the substrings below, a reworded reason
+  // that happened to say "timed out" would have been told as a machine that
+  // did not answer.
+  if (error instanceof TargetHeldBack) {
+    return error.message;
+  }
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes('control-not-permitted') || message.includes('Control Not Permitted')) {
     return 'The trainer stopped accepting targets. Take control again to carry on.';
   }
   if (message.includes('timed out') || message.includes('timeout')) {
     return 'The trainer did not answer. The next target will be sent again.';
-  }
-  // #721: the ride controller, not the machine, held the target back while a
-  // trainer is being forgotten (`ride/controller.ts` §`mustWaitForForget`),
-  // so this does not say the trainer refused anything. Its own sentence says
-  // why and what ends it. By class, not by wording — #722's review: a
-  // substring of the sentence tied this file to its words, and rewording it
-  // would have put "The trainer refused that target" back silently.
-  if (error instanceof TargetHeldBack) {
-    return error.message;
   }
   return 'The trainer refused that target. The next one will be sent again.';
 }

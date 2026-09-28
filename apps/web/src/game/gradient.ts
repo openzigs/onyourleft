@@ -106,6 +106,7 @@ import {
 import { createSimulationWriter, type SimulationWriter } from '@onyourleft/sensors/protocol';
 
 import type { GradientTrainer } from './trainer-port';
+import { TargetHeldBack } from '../ride/held-back';
 
 export interface GradientSessionOptions {
   /** The route being ridden. The driver reads its grade at the rider's distance. */
@@ -276,6 +277,15 @@ const RELEASE_INCOMPLETE_ROAD =
  * looking at a hill would go looking for a workout they are not riding.
  */
 function faultText(error: unknown): string {
+  // `ride/controller.ts` §`mustWaitForForget` (#718's second review, #721):
+  // the app, not the machine, held the gradient back, so this does not say the
+  // trainer refused anything. By class and first, never by the reason's words
+  // (#724): until then this matched the substring "still being forgotten", so
+  // rewording the controller's reason would have told the rider "The trainer
+  // refused that gradient" with nothing going red.
+  if (error instanceof TargetHeldBack) {
+    return 'The hills are not being sent yet: Bluetooth is still finishing forgetting a trainer. The next gradient will be sent again.';
+  }
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes('control-not-permitted') || message.includes('Control Not Permitted')) {
     return 'The trainer stopped accepting the road. Take control again on the Ride screen.';
@@ -285,12 +295,6 @@ function faultText(error: unknown): string {
   }
   if (message.includes('timed out') || message.includes('timeout')) {
     return 'The trainer did not answer. The next gradient will be sent again.';
-  }
-  // `ride/controller.ts` §`askedForByTheRider` (#718's second review): the
-  // app, not the machine, held the gradient back, so this does not say the
-  // trainer refused anything.
-  if (message.includes('still being forgotten')) {
-    return 'The hills are not being sent yet: Bluetooth is still finishing forgetting a trainer. The next gradient will be sent again.';
   }
   return 'The trainer refused that gradient. The next one will be sent again.';
 }
