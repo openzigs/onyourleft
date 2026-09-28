@@ -39,6 +39,19 @@
 
 import { createHash } from 'node:crypto';
 
+import {
+  REALISTIC_BICYCLE_MAPS,
+  REALISTIC_BICYCLE_MAP_NAMES,
+  type RealisticBicycleMap,
+} from '../../src/game/realistic-assets';
+
+import {
+  BICYCLE_MAP_KINDS,
+  BICYCLE_MAP_WORDS,
+  drawBicycleMap,
+  pixelDigest,
+} from './draw-bicycle-maps';
+
 /** Hosts whose terms forbid shipping the file in a bundle or a repository. */
 export const BARRED_HOSTS: readonly string[] = ['mixamo.com', 'www.mixamo.com'];
 
@@ -283,8 +296,13 @@ export const PINNED_KTX_VERSION_LINE = 'ktx version: v4.4.2';
  *   ⚠️ **Three channels, not the encoder's `--normal-mode`**: that mode stores
  *   X and Y in RGB and A and needs a shader to rebuild Z, and three's
  *   `normalMap` reads RGB. Nothing here changes a shader.
+ * - `data` — a map that is neither colour nor a normal: the realistic
+ *   bicycle's roughness maps (#624). Encoded exactly as a normal map is —
+ *   UASTC, linear, with Zstandard — because what it holds is a number per
+ *   texel that three reads raw, and ETC1S's shared endpoints band a smooth
+ *   one. Its own name so that a row says what the map IS.
  */
-export type TextureEncoding = 'colour' | 'colour-alpha' | 'normal';
+export type TextureEncoding = 'colour' | 'colour-alpha' | 'normal' | 'data';
 
 /**
  * Which corner of the picture a texture coordinate of (0, 0) names.
@@ -324,7 +342,7 @@ export function ktxCreateArguments(
   output: string,
 ): readonly string[] {
   const encoded =
-    step.encoding === 'normal'
+    step.encoding === 'normal' || step.encoding === 'data'
       ? [
           '--format',
           'R8G8B8_UNORM',
@@ -363,7 +381,7 @@ export function ktxCreateArguments(
 /** What {@link ktxCreateArguments} does, in words — the `modified` a record carries. */
 export function encodingWords(step: Ktx2Step): string {
   const codec =
-    step.encoding === 'normal'
+    step.encoding === 'normal' || step.encoding === 'data'
       ? 'Basis Universal UASTC with Zstandard, linear'
       : step.encoding === 'colour-alpha'
         ? 'Basis Universal ETC1S with alpha, sRGB'
@@ -402,6 +420,13 @@ export type OutputRecipe =
    * road's and the ground's maps, which were committed verbatim until then.
    */
   | { readonly how: 'ktx2'; readonly file: string; readonly ktx2: Ktx2Step }
+  /**
+   * A map this repository DRAWS — #624: {@link DRAW_SCRIPT} draws its pixels
+   * from arithmetic and {@link KTX2_SCRIPT} encodes them. There is no upstream
+   * input and nothing in the lock; the picture the encoder reads is the input,
+   * and its digest is the row's `inputsha256`.
+   */
+  | { readonly how: 'drawn'; readonly map: RealisticBicycleMap; readonly ktx2: Ktx2Step }
   /** Made by a Blender script: {@link inputDigest} of the source's locked files is its input. */
   | {
       readonly how: 'blender';
@@ -455,6 +480,21 @@ const TREE_SCRIPT = 'blender/process_tree.py';
  * `flipY` and the shader's `vStripUv` was written against that.
  */
 const IMPOSTOR_KTX2: Ktx2Step = { encoding: 'colour-alpha', origin: 'bottom-left' };
+
+/** Where a drawn map's script lives — #624. @see OutputRecipe */
+export const DRAW_SCRIPT = 'draw-bicycle-maps.ts';
+
+/**
+ * What a drawn map's {@link OutputSpec.from} names: no {@link SOURCES} entry,
+ * because nothing was downloaded — #624.
+ */
+export const DRAWN_FROM = 'this repository';
+
+/** The tools a drawn map is made with: the drawing runs under the repository's own Node. */
+export const DRAWN_TOOL = `Node.js 24 (.nvmrc), then ${PINNED_KTX}`;
+
+/** The date #624's maps were drawn and dedicated — a drawn row's `read`. */
+export const DRAWN_ON = '2026-09-27';
 
 /** Where {@link structureMap}'s script lives — #475. */
 export const TEXTURE_SCRIPT = 'blender/process_texture.py';
@@ -526,7 +566,25 @@ export const OUTPUTS: readonly OutputSpec[] = [
     modified:
       'the body mesh only, its skeleton reduced from 163 bones to 24 with each dropped bone’s weights merged into its nearest kept ancestor, coloured as cycling kit by dominant bone, collapse-decimated to about 9 000 triangles, in its rest pose',
   },
+  // #624: the bicycle's four maps, drawn here. ⚠️ `top-left`: they are drawn
+  // in the orientation the bicycle's texture coordinates read them — row 0 is
+  // v = 0 (`src/game/bicycle-surfaces.ts` §`bandV`) — and never went through
+  // `TextureLoader`, so nothing is flipped.
+  ...REALISTIC_BICYCLE_MAP_NAMES.map((map): OutputSpec => {
+    const ktx2: Ktx2Step = { encoding: BICYCLE_MAP_KINDS[map], origin: 'top-left' };
+    return {
+      file: REALISTIC_BICYCLE_MAPS[map],
+      from: DRAWN_FROM,
+      recipe: { how: 'drawn', map, ktx2 },
+      modified: `${BICYCLE_MAP_WORDS[map]}; then ${encodingWords(ktx2)}${KTX2_STEP_WORDS}${KTX2_SCRIPT_PATH}`,
+    };
+  }),
 ];
+
+/** The digest of the pixels a drawn map's encoder reads — its row's `inputsha256`. */
+export function drawnDigest(map: RealisticBicycleMap): string {
+  return pixelDigest(drawBicycleMap(map));
+}
 
 /**
  * One structure map: a Poly Haven 1K map downsized — #475 — and since #618
@@ -827,6 +885,23 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
         (each.recipe.alsoWrites ?? []).some((also) => also.file === file)),
   );
   if (output === undefined) throw new Error(`${file}: no pipeline output makes it`);
+  if (output.recipe.how === 'drawn') {
+    return [
+      ['path', `${OUTPUT_DIRECTORY}/${file}`],
+      [
+        'source',
+        `This repository, #624 — drawn from arithmetic by ${PIPELINE_DIRECTORY}${DRAW_SCRIPT} for the realistic bicycle, at the sizes src/game/bicycle.ts states. Nothing was downloaded, traced, generated by a model or derived from another product's appearance (ADR 0009, ADR 0026 D-4)`,
+      ],
+      ['licence', 'CC0-1.0'],
+      ['read', DRAWN_ON],
+      ['sha256', sha256],
+      ['modified', output.modified ?? ''],
+      ['input', `${PIPELINE_DIRECTORY}${DRAW_SCRIPT}#${output.recipe.map}`],
+      ['inputsha256', drawnDigest(output.recipe.map)],
+      ['script', `${PIPELINE_DIRECTORY}${DRAW_SCRIPT}`],
+      ['tool', DRAWN_TOOL],
+    ];
+  }
   const source = lock.sources.find((each) => each.id === output.from);
   if (source === undefined) throw new Error(`${file}: ${output.from} is not in the lock`);
   const path = `${OUTPUT_DIRECTORY}/${file}`;

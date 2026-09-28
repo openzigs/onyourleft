@@ -22,7 +22,16 @@ import { describe, expect, it } from 'vitest';
 
 import { parseAssetManifest } from '../../src/credits/manifest';
 import {
+  REALISTIC_BICYCLE_MAPS,
+  REALISTIC_BICYCLE_MAP_NAMES,
+} from '../../src/game/realistic-assets';
+import { fileKtx2Facts } from '../../src/game/realistic-bytes-testing';
+
+import { drawBicycleMap, pixelDigest } from './draw-bicycle-maps';
+import {
   assetRecord,
+  DRAW_SCRIPT,
+  DRAWN_TOOL,
   inputDigest,
   KTX2_SCRIPT,
   KTX2_SCRIPT_PATH,
@@ -71,7 +80,8 @@ describe('the realistic files and the pipeline that makes them', () => {
   it('records a derived file’s input as the digest of what the lock downloaded', () => {
     // The one number in a derived row nothing else in CI recomputes.
     for (const output of OUTPUTS) {
-      if (output.recipe.how === 'verbatim') continue;
+      // A drawn map has no download to digest: §"the bicycle's drawn maps".
+      if (output.recipe.how === 'verbatim' || output.recipe.how === 'drawn') continue;
       const source = lock.sources.find((each) => each.id === output.from);
       const entry = manifest.entries.find(
         (each) => each.path === `${OUTPUT_DIRECTORY}/${output.file}`,
@@ -124,11 +134,69 @@ describe('the realistic files and the pipeline that makes them', () => {
   it('names a committed script, carrying its header, for every derived file', () => {
     for (const output of OUTPUTS) {
       if (output.recipe.how === 'verbatim') continue;
-      const name = output.recipe.how === 'ktx2' ? KTX2_SCRIPT : output.recipe.script;
+      const recipe = output.recipe;
+      const name =
+        recipe.how === 'ktx2' ? KTX2_SCRIPT : recipe.how === 'drawn' ? DRAW_SCRIPT : recipe.script;
       const script = readFileSync(join(REPOSITORY, 'apps/web/tools/realistic', name), 'utf8');
       expect(script.split('\n').slice(0, 5).join('\n'), name).toContain(
         'SPDX-License-Identifier: AGPL-3.0-or-later',
       );
+    }
+  });
+});
+
+describe('the bicycle’s drawn maps — #624', () => {
+  const rowOf = (file: string): Readonly<Record<string, string | undefined>> =>
+    (manifest.entries.find((each) => each.path === `${OUTPUT_DIRECTORY}/${file}`) ??
+      {}) as Readonly<Record<string, string | undefined>>;
+
+  it('records, as each map’s input, the digest of the pixels the drawing script draws TODAY', () => {
+    // The decoded-pixel comparison `tools/icons/generate-icons.test.ts` makes,
+    // one step earlier: the picture the encoder reads is redrawn here, in CI,
+    // and its digest must be the one the committed KTX2 was made from. A
+    // drawing changed without the maps being made again is red here; the
+    // KTX2 bytes themselves are `process-assets.ts --check`'s.
+    for (const map of REALISTIC_BICYCLE_MAP_NAMES) {
+      const row = rowOf(REALISTIC_BICYCLE_MAPS[map]);
+      expect(row['inputsha256'], map).toBe(pixelDigest(drawBicycleMap(map)));
+      expect(row['input'], map).toBe(`apps/web/tools/realistic/${DRAW_SCRIPT}#${map}`);
+      expect(row['script'], map).toBe(`apps/web/tools/realistic/${DRAW_SCRIPT}`);
+      expect(row['tool'], map).toBe(DRAWN_TOOL);
+      expect(row['licence'], map).toBe('CC0-1.0');
+      // It says what the encoder did, and names the encoder's script.
+      expect(row['modified'], map).toContain(KTX2_SCRIPT_PATH);
+      expect(row['modified'], map).toContain(PINNED_KTX);
+      // …and that nothing was fetched, traced or generated (ADR 0009, D-4).
+      expect(row['source'], map).toContain('Nothing was downloaded');
+    }
+  });
+
+  it('commits each map at the size it is drawn, UASTC and linear, with its whole mipmap chain', () => {
+    for (const map of REALISTIC_BICYCLE_MAP_NAMES) {
+      const drawn = drawBicycleMap(map);
+      const facts = fileKtx2Facts(join(REPOSITORY, OUTPUT_DIRECTORY, REALISTIC_BICYCLE_MAPS[map]));
+      expect(facts, map).toMatchObject({
+        width: drawn.size,
+        height: drawn.size,
+        scheme: 'uastc',
+        transfer: 'linear',
+        levels: Math.log2(drawn.size) + 1,
+      });
+    }
+  });
+
+  it('is in no source and no lock: nothing was downloaded for it', () => {
+    for (const map of REALISTIC_BICYCLE_MAP_NAMES) {
+      const output = OUTPUTS.find((each) => each.file === REALISTIC_BICYCLE_MAPS[map]);
+      expect(output?.recipe.how, map).toBe('drawn');
+      expect(
+        SOURCES.map((source) => source.id),
+        map,
+      ).not.toContain(output?.from);
+      expect(
+        lock.sources.map((source) => source.id),
+        map,
+      ).not.toContain(output?.from);
     }
   });
 });

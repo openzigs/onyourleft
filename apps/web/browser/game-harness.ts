@@ -69,7 +69,13 @@ import {
   type RoutePoint,
 } from '@onyourleft/domain';
 
-import { NEAR_PLANE_METRES, cameraRig, verticalHalfTangent } from '../src/game/camera';
+import {
+  CAMERA_ABOVE_METRES,
+  NEAR_PLANE_METRES,
+  cameraRig,
+  verticalHalfTangent,
+} from '../src/game/camera';
+import { RIDER_BICYCLE_PARTS } from '../src/game/bicycle';
 import type { CameraPose, GameView, SceneFrame } from '../src/game/port';
 import type { WorldStyle } from '../src/game/world';
 
@@ -104,6 +110,7 @@ import {
 import { srgbByteToLinear } from '../src/game/scenery-palette';
 import { buildingPlan, onFace, OPENING_RECESS_METRES } from '../src/game/buildings';
 import {
+  bicycleTreadOf,
   compressedRealisticLoaders,
   drawnWorldOf,
   bridgesWearStoneOf,
@@ -3950,6 +3957,199 @@ async function textureProbe(canvasOf: () => HTMLCanvasElement): Promise<TextureM
   }
 }
 
+/**
+ * The realistic front tyre's tread, read back — #624. Luma is the 8-bit
+ * `luminanceOf` of each pixel of a square of the tyre; `variance` is over
+ * that square.
+ */
+export interface TreadMeasurement {
+  /** How many pixels the square is. */
+  readonly pixels: number;
+  /** As the product draws it. */
+  readonly variance: number;
+  readonly mean: number;
+  /** THE CONTROL: the same frame with the rubber's normal map off. */
+  readonly controlVariance: number;
+  /** The same square with no bicycle in the frame — what says the square is the tyre. */
+  readonly emptyMean: number;
+  /** How far from the eye the square is, in metres. */
+  readonly distanceMetres: number;
+  /**
+   * The mean sRGB of a 3 × 3 square of the right fork leg, the same bicycle
+   * drawn as each of the three riders in turn — #368's tint, still on the
+   * paint now that the paint has a roughness map.
+   */
+  readonly forks: Readonly<Record<'rider' | 'bot' | 'ghost', readonly number[]>>;
+}
+
+const NO_TREAD: TreadMeasurement = {
+  pixels: 0,
+  variance: 0,
+  mean: 0,
+  controlVariance: 0,
+  emptyMean: 0,
+  distanceMetres: 0,
+  forks: { rider: [], bot: [], ghost: [] },
+};
+
+/**
+ * Where the front tyre is read — #624: the camera brought down to 0.45 m, the
+ * bicycle turned to face it, and the TREAD read a quarter turn up the wheel
+ * from the contact patch, where it faces the eye, 0.8 m from it.
+ *
+ * ⚠️ **A quarter turn up, and not at the contact patch itself — measured.**
+ * The tread is the crown all the way round; at the patch it faces the road and
+ * is lit by nothing but the ground, and on 2026-09-27 a square 50° round from
+ * it read luma 2 of 255 with a variance of 0.0003 with the tread and without,
+ * where 90° round read 26 and told them apart four times over. And close, for
+ * the mipmaps: at the chase camera 4.5 m back and 2 m up a tread period is
+ * under two pixels of this probe's 640 × 360, where the ridges average toward
+ * flat — which is what a rider on a phone sees too, and why the owner's look
+ * is at `?at=900` and on the tablet.
+ *
+ * The square is 3 × 9: narrow ACROSS the tyre, where its own curve turns the
+ * light fastest, and long ALONG it, over about one tread period.
+ *
+ * ⚠️ Moving any of these moves the light on the square, and so the absolute
+ * window `game.browser.spec.ts` holds the tread to — read
+ * §`TREAD_VARIANCE_OVER_CONTROL` there before changing one.
+ */
+const TREAD_PROBE_EYE_METRES = 0.45;
+const TREAD_PROBE_DISTANCE_METRES = 0.8;
+const TREAD_PROBE_ROUND_DEGREES = 90;
+const TREAD_PROBE_HALF = { across: 1, along: 4 } as const;
+
+/**
+ * The front tyre's tread in the realistic world, read back — #624.
+ *
+ * One rider, turned to face a camera brought low, on a bare level road; a
+ * square of pixels on the front tyre's tread 90° round from the road, aimed from the
+ * wheel's own geometry (`bicycle.ts` §`RIDER_BICYCLE_PARTS`) through the frame's
+ * own camera ({@link pixelFor}), never from fractions of the frame. Its luma
+ * variance is the tread's shading.
+ *
+ * **The control** is the same frame with the rubber's normal map off
+ * (`three-renderer.ts` §`bicycleTreadOf`): what is left is the tyre's curve and
+ * the light across it, and that must fall below the floor the product is held
+ * above. **The empty frame** — no bicycle at all — says the square was the
+ * tyre and not the road behind it.
+ */
+function treadProbe(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  base: SceneFrame,
+): TreadMeasurement {
+  const [rider] = base.markers.filter((marker) => marker.kind === 'rider');
+  const front = RIDER_BICYCLE_PARTS.find((part) => part.solid.shape === 'ring' && part.z > 0);
+  const fork = RIDER_BICYCLE_PARTS.find((part) => part.name === 'fork 1');
+  if (
+    rider === undefined ||
+    front === undefined ||
+    fork === undefined ||
+    front.solid.shape !== 'ring'
+  ) {
+    return NO_TREAD;
+  }
+  const outer = front.solid.radius + front.solid.thickness;
+  const pose = base.camera;
+  const roadY = pose.y;
+  const camera: CameraPose = {
+    ...pose,
+    eyeRoadY: roadY + TREAD_PROBE_EYE_METRES - CAMERA_ABOVE_METRES,
+    targetRoadY: roadY + TREAD_PROBE_EYE_METRES / 2,
+  };
+  const { eye } = cameraRig(camera);
+  // Facing the camera: the bicycle's heading is back along the camera's.
+  const facing = { x: -pose.headingX, z: -pose.headingZ };
+  const round = (TREAD_PROBE_ROUND_DEGREES * Math.PI) / 180;
+  // The hub is placed so the probed point is TREAD_PROBE_DISTANCE_METRES from
+  // the eye along the ground, and the marker behind the hub by the hub's own z.
+  const hubAhead = TREAD_PROBE_DISTANCE_METRES + outer * Math.sin(round);
+  const hub = { x: eye.x + pose.headingX * hubAhead, z: eye.z + pose.headingZ * hubAhead };
+  const marker = {
+    ...rider,
+    x: hub.x - facing.x * front.z,
+    y: roadY,
+    z: hub.z - facing.z * front.z,
+    headingX: facing.x,
+    headingZ: facing.z,
+    lean: 0,
+    bodyLean: 0,
+  };
+  const point = {
+    x: hub.x + facing.x * outer * Math.sin(round),
+    y: roadY + front.y - outer * Math.cos(round),
+    z: hub.z + facing.z * outer * Math.sin(round),
+  };
+  const frame: SceneFrame = { ...base, camera, markers: [marker], scatter: [] };
+  const empty: SceneFrame = { ...frame, markers: [] };
+  const centre = pixelFor(frame, canvas, point);
+  const width = TREAD_PROBE_HALF.across * 2 + 1;
+  const height = TREAD_PROBE_HALF.along * 2 + 1;
+  const lumas = (scene: SceneFrame): number[] => {
+    view.render(scene);
+    view.render(scene);
+    const pixels = readRegion(
+      gl,
+      Math.round(centre.x) - TREAD_PROBE_HALF.across,
+      Math.round(centre.y) - TREAD_PROBE_HALF.along,
+      width,
+      height,
+    );
+    const out: number[] = [];
+    for (let at = 0; at < pixels.length; at += 4) {
+      out.push(luminanceOf([pixels[at] ?? 0, pixels[at + 1] ?? 0, pixels[at + 2] ?? 0, 255]));
+    }
+    return out;
+  };
+  const meanOf = (values: readonly number[]): number =>
+    values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length);
+  const varianceOf = (values: readonly number[]): number => {
+    const mean = meanOf(values);
+    return meanOf(values.map((value) => (value - mean) ** 2));
+  };
+  const product = lumas(frame);
+  let control: number[];
+  try {
+    bicycleTreadOf(view, false);
+    control = lumas(frame);
+  } finally {
+    bicycleTreadOf(view, true);
+  }
+  const emptied = lumas(empty);
+  // #368: the same bicycle as each rider in turn, a square of its fork read.
+  // A point in the bicycle's own frame is `x` across it and `z` along its
+  // heading: across is the heading turned a quarter to the right.
+  const forkPoint = {
+    x: marker.x + fork.x * facing.z + fork.z * facing.x,
+    y: roadY + fork.y,
+    z: marker.z - fork.x * facing.x + fork.z * facing.z,
+  };
+  const forkAt = pixelFor(frame, canvas, forkPoint);
+  const forkOf = (kind: 'rider' | 'bot' | 'ghost'): number[] => {
+    const scene: SceneFrame = { ...frame, markers: [{ ...marker, kind }] };
+    view.render(scene);
+    view.render(scene);
+    const pixels = readRegion(gl, Math.round(forkAt.x) - 1, Math.round(forkAt.y) - 1, 3, 3);
+    return [0, 1, 2].map((channel) => {
+      let sum = 0;
+      for (let at = channel; at < pixels.length; at += 4) sum += pixels[at] ?? 0;
+      return sum / 9;
+    });
+  };
+  const forks = { rider: forkOf('rider'), bot: forkOf('bot'), ghost: forkOf('ghost') };
+  return {
+    pixels: product.length,
+    variance: varianceOf(product),
+    mean: meanOf(product),
+    controlVariance: varianceOf(control),
+    emptyMean: meanOf(emptied),
+    distanceMetres: Math.hypot(point.x - eye.x, point.y - eye.y, point.z - eye.z),
+    forks,
+  };
+}
+
 /** What the `?realistic` run measures — ADR 0026. @see realisticProbe */
 export interface RealisticMeasurement {
   readonly measured: boolean;
@@ -4068,6 +4268,8 @@ export interface RealisticMeasurement {
   readonly tint: TintMeasurement;
   /** #620: the ground under a tree's blob and 5 m from it, with and without the blobs. @see groundBlobProbe */
   readonly grounding: GroundBlobMeasurement;
+  /** #624: the front tyre's tread, read back, with and without its normal map. @see treadProbe */
+  readonly tread: TreadMeasurement;
   /**
    * #544: the distant hills against the sky, read off the drawing buffer — as
    * the product draws them, and (the control) with the view's horizon put back
@@ -4256,6 +4458,7 @@ const NO_REALISTIC: RealisticMeasurement = {
     houseTints: [],
   },
   grounding: NO_GROUNDING,
+  tread: NO_TREAD,
   horizon: [],
   horizonControl: [],
   horizonColours: { fog: [], foot: [] },
@@ -5558,6 +5761,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const tint = tintProbe(view, gl, canvas, riding(level, 400));
   phaseEnds('realistic: seeded tints');
 
+  // #624, on the same view and the same road.
+  const tread = treadProbe(view, gl, canvas, riding(level, 400));
+  phaseEnds('realistic: the tread — #624');
+
   // #620, on the same view and the same road; then what a whole wooded frame
   // spends on its blobs.
   const groundingProbe = groundBlobProbe(view, gl, canvas, riding(level, 400));
@@ -5742,6 +5949,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     windowWall,
     tint,
     grounding,
+    tread,
     horizon,
     horizonControl,
     horizonColours,
