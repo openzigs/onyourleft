@@ -22,6 +22,7 @@
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { test as base, devices, expect } from '@playwright/test';
 
@@ -48,6 +49,12 @@ import {
   PRESENCE_GRID_COLUMNS,
   PRESENCE_GRID_ROWS,
 } from '../src/camera/presence';
+import {
+  PHOTOGRAPHIC_STRUCTURE_SURFACES,
+  REALISTIC_VEGETATION,
+  REALISTIC_VEGETATION_KINDS,
+} from '../src/game/realistic-assets';
+import { modelFacts } from '../src/game/realistic-bytes-testing';
 
 /**
  * Said beside every frame time this spec publishes — #473. Since #473 the
@@ -900,6 +907,47 @@ function shiftMissedBy(
 
 /** #617's trees' own load — #644. @see TreeLevelMeasurement */
 const TREES_QUERY = '?realistic&trees';
+
+/** Where the committed realistic files are. */
+const REALISTIC_PUBLIC = fileURLToPath(new URL('../public/realistic/', import.meta.url));
+
+/**
+ * How many images the realistic world holds, once per image — #618's review:
+ * four surface maps, two a photographic structure surface, and every image in
+ * a vegetation model plus its impostor, read off the committed files exactly as
+ * `realistic-textures.test.ts` reads them.
+ */
+function realisticImageCount(): number {
+  const models = REALISTIC_VEGETATION_KINDS.flatMap((kind) => REALISTIC_VEGETATION[kind]);
+  return (
+    4 +
+    2 * PHOTOGRAPHIC_STRUCTURE_SURFACES.length +
+    models.reduce(
+      (sum, model) =>
+        sum +
+        modelFacts(join(REALISTIC_PUBLIC, model.file)).images.length +
+        (model.impostor === undefined ? 0 : 1),
+      0,
+    )
+  );
+}
+
+/** Bytes a 4×4 block of each GPU format a realistic texture can be uploaded as. */
+const BLOCK_BYTES: Readonly<Record<string, number>> = {
+  'ASTC 4x4': 16,
+  'ETC2 RGB': 8,
+  'ETC2 RGBA': 16,
+  BC7: 16,
+};
+
+/** The bytes a block-compressed mip chain of a size is, level by level down to 1×1. */
+function blockChainBytes(width: number, height: number, blockBytes: number): number {
+  let total = 0;
+  for (let w = width, h = height; ; w = Math.max(1, w >> 1), h = Math.max(1, h >> 1)) {
+    total += Math.ceil(w / 4) * Math.ceil(h / 4) * blockBytes;
+    if (w === 1 && h === 1) return total;
+  }
+}
 
 test.describe('the game renderer in a real browser', () => {
   paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
@@ -3009,6 +3057,64 @@ test.describe('the realistic world — ADR 0026', () => {
     );
     // And the photograph reached the GPU: this world samples textures.
     expect(measured.texturesCreated).toBeGreaterThan(5);
+  });
+
+  test('hands the GPU every realistic texture compressed, and the RGBA8 control is labelled a fallback — #618', async ({
+    harnessRun,
+  }) => {
+    const { textures, firstFrameMs, loadMs } = await realistic(harnessRun);
+    // Non-vacuity, and EXACT (#618's review — a floor let up to eight maps go
+    // missing): four surface maps, fourteen structure maps, and every map in a
+    // model plus its impostor, once per IMAGE, read off the committed files the
+    // way `realistic-textures.test.ts` reads them.
+    expect(textures.worn.length).toBe(realisticImageCount());
+    expect(textures.uploaded).toBe(textures.worn.length);
+    expect(textures.uploads).toHaveLength(textures.uploaded);
+    // Which block formats THIS context gets. ⚠️ SwiftShader offers ASTC and
+    // ETC — measured on 2026-09-27, against #618's own premise that it offers
+    // neither — so on a Mac this reads ASTC and ETC2, the tablet's formats.
+    // On the CI runner `KTX2Loader`'s own Linux rule turns them off, and it
+    // reads BC7: still a GPU block format, and published so.
+    const expected = textures.desktopRule ? ['BC7'] : ['ASTC 4x4', 'ETC2 RGB', 'ETC2 RGBA'];
+    for (const format of textures.uploads) expect(expected, format).toContain(format);
+    for (const texture of textures.worn)
+      expect(expected, JSON.stringify(texture)).toContain(texture.format);
+    // Nothing uploaded uncompressed — the claim.
+    expect(textures.uploads).not.toContain('RGBA8');
+    // ⚠️ THE CONTROL: the same file, through a loader told the device offers
+    // no compressed format, goes up as RGBA8 AND says so. Without it, every
+    // assertion above could be true of labels that said "compressed" whatever
+    // was uploaded.
+    expect(textures.control.uploads).toEqual(['RGBA8']);
+    expect(textures.control.format).toBe('RGBA8 (fallback)');
+    expect(textures.control.compressed).toBe(false);
+    expect(expected).not.toContain(textures.control.uploads[0]);
+    // The sky is #618's one exclusion: half-float, for PMREMGenerator.
+    expect(textures.sky.format).toBe('half-float');
+    // The GPU bytes, bounded BOTH ways (#618's review, #621's lesson — a floor
+    // proves presence, not correctness): each texture is exactly its format's
+    // block chain, every level down to 1×1, at 16 bytes a 4×4 block for ASTC
+    // 4×4, ETC2 RGBA and BC7 and 8 for ETC2 RGB. A transcode that zeroed a
+    // level, doubled one or dropped the chain is red here, on either runner.
+    for (const texture of textures.worn) {
+      expect(texture.width, JSON.stringify(texture)).toBeGreaterThanOrEqual(4);
+      expect(texture.height, JSON.stringify(texture)).toBeGreaterThanOrEqual(4);
+      expect(texture.bytes, JSON.stringify(texture)).toBe(
+        blockChainBytes(texture.width, texture.height, BLOCK_BYTES[texture.format] ?? Number.NaN),
+      );
+    }
+    const mib = (bytes: number): string => (bytes / 2 ** 20).toFixed(1);
+    const held = textures.worn.reduce((sum, texture) => sum + texture.bytes, 0);
+    const counts = new Map<string, number>();
+    for (const format of textures.uploads) counts.set(format, (counts.get(format) ?? 0) + 1);
+    console.log(
+      `#618: ${String(textures.uploaded)} realistic textures uploaded as ` +
+        `${[...counts].map(([format, count]) => `${String(count)} ${format}`).join(', ')}` +
+        `${textures.desktopRule ? " (KTX2Loader's Linux desktop rule)" : ''}, ${mib(held)} MiB; ` +
+        `the sky ${mib(textures.sky.bytes)} MiB at half-float; the control ${textures.control.format}; ` +
+        `offered ${textures.offered.join(' ')} on ${textures.platform}; ` +
+        `loaded in ${loadMs.toFixed(0)} ms, first realistic frame at ${firstFrameMs.toFixed(0)} ms (SwiftShader)`,
+    );
   });
 
   test('draws the canopy after the opaque world, and the frame is the same picture — #619 lever 1', async ({

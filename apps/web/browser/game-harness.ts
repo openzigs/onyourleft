@@ -98,9 +98,13 @@ import { ridgeLift, skylineCrestFloor } from '../src/game/realistic-light';
 import { srgbByteToLinear } from '../src/game/scenery-palette';
 import { buildingPlan, onFace, OPENING_RECESS_METRES } from '../src/game/buildings';
 import {
+  compressedRealisticLoaders,
   drawnWorldOf,
   bridgesWearStoneOf,
   loadRealisticWorld,
+  realisticTextureFormat,
+  realisticTextureReport,
+  uploadRealisticTexturesOf,
   loadSceneryModels,
   horizonColoursOf,
   horizonFromSkyOf,
@@ -122,7 +126,11 @@ import {
 } from '../src/game/three-renderer';
 import { groundBlobAlpha, groundUnder } from '../src/game/ground-blob';
 import { clearOfTheCamera, nearPyramid, sceneryReach } from '../src/game/near-field';
-import { realisticWorldNotice } from '../src/game/realistic-assets';
+import {
+  REALISTIC_SURFACES,
+  realisticUrl,
+  realisticWorldNotice,
+} from '../src/game/realistic-assets';
 import {
   FOLIAGE_TINT,
   instanceTint,
@@ -3759,9 +3767,192 @@ const NO_GROUNDING: GroundBlobMeasurement = {
   woodedTriangles: 0,
 };
 
+/**
+ * What the realistic textures were handed to the GPU as — #618. @see textureProbe
+ */
+export interface TextureMeasurement {
+  /** The compressed-texture extensions THIS context offers, and the platform, which decide the formats. */
+  readonly offered: readonly string[];
+  readonly platform: string;
+  /**
+   * Whether `KTX2Loader.detectSupport`'s own Linux rule applies here — Linux
+   * outside Android offering ASTC, ETC2, BPTC and S3TC together, where it
+   * turns ASTC and ETC off because a desktop driver decodes them in software.
+   * SwiftShader on the CI runner is that case, and draws BC7.
+   */
+  readonly desktopRule: boolean;
+  /** Every texture the loaded world holds but the sky, as `realisticTextureReport` labels it. */
+  readonly worn: readonly {
+    readonly role: string;
+    readonly format: string;
+    readonly bytes: number;
+    /** The base level's size, which the spec derives each block chain's bytes from. */
+    readonly width: number;
+    readonly height: number;
+  }[];
+  /** The sky, which #618 leaves at half-float. */
+  readonly sky: { readonly format: string; readonly bytes: number };
+  /** The internal format of every upload a fresh view made of those textures, read off the GL calls. */
+  readonly uploads: readonly string[];
+  /** How many textures were handed to that view. */
+  readonly uploaded: number;
+  /**
+   * The CONTROL: the road's colour map through a loader told the device offers
+   * no compressed format — its label, and what it was uploaded as. It must be
+   * RGBA8 and labelled a fallback, or the claim above is about labels.
+   */
+  readonly control: {
+    readonly format: string;
+    readonly compressed: boolean;
+    readonly uploads: readonly string[];
+  };
+}
+
+const NO_TEXTURES: TextureMeasurement = {
+  offered: [],
+  platform: '',
+  desktopRule: false,
+  worn: [],
+  sky: { format: '', bytes: 0 },
+  uploads: [],
+  uploaded: 0,
+  control: { format: '', compressed: false, uploads: [] },
+};
+
+/**
+ * A GL internal format by name — the ones a realistic texture can be uploaded
+ * as. WebGL 2 has no query for a texture's format once it is uploaded, so the
+ * probe reads the argument the renderer passed.
+ */
+const GL_TEXTURE_FORMATS: ReadonlyMap<number, string> = new Map([
+  [0x93b0, 'ASTC 4x4'],
+  [0x93d0, 'ASTC 4x4'],
+  [0x9274, 'ETC2 RGB'],
+  [0x9275, 'ETC2 RGB'],
+  [0x9278, 'ETC2 RGBA'],
+  [0x9279, 'ETC2 RGBA'],
+  [0x8d64, 'ETC1'],
+  [0x8e8c, 'BC7'],
+  [0x8e8d, 'BC7'],
+  [0x83f0, 'BC1'],
+  [0x83f1, 'BC1'],
+  [0x8c4c, 'BC1'],
+  [0x8c4d, 'BC1'],
+  [0x83f3, 'BC3'],
+  [0x8c4f, 'BC3'],
+  [0x8058, 'RGBA8'],
+  [0x8c43, 'RGBA8'],
+]);
+
+/** Records the internal format of every texture upload `body` makes, by name. */
+function recordingUploads(body: () => void): string[] {
+  const gl = WebGL2RenderingContext.prototype;
+  /* eslint-disable @typescript-eslint/unbound-method */
+  const storage = gl.texStorage2D;
+  const compressed = gl.compressedTexImage2D;
+  const image = gl.texImage2D;
+  /* eslint-enable @typescript-eslint/unbound-method */
+  const seen: string[] = [];
+  const note = (internal: number): void => {
+    seen.push(GL_TEXTURE_FORMATS.get(internal) ?? `0x${internal.toString(16)}`);
+  };
+  gl.texStorage2D = function (this: WebGL2RenderingContext, ...args: Parameters<typeof storage>) {
+    note(args[2]);
+    storage.apply(this, args);
+  };
+  gl.compressedTexImage2D = function (this: WebGL2RenderingContext, ...args: unknown[]) {
+    if (args[1] === 0) note(args[2] as number);
+    (compressed as (...rest: unknown[]) => void).apply(this, args);
+  };
+  gl.texImage2D = function (this: WebGL2RenderingContext, ...args: unknown[]) {
+    if (args[1] === 0) note(args[2] as number);
+    (image as (...rest: unknown[]) => void).apply(this, args);
+  };
+  try {
+    body();
+  } finally {
+    gl.texStorage2D = storage;
+    gl.compressedTexImage2D = compressed;
+    gl.texImage2D = image;
+  }
+  return seen;
+}
+
+/**
+ * The realistic textures, uploaded and read back — #618.
+ *
+ * On a FRESH view, so every texture is uploaded here rather than having been
+ * uploaded already by a frame the probe drew: three uploads a texture once.
+ * Then the control, on the same view: the road's colour map transcoded for a
+ * device that offers nothing, which must go up as RGBA8 and be labelled so.
+ */
+async function textureProbe(canvasOf: () => HTMLCanvasElement): Promise<TextureMeasurement> {
+  const canvas = canvasOf();
+  const view = threeGameRenderer.create(canvas, REALISTIC_LADDER[0] as QualitySettings);
+  view.resize(64, 64);
+  const gl = canvas.getContext('webgl2');
+  try {
+    if (gl === null) return NO_TEXTURES;
+    const offered = (gl.getSupportedExtensions() ?? []).filter((name) =>
+      /compressed|compression/.test(name),
+    );
+    const platform = navigator.platform;
+    const has = (name: string): boolean => offered.includes(name);
+    const desktopRule =
+      platform.includes('Linux') &&
+      !navigator.userAgent.includes('Android') &&
+      has('WEBGL_compressed_texture_astc') &&
+      has('WEBGL_compressed_texture_etc') &&
+      has('EXT_texture_compression_bptc') &&
+      has('WEBGL_compressed_texture_s3tc');
+    const report = realisticTextureReport();
+    let uploaded = 0;
+    const uploads = recordingUploads(() => {
+      uploaded = uploadRealisticTexturesOf(view);
+    });
+    const none = compressedRealisticLoaders({ has: () => false, get: () => null });
+    let control: TextureMeasurement['control'];
+    try {
+      const texture = await none.texture(realisticUrl(REALISTIC_SURFACES.road.colour));
+      const label = realisticTextureFormat(texture);
+      const controlUploads = recordingUploads(() => {
+        uploadRealisticTexturesOf(view, [texture]);
+      });
+      texture.dispose();
+      control = { format: label.format, compressed: label.compressed, uploads: controlUploads };
+    } finally {
+      none.dispose();
+    }
+    const sky = report.find((each) => each.role === 'sky');
+    return {
+      offered,
+      platform,
+      desktopRule,
+      worn: report
+        .filter((each) => each.role !== 'sky')
+        .map(({ role, format, bytes, width, height }) => ({ role, format, bytes, width, height })),
+      sky: { format: sky?.format ?? '', bytes: sky?.bytes ?? 0 },
+      uploads,
+      uploaded,
+      control,
+    };
+  } finally {
+    view.destroy();
+  }
+}
+
 /** What the `?realistic` run measures — ADR 0026. @see realisticProbe */
 export interface RealisticMeasurement {
   readonly measured: boolean;
+  /** #618: what the textures were handed to the GPU as, and the RGBA8 control. @see textureProbe */
+  readonly textures: TextureMeasurement;
+  /**
+   * #618: milliseconds from asking for the world to the first realistic frame
+   * finished on this machine's GPU — the load, a view, and the frame that
+   * uploads what it draws. Published, never asserted: SwiftShader is not the
+   * tablet, whose figure is validation 0002's.
+   */
+  readonly firstFrameMs: number;
   /** Which world a realistic rung drew BEFORE anything was loaded: D-7's fallback. */
   readonly fallbackWorld: string;
   /** What a load that could not reach its files reported, and what a rider is told. */
@@ -3963,6 +4154,8 @@ export interface HorizonReading {
 
 const NO_REALISTIC: RealisticMeasurement = {
   measured: false,
+  textures: NO_TEXTURES,
+  firstFrameMs: 0,
   fallbackWorld: '',
   failedLoad: { loaded: false, offline: false },
   failedNotice: '',
@@ -4872,6 +5065,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     view.render(wooded);
     texturesCreated = textures();
   });
+  // #618: to here is the first realistic frame — the load, a view, and the
+  // frame that uploads what it draws — finished on the GPU.
+  gl.finish();
+  const firstFrameMs = performance.now() - started;
   const materials = sceneMaterialsOf(view).filter((each) => each.visible);
   const standard = materials.filter((each) => each.type === 'MeshStandardMaterial');
   const impostors = materials.filter((each) => each.type === 'ShaderMaterial' && each.constructed);
@@ -4896,6 +5093,9 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     drawCallsWithoutRoad = calls() - middle;
   });
   phaseEnds('realistic: view, textures, draw calls');
+
+  const textures = await textureProbe(canvasOf);
+  phaseEnds('realistic: texture formats — #618');
 
   const roadLuminance = (frame: SceneFrame): number => {
     const bare: SceneFrame = { ...frame, markers: [], scatter: [] };
@@ -5169,6 +5369,8 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
 
   return {
     measured: true,
+    textures,
+    firstFrameMs,
     fallbackWorld,
     failedLoad: failed.loaded
       ? { loaded: true, offline: false }

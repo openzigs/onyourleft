@@ -10,6 +10,8 @@ import {
 import { SHIPPED_LICENCE_TEXTS } from '../../src/credits/credits';
 import { REALISTIC_DIRECTORY, realisticFiles } from '../../src/game/realistic-assets';
 import { SCENERY_ATLAS, SCENERY_MODELS } from '../../src/game/scenery-models';
+import { REALISTIC_TRANSCODER_DIRECTORY } from '../../src/game/transcoder-files';
+import { TRANSCODER_FILES } from '../basis/transcoder-plugin';
 import {
   FONT_LICENCE_FILE,
   FONT_STACK,
@@ -144,6 +146,30 @@ describe('the realistic world is not precached, and the stylised one all is — 
     expect(cacheVersion([...BUILD, ...stylised, ...changed], fakeDigest)).toBe(
       cacheVersion(build, fakeDigest),
     );
+  });
+});
+
+describe('the Basis transcoder is not precached — #618', () => {
+  /** What `tools/basis/transcoder-plugin.ts` emits into a build. */
+  const transcoder = TRANSCODER_FILES.map((name) =>
+    file(`${REALISTIC_TRANSCODER_DIRECTORY}${name}`),
+  );
+
+  it('holds neither transcoder file: they are the realistic world’s, excluded by its directory', () => {
+    expect(transcoder.length).toBe(2);
+    for (const each of transcoder) {
+      expect(precacheEntries([...BUILD, ...transcoder]), each.name).not.toContain(each.name);
+    }
+  });
+
+  it('would hold them anywhere else — so it is the directory that keeps them out', () => {
+    // The control: the same two files where `KTX2Loader`'s own default URLs
+    // would have put them, had `withoutDefaultUrls` not taken those out.
+    const hashed = TRANSCODER_FILES.map((name) => file(`assets/${name.replace('.', '-h4sh.')}`));
+    for (const each of hashed) {
+      expect(precacheEntries([...BUILD, ...hashed]), each.name).toContain(each.name);
+    }
+    expect(REALISTIC_TRANSCODER_DIRECTORY.startsWith(REALISTIC_DIRECTORY)).toBe(true);
   });
 });
 

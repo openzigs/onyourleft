@@ -1318,11 +1318,11 @@ describe('a failed load releases everything it loaded, including what arrives la
     // Every structure map answers after every other file. A load that did not
     // settle them before deciding would have released everything else and
     // left these held by nobody.
-    const { loaders, held } = lateLoaders({ fail: REALISTIC_SKY, slowest: '_512.jpg' });
+    const { loaders, held } = lateLoaders({ fail: REALISTIC_SKY, slowest: '_512.ktx2' });
     const outcome = await loadRealisticWorld(loaders);
     expect(outcome.loaded).toBe(false);
     await new Promise((resolve) => setTimeout(resolve, 50));
-    const surfaces = held.filter((one) => one.url.includes('_512.jpg'));
+    const surfaces = held.filter((one) => one.url.includes('_512.ktx2'));
     expect(surfaces.length).toBe(2 * PHOTOGRAPHIC_STRUCTURE_SURFACES.length);
     expect(surfaces.filter((one) => !one.released).map((one) => one.url)).toEqual([]);
   });

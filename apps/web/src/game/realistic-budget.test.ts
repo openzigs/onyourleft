@@ -19,6 +19,8 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import { TRANSCODER_FILES, transcoderSource } from '../../tools/basis/transcoder-plugin';
+
 import {
   PHOTOGRAPHIC_STRUCTURE_SURFACES,
   REALISTIC_RIDER,
@@ -31,6 +33,7 @@ import {
 } from './realistic-assets';
 import { treeSlots, type TreeLevels } from './tree-levels';
 import {
+  DEVICE_BYTES_PER_TEXEL,
   environmentMapBytes,
   HARD_SWAP_TREE_LEVELS,
   estimatedTextureBytes,
@@ -47,7 +50,12 @@ import {
 } from './realistic-budget';
 import { GROUND_BLOB_TRIANGLES } from './ground-blob';
 import { readGlb } from './model-bytes-testing';
-import { fileImageSize, modelFacts } from './realistic-bytes-testing';
+import {
+  fileImageSize,
+  fileKtx2Facts,
+  modelFacts,
+  type Ktx2Facts,
+} from './realistic-bytes-testing';
 import { STRUCTURE_KINDS } from './scatter';
 import { SCENERY_MODELS } from './scenery-models';
 import { BUILT_KINDS } from './buildings';
@@ -60,6 +68,7 @@ import {
 } from './three-renderer';
 
 const SHIPPED = fileURLToPath(new URL('../../public/realistic/', import.meta.url));
+const WEB = fileURLToPath(new URL('../../', import.meta.url));
 const at = (file: string): string => join(SHIPPED, file);
 
 const riderTriangles = modelFacts(at(REALISTIC_RIDER)).triangles;
@@ -367,47 +376,144 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     );
   });
 
-  it('holds the estimated texture memory under its ceiling', () => {
-    const shapes = [];
-    const sky = fileImageSize(at(REALISTIC_SKY));
-    // three's HDR loader makes half-float RGBA with no mipmaps, and the
-    // environment is prefiltered from it.
-    shapes.push({ ...sky, bytesPerTexel: 8, mipmapped: false });
-    for (const maps of [REALISTIC_SURFACES.road, REALISTIC_SURFACES.ground]) {
-      for (const file of [maps.colour, maps.normal]) {
-        shapes.push({ ...fileImageSize(at(file)), bytesPerTexel: 4, mipmapped: true });
-      }
-    }
-    // #475: the structures' surfaces, 8-bit and mipmapped like the ground's.
-    for (const surface of PHOTOGRAPHIC_STRUCTURE_SURFACES) {
+  /**
+   * Every committed texture but the sky, read off disk, by class — #618:
+   * each a KTX2 file, whose own header says its size and encoding.
+   */
+  const textures = (): readonly {
+    readonly role: 'surface' | 'structure' | 'model' | 'impostor';
+    readonly facts: Ktx2Facts;
+  }[] => [
+    ...[REALISTIC_SURFACES.road, REALISTIC_SURFACES.ground].flatMap((maps) =>
+      [maps.colour, maps.normal].map((file) => ({
+        role: 'surface' as const,
+        facts: fileKtx2Facts(at(file)),
+      })),
+    ),
+    ...PHOTOGRAPHIC_STRUCTURE_SURFACES.flatMap((surface) => {
       const maps = REALISTIC_STRUCTURE_SURFACES[surface];
-      for (const file of [maps.colour, maps.normal]) {
-        shapes.push({ ...fileImageSize(at(file)), bytesPerTexel: 4, mipmapped: true });
-      }
+      return [maps.colour, maps.normal].map((file) => ({
+        role: 'structure' as const,
+        facts: fileKtx2Facts(at(file)),
+      }));
+    }),
+    ...REALISTIC_VEGETATION_KINDS.flatMap((kind) =>
+      REALISTIC_VEGETATION[kind].flatMap((model) => [
+        ...modelFacts(at(model.file)).ktx2.map((facts) => ({ role: 'model' as const, facts })),
+        ...(model.impostor === undefined
+          ? []
+          : [{ role: 'impostor' as const, facts: fileKtx2Facts(at(model.impostor)) }]),
+      ]),
+    ),
+  ];
+
+  /** What the tablet is handed per texel for one KTX2 file. @see DEVICE_BYTES_PER_TEXEL */
+  const onTheTablet = (facts: Ktx2Facts): number =>
+    facts.scheme === 'uastc'
+      ? DEVICE_BYTES_PER_TEXEL.uastc
+      : facts.alpha
+        ? DEVICE_BYTES_PER_TEXEL['etc1s-alpha']
+        : DEVICE_BYTES_PER_TEXEL.etc1s;
+
+  /** The sky alone: half-float with no mipmaps, and the environment prefiltered from it. */
+  const skyBytes = (): number => {
+    const sky = fileImageSize(at(REALISTIC_SKY));
+    return (
+      estimatedTextureBytes({ ...sky, bytesPerTexel: 8, mipmapped: false }) +
+      environmentMapBytes(sky.width)
+    );
+  };
+
+  it('commits every texture but the sky as KTX2, a full mipmap chain each — #618', () => {
+    const all = textures();
+    // Non-vacuity: the whole set, read — four surface maps, fourteen structure
+    // maps, four impostors and every map in a tree, shrub and rock.
+    expect(all.length).toBeGreaterThanOrEqual(40);
+    for (const { role, facts } of all) {
+      const full = Math.floor(Math.log2(Math.max(facts.width, facts.height))) + 1;
+      expect(facts.levels, `${role} ${JSON.stringify(facts)}`).toBe(full);
     }
+    // And no JPEG or PNG is left in a model for three to decode to RGBA8.
     for (const kind of REALISTIC_VEGETATION_KINDS) {
       for (const model of REALISTIC_VEGETATION[kind]) {
-        for (const image of modelFacts(at(model.file)).images) {
-          shapes.push({ ...image, bytesPerTexel: 4, mipmapped: true });
-        }
-        if (model.impostor !== undefined) {
-          shapes.push({ ...fileImageSize(at(model.impostor)), bytesPerTexel: 4, mipmapped: true });
-        }
+        const facts = modelFacts(at(model.file));
+        expect(facts.ktx2.length, model.file).toBe(facts.images.length);
       }
     }
-    const total =
-      shapes.reduce((sum, shape) => sum + estimatedTextureBytes(shape), 0) +
-      environmentMapBytes(sky.width);
+  });
+
+  it('holds the estimated texture memory under its ceiling, as the tablet is handed it — #618', () => {
+    const all = textures();
+    const compressed = all.reduce(
+      (sum, { facts }) =>
+        sum +
+        estimatedTextureBytes({ ...facts, bytesPerTexel: onTheTablet(facts), mipmapped: true }),
+      0,
+    );
+    // The same set as three decoded it before #618, RGBA8: the "before".
+    const decoded = all.reduce(
+      (sum, { facts }) =>
+        sum + estimatedTextureBytes({ ...facts, bytesPerTexel: 4, mipmapped: true }),
+      0,
+    );
+    const total = compressed + skyBytes();
+    const before = decoded + skyBytes();
+    const mib = (bytes: number): string => (bytes / 2 ** 20).toFixed(1);
+    const tablet = (facts: Ktx2Facts): number =>
+      estimatedTextureBytes({ ...facts, bytesPerTexel: onTheTablet(facts), mipmapped: true });
+    const sum = (keep: (each: (typeof all)[number]) => boolean): number =>
+      all.filter(keep).reduce((bytes, each) => bytes + tablet(each.facts), 0);
+    const standalone = (each: (typeof all)[number]): boolean =>
+      each.role === 'surface' || each.role === 'structure';
+    console.log(
+      `#618: texture memory estimated ${mib(total)} MiB on the tablet's formats, ${mib(before)} MiB as RGBA8. ` +
+        `Colour maps ${mib(sum((each) => standalone(each) && each.facts.scheme === 'etc1s'))}, ` +
+        `normal maps ${mib(sum((each) => standalone(each) && each.facts.scheme === 'uastc'))}, ` +
+        `maps inside a GLB ${mib(sum((each) => each.role === 'model'))}, ` +
+        `impostors ${mib(sum((each) => each.role === 'impostor'))}; the sky alone ${mib(skyBytes())}`,
+    );
     expect(total).toBeLessThanOrEqual(REALISTIC_TEXTURE_MEMORY_BYTES);
+    // #618's criterion: it FALLS, from the 136 MiB the RGBA8 set was estimated at.
+    expect(before).toBeGreaterThan(130 * 2 ** 20);
+    expect(total).toBeLessThan(before - 60 * 2 ** 20);
     // ⚠️ Non-vacuity: the set is real, so the estimate is a real fraction of
     // the ceiling rather than a rounding error under it.
     expect(total).toBeGreaterThan(REALISTIC_TEXTURE_MEMORY_BYTES / 4);
   });
 
-  it('adds no more to the build than its share', () => {
-    const bytes = realisticFiles().reduce((sum, file) => sum + statSync(at(file)).size, 0);
-    expect(bytes).toBeLessThanOrEqual(REALISTIC_BUILD_BYTES);
-    expect(bytes).toBeGreaterThan(REALISTIC_BUILD_BYTES / 4);
+  it('prices a KTX2 file by what the tablet is handed, never by the file’s own size — #618', () => {
+    // A colour map with no alpha is ETC2 RGB, half a byte a texel; with alpha,
+    // ETC2 RGBA; a normal map ASTC 4×4. The road's colour and normal maps
+    // are the same 1024 px and must price differently.
+    const colour = fileKtx2Facts(at(REALISTIC_SURFACES.road.colour));
+    const normal = fileKtx2Facts(at(REALISTIC_SURFACES.road.normal));
+    expect(colour).toMatchObject({ scheme: 'etc1s', alpha: false, transfer: 'srgb' });
+    expect(normal).toMatchObject({ scheme: 'uastc', alpha: false, transfer: 'linear' });
+    expect(onTheTablet(colour)).toBe(0.5);
+    expect(onTheTablet(normal)).toBe(1);
+    for (const kind of ['tree-broadleaf', 'tree-conifer'] as const) {
+      for (const model of REALISTIC_VEGETATION[kind]) {
+        if (model.impostor === undefined) continue;
+        const strip = fileKtx2Facts(at(model.impostor));
+        expect(strip, model.impostor).toMatchObject({ scheme: 'etc1s', alpha: true });
+        expect(onTheTablet(strip)).toBe(1);
+      }
+    }
+  });
+
+  it('adds no more to the build than its share, the transcoder included — #618', () => {
+    const files = realisticFiles().reduce((sum, file) => sum + statSync(at(file)).size, 0);
+    const transcoder = TRANSCODER_FILES.reduce(
+      (sum, file) => sum + statSync(transcoderSource(WEB, file)).size,
+      0,
+    );
+    console.log(
+      `#618: the realistic set is ${String(files)} bytes and its transcoder ${String(transcoder)}`,
+    );
+    // ADR 0026 D-8 recorded the .wasm at 527 333 bytes, read from the tree.
+    expect(statSync(transcoderSource(WEB, 'basis_transcoder.wasm')).size).toBe(527_333);
+    expect(files + transcoder).toBeLessThanOrEqual(REALISTIC_BUILD_BYTES);
+    expect(files).toBeGreaterThan(REALISTIC_BUILD_BYTES / 4);
   });
 });
 
