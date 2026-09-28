@@ -468,6 +468,20 @@ describe('criterion 3 — everything interactive is reachable by keyboard', () =
   for (const route of ALL_ROUTES) {
     it(`every control on ${route.id} is in the tab order and is named`, async () => {
       await open(route.path);
+      // #666: a control tucked in a closed "More about" disclosure is reached
+      // by opening it first, which is one press on its summary — so every
+      // summary must be in the tab order as the page is drawn, and every
+      // control must be in it once the disclosures are open. `tabbableElements`
+      // leaves a closed disclosure's content out (#665), as a browser does.
+      const closed = new Set(tabbableElements(document));
+      for (const summary of queryAll(document, 'details > summary:first-of-type')) {
+        expect(closed.has(summary), `summary not in the tab order: ${summary.outerHTML}`).toBe(
+          true,
+        );
+      }
+      for (const details of queryAll(document, 'details')) {
+        details.setAttribute('open', '');
+      }
       const tabbable = new Set(tabbableElements(document));
       const controls = queryAll(
         document,
@@ -481,6 +495,21 @@ describe('criterion 3 — everything interactive is reachable by keyboard', () =
       }
     });
   }
+
+  it('leaves a link tucked in a closed “More about” out of the tab order until it is opened — #666', async () => {
+    // The jsdom half of #666's fourth criterion; `controls-first.browser.spec.ts`
+    // presses Tab through the same route in a real Chromium.
+    await open('/settings');
+    const tucked = queryAll(document, 'details.oyl-more').find(
+      (details) => details.querySelector('a[href]') !== null,
+    );
+    const link = tucked?.querySelector('a[href]');
+    expect(link, 'Settings tucks no link, so this checks nothing').toBeTruthy();
+    expect(tabbableElements(document)).not.toContain(link);
+    expect(tabbableElements(document)).toContain(tucked?.querySelector('summary'));
+    tucked?.setAttribute('open', '');
+    expect(tabbableElements(document)).toContain(link);
+  });
 
   it('puts the skip link first in the tab order, which is the one press it exists for', async () => {
     await open('/');

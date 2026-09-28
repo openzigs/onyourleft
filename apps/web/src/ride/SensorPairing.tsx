@@ -81,6 +81,15 @@ export const PAIRING_STEPS: readonly {
 export const NOT_PAIRED = 'Not paired';
 
 /**
+ * Web Bluetooth's one-gesture-per-device rule, as the pairing list says it —
+ * CLAUDE.md §8, ADR 0003 D-7 rule 5. Never inside the disclosure beneath the
+ * list (#659), and held there by `a11y/kept-visible.a11y.test.tsx` (#666).
+ */
+export const ONE_GESTURE_PER_DEVICE =
+  'Bluetooth needs one user gesture per device: each one is its own button and its own prompt, ' +
+  'and there is no way to pair them all at once.';
+
+/**
  * What a connection state means to somebody on a bike, in words — SC 1.4.1.
  *
  * `disconnected` says what to do, because on Web Bluetooth there is no silent
@@ -144,10 +153,7 @@ export function PairingPanel({
           />
         ))}
       </ul>
-      <p>
-        Bluetooth needs one user gesture per device: each one is its own button and its own prompt,
-        and there is no way to pair them all at once.
-      </p>
+      <p>{ONE_GESTURE_PER_DEVICE}</p>
       {limits.map((limit) => (
         <p key={limit}>{limit}</p>
       ))}

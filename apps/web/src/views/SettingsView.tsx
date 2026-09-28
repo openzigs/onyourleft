@@ -66,8 +66,9 @@ import { UNIT_SYSTEMS, type UnitSystem } from '@onyourleft/store';
 import { DEFAULT_RIDER_MASS_KILOGRAMS, massToSave, riderMassFor } from '../athlete/mass';
 import type { AthleteMassPort } from '../athlete/store-port';
 import { Button } from '../design/Button';
+import { KeptVisible, MoreAbout } from '../design/MoreAbout';
 import { StatusMessage } from '../design/StatusMessage';
-import { PersistenceNotice } from '../support/PersistenceNotice';
+import { CLEARING_STILL_REMOVES, PersistenceNotice } from '../support/PersistenceNotice';
 import type { StorageManagerLike } from '../support/persistent-storage';
 import { hrefFor, routeById } from '../shell/routes';
 import {
@@ -155,6 +156,27 @@ export const MASS_SAVED = 'Saved. The trainer game now rides you at this weight.
 
 /** Said when the weight has been cleared and the default is back. */
 export const MASS_CLEARED = 'Cleared. The trainer game rides you at the assumed weight again.';
+
+/** Where the rider's weight goes, which is nowhere — kept on the screen (#666). */
+export const WEIGHT_STAYS_HERE =
+  'Nothing is sent anywhere — it is stored on this device with your rides.';
+
+/**
+ * The sentences on this screen that are never tucked into a "More about"
+ * disclosure — #666. They are about what leaves the device and to whom, and
+ * what a rider can lose: the map-tile host (#534's review, #558), where a
+ * weight is kept, and that clearing site data takes the rides with it.
+ * `a11y/kept-visible.a11y.test.tsx` fails this route if any of them has a
+ * closed `<details>` above it. Fragments where the sentence names a host.
+ */
+export const SETTINGS_KEPT_VISIBLE: readonly string[] = [
+  WEIGHT_STAYS_HERE,
+  'sends the map area and your device’s IP address to',
+  'It sends no ride data.',
+  'keeps a record of each map request',
+  'the app asks',
+  CLEARING_STILL_REMOVES,
+];
 
 /** Said when there is nothing to write a weight to. */
 export const MASS_NO_STORE =
@@ -286,11 +308,7 @@ export function SettingsView({
     <>
       <section className="oyl-panel" aria-labelledby="oyl-units-heading">
         <h2 id="oyl-units-heading">Units</h2>
-        <p className="oyl-muted">
-          One choice covers distance, speed, climbing and weight. A rider who wants miles for
-          distance and metres for climbing cannot have that — the whole app follows one setting, and
-          splitting it later is something we can add without taking anything away.
-        </p>
+        <p className="oyl-muted">One choice covers distance, speed, climbing and weight.</p>
 
         {/*
         A radio group rather than a select, because there are two options and
@@ -348,11 +366,18 @@ export function SettingsView({
           </StatusMessage>
         )}
 
-        <p className="oyl-muted">
-          This changes how numbers are <strong>shown</strong> and nothing else. Every ride stays
-          recorded exactly as it was, and a FIT, GPX or TCX file you export is unaffected — those
-          formats have their own unit rules and another program reads them.
-        </p>
+        <MoreAbout about="units">
+          <p className="oyl-muted">
+            A rider who wants miles for distance and metres for climbing cannot have that — the
+            whole app follows one setting, and splitting it later is something we can add without
+            taking anything away.
+          </p>
+          <p className="oyl-muted">
+            This changes how numbers are <strong>shown</strong> and nothing else. Every ride stays
+            recorded exactly as it was, and a FIT, GPX or TCX file you export is unaffected — those
+            formats have their own unit rules and another program reads them.
+          </p>
+        </MoreAbout>
       </section>
 
       {/*
@@ -447,11 +472,7 @@ function AnnouncementsPanel({
   return (
     <section className="oyl-panel oyl-announce" aria-labelledby="oyl-announce-heading">
       <h2 id="oyl-announce-heading">Announcements</h2>
-      <p className="oyl-muted">
-        For riding with a screen reader. During a ride in the trainer game, your screen reader is
-        given a short sentence now and then — never more than one every few seconds, and nothing you
-        have not chosen below. Off unless you turn it on, and kept on this device only.
-      </p>
+      <p className="oyl-muted">For riding with a screen reader.</p>
       <p>
         <label className="oyl-announce__switch">
           <input
@@ -514,6 +535,13 @@ function AnnouncementsPanel({
           {message.text}
         </StatusMessage>
       )}
+      <MoreAbout about="announcements">
+        <p className="oyl-muted">
+          During a ride in the trainer game, your screen reader is given a short sentence now and
+          then — never more than one every few seconds, and nothing you have not chosen above. Off
+          unless you turn it on, and kept on this device only.
+        </p>
+      </MoreAbout>
     </section>
   );
 }
@@ -551,13 +579,8 @@ function SoundsPanel({
     <section className="oyl-panel oyl-announce oyl-sounds" aria-labelledby="oyl-sounds-heading">
       <h2 id="oyl-sounds-heading">Sounds</h2>
       <p className="oyl-muted">
-        Short sounds during a ride, as well as anything your screen reader says: a steady tone
-        during a workout that rises when your power is over the target and falls when it is under,
-        two rising notes when a workout block changes, and one low note as each distance-to-go mark
-        passes in the game. That note plays only with its spoken sentence, so it needs announcements
-        turned on above, with &ldquo;Say the distance to go&rdquo; set to a distance. The tone is
-        silent whenever there is no power reading. Off unless you turn it on; while riding, a Mute
-        sounds button and a volume slider are on the ride screen.
+        Off unless you turn it on; while riding, a Mute sounds button and a volume slider are on the
+        ride screen.
       </p>
       <p>
         <label className="oyl-announce__switch">
@@ -591,6 +614,16 @@ function SoundsPanel({
           {message.text}
         </StatusMessage>
       )}
+      <MoreAbout about="sounds">
+        <p className="oyl-muted">
+          Short sounds during a ride, as well as anything your screen reader says: a steady tone
+          during a workout that rises when your power is over the target and falls when it is under,
+          two rising notes when a workout block changes, and one low note as each distance-to-go
+          mark passes in the game. That note plays only with its spoken sentence, so it needs
+          announcements turned on above, with &ldquo;Say the distance to go&rdquo; set to a
+          distance. The tone is silent whenever there is no power reading.
+        </p>
+      </MoreAbout>
     </section>
   );
 }
@@ -628,15 +661,7 @@ function GameWorldPanel({
       <h2 id="oyl-world-heading">Game world</h2>
       <p className="oyl-muted">
         The trainer game draws a standard world unless you choose the realistic one: photographic
-        road, ground and sky, photoscanned trees and a modelled rider. It asks much more of the
-        device. If the device gets too hot during a ride, the rest of that ride is in the standard
-        world and the ride screen says so. It has been measured on one tablet, not on phones.
-      </p>
-      <p className="oyl-muted">
-        In a browser the realistic world is downloaded when a ride starts — about 33 MB — and is not
-        kept on this device for use offline. With no network, or if it cannot be loaded, the ride is
-        in the standard world instead and the ride screen says so. In the Android app it is already
-        on the device.
+        road, ground and sky, photoscanned trees and a modelled rider.
       </p>
       <p>
         <label className="oyl-announce__switch">
@@ -661,6 +686,19 @@ function GameWorldPanel({
           {message.text}
         </StatusMessage>
       )}
+      <MoreAbout about="the realistic world">
+        <p className="oyl-muted">
+          It asks much more of the device. If the device gets too hot during a ride, the rest of
+          that ride is in the standard world and the ride screen says so. It has been measured on
+          one tablet, not on phones.
+        </p>
+        <p className="oyl-muted">
+          In a browser the realistic world is downloaded when a ride starts — about 33 MB — and is
+          not kept on this device for use offline. With no network, or if it cannot be loaded, the
+          ride is in the standard world instead and the ride screen says so. In the Android app it
+          is already on the device.
+        </p>
+      </MoreAbout>
     </section>
   );
 }
@@ -707,22 +745,31 @@ function MapTilesPanel({
     >
       <h2 id="oyl-map-tiles-heading">Ride map</h2>
       {host === undefined ? (
-        <p className="oyl-muted">
-          This build has no map configured, so it never asks a tile server for anything. A ride’s
-          route is drawn on a plain background.
-        </p>
+        <KeptVisible>
+          <p className="oyl-muted">
+            This build has no map configured, so it never asks a tile server for anything. A ride’s
+            route is drawn on a plain background.
+          </p>
+        </KeptVisible>
       ) : (
         <>
-          <p className="oyl-muted">
-            When this is on, opening a ride that has GPS asks {host} for the map around where you
-            rode. That sends the map area and your device’s IP address to {host}. It sends no ride
-            data.
-            {ours
-              ? ` Cloudflare, which runs ${host} for us, keeps a record of each map request — your IP address, the time, and your device or browser type, not which part of the map — that our Cloudflare account can see for up to 7 days. We don’t use it or share it.`
-              : ''}{' '}
-            When it is off, the app asks {host} for nothing and draws your route on a plain
-            background.
-          </p>
+          {/*
+            #666: kept on the screen, whole. What leaves the device and to whom
+            is the privacy sentence #534's review and #558 put beside this
+            switch, and a closed disclosure is one press from hidden.
+          */}
+          <KeptVisible>
+            <p className="oyl-muted">
+              When this is on, opening a ride that has GPS asks {host} for the map around where you
+              rode. That sends the map area and your device’s IP address to {host}. It sends no ride
+              data.
+              {ours
+                ? ` Cloudflare, which runs ${host} for us, keeps a record of each map request — your IP address, the time, and your device or browser type, not which part of the map — that our Cloudflare account can see for up to 7 days. We don’t use it or share it.`
+                : ''}{' '}
+              When it is off, the app asks {host} for nothing and draws your route on a plain
+              background.
+            </p>
+          </KeptVisible>
           <p>
             <label className="oyl-announce__switch">
               <input
@@ -871,32 +918,9 @@ function WeightPanel({
   return (
     <section className="oyl-panel" aria-labelledby="oyl-weight-heading">
       <h2 id="oyl-weight-heading">Your weight</h2>
-      <p className="oyl-muted">
-        The trainer game works out how fast you are going from how hard you are pedalling, and what
-        you weigh is most of the answer on a climb. Nothing is sent anywhere — it is stored on this
-        device with your rides.
-      </p>
-      <p className="oyl-muted">
-        {current.assumed ? 'You have not entered one, so rides use an assumed ' : 'Rides use '}
-        {measurementText(formatMass(current.mass, units))}
-        {current.assumed
-          ? '. That is a stand-in and not a measurement, and it is wrong for almost everybody.'
-          : '.'}{' '}
-        A bicycle is added to it — the game rides a rider and a bike, not a rider.
-      </p>
-      {/*
-        ⚠️ #365's fifth criterion, and the half a weight box cannot carry on its
-        own: weight is most of the answer on a climb and almost none of it on
-        the flat, where what decides a rider's speed is how much air they are
-        pushing. That is chosen per ride on the game screen — `game/rider.ts`
-        §`RIDING_POSITIONS` — and a rider told only about their weight would go
-        looking for the flat-road setting here and not find one.
-      */}
-      <p className="oyl-muted">
-        On the flat it is mostly air rather than weight. How you are riding — sitting up, on the
-        hoods, in the drops — is chosen for each ride on the{' '}
-        <a href={hrefFor(routeById('game'))}>trainer game screen</a>.
-      </p>
+      <KeptVisible>
+        <p className="oyl-muted">{WEIGHT_STAYS_HERE}</p>
+      </KeptVisible>
 
       {port === undefined ? (
         <StatusMessage tone="warning" label="No local store">
@@ -916,6 +940,35 @@ function WeightPanel({
           onMessage={setMessage}
         />
       )}
+
+      <p className="oyl-muted">
+        {current.assumed ? 'You have not entered one, so rides use an assumed ' : 'Rides use '}
+        {measurementText(formatMass(current.mass, units))}
+        {current.assumed
+          ? '. That is a stand-in and not a measurement, and it is wrong for almost everybody.'
+          : '.'}{' '}
+        A bicycle is added to it — the game rides a rider and a bike, not a rider.
+      </p>
+      <MoreAbout about="your weight">
+        <p className="oyl-muted">
+          The trainer game works out how fast you are going from how hard you are pedalling, and
+          what you weigh is most of the answer on a climb.
+        </p>
+        {/*
+          ⚠️ #365's fifth criterion, and the half a weight box cannot carry on
+          its own: weight is most of the answer on a climb and almost none of it
+          on the flat, where what decides a rider's speed is how much air they
+          are pushing. That is chosen per ride on the game screen —
+          `game/rider.ts` §`RIDING_POSITIONS` — and a rider told only about
+          their weight would go looking for the flat-road setting here and not
+          find one.
+        */}
+        <p className="oyl-muted">
+          On the flat it is mostly air rather than weight. How you are riding — sitting up, on the
+          hoods, in the drops — is chosen for each ride on the{' '}
+          <a href={hrefFor(routeById('game'))}>trainer game screen</a>.
+        </p>
+      </MoreAbout>
     </section>
   );
 }

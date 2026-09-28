@@ -638,6 +638,16 @@ origin's permission back, and in every transport the id stops being issued until
 returns the device again. `apps/web/browser/devices.browser.spec.ts` walks Home → Devices → Pair
 against the scripted Web Bluetooth stack, with today's dead end as its control.
 
+**Controls first, detail tucked** (#666, the owner's ruling on #654). Settings, Segments, Files and
+the Devices screen keep a route's heading and one short sentence, then its controls, then a native
+`<details>` — `design/MoreAbout.tsx`, *"More about …"* — holding the longer explanation. Nothing was
+deleted: `a11y/route-sentences.a11y.test.tsx` holds every route to the sentences it rendered on
+`main`. What may **never** be tucked — trainer control, what leaves the device and to whom, what an
+erase cannot reach, the camera and anyone else in the room, Web Bluetooth's limits — is listed per
+view in a `*_KEPT_VISIBLE` constant and held by `a11y/kept-visible.a11y.test.tsx`; the Camera screen
+tucks nothing and got its first control above the fold by putting the side camera's way in first.
+`apps/web/browser/controls-first.browser.spec.ts` measures the fold on every route.
+
 ### `apps/web/src/transfer`: import and export, and the sample grid nobody else owns
 
 Added by [#51](https://github.com/openzigs/onyourleft/issues/51), and it is `packages/fit`'s **first

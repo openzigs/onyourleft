@@ -49,12 +49,19 @@ import { StrictMode, type JSX } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 
+import { unixSeconds } from '@onyourleft/domain';
+import { activityId, openActivityStore, routeId } from '@onyourleft/store';
+
+import { tabbableElements } from '../src/a11y/audit';
 import { Button } from '../src/design/Button';
 import { ScrollTable } from '../src/design/ScrollTable';
 import { VisuallyHidden } from '../src/design/VisuallyHidden';
 import { OSM_ATTRIBUTION } from '../src/map/basemap';
 import type { MapPort } from '../src/map/port';
+import { LOCAL_ATHLETE, localAthleteRecord } from '../src/local-athlete';
 import { ALL_ROUTES, matchHash, type RouteId } from '../src/shell/routes';
+import { webCryptoDigest } from '../src/transfer/browser';
+import type { TransferPort } from '../src/transfer/store-port';
 import {
   PARAMETERS,
   POPULATED,
@@ -111,10 +118,70 @@ export interface ReflowMeasurement {
    */
   readonly errors: readonly string[];
   readonly settledWithinPatience: boolean;
+  /**
+   * The first control in `main`, in document order, that is laid out — #666.
+   * `null` when the route has none. A `<summary>` is not counted: a
+   * disclosure is where the explanation went, not what a rider came to do.
+   */
+  readonly firstControl: FirstControl | null;
+  /**
+   * Where the fold is, in CSS px from the top: the viewport's height less the
+   * safe-area inset at the bottom (#439), or the top of a navigation bar fixed
+   * across the bottom, whichever is higher — what covers the page is not
+   * above the fold.
+   */
+  readonly fold: number;
+  /**
+   * The prose laid out between the route's summary and its first control that
+   * is NOT marked `data-oyl-kept-visible` — #666. Empty means everything in
+   * the way is a heading or text the owner ruled must stay on the screen, so
+   * a route whose consent text pushes its first control below the fold is
+   * judged by this instead of by the fold.
+   */
+  readonly proseBeforeFirstControl: readonly string[];
+  /** Every "More about" disclosure, and the prose above its section's first control. */
+  readonly sections: readonly SectionProse[];
+  /** Every `<details>` in `main`, and how many of them are open as measured. */
+  readonly disclosures: { readonly total: number; readonly open: number };
+}
+
+/**
+ * A section that tucks its explanation (#666), and the CSS px of prose laid
+ * out between its heading and its first control — the one sentence, and
+ * nothing the owner did not rule must stay.
+ */
+export interface SectionProse {
+  readonly heading: string;
+  readonly summary: string;
+  readonly proseHeight: number;
+  /** Whether the section has a control at all after its heading. */
+  readonly controlled: boolean;
+}
+
+/** One control's place on the page, in CSS px from the top of the viewport. */
+export interface FirstControl {
+  readonly description: string;
+  readonly text: string;
+  readonly top: number;
 }
 
 declare global {
   interface Window {
+    /**
+     * A stable name for an element, for comparing a real Tab sequence with the
+     * model's — #666. The probed link is `link`.
+     */
+    __oylTabKey?: (element: Element) => string;
+    /**
+     * `a11y/audit.ts` §`tabbableElements` over the live page, inside `main`,
+     * as keys — and, separately, the radios in it that a browser does NOT
+     * stop on: every radio of a named group but the checked one (or the first,
+     * when none is checked). The model counts each radio; a browser makes a
+     * group one tab stop and moves within it by arrow key. #666 found that
+     * difference by comparing the two (filed as #698), and it is reported
+     * apart from the sequence so that the rest can be compared exactly.
+     */
+    __oylTabModel?: () => { readonly stops: string[]; readonly radiosWithinAGroup: string[] };
     __oylReflow?: {
       readonly ready: boolean;
       readonly errors: readonly string[];
@@ -137,10 +204,33 @@ async function realMap(): Promise<MapPort> {
   return (await import('../src/map/maplibre')).mapLibrePort;
 }
 
+/**
+ * The Files screen's port, over this browser's own IndexedDB — #666. Without
+ * one the screen shows its not-available sentence and none of its forms, and
+ * the forms are what #654 measured at 3,554 px. A database of the harness's
+ * own name, never written to: nothing on the walk imports a file.
+ */
+function transferPort(): TransferPort {
+  const now = unixSeconds(Math.floor(Date.now() / 1000));
+  return {
+    store: openActivityStore('oyl-reflow-harness'),
+    athleteId: LOCAL_ATHLETE,
+    newActivityId: () => activityId(crypto.randomUUID()),
+    newRouteId: () => routeId(crypto.randomUUID()),
+    now: () => now,
+    timeZone: 'UTC',
+    digest: webCryptoDigest,
+    save: () => undefined,
+    drafts: { forget: () => undefined },
+    athleteRow: localAthleteRecord(now),
+  };
+}
+
 function shell(populated: boolean): JSX.Element {
   return (
     <PopulatedShell
       populated={populated}
+      transfer={transferPort()}
       map={realMap}
       basemap={{
         archiveUrl: new URL('/basemap-fixture.pmtiles', window.location.origin).toString(),
@@ -367,14 +457,210 @@ function applyControl(control: string | null): void {
   main.append(specimen);
 }
 
+/**
+ * What counts as a control for #666's "first control above the fold": a
+ * button, a form control, or a link drawn as a button — which is how #668
+ * made every next step that is an action look. A link inside a sentence is a
+ * reference rather than the thing a rider came to do, so a page of prose with
+ * a link in its third paragraph has no control, not a late one. A `<summary>`
+ * is not a control here either, and nor is anything inside one: a disclosure
+ * is where the explanation went.
+ */
+const CONTROL_SELECTOR = 'button, input:not([type="hidden"]), select, textarea, a[href].oyl-button';
+
+/**
+ * Whether an element is drawn — one in a closed `<details>` is not.
+ *
+ * ⚠️ **Not "has a box"**, and #666 found that out by mutation: Chromium 153
+ * lays out the content of a CLOSED `<details>` and hides it (the content slot
+ * is `content-visibility: hidden`, so find-in-page can open it), so a tucked
+ * paragraph reports a full-size `getBoundingClientRect()`. The first version
+ * of this function read the box, and counted every tucked paragraph as prose
+ * in the way. `checkVisibility()` is the platform's own answer, and a box is
+ * still required so an empty element does not count.
+ */
+function laidOut(element: Element): boolean {
+  const box = element.getBoundingClientRect();
+  return element.checkVisibility() && (box.width > 0 || box.height > 0);
+}
+
+const PROSE_SELECTOR = 'p, li, dd, dt, .oyl-status, figcaption, blockquote';
+
+function inOrder(first: Node, second: Node): boolean {
+  return (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+}
+
+function textOf(element: Element): string {
+  return (element.textContent ?? '').replace(/\s+/g, ' ').trim();
+}
+
+/** The controls of `main` that are laid out, in document order. */
+function laidOutControls(main: Element): Element[] {
+  return [...main.querySelectorAll(CONTROL_SELECTOR)].filter(
+    (element) => element.closest('summary') === null && laidOut(element),
+  );
+}
+
+/**
+ * The prose blocks of `main` that lie wholly between `after` and `before`, are
+ * laid out, hold no control and are not marked `data-oyl-kept-visible` — the
+ * outermost of each, so a list is counted once and not again for its items.
+ */
+function proseBetween(main: Element, after: Element | null, before: Element | null): Element[] {
+  const blocks = [...main.querySelectorAll(PROSE_SELECTOR)].filter(
+    (element) =>
+      laidOut(element) &&
+      textOf(element) !== '' &&
+      element.closest('[data-oyl-kept-visible], summary') === null &&
+      element.querySelector(CONTROL_SELECTOR) === null &&
+      (after === null || inOrder(after, element)) &&
+      (before === null || (!element.contains(before) && inOrder(element, before))),
+  );
+  return blocks.filter(
+    (element) => !blocks.some((other) => other !== element && other.contains(element)),
+  );
+}
+
+function proseBeforeFirstControl(): string[] {
+  const main = document.querySelector('main');
+  if (main === null) {
+    return [];
+  }
+  const control = laidOutControls(main)[0] ?? null;
+  // The route's own summary is the shell's (#48), under its `h1`, and is the
+  // one sentence every route keeps.
+  const summary = main.querySelector(':scope > h1 + p');
+  return proseBetween(main, summary, control).map((element) => textOf(element).slice(0, 80));
+}
+
+/**
+ * Every "More about" disclosure, its section's heading, and the height of the
+ * prose between that heading and the section's first control — #666 applied
+ * section by section: a long page whose first control is near the top can
+ * still bury every later one under a paragraph, which is Settings on `main`.
+ */
+function sections(): SectionProse[] {
+  const main = document.querySelector('main');
+  if (main === null) {
+    return [];
+  }
+  const headings = [...main.querySelectorAll('h2, h3')].filter(laidOut);
+  const controls = laidOutControls(main);
+  const found: SectionProse[] = [];
+  for (const details of main.querySelectorAll('details.oyl-more')) {
+    if (details.hasAttribute('data-oyl-inline-copy')) {
+      continue;
+    }
+    const heading = headings.filter((each) => inOrder(each, details)).at(-1);
+    if (heading === undefined) {
+      continue;
+    }
+    // The section ends at the next heading of its own level or higher.
+    const end = headings.find((each) => inOrder(heading, each) && each.tagName <= heading.tagName);
+    const control =
+      controls.find(
+        (each) => inOrder(heading, each) && (end === undefined || inOrder(each, end)),
+      ) ?? null;
+    found.push({
+      heading: textOf(heading),
+      summary: textOf(details.querySelector('summary') ?? details),
+      proseHeight: proseBetween(main, heading, control ?? end ?? null).reduce(
+        (sum, element) => sum + element.getBoundingClientRect().height,
+        0,
+      ),
+      controlled: control !== null,
+    });
+  }
+  return found;
+}
+
+function firstControl(): FirstControl | null {
+  const main = document.querySelector('main');
+  if (main === null) {
+    return null;
+  }
+  for (const element of main.querySelectorAll(CONTROL_SELECTOR)) {
+    // A control inside a closed `<details>` is not laid out: it has no box.
+    if (element.closest('summary') !== null || !laidOut(element)) {
+      continue;
+    }
+    const box = element.getBoundingClientRect();
+    return {
+      description: describe(element),
+      text: (element.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 60),
+      top: box.top + window.scrollY,
+    };
+  }
+  return null;
+}
+
+function foldLine(): number {
+  const probe = document.createElement('div');
+  probe.style.cssText =
+    'position:fixed;visibility:hidden;padding-bottom:env(safe-area-inset-bottom,0px)';
+  document.body.append(probe);
+  const inset = Number.parseFloat(getComputedStyle(probe).paddingBottom);
+  probe.remove();
+  let fold = window.innerHeight - inset;
+  const nav = document.querySelector('.oyl-nav');
+  if (nav !== null && getComputedStyle(nav).position === 'fixed') {
+    const box = nav.getBoundingClientRect();
+    // A bar across the bottom, not a rail down the side.
+    if (box.width >= window.innerWidth - 1 && box.top > window.innerHeight / 2) {
+      fold = Math.min(fold, box.top);
+    }
+  }
+  return fold;
+}
+
+/**
+ * The control #666 names: a copy of the page with its explanation put back —
+ * each "More about" disclosure copied, OPEN, to straight under its section's
+ * heading, where the explanation stood before it was tucked. The fold and the
+ * section rules must then FAIL on the routes that tuck anything, or they are
+ * not measuring it.
+ *
+ * A copy rather than a move: the disclosure is React's, and moving a node
+ * React owns makes the next render fail to remove it. The copies are the
+ * harness's own and are removed before each route is opened.
+ */
+function inlineDisclosureCopies(): void {
+  const main = document.querySelector('main');
+  if (main === null) {
+    return;
+  }
+  const headings = [...main.querySelectorAll('h2, h3')];
+  for (const details of main.querySelectorAll('details.oyl-more')) {
+    const heading = headings.filter((each) => inOrder(each, details)).at(-1);
+    const copy = details.cloneNode(true) as HTMLElement;
+    copy.setAttribute('open', '');
+    copy.setAttribute('data-oyl-inline-copy', '');
+    if (heading === undefined) {
+      main.querySelector(':scope > h1 + p')?.after(copy);
+    } else {
+      heading.after(copy);
+    }
+  }
+}
+
+function removeInlineCopies(): void {
+  for (const copy of document.querySelectorAll('[data-oyl-inline-copy]')) {
+    copy.remove();
+  }
+}
+
 async function visit(hash: string): Promise<ReflowMeasurement> {
   const control = new URLSearchParams(window.location.search).get('control');
+  removeInlineCopies();
   window.location.hash = hash;
   const { route } = matchHash(hash);
   const headed = await untilHeading(route.title);
   const quiet = await untilQuiet();
   await document.fonts.ready;
   applyControl(control);
+  if (new URLSearchParams(window.location.search).get('disclosures') === 'inline') {
+    inlineDisclosureCopies();
+  }
   await nextFrame();
   visited.add(route.id);
   // Read through a `Partial` view on purpose: the spec's "no entry" fault has
@@ -402,6 +688,14 @@ async function visit(hash: string): Promise<ReflowMeasurement> {
     markerPresent: marker === undefined ? null : document.querySelector(marker) !== null,
     errors: raised,
     settledWithinPatience: headed && quiet,
+    firstControl: firstControl(),
+    fold: foldLine(),
+    proseBeforeFirstControl: proseBeforeFirstControl(),
+    sections: sections(),
+    disclosures: {
+      total: document.querySelectorAll('main details').length,
+      open: document.querySelectorAll('main details[open]').length,
+    },
   };
 }
 
@@ -438,6 +732,38 @@ window.addEventListener('unhandledrejection', (event) => {
   const reason: unknown = event.reason;
   errors.push(`unhandled rejection: ${reason instanceof Error ? reason.message : String(reason)}`);
 });
+
+function tabKey(element: Element): string {
+  if (element.getAttribute('data-oyl-probe') === 'link') {
+    return 'link';
+  }
+  const index = [...document.querySelectorAll('*')].indexOf(element);
+  return `${describe(element)}@${String(index)}`;
+}
+
+window.__oylTabKey = tabKey;
+/** A radio a browser reaches by arrow key within its group rather than by Tab. */
+function withinARadioGroup(element: Element): boolean {
+  if (!(element instanceof HTMLInputElement) || element.type !== 'radio' || element.name === '') {
+    return false;
+  }
+  const group = [...document.querySelectorAll<HTMLInputElement>('input[type="radio"]')].filter(
+    (radio) => radio.name === element.name && radio.form === element.form,
+  );
+  const stop = group.find((radio) => radio.checked) ?? group[0];
+  return stop !== element;
+}
+
+window.__oylTabModel = () => {
+  const main = document.querySelector('main');
+  const model = tabbableElements(document).filter(
+    (element) => main?.contains(element) === true && element !== main,
+  );
+  return {
+    stops: model.filter((element) => !withinARadioGroup(element)).map(tabKey),
+    radiosWithinAGroup: model.filter(withinARadioGroup).map(tabKey),
+  };
+};
 
 try {
   main();

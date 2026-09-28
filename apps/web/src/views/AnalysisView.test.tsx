@@ -27,6 +27,7 @@ import { activityId, athleteId as toAthleteId } from '@onyourleft/store';
 import { seconds } from '@onyourleft/domain';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { buttonsByView, onePrimaryViolations } from '../a11y/button-hierarchy';
 import { stubAnalysis, type StubAnalysisRide } from '../analysis/testing';
 import { stubActivity } from '../detail/testing';
 import {
@@ -110,6 +111,24 @@ describe('AnalysisView — with no local store', () => {
 
     expect(mounted.container.textContent).toContain('No local store on this browser');
     expect(queryAll(mounted.container, 'table')).toHaveLength(0);
+  });
+
+  it('offers its two next steps as buttons, one of them primary — #668, finished by #666', async () => {
+    mounted = await mount(
+      <main>
+        <AnalysisView />
+      </main>,
+    );
+    const named = (label: string): Element | undefined =>
+      queryAll(mounted?.container ?? document, 'main a').find(
+        (element) => (element.textContent ?? '').trim() === label,
+      );
+    const rides = named('Your rides');
+    const files = named('Import or export files');
+    expect(rides?.classList.contains('oyl-button'), rides?.outerHTML).toBe(true);
+    expect(files?.classList.contains('oyl-button--secondary'), files?.outerHTML).toBe(true);
+    expect(buttonsByView(document)[0]?.primaries).toEqual([rides]);
+    expect(onePrimaryViolations(document)).toEqual([]);
   });
 });
 

@@ -65,6 +65,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore, type JSX } from 'react';
 
 import { Button } from '../design/Button';
+import { KeptVisible } from '../design/MoreAbout';
 import { StatusMessage } from '../design/StatusMessage';
 import {
   BYSTANDER_SENTENCE,
@@ -169,6 +170,15 @@ export const SINGLE_PICTURE_PURPOSE =
 export const SIDE_CAMERA_UNAVAILABLE =
   'A side camera cannot be paired on this device: this browser cannot make the direct link ' +
   'between two devices that pairing needs. This device’s own camera, below, still works.';
+
+/**
+ * The sentences on this screen that are never tucked into a "More about"
+ * disclosure — #666: what the camera captures, where a picture goes and what
+ * is kept (ADR 0029, #382's consent statement), anyone else in the room (ADR
+ * 0029 D-5), and what is sent to the rider's own computer, unencrypted
+ * (ADR 0029's amendment, Q1). `a11y/kept-visible.a11y.test.tsx` holds them.
+ */
+export const CAMERA_KEPT_VISIBLE: readonly string[] = [...CONSENT_STATEMENT, BYSTANDER_SENTENCE];
 
 export function CameraView({ controller, sidePairing }: CameraViewProps): JSX.Element {
   if (controller === undefined) {
@@ -331,24 +341,6 @@ function Camera({
       */}
       <h2 id={TITLE_ID}>Camera</h2>
 
-      <section aria-labelledby="oyl-camera-what">
-        <h3 id="oyl-camera-what">What this does</h3>
-        <ul>
-          {CONSENT_STATEMENT.map((line) => (
-            <li key={line}>{line}</li>
-          ))}
-        </ul>
-        {/*
-          ADR 0029 D-5, verbatim, and `camera/consent.ts` asserts it against the
-          ADR on disk. It is a `StatusMessage` rather than a paragraph because
-          it is the one sentence on this screen that is about somebody who is
-          not the rider and cannot answer for themselves.
-        */}
-        <StatusMessage tone="warning" label="Anyone else in the room">
-          {BYSTANDER_SENTENCE}
-        </StatusMessage>
-      </section>
-
       {/*
         #528. The tripod phone's own screen, for the arrangement the owner
         chose (#386): a link rather than a control, because it is a different
@@ -358,6 +350,13 @@ function Camera({
         drawn as a button** (#557): the owner's first attempt went to "Turn the
         camera on" and "Take a picture" below, which have no preview and are
         not the pairing at all, because this was one small link in a sentence.
+
+        ⚠️ **And since #666 before "What this does" too**, which is about THIS
+        device's camera: the link goes to the phone's own page, which asks its
+        own consent, so nothing here is agreed to by pressing it. That puts the
+        screen's first control above the fold on a phone
+        (`controls-first.browser.spec.ts`), where it used to start at
+        y = 1,400 px under the consent text.
       */}
       <section aria-labelledby="oyl-camera-side-way">
         <h3 id="oyl-camera-side-way">{SIDE_CAMERA_WAY_TITLE}</h3>
@@ -381,6 +380,32 @@ function Camera({
             </li>
           </ol>
         )}
+      </section>
+
+      <section aria-labelledby="oyl-camera-what">
+        <h3 id="oyl-camera-what">What this does</h3>
+        {/*
+          #666: never tucked. What is captured, where it goes and what is kept
+          is what the consent below agrees to (ADR 0029, #382), and the
+          bystander sentence is D-5's — both stay on the screen, before the
+          box that says they were read.
+        */}
+        <KeptVisible>
+          <ul>
+            {CONSENT_STATEMENT.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+          {/*
+          ADR 0029 D-5, verbatim, and `camera/consent.ts` asserts it against the
+          ADR on disk. It is a `StatusMessage` rather than a paragraph because
+          it is the one sentence on this screen that is about somebody who is
+          not the rider and cannot answer for themselves.
+        */}
+          <StatusMessage tone="warning" label="Anyone else in the room">
+            {BYSTANDER_SENTENCE}
+          </StatusMessage>
+        </KeptVisible>
       </section>
 
       {agreed ? null : (
@@ -772,7 +797,8 @@ function AnalysisSection({
   return (
     <section aria-labelledby="oyl-camera-analysis">
       <h3 id="oyl-camera-analysis">Your own computer</h3>
-      <p>
+      {/* #666: what is sent, to where, and unencrypted — never tucked (ADR 0029 §Q1). */}
+      <p data-oyl-kept-visible="">
         A computer of yours on the same network can look at your pictures, running a model server
         you install on it. Nothing is set up to begin with, and nothing is sent until you enter its
         address and switch it on. A picture then goes to that one address, only when you press the

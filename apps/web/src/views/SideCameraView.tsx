@@ -43,6 +43,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore, type JSX } from 'react';
 
 import { Button } from '../design/Button';
+import { KeptVisible } from '../design/MoreAbout';
 import { StatusMessage } from '../design/StatusMessage';
 import { BYSTANDER_SENTENCE, CONSENT_REFUSAL_TEXT } from '../camera/consent';
 import { FRAMING_VERDICT_TEXT } from '../camera/framing';
@@ -70,6 +71,16 @@ const TITLE_ID = 'oyl-side-camera-title';
  * ADR 0033 D-3 and D-6. The consent screen changes in the pull request that
  * sends the first picture, which is the only order in which it stays true.
  */
+/**
+ * The sentences on the phone's page that are never tucked — #666, ADR 0029
+ * D-5 and ADR 0033. `a11y/kept-visible.a11y.test.tsx` holds them.
+ */
+export const SIDE_CAMERA_KEPT_VISIBLE: readonly string[] = [
+  BYSTANDER_SENTENCE,
+  LINK_LOSS_SENTENCE,
+  'This phone keeps nothing about you once the session ends',
+];
+
 export const SIDE_PICTURES_GO_SENTENCE =
   'While it is filming, it sends about five small pictures a second to the tablet you paired it ' +
   'with — directly, over your own Wi-Fi, encrypted — and nowhere else. The tablet looks at each ' +
@@ -303,27 +314,37 @@ function SessionScreen({
       {state.phase === 'off' ? (
         <section aria-labelledby="oyl-side-camera-what">
           <h3 id="oyl-side-camera-what">Before the camera is on</h3>
-          <ul>
-            <li>
-              This phone stands on a tripod beside the bike and takes pictures of you from the side
-              while you ride, only while the &ldquo;Camera on&rdquo; sign is showing.
-            </li>
-            <li>
-              While you set it up, it shows you its own picture so you can line the bike up. That
-              picture is not kept.
-            </li>
-            <li>{SIDE_PICTURES_GO_SENTENCE}</li>
-            <li>
-              This phone keeps nothing about you once the session ends — no picture, no outline, no
-              record of the session.
-            </li>
-          </ul>
-          <StatusMessage tone="warning" label="Anyone else in the room">
-            {BYSTANDER_SENTENCE}
-          </StatusMessage>
-          <StatusMessage tone="warning" label="If the tablet loses touch">
-            {LINK_LOSS_SENTENCE}
-          </StatusMessage>
+          {/*
+            #666: all of it stays on the screen, before the box that says it
+            was read — what this phone does, anyone else in the room (ADR 0029
+            D-5) and what it does if the tablet loses touch (ADR 0033). There
+            is nothing here to tuck, so the first control follows the consent
+            text rather than a fold line: the browser gate's fold rule lets
+            `data-oyl-kept-visible` text stand before it, and nothing else.
+          */}
+          <KeptVisible>
+            <ul>
+              <li>
+                This phone stands on a tripod beside the bike and takes pictures of you from the
+                side while you ride, only while the &ldquo;Camera on&rdquo; sign is showing.
+              </li>
+              <li>
+                While you set it up, it shows you its own picture so you can line the bike up. That
+                picture is not kept.
+              </li>
+              <li>{SIDE_PICTURES_GO_SENTENCE}</li>
+              <li>
+                This phone keeps nothing about you once the session ends — no picture, no outline,
+                no record of the session.
+              </li>
+            </ul>
+            <StatusMessage tone="warning" label="Anyone else in the room">
+              {BYSTANDER_SENTENCE}
+            </StatusMessage>
+            <StatusMessage tone="warning" label="If the tablet loses touch">
+              {LINK_LOSS_SENTENCE}
+            </StatusMessage>
+          </KeptVisible>
           <p>
             <label>
               <input

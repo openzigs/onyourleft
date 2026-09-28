@@ -11,6 +11,7 @@ import {
 } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
+import { MoreAbout } from '../design/MoreAbout';
 import { StatusMessage } from '../design/StatusMessage';
 import {
   createSegmentFromRide,
@@ -279,12 +280,7 @@ export function SegmentsView({ port, match }: SegmentsViewProps): JSX.Element {
       <section aria-labelledby="segments-make">
         <h2 id="segments-make">Make a segment</h2>
         <p className="oyl-muted">
-          A segment is a stretch of road with a direction, cut from one of your own rides. The climb
-          and its descent are two different segments, because they are two different efforts.
-        </p>
-        <p className="oyl-muted">
-          There is no map on this screen yet, so the stretch is chosen by the first and last
-          recorded second of the ride rather than by dragging on a line.
+          A segment is a stretch of road with a direction, cut from one of your own rides.
         </p>
 
         {rides === undefined ? (
@@ -360,7 +356,68 @@ export function SegmentsView({ port, match }: SegmentsViewProps): JSX.Element {
             )}
           </>
         )}
+
+        <MoreAbout about="making a segment">
+          <p className="oyl-muted">
+            The climb and its descent are two different segments, because they are two different
+            efforts.
+          </p>
+          <p className="oyl-muted">
+            There is no map on this screen yet, so the stretch is chosen by the first and last
+            recorded second of the ride rather than by dragging on a line.
+          </p>
+        </MoreAbout>
       </section>
+
+      {/*
+        #666: before "Your segments" rather than after it. It is the screen's
+        other action, and the list is what it acts on — so on a phone with no
+        segments yet, the one control the screen offers is not pushed below
+        the fold by a heading and a sentence saying the list is empty.
+      */}
+      {match === undefined ? null : (
+        <section aria-labelledby="segments-match">
+          <h2 id="segments-match">Find your efforts</h2>
+          <p className="oyl-muted">
+            Matching reads the positions of each ride once and stores every time you have set on
+            these segments.
+          </p>
+          <Button variant="secondary" onClick={() => void runSweep()} disabled={matching}>
+            {matching ? 'Matching…' : 'Match my rides'}
+          </Button>
+          {sweepFailure === undefined ? null : (
+            <StatusMessage tone="danger" live>
+              Matching stopped part-way through and this device may hold fewer efforts than your
+              rides contain. Pressing it again carries on from the last ride it finished.{' '}
+              {sweepFailure}
+            </StatusMessage>
+          )}
+          {swept === undefined ? null : (
+            <>
+              <StatusMessage tone={swept.kind === 'swept' ? 'success' : 'warning'} live>
+                {sweepSentence(swept)}
+              </StatusMessage>
+              {gapNote === undefined ? null : (
+                <StatusMessage tone="info" label="Why some rides have no time">
+                  {gapNote}
+                </StatusMessage>
+              )}
+            </>
+          )}
+          <MoreAbout about="matching">
+            <p className="oyl-muted">
+              It is <strong>not</strong> done while you ride, and not when a ride is saved: it
+              decodes a ride&rsquo;s whole track, and that does not belong on the end of pressing
+              Stop. So a ride you have just recorded shows no effort until you run this.
+            </p>
+            <p className="oyl-muted">
+              One press covers up to {String(SWEEP_ACTIVITY_BUDGET)} rides and remembers where it
+              got to, so pressing it again carries on rather than starting over. Running it after
+              making a segment is what finds that segment in rides you have already stored.
+            </p>
+          </MoreAbout>
+        </section>
+      )}
 
       <section aria-labelledby="segments-yours">
         <h2 id="segments-yours">Your segments</h2>
@@ -408,45 +465,6 @@ export function SegmentsView({ port, match }: SegmentsViewProps): JSX.Element {
           </ScrollTable>
         )}
       </section>
-
-      {match === undefined ? null : (
-        <section aria-labelledby="segments-match">
-          <h2 id="segments-match">Find your efforts</h2>
-          <p className="oyl-muted">
-            Matching reads the positions of each ride once and stores every time you have set on
-            these segments. It is <strong>not</strong> done while you ride, and not when a ride is
-            saved: it decodes a ride&rsquo;s whole track, and that does not belong on the end of
-            pressing Stop. So a ride you have just recorded shows no effort until you run this.
-          </p>
-          <p className="oyl-muted">
-            One press covers up to {String(SWEEP_ACTIVITY_BUDGET)} rides and remembers where it got
-            to, so pressing it again carries on rather than starting over. Running it after making a
-            segment is what finds that segment in rides you have already stored.
-          </p>
-          <Button variant="secondary" onClick={() => void runSweep()} disabled={matching}>
-            {matching ? 'Matching…' : 'Match my rides'}
-          </Button>
-          {sweepFailure === undefined ? null : (
-            <StatusMessage tone="danger" live>
-              Matching stopped part-way through and this device may hold fewer efforts than your
-              rides contain. Pressing it again carries on from the last ride it finished.{' '}
-              {sweepFailure}
-            </StatusMessage>
-          )}
-          {swept === undefined ? null : (
-            <>
-              <StatusMessage tone={swept.kind === 'swept' ? 'success' : 'warning'} live>
-                {sweepSentence(swept)}
-              </StatusMessage>
-              {gapNote === undefined ? null : (
-                <StatusMessage tone="info" label="Why some rides have no time">
-                  {gapNote}
-                </StatusMessage>
-              )}
-            </>
-          )}
-        </section>
-      )}
     </>
   );
 }
