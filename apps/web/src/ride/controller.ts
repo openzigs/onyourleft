@@ -497,6 +497,16 @@ function forgottenButStillListed(name: string): string {
   return `${name} is forgotten here, but your browser still lists it. To remove it there too, remove it in this site's settings.`;
 }
 
+/**
+ * What a rider is told when *Forget* removed a device but one of this app's
+ * subscriptions to it would not let go — #706. The device is gone from the
+ * list and from the transport either way; the sentence is so the rider is not
+ * left with a reading that seems to come from nowhere, and knows what clears it.
+ */
+function forgottenButStillListening(name: string): string {
+  return `${name} is forgotten, but this app could not stop listening to it cleanly. If its readings still appear, reload this page.`;
+}
+
 /** Why a game ride's gradient is refused while its trainer is being let go. */
 const TRAINER_BEING_FORGOTTEN = 'the trainer is being forgotten';
 
@@ -1329,7 +1339,14 @@ export function createRideController(options: RideControllerOptions): RideContro
       // A connect or a subscribe that failed leaves nothing on screen. Half a
       // sensor — listed, named, and delivering nothing — is the state a rider
       // cannot tell from a working one.
-      detach(entry);
+      try {
+        detach(entry);
+      } catch {
+        // #706: an unsubscribe that throws must not skip the removal and the
+        // forget below, and must not replace the pairing error — which is
+        // what went wrong, and what the rider can act on. `detach` has run
+        // every one of its steps by the time it throws.
+      }
       sensors.delete(id);
       // And the transport lets go of it too (#659's review). Nothing here
       // holds control yet — that is a separate press — so there is nothing to
@@ -1770,7 +1787,21 @@ export function createRideController(options: RideControllerOptions): RideContro
           changed();
           return;
         }
-        detach(entry);
+        // #706: a throw from an unsubscribe is caught, not let out. `detach`
+        // has run every step by then; the sensor still leaves the list and
+        // the transport, and `unpair` does not reject — the Devices screen
+        // calls it with `void`, so a rejection reached the page unhandled and
+        // the rider was told nothing.
+        let stillListening = false;
+        try {
+          detach(entry);
+        } catch {
+          stillListening = true;
+        }
+        const name = entry.device.name ?? 'That device';
+        if (stillListening) {
+          pairingError = forgottenButStillListening(name);
+        }
         sensors.delete(id);
         changed();
         try {
@@ -1786,7 +1817,11 @@ export function createRideController(options: RideControllerOptions): RideContro
           // rejection means one thing: the stack refused to give up its
           // permission. The device is gone from this app, and the browser
           // still lists it — which the row saying *Not paired* would hide.
-          pairingError = forgottenButStillListed(entry.device.name ?? 'That device');
+          const refused = forgottenButStillListed(name);
+          // Both, when both went wrong: each names a different thing to do.
+          pairingError = stillListening
+            ? `${forgottenButStillListening(name)} ${refused}`
+            : refused;
         }
         changed();
       } finally {

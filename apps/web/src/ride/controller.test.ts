@@ -2286,6 +2286,152 @@ describe('a browser that refuses to forget — #659’s review', () => {
   });
 });
 
+describe('an unsubscribe that throws does not leave half a sensor listed — #706', () => {
+  // `detach` runs every step when an unsubscribe throws and then rethrows the
+  // first failure (#704). Its two callers other than `dispose` let that
+  // rethrow skip their own clean-up: the sensor stayed listed with its client
+  // closed, the transport kept its record, and `unpair` rejected into a
+  // `void` call on the Devices screen.
+
+  /** Every connection-state observer's unsubscribe throws, after it has let go. */
+  function throwingObserver(transport: SensorTransport): SensorTransport {
+    const observe = transport.observeConnectionState.bind(transport);
+    vi.spyOn(transport, 'observeConnectionState').mockImplementation((id, listener) => {
+      const unobserve = observe(id, listener);
+      return () => {
+        unobserve();
+        throw new Error('the transport would not let go');
+      };
+    });
+    return transport;
+  }
+
+  function forgottenBy(transport: SensorTransport, id: typeof STRAP): boolean {
+    try {
+      transport.connectionState(id);
+    } catch (error) {
+      return isSensorError(error, 'device-not-found');
+    }
+    return false;
+  }
+
+  it('a failed pairing still removes and forgets the sensor, and reports the PAIRING error', async () => {
+    const { transport } = createSimulator({
+      devices: [hrsStrap({ id: 'strap', name: 'HRM 04B1' })],
+    });
+    throwingObserver(transport);
+    let refuseConnect = true;
+    const flaky: SensorTransport = {
+      ...transport,
+      connect: (id) =>
+        refuseConnect
+          ? Promise.reject(new Error('the link would not come up'))
+          : transport.connect(id),
+    };
+    const controller = createRideController({
+      transport: flaky,
+      store: harnessStore(),
+      athleteId: ATHLETE_A,
+      newSessionId: () => recordingSessionId('attach-unsubscribe-threw'),
+      now: () => unixSeconds(1),
+    });
+
+    await expect(controller.pair('heart-rate')).resolves.toBeUndefined();
+
+    // What went wrong is the link, and that is what the rider is told — not
+    // the unsubscribe that failed while the attempt was being undone.
+    expect(controller.getSnapshot().pairingError).toBe('the link would not come up');
+    expect(controller.getSnapshot().sensors).toEqual([]);
+    expect(forgottenBy(transport, STRAP)).toBe(true);
+    // And the chooser brings it back, with no "already paired".
+    refuseConnect = false;
+    await controller.pair('heart-rate');
+    expect(controller.getSnapshot().pairingError).toBeUndefined();
+    expect(controller.getSnapshot().sensors.map((sensor) => sensor.id)).toEqual([STRAP]);
+    controller.dispose();
+  });
+
+  it('Forget still removes and forgets the sensor, resolves, and says so in a sentence', async () => {
+    const rig = benchWith({ devices: 'trainer+strap' });
+    throwingObserver(rig.transport);
+    await rig.controller.pair('trainer');
+    await rig.controller.pair('heart-rate');
+    await ride(rig, 3);
+
+    await expect(rig.controller.unpair(STRAP)).resolves.toBeUndefined();
+
+    const snapshot = rig.controller.getSnapshot();
+    expect(snapshot.sensors.map((sensor) => sensor.id)).toEqual([TRAINER]);
+    expect(forgottenBy(rig.transport, STRAP)).toBe(true);
+    expect(snapshot.pairingError).toBe(
+      'HRM 04B1 is forgotten, but this app could not stop listening to it cleanly. If its readings still appear, reload this page.',
+    );
+    // And the chooser brings it back.
+    await rig.controller.pair('heart-rate');
+    expect(rig.controller.getSnapshot().sensors.map((sensor) => sensor.id)).toContain(STRAP);
+    rig.controller.dispose();
+  });
+
+  it('Forget on a held trainer still sends the Stop BEFORE it detaches — #659', async () => {
+    const rig = benchWith({ machine: { retainsTargetsThroughStop: true } });
+    throwingObserver(rig.transport);
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.setTargetPower(watts(210));
+    const before = rig.written.length;
+
+    await expect(rig.controller.unpair(TRAINER)).resolves.toBeUndefined();
+    await flushMicrotasks(20);
+
+    const snapshot = rig.controller.getSnapshot();
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(snapshot.trainer.paired).toBe(false);
+    expect(snapshot.sensors).toEqual([]);
+    expect(forgottenBy(rig.transport, TRAINER)).toBe(true);
+    expect(snapshot.pairingError).toBe(
+      'KICKR 1F2A is forgotten, but this app could not stop listening to it cleanly. If its readings still appear, reload this page.',
+    );
+    rig.controller.dispose();
+  });
+
+  it('says both things when the browser also refuses to forget it', async () => {
+    const fake = createFakeBluetooth({
+      devices: [
+        {
+          id: 'strap',
+          name: 'HRM 04B1',
+          services: [{ uuid: HEART_RATE_SERVICE, characteristics: [HEART_RATE_MEASUREMENT] }],
+          forgetRejects: true,
+        },
+      ],
+    });
+    const transport = throwingObserver(
+      createWebBluetoothTransport({
+        profiles: [heartRateProfile],
+        bluetooth: fake.bluetooth,
+        hasUserActivation: () => true,
+      }),
+    );
+    const controller = createRideController({
+      transport,
+      store: harnessStore(),
+      athleteId: ATHLETE_A,
+      newSessionId: () => recordingSessionId('forget-refused-and-threw'),
+      now: () => unixSeconds(1),
+    });
+    await controller.pair('heart-rate');
+
+    await expect(controller.unpair(STRAP)).resolves.toBeUndefined();
+
+    expect(fake.bench.device('strap').forgets).toBe(1);
+    expect(controller.getSnapshot().sensors).toHaveLength(0);
+    expect(controller.getSnapshot().pairingError).toBe(
+      "HRM 04B1 is forgotten, but this app could not stop listening to it cleanly. If its readings still appear, reload this page. HRM 04B1 is forgotten here, but your browser still lists it. To remove it there too, remove it in this site's settings.",
+    );
+    controller.dispose();
+  });
+});
+
 describe('a paused ride eases the workout to the trainer’s OWN floor — #441', () => {
   it('writes the minimum the trainer reported, as a 0x05, and no Stop', async () => {
     // ⚠️ Through the controller's own composition, because the floor is the
