@@ -23,6 +23,8 @@ import { describe, expect, it } from 'vitest';
 import { contrastRatio, relativeLuminance } from './contrast';
 import {
   COLOUR_TOKENS,
+  DARK_COLOUR_TOKENS,
+  ELEVATION_DIRECTION,
   ELEVATION_SURFACES,
   FONT_SIZE_TOKENS,
   MAXIMUM_ELEVATION_STEP,
@@ -30,7 +32,43 @@ import {
   TYPE_SCALE_BASE_REM,
   TYPE_SCALE_RATIO,
   TYPE_SCALE_STEPS,
+  THEMES,
+  paletteColours,
 } from './tokens';
+
+describe('the dark palette (#672)', () => {
+  it('names exactly the light palette’s tokens less the HUD’s, in both directions', () => {
+    const themed = Object.keys(COLOUR_TOKENS)
+      .filter((token) => !token.startsWith('hud'))
+      .sort();
+    expect(Object.keys(DARK_COLOUR_TOKENS).sort()).toEqual(themed);
+  });
+
+  it('declares no HUD token: the HUD is the same in both palettes', () => {
+    expect(Object.keys(DARK_COLOUR_TOKENS).filter((token) => token.startsWith('hud'))).toEqual([]);
+    const dark = paletteColours('dark');
+    for (const token of Object.keys(COLOUR_TOKENS).filter((name) => name.startsWith('hud'))) {
+      expect(dark[token as keyof typeof dark], token).toBe(
+        COLOUR_TOKENS[token as keyof typeof COLOUR_TOKENS],
+      );
+    }
+  });
+
+  it('is a palette of its own, not the light one under a second name', () => {
+    // Every themed token differs, so a dark block that quietly repeated a
+    // light value would be seen here rather than as a light patch on a dark page.
+    const same = Object.entries(DARK_COLOUR_TOKENS).filter(
+      ([token, value]) => COLOUR_TOKENS[token as keyof typeof COLOUR_TOKENS] === value,
+    );
+    expect(same).toEqual([]);
+  });
+
+  it('uses neither pure black nor pure white', () => {
+    // A comfort choice (halation on a dark page), stated in tokens.ts.
+    expect(Object.values(DARK_COLOUR_TOKENS)).not.toContain('#000000');
+    expect(Object.values(DARK_COLOUR_TOKENS)).not.toContain('#ffffff');
+  });
+});
 
 describe('the elevation ramp is a ramp', () => {
   it('numbers its levels by its own order, so the two cannot disagree', () => {
@@ -52,37 +90,51 @@ describe('the elevation ramp is a ramp', () => {
     );
   });
 
-  it('gets darker at every step, which is the direction this theme states', () => {
-    const luminances = ELEVATION_SURFACES.map((surface) =>
-      relativeLuminance(COLOUR_TOKENS[surface.token]),
-    );
-    for (let index = 1; index < luminances.length; index += 1) {
-      expect(
-        luminances[index],
-        `${ELEVATION_SURFACES[index]?.token ?? '?'} is lighter than the level below it, so its ` +
-          'level number says one thing and the pixels say another',
-      ).toBeLessThan(luminances[index - 1] as number);
-    }
+  it('states a direction for each palette: darker in light, lighter in dark', () => {
+    expect(ELEVATION_DIRECTION).toEqual({ light: 'darker', dark: 'lighter' });
   });
 
-  it('separates adjacent levels enough to be seen, and little enough to read as one ramp', () => {
-    for (let index = 1; index < ELEVATION_SURFACES.length; index += 1) {
-      const below = ELEVATION_SURFACES[index - 1];
-      const above = ELEVATION_SURFACES[index];
-      if (below === undefined || above === undefined) {
-        throw new Error('the ramp is shorter than its own length');
+  describe.each(THEMES)('in the %s palette', (theme) => {
+    const colours = paletteColours(theme);
+
+    it('moves the way this palette states at every step', () => {
+      const luminances = ELEVATION_SURFACES.map((surface) =>
+        relativeLuminance(colours[surface.token]),
+      );
+      for (let index = 1; index < luminances.length; index += 1) {
+        const below = luminances[index - 1] as number;
+        const here = luminances[index] as number;
+        const message =
+          `${theme}: ${ELEVATION_SURFACES[index]?.token ?? '?'} does not go ` +
+          `${ELEVATION_DIRECTION[theme]} than the level below it, so its level number says one ` +
+          'thing and the pixels say another';
+        if (ELEVATION_DIRECTION[theme] === 'darker') {
+          expect(here, message).toBeLessThan(below);
+        } else {
+          expect(here, message).toBeGreaterThan(below);
+        }
       }
-      const step = contrastRatio(COLOUR_TOKENS[above.token], COLOUR_TOKENS[below.token]);
-      expect(
-        step,
-        `${below.token} → ${above.token} is ${step.toFixed(4)}:1, too small a step to see`,
-      ).toBeGreaterThanOrEqual(MINIMUM_ELEVATION_STEP);
-      expect(
-        step,
-        `${below.token} → ${above.token} is ${step.toFixed(4)}:1, which is not an elevation ` +
-          'step but a different colour — the page reads as stripes rather than as layers',
-      ).toBeLessThanOrEqual(MAXIMUM_ELEVATION_STEP);
-    }
+    });
+
+    it('separates adjacent levels enough to be seen, and little enough to read as one ramp', () => {
+      for (let index = 1; index < ELEVATION_SURFACES.length; index += 1) {
+        const below = ELEVATION_SURFACES[index - 1];
+        const above = ELEVATION_SURFACES[index];
+        if (below === undefined || above === undefined) {
+          throw new Error('the ramp is shorter than its own length');
+        }
+        const step = contrastRatio(colours[above.token], colours[below.token]);
+        expect(
+          step,
+          `${theme}: ${below.token} → ${above.token} is ${step.toFixed(4)}:1, too small a step to see`,
+        ).toBeGreaterThanOrEqual(MINIMUM_ELEVATION_STEP);
+        expect(
+          step,
+          `${theme}: ${below.token} → ${above.token} is ${step.toFixed(4)}:1, which is not an ` +
+            'elevation step but a different colour — the page reads as stripes rather than as layers',
+        ).toBeLessThanOrEqual(MAXIMUM_ELEVATION_STEP);
+      }
+    });
   });
 });
 

@@ -20,22 +20,55 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { COLOUR_TOKENS, FONT_SIZE_TOKENS, SPACE_TOKENS } from '../design/tokens';
+import {
+  COLOUR_TOKENS,
+  DARK_COLOUR_TOKENS,
+  FONT_SIZE_TOKENS,
+  SPACE_TOKENS,
+} from '../design/tokens';
 
 const themeCss = readFileSync(
   fileURLToPath(new URL('../design/theme.css', import.meta.url)),
   'utf8',
 );
 
-/** `--oyl-color-ink-muted: #4a5b5c;` → `['inkMuted', '#4a5b5c']`. */
-function declarationsWithPrefix(prefix: string): Map<string, string> {
+/**
+ * The text of the one rule whose selector is exactly `selector`, braces
+ * matched, comments stripped — or a failure naming it (#672).
+ */
+function blockOf(selector: string): string {
+  const css = themeCss.replaceAll(/\/\*[\s\S]*?\*\//g, '');
+  const opening = `\n${selector} {`;
+  const start = css.indexOf(opening);
+  expect(start, `theme.css has no \`${selector}\` block`).toBeGreaterThanOrEqual(0);
+  expect(css.indexOf(opening, start + 1), `theme.css has two \`${selector}\` blocks`).toBe(-1);
+  let depth = 0;
+  for (let index = css.indexOf('{', start); index < css.length; index += 1) {
+    const character = css[index];
+    if (character === '{') depth += 1;
+    if (character === '}') {
+      depth -= 1;
+      if (depth === 0) return css.slice(start, index + 1);
+    }
+  }
+  throw new Error(`the \`${selector}\` block is never closed`);
+}
+
+/** The light palette's block, which is also where the space and type tokens live. */
+const LIGHT_BLOCK = ':root';
+/** The dark palette's block (#672). */
+const DARK_BLOCK = ":root[data-theme='dark']";
+
+/** `--oyl-color-ink-muted: #4a5b5c;` → `['inkMuted', '#4a5b5c']`, in `css`. */
+function declarationsWithPrefix(prefix: string, css: string): Map<string, string> {
   const pattern = new RegExp(`--oyl-${prefix}-([a-z0-9-]+)\\s*:\\s*([^;]+);`, 'g');
   const found = new Map<string, string>();
-  for (const match of themeCss.matchAll(pattern)) {
+  for (const match of css.matchAll(pattern)) {
     const [, kebab, value] = match;
     if (kebab === undefined || value === undefined) {
       continue;
     }
+    expect(found.has(camelCase(kebab)), `--oyl-${prefix}-${kebab} is declared twice`).toBe(false);
     found.set(camelCase(kebab), value.trim());
   }
   return found;
@@ -50,11 +83,38 @@ describe('theme.css and tokens.ts cannot drift', () => {
     ['color', COLOUR_TOKENS as Record<string, string>],
     ['space', SPACE_TOKENS as Record<string, string>],
     ['font-size', FONT_SIZE_TOKENS as Record<string, string>],
-  ])('declares exactly the %s tokens, with the same values', (prefix, tokens) => {
-    const declared = declarationsWithPrefix(prefix);
+  ])('declares exactly the %s tokens in `:root`, with the same values', (prefix, tokens) => {
+    const declared = declarationsWithPrefix(prefix, blockOf(LIGHT_BLOCK));
     expect(Object.fromEntries([...declared].sort())).toEqual(
       Object.fromEntries(Object.entries(tokens).sort()),
     );
+  });
+
+  it('declares exactly the dark palette in the dark block, with the same values (#672)', () => {
+    // Both directions, as above: a dark token with no declaration paints the
+    // LIGHT value on a dark page, and a declaration with no token — a HUD
+    // token redeclared, above all — is a colour nothing measured.
+    const declared = declarationsWithPrefix('color', blockOf(DARK_BLOCK));
+    expect(Object.fromEntries([...declared].sort())).toEqual(
+      Object.fromEntries(Object.entries(DARK_COLOUR_TOKENS).sort()),
+    );
+  });
+
+  it('declares no other token anywhere else, so neither block can be bypassed (#672)', () => {
+    // A third palette block — a `@media (prefers-color-scheme: dark)` rule, say
+    // — would paint values neither check above reads.
+    const outside = themeCss
+      .replaceAll(/\/\*[\s\S]*?\*\//g, '')
+      .replace(blockOf(LIGHT_BLOCK), '')
+      .replace(blockOf(DARK_BLOCK), '');
+    expect([...outside.matchAll(/--oyl-(?:color|space|font-size)-[a-z0-9-]+\s*:/g)]).toEqual([]);
+  });
+
+  it('tells the platform which palette each block is (#672)', () => {
+    // So a scrollbar, a date picker, a `base-select` picker's platform parts
+    // and `accent-color`'s check mark follow the page rather than the device.
+    expect(blockOf(LIGHT_BLOCK)).toMatch(/\n\s*color-scheme: light;/);
+    expect(blockOf(DARK_BLOCK)).toMatch(/\n\s*color-scheme: dark;/);
   });
 });
 
