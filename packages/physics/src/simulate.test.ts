@@ -310,6 +310,11 @@ describe('inputs the integrator cannot honour', () => {
     ).toThrow(PhysicsError);
   });
 
+  // ⚠️ **11 s, a hang guard rather than a budget — #682.** Vitest's default 5 s was nobody's choice
+  // for this case: under coverage on CI it took 1.9 s to 3.5 s over thirteen green `main` runs on
+  // 2026-09-28 (36370135206 to 36405580515), the slowest on 36371441351 (the slower of the two
+  // runners, a job over 1 000 s) — 71 % of that default. 11 s is about three times the slowest, so
+  // a hang is still red.
   it('still accepts the longest tick that is under the bound', () => {
     // The bound has to be above anything legitimate, or it is a bug rather than
     // a guard. Ten thousand seconds is nearly three hours asked for in one call.
@@ -320,7 +325,7 @@ describe('inputs the integrator cannot honour', () => {
     );
     expect(marathon.distance).toBeGreaterThan(0);
     expect(Number.isFinite(marathon.distance)).toBe(true);
-  });
+  }, 11_000);
 
   it('integrates a tick longer than one sub-step by subdividing it', () => {
     // A 10-second tick is 1 000 sub-steps, not one. Without the subdivision this

@@ -48,6 +48,11 @@ describe('the bounds a realistic instance’s tint is drawn inside — #621', ()
     }
   });
 
+  // ⚠️ **10 s, a hang guard rather than a budget — #682.** Vitest's default 5 s was nobody's choice
+  // for this case: under coverage on CI it took 1.8 s to 3.1 s over thirteen green `main` runs on
+  // 2026-09-28 (36370135206 to 36405580515), the slowest on 36395959573 (the slower of the two
+  // runners, a job over 1 000 s) — 61 % of that default. 10 s is about three times the slowest, so
+  // a hang is still red.
   it('keeps every tint inside its bound, and uses most of it', () => {
     for (const bound of [FOLIAGE_TINT, MASONRY_TINT]) {
       let widest = { hueDegrees: 0, saturation: 0, brightness: 0 };
@@ -65,7 +70,7 @@ describe('the bounds a realistic instance’s tint is drawn inside — #621', ()
       expect(widest.saturation).toBeGreaterThan(0.9 * bound.saturation);
       expect(widest.brightness).toBeGreaterThan(0.9 * bound.brightness);
     }
-  });
+  }, 10_000);
 
   it('turns masonry’s hue half as far as foliage’s, at the same place', () => {
     const { x, z } = { x: 17.25, z: -3.5 };

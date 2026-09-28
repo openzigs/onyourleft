@@ -2123,6 +2123,15 @@ job, not a budget. ⚠️ **It is 20 since
 the old file.** A stop has to be clear of the thing it stops: main was taking 9 to 13 minutes, and the
 first run of #423's pull request ran for **14m19s** with nothing hung — 41 seconds from being killed. The
 browser gate is what grew (6.8 minutes on main, 8.0 with the ride-stage and Ride-screen specs).
+⚠️ **It is 25 since [#682](https://github.com/openzigs/onyourleft/issues/682), and a reviewer who
+remembers 20 is reading the old file.** Thirteen green runs on `main` on 2026-09-28 (36370135206 to
+36405580515, job `started_at` to `completed_at`, which excludes queueing) took **699 s to 1 128 s**,
+in two clusters — 699–888 s and 1 005–1 128 s — and the slower one is the runner #651 read as an AMD
+EPYC 7763 (no run prints its CPU; the cluster is the evidence). The slowest, 36405580515, was
+**18m48s — 72 s from twenty minutes**. Run 36396660625's 28 minutes of wall clock was 11m36s of
+waiting for the concurrency group before its job was created and a 16m45s job. Twenty-five leaves a
+green job 372 s clear and pays for the browser gate's own stop to grow with it (below); it is still
+a stop and not a budget.
 ⚠️ **Since [#456](https://github.com/openzigs/onyourleft/issues/456) the cases in
 `game.browser.spec.ts` share ONE load of their harness, and a reviewer who remembers "every case
 reloads a harness that takes ten seconds" is reading the old file.** They did reload it, and that was
@@ -2164,7 +2173,28 @@ page, 65 s for `?shadow-map`, 120 s for `?realistic` and 120 s for `?realistic&t
 describe that reads it failing at once in its hook and naming the describe that paid. The
 arithmetic that fits all four hanging inside the gate's own 580 s (`playwright.config.ts`
 §`GATE_BUDGET_MS`), and the gate inside the job's twenty, is `game.browser.spec.ts`
-§`paysForTheRealisticLoad`, with the local run that demonstrated it. ⚠️ And the two default loads
+§`paysForTheRealisticLoad`, with the local run that demonstrated it. ⚠️ **Those figures are
+#651's and are the old file since [#682](https://github.com/openzigs/onyourleft/issues/682).** A
+day later green loads on the slower runner reached 39 s, 45 s, 111 s and 105 s — 78 %, 69 %, 93 %
+and 88 % of their budgets — and a green gate took 547 s of its 580 (run 36405580515), so the budgets
+are **60 s, 70 s, 165 s and 160 s** and the gate's stop **840 s**, each about 1.5 times the slowest
+green figure. If every game load hangs, and `realistic.browser.spec.ts`' page with them:
+
+| | seconds |
+|---|---|
+| the four budgets, 60 + 70 + 165 + 160 | 455 |
+| 21 describes failing, each replacing the worker, and the two servers starting (#651's figure) | 30 |
+| the rest of the gate before the game spec's first load, slowest green (36395959573, 36405580515) | 245 |
+| `realistic.browser.spec.ts`' instruments case waiting its own 150 s where green took at most 66 s | 84 |
+| **inside the gate's 840** | **814** |
+
+and the gate's step starts at most 592 s into the job and builds for 9 s (36395959573), so 840 s
+ends it by **1 441 s — 59 s inside the job's 1 500**, with only the coverage publish and upload after
+it. ⚠️ **Nothing re-checks either margin** (26 s and 59 s): a spec added to the gate eats the first
+and a step added before it eats the second. Before #682 the second was **19 s** once the 9 s build
+the old sum left out is counted (592 + 9 + 580 against 1 200). A Vitest hang cannot outlive the job
+either: that step starts at most about 222 s in, takes at most 370 s green, and no case in it has a
+timeout above 300 s, so a hung case ends it by about 892 s — and a failed step stops the job there. ⚠️ And the two default loads
 no longer run the same probes: each case reads one load's copy, so each load runs only what its
 own cases read (`game-harness.ts` §`SHADOW_MAP_LOAD`) — measured on the runner, that was 12.6 s of
 the plain page's 34 and about 16 s of `?shadow-map`'s 55 spent for nobody. A new case on either
@@ -2183,6 +2213,24 @@ largest files — the #545 near-field rides at 216 s and the FIT fuzz at 99 s �
 three times by coverage's instrumentation of their hot loops (2.8 times for the rides, measured as
 CPU time locally; 3.3 times for the fuzz, `decode-fuzz.test.ts`'s own measurement). Which runner a job lands
 on is not something this repository can choose without paying for a larger one, which §8 forbids.
+
+⚠️ **A Vitest case's timeout is judged against its time under coverage ON CI, and since
+[#682](https://github.com/openzigs/onyourleft/issues/682) no case runs above half of it.** The
+measurement needs nothing added: Vitest's default reporter prints, beneath its file, every case
+slower than 300 ms, so every job log already holds per-case times for the `Tests and coverage
+report` step. Read over thirteen green `main` runs on 2026-09-28 (36370135206 to 36405580515),
+eighteen cases ran at 45 % or more of their timeout (#682 asks for 50 %; the five points are
+margin on one day's sample), fifteen of them on Vitest's default 5 s — the slowest,
+`no-network.test.ts`' MediaPipe scan, at **4.8 s, 96 %** — and #682's own cull sweep, given 15 s by
+#651, had fallen to 38 %. Seventeen of them now carry an explicit timeout of about three times their
+slowest CI figure, with the figures and the run ids beside it; none of them is a
+performance claim, and none of their assertions or inputs changed. The #545 near-field rides went
+from 120 s to 230 s (75.2 s, 63 %) and the FIT fuzz from 180 s to 300 s (96.6 s, 54 %). A new case
+that is slow under coverage takes the same shape: measure it in a CI log, write the numbers beside
+it, never trim what it sweeps. ⚠️ **One in-test timing bound is also near its line and is NOT
+changed here**: `racing-line.test.ts`' 1 000 km solve asserts under 30 s and took 12.2 s to 27.2 s
+on the same runs (36374954481), which is an assertion rather than a timeout and so is its own
+issue, [#734](https://github.com/openzigs/onyourleft/issues/734).
 
 ⚠️ **The browser is pinned by the lockfile, not by the install command.** `@playwright/test`
 **1.63.0** ships Chromium revision **1243**, and `playwright install chromium` fetches whatever the

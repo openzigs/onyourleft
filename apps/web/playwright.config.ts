@@ -138,17 +138,25 @@ export const LAUNCH_ARGS = [
 /**
  * How long the whole run may take before it stops itself — #651.
  *
- * ⚠️ **The job's `timeout-minutes` is 20, and this has to END before it does,
+ * ⚠️ **The job's `timeout-minutes` is 25, and this has to END before it does,
  * or the run reports nothing**: a job the runner cancels says "cancelled" and
  * names no case and no describe. On the slower of the two runners CI lands on
- * (an AMD EPYC 7763) this gate starts as late as 578 s into the job, behind the
- * Vitest run (run 36342083309, attempt 1; 572 s, 538 s and 542 s on three
- * before it), so 580 s ends it by 1 158 s — 42 s inside the job's 1 200, with
- * only the coverage publish and upload (2–3 s) after it. ⚠️ **Nothing
- * re-checks that 42 s.** Every step added before this gate eats into it, and
- * the first sign will be a cancelled job rather than a red case: #664 added
- * about 10 s while #651 was open. The slowest GREEN gate measured on that runner took 452 s
- * (run 36318760634), and #651's took 390 s to 405 s.
+ * (a job over 1 000 s; #651 read it as an AMD EPYC 7763) this gate's step
+ * starts as late as 592 s into the job, behind the Vitest run, and builds for
+ * 9 s before Playwright starts (run 36395959573; thirteen green `main` runs
+ * read on 2026-09-28, 36370135206 to 36405580515), so 840 s ends it by
+ * 1 441 s — 59 s inside the job's 1 500, with only the coverage publish and
+ * upload (2–3 s) after it. ⚠️ **Nothing re-checks that 59 s.** Every step
+ * added before this gate eats into it, and the first sign will be a cancelled
+ * job rather than a red case: it was 42 s inside twenty minutes when #651
+ * measured it, and 19 s by #682 once the build its sum left out is counted
+ * (592 + 9 + 580), which is how 20 became 25.
+ *
+ * ⚠️ **It is 840 s since #682, and a reviewer who remembers 580 is reading
+ * the old file.** A GREEN gate took 547 s of Playwright's 580 on 36405580515
+ * — 94 %, its four game loads at 69 % to 93 % of their own budgets — where
+ * #651's took 390 s to 405 s and the slowest it measured 452 s (run
+ * 36318760634). 840 s is 1.54 times that green 547 s.
  *
  * Every load the gate pays for has a budget of its own, and the arithmetic
  * that fits the four game loads inside this one is `game.browser.spec.ts`
@@ -156,7 +164,7 @@ export const LAUNCH_ARGS = [
  * budget of its own hangs: Playwright stops, marks what was running as
  * interrupted and what had not started as not run, and exits non-zero.
  */
-export const GATE_BUDGET_MS = 580_000;
+export const GATE_BUDGET_MS = 840_000;
 
 /** The game spec, which runs as a project of its own — see `projects`. */
 const GAME_SPEC = /game\.browser\.spec\.ts$/;

@@ -1061,6 +1061,11 @@ describe('the inside pedal never touches the road — #546', () => {
     }
   });
 
+  // ⚠️ **8 s, a hang guard rather than a budget — #682.** Vitest's default 5 s was nobody's choice
+  // for this case: under coverage on CI it took 1.0 s to 2.4 s over thirteen green `main` runs on
+  // 2026-09-28 (36370135206 to 36405580515), the slowest on 36383955618 (the slower of the two
+  // runners, a job over 1 000 s) — 49 % of that default. 8 s is about three times the slowest, so a
+  // hang is still red.
   it('keeps every pedal off the road at every crank angle and every lean to 45°, either way', () => {
     for (let degrees = -45; degrees <= 45; degrees += 0.25) {
       const lean = degrees * DEGREE;
@@ -1069,7 +1074,7 @@ describe('the inside pedal never touches the road — #546', () => {
         expect(lowestPedalHeight(lean, drawn)).toBeGreaterThanOrEqual(0);
       }
     }
-  });
+  }, 8_000);
 
   it('swings the cranks to parked rather than snapping them', () => {
     for (const angle of [0, 1.5, 3, 4.5]) {

@@ -244,6 +244,11 @@ describe('two riders level on the road are not drawn inside each other — #499'
     }
   });
 
+  // ⚠️ **8 s, a hang guard rather than a budget — #682.** Vitest's default 5 s was nobody's choice
+  // for this case: under coverage on CI it took 0.9 s to 2.5 s over thirteen green `main` runs on
+  // 2026-09-28 (36370135206 to 36405580515), the slowest on 36405580515 (the slower of the two
+  // runners, a job over 1 000 s) — 49 % of that default. 8 s is about three times the slowest, so a
+  // hang is still red.
   it('eases a rider aside rather than jumping it as another passes', () => {
     // The bot's sideways place, as it closes from 6 m behind to 6 m ahead in
     // 5 cm steps: no step is more than 10 cm.
@@ -259,7 +264,7 @@ describe('two riders level on the road are not drawn inside each other — #499'
       }
       previous = sideways;
     }
-  });
+  }, 8_000);
 
   it('leaves a lone rider on the line', () => {
     const frame = frameOf(hairpin, stateAt(hairpin, APEX, 8, { distance: APEX + 30, speed: 8 }), {

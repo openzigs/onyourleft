@@ -674,6 +674,12 @@ describe('a ride — nothing the camera passes is cut by the near plane (#545)',
   /** Frames measured, by ride, so a finding below cannot pass over rides that never ran. */
   const measured = new Map<string, number>();
 
+  // ⚠️ **230 s a ride, a hang guard rather than a budget — #682.** It was 120 s, and the slowest
+  // ride came within 45 s of it: under coverage on CI, over thirteen green `main` runs on
+  // 2026-09-28 (36370135206 to 36405580515), 'a level road through villages' took 37.9 s to
+  // 75.2 s — 63 % of 120 s, the slowest on 36371441351, the slower of the two runners (a job over
+  // 1 000 s) — and 'a 300 m right-hand circuit' up to 42.1 s. Coverage instruments the cull's
+  // hot loop about three times over (CLAUDE.md §4c). 230 s is about three times the slowest ride.
   for (const name of Object.keys(RIDES)) {
     it(`${name}: what the renderer draws, every aspect, both worlds`, () => {
       for (const { rig, scatter } of ride(name)) {
@@ -704,7 +710,7 @@ describe('a ride — nothing the camera passes is cut by the near plane (#545)',
         }
         measured.set(name, (measured.get(name) ?? 0) + 1);
       }
-    }, 120_000);
+    }, 230_000);
   }
 
   it('cuts nothing a device draws even before the cull — the owner’s tablet among them', () => {

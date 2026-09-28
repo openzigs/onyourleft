@@ -280,7 +280,14 @@ describe('the FIT decoder survives a seeded corpus fuzz', () => {
     // reproducible; a stride would keep the runtime and lose the property. The
     // sweep is ~75% of this file's cost (6.4 s of 8.1 s uninstrumented, measured
     // by zeroing the other knobs) and it is the part worth paying for.
-    { timeout: 180_000 },
+    //
+    // ⚠️ 300 s since #682, and a reviewer who remembers 180 s is reading the
+    // old file. Under coverage on CI this case took 52.5 s to 96.6 s over
+    // thirteen green `main` runs on 2026-09-28 (36370135206 to 36405580515) —
+    // 54 % of 180 s, the slowest on 36405580515, the slower of the two runners
+    // (a job over 1 000 s; 82.4 s to 96.6 s on that runner, 52.5 s to 67.1 s on
+    // the other). 300 s is about three times the slowest.
+    { timeout: 300_000 },
     () => {
       // The timeout is the hang guard: a wedged record loop never reaches an
       // assertion, so the only thing that can catch it is the runner.
@@ -304,7 +311,9 @@ describe('the GPX and TCX readers survive the same fuzz', () => {
 
     it(
       `produces a decode or an ActivityXmlError for every mutated ${extension} case`,
-      // Same ceiling as the FIT arm above, for the same reason. This arm has no
+      // The ceiling the FIT arm above had until #682, for the same reason (at
+      // most 5.7 s here on the thirteen runs #682 read, 3 % of it, so it did not
+      // move with the FIT arm's). This arm has no
       // byte sweep and costs a fraction of it, so 60 s was not close to failing
       // here -- but it was calibrated against `pnpm run test` exactly as the
       // other one was, and the 3.3x coverage multiplier applies to both. Leaving

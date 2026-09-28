@@ -72,7 +72,18 @@ jobs:
     # game.browser.spec.ts reloads a harness that takes ten seconds on a runner
     # with no GPU. Twenty is still a stop: a hung job dies in twenty minutes
     # rather than six hours.
-    timeout-minutes: 20
+    #
+    # Raised from 20 with #682, for the same reason. Thirteen green runs on main
+    # on 2026-09-28 (36370135206 to 36405580515) took 699 s to 1 128 s (18m48s,
+    # run 36405580515), in two clusters: 699-888 s and 1 005-1 128 s, the
+    # second the slower runner. A green job was 72 s from twenty minutes, and
+    # the browser gate's own stop (playwright.config.ts GATE_BUDGET_MS) had to
+    # end inside it too: a green gate took 547 s of its 580. Twenty-five leaves a
+    # green job 372 s clear and lets that stop grow to 840 s, which still ends
+    # 59 s inside the job with every game load hung -- the arithmetic is
+    # game.browser.spec.ts paysForTheRealisticLoad and CLAUDE.md section 4c.
+    # Still a stop, not a budget: nothing here waits for it.
+    timeout-minutes: 25
     steps:
       - name: Check out the repository
         # Pinned to a full commit SHA, not a tag: a tag is mutable, and a

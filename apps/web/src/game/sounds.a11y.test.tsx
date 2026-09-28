@@ -216,6 +216,11 @@ describe('the game — #400', () => {
     expect(resumedInThePress, 'audio was not resumed inside the press on Ride').toBe(1);
   });
 
+  // ⚠️ **9 s, a hang guard rather than a budget — #682.** Vitest's default 5 s was nobody's choice
+  // for this case: under coverage on CI it took 1.1 s to 2.7 s over thirteen green `main` runs on
+  // 2026-09-28 (36370135206 to 36405580515), the slowest on 36405580515 (the slower of the two
+  // runners, a job over 1 000 s) — 54 % of that default. 9 s is about three times the slowest, so a
+  // hang is still red.
   it('makes no call at all for a rider who did not turn sounds on, and shows no control', async () => {
     chooseDistanceTicks();
     await openGame();
@@ -223,8 +228,13 @@ describe('the game — #400', () => {
     await pump(200);
     expect(output.calls).toEqual([]);
     expect(button('Mute sounds')).toBeUndefined();
-  });
+  }, 9_000);
 
+  // ⚠️ **11 s, a hang guard rather than a budget — #682.** Vitest's default 5 s was nobody's choice
+  // for this case: under coverage on CI it took 1.4 s to 3.4 s over thirteen green `main` runs on
+  // 2026-09-28 (36370135206 to 36405580515), the slowest on 36383955618 (the slower of the two
+  // runners, a job over 1 000 s) — 69 % of that default. 11 s is about three times the slowest, so
+  // a hang is still red.
   it('plays the distance sound on the frame its sentence is said, and on no other', async () => {
     chooseSounds();
     chooseDistanceTicks();
@@ -244,8 +254,13 @@ describe('the game — #400', () => {
         .filter((call) => call.kind === 'playCue')
         .every((call) => call.cue === 'distance'),
     ).toBe(true);
-  });
+  }, 11_000);
 
+  // ⚠️ **12 s, a hang guard rather than a budget — #682.** Vitest's default 5 s was nobody's choice
+  // for this case: under coverage on CI it took 1.3 s to 3.9 s over thirteen green `main` runs on
+  // 2026-09-28 (36370135206 to 36405580515), the slowest on 36374954481 (the slower of the two
+  // runners, a job over 1 000 s) — 77 % of that default. 12 s is about three times the slowest, so
+  // a hang is still red.
   it('puts Mute sounds and the volume on the ride’s own screen, and the mute silences', async () => {
     chooseSounds();
     chooseDistanceTicks();
@@ -267,7 +282,7 @@ describe('the game — #400', () => {
     expect(JSON.parse(localStorage.getItem(CUES_STORAGE_KEY) ?? '{}')).toMatchObject({
       muted: true,
     });
-  });
+  }, 12_000);
 });
 
 describe('the audio may stop once nothing is riding — #447', () => {
