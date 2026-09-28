@@ -40,7 +40,11 @@ import {
   ANNOUNCEMENTS_SAVED,
   APPEARANCE_STAYS_HERE,
 } from './SettingsView';
-import { THEME_STORAGE_KEY, type ThemeStorage } from '../design/theme-selection';
+import {
+  THEME_OVERRIDE_ATTRIBUTE,
+  THEME_STORAGE_KEY,
+  type ThemeStorage,
+} from '../design/theme-selection';
 import {
   readAnnouncementPreference,
   type PreferenceStorage,
@@ -1086,8 +1090,14 @@ describe('appearance — #672', () => {
     return disk;
   }
 
-  async function mountWith(store: ThemeStorage): Promise<Awaited<ReturnType<typeof mount>>> {
+  async function mountWith(
+    store: ThemeStorage,
+    options: { readonly keepHeld?: boolean } = {},
+  ): Promise<Awaited<ReturnType<typeof mount>>> {
     document.documentElement.removeAttribute('data-theme');
+    if (options.keepHeld !== true) {
+      document.documentElement.removeAttribute(THEME_OVERRIDE_ATTRIBUTE);
+    }
     return mount(
       <SettingsView
         units="metric"
@@ -1171,6 +1181,29 @@ describe('appearance — #672', () => {
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
     expect(mounted.container.textContent).toContain(ANNOUNCEMENTS_NOT_KEPT);
     mounted.unmount();
+  });
+
+  it('holds a refused choice for the page’s life, over an OLDER stored one (#744’s review)', async () => {
+    // A full quota: the device still holds Light from before, and will not
+    // take Dark. The page is Dark, and says so again when the screen reopens,
+    // because the inline script and the module both read the held choice
+    // before storage (`theme-selection.test.ts` holds the device-change half).
+    const disk = themeDisk();
+    disk.values.set(THEME_STORAGE_KEY, 'light');
+    disk.refuse = true;
+    const mounted = await mountWith(disk.store);
+    await act(async () => {
+      radio(mounted.container, 'Dark').click();
+      await Promise.resolve();
+    });
+    expect(document.documentElement.getAttribute(THEME_OVERRIDE_ATTRIBUTE)).toBe('dark');
+    expect(disk.values.get(THEME_STORAGE_KEY)).toBe('light');
+    mounted.unmount();
+
+    const reopened = await mountWith(disk.store, { keepHeld: true });
+    expect(radio(reopened.container, 'Dark').checked).toBe(true);
+    reopened.unmount();
+    document.documentElement.removeAttribute(THEME_OVERRIDE_ATTRIBUTE);
   });
 
   it('says the ride screen does not change, beside the control', async () => {

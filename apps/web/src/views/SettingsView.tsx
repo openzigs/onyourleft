@@ -69,10 +69,9 @@ import { Button } from '../design/Button';
 import { KeptVisible, MoreAbout } from '../design/MoreAbout';
 import {
   THEME_CHOICES,
-  applyThemeChoice,
+  chooseTheme,
+  currentThemeChoice,
   deviceThemeStorage,
-  readThemeChoice,
-  writeThemeChoice,
   type ThemeChoice,
   type ThemeStorage,
 } from '../design/theme-selection';
@@ -483,20 +482,23 @@ export const APPEARANCE_STAYS_HERE = 'Kept on this device only. The ride screen 
  * same in both palettes, which the sentence beside the control says.
  */
 function AppearancePanel({ storage }: { readonly storage: ThemeStorage | undefined }): JSX.Element {
-  const [choice, setChoice] = useState<ThemeChoice>(() => readThemeChoice(storage));
+  const [choice, setChoice] = useState<ThemeChoice>(() => currentThemeChoice(document, storage));
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
 
   function choose(next: ThemeChoice): void {
     setChoice(next);
-    const kept = writeThemeChoice(storage, next);
     // The page follows what was CHOSEN even where the device would not keep
-    // it; the message says it will not survive a reload.
-    applyThemeChoice({
-      document,
-      localStorage: kept ? storage : inMemoryChoice(next),
-      matchMedia:
-        typeof window.matchMedia === 'function' ? window.matchMedia.bind(window) : undefined,
-    });
+    // it — held on the page for its life, so a device change later does not
+    // undo it — and the message says it will not survive a reload.
+    const kept = chooseTheme(
+      {
+        document,
+        localStorage: storage,
+        matchMedia:
+          typeof window.matchMedia === 'function' ? window.matchMedia.bind(window) : undefined,
+      },
+      next,
+    );
     setMessage(
       kept
         ? { tone: 'success', text: ANNOUNCEMENTS_SAVED }
@@ -538,15 +540,6 @@ function AppearancePanel({ storage }: { readonly storage: ThemeStorage | undefin
       )}
     </section>
   );
-}
-
-/** A storage that holds one choice, for a page whose device refused to keep it. */
-function inMemoryChoice(choice: ThemeChoice): ThemeStorage {
-  return {
-    getItem: () => (choice === 'device' ? null : choice),
-    setItem: () => undefined,
-    removeItem: () => undefined,
-  };
 }
 
 /** What a rider is told when the device kept the choice, and when it would not. */

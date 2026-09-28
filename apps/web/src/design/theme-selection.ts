@@ -32,6 +32,17 @@
  * the sound and announcement choices already go, and an erase removes it
  * (`transfer/erase-device.ts`). A private window or blocked site data reads as
  * "follow the device", and never takes the page down.
+ *
+ * ## A choice the device refused, and a choice made in another tab
+ *
+ * Where the device will not keep a choice (a private window, a full quota
+ * with an OLDER choice still stored), the page still takes it, and holds it
+ * for the page's life on the root element ({@link THEME_OVERRIDE_ATTRIBUTE}),
+ * which the script and {@link applyThemeChoice} both read BEFORE storage — so
+ * a later device change does not put the page back on a choice the rider
+ * replaced (#744's review). A choice another tab keeps reaches this one
+ * through the `storage` event, which clears the held choice and applies the
+ * stored one: the newest choice wins, whichever tab made it.
  */
 
 import type { Theme } from './tokens';
@@ -58,6 +69,13 @@ export const DEVICE_DARK_QUERY = '(prefers-color-scheme: dark)';
  * `tokens.ts` §`themeColour`.
  */
 export const THEME_META_ATTRIBUTE = 'data-oyl-theme';
+
+/**
+ * The root element's attribute that holds, for this page's life only, a choice
+ * the device refused to keep — `device`, `light` or `dark`. Read before
+ * storage by the script and by {@link applyThemeChoice}.
+ */
+export const THEME_OVERRIDE_ATTRIBUTE = 'data-oyl-theme-override';
 
 /** What this module needs of `localStorage`. */
 export interface ThemeStorage {
@@ -125,6 +143,20 @@ export function resolveTheme(choice: ThemeChoice, devicePrefersDark: boolean): T
   return devicePrefersDark ? 'dark' : 'light';
 }
 
+/** The choice this page holds because the device would not keep it, if any. */
+function heldThemeChoice(doc: Document): ThemeChoice | undefined {
+  const held = doc.documentElement.getAttribute(THEME_OVERRIDE_ATTRIBUTE);
+  return held === 'device' || held === 'light' || held === 'dark' ? held : undefined;
+}
+
+/**
+ * The choice in force on this page: one it holds because the device refused
+ * to keep it, or else the stored one. What Settings shows as chosen.
+ */
+export function currentThemeChoice(doc: Document, storage: ThemeStorage | undefined): ThemeChoice {
+  return heldThemeChoice(doc) ?? readThemeChoice(storage);
+}
+
 /** What {@link applyThemeChoice} needs of `window`. */
 export interface ThemeWindow {
   readonly document: Document;
@@ -160,7 +192,7 @@ function storageOf(win: ThemeWindow): ThemeStorage | undefined {
  * palette's meta applies to `all` and the other to `not all`.
  */
 export function applyThemeChoice(win: ThemeWindow): Theme {
-  const choice = readThemeChoice(storageOf(win));
+  const choice = currentThemeChoice(win.document, storageOf(win));
   const theme = resolveTheme(choice, devicePrefersDark(win));
   const root = win.document.documentElement;
   root.setAttribute('data-theme', theme);
@@ -181,22 +213,47 @@ export function applyThemeChoice(win: ThemeWindow): Theme {
 }
 
 /**
+ * A rider's choice, from Settings: kept on the device where it will keep it,
+ * held on the page for its life where it will not, and applied at once.
+ * `false` when the device refused, so the screen can say the choice will not
+ * survive a reload.
+ */
+export function chooseTheme(win: ThemeWindow, choice: ThemeChoice): boolean {
+  const kept = writeThemeChoice(storageOf(win), choice);
+  const root = win.document.documentElement;
+  if (kept) {
+    root.removeAttribute(THEME_OVERRIDE_ATTRIBUTE);
+  } else {
+    root.setAttribute(THEME_OVERRIDE_ATTRIBUTE, choice);
+  }
+  applyThemeChoice(win);
+  return kept;
+}
+
+/**
  * The script that runs before the first paint. ES5 and no module syntax,
  * because it is inlined as a classic `<script>`; every name it reads is one of
  * the constants above, interpolated, so none is typed twice.
  *
  * It re-reads the stored choice on every device change, so a rider who chose
  * a palette in Settings is not moved by the device afterwards, and one who
- * went back to "Match this device" is followed again with no reload. It runs
- * once more when the document has been parsed, because it runs ahead of the
+ * went back to "Match this device" is followed again with no reload. A choice
+ * the page holds ({@link THEME_OVERRIDE_ATTRIBUTE}) is read before storage.
+ * Another tab's choice arrives as a `storage` event for the key — or with no
+ * key, which is a `clear()` — and replaces any held one. It runs once more
+ * when the document has been parsed, because it runs ahead of the
  * `theme-color` metas it points.
  */
 export const THEME_SELECTION_SCRIPT = `(function () {
   var key = ${JSON.stringify(THEME_STORAGE_KEY)};
   var attribute = ${JSON.stringify(THEME_META_ATTRIBUTE)};
+  var held = ${JSON.stringify(THEME_OVERRIDE_ATTRIBUTE)};
   var query = null;
   try { query = window.matchMedia(${JSON.stringify(DEVICE_DARK_QUERY)}); } catch (error) {}
   function stored() {
+    var holding = document.documentElement.getAttribute(held);
+    if (holding === 'light' || holding === 'dark') return holding;
+    if (holding === 'device') return null;
     try {
       var value = window.localStorage.getItem(key);
       return value === 'light' || value === 'dark' ? value : null;
@@ -219,6 +276,13 @@ export const THEME_SELECTION_SCRIPT = `(function () {
   }
   apply();
   if (query && query.addEventListener) query.addEventListener('change', apply);
+  if (window.addEventListener) {
+    window.addEventListener('storage', function (event) {
+      if (event.key !== key && event.key !== null) return;
+      document.documentElement.removeAttribute(held);
+      apply();
+    });
+  }
   document.addEventListener('DOMContentLoaded', apply);
 })();`;
 
@@ -231,6 +295,7 @@ export function themeEraser(win: ThemeWindow): { forget(): void } {
   return {
     forget: () => {
       forgetThemeChoice(storageOf(win));
+      win.document.documentElement.removeAttribute(THEME_OVERRIDE_ATTRIBUTE);
       applyThemeChoice(win);
     },
   };

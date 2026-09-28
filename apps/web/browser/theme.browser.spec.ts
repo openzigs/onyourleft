@@ -20,7 +20,8 @@
  *    about a page that happened to be dark.
  * 2. **The choice survives a reload**: Settings' *Dark*, pressed on the
  *    product, then the page reloaded and a second page opened, each reading
- *    `data-theme` and its first frame.
+ *    `data-theme` and its first frame — and the second page's *Match this
+ *    device* reaching the first, still open, through the `storage` event.
  * 3. **Every route is painted from the dark palette** under a dark device —
  *    `shell.html` with the real `AppShell` and route table: the body, the
  *    header's surface (#671's alias), every link in running text and every
@@ -215,6 +216,11 @@ test.describe('#672 — a choice made in Settings survives a reload', () => {
       .getByText('Match this device', { exact: true })
       .click();
     expect(await next.evaluate(() => document.documentElement.dataset['theme'])).toBe('light');
+    // #744's review: the FIRST page, still open and still dark, is another tab
+    // — the `storage` event carries the choice across with no reload.
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.dataset['theme']))
+      .toBe('light');
     await next.emulateMedia({ colorScheme: 'dark' });
     await expect
       .poll(() => next.evaluate(() => document.documentElement.dataset['theme']))
