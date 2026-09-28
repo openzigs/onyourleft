@@ -610,11 +610,20 @@ stylesheet (§4e of CLAUDE.md). A selection lives in the URL — `#/<list>/selec
 view stays mounted, and back, reload and a shared link land on the same item; `#/activities/<id>`
 is still a ride's own full page. An id the list did not read is read on its own (`getActivity`,
 `getWorkout`, `getRoute`), and one the device does not hold is a stated "not found". Choosing an item
-moves focus to the detail's heading; letting it go returns focus to the item; each pane is a named
-region, and a skip link moves between them. The one-primary rule counts **per pane** on a
-`list-detail` `main`, and only there. `browser/list-detail.browser.spec.ts` measures the panes side
-by side on a landscape tablet, with the routes switched back to `prose` as its control, and publishes
-each primary action's place on arrival.
+moves focus to the detail's heading; letting it go returns focus to the item; rotating from two
+panes to one with focus in the list moves it to the chosen item's heading. Each pane is a named
+region, and at two panes a skip link at the head of the list moves focus to the detail — **one way
+only**: from the detail the list is where Shift+Tab already leads, and at one pane there is only one
+pane. Its `href` is the page's own address, so a new tab opens the same list and item rather than the
+not-found page. ⚠️ **Every selection pushes a history entry, at both widths, deliberately**: each is
+an address a rider can reload or share, a middle-click opens it in a new tab, and back means the same
+thing on a tablet and on a phone — `replace` at two panes would need every list link to intercept its
+own click. With an item chosen the detail pane holds that item alone; Workouts' builder and Routes'
+import are reached from the head of the list (`ListDetail.tsx` §`CreateLink`), which is that pane's
+one primary then and secondary when the form is already on screen. The one-primary rule counts
+**per pane** on a `list-detail` `main`, and only there. `browser/list-detail.browser.spec.ts`
+measures the panes side by side on a landscape tablet, with the routes switched back to `prose` as
+its control, and publishes each primary action's place on arrival and with the item chosen.
 
 ⚠️ **#307's review added a fourth thing, and it is a gate rather than a system.** The first three are
 all checkable *without a browser* — a colour ratio, a number against a ratio, a `var()` against a
