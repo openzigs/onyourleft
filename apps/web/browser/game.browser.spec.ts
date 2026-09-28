@@ -53,6 +53,7 @@ import {
 import {
   PHOTOGRAPHIC_STRUCTURE_SURFACES,
   REALISTIC_BICYCLE_MAP_NAMES,
+  REALISTIC_RIDER_MAP_NAMES,
   REALISTIC_VEGETATION,
   REALISTIC_VEGETATION_KINDS,
 } from '../src/game/realistic-assets';
@@ -969,6 +970,8 @@ function realisticImageCount(): number {
     2 * PHOTOGRAPHIC_STRUCTURE_SURFACES.length +
     // #624: the bicycle's four drawn maps.
     REALISTIC_BICYCLE_MAP_NAMES.length +
+    // #623: the rider's kit, relief and occlusion maps.
+    REALISTIC_RIDER_MAP_NAMES.length +
     models.reduce(
       (sum, model) =>
         sum +
