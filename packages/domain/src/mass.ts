@@ -41,9 +41,34 @@
  * name. Nothing here converts one.
  */
 
+import type { Kilograms, Watts } from './quantities';
+
 /**
  * Kilograms in an avoirdupois pound, exactly.
  *
  * The unit an imperial rider enters and reads their own weight in.
  */
 export const KILOGRAMS_PER_POUND = 0.45359237;
+
+/**
+ * Power per kilogram of the rider, as a plain number of watts per kilogram
+ * (#809).
+ *
+ * Here for the reason {@link KILOGRAMS_PER_POUND} is: a ratio two clients
+ * could each write as `power / mass` is a ratio they could each get wrong in a
+ * different way — a mass in pounds, a mass with the bicycle added — and the
+ * disagreement would be invisible. Both arguments are branded, so a bare
+ * number, a bpm or a total mass from `packages/physics` cannot be handed in by
+ * mistake.
+ *
+ * ⚠️ **The rider's own mass, never rider plus bicycle.** That is what
+ * `AthleteRecord.mass` holds, and a watts-per-kilogram figure is quoted
+ * against it.
+ *
+ * ⚠️ **Not a quantity type.** It is a ratio a model or a screen reads, and
+ * nothing converts it further; a brand of its own would be a type with no
+ * second use.
+ */
+export function wattsPerKilogram(power: Watts, mass: Kilograms): number {
+  return power / mass;
+}

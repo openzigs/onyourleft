@@ -428,6 +428,16 @@ apps/                 AGPL-3.0-or-later, without exception
                         run, and the key half that is never written; and the
                         erase that is its pair, whose two lists say what goes
                         and what it cannot reach
+    src/ride-analysis/  what a model is sent about a saved ride (#809, epic
+                        #795) — `input.ts`, a PURE function from a ride, its
+                        streams, laps and route profile to at most eight
+                        sections of numbers. ⚠️ No coordinate, no absolute
+                        altitude, no date, name or id, and no string but the
+                        template version and its own enumerations —
+                        `input.test.ts` walks a built input for all of it. A
+                        gap is coverage, never a zero; W/kg only with a real
+                        mass; the pose summary only with camera consent and
+                        never in a section. Nothing calls it yet (#810, #811)
     src/units/          which units a rider reads in (#238) — the one place a
                         number becomes a unit, the context a component asks,
                         and the source scan that stops a future screen writing
@@ -4545,6 +4555,7 @@ top of an issue **supersedes its body**.
 | What proves nothing on the report's path reaches a trainer | `apps/web/src/camera/side-report-safety.test.ts` |
 | What a ride shows and says about the side camera, why a lost link is a notice and "filming" is not, and why it is spoken with announcements off | `apps/web/src/ride/side-camera.ts`, `apps/web/src/game/hud/announce.ts` §`side-camera-lost`, `apps/web/src/game/hud/HudPanel.tsx` §`sideCamera`, [#551](https://github.com/openzigs/onyourleft/issues/551) |
 | What a rider is told when the Android recording service could not start, what asks for it again, and where the sentence goes on each screen | `apps/web/src/ride/controller.ts` §`askToKeepAlive`, §`askAgainIfRefused`, §`RIDE_MAY_STOP_WITH_SCREEN_OFF`, `apps/web/src/ride/keep-alive-notice.a11y.test.tsx`, `apps/web/browser/rideview.browser.spec.ts` §"#647", [#647](https://github.com/openzigs/onyourleft/issues/647) |
+| What a model is sent about a ride, how the ride is cut into sections, and what the input may never carry | `apps/web/src/ride-analysis/input.ts`, `apps/web/src/ride-analysis/input.test.ts` §"what never leaves", `apps/web/src/camera/side-session-summary.ts`, [#809](https://github.com/openzigs/onyourleft/issues/809) |
 | Which kind of button a control is, why a view may have one primary, and what counts them | `apps/web/src/design/Button.tsx` §`ButtonVariant`, `apps/web/src/a11y/button-hierarchy.a11y.test.tsx`, [`docs/architecture.md`](docs/architecture.md) §"Three kinds of button", [#668](https://github.com/openzigs/onyourleft/issues/668) |
 | Why Activities, Workouts and Routes are two panes on a landscape tablet and one below, where the breakpoint is written, and how a selection survives back, reload and a shared link | `apps/web/src/shell/ListDetail.tsx`, `apps/web/src/shell/routes.ts` §`RouteDefinition.selection`, `apps/web/src/design/theme.css` §`--oyl-list-detail-from`, `apps/web/browser/list-detail.browser.spec.ts`, [#670](https://github.com/openzigs/onyourleft/issues/670) |
 | Why the one-primary rule counts per pane on a list–detail route at two panes and nowhere else, and why one pane is one view | `apps/web/src/a11y/button-hierarchy.ts` §`primaryUnits`, [#670](https://github.com/openzigs/onyourleft/issues/670), [#723](https://github.com/openzigs/onyourleft/issues/723) |
