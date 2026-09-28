@@ -374,7 +374,9 @@ test.describe('#666 — the first control is above the fold on every route', () 
         });
       }
 
-      for (const viewport of TABLETS) {
+      // The tablets in the light palette only: the dark walk is the phone's,
+      // for `reflow.browser.spec.ts` §`DARK_VIEWPORTS`' measured reason.
+      for (const viewport of theme === 'light' ? TABLETS : []) {
         test(`on a ${viewport.name}, with a ${String(FOLD_MARGIN_PIXELS)} px margin`, async ({
           page,
         }) => {
