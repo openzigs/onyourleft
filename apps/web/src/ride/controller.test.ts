@@ -65,7 +65,7 @@ import {
   seedAthletes,
   type StoreHarness,
 } from '@onyourleft/store/testing';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_AUTO_PAUSE_AFTER_SECONDS } from '../recording/channels';
 import type { RecordingCheckpointStore } from '../recording/recorder';
@@ -142,6 +142,11 @@ interface Bench {
   /** Every control point write, as octets, in order — #372 asserts on these. */
   readonly written: number[][];
   readonly sessionIds: RecordingSessionId[];
+  /**
+   * Deliver the Stop answers `holdStopAnswer` held back, in order (#695's
+   * review). A no-op when nothing is held.
+   */
+  readonly deliverHeldStopAnswer: () => void;
 }
 
 interface BenchOptions {
@@ -182,6 +187,15 @@ interface BenchOptions {
   readonly permissionLostBeforeStopAnswer?: boolean;
   /** Refuse every `0x08` write at the ATT layer, so a release cannot land. */
   readonly refuseStop?: boolean;
+  /**
+   * Hold back the machine's answer to a Stop (`0x80 0x08 …`) until the test
+   * calls {@link Bench.deliverHeldStopAnswer} — #695's review. The simulator
+   * otherwise answers inside the write itself, so a release settles within
+   * microtasks and no tick can land while the Stop is on the wire. On a real
+   * trainer that answer takes time, and whatever is queued or ticked in that
+   * window is exactly what a dispose has to keep off the control point.
+   */
+  readonly holdStopAnswer?: boolean;
   /** Refuse every `0x05` below this many watts at the ATT layer — a refused ease (#567). */
   readonly refuseTargetsBelow?: number;
 }
@@ -204,6 +218,7 @@ function benchWith(options: BenchOptions = {}): Bench {
   const written: number[][] = [];
 
   const statusListeners: Array<(value: DataView) => void> = [];
+  const heldStopAnswers: Array<() => void> = [];
 
   const openTrainer: OpenTrainer = (id) => {
     if (options.trainerOffers !== undefined) {
@@ -233,7 +248,16 @@ function benchWith(options: BenchOptions = {}): Bench {
             return Promise.resolve();
           },
           onControlPointIndication: (listener) =>
-            controlPoint.onResponse((response) => listener(responseToOctets(response))),
+            controlPoint.onResponse((response) => {
+              const octets = responseToOctets(response);
+              if (options.holdStopAnswer === true && octets.getUint8(1) === STOP_OR_PAUSE) {
+                heldStopAnswers.push(() => {
+                  listener(octets);
+                });
+                return;
+              }
+              listener(octets);
+            }),
           onStatus: (listener) => {
             statusListeners.push(listener);
             return controlPoint.onStatus((status) => listener(statusToOctets(status)));
@@ -312,6 +336,11 @@ function benchWith(options: BenchOptions = {}): Bench {
     trainerControl: () => control,
     targetOnTheTrainer: () => bench.device(TRAINER).inspect().ftms?.targetPower,
     written,
+    deliverHeldStopAnswer: () => {
+      for (const deliver of heldStopAnswers.splice(0)) {
+        deliver();
+      }
+    },
   };
 }
 
@@ -1709,7 +1738,360 @@ describe('forgetting the trainer lets it go first — #659’s review', () => {
 
     expect(rig.written.slice(before)).toStrictEqual([]);
     expect(rig.controller.getSnapshot().trainer.paired).toBe(false);
+    // #695: and no "may still be holding resistance" about a machine this app
+    // never drove — a release attempted without control is refused as one.
+    expect(rig.controller.getSnapshot().trainer.releaseFault).toBeUndefined();
     rig.controller.dispose();
+  });
+});
+
+describe('disposing the controller lets a held trainer go first — #695', () => {
+  // ⚠️ `dispose` used to `detach` every sensor and nothing else, and `detach`
+  // unsubscribes `onControlLost` and then closes the client, which writes
+  // nothing. So a controller disposed with ERG, a workout or a gradient on the
+  // machine sent no Stop at all — the one release (#372) was bypassed. Nothing
+  // in production calls `dispose()` yet; this is what it must do before
+  // something does (a `pagehide`, say).
+  const THRESHOLD = watts(250);
+  const long = (): WorkoutRecord => ({
+    id: workoutId('w-dispose'),
+    createdBy: ATHLETE_A,
+    name: 'Long',
+    workout: {
+      name: 'Long',
+      blocks: [{ kind: 'steady', seconds: seconds(600), target: thresholdShare(0.8) }],
+    },
+    createdAt: unixSeconds(1),
+    updatedAt: unixSeconds(1),
+  });
+
+  async function riding(options: BenchOptions = {}): Promise<Bench> {
+    const rig = benchWith({ machine: { retainsTargetsThroughStop: true }, ...options });
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    return rig;
+  }
+
+  const stops = (writes: readonly number[][]): number =>
+    writes.filter((bytes) => bytes[0] === STOP_OR_PAUSE).length;
+
+  /** The client is closed once `detach` has run: any procedure is refused as not connected. */
+  async function closed(rig: Bench): Promise<boolean> {
+    const client = rig.trainerControl();
+    if (client === undefined) {
+      return false;
+    }
+    try {
+      await client.requestControl();
+      return false;
+    } catch (error) {
+      return isSensorError(error, 'not-connected');
+    }
+  }
+
+  it('sends exactly one Stop for a hand-set ERG target, then closes the client', async () => {
+    const rig = await riding();
+    await rig.controller.setTargetPower(watts(210));
+    expect(rig.targetOnTheTrainer()).toBe(210);
+    const before = rig.written.length;
+
+    rig.controller.dispose();
+    await flushMicrotasks(20);
+
+    // Exactly the one release, and no Request Control after it (rule 2).
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(rig.written.at(-1)).toStrictEqual([STOP_OR_PAUSE, 0x01]);
+    expect(await closed(rig)).toBe(true);
+    // Idempotent: a second dispose sends nothing.
+    rig.controller.dispose();
+    await flushMicrotasks(20);
+    expect(stops(rig.written.slice(before))).toBe(1);
+  });
+
+  it('ends a running workout with the one Stop, and writes no ERG target after it', async () => {
+    // The Stop's answer is held back (#695's review), so the five ticks below
+    // land while it is still on the wire — which is when a workout left
+    // running would queue its next target behind it.
+    const rig = await riding({ holdStopAnswer: true });
+    rig.controller.startWorkout(long(), THRESHOLD);
+    await ride(rig, 3);
+    await flushMicrotasks();
+    expect(rig.targetOnTheTrainer()).toBe(200);
+    const before = rig.written.length;
+
+    rig.controller.dispose();
+    await flushMicrotasks(20);
+    await ride(rig, 5);
+    await flushMicrotasks(20);
+    rig.deliverHeldStopAnswer();
+    await flushMicrotasks(20);
+
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    const snapshot = rig.controller.getSnapshot();
+    expect(snapshot.workout).toBeUndefined();
+    // A release is not a loss: no "Control lost".
+    expect(snapshot.trainer.lost).toBeUndefined();
+  });
+
+  it('is not a loss and re-grabs nothing when 0xFF beats the Stop’s answer', async () => {
+    // PR #442's ordering, with `reacquireControl` on as production has it. The
+    // control-loss listener is still subscribed while the Stop is on the wire —
+    // `detach` waits for it — so a release that did not mark itself as one
+    // would read the 0xFF as a loss and write a Request Control after it.
+    // The answer itself is held too (#695's review), so the ticks below land
+    // between the 0xFF and the answer — the window a re-grab would use.
+    const rig = await riding({ permissionLostBeforeStopAnswer: true, holdStopAnswer: true });
+    rig.controller.startWorkout(long(), THRESHOLD);
+    await ride(rig, 2);
+    await flushMicrotasks();
+    const before = rig.written.length;
+
+    rig.controller.dispose();
+    await flushMicrotasks(20);
+    await ride(rig, 3);
+    await flushMicrotasks(20);
+    rig.deliverHeldStopAnswer();
+    await flushMicrotasks(20);
+
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(rig.controller.getSnapshot().trainer.lost).toBeUndefined();
+    expect(rig.controller.getSnapshot().workout).toBeUndefined();
+  });
+
+  it('ends a hand-set target’s stall rescue, so no 0x05 follows the Stop', async () => {
+    // ⚠️ The Stop's answer is HELD (#695's review). Without it the simulator
+    // answers inside the write, the release settles within microtasks, and
+    // `detach`'s own `endManualErg` has ended the rescue before the first
+    // tick below — so this test stayed green with `releaseTrainer`'s
+    // `endManualErg` deleted. Held, the rescue is ticked while the Stop is
+    // really outstanding, and a 0x05 it queued would run BEFORE the settled
+    // release reached `close()`: `[[0x08, 0x01], [0x05, 25, 0]]`.
+    const rig = benchWith({
+      machine: { retainsTargetsThroughStop: true, minTargetPower: watts(25) },
+      holdStopAnswer: true,
+    });
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    rig.bench.rider.set({ cadence: revolutionsPerMinute(85) });
+    await rig.controller.setTargetPower(watts(150));
+    await ride(rig, 3);
+    await flushMicrotasks();
+    // Collapse into a rescue, then dispose in the middle of it.
+    for (const rpm of [68, 66, 62, 57, 52]) {
+      rig.bench.rider.set({ cadence: revolutionsPerMinute(rpm) });
+      await ride(rig, 1);
+      await flushMicrotasks(20);
+    }
+    expect(rig.controller.getSnapshot().trainer.ergRescue).toBeDefined();
+    const before = rig.written.length;
+
+    // ⚠️ The readings the rescue is about to judge have ARRIVED before the
+    // dispose, and are judged on the ticks after it. Since #695's review the
+    // subscriptions end at once, so readings arriving after the dispose would
+    // reach no rescue at all and could not tell whether `releaseTrainer` ended
+    // it: the collapse has to be in the history already.
+    for (const rpm of [47, 40, 30, 20, 10, 5]) {
+      rig.bench.rider.set({ cadence: revolutionsPerMinute(rpm) });
+      rig.bench.advance(seconds(1));
+    }
+    rig.controller.dispose();
+    for (let tick = 0; tick < 10; tick += 1) {
+      await ride(rig, 1);
+      await flushMicrotasks(20);
+    }
+    rig.deliverHeldStopAnswer();
+    await flushMicrotasks(20);
+
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+  });
+
+  it('lets no command reach the machine while its Stop is on the wire', async () => {
+    // #695's review. A procedure queued behind the Stop runs BEFORE the
+    // settled release reaches `detach` and `close()`, so detaching late keeps
+    // nothing off the wire. Emptying the sensor map is what does: with it
+    // gone, `setTargetPower` wrote `[[0x08, 0x01], [0x05, 250, 0]]` here.
+    const rig = await riding({ holdStopAnswer: true });
+    await rig.controller.setTargetPower(watts(210));
+    const before = rig.written.length;
+
+    rig.controller.dispose();
+    await flushMicrotasks(20);
+    const target = rig.controller.setTargetPower(THRESHOLD);
+    // Rule 2: nothing asks for control after a release.
+    const regrab = rig.controller.requestTrainerControl();
+    const started = rig.controller.startWorkout(long(), THRESHOLD);
+    await flushMicrotasks(20);
+    await ride(rig, 3);
+    rig.deliverHeldStopAnswer();
+    await Promise.all([target, regrab]);
+    await flushMicrotasks(20);
+
+    expect(started).toBe(false);
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(await closed(rig)).toBe(true);
+  });
+
+  it('stops listening to the readings at once, before the Stop is answered', async () => {
+    // #695's review: the subscriptions used to outlive `dispose` until the
+    // release settled — up to a procedure timeout per queued write — and each
+    // reading still fed the recorder, moved the phase and announced a change
+    // on a controller nobody owns any more.
+    const rig = benchWith({ machine: { retainsTargetsThroughStop: true }, holdStopAnswer: true });
+    const live = new Set<string>();
+    const subscribe = rig.transport.subscribe.bind(rig.transport);
+    vi.spyOn(rig.transport, 'subscribe').mockImplementation(async (id, capability, listener) => {
+      const unsubscribe = await subscribe(id, capability, listener);
+      const key = `${id}:${capability}`;
+      live.add(key);
+      return () => {
+        live.delete(key);
+        unsubscribe();
+      };
+    });
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    await rig.controller.setTargetPower(watts(210));
+    expect(live.size).toBeGreaterThan(0);
+
+    rig.controller.dispose();
+    await flushMicrotasks(20);
+
+    // The Stop is written and its answer is still held, so the release has
+    // not settled and nothing has been detached — and yet nothing is
+    // listening to a reading.
+    expect(stops(rig.written)).toBe(1);
+    expect([...live]).toStrictEqual([]);
+
+    rig.deliverHeldStopAnswer();
+    await flushMicrotasks(20);
+    expect(await closed(rig)).toBe(true);
+  });
+
+  it('detaches every sensor even when one of them throws on the way out', async () => {
+    // #695's review: the detach used to run in one `.then` with no catch, so
+    // one throwing unsubscribe left every entry after it attached — here the
+    // trainer, whose client then never closes — and surfaced as an unhandled
+    // rejection, which Vitest fails the run on.
+    const rig = benchWith({
+      devices: 'trainer+strap',
+      machine: { retainsTargetsThroughStop: true },
+    });
+    const observe = rig.transport.observeConnectionState.bind(rig.transport);
+    vi.spyOn(rig.transport, 'observeConnectionState').mockImplementation((id, listener) => {
+      const unobserve = observe(id, listener);
+      if (id !== STRAP) {
+        return unobserve;
+      }
+      return () => {
+        unobserve();
+        throw new Error('the transport would not let go');
+      };
+    });
+    // The strap first, so it is detached before the trainer.
+    await rig.controller.pair('heart-rate');
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.setTargetPower(watts(200));
+    const before = rig.written.length;
+
+    expect(() => {
+      rig.controller.dispose();
+    }).not.toThrow();
+    await flushMicrotasks(20);
+
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(await closed(rig)).toBe(true);
+  });
+
+  it('releases a game ride’s gradient through the same Stop, and refuses its next write', async () => {
+    const rig = await riding();
+    const handle = rig.controller.simulationControl();
+    await handle?.setSimulationParameters({ grade: gradePercent(6) });
+    const before = rig.written.length;
+
+    rig.controller.dispose();
+    const late = handle?.setSimulationParameters({ grade: gradePercent(8) });
+    // During the release as well as after it, and with the dispose's own
+    // reason: nothing is being forgotten here (#695's review).
+    await expect(late).rejects.toThrow('the ride controller has let the trainer go');
+    await flushMicrotasks(20);
+    // And once the release has settled, refused by the controller rather than
+    // left to whatever the closed client happens to say.
+    await expect(handle?.setSimulationParameters({ grade: gradePercent(9) })).rejects.toThrow(
+      'the ride controller has let the trainer go',
+    );
+    // The game's own release, arriving as its view unmounts, sends nothing
+    // more: the client is closed by then.
+    await handle?.letGo().catch(() => undefined);
+    await flushMicrotasks(20);
+
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+  });
+
+  it('joins a release already on the wire — Stop pressed, then disposed — and sends one Stop', async () => {
+    const rig = await riding();
+    rig.controller.startWorkout(long(), THRESHOLD);
+    await ride(rig, 2);
+    await flushMicrotasks();
+    const before = rig.written.length;
+
+    rig.controller.armStop();
+    const stopping = rig.controller.confirmStop();
+    rig.controller.dispose();
+    await stopping;
+    await flushMicrotasks(20);
+
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(await closed(rig)).toBe(true);
+  });
+
+  it('does not throw when the Stop is refused, and still detaches', async () => {
+    const rig = await riding({ refuseStop: true });
+    await rig.controller.setTargetPower(watts(200));
+    const before = rig.written.length;
+
+    expect(() => {
+      rig.controller.dispose();
+    }).not.toThrow();
+    await flushMicrotasks(20);
+
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(await closed(rig)).toBe(true);
+  });
+
+  it('swallows a release that rejects outright, and still detaches', async () => {
+    // A `letGo` that REJECTS rather than reporting `incomplete` — a
+    // `control-not-held` from the machine, or a programming error. Vitest
+    // fails the run on an unhandled rejection, so a missing catch is red here.
+    const rig = await riding();
+    await rig.controller.setTargetPower(watts(200));
+    const client = rig.trainerControl();
+    expect(client).toBeDefined();
+    const letGo = vi
+      .spyOn(client as TrainerControl, 'letGo')
+      .mockRejectedValue(new Error('the machine said no'));
+
+    expect(() => {
+      rig.controller.dispose();
+    }).not.toThrow();
+    await flushMicrotasks(20);
+
+    expect(letGo).toHaveBeenCalledTimes(1);
+    expect(await closed(rig)).toBe(true);
+  });
+
+  it('writes nothing when this app does not hold the trainer', async () => {
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    const before = rig.written.length;
+
+    rig.controller.dispose();
+    await flushMicrotasks(20);
+
+    expect(rig.written.slice(before)).toStrictEqual([]);
+    expect(await closed(rig)).toBe(true);
   });
 });
 
@@ -2854,6 +3236,236 @@ describe('#526 — the ride asks once whether it may show its notification', () 
     await settled();
     expect(rig.controller.getSnapshot().phase).toBe('stopped');
     expect(rig.controller.getSnapshot().notificationNotice).toBeUndefined();
+    rig.controller.dispose();
+  });
+});
+
+// --- #647: a refused keep-alive is on the ride's state -----------------------
+
+/**
+ * #647 — `quietly` used to swallow a refused keep-alive with no trace: the
+ * ride recorded (#524's "degraded, not broken"), and nothing told the rider it
+ * might stop with the screen off. These drive the controller with a port that
+ * refuses — the way `RecordingServicePlugin.java` refuses on Android 14+ with
+ * no Bluetooth permission — and read `keepAliveFailed` off the snapshot a
+ * screen reads.
+ */
+describe('#647 — a refused keep-alive is on the ride’s state, and clears', () => {
+  /** A port whose answers are scripted call by call: `true` refuses. */
+  function scripted(refusals: readonly boolean[]): RideKeepAlivePort & {
+    readonly calls: string[];
+  } {
+    const calls: string[] = [];
+    let asked = 0;
+    return {
+      calls,
+      keepRideAlive: () => {
+        calls.push('keep');
+        const refuse = refusals[asked] ?? false;
+        asked += 1;
+        return refuse
+          ? Promise.reject(new Error('The Bluetooth permission is not granted'))
+          : Promise.resolve();
+      },
+      letRideSleep: () => {
+        calls.push('sleep');
+        return Promise.resolve();
+      },
+    };
+  }
+
+  async function settled(): Promise<void> {
+    for (let turn = 0; turn < 10; turn += 1) {
+      await Promise.resolve();
+    }
+  }
+
+  it('is false while the platform keeps the ride alive', async () => {
+    const rig = benchWith({ keepAlive: scripted([false]) });
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(false);
+    await rig.controller.start();
+    await settled();
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(false);
+    rig.controller.dispose();
+  });
+
+  it('is true once the platform refuses, and the ride records anyway', async () => {
+    const rig = benchWith({ keepAlive: scripted([true]) });
+    await rig.controller.start();
+    await settled();
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(true);
+    await rig.controller.pause();
+    await rig.controller.resume();
+    await ride(rig, 3);
+    // A pause is not a transition, and nothing is asked per tick.
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(true);
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    expect(rig.controller.getSnapshot().sampleCount).toBeGreaterThan(0);
+    rig.controller.dispose();
+  });
+
+  it('is true when the port throws before it returns a promise', async () => {
+    const rig = benchWith({
+      keepAlive: {
+        keepRideAlive: () => {
+          throw new Error('RecordingService is not implemented on this platform');
+        },
+        letRideSleep: () => Promise.resolve(),
+      },
+    });
+    await rig.controller.start();
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(true);
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    rig.controller.dispose();
+  });
+
+  it('tells a listener when it changes, so a screen re-renders', async () => {
+    const rig = benchWith({ keepAlive: scripted([true]) });
+    const seen: boolean[] = [];
+    rig.controller.subscribe(() => {
+      seen.push(rig.controller.getSnapshot().keepAliveFailed);
+    });
+    await rig.controller.start();
+    await settled();
+    expect(seen.at(-1)).toBe(true);
+    rig.controller.dispose();
+  });
+
+  it('asks again when a sensor pairs during the ride, and clears when that succeeds', async () => {
+    // A rider who presses Start before pairing anything has not been asked for
+    // the Bluetooth permission yet; pairing is when they are.
+    const port = scripted([true, false]);
+    const rig = benchWith({ keepAlive: port });
+    await rig.controller.start();
+    await settled();
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(true);
+
+    await rig.controller.pair('trainer');
+    await settled();
+    expect(port.calls).toEqual(['keep', 'keep']);
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(false);
+    rig.controller.dispose();
+  });
+
+  it('stays true when the second ask is refused too', async () => {
+    const port = scripted([true, true]);
+    const rig = benchWith({ keepAlive: port });
+    await rig.controller.start();
+    await rig.controller.pair('trainer');
+    await settled();
+    expect(port.calls).toEqual(['keep', 'keep']);
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(true);
+    rig.controller.dispose();
+  });
+
+  it('asks nothing extra when a sensor pairs and nothing was refused, or outside a ride', async () => {
+    const port = scripted([]);
+    const rig = benchWith({ devices: 'trainer+strap', keepAlive: port });
+    await rig.controller.pair('trainer');
+    expect(port.calls).toEqual([]);
+    await rig.controller.start();
+    await rig.controller.pair('heart-rate');
+    await settled();
+    expect(port.calls).toEqual(['keep']);
+    rig.controller.dispose();
+  });
+
+  it('clears when a granted notification re-starts the service — #526', async () => {
+    const port = scripted([true, false]);
+    const rig = benchWith({
+      keepAlive: port,
+      notificationPermission: {
+        notificationPermission: () => Promise.resolve('prompt'),
+        askForNotificationPermission: () => Promise.resolve('granted'),
+      },
+    });
+    await rig.controller.start();
+    await settled();
+    expect(port.calls).toEqual(['keep', 'keep']);
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(false);
+    rig.controller.dispose();
+  });
+
+  it('is false again once the ride stops, and a late refusal does not reach the next ride', async () => {
+    // Every ask hangs until the test answers it, so the first ride's refusal
+    // can be delivered while the SECOND ride is in progress.
+    const refusals: ((reason: Error) => void)[] = [];
+    const rig = benchWith({
+      keepAlive: {
+        keepRideAlive: () =>
+          new Promise<void>((_resolve, reject) => {
+            refusals.push(reject);
+          }),
+        letRideSleep: () => Promise.resolve(),
+      },
+      rideSave: storeSavePort(),
+    });
+    await rig.controller.start();
+    await ride(rig, 3);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().phase).toBe('stopped');
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(false);
+
+    expect(await rig.controller.startNewRide()).toBe(true);
+    await rig.controller.start();
+    expect(refusals).toHaveLength(2);
+    // The FIRST ride's ask is refused now, with the second ride recording.
+    refusals[0]?.(new Error('Android did not allow the recording service to start'));
+    await settled();
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(false);
+    // …and this ride's own refusal still raises it.
+    refusals[1]?.(new Error('Android did not allow the recording service to start'));
+    await settled();
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(true);
+    rig.controller.dispose();
+  });
+
+  it('is published when the re-ask after a granted notification throws — #693’s review', async () => {
+    // The first ask succeeds; the re-start after `granted` throws before it
+    // returns a promise. That throw is NOT inside `changed()`, so the flag has
+    // to be published — a snapshot built before it would never show it.
+    let asked = 0;
+    const rig = benchWith({
+      keepAlive: {
+        keepRideAlive: () => {
+          asked += 1;
+          if (asked === 1) {
+            return Promise.resolve();
+          }
+          throw new Error('RecordingService could not be started again');
+        },
+        letRideSleep: () => Promise.resolve(),
+      },
+      notificationPermission: {
+        notificationPermission: () => Promise.resolve('prompt'),
+        askForNotificationPermission: () => Promise.resolve('granted'),
+      },
+    });
+    const seen: boolean[] = [];
+    rig.controller.subscribe(() => {
+      seen.push(rig.controller.getSnapshot().keepAliveFailed);
+    });
+    await rig.controller.start();
+    // A snapshot taken now is cached; only `changed()` drops it.
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(false);
+    await settled();
+    expect(asked).toBe(2);
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(true);
+    expect(seen.at(-1)).toBe(true);
+    rig.controller.dispose();
+  });
+
+  it('clears when the refused ride stops', async () => {
+    const rig = benchWith({ keepAlive: scripted([true]), rideSave: storeSavePort() });
+    await rig.controller.start();
+    await settled();
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(true);
+    await ride(rig, 3);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(false);
     rig.controller.dispose();
   });
 });

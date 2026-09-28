@@ -661,3 +661,154 @@ for (const viewport of EASED_VIEWPORTS) {
     });
   });
 }
+
+/**
+ * #647 — the platform refused to keep the ride alive (on Android, the
+ * recording service did not start), so the ride may stop if the screen goes
+ * off, and `RideView` says so BESIDE the Live group's heading
+ * (`theme.css` §`.oyl-ride__heading`).
+ *
+ * What is held: the sentence is whole, on the screen, uncovered and in no
+ * `<details>` (the owner's ruling on #654's re-review — it is a safety
+ * sentence); every ride control is still on the screen; and at every tablet
+ * BOTH the notice's own bottom and *Pause* / *Stop* clear
+ * {@link FOLD_MARGIN_PIXELS} — landscape, every ride control does — as
+ * shipped AND with every live and trainer button held to 48 px: #669's larger
+ * controls, which are not merged, applied in the harness as a what-if rather
+ * than argued from a margin.
+ *
+ * ⚠️ **The notice's floor is §4f's 50 px and it was 0 until #693's review**,
+ * and a reviewer who remembers the notice being "bounded only by being on the
+ * screen" is reading the old file. Under *Pause* / *Stop* — where the pull
+ * request first put it — it ended 15.7 px above the fold on the owner's tablet
+ * in the shell and 3.7 px at 1024×720, so the safety sentence #647 exists to
+ * show was unproven on the owner's own tablet by §4f's own rule.
+ *
+ * Upright, the live group is stacked over the trainer's, and the lowest ride
+ * control is the workout chooser: there the floor is held on *Pause* /
+ * *Stop* and on the notice, and the chooser's margin is published and held to
+ * be on the screen. Beside the heading the notice is one line upright and
+ * costs the chooser its height less the heading's; #692 is the room a
+ * standing notice needs there, and #669's 48 px alone spend most of what main
+ * leaves it.
+ *
+ * ⚠️ **Two controls, and they fail for different reasons.** Put back UNDER
+ * *Pause* / *Stop* — the review's finding — the notice's own margin must fall
+ * under the floor at the in-shell tablets; moved ABOVE them, where
+ * `notificationNotice` sits, *Pause* must. Without the first, a green run could
+ * be a layout where the heading did nothing; without the second, one where the
+ * notice was never measured against the controls at all.
+ */
+const KEEP_ALIVE_FAILED = '?keepalive=failed';
+const KEEP_SCREEN_ON_TEXT = '!Keep the screen on: your ride may stop without it.';
+
+for (const viewport of EASED_VIEWPORTS) {
+  const upright = viewport.height > viewport.width;
+  test.describe(`a ride that may stop with the screen off — #647 — ${viewport.name}`, () => {
+    test('the notice is there, whole, and in no disclosure — and absent without the refusal', async ({
+      page,
+    }) => {
+      await open(page, viewport, KEEP_ALIVE_FAILED);
+      const seen = await measure(page);
+      expect(seen.keepScreenOn?.text).toBe(KEEP_SCREEN_ON_TEXT);
+      expect(seen.keepScreenOn?.inDisclosure).toBe(false);
+      expect(seen.keepScreenOn?.box.height ?? 0).toBeGreaterThan(20);
+
+      await open(page, viewport);
+      expect((await measure(page)).keepScreenOn).toBeUndefined();
+    });
+
+    for (const grown of [undefined, 48] as const) {
+      const what = grown === undefined ? 'as shipped' : `with #669's ${String(grown)} px controls`;
+      test(`the notice${upright ? ', Pause and Stop clear' : ' and every ride control clear'} the fold by a margin — ${what}`, async ({
+        page,
+      }, testInfo) => {
+        await open(page, viewport, KEEP_ALIVE_FAILED);
+        if (grown !== undefined) {
+          await page.evaluate((pixels) => {
+            window.__oylRideView?.growControlsTo(pixels);
+          }, grown);
+        }
+        const seen = await measure(page);
+
+        expect(seen.scrollY).toBe(0);
+        const during = seen.controls.filter((each) => each.group !== 'sensors');
+        expect(during.map((each) => each.name)).toEqual(expect.arrayContaining(['Pause', 'Stop']));
+        if (grown !== undefined) {
+          // The what-if took: Pause is the height #669 gives it.
+          const pause = during.find((each) => each.name === 'Pause');
+          expect(pause?.box.height ?? 0).toBeGreaterThanOrEqual(grown - SUBPIXEL_TOLERANCE);
+        }
+        // Upright, the controls that END a recording; landscape, every ride
+        // control. @see the note above this block
+        const held = upright
+          ? during.filter((each) => each.name === 'Pause' || each.name === 'Stop')
+          : during;
+        expect(during.filter((each) => !onScreen(each, viewport)).map(describeControl)).toEqual([]);
+        const notice = seen.keepScreenOn;
+        expect(notice?.onTop).toBe(true);
+        expect((notice?.box.top ?? -1) >= insetsOf(viewport).top).toBe(true);
+
+        const lowestOf = (among: readonly RideViewControl[]): RideViewControl =>
+          among.reduce((low, each) => (each.box.bottom > low.box.bottom ? each : low));
+        const lowest = lowestOf(during);
+        const lowestHeld = lowestOf(held);
+        const controlMargin = foldMargin(lowest.box.bottom, viewport);
+        const heldMargin = foldMargin(lowestHeld.box.bottom, viewport);
+        const noticeMargin = foldMargin(notice?.box.bottom ?? Infinity, viewport);
+        const note =
+          `${what}: lowest control ${controlMargin.toFixed(1)} px (${describeControl(lowest)}); ` +
+          (upright ? `Pause / Stop ${heldMargin.toFixed(1)} px; ` : '') +
+          `the notice ${noticeMargin.toFixed(1)} px, ${(notice?.box.height ?? 0).toFixed(0)} px tall ` +
+          `— at ${String(viewport.width)}×${String(viewport.height)}`;
+        testInfo.annotations.push({
+          type: 'keep the screen on, margin to the fold',
+          description: note,
+        });
+        console.log(`keep the screen on, margin to the fold — ${viewport.name} — ${note}`);
+
+        expect(noticeMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+        expect(heldMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+      });
+    }
+
+    if (!upright && (viewport.insets !== undefined || viewport.height === 720)) {
+      test('the control — under Pause and Stop, the notice itself falls under the floor', async ({
+        page,
+      }, testInfo) => {
+        await open(page, viewport, KEEP_ALIVE_FAILED);
+        const before = await measure(page);
+        await page.evaluate(() => {
+          window.__oylRideView?.noticeUnderControls();
+        });
+        const after = await measure(page);
+        const noticeAt = (seen: RideViewMeasurement): number =>
+          foldMargin(seen.keepScreenOn?.box.bottom ?? Infinity, viewport);
+        const note = `the notice ${noticeAt(before).toFixed(1)} px → ${noticeAt(after).toFixed(1)} px`;
+        testInfo.annotations.push({ type: 'control, notice under Pause', description: note });
+        console.log(`keep the screen on, notice under Pause — ${viewport.name} — ${note}`);
+        expect(noticeAt(before)).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+        expect(noticeAt(after)).toBeLessThan(FOLD_MARGIN_PIXELS);
+      });
+
+      test('the control — above Pause and Stop, the notice puts them under the floor', async ({
+        page,
+      }, testInfo) => {
+        await open(page, viewport, KEEP_ALIVE_FAILED);
+        const before = await measure(page);
+        await page.evaluate(() => {
+          window.__oylRideView?.noticeAboveControls();
+        });
+        const after = await measure(page);
+        const pauseAt = (seen: RideViewMeasurement): number =>
+          seen.controls.find((each) => each.name === 'Pause')?.box.bottom ?? -Infinity;
+        const margin = foldMargin(pauseAt(after), viewport);
+        const note = `Pause ${foldMargin(pauseAt(before), viewport).toFixed(1)} px → ${margin.toFixed(1)} px`;
+        testInfo.annotations.push({ type: 'control, notice above Pause', description: note });
+        console.log(`keep the screen on, notice above Pause — ${viewport.name} — ${note}`);
+        expect(foldMargin(pauseAt(before), viewport)).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+        expect(margin).toBeLessThan(FOLD_MARGIN_PIXELS);
+      });
+    }
+  });
+}

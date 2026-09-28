@@ -1248,3 +1248,258 @@ test.describe('#439 — a ride with edge-to-edge insets does not scroll', () => 
     });
   }
 });
+
+/**
+ * #647 — the ride being recorded may stop if the screen goes off, because the
+ * platform refused the recording service. `?keepalive=failed` puts
+ * *"Keep the screen on: your ride may stop without it."* in the
+ * HUD's notice cell, where it stays for as long as the refusal does: it is a
+ * safety sentence, so there is no toggle and no disclosure (the owner's ruling
+ * on #654's re-review).
+ *
+ * `&trainer=workout` adds the longest road notice, which stands open for a
+ * ride's first seconds and has a *Trainer notice* control. ⚠️ **Since #693's
+ * review (N2) the refusal changes that on upright phones under 25 rem wide
+ * and nowhere else**: there (`GameView` §`ONE_NOTICE_ONLY_QUERY` — 360×800,
+ * 360×752 and 390×844 here) the road notice and its control are off the HUD
+ * while the refusal stands, because the two together ran over the rider, or
+ * up to it, however the road notice got open; everywhere else it opens, and
+ * is put away, exactly as it does without the refusal — and the pair is held
+ * over nothing, clear of the rider's box by `EASED_RIDER_CLEARANCE_PIXELS`
+ * upright.
+ *
+ * The control takes the rule away — `matchMedia` answering "no" to that one
+ * query before the page loads — and requires the pair, open, to come within
+ * the clearance of the rider at the two 360 px phones. Not at 390×844, where
+ * the pair ended 51 px above the rider on a Mac: inside the rule for the CI
+ * runner's tighter fonts, not because it collides there.
+ */
+async function keepScreenOnNotice(page: Page): Promise<{
+  text: string;
+  inDisclosure: boolean;
+  roadNoticeShown: boolean;
+  roadNoticeOnHud: boolean;
+}> {
+  return page.evaluate(() => {
+    const label = [...document.querySelectorAll('.oyl-hud__notices .oyl-status__label')].find(
+      (each) => each.textContent?.startsWith('Keep the screen on'),
+    );
+    const notice = label?.closest('.oyl-status');
+    const road = document.querySelector('#oyl-hud-standing-notice');
+    return {
+      text: (notice?.textContent ?? '').replace(/\s+/g, ' '),
+      inDisclosure: (notice?.closest('details') ?? null) !== null,
+      roadNoticeShown: road !== null && !road.classList.contains('oyl-visually-hidden'),
+      roadNoticeOnHud: road !== null,
+    };
+  });
+}
+
+/** The keep-the-screen-on notice laid out on the stage, over nothing. */
+async function keepScreenOnLaidOut(
+  page: Page,
+  viewport: Viewport,
+  what: string,
+): Promise<{ readonly collisions: string[]; readonly clearance: number }> {
+  const seen = await measure(page);
+  const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
+  const onAPhone = Math.min(viewport.width, viewport.height) <= 480;
+  const laidOut = seen.panels.filter((each) => each.box.height > 1);
+  expect(laidOut).toHaveLength(onAPhone ? 4 : 5);
+  const rider = riderBox(viewport);
+  const clearance = rider.top - (notice?.box.bottom ?? Infinity);
+  console.log(
+    `keep the screen on, ${what} — ${viewport.name} — notice cell ${(notice?.box.height ?? 0).toFixed(0)} px tall` +
+      (viewport.height > viewport.width
+        ? `; ${clearance.toFixed(0)} px above the rider's box`
+        : `; ends at x = ${(notice?.box.right ?? 0).toFixed(0)}, rider from x = ${rider.left.toFixed(0)}`),
+  );
+  return { collisions: easedCollisions(seen, viewport), clearance };
+}
+
+const KEEP_SCREEN_ON_SEEN = '!Keep the screen on: your ride may stop without it.';
+
+/** `GameView` §`ONE_NOTICE_ONLY_QUERY`'s phones: the column layout under 25 rem wide. */
+const oneNoticeOnly = (viewport: Viewport): boolean =>
+  viewport.width >= 360 && viewport.width < 400 && viewport.height >= 752;
+
+test.describe('a ride that may stop with the screen off — #647', () => {
+  for (const [query, what] of [
+    ['?keepalive=failed', 'alone'],
+    ['?keepalive=failed&trainer=workout', 'with the road notice'],
+  ] as const) {
+    for (const viewport of OVERLAY_VIEWPORTS) {
+      test(`the notice, ${what}, whole and over nothing — ${viewport.name}`, async ({ page }) => {
+        await openRide(page, viewport, query);
+        const found = await keepScreenOnNotice(page);
+        expect(found.text).toBe(KEEP_SCREEN_ON_SEEN);
+        expect(found.inDisclosure).toBe(false);
+        const withRoad = query.includes('trainer=workout');
+        if (withRoad && !oneNoticeOnly(viewport)) {
+          // As without the refusal: open for the ride's first seconds, beside
+          // it, with its control on the HUD.
+          expect(found.roadNoticeShown).toBe(true);
+          const toggle = named((await measure(page)).items, 'control: Trainer notice');
+          expect(inside(toggle.box, viewport) && toggle.onTop, describeItem(toggle)).toBe(true);
+        } else {
+          // Alone — and at the two narrowest upright phones, the road notice
+          // and its control are not on the HUD while the refusal stands.
+          expect(found.roadNoticeOnHud).toBe(false);
+          expect(
+            (await measure(page)).items.some((each) => each.name === 'control: Trainer notice'),
+          ).toBe(false);
+        }
+        const described = withRoad && oneNoticeOnly(viewport) ? 'road notice off the HUD' : what;
+        const { collisions, clearance } = await keepScreenOnLaidOut(page, viewport, described);
+        expect(collisions).toEqual([]);
+        if (viewport.height > viewport.width) {
+          expect(clearance).toBeGreaterThanOrEqual(EASED_RIDER_CLEARANCE_PIXELS);
+        }
+      });
+    }
+  }
+
+  // The control: the rule taken away. `matchMedia` answers "no" to
+  // ONE_NOTICE_ONLY_QUERY before the page loads, so at the two 360 px
+  // upright phones the road notice opens beside it as it does elsewhere — and
+  // must come within the clearance of the rider, or the rule is being held
+  // over a pair that always fitted.
+  for (const viewport of OVERLAY_VIEWPORTS.filter((each) => each.width === 360)) {
+    test(`the control — without the rule, the road notice open beside it comes within the clearance of the rider — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await page.addInitScript(() => {
+        const real = window.matchMedia.bind(window);
+        // `not all` matches nothing, in the browser's own MediaQueryList.
+        window.matchMedia = (query: string): MediaQueryList =>
+          real(query.includes('width < 25rem') ? 'not all' : query);
+      });
+      await openRide(page, viewport, '?keepalive=failed&trainer=workout');
+      await expect.poll(async () => (await keepScreenOnNotice(page)).roadNoticeShown).toBe(true);
+      // ⚠️ Clearance only, since #693's re-review shortened the sentence (to
+      // one line on a Mac; the CI runner still wraps it): the pair open now
+      // ends 26 px (360×800) and 1 px (360×752) ABOVE the rider's box on a
+      // Mac, where the longer one ran 27 px into it — under the clearance
+      // still, and so still the rule's reason.
+      const { clearance } = await keepScreenOnLaidOut(
+        page,
+        viewport,
+        'without the rule, the road notice open',
+      );
+      expect(clearance).toBeLessThan(EASED_RIDER_CLEARANCE_PIXELS);
+    });
+  }
+});
+
+/**
+ * #647 — #693's re-review, B2: *"Keep the screen on"* beside EACH other
+ * notice the HUD never puts away. The notice cell stacks every one of them —
+ * the *Trainer* fault, *Eased* (#585), the side camera's lost link (#551) and
+ * this — so a pair is a taller cell over the same rider, and none of the
+ * sentences may be put away to make room.
+ *
+ * Every pair is held over nothing at every overlay viewport and, upright, to
+ * `EASED_RIDER_CLEARANCE_PIXELS` above the leaning rider's box — #605's floor
+ * for the Eased notice, which the other two pairs meet by the same geometry
+ * (a two-line notice and a one-line one), so they are held to it too rather
+ * than only to "no collision". Each prints its clearance.
+ *
+ * What gets it there: *"Keep the screen on: your ride may stop without it."*
+ * is shorter — one line at 360 px on a Mac, though still two on the CI runner,
+ * whose fonts are wider — and two notices sharing the cell give up half their
+ * vertical padding (`theme.css` §"Two notices in the one cell"), which on the
+ * runner is what clears the floor. As round one
+ * of #693 shipped it — the longer sentence, full padding — the pair beside
+ * Eased ended 38 px above the rider at 360×752; the control below puts both
+ * back and requires the same measurement to fall under the floor.
+ */
+const NEVER_PUT_AWAY: readonly (readonly [query: string, beside: string, words: string])[] = [
+  ['&rescue=floor', 'Eased', 'Eased'],
+  ['&side=lost', 'the side camera lost', 'Side camera'],
+  ['&gradient=refused', 'a trainer fault', 'stopped accepting the road'],
+];
+
+/**
+ * The stage measured on a frame that has both notices in the cell. The
+ * refusing trainer's fault can be absent for a frame (`ride-harness.tsx`
+ * §`REFUSED`), so the check and the measurement are one evaluation.
+ */
+async function measureWithBoth(page: Page, words: string): Promise<StageMeasurement> {
+  let found: StageMeasurement | undefined;
+  await expect
+    .poll(async () => {
+      found = await page.evaluate((beside) => {
+        const text = document.querySelector('.oyl-hud__notices')?.textContent ?? '';
+        return text.includes(beside) && text.includes('Keep the screen on')
+          ? window.__oylRide?.measure()
+          : undefined;
+      }, words);
+      return found !== undefined;
+    })
+    .toBe(true);
+  if (found === undefined) throw new Error('unreachable');
+  return found;
+}
+
+test.describe('keep the screen on, beside every notice that stays — #647', () => {
+  for (const [query, beside, words] of NEVER_PUT_AWAY) {
+    for (const viewport of OVERLAY_VIEWPORTS) {
+      test(`beside ${beside}, over nothing — ${viewport.name}`, async ({ page }) => {
+        await openRide(page, viewport, `?keepalive=failed${query}`);
+        const seen = await measureWithBoth(page, words);
+        const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
+        const rider = riderBox(viewport);
+        const clearance = rider.top - (notice?.box.bottom ?? Infinity);
+        console.log(
+          `keep the screen on beside ${beside} — ${viewport.name} — notice cell ` +
+            `${(notice?.box.height ?? 0).toFixed(0)} px tall` +
+            (viewport.height > viewport.width
+              ? `; ${clearance.toFixed(0)} px above the rider's box`
+              : `; ends at x = ${(notice?.box.right ?? 0).toFixed(0)}, rider from x = ${rider.left.toFixed(0)}`),
+        );
+        expect(easedCollisions(seen, viewport)).toEqual([]);
+        if (viewport.height > viewport.width) {
+          expect(clearance).toBeGreaterThanOrEqual(EASED_RIDER_CLEARANCE_PIXELS);
+        }
+      });
+    }
+  }
+
+  // The control: the cell as round one of #693 shipped it — the old, longer
+  // sentence in the same notice, and both notices at the padding a notice has
+  // alone. Same elements, same cell, same viewport; only the words and the
+  // padding change. It must fall under the floor, or the floor above is being
+  // held over a cell that could never have reached the rider.
+  for (const viewport of OVERLAY_VIEWPORTS.filter((each) => each.height === 752)) {
+    test(`the control — as round one shipped it, the pair beside Eased comes within ${String(EASED_RIDER_CLEARANCE_PIXELS)} px of the rider — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openRide(page, viewport, '?keepalive=failed&rescue=floor');
+      await measureWithBoth(page, 'Eased');
+      await page.evaluate(() => {
+        const statuses = [
+          ...document.querySelectorAll<HTMLElement>('.oyl-hud__notices > .oyl-status'),
+        ];
+        const label = statuses
+          .map((each) => each.querySelector('.oyl-status__label'))
+          .find((each) => each?.textContent?.startsWith('Keep the screen on'));
+        const body = label?.parentElement;
+        if (label === null || label === undefined || body === null || body === undefined) {
+          throw new Error('no keep-the-screen-on notice to restore');
+        }
+        body.replaceChildren(label, 'your ride may stop if the screen goes off.');
+        for (const each of statuses) each.style.padding = 'var(--oyl-space-sm)';
+      });
+      const text = await noticeText(page);
+      expect(text).toContain('Eased');
+      expect(text).toContain('Keep the screen on: your ride may stop if the screen goes off.');
+      const seen = await measure(page);
+      const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
+      const clearance = riderBox(viewport).top - (notice?.box.bottom ?? Infinity);
+      console.log(
+        `keep the screen on beside Eased, as round one shipped it — ${viewport.name} — ${clearance.toFixed(0)} px above the rider's box`,
+      );
+      expect(clearance).toBeLessThan(EASED_RIDER_CLEARANCE_PIXELS);
+    });
+  }
+});

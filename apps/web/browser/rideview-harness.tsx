@@ -139,8 +139,19 @@ const FLOOR: WorkoutRescue = {
   reason: 'Pedalling has stopped, so the target has been dropped to the trainer’s lowest.',
 };
 
+/**
+ * `rideview.html?keepalive=failed` — #647: the platform refused to keep the
+ * ride alive, so `RideView` shows *"Keep the screen on: your ride may stop
+ * without it."* beside the Live group's heading. Through the stub's
+ * snapshot for the reason {@link WORKOUT_STATE} is: this page measures where
+ * the sentence lands; `ride/keep-alive-notice.a11y.test.tsx` §"the Ride
+ * screen — #647" drives the real controller with a refusing port and reads the
+ * same sentence off the screen.
+ */
+const KEEP_ALIVE_FAILED = new URLSearchParams(window.location.search).get('keepalive') === 'failed';
+
 function snapshot(): RideSnapshot {
-  const riding = ridingSnapshot();
+  const riding = { ...ridingSnapshot(), keepAliveFailed: KEEP_ALIVE_FAILED };
   if (WORKOUT_STATE !== 'eased' && WORKOUT_STATE !== 'running') {
     return riding;
   }
@@ -202,6 +213,19 @@ export interface RideViewMeasurement {
   readonly cardBackground: string;
   /** #605: the workout's Eased notice, disclosure included, if there is one. */
   readonly eased: { readonly box: Box; readonly text: string; readonly open: boolean } | undefined;
+  /**
+   * #647: the keep-the-screen-on notice, if there is one — its box, its
+   * words, whether any `<details>` holds it, and whether it is the topmost
+   * thing at its own centre.
+   */
+  readonly keepScreenOn:
+    | {
+        readonly box: Box;
+        readonly text: string;
+        readonly inDisclosure: boolean;
+        readonly onTop: boolean;
+      }
+    | undefined;
 }
 
 declare global {
@@ -218,6 +242,12 @@ declare global {
       readonly openEasedDetail: () => void;
       /** #605's control: the running workout as #585 shipped it. @see restoreAsShipped */
       readonly restoreAsShipped: () => void;
+      /** #647's what-if: the ride controls at #669's 48 px. @see growControlsTo */
+      readonly growControlsTo: (pixels: number) => void;
+      /** #647's control: the notice moved above Pause / Stop. @see noticeAboveControls */
+      readonly noticeAboveControls: () => void;
+      /** #647's control: the notice moved under Pause / Stop. @see noticeUnderControls */
+      readonly noticeUnderControls: () => void;
     };
   }
 }
@@ -300,7 +330,80 @@ function measure(): RideViewMeasurement {
     pageOverflow: document.documentElement.scrollHeight - window.innerHeight,
     cardBackground: card === null ? '' : window.getComputedStyle(card).backgroundColor,
     eased: easedNotice(),
+    keepScreenOn: keepScreenOnNotice(),
   };
+}
+
+/** #647's notice, found by its label — the words a rider reads first. */
+function keepScreenOnElement(): Element | undefined {
+  return [...document.querySelectorAll('.oyl-ride__group--live .oyl-status')].find(
+    (each) => textOf(each.querySelector('.oyl-status__label') ?? each) === 'Keep the screen on:',
+  );
+}
+
+function keepScreenOnNotice(): RideViewMeasurement['keepScreenOn'] {
+  const notice = keepScreenOnElement();
+  if (notice === undefined) {
+    return undefined;
+  }
+  const box = boxOf(notice);
+  const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+  return {
+    box,
+    text: textOf(notice),
+    inDisclosure: notice.closest('details') !== null || notice.querySelector('details') !== null,
+    onTop: hit !== null && (hit === notice || notice.contains(hit)),
+  };
+}
+
+/**
+ * #647's what-if for #669, which is still open: every button in the two
+ * groups a rider uses DURING a ride held to `pixels` tall, as #669 will hold
+ * *Start*, *Pause*, *End* and *Set target* to 48. All of them rather than those
+ * four, so the figure is the conservative one.
+ */
+function growControlsTo(pixels: number): void {
+  const style = document.createElement('style');
+  style.textContent =
+    `.oyl-ride__group--live .oyl-button, .oyl-ride__group--trainer .oyl-button ` +
+    `{ min-height: ${String(pixels)}px; }`;
+  document.head.append(style);
+}
+
+/**
+ * #647's first control: the notice where `notificationNotice` sits — ABOVE
+ * *Pause* / *Stop* — on the live element. #436's review measured what a line
+ * there costs those two on a tablet; this is that cost, for this sentence.
+ */
+function noticeAboveControls(): void {
+  const { notice, pause } = keepScreenOnParts();
+  pause.before(notice);
+}
+
+/**
+ * #647's second control — #693's review: the notice as that pull request
+ * first shipped it, UNDER *Pause* / *Stop*. Moved out of
+ * `.oyl-ride__heading` it is an ordinary status again, padding and all, and
+ * its own margin to the fold is the one the review found under 50 px.
+ */
+function noticeUnderControls(): void {
+  const { notice, stop } = keepScreenOnParts();
+  stop.after(notice);
+}
+
+function keepScreenOnParts(): {
+  readonly notice: Element;
+  readonly pause: Element;
+  readonly stop: Element;
+} {
+  const notice = keepScreenOnElement();
+  const buttons = [...document.querySelectorAll('.oyl-ride__group--live button')];
+  const pause = buttons.find((each) => textOf(each) === 'Pause');
+  const stop = buttons.find((each) => textOf(each) === 'Stop');
+  if (notice === undefined || pause === undefined || stop === undefined) {
+    throw new Error('rideview harness: there is no keep-the-screen-on notice, Pause and Stop');
+  }
+  return { notice, pause, stop };
 }
 
 /** The Eased notice's surface: the status with its disclosure, as laid out. */
@@ -448,6 +551,9 @@ async function run(): Promise<void> {
       ),
     );
   }
+  if (KEEP_ALIVE_FAILED) {
+    await until('the keep-the-screen-on notice', keepScreenOnElement);
+  }
   await document.fonts.ready;
 
   window.__oylRideView = {
@@ -458,6 +564,9 @@ async function run(): Promise<void> {
     restoreFullHeightShell,
     openEasedDetail,
     restoreAsShipped,
+    growControlsTo,
+    noticeAboveControls,
+    noticeUnderControls,
   };
 }
 
@@ -471,5 +580,8 @@ run().catch((error: unknown) => {
     restoreFullHeightShell,
     openEasedDetail,
     restoreAsShipped,
+    growControlsTo,
+    noticeAboveControls,
+    noticeUnderControls,
   };
 });

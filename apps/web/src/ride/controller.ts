@@ -360,6 +360,19 @@ export interface RideSnapshot {
    * `undefined` otherwise, which is every ride where nothing was asked.
    */
   readonly notificationNotice: string | undefined;
+  /**
+   * #647: the platform refused to keep this ride alive — on Android, the
+   * recording service did not start — so the ride records but may be stopped
+   * if the screen goes off. The Ride screen and the game's HUD show
+   * {@link RIDE_MAY_STOP_WITH_SCREEN_OFF} while it is `true`.
+   *
+   * Raised only by a REFUSAL (a rejected or thrown `keepRideAlive`) on the
+   * ride in progress; cleared by the next `keepRideAlive` that resolves on the
+   * same ride, and by the ride ending. What asks again is
+   * {@link RideController.pair} succeeding and a granted notification (#526) —
+   * `syncKeepAlive` says why those two.
+   */
+  readonly keepAliveFailed: boolean;
 }
 
 /**
@@ -408,6 +421,40 @@ export const RIDE_NOTIFICATION_REFUSED =
   'Your ride is still recording. Android will not show its “Recording ride” notification, because notifications are not allowed for On Your Left. You can allow them in the app’s settings.';
 
 /**
+ * #647 — what a rider is told while the ride may be stopped with the screen
+ * off ({@link RideSnapshot.keepAliveFailed}). The label says what to do and
+ * the sentence says why; neither carries a cause or an error, because the
+ * rider can act on "keep the screen on" and on nothing else.
+ *
+ * ⚠️ **A safety sentence, so it is never behind a disclosure** — the owner's
+ * ruling on #654's re-review of #647. It is short so that it fits where it is
+ * shown: beside the Live heading on the Ride screen and in the HUD's notice cell
+ * (`ride.browser.spec.ts` and `rideview.browser.spec.ts` §"#647" measure both).
+ *
+ * ⚠️ **Shortened for the HUD's notice cell at 360 px** — #693's re-review,
+ * B2. It used to be *"your ride may stop if the screen goes off."*, and beside
+ * *Eased* (#585) the cell ended 38 px above the leaning rider's box at 360×752
+ * in the pinned Chromium on a Mac, under #605's 50 px floor. Neither notice may
+ * be put away, so the sentence got shorter: *"it"* is the screen the label has
+ * just named. It is ONE line there on a Mac and still TWO on the CI runner,
+ * whose fonts are wider — so on the runner the clearance comes from the cell's
+ * tighter padding (`theme.css` §"Two notices in the one cell") rather than
+ * from the sentence. `ride.browser.spec.ts` §"keep the screen on, beside every
+ * notice that stays" publishes the clearance.
+ */
+export const KEEP_SCREEN_ON_LABEL = 'Keep the screen on';
+
+/** @see KEEP_SCREEN_ON_LABEL */
+export const RIDE_MAY_STOP_WITH_SCREEN_OFF = 'your ride may stop without it.';
+
+/**
+ * The same, as the ride's one announcement region says it (#647) — the label
+ * and the sentence, once, when the notice appears. `game/hud/announce.ts`
+ * §`screen-off-risk`.
+ */
+export const RIDE_MAY_STOP_SPOKEN = `${KEEP_SCREEN_ON_LABEL}: ${RIDE_MAY_STOP_WITH_SCREEN_OFF}`;
+
+/**
  * What a rider who sets an ERG target by hand during a workout is told (#542's
  * review). It names what to do instead.
  *
@@ -452,6 +499,9 @@ function forgottenButStillListed(name: string): string {
 
 /** Why a game ride's gradient is refused while its trainer is being let go. */
 const TRAINER_BEING_FORGOTTEN = 'the trainer is being forgotten';
+
+/** Why a game's gradient is refused once the controller has let go (#695). */
+const RIDE_CONTROLLER_DISPOSED = 'the ride controller has let the trainer go';
 
 /**
  * What a finished ride needs to become an activity — #14's fourth criterion,
@@ -710,7 +760,16 @@ export interface RideController {
    * samples with.
    */
   tickNow(): Promise<void>;
-  /** Unsubscribe from everything. Does not stop or discard a recording. */
+  /**
+   * Unsubscribe from everything. Does not stop or discard a recording.
+   *
+   * #695: a trainer this app holds is let go first, through the one release
+   * (an FTMS Stop, joined with any already in flight), and a running workout
+   * is ended. Returns at once. Readings stop at once and every command finds
+   * no trainer from then on; the rest of each sensor is detached when that
+   * release settles, whichever way it went, so the Stop reaches the wire
+   * before the client is closed. Idempotent.
+   */
   dispose(): void;
 }
 
@@ -718,6 +777,12 @@ interface SensorEntry {
   readonly device: SensorDevice;
   readonly role: PairingRole;
   readonly release: Unsubscribe[];
+  /**
+   * The measurement subscriptions, apart from {@link release} — #695's
+   * review. `dispose` drops these at once, and keeps the connection-state
+   * observer and `onControlLost` until its release settles.
+   */
+  readonly measurements: Unsubscribe[];
   state: ConnectionState;
   trainer: TrainerConnection | undefined;
   /** What the machine offers, whether or not this app will drive it (#370). */
@@ -788,6 +853,8 @@ export function createRideController(options: RideControllerOptions): RideContro
   let keepAliveGeneration = 0;
   /** @see RideSnapshot.notificationNotice */
   let notificationNotice: string | undefined;
+  /** @see RideSnapshot.keepAliveFailed */
+  let keepAliveFailed = false;
 
   /**
    * #526 — ask for `POST_NOTIFICATIONS` at most once, BESIDE the first ride's
@@ -844,8 +911,9 @@ export function createRideController(options: RideControllerOptions): RideContro
         return;
       }
       if (answer === 'granted') {
-        // Re-start so the service posts the notification it could not.
-        await keepAlive.keepRideAlive();
+        // Re-start so the service posts the notification it could not — and,
+        // #647, so a service that was refused gets another chance.
+        askToKeepAlive(keepAlive, generation);
         return;
       }
       notificationNotice = RIDE_NOTIFICATION_REFUSED;
@@ -857,8 +925,10 @@ export function createRideController(options: RideControllerOptions): RideContro
 
   /**
    * Call a keep-alive method and let neither of its failures reach the ride —
-   * #524's third criterion. `.catch` on the returned promise is not enough on
-   * its own: a port that throws BEFORE it returns a promise would throw out of
+   * #524's third criterion. Since #647 only `letRideSleep` comes through here:
+   * a refused `keepRideAlive` is recorded by {@link askToKeepAlive} instead.
+   * `.catch` on the returned promise is not enough on its own: a port that
+   * throws BEFORE it returns a promise would throw out of
    * {@link changed}, which is inside `start()` and `confirmStop()`, and so fail
    * a ride because a notification could not be posted. `controller.test.ts`
    * §"#524" holds both halves.
@@ -869,6 +939,88 @@ export function createRideController(options: RideControllerOptions): RideContro
     } catch {
       // Degraded, not broken: the ride records without the service.
     }
+  };
+
+  /**
+   * Ask the platform to keep this ride alive, and record whether it would —
+   * #647. Until #647 the answer went to {@link quietly} and nowhere else, so a
+   * ride running WITHOUT its foreground service looked exactly like one with
+   * it, and the rider was not told that turning the screen off might end it.
+   *
+   * Still never thrown into the ride (#524's third criterion): a refusal is a
+   * flag on the snapshot, a sentence on two screens and one announcement, and
+   * the ride records either way.
+   *
+   * ⚠️ **Only an answer for THIS ride moves the flag.** Every way into or out
+   * of a ride bumps the generation, so a refusal arriving after the ride
+   * stopped cannot put a notice on the next one, and a late success cannot
+   * clear a later ride's.
+   *
+   * ⚠️ **A hang leaves the flag down.** The port's contract is a promise that
+   * settles; `RecordingServicePlugin.java` §`start` resolves or rejects
+   * synchronously on the main thread, and nothing it does waits on the rider.
+   * A promise that never settled would say nothing either way — this does not
+   * guess, because a notice that the service failed when it may have started
+   * is a false sentence on the one screen a rider trusts mid-ride.
+   *
+   * ⚠️ **A throw before the promise is a refusal too.** From
+   * {@link syncKeepAlive} the flag is raised synchronously and nothing else,
+   * because that caller is already inside {@link changed} and a second
+   * `changed()` would re-enter it. From anywhere else — the re-ask after a
+   * granted notification, the re-ask after a pairing — it goes through
+   * `answered`, which publishes it: #693's review found the re-ask after a
+   * granted notification raising the flag on a snapshot nobody rebuilt.
+   */
+  const askToKeepAlive = (
+    keepAlive: RideKeepAlivePort,
+    generation: number,
+    insideChanged = false,
+  ): void => {
+    const sameRide = (): boolean => generation === keepAliveGeneration;
+    const answered = (failed: boolean): void => {
+      if (!sameRide() || keepAliveFailed === failed) {
+        return;
+      }
+      keepAliveFailed = failed;
+      changed();
+    };
+    let asked: Promise<void>;
+    try {
+      asked = keepAlive.keepRideAlive();
+    } catch {
+      // Degraded, not broken: the ride records without the service.
+      if (insideChanged) {
+        keepAliveFailed = true;
+      } else {
+        answered(true);
+      }
+      return;
+    }
+    asked.then(
+      () => {
+        answered(false);
+      },
+      () => {
+        answered(true);
+      },
+    );
+  };
+
+  /**
+   * #647: ask again, on this ride, for a service that was refused — called
+   * where the refusal's likeliest cause has just gone away. On Android 14+
+   * `RecordingServicePlugin.java` refuses the service while the Bluetooth
+   * permission is not granted, and a rider may press Start before pairing
+   * anything, which is before anything asked for it; a sensor paired since is
+   * that permission granted. Nothing is asked when nothing failed, and nothing
+   * outside a ride in progress.
+   */
+  const askAgainIfRefused = (): void => {
+    const keepAlive = options.keepAlive;
+    if (!keepAliveFailed || !keptAlive || keepAlive === undefined) {
+      return;
+    }
+    askToKeepAlive(keepAlive, keepAliveGeneration);
   };
 
   /**
@@ -901,10 +1053,12 @@ export function createRideController(options: RideControllerOptions): RideContro
     if (!wanted) {
       // #526: told on the ride that asked, and not carried into the next.
       notificationNotice = undefined;
+      // #647: the same — a ride that has ended has nothing to keep alive.
+      keepAliveFailed = false;
       quietly(() => keepAlive.letRideSleep());
       return;
     }
-    quietly(() => keepAlive.keepRideAlive());
+    askToKeepAlive(keepAlive, generation, true);
     const permission = options.notificationPermission;
     if (permission !== undefined) {
       void askAboutTheNotification(permission, keepAlive, generation);
@@ -1092,6 +1246,7 @@ export function createRideController(options: RideControllerOptions): RideContro
           [...sensors.values()].filter((entry) => entry.state === 'connected').length,
       ),
       notificationNotice,
+      keepAliveFailed,
     };
   };
 
@@ -1162,6 +1317,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       device,
       role,
       release: [],
+      measurements: [],
       state: transport.connectionState(id),
       trainer: undefined,
       controlChoice: NO_TRAINER_CONTROL,
@@ -1214,7 +1370,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       if (capability === 'trainer-control') {
         continue;
       }
-      entry.release.push(await transport.subscribe(id, capability, onMeasurement));
+      entry.measurements.push(await transport.subscribe(id, capability, onMeasurement));
     }
 
     if (entry.role === 'trainer' && openTrainer !== undefined) {
@@ -1265,6 +1421,10 @@ export function createRideController(options: RideControllerOptions): RideContro
    * rather than sending a second. A hand-set target and a game ride's
    * gradient are let go by the same call — `releaseTrainer` ends the first,
    * and {@link leaving} refuses the second's further writes.
+   *
+   * Since #695 `dispose` lets its trainer go through this too, for the same
+   * reasons and in the same order; it ignores the answer, because a disposed
+   * controller has nobody left to tell.
    */
   const letGoBeforeForgetting = async (entry: SensorEntry): Promise<boolean> => {
     const client = entry.trainer?.control;
@@ -1289,7 +1449,15 @@ export function createRideController(options: RideControllerOptions): RideContro
     }
   };
 
+  /** Stop listening to a sensor's readings. Idempotent. */
+  const unsubscribeMeasurements = (entry: SensorEntry): void => {
+    for (const release of entry.measurements.splice(0)) {
+      release();
+    }
+  };
+
   const detach = (entry: SensorEntry): void => {
+    unsubscribeMeasurements(entry);
     for (const release of entry.release.splice(0)) {
       release();
     }
@@ -1542,6 +1710,8 @@ export function createRideController(options: RideControllerOptions): RideContro
           return;
         }
         await attach(device, role);
+        // #647: a sensor that paired is a Bluetooth permission granted.
+        askAgainIfRefused();
       } catch (error) {
         pairingError = describe(error);
         changed();
@@ -1927,6 +2097,13 @@ export function createRideController(options: RideControllerOptions): RideContro
       }
       return {
         setSimulationParameters: (parameters) => {
+          // #695: after `dispose`, whose release outlives this call. Checked
+          // BEFORE `leaving`, because a dispose lets the trainer go through
+          // `letGoBeforeForgetting` too and nothing is being forgotten — the
+          // reason has to say what actually happened (#695's review).
+          if (disposed) {
+            return Promise.reject(new Error(RIDE_CONTROLLER_DISPOSED));
+          }
           // #659's review: the trainer is being let go so it can be
           // forgotten, and a gradient after that Stop would take it back.
           if (leaving.has(client)) {
@@ -1996,11 +2173,65 @@ export function createRideController(options: RideControllerOptions): RideContro
       disposed = true;
       // #524: the controller that asked for the service is gone.
       syncKeepAlive();
-      for (const entry of sensors.values()) {
-        detach(entry);
-      }
+      // #695: a held trainer is let go through the ONE release BEFORE anything
+      // is detached. `detach` closes the client, `close()` writes nothing, and
+      // a Stop still queued behind it is refused as "not connected" — so a
+      // dispose that detached first sent no Stop, and one that detached while
+      // a Stop was already on the wire (Stop pressed, then disposed) cut that
+      // one off too. `letGoBeforeForgetting` ends a running workout (whose
+      // session releases through `releaseTrainer`), joins a release already in
+      // flight rather than sending a second, ends a hand-set target and its
+      // rescue (`releaseTrainer` does), sends nothing when nothing is held, and
+      // never rejects.
+      //
+      // ⚠️ Synchronous, fire-and-forget: the release is started here and each
+      // sensor is detached only once it SETTLES, so `close()` cannot cut the
+      // Stop off.
+      //
+      // ⚠️ **Detaching late does NOT keep anything else off the wire, and a
+      // reader who takes it to is reading it backwards** (#695's review,
+      // measured with the Stop's answer held back): a procedure queued behind
+      // the Stop runs BEFORE the settled release reaches `detach` and
+      // `close()`, so a target, a Request Control or a rescue's 0x05 queued in
+      // that window would land after the Stop. What keeps them off is, in
+      // order: `sensors.clear()` below, so every controller command from here
+      // on finds no trainer (`setTargetPower`, `requestTrainerControl`,
+      // `startWorkout`); `releaseTrainer`'s own `endManualErg`, which ends a
+      // hand-set target's rescue before the Stop is queued; and `disposed`
+      // and `leaving`, which refuse a game's gradient handle — it holds the
+      // client itself and never looks in the sensor map.
+      const entries = [...sensors.values()];
+      const trainer = trainerEntry();
+      const released =
+        trainer === undefined ? Promise.resolve(true) : letGoBeforeForgetting(trainer);
       sensors.clear();
       listeners.clear();
+      // The readings stop now (#695's review): a disposed controller must not
+      // go on feeding its recorder, moving its phase or announcing changes for
+      // up to a procedure timeout per queued write — and a rescue gets no new
+      // cadence to judge. The connection-state observer and `onControlLost`
+      // stay until the release settles, exactly as for any other release: the
+      // first so a link that drops mid-Stop rejects it rather than leaving it
+      // waiting, the second so the Stop runs against the same listeners the
+      // 0xFF-before-the-answer test pins.
+      for (const entry of entries) {
+        unsubscribeMeasurements(entry);
+      }
+      void released
+        .catch(() => false)
+        .then(() => {
+          // Each entry on its own (#695's review): a transport whose
+          // unsubscribe throws, or a `close()` that does, must not leave the
+          // entries after it attached, nor surface as an unhandled rejection.
+          for (const entry of entries) {
+            try {
+              detach(entry);
+            } catch {
+              // Nobody is left to tell; the next entry still lets go.
+            }
+          }
+        })
+        .catch(() => undefined);
     },
   };
 

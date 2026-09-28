@@ -13,14 +13,13 @@
  *
  * ## Why this is a `*-port.ts`
  *
- * CLAUDE.md §4j: the suffix makes both methods `WIRE003` targets. ⚠️ **That
- * is weaker for `keepRideAlive` than it reads, measured rather than assumed**:
- * the controller calls it in TWO places — `syncKeepAlive`, which is the one
- * that matters, and `askAboutTheNotification`'s re-start after a granted
- * notification (#526). Deleting the first call alone leaves `check:wiring`
- * GREEN, because the second still names it; what goes red is
- * `ride/controller.test.ts` §"#524" and §"#526". Deleting `letRideSleep`'s one
- * call is a red `WIRE003`.
+ * CLAUDE.md §4j: the suffix makes both methods `WIRE003` targets. Since #647
+ * the controller calls `keepRideAlive` in ONE place, `askToKeepAlive`, which
+ * `syncKeepAlive`, a granted notification (#526) and a sensor pairing mid-ride
+ * all go through — so deleting that call is a red `WIRE003`. ⚠️ Deleting one
+ * of the three CALLERS of `askToKeepAlive` is not: what goes red then is
+ * `ride/controller.test.ts` §"#524", §"#526" and §"#647". Deleting
+ * `letRideSleep`'s one call is a red `WIRE003`.
  *
  * **The provider half** used to be the §Limits case: `main.tsx` handed the
  * Android implementation to `createRideController` as an optional option, and
@@ -32,11 +31,17 @@
  *
  * ## ⚠️ Neither method may throw into the ride
  *
- * The controller calls these fire-and-forget and swallows a rejection. A ride
- * recorded without the service is a DEGRADED ride — it may be cut short if the
- * phone reclaims the process — not a broken one, and refusing to record because
- * a notification could not be posted would turn a background risk into a
- * certain loss.
+ * The controller calls these fire-and-forget. A ride recorded without the
+ * service is a DEGRADED ride — it may be cut short if the phone reclaims the
+ * process — not a broken one, and refusing to record because a notification
+ * could not be posted would turn a background risk into a certain loss.
+ *
+ * ⚠️ **Since #647 a refused `keepRideAlive` is not swallowed silently.** It
+ * still never reaches the ride, but it is `RideSnapshot.keepAliveFailed`, and
+ * the Ride screen and the game's HUD tell the rider to keep the screen on.
+ * A REJECTION (or a throw) is what means "refused"; a promise that never
+ * settles is read as nothing either way. `RecordingServicePlugin.java` §`start`
+ * settles at once on both paths, so no bound is put on it here.
  */
 
 /** The two calls a ride makes, on the transitions into and out of riding. */
