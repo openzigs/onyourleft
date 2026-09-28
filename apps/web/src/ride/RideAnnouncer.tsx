@@ -88,6 +88,7 @@ import {
 import {
   deviceStorage,
   readAnnouncementPreference,
+  type AnnouncementPreference,
   type PreferenceStorage,
 } from '../game/hud/announce-preference';
 
@@ -134,6 +135,15 @@ export interface RideAnnouncerProps {
   readonly keepAliveFailed?: boolean | undefined;
   /** Where the rider's announcement choice is read from. This device's, by default. */
   readonly storage?: PreferenceStorage | undefined;
+  /**
+   * The rider's announcement choice, already read — #740. The Ride screen
+   * reads it ONCE and hands the same object here and to the ERG form, which
+   * answers a held *Set* only when this region does not (#655). Read twice,
+   * the two agreed only because both happened to read this device's storage
+   * in one mount pass; handed down, they agree by construction. Read from
+   * {@link storage} only where nothing is handed in.
+   */
+  readonly preference?: AnnouncementPreference | undefined;
   /**
    * Told the kind of every event as it HAPPENS — the moment it is handed to
    * the announcer, whether or not it then wins the 3 s window. #400's interval
@@ -268,6 +278,7 @@ export function RideAnnouncer({
   sideCamera,
   keepAliveFailed = false,
   storage,
+  preference: handed,
   onEvent,
   clock,
 }: RideAnnouncerProps): JSX.Element {
@@ -275,8 +286,8 @@ export function RideAnnouncer({
   const [said, setSaid] = useState({ text: '', count: 0 });
   // Read once, when the screen appears: a preference is a setting, not a live
   // value, and a rider changes it on Settings rather than mid-interval.
-  const [preference] = useState(() =>
-    readAnnouncementPreference(storage === undefined ? deviceStorage() : storage),
+  const [preference] = useState(
+    () => handed ?? readAnnouncementPreference(storage === undefined ? deviceStorage() : storage),
   );
   const announcer = useRef<AnnouncerState>(INITIAL_ANNOUNCER);
   const seen = useRef<Seen>(seenIn(trainer, workout, sideCamera, keepAliveFailed));

@@ -162,10 +162,11 @@ function LiveRide({
   const snapshot = useRideSnapshot(controller);
   const thresholdPower = useThresholdPower(analysis);
   const sideCamera = useSideCamera(sidePairing);
-  // #655: read once, at mount, from the device — as `RideAnnouncer` reads it
-  // (`WorkoutPanel` hands it no other storage here), so the two agree on
-  // which of them answers a held *Set*.
-  const [announcementsOn] = useState(() => readAnnouncementPreference(deviceStorage()).enabled);
+  // #655: which of two voices answers a held *Set* — the ERG form's, or the
+  // ride's one region. ⚠️ Read ONCE, here, and the same object handed to
+  // both (#740): until then `RideAnnouncer` read it again for itself, and the
+  // two agreed only because both read this device's storage in one mount pass.
+  const [announcements] = useState(() => readAnnouncementPreference(deviceStorage()));
 
   // ⚠️ On mount, because #212's whole point is that a rider who lost a tab is
   // *told* — the recording was always on the device and nothing looked for it.
@@ -276,7 +277,7 @@ function LiveRide({
           workoutOwnsTarget={snapshot.workout !== undefined}
           // #655: which voice answers a held *Set* — the form's, or the
           // ride's one region. Read where `RideAnnouncer` reads it.
-          announcementsOn={announcementsOn}
+          announcementsOn={announcements.enabled}
         />
         <WorkoutPanel
           trainer={snapshot.trainer}
@@ -290,6 +291,8 @@ function LiveRide({
           sideCamera={sideCamera.state}
           // #647: …and, once, that the ride may stop if the screen goes off.
           keepAliveFailed={snapshot.keepAliveFailed}
+          // #740: the choice read above, so the region and the ERG form agree.
+          announcementPreference={announcements}
           onStart={(record) => {
             // ⚠️ Guarded rather than defaulted. The panel does not render a Start
             // control without a threshold, so this is unreachable through the UI
