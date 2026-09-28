@@ -245,6 +245,19 @@ export interface TrainerSnapshot {
    * half — what the rider asked for, and why it is not on the machine.
    */
   readonly ergRescue: ManualErgRescue | undefined;
+  /**
+   * The answer to a *Set* the rescue DEFERRED — #655. {@link ergRescue}'s
+   * `pending` says what is waiting; this says that the rider's last press is
+   * what put it there, and `press` counts presses, so a second *Set* of the
+   * same number is a second answer rather than no change. `undefined` once the
+   * rescue hands back (the target is then written, and "held" would be false),
+   * and once the pending target is another one.
+   *
+   * ⚠️ **A statement about the screen's answer and nothing else**: it is set
+   * after the manual writer has already decided not to write, and nothing
+   * reads it on the way to the trainer.
+   */
+  readonly ergHeld: { readonly target: Watts; readonly press: number } | undefined;
 }
 
 /** A metric and what the screen may say about it. */
@@ -995,6 +1008,9 @@ export function createRideController(options: RideControllerOptions): RideContro
   let workout: WorkoutInProgress | undefined;
   let refusal: string | undefined;
   let releaseFault: string | undefined;
+  /** The last *Set* the rescue deferred, and how many it has deferred. @see TrainerSnapshot.ergHeld */
+  let held: { readonly target: Watts; readonly press: number } | undefined;
+  let heldPresses = 0;
   /**
    * The hand-set ERG target and its stall rescue (#567), with the control it
    * was built on — a re-paired trainer is a different control, and a writer
@@ -1732,6 +1748,9 @@ export function createRideController(options: RideControllerOptions): RideContro
         refusal,
         releaseFault,
         ergRescue: manual?.erg.rescue(),
+        // #655: only while that press is still what the rescue is holding.
+        ergHeld:
+          held !== undefined && manual?.erg.rescue()?.pending === held.target ? held : undefined,
       },
       storage: recorder?.storageState ?? 'ok',
       saveState,
@@ -2823,6 +2842,11 @@ export function createRideController(options: RideControllerOptions): RideContro
         const outcome = await manualErgFor(client, connection).set(target);
         if (outcome.kind === 'failed') {
           refusal = describe(outcome.error);
+        } else if (outcome.kind === 'deferred') {
+          // #655: the press is answered. Nothing is written here — the writer
+          // has already kept it as the pending target.
+          heldPresses += 1;
+          held = { target, press: heldPresses };
         }
       } finally {
         // Cleared whichever way it went. On success the client's own

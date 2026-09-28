@@ -89,7 +89,7 @@ import {
   resolvedInsets,
   type Insets,
 } from './insets';
-import type { RideViewControl, RideViewMeasurement } from './rideview-harness';
+import type { RideViewControl, RideViewMeasurement, RideViewNotice } from './rideview-harness';
 
 import { RIDE_TIME_TARGET_PIXELS } from '../src/design/ride-time-controls';
 
@@ -492,19 +492,16 @@ function foldMargin(bottom: number, viewport: Viewport): number {
 /**
  * #605's review: the four TABLETS are all landscape, where *Pause* and *Stop*
  * sit in another column from the trainer group — so "opening the detail moves
- * no control" was partly true by construction. The upright tablet is the one
- * layout where they share a column with the notice, so it is measured too.
+ * no control" was partly true by construction. The upright tablet was then the
+ * one layout where they shared a column with the notice, so it is measured too.
  *
- * ⚠️ **What that measured, said plainly.** Upright, the live group stacks
- * ABOVE the trainer group, and the notice is the last control-bearing thing
- * in the page — so there too nothing that can move sits below it, and "moves
- * no control" holds by the ORDER. What the case guards is that order: putting
- * *End workout* back after the notice (as #585 shipped it) turns it red here
- * as at the landscape sizes, and the fold case with it. The upright notice's
- * margin to the fold is the smallest of the five, and its figure is the one
- * #669's larger controls spent: *Pause* / *Stop* and *End workout* sit
- * above it in the same column, 4 px each at 48 px, while #669 leaves the
- * disclosure's summary alone. Published, and held to the floor.
+ * ⚠️ **Since #692 the upright tablet is two columns as well**, and a reviewer
+ * who remembers the live group stacked over the trainer group there is reading
+ * the old file: nothing in the live column can move the trainer column now, at
+ * any size. What #605's review measured upright — the order, *End workout*
+ * before the notice — is held by the four landscape controls below, because
+ * upright it is 300 px clear either way and a control there cannot fail. The
+ * cases that hold margins still run upright, and publish them.
  */
 const EASED_VIEWPORTS: readonly Viewport[] = [...TABLETS, TABLET_UPRIGHT_IN_THE_SHELL];
 
@@ -578,29 +575,12 @@ for (const viewport of EASED_VIEWPORTS) {
       expect(controlMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
       expect(noticeMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
 
-      // #605's re-review. Upright, the ERG line — the target sentence and the
-      // refusal after it — sits above the notice in the same column, so every
-      // line it wraps to is a line off the notice's margin. It is held to ONE.
-      // `controller.ts` §`MANUAL_ERG_DURING_WORKOUT` says why it is as short as
-      // it is: the reviewer's longer wording wraps on the runner's fonts.
-      if (viewport.height > viewport.width) {
-        const erg = await page.evaluate(() => {
-          const line = document.querySelector('.oyl-trainer__erg');
-          if (line === null) return undefined;
-          return {
-            height: line.getBoundingClientRect().height,
-            lineHeight: Number.parseFloat(window.getComputedStyle(line).lineHeight),
-            text: (line.textContent ?? '').replace(/\s+/g, ' '),
-          };
-        });
-        expect(erg?.text).toBe(
-          'ERG, optional: Holding 250 W. End the workout to set a target by hand.',
-        );
-        expect(
-          erg?.height ?? Infinity,
-          `the ERG line wraps: ${String(erg?.height)} px`,
-        ).toBeLessThan(1.5 * (erg?.lineHeight ?? 0));
-      }
+      // ⚠️ #605's re-review held the ERG line above this notice to ONE line
+      // upright, because in one column every line it wrapped to came off the
+      // notice's margin. Since #692 the upright tablet is two columns and the
+      // notice is 500 px clear of the fold, so what that rule protected is
+      // the assertion above, and it is held directly. A reviewer who
+      // remembers the one-line check is reading the old file.
       expect((seen.eased?.box.top ?? -1) >= insetsOf(viewport).top).toBe(true);
     });
 
@@ -637,29 +617,35 @@ for (const viewport of EASED_VIEWPORTS) {
       // would be a bound on this machine's fonts.
     });
 
-    test('the control — as #585 shipped it, End workout is under the floor', async ({
-      page,
-    }, testInfo) => {
-      await open(page, viewport, EASED);
-      await page.evaluate(() => {
-        window.__oylRideView?.restoreAsShipped();
-      });
-      const seen = await measure(page);
+    // ⚠️ Landscape only since #692. Upright, the trainer group is its own
+    // column now, so *End workout* last is still 300 px clear of the fold
+    // there and the control cannot fail; the ORDER it guards is the same
+    // component at every size, and the four landscape tablets hold it.
+    if (viewport.width > viewport.height) {
+      test('the control — as #585 shipped it, End workout is under the floor', async ({
+        page,
+      }, testInfo) => {
+        await open(page, viewport, EASED);
+        await page.evaluate(() => {
+          window.__oylRideView?.restoreAsShipped();
+        });
+        const seen = await measure(page);
 
-      expect(seen.eased?.text).toContain('Press End workout to leave it.');
-      expect(seen.eased?.open).toBe(false);
-      const end = seen.controls.find((each) => each.name === 'End workout');
-      expect(end?.box.height ?? 0).toBeGreaterThan(0);
-      const margin = foldMargin(end?.box.bottom ?? -Infinity, viewport);
-      testInfo.annotations.push({
-        type: 'control, End workout margin',
-        description: `${margin.toFixed(1)} px`,
+        expect(seen.eased?.text).toContain('Press End workout to leave it.');
+        expect(seen.eased?.open).toBe(false);
+        const end = seen.controls.find((each) => each.name === 'End workout');
+        expect(end?.box.height ?? 0).toBeGreaterThan(0);
+        const margin = foldMargin(end?.box.bottom ?? -Infinity, viewport);
+        testInfo.annotations.push({
+          type: 'control, End workout margin',
+          description: `${margin.toFixed(1)} px`,
+        });
+        console.log(
+          `workout eased, as #585 shipped it — ${viewport.name} — End workout ${margin.toFixed(1)} px`,
+        );
+        expect(margin).toBeLessThan(FOLD_MARGIN_PIXELS);
       });
-      console.log(
-        `workout eased, as #585 shipped it — ${viewport.name} — End workout ${margin.toFixed(1)} px`,
-      );
-      expect(margin).toBeLessThan(FOLD_MARGIN_PIXELS);
-    });
+    }
   });
 }
 
@@ -671,12 +657,9 @@ for (const viewport of EASED_VIEWPORTS) {
  *
  * What is held: the sentence is whole, on the screen, uncovered and in no
  * `<details>` (the owner's ruling on #654's re-review — it is a safety
- * sentence); every ride control is still on the screen; and at every tablet
- * BOTH the notice's own bottom and *Pause* / *Stop* clear
- * {@link FOLD_MARGIN_PIXELS} — landscape, every ride control does. ⚠️ Until
- * #669 merged this also ran with every live and trainer button held to 48 px
- * as a what-if in the harness; #669's 48 px ride controls are what ships now,
- * so the what-if is gone and "as shipped" is that layout.
+ * sentence); every ride control is still on the screen; and at every tablet,
+ * both ways up, the notice's own bottom and EVERY ride control clear
+ * {@link FOLD_MARGIN_PIXELS}.
  *
  * ⚠️ **The notice's floor is §4f's 50 px and it was 0 until #693's review**,
  * and a reviewer who remembers the notice being "bounded only by being on the
@@ -685,26 +668,20 @@ for (const viewport of EASED_VIEWPORTS) {
  * in the shell and 3.7 px at 1024×720, so the safety sentence #647 exists to
  * show was unproven on the owner's own tablet by §4f's own rule.
  *
- * Upright, the live group is stacked over the trainer's, and the lowest ride
- * control is the workout chooser: there the floor is held on *Pause* /
- * *Stop* and on the notice, and the chooser's margin is published and held to
- * be on the screen. Beside the heading the notice is one line upright and
- * costs the chooser its height less the heading's; #692 is the room a
- * standing notice needs there. The chooser's own floor is held since #669, by
- * §"#669 — the workout chooser" below.
- *
- * ⚠️ **Two controls, and they fail for different reasons.** Put back UNDER
- * *Pause* / *Stop* — the review's finding — the notice's own margin must fall
- * under the floor at the in-shell tablets; moved ABOVE them, where
- * `notificationNotice` sits, *Pause* must. Without the first, a green run could
- * be a layout where the heading did nothing; without the second, one where the
- * notice was never measured against the controls at all.
+ * ⚠️ **Since #692 upright holds every ride control, not only *Pause* /
+ * *Stop*,** and a reviewer who remembers the workout chooser published and
+ * not held here is reading the old file: that was #692, and the trainer
+ * group is its own column upright now. ⚠️ And **#647's two controls are
+ * gone** — the notice moved under *Pause* / *Stop*, and above them — because
+ * since #692 *Pause* / *Stop* come straight after the Live heading, and a
+ * 51 px notice either side of them leaves both 350 px clear of the fold: a
+ * control that cannot fail. §"#692" below carries the control for the
+ * arrangement that replaced them.
  */
 const KEEP_ALIVE_FAILED = '?keepalive=failed';
 const KEEP_SCREEN_ON_TEXT = '!Keep the screen on: your ride may stop without it.';
 
 for (const viewport of EASED_VIEWPORTS) {
-  const upright = viewport.height > viewport.width;
   test.describe(`a ride that may stop with the screen off — #647 — ${viewport.name}`, () => {
     test('the notice is there, whole, and in no disclosure — and absent without the refusal', async ({
       page,
@@ -719,105 +696,312 @@ for (const viewport of EASED_VIEWPORTS) {
       expect((await measure(page)).keepScreenOn).toBeUndefined();
     });
 
-    {
-      // #669: the ride controls ARE 48 px now, so the what-if this loop ran
-      // beside the shipped layout is the shipped layout.
-      const what = 'as shipped, with #669’s 48 px ride controls';
-      test(`the notice${upright ? ', Pause and Stop clear' : ' and every ride control clear'} the fold by a margin — ${what}`, async ({
+    test('the notice and every ride control clear the fold by a margin', async ({
+      page,
+    }, testInfo) => {
+      await open(page, viewport, KEEP_ALIVE_FAILED);
+      const seen = await measure(page);
+
+      expect(seen.scrollY).toBe(0);
+      const during = seen.controls.filter((each) => each.group !== 'sensors');
+      expect(during.map((each) => each.name)).toEqual(expect.arrayContaining(['Pause', 'Stop']));
+      // The apparatus: Pause is the height #669 gives it, so the margins
+      // below are taken over the controls a rider gets.
+      const pause = during.find((each) => each.name === 'Pause');
+      expect(pause?.box.height ?? 0).toBeGreaterThanOrEqual(
+        RIDE_TIME_TARGET_PIXELS - SUBPIXEL_TOLERANCE,
+      );
+      expect(during.filter((each) => !onScreen(each, viewport)).map(describeControl)).toEqual([]);
+      const notice = seen.keepScreenOn;
+      expect(notice?.onTop).toBe(true);
+      expect((notice?.box.top ?? -1) >= insetsOf(viewport).top).toBe(true);
+
+      const lowest = lowestOf(during);
+      const controlMargin = foldMargin(lowest.box.bottom, viewport);
+      const noticeMargin = foldMargin(notice?.box.bottom ?? Infinity, viewport);
+      const note =
+        `lowest control ${controlMargin.toFixed(1)} px (${describeControl(lowest)}); ` +
+        `the notice ${noticeMargin.toFixed(1)} px, ${(notice?.box.height ?? 0).toFixed(0)} px tall ` +
+        `— at ${String(viewport.width)}×${String(viewport.height)}`;
+      testInfo.annotations.push({
+        type: 'keep the screen on, margin to the fold',
+        description: note,
+      });
+      console.log(`keep the screen on, margin to the fold — ${viewport.name} — ${note}`);
+
+      expect(noticeMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+      expect(controlMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+    });
+  });
+}
+
+/**
+ * #692 — room for a standing notice at in-shell tablet sizes.
+ *
+ * ## What was wrong, measured
+ *
+ * A standing notice is one that stays for the rest of a ride: #647's *Keep
+ * the screen on*, #526's *No notification* (Android only — the platform this
+ * app ships to a tablet on), the recorder's *Device full* or *Save failed*,
+ * #551's lost side camera, #605's *Eased*. Measured in the pinned Chromium on a
+ * Mac before #692, each alone:
+ *
+ *   1280×800 in the shell   *No notification*   *Pause* −77.9 px, UNDER the fold
+ *   1024×720                *No notification*   *Pause* −65.1 px, UNDER the fold
+ *   800×1280 upright        *Save failed*       the workout's *Ride* −11.5 px
+ *   800×1280 upright        *No notification*   the workout's *Ride* −36.3 px
+ *
+ * None of those states had ever been rendered by this gate. *No notification*
+ * stood ABOVE *Pause* (`RideView.tsx` §`RideControls`), where #436's review
+ * had already measured what a line there costs; and upright the Live group was
+ * stacked over the trainer group, so anything the Live group gained — a notice,
+ * the side camera, a wrapped clock — came off the workout chooser's margin.
+ *
+ * ## What #692 does, and the one rule under it
+ *
+ * **Nothing whose height changes during a ride sits above a ride control in
+ * its column.** Two changes make that true:
+ *
+ *   - `RideView.tsx`: in the Live group the ride controls come straight after
+ *     the heading, then the side camera (which carries a control), then the
+ *     standing notices, then the metric cards and the clock. The notices are
+ *     on the screen, high, and the metrics are what moves.
+ *   - `theme.css` §`.oyl-ride`: a tablet held upright is two columns, the
+ *     trainer BESIDE the live group, as landscape is. Width alone gave 800 px
+ *     one column; with the height a tablet upright has, two fit.
+ *
+ * #647's notice stays beside the Live heading and #605's *Eased* stays in the
+ * running workout's section, each on the screen as the owner ruled; the
+ * controls stay #669's 48 px.
+ *
+ * ## What is held, and what is only published
+ *
+ * Each standing notice alone, at every tablet, both ways up, inside the shell
+ * with the #439 insets on the engine: every ride control on the screen with no
+ * scrolling and clear of {@link FOLD_MARGIN_PIXELS}, and the notice itself on
+ * the screen, uncovered and clear of the same floor. With EVERY one of them
+ * standing at once the controls are held the same; the notices' own margins
+ * are published and held only to START on the screen — five notices at once
+ * are more sentences than a landscape tablet's column holds above its fold,
+ * and what goes past it is the last sentence, never a control. The metric
+ * cards' margin is published everywhere: they are what moves now.
+ *
+ * ⚠️ The upright insets are the landscape reading reused, not read off the
+ * device (`insets.ts`).
+ *
+ * ## The control
+ *
+ * `asBefore692()` puts the screen back as it was on the live elements — the
+ * metric cards above the controls, *No notification* above *Pause*, and one
+ * column upright — and with *No notification* standing the lowest ride control
+ * must fall under the floor at every in-shell tablet. Without it, "every
+ * control clears the fold" is as true of a page that rendered no notice.
+ */
+const STANDING_NOTICES: readonly {
+  readonly name: string;
+  readonly query: string;
+  /** The label each notice this state stands opens with. */
+  readonly labels: readonly string[];
+}[] = [
+  { name: 'keep the screen on', query: '?keepalive=failed', labels: ['Keep the screen on:'] },
+  { name: 'no notification', query: '?notification=refused', labels: ['No notification:'] },
+  { name: 'device full', query: '?storage=full', labels: ['Device full:'] },
+  { name: 'side camera lost', query: '?side=lost', labels: ['Side camera:'] },
+  { name: 'a workout eased', query: '?workout=eased', labels: ['Eased:'] },
+];
+
+const EVERY_NOTICE = {
+  name: 'every standing notice at once',
+  query: '?workout=eased&keepalive=failed&notification=refused&storage=full&side=lost',
+  labels: STANDING_NOTICES.flatMap((each) => each.labels),
+};
+
+/** Live-group notices that are not standing IN the column. @see the #692 case */
+const NOT_IN_THE_COLUMN: readonly string[] = ['Keep the screen on:', 'Side camera:'];
+
+function lowestOf(among: readonly RideViewControl[]): RideViewControl {
+  return among.reduce((low, each) => (each.box.bottom > low.box.bottom ? each : low));
+}
+
+function describeNotice(notice: RideViewNotice, viewport: Viewport): string {
+  return `${notice.label} ${foldMargin(notice.box.bottom, viewport).toFixed(1)} px (${notice.box.height.toFixed(0)} px tall)`;
+}
+
+for (const viewport of EASED_VIEWPORTS) {
+  for (const state of [...STANDING_NOTICES, EVERY_NOTICE]) {
+    const alone = state !== EVERY_NOTICE;
+    test.describe(`#692 — ${state.name} — ${viewport.name}`, () => {
+      test(`every ride control clears the fold by a margin${alone ? ', and so does the notice' : ''}`, async ({
         page,
       }, testInfo) => {
-        await open(page, viewport, KEEP_ALIVE_FAILED);
+        await open(page, viewport, state.query);
         const seen = await measure(page);
 
         expect(seen.scrollY).toBe(0);
+        // The apparatus: every notice this state stands is on the page, so
+        // the margins below are taken over a screen that has them.
+        expect(seen.notices.map((each) => each.label)).toEqual(
+          expect.arrayContaining([...state.labels]),
+        );
+
         const during = seen.controls.filter((each) => each.group !== 'sensors');
         expect(during.map((each) => each.name)).toEqual(expect.arrayContaining(['Pause', 'Stop']));
-        // The apparatus: Pause is the height #669 gives it, so the margins
-        // below are taken over the controls a rider gets.
-        const pause = during.find((each) => each.name === 'Pause');
-        expect(pause?.box.height ?? 0).toBeGreaterThanOrEqual(
-          RIDE_TIME_TARGET_PIXELS - SUBPIXEL_TOLERANCE,
-        );
-        // Upright, the controls that END a recording; landscape, every ride
-        // control. @see the note above this block
-        const held = upright
-          ? during.filter((each) => each.name === 'Pause' || each.name === 'Stop')
-          : during;
-        expect(during.filter((each) => !onScreen(each, viewport)).map(describeControl)).toEqual([]);
-        const notice = seen.keepScreenOn;
-        expect(notice?.onTop).toBe(true);
-        expect((notice?.box.top ?? -1) >= insetsOf(viewport).top).toBe(true);
+        if (state.query.includes('side=lost')) {
+          expect(during.map((each) => each.name)).toContain('Stop side camera');
+        }
 
-        const lowestOf = (among: readonly RideViewControl[]): RideViewControl =>
-          among.reduce((low, each) => (each.box.bottom > low.box.bottom ? each : low));
+        // Published BEFORE anything below is asserted, so a red run still says
+        // where every control and notice ended.
         const lowest = lowestOf(during);
-        const lowestHeld = lowestOf(held);
         const controlMargin = foldMargin(lowest.box.bottom, viewport);
-        const heldMargin = foldMargin(lowestHeld.box.bottom, viewport);
-        const noticeMargin = foldMargin(notice?.box.bottom ?? Infinity, viewport);
+        const standing = seen.notices.filter((each) => state.labels.includes(each.label));
+        const metricsMargin = foldMargin(seen.metrics?.bottom ?? Infinity, viewport);
         const note =
-          `${what}: lowest control ${controlMargin.toFixed(1)} px (${describeControl(lowest)}); ` +
-          (upright ? `Pause / Stop ${heldMargin.toFixed(1)} px; ` : '') +
-          `the notice ${noticeMargin.toFixed(1)} px, ${(notice?.box.height ?? 0).toFixed(0)} px tall ` +
+          `lowest control ${controlMargin.toFixed(1)} px (${describeControl(lowest)}); ` +
+          `${standing.map((each) => describeNotice(each, viewport)).join('; ')}; ` +
+          `the metric cards end ${metricsMargin.toFixed(1)} px above the fold ` +
           `— at ${String(viewport.width)}×${String(viewport.height)}`;
-        testInfo.annotations.push({
-          type: 'keep the screen on, margin to the fold',
-          description: note,
-        });
-        console.log(`keep the screen on, margin to the fold — ${viewport.name} — ${note}`);
+        testInfo.annotations.push({ type: '#692 margins to the fold', description: note });
+        console.log(`#692 — ${state.name} — ${viewport.name} — ${note}`);
 
-        expect(noticeMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
-        expect(heldMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
-      });
-    }
+        expect(during.filter((each) => !onScreen(each, viewport)).map(describeControl)).toEqual([]);
+        expect(controlMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
 
-    if (!upright && (viewport.insets !== undefined || viewport.height === 720)) {
-      test('the control — under Pause and Stop, the notice itself falls under the floor', async ({
-        page,
-      }, testInfo) => {
-        await open(page, viewport, KEEP_ALIVE_FAILED);
-        const before = await measure(page);
-        await page.evaluate(() => {
-          window.__oylRideView?.noticeUnderControls();
-        });
-        const after = await measure(page);
-        const noticeAt = (seen: RideViewMeasurement): number =>
-          foldMargin(seen.keepScreenOn?.box.bottom ?? Infinity, viewport);
-        const note = `the notice ${noticeAt(before).toFixed(1)} px → ${noticeAt(after).toFixed(1)} px`;
-        testInfo.annotations.push({ type: 'control, notice under Pause', description: note });
-        console.log(`keep the screen on, notice under Pause — ${viewport.name} — ${note}`);
-        expect(noticeAt(before)).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
-        expect(noticeAt(after)).toBeLessThan(FOLD_MARGIN_PIXELS);
+        // The rule itself, in the Live column: no standing notice starts above
+        // a ride control's end. Two are not standing in that column: #647's is
+        // BESIDE the heading, above everything by the owner's ruling, and the
+        // side camera's own line is the label of the control under it. ⚠️ This
+        // is what the CI runner's first run of #692 found — *No notification*
+        // still inside `RideControls`, over *Stop side camera* (66.3 px).
+        const liveControls = during.filter((each) => each.group === 'live');
+        const lowestLive = lowestOf(liveControls);
+        const above = seen.notices.filter(
+          (each) =>
+            each.group === 'live' &&
+            !NOT_IN_THE_COLUMN.includes(each.label) &&
+            each.box.top < lowestLive.box.bottom,
+        );
+        expect(
+          above.map((each) => `${each.label} starts above ${describeControl(lowestLive)}`),
+        ).toEqual([]);
+        for (const notice of standing) {
+          expect(notice.onTop, `${notice.label} is covered`).toBe(true);
+          expect(notice.box.top, `${notice.label} starts under the bars`).toBeGreaterThanOrEqual(
+            insetsOf(viewport).top - SUBPIXEL_TOLERANCE,
+          );
+          if (alone) {
+            expect(foldMargin(notice.box.bottom, viewport), note).toBeGreaterThanOrEqual(
+              FOLD_MARGIN_PIXELS,
+            );
+          } else {
+            expect(notice.box.top, `${notice.label} starts below the fold`).toBeLessThan(
+              viewport.height - insetsOf(viewport).bottom,
+            );
+          }
+        }
       });
+    });
+  }
+}
 
-      test('the control — above Pause and Stop, the notice puts them under the floor', async ({
-        page,
-      }, testInfo) => {
-        await open(page, viewport, KEEP_ALIVE_FAILED);
-        const before = await measure(page);
-        await page.evaluate(() => {
-          window.__oylRideView?.noticeAboveControls();
-        });
-        const after = await measure(page);
-        const pauseAt = (seen: RideViewMeasurement): number =>
-          seen.controls.find((each) => each.name === 'Pause')?.box.bottom ?? -Infinity;
-        const margin = foldMargin(pauseAt(after), viewport);
-        const note = `Pause ${foldMargin(pauseAt(before), viewport).toFixed(1)} px → ${margin.toFixed(1)} px`;
-        testInfo.annotations.push({ type: 'control, notice above Pause', description: note });
-        console.log(`keep the screen on, notice above Pause — ${viewport.name} — ${note}`);
-        expect(foldMargin(pauseAt(before), viewport)).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
-        expect(margin).toBeLessThan(FOLD_MARGIN_PIXELS);
+/** The in-shell tablets, where #692 was found. */
+const IN_THE_SHELL: readonly Viewport[] = [
+  TABLET_IN_THE_SHELL,
+  SMALL_TABLET_IN_THE_SHELL,
+  TABLET_UPRIGHT_IN_THE_SHELL,
+];
+
+for (const viewport of IN_THE_SHELL) {
+  test.describe(`#692 — the control — ${viewport.name}`, () => {
+    test('laid out as before #692, a standing notice puts a ride control under the floor', async ({
+      page,
+    }, testInfo) => {
+      await open(page, viewport, '?notification=refused');
+      const lowestMargin = (seen: RideViewMeasurement): { margin: number; name: string } => {
+        const lowest = lowestOf(seen.controls.filter((each) => each.group !== 'sensors'));
+        return { margin: foldMargin(lowest.box.bottom, viewport), name: lowest.name };
+      };
+      const fixed = lowestMargin(await measure(page));
+      await page.evaluate(() => {
+        window.__oylRideView?.asBefore692();
       });
-    }
+      const before = await measure(page);
+      const reverted = lowestMargin(before);
+      const note =
+        `lowest control ${fixed.margin.toFixed(1)} px (${fixed.name}) → ` +
+        `${reverted.margin.toFixed(1)} px (${reverted.name}) laid out as before #692`;
+      testInfo.annotations.push({ type: '#692 control', description: note });
+      console.log(`#692 — the control — ${viewport.name} — ${note}`);
+
+      // The apparatus: the control did rewrite the page. The metric cards are
+      // above the controls again, and upright the trainer group is under the
+      // live one again.
+      const pause = before.controls.find((each) => each.name === 'Pause');
+      expect(before.metrics?.bottom ?? Infinity).toBeLessThanOrEqual(pause?.box.top ?? -Infinity);
+      if (viewport.height > viewport.width) {
+        expect(before.groups.trainer?.top ?? 0).toBeGreaterThanOrEqual(
+          before.groups.live?.bottom ?? Infinity,
+        );
+      }
+
+      expect(fixed.margin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+      expect(reverted.margin, note).toBeLessThan(FOLD_MARGIN_PIXELS);
+    });
   });
 }
+
+/** Two rows of cards at the small step rather than the medium one, and the gap. */
+const CARDS_TIGHTEN_BY_PIXELS = 30;
+
+test.describe(`#692 — the metric cards — ${TABLET_IN_THE_SHELL.name}`, () => {
+  /**
+   * The cost #692 moved, and the rule that pays some of it back: with a
+   * notice standing in the Live group the cards are what move down, so they
+   * tighten (`theme.css` §"#692: while a notice stands"). Held as the cards'
+   * height against the same screen with no notice, because where they END
+   * depends on the fonts and is published above rather than bounded.
+   */
+  test('tighten while a notice stands in the Live group, and not for one beside the heading', async ({
+    page,
+  }, testInfo) => {
+    const viewport = TABLET_IN_THE_SHELL;
+    const heightWith = async (query: string): Promise<number> => {
+      await open(page, viewport, query);
+      return (await measure(page)).metrics?.height ?? 0;
+    };
+    const none = await heightWith('');
+    const standing = await heightWith('?notification=refused');
+    const beside = await heightWith(KEEP_ALIVE_FAILED);
+    const note = `the metric cards ${none.toFixed(1)} px tall with no notice, ${standing.toFixed(1)} px with No notification, ${beside.toFixed(1)} px with Keep the screen on`;
+    testInfo.annotations.push({ type: '#692 metric cards', description: note });
+    console.log(`#692 — the metric cards — ${note}`);
+
+    expect(none, note).toBeGreaterThan(0);
+    expect(none - standing, note).toBeGreaterThanOrEqual(CARDS_TIGHTEN_BY_PIXELS);
+    expect(beside, note).toBeCloseTo(none, 0);
+  });
+});
+
+test.describe(`#692 — ${TABLET_UPRIGHT_IN_THE_SHELL.name}`, () => {
+  test('the trainer is BESIDE the live group upright, as it is in landscape', async ({ page }) => {
+    const viewport = TABLET_UPRIGHT_IN_THE_SHELL;
+    await open(page, viewport);
+    const { groups } = await measure(page);
+
+    expect(groups.trainer?.top).toBeCloseTo(groups.live?.top ?? -1, 0);
+    expect(groups.trainer?.left ?? 0).toBeGreaterThanOrEqual(groups.live?.right ?? Infinity);
+  });
+});
 
 /**
  * #669 — the workout chooser on the tablet held upright, inside the shell.
  *
  * ⚠️ **Nothing asserted this before #669, and it was already under the floor.**
- * Upright the screen is one column, the trainer group is under the live one,
- * and the workout's *Ride* is the last ride control in it. The #647 block
+ * Upright the screen was one column then, the trainer group under the live
+ * one, and the workout's *Ride* the last ride control in it. ⚠️ Since #692 it
+ * is two columns and *Ride* ends about 525 px clear; the case still holds the
+ * floor and its control still moves *Ride*, and §"#692" is where the margin a
+ * notice costs is held now. The #647 block
  * above held only *Pause* / *Stop* there and published this margin: on the CI
  * runner it read **38.9 px** on `main` before #669 and **29.3 px** with #669's
  * 48 px controls — under {@link FOLD_MARGIN_PIXELS} both times; on a Mac 63.7

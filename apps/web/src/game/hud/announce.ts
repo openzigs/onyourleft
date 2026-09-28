@@ -29,6 +29,7 @@
  * | 5 | a climb or a descent ahead | event (#399) | attested | no |
  * | 5a | the side camera's link lost | event (#551) | ADR 0033 D-5 | **yes** — #551 |
  * | 5b | the ride may stop if the screen goes off | event (#647) | #524 | no |
+ * | 5c | a *Set* the stall rescue held, answered | event (#655) | #445's press answer | no — the form's own `live` answer says it instead |
  * | 6 | power off an acknowledged target | ≥ 10 % for ≥ 5 s | attested | no |
  * | 7 | distance to go | a distance tick | attested | no |
  * | 8 | power | a time cadence | attested | no |
@@ -50,6 +51,7 @@
  * | `climb-ahead` | `GameView` | `hud/climb-ahead.ts` |
  * | `side-camera-lost` | `GameView` and `ride/RideAnnouncer.tsx` | `ride/side-camera.ts` §`sideCameraLostEvent` |
  * | `screen-off-risk` | `GameView` and `ride/RideAnnouncer.tsx` | `RideSnapshot.keepAliveFailed` (#647) |
+ * | `erg-held` | `ride/RideAnnouncer.tsx` | `TrainerSnapshot.ergHeld` (#655) |
  * | readings | `GameView` | `fields.ts` §`hudReadings` |
  *
  * ⚠️ **Rank 1 is broader than its name**, and the name was kept rather than
@@ -99,6 +101,22 @@
  * {@link ALWAYS_SPOKEN}**: #647 asks for it "when announcements are on", and
  * nothing about it is the machine under the rider. A rider with announcements
  * off reads it on both screens, where it is never put away.
+ *
+ * ⚠️ **Rank 5c is #655's**: a *Set* the rider pressed on the Ride screen's ERG
+ * form while the stall rescue held the machine, answered — *"Held: your new
+ * target of N W will be set once your cadence has held steady …"*. It is the
+ * answer to the rider's OWN press, which #445 keeps out of this region and on
+ * the form as a `live` message; with announcements ON it comes here instead,
+ * so a rider who chose this region hears the answer in its order and never
+ * twice. It is the LOWEST event, on purpose: an answer the rider is waiting
+ * for must not cost a safety sentence its place — a lower event arriving
+ * behind a higher one is dropped — so it never displaces one, and its caller
+ * offers it on every call until it comes back as `kind` (#647's "owed" rule)
+ * so it is never lost either. What it costs is a window's wait behind
+ * anything already said. Only the Ride screen feeds it: the ERG form is
+ * nowhere else, and a gradient ends a hand-set target (`ride/controller.ts`
+ * §`simulationControl`). ⚠️ **Not in {@link ALWAYS_SPOKEN}**: with
+ * announcements off the form speaks it, and this region says nothing new.
  *
  * ## ⚠️ Four kinds are spoken with announcements OFF — {@link ALWAYS_SPOKEN}
  *
@@ -158,7 +176,8 @@ export type AnnouncementEvent =
   | { readonly kind: 'interval-ahead'; readonly text: string }
   | { readonly kind: 'climb-ahead'; readonly text: string }
   | { readonly kind: 'side-camera-lost'; readonly text: string }
-  | { readonly kind: 'screen-off-risk'; readonly text: string };
+  | { readonly kind: 'screen-off-risk'; readonly text: string }
+  | { readonly kind: 'erg-held'; readonly text: string };
 
 /** Every kind of sentence, events and readings together. */
 export type AnnouncementKind =
@@ -176,6 +195,7 @@ export const PRIORITY: readonly AnnouncementKind[] = [
   'climb-ahead',
   'side-camera-lost',
   'screen-off-risk',
+  'erg-held',
   'power-off-target',
   'distance-tick',
   'power',

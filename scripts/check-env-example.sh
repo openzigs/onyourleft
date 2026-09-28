@@ -97,7 +97,12 @@ is_documented() {
   for candidate in ${BUILTIN_NAMES}; do
     [ "${name}" = "${candidate}" ] && return 0
   done
-  printf '%s\n' "${declared}" | grep -qxF "${name}"
+  # A here-string, never `printf | grep -q`: grep -q exits at the first match,
+  # the writer is then killed by SIGPIPE, and under `pipefail` the pipeline
+  # reports 141 -- a documented variable read as undocumented. It depends on
+  # whether printf had finished writing when grep exited, so it passed locally
+  # and failed on main's CI run 36419270155 for OYL_DEVTOOLS_PORT.
+  grep -qxF "${name}" <<<"${declared}"
 }
 
 # The root's own toolchain files are scanned as well as the two package trees:

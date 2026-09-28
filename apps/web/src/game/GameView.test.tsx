@@ -1050,6 +1050,12 @@ describe('GameView — each rung draws at its own frame cap (#476)', () => {
    */
   const MEASURED_VSYNCS = 27;
 
+  // ⚠️ **8 s, a ceiling rather than a budget — #682.** Vitest's default 5 s was nobody's choice for
+  // this case: under coverage on CI it took 1.3 s to 2.4 s over thirteen green `main` runs on
+  // 2026-09-28 (36370135206 to 36405580515), the slowest on 36371441351 (the slower of the two
+  // runners, a job over 1 000 s) — 49 % of that default. 8 s is about three times the slowest, so a
+  // slow-down is red, and so is a case left waiting on something that never settles. A loop that
+  // never yields is caught only by the job’s own stop (CLAUDE.md §4c).
   it('draws every animation frame at the top two rungs, then 30, 24 and 20 a second — #482', async () => {
     const frames = await startRiding({ pacer: false });
     const drawnPerMeasure = async (): Promise<number> => {
@@ -1078,7 +1084,7 @@ describe('GameView — each rung draws at its own frame cap (#476)', () => {
     expect(counts[4] ?? 0).toBeLessThan(counts[3] ?? 0);
     expect(counts[3] ?? 0).toBeLessThan(counts[2] ?? 0);
     expect(counts[2] ?? 0).toBeLessThan(counts[1] ?? 0);
-  });
+  }, 8_000);
 
   it('re-renders the HUD only on the frames it draws, at every capped rung — #482', async () => {
     // ⚠️ #481's review: `if (paced.draw)` → `if (true)` left every test here
@@ -1407,6 +1413,12 @@ describe('GameView — a hot forecast steps the world down (#247)', () => {
       expect(rungs).toEqual([QUALITY_LADDER[1], QUALITY_LADDER[2]]);
     });
 
+    // ⚠️ **10 s, a ceiling rather than a budget — #682.** Vitest's default 5 s was nobody's choice
+    // for this case: under coverage on CI it took 1.1 s to 3.0 s over thirteen green `main` runs on
+    // 2026-09-28 (36370135206 to 36405580515), the slowest on 36371441351 (the slower of the two
+    // runners, a job over 1 000 s) — 60 % of that default. 10 s is about three times the slowest,
+    // so a slow-down is red, and so is a case left waiting on something that never settles. A loop
+    // that never yields is caught only by the job’s own stop (CLAUDE.md §4c).
     it('climbs one rung, not all of them, on one cool reading', async () => {
       const port = settable(0.95);
       await startRiding({ pacer: false, thermal: port });
@@ -1417,7 +1429,7 @@ describe('GameView — a hot forecast steps the world down (#247)', () => {
       await poll();
       await pump(LONG_AFTER, COMFORTABLE_MS);
       expect(rungs).toEqual([QUALITY_LADDER[1], QUALITY_LADDER[2], QUALITY_LADDER[1]]);
-    });
+    }, 10_000);
   });
 
   it('stays on the top rung under a cool forecast', async () => {

@@ -678,10 +678,25 @@ async function harness(
  * took 64 s, 70 s and 77 s alone (runs 36320822283, 36334163962 and
  * 36337270885 — the last with #621's seeded-tint probe added — and 77 s again
  * on 36340917231), so 120 s is 1.56 times the slowest.
+ *
+ * ⚠️ **It is 165 s since #682, and a reviewer who remembers 120 is reading the
+ * old file.** A day later the same load took 91 s to 111 s on that runner's
+ * green `main` runs (thirteen read on 2026-09-28, 36370135206 to 36405580515;
+ * 111 s on 36405580515) — 93 % of 120 s, a green run 9 s from red. No one
+ * phase grew: #624's tread added 1.9 s and the rest is the runner's spread
+ * (texture formats 21.4 s to 24.1 s, house window 11.7 s to 13.1 s). 165 s is
+ * 1.49 times the slowest, and §`paysForTheRealisticLoad` is the sum it fits in.
  */
-const REALISTIC_LOAD_BUDGET_MS = 120_000;
-/** `?realistic&trees` — 79 s to 80 s alone on the last three of those runs, so 1.5 times. */
-const TREES_LOAD_BUDGET_MS = 120_000;
+const REALISTIC_LOAD_BUDGET_MS = 165_000;
+/**
+ * `?realistic&trees` — 79 s to 80 s alone on the last three of #651's runs, so
+ * 120 s was 1.5 times. ⚠️ **160 s since #682**: on 36405580515 it took 105 s,
+ * 88 % of 120. #720 added a phase to it (`trees: unmerged control`, 11.7 s to
+ * 16.1 s), and that run was slower than the one before it in every phase: the
+ * load had been 82 s to 83 s on that runner before #720 and 86 s on the first
+ * run after (36396660625). 160 s is 1.52 times 105.
+ */
+const TREES_LOAD_BUDGET_MS = 160_000;
 
 /**
  * Pays for the `?realistic` load in a `beforeAll` with its own budget — #607.
@@ -716,34 +731,54 @@ const TREES_LOAD_BUDGET_MS = 120_000;
  * third one said which describe it was. And it left out the plain page, whose
  * load no hook paid for: a hung one cost 60 s a case, down forty-five cases.
  *
+ * ⚠️ **The figures below are #682's, and a reviewer who remembers 355 s of
+ * budgets, 179 s of the rest of the gate and 42 s inside `timeout-minutes: 20`
+ * is reading the old file** — by 2026-09-28 green loads sat at up to 93 % of
+ * their budgets, and a green gate took 547 s of its 580 (36405580515). #682
+ * raised the job's stop to 25 minutes and spent part of it here.
+ *
  * What a hang costs now, and why it fits. The ledger (§`loadLedger`) makes a
  * hung load cost ONE budget per query per run, whichever describe paid it,
  * and every other describe that reads that query fails at once in its own hook
  * (§`paysForTheLoad`). The game spec is a Playwright project of its own,
  * listed LAST (`playwright.config.ts` §`projects`), so its four loads run one
  * after another in one worker once the rest of the gate is done. On the slower
- * of the two runners CI lands on (an AMD EPYC 7763) the rest of the gate took
- * 164 s, 168 s, 177 s and 179 s (runs 36334163962, 36337270885, 36340917231
- * and 36342083309's first attempt — it grows as specs are added). If every
- * one of the four loads hung:
+ * of the two runners CI lands on (a job over 1 000 s; #651 read it as an AMD
+ * EPYC 7763) the rest of the gate — from Playwright's start to the game
+ * spec's first load — took up to 245 s (runs 36395959573 and 36405580515; it
+ * grows as specs are added). If every one of the four loads hung:
  *
- *     50 + 65 + 120 + 120    the four budgets: plain, `?shadow-map`,
+ *     60 + 70 + 165 + 160    the four budgets: plain, `?shadow-map`,
  *                            `?realistic`, `?realistic&trees`
- *   = 355 s
+ *   = 455 s
  *   +  30 s                  21 describes failing, each replacing the worker,
  *                            and the two servers starting (measured below)
- *   + 179 s                  the rest of the gate, first
- *   = 564 s                  inside the gate's own 580 (`GATE_BUDGET_MS`)
+ *   + 245 s                  the rest of the gate, first
+ *   +  84 s                  `realistic.browser.spec.ts`' instruments case,
+ *                            if its page hangs too: it waits its own 150 s
+ *                            for a load that took at most 66 s green
+ *   = 814 s                  inside the gate's own 840 (`GATE_BUDGET_MS`)
  *
- * and the gate cannot outlive the job: on that runner it starts as late as
- * 578 s in (run 36342083309, attempt 1), so 580 s ends it by 1 158 s — 42 s
- * inside `timeout-minutes: 20`, with only the coverage publish and upload
- * (2–3 s) after it. ⚠️ **Nothing re-checks either margin** — the 16 s between
- * 564 and 580, or the 42 s between 1 158 and 1 200. A spec added to the gate
- * eats the first and a step added before the gate eats the second, and
- * neither says so until a hang meets it. Each budget
- * is at least 1.5 times what its load took alone there (§`PLAIN_LOAD_BUDGET_MS`
- * and §`REALISTIC_LOAD_BUDGET_MS` give the margins).
+ * ⚠️ **The 84 s assumes that case's FIRST load hangs.** If the first is green
+ * and its control load hangs instead, the case takes about 180 s where green
+ * took 66 s — 114 s — and the sum is 844 s, 4 s past 840. The linear sum
+ * over-counts: that spec runs on the `chromium` project in one of the two
+ * workers, and while it waits the other worker finishes the remaining specs
+ * and takes this group (`playwright.config.ts` §`projects`: nothing waits for
+ * `chromium` to finish), so the wait overlaps the rest of the gate and these
+ * loads rather than adding to them in a line. That is reasoned, not measured;
+ * if the overlap were ever under 4 s, the gate would stop itself at 840 s with
+ * the last describe here interrupted — inside the job, naming what ran.
+ *
+ * and the gate cannot outlive the job: on that runner the step starts as late
+ * as 592 s in (run 36395959573) and builds for 9 s before Playwright starts,
+ * so 840 s ends it by 1 441 s — 59 s inside `timeout-minutes: 25`'s 1 500,
+ * with only the coverage publish and upload (2–3 s) after it. ⚠️ **Nothing
+ * re-checks either margin** — the 26 s between 814 and 840, or the 59 s
+ * between 1 441 and 1 500. A spec added to the gate eats the first and a step
+ * added before the gate eats the second, and neither says so until a hang
+ * meets it. Each budget is at least 1.49 times what its load took alone there
+ * (§`PLAIN_LOAD_BUDGET_MS` and §`REALISTIC_LOAD_BUDGET_MS` give the margins).
  *
  * Measured with every load made to hang and every budget cut to a tenth —
  * 36.5 s of budgets — locally, `--project game`, on #651's branch:
@@ -776,14 +811,21 @@ function paysForTheRealisticLoad(): void {
  * 16 s of `?shadow-map`'s 55. They took 22 s and 39 s after (runs
  * 36337270885 and 36340917231), so the budgets are 2.3 and 1.7 times that.
  *
+ * ⚠️ **60 s and 70 s since #682, not 50 and 65.** On 2026-09-28 the slower
+ * runner's green `main` runs took them to 39 s and 45 s (36405580515; thirteen
+ * runs read, 36370135206 to 36405580515) — 78 % and 69 %. The plain load
+ * starts while the other worker is still on the last `chromium` spec (§`projects`
+ * in `playwright.config.ts`), which is some of that. 60 s and 70 s are 1.54
+ * and 1.56 times the slowest.
+ *
  * ⚠️ **Alone, and that is measured**: the game spec runs after everything
  * else (`playwright.config.ts` §`projects`). Run beside the rest of the gate,
  * as #651 tried, the plain load took 58 s and `?shadow-map` passed 120 s
  * (run 36326756014) — SwiftShader draws on the CPU the other worker is using.
  */
-const PLAIN_LOAD_BUDGET_MS = 50_000;
+const PLAIN_LOAD_BUDGET_MS = 60_000;
 /** @see PLAIN_LOAD_BUDGET_MS */
-const SHADOW_MAP_LOAD_BUDGET_MS = 65_000;
+const SHADOW_MAP_LOAD_BUDGET_MS = 70_000;
 
 /**
  * Pays for a load in a `beforeAll` under its own budget — #607, generalised by
