@@ -11,7 +11,7 @@ import {
   type RefObject,
 } from 'react';
 
-import type { ActivityOrder, ActivitySummary, SortDirection } from '@onyourleft/store';
+import type { ActivityId, ActivityOrder, ActivitySummary, SortDirection } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
 import { ScrollTable } from '../design/ScrollTable';
@@ -21,9 +21,10 @@ import { POWER_UNIT } from '../format';
 import { useUnits } from '../units/context';
 import { distanceUnit } from '../units/format';
 import { libraryLayout, type LibraryLayout } from '../library/layout';
-import { orderedRows, PAGE_SIZE, type LibraryRow } from '../library/rows';
+import { orderedRows, PAGE_SIZE, rowFor, type LibraryRow } from '../library/rows';
 import type { LibraryPort } from '../library/store-port';
-import { hrefFor, hrefForActivity, routeById } from '../shell/routes';
+import { ListDetail, SELECTED_HEADING_ID } from '../shell/ListDetail';
+import { hrefFor, hrefForActivity, hrefForSelection, routeById } from '../shell/routes';
 
 /**
  * The ride history: every activity stored on this device (#62).
@@ -63,6 +64,19 @@ import { hrefFor, hrefForActivity, routeById } from '../shell/routes';
  * The link is on the name rather than on the row for the same reason the Delete
  * button carries the ride's name in visually hidden text: a screen-reader user
  * moving by link hears "Tuesday morning", not "row 4".
+ *
+ * ## A list beside its detail — #670
+ *
+ * Since #670 the name SELECTS the ride — `#/activities/selected/<id>` — and
+ * the ride's summary is drawn in a detail pane beside the list on a wide
+ * window, or in place of it on a narrow one (`shell/ListDetail.tsx`). The
+ * summary links to the ride's own full page, which is still
+ * `#/activities/<id>`. A selected ride outside the page the list read is read
+ * on its own ({@link LibraryStore.getActivity}), so a shared link to an old
+ * ride is not called "not found" because it is ride fifty-one.
+ *
+ * *Start a ride* comes FIRST since #670, above the sort control: #668 measured
+ * it 5,560 px down a populated library, below forty rides.
  */
 export interface ActivitiesViewProps {
   /**
@@ -74,6 +88,8 @@ export interface ActivitiesViewProps {
    * no rides.
    */
   readonly library?: LibraryPort | undefined;
+  /** The selected ride's id, from `#/activities/selected/<id>` — #670. */
+  readonly selected?: string | undefined;
 }
 
 /** The sort control's `id`, for its `<label>`. One library per page. */
@@ -185,13 +201,19 @@ function contentWidth(element: HTMLElement): number {
   );
 }
 
+/** The selected ride, when it is not in the page the list read. */
+type Fetched =
+  | { readonly id: string; readonly kind: 'found'; readonly summary: ActivitySummary }
+  | { readonly id: string; readonly kind: 'missing' }
+  | { readonly id: string; readonly kind: 'failed' };
+
 type LoadState =
   | { readonly kind: 'idle' }
   | { readonly kind: 'loading' }
   | { readonly kind: 'ready'; readonly rows: readonly LibraryRow[]; readonly total: number }
   | { readonly kind: 'failed'; readonly reason: string };
 
-export function ActivitiesView({ library }: ActivitiesViewProps): JSX.Element {
+export function ActivitiesView({ library, selected }: ActivitiesViewProps): JSX.Element {
   const [orderBy, setOrderBy] = useState<ActivityOrder>('startedAt');
   const [direction, setDirection] = useState<SortDirection>('descending');
   const [state, setState] = useState<LoadState>({ kind: 'idle' });
@@ -231,6 +253,56 @@ export function ActivitiesView({ library }: ActivitiesViewProps): JSX.Element {
   useEffect(() => {
     void load();
   }, [load, reloads]);
+
+  const inPage =
+    selected === undefined || state.kind !== 'ready'
+      ? undefined
+      : state.rows.find((row) => row.id === selected);
+  const readAlone =
+    selected !== undefined &&
+    inPage === undefined &&
+    (state.kind === 'ready' || state.kind === 'failed');
+  const [fetched, setFetched] = useState<Fetched | undefined>(undefined);
+  /*
+   * ⚠️ ONCE per selected id (and once more after a delete reloads the list),
+   * which `store-port.ts` §`getActivity` promises and #670's review found
+   * broken: with the load state in this effect's dependencies, every sort
+   * change passed through `loading` and back and read the ride — original
+   * file bytes included — again. The key is what has been asked for; the
+   * row is derived at render, so a change of units needs no read either.
+   */
+  const asked = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!readAlone || library === undefined || selected === undefined) {
+      return;
+    }
+    // The athlete is in the key: the same id asked of a different athlete is
+    // a different question, and must not keep the first one's ride.
+    const key = `${String(reloads)}\u0000${library.athleteId}\u0000${selected}`;
+    if (asked.current === key) {
+      return;
+    }
+    asked.current = key;
+    const settleWith = (next: Fetched): void => {
+      // Only the newest question's answer is shown: a slow read for a ride
+      // the rider has already moved on from is dropped.
+      if (asked.current === key) {
+        setFetched(next);
+      }
+    };
+    library.store.getActivity(library.athleteId, selected as ActivityId).then(
+      (summary) => {
+        settleWith(
+          summary === undefined
+            ? { id: selected, kind: 'missing' }
+            : { id: selected, kind: 'found', summary },
+        );
+      },
+      () => {
+        settleWith({ id: selected, kind: 'failed' });
+      },
+    );
+  }, [readAlone, library, selected, reloads]);
 
   const remove = useCallback(
     async (id: string): Promise<void> => {
@@ -295,9 +367,33 @@ export function ActivitiesView({ library }: ActivitiesViewProps): JSX.Element {
   // common case here rather than the odd one.
   const indoor = (row: LibraryRow): JSX.Element | undefined =>
     row.hasPosition ? undefined : <span className="oyl-muted"> · indoor</span>;
+  const selectLink = (row: LibraryRow): JSX.Element => (
+    <a
+      href={hrefForSelection(routeById('activities'), row.id)}
+      data-oyl-select={row.id}
+      aria-current={row.id === selected ? 'true' : undefined}
+    >
+      {row.name}
+    </a>
+  );
 
-  return (
+  const list = (
     <div className="oyl-library" data-layout={layout} ref={container}>
+      {/*
+        #668: the next steps are actions, so they are drawn as buttons rather
+        than links in a sentence — on an empty library they are the only
+        thing to do. *Start a ride* is this pane's one primary; every row's
+        *Delete* is secondary. FIRST since #670: below the list they were
+        5,560 px down a populated library.
+      */}
+      <p className="oyl-library__actions">
+        <a className="oyl-button" href={hrefFor(routeById('ride'))}>
+          Start a ride
+        </a>{' '}
+        <a className="oyl-button oyl-button--secondary" href={hrefFor(routeById('transfer'))}>
+          Import or export files
+        </a>
+      </p>
       <div className="oyl-library-controls">
         {/*
           A native select rather than two filled buttons (#660, #654's
@@ -343,7 +439,7 @@ export function ActivitiesView({ library }: ActivitiesViewProps): JSX.Element {
               {rows.map((row) => (
                 <li key={row.id} className="oyl-panel oyl-activity-card">
                   <p className="oyl-activity-card__name oyl-library__name">
-                    <a href={hrefForActivity(row.id)}>{row.name}</a>
+                    {selectLink(row)}
                     {indoor(row)}
                   </p>
                   <dl className="oyl-activity-card__facts">
@@ -391,7 +487,7 @@ export function ActivitiesView({ library }: ActivitiesViewProps): JSX.Element {
               rows.map((row) => (
                 <tr key={row.id}>
                   <th scope="row" className="oyl-library__name">
-                    <a href={hrefForActivity(row.id)}>{row.name}</a>
+                    {selectLink(row)}
                     {indoor(row)}
                   </th>
                   <td>{row.startedAt}</td>
@@ -422,20 +518,101 @@ export function ActivitiesView({ library }: ActivitiesViewProps): JSX.Element {
         Rides are stored on this device and nowhere else. There is no account and no server, so
         clearing this browser&rsquo;s site data deletes them — export anything you want to keep.
       </p>
-      {/*
-        #668: the next steps are actions, so they are drawn as buttons rather
-        than links in a sentence — on an empty library they are the only
-        thing to do. *Start a ride* is this screen's one primary; every row's
-        *Delete* is secondary.
-      */}
+    </div>
+  );
+
+  const shown:
+    | { readonly kind: 'found'; readonly row: LibraryRow }
+    | { readonly kind: 'missing' | 'failed' }
+    | undefined =
+    inPage !== undefined
+      ? { kind: 'found', row: inPage }
+      : fetched?.id !== selected || fetched === undefined
+        ? undefined
+        : fetched.kind === 'found'
+          ? { kind: 'found', row: rowFor(fetched.summary, units) }
+          : fetched;
+
+  return (
+    <ListDetail
+      route={routeById('activities')}
+      selection={selected}
+      listLabel="Your rides"
+      detailLabel="Ride summary"
+      backLabel="All rides"
+      detailWithoutSelection={false}
+      list={list}
+      detail={
+        selected === undefined ? (
+          <p className="oyl-muted">Choose a ride from the list to see its summary here.</p>
+        ) : shown === undefined ? (
+          <p>Reading this ride…</p>
+        ) : shown.kind === 'found' ? (
+          <RideSummary row={shown.row} />
+        ) : shown.kind === 'missing' ? (
+          <>
+            <h2 id={SELECTED_HEADING_ID} tabIndex={-1}>
+              Ride not found
+            </h2>
+            <p>
+              No ride with that address is stored on this device. It may have been deleted, or the
+              link may have come from another device — rides are never copied between them.
+            </p>
+          </>
+        ) : (
+          <>
+            <h2 id={SELECTED_HEADING_ID} tabIndex={-1}>
+              This ride could not be read
+            </h2>
+            <StatusMessage tone="warning">
+              The ride could not be read from this device&rsquo;s storage. Reload the page to try
+              again.
+            </StatusMessage>
+          </>
+        )
+      }
+    />
+  );
+}
+
+/** The selected ride, in the detail pane — #670. Its full page is one link away. */
+function RideSummary({ row }: { readonly row: LibraryRow }): JSX.Element {
+  const units = useUnits();
+  return (
+    <>
+      <h2 id={SELECTED_HEADING_ID} tabIndex={-1}>
+        {row.name}
+      </h2>
+      <dl className="oyl-activity-card__facts">
+        <div>
+          <dt>Started</dt>
+          <dd>{row.startedAt}</dd>
+        </div>
+        <div>
+          <dt>Duration</dt>
+          <dd>{row.duration}</dd>
+        </div>
+        <div>
+          <dt>Distance</dt>
+          <dd>
+            {row.distance} {distanceUnit(units)}
+          </dd>
+        </div>
+        <div>
+          <dt>Avg power</dt>
+          <dd>{row.averagePower === undefined ? '—' : `${row.averagePower} ${POWER_UNIT}`}</dd>
+        </div>
+        <div>
+          <dt>Where</dt>
+          <dd>{row.hasPosition ? 'Outdoors, with a track' : 'Indoor, no track'}</dd>
+        </div>
+      </dl>
+      {/* The detail pane's one primary (#670: one primary per pane). */}
       <p>
-        <a className="oyl-button" href={hrefFor(routeById('ride'))}>
-          Start a ride
-        </a>{' '}
-        <a className="oyl-button oyl-button--secondary" href={hrefFor(routeById('transfer'))}>
-          Import or export files
+        <a className="oyl-button" href={hrefForActivity(row.id)}>
+          Open ride details
         </a>
       </p>
-    </div>
+    </>
   );
 }

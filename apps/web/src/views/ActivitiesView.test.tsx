@@ -42,6 +42,7 @@ import {
   settle,
   type Mounted,
 } from '../testing/mount';
+import { liveRegionsSaying, timesSaid } from '../testing/said-once';
 
 import { ActivitiesView } from './ActivitiesView';
 
@@ -232,6 +233,8 @@ describe('#62 — the local activity library', () => {
           open.write(async (store) => store.listActivitySummaries(owner)),
         deleteActivity: (owner: AthleteId, id: ActivityId) =>
           open.write(async (store) => store.deleteActivity(owner, id)),
+        getActivity: (owner: AthleteId, id: ActivityId) =>
+          open.write(async (store) => store.getActivity(owner, id)),
       },
     };
 
@@ -291,6 +294,8 @@ describe('#62 — the local activity library', () => {
           open.write(async (store) => store.listActivitySummaries(owner)),
         deleteActivity: (owner: AthleteId, id: ActivityId) =>
           open.write(async (store) => store.deleteActivity(owner, id)),
+        getActivity: (owner: AthleteId, id: ActivityId) =>
+          open.write(async (store) => store.getActivity(owner, id)),
       },
     };
     mounted = await mount(<ActivitiesView library={library} />);
@@ -336,6 +341,7 @@ describe('#62 — the local activity library', () => {
       store: {
         listActivitySummaries: () => Promise.reject(new Error('QuotaExceededError')),
         deleteActivity: () => Promise.resolve(true),
+        getActivity: () => Promise.resolve(undefined),
       },
     };
 
@@ -447,7 +453,9 @@ describe('#660 — a card list on a phone, a table where it fits', () => {
     expect(first).toContain('42.2 km');
     expect(first).toContain('212 W');
     expect(cards[1]?.textContent).toContain('indoor');
-    expect(cards[0]?.querySelector('a')?.getAttribute('href')).toBe('#/activities/outdoor');
+    expect(cards[0]?.querySelector('a')?.getAttribute('href')).toBe(
+      '#/activities/selected/outdoor',
+    );
     // Named by the same words the table's caption would have said.
     const list = document.querySelector('.oyl-activity-cards');
     const label = document.getElementById(list?.getAttribute('aria-labelledby') ?? '');
@@ -495,5 +503,188 @@ describe('#660 — a card list on a phone, a table where it fits', () => {
     expect(region?.getAttribute('tabindex')).toBe('0');
     const caption = document.querySelector('caption');
     expect(region?.getAttribute('aria-labelledby')).toBe(caption?.id);
+  });
+});
+
+describe('#670 — a selected ride', () => {
+  function many(count: number): ActivitySummary[] {
+    return Array.from({ length: count }, (_unused, index) =>
+      summary(`ride-${String(index)}`, {
+        name: `Ride number ${String(index)}`,
+        startedAt: unixSeconds(1_700_000_000 - index * 86_400),
+      }),
+    );
+  }
+
+  it('is summarised from the page the list read, with no second read', async () => {
+    const library = stubLibrary(OWNER, many(3));
+    mounted = await mount(<ActivitiesView library={library} selected="ride-1" />);
+    await settle();
+    expect(document.getElementById('oyl-selected-heading')?.textContent).toBe('Ride number 1');
+    expect(library.gets).toEqual([]);
+    const open = queryAll<HTMLAnchorElement>(document.body, 'a').find(
+      (anchor) => anchor.textContent === 'Open ride details',
+    );
+    expect(open?.getAttribute('href')).toBe('#/activities/ride-1');
+  });
+
+  it('is read on its own when it is outside the page, rather than called "not found"', async () => {
+    // Ride fifty-five of sixty: past PAGE_SIZE, so the list never held it.
+    const library = stubLibrary(OWNER, many(PAGE_SIZE + 10));
+    mounted = await mount(<ActivitiesView library={library} selected="ride-55" />);
+    await settle();
+    await settle();
+    expect(library.gets).toEqual(['ride-55']);
+    expect(document.getElementById('oyl-selected-heading')?.textContent).toBe('Ride number 55');
+  });
+
+  it('says a ride this device does not hold is not found', async () => {
+    const library = stubLibrary(OWNER, many(3));
+    mounted = await mount(<ActivitiesView library={library} selected="nobody-knows" />);
+    await settle();
+    await settle();
+    expect(document.getElementById('oyl-selected-heading')?.textContent).toBe('Ride not found');
+    expect(document.body.textContent).toContain(
+      'No ride with that address is stored on this device',
+    );
+  });
+
+  it('says another athlete’s ride is not found, even though this device holds it', async () => {
+    // #670's review (N3): an id that exists for nobody proves nothing about
+    // scoping. This one is on the device, under athlete B.
+    const library = stubLibrary(OWNER, [
+      ...many(3),
+      summary('somebody-elses', { athleteId: athleteId('athlete-b'), name: 'Their ride' }),
+    ]);
+    mounted = await mount(<ActivitiesView library={library} selected="somebody-elses" />);
+    await settle();
+    await settle();
+    expect(library.gets).toEqual(['somebody-elses']);
+    expect(document.getElementById('oyl-selected-heading')?.textContent).toBe('Ride not found');
+    expect(document.body.textContent).not.toContain('Their ride');
+  });
+
+  it('reads a ride outside the page once, however often the list is re-sorted', async () => {
+    // #670's review (N2): the read returns the original file bytes, and a
+    // sort change used to repeat it every time.
+    // Older rides are shorter too, so every order below keeps ride 55 off
+    // the page: each sort re-reads the page and must not re-read the ride.
+    const stub = stubLibrary(
+      OWNER,
+      many(PAGE_SIZE + 10).map((ride, index) => ({ ...ride, distance: metres(100_000 - index) })),
+    );
+    // A page read that takes a turn of the event loop, as IndexedDB's does, so
+    // the screen really passes through "loading" between two sorts rather
+    // than having React batch it away.
+    const library = {
+      ...stub,
+      store: {
+        ...stub.store,
+        listActivitySummaries: (
+          ...args: Parameters<typeof stub.store.listActivitySummaries>
+        ): ReturnType<typeof stub.store.listActivitySummaries> =>
+          new Promise((resolve) => {
+            setTimeout(() => {
+              resolve(stub.store.listActivitySummaries(...args));
+            }, 0);
+          }),
+      },
+    };
+    mounted = await mount(<ActivitiesView library={library} selected="ride-55" />);
+    await settle();
+    await settle();
+    expect(stub.gets).toEqual(['ride-55']);
+    for (const order of ['distance:descending', 'startedAt:descending', 'distance:descending']) {
+      await chooseOption(sortControl(), order);
+      await settle();
+      await settle();
+    }
+    expect(stub.reads.length).toBeGreaterThanOrEqual(4);
+    expect(stub.gets).toEqual(['ride-55']);
+    expect(document.getElementById('oyl-selected-heading')?.textContent).toBe('Ride number 55');
+  });
+
+  it('reads the ride again when the athlete changes, rather than keeping the first one’s', async () => {
+    // #670's second review: the read was keyed on the reload count and the id
+    // alone, so the same id under a different athlete kept the first ride.
+    const other = athleteId('athlete-b');
+    const theirs = many(PAGE_SIZE + 10).map((ride) => ({
+      ...ride,
+      athleteId: other,
+      name: ride.name.replace('Ride number', 'Their ride'),
+    }));
+    const first = stubLibrary(OWNER, many(PAGE_SIZE + 10));
+    const second = stubLibrary(other, theirs);
+    mounted = await mount(<ActivitiesView library={first} selected="ride-55" />);
+    await settle();
+    await settle();
+    expect(document.getElementById('oyl-selected-heading')?.textContent).toBe('Ride number 55');
+    await mounted.rerender(<ActivitiesView library={second} selected="ride-55" />);
+    await settle();
+    await settle();
+    expect(second.gets).toEqual(['ride-55']);
+    expect(document.getElementById('oyl-selected-heading')?.textContent).toBe('Their ride 55');
+  });
+
+  it('marks the chosen ride in the list, in words a reader hears', async () => {
+    const library = stubLibrary(OWNER, many(3));
+    mounted = await mount(<ActivitiesView library={library} selected="ride-2" />);
+    await settle();
+    const current = queryAll(document.body, '[aria-current="true"]');
+    expect(current.map((element) => element.getAttribute('data-oyl-select'))).toEqual(['ride-2']);
+  });
+
+  it('puts Start a ride before the list, so a long history does not bury it (#668)', async () => {
+    const library = stubLibrary(OWNER, many(40));
+    mounted = await mount(<ActivitiesView library={library} />);
+    await settle();
+    const start = queryAll(document.body, 'a.oyl-button').find(
+      (anchor) => anchor.textContent === 'Start a ride',
+    );
+    const firstRide = document.querySelector('[data-oyl-select]');
+    expect(start).toBeDefined();
+    expect(firstRide).not.toBeNull();
+    expect(
+      (start as Element).compareDocumentPosition(firstRide as Element) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+});
+
+/**
+ * #670's review (B1): a message rendered twice is invisible to `toContain`.
+ * This screen never had the Routes screen's duplicate; these keep it so.
+ */
+describe('each message is said once, in one live region', () => {
+  function saidOnce(text: string): void {
+    expect(timesSaid(document.body, text), `“${text}” is on the screen`).toBe(1);
+    expect(liveRegionsSaying(document.body, text), `“${text}” is in live regions`).toBe(1);
+  }
+
+  it('when a delete asks to be confirmed', async () => {
+    const library = stubLibrary(OWNER, [summary('one', { name: 'Only ride' })]);
+    mounted = await mount(<ActivitiesView library={library} selected="one" />);
+    await settle();
+    const remove = queryAll(document.body, 'button').find((button) =>
+      (button.textContent ?? '').startsWith('Delete'),
+    );
+    await activateWithKeyboard(remove as HTMLElement);
+    await settle();
+    saidOnce('Deleting a ride cannot be undone.');
+  });
+
+  it('when the rides cannot be read', async () => {
+    const library = {
+      athleteId: OWNER,
+      store: {
+        listActivitySummaries: () => Promise.reject(new Error('QuotaExceededError')),
+        deleteActivity: () => Promise.resolve(true),
+        getActivity: () => Promise.resolve(undefined),
+      },
+    };
+    mounted = await mount(<ActivitiesView library={library} selected="one" />);
+    await settle();
+    await settle();
+    saidOnce('Could not read the rides on this device.');
   });
 });

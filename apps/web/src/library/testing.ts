@@ -23,24 +23,39 @@ export interface StubLibrary extends LibraryPort {
   /** Every `listActivitySummaries` call, so a test can assert the read budget. */
   readonly reads: ListActivitiesOptions[];
   readonly deleted: string[];
+  /** Every id `getActivity` was asked for — #670's single read. */
+  readonly gets: string[];
 }
 
 export function stubLibrary(owner: AthleteId, summaries: readonly ActivitySummary[]): StubLibrary {
   const held = [...summaries];
   const reads: ListActivitiesOptions[] = [];
   const deleted: string[] = [];
+  const gets: string[] = [];
 
   const store: LibraryStore = {
-    listActivitySummaries: (_owner: AthleteId, options: ListActivitiesOptions = {}) => {
+    listActivitySummaries: (requester: AthleteId, options: ListActivitiesOptions = {}) => {
       reads.push(options);
       const { orderBy = 'startedAt', direction = 'descending', offset = 0, limit } = options;
       const key = (summary: ActivitySummary): number =>
         orderBy === 'distance' ? summary.distance : summary.startedAt;
-      const sorted = [...held].sort((left, right) =>
-        direction === 'descending' ? key(right) - key(left) : key(left) - key(right),
-      );
+      // Scoped, like `getActivity` below — #670's review: unscoped, the page
+      // itself handed another athlete's ride to the screen.
+      const sorted = held
+        .filter((summary) => summary.athleteId === requester)
+        .sort((left, right) =>
+          direction === 'descending' ? key(right) - key(left) : key(left) - key(right),
+        );
       const from = sorted.slice(offset);
       return Promise.resolve(limit === undefined ? from : from.slice(0, limit));
+    },
+    getActivity: (owner: AthleteId, id: ActivityId) => {
+      gets.push(id);
+      // Scoped, even in a stub: a stub that ignored the owner would make every
+      // scoping assertion over it vacuous.
+      return Promise.resolve(
+        held.find((summary) => summary.id === id && summary.athleteId === owner),
+      );
     },
     deleteActivity: (_owner: AthleteId, id: ActivityId) => {
       deleted.push(id);
@@ -53,5 +68,5 @@ export function stubLibrary(owner: AthleteId, summaries: readonly ActivitySummar
     },
   };
 
-  return { athleteId: owner, store, reads, deleted };
+  return { athleteId: owner, store, reads, deleted, gets };
 }

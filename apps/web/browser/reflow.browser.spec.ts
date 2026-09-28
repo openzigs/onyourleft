@@ -204,7 +204,7 @@ for (const data of DATASETS) {
 
 /**
  * #660's second criterion, measured: the library is a card list on a phone and
- * stays a table where its columns fit — decided by `library/layout.ts` from the
+ * in #670's list pane, and stays a table where its columns fit — decided by `library/layout.ts` from the
  * width the library is given. And its sort control is a `select` with the
  * 44 px target every control here has (#316).
  */
@@ -213,10 +213,15 @@ test.describe('the activity library is cards on a phone and a table where it fit
   if (activities === undefined) {
     throw new Error('the route table has no activities route');
   }
+  // ⚠️ 844×390 is CARDS since #670: at 840 px and wider the library is the
+  // list pane of a list–detail layout, 22.5rem wide, which is narrower than a
+  // table's columns. The table is where one pane is wide enough for it — the
+  // tablet upright.
   const expected = [
     [320, 256, 'cards'],
     [390, 844, 'cards'],
-    [844, 390, 'table'],
+    [844, 390, 'cards'],
+    [800, 1280, 'table'],
   ] as const;
   for (const [width, height, layout] of expected) {
     test(`a ${layout === 'cards' ? 'card list' : 'table'} at ${String(width)}×${String(height)}`, async ({

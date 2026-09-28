@@ -20,6 +20,15 @@
  * cannot fail. Rewording a sentence is a real change and is done by editing
  * the record in the same commit, where a reviewer sees both halves.
  *
+ * Since #670 a `list-detail` route's populated walk is read twice — the list,
+ * and the same route with the fixture's item selected — because the list's
+ * columns became the selected item's facts and actions. Three sentences were
+ * edited in the record in #670's commit rather than lost: the Routes screen's
+ * empty list said to import "above" (the import is beside it or below it
+ * now), the Workouts builder said to add a block "above" (the block form
+ * follows *Save workout* now), and the Workouts table's "Actions" column
+ * heading is gone with the table.
+ *
  * ## What it does not check
  *
  * That a sentence is in the same ORDER, or visible — `kept-visible.a11y.test`
@@ -37,7 +46,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { StoreHarness } from '@onyourleft/store/testing';
 
 import { ALL_ROUTES, type RouteDefinition } from '../shell/routes';
-import { openRoute } from '../testing/hierarchy-walk';
+import { openRoute, selectFixtureItem } from '../testing/hierarchy-walk';
 import type { Mounted } from '../testing/mount';
 import { sentencesIn, textBlocks } from '../testing/route-sentences';
 import { emptyTransferPort } from '../testing/transfer-port';
@@ -112,7 +121,15 @@ describe('#666 — every sentence a route rendered on main still renders on it',
     for (const route of ALL_ROUTES) {
       it(`${route.id} (${route.path}), ${data}`, async () => {
         const main = await open(route, data === 'populated');
-        const rendered = textBlocks(main).join(' \n ');
+        const blocks = textBlocks(main);
+        // #670: on a list–detail route an item's own sentences — its facts,
+        // its actions — render on the SAME route once it is selected, where
+        // they used to be columns of the list. The union is what the route
+        // renders.
+        if (data === 'populated' && (await selectFixtureItem(route))) {
+          blocks.push(...textBlocks(main));
+        }
+        const rendered = blocks.join(' \n ');
         const lost = (record[key(route, data)] ?? []).filter(
           (sentence) => !rendered.includes(sentence),
         );

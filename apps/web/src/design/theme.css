@@ -83,6 +83,20 @@
   --oyl-measure: 68ch;
 
   /*
+   * The list–detail layout's two numbers (#670). `--oyl-list-detail-from` is
+   * THE breakpoint — 52.5rem, 840 px at the root size, Material 3's expanded
+   * window — and is written here and nowhere else: `shell/ListDetail.tsx`
+   * reads it back at run time to decide the panes, because a media query
+   * cannot read a custom property and the panes are decided in script (the
+   * audit loads no stylesheet, so a pane styled away would still look present
+   * to it). `rem` for the reason the header's query gives: a reader's larger
+   * default text moves the breakpoint with it. The list pane's width is fixed,
+   * Material's 360 dp, and the detail takes what is left.
+   */
+  --oyl-list-detail-from: 52.5rem;
+  --oyl-list-pane-width: 22.5rem;
+
+  /*
    * The parts of the screen the platform keeps for itself — a notch, a gesture
    * bar, a status bar — as four lengths (#423).
    *
@@ -502,6 +516,80 @@ h3:first-child {
  */
 .oyl-main--dashboard {
   max-width: none;
+}
+
+/*
+ * A list beside its detail (#670). The reading measure is dropped only while
+ * there ARE two panes — one pane keeps it, like every other read route — and
+ * `shell/ListDetail.tsx` decides the panes from `--oyl-list-detail-from`.
+ * `browser/list-detail.browser.spec.ts` measures both panes side by side on a
+ * landscape tablet, with this rule's route switched back to `prose` as the
+ * control.
+ */
+.oyl-main--list-detail:has(.oyl-list-detail--two) {
+  max-width: none;
+}
+
+.oyl-list-detail--two {
+  display: grid;
+  grid-template-columns: var(--oyl-list-pane-width) minmax(0, 1fr);
+  column-gap: var(--oyl-space-lg);
+  align-items: start;
+}
+
+.oyl-list-detail__list,
+.oyl-list-detail__detail {
+  position: relative;
+  min-width: 0;
+}
+
+/*
+ * The skip link between the panes: out of sight until it has focus, and
+ * then drawn where it is — not moved off the page, because inside a pane
+ * "off the top" is over the page's own summary.
+ */
+.oyl-pane-skip:not(:focus) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.oyl-pane-skip:focus {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+}
+
+/* One item of a pane's list: its link, and a line of facts. */
+.oyl-pane-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-pane-list__item {
+  padding: var(--oyl-space-sm) var(--oyl-space-md);
+  border: 1px solid var(--oyl-color-border);
+  border-radius: var(--oyl-radius);
+  overflow-wrap: anywhere;
+}
+
+/* The chosen item: a heavier edge, not a colour alone (SC 1.4.1), and `aria-current` says it. */
+.oyl-pane-list__item[aria-current='true'] {
+  border: 3px solid var(--oyl-color-accent);
+  padding: calc(var(--oyl-space-sm) - 2px) calc(var(--oyl-space-md) - 2px);
+}
+
+.oyl-pane-list__item a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  font-weight: 700;
 }
 
 .oyl-home {

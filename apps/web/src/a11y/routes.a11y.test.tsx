@@ -19,6 +19,10 @@
  * under a check named for what broke.
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
@@ -63,7 +67,18 @@ import {
   type Mounted,
 } from '../testing/mount';
 
+import { openRoute, selectFixtureItem } from '../testing/hierarchy-walk';
+import { answerTwoPanes } from '../testing/panes';
+import { SELECTED_HEADING_ID } from '../shell/ListDetail';
+import { hrefForSelection } from '../shell/routes';
+
 import { accessibleName, auditAccessibility, formatViolations, tabbableElements } from './audit';
+
+// `join` rather than `new URL(…, import.meta.url)`, which Vite rewrites into an asset URL.
+const THEME = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), '../design/theme.css'),
+  'utf8',
+);
 
 /**
  * A browser that can pair.
@@ -83,10 +98,13 @@ const CAPABLE: CapabilityProbe = { bluetooth: workingBluetooth(), secureContext:
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
 
 let mounted: Mounted | undefined;
+let restorePanes: (() => void) | undefined;
 
 afterEach(() => {
   mounted?.unmount();
   mounted = undefined;
+  restorePanes?.();
+  restorePanes = undefined;
   globalThis.location.hash = '';
 });
 
@@ -661,6 +679,87 @@ describe('criterion 5 — focus is managed on navigation', () => {
     expect(document.activeElement).toBe(document.querySelector('main'));
     expect(document.querySelector('h1')?.textContent).toBe(routeById('about').title);
   });
+});
+
+/**
+ * #670: every `list-detail` route of the table, over the populated fixture, at
+ * BOTH widths — one pane and two — with nothing chosen and with an item
+ * chosen. The loop above renders each route with no store, which draws none
+ * of the panes' contents.
+ */
+describe('#670 — a list beside its detail, at both widths', () => {
+  const listDetail = ALL_ROUTES.filter((route) => route.layout === 'list-detail');
+
+  function panes(): HTMLElement[] {
+    return queryAll<HTMLElement>(document, '[data-oyl-pane]').filter((pane) => !pane.hidden);
+  }
+
+  for (const route of listDetail) {
+    for (const wide of [false, true]) {
+      const width = wide ? 'two panes' : 'one pane';
+
+      it(`${route.id}, nothing chosen, ${width}: audit clean`, async () => {
+        restorePanes = answerTwoPanes(wide, THEME);
+        mounted = await openRoute(route, true);
+        expect(document.querySelector('h1')?.textContent).toBe(route.title);
+        expect(document.querySelector('main')?.classList.contains('oyl-main--list-detail')).toBe(
+          true,
+        );
+        expectClean(`${route.id}, nothing chosen, ${width}`);
+      });
+
+      it(`${route.id}, an item chosen, ${width}: audit clean, and the panes are named regions`, async () => {
+        restorePanes = answerTwoPanes(wide, THEME);
+        mounted = await openRoute(route, true);
+        expect(await selectFixtureItem(route)).toBe(true);
+        expect(document.getElementById(SELECTED_HEADING_ID)).not.toBeNull();
+        expectClean(`${route.id}, an item chosen, ${width}`);
+        const shown = panes();
+        // Two named regions side by side; one on a narrow window.
+        expect(shown.map((pane) => pane.getAttribute('data-oyl-pane'))).toEqual(
+          wide ? ['list', 'detail'] : ['detail'],
+        );
+        for (const pane of shown) {
+          expect(pane.tagName).toBe('SECTION');
+          const name =
+            pane.getAttribute('aria-label') ??
+            document.getElementById(pane.getAttribute('aria-labelledby') ?? '')?.textContent ??
+            '';
+          expect(name, `${route.id}: an unnamed pane`).not.toBe('');
+        }
+      });
+    }
+
+    it(`${route.id}: Enter on a list item moves focus to the detail pane's heading`, async () => {
+      restorePanes = answerTwoPanes(true, THEME);
+      mounted = await openRoute(route, true);
+      const item = document.querySelector<HTMLAnchorElement>(
+        '[data-oyl-pane="list"] a[data-oyl-select]',
+      );
+      expect(item, `${route.id}: no list item to choose`).not.toBeNull();
+      await activateWithKeyboard(item as HTMLAnchorElement);
+      await settle();
+      expect(globalThis.location.hash).toBe(
+        hrefForSelection(route, item?.getAttribute('data-oyl-select') ?? ''),
+      );
+      expect(document.activeElement?.id).toBe(SELECTED_HEADING_ID);
+      expect(
+        document.activeElement?.closest('[data-oyl-pane]')?.getAttribute('data-oyl-pane'),
+      ).toBe('detail');
+    });
+
+    it(`${route.id}: an unknown id is a stated "not found", never an empty pane`, async () => {
+      restorePanes = answerTwoPanes(true, THEME);
+      mounted = await openRoute(route, true);
+      globalThis.location.hash = hrefForSelection(route, 'no-such-item');
+      globalThis.dispatchEvent(new HashChangeEvent('hashchange'));
+      for (let round = 0; round < 10; round += 1) await settle();
+      const heading = document.getElementById(SELECTED_HEADING_ID);
+      expect(heading?.textContent).toMatch(/not found$/);
+      expect(heading?.closest('[data-oyl-pane]')?.getAttribute('data-oyl-pane')).toBe('detail');
+      expectClean(`${route.id}, an unknown id`);
+    });
+  }
 });
 
 describe('the document title follows the route', () => {

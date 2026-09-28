@@ -43,6 +43,16 @@
  * a box that scrolls sideways inside itself and lacks one of the three things
  * such a box needs. Each must turn the walk's own fault list non-empty —
  * without them, a page that rendered nothing would pass.
+ *
+ * ## The list–detail layout — #670
+ *
+ * Each measurement also carries the panes of a `list-detail` route
+ * ({@link ListDetailBoxes}), the rail's right edge and every primary button's
+ * place, for `list-detail.browser.spec.ts`. `?layout=prose` is that spec's
+ * control: before anything renders, the three `list-detail` routes of the
+ * real table are switched back to `prose`, which is the reading measure #670
+ * replaced. And a page opened WITH a hash keeps it, so a fresh load of
+ * `#/activities/selected/<id>` is a fresh load of that selection.
  */
 
 import { StrictMode, type JSX } from 'react';
@@ -59,7 +69,8 @@ import { VisuallyHidden } from '../src/design/VisuallyHidden';
 import { OSM_ATTRIBUTION } from '../src/map/basemap';
 import type { MapPort } from '../src/map/port';
 import { LOCAL_ATHLETE, localAthleteRecord } from '../src/local-athlete';
-import { ALL_ROUTES, matchHash, type RouteId } from '../src/shell/routes';
+import { PRIMARY_BUTTON_SELECTOR } from '../src/a11y/button-hierarchy';
+import { ALL_ROUTES, matchHash, type RouteId, type RouteLayout } from '../src/shell/routes';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
 import { webCryptoDigest } from '../src/transfer/browser';
 import type { TransferPort } from '../src/transfer/store-port';
@@ -67,6 +78,7 @@ import {
   PARAMETERS,
   POPULATED,
   PopulatedShell,
+  SELECTIONS,
   type PopulatedExpectation,
 } from '../src/testing/populated-shell';
 
@@ -77,6 +89,32 @@ import '../src/design/theme.css';
 const QUIET_MS = 250;
 /** The most a route is waited for, first for its `h1` and then for quiet. */
 const PATIENCE_MS = 10_000;
+
+/** A box in CSS px from the viewport's top-left, as `getBoundingClientRect` gives it. */
+export interface Box {
+  readonly left: number;
+  readonly right: number;
+  readonly top: number;
+  readonly bottom: number;
+}
+
+/** A `list-detail` route's panes — #670. A hidden pane has no box. */
+export interface ListDetailBoxes {
+  /** `data-oyl-panes`: how many panes `ListDetail` decided on. */
+  readonly panes: string | null;
+  readonly container: Box;
+  readonly list: Box | null;
+  readonly detail: Box | null;
+}
+
+/** A primary button's place, in CSS px from the top of the DOCUMENT. */
+export interface PrimaryPlace {
+  readonly text: string;
+  readonly top: number;
+  readonly bottom: number;
+  /** Which pane holds it, or `null` outside any. */
+  readonly pane: string | null;
+}
 
 /** One box that scrolls sideways inside itself, and what a keyboard user gets. */
 export interface ScrollBox {
@@ -144,6 +182,14 @@ export interface ReflowMeasurement {
   readonly sections: readonly SectionProse[];
   /** Every `<details>` in `main`, and how many of them are open as measured. */
   readonly disclosures: { readonly total: number; readonly open: number };
+  /** The list–detail panes, or `null` on a route that has none — #670. */
+  readonly listDetail: ListDetailBoxes | null;
+  /** The right edge of the navigation RAIL, or `0` where it is a bar or absent. */
+  readonly railRight: number;
+  /** Every primary button in `main` that is laid out — #670's published positions. */
+  readonly primaries: readonly PrimaryPlace[];
+  /** The `main` element's layout class, e.g. `oyl-main--list-detail`. */
+  readonly mainLayout: string | null;
 }
 
 /**
@@ -188,6 +234,8 @@ declare global {
       readonly errors: readonly string[];
       readonly data: 'empty' | 'populated';
       readonly parameters: Partial<Record<RouteId, string>>;
+      /** The item each `list-detail` route selects in the populated fixture — #670. */
+      readonly selections: Partial<Record<RouteId, string>>;
       readonly populated: Partial<Record<RouteId, PopulatedExpectation>>;
       readonly visit: (hash: string) => Promise<ReflowMeasurement>;
       /** Every id in `ALL_ROUTES` this page has not rendered. */
@@ -710,6 +758,54 @@ function removeInlineCopies(): void {
   }
 }
 
+function boxOf(element: Element | null): Box | null {
+  if (element === null || !laidOut(element)) {
+    return null;
+  }
+  const box = element.getBoundingClientRect();
+  return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
+}
+
+function listDetailBoxes(): ListDetailBoxes | null {
+  const container = document.querySelector('main .oyl-list-detail');
+  const box = boxOf(container);
+  if (container === null || box === null) {
+    return null;
+  }
+  return {
+    panes: container.getAttribute('data-oyl-panes'),
+    container: box,
+    list: boxOf(container.querySelector('[data-oyl-pane="list"]')),
+    detail: boxOf(container.querySelector('[data-oyl-pane="detail"]')),
+  };
+}
+
+function railRight(): number {
+  const nav = document.querySelector('.oyl-nav');
+  if (nav === null || getComputedStyle(nav).position !== 'fixed') {
+    return 0;
+  }
+  const box = nav.getBoundingClientRect();
+  // A rail down the side, not a bar across the bottom.
+  return box.height >= window.innerHeight / 2 && box.left < window.innerWidth / 2 ? box.right : 0;
+}
+
+function primaries(): PrimaryPlace[] {
+  const main = document.querySelector('main');
+  if (main === null) {
+    return [];
+  }
+  return [...main.querySelectorAll(PRIMARY_BUTTON_SELECTOR)].filter(laidOut).map((element) => {
+    const box = element.getBoundingClientRect();
+    return {
+      text: (element.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 60),
+      top: box.top + window.scrollY,
+      bottom: box.bottom + window.scrollY,
+      pane: element.closest('[data-oyl-pane]')?.getAttribute('data-oyl-pane') ?? null,
+    };
+  });
+}
+
 async function visit(hash: string): Promise<ReflowMeasurement> {
   const control = new URLSearchParams(window.location.search).get('control');
   removeInlineCopies();
@@ -757,7 +853,30 @@ async function visit(hash: string): Promise<ReflowMeasurement> {
       total: document.querySelectorAll('main details').length,
       open: document.querySelectorAll('main details[open]').length,
     },
+    listDetail: listDetailBoxes(),
+    railRight: railRight(),
+    primaries: primaries(),
+    mainLayout:
+      [...(document.querySelector('main')?.classList ?? [])].find((name) =>
+        name.startsWith('oyl-main--'),
+      ) ?? null,
   };
+}
+
+/**
+ * `?layout=prose` — #670's control. The `list-detail` routes of the REAL
+ * table go back to the reading measure before anything renders, so the
+ * spec's width assertion must fail on them.
+ */
+function applyLayoutControl(): void {
+  if (new URLSearchParams(window.location.search).get('layout') !== 'prose') {
+    return;
+  }
+  for (const route of ALL_ROUTES) {
+    if (route.layout === 'list-detail') {
+      (route as { layout: RouteLayout }).layout = 'prose';
+    }
+  }
 }
 
 function main(): void {
@@ -769,7 +888,11 @@ function main(): void {
   if (data !== 'empty' && data !== 'populated') {
     throw new Error(`reflow harness: ?data must be "empty" or "populated", not ${String(data)}`);
   }
-  window.location.hash = '#/';
+  applyLayoutControl();
+  // A page opened with a hash keeps it (#670: a fresh load of a selection).
+  if (window.location.hash === '') {
+    window.location.hash = '#/';
+  }
   flushSync(() => {
     createRoot(host).render(<StrictMode>{shell(data === 'populated')}</StrictMode>);
   });
@@ -778,6 +901,7 @@ function main(): void {
     errors,
     data,
     parameters: PARAMETERS,
+    selections: SELECTIONS,
     populated: POPULATED,
     visit,
     unvisited: () => ALL_ROUTES.map((route) => route.id).filter((id) => !visited.has(id)),
@@ -835,6 +959,7 @@ try {
     errors,
     data: 'empty',
     parameters: PARAMETERS,
+    selections: SELECTIONS,
     populated: POPULATED,
     visit: () => Promise.reject(new Error('the reflow harness did not start')),
     unvisited: () => ALL_ROUTES.map((route) => route.id),

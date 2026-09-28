@@ -29,6 +29,7 @@ import {
   typeInto,
   type Mounted,
 } from '../testing/mount';
+import { liveRegionsSaying, timesSaid } from '../testing/said-once';
 import type { DownloadableFile } from '../transfer/store-port';
 import { WORKOUT_LIST_LIMIT } from '../workouts/store-port';
 import { workoutStub, type WorkoutStub } from '../workouts/testing';
@@ -58,8 +59,16 @@ function workout(overrides: Partial<WorkoutRecord> = {}): WorkoutRecord {
   };
 }
 
-async function render(stub: WorkoutStub | undefined, now = 1_700_000_500): Promise<Mounted> {
-  const view = await mount(<WorkoutsView port={stub} now={() => now} />);
+/**
+ * `selected` is the id in `#/workouts/selected/<id>` — #670. A saved workout's
+ * own facts and controls are drawn once it is chosen, in the detail pane.
+ */
+async function render(
+  stub: WorkoutStub | undefined,
+  now = 1_700_000_500,
+  selected?: string,
+): Promise<Mounted> {
+  const view = await mount(<WorkoutsView port={stub} now={() => now} selected={selected} />);
   await settle();
   mounted = view;
   return view;
@@ -74,6 +83,7 @@ async function renderWithSave(
     <WorkoutsView
       port={stub}
       now={() => now}
+      selected="workout-1"
       save={(file) => {
         saved.push(file);
       }}
@@ -112,7 +122,7 @@ function field(root: ParentNode, id: string): HTMLInputElement {
 
 describe('the library', () => {
   it('lists a saved workout by name, length and shape', async () => {
-    const view = await render(workoutStub(ATHLETE, [workout()]));
+    const view = await render(workoutStub(ATHLETE, [workout()]), undefined, 'workout-1');
     const text = view.container.textContent ?? '';
     expect(text).toContain('Sweet spot');
     expect(text).toContain('10 min');
@@ -260,14 +270,14 @@ describe('building a workout', () => {
 
 describe('deleting a workout asks first', () => {
   it('names the workout in the confirmation', async () => {
-    const view = await render(workoutStub(ATHLETE, [workout()]));
+    const view = await render(workoutStub(ATHLETE, [workout()]), undefined, 'workout-1');
     await activateWithKeyboard(buttonSaying(view.container, 'Delete Sweet spot') as HTMLElement);
     expect(view.container.textContent).toContain('Delete “Sweet spot”?');
   });
 
   it('keeps it when the rider says so', async () => {
     const stub = workoutStub(ATHLETE, [workout()]);
-    const view = await render(stub);
+    const view = await render(stub, undefined, 'workout-1');
     await activateWithKeyboard(buttonSaying(view.container, 'Delete Sweet spot') as HTMLElement);
     await activateWithKeyboard(buttonSaying(view.container, 'Keep it') as HTMLElement);
     await settle();
@@ -276,12 +286,15 @@ describe('deleting a workout asks first', () => {
 
   it('deletes it on the second press, and the row goes', async () => {
     const stub = workoutStub(ATHLETE, [workout()]);
-    const view = await render(stub);
+    const view = await render(stub, undefined, 'workout-1');
     await activateWithKeyboard(buttonSaying(view.container, 'Delete Sweet spot') as HTMLElement);
     await activateWithKeyboard(buttonSaying(view.container, 'Delete “Sweet spot”') as HTMLElement);
     await settle();
-
     expect(stub.rows()).toEqual([]);
+    // What the shell does when the delete moves the hash back to the list:
+    // the builder is drawn again, and the sentence with it.
+    await view.rerender(<WorkoutsView port={stub} now={() => 1_700_000_500} />);
+    await settle();
     expect(view.container.textContent).toContain('Deleted “Sweet spot”');
   });
 });
@@ -291,7 +304,7 @@ describe('what this screen does not claim', () => {
     // ⚠️ Every such number is a function of the rider's threshold, and this
     // screen deliberately holds none. A workout is threshold-independent, which
     // is the whole reason a target is a share.
-    const view = await render(workoutStub(ATHLETE, [workout()]));
+    const view = await render(workoutStub(ATHLETE, [workout()]), undefined, 'workout-1');
     const text = view.container.textContent ?? '';
     expect(text).not.toMatch(/\d\s?W\b/);
     expect(text.toLowerCase()).not.toContain('stress');
@@ -312,7 +325,7 @@ describe('a workout can leave as a file and come back — #202, ADR 0017', () =>
   it('does not offer an export this build cannot perform', async () => {
     // Offered and inert is worse than absent: a rider presses it, nothing
     // happens, and there is nothing on the screen that says why.
-    const view = await render(workoutStub(ATHLETE, [workout()]));
+    const view = await render(workoutStub(ATHLETE, [workout()]), undefined, 'workout-1');
     expect(buttonSaying(view.container, 'Export Sweet spot')).toBeUndefined();
     expect(buttonSaying(view.container, 'Delete Sweet spot')).toBeDefined();
   });
@@ -322,5 +335,171 @@ describe('a workout can leave as a file and come back — #202, ADR 0017', () =>
     const view = await render(stub);
     await submitForm(formOf(field(view.container, 'workout-file')));
     expect(view.container.textContent ?? '').toContain('Choose a workout file');
+  });
+});
+
+describe('#670 — a selected workout', () => {
+  it('is read on its own when the list did not hold it, rather than called "not found"', async () => {
+    // The list is bounded (WORKOUT_LIST_LIMIT); a reload or a shared link can
+    // name one past it. A stub whose list leaves it out stands for that.
+    const stub = workoutStub(ATHLETE, [workout()]);
+    const asked: string[] = [];
+    const port: WorkoutStub = {
+      ...stub,
+      store: {
+        ...stub.store,
+        listWorkouts: () => Promise.resolve([]),
+        getWorkout: (owner, id) => {
+          asked.push(id);
+          return stub.store.getWorkout(owner, id);
+        },
+      },
+    };
+    const view = await render(port, undefined, 'workout-1');
+    await settle();
+    expect(asked).toEqual(['workout-1']);
+    expect(view.container.querySelector('#oyl-selected-heading')?.textContent).toBe('Sweet spot');
+  });
+
+  it('says a workout this device does not hold is not found', async () => {
+    const view = await render(workoutStub(ATHLETE, [workout()]), undefined, 'nobody-knows');
+    await settle();
+    expect(view.container.querySelector('#oyl-selected-heading')?.textContent).toBe(
+      'Workout not found',
+    );
+    // #670's review (N1): the builder is not drawn under a chosen workout;
+    // the list's *Build a workout* is the way back to it, and the primary.
+    expect(view.container.querySelector('#workout-name')).toBeNull();
+    const build = view.container.querySelector('[data-oyl-pane="list"] a[data-oyl-create]');
+    expect(build?.textContent).toBe('Build a workout');
+    expect(build?.getAttribute('href')).toBe('#/workouts');
+    expect(build?.className).toBe('oyl-button');
+  });
+
+  it('says another athlete’s workout is not found, even though this device holds it', async () => {
+    // #670's review (N3): the id is on the device, under somebody else.
+    const stub = workoutStub(ATHLETE, [workout({ createdBy: toAthleteId('athlete-b') })]);
+    const view = await render(stub, undefined, 'workout-1');
+    await settle();
+    expect(view.container.querySelector('#oyl-selected-heading')?.textContent).toBe(
+      'Workout not found',
+    );
+    expect(view.container.textContent).not.toContain('Sweet spot');
+  });
+
+  it('with nothing chosen, draws the builder, and the list’s way to it is secondary', async () => {
+    const view = await render(workoutStub(ATHLETE, [workout()]));
+    expect(view.container.querySelector('#workout-name')).not.toBeNull();
+    const build = view.container.querySelector('[data-oyl-pane="list"] a[data-oyl-create]');
+    expect(build?.className).toBe('oyl-button oyl-button--secondary');
+  });
+
+  it('keeps the name typed into the builder across choosing a workout and coming back', async () => {
+    // #670's second review: choosing a workout unmounts the builder, and the
+    // name box was uncontrolled — the blocks came back and the name did not.
+    const stub = workoutStub(ATHLETE, [workout()]);
+    const view = await render(stub);
+    await typeInto(field(view.container, 'block-minutes'), '10');
+    await typeInto(field(view.container, 'block-percent'), '65');
+    await activateWithKeyboard(buttonSaying(view.container, 'Add block') as HTMLElement);
+    await typeInto(field(view.container, 'workout-name'), 'Tempo');
+    await view.rerender(
+      <WorkoutsView port={stub} now={() => 1_700_000_500} selected="workout-1" />,
+    );
+    await settle();
+    expect(view.container.querySelector('#workout-name')).toBeNull();
+    await view.rerender(<WorkoutsView port={stub} now={() => 1_700_000_500} />);
+    await settle();
+    expect(field(view.container, 'workout-name').value).toBe('Tempo');
+    await activateWithKeyboard(buttonSaying(view.container, 'Save workout') as HTMLElement);
+    await settle();
+    expect(stub.rows().map((row) => row.name)).toContain('Tempo');
+  });
+
+  it('does not bring back what the builder last said after a workout is chosen', async () => {
+    // #670's second review: the builder's messages outlived a visit to a
+    // chosen workout and came back in a re-mounted live region.
+    const stub = workoutStub(ATHLETE, [workout()]);
+    const view = await render(stub);
+    await typeInto(field(view.container, 'block-minutes'), '10');
+    await typeInto(field(view.container, 'block-percent'), '65');
+    await activateWithKeyboard(buttonSaying(view.container, 'Add block') as HTMLElement);
+    await typeInto(field(view.container, 'workout-name'), 'Tempo');
+    await activateWithKeyboard(buttonSaying(view.container, 'Save workout') as HTMLElement);
+    await settle();
+    await submitForm(formOf(field(view.container, 'workout-file')));
+    expect(view.container.textContent).toContain('Saved “Tempo”.');
+    expect(view.container.textContent).toContain('Choose a workout file to import.');
+    await view.rerender(
+      <WorkoutsView port={stub} now={() => 1_700_000_500} selected="workout-1" />,
+    );
+    await settle();
+    await view.rerender(<WorkoutsView port={stub} now={() => 1_700_000_500} />);
+    await settle();
+    expect(view.container.textContent).not.toContain('Saved “Tempo”.');
+    expect(view.container.textContent).not.toContain('Choose a workout file to import.');
+    expect(queryAll(view.container, '[role="status"], [aria-live]').length).toBe(0);
+  });
+
+  it('goes back to the list once the chosen workout is deleted', async () => {
+    globalThis.location.hash = '#/workouts/selected/workout-1';
+    const stub = workoutStub(ATHLETE, [workout()]);
+    const view = await render(stub, undefined, 'workout-1');
+    await activateWithKeyboard(buttonSaying(view.container, 'Delete Sweet spot') as HTMLElement);
+    await activateWithKeyboard(buttonSaying(view.container, 'Delete “Sweet spot”') as HTMLElement);
+    await settle();
+    expect(globalThis.location.hash).toBe('#/workouts');
+    globalThis.location.hash = '';
+  });
+});
+
+/**
+ * #670's review (B1): a message rendered twice is invisible to `toContain`;
+ * these count what is said, and in how many live regions.
+ */
+describe('each message is said once, in one live region', () => {
+  function saidOnce(root: Element, text: string): void {
+    expect(timesSaid(root, text), `“${text}” is on the screen`).toBe(1);
+    expect(liveRegionsSaying(root, text), `“${text}” is in live regions`).toBe(1);
+  }
+
+  it('after a delete', async () => {
+    const stub = workoutStub(ATHLETE, [workout()]);
+    const view = await render(stub, undefined, 'workout-1');
+    await activateWithKeyboard(buttonSaying(view.container, 'Delete Sweet spot') as HTMLElement);
+    await activateWithKeyboard(buttonSaying(view.container, 'Delete “Sweet spot”') as HTMLElement);
+    await settle();
+    await view.rerender(<WorkoutsView port={stub} now={() => 1_700_000_500} />);
+    await settle();
+    saidOnce(view.container, 'Deleted “Sweet spot”.');
+  });
+
+  it('after a refused import', async () => {
+    const view = await render(workoutStub(ATHLETE));
+    await submitForm(formOf(field(view.container, 'workout-file')));
+    saidOnce(view.container, 'Choose a workout file to import.');
+  });
+
+  it('after a save', async () => {
+    const view = await render(workoutStub(ATHLETE));
+    await typeInto(field(view.container, 'block-minutes'), '10');
+    await typeInto(field(view.container, 'block-percent'), '65');
+    await activateWithKeyboard(buttonSaying(view.container, 'Add block') as HTMLElement);
+    await typeInto(field(view.container, 'workout-name'), 'Tempo');
+    await activateWithKeyboard(buttonSaying(view.container, 'Save workout') as HTMLElement);
+    await settle();
+    saidOnce(view.container, 'Saved “Tempo”.');
+  });
+
+  it('after a refused save', async () => {
+    const view = await render(workoutStub(ATHLETE));
+    await typeInto(field(view.container, 'workout-name'), 'Empty');
+    await activateWithKeyboard(buttonSaying(view.container, 'Save workout') as HTMLElement);
+    await settle();
+    const refusal = queryAll(view.container, '.oyl-status')
+      .map((element) => element.textContent ?? '')
+      .find((text) => text.includes('Add at least one block'));
+    expect(refusal).toBeDefined();
+    saidOnce(view.container, 'Add at least one block');
   });
 });
