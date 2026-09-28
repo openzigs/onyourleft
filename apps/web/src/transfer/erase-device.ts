@@ -261,8 +261,9 @@ export interface EraseOutcome {
  * Thin on purpose where the store is concerned: the cascade, its transaction
  * and its exhaustiveness are `packages/store`'s, and duplicating any of that
  * here would be a second place for the table list to be wrong. What this adds
- * is the decision, the words, the things on this device `deleteAthlete` cannot reach (a half-drawn route, the palette choice), and
- * the row that has to exist afterwards.
+ * is the decision, the words, the things on this device `deleteAthlete`
+ * cannot reach (a half-drawn route, the palette choice), and the row that has
+ * to exist afterwards.
  *
  * The order matters. The drafts are forgotten **after** the cascade, so a
  * failed delete does not lose a half-drawn route for nothing; the row is
