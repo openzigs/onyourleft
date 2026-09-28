@@ -59,6 +59,8 @@ import type { GamePort } from '../game/GameView';
 import { NO_SENSORS } from '../game/sensors';
 import { stubAnalysis } from '../analysis/testing';
 import { CameraController } from '../camera/session';
+import type { SidePairingPort } from '../camera/side-pairing-port';
+import { scriptedSidePairing } from '../camera/testing';
 import { SIDE_OBSERVATION_SENTENCES, SIDE_REPORT_OBSERVED } from '../camera/side-report-wording';
 import { stubActivity, stubDetail, stubLap } from '../detail/testing';
 import { stubEffortPort } from '../efforts/testing';
@@ -146,11 +148,12 @@ export const POPULATED: Record<RouteId, PopulatedExpectation> = {
   transfer: {
     kind: 'none',
     reason:
-      'handed no transfer port, so it shows its not-available state in both walks; its forms with a store behind them are NOT walked here',
+      'where a caller hands it a transfer port (#666: the reflow page, over the browser’s own IndexedDB, and the sentence walk, over fake-indexeddb) that store is empty in both walks; where none is handed it shows its not-available state in both',
   },
   camera: {
     kind: 'none',
-    reason: 'the camera this page hands it opens nothing, so it is the same in both walks',
+    reason:
+      'the camera this page hands it opens nothing, and its side-camera pairing is offered and never made, so it is the same in both walks',
   },
   settings: {
     kind: 'none',
@@ -164,7 +167,7 @@ export const POPULATED: Record<RouteId, PopulatedExpectation> = {
   },
   'side-camera': {
     kind: 'none',
-    reason: 'handed no pairing, so it shows its before-pairing state in both walks',
+    reason: 'no pairing is ever made, so it shows its before-pairing state in both walks',
   },
   'not-found': { kind: 'none', reason: 'static: a heading and the route list' },
 };
@@ -322,6 +325,25 @@ function quietCamera(): CameraController {
 }
 
 /**
+ * A side-camera pairing that is OFFERED and never made — #666.
+ *
+ * `main.tsx` builds one wherever this browser can make the direct link, which
+ * is most of them, and the Camera screen's first control is the way in it
+ * offers (#557). Without it this fixture measured the rarer screen, where no
+ * side camera can be paired. It is the scripted port the unit tests use with
+ * no current pairing, so the ride screens show no side camera and nothing is
+ * ever connected.
+ */
+function unpairedSideCamera(): SidePairingPort {
+  const scripted = scriptedSidePairing();
+  return {
+    offerSideCamera: () => scripted.offerSideCamera(),
+    currentSideCamera: () => undefined,
+    answerSideCamera: (code) => scripted.answerSideCamera(code),
+  };
+}
+
+/**
  * The trainer game's routes. Populated: one route with a long name, which the
  * picker lists with its ghost checkbox. No ride is started — this page has no
  * renderer — so the sensors are never read.
@@ -347,11 +369,14 @@ function gamePort(populated: boolean): GamePort {
 }
 
 /**
- * What a caller supplies that this fixture does not — a map and its basemap —
- * or replaces: the ride controller, for a state of the ride screen neither
+ * What a caller supplies that this fixture does not — a map and its basemap,
+ * and a transfer port, which needs a real store (#666) — or replaces: the ride controller, for a state of the ride screen neither
  * fixture reaches (the one-primary gate's paused-with-a-stop-armed case).
  */
-export type PopulatedShellExtras = Pick<AppShellProps, 'map' | 'basemap' | 'rideController'>;
+export type PopulatedShellExtras = Pick<
+  AppShellProps,
+  'map' | 'basemap' | 'rideController' | 'transfer'
+>;
 
 /** The real `AppShell` over the empty or the populated fixture. */
 export function PopulatedShell({
@@ -442,6 +467,7 @@ export function PopulatedShell({
           : [],
       )}
       game={gamePort(populated)}
+      sidePairing={unpairedSideCamera()}
       {...extras}
     />
   );

@@ -17,7 +17,12 @@ import type { RideController } from '../ride/controller';
 import { hrefFor, type RouteDefinition } from '../shell/routes';
 
 import { mount, settle, type Mounted } from './mount';
-import { PARAMETERS, POPULATED, PopulatedShell } from './populated-shell';
+import {
+  PARAMETERS,
+  POPULATED,
+  PopulatedShell,
+  type PopulatedShellExtras,
+} from './populated-shell';
 
 function hashFor(route: RouteDefinition): string {
   if (!route.path.split('/').some((segment) => segment.startsWith(':'))) {
@@ -46,11 +51,13 @@ export async function openRoute(
   route: RouteDefinition,
   populated: boolean,
   rideController?: RideController,
+  extras: Omit<PopulatedShellExtras, 'rideController'> = {},
 ): Promise<Mounted> {
   globalThis.location.hash = hashFor(route);
   const mounted = await mount(
     <PopulatedShell
       populated={populated}
+      {...extras}
       {...(rideController === undefined ? {} : { rideController })}
     />,
   );
