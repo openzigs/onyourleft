@@ -230,6 +230,20 @@ function LiveRide({
         */}
         <RideControls controller={controller} snapshot={snapshot} />
         <SideCameraOnRide state={sideCamera.state} onStop={sideCamera.stop} />
+        {snapshot.notificationNotice !== undefined && rideInProgress(snapshot.phase) ? (
+          // #526: set once, on the ride where the rider refused the permission,
+          // and it stands for the rest of that ride. ⚠️ AFTER every ride
+          // control since #692 — the side camera's *Stop side camera* too —
+          // and a reviewer who remembers it above *Pause*, inside
+          // `RideControls`, is reading the old file: there, on the owner's
+          // tablet in the Android shell, its 156 px put *Pause* / *Stop*
+          // 77.9 px UNDER the fold — the controls that end a recording, off
+          // the screen, on the one platform that shows this sentence.
+          // `rideInProgress` is the branch of `RideControls` it rendered in.
+          <StatusMessage tone="info" label="No notification" live>
+            {snapshot.notificationNotice}
+          </StatusMessage>
+        ) : null}
         <StorageNotice snapshot={snapshot} />
         <MetricGrid metrics={snapshot.metrics} />
         <p className="oyl-ride__clock">
@@ -578,18 +592,6 @@ function RideControls({
           </div>
         </>
       ) : null}
-      {snapshot.notificationNotice === undefined ? null : (
-        // #526: set once, on the ride where the rider refused the permission,
-        // and it stands for the rest of that ride. ⚠️ AFTER the controls since
-        // #692, and a reviewer who remembers it above *Pause* is reading the
-        // old file: there, on the owner's tablet in the Android shell, its
-        // 156 px put *Pause* / *Stop* 77.9 px UNDER the fold — the controls
-        // that end a recording, off the screen, on the one platform that shows
-        // this sentence. `theme.css` §`.oyl-ride` has the table.
-        <StatusMessage tone="info" label="No notification" live>
-          {snapshot.notificationNotice}
-        </StatusMessage>
-      )}
     </>
   );
 }

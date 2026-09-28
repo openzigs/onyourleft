@@ -816,6 +816,9 @@ const EVERY_NOTICE = {
   labels: STANDING_NOTICES.flatMap((each) => each.labels),
 };
 
+/** Live-group notices that are not standing IN the column. @see the #692 case */
+const NOT_IN_THE_COLUMN: readonly string[] = ['Keep the screen on:', 'Side camera:'];
+
 function lowestOf(among: readonly RideViewControl[]): RideViewControl {
   return among.reduce((low, each) => (each.box.bottom > low.box.bottom ? each : low));
 }
@@ -863,6 +866,24 @@ for (const viewport of EASED_VIEWPORTS) {
 
         expect(during.filter((each) => !onScreen(each, viewport)).map(describeControl)).toEqual([]);
         expect(controlMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+
+        // The rule itself, in the Live column: no standing notice starts above
+        // a ride control's end. Two are not standing in that column: #647's is
+        // BESIDE the heading, above everything by the owner's ruling, and the
+        // side camera's own line is the label of the control under it. ⚠️ This
+        // is what the CI runner's first run of #692 found — *No notification*
+        // still inside `RideControls`, over *Stop side camera* (66.3 px).
+        const liveControls = during.filter((each) => each.group === 'live');
+        const lowestLive = lowestOf(liveControls);
+        const above = seen.notices.filter(
+          (each) =>
+            each.group === 'live' &&
+            !NOT_IN_THE_COLUMN.includes(each.label) &&
+            each.box.top < lowestLive.box.bottom,
+        );
+        expect(
+          above.map((each) => `${each.label} starts above ${describeControl(lowestLive)}`),
+        ).toEqual([]);
         for (const notice of standing) {
           expect(notice.onTop, `${notice.label} is covered`).toBe(true);
           expect(notice.box.top, `${notice.label} starts under the bars`).toBeGreaterThanOrEqual(
