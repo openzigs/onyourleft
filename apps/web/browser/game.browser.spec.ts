@@ -3611,9 +3611,10 @@ const AIR_CONTROL_AGREEMENT = 0.02;
  * ⚠️ **A tenth, not the quarter #703 shipped with (#708), and the tenth is
  * measured rather than chosen.** The largest residual on the unmutated build is
  * **0.3 bytes** (towards the sun, channel 2: 3.8 drawn against 3.5 predicted;
- * the valley's worst is 0.2), and three local runs and #703's CI run printed
- * the same figures to the tenth of a byte — so the fixed part alone covers the
- * residual five times over and the share is headroom, not the fit. At a quarter
+ * the valley's worst is 0.2). Three local runs printed identical figures, and
+ * #708's CI run (36374305671) read every shift within 0.1 byte of them with
+ * the same 0.3 worst — so the fixed part alone covers the residual five times
+ * over and the share is headroom, not the fit. At a quarter
  * a fog leaning at HALF strength missed by 3.64 bytes against a bound of 3.30
  * on one channel of six and passed the other five: #621's lesson from below.
  * At a tenth the same mutation misses channels 0 and 1 towards the sun and
