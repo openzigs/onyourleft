@@ -765,9 +765,10 @@ export interface RideController {
    *
    * #695: a trainer this app holds is let go first, through the one release
    * (an FTMS Stop, joined with any already in flight), and a running workout
-   * is ended. Returns at once; the sensors are detached when that release
-   * settles, whichever way it went, so the Stop reaches the wire before the
-   * client is closed. Idempotent.
+   * is ended. Returns at once. Readings stop at once and every command finds
+   * no trainer from then on; the rest of each sensor is detached when that
+   * release settles, whichever way it went, so the Stop reaches the wire
+   * before the client is closed. Idempotent.
    */
   dispose(): void;
 }
@@ -776,6 +777,12 @@ interface SensorEntry {
   readonly device: SensorDevice;
   readonly role: PairingRole;
   readonly release: Unsubscribe[];
+  /**
+   * The measurement subscriptions, apart from {@link release} — #695's
+   * review. `dispose` drops these at once, and keeps the connection-state
+   * observer and `onControlLost` until its release settles.
+   */
+  readonly measurements: Unsubscribe[];
   state: ConnectionState;
   trainer: TrainerConnection | undefined;
   /** What the machine offers, whether or not this app will drive it (#370). */
@@ -1310,6 +1317,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       device,
       role,
       release: [],
+      measurements: [],
       state: transport.connectionState(id),
       trainer: undefined,
       controlChoice: NO_TRAINER_CONTROL,
@@ -1362,7 +1370,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       if (capability === 'trainer-control') {
         continue;
       }
-      entry.release.push(await transport.subscribe(id, capability, onMeasurement));
+      entry.measurements.push(await transport.subscribe(id, capability, onMeasurement));
     }
 
     if (entry.role === 'trainer' && openTrainer !== undefined) {
@@ -1441,7 +1449,15 @@ export function createRideController(options: RideControllerOptions): RideContro
     }
   };
 
+  /** Stop listening to a sensor's readings. Idempotent. */
+  const unsubscribeMeasurements = (entry: SensorEntry): void => {
+    for (const release of entry.measurements.splice(0)) {
+      release();
+    }
+  };
+
   const detach = (entry: SensorEntry): void => {
+    unsubscribeMeasurements(entry);
     for (const release of entry.release.splice(0)) {
       release();
     }
@@ -2081,14 +2097,17 @@ export function createRideController(options: RideControllerOptions): RideContro
       }
       return {
         setSimulationParameters: (parameters) => {
+          // #695: after `dispose`, whose release outlives this call. Checked
+          // BEFORE `leaving`, because a dispose lets the trainer go through
+          // `letGoBeforeForgetting` too and nothing is being forgotten — the
+          // reason has to say what actually happened (#695's review).
+          if (disposed) {
+            return Promise.reject(new Error(RIDE_CONTROLLER_DISPOSED));
+          }
           // #659's review: the trainer is being let go so it can be
           // forgotten, and a gradient after that Stop would take it back.
           if (leaving.has(client)) {
             return Promise.reject(new Error(TRAINER_BEING_FORGOTTEN));
-          }
-          // #695: the same after `dispose`, whose release outlives this call.
-          if (disposed) {
-            return Promise.reject(new Error(RIDE_CONTROLLER_DISPOSED));
           }
           // #567: a gradient takes the machine out of ERG, so a hand-set
           // target's rescue writing a 0x05 under a game ride would put it back.
@@ -2165,24 +2184,54 @@ export function createRideController(options: RideControllerOptions): RideContro
       // rescue (`releaseTrainer` does), sends nothing when nothing is held, and
       // never rejects.
       //
-      // ⚠️ Synchronous, fire-and-forget: the release is started here and the
-      // sensors are detached only once it SETTLES, so `close()` cannot cut the
-      // Stop off. Emptied now, though, so every command from here on finds no
-      // trainer to write to; a game's gradient handle, which holds the client
-      // itself, is refused by `disposed` in `simulationControl`.
+      // ⚠️ Synchronous, fire-and-forget: the release is started here and each
+      // sensor is detached only once it SETTLES, so `close()` cannot cut the
+      // Stop off.
+      //
+      // ⚠️ **Detaching late does NOT keep anything else off the wire, and a
+      // reader who takes it to is reading it backwards** (#695's review,
+      // measured with the Stop's answer held back): a procedure queued behind
+      // the Stop runs BEFORE the settled release reaches `detach` and
+      // `close()`, so a target, a Request Control or a rescue's 0x05 queued in
+      // that window would land after the Stop. What keeps them off is, in
+      // order: `sensors.clear()` below, so every controller command from here
+      // on finds no trainer (`setTargetPower`, `requestTrainerControl`,
+      // `startWorkout`); `releaseTrainer`'s own `endManualErg`, which ends a
+      // hand-set target's rescue before the Stop is queued; and `disposed`
+      // and `leaving`, which refuse a game's gradient handle — it holds the
+      // client itself and never looks in the sensor map.
       const entries = [...sensors.values()];
       const trainer = trainerEntry();
       const released =
         trainer === undefined ? Promise.resolve(true) : letGoBeforeForgetting(trainer);
       sensors.clear();
       listeners.clear();
+      // The readings stop now (#695's review): a disposed controller must not
+      // go on feeding its recorder, moving its phase or announcing changes for
+      // up to a procedure timeout per queued write — and a rescue gets no new
+      // cadence to judge. The connection-state observer and `onControlLost`
+      // stay until the release settles, exactly as for any other release: the
+      // first so a link that drops mid-Stop rejects it rather than leaving it
+      // waiting, the second so the Stop runs against the same listeners the
+      // 0xFF-before-the-answer test pins.
+      for (const entry of entries) {
+        unsubscribeMeasurements(entry);
+      }
       void released
         .catch(() => false)
         .then(() => {
+          // Each entry on its own (#695's review): a transport whose
+          // unsubscribe throws, or a `close()` that does, must not leave the
+          // entries after it attached, nor surface as an unhandled rejection.
           for (const entry of entries) {
-            detach(entry);
+            try {
+              detach(entry);
+            } catch {
+              // Nobody is left to tell; the next entry still lets go.
+            }
           }
-        });
+        })
+        .catch(() => undefined);
     },
   };
 
