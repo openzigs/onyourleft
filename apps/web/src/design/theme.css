@@ -3108,6 +3108,24 @@ p > label + input[type='file'] {
   outline-offset: 2px;
 }
 
+/* #748: EVERY keyboard focus ring on the HUD is the HUD's own ink, not only
+   the `.oyl-hud__control`s'. The mute toggle, the volume and the side
+   camera's Stop took the page's `:focus-visible`, and `.oyl-hud` pins
+   `--oyl-color-focus` to its light value, #141b1a — drawn 2 px outside the
+   control onto `hudSurface`, #10161c: 1.04:1, a ring nobody could see (WCAG
+   2.2 SC 2.4.7, 2.4.13). `hudInk` on `hudSurface` is 17.07:1, declared in
+   `tokens.ts` as the ring's own pair. A notice keeps the page's ring: it has
+   its own light surface, which is where its ring lands. Read back off the
+   engine, with this rule deleted as the control, by
+   `browser/hud-focus.browser.spec.ts`. */
+.oyl-hud :focus-visible {
+  outline-color: var(--oyl-color-hud-ink);
+}
+
+.oyl-hud .oyl-status :focus-visible {
+  outline-color: var(--oyl-color-focus);
+}
+
 /* A notice is an exception, so it is set as compactly as it can be read: the
    page's `StatusMessage`, in the HUD's supporting size, with the grid's gap
    doing the job of its margin. It keeps its own opaque surface and its own

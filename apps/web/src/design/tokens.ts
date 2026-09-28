@@ -948,6 +948,14 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     where: 'the edge of a HUD control (WCAG 2.2 SC 1.4.11)',
   },
   {
+    foreground: 'hudInk',
+    background: 'hudSurface',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: { light: 17.07, dark: 17.07 },
+    where:
+      'the focus ring of every HUD control, the mute, the volume and the side camera’s Stop among them, offset onto its panel (WCAG 2.2 SC 2.4.13, #748)',
+  },
+  {
     foreground: 'hudStaleInk',
     background: 'hudSurface',
     minimum: AA_TEXT,
