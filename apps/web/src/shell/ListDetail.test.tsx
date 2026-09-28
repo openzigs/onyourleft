@@ -359,6 +359,31 @@ describe('the create link', () => {
     expect(globalThis.location.hash).toBe('#/routes');
   });
 
+  it.each([
+    ['a Ctrl click', { ctrlKey: true }],
+    ['a Cmd click', { metaKey: true }],
+    ['a Shift click', { shiftKey: true }],
+    ['an Alt click', { altKey: true }],
+    ['a middle click', { button: 1 }],
+  ])(
+    'leaves this tab’s way back to the item alone after %s, which opens it elsewhere',
+    async (_name, init) => {
+      // #670's second review: opening *Import a route* in a new tab used to
+      // note a create press in THIS tab, so the next back to the list focused
+      // the form's heading instead of the item that was chosen.
+      restore = answerTwoPanes(true, THEME);
+      mounted = await mount(withForm('a'));
+      const link = pane('list').querySelector<HTMLAnchorElement>('[data-oyl-create]');
+      link?.addEventListener('click', (event) => {
+        event.preventDefault();
+      });
+      link?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ...init }));
+      await mounted.rerender(withForm(undefined));
+      await settle();
+      expect(document.activeElement?.getAttribute('data-oyl-select')).toBe('a');
+    },
+  );
+
   it('does not steer a later back to the list away from the item', async () => {
     // The note a create link leaves is spent by the next change of selection.
     restore = answerTwoPanes(true, THEME);

@@ -394,6 +394,53 @@ describe('#670 — a selected workout', () => {
     expect(build?.className).toBe('oyl-button oyl-button--secondary');
   });
 
+  it('keeps the name typed into the builder across choosing a workout and coming back', async () => {
+    // #670's second review: choosing a workout unmounts the builder, and the
+    // name box was uncontrolled — the blocks came back and the name did not.
+    const stub = workoutStub(ATHLETE, [workout()]);
+    const view = await render(stub);
+    await typeInto(field(view.container, 'block-minutes'), '10');
+    await typeInto(field(view.container, 'block-percent'), '65');
+    await activateWithKeyboard(buttonSaying(view.container, 'Add block') as HTMLElement);
+    await typeInto(field(view.container, 'workout-name'), 'Tempo');
+    await view.rerender(
+      <WorkoutsView port={stub} now={() => 1_700_000_500} selected="workout-1" />,
+    );
+    await settle();
+    expect(view.container.querySelector('#workout-name')).toBeNull();
+    await view.rerender(<WorkoutsView port={stub} now={() => 1_700_000_500} />);
+    await settle();
+    expect(field(view.container, 'workout-name').value).toBe('Tempo');
+    await activateWithKeyboard(buttonSaying(view.container, 'Save workout') as HTMLElement);
+    await settle();
+    expect(stub.rows().map((row) => row.name)).toContain('Tempo');
+  });
+
+  it('does not bring back what the builder last said after a workout is chosen', async () => {
+    // #670's second review: the builder's messages outlived a visit to a
+    // chosen workout and came back in a re-mounted live region.
+    const stub = workoutStub(ATHLETE, [workout()]);
+    const view = await render(stub);
+    await typeInto(field(view.container, 'block-minutes'), '10');
+    await typeInto(field(view.container, 'block-percent'), '65');
+    await activateWithKeyboard(buttonSaying(view.container, 'Add block') as HTMLElement);
+    await typeInto(field(view.container, 'workout-name'), 'Tempo');
+    await activateWithKeyboard(buttonSaying(view.container, 'Save workout') as HTMLElement);
+    await settle();
+    await submitForm(formOf(field(view.container, 'workout-file')));
+    expect(view.container.textContent).toContain('Saved “Tempo”.');
+    expect(view.container.textContent).toContain('Choose a workout file to import.');
+    await view.rerender(
+      <WorkoutsView port={stub} now={() => 1_700_000_500} selected="workout-1" />,
+    );
+    await settle();
+    await view.rerender(<WorkoutsView port={stub} now={() => 1_700_000_500} />);
+    await settle();
+    expect(view.container.textContent).not.toContain('Saved “Tempo”.');
+    expect(view.container.textContent).not.toContain('Choose a workout file to import.');
+    expect(queryAll(view.container, '[role="status"], [aria-live]').length).toBe(0);
+  });
+
   it('goes back to the list once the chosen workout is deleted', async () => {
     globalThis.location.hash = '#/workouts/selected/workout-1';
     const stub = workoutStub(ATHLETE, [workout()]);

@@ -65,12 +65,6 @@ import { hrefFor, hrefForSelection, routeById } from '../shell/routes';
  * screen that starts it.
  */
 
-/** One text field of a submitted form. See `SegmentsView.tsx` for why this narrows. */
-function fieldOf(form: FormData, name: string): string {
-  const value = form.get(name);
-  return typeof value === 'string' ? value : '';
-}
-
 /** The words for a block kind, in the order the picker offers them. */
 const BLOCK_KINDS: readonly { readonly kind: WorkoutBlock['kind']; readonly label: string }[] = [
   { kind: 'steady', label: 'Steady' },
@@ -125,6 +119,13 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
   const [saved, setSaved] = useState<string | undefined>(undefined);
   const [draft, setDraft] = useState<BlockDraft>(EMPTY_DRAFT);
   const [blocks, setBlocks] = useState<readonly WorkoutBlock[]>([]);
+  /*
+   * ⚠️ In state rather than read off the form, since #670's second review: a
+   * chosen workout takes the builder's place in the detail pane, so the name
+   * box is UNMOUNTED while one is shown — and an uncontrolled box came back
+   * empty, with the blocks it was named for still listed above it.
+   */
+  const [name, setName] = useState('');
   const [pendingDelete, setPendingDelete] = useState<WorkoutRow | undefined>(undefined);
   const [fileFault, setFileFault] = useState<string | undefined>(undefined);
   const [fileNote, setFileNote] = useState<string | undefined>(undefined);
@@ -162,6 +163,23 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  /*
+   * Choosing a workout clears what the builder last SAID — #670's second
+   * review. Those messages are drawn in the builder, which is not on screen
+   * while a workout is chosen, and coming back re-mounted a live region still
+   * holding "Saved …" from a save long past. Cleared on choosing rather than
+   * on every change of `selected`, because deleting the chosen workout sets
+   * "Deleted …" and THEN lets go of the selection, and that sentence is the
+   * one the builder should show on arrival.
+   */
+  useEffect(() => {
+    if (selected === undefined) return;
+    setSaved(undefined);
+    setRefusal(undefined);
+    setFileNote(undefined);
+    setFileFault(undefined);
+  }, [selected]);
 
   const inList =
     selected === undefined ? undefined : entries?.find((entry) => entry.row.id === selected);
@@ -223,11 +241,10 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
     async (event: FormEvent<HTMLFormElement>): Promise<void> => {
       event.preventDefault();
       if (port === undefined) return;
-      const form = new FormData(event.currentTarget);
       const outcome = workoutToSave({
         id: `workout-${String(Math.round(clock() * 1000))}` as WorkoutId,
         owner: port.athleteId,
-        name: fieldOf(form, 'name'),
+        name,
         blocks,
         now: clock(),
       });
@@ -243,7 +260,7 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
       setDraft(EMPTY_DRAFT);
       await reload();
     },
-    [blocks, clock, port, reload],
+    [blocks, clock, name, port, reload],
   );
 
   /**
@@ -517,7 +534,15 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
             <form aria-label="Save this workout" onSubmit={(event) => void onSave(event)}>
               <p>
                 <label htmlFor="workout-name">Name</label>
-                <input id="workout-name" name="name" type="text" />
+                <input
+                  id="workout-name"
+                  name="name"
+                  type="text"
+                  value={name}
+                  onChange={(event) => {
+                    setName(event.target.value);
+                  }}
+                />
               </p>
               <Button type="submit">Save workout</Button>
             </form>

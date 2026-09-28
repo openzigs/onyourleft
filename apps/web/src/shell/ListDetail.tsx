@@ -265,6 +265,13 @@ export function ListDetail({
   }
 
   function noteCreate(event: MouseEvent<HTMLDivElement>): void {
+    // A click that opens the link somewhere else — a new tab or window, with
+    // a modifier or a button other than the primary — leaves THIS tab's
+    // selection alone, so it must not decide where this tab's focus goes on
+    // the next way back to the list. #670's second review.
+    if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) {
+      return;
+    }
     if (event.target instanceof Element && event.target.closest(`[${CREATE_ATTRIBUTE}]`) !== null) {
       createPressed.current = true;
     }

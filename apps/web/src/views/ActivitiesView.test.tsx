@@ -604,6 +604,28 @@ describe('#670 — a selected ride', () => {
     expect(document.getElementById('oyl-selected-heading')?.textContent).toBe('Ride number 55');
   });
 
+  it('reads the ride again when the athlete changes, rather than keeping the first one’s', async () => {
+    // #670's second review: the read was keyed on the reload count and the id
+    // alone, so the same id under a different athlete kept the first ride.
+    const other = athleteId('athlete-b');
+    const theirs = many(PAGE_SIZE + 10).map((ride) => ({
+      ...ride,
+      athleteId: other,
+      name: ride.name.replace('Ride number', 'Their ride'),
+    }));
+    const first = stubLibrary(OWNER, many(PAGE_SIZE + 10));
+    const second = stubLibrary(other, theirs);
+    mounted = await mount(<ActivitiesView library={first} selected="ride-55" />);
+    await settle();
+    await settle();
+    expect(document.getElementById('oyl-selected-heading')?.textContent).toBe('Ride number 55');
+    await mounted.rerender(<ActivitiesView library={second} selected="ride-55" />);
+    await settle();
+    await settle();
+    expect(second.gets).toEqual(['ride-55']);
+    expect(document.getElementById('oyl-selected-heading')?.textContent).toBe('Their ride 55');
+  });
+
   it('marks the chosen ride in the list, in words a reader hears', async () => {
     const library = stubLibrary(OWNER, many(3));
     mounted = await mount(<ActivitiesView library={library} selected="ride-2" />);

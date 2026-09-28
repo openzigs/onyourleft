@@ -276,7 +276,9 @@ export function ActivitiesView({ library, selected }: ActivitiesViewProps): JSX.
     if (!readAlone || library === undefined || selected === undefined) {
       return;
     }
-    const key = `${String(reloads)}\u0000${selected}`;
+    // The athlete is in the key: the same id asked of a different athlete is
+    // a different question, and must not keep the first one's ride.
+    const key = `${String(reloads)}\u0000${library.athleteId}\u0000${selected}`;
     if (asked.current === key) {
       return;
     }
