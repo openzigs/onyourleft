@@ -232,6 +232,8 @@ describe('#62 — the local activity library', () => {
           open.write(async (store) => store.listActivitySummaries(owner)),
         deleteActivity: (owner: AthleteId, id: ActivityId) =>
           open.write(async (store) => store.deleteActivity(owner, id)),
+        getActivity: (owner: AthleteId, id: ActivityId) =>
+          open.write(async (store) => store.getActivity(owner, id)),
       },
     };
 
@@ -291,6 +293,8 @@ describe('#62 — the local activity library', () => {
           open.write(async (store) => store.listActivitySummaries(owner)),
         deleteActivity: (owner: AthleteId, id: ActivityId) =>
           open.write(async (store) => store.deleteActivity(owner, id)),
+        getActivity: (owner: AthleteId, id: ActivityId) =>
+          open.write(async (store) => store.getActivity(owner, id)),
       },
     };
     mounted = await mount(<ActivitiesView library={library} />);
@@ -336,6 +340,7 @@ describe('#62 — the local activity library', () => {
       store: {
         listActivitySummaries: () => Promise.reject(new Error('QuotaExceededError')),
         deleteActivity: () => Promise.resolve(true),
+        getActivity: () => Promise.resolve(undefined),
       },
     };
 
@@ -447,7 +452,9 @@ describe('#660 — a card list on a phone, a table where it fits', () => {
     expect(first).toContain('42.2 km');
     expect(first).toContain('212 W');
     expect(cards[1]?.textContent).toContain('indoor');
-    expect(cards[0]?.querySelector('a')?.getAttribute('href')).toBe('#/activities/outdoor');
+    expect(cards[0]?.querySelector('a')?.getAttribute('href')).toBe(
+      '#/activities/selected/outdoor',
+    );
     // Named by the same words the table's caption would have said.
     const list = document.querySelector('.oyl-activity-cards');
     const label = document.getElementById(list?.getAttribute('aria-labelledby') ?? '');
@@ -495,5 +502,73 @@ describe('#660 — a card list on a phone, a table where it fits', () => {
     expect(region?.getAttribute('tabindex')).toBe('0');
     const caption = document.querySelector('caption');
     expect(region?.getAttribute('aria-labelledby')).toBe(caption?.id);
+  });
+});
+
+describe('#670 — a selected ride', () => {
+  function many(count: number): ActivitySummary[] {
+    return Array.from({ length: count }, (_unused, index) =>
+      summary(`ride-${String(index)}`, {
+        name: `Ride number ${String(index)}`,
+        startedAt: unixSeconds(1_700_000_000 - index * 86_400),
+      }),
+    );
+  }
+
+  it('is summarised from the page the list read, with no second read', async () => {
+    const library = stubLibrary(OWNER, many(3));
+    mounted = await mount(<ActivitiesView library={library} selected="ride-1" />);
+    await settle();
+    expect(document.getElementById('oyl-selected-heading')?.textContent).toBe('Ride number 1');
+    expect(library.gets).toEqual([]);
+    const open = queryAll<HTMLAnchorElement>(document.body, 'a').find(
+      (anchor) => anchor.textContent === 'Open ride details',
+    );
+    expect(open?.getAttribute('href')).toBe('#/activities/ride-1');
+  });
+
+  it('is read on its own when it is outside the page, rather than called "not found"', async () => {
+    // Ride fifty-five of sixty: past PAGE_SIZE, so the list never held it.
+    const library = stubLibrary(OWNER, many(PAGE_SIZE + 10));
+    mounted = await mount(<ActivitiesView library={library} selected="ride-55" />);
+    await settle();
+    await settle();
+    expect(library.gets).toEqual(['ride-55']);
+    expect(document.getElementById('oyl-selected-heading')?.textContent).toBe('Ride number 55');
+  });
+
+  it('says a ride this device does not hold is not found', async () => {
+    const library = stubLibrary(OWNER, many(3));
+    mounted = await mount(<ActivitiesView library={library} selected="somebody-elses" />);
+    await settle();
+    await settle();
+    expect(document.getElementById('oyl-selected-heading')?.textContent).toBe('Ride not found');
+    expect(document.body.textContent).toContain(
+      'No ride with that address is stored on this device',
+    );
+  });
+
+  it('marks the chosen ride in the list, in words a reader hears', async () => {
+    const library = stubLibrary(OWNER, many(3));
+    mounted = await mount(<ActivitiesView library={library} selected="ride-2" />);
+    await settle();
+    const current = queryAll(document.body, '[aria-current="true"]');
+    expect(current.map((element) => element.getAttribute('data-oyl-select'))).toEqual(['ride-2']);
+  });
+
+  it('puts Start a ride before the list, so a long history does not bury it (#668)', async () => {
+    const library = stubLibrary(OWNER, many(40));
+    mounted = await mount(<ActivitiesView library={library} />);
+    await settle();
+    const start = queryAll(document.body, 'a.oyl-button').find(
+      (anchor) => anchor.textContent === 'Start a ride',
+    );
+    const firstRide = document.querySelector('[data-oyl-select]');
+    expect(start).toBeDefined();
+    expect(firstRide).not.toBeNull();
+    expect(
+      (start as Element).compareDocumentPosition(firstRide as Element) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });

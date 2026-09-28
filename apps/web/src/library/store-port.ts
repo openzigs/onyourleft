@@ -8,7 +8,7 @@
  * the name, so it cannot open a database itself. `main.tsx` is the one caller
  * that reaches the real store.
  *
- * Two methods. A port that exposed the whole store would let a later edit reach
+ * Three methods. A port that exposed the whole store would let a later edit reach
  * for `getStreamSet` from a list row, which is the one thing #62's read budget
  * forbids — see {@link PAGE_SIZE}.
  */
@@ -26,6 +26,18 @@ export interface LibraryStore {
     options?: ListActivitiesOptions,
   ): Promise<ActivitySummary[]>;
   deleteActivity(owner: AthleteId, id: ActivityId): Promise<boolean>;
+  /**
+   * One ride, by id, scoped to its owner — #670's selection, for a ride that
+   * is not in the page {@link listActivitySummaries} returned: a shared or
+   * reloaded `#/activities/selected/<id>` for ride fifty-one would otherwise
+   * be called "not found".
+   *
+   * ⚠️ Typed as a summary, and the store's `getActivity` is what satisfies it
+   * — which returns the whole record, **original file bytes included**. There
+   * is no single-summary read in `packages/store`; this is read only when the
+   * selection is outside the page, once per selection, never per row.
+   */
+  getActivity(owner: AthleteId, id: ActivityId): Promise<ActivitySummary | undefined>;
 }
 
 export interface LibraryPort {

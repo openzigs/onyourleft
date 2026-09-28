@@ -34,6 +34,10 @@
  *    pin the counting rule itself.
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { unixSeconds } from '@onyourleft/domain';
@@ -43,17 +47,27 @@ import { Button } from '../design/Button';
 import type { RideController, RideSnapshot } from '../ride/controller';
 import { idleSnapshot, ridingSnapshot, stubRideController } from '../ride/testing';
 import { ALL_ROUTES, routeById, type RouteDefinition } from '../shell/routes';
-import { openRoute, walkRoute } from '../testing/hierarchy-walk';
+import { openRoute, selectFixtureItem, walkRoute } from '../testing/hierarchy-walk';
+import { answerTwoPanes } from '../testing/panes';
 import { mount, settle, type Mounted } from '../testing/mount';
 import { ActivitiesView } from '../views/ActivitiesView';
 
-import { buttonsByView, onePrimaryViolations } from './button-hierarchy';
+import { buttonsByView, onePrimaryViolations, primaryUnits } from './button-hierarchy';
+
+// `join` rather than `new URL(…, import.meta.url)`, which Vite rewrites into an asset URL.
+const THEME = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), '../design/theme.css'),
+  'utf8',
+);
 
 let mounted: Mounted | undefined;
+let restorePanes: (() => void) | undefined;
 
 afterEach(() => {
   mounted?.unmount();
   mounted = undefined;
+  restorePanes?.();
+  restorePanes = undefined;
   globalThis.location.hash = '';
 });
 
@@ -181,6 +195,96 @@ describe('#668 — an empty state offers its next step as a button', () => {
       );
     expect(buttonsByView(document)[0]?.primaries).toEqual([named('Start a ride')]);
     expect(named('Import or export files')?.classList.contains('oyl-button--secondary')).toBe(true);
+  });
+});
+
+/**
+ * #670: on a list–detail route the rule is per pane. Every such route of the
+ * table, over the populated fixture with its item selected, at both widths.
+ */
+describe('#670 — one primary per pane on a list–detail route', () => {
+  const listDetail = ALL_ROUTES.filter((route) => route.layout === 'list-detail');
+
+  it('has list–detail routes to walk', () => {
+    expect(listDetail.map((route) => route.id).sort()).toEqual([
+      'activities',
+      'routes',
+      'workouts',
+    ]);
+  });
+
+  for (const route of listDetail) {
+    for (const wide of [false, true]) {
+      it(`${route.id}, an item selected, ${wide ? 'two panes' : 'one pane'}`, async () => {
+        restorePanes = answerTwoPanes(wide, THEME);
+        mounted = await openRoute(route, true);
+        expect(await selectFixtureItem(route)).toBe(true);
+        expect(document.querySelector('[data-oyl-panes]')?.getAttribute('data-oyl-panes')).toBe(
+          wide ? '2' : '1',
+        );
+        expect(onePrimaryViolations(document), `${route.id}`).toEqual([]);
+      });
+    }
+  }
+
+  it('is what lets Activities show two primaries at once — one per pane', async () => {
+    // Without the per-pane rule this screen would be a violation: the list's
+    // *Start a ride* and the selected ride's *Open ride details* are both on
+    // a landscape tablet. So the whole-main count is 2, and it passes.
+    restorePanes = answerTwoPanes(true, THEME);
+    mounted = await openRoute(routeById('activities'), true);
+    await selectFixtureItem(routeById('activities'));
+    expect(buttonsByView(document)[0]?.primaries).toHaveLength(2);
+    expect(primaryUnits(document).map((unit) => unit.primaries.length)).toEqual([0, 1, 1]);
+    expect(onePrimaryViolations(document)).toEqual([]);
+  });
+
+  it('the control — the same panes in a main that is not list–detail are one view', async () => {
+    mounted = await mount(
+      <main className="oyl-main oyl-main--prose">
+        <section data-oyl-pane="list">
+          <Button>Start a ride</Button>
+        </section>
+        <section data-oyl-pane="detail">
+          <Button>Open ride details</Button>
+        </section>
+      </main>,
+    );
+    expect(onePrimaryViolations(document)).toEqual([
+      '2 primary buttons in one view: “Start a ride”, “Open ride details”',
+    ]);
+  });
+
+  it('the control — two primaries in ONE pane are still reported, and the pane is named', async () => {
+    mounted = await mount(
+      <main className="oyl-main oyl-main--list-detail">
+        <section data-oyl-pane="list">
+          <Button>Start a ride</Button>
+          <Button>Import route</Button>
+        </section>
+        <section data-oyl-pane="detail">
+          <Button>Open ride details</Button>
+        </section>
+      </main>,
+    );
+    expect(onePrimaryViolations(document)).toEqual([
+      '2 primary buttons in one view (main, list pane): “Start a ride”, “Import route”',
+    ]);
+  });
+
+  it('the control — a primary outside the panes counts against the rest of main', async () => {
+    mounted = await mount(
+      <main className="oyl-main oyl-main--list-detail">
+        <Button>Save everything</Button>
+        <Button>Save it all again</Button>
+        <section data-oyl-pane="list">
+          <Button>Start a ride</Button>
+        </section>
+      </main>,
+    );
+    expect(onePrimaryViolations(document)).toEqual([
+      '2 primary buttons in one view (main, outside its panes): “Save everything”, “Save it all again”',
+    ]);
   });
 });
 

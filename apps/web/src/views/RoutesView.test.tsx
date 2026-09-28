@@ -103,14 +103,21 @@ function zone(): PrivacyZoneRecord {
   };
 }
 
-async function render(stub: RouteStub): Promise<Mounted> {
-  mounted = await mount(<RoutesView port={stub} now={() => 1_700_000_500} />);
+/**
+ * `selected` is the id in `#/routes/selected/<id>` — #670. A route's own
+ * facts and controls are drawn once it is chosen, in the detail pane.
+ */
+async function render(stub: RouteStub, selected?: string): Promise<Mounted> {
+  mounted = await mount(<RoutesView port={stub} now={() => 1_700_000_500} selected={selected} />);
   await settle();
   return mounted;
 }
 
 /** Renders with a download collector, so #74's export column is reachable. */
-async function renderWithSave(stub: RouteStub): Promise<{
+async function renderWithSave(
+  stub: RouteStub,
+  selected = 'route-1',
+): Promise<{
   root: Mounted;
   saved: DownloadableFile[];
 }> {
@@ -119,6 +126,7 @@ async function renderWithSave(stub: RouteStub): Promise<{
     <RoutesView
       port={stub}
       now={() => 1_700_000_500}
+      selected={selected}
       save={(file) => {
         saved.push(file);
       }}
@@ -136,7 +144,7 @@ describe('the saved list', () => {
   it('shows a route’s name, shape and who can see it — never in colour alone', () => {
     // #48: nothing on this screen encodes meaning in colour, so the visibility
     // is a word in its own cell.
-    return render(routeStub(ATHLETE, [route()])).then((view) => {
+    return render(routeStub(ATHLETE, [route()]), 'route-1').then((view) => {
       const text = view.container.textContent ?? '';
       expect(text).toContain('Box Hill loop');
       expect(text).toContain('private');
@@ -184,7 +192,7 @@ describe('the saved list', () => {
 describe('deleting — #73 criterion 3', () => {
   it('asks first, and names the route it is about to remove', async () => {
     const stub = routeStub(ATHLETE, [route()]);
-    const view = await render(stub);
+    const view = await render(stub, 'route-1');
     const remove = buttonSaying(view.container, 'Delete');
     expect(remove).toBeDefined();
     await activateWithKeyboard(remove as HTMLElement);
@@ -199,7 +207,7 @@ describe('deleting — #73 criterion 3', () => {
 
   it('keeps it when the rider backs out', async () => {
     const stub = routeStub(ATHLETE, [route()]);
-    const view = await render(stub);
+    const view = await render(stub, 'route-1');
     await activateWithKeyboard(buttonSaying(view.container, 'Delete') as HTMLElement);
     await settle();
     await activateWithKeyboard(buttonSaying(view.container, 'Keep it') as HTMLElement);
@@ -209,7 +217,7 @@ describe('deleting — #73 criterion 3', () => {
 
   it('removes it once confirmed', async () => {
     const stub = routeStub(ATHLETE, [route()]);
-    const view = await render(stub);
+    const view = await render(stub, 'route-1');
     await activateWithKeyboard(buttonSaying(view.container, 'Delete') as HTMLElement);
     await settle();
     await activateWithKeyboard(
@@ -224,7 +232,7 @@ describe('deleting — #73 criterion 3', () => {
 describe('editing', () => {
   it('renames in place, keeping the same route rather than adding one', async () => {
     const stub = routeStub(ATHLETE, [route()]);
-    const view = await render(stub);
+    const view = await render(stub, 'route-1');
     const field = view.container.querySelector<HTMLInputElement>('#name-route-1');
     await typeInto(field as HTMLInputElement, 'Ranmore');
     await activateWithKeyboard(buttonSaying(view.container, 'Save changes') as HTMLElement);
@@ -238,7 +246,7 @@ describe('editing', () => {
     // A second tab. The screen is holding the updatedAt it read; the row has
     // moved on.
     const stub = routeStub(ATHLETE, [route()]);
-    const view = await render(stub);
+    const view = await render(stub, 'route-1');
     stub.writeBehind({
       ...route(),
       name: 'Renamed elsewhere',
@@ -257,7 +265,7 @@ describe('editing', () => {
     // a different start is not the route — so nothing is written at all.
     const stub = routeStub(ATHLETE, [route({ profile: routeProfile(northPoints(3000, 0)) })]);
     stub.setZones([zone()]);
-    const view = await render(stub);
+    const view = await render(stub, 'route-1');
     const select = view.container.querySelector<HTMLSelectElement>('#visibility-route-1');
     (select as HTMLSelectElement).value = 'public';
     await activateWithKeyboard(buttonSaying(view.container, 'Save changes') as HTMLElement);
@@ -312,7 +320,7 @@ describe('sending a route to a head unit (#74)', () => {
     // `main.tsx` could not build a transfer port, which is the same condition
     // the transfer screen already refuses under.
     const stub = routeStub(ATHLETE, [route()]);
-    mounted = await mount(<RoutesView port={stub} now={() => 1_700_000_500} />);
+    mounted = await mount(<RoutesView port={stub} now={() => 1_700_000_500} selected="route-1" />);
     await settle();
     expect(buttonSaying(mounted.container, 'Download GPX')).toBeUndefined();
     expect(mounted.container.textContent).toContain('Downloading is not available');
@@ -402,7 +410,7 @@ describe('the loop box — #296', () => {
     );
     if (outcome.status !== 'saved') throw new Error('the import refused the circuit');
 
-    const view = await render(routeStub(ATHLETE, [outcome.record]));
+    const view = await render(routeStub(ATHLETE, [outcome.record]), 'route-1');
 
     expect(view.container.textContent).toContain('Loop');
     expect(view.container.textContent).not.toContain('Point to point');
@@ -467,5 +475,54 @@ describe('pressing Import with no file chosen', () => {
 
     expect(view.container.textContent ?? '').toContain('Choose a GPX file to import.');
     expect(stub.rows()).toHaveLength(0);
+  });
+});
+
+describe('#670 — a selected route', () => {
+  it('is read on its own when the list did not hold it, rather than called "not found"', async () => {
+    const stub = routeStub(ATHLETE, [route()]);
+    const asked: string[] = [];
+    const port: RouteStub = {
+      ...stub,
+      store: {
+        ...stub.store,
+        listRoutes: () => Promise.resolve([]),
+        getRoute: (owner, id) => {
+          asked.push(id);
+          return stub.store.getRoute(owner, id);
+        },
+      },
+    };
+    const view = await render(port, 'route-1');
+    await settle();
+    expect(asked).toEqual(['route-1']);
+    expect(view.container.querySelector('#oyl-selected-heading')?.textContent).toBe(
+      'Box Hill loop',
+    );
+  });
+
+  it('says a route this device does not hold is not found, and still offers the import', async () => {
+    const view = await render(routeStub(ATHLETE, [route()]), 'nobody-knows');
+    await settle();
+    expect(view.container.querySelector('#oyl-selected-heading')?.textContent).toBe(
+      'Route not found',
+    );
+    expect(buttonSaying(view.container, 'Import route')).toBeDefined();
+  });
+
+  it('puts Import route first in the detail pane (#668), and drawing one at the head of the list', async () => {
+    const view = await render(routeStub(ATHLETE, [route()]));
+    const detail = view.container.querySelector('[data-oyl-pane="detail"]');
+    const headings = queryAll(detail as Element, 'h2').map((heading) => heading.textContent);
+    expect(headings[0]).toBe('Import a route');
+    const list = view.container.querySelector('[data-oyl-pane="list"]');
+    const draw = queryAll(list as Element, 'a.oyl-button')[0];
+    expect(draw?.textContent).toBe('Draw a route on this device');
+    // Before the saved routes: on one pane, a phone's first control.
+    expect(
+      (draw as Element).compareDocumentPosition(
+        list?.querySelector('[data-oyl-select]') as Element,
+      ) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });

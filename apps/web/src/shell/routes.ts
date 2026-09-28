@@ -92,8 +92,15 @@ export type RouteId =
  * ⚠️ The trainer game is `prose` and that is not an oversight: its *picker* is
  * a form and wants the measure, and its *ride* is a fixed full-bleed stage
  * (#423) which no `max-width` on an ancestor can bound.
+ *
+ * - `list-detail` drops it for a list BESIDE its detail — #670, Material 3's
+ *   list–detail canonical layout, taken as a pattern (ADR 0009). Two panes at
+ *   an expanded window, one below; `shell/ListDetail.tsx` is the component and
+ *   `theme.css` §`--oyl-list-detail-from` is the one breakpoint. A route that
+ *   declares it also declares {@link RouteDefinition.selection}, the URL a
+ *   selected item lives at, and `routes.test.ts` holds the two together.
  */
-export type RouteLayout = 'prose' | 'instruments' | 'dashboard';
+export type RouteLayout = 'prose' | 'instruments' | 'dashboard' | 'list-detail';
 
 /**
  * Which of the primary destinations a route belongs to — #427.
@@ -170,6 +177,20 @@ export interface RouteDefinition {
   /** @see RouteLayout */
   readonly layout: RouteLayout;
   /**
+   * Where one selected item of a `list-detail` route lives — #670.
+   *
+   * A path with one `:` segment, e.g. `/activities/selected/:activity`. It
+   * matches to THIS route with the segment as {@link RouteMatch.parameter}, so
+   * the view stays mounted when the selection changes and a reload, a shared
+   * link or the back button all land on the same selection.
+   *
+   * ⚠️ `selected` is a literal rather than the id going straight after the
+   * list's path because `/activities/:activity` is already the ride's own full
+   * page (#50), and every link to it — Home's recent rides among them — must
+   * keep opening that page.
+   */
+  readonly selection?: string;
+  /**
    * Which primary destination this route belongs to. @see NavGroupId
    *
    * Absent only on the not-found page, which belongs to nothing.
@@ -218,7 +239,8 @@ export const ROUTES: readonly RouteDefinition[] = [
   {
     id: 'workouts',
     group: 'ride',
-    layout: 'prose',
+    layout: 'list-detail',
+    selection: '/workouts/selected/:workout',
     path: '/workouts',
     navLabel: 'Workouts',
     title: 'Workouts',
@@ -229,7 +251,8 @@ export const ROUTES: readonly RouteDefinition[] = [
   {
     id: 'activities',
     group: 'history',
-    layout: 'prose',
+    layout: 'list-detail',
+    selection: '/activities/selected/:activity',
     path: '/activities',
     navLabel: 'Activities',
     title: 'Activities',
@@ -259,7 +282,8 @@ export const ROUTES: readonly RouteDefinition[] = [
   {
     id: 'routes',
     group: 'routes',
-    layout: 'prose',
+    layout: 'list-detail',
+    selection: '/routes/selected/:route',
     path: '/routes',
     navLabel: 'Routes',
     title: 'Routes',
@@ -339,7 +363,8 @@ export const ROUTES: readonly RouteDefinition[] = [
  * still needs a title and a summary.
  *
  * ⚠️ Its path is `/routes/new`, a **literal** third segment rather than a
- * parameter. {@link matchHash} compares literals before it captures, so if a
+ * parameter. {@link matchHash} prefers the pattern with more literal segments (true since
+ * #670, and claimed here before it was), so if a
  * `/routes/:route` detail route is ever added this one still wins — worth
  * knowing before somebody adds it and assumes the order in
  * {@link MATCHABLE_ROUTES} decides.
@@ -440,7 +465,8 @@ export const ACTIVITY_DETAIL_ROUTE: RouteDefinition = {
  *
  * ⚠️ Its path has the same **shape** as the activity route — three segments,
  * one of them a parameter — and they are told apart by the literal in the
- * middle. {@link matchHash} compares literals before it captures, so the order
+ * middle. {@link matchHash} prefers the pattern with more literal segments (since
+ * #670), so the order
  * of the two in {@link ALL_ROUTES} does not matter; that is worth knowing
  * before somebody adds a third and assumes it does.
  */
@@ -531,6 +557,19 @@ export interface RouteMatch {
  * encoding is applied by {@link hrefFor} and undone here, and neither half is
  * spelled out anywhere else.
  *
+ * ⚠️ **The most specific pattern wins, not the first in the table** — #670.
+ * Until then the loop returned the first route that matched, while two notes
+ * in this file (on {@link ROUTE_BUILDER_ROUTE} and
+ * {@link SEGMENT_DETAIL_ROUTE}) promised that literals were compared before a
+ * parameter captured. They were not: a `/routes/:route` placed before
+ * `/routes/new` in {@link ALL_ROUTES} would have captured `new`. Nothing
+ * collided, so nothing noticed; a candidate now wins by counting its literal
+ * segments, and `routes.test.ts` puts a colliding pair in both orders.
+ *
+ * A `list-detail` route's {@link RouteDefinition.selection} is tried beside its
+ * own path and matches to the same route, with the selected id as the
+ * parameter.
+ *
  * ⚠️ **An undecodable parameter is not a match.** `decodeURIComponent` throws
  * on a lone `%` — reachable by typing in the address bar — and a router that
  * let that escape would replace the whole app with an unhandled exception. It
@@ -538,37 +577,68 @@ export interface RouteMatch {
  * and a way out.
  */
 export function matchHash(hash: string): RouteMatch {
+  return matchHashAmong(MATCHABLE_ROUTES, hash);
+}
+
+/**
+ * {@link matchHash} over a given table, so a test can put two routes in
+ * either order — the property #670 found was untrue.
+ */
+export function matchHashAmong(routes: readonly RouteDefinition[], hash: string): RouteMatch {
   const segments = normaliseHash(hash).split('/');
-  for (const route of MATCHABLE_ROUTES) {
-    const pattern = route.path.split('/');
-    if (pattern.length !== segments.length) {
-      continue;
-    }
-    let parameter: string | undefined;
-    let matched = true;
-    for (const [index, expected] of pattern.entries()) {
-      const actual = segments[index] ?? '';
-      if (expected.startsWith(':')) {
-        if (actual === '') {
-          matched = false;
-          break;
-        }
-        try {
-          parameter = decodeURIComponent(actual);
-        } catch {
-          matched = false;
-          break;
-        }
-      } else if (expected !== actual) {
-        matched = false;
-        break;
+  let best: { readonly match: RouteMatch; readonly literals: number } | undefined;
+  for (const route of routes) {
+    for (const path of route.selection === undefined
+      ? [route.path]
+      : [route.path, route.selection]) {
+      const attempt = matchPattern(path.split('/'), segments);
+      if (attempt === undefined) {
+        continue;
+      }
+      // The most literal segments wins, whatever the table's order — #670.
+      if (best === undefined || attempt.literals > best.literals) {
+        best = {
+          match:
+            attempt.parameter === undefined ? { route } : { route, parameter: attempt.parameter },
+          literals: attempt.literals,
+        };
       }
     }
-    if (matched) {
-      return parameter === undefined ? { route } : { route, parameter };
+  }
+  return best?.match ?? { route: NOT_FOUND_ROUTE };
+}
+
+/**
+ * One pattern against one path: the parameter it captured and how many of its
+ * segments were literals, or `undefined` when it does not match.
+ */
+function matchPattern(
+  pattern: readonly string[],
+  segments: readonly string[],
+): { readonly parameter: string | undefined; readonly literals: number } | undefined {
+  if (pattern.length !== segments.length) {
+    return undefined;
+  }
+  let parameter: string | undefined;
+  let literals = 0;
+  for (const [index, expected] of pattern.entries()) {
+    const actual = segments[index] ?? '';
+    if (expected.startsWith(':')) {
+      if (actual === '') {
+        return undefined;
+      }
+      try {
+        parameter = decodeURIComponent(actual);
+      } catch {
+        return undefined;
+      }
+    } else if (expected === actual) {
+      literals += 1;
+    } else {
+      return undefined;
     }
   }
-  return { route: NOT_FOUND_ROUTE };
+  return { parameter, literals };
 }
 
 /**
@@ -631,6 +701,18 @@ export function hrefFor(route: RouteDefinition, parameter?: string): string {
     .map((segment) => (segment.startsWith(':') ? encodeURIComponent(parameter) : segment))
     .join('/');
   return `#${path}`;
+}
+
+/**
+ * The link that selects one item of a `list-detail` route — #670. A route with
+ * no {@link RouteDefinition.selection} gets its own list link, which is a page
+ * rather than a crash.
+ */
+export function hrefForSelection(route: RouteDefinition, id: string): string {
+  if (route.selection === undefined) {
+    return hrefFor(route);
+  }
+  return hrefFor({ ...route, path: route.selection }, id);
 }
 
 /** The link to one ride's detail view. */

@@ -14,12 +14,13 @@ import { expect } from 'vitest';
 
 import { buttonsByView, onePrimaryViolations, type ViewButtons } from '../a11y/button-hierarchy';
 import type { RideController } from '../ride/controller';
-import { hrefFor, type RouteDefinition } from '../shell/routes';
+import { hrefFor, hrefForSelection, type RouteDefinition } from '../shell/routes';
 
 import { mount, settle, type Mounted } from './mount';
 import {
   PARAMETERS,
   POPULATED,
+  SELECTIONS,
   PopulatedShell,
   type PopulatedShellExtras,
 } from './populated-shell';
@@ -63,6 +64,22 @@ export async function openRoute(
   );
   await settled();
   return mounted;
+}
+
+/**
+ * Choose the populated fixture's item on a `list-detail` route that is already
+ * open — #670 — by moving the hash, as a link would, and settle. `false` for a
+ * route with no selection or no fixture item to select.
+ */
+export async function selectFixtureItem(route: RouteDefinition): Promise<boolean> {
+  const id = SELECTIONS[route.id];
+  if (route.selection === undefined || id === undefined) {
+    return false;
+  }
+  globalThis.location.hash = hrefForSelection(route, id);
+  globalThis.dispatchEvent(new HashChangeEvent('hashchange'));
+  await settled();
+  return true;
 }
 
 /** What one route of the walk found. */

@@ -23,12 +23,15 @@ export interface StubLibrary extends LibraryPort {
   /** Every `listActivitySummaries` call, so a test can assert the read budget. */
   readonly reads: ListActivitiesOptions[];
   readonly deleted: string[];
+  /** Every id `getActivity` was asked for — #670's single read. */
+  readonly gets: string[];
 }
 
 export function stubLibrary(owner: AthleteId, summaries: readonly ActivitySummary[]): StubLibrary {
   const held = [...summaries];
   const reads: ListActivitiesOptions[] = [];
   const deleted: string[] = [];
+  const gets: string[] = [];
 
   const store: LibraryStore = {
     listActivitySummaries: (_owner: AthleteId, options: ListActivitiesOptions = {}) => {
@@ -42,6 +45,14 @@ export function stubLibrary(owner: AthleteId, summaries: readonly ActivitySummar
       const from = sorted.slice(offset);
       return Promise.resolve(limit === undefined ? from : from.slice(0, limit));
     },
+    getActivity: (owner: AthleteId, id: ActivityId) => {
+      gets.push(id);
+      // Scoped, even in a stub: a stub that ignored the owner would make every
+      // scoping assertion over it vacuous.
+      return Promise.resolve(
+        held.find((summary) => summary.id === id && summary.athleteId === owner),
+      );
+    },
     deleteActivity: (_owner: AthleteId, id: ActivityId) => {
       deleted.push(id);
       const at = held.findIndex((summary) => summary.id === id);
@@ -53,5 +64,5 @@ export function stubLibrary(owner: AthleteId, summaries: readonly ActivitySummar
     },
   };
 
-  return { athleteId: owner, store, reads, deleted };
+  return { athleteId: owner, store, reads, deleted, gets };
 }

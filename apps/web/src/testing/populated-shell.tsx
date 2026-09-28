@@ -97,6 +97,17 @@ export const PARAMETERS: Partial<Record<RouteId, string>> = {
 };
 
 /**
+ * The item each `list-detail` route (#670) selects in the populated fixture —
+ * one the list holds. A `list-detail` route with no entry here is reported by
+ * `routes.test.ts`, never skipped.
+ */
+export const SELECTIONS: Partial<Record<RouteId, string>> = {
+  activities: RIDE_ID,
+  workouts: 'workout-1',
+  routes: 'route-1',
+};
+
+/**
  * What a route shows when its fixtures reach it, for EVERY route in the table.
  *
  * A fixture that stopped reaching its view would otherwise measure the empty
@@ -128,11 +139,11 @@ export const POPULATED: Record<RouteId, PopulatedExpectation> = {
   home: { kind: 'fixture', marker: '.oyl-main .oyl-home__facts' },
   ride: { kind: 'fixture', marker: '.oyl-main .oyl-metric--live' },
   game: { kind: 'fixture', marker: '.oyl-game__picker li input[type="checkbox"]' },
-  workouts: { kind: 'fixture', marker: '.oyl-main .oyl-scroll-region tbody tr' },
+  workouts: { kind: 'fixture', marker: '.oyl-main a[data-oyl-select]' },
   activities: { kind: 'fixture', marker: '.oyl-main a[href^="#/activities/"]' },
   analysis: { kind: 'fixture', marker: '.oyl-main .oyl-scroll-region tbody tr' },
   segments: { kind: 'fixture', marker: '.oyl-main a[href^="#/segments/"]' },
-  routes: { kind: 'fixture', marker: '.oyl-main .oyl-scroll-region tbody tr' },
+  routes: { kind: 'fixture', marker: '.oyl-main a[data-oyl-select]' },
   'activity-detail': { kind: 'fixture', marker: '.oyl-side-report' },
   'segment-detail': { kind: 'fixture', marker: '.oyl-main tbody tr' },
   credits: {

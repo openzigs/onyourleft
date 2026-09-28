@@ -58,8 +58,16 @@ function workout(overrides: Partial<WorkoutRecord> = {}): WorkoutRecord {
   };
 }
 
-async function render(stub: WorkoutStub | undefined, now = 1_700_000_500): Promise<Mounted> {
-  const view = await mount(<WorkoutsView port={stub} now={() => now} />);
+/**
+ * `selected` is the id in `#/workouts/selected/<id>` — #670. A saved workout's
+ * own facts and controls are drawn once it is chosen, in the detail pane.
+ */
+async function render(
+  stub: WorkoutStub | undefined,
+  now = 1_700_000_500,
+  selected?: string,
+): Promise<Mounted> {
+  const view = await mount(<WorkoutsView port={stub} now={() => now} selected={selected} />);
   await settle();
   mounted = view;
   return view;
@@ -74,6 +82,7 @@ async function renderWithSave(
     <WorkoutsView
       port={stub}
       now={() => now}
+      selected="workout-1"
       save={(file) => {
         saved.push(file);
       }}
@@ -112,7 +121,7 @@ function field(root: ParentNode, id: string): HTMLInputElement {
 
 describe('the library', () => {
   it('lists a saved workout by name, length and shape', async () => {
-    const view = await render(workoutStub(ATHLETE, [workout()]));
+    const view = await render(workoutStub(ATHLETE, [workout()]), undefined, 'workout-1');
     const text = view.container.textContent ?? '';
     expect(text).toContain('Sweet spot');
     expect(text).toContain('10 min');
@@ -260,14 +269,14 @@ describe('building a workout', () => {
 
 describe('deleting a workout asks first', () => {
   it('names the workout in the confirmation', async () => {
-    const view = await render(workoutStub(ATHLETE, [workout()]));
+    const view = await render(workoutStub(ATHLETE, [workout()]), undefined, 'workout-1');
     await activateWithKeyboard(buttonSaying(view.container, 'Delete Sweet spot') as HTMLElement);
     expect(view.container.textContent).toContain('Delete “Sweet spot”?');
   });
 
   it('keeps it when the rider says so', async () => {
     const stub = workoutStub(ATHLETE, [workout()]);
-    const view = await render(stub);
+    const view = await render(stub, undefined, 'workout-1');
     await activateWithKeyboard(buttonSaying(view.container, 'Delete Sweet spot') as HTMLElement);
     await activateWithKeyboard(buttonSaying(view.container, 'Keep it') as HTMLElement);
     await settle();
@@ -276,7 +285,7 @@ describe('deleting a workout asks first', () => {
 
   it('deletes it on the second press, and the row goes', async () => {
     const stub = workoutStub(ATHLETE, [workout()]);
-    const view = await render(stub);
+    const view = await render(stub, undefined, 'workout-1');
     await activateWithKeyboard(buttonSaying(view.container, 'Delete Sweet spot') as HTMLElement);
     await activateWithKeyboard(buttonSaying(view.container, 'Delete “Sweet spot”') as HTMLElement);
     await settle();
@@ -291,7 +300,7 @@ describe('what this screen does not claim', () => {
     // ⚠️ Every such number is a function of the rider's threshold, and this
     // screen deliberately holds none. A workout is threshold-independent, which
     // is the whole reason a target is a share.
-    const view = await render(workoutStub(ATHLETE, [workout()]));
+    const view = await render(workoutStub(ATHLETE, [workout()]), undefined, 'workout-1');
     const text = view.container.textContent ?? '';
     expect(text).not.toMatch(/\d\s?W\b/);
     expect(text.toLowerCase()).not.toContain('stress');
@@ -312,7 +321,7 @@ describe('a workout can leave as a file and come back — #202, ADR 0017', () =>
   it('does not offer an export this build cannot perform', async () => {
     // Offered and inert is worse than absent: a rider presses it, nothing
     // happens, and there is nothing on the screen that says why.
-    const view = await render(workoutStub(ATHLETE, [workout()]));
+    const view = await render(workoutStub(ATHLETE, [workout()]), undefined, 'workout-1');
     expect(buttonSaying(view.container, 'Export Sweet spot')).toBeUndefined();
     expect(buttonSaying(view.container, 'Delete Sweet spot')).toBeDefined();
   });
@@ -322,5 +331,50 @@ describe('a workout can leave as a file and come back — #202, ADR 0017', () =>
     const view = await render(stub);
     await submitForm(formOf(field(view.container, 'workout-file')));
     expect(view.container.textContent ?? '').toContain('Choose a workout file');
+  });
+});
+
+describe('#670 — a selected workout', () => {
+  it('is read on its own when the list did not hold it, rather than called "not found"', async () => {
+    // The list is bounded (WORKOUT_LIST_LIMIT); a reload or a shared link can
+    // name one past it. A stub whose list leaves it out stands for that.
+    const stub = workoutStub(ATHLETE, [workout()]);
+    const asked: string[] = [];
+    const port: WorkoutStub = {
+      ...stub,
+      store: {
+        ...stub.store,
+        listWorkouts: () => Promise.resolve([]),
+        getWorkout: (owner, id) => {
+          asked.push(id);
+          return stub.store.getWorkout(owner, id);
+        },
+      },
+    };
+    const view = await render(port, undefined, 'workout-1');
+    await settle();
+    expect(asked).toEqual(['workout-1']);
+    expect(view.container.querySelector('#oyl-selected-heading')?.textContent).toBe('Sweet spot');
+  });
+
+  it('says a workout this device does not hold is not found', async () => {
+    const view = await render(workoutStub(ATHLETE, [workout()]), undefined, 'nobody-knows');
+    await settle();
+    expect(view.container.querySelector('#oyl-selected-heading')?.textContent).toBe(
+      'Workout not found',
+    );
+    // And the builder is still there beneath it.
+    expect(view.container.textContent).toContain('Build a workout');
+  });
+
+  it('goes back to the list once the chosen workout is deleted', async () => {
+    globalThis.location.hash = '#/workouts/selected/workout-1';
+    const stub = workoutStub(ATHLETE, [workout()]);
+    const view = await render(stub, undefined, 'workout-1');
+    await activateWithKeyboard(buttonSaying(view.container, 'Delete Sweet spot') as HTMLElement);
+    await activateWithKeyboard(buttonSaying(view.container, 'Delete “Sweet spot”') as HTMLElement);
+    await settle();
+    expect(globalThis.location.hash).toBe('#/workouts');
+    globalThis.location.hash = '';
   });
 });

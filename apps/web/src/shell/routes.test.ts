@@ -8,13 +8,16 @@ import {
   CREDITS_ROUTE,
   hrefFor,
   hrefForActivity,
+  hrefForSelection,
   matchHash,
+  matchHashAmong,
   normaliseHash,
   NOT_FOUND_ROUTE,
   routeById,
   routeForHash,
   ROUTES,
 } from './routes';
+import { SELECTIONS } from '../testing/populated-shell';
 
 describe('normaliseHash', () => {
   it.each([
@@ -105,6 +108,59 @@ describe('matchHash — the route parameter #50 introduced', () => {
   });
 });
 
+describe('a selection in the URL — #670', () => {
+  it('matches a selection to the list route, with the id as its parameter', () => {
+    expect(matchHash('#/activities/selected/ride-7')).toEqual({
+      route: routeById('activities'),
+      parameter: 'ride-7',
+    });
+    expect(matchHash('#/workouts/selected/w-1').route.id).toBe('workouts');
+    expect(matchHash('#/routes/selected/r-1').route.id).toBe('routes');
+  });
+
+  it('keeps a ride’s own full page where every existing link points', () => {
+    expect(matchHash(hrefForActivity('ride-7'))).toEqual({
+      route: ACTIVITY_DETAIL_ROUTE,
+      parameter: 'ride-7',
+    });
+  });
+
+  it('round-trips an id that needs encoding', () => {
+    const id = 'a/b #c d%';
+    const hash = hrefForSelection(routeById('routes'), id);
+    expect(hash).toBe('#/routes/selected/a%2Fb%20%23c%20d%25');
+    expect(matchHash(hash)).toEqual({ route: routeById('routes'), parameter: id });
+  });
+
+  it('still opens the route builder, whose literal path is a sibling', () => {
+    expect(matchHash('#/routes/new').route.id).toBe('route-builder');
+  });
+
+  it('gives a route with no selection its own list link rather than a broken one', () => {
+    expect(hrefForSelection(routeById('about'), 'x')).toBe('#/about');
+  });
+});
+
+describe('the more literal pattern wins, whatever the order — #670', () => {
+  // The notes on the route builder and the segment route promised this and the
+  // loop returned the first match. A parameter placed before a literal of the
+  // same shape captured the literal.
+  const literal = { ...routeById('route-builder') };
+  const parameter = {
+    ...routeById('route-builder'),
+    id: 'routes' as const,
+    path: '/routes/:route',
+  };
+
+  it.each([
+    ['literal first', [literal, parameter]],
+    ['parameter first', [parameter, literal]],
+  ])('%s', (_order, table) => {
+    expect(matchHashAmong(table, '#/routes/new').route).toBe(literal);
+    expect(matchHashAmong(table, '#/routes/r-1')).toEqual({ route: parameter, parameter: 'r-1' });
+  });
+});
+
 describe('hrefFor with a parameter', () => {
   it('substitutes the segment rather than appending to the path', () => {
     expect(hrefForActivity('ride-7')).toBe('#/activities/ride-7');
@@ -186,9 +242,31 @@ describe('which routes are read and which are operated (#422)', () => {
     expect(ALL_ROUTES.length - operated.length).toBeGreaterThan(10);
   });
 
-  it('gives every route one of the three, so the shell never writes a class naming no rule', () => {
+  it('gives every route one of the four, so the shell never writes a class naming no rule', () => {
     for (const route of ALL_ROUTES) {
-      expect(['prose', 'instruments', 'dashboard'], route.id).toContain(route.layout);
+      expect(['prose', 'instruments', 'dashboard', 'list-detail'], route.id).toContain(
+        route.layout,
+      );
+    }
+  });
+
+  it('lays out Activities, Workouts and Routes as a list beside its detail, and nothing else — #670', () => {
+    expect(
+      ALL_ROUTES.filter((route) => route.layout === 'list-detail').map((route) => route.id),
+    ).toEqual(['workouts', 'activities', 'routes']);
+  });
+
+  it('gives a list–detail route a selection path, and no other route one — #670', () => {
+    for (const route of ALL_ROUTES) {
+      if (route.layout === 'list-detail') {
+        expect(route.selection, route.id).toMatch(new RegExp(`^${route.path}/selected/:[a-z]+$`));
+        expect(
+          SELECTIONS[route.id],
+          `${route.id}: populated-shell names no item to select`,
+        ).toBeDefined();
+      } else {
+        expect(route.selection, route.id).toBeUndefined();
+      }
     }
   });
 

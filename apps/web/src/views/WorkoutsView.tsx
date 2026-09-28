@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useCallback, useEffect, useState, type FormEvent, type JSX } from 'react';
+import { useCallback, useEffect, useId, useState, type FormEvent, type JSX } from 'react';
 
 import type { WorkoutBlock } from '@onyourleft/domain';
 import type { WorkoutId, WorkoutRecord } from '@onyourleft/store';
@@ -18,7 +18,8 @@ import {
 import { blockText, workoutRow, type WorkoutRow } from '../workouts/library';
 import { WORKOUT_LIST_LIMIT, type WorkoutPort } from '../workouts/store-port';
 import { exportedWorkout, workoutFromFile } from '../workouts/transfer';
-import { ScrollTable } from '../design/ScrollTable';
+import { ListDetail, SELECTED_HEADING_ID } from '../shell/ListDetail';
+import { hrefFor, hrefForSelection, routeById } from '../shell/routes';
 
 /**
  * Workouts (#14) — the ones this device holds, and building a new one.
@@ -45,6 +46,12 @@ import { ScrollTable } from '../design/ScrollTable';
  * `AnalysisView.tsx`'s reason, and the workout's shape is a sentence rather
  * than a chart — see `library.ts` for why the words are the primary form and
  * not a fallback.
+ *
+ * **A list beside its detail — #670.** The saved workouts are the list;
+ * choosing one (`#/workouts/selected/<id>`) puts it, with its export and its
+ * delete, at the head of the detail pane, above the builder and the import
+ * that the pane always holds. A workout not in the list the screen read is
+ * read on its own (`store-port.ts` §`getWorkout`, whose first caller this is).
  *
  * ⚠️ **Nothing here rides a workout.** Choosing one and running it against a
  * trainer is the ride screen's, and it is the remaining slice of #14: this
@@ -82,7 +89,15 @@ export interface WorkoutsViewProps {
    * rather than offered and inert — `RoutesView.tsx`'s rule.
    */
   readonly save?: ((file: DownloadableFile) => void) | undefined;
+  /** The selected workout's id, from `#/workouts/selected/<id>` — #670. */
+  readonly selected?: string | undefined;
 }
+
+/** A selected workout that was not in the list, read on its own. */
+type Fetched =
+  | { readonly id: string; readonly kind: 'found'; readonly entry: WorkoutEntry }
+  | { readonly id: string; readonly kind: 'missing' }
+  | { readonly id: string; readonly kind: 'failed' };
 
 /**
  * A listed workout, and the record it came from.
@@ -98,7 +113,7 @@ interface WorkoutEntry {
   readonly record: WorkoutRecord;
 }
 
-export function WorkoutsView({ port, now, save }: WorkoutsViewProps): JSX.Element {
+export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): JSX.Element {
   const [entries, setEntries] = useState<readonly WorkoutEntry[] | undefined>(undefined);
   const [loadFault, setLoadFault] = useState<string | undefined>(undefined);
   const [refusal, setRefusal] = useState<BuildRefusal | undefined>(undefined);
@@ -108,6 +123,9 @@ export function WorkoutsView({ port, now, save }: WorkoutsViewProps): JSX.Elemen
   const [pendingDelete, setPendingDelete] = useState<WorkoutRow | undefined>(undefined);
   const [fileFault, setFileFault] = useState<string | undefined>(undefined);
   const [fileNote, setFileNote] = useState<string | undefined>(undefined);
+  const [exported, setExported] = useState<string | undefined>(undefined);
+  const [fetched, setFetched] = useState<Fetched | undefined>(undefined);
+  const listCaptionId = useId();
 
   const clock = useCallback((): number => (now === undefined ? Date.now() / 1000 : now()), [now]);
 
@@ -139,6 +157,37 @@ export function WorkoutsView({ port, now, save }: WorkoutsViewProps): JSX.Elemen
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  const inList =
+    selected === undefined ? undefined : entries?.find((entry) => entry.row.id === selected);
+  const readAlone = selected !== undefined && entries !== undefined && inList === undefined;
+  useEffect(() => {
+    if (!readAlone || port === undefined || selected === undefined) {
+      return undefined;
+    }
+    let live = true;
+    port.store.getWorkout(port.athleteId, selected as WorkoutId).then(
+      (record) => {
+        if (!live) return;
+        if (record === undefined) {
+          setFetched({ id: selected, kind: 'missing' });
+          return;
+        }
+        try {
+          setFetched({ id: selected, kind: 'found', entry: { row: workoutRow(record), record } });
+        } catch {
+          setFetched({ id: selected, kind: 'failed' });
+        }
+      },
+      () => {
+        if (live) setFetched({ id: selected, kind: 'failed' });
+      },
+    );
+    return () => {
+      live = false;
+    };
+    // `entries` is here so a reload — after a delete — reads the workout again.
+  }, [readAlone, port, selected, entries]);
 
   const onAddBlock = useCallback(
     (event: FormEvent<HTMLFormElement>): void => {
@@ -202,8 +251,7 @@ export function WorkoutsView({ port, now, save }: WorkoutsViewProps): JSX.Elemen
       if (save === undefined) return;
       const file = exportedWorkout(record);
       save(file);
-      setFileFault(undefined);
-      setFileNote(`${file.fileName} is ready. It holds the workout, not any ride you did of it.`);
+      setExported(`${file.fileName} is ready. It holds the workout, not any ride you did of it.`);
     },
     [save],
   );
@@ -251,10 +299,15 @@ export function WorkoutsView({ port, now, save }: WorkoutsViewProps): JSX.Elemen
       if (port === undefined) return;
       await port.store.deleteWorkout(port.athleteId, row.id as WorkoutId);
       setPendingDelete(undefined);
+      setExported(undefined);
       setSaved(`Deleted “${row.name}”.`);
       await reload();
+      // The selection named what was just deleted; the list is where to be.
+      if (selected === row.id) {
+        globalThis.location.hash = hrefFor(routeById('workouts'));
+      }
     },
-    [port, reload],
+    [port, reload, selected],
   );
 
   if (port === undefined) {
@@ -272,274 +325,355 @@ export function WorkoutsView({ port, now, save }: WorkoutsViewProps): JSX.Elemen
   const needsTarget =
     draft.kind === 'steady' || draft.kind === 'ramp' || draft.kind === 'intervals';
 
-  return (
-    <section>
-      <h2>Build a workout</h2>
-      <p>
-        Targets are a percentage of your own threshold power, so the same workout works whatever
-        shape you are in. A free-ride block releases the trainer instead of holding a target.
-      </p>
+  const shown: Fetched | { readonly kind: 'found'; readonly entry: WorkoutEntry } | undefined =
+    inList !== undefined
+      ? { kind: 'found', entry: inList }
+      : fetched?.id === selected
+        ? fetched
+        : undefined;
 
-      <form onSubmit={onAddBlock}>
-        <h3>Add a block</h3>
-        <p>
-          <label htmlFor="block-kind">Kind</label>
-          <select
-            id="block-kind"
-            name="kind"
-            value={draft.kind}
-            onChange={(event) =>
-              setDraft({ ...draft, kind: event.target.value as WorkoutBlock['kind'] })
-            }
-          >
-            {BLOCK_KINDS.map((entry) => (
-              <option key={entry.kind} value={entry.kind}>
-                {entry.label}
-              </option>
-            ))}
-          </select>
-        </p>
-        <p>
-          <label htmlFor="block-minutes">
-            {draft.kind === 'intervals' ? 'Hard interval, minutes' : 'Minutes'}
-          </label>
-          <input
-            id="block-minutes"
-            name="minutes"
-            type="text"
-            inputMode="decimal"
-            value={draft.minutes}
-            onChange={(event) => setDraft({ ...draft, minutes: event.target.value })}
-          />
-        </p>
-        {needsTarget ? (
-          <p>
-            <label htmlFor="block-percent">
-              {draft.kind === 'ramp'
-                ? 'Starting target, % of threshold'
-                : draft.kind === 'intervals'
-                  ? 'Hard target, % of threshold'
-                  : 'Target, % of threshold'}
-            </label>
-            <input
-              id="block-percent"
-              name="percent"
-              type="text"
-              inputMode="decimal"
-              value={draft.percent}
-              onChange={(event) => setDraft({ ...draft, percent: event.target.value })}
-            />
-          </p>
-        ) : null}
-        {draft.kind === 'ramp' ? (
-          <p>
-            <label htmlFor="block-to-percent">Finishing target, % of threshold</label>
-            <input
-              id="block-to-percent"
-              name="toPercent"
-              type="text"
-              inputMode="decimal"
-              value={draft.toPercent}
-              onChange={(event) => setDraft({ ...draft, toPercent: event.target.value })}
-            />
-          </p>
-        ) : null}
-        {draft.kind === 'intervals' ? (
+  const list =
+    entries === undefined ? (
+      <p>Reading your workouts…</p>
+    ) : (
+      <>
+        {loadFault === undefined ? null : <StatusMessage tone="warning">{loadFault}</StatusMessage>}
+        {entries.length === 0 ? (
+          <p>No workouts saved on this device yet.</p>
+        ) : (
           <>
-            <p>
-              <label htmlFor="block-repeats">How many times</label>
-              <input
-                id="block-repeats"
-                name="repeats"
-                type="text"
-                inputMode="numeric"
-                value={draft.repeats}
-                onChange={(event) => setDraft({ ...draft, repeats: event.target.value })}
-              />
+            <p className="oyl-muted" id={listCaptionId}>
+              Workouts saved on this device, newest first.
             </p>
-            <p>
-              <label htmlFor="block-easy-minutes">Recovery, minutes</label>
-              <input
-                id="block-easy-minutes"
-                name="easyMinutes"
-                type="text"
-                inputMode="decimal"
-                value={draft.easyMinutes}
-                onChange={(event) => setDraft({ ...draft, easyMinutes: event.target.value })}
-              />
-            </p>
-            <p>
-              <label htmlFor="block-easy-percent">Recovery target, % of threshold</label>
-              <input
-                id="block-easy-percent"
-                name="easyPercent"
-                type="text"
-                inputMode="decimal"
-                value={draft.easyPercent}
-                onChange={(event) => setDraft({ ...draft, easyPercent: event.target.value })}
-              />
-            </p>
+            <ul className="oyl-pane-list" aria-labelledby={listCaptionId}>
+              {entries.map(({ row }) => (
+                <li key={row.id} className="oyl-pane-list__item">
+                  <a
+                    href={hrefForSelection(routeById('workouts'), row.id)}
+                    data-oyl-select={row.id}
+                    aria-current={row.id === selected ? 'true' : undefined}
+                  >
+                    {row.name}
+                  </a>
+                  <p className="oyl-muted">
+                    {row.duration} · hardest: {hardestText(row)}
+                  </p>
+                </li>
+              ))}
+            </ul>
           </>
-        ) : null}
+        )}
+      </>
+    );
+
+  const chosen =
+    selected === undefined ? null : shown === undefined ? (
+      <p>Reading this workout…</p>
+    ) : shown.kind === 'found' ? (
+      <div className="oyl-selected">
+        <h2 id={SELECTED_HEADING_ID} tabIndex={-1}>
+          {shown.entry.row.name}
+        </h2>
+        <dl className="oyl-activity-card__facts">
+          <div>
+            <dt>Length</dt>
+            <dd>{shown.entry.row.duration}</dd>
+          </div>
+          <div>
+            <dt>Hardest</dt>
+            <dd>{hardestText(shown.entry.row)}</dd>
+          </div>
+          <div>
+            <dt>Shape</dt>
+            <dd>{shown.entry.row.shape}</dd>
+          </div>
+        </dl>
+
         <p>
-          <label htmlFor="block-label">Label, optional</label>
-          <input
-            id="block-label"
-            name="label"
-            type="text"
-            value={draft.label}
-            onChange={(event) => setDraft({ ...draft, label: event.target.value })}
-          />
+          {save === undefined ? null : (
+            <Button
+              variant="secondary"
+              type="button"
+              onClick={() => {
+                onExport(shown.entry.record);
+              }}
+            >
+              Export {shown.entry.row.name}
+            </Button>
+          )}{' '}
+          <Button
+            variant="secondary"
+            type="button"
+            onClick={() => {
+              setPendingDelete(shown.entry.row);
+            }}
+          >
+            Delete {shown.entry.row.name}
+          </Button>
         </p>
-        <Button variant="secondary" type="submit">
-          Add block
-        </Button>
-      </form>
-
-      <h3>This workout</h3>
-      {blocks.length === 0 ? (
-        <p>No blocks yet. Add one above.</p>
-      ) : (
-        <ol>
-          {blocks.map((block, index) => (
-            <li key={`${block.kind}-${String(index)}`}>
-              {blockText(block)}{' '}
-              <Button
-                variant="secondary"
-                type="button"
-                onClick={() => {
-                  onRemoveBlock(index);
-                }}
-              >
-                Remove block {String(index + 1)}
-              </Button>
-            </li>
-          ))}
-        </ol>
-      )}
-
-      <form onSubmit={(event) => void onSave(event)}>
+        {exported === undefined ? null : (
+          <StatusMessage tone="success" live>
+            {exported}
+          </StatusMessage>
+        )}
+        {pendingDelete === undefined ? null : (
+          <div>
+            <h3>Delete “{pendingDelete.name}”?</h3>
+            <p>
+              This removes the workout from this device. It does not affect any ride you have
+              already recorded.
+            </p>
+            <Button
+              variant="secondary"
+              type="button"
+              onClick={() => {
+                void onDelete(pendingDelete);
+              }}
+            >
+              Delete “{pendingDelete.name}”
+            </Button>
+            <Button
+              variant="secondary"
+              type="button"
+              onClick={() => {
+                setPendingDelete(undefined);
+              }}
+            >
+              Keep it
+            </Button>
+          </div>
+        )}
+      </div>
+    ) : (
+      <div className="oyl-selected">
+        <h2 id={SELECTED_HEADING_ID} tabIndex={-1}>
+          {shown.kind === 'missing' ? 'Workout not found' : 'This workout could not be read'}
+        </h2>
         <p>
-          <label htmlFor="workout-name">Name</label>
-          <input id="workout-name" name="name" type="text" />
+          {shown.kind === 'missing'
+            ? 'No workout with that address is saved on this device. It may have been deleted, ' +
+              'or the link may have come from another device — workouts are never copied ' +
+              'between them.'
+            : 'It is stored on this device and could not be read back. Reload the page to try ' +
+              'again.'}
         </p>
-        <Button type="submit">Save workout</Button>
-      </form>
+      </div>
+    );
 
-      {refusal === undefined ? null : (
-        <StatusMessage tone="warning">{refusal.message}</StatusMessage>
-      )}
-      {saved === undefined ? null : <StatusMessage tone="success">{saved}</StatusMessage>}
+  return (
+    <ListDetail
+      route={routeById('workouts')}
+      selection={selected}
+      listLabel="Saved workouts"
+      detailLabel="Workout"
+      backLabel="All workouts"
+      detailWithoutSelection
+      list={list}
+      detail={
+        <>
+          {chosen}
+          <h2>Build a workout</h2>
+          <p>
+            Targets are a percentage of your own threshold power, so the same workout works whatever
+            shape you are in. A free-ride block releases the trainer instead of holding a target.
+          </p>
 
-      <h2>Import a workout</h2>
-      <p>
-        A workout file written by On Your Left. The file is read on this device and never sent
-        anywhere. Files from other training apps are not read yet.
-      </p>
-      <form onSubmit={(event) => void onImport(event)}>
-        <p>
-          <label htmlFor="workout-file">Workout file</label>
-          <input id="workout-file" name="file" type="file" accept=".json,application/json" />
-        </p>
-        <Button variant="secondary" type="submit">
-          Import workout
-        </Button>
-      </form>
-
-      {fileFault === undefined ? null : (
-        <StatusMessage tone="warning" live>
-          {fileFault}
-        </StatusMessage>
-      )}
-      {fileNote === undefined ? null : (
-        <StatusMessage tone="success" live>
-          {fileNote}
-        </StatusMessage>
-      )}
-
-      <h2>Saved workouts</h2>
-      {loadFault === undefined ? null : <StatusMessage tone="warning">{loadFault}</StatusMessage>}
-      {entries === undefined ? (
-        <p>Reading your workouts…</p>
-      ) : entries.length === 0 ? (
-        <p>No workouts saved on this device yet.</p>
-      ) : (
-        <ScrollTable caption="Workouts saved on this device, newest first.">
-          <thead>
-            <tr>
-              <th scope="col">Name</th>
-              <th scope="col">Length</th>
-              <th scope="col">Hardest</th>
-              <th scope="col">Shape</th>
-              <th scope="col">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map(({ row, record }) => (
-              <tr key={row.id}>
-                <th scope="row">{row.name}</th>
-                <td>{row.duration}</td>
-                <td>
-                  {row.hardestPercent === undefined
-                    ? 'No target'
-                    : `${String(row.hardestPercent)}% of threshold`}
-                </td>
-                <td>{row.shape}</td>
-                <td>
-                  {save === undefined ? null : (
-                    <Button
-                      variant="secondary"
-                      type="button"
-                      onClick={() => {
-                        onExport(record);
-                      }}
-                    >
-                      Export {row.name}
-                    </Button>
-                  )}
+          <h3>This workout</h3>
+          {blocks.length === 0 ? (
+            <p>No blocks yet. Add one below.</p>
+          ) : (
+            <ol>
+              {blocks.map((block, index) => (
+                <li key={`${block.kind}-${String(index)}`}>
+                  {blockText(block)}{' '}
                   <Button
                     variant="secondary"
                     type="button"
                     onClick={() => {
-                      setPendingDelete(row);
+                      onRemoveBlock(index);
                     }}
                   >
-                    Delete {row.name}
+                    Remove block {String(index + 1)}
                   </Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </ScrollTable>
-      )}
+                </li>
+              ))}
+            </ol>
+          )}
 
-      {pendingDelete === undefined ? null : (
-        <section>
-          <h3>Delete “{pendingDelete.name}”?</h3>
+          <form aria-label="Save this workout" onSubmit={(event) => void onSave(event)}>
+            <p>
+              <label htmlFor="workout-name">Name</label>
+              <input id="workout-name" name="name" type="text" />
+            </p>
+            <Button type="submit">Save workout</Button>
+          </form>
+
+          {refusal === undefined ? null : (
+            <StatusMessage tone="warning">{refusal.message}</StatusMessage>
+          )}
+          {saved === undefined ? null : <StatusMessage tone="success">{saved}</StatusMessage>}
+
+          {/*
+            #670: the workout, its name and *Save workout* come BEFORE the
+            form that adds a block, so the pane's one primary is on screen on
+            arrival on a landscape tablet — below the block form it was 72 px
+            under the fold there.
+          */}
+          {/*
+            Every form here is named: #670's audit of a populated screen —
+            the first, since the route loop renders it with no store — found
+            three unnamed forms, which a landmark list cannot tell apart.
+          */}
+          <form aria-label="Add a block" onSubmit={onAddBlock}>
+            <h3>Add a block</h3>
+            <p>
+              <label htmlFor="block-kind">Kind</label>
+              <select
+                id="block-kind"
+                name="kind"
+                value={draft.kind}
+                onChange={(event) =>
+                  setDraft({ ...draft, kind: event.target.value as WorkoutBlock['kind'] })
+                }
+              >
+                {BLOCK_KINDS.map((entry) => (
+                  <option key={entry.kind} value={entry.kind}>
+                    {entry.label}
+                  </option>
+                ))}
+              </select>
+            </p>
+            <p>
+              <label htmlFor="block-minutes">
+                {draft.kind === 'intervals' ? 'Hard interval, minutes' : 'Minutes'}
+              </label>
+              <input
+                id="block-minutes"
+                name="minutes"
+                type="text"
+                inputMode="decimal"
+                value={draft.minutes}
+                onChange={(event) => setDraft({ ...draft, minutes: event.target.value })}
+              />
+            </p>
+            {needsTarget ? (
+              <p>
+                <label htmlFor="block-percent">
+                  {draft.kind === 'ramp'
+                    ? 'Starting target, % of threshold'
+                    : draft.kind === 'intervals'
+                      ? 'Hard target, % of threshold'
+                      : 'Target, % of threshold'}
+                </label>
+                <input
+                  id="block-percent"
+                  name="percent"
+                  type="text"
+                  inputMode="decimal"
+                  value={draft.percent}
+                  onChange={(event) => setDraft({ ...draft, percent: event.target.value })}
+                />
+              </p>
+            ) : null}
+            {draft.kind === 'ramp' ? (
+              <p>
+                <label htmlFor="block-to-percent">Finishing target, % of threshold</label>
+                <input
+                  id="block-to-percent"
+                  name="toPercent"
+                  type="text"
+                  inputMode="decimal"
+                  value={draft.toPercent}
+                  onChange={(event) => setDraft({ ...draft, toPercent: event.target.value })}
+                />
+              </p>
+            ) : null}
+            {draft.kind === 'intervals' ? (
+              <>
+                <p>
+                  <label htmlFor="block-repeats">How many times</label>
+                  <input
+                    id="block-repeats"
+                    name="repeats"
+                    type="text"
+                    inputMode="numeric"
+                    value={draft.repeats}
+                    onChange={(event) => setDraft({ ...draft, repeats: event.target.value })}
+                  />
+                </p>
+                <p>
+                  <label htmlFor="block-easy-minutes">Recovery, minutes</label>
+                  <input
+                    id="block-easy-minutes"
+                    name="easyMinutes"
+                    type="text"
+                    inputMode="decimal"
+                    value={draft.easyMinutes}
+                    onChange={(event) => setDraft({ ...draft, easyMinutes: event.target.value })}
+                  />
+                </p>
+                <p>
+                  <label htmlFor="block-easy-percent">Recovery target, % of threshold</label>
+                  <input
+                    id="block-easy-percent"
+                    name="easyPercent"
+                    type="text"
+                    inputMode="decimal"
+                    value={draft.easyPercent}
+                    onChange={(event) => setDraft({ ...draft, easyPercent: event.target.value })}
+                  />
+                </p>
+              </>
+            ) : null}
+            <p>
+              <label htmlFor="block-label">Label, optional</label>
+              <input
+                id="block-label"
+                name="label"
+                type="text"
+                value={draft.label}
+                onChange={(event) => setDraft({ ...draft, label: event.target.value })}
+              />
+            </p>
+            <Button variant="secondary" type="submit">
+              Add block
+            </Button>
+          </form>
+
+          <h2>Import a workout</h2>
           <p>
-            This removes the workout from this device. It does not affect any ride you have already
-            recorded.
+            A workout file written by On Your Left. The file is read on this device and never sent
+            anywhere. Files from other training apps are not read yet.
           </p>
-          <Button
-            variant="secondary"
-            type="button"
-            onClick={() => {
-              void onDelete(pendingDelete);
-            }}
-          >
-            Delete “{pendingDelete.name}”
-          </Button>
-          <Button
-            variant="secondary"
-            type="button"
-            onClick={() => {
-              setPendingDelete(undefined);
-            }}
-          >
-            Keep it
-          </Button>
-        </section>
-      )}
-    </section>
+          <form aria-label="Import a workout" onSubmit={(event) => void onImport(event)}>
+            <p>
+              <label htmlFor="workout-file">Workout file</label>
+              <input id="workout-file" name="file" type="file" accept=".json,application/json" />
+            </p>
+            <Button variant="secondary" type="submit">
+              Import workout
+            </Button>
+          </form>
+
+          {fileFault === undefined ? null : (
+            <StatusMessage tone="warning" live>
+              {fileFault}
+            </StatusMessage>
+          )}
+          {fileNote === undefined ? null : (
+            <StatusMessage tone="success" live>
+              {fileNote}
+            </StatusMessage>
+          )}
+        </>
+      }
+    />
   );
+}
+
+/** The hardest target in words, or that there is none. */
+function hardestText(row: WorkoutRow): string {
+  return row.hardestPercent === undefined
+    ? 'No target'
+    : `${String(row.hardestPercent)}% of threshold`;
 }

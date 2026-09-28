@@ -383,7 +383,7 @@ function viewFor(
         />
       );
     case 'activities':
-      return <ActivitiesView library={props.library} />;
+      return <ActivitiesView library={props.library} selected={match.parameter} />;
     case 'activity-detail':
       return (
         <ActivityDetailView
@@ -398,11 +398,19 @@ function viewFor(
     case 'segments':
       return <SegmentsView port={props.segments} match={props.match} />;
     case 'routes':
-      return <RoutesView port={props.routes} save={props.transfer?.save} />;
+      return (
+        <RoutesView port={props.routes} save={props.transfer?.save} selected={match.parameter} />
+      );
     case 'route-builder':
       return <RouteBuilderView provider={props.routing} />;
     case 'workouts':
-      return <WorkoutsView port={props.workouts} save={props.transfer?.save} />;
+      return (
+        <WorkoutsView
+          port={props.workouts}
+          save={props.transfer?.save}
+          selected={match.parameter}
+        />
+      );
     case 'game':
       return (
         <GameView
