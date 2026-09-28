@@ -103,6 +103,20 @@ assert_clean "an entry with an empty placeholder still counts as documented"
 new_fixture
 assert_clean "a repository whose code reads no variables passes"
 
+# A match on the FIRST line of a template far larger than a pipe's buffer. With
+# `printf | grep -q` grep exits after one line while printf still has kilobytes
+# to write, so printf dies of SIGPIPE and `pipefail` turns a documented variable
+# into a violation -- deterministically here, by chance on a CI runner (main,
+# run 36419270155, OYL_DEVTOOLS_PORT).
+new_fixture
+{
+  printf 'VITE_FIRST_OF_MANY=x\n'
+  for i in $(seq 1 20000); do printf 'OYL_FILLER_%05d=x\n' "$i"; done
+} > "${fixture_root}/.env.example"
+write_source 'apps/web/src/config.ts' \
+  'export const v = import.meta.env.VITE_FIRST_OF_MANY;'
+assert_clean "a documented variable passes when the template is larger than a pipe buffer"
+
 # --- An undocumented variable is caught, in each spelling that reaches one -----
 
 new_fixture
