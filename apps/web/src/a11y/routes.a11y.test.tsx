@@ -772,6 +772,29 @@ describe('the document title follows the route', () => {
 });
 
 /**
+ * #671 folds the wordmark off a phone's screen, so the app's name has to reach
+ * assistive technology some other way than the paragraph a sighted reader no
+ * longer sees. Checked on every route, because the header is the shell's and a
+ * route that rendered its own would be a second banner.
+ */
+describe('the app’s name survives the folded wordmark — #671', () => {
+  it.each(ALL_ROUTES.map((route) => [route.id, route] as const))(
+    '%s: one banner, labelled with the app’s name, and the h1 is the first heading',
+    async (_id, route) => {
+      await open(route.path);
+      const banners = document.querySelectorAll('header.oyl-header');
+      expect(banners).toHaveLength(1);
+      expect(banners[0]?.getAttribute('aria-label')).toBe('On Your Left');
+      // The navigation is its own landmark, not a part of the banner's box.
+      expect(banners[0]?.querySelector('nav')).toBeNull();
+      expect(document.title.endsWith(' — On Your Left')).toBe(true);
+      const firstHeading = document.querySelector('h1, h2, h3, h4, h5, h6, [role="heading"]');
+      expect(firstHeading?.tagName).toBe('H1');
+    },
+  );
+});
+
+/**
  * Reach a route the way a rider does, by the keyboard: its own link if one is
  * on the page, otherwise its group's link and then its page's — #427. Returns
  * how many activations that took, and fails if there was no way at all.

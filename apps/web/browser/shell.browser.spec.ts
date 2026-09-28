@@ -52,6 +52,13 @@ import { expect, test, type Page } from '@playwright/test';
 import { AA_LARGE_TEXT_OR_NON_TEXT, contrastRatio } from '../src/design/contrast';
 import { COLOUR_TOKENS, type ColourToken } from '../src/design/tokens';
 import { decodePng } from '../src/game/model-bytes-testing';
+import {
+  applyInsets,
+  PIXEL_TABLET_LANDSCAPE_INSETS,
+  PIXEL_TABLET_PORTRAIT_INSETS_ASSUMED,
+  resolvedInsets,
+  type Insets,
+} from './insets';
 
 /**
  * The viewports measured, and why each is here.
@@ -72,19 +79,30 @@ const VIEWPORTS = [
 /**
  * The most of a viewport that chrome may still cover once the page is scrolled.
  *
- * Measured on this branch in the lockfile-pinned Chromium: the worst case the
- * `@media (min-width: 64rem) and (min-height: 40rem)` block can admit is
- * 1024×640, where the header is 97 px — **15.2%**. Before the fix, 320×256 was
- * **70%**.
+ * ⚠️ **17 %, down from 20 % — #671, and a reviewer who remembers 0.2 is reading
+ * the old file.** The area is the header and the navigation together (#427),
+ * and it is published per viewport on every run (`chrome area` in the log and
+ * in each case's annotations). Measured in the lockfile-pinned Chromium,
+ * before (`main` at 4b0ba28) and after #671:
  *
- * ⚠️ 20% is a budget with headroom over the worst admitted case, and that is
- * deliberate rather than slack: it is loose enough that a font-metric
- * difference between Chromium builds cannot turn this red, and tight enough to
- * catch every failure of the shape that has actually occurred — a twelfth
- * route wrapping the nav to a second line at 1024 px takes the header to 138 px
- * and 21.6%, which fails.
+ *   320×256    0 px²       0.0 %  →       0 px²   0.0 %   nothing pinned
+ *   375×667    23 561 px²  9.4 %  →  23 561 px²   9.4 %   the bar alone
+ *   768×1024   90 112 px² 11.5 %  →  90 112 px²  11.5 %   the rail alone
+ *   1024×640  123 712 px² 18.9 %  → 101 248 px²  15.4 %   rail + sticky header
+ *   1280×800  156 224 px² 15.3 %  → 127 616 px²  12.5 %   rail + sticky header
+ *
+ * Only the two viewports where the header sticks moved, because everywhere
+ * else it scrolls away; the worst case is still 1024×640, the smallest the
+ * sticky query admits, and it is now a 48 px header beside the 88 px rail.
+ *
+ * **The margin is 1.6 points over that worst case**, and it is sized against
+ * what can move: both boxes are DECLARED lengths now (`--oyl-header-height`,
+ * the rail's 5.5rem), so a font-metric difference between Chromium builds
+ * cannot move the area at all, and the margin is room for a header about 10 px
+ * taller than the declared one and no more. The header #671 replaced — 72 px —
+ * is 18.9 % at 1024×640 and fails, which is the measured control.
  */
-const PERSISTENT_CHROME_BUDGET = 0.2;
+const PERSISTENT_CHROME_BUDGET = 0.17;
 
 /**
  * How far clear of the chrome a heading has to land after a fragment jump, in
@@ -147,16 +165,16 @@ for (const viewport of VIEWPORTS) {
         const region = document.querySelector('.oyl-main');
         if (header === null || region === null) throw new Error('no .oyl-header or no .oyl-main');
         return {
-          headerHeight: header.getBoundingClientRect().height,
           headerBackground: getComputedStyle(header).backgroundColor,
           scrollable: document.documentElement.scrollHeight - window.innerHeight,
           overflowsViewport: region.getBoundingClientRect().height - window.innerHeight,
         };
       });
 
-      expect(state.headerHeight, 'the header has no height — did theme.css load?').toBeGreaterThan(
-        0,
-      );
+      // ⚠️ Not the header's HEIGHT, which this used to require be positive:
+      // since #671 the header is zero tall below the rail breakpoint on
+      // purpose. Its computed surface below says the stylesheet loaded, and
+      // §"#671" measures the height against what `theme.css` declares.
       expect(
         state.headerBackground,
         'the header is not painted in the elevation-3 surface. Either theme.css did not load, ' +
@@ -249,6 +267,12 @@ for (const viewport of VIEWPORTS) {
       );
 
       const share = covered.visible / covered.viewport;
+      // Published, not only bounded (#671): the budget is set from these.
+      const published = `${covered.visible.toFixed(0)} px², ${(share * 100).toFixed(2)} % of ${String(
+        covered.viewport,
+      )} px²`;
+      console.log(`chrome area, ${viewport.name}: ${published}`);
+      test.info().annotations.push({ type: 'chrome area', description: published });
       expect(
         share,
         `the header and the navigation still cover ${covered.visible.toFixed(0)} px² of a ${String(
@@ -342,12 +366,25 @@ for (const viewport of VIEWPORTS) {
         // hit the header. Without it, an `elementFromPoint` that returned
         // `null` for everything — an off-screen link, a zero-size box — would
         // make the assertion below unfalsifiable.
+        //
+        // ⚠️ Since #671 the header has NO box below the rail breakpoint, so
+        // there it is the far end of the `h1`'s box that has to hit the `h1`
+        // — the same proof that hit-testing sees this page, on the one thing
+        // every route is sure to have, and clear of the link, which on a
+        // phone sits over the heading's start.
         const headerBox = header.getBoundingClientRect();
-        const elsewhere = document.elementFromPoint(headerBox.right - 4, box.bottom + 8);
+        const heading = document.querySelector('h1');
+        if (heading === null) throw new Error('no h1');
+        const headingBox = heading.getBoundingClientRect();
+        const [target, x, y] =
+          headerBox.height > 0
+            ? [header, headerBox.right - 4, headerBox.top + headerBox.height / 2]
+            : [heading, headingBox.right - 4, headingBox.top + headingBox.height / 2];
+        const elsewhere = document.elementFromPoint(x, y);
 
         return {
           onLink: centre !== null && link.contains(centre),
-          onHeaderElsewhere: elsewhere !== null && header.contains(elsewhere),
+          onHeaderElsewhere: elsewhere !== null && target.contains(elsewhere),
           linkHeight: box.height,
         };
       });
@@ -355,7 +392,8 @@ for (const viewport of VIEWPORTS) {
       expect(hit.linkHeight, 'the skip link has no box to hit-test').toBeGreaterThan(0);
       expect(
         hit.onHeaderElsewhere,
-        'a point inside the header does not hit the header, so this hit test proves nothing',
+        'a point inside the header (or, where the header is folded away, the h1) does not hit ' +
+          'it, so this hit test proves nothing',
       ).toBe(true);
       expect(
         hit.onLink,
@@ -458,6 +496,226 @@ test.describe('the sticky header and its scroll margin are one decision', () => 
       Number.parseFloat(largeMargin),
       'the header sticks and nothing compensates the fragment jump for it',
     ).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * A smaller header, and the band under the status bar — #671.
+ *
+ * ## What was wrong
+ *
+ * Since #427 put the navigation in a bar and a rail, the header held only the
+ * wordmark, and it was still 72 px: on a phone a third header above the
+ * section row and the `h1`, while the bar already said where you were. And
+ * with the tablet's edge-to-edge insets the header began at y = 36 — `body` is
+ * padded by the inset — so a band of canvas showed under the status bar while
+ * the rail beside it painted to y = 0. Capacitor's status-bar colour does
+ * nothing on Android 16, so the page has to paint that band itself.
+ *
+ * ## What is measured, and the control that makes it mean something
+ *
+ * At the three viewports #671 names and the two tablet ones #439 measured:
+ * the header's height, read from the browser and published; and, with the
+ * insets applied to the ENGINE (`insets.ts`) and read back, the pixel at
+ * (50 %, 18) — the middle of a 36 px status bar — read off a screenshot and
+ * required to be the header's surface token, at load and again after a long
+ * scroll, when content has passed beneath it.
+ *
+ * ⚠️ **The control is the header as it was**, put back over the shipped
+ * stylesheet by {@link BEFORE_671}: the same page must then FAIL both — a
+ * header of at least 72 px and a pixel that is not the token. Without it a
+ * pixel sampled from a page that never applied its insets, or a header that
+ * never rendered, would pass as readily as a correct one.
+ *
+ * ## What this does NOT prove
+ *
+ * Anything on the owner's tablet. The insets are the ones read off it (#439),
+ * and the upright ones are assumed; whether a real status bar shows the band
+ * as the header's colour is a device check, written into the pull request.
+ */
+const HEADER_VIEWPORTS: readonly {
+  readonly name: string;
+  readonly width: number;
+  readonly height: number;
+  readonly insets: Insets;
+}[] = [
+  { name: '320×256', width: 320, height: 256, insets: PIXEL_TABLET_LANDSCAPE_INSETS },
+  { name: '390×844', width: 390, height: 844, insets: PIXEL_TABLET_LANDSCAPE_INSETS },
+  { name: '844×390', width: 844, height: 390, insets: PIXEL_TABLET_LANDSCAPE_INSETS },
+  {
+    name: 'tablet 1280×800, insets 36/32',
+    width: 1280,
+    height: 800,
+    insets: PIXEL_TABLET_LANDSCAPE_INSETS,
+  },
+  {
+    name: 'tablet 800×1280, insets 36/32 (assumed)',
+    width: 800,
+    height: 1280,
+    insets: PIXEL_TABLET_PORTRAIT_INSETS_ASSUMED,
+  },
+];
+
+/** The wordmark bar #671 replaced, in CSS pixels, measured on `main` at 4b0ba28. */
+const WORDMARK_BAR_PIXELS = 72;
+
+/** Where the status bar's middle is: half the 36 px inset read off the tablet. */
+const STATUS_BAR_ROW = 18;
+
+/**
+ * The header's rules as they were before #671, laid over the shipped
+ * stylesheet — the control. The same declarations `theme.css` had at 4b0ba28,
+ * plus the one thing that undoes the band: the pseudo-element's content.
+ */
+const BEFORE_671 = `
+  .oyl-header { display: block !important; min-height: 0 !important;
+    padding: var(--oyl-space-md) !important;
+    border-bottom: 1px solid var(--oyl-color-border) !important; }
+  .oyl-wordmark { position: static !important; width: auto !important; height: auto !important;
+    margin: 0 0 var(--oyl-space-sm) !important; overflow: visible !important;
+    clip-path: none !important; white-space: normal !important; }
+  .oyl-header::before { content: none !important; }
+`;
+
+interface HeaderReading {
+  readonly height: number;
+  readonly top: number;
+  readonly atLoad: string;
+  readonly afterScroll: string;
+  readonly headerTopAfterScroll: number;
+}
+
+async function readHeader(
+  page: Page,
+  viewport: (typeof HEADER_VIEWPORTS)[number],
+  path: (name: string) => string,
+  control: boolean,
+): Promise<HeaderReading> {
+  await page.setViewportSize({ width: viewport.width, height: viewport.height });
+  await applyInsets(page, viewport.insets);
+  await openShell(page);
+  // The insets must be the ones the page resolved, or this measured nothing.
+  expect(await resolvedInsets(page)).toEqual(viewport.insets);
+  if (control) {
+    await page.addStyleTag({ content: BEFORE_671 });
+    await settled(page);
+  }
+  const box = await page.evaluate(() => {
+    const header = document.querySelector('.oyl-header');
+    if (header === null) throw new Error('no .oyl-header');
+    const measured = header.getBoundingClientRect();
+    return { height: measured.height, top: measured.top };
+  });
+  const pixel = async (name: string): Promise<string> => {
+    const file = path(name);
+    await page.screenshot({
+      path: file,
+      clip: { x: Math.floor(viewport.width / 2), y: STATUS_BAR_ROW, width: 1, height: 1 },
+    });
+    const png = decodePng(file);
+    return `#${[0, 1, 2]
+      .map((channel) => (png.data[channel] ?? 0).toString(16).padStart(2, '0'))
+      .join('')}`;
+  };
+  const atLoad = await pixel('at-load.png');
+  await page.evaluate(() => {
+    window.scrollTo(0, 2000);
+  });
+  await settled(page);
+  expect(await page.evaluate(() => window.scrollY), 'the page did not scroll').toBeGreaterThan(0);
+  const scrolled = await pixel('after-scroll.png');
+  // A POSITIONED element scrolled under the band — a pane, a map, anything
+  // with `position: relative` — paints above an unpositioned one in document
+  // order, and so above a band with no `z-index` of its own. The same pixel is
+  // read again with everything in `main` positioned and opaque, which changes
+  // no box: the harness's spacer is transparent, and a band beneath a
+  // transparent box reads as a band above it.
+  await page.addStyleTag({
+    content: '.oyl-main * { position: relative; background: var(--oyl-color-canvas); }',
+  });
+  await settled(page);
+  const positioned = await pixel('after-scroll-positioned.png');
+  const afterScroll = scrolled === positioned ? scrolled : `${scrolled} / ${positioned} positioned`;
+  const headerTopAfterScroll = await page.evaluate(
+    () => document.querySelector('.oyl-header')?.getBoundingClientRect().top ?? Number.NaN,
+  );
+  return { ...box, atLoad, afterScroll, headerTopAfterScroll };
+}
+
+for (const viewport of HEADER_VIEWPORTS) {
+  test.describe(`#671 — the header at ${viewport.name}`, () => {
+    test('is under 72 px, and the status bar’s band is the header’s surface', async ({
+      page,
+    }, info) => {
+      const read = await readHeader(page, viewport, (name) => info.outputPath(name), false);
+      const published =
+        `header ${read.height.toFixed(1)} px at y=${read.top.toFixed(0)}; ` +
+        `(50 %, ${String(STATUS_BAR_ROW)}) ${read.atLoad} at load, ${read.afterScroll} scrolled`;
+      console.log(`#671 ${viewport.name}: ${published}`);
+      info.annotations.push({ type: 'header', description: published });
+
+      expect(
+        read.height,
+        `the header is ${read.height.toFixed(1)} px — the wordmark bar #671 folded was ` +
+          `${String(WORDMARK_BAR_PIXELS)} px`,
+      ).toBeLessThan(WORDMARK_BAR_PIXELS);
+      if (viewport.width < 600) {
+        expect(read.height, 'below the rail breakpoint the wordmark bar is folded away').toBe(0);
+      }
+      expect(
+        read.atLoad,
+        'the band under the status bar is not the header’s surface — a strip of canvas where ' +
+          'the tablet showed one (theme.css §`.oyl-header::before`)',
+      ).toBe(COLOUR_TOKENS.surfaceOverlay);
+      expect(
+        read.afterScroll,
+        'content scrolled up into the status bar’s band instead of passing beneath it',
+      ).toBe(COLOUR_TOKENS.surfaceOverlay);
+      if (read.height > 0 && viewport.width >= 1024 && viewport.height >= 640) {
+        // Where it sticks, it sticks under the band rather than behind it.
+        expect(read.headerTopAfterScroll, 'the sticky header is under the status bar').toBe(
+          viewport.insets.top,
+        );
+      }
+    });
+
+    test('the control — the header as it was fails both', async ({ page }, info) => {
+      const read = await readHeader(page, viewport, (name) => info.outputPath(name), true);
+      console.log(
+        `#671 control ${viewport.name}: header ${read.height.toFixed(1)} px, ` +
+          `(50 %, ${String(STATUS_BAR_ROW)}) ${read.atLoad}`,
+      );
+      expect(
+        read.height,
+        'the old header measures under 72 px, so the height assertion cannot fail',
+      ).toBeGreaterThanOrEqual(WORDMARK_BAR_PIXELS);
+      expect(
+        read.atLoad,
+        'the band is the header’s colour without the rule that paints it, so the pixel ' +
+          'assertion cannot fail',
+      ).toBe(COLOUR_TOKENS.canvas);
+    });
+  });
+}
+
+test.describe('#671 — the app’s name on a phone', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('is off the screen and still the banner’s name, and the h1 is the first heading', async ({
+    page,
+  }) => {
+    await openShell(page);
+    await expect(page.getByRole('banner', { name: 'On Your Left' })).toHaveCount(1);
+    await expect(page).toHaveTitle(/ — On Your Left$/);
+    const state = await page.evaluate(() => {
+      const wordmark = document.querySelector('.oyl-wordmark');
+      const first = document.querySelector('h1, h2, h3, h4, h5, h6, [role="heading"]');
+      if (wordmark === null) throw new Error('no wordmark');
+      const box = wordmark.getBoundingClientRect();
+      return { area: box.width * box.height, first: first?.tagName ?? null };
+    });
+    expect(state.area, 'the wordmark is still drawn on a phone').toBeLessThanOrEqual(1);
+    expect(state.first).toBe('H1');
   });
 });
 
