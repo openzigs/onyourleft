@@ -10,6 +10,7 @@ import {
 } from '@onyourleft/domain';
 import {
   ANDROID_BLE,
+  ForgetUnconfirmedError,
   isSensorError,
   MAX_RECOMMENDED_CONCURRENT_CONNECTIONS,
   SensorError,
@@ -687,6 +688,154 @@ describe('a forget the plugin never answers — #716', () => {
     await transport.connect(device.identity.id);
     await transport.forget(device.identity.id);
     expect(clock.pending).toEqual([]);
+  });
+
+  /**
+   * A plugin whose `disconnect` or `stopNotifications` the test answers by
+   * hand once `hold` is set — #718's review. Resolve, reject, or never.
+   */
+  function heldPlugin(clock: ReturnType<typeof manualClock>, hold: 'disconnect' | 'stop') {
+    const base = scriptedPort({});
+    let holding = false;
+    let heldCalls = 0;
+    let answer: { resolve: () => void; reject: (error: unknown) => void } | undefined;
+    const held = (): Promise<void> => {
+      heldCalls += 1;
+      return new Promise<void>((resolve, reject) => {
+        answer = { resolve, reject };
+      });
+    };
+    const plugin: typeof base = {
+      ...base,
+      disconnect: (deviceId) =>
+        holding && hold === 'disconnect' ? held() : base.disconnect(deviceId),
+      stopNotifications: (deviceId, service, characteristic) =>
+        holding && hold === 'stop'
+          ? held()
+          : base.stopNotifications(deviceId, service, characteristic),
+    };
+    const transport = createCapacitorTransport({
+      plugin,
+      profiles: [compositeProfile],
+      now: () => AT,
+      schedule: clock.schedule,
+    });
+    return {
+      base,
+      transport,
+      hold: () => {
+        holding = true;
+      },
+      /** How many calls are being held unanswered. */
+      heldCalls: () => heldCalls,
+      resolve: () => answer?.resolve(),
+      reject: (error: unknown) => answer?.reject(error),
+    };
+  }
+
+  it('says the LINK is unconfirmed, and carries the plugin’s call until it lands — #718', async () => {
+    const clock = manualClock();
+    const { transport, hold, resolve } = heldPlugin(clock, 'disconnect');
+    const device = await transport.discover({ capabilities: [] });
+    await transport.connect(device.identity.id);
+    hold();
+    const forgetting = transport.forget(device.identity.id).catch((error: unknown) => error);
+    await flush();
+    clock.pending[0]?.fire();
+    const error = await forgetting;
+
+    expect(error).toBeInstanceOf(ForgetUnconfirmedError);
+    const unconfirmed = error as ForgetUnconfirmedError;
+    expect(unconfirmed.code).toBe('forget-timed-out');
+    // Never `permission`: the plugin holds none, and the rider must not be
+    // sent to a site's settings the shell does not have.
+    expect(unconfirmed.holding).toBe('link');
+
+    // The call is still running, and the rejection says so until it lands.
+    let landed = false;
+    void unconfirmed.stillRunning?.then(() => {
+      landed = true;
+    });
+    await flush();
+    expect(unconfirmed.stillRunning).toBeDefined();
+    expect(landed).toBe(false);
+    resolve();
+    await flush();
+    expect(landed).toBe(true);
+  });
+
+  it('carries a call that lands by FAILING as landed, not as a rejection', async () => {
+    const clock = manualClock();
+    const { transport, hold, reject } = heldPlugin(clock, 'disconnect');
+    const device = await transport.discover({ capabilities: [] });
+    await transport.connect(device.identity.id);
+    hold();
+    const forgetting = transport.forget(device.identity.id).catch((error: unknown) => error);
+    await flush();
+    clock.pending[0]?.fire();
+    const unconfirmed = (await forgetting) as ForgetUnconfirmedError;
+    reject(new Error('disconnect failed'));
+    // Fulfils: whichever way the plugin answered, it has stopped acting.
+    await expect(unconfirmed.stillRunning).resolves.toBeUndefined();
+  });
+
+  it('names a refused disconnect forget-refused, holding the link — #718', async () => {
+    const clock = manualClock();
+    const { transport, hold, reject } = heldPlugin(clock, 'disconnect');
+    const device = await transport.discover({ capabilities: [] });
+    await transport.connect(device.identity.id);
+    hold();
+    const forgetting = transport.forget(device.identity.id).catch((error: unknown) => error);
+    await flush();
+    const cause = new Error('disconnect failed');
+    reject(cause);
+    const error = await forgetting;
+
+    expect(error).toBeInstanceOf(ForgetUnconfirmedError);
+    const refused = error as ForgetUnconfirmedError;
+    expect(refused.code).toBe('forget-refused');
+    expect(refused.holding).toBe('link');
+    // A refusal is an answer: nothing is still running.
+    expect(refused.stillRunning).toBeUndefined();
+    expect(refused.cause).toBe(cause);
+    expect(clock.pending).toEqual([]);
+  });
+
+  it('bounds a stop-notifications the plugin never answers, before it reaches disconnect — #718', async () => {
+    // The OTHER half of `letGo`: `teardown` stops every started notification
+    // before the disconnect, and a plugin stuck THERE never reaches the
+    // disconnect at all.
+    const clock = manualClock();
+    const { base, transport, hold, heldCalls } = heldPlugin(clock, 'stop');
+    const device = await transport.discover({ capabilities: [] });
+    const id = device.identity.id;
+    await transport.connect(id);
+    await transport.subscribe(id, 'power', () => undefined);
+    hold();
+    const before = base.calls.length;
+
+    let outcome: unknown = 'pending';
+    const forgetting = transport.forget(id).then(
+      () => 'resolved',
+      (error: unknown) => error,
+    );
+    void forgetting.then((settled) => {
+      outcome = settled;
+    });
+    await flush();
+    expect(outcome).toBe('pending');
+    // Stuck in the stop: held, and the disconnect never asked for.
+    expect(heldCalls()).toBe(1);
+    expect(base.calls.slice(before)).toEqual([]);
+    expect(clock.pending.map((deadline) => deadline.after)).toEqual([FORGET_DEADLINE]);
+
+    clock.pending[0]?.fire();
+    await forgetting;
+    expect(isSensorError(outcome, 'forget-timed-out')).toBe(true);
+    expect((outcome as ForgetUnconfirmedError).holding).toBe('link');
+    expect(() => transport.connectionState(id)).toThrow(
+      expect.objectContaining({ code: 'device-not-found' }),
+    );
   });
 
   it('waits exactly as long as the Web Bluetooth adapter does', () => {

@@ -14,7 +14,7 @@
 import { seconds, type Seconds } from '@onyourleft/domain';
 import { describe, expect, it } from 'vitest';
 
-import { isSensorError } from '../../src/errors';
+import { ForgetUnconfirmedError, isSensorError } from '../../src/errors';
 
 import { DEFAULT_GATT_OPERATION_TIMEOUT } from './queue';
 import { createWebBluetoothTransport } from './transport';
@@ -207,6 +207,40 @@ describe('a forget the browser never answers — #716', () => {
     expect(clock.pending.map((deadline) => deadline.after)).toEqual([
       DEFAULT_GATT_OPERATION_TIMEOUT,
     ]);
+  });
+
+  it('says the GRANT is unconfirmed, and carries the browser’s call until it lands — #718', async () => {
+    let answer: () => void = () => undefined;
+    const late = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    const { transport, clock, bench } = bounded({ ...stubTrainerDevice(), forgetWaitsFor: late });
+    const device = await transport.discover({ capabilities: ['power'] });
+    await transport.connect(device.identity.id);
+    const forgetting = transport.forget(device.identity.id).catch((error: unknown) => error);
+    await flush();
+    clock.pending[0]?.fire();
+    const error = await forgetting;
+
+    expect(error).toBeInstanceOf(ForgetUnconfirmedError);
+    const unconfirmed = error as ForgetUnconfirmedError;
+    expect(unconfirmed.code).toBe('forget-timed-out');
+    expect(unconfirmed.holding).toBe('permission');
+
+    let landed = false;
+    void unconfirmed.stillRunning?.then(() => {
+      landed = true;
+    });
+    await flush();
+    expect(unconfirmed.stillRunning).toBeDefined();
+    expect(landed).toBe(false);
+    expect(bench.device('stub-trainer').allowedServices.length).toBeGreaterThan(0);
+
+    // The browser answers: the grant goes, and the carried call says so.
+    answer();
+    await flush();
+    expect(landed).toBe(true);
+    expect(bench.device('stub-trainer').allowedServices).toEqual([]);
   });
 
   it('leaves no deadline behind when the browser answers, either way', async () => {

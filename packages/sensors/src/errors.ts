@@ -171,8 +171,20 @@ export type SensorErrorCode =
    * device unpairable for the rest of the session. Its own code rather than
    * the refusal a stack reports, because "unknown" is a different state from
    * "refused": the browser MAY still list the device, and may not.
+   *
+   * Raised as a {@link ForgetUnconfirmedError}, which says WHAT the stack may
+   * still hold and carries the call it left running — #718's review.
    */
-  | 'forget-timed-out';
+  | 'forget-timed-out'
+  /**
+   * `forget` let go of the device here, and the stack refused to let go of its
+   * own hold on it — #718's review. Raised as a {@link ForgetUnconfirmedError}
+   * by a transport whose refusal is not a permission, so a caller can tell a
+   * rider the right thing: the Capacitor transport, whose stop or disconnect
+   * failed and whose LINK may therefore still be up. A Web Bluetooth refusal
+   * to revoke a grant is still the stack's own error, as it always was.
+   */
+  | 'forget-refused';
 
 /**
  * The one error this package raises.
@@ -200,6 +212,60 @@ export class SensorError extends Error {
     this.name = 'SensorError';
     this.code = code;
     this.deviceId = options?.deviceId;
+  }
+}
+
+/**
+ * What a stack may still hold on a device a `forget` let go of here — #718's
+ * review. The two real transports differ, and a rider has to be told the one
+ * that is true on theirs:
+ *
+ * - `permission` — Web Bluetooth. The link went before `BluetoothDevice.forget()`
+ *   was called, so what is unconfirmed is the origin's GRANT: the browser may
+ *   still list the device as allowed.
+ * - `link` — the Capacitor plugin, which holds no permission this program could
+ *   give back. What is unconfirmed is its stop and its disconnect: the LINK may
+ *   still be up.
+ */
+export type ForgetHold = 'permission' | 'link';
+
+/**
+ * A `forget` whose record is gone here and whose stack has not confirmed its
+ * own half — #716, #718's review.
+ *
+ * ⚠️ **{@link stillRunning} is a trainer-safety fact, not a courtesy.** A
+ * timed-out forget leaves the stack's call running, and when it lands it acts
+ * on whatever pairing of the device is current THEN: on Web Bluetooth it
+ * revokes the grant, which drops the link; in the Capacitor transport it
+ * disconnects the plugin id the new pairing is using. A trainer re-paired and
+ * put under control in that window would lose its link with a target still on
+ * it, and this app could no longer send the Stop that lets it go. So a caller
+ * that hands out trainer control waits for this first.
+ */
+export class ForgetUnconfirmedError extends SensorError {
+  /** What the stack may still hold. @see ForgetHold */
+  readonly holding: ForgetHold;
+
+  /**
+   * Fulfils — never rejects — once the stack's own call has finished, either
+   * way. `undefined` when it already has: a refusal is an answer.
+   */
+  readonly stillRunning: Promise<void> | undefined;
+
+  constructor(
+    code: 'forget-timed-out' | 'forget-refused',
+    message: string,
+    options: {
+      readonly deviceId: string;
+      readonly holding: ForgetHold;
+      readonly stillRunning?: Promise<void> | undefined;
+      readonly cause?: unknown;
+    },
+  ) {
+    super(code, message, { deviceId: options.deviceId, cause: options.cause });
+    this.name = 'ForgetUnconfirmedError';
+    this.holding = options.holding;
+    this.stillRunning = options.stillRunning;
   }
 }
 

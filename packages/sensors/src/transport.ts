@@ -248,7 +248,14 @@ export interface SensorTransport {
    * transport's bound — the one its GATT operations are held to — is left to
    * finish on its own and this rejects with `forget-timed-out`. The record is
    * gone by then too, so the device can be chosen again; what is unknown is
-   * only whether the stack still holds its permission.
+   * only whether the stack still holds its permission — or, where the stack
+   * holds none, its link.
+   *
+   * ⚠️ A transport that can say WHAT it could not confirm rejects with a
+   * `ForgetUnconfirmedError` (#718's review), naming the hold and carrying a
+   * timed-out stack call that is still running. That call acts on whatever
+   * pairing of the device is current when it lands, so a caller that hands out
+   * trainer CONTROL waits for it.
    */
   forget(id: DeviceId): Promise<void>;
 

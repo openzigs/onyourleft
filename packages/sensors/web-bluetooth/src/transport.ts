@@ -58,7 +58,7 @@ import {
   type DeviceIdentity,
   type SensorDevice,
 } from '../../src/device';
-import { SensorError } from '../../src/errors';
+import { ForgetUnconfirmedError, SensorError } from '../../src/errors';
 import { isMeasurementOf, type MeasurementFor } from '../../src/measurement';
 import { MAX_RECOMMENDED_CONCURRENT_CONNECTIONS } from '../../src/plan';
 import { createDeviceSession, type DeviceSession } from '../../src/session';
@@ -1542,15 +1542,30 @@ export function createWebBluetoothTransport(
       // told the browser has not confirmed its half. The browser's call is left
       // running: nothing can cancel it, and when it lands it revokes the grant
       // of whatever pairing of this device is current then.
+      //
+      // ⚠️ And the call it leaves running goes out on the rejection (#718's
+      // review): when it lands it drops the link of whatever pairing of this
+      // device is current then, and a caller that hands out trainer control
+      // must not do so until it has — `ForgetUnconfirmedError.stillRunning`.
+      const revoking = attempt(() => revoke.call(native));
       await new Promise<void>((resolve, reject) => {
         const cancel = schedule(() => {
           reject(
-            new SensorError('forget-timed-out', 'the browser did not confirm the forget in time', {
-              deviceId: id,
-            }),
+            new ForgetUnconfirmedError(
+              'forget-timed-out',
+              'the browser did not confirm the forget in time',
+              {
+                deviceId: id,
+                holding: 'permission',
+                stillRunning: revoking.then(
+                  () => undefined,
+                  () => undefined,
+                ),
+              },
+            ),
           );
         }, forgetTimeout);
-        attempt(() => revoke.call(native)).then(
+        revoking.then(
           () => {
             cancel();
             resolve();

@@ -144,6 +144,11 @@ export interface FakeDeviceSpec {
    * permits.
    */
   readonly forgetNeverSettles?: boolean;
+  /**
+   * `forget()` waits for this before it revokes anything — #718's review. A
+   * browser that answers LATE: the test decides when the grant goes.
+   */
+  readonly forgetWaitsFor?: Promise<void>;
 }
 
 export interface FakeDeviceHandle {
@@ -641,11 +646,17 @@ export function createFakeBluetooth(options: FakeBluetoothOptions): FakeBluetoot
                 if (spec.forgetNeverSettles === true) {
                   return new Promise<void>(() => undefined);
                 }
-                state.allowed.clear();
-                if (state.connected) {
-                  state.connected = false;
-                  queueDisconnect(state);
+                const revoke = (): void => {
+                  state.allowed.clear();
+                  if (state.connected) {
+                    state.connected = false;
+                    queueDisconnect(state);
+                  }
+                };
+                if (spec.forgetWaitsFor !== undefined) {
+                  return spec.forgetWaitsFor.then(revoke);
                 }
+                revoke();
                 return Promise.resolve();
               },
             }),

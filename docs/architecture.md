@@ -636,7 +636,11 @@ Devices. The controls come first and what the platform cannot do is beneath them
 `SensorTransport.forget`: `BluetoothDevice.forget()` in a browser that has it, which gives the
 origin's permission back, and in every transport the id stops being issued until the chooser
 returns the device again. Since #716 both transports hold it to the GATT queue's thirty-second
-bound: past it the device is forgotten here and the rider is told the browser may still list it.
+bound: past it the device is forgotten here and the rider is told what went unconfirmed — in a
+browser that it may still be listed, in the Android shell that it may still be connected
+(`ForgetUnconfirmedError.holding`, #718's review). And while that late call is still running no
+trainer is asked for control: when it lands it drops the link of whatever pairing of the device is
+current, and a trainer holding a target with no link cannot be sent a Stop.
 Since #713 a Forget pressed while that device's pairing is still wiring ends the pairing quietly,
 and whatever the pairing acquired after the press — a subscription, a trainer's control client — is
 let go. `apps/web/browser/devices.browser.spec.ts` walks Home → Devices → Pair

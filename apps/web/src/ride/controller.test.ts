@@ -31,7 +31,16 @@ import {
   type Watts,
   type WorkoutBlock,
 } from '@onyourleft/domain';
-import { type DeviceId, deviceId, isSensorError, type SensorTransport } from '@onyourleft/sensors';
+import {
+  type DeviceId,
+  deviceId,
+  ForgetUnconfirmedError,
+  type ForgetHold,
+  isSensorError,
+  type SensorTransport,
+} from '@onyourleft/sensors';
+import { createCapacitorTransport } from '@onyourleft/mobile';
+import { scriptedPort } from '@onyourleft/mobile/testing';
 import {
   createTrainerControl,
   decodeSupportedPowerRange,
@@ -72,6 +81,7 @@ import type { RecordingCheckpointStore } from '../recording/recorder';
 
 import {
   canStartNewRide,
+  CONTROL_WAITS_FOR_FORGET,
   createRideController,
   PAIRING_ROLE_CAPABILITIES,
   RIDE_NOTIFICATION_REFUSED,
@@ -3239,6 +3249,42 @@ describe('Forget pressed while a pairing is still wiring — #713', () => {
     expect(rig.targetOnTheTrainer()).toBeUndefined();
     rig.controller.dispose();
   });
+
+  it('dispose: the control client that arrives after it is closed, and writes nothing — #718', async () => {
+    // The other way a pairing is abandoned, and a different path from Forget:
+    // `dispose` clears the list and lets go without a forget. A late client
+    // must find no entry to hang on and be closed, not left listening.
+    const rig = benchWith({ holdOpenTrainer: true, machine: { retainsTargetsThroughStop: true } });
+    const pairing = rig.controller.pair('trainer');
+    await flushMicrotasks(20);
+    expect(listed(rig)).toEqual([TRAINER]);
+    const client = rig.trainerControl();
+    if (client === undefined) {
+      throw new Error('openTrainer was not asked');
+    }
+    const close = vi.spyOn(client, 'close');
+    let listening = 0;
+    const onControlLost = client.onControlLost.bind(client);
+    vi.spyOn(client, 'onControlLost').mockImplementation((listener) => {
+      listening += 1;
+      const unsubscribe = onControlLost(listener);
+      return () => {
+        listening -= 1;
+        unsubscribe();
+      };
+    });
+
+    rig.controller.dispose();
+    rig.answerOpenTrainer();
+    await pairing;
+    await flushMicrotasks(20);
+
+    expect(close).toHaveBeenCalled();
+    expect(listening).toBe(0);
+    expect(rig.controller.getSnapshot().pairingError).toBeUndefined();
+    expect(rig.written).toEqual([]);
+    expect(rig.targetOnTheTrainer()).toBeUndefined();
+  });
 });
 
 describe('a forget the browser never answers — #716', () => {
@@ -3363,6 +3409,270 @@ describe('a forget the browser never answers — #716', () => {
     await controller.pair('heart-rate');
     expect(controller.getSnapshot().sensors.map((sensor) => sensor.id)).toEqual([STRAP]);
     controller.dispose();
+  });
+});
+
+describe('a forget Bluetooth does not confirm, inside the Android shell — #718', () => {
+  // The real Capacitor transport over the scripted plugin, as `main.tsx`
+  // builds it inside the shell. Its forget stops the notifications and drops
+  // the link; the plugin holds no grant, so nothing about a browser or a
+  // site's settings is true here — what is unknown is the LINK.
+  function shell(disconnect: 'hangs' | 'refuses') {
+    const base = scriptedPort({ chooses: { deviceId: 'AA:BB:CC:DD:EE:01', name: 'HRM 04B1' } });
+    let letGoWith: 'normally' | 'held' = 'normally';
+    const plugin: typeof base = {
+      ...base,
+      disconnect: (id) => {
+        if (letGoWith === 'normally') {
+          return base.disconnect(id);
+        }
+        return disconnect === 'hangs'
+          ? new Promise<void>(() => undefined)
+          : Promise.reject(new Error('disconnect failed'));
+      },
+    };
+    const deadlines: Array<() => void> = [];
+    const transport = createCapacitorTransport({
+      plugin,
+      profiles: [heartRateProfile],
+      now: () => unixSeconds(1),
+      schedule: (callback) => {
+        deadlines.push(callback);
+        return () => {
+          const index = deadlines.indexOf(callback);
+          if (index !== -1) {
+            deadlines.splice(index, 1);
+          }
+        };
+      },
+    });
+    const controller = createRideController({
+      transport,
+      store: harnessStore(),
+      athleteId: ATHLETE_A,
+      newSessionId: () => recordingSessionId('shell-forget'),
+      now: () => unixSeconds(1),
+    });
+    return {
+      controller,
+      id: deviceId('AA:BB:CC:DD:EE:01'),
+      hold: () => {
+        letGoWith = 'held';
+      },
+      release: () => {
+        letGoWith = 'normally';
+      },
+      passTheBound: () => {
+        for (const fire of deadlines.splice(0)) {
+          fire();
+        }
+      },
+    };
+  }
+
+  const MAY_STILL_BE_CONNECTED =
+    'HRM 04B1 is forgotten here, but Bluetooth did not confirm it let go, so it may still be connected. If it still appears connected, turn Bluetooth off and on.';
+
+  it('says the device may still be connected when the plugin runs out of time — and nothing about a browser', async () => {
+    const { controller, id, hold, release, passTheBound } = shell('hangs');
+    await controller.pair('heart-rate');
+    expect(controller.getSnapshot().sensors.map((sensor) => sensor.id)).toEqual([id]);
+    hold();
+    let settled = false;
+    const unpairing = controller.unpair(id).then(() => {
+      settled = true;
+    });
+    await flushMicrotasks(40);
+    expect(settled).toBe(false);
+    passTheBound();
+    await unpairing;
+
+    const said = controller.getSnapshot().pairingError;
+    expect(said).toBe(MAY_STILL_BE_CONNECTED);
+    expect(said).not.toMatch(/browser|settings/u);
+    // And it pairs again, which is #716 — with a plugin that answers again,
+    // because the transport's own connect disconnects first.
+    release();
+    await controller.pair('heart-rate');
+    expect(controller.getSnapshot().sensors.map((sensor) => sensor.id)).toEqual([id]);
+    controller.dispose();
+  });
+
+  it('says the same when the plugin refuses the disconnect', async () => {
+    const { controller, id, hold } = shell('refuses');
+    await controller.pair('heart-rate');
+    hold();
+    await controller.unpair(id);
+
+    const said = controller.getSnapshot().pairingError;
+    expect(said).toBe(MAY_STILL_BE_CONNECTED);
+    expect(said).not.toMatch(/browser|settings/u);
+    controller.dispose();
+  });
+});
+
+describe('no trainer control while a timed-out forget is still running — #718', () => {
+  // #716 lets a device be paired again at the transport's bound while the
+  // stack's own forget is still running, and when that call lands it drops
+  // the link of whatever pairing is current then. A trainer put under control
+  // in that window would lose its link holding a target. So pairing goes on,
+  // and control waits for the call to land.
+
+  interface LateForget {
+    /** Let the stack's call land. */
+    readonly land: () => void;
+  }
+
+  /**
+   * Make the next `transport.forget` do its work here and then reject as a
+   * transport whose bound passed does: a {@link ForgetUnconfirmedError}
+   * carrying a call the test lands by hand.
+   */
+  function timesOutOnce(transport: SensorTransport, holding: ForgetHold): LateForget {
+    const forget = transport.forget.bind(transport);
+    let land: () => void = () => undefined;
+    const stillRunning = new Promise<void>((resolve) => {
+      land = resolve;
+    });
+    vi.spyOn(transport, 'forget').mockImplementationOnce(async (id) => {
+      await forget(id);
+      throw new ForgetUnconfirmedError('forget-timed-out', 'late', {
+        deviceId: id,
+        holding,
+        stillRunning,
+      });
+    });
+    return {
+      land: () => {
+        land();
+      },
+    };
+  }
+
+  const REQUEST_CONTROL = 0x00;
+  const asked = (rig: Bench): number =>
+    rig.written.filter((octets) => octets[0] === REQUEST_CONTROL).length;
+
+  for (const holding of ['permission', 'link'] as const) {
+    it(`pairs the trainer again, and asks it for nothing until the call lands (${holding})`, async () => {
+      const rig = benchWith({ machine: { retainsTargetsThroughStop: true } });
+      await rig.controller.pair('trainer');
+      const late = timesOutOnce(rig.transport, holding);
+      await rig.controller.unpair(TRAINER);
+
+      // #716: pairing again works.
+      await rig.controller.pair('trainer');
+      expect(rig.controller.getSnapshot().trainer.paired).toBe(true);
+
+      // Control does not.
+      await rig.controller.requestTrainerControl();
+      expect(rig.controller.getSnapshot().trainer.refusal).toBe(CONTROL_WAITS_FOR_FORGET);
+      expect(asked(rig)).toBe(0);
+      expect(rig.trainerControl()?.hasControl()).toBe(false);
+      // And so no setpoint takes, whatever the screen asks: the client itself
+      // refuses a target it was never granted control for.
+      await rig.controller.setTargetPower(watts(200));
+      await flushMicrotasks(20);
+      expect(rig.targetOnTheTrainer()).toBeUndefined();
+      expect(rig.written).toEqual([]);
+      await rig.controller.requestTrainerControl();
+      expect(rig.controller.getSnapshot().trainer.refusal).toBe(CONTROL_WAITS_FOR_FORGET);
+
+      // The call lands: the sentence goes by itself, and control can be had.
+      late.land();
+      await flushMicrotasks(20);
+      expect(rig.controller.getSnapshot().trainer.refusal).toBeUndefined();
+      await rig.controller.requestTrainerControl();
+      expect(asked(rig)).toBe(1);
+      expect(rig.trainerControl()?.hasControl()).toBe(true);
+      rig.controller.dispose();
+    });
+  }
+
+  it('holds control back after a refused Pair’s own forget runs out of time too', async () => {
+    const rig = benchWith({ machine: { retainsTargetsThroughStop: true } });
+    await rig.controller.pair('trainer');
+    // Forget's own forget is held pending, so a Pair meanwhile is refused and
+    // forgets what its chooser made — and THAT forget runs out of time.
+    const forget = rig.transport.forget.bind(rig.transport);
+    let finishFirst: () => void = () => undefined;
+    let land: () => void = () => undefined;
+    const stillRunning = new Promise<void>((resolve) => {
+      land = resolve;
+    });
+    vi.spyOn(rig.transport, 'forget')
+      .mockImplementationOnce(
+        (id) =>
+          new Promise<void>((resolve, reject) => {
+            finishFirst = () => {
+              forget(id).then(resolve, reject);
+            };
+          }),
+      )
+      .mockImplementationOnce(async (id) => {
+        await forget(id);
+        throw new ForgetUnconfirmedError('forget-timed-out', 'late', {
+          deviceId: id,
+          holding: 'permission',
+          stillRunning,
+        });
+      });
+    const unpairing = rig.controller.unpair(TRAINER);
+    await flushMicrotasks(20);
+    const refused = rig.controller.pair('trainer');
+    await flushMicrotasks(20);
+    finishFirst();
+    await unpairing;
+    await refused;
+
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    expect(rig.controller.getSnapshot().trainer.refusal).toBe(CONTROL_WAITS_FOR_FORGET);
+    expect(asked(rig)).toBe(0);
+
+    land();
+    await flushMicrotasks(20);
+    await rig.controller.requestTrainerControl();
+    expect(asked(rig)).toBe(1);
+    rig.controller.dispose();
+  });
+
+  it('holds control back after a failed pairing’s clean-up forget runs out of time', async () => {
+    const rig = benchWith({ machine: { retainsTargetsThroughStop: true } });
+    const connect = rig.transport.connect.bind(rig.transport);
+    vi.spyOn(rig.transport, 'connect')
+      .mockImplementationOnce(async (id) => {
+        await connect(id);
+        throw new Error('the link dropped while it was coming up');
+      })
+      .mockImplementation(connect);
+    const late = timesOutOnce(rig.transport, 'link');
+    await rig.controller.pair('trainer');
+    expect(rig.controller.getSnapshot().trainer.paired).toBe(false);
+
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    expect(rig.controller.getSnapshot().trainer.refusal).toBe(CONTROL_WAITS_FOR_FORGET);
+    expect(asked(rig)).toBe(0);
+
+    late.land();
+    await flushMicrotasks(20);
+    await rig.controller.requestTrainerControl();
+    expect(asked(rig)).toBe(1);
+    rig.controller.dispose();
+  });
+
+  it('does not hold a trainer back for a heart-rate strap’s late forget', async () => {
+    const rig = benchWith({ devices: 'trainer+strap' });
+    await rig.controller.pair('trainer');
+    await rig.controller.pair('heart-rate');
+    timesOutOnce(rig.transport, 'permission');
+    await rig.controller.unpair(STRAP);
+
+    await rig.controller.requestTrainerControl();
+    expect(rig.controller.getSnapshot().trainer.refusal).toBeUndefined();
+    expect(asked(rig)).toBe(1);
+    rig.controller.dispose();
   });
 });
 
@@ -4538,6 +4848,23 @@ describe('#647 — a refused keep-alive is on the ride’s state, and clears', (
     await settled();
     expect(port.calls).toEqual(['keep', 'keep']);
     expect(rig.controller.getSnapshot().keepAliveFailed).toBe(false);
+    rig.controller.dispose();
+  });
+
+  it('does not ask again for a pairing Forget abandoned — #718', async () => {
+    // Nothing paired, so nothing was granted that could change the answer.
+    const port = scripted([true, false]);
+    const rig = benchWith({ keepAlive: port, holdOpenTrainer: true });
+    await rig.controller.start();
+    await settled();
+    const pairing = rig.controller.pair('trainer');
+    await flushMicrotasks(20);
+    await rig.controller.unpair(TRAINER);
+    rig.answerOpenTrainer();
+    await pairing;
+    await settled();
+    expect(port.calls).toEqual(['keep']);
+    expect(rig.controller.getSnapshot().keepAliveFailed).toBe(true);
     rig.controller.dispose();
   });
 
