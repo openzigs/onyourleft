@@ -201,6 +201,54 @@ describe('one region while riding — #395, #445', () => {
   });
 });
 
+describe('a sentence said again is a NEW node in the region — #740 (#655’s review)', () => {
+  /**
+   * #655 made the region insert a node per sentence (`RideAnnouncer.tsx`
+   * §"said twice"), so a sentence the core decides to say AGAIN — word for
+   * word — is heard again. Before it, React set the same text in place and a
+   * screen reader heard nothing. Only `erg-held` pinned that; this is the
+   * ordinary case, a second *Control lost* for the same reason after control
+   * came back. `textContent` cannot tell a re-said sentence from a silent one,
+   * so what is read is the NODE.
+   *
+   * ⚠️ The game's HUD region (`HudPanel.tsx`, `data-oyl-announcer="hud"`)
+   * still sets its text in place, so there the same sentence twice in a row is
+   * still silent the second time. The two regions differ, on purpose here and
+   * as a known gap there; `hud-announcer.a11y.test.tsx` does not claim it.
+   */
+  it('inserts a new node for a second "Control lost" in the same words', async () => {
+    let now = 100;
+    const panel = (trainer: TrainerSnapshot) => (
+      <WorkoutPanel
+        trainer={trainer}
+        workout={workout()}
+        onStart={() => undefined}
+        onEnd={() => undefined}
+        announcerClock={() => now}
+      />
+    );
+    const riding = ridingSnapshot().trainer;
+    const lost = { ...riding, hasControl: false, lost: 'permission-lost' as const };
+    const regionNode = (): ChildNode | null =>
+      document.querySelector('[data-oyl-announcer="ride"]')?.firstChild ?? null;
+
+    mounted = await mount(panel(riding));
+    now = 110;
+    await mounted.rerender(panel(lost));
+    const first = regionNode();
+    const said = region();
+    expect(said).toMatch(/^Control lost: The trainer took control back/);
+
+    now = 120;
+    await mounted.rerender(panel(riding));
+    now = 130;
+    await mounted.rerender(panel(lost));
+
+    expect(region(), 'the second loss said something else').toBe(said);
+    expect(regionNode(), 'the same sentence was set in place, so it is not heard').not.toBe(first);
+  });
+});
+
 describe('a sentence waiting for the window is said when it opens — #445', () => {
   /**
    * ⚠️ **The case the workout's old clock could not serve.** Losing control

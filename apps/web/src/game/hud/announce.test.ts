@@ -418,6 +418,16 @@ describe('a climb ahead is a row with its own "never" — #399', () => {
       { ...ON, powerEverySeconds: 'never', climbLeadMetres: 'never' },
     );
     expect(said).toEqual([undefined]);
+    // #739: this is the core's OWN guard, and it goes red alone when that
+    // guard is deleted. The caller's guard — `GameView` building no climb
+    // event at all — is held apart in `hud-announcer.a11y.test.tsx`. The
+    // control: the same event under a chosen lead IS said, so the silence
+    // above is the row's and not something else dropping the event.
+    const chosen = run(
+      [{ now: 60, events: [{ kind: 'climb-ahead', text: 'Climb in 250 metres, 6 percent' }] }],
+      { ...ON, powerEverySeconds: 'never', climbLeadMetres: 250 },
+    );
+    expect(chosen.said).toEqual(['Climb in 250 metres, 6 percent']);
   });
 
   it('says what each sentence was about, so a cue can follow the sentence — #400', () => {

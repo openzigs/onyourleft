@@ -323,6 +323,11 @@ test.describe('#670 — one pane below 840 px', () => {
         const id = await selectionOf(page, route);
         const item = page.locator(`[data-oyl-pane="list"] a[data-oyl-select="${id}"]`);
         await item.focus();
+        // #738: the ELEMENT focus left, marked, so that coming back can be
+        // held to it rather than to a link of the same name drawn again.
+        await item.evaluate((link) => {
+          (link as HTMLElement & { oylLeftFrom?: true }).oylLeftFrom = true;
+        });
         await page.keyboard.press('Enter');
         await expect(page.locator('#oyl-selected-heading')).toBeFocused();
         expect(page.url()).toContain(hrefForSelection(route, id));
@@ -338,6 +343,20 @@ test.describe('#670 — one pane below 840 px', () => {
 
         await page.goBack();
         await expect(item, `${route.id}: back did not return focus to the item`).toBeFocused();
+        // ⚠️ #738: and to the SAME element. On CI (run 36412215912) focus came
+        // back to the Activities list at 800×1280 and was then lost: hidden,
+        // the list measured a width of nothing, became cards, and was drawn
+        // as a table again AFTER focus had returned to a card — so the link
+        // that had focus was removed. Whether the redraw came before or after
+        // the focus was timing, which is why the case was flaky rather than
+        // red; a list that was drawn again at all is what this asserts, and
+        // that is not timing (`ActivitiesView.tsx` §`useLibraryLayout`).
+        expect(
+          await item.evaluate(
+            (link) => (link as HTMLElement & { oylLeftFrom?: true }).oylLeftFrom === true,
+          ),
+          `${route.id}: the list was drawn again, so focus returned to a new link`,
+        ).toBe(true);
         expect(page.url()).toContain(hrefFor(route));
       }
     });

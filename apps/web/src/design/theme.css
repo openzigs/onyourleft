@@ -1685,12 +1685,29 @@ a.oyl-button {
  * collapses with the notice's own — and leaves the numbers themselves —
  * `MetricGrid.tsx` §`MINIMUM_PRIMARY_METRIC_REM` — exactly the size they were.
  * Measured in the pinned Chromium on a Mac: the cards end 2.1 px above that
- * fold rather than 45.9 under it. `rideview.browser.spec.ts` §"#692"
- * publishes where they end at every tablet, and holds the tightening.
+ * fold rather than 45.9 under it. ⚠️ **That is the Mac's figure, and on the CI
+ * runner's fonts it was −22.7 px** (run 36416451402) — one standing notice put
+ * the lower row under the fold. #671's smaller header gave 24 px back: on
+ * `main` at `ca300c9` CI reads +1.3 px at 1280×800 in the shell and +14.1 px
+ * at 1024×720 with *No notification* (run 36450645172), a Mac +26.1 and
+ * +38.9. So since #740 the FIRST row — the readings a rider looks at first —
+ * is held to the 50 px floor with any one notice standing, and the whole list
+ * is published and not bounded (`rideview.browser.spec.ts` §"#692"). Whether
+ * the lower row is on a real tablet's fonts is #733's to answer.
  *
  * A notice beside the heading (#647's) is not a child of the group and does
  * not count: it costs the cards its height less the heading's, which is what
  * it always cost them.
+ *
+ * ⚠️ **"While a notice stands" is narrower than what the selector matches**
+ * (#740, #692's review). `RideControls` renders a fragment, so every
+ * `StatusMessage` it shows is a direct child of the group too — the stop's
+ * armed *Confirm*, the stopped ride's notice, the idle *No sensors* — and so
+ * is the side camera's line while it is only *filming*. The cards tighten
+ * for those as well; a rider who arms *Stop* sees them step in by the small
+ * step. Harmless, because the cards sit below every control, and kept rather
+ * than narrowed with a marker: each of those is a line of height above the
+ * cards, which is what the tightening pays for.
  */
 .oyl-ride__group--live:has(> .oyl-status, > .oyl-ride__side-camera) > .oyl-metric-grid {
   gap: var(--oyl-space-sm);
@@ -3106,6 +3123,24 @@ p > label + input[type='file'] {
 .oyl-hud__control:focus-visible {
   outline: 3px solid var(--oyl-color-hud-ink);
   outline-offset: 2px;
+}
+
+/* #748: EVERY keyboard focus ring on the HUD is the HUD's own ink, not only
+   the `.oyl-hud__control`s'. The mute toggle, the volume and the side
+   camera's Stop took the page's `:focus-visible`, and `.oyl-hud` pins
+   `--oyl-color-focus` to its light value, #141b1a — drawn 2 px outside the
+   control onto `hudSurface`, #10161c: 1.04:1, a ring nobody could see (WCAG
+   2.2 SC 2.4.7, 2.4.13). `hudInk` on `hudSurface` is 17.07:1, declared in
+   `tokens.ts` as the ring's own pair. A notice keeps the page's ring: it has
+   its own light surface, which is where its ring lands. Read back off the
+   engine, with this rule deleted as the control, by
+   `browser/hud-focus.browser.spec.ts`. */
+.oyl-hud :focus-visible {
+  outline-color: var(--oyl-color-hud-ink);
+}
+
+.oyl-hud .oyl-status :focus-visible {
+  outline-color: var(--oyl-color-focus);
 }
 
 /* A notice is an exception, so it is set as compactly as it can be read: the

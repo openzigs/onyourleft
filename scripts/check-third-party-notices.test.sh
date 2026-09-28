@@ -181,8 +181,8 @@ ok() { printf 'ok   %s\n' "$1"; pass=$((pass + 1)); }
 bad() { printf 'FAIL %s\n%s\n' "$1" "${2:-${out}}"; fail=$((fail + 1)); }
 
 assert_exit() { if [ "${code}" -eq "$2" ]; then ok "$1"; else bad "$1 -- expected exit $2, got ${code}"; fi; }
-assert_says() { if printf '%s' "${out}" | grep -qF -- "$2"; then ok "$1"; else bad "$1 -- output lacks: $2"; fi; }
-assert_silent() { if printf '%s' "${out}" | grep -qF -- "$2"; then bad "$1 -- output has: $2"; else ok "$1"; fi; }
+assert_says() { if grep -qF -- "$2" <<< "${out}"; then ok "$1"; else bad "$1 -- output lacks: $2"; fi; }
+assert_silent() { if grep -qF -- "$2" <<< "${out}"; then bad "$1 -- output has: $2"; else ok "$1"; fi; }
 assert_document_has() {
   if grep -qF -- "$2" "${tmp}/${DOCUMENT}" 2>/dev/null; then ok "$1"; else bad "$1 -- document lacks: $2" "$(cat "${tmp}/${DOCUMENT}" 2>/dev/null)"; fi
 }
@@ -297,12 +297,12 @@ printf 'the licence of twice two\n' > "${TWO_B}/LICENSE"
 closure @onyourleft/web "{$(entry MIT react 19.0.0 "${REACT}"),\"MIT twice\":[{\"name\":\"twice\",\"versions\":[\"1.0.0\",\"2.0.0\"],\"paths\":[\"${TWO_A}\",\"${TWO_B}\"],\"license\":\"MIT\"}]}"
 generate
 assert_exit 'generates with one package at two versions' 0
-if entry_block twice 1.0.0 | grep -qF 'the licence of twice one' && ! entry_block twice 1.0.0 | grep -qF 'twice two'; then
+if grep -qF 'the licence of twice one' <<< "$(entry_block twice 1.0.0)" && ! grep -qF 'twice two' <<< "$(entry_block twice 1.0.0)"; then
   ok 'notices version 1 with the text from version 1'"'"'s own directory'
 else
   bad 'notices version 1 with the text from version 1'"'"'s own directory' "$(entry_block twice 1.0.0)"
 fi
-if entry_block twice 2.0.0 | grep -qF 'the licence of twice two' && ! entry_block twice 2.0.0 | grep -qF 'twice one'; then
+if grep -qF 'the licence of twice two' <<< "$(entry_block twice 2.0.0)" && ! grep -qF 'twice one' <<< "$(entry_block twice 2.0.0)"; then
   ok 'and version 2 with the text from version 2'"'"'s'
 else
   bad 'and version 2 with the text from version 2'"'"'s' "$(entry_block twice 2.0.0)"

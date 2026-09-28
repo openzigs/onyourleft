@@ -87,7 +87,7 @@ assert_violation() {
   out="$(bash "${CHECKER}" "${fixture_root}" 2>&1)"
   status=$?
   if [ "${status}" -ne 0 ] \
-     && printf '%s' "${out}" | grep "^LIC005: " | grep -qF "${needle}"; then
+     && grep -qF "${needle}" <<< "$(grep "^LIC005: " <<< "${out}")"; then
     pass=$((pass + 1))
     printf 'ok   %s\n' "${name}"
   else
@@ -271,7 +271,7 @@ new_fixture
 printf 'tampered\n' >> "${fixture_root}/LICENSE"
 out="$(PATH="${stub_bin}" "${bash_abs}" "${CHECKER}" "${fixture_root}" 2>&1)"
 status=$?
-if [ "${status}" -ne 0 ] && printf '%s' "${out}" | grep -q "^LIC005: "; then
+if [ "${status}" -ne 0 ] && grep -q "^LIC005: " <<< "${out}"; then
   pass=$((pass + 1))
   printf 'ok   the sha256sum fallback still rejects an edited LICENSE\n'
 else

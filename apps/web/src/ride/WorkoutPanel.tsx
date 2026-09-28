@@ -75,7 +75,11 @@ import type { WorkoutRecord } from '@onyourleft/store';
 import type { SideControlState } from '../camera/side-pairing-port';
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
-import { deviceStorage, type PreferenceStorage } from '../game/hud/announce-preference';
+import {
+  deviceStorage,
+  type AnnouncementPreference,
+  type PreferenceStorage,
+} from '../game/hud/announce-preference';
 import { RideCues } from '../game/audio-cues';
 import type { CueOutput } from '../game/audio-port';
 import { readCuePreference, writeCuePreference, type CuePreference } from '../game/cue-preference';
@@ -120,6 +124,11 @@ export interface WorkoutPanelProps {
    */
   readonly announcements?: PreferenceStorage | undefined;
   /**
+   * The announcement choice the screen above already read, handed on to the
+   * ride's one region — #740, @see RideAnnouncerProps.preference.
+   */
+  readonly announcementPreference?: AnnouncementPreference | undefined;
+  /**
    * The rider's live power in watts, or `undefined` when the reading is not
    * live — a dropped meter, none paired. #400's tone reads it, and an
    * `undefined` here SILENCES the tone rather than sounding a floor.
@@ -151,6 +160,7 @@ export function WorkoutPanel({
   onStart,
   onEnd,
   announcements,
+  announcementPreference,
   power,
   sounds,
   announcerClock,
@@ -245,6 +255,7 @@ export function WorkoutPanel({
       sideCamera={sideCamera}
       keepAliveFailed={keepAliveFailed}
       storage={announcements}
+      preference={announcementPreference}
       clock={announcerClock}
       // #400: the interval sound, on the block CHANGE — not on the sentence
       // winning the window, which could hold it 3 s or drop it (#448's

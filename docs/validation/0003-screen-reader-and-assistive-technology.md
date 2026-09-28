@@ -480,6 +480,33 @@ power sentence whatever the rider set — and it was moved to the game by #448's
 
 ---
 
+## Part K — the Ride screen's reading order since #692 ([#740](https://github.com/openzigs/onyourleft/issues/740))
+
+[#692](https://github.com/openzigs/onyourleft/issues/692) moved the Ride screen's standing notices
+AFTER the ride controls, so that a notice could not push *Pause* / *Stop* off a tablet's screen. The
+**tab order did not change** — none of the notices holds a focusable element, and every control kept
+its place relative to every other — but the **reading order did**: swiping through the Live group,
+TalkBack now meets *Pause* / *Stop* and the side camera's *Stop side camera* **before** *No
+notification* and *Device full*, where it used to meet *No notification* first. Both notices are
+`live`, so each is announced when it appears whatever the reading position, and *Keep the screen
+on* still comes first, beside the Live heading. The gates can read the DOM order; only a person can
+say whether the new order is one a rider can follow. ⚠️ Off the bike. *No notification* is Android
+only: refuse the notification permission when the app first asks, then start a ride.
+
+| Step | What to do | What should be heard |
+|---|---|---|
+| K1 | Refuse notifications, start a recording on the Ride screen, then swipe (next item) from the *Live* heading to the end of the group | *Live*, then *Pause*, *Stop*, then *No notification: …*, then the four readings and the clock. Nothing skipped, nothing read twice, and the notice's words read whole |
+| K2 | As K1, with the side camera paired and then its link lost | *Pause*, *Stop*, the side camera's line and *Stop side camera*, then the notices. Say whether meeting the controls before the reason they matter was confusing — that is the question #692's review left for this procedure |
+
+### K results
+
+| Step | Heard, in order | Confusing? | Notes |
+|---|---|---|---|
+| K1 | | | |
+| K2 | | | |
+
+---
+
 ## After the session
 
 1. **Fill the tables in this file and commit it**, with the date and who ran each part. An empty

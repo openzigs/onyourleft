@@ -146,7 +146,7 @@ assert_red() {
 
 assert_says() {
   local name="$1" expected="$2"
-  if printf '%s' "${out}" | grep -qF -- "${expected}"; then
+  if grep -qF -- "${expected}" <<< "${out}"; then
     pass=$((pass + 1))
   else
     fail=$((fail + 1))
@@ -156,7 +156,7 @@ assert_says() {
 
 assert_silent_about() {
   local name="$1" unexpected="$2"
-  if printf '%s' "${out}" | grep -qF -- "${unexpected}"; then
+  if grep -qF -- "${unexpected}" <<< "${out}"; then
     fail=$((fail + 1))
     printf 'FAIL: %s\n  did not expect: %s\n  got:\n%s\n\n' "${name}" "${unexpected}" "${out}"
   else
@@ -409,7 +409,7 @@ else
   fail=$((fail + 1))
   printf 'FAIL: the checker exits 0 from a path containing a space\n  output:\n%s\n' "${spaced_out}"
 fi
-if printf '%s' "${spaced_out}" | grep -qF 'missing `fx`'; then
+if grep -qF 'missing `fx`' <<< "${spaced_out}"; then
   pass=$((pass + 1))
 else
   fail=$((fail + 1))

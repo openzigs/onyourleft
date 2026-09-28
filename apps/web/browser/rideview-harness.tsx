@@ -183,6 +183,18 @@ const SIDE = QUERY.get('side');
 const SIDE_PAIRING =
   SIDE === 'filming' || SIDE === 'lost' ? scriptedSidePairing({ phone: SIDE }) : undefined;
 
+/**
+ * `rideview.html?erg=held` — #740 (#655's review, N1): a HAND-SET target the
+ * stall rescue has eased to the floor, with the rider's next *Set* held — the
+ * *Eased* notice and the *Held* line both standing in the trainer group, above
+ * the ERG form whose *End ERG* the Eased sentence itself names. No fixture
+ * rendered a manual rescue before: `?workout=eased` is a workout's, where this
+ * form is absent. The words are the real `rescueSentence` and `heldSentence`,
+ * rendered by `TrainerPanel` from the snapshot as the real controller fills
+ * it (`controller.test.ts` §"#655" asserts that half).
+ */
+const ERG_HELD = QUERY.get('erg') === 'held';
+
 function snapshot(): RideSnapshot {
   const riding = {
     ...ridingSnapshot(),
@@ -190,6 +202,21 @@ function snapshot(): RideSnapshot {
     notificationNotice: NOTIFICATION_REFUSED ? RIDE_NOTIFICATION_REFUSED : undefined,
     storage: STORAGE_FULL ? ('quota-exceeded' as const) : ('ok' as const),
   };
+  if (ERG_HELD) {
+    return {
+      ...riding,
+      trainer: {
+        ...riding.trainer,
+        ergRescue: {
+          target: watts(250),
+          holding: 'floor',
+          reason: 'Pedalling has stopped, so the target has been dropped to the trainer’s lowest.',
+          pending: watts(180),
+        },
+        ergHeld: { target: watts(180), press: 1 },
+      },
+    };
+  }
   if (RIDE_STATE === 'idle') {
     return {
       ...riding,
@@ -286,6 +313,12 @@ export interface RideViewMeasurement {
   readonly notices: readonly RideViewNotice[];
   /** #692: the four metric cards' list, which is what moves now instead. */
   readonly metrics: Box | undefined;
+  /**
+   * #740: the cards on the list's FIRST row — whatever the grid put there —
+   * as one box, so the readings a rider looks at first can be held on the
+   * screen while a notice stands, which the whole list cannot be.
+   */
+  readonly metricsTopRow: Box | undefined;
 }
 
 /** One standing notice. @see RideViewMeasurement.notices */
@@ -312,6 +345,8 @@ declare global {
       readonly restoreAsShipped: () => void;
       /** #692's control: the screen as it was laid out before #692. @see asBefore692 */
       readonly asBefore692: () => void;
+      /** #740's control: the Held line back above the ERG form. @see heldAboveTheForm */
+      readonly heldAboveTheForm: () => void;
     };
   }
 }
@@ -398,7 +433,20 @@ function measure(): RideViewMeasurement {
     keepScreenOn: keepScreenOnNotice(),
     notices: standingNotices(),
     metrics: metricGrid === null ? undefined : boxOf(metricGrid),
+    metricsTopRow: topRowOf(metricGrid),
   };
+}
+
+/** The union of the cards whose top is the grid's first row. @see RideViewMeasurement */
+function topRowOf(grid: Element | null): Box | undefined {
+  const cards = grid === null ? [] : [...grid.querySelectorAll(':scope > .oyl-metric')].map(boxOf);
+  if (cards.length === 0) return undefined;
+  const top = Math.min(...cards.map((card) => card.top));
+  const row = cards.filter((card) => card.top < top + 1);
+  const left = Math.min(...row.map((card) => card.left));
+  const right = Math.max(...row.map((card) => card.right));
+  const bottom = Math.max(...row.map((card) => card.bottom));
+  return { left, top, right, bottom, width: right - left, height: bottom - top };
 }
 
 function standingNotices(): RideViewNotice[] {
@@ -434,6 +482,26 @@ function standingNotices(): RideViewNotice[] {
  * standing notice on the page; without that, "every control clears the fold"
  * is just as true of a page that measured nothing.
  */
+/**
+ * #740's control: the *Held* line back where #655 put it — straight after the
+ * *Eased* notice, above the ERG form — on the live elements. The spec requires
+ * *End ERG* under the floor then; without it "End ERG clears the fold" is as
+ * true of a page whose Held line was never rendered.
+ */
+function heldAboveTheForm(): void {
+  const trainer = document.querySelector('.oyl-ride__group--trainer');
+  const labelled = (label: string): Element | undefined =>
+    [...(trainer?.querySelectorAll('.oyl-status') ?? [])].find(
+      (each) => textOf(each.querySelector('.oyl-status__label') ?? each) === label,
+    );
+  const eased = labelled('Eased:');
+  const held = labelled('Held:');
+  if (eased === undefined || held === undefined) {
+    throw new Error('rideview harness: ?erg=held did not render its Eased and Held notices');
+  }
+  eased.after(held);
+}
+
 function asBefore692(): void {
   const live = document.querySelector('.oyl-ride__group--live');
   const heading = live?.querySelector('.oyl-ride__heading');
@@ -672,6 +740,7 @@ async function run(): Promise<void> {
     openEasedDetail,
     restoreAsShipped,
     asBefore692,
+    heldAboveTheForm,
   };
 }
 
@@ -686,5 +755,6 @@ run().catch((error: unknown) => {
     openEasedDetail,
     restoreAsShipped,
     asBefore692,
+    heldAboveTheForm,
   };
 });

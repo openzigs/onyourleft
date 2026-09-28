@@ -99,9 +99,12 @@ is_documented() {
   done
   # A here-string, never `printf | grep -q`: grep -q exits at the first match,
   # the writer is then killed by SIGPIPE, and under `pipefail` the pipeline
-  # reports 141 -- a documented variable read as undocumented. It depends on
-  # whether printf had finished writing when grep exited, so it passed locally
-  # and failed on main's CI run 36419270155 for OYL_DEVTOOLS_PORT.
+  # reports 141 -- a documented variable read as undocumented. On Linux bash's
+  # `printf` writes a multi-line argument one LINE per `write(2)` (#743), so the
+  # writer can still be writing whenever the match is not on its last line; it
+  # is a race, not a question of the pipe buffer, which is why it passed locally
+  # and failed on main's CI run 36419270155 for OYL_DEVTOOLS_PORT. SH001 in
+  # check-repo-rules.sh refuses the pipeline anywhere under scripts/.
   grep -qxF "${name}" <<<"${declared}"
 }
 

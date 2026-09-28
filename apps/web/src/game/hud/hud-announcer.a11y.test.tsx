@@ -50,6 +50,25 @@ import {
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
 
+/**
+ * #739: every event kind `GameView` hands the announcer, in order, recorded on
+ * the way through the REAL `announce`. The "never" climb row has two guards —
+ * `GameView` building no climb event at all, and the core dropping one it is
+ * handed — and the region staying silent cannot tell them apart. This can: it
+ * reads what `GameView` OFFERED, before the core's own guard.
+ */
+const offered = vi.hoisted((): string[] => []);
+vi.mock('./announce', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./announce')>();
+  return {
+    ...actual,
+    announce: (...args: Parameters<typeof actual.announce>) => {
+      for (const event of args[1].events ?? []) offered.push(event.kind);
+      return actual.announce(...args);
+    },
+  };
+});
+
 function flatRoute(): RidableRoute {
   const points: RoutePoint[] = [];
   for (let index = 0; index <= 400; index += 1) {
@@ -127,6 +146,7 @@ beforeEach(() => {
   vi.spyOn(performance, 'now').mockImplementation(() => nowMs);
   localStorage.clear();
   routes = [flatRoute()];
+  offered.length = 0;
 });
 
 afterEach(() => {
@@ -285,6 +305,9 @@ describe('the road ahead, through the same region — #399', () => {
     await startRide();
     const said = await pumpUntil(/^Climb/, 400);
     expect(said).toMatch(/^Climb in 250 metres, [5-7] percent$/);
+    // #739's control for the case below: a chosen lead is OFFERED, so a
+    // recording that saw nothing there would not be evidence of anything.
+    expect(offered).toContain('climb-ahead');
   });
 
   // ⚠️ **14 s, a ceiling rather than a budget — #682.** Vitest's default 5 s was nobody's choice
@@ -303,6 +326,11 @@ describe('the road ahead, through the same region — #399', () => {
     await startRide();
     await pump(400);
     expect(region()?.textContent).toBe('');
+    // #739: and `GameView` never built the event for the core to drop. The
+    // region's silence alone holds while EITHER guard stands; this goes red
+    // when `GameView`'s own is deleted and the core's is kept, and
+    // `announce.test.ts` §"drops a climb it is handed" the other way round.
+    expect(offered).not.toContain('climb-ahead');
   }, 14_000);
 
   it('says the distance to go the HUD is showing, on the rider’s tick', async () => {
