@@ -270,6 +270,11 @@ is sent in the background.
   has been sent — and whatever it answers is ignored.
 - **What happens to it afterwards:** on your computer, that is up to your computer and the software
   you installed on it — this app cannot see or delete a copy there.
+- **What the app keeps:** the write-up your computer sends back, only once it has passed the app's
+  checks on what may be shown, saved with that ride on this device in place of any write-up it had
+  before. If the write-up does not pass, is cancelled or does not finish, nothing is kept and an
+  earlier write-up stays as it was. It goes with the ride when you delete it, is in the account
+  export, and *Erase everything* removes it. Nothing else your computer answers is kept.
 
 ## Questions sent to a service you chose, on your own key
 
