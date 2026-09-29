@@ -239,7 +239,7 @@ const POSE_FIGURES = [
   'These figures compare the first third of the ride’s side-camera session with its last third, as one camera filming from the side saw them. They cover the whole session, not any one section.',
   'Each is the last third minus the first third. torso, knee and elbow are changes of angle; head is a share of the length of the torso; saddle is a share of the length of the thigh.',
   'A positive torso means more upright; a positive knee, straighter at the bottom of the pedal stroke; a positive elbow, straighter; a positive head, further forward of the shoulders; a positive saddle, sitting further forward on the saddle. Negative is the other way.',
-  'A part that is missing could not be compared. posesCompared is how many readings the comparison used, and source whether the pictures were read on the tablet or on the cyclist’s own computer. These are rough estimates from one camera, and a small change may be noise.',
+  'A part that is missing could not be compared. posed is how many pictures showed a rider the comparison could use, noRider and unreadable how many did not, and source whether the pictures were read on the tablet or on the cyclist’s own computer. These are rough estimates from one camera, and a small change may be noise.',
   'Do not quote these figures. Describe only which way a part changed, and whether the change was small or large.',
 ].join(' ');
 
@@ -251,7 +251,9 @@ function positionPrompt(input: RideAnalysisInput): StepPrompt | undefined {
   const { differences } = pose;
   const figures = {
     source: pose.source,
-    posesCompared: pose.posesCompared,
+    posed: pose.posed,
+    noRider: pose.noRider,
+    unreadable: pose.unreadable,
     differences: {
       torso: differences.torso,
       knee: differences.knee,

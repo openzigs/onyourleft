@@ -71,7 +71,9 @@ const LARGEST: RideAnalysisInput = {
   sections: Array.from({ length: MAXIMUM_SECTIONS }, (_, position) => widestSection(position + 1)),
   pose: {
     source: 'computer',
-    posesCompared: 54_000,
+    posed: 54_000,
+    noRider: 54_000,
+    unreadable: 54_000,
     differences: { torso: -12.34, knee: 8.76, elbow: -10.11, head: 0.12, saddle: -0.09 },
   },
 };
@@ -99,7 +101,7 @@ const ORDINARY: RideAnalysisInput = {
       metrics: { power: { coverage: 1, mean: 180, max: 420 }, cadence: { coverage: 0.3 } },
     },
   ],
-  pose: { source: 'tablet', posesCompared: 300, differences: { torso: 2.1 } },
+  pose: { source: 'tablet', posed: 300, noRider: 0, unreadable: 0, differences: { torso: 2.1 } },
 };
 
 /**
@@ -216,7 +218,7 @@ describe('a template is { id, version, steps }', () => {
  * meaning the same words.
  */
 const RECORDED_DIGESTS: Readonly<Record<string, string>> = {
-  'ride-write-up@1': 'ae8c5988484ba26385041325933ba4a0ab32d4101f9f685c0f1b2b59d8c97da2',
+  'ride-write-up@1': 'c783b7bdaaf48232c01546445a307e7f846fdbcc38e45d95d4805b119f5fd9c7',
 };
 
 function digestOf(template: AnalysisTemplate): string {
@@ -495,7 +497,7 @@ describe('each step’s prompt', () => {
     const prompt = section.prompt(LARGEST, 2);
     expect(prompt.user).toContain(JSON.stringify(LARGEST.sections[1]));
     expect(prompt.user).not.toContain(JSON.stringify(LARGEST.sections[0]));
-    expect(prompt.user).not.toContain('posesCompared');
+    expect(prompt.user).not.toContain('noRider');
     expect(prompt.user).toContain('{"section":2,"notes":"…"}');
     expect(prompt.replySchema?.schema).toMatchObject({
       properties: { section: { enum: [2] }, notes: { maxLength: MAXIMUM_NOTE_CHARACTERS } },
