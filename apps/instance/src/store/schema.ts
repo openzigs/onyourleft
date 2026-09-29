@@ -79,6 +79,18 @@ export interface RoomTable {
   readonly physics_version: number;
 }
 
+/** What a room is ridden on, as the room core needs it (#780, migration 0005). */
+export interface RoomCourseTable {
+  readonly room_id: string;
+  readonly length_metres: number;
+  /** JSON: `[[fromMetres, percent], …]`, the first from 0, ascending. */
+  readonly grades: string;
+  readonly riding_position: 'upright' | 'hoods' | 'drops';
+  readonly capacity: number | null;
+  readonly countdown_ms: number | null;
+  readonly rejoin_window_ms: number | null;
+}
+
 /** One athlete's result in one room. */
 export interface ResultTable {
   readonly room_id: string;
@@ -142,6 +154,7 @@ export interface InstanceDatabase {
   readonly session: SessionTable;
   readonly activity_record: ActivityRecordTable;
   readonly room: RoomTable;
+  readonly room_course: RoomCourseTable;
   readonly result: ResultTable;
   readonly auth_challenge: AuthChallengeTable;
   readonly recovery_code: RecoveryCodeTable;
