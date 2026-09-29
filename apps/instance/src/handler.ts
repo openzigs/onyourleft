@@ -6,6 +6,7 @@ import { errorResponse } from './errors.ts';
 import { logRequest, logUnhandled, type LogSink } from './log.ts';
 import { openApiDocument } from './openapi.ts';
 import type { ClientInfo } from './route-kit.ts';
+import type { Sync } from './sync/sync.ts';
 import { ROUTES, type Route } from './routes.ts';
 
 /**
@@ -55,6 +56,11 @@ export interface HandlerOptions {
    * (the self-hosted box's wiring is #780's), so it serves the metadata alone.
    */
   readonly identity?: Identity;
+  /**
+   * Sync (#37, #776): the store and the blobs a device syncs through. Absent,
+   * every route that needs it answers `unavailable`, as for identity.
+   */
+  readonly sync?: Sync;
 }
 
 /** A path parameter's value: one segment, of these characters only. */
@@ -158,6 +164,7 @@ export function createHandler(options: HandlerOptions): Handler {
   ): Promise<Response> {
     const identity = options.identity;
     if (matched.identity === true && identity === undefined) return errorResponse('unavailable');
+    if (matched.sync === true && options.sync === undefined) return errorResponse('unavailable');
     let caller;
     if (matched.auth === 'session') {
       caller = await identity?.authenticate(request.headers.get('authorization'));
@@ -184,6 +191,7 @@ export function createHandler(options: HandlerOptions): Handler {
       specification,
       identity,
       caller,
+      sync: options.sync,
     });
   }
 

@@ -34,6 +34,7 @@ import type {
   Room,
   Session,
   SqlStore,
+  SyncItemWrite,
 } from '../sql-store.ts';
 
 /** Opens a store over a database file. The real one is {@link openSqlStore}. */
@@ -219,6 +220,30 @@ export function resultFixture(athleteId: string, roomId = SHARED_ROOM.id): Resul
   return { roomId, athleteId, finishMs: 3_600_000, flags: 0 };
 }
 
+/**
+ * A file all three athletes sent — two riders can upload identical bytes
+ * (#776) — so a read keyed by content alone would find somebody else's record.
+ */
+export const SHARED_CONTENT_SHA256 = hexOf('the-same-file-for-everyone');
+
+/**
+ * One item of every kind #776's addition names but an activity — a write-up,
+ * a side-camera report with its pose summary, a goal, a note and a reference
+ * document — for `athleteId`. The bodies say whose they are, so a read that
+ * crossed athletes would be visible in the bytes as well as in `athleteId`.
+ */
+export function syncItemFixtures(athleteId: string): readonly SyncItemWrite[] {
+  const kinds = ['write-up', 'side-camera-report', 'goal', 'note', 'document'] as const;
+  return kinds.map((kind) => ({
+    athleteId,
+    kind,
+    key: `${kind}-of-${athleteId}`,
+    body: new TextEncoder().encode(JSON.stringify({ kind, of: athleteId })),
+    digest: hexOf(`${kind}-${athleteId}`),
+    now: 1_790_000_400,
+  }));
+}
+
 /** Every athlete-scoped row the schema has, for all three athletes. */
 export async function seedWorld(store: SqlStore): Promise<void> {
   await store.putRoom(SHARED_ROOM);
@@ -227,6 +252,23 @@ export async function seedWorld(store: SqlStore): Promise<void> {
     await store.putSession(sessionFixture(athlete));
     await store.putActivityRecord(activityRecordFixture(athlete));
     await store.putActivityRecord(activityRecordFixture(athlete, 'second-ride'));
+    // Migration 0005's manifest (#37, #776): an ingested ride, and every other kind.
+    const synced = activityRecordFixture(athlete, 'synced-ride');
+    await store.ingestActivity({
+      athleteId: athlete,
+      contentSha256: synced.contentSha256,
+      signedRecord: synced.signedRecord,
+      recordSha256: hexOf(`record-${athlete}`),
+      now: synced.receivedAt,
+    });
+    await store.ingestActivity({
+      athleteId: athlete,
+      contentSha256: SHARED_CONTENT_SHA256,
+      signedRecord: new TextEncoder().encode(`${athlete}'s record of the shared file`),
+      recordSha256: hexOf(`shared-record-${athlete}`),
+      now: 1_790_000_250,
+    });
+    for (const item of syncItemFixtures(athlete)) await store.putSyncItem(item);
     await store.putResult(resultFixture(athlete));
     // Migration 0004's athlete-scoped tables (#772, #773, #774), one row each.
     await store.putLinkCode({

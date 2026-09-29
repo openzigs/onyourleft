@@ -1187,6 +1187,167 @@
           }
         }
       }
+    },
+    "/v1/sync/files/{content}": {
+      "get": {
+        "operationId": "getOriginalFile",
+        "summary": "The original activity file, byte for byte, as it was sent: the rider’s own true track, unobfuscated. Only to an athlete who holds a record of it.",
+        "parameters": [
+          {
+            "name": "content",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/sync/records": {
+      "post": {
+        "operationId": "ingestRecord",
+        "summary": "Send a signed activity record with its original file (base64). Checked in order — the file’s type from its bytes, that it decodes, the record’s signature and content hash, that the key is yours — and stored only if every check passes. The same file sent again answers the first record.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "record": {
+                    "type": "object",
+                    "description": "A signed activity record, ADR 0014’s format: seven members, the signature over the RFC 8785 canonical form of the other six."
+                  },
+                  "file": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "record",
+                  "file"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "contentSha256": {
+                      "type": "string"
+                    },
+                    "recordSha256": {
+                      "type": "string"
+                    },
+                    "receivedAt": {
+                      "type": "integer"
+                    },
+                    "duplicate": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "contentSha256",
+                    "recordSha256",
+                    "receivedAt",
+                    "duplicate"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "415": {
+            "$ref": "#/components/responses/file_type_unsupported"
+          },
+          "422": {
+            "description": "One of `file_undecodable`, `record_malformed`, `record_unsupported`, `record_signature_mismatch`, `record_content_mismatch`, `record_not_your_key`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1218,6 +1379,13 @@
                   "key_in_use",
                   "last_device",
                   "payload_too_large",
+                  "file_type_unsupported",
+                  "file_undecodable",
+                  "record_malformed",
+                  "record_unsupported",
+                  "record_signature_mismatch",
+                  "record_content_mismatch",
+                  "record_not_your_key",
                   "rate_limited",
                   "internal",
                   "unavailable"
@@ -1432,6 +1600,76 @@
       },
       "payload_too_large": {
         "description": "`payload_too_large` (413), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "file_type_unsupported": {
+        "description": "`file_type_unsupported` (415), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "file_undecodable": {
+        "description": "`file_undecodable` (422), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "record_malformed": {
+        "description": "`record_malformed` (422), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "record_unsupported": {
+        "description": "`record_unsupported` (422), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "record_signature_mismatch": {
+        "description": "`record_signature_mismatch` (422), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "record_content_mismatch": {
+        "description": "`record_content_mismatch` (422), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "record_not_your_key": {
+        "description": "`record_not_your_key` (422), in the one error shape.",
         "content": {
           "application/json": {
             "schema": {

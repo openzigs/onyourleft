@@ -30,18 +30,18 @@ describe('tools/migrate.ts (#769)', () => {
 
     const latest = migrate(path, 'latest');
     expect(latest.status, latest.out).toBe(0);
-    expect(latest.out).toMatch(/latest: 4 migration\(s\) changed/);
-    expect(latest.out).toMatch(/applied: 0001-[^\n]*, 0004-identity\n/);
+    expect(latest.out).toMatch(/latest: 5 migration\(s\) changed/);
+    expect(latest.out).toMatch(/applied: 0001-[^\n]*, 0005-sync\n/);
     expect(latest.out).toMatch(/ {2}result: 0 row\(s\)/);
 
     const down = migrate(path, 'down');
     expect(down.out).toMatch(/down: 1 migration\(s\) changed/);
-    expect(down.out).not.toMatch(/0004-identity/);
-    expect(down.out).not.toMatch(/ {2}display_name_change:/);
+    expect(down.out).not.toMatch(/0005-sync/);
+    expect(down.out).not.toMatch(/ {2}sync_item:/);
 
     const up = migrate(path, 'up');
     expect(up.out).toMatch(/up: 1 migration\(s\) changed/);
-    expect(up.out).toMatch(/0004-identity/);
+    expect(up.out).toMatch(/0005-sync/);
   });
 
   it('refuses status, up and down on a path with no database, and creates none', async () => {

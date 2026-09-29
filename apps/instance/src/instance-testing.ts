@@ -4,6 +4,7 @@ import type { Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
 import { createHandler, type Handler } from './handler.ts';
 import type { Route } from './routes.ts';
+import type { Sync } from './sync/sync.ts';
 import { listen, type Listening } from './node-listener.ts';
 
 /**
@@ -39,6 +40,7 @@ export async function startTestInstance(
     routes?: readonly Route[];
     notices?: string;
     identity?: Identity;
+    sync?: Sync;
   } = {},
 ): Promise<TestInstance> {
   const lines: string[] = [];
@@ -49,6 +51,7 @@ export async function startTestInstance(
     log: (line) => lines.push(line),
     ...(options.routes === undefined ? {} : { routes: options.routes }),
     ...(options.identity === undefined ? {} : { identity: options.identity }),
+    ...(options.sync === undefined ? {} : { sync: options.sync }),
   });
   const listening = await listen(handler, { host: '127.0.0.1', port: 0 });
   return { handler, listening, url: listening.url, lines };

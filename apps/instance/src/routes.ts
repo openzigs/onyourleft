@@ -2,6 +2,7 @@
 
 import { IDENTITY_ROUTES } from './auth/routes.ts';
 import { json, type Route, type Schema } from './route-kit.ts';
+import { SYNC_ROUTES } from './sync/routes.ts';
 
 /**
  * The instance's routes, as ONE table the handler dispatches on and the
@@ -15,8 +16,9 @@ import { json, type Route, type Schema } from './route-kit.ts';
  * entry declares — `openapi.test.ts` holds by calling every route through the
  * real listener and checking the body against the declared schema.
  *
- * The identity routes (#772, #773, #774) are `auth/routes.ts`'s, appended
- * here, so there is still one table.
+ * The identity routes (#772, #773, #774) are `auth/routes.ts`'s and the sync
+ * routes (#37, #38, #776, #35) `sync/routes.ts`'s, appended here, so there is
+ * still one table.
  *
  * ## Versioning
  *
@@ -98,4 +100,5 @@ export const ROUTES: readonly Route[] = [
       new Response(notices, { headers: { 'content-type': 'text/plain; charset=utf-8' } }),
   },
   ...IDENTITY_ROUTES,
+  ...SYNC_ROUTES,
 ];

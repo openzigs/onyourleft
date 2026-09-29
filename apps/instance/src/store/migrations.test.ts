@@ -73,9 +73,13 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   auth_challenge: `INSERT INTO auth_challenge VALUES ('${'3'.repeat(64)}', 'key-b', 5, NULL)`,
   recovery_code: `INSERT INTO recovery_code VALUES ('${'4'.repeat(64)}', 'a', 6, NULL)`,
   link_code: `INSERT INTO link_code VALUES ('${'5'.repeat(64)}', 'a', 'key-a', 7, NULL)`,
-  display_name_change: `INSERT INTO display_name_change (athlete_id, previous_name, changed_at) VALUES ('a', 'Old', 8)`,
+  // An explicit id, because the table's own is generated and `ON CONFLICT DO
+  // NOTHING` then has no conflict to see: a second seed (after a later
+  // migration, which 0005 was the first to be) would add a second row.
+  display_name_change: `INSERT INTO display_name_change (id, athlete_id, previous_name, changed_at) VALUES (1, 'a', 'Old', 8)`,
   recovery_email: `INSERT INTO recovery_email VALUES ('a', 'a@example.org')`,
   email_recovery_token: `INSERT INTO email_recovery_token VALUES ('${'6'.repeat(64)}', 'a', 9, NULL)`,
+  sync_item: `INSERT INTO sync_item (seq, athlete_id, kind, item_key, digest, body, received_at, deleted_at) VALUES (1, 'a', 'write-up', 'ride-1', '${'7'.repeat(64)}', x'7b7d', 10, NULL)`,
 };
 
 interface Snapshot {
