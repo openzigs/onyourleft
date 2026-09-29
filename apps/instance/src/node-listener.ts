@@ -3,6 +3,8 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import type { ReadableStream as WebReadableStream } from 'node:stream/web';
 
 import { errorResponse } from './errors.ts';
 import type { Handler } from './handler.ts';
@@ -21,12 +23,35 @@ import type { Handler } from './handler.ts';
  * resolves nowhere, so a URL built from it that leaked into a response would be
  * visibly wrong rather than plausibly someone's.
  *
+ * ⚠️ **And the request-target cannot move it** (#841). Until then the target
+ * was RESOLVED against the constant, so `//evil.example/health` and the
+ * absolute form `http://evil.example/health` both came out with the host
+ * `evil.example` — harmless while nothing builds a link from the URL, host
+ * injection the day something does. {@link requestUrl} appends an origin-form
+ * target to the origin as text, so `//evil.example/health` is a PATH; keeps
+ * only the path and query of an absolute-form one, which RFC 9112 §3.2.2 says a
+ * server must accept; and refuses anything else (`*`) as `validation_failed`.
+ *
  * ⚠️ **The body is streamed to the handler, not buffered here**, so the
- * handler's size limit is the only one and it bounds what is read.
+ * handler's size limit is the only one and it bounds what is read. **And the
+ * response is streamed to the client with backpressure** (#841): a client that
+ * stops reading stops the response being pulled, rather than Node buffering
+ * the whole of it.
  */
 
 /** The origin every request URL is built on. */
 export const REQUEST_ORIGIN = 'http://instance.invalid';
+
+/** The URL a request-target names, on {@link REQUEST_ORIGIN} whatever the target says. Throws on any other form. */
+export function requestUrl(target: string | undefined): URL {
+  const text = target ?? '/';
+  if (text.startsWith('/')) return new URL(`${REQUEST_ORIGIN}${text}`);
+  const absolute = new URL(text);
+  if (absolute.protocol !== 'http:' && absolute.protocol !== 'https:') {
+    throw new TypeError('not an http request-target');
+  }
+  return new URL(`${REQUEST_ORIGIN}${absolute.pathname}${absolute.search}`);
+}
 
 function requestFrom(incoming: IncomingMessage): Request {
   const method = incoming.method ?? 'GET';
@@ -36,7 +61,7 @@ function requestFrom(incoming: IncomingMessage): Request {
     for (const one of Array.isArray(value) ? value : [value]) headers.append(name, one);
   }
   const hasBody = method !== 'GET' && method !== 'HEAD';
-  return new Request(new URL(incoming.url ?? '/', REQUEST_ORIGIN), {
+  return new Request(requestUrl(incoming.url), {
     method,
     headers,
     ...(hasBody
@@ -51,10 +76,12 @@ async function send(response: Response, outgoing: ServerResponse): Promise<void>
     headers[name] = value;
   });
   outgoing.writeHead(response.status, headers);
-  if (response.body !== null) {
-    for await (const chunk of response.body) outgoing.write(chunk);
+  if (response.body === null) {
+    outgoing.end();
+    return;
   }
-  outgoing.end();
+  // `pipeline` waits on `drain`, so the body is pulled no faster than the client reads.
+  await pipeline(Readable.fromWeb(response.body as WebReadableStream<Uint8Array>), outgoing);
 }
 
 /** A running listener: where it is, and how to stop it. */
@@ -75,7 +102,7 @@ export function listen(
     try {
       request = requestFrom(incoming);
     } catch {
-      void send(errorResponse('validation_failed'), outgoing);
+      send(errorResponse('validation_failed'), outgoing).catch(() => outgoing.destroy());
       return;
     }
     handler(request)

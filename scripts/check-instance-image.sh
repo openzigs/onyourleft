@@ -19,10 +19,25 @@
 # Needs Docker and the network (the base image is pulled by digest the first
 # time), so it is NOT in `check:repo`, the bare-clone set.
 #
+# ⚠️ **The one outside service it needs is Docker Hub** (#841). The base image
+# is pulled from there whenever this machine does not already hold it -- on
+# every CI run, because a runner starts empty. GitHub's own documentation says
+# Docker Hub's rate limit is not applied to GitHub-hosted runners pulling a
+# public image (read 2026-09-29), so what is left is an OUTAGE, and that is
+# what IMG004 names: the pull is its own step, before the build, so a registry
+# that is down reads as the registry being down rather than as a Dockerfile
+# that stopped building. CLAUDE.md §4c records the decision to keep this in the
+# required job anyway.
+#
 # Rules:
 #   IMG001  the image does not build
 #   IMG002  the container never reports healthy
 #   IMG003  /source does not name the commit the image was built from
+#   IMG004  the base image could not be pulled (Docker Hub, not this tree)
+#   IMG005  the Dockerfile's base image is not pinned by digest
+#
+# Its own suite, with a fake `docker` on PATH and no Docker needed:
+#   bash scripts/check-instance-image.test.sh
 #
 # Run: bash scripts/check-instance-image.sh
 
@@ -52,6 +67,19 @@ fail() {
 }
 
 commit="$(git -C "${ROOT}" rev-parse HEAD)" || fail 'could not read the commit with git.'
+
+# The base image, read out of the Dockerfile rather than written down twice.
+# A tag is mutable, so a base image that is not pinned by digest is a finding
+# of its own (CLAUDE.md §8's reason for pinning every action to a commit).
+base="$(sed -n 's/^FROM[[:space:]]\{1,\}\([^[:space:]]\{1,\}\).*/\1/p' "${ROOT}/apps/instance/Dockerfile" | head -n 1)"
+case "${base}" in
+  *@sha256:*) ;;
+  *) fail "IMG005 apps/instance/Dockerfile's base image is not pinned by digest: ${base:-(no FROM line)}" ;;
+esac
+if ! docker image inspect "${base}" >/dev/null 2>&1; then
+  docker pull --quiet "${base}" >/dev/null ||
+    fail "IMG004 the base image ${base} could not be pulled. That is Docker Hub (an outage, or no network), not a defect in apps/instance -- re-run once it answers."
+fi
 
 if ! docker build --quiet --build-arg "OYL_INSTANCE_COMMIT=${commit}" \
   -t "${TAG}" "${ROOT}/apps/instance" >/dev/null; then
