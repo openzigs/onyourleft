@@ -67,13 +67,8 @@
  * says so to the rider rather than implying the link is encrypted.
  */
 
-import type {
-  AnalysisCall,
-  AnalysisFailure,
-  AnalysisOutcome,
-  AnalysisPort,
-  AnalysisRequest,
-} from './analysis-port';
+import type { AnalysisPort, AnalysisRequest } from './analysis-port';
+import type { AnalysisCall, AnalysisFailure, AnalysisOutcome } from './model-answer';
 import { ANALYSIS_PROMPTS } from './analysis-port';
 import {
   addressSpaceOf,

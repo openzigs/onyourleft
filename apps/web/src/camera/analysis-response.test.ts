@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { UntrustedText } from './analysis-port';
+import type { UntrustedText } from './model-answer';
 import {
   answeredReady,
   cleanedDescription,
