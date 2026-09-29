@@ -590,3 +590,7 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   | `apps/web/src/camera/hosted-model.ts` | `HOSTED_CONSENT` is C above, naming the button by `HOSTED_TEST_QUESTION_LABEL`, which `views/CameraView.tsx` renders |
   | `apps/web/src/detail/write-up.test.ts` | Reads C from this, the NEWEST entry, with the entry above's C as the control |
   | `apps/mobile/src/android/data-safety.ts` | The fitness-info row says the climb is a difference, not an altitude |
+
+  **A correction to the entry above's table.** It says the privacy policy's hosted section *"carries
+  C's first two paragraphs"*. It carries C's headline and its first paragraph only; the test
+  question is described in the policy's own words, under *What is sent*. The policy is not changed.

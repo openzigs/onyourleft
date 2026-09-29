@@ -964,4 +964,4 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   | Artefact | What changed in the same pull request |
   |---|---|
   | `apps/web/src/camera/hosted-model.ts` | `HOSTED_CONSENT` is the wording above, and `hosted-model.test.ts` compares it with this, the NEWEST entry. The button's label is `HOSTED_TEST_QUESTION_LABEL`, which the consent and `views/CameraView.tsx` both read, so renaming the button changes the consent |
-  | `apps/web/src/a11y/route-sentences.snapshot.json` | The Camera route's one changed sentence, re-recorded |
+  | `apps/web/src/views/CameraView.test.tsx` | Requires the button the Camera page renders to read exactly `HOSTED_TEST_QUESTION_LABEL` |
