@@ -1284,7 +1284,7 @@ apps/                 AGPL-3.0-or-later, without exception
                         with no build step (`node src/main.ts`). It answers
                         `/health`, `/source` (AGPL-3.0 §13, ADR 0036 D-6),
                         `/openapi.json` and `/licences/third-party.txt`, and
-                        nothing else yet. ⚠️ **One runtime dependency since
+                        nothing else yet. ⚠️ **One third-party runtime dependency since
                         #769, `kysely`** (ADR 0037 D-9's row): its notices
                         document says so and `check:notices` holds it. Since
                         #842 it also holds `src/store/` — the `SqlStore` port
@@ -1307,6 +1307,23 @@ apps/                 AGPL-3.0-or-later, without exception
                         `openapi.json` is generated from (#36). `Dockerfile`
                         is the first deploy target; `scripts/check-instance-image.sh`
                         builds it and asks `/health` inside the container
+    src/room/core/      the room core (#779): one room as a deterministic
+                        state machine — hello, capacity (50, up to 100),
+                        countdown, a 1 Hz tick that re-simulates every rider
+                        through `@onyourleft/physics`' `advanceRider` and
+                        `ridingConditions`, coasting at 0 W, rejoin inside a
+                        window, finish order — with NO socket, timer or clock:
+                        time is a parameter to every method. ⚠️ Platform-free
+                        by `tsconfig.room-core.json` (ES2024, no `types`) and
+                        an `eslint.config.js` block that also bans `Date`, the
+                        timers, `performance`, `Math.random` and `ws`.
+                        `clock.ts` maps a client's `atMs` onto the room's
+                        clock, because the two are never the same clock.
+                        ⚠️ **NOT mounted yet** — #780 (Node, `ws`) and #781
+                        (Durable Object) are the adapters, and `main.ts`
+                        imports none of it. ⚠️ Its workspace dependencies are
+                        TypeScript with extensionless relative imports, which
+                        `node src/main.ts` cannot load: #780 owns that
 
 packages/             Apache-2.0, without exception
   domain/             units, core types, validation, signing, analysis (#25)
@@ -2095,7 +2112,9 @@ not.
   decision D6), and a reviewer who remembers it is reading the old file.
 - **Any instance feature beyond metadata.** `apps/instance` answers `/health`, `/source`,
   `/openapi.json` and `/licences/third-party.txt` and nothing else yet: no account (#772), no sync
-  (#776), no room (#779, #780). Do not write a command or a test that assumes one of those exists.
+  (#776), no room anybody can reach (#780). ⚠️ The room **core** exists since
+  [#779](https://github.com/openzigs/onyourleft/issues/779) — `src/room/core/` — and nothing mounts
+  it. Do not write a command or a test that assumes a reachable room exists.
   ⚠️ **The database and the blob store DO exist since #842** (#769, #770) — a reviewer who
   remembers "no database (#769)" in this bullet is reading the old file — but no route and no
   start-up path opens either: `main.ts` reads no database path, and the Docker image installs

@@ -1265,9 +1265,10 @@ names nothing from Node, so the Node listener that fronts it today and the Durab
 (#781) mount the same code (ADR 0037 D-2). Every rule — the body limit, routing, the error shape,
 the log — is the handler's, so two adapters cannot disagree about any of them.
 
-**No build step, and one runtime dependency.** Node 24 strips the types and runs `src/main.ts` as
-committed, so the tsconfig adds `allowImportingTsExtensions` and `erasableSyntaxOnly`. The instance
-imports nothing but Node and — since #769, in `src/store/` alone — `kysely` (ADR 0037 D-9), which
+**No build step, and one third-party runtime dependency.** Node 24 strips the types and runs
+`src/main.ts` as committed, so the tsconfig adds `allowImportingTsExtensions` and
+`erasableSyntaxOnly`. The instance imports nothing but Node, this repository's own packages and —
+since #769, in `src/store/` alone — `kysely` (ADR 0037 D-9), which
 `apps/instance/third-party.txt` states and `check:notices` holds —
 and that document is **the instance's own**, served at `GET /licences/third-party.txt` and kept out
 of the app's notices (§4g of `CLAUDE.md`), because a rider's device carries none of it.

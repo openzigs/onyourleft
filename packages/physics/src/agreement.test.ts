@@ -72,7 +72,13 @@ import {
   type Watts,
 } from '@onyourleft/domain';
 
-import { PHYSICS_VERSION, ridingCoefficients, type RidingPosition } from './riding';
+import { fieldDraftFactors } from './draft';
+import {
+  PHYSICS_VERSION,
+  ridingCoefficients,
+  ridingConditions,
+  type RidingPosition,
+} from './riding';
 import { advance, START_OF_RIDE, type RideConditions, type RideState } from './simulate';
 
 /**
@@ -219,8 +225,11 @@ const RACE_EXPECTED: Readonly<Record<RidingPosition, { speed: string; distance: 
 };
 
 describe('the race’s own configuration — #487, ADR 0028 D-1', () => {
-  it('is physics version 1, which these vectors are the answer of', () => {
-    expect(PHYSICS_VERSION).toBe(1);
+  it('is physics version 2, which these vectors and the drafting vectors are the answer of', () => {
+    // 2 since #786 added the draft model below. The riding-alone vectors did
+    // not move — `k = 1` is the old arithmetic to the bit — but a version-1
+    // client drafts nobody, so a room refuses it (`@onyourleft/protocol`).
+    expect(PHYSICS_VERSION).toBe(2);
   });
 
   for (const position of ['upright', 'hoods', 'drops'] as const) {
@@ -230,6 +239,93 @@ describe('the race’s own configuration — #487, ADR 0028 D-1', () => {
       expect(String(settled.distance)).toBe(RACE_EXPECTED[position].distance);
       // And it is not the package default: a race runs a different bicycle.
       expect(String(settled.distance)).not.toBe(EXPECTED.distance);
+    });
+  }
+});
+
+/**
+ * Two riders at a fixed gap, each drafted by the model and ridden through
+ * `advance` — #786's agreement vector, ADR 0038 D-6 answer 3.
+ *
+ * The draft multiplier comes from `fieldDraftFactors` over the two riders'
+ * distances, so a table entry moved in the fourth significant figure moves the
+ * area each is ridden at and turns this red. The trace is `TRACE` above, at the
+ * race's hoods and a 74 kg athlete on the one bicycle.
+ */
+const DRAFT_GAP_METRES = 0.5;
+
+const DRAFT_EXPECTED = {
+  follower: { k: '0.652', speed: '11.61547888821103', distance: '433.63402666782935' },
+  leader: { k: '0.987', speed: '10.657317005025284', distance: '412.24273112062053' },
+} as const;
+
+describe('two riders drafting at a fixed gap — #786, ADR 0038', () => {
+  const [follower, leader] = fieldDraftFactors([100, 100 + DRAFT_GAP_METRES]) as [number, number];
+
+  for (const [who, k] of [
+    ['follower', follower],
+    ['leader', leader],
+  ] as const) {
+    it(`rides the ${who} at a fixed position, digit for digit`, () => {
+      expect(String(k)).toBe(DRAFT_EXPECTED[who].k);
+      const base = ridingConditions(kilograms(74), 'hoods', k);
+      const settled = rideTheTrace({ ...base, integrationStepSeconds: 0.01 });
+      expect(String(settled.speed)).toBe(DRAFT_EXPECTED[who].speed);
+      expect(String(settled.distance)).toBe(DRAFT_EXPECTED[who].distance);
+    });
+  }
+
+  it('puts the follower further up the road than the leader, and both ahead of riding alone', () => {
+    const alone = rideTheTrace({
+      ...ridingConditions(kilograms(74), 'hoods'),
+      integrationStepSeconds: 0.01,
+    }).distance;
+    expect(Number(DRAFT_EXPECTED.follower.distance)).toBeGreaterThan(
+      Number(DRAFT_EXPECTED.leader.distance),
+    );
+    expect(Number(DRAFT_EXPECTED.leader.distance)).toBeGreaterThan(alone);
+  });
+});
+
+/**
+ * The room's own configuration — what #779's room core computes for a rider,
+ * pinned here so the room's test can require the same digits (#779's
+ * agreement criterion).
+ *
+ * The race vectors above ride the trace's grade by **time**; a room reads the
+ * grade off the course at the rider's **distance** at the start of each
+ * one-second tick, rides a declared 74 kg athlete on the one bicycle through
+ * `ridingConditions`, and uses the package's default integration step. That is
+ * this vector. `apps/instance/src/room/core/room.test.ts` §"agreement" feeds
+ * the same powers, one report a tick, and requires these strings.
+ */
+const ROOM_COURSE_GRADE_PERCENT = (metres: number): number =>
+  metres < 150 ? 0 : metres < 300 ? 6.5 : -3.25;
+
+const ROOM_EXPECTED: Readonly<Record<RidingPosition, { speed: string; distance: string }>> = {
+  upright: { speed: '6.589710958414384', distance: '334.8060822533738' },
+  hoods: { speed: '7.464954609002774', distance: '351.15003678706177' },
+  drops: { speed: '8.31756864912602', distance: '369.1076290083885' },
+};
+
+describe('the room’s configuration — #779, ADR 0028 D-1', () => {
+  for (const position of ['upright', 'hoods', 'drops'] as const) {
+    it(`computes a fixed position for a 74 kg athlete in the ${position}, grade by distance`, () => {
+      const conditions = ridingConditions(kilograms(74), position);
+      let state = START_OF_RIDE;
+      for (const { power } of TRACE) {
+        state = advance(
+          state,
+          {
+            power,
+            grade: gradePercent(ROOM_COURSE_GRADE_PERCENT(state.distance)),
+            duration: ONE_SECOND,
+          },
+          conditions,
+        );
+      }
+      expect(String(state.speed)).toBe(ROOM_EXPECTED[position].speed);
+      expect(String(state.distance)).toBe(ROOM_EXPECTED[position].distance);
     });
   }
 });

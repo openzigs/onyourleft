@@ -98,10 +98,19 @@ export class ProtocolEncodeError extends Error {
   }
 }
 
-/** Internal: unwinds the walk to the one place a refusal becomes a result. */
+/**
+ * Internal: unwinds the walk to the one place a refusal becomes a result.
+ *
+ * ⚠️ A field assigned in the constructor, never a parameter property: a room
+ * (`apps/instance`) runs this file under Node's type stripping, which erases
+ * types and transforms nothing, so `constructor(readonly refusal)` is a syntax
+ * error there (`erasableSyntaxOnly`, #779).
+ */
 class Refused extends Error {
-  constructor(readonly refusal: Refusal) {
+  readonly refusal: Refusal;
+  constructor(refusal: Refusal) {
     super(refusal.reason);
+    this.refusal = refusal;
   }
 }
 

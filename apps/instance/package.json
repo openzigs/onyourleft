@@ -7,17 +7,20 @@
   "description": "The self-hostable instance server (ADR 0036, ADR 0037) \u2014 a fetch-style handler and a thin Node listener. Nothing but Node itself at runtime.",
   "main": "./src/main.ts",
   "scripts": {
-    "typecheck": "tsc --noEmit --project tsconfig.json",
+    "typecheck": "tsc --noEmit --project tsconfig.json && tsc --noEmit --project tsconfig.room-core.json",
     "test": "vitest run",
     "start": "node src/main.ts",
     "openapi:generate": "node tools/write-openapi.ts",
     "migrate": "node tools/migrate.ts"
   },
+  "dependencies": {
+    "@onyourleft/domain": "workspace:*",
+    "@onyourleft/physics": "workspace:*",
+    "@onyourleft/protocol": "workspace:*",
+    "kysely": "0.29.6"
+  },
   "devDependencies": {
     "typescript": "6.0.3",
     "vitest": "4.1.11"
-  },
-  "dependencies": {
-    "kysely": "0.29.6"
   }
 }

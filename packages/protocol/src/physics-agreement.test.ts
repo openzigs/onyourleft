@@ -43,4 +43,19 @@ describe('agreement with @onyourleft/physics', () => {
     });
     expect(decodeClientMessage(hello, { physicsVersion: PHYSICS_VERSION }).ok).toBe(true);
   });
+
+  it('refuses a version-1 client against a room on the draft model — #786', () => {
+    // Version 2 is the first with drafting (ADR 0038). A client on 1 drafts
+    // nobody, so the room it would be raced by is one it cannot predict.
+    expect(PHYSICS_VERSION).toBe(2);
+    const oldClient = encodeMessage({
+      type: 'hello',
+      protocol: PROTOCOL_VERSION,
+      physicsVersion: 1,
+      ticket: 't',
+    });
+    const decoded = decodeClientMessage(oldClient, { physicsVersion: PHYSICS_VERSION });
+    expect(decoded.ok).toBe(false);
+    expect(decoded.ok ? undefined : decoded.refusal.reason).toBe('physics-mismatch');
+  });
 });

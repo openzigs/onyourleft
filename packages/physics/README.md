@@ -112,6 +112,76 @@ the worked example the test suite reproduces and 97.698 % would put that reprodu
 published answer. The two differ by 0.2 % of total power; if you are tuning for a rider rather than
 for the paper, neither is more right than the other.
 
+### The draft model (#786, ADR 0038) — `draft.ts`
+
+A multiplier `k` on a rider's `C_D·A` that the **caller** applies (`ridingConditions`' `dragFactor`),
+from distance along the route alone. The integrator does not call it, so with `k = 1` every number
+above is untouched and `martin-1998.test.ts` did not change. Only `+ − × ÷`: `draft.test.ts` reads
+the source and fails on any `Math` member or `**`.
+
+| Coefficient | Value | Where it comes from |
+|---|---|---|
+| `k_behind`, depth 1, at 0.05 / 0.15 / 0.5 / 1 / 5 m | 0.641 / 0.644 / 0.652 / 0.665 / 0.709 | Blocken, Toparlar, van Druenen & Andrianne 2018, *Aerodynamic drag in cycling team time trials*, J. Wind Eng. Ind. Aerodyn. 182, 128–145, Figs. 9–13, 2-rider rows, rider 2. Read off the figures by ADR 0038's author, 2026-09-29 |
+| `k_behind`, depth 2 | 0.517 / 0.522 / 0.536 / 0.556 / 0.631 | the same figures, 3-rider rows, rider 3 |
+| `k_behind`, depth 3 | 0.459 / 0.466 / 0.486 / 0.511 / 0.611 | 4-rider rows, rider 4 |
+| `k_behind`, depth 4 | 0.436 / 0.443 / 0.466 / 0.493 / 0.605 | 5-rider rows, rider 5 |
+| `k_behind`, depth 5 and more | 0.425 / 0.433 / 0.457 / 0.485 / 0.602 | 6-rider rows, rider 6; the paper, §4.3 observation 3: from the 5th rider on, drag is *"very similar"* |
+| `k_ahead_of` (the leader) | 0.976 / 0.980 / 0.987 / 0.992 / 0.999 | the same figures, 2-rider rows, rider 1 |
+| `LEVEL_METRES` | 0.05 m | ADR 0038 D-2: closer than the paper's *"theoretical minimum distance"*, riders are level and shelter neither way |
+| ⚠️ `DRAFT_REACH_METRES` | 30 m | **Unsourced — the author's choice** (ADR 0038 D-3.3). Each row is linear from its 5 m value to 1.000 at 30 m |
+| ⚠️ the gap a chain is read at | the rider's own gap to the nearest wheel | **Unsourced — the author's choice** (ADR 0038 D-3.6 step 2): every line the paper measured is evenly spaced |
+
+What the model was held to, as tests (`draft.test.ts` §"the check ADR 0038 D-3 held the table to"):
+the 3-rider line's middle rider at 0.05 m (0.626 against 0.617 measured) and at 1 m (0.660 against
+0.655), and rider 7 of 9 at 0.15 m (0.424 against 0.407). It errs toward **less** draft, by at most
+about 4 %.
+
+#### ⚠️ Blocken et al. 2013 disagrees with this table, for every position
+
+ADR 0038 D-3.5 asked #786 to read the two-rider paper in full. It was read on 2026-09-29 from the
+authors' preprint (Blocken B, Defraeye T, Koninckx E, Carmeliet J, Hespel P, *CFD simulations of the
+aerodynamic drag of two drafting cyclists*, Computers & Fluids 71 (2013) 435–445,
+[urbanphysics.net](https://urbanphysics.net/2013_CAF_BB_TD_EK_JC_PH__Preprint.pdf)). Its Tables 2–4
+give the trailing and leading rider's drag reduction **per position**, at d = 0.01, 0.25, 0.5 and 1 m:
+
+| Position (2013) | Trailing reduction at 0.01 / 0.25 / 0.5 / 1 m | Leading reduction, same gaps | Isolated `A·C_D` (body only, CFD) |
+|---|---|---|---|
+| Upright (UP) | 27.1 / 26.5 / 25.9 / 25.0 % | 0.8 / 0.7 / 0.6 / 0.5 % | 0.213 m² |
+| Dropped (DP) | 23.1 / 22.9 / 22.1 / 21.4 % | 1.7 / 1.1 / 0.7 / 0.4 % | 0.173 m² |
+| Time trial (TTP) | 13.8 / 13.4 / 12.8 / 11.7 % | 2.6 / 1.7 / 1.2 / 0.6 % | 0.135 m² |
+
+This table's depth-1 row is a **35.9 %** reduction at 0.05 m and **33.5 %** at 1 m. So:
+
+- **The time-trial disagreement ADR 0038 D-3.5 named is real and large**: for the position the 2018
+  figures were measured in, 2013 gives the trailing rider **13.8 %** at 0.01 m against 2018's 35.9 % at
+  0.05 m — a factor of about 2.6 — and 11.7 % against 33.5 % at 1 m.
+- **The road positions a race actually rides are closer to 2018 than the time-trial one is**, but still
+  below it: the dropped position is 23.1 → 21.4 %, the upright 27.1 → 25.0 %.
+- **The leading-rider effect agrees** in size: 2013's 0.4–2.6 % against 2018's 0.8–2.4 % over the
+  same range of gaps.
+- **Why they may differ, from 2013's own limitations (§6.1)**: the 2013 simulations are of the
+  **body only, without the bicycle** (*"the bicycle accounts for 30-35% of the total drag"*), with
+  **stationary legs and wheels**, and of one rider geometry; the paper itself notes its reductions
+  (*"max. 30%"*) are smaller than earlier wind-tunnel studies' 37–49 %. It is not established here
+  which paper a road race resembles more.
+
+⚠️ **This is ADR 0038's first "what would make this ADR wrong" condition** — *"Blocken 2013's full
+paper, read, gives gap-dependent values per position that differ from the 2018 time-trial table by
+more than D-3's check tolerates"* — and it is met: D-3's check tolerates about 4 %. Version 1 keeps
+the 2018 table because ADR 0038 D-3.5 decides it, and a change of model is a new `physicsVersion`
+and a decision for the owner, not for the pull request that read the paper. It is recorded here and
+raised on #786 so that decision is taken before races depend on drafting (#787).
+
+### `PHYSICS_VERSION`, and what each one changed
+
+A room refuses a client on another version (ADR 0028 D-2 rule 5, `@onyourleft/protocol`'s hello).
+Bump it in the same commit as any change that moves a vector in `agreement.test.ts`.
+
+| Version | Change |
+|---|---|
+| 1 | #487: the race's coefficient set, moved here from the game |
+| 2 | #786: the draft model (ADR 0038). No riding-alone vector moved; a version-1 client drafts nobody |
+
 ---
 
 ## 3. The model

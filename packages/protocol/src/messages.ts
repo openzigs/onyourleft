@@ -90,9 +90,23 @@ export interface Welcome {
   readonly roomConfig: RoomConfig;
 }
 
-/** Why a room refused a hello. */
+/**
+ * Why a room refused a hello. Settled by #779, where the room that sends them
+ * was built (they were placeholders in #768):
+ *
+ * - `protocol-mismatch`, `physics-mismatch` — ADR 0028 D-2 rule 5.
+ * - `ticket-refused` — the room's admission does not accept the ticket: not
+ *   one it issued, expired, or for another room. It says nothing about why, so
+ *   a refusal cannot be used to probe which tickets exist.
+ * - `room-full` — every seat is taken (ADR 0037 D-7: 50 by default, 100 at most).
+ * - `room-closed` — the room admits nobody new: a race that has started, to an
+ *   athlete who holds no seat; a race to an athlete whose seat was given up
+ *   when their rejoin window ran out (they did not finish); a room that has
+ *   finished. Added by #779 while version 1 is unshipped — without it the only
+ *   honest answers to a late hello were two that name something else.
+ */
 export type RefuseReason =
-  'protocol-mismatch' | 'physics-mismatch' | 'ticket-refused' | 'room-full';
+  'protocol-mismatch' | 'physics-mismatch' | 'ticket-refused' | 'room-full' | 'room-closed';
 
 /** The room's answer to a hello it does not accept. */
 export interface Refuse {

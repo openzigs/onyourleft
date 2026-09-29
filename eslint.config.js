@@ -233,6 +233,18 @@ const platformIsolation = (extraPatterns = []) => ({
   ],
 });
 
+/**
+ * The instance's SQL driver and query builder, by name (#769). Only
+ * `apps/instance/src/store/` may import them — see the block that uses this.
+ */
+const SQL_DRIVER_IMPORT_PATTERNS = [
+  {
+    group: ['node:sqlite', 'sqlite', 'kysely', 'kysely/*', 'better-sqlite3', 'sqlite3'],
+    message:
+      'Only apps/instance/src/store/ may name the SQL driver or Kysely (#769, ADR 0037 D-2). Use the SqlStore port.',
+  },
+];
+
 export default tseslint.config(
   {
     ignores: [
@@ -546,6 +558,82 @@ export default tseslint.config(
     },
   },
 
+  // --- The instance's database driver stays behind its port -----------------
+  // #769. `apps/instance/src/store/` is the one place the instance names its
+  // SQL driver (`node:sqlite`) or its query builder (Kysely): the core has to
+  // mount unchanged under a Durable Object (ADR 0037 D-2), whose SQLite is
+  // reached another way, so a handler that imported the driver would have
+  // chosen the platform. Everything else asks the `SqlStore` port. The two
+  // SQLite packages ADR 0037 D-5 named and did not adopt are listed too, so
+  // taking one of them is a change here rather than a quiet import.
+  //
+  // ⚠️ It comes BEFORE the room core's block, which sets the same rule for its
+  // own files and so replaces this one there: flat config keeps the last
+  // setting of a rule. The room core carries these patterns in its own list.
+  {
+    files: ['apps/instance/**/*.ts'],
+    ignores: ['apps/instance/src/store/**'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          patterns: SQL_DRIVER_IMPORT_PATTERNS,
+        },
+      ],
+    },
+  },
+
+  // --- The room core is pure: time arrives as a parameter (#779) ------------
+  // `apps/instance/src/room/core/` is mounted unchanged by a Node adapter
+  // (#780) and a Durable Object (#781), ADR 0037 D-2, and its determinism test
+  // — the same calls give byte-identical frames — means something only while
+  // it reads no clock. `tsconfig.room-core.json` is the closure for the
+  // platform (no `lib` but ES2024, no `types`); this is the fast duplicate,
+  // plus the ECMAScript clock and the timers no `lib` narrowing can remove,
+  // and the socket library by name.
+  {
+    files: ['apps/instance/src/room/core/**/*.ts'],
+    rules: {
+      ...platformIsolation([
+        {
+          group: ['ws', 'ws/*'],
+          message:
+            'The room core names no socket library: the adapter owns the socket (ADR 0037 D-2).',
+        },
+        ...SQL_DRIVER_IMPORT_PATTERNS,
+      ]),
+      'no-restricted-globals': [
+        'error',
+        ...PLATFORM_GLOBALS.map((name) => ({
+          name,
+          message:
+            'The room core names no platform API: an adapter owns the socket and the timer (ADR 0037 D-2, #779).',
+        })),
+        ...[
+          'Date',
+          'setTimeout',
+          'setInterval',
+          'setImmediate',
+          'queueMicrotask',
+          'performance',
+        ].map((name) => ({
+          name,
+          message:
+            'The room core reads no clock and schedules nothing: time arrives as a parameter, as in the recording engine (#45, #779).',
+        })),
+      ],
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'Math',
+          property: 'random',
+          message:
+            'The room core is deterministic: the same calls give byte-identical frames (#779).',
+        },
+      ],
+    },
+  },
+
   // --- The announcer's core is pure: time arrives as a parameter -------------
   // #396. `apps/web/src/game/hud/announce.ts` decides whether a rider hears a
   // sentence, and its whole test suite drives it with a fake clock — which is
@@ -618,33 +706,6 @@ export default tseslint.config(
         WebSocket: 'readonly',
       },
       sourceType: 'module',
-    },
-  },
-
-  // --- The instance's database driver stays behind its port -----------------
-  // #769. `apps/instance/src/store/` is the one place the instance names its
-  // SQL driver (`node:sqlite`) or its query builder (Kysely): the core has to
-  // mount unchanged under a Durable Object (ADR 0037 D-2), whose SQLite is
-  // reached another way, so a handler that imported the driver would have
-  // chosen the platform. Everything else asks the `SqlStore` port. The two
-  // SQLite packages ADR 0037 D-5 named and did not adopt are listed too, so
-  // taking one of them is a change here rather than a quiet import.
-  {
-    files: ['apps/instance/**/*.ts'],
-    ignores: ['apps/instance/src/store/**'],
-    rules: {
-      '@typescript-eslint/no-restricted-imports': [
-        'error',
-        {
-          patterns: [
-            {
-              group: ['node:sqlite', 'sqlite', 'kysely', 'kysely/*', 'better-sqlite3', 'sqlite3'],
-              message:
-                'Only apps/instance/src/store/ may name the SQL driver or Kysely (#769, ADR 0037 D-2). Use the SqlStore port.',
-            },
-          ],
-        },
-      ],
     },
   },
 
