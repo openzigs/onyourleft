@@ -157,7 +157,9 @@ function sortOptionFor(orderBy: ActivityOrder, direction: SortDirection): SortOp
  * of three. An update made in a LAYOUT effect is flushed before the browser
  * paints, so the width is read here first and the observer only follows later
  * changes. `reflow.browser.spec.ts` §"the first frame" samples every frame
- * from navigation and fails on a table before cards.
+ * from navigation and fails on a table before cards — which guards the
+ * synchronous first read above, and not the choice of a layout effect over an
+ * ordinary one: nothing has shown that it tells the two apart (#690).
  *
  * Where there is no `ResizeObserver` — jsdom — nothing is measured and it
  * stays a table. A width of nought is read as "not laid out" rather than as a
