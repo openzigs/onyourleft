@@ -54,8 +54,14 @@ import { verifyEd25519 } from '../auth/crypto.ts';
 import type { Caller, Outcome } from '../auth/identity.ts';
 import { BLOB_KEY, type BlobStore } from '../blob/blob-store.ts';
 import type { ErrorCode, FieldProblem } from '../errors.ts';
+import { encodeCursor, parsePageRequest, type Page } from '../pagination.ts';
 import type { ActivityRecord, SqlStore } from '../store/sql-store.ts';
-import { decodeActivityFile } from './activity-file.ts';
+import {
+  decodeActivityFile,
+  downsample,
+  STREAM_CHANNELS,
+  type StreamChannel,
+} from './activity-file.ts';
 import { createContentLock } from './content-lock.ts';
 
 export interface SyncOptions {
@@ -75,10 +81,52 @@ export interface Ingested {
   readonly duplicate: boolean;
 }
 
+/** One of the caller's activities, as the list shows it (#38). */
+export interface ActivityView {
+  readonly contentSha256: string;
+  /** Unix seconds. */
+  readonly receivedAt: number;
+  /** What the signed record claims: #62's list row, never a coordinate. */
+  readonly claims: SignedActivityRecord['claims'];
+}
+
+/** One activity in detail: the list row, and the signed record itself. */
+export interface ActivityDetail extends ActivityView {
+  readonly recordSha256: string;
+  readonly record: SignedActivityRecord;
+}
+
+/**
+ * A ride's samples at a resolution (#38): `t` in seconds from the first
+ * sample, and each channel beside it, `null` where there was no reading.
+ * **No position**, ever — see `activity-file.ts`.
+ */
+export interface StreamsView {
+  /** How many samples the file holds. */
+  readonly samples: number;
+  /** How many this answer carries: `samples`, or the resolution asked for. */
+  readonly points: number;
+  readonly t: readonly number[];
+  readonly channels: Readonly<Record<StreamChannel, readonly (number | null)[]>>;
+}
+
+/** The most points a stream request may ask for; a chart is never wider. */
+export const MAXIMUM_STREAM_POINTS = 10_000;
+
 export interface Sync {
   ingest(caller: Caller, body: Readonly<Record<string, unknown>>): Promise<Outcome<Ingested>>;
   /** The original file, byte for byte — only to an athlete who holds a record of it. */
   file(caller: Caller, contentSha256: string): Promise<Outcome<Uint8Array>>;
+  /** #38: the caller's activities, newest first, one store query a page. */
+  activities(caller: Caller, query: URLSearchParams): Promise<Outcome<Page<ActivityView>>>;
+  /** #38: one of the caller's activities. */
+  activity(caller: Caller, contentSha256: string): Promise<Outcome<ActivityDetail>>;
+  /** #38: one of the caller's activities' samples, at `?points=` or in full. */
+  streams(
+    caller: Caller,
+    contentSha256: string,
+    query: URLSearchParams,
+  ): Promise<Outcome<StreamsView>>;
 }
 
 const refuse = (code: ErrorCode, fields?: readonly FieldProblem[]): Outcome<never> =>
@@ -147,6 +195,16 @@ export function createSync(options: SyncOptions): Sync {
   const seconds = (): number => Math.floor(now() / 1000);
   const lock = createContentLock();
 
+  /**
+   * THE read every per-activity route goes through (#38's choke point): the
+   * caller's own record of this file, or nothing. Keyed by the caller AND the
+   * content, so a record another athlete holds of the same bytes is not it.
+   */
+  const owned = (caller: Caller, contentSha256: string): Promise<ActivityRecord | undefined> =>
+    BLOB_KEY.test(contentSha256)
+      ? store.getActivityRecord(caller.athleteId, contentSha256)
+      : Promise.resolve(undefined);
+
   return {
     ingest: async (caller, body) => {
       const { record, file } = body;
@@ -209,11 +267,92 @@ export function createSync(options: SyncOptions): Sync {
     },
 
     file: async (caller, contentSha256) => {
-      if (!BLOB_KEY.test(contentSha256)) return refuse('not_found');
-      const held = await store.getActivityRecord(caller.athleteId, contentSha256);
+      const held = await owned(caller, contentSha256);
       if (held === undefined) return refuse('not_found');
       const bytes = await blobs.get(contentSha256);
       return bytes === undefined ? refuse('not_found') : { ok: true, value: bytes };
     },
+
+    activities: async (caller, query) => {
+      const request = parsePageRequest(query);
+      if (!request.ok) return refuse('validation_failed', request.fields);
+      const { limit, after } = request.request;
+      const before = after === undefined ? undefined : Number(after.id);
+      if (before !== undefined && (after?.key !== 'seq' || !Number.isSafeInteger(before))) {
+        return invalid('cursor', 'must be a cursor this instance returned');
+      }
+      // One query for the page, and one row more than the page: that row says
+      // whether there is a next page without a second query (#38's counter).
+      const rows = await store.listActivityPage(caller.athleteId, before, limit + 1);
+      const page = rows.slice(0, limit);
+      const last = page.at(-1);
+      return {
+        ok: true,
+        value: {
+          items: page.map(({ record }) => viewOf(record)),
+          next:
+            rows.length > limit && last !== undefined
+              ? encodeCursor({ key: 'seq', id: String(last.seq) })
+              : null,
+        },
+      };
+    },
+
+    activity: async (caller, contentSha256) => {
+      const held = await owned(caller, contentSha256);
+      if (held === undefined) return refuse('not_found');
+      return {
+        ok: true,
+        value: {
+          ...viewOf(held),
+          recordSha256: toHex(await sha256Bytes(held.signedRecord)),
+          record: storedRecord(held),
+        },
+      };
+    },
+
+    streams: async (caller, contentSha256, query) => {
+      const asked = query.getAll('points');
+      let points: number | undefined;
+      if (asked.length > 1) return invalid('points', 'must be given at most once');
+      if (asked.length === 1) {
+        points = /^[0-9]{1,6}$/.test(asked[0] ?? '') ? Number(asked[0]) : Number.NaN;
+        if (!Number.isInteger(points) || points < 2 || points > MAXIMUM_STREAM_POINTS) {
+          return invalid(
+            'points',
+            `must be a whole number from 2 to ${String(MAXIMUM_STREAM_POINTS)}`,
+          );
+        }
+      }
+      const held = await owned(caller, contentSha256);
+      if (held === undefined) return refuse('not_found');
+      const bytes = await blobs.get(contentSha256);
+      if (bytes === undefined) return refuse('not_found');
+      const decoded = decodeActivityFile(bytes);
+      // It decoded when it was ingested; a file that no longer does is not a stream.
+      if (!decoded.ok) return refuse('not_found');
+      const served = points === undefined ? decoded.samples : downsample(decoded.samples, points);
+      const channels = Object.fromEntries(
+        STREAM_CHANNELS.map((channel) => [channel, served.map((sample) => sample[channel])]),
+      ) as Record<StreamChannel, (number | null)[]>;
+      return {
+        ok: true,
+        value: {
+          samples: decoded.samples.length,
+          points: served.length,
+          t: served.map((sample) => sample.t),
+          channels,
+        },
+      };
+    },
+  };
+}
+
+/** A stored record as the list shows it. */
+function viewOf(record: ActivityRecord): ActivityView {
+  return {
+    contentSha256: record.contentSha256,
+    receivedAt: record.receivedAt,
+    claims: storedRecord(record).claims,
   };
 }

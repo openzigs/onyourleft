@@ -189,6 +189,397 @@
         }
       }
     },
+    "/v1/activities": {
+      "get": {
+        "operationId": "listActivities",
+        "summary": "Your activities, newest first: `?limit=` (1–200, default 50) and `?cursor=` from the page before. One query a page, and stable while activities are added.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "contentSha256": {
+                            "type": "string"
+                          },
+                          "receivedAt": {
+                            "type": "integer"
+                          },
+                          "claims": {
+                            "type": "object",
+                            "properties": {
+                              "activityId": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "startedAt": {
+                                "type": "integer"
+                              },
+                              "startedAtTimeZone": {
+                                "type": "string"
+                              },
+                              "elapsedTime": {
+                                "type": "number"
+                              },
+                              "movingTime": {
+                                "type": "number"
+                              },
+                              "distance": {
+                                "type": "number"
+                              },
+                              "hasPosition": {
+                                "type": "boolean"
+                              },
+                              "averagePower": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "activityId",
+                              "name",
+                              "startedAt",
+                              "startedAtTimeZone",
+                              "elapsedTime",
+                              "movingTime",
+                              "distance",
+                              "hasPosition"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "contentSha256",
+                          "receivedAt",
+                          "claims"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "next": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "next"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/activities/{content}": {
+      "get": {
+        "operationId": "getActivity",
+        "summary": "One of your activities, by the SHA-256 of its file: what its record claims, and the signed record itself.",
+        "parameters": [
+          {
+            "name": "content",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "contentSha256": {
+                      "type": "string"
+                    },
+                    "receivedAt": {
+                      "type": "integer"
+                    },
+                    "claims": {
+                      "type": "object",
+                      "properties": {
+                        "activityId": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "startedAt": {
+                          "type": "integer"
+                        },
+                        "startedAtTimeZone": {
+                          "type": "string"
+                        },
+                        "elapsedTime": {
+                          "type": "number"
+                        },
+                        "movingTime": {
+                          "type": "number"
+                        },
+                        "distance": {
+                          "type": "number"
+                        },
+                        "hasPosition": {
+                          "type": "boolean"
+                        },
+                        "averagePower": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "activityId",
+                        "name",
+                        "startedAt",
+                        "startedAtTimeZone",
+                        "elapsedTime",
+                        "movingTime",
+                        "distance",
+                        "hasPosition"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "recordSha256": {
+                      "type": "string"
+                    },
+                    "record": {
+                      "type": "object",
+                      "description": "A signed activity record, ADR 0014’s format: seven members, the signature over the RFC 8785 canonical form of the other six."
+                    }
+                  },
+                  "required": [
+                    "contentSha256",
+                    "receivedAt",
+                    "claims",
+                    "recordSha256",
+                    "record"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/activities/{content}/streams": {
+      "get": {
+        "operationId": "getActivityStreams",
+        "summary": "One of your activities’ samples — power, heart rate, cadence, speed, altitude and distance, never a position — in full, or at `?points=` (2–10 000) for a chart: each point the mean of its share of the ride, a gap left as `null`.",
+        "parameters": [
+          {
+            "name": "content",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "samples": {
+                      "type": "integer"
+                    },
+                    "points": {
+                      "type": "integer"
+                    },
+                    "t": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    },
+                    "channels": {
+                      "type": "object",
+                      "properties": {
+                        "power": {
+                          "type": "array",
+                          "items": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          }
+                        },
+                        "heartRate": {
+                          "type": "array",
+                          "items": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          }
+                        },
+                        "cadence": {
+                          "type": "array",
+                          "items": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          }
+                        },
+                        "speed": {
+                          "type": "array",
+                          "items": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          }
+                        },
+                        "altitude": {
+                          "type": "array",
+                          "items": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          }
+                        },
+                        "distance": {
+                          "type": "array",
+                          "items": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "power",
+                        "heartRate",
+                        "cadence",
+                        "speed",
+                        "altitude",
+                        "distance"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "samples",
+                    "points",
+                    "t",
+                    "channels"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/athletes/{athleteId}": {
       "get": {
         "operationId": "getAthlete",

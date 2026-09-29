@@ -138,6 +138,18 @@ export const SYNC_HAPPY_CALLS: Readonly<
     const { token, content } = await riderWithRide(world);
     return authorised(world, token, 'GET', `/v1/sync/files/${content}`);
   },
+  listActivities: async (world) => {
+    const { token } = await riderWithRide(world);
+    return authorised(world, token, 'GET', '/v1/activities');
+  },
+  getActivity: async (world) => {
+    const { token, content } = await riderWithRide(world);
+    return authorised(world, token, 'GET', `/v1/activities/${content}`);
+  },
+  getActivityStreams: async (world) => {
+    const { token, content } = await riderWithRide(world);
+    return authorised(world, token, 'GET', `/v1/activities/${content}/streams?points=10`);
+  },
 };
 
 const NOMINAL = (): Uint8Array => corpusFile('nominal-ride.gpx');

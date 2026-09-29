@@ -58,6 +58,36 @@ const recordSchema: Schema = {
 
 const SESSION = { identity: true, auth: 'session', sync: true } as const;
 
+const nullableNumber: Schema = { type: ['number', 'null'] };
+const series: Schema = { type: 'array', items: nullableNumber };
+
+/** A signed record's claims: `@onyourleft/domain`'s `ActivityClaims`, and no coordinate. */
+const claimsSchema: Schema = object(
+  {
+    activityId: string,
+    name: string,
+    startedAt: integer,
+    startedAtTimeZone: string,
+    elapsedTime: { type: 'number' },
+    movingTime: { type: 'number' },
+    distance: { type: 'number' },
+    hasPosition: { type: 'boolean' },
+    averagePower: { type: 'number' },
+  },
+  [
+    'activityId',
+    'name',
+    'startedAt',
+    'startedAtTimeZone',
+    'elapsedTime',
+    'movingTime',
+    'distance',
+    'hasPosition',
+  ],
+);
+
+const activityProperties = { contentSha256: string, receivedAt: integer, claims: claimsSchema };
+
 export const SYNC_ROUTES: readonly Route[] = [
   {
     method: 'POST',
@@ -106,5 +136,71 @@ export const SYNC_ROUTES: readonly Route[] = [
         headers: { 'content-type': 'application/octet-stream' },
       });
     },
+  },
+  {
+    method: 'GET',
+    path: '/v1/activities',
+    operationId: 'listActivities',
+    summary:
+      'Your activities, newest first: `?limit=` (1–200, default 50) and `?cursor=` from the page before. One query a page, and stable while activities are added.',
+    ...SESSION,
+    errors: ['unauthenticated', 'validation_failed'],
+    response: {
+      contentType: 'application/json',
+      schema: object({
+        items: { type: 'array', items: object(activityProperties) },
+        next: { type: ['string', 'null'] },
+      }),
+    },
+    handle: async (context) =>
+      answer(await syncOf(context).activities(callerOf(context), context.url.searchParams)),
+  },
+  {
+    method: 'GET',
+    path: '/v1/activities/{content}',
+    operationId: 'getActivity',
+    summary:
+      'One of your activities, by the SHA-256 of its file: what its record claims, and the signed record itself.',
+    ...SESSION,
+    errors: ['unauthenticated', 'not_found'],
+    response: {
+      contentType: 'application/json',
+      schema: object({ ...activityProperties, recordSha256: string, record: recordSchema }),
+    },
+    handle: async (context) =>
+      answer(await syncOf(context).activity(callerOf(context), context.params.content ?? '')),
+  },
+  {
+    method: 'GET',
+    path: '/v1/activities/{content}/streams',
+    operationId: 'getActivityStreams',
+    summary:
+      'One of your activities’ samples — power, heart rate, cadence, speed, altitude and distance, never a position — in full, or at `?points=` (2–10 000) for a chart: each point the mean of its share of the ride, a gap left as `null`.',
+    ...SESSION,
+    errors: ['unauthenticated', 'not_found', 'validation_failed'],
+    response: {
+      contentType: 'application/json',
+      schema: object({
+        samples: integer,
+        points: integer,
+        t: { type: 'array', items: { type: 'number' } },
+        channels: object({
+          power: series,
+          heartRate: series,
+          cadence: series,
+          speed: series,
+          altitude: series,
+          distance: series,
+        }),
+      }),
+    },
+    handle: async (context) =>
+      answer(
+        await syncOf(context).streams(
+          callerOf(context),
+          context.params.content ?? '',
+          context.url.searchParams,
+        ),
+      ),
   },
 ];
