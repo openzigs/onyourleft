@@ -97,7 +97,7 @@ export { FEET_PER_MILE, METRES_PER_FOOT, METRES_PER_MILE } from './length';
 // pounds is a conversion, and every conversion in this program goes through
 // this package. See `mass.ts` for what is deliberately absent from it.
 
-export { KILOGRAMS_PER_POUND } from './mass';
+export { KILOGRAMS_PER_POUND, wattsPerKilogram } from './mass';
 
 // --- Geodesy: distance on the earth's surface -------------------------------
 //

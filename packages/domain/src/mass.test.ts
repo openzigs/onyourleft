@@ -17,7 +17,8 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { KILOGRAMS_PER_POUND } from './mass';
+import { kilograms, watts } from './quantities';
+import { KILOGRAMS_PER_POUND, wattsPerKilogram } from './mass';
 
 describe('the imperial mass definition', () => {
   it('fixes the pound at exactly 0.45359237 kg', () => {
@@ -42,5 +43,16 @@ describe('the imperial mass definition', () => {
     const kilograms = 154 * KILOGRAMS_PER_POUND;
     expect(kilograms).toBeCloseTo(69.853, 3);
     expect(kilograms / KILOGRAMS_PER_POUND).toBeCloseTo(154, 9);
+  });
+});
+
+describe('watts per kilogram (#809)', () => {
+  it("divides power by the rider's mass", () => {
+    expect(wattsPerKilogram(watts(280), kilograms(70))).toBe(4);
+  });
+
+  it('is power over mass and not mass over power', () => {
+    // 70 / 280 is 0.25, which is the inversion a hand-written ratio can make.
+    expect(wattsPerKilogram(watts(280), kilograms(70))).not.toBe(0.25);
   });
 });
