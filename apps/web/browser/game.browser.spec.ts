@@ -40,7 +40,9 @@ import type {
   RiderExtent,
   TreeHandOver,
   TreeLevelMeasurement,
+  WaterBand,
 } from './game-harness';
+import { FRESNEL_CONTROL, FRESNEL_REFERENCE, WATER_BAND_ROWS } from './realistic-surfaces-fixture';
 import { MINIMUM_TINT_CONTRAST_RATIO } from '../src/game/terrain';
 import { type InstanceTint, NO_TINT, tintedLinear } from '../src/game/instance-tint';
 import { GROUND_BLOB_DARKNESS } from '../src/game/ground-blob';
@@ -699,6 +701,14 @@ const REALISTIC_LOAD_BUDGET_MS = 165_000;
  * run after (36396660625). 160 s is 1.52 times 105.
  */
 const TREES_LOAD_BUDGET_MS = 160_000;
+
+/**
+ * #629: how much larger the grazing water's Fresnel term, read back, must be
+ * than the near water's — **0.2** — and the most either may read: **1.05**, a
+ * whole reflection and the read-back's own spread.
+ */
+const WATER_FRESNEL_MARGIN = 0.2;
+const WATER_FRESNEL_CEILING = 1.05;
 
 /**
  * #628: how much lighter a wheel track must read than its lane's middle, as a
@@ -3294,6 +3304,45 @@ test.describe('the realistic world — ADR 0026', () => {
     // The control: with the wear off the same two strips read alike, so the
     // difference above is the wear and not the grain, the sheen or the angle.
     expect(Math.abs(control)).toBeLessThan(WHEEL_TRACK_FLOOR);
+  });
+
+  test('lets the water reflect the sky it is under, by Fresnel — the grazing water reflects more — #629', async ({
+    harnessRun,
+  }) => {
+    const measured = await realistic(harnessRun);
+    const water = measured.waterReflection;
+    expect(water.measured).toBe(true);
+    // Non-vacuity: a lake, many rows deep, and the realistic water drew it —
+    // the environment map, which the stylised ladder's top must not keep.
+    expect(water.reflects).toBe(true);
+    expect(measured.waterReflectsAfterStepDown).toBe(false);
+    // Each band's Fresnel term, read back: the drawn frame's departure from
+    // the water's own body, against the reference's at a known F. The fog,
+    // the sky and the body cancel (`game-harness.ts` §`WaterReflectionMeasurement`).
+    const fresnel = (band: WaterBand, drawn: number): number =>
+      (FRESNEL_REFERENCE * (drawn - band.body)) / (band.reference - band.body);
+    const near = fresnel(water.near, water.near.drawn);
+    const far = fresnel(water.far, water.far.drawn);
+    const nearControl = fresnel(water.near, water.near.control);
+    const farControl = fresnel(water.far, water.far.control);
+    console.log(
+      `the lake's Fresnel term read back: near ${near.toFixed(3)}, grazing ${far.toFixed(3)}; ` +
+        `held at ${String(FRESNEL_CONTROL)}, ${nearControl.toFixed(3)} and ${farControl.toFixed(3)} ` +
+        `(${String(water.rows)} rows, ${String(water.pixels)} px)`,
+    );
+    expect(water.rows).toBeGreaterThan(WATER_BAND_ROWS * 2);
+    expect(water.pixels).toBeGreaterThan(1_000);
+    // Fresnel-shaped, bounded both ways: the grazing water reflects much more
+    // of the sky than the near water, the near water is still water (F0 is
+    // 0.02, not 0), and neither reads past a whole reflection.
+    expect(far - near).toBeGreaterThan(WATER_FRESNEL_MARGIN);
+    expect(near).toBeGreaterThan(0);
+    expect(far).toBeLessThan(WATER_FRESNEL_CEILING);
+    // The control: Fresnel held at a constant reads that constant in both
+    // bands, within 2 % — so the difference above is the Fresnel term and not
+    // the fog, the angle to the sun or which part of the sky a band faces.
+    expect(Math.abs(farControl - nearControl)).toBeLessThan(0.02 * FRESNEL_CONTROL);
+    expect(Math.abs(nearControl - FRESNEL_CONTROL)).toBeLessThan(0.02 * FRESNEL_CONTROL);
   });
 
   test('hands the GPU every realistic texture compressed, and the RGBA8 control is labelled a fallback — #618', async ({

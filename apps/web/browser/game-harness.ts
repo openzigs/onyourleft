@@ -94,6 +94,7 @@ import {
   circuitRoute,
   hairpinRoute,
   hillRoute,
+  lakeValleyRoute,
   northRoute,
   valleyRoute,
 } from '../src/game/route-fixtures-testing';
@@ -143,6 +144,8 @@ import {
   nearFieldShapes,
   showGroundBlobsOf,
   roadWearOf,
+  waterFresnelOf,
+  waterReflectsOf,
 } from '../src/game/three-renderer';
 import { PATCH_CELL_METRES, patchInCell, WHEEL_TRACK_OFFSETS_METRES } from '../src/game/road-wear';
 import { groundBlobAlpha, groundUnder } from '../src/game/ground-blob';
@@ -163,6 +166,7 @@ import {
 import { HARD_SWAP_TREE_LEVELS, REALISTIC_TREE_LEVELS } from '../src/game/realistic-budget';
 import type { TreeLevels } from '../src/game/tree-levels';
 import { COUNTED_DRAWS, trianglesInDraw } from './realistic/draws';
+import { FRESNEL_CONTROL, FRESNEL_REFERENCE, WATER_BAND_ROWS } from './realistic-surfaces-fixture';
 import {
   scatterSeed,
   STRUCTURE_KINDS,
@@ -4395,6 +4399,8 @@ export interface RealisticMeasurement {
   readonly air: AirMeasurement;
   /** #628: the worn road's wheel track against its lane, worn and not. @see roadWearProbe */
   readonly roadWear: RoadWearMeasurement;
+  /** #629: a lake's near and grazing water, reflecting and held. @see waterReflectionProbe */
+  readonly waterReflection: WaterReflectionMeasurement;
   /**
    * #622: visible meshes that three fogs, in the realistic frame and in the
    * same frame drawn stylised — how many breathe the realistic air, and how
@@ -4480,6 +4486,8 @@ export interface RealisticMeasurement {
   readonly sceneryDrawnBudgeted: number;
   /** After stepping down to the stylised ladder: which world, and how many physically based meshes remain visible. */
   readonly afterStepDownWorld: string;
+  /** #629: whether the water still reflected the environment map after the step down — it must not. */
+  readonly waterReflectsAfterStepDown: boolean;
   readonly afterStepDownStandard: number;
   /**
    * #501's review: whether the bridges wore the photographed stone on the
@@ -4770,6 +4778,203 @@ function roadWearProbe(
   };
 }
 
+/**
+ * A lake's water near the camera and at a grazing angle further off — #629.
+ * Mean relative luminances (linear) over the bottom and the top
+ * {@link WATER_BAND_ROWS} rows of the lake's pixels (where drawing the water
+ * changed the frame), in four renders of one frame: as the product draws it;
+ * with Fresnel held at 0 — the water's own body, no sky; held at
+ * {@link FRESNEL_REFERENCE} — the reference; and held at
+ * {@link FRESNEL_CONTROL} — the control.
+ *
+ * ⚠️ **Why a reference, measured.** The first version divided each band by the
+ * body alone and read the grazing water LESS reflective than the near (1.31
+ * against 1.59): the far band is mostly fog, which pulls any ratio to 1. The
+ * fog mixes in linear light AFTER the Fresnel mix, so `(L − L₀) = (1 − f)·F·(S
+ * − B)` for a band's fog share `f`, sky `S` and body `B`, and dividing by the
+ * same difference at a KNOWN F cancels the fog, the sky and the body:
+ * `F = F_ref · (L − L₀) / (L_ref − L₀)`. The control is the same arithmetic on
+ * a frame drawn at another constant F, which must read that constant in both
+ * bands.
+ */
+export interface WaterReflectionMeasurement {
+  readonly measured: boolean;
+  /** Whether the view's water reflected the environment map. */
+  readonly reflects: boolean;
+  /** How many of the frame's pixels were water, and in how many rows. */
+  readonly pixels: number;
+  readonly rows: number;
+  /** Each band: as drawn, the body (F = 0), the reference and the control. */
+  readonly near: WaterBand;
+  readonly far: WaterBand;
+}
+
+/** One band's four read-backs. @see WaterReflectionMeasurement */
+export interface WaterBand {
+  readonly drawn: number;
+  readonly body: number;
+  readonly reference: number;
+  readonly control: number;
+}
+
+const NO_BAND: WaterBand = { drawn: 0, body: 0, reference: 0, control: 0 };
+
+const NO_WATER_REFLECTION: WaterReflectionMeasurement = {
+  measured: false,
+  reflects: false,
+  pixels: 0,
+  rows: 0,
+  near: NO_BAND,
+  far: NO_BAND,
+};
+
+/** How much higher than the chase camera #629's probe looks at the lake from, in metres. */
+const LAKE_PROBE_RISE_METRES = 10;
+
+/** Where on `lakeValleyRoute` the camera stands: inside its lake's stretch, which runs from about 1 329 m to 1 668 m. */
+const LAKE_PROBE_DISTANCE = 1_360;
+
+/** @see WaterReflectionMeasurement */
+function waterReflectionProbe(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  riding: (profile: ReturnType<typeof northRoute>, distance: number) => SceneFrame,
+): WaterReflectionMeasurement {
+  const base = riding(lakeValleyRoute(), LAKE_PROBE_DISTANCE);
+  // ⚠️ **Turned to face the lake, and raised**, measured: looking up the
+  // road, the lake (16 m to 110 m off it, `waterways.ts` §`LAKE_NEAR_METRES`)
+  // enters the frame only far ahead, so all 29 rows of it were grazing — a
+  // Fresnel term of 0.71 in the nearest band and 0.79 in the farthest — and
+  // faced square on from the chase camera's height the bank hid all but 24
+  // rows. From {@link LAKE_PROBE_RISE_METRES} higher the near shore is about
+  // 30° below the eye and the far shore about 6°. The side the lake lies on
+  // is found by looking both ways.
+  const facing = (side: number): SceneFrame => ({
+    ...base,
+    markers: [],
+    scatter: [],
+    camera: {
+      ...base.camera,
+      headingX: side,
+      headingZ: 0,
+      eyeRoadY: base.camera.eyeRoadY + LAKE_PROBE_RISE_METRES,
+    },
+  });
+  const waterIn = (scene: SceneFrame): number => {
+    const dried: SceneFrame = {
+      ...scene,
+      water: { ...scene.water, surface: { ...scene.water.surface, indices: new Uint32Array(0) } },
+    };
+    view.render(dried);
+    view.render(dried);
+    const without = readRegion(gl, 0, 0, canvas.width, canvas.height);
+    view.render(scene);
+    view.render(scene);
+    const drawn = readRegion(gl, 0, 0, canvas.width, canvas.height);
+    let count = 0;
+    for (let at = 0; at < drawn.length; at += 4) {
+      if (Math.abs((drawn[at] ?? 0) - (without[at] ?? 0)) > 2) count += 1;
+    }
+    return count;
+  };
+  const west = facing(1);
+  const east = facing(-1);
+  const frame = waterIn(west) >= waterIn(east) ? west : east;
+  const dry: SceneFrame = {
+    ...frame,
+    water: {
+      ...frame.water,
+      surface: { ...frame.water.surface, indices: new Uint32Array(0) },
+      bridges: [],
+    },
+  };
+  const whole = (scene: SceneFrame): Uint8Array => {
+    view.render(scene);
+    view.render(scene);
+    return readRegion(gl, 0, 0, canvas.width, canvas.height);
+  };
+  const withoutWater = whole(dry);
+  const product = whole(frame);
+  const reflects = waterReflectsOf(view);
+  waterFresnelOf(view, 0);
+  const body = whole(frame);
+  waterFresnelOf(view, FRESNEL_REFERENCE);
+  const reference = whole(frame);
+  waterFresnelOf(view, FRESNEL_CONTROL);
+  const control = whole(frame);
+  waterFresnelOf(view, undefined);
+  const width = canvas.width;
+  // Water is where drawing it changed the pixel. Rows are bottom-up, as
+  // `readPixels` returns them: row 0 is the bottom of the frame, the nearest.
+  const rowsWithWater: number[] = [];
+  let pixels = 0;
+  const isWater = (at: number): boolean =>
+    Math.abs((product[at] ?? 0) - (withoutWater[at] ?? 0)) +
+      Math.abs((product[at + 1] ?? 0) - (withoutWater[at + 1] ?? 0)) +
+      Math.abs((product[at + 2] ?? 0) - (withoutWater[at + 2] ?? 0)) >
+    6;
+  // Only a pixel whose four neighbours are water too: a shore pixel is part
+  // bank, and the bank does not answer Fresnel.
+  const inside = (row: number, column: number): boolean =>
+    row > 0 &&
+    column > 0 &&
+    row + 1 < canvas.height &&
+    column + 1 < width &&
+    isWater((row * width + column) * 4) &&
+    isWater(((row - 1) * width + column) * 4) &&
+    isWater(((row + 1) * width + column) * 4) &&
+    isWater((row * width + column - 1) * 4) &&
+    isWater((row * width + column + 1) * 4);
+  for (let row = 0; row < canvas.height; row += 1) {
+    let any = false;
+    for (let column = 0; column < width; column += 1) {
+      if (isWater((row * width + column) * 4)) {
+        any = true;
+        pixels += 1;
+      }
+    }
+    if (any) rowsWithWater.push(row);
+  }
+  const rowsInside = rowsWithWater.filter((row) => {
+    for (let column = 1; column + 1 < width; column += 1) if (inside(row, column)) return true;
+    return false;
+  });
+  const band = (rows: readonly number[], pixelsOf: Uint8Array): number => {
+    let total = 0;
+    let count = 0;
+    for (const row of rows) {
+      for (let column = 0; column < width; column += 1) {
+        const at = (row * width + column) * 4;
+        if (!inside(row, column)) continue;
+        total += relativeLuminanceOf(
+          pixelsOf[at] ?? 0,
+          pixelsOf[at + 1] ?? 0,
+          pixelsOf[at + 2] ?? 0,
+        );
+        count += 1;
+      }
+    }
+    return count === 0 ? 0 : total / count;
+  };
+  const nearRows = rowsInside.slice(0, WATER_BAND_ROWS);
+  const farRows = rowsInside.slice(-WATER_BAND_ROWS);
+  const bandOf = (rows: readonly number[]): WaterBand => ({
+    drawn: band(rows, product),
+    body: band(rows, body),
+    reference: band(rows, reference),
+    control: band(rows, control),
+  });
+  return {
+    measured: true,
+    reflects,
+    pixels,
+    rows: rowsWithWater.length,
+    near: bandOf(nearRows),
+    far: bandOf(farRows),
+  };
+}
+
 /** What {@link airProbe} reports when it did not run. */
 const NO_AIR: AirMeasurement = {
   measured: false,
@@ -4792,6 +4997,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   measured: false,
   air: NO_AIR,
   roadWear: NO_ROAD_WEAR,
+  waterReflection: NO_WATER_REFLECTION,
   atmosphere: {
     realisticTaught: 0,
     realisticUntaught: 0,
@@ -4833,6 +5039,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   sceneryDrawnTop: 0,
   sceneryDrawnBudgeted: 0,
   afterStepDownWorld: '',
+  waterReflectsAfterStepDown: false,
   afterStepDownStandard: 0,
   bridgesWearStone: false,
   bridgesWearStoneAfterStepDown: false,
@@ -6056,6 +6263,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const roadWear = roadWearProbe(view, gl, canvas, riding, slantedLevelRoute());
   phaseEnds('realistic: road wear — #628');
 
+  // #629: the water, on the lake.
+  const waterReflection = waterReflectionProbe(view, gl, canvas, riding);
+  phaseEnds('realistic: water reflection — #629');
+
   const climbLuminance = roadLuminance(riding(climb, 400));
   const descentLuminance = roadLuminance(riding(descent, 400));
   // #628: the same two with the wear off — what the wear spent of the margin.
@@ -6297,6 +6508,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   view.setQuality(QUALITY_LADDER[0] as QualitySettings);
   view.render(wooded);
   const afterStepDownWorld = drawnWorldOf(view);
+  const waterReflectsAfterStepDown = waterReflectsOf(view);
   const bridgesWearStoneAfterStepDown = bridgesWearStoneOf(view);
   const afterStepDownStandard = sceneMaterialsOf(view).filter(
     (each) => each.visible && each.type === 'MeshStandardMaterial',
@@ -6328,6 +6540,8 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   return {
     measured: true,
     roadWear,
+    waterReflection,
+    waterReflectsAfterStepDown,
     textures,
     firstFrameMs,
     fallbackWorld,

@@ -160,6 +160,7 @@ import {
   DoubleSide,
   DynamicDrawUsage,
   EquirectangularReflectionMapping,
+  Euler,
   FogExp2,
   Group,
   HalfFloatType,
@@ -167,6 +168,7 @@ import {
   InstancedMesh,
   LinearMipmapLinearFilter,
   LoadingManager,
+  Matrix3,
   Matrix4,
   Mesh,
   MeshBasicMaterial,
@@ -4435,6 +4437,107 @@ void main() {
 }
 `;
 
+/**
+ * The realistic water's fragment — #629: #459's shader with its two-colour
+ * sky replaced by the scene's own prefiltered environment map, sampled along
+ * the reflection of the view ray about the rippled normal, and a glint of
+ * `world.ts`'s one sun.
+ *
+ * - **The environment, not a second sky.** The same PMREM map the realistic
+ *   world's materials are lit by (ADR 0026 D-9), through three's own
+ *   `textureCubeUV` at roughness 0 and three's own rotation of it, so a cloud
+ *   in the sky is the cloud in the lake. It is scaled by `environmentScale`,
+ *   which brings the zenith band down to the brightness #459's water was tuned
+ *   against (`realistic-light.ts` §`reflectedSkyColour`'s own target): this
+ *   shader is not tone mapped, so the photograph's radiance at its own
+ *   brightness would be white.
+ * - **Fresnel is Schlick's**, with F0 = 0.02 for water, as #459's was. The
+ *   browser gate holds it (`fresnelHeld` ≥ 0 is its control).
+ * - **The glint** is a specular lobe toward the sun, of at most
+ *   {@link WATER_GLINT_PEAK} added in linear light, and ⚠️ **what it can clip,
+ *   stated (ADR 0026 D-10)**: the sum is clamped to 1 per channel, the
+ *   output's white, so a glint on a bright sky's reflection saturates to white
+ *   rather than overflowing — which is what a glint is.
+ *
+ * Built by replacing lines of {@link WATER_FRAGMENT}, each asserted, so the
+ * stylised water's shader is not touched at all.
+ */
+function reflectingWaterFragment(): string {
+  const swaps: readonly (readonly [string, string])[] = [
+    [
+      'uniform vec3 skyColour;',
+      `uniform vec3 skyColour;
+uniform sampler2D envMap;
+uniform mat3 envMapRotation;
+uniform float environmentScale;
+uniform vec3 sunDirection;
+uniform vec3 sunGlint;
+uniform float fresnelHeld;
+#include <cube_uv_reflection_fragment>`,
+    ],
+    [
+      'float fresnel = 0.02 + 0.98 * pow(1.0 - facing, 5.0);',
+      'float fresnel = fresnelHeld >= 0.0 ? fresnelHeld : 0.02 + 0.98 * pow(1.0 - facing, 5.0);',
+    ],
+    [
+      'vec3 sky = mix(horizonColour, skyColour, smoothstep(0.0, 0.4, r.y));',
+      `vec3 sky = textureCubeUV(envMap, envMapRotation * normalize(vec3(r.x, max(r.y, 0.0), r.z)), 0.0).rgb * environmentScale;
+  float glint = pow(max(dot(r, sunDirection), 0.0), ${glslFloat(WATER_GLINT_EXPONENT)});`,
+    ],
+    [
+      'gl_FragColor = vec4(mix(body, sky, fresnel), 1.0);',
+      'gl_FragColor = vec4(min(mix(body, sky, fresnel) + sunGlint * glint * fresnel, vec3(1.0)), 1.0);',
+    ],
+  ];
+  let text = WATER_FRAGMENT;
+  for (const [from, to] of swaps) {
+    if (!text.includes(from)) {
+      throw new Error(
+        `the water shader no longer holds "${from}", where #629's reflection is spliced in`,
+      );
+    }
+    text = text.replace(from, to);
+  }
+  return text;
+}
+
+/**
+ * How sharp the realistic water's sun glint is: a lobe of `cos^600` about the
+ * sun's reflection, about 5.5° across at half height — #629. This
+ * repository's own figure: tight enough to read as a glint off ripples rather
+ * than a sheen, wide enough that the band-limited ripples still scatter it.
+ */
+const WATER_GLINT_EXPONENT = 600;
+
+/**
+ * The most the glint adds, in linear light: **0.6** of the sun's own colour at
+ * the lobe's peak, before Fresnel — #629. @see reflectingWaterFragment for what
+ * it can clip.
+ */
+const WATER_GLINT_PEAK = 0.6;
+
+/** The glint's colour at its peak: a warm white, times {@link WATER_GLINT_PEAK}. */
+const WATER_GLINT_COLOUR = new Color(1, 0.96, 0.88).multiplyScalar(WATER_GLINT_PEAK);
+
+/**
+ * `defines` three writes for a material whose environment is a PMREM cube UV
+ * map of this height — #629. The water is a `ShaderMaterial`, which three
+ * does not give an environment, so they are written here from three's own
+ * arithmetic (`WebGLProgram.js` §`generateCubeUVSize`, 0.185.1), and a test
+ * holds this to it.
+ */
+export function cubeUvDefines(imageHeight: number): Record<string, string> {
+  const maxMip = Math.log2(imageHeight) - 2;
+  const texelHeight = 1 / imageHeight;
+  const texelWidth = 1 / (3 * Math.max(2 ** maxMip, 7 * 16));
+  return {
+    ENVMAP_TYPE_CUBE_UV: '',
+    CUBEUV_TEXEL_WIDTH: String(texelWidth),
+    CUBEUV_TEXEL_HEIGHT: String(texelHeight),
+    CUBEUV_MAX_MIP: `${String(maxMip)}.0`,
+  };
+}
+
 /** Relative luminance of a colour in the linear working space, Rec. 709. */
 function linearLuminance(colour: Color): number {
   return 0.2126 * colour.r + 0.7152 * colour.g + 0.0722 * colour.b;
@@ -4476,6 +4579,20 @@ export class WaterBelt {
     ]),
   });
   readonly #flat = new MeshBasicMaterial({ color: WATER_DEEP_COLOUR, side: DoubleSide });
+  /**
+   * The realistic water — #629: the same ripples reflecting the scene's own
+   * environment map, built for the environment it is handed. @see setEnvironment
+   */
+  #reflecting: { readonly environment: Texture; readonly material: ShaderMaterial } | undefined;
+  /** The environment the realistic rungs reflect. @see setEnvironment */
+  #environment: Texture | undefined;
+  /** Its turn about the vertical, the scene's `environmentRotation.y`, set every frame. */
+  #environmentTurn = 0;
+  #drawn: QualitySettings['water'] = 'shaded';
+  /** Fresnel as the product computes it (−1), or held at a constant — the browser gate's control. */
+  #fresnelHeld = -1;
+  readonly #rotation = new Matrix4();
+  readonly #turn = new Euler();
   readonly #mesh: Mesh;
   #vertexCapacity = 0;
   #indexCapacity = 0;
@@ -4498,7 +4615,11 @@ export class WaterBelt {
    * @see withAtmosphere
    */
   wears(material: Material): boolean {
-    return material === this.#shaded || material === this.#flat;
+    return (
+      material === this.#shaded ||
+      material === this.#flat ||
+      material === this.#reflecting?.material
+    );
   }
 
   get mesh(): Mesh {
@@ -4526,7 +4647,49 @@ export class WaterBelt {
 
   /** @see QualitySettings.water */
   setDrawn(drawn: QualitySettings['water']): void {
-    this.#mesh.material = drawn === 'shaded' ? this.#shaded : this.#flat;
+    this.#drawn = drawn;
+    this.#mount();
+  }
+
+  /**
+   * The environment the realistic rungs reflect — #629. `undefined` on every
+   * stylised rung, which keeps #459's shader, and on a realistic rung until a
+   * world is loaded: `reflectedSkyColour`'s one colour is then the fallback.
+   */
+  setEnvironment(environment: Texture | undefined): void {
+    if (environment === this.#environment) return;
+    this.#environment = environment;
+    if (environment !== undefined && this.#reflecting?.environment !== environment) {
+      this.#reflecting?.material.dispose();
+      this.#reflecting = { environment, material: reflectingWaterMaterial(environment) };
+    }
+    this.#mount();
+  }
+
+  /** The environment's turn about the vertical this frame — the scene's `environmentRotation.y`. */
+  setEnvironmentTurn(turn: number): void {
+    this.#environmentTurn = turn;
+  }
+
+  /** Whether the water reflects an environment map now — #629. @see waterReflectsOf */
+  get reflects(): boolean {
+    return this.#mesh.material === this.#reflecting?.material && this.#environment !== undefined;
+  }
+
+  /** Fresnel held at a constant, or (`undefined`) computed — #629's control. @see waterFresnelOf */
+  holdFresnel(held: number | undefined): void {
+    this.#fresnelHeld = held ?? -1;
+  }
+
+  #mount(): void {
+    if (this.#drawn !== 'shaded') {
+      this.#mesh.material = this.#flat;
+      return;
+    }
+    this.#mesh.material =
+      this.#environment !== undefined && this.#reflecting !== undefined
+        ? this.#reflecting.material
+        : this.#shaded;
   }
 
   /**
@@ -4567,6 +4730,29 @@ export class WaterBelt {
       horizon.setRGB(...reflectedSkyColour(reflection.horizon, linearLuminance(horizon)));
     }
     (uniforms['time'] as { value: number }).value = seconds;
+    // #629: the realistic water's own uniforms, from the same frame.
+    const reflecting = this.#reflecting?.material.uniforms as
+      Record<string, { value: unknown } | undefined> | undefined;
+    if (reflecting !== undefined && this.#environment !== undefined) {
+      (reflecting['skyColour']?.value as Color).copy(sky);
+      (reflecting['horizonColour']?.value as Color).copy(horizon);
+      (reflecting['time'] as { value: number }).value = seconds;
+      (reflecting['fresnelHeld'] as { value: number }).value = this.#fresnelHeld;
+      (reflecting['sunDirection']?.value as Vector3)
+        .set(world.sun.x, world.sun.y, world.sun.z)
+        .normalize();
+      // three's own rotation of an environment (WebGLMaterials, 0.185.1): the
+      // scene's `environmentRotation` as a matrix, transposed.
+      this.#turn.set(0, this.#environmentTurn, 0);
+      (reflecting['envMapRotation']?.value as Matrix3)
+        .setFromMatrix4(this.#rotation.makeRotationFromEuler(this.#turn))
+        .transpose();
+      (reflecting['environmentScale'] as { value: number }).value =
+        reflection === undefined ? 0 : environmentScaleFor(reflection.zenith, linearLuminance(sky));
+      (reflecting['rippleFilter'] as { value: number }).value = (
+        uniforms['rippleFilter'] as { value: number }
+      ).value;
+    }
     if (surface.vertices.length > this.#vertexCapacity) {
       this.#vertexCapacity = Math.max(surface.vertices.length, this.#vertexCapacity * 2);
       this.#geometry.setAttribute(
@@ -4596,7 +4782,58 @@ export class WaterBelt {
     this.#geometry.dispose();
     this.#shaded.dispose();
     this.#flat.dispose();
+    this.#reflecting?.material.dispose();
   }
+}
+
+/**
+ * The realistic water's material for one environment map — #629.
+ * @see reflectingWaterFragment
+ */
+function reflectingWaterMaterial(environment: Texture): ShaderMaterial {
+  const height = (environment.image as { height?: number } | null)?.height ?? 256;
+  const material = constructed(
+    new ShaderMaterial({
+      vertexShader: WATER_VERTEX,
+      fragmentShader: reflectingWaterFragment(),
+      fog: true,
+      side: DoubleSide,
+      defines: cubeUvDefines(height),
+      uniforms: UniformsUtils.merge([
+        UniformsLib.fog,
+        {
+          skyColour: { value: new Color(UNSET_COLOUR) },
+          horizonColour: { value: new Color(UNSET_COLOUR) },
+          deepColour: { value: new Color(WATER_DEEP_COLOUR) },
+          shallowColour: { value: new Color(WATER_SHALLOW_COLOUR) },
+          time: { value: 0 },
+          rippleFilter: { value: 1 },
+          envMap: { value: null },
+          envMapRotation: { value: new Matrix3() },
+          environmentScale: { value: 0 },
+          sunDirection: { value: new Vector3(0, 1, 0) },
+          sunGlint: { value: WATER_GLINT_COLOUR.clone() },
+          fresnelHeld: { value: -1 },
+        },
+      ]),
+    }),
+  );
+  // After the merge, which clones every texture it is handed: the water reads
+  // THE environment map, not a copy of it.
+  (material.uniforms['envMap'] as { value: Texture | null }).value = environment;
+  return material;
+}
+
+/**
+ * What the environment map is multiplied by in the water — #629: the factor
+ * that takes the photograph's zenith band to `target`, the luminance #459's
+ * water was tuned against (`realistic-light.ts` §`reflectedSkyColour`'s
+ * target), so the brightest part of a reflection is where the stylised
+ * water's sky was, and the rest follows the photograph.
+ */
+function environmentScaleFor(zenith: LinearColour, target: number): number {
+  const measured = 0.2126 * zenith[0] + 0.7152 * zenith[1] + 0.0722 * zenith[2];
+  return measured > 0 && target > 0 ? target / measured : 0;
 }
 
 /**
@@ -9764,6 +10001,30 @@ export function roadWearOf(view: GameView, on: boolean): void {
 }
 
 /**
+ * Holds the realistic water's Fresnel term at a constant, or (`undefined`)
+ * lets it be computed again — #629. The browser gate's control: held, a near
+ * and a grazing patch of the same lake must read alike, or the difference the
+ * gate measured was the fog or the sky and not the Fresnel term.
+ *
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`;
+ * the product always computes Fresnel.
+ */
+export function waterFresnelOf(view: GameView, held: number | undefined): void {
+  if (view instanceof ThreeGameView) view.waterFresnel(held);
+}
+
+/**
+ * Whether a view's water reflects the scene's environment map — #629: on a
+ * realistic rung with a world loaded, and never on a stylised one.
+ *
+ * @test-facing read by `game-harness.ts`, which requires it on the realistic
+ * view and off after the step down.
+ */
+export function waterReflectsOf(view: GameView): boolean {
+  return view instanceof ThreeGameView && view.waterReflects;
+}
+
+/**
  * Takes the realistic bicycle's rubber normal map off, or puts it back — #624.
  * The browser gate's control: with the tread off, the front tyre must read
  * back flatter than the floor the product's tread is held above, or the
@@ -10163,6 +10424,9 @@ class ThreeGameView implements GameView {
       this.#air,
     );
     this.#valleyMiddle = frame.terrain.horizon.middle;
+    // #629: the realistic water reflects the scene's environment, turned as
+    // the scene turns it (`#updateWorld`, which has run above).
+    this.#water.setEnvironmentTurn(this.#scene.environmentRotation.y);
     this.#water.update(
       frame.water.surface,
       frame.world,
@@ -10358,6 +10622,7 @@ class ThreeGameView implements GameView {
     this.#scene.background =
       drawing === undefined || loaded === undefined ? this.#sky : loaded.sky.texture;
     this.#scene.environment = drawing?.environment ?? null;
+    this.#water.setEnvironment(drawing?.environment);
     if (this.#renderer !== undefined) {
       this.#renderer.toneMapping = realistic ? AgXToneMapping : NoToneMapping;
       this.#renderer.toneMappingExposure = REALISTIC_EXPOSURE;
@@ -10465,6 +10730,16 @@ class ThreeGameView implements GameView {
   roadWear(on: boolean): void {
     const wear = this.#realistic === undefined ? undefined : ROAD_WEAR.get(this.#realistic.road);
     if (wear !== undefined) wear.on = on ? 1 : 0;
+  }
+
+  /** @see waterFresnelOf */
+  waterFresnel(held: number | undefined): void {
+    this.#water.holdFresnel(held);
+  }
+
+  /** @see waterReflectsOf */
+  get waterReflects(): boolean {
+    return this.#water.reflects;
   }
 
   /** @see filterWaterRipplesOf */
