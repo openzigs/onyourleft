@@ -1,83 +1,67 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The navigation's icons — #427.
+ * The navigation's icons — #427, drawn by Lucide since #673.
  *
- * ## Why they are drawn here and not installed
+ * ## Why they come from a package now
  *
- * Five glyphs. An icon SET as a dependency would be a
- * licence answer in both of this repository's gates — `DEP001` for the
- * package's own licence, and since ADR 0025 `DEP002`, which admits no copyleft
- * in an app's distributed closure — and a bundle cost, for five shapes. So
- * they are authored here, as source, under this directory's
- * `AGPL-3.0-or-later` like every other line in `apps/`: plain geometry, a
- * handful of circles and lines on a 24-unit grid, drawn for this file and
- * copied from nothing. ADR 0009 L1 forbids reproducing a competitor's icon set
- * as a set; these are nobody's set.
+ * [ADR 0034](../../../../docs/adr/0034-lucide-icons.md) adopts `lucide-react`
+ * (ISC, with MIT for the icons derived from Feather) and reverses what this
+ * header used to say: that five glyphs were authored here, as source, rather
+ * than installed. The owner ruled on #654 that the app adopts one icon set and
+ * ships only the icons it uses; this file is the first caller.
+ *
+ * ⚠️ **Named imports only, and never a dynamic one.** `lucide-react/dynamic`
+ * maps every icon in the set to a lazy import, which would put all of them in
+ * the build and, because the precache is derived from the build (#406), in
+ * every rider's first download. `eslint.config.js` refuses every subpath of
+ * the package and both names, and `tools/bundle/icon-modules.ts` fails the
+ * build when the number of Lucide icon modules in it differs from the number
+ * of icons imported in source.
+ *
+ * ⚠️ **The artwork is Lucide's and is not copied into this file.** Pasting its
+ * paths here would put ISC and MIT artwork under this directory's
+ * `AGPL-3.0-or-later` header, which is §3a's misdeclaration. The notice travels
+ * in the third-party notices document instead (#664).
  *
  * ⚠️ **Decoration, never the name.** Every navigation item carries a visible
  * text label beside its icon, so each icon is `aria-hidden` and the link is
  * named by its words — which a speech-control user can say and a sighted one
- * can read. An icon-only rail would need `aria-label`s; this one never is.
+ * can read. It is set here explicitly rather than left to Lucide's own default,
+ * so a Lucide release that changed the default could not change this. An
+ * icon-only control would carry `aria-label` on the CONTROL, never a `<title>`
+ * on the SVG (ADR 0034 D-4).
  */
 
 import type { JSX } from 'react';
+import { Bike, Ellipsis, House, RotateCcwClock, Route, type LucideIcon } from 'lucide-react';
 
 import type { NavIconName } from './routes';
 
-const SHAPES: Record<NavIconName, JSX.Element> = {
-  // Two wheels and the frame between them.
-  ride: (
-    <>
-      <circle cx="6" cy="16" r="4" />
-      <circle cx="18" cy="16" r="4" />
-      <path d="M6 16l4-7h5l3 7M10 9l3 7h-7M13 6h3" />
-    </>
-  ),
-  // A dial with two hands, and the arrow of time turning back.
-  history: (
-    <>
-      <path d="M4 12a8 8 0 1 0 2.3-5.6" />
-      <path d="M4 4v4h4" />
-      <path d="M12 8v4l3 2" />
-    </>
-  ),
-  // A winding road from a start dot to a finish pin.
-  routes: (
-    <>
-      <circle cx="5" cy="19" r="2" />
-      <path d="M7 19h6a3 3 0 0 0 0-6h-2a3 3 0 0 1 0-6h4" />
-      <path d="M18 3.5a2.5 2.5 0 0 1 2.5 2.5c0 2-2.5 4.5-2.5 4.5S15.5 8 15.5 6A2.5 2.5 0 0 1 18 3.5z" />
-    </>
-  ),
-  // A roof and a door (#428).
-  home: <path d="M4 11l8-7 8 7M6 9.5V20h4.5v-5h3v5H18V9.5" />,
-  // Three dots: everything else.
-  more: (
-    <>
-      <circle cx="5" cy="12" r="1.6" />
-      <circle cx="12" cy="12" r="1.6" />
-      <circle cx="19" cy="12" r="1.6" />
-    </>
-  ),
+/** One stroke for every icon, so the five read as one set. */
+const NAV_ICON_STROKE_WIDTH = 1.8;
+
+const SHAPES: Record<NavIconName, LucideIcon> = {
+  ride: Bike,
+  // ⚠️ `History` in #673's list is an ALIAS of this icon in lucide-react
+  // 1.48.0 (its class is `lucide-rotate-ccw-clock`); the canonical name is
+  // imported so a major release that drops the alias cannot drop the icon.
+  history: RotateCcwClock,
+  routes: Route,
+  home: House,
+  more: Ellipsis,
 };
 
 export function NavIcon({ name }: { readonly name: NavIconName }): JSX.Element {
+  const Shape = SHAPES[name];
   return (
-    <svg
+    <Shape
       className="oyl-nav-icon"
-      viewBox="0 0 24 24"
-      width="24"
-      height="24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
+      size={24}
+      color="currentColor"
+      strokeWidth={NAV_ICON_STROKE_WIDTH}
       aria-hidden="true"
       focusable="false"
-    >
-      {SHAPES[name]}
-    </svg>
+    />
   );
 }
