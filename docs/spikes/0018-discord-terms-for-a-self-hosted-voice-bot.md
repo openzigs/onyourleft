@@ -30,8 +30,15 @@
 > accepts the Developer Terms for their own Application, and this project, as the author of the
 > code, is not a party unless it runs an instance itself. **Nine things in the design have to
 > change or be added (§7).** The largest four: (1) **no Application ID, client ID, client secret or
-> token may be in this repository or in a web build**, because the Terms say *"developer credentials
-> may not be embedded in open source projects"* and list the Application ID as a credential; (2)
+> token may be in this repository or in any artefact this project distributes**, because the Terms
+> say *"developer credentials may not be embedded in open source projects"* and list the Application
+> ID as a credential. An operator's own configuration, supplied at run time or at build time on
+> their own machine, is not what that clause addresses. The instance builds the OAuth2 authorise URL
+> for an **architectural** reason: one web build and one APK serve every instance, so they cannot
+> hold any one operator's ID. ⚠️ The Application ID is the `client_id` in every authorise URL, so it
+> reaches the rider's browser in the OAuth2 redirect whichever side builds the URL. How that fits
+> with the Terms' requirement to *"treat them as Discord confidential information"* is **an open
+> question** (§8, Q5), not settled here; (2)
 > **API Data must be encrypted at rest**, and the instance's SQLite database and its backups are not
 > encrypted today; (3) **each operator must publish a privacy policy** that covers Discord data and
 > link it in the Developer Portal and from the app; (4) **honouring rate limits is a term of the
@@ -40,9 +47,10 @@
 > Discord Social SDK" to include *"Discord login or authentication methods, Discord account linking"*.
 > If that covers plain OAuth2 account linking, the public-room design would bind the operator to
 > those terms too, including a clause against developing anything that *"could, directly or
-> indirectly, compete with … other Discord services"*. **Recommendation: ship private-room voice
-> (link only, no OAuth2) first, and hold public-room account linking until Discord's developer
-> support answers that question in writing (§8).** The Social SDK licence grant is recorded
+> indirectly, compete with … other Discord services"*. **Recommendation, awaiting the owner: ship
+> private-room voice (link only, no OAuth2) first, and hold public-room account linking until
+> Discord's developer support answers that question in writing (§8, Q1).** This spike decides none
+> of §8's questions; each is put to the owner with a recommendation. The Social SDK licence grant is recorded
 > first-hand in §6. It confirms the wording 0017 took from a search summary and adds to it.
 
 ---
@@ -53,7 +61,7 @@
 | --- | --- | --- | --- |
 | 1 | Read the Developer Terms of Service and Developer Policy **in substance** for a bot run by a self-hosted operator: what an operator agrees to, data retention, rate limits, and anything forbidding the pattern | §3, §4, §5 | **Done.** Both read in full, first-hand, on 2026-09-29 (§2 says how, given the `403`) |
 | 2 | Read the Social SDK Terms first-hand, and record the licence grant either way | §6 | **Done.** Read in full; the grant is quoted |
-| 3 | Record the findings with dates, and say whether option A can ship as designed | the whole document; §7, §8 | **Done.** It can ship **with the changes in §7**. One question (§8, Q1) could not be settled by reading and holds back public-room account linking only |
+| 3 | Record the findings with dates, and say whether option A can ship as designed | the whole document; §7, §8 | **Done.** It can ship **with the changes in §7**. Five questions (§8) are left to the owner, each with a recommendation; Q1 could not be settled by reading and, on the recommendation, would hold back public-room account linking only |
 
 ---
 
@@ -108,12 +116,27 @@ Three consequences follow for how the code is written:
    across Applications: *"You will use any developer credentials (such as your Application ID,
    passwords, keys, tokens, and client secrets) we assign to you solely with your Application … (and
    will not permit or enable any other Application to use them)"* (§2(d)).
-2. **No credential may be in this repository.** The same clause ends: *"For the avoidance of doubt,
-   developer credentials may not be embedded in open source projects."* ⚠️ **The Application ID is
-   named as a credential.** So the OAuth2 client ID, which is the Application ID, must also come from
-   the operator's configuration at run time. It must not be written into `apps/web`, a build-time
-   variable, a fixture or a test. 0017 §3.5 already made the token and guild ID environment
-   variables. This extends the rule to the client ID and client secret.
+2. **No credential may be in this repository or in any artefact this project distributes.** The same
+   clause ends: *"For the avoidance of doubt, developer credentials may not be embedded in open
+   source projects."* ⚠️ **The Application ID is named as a credential.** So the OAuth2 client ID,
+   which is the Application ID, must not be written into this repository's source, a fixture, a
+   test, or a web build, APK or image this project publishes. 0017 §3.5 already made the token and
+   guild ID environment variables; this extends the rule to the client ID and client secret. What
+   the clause does **not** say is anything about an operator's own configuration: a variable an
+   operator sets on their own machine, at run time or at build time, is not embedded in an open
+   source project. So "a run-time variable" is not something the Terms require.
+   - **The instance builds the OAuth2 authorise URL, and the reason is architectural, not the
+     Terms.** One web build and one APK serve every instance, so neither can hold any one operator's
+     ID. The instance is the one piece each operator configures.
+   - ⚠️ **The `client_id` reaches the rider's browser whatever is done.** It is a query parameter
+     of the authorise URL, and the OAuth2 code grant redirects the rider's browser to that URL. So
+     building the URL on the instance does **not** keep the ID out of the browser. The same clause
+     says the operator *"will treat them as Discord confidential information (as described
+     below)"*, and §7(c) describes that as information *"marked or designated confidential or that
+     would normally be considered confidential under the circumstances (including any nonpublic
+     information)"*. An ID that the documented OAuth2 flow puts in every user's address bar is hard
+     to call nonpublic, but nothing read says how Discord reconciles the two. **This is left open**
+     (§8, Q5).
 3. **The operator is responsible for the Application's users.** *"You are solely responsible for your
    Application … You will require users to comply with all applicable laws and regulations and the
    Terms (including our Terms of Service)"* (§3(b)). The operator page #789 requires has to say so.
@@ -136,14 +159,14 @@ spike**; the Developer Policy quotes the parts of them it relies on.
 | §1(a) Age | *"you are at least 13 years of age and meet the minimum age required by the laws in your country"* | Applies to the **operator**. Not a design constraint |
 | §2(a) Licence | *"a limited, non-exclusive, non-sublicensable, non-transferable, non-assignable, revocable license to access and use the APIs … solely as necessary to integrate with, develop, and operate your Application"* | The whole of option A rests on a **revocable** licence. §9(a) lets Discord end it *"at our convenience upon notice to you"*. Option C (0017 §7) remains the exit, which is why 0017 deferred it rather than rejecting it |
 | §2(b) Restrictions | Not to access the APIs in a way that *"(iv) exceeds any API rate, call, or other usage limits we set in our sole discretion … or that we believe constitutes excessive or abusive usage"*; and not to *"redistribute, rent, lease, sell, or syndicate access to the APIs"* | **Honouring rate limits is a term, not only good practice** (§5.2 below). Riders never call the API themselves, so the instance does not syndicate access to it |
-| §2(d) Credentials | Quoted in §3. Also: *"you will keep API keys and tokens encrypted in any files or other materials accessible by third parties (other than your Service Providers …)"* | No credential in the repository. A token in an operator's own `.env` on their own machine is not accessible to third parties. A hosting provider that can read it is a Service Provider (§12(a)) |
-| §3(a) App Content licence | Discord receives a licence to *"App Content"*: *"any data … that you … add to our services … (including as submitted, posted, or displayed by or through your Application)"* | **A channel name and an invite are App Content.** Nothing a rider typed should become a channel name (§7, item 8) |
+| §2(d) Credentials | Quoted in §3. Also: *"you will keep API keys and tokens encrypted in any files or other materials accessible by third parties (other than your Service Providers …)"* | No credential in the repository or in anything this project distributes. A token in an operator's own `.env` on their own machine is not accessible to third parties. A hosting provider that can read it is a Service Provider (§12(a)) |
+| §3(a) App Content licence | Discord receives a licence to *"App Content"*: *"any data … that you … add to our services … (including as submitted, posted, or displayed by or through your Application)"* | **A channel name and an invite are App Content.** The clause does not forbid anything; it licenses what is sent. This project's own recommendation is that nothing a rider typed becomes a channel name (§7, item 8) |
 | §4 Rights | *"You represent and warrant that you have obtained and will maintain all necessary rights (including from your users) … to access, use, and otherwise process users' API Data"* | The rider's consent screen for account linking is where those rights come from (§5.1, rule 1) |
 | §5(a) Privacy policy | *"You will provide and adhere to a privacy policy for your Application that … clearly, accurately, and fully describes to users of your Application what data you collect, how you use and share such data with us and third parties, and how users can request deletion of such data."* And: *"You will maintain publicly available, up-to-date links to your privacy policy in the Developer Portal and make it easily accessible to users from your Application."* It names GDPR, UK GDPR, LGPD, CCPA and CPRA | **Every operator needs a published privacy policy that covers Discord**, linked in the Portal and from the app. For the owner's instance, that is `docs/privacy-policy.md` under #778. For anybody else's, the operator page must say it is theirs to write |
 | §5(b) Sharing | API Data may be shared only with a Service Provider, where law requires it, or *"when a user of your Application expressly directs you to share their API Data with the third party"* | The instance shares no API Data. It stores a channel ID and invite per room, and a Discord user ID for each linked rider |
 | §5(b) **Retention** | *"you will … promptly delete the API Data when: (a) retaining it is no longer necessary for your Application's stated … functionality …; (b) you stop operating your Application …; (c) we request you delete it; (d) the applicable user requests you delete it"*. And: *"You will give users an easily accessible way to ask for their API Data to be modified and deleted."* | Channel IDs and invites are deleted when the room closes, which 0017 already does. A linked rider's Discord user ID is deleted on **unlink**, on **account erasure** (#35), and when the operator **turns voice off**. OAuth2 tokens are API Data too: *"API Data includes your developer credentials and access tokens"* (§13). So **do not keep them** (§7, item 4) |
-| §5(c) **Security** | *"These efforts will include: (i) encryption of the data at rest and (ii) maintaining administrative, physical, and technical safeguards"*. The operator must notify users of unauthorised access *"to the extent required by applicable laws"*, and must *"promptly notify us"* of any incident involving API Data | ⚠️ **ADR 0037 D-5's SQLite database is not encrypted at rest, and neither are its Litestream backups.** Any API Data the instance keeps must be. §7, item 3, and §8, Q2 |
-| §6 Monitoring and App Review | Discord may monitor API use, and may require App Review *"when use of your Application reaches certain thresholds"* | See §5.3: the documented threshold is 100 servers, and each operator's bot is in one |
+| §5(c) **Security** | *"These efforts will include: (i) encryption of the data at rest and (ii) maintaining administrative, physical, and technical safeguards"*. The operator must notify users of unauthorised access *"to the extent required by applicable laws"*, and must *"promptly notify us"* of any incident involving API Data | ⚠️ **ADR 0037 D-5's SQLite database is not encrypted at rest, and neither are its Litestream backups.** Any API Data the instance keeps must be. ⚠️ **API Data includes *"your developer credentials and access tokens"*** (§13), so this duty covers the **bot token and the client secret** too, not only rider data. §7, item 3, and §8, Q2 |
+| §6 Monitoring and App Review | Discord may monitor API use, and may require App Review *"when use of your Application reaches certain thresholds"* | **No App Review threshold appeared in anything read.** The 100-server figure in §5.3 is the threshold for **verification**, from a different article (S6), not an App Review threshold. Each operator's bot is in one server |
 | §9(a) Inactive tokens | *"we may also limit, suspend, or terminate your Application's access tokens … that have not been used or accessed within at least the prior 30-day period, with or without notice to you"* | ⚠️ **An instance with no voice room for 30 days can find its bot token dead.** The bot must treat `401` as "voice is off" and say so in the operator log, not retry (which also matters for §5.2's invalid-request limit) |
 | §9(b) After termination | Stop using the APIs and credentials and *"delete any cached or stored API Data"* | The operator page must say what "turning voice off" deletes |
 | §10(c) Indemnity | The operator indemnifies Discord for claims relating to *"access to or use of the APIs or API Data by you … your Application, or your users"* | A risk the operator carries, including the owner for their own instance. Not a design constraint |
@@ -213,8 +236,7 @@ of the Terms, exceeding the limits is a breach, not just a failed request.
 | Two-factor authentication | *"For bots with elevated permissions … we enforce two-factor authentication on the owner's account when added to guilds that have server-wide 2FA enabled."* | S3 (OAuth2 page) | The operator page should say the operator's Discord account may need 2FA. `MANAGE_CHANNELS`, `MANAGE_ROLES` and `KICK_MEMBERS` are marked elevated |
 | OAuth2 access token lifetime | `expires_in: 604800` in the documented examples (7 days), with a refresh token | S3 | Only matters if tokens are kept, which §7 item 4 says not to do |
 
-**No gateway intent is needed**, so the privileged-intent rules for bots in 100 or more servers do
-not apply. 0017 §3.2's design makes no gateway connection. The *Bot vs User Accounts* note on the
+**No gateway intent is needed**: 0017 §3.2's design makes no gateway connection. The *Bot vs User Accounts* note on the
 OAuth2 page (S3) forbids *"automating standard user accounts"*. The design uses a bot account only.
 
 ---
@@ -293,19 +315,20 @@ question whichever reading is right. §8, Q1.
 
 ## 7. What has to change in option A, and what is added
 
-Each item cites the clause that requires it. None of them changes 0017's architecture: REST only,
+Each item cites the clause that requires it; where part of an item is this project's own
+recommendation rather than a requirement, the item says so. None of them changes 0017's architecture: REST only,
 no dependency, the channel living exactly as long as the room.
 
 | # | Change | Required by | Lands in (0017 §8.3 draft numbering) |
 | --- | --- | --- | --- |
-| 1 | **No Application ID, client ID, client secret or bot token in the repository or in a web build.** All come from the operator's environment at run time. `.env.example` lists them **empty**. The instance, not `apps/web`, builds the OAuth2 authorize URL | Terms §2(d) | 1 (bot), 4 (linking) |
+| 1 | **No Application ID, client ID, client secret or bot token in the repository or in any artefact this project distributes** (a web build, an APK, a container image). Each operator supplies their own; `.env.example` lists them **empty**. The Terms say nothing about how an operator's own configuration is supplied. **Design, not a requirement of the Terms:** the instance, not `apps/web`, builds the OAuth2 authorise URL, because one web build and one APK serve every instance and so cannot hold any one operator's ID. ⚠️ The `client_id` is still visible to the rider's browser in the OAuth2 redirect; how that fits with *"treat them as Discord confidential information"* is §8, Q5 | Terms §2(d) (the repository and distributed artefacts only) | 1 (bot), 4 (linking) |
 | 2 | **Each operator publishes a privacy policy** that names Discord, what it receives, what the instance keeps, and how to have it deleted. It is linked in the Developer Portal and from the app. For the owner's instance, `docs/privacy-policy.md` | Terms §5(a) | 5 (disclosures, #778) |
-| 3 | **API Data encrypted at rest**, backups included: the channel ID and invite per room, and each linked rider's Discord user ID | Terms §5(c) | 1 and 4. §8, Q2 |
+| 3 | **API Data encrypted at rest**, backups included: the channel ID and invite per room, each linked rider's Discord user ID, **and the bot token and client secret**, because API Data *"includes your developer credentials and access tokens"* (§13). ⚠️ So the credentials cannot sit in plaintext beside an encryption key for the rest | Terms §5(c), §13; §2(d) for files third parties can reach | 1 and 4. §8, Q2 |
 | 4 | **Keep no OAuth2 token.** Add the rider to the operator's server **once, at link time**, with the fresh access token, then **revoke** it (the token revocation URL, S3). After that the bot works with the bot token only: roles, disconnects and removal need no user token. Store only the Discord user ID, and delete it on unlink, on account erasure (#35) and when the operator turns voice off | Terms §5(b), §13 (tokens are API Data); Policy rule 3 | 4 |
 | 5 | **A consent screen before Discord's own**: that linking adds the account to *this operator's* named server, gives it a role per room, and can remove it. Linking is never automatic | Policy rules 1 and 2 | 4 |
 | 6 | **Rate limits honoured as a term**: read the headers, wait out a bucket, honour `retry_after`, stop on the first `401` and turn voice off, never retry a `403` or `404`. No limit hard-coded | Terms §2(b)(iv); Policy *API Limits*; S3 | 1 |
 | 7 | **A dead token means voice is off**, not an error loop, because a token unused for 30 days may be suspended and repeated `401`s count toward the per-IP ban | Terms §9(a); S3 | 1 |
-| 8 | **Nothing a rider typed, and no ride data, in anything sent to Discord.** A channel name is derived from the room's opaque ID, with no topic and no audit-log reason carrying personal data | Terms §3(a); Policy rules 10 and 16 | 1 |
+| 8 | **No ride or health data in anything sent to Discord** (required), **and nothing a rider typed** (this project's own recommendation, not a requirement of anything read). A channel name is derived from the room's opaque ID, with no topic and no audit-log reason carrying personal data | Ride and health data: Policy rule 16. Rider-typed text: **this project's recommendation** (Terms §3(a) licenses such text to Discord; it does not forbid sending it) | 1 |
 | 9 | **Capacity**: no single category for room channels (50-channel cap); a cap on concurrent voice rooms below the server's 500 channels, and on public rooms below 250 roles; invites deleted explicitly; the bot refuses to start voice if the server has Membership Screening on | S7; S4 | 1, 3 |
 | — | **The operator page** (#789) gains: the operator accepts Discord's Developer Terms for their own Application; their privacy policy; the report route; the 30-day token note; 2FA; Membership Screening; the arbitration opt-out window (§8, Q4) | Terms §1(a), §3(b), §5, §9(a), §12(e); Policy closing rule | 3, 5 |
 
@@ -317,23 +340,22 @@ no dependency, the channel living exactly as long as the room.
 
 - **Private rooms (A-link)**: **yes**, with items 1, 2, 3, 6, 7, 8 and 9. No rider data reaches the
   instance from Discord, and no user token exists. The Social SDK question does not arise.
-- **Public rooms (A-linked)**: **yes in principle**, with items 4 and 5 as well. **Recommended to wait
-  for Q1** before the linking sub-issue ships.
+- **Public rooms (A-linked)**: **yes in principle**, with items 4 and 5 as well. **The
+  recommendation is to wait for Q1** before the linking sub-issue ships; that is the owner's call.
 
-### Questions this reading could not settle
+### Questions awaiting the owner
 
-The owner was unavailable overnight on 2026-09-29. The coordinator instructed that the recommended
-answer be taken for each open question and recorded. Each **recommended answer** below is therefore
-the working assumption for the sub-issues. It is reversible, and it is also listed under *"Decisions
-taken without the owner"* in the pull request that carries this spike. Q4 is not a design question.
-It is a legal choice for each operator, and it is **not** decided here.
+A spike decides nothing (`CLAUDE.md` §7). Each question below is **open, awaiting the owner**, and
+each carries a **recommendation** only. None is a working assumption for any sub-issue until the
+owner answers it. Q4 is not a design question: it is a legal choice for each operator.
 
-| # | Question | Recommended answer (taken as the working assumption) | Why |
+| # | Question | Recommendation (awaiting the owner) | Why |
 | --- | --- | --- | --- |
 | Q1 | Do the Social SDK Terms, with their non-compete clause §2(b)(vii), reach plain OAuth2 account linking (§6.3)? | **Ship private-room voice first. Hold public-room account linking until Discord's developer support answers in writing** whether an Application that uses only OAuth2 `identify` + `guilds.join`, and no Social SDK library, is subject to the Social SDK Terms. Keep the answer with this spike's successor. If support will not answer, the owner decides with counsel | Private rooms do not need linking. Asking costs a support ticket, and guessing wrong could bind the project's maintainer to a non-compete |
-| Q2 | How is API Data encrypted at rest on the instance (§7 item 3)? | **Application-level encryption of the Discord columns** with a key from the operator's environment, **plus** a requirement on the operator page for encrypted backups. Not "the operator should use full-disk encryption" alone | The instance cannot check a disk. It can check that it encrypts its own columns, in a test. Litestream backups leave the box (ADR 0037 D-5) and must not carry plaintext |
+| Q2 | How is API Data encrypted at rest on the instance (§7 item 3), given that API Data includes the bot token and client secret (Terms §13)? | **Application-level encryption of the Discord columns** with a key held **outside** the instance's data directory, **plus** encryption of the bot token and client secret at rest (not a plaintext `.env` beside the key), **plus** a requirement on the operator page for encrypted backups and an encrypted disk for wherever the key and credentials live. Not "the operator should use full-disk encryption" alone. ⚠️ Column encryption with its key sitting next to a plaintext bot token protects the columns and leaves the credential Discord names first exposed, which is why the credentials are in scope too. How the key and credentials are held on the owner's box (a secrets file on an encrypted volume, the OS keychain, or Docker secrets) is part of the question | The instance cannot check a disk. It can check that it encrypts its own columns, in a test. Litestream backups leave the box (ADR 0037 D-5) and must not carry plaintext |
 | Q3 | Should a private-room voice link need an age check? | **No.** Discord's own users must be at least 13, private-room voice gives the instance no API Data about any rider, and public rooms keep their 18+ rule | Policy rule 9 is about directing the Application at under-13s. A link to a Discord channel, shown to riders a room admitted, does not do that |
-| Q4 | Should an operator opt out of Discord's arbitration clause within 30 days of creating their Application (Terms §12(e))? | **Not decided here.** The operator page should state that the window exists and where the Terms describe it | A legal choice that belongs to each operator, the owner included, and not something a pull request can take |
+| Q4 | Should an operator opt out of Discord's arbitration clause within 30 days of creating their Application (Terms §12(e))? | **No recommendation on the choice itself.** The operator page should state that the window exists and where the Terms describe it | A legal choice that belongs to each operator, the owner included, and not something a pull request can take |
+| Q5 | The Terms name the Application ID a credential to be treated as *"Discord confidential information"* (§2(d), §7(c): information *"that would normally be considered confidential under the circumstances (including any nonpublic information)"*). The same ID is the `client_id` in every OAuth2 authorise URL, and so reaches every linking rider's browser (§3 item 2). How do the two fit? | **Keep the ID out of the repository and everything this project distributes (§7 item 1), treat it as configuration on the instance, and ask Discord's developer support in the same written question as Q1.** Do not claim that building the URL on the instance keeps the ID confidential: it does not | Nothing read reconciles the two. The documented OAuth2 flow cannot work without the browser seeing the ID, so the likely reading is that the clause is about not publishing or sharing it beyond that flow, but that is a reading, not a finding. Private-room voice (no OAuth2) does not raise it |
 
 ---
 
