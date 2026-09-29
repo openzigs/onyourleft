@@ -1151,6 +1151,10 @@ describe('a rider who moves like a rider — #625', () => {
     );
     expect(Math.abs(riderMotion(HALF_PI, Number.NaN, 0, emptyRiderMotion()).trunkRoll)).toBe(0);
     expect(Math.abs(riderMotion(HALF_PI, -1, 0, emptyRiderMotion()).trunkRoll)).toBe(0);
+    // A crank angle that is not a number rocks nothing, rather than writing a
+    // NaN into every bone of the body.
+    const lost = riderMotion(Number.NaN, 1, 0, emptyRiderMotion());
+    expect(Math.abs(lost.trunkRoll) + Math.abs(lost.pelvisRoll) + Math.abs(lost.ankle[0])).toBe(0);
   });
 
   it('breathes from the ride clock alone: one breath a period, and the same moment gives the same breath', () => {
