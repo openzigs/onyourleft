@@ -38,7 +38,11 @@ import type {
   ActivityRecordTable,
   AthleteTable,
   DeviceKeyTable,
+  DisplayNameChangeTable,
+  EmailRecoveryTokenTable,
   InstanceDatabase,
+  LinkCodeTable,
+  RecoveryCodeTable,
   ResultTable,
   RoomTable,
   SessionTable,
@@ -53,11 +57,17 @@ export interface Athlete {
 }
 
 export interface DeviceKey {
+  /** Lowercase hex, ADR 0014's spelling. */
   readonly publicKey: string;
   readonly athleteId: string;
   readonly addedAt: number;
   readonly revokedAt: number | null;
+  /** When the key last signed in; `null` until it has (#773). */
+  readonly lastUsedAt: number | null;
 }
+
+/** A device key as it is written: when it was last used is the store's to record. */
+export type DeviceKeyWrite = Omit<DeviceKey, 'lastUsedAt'>;
 
 export interface Session {
   /** SHA-256 of the bearer token, lowercase hex. Never the token. */
@@ -90,6 +100,70 @@ export interface Result {
   readonly flags: number;
 }
 
+/** A nonce issued to a public key (#772). */
+export interface Challenge {
+  readonly nonce: string;
+  readonly publicKey: string;
+  readonly expiresAt: number;
+}
+
+/**
+ * What spending a single-use value did. `used` and `expired` are told apart
+ * from `unknown` because #772 and #773 each ask for a distinct refusal.
+ */
+export type Take<T> =
+  | ({ readonly outcome: 'taken' } & T)
+  | { readonly outcome: 'unknown' }
+  | { readonly outcome: 'used' }
+  | { readonly outcome: 'expired' };
+
+/** One of an athlete's recovery codes, as its SHA-256 (ruling Q1). */
+export interface RecoveryCode {
+  readonly codeSha256: string;
+  readonly athleteId: string;
+  readonly createdAt: number;
+  readonly usedAt: number | null;
+}
+
+/** A link code, as its SHA-256, and the device key that minted it (#773). */
+export interface LinkCode {
+  readonly codeSha256: string;
+  readonly athleteId: string;
+  readonly mintedByKey: string;
+  readonly expiresAt: number;
+  readonly usedAt: number | null;
+}
+
+/** A name an athlete had before (#774). */
+export interface DisplayNameChange {
+  readonly athleteId: string;
+  readonly previousName: string;
+  readonly changedAt: number;
+}
+
+/** An athlete's email recovery address. */
+export interface RecoveryEmail {
+  readonly athleteId: string;
+  readonly address: string;
+}
+
+/** An email recovery link's token, as its SHA-256. */
+export interface EmailRecoveryToken {
+  readonly tokenSha256: string;
+  readonly athleteId: string;
+  readonly expiresAt: number;
+  readonly usedAt: number | null;
+}
+
+/** A new athlete, their first key and their recovery codes, written together or not at all. */
+export interface Registration {
+  readonly athlete: Athlete;
+  readonly key: DeviceKeyWrite;
+  readonly recoveryCodeSha256s: readonly string[];
+  /** Only where the operator enabled email recovery. */
+  readonly recoveryEmail?: string;
+}
+
 /** What storing an activity record did: a retried sync of the same file is `duplicate`. */
 export type PutOutcome = 'stored' | 'duplicate';
 
@@ -98,13 +172,56 @@ export interface SqlStore {
   putAthlete(athlete: Athlete): Promise<void>;
   getAthlete(athleteId: string): Promise<Athlete | undefined>;
 
-  putDeviceKey(key: DeviceKey): Promise<void>;
+  putDeviceKey(key: DeviceKeyWrite): Promise<void>;
   listDeviceKeys(athleteId: string): Promise<readonly DeviceKey[]>;
+  /** Authentication: the key is what names the athlete, so this is not athlete-scoped. */
+  findDeviceKey(publicKey: string): Promise<DeviceKey | undefined>;
+  /** Record that one of this athlete's keys signed in. */
+  touchDeviceKey(athleteId: string, publicKey: string, at: number): Promise<void>;
+  /**
+   * Revoke one of this athlete's keys, and every session and unspent link
+   * code it holds. `false` when the athlete holds no such key.
+   */
+  revokeDeviceKey(athleteId: string, publicKey: string, at: number): Promise<boolean>;
+  /** A new athlete with their first key and recovery codes, in one transaction (#772). */
+  registerAthlete(registration: Registration): Promise<void>;
+
+  putChallenge(challenge: Challenge): Promise<void>;
+  /** Spend a nonce: `taken` once, `used` after, `expired` from `expiresAt` on. */
+  takeChallenge(nonce: string, now: number): Promise<Take<{ readonly publicKey: string }>>;
+  /** Delete every challenge that expired before `before`. Answers how many. */
+  pruneChallenges(before: number): Promise<number>;
+
+  listRecoveryCodes(athleteId: string): Promise<readonly RecoveryCode[]>;
+  /** Spend a recovery code, whoever's it is: the code is what names the athlete. */
+  takeRecoveryCode(codeSha256: string, now: number): Promise<Take<{ readonly athleteId: string }>>;
+
+  putLinkCode(code: Omit<LinkCode, 'usedAt'>): Promise<void>;
+  listLinkCodes(athleteId: string): Promise<readonly LinkCode[]>;
+  /** Spend a link code: the code is what names the athlete. */
+  takeLinkCode(codeSha256: string, now: number): Promise<Take<{ readonly athleteId: string }>>;
+
+  /** Change a display name, keeping the old one in the audit trail. `false` for no such athlete. */
+  renameAthlete(athleteId: string, name: string, at: number): Promise<boolean>;
+  listDisplayNameChanges(athleteId: string): Promise<readonly DisplayNameChange[]>;
+
+  getRecoveryEmail(athleteId: string): Promise<RecoveryEmail | undefined>;
+  /** Email recovery: the address is what names the athlete. */
+  findRecoveryEmail(address: string): Promise<RecoveryEmail | undefined>;
+  putEmailRecoveryToken(token: Omit<EmailRecoveryToken, 'usedAt'>): Promise<void>;
+  listEmailRecoveryTokens(athleteId: string): Promise<readonly EmailRecoveryToken[]>;
+  /** Spend an email recovery token: the token is what names the athlete. */
+  takeEmailRecoveryToken(
+    tokenSha256: string,
+    now: number,
+  ): Promise<Take<{ readonly athleteId: string }>>;
 
   putSession(session: Session): Promise<void>;
   /** Authentication: the token names the athlete, so this is not athlete-scoped. */
   findSession(tokenSha256: string): Promise<Session | undefined>;
   listSessions(athleteId: string): Promise<readonly Session[]>;
+  /** Revoke one of this athlete's sessions. `false` when the athlete holds no such session. */
+  revokeSession(athleteId: string, tokenSha256: string, at: number): Promise<boolean>;
 
   putActivityRecord(record: ActivityRecord): Promise<PutOutcome>;
   getActivityRecord(athleteId: string, contentSha256: string): Promise<ActivityRecord | undefined>;
@@ -139,6 +256,11 @@ export const ATHLETE_TABLES_IN_ERASURE_ORDER = [
   'result',
   'activity_record',
   'session',
+  'link_code',
+  'recovery_code',
+  'display_name_change',
+  'recovery_email',
+  'email_recovery_token',
   'device_key',
 ] as const satisfies readonly (keyof InstanceDatabase)[];
 
@@ -154,7 +276,47 @@ const deviceKeyFrom = (row: Selectable<DeviceKeyTable>): DeviceKey => ({
   athleteId: row.athlete_id,
   addedAt: row.added_at,
   revokedAt: row.revoked_at,
+  lastUsedAt: row.last_used_at,
 });
+
+const recoveryCodeFrom = (row: Selectable<RecoveryCodeTable>): RecoveryCode => ({
+  codeSha256: row.code_sha256,
+  athleteId: row.athlete_id,
+  createdAt: row.created_at,
+  usedAt: row.used_at,
+});
+
+const linkCodeFrom = (row: Selectable<LinkCodeTable>): LinkCode => ({
+  codeSha256: row.code_sha256,
+  athleteId: row.athlete_id,
+  mintedByKey: row.minted_by_key,
+  expiresAt: row.expires_at,
+  usedAt: row.used_at,
+});
+
+const displayNameChangeFrom = (row: Selectable<DisplayNameChangeTable>): DisplayNameChange => ({
+  athleteId: row.athlete_id,
+  previousName: row.previous_name,
+  changedAt: row.changed_at,
+});
+
+const emailRecoveryTokenFrom = (row: Selectable<EmailRecoveryTokenTable>): EmailRecoveryToken => ({
+  tokenSha256: row.token_sha256,
+  athleteId: row.athlete_id,
+  expiresAt: row.expires_at,
+  usedAt: row.used_at,
+});
+
+/** A single-use row's outcome, from what was read before it was spent. */
+function outcomeOf(
+  row: { readonly used_at: number | null; readonly expires_at?: number } | undefined,
+  now: number,
+): 'unknown' | 'used' | 'expired' | 'spendable' {
+  if (row === undefined) return 'unknown';
+  if (row.used_at !== null) return 'used';
+  if (row.expires_at !== undefined && now >= row.expires_at) return 'expired';
+  return 'spendable';
+}
 
 const sessionFrom = (row: Selectable<SessionTable>): Session => ({
   tokenSha256: row.token_sha256,
@@ -266,6 +428,329 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         ).map(deviceKeyFrom),
       ),
 
+    findDeviceKey: (publicKey) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('device_key')
+          .selectAll()
+          .where('public_key', '=', publicKey)
+          .executeTakeFirst();
+        return row === undefined ? undefined : deviceKeyFrom(row);
+      }),
+
+    touchDeviceKey: (athleteId, publicKey, at) =>
+      exclusive(async () => {
+        await db
+          .updateTable('device_key')
+          .set({ last_used_at: at })
+          .where('athlete_id', '=', athleteId)
+          .where('public_key', '=', publicKey)
+          .execute();
+      }),
+
+    revokeDeviceKey: (athleteId, publicKey, at) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const updated = await trx
+            .updateTable('device_key')
+            .set({ revoked_at: sql<number>`coalesce(revoked_at, ${at})` })
+            .where('athlete_id', '=', athleteId)
+            .where('public_key', '=', publicKey)
+            .executeTakeFirst();
+          if (updated.numUpdatedRows === 0n) return false;
+          await trx
+            .updateTable('session')
+            .set({ revoked_at: sql<number>`coalesce(revoked_at, ${at})` })
+            .where('athlete_id', '=', athleteId)
+            .where('device_key', '=', publicKey)
+            .execute();
+          await trx
+            .updateTable('link_code')
+            .set({ used_at: sql<number>`coalesce(used_at, ${at})` })
+            .where('athlete_id', '=', athleteId)
+            .where('minted_by_key', '=', publicKey)
+            .execute();
+          return true;
+        }),
+      ),
+
+    registerAthlete: (registration) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const { athlete, key } = registration;
+          if (key.athleteId !== athlete.id) {
+            throw new OwnershipConflictError('A first key must be its own athlete’s.');
+          }
+          const held = await trx
+            .selectFrom('device_key')
+            .select('athlete_id')
+            .where('public_key', '=', key.publicKey)
+            .executeTakeFirst();
+          if (held !== undefined) {
+            throw new OwnershipConflictError('That device key belongs to another athlete.');
+          }
+          await trx
+            .insertInto('athlete')
+            .values({
+              id: athlete.id,
+              display_name: athlete.displayName,
+              created_at: athlete.createdAt,
+              registration_state: athlete.registrationState,
+            })
+            .execute();
+          await trx
+            .insertInto('device_key')
+            .values({
+              public_key: key.publicKey,
+              athlete_id: key.athleteId,
+              added_at: key.addedAt,
+              revoked_at: key.revokedAt,
+            })
+            .execute();
+          for (const codeSha256 of registration.recoveryCodeSha256s) {
+            await trx
+              .insertInto('recovery_code')
+              .values({
+                code_sha256: codeSha256,
+                athlete_id: athlete.id,
+                created_at: athlete.createdAt,
+                used_at: null,
+              })
+              .execute();
+          }
+          if (registration.recoveryEmail !== undefined) {
+            await trx
+              .insertInto('recovery_email')
+              .values({ athlete_id: athlete.id, address: registration.recoveryEmail })
+              .execute();
+          }
+        }),
+      ),
+
+    putChallenge: (challenge) =>
+      exclusive(async () => {
+        await db
+          .insertInto('auth_challenge')
+          .values({
+            nonce: challenge.nonce,
+            public_key: challenge.publicKey,
+            expires_at: challenge.expiresAt,
+            used_at: null,
+          })
+          .execute();
+      }),
+
+    takeChallenge: (nonce, now) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const row = await trx
+            .selectFrom('auth_challenge')
+            .selectAll()
+            .where('nonce', '=', nonce)
+            .executeTakeFirst();
+          const outcome = outcomeOf(row, now);
+          if (outcome !== 'spendable' || row === undefined) {
+            return { outcome: outcome === 'spendable' ? 'unknown' : outcome } as const;
+          }
+          await trx
+            .updateTable('auth_challenge')
+            .set({ used_at: now })
+            .where('nonce', '=', nonce)
+            .execute();
+          return { outcome: 'taken', publicKey: row.public_key } as const;
+        }),
+      ),
+
+    pruneChallenges: (before) =>
+      exclusive(async () => {
+        const deleted = await db
+          .deleteFrom('auth_challenge')
+          .where('expires_at', '<', before)
+          .executeTakeFirst();
+        return Number(deleted.numDeletedRows);
+      }),
+
+    listRecoveryCodes: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('recovery_code')
+            .selectAll()
+            .where('athlete_id', '=', athleteId)
+            .orderBy('code_sha256')
+            .execute()
+        ).map(recoveryCodeFrom),
+      ),
+
+    takeRecoveryCode: (codeSha256, now) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const row = await trx
+            .selectFrom('recovery_code')
+            .selectAll()
+            .where('code_sha256', '=', codeSha256)
+            .executeTakeFirst();
+          const outcome = outcomeOf(row, now);
+          if (outcome !== 'spendable' || row === undefined) {
+            return { outcome: outcome === 'spendable' ? 'unknown' : outcome } as const;
+          }
+          await trx
+            .updateTable('recovery_code')
+            .set({ used_at: now })
+            .where('code_sha256', '=', codeSha256)
+            .execute();
+          return { outcome: 'taken', athleteId: row.athlete_id } as const;
+        }),
+      ),
+
+    putLinkCode: (code) =>
+      exclusive(async () => {
+        await db
+          .insertInto('link_code')
+          .values({
+            code_sha256: code.codeSha256,
+            athlete_id: code.athleteId,
+            minted_by_key: code.mintedByKey,
+            expires_at: code.expiresAt,
+            used_at: null,
+          })
+          .execute();
+      }),
+
+    listLinkCodes: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('link_code')
+            .selectAll()
+            .where('athlete_id', '=', athleteId)
+            .orderBy('code_sha256')
+            .execute()
+        ).map(linkCodeFrom),
+      ),
+
+    takeLinkCode: (codeSha256, now) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const row = await trx
+            .selectFrom('link_code')
+            .selectAll()
+            .where('code_sha256', '=', codeSha256)
+            .executeTakeFirst();
+          const outcome = outcomeOf(row, now);
+          if (outcome !== 'spendable' || row === undefined) {
+            return { outcome: outcome === 'spendable' ? 'unknown' : outcome } as const;
+          }
+          await trx
+            .updateTable('link_code')
+            .set({ used_at: now })
+            .where('code_sha256', '=', codeSha256)
+            .execute();
+          return { outcome: 'taken', athleteId: row.athlete_id } as const;
+        }),
+      ),
+
+    renameAthlete: (athleteId, name, at) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const row = await trx
+            .selectFrom('athlete')
+            .select('display_name')
+            .where('id', '=', athleteId)
+            .executeTakeFirst();
+          if (row === undefined) return false;
+          await trx
+            .insertInto('display_name_change')
+            .values({ athlete_id: athleteId, previous_name: row.display_name, changed_at: at })
+            .execute();
+          await trx
+            .updateTable('athlete')
+            .set({ display_name: name })
+            .where('id', '=', athleteId)
+            .execute();
+          return true;
+        }),
+      ),
+
+    listDisplayNameChanges: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('display_name_change')
+            .selectAll()
+            .where('athlete_id', '=', athleteId)
+            .orderBy('changed_at')
+            .orderBy('id')
+            .execute()
+        ).map(displayNameChangeFrom),
+      ),
+
+    getRecoveryEmail: (athleteId) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('recovery_email')
+          .selectAll()
+          .where('athlete_id', '=', athleteId)
+          .executeTakeFirst();
+        return row === undefined ? undefined : { athleteId: row.athlete_id, address: row.address };
+      }),
+
+    findRecoveryEmail: (address) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('recovery_email')
+          .selectAll()
+          .where('address', '=', address)
+          .executeTakeFirst();
+        return row === undefined ? undefined : { athleteId: row.athlete_id, address: row.address };
+      }),
+
+    putEmailRecoveryToken: (token) =>
+      exclusive(async () => {
+        await db
+          .insertInto('email_recovery_token')
+          .values({
+            token_sha256: token.tokenSha256,
+            athlete_id: token.athleteId,
+            expires_at: token.expiresAt,
+            used_at: null,
+          })
+          .execute();
+      }),
+
+    listEmailRecoveryTokens: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('email_recovery_token')
+            .selectAll()
+            .where('athlete_id', '=', athleteId)
+            .orderBy('token_sha256')
+            .execute()
+        ).map(emailRecoveryTokenFrom),
+      ),
+
+    takeEmailRecoveryToken: (tokenSha256, now) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const row = await trx
+            .selectFrom('email_recovery_token')
+            .selectAll()
+            .where('token_sha256', '=', tokenSha256)
+            .executeTakeFirst();
+          const outcome = outcomeOf(row, now);
+          if (outcome !== 'spendable' || row === undefined) {
+            return { outcome: outcome === 'spendable' ? 'unknown' : outcome } as const;
+          }
+          await trx
+            .updateTable('email_recovery_token')
+            .set({ used_at: now })
+            .where('token_sha256', '=', tokenSha256)
+            .execute();
+          return { outcome: 'taken', athleteId: row.athlete_id } as const;
+        }),
+      ),
+
     putSession: (session) =>
       exclusive(async () => {
         await db.transaction().execute(async (trx) => {
@@ -325,6 +810,17 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             .execute()
         ).map(sessionFrom),
       ),
+
+    revokeSession: (athleteId, tokenSha256, at) =>
+      exclusive(async () => {
+        const updated = await db
+          .updateTable('session')
+          .set({ revoked_at: sql<number>`coalesce(revoked_at, ${at})` })
+          .where('athlete_id', '=', athleteId)
+          .where('token_sha256', '=', tokenSha256)
+          .executeTakeFirst();
+        return updated.numUpdatedRows > 0n;
+      }),
 
     putActivityRecord: (record) =>
       exclusive(async () => {

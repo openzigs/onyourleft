@@ -26,6 +26,8 @@
  *   of this database authenticates nobody.
  */
 
+import type { Generated } from 'kysely';
+
 /** An account on this instance. */
 export interface AthleteTable {
   readonly id: string;
@@ -36,11 +38,17 @@ export interface AthleteTable {
 
 /** An Ed25519 public key an athlete signs with (ADR 0014). */
 export interface DeviceKeyTable {
-  /** The raw 32-byte key, base64url. */
+  /**
+   * The raw 32-byte key, lowercase hex — ADR 0014's own spelling, the one a
+   * signed activity record carries (#772 settled it; #769's comment said
+   * base64url before anything wrote a key).
+   */
   readonly public_key: string;
   readonly athlete_id: string;
   readonly added_at: number;
   readonly revoked_at: number | null;
+  /** When the key last signed in (#773). Added by migration 0004. */
+  readonly last_used_at: number | null;
 }
 
 /** A signed-in session. */
@@ -79,6 +87,54 @@ export interface ResultTable {
   readonly flags: number;
 }
 
+/** A nonce issued to a public key (#772). Not athlete-scoped: see migration 0004. */
+export interface AuthChallengeTable {
+  readonly nonce: string;
+  readonly public_key: string;
+  readonly expires_at: number;
+  readonly used_at: number | null;
+}
+
+/** A one-time recovery code, as its SHA-256 (#773, ruling Q1). */
+export interface RecoveryCodeTable {
+  readonly code_sha256: string;
+  readonly athlete_id: string;
+  readonly created_at: number;
+  readonly used_at: number | null;
+}
+
+/** A code one device minted so another can be added to the athlete (#773). */
+export interface LinkCodeTable {
+  readonly code_sha256: string;
+  readonly athlete_id: string;
+  /** The device key that minted it — this athlete's, by the composite foreign key. */
+  readonly minted_by_key: string;
+  readonly expires_at: number;
+  readonly used_at: number | null;
+}
+
+/** A name an athlete had before, and when it changed: #789's audit trail (#774). */
+export interface DisplayNameChangeTable {
+  readonly id: Generated<number>;
+  readonly athlete_id: string;
+  readonly previous_name: string;
+  readonly changed_at: number;
+}
+
+/** An athlete's address for email recovery — only where the operator enabled it (#773). */
+export interface RecoveryEmailTable {
+  readonly athlete_id: string;
+  readonly address: string;
+}
+
+/** An email recovery link's token, as its SHA-256 (#773). */
+export interface EmailRecoveryTokenTable {
+  readonly token_sha256: string;
+  readonly athlete_id: string;
+  readonly expires_at: number;
+  readonly used_at: number | null;
+}
+
 /** Every table, by name. */
 export interface InstanceDatabase {
   readonly athlete: AthleteTable;
@@ -87,4 +143,10 @@ export interface InstanceDatabase {
   readonly activity_record: ActivityRecordTable;
   readonly room: RoomTable;
   readonly result: ResultTable;
+  readonly auth_challenge: AuthChallengeTable;
+  readonly recovery_code: RecoveryCodeTable;
+  readonly link_code: LinkCodeTable;
+  readonly display_name_change: DisplayNameChangeTable;
+  readonly recovery_email: RecoveryEmailTable;
+  readonly email_recovery_token: EmailRecoveryTokenTable;
 }

@@ -66,10 +66,40 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   },
   listActivityRecords: { probe: (store, athleteId) => store.listActivityRecords(athleteId) },
   listResults: { probe: (store, athleteId) => store.listResults(athleteId) },
+  listRecoveryCodes: { probe: (store, athleteId) => store.listRecoveryCodes(athleteId) },
+  listLinkCodes: { probe: (store, athleteId) => store.listLinkCodes(athleteId) },
+  listDisplayNameChanges: {
+    probe: (store, athleteId) => store.listDisplayNameChanges(athleteId),
+  },
+  getRecoveryEmail: {
+    probe: async (store, athleteId) => one(await store.getRecoveryEmail(athleteId)),
+  },
+  listEmailRecoveryTokens: {
+    probe: (store, athleteId) => store.listEmailRecoveryTokens(athleteId),
+  },
 
   findSession: {
     notAScopedRead: 'authentication: the token is what names the athlete (#772)',
   },
+  findDeviceKey: {
+    notAScopedRead: 'authentication: the public key is what names the athlete (#772)',
+  },
+  takeChallenge: { notAScopedRead: 'spends a nonce, issued before any athlete is named (#772)' },
+  pruneChallenges: { notAScopedRead: 'a write over challenges, which belong to no athlete' },
+  takeRecoveryCode: { notAScopedRead: 'recovery: the code is what names the athlete (#773)' },
+  takeLinkCode: { notAScopedRead: 'linking: the code is what names the athlete (#773)' },
+  findRecoveryEmail: { notAScopedRead: 'email recovery: the address names the athlete (#773)' },
+  takeEmailRecoveryToken: {
+    notAScopedRead: 'email recovery: the token is what names the athlete (#773)',
+  },
+  touchDeviceKey: { notAScopedRead: 'a write; scoping is sql-store.test.ts’s' },
+  revokeDeviceKey: { notAScopedRead: 'a write; scoping is sql-store.test.ts’s' },
+  revokeSession: { notAScopedRead: 'a write; scoping is sql-store.test.ts’s' },
+  registerAthlete: { notAScopedRead: 'a write; ownership is sql-store.test.ts’s' },
+  putChallenge: { notAScopedRead: 'a write' },
+  putLinkCode: { notAScopedRead: 'a write; the schema holds the minting key to its athlete' },
+  renameAthlete: { notAScopedRead: 'a write; scoping is sql-store.test.ts’s' },
+  putEmailRecoveryToken: { notAScopedRead: 'a write' },
   getRoom: { notAScopedRead: 'a room belongs to no athlete' },
   listRoomResults: { notAScopedRead: 'a finish order is every rider’s, by design (ADR 0037)' },
   putAthlete: { notAScopedRead: 'a write' },
