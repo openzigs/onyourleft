@@ -328,6 +328,24 @@ describe('a client’s clock is not the room’s — #779, from #832’s review'
     });
   }
 
+  it('does not let one report held up in a queue move the clock the next is judged by', () => {
+    const room = runningRace(['ann']);
+    for (let t = 0; t < 5; t += 1) {
+      room.receive(1, reportText(t, t * SECOND + 400, 250), t * SECOND + 420);
+      room.tick((t + 1) * SECOND);
+    }
+    // Report 5 is sampled at 5.4 s and delivered 2.5 s late; the client, backgrounded,
+    // samples nothing more until 8.4 s, and that one arrives promptly.
+    room.tick(6 * SECOND);
+    room.tick(7 * SECOND);
+    room.receive(1, reportText(5, 5400, 250), 7900);
+    room.tick(8 * SECOND);
+    room.receive(1, reportText(6, 8400, 250), 8420);
+    const out = room.tick(9 * SECOND);
+    expect(lastFrame(out, 1).ackSequence).toBe(6);
+    expect(lastFrame(out, 1).riders[0]?.flags).toBe(0);
+  });
+
   it('does not coast a client far behind the room’s clock, and refuses a report stamped far ahead of its own timeline', () => {
     const room = runningRace(['ann']);
     const behind = 10_000; // the client's clock reads 10 s at room 1 000 010 ms
