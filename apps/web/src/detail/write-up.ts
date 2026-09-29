@@ -40,7 +40,7 @@ export const WRITE_UP_FRAMING_REST =
 
 /**
  * ADR 0035 D-9 B, the own-computer paragraph as the privacy policy carries it
- * (#802) — shown beside the ask control when the rider's own computer is
+ * (#802), as ADR 0035's 2026-09-29 amendment completed it (#845) — shown beside the ask control when the rider's own computer is
  * offered, so what will be sent is said where the press is, in the approved
  * words. Pinned against the ADR by `write-up.test.ts`.
  */
@@ -49,7 +49,8 @@ export const COMPUTER_SENDS_LEAD =
 export const COMPUTER_SENDS =
   "When you press the button on a ride's page, that ride's numbers go to the computer you set up: " +
   'heart rate, cadence and power, your weight and watts per kilogram, your threshold power, if you ' +
-  'set one, how long the ride lasted, and how it went section by section. If the side camera ' +
+  "set one, how long the ride lasted, its distance, and each section's gradient and total " +
+  'climb, and how it went section by section. If the side camera ' +
   'filmed the ride, and you agreed to the camera, it also gets how a few measurements of your ' +
   'riding position changed between the start and the end of filming. Never a picture. Nothing is ' +
   'sent until you press the button, and nothing is sent in the background.';

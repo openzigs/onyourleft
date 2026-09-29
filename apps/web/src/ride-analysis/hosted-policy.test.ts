@@ -65,4 +65,13 @@ describe('the hosted section of the privacy policy (#803, ADR 0035 D-9 C)', () =
     const drifted = section.replace('your threshold power, if you set one, ', '');
     expect(drifted).not.toContain(approved);
   });
+
+  it('names the distance, gradient and climb, and goes red without them — #845', () => {
+    expect(approved).toContain("its distance, and each section's gradient and total climb");
+    const drifted = section.replace(
+      "its distance, and each section's gradient and total climb, ",
+      '',
+    );
+    expect(drifted).not.toContain(approved);
+  });
 });
