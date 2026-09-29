@@ -24,6 +24,7 @@ import {
   type ReportWindow,
   type RiderReport,
 } from './plausibility';
+import { PhysicsError } from './physics-error';
 import { RIDING_POSITION_DRAG_AREAS, ridingCoefficients } from './riding';
 import { advance, START_OF_RIDE, type RideConditions } from './simulate';
 
@@ -280,5 +281,11 @@ describe('rule 4 — the room’s position wins, and the disagreement is a signa
     expect(disagreement(97, 100, 3)).toEqual({ metres: -3, correct: false });
     expect(disagreement(96.5, 100, 3)).toEqual({ metres: -3.5, correct: true });
     expect(disagreement(100, 100, 0)).toEqual({ metres: 0, correct: false });
+  });
+
+  it('refuses a tolerance that would silently never, or always, correct — #779, from #832’s review', () => {
+    for (const tolerance of [Number.NaN, -1, -0.001, Number.POSITIVE_INFINITY]) {
+      expect(() => disagreement(105, 100, tolerance)).toThrow(PhysicsError);
+    }
   });
 });
