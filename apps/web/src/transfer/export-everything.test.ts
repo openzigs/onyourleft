@@ -1262,7 +1262,11 @@ describe('exporting the side camera’s reports (#388)', () => {
                   return () => Promise.reject(broken);
                 }
                 const value: unknown = Reflect.get(target, property, receiver);
-                return typeof value === 'function' ? value.bind(target) : value;
+                if (typeof value !== 'function') {
+                  return value;
+                }
+                const call = value as (...args: unknown[]) => unknown;
+                return (...args: unknown[]) => call.apply(target, args);
               },
             }),
             athleteId: ATHLETE_A,
