@@ -28,6 +28,7 @@ import {
   RIDER_HALF_WIDTH_METRES,
   bicycleRoll,
   drawnCrankAngle,
+  pedallingShare,
   simulatedCrankAngle,
   type RiderRoll,
 } from './bicycle';
@@ -117,6 +118,18 @@ export interface SceneInput {
    * start line and the browser harness build frames with no ride behind them.
    */
   readonly crankAngle?: number | undefined;
+  /**
+   * Whether the rider's cranks are being turned by a cadence reading this
+   * frame — #625, `bicycle.ts` §`cadenceTurns`, supplied by `GameView` beside
+   * {@link crankAngle}. The realistic body rocks only while it is.
+   *
+   * ⚠️ **Optional the safe way round**: absent is a rider who is NOT
+   * pedalling, which is what the start line and a harness frame with no
+   * cadence behind it are. A `GameView` that stopped supplying it would draw a
+   * still rider, and `GameView.test.tsx` reads it off the frame for that
+   * reason.
+   */
+  readonly pedalling?: boolean | undefined;
   /**
    * Draws every rider on the centreline, upright, as every frame did before
    * #499 — the control the browser gate measures the line against, and
@@ -361,6 +374,8 @@ interface Rider {
   readonly distance: number;
   readonly speed: number;
   readonly crankAngle: number | undefined;
+  /** Whether a reading turns this rider's cranks, before a bend parks them. @see RiderMarker.pedalling */
+  readonly pedalling: boolean;
 }
 
 /**
@@ -385,6 +400,7 @@ function ridersOnTheRoad(
       distance: riderDistance,
       speed: input.state.ride.speed,
       crankAngle: input.crankAngle,
+      pedalling: input.pedalling === true,
     },
   ];
   const bot = input.state.bot;
@@ -395,6 +411,9 @@ function ridersOnTheRoad(
       // The bot's own simulated speed, from the same step as its odometer.
       speed: bot?.state.speed ?? 0,
       crankAngle: pedalling(input.botDistance),
+      // #625: a simulated rider pedals while it moves — its cranks turn from
+      // its odometer, so a stopped one's are still.
+      pedalling: (bot?.state.speed ?? 0) > 0,
     });
   }
   if (input.ghost !== undefined) {
@@ -415,14 +434,22 @@ function ridersOnTheRoad(
       distance: at,
       speed: ghostSpeed(input.ghost, clock),
       crankAngle: pedalling(at),
+      pedalling: ghostSpeed(input.ghost, clock) > 0,
     });
   }
+  // #625: the ride's own clock, which a held or paused ride holds — never a
+  // wall clock. @see RiderMarker.rideSeconds
+  const rideClock: number = ghostClock(input.state);
   return riders.map((rider) => {
     const lateral = line === undefined ? 0 : lateralOf(rider, riders, line);
     // The COMBINED lean the physics asks for, split into the bicycle's and the
     // body's — #546. @see RiderMarker.lean
     const roll = bicycleRoll(line === undefined ? 0 : leanAt(line, rider.distance, rider.speed));
-    const marker = markerAt(corridor, rider.distance, rider.kind, lateral, roll);
+    const marker = markerAt(corridor, rider.distance, rider.kind, lateral, roll, {
+      // #625: the stroke's motion, faded out as a bend parks the cranks.
+      pedalling: rider.pedalling ? pedallingShare(roll.bicycle) : 0,
+      rideSeconds: rideClock,
+    });
     // #546: in a bend tight enough for the inside pedal to strike, every
     // rider's cranks — the rider's own included, by the owner's ruling — are
     // DRAWN parked with the outside pedal down. @see drawnCrankAngle
@@ -514,6 +541,7 @@ function markerAt(
   kind: RiderMarker['kind'],
   lateral: number,
   roll: RiderRoll,
+  motion: Pick<RiderMarker, 'pedalling' | 'rideSeconds'>,
 ): RiderMarker {
   const at = placeOnCorridor(corridor, atDistance);
   // ⚠️ The heading is the road's at **this** marker's own distance, not the
@@ -531,6 +559,8 @@ function markerAt(
     ...heading,
     lean: roll.bicycle,
     bodyLean: roll.body,
+    pedalling: motion.pedalling,
+    rideSeconds: motion.rideSeconds,
   };
 }
 

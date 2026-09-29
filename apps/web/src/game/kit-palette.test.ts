@@ -57,6 +57,8 @@ function marker(kind: RiderMarker['kind'], z: number): RiderMarker {
     headingZ: 1,
     lean: 0,
     bodyLean: 0,
+    pedalling: 0,
+    rideSeconds: 0,
     crankAngle: 0,
   };
 }
