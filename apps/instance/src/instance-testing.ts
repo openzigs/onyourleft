@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import type { Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
 import { createHandler, type Handler } from './handler.ts';
 import type { Route } from './routes.ts';
@@ -33,7 +34,12 @@ export interface TestInstance {
 }
 
 export async function startTestInstance(
-  options: { config?: Partial<Config>; routes?: readonly Route[]; notices?: string } = {},
+  options: {
+    config?: Partial<Config>;
+    routes?: readonly Route[];
+    notices?: string;
+    identity?: Identity;
+  } = {},
 ): Promise<TestInstance> {
   const lines: string[] = [];
   const handler = createHandler({
@@ -42,6 +48,7 @@ export async function startTestInstance(
     notices: options.notices ?? 'notices',
     log: (line) => lines.push(line),
     ...(options.routes === undefined ? {} : { routes: options.routes }),
+    ...(options.identity === undefined ? {} : { identity: options.identity }),
   });
   const listening = await listen(handler, { host: '127.0.0.1', port: 0 });
   return { handler, listening, url: listening.url, lines };

@@ -29,18 +29,34 @@
  * ⚠️ **Another athlete's resource is `not_found`, deliberately.** A 403 says
  * "this exists and is not yours", which is the cross-athlete exposure
  * `CLAUDE.md` §6 lists, leaked through a status code. #36 names the case
- * "forbidden/not-found" and this is the one code for it.
+ * "forbidden/not-found" and this is the one code for it. `registration_closed`
+ * (#772) is a 403 about the INSTANCE — it registers nobody — and names no
+ * athlete's resource.
  */
 
 /** Every code this instance can send, and the HTTP status each one is sent with. */
 export const ERROR_STATUS = {
   validation_failed: 400,
   unauthenticated: 401,
+  wrong_purpose: 401,
+  wrong_instance: 401,
+  challenge_unknown: 401,
+  challenge_used: 401,
+  challenge_expired: 401,
+  bad_signature: 401,
+  key_revoked: 401,
+  code_unknown: 401,
+  code_used: 401,
+  code_expired: 401,
+  registration_closed: 403,
   not_found: 404,
   method_not_allowed: 405,
+  key_in_use: 409,
+  last_device: 409,
   payload_too_large: 413,
   rate_limited: 429,
   internal: 500,
+  unavailable: 503,
 } as const;
 
 export type ErrorCode = keyof typeof ERROR_STATUS;
@@ -70,6 +86,20 @@ export interface ErrorBody {
 const MESSAGES: Record<ErrorCode, string> = {
   validation_failed: 'The request is not valid. Each field named in `fields` says why.',
   unauthenticated: 'This needs a signed-in device.',
+  wrong_purpose: 'The signature is not a statement made for this request.',
+  wrong_instance: 'The signature was made for another instance.',
+  challenge_unknown: 'This instance did not issue that challenge to that key.',
+  challenge_used: 'That challenge has already been used. Ask for a new one.',
+  challenge_expired: 'That challenge has expired. Ask for a new one.',
+  bad_signature: 'The signature does not verify with that key.',
+  key_revoked: 'That device key has been revoked.',
+  code_unknown: 'That code is not one this instance issued.',
+  code_used: 'That code has already been used.',
+  code_expired: 'That code has expired.',
+  registration_closed: 'This instance is not registering new riders.',
+  key_in_use: 'That device key is already registered here.',
+  last_device: 'This is your last device. Revoking it needs one of your recovery codes.',
+  unavailable: 'This instance does not offer accounts.',
   not_found: 'There is nothing here that this device may see.',
   method_not_allowed: 'This address does not accept that method.',
   payload_too_large: 'The request body is larger than this instance accepts.',

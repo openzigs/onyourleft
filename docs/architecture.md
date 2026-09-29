@@ -1238,9 +1238,11 @@ That is why D-9 puts the rule at capture and why the check on it is a refusal ra
 in this repository as `apps/instance`; [ADR 0037](adr/0037-instance-runtime-hosting-and-transport.md)
 decided how it is built. [#767](https://github.com/openzigs/onyourleft/issues/767) scaffolded it and
 [#36](https://github.com/openzigs/onyourleft/issues/36) gave it an API contract and an error model.
-**What it does today is small on purpose**: it answers four metadata routes and nothing else. No
-account, no sync and no room exists yet — #772, #776 and #779/#780 build them. The database (#769)
-and the blob store (#770) exist since #842 and nothing calls them yet; see "Storage" below.
+**What it does today is small on purpose**: four metadata routes, and — since #855 (#772, #773,
+#774) — the identity routes under `/v1/auth/`, which a handler serves only when it is HANDED an
+identity service over a store. The Node entry point is not handed one yet (see "Identity" below),
+so a running instance still answers the metadata alone. No sync and no reachable room exists yet
+— #776 and #780 build them.
 
 **The device is canonical and a rider with no instance loses nothing** (ADR 0036 D-3). Nothing in
 `apps/web` or `apps/mobile` imports the instance, and nothing may: a client reaches it over the
@@ -1300,9 +1302,45 @@ because the only other answer is `main`, which is not what is running.
 | Proof | A round-trip harness whose read cannot be served by the writing connection, run red against three broken stores; athlete scoping enumerated from the port's keys over three athletes; erasure against every table with a foreign key to `athlete`, found in the schema, with every reference between two athlete-scoped tables carrying `athlete_id` on both sides (#842 review: a session could name another athlete's key and block that erasure); two writer THREADS with no `SQLITE_BUSY` escaping, and a busy-timeout-0 control that must see one | `src/store/testing/`, `src/store/*.test.ts` |
 | Blobs | Content-addressed by SHA-256 (Web Crypto, so portable): `put`/`get`/`has`/`delete`, a key refused unless it is 64 lowercase hex characters, before any path or URL is made. Local disk by default (write to `incoming/`, fsync, rename — a `SIGKILL` mid-write leaves nothing under the final name), an in-memory fake, and S3-compatible over `fetch` with its own SigV4 (reproducing AWS's worked example). One conformance suite runs all three; the bucket half only when `OYL_INSTANCE_S3_*` is set | `src/blob/` |
 
-⚠️ **Nothing calls either yet.** `main.ts` opens no database, and the Docker image copies `src/`
-without installing `node_modules`, so a route that imports the store needs the image to install
-`kysely` first — the first consumer's work (#772, #37, #776).
+⚠️ **The identity routes are the store's first consumer (#855), and `main.ts` still opens no
+database.** The Docker image copies `src/` without installing `node_modules`, so the entry point
+cannot import `kysely` until the image installs it — #780's work, with the box's database path.
+Until then the handler is built without an identity and every identity route answers
+`unavailable` (503).
+
+#### Identity (#772, #773, #774)
+
+An athlete on an instance is **a set of device keys** and nothing else — no password anywhere
+(ruling Q12). Each key is a device's ADR 0014 key, which keeps signing that device's records
+unchanged; the instance only ever verifies.
+
+```mermaid
+sequenceDiagram
+    participant D as Device (apps/web)
+    participant I as Instance
+    D->>I: POST /v1/auth/challenge {publicKey}
+    I-->>D: {nonce, expiresAt (+60 s)}
+    D->>D: sign RFC 8785 {purpose:"oyl-auth-v1", instanceOrigin, nonce, publicKey, issuedAt}
+    D->>I: POST /v1/auth/session {statement, signature}
+    I-->>D: {sessionToken (shown once), expiresAt, athleteId, recoveryCodes (first time only)}
+    D->>I: POST /v1/rooms/{roomId}/ticket (Bearer)
+    I-->>D: {ticket (one room, one hello, 30 s)}
+```
+
+| Concern | Decision | Where |
+|---|---|---|
+| What is signed | `@onyourleft/domain`'s `deviceStatementBytes`: five members, RFC 8785, canonicalised once for the browser and the instance (ADR 0014 D-8). `purpose` is one of `oyl-auth-v1`, `oyl-link-v1` and `oyl-recover-v1`, so a sign-in cannot add a key and no activity record (which has no `purpose`) verifies as a statement; `instanceOrigin` binds it to one instance | `packages/domain/src/identity/device-statement.ts` |
+| Refusals, in order | `wrong_purpose`, `wrong_instance`, `challenge_unknown` / `challenge_used` / `challenge_expired` (the nonce is spent before the signature is checked, so a replay of a whole request is `challenge_used`), `bad_signature`, `key_revoked`. Each is its own code | `apps/instance/src/auth/identity.ts` |
+| Secrets at rest | The SHA-256 of every secret handed out — session tokens, recovery codes, link codes, email-recovery tokens — never the secret. A test searches the database file, its WAL and its index for each one | `src/auth/`, migration `0004-identity` |
+| Registration | The first key an instance sees registers an athlete, where registration is `open` (the default until #775 adds its modes); the answer carries ten one-time recovery codes, once | `identity.ts` §`register` |
+| Rooms | A **ticket**, never the session token, in the hello: minted against a live session for one room, spent on admission, 30 s. Kept in memory by the process that runs the room; `TicketBook.admitterFor(roomId)` is the room core's `Admit` (#779). #781's Durable Object adapter plugs it in when it lands | `src/auth/tickets.ts` |
+| Other devices | A signed-in device mints a 5-minute, single-use **link code**; the new device signs `oyl-link-v1` with its OWN key. Revoking a key revokes its sessions and unspent link codes; the last key needs a recovery code the athlete holds (checked, not spent). A revoked key's records stay valid (ADR 0014 D-6) | `identity.ts` |
+| Every device lost | A recovery code, or — only where the operator hands the identity a mail transport — an emailed single-use link (30 minutes). With email recovery off, no address is accepted or stored | `identity.ts` §`recover`, §`requestEmailRecovery` |
+| What other riders see | ONE projection, `publicAthlete`: the id and the display name. Every `athlete` column is classified public or private and a test reads the migrated table's columns; a declared mass travels only in a ticket and reaches no other rider | `src/auth/public-athlete.ts` |
+| Display names | 1–32 scalar values after NFC; control, bidirectional and invisible characters refused, each by name. At most three changes a day; every earlier name is kept for moderation (#789) | `packages/domain/src/identity/display-name.ts`, `display_name_change` |
+| Rate limits | In memory, fixed windows: a challenge per key and per address (the address from the adapter, never logged). Behind a proxy the address is the proxy's — #775's to weigh | `src/auth/rate-limit.ts` |
+| The client half | `apps/web/src/instance/sign-in.ts`: the local athlete first, then the device key, then challenge → sign → session, and the instance's athlete id kept on the device. It takes its transport as a parameter and names no `fetch`: #777 supplies the one module allowed to call an instance, after #778's disclosures | `apps/web/src/instance/` |
+| Across platforms | `apps/web/browser/identity.browser.spec.ts`: the browser signs with the app's own non-extractable key in IndexedDB, and a real instance running in the spec's process verifies it, with a flipped signature byte and another instance's origin as controls | the browser gate |
 
 #### The API contract (#36)
 
@@ -1310,12 +1348,13 @@ without installing `node_modules`, so a route that imports the store needs the i
 |---|---|---|
 | The specification | OpenAPI 3.1, **generated** from the route table the handler dispatches on, committed as `apps/instance/openapi.json` and served at `GET /openapi.json`. `src/openapi.test.ts` fails when the committed file is not what the table generates, and calls every route through the real listener to check its body against the declared schema | `src/routes.ts`, `src/openapi.ts` |
 | Errors | One shape, `{ "error": { "code", "message", "fields"? } }`. `code` is stable and machine-readable; `message` is a fixed sentence per code and **never carries a value from the request** — ADR 0004 D widened to every field, because the instance cannot tell where a stranger's client put a coordinate. Another athlete's resource is `not_found`, never a 403 | `src/errors.ts` |
-| Codes | `validation_failed` 400 (with `fields`, each naming a field and a problem), `unauthenticated` 401, `not_found` 404, `method_not_allowed` 405 (with `Allow`), `payload_too_large` 413, `rate_limited` 429, `internal` 500. Adding a code is an addition; renaming one is breaking | `src/errors.ts` §`ERROR_STATUS` |
+| Codes | `validation_failed` 400 (with `fields`, each naming a field and a problem), `unauthenticated` 401, `not_found` 404, `method_not_allowed` 405 (with `Allow`), `payload_too_large` 413, `rate_limited` 429, `internal` 500 — and since #855 identity's: the seven sign-in refusals and `code_unknown` / `code_used` / `code_expired` (401), `registration_closed` 403, `key_in_use` and `last_device` 409, `unavailable` 503. Several codes share a status, and the specification names every code a status can carry. Adding a code is an addition; renaming one is breaking | `src/errors.ts` §`ERROR_STATUS` |
 | An unhandled exception | `internal`, with no message, stack or path; the log gets the error's **name** alone | `src/handler.ts`, `src/log.ts` |
 | Request bodies | Bounded before routing: a declared length over the limit is refused unread, and an undeclared one is read only up to the limit | `src/handler.ts` §`boundedBody` |
 | Pagination | **Keyset, never offset**: a list is ordered by (sort key, id) and a page is the next `limit` rows after an opaque cursor. Every row present when a listing begins is returned exactly once however many are inserted between pages; an offset control in the test shows the failure it prevents. `limit` defaults to 50 and is at most 200 | `src/pagination.ts` |
 
-**Versioning.** The four metadata routes — `/health`, `/source`, `/openapi.json`,
+**Versioning.** The identity routes live under `/v1/` (#772's diagram named `/auth/…`; these are
+those paths, versioned). The four metadata routes — `/health`, `/source`, `/openapi.json`,
 `/licences/third-party.txt` — are unversioned and only ever gain fields. The API a client syncs
 through lives under `/v1/` from its first route (#776). **A breaking change is `/v2/` served beside
 `/v1/`, never an edit to `/v1/`**, because anyone can run an instance and a third party implements
@@ -1323,10 +1362,9 @@ against this contract (#36's revision block): a change that would break a strang
 breaking whether or not this repository's own client notices. `info.version` in the specification is
 the API's version, not the package's.
 
-⚠️ **What the contract does not have yet, and who owes it.** `unauthenticated` and `rate_limited` are
-defined and their shape is tested, but no route produces either: authentication is #772's and a rate
-limiter is not built. No route takes input yet, so a validation failure is produced only by the
-pagination parser, which no route calls until #776's first list. #36 stays open for those.
+⚠️ **What the contract does not have yet, and who owes it.** Since #855 the identity routes
+produce `unauthenticated`, `rate_limited` and `validation_failed` and take JSON bodies; the
+pagination parser still has no caller until #776's first list.
 
 ### The realistic world: what is built, and how a rider chooses it
 

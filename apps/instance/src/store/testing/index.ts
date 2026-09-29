@@ -28,7 +28,8 @@ import { openSqlStore } from '../open-sql-store.ts';
 import type {
   ActivityRecord,
   Athlete,
-  DeviceKey,
+  DeviceKeyWrite,
+  Registration,
   Result,
   Room,
   Session,
@@ -191,7 +192,7 @@ export function athleteFixture(id: string): Athlete {
   return { id, displayName: `Rider ${id}`, createdAt: 1_790_000_000, registrationState: 'active' };
 }
 
-export function deviceKeyFixture(athleteId: string): DeviceKey {
+export function deviceKeyFixture(athleteId: string): DeviceKeyWrite {
   return { publicKey: `key-of-${athleteId}`, athleteId, addedAt: 1_790_000_100, revokedAt: null };
 }
 
@@ -222,11 +223,33 @@ export function resultFixture(athleteId: string, roomId = SHARED_ROOM.id): Resul
 export async function seedWorld(store: SqlStore): Promise<void> {
   await store.putRoom(SHARED_ROOM);
   for (const athlete of ATHLETES) {
-    await store.putAthlete(athleteFixture(athlete));
-    await store.putDeviceKey(deviceKeyFixture(athlete));
+    await store.registerAthlete(registrationFixture(athlete));
     await store.putSession(sessionFixture(athlete));
     await store.putActivityRecord(activityRecordFixture(athlete));
     await store.putActivityRecord(activityRecordFixture(athlete, 'second-ride'));
     await store.putResult(resultFixture(athlete));
+    // Migration 0004's athlete-scoped tables (#772, #773, #774), one row each.
+    await store.putLinkCode({
+      codeSha256: hexOf(`link-${athlete}`),
+      athleteId: athlete,
+      mintedByKey: deviceKeyFixture(athlete).publicKey,
+      expiresAt: 1_790_000_600,
+    });
+    await store.renameAthlete(athlete, `Renamed ${athlete}`, 1_790_000_300);
+    await store.putEmailRecoveryToken({
+      tokenSha256: hexOf(`email-${athlete}`),
+      athleteId: athlete,
+      expiresAt: 1_790_000_900,
+    });
   }
+}
+
+/** A fixture athlete's registration: their first key, a recovery code and an email address. */
+export function registrationFixture(athleteId: string): Registration {
+  return {
+    athlete: athleteFixture(athleteId),
+    key: deviceKeyFixture(athleteId),
+    recoveryCodeSha256s: [hexOf(`recovery-${athleteId}`)],
+    recoveryEmail: `${athleteId}@example.org`,
+  };
 }
