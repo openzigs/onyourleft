@@ -69,7 +69,7 @@
 
 import { MAXIMUM_WRITE_UP_CHARACTERS } from '@onyourleft/store';
 
-import type { UntrustedText } from './analysis-port';
+import type { UntrustedText } from './model-answer';
 import {
   type AngleClaimKind,
   angleClaimKinds,

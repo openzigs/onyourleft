@@ -16,7 +16,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import type { UntrustedText } from './analysis-port';
+import type { UntrustedText } from './model-answer';
 import {
   MAXIMUM_WRITE_UP_CHARACTERS,
   passedScreen,
