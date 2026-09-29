@@ -25,7 +25,7 @@ import type { SidePicture } from './side-link-pictures';
 import type { SideCameraControlPort, SideControlState } from './side-pairing-port';
 import type { SideReport } from './side-report';
 import type { SideSessionSummary } from './side-session-summary';
-import type { UntrustedText } from './analysis-port';
+import type { UntrustedText } from './model-answer';
 import { sidePoseFromAnswer } from './computer-pose';
 import {
   ISSUE_761_BLANK_ANSWERS,
