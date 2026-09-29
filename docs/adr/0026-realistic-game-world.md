@@ -517,3 +517,18 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
     None is taken, and admitting one would be the superseding ADR this section's own D-4 names.
   - **Clothes packs** were not ruled in: the rider's kit is this repository's own drawing, dedicated
     `CC0-1.0` as the app icons are (ADR 0024 D-5).
+
+- **2026-09-29** — **The realistic world no longer draws the round contact blob.** The 2026-09-26
+  entry above records that *"the realistic world still draws the contact blob"*; since
+  [#626](https://github.com/openzigs/onyourleft/issues/626) it draws the realistic riders'
+  **bike-shaped shadow** instead, on the same `'contact'` rungs and in the same one instanced
+  transparent draw, and the stylised world keeps the blob and the shadow map exactly as #547 left
+  them. It is #626's option 1 — a silhouette, not the 512² shadow map: `rider-silhouette.ts` makes
+  the rider and bicycle's side view once, when a view builds its realistic world (256 × 128, two
+  bytes a texel, 64 KiB, no build byte), and `three-renderer.ts` §`RiderSilhouetteBelt` casts it
+  along `world.ts`'s one sun every frame. Because the side view does not depend on the sun or the
+  heading, it is made once rather than per route as #626 expected. No depth pass, no draw call and
+  no frame triangle are added; the ghost still casts none. What the tablet measures of it, and
+  whether the owner wants option 2 beside it, is validation 0002 Part AH's and #626's, not this
+  entry's. Nothing in this ADR's decisions changes: D-6's budget gains a 128 KiB line for it
+  (`realistic-budget.ts` §`REALISTIC_RIDER_SILHOUETTE_BYTES`) inside the texture ceiling.

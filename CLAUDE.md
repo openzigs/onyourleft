@@ -641,7 +641,13 @@ apps/                 AGPL-3.0-or-later, without exception
                         — the distances it was checked at are validation 0002
                         Part N. `simulatedCrankAngle` turns the other two's
                         cranks from their own ODOMETER at a fixed gear, which
-                        is neither a reading nor a rate anybody invented
+                        is neither a reading nor a rate anybody invented.
+                        ⚠️ **Since #625 the realistic body MOVES** — pelvis
+                        roll, trunk rock, a head held level, ankling
+                        (`riderMotion`, amplitudes cited) — only while the
+                        marker's `pedalling` says a reading turns the cranks,
+                        and a breath on the RIDE's clock (`rideSeconds`), so a
+                        held ride holds it. The stylised rider does not move
     src/game/racing-line.ts
                         the line each rider rides through a bend, and the lean
                         (#499) — the least PEAK curvature inside the
@@ -702,8 +708,14 @@ apps/                 AGPL-3.0-or-later, without exception
                         device now stores `oyl.game.riderShadowMap = off` to
                         not get it. The blob is the FALLBACK — every rung after
                         the first step down (`keepsShadowMap`'s latch is
-                        unchanged), the realistic world, and a device that
-                        turned the map off. ⚠️ **The ghost casts no MAP shadow
+                        unchanged), and a device that turned the map off.
+                        ⚠️ **Since #626 NOT the realistic world**, which casts
+                        a bike-shaped silhouette on the same rungs instead
+                        (`rider-silhouette.ts`, `three-renderer.ts`
+                        §`RiderSilhouetteBelt`): the rider's side view made
+                        once, thrown along the sun each frame by a shader whose
+                        TypeScript twin is `silhouetteCoverage`, and which the
+                        browser gate holds to that twin. ⚠️ **The ghost casts no MAP shadow
                         either**, and did until #547: it shares the rider's
                         meshes, so `three-renderer.ts` §`RiderBelt` hands the
                         pass the casters only, by this file's table. The ride's

@@ -131,6 +131,10 @@ import {
   sceneMaterialsOf,
   type DrawnPiece,
   sceneryDrawnOf,
+  realisticShouldersOf,
+  realisticRidersShownOf,
+  realisticSilhouetteOf,
+  riderSilhouettesOf,
   setBuildingOpenings,
   setRealisticTints,
   setRealisticMaterialsMerged,
@@ -144,6 +148,7 @@ import {
   showGroundBlobsOf,
 } from '../src/game/three-renderer';
 import { groundBlobAlpha, groundUnder } from '../src/game/ground-blob';
+import { silhouetteCoverage, silhouetteThrow } from '../src/game/rider-silhouette';
 import { clearOfTheCamera, nearPyramid, sceneryReach } from '../src/game/near-field';
 import {
   REALISTIC_SURFACES,
@@ -2577,6 +2582,8 @@ function colourProbes(probe: SceneFrame): {
           headingZ: pose.headingZ,
           lean: 0,
           bodyLean: 0,
+          pedalling: 0,
+          rideSeconds: 0,
           crankAngle: at,
         },
       ],
@@ -3292,6 +3299,26 @@ function pixelFor(
  * the camera with them, so the right lane at 1.5 m is behind their back.
  */
 const NEAR_ROAD_PROBE = { ahead: 20, across: -1.5 } as const;
+
+/** A shadow's shape read off the drawing buffer — #626. @see RealisticMeasurement.riderShadow */
+interface ShadowShape {
+  readonly fill: number;
+  readonly squareMetres: number;
+  readonly agreement: number;
+}
+
+const NO_SHADOW_SHAPE: ShadowShape = { fill: 0, squareMetres: 0, agreement: 0 };
+
+/**
+ * How high over the rider #626's shadow probe looks down from, and how far
+ * apart the ground points it reads are: 6 m and 5 cm — a pixel or two a point
+ * on the 640 × 360 canvas, with the whole 5 m square a shadow can reach in the
+ * frame.
+ */
+const SHADOW_ALTITUDE_METRES = 6;
+/** How long #626's probe's heading is: a thousandth of a unit. @see SHADOW_ALTITUDE_METRES */
+const SHADOW_HEADING_SHARE = 0.001;
+const SHADOW_GRID_METRES = 0.05;
 
 /**
  * The same lane, 150 m up the road: the only difference between the two
@@ -4442,6 +4469,24 @@ export interface RealisticMeasurement {
   /** Pixels that changed when the rider's cranks turned, and when the cadence went and they were held. */
   readonly crankTurnPixels: number;
   readonly crankHeldPixels: number;
+  /**
+   * How far the realistic rider's shoulders moved ACROSS the bicycle between
+   * two frames half a pedal stroke apart, in metres — #625: pedalling, and
+   * the control with no cadence, which must not move them.
+   */
+  readonly shoulderRock: number;
+  readonly shoulderRockControl: number;
+  /**
+   * The realistic rider's shadow read off the drawing buffer from straight
+   * above, the rider left out so it cannot hide it — #626. `fill` is how much
+   * of its own bounding rectangle, along and across the bicycle, the shadow
+   * covers; `agreement` how much of the shadow drawn and of
+   * `rider-silhouette.ts` §`silhouetteCoverage`'s shadow is the same ground
+   * (the two covered sets' intersection over their union). The control is the
+   * round blob #626 replaced, drawn under the same sun.
+   */
+  readonly riderShadow: ShadowShape;
+  readonly riderShadowControl: ShadowShape;
   /** How far the realistic frame differs from the stylised one across the whole picture, as a share. */
   readonly worldChangedShare: number;
   /**
@@ -4682,6 +4727,10 @@ const NO_REALISTIC: RealisticMeasurement = {
   levelDescentLuminance: 0,
   crankTurnPixels: 0,
   crankHeldPixels: 0,
+  shoulderRock: 0,
+  shoulderRockControl: 0,
+  riderShadow: NO_SHADOW_SHAPE,
+  riderShadowControl: NO_SHADOW_SHAPE,
   worldChangedShare: 0,
   foliageOrder: { cut: 0, opaque: 0, cutBeforeOpaque: 0 },
   foliageOrderControl: { cut: 0, opaque: 0, cutBeforeOpaque: 0 },
@@ -5933,7 +5982,151 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const turned = whole();
   view.render(withCrank(undefined));
   const held = whole();
+  // #625: the shoulders read off the belt's own bones on two frames half a
+  // stroke apart — pedalling, and with no cadence (the control).
+  const shoulderAcross = (angle: number, pedalling: number): number => {
+    const frame: SceneFrame = {
+      ...wooded,
+      scatter: [],
+      markers: wooded.markers.map((marker) =>
+        marker.kind === 'rider' ? { ...marker, crankAngle: angle, pedalling } : marker,
+      ),
+    };
+    view.render(frame);
+    const rider = frame.markers.find((marker) => marker.kind === 'rider');
+    const at = realisticShouldersOf(view);
+    if (rider === undefined || at === undefined) return Number.NaN;
+    // Across the bicycle: its own +X, `(headingZ, −headingX)`.
+    return at.x * rider.headingZ - at.z * rider.headingX;
+  };
+  const shoulderRock = Math.abs(shoulderAcross(Math.PI / 2, 1) - shoulderAcross(1.5 * Math.PI, 1));
+  const shoulderRockControl = Math.abs(
+    shoulderAcross(Math.PI / 2, 0) - shoulderAcross(1.5 * Math.PI, 0),
+  );
   phaseEnds('realistic: road luminance and cranks');
+
+  // #626: the rider's shadow from 6 m straight above — nearly: a heading a
+  // thousandth of a unit long puts `cameraRig`'s eye and target a few
+  // millimetres apart over the rider, and still tells three which way the
+  // picture is up, where a heading of nothing does not — with the rider left
+  // out, drawn three ways: the silhouette, the round blob it replaced (the
+  // control), and no contact shadow at all, which is what "shadowed" is read
+  // against. A ground point is in shadow where it is at least a fifth darker
+  // than with none: the silhouette's full darkness takes 0.45 off.
+  const riderShadow = ((): { readonly shape: ShadowShape; readonly control: ShadowShape } => {
+    const base = riding(level, 400);
+    const rider = base.markers.find((marker) => marker.kind === 'rider');
+    const silhouette = realisticSilhouetteOf(view);
+    const thrown = { x: 0, z: 0 };
+    if (rider === undefined || silhouette === undefined) {
+      return { shape: NO_SHADOW_SHAPE, control: NO_SHADOW_SHAPE };
+    }
+    silhouetteThrow(rider, base.world.sun, thrown);
+    const above: SceneFrame = {
+      ...base,
+      scatter: [],
+      markers: [rider],
+      camera: {
+        x: rider.x,
+        y: rider.y,
+        z: rider.z,
+        headingX: SHADOW_HEADING_SHARE * rider.headingX,
+        headingZ: SHADOW_HEADING_SHARE * rider.headingZ,
+        eyeRoadY: rider.y + SHADOW_ALTITUDE_METRES - CAMERA_ABOVE_METRES,
+        targetRoadY: rider.y,
+      },
+    };
+    // `inTheFrame`'s projection, with the right-hand vector normalised: it
+    // takes the pose's heading as a unit vector, and this one is not.
+    const rig = cameraRig(above.camera);
+    const forwardLength = Math.hypot(
+      rig.target.x - rig.eye.x,
+      rig.target.y - rig.eye.y,
+      rig.target.z - rig.eye.z,
+    );
+    const forward = {
+      x: (rig.target.x - rig.eye.x) / forwardLength,
+      y: (rig.target.y - rig.eye.y) / forwardLength,
+      z: (rig.target.z - rig.eye.z) / forwardLength,
+    };
+    const right = { x: -rider.headingZ, z: rider.headingX };
+    const up = {
+      x: -right.z * forward.y,
+      y: right.z * forward.x - right.x * forward.z,
+      z: right.x * forward.y,
+    };
+    const aspect = canvas.width / canvas.height;
+    const tangent = verticalHalfTangent(aspect);
+    const overhead = (point: {
+      readonly x: number;
+      readonly y: number;
+      readonly z: number;
+    }): { readonly x: number; readonly y: number } => {
+      const to = { x: point.x - rig.eye.x, y: point.y - rig.eye.y, z: point.z - rig.eye.z };
+      const depth = to.x * forward.x + to.y * forward.y + to.z * forward.z;
+      const across = (1 + (to.x * right.x + to.z * right.z) / (depth * tangent * aspect)) / 2;
+      const down = (1 - (to.x * up.x + to.y * up.y + to.z * up.z) / (depth * tangent)) / 2;
+      return { x: canvas.width * across, y: canvas.height * (1 - down) };
+    };
+    realisticRidersShownOf(view, false);
+    const drawn = (): Uint8Array => {
+      view.render(above);
+      view.render(above);
+      return whole();
+    };
+    const silhouetteDrawn = drawn();
+    riderSilhouettesOf(view, false);
+    const blobDrawn = drawn();
+    view.setQuality({ ...top, riderShadows: 'none' });
+    const bare = drawn();
+    view.setQuality(top);
+    riderSilhouettesOf(view, true);
+    realisticRidersShownOf(view, true);
+    const luminanceAt = (pixels: Uint8Array, x: number, y: number): number => {
+      const at = (Math.round(y) * canvas.width + Math.round(x)) * 4;
+      return relativeLuminanceOf(pixels[at] ?? 0, pixels[at + 1] ?? 0, pixels[at + 2] ?? 0);
+    };
+    const shapeOf = (pixels: Uint8Array, twin: boolean): ShadowShape => {
+      let covered = 0;
+      let both = 0;
+      let either = 0;
+      let [acrossLow, acrossHigh, alongLow, alongHigh] = [Infinity, -Infinity, Infinity, -Infinity];
+      for (let across = -2.5; across <= 2.5; across += SHADOW_GRID_METRES) {
+        for (let along = -2.5; along <= 3; along += SHADOW_GRID_METRES) {
+          const point = {
+            x: rider.x + across * rider.headingZ + along * rider.headingX,
+            y: rider.y,
+            z: rider.z - across * rider.headingX + along * rider.headingZ,
+          };
+          const pixel = overhead(point);
+          if (pixel.x < 0 || pixel.y < 0 || pixel.x >= canvas.width || pixel.y >= canvas.height) {
+            continue;
+          }
+          const without = luminanceAt(bare, pixel.x, pixel.y);
+          const shaded = luminanceAt(pixels, pixel.x, pixel.y) < 0.8 * without;
+          const predicted = twin && silhouetteCoverage(silhouette, thrown, across, along) > 0.5;
+          if (shaded && predicted) both += 1;
+          if (shaded || predicted) either += 1;
+          if (!shaded) continue;
+          covered += 1;
+          acrossLow = Math.min(acrossLow, across);
+          acrossHigh = Math.max(acrossHigh, across);
+          alongLow = Math.min(alongLow, along);
+          alongHigh = Math.max(alongHigh, along);
+        }
+      }
+      const cell = SHADOW_GRID_METRES * SHADOW_GRID_METRES;
+      const box =
+        (acrossHigh - acrossLow + SHADOW_GRID_METRES) * (alongHigh - alongLow + SHADOW_GRID_METRES);
+      return {
+        fill: covered === 0 ? 0 : (covered * cell) / box,
+        squareMetres: covered * cell,
+        agreement: either === 0 ? 0 : both / either,
+      };
+    };
+    return { shape: shapeOf(silhouetteDrawn, true), control: shapeOf(blobDrawn, false) };
+  })();
+  phaseEnds('realistic: rider shadow — #626');
 
   // #500: a house on the road 24 m ahead, turned to face the camera, and its
   // front ground-floor window read back — then the same square on a view
@@ -6201,6 +6394,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     levelDescentLuminance,
     crankTurnPixels: pixelsChanged(atRest, turned),
     crankHeldPixels: pixelsChanged(turned, held),
+    shoulderRock,
+    shoulderRockControl,
+    riderShadow: riderShadow.shape,
+    riderShadowControl: riderShadow.control,
     worldChangedShare,
     air,
     atmosphere,
