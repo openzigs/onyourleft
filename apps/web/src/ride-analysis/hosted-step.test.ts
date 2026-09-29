@@ -19,6 +19,7 @@ import { modelServer, STILL_CLOCK, type ModelServer } from './model-server-testi
 import type { ModelStepPort, StepRequest } from './model-step-port';
 import { runAnalysis } from './runner';
 import { sealStep } from './sealed-step';
+import { patternsOnlyGuard } from './personal-details-testing';
 
 const KEY = 'fixture-hosted-key-DO-NOT-LEAK-0123456789';
 
@@ -70,7 +71,7 @@ function controller(send: HostedSend, hostedOn = true): CameraController {
   const camera = new CameraController({
     port: scriptedCamera().port,
     schedule: manualSchedule().schedule,
-    hosted: () => hostedModelPort(service(), { send }),
+    hosted: () => hostedModelPort(service(), { guard: patternsOnlyGuard, send }),
   });
   camera.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
   if (hostedOn) {

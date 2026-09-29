@@ -202,7 +202,9 @@ const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
   // #623: 'Your kit' is not here. The walk renders Settings with no kit port,
   // where the owner's ruling of 2026-09-28 leaves the kit control ABSENT and
   // with it the "More about your kit" that explained the choice.
-  settings: ['Units', 'Your weight', 'Announcements', 'Sounds', 'Game world'],
+  // #839: 'Words to mask' tucks what is masked and what masking cannot do
+  // under its "More about"; where it is kept stays above the form.
+  settings: ['Units', 'Your weight', 'Announcements', 'Sounds', 'Game world', 'Words to mask'],
   segments: ['Make a segment', 'Find your efforts'],
   transfer: ['Import'],
 };

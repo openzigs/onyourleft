@@ -420,6 +420,11 @@ test.describe('#670 — one pane below 840 px', () => {
         // the focus was timing, which is why the case was flaky rather than
         // red; a list that was drawn again at all is what this asserts, and
         // that is not timing (`ActivitiesView.tsx` §`useLibraryLayout`).
+        // ⚠️ But it reads the expando at ONE moment, so a redraw that lands
+        // after this `evaluate` still passes: before the fix it went red only
+        // 2 times in 20 (#758). The deterministic gate is
+        // `ActivitiesView.test.tsx` §"#738" and §"#758"; this is the
+        // corroboration in a real engine.
         expect(
           await item.evaluate(
             (link) => (link as HTMLElement & { oylLeftFrom?: true }).oylLeftFrom === true,

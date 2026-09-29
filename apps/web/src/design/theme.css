@@ -2611,6 +2611,33 @@ p > label + input[type='file'] {
   color: var(--oyl-color-ink-muted);
 }
 
+/*
+ * The rider's words to mask (#839, `athlete/MaskedWordsPanel.tsx`). One row an
+ * entry, its Remove beside it and wrapping under it on a narrow screen, and
+ * the entry itself broken anywhere — a rider may list an unbreakable village
+ * name, which would otherwise scroll a phone's page sideways (SC 1.4.10).
+ */
+.oyl-masked-words__list {
+  display: grid;
+  gap: var(--oyl-space-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.oyl-masked-words__list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-masked-words__word {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .oyl-write-up__text {
   margin-inline: 0;
   padding-inline-start: var(--oyl-space-md);

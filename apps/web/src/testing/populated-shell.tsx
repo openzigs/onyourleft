@@ -78,6 +78,7 @@ import { AppShell, type AppShellProps } from '../shell/AppShell';
 import type { RouteId } from '../shell/routes';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import type { UnitsPort } from '../units/store-port';
+import type { MaskedWordsPort } from '../athlete/masked-words-port';
 import { workoutStub } from '../workouts/testing';
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
@@ -171,10 +172,8 @@ export const POPULATED: Record<RouteId, PopulatedExpectation> = {
     reason:
       'the camera this page hands it opens nothing, and its side-camera pairing is offered and never made, so it is the same in both walks',
   },
-  settings: {
-    kind: 'none',
-    reason: 'its forms are the same whatever is stored; nothing it renders is a list of data',
-  },
+  // #839: the rider's words to mask are the one list the screen renders.
+  settings: { kind: 'fixture', marker: '.oyl-main .oyl-masked-words li' },
   about: { kind: 'none', reason: 'static prose' },
   // #690: its waypoint list and legs table come from the draft in local
   // storage, which `PopulatedShell` writes for the populated walk and clears
@@ -294,6 +293,8 @@ const POPULATED_WRITE_UP: RideWriteUpRecord = {
 function rideAnalysisPort(): RideAnalysisPort {
   return {
     availableSources: () => ['computer'],
+    previewHostedRequest: async () => Promise.resolve({ kind: 'shown', steps: [], total: 1 }),
+    hostedPreviewSeen: () => true,
     askForRideWriteUp: async () => new Promise<AskOutcome>(() => undefined),
   };
 }
@@ -388,6 +389,35 @@ function settingsPort(): UnitsPort {
     store: {
       setAthleteUnits: (id, units): Promise<AthleteRecord | undefined> =>
         Promise.resolve({ id, displayName: 'You', createdAt: unixSeconds(NOW), units }),
+    },
+  };
+}
+
+/**
+ * The rider's words to mask (#839) — in the populated walk a list whose
+ * entries include one long phrase and one unbreakable word, so the reflow
+ * walk lays out the longest a row can be.
+ */
+function maskedWordsPort(populated: boolean): MaskedWordsPort {
+  const words = populated
+    ? [
+        'Kestrel Farm',
+        'The Old Rectory, Lower Oakbrook Lane, Little Wittenham-on-the-Marsh',
+        'Supercalifragilisticexpialidociousvillagename',
+      ]
+    : [];
+  return {
+    athleteId: ATHLETE,
+    store: {
+      getAthlete: (id): Promise<AthleteRecord | undefined> =>
+        Promise.resolve({
+          id,
+          displayName: 'You',
+          createdAt: unixSeconds(NOW),
+          maskedWords: words,
+        }),
+      setAthleteMaskedWords: (id, next): Promise<AthleteRecord | undefined> =>
+        Promise.resolve({ id, displayName: 'You', createdAt: unixSeconds(NOW), maskedWords: next }),
     },
   };
 }
@@ -509,6 +539,7 @@ export function PopulatedShell({
       rideController={stubRideController(populated ? ridingSnapshot() : idleSnapshot()).controller}
       settings={settingsPort()}
       athleteMass={athleteMassPort()}
+      maskedWords={maskedWordsPort(populated)}
       library={stubLibrary(ATHLETE, rides)}
       detail={detailPort(populated)}
       rideAnalysis={rideAnalysisPort()}

@@ -257,5 +257,57 @@ run_check
 assert_exit 'a Dockerfile with no FROM fails' 1
 assert_says 'as IMG005, saying so' 'IMG005 apps/instance/Dockerfile'"'"'s base image is not pinned by digest: (no FROM line)'
 
+# Every FROM, in every spelling Docker reads (#852). The check used to read the
+# first line starting `FROM`, so each of these passed it.
+OTHER='node:24.21.0-alpine@sha256:1111111111111111111111111111111111111111111111111111111111111111'
+
+new_fixture
+printf 'FROM %s AS build\nFROM node:24-bookworm-slim\n' "${PINNED}" > "${tmp}/repo/apps/instance/Dockerfile"
+run_check
+assert_exit 'a second stage built from a tag fails' 1
+assert_says 'as IMG005, naming the second base' 'not pinned by digest: node:24-bookworm-slim'
+
+new_fixture
+printf 'from node:24-bookworm-slim\n' > "${tmp}/repo/apps/instance/Dockerfile"
+run_check
+assert_exit 'a lowercase from with a tag fails' 1
+assert_says 'as IMG005, naming it' 'not pinned by digest: node:24-bookworm-slim'
+
+new_fixture
+printf '  FROM --platform=linux/amd64 node:24-bookworm-slim AS run\n' > "${tmp}/repo/apps/instance/Dockerfile"
+run_check
+assert_exit 'an indented FROM with --platform and a tag fails' 1
+assert_says 'as IMG005, naming the image rather than the option' 'not pinned by digest: node:24-bookworm-slim'
+
+new_fixture
+printf 'FROM node AS node\n' > "${tmp}/repo/apps/instance/Dockerfile"
+run_check
+assert_exit 'a stage named like its unpinned image fails' 1
+assert_says 'as IMG005, reading the image and not the alias' 'not pinned by digest: node'
+
+new_fixture
+printf 'FROM\n' > "${tmp}/repo/apps/instance/Dockerfile"
+run_check
+assert_exit 'a FROM with no image fails' 1
+assert_says 'as IMG005, saying so' 'not pinned by digest: (a FROM line with no image)'
+
+new_fixture
+# The literal $BUILDPLATFORM is the Dockerfile's, not this shell's.
+# shellcheck disable=SC2016
+printf 'FROM --platform=$BUILDPLATFORM %s AS Build\nfrom %s as test\nFROM build AS run\nFROM scratch\nFROM TEST\n' \
+  "${PINNED}" "${OTHER}" > "${tmp}/repo/apps/instance/Dockerfile"
+run_check
+assert_exit 'every FROM pinned, with stage references and scratch, passes' 0
+assert_asked 'pulls the first base' "docker pull --quiet ${PINNED}"
+assert_asked 'and the second' "docker pull --quiet ${OTHER}"
+assert_not_asked 'and not a stage by its name' 'docker pull --quiet build'
+assert_not_asked 'nor scratch' 'docker pull --quiet scratch'
+
+new_fixture
+printf 'FROM scratch\n' > "${tmp}/repo/apps/instance/Dockerfile"
+run_check
+assert_exit 'a Dockerfile built only from scratch pulls nothing and passes' 0
+assert_not_asked 'and pulls nothing' 'docker pull'
+
 printf '\n%d passed, %d failed\n' "${pass}" "${fail}"
 [ "${fail}" -eq 0 ]
