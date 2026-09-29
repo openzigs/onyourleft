@@ -188,6 +188,11 @@ apps/                 AGPL-3.0-or-later, without exception
                         inline palette script into every page Vite builds —
                         product and harness — straight after the charset, so
                         the first frame is in the right palette (#672)
+    tools/bundle/       two rules the product build checks about itself and
+                        fails on (#673, #674): the Lucide icon modules in the
+                        bundle are exactly the icons the source imports
+                        (ADR 0034 D-2), and no view `shell/lazy/` names is in
+                        the entry chunk's static graph
     tools/precache/     what the worker precaches, as a pure function over the
                         build's output (#406) — build-time code, so it lives
                         beside the icon generator rather than in `src/`
@@ -428,8 +433,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         and since #427 the navigation: four groups recorded on
                         the route table itself (`routes.ts` §`NavGroupId`), a
                         bar on a compact window and a rail on a wider one, and
-                        the icons, authored here as inline SVG rather than
-                        installed — no icon set is a dependency; and since
+                        the icons — ⚠️ Lucide's since #673 (ADR 0034:
+                        `lucide-react`, named imports only; a reviewer who
+                        remembers "authored here as inline SVG, no icon set
+                        is a dependency" is reading the old file); and since
                         #670 `ListDetail.tsx`, the list beside its detail on
                         Activities, Workouts and Routes — two panes from the
                         ONE breakpoint `theme.css` §`--oyl-list-detail-from`
@@ -439,7 +446,15 @@ apps/                 AGPL-3.0-or-later, without exception
                         ⚠️ Every selection pushes a history entry at BOTH
                         widths, on purpose (`ListDetail.tsx` §History), and
                         the panes' skip link goes list → detail only, at two
-                        panes only
+                        panes only. ⚠️ Since #674 every view but Home and
+                        the not-found page is LAZY: one module per navigation
+                        group under `lazy/`, loaded with a literal `import()`
+                        through `lazy-view.tsx` (a loading line under the
+                        `h1`, and a Reload on a chunk that cannot be fetched),
+                        preloaded by `main.tsx` once Home is idle. A view
+                        imported by name from the entry's graph fails
+                        `pnpm run build` (`tools/bundle/entry-graph.ts`), and
+                        the jsdom `mount`/`settle` wait for the loads
     src/support/        browser-capability detection and its notice (#48), and
                         since #409 whether this browser may throw a rider's
                         history away — the one place `persist()` is asked for,
@@ -657,7 +672,13 @@ apps/                 AGPL-3.0-or-later, without exception
                         — the distances it was checked at are validation 0002
                         Part N. `simulatedCrankAngle` turns the other two's
                         cranks from their own ODOMETER at a fixed gear, which
-                        is neither a reading nor a rate anybody invented
+                        is neither a reading nor a rate anybody invented.
+                        ⚠️ **Since #625 the realistic body MOVES** — pelvis
+                        roll, trunk rock, a head held level, ankling
+                        (`riderMotion`, amplitudes cited) — only while the
+                        marker's `pedalling` says a reading turns the cranks,
+                        and a breath on the RIDE's clock (`rideSeconds`), so a
+                        held ride holds it. The stylised rider does not move
     src/game/racing-line.ts
                         the line each rider rides through a bend, and the lean
                         (#499) — the least PEAK curvature inside the
@@ -718,8 +739,14 @@ apps/                 AGPL-3.0-or-later, without exception
                         device now stores `oyl.game.riderShadowMap = off` to
                         not get it. The blob is the FALLBACK — every rung after
                         the first step down (`keepsShadowMap`'s latch is
-                        unchanged), the realistic world, and a device that
-                        turned the map off. ⚠️ **The ghost casts no MAP shadow
+                        unchanged), and a device that turned the map off.
+                        ⚠️ **Since #626 NOT the realistic world**, which casts
+                        a bike-shaped silhouette on the same rungs instead
+                        (`rider-silhouette.ts`, `three-renderer.ts`
+                        §`RiderSilhouetteBelt`): the rider's side view made
+                        once, thrown along the sun each frame by a shader whose
+                        TypeScript twin is `silhouetteCoverage`, and which the
+                        browser gate holds to that twin. ⚠️ **The ghost casts no MAP shadow
                         either**, and did until #547: it shares the rider's
                         meshes, so `three-renderer.ts` §`RiderBelt` hands the
                         pass the casters only, by this file's table. The ride's
@@ -2399,7 +2426,9 @@ devDependency, because `three` ships no types of its own) and — since #529 —
 `jsqr` 1.4.0 (Apache-2.0), both **zero-dependency** runtime dependencies of `apps/web`, which draw and
 read the side camera's pairing QR codes and are named in exactly one file,
 `apps/web/src/camera/side-link-qr.ts` and loaded from it with `import()` only while pairing, so
-neither is in the entry chunk, are
+neither is in the entry chunk, and — since #673 — `lucide-react` 1.48.0 (ISC, with MIT for the
+icons derived from Feather; **zero dependencies**, a runtime dependency of `apps/web`, named imports
+only — [ADR 0034](docs/adr/0034-lucide-icons.md)), are
 installed;
 
 ⚠️ **`three` is pinned at 0.185.1 rather than at the current 0.186.0 deliberately, and since #489
@@ -4321,9 +4350,10 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   reading the old file.
   ⚠️ **0035 is [ADR 0035](docs/adr/0035-model-written-ride-write-ups.md)**, taken by
   [#796](https://github.com/openzigs/onyourleft/issues/796) for a ride write-up written by the
-  rider's own model, and **0034 is reserved for [#673](https://github.com/openzigs/onyourleft/issues/673)**,
-  whose title names it; it is not written. A reviewer who remembers this sentence offering 0034 is
-  reading the old file.
+  rider's own model, and **0034 is [ADR 0034](docs/adr/0034-lucide-icons.md)**, reserved for
+  [#673](https://github.com/openzigs/onyourleft/issues/673) and written by it on 2026-09-29 (bundle
+  [#857](https://github.com/openzigs/onyourleft/issues/857)): icons come from Lucide. A reviewer who
+  remembers this sentence calling 0034 reserved and unwritten is reading the old file.
   ⚠️ **0033 is [ADR 0033](docs/adr/0033-side-camera-link.md)**, taken by
   [#527](https://github.com/openzigs/onyourleft/issues/527) for the side-camera link. A reviewer who
   remembers this sentence offering 0033 is reading the old file.

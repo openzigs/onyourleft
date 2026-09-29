@@ -158,6 +158,7 @@ import {
   CylinderGeometry,
   DirectionalLight,
   DoubleSide,
+  DataTexture,
   DynamicDrawUsage,
   EquirectangularReflectionMapping,
   FogExp2,
@@ -165,6 +166,7 @@ import {
   HalfFloatType,
   InstancedBufferAttribute,
   InstancedMesh,
+  LinearFilter,
   LinearMipmapLinearFilter,
   LoadingManager,
   Matrix4,
@@ -194,16 +196,18 @@ import {
   RGBA_S3TC_DXT5_Format,
   RGB_PVRTC_4BPPV1_Format,
   RGBAFormat,
+  RGFormat,
   SRGBColorSpace,
   TorusGeometry,
+  UnsignedByteType,
   ShaderChunk,
   UniformsLib,
   UniformsUtils,
   Vector2,
   Vector3,
+  Vector4,
   WebGLRenderer,
   type Bone,
-  type DataTexture,
   type Material,
   type Object3D,
   type SkinnedMesh,
@@ -255,8 +259,11 @@ import {
   RIDER_PALETTE,
   emptyRiderJoints,
   riderKitFor,
+  emptyRiderMotion,
   legBones,
   riderJoints,
+  riderMotion,
+  type RiderMotion,
   type JointPoint,
   type RiderKit,
   type RiderPart,
@@ -273,6 +280,16 @@ import {
   tyreUv,
   type Uv,
 } from './bicycle-surfaces';
+import {
+  rasteriseSilhouette,
+  silhouetteThrow,
+  SILHOUETTE_ALONG_TEXELS,
+  SILHOUETTE_EDGE_METRES,
+  SILHOUETTE_MARGIN_METRES,
+  SILHOUETTE_TAPS,
+  SILHOUETTE_UP_TEXELS,
+  type RiderSilhouette,
+} from './rider-silhouette';
 import {
   CASTS_CONTACT_SHADOW,
   CONTACT_SHADOW_DARKNESS,
@@ -3069,6 +3086,219 @@ function contactShadowGeometry(): BufferGeometry {
   geometry.setIndex(indices);
   return geometry;
 }
+
+/**
+ * The realistic riders' bike-shaped shadow — #626, option 1: the side view
+ * `rider-silhouette.ts` makes once, cast along `world.ts`'s one sun by a
+ * fragment shader, **one instanced transparent draw for all of them**, in
+ * place of the round blob {@link ContactShadowBelt} draws. The stylised world
+ * keeps the blob and the map (#547) exactly as it had them.
+ *
+ * Drawn the way the blob is, and for its reasons: transparent with no depth
+ * write, depth-tested, lifted {@link CONTACT_SHADOW_LIFT_METRES} and
+ * polygon-offset toward the camera, black with an alpha no darker than
+ * {@link CONTACT_SHADOW_DARKNESS}. Not fogged: it lies under a rider, where
+ * the fog has taken next to nothing (the blob's own #622 argument).
+ *
+ * ⚠️ **One texture, 64 KiB, and no depth pass**: the quad a rider is drawn
+ * over is its cast silhouette's footprint on the road, and each fragment walks
+ * up the heights that could have cast onto it (`rider-silhouette.ts`
+ * §`silhouetteCoverage` is the same arithmetic in TypeScript). The ghost
+ * casts none (`contact-shadow.ts` §`CASTS_CONTACT_SHADOW`).
+ */
+export class RiderSilhouetteBelt {
+  readonly #texture: DataTexture;
+  readonly #material: ShaderMaterial;
+  readonly #mesh: InstancedMesh;
+  readonly #throws: InstancedBufferAttribute;
+  readonly #throw: SunThrow = { x: 0, z: 0 };
+  /** The `oylDarkness` uniform itself. @see setDarkness */
+  readonly #darkness = { value: CONTACT_SHADOW_DARKNESS };
+  readonly #position = new Vector3();
+  readonly #turn = new Quaternion();
+  readonly #matrix = new Matrix4();
+  readonly #up = new Vector3(0, 1, 0);
+  readonly #unit = new Vector3(1, 1, 1);
+  #shown = false;
+
+  constructor(silhouette: RiderSilhouette) {
+    this.#texture = new DataTexture(
+      silhouette.texels,
+      SILHOUETTE_ALONG_TEXELS,
+      SILHOUETTE_UP_TEXELS,
+      RGFormat,
+      UnsignedByteType,
+    );
+    this.#texture.magFilter = LinearFilter;
+    this.#texture.minFilter = LinearFilter;
+    this.#texture.generateMipmaps = false;
+    this.#texture.wrapS = ClampToEdgeWrapping;
+    this.#texture.wrapT = ClampToEdgeWrapping;
+    this.#texture.needsUpdate = true;
+    const { zMin, zMax, height, reach } = silhouette.bounds;
+    this.#material = constructed(
+      new ShaderMaterial({
+        uniforms: {
+          oylSilhouette: { value: this.#texture },
+          oylBounds: { value: new Vector4(zMin, zMax, height, reach) },
+          oylDarkness: this.#darkness,
+        },
+        vertexShader: SILHOUETTE_VERTEX,
+        fragmentShader: SILHOUETTE_FRAGMENT,
+        transparent: true,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -4,
+      }),
+    );
+    const geometry = new BufferGeometry();
+    // A unit square in (x, z), facing +Y: the vertex shader stretches it over
+    // each rider's cast footprint. Wound for +Y — the blob's reason.
+    geometry.setAttribute(
+      'position',
+      new BufferAttribute(new Float32Array([0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1]), 3),
+    );
+    geometry.setIndex([0, 2, 1, 0, 3, 2]);
+    this.#throws = new InstancedBufferAttribute(new Float32Array(RIDDEN_KINDS.length * 2), 2);
+    this.#throws.setUsage(DynamicDrawUsage);
+    geometry.setAttribute('oylThrow', this.#throws);
+    this.#mesh = new InstancedMesh(geometry, this.#material, RIDDEN_KINDS.length);
+    this.#mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+    this.#mesh.count = 0;
+    this.#mesh.frustumCulled = false;
+    this.#mesh.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The one mesh. For the tests and the harness. */
+  get mesh(): InstancedMesh {
+    return this.#mesh;
+  }
+
+  /** Whether a material is this belt's — kept out of the realistic air, as the blob's is. */
+  wears(material: Material): boolean {
+    return material === this.#material;
+  }
+
+  /** Whether the silhouettes are drawn at all. */
+  setShown(on: boolean): void {
+    this.#shown = on;
+    if (!on) {
+      this.#mesh.count = 0;
+      this.#mesh.visible = false;
+    }
+  }
+
+  /**
+   * How dark a whole silhouette is — {@link CONTACT_SHADOW_DARKNESS} unless the
+   * browser gate's control asks otherwise. @see riderSilhouetteDarknessOf
+   */
+  setDarkness(darkness: number): void {
+    this.#darkness.value = darkness;
+  }
+
+  /** One silhouette per rider who casts one, under this frame's sun. Allocates nothing. */
+  place(markers: readonly RiderMarker[], sun: SunStyle): void {
+    if (!this.#shown) {
+      return;
+    }
+    let slot = 0;
+    for (const marker of markers) {
+      if (slot >= RIDDEN_KINDS.length) {
+        break;
+      }
+      if (!silhouetteThrow(marker, sun, this.#throw)) {
+        continue;
+      }
+      this.#position.set(marker.x, marker.y + CONTACT_SHADOW_LIFT_METRES, marker.z);
+      this.#turn.setFromAxisAngle(this.#up, Math.atan2(marker.headingX, marker.headingZ));
+      this.#mesh.setMatrixAt(slot, this.#matrix.compose(this.#position, this.#turn, this.#unit));
+      this.#throws.setXY(slot, this.#throw.x, this.#throw.z);
+      slot += 1;
+    }
+    this.#mesh.count = slot;
+    this.#mesh.instanceMatrix.needsUpdate = true;
+    this.#throws.needsUpdate = true;
+    this.#mesh.visible = slot > 0;
+  }
+
+  dispose(): void {
+    this.#mesh.geometry.dispose();
+    this.#mesh.dispose();
+    this.#material.dispose();
+    this.#texture.dispose();
+  }
+}
+
+/** The silhouette's quad, stretched over one rider's cast footprint. @see RiderSilhouetteBelt */
+const SILHOUETTE_VERTEX = /* glsl */ `
+attribute vec2 oylThrow;
+uniform vec4 oylBounds;
+varying vec2 vOylGround;
+varying vec2 vOylThrow;
+void main() {
+  float margin = ${glslFloat(SILHOUETTE_MARGIN_METRES)};
+  float topAcross = oylBounds.z * oylThrow.x;
+  float topAlong = oylBounds.z * oylThrow.y;
+  float edge = oylBounds.w + margin;
+  float across = mix(min(0.0, topAcross) - edge, max(0.0, topAcross) + edge, position.x);
+  float along = mix(
+    oylBounds.x + min(0.0, topAlong) - margin,
+    oylBounds.y + max(0.0, topAlong) + margin,
+    position.z
+  );
+  vOylGround = vec2(across, along);
+  vOylThrow = oylThrow;
+  gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(across, 0.0, along, 1.0);
+}
+`;
+
+/**
+ * How covered a point on the road is by the cast silhouette — #626.
+ * `rider-silhouette.ts` §`silhouetteCoverage` is this, in TypeScript.
+ */
+const SILHOUETTE_FRAGMENT = /* glsl */ `
+uniform sampler2D oylSilhouette;
+uniform vec4 oylBounds;
+uniform float oylDarkness;
+varying vec2 vOylGround;
+varying vec2 vOylThrow;
+void main() {
+  float height = oylBounds.z;
+  float reach = oylBounds.w;
+  float low = 0.0;
+  float high = height;
+  if (abs(vOylThrow.x) > 1e-4) {
+    float a = (vOylGround.x - reach) / vOylThrow.x;
+    float b = (vOylGround.x + reach) / vOylThrow.x;
+    low = max(0.0, min(a, b));
+    high = min(height, max(a, b));
+  }
+  if (high < low) discard;
+  float cover = 0.0;
+  for (int tap = 0; tap < ${String(SILHOUETTE_TAPS)}; tap++) {
+    float y = low + (high - low) * (float(tap) + 0.5) / ${glslFloat(SILHOUETTE_TAPS)};
+    float z = vOylGround.y - y * vOylThrow.y;
+    float x = abs(vOylGround.x - y * vOylThrow.x);
+    vec2 uv = vec2((z - oylBounds.x) / (oylBounds.y - oylBounds.x), y / height);
+    if (uv.x < 0.0 || uv.x >= 1.0 || uv.y < 0.0 || uv.y >= 1.0) continue;
+    vec2 texel = texture2D(oylSilhouette, uv).rg;
+    float edge = texel.g * reach;
+    float inside = 1.0 - smoothstep(
+      edge - ${glslFloat(SILHOUETTE_EDGE_METRES)},
+      edge + ${glslFloat(SILHOUETTE_EDGE_METRES)},
+      x
+    );
+    cover = max(cover, texel.r * inside);
+  }
+  if (cover <= 0.0) discard;
+  gl_FragColor = vec4(0.0, 0.0, 0.0, oylDarkness * cover);
+}
+`;
 
 /**
  * The ground under the realistic scenery — #620: one soft dark ellipse under
@@ -7810,6 +8040,12 @@ export class RealisticRiderBelt {
   readonly #alongTheBicycle = new Vector3(0, 0, 1);
   readonly #roll = new Quaternion();
   readonly #unit = new Vector3(1, 1, 1);
+  /** #625's scratch: the motion, the head held level, and a world turn. */
+  readonly #motion = emptyRiderMotion();
+  readonly #headHeld = new Quaternion();
+  readonly #spin = new Quaternion();
+  readonly #alongWorld = new Vector3();
+  readonly #acrossWorld = new Vector3();
   #shown = true;
 
   constructor(body: Object3D, maps: RealisticBicycleMaps, dressed: RealisticRiderMaps) {
@@ -7930,6 +8166,75 @@ export class RealisticRiderBelt {
     return this.#helmets;
   }
 
+  /**
+   * The rider and bicycle seen from the side, with the cranks level — #626's
+   * silhouette, made from THIS belt's own body, posed by this belt's own
+   * `#pose`, and the bicycle's own meshes, so the shadow is the shape that is
+   * drawn. Made once, when a view builds its realistic world; it poses slot 0
+   * at the origin and leaves it hidden, so it must run before a frame is
+   * placed, which `RealisticDrawing`'s constructor is.
+   */
+  silhouette(): RiderSilhouette {
+    const level: RiderMarker = {
+      kind: 'rider',
+      x: 0,
+      y: 0,
+      z: 0,
+      headingX: 0,
+      headingZ: 1,
+      lean: 0,
+      bodyLean: 0,
+      pedalling: 0,
+      rideSeconds: 0,
+      crankAngle: Math.PI / 2,
+    };
+    this.#placeOne(0, level);
+    const rider = this.#riders[0] as RealisticRiderSlot;
+    rider.root.updateMatrixWorld(true);
+    const corners: number[] = [];
+    const vertex = new Vector3();
+    const pushed = (geometry: BufferGeometry, at: (index: number) => Vector3): void => {
+      const index = geometry.index;
+      const count = index === null ? geometry.getAttribute('position').count : index.count;
+      for (let corner = 0; corner < count; corner += 1) {
+        const point = at(index === null ? corner : index.getX(corner));
+        corners.push(point.x, point.y, point.z);
+      }
+    };
+    // The body, skinned where this pose put it, into the bicycle's frame —
+    // which is the world's here: the belt's group has no parent yet.
+    const body = rider.body;
+    pushed(body.geometry, (index) =>
+      body.getVertexPosition(index, vertex).applyMatrix4(body.matrixWorld),
+    );
+    // The bicycle's meshes, the crankset and the helmet, as slot 0 draws them.
+    for (const mesh of [this.#frame, this.#rubber, this.#metal, this.#cranks, this.#helmets]) {
+      mesh.getMatrixAt(0, this.#matrix);
+      const at = mesh.geometry.getAttribute('position');
+      pushed(mesh.geometry, (index) =>
+        vertex.fromBufferAttribute(at, index).applyMatrix4(this.#matrix),
+      );
+    }
+    rider.root.visible = false;
+    return rasteriseSilhouette(new Float32Array(corners));
+  }
+
+  /**
+   * The first drawn rider's shoulders — the middle of its two upper arms'
+   * heads — in world space, written into `into`; `false` when none is drawn.
+   * #625's browser gate. @see realisticShouldersOf
+   */
+  shouldersOf(into: { x: number; y: number; z: number }): boolean {
+    const rider = this.#riders[0];
+    if (rider === undefined || !rider.root.visible) return false;
+    const left = boneOf(rider.bones, 'upperarm01.L').getWorldPosition(this.#a);
+    const right = boneOf(rider.bones, 'upperarm01.R').getWorldPosition(this.#b);
+    into.x = (left.x + right.x) / 2;
+    into.y = (left.y + right.y) / 2;
+    into.z = (left.z + right.z) / 2;
+    return true;
+  }
+
   /** Every rider's body. For the tests. */
   get bodies(): readonly SkinnedMesh[] {
     return this.#riders.map((rider) => rider.body);
@@ -8005,7 +8310,10 @@ export class RealisticRiderBelt {
     const tint = this.#tint.setHex(RIDER_TINTS[marker.kind]);
     rider.material.color.copy(tint);
     rider.root.updateMatrixWorld(true);
-    this.#pose(rider, rider.angle, marker.bodyLean);
+    // #625: how this rider moves on top of the joints — from the crank angle
+    // it is drawn at, how much of the stroke is drawn, and the RIDE's clock.
+    const motion = riderMotion(rider.angle, marker.pedalling, marker.rideSeconds, this.#motion);
+    this.#pose(rider, rider.angle, marker.bodyLean, motion);
     const world = rider.root.matrixWorld;
     for (const mesh of [this.#frame, this.#rubber, this.#metal]) {
       mesh.setMatrixAt(slot, world);
@@ -8024,14 +8332,45 @@ export class RealisticRiderBelt {
     this.#helmets.setColorAt(slot, tint);
   }
 
-  /** Aims one rider's bones at `bicycle.ts`'s joints for a crank angle. */
-  #pose(rider: RealisticRiderSlot, crankAngle: number, bodyLean: number): void {
+  /**
+   * Aims one rider's bones at `bicycle.ts`'s joints for a crank angle, and
+   * moves them by `motion` — #625.
+   *
+   * The motion is applied in the order that keeps what #369 and #546 fix:
+   *
+   * 1. The pelvis rolls about the bicycle's long axis BEFORE the hips are
+   *    found, so the hips' middle is still put on the saddle and each leg's
+   *    two-bone solve starts from the rolled hip — the feet stay on the pedals.
+   *    (Each half about its own head; the two meet at the body's middle.)
+   * 2. The back is aimed as before, at `bodyLean` (#546), and the head's world
+   *    orientation read there. Then it is aimed again at the rocked and
+   *    breathing back, and the HEAD is turned back to what it was: the
+   *    shoulders move and the head stays level, looking up the road.
+   * 3. The arms are solved from wherever the shoulders now are to the grips,
+   *    so the hands stay on the bar: the arms absorb the rock.
+   * 4. Each foot turns about the bicycle's `+X` at its own ankle, which is the
+   *    point the shin is aimed at, so ankling moves no pedal.
+   */
+  #pose(
+    rider: RealisticRiderSlot,
+    crankAngle: number,
+    bodyLean: number,
+    motion: RiderMotion,
+  ): void {
     for (let index = 0; index < rider.ordered.length; index += 1) {
       const bone = rider.ordered[index] as Bone;
       bone.quaternion.copy(rider.restQuaternions[index] as Quaternion);
       bone.position.copy(rider.restPositions[index] as Vector3);
     }
     rider.root.updateMatrixWorld(true);
+    const along = this.#alongWorld.set(0, 0, 1).transformDirection(rider.root.matrixWorld);
+    const across = this.#acrossWorld.set(1, 0, 0).transformDirection(rider.root.matrixWorld);
+    const skeletonRoot = boneOf(rider.bones, 'root');
+    // 1. #625: the pelvis rolls toward the downstroke — its two halves, and
+    // not the skeleton's root, so the back and the head start from where they
+    // would have with no motion and the head can be held exactly there (2).
+    this.#turnInWorld(boneOf(rider.bones, 'pelvis.L'), along, motion.pelvisRoll);
+    this.#turnInWorld(boneOf(rider.bones, 'pelvis.R'), along, motion.pelvisRoll);
     // #546: the shoulders held back toward upright against the bicycle; the
     // back is aimed at them below, so the MakeHuman body rolls about its hips.
     const joints = riderJoints(crankAngle, this.#joints, bodyLean);
@@ -8043,7 +8382,6 @@ export class RealisticRiderBelt {
       .add(boneOf(rider.bones, 'upperleg01.R').getWorldPosition(this.#b))
       .multiplyScalar(0.5);
     const shift = toWorld(joints.hips, this.#b).sub(hips);
-    const skeletonRoot = boneOf(rider.bones, 'root');
     skeletonRoot.parent?.getWorldQuaternion(this.#parent);
     shift.applyQuaternion(this.#parent.invert()).divideScalar(this.#scale);
     skeletonRoot.position.add(shift);
@@ -8051,6 +8389,20 @@ export class RealisticRiderBelt {
     // The back, from the hips towards the shoulders.
     toWorld(joints.shoulders, this.#c).sub(toWorld(joints.hips, this.#d));
     this.#aim(rider, 'spine05', 'neck01', this.#c);
+    // 2. #625: the head as the unrocked back holds it, then the rock and the
+    // breath, then the head put back — level, looking up the road.
+    const head = boneOf(rider.bones, 'head');
+    head.getWorldQuaternion(this.#headHeld);
+    if (motion.trunkRoll !== 0 || motion.trunkPitch !== 0) {
+      riderJoints(crankAngle, this.#joints, bodyLean + motion.trunkRoll);
+      toWorld(joints.shoulders, this.#c).sub(toWorld(joints.hips, this.#d));
+      this.#c.applyQuaternion(this.#spin.setFromAxisAngle(across, motion.trunkPitch));
+      this.#aim(rider, 'spine05', 'neck01', this.#c);
+      this.#parent.identity();
+      head.parent?.getWorldQuaternion(this.#parent);
+      head.quaternion.copy(this.#parent.invert().multiply(this.#headHeld));
+      head.updateMatrixWorld(true);
+    }
     const forward = this.#e.set(0, 0, 1).transformDirection(rider.root.matrixWorld);
     for (const index of [0, 1] as const) {
       const suffix = index === 0 ? 'L' : 'R';
@@ -8078,7 +8430,24 @@ export class RealisticRiderBelt {
       const knee = twoBoneJoint(hip, foot, thigh, shin, forward, this.#d);
       this.#aim(rider, `upperleg01.${suffix}`, `lowerleg01.${suffix}`, this.#c.copy(knee).sub(hip));
       this.#aim(rider, `lowerleg01.${suffix}`, `foot.${suffix}`, this.#c.copy(foot).sub(knee));
+      // 4. #625: ankling. A toe lifted is a turn of MINUS the dorsiflexion
+      // about `+X`, which takes `+Z` toward `−Y`.
+      this.#turnInWorld(boneOf(rider.bones, `foot.${suffix}`), across, -motion.ankle[index]);
     }
+  }
+
+  /**
+   * Turns `bone` by `angle` about `axis`, both in world space, and updates it
+   * and everything under it — #625. Nothing at a zero angle. Allocates nothing.
+   */
+  #turnInWorld(bone: Bone, axis: Vector3, angle: number): void {
+    if (angle === 0) return;
+    bone.getWorldQuaternion(this.#world);
+    this.#spin.setFromAxisAngle(axis, angle);
+    this.#parent.identity();
+    bone.parent?.getWorldQuaternion(this.#parent);
+    bone.quaternion.copy(this.#parent.invert().multiply(this.#spin.multiply(this.#world)));
+    bone.updateMatrixWorld(true);
   }
 
   #length(rider: RealisticRiderSlot, from: string, to: string): number {
@@ -9176,6 +9545,10 @@ class RealisticDrawing {
   readonly structures: RealisticStructureBelts;
   readonly primitives: ScatterBelt;
   readonly riders: RealisticRiderBelt;
+  /** The riders' bike-shaped shadow, made from the riders just built — #626. */
+  readonly shadows: RiderSilhouetteBelt;
+  /** What {@link shadows} casts. For the browser gate. */
+  readonly silhouette: RiderSilhouette;
   readonly grounding: GroundBlobBelt;
   readonly road: MeshStandardMaterial;
   readonly ground: MeshStandardMaterial;
@@ -9215,6 +9588,8 @@ class RealisticDrawing {
     });
     this.riders = new RealisticRiderBelt(world.body, world.bicycle, world.rider);
     this.riders.setRiderKit(riderKit);
+    this.silhouette = this.riders.silhouette();
+    this.shadows = new RiderSilhouetteBelt(this.silhouette);
     this.grounding = new GroundBlobBelt();
     this.#casterLists = [this.vegetation.grounded, this.#structureCasters];
     this.road = photographicRoadMaterial(world.road.colour, world.road.normal);
@@ -9234,6 +9609,7 @@ class RealisticDrawing {
     this.structures.addTo(scene);
     this.primitives.addTo(scene);
     this.riders.addTo(scene);
+    this.shadows.addTo(scene);
     this.grounding.addTo(scene);
   }
 
@@ -9243,6 +9619,8 @@ class RealisticDrawing {
     this.primitives.setShown(on);
     this.riders.setShown(on);
     this.grounding.setShown(on);
+    // #626: shown only by the view, on a rung that grounds riders by contact.
+    if (!on) this.shadows.setShown(false);
   }
 
   /** Every scenery belt, handed the same frame. */
@@ -9301,6 +9679,7 @@ class RealisticDrawing {
     this.structures.dispose();
     this.primitives.dispose();
     this.riders.dispose();
+    this.shadows.dispose();
     this.grounding.dispose();
     this.road.dispose();
     this.ground.dispose();
@@ -9423,6 +9802,67 @@ export interface SceneMaterial {
  */
 export function drawnWorldOf(view: GameView): QualitySettings['world'] {
   return view instanceof ThreeGameView ? view.drawnWorld : 'stylised';
+}
+
+/**
+ * Draws the realistic riders' shadow as the #626 silhouette (`true`, what a
+ * ride draws) or as the round blob it replaced (`false`) — the browser gate's
+ * control, which must read round.
+ *
+ * @test-facing called by `game-harness.ts` for the #626 control; nothing in
+ * the render path turns the silhouette off
+ */
+export function riderSilhouettesOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.showRiderSilhouettes(on);
+}
+
+/**
+ * Sets how dark a whole silhouette is drawn — #626's darkness gate, whose
+ * control draws it at `1`, full black, which the gate must refuse (#872's
+ * review: a shadow bounded in shape and not in darkness passed as black).
+ *
+ * @test-facing called by `game-harness.ts` for that control; a ride draws
+ * {@link CONTACT_SHADOW_DARKNESS} and nothing in the render path changes it
+ */
+export function riderSilhouetteDarknessOf(view: GameView, darkness: number): void {
+  if (view instanceof ThreeGameView) view.setRiderSilhouetteDarkness(darkness);
+}
+
+/**
+ * The silhouette a view's realistic riders cast, while it draws the realistic
+ * world — #626: the browser gate holds the SHIPPED shader's shadow to
+ * `rider-silhouette.ts` §`silhouetteCoverage` over this very picture.
+ *
+ * @test-facing read by `game-harness.ts`; nothing in the render path asks
+ */
+export function realisticSilhouetteOf(view: GameView): RiderSilhouette | undefined {
+  return view instanceof ThreeGameView ? view.realisticSilhouette : undefined;
+}
+
+/**
+ * Draws a view's realistic riders, or leaves them out while their shadows are
+ * still cast — #626: the browser gate reads a shadow the rider would otherwise
+ * stand on.
+ *
+ * @test-facing called by `game-harness.ts`; nothing in the render path hides
+ * the riders while drawing their shadows
+ */
+export function realisticRidersShownOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.showRealisticRiders(on);
+}
+
+/**
+ * Where the realistic rider's shoulders were in a view's last frame, in world
+ * space — #625: the browser gate reads them on two frames half a pedal stroke
+ * apart. `undefined` for a view drawing no realistic rider.
+ *
+ * @test-facing read by `game-harness.ts` for the browser gate's rock
+ * assertion; nothing in the render path needs to ask
+ */
+export function realisticShouldersOf(
+  view: GameView,
+): { readonly x: number; readonly y: number; readonly z: number } | undefined {
+  return view instanceof ThreeGameView ? view.realisticShoulders() : undefined;
 }
 
 /**
@@ -9839,6 +10279,12 @@ class ThreeGameView implements GameView {
   /** The `riderShadows` the view is drawing with, so a change is seen once. */
   #riderShadows: QualitySettings['riderShadows'] | undefined;
   /**
+   * Whether the realistic world grounds its riders with the silhouette —
+   * #626. Only the browser gate's control turns it off, to draw the round
+   * blob it replaced. @see riderSilhouettesOf
+   */
+  #silhouetteShadows = true;
+  /**
    * The world, as three objects built once and mutated thereafter — #240's
    * NFR-3. Every one of them is a fixed instance: the sky is the `Color` the
    * scene's background *is*, the fog is the `FogExp2` the scene holds, and the
@@ -10187,6 +10633,8 @@ class ThreeGameView implements GameView {
     // ADR 0026. Which world this rung draws — after everything above, so the
     // realistic belts it may build are budgeted by the same rung.
     this.#applyWorld(settings.world);
+    // #626: after the world, because which contact shadow is drawn depends on it.
+    this.#applyContactShadows();
     this.#applySize();
   }
 
@@ -10247,6 +10695,12 @@ class ThreeGameView implements GameView {
       this.#realistic = undefined;
       evictRealisticWorldFromGpu();
     }
+  }
+
+  /** The realistic rider's shoulders in the last frame. @see realisticShouldersOf */
+  realisticShoulders(): { x: number; y: number; z: number } | undefined {
+    const into = { x: 0, y: 0, z: 0 };
+    return this.#realistic?.riders.shouldersOf(into) === true ? into : undefined;
   }
 
   /** How many scenery items the last frame drew, in the world it drew. @see sceneryDrawnOf */
@@ -10427,7 +10881,10 @@ class ThreeGameView implements GameView {
           constructed: isConstructedMaterial(material),
           fogged: (material as Partial<MeshBasicMaterial>).fog === true,
           atmospheric: breathesTheAir(material),
-          shared: this.#water.wears(material) || this.#contactShadows.wears(material),
+          shared:
+            this.#water.wears(material) ||
+            this.#contactShadows.wears(material) ||
+            this.#realistic?.shadows.wears(material) === true,
         });
       }
     });
@@ -10477,12 +10934,47 @@ class ThreeGameView implements GameView {
     this.#riders.recompile();
     this.#shadowCatcher.visible = map;
     this.#shadowCatcher.material.needsUpdate = true;
-    this.#contactShadows.setShown(riderShadows === 'contact');
+    this.#applyContactShadows();
+  }
+
+  /**
+   * Which of the two contact shadows a `'contact'` rung draws — #626: the
+   * realistic riders' bike-shaped silhouette in the realistic world, the round
+   * blob in the stylised one. Never both, and neither on a `'map'` or
+   * `'none'` rung.
+   */
+  #applyContactShadows(): void {
+    const contact = this.#riderShadows === 'contact';
+    const silhouette = this.#drawing === 'realistic' && this.#silhouetteShadows;
+    this.#contactShadows.setShown(contact && !silhouette);
+    this.#realistic?.shadows.setShown(contact && silhouette);
+  }
+
+  /** @see riderSilhouettesOf */
+  showRiderSilhouettes(on: boolean): void {
+    this.#silhouetteShadows = on;
+    this.#applyContactShadows();
+  }
+
+  /** @see riderSilhouetteDarknessOf */
+  setRiderSilhouetteDarkness(darkness: number): void {
+    this.#realistic?.shadows.setDarkness(darkness);
+  }
+
+  /** The realistic riders' silhouette, while a realistic world is drawn. @see realisticSilhouetteOf */
+  get realisticSilhouette(): RiderSilhouette | undefined {
+    return this.#realistic?.silhouette;
+  }
+
+  /** @see realisticRidersShownOf */
+  showRealisticRiders(on: boolean): void {
+    this.#realistic?.riders.setShown(on);
   }
 
   /** Where this frame's shadows fall — #426. */
   #updateShadows(frame: SceneFrame): void {
     this.#contactShadows.place(frame.markers, frame.world.sun);
+    this.#realistic?.shadows.place(frame.markers, frame.world.sun);
     if (this.#riderShadows === 'map') {
       const pose = frame.camera;
       this.#lighting.aimShadowAt(pose.x, pose.y, pose.z, frame.world.sun);

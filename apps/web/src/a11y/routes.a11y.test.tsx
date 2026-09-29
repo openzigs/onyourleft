@@ -674,6 +674,23 @@ describe('criterion 5 — focus is managed on navigation', () => {
     expect(accessibleName(main as Element)).toBe(routeById('devices').title);
   });
 
+  it('keeps focus on main once a view in a lazy chunk replaces its fallback — #674', async () => {
+    // Every group but Home arrives in a chunk of its own, so the render that
+    // navigates shows `ViewLoading` first. Focus goes to `main` on that render;
+    // what is asserted is that it is STILL there, and still names the page,
+    // once the view has replaced the fallback — which holds because the
+    // `Suspense` boundary is inside `main`, under the `h1`, and never around it.
+    await open('/');
+    for (const destination of [routeById('workouts'), routeById('segments'), routeById('about')]) {
+      await navigateTo(destination);
+      expect(document.querySelector('[data-oyl-view-loading]')).toBeNull();
+      expect(document.querySelector('main')?.textContent).not.toContain('Loading this page');
+      const main = document.querySelector('main');
+      expect(document.activeElement, `focus left main on ${destination.id}`).toBe(main);
+      expect(accessibleName(main as Element)).toBe(destination.title);
+    }
+  });
+
   it('does not steal focus on first render, which would make the skip link unreachable', async () => {
     await open('/');
     expect(document.activeElement).toBe(document.body);
