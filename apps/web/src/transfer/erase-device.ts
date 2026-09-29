@@ -182,6 +182,11 @@ export const ERASE_CANNOT_REACH: readonly string[] = [
   // #518, ADR 0029's 2026-09-28 amendment. The hosted service is a third party
   // and keeps what it keeps; this project cannot compel a deletion.
   'a question you sent to a service you chose, on your own key, which is a copy that service holds',
+  // #804, from #828's review. The post-ride ask sends a ride's NUMBERS to the
+  // rider's own computer (ADR 0035 D-9 B), and the privacy policy's erase
+  // paragraph already says an erase cannot reach that copy;
+  // `erase-device.test.ts` holds the two texts together.
+  'a ride’s numbers you sent to your own computer for a write-up, which is a copy that computer holds',
   'a photograph you copied off this device yourself, which is wherever you copied it to',
 ];
 

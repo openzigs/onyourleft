@@ -29,6 +29,7 @@ import { rideAnalysisInput, type RideAnalysisInput } from './input';
 import type { ModelStepPort, StepReply, StepRequest } from './model-step-port';
 import {
   finishOf,
+  HINT_REFUSED_STATUSES,
   isTextOnlyStep,
   ownComputerStepPort,
   STEP_REQUEST_FIELDS,
@@ -329,6 +330,81 @@ function hangingSend(): { readonly send: AnalysisSend; readonly sent: Sent[] } {
   );
 }
 
+describe('a server that refuses the response_format hint (#804, from #828’s review)', () => {
+  it.each([400, 422])(
+    'asks once more without the hint after a %i, and reads that reply',
+    async (status) => {
+      const { send, sent } = recordingSend((init) =>
+        bodyText(init).includes('response_format')
+          ? new Response('{"error":"unknown field"}', { status })
+          : reply('{"section":1,"notes":"Steady."}'),
+      );
+      const answer = await portWith(send).runModelStep(STEP, live());
+      expect(answer).toStrictEqual({
+        kind: 'answered',
+        text: '{"section":1,"notes":"Steady."}',
+        finish: 'stop',
+      });
+      expect(sent).toHaveLength(2);
+      expect(bodyOf(sent[0] as Sent)).toHaveProperty('response_format');
+      const retried = bodyOf(sent[1] as Sent);
+      expect(retried).not.toHaveProperty('response_format');
+      // Otherwise the same request.
+      const first = bodyOf(sent[0] as Sent);
+      delete first.response_format;
+      expect(retried).toStrictEqual(first);
+    },
+  );
+
+  it('asks only once more, and reads a second refusal as the failure it is', async () => {
+    const { send, sent } = recordingSend(() => new Response('', { status: 400 }));
+    const answer = await portWith(send).runModelStep(STEP, live());
+    expect(sent).toHaveLength(2);
+    expect(answer.kind).toBe('failed');
+  });
+
+  it('does not retry a step that carried no hint, or a status that is not a refusal of it', async () => {
+    const refused = recordingSend(() => new Response('', { status: 400 }));
+    await portWith(refused.send).runModelStep(SUMMARY_STEP, live());
+    expect(refused.sent).toHaveLength(1);
+    const broken = recordingSend(() => new Response('', { status: 500 }));
+    await portWith(broken.send).runModelStep(STEP, live());
+    expect(broken.sent).toHaveLength(1);
+    expect(HINT_REFUSED_STATUSES).toStrictEqual([400, 422]);
+  });
+
+  it('does the same inside the Android shell', async () => {
+    const requests: NativeAnalysisRequest[] = [];
+    const native: NativeAnalysisPost = async (request) => {
+      requests.push(request);
+      return Promise.resolve(
+        'response_format' in request.json
+          ? { status: 422, body: '' }
+          : {
+              status: 200,
+              body: JSON.stringify({
+                choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+              }),
+            },
+      );
+    };
+    const answer = await riderModelStepPort(endpoint(), { native })?.runModelStep(STEP, live());
+    expect(answer).toStrictEqual({ kind: 'answered', text: 'ok', finish: 'stop' });
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.json).not.toHaveProperty('response_format');
+  });
+
+  it('does not retry once the step was cancelled', async () => {
+    const cancel = new AbortController();
+    const { send, sent } = recordingSend(() => {
+      cancel.abort();
+      return new Response('', { status: 400 });
+    });
+    await portWith(send).runModelStep(STEP, cancel.signal);
+    expect(sent).toHaveLength(1);
+  });
+});
+
 describe('cancelling (#802)', () => {
   it('in a browser, hands the runner’s signal to the request itself', async () => {
     const { send, sent } = hangingSend();
@@ -553,13 +629,16 @@ function productionSources(): readonly string[] {
 const SENDS_A_RIDE = /(?<![\w$])(?:runAnalysis|riderModelStepPort|ownComputerStepPort)\s*\(/;
 
 /**
- * The modules that may call {@link SENDS_A_RIDE}, and why: only the modules
- * that define them. ⚠️ **#804 adds the one press here**, and nothing else:
- * ending a ride, saving it and opening its page must stay out of this list.
+ * The modules that may call {@link SENDS_A_RIDE}, and why: the modules that
+ * define them, and — since #804 — the one ask, `ride-analysis.ts`, whose only
+ * caller is the ride page's press (`RideWriteUpControl.tsx`, which names
+ * `askForRideWriteUp` and none of these). Ending a ride, saving it and
+ * opening its page must stay out of this list.
  */
 const MAY_START_A_RUN: readonly string[] = [
   join('ride-analysis', 'runner.ts'),
   join('ride-analysis', 'own-computer-step.ts'),
+  join('ride-analysis', 'ride-analysis.ts'),
   join('camera', 'analysis-transport.ts'),
 ];
 
