@@ -143,3 +143,17 @@ export function passedScreen(
 ): outcome is ScreenedWriteUp {
   return typeof outcome === 'string';
 }
+
+/**
+ * A write-up read back from the store, screened AGAIN before it is shown —
+ * #805: a stored row is not trusted because the code that wrote it screened
+ * it. A row can be hand-edited, restored from an older build's export, or
+ * written by a build whose screen was weaker, so the ride's page runs every
+ * saved write-up through {@link screenWriteUp} exactly as a fresh reply is.
+ *
+ * It takes a plain `string` because that is what the store hands back, and
+ * treats it as untrusted, which is what it is.
+ */
+export function screenSavedWriteUp(text: string): ScreenedWriteUp | WithheldWriteUp {
+  return screenWriteUp(text as UntrustedText);
+}

@@ -58,6 +58,8 @@ import { emptyTransferPort } from '../testing/transfer-port';
 import { FILES_KEPT_VISIBLE } from '../transfer/TransferView';
 import { CAMERA_AGREED_KEPT_VISIBLE, CAMERA_KEPT_VISIBLE, CameraView } from '../views/CameraView';
 import { DEVICES_KEPT_VISIBLE, DevicesView } from '../views/DevicesView';
+import { COMPUTER_SENDS, COMPUTER_SENDS_LEAD } from '../detail/write-up';
+import { WRITE_UP_EXPLANATION } from '../ride-analysis/RideWriteUpControl';
 import { RideView } from '../views/RideView';
 import { SETTINGS_KEPT_VISIBLE } from '../views/SettingsView';
 import { SIDE_CAMERA_KEPT_VISIBLE } from '../views/SideCameraView';
@@ -160,7 +162,15 @@ const KEPT: Record<RouteId, Kept> = {
   about: { sentences: [], reason: `${NOTHING_TUCKED}: it is the page of prose` },
   credits: { sentences: [], reason: `${NOTHING_TUCKED}: it is the page of prose` },
   'route-builder': { sentences: [], reason: NOTHING_TUCKED },
-  'activity-detail': { sentences: [], reason: NOTHING_TUCKED },
+  'activity-detail': {
+    sentences: [],
+    // #805, carried from #831's review: what leaves the device, and when, on
+    // the ride's page — the ask's explanation and the approved words of what
+    // it sends (ADR 0035 D-9 B). The populated fixture sets up the ask.
+    populated: [WRITE_UP_EXPLANATION, `${COMPUTER_SENDS_LEAD} ${COMPUTER_SENDS}`],
+    reason:
+      'the empty walk opens a ride that is not on the device, so nothing of the write-up renders there',
+  },
   'segment-detail': { sentences: [], reason: NOTHING_TUCKED },
   'not-found': { sentences: [], reason: NOTHING_TUCKED },
 };

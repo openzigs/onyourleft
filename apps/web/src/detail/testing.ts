@@ -26,6 +26,7 @@ import {
   type AthleteId,
   type LapRecord,
   type PrivacyZoneRecord,
+  type RideWriteUpRecord,
   type Samples,
   type SideCameraReportRecord,
   type StreamChannel,
@@ -46,6 +47,8 @@ export interface StubRide {
   readonly sampleInterval?: number;
   /** #388: the side camera's report on this ride, or `'unreadable'` for a row that will not decode. */
   readonly sideCamera?: SideCameraReportRecord | 'unreadable';
+  /** #805: the model's write-up saved with this ride, or `'unreadable'` for a row that will not decode. */
+  readonly writeUp?: RideWriteUpRecord | 'unreadable';
 }
 
 export interface StubDetail extends DetailPort {
@@ -167,6 +170,14 @@ export function stubDetail(
       return ride.sideCamera === 'unreadable'
         ? Promise.reject(new Error('sideCameraReport.summary: must be a sentence'))
         : Promise.resolve(ride.sideCamera);
+    },
+    getRideWriteUp: (_owner: AthleteId, id: ActivityId) => {
+      if (id !== ride.activity.id || ride.writeUp === undefined) {
+        return Promise.resolve(undefined);
+      }
+      return ride.writeUp === 'unreadable'
+        ? Promise.reject(new Error('rideWriteUp.text: must be text'))
+        : Promise.resolve(ride.writeUp);
     },
   };
 

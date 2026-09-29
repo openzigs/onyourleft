@@ -301,6 +301,25 @@ describe('only screened text is saved', () => {
     expect(JSON.stringify(saved)).not.toContain(REPLY_MARKER);
   });
 
+  it('refuses a structured reply carrying a key beside the validated ones, so it reaches nothing (#805)', async () => {
+    const id = await seededRide();
+    await ask().askForRideWriteUp(id, 'computer', live());
+    const earlier = await savedWriteUp(id);
+    server = modelServer('A different ride entirely.', { extraKey: true });
+    const outcome = await ask().askForRideWriteUp(id, 'computer', live());
+    // Every section step is refused at the acceptor, so the run fails and the
+    // earlier write-up stands.
+    expect(outcome).toStrictEqual({
+      kind: 'failed',
+      text: RUN_FAILURE_TEXT['too-few-sections'],
+    });
+    // The server was asked; the outcome above is what its extra key cost.
+    expect(server.requests.length).toBeGreaterThan(0);
+    const saved = await savedWriteUp(id);
+    expect(saved).toStrictEqual(earlier);
+    expect(JSON.stringify(saved)).not.toContain(REPLY_MARKER);
+  });
+
   it('takes a screened write-up, and a plain string does not compile', () => {
     const record: Omit<ScreenedRideWriteUp, 'text'> = {
       activityId: activityId('r'),

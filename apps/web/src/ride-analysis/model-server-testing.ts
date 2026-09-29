@@ -41,10 +41,24 @@ function schemaNameOf(request: ModelServerRequest): string | undefined {
   return format?.json_schema?.name;
 }
 
+/** How a {@link modelServer} answers, beyond its summary. */
+export interface ModelServerOptions {
+  /**
+   * Plant {@link REPLY_MARKER} as an extra key beside `notes` inside every
+   * structured step's content as well — #805, carried from #831's review. The
+   * acceptors take exactly the keys their contract names and refuse the rest
+   * (`template.ts` §`jsonObject`), so every such step is a failed one and the
+   * marker can reach nothing.
+   */
+  readonly extraKey?: boolean;
+}
+
 /** A server answering every step. `summary` is the summary step's reply. */
 export function modelServer(
   summary = 'A steady ride, evenly paced from start to finish.',
+  options: ModelServerOptions = {},
 ): ModelServer {
+  const extra = options.extraKey === true ? { remark: REPLY_MARKER } : {};
   const requests: ModelServerRequest[] = [];
   const server: ModelServer = {
     requests,
@@ -58,9 +72,13 @@ export function modelServer(
       let content: string;
       if (name === 'section_notes') {
         const section = Number(/"section":(\d+)/.exec(contentOf(request))?.[1] ?? '0');
-        content = JSON.stringify({ section, notes: `Section ${String(section)} was steady.` });
+        content = JSON.stringify({
+          section,
+          notes: `Section ${String(section)} was steady.`,
+          ...extra,
+        });
       } else if (name === 'position_notes') {
-        content = JSON.stringify({ notes: 'Posture held steady.' });
+        content = JSON.stringify({ notes: 'Posture held steady.', ...extra });
       } else {
         content = server.summary;
       }

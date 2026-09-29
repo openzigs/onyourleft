@@ -27,6 +27,7 @@ import type {
   ActivityId,
   ActivityRecord,
   LapRecord,
+  RideWriteUpRecord,
   SideCameraReportRecord,
   StreamSetSummary,
   Samples,
@@ -45,7 +46,23 @@ export interface RideOverview {
   readonly laps: readonly LapRecord[];
   /** The side camera's report on this ride (#388). See {@link SideCameraOverview}. */
   readonly sideCamera: SideCameraOverview;
+  /** The model's write-up saved with this ride (#805). See {@link WriteUpOverview}. */
+  readonly writeUp: WriteUpOverview;
 }
+
+/**
+ * What the ride's page knows about a model's write-up (#805).
+ *
+ * - `none` — nobody has asked a model about this ride, or nothing was kept.
+ * - `saved` — the row, NOT yet screened: `write-up.ts` §`shownWriteUp` screens
+ *   it again before a word of it is shown.
+ * - `unreadable` — there is a row and it would not decode. Said in words, as
+ *   `SideCameraOverview`'s is, because hiding it would look exactly like `none`.
+ */
+export type WriteUpOverview =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'saved'; readonly record: RideWriteUpRecord }
+  | { readonly kind: 'unreadable' };
 
 /**
  * What the ride's page knows about a side-camera report (#388).
@@ -84,7 +101,22 @@ export async function loadOverview(
   const streams = await port.store.getStreamSetSummary(port.athleteId, id);
   const laps = await port.store.listLaps(port.athleteId, id);
   const sideCamera = await readSideCamera(port, id);
-  return { activity, streams, laps, sideCamera };
+  const writeUp = await readWriteUp(port, id);
+  return { activity, streams, laps, sideCamera, writeUp };
+}
+
+/**
+ * The ride's saved write-up, never throwing, for `readSideCamera`'s reason.
+ * Exported because the page reads it again after a new one is saved (#805).
+ */
+export async function readWriteUp(port: DetailPort, id: ActivityId): Promise<WriteUpOverview> {
+  try {
+    const record = await port.store.getRideWriteUp(port.athleteId, id);
+    return record === undefined ? { kind: 'none' } : { kind: 'saved', record };
+  } catch {
+    // Nothing of the error is read: the value it refused is a model's words.
+    return { kind: 'unreadable' };
+  }
 }
 
 /**

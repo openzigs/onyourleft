@@ -270,6 +270,7 @@ export function ownComputerStepPort(
   }
   const { send } = options;
   const { url, space } = target;
+  const hint = hintMemory();
 
   return {
     async runModelStep(step: StepRequest, signal: AbortSignal): Promise<StepReply> {
@@ -311,12 +312,36 @@ export function ownComputerStepPort(
         }
         return { status, body };
       };
-      const first = await once(step);
-      if (!refusedTheHint(step, first) || signal.aborted) {
+      const first = await once(hint.shape(step));
+      if (!refusedTheHint(hint.shape(step), first) || signal.aborted) {
         return 'kind' in first ? first : stepReplyFrom(first);
       }
       const second = await once(withoutHint(step));
+      hint.retried(second);
       return 'kind' in second ? second : stepReplyFrom(second);
+    },
+  };
+}
+
+/**
+ * What a port remembers about its server's answer to the `response_format`
+ * hint (#805, carried from #831's review): once a hinted step was refused and
+ * the same step without the hint was answered (a 2xx), every later step on
+ * that port goes without it, so a server that refuses the hint is not sent
+ * every structured step twice. An unhinted request that fails as well says
+ * nothing about the hint, and is not remembered.
+ */
+function hintMemory(): {
+  shape(step: StepRequest): StepRequest;
+  retried(reply: NativeAnalysisReply | StepReply): void;
+} {
+  let refused = false;
+  return {
+    shape: (step) => (refused && step.replySchema !== undefined ? withoutHint(step) : step),
+    retried(reply) {
+      if (!('kind' in reply) && reply.status >= 200 && reply.status < 300) {
+        refused = true;
+      }
     },
   };
 }
@@ -368,6 +393,7 @@ function nativeStepPort(
   literal: boolean,
   native: NativeAnalysisPost,
 ): ModelStepPort {
+  const hint = hintMemory();
   return {
     async runModelStep(step: StepRequest, signal: AbortSignal): Promise<StepReply> {
       if (!isTextOnlyStep(step)) {
@@ -399,11 +425,12 @@ function nativeStepPort(
         }
       };
       const answered = (async (): Promise<StepReply> => {
-        const first = await once(step);
-        if (!refusedTheHint(step, first)) {
+        const first = await once(hint.shape(step));
+        if (!refusedTheHint(hint.shape(step), first)) {
           return 'kind' in first ? first : stepReplyFrom(first);
         }
         const second = await once(withoutHint(step));
+        hint.retried(second);
         return 'kind' in second ? second : stepReplyFrom(second);
       })();
       try {
