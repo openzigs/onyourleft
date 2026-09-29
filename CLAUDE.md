@@ -180,10 +180,11 @@ apps/                 AGPL-3.0-or-later, without exception
                         inline palette script into every page Vite builds —
                         product and harness — straight after the charset, so
                         the first frame is in the right palette (#672)
-    tools/bundle/       a rule the product build checks about itself and
-                        fails on (#673): the Lucide icon modules in the
+    tools/bundle/       two rules the product build checks about itself and
+                        fails on (#673, #674): the Lucide icon modules in the
                         bundle are exactly the icons the source imports
-                        (ADR 0034 D-2)
+                        (ADR 0034 D-2), and no view `shell/lazy/` names is in
+                        the entry chunk's static graph
     tools/precache/     what the worker precaches, as a pure function over the
                         build's output (#406) — build-time code, so it lives
                         beside the icon generator rather than in `src/`
@@ -429,7 +430,15 @@ apps/                 AGPL-3.0-or-later, without exception
                         ⚠️ Every selection pushes a history entry at BOTH
                         widths, on purpose (`ListDetail.tsx` §History), and
                         the panes' skip link goes list → detail only, at two
-                        panes only
+                        panes only. ⚠️ Since #674 every view but Home and
+                        the not-found page is LAZY: one module per navigation
+                        group under `lazy/`, loaded with a literal `import()`
+                        through `lazy-view.tsx` (a loading line under the
+                        `h1`, and a Reload on a chunk that cannot be fetched),
+                        preloaded by `main.tsx` once Home is idle. A view
+                        imported by name from the entry's graph fails
+                        `pnpm run build` (`tools/bundle/entry-graph.ts`), and
+                        the jsdom `mount`/`settle` wait for the loads
     src/support/        browser-capability detection and its notice (#48), and
                         since #409 whether this browser may throw a rider's
                         history away — the one place `persist()` is asked for,

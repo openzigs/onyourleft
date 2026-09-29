@@ -40,7 +40,8 @@ import {
   platformControllerChanges,
   type UpdateWatcher,
 } from './offline/update';
-import { AppShell } from './shell/AppShell';
+import { AppShell, VIEW_GROUPS } from './shell/AppShell';
+import { preloadViewGroups } from './shell/lazy-view';
 import { browserScreenLockSource, platformWakeLock } from './game/hud/wake-lock';
 import type { GamePort, RidableRoute } from './game/GameView';
 import { gameTrainerPortOver, type GameTrainerPort } from './game/trainer-port';
@@ -1013,6 +1014,14 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   // reads the registration's `waiting` and `installing` workers when it is
   // made, which is exactly when it was made before this change.
   draw(undefined);
+  // #674: every group but Home is a chunk of its own. Loading them once the
+  // browser is idle after the first paint keeps them off Home's critical path
+  // and off the rider's first press of Ride, which would otherwise show
+  // "Loading this page…" for React's reveal throttle (`shell/lazy-view.tsx`
+  // §`lazyView`). A failure here is swallowed and asked again on the visit.
+  afterFirstPaint(() => {
+    preloadViewGroups(VIEW_GROUPS);
+  });
   const registered = await workerRegistration;
   const update = buildUpdateWatcher(registered, rideController);
   if (registered.kind === 'registered') {
@@ -1031,6 +1040,18 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   }
   if (update !== undefined) {
     draw(update);
+  }
+}
+
+/**
+ * Run `work` once the browser is idle, or after two seconds whatever happens —
+ * `requestIdleCallback`'s own `timeout`. Where it is absent, a plain timer.
+ */
+function afterFirstPaint(work: () => void): void {
+  if (typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(work, { timeout: 2000 });
+  } else {
+    window.setTimeout(work, 1000);
   }
 }
 

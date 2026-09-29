@@ -547,6 +547,19 @@ in one file:
 - **The accessibility checker is ours too** (`src/a11y/`), for the licence and headless-DOM reasons
   in CLAUDE.md §4e. It runs on every route, in CI, as a step of its own, and it fails the build.
 
+**Views load per navigation group since [#674](https://github.com/openzigs/onyourleft/issues/674).**
+Home, the shell, the route table and the not-found page are in the entry chunk; every other view is
+in one chunk per group (Ride, History, Routes, More), one module each under `src/shell/lazy/`,
+loaded with a literal `import()` through `src/shell/lazy-view.tsx`. While a group arrives, `main`
+holds a one-line loading status under the route's own `h1`, so the focus the shell puts on `main`
+survives the view replacing it; a chunk that cannot be fetched says so with a Reload control, which
+is also ADR 0027's left-behind tab. `main.tsx` preloads every group once Home is idle, and a group
+already in memory renders without suspending, because React holds a fallback on screen for about
+300 ms once it has shown one. The precache needs no edit: it is derived from the build (#406).
+`apps/web/tools/bundle/entry-graph.ts` fails `pnpm run build` if any view a group module names is in
+the entry chunk's static graph, and `offline.browser.spec.ts` opens a route in every group with the
+network off.
+
 [#307](https://github.com/openzigs/onyourleft/issues/307) gave that design system the three things
 it did not have, and each is checkable rather than a matter of taste:
 

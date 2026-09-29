@@ -36,32 +36,16 @@
  * the route does **not** change.
  */
 
-import { useEffect, useRef, useState, type JSX, type MouseEvent } from 'react';
+import { Suspense, useEffect, useRef, useState, type JSX, type MouseEvent } from 'react';
 
 import { DEFAULT_UNIT_SYSTEM, type KitColour, type UnitSystem } from '@onyourleft/store';
 import type { Kilograms } from '@onyourleft/domain';
 
-import { GameView } from '../game/GameView';
-import { AboutView } from '../views/AboutView';
-import { CameraView } from '../views/CameraView';
-import { SideCameraView } from '../views/SideCameraView';
 import { HomeView } from '../views/HomeView';
-import { ActivitiesView } from '../views/ActivitiesView';
-import { ActivityDetailView } from '../views/ActivityDetailView';
-import { AnalysisView } from '../views/AnalysisView';
-import { CreditsView } from '../views/CreditsView';
-import { DevicesView } from '../views/DevicesView';
 import { NotFoundView } from '../views/NotFoundView';
-import { RideView } from '../views/RideView';
-import { SegmentDetailView } from '../views/SegmentDetailView';
 import type { RoutingProvider } from '@onyourleft/domain';
 
-import { RouteBuilderView } from '../views/RouteBuilderView';
-import { RoutesView } from '../views/RoutesView';
-import { WorkoutsView } from '../views/WorkoutsView';
-import { SegmentsView } from '../views/SegmentsView';
 import { RideSession } from '../ride/RideSession';
-import { SettingsView } from '../views/SettingsView';
 import { UnitsProvider } from '../units/context';
 import type { UnitsPort } from '../units/store-port';
 import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
@@ -69,7 +53,6 @@ import type { AthleteMassPort } from '../athlete/store-port';
 import type { RideController } from '../ride/controller';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import type { ShellSupportPort } from '../support/shell-support-port';
-import { TransferView } from '../transfer/TransferView';
 import type { AnalysisPort } from '../analysis/store-port';
 import type { DetailPort } from '../detail/store-port';
 import type { RideAnalysisPort } from '../ride-analysis/ride-analysis-port';
@@ -102,6 +85,49 @@ import {
   type RouteMatch,
 } from './routes';
 import { useRoute } from './useRoute';
+import { lazyView, viewGroup, ViewBoundary, ViewLoading, type ViewGroup } from './lazy-view';
+
+/**
+ * The views that arrive in a chunk of their own, one chunk per navigation
+ * group — #674. Home and the not-found page stay in the entry chunk: Home is
+ * where the app opens, and the not-found page is what an address that matches
+ * nothing must still be able to render with the network off.
+ *
+ * ⚠️ Each specifier is a LITERAL, and must stay one: `check:wiring` follows a
+ * literal `import()` and nothing else (CLAUDE.md §4j), and
+ * `tools/bundle/entry-graph.ts` reads `shell/lazy/` to know which views must
+ * not be reachable from the entry chunk.
+ */
+const RIDE_GROUP = viewGroup(async () => import('./lazy/ride'));
+const HISTORY_GROUP = viewGroup(async () => import('./lazy/history'));
+const ROUTES_GROUP = viewGroup(async () => import('./lazy/routes'));
+const MORE_GROUP = viewGroup(async () => import('./lazy/more'));
+
+/** Every lazily loaded group, for `main.tsx` to preload once Home has painted. */
+export const VIEW_GROUPS: readonly ViewGroup<unknown>[] = [
+  RIDE_GROUP,
+  HISTORY_GROUP,
+  ROUTES_GROUP,
+  MORE_GROUP,
+];
+
+const RideView = lazyView(RIDE_GROUP, (group) => group.RideView);
+const GameView = lazyView(RIDE_GROUP, (group) => group.GameView);
+const WorkoutsView = lazyView(RIDE_GROUP, (group) => group.WorkoutsView);
+const ActivitiesView = lazyView(HISTORY_GROUP, (group) => group.ActivitiesView);
+const ActivityDetailView = lazyView(HISTORY_GROUP, (group) => group.ActivityDetailView);
+const AnalysisView = lazyView(HISTORY_GROUP, (group) => group.AnalysisView);
+const SegmentsView = lazyView(HISTORY_GROUP, (group) => group.SegmentsView);
+const SegmentDetailView = lazyView(HISTORY_GROUP, (group) => group.SegmentDetailView);
+const RoutesView = lazyView(ROUTES_GROUP, (group) => group.RoutesView);
+const RouteBuilderView = lazyView(ROUTES_GROUP, (group) => group.RouteBuilderView);
+const DevicesView = lazyView(MORE_GROUP, (group) => group.DevicesView);
+const TransferView = lazyView(MORE_GROUP, (group) => group.TransferView);
+const CameraView = lazyView(MORE_GROUP, (group) => group.CameraView);
+const SideCameraView = lazyView(MORE_GROUP, (group) => group.SideCameraView);
+const SettingsView = lazyView(MORE_GROUP, (group) => group.SettingsView);
+const AboutView = lazyView(MORE_GROUP, (group) => group.AboutView);
+const CreditsView = lazyView(MORE_GROUP, (group) => group.CreditsView);
 
 /** The id `main` carries, and the only place it is written. */
 const MAIN_ID = 'oyl-main';
@@ -709,10 +735,22 @@ export function AppShell(props: AppShellProps): JSX.Element {
             {route.title}
           </h1>
           {immersive ? null : <p className="oyl-muted">{route.summary}</p>}
-          {viewFor(match, props, units, setUnits, riderMass, setRiderMass, setImmersive, {
-            colour: kitColour,
-            onChange: setKitColour,
-          })}
+          {/*
+            #674: a view in a lazy group is not in the entry chunk, so on its
+            first visit it suspends and the fallback stands under the `h1` until
+            it arrives. Keyed by route so a chunk that failed on one route does
+            not keep the next route's page blank. Inside `main`, below the
+            heading, so the focus the effect above puts on `main` survives the
+            view replacing its fallback.
+          */}
+          <ViewBoundary key={route.id}>
+            <Suspense fallback={<ViewLoading />}>
+              {viewFor(match, props, units, setUnits, riderMass, setRiderMass, setImmersive, {
+                colour: kitColour,
+                onChange: setKitColour,
+              })}
+            </Suspense>
+          </ViewBoundary>
         </main>
 
         {immersive ? null : (

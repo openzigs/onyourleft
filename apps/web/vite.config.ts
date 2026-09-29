@@ -20,6 +20,7 @@ import react from '@vitejs/plugin-react';
 import { build, defineConfig, type Plugin } from 'vite';
 
 import { POSE_DIRECTORY, POSE_WORKER_CHUNK } from './src/camera/pose-files';
+import { lazyViewsStayLazy } from './tools/bundle/entry-graph';
 import { onlyImportedIcons } from './tools/bundle/icon-modules';
 import { copiedIntoBuild } from './tools/notices/copied-into-build';
 import { basisTranscoder } from './tools/basis/transcoder-plugin';
@@ -193,6 +194,8 @@ export default defineConfig({
     basisTranscoder(),
     serviceWorker(),
     copiedIntoBuild(ROOT),
+    // #674: no view AppShell loads on demand may be in the entry chunk's graph.
+    lazyViewsStayLazy(ROOT),
     // #673, ADR 0034 D-2: the Lucide icons that ship are the ones the source names.
     onlyImportedIcons(),
   ],

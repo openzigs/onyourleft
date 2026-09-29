@@ -62,6 +62,8 @@ import { StrictMode, type JSX } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 
+import { viewGroupsLoaded } from './views-loaded';
+
 import { unixSeconds } from '@onyourleft/domain';
 import { activityId, openActivityStore, routeId } from '@onyourleft/store';
 
@@ -996,7 +998,9 @@ window.__oylTabModel = () => {
   };
 };
 
+// #674: the view groups first, so every view renders on the render that asks. @see viewGroupsLoaded
 try {
+  await viewGroupsLoaded();
   main();
 } catch (error: unknown) {
   errors.push(error instanceof Error ? error.message : String(error));
