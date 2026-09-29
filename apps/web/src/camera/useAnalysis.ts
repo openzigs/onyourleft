@@ -35,7 +35,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { AnalysisCall, AnalysisFailure, AnalysisQuestion } from './analysis-port';
+import type { AnalysisCall, AnalysisFailure, AnalysisQuestion } from './model-answer';
 import { answeredReady } from './analysis-response';
 
 /**

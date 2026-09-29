@@ -195,8 +195,10 @@ function walk(
 
 const POSE: SideSessionSummary = {
   source: 'tablet',
-  posesCompared: 1840,
   differences: { knee: -3.25, torso: 1.5 },
+  posed: 1840,
+  noRider: 12,
+  unreadable: 3,
 };
 
 /**
@@ -677,7 +679,7 @@ describe('the pose summary', () => {
       expect(input.pose).toStrictEqual(POSE);
     } else {
       expect(input.pose).toBeUndefined();
-      expect(JSON.stringify(input)).not.toContain('posesCompared');
+      expect(JSON.stringify(input)).not.toContain('noRider');
     }
   });
 
@@ -687,7 +689,9 @@ describe('the pose summary', () => {
     const input = inputFor(from, { pose: POSE, cameraConsented: true });
     expect(input.pose).toBeDefined();
     const inSections = walk(input.sections).keys.filter((key) =>
-      ['pose', 'posesCompared', 'differences', 'source', 'knee', 'torso'].includes(key),
+      ['pose', 'posed', 'noRider', 'unreadable', 'differences', 'source', 'knee', 'torso'].includes(
+        key,
+      ),
     );
     expect(inSections).toStrictEqual([]);
   });
@@ -704,6 +708,15 @@ describe('the pose summary', () => {
     const unknown = { ...POSE, source: 'cloud' } as unknown as SideSessionSummary;
     expect(inputFor(from, { pose: unknown, cameraConsented: true }).pose).toBeUndefined();
   });
+
+  it('sends nothing for a summary whose counts are not numbers (#801)', async () => {
+    const ride = rideFor(ATHLETE_A);
+    const from = await saved(ride, streamSetFor(ride, { sampleCount: 600 }));
+    for (const count of ['posed', 'noRider', 'unreadable'] as const) {
+      const broken = { ...POSE, [count]: Number.NaN };
+      expect(inputFor(from, { pose: broken, cameraConsented: true }).pose, count).toBeUndefined();
+    }
+  });
 });
 
 describe('the size of the input', () => {
@@ -719,8 +732,10 @@ describe('the size of the input', () => {
     const input = inputFor(from, {
       pose: {
         source: 'computer',
-        posesCompared: 54_000,
         differences: { torso: -12.34, knee: 8.76, elbow: -10.11, head: 0.12, saddle: -0.09 },
+        posed: 54_000,
+        noRider: 54_000,
+        unreadable: 54_000,
       },
       cameraConsented: true,
     });

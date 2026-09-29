@@ -22,8 +22,10 @@
  * cancel out of a standing value, which is why there is none.
  *
  * ⚠️ **Within ONE session only.** A comparison with an earlier session needs
- * that session's pose numbers, which are never kept (the owner's retention
- * ruling on #388 keeps sentences only), and ADR 0033 D-7 permits one only when
+ * that session's per-third values, which are never kept (the owner's retention
+ * ruling on #388 kept sentences only; since #801 the session's DIFFERENCES are
+ * kept too — {@link sideSessionFrom} — and a difference is not a per-third
+ * value), and ADR 0033 D-7 permits one only when
  * the framing check passed. The owner put cross-session comparison out of
  * scope for this issue; it needs its own issue and ruling.
  *
@@ -59,6 +61,7 @@
  */
 
 import type { SidePose, SidePoseLandmark } from './side-analysis-port';
+import type { SidePoseSource, SideSessionSummary } from './side-session-summary';
 import {
   SIDE_OBSERVATION_KINDS,
   SIDE_OBSERVATION_SENTENCES,
@@ -202,6 +205,31 @@ export const OBSERVATION_THRESHOLDS: Readonly<Record<SideObservationKind, number
 };
 
 /**
+ * How a session's pictures came out, and where its poses were estimated — what
+ * {@link sideSessionFrom} reads. `side-analysis-port.ts` §`SideAnalysisState`
+ * satisfies it.
+ */
+export interface SideSessionLooked extends SideReportLooked {
+  readonly place: SidePoseSource;
+}
+
+/**
+ * What a session came to: its sentences, and — only when something was
+ * compared — its pose summary.
+ */
+export interface SideSessionOutcome {
+  /** `undefined` when nothing was looked at at all. */
+  readonly report: SideReport | undefined;
+  /**
+   * The differences behind {@link report}'s sentences — #801. **`undefined`
+   * whenever the report compared nothing** (too short, unreadable, no model,
+   * nothing looked at): never a summary of zeros, which would tell a model
+   * "nothing changed" about a session nobody compared.
+   */
+  readonly summary: SideSessionSummary | undefined;
+}
+
+/**
  * What a session came to, as sentences — or `undefined` when nothing was
  * looked at at all (a pairing that never filmed has nothing to report).
  */
@@ -209,19 +237,41 @@ export function sideReportFrom(
   samples: readonly SideReportSample[],
   looked: SideReportLooked,
 ): SideReport | undefined {
+  return sideSessionFrom(samples, { ...looked, place: 'tablet' }).report;
+}
+
+/**
+ * A session's report AND its pose summary, from **one** pass over the same
+ * statistics — #801's first criterion: the sentences are chosen from the
+ * very differences the summary keeps, so the two cannot disagree.
+ *
+ * The samples are only ever poses that passed #761's plausibility check:
+ * `side-analysis.ts` keeps a pose only when the estimator answered `pose`, and
+ * `computer-pose.ts` answers `no-rider` (cause `implausible`) for one that
+ * could not be a rider. So the summary is built from plausible poses by
+ * construction, and the turned-away ones are in its `noRider` count.
+ */
+export function sideSessionFrom(
+  samples: readonly SideReportSample[],
+  looked: SideSessionLooked,
+): SideSessionOutcome {
+  const nothingCompared = (report: SideReport | undefined): SideSessionOutcome => ({
+    report,
+    summary: undefined,
+  });
   const lookedAt = looked.posed + looked.noRider + looked.unreadable;
   if (looked.model === 'unavailable' && looked.posed === 0) {
-    return { summary: SIDE_REPORT_NO_MODEL, observations: [] };
+    return nothingCompared({ summary: SIDE_REPORT_NO_MODEL, observations: [] });
   }
   if (lookedAt === 0) {
-    return undefined;
+    return nothingCompared(undefined);
   }
   if (samples.length === 0 || looked.posed < lookedAt * MINIMUM_POSED_SHARE) {
-    return { summary: SIDE_REPORT_UNREADABLE, observations: [] };
+    return nothingCompared({ summary: SIDE_REPORT_UNREADABLE, observations: [] });
   }
   const thirds = thirdsOf(samples);
   if (thirds === undefined) {
-    return { summary: SIDE_REPORT_TOO_SHORT, observations: [] };
+    return nothingCompared({ summary: SIDE_REPORT_TOO_SHORT, observations: [] });
   }
   const { early, late } = thirds;
 
@@ -230,8 +280,21 @@ export function sideReportFrom(
     change: changeOf(kind, early, late),
   }));
   if (compared.every(({ change }) => change === undefined)) {
-    return { summary: SIDE_REPORT_UNREADABLE, observations: [] };
+    return nothingCompared({ summary: SIDE_REPORT_UNREADABLE, observations: [] });
   }
+  const differences: Partial<Record<SideObservationKind, number>> = {};
+  for (const { kind, change } of compared) {
+    if (change !== undefined) {
+      differences[kind] = change;
+    }
+  }
+  const summary: SideSessionSummary = {
+    source: looked.place,
+    differences,
+    posed: looked.posed,
+    noRider: looked.noRider,
+    unreadable: looked.unreadable,
+  };
   const observations = compared.flatMap(({ kind, change }) => {
     if (change === undefined || Math.abs(change) < OBSERVATION_THRESHOLDS[kind]) {
       return [];
@@ -249,13 +312,19 @@ export function sideReportFrom(
   const allCompared = compared.every(({ change }) => change !== undefined);
   if (observations.length > 0) {
     return {
-      summary: allCompared ? SIDE_REPORT_OBSERVED : SIDE_REPORT_OBSERVED_IN_PART,
-      observations,
+      report: {
+        summary: allCompared ? SIDE_REPORT_OBSERVED : SIDE_REPORT_OBSERVED_IN_PART,
+        observations,
+      },
+      summary,
     };
   }
   return {
-    summary: allCompared ? SIDE_REPORT_UNCHANGED : SIDE_REPORT_UNCHANGED_IN_PART,
-    observations,
+    report: {
+      summary: allCompared ? SIDE_REPORT_UNCHANGED : SIDE_REPORT_UNCHANGED_IN_PART,
+      observations,
+    },
+    summary,
   };
 }
 

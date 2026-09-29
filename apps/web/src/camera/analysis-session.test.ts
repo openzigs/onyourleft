@@ -9,7 +9,8 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { AnalysisCall, AnalysisPort, AnalysisRequest } from './analysis-port';
+import type { AnalysisPort, AnalysisRequest } from './analysis-port';
+import type { AnalysisCall } from './model-answer';
 import { endpointDecision, readAnalysisEndpoint, type EndpointStorage } from './analysis-endpoint';
 import { riderAnalysisPort, type AnalysisSend } from './analysis-transport';
 import { CameraController, type FrameSink } from './session';

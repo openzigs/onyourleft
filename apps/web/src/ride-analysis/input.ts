@@ -698,7 +698,8 @@ function published(measured: Measured): ChannelSummary {
  * a source that is not one of {@link SIDE_POSE_SOURCES} sends nothing.
  */
 function copiedPose(pose: SideSessionSummary): SideSessionSummary | undefined {
-  if (!SIDE_POSE_SOURCES.includes(pose.source) || !Number.isFinite(pose.posesCompared)) {
+  const counts = [pose.posed, pose.noRider, pose.unreadable];
+  if (!SIDE_POSE_SOURCES.includes(pose.source) || !counts.every(Number.isFinite)) {
     return undefined;
   }
   const differences: Partial<Record<(typeof SIDE_OBSERVATION_KINDS)[number], number>> = {};
@@ -708,7 +709,13 @@ function copiedPose(pose: SideSessionSummary): SideSessionSummary | undefined {
       differences[kind] = rounded(difference, 2);
     }
   }
-  return { source: pose.source, posesCompared: Math.round(pose.posesCompared), differences };
+  return {
+    source: pose.source,
+    differences,
+    posed: Math.round(pose.posed),
+    noRider: Math.round(pose.noRider),
+    unreadable: Math.round(pose.unreadable),
+  };
 }
 
 function rounded(value: number, places: number): number {
