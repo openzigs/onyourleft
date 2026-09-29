@@ -121,6 +121,13 @@ jobs:
       - name: Concurrency runner tests
         run: bash scripts/run-concurrently.test.sh
 
+      # Which CPU this run landed on (#866, #864). ubuntu-latest is served by
+      # more than one CPU model at different speeds, and a step's duration
+      # means nothing without it. Not a §4a command; CLAUDE.md section 4c
+      # records it beside the apt-source step, the other one.
+      - name: Record the runner's CPU
+        run: lscpu | grep -E '^(Model name|Thread|Core|Socket|CPU\(s\))'
+
       # --- The workspace toolchain, from here down (CLAUDE.md section 4a) ------
 
       # Reads .nvmrc so the runner and a contributor cannot disagree about the

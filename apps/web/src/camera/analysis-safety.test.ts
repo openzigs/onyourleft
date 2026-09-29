@@ -149,7 +149,9 @@ function code(path: string): string {
  * each form.
  */
 function importsIn(source: string, pattern: RegExp, fileName?: string): boolean {
-  return specifiersIn(stripComments(source), fileName).some((specifier) => pattern.test(specifier));
+  // No `stripComments` first (#864): the parser skips comments already, and
+  // that pre-pass read `/[/*]/` as the start of a comment.
+  return specifiersIn(source, fileName).some((specifier) => pattern.test(specifier));
 }
 
 /** Whether `path` imports a module whose specifier matches `pattern`. */
@@ -255,6 +257,13 @@ describe('2. in the module graph, an answer cannot reach a trainer', () => {
     ['a type import', "type T = import('../ride/trainer').Trainer;"],
   ])('reads every spelling of a trainer import: %s (#821)', (_form, line) => {
     expect(importsIn(`// a holder\n${line}\n`, TRAINER_MODULE, 'camera/planted.ts')).toBe(true);
+  });
+
+  it('reads an import after a regex literal holding `/*` (#864)', () => {
+    // A comment-stripping pre-pass took `/*` inside the character class for a
+    // comment, and everything up to the `*/` below with it.
+    const source = "const q = /[/*]/;\nimport '../ride/controller';\n// */\n";
+    expect(importsIn(source, TRAINER_MODULE, 'camera/planted.ts')).toBe(true);
   });
 
   it('is not fooled by a trainer path that is only a string or a comment (#821)', () => {

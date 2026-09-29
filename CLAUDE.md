@@ -1667,9 +1667,9 @@ downstream issue's acceptance criteria depend on these.
 # Exits 0 clean; exits 1 listing each violation by rule id.
 bash scripts/check-repo-rules.sh
 
-# Test the checker itself. Fixture-driven; 206 cases, printed by the run on
-# 2026-09-23. ⚠️ This said 115 until #357, 168 until #416, 182 until #378 and
-# 195 until #493, and has been stale every single time somebody quoted it —
+# Test the checker itself. Fixture-driven; 218 cases, printed by the run on
+# 2026-09-29. ⚠️ This said 115 until #357, 168 until #416, 182 until #378,
+# 195 until #493 and 206 until #864, and has been stale every single time somebody quoted it —
 # the number is what the suite prints, so read the run rather than this line.
 bash scripts/check-repo-rules.test.sh
 
@@ -1772,7 +1772,7 @@ pnpm run test:uninstrumented
 # runs no test: under a second.
 pnpm run check:test-split
 
-# Its own suite. Fixture-driven; 25 cases on 2026-09-29 — the count is what the
+# Its own suite. Fixture-driven; 32 cases on 2026-09-29 (25 before #864) — the count is what the
 # run prints. Needs Node, so not in `check:repo`.
 bash scripts/check-test-split.test.sh
 
@@ -2102,8 +2102,8 @@ bash scripts/check-instance-image.sh
 
 # Its own suite (#841). A fake `docker`, `curl` and `sleep` go first on PATH,
 # the way check-third-party-notices.test.sh fakes `pnpm`, so it needs no Docker
-# and waits for nothing; every IMG id has a case that goes red. 60 cases on
-# 2026-09-29 (43 before #852) -- the count is what the run prints.
+# and waits for nothing; every IMG id has a case that goes red. 62 cases on
+# 2026-09-29 (60 before #864, 43 before #852) -- the count is what the run prints.
 bash scripts/check-instance-image.test.sh
 
 # The same image by hand, for #807's deployment. The commit is a REQUIRED build
@@ -2517,7 +2517,7 @@ each of those can do is turn `main` red on a day the service is down. For Docker
 | The Docker image, and `/health` inside the container | `Checks, concurrently`, as `instance image` | mostly a digest-pinned pull, so it waits rather than works — the step's shape |
 | The OpenAPI drift check (#36) | the Vitest run (`src/openapi.test.ts`) | it is a byte comparison, not a tool |
 | Rooms: the conformance suite (`src/room/conformance.test.ts`) against the reference and the Durable Object adapter under in-memory fakes, and the adapter's own cases under fakes | the Vitest run (`instance`) | #781; well under a second. #780's Node adapter joins the same file |
-| Rooms: the Durable Object adapter under a real `workerd` | **not CI** — `test:workerd`, a local command (§4a), decided by #781 | about 35 s, most of it waiting on the runtime's alarms and its ten-second eviction, which a job already past fifteen minutes on the 7763 cannot spend on every pull request; its logic runs in CI under the fakes. ⚠️ **The 35 s is a LOCAL figure** (34.6 s again on #781's review, on a Mac) — the suite has never run on the runner, so this decision rests on the local figure and #771's *"measure its cost on the runner before deciding"* is not met. ⚠️ The ~130 MB `workerd` binary is still downloaded by CI's install (§8) |
+| Rooms: the Durable Object adapter under a real `workerd` | **not CI** — `test:workerd`, a local command (§4a), decided by #781 | about 35 s, most of it waiting on the runtime's alarms and its ten-second eviction, which a job already past fifteen minutes on the 7763 cannot spend on every pull request; its logic runs in CI under the fakes. ⚠️ **The 35 s is a LOCAL figure** (34.6 s again on #781's review, on a Mac) — the suite has never run on the runner, so this decision rests on the local figure and #771's *"measure its cost on the runner before deciding"* is not met. ⚠️ The ~130 MB `workerd` binary is still downloaded by CI's install, and **that costs well under a second there** — measured for #864, §8 |
 | Rooms: the two-browser e2e spec with its fan-out control | **not built yet** — #780 | #771's last criterion is owed by the first room a browser can reach |
 | A load test, and a Cloudflare bill | **not CI** (#792, #464) | a measurement and an account, not gates |
 
@@ -2547,6 +2547,22 @@ so it is recorded as runner variance, not as a cost. ⚠️ **The job was alread
 so #771's "if the delta pushes a green run past 15 minutes" was already true of `main`. This
 change did not push it there, and moving something out of the job is #651's open question, not
 this one's.
+
+**#771's second 7763 sample, found for [#864](https://github.com/openzigs/onyourleft/issues/864).**
+It had landed and nobody had read it: `main` at #853's merge,
+[36615487288](https://github.com/openzigs/onyourleft/actions/runs/36615487288), the tree after #833
+and #850 and before #852, printed `AMD EPYC 7763` and took **1276 s** (169 s concurrent, 417 s
+Vitest with coverage, 609 s browser gate). So the 7763 after the instance is **n = 2: 1223 s and
+1276 s**, against 1206–1231 s before. ⚠️ **That is not a +30 s cost of the instance**: five other
+merges (#840, #843, #844, #850, #853) sit between the two samples, and #852's own "before" runs on
+that same ancestry took 1256–1296 s on the 7763 — the growth is in Vitest and the browser gate, which
+the instance does not touch, and its own step (the image check) is 10–15 s. Two later `main` runs on
+the 7763, after #852, read the same way: [36636542091](https://github.com/openzigs/onyourleft/actions/runs/36636542091)
+(#860, **1196 s**: 294 s coverage, 44 s outside it, 608 s browser gate) and
+[36639122031](https://github.com/openzigs/onyourleft/actions/runs/36639122031) (#862, **1234 s**:
+308 s, 45 s, 619 s). ⚠️ Every one of these CPU lines came from the racing-line test's print, which
+not every run makes; the `Record the runner's CPU` step (below, §"exactly two steps") is what makes
+it every run's.
 
 **The runs since, read on 2026-09-29 for #841, and why they settle nothing about #771.** No second
 `main` run after #833 has landed on a 7763 yet, so the 7763 comparison is still n = 1 — it is owed
@@ -2632,8 +2648,11 @@ If CI ever needs a step this file does not list, **this
 file is wrong and gets fixed in the same PR**; CI must not accumulate private knowledge, because
 that is how a contributor's local green becomes CI's red with no explanation.
 
-⚠️ **There is exactly one step that is not a §4a command, and this is it:
-`sudo rm -f /etc/apt/sources.list.d/google-chrome.*`, before the browser install** — which since
+⚠️ **There are exactly two steps that are not §4a commands.** The first, since #866, is `Record
+the runner's CPU` — `lscpu`, filtered to the model and the core count — because two CPU models at
+different speeds serve `ubuntu-latest` and a duration means nothing without it (#864); it gates
+nothing. The second is this one:
+`sudo rm -f /etc/apt/sources.list.d/google-chrome.*`, before the browser install — which since
 #651 means before `Checks, concurrently`, the step the browser install runs in.
 It is recorded here rather than left as private CI knowledge, which is what the paragraph above
 forbids. `playwright install --with-deps` runs `apt-get update` across **every** source the runner
@@ -2911,7 +2930,7 @@ would otherwise be documented and unenforced, which is the gap this project keep
 | `boundaries/dependencies` | an import from `packages/*` into `apps/*`, in either the relative (`../../../apps/web/src/...`) or the workspace (`@onyourleft/web`) spelling. Dependencies point one way |
 | `@typescript-eslint/no-restricted-imports` in `packages/domain`, `packages/physics`, `packages/sensors/src`, `packages/sensors/protocol` and `packages/sensors/web-bluetooth` | naming **any** Node builtin — the list is derived from `builtinModules`, not typed out, so `events`, `util` and `stream/promises` fail exactly as `node:fs` does — or `react`, `react-dom`, `vite` or `dexie`, or a BLE library |
 | `no-restricted-globals` in `packages/domain`, `packages/physics`, `packages/sensors/src` and `packages/sensors/protocol` | naming a DOM global (`window`, `document`, `navigator`, `location`, `history`, `localStorage`, `sessionStorage`, `indexedDB`, `caches`), a Node global (`process`, `Buffer`, `__dirname`, `__filename`, `global`, `require`) or a network global (`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Request`, `Response`, `Headers`). This one **is** a named list; the closure is the typechecker below |
-| `no-restricted-globals` in `apps/instance/src`, **except the Node adapter** | naming a Node-only global — `Buffer`, `process`, `require`, `module`, `exports`, `__dirname`, `__filename`, `global`, `setImmediate`, `clearImmediate` — anywhere the core mounts unchanged under `workerd` ([ADR 0037](docs/adr/0037-instance-runtime-hosting-and-transport.md) D-2, [#852](https://github.com/openzigs/onyourleft/issues/852)). ⚠️ The exemption is **by file name, not directory**: `main.ts`, `node-listener.ts`, `store/node-sqlite.ts`, `blob/disk-blob-store.ts`, and tests and `*-testing.ts`/`testing/` support — so a new core file is covered with no edit and a new adapter file is a line in `eslint.config.js`. `fetch`, `Request`, `Response`, `Headers` and `crypto` are **not** listed: `workerd` has them and the handler is written against them. ⚠️ **This is the only gate for it on a pull request**: the wide `tsconfig.json` carries `@types/node`, so `process` typechecks, and the `workerd` suite is local-only. Probed: `Buffer`, `process` and `__dirname` in `pagination.ts` passed `eslint` before this block and are three errors after; `process` in `node-listener.ts` is still none. It names globals only — a `node:` **import** in the core is still caught by nothing but `workerd` |
+| `no-restricted-globals` in `apps/instance/src`, **except the Node adapter** | naming a Node-only global — `Buffer`, `process`, `require`, `module`, `exports`, `__dirname`, `__filename`, `global`, `setImmediate`, `clearImmediate` — anywhere the core mounts unchanged under `workerd` ([ADR 0037](docs/adr/0037-instance-runtime-hosting-and-transport.md) D-2, [#852](https://github.com/openzigs/onyourleft/issues/852)). ⚠️ The exemption is **by file name, not directory**: `main.ts`, `node-listener.ts`, `store/node-sqlite.ts`, `blob/disk-blob-store.ts`, and tests and `*-testing.ts`/`testing/` support — so a new core file is covered with no edit and a new adapter file is a line in `eslint.config.js`. `fetch`, `Request`, `Response`, `Headers` and `crypto` are **not** listed: `workerd` has them and the handler is written against them. ⚠️ **This is the only gate for it on a pull request**: the wide `tsconfig.json` carries `@types/node`, so `process` typechecks, and the `workerd` suite is local-only. Probed: `Buffer`, `process` and `__dirname` in `pagination.ts` passed `eslint` before this block and are three errors after; `process` in `node-listener.ts` is still none. ⚠️ **Since [#864](https://github.com/openzigs/onyourleft/issues/864) it is three rules, not one**: `no-restricted-properties` refuses the same names as properties of `globalThis`, `window`, `self` and `global` (`globalThis.process` is a member expression, which the globals rule never reads — probed: 0 errors before), and `@typescript-eslint/no-restricted-imports` refuses a Node builtin in either spelling, derived from `builtinModules` like the row above — a `node:` import in the core used to be caught by nothing but `workerd`. The room core's own block carries the property entries too, because flat config keeps the last setting of a rule. Probed on the four directories (the core, `store/`, `room/core/`, `room/durable-object/`) with `node:fs`, `path`, `globalThis.process`, `globalThis.Buffer` and `self.require`: none of the three member forms and neither import was an error in the core or `store/` before, and all five are after |
 | `no-restricted-globals` in `packages/sensors/web-bluetooth` | naming any of the same list **except `navigator`** — the adapter is the transport boundary and `navigator.bluetooth` is the one platform API it exists to reach. The exception is derived by subtracting one name from the list above rather than restating it, so the two cannot drift |
 
 `packages/domain/tsconfig.json` narrows `lib` to `ES2024` and sets `types: []`. That is the closure
@@ -4451,8 +4470,19 @@ entries, both answered `false` for the same reason: `unrs-resolver` ships prebui
 as platform optional dependencies, so its script has nothing to do; and `workerd` (since
 [#781](https://github.com/openzigs/onyourleft/issues/781)) is a binary in its platform package
 (`@cloudflare/workerd-<os>-<arch>`), whose script only re-links it or, when that package is
-missing, downloads it from npm at install time. ⚠️ That package is ~130 MB, so every install —
-CI's included — downloads it, though CI runs nothing that uses it (§4c).
+missing, downloads it from npm at install time. ⚠️ That package is ~130 MB (134 218 589 bytes
+unpacked, a 39.7 MB tarball for `linux-64`), so every install — CI's included — downloads it, though
+CI runs nothing that uses it (§4c). **Measured for [#864](https://github.com/openzigs/onyourleft/issues/864),
+it is not worth keeping out of CI, and nothing does.** pnpm's own `Done in` for the job's frozen
+install, over six `main` runs either side of #851: **4.1–5.2 s (median 4.7) before, 3.9–6.1 s (median
+4.9) after** (+2 packages, 366 → 368; runs 36598959609–36626498625 and 36629332610–36642554580). The
+registry is close to the runner and the tarball downloads beside 367 others. `check:capacitor`'s and
+`check:notices`' own installs reuse that store and took the same 1–2 s and 7–9 s as their steps did
+before. On a developer's machine with an EMPTY store it is larger — 7.1–11.2 s (median 7.4) before
+against 11.0–13.6 s (median 11.9) after, five each, on 2026-09-29 — which is one download per clean
+store, not per install. Keeping it out would have meant `--no-optional` (which drops every platform
+binary, Rolldown's included) or an `ignoredOptionalDependencies` entry (which rewrites the lockfile
+for everyone, `test:workerd` included), each for about 0.2 s of a ~20-minute job.
 
 **That block is therefore a security-relevant file on every fork pull request.** CI installs from the
 *fork's* `pnpm-workspace.yaml`, so flipping an entry to `true` and adding a dependency is what makes
