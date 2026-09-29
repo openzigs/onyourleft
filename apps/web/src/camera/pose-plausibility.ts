@@ -22,7 +22,8 @@
  *    missing any of them cannot be checked, and a pose that cannot be
  *    checked is not accepted.
  * 2. **Top to bottom**: the ear (when given) not far below the shoulder
- *    ({@link EAR_BELOW_SHOULDER_TOLERANCE}), the shoulder above the hip, the hip above the ankle, the knee above the ankle. The
+ *    ({@link EAR_BELOW_SHOULDER_TOLERANCE}), the shoulder above the hip,
+ *    the hip above the ankle, the knee above the ankle. The
  *    knee against the hip is deliberately not checked: at the top of the
  *    stroke a low saddle puts the knee level with the hip or above it.
  * 3. **The knee is bent**: {@link MAXIMUM_KNEE_OPENING_COSINE}.

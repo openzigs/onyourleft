@@ -712,6 +712,10 @@ function channelOver(
   }
   // At most 1: a sample recorded in a slot the moving time did not count
   // (an imported file's own moving time, say) is not more than full coverage.
+  // ⚠️ So on such a ride this is an UPPER bound: when the stored moving time
+  // is shorter than the recorded span, samples from the stationary stretch
+  // fill in for real dropouts, and a channel that was half missing can read
+  // 1. The mean is over the samples present and is unaffected.
   const coverage = Math.min(1, present / slots);
   if (present === 0 || coverage < MINIMUM_REPORTED_COVERAGE) {
     return { coverage: rounded(coverage, 2) };
