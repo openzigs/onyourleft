@@ -185,6 +185,11 @@ const IMPORTERS: Readonly<
   // hands back plain text or the kinds of finding, and the check below holds
   // it to importing no trainer module like every other holder.
   [join('camera', 'write-up-screen.ts')]: 'holds an answer',
+  // #811: the ride analysis's port and runner. A step's reply is an answer
+  // until the template's acceptors or the screen above reduce it; both are
+  // also walked transitively by `ride-analysis/runner-safety.test.ts`.
+  [join('ride-analysis', 'model-step-port.ts')]: 'holds an answer',
+  [join('ride-analysis', 'runner.ts')]: 'holds an answer',
 };
 
 /** The modules through which anything reaches a trainer's control point. */
