@@ -540,3 +540,53 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   | `apps/web/src/camera/hosted-model.ts` | `HOSTED_CONSENT` is C above |
   | [`docs/privacy-policy.md`](../privacy-policy.md) | The own-computer paragraph is B, the hosted section carries C's first two paragraphs, and the sharing line reads *"We never sell your data. The only sharing is the analysis you choose to send to a service you set up."*, which agrees with Play Data Safety's fitness and health rows, declared shared |
   | `apps/mobile/src/android/data-safety.ts` | The fitness-info row's description names the distance, gradient and climb |
+- **2026-09-29** — **C's test-question sentence is replaced: the question goes when the rider
+  presses the button, not when a service is saved.** The entry above quoted, as approved, *"When
+  you save a service, the app sends it one test question, containing none of your data, to check it
+  answers."*, and recorded that the app does not do that. The owner ruled on
+  [#847](https://github.com/openzigs/onyourleft/issues/847) on 2026-09-29 that the sentence is
+  replaced, word for word, by *"When you press 'Send a test question to the service', the app sends
+  it one test question, containing none of your data, to check it answers."* The app is not changed:
+  *Save this service* still sends nothing. **Nothing above is edited**; B, as the entry above
+  amended it, stands, and C below replaces C as the entry above amended it. ADR 0029 gains an entry
+  quoting it.
+
+  **C, as amended:**
+
+  > **This sends your ride to a service you have chosen, using your own key.**
+  >
+  > If you turn this on, each time you ask for a ride analysis, that ride's numbers are sent to the
+  > address you entered, using the key you entered: your heart rate, cadence and power, your weight
+  > and watts per kilogram, your threshold power, if you set one, how long the ride lasted, its
+  > distance, and each section's gradient and total climb, and how it went section by section. If
+  > the side camera filmed the ride, it is also sent how a few measurements of your riding position
+  > changed between the start and the end of filming. That is a company or a computer that is not
+  > yours and not ours, and we cannot see what they do with it or how long they keep it. We cannot
+  > delete it for you afterwards. Like any service you connect to, it also sees your internet
+  > address.
+  >
+  > It is never sent a picture — not a photograph of you, and nothing made from one. It is not sent
+  > your name, where you rode, or when. When you press 'Send a test question to the service', the
+  > app sends it one test question, containing none of your data, to check it answers.
+  >
+  > Your key is kept on this device, is sent only to the address you entered, and is never put in a
+  > file this app exports.
+  >
+  > **You do not need this.** Everything else in the app works without it, and a computer of your own
+  > can do the same analysis.
+  >
+  > This is off. It stays off until you turn it on, it is off again whenever the app is opened, and
+  > you can turn it off at any time.
+
+  **What else #848's review asked for, in the same pull request.**
+  `apps/web/src/ride-analysis/sent-fields.test.ts` names every sent key by a phrase of more than one
+  word, so no single common word such as *power* can name a figure by appearing anywhere in the
+  disclosure, and it collects the keys of the system half of every prompt as well as the user half.
+  And the Play Data Safety fitness-info row says that the total climb is the height gained over a
+  section, a difference between two heights and never an altitude.
+
+  | Artefact | What changed in the same pull request |
+  |---|---|
+  | `apps/web/src/camera/hosted-model.ts` | `HOSTED_CONSENT` is C above, naming the button by `HOSTED_TEST_QUESTION_LABEL`, which `views/CameraView.tsx` renders |
+  | `apps/web/src/detail/write-up.test.ts` | Reads C from this, the NEWEST entry, with the entry above's C as the control |
+  | `apps/mobile/src/android/data-safety.ts` | The fitness-info row says the climb is a difference, not an altitude |

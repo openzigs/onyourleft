@@ -17,6 +17,7 @@ import {
   HOSTED_CONSENT,
   HOSTED_MODEL_REFUSAL_TEXT,
   HOSTED_MODEL_STORAGE_KEY,
+  HOSTED_TEST_QUESTION_LABEL,
   hostedCompletionsUrl,
   hostedModelDecision,
   hostedModelDecisionKeepingKey,
@@ -84,6 +85,36 @@ describe('the hosted consent wording is the one ADR 0029’s newest amendment qu
     // #845: the completed wording, not #803's.
     expect(amendment).toContain("its distance, and each section's gradient and total climb");
     expect(amendment).toContain('one test question, containing none of your data');
+    // #847: the question goes on the button's press, not on a save.
+    expect(amendment).toContain("When you press 'Send a test question to the service'");
+  });
+
+  it('names the button the Camera page really renders — #847', () => {
+    // The consent names a control by its label; the label is one constant
+    // the Camera page renders, so a rename cannot leave the consent naming a
+    // button that is gone without this and the ADR comparison both noticing.
+    expect(HOSTED_TEST_QUESTION_LABEL).toBe('Send a test question to the service');
+    expect(HOSTED_CONSENT.paragraphs.join(' ')).toContain(`'${HOSTED_TEST_QUESTION_LABEL}'`);
+  });
+
+  it('would notice the #845 wording, which said the question goes on a save — the control', () => {
+    const entries = [...markdown.matchAll(/^- \*\*2026-09-29\*\*/gm)];
+    expect(entries.length).toBeGreaterThanOrEqual(2);
+    // Only the block quotes: the newest entry's prose quotes the old sentence
+    // to say what it replaces.
+    const quoted = (from?: number, to?: number): string =>
+      asProse(
+        markdown
+          .slice(from, to)
+          .split('\n')
+          .filter((line) => line.trimStart().startsWith('>'))
+          .join('\n'),
+      );
+    const previous = quoted(entries.at(-2)?.index, entries.at(-1)?.index);
+    const newest = quoted(entries.at(-1)?.index);
+    expect(previous).toContain('When you save a service, the app sends it one test question');
+    expect(newest).toContain(HOSTED_CONSENT.paragraphs.map(asProse).join(' '));
+    expect(newest).not.toContain('When you save a service');
   });
 
   it('appears in the newest amendment word for word, every part and in order', () => {
@@ -108,7 +139,10 @@ describe('the hosted consent wording is the one ADR 0029’s newest amendment qu
     expect(all).toContain('using the key you entered');
     expect(all).toContain('your heart rate, cadence and power');
     expect(all).toContain("each section's gradient and total climb");
-    expect(all).toContain('When you save a service, the app sends it one test question');
+    expect(all).toContain(
+      "When you press 'Send a test question to the service', the app sends it one test question",
+    );
+    expect(all).not.toContain('When you save a service');
     expect(all).toContain('We cannot delete it for you afterwards');
     expect(all).not.toContain('Today it is sent only a test question');
     expect(HOSTED_CONSENT.notNeeded).toContain('You do not need this');

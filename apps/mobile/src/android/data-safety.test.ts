@@ -229,6 +229,18 @@ describe('the declaration filed on Play', () => {
     }
   });
 
+  it('says the climb a ride analysis sends is a difference, not an altitude — #847', () => {
+    // The row declares no location, and says no altitude is sent. A total
+    // climb is a height, so the row says what kind: #848's review asked for
+    // it in words rather than left for a reviewer to infer.
+    const fitness = DATA_SAFETY_DECLARATION.find(
+      (row) => row.dataType === 'Health and fitness — fitness info',
+    );
+    expect(fitness?.why).toContain('total climb (the height gained over the section');
+    expect(fitness?.why).toContain('a difference between two heights and never an altitude');
+    expect(fitness?.why).toContain('No position, altitude, date or identifier is sent');
+  });
+
   it('answers the photos row as collected, optional and not shared — #387', () => {
     // ⚠️ **Re-filed in the same pull request as the first byte**, which is
     // #377's epic criterion: the declaration is true of the shipped app at

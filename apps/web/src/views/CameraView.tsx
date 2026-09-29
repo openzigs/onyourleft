@@ -94,6 +94,7 @@ import {
   forgetHostedModel,
   HOSTED_CONSENT,
   HOSTED_MODEL_REFUSAL_TEXT,
+  HOSTED_TEST_QUESTION_LABEL,
   hostedModelDecisionKeepingKey,
   readHostedModel,
   writeHostedModel,
@@ -1149,7 +1150,7 @@ function HostedSection({ controller }: { readonly controller: CameraController }
               ask('connection-check');
             }}
           >
-            Send a test question to the service
+            {HOSTED_TEST_QUESTION_LABEL}
           </Button>
         </p>
       ) : null}
