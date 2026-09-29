@@ -930,6 +930,27 @@ async function scrollPageToEnd(page: Page): Promise<void> {
   await settleScroll(page);
 }
 
+/**
+ * Focus the skip link WITHOUT the scroll a focus call makes, and say so (#726,
+ * from #731's review). A plain `focus()` from the page's end scrolls the link
+ * — and so the page — back to the top before Enter is pressed, so the jump
+ * the skip link makes contributed nothing to what was measured after it:
+ * `mainRef.current?.focus({ preventScroll: true })` left both cases green.
+ * Measured this way, the jump left the `h1` at y = −10 150 on the control's
+ * layout, which is why `AppShell.tsx` §`skipToContent` scrolls `main` in.
+ */
+async function focusSkipLinkInPlace(page: Page): Promise<void> {
+  const before = await page.evaluate(() => window.scrollY);
+  await page.locator('.oyl-skip-link').evaluate((link) => {
+    (link as HTMLElement).focus({ preventScroll: true });
+  });
+  await expect(page.locator('.oyl-skip-link')).toBeFocused();
+  expect(
+    await page.evaluate(() => window.scrollY),
+    'focusing the skip link moved the page, so the jump it makes is not what is measured',
+  ).toBe(before);
+}
+
 /** Where `main`'s h1 is, against the header (or the inset band) and the fold. */
 async function h1Landing(page: Page): Promise<{
   top: number;
@@ -1084,7 +1105,7 @@ test.describe('#723 — two panes scroll on their own', () => {
       // From the page's furthest scroll, so the skip link has the 52 px of
       // footer line to undo rather than landing where the page already was.
       await scrollPageToEnd(page);
-      await page.locator('.oyl-skip-link').focus();
+      await focusSkipLinkInPlace(page);
       await page.keyboard.press('Enter');
       await expect(page.locator('main')).toBeFocused();
       await settleScroll(page);
@@ -1127,7 +1148,7 @@ test.describe('#723 — two panes scroll on their own', () => {
         `${route.id}: scrolled ${String(before.scrollY)} px, the h1 at ` +
           `${before.top.toFixed(0)}–${before.bottom.toFixed(0)} still read as in view`,
       ).toBe(true);
-      await page.locator('.oyl-skip-link').focus();
+      await focusSkipLinkInPlace(page);
       await page.keyboard.press('Enter');
       await expect(page.locator('main')).toBeFocused();
       await settleScroll(page);
