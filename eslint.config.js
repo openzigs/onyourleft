@@ -583,6 +583,60 @@ export default tseslint.config(
     },
   },
 
+  // --- The instance's core names no Node-only global (#852) -----------------
+  // ADR 0037 D-2: the room, the API handler and pagination are mounted
+  // unchanged by a Node adapter and by a Durable Object under `workerd`, which
+  // has no `Buffer`, no `process` and no `require`. A handler that reached for
+  // one would typecheck (the wide `tsconfig.json` carries `@types/node`), pass
+  // every Node test, and fail only under `workerd` — whose suite is local-only.
+  // So this is the half that runs on every pull request.
+  //
+  // What is exempt is the NODE ADAPTER, by name, and nothing by directory:
+  // the entry point, the HTTP listener, the `node:sqlite` driver and the disk
+  // blob store — plus tests and test support, which run on Node by
+  // definition. A new adapter file is added here on purpose; a new core file
+  // is covered without anyone editing this. The platform-neutral globals the
+  // handler is written against (`fetch`, `Request`, `Response`, `Headers`,
+  // `crypto`) are NOT listed: `workerd` has them.
+  //
+  // ⚠️ It comes BEFORE the room core's block, which sets the same rule and so
+  // replaces this one under `src/room/core/`; that block's own list already
+  // carries every name here but `module`, `exports` and `clearImmediate`,
+  // which its `lib`-narrowed tsconfig makes compile errors anyway.
+  {
+    files: ['apps/instance/src/**/*.ts'],
+    ignores: [
+      'apps/instance/src/main.ts',
+      'apps/instance/src/node-listener.ts',
+      'apps/instance/src/store/node-sqlite.ts',
+      'apps/instance/src/blob/disk-blob-store.ts',
+      'apps/instance/src/**/*.test.ts',
+      'apps/instance/src/**/*-testing.ts',
+      'apps/instance/src/**/testing/**',
+    ],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        ...[
+          'Buffer',
+          'process',
+          'require',
+          'module',
+          'exports',
+          '__dirname',
+          '__filename',
+          'global',
+          'setImmediate',
+          'clearImmediate',
+        ].map((name) => ({
+          name,
+          message:
+            'The instance core mounts unchanged under workerd, which has no Node globals (ADR 0037 D-2, #852). Take what you need as a parameter, or put Node-only code in an adapter file and name it in this block’s ignores.',
+        })),
+      ],
+    },
+  },
+
   // --- The room core is pure: time arrives as a parameter (#779) ------------
   // `apps/instance/src/room/core/` is mounted unchanged by a Node adapter
   // (#780) and a Durable Object (#781), ADR 0037 D-2, and its determinism test
