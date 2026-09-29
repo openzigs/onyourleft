@@ -277,7 +277,7 @@ describe('the declaration filed on Play', () => {
     expect(photos?.shared).toBe(false);
   });
 
-  it('collects nothing else — the map, the camera and the post-ride ask, and nothing more', () => {
+  it('collects nothing else — the map, the camera, the post-ride ask and an instance, and nothing more', () => {
     const collected = DATA_SAFETY_DECLARATION.filter((answer) => answer.collected).map(
       (answer) => answer.dataType,
     );
@@ -285,7 +285,10 @@ describe('the declaration filed on Play', () => {
       'Location — approximate location',
       'Health and fitness — health info',
       'Health and fitness — fitness info',
+      'Personal info — Name',
+      'Personal info — User IDs',
       'Photos and videos',
+      'Device or other IDs',
     ]);
     // Shared: the health rows alone, since #803. Photos and videos, and every
     // location row, stay `shared: false` — the hosted path is never sent a
@@ -305,6 +308,55 @@ describe('the declaration filed on Play', () => {
     expect(camera, 'the reviewed list has no CAMERA entry').toBeDefined();
     expect(locationClaimFaults(REVIEWED_PERMISSIONS)).toEqual([]);
     expect(LOCATION_PERMISSIONS).not.toContain('android.permission.CAMERA');
+  });
+
+  it('answers what connecting to an instance sends, optional and not shared — #777, #778', () => {
+    // #778's criterion: the answers are revised for the build that ships
+    // instance support. Signing in sends the device's public key and, when
+    // typed, a display name; the instance gives the rider an account.
+    for (const dataType of [
+      'Device or other IDs',
+      'Personal info — Name',
+      'Personal info — User IDs',
+    ]) {
+      const answer = DATA_SAFETY_DECLARATION.find((row) => row.dataType === dataType);
+      expect(answer, dataType).toBeDefined();
+      expect(answer?.collected, dataType).toBe(true);
+      expect(answer?.shared, dataType).toBe(false);
+      expect(answer?.optional, dataType).toBe(true);
+      expect(answer?.purposes, dataType).toStrictEqual(['App functionality', 'Account management']);
+      expect(answer?.why, dataType).toContain('#777');
+      expect(answer?.why, dataType).toContain('Connect');
+    }
+    // The old single row, and its "no sign-in" claim, are gone rather than
+    // left beside the new ones.
+    expect(DATA_SAFETY_DECLARATION.some((row) => row.dataType === 'Personal info')).toBe(false);
+    expect(DATA_SAFETY_DECLARATION.map((row) => row.why).join(' ')).not.toContain('no sign-in');
+    // No email: the app has no field for one.
+    const email = DATA_SAFETY_DECLARATION.find(
+      (row) => row.dataType === 'Personal info — Email address',
+    );
+    expect(email?.collected).toBe(false);
+  });
+
+  it('names Discord for voice chat, and collects no audio itself — #778, #794', () => {
+    const audio = DATA_SAFETY_DECLARATION.find((row) => row.dataType.startsWith('Audio'));
+    expect(audio?.collected).toBe(false);
+    expect(audio?.why).toContain('Discord');
+    expect(audio?.why).toContain('username and picture');
+    const ids = DATA_SAFETY_DECLARATION.find((row) => row.dataType === 'Personal info — User IDs');
+    expect(ids?.why).toContain('Discord id');
+  });
+
+  it('still declares no precise location with an instance connected — #777', () => {
+    // #778: the location rule must pass with the new declaration, not be
+    // deleted. This build sends an instance no position.
+    const precise = DATA_SAFETY_DECLARATION.find(
+      (answer) => answer.dataType === 'Location — precise location',
+    );
+    expect(precise?.collected).toBe(false);
+    expect(precise?.why).toContain('instance');
+    expect(locationClaimFaults(REVIEWED_PERMISSIONS)).toEqual([]);
   });
 
   it('gives a reason for every answer', () => {

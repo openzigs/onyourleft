@@ -183,6 +183,21 @@ describe('what the About page claims about the network — #404, then #408', () 
     expect(text).toContain('a computer of your own');
     expect(text).not.toContain('Nothing is collected');
   });
+
+  it('names what an instance is sent, and only on connecting — #777, #778', async () => {
+    // "No server to sign in to" became false the day a rider could connect to
+    // an instance, so the page says when it is true and what the one
+    // exception sends.
+    const text = await aboutText();
+    expect(text).toContain('unless you choose to connect to an instance');
+    expect(text).toContain('Nothing is sent to us unless you connect to this project’s instance');
+    expect(text).toContain('public key, the name other riders will see if you type one');
+    expect(text).not.toContain('There is no account, no analytics and no server');
+    const mounted = await mount(<AboutView />);
+    const link = mounted.container.querySelector('a[href="#/settings/instance"]');
+    mounted.unmount();
+    expect(link?.textContent).toBe('connect to an instance');
+  });
 });
 
 describe('what the About page says about a ride the app closed on — #411', () => {

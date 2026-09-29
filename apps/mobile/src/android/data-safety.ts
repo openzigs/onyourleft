@@ -69,9 +69,12 @@ export interface DataSafetyAnswer {
 /**
  * The declaration filed for this app.
  *
- * ⚠️ Every row but four is `collected: false`, and that is a statement about
- * the PRODUCT, not a convenience: Phase 1 has no server, no account and no
- * analytics (CLAUDE.md §1, owner decision D6). Play's definition of
+ * ⚠️ Every row but seven is `collected: false` (four until #777), and that is
+ * a statement about the PRODUCT, not a convenience: no analytics, and nothing
+ * sent anywhere a rider did not choose. ⚠️ "Phase 1 has no server" was the
+ * reason this line gave until ADR 0036 lifted owner decision D6; an instance is
+ * now something a rider may connect to, and the three rows #777 moved say
+ * what that sends. Play's definition of
  * "collected" is data transferred off the device; a ride the athlete exports
  * to a file themselves is not a collection, and neither is a measurement
  * written to IndexedDB on the phone.
@@ -101,6 +104,17 @@ export interface DataSafetyAnswer {
  * sends a ride's numbers to the rider's own computer on a press. See the rows.
  * ⚠️ **Since #803 they are SHARED as well**: the same ask can go to a hosted
  * model on the rider's own key, which is a third party.
+ *
+ * ⚠️ **Since #777 the device's public key and the rider's display name are
+ * collected too**, when the rider connects to an instance: see the Device or
+ * other IDs, Personal info — Name and Personal info — User IDs rows. This
+ * build sends an instance nothing else — no ride, route, position or health
+ * data — so every other row is unmoved by it, and each says so where it used
+ * to say "this project runs no server". ⚠️ The rows are revised for the build
+ * that ships instance support (#778), and a later build that syncs rides
+ * (#776) or joins a room (#782) moves the precise-location and health rows
+ * again, in its own pull request. Draft wording awaiting the owner's approval
+ * (#880).
  *
  * ⚠️ The health rows are here because Play's Health Content and Services policy
  * covers apps that are not primarily health apps — its own example is a game
@@ -171,7 +185,7 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     dataType: 'Location — precise location',
     collected: false,
     shared: false,
-    why: 'a recorded ride carries positions and they stay in IndexedDB on the device; the app requests no GPS fix and never transmits a position. The location permissions in the manifest exist only so that a BLE scan works below API 31, which Android required, and they are bounded at API 30 — see locationClaimFaults. The one location signal that leaves the device is a map tile request: which part of the map it asks for is handled while the request is served and not kept, and what is kept is the IP address, answered under approximate location',
+    why: 'a recorded ride carries positions and they stay in IndexedDB on the device; the app requests no GPS fix and never transmits a position — connecting to an instance (#777) sends none either, in this build. The location permissions in the manifest exist only so that a BLE scan works below API 31, which Android required, and they are bounded at API 30 — see locationClaimFaults. The one location signal that leaves the device is a map tile request: which part of the map it asks for is handled while the request is served and not kept, and what is kept is the IP address, answered under approximate location',
   },
   {
     // ⚠️ **Re-answered by #804, and the answer CHANGED — collected: true.** A
@@ -200,7 +214,7 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     shared: true,
     optional: true,
     purposes: ['App functionality'],
-    why: 'heart rate from a BLE strap, stored locally. In scope of the Health apps policy because it advances gameplay (#85). When the rider presses the button on a ride’s page that asks for a write-up (#804), that ride’s heart rate — as numbers, section by section — is sent to the source they chose: one computer the rider configured at an address on their own network and switched on, the same computer and rules as the Photos row; or (#803) a hosted model service the rider chose, at the https address they typed, on their own key, which is a third party — hence shared. The hosted path is off by default, separately consented, off again whenever the app is opened, and gated on that consent at every step. Nothing is set up by default, nothing is sent until the press, and nothing is sent in the background. It is not sent to this project, which runs no server',
+    why: 'heart rate from a BLE strap, stored locally. In scope of the Health apps policy because it advances gameplay (#85). When the rider presses the button on a ride’s page that asks for a write-up (#804), that ride’s heart rate — as numbers, section by section — is sent to the source they chose: one computer the rider configured at an address on their own network and switched on, the same computer and rules as the Photos row; or (#803) a hosted model service the rider chose, at the https address they typed, on their own key, which is a third party — hence shared. The hosted path is off by default, separately consented, off again whenever the app is opened, and gated on that consent at every step. Nothing is set up by default, nothing is sent until the press, and nothing is sent in the background. It is not sent to this project, and this build sends none of it to an instance the rider connects to (#777)',
   },
   {
     // ⚠️ **Re-answered by #804, and the answer CHANGED — collected: true.** A
@@ -220,13 +234,46 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     shared: true,
     optional: true,
     purposes: ['App functionality'],
-    why: 'power, cadence, speed and distance from BLE sensors and the trainer, stored locally. When the rider presses the button on a ride’s page that asks for a write-up (#804), that ride’s power, cadence, the rider’s weight and watts per kilogram, their threshold power if set, and the ride’s length and distance, with each section’s gradient and total climb (the height gained over the section, a difference between two heights and never an altitude), section by section, are sent as numbers to the source they chose: one computer the rider configured at an address on their own network and switched on — the same computer and rules as the Photos row — or (#803) a hosted model service the rider chose, at the https address they typed, on their own key, which is a third party — hence shared. The hosted path is off by default, separately consented, off again whenever the app is opened, and gated on that consent at every step. Nothing is set up by default and nothing is sent until the press. It is not sent to this project, which runs no server. No position, altitude, date or identifier is sent on either path',
+    why: 'power, cadence, speed and distance from BLE sensors and the trainer, stored locally. When the rider presses the button on a ride’s page that asks for a write-up (#804), that ride’s power, cadence, the rider’s weight and watts per kilogram, their threshold power if set, and the ride’s length and distance, with each section’s gradient and total climb (the height gained over the section, a difference between two heights and never an altitude), section by section, are sent as numbers to the source they chose: one computer the rider configured at an address on their own network and switched on — the same computer and rules as the Photos row — or (#803) a hosted model service the rider chose, at the https address they typed, on their own key, which is a third party — hence shared. The hosted path is off by default, separately consented, off again whenever the app is opened, and gated on that consent at every step. Nothing is set up by default and nothing is sent until the press. It is not sent to this project, and this build sends none of it to an instance the rider connects to (#777). No position, altitude, date or identifier is sent on either path',
   },
   {
-    dataType: 'Personal info',
+    // ⚠️ **Split by #777, and the Name answer CHANGED — collected: true.** A
+    // reviewer who remembers one `Personal info` row answering "there is no
+    // account, no sign-in and no name" is reading the old file. A rider may
+    // connect to an instance and, when that instance has not seen the device
+    // before, type the name other riders will see; it is sent to that
+    // instance. Collected on #387's reasoning even for an instance the rider
+    // runs themselves, and plainly so for the project's own instance, which is
+    // ours. `shared: false`: the instance is the rider's or ours, and the
+    // project's traffic passes through Cloudflare as our service provider.
+    // Optional: nothing is sent until the rider types an address and presses
+    // Connect, and the name itself is optional.
+    dataType: 'Personal info — Name',
+    collected: true,
+    shared: false,
+    optional: true,
+    purposes: ['App functionality', 'Account management'],
+    why: 'only when the rider connects to an instance (#777): the name other riders will see there, if they type one, sent to that instance when it has not seen this device before, and kept by it with the rider’s account. Nothing is sent until the rider types the instance’s address and presses Connect. An instance is one the rider chose — their own, or this project’s, whose traffic Cloudflare carries for us as our service provider. It is not kept on the device',
+  },
+  {
+    // #777: the account an instance gives a rider, and the session that
+    // identifies them to it, are an account ID in Play's sense. ⚠️ And, when
+    // voice chat arrives (#794, option A; #778's comment of 2026-09-29), a
+    // rider who links their Discord account has their Discord id kept by the
+    // instance with their account — named here now so the filing does not
+    // change silently when it ships.
+    dataType: 'Personal info — User IDs',
+    collected: true,
+    shared: false,
+    optional: true,
+    purposes: ['App functionality', 'Account management'],
+    why: 'only when the rider connects to an instance (#777): the instance creates an account for the rider and a sign-in session for this device, which the app sends back to it with each request so it knows who is asking. Where an instance offers voice chat on Discord (#794), a rider who links their Discord account has their Discord id kept by the instance with their account. Nothing is sent until the rider presses Connect',
+  },
+  {
+    dataType: 'Personal info — Email address',
     collected: false,
     shared: false,
-    why: 'there is no account, no sign-in and no name or email field anywhere in the client',
+    why: 'the app has no email field anywhere. An instance’s operator may offer email recovery of an account, but this app sends no email address to an instance (#773, #777)',
   },
   {
     dataType: 'Files and docs',
@@ -312,13 +359,28 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     shared: false,
     optional: true,
     purposes: ['App functionality'],
-    why: 'a still picture from the camera (#382, #383) is sent — only when the rider presses the button that sends it — to one computer the rider configured at an address on their own network and switched on (#387). Nothing is set up by default and nothing is sent until it is. It is not sent to this project, which runs no server, and not to any third party: an address that is not on the rider’s own network is refused. A picture is otherwise discarded after it has been looked at unless the rider turns on this ride’s keep (ADR 0029 D-2). Separately, a side-camera phone the rider paired by scanning sends its pictures to the rider’s own tablet over an end-to-end encrypted WebRTC data channel with no relay (#530, ADR 0033 D-1), where each is analysed on the tablet and discarded at once, never stored, shown or sent on (ADR 0033 D-6) — end-to-end encrypted transfer between the rider’s own devices, which Play exempts, and so not what makes this row collected. The one exception is a stream the rider switches on (#553, ADR 0033 D-11): with a second switch, off by default, ticked beside a sentence saying so, every side-camera picture — about five a second while the side camera films — is sent on to that same computer of the rider’s instead of being analysed on the tablet, over the same path as above, and is still not kept on the tablet. A hosted model the rider sets up on their own key (#518) is never sent a picture, nor anything made from one',
+    why: 'a still picture from the camera (#382, #383) is sent — only when the rider presses the button that sends it — to one computer the rider configured at an address on their own network and switched on (#387). Nothing is set up by default and nothing is sent until it is. It is not sent to this project or to an instance (#777), and not to any third party: an address that is not on the rider’s own network is refused. A picture is otherwise discarded after it has been looked at unless the rider turns on this ride’s keep (ADR 0029 D-2). Separately, a side-camera phone the rider paired by scanning sends its pictures to the rider’s own tablet over an end-to-end encrypted WebRTC data channel with no relay (#530, ADR 0033 D-1), where each is analysed on the tablet and discarded at once, never stored, shown or sent on (ADR 0033 D-6) — end-to-end encrypted transfer between the rider’s own devices, which Play exempts, and so not what makes this row collected. The one exception is a stream the rider switches on (#553, ADR 0033 D-11): with a second switch, off by default, ticked beside a sentence saying so, every side-camera picture — about five a second while the side camera films — is sent on to that same computer of the rider’s instead of being analysed on the tablet, over the same path as above, and is still not kept on the tablet. A hosted model the rider sets up on their own key (#518) is never sent a picture, nor anything made from one',
   },
   {
+    // ⚠️ **Re-answered by #777, and the answer CHANGED — collected: true.** A
+    // reviewer who remembers the public half travelling "only inside a file
+    // the athlete exports themselves" is reading the old file: signing in to
+    // an instance sends it, and the instance keeps it as one of the athlete's
+    // devices (#772, #773). The private half still never leaves.
     dataType: 'Device or other IDs',
+    collected: true,
+    shared: false,
+    optional: true,
+    purposes: ['App functionality', 'Account management'],
+    why: 'the device signing keypair (#61): its private half never leaves the device — it is a non-extractable CryptoKey — and its public half travels inside a file the athlete exports themselves and, only when the rider connects to an instance (#777), to that instance, which keeps it as one of the rider’s devices with when it was added and last used. Nothing is sent until the rider types the instance’s address and presses Connect',
+  },
+  {
+    // #778's comment of 2026-09-29 (#794, option A): voice chat in a room is
+    // on Discord, through Discord's own app, never through this one.
+    dataType: 'Audio — Voice or sound recordings',
     collected: false,
     shared: false,
-    why: 'the device signing keypair (#61) never leaves the device — its private half is a non-extractable CryptoKey — and its public half travels only inside a file the athlete exports themselves',
+    why: 'this app records no audio and sends none. Where an instance offers voice chat in a room, it happens on Discord, a separate service the rider chooses to use through Discord’s own app: Discord receives the rider’s voice, and other riders in the voice channel see the rider’s Discord username and picture',
   },
 ];
 
