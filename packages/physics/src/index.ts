@@ -112,3 +112,40 @@ export {
 
 export type { BotCourse, BotPacerDriver, BotTick } from './pacer';
 export { advanceBot, BOT_AT_START_LINE, botDemand, createBotPacer } from './pacer';
+
+// --- The coefficient set a ride runs, and the version of the answer (#487) --
+//
+// Moved here from `apps/web/src/game/rider.ts` so that a race room, which may
+// not import `apps/web`, runs exactly the set the game does (ADR 0028 D-1).
+
+export type { RidingPosition } from './riding';
+export {
+  PHYSICS_VERSION,
+  RIDING_POSITION_DRAG_AREAS,
+  ridingCoefficients,
+  ROAD_ROLLING_RESISTANCE_COEFFICIENT,
+} from './riding';
+
+// --- What a race room checks (#487, ADR 0028 D-2 rules 1–4) -----------------
+
+export type {
+  CeilingBreach,
+  Disagreement,
+  InadmissibleReason,
+  PlausibilityLimits,
+  PlausibilityVerdict,
+  PowerDurationCeiling,
+  ReportVerdict,
+  ReportWindow,
+  RiderReport,
+} from './plausibility';
+export {
+  advanceRider,
+  declaredMassAdmissible,
+  DEFAULT_PLAUSIBILITY_LIMITS,
+  disagreement,
+  judgeReport,
+  plausibility,
+  powerToSimulate,
+  Q3_CEILINGS,
+} from './plausibility';

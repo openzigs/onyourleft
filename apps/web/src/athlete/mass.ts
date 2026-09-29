@@ -38,6 +38,7 @@
  */
 
 import { kilograms, KILOGRAMS_PER_POUND, type Kilograms } from '@onyourleft/domain';
+import { DEFAULT_PLAUSIBILITY_LIMITS } from '@onyourleft/physics';
 import type { UnitSystem } from '@onyourleft/store';
 
 /**
@@ -74,10 +75,17 @@ export const DEFAULT_RIDER_MASS_KILOGRAMS = 71;
  * zero and negatives, and what this catches is a typed decimal point — 6.5 for
  * 65 — which is a number the physics would accept and ride absurdly.
  */
-export const MINIMUM_MASS_KILOGRAMS = 20;
+export const MINIMUM_MASS_KILOGRAMS = DEFAULT_PLAUSIBILITY_LIMITS.minimumMassKilograms;
 
-/** The heaviest. The same argument: 800 for 80 is a slipped digit, not a rider. */
-export const MAXIMUM_MASS_KILOGRAMS = 300;
+/**
+ * The heaviest. The same argument: 800 for 80 is a slipped digit, not a rider.
+ *
+ * ⚠️ Both bounds are read from `@onyourleft/physics` since #487, because a race
+ * room applies the same range to a declared mass (ADR 0028 D-2 rule 1) and
+ * cannot import this file. One range, so a mass this screen accepts is never
+ * one a room refuses.
+ */
+export const MAXIMUM_MASS_KILOGRAMS = DEFAULT_PLAUSIBILITY_LIMITS.maximumMassKilograms;
 
 /** What the rider is ridden at, and whether they ever said so. */
 export interface RiderMass {
