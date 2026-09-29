@@ -230,17 +230,6 @@ export interface SideSessionOutcome {
 }
 
 /**
- * What a session came to, as sentences — or `undefined` when nothing was
- * looked at at all (a pairing that never filmed has nothing to report).
- */
-export function sideReportFrom(
-  samples: readonly SideReportSample[],
-  looked: SideReportLooked,
-): SideReport | undefined {
-  return sideSessionFrom(samples, { ...looked, place: 'tablet' }).report;
-}
-
-/**
  * A session's report AND its pose summary, from **one** pass over the same
  * statistics — #801's first criterion: the sentences are chosen from the
  * very differences the summary keeps, so the two cannot disagree.
