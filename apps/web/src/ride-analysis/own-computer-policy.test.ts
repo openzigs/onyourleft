@@ -32,17 +32,21 @@ function asProse(markdown: string): string {
     .trim();
 }
 
-/** ADR 0035 D-9's wording B: the block quote after its heading and before C's. */
+/**
+ * ADR 0035 D-9's wording B as its 2026-09-29 amendment completed it (#845):
+ * the block quote after `**B, as amended:**` and before C's. The body's
+ * original B is never edited, so it is not what ships.
+ */
 function approvedWordingB(adr: string): string {
-  const start = adr.indexOf('**B — own computer, a new paragraph in the privacy policy:**');
-  const end = adr.indexOf('**C — hosted', start);
+  const start = adr.indexOf('**B, as amended:**');
+  const end = adr.indexOf('**C, as amended:**', start);
   if (start < 0 || end < 0) {
     return '';
   }
   const quoted = adr
     .slice(start, end)
     .split('\n')
-    .filter((line) => line.startsWith('>'))
+    .filter((line) => line.trimStart().startsWith('>'))
     .join('\n');
   return asProse(quoted);
 }
@@ -55,6 +59,7 @@ describe('the own-computer paragraph (#802, ADR 0035 D-9 B)', () => {
     expect(wording.length).toBeGreaterThan(400);
     expect(wording).toMatch(/^A ride sent to your own computer, when you ask for an analysis\./);
     expect(wording).toContain('your threshold power, if you set one');
+    expect(wording).toContain("its distance, and each section's gradient and total climb");
     expect(wording).toContain('Never a picture.');
   });
 
@@ -69,6 +74,28 @@ describe('the own-computer paragraph (#802, ADR 0035 D-9 B)', () => {
   it('goes red on a policy that drops the owner’s addition', () => {
     const drifted = asProse(read(POLICY)).replace('your threshold power, if you set one, ', '');
     expect(drifted).not.toContain(wording);
+  });
+
+  it('goes red on a policy that drops the distance, gradient and climb — #845', () => {
+    const drifted = asProse(read(POLICY)).replace(
+      "its distance, and each section's gradient and total climb, ",
+      '',
+    );
+    expect(drifted).not.toContain(wording);
+  });
+});
+
+describe('the privacy policy’s sharing line (#845)', () => {
+  const policy = asProse(read(POLICY));
+
+  it('says the owner’s words, which agree with Play Data Safety declaring fitness info shared', () => {
+    expect(policy).toContain(
+      'We never sell your data. The only sharing is the analysis you choose to send to a service you set up.',
+    );
+  });
+
+  it('no longer says there is no sharing at all', () => {
+    expect(policy).not.toContain('No sale or sharing of personal information');
   });
 });
 

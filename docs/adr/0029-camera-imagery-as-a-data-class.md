@@ -879,3 +879,46 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   | [`docs/privacy-policy.md`](../privacy-policy.md) | §"Questions sent to a service you chose, on your own key" says what a ride analysis sends, in the words above; the sentence promising to say so first is gone |
   | `apps/mobile/src/android/data-safety.ts` | **Health and fitness — health info** and **fitness info** are `collected: true, shared: true`. **Photos and videos stays `shared: false`**, and no location row moves: nothing sent carries a coordinate |
   | `apps/web/src/transfer/erase-device.ts` | The hosted line of `ERASE_CANNOT_REACH` names a ride's numbers as well as a question |
+- **2026-09-29** — **The hosted consent wording of the entry above is replaced by ADR 0035 D-9 C as
+  [ADR 0035](0035-model-written-ride-write-ups.md)'s 2026-09-29 amendment completed it.** The
+  review of [#843](https://github.com/openzigs/onyourleft/pull/843) found that the wording did not
+  name the ride's distance, or each section's gradient and total climb, all of which a ride
+  analysis sends, and did not mention the connection check. The owner ruled on
+  [#845](https://github.com/openzigs/onyourleft/issues/845) on 2026-09-29, which answers the
+  question the entry above left to the owner. **Nothing in the entries above is edited.**
+
+  **The consent screen's words for the hosted path, from ADR 0035 D-9 C as amended:**
+
+  > **This sends your ride to a service you have chosen, using your own key.**
+  >
+  > If you turn this on, each time you ask for a ride analysis, that ride's numbers are sent to the
+  > address you entered, using the key you entered: your heart rate, cadence and power, your weight
+  > and watts per kilogram, your threshold power, if you set one, how long the ride lasted, its
+  > distance, and each section's gradient and total climb, and how it went section by section. If
+  > the side camera filmed the ride, it is also sent how a few measurements of your riding position
+  > changed between the start and the end of filming. That is a company or a computer that is not
+  > yours and not ours, and we cannot see what they do with it or how long they keep it. We cannot
+  > delete it for you afterwards. Like any service you connect to, it also sees your internet
+  > address.
+  >
+  > It is never sent a picture — not a photograph of you, and nothing made from one. It is not sent
+  > your name, where you rode, or when. When you save a service, the app sends it one test question,
+  > containing none of your data, to check it answers.
+  >
+  > Your key is kept on this device, is sent only to the address you entered, and is never put in a
+  > file this app exports.
+  >
+  > **You do not need this.** Everything else in the app works without it, and a computer of your own
+  > can do the same analysis.
+  >
+  > This is off. It stays off until you turn it on, it is off again whenever the app is opened, and
+  > you can turn it off at any time.
+
+  ⚠️ **The test question is not sent when a service is saved**: it goes when the rider, with the
+  hosted model on, presses *Send a test question to the service*. The sentence is quoted as
+  approved; ADR 0035's amendment records the same caveat, and rewording it is the owner's ([#847](https://github.com/openzigs/onyourleft/issues/847)).
+
+  | Artefact | What changed in the same pull request |
+  |---|---|
+  | `apps/web/src/camera/hosted-model.ts` | `HOSTED_CONSENT` is the wording above, and `hosted-model.test.ts` compares it with this, the NEWEST entry |
+  | [`docs/privacy-policy.md`](../privacy-policy.md) | The hosted section's list names the distance, gradient and climb, and the sharing line reads *"We never sell your data. The only sharing is the analysis you choose to send to a service you set up."* |
