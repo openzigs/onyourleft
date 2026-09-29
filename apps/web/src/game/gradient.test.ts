@@ -92,6 +92,10 @@ const HELD_WHILE_LETTING_GO =
 const HELD_AFTER_LETTING_GO =
   'The hills are no longer being sent: this app has stopped driving the trainer.';
 
+/** Once its trainer has been detached (#732). */
+const HELD_AFTER_DISCONNECT =
+  'The hills are no longer being sent: this trainer is not connected to this app any more.';
+
 /** The fault a session reports when its one gradient is refused with `error`. */
 async function faultFor(error: Error): Promise<string> {
   const trainer = recordingTrainer({ reject: error });
@@ -344,7 +348,7 @@ describe('a gradient session drives a trainer from a route', () => {
   });
 
   it('words each refusal for the road rather than for a target', async () => {
-    // Seven distinct sentences, because a rider reading "the trainer refused
+    // Eight distinct sentences, because a rider reading "the trainer refused
     // that target" while looking at a hill would go looking for a workout they
     // are not riding.
     const said = new Set<string>();
@@ -357,14 +361,17 @@ describe('a gradient session drives a trainer from a route', () => {
       new TargetHeldBack('forget-running', 'a trainer is still being forgotten'),
       // The controller's other two holds (#728).
       new TargetHeldBack('letting-go-to-forget', 'the trainer is being forgotten'),
-      new TargetHeldBack('let-go', 'the ride controller has let the trainer go'),
+      new TargetHeldBack('let-go', 'the ride controller was disposed and writes nothing again'),
+      // And once its trainer has been detached (#732).
+      new TargetHeldBack('disconnected', 'the trainer is no longer connected to this app'),
     ]) {
       said.add(await faultFor(error));
     }
-    expect(said.size).toBe(7);
+    expect(said.size).toBe(8);
     expect(said).toContain(HELD_BACK);
     expect(said).toContain(HELD_WHILE_LETTING_GO);
     expect(said).toContain(HELD_AFTER_LETTING_GO);
+    expect(said).toContain(HELD_AFTER_DISCONNECT);
     for (const text of said) {
       expect(text).toMatch(/road|hill|gradient/);
     }
@@ -390,6 +397,9 @@ describe('a gradient session drives a trainer from a route', () => {
         HELD_WHILE_LETTING_GO,
       );
       expect(await faultFor(new TargetHeldBack('let-go', reason))).toBe(HELD_AFTER_LETTING_GO);
+      expect(await faultFor(new TargetHeldBack('disconnected', reason))).toBe(
+        HELD_AFTER_DISCONNECT,
+      );
     });
 
     it('promises the next gradient only for the hold that lifts by itself (#728)', async () => {
@@ -397,7 +407,7 @@ describe('a gradient session drives a trainer from a route', () => {
       // be forgotten is gone once it has been, and a disposed controller
       // writes nothing again — so neither may say the next one will be sent.
       expect(HELD_BACK).toContain('will be sent again');
-      for (const hold of ['letting-go-to-forget', 'let-go'] as const) {
+      for (const hold of ['letting-go-to-forget', 'let-go', 'disconnected'] as const) {
         const text = await faultFor(new TargetHeldBack(hold, 'held'));
         expect(text).not.toMatch(/sent again|refused/);
         // #729's review: each is on screen while the release's Stop is in

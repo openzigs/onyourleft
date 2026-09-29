@@ -57,7 +57,10 @@ import {
   TINT_CODEC_STEPS,
   TINT_CODEC_ZERO,
   packedInstanceTint,
+  tintedLinear,
+  unpackInstanceTint,
 } from './instance-tint';
+import { glslFunction, type GlslValue } from './glsl-testing';
 import {
   CAMERA_BEHIND_METRES,
   FRUSTUM_SPREAD,
@@ -2406,6 +2409,14 @@ describe('every realistic tree, shrub, rock and building wears a seeded tint —
   // gate's floors, so the hue scale written in degrees where the shader turns
   // radians passed every test. These are the codec's own ranges, read back out
   // of the program three is handed.
+  //
+  // ⚠️ The regexes below key on the GLSL's FORMATTING — `(vec3(hue,
+  // saturation, brightness) - 127.0)`, the two-space indent that closes the
+  // function, the whitespace inside `vec3(`. Reformatting `TINT_DECODE_GLSL`
+  // turns this red with nothing wrong, and that is expected: it fails closed
+  // (`not.toBeNull()`). #678's case below evaluates the same function by value
+  // and does not care how it is laid out, so a red here after a reformat with
+  // that one green is the formatting, and the patterns are what to update.
   it('decodes the tint in the shader with the codec’s own ranges, the hue in radians', () => {
     const shrub = prepareRealisticShape(aScene([{ material: loaderMaterial() }]), 'shrub');
     new RealisticVegetationBelt(new Map([['shrub', [shrub]]]));
@@ -2423,6 +2434,109 @@ describe('every realistic tree, shrub, rock and building wears a seeded tint —
     expect(Number(scale?.[2])).toBeCloseTo((TINT_CODEC_RANGE.hueDegrees * Math.PI) / 180, 7);
     expect(Number(scale?.[3])).toBeCloseTo(TINT_CODEC_RANGE.saturation, 7);
     expect(Number(scale?.[4])).toBeCloseTo(TINT_CODEC_RANGE.brightness, 7);
+  });
+
+  describe('the shader’s tint arithmetic, evaluated from the program three is handed — #678', () => {
+    // The browser gate reads the tint through AgX, which draws each shift at
+    // about 0.75 of its size, and its tolerance absorbed that: a brightness
+    // scale from about 0.8× to 1.87× passed, and 1.5× scored BETTER than the
+    // correct build (#658's re-review). So the arithmetic is held here, at
+    // unit speed, by running the GLSL itself against `tintedLinear`.
+    const compiled = (): { vertex: string; fragment: string } => {
+      const shrub = prepareRealisticShape(aScene([{ material: loaderMaterial() }]), 'shrub');
+      new RealisticVegetationBelt(new Map([['shrub', [shrub]]]));
+      return compiledBoth(shrub.parts[0]?.material);
+    };
+
+    /** A packed tint from its three signed steps, as `packedInstanceTint` packs one. */
+    const packed = (hue: number, saturation: number, brightness: number): number =>
+      hue +
+      TINT_CODEC_STEPS +
+      (saturation + TINT_CODEC_STEPS) * 256 +
+      (brightness + TINT_CODEC_STEPS) * 65536 -
+      TINT_CODEC_ZERO;
+
+    const STEPS = [-TINT_CODEC_STEPS, -61, -1, 0, 1, 40, TINT_CODEC_STEPS];
+    const COLOURS: readonly (readonly [number, number, number])[] = [
+      [0.18, 0.32, 0.06],
+      [0.5, 0.5, 0.5],
+      [0.9, 0.1, 0.05],
+      [0.02, 0.04, 0.6],
+      [0, 0, 0],
+      [1, 1, 1],
+    ];
+    const TOLERANCE = 1e-6;
+
+    /** The largest channel difference between `apply` and `tintedLinear` over every sample. */
+    const worstMiss = (apply: (...args: readonly GlslValue[]) => GlslValue): number => {
+      let worst = 0;
+      for (const hue of STEPS) {
+        for (const saturation of STEPS) {
+          for (const brightness of STEPS) {
+            const tint = unpackInstanceTint(packed(hue, saturation, brightness));
+            const radians: GlslValue = [
+              (tint.hueDegrees * Math.PI) / 180,
+              tint.saturation,
+              tint.brightness,
+            ];
+            for (const colour of COLOURS) {
+              const drawn = apply(colour, radians);
+              const expected = tintedLinear([colour[0], colour[1], colour[2]], tint);
+              if (typeof drawn === 'number') throw new Error('oylTinted returned a float');
+              for (let at = 0; at < 3; at += 1) {
+                worst = Math.max(worst, Math.abs((drawn[at] ?? 0) - (expected[at] ?? 0)));
+              }
+            }
+          }
+        }
+      }
+      return worst;
+    };
+
+    it('decodes every packed tint to what unpackInstanceTint reads, the hue in radians', () => {
+      const decode = glslFunction(compiled().vertex, 'oylTintOf');
+      for (const hue of STEPS) {
+        for (const saturation of STEPS) {
+          for (const brightness of STEPS) {
+            const stored = packed(hue, saturation, brightness);
+            const tint = unpackInstanceTint(stored);
+            const decoded = decode(stored);
+            if (typeof decoded === 'number') throw new Error('oylTintOf returned a float');
+            expect(decoded[0]).toBeCloseTo((tint.hueDegrees * Math.PI) / 180, 6);
+            expect(decoded[1]).toBeCloseTo(tint.saturation, 6);
+            expect(decoded[2]).toBeCloseTo(tint.brightness, 6);
+          }
+        }
+      }
+    });
+
+    it('applies a tint exactly as tintedLinear does, at every edge of the codec', () => {
+      expect(worstMiss(glslFunction(compiled().fragment, 'oylTinted'))).toBeLessThan(TOLERANCE);
+    });
+
+    // The control: each mutation of the shipped text, pushing the effect UP
+    // and DOWN, must miss by far more than the tolerance. Each `replace` is
+    // required to have found its text, so a reworded shader cannot turn a
+    // control into a copy of the product.
+    it.each([
+      ['brightness 1.5×', '(1.0 + tint.z)', '(1.0 + 1.5 * tint.z)'],
+      ['brightness halved', '(1.0 + tint.z)', '(1.0 + 0.5 * tint.z)'],
+      ['saturation 2×', '(1.0 + tint.y)', '(1.0 + 2.0 * tint.y)'],
+      ['saturation halved', '(1.0 + tint.y)', '(1.0 + 0.5 * tint.y)'],
+      [
+        'hue turned the other way',
+        '+ cross(grey, colour) * turnSin',
+        '- cross(grey, colour) * turnSin',
+      ],
+      ['hue turned 1.5×', 'float turnSin = sin(tint.x);', 'float turnSin = sin(1.5 * tint.x);'],
+    ])('goes red, by a clear margin, on %s', (_mutation, shipped, mutated) => {
+      const { fragment } = compiled();
+      expect(fragment).toContain(shipped);
+      const miss = worstMiss(glslFunction(fragment.replace(shipped, mutated), 'oylTinted'));
+      // A thousand times the tolerance at the least. Measured: 0.087
+      // (saturation halved) to 0.32 (hue reversed), against 1e-6.
+      expect(miss).toBeGreaterThan(TOLERANCE * 1000);
+    });
   });
 
   it('throws, naming #621, where three’s program no longer holds an include the tint is spliced at', () => {

@@ -104,7 +104,8 @@ is_documented() {
   # writer can still be writing whenever the match is not on its last line; it
   # is a race, not a question of the pipe buffer, which is why it passed locally
   # and failed on main's CI run 36419270155 for OYL_DEVTOOLS_PORT. SH001 in
-  # check-repo-rules.sh refuses the pipeline anywhere under scripts/.
+  # check-repo-rules.sh refuses the pipeline in any shell script in the
+  # repository.
   grep -qxF "${name}" <<<"${declared}"
 }
 

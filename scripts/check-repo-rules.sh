@@ -1295,6 +1295,27 @@ check_xml_comments
 # it; the pattern is assembled from pieces so that no line here is a finding.
 SH001_PIPE='|'
 SH001_PATTERN="(^|[^|])\\${SH001_PIPE}[[:space:]]*grep[[:space:]]([^|]*[[:space:]])?(-[a-zA-Z]*q|--quiet)"
+#
+# ⚠️ The pattern reads one line at a time, so a pipe that ENDS a line escaped
+# it until #758: `x=$(printf a |` with `grep -q a)` on the next line. The
+# second pass below reads a `grep -q` that OPENS a line whose last code line
+# before it ends in a single pipe -- blank and comment lines between are
+# skipped, as bash skips them. A pipe that opens the grep's own line, after a
+# backslash continuation, is the pattern above's.
+SH001_GREP_OPENS="^[[:space:]]*grep[[:space:]]([^|]*[[:space:]])?(-[a-zA-Z]*q|--quiet)"
+# A bracket, never a backslash: `awk -v` processes escapes in the value, and
+# `\|` came out as a bare `|` -- an alternation that matched every line.
+SH001_PIPE_ENDS="(^|[^|])[${SH001_PIPE}][[:space:]]*$"
+
+# Every `grep -q` line in "$1" that a trailing pipe on the line before feeds,
+# as `number:text`.
+sh001_trailing_pipes() {
+  awk -v opens="${SH001_GREP_OPENS}" -v ends="${SH001_PIPE_ENDS}" '
+    /^[[:space:]]*(#|$)/ { next }
+    piped && $0 ~ opens { print NR ":" $0 }
+    { piped = ($0 ~ ends) }
+  ' "$1"
+}
 
 check_no_pipe_into_grep_quiet() {
   local file relative number text
@@ -1307,7 +1328,7 @@ check_no_pipe_into_grep_quiet() {
       # also skip any indented line with a `#` anywhere in it (`${#array[@]}`).
       [[ "${text}" =~ ^[[:space:]]*# ]] && continue
       report SH001 "${relative}:${number}: a pipeline into \`grep -q\`; under \`pipefail\` grep's early exit can kill the producer with SIGPIPE and turn a match into \"no match\" -- read a here-string instead: grep -q ... <<< \"\${text}\" (#743)"
-    done < <(grep -nE "${SH001_PATTERN}" "${file}")
+    done < <(grep -nE "${SH001_PATTERN}" "${file}"; sh001_trailing_pipes "${file}")
   done < <(find "${ROOT}" \( "${GENERATED[@]}" \) -prune -o -type f -name '*.sh' -print | sort)
 }
 
