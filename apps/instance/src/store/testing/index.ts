@@ -219,6 +219,9 @@ export function resultFixture(athleteId: string, roomId = SHARED_ROOM.id): Resul
   return { roomId, athleteId, finishMs: 3_600_000, flags: 0 };
 }
 
+/** A rename limit the fixtures never reach. */
+export const FIXTURE_RENAME_LIMIT = { count: 100, windowSeconds: 86_400 } as const;
+
 /** Every athlete-scoped row the schema has, for all three athletes. */
 export async function seedWorld(store: SqlStore): Promise<void> {
   await store.putRoom(SHARED_ROOM);
@@ -235,7 +238,7 @@ export async function seedWorld(store: SqlStore): Promise<void> {
       mintedByKey: deviceKeyFixture(athlete).publicKey,
       expiresAt: 1_790_000_600,
     });
-    await store.renameAthlete(athlete, `Renamed ${athlete}`, 1_790_000_300);
+    await store.renameAthlete(athlete, `Renamed ${athlete}`, 1_790_000_300, FIXTURE_RENAME_LIMIT);
     await store.putEmailRecoveryToken({
       tokenSha256: hexOf(`email-${athlete}`),
       athleteId: athlete,

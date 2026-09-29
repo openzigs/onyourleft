@@ -171,6 +171,18 @@ export interface Registration {
   readonly recoveryEmail?: string;
 }
 
+/** What revoking a device key did (#867). */
+export type RevokeOutcome = 'revoked' | 'not_found' | 'last_device';
+
+/** How many times a display name may change, and over how long (#774, #867). */
+export interface RenameLimit {
+  readonly count: number;
+  readonly windowSeconds: number;
+}
+
+/** What a rename did (#867). */
+export type RenameOutcome = 'renamed' | 'not_found' | 'rate_limited';
+
 /** What storing an activity record did: a retried sync of the same file is `duplicate`. */
 export type PutOutcome = 'stored' | 'duplicate';
 
@@ -187,9 +199,21 @@ export interface SqlStore {
   touchDeviceKey(athleteId: string, publicKey: string, at: number): Promise<void>;
   /**
    * Revoke one of this athlete's keys, and every session and unspent link
-   * code it holds. `false` when the athlete holds no such key.
+   * code it holds. `not_found` when the athlete holds no such key.
+   *
+   * ⚠️ **The last-key rule is checked HERE, in the transaction that writes
+   * (#867)**: the athlete's LAST live key is revoked only when
+   * `recoveryCodeSha256` is one of their unspent recovery codes — checked,
+   * not spent — and is otherwise `last_device`. The identity used to count
+   * the live keys in one store call and revoke in another, so two sessions
+   * revoking the last two keys at once could each see two and leave none.
    */
-  revokeDeviceKey(athleteId: string, publicKey: string, at: number): Promise<boolean>;
+  revokeDeviceKey(
+    athleteId: string,
+    publicKey: string,
+    at: number,
+    recoveryCodeSha256: string | null,
+  ): Promise<RevokeOutcome>;
   /** A new athlete with their first key and recovery codes, in one transaction (#772). */
   registerAthlete(registration: Registration): Promise<void>;
 
@@ -208,8 +232,19 @@ export interface SqlStore {
   /** Spend a link code: the code is what names the athlete. */
   takeLinkCode(codeSha256: string, now: number): Promise<Take<{ readonly athleteId: string }>>;
 
-  /** Change a display name, keeping the old one in the audit trail. `false` for no such athlete. */
-  renameAthlete(athleteId: string, name: string, at: number): Promise<boolean>;
+  /**
+   * Change a display name, keeping the old one in the audit trail.
+   * `not_found` for no such athlete; `rate_limited` when the athlete already
+   * changed it `limit.count` times in the `limit.windowSeconds` before `at`.
+   * ⚠️ Counted and written in ONE transaction (#867), so two renames at once
+   * cannot each see the window under its limit.
+   */
+  renameAthlete(
+    athleteId: string,
+    name: string,
+    at: number,
+    limit: RenameLimit,
+  ): Promise<RenameOutcome>;
   listDisplayNameChanges(athleteId: string): Promise<readonly DisplayNameChange[]>;
 
   getRecoveryEmail(athleteId: string): Promise<RecoveryEmail | undefined>;
@@ -455,16 +490,38 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           .execute();
       }),
 
-    revokeDeviceKey: (athleteId, publicKey, at) =>
+    revokeDeviceKey: (athleteId, publicKey, at, recoveryCodeSha256) =>
       exclusive(() =>
-        db.transaction().execute(async (trx) => {
-          const updated = await trx
+        db.transaction().execute(async (trx): Promise<RevokeOutcome> => {
+          const keys = await trx
+            .selectFrom('device_key')
+            .select(['public_key', 'revoked_at'])
+            .where('athlete_id', '=', athleteId)
+            .execute();
+          const target = keys.find((key) => key.public_key === publicKey);
+          if (target === undefined) return 'not_found';
+          const live = keys.filter((key) => key.revoked_at === null);
+          if (target.revoked_at === null && live.length === 1) {
+            // The last key: only with a code that would let the athlete back
+            // in. Checked in this transaction and not spent (#867).
+            const held =
+              recoveryCodeSha256 === null
+                ? undefined
+                : await trx
+                    .selectFrom('recovery_code')
+                    .select('code_sha256')
+                    .where('athlete_id', '=', athleteId)
+                    .where('code_sha256', '=', recoveryCodeSha256)
+                    .where('used_at', 'is', null)
+                    .executeTakeFirst();
+            if (held === undefined) return 'last_device';
+          }
+          await trx
             .updateTable('device_key')
             .set({ revoked_at: sql<number>`coalesce(revoked_at, ${at})` })
             .where('athlete_id', '=', athleteId)
             .where('public_key', '=', publicKey)
-            .executeTakeFirst();
-          if (updated.numUpdatedRows === 0n) return false;
+            .execute();
           await trx
             .updateTable('session')
             .set({ revoked_at: sql<number>`coalesce(revoked_at, ${at})` })
@@ -477,7 +534,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             .where('athlete_id', '=', athleteId)
             .where('minted_by_key', '=', publicKey)
             .execute();
-          return true;
+          return 'revoked';
         }),
       ),
 
@@ -660,15 +717,23 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         }),
       ),
 
-    renameAthlete: (athleteId, name, at) =>
+    renameAthlete: (athleteId, name, at, limit) =>
       exclusive(() =>
-        db.transaction().execute(async (trx) => {
+        db.transaction().execute(async (trx): Promise<RenameOutcome> => {
           const row = await trx
             .selectFrom('athlete')
             .select('display_name')
             .where('id', '=', athleteId)
             .executeTakeFirst();
-          if (row === undefined) return false;
+          if (row === undefined) return 'not_found';
+          // Counted in the transaction that writes (#867).
+          const recent = await trx
+            .selectFrom('display_name_change')
+            .select((eb) => eb.fn.countAll<number>().as('n'))
+            .where('athlete_id', '=', athleteId)
+            .where('changed_at', '>', at - limit.windowSeconds)
+            .executeTakeFirstOrThrow();
+          if (Number(recent.n) >= limit.count) return 'rate_limited';
           await trx
             .insertInto('display_name_change')
             .values({ athlete_id: athleteId, previous_name: row.display_name, changed_at: at })
@@ -678,7 +743,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             .set({ display_name: name })
             .where('id', '=', athleteId)
             .execute();
-          return true;
+          return 'renamed';
         }),
       ),
 

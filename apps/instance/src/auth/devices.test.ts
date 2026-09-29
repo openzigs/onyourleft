@@ -279,6 +279,50 @@ describe('revoking a device', () => {
   });
 });
 
+describe('two sessions revoking the last two keys at once (#867)', () => {
+  it('leaves the athlete a key: one revocation lands and the other is last_device', async () => {
+    // The race in a known order: when the first revocation reaches the store,
+    // the second is run to completion ahead of it. A rule checked in one
+    // store call and written in another sees two live keys both times.
+    let interleave: (() => Promise<unknown>) | undefined;
+    const w = await start({
+      storeSeenBy: (store) => ({
+        ...store,
+        revokeDeviceKey: async (...args) => {
+          const other = interleave;
+          interleave = undefined;
+          if (other !== undefined) await other();
+          return store.revokeDeviceKey(...args);
+        },
+      }),
+    });
+    const first = await registered(w);
+    const second = await testDevice();
+    expect((await link(w, second, await mintLinkCode(w, first.token))).status).toBe(200);
+    const secondToken = (await w.signIn(second)).body.sessionToken as string;
+
+    let late: { status: number; body: unknown } | undefined;
+    interleave = async () => {
+      late = await w.call('POST', `/v1/auth/devices/${first.device.publicKey}/revoke`, {
+        token: secondToken,
+        body: {},
+      });
+    };
+    const early = await w.call('POST', `/v1/auth/devices/${second.publicKey}/revoke`, {
+      token: first.token,
+      body: {},
+    });
+
+    expect(late?.status, JSON.stringify(late?.body)).toBe(204);
+    expect(early.status, JSON.stringify(early.body)).toBe(409);
+    expect(codeOf(early.body)).toBe('last_device');
+    const keys = await w.freshRead((store) => store.listDeviceKeys(first.athleteId));
+    expect(keys.filter((key) => key.revokedAt === null).map((key) => key.publicKey)).toEqual([
+      second.publicKey,
+    ]);
+  });
+});
+
 describe('the device list', () => {
   it('lists this athlete’s devices with when each was added and last used, and nothing of anyone else — three athletes', async () => {
     const w = await start();

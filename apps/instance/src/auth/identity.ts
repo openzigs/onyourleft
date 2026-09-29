@@ -458,13 +458,13 @@ export function createIdentity(options: IdentityOptions): Identity {
       if (typeof displayName !== 'string') return invalid('displayName', 'must be a string');
       const checked = checkDisplayName(displayName);
       if (!checked.ok) return invalid('displayName', NAME_PROBLEMS[checked.problem]);
-      const at = seconds();
-      const recent = (await store.listDisplayNameChanges(caller.athleteId)).filter(
-        (change) => change.changedAt > at - limits.renameWindowSeconds,
-      );
-      if (recent.length >= limits.renamesPerWindow) return refuse('rate_limited');
-      if (!(await store.renameAthlete(caller.athleteId, checked.name, at)))
-        return refuse('not_found');
+      // The limit is counted by the store, in the transaction that writes
+      // (#867): counted here, two renames at once could each see room.
+      const outcome = await store.renameAthlete(caller.athleteId, checked.name, seconds(), {
+        count: limits.renamesPerWindow,
+        windowSeconds: limits.renameWindowSeconds,
+      });
+      if (outcome !== 'renamed') return refuse(outcome);
       return { ok: true, value: { athleteId: caller.athleteId, displayName: checked.name } };
     },
 
@@ -495,22 +495,15 @@ export function createIdentity(options: IdentityOptions): Identity {
     },
 
     async revokeDevice(caller, publicKey, recoveryCode) {
-      const keys = await store.listDeviceKeys(caller.athleteId);
-      const target = keys.find((key) => key.publicKey === publicKey);
-      if (target === undefined) return refuse('not_found');
-      const live = keys.filter((key) => key.revokedAt === null);
-      if (target.revokedAt === null && live.length === 1) {
-        // The last key: refused unless the athlete shows they hold a code that
-        // would let them back in. The code is checked, not spent.
-        if (typeof recoveryCode !== 'string') return refuse('last_device');
-        const hash = await sha256Hex(normalisedCode(recoveryCode));
-        const held = (await store.listRecoveryCodes(caller.athleteId)).some(
-          (code) => code.codeSha256 === hash && code.usedAt === null,
-        );
-        if (!held) return refuse('last_device');
-      }
-      await store.revokeDeviceKey(caller.athleteId, publicKey, seconds());
-      return { ok: true, value: null };
+      // The last key is refused unless the athlete shows a code that would
+      // let them back in; the code is checked, not spent. ⚠️ The STORE checks
+      // it, in the transaction that revokes (#867): counting the live keys
+      // here and revoking in a second call let two sessions revoking the last
+      // two keys at once each see two, and leave the athlete with none.
+      const proof =
+        typeof recoveryCode === 'string' ? await sha256Hex(normalisedCode(recoveryCode)) : null;
+      const outcome = await store.revokeDeviceKey(caller.athleteId, publicKey, seconds(), proof);
+      return outcome === 'revoked' ? { ok: true, value: null } : refuse(outcome);
     },
 
     async mintLinkCode(caller) {

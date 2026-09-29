@@ -14,6 +14,7 @@ import {
   ATHLETE_C,
   createStoreHarness,
   deviceKeyFixture,
+  FIXTURE_RENAME_LIMIT,
   registrationFixture,
   seedWorld,
   sessionFixture,
@@ -85,9 +86,13 @@ describe('device keys (#772, #773)', () => {
   it('revokes one athlete’s key, its sessions and its link codes, and nobody else’s', async () => {
     const opened = await world();
     const key = deviceKeyFixture(ATHLETE_B).publicKey;
+    // B's only key, so it needs one of B's codes (#867).
+    const [code] = registrationFixture(ATHLETE_B).recoveryCodeSha256s;
     expect(
-      await opened.write((store) => store.revokeDeviceKey(ATHLETE_B, key, 1_790_001_000)),
-    ).toBe(true);
+      await opened.write((store) =>
+        store.revokeDeviceKey(ATHLETE_B, key, 1_790_001_000, code ?? null),
+      ),
+    ).toBe('revoked');
     const b = await opened.read((store) => store.findDeviceKey(key));
     expect(b?.revokedAt).toBe(1_790_001_000);
     const session = await opened.read((store) =>
@@ -108,8 +113,57 @@ describe('device keys (#772, #773)', () => {
   it('will not revoke a key as an athlete who does not hold it', async () => {
     const opened = await world();
     const key = deviceKeyFixture(ATHLETE_B).publicKey;
-    expect(await opened.write((store) => store.revokeDeviceKey(ATHLETE_A, key, 5))).toBe(false);
+    const [codeOfA] = registrationFixture(ATHLETE_A).recoveryCodeSha256s;
+    expect(
+      await opened.write((store) => store.revokeDeviceKey(ATHLETE_A, key, 5, codeOfA ?? null)),
+    ).toBe('not_found');
     expect((await opened.read((store) => store.findDeviceKey(key)))?.revokedAt).toBeNull();
+  });
+
+  describe('the last-key rule, in the transaction that revokes (#867)', () => {
+    const key = deviceKeyFixture(ATHLETE_B).publicKey;
+    const [codeOfB] = registrationFixture(ATHLETE_B).recoveryCodeSha256s as [string];
+    const [codeOfA] = registrationFixture(ATHLETE_A).recoveryCodeSha256s as [string];
+
+    it('refuses the last live key with no code, another athlete’s code, or a spent one', async () => {
+      const opened = await world();
+      for (const proof of [null, codeOfA, 'f0'.repeat(32)]) {
+        expect(await opened.write((store) => store.revokeDeviceKey(ATHLETE_B, key, 5, proof))).toBe(
+          'last_device',
+        );
+      }
+      await opened.write((store) => store.takeRecoveryCode(codeOfB, 6));
+      expect(await opened.write((store) => store.revokeDeviceKey(ATHLETE_B, key, 7, codeOfB))).toBe(
+        'last_device',
+      );
+      expect((await opened.read((store) => store.findDeviceKey(key)))?.revokedAt).toBeNull();
+    });
+
+    it('revokes the last live key with a held code, and does not spend the code', async () => {
+      const opened = await world();
+      expect(await opened.write((store) => store.revokeDeviceKey(ATHLETE_B, key, 5, codeOfB))).toBe(
+        'revoked',
+      );
+      expect((await opened.read((store) => store.findDeviceKey(key)))?.revokedAt).toBe(5);
+      const codes = await opened.read((store) => store.listRecoveryCodes(ATHLETE_B));
+      expect(codes.map((code) => code.usedAt)).toEqual([null]);
+    });
+
+    it('needs no code while another key is live, and counts only live keys', async () => {
+      const opened = await world();
+      const second = { ...deviceKeyFixture(ATHLETE_B), publicKey: 'second-key-of-b' };
+      await opened.write((store) => store.putDeviceKey(second));
+      expect(
+        await opened.write((store) => store.revokeDeviceKey(ATHLETE_B, second.publicKey, 5, null)),
+      ).toBe('revoked');
+      // Revoking an already revoked key again is not the last-key case.
+      expect(
+        await opened.write((store) => store.revokeDeviceKey(ATHLETE_B, second.publicKey, 6, null)),
+      ).toBe('revoked');
+      expect(await opened.write((store) => store.revokeDeviceKey(ATHLETE_B, key, 7, null))).toBe(
+        'last_device',
+      );
+    });
   });
 
   it('records when a key was last used, for its own athlete only', async () => {
@@ -225,14 +279,45 @@ describe('recovery and link codes (#773)', () => {
 describe('display names (#774)', () => {
   it('keeps every earlier name, for one athlete only', async () => {
     const opened = await world();
-    await opened.write((store) => store.renameAthlete(ATHLETE_B, 'Third', 1_790_002_000));
+    expect(
+      await opened.write((store) =>
+        store.renameAthlete(ATHLETE_B, 'Third', 1_790_002_000, FIXTURE_RENAME_LIMIT),
+      ),
+    ).toBe('renamed');
     expect((await opened.read((store) => store.getAthlete(ATHLETE_B)))?.displayName).toBe('Third');
     expect(await opened.read((store) => store.listDisplayNameChanges(ATHLETE_B))).toEqual([
       { athleteId: ATHLETE_B, previousName: `Rider ${ATHLETE_B}`, changedAt: 1_790_000_300 },
       { athleteId: ATHLETE_B, previousName: `Renamed ${ATHLETE_B}`, changedAt: 1_790_002_000 },
     ]);
     expect(await opened.read((store) => store.listDisplayNameChanges(ATHLETE_A))).toHaveLength(1);
-    expect(await opened.write((store) => store.renameAthlete('nobody', 'x', 1))).toBe(false);
+    expect(
+      await opened.write((store) => store.renameAthlete('nobody', 'x', 1, FIXTURE_RENAME_LIMIT)),
+    ).toBe('not_found');
+  });
+
+  it('counts the limit in the transaction that renames: this athlete’s changes, in the window (#867)', async () => {
+    const opened = await world();
+    // The fixture renamed each athlete once, at 1_790_000_300.
+    const limit = { count: 2, windowSeconds: 1_000 };
+    const at = 1_790_000_300 + 500;
+    expect(await opened.write((store) => store.renameAthlete(ATHLETE_B, 'Second', at, limit))).toBe(
+      'renamed',
+    );
+    expect(
+      await opened.write((store) => store.renameAthlete(ATHLETE_B, 'Third', at + 1, limit)),
+    ).toBe('rate_limited');
+    expect((await opened.read((store) => store.getAthlete(ATHLETE_B)))?.displayName).toBe('Second');
+    expect(await opened.read((store) => store.listDisplayNameChanges(ATHLETE_B))).toHaveLength(2);
+    // Another athlete's changes are not counted against B's, and nor is A's
+    // own fixture rename once it has left the window.
+    expect(
+      await opened.write((store) => store.renameAthlete(ATHLETE_A, 'Other', at + 1, limit)),
+    ).toBe('renamed');
+    expect(
+      await opened.write((store) =>
+        store.renameAthlete(ATHLETE_B, 'Later', 1_790_000_300 + 1_000, limit),
+      ),
+    ).toBe('renamed');
   });
 });
 
