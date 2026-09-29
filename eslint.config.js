@@ -607,6 +607,7 @@ export default tseslint.config(
     files: ['apps/instance/src/**/*.ts'],
     ignores: [
       'apps/instance/src/main.ts',
+      'apps/instance/src/serve.ts',
       'apps/instance/src/node-listener.ts',
       'apps/instance/src/store/node-sqlite.ts',
       'apps/instance/src/blob/disk-blob-store.ts',
