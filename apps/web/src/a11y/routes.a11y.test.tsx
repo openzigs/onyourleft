@@ -402,6 +402,19 @@ describe('criterion 4 — every route passes the automated audit', () => {
     expectClean('segments after a sweep');
   });
 
+  it('the ride detail route passes with a model’s write-up and the ask on it — #805', async () => {
+    // The loop above opens the route with no store, where there is no ride and
+    // so no write-up. The populated fixture has both, and the ask set up.
+    mounted = await openRoute(routeById('activity-detail'), true);
+    const section = document.querySelector('section[aria-labelledby="oyl-write-up-heading"]');
+    expect(
+      section?.querySelector('.oyl-write-up__text'),
+      'no write-up is on the page',
+    ).not.toBeNull();
+    expect(section?.querySelector('button'), 'no ask control is on the page').not.toBeNull();
+    expectClean('activity-detail with a write-up');
+  });
+
   it('the ride route passes with no controller, which is what Safari and Firefox get', async () => {
     // The other branch of the ride screen: an explanation and a link, and no
     // control that cannot work. Auditing only the mid-ride state would leave
