@@ -484,6 +484,18 @@ export default tseslint.config(
     },
   },
 
+  // --- packages/protocol is the race-room wire format, and platform-free ------
+  // #768. The same bytes are decoded in a browser, in the Android WebView and
+  // in a room under Node or `workerd`, so it takes packages/domain's isolation
+  // verbatim. `packages/protocol/tsconfig.json` is the closure; this is the
+  // fast duplicate, and it is what makes a `WebSocket` or a `fetch` in `src/`
+  // fail lint as well as typecheck. The transport belongs to the adapters
+  // (`apps/instance`, `apps/web`), never to the format.
+  {
+    files: ['packages/protocol/**/*.{ts,tsx}'],
+    rules: platformIsolation(BLE_LIBRARY_IMPORT_PATTERNS),
+  },
+
   // --- packages/physics is pure computation, and pure means deterministic -----
   // #88's package is a model, not a service: docs/architecture.md gives it
   // "Power → speed, as separately testable terms" and forbids it any rendering,
