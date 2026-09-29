@@ -33,10 +33,9 @@ import { useId, type JSX, type ReactNode } from 'react';
  * (#683's review, kept as a trade-off rather than changed): a page with two
  * tables whose captions read the same would be two landmarks of one role and
  * one name, which a landmark list cannot tell apart. Give each table its own
- * caption. ⚠️ **Nothing enforces that yet**: `a11y/audit.ts`
- * §`landmarks-are-distinguishable` reads `nav`, `aside`, `section` and `form`
- * by TAG, and this region is a `div` with `role="region"`, so two identical
- * captions would pass it. Checked on the rule's source rather than assumed.
+ * caption. Since #690 `a11y/audit.ts` §`landmarks-are-distinguishable`
+ * enforces it: it reads a declared `role="region"` as well as the tags, so two
+ * identical captions on one page fail the accessibility gate.
  *
  * ⚠️ `browser/reflow.browser.spec.ts` is what measures that a box which DOES
  * scroll sideways is one of these; this component is what makes that true.

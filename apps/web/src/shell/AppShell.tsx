@@ -629,9 +629,22 @@ export function AppShell(props: AppShellProps): JSX.Element {
     document.title = `${route.title} — ${APP_NAME}`;
   }, [route.title]);
 
+  /*
+   * The jump the link's `#main` would make natively, plus the focus move
+   * (#726). `focus()` alone scrolls only "if needed", and a `main` taller than
+   * the viewport that still reaches into it is never needed: from the end of
+   * a long page the skip link used to leave the `h1` thousands of pixels
+   * above the screen. It was never seen because Tab to the link scrolls to the
+   * top first, and #731's review found the browser gate measured that scroll
+   * rather than this one. `scrollIntoView` honours `.oyl-main`'s
+   * `scroll-margin-top`, so the status bar and a sticky header are cleared.
+   */
   function skipToContent(event: MouseEvent<HTMLAnchorElement>): void {
     event.preventDefault();
-    mainRef.current?.focus();
+    const main = mainRef.current;
+    if (main === null) return;
+    main.focus({ preventScroll: true });
+    main.scrollIntoView({ block: 'start' });
   }
 
   return (
