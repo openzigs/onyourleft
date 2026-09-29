@@ -457,16 +457,16 @@ apps/                 AGPL-3.0-or-later, without exception
                         `input.test.ts` walks a built input for all of it. A
                         gap is coverage, never a zero; W/kg only with a real
                         mass; the pose summary only with camera consent and
-                        never in a section. Nothing calls it yet (#810, #811).
+                        never in a section. ⚠️ Called since #804 (below).
                         Since #811 `runner.ts` runs a template's steps through
                         `model-step-port.ts` — per-step and per-run time and
                         token budgets, one parse-repair re-ask, a failed
                         section LEFT OUT, the #798 screen and one rewrite —
                         and saves nothing: a caller keeps a write-up only on
                         `written`. Time is a `RunnerClock` it is handed.
-                        ⚠️ The port carries an `@unwired` until #804 wires it
-                        — on its two DECLARATIONS since #802, not the file,
-                        because #802 made the file reachable. Since #802
+                        ⚠️ Its two `@unwired` tags came off with #804 —
+                        a reviewer who remembers them is reading the old
+                        file. Since #802
                         `own-computer-step.ts` is the step port to the rider's
                         own computer: text only (a step with any other field,
                         a byte array or a `data:` URL is refused as
@@ -475,7 +475,19 @@ apps/                 AGPL-3.0-or-later, without exception
                         sends through `camera/analysis-transport.ts`
                         §`riderModelStepPort`, which hands it the client's ONE
                         `fetch`; ⚠️ it is NOT in that module because that
-                        module builds pictures and this one must reach none
+                        module builds pictures and this one must reach none.
+                        Since #804 `ride-analysis.ts` is the post-ride ASK
+                        behind `ride-analysis-port.ts`: one press on a ride's
+                        page (`RideWriteUpControl.tsx`, the only caller) reads
+                        the ride, runs the agent through the step port
+                        `main.tsx` builds with `riderModelStepSource`, and
+                        saves ONLY a `ScreenedWriteUp`, replacing the ride's
+                        write-up; any failure leaves the earlier one as it
+                        was. The rider's own computer is offered first; there
+                        is no hosted STEP port until #803. ⚠️ The port is an
+                        optional prop, so `ride-analysis-wiring.test.tsx`
+                        drives the real shell at the detail route with it
+                        built as `main.tsx` builds it
     src/units/          which units a rider reads in (#238) — the one place a
                         number becomes a unit, the context a component asks,
                         and the source scan that stops a future screen writing
@@ -1328,7 +1340,22 @@ packages/             Apache-2.0, without exception
                         because the method is not on the type it holds
     web-bluetooth/      the browser transport (#40) — the one place a BluetoothDevice exists
   physics/            cycling power/speed model, Martin et al. 1998 (#88), and
-                      the synthetic rider that composes #92's rule with it
+                      the synthetic rider that composes #92's rule with it; and
+                      since #487 the coefficient set a ride runs (`riding.ts`,
+                      moved out of `apps/web/src/game/rider.ts` so a race room
+                      runs the game's own set), `PHYSICS_VERSION`, and the race
+                      room's plausibility rule (`plausibility.ts`, ADR 0028 D-2
+                      rules 1–4, Q3's ceilings as a parameter default).
+                      ⚠️ A breach FLAGS and never rejects, and an inadmissible
+                      report coasts the rider at zero — never their last power
+  protocol/           the race-room wire format (#768) — every message, the
+                      encoder, a bounded decoder that refuses rather than
+                      throws, and the version handshake. ⚠️ NO production
+                      dependency, not even a workspace one: a room passes its
+                      `PHYSICS_VERSION` in, and `physics-agreement.test.ts`
+                      holds the restated bounds equal to physics'. A report
+                      carries power, never a position, and no message carries
+                      a coordinate (`coordinates.test.ts`)
   store/              local activity, stream, recording-checkpoint, signed-record,
                       segment, effort and route store, and the round-trip harness
                       (#26-#28, #46, #61, #64, #66, #89); since #388 the side
@@ -1384,7 +1411,8 @@ ASSETS.toml           the provenance, licence and SHA-256 of every committed
 ```
 
 **`apps/web`, `apps/mobile`, `apps/instance`, `packages/domain`, `packages/sensors`, `packages/fit`,
-`packages/store` and `packages/physics` exist; `packages/protocol` does not yet (#768).**
+`packages/store`, `packages/physics` and — since [#768](https://github.com/openzigs/onyourleft/issues/768)
+— `packages/protocol` exist.**
 `apps/instance` was created by [#767](https://github.com/openzigs/onyourleft/issues/767) on
 2026-09-29, the first package that listens on a socket (ADR 0036).
 The first two were created by [#23](https://github.com/openzigs/onyourleft/issues/23) along with the
@@ -1411,8 +1439,8 @@ cover the paths, so a package arrives inside the rules rather than beside them.
 | `packages/fit` | FIT / GPX / TCX decode and encode | Anything server-specific; anything under `apps/` |
 | `packages/sensors` | BLE sensor and trainer abstraction (`src/`), and the Web Bluetooth transport (`web-bluetooth/`) | `src/`: **any platform API at all**, and any BLE library. `web-bluetooth/`: every platform global except `navigator`. Web Bluetooth types must not escape above the transport boundary |
 | `packages/physics` | Power → speed. Pure computation. | Any rendering, BLE or platform API |
+| `packages/protocol` | The race-room wire format: messages, a bounded decoder, the version handshake (#768) | **Any platform API at all**, as `packages/domain` — and any production dependency |
 | `packages/store` | Local activity, stream, **recording-checkpoint** and **signed-record** persistence, the device keypair, and its migrations | Anything under `apps/` |
-| `packages/protocol` — **not yet created, #768** | The wire format between a client and a race room: frame types, bounded decoding, the version handshake (ADR 0037 D-3) | **Any platform API**, and above all any network global — `fetch`, `WebSocket` — which #768 enforces through `eslint.config.js`'s platform-isolation blocks (ADR 0036 D-3.a). Anything under `apps/` |
 | `apps/instance` | The instance server: HTTP now, rooms later. AGPL-3.0-or-later by path | `apps/web` and `apps/mobile` — and the client must not import it either. Any runtime dependency outside ADR 0037 D-9's table without a row like it |
 
 ---
@@ -4749,6 +4777,7 @@ top of an issue **supersedes its body**.
 | What proves the HUD's live region is not hidden and moves nothing, and why that is not a screen reader | `apps/web/browser/hud.browser.spec.ts` §"#401", [#401](https://github.com/openzigs/onyourleft/issues/401) |
 | Which steps a model-written ride write-up is made of, what each prompt says, and why changing a shipped prompt is a new template version rather than an edit | `apps/web/src/ride-analysis/template.ts`, `apps/web/src/ride-analysis/template-v1.ts`, `template.test.ts` §`RECORDED_DIGESTS`, [#810](https://github.com/openzigs/onyourleft/issues/810) |
 | How a write-up's steps are run, what a weak model's failed step costs, what each budget is and why, and what a cancelled run keeps | `apps/web/src/ride-analysis/runner.ts` §`RUN_BUDGET_MILLISECONDS`, §`RUN_TOKEN_BUDGET`, §`RUN_FAILURE_TEXT`, `apps/web/src/ride-analysis/model-step-port.ts`, `runner-safety.test.ts`, [#811](https://github.com/openzigs/onyourleft/issues/811) |
+| What one press on a ride's page does, which source is offered first, what a cancel says on each path, and why a failed run keeps the earlier write-up | `apps/web/src/ride-analysis/ride-analysis.ts` §`CANCELLED_TEXT`, §`ASK_FAILURE_TEXT`, `apps/web/src/ride-analysis/ride-analysis-port.ts`, `apps/web/src/ride-analysis/RideWriteUpControl.tsx`, `ride-analysis-wiring.test.tsx`, [#804](https://github.com/openzigs/onyourleft/issues/804) |
 | What a ride-analysis step sends to the rider's own computer, what it refuses to send, how a cut-off reply is told apart, and what a cancel does in the Android shell | `apps/web/src/ride-analysis/own-computer-step.ts`, `apps/web/src/camera/analysis-transport.ts` §`riderModelStepPort`, `docs/privacy-policy.md` §"A ride sent to your own computer", `own-computer-policy.test.ts`, [#802](https://github.com/openzigs/onyourleft/issues/802) |
 
 <!-- Last updated: 2026-09-17 by delivery:code-issue resolving #355 (the verge as a visibility constant, and the camera-cone gate that had been missing) -->

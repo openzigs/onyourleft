@@ -72,6 +72,7 @@ import type { ShellSupportPort } from '../support/shell-support-port';
 import { TransferView } from '../transfer/TransferView';
 import type { AnalysisPort } from '../analysis/store-port';
 import type { DetailPort } from '../detail/store-port';
+import type { RideAnalysisPort } from '../ride-analysis/ride-analysis-port';
 import type { BasemapConfig } from '../map/basemap';
 import type { MapPort } from '../map/port';
 import type { LibraryPort } from '../library/store-port';
@@ -260,6 +261,14 @@ export interface AppShellProps {
    */
   readonly detail?: DetailPort | undefined;
   /**
+   * The post-ride ask (#804): one press on a ride's page runs the analysis
+   * agent on the model the rider set up and saves the write-up with the ride.
+   * `undefined` offers no control. ⚠️ Optional, so a `main.tsx` that left it
+   * out would be green in `check:wiring` (§4j §Limits);
+   * `ride-analysis/ride-analysis-wiring.test.tsx` is what goes red for that.
+   */
+  readonly rideAnalysis?: RideAnalysisPort | undefined;
+  /**
    * The analysis screen's store (#78).
    *
    * A fifth port over the same connection, and the only one that may read the
@@ -420,6 +429,7 @@ function viewFor(
           activityId={match.parameter}
           map={props.map}
           basemap={props.basemap}
+          writeUp={props.rideAnalysis}
         />
       );
     case 'analysis':

@@ -72,6 +72,7 @@ import {
   type Watts,
 } from '@onyourleft/domain';
 
+import { PHYSICS_VERSION, ridingCoefficients, type RidingPosition } from './riding';
 import { advance, START_OF_RIDE, type RideConditions, type RideState } from './simulate';
 
 /**
@@ -94,12 +95,12 @@ import { advance, START_OF_RIDE, type RideConditions, type RideState } from './s
  * coefficients a caller supplies on top — which is the property D-2 rule 5's
  * physics-version-on-the-wire rests on.
  *
- * ⚠️ **A second vector at the race's own configuration is deliberately absent**
- * and belongs to [#487](https://github.com/openzigs/onyourleft/issues/487).
- * Writing 0.36 and 0.005 as literals here would pin a configuration this
- * package cannot see move — a test that goes stale in silence, which is worse
- * than the gap it closes. #487 moves those constants into `packages/` first,
- * and then the vector costs five lines and has a constant to point at.
+ * ⚠️ **The race's own configuration has its vector below since
+ * [#487](https://github.com/openzigs/onyourleft/issues/487)**, which moved those
+ * constants into this package (`riding.ts`), and a reviewer who remembers it
+ * being "deliberately absent" is reading the old file. It points at
+ * `ridingCoefficients`, not at literals, so a moved constant is a red build
+ * here rather than a vector pinning a configuration nobody runs.
  *
  * Mass, air density and the integration step are spelled out because a vector
  * that depended on a *caller's* choice would be pinning the caller instead.
@@ -199,4 +200,36 @@ describe('one physics for everyone — #465 criterion 2, ADR 0028 D-1', () => {
     expect(state.distance).toBeCloseTo(Number(EXPECTED.distance), 6);
     expect(state.speed).toBeCloseTo(Number(EXPECTED.speed), 6);
   });
+});
+
+/**
+ * The race's own configuration — ADR 0028 D-1's table, at each position a race
+ * may fix — #487's second item.
+ *
+ * ⚠️ **Keyed by `PHYSICS_VERSION`.** A change that moves any vector in this
+ * file moves the version in the same commit (`riding.ts` §`PHYSICS_VERSION`),
+ * and the assertion on the version below is what makes the two be read
+ * together: a vector edited without the version is a diff a reviewer sees
+ * beside a number that did not move.
+ */
+const RACE_EXPECTED: Readonly<Record<RidingPosition, { speed: string; distance: string }>> = {
+  upright: { speed: '10.233834382791555', distance: '402.497584110409' },
+  hoods: { speed: '10.62485681501574', distance: '411.5024211178726' },
+  drops: { speed: '10.988216544849829', distance: '419.72918217795575' },
+};
+
+describe('the race’s own configuration — #487, ADR 0028 D-1', () => {
+  it('is physics version 1, which these vectors are the answer of', () => {
+    expect(PHYSICS_VERSION).toBe(1);
+  });
+
+  for (const position of ['upright', 'hoods', 'drops'] as const) {
+    it(`computes a fixed position in the ${position} from a fixed trace, digit for digit`, () => {
+      const settled = rideTheTrace({ ...CONDITIONS, coefficients: ridingCoefficients(position) });
+      expect(String(settled.speed)).toBe(RACE_EXPECTED[position].speed);
+      expect(String(settled.distance)).toBe(RACE_EXPECTED[position].distance);
+      // And it is not the package default: a race runs a different bicycle.
+      expect(String(settled.distance)).not.toBe(EXPECTED.distance);
+    });
+  }
 });

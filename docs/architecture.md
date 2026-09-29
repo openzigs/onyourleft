@@ -185,6 +185,10 @@ packages/             Apache-2.0, without exception
     protocol/           the GATT profile clients (#41, #42, #43); no platform API either
     web-bluetooth/      the browser transport (#40); the one place a BluetoothDevice exists
   physics/            cycling power/speed model — Martin et al. 1998, as separate terms
+                      and, since #487, the coefficient set a ride runs and the
+                      race room's plausibility rule (ADR 0028 D-2 rules 1–4)
+  protocol/           the race-room wire format (#768): messages, a bounded
+                      decoder and the version handshake; no dependency at all
   store/              local activity, stream and recording-checkpoint store
 
 docs/
@@ -221,7 +225,8 @@ checkable.
 | `packages/sensors/src` | Apache-2.0 | BLE sensor and trainer abstraction, and the simulator | **Any platform API at all**, as `packages/domain` — plus any BLE library, because an abstraction that names one has chosen it for all three stacks | #39, #44 |
 | `packages/sensors/protocol` | Apache-2.0 | The GATT profile clients: Heart Rate, Cycling Speed and Cadence and Cycling Power — service and characteristic UUIDs, bounds-checked payload decoding, and the `GattProfile` seam itself | **Any platform API at all**, as `packages/sensors/src` — it is compiled by the same platform-free program, because the same decoders serve the browser adapter and the native stacks | #41, #42 |
 | `packages/sensors/web-bluetooth` | Apache-2.0 | The browser transport: the `DeviceId → device/server/service/characteristic` map, the global GATT operation queue, the profile registry `packages/sensors/protocol` fills, and — since #49 — the **production `FitnessMachineChannel`**, which is the only place in the program that writes to a GATT characteristic | Anything server-specific; every platform global except `navigator`. **Web Bluetooth types must not escape above the transport boundary** | #40, #49 |
-| `packages/physics` | Apache-2.0 | Power → speed, as separately testable terms | Any rendering, BLE or platform API | #88 |
+| `packages/physics` | Apache-2.0 | Power → speed, as separately testable terms; since #487 the coefficient set a ride and a race run, `PHYSICS_VERSION`, and the race room's plausibility rule | Any rendering, BLE or platform API | #88, #487 |
+| `packages/protocol` | Apache-2.0 | The race-room wire format: every message, the encoder, a bounded decoder that refuses rather than throws, and the version handshake | **Any platform API at all**, and any production dependency | #768 |
 | `packages/store` | Apache-2.0 | Local activity and stream persistence, its migrations, and the round-trip test harness | Anything under `apps/` | #26, #27, #28 |
 
 `packages/domain` is filled in as of [#25](https://github.com/openzigs/onyourleft/issues/25): the

@@ -69,7 +69,7 @@ export interface DataSafetyAnswer {
 /**
  * The declaration filed for this app.
  *
- * ⚠️ Every row but two is `collected: false`, and that is a statement about
+ * ⚠️ Every row but four is `collected: false`, and that is a statement about
  * the PRODUCT, not a convenience: Phase 1 has no server, no account and no
  * analytics (CLAUDE.md §1, owner decision D6). Play's definition of
  * "collected" is data transferred off the device; a ride the athlete exports
@@ -95,6 +95,10 @@ export interface DataSafetyAnswer {
  * remembers "every row but one" is reading the old file: the ride map's tile
  * requests' IP addresses are visible in the tile host's analytics for up to
  * 7 days, which is not ephemeral processing. See the row.
+ *
+ * ⚠️ **Since #804 the two health rows are collected too**, and a reviewer who
+ * remembers "every row but two" is reading the old file: the post-ride ask
+ * sends a ride's numbers to the rider's own computer on a press. See the rows.
  *
  * ⚠️ The health rows are here because Play's Health Content and Services policy
  * covers apps that are not primarily health apps — its own example is a game
@@ -168,25 +172,39 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     why: 'a recorded ride carries positions and they stay in IndexedDB on the device; the app requests no GPS fix and never transmits a position. The location permissions in the manifest exist only so that a BLE scan works below API 31, which Android required, and they are bounded at API 30 — see locationClaimFaults. The one location signal that leaves the device is a map tile request: which part of the map it asks for is handled while the request is served and not kept, and what is kept is the IP address, answered under approximate location',
   },
   {
+    // ⚠️ **Re-answered by #804, and the answer CHANGED — collected: true.** A
+    // reviewer who remembers `collected: false` "because nothing transmits it"
+    // is reading the old file: the post-ride ask sends a ride's heart rate, as
+    // numbers, to the rider's own computer when they press the button on the
+    // ride's page (ADR 0035 D-9 B). That is transmission off the device, so it
+    // is collected, on the Photos row's reasoning; `shared: false` and
+    // `optional: true` on the same words — the destination is the rider's own
+    // computer, the transfer is a specific user-initiated action, and nothing
+    // is set up by default. A hosted model being sent ride data (#803) is what
+    // moves this row to `shared: true`, in that pull request.
     dataType: 'Health and fitness — health info',
-    collected: false,
+    collected: true,
     shared: false,
-    why: 'heart rate from a BLE strap, stored locally. In scope of the Health apps policy because it advances gameplay (#85); not collected because nothing transmits it',
+    optional: true,
+    purposes: ['App functionality'],
+    why: 'heart rate from a BLE strap, stored locally. In scope of the Health apps policy because it advances gameplay (#85). When the rider presses the button on a ride’s page that asks for a write-up (#804), that ride’s heart rate — as numbers, section by section — is sent to one computer the rider configured at an address on their own network and switched on, the same computer and rules as the Photos row. Nothing is set up by default, nothing is sent until the press, and nothing is sent in the background. It is not sent to this project, which runs no server, and not to any third party',
   },
   {
-    // ⚠️ **#518: the row the hosted path would move, and it has not moved
-    // yet.** The owner's ruling lets a hosted model on the rider's own key be
-    // sent ride data and pose numbers the tablet has already computed — which
-    // is fitness info, sent to a third party: `collected: true, shared: true`.
-    // The one question #518 built is a connection check that carries NO ride
-    // or pose numbers, so nothing here is transmitted yet, and answering
-    // `true` would be filing a feature the app does not have. ADR 0029's
-    // 2026-09-28 amendment says the issue that adds a numbers question re-files
-    // this row in the same pull request.
+    // ⚠️ **Re-answered by #804, and the answer CHANGED — collected: true.** A
+    // reviewer who remembers "#518: the row the hosted path would move, and it
+    // has not moved yet" is reading the old file. The post-ride ask sends a
+    // ride's power, cadence, weight, watts per kilogram, threshold power and
+    // length, section by section, to the rider's OWN computer on the press
+    // (ADR 0035 D-9 B). Collected, not shared, optional — the health-info
+    // row's reasoning, and the Photos row's. The hosted path (#518) still
+    // sends only a fixed test question carrying none of it; #803, which sends
+    // ride data to a hosted model, moves this row to `shared: true`.
     dataType: 'Health and fitness — fitness info',
-    collected: false,
+    collected: true,
     shared: false,
-    why: 'power, cadence, speed and distance from BLE sensors and the trainer, stored locally. A hosted model the rider sets up on their own key (#518) is sent only a fixed test question today, carrying none of it',
+    optional: true,
+    purposes: ['App functionality'],
+    why: 'power, cadence, speed and distance from BLE sensors and the trainer, stored locally. When the rider presses the button on a ride’s page that asks for a write-up (#804), that ride’s power, cadence, the rider’s weight and watts per kilogram, their threshold power if set, and the ride’s length, section by section, are sent as numbers to one computer the rider configured at an address on their own network and switched on — the same computer and rules as the Photos row. Nothing is set up by default and nothing is sent until the press. It is not sent to this project or to any third party. A hosted model the rider sets up on their own key (#518) is sent only a fixed test question today, carrying none of it',
   },
   {
     dataType: 'Personal info',

@@ -41,6 +41,12 @@
  * `response_format` hint carrying the step's schema. Nothing else: no ride id,
  * no athlete id, no date, no position. The key set is pinned by a test.
  *
+ * ⚠️ **The hint is OpenAI's shape and not every local server takes it**
+ * (#804, from #828's review). A step whose hint is answered with a
+ * {@link HINT_REFUSED_STATUSES} status is sent ONCE more without it — the
+ * prompt spells the form out and the runner validates the reply regardless —
+ * so a server that rejects the hint does not fail every JSON step.
+ *
  * ## How a reply ends
  *
  * The reply's `finish_reason` is read and handed to the runner as a
@@ -273,37 +279,81 @@ export function ownComputerStepPort(
       if (signal.aborted) {
         return failed('cancelled');
       }
-      // The same settings as the picture path, for the same reasons
-      // (`camera/analysis-transport.ts` §"What leaves, exactly"), and the
-      // runner's own signal, so a cancel closes the connection.
-      const init: RequestInit & { targetAddressSpace: AddressSpace } = {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(stepRequestBody(model, step)),
-        cache: 'no-store',
-        credentials: 'omit',
-        redirect: 'error',
-        referrerPolicy: 'no-referrer',
-        mode: 'cors',
-        signal,
-        targetAddressSpace: space,
+      const once = async (sent: StepRequest): Promise<NativeAnalysisReply | StepReply> => {
+        // The same settings as the picture path, for the same reasons
+        // (`camera/analysis-transport.ts` §"What leaves, exactly"), and the
+        // runner's own signal, so a cancel closes the connection.
+        const init: RequestInit & { targetAddressSpace: AddressSpace } = {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(stepRequestBody(model, sent)),
+          cache: 'no-store',
+          credentials: 'omit',
+          redirect: 'error',
+          referrerPolicy: 'no-referrer',
+          mode: 'cors',
+          signal,
+          targetAddressSpace: space,
+        };
+        let status: number;
+        let body: string | undefined;
+        try {
+          // ⚠️ Nothing of a rejection is read: a network error's message can
+          // name the address (ADR 0029 D-8).
+          const response = await send(url, init);
+          status = response.status;
+          body = await boundedText(response, MAXIMUM_RESPONSE_BYTES);
+        } catch {
+          return failed(signal.aborted ? 'cancelled' : 'unreachable');
+        }
+        if (body === undefined) {
+          return failed('too-large');
+        }
+        return { status, body };
       };
-      let status: number;
-      let body: string | undefined;
-      try {
-        // ⚠️ Nothing of a rejection is read: a network error's message can
-        // name the address (ADR 0029 D-8).
-        const response = await send(url, init);
-        status = response.status;
-        body = await boundedText(response, MAXIMUM_RESPONSE_BYTES);
-      } catch {
-        return failed(signal.aborted ? 'cancelled' : 'unreachable');
+      const first = await once(step);
+      if (!refusedTheHint(step, first) || signal.aborted) {
+        return 'kind' in first ? first : stepReplyFrom(first);
       }
-      if (body === undefined) {
-        return failed('too-large');
-      }
-      return stepReplyFrom({ status, body });
+      const second = await once(withoutHint(step));
+      return 'kind' in second ? second : stepReplyFrom(second);
     },
+  };
+}
+
+/**
+ * The HTTP statuses a server answers a request body it will not take with —
+ * which is what one that does not know `response_format`'s `json_schema`
+ * (OpenAI's shape, never tried against every local server) answers.
+ */
+export const HINT_REFUSED_STATUSES: readonly number[] = [400, 422];
+
+/**
+ * Whether `reply` is a refusal of the `response_format` hint `step` carried
+ * (#804, from #828's review). Without the retry this enables, a server that
+ * rejects the hint fails every JSON step, and the run ends as
+ * `too-few-sections` with nothing saying why.
+ */
+function refusedTheHint(step: StepRequest, reply: NativeAnalysisReply | StepReply): boolean {
+  return (
+    step.replySchema !== undefined &&
+    !('kind' in reply) &&
+    HINT_REFUSED_STATUSES.includes(reply.status)
+  );
+}
+
+/**
+ * The same step with no `response_format` hint. The prompt still spells the
+ * form out and the runner validates the reply either way, so the hint is a
+ * help to a server that knows it and nothing more.
+ */
+function withoutHint(step: StepRequest): StepRequest {
+  return {
+    kind: step.kind,
+    system: step.system,
+    user: step.user,
+    maximumTokens: step.maximumTokens,
+    temperature: step.temperature,
   };
 }
 
@@ -336,17 +386,25 @@ function nativeStepPort(
         };
         signal.addEventListener('abort', onAbort, { once: true });
       });
-      const answered = (async (): Promise<StepReply> => {
+      const once = async (sent: StepRequest): Promise<NativeAnalysisReply | StepReply> => {
         try {
           const reply = await native({
             url,
             headers: { 'Content-Type': 'application/json' },
-            json: stepRequestBody(model, step),
+            json: stepRequestBody(model, sent),
           });
-          return signal.aborted ? failed('cancelled') : stepReplyFrom(reply);
+          return signal.aborted ? failed('cancelled') : reply;
         } catch {
           return failed(signal.aborted ? 'cancelled' : 'unreachable');
         }
+      };
+      const answered = (async (): Promise<StepReply> => {
+        const first = await once(step);
+        if (!refusedTheHint(step, first)) {
+          return 'kind' in first ? first : stepReplyFrom(first);
+        }
+        const second = await once(withoutHint(step));
+        return 'kind' in second ? second : stepReplyFrom(second);
       })();
       try {
         return await Promise.race([answered, abandoned]);

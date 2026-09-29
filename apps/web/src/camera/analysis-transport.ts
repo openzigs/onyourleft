@@ -376,10 +376,10 @@ export async function riderAnalysisSource(
  * `undefined` for the reason {@link riderAnalysisPort} gives: with nothing
  * configured and switched on there is no object that could send anything.
  *
- * ⚠️ **Nothing in the client calls it yet**: the post-ride ask that does is
- * #804's, and until then "nothing is sent without a press" rests on there
- * being no caller at all — `own-computer-step.test.ts` §"sends nothing
- * without a press" holds that, and #804 has to name its press there.
+ * ⚠️ **Called through {@link riderModelStepSource}, which `main.tsx` hands to
+ * the post-ride ask (#804)** — and the ask sends only on the ride page's press:
+ * `own-computer-step.test.ts` §"sends nothing without a press" names the one
+ * module that may start a run.
  */
 export function riderModelStepPort(
   endpoint: AnalysisEndpoint | undefined,
@@ -389,4 +389,30 @@ export function riderModelStepPort(
     send: options.send ?? platformSend,
     ...(options.native === undefined ? {} : { native: options.native }),
   });
+}
+
+/**
+ * **Which way a ride's numbers leave this device**: the platform's `fetch` in
+ * a browser, Capacitor's native HTTP inside the Android shell (#553) — the
+ * same choice as {@link riderAnalysisSource}, for the ride analysis's text
+ * steps (#804). The returned function looks the endpoint up again on every
+ * call, so switching the computer off stops the next ask.
+ *
+ * ⚠️ Here rather than inline in `main.tsx` for {@link riderAnalysisSource}'s
+ * reason: `native` is optional, so a composition root that stopped passing it
+ * inside the shell would still typecheck, and the WebView's `fetch` is blocked
+ * there as mixed content. `analysis-transport.test.ts` drives both branches.
+ */
+export async function riderModelStepSource(
+  nativeShell: boolean,
+  loadNative: () => Promise<NativeAnalysisPost>,
+  endpoint: () => AnalysisEndpoint | undefined,
+  send?: AnalysisSend,
+): Promise<() => ModelStepPort | undefined> {
+  const base = send === undefined ? {} : { send };
+  if (!nativeShell) {
+    return () => riderModelStepPort(endpoint(), base);
+  }
+  const native = await loadNative();
+  return () => riderModelStepPort(endpoint(), { ...base, native });
 }
