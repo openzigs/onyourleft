@@ -78,9 +78,34 @@ function comparePositions(left: Position, right: Position): number {
   return compare(left.key, right.key) || compare(left.id, right.id);
 }
 
+/*
+ * base64url (RFC 4648 §5, unpadded) over the UTF-8 bytes, written out with
+ * `TextEncoder`, `btoa` and `atob` rather than Node's `Buffer` (#841): this
+ * module is the one every list route will use, and a Durable Object (#781)
+ * mounts the handler unchanged (ADR 0037 D-2), where `Buffer` exists only under
+ * `nodejs_compat`. The bytes are the ones `Buffer`'s `base64url` wrote, which
+ * `pagination.test.ts` holds, so a cursor means the same thing on either side.
+ */
+
+function toBase64Url(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/**
+ * Throws on text that is not base64url, which the caller reads as "not ours".
+ * No padding is put back: `atob` is WHATWG's forgiving base64, which accepts
+ * none, and still throws on a length that no bytes could have (`'a'`).
+ */
+function fromBase64Url(text: string): Uint8Array {
+  const binary = atob(text.replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
 /** The opaque cursor for a position. */
 export function encodeCursor(position: Position): string {
-  return Buffer.from(JSON.stringify([position.key, position.id]), 'utf8').toString('base64url');
+  return toBase64Url(new TextEncoder().encode(JSON.stringify([position.key, position.id])));
 }
 
 /** The position a cursor names, or `undefined` for anything this instance did not write. */
@@ -88,7 +113,7 @@ export function decodeCursor(cursor: string): Position | undefined {
   if (!/^[A-Za-z0-9_-]+$/.test(cursor)) return undefined;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+    parsed = JSON.parse(new TextDecoder().decode(fromBase64Url(cursor)));
   } catch {
     return undefined;
   }
