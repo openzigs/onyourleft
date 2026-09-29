@@ -621,6 +621,33 @@ export default tseslint.config(
     },
   },
 
+  // --- The instance's database driver stays behind its port -----------------
+  // #769. `apps/instance/src/store/` is the one place the instance names its
+  // SQL driver (`node:sqlite`) or its query builder (Kysely): the core has to
+  // mount unchanged under a Durable Object (ADR 0037 D-2), whose SQLite is
+  // reached another way, so a handler that imported the driver would have
+  // chosen the platform. Everything else asks the `SqlStore` port. The two
+  // SQLite packages ADR 0037 D-5 named and did not adopt are listed too, so
+  // taking one of them is a change here rather than a quiet import.
+  {
+    files: ['apps/instance/**/*.ts'],
+    ignores: ['apps/instance/src/store/**'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['node:sqlite', 'sqlite', 'kysely', 'kysely/*', 'better-sqlite3', 'sqlite3'],
+              message:
+                'Only apps/instance/src/store/ may name the SQL driver or Kysely (#769, ADR 0037 D-2). Use the SqlStore port.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+
   // --- Tests -----------------------------------------------------------------
   {
     files: ['**/*.test.{ts,tsx}'],
