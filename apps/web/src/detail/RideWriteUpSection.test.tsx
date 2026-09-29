@@ -147,11 +147,9 @@ describe('text, and only text', () => {
     expect(shown?.childElementCount).toBe(0);
     expect(shown?.childNodes).toHaveLength(1);
     expect(section()?.querySelectorAll('b')).toHaveLength(0);
-    expect(
-      [...(section()?.querySelectorAll('a') ?? [])].filter((link) =>
-        (link.getAttribute('href') ?? '').includes('example.com'),
-      ),
-    ).toHaveLength(0);
+    // With a model set up the section holds no link of its own at all, so
+    // any link in it would be one made from the text.
+    expect(section()?.querySelectorAll('a')).toHaveLength(0);
   });
 
   it('frames it with ADR 0035 D-9 A, above the text', async () => {
