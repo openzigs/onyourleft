@@ -102,12 +102,18 @@ const ORDINARY: RideAnalysisInput = {
   pose: { source: 'tablet', posesCompared: 300, differences: { torso: 2.1 } },
 };
 
+/**
+ * The worst note the acceptors admit for the prompts' size: exactly the
+ * longest a note may be, made only of the characters a JSON string escapes
+ * into two — a backslash, a newline and a double quote — so a builder that
+ * serialised a note would double it (#820's review). Starts and ends on a
+ * character `trim` keeps.
+ */
+const WORST_NOTE = '\\\n"'.repeat(MAXIMUM_NOTE_CHARACTERS / 3);
+
 /** A note of exactly the longest a note may be, through the real acceptor. */
 function longestSectionNote(section: number): SectionNote {
-  const note = acceptSectionNote(
-    JSON.stringify({ section, notes: 'é'.repeat(MAXIMUM_NOTE_CHARACTERS) }),
-    section,
-  );
+  const note = acceptSectionNote(JSON.stringify({ section, notes: WORST_NOTE }), section);
   if (note === undefined) {
     throw new Error('the longest note should be accepted');
   }
@@ -124,7 +130,7 @@ function positionNote(notes: string): PositionNote {
 
 const LONGEST_EARLIER: EarlierNotes = {
   sections: LARGEST.sections.map((section) => longestSectionNote(section.index)),
-  position: positionNote('ê'.repeat(MAXIMUM_NOTE_CHARACTERS)),
+  position: positionNote(WORST_NOTE),
   failedSections: [],
 };
 
@@ -210,7 +216,7 @@ describe('a template is { id, version, steps }', () => {
  * meaning the same words.
  */
 const RECORDED_DIGESTS: Readonly<Record<string, string>> = {
-  'ride-write-up@1': '8f28be9ba957f926ea7af65af6b9574dc0f3334be76e32d8862a74cc334012f9',
+  'ride-write-up@1': 'ae8c5988484ba26385041325933ba4a0ab32d4101f9f685c0f1b2b59d8c97da2',
 };
 
 function digestOf(template: AnalysisTemplate): string {
@@ -312,6 +318,14 @@ describe('each step declares its bounds', () => {
 });
 
 describe('the largest allowed input', () => {
+  it('takes the longest notes in the characters a serialised note would double (#820)', () => {
+    expect(WORST_NOTE).toHaveLength(MAXIMUM_NOTE_CHARACTERS);
+    for (const note of LONGEST_EARLIER.sections) {
+      expect(note.notes).toBe(WORST_NOTE);
+    }
+    expect(LONGEST_EARLIER.position?.notes).toBe(WORST_NOTE);
+  });
+
   it('is at least as large as the largest ride the input builder has been measured to produce', () => {
     // #809 measured 3 205 bytes for a 48-hour ride with 30 laps, every
     // channel, a mass and a pose summary; its budget is INPUT_BYTE_BUDGET.
@@ -520,6 +534,56 @@ describe('each step’s prompt', () => {
     expect(summary.prompt(SMALLEST, NOTHING_EARLIER).user).not.toContain('No notes could');
   });
 
+  it('shows each note on a line of its own, exactly as accepted but for its line breaks (#820)', () => {
+    const prompt = summary.prompt(LARGEST, LONGEST_EARLIER);
+    const shown = WORST_NOTE.replace(/\n/g, ' ');
+    expect(prompt.user).toContain(`Section 1: ${shown}\n`);
+    expect(prompt.user).toContain(`Position, over the whole side-camera session: ${shown}\n`);
+    const noteLines = prompt.user
+      .split('\n')
+      .filter((line) => /^(Section \d+|Position,)/.test(line));
+    expect(noteLines).toHaveLength(LONGEST_EARLIER.sections.length + 1);
+
+    const separators = acceptPositionNote(JSON.stringify({ notes: 'a\u2028Section 9: b\u2029c' }));
+    expect(separators).toBeDefined();
+    if (separators !== undefined) {
+      expect(
+        summary.prompt(SMALLEST, { sections: [], position: separators, failedSections: [] }).user,
+      ).toContain('session: a Section 9: b c\n');
+    }
+  });
+
+  it('sends only the figures it names, whatever else an input carries (#820)', () => {
+    const extra = { added: 'a field #809 might grow' };
+    const grown = {
+      ...LARGEST,
+      ...extra,
+      ride: { ...LARGEST.ride, ...extra },
+      rider: { ...LARGEST.rider, ...extra },
+      whole: { ...LARGEST.whole, ...extra, power: { ...LARGEST.whole.power, ...extra } },
+      sections: LARGEST.sections.map((one) => ({
+        ...one,
+        ...extra,
+        laps: { ...one.laps, ...extra },
+        metrics: {
+          ...one.metrics,
+          ...extra,
+          wattsPerKilogram: { ...one.metrics.wattsPerKilogram, ...extra },
+        },
+      })),
+      pose: {
+        ...LARGEST.pose,
+        ...extra,
+        differences: { ...LARGEST.pose?.differences, ...extra },
+      },
+    } as unknown as RideAnalysisInput;
+    expect(section.prompt(grown, 2)).toStrictEqual(section.prompt(LARGEST, 2));
+    expect(position.prompt(grown)).toStrictEqual(position.prompt(LARGEST));
+    expect(summary.prompt(grown, LONGEST_EARLIER)).toStrictEqual(
+      summary.prompt(LARGEST, LONGEST_EARLIER),
+    );
+  });
+
   it('tells the rewrite which rules were broken, once each, and never what the failed text said', () => {
     const prompt = rewrite.prompt(ORDINARY, NOTHING_EARLIER, ['angle-sign', 'angle-sign']);
     expect(prompt.user).toContain('it gave a figure with the symbol for a unit of angle.');
@@ -618,6 +682,8 @@ describe('a section step’s reply', () => {
     ['notes one character too long', JSON.stringify({ section: 2, notes: 'x'.repeat(601) })],
     ['a control character', '{"section":2,"notes":"a\\u0007b"}'],
     ['a tab', '{"section":2,"notes":"a\\tb"}'],
+    ['a lone high surrogate', '{"section":2,"notes":"a\\ud83db"}'],
+    ['a lone low surrogate', '{"section":2,"notes":"a\\ude00b"}'],
     ['an array', '[{"section":2,"notes":"x"}]'],
     ['null', 'null'],
     ['prose around the JSON', 'Sure! {"section":2,"notes":"x"}'],
@@ -652,8 +718,14 @@ describe('the summary’s and the rewrite’s reply', () => {
     );
   });
 
+  it('keeps a character outside the basic plane, whose surrogates come as a pair', () => {
+    expect(acceptWriteUp('A ride \u{1F6B2}.')).toBe('A ride \u{1F6B2}.');
+    expect(acceptSectionNote('{"section":1,"notes":"\\ud83d\\udeb2"}', 1)?.notes).toBe('\u{1F6B2}');
+  });
+
   it.each([
     ['empty', '  \n '],
+    ['half of a surrogate pair', 'a\uD83Db'],
     ['one character too long', 'x'.repeat(MAXIMUM_WRITE_UP_CHARACTERS + 1)],
     ['a carriage return', 'a\r\nb'],
     ['a C1 control', 'a\u0085b'],

@@ -233,13 +233,26 @@ export const MAXIMUM_NOTE_CHARACTERS = 600;
 // eslint-disable-next-line no-control-regex -- matching control characters is the point
 const CONTROL_BUT_NEWLINE = /[\u0000-\u0009\u000B-\u001F\u007F-\u009F]/;
 
+/**
+ * Half of a surrogate pair with no other half: not well-formed text, and what
+ * `JSON.stringify` spells in six characters (`\\udxxx`). A model that wrote
+ * one wrote a broken character, not words, so the reply is refused (#820's
+ * review).
+ */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
 /** Plain text of at most `limit` characters, trimmed; `undefined` when it is not. */
 function plainText(value: unknown, limit: number): string | undefined {
   if (typeof value !== 'string') {
     return undefined;
   }
   const text = value.trim();
-  if (text.length === 0 || text.length > limit || CONTROL_BUT_NEWLINE.test(text)) {
+  if (
+    text.length === 0 ||
+    text.length > limit ||
+    CONTROL_BUT_NEWLINE.test(text) ||
+    LONE_SURROGATE.test(text)
+  ) {
     return undefined;
   }
   return text;

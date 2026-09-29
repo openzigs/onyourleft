@@ -39,7 +39,7 @@ import type {
   ScreenRule,
   StepPrompt,
 } from './template';
-import type { RideAnalysisInput } from './input';
+import type { ChannelSummary, MetricSummary, RideAnalysisInput, SectionSummary } from './input';
 
 /** The longest a note may be, as this version's prompts state it. */
 const NOTE_CHARACTERS = 600;
@@ -61,8 +61,8 @@ const NOTE_CHARACTERS = 600;
 
 /**
  * A section step: the instructions, the whole-ride figures and one section's.
- * The largest such prompt is 2 819 characters (`template.test.ts` builds it,
- * 2026-09-29); 3 300 leaves a sixth of headroom. `max_tokens` 400: a 600-character note in
+ * The largest such prompt is 2 906 characters (`template.test.ts` builds it,
+ * 2026-09-29); 3 300 leaves about an eighth of headroom. `max_tokens` 400: a 600-character note in
  * its JSON is under 250 tokens. 60 s: the reply is short, and eight of these
  * run in turn, so a slow model is given up on well inside a rider's patience.
  */
@@ -73,7 +73,7 @@ const SECTION_BOUNDS = {
 } as const;
 
 /**
- * The position step: the instructions and the pose summary — 1 983 characters
+ * The position step: the instructions and the pose summary — 2 091 characters
  * at its largest (2026-09-29) — with the same reply shape as a section's and
  * so the same `max_tokens` and deadline.
  */
@@ -85,7 +85,9 @@ const POSITION_BOUNDS = {
 
 /**
  * The summary step: the instructions, the whole-ride figures and up to nine
- * 600-character notes — 8 134 characters at its largest (2026-09-29).
+ * 600-character notes — 8 203 characters at its largest (2026-09-29), and
+ * that largest holds whatever the notes are made of, because a note is shown
+ * one character for one (§`oneLine`).
  * `max_tokens` 1 024 is room for the 500 words the prompt asks for at most,
  * and 8 600 / 3 + 1 024 = 3 891 tokens, inside 4 096. 120 s: the longest
  * reply of the run, and the native ceiling above.
@@ -97,7 +99,8 @@ const SUMMARY_BOUNDS = {
 } as const;
 
 /**
- * The rewrite step: the summary's prompt and the rules that were broken.
+ * The rewrite step: the summary's prompt and the rules that were broken —
+ * 8 511 characters at its largest (2026-09-29).
  * 9 000 / 3 + 1 024 = 4 024 tokens, inside 4 096 — the tightest of the four,
  * and the reason its bound is not rounded up further.
  */
@@ -131,9 +134,53 @@ const FIGURES = [
   'A section is one stretch of the ride, numbered in the order ridden. Its kind is climb, flat or descent (from the gradient), lap (from the laps the cyclist marked) or time (an equal share of the ride); meanGradientPercent is its average gradient, elevationGainMetres how much it climbed, and laps which of the marked laps it covers.',
 ].join(' ');
 
+// --- What of the input is sent ------------------------------------------------
+//
+// Every figure is picked by name rather than serialising #809's objects whole,
+// so a field added to those types later cannot change what this version sends
+// for a real ride while the digest over fixed fixtures stays green (#820's
+// review). A key absent from the input is absent here too: `JSON.stringify`
+// leaves out a property whose value is `undefined`.
+
+function channel(summary: ChannelSummary | undefined): object | undefined {
+  return summary === undefined
+    ? undefined
+    : { coverage: summary.coverage, mean: summary.mean, max: summary.max };
+}
+
+function metrics(summary: MetricSummary): object {
+  const perKilogram = summary.wattsPerKilogram;
+  return {
+    power: channel(summary.power),
+    heartRate: channel(summary.heartRate),
+    cadence: channel(summary.cadence),
+    wattsPerKilogram:
+      perKilogram === undefined ? undefined : { mean: perKilogram.mean, max: perKilogram.max },
+  };
+}
+
+function sectionFigures(section: SectionSummary): object {
+  const laps = section.laps;
+  return {
+    index: section.index,
+    kind: section.kind,
+    minutes: section.minutes,
+    distanceKilometres: section.distanceKilometres,
+    meanGradientPercent: section.meanGradientPercent,
+    elevationGainMetres: section.elevationGainMetres,
+    laps: laps === undefined ? undefined : { first: laps.first, last: laps.last },
+    metrics: metrics(section.metrics),
+  };
+}
+
 /** The whole-ride figures: everything the input carries but the sections and the pose. */
 function wholeRide(input: RideAnalysisInput): string {
-  return JSON.stringify({ ride: input.ride, rider: input.rider, whole: input.whole });
+  const { ride, rider } = input;
+  return JSON.stringify({
+    ride: { movingMinutes: ride.movingMinutes, distanceKilometres: ride.distanceKilometres },
+    rider: { massKilograms: rider.massKilograms, thresholdPower: rider.thresholdPower },
+    whole: metrics(input.whole),
+  });
 }
 
 /** Every section, briefly, so a section can be read against the rest of the ride. */
@@ -179,7 +226,7 @@ function sectionPrompt(input: RideAnalysisInput, index: number): StepPrompt {
     user: [
       `The whole ride: ${wholeRide(input)}`,
       `Its sections: ${outline(input)}.`,
-      `Section ${String(index)}: ${JSON.stringify(section)}`,
+      `Section ${String(index)}: ${JSON.stringify(sectionFigures(section))}`,
       `Describe how section ${String(index)} went, compared with the whole ride: effort, heart rate, cadence and pacing, as far as the figures show them.`,
       `Reply with JSON only, in exactly this form: {"section":${String(index)},"notes":"…"} where notes is plain text of at most ${String(NOTE_CHARACTERS)} characters.`,
     ].join('\n'),
@@ -197,13 +244,26 @@ const POSE_FIGURES = [
 ].join(' ');
 
 function positionPrompt(input: RideAnalysisInput): StepPrompt | undefined {
-  if (input.pose === undefined) {
+  const pose = input.pose;
+  if (pose === undefined) {
     return undefined;
   }
+  const { differences } = pose;
+  const figures = {
+    source: pose.source,
+    posesCompared: pose.posesCompared,
+    differences: {
+      torso: differences.torso,
+      knee: differences.knee,
+      elbow: differences.elbow,
+      head: differences.head,
+      saddle: differences.saddle,
+    },
+  };
   return {
     system: `${COMMON} ${POSE_FIGURES}`,
     user: [
-      `The side-camera comparison: ${JSON.stringify(input.pose)}`,
+      `The side-camera comparison: ${JSON.stringify(figures)}`,
       'Describe what, if anything, changed in the cyclist’s position between the start and the end of the session.',
       `Reply with JSON only, in exactly this form: {"notes":"…"} where notes is plain text of at most ${String(NOTE_CHARACTERS)} characters.`,
     ].join('\n'),
@@ -211,11 +271,26 @@ function positionPrompt(input: RideAnalysisInput): StepPrompt | undefined {
   };
 }
 
+/**
+ * A note as the summary is shown it: on one line, and otherwise exactly as it
+ * was accepted. ⚠️ **Not `JSON.stringify`**, which is what this used to be: a
+ * JSON string spells a quote, a backslash or a newline in two characters, so
+ * nine accepted notes of those came to 13 621 characters against the summary's
+ * 8 600 (#820's review) — and the server truncates silently, from the front,
+ * where the instructions are. Replacing a line break with a space is one
+ * character for one, so a note takes exactly its own length here and the
+ * acceptor's bound is the prompt's. One line each also keeps a note from
+ * starting a line of its own that reads like another section's.
+ */
+function oneLine(notes: string): string {
+  return notes.replace(/[\n\u2028\u2029]/g, ' ');
+}
+
 /** The notes the earlier steps' replies came to, as the summary is shown them. */
 function notesOf(earlier: EarlierNotes): string {
   const sections = [...earlier.sections]
     .sort((a, b) => a.section - b.section)
-    .map((note) => `Section ${String(note.section)}: ${JSON.stringify(note.notes)}`);
+    .map((note) => `Section ${String(note.section)}: ${oneLine(note.notes)}`);
   const failed =
     earlier.failedSections.length === 0
       ? []
@@ -228,7 +303,7 @@ function notesOf(earlier: EarlierNotes): string {
   const position =
     earlier.position === undefined
       ? []
-      : [`Position, over the whole side-camera session: ${JSON.stringify(earlier.position.notes)}`];
+      : [`Position, over the whole side-camera session: ${oneLine(earlier.position.notes)}`];
   return [...sections, ...failed, ...position].join('\n');
 }
 
