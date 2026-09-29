@@ -206,6 +206,11 @@ export interface SyncItem {
   readonly deletedAt: number | null;
 }
 
+/** A manifest row: the item, and a live activity's signed record beside it. */
+export interface ManifestRow extends SyncItem {
+  readonly signedRecord: Uint8Array | null;
+}
+
 /** A position in the manifest's order. */
 export interface ManifestPosition {
   readonly receivedAt: number;
@@ -335,7 +340,7 @@ export interface SqlStore {
     athleteId: string,
     after: ManifestPosition | undefined,
     limit: number,
-  ): Promise<readonly SyncItem[]>;
+  ): Promise<readonly ManifestRow[]>;
   getActivityRecord(athleteId: string, contentSha256: string): Promise<ActivityRecord | undefined>;
   listActivityRecords(athleteId: string): Promise<readonly ActivityRecord[]>;
 
@@ -1246,14 +1251,31 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
 
     listSyncManifest: (athleteId, after, limit) =>
       exclusive(async () => {
-        let query = db.selectFrom('sync_item').selectAll().where('athlete_id', '=', athleteId);
+        // An activity's row brings its signed record, so the manifest can say
+        // which ride it is without a query per entry. Joined on the athlete
+        // AND the content: another athlete's record of the same file is not it.
+        let query = db
+          .selectFrom('sync_item')
+          .leftJoin('activity_record', (join) =>
+            join
+              .onRef('activity_record.athlete_id', '=', 'sync_item.athlete_id')
+              .onRef('activity_record.content_sha256', '=', 'sync_item.item_key')
+              .on('sync_item.kind', '=', 'activity'),
+          )
+          .selectAll('sync_item')
+          .select('activity_record.signed_record as signed_record')
+          .where('sync_item.athlete_id', '=', athleteId);
         if (after !== undefined) {
           query = query.where(
-            sql<boolean>`(received_at, seq) > (${after.receivedAt}, ${after.seq})`,
+            sql<boolean>`(sync_item.received_at, sync_item.seq) > (${after.receivedAt}, ${after.seq})`,
           );
         }
-        const rows = await query.orderBy('received_at').orderBy('seq').limit(limit).execute();
-        return rows.map(syncItemFrom);
+        const rows = await query
+          .orderBy('sync_item.received_at')
+          .orderBy('sync_item.seq')
+          .limit(limit)
+          .execute();
+        return rows.map((row) => ({ ...syncItemFrom(row), signedRecord: row.signed_record }));
       }),
 
     putRoom: (room) =>

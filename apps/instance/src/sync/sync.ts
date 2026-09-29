@@ -55,7 +55,12 @@ import type { Caller, Outcome } from '../auth/identity.ts';
 import { BLOB_KEY, type BlobStore } from '../blob/blob-store.ts';
 import type { ErrorCode, FieldProblem } from '../errors.ts';
 import { encodeCursor, parsePageRequest, type Page } from '../pagination.ts';
-import type { ActivityRecord, SqlStore } from '../store/sql-store.ts';
+import {
+  SYNC_KINDS,
+  type ActivityRecord,
+  type SqlStore,
+  type SyncKind,
+} from '../store/sql-store.ts';
 import {
   decodeActivityFile,
   downsample,
@@ -113,7 +118,57 @@ export interface StreamsView {
 /** The most points a stream request may ask for; a chart is never wider. */
 export const MAXIMUM_STREAM_POINTS = 10_000;
 
+/** One entry of the manifest (#776). */
+export interface ManifestEntry {
+  readonly kind: SyncKind;
+  /** An activity's content SHA-256, or the device's own id for anything else. */
+  readonly key: string;
+  /** SHA-256 of the item as stored — of the signed record, for an activity. `null` when deleted. */
+  readonly digest: string | null;
+  /** Unix seconds. */
+  readonly receivedAt: number;
+  readonly deleted: boolean;
+  /** Which ride a live activity is — its record's `claims.activityId` — or `null`. */
+  readonly activityId: string | null;
+}
+
+/** A signed record, as a pulling device fetches it (#776). */
+export interface PulledRecord {
+  readonly record: SignedActivityRecord;
+  readonly recordSha256: string;
+  readonly receivedAt: number;
+}
+
+/** An item, exactly as the device sent it (#776). */
+export interface StoredItem {
+  /** The text the device sent, byte for byte. */
+  readonly body: string;
+  readonly digest: string;
+  readonly receivedAt: number;
+}
+
+/** The kinds a device puts as items; an activity comes through {@link Sync.ingest}. */
+export const ITEM_KINDS: readonly Exclude<SyncKind, 'activity'>[] = SYNC_KINDS.filter(
+  (kind): kind is Exclude<SyncKind, 'activity'> => kind !== 'activity',
+);
+
 export interface Sync {
+  /** #776: the caller's manifest, `(receivedAt, id)`-paged, tombstones included. */
+  manifest(caller: Caller, query: URLSearchParams): Promise<Outcome<Page<ManifestEntry>>>;
+  /** #776: one of the caller's signed records, for a device to verify before it writes. */
+  record(caller: Caller, contentSha256: string): Promise<Outcome<PulledRecord>>;
+  /** #776: store an item — a write-up, a side-camera report, a goal, a note, a document. */
+  putItem(
+    caller: Caller,
+    kind: string,
+    key: string,
+    body: unknown,
+  ): Promise<
+    Outcome<{ readonly digest: string; readonly receivedAt: number; readonly unchanged: boolean }>
+  >;
+  getItem(caller: Caller, kind: string, key: string): Promise<Outcome<StoredItem>>;
+  /** #776: delete an item, or an activity by its content hash, leaving a tombstone. */
+  deleteItem(caller: Caller, kind: string, key: string): Promise<Outcome<null>>;
   ingest(caller: Caller, body: Readonly<Record<string, unknown>>): Promise<Outcome<Ingested>>;
   /** The original file, byte for byte — only to an athlete who holds a record of it. */
   file(caller: Caller, contentSha256: string): Promise<Outcome<Uint8Array>>;
@@ -205,7 +260,119 @@ export function createSync(options: SyncOptions): Sync {
       ? store.getActivityRecord(caller.athleteId, contentSha256)
       : Promise.resolve(undefined);
 
+  /** Remove a file nobody holds a record of any more, under the file's lock. */
+  const collect = (contentSha256: string): Promise<void> =>
+    lock.hold(contentSha256, async () => {
+      if (!(await store.isContentHeld(contentSha256))) await blobs.delete(contentSha256);
+    });
+
+  const itemKind = (kind: string): Exclude<SyncKind, 'activity'> | undefined =>
+    ITEM_KINDS.find((each) => each === kind);
+
   return {
+    manifest: async (caller, query) => {
+      const request = parsePageRequest(query);
+      if (!request.ok) return refuse('validation_failed', request.fields);
+      const { limit, after } = request.request;
+      let position;
+      if (after !== undefined) {
+        position = { receivedAt: Number(after.key), seq: Number(after.id) };
+        if (!Number.isSafeInteger(position.receivedAt) || !Number.isSafeInteger(position.seq)) {
+          return invalid('cursor', 'must be a cursor this instance returned');
+        }
+      }
+      const rows = await store.listSyncManifest(caller.athleteId, position, limit + 1);
+      const page = rows.slice(0, limit);
+      const last = page.at(-1);
+      return {
+        ok: true,
+        value: {
+          items: page.map((row) => ({
+            kind: row.kind,
+            key: row.key,
+            digest: row.digest,
+            receivedAt: row.receivedAt,
+            deleted: row.deletedAt !== null,
+            activityId:
+              row.signedRecord === null
+                ? null
+                : storedRecord({ ...row, contentSha256: row.key, signedRecord: row.signedRecord })
+                    .claims.activityId,
+          })),
+          next:
+            rows.length > limit && last !== undefined
+              ? encodeCursor({ key: String(last.receivedAt), id: String(last.seq) })
+              : null,
+        },
+      };
+    },
+
+    record: async (caller, contentSha256) => {
+      const held = await owned(caller, contentSha256);
+      if (held === undefined) return refuse('not_found');
+      return {
+        ok: true,
+        value: {
+          record: storedRecord(held),
+          recordSha256: toHex(await sha256Bytes(held.signedRecord)),
+          receivedAt: held.receivedAt,
+        },
+      };
+    },
+
+    putItem: async (caller, kind, key, body) => {
+      const known = itemKind(kind);
+      if (known === undefined) return refuse('not_found');
+      if (typeof body !== 'string') return invalid('body', 'must be the item, as text');
+      // Kept byte for byte: a write-up is the device's screened copy (#776).
+      const bytes = new TextEncoder().encode(body);
+      const digest = toHex(await sha256Bytes(bytes));
+      const outcome = await store.putSyncItem({
+        athleteId: caller.athleteId,
+        kind: known,
+        key,
+        body: bytes,
+        digest,
+        now: seconds(),
+      });
+      const stored = await store.getSyncItem(caller.athleteId, known, key);
+      return {
+        ok: true,
+        value: {
+          digest,
+          receivedAt: stored?.receivedAt ?? seconds(),
+          unchanged: outcome === 'unchanged',
+        },
+      };
+    },
+
+    getItem: async (caller, kind, key) => {
+      const known = itemKind(kind);
+      if (known === undefined) return refuse('not_found');
+      const item = await store.getSyncItem(caller.athleteId, known, key);
+      if (item?.body === null || item?.body === undefined || item.digest === null) {
+        return refuse('not_found');
+      }
+      return {
+        ok: true,
+        value: {
+          body: new TextDecoder().decode(item.body),
+          digest: item.digest,
+          receivedAt: item.receivedAt,
+        },
+      };
+    },
+
+    deleteItem: async (caller, kind, key) => {
+      const known: SyncKind | undefined = kind === 'activity' ? 'activity' : itemKind(kind);
+      if (known === undefined) return refuse('not_found');
+      if (known === 'activity' && !BLOB_KEY.test(key)) return refuse('not_found');
+      const removed = await store.deleteSyncItem(caller.athleteId, known, key, seconds());
+      if (!removed) return refuse('not_found');
+      if (known === 'activity') await collect(key);
+      return { ok: true, value: null };
+    },
+
     ingest: async (caller, body) => {
       const { record, file } = body;
       if (typeof record !== 'object' || record === null || Array.isArray(record)) {

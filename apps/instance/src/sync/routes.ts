@@ -16,7 +16,7 @@
  */
 
 import { errorResponse } from '../errors.ts';
-import { json, type Route, type RouteContext, type Schema } from '../route-kit.ts';
+import { json, noContent, type Route, type RouteContext, type Schema } from '../route-kit.ts';
 import type { Outcome } from '../auth/identity.ts';
 import type { Sync } from './sync.ts';
 
@@ -88,7 +88,116 @@ const claimsSchema: Schema = object(
 
 const activityProperties = { contentSha256: string, receivedAt: integer, claims: claimsSchema };
 
+const kindSchema: Schema = {
+  type: 'string',
+  enum: ['activity', 'write-up', 'side-camera-report', 'goal', 'note', 'document'],
+};
+
 export const SYNC_ROUTES: readonly Route[] = [
+  {
+    method: 'GET',
+    path: '/v1/sync/manifest',
+    operationId: 'getSyncManifest',
+    summary:
+      'Everything you have synced, tombstones included, in the order it arrived: `?limit=` (1–200) and `?cursor=`, a (receivedAt, id) position — so paging while other devices sync repeats nothing and skips nothing that was there.',
+    ...SESSION,
+    errors: ['unauthenticated', 'validation_failed'],
+    response: {
+      contentType: 'application/json',
+      schema: object({
+        items: {
+          type: 'array',
+          items: object({
+            kind: kindSchema,
+            key: string,
+            digest: { type: ['string', 'null'] },
+            receivedAt: integer,
+            deleted: { type: 'boolean' },
+            activityId: { type: ['string', 'null'] },
+          }),
+        },
+        next: { type: ['string', 'null'] },
+      }),
+    },
+    handle: async (context) =>
+      answer(await syncOf(context).manifest(callerOf(context), context.url.searchParams)),
+  },
+  {
+    method: 'GET',
+    path: '/v1/sync/records/{content}',
+    operationId: 'getSignedRecord',
+    summary:
+      'One of your signed records, by the SHA-256 of its file. A device verifies it, and the file, before it writes anything.',
+    ...SESSION,
+    errors: ['unauthenticated', 'not_found'],
+    response: {
+      contentType: 'application/json',
+      schema: object({ record: recordSchema, recordSha256: string, receivedAt: integer }),
+    },
+    handle: async (context) =>
+      answer(await syncOf(context).record(callerOf(context), context.params.content ?? '')),
+  },
+  {
+    method: 'POST',
+    path: '/v1/sync/items/{kind}/{key}',
+    operationId: 'putSyncItem',
+    summary:
+      'Store a write-up, a side-camera report (its pose summary inside), a goal, a note or a reference document, exactly as the device sends it. The device’s copy is canonical: a later put replaces it.',
+    ...SESSION,
+    request: object({ body: string }),
+    errors: ['unauthenticated', 'validation_failed', 'not_found'],
+    response: {
+      contentType: 'application/json',
+      schema: object({ digest: string, receivedAt: integer, unchanged: { type: 'boolean' } }),
+    },
+    handle: async (context) =>
+      answer(
+        await syncOf(context).putItem(
+          callerOf(context),
+          context.params.kind ?? '',
+          context.params.key ?? '',
+          context.json.body,
+        ),
+      ),
+  },
+  {
+    method: 'GET',
+    path: '/v1/sync/items/{kind}/{key}',
+    operationId: 'getSyncItem',
+    summary: 'One of your items, byte for byte as it was sent.',
+    ...SESSION,
+    errors: ['unauthenticated', 'not_found'],
+    response: {
+      contentType: 'application/json',
+      schema: object({ body: string, digest: string, receivedAt: integer }),
+    },
+    handle: async (context) =>
+      answer(
+        await syncOf(context).getItem(
+          callerOf(context),
+          context.params.kind ?? '',
+          context.params.key ?? '',
+        ),
+      ),
+  },
+  {
+    method: 'DELETE',
+    path: '/v1/sync/items/{kind}/{key}',
+    operationId: 'deleteSyncItem',
+    summary:
+      'Delete one of your items — or, as `activity`, a ride by its content hash, its file with it unless another rider sent the same bytes. A tombstone stays in the manifest so your other devices learn of it.',
+    ...SESSION,
+    errors: ['unauthenticated', 'not_found'],
+    response: { contentType: 'none' },
+    handle: async (context) => {
+      const outcome = await syncOf(context).deleteItem(
+        callerOf(context),
+        context.params.kind ?? '',
+        context.params.key ?? '',
+      );
+      return outcome.ok ? noContent() : answer(outcome);
+    },
+  },
   {
     method: 'POST',
     path: '/v1/sync/records',

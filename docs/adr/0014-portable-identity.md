@@ -314,3 +314,20 @@ prevent, arriving with our blessing instead of by accident.
   and signing its FIT file is #45's and #29's join, and it is not in this change.
 - **Nothing publishes a record.** There is no transport in Phase 1 (owner decision D6). The format
   is portable; nothing carries it anywhere yet.
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-09-29** — D-9's "until #56" is no longer the point at which records first exist beyond one
+  device: [#776](https://github.com/openzigs/onyourleft/issues/776)'s two-way sync is, because a
+  record a device pushes to an instance (#37) is pulled onto the athlete's other devices. So the
+  record format is **version 1 and final** as of the merge of the pull request that resolves #776,
+  and D-9's own rule now applies: a change to the format is a **migration**, not an edit. Any
+  version 2 is a new `version` value beside 1, and every verifier — `packages/domain`'s
+  `verifyActivityRecord`, the instance's ingestion (`apps/instance/src/sync/sync.ts`) and a pulling
+  device (`apps/web/src/instance/sync.ts`) — must go on verifying version 1 records for as long as
+  one exists, answering `unsupported` only for a version it has never been taught. A record already
+  signed is never re-signed into a new version. (#881)

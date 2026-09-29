@@ -1635,6 +1635,352 @@
         }
       }
     },
+    "/v1/sync/items/{kind}/{key}": {
+      "post": {
+        "operationId": "putSyncItem",
+        "summary": "Store a write-up, a side-camera report (its pose summary inside), a goal, a note or a reference document, exactly as the device sends it. The device’s copy is canonical: a later put replaces it.",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "body": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "body"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "digest": {
+                      "type": "string"
+                    },
+                    "receivedAt": {
+                      "type": "integer"
+                    },
+                    "unchanged": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "digest",
+                    "receivedAt",
+                    "unchanged"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      },
+      "get": {
+        "operationId": "getSyncItem",
+        "summary": "One of your items, byte for byte as it was sent.",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "body": {
+                      "type": "string"
+                    },
+                    "digest": {
+                      "type": "string"
+                    },
+                    "receivedAt": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "body",
+                    "digest",
+                    "receivedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteSyncItem",
+        "summary": "Delete one of your items — or, as `activity`, a ride by its content hash, its file with it unless another rider sent the same bytes. A tombstone stays in the manifest so your other devices learn of it.",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/sync/manifest": {
+      "get": {
+        "operationId": "getSyncManifest",
+        "summary": "Everything you have synced, tombstones included, in the order it arrived: `?limit=` (1–200) and `?cursor=`, a (receivedAt, id) position — so paging while other devices sync repeats nothing and skips nothing that was there.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "activity",
+                              "write-up",
+                              "side-camera-report",
+                              "goal",
+                              "note",
+                              "document"
+                            ]
+                          },
+                          "key": {
+                            "type": "string"
+                          },
+                          "digest": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "receivedAt": {
+                            "type": "integer"
+                          },
+                          "deleted": {
+                            "type": "boolean"
+                          },
+                          "activityId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "key",
+                          "digest",
+                          "receivedAt",
+                          "deleted",
+                          "activityId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "next": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "next"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/sync/records": {
       "post": {
         "operationId": "ingestRecord",
@@ -1727,6 +2073,79 @@
                 }
               }
             }
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/sync/records/{content}": {
+      "get": {
+        "operationId": "getSignedRecord",
+        "summary": "One of your signed records, by the SHA-256 of its file. A device verifies it, and the file, before it writes anything.",
+        "parameters": [
+          {
+            "name": "content",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "record": {
+                      "type": "object",
+                      "description": "A signed activity record, ADR 0014’s format: seven members, the signature over the RFC 8785 canonical form of the other six."
+                    },
+                    "recordSha256": {
+                      "type": "string"
+                    },
+                    "receivedAt": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "record",
+                    "recordSha256",
+                    "receivedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
           },
           "429": {
             "$ref": "#/components/responses/rate_limited"

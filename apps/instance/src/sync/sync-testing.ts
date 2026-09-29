@@ -138,6 +138,28 @@ export const SYNC_HAPPY_CALLS: Readonly<
     const { token, content } = await riderWithRide(world);
     return authorised(world, token, 'GET', `/v1/sync/files/${content}`);
   },
+  getSyncManifest: async (world) => {
+    const { token } = await riderWithRide(world);
+    return authorised(world, token, 'GET', '/v1/sync/manifest');
+  },
+  getSignedRecord: async (world) => {
+    const { token, content } = await riderWithRide(world);
+    return authorised(world, token, 'GET', `/v1/sync/records/${content}`);
+  },
+  putSyncItem: async (world) => {
+    const { token } = await signedInRider(world);
+    return authorised(world, token, 'POST', '/v1/sync/items/write-up/ride-1', { body: '{}' });
+  },
+  getSyncItem: async (world) => {
+    const { token } = await signedInRider(world);
+    await authorised(world, token, 'POST', '/v1/sync/items/note/note-1', { body: 'a note' });
+    return authorised(world, token, 'GET', '/v1/sync/items/note/note-1');
+  },
+  deleteSyncItem: async (world) => {
+    const { token } = await signedInRider(world);
+    await authorised(world, token, 'POST', '/v1/sync/items/goal/goal-1', { body: 'a goal' });
+    return authorised(world, token, 'DELETE', '/v1/sync/items/goal/goal-1');
+  },
   listActivities: async (world) => {
     const { token } = await riderWithRide(world);
     return authorised(world, token, 'GET', '/v1/activities');
