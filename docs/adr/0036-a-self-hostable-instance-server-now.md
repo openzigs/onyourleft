@@ -234,6 +234,9 @@ About screen ([ADR 0025](0025-app-store-additional-permission.md) D-7).
   tunnel, holds other people's data, and receives input from devices it does not control. `SECURITY.md`'s
   classes — cross-athlete exposure, location in an error message, untrusted input — apply to it from
   its first line, and it inherits them rather than adding a new list.
+- **No hosting bill is implied.** Lifting D6 commits the project to a server, not to paying for one:
+  the first instance runs on the owner's own machine behind a Cloudflare Tunnel (D-7, #807), and any
+  paid box or managed deploy is a later decision of the owner's.
 - **The home machine is the first production host**, with a home connection's upload, a machine that
   sleeps and reboots, and no second site. #807 owns backups, sleep and reboot. A rider's data on the
   instance is a **copy** (D-3.b), so an outage costs reachability and never history.
