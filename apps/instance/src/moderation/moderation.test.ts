@@ -190,8 +190,30 @@ describe('moderator actions, each written to the append-only log (#83)', () => {
     const w = await start();
     const { anna, bea } = await reported(w);
     await w.as(bea, 'POST', `/v1/blocks/${anna.athleteId}`);
+    await w.as(bea, 'POST', '/v1/reports', { athleteId: anna.athleteId, reason: 'Spam' });
+    await w.as(bea, 'POST', '/v1/auth/display-name', { displayName: 'Bee' });
+    await w.as(bea, 'POST', '/v1/auth/link-codes');
+    await w.freshRead((store) =>
+      store.putActivityRecord({
+        athleteId: bea.athleteId,
+        contentSha256: 'c'.repeat(64),
+        signedRecord: new Uint8Array([1, 2, 3]),
+        receivedAt: seconds(w),
+      }),
+    );
     const rowsBefore = athleteRows(w.path, bea.athleteId);
-    expect(Object.values(rowsBefore).some((count) => count > 0)).toBe(true);
+    for (const table of [
+      'activity_record',
+      'block',
+      'device_key',
+      'display_name_change',
+      'link_code',
+      'recovery_code',
+      'report',
+      'session',
+    ]) {
+      expect(rowsBefore[table], `${table} seeded`).toBeGreaterThan(0);
+    }
 
     const suspended = await w.as(
       w.owner,
