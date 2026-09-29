@@ -173,6 +173,11 @@ interface Bench {
    */
   readonly deliverHeldStopAnswer: () => void;
   /**
+   * Deliver the target answers `holdTargetAnswer` held back, in order (#758).
+   * A no-op when nothing is held.
+   */
+  readonly deliverHeldTargetAnswers: () => void;
+  /**
    * Let the first `openTrainer` held by {@link BenchOptions.holdOpenTrainer}
    * answer (#713). A no-op when nothing is held.
    */
@@ -241,6 +246,13 @@ interface BenchOptions {
    * alone (#704).
    */
   readonly holdStopAnswer?: boolean;
+  /**
+   * Hold back the machine's answer to a Set Target Power (`0x80 0x05 …`) until
+   * the test calls {@link Bench.deliverHeldTargetAnswers} — #758. The window
+   * in which a *Set* is in flight and a second one is queued behind it, which
+   * the simulator, answering inside the write, never leaves open.
+   */
+  readonly holdTargetAnswer?: boolean;
   /** Refuse every `0x05` below this many watts at the ATT layer — a refused ease (#567). */
   readonly refuseTargetsBelow?: number;
   /**
@@ -287,6 +299,7 @@ function benchWith(options: BenchOptions = {}): Bench {
 
   const statusListeners: Array<(value: DataView) => void> = [];
   const heldStopAnswers: Array<() => void> = [];
+  const heldTargetAnswers: Array<() => void> = [];
   const heldControlAnswers: Array<() => void> = [];
   let requestControlRefused = false;
 
@@ -337,6 +350,12 @@ function benchWith(options: BenchOptions = {}): Bench {
               const octets = responseToOctets(response);
               if (options.holdStopAnswer === true && octets.getUint8(1) === STOP_OR_PAUSE) {
                 heldStopAnswers.push(() => {
+                  listener(octets);
+                });
+                return;
+              }
+              if (options.holdTargetAnswer === true && octets.getUint8(1) === 0x05) {
+                heldTargetAnswers.push(() => {
                   listener(octets);
                 });
                 return;
@@ -445,6 +464,11 @@ function benchWith(options: BenchOptions = {}): Bench {
     written,
     deliverHeldStopAnswer: () => {
       for (const deliver of heldStopAnswers.splice(0)) {
+        deliver();
+      }
+    },
+    deliverHeldTargetAnswers: () => {
+      for (const deliver of heldTargetAnswers.splice(0)) {
         deliver();
       }
     },
@@ -1484,6 +1508,8 @@ describe('pausing and resuming by hand', () => {
 /** The octets of a write, by op code: FTMS Table 4.15. */
 const RESET = 0x01;
 const STOP_OR_PAUSE = 0x08;
+// FTMS Set Indoor Bike Simulation Parameters.
+const SET_SIMULATION = 0x11;
 
 describe('ending ERG by hand — the "End ERG" button', () => {
   it('takes the trainer out of ERG without ending the ride', async () => {
@@ -1905,6 +1931,46 @@ describe('forgetting the trainer lets it go first — #659’s review', () => {
     expect(fault).not.toMatch(/has let|is being let go|let the trainer go|released/);
     // Only the refused release reached the machine: no gradient followed it.
     expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+
+    // #732: and the hold lifts with the abandoned forget. The trainer is still
+    // this app's, so the next sample reaches it and the fault clears.
+    session.sample(seconds(1), 600);
+    await session.settled();
+    await flushMicrotasks(20);
+    expect(session.state().fault).toBeUndefined();
+    const after = rig.written.slice(before + 1);
+    expect(after).toHaveLength(1);
+    expect(after[0]?.[0]).toBe(SET_SIMULATION);
+    rig.controller.dispose();
+  });
+
+  it('refuses a game handle whose trainer has been forgotten with a typed hold, and says so (#732)', async () => {
+    // Unreachable today — `GameView` stops its gradient session before Forget
+    // can be pressed — but a handle outlives its pairing, and the closed
+    // client's own error was told as "The trainer refused that gradient. The
+    // next one will be sent again.": both halves false.
+    const rig = await riding();
+    const handle = rig.controller.simulationControl();
+    if (handle === undefined) {
+      throw new Error('no simulation control');
+    }
+    await handle.setSimulationParameters({ grade: gradePercent(6) });
+    await rig.controller.unpair(TRAINER);
+    await flushMicrotasks(20);
+    expect(rig.controller.getSnapshot().trainer.paired).toBe(false);
+    const before = rig.written.length;
+
+    const late = handle.setSimulationParameters({ grade: gradePercent(8) });
+    await expect(late).rejects.toBeInstanceOf(TargetHeldBack);
+    await expect(late).rejects.toHaveProperty('hold', 'disconnected');
+
+    const session = createGradientSession({ profile: risingRoad(), control: handle });
+    session.sample(seconds(0), 500);
+    await session.settled();
+    expect(session.state().fault).toBe(
+      'The hills are no longer being sent: this trainer is not connected to this app any more.',
+    );
+    expect(rig.written.slice(before)).toStrictEqual([]);
     rig.controller.dispose();
   });
 
@@ -2320,7 +2386,7 @@ describe('disposing the controller lets a held trainer go first — #695', () =>
     const late = handle?.setSimulationParameters({ grade: gradePercent(8) });
     // During the release as well as after it, and with the dispose's own
     // reason: nothing is being forgotten here (#695's review).
-    await expect(late).rejects.toThrow('the ride controller has let the trainer go');
+    await expect(late).rejects.toThrow('the ride controller was disposed and writes nothing again');
     // #728: the app held it back, and says so by class and by kind.
     await expect(late).rejects.toBeInstanceOf(TargetHeldBack);
     await expect(late).rejects.toHaveProperty('hold', 'let-go');
@@ -2328,7 +2394,7 @@ describe('disposing the controller lets a held trainer go first — #695', () =>
     // And once the release has settled, refused by the controller rather than
     // left to whatever the closed client happens to say.
     await expect(handle?.setSimulationParameters({ grade: gradePercent(9) })).rejects.toThrow(
-      'the ride controller has let the trainer go',
+      'the ride controller was disposed and writes nothing again',
     );
     // The game's own release, arriving as its view unmounts, sends nothing
     // more: the client is closed by then.
@@ -6710,6 +6776,88 @@ describe('#567 — a hand-set ERG target gets the workout’s stall rescue', () 
     );
     expect(rig.targetOnTheTrainer()).toBe(180);
     expect(rig.controller.getSnapshot().trainer.ergHeld).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  /** A bench whose Set Target Power answers wait for the test (#758). */
+  async function heldAnswerRig(): Promise<Bench> {
+    const rig = benchWith({
+      machine: { retainsTargetsThroughStop: true, minTargetPower: watts(FLOOR) },
+      holdTargetAnswer: true,
+    });
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await setAnswered(rig, 150);
+    return rig;
+  }
+
+  /** Set `target` at a steady cadence, answering it at once. */
+  async function setAnswered(rig: Bench, target: number): Promise<void> {
+    rig.bench.rider.set({ cadence: revolutionsPerMinute(85) });
+    const set = rig.controller.setTargetPower(watts(target));
+    await flushMicrotasks(20);
+    rig.deliverHeldTargetAnswers();
+    await set;
+    await ride(rig, 3);
+    await flushMicrotasks();
+  }
+
+  /**
+   * One *Set* on the wire with its answer held, a second (180 W) queued behind
+   * it, and the stall beginning while both wait — #740 N4's path.
+   */
+  async function queuedBehindInFlight(rig: Bench): Promise<void> {
+    const inFlight = rig.controller.setTargetPower(watts(160));
+    await flushMicrotasks(20);
+    const queued = rig.controller.setTargetPower(watts(180));
+    await flushMicrotasks(20);
+    await pedalAt(rig, PART_S);
+    rig.deliverHeldTargetAnswers();
+    await flushMicrotasks(20);
+    await pedalAt(rig, [37, 37]);
+    rig.deliverHeldTargetAnswers();
+    await Promise.all([inFlight, queued]);
+    await flushMicrotasks(20);
+  }
+
+  it('does not answer a Set that was queued behind one in flight when the rescue began — #740 N4, #758', async () => {
+    // ⚠️ `answersHeld(outcome)` in the controller is the whole of N4's fix
+    // there: a *Set* already waiting when the rescue began is deferred too,
+    // but the rescue's own notice names it as pending, so answering it again
+    // said that clause twice. Reverting it to `outcome.kind === 'deferred'`
+    // left every other test green (#758).
+    const rig = await heldAnswerRig();
+    await queuedBehindInFlight(rig);
+
+    const trainer = rig.controller.getSnapshot().trainer;
+    // The rescue holds the queued target as pending, so the notice names it —
+    expect(trainer.ergRescue).toMatchObject({ pending: 180 });
+    // — and the Set is not answered with a second "held" line.
+    expect(trainer.ergHeld).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('forgets a held answer when the hand-set target ends — #655 nit, #758', async () => {
+    // `held` outlived the writer it described. Nothing showed it while no
+    // writer existed, but the next rescue whose pending target happened to
+    // be the same number brought the old answer, and its old press, back.
+    const rig = await heldAnswerRig();
+    await pedalAt(rig, PART_S);
+    // The ease's own answer.
+    rig.deliverHeldTargetAnswers();
+    await flushMicrotasks(20);
+    await rig.controller.setTargetPower(watts(180));
+    await flushMicrotasks(20);
+    expect(rig.controller.getSnapshot().trainer.ergHeld?.target).toBe(180);
+
+    await rig.controller.clearTargetPower();
+    await flushMicrotasks(20);
+    await setAnswered(rig, 150);
+    await queuedBehindInFlight(rig);
+
+    const trainer = rig.controller.getSnapshot().trainer;
+    expect(trainer.ergRescue).toMatchObject({ pending: 180 });
+    expect(trainer.ergHeld).toBeUndefined();
     rig.controller.dispose();
   });
 

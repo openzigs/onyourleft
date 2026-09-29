@@ -65,6 +65,7 @@ import { SettingsView } from '../views/SettingsView';
 import { UnitsProvider } from '../units/context';
 import type { UnitsPort } from '../units/store-port';
 import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
+import type { MaskedWordsPort } from '../athlete/masked-words-port';
 import type { AthleteMassPort } from '../athlete/store-port';
 import type { RideController } from '../ride/controller';
 import type { CapabilityProbe } from '../support/bluetooth-support';
@@ -362,6 +363,12 @@ export interface AppShellProps {
    */
   readonly athleteKit?: AthleteKitColourPort | undefined;
   /**
+   * The settings screen's read and write of the rider's words to mask (#839).
+   * Optional like every other port here; without one the panel says there is
+   * no store to keep a list in.
+   */
+  readonly maskedWords?: MaskedWordsPort | undefined;
+  /**
    * The rider's kit colour, read from the athlete row at start-up (#623).
    *
    * ⚠️ **The initial value only**, exactly like {@link riderMass}, and passed
@@ -549,6 +556,7 @@ function viewFor(
           onKitColourChange={kit.onChange}
           {...(props.storage === undefined ? {} : { storage: props.storage })}
           basemap={props.basemap}
+          maskedWords={props.maskedWords}
         />
       );
     case 'about':
@@ -621,9 +629,22 @@ export function AppShell(props: AppShellProps): JSX.Element {
     document.title = `${route.title} — ${APP_NAME}`;
   }, [route.title]);
 
+  /*
+   * The jump the link's `#main` would make natively, plus the focus move
+   * (#726). `focus()` alone scrolls only "if needed", and a `main` taller than
+   * the viewport that still reaches into it is never needed: from the end of
+   * a long page the skip link used to leave the `h1` thousands of pixels
+   * above the screen. It was never seen because Tab to the link scrolls to the
+   * top first, and #731's review found the browser gate measured that scroll
+   * rather than this one. `scrollIntoView` honours `.oyl-main`'s
+   * `scroll-margin-top`, so the status bar and a sticky header are cleared.
+   */
   function skipToContent(event: MouseEvent<HTMLAnchorElement>): void {
     event.preventDefault();
-    mainRef.current?.focus();
+    const main = mainRef.current;
+    if (main === null) return;
+    main.focus({ preventScroll: true });
+    main.scrollIntoView({ block: 'start' });
   }
 
   return (

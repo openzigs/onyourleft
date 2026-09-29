@@ -727,6 +727,123 @@ test.describe('#671 — the app’s name on a phone', () => {
 });
 
 /**
+ * The skip link, and the jump it makes, clear the status bar — #726.
+ *
+ * `.oyl-skip-link` has no positioned ancestor, so it is placed against the
+ * initial containing block rather than below `body`'s safe-area padding: with
+ * the tablet's 36 px top inset the focused link sat at y = 8, its top 28 px
+ * under the status bar. And where the header does not stick, the jump itself
+ * scrolled `main` to y = 0, leaving the `h1` 24 px down and its top 12 px
+ * under the bar. In this Chromium #671's band is drawn beneath the link, so
+ * the existing hit-test passes either way; on a device the OS status bar is
+ * drawn over the WebView, which only a measurement against the inset can see.
+ *
+ * Measured at #671's viewports with the #439 insets applied to the engine and
+ * read back. The control is the two rules as they were, and must fail: the
+ * link's top under the inset everywhere, and the `h1` under the band wherever
+ * the header does not stick (where it sticks, 7rem still clamps the jump).
+ */
+const BEFORE_726 = `
+  .oyl-skip-link { top: var(--oyl-space-sm) !important; }
+  @media not ((min-width: 64rem) and (min-height: 40rem)) {
+    .oyl-main { scroll-margin-top: 0 !important; }
+  }
+`;
+
+interface SkipReading {
+  readonly linkTop: number;
+  readonly headingTop: number;
+  readonly ceiling: number;
+  readonly scrollY: number;
+  readonly sticks: boolean;
+}
+
+async function readSkip(
+  page: Page,
+  viewport: (typeof HEADER_VIEWPORTS)[number],
+  control: boolean,
+): Promise<SkipReading> {
+  await page.setViewportSize({ width: viewport.width, height: viewport.height });
+  await applyInsets(page, viewport.insets);
+  await openShell(page);
+  expect(await resolvedInsets(page)).toEqual(viewport.insets);
+  if (control) {
+    await page.addStyleTag({ content: BEFORE_726 });
+    await settled(page);
+  }
+  await page.keyboard.press('Tab');
+  await expect(page.locator('.oyl-skip-link')).toBeFocused();
+  await settled(page);
+  const linkTop = await page.evaluate(
+    () => document.querySelector('.oyl-skip-link')?.getBoundingClientRect().top ?? Number.NaN,
+  );
+  await page.locator('.oyl-skip-link').press('Enter');
+  await expect(page.locator('main')).toBeFocused();
+  await settled(page);
+  const landed = await page.evaluate(() => {
+    const header = document.querySelector('.oyl-header');
+    const heading = document.querySelector('h1');
+    if (header === null || heading === null) throw new Error('no header or no h1');
+    const headerBox = header.getBoundingClientRect();
+    return {
+      headingTop: heading.getBoundingClientRect().top,
+      // The header's bottom where it is on screen, and 0 where it has gone.
+      headerBottom: Math.max(0, headerBox.bottom),
+      scrollY: window.scrollY,
+      sticks: getComputedStyle(header).position === 'sticky',
+    };
+  });
+  return {
+    linkTop,
+    headingTop: landed.headingTop,
+    ceiling: Math.max(viewport.insets.top, landed.headerBottom),
+    scrollY: landed.scrollY,
+    sticks: landed.sticks,
+  };
+}
+
+for (const viewport of HEADER_VIEWPORTS) {
+  test.describe(`#726 — the skip link at ${viewport.name}`, () => {
+    test('is below the status bar, and lands the h1 below it', async ({ page }, info) => {
+      const read = await readSkip(page, viewport, false);
+      const published =
+        `link top ${read.linkTop.toFixed(0)} against an inset of ${String(viewport.insets.top)}; ` +
+        `h1 at ${read.headingTop.toFixed(0)}, ${(read.headingTop - read.ceiling).toFixed(0)} px ` +
+        `clear of the chrome, scrollY ${String(read.scrollY)}`;
+      console.log(`#726 ${viewport.name}: ${published}`);
+      info.annotations.push({ type: 'skip link', description: published });
+      expect(
+        read.linkTop,
+        'the focused skip link starts under the status bar (theme.css §`.oyl-skip-link`)',
+      ).toBeGreaterThanOrEqual(viewport.insets.top);
+      expect(
+        read.headingTop - read.ceiling,
+        'the h1 a rider skipped to is under the status bar or the header ' +
+          '(theme.css §`.oyl-main` scroll-margin-top)',
+      ).toBeGreaterThanOrEqual(MINIMUM_HEADING_CLEARANCE);
+    });
+
+    test('the control — the rules as they were fail', async ({ page }) => {
+      const read = await readSkip(page, viewport, true);
+      console.log(
+        `#726 control ${viewport.name}: link top ${read.linkTop.toFixed(0)}, h1 ` +
+          `${(read.headingTop - read.ceiling).toFixed(0)} px clear, scrollY ${String(read.scrollY)}`,
+      );
+      expect(
+        read.linkTop,
+        'the old skip link clears the inset, so the link assertion cannot fail',
+      ).toBeLessThan(viewport.insets.top);
+      if (!read.sticks) {
+        expect(
+          read.headingTop - read.ceiling,
+          'the jump clears the status bar with no scroll margin, so the h1 assertion cannot fail',
+        ).toBeLessThan(MINIMUM_HEADING_CLEARANCE);
+      }
+    });
+  });
+}
+
+/**
  * The touch target — #316.
  *
  * ## What was wrong

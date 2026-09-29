@@ -108,7 +108,7 @@ jobs:
       # CI accumulating private knowledge is how a contributor's local green
       # becomes CI's red with no explanation.
       #
-      # ⚠️ One step below, `Checks, concurrently`, runs twenty-two §4a commands
+      # ⚠️ One step below, `Checks, concurrently`, runs twenty-six §4a commands
       # AT ONCE through scripts/run-concurrently.sh (#651), and a reviewer who
       # remembers one step per command is reading the old file. The job is one job on purpose
       # -- see the Browser gate step -- so using more than one of the runner's
@@ -117,7 +117,7 @@ jobs:
       # by itself, fails the step if ANY command failed, and prints each failed
       # command's whole output again at the end. Its own suite runs first,
       # before anything is trusted to it: a runner that swallowed a failure
-      # would make that step twenty-two gates removed, and look green.
+      # would make that step twenty-six gates removed, and look green.
       - name: Concurrency runner tests
         run: bash scripts/run-concurrently.test.sh
 
@@ -231,6 +231,12 @@ jobs:
       #   what counts as an accessibility test from paths and from
       #   package.json's own script, so it has a suite.
       #
+      #   check:test-split -- #852. `test:coverage` leaves the heaviest files
+      #   out and `test:uninstrumented` runs exactly them; this asks Vitest
+      #   what each selects and fails on a file in neither run or in both. It
+      #   lists files and runs no test, so it has no case timeout to miss. Its
+      #   suite, for the reason every checker here has one.
+      #
       #   check:wiring -- #278. Every other gate looks INSIDE a unit, and five
       #   defects in one week were a correct, unit-tested, typechecked, linted
       #   unit wired to nothing: no device could be paired on Android at all
@@ -280,7 +286,11 @@ jobs:
       #   Mostly a pull of the digest-pinned base image and a few COPY layers,
       #   so it is waiting rather than working and belongs here. The instance's
       #   Vitest project needs no step: it is one more project in the Vitest
-      #   run below (CLAUDE.md section 4c says what that cost).
+      #   run below (CLAUDE.md section 4c says what that cost). ⚠️ The pull is
+      #   from Docker Hub, the one registry this job needs that nothing else
+      #   does; a Docker Hub outage turns this red as IMG004, which names the
+      #   registry rather than the Dockerfile (#841, CLAUDE.md section 4c).
+      #   Its suite fakes `docker` on PATH and needs no Docker.
       #
       # Every one of these is also what it was before #651 in every other way:
       # the same command, and its failure fails the job. Most checkers need
@@ -309,6 +319,8 @@ jobs:
           'lint' 'pnpm run lint'
           'typecheck' 'pnpm run typecheck'
           'accessibility checker tests' 'bash scripts/check-a11y-suite.test.sh'
+          'test split' 'pnpm run check:test-split'
+          'test split checker tests' 'bash scripts/check-test-split.test.sh'
           'wiring' 'pnpm run check:wiring'
           'wiring checker tests' 'bash scripts/check-wiring.test.sh'
           'cost model' 'pnpm run check:cost-model'
@@ -319,6 +331,7 @@ jobs:
           'build' 'pnpm run build'
           'playwright install' 'pnpm --filter @onyourleft/web exec playwright install --with-deps chromium'
           'instance image' 'bash scripts/check-instance-image.sh'
+          'instance image checker tests' 'bash scripts/check-instance-image.test.sh'
 
       # #48's fourth acceptance criterion: automated accessibility checks run on
       # every route and fail the build on a violation. The checks are Vitest
@@ -428,8 +441,25 @@ jobs:
       # page's load passed its case's 60 s, and two Vitest cases that take
       # 3.5 to 4.4 s alone passed their 5 s. Two gates that go red because of
       # each other are not two gates.
+      #
+      # ⚠️ Since #852 it is NOT the whole suite. The two heaviest files -- the
+      # #545 near-field rides and the FIT decode fuzz -- spent about 300 s of
+      # this step's summed test time under V8's instrumentation, which slows
+      # their hot loops about three times, so `test:coverage` excludes them
+      # and the step below runs them with none. They gate exactly as before;
+      # the coverage REPORT stops counting what those two files alone execute,
+      # which section 5 says is a signal and not a gate. `check:test-split`,
+      # in the concurrent step above, is what stops the two lists coming apart
+      # -- a file in neither run is a file CI never runs.
       - name: Tests and coverage report
         run: pnpm run test:coverage
+
+      # The other half of the split (#852): the files `test:coverage`
+      # excludes, as a plain run-once Vitest with no coverage. Its own step
+      # rather than the concurrent one, for that step's own reason: Vitest's
+      # 5 s case timeout beside other work (#651).
+      - name: Tests outside coverage
+        run: pnpm run test:uninstrumented
 
       # --- The browser gate (#63) ----------------------------------------------
       #

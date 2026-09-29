@@ -1354,11 +1354,36 @@ apps/                 AGPL-3.0-or-later, without exception
                         timers, `performance`, `Math.random` and `ws`.
                         `clock.ts` maps a client's `atMs` onto the room's
                         clock, because the two are never the same clock.
-                        ⚠️ **NOT mounted yet** — #780 (Node, `ws`) and #781
-                        (Durable Object) are the adapters, and `main.ts`
-                        imports none of it. ⚠️ Its workspace dependencies are
+                        ⚠️ **Mounted by one adapter, and not by the
+                        instance**: #781's Durable Object (below) runs it
+                        under `workerd` in tests only, and #780 (Node, `ws`)
+                        is not built — `main.ts` imports none of it. ⚠️ Its workspace dependencies are
                         TypeScript with extensionless relative imports, which
                         `node src/main.ts` cannot load: #780 owns that
+    src/room/durable-object/
+                        the room core as a Cloudflare Durable Object (#781,
+                        ADR 0037 D-2's second adapter), BUILT AND NOT DEPLOYED
+                        (the owner's Q3/Q6): one object per room, every socket
+                        through the Hibernation API with its connection in
+                        its attachment, the 1 Hz tick as a storage alarm that
+                        is not re-set once the room leaves countdown/running
+                        (so an emptied room stops billing), and a lobby
+                        restored after eviction by REPLAYING a log of the
+                        core's own calls — with the admission's recorded
+                        answers, so a ticket is verified once per hello and
+                        never again. ⚠️ A room evicted after it left the lobby
+                        is not restored: it refuses its sockets `room-closed`.
+                        ⚠️ Platform-free by `tsconfig.durable-object.json`
+                        (ES2024, no `types`) and an eslint block; what it
+                        needs of the runtime is ports in `platform.ts`, not
+                        `@cloudflare/workers-types`. ⚠️ **No production
+                        Worker entry**: which room an object serves and where
+                        its course comes from are #790's.
+                        `worker-under-test.ts` is the only thing `workerd`
+                        loads, and only for `test:workerd` (§4a). Held to the
+                        core by `src/room/conformance.test.ts` — one script,
+                        every adapter, byte-identical text per socket; #780
+                        adds itself to that file's `ADAPTERS`
 
 packages/             Apache-2.0, without exception
   domain/             units, core types, validation, signing, analysis (#25)
@@ -1729,8 +1754,27 @@ pnpm run typecheck
 pnpm run test
 
 # The same run with a coverage report. There is no percentage threshold and you
-# must not add one — see §5.
+# must not add one — see §5. ⚠️ Since #852 it is NOT the whole suite: it
+# `--exclude`s the two heaviest files, which the next command runs.
 pnpm run test:coverage
+
+# The files `test:coverage` excludes, with NO coverage (#852): the #545
+# near-field rides and the FIT decode fuzz, which V8's instrumentation slowed
+# about three times. They gate exactly as before; the coverage report stops
+# counting what they alone execute (§5). `pnpm run test` still runs everything.
+pnpm run test:uninstrumented
+
+# What stops those two lists coming apart (#852). Reads both scripts out of
+# package.json, asks `vitest list` what the whole suite and each half select,
+# and fails on a file in NEITHER run (CI would never run it) or in BOTH. ⚠️ An
+# `--exclude` glob is matched against each Vitest PROJECT's root, not the
+# repository's, which is why it compares selections rather than globs. Lists,
+# runs no test: under a second.
+pnpm run check:test-split
+
+# Its own suite. Fixture-driven; 25 cases on 2026-09-29 — the count is what the
+# run prints. Needs Node, so not in `check:repo`.
+bash scripts/check-test-split.test.sh
 
 # The accessibility gate (#48): every route in apps/web is rendered into a DOM
 # and audited, and the design tokens are checked for WCAG 2.2 AA contrast. This
@@ -1976,6 +2020,19 @@ pnpm --filter @onyourleft/mobile run native:closure
 pnpm --filter @onyourleft/instance run test
 pnpm --filter @onyourleft/instance run typecheck
 
+# The Durable Object adapter (#781) under a REAL workerd, run on 2026-09-29:
+# the conformance script through the adapter under workerd, the tick as a real
+# storage alarm that stops once an emptied race finishes, and a lobby evicted
+# by the runtime itself (after ~10 s idle) and restored. It bundles
+# src/room/durable-object/worker-under-test.ts with rolldown, runs the pinned
+# `workerd` binary on 127.0.0.1 with SQLite storage in a temporary directory,
+# and needs NO Cloudflare account, token or network. About 35 s, most of it
+# waiting on the runtime's own clock. ⚠️ NOT in CI and NOT in `pnpm run test`
+# (§4c): `vitest.config.ts` excludes `*.workerd.test.ts`, and
+# `src/room/conformance.test.ts` runs there against the reference and the
+# adapter under in-memory fakes, with its workerd block reported SKIPPED.
+pnpm --filter @onyourleft/instance run test:workerd
+
 # Start the instance on this machine, on 127.0.0.1:8787. ⚠️ It REFUSES to start
 # without a commit or a source URL (AGPL-3.0 §13, ADR 0036 D-6); every variable
 # it reads is in .env.example. Ctrl-C stops it. Not a gate, and nothing runs it.
@@ -2030,11 +2087,24 @@ npm view typescript-eslint peerDependencies.typescript
 # Requires Docker, and the network the first time (the base image is pulled by
 # digest). Builds apps/instance/Dockerfile with the tree's commit, waits for
 # the image's OWN healthcheck to answer /health inside the container, and
-# requires /source to name that commit. IMG001-IMG003. Removes the container
-# and the image whatever happens. About 1 s with the base image cached and
-# 2 s without on a developer's machine, and about 10 s on the CI runner,
-# measured 2026-09-29. In CI since #771 (§4c).
+# requires /source to name that commit. IMG001-IMG005: since #841 the base
+# image must be pinned by digest (IMG005) and is pulled as its own step, so a
+# Docker Hub that will not serve it is IMG004 -- the registry, named -- rather
+# than an IMG001 that reads like a broken Dockerfile. ⚠️ Since #852 that is
+# EVERY `FROM`, in any case, with options such as `--platform=` before the
+# image; a stage naming an earlier stage, and `scratch`, are not base images.
+# Until then it read the first line beginning `FROM` alone. A base image already
+# on the machine is not pulled again. Removes the container and the image
+# whatever happens. About 1 s with the base image cached and 2 s without on a
+# developer's machine, and 10 to 15 s on the CI runner, measured 2026-09-29.
+# In CI since #771 (§4c).
 bash scripts/check-instance-image.sh
+
+# Its own suite (#841). A fake `docker`, `curl` and `sleep` go first on PATH,
+# the way check-third-party-notices.test.sh fakes `pnpm`, so it needs no Docker
+# and waits for nothing; every IMG id has a case that goes red. 60 cases on
+# 2026-09-29 (43 before #852) -- the count is what the run prints.
+bash scripts/check-instance-image.test.sh
 
 # The same image by hand, for #807's deployment. The commit is a REQUIRED build
 # argument: the build fails without it, rather than an instance that cannot
@@ -2067,7 +2137,7 @@ docker run --rm -p 127.0.0.1:8787:8787 onyourleft-instance
 | `XML002` | an XML comment is never closed — the `DOC002` failure mode in XML, where the scanner's state sticks, everything after it is silently skipped, and a parser drops every element that follows |
 | `XML003` | a `<![CDATA[` section is never closed. #229, and it is the rule that keeps the two above honest: before it, an unclosed CDATA set the scanner's state and nothing cleared it, so **`XML001` and `XML002` went silent for the rest of the file and it reported clean** — `DOC002`'s own failure mode inside the rule written because of `DOC002`. Closure is now decided where a region opens, so the section is reported **and** the scan carries on |
 | `XML004` | a processing instruction is never closed with `?>`. The same construct class, and the reason a PI is tracked at all: `Comment` is not a production inside `PIContent`, so `<?php <!-- a -- b --> ?>` is valid XML that #225's first version reported as `XML001`. Tracking it fixes that false positive; `XML004` is what stops the tracking becoming a second way to switch the scanner off |
-| `SH001` | a shell script anywhere the walk reaches pipes into `grep -q` (or `--quiet`). [#743](https://github.com/openzigs/onyourleft/issues/743): under `set -o pipefail`, `grep -q` exits at its first match, a producer still writing dies of SIGPIPE, and the pipeline reads a MATCH as "no match". ⚠️ **It is not about the pipe buffer**, which is what this repository believed until #743: on Linux bash's `printf` writes one line per `write(2)`, so any producer of two or more lines can lose the race. The negated form (`! … \| grep -q`) turned a lost race into a silent PASS in about eight fixture assertions. Every pipeline is refused, a one-line producer included, so there is no allowlist to grow; read a here-string instead (`grep -q x <<< "${out}"`). A comment line may name the pipeline |
+| `SH001` | a shell script anywhere the walk reaches pipes into `grep -q` (or `--quiet`). [#743](https://github.com/openzigs/onyourleft/issues/743): under `set -o pipefail`, `grep -q` exits at its first match, a producer still writing dies of SIGPIPE, and the pipeline reads a MATCH as "no match". ⚠️ **It is not about the pipe buffer**, which is what this repository believed until #743: on Linux bash's `printf` writes one line per `write(2)`, so any producer of two or more lines can lose the race. The negated form (`! … \| grep -q`) turned a lost race into a silent PASS in about eight fixture assertions. Every pipeline is refused, a one-line producer included, so there is no allowlist to grow; read a here-string instead (`grep -q x <<< "${out}"`). A comment line may name the pipeline. ⚠️ Since [#758](https://github.com/openzigs/onyourleft/issues/758) a pipe that ENDS a line, feeding a `grep -q` that opens the next code line, is refused too; the line-at-a-time pattern alone could not see it |
 | `ASSET001` | a committed **binary** exists that `ASSETS.toml` does not name. #339, filed before the first `.glb` exists rather than after. ⚠️ Discovery walks for binaries by **content** — a NUL byte in the first 8000, which is git's own rule — and deliberately **not** by an extension list: a list fails closed against deleting a format and **open** against adding one, which is #142's defect exactly |
 | `ASSET002` | `ASSETS.toml` names a path that is not there. A stale entry records the provenance of nothing. A glob lands here rather than being refused as syntax, unlike `.spdx-exempt`: the lookup is string equality, so a pattern truly names no file |
 | `ASSET003` | a named file's SHA-256 does not reproduce, or none is recorded. ⚠️ It pins **what is committed**, so a substitution is visible; it does **not** establish that the bytes are the upstream artefact they name, which nothing offline can — `apps/mobile/README.md` §4 still stands on `gradle-wrapper.jar` |
@@ -2150,8 +2220,10 @@ not.
   also holds the identity routes (#772–#774), which answer `unavailable` because `main.ts` hands the
   handler no identity — no account on a running instance until #780 opens the store, no sync
   (#776), no room anybody can reach (#780). ⚠️ The room **core** exists since
-  [#779](https://github.com/openzigs/onyourleft/issues/779) — `src/room/core/` — and nothing mounts
-  it. Do not write a command or a test that assumes a reachable room exists.
+  [#779](https://github.com/openzigs/onyourleft/issues/779) — `src/room/core/` — and the only
+  thing that mounts it is [#781](https://github.com/openzigs/onyourleft/issues/781)'s Durable
+  Object adapter, under a local `workerd` in `test:workerd` and **deployed nowhere**. Do not write a
+  command or a test that assumes a reachable room exists.
   ⚠️ **The database and the blob store DO exist since #842** (#769, #770) — a reviewer who
   remembers "no database (#769)" in this bullet is reading the old file — but no route and no
   start-up path opens either: `main.ts` reads no database path, and the Docker image installs
@@ -2368,49 +2440,85 @@ push to `main`. It runs **exactly** the §4a commands and nothing else: `bash
 scripts/run-concurrently.test.sh`, the eight bare-clone script
 checks (`check-repo-rules`, `check-licence-hashes`, `check-env-example` and `check-doc-links`, each
 with its own fixture suite), `shellcheck scripts/*.sh`, then `pnpm install --frozen-lockfile`, `format:check`, `lint`,
-`typecheck`, `test:coverage`, `check:a11y-suite`,
+`typecheck`, `test:coverage`, `test:uninstrumented`, `check:test-split` and its suite
+`bash scripts/check-test-split.test.sh` (all three since [#852](https://github.com/openzigs/onyourleft/issues/852)), `check:a11y-suite`,
 `test:a11y`, `bash scripts/check-a11y-suite.test.sh`, `check:wiring`,
 `bash scripts/check-wiring.test.sh`, `check:capacitor`,
 `bash scripts/check-capacitor-generated.test.sh`, `check:cost-model`,
 `bash scripts/check-cost-model.test.sh`, `bash scripts/coverage-summary.test.sh`, `build`,
 `playwright install --with-deps chromium`, `test:browser`, `bash scripts/check-dependency-licences.test.sh`, `check:licences`,
 `bash scripts/check-third-party-notices.test.sh`, `check:notices` and — since
-[#771](https://github.com/openzigs/onyourleft/issues/771) — `bash scripts/check-instance-image.sh` — then
+[#771](https://github.com/openzigs/onyourleft/issues/771) — `bash scripts/check-instance-image.sh`, with its
+suite `bash scripts/check-instance-image.test.sh` since [#841](https://github.com/openzigs/onyourleft/issues/841) — then
 publishes the coverage table to the run summary and uploads the HTML report as an artefact.
 Those last two carry `if: always()` and cannot fail the job: the run where coverage moved
 unexpectedly is exactly the one whose table you want, and a reporting step that can fail a
 build is a percentage floor arriving by the back door, which §5 forbids.
 
 ⚠️ **Since [#651](https://github.com/openzigs/onyourleft/issues/651) one step, `Checks,
-concurrently`, runs twenty-three of those commands AT ONCE (twenty-two until #771 added the
-instance image), and a reviewer who remembers one step per
+concurrently`, runs twenty-six of those commands AT ONCE (twenty-two until #771 added the
+instance image, twenty-three until #841 added its suite, twenty-four until #852 added
+`check:test-split` and its suite), and a reviewer who remembers one step per
 command is reading the old file.** It runs the eight bare-clone script checks, `shellcheck`,
 `format:check`, `lint`, `typecheck`, `check:wiring`, `check:cost-model`, `check:licences`, `build`,
-the browser install, the instance image and five checker suites, after the install — the bare-clone checks need none
+the browser install, the instance image, `check:test-split` and seven checker suites, after the install — the bare-clone checks need none
 of it, but on their own before it they took 48 s with the runner otherwise idle. It goes through
 `scripts/run-concurrently.sh` (§4a), which labels every line with its command, waits on each
 process by itself and fails the step if **any** command failed — its own suite runs first, because
-a runner that swallowed a failure would make that step twenty-three gates removed and still look
+a runner that swallowed a failure would make that step twenty-six gates removed and still look
 green, and #651's pull request proved it red on the runner with one formatting defect (run
 36325105846: `format:check` FAILED, the other twelve then in that step finished, the job failed).
 ⚠️ **Anything that runs Vitest stays out of it**, and so do `check:capacitor` and `check:notices`,
 which each run their own install under the tree the linter is walking: Vitest's 5 s case
 timeout is already within a second of several cases on the slower runner, and beside other work
-three of them passed it (run 36324592730) — `test:a11y` and `test:coverage` each run alone. And
+three of them passed it (run 36324592730) — `test:a11y`, `test:coverage` and, since #852,
+`test:uninstrumented` each run alone. (`check:test-split` is in it: it runs `vitest list`, which
+runs no case and so has no timeout to miss.) And
 `test:coverage` and `test:browser` are **not** run together, though they are the two longest steps:
 run 36323764725 did it and both went red, because each is CPU-bound on its own.
 
 ⚠️ **The instance ([#771](https://github.com/openzigs/onyourleft/issues/771)) is tested inside this
 same job and adds no step of its own but one**, decided against the three constraints that bound
-everything here — one required context, a budget already spent, and no gate that needs a service
-outside the runner:
+everything here — one required context, a budget already spent, and no gate that needs an account,
+a secret or a service this project operates. ⚠️ **This used to read "no gate that needs a service
+outside the runner", and that was never true** ([#841](https://github.com/openzigs/onyourleft/issues/841)):
+the install reaches the npm registry, the browser install Playwright's CDN and Ubuntu's archives,
+and the image check **Docker Hub**, on every run, because a runner starts with no base image. What
+each of those can do is turn `main` red on a day the service is down. For Docker Hub:
+
+- **Its pull-rate limit does not apply here.** GitHub's
+  [Actions limits](https://docs.github.com/en/actions/reference/limits) page says *"GitHub-hosted
+  runners pulling public images: Docker Hub's rate limit is not applied"* (read 2026-09-29), and the
+  base image is public. A self-hosted runner would not have that exemption.
+- **An outage is named, not disguised.** The checker pulls the base image as its own step before it
+  builds, so a registry that will not serve it fails as `IMG004`, saying it is Docker Hub and not
+  `apps/instance` — a re-run, not a fix. Before #841 it failed as `IMG001`, *"the Dockerfile did not
+  build"*.
+- **Once the base image is held, the build does not ask the registry again — measured, not
+  assumed** ([#852](https://github.com/openzigs/onyourleft/issues/852), 2026-09-29). In a
+  `docker:29-dind` daemon (Docker Engine 29.8.1, its default image store) the pinned base was
+  pulled, the daemon's network was then **disconnected** (a request to `registry-1.docker.io` from
+  inside it failed to resolve), the build cache was pruned, and `docker build --no-cache` of
+  `apps/instance` succeeded in about a second with `load metadata for …@sha256:…` answered locally.
+  **Control**: the same disconnected daemon with the base image *not* held failed at exactly that
+  step, `failed to do request: Head "https://registry-1.docker.io/v2/…"`. So after `IMG004`'s pull
+  succeeds, a registry outage cannot surface as `IMG001`. ⚠️ Measured on 29.8.1 locally, not on the
+  runner's own Docker; a different engine or builder driver could resolve differently.
+- **The check stays in the required job, decided.** It is the only gate that the image builds and
+  that `/source` names its commit (AGPL-3.0 §13), a second job could not block a merge, and it is
+  exposed to one more registry than the job already was — the same trade as the install. Mirroring
+  the base image to GHCR would move the dependency rather than remove it, and would add a push
+  credential, which this job holds none of. Removing `'instance image'` from `Checks, concurrently`
+  is a one-line revert if an outage ever outlasts the patience of the day.
 
 | What | Where | Why |
 |---|---|---|
 | `apps/instance`'s unit and HTTP tests (the real listener on an ephemeral port) | the Vitest run, as one more project (`instance`) | no service, no second job; 51 cases in about 0.15 s locally at #767, 299 at #855 (the identity routes' files add about 1 s of case time on an idle machine — the count ages, read the run) |
 | The Docker image, and `/health` inside the container | `Checks, concurrently`, as `instance image` | mostly a digest-pinned pull, so it waits rather than works — the step's shape |
 | The OpenAPI drift check (#36) | the Vitest run (`src/openapi.test.ts`) | it is a byte comparison, not a tool |
-| Rooms: the conformance suite on Node and on `workerd`, and the two-browser e2e spec with its fan-out control | **not built yet** — #779, #780, #781 | #771's last two criteria are owed by the first room, not by this scaffold |
+| Rooms: the conformance suite (`src/room/conformance.test.ts`) against the reference and the Durable Object adapter under in-memory fakes, and the adapter's own cases under fakes | the Vitest run (`instance`) | #781; well under a second. #780's Node adapter joins the same file |
+| Rooms: the Durable Object adapter under a real `workerd` | **not CI** — `test:workerd`, a local command (§4a), decided by #781 | about 35 s, most of it waiting on the runtime's alarms and its ten-second eviction, which a job already past fifteen minutes on the 7763 cannot spend on every pull request; its logic runs in CI under the fakes. ⚠️ **The 35 s is a LOCAL figure** (34.6 s again on #781's review, on a Mac) — the suite has never run on the runner, so this decision rests on the local figure and #771's *"measure its cost on the runner before deciding"* is not met. ⚠️ The ~130 MB `workerd` binary is still downloaded by CI's install (§8) |
+| Rooms: the two-browser e2e spec with its fan-out control | **not built yet** — #780 | #771's last criterion is owed by the first room a browser can reach |
 | A load test, and a Cloudflare bill | **not CI** (#792, #464) | a measurement and an account, not gates |
 
 **What it cost, measured on the runner** — see the table directly below this paragraph, which
@@ -2427,8 +2535,10 @@ quotes run ids rather than estimates.
 | **After**, #833 | [36582905894](https://github.com/openzigs/onyourleft/actions/runs/36582905894) attempt 1 | EPYC 9V74 | 1216 s | 154 s | 410 s | 581 s |
 | **After**, #833 | [36588252465](https://github.com/openzigs/onyourleft/actions/runs/36588252465) | EPYC 9V74 | 994 s | | | |
 
-**On the 7763 — the runner #771 names — the delta is +4 s** (1223 s against a mean of 1219 s over
-three `main` runs), inside the spread of `main` alone. The image check itself took about **10 s**
+⚠️ **This paragraph used to say "the delta is +4 s" on the 7763, and that was one run inside a 25 s
+spread** ([#841](https://github.com/openzigs/onyourleft/issues/841)): **no measurable change, n = 1
+on the 7763**, where #771 asked for two. The 1223 s run against a mean of 1219 s over three `main`
+runs is inside the spread of `main` alone. The image check itself took about **10 s**
 inside the concurrent step, which grew by 3 s. The instance's Vitest project is 51 cases in well under
 a second. **On the 9V74 it is +16 s** on the second sample (994 s against 985 s and 970 s on
 `main`). ⚠️ The first 9V74 sample took 1216 s, and all of the extra time was in Vitest (+110 s) and
@@ -2437,6 +2547,75 @@ so it is recorded as runner variance, not as a cost. ⚠️ **The job was alread
 so #771's "if the delta pushes a green run past 15 minutes" was already true of `main`. This
 change did not push it there, and moving something out of the job is #651's open question, not
 this one's.
+
+**The runs since, read on 2026-09-29 for #841, and why they settle nothing about #771.** No second
+`main` run after #833 has landed on a 7763 yet, so the 7763 comparison is still n = 1 — it is owed
+by the next one, and its id goes in the table above. What did land says the runner, not the change,
+is the variable:
+
+| | Run | CPU | Job | `Checks, concurrently` | Vitest with coverage | Browser gate |
+|---|---|---|--:|--:|--:|--:|
+| **Before** #833, `main` | [36585604660](https://github.com/openzigs/onyourleft/actions/runs/36585604660) | EPYC 9V74 | 977 s | 129 s | 297 s | 490 s |
+| **Before** #833, `main` | [36588522202](https://github.com/openzigs/onyourleft/actions/runs/36588522202) | EPYC 7763 | 1230 s | 161 s | 391 s | 605 s |
+| **Before** #833, `main` | [36595072185](https://github.com/openzigs/onyourleft/actions/runs/36595072185) | EPYC 9V45 | 738 s | 98 s | 213 s | 378 s |
+| **After** #833, `main` | [36596941341](https://github.com/openzigs/onyourleft/actions/runs/36596941341) | EPYC 9V74 | 1206 s | 168 s | 379 s | 584 s |
+| **After** #833 and #840, `main` | [36598959609](https://github.com/openzigs/onyourleft/actions/runs/36598959609) | EPYC 9V74 | 1228 s | 173 s | 393 s | 584 s |
+
+The two post-#833 9V74 runs took 1206 s and 1228 s where the three before took 970–985 s — the
+same 25 % the first 9V74 sample on #833's own pull request showed, and in the two steps it does not
+touch; the image check itself took **12 s and 15 s** inside the concurrent step. So "EPYC 9V74" is
+not one speed (the tag is the CPU model, not the VM's share of it), and one job can land anywhere
+from 738 s to 1230 s. **Any before/after comparison of this job is n-per-CPU or it is noise.**
+
+#### Where the time comes from next — owed before B9 and B12
+
+⚠️ **The job is now 1206–1231 s of its 25-minute `timeout-minutes` on the slower runners — about
+20.5 minutes, 82 % of the stop** — and every bundle still to come adds to it: rooms and their
+conformance suite on Node and on `workerd` (#779–#781), and the two-browser room spec. A stop has to
+be clear of what it stops (§4f's #423 reason), so this has to be answered **before** those land, not
+by raising the stop again. The time is in two steps: Vitest with coverage (379–393 s) and the
+browser gate (584–605 s). The candidates, in the order they cost least in what the job proves:
+
+1. **Run the heaviest Vitest files outside coverage instrumentation — DONE by
+   [#852](https://github.com/openzigs/onyourleft/issues/852), and it bought about one minute, not
+   three.** `test:coverage` `--exclude`s the #545 near-field rides and the FIT decode fuzz, and
+   `test:uninstrumented` runs them with no coverage in a step of its own (`Tests outside coverage`);
+   `check:test-split` holds the two lists to the whole suite, once each. They still gate exactly as
+   before; what the report lost is §5's to say. #651's ratio held — the pair took 28 s of test time
+   uninstrumented against 82 s instrumented locally, and 57 s against about 307 s on the runners —
+   but the saving is smaller than that ratio predicted, because the uninstrumented run is its own
+   Vitest start-up and its wall time is the near-field file alone (43 s of a 45 s step: two files,
+   two workers, one of them idle for most of it). Measured on the 7763, the runner #771 names:
+
+   | | Run | CPU | Job | Vitest with coverage | Tests outside coverage | Both | Browser gate |
+   |---|---|---|--:|--:|--:|--:|--:|
+   | **Before** #852 | [36602099227](https://github.com/openzigs/onyourleft/actions/runs/36602099227) | EPYC 7763 | 1256 s | 399 s | | 399 s | 608 s |
+   | **Before** #852 | [36610049975](https://github.com/openzigs/onyourleft/actions/runs/36610049975) | EPYC 7763 | 1257 s | 399 s | | 399 s | 610 s |
+   | **Before** #852 | [36613423129](https://github.com/openzigs/onyourleft/actions/runs/36613423129) | EPYC 7763 | 1296 s | 416 s | | 416 s | 621 s |
+   | **After** #852 | [36615071157](https://github.com/openzigs/onyourleft/actions/runs/36615071157) | EPYC 7763 | 1220 s | 297 s | 45 s | 342 s | 616 s |
+
+   **The two Vitest steps went from 399–416 s to 342 s: about −63 s, n = 1 after.** The job went
+   from 1256–1296 s to 1220 s, −50 s against the mean, inside what the browser gate alone varies
+   by. The "before" rows are other branches' pull requests on the same tree ancestry (#842, #839),
+   because no `main` run in that window printed its CPU; #850's own run
+   ([36612643969](https://github.com/openzigs/onyourleft/actions/runs/36612643969), the tree this
+   branch starts from) landed on a 9V74 at 1170 s with 376 s of coverage. **It did not free three
+   minutes**, which is the threshold #852 set for reporting back: the rest has to come from option
+   2 or from the browser gate, and both are the owner's. The next files by weight
+   (`realistic-textures`, `GameView`, `racing-line`, `line-on-the-road`: about 100 s of test time
+   under coverage on the 9V74) are slowed about 2× rather than 3× — measured locally, 29 s against
+   14 s — so moving them too would buy perhaps 25 s more of wall time and lose four more files from
+   the report.
+   ⚠️ **#771's second `main` sample on the 7763 is still owed**: the one `main` run after #850's
+   tree ([36615069379](https://github.com/openzigs/onyourleft/actions/runs/36615069379), 1150 s)
+   printed no CPU. The CPU line in these logs is not the runner's: it is printed by one Vitest
+   test (the racing-line timing), and only on some runs.
+2. **A second, non-required job for the heaviest gates**, nightly or on push to `main`. It would buy
+   the most, and it is an **owner decision**: a job that is not `Repository rules` cannot block a
+   merge (the warning at the top of this section), so whatever moves there stops being a gate on a
+   pull request and becomes a report after it. Nothing is moved there until the owner says which,
+   if any.
+3. **Not a larger runner**: §8 — always charged, even on a public repository.
 
 ⚠️ **The runner is two cores, not four, and that is what bounds all of this.** `ubuntu-latest`
 reports four vCPUs, and `lscpu` on it reads `Thread(s) per core: 2`, `Core(s) per socket: 2` (run
@@ -2732,6 +2911,7 @@ would otherwise be documented and unenforced, which is the gap this project keep
 | `boundaries/dependencies` | an import from `packages/*` into `apps/*`, in either the relative (`../../../apps/web/src/...`) or the workspace (`@onyourleft/web`) spelling. Dependencies point one way |
 | `@typescript-eslint/no-restricted-imports` in `packages/domain`, `packages/physics`, `packages/sensors/src`, `packages/sensors/protocol` and `packages/sensors/web-bluetooth` | naming **any** Node builtin — the list is derived from `builtinModules`, not typed out, so `events`, `util` and `stream/promises` fail exactly as `node:fs` does — or `react`, `react-dom`, `vite` or `dexie`, or a BLE library |
 | `no-restricted-globals` in `packages/domain`, `packages/physics`, `packages/sensors/src` and `packages/sensors/protocol` | naming a DOM global (`window`, `document`, `navigator`, `location`, `history`, `localStorage`, `sessionStorage`, `indexedDB`, `caches`), a Node global (`process`, `Buffer`, `__dirname`, `__filename`, `global`, `require`) or a network global (`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Request`, `Response`, `Headers`). This one **is** a named list; the closure is the typechecker below |
+| `no-restricted-globals` in `apps/instance/src`, **except the Node adapter** | naming a Node-only global — `Buffer`, `process`, `require`, `module`, `exports`, `__dirname`, `__filename`, `global`, `setImmediate`, `clearImmediate` — anywhere the core mounts unchanged under `workerd` ([ADR 0037](docs/adr/0037-instance-runtime-hosting-and-transport.md) D-2, [#852](https://github.com/openzigs/onyourleft/issues/852)). ⚠️ The exemption is **by file name, not directory**: `main.ts`, `node-listener.ts`, `store/node-sqlite.ts`, `blob/disk-blob-store.ts`, and tests and `*-testing.ts`/`testing/` support — so a new core file is covered with no edit and a new adapter file is a line in `eslint.config.js`. `fetch`, `Request`, `Response`, `Headers` and `crypto` are **not** listed: `workerd` has them and the handler is written against them. ⚠️ **This is the only gate for it on a pull request**: the wide `tsconfig.json` carries `@types/node`, so `process` typechecks, and the `workerd` suite is local-only. Probed: `Buffer`, `process` and `__dirname` in `pagination.ts` passed `eslint` before this block and are three errors after; `process` in `node-listener.ts` is still none. It names globals only — a `node:` **import** in the core is still caught by nothing but `workerd` |
 | `no-restricted-globals` in `packages/sensors/web-bluetooth` | naming any of the same list **except `navigator`** — the adapter is the transport boundary and `navigator.bluetooth` is the one platform API it exists to reach. The exception is derived by subtracting one name from the list above rather than restating it, so the two cannot drift |
 
 `packages/domain/tsconfig.json` narrows `lib` to `ES2024` and sets `types: []`. That is the closure
@@ -2810,7 +2990,7 @@ percentage.
 
 | File | What it decides |
 |---|---|
-| `audit.ts` | sixteen structural rules over a rendered DOM (it said fourteen until #394 and fifteen until #660; `table-in-scroll-region` is the sixteenth — every table the child of a focusable, named scroll region, `design/ScrollTable.tsx`, because SC 1.4.10 lets a table keep its columns on a phone only there — count `ACCESSIBILITY_RULES` rather than this cell) — an unnamed control, a control not in the tab order, a broken heading order, a dangling ARIA reference, a positive `tabindex`, and so on. `tabbableElements` is the tab-order model the keyboard tests rest on |
+| `audit.ts` | sixteen structural rules over a rendered DOM (it said fourteen until #394 and fifteen until #660; `table-in-scroll-region` is the sixteenth — every table the child of a focusable, named scroll region, `design/ScrollTable.tsx`, because SC 1.4.10 lets a table keep its columns on a phone only there — count `ACCESSIBILITY_RULES` rather than this cell; since #690 `landmarks-are-distinguishable` reads a declared landmark `role` as well as the tag, so two `ScrollTable`s captioned alike fail) — an unnamed control, a control not in the tab order, a broken heading order, a dangling ARIA reference, a positive `tabindex`, and so on. `tabbableElements` is the tab-order model the keyboard tests rest on |
 | `audit.a11y.test.ts` | a violating fixture for **every** rule, plus an assertion that every rule in `ACCESSIBILITY_RULES` has one. A rule added without a failing fixture fails the build |
 | `route-sentences.a11y.test.tsx` | [#666](https://github.com/openzigs/onyourleft/issues/666)'s "nothing is deleted": every sentence every route rendered on `main`, over both walk fixtures and with a store behind Files, is recorded in `route-sentences.snapshot.json` and must still render on the same route, visible or tucked. ⚠️ The record is READ unless `OYL_RECORD_ROUTE_SENTENCES=1`; a reworded sentence is changed in the record in the same commit, where a reviewer sees both. ⚠️ **Since [#746](https://github.com/openzigs/onyourleft/issues/746) the record must EQUAL what the recorder would write**, and the two share one collection (the list, plus the selected item on a list–detail route): a sentence ADDED to a route is red until the record is re-taken with that variable, and the diff is where a dropped line shows |
 | `kept-visible.a11y.test.tsx` | #666's other half: each view's `*_KEPT_VISIBLE` sentences — trainer control, what leaves the device, what an erase cannot reach, the camera and anyone else in the room, Web Bluetooth's limits — mapped from a `Record` over `RouteId`, must be on their route with no closed `<details>` above them; and nothing marked `data-oyl-kept-visible` may be tucked on any route |
@@ -2884,7 +3064,7 @@ browser runs**.
 | `hud.html`, `hud-harness.tsx` | since #266, the ride HUD: the **real** `game/hud/HudPanel.tsx` under the **real** `design/theme.css`, on the **real** stage `GameView` gives it, with every field populated and all three of #259's settled outcome words. ⚠️ **Until #423 that was the `oyl-shell` → `oyl-main` → `oyl-game` chain, and a reviewer who remembers it is reading the old file**: the HUD is laid over a `position: fixed` stage now, so its containing block is the viewport whatever is above it, and the old chain would have gone on measuring a stacked layout a rider only gets at 320×256. One thing on this page is the harness's own and it says so: each stage is `position: relative` and `100vh` tall, because six fixed stages are six panels on top of one another. A **`.tsx`**, and the first React in this directory |
 | `hud.browser.spec.ts` | its spec — no `.oyl-hud__value` overflows its grid track at a phone in either orientation, at **360 px** (where #423's first layout ran the third primary reading off the screen) and at a landscape tablet, read back from the browser's own layout. Its **control panels** are the half that makes a green run mean something; ⚠️ since #423 the control moves the words into the primary list as well as stripping #259's class, because every word is a secondary reading now and at 1.5 rem it would spill by under three pixels, which is not a control |
 | `shell.html`, `shell-harness.tsx` | since #307's review, the app **shell**: the **real** `shell/AppShell.tsx` with the **real** `ROUTES` table under the **real** `design/theme.css`. The second `.tsx` here. ⚠️ Its spacer goes **inside `.oyl-main`** and the file says why at length — after `.oyl-shell` the header scrolls out of its own sticky containing block and measures 0 px, and inside `.oyl-shell` `main` stays shorter than the viewport so a focus scroll never consults `scroll-margin-top`. Each mistake made a different assertion pass over nothing. ⚠️ Since #316 it also renders the **real** `design/Button.tsx` in both variants, with `RideView`'s own labels, because a shell handed no ports renders **zero** controls on all eleven routes and a size assertion over an empty list passes. Since #667, `?controls=specimens` adds the native form controls — a file input, checkbox and radio rows in both markups the views use, a `<select>`, a range and a progress bar — and `&base-select=off` deletes the `@supports (appearance: base-select)` block through the CSSOM, which is the select's control |
-| `shell.browser.spec.ts` | its spec — how much of the viewport persistent chrome still covers after a scroll, where a fragment jump lands the `h1`, whether the focused skip link is the topmost thing at its own centre (hit-tested, not read off a `z-index`), and no horizontal scrolling at 320 px. ⚠️ Since #316 it also measures the **touch target** three ways, and the three fail for different reasons — see below ⚠️ **Since #427 `PERSISTENT_CHROME_BUDGET` is an AREA** — the header and the navigation bar or rail together — and the spec also measures the bar/rail switch and each destination's 44×44 target the three ways #316 measures a button. ⚠️ **Since #671 that budget is 0.17, not 0.2**, and the spec publishes the area it measured at every viewport: the header is a declared `--oyl-header-height` (48 px, and zero below the rail breakpoint, where the wordmark is folded off the screen and the `banner` landmark's label carries the app's name), and the top safe-area inset is painted in `--oyl-header-surface` by `.oyl-header::before`. §"#671" reads that band's pixel with the #439 insets applied to the engine, and its control is the header as it was, which must fail both ⚠️ Since #667 it also measures a checkbox or radio ROW the same three ways (the stripped row must FALL SHORT — the floor is what holds it), the file button against a real `.oyl-button--secondary`, a checked box's pixels, and the `base-select` picker: opened by Space and by click, every option 44 px, the platform's own accessibility role, token colours exactly, forced colours reverting it — with the `@supports`-less page as the control. `Enter` on a CLOSED select does not open it in Chromium, with or without `base-select`; that is the platform keyboard model, not a defect |
+| `shell.browser.spec.ts` | its spec — how much of the viewport persistent chrome still covers after a scroll, where a fragment jump lands the `h1`, whether the focused skip link is the topmost thing at its own centre (hit-tested, not read off a `z-index`), and no horizontal scrolling at 320 px. ⚠️ Since #316 it also measures the **touch target** three ways, and the three fail for different reasons — see below ⚠️ **Since #427 `PERSISTENT_CHROME_BUDGET` is an AREA** — the header and the navigation bar or rail together — and the spec also measures the bar/rail switch and each destination's 44×44 target the three ways #316 measures a button. ⚠️ **Since #671 that budget is 0.17, not 0.2**, and the spec publishes the area it measured at every viewport: the header is a declared `--oyl-header-height` (48 px, and zero below the rail breakpoint, where the wordmark is folded off the screen and the `banner` landmark's label carries the app's name), and the top safe-area inset is painted in `--oyl-header-surface` by `.oyl-header::before`. §"#671" reads that band's pixel with the #439 insets applied to the engine, and its control is the header as it was, which must fail both ⚠️ Since #667 it also measures a checkbox or radio ROW the same three ways (the stripped row must FALL SHORT — the floor is what holds it), the file button against a real `.oyl-button--secondary`, a checked box's pixels, and the `base-select` picker: opened by Space and by click, every option 44 px, the platform's own accessibility role, token colours exactly, forced colours reverting it — with the `@supports`-less page as the control. `Enter` on a CLOSED select does not open it in Chromium, with or without `base-select`; that is the platform keyboard model, not a defect. ⚠️ Since [#726](https://github.com/openzigs/onyourleft/issues/726) §"#726" focuses the skip link and follows it with the #439 insets applied at #671's five viewports: the link's top at or below the inset, and the `h1` 16 px clear of the status bar or the header — `.oyl-main`'s `scroll-margin-top` is the top inset where the header does not stick. Its control is the two rules as they were |
 | `links.browser.spec.ts` | since [#661](https://github.com/openzigs/onyourleft/issues/661), the colour of every link on every route in `ALL_ROUTES`, on `shell.html?links=specimens` — which adds one link inside each `StatusMessage` tone, because no route the portless shell renders puts a link on a status surface. Each computed colour, underline colour and surface must be a token (converted from `tokens.ts`, not re-typed), the (colour, surface) pair must be one `CONTRAST_REQUIREMENTS` declares **at the 4.5:1 text threshold** (a 3:1 non-text pair does not answer for a link), a classless link must be underlined, and hover, keyboard focus and a press must each paint their own token with the state asserted to have applied — one test per route, with the four specimens driven once and a last case in each serial group counting the routes visited. Its control deletes the `:where(a…)` rules through the CSSOM and requires the browser's `rgb(0, 0, 238)` back. ⚠️ **It cannot read `:visited`** — a browser reports a visited link as unvisited, by design — so `theme.a11y.test.ts` §"paints every link state with its own token" holds that rule |
 | `hud-focus.browser.spec.ts` | since [#748](https://github.com/openzigs/onyourleft/issues/748), every keyboard focus ring on the ride HUD: it Tabs through `ride.html?sounds=on&side=lost` with the real keyboard, in the light and the dark page palette, and for each control that takes focus inside `.oyl-hud` reads the ring the engine computed and the surface it lands on (the nearest ancestor that paints), holding the ratio to 3:1; the mute, the volume and the side camera's *Stop* must each be visited. They took the page's ring, `--oyl-color-focus` pinned light (#141b1a) on `hudSurface`: 1.04:1. ⚠️ Its control deletes `theme.css` §`.oyl-hud :focus-visible` through the CSSOM and requires those three back under 1.1:1 |
 | `offline.browser.spec.ts` | since #408, the offline claim — against **`apps/web/dist`**, in a **persistent** context closed and reopened, with **two controls**. The only spec here that does not drive a harness page, and the first use of `setOffline` in this repository |
@@ -2899,11 +3079,11 @@ browser runs**.
 | `identity.html`, `identity-harness.ts`, `identity.browser.spec.ts` | since [#855](https://github.com/openzigs/onyourleft/issues/855) (#772's cross-platform criterion, ADR 0014 D-8), a statement signed by THIS browser's WebCrypto with the app's own device key — the store's non-extractable `CryptoKey` in IndexedDB, through the real `instance/sign-in.ts` — verified by a **real instance** (the real handler, identity routes and a SQLite file) running in the spec's own Node process, reached through `page.exposeFunction`. The same stored key signs in a second time as the same athlete. ⚠️ **Two controls**: a signature with one byte flipped in transit must be `bad_signature`, and a browser signing for another origin `wrong_instance`. ⚠️ The spec imports `apps/instance/src/auth/identity-testing.ts` by a COMPUTED path, because `apps/web`'s typecheck does not follow the instance's `.ts` specifiers; it is the one place `apps/web` reaches `apps/instance`, and it is Node-side test code — no page imports it |
 | `sidelink.html`, `sidelink-harness.ts`, `sidelink.browser.spec.ts` | since #529, the side-camera link paired end to end in the real engine: two peer connections in one page through the real offer and answer codes and the SDP `camera/side-link-sdp.ts` rebuilds, a start and a stop acknowledged across, and the offer drawn on a canvas and read back by the real reader. ⚠️ `playwright.config.ts` passes `--disable-features=WebRtcHideLocalIpsWithMdns` so the candidates are raw private addresses — the path spike 0012 found both Android WebViews take — rather than `.local` names a CI container may have no responder for. ⚠️ **Not two devices**, and not #541's packet capture |
 | `bend.html`, `bend-harness.ts`, `bend.browser.spec.ts` | since #543, a planner-sampled 20 m bend drawn by the real renderer and read back from **straight above** — a heading of nothing puts `cameraRig`'s eye over its target — with the road isolated the #440 way. Rays from the bend's centre find each edge; the edge is walked in 2 m chords and what is held to `MAXIMUM_CORRIDOR_JOINT_DEGREES` is the **kink**, a turn less its neighbours' mean, because a smooth inner edge turns 7° every two metres anyway. Its control is the road as drawn before #543 (`roadCorridor`'s `unsmoothed`), which must kink. `with-corridor.ts` rebuilds the ground and water around a swapped corridor, which the loop page needs too since #543: ground shaped for one road over another split 32 rows of it. ⚠️ Since #583 the sweep of rays starts on a ray that MISSES the road: it started at 0°, and #583's mirrored bend straddled 0° and read as two short edges (81.7° and 73.3° of turn) with nothing else wrong |
-| `reflow.html`, `reflow-harness.tsx`, `reflow.browser.spec.ts` | since [#660](https://github.com/openzigs/onyourleft/issues/660), WCAG 2.2 SC 1.4.10 (Reflow) on **every** route: the real `AppShell` over in-memory ports that are either empty or populated (forty rides with long and unbreakable names, a ride with a chart, laps, a map and a side-camera report, a segment with efforts, a route, a workout), opened at 320×256, 390×844 and 844×390. The routes come from `ALL_ROUTES` — imported, never listed — and the PAGE reads the same table and reports any route it was never asked to render, so a walk over a hand list fails; a parameterised route the harness has no fixture id for is a failure, not a skip. Each route must render its own `h1` and raise no uncaught error or unhandled rejection, the document must not scroll sideways, and every box that DOES scroll sideways must take focus, be a `region` and have a name. ⚠️ **Every route declares what its fixture puts on the page** — `reflow-harness.tsx` §`POPULATED`, a `Record` over `RouteId`, present when populated and ABSENT when empty — or why nothing on it comes from one; a route with no entry fails both walks. Until #683's review it was a `Partial` list of five, and emptying the routes, workouts and analysis fixtures left every walk green. ⚠️ **Five controls**: an over-wide element in `main` must fail at all three viewports; a region that cannot take focus, a region with no name and a focusable named box whose role is `group` must each fail; and the real `design/ScrollTable.tsx`, wider than the phone with visually hidden text at its far end, must pass — which is what caught that an absolutely positioned descendant escapes a scroll container that is not its containing block (`theme.css` §`.oyl-scroll-region`). It prints every route's margin. ⚠️ Not a real phone's fonts and not a text size above 100 %. ⚠️ **Since #672 the walk runs in BOTH palettes** (it said "not the dark theme (#654 P1-f)" until then), as do `controls-first`'s walks, `links`' and `button-hierarchy`'s colour reads — parametrised over `tokens.ts` §`THEMES` with Playwright's `colorScheme`, each asserting the page really is in that palette. ⚠️ **Every viewport runs dark as well as light.** For one commit the two LAYOUT walks ran dark at the phone only: #672's first CI run (36422201251), with every walk dark, finished in 19m48s, 12 s inside the job's then 20-minute stop, and its browser gate took 593 s. #682's 25 minutes and 840 s gave them back. The six dark cases the cut had dropped cost about 5.7 s each and 17 s of wall time locally, and 38.7 s summed (about 19 s of wall time) on the runner. On the run that put them back (36427026037, green) Playwright took 9.8 minutes of `GATE_BUDGET_MS`'s 14 (70 %), the gate's step 594 s, and the job 20m19s of its 25. ⚠️ That run's Vitest with coverage took 392 s against 255 s on the cut run (36424666303: job 14m32s, gate step 453 s), so the runner, not the dark walks, accounts for most of the gap between the two jobs |
+| `reflow.html`, `reflow-harness.tsx`, `reflow.browser.spec.ts` | since [#660](https://github.com/openzigs/onyourleft/issues/660), WCAG 2.2 SC 1.4.10 (Reflow) on **every** route: the real `AppShell` over in-memory ports that are either empty or populated (forty rides with long and unbreakable names, a ride with a chart, laps, a map and a side-camera report, a segment with efforts, a route, a workout), opened at 320×256, 390×844 and 844×390. The routes come from `ALL_ROUTES` — imported, never listed — and the PAGE reads the same table and reports any route it was never asked to render, so a walk over a hand list fails; a parameterised route the harness has no fixture id for is a failure, not a skip. Each route must render its own `h1` and raise no uncaught error or unhandled rejection, the document must not scroll sideways, and every box that DOES scroll sideways must take focus, be a `region` and have a name. ⚠️ **Every route declares what its fixture puts on the page** — `reflow-harness.tsx` §`POPULATED`, a `Record` over `RouteId`, present when populated and ABSENT when empty — or why nothing on it comes from one; a route with no entry fails both walks. Until #683's review it was a `Partial` list of five, and emptying the routes, workouts and analysis fixtures left every walk green. ⚠️ **Since [#690](https://github.com/openzigs/onyourleft/issues/690) the route builder and Files are populated too**: `testing/populated-shell.tsx` §`seedRouteDraft` writes a four-waypoint freehand draft to local storage (and clears it for the empty walk), and the harness fills its Files screen's own IndexedDB with three rides and imports one unreadable file through the screen's form (`reflow-harness.tsx` §`importOnTransfer`), so the ride chooser and the outcome table are both walked — `EXPECTATIONS` requires both on the populated page and neither on the empty one. ⚠️ **Five controls**: an over-wide element in `main` must fail at all three viewports; a region that cannot take focus, a region with no name and a focusable named box whose role is `group` must each fail; and the real `design/ScrollTable.tsx`, wider than the phone with visually hidden text at its far end, must pass — which is what caught that an absolutely positioned descendant escapes a scroll container that is not its containing block (`theme.css` §`.oyl-scroll-region`). It prints every route's margin. ⚠️ Not a real phone's fonts and not a text size above 100 %. ⚠️ **Since #672 the walk runs in BOTH palettes** (it said "not the dark theme (#654 P1-f)" until then), as do `controls-first`'s walks, `links`' and `button-hierarchy`'s colour reads — parametrised over `tokens.ts` §`THEMES` with Playwright's `colorScheme`, each asserting the page really is in that palette. ⚠️ **Every viewport runs dark as well as light.** For one commit the two LAYOUT walks ran dark at the phone only: #672's first CI run (36422201251), with every walk dark, finished in 19m48s, 12 s inside the job's then 20-minute stop, and its browser gate took 593 s. #682's 25 minutes and 840 s gave them back. The six dark cases the cut had dropped cost about 5.7 s each and 17 s of wall time locally, and 38.7 s summed (about 19 s of wall time) on the runner. On the run that put them back (36427026037, green) Playwright took 9.8 minutes of `GATE_BUDGET_MS`'s 14 (70 %), the gate's step 594 s, and the job 20m19s of its 25. ⚠️ That run's Vitest with coverage took 392 s against 255 s on the cut run (36424666303: job 14m32s, gate step 453 s), so the runner, not the dark walks, accounts for most of the gap between the two jobs |
 | `theme.browser.spec.ts` | since [#672](https://github.com/openzigs/onyourleft/issues/672), the dark palette as painted: the PRODUCT's first frame (a `requestAnimationFrame` an init script registers before any page script) is the right palette's canvas under a dark device, a light one, and each with the opposite chosen — with the inline script cut out of `dist/index.html` as the control, which paints LIGHT first under a dark device; Settings' *Dark* survives a reload and a new page, and a choice made in one tab reaches another through the `storage` event; every route's page, header surface, links and primary buttons come from the dark set under a dark device, with the dark block deleted through the CSSOM as the control; and the HUD — `hud.html`, and a ride carrying the mute toggle, the volume, the side camera's *Stop* and a warning notice (`ride.html?trainer=workout&sounds=on&side=lost&paused=yes`) — reads identically in both palettes while the page around it changes: every computed colour of `.oyl-hud` and of every descendant and pseudo-element (SVG fill and stroke and `color-scheme` included), each panel the HUD's own surface, and those four controls' pixels. ⚠️ **Until #744's review it read only the panels, values and labels, and the mute toggle and notices followed the page**: `theme.css` §`.oyl-hud` now PINS the HUD to the light palette (`color-scheme: light` and every page colour token restated at its light value, held to `tokens.ts` by `theme.a11y.test.ts`), and the control deletes that pin through the CSSOM and requires the mute toggle and the warning notice to move. ⚠️ Not the Android WebView, the native launch screen or the basemap — #672's second half and the owner's tablet check |
 | `button-hierarchy.browser.spec.ts` | since [#668](https://github.com/openzigs/onyourleft/issues/668), the three kinds of button and the segmented control, on `shell.html?hierarchy=specimens` (`shell-harness.tsx` §`HierarchySpecimens`, because no port-less route renders a toggle): every state of every kind — rest, pointer, press, keyboard focus, disabled, on — read back from the engine and held BOTH ways, equal to the tokens the rule names AND a pair `tokens.ts` §`CONTRAST_REQUIREMENTS` declares at its threshold; the on toggle's doubled border (SC 1.4.1); each segment a 44 px target the #316 three ways. ⚠️ Its control, `&hover-rule=off`, deletes #688's rule and requires the hovered secondary to read back as #688 found it, `accent` on `accentHover`, under 4.5:1. ⚠️ A read-back is compared with the token EXPECTED, never looked up: `ink`/`focus` and `canvas`/`accentInk` share values, so a reverse lookup names the wrong one |
-| `controls-first.browser.spec.ts` | since [#666](https://github.com/openzigs/onyourleft/issues/666), controls first, detail tucked, on `reflow.html` (`reflow-harness.tsx` gained a first-control reading, a fold line, a section-prose reading and a store behind the Files screen): every route in `ALL_ROUTES`, over both fixtures at 390×844 and on the owner's tablet in the shell both ways up with the #439 insets and the 50 px floor, must START its first control (a button, a form control or a link drawn as a button) above the fold — the viewport less its bottom inset, or the top of a bottom navigation bar — unless everything in the way is a heading or marked `data-oyl-kept-visible` (`design/MoreAbout.tsx` §`KeptVisible`, the consent text a consent screen's box follows); and every section that tucks its explanation lays out at most 130 px of prose above its own first control. ⚠️ **Its control, `?disclosures=inline`, puts every "More about" back under its heading, open**, and Segments, Settings and Files must then fail — Camera is not among them because it tucks nothing: its first control came up by ORDER. It also presses the real Tab key through Settings and compares the sequence with `tabbableElements` over the live DOM, and measures a summary's 44 px row #316's three ways and its token-painted marker. ⚠️ **Two things it found**: Chromium gives the content of a CLOSED `<details>` a full-size `getBoundingClientRect()` (the slot is `content-visibility: hidden`), so "has a box" is not "is drawn" — `checkVisibility()` is; and a browser stops once per named radio group where the model stops on every radio ([#698](https://github.com/openzigs/onyourleft/issues/698)), pinned apart from the sequence |
-| `list-detail.browser.spec.ts` | since [#670](https://github.com/openzigs/onyourleft/issues/670), the list beside its detail on `reflow.html` (`reflow-harness.tsx` gained the panes' boxes, the rail's edge and every primary's place, keeps a hash it is opened with, and takes `?layout=prose`): every `list-detail` route of `ALL_ROUTES`, with the fixture's item chosen and not, lays out two panes side by side inside the viewport and spanning at least 80 % of what the rail leaves at 1280×800 with the #439 insets and at 1280×720; one pane, no sideways scroll, and Enter-then-back returning focus to the item at 800×1280, 390×844 and 320×256; a FRESH page at a selection shows it and at an unknown id says "not found"; rotating keeps the selection. ⚠️ **Its control, `?layout=prose`, switches the same routes of the real table back to the reading measure before anything renders, and the width assertion must fail on every one.** It publishes each primary action's place and margin to the fold at the four viewports #670 names, on arrival AND with the item chosen, and holds it above the fold only where `PRIMARY_ON_ARRIVAL` and `PRIMARY_WHEN_SELECTED` say the layout allows, with the reason for every gap — the selected state was unmeasured until #670's review, which found *Import route* 413 px under the tablet's fold there. It also rotates with focus on a list link and requires focus on the chosen item's heading after the rotation. ⚠️ **Since [#723](https://github.com/openzigs/onyourleft/issues/723) it also measures that the two panes scroll ON THEIR OWN** on the tablet with its insets and at 1280×720: the wheel over one moves neither the page nor the other (a list at its end included, over two new gestures, because Chromium does not chain the first), Enter on the lowest of forty rides leaves `window.scrollY` at 0 and lands focus — its ring too — inside the detail pane, and every pane lies between the header and the bottom inset at the page's top and at its furthest scroll, margins published. Its control is `reflow.html?panes=page`, the pre-#723 layout put back by a stylesheet of the harness's own. And a primary's margin is now to its pane's bottom where that clips it (`PrimaryPlace.clipBottom`): with the footer inside the viewport, *Import route* ended 23 px above the bottom of its pane and the fold said 125 |
+| `controls-first.browser.spec.ts` | since [#666](https://github.com/openzigs/onyourleft/issues/666), controls first, detail tucked, on `reflow.html` (`reflow-harness.tsx` gained a first-control reading, a fold line, a section-prose reading and a store behind the Files screen): every route in `ALL_ROUTES`, over both fixtures at 390×844 and on the owner's tablet in the shell both ways up with the #439 insets and the 50 px floor, must START its first control (a button, a form control or a link drawn as a button) above the fold — the viewport less its bottom inset, or the top of a bottom navigation bar — unless everything in the way is a heading or marked `data-oyl-kept-visible` (`design/MoreAbout.tsx` §`KeptVisible`, the consent text a consent screen's box follows); and every section that tucks its explanation lays out at most 130 px of prose above its own first control. ⚠️ **Its control, `?disclosures=inline`, puts every "More about" back under its heading, open**, and Segments, Settings and Files must then fail — Camera is not among them because it tucks nothing: its first control came up by ORDER. It also presses the real Tab key through Settings and compares the sequence with `tabbableElements` over the live DOM, and measures a summary's 44 px row #316's three ways and its token-painted marker. ⚠️ **Two things it found**: Chromium gives the content of a CLOSED `<details>` a full-size `getBoundingClientRect()` (the slot is `content-visibility: hidden`), so "has a box" is not "is drawn" — `checkVisibility()` is; and a browser stops once per named radio group where the model stopped on every radio. ⚠️ **Since [#698](https://github.com/openzigs/onyourleft/issues/698) the model does too** (`a11y/audit.ts` §`oneStopPerRadioGroup`, Chromium's own rule: the checked radio, else the first met) and the WHOLE sequence is compared, Settings' units group included; `keyboardReachableElements` adds the radios an arrow key reaches, which is what `routes.a11y.test.tsx` criterion 3 asks |
+| `list-detail.browser.spec.ts` | since [#670](https://github.com/openzigs/onyourleft/issues/670), the list beside its detail on `reflow.html` (`reflow-harness.tsx` gained the panes' boxes, the rail's edge and every primary's place, keeps a hash it is opened with, and takes `?layout=prose`): every `list-detail` route of `ALL_ROUTES`, with the fixture's item chosen and not, lays out two panes side by side inside the viewport and spanning at least 80 % of what the rail leaves at 1280×800 with the #439 insets and at 1280×720; one pane, no sideways scroll, and Enter-then-back returning focus to the item at 800×1280, 390×844 and 320×256; a FRESH page at a selection shows it and at an unknown id says "not found"; rotating keeps the selection. ⚠️ **Its control, `?layout=prose`, switches the same routes of the real table back to the reading measure before anything renders, and the width assertion must fail on every one.** It publishes each primary action's place and margin to the fold at the four viewports #670 names, on arrival AND with the item chosen, and holds it above the fold only where `PRIMARY_ON_ARRIVAL` and `PRIMARY_WHEN_SELECTED` say the layout allows, with the reason for every gap — the selected state was unmeasured until #670's review, which found *Import route* 413 px under the tablet's fold there. It also rotates with focus on a list link and requires focus on the chosen item's heading after the rotation. ⚠️ **Since [#723](https://github.com/openzigs/onyourleft/issues/723) it also measures that the two panes scroll ON THEIR OWN** on the tablet with its insets and at 1280×720: the wheel over one moves neither the page nor the other (a list at its end included, over two new gestures, because Chromium does not chain the first), Enter on the lowest of forty rides leaves `window.scrollY` at 0 and lands focus — its ring too — inside the detail pane, and every pane lies between the header and the bottom inset at the page's top and at its furthest scroll, margins published. Its control is `reflow.html?panes=page`, the pre-#723 layout put back by a stylesheet of the harness's own. And a primary's margin is now to its pane's bottom where that clips it (`PrimaryPlace.clipBottom`): with the footer inside the viewport, *Import route* ended 23 px above the bottom of its pane and the fold said 125. ⚠️ Since [#726](https://github.com/openzigs/onyourleft/issues/726) its skip-link cases focus the link with `preventScroll`, so what they measure is the JUMP — which found it scrolled nothing from the end of a long page (`AppShell.tsx` §`skipToContent`). Since [#730](https://github.com/openzigs/onyourleft/issues/730) §"#730" holds the two panes' headings level on every route, with the 40 px `h2` gap put back as the control |
 | `insets.ts` | since #439, edge-to-edge safe-area insets applied to the ENGINE through `Emulation.setSafeAreaInsetsOverride`, so `env()` itself reports them, plus the one inset reading taken off the owner's tablet. Every #439 case also reads the insets back, so a Playwright bump that drops the protocol call fails rather than measuring a page with none |
 | `../playwright.config.ts` | Chromium only, no retries, the SwiftShader flags without which a GPU-less runner gives MapLibre no context at all — and since #408 **two `webServer` entries**, because the product and the harness are different builds. ⚠️ Since [#651](https://github.com/openzigs/onyourleft/issues/651) **two projects, `game` listed LAST**, so its four loads run alone after everything else — run beside the other specs they slowed by half or more, because SwiftShader draws on the CPU — and a `globalTimeout` (`GATE_BUDGET_MS`, **840 s since #682** — a reviewer who remembers 580 s is reading the old file) so the gate stops itself and names what was running before the job's `timeout-minutes` cancels it in silence. Playwright's default of two workers stays: the runner is two cores (§4c). A reviewer who remembers one `chromium` project is reading the old file. `playwright.config.ts` §`projects` says why, and what splitting the game further did |
 | `../vite.browser.config.ts` | the harness build. A second Vite config, so the harness cannot reach a shipped bundle |
@@ -3795,6 +3975,16 @@ its output; including it in the report would only mix a generator's coverage int
 denominator. #107's observation that the report listed `apps/web` alone at 125 statements predated
 the second pattern and is no longer true: all six packages appear (`packages/physics` since #88).
 
+⚠️ **Since [#852](https://github.com/openzigs/onyourleft/issues/852) the report is taken WITHOUT
+two test files**, and a module only they exercise reads as untested in it. `test:coverage` excludes
+the #545 near-field rides and the FIT decode fuzz, which `test:uninstrumented` runs with no
+coverage (§4c says why: CI time). Measured locally on 2026-09-29, the total moved from 94.43 % of
+statements to 93.19 %, and almost all of it is two files: `apps/web/src/game/near-field.ts`
+**98.87 % → 23.22 %** and `near-field-testing.ts` 92.54 % → 0 %; `packages/fit/src/xml/` lost 12
+statements, and nothing else moved. Those two numbers are the instrumentation's absence, not the
+tests': read a low figure on either file as *not measured*, and run
+`pnpm exec vitest run --coverage apps/web/src/game/near-field.test.ts` for the real one.
+
 ### Verifying a *compile-time* guarantee
 
 A brand, a nominal type or a `@ts-expect-error` is only a guarantee while its absence breaks the
@@ -4256,9 +4446,13 @@ because the copy under `node_modules/.pnpm` is read too.
 **An install script is a decision, recorded in `pnpm-workspace.yaml`.** pnpm 11 does not run
 dependency build scripts until `allowBuilds` names them, and leaves `pnpm install` exiting 1 until
 each is answered `true` or `false`. Answer it rather than deleting the entry: an install script runs
-arbitrary code with your privileges before any lint or test gate sees the package. The one entry
-today is `unrs-resolver`, answered `false` — it ships prebuilt native bindings as platform optional
-dependencies, so the script has nothing to do.
+arbitrary code with your privileges before any lint or test gate sees the package. There are two
+entries, both answered `false` for the same reason: `unrs-resolver` ships prebuilt native bindings
+as platform optional dependencies, so its script has nothing to do; and `workerd` (since
+[#781](https://github.com/openzigs/onyourleft/issues/781)) is a binary in its platform package
+(`@cloudflare/workerd-<os>-<arch>`), whose script only re-links it or, when that package is
+missing, downloads it from npm at install time. ⚠️ That package is ~130 MB, so every install —
+CI's included — downloads it, though CI runs nothing that uses it (§4c).
 
 **That block is therefore a security-relevant file on every fork pull request.** CI installs from the
 *fork's* `pnpm-workspace.yaml`, so flipping an entry to `true` and adding a dependency is what makes
@@ -4446,6 +4640,10 @@ top of an issue **supersedes its body**.
 | What the owner actually decided about the camera, and which of the four answers changes a promise | [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) §Amendments, [#495](https://github.com/openzigs/onyourleft/issues/495) |
 | What the no-network promise becomes, the one egress it does not cover, and the three artefacts that move with it | [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) §Amendments §Q1, `apps/web/src/privacy/no-network.test.ts`, [`docs/privacy-policy.md`](docs/privacy-policy.md) |
 | Which one module may send anything off the device, and what goes red for a second | `apps/web/src/camera/analysis-transport.ts`, `apps/web/src/privacy/no-network.test.ts` §`PERMITTED_NETWORK_CALLS`, [#387](https://github.com/openzigs/onyourleft/issues/387) |
+| What is masked before anything is sent to a hosted model, what is deliberately not, and why the original text is replaced rather than the folded reading | `apps/web/src/ride-analysis/hosted-mask.ts`, [#839](https://github.com/openzigs/onyourleft/issues/839) |
+| What proves no hosted request skips the masking, and the planted details it looks for | `apps/web/src/ride-analysis/hosted-mask-reachable.test.ts`, `apps/web/src/ride-analysis/personal-details-testing.ts` |
+| Where the rider's list of words to mask is kept, why it is not in the account export, and why the screen refuses what the store would silently drop | `packages/store/src/masked-words.ts`, `apps/web/src/athlete/masked-words.ts`, `apps/web/src/athlete/MaskedWordsPanel.tsx` |
+| Why the ride page shows what a hosted run will send before the first one, and why that preview is the sent text | `apps/web/src/ride-analysis/ride-analysis.ts` §`previewHostedRequest`, `apps/web/src/ride-analysis/RideWriteUpControl.tsx` §`HostedPreviewPanel` |
 | Whether a hosted model on the rider's own key may be used, why it is never sent a picture, where the key lives and what stops it reaching a log, an error, an export or `packages/store` | `apps/web/src/camera/hosted-model.ts`, `apps/web/src/camera/hosted-transport.ts`, `apps/web/src/camera/hosted-key.test.ts`, `apps/web/src/camera/session.ts` §`agreeToHosted`, [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) §Amendments 2026-09-28, [#518](https://github.com/openzigs/onyourleft/issues/518) |
 | How the tablet and the tripod phone connect with no server, what a stranger on the same Wi-Fi can and cannot do, and why the no-network gate cannot see WebRTC yet | [ADR 0033](docs/adr/0033-side-camera-link.md) D-1, D-4, D-9, [#532](https://github.com/openzigs/onyourleft/issues/532) |
 | Why the rider's computer must be on their own network by its spelling, and why a hosted model cannot be typed in | `apps/web/src/camera/analysis-endpoint.ts` §`addressSpaceOf`, [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) §Amendments §Q1 |
@@ -4853,6 +5051,7 @@ top of an issue **supersedes its body**.
 | When a session's placement becomes the next framing reference, and why a failed check keeps the old one | `apps/web/src/camera/side-analysis.ts` §`REFERENCE_MOVES_ON`, [#388](https://github.com/openzigs/onyourleft/issues/388) |
 | What the side camera's post-ride report may say, where every sentence lives, and why it has no numbers yet | `apps/web/src/camera/side-report.ts` §`MEASURED_SPREAD_DEGREES`, `apps/web/src/camera/side-report-wording.ts`, [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md) D-2, [#388](https://github.com/openzigs/onyourleft/issues/388) |
 | Whether live in-ride coaching exists, what its round trip to the rider's computer measured, and what a pose from a general vision model is worth | [`docs/spikes/0016-live-in-ride-coaching.md`](docs/spikes/0016-live-in-ride-coaching.md), [#389](https://github.com/openzigs/onyourleft/issues/389) |
+| How riders would talk in a room (a Discord bot, the Social SDK, or our own WebRTC), why a voice link alone cannot enforce a ban, and why the bot needs no dependency | [`docs/spikes/0017-voice-chat-for-rooms.md`](docs/spikes/0017-voice-chat-for-rooms.md), [#794](https://github.com/openzigs/onyourleft/issues/794) |
 | Which ride a side-camera session's report is saved with, and when it is dropped instead | `apps/web/src/camera/side-report-keeper.ts` |
 | Where the side camera's pose summary is made, why it is absent rather than zeros, which poses it may read, and what exports and erases it | `apps/web/src/camera/side-report.ts` §`sideSessionFrom`, `apps/web/src/camera/side-session-summary.ts`, `apps/web/src/transfer/export-everything.ts` §`ManifestPoseSummary`, [#801](https://github.com/openzigs/onyourleft/issues/801) |
 | What stops any screen rendering an absolute joint angle or a frontal-plane word, and the three exemptions | `apps/web/src/camera/no-absolute-angles.ts` §`EXEMPT`, `apps/web/src/camera/no-absolute-angles.test.ts`, [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md) D-8 |
@@ -4886,4 +5085,4 @@ top of an issue **supersedes its body**.
 | What a ride-analysis step sends to the rider's own computer, what it refuses to send, how a cut-off reply is told apart, and what a cancel does in the Android shell | `apps/web/src/ride-analysis/own-computer-step.ts`, `apps/web/src/camera/analysis-transport.ts` §`riderModelStepPort`, `docs/privacy-policy.md` §"A ride sent to your own computer", `own-computer-policy.test.ts`, [#802](https://github.com/openzigs/onyourleft/issues/802) |
 | What a ride analysis sends to a hosted model on the rider's key, why only a step the runner sealed can be sent, where the consent is checked on every step, and what the consent, the policy and Play Data Safety say about it | `apps/web/src/ride-analysis/hosted-step.ts`, `apps/web/src/ride-analysis/sealed-step.ts`, `apps/web/src/camera/hosted-transport.ts` §`isBuiltRequest`, `apps/web/src/camera/hosted-model.ts` §`HOSTED_CONSENT`, [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) §Amendments 2026-09-29, `docs/privacy-policy.md` §"Questions sent to a service you chose, on your own key", `apps/mobile/src/android/data-safety.ts`, [#803](https://github.com/openzigs/onyourleft/issues/803) |
 
-<!-- Last updated: 2026-09-17 by delivery:code-issue resolving #355 (the verge as a visibility constant, and the camera-cone gate that had been missing) -->
+<!-- Last updated: 2026-09-29 by delivery:code-issue resolving #841 (the Docker Hub dependency named, the image checker's suite, and where CI time comes from next) -->

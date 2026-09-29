@@ -1,0 +1,23 @@
+{
+  // The Durable Object adapter (#781), with NO platform types: `lib` is ES2024
+  // alone and `types` is empty, so a `process`, a `Buffer` or a `node:` import
+  // under `src/room/durable-object/` is a compile error here — as it is a load
+  // error under `workerd`, which runs this code with no Node compatibility
+  // flag. What the adapter needs of the Workers runtime is written down as
+  // ports in `platform.ts` rather than installed as `@cloudflare/workers-types`,
+  // whose globals would collide with `@types/node`'s in the wide program.
+  //
+  // Test files and `*-testing.ts` fakes are excluded: they run in Node, under
+  // Vitest, and `tsconfig.json` checks them. `worker-under-test.ts` is
+  // INCLUDED, because it is the module `workerd` actually loads.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "types": [],
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true
+  },
+  "include": ["src/room/durable-object/**/*.ts"],
+  "exclude": ["src/room/durable-object/**/*.test.ts", "src/room/durable-object/**/*-testing.ts"]
+}

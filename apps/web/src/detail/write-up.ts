@@ -105,6 +105,18 @@ export const WRITE_UP_UNREADABLE =
 export const WRITE_UP_EARLIER =
   'This is the earlier write-up of this ride. The attempt above did not replace it.';
 
+/**
+ * Above the earlier write-up while the new one, saved, is read back — #816,
+ * from #838's review. Without it the old text stood under "saved" as if it
+ * were the new one.
+ */
+export const WRITE_UP_EARLIER_READING =
+  'This is the earlier write-up of this ride. The new one is saved and is being read back.';
+
+/** Above the earlier write-up when the new one was saved and could not be read back. */
+export const WRITE_UP_EARLIER_NOT_READ =
+  'This is the earlier write-up of this ride. The new one is saved, and shows when you open this ride again.';
+
 /** Where the write-up was asked, in words — never by colour alone. */
 export const WRITE_UP_SOURCE_TEXT: Readonly<Record<RideWriteUpSourceRecord, string>> = {
   computer: 'It was written by the model on your own computer.',

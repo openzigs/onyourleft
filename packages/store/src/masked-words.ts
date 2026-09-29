@@ -1,0 +1,75 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * The rider's own list of words that are always masked before anything is
+ * sent to a hosted model — [#839](https://github.com/openzigs/onyourleft/issues/839).
+ *
+ * A street, a town, a family member's name: the things no pattern can find,
+ * because nothing about "Acacia Avenue" or "Priya" looks like an address or a
+ * name to a regular expression. `apps/web/src/ride-analysis/hosted-mask.ts`
+ * is where they are matched; this package holds only the list.
+ *
+ * ## On the athlete row
+ *
+ * For ADR 0020 D-2's reason (`unit-system.ts`, `kit-colour.ts`): it is the
+ * rider's, not the machine's, so it is on the athlete row and #776's sync can
+ * carry it when it lands — the device copy canonical until then, and after.
+ * An erase takes it with the row (`deleteAthlete`).
+ *
+ * ⚠️ **It is NOT in the account export** (`apps/web/src/transfer/export-everything.ts`
+ * names every field it copies, and this is not one of them). It is a list of
+ * the most identifying words the rider knows about themselves — the same kind
+ * of thing as a privacy zone, which is never exported either.
+ *
+ * ## What a stored list may hold
+ *
+ * {@link parseMaskedWords} is total and is applied on the way in and on the
+ * way out, so a hand-edited row cannot take a rider's library away (the
+ * `units` precedent): anything that is not a string is dropped, every entry
+ * is trimmed and has its runs of white space folded to one space, an empty
+ * one is dropped, a repeat (compared case-insensitively) is dropped, an entry
+ * longer than {@link MAXIMUM_MASKED_WORD_LENGTH} is dropped, and the list
+ * stops at {@link MAXIMUM_MASKED_WORDS}. ⚠️ **Dropping is the unsafe
+ * direction for a privacy list**, which is why the screen that writes it
+ * refuses those entries before they are written (`apps/web/src/athlete/masked-words.ts`)
+ * — so a dropped entry can only come from a row nobody typed.
+ */
+
+/** The most entries a list may hold. A list is a handful of names, not a dictionary. */
+export const MAXIMUM_MASKED_WORDS = 200;
+
+/** The longest one entry may be, in UTF-16 code units. A street name with its town fits. */
+export const MAXIMUM_MASKED_WORD_LENGTH = 80;
+
+/** One entry as it is stored: trimmed, with its inner white space folded to single spaces. */
+export function tidyMaskedWord(word: string): string {
+  return word.trim().replace(/\s+/gu, ' ');
+}
+
+/**
+ * The list a stored or typed value names — total; see the file comment for
+ * what is dropped.
+ */
+export function parseMaskedWords(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const words: string[] = [];
+  for (const entry of value as readonly unknown[]) {
+    if (words.length >= MAXIMUM_MASKED_WORDS) {
+      break;
+    }
+    if (typeof entry !== 'string') {
+      continue;
+    }
+    const word = tidyMaskedWord(entry);
+    const key = word.toLocaleLowerCase('en');
+    if (word === '' || word.length > MAXIMUM_MASKED_WORD_LENGTH || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    words.push(word);
+  }
+  return words;
+}

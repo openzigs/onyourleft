@@ -17,6 +17,7 @@ import {
   HOSTED_CONSENT,
   HOSTED_MODEL_STORAGE_KEY,
   HOSTED_MODEL_REFUSAL_TEXT,
+  HOSTED_TEST_QUESTION_LABEL,
   readHostedModel,
   writeHostedModel,
 } from '../camera/hosted-model';
@@ -51,6 +52,7 @@ import {
   SINGLE_PICTURE_PURPOSE_ALONE,
   SINGLE_PICTURE_TITLE,
 } from './CameraView';
+import { patternsOnlyGuard } from '../ride-analysis/personal-details-testing';
 
 let mounted: Mounted | undefined;
 
@@ -1053,7 +1055,7 @@ describe('a hosted model, on your own key — #518', () => {
     const controller = new CameraController({
       port: camera.port,
       schedule: manualSchedule().schedule,
-      hosted: () => hostedModelPort(readHostedModel(), { send }),
+      hosted: () => hostedModelPort(readHostedModel(), { guard: patternsOnlyGuard, send }),
     });
     controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
     mounted = await mount(<CameraView controller={controller} />);
@@ -1134,6 +1136,10 @@ describe('a hosted model, on your own key — #518', () => {
       expect.unreachable('no send control once turned on');
       return;
     }
+    // #847: the consent names this button by `HOSTED_TEST_QUESTION_LABEL`, so
+    // the label the page renders must be exactly that, not merely contain it.
+    expect(ask.textContent?.trim()).toBe(HOSTED_TEST_QUESTION_LABEL);
+    expect(document.body.textContent).toContain(`'${ask.textContent?.trim() ?? ''}'`);
     await activateWithKeyboard(ask);
     await settle();
     expect(sent).toHaveLength(1);

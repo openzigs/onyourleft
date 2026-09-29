@@ -71,6 +71,8 @@ import {
 
 import { DEFAULT_RIDER_MASS_KILOGRAMS, massToSave, riderMassFor } from '../athlete/mass';
 import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
+import { MASKED_WORDS_LEAD, MaskedWordsPanel } from '../athlete/MaskedWordsPanel';
+import type { MaskedWordsPort } from '../athlete/masked-words-port';
 import type { AthleteMassPort } from '../athlete/store-port';
 import { Button } from '../design/Button';
 import { KeptVisible, MoreAbout } from '../design/MoreAbout';
@@ -198,6 +200,7 @@ export const SETTINGS_KEPT_VISIBLE: readonly string[] = [
   'We don’t use it or share it.',
   'the app asks',
   CLEARING_STILL_REMOVES,
+  MASKED_WORDS_LEAD,
 ];
 
 /** Said when there is nothing to write a weight to. */
@@ -345,6 +348,12 @@ export interface SettingsViewProps {
    * cannot be. `design/theme-selection.ts` argues it.
    */
   readonly themeStorage?: ThemeStorage | undefined;
+  /**
+   * The rider's list of words masked before anything is sent to a hosted
+   * model (#839). `undefined` where this browser has no local store — the
+   * panel then says so and offers no list.
+   */
+  readonly maskedWords?: MaskedWordsPort | undefined;
 }
 
 export function SettingsView({
@@ -361,6 +370,7 @@ export function SettingsView({
   announcements,
   basemap,
   themeStorage,
+  maskedWords,
 }: SettingsViewProps): JSX.Element {
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
 
@@ -514,6 +524,9 @@ export function SettingsView({
         storage={announcements === undefined ? deviceStorage() : announcements}
         basemap={basemap}
       />
+
+      {/* #839. Beside the map tiles: both are about what leaves this device. */}
+      <MaskedWordsPanel port={maskedWords} />
 
       <PersistenceNotice {...(storage === undefined ? {} : { storage })} />
     </>

@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  EAR_BELOW_SHOULDER_TOLERANCE,
   implausibility,
   LIMB_RATIO_BOUNDS,
   MAXIMUM_KNEE_OPENING_COSINE,
@@ -74,10 +75,40 @@ describe('pose plausibility — #761', () => {
     expect(implausibility(pose({ knee: DRAWN.hip }))).toBe('points-coincide');
   });
 
-  it('refuses a head below the shoulder', () => {
-    expect(implausibility(pose({ ear: [DRAWN.ear[0], DRAWN.shoulder[1] + 0.01] }))).toBe(
-      'head-below-shoulder',
-    );
+  /** The drawn rider's trunk, shoulder to hip, in shares of the picture's height. */
+  const TRUNK = Math.hypot(
+    (DRAWN.shoulder[0] - DRAWN.hip[0]) * ASPECT,
+    DRAWN.shoulder[1] - DRAWN.hip[1],
+  );
+
+  it('refuses a head well below the shoulder, and passes one just inside the tolerance', () => {
+    const below = (trunks: number) =>
+      pose({ ear: [DRAWN.ear[0], DRAWN.shoulder[1] + trunks * TRUNK] });
+    expect(implausibility(below(EAR_BELOW_SHOULDER_TOLERANCE + 0.02))).toBe('head-below-shoulder');
+    expect(implausibility(below(EAR_BELOW_SHOULDER_TOLERANCE - 0.02))).toBeUndefined();
+    expect(EAR_BELOW_SHOULDER_TOLERANCE).toBe(0.25);
+  });
+
+  it('passes a rider on aerobars, head level with the shoulders and the ear a few pixels under — #813', () => {
+    // The drawn rider's legs, with the trunk laid almost flat along the top
+    // tube and the head tucked between the shoulders: the ear 2 px below the
+    // shoulder in the spike's 256 × 192 picture.
+    const aero = pose({
+      shoulder: [165 / 256, 72 / 192],
+      ear: [178 / 256, 74 / 192],
+      elbow: [168 / 256, 88 / 192],
+      wrist: [190 / 256, 88 / 192],
+    });
+    expect(implausibility(aero)).toBeUndefined();
+    // The same rider with the head dropped to the elbows is not a rider.
+    expect(
+      implausibility({
+        ...aero,
+        landmarks: aero.landmarks.map((mark) =>
+          mark.name === 'ear' ? { ...mark, y: 88 / 192 } : mark,
+        ),
+      }),
+    ).toBe('head-below-shoulder');
   });
 
   it('refuses a shoulder below the hip — the order the spike’s hallucinations broke', () => {

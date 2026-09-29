@@ -84,6 +84,7 @@ export {
   gapFillingStoreFactory,
   memoryWriteStoreFactory,
   misfiledKitColourStoreFactory,
+  lastWordDroppedStoreFactory,
   misroutedBlobStoreFactory,
   roundedClaimStoreFactory,
   appendingEffortStoreFactory,

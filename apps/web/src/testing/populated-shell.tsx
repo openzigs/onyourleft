@@ -22,7 +22,7 @@
  * basemap; jsdom has no WebGL and supplies neither.
  */
 
-import type { JSX } from 'react';
+import { useState, type JSX } from 'react';
 
 import {
   altitudeMetres,
@@ -70,12 +70,15 @@ import { stubEffortPort } from '../efforts/testing';
 import { stubLibrary } from '../library/testing';
 import { idleSnapshot, ridingSnapshot, stubRideController } from '../ride/testing';
 import { routeStub, stubRouteId } from '../routes/testing';
+import { addWaypoint, emptyDraft, type RouteDraft } from '../routing/draft';
+import { DRAFT_STORAGE_KEY, serialiseDraft } from '../routing/draft-storage';
 import { stubMatchPort } from '../segments/match-testing';
 import { stubSegments } from '../segments/testing';
 import { AppShell, type AppShellProps } from '../shell/AppShell';
 import type { RouteId } from '../shell/routes';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import type { UnitsPort } from '../units/store-port';
+import type { MaskedWordsPort } from '../athlete/masked-words-port';
 import { workoutStub } from '../workouts/testing';
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
@@ -130,8 +133,8 @@ export const SELECTIONS: Partial<Record<RouteId, string>> = {
  *   the selector must be present in BOTH walks.
  * - `none` — nothing on the route comes from these fixtures, and the reason
  *   says why. ⚠️ A `none` is a statement about THIS harness, not about the
- *   screen: `transfer` has data-dependent content and is handed no port here,
- *   and the reason says so rather than calling the screen static.
+ *   screen: `transfer` has data-dependent content from a port this shell does
+ *   not build, and the reason says so rather than calling the screen static.
  */
 export type PopulatedExpectation =
   | { readonly kind: 'fixture'; readonly marker: string }
@@ -162,23 +165,20 @@ export const POPULATED: Record<RouteId, PopulatedExpectation> = {
   transfer: {
     kind: 'none',
     reason:
-      'where a caller hands it a transfer port (#666: the reflow page, over the browser’s own IndexedDB, and the sentence walk, over fake-indexeddb) that store is empty in both walks; where none is handed it shows its not-available state in both',
+      'what it shows comes from the store behind the transfer port a caller hands it, not from these fixtures; the reflow page fills that store and imports a file for its populated walk and says so with an expectation of its own (#690), while the sentence walk hands it an empty store and the others none',
   },
   camera: {
     kind: 'none',
     reason:
       'the camera this page hands it opens nothing, and its side-camera pairing is offered and never made, so it is the same in both walks',
   },
-  settings: {
-    kind: 'none',
-    reason: 'its forms are the same whatever is stored; nothing it renders is a list of data',
-  },
+  // #839: the rider's words to mask are the one list the screen renders.
+  settings: { kind: 'fixture', marker: '.oyl-main .oyl-masked-words li' },
   about: { kind: 'none', reason: 'static prose' },
-  'route-builder': {
-    kind: 'none',
-    reason:
-      'handed no routing provider, and its draft is local storage rather than a port — the same in both walks',
-  },
+  // #690: its waypoint list and legs table come from the draft in local
+  // storage, which `PopulatedShell` writes for the populated walk and clears
+  // for the empty one — see `seedRouteDraft`.
+  'route-builder': { kind: 'fixture', marker: '.oyl-main .oyl-scroll-region tbody tr' },
   'side-camera': {
     kind: 'none',
     reason: 'no pairing is ever made, so it shows its before-pairing state in both walks',
@@ -205,6 +205,45 @@ function rideName(index: number): string {
     return `Llanfairpwllgwyngyllgogerychwyrndrobwllllantysiliogogogoch loop ${String(index)}`;
   }
   return `An extraordinarily long Sunday morning club ride out to the reservoir and back again ${String(index)}`;
+}
+
+/**
+ * One of the populated library's rides, for a caller that puts it in a store
+ * of its own — the reflow page's Files screen (#690).
+ */
+export function fixtureRide(index: number): ActivityRecord {
+  return ride(index);
+}
+
+/** How many waypoints the route builder's fixture draft has. */
+export const FIXTURE_DRAFT_WAYPOINTS = 4;
+
+/**
+ * The route builder's fixture (#690): four waypoints joined by freehand legs,
+ * which a draft restores whole with no routing engine (`draft-storage.ts`
+ * §`deserialiseDraft`), so the waypoint list and the legs table are drawn.
+ */
+function fixtureDraft(): RouteDraft {
+  let draft = emptyDraft();
+  for (let index = 0; index < FIXTURE_DRAFT_WAYPOINTS; index += 1) {
+    draft = addWaypoint(draft, north(index * 400, (index % 2) * 300), 'freehand').draft;
+  }
+  return draft;
+}
+
+/**
+ * Put the fixture draft where the route builder reads it, or take it away.
+ * The draft is local storage rather than a port (`routing/draft-storage.ts`),
+ * so it is the one fixture this shell cannot hand over as a prop — and a walk
+ * of the empty fixture after a populated one on the same origin would
+ * otherwise find the populated draft still there.
+ */
+export function seedRouteDraft(populated: boolean, storage: Storage): void {
+  if (populated) {
+    storage.setItem(DRAFT_STORAGE_KEY, serialiseDraft(fixtureDraft()));
+  } else {
+    storage.removeItem(DRAFT_STORAGE_KEY);
+  }
 }
 
 function ride(index: number): ActivityRecord {
@@ -254,6 +293,8 @@ const POPULATED_WRITE_UP: RideWriteUpRecord = {
 function rideAnalysisPort(): RideAnalysisPort {
   return {
     availableSources: () => ['computer'],
+    previewHostedRequest: async () => Promise.resolve({ kind: 'shown', steps: [], total: 1 }),
+    hostedPreviewSeen: () => true,
     askForRideWriteUp: async () => new Promise<AskOutcome>(() => undefined),
   };
 }
@@ -348,6 +389,35 @@ function settingsPort(): UnitsPort {
     store: {
       setAthleteUnits: (id, units): Promise<AthleteRecord | undefined> =>
         Promise.resolve({ id, displayName: 'You', createdAt: unixSeconds(NOW), units }),
+    },
+  };
+}
+
+/**
+ * The rider's words to mask (#839) — in the populated walk a list whose
+ * entries include one long phrase and one unbreakable word, so the reflow
+ * walk lays out the longest a row can be.
+ */
+function maskedWordsPort(populated: boolean): MaskedWordsPort {
+  const words = populated
+    ? [
+        'Kestrel Farm',
+        'The Old Rectory, Lower Oakbrook Lane, Little Wittenham-on-the-Marsh',
+        'Supercalifragilisticexpialidociousvillagename',
+      ]
+    : [];
+  return {
+    athleteId: ATHLETE,
+    store: {
+      getAthlete: (id): Promise<AthleteRecord | undefined> =>
+        Promise.resolve({
+          id,
+          displayName: 'You',
+          createdAt: unixSeconds(NOW),
+          maskedWords: words,
+        }),
+      setAthleteMaskedWords: (id, next): Promise<AthleteRecord | undefined> =>
+        Promise.resolve({ id, displayName: 'You', createdAt: unixSeconds(NOW), maskedWords: next }),
     },
   };
 }
@@ -447,6 +517,12 @@ export function PopulatedShell({
   capabilities = NO_BLUETOOTH,
   ...extras
 }: { readonly populated: boolean } & PopulatedShellExtras): JSX.Element {
+  // Before anything below renders, so a route builder mounted in this same
+  // render reads it; once, so a re-render never rewrites a rider's edits.
+  useState(() => {
+    seedRouteDraft(populated, localStorage);
+    return populated;
+  });
   const rides = populated
     ? Array.from({ length: POPULATED_RIDES }, (_unused, index) => ride(index))
     : [];
@@ -463,6 +539,7 @@ export function PopulatedShell({
       rideController={stubRideController(populated ? ridingSnapshot() : idleSnapshot()).controller}
       settings={settingsPort()}
       athleteMass={athleteMassPort()}
+      maskedWords={maskedWordsPort(populated)}
       library={stubLibrary(ATHLETE, rides)}
       detail={detailPort(populated)}
       rideAnalysis={rideAnalysisPort()}

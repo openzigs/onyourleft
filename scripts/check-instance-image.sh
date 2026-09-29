@@ -19,10 +19,25 @@
 # Needs Docker and the network (the base image is pulled by digest the first
 # time), so it is NOT in `check:repo`, the bare-clone set.
 #
+# ⚠️ **The one outside service it needs is Docker Hub** (#841). The base image
+# is pulled from there whenever this machine does not already hold it -- on
+# every CI run, because a runner starts empty. GitHub's own documentation says
+# Docker Hub's rate limit is not applied to GitHub-hosted runners pulling a
+# public image (read 2026-09-29), so what is left is an OUTAGE, and that is
+# what IMG004 names: the pull is its own step, before the build, so a registry
+# that is down reads as the registry being down rather than as a Dockerfile
+# that stopped building. CLAUDE.md §4c records the decision to keep this in the
+# required job anyway.
+#
 # Rules:
 #   IMG001  the image does not build
 #   IMG002  the container never reports healthy
 #   IMG003  /source does not name the commit the image was built from
+#   IMG004  the base image could not be pulled (Docker Hub, not this tree)
+#   IMG005  the Dockerfile's base image is not pinned by digest
+#
+# Its own suite, with a fake `docker` on PATH and no Docker needed:
+#   bash scripts/check-instance-image.test.sh
 #
 # Run: bash scripts/check-instance-image.sh
 
@@ -52,6 +67,58 @@ fail() {
 }
 
 commit="$(git -C "${ROOT}" rev-parse HEAD)" || fail 'could not read the commit with git.'
+
+# The base images, read out of the Dockerfile rather than written down twice.
+# A tag is mutable, so a base image that is not pinned by digest is a finding
+# of its own (CLAUDE.md §8's reason for pinning every action to a commit).
+#
+# EVERY `FROM`, not the first (#852): a second stage built from a tag would
+# pass a check that read one line. Docker reads the instruction without regard
+# to case and lets options come before the image, so `from`, leading
+# whitespace and `FROM --platform=... <image>` are all read. A stage that
+# names an EARLIER stage (`FROM build AS run`) or `scratch` pulls nothing and
+# is not a base image. Anything this cannot read -- a `FROM` split over a line
+# continuation, an image from an `ARG` -- has no digest to show and fails,
+# which is the direction a check should fail in.
+bases=()
+stages=' '
+from_lines=0
+while IFS= read -r line; do
+  read -r -a words <<< "${line}"
+  [ "${#words[@]}" -gt 0 ] || continue
+  [ "$(printf '%s' "${words[0]}" | tr '[:upper:]' '[:lower:]')" = from ] || continue
+  from_lines=$((from_lines + 1))
+  index=1
+  while [ "${index}" -lt "${#words[@]}" ] && [[ "${words[${index}]}" == --* ]]; do
+    index=$((index + 1))
+  done
+  image="${words[${index}]:-}"
+  lowered="$(printf '%s' "${image}" | tr '[:upper:]' '[:lower:]')"
+  # Only an EARLIER stage counts: `FROM node AS node` names the image.
+  earlier="${stages}"
+  if [ "$(printf '%s' "${words[$((index + 1))]:-}" | tr '[:upper:]' '[:lower:]')" = as ] &&
+    [ -n "${words[$((index + 2))]:-}" ]; then
+    stages+="$(printf '%s' "${words[$((index + 2))]}" | tr '[:upper:]' '[:lower:]') "
+  fi
+  [ "${lowered}" = scratch ] && continue
+  if [ -n "${lowered}" ]; then
+    case "${earlier}" in
+      *" ${lowered} "*) continue ;;
+    esac
+  fi
+  case "${image}" in
+    *@sha256:*) bases+=("${image}") ;;
+    *) fail "IMG005 apps/instance/Dockerfile's base image is not pinned by digest: ${image:-(a FROM line with no image)}" ;;
+  esac
+done < "${ROOT}/apps/instance/Dockerfile"
+[ "${from_lines}" -gt 0 ] ||
+  fail "IMG005 apps/instance/Dockerfile's base image is not pinned by digest: (no FROM line)"
+for base in ${bases[@]+"${bases[@]}"}; do
+  if ! docker image inspect "${base}" >/dev/null 2>&1; then
+    docker pull --quiet "${base}" >/dev/null ||
+      fail "IMG004 the base image ${base} could not be pulled. That is Docker Hub (an outage, or no network), not a defect in apps/instance -- re-run once it answers."
+  fi
+done
 
 if ! docker build --quiet --build-arg "OYL_INSTANCE_COMMIT=${commit}" \
   -t "${TAG}" "${ROOT}/apps/instance" >/dev/null; then
