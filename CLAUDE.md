@@ -3804,7 +3804,12 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   prose. ⚠️ A reviewer who remembers this sentence being unenforced is reading the old file:
   deleting an ADR's `- **Status**: Accepted` line used to leave `check-repo-rules.sh` reporting
   clean at exit 0. Numbers are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
-  **and which are claimed by open issues** before you pick one. **The next free number is 0034.**
+  **and which are claimed by open issues** before you pick one. **The next free number is 0036.**
+  ⚠️ **0035 is [ADR 0035](docs/adr/0035-model-written-ride-write-ups.md)**, taken by
+  [#796](https://github.com/openzigs/onyourleft/issues/796) for a ride write-up written by the
+  rider's own model, and **0034 is reserved for [#673](https://github.com/openzigs/onyourleft/issues/673)**,
+  whose title names it; it is not written. A reviewer who remembers this sentence offering 0034 is
+  reading the old file.
   ⚠️ **0033 is [ADR 0033](docs/adr/0033-side-camera-link.md)**, taken by
   [#527](https://github.com/openzigs/onyourleft/issues/527) for the side-camera link. A reviewer who
   remembers this sentence offering 0033 is reading the old file.

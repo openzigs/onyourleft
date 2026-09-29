@@ -712,3 +712,13 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
     the other was validated; and a report is saved as sentences under the store's 400-character
     limit, which the longest summary with a source sentence appended would pass. The screen during
     the session already says where every picture went.
+
+- **2026-09-28** — **D-6's *"What is kept"* row is superseded in its last clause, *"and discarded
+  when the report is made"*, by [ADR 0035](0035-model-written-ride-write-ups.md) D-6**, on the
+  owner's ruling on [#795](https://github.com/openzigs/onyourleft/issues/795): a pose summary is
+  to be kept with the ride, from the pull request that first stores one: differences only, per sagittal kind, with comparability, counts and source —
+  owned by the athlete, removed by the erase, carried in the export and listed in the privacy
+  policy. ⚠️ **D-6's rule about pictures is untouched**: no picture is stored or shown on the
+  tablet. **D-3 stands**: the owner confirmed on
+  [#796](https://github.com/openzigs/onyourleft/issues/796) that position is analysed over the whole
+  session only, and nothing joins the summary to a section or a reading of the ride.
