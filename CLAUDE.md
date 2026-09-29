@@ -1295,9 +1295,21 @@ apps/                 AGPL-3.0-or-later, without exception
                         with no build step (`node src/main.ts`). It answers
                         `/health`, `/source` (AGPL-3.0 §13, ADR 0036 D-6),
                         `/openapi.json` and `/licences/third-party.txt`, and
-                        nothing else yet. ⚠️ **No runtime dependency at all**:
-                        its notices document says so and `check:notices` holds
-                        it. ⚠️ It must not depend on `apps/web` or
+                        nothing else yet. ⚠️ **One third-party runtime dependency since
+                        #769, `kysely`** (ADR 0037 D-9's row): its notices
+                        document says so and `check:notices` holds it. Since
+                        #842 it also holds `src/store/` — the `SqlStore` port
+                        over SQLite (`node:sqlite` through Kysely, with a
+                        forty-line adapter because Kysely reads NO rows from
+                        `node:sqlite` as it is), three migrations each with a
+                        tested `down`, and a round-trip harness — and
+                        `src/blob/`, content-addressed blobs on local disk,
+                        in memory, or in an S3-compatible bucket. ⚠️ **Nothing
+                        calls either yet**: #772, #37 and #776 are their first
+                        consumers, and the Docker image installs no
+                        `node_modules` until one does. ⚠️ Only `src/store/` may
+                        import the driver or Kysely (`eslint.config.js`).
+                        ⚠️ It must not depend on `apps/web` or
                         `apps/mobile` (`boundaries/dependencies`), and nothing
                         in the client may import it: the client reaches an
                         instance over the network, through ONE module (#777,
@@ -1983,6 +1995,20 @@ pnpm --filter @onyourleft/instance run test:workerd
 # it reads is in .env.example. Ctrl-C stops it. Not a gate, and nothing runs it.
 OYL_INSTANCE_COMMIT="$(git rev-parse HEAD)" pnpm --filter @onyourleft/instance start
 
+# Migrate an instance database file by hand (#769): `status`, `latest`, `up`
+# (one) or `down` (one), each printing the applied migrations and every table's
+# row count afterwards. ⚠️ `down` drops what the newest migration created, rows
+# and all. Run on 2026-09-29 against a file holding three athletes' fixture rows.
+pnpm --filter @onyourleft/instance run migrate <database file> status
+
+# The blob store's conformance suite against a REAL S3-compatible bucket (#770).
+# Unset, those cases SKIP loudly naming the five variables; CI sets none, so it
+# is not a gate. Run on 2026-09-29 against SeaweedFS 4.48 with signatures
+# enforced (and red with a wrong secret).
+OYL_INSTANCE_S3_ENDPOINT=… OYL_INSTANCE_S3_BUCKET=… OYL_INSTANCE_S3_REGION=… \
+  OYL_INSTANCE_S3_ACCESS_KEY_ID=… OYL_INSTANCE_S3_SECRET_ACCESS_KEY=… \
+  pnpm --filter @onyourleft/instance run test
+
 # Rewrite apps/instance/openapi.json from the route table (#36). The ONLY way
 # that file changes: `src/openapi.test.ts` fails when it is not what this
 # writes, so a route added without it is a red build. Read the diff after.
@@ -2018,11 +2044,21 @@ npm view typescript-eslint peerDependencies.typescript
 # Requires Docker, and the network the first time (the base image is pulled by
 # digest). Builds apps/instance/Dockerfile with the tree's commit, waits for
 # the image's OWN healthcheck to answer /health inside the container, and
-# requires /source to name that commit. IMG001-IMG003. Removes the container
-# and the image whatever happens. About 1 s with the base image cached and
-# 2 s without on a developer's machine, and about 10 s on the CI runner,
-# measured 2026-09-29. In CI since #771 (§4c).
+# requires /source to name that commit. IMG001-IMG005: since #841 the base
+# image must be pinned by digest (IMG005) and is pulled as its own step, so a
+# Docker Hub that will not serve it is IMG004 -- the registry, named -- rather
+# than an IMG001 that reads like a broken Dockerfile. A base image already on
+# the machine is not pulled again. Removes the container and the image
+# whatever happens. About 1 s with the base image cached and 2 s without on a
+# developer's machine, and 10 to 15 s on the CI runner, measured 2026-09-29.
+# In CI since #771 (§4c).
 bash scripts/check-instance-image.sh
+
+# Its own suite (#841). A fake `docker`, `curl` and `sleep` go first on PATH,
+# the way check-third-party-notices.test.sh fakes `pnpm`, so it needs no Docker
+# and waits for nothing; every IMG id has a case that goes red. 43 cases on
+# 2026-09-29 -- the count is what the run prints.
+bash scripts/check-instance-image.test.sh
 
 # The same image by hand, for #807's deployment. The commit is a REQUIRED build
 # argument: the build fails without it, rather than an instance that cannot
@@ -2135,11 +2171,15 @@ not.
   decision D6), and a reviewer who remembers it is reading the old file.
 - **Any instance feature beyond metadata.** `apps/instance` answers `/health`, `/source`,
   `/openapi.json` and `/licences/third-party.txt` and nothing else yet: no account (#772), no sync
-  (#776), no database (#769), no room anybody can reach (#780). ⚠️ The room **core** exists since
+  (#776), no room anybody can reach (#780). ⚠️ The room **core** exists since
   [#779](https://github.com/openzigs/onyourleft/issues/779) — `src/room/core/` — and the only
   thing that mounts it is [#781](https://github.com/openzigs/onyourleft/issues/781)'s Durable
   Object adapter, under a local `workerd` in `test:workerd` and **deployed nowhere**. Do not write a
   command or a test that assumes a reachable room exists.
+  ⚠️ **The database and the blob store DO exist since #842** (#769, #770) — a reviewer who
+  remembers "no database (#769)" in this bullet is reading the old file — but no route and no
+  start-up path opens either: `main.ts` reads no database path, and the Docker image installs
+  no `node_modules`, so `kysely` is not in it. The first consumer wires both.
 
 #### What exists, and what each is **not** yet
 
@@ -2359,22 +2399,23 @@ with its own fixture suite), `shellcheck scripts/*.sh`, then `pnpm install --fro
 `bash scripts/check-cost-model.test.sh`, `bash scripts/coverage-summary.test.sh`, `build`,
 `playwright install --with-deps chromium`, `test:browser`, `bash scripts/check-dependency-licences.test.sh`, `check:licences`,
 `bash scripts/check-third-party-notices.test.sh`, `check:notices` and — since
-[#771](https://github.com/openzigs/onyourleft/issues/771) — `bash scripts/check-instance-image.sh` — then
+[#771](https://github.com/openzigs/onyourleft/issues/771) — `bash scripts/check-instance-image.sh`, with its
+suite `bash scripts/check-instance-image.test.sh` since [#841](https://github.com/openzigs/onyourleft/issues/841) — then
 publishes the coverage table to the run summary and uploads the HTML report as an artefact.
 Those last two carry `if: always()` and cannot fail the job: the run where coverage moved
 unexpectedly is exactly the one whose table you want, and a reporting step that can fail a
 build is a percentage floor arriving by the back door, which §5 forbids.
 
 ⚠️ **Since [#651](https://github.com/openzigs/onyourleft/issues/651) one step, `Checks,
-concurrently`, runs twenty-three of those commands AT ONCE (twenty-two until #771 added the
-instance image), and a reviewer who remembers one step per
+concurrently`, runs twenty-four of those commands AT ONCE (twenty-two until #771 added the
+instance image, twenty-three until #841 added its suite), and a reviewer who remembers one step per
 command is reading the old file.** It runs the eight bare-clone script checks, `shellcheck`,
 `format:check`, `lint`, `typecheck`, `check:wiring`, `check:cost-model`, `check:licences`, `build`,
-the browser install, the instance image and five checker suites, after the install — the bare-clone checks need none
+the browser install, the instance image and six checker suites, after the install — the bare-clone checks need none
 of it, but on their own before it they took 48 s with the runner otherwise idle. It goes through
 `scripts/run-concurrently.sh` (§4a), which labels every line with its command, waits on each
 process by itself and fails the step if **any** command failed — its own suite runs first, because
-a runner that swallowed a failure would make that step twenty-three gates removed and still look
+a runner that swallowed a failure would make that step twenty-four gates removed and still look
 green, and #651's pull request proved it red on the runner with one formatting defect (run
 36325105846: `format:check` FAILED, the other twelve then in that step finished, the job failed).
 ⚠️ **Anything that runs Vitest stays out of it**, and so do `check:capacitor` and `check:notices`,
@@ -2386,8 +2427,27 @@ run 36323764725 did it and both went red, because each is CPU-bound on its own.
 
 ⚠️ **The instance ([#771](https://github.com/openzigs/onyourleft/issues/771)) is tested inside this
 same job and adds no step of its own but one**, decided against the three constraints that bound
-everything here — one required context, a budget already spent, and no gate that needs a service
-outside the runner:
+everything here — one required context, a budget already spent, and no gate that needs an account,
+a secret or a service this project operates. ⚠️ **This used to read "no gate that needs a service
+outside the runner", and that was never true** ([#841](https://github.com/openzigs/onyourleft/issues/841)):
+the install reaches the npm registry, the browser install Playwright's CDN and Ubuntu's archives,
+and the image check **Docker Hub**, on every run, because a runner starts with no base image. What
+each of those can do is turn `main` red on a day the service is down. For Docker Hub:
+
+- **Its pull-rate limit does not apply here.** GitHub's
+  [Actions limits](https://docs.github.com/en/actions/reference/limits) page says *"GitHub-hosted
+  runners pulling public images: Docker Hub's rate limit is not applied"* (read 2026-09-29), and the
+  base image is public. A self-hosted runner would not have that exemption.
+- **An outage is named, not disguised.** The checker pulls the base image as its own step before it
+  builds, so a registry that will not serve it fails as `IMG004`, saying it is Docker Hub and not
+  `apps/instance` — a re-run, not a fix. Before #841 it failed as `IMG001`, *"the Dockerfile did not
+  build"*.
+- **The check stays in the required job, decided.** It is the only gate that the image builds and
+  that `/source` names its commit (AGPL-3.0 §13), a second job could not block a merge, and it is
+  exposed to one more registry than the job already was — the same trade as the install. Mirroring
+  the base image to GHCR would move the dependency rather than remove it, and would add a push
+  credential, which this job holds none of. Removing `'instance image'` from `Checks, concurrently`
+  is a one-line revert if an outage ever outlasts the patience of the day.
 
 | What | Where | Why |
 |---|---|---|
@@ -2413,8 +2473,10 @@ quotes run ids rather than estimates.
 | **After**, #833 | [36582905894](https://github.com/openzigs/onyourleft/actions/runs/36582905894) attempt 1 | EPYC 9V74 | 1216 s | 154 s | 410 s | 581 s |
 | **After**, #833 | [36588252465](https://github.com/openzigs/onyourleft/actions/runs/36588252465) | EPYC 9V74 | 994 s | | | |
 
-**On the 7763 — the runner #771 names — the delta is +4 s** (1223 s against a mean of 1219 s over
-three `main` runs), inside the spread of `main` alone. The image check itself took about **10 s**
+⚠️ **This paragraph used to say "the delta is +4 s" on the 7763, and that was one run inside a 25 s
+spread** ([#841](https://github.com/openzigs/onyourleft/issues/841)): **no measurable change, n = 1
+on the 7763**, where #771 asked for two. The 1223 s run against a mean of 1219 s over three `main`
+runs is inside the spread of `main` alone. The image check itself took about **10 s**
 inside the concurrent step, which grew by 3 s. The instance's Vitest project is 51 cases in well under
 a second. **On the 9V74 it is +16 s** on the second sample (994 s against 985 s and 970 s on
 `main`). ⚠️ The first 9V74 sample took 1216 s, and all of the extra time was in Vitest (+110 s) and
@@ -2423,6 +2485,48 @@ so it is recorded as runner variance, not as a cost. ⚠️ **The job was alread
 so #771's "if the delta pushes a green run past 15 minutes" was already true of `main`. This
 change did not push it there, and moving something out of the job is #651's open question, not
 this one's.
+
+**The runs since, read on 2026-09-29 for #841, and why they settle nothing about #771.** No second
+`main` run after #833 has landed on a 7763 yet, so the 7763 comparison is still n = 1 — it is owed
+by the next one, and its id goes in the table above. What did land says the runner, not the change,
+is the variable:
+
+| | Run | CPU | Job | `Checks, concurrently` | Vitest with coverage | Browser gate |
+|---|---|---|--:|--:|--:|--:|
+| **Before** #833, `main` | [36585604660](https://github.com/openzigs/onyourleft/actions/runs/36585604660) | EPYC 9V74 | 977 s | 129 s | 297 s | 490 s |
+| **Before** #833, `main` | [36588522202](https://github.com/openzigs/onyourleft/actions/runs/36588522202) | EPYC 7763 | 1230 s | 161 s | 391 s | 605 s |
+| **Before** #833, `main` | [36595072185](https://github.com/openzigs/onyourleft/actions/runs/36595072185) | EPYC 9V45 | 738 s | 98 s | 213 s | 378 s |
+| **After** #833, `main` | [36596941341](https://github.com/openzigs/onyourleft/actions/runs/36596941341) | EPYC 9V74 | 1206 s | 168 s | 379 s | 584 s |
+| **After** #833 and #840, `main` | [36598959609](https://github.com/openzigs/onyourleft/actions/runs/36598959609) | EPYC 9V74 | 1228 s | 173 s | 393 s | 584 s |
+
+The two post-#833 9V74 runs took 1206 s and 1228 s where the three before took 970–985 s — the
+same 25 % the first 9V74 sample on #833's own pull request showed, and in the two steps it does not
+touch; the image check itself took **12 s and 15 s** inside the concurrent step. So "EPYC 9V74" is
+not one speed (the tag is the CPU model, not the VM's share of it), and one job can land anywhere
+from 738 s to 1230 s. **Any before/after comparison of this job is n-per-CPU or it is noise.**
+
+#### Where the time comes from next — owed before B9 and B12
+
+⚠️ **The job is now 1206–1231 s of its 25-minute `timeout-minutes` on the slower runners — about
+20.5 minutes, 82 % of the stop** — and every bundle still to come adds to it: rooms and their
+conformance suite on Node and on `workerd` (#779–#781), and the two-browser room spec. A stop has to
+be clear of what it stops (§4f's #423 reason), so this has to be answered **before** those land, not
+by raising the stop again. The time is in two steps: Vitest with coverage (379–393 s) and the
+browser gate (584–605 s). The candidates, in the order they cost least in what the job proves:
+
+1. **Run the heaviest Vitest files outside coverage instrumentation.** #651 measured the #545
+   near-field rides at 216 s and the FIT fuzz at 99 s under coverage, slowed about three times by
+   instrumenting their hot loops. Run them in their own uninstrumented Vitest invocation and they
+   still gate exactly as now; what changes is that the coverage **report** stops counting their
+   lines, which §5 says is a signal and not a gate. Estimated saving on the 7763: about 200 s,
+   from #651's ratio — **not measured**, so the first pull request to do it measures it. No owner
+   decision needed; this is the one to do first.
+2. **A second, non-required job for the heaviest gates**, nightly or on push to `main`. It would buy
+   the most, and it is an **owner decision**: a job that is not `Repository rules` cannot block a
+   merge (the warning at the top of this section), so whatever moves there stops being a gate on a
+   pull request and becomes a report after it. Nothing is moved there until the owner says which,
+   if any.
+3. **Not a larger runner**: §8 — always charged, even on a public repository.
 
 ⚠️ **The runner is two cores, not four, and that is what bounds all of this.** `ubuntu-latest`
 reports four vCPUs, and `lscpu` on it reads `Thread(s) per core: 2`, `Core(s) per socket: 2` (run
@@ -4868,4 +4972,4 @@ top of an issue **supersedes its body**.
 | What a ride-analysis step sends to the rider's own computer, what it refuses to send, how a cut-off reply is told apart, and what a cancel does in the Android shell | `apps/web/src/ride-analysis/own-computer-step.ts`, `apps/web/src/camera/analysis-transport.ts` §`riderModelStepPort`, `docs/privacy-policy.md` §"A ride sent to your own computer", `own-computer-policy.test.ts`, [#802](https://github.com/openzigs/onyourleft/issues/802) |
 | What a ride analysis sends to a hosted model on the rider's key, why only a step the runner sealed can be sent, where the consent is checked on every step, and what the consent, the policy and Play Data Safety say about it | `apps/web/src/ride-analysis/hosted-step.ts`, `apps/web/src/ride-analysis/sealed-step.ts`, `apps/web/src/camera/hosted-transport.ts` §`isBuiltRequest`, `apps/web/src/camera/hosted-model.ts` §`HOSTED_CONSENT`, [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) §Amendments 2026-09-29, `docs/privacy-policy.md` §"Questions sent to a service you chose, on your own key", `apps/mobile/src/android/data-safety.ts`, [#803](https://github.com/openzigs/onyourleft/issues/803) |
 
-<!-- Last updated: 2026-09-17 by delivery:code-issue resolving #355 (the verge as a visibility constant, and the camera-cone gate that had been missing) -->
+<!-- Last updated: 2026-09-29 by delivery:code-issue resolving #841 (the Docker Hub dependency named, the image checker's suite, and where CI time comes from next) -->

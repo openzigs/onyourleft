@@ -42,10 +42,14 @@ function asProse(markdown: string): string {
     .trim();
 }
 
-/** The block quote after `heading` in ADR 0035 and before `next`. */
-function quotedAfter(heading: string, next: string): string {
+/**
+ * The block quote after `heading` in ADR 0035 and before `next` — the FIRST
+ * `heading`, or with `newest` the last, which is how a wording amended twice
+ * is read at its newest (#847).
+ */
+function quotedAfter(heading: string, next: string, newest = false): string {
   const adr = read(ADR_0035);
-  const start = adr.indexOf(heading);
+  const start = newest ? adr.lastIndexOf(heading) : adr.indexOf(heading);
   const end = adr.indexOf(next, start + heading.length);
   if (start < 0 || end < 0) {
     return '';
@@ -54,7 +58,7 @@ function quotedAfter(heading: string, next: string): string {
     adr
       .slice(start, end)
       .split('\n')
-      .filter((line) => line.startsWith('>'))
+      .filter((line) => line.trimStart().startsWith('>'))
       .join('\n'),
   );
 }
@@ -67,18 +71,41 @@ describe('the approved wording, word for word (ADR 0035 D-9)', () => {
     expect(`${WRITE_UP_FRAMING_LEAD} ${WRITE_UP_FRAMING_REST}`).toBe(approved);
   });
 
-  it('says what the rider’s own computer is sent in wording B', () => {
-    const approved = quotedAfter('**B — own computer', '**C — hosted');
+  // B and C as ADR 0035's 2026-09-29 amendment completed them (#845). The
+  // body's D-9 still quotes the originals, and an ADR body is never edited.
+  it('says what the rider’s own computer is sent in wording B, as amended — #845', () => {
+    const approved = quotedAfter('**B, as amended:**', '**C, as amended:**');
     expect(approved.length).toBeGreaterThan(400);
+    expect(approved).toContain("its distance, and each section's gradient and total climb");
     expect(`${COMPUTER_SENDS_LEAD} ${COMPUTER_SENDS}`).toBe(approved);
   });
 
-  it('stands wording C beside the hosted ask, all but the sentence about the switch — #803', () => {
-    const approved = quotedAfter('**C — hosted', '⚠️ **A says');
+  it('stands wording C, as amended, beside the hosted ask, all but the sentence about the switch — #803, #845, #847', () => {
+    // The NEWEST C: #847's entry replaced #845's test-question sentence.
+    const approved = quotedAfter('**C, as amended:**', '| Artefact', true);
     expect(approved.length).toBeGreaterThan(900);
+    expect(approved).toContain(
+      "When you press 'Send a test question to the service', the app sends it one test question",
+    );
     expect(`${HOSTED_SENDS.join(' ')} ${HOSTED_CONSENT.offUntilOn}`).toBe(approved);
     // More than the headline: #838's review found only the first sentence here.
     expect(HOSTED_SENDS.length).toBe(5);
+  });
+
+  it('would notice the body’s original B and C, which no longer ship — the control', () => {
+    const originalB = quotedAfter('**B — own computer', '**C — hosted');
+    const originalC = quotedAfter('**C — hosted', '⚠️ **A says');
+    expect(originalB.length).toBeGreaterThan(400);
+    expect(originalC.length).toBeGreaterThan(900);
+    expect(`${COMPUTER_SENDS_LEAD} ${COMPUTER_SENDS}`).not.toBe(originalB);
+    expect(`${HOSTED_SENDS.join(' ')} ${HOSTED_CONSENT.offUntilOn}`).not.toBe(originalC);
+  });
+
+  it('would notice #845’s C, which said the test question goes on a save — the control, #847', () => {
+    const c845 = quotedAfter('**C, as amended:**', '⚠️ **The test question');
+    expect(c845).toContain('When you save a service, the app sends it one test question');
+    expect(c845).not.toBe(quotedAfter('**C, as amended:**', '| Artefact', true));
+    expect(`${HOSTED_SENDS.join(' ')} ${HOSTED_CONSENT.offUntilOn}`).not.toBe(c845);
   });
 });
 

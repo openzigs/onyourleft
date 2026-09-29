@@ -11,12 +11,14 @@
     "test": "vitest run",
     "test:workerd": "vitest run --config vitest.workerd.config.ts",
     "start": "node src/main.ts",
-    "openapi:generate": "node tools/write-openapi.ts"
+    "openapi:generate": "node tools/write-openapi.ts",
+    "migrate": "node tools/migrate.ts"
   },
   "dependencies": {
     "@onyourleft/domain": "workspace:*",
     "@onyourleft/physics": "workspace:*",
-    "@onyourleft/protocol": "workspace:*"
+    "@onyourleft/protocol": "workspace:*",
+    "kysely": "0.29.6"
   },
   "devDependencies": {
     "rolldown": "1.2.6",
