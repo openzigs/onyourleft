@@ -101,6 +101,7 @@ import type {
   CameraFrameRecord,
   FramingReferenceRecord,
   SideCameraReportRecord,
+  RideWriteUpRecord,
   MatchCheckpointRecord,
   PrivacyZoneRecord,
   SegmentEffortRecord,
@@ -116,6 +117,7 @@ import {
   chunksOf,
   framingReferenceFor,
   sideCameraReportFor,
+  rideWriteUpFor,
   createStoreHarness,
   effortFor,
   extractableDeviceKey,
@@ -168,6 +170,7 @@ interface World {
   readonly frame: CameraFrameRecord;
   readonly reference: FramingReferenceRecord;
   readonly report: SideCameraReportRecord;
+  readonly writeUp: RideWriteUpRecord;
 }
 
 /** A distinct 64-character lowercase hex digest per athlete. */
@@ -231,6 +234,8 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
   const reference = framingReferenceFor(owner);
   // #388. Different sentences per athlete, on this athlete's own ride.
   const report = sideCameraReportFor(owner, ride.id);
+  // #800. Different text per athlete, on this athlete's own ride.
+  const writeUp = rideWriteUpFor(owner, ride.id);
 
   await harness.write(async (store) => {
     await store.putRoute(route);
@@ -251,6 +256,7 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     await store.putCameraFrame(frame);
     await store.putFramingReference(reference);
     await store.putSideCameraReport(report);
+    await store.putRideWriteUp(writeUp);
     await store.setActivityLoadSummary(owner, ride.id, {
       effortWeightedPower: watts(210 + ATHLETES.indexOf(owner)),
       loadCoveredTime: seconds(SAMPLE_COUNT),
@@ -271,6 +277,7 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     frame,
     reference,
     report,
+    writeUp,
   };
 }
 
@@ -709,6 +716,24 @@ const PROBES: readonly ScopingProbe[] = [
       // first row for the ride id could not pass by coincidence.
       const theirsRead = await store.getSideCameraReport(theirs.owner, theirs.ride.id);
       expect(theirsRead?.summary).toBe(theirs.report.summary);
+      // #800. The pose summary is somebody's numbers, and it comes back with
+      // its own report and no one else's.
+      expect(read?.pose).toStrictEqual(mine.report.pose);
+      expect(theirsRead?.pose).toStrictEqual(theirs.report.pose);
+    },
+  },
+  {
+    member: 'getRideWriteUp',
+    leaks:
+      'a model’s write-up of somebody else’s ride — and, where the pose summary was sent, of their body',
+    async run(store, mine, theirs) {
+      const read = await store.getRideWriteUp(mine.owner, mine.ride.id);
+      expect(read?.text).toBe(mine.writeUp.text);
+      // Their ride asked for as ME answers nothing: scoped on the athlete as
+      // well as the ride, never on the ride alone.
+      await expect(store.getRideWriteUp(mine.owner, theirs.ride.id)).resolves.toBeUndefined();
+      const theirsRead = await store.getRideWriteUp(theirs.owner, theirs.ride.id);
+      expect(theirsRead?.text).toBe(theirs.writeUp.text);
     },
   },
 ];

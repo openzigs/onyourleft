@@ -101,6 +101,9 @@ import {
   fromPersistedSideCameraReport,
   sideCameraReportProblem,
   toPersistedSideCameraReport,
+  fromPersistedRideWriteUp,
+  rideWriteUpProblem,
+  toPersistedRideWriteUp,
   fromPersistedRoute,
   fromPersistedWorkout,
   toPersistedCameraFrame,
@@ -112,6 +115,7 @@ import {
   type PersistedCameraFrame,
   type PersistedFramingReference,
   type PersistedSideCameraReport,
+  type PersistedRideWriteUp,
   type PersistedLap,
   type PersistedPrivacyZone,
   type PersistedRoute,
@@ -125,6 +129,7 @@ import type {
   CameraFrameRecord,
   FramingReferenceRecord,
   SideCameraReportRecord,
+  RideWriteUpRecord,
   LapRecord,
   NewActivity,
   NewLap,
@@ -154,6 +159,7 @@ import {
   type PersistedRecordingChunk,
   type PersistedRecordingSession,
 } from './recording-persisted';
+import { SCHEMA_MIGRATIONS, upgradeWith } from './migrations';
 import {
   DEXIE_IDB_VERSION_MULTIPLIER,
   INDEX,
@@ -326,6 +332,12 @@ export interface AthleteDeletionCounts {
    * *"everything derived from one"*.
    */
   readonly sideCameraReports: number;
+  /**
+   * The models' ride write-ups removed — #800, one per ride that had one. A
+   * model's words about the rider's ride and, where the pose summary was sent,
+   * their body.
+   */
+  readonly rideWriteUps: number;
 }
 
 /**
@@ -379,8 +391,23 @@ export class ActivityStore {
     // Every version is declared, in order, on every open. Dexie needs the whole
     // history to know how to upgrade a database that is behind — declaring only
     // the newest would leave a version-1 database on disk with no path forward.
+    //
+    // A version whose records change shape also gets its migration's `up` as
+    // the `.upgrade()` Dexie runs inside the `versionchange` transaction —
+    // version 13 (#800) is the first. Driven from `SCHEMA_MIGRATIONS` so an
+    // entry there is wired in by existing; `migrations.test.ts` holds every
+    // entry to a version this array declares, because one naming no version
+    // would attach to nothing and never run.
     SCHEMA_VERSIONS.forEach((stores, index) => {
-      this.#db.version(index + 1).stores(stores);
+      const version = this.#db.version(index + 1).stores(stores);
+      const migrations = SCHEMA_MIGRATIONS.filter((migration) => migration.toVersion === index + 1);
+      if (migrations.length > 0) {
+        version.upgrade(async (transaction) => {
+          for (const migration of migrations) {
+            await upgradeWith(migration)(transaction);
+          }
+        });
+      }
     });
     // Fires on every open, including the lazy one the first query triggers, and
     // throwing here rejects that open. See `#assertNotDowngraded`.
@@ -492,6 +519,10 @@ export class ActivityStore {
 
   get #sideCameraReports(): Table<PersistedSideCameraReport, string> {
     return this.#db.table<PersistedSideCameraReport, string>(TABLE.sideCameraReports);
+  }
+
+  get #rideWriteUps(): Table<PersistedRideWriteUp, string> {
+    return this.#db.table<PersistedRideWriteUp, string>(TABLE.rideWriteUps);
   }
 
   // --- Athletes -------------------------------------------------------------
@@ -809,6 +840,7 @@ export class ActivityStore {
         this.#cameraFrames,
         this.#framingReferences,
         this.#sideCameraReports,
+        this.#rideWriteUps,
       ],
       async () => {
         // The signed records and the device key go with the athlete. The key is
@@ -879,6 +911,12 @@ export class ActivityStore {
           .where(INDEX.sideCameraReportByAthlete)
           .equals(id)
           .delete();
+        // #800. A model's words about each ride — and, where the pose summary
+        // was sent, about the rider's body — so they go with the rider.
+        const rideWriteUps = await this.#rideWriteUps
+          .where(INDEX.rideWriteUpByAthlete)
+          .equals(id)
+          .delete();
         await this.#athletes.delete(id);
         return {
           activities,
@@ -893,6 +931,7 @@ export class ActivityStore {
           cameraFrames,
           framingReferences,
           sideCameraReports,
+          rideWriteUps,
         };
       },
     );
@@ -1113,6 +1152,7 @@ export class ActivityStore {
         this.#activityRecords,
         this.#segmentEfforts,
         this.#sideCameraReports,
+        this.#rideWriteUps,
       ],
       async () => {
         const existing = await this.#activities
@@ -1149,6 +1189,9 @@ export class ActivityStore {
         // and it was read off pictures of the rider: left behind it would be
         // sentences about somebody's body under a ride that no longer exists.
         await this.#sideCameraReports.delete(id);
+        // #800. The write-up is about this ride and nothing else, for the
+        // report's reason.
+        await this.#rideWriteUps.delete(id);
         await this.#activities.delete(id);
         return true;
       },
@@ -1691,6 +1734,61 @@ export class ActivityStore {
       .equals([owner, activity])
       .first();
     return row === undefined ? undefined : fromPersistedSideCameraReport(row);
+  }
+
+  // --- Ride write-ups (#800) ------------------------------------------------
+
+  /**
+   * Keeps a model's write-up of a ride, **replacing** any write-up that ride
+   * already had — #800, the owner's ruling 7 on #795: *"a new analysis
+   * replaces the saved one"*. The key is the activity, so a replacement is
+   * one `put` and there is never a second row to reconcile.
+   *
+   * The text has passed the client's runtime screen (#798) before it arrives
+   * here; what this checks is plain text, the length bound and the fields the
+   * record may carry — `records.ts` §`RideWriteUpRecord` says what it may not.
+   *
+   * **Refuses a write-up on a ride that is not the athlete's**, inside the
+   * same transaction as the write, for `putSideCameraReport`'s reason.
+   *
+   * @throws {StoreReferentialError} if `record.activityId` names no activity of
+   * `record.athleteId`'s.
+   * @throws {StoreValidationError} naming the field and the constraint — never
+   * the value, which is a model's words about somebody's ride.
+   */
+  async putRideWriteUp(record: RideWriteUpRecord): Promise<void> {
+    const problem = rideWriteUpProblem(record);
+    if (problem !== undefined) {
+      throw new StoreValidationError(problem);
+    }
+    const row = toPersistedRideWriteUp(record);
+    await this.#db.transaction('rw', [this.#activities, this.#rideWriteUps], async () => {
+      const ride = await this.#activities
+        .where(INDEX.activityByAthleteAndId)
+        .equals([record.athleteId, record.activityId])
+        .first();
+      if (ride === undefined) {
+        throw new StoreReferentialError(
+          `cannot store a ride write-up: athlete ${record.athleteId} has no activity ${record.activityId}`,
+        );
+      }
+      await this.#rideWriteUps.put(row);
+    });
+  }
+
+  /**
+   * The write-up kept for this athlete's ride, or `undefined` — the ordinary
+   * answer, for every ride nobody has asked a model about.
+   */
+  async getRideWriteUp(
+    owner: AthleteId,
+    activity: ActivityId,
+  ): Promise<RideWriteUpRecord | undefined> {
+    const row = await this.#rideWriteUps
+      .where(INDEX.rideWriteUpByAthleteAndActivity)
+      .equals([owner, activity])
+      .first();
+    return row === undefined ? undefined : fromPersistedRideWriteUp(row);
   }
 
   // --- Segment efforts (#66) ------------------------------------------------

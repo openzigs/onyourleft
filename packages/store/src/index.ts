@@ -34,6 +34,11 @@ export type {
   FramingLandmarkRecord,
   FramingReferenceRecord,
   SideCameraReportRecord,
+  SideSessionKind,
+  SideSessionSourceRecord,
+  SideSessionSummaryRecord,
+  RideWriteUpRecord,
+  RideWriteUpSourceRecord,
   LapRecord,
   NewActivity,
   NewLap,
@@ -48,7 +53,12 @@ export type {
   SegmentRecord,
   WorkoutRecord,
 } from './records';
-export { DEFAULT_PRIVACY_ZONE_RADIUS_METRES } from './records';
+export {
+  DEFAULT_PRIVACY_ZONE_RADIUS_METRES,
+  RIDE_WRITE_UP_SOURCES,
+  SIDE_SESSION_KINDS,
+  SIDE_SESSION_SOURCES,
+} from './records';
 
 // --- Identifiers ------------------------------------------------------------
 
@@ -195,6 +205,9 @@ export {
   // The side camera's report sentences have a length the store refuses past;
   // the client's wording is held under it by a test (#564).
   MAXIMUM_SIDE_REPORT_SENTENCE,
+  // A model's write-up has a length the store refuses past, and #798's
+  // runtime screen holds a write-up to the same number (#800).
+  MAXIMUM_WRITE_UP_CHARACTERS,
 } from './persisted';
 
 // --- Identity: the device keypair and signed activity records (#61) ---------

@@ -38,17 +38,25 @@ import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { openActivityStore } from './activity-store';
+import { StoreDecodeError } from './errors';
 import { activityId, athleteId, recordingSessionId, routeId } from './ids';
 
 import {
   migrateDown,
   migrateUp,
   SCHEMA_MIGRATIONS,
+  SIDE_REPORT_POSE_SUMMARY,
   upgradeWith,
   type RecordMigration,
 } from './migrations';
 import { SCHEMA_VERSION, SCHEMA_VERSIONS, STORES_V1, STORES_V2, STORES_V3, TABLE } from './schema';
-import { cameraFrameFor, framingReferenceFor, sideCameraReportFor } from './testing';
+import type { PersistedSideCameraReport, PersistedSideCameraReportV12 } from './persisted';
+import {
+  cameraFrameFor,
+  framingReferenceFor,
+  rideWriteUpFor,
+  sideCameraReportFor,
+} from './testing';
 import { ensureDeviceSigningKey, webCryptoSha256, webCryptoVerifier } from './web-crypto';
 
 /**
@@ -231,7 +239,7 @@ describe('the same pair, applied to a database that contains rows', () => {
 });
 
 describe('the production registry', () => {
-  it('is empty of record migrations, because no version has changed a record’s shape', () => {
+  it('holds one record migration, version 13’s, because only version 13 changed a record’s shape', () => {
     // Version 2 (#27) **adds** `streamSets` and `streamBlobs`, version 3 (#46)
     // adds the recording stores, version 4 (#61) adds `deviceKeys` and
     // `activityRecords`, version 5 (#64) adds `segments`, and version 6 (#66)
@@ -277,8 +285,31 @@ describe('the production registry', () => {
     // Version 11 (#528) adds `framingReferences`, the same case again: a new
     // store, keyed by the athlete, with no rows to migrate.
     // Version 12 (#388) adds `sideCameraReports`, the same case once more.
-    expect(SCHEMA_VERSION).toBe(12);
-    expect(SCHEMA_MIGRATIONS).toEqual([]);
+    //
+    // ⚠️ Version 13 (#800) is the first that changes an existing record: every
+    // side-camera report gains a REQUIRED `pose`. That is the first entry, and
+    // the reason this test used to say "empty" and does not now.
+    expect(SCHEMA_VERSION).toBe(13);
+    expect(SCHEMA_MIGRATIONS).toStrictEqual([SIDE_REPORT_POSE_SUMMARY]);
+  });
+
+  it('names a version this store declares for every migration, so each one is attached and runs', () => {
+    // `ActivityStore` attaches a migration to the `version(n)` whose n is its
+    // `toVersion`. One naming version 1 (which has no upgrade) or a version
+    // past the last would attach to nothing and never run, with every other
+    // test here still green.
+    for (const migration of SCHEMA_MIGRATIONS) {
+      expect(migration.toVersion).toBeGreaterThanOrEqual(2);
+      expect(migration.toVersion).toBeLessThanOrEqual(SCHEMA_VERSIONS.length);
+      expect(
+        Object.keys(
+          SCHEMA_VERSIONS.slice(0, migration.toVersion).reduce(
+            (tables, stores) => ({ ...tables, ...stores }),
+            {},
+          ),
+        ),
+      ).toContain(migration.table);
+    }
   });
 
   it('declares exactly as many schemas as the version it claims to be at', () => {
@@ -705,5 +736,150 @@ describe('version 11 to version 12 — #388’s side-camera reports', () => {
     expect(none).toBeUndefined();
     expect(kept?.observations).toStrictEqual(report.observations);
     expect(beforeVersion).toBeLessThan(SCHEMA_VERSION * 10);
+  });
+});
+
+describe('version 12 to version 13 — #800, the first record migration', () => {
+  /** Two reports exactly as version 12 wrote them: sentences, no `pose` key at all. */
+  const V12_REPORTS: readonly PersistedSideCameraReportV12[] = [
+    {
+      activityId: 'ride-1',
+      athleteId: 'athlete-a',
+      summary: 'A summary written at version twelve.',
+      observations: ['A first observation.', 'A second observation.'],
+    },
+    {
+      activityId: 'ride-2',
+      athleteId: 'athlete-b',
+      summary: 'Nothing could be compared.',
+      observations: [],
+    },
+  ];
+
+  it('up then down returns every version-12 report to exactly its version-12 shape', () => {
+    const rolledBack = migrateDown(
+      SIDE_REPORT_POSE_SUMMARY,
+      migrateUp(SIDE_REPORT_POSE_SUMMARY, V12_REPORTS),
+    );
+    // Strict: a `down` that left `pose: undefined` behind, or kept `pose: null`,
+    // is not the version-12 shape, and `toEqual` would let both through.
+    expect(rolledBack).toStrictEqual(V12_REPORTS);
+    for (const row of rolledBack) {
+      expect(Object.keys(row)).not.toContain('pose');
+    }
+  });
+
+  it('up actually changes the shape — every report gains pose, null, and nothing else moves', () => {
+    const migrated = migrateUp(SIDE_REPORT_POSE_SUMMARY, V12_REPORTS);
+    expect(migrated).toStrictEqual(V12_REPORTS.map((row) => ({ ...row, pose: null })));
+  });
+
+  it('down drops a kept pose summary — the data loss its description names', () => {
+    const kept: PersistedSideCameraReport = {
+      ...V12_REPORTS[0]!,
+      pose: {
+        differences: { torso: -2 },
+        posed: 10,
+        noRider: 0,
+        unreadable: 1,
+        source: 'tablet',
+      },
+    };
+    expect(SIDE_REPORT_POSE_SUMMARY.down(kept)).toStrictEqual(V12_REPORTS[0]);
+    expect(SIDE_REPORT_POSE_SUMMARY.description).toMatch(/down drops/);
+  });
+
+  it('is pure — the fixture is not mutated', () => {
+    const before = structuredClone(V12_REPORTS);
+    migrateDown(SIDE_REPORT_POSE_SUMMARY, migrateUp(SIDE_REPORT_POSE_SUMMARY, V12_REPORTS));
+    expect(V12_REPORTS).toStrictEqual(before);
+  });
+
+  /**
+   * The same pair, through a real Dexie version bump against a database with
+   * version-12 rows in it — which is the first time `ActivityStore` runs an
+   * `.upgrade()` at all.
+   */
+  it('migrates the reports on a real version-12 database, and they roll back exactly', async () => {
+    const v12 = new Dexie(databaseName);
+    SCHEMA_VERSIONS.slice(0, 12).forEach((stores, index) => {
+      v12.version(index + 1).stores(stores);
+    });
+    await v12.table(TABLE.athletes).put({ id: 'athlete-a', displayName: 'A', createdAt: 1 });
+    await v12.table(TABLE.sideCameraReports).bulkPut([...V12_REPORTS]);
+    const beforeVersion = v12.backendDB().version;
+    v12.close();
+
+    const owner = athleteId('athlete-a');
+    const store = openActivityStore(databaseName);
+    const read = await store.getSideCameraReport(owner, activityId('ride-1'));
+    // The new store is usable on a database that predates it.
+    const ride = {
+      id: activityId('ride-after-13'),
+      athleteId: owner,
+      name: 'After thirteen',
+      startedAt: unixSeconds(1_760_000_000),
+      startedAtTimeZone: 'Europe/London',
+      elapsedTime: seconds(600),
+      movingTime: seconds(600),
+      distance: metres(5000),
+      hasPosition: false,
+      createdAt: unixSeconds(1_760_000_600),
+    };
+    await store.putActivity(ride);
+    const writeUp = rideWriteUpFor(owner, ride.id);
+    await store.putRideWriteUp(writeUp);
+    store.close();
+
+    // Read what is on disk through a connection that ran no upgrade.
+    const raw = new Dexie(databaseName);
+    SCHEMA_VERSIONS.forEach((stores, index) => {
+      raw.version(index + 1).stores(stores);
+    });
+    const onDisk = (await raw
+      .table(TABLE.sideCameraReports)
+      .orderBy('activityId')
+      .toArray()) as PersistedSideCameraReport[];
+    const writeUps = await raw.table(TABLE.rideWriteUps).count();
+    raw.close();
+
+    expect(beforeVersion).toBe(12 * 10);
+    expect(read?.pose).toBeNull();
+    expect(read?.observations).toStrictEqual(V12_REPORTS[0]?.observations);
+    expect(onDisk).toStrictEqual(V12_REPORTS.map((row) => ({ ...row, pose: null })));
+    expect(migrateDown(SIDE_REPORT_POSE_SUMMARY, onDisk)).toStrictEqual(V12_REPORTS);
+    expect(writeUps).toBe(1);
+  });
+
+  /**
+   * #815's review: `up` runs inside Dexie's versionchange transaction, so a
+   * throw there aborts the upgrade and the database never opens — every ride
+   * on the device unreadable, with no downgrade to go back to. At version 12 a
+   * malformed report failed its own read and nothing else, and it must still.
+   */
+  it('a malformed version-12 report does not stop the database opening — only its own read fails', async () => {
+    const v12 = new Dexie(databaseName);
+    SCHEMA_VERSIONS.slice(0, 12).forEach((stores, index) => {
+      v12.version(index + 1).stores(stores);
+    });
+    await v12.table(TABLE.athletes).put({ id: 'athlete-a', displayName: 'A', createdAt: 1 });
+    await v12.table(TABLE.sideCameraReports).bulkPut([
+      V12_REPORTS[0]!,
+      // Hand-edited: observations is not an array, so not iterable either.
+      { activityId: 'ride-bad', athleteId: 'athlete-a', summary: 'Edited.', observations: 42 },
+    ]);
+    v12.close();
+
+    const owner = athleteId('athlete-a');
+    const store = openActivityStore(databaseName);
+    try {
+      expect((await store.getAthlete(owner))?.id).toBe('athlete-a');
+      expect((await store.getSideCameraReport(owner, activityId('ride-1')))?.pose).toBeNull();
+      await expect(store.getSideCameraReport(owner, activityId('ride-bad'))).rejects.toBeInstanceOf(
+        StoreDecodeError,
+      );
+    } finally {
+      store.close();
+    }
   });
 });

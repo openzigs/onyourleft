@@ -101,6 +101,7 @@ describe('which ride a session’s report goes with', () => {
         activityId: RIDE,
         summary: REPORT.summary,
         observations: REPORT.observations,
+        pose: null,
       },
     ]);
     expect(rides.listening()).toBe(0);

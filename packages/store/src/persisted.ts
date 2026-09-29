@@ -60,6 +60,11 @@ import type {
   FramingCheckRecord,
   FramingReferenceRecord,
   SideCameraReportRecord,
+  SideSessionKind,
+  SideSessionSourceRecord,
+  SideSessionSummaryRecord,
+  RideWriteUpRecord,
+  RideWriteUpSourceRecord,
   LapRecord,
   PrivacyZoneRecord,
   OriginalFileReference,
@@ -69,7 +74,12 @@ import type {
   RouteRecord,
   WorkoutRecord,
 } from './records';
-import { FRAMING_CHECK_RECORDS } from './records';
+import {
+  FRAMING_CHECK_RECORDS,
+  RIDE_WRITE_UP_SOURCES,
+  SIDE_SESSION_KINDS,
+  SIDE_SESSION_SOURCES,
+} from './records';
 import { parseKitColour } from './kit-colour';
 import { parseUnitSystem } from './unit-system';
 import { DEFAULT_VISIBILITY, parseVisibility } from './visibility';
@@ -1328,12 +1338,35 @@ export function fromPersistedFramingReference(
 /**
  * A side-camera report, as it sits on disk — #388. The same fields as
  * {@link SideCameraReportRecord}, in plain types.
+ *
+ * ⚠️ **`pose` is present on every row since schema version 13** (#800), `null`
+ * where no summary was kept. `migrations.ts` §`SIDE_REPORT_POSE_SUMMARY` puts
+ * it on every row written before, so a row without it is one nobody's upgrade
+ * wrote — and it is refused rather than read as `null`.
  */
 export interface PersistedSideCameraReport {
   activityId: string;
   athleteId: string;
   summary: string;
   observations: string[];
+  pose: PersistedSideSessionSummary | null;
+}
+
+/** A side-camera report as schema version 12 wrote it — the shape `down` returns to. */
+export interface PersistedSideCameraReportV12 {
+  activityId: string;
+  athleteId: string;
+  summary: string;
+  observations: string[];
+}
+
+/** A {@link SideSessionSummaryRecord}, in plain types. */
+export interface PersistedSideSessionSummary {
+  differences: Partial<Record<SideSessionKind, number>>;
+  posed: number;
+  noRider: number;
+  unreadable: number;
+  source: string;
 }
 
 /**
@@ -1355,16 +1388,17 @@ export const MAXIMUM_SIDE_REPORT_OBSERVATIONS = 8;
 export const MAXIMUM_SIDE_REPORT_SENTENCE = 400;
 
 /**
- * What is wrong with a side-camera report's sentences, or `undefined` when
- * nothing is — one rule for the way in and the way out, like
+ * What is wrong with a side-camera report's sentences or its pose summary, or
+ * `undefined` when nothing is — one rule for the way in and the way out, like
  * {@link framingReferenceProblem}.
  *
  * ⚠️ **The message names the field and the constraint and never the value.**
- * The value is a sentence about somebody's body.
+ * The value is a sentence, or a number, about somebody's body.
  */
 export function sideCameraReportProblem(report: {
   readonly summary: unknown;
   readonly observations: unknown;
+  readonly pose: unknown;
 }): string | undefined {
   if (!isSentence(report.summary)) {
     return `sideCameraReport.summary: must be a sentence of at most ${String(MAXIMUM_SIDE_REPORT_SENTENCE)} characters`;
@@ -1381,7 +1415,7 @@ export function sideCameraReportProblem(report: {
       return `sideCameraReport.observations[${String(index)}]: must be a sentence of at most ${String(MAXIMUM_SIDE_REPORT_SENTENCE)} characters`;
     }
   }
-  return undefined;
+  return report.pose === null ? undefined : sideSessionSummaryProblem(report.pose);
 }
 
 function isSentence(value: unknown): value is string {
@@ -1390,6 +1424,44 @@ function isSentence(value: unknown): value is string {
     value.trim().length > 0 &&
     value.length <= MAXIMUM_SIDE_REPORT_SENTENCE
   );
+}
+
+/**
+ * What is wrong with a pose summary, or `undefined` — #800.
+ *
+ * ⚠️ `undefined` is refused, not read as `null`: on a version-13 row it means
+ * the field was never written, which no build of this package does.
+ */
+function sideSessionSummaryProblem(pose: unknown): string | undefined {
+  if (!isPlainObject(pose)) {
+    return 'sideCameraReport.pose: must be a pose summary or null';
+  }
+  const differences = pose['differences'];
+  if (!isPlainObject(differences)) {
+    return 'sideCameraReport.pose.differences: must be a record of differences';
+  }
+  for (const [kind, difference] of Object.entries(differences)) {
+    if (!(SIDE_SESSION_KINDS as readonly string[]).includes(kind)) {
+      return 'sideCameraReport.pose.differences: may name only the five sagittal kinds';
+    }
+    if (typeof difference !== 'number' || !Number.isFinite(difference)) {
+      return `sideCameraReport.pose.differences.${kind}: must be a finite number`;
+    }
+  }
+  for (const count of ['posed', 'noRider', 'unreadable'] as const) {
+    const value = pose[count];
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+      return `sideCameraReport.pose.${count}: must be a whole number, zero or more`;
+    }
+  }
+  if (!(SIDE_SESSION_SOURCES as readonly unknown[]).includes(pose['source'])) {
+    return 'sideCameraReport.pose.source: must be tablet or computer';
+  }
+  return undefined;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**
@@ -1404,7 +1476,33 @@ export function toPersistedSideCameraReport(
     athleteId: record.athleteId,
     summary: record.summary,
     observations: [...record.observations],
+    pose: record.pose === null ? null : persistedPose(record.pose),
   };
+}
+
+/** Field by field, and only the kinds present — an absent kind stays absent on disk. */
+function persistedPose(pose: SideSessionSummaryRecord): PersistedSideSessionSummary {
+  return {
+    differences: presentDifferences(pose.differences),
+    posed: pose.posed,
+    noRider: pose.noRider,
+    unreadable: pose.unreadable,
+    source: pose.source,
+  };
+}
+
+/** The differences of the five kinds that are present, and nothing else. */
+function presentDifferences(
+  differences: Readonly<Partial<Record<SideSessionKind, number>>>,
+): Partial<Record<SideSessionKind, number>> {
+  const present: Partial<Record<SideSessionKind, number>> = {};
+  for (const kind of SIDE_SESSION_KINDS) {
+    const difference = differences[kind];
+    if (difference !== undefined) {
+      present[kind] = difference;
+    }
+  }
+  return present;
 }
 
 /**
@@ -1423,5 +1521,174 @@ export function fromPersistedSideCameraReport(
     athleteId: athleteId(decodedString('sideCameraReport.athleteId', row.athleteId)),
     summary: row.summary,
     observations: [...row.observations],
+    pose:
+      row.pose === null
+        ? null
+        : {
+            differences: presentDifferences(row.pose.differences),
+            posed: row.pose.posed,
+            noRider: row.pose.noRider,
+            unreadable: row.pose.unreadable,
+            source: row.pose.source as SideSessionSourceRecord,
+          },
+  };
+}
+
+// --- Ride write-ups (#800) --------------------------------------------------
+
+/** A {@link RideWriteUpRecord}, as it sits on disk. The same fields, in plain types. */
+export interface PersistedRideWriteUp {
+  activityId: string;
+  athleteId: string;
+  text: string;
+  templateId: string;
+  templateVersion: string;
+  source: string;
+  includedPose: boolean;
+  missingSections: number[];
+  writtenAt: number;
+}
+
+/**
+ * The longest write-up this store keeps, in UTF-16 code units — #800, and the
+ * bound #798's runtime screen holds a write-up to.
+ *
+ * ⚠️ **Here rather than in the client, so there is one number.** The screen
+ * lives in `apps/web` and may import this package; this package may not
+ * import the client. At most eight sections, a position section and a summary
+ * (epic #795) at a generous paragraph each is well under it; a page of a
+ * book is about 2 000.
+ */
+export const MAXIMUM_WRITE_UP_CHARACTERS = 16_000;
+
+/**
+ * The most sections a write-up template may have — epic #795's *"at most 8
+ * sections"* — and therefore the bound on `missingSections`, each of which is
+ * a zero-based index below it.
+ */
+export const MAXIMUM_WRITE_UP_SECTIONS = 8;
+
+/** The longest template id or version string kept. An identifier, not prose. */
+export const MAXIMUM_WRITE_UP_TEMPLATE_FIELD = 64;
+
+/** A template id or version: letters, digits, `.`, `_` and `-`, and nothing that renders as markup. */
+const TEMPLATE_FIELD = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * Every control character but a newline: C0 (tab and carriage return
+ * included), DEL and C1. The write-up is shown as plain text (#798), and a
+ * newline is the one control a paragraph needs.
+ *
+ * ⚠️ **It does NOT refuse the format characters** — the bidi embeddings and
+ * overrides (U+202A–U+202E), the isolates (U+2066–U+2069) and the zero-width
+ * characters — which can reorder or hide what the stored text displays as. The
+ * store admits them on purpose; screening what a rider is shown is #798's job,
+ * and #798 has been told (#815's review).
+ */
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
+const CONTROL_BUT_NEWLINE = /[\u0000-\u0009\u000B-\u001F\u007F-\u009F]/;
+
+/**
+ * What is wrong with a write-up, or `undefined` when nothing is — one rule for
+ * the way in and the way out.
+ *
+ * ⚠️ **The message names the field and the constraint and never the value.**
+ * The value is a model's words about somebody's ride and body.
+ */
+export function rideWriteUpProblem(writeUp: {
+  readonly text: unknown;
+  readonly templateId: unknown;
+  readonly templateVersion: unknown;
+  readonly source: unknown;
+  readonly includedPose: unknown;
+  readonly missingSections: unknown;
+}): string | undefined {
+  const text = writeUp.text;
+  if (typeof text !== 'string' || text.trim().length === 0) {
+    return 'rideWriteUp.text: must be text';
+  }
+  if (text.length > MAXIMUM_WRITE_UP_CHARACTERS) {
+    return `rideWriteUp.text: must be at most ${String(MAXIMUM_WRITE_UP_CHARACTERS)} characters`;
+  }
+  if (CONTROL_BUT_NEWLINE.test(text)) {
+    return 'rideWriteUp.text: must hold no control character but a newline';
+  }
+  for (const field of ['templateId', 'templateVersion'] as const) {
+    const value = writeUp[field];
+    if (
+      typeof value !== 'string' ||
+      value.length > MAXIMUM_WRITE_UP_TEMPLATE_FIELD ||
+      !TEMPLATE_FIELD.test(value)
+    ) {
+      return `rideWriteUp.${field}: must be an identifier of at most ${String(MAXIMUM_WRITE_UP_TEMPLATE_FIELD)} letters, digits, dots, underscores or hyphens`;
+    }
+  }
+  if (!(RIDE_WRITE_UP_SOURCES as readonly unknown[]).includes(writeUp.source)) {
+    return 'rideWriteUp.source: must be computer or hosted';
+  }
+  if (typeof writeUp.includedPose !== 'boolean') {
+    return 'rideWriteUp.includedPose: must be true or false';
+  }
+  const missing = writeUp.missingSections;
+  if (!Array.isArray(missing) || missing.length > MAXIMUM_WRITE_UP_SECTIONS) {
+    return `rideWriteUp.missingSections: must be a list of at most ${String(MAXIMUM_WRITE_UP_SECTIONS)} sections`;
+  }
+  let previous = -1;
+  for (const [index, section] of (missing as unknown[]).entries()) {
+    if (
+      typeof section !== 'number' ||
+      !Number.isInteger(section) ||
+      section <= previous ||
+      section >= MAXIMUM_WRITE_UP_SECTIONS
+    ) {
+      return `rideWriteUp.missingSections[${String(index)}]: must be a section index below ${String(MAXIMUM_WRITE_UP_SECTIONS)}, ascending and distinct`;
+    }
+    previous = section;
+  }
+  return undefined;
+}
+
+/**
+ * A write-up, on its way to disk. **Field by field and nothing else**: a
+ * caller that handed in an object carrying a model name, an address or a raw
+ * reply as well still writes none of it (records.ts §`RideWriteUpRecord`).
+ */
+export function toPersistedRideWriteUp(record: RideWriteUpRecord): PersistedRideWriteUp {
+  return {
+    activityId: record.activityId,
+    athleteId: record.athleteId,
+    text: record.text,
+    templateId: record.templateId,
+    templateVersion: record.templateVersion,
+    source: record.source,
+    includedPose: record.includedPose,
+    missingSections: [...record.missingSections],
+    writtenAt: record.writtenAt,
+  };
+}
+
+/**
+ * @throws {StoreDecodeError} naming the field and the constraint, and never
+ * the value — see {@link rideWriteUpProblem}.
+ */
+export function fromPersistedRideWriteUp(row: PersistedRideWriteUp): RideWriteUpRecord {
+  const problem = rideWriteUpProblem(row);
+  if (problem !== undefined) {
+    throw new StoreDecodeError(problem);
+  }
+  return {
+    activityId: activityId(decodedString('rideWriteUp.activityId', row.activityId)),
+    athleteId: athleteId(decodedString('rideWriteUp.athleteId', row.athleteId)),
+    text: row.text,
+    templateId: row.templateId,
+    templateVersion: row.templateVersion,
+    source: row.source as RideWriteUpSourceRecord,
+    includedPose: row.includedPose,
+    missingSections: [...row.missingSections],
+    writtenAt: decoded(
+      'rideWriteUp.writtenAt',
+      decodedNumber('rideWriteUp.writtenAt', row.writtenAt),
+      unixSeconds,
+    ),
   };
 }

@@ -165,6 +165,9 @@ function openSession(options: SideReportKeeperOptions): SideReportSession {
         activityId: ride,
         summary: said.summary,
         observations: said.observations,
+        // No pose summary is kept yet. The store holds one since schema
+        // version 13 (#800); what writes it, differences only, is #801.
+        pose: null,
       })
       .catch(() => {
         // Nothing of the error is read: a storage error can name the key it

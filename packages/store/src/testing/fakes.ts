@@ -83,6 +83,7 @@ import type {
   FramingReferenceRecord,
   RouteRecord,
   SideCameraReportRecord,
+  RideWriteUpRecord,
   SegmentEffortRecord,
   SegmentRecord,
   WorkoutRecord,
@@ -186,6 +187,8 @@ function bindStore(real: ActivityStore): PersistentStore {
     deleteFramingReference: async (owner) => real.deleteFramingReference(owner),
     putSideCameraReport: async (record) => real.putSideCameraReport(record),
     getSideCameraReport: async (owner, activity) => real.getSideCameraReport(owner, activity),
+    putRideWriteUp: async (record) => real.putRideWriteUp(record),
+    getRideWriteUp: async (owner, activity) => real.getRideWriteUp(owner, activity),
   };
 }
 
@@ -280,6 +283,10 @@ export function memoryWriteStoreFactory(): StoreFactory {
         },
         putSideCameraReport: (record: SideCameraReportRecord) => {
           memory.set(`side-report:${record.activityId}`, record);
+          return Promise.resolve();
+        },
+        putRideWriteUp: (record: RideWriteUpRecord) => {
+          memory.set(`write-up:${record.activityId}`, record);
           return Promise.resolve();
         },
       };
@@ -1054,6 +1061,76 @@ export function lastSentenceDroppedReportStoreFactory(): StoreFactory {
             ...record,
             observations: record.observations.slice(0, -1),
           }),
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A repository whose side-camera report put **drops the pose summary**.
+ *
+ * The eighteenth fake, for #800's pose summary. It stands for a layer above
+ * the store that rebuilt the report from the fields it knew before version 13
+ * — `summary` and `observations` — and answered the new required field with
+ * `null`, the value every report written before version 13 legitimately has.
+ * Every write succeeds, every sentence comes back exact, and the row reads as
+ * "no pose summary kept", which is a real state: only a round trip that
+ * compares the summary itself notices the rider's numbers are gone.
+ * `assertSideCameraReportRoundTrip` compares `pose` field by field;
+ * `ride-write-up-store.test.ts` is the red/green pair.
+ */
+export function poselessReportStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        putSideCameraReport: async (record: SideCameraReportRecord): Promise<void> =>
+          real.putSideCameraReport({
+            athleteId: record.athleteId,
+            activityId: record.activityId,
+            summary: record.summary,
+            observations: record.observations,
+            pose: null,
+          }),
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A repository whose write-up put **acknowledges a second write-up and keeps
+ * the first**.
+ *
+ * The nineteenth fake, for #800's write path and CLAUDE.md §5's *wrong time*:
+ * the owner's ruling 7 on #795 is that a new analysis replaces the saved one,
+ * and this store answers the new one with success and goes on holding the old
+ * — so the ride page shows last week's words under today's press, with the
+ * right ride, the right athlete and well-formed text. A single-write test is
+ * indistinguishable from the real store. Only a round trip that writes TWO
+ * write-ups and compares what comes back with the second notices, which is
+ * what `assertRideWriteUpRoundTrip` does on a harness that already holds one.
+ * `ride-write-up-store.test.ts` is the red/green pair.
+ */
+export function firstWriteUpStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        putRideWriteUp: async (record: RideWriteUpRecord): Promise<void> => {
+          if ((await real.getRideWriteUp(record.athleteId, record.activityId)) !== undefined) {
+            // Reported as success, and nothing is written.
+            return;
+          }
+          await real.putRideWriteUp(record);
+        },
       };
     },
     destroy: async (name) => {
