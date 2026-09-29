@@ -21,6 +21,7 @@ import * as activityRecords from './0002-activity-records.ts';
 import * as roomsAndResults from './0003-rooms-and-results.ts';
 import * as identity from './0004-identity.ts';
 import * as moderation from './0005-moderation.ts';
+import * as registration from './0006-registration.ts';
 
 /** A migration this repository accepts: both directions. */
 export interface InstanceMigration {
@@ -34,4 +35,5 @@ export const MIGRATIONS: Readonly<Record<string, InstanceMigration>> = {
   '0003-rooms-and-results': roomsAndResults,
   '0004-identity': identity,
   '0005-moderation': moderation,
+  '0006-registration': registration,
 };

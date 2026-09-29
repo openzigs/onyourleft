@@ -38,6 +38,11 @@ export interface AthleteTable {
   readonly suspended_at: number | null;
   /** When a moderator hid the display name, or `null` (#83). Added by migration 0005. */
   readonly display_name_hidden_at: number | null;
+  /**
+   * When the rider confirmed they are 18 or over, or `null` (#775, ruling Q5).
+   * A confirmation's date, never a birth date. Added by migration 0006.
+   */
+  readonly adult_confirmed_at: number | null;
 }
 
 /** An Ed25519 public key an athlete signs with (ADR 0014). */
@@ -170,6 +175,15 @@ export interface ModerationLogTable {
   readonly at: number;
 }
 
+/** A single-use invitation a moderator minted, as its SHA-256 (#775). */
+export interface InviteCodeTable {
+  readonly code_sha256: string;
+  /** The moderator who minted it. */
+  readonly athlete_id: string;
+  readonly expires_at: number;
+  readonly used_at: number | null;
+}
+
 /** Every table, by name. */
 export interface InstanceDatabase {
   readonly athlete: AthleteTable;
@@ -187,4 +201,5 @@ export interface InstanceDatabase {
   readonly block: BlockTable;
   readonly report: ReportTable;
   readonly moderation_log: ModerationLogTable;
+  readonly invite_code: InviteCodeTable;
 }

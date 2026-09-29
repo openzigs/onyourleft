@@ -153,7 +153,54 @@ async function moderatorAction(world: IdentityInstance, path: string): Promise<R
   );
 }
 
+/** A rider awaiting approval (#775), written beneath the routes: this world registers openly. */
+async function pendingAthlete(world: IdentityInstance): Promise<string> {
+  const device = await testDevice();
+  const athleteId = `pending-${device.publicKey.slice(0, 16)}`;
+  await world.freshRead((store) =>
+    store.registerAthlete({
+      athlete: {
+        id: athleteId,
+        displayName: 'Pending',
+        createdAt: 1,
+        registrationState: 'pending',
+      },
+      key: { publicKey: device.publicKey, athleteId, addedAt: 1, revokedAt: null },
+      recoveryCodeSha256s: [],
+    }),
+  );
+  return athleteId;
+}
+
 const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
+  getAccount: async (world) =>
+    send(world, 'GET', '/v1/auth/account', (await signedIn(world)).token),
+  confirmAdult: async (world) =>
+    send(world, 'POST', '/v1/auth/adult', (await signedIn(world)).token, { confirmed: true }),
+  listPendingRegistrations: async (world) => {
+    await pendingAthlete(world);
+    return send(world, 'GET', '/v1/moderation/registrations', await moderatorToken(world));
+  },
+  approveRegistration: async (world) =>
+    send(
+      world,
+      'POST',
+      `/v1/moderation/registrations/${await pendingAthlete(world)}/approve`,
+      await moderatorToken(world),
+      { reason: 'Known to the club' },
+    ),
+  refuseRegistration: async (world) =>
+    send(
+      world,
+      'POST',
+      `/v1/moderation/registrations/${await pendingAthlete(world)}/refuse`,
+      await moderatorToken(world),
+      { reason: 'Spam account' },
+    ),
+  createInvite: async (world) =>
+    send(world, 'POST', '/v1/moderation/invites', await moderatorToken(world), {
+      reason: 'For the Tuesday group',
+    }),
   listBlocks: async (world) => send(world, 'GET', '/v1/blocks', (await signedIn(world)).token),
   blockAthlete: async (world) =>
     send(world, 'POST', `/v1/blocks/${await anotherAthlete(world)}`, (await signedIn(world)).token),

@@ -31,8 +31,9 @@ import { ROUTES, type Route } from './routes.ts';
  *    so a value the route reads from `params` is never a path or a query.
  * 3. **What the route declares it needs** (#772): the instance's accounts
  *    (`unavailable` when this instance was given none), a signed-in session
- *    (`unauthenticated`, with `WWW-Authenticate: Bearer`), and a JSON object
- *    body (`validation_failed`).
+ *    (`unauthenticated`, with `WWW-Authenticate: Bearer`) — one that is not
+ *    awaiting approval unless the route `admitsPending` (#775,
+ *    `registration_pending`) — and a JSON object body (`validation_failed`).
  * 4. **Whom the route reaches** (#83) — THE choke point. A route that names
  *    another athlete in its path is called only when `moderation.ts`
  *    §`canSee` says the caller may see them; otherwise the answer is
@@ -186,6 +187,11 @@ export function createHandler(options: HandlerOptions): Handler {
       caller = await identity?.authenticate(request.headers.get('authorization'));
       if (caller === undefined) {
         return errorResponse('unauthenticated', { headers: { 'www-authenticate': 'Bearer' } });
+      }
+      // An athlete awaiting approval reaches their own account and nothing
+      // else (#775): not other riders, not rooms, not reports.
+      if (caller.standing === 'pending' && matched.admitsPending !== true) {
+        return errorResponse('registration_pending');
       }
     }
     if (!(await reachable(matched, params, caller))) return errorResponse('not_found');

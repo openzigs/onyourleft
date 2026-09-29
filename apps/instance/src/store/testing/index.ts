@@ -257,6 +257,11 @@ export async function seedWorld(store: SqlStore): Promise<void> {
     for (const other of ATHLETES) {
       if (other !== athlete) await store.putBlock(athlete, other, 1_790_000_400);
     }
+    // Migration 0006's (#775): an invitation each.
+    await store.mintInviteCode(
+      { codeSha256: hexOf(`invite-${athlete}`), athleteId: athlete, expiresAt: 1_790_600_000 },
+      { reason: 'Seeded', at: 1_790_000_450 },
+    );
     await store.putReport({
       athleteId: athlete,
       targetAthleteId: next,

@@ -39,6 +39,7 @@
 
 import type { ErrorCode, FieldProblem } from '../errors.ts';
 import type {
+  AthleteRecord,
   ModerationActionKind,
   ModerationLogEntry,
   Report,
@@ -87,6 +88,8 @@ export interface Moderation {
   report(athleteId: string, target: unknown, reason: unknown): Promise<ModerationResult<null>>;
 
   openReports(): Promise<readonly Report[]>;
+  /** The approval queue (#775): every athlete awaiting a moderator's decision. */
+  pendingRegistrations(): Promise<readonly AthleteRecord[]>;
   log(): Promise<readonly ModerationLogEntry[]>;
   act(
     moderatorId: string,
@@ -210,6 +213,7 @@ export function createModeration(options: ModerationOptions): Moderation {
     },
 
     openReports: () => store.listOpenReports(),
+    pendingRegistrations: () => store.listPendingAthletes(),
     log: () => store.listModerationLog(),
 
     async act(moderatorId, action, target, fields) {

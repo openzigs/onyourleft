@@ -63,6 +63,18 @@ const STATEMENT_PROPERTIES: Readonly<Record<string, Schema>> = {
 
 const publicAthleteSchema = object({ athleteId: string, displayName: string });
 
+const accountSchema = object({
+  athleteId: string,
+  displayName: string,
+  registrationState: { type: 'string', enum: ['active', 'pending'] },
+  adultConfirmedAt: nullableInteger,
+  moderatorRole: { type: ['string', 'null'] },
+  publicRooms: object({
+    eligible: { type: 'boolean' },
+    reasons: { type: 'array', items: string },
+  }),
+});
+
 const STATEMENT_ERRORS = [
   'validation_failed',
   'wrong_purpose',
@@ -97,13 +109,29 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     operationId: 'createSession',
     reaches: 'own',
     summary:
-      'Sign in with a signed `oyl-auth-v1` statement. A key the instance has not seen registers a new athlete, and only then are the recovery codes in the answer.',
+      'Sign in with a signed `oyl-auth-v1` statement. A key the instance has not seen registers a new athlete as the registration mode allows — awaiting approval by default — and only then are the recovery codes in the answer. New registrations are rate-limited per client address.',
     identity: true,
     request: object(
-      { ...STATEMENT_PROPERTIES, displayName: string, recoveryEmail: string },
+      {
+        ...STATEMENT_PROPERTIES,
+        displayName: string,
+        recoveryEmail: string,
+        inviteCode: string,
+        confirmsAdult: { type: 'boolean' },
+      },
       Object.keys(STATEMENT_PROPERTIES),
     ),
-    errors: [...STATEMENT_ERRORS, 'key_revoked', 'registration_closed'],
+    errors: [
+      ...STATEMENT_ERRORS,
+      'key_revoked',
+      'registration_closed',
+      'registration_refused',
+      'account_suspended',
+      'code_unknown',
+      'code_used',
+      'code_expired',
+      'rate_limited',
+    ],
     response: {
       contentType: 'application/json',
       schema: object(
@@ -113,17 +141,31 @@ export const IDENTITY_ROUTES: readonly Route[] = [
           athleteId: string,
           displayName: string,
           registered: { type: 'boolean' },
+          registrationState: { type: 'string', enum: ['active', 'pending'] },
           recoveryCodes: { type: 'array', items: string },
         },
-        ['sessionToken', 'expiresAt', 'athleteId', 'displayName', 'registered'],
+        [
+          'sessionToken',
+          'expiresAt',
+          'athleteId',
+          'displayName',
+          'registered',
+          'registrationState',
+        ],
       ),
     },
     handle: async (context) =>
       answer(
-        await identityOf(context).signIn(context.json, {
-          displayName: context.json.displayName,
-          recoveryEmail: context.json.recoveryEmail,
-        }),
+        await identityOf(context).signIn(
+          context.json,
+          {
+            displayName: context.json.displayName,
+            recoveryEmail: context.json.recoveryEmail,
+            inviteCode: context.json.inviteCode,
+            confirmsAdult: context.json.confirmsAdult,
+          },
+          context.client.address,
+        ),
       ),
   },
   {
@@ -131,6 +173,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     path: '/v1/auth/session',
     operationId: 'getSession',
     reaches: 'own',
+    admitsPending: true,
     summary: 'Who this session is: the athlete, as other riders see them.',
     identity: true,
     auth: 'session',
@@ -143,6 +186,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     path: '/v1/auth/session',
     operationId: 'deleteSession',
     reaches: 'own',
+    admitsPending: true,
     summary: 'Sign out: the session is revoked on the instance, not only forgotten by the device.',
     identity: true,
     auth: 'session',
@@ -158,6 +202,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     path: '/v1/auth/display-name',
     operationId: 'setDisplayName',
     reaches: 'own',
+    admitsPending: true,
     summary:
       'Change the display name: 1–32 characters, no control, bidirectional or invisible character. Rate-limited, and the old name is kept for moderation.',
     identity: true,
@@ -190,11 +235,11 @@ export const IDENTITY_ROUTES: readonly Route[] = [
         'a room’s riders see each other: blocking inside a room is room moderation, #789’s (ADR 0028 D-6.4)',
     },
     summary:
-      'A ticket for one room’s WebSocket hello: single use, 30 seconds. The socket never carries the session token.',
+      'A ticket for one room’s WebSocket hello: single use, 30 seconds. The socket never carries the session token. A public room needs an eligible account (`GET /v1/auth/account`).',
     identity: true,
     auth: 'session',
     request: object({ declaredMassKilograms: { type: 'number' } }),
-    errors: ['unauthenticated', 'validation_failed'],
+    errors: ['unauthenticated', 'validation_failed', 'not_eligible'],
     response: {
       contentType: 'application/json',
       schema: object({ ticket: string, expiresAt: integer }),
@@ -216,6 +261,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     path: '/v1/auth/devices',
     operationId: 'listDevices',
     reaches: 'own',
+    admitsPending: true,
     summary: 'This athlete’s device keys: when each was added and last used, and which is asking.',
     identity: true,
     auth: 'session',
@@ -243,6 +289,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     path: '/v1/auth/devices/{publicKey}/revoke',
     operationId: 'revokeDevice',
     reaches: 'own',
+    admitsPending: true,
     summary:
       'Revoke one of this athlete’s device keys and its sessions. The last key needs one of the athlete’s recovery codes, which is checked and not spent.',
     identity: true,
@@ -264,6 +311,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     path: '/v1/auth/link-codes',
     operationId: 'createLinkCode',
     reaches: 'own',
+    admitsPending: true,
     summary:
       'A single-use code, good for 5 minutes, that adds another device’s own key to this athlete.',
     identity: true,
@@ -329,5 +377,35 @@ export const IDENTITY_ROUTES: readonly Route[] = [
       );
       return outcome.ok ? noContent() : answer(outcome);
     },
+  },
+  {
+    method: 'GET',
+    path: '/v1/auth/account',
+    operationId: 'getAccount',
+    reaches: 'own',
+    admitsPending: true,
+    summary:
+      'This athlete’s own account: whether it is approved, when they confirmed they are 18 or over, any moderator role, and whether they may join a public room — and if not, every reason why.',
+    identity: true,
+    auth: 'session',
+    errors: ['unauthenticated'],
+    response: { contentType: 'application/json', schema: accountSchema },
+    handle: async (context) => answer(await identityOf(context).account(callerOf(context))),
+  },
+  {
+    method: 'POST',
+    path: '/v1/auth/adult',
+    operationId: 'confirmAdult',
+    reaches: 'own',
+    admitsPending: true,
+    summary:
+      'Confirm that the rider is 18 or over, which public rooms require (ruling Q5). Only the confirmation and its date are kept: no date of birth is asked for or stored.',
+    identity: true,
+    auth: 'session',
+    request: object({ confirmed: { type: 'boolean' } }),
+    errors: ['unauthenticated', 'validation_failed'],
+    response: { contentType: 'application/json', schema: accountSchema },
+    handle: async (context) =>
+      answer(await identityOf(context).confirmAdult(callerOf(context), context.json.confirmed)),
   },
 ];

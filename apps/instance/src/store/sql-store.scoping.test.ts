@@ -78,6 +78,16 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
     probe: (store, athleteId) => store.listEmailRecoveryTokens(athleteId),
   },
   listBlocks: { probe: (store, athleteId) => store.listBlocks(athleteId) },
+  listInviteCodes: { probe: (store, athleteId) => store.listInviteCodes(athleteId) },
+  countActivityRecords: {
+    // A count, held to the caller's own rows: an unscoped count is every
+    // athlete's, which the listing (probed above) is not.
+    probe: async (store, athleteId) => {
+      const own = await store.listActivityRecords(athleteId);
+      const counted = await store.countActivityRecords(athleteId);
+      return counted === own.length ? own : [{ athleteId: `counted ${String(counted)}` }];
+    },
+  },
   listReports: {
     probe: async (store, athleteId) =>
       (await store.listReports(athleteId)).map((report) => ({ athleteId: report.athleteId })),
@@ -122,6 +132,9 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   deleteBlock: { notAScopedRead: 'a write; scoping is sql-store.moderation.test.ts’s' },
   putReport: { notAScopedRead: 'a write' },
   moderate: { notAScopedRead: 'a moderator’s write; sql-store.moderation.test.ts' },
+  listPendingAthletes: { notAScopedRead: 'the moderators’ approval queue (#775)' },
+  confirmAdult: { notAScopedRead: 'a write; registration.test.ts' },
+  mintInviteCode: { notAScopedRead: 'a moderator’s write, logged with it (#775)' },
   eraseAthlete: { notAScopedRead: 'erasure: sql-store.erasure.test.ts' },
   close: { notAScopedRead: 'not a read' },
 };

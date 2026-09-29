@@ -29,6 +29,58 @@ the role until the setting names another key.
 A moderator cannot act on a moderator. The owner and the deputy cannot suspend each other or hide
 each other's names, and neither can act on themselves. If the deputy has to go, change the setting.
 
+## Who can join: the registration modes
+
+`OYL_INSTANCE_REGISTRATION` sets how the instance takes new riders. **If it is not set, the mode
+is `approval`.** That is the owner's ruling for this project (#16, Q5 and Q13), and it means an
+instance someone starts without reading this page does not let anybody in unseen.
+
+| Mode | A device key the instance has never seen… |
+|---|---|
+| `approval` (the default) | registers an account that **waits** for the owner or the deputy. While it waits, the rider can see their own account, name themselves and confirm their age, and nothing else. Other riders cannot see them. |
+| `invite` | registers only with a single-use invitation a moderator minted (`POST /v1/moderation/invites`, good for seven days). The invitation is spent in the same transaction that registers the account. |
+| `open` | registers an active account at once. |
+| `closed` | is refused. |
+
+The keys named in `OYL_INSTANCE_OWNER_KEY` and `OYL_INSTANCE_DEPUTY_KEY` register active in every
+mode.
+
+| Approval action | Route | Effect |
+|---|---|---|
+| Read the queue | `GET /v1/moderation/registrations` | Every account awaiting a decision, oldest first, and whether each rider confirmed they are 18 or over. |
+| Approve | `POST /v1/moderation/registrations/{id}/approve` | The account becomes active. |
+| Refuse | `POST /v1/moderation/registrations/{id}/refuse` | The account's session ends, and every key it holds is refused at sign-in from then on. |
+
+Both decisions need a reason and are written to the moderation log, like every other action.
+
+**New accounts are limited per client address:** at most 3 an hour. An IPv6 address counts by its
+first 64 bits, because one home connection is usually given a whole /64 range. ⚠️ **The limit can
+be varied.** Someone with many IPv4 addresses, or a larger IPv6 range, gets an allowance for each.
+What makes a new identity cost something is the approval queue. The limit only slows how fast one
+address can fill that queue.
+
+### Behind a proxy or a tunnel
+
+Behind a Cloudflare Tunnel, or any proxy on your machine, every request comes from the proxy. A
+per-address limit would then be **one shared bucket for everybody**: one busy client could stop
+everyone else from signing up. Set `OYL_INSTANCE_CLIENT_ADDRESS_HEADER` to the header your proxy
+puts the rider's address in. For Cloudflare that is `cf-connecting-ip`, and the project's Docker
+image already sets it. The instance reads that header only when the connection comes from a
+loopback or private address, which is where your proxy is. From anywhere else it ignores the
+header, because anybody could have typed it. ⚠️ A device on your own private network can set the
+header and be believed.
+
+## Public rooms: who may join
+
+A public room needs an account that meets **every** one of these rules (`GET /v1/auth/account` tells
+a rider which ones they meet):
+
+- it is approved, and not suspended;
+- the rider has confirmed they are **18 or over** (ruling Q5). Only the confirmation and its date
+  are stored. **No date of birth is ever asked for or kept**;
+- it is at least `OYL_INSTANCE_PUBLIC_ROOM_MIN_ACCOUNT_DAYS` days old (7 if you set nothing);
+- it has synced at least `OYL_INSTANCE_PUBLIC_ROOM_MIN_RIDES` rides (3 if you set nothing).
+
 ## What a rider can do
 
 | Action | What happens |

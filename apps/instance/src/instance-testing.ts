@@ -22,6 +22,10 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     commit: TEST_COMMIT,
     sourceUrl: `https://github.com/openzigs/onyourleft/tree/${TEST_COMMIT}`,
     bodyLimitBytes: 1024,
+    registration: 'approval',
+    moderators: {},
+    publicRooms: { minimumAccountDays: 7, minimumCompletedRides: 3 },
+    clientAddressHeader: null,
     ...overrides,
   };
 }

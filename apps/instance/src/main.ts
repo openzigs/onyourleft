@@ -29,6 +29,12 @@ const result = readConfig({
   port: process.env.OYL_INSTANCE_PORT,
   commit: process.env.OYL_INSTANCE_COMMIT,
   sourceUrl: process.env.OYL_INSTANCE_SOURCE_URL,
+  registration: process.env.OYL_INSTANCE_REGISTRATION,
+  ownerKey: process.env.OYL_INSTANCE_OWNER_KEY,
+  deputyKey: process.env.OYL_INSTANCE_DEPUTY_KEY,
+  publicRoomMinAccountDays: process.env.OYL_INSTANCE_PUBLIC_ROOM_MIN_ACCOUNT_DAYS,
+  publicRoomMinRides: process.env.OYL_INSTANCE_PUBLIC_ROOM_MIN_RIDES,
+  clientAddressHeader: process.env.OYL_INSTANCE_CLIENT_ADDRESS_HEADER,
 });
 
 if (!result.ok) {
@@ -39,7 +45,16 @@ if (!result.ok) {
 const { config } = result;
 const notices = readFileSync(new URL('../third-party.txt', import.meta.url), 'utf8');
 const handler = createHandler({ config, version: manifest.version, notices, log });
-const listening = await listen(handler, { host: config.host, port: config.port });
+// ⚠️ No identity yet: the image installs no `kysely`, so this entry point opens
+// no database and every account route answers `unavailable` until #780 wires
+// the store. When it does, `identitySettings(config)` is what it hands
+// `createIdentity` — the registration mode, the moderators and the
+// public-room thresholds read above.
+const listening = await listen(handler, {
+  host: config.host,
+  port: config.port,
+  clientAddressHeader: config.clientAddressHeader,
+});
 logEvent(log, 'listening', {
   url: listening.url,
   version: manifest.version,

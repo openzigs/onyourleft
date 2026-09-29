@@ -14,7 +14,7 @@
 
 import { errorResponse } from '../errors.ts';
 import { json, noContent, type Route, type RouteContext, type Schema } from '../route-kit.ts';
-import type { Moderation, ModerationResult } from './moderation.ts';
+import type { AthleteAction, Moderation, ModerationResult } from './moderation.ts';
 
 function moderationOf(context: RouteContext): Moderation {
   // The handler answers `unavailable` before calling a route that declares
@@ -72,12 +72,12 @@ const actionResponse: Route['response'] = {
 function athleteAction(
   path: string,
   operationId: string,
-  action: 'suspend' | 'unsuspend' | 'hide_display_name',
+  action: AthleteAction,
   summary: string,
 ): Route {
   return {
     method: 'POST',
-    path: `/v1/moderation/athletes/{athleteId}/${path}`,
+    path: `/v1/moderation/${path}`,
     operationId,
     reaches: 'moderation',
     summary,
@@ -222,23 +222,97 @@ export const MODERATION_ROUTES: readonly Route[] = [
       ),
   },
   athleteAction(
-    'suspend',
+    'athletes/{athleteId}/suspend',
     'suspendAthlete',
     'suspend',
     'Suspend an account: every one of its keys is refused, its sessions end, and other riders stop seeing it. Nothing it owns is deleted. Written to the moderation log.',
   ),
   athleteAction(
-    'unsuspend',
+    'athletes/{athleteId}/unsuspend',
     'unsuspendAthlete',
     'unsuspend',
     'Lift a suspension. Written to the moderation log.',
   ),
   athleteAction(
-    'hide-display-name',
+    'athletes/{athleteId}/hide-display-name',
     'hideDisplayName',
     'hide_display_name',
     'Hide an athlete’s display name from other riders until they choose another. Written to the moderation log.',
   ),
+  {
+    method: 'GET',
+    path: '/v1/moderation/registrations',
+    operationId: 'listPendingRegistrations',
+    reaches: 'moderation',
+    summary:
+      'The approval queue (#775): every athlete awaiting a moderator’s decision, oldest first, and whether each has confirmed they are 18 or over.',
+    identity: true,
+    auth: 'session',
+    errors: ['unauthenticated'],
+    response: {
+      contentType: 'application/json',
+      schema: object({
+        registrations: {
+          type: 'array',
+          items: object({
+            athleteId: string,
+            displayName: string,
+            createdAt: integer,
+            adultConfirmed: { type: 'boolean' },
+          }),
+        },
+      }),
+    },
+    handle: async (context) =>
+      json({
+        registrations: (await moderationOf(context).pendingRegistrations()).map((athlete) => ({
+          athleteId: athlete.id,
+          displayName: athlete.displayName,
+          createdAt: athlete.createdAt,
+          adultConfirmed: athlete.adultConfirmedAt !== null,
+        })),
+      }),
+  },
+  athleteAction(
+    'registrations/{athleteId}/approve',
+    'approveRegistration',
+    'approve_registration',
+    'Approve an account awaiting approval. Written to the moderation log.',
+  ),
+  athleteAction(
+    'registrations/{athleteId}/refuse',
+    'refuseRegistration',
+    'refuse_registration',
+    'Refuse an account awaiting approval: its every key is refused at sign-in from then on. Written to the moderation log.',
+  ),
+  {
+    method: 'POST',
+    path: '/v1/moderation/invites',
+    operationId: 'createInvite',
+    reaches: 'moderation',
+    summary:
+      'A single-use invitation, good for seven days, for an instance whose registration is invite-only. Written to the moderation log.',
+    identity: true,
+    auth: 'session',
+    request: object({ reason: string }),
+    errors: ['unauthenticated', 'validation_failed'],
+    response: {
+      contentType: 'application/json',
+      schema: object({ inviteCode: string, expiresAt: integer }),
+    },
+    handle: async (context) => {
+      if (context.identity === undefined || context.caller === undefined) {
+        throw new Error('moderation route called without identity or caller');
+      }
+      const outcome = await context.identity.mintInvite(context.caller, context.json.reason);
+      return outcome.ok
+        ? json(outcome.value)
+        : errorResponse(
+            outcome.code,
+            outcome.fields === undefined ? {} : { fields: outcome.fields },
+          );
+    },
+  },
   {
     method: 'GET',
     path: '/v1/moderation/log',

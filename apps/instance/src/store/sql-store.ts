@@ -42,6 +42,7 @@ import type {
   DisplayNameChangeTable,
   EmailRecoveryTokenTable,
   InstanceDatabase,
+  InviteCodeTable,
   LinkCodeTable,
   ModerationLogTable,
   RecoveryCodeTable,
@@ -65,6 +66,8 @@ export interface AthleteRecord extends Athlete {
   readonly suspendedAt: number | null;
   /** When a moderator hid the display name, or `null`. */
   readonly displayNameHiddenAt: number | null;
+  /** When the rider confirmed they are 18 or over, or `null` (#775). Never a birth date. */
+  readonly adultConfirmedAt: number | null;
 }
 
 export interface DeviceKey {
@@ -180,6 +183,34 @@ export interface Registration {
    * #865.
    */
   readonly recoveryEmail?: string;
+  /** The rider confirmed they are 18 or over as they registered (#775): when. */
+  readonly adultConfirmedAt?: number;
+  /**
+   * An invitation to spend in the same transaction (#775's invite-only mode),
+   * so a registration that fails leaves the invitation unspent, and one
+   * invitation cannot register two athletes. A refusal throws
+   * {@link InviteRefusedError}.
+   */
+  readonly inviteCodeSha256?: string;
+}
+
+/** A moderator's invitation, as its SHA-256 (#775). */
+export interface InviteCode {
+  readonly codeSha256: string;
+  /** The moderator who minted it. */
+  readonly athleteId: string;
+  readonly expiresAt: number;
+  readonly usedAt: number | null;
+}
+
+/** A registration's invitation could not be spent: why. */
+export class InviteRefusedError extends Error {
+  override readonly name = 'InviteRefusedError';
+  readonly outcome: 'unknown' | 'used' | 'expired';
+  constructor(outcome: 'unknown' | 'used' | 'expired') {
+    super(`The invitation is ${outcome}.`);
+    this.outcome = outcome;
+  }
 }
 
 /** One athlete blocking another (#83). */
@@ -222,9 +253,13 @@ export interface ModerationAction {
   readonly at: number;
 }
 
+/** Everything the log records: the actions, and a moderator minting an invitation (#775). */
+export type LoggedActionKind = ModerationActionKind | 'mint_invite';
+
 /** One entry of the append-only moderation log. */
-export interface ModerationLogEntry extends ModerationAction {
+export interface ModerationLogEntry extends Omit<ModerationAction, 'action'> {
   readonly id: number;
+  readonly action: LoggedActionKind;
 }
 
 /**
@@ -332,6 +367,19 @@ export interface SqlStore {
   /** The moderation log, oldest first. */
   listModerationLog(): Promise<readonly ModerationLogEntry[]>;
 
+  /** Record that the athlete confirmed they are 18 or over (#775). The first date is kept. */
+  confirmAdult(athleteId: string, at: number): Promise<boolean>;
+  /** The moderators' approval queue: every athlete awaiting approval, oldest first (#775). */
+  listPendingAthletes(): Promise<readonly AthleteRecord[]>;
+  /** How many rides the athlete has synced: public-room eligibility counts them (#775). */
+  countActivityRecords(athleteId: string): Promise<number>;
+  /** A moderator's invitation, and its entry in the moderation log, together (#775). */
+  mintInviteCode(
+    code: Omit<InviteCode, 'usedAt'>,
+    log: { readonly reason: string; readonly at: number },
+  ): Promise<void>;
+  listInviteCodes(athleteId: string): Promise<readonly InviteCode[]>;
+
   /** Remove every row this athlete owns, the athlete included (#35). */
   eraseAthlete(athleteId: string): Promise<void>;
 
@@ -360,6 +408,7 @@ export const ATHLETE_TABLES_IN_ERASURE_ORDER = [
   'email_recovery_token',
   'block',
   'report',
+  'invite_code',
   'device_key',
 ] as const satisfies readonly (keyof InstanceDatabase)[];
 
@@ -370,6 +419,14 @@ const athleteFrom = (row: Selectable<AthleteTable>): AthleteRecord => ({
   registrationState: row.registration_state,
   suspendedAt: row.suspended_at,
   displayNameHiddenAt: row.display_name_hidden_at,
+  adultConfirmedAt: row.adult_confirmed_at,
+});
+
+const inviteCodeFrom = (row: Selectable<InviteCodeTable>): InviteCode => ({
+  codeSha256: row.code_sha256,
+  athleteId: row.athlete_id,
+  expiresAt: row.expires_at,
+  usedAt: row.used_at,
 });
 
 const blockFrom = (row: Selectable<BlockTable>): Block => ({
@@ -391,7 +448,7 @@ const reportFrom = (row: Selectable<ReportTable>): Report => ({
 
 const moderationLogFrom = (row: Selectable<ModerationLogTable>): ModerationLogEntry => ({
   id: row.id,
-  action: row.action as ModerationActionKind,
+  action: row.action as LoggedActionKind,
   actorAthleteId: row.actor_athlete_id,
   targetAthleteId: row.target_athlete_id,
   reportId: row.report_id,
@@ -515,6 +572,13 @@ async function applyToAthlete(
     case 'refuse_registration':
       if (target.registration_state !== 'pending') return false;
       await athlete.set({ registration_state: 'refused' }).execute();
+      // A rider awaiting approval holds a session to see how it went; a
+      // refusal ends it, as a suspension does.
+      await trx
+        .updateTable('session')
+        .set({ revoked_at: sql<number>`coalesce(revoked_at, ${at})` })
+        .where('athlete_id', '=', target.id)
+        .execute();
       return true;
     case 'dismiss_report':
       return true;
@@ -654,6 +718,20 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           if (key.athleteId !== athlete.id) {
             throw new OwnershipConflictError('A first key must be its own athlete’s.');
           }
+          if (registration.inviteCodeSha256 !== undefined) {
+            const invite = await trx
+              .selectFrom('invite_code')
+              .selectAll()
+              .where('code_sha256', '=', registration.inviteCodeSha256)
+              .executeTakeFirst();
+            const outcome = outcomeOf(invite, athlete.createdAt);
+            if (outcome !== 'spendable') throw new InviteRefusedError(outcome);
+            await trx
+              .updateTable('invite_code')
+              .set({ used_at: athlete.createdAt })
+              .where('code_sha256', '=', registration.inviteCodeSha256)
+              .execute();
+          }
           const held = await trx
             .selectFrom('device_key')
             .select('athlete_id')
@@ -669,6 +747,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               display_name: athlete.displayName,
               created_at: athlete.createdAt,
               registration_state: athlete.registrationState,
+              adult_confirmed_at: registration.adultConfirmedAt ?? null,
             })
             .execute();
           await trx
@@ -1267,6 +1346,77 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         (await db.selectFrom('moderation_log').selectAll().orderBy('id').execute()).map(
           moderationLogFrom,
         ),
+      ),
+
+    confirmAdult: (athleteId, at) =>
+      exclusive(async () => {
+        const updated = await db
+          .updateTable('athlete')
+          .set({ adult_confirmed_at: sql<number>`coalesce(adult_confirmed_at, ${at})` })
+          .where('id', '=', athleteId)
+          .executeTakeFirst();
+        return updated.numUpdatedRows > 0n;
+      }),
+
+    listPendingAthletes: () =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('athlete')
+            .selectAll()
+            .where('registration_state', '=', 'pending')
+            .orderBy('created_at')
+            .orderBy('id')
+            .execute()
+        ).map(athleteFrom),
+      ),
+
+    countActivityRecords: (athleteId) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('activity_record')
+          .select((eb) => eb.fn.countAll<number>().as('n'))
+          .where('athlete_id', '=', athleteId)
+          .executeTakeFirstOrThrow();
+        return Number(row.n);
+      }),
+
+    mintInviteCode: (code, log) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          await trx
+            .insertInto('invite_code')
+            .values({
+              code_sha256: code.codeSha256,
+              athlete_id: code.athleteId,
+              expires_at: code.expiresAt,
+              used_at: null,
+            })
+            .execute();
+          await trx
+            .insertInto('moderation_log')
+            .values({
+              actor_athlete_id: code.athleteId,
+              action: 'mint_invite',
+              target_athlete_id: null,
+              report_id: null,
+              reason: log.reason,
+              at: log.at,
+            })
+            .execute();
+        }),
+      ),
+
+    listInviteCodes: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('invite_code')
+            .selectAll()
+            .where('athlete_id', '=', athleteId)
+            .orderBy('code_sha256')
+            .execute()
+        ).map(inviteCodeFrom),
       ),
 
     eraseAthlete: (athleteId) =>

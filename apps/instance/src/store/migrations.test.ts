@@ -78,6 +78,7 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   email_recovery_token: `INSERT INTO email_recovery_token VALUES ('${'6'.repeat(64)}', 'a', 9, NULL)`,
   block: `INSERT INTO block VALUES ('a', 'b', 10)`,
   report: `INSERT INTO report (id, athlete_id, target_athlete_id, reason, created_at) VALUES (1, 'a', 'b', 'Why', 11)`,
+  invite_code: `INSERT INTO invite_code VALUES ('${'7'.repeat(64)}', 'a', 13, NULL)`,
   moderation_log: `INSERT INTO moderation_log (id, actor_athlete_id, action, target_athlete_id, reason, at) VALUES (1, 'a', 'suspend', 'b', 'Why', 12)`,
 };
 

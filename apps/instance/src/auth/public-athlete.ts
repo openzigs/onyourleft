@@ -40,6 +40,8 @@ export const ATHLETE_COLUMNS: Readonly<Record<string, ColumnClass>> = {
   // Moderation (#83): other riders see the EFFECT of a hidden name, never the flag.
   suspended_at: 'private',
   display_name_hidden_at: 'private',
+  // #775: a confirmation's date, never a birth date, and nobody else's business.
+  adult_confirmed_at: 'private',
 };
 
 /** What another rider may see of an athlete. */

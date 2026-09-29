@@ -90,6 +90,11 @@ export interface Route {
   readonly identity?: true;
   /** Whether the route reaches another athlete, and how (#83). */
   readonly reaches: Reach;
+  /**
+   * An athlete awaiting approval (#775) may call this route. Every other
+   * session route answers such a caller `registration_pending`.
+   */
+  readonly admitsPending?: true;
   /** The route needs a signed-in device: `Authorization: Bearer <session token>`. */
   readonly auth?: 'session';
   /** The JSON body the route reads, for the specification. */

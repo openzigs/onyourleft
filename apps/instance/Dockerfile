@@ -31,10 +31,18 @@ WORKDIR /srv/instance
 COPY package.json LICENSE third-party.txt ./
 COPY src ./src
 
+# The project's instance (#775, rulings Q5 and Q13 of 2026-09-28): registration
+# needs a moderator's approval, and the rider's address comes from the
+# Cloudflare Tunnel's header, which is believed only from a private peer
+# (`src/client-address.ts`). The owner's and the deputy's device keys are NOT
+# baked in: pass OYL_INSTANCE_OWNER_KEY and OYL_INSTANCE_DEPUTY_KEY when the
+# container is run — `docs/moderation.md` says how.
 ENV NODE_ENV=production \
     OYL_INSTANCE_HOST=0.0.0.0 \
     OYL_INSTANCE_PORT=8787 \
-    OYL_INSTANCE_COMMIT=${OYL_INSTANCE_COMMIT}
+    OYL_INSTANCE_COMMIT=${OYL_INSTANCE_COMMIT} \
+    OYL_INSTANCE_REGISTRATION=approval \
+    OYL_INSTANCE_CLIENT_ADDRESS_HEADER=cf-connecting-ip
 
 USER node
 EXPOSE 8787

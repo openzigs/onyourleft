@@ -25,6 +25,10 @@ afterEach(async () => {
   harness = undefined;
 });
 
+/** The log, less the invitations `seedWorld` mints (#775). */
+const actions = (entries: readonly { action: string }[]) =>
+  entries.filter((entry) => entry.action !== 'mint_invite');
+
 async function seeded(): Promise<StoreHarness> {
   harness = await createStoreHarness();
   await harness.write(seedWorld);
@@ -53,7 +57,7 @@ describe('the moderation log (#83)', () => {
     } finally {
       database.close();
     }
-    expect(await h.read((store) => store.listModerationLog())).toEqual([
+    expect(actions(await h.read((store) => store.listModerationLog()))).toEqual([
       { ...suspendB, id: expect.any(Number) as number },
     ]);
   });
@@ -70,7 +74,7 @@ describe('the moderation log (#83)', () => {
     expect(
       await h.write((store) => store.moderate({ ...suspendB, targetAthleteId: 'nobody' })),
     ).toEqual({ outcome: 'not_found' });
-    expect(await h.read((store) => store.listModerationLog())).toHaveLength(1);
+    expect(actions(await h.read((store) => store.listModerationLog()))).toHaveLength(1);
     expect((await h.read((store) => store.getAthlete(ATHLETE_B)))?.suspendedAt).toBe(suspendB.at);
   });
 
