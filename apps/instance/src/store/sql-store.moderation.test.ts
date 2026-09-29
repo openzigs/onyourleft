@@ -91,6 +91,44 @@ describe('the moderation log (#83)', () => {
     }
   });
 
+  it('ends every session of an athlete whose registration is refused (#775)', async () => {
+    const h = await seeded();
+    await h.write(async (store) => {
+      await store.putAthlete({
+        id: 'pending-d',
+        displayName: 'D',
+        createdAt: 1,
+        registrationState: 'pending',
+      });
+      await store.putDeviceKey({
+        publicKey: 'key-d',
+        athleteId: 'pending-d',
+        addedAt: 1,
+        revokedAt: null,
+      });
+      await store.putSession({
+        tokenSha256: 'd'.repeat(64),
+        athleteId: 'pending-d',
+        deviceKey: 'key-d',
+        expiresAt: 1_800_000_000,
+        revokedAt: null,
+      });
+    });
+    await h.write((store) =>
+      store.moderate({
+        ...suspendB,
+        action: 'refuse_registration',
+        targetAthleteId: 'pending-d',
+      }),
+    );
+    expect((await h.read((store) => store.getAthlete('pending-d')))?.registrationState).toBe(
+      'refused',
+    );
+    expect((await h.read((store) => store.listSessions('pending-d')))[0]?.revokedAt).toBe(
+      suspendB.at,
+    );
+  });
+
   it('closes the report an action decides, with who, when and what', async () => {
     const h = await seeded();
     const [report] = await h.read((store) => store.listReports(ATHLETE_A));

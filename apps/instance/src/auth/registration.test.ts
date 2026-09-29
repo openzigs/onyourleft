@@ -324,6 +324,8 @@ describe('a suspension binds every key the athlete holds (#775, ADR 0028 D-6.2)'
     const signedIn = await w.signIn(first);
     const token = signedIn.body.sessionToken as string;
     const athleteId = signedIn.body.athleteId as string;
+    // A minute on, so the second key is not added in the second the account was.
+    w.clock.ms += 60_000;
     const code = await w.call('POST', '/v1/auth/link-codes', { token });
     const second = await testDevice();
     const linked = await w.call('POST', '/v1/auth/link', {
