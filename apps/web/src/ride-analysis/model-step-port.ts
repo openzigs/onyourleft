@@ -7,12 +7,17 @@
  * The runner (`runner.ts`) asks for one step at a time and never learns how the
  * step reached a model: the rider's own computer in a browser, the same through
  * the Android shell's native HTTP, or a hosted service (#802, #803). Each of
- * those implements this port; none of them exists yet, and #804 wires the
- * first.
+ * those implements this port. The rider's own computer's is
+ * `own-computer-step.ts` (#802); the hosted one is #803's, and #804 wires the
+ * first press.
  *
- * @unwired the runner that calls this port has no caller in the client until
- * #804 wires the ride analysis in; #804 removes this tag, and `check:wiring`
- * is red on this file without it until then.
+ * ⚠️ **Reachable from the entry point since #802, and not yet called.**
+ * `camera/analysis-transport.ts`, which `main.tsx` imports, builds the
+ * own-computer port, so this file is no longer a module nothing imports and
+ * its file-level exemption came off. The exemption is on the two declarations
+ * below instead, which nothing in production names until #804's press calls
+ * the runner; #804 removes both tags, and `check:wiring` is red on this file
+ * without them until then.
  *
  * ## Why a `*-port.ts`
  *
@@ -67,13 +72,22 @@ export type StepReply =
   | { readonly kind: 'answered'; readonly text: UntrustedText; readonly finish: StepFinish }
   | { readonly kind: 'failed'; readonly failure: AnalysisFailure | HostedFailure };
 
-/** What the runner asks of whatever reaches a model. */
+/**
+ * What the runner asks of whatever reaches a model.
+ *
+ * @unwired `runner.ts` §`runAnalysis`, which is what names this port, has no
+ *   caller in the client until #804 wires the post-ride ask; #804 removes this
+ *   tag.
+ */
 export interface ModelStepPort {
   /**
    * Send one step and read its reply. Settles; never rejects. When `signal`
    * aborts, the transport stops the request if it can — in a browser it can;
    * inside the Android shell it cannot (spike 0016 §2.1), and the runner
    * discards whatever arrives late either way.
+   *
+   * @unwired called by `runner.ts` §`runAnalysis`, which nothing in the client
+   *   calls until #804's press; #804 removes this tag.
    */
   runModelStep(step: StepRequest, signal: AbortSignal): Promise<StepReply>;
 }

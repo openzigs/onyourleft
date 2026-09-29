@@ -47,6 +47,7 @@ describe('the ride analysis reaches no trainer (#811, CLAUDE.md §6)', () => {
         'ride-analysis/model-step-port.ts',
         'ride-analysis/template.ts',
         'ride-analysis/input.ts',
+        'ride-analysis/own-computer-step.ts',
       ]),
     );
     // And past one level: the runner reaches the screen's matchers through the screen.
@@ -68,7 +69,12 @@ describe('the ride analysis reaches no trainer (#811, CLAUDE.md §6)', () => {
         ? `${source}\nimport { createRideController } from '../ride/controller';\n`
         : source;
     };
-    for (const target of ['ride-analysis/runner.ts', 'camera/write-up-screen.ts']) {
+    // #802: and in the step port to the rider's own computer.
+    for (const target of [
+      'ride-analysis/runner.ts',
+      'camera/write-up-screen.ts',
+      'ride-analysis/own-computer-step.ts',
+    ]) {
       expect(
         trainerModulesReachedFrom(importWalk(planted(target)), ANALYSIS_MODULES),
         target,

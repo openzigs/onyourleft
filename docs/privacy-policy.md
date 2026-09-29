@@ -1,6 +1,6 @@
 # On Your Left — privacy policy
 
-**Last updated: 2026-09-28.** This is the policy for the On Your Left Android app
+**Last updated: 2026-09-29.** This is the policy for the On Your Left Android app
 (`dev.openzigs.onyourleft`) and for the web client it is built from. It is the policy linked from the
 app's About page and from the Google Play listing, and those two links point at this file
 ([#95](https://github.com/openzigs/onyourleft/issues/95)).
@@ -20,7 +20,7 @@ report, not a page view.
 
 That is not a promise about our intentions. It is a property of the software: the code this project
 writes contains exactly **three** network calls, and each can do only the one thing described below —
-a picture to a computer of your own, a direct link between your tablet and a second phone you
+a picture, or a ride's numbers when you ask for an analysis, to a computer of your own, a direct link between your tablet and a second phone you
 paired with it, and a question — never a picture — to a service you chose, on your own key. The whole thing is [open source](https://github.com/openzigs/onyourleft), so you can
 check that rather than take our word for it.
 
@@ -31,7 +31,9 @@ that address, and only when you press the button that sends it. If you also swit
 side camera's pictures there — a second switch, off to begin with — every picture the side camera
 takes while it films goes there instead of being looked at on the tablet. Nothing is set up to
 begin with, and nothing is sent until you have entered an address and switched it on. It is
-described under **Pictures sent to your own computer** below.
+described under **Pictures sent to your own computer** below. The same computer can also be sent a
+ride's numbers — never a picture — when you press the button that asks for an analysis of that
+ride, as described under **A ride sent to your own computer** below.
 
 **The second thing you can switch on: a question sent to a service you chose, on your own key.**
 If you use the camera, you can also enter the address of a hosted model service you have an account
@@ -115,6 +117,8 @@ Only these, and only when you do them:
 - **A ride or route you choose to share.** A copy, trimmed by your privacy zones.
 - **A picture sent to your own computer, if you set one up and switch it on.** See **Pictures sent
   to your own computer** below.
+- **A ride's numbers sent to your own computer, when you ask for an analysis of it** — never a
+  picture. See **A ride sent to your own computer** below.
 - **A question sent to a service you chose, on your own key, if you set one up and turn it on** —
   never a picture. See **Questions sent to a service you chose, on your own key** below.
 - **Start and stop, and pictures, between your tablet and a side-camera phone, if you pair them.**
@@ -243,6 +247,30 @@ install, and what the risk of a downloaded model file is to that computer.
 There is no option in this app to send a picture to a hosted AI service, and no such service is
 built in, suggested or named.
 
+## A ride sent to your own computer
+
+**A ride sent to your own computer, when you ask for an analysis.** When you press the button on
+a ride's page, that ride's numbers go to the computer you set up: heart rate, cadence and power,
+your weight and watts per kilogram, your threshold power, if you set one, how long the ride
+lasted, and how it went section by section. If the side camera filmed the ride, and you agreed to
+the camera, it also gets how a few measurements of your riding position changed between the start
+and the end of filming. Never a picture. Nothing is sent until you press the button, and nothing
+is sent in the background.
+
+- **Where it goes, and how:** to the same computer, at the same address, by the same rules as
+  **Pictures sent to your own computer** above — only an address on your own network, never a
+  redirect, and not encrypted on the way unless the address starts with `https://`. In the Android
+  app it is sent by the app itself, to a private address written as numbers.
+- **What it is not sent:** not a picture and nothing made from one beyond those few differences, not
+  your name, not where you rode — no position, no height above sea level — and not when.
+- **How:** as several short questions in a row, one for each section of the ride and one for the
+  whole, each carrying the numbers it needs as text.
+- **If you cancel:** the app stops waiting and keeps nothing. Your computer may carry on working on
+  the question it was asked for a while — in the Android app the app cannot stop a question once it
+  has been sent — and whatever it answers is ignored.
+- **What happens to it afterwards:** on your computer, that is up to your computer and the software
+  you installed on it — this app cannot see or delete a copy there.
+
 ## Questions sent to a service you chose, on your own key
 
 This is the only way this app's own code sends anything to a service you chose on the internet, and it
@@ -283,7 +311,7 @@ page. You do not need this: everything else in the app works without it.
   logger, and the app blocks every request it would make (see **A second phone you pair as a side
   camera** above).
 - No sale or sharing of personal information. Nothing is transmitted to us or to anybody else
-  except the pictures you choose to send to your own computer, the questions you choose to send to
+  except the pictures and the rides you choose to send to your own computer, the questions you choose to send to
   a service of your own choosing, and the map tile requests described above, whose record our Cloudflare account can see for up to 7 days and which we neither use nor
   share.
 - No tracking across apps or sites.
@@ -295,8 +323,8 @@ deletes every ride, route, segment, effort, workout and setting, and the signing
 after you type a confirmation phrase.
 
 Some things an erase cannot reach, and the app says so before you press it: files you have already
-exported, a copy of a ride you have already given to somebody, a picture you sent to your own
-computer, which is a copy that computer holds, a question you sent to a service you chose, which is
+exported, a copy of a ride you have already given to somebody, a picture or a ride's numbers you
+sent to your own computer, which is a copy that computer holds, a question you sent to a service you chose, which is
 a copy that service holds, and Cloudflare's record of recent map requests —
 your IP address, the time, and your device or browser type — which we cannot delete on request and
 which ages out of what our Cloudflare account can see after 7 days.
