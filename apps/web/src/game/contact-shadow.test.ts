@@ -41,6 +41,8 @@ const marker = (kind: RiderMarker['kind'], x = 0, z = 0, lean = 0): RiderMarker 
   headingZ: 1,
   lean,
   bodyLean: 0,
+  pedalling: 0,
+  rideSeconds: 0,
 });
 
 /**
