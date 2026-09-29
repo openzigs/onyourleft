@@ -71,7 +71,8 @@ import {
   type ScreenedWriteUp,
 } from '../camera/write-up-screen';
 import type { RideAnalysisInput } from './input';
-import type { ModelStepPort, StepReply, StepRequest } from './model-step-port';
+import type { ModelStepPort, StepReply } from './model-step-port';
+import { sealStep } from './sealed-step';
 import {
   acceptPositionNote,
   acceptSectionNote,
@@ -338,14 +339,16 @@ export async function runAnalysis(
     }
     tokensAskedFor += bounds.maximumTokens;
 
-    const request: StepRequest = {
+    // Sealed (#803): the hosted path sends only a step made here, from the
+    // template's prompt, and refuses anything else by identity.
+    const request = sealStep({
       kind,
       system: prompt.system,
       user: prompt.user,
       ...(prompt.replySchema === undefined ? {} : { replySchema: prompt.replySchema }),
       maximumTokens: bounds.maximumTokens,
       temperature,
-    };
+    });
     const cutByTheRun = remaining < bounds.deadlineMilliseconds;
     const step = new AbortController();
     const timer = clock.delay(Math.min(bounds.deadlineMilliseconds, remaining));

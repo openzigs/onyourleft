@@ -207,10 +207,11 @@ describe('the declaration filed on Play', () => {
     expect(health.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('answers both health rows as collected, optional and not shared — #804', () => {
+  it('answers both health rows as collected, optional and SHARED — #804, #803', () => {
     // #804's press sends a ride's heart rate, power and cadence, as numbers,
-    // to the rider's own computer — the photos row's answer, for the photos
-    // row's reasons, re-filed in the same pull request as the button.
+    // to the rider's own computer — collected. #803 sends the same to a hosted
+    // model on the rider's own key, a third party the rider chose — shared
+    // (the owner's ruling 4 on #795), re-filed in the same pull request.
     for (const dataType of [
       'Health and fitness — health info',
       'Health and fitness — fitness info',
@@ -218,11 +219,13 @@ describe('the declaration filed on Play', () => {
       const answer = DATA_SAFETY_DECLARATION.find((row) => row.dataType === dataType);
       expect(answer, dataType).toBeDefined();
       expect(answer?.collected, dataType).toBe(true);
-      expect(answer?.shared, dataType).toBe(false);
+      expect(answer?.shared, dataType).toBe(true);
       expect(answer?.optional, dataType).toBe(true);
       expect(answer?.purposes, dataType).toStrictEqual(['App functionality']);
       expect(answer?.why, dataType).toContain('#804');
       expect(answer?.why, dataType).toContain('their own network');
+      expect(answer?.why, dataType).toContain('#803');
+      expect(answer?.why, dataType).toContain('hosted model service the rider chose');
     }
   });
 
@@ -272,9 +275,12 @@ describe('the declaration filed on Play', () => {
       'Health and fitness — fitness info',
       'Photos and videos',
     ]);
-    for (const answer of DATA_SAFETY_DECLARATION) {
-      expect(answer.shared, answer.dataType).toBe(false);
-    }
+    // Shared: the health rows alone, since #803. Photos and videos, and every
+    // location row, stay `shared: false` — the hosted path is never sent a
+    // picture and nothing it is sent carries a coordinate.
+    expect(
+      DATA_SAFETY_DECLARATION.filter((answer) => answer.shared).map((answer) => answer.dataType),
+    ).toStrictEqual(['Health and fitness — health info', 'Health and fitness — fitness info']);
   });
 
   it('adding the camera permission leaves the location claim untouched', () => {

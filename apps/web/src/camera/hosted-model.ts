@@ -8,7 +8,8 @@
  * The owner's ruling, recorded in ADR 0029's 2026-09-28 amendment: *"a hosted
  * model on the rider's own key, with NUMBERS ONLY and never a picture"*, off by
  * default, separately consented, and not enabled by consenting to local
- * analysis. This file is the configuration half; `hosted-transport.ts` is the
+ * analysis. Since #803 those numbers are a ride's, when the rider asks for an
+ * analysis (ADR 0035; ADR 0029's 2026-09-29 amendment). This file is the configuration half; `hosted-transport.ts` is the
  * request, and `session.ts` §`CameraController.askHostedModel` is where the
  * consent is checked before either is reached.
  *
@@ -57,12 +58,18 @@
 import { COMPLETIONS_PATH, MAXIMUM_MODEL_NAME_LENGTH } from './analysis-endpoint';
 
 /**
- * The consent screen's words, verbatim from ADR 0029's 2026-09-28 amendment.
+ * The consent screen's words — ADR 0035 D-9 C, as the owner approved them,
+ * and quoted by ADR 0029's 2026-09-29 amendment (#803), which replaces the
+ * 2026-09-28 amendment's wording now that the hosted path sends a ride's
+ * numbers — and since #845 by the amendment after it, which names the
+ * distance, each section's gradient and total climb, and the connection check.
  *
- * ⚠️ **Do not improve this.** `hosted-model.test.ts` reads the ADR and
- * compares, the way `consent.test.ts` pins D-5. D-7's own quoted wording is
- * about a photograph, and the owner ruled the hosted path is never sent one,
- * so these are the words that amendment ruled on for the path that was built.
+ * ⚠️ **Do not improve this.** `hosted-model.test.ts` reads the NEWEST
+ * amendment of ADR 0029 and compares, the way `consent.test.ts` pins D-5.
+ * D-7's own quoted wording is about a photograph, and the owner ruled the
+ * hosted path is never sent one. The same words stand beside the hosted ask on
+ * a ride's page (`ride-analysis/RideWriteUpControl.tsx`), all but
+ * {@link HOSTED_CONSENT.offUntilOn}, which describes the switch.
  */
 export const HOSTED_CONSENT: {
   readonly headline: string;
@@ -70,20 +77,26 @@ export const HOSTED_CONSENT: {
   readonly notNeeded: string;
   readonly offUntilOn: string;
 } = {
-  headline: 'This sends questions to a service you have chosen, using your own key.',
+  headline: 'This sends your ride to a service you have chosen, using your own key.',
   paragraphs: [
-    'If you turn this on, each time you press the button below a question written into this app is ' +
-      'sent to the address you entered, using the key you entered. That is a company or a computer ' +
-      'that is not yours and not ours, and we cannot see what they do with it or how long they keep ' +
-      'it. We cannot delete it for you afterwards. Like any service you connect to, it also sees ' +
-      'your internet address.',
-    'It is never sent a picture — not a photograph of you, and nothing made from one. Today it is ' +
-      'sent only a test question, with no numbers from your rides. It is not sent your name, your ' +
-      'rides, or where you were.',
+    "If you turn this on, each time you ask for a ride analysis, that ride's numbers are sent to " +
+      'the address you entered, using the key you entered: your heart rate, cadence and power, your ' +
+      'weight and watts per kilogram, your threshold power, if you set one, how long the ride ' +
+      "lasted, its distance, and each section's gradient and total climb, and how it went section " +
+      'by section. If the side camera filmed the ride, it is also ' +
+      'sent how a few measurements of your riding position changed between the start and the end of ' +
+      'filming. That is a company or a computer that is not yours and not ours, and we cannot see ' +
+      'what they do with it or how long they keep it. We cannot delete it for you afterwards. Like ' +
+      'any service you connect to, it also sees your internet address.',
+    'It is never sent a picture — not a photograph of you, and nothing made from one. It is not ' +
+      'sent your name, where you rode, or when. When you save a service, the app sends it one ' +
+      'test question, containing none of your data, to check it answers.',
     'Your key is kept on this device, is sent only to the address you entered, and is never put in ' +
       'a file this app exports.',
   ],
-  notNeeded: 'You do not need this. Everything else in the app works without it.',
+  notNeeded:
+    'You do not need this. Everything else in the app works without it, and a computer of your ' +
+    'own can do the same analysis.',
   offUntilOn:
     'This is off. It stays off until you turn it on, it is off again whenever the app is opened, ' +
     'and you can turn it off at any time.',

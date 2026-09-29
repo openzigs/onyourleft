@@ -12,6 +12,8 @@ import { activityId, athleteId, type ActivityId } from '@onyourleft/store';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { auditAccessibility, formatViolations } from '../a11y/audit';
+import { HOSTED_CONSENT } from '../camera/hosted-model';
+import { HOSTED_SENDS } from '../detail/write-up';
 import { stubActivity, stubDetail } from '../detail/testing';
 import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
 import { ActivityDetailView } from '../views/ActivityDetailView';
@@ -120,6 +122,38 @@ describe('which controls are offered', () => {
   it('offers the one source that is set up, alone', async () => {
     await open(scriptedPort(['hosted']));
     expect(buttons()).toStrictEqual([ASK_LABEL.hosted.first]);
+  });
+});
+
+describe('what the hosted ask says it sends (#803, carried from #838’s review)', () => {
+  /** The paragraphs of the "what is sent" block every ask control is described by. */
+  function sendsParagraphs(): string[] {
+    const control = document.querySelector('.oyl-write-up__controls button');
+    const id = control?.getAttribute('aria-describedby') ?? '';
+    return [...(document.getElementById(id)?.querySelectorAll('p') ?? [])].map(
+      (paragraph) => paragraph.textContent,
+    );
+  }
+
+  it('stands ADR 0035 D-9 C beside the hosted ask in full, but for the sentence about the switch', async () => {
+    await open(scriptedPort(['hosted']));
+    // `write-up.test.ts` pins HOSTED_SENDS to the ADR; this pins what renders to it.
+    expect(sendsParagraphs()).toStrictEqual([...HOSTED_SENDS]);
+    expect(sendsParagraphs().join(' ')).toContain('your heart rate, cadence and power');
+    expect(document.body.textContent).not.toContain(HOSTED_CONSENT.offUntilOn);
+    expectClean('the hosted wording');
+  });
+
+  it('says both, in order, when both sources are offered', async () => {
+    await open(scriptedPort(['computer', 'hosted']));
+    const said = sendsParagraphs();
+    expect(said).toHaveLength(1 + HOSTED_SENDS.length);
+    expect(said.slice(1)).toStrictEqual([...HOSTED_SENDS]);
+  });
+
+  it('says none of it where only the rider’s computer is offered', async () => {
+    await open(scriptedPort(['computer']));
+    expect(document.body.textContent).not.toContain(HOSTED_CONSENT.headline);
   });
 });
 

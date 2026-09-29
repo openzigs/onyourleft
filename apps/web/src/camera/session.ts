@@ -61,6 +61,7 @@ import type {
 import { CameraCaptureError } from './camera-port';
 import { consentDecision, NO_CONSENT, type CameraConsent, type ConsentAnswers } from './consent';
 import type { HostedCall, HostedFailure, HostedPort, HostedQuestion } from './hosted-port';
+import type { SealedStep } from '../ride-analysis/sealed-step';
 import type { AnalysisPort } from './analysis-port';
 import type {
   AnalysisCall,
@@ -545,7 +546,13 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
   }
 
   /**
-   * Ask the rider's hosted service one question — #518.
+   * Ask the rider's hosted service one question — #518 — or send it one step
+   * of a ride analysis the runner sealed (#803).
+   *
+   * ⚠️ **Every step of a ride analysis comes through here**, one call per
+   * step (`ride-analysis/hosted-step.ts`), so the consent check below gates
+   * each one rather than the press alone: a rider who turns the hosted model
+   * off while a run is going stops the next step being sent.
    *
    * The order refuses without doing the next step: **consent** —
    * `consent.hosted`, which only {@link agreeToHosted} sets; then
@@ -558,7 +565,7 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
    * Nothing the service said reaches this controller's state; the outcome is
    * returned and not stored, for the reason {@link askAboutPicture} gives.
    */
-  askHostedModel(question: HostedQuestion): HostedCall {
+  askHostedModel(asked: HostedQuestion | SealedStep): HostedCall {
     const refused = (failure: HostedFailure): HostedCall => ({
       outcome: Promise.resolve({ kind: 'failed', failure }),
       cancel: () => undefined,
@@ -570,7 +577,9 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
     if (port === undefined) {
       return refused('not-configured');
     }
-    return port.sendHostedQuestion({ question });
+    return port.sendHostedQuestion(
+      typeof asked === 'string' ? { question: asked } : { step: asked },
+    );
   }
 
   /**

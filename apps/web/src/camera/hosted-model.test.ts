@@ -59,33 +59,58 @@ function memoryStorage(): HostedModelStorage & { readonly rows: Map<string, stri
   };
 }
 
-describe('the hosted consent wording is the one ADR 0029’s 2026-09-28 amendment ruled on', () => {
-  const adr = asProse(readFileSync(ADR_0029, 'utf8'));
-  const amendment = adr.slice(adr.indexOf('2026-09-28'));
+/** The newest entry of an ADR's `## Amendments` section, as prose. */
+function newestAmendment(markdown: string): string {
+  const section = markdown.slice(markdown.indexOf('## Amendments'));
+  const entries = [...section.matchAll(/^- \*\*(\d{4}-\d{2}-\d{2})\*\*/gm)];
+  const last = entries.at(-1);
+  return last === undefined ? '' : asProse(section.slice(last.index));
+}
 
-  it('can find the amendment at all', () => {
-    expect(adr).toContain('D-7 — The hosted path');
-    expect(amendment).toContain('NUMBERS ONLY');
+describe('the hosted consent wording is the one ADR 0029’s newest amendment quotes (#803)', () => {
+  const markdown = readFileSync(ADR_0029, 'utf8');
+  const amendment = newestAmendment(markdown);
+  const parts = [
+    HOSTED_CONSENT.headline,
+    ...HOSTED_CONSENT.paragraphs,
+    HOSTED_CONSENT.notNeeded,
+    HOSTED_CONSENT.offUntilOn,
+  ];
+
+  it('can find the amendment at all, and it is the one that moved the words for ride data', () => {
+    expect(asProse(markdown)).toContain('D-7 — The hosted path');
+    expect(amendment).toMatch(/^- 2026-09-29 — /);
+    expect(amendment).toContain('ADR 0035 D-9 C');
+    // #845: the completed wording, not #803's.
+    expect(amendment).toContain("its distance, and each section's gradient and total climb");
+    expect(amendment).toContain('one test question, containing none of your data');
   });
 
-  it('appears in the amendment word for word, every part and in order', () => {
-    const parts = [
-      HOSTED_CONSENT.headline,
-      ...HOSTED_CONSENT.paragraphs,
-      HOSTED_CONSENT.notNeeded,
-      HOSTED_CONSENT.offUntilOn,
-    ];
+  it('appears in the newest amendment word for word, every part and in order', () => {
     expect(
       amendment,
-      'the hosted consent must say what the amendment says; an ADR body is never edited in place',
+      'the hosted consent must say what the newest amendment says; an ADR body is never edited in place',
     ).toContain(parts.map(asProse).join(' '));
   });
 
-  it('says never a picture, names the key, and names the alternative', () => {
+  it('would notice the words the 2026-09-28 amendment quoted, which no longer ship', () => {
+    // The control: the superseded wording is still in the ADR, and it is NOT
+    // what the newest amendment says — so a test reading the first amendment
+    // instead would pass over the old words.
+    const older = asProse(markdown.slice(markdown.indexOf('- **2026-09-28**')));
+    expect(older).toContain('Today it is sent only a test question');
+    expect(amendment).not.toContain('Today it is sent only a test question');
+  });
+
+  it('says never a picture, names the key and what a ride sends, and names the alternative', () => {
     const all = [HOSTED_CONSENT.headline, ...HOSTED_CONSENT.paragraphs].join(' ');
     expect(all).toContain('never sent a picture');
     expect(all).toContain('using the key you entered');
+    expect(all).toContain('your heart rate, cadence and power');
+    expect(all).toContain("each section's gradient and total climb");
+    expect(all).toContain('When you save a service, the app sends it one test question');
     expect(all).toContain('We cannot delete it for you afterwards');
+    expect(all).not.toContain('Today it is sent only a test question');
     expect(HOSTED_CONSENT.notNeeded).toContain('You do not need this');
     expect(HOSTED_CONSENT.offUntilOn).toContain('This is off');
   });

@@ -21,7 +21,7 @@ report, not a page view.
 That is not a promise about our intentions. It is a property of the software: the code this project
 writes contains exactly **three** network calls, and each can do only the one thing described below —
 a picture, or a ride's numbers when you ask for an analysis, to a computer of your own, a direct link between your tablet and a second phone you
-paired with it, and a question — never a picture — to a service you chose, on your own key. The whole thing is [open source](https://github.com/openzigs/onyourleft), so you can
+paired with it, and a question, or a ride's numbers when you ask for an analysis — never a picture — to a service you chose, on your own key. The whole thing is [open source](https://github.com/openzigs/onyourleft), so you can
 check that rather than take our word for it.
 
 **The one thing you can switch on: a picture sent to a computer of your own.** If you use the
@@ -38,9 +38,10 @@ ride, as described under **A ride sent to your own computer** below.
 **The second thing you can switch on: a question sent to a service you chose, on your own key.**
 If you use the camera, you can also enter the address of a hosted model service you have an account
 with, the model's name, and your own key for it, and then turn it on. It is sent **numbers and
-words, never a picture** — today, only a test question, when you press the button that sends it.
-It is off whenever the app is opened, and nothing is set up to begin with. It is described under
-**Questions sent to a service you chose, on your own key** below.
+words, never a picture**: a test question when you press the button that sends it, and a ride's
+numbers when you ask for an analysis of that ride. It is off whenever the app is opened, and
+nothing is set up to begin with. It is described under **Questions sent to a service you chose, on
+your own key** below.
 
 ⚠️ **That computer is yours, not ours.** On Your Left runs no server. It is not an On Your Left
 service, not an account, and not the future sync server this project may one day run
@@ -119,8 +120,9 @@ Only these, and only when you do them:
   to your own computer** below.
 - **A ride's numbers sent to your own computer, when you ask for an analysis of it** — never a
   picture. See **A ride sent to your own computer** below.
-- **A question sent to a service you chose, on your own key, if you set one up and turn it on** —
-  never a picture. See **Questions sent to a service you chose, on your own key** below.
+- **A question, or a ride's numbers when you ask for an analysis of it, sent to a service you
+  chose, on your own key, if you set one up and turn it on** — never a picture. See **Questions sent
+  to a service you chose, on your own key** below.
 - **Start and stop, and pictures, between your tablet and a side-camera phone, if you pair them.**
   The pictures go from the phone to your tablet and no further. See **A second phone you pair as a
   side camera** below.
@@ -252,10 +254,10 @@ built in, suggested or named.
 **A ride sent to your own computer, when you ask for an analysis.** When you press the button on
 a ride's page, that ride's numbers go to the computer you set up: heart rate, cadence and power,
 your weight and watts per kilogram, your threshold power, if you set one, how long the ride
-lasted, and how it went section by section. If the side camera filmed the ride, and you agreed to
-the camera, it also gets how a few measurements of your riding position changed between the start
-and the end of filming. Never a picture. Nothing is sent until you press the button, and nothing
-is sent in the background.
+lasted, its distance, and each section's gradient and total climb, and how it went section by
+section. If the side camera filmed the ride, and you agreed to the camera, it also gets how a few
+measurements of your riding position changed between the start and the end of filming. Never a
+picture. Nothing is sent until you press the button, and nothing is sent in the background.
 
 - **Where it goes, and how:** to the same computer, at the same address, by the same rules as
   **Pictures sent to your own computer** above — only an address on your own network, never a
@@ -281,31 +283,53 @@ is sent in the background.
 This is the only way this app's own code sends anything to a service you chose on the internet, and it
 is off until you turn it on — and off again whenever the app is opened. **It is never sent a picture.**
 
-- **What is sent:** a question written into the app, and the model name you typed. Today the only
-  question is a test that asks the service to reply with one word; it carries no numbers from your
-  rides. The app is allowed to send such a service numbers it has already worked out — from a ride,
-  or from where the side camera found you in its pictures — **but never a picture, and nothing made
-  from one**, and this policy will say so before any question that carries such numbers is added.
-  Not your name, not your rides, not your position, not your heart rate, and not an identifier.
+**This sends your ride to a service you have chosen, using your own key.** If you turn this on,
+each time you ask for a ride analysis, that ride's numbers are sent to the address you entered,
+using the key you entered: your heart rate, cadence and power, your weight and watts per kilogram,
+your threshold power, if you set one, how long the ride lasted, its distance, and each section's
+gradient and total climb, and how it went section by section. If the side camera filmed the ride,
+it is also sent how a few measurements of your riding position changed between the start and the
+end of filming. That is a company or a computer that is not yours
+and not ours, and we cannot see what they do with it or how long they keep it. We cannot delete it
+for you afterwards. Like any service you connect to, it also sees your internet address.
+
+- **What is sent:** for a ride analysis, the ride's numbers above, as several short questions in a
+  row — one for each section of the ride and one for the whole — each written by the app and
+  carrying the numbers it needs as text, with the model name you typed. The measurements of your
+  riding position go only if you also agreed to the camera. Separately, the Camera page's check of
+  the connection sends a test question that asks the service to reply with one word, and carries no
+  numbers from your rides.
+- **What is not sent:** never a picture, and nothing made from one beyond those few differences in
+  position. Not your name, not where you rode — no position, no height above sea level — not when,
+  and not an identifier.
 - **Your key:** the key you typed, sent in the request's `Authorization` header to the address you
   typed and to nowhere else. It is kept in this device's browser storage, is never put in a file the
   app exports, is never shown again once saved, and *Forget this service and key* or *Erase
   everything* removes it.
-- **Where it goes:** to the one address you typed, which must start with `https://`, so the question
+- **Where it goes:** to the one address you typed, which must start with `https://`, so what is sent
   and your key are encrypted on the way. The app will not follow a redirect somewhere else. No
   service is built in, suggested or named: you choose it, under your own agreement with whoever runs
   it.
-- **When:** only when you press the button that sends it, and only after you have turned the hosted
-  model on since the app was opened. Nothing is sent on a timer.
-- **What the service sees and keeps:** the question, the model name, your key, and — as with any
+- **When:** only when you press the button that sends it — on the Camera page for the test, on a
+  ride's page for an analysis — and only after you have turned the hosted model on since the app was
+  opened. The app checks that it is still on before every question of an analysis, so turning it off
+  stops the next one. Nothing is sent on a timer or in the background.
+- **If you cancel:** the app stops waiting, closes the connection and keeps nothing. The service has
+  already been sent the ride's numbers by then, and may carry on for a while; whatever it answers is
+  ignored.
+- **What the service sees and keeps:** what it was sent, the model name, your key, and — as with any
   service you connect to — your internet address. It is a company or a computer that is not yours
   and not ours; we cannot see what it does with the request or how long it keeps it, and we cannot
   delete it for you afterwards.
-- **What the app does with the answer:** it notes whether the service understood the question, and
-  shows none of its words.
+- **What the app does with the answer:** for the test, it notes whether the service understood the
+  question, and shows none of its words. For an analysis, it keeps the write-up the service sends
+  back only once it has passed the app's checks on what may be shown, saved with that ride on this
+  device in place of any write-up it had before, exactly as for **A ride sent to your own computer**
+  above. Nothing else the service answers is kept.
 
 To stop it, untick *Turn the hosted model on* or press **Forget this service and key** on the Camera
-page. You do not need this: everything else in the app works without it.
+page. You do not need this: everything else in the app works without it, and a computer of your own
+can do the same analysis.
 
 ## What the app does not do
 
@@ -315,9 +339,10 @@ page. You do not need this: everything else in the app works without it.
   Google's MediaPipe, which runs the side camera's pose model on your tablet — contains a usage
   logger, and the app blocks every request it would make (see **A second phone you pair as a side
   camera** above).
-- No sale or sharing of personal information. Nothing is transmitted to us or to anybody else
-  except the pictures and the rides you choose to send to your own computer, the questions you choose to send to
-  a service of your own choosing, and the map tile requests described above, whose record our Cloudflare account can see for up to 7 days and which we neither use nor
+- We never sell your data. The only sharing is the analysis you choose to send to a service you
+  set up. Nothing is transmitted to us or to anybody else
+  except the pictures and the rides you choose to send to your own computer, the questions and the
+  rides you choose to send to a service of your own choosing, and the map tile requests described above, whose record our Cloudflare account can see for up to 7 days and which we neither use nor
   share.
 - No tracking across apps or sites.
 
@@ -329,8 +354,8 @@ after you type a confirmation phrase.
 
 Some things an erase cannot reach, and the app says so before you press it: files you have already
 exported, a copy of a ride you have already given to somebody, a picture or a ride's numbers you
-sent to your own computer, which is a copy that computer holds, a question you sent to a service you chose, which is
-a copy that service holds, and Cloudflare's record of recent map requests —
+sent to your own computer, which is a copy that computer holds, a question or a ride's numbers you
+sent to a service you chose, which is a copy that service holds, and Cloudflare's record of recent map requests —
 your IP address, the time, and your device or browser type — which we cannot delete on request and
 which ages out of what our Cloudflare account can see after 7 days.
 
