@@ -33,7 +33,26 @@ export const MAXIMUM_NESTING_DEPTH = 3;
 /** ADR 0037 D-7: a room is 50 riders, up to 100. */
 export const MAXIMUM_RIDERS = 100;
 
-/** The most power a report may carry — Sir Chris Hoy's 2500 W peak, the one first-hand figure in ADR 0028 Q3's table. */
+/**
+ * The most power a report may carry — Sir Chris Hoy's 2500 W peak, the one
+ * first-hand figure in ADR 0028 Q3's table.
+ *
+ * ⚠️ **A wire bound, and so a ceiling on the room's own limit** (#779, from
+ * #832's review). `@onyourleft/physics`' `PlausibilityLimits.maximumPowerWatts`
+ * defaults to this same 2500 (`physics-agreement.test.ts` holds them equal),
+ * and a room may **lower** it but never raise it: a report over this bound is
+ * refused by the decoder as `bad-value` before the room sees it, so a room
+ * configured higher would admit nothing more. The room refuses such a
+ * configuration at start-up (`apps/instance` §`roomSettings`). Raising it is a
+ * new `PROTOCOL_VERSION`.
+ *
+ * ⚠️ **And an over-bound report coasts the rider and feeds no rule-2 flag.**
+ * The room never sees its power, so it simulates that step at 0 W (rule 1) and
+ * shows the rider coasting; a flag is rule 2's, over the power the room
+ * simulated. A rider whose meter reports 3000 W is therefore slowed, visibly,
+ * and not flagged — which is the safer of the two errors, and stated here
+ * rather than discovered.
+ */
 export const MAXIMUM_REPORTED_POWER_WATTS = 2500;
 
 /** The longest admission ticket, in characters. */
@@ -116,7 +135,13 @@ export const MESSAGE_FIELDS = {
     reason: {
       shape: {
         kind: 'enum',
-        values: ['protocol-mismatch', 'physics-mismatch', 'ticket-refused', 'room-full'],
+        values: [
+          'protocol-mismatch',
+          'physics-mismatch',
+          'ticket-refused',
+          'room-full',
+          'room-closed',
+        ],
       },
     },
   },

@@ -120,11 +120,30 @@ export { advanceBot, BOT_AT_START_LINE, botDemand, createBotPacer } from './pace
 
 export type { RidingPosition } from './riding';
 export {
+  BICYCLE_MASS_KILOGRAMS,
   PHYSICS_VERSION,
   RIDING_POSITION_DRAG_AREAS,
   ridingCoefficients,
+  ridingConditions,
   ROAD_ROLLING_RESISTANCE_COEFFICIENT,
+  SEA_LEVEL_AIR_DENSITY,
 } from './riding';
+
+// --- The draft model (#786, ADR 0038) ----------------------------------------
+//
+// A multiplier on `C_D·A` the CALLER applies — through `ridingConditions`'
+// `dragFactor` — and nothing the integrator calls. From distance along the
+// route alone; `+ − × ÷` only.
+
+export {
+  DRAFT_REACH_METRES,
+  DRAFT_TABLE,
+  draftFactor,
+  fieldDraftFactors,
+  LEVEL_METRES,
+  leadFactor,
+  MAXIMUM_DRAFT_DEPTH,
+} from './draft';
 
 // --- What a race room checks (#487, ADR 0028 D-2 rules 1–4) -----------------
 

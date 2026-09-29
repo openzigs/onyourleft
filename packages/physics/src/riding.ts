@@ -25,8 +25,13 @@
  * defaults and not measurements**.
  */
 
+import { altitudeMetres, degreesCelsius, kilograms, type Kilograms } from '@onyourleft/domain';
+
+import { airDensityKilogramsPerCubicMetre } from './air';
 import type { PhysicsCoefficients } from './coefficients';
 import { withDragArea } from './coefficients';
+import { PhysicsError } from './physics-error';
+import type { RideConditions } from './simulate';
 
 /**
  * Where a rider's hands are — #365. In a race it is the race's, never the
@@ -76,6 +81,61 @@ export function ridingCoefficients(
 }
 
 /**
+ * What the bicycle under every rider weighs, in kilograms — ADR 0028 D-1's
+ * "one bicycle".
+ *
+ * Moved here from `apps/web/src/game/rider.ts` by #779 for the reason the
+ * drag areas moved in #487: a race room adds it to a declared mass, may not
+ * import `apps/web`, and a second 9 written under `apps/instance` could drift.
+ * Its provenance — a road bike a rider owns, with pedals; a **default and not
+ * a measurement** — is recorded where it always was, at `rider.ts`.
+ */
+export const BICYCLE_MASS_KILOGRAMS = 9;
+
+/**
+ * Sea level at 15 °C, the ISO 2533 reference, through `air.ts` — the air every
+ * ride and every race is simulated in (ADR 0028 D-1: one air).
+ *
+ * ⚠️ `air.ts` uses `Math.pow`, which IEEE 754 does not specify exactly. At
+ * altitude 0 its base is `1 − L·0/T₀ = 1` exactly, and `pow(1, y)` is `1` by
+ * the ECMAScript specification on every engine, so this one value is as
+ * portable as the four operations. A race at altitude would not be.
+ */
+export const SEA_LEVEL_AIR_DENSITY = airDensityKilogramsPerCubicMetre(
+  altitudeMetres(0),
+  degreesCelsius(15),
+);
+
+/**
+ * Everything `advance` needs to ride an athlete of `athleteMass` in `position`
+ * — the game's ride and a race room's re-simulation, built one way (#779).
+ *
+ * @param athleteMass the **athlete's** declared mass; the bicycle is added here
+ * and only here.
+ * @param dragFactor ADR 0038's draft multiplier `k` on the position's `C_D·A`
+ * (`draft.ts`); `1`, the default, is riding alone and is byte for byte the
+ * conditions before drafting existed.
+ */
+export function ridingConditions(
+  athleteMass: Kilograms,
+  position: RidingPosition,
+  dragFactor = 1,
+): RideConditions {
+  if (!(dragFactor > 0 && dragFactor <= 1)) {
+    throw new PhysicsError('a draft multiplier is in (0, 1]');
+  }
+  // `1 × area` is `area` exactly, so riding alone is `ridingCoefficients(position)` to the bit.
+  return {
+    totalMass: kilograms(athleteMass + BICYCLE_MASS_KILOGRAMS),
+    airDensityKilogramsPerCubicMetre: SEA_LEVEL_AIR_DENSITY,
+    coefficients: {
+      ...withDragArea(dragFactor * RIDING_POSITION_DRAG_AREAS[position]),
+      rollingResistanceCoefficient: ROAD_ROLLING_RESISTANCE_COEFFICIENT,
+    },
+  };
+}
+
+/**
  * The version of this package's **answer** — ADR 0028 D-2 rule 5.
  *
  * A room re-simulates every rider and its position is the one that counts, so
@@ -88,5 +148,9 @@ export function ridingCoefficients(
  * `agreement.test.ts`**, including the race-configuration vector. That file
  * pins this number beside the vectors it versions, so the two are read and
  * changed together.
+ *
+ * **2** since #786: the draft model (`draft.ts`, ADR 0038) is part of the
+ * answer a room computes, so a version-1 client — which drafts nobody — is
+ * refused rather than raced on a different model.
  */
-export const PHYSICS_VERSION = 1;
+export const PHYSICS_VERSION = 2;

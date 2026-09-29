@@ -546,6 +546,56 @@ export default tseslint.config(
     },
   },
 
+  // --- The room core is pure: time arrives as a parameter (#779) ------------
+  // `apps/instance/src/room/core/` is mounted unchanged by a Node adapter
+  // (#780) and a Durable Object (#781), ADR 0037 D-2, and its determinism test
+  // — the same calls give byte-identical frames — means something only while
+  // it reads no clock. `tsconfig.room-core.json` is the closure for the
+  // platform (no `lib` but ES2024, no `types`); this is the fast duplicate,
+  // plus the ECMAScript clock and the timers no `lib` narrowing can remove,
+  // and the socket library by name.
+  {
+    files: ['apps/instance/src/room/core/**/*.ts'],
+    rules: {
+      ...platformIsolation([
+        {
+          group: ['ws', 'ws/*'],
+          message:
+            'The room core names no socket library: the adapter owns the socket (ADR 0037 D-2).',
+        },
+      ]),
+      'no-restricted-globals': [
+        'error',
+        ...PLATFORM_GLOBALS.map((name) => ({
+          name,
+          message:
+            'The room core names no platform API: an adapter owns the socket and the timer (ADR 0037 D-2, #779).',
+        })),
+        ...[
+          'Date',
+          'setTimeout',
+          'setInterval',
+          'setImmediate',
+          'queueMicrotask',
+          'performance',
+        ].map((name) => ({
+          name,
+          message:
+            'The room core reads no clock and schedules nothing: time arrives as a parameter, as in the recording engine (#45, #779).',
+        })),
+      ],
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'Math',
+          property: 'random',
+          message:
+            'The room core is deterministic: the same calls give byte-identical frames (#779).',
+        },
+      ],
+    },
+  },
+
   // --- The announcer's core is pure: time arrives as a parameter -------------
   // #396. `apps/web/src/game/hud/announce.ts` decides whether a rider hears a
   // sentence, and its whole test suite drives it with a fake clock — which is
