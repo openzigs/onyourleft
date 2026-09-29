@@ -9,12 +9,17 @@
  * where that is made a property of the types rather than of a caller's
  * manners:
  *
- * - **A {@link HostedRequest} is a question name and nothing else.** No
- *   `frame`, no bytes, no string of the caller's choosing. A caller holding a
- *   `CapturedFrame` has nowhere to put it: an object literal carrying one is a
- *   compile error (`hosted-transport.test.ts` pins that with a
- *   `@ts-expect-error`), and a request smuggled past the compiler with extra
- *   members is refused at run time as `not-numbers` before anything is sent.
+ * - **A {@link HostedRequest} is a question name, or a step the analysis
+ *   runner sealed, and nothing else** (#803). No `frame`, no bytes, no string
+ *   of the caller's choosing. A caller holding a `CapturedFrame`, a `Blob`, an
+ *   `ImageBitmap` or an `ImageData` has nowhere to put it: an object literal
+ *   carrying one is a compile error, and so is a step the caller wrote
+ *   themselves, because only `ride-analysis/sealed-step.ts` §`sealStep` makes
+ *   a `SealedStep` (`hosted-transport.test.ts` pins each with a
+ *   `@ts-expect-error`). A request smuggled past the compiler — extra members,
+ *   or a step that looks sealed and was not — is refused at run time as
+ *   `not-numbers` before anything is sent (`hosted-transport.ts`
+ *   §`isBuiltRequest`).
  * - **This file imports nothing that names a picture**, and neither does the
  *   transport behind it. `hosted-transport.test.ts` §"cannot name a picture"
  *   reads both and fails on an import of the camera's frame types or on the
@@ -23,14 +28,16 @@
  *   in two steps, through `analysis-port.ts`, for `UntrustedText`.
  *   `no-picture-reachable.test.ts` walks the whole graph from here now.
  *
- * ## The first question carries no numbers at all
+ * ## What is sent
  *
- * The ruling PERMITS ride data and pose numbers the tablet has already worked
- * out. The one question built here is a connection check with no numbers,
- * because a question that sent ride numbers would have an answer with nowhere
- * to go: nothing may show a model's words about a rider's body outside
- * ADR 0030's vocabularies. The amendment says what the issue that adds one
- * owes.
+ * Two kinds of request. The **connection check** (#518) is a fixed question
+ * with no numbers. A **step** (#803) is one step of the ride analysis: a
+ * prompt #810's template built from #809's input — the ride's numbers, as
+ * text, and never a coordinate, a date or a name — sealed by the runner. The
+ * owner's ruling 4 on #795 permits it: *"the full ride data (health and
+ * fitness data shared with a third party the rider chose)"*. The words the
+ * rider reads before any of it is sent are ADR 0035 D-9 C, quoted by
+ * ADR 0029's 2026-09-29 amendment and by `hosted-model.ts` §`HOSTED_CONSENT`.
  *
  * ## Why a `*-port.ts`
  *
@@ -41,6 +48,7 @@
  * the controller cannot keep this one alive by name.
  */
 
+import type { SealedStep } from '../ride-analysis/sealed-step';
 import type { UntrustedText } from './model-answer';
 
 /** What this client may ask, as a closed set. */
@@ -56,10 +64,18 @@ export const HOSTED_PROMPTS: Readonly<Record<HostedQuestion, string>> = {
     'word: ready',
 };
 
-/** One question, and nothing else. @see this file's header */
-export interface HostedRequest {
-  readonly question: HostedQuestion;
-}
+/**
+ * One question, or one sealed step of the ride analysis, and nothing else.
+ * @see this file's header
+ */
+export type HostedRequest = { readonly question: HostedQuestion } | { readonly step: SealedStep };
+
+/**
+ * How the service said its reply ended — `choices[0].finish_reason`. The
+ * runner fails a step whose reply was cut off (`length`) rather than taking
+ * half an answer; the connection check ignores it.
+ */
+export type HostedFinish = 'stop' | 'length' | 'other';
 
 /** Why a question was not answered. Every member has a sentence below. */
 export type HostedFailure =
@@ -68,8 +84,8 @@ export type HostedFailure =
   /** No service is saved on this device. */
   | 'not-configured'
   /**
-   * The request carried something other than a question name — the run-time
-   * half of "never a picture". Reached without a request being made.
+   * The request was not a question name or a step the runner sealed — the
+   * run-time half of "never a picture". Reached without a request being made.
    */
   | 'not-numbers'
   /** The request never reached an answer. A browser says nothing more to a page. */
@@ -132,11 +148,17 @@ export const HOSTED_FAILURE_TEXT: Readonly<Record<HostedFailure, string>> = {
 
 /**
  * What came back. `description` is untrusted input for the reason
- * `model-answer.ts` §`AnalysisOutcome` gives, and it goes no further than
- * `useHostedCheck.ts`, which reduces it to "understood" and a length.
+ * `model-answer.ts` §`AnalysisOutcome` gives. For the connection check it goes
+ * no further than `useHostedCheck.ts`, which reduces it to "understood" and a
+ * length; for a step, no further than the analysis runner, through
+ * `ride-analysis/hosted-step.ts` (#803).
  */
 export type HostedOutcome =
-  | { readonly kind: 'described'; readonly description: UntrustedText }
+  | {
+      readonly kind: 'described';
+      readonly description: UntrustedText;
+      readonly finish: HostedFinish;
+    }
   | { readonly kind: 'failed'; readonly failure: HostedFailure };
 
 /** A request in flight. */
@@ -149,6 +171,6 @@ export interface HostedCall {
 
 /** The one seam between this client and a hosted model. */
 export interface HostedPort {
-  /** Send one question — and nothing else — and read the answer. */
+  /** Send one question or one sealed step — and nothing else — and read the answer. */
   sendHostedQuestion(request: HostedRequest): HostedCall;
 }

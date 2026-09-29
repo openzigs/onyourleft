@@ -81,7 +81,7 @@ function manualDeadline(): { readonly schedule: AnalysisSchedule; fire: () => vo
   };
 }
 
-const READY = { kind: 'described', description: 'ready' as UntrustedText } as const;
+const READY = { kind: 'described', description: 'ready' as UntrustedText, finish: 'stop' } as const;
 
 function Probe(props: {
   readonly asker: HostedAsker;
@@ -163,7 +163,11 @@ describe('useHostedCheck', () => {
     expect(cancelled).toStrictEqual([0]);
     // …and even if it answers anyway, the screen is the second's.
     await inAct(() => {
-      answer(0, { kind: 'described', description: 'not ready at all' as UntrustedText });
+      answer(0, {
+        kind: 'described',
+        description: 'not ready at all' as UntrustedText,
+        finish: 'stop',
+      });
     });
     await settle();
     expect(shown()).toStrictEqual({ kind: 'asking' });
@@ -188,7 +192,11 @@ describe('useHostedCheck', () => {
     mounted = await mount(<Probe asker={asker} schedule={manualDeadline().schedule} />);
     await press();
     await inAct(() => {
-      answer(0, { kind: 'described', description: 'Hello from a service.' as UntrustedText });
+      answer(0, {
+        kind: 'described',
+        description: 'Hello from a service.' as UntrustedText,
+        finish: 'stop',
+      });
     });
     await settle();
     expect(shown()).toStrictEqual({ kind: 'answered', understood: false, characters: 21 });

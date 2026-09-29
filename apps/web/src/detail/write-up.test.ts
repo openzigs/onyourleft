@@ -16,11 +16,12 @@ import { unixSeconds } from '@onyourleft/domain';
 import { activityId, athleteId, type RideWriteUpRecord } from '@onyourleft/store';
 import { describe, expect, it } from 'vitest';
 
+import { HOSTED_CONSENT } from '../camera/hosted-model';
 import { stripComments } from '../units/no-inline-units';
 import {
   COMPUTER_SENDS,
   COMPUTER_SENDS_LEAD,
-  HOSTED_SENDS_LEAD,
+  HOSTED_SENDS,
   missingSectionsText,
   shownWriteUp,
   WRITE_UP_FRAMING_LEAD,
@@ -72,9 +73,12 @@ describe('the approved wording, word for word (ADR 0035 D-9)', () => {
     expect(`${COMPUTER_SENDS_LEAD} ${COMPUTER_SENDS}`).toBe(approved);
   });
 
-  it('opens the hosted source with wording C’s first sentence', () => {
+  it('stands wording C beside the hosted ask, all but the sentence about the switch — #803', () => {
     const approved = quotedAfter('**C — hosted', '⚠️ **A says');
-    expect(approved.startsWith(`${HOSTED_SENDS_LEAD} `)).toBe(true);
+    expect(approved.length).toBeGreaterThan(900);
+    expect(`${HOSTED_SENDS.join(' ')} ${HOSTED_CONSENT.offUntilOn}`).toBe(approved);
+    // More than the headline: #838's review found only the first sentence here.
+    expect(HOSTED_SENDS.length).toBe(5);
   });
 });
 

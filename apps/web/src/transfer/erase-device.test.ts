@@ -161,12 +161,29 @@ describe('what the rider is told before they press it', () => {
     expect(text).toContain('copied off this device');
   });
 
-  it('names the copy a hosted service holds of a question — #518, and it is not a picture', () => {
-    // ADR 0029's 2026-09-28 amendment writes the line: what leaves on the
-    // hosted path is a question, so what an erase cannot reach is that.
+  it('names the copy a hosted service holds of a question and of a ride’s numbers — #518, #803', () => {
+    // ADR 0029's 2026-09-28 amendment wrote the line for a question; #803
+    // sends a ride's numbers there too, and the line says so. Not a picture.
     expect(ERASE_CANNOT_REACH).toContain(
-      'a question you sent to a service you chose, on your own key, which is a copy that service holds',
+      'a question or a ride’s numbers you sent to a service you chose, on your own key, which is a copy that service holds',
     );
+  });
+
+  it('names the ride’s numbers sent to a hosted service, as the privacy policy does — #803', () => {
+    const policy = readFileSync(
+      fileURLToPath(new URL('../../../../docs/privacy-policy.md', import.meta.url)),
+      'utf8',
+    );
+    const erase = policy.slice(
+      policy.indexOf('## Deleting your data'),
+      policy.indexOf('## Children'),
+    );
+    const straight = (text: string): string => text.replace(/[‘’]/g, "'").replace(/\s+/g, ' ');
+    expect(straight(erase)).toContain(
+      "a question or a ride's numbers you sent to a service you chose, which is a copy that service holds",
+    );
+    const line = ERASE_CANNOT_REACH.find((entry) => straight(entry).includes('service you chose'));
+    expect(straight(line ?? '')).toContain("a question or a ride's numbers");
   });
 
   it('names the hosted service’s key among what an erase removes — #518', () => {

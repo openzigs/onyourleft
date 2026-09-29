@@ -477,8 +477,19 @@ apps/                 AGPL-3.0-or-later, without exception
                         `main.tsx` builds with `riderModelStepSource`, and
                         saves ONLY a `ScreenedWriteUp`, replacing the ride's
                         write-up; any failure leaves the earlier one as it
-                        was. The rider's own computer is offered first; there
-                        is no hosted STEP port until #803. ⚠️ The port is an
+                        was. The rider's own computer is offered first.
+                        ⚠️ Since #803 there IS a hosted source — a reviewer
+                        who remembers "no hosted STEP port until #803" is
+                        reading the old file: `hosted-step.ts` sends each step
+                        through `CameraController.askHostedModel`, which
+                        checks the hosted consent on EVERY step, to
+                        `camera/hosted-transport.ts`'s one `fetch`. Only a
+                        step the runner SEALED is sent (`sealed-step.ts`: a
+                        brand no literal satisfies, and a `WeakSet` checked
+                        by identity at run time); `sealed-step.test.ts` fails
+                        if any production module but `runner.ts` names
+                        `sealStep`. No `response_format` hint goes to a hosted
+                        service. ⚠️ The port is an
                         optional prop, so `ride-analysis-wiring.test.tsx`
                         drives the real shell at the detail route with it
                         built as `main.tsx` builds it. ⚠️ Since #805 the
@@ -4659,5 +4670,6 @@ top of an issue **supersedes its body**.
 | What one press on a ride's page does, which source is offered first, what a cancel says on each path, and why a failed run keeps the earlier write-up | `apps/web/src/ride-analysis/ride-analysis.ts` §`CANCELLED_TEXT`, §`ASK_FAILURE_TEXT`, `apps/web/src/ride-analysis/ride-analysis-port.ts`, `apps/web/src/ride-analysis/RideWriteUpControl.tsx`, `ride-analysis-wiring.test.tsx`, [#804](https://github.com/openzigs/onyourleft/issues/804) |
 | How a model's write-up is shown on a ride's page, why a saved one is screened again, what every state says, and what a rider with no model set up sees | `apps/web/src/detail/RideWriteUpSection.tsx`, `apps/web/src/detail/write-up.ts` §`shownWriteUp`, `apps/web/src/camera/write-up-screen.ts` §`screenSavedWriteUp`, `RideWriteUpSection.test.tsx`, [#805](https://github.com/openzigs/onyourleft/issues/805) |
 | What a ride-analysis step sends to the rider's own computer, what it refuses to send, how a cut-off reply is told apart, and what a cancel does in the Android shell | `apps/web/src/ride-analysis/own-computer-step.ts`, `apps/web/src/camera/analysis-transport.ts` §`riderModelStepPort`, `docs/privacy-policy.md` §"A ride sent to your own computer", `own-computer-policy.test.ts`, [#802](https://github.com/openzigs/onyourleft/issues/802) |
+| What a ride analysis sends to a hosted model on the rider's key, why only a step the runner sealed can be sent, where the consent is checked on every step, and what the consent, the policy and Play Data Safety say about it | `apps/web/src/ride-analysis/hosted-step.ts`, `apps/web/src/ride-analysis/sealed-step.ts`, `apps/web/src/camera/hosted-transport.ts` §`isBuiltRequest`, `apps/web/src/camera/hosted-model.ts` §`HOSTED_CONSENT`, [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) §Amendments 2026-09-29, `docs/privacy-policy.md` §"Questions sent to a service you chose, on your own key", `apps/mobile/src/android/data-safety.ts`, [#803](https://github.com/openzigs/onyourleft/issues/803) |
 
 <!-- Last updated: 2026-09-17 by delivery:code-issue resolving #355 (the verge as a visibility constant, and the camera-cone gate that had been missing) -->

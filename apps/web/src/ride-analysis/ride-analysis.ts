@@ -27,9 +27,9 @@
  *
  * The owner's ruling 7: the rider's own computer is offered first when both
  * it and a hosted model are set up. {@link RideAnalysisOptions.hosted} is
- * absent in production until #803 builds a hosted STEP port — the hosted
- * connection check (#518) sends a fixed question and cannot carry a ride —
- * so today the list is the computer or nothing.
+ * built by `main.tsx` since #803 (`hosted-step.ts` §`hostedStepPort`), and
+ * is offered only while the rider has turned the hosted model on since the
+ * app was opened and a service is saved.
  *
  * ## The pose summary goes only with camera consent
  *
@@ -128,7 +128,11 @@ export interface RideAnalysisOptions {
    * and switched on. `camera/analysis-transport.ts` §`riderModelStepSource`.
    */
   readonly computer: () => ModelStepPort | undefined;
-  /** The hosted model's step port, the same way. #803's; absent until then. */
+  /**
+   * The hosted model's step port, the same way (#803) — `undefined` unless
+   * the hosted model is turned on and a service is saved. Absent where there
+   * is no camera controller to hold that consent.
+   */
   readonly hosted?: () => ModelStepPort | undefined;
   /**
    * Whether this is the Android shell, where a request to the rider's

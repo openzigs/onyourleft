@@ -44,7 +44,10 @@
  * `ride-analysis/own-computer-step.ts`, which the derivation above walks, and
  * moved the send types it needs out of the transport into `http-body.ts`; and
  * §"the body carries no picture" holds every body a real run sends through it
- * to {@link pictureBodyFaults}. #803 owes the same for the hosted path.
+ * to {@link pictureBodyFaults}. #803 did the same for the hosted path: its
+ * step port is `ride-analysis/hosted-step.ts`, walked by the same derivation,
+ * and §"the body carries no picture" holds every body a real run sends through
+ * the hosted transport.
  */
 
 import { readdirSync } from 'node:fs';
@@ -60,7 +63,12 @@ import { endpointDecision } from './analysis-endpoint';
 import { runAnalysis } from '../ride-analysis/runner';
 import { capturedFrame } from './frame';
 import { HOSTED_PROMPTS, type HostedQuestion } from './hosted-port';
-import { hostedRequestBody } from './hosted-transport';
+import { hostedModelPort, hostedRequestBody } from './hosted-transport';
+import { hostedModelDecision } from './hosted-model';
+import { CameraController } from './session';
+import { cleanFrameBytes, manualSchedule, scriptedCamera } from './testing';
+import { hostedStepPort } from '../ride-analysis/hosted-step';
+import { modelServer, STILL_CLOCK } from '../ride-analysis/model-server-testing';
 import {
   importWalk,
   readFromDisk,
@@ -69,7 +77,6 @@ import {
   type ReadSource,
 } from './import-walk-testing';
 import { largestArrayIn, PICTURE_NAME, pictureBodyFaults } from './no-picture-testing';
-import { cleanFrameBytes } from './testing';
 
 /** The modules #799 names as picture modules whatever their code says. */
 const MINIMUM_PICTURE_MODULES = [
@@ -338,6 +345,45 @@ describe('the body carries no picture (#799)', () => {
         now: () => 0,
         delay: () => ({ elapsed: new Promise<void>(() => undefined), cancel: () => undefined }),
       },
+      signal: new AbortController().signal,
+    });
+    // Three sections, the position step and the summary: a whole run.
+    expect(outcome.kind).toBe('written');
+    expect(bodies).toHaveLength(5);
+    for (const body of bodies) {
+      expect(pictureBodyFaults(body, largestArrayIn(withPose))).toStrictEqual([]);
+    }
+  });
+
+  it('passes every body a real run sends to the hosted model (#803)', async () => {
+    const bodies: unknown[] = [];
+    const server = modelServer();
+    const service = hostedModelDecision({
+      address: 'https://models.example.invalid',
+      model: 'm',
+      key: 'fixture-hosted-key',
+    }).model;
+    const camera = new CameraController({
+      port: scriptedCamera().port,
+      schedule: manualSchedule().schedule,
+      hosted: () =>
+        hostedModelPort(service, {
+          send: async (url, init) => {
+            bodies.push(JSON.parse(typeof init.body === 'string' ? init.body : '') as unknown);
+            return server.send(url, init);
+          },
+        }),
+    });
+    camera.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    camera.agreeToHosted(true);
+    const port = hostedStepPort(camera, () => true);
+    const withPose: RideAnalysisInput = {
+      ...INPUT,
+      pose: { source: 'tablet', posed: 300, noRider: 2, unreadable: 1, differences: { knee: -2 } },
+    };
+    const outcome = await runAnalysis(withPose, {
+      port: port as NonNullable<typeof port>,
+      clock: STILL_CLOCK,
       signal: new AbortController().signal,
     });
     // Three sections, the position step and the summary: a whole run.

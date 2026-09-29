@@ -32,7 +32,7 @@ import type { ActivityId } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
 import { KeptVisible } from '../design/MoreAbout';
-import { COMPUTER_SENDS, COMPUTER_SENDS_LEAD, HOSTED_SENDS_LEAD } from '../detail/write-up';
+import { COMPUTER_SENDS, COMPUTER_SENDS_LEAD, HOSTED_SENDS } from '../detail/write-up';
 import type { AskOutcome, RideAnalysisPort, RideWriteUpSource } from './ride-analysis-port';
 
 /** The section's heading. */
@@ -181,11 +181,23 @@ export function RideWriteUpControl({
               <strong>{COMPUTER_SENDS_LEAD}</strong> {COMPUTER_SENDS}
             </p>
           ) : undefined}
-          {sources.includes('hosted') ? (
-            <p>
-              <strong>{HOSTED_SENDS_LEAD}</strong>
-            </p>
-          ) : undefined}
+          {/*
+            #803: ADR 0035 D-9 C in full but for its sentence about the switch,
+            which is ON wherever this is shown (`detail/write-up.ts`
+            §`HOSTED_SENDS`). Carried from #838's review, where only the
+            headline stood here.
+          */}
+          {sources.includes('hosted')
+            ? HOSTED_SENDS.map((sentence, index) => (
+                <p key={sentence}>
+                  {index === 0 || index === HOSTED_SENDS.length - 1 ? (
+                    <strong>{sentence}</strong>
+                  ) : (
+                    sentence
+                  )}
+                </p>
+              ))
+            : undefined}
         </div>
       </KeptVisible>
       {/* Rendered from the start, so a screen reader is listening before it changes. */}
