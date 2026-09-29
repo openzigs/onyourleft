@@ -1255,7 +1255,9 @@ flowchart LR
     handler --> errors[src/errors.ts<br/>the one error shape]
     handler --> log[src/log.ts<br/>no body, token or coordinate]
   end
-  do[Durable Object adapter, #781<br/>not built] -.-> handler
+  core[src/room/core/<br/>the room core, #779]
+  do[src/room/durable-object/<br/>Durable Object adapter, #781<br/>not deployed] --> core
+  do -.->|whether it also mounts the handler is #790's| handler
   docker[Dockerfile<br/>first deploy, #807] --> main
 ```
 
@@ -1263,6 +1265,16 @@ flowchart LR
 names nothing from Node, so the Node listener that fronts it today and the Durable Object adapter
 (#781) mount the same code (ADR 0037 D-2). Every rule — the body limit, routing, the error shape,
 the log — is the handler's, so two adapters cannot disagree about any of them.
+
+**The Durable Object adapter mounts the room core, not the handler — so far.**
+[#781](https://github.com/openzigs/onyourleft/issues/781) built it: one object per room, every
+socket through the Hibernation API, the tick as a storage alarm that is not re-set once a room stops
+running, and a lobby that survives eviction by replaying a log of the core's own calls. Whether the
+managed platform hosts rooms only or the whole instance is left to #790 (ADR 0037 D-2), so nothing
+routes HTTP to it and there is no production Worker entry. It is **deployed nowhere**; it runs under
+a local `workerd` in `test:workerd` (`CLAUDE.md` §4a). `src/room/conformance.test.ts` drives the
+core directly and every adapter with one script and requires byte-identical text on every socket —
+#780's Node adapter joins that file.
 
 **No build step and no runtime dependency.** Node 24 strips the types and runs `src/main.ts` as
 committed, so the tsconfig adds `allowImportingTsExtensions` and `erasableSyntaxOnly`. The instance

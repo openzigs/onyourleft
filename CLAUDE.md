@@ -1318,11 +1318,36 @@ apps/                 AGPL-3.0-or-later, without exception
                         timers, `performance`, `Math.random` and `ws`.
                         `clock.ts` maps a client's `atMs` onto the room's
                         clock, because the two are never the same clock.
-                        ⚠️ **NOT mounted yet** — #780 (Node, `ws`) and #781
-                        (Durable Object) are the adapters, and `main.ts`
-                        imports none of it. ⚠️ Its workspace dependencies are
+                        ⚠️ **Mounted by one adapter, and not by the
+                        instance**: #781's Durable Object (below) runs it
+                        under `workerd` in tests only, and #780 (Node, `ws`)
+                        is not built — `main.ts` imports none of it. ⚠️ Its workspace dependencies are
                         TypeScript with extensionless relative imports, which
                         `node src/main.ts` cannot load: #780 owns that
+    src/room/durable-object/
+                        the room core as a Cloudflare Durable Object (#781,
+                        ADR 0037 D-2's second adapter), BUILT AND NOT DEPLOYED
+                        (the owner's Q3/Q6): one object per room, every socket
+                        through the Hibernation API with its connection in
+                        its attachment, the 1 Hz tick as a storage alarm that
+                        is not re-set once the room leaves countdown/running
+                        (so an emptied room stops billing), and a lobby
+                        restored after eviction by REPLAYING a log of the
+                        core's own calls — with the admission's recorded
+                        answers, so a ticket is verified once per hello and
+                        never again. ⚠️ A room evicted after it left the lobby
+                        is not restored: it refuses its sockets `room-closed`.
+                        ⚠️ Platform-free by `tsconfig.durable-object.json`
+                        (ES2024, no `types`) and an eslint block; what it
+                        needs of the runtime is ports in `platform.ts`, not
+                        `@cloudflare/workers-types`. ⚠️ **No production
+                        Worker entry**: which room an object serves and where
+                        its course comes from are #790's.
+                        `worker-under-test.ts` is the only thing `workerd`
+                        loads, and only for `test:workerd` (§4a). Held to the
+                        core by `src/room/conformance.test.ts` — one script,
+                        every adapter, byte-identical text per socket; #780
+                        adds itself to that file's `ADAPTERS`
 
 packages/             Apache-2.0, without exception
   domain/             units, core types, validation, signing, analysis (#25)
@@ -1940,6 +1965,19 @@ pnpm --filter @onyourleft/mobile run native:closure
 pnpm --filter @onyourleft/instance run test
 pnpm --filter @onyourleft/instance run typecheck
 
+# The Durable Object adapter (#781) under a REAL workerd, run on 2026-09-29:
+# the conformance script through the adapter under workerd, the tick as a real
+# storage alarm that stops once an emptied race finishes, and a lobby evicted
+# by the runtime itself (after ~10 s idle) and restored. It bundles
+# src/room/durable-object/worker-under-test.ts with rolldown, runs the pinned
+# `workerd` binary on 127.0.0.1 with SQLite storage in a temporary directory,
+# and needs NO Cloudflare account, token or network. About 35 s, most of it
+# waiting on the runtime's own clock. ⚠️ NOT in CI and NOT in `pnpm run test`
+# (§4c): `vitest.config.ts` excludes `*.workerd.test.ts`, and
+# `src/room/conformance.test.ts` runs there against the reference and the
+# adapter under in-memory fakes, with its workerd block reported SKIPPED.
+pnpm --filter @onyourleft/instance run test:workerd
+
 # Start the instance on this machine, on 127.0.0.1:8787. ⚠️ It REFUSES to start
 # without a commit or a source URL (AGPL-3.0 §13, ADR 0036 D-6); every variable
 # it reads is in .env.example. Ctrl-C stops it. Not a gate, and nothing runs it.
@@ -2098,8 +2136,10 @@ not.
 - **Any instance feature beyond metadata.** `apps/instance` answers `/health`, `/source`,
   `/openapi.json` and `/licences/third-party.txt` and nothing else yet: no account (#772), no sync
   (#776), no database (#769), no room anybody can reach (#780). ⚠️ The room **core** exists since
-  [#779](https://github.com/openzigs/onyourleft/issues/779) — `src/room/core/` — and nothing mounts
-  it. Do not write a command or a test that assumes a reachable room exists.
+  [#779](https://github.com/openzigs/onyourleft/issues/779) — `src/room/core/` — and the only
+  thing that mounts it is [#781](https://github.com/openzigs/onyourleft/issues/781)'s Durable
+  Object adapter, under a local `workerd` in `test:workerd` and **deployed nowhere**. Do not write a
+  command or a test that assumes a reachable room exists.
 
 #### What exists, and what each is **not** yet
 
@@ -2354,7 +2394,9 @@ outside the runner:
 | `apps/instance`'s unit and HTTP tests (the real listener on an ephemeral port) | the Vitest run, as one more project (`instance`) | no service, no second job; 51 cases in about 0.15 s locally |
 | The Docker image, and `/health` inside the container | `Checks, concurrently`, as `instance image` | mostly a digest-pinned pull, so it waits rather than works — the step's shape |
 | The OpenAPI drift check (#36) | the Vitest run (`src/openapi.test.ts`) | it is a byte comparison, not a tool |
-| Rooms: the conformance suite on Node and on `workerd`, and the two-browser e2e spec with its fan-out control | **not built yet** — #779, #780, #781 | #771's last two criteria are owed by the first room, not by this scaffold |
+| Rooms: the conformance suite (`src/room/conformance.test.ts`) against the reference and the Durable Object adapter under in-memory fakes, and the adapter's own cases under fakes | the Vitest run (`instance`) | #781; well under a second. #780's Node adapter joins the same file |
+| Rooms: the Durable Object adapter under a real `workerd` | **not CI** — `test:workerd`, a local command (§4a), decided by #781 | about 35 s, most of it waiting on the runtime's alarms and its ten-second eviction, which a job already past fifteen minutes on the 7763 cannot spend on every pull request; its logic runs in CI under the fakes. ⚠️ The ~130 MB `workerd` binary is still downloaded by CI's install (§8) |
+| Rooms: the two-browser e2e spec with its fan-out control | **not built yet** — #780 | #771's last criterion is owed by the first room a browser can reach |
 | A load test, and a Cloudflare bill | **not CI** (#792, #464) | a measurement and an account, not gates |
 
 **What it cost, measured on the runner** — see the table directly below this paragraph, which
@@ -4199,9 +4241,13 @@ because the copy under `node_modules/.pnpm` is read too.
 **An install script is a decision, recorded in `pnpm-workspace.yaml`.** pnpm 11 does not run
 dependency build scripts until `allowBuilds` names them, and leaves `pnpm install` exiting 1 until
 each is answered `true` or `false`. Answer it rather than deleting the entry: an install script runs
-arbitrary code with your privileges before any lint or test gate sees the package. The one entry
-today is `unrs-resolver`, answered `false` — it ships prebuilt native bindings as platform optional
-dependencies, so the script has nothing to do.
+arbitrary code with your privileges before any lint or test gate sees the package. There are two
+entries, both answered `false` for the same reason: `unrs-resolver` ships prebuilt native bindings
+as platform optional dependencies, so its script has nothing to do; and `workerd` (since
+[#781](https://github.com/openzigs/onyourleft/issues/781)) is a binary in its platform package
+(`@cloudflare/workerd-<os>-<arch>`), whose script only re-links it or, when that package is
+missing, downloads it from npm at install time. ⚠️ That package is ~130 MB, so every install —
+CI's included — downloads it, though CI runs nothing that uses it (§4c).
 
 **That block is therefore a security-relevant file on every fork pull request.** CI installs from the
 *fork's* `pnpm-workspace.yaml`, so flipping an entry to `true` and adding a dependency is what makes
