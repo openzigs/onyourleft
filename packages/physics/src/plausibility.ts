@@ -49,6 +49,7 @@ import {
   type Watts,
 } from '@onyourleft/domain';
 
+import { PhysicsError } from './physics-error';
 import { advance, type RideConditions, type RideState, type RideStep } from './simulate';
 
 /**
@@ -286,12 +287,18 @@ export interface Disagreement {
  * @param toleranceMetres the distance past which a client is corrected. ADR
  * 0028 says "a stated distance" and states none, so it is a **required**
  * parameter rather than a default this file would be inventing.
+ * @throws PhysicsError for a tolerance that is not a finite distance of at
+ * least 0 m. ⚠️ A NaN would make `correct` false for ever and a negative one
+ * true for ever, each silently (#779, from #832's review).
  */
 export function disagreement(
   clientMetres: number,
   roomMetres: number,
   toleranceMetres: number,
 ): Disagreement {
+  if (!Number.isFinite(toleranceMetres) || toleranceMetres < 0) {
+    throw new PhysicsError('a disagreement tolerance must be a finite distance of at least 0 m');
+  }
   const metres = clientMetres - roomMetres;
   return { metres, correct: Math.abs(metres) > toleranceMetres };
 }

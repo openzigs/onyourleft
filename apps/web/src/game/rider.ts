@@ -45,11 +45,11 @@
  * bearings.
  */
 
-import { altitudeMetres, degreesCelsius, kilograms, type Kilograms } from '@onyourleft/domain';
+import { type Kilograms } from '@onyourleft/domain';
 import {
-  airDensityKilogramsPerCubicMetre,
+  BICYCLE_MASS_KILOGRAMS as PHYSICS_BICYCLE_MASS_KILOGRAMS,
   RIDING_POSITION_DRAG_AREAS,
-  ridingCoefficients,
+  ridingConditions,
   ROAD_ROLLING_RESISTANCE_COEFFICIENT,
   type RideConditions,
   type RidingPosition,
@@ -87,20 +87,14 @@ export type { RidingPosition };
  * rider who has entered nothing rides precisely as they did before #325, and
  * that is asserted rather than described — `rider.test.ts` §"leaves a rider who
  * has said nothing exactly where they were".
- */
-export const BICYCLE_MASS_KILOGRAMS = 9;
-
-/**
- * Sea level, 15 °C: the ISO 2533 reference, from `packages/physics`'s model.
  *
- * Computed once at module scope rather than per call, because it does not
- * depend on the rider and `airDensityKilogramsPerCubicMetre` is a handful of
- * exponentials.
+ * ⚠️ **The number is `@onyourleft/physics`' since #779**, which moved it beside
+ * the drag areas for #487's reason: a race room adds the same bicycle to a
+ * declared mass (ADR 0028 D-1, "one bicycle") and may not import this file.
+ * So is the sea-level air, and {@link rideConditionsFor} is
+ * `ridingConditions`, the call a room makes. The provenance above stays here.
  */
-const SEA_LEVEL_AIR_DENSITY = airDensityKilogramsPerCubicMetre(
-  altitudeMetres(0),
-  degreesCelsius(15),
-);
+export const BICYCLE_MASS_KILOGRAMS = PHYSICS_BICYCLE_MASS_KILOGRAMS;
 
 /*
  * How the rider is sitting on the bicycle — #365. `RidingPosition` is
@@ -258,16 +252,10 @@ export function rideConditionsFor(
   riderMass: Kilograms,
   position: RidingPosition = DEFAULT_RIDING_POSITION,
 ): RideConditions {
-  return {
-    totalMass: kilograms(riderMass + BICYCLE_MASS_KILOGRAMS),
-    airDensityKilogramsPerCubicMetre: SEA_LEVEL_AIR_DENSITY,
-    // ⚠️ **The field that was `undefined` on every ride until #365**, which is
-    // why every rider was simulated with Martin's track-racer drag area.
-    // `simulation.ts` already threaded `conditions.coefficients` through to
-    // `advance`; the missing half was here, upstream of it.
-    //
-    // Since #487 this is `ridingCoefficients`, the same call a race room makes,
-    // so the game and a race cannot build the set two ways.
-    coefficients: ridingCoefficients(position),
-  };
+  // ⚠️ `coefficients` was `undefined` on every ride until #365, which is why
+  // every rider was simulated with Martin's track-racer drag area. Since #487
+  // it is `ridingCoefficients`, and since #779 the whole object is
+  // `ridingConditions` — the same call a race room makes, so the game and a
+  // race cannot build the conditions two ways.
+  return ridingConditions(riderMass, position);
 }

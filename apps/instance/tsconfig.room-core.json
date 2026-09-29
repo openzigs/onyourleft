@@ -1,0 +1,24 @@
+{
+  // The room core (#779) and nothing else, with NO platform: `lib` is ES2024
+  // alone and `types` is empty, so `process`, `setTimeout`, `WebSocket`,
+  // `fetch` and every `node:` module are compile errors under
+  // `src/room/core/`. The core is mounted unchanged by a Node adapter (#780)
+  // and a Durable Object (#781) (ADR 0037 D-2), so it may name neither.
+  //
+  // `tsconfig.json` is the wide program and still covers these files, for the
+  // editor and for ESLint's project service; this is the one that ENFORCES —
+  // `pnpm --filter @onyourleft/instance run typecheck` runs both, the shape
+  // `packages/fit` and `packages/sensors` use (CLAUDE.md §4d).
+  //
+  // ⚠️ `Date`, `Math.random` and the ECMAScript-free names survive `lib`, so
+  // `eslint.config.js`'s room-core block bans the clock and the timers by name.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "types": [],
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true
+  },
+  "include": ["src/room/core/**/*.ts"]
+}
