@@ -38,11 +38,13 @@
  * `ride-analysis/`, derived rather than listed, so #809's input builder is
  * walked today and #810's prompt builders and #811's runner are walked the day
  * they land there. ⚠️ A step-request type or body builder added to
- * `analysis-transport.ts` itself (#802) CANNOT be walked: that module carries
- * pictures by design, for `side-pose` and `connection-check`. #802 has to put
- * the ride-analysis request and its builder in a module of their own and add
- * it to {@link ENTRIES}, and #802 and #803 hold their bodies to
- * {@link pictureBodyFaults}.
+ * `analysis-transport.ts` itself CANNOT be walked: that module carries
+ * pictures by design, for `side-pose` and `connection-check`. So #802 put the
+ * ride-analysis request and its builder in a module of their own,
+ * `ride-analysis/own-computer-step.ts`, which the derivation above walks, and
+ * moved the send types it needs out of the transport into `http-body.ts`; and
+ * §"the body carries no picture" holds every body a real run sends through it
+ * to {@link pictureBodyFaults}. #803 owes the same for the hosted path.
  */
 
 import { readdirSync } from 'node:fs';
@@ -53,7 +55,9 @@ import { describe, expect, it } from 'vitest';
 import { stripComments } from '../units/no-inline-units';
 import type { RideAnalysisInput } from '../ride-analysis/input';
 
-import { analysisRequestBody } from './analysis-transport';
+import { analysisRequestBody, riderModelStepPort } from './analysis-transport';
+import { endpointDecision } from './analysis-endpoint';
+import { runAnalysis } from '../ride-analysis/runner';
 import { capturedFrame } from './frame';
 import { HOSTED_PROMPTS, type HostedQuestion } from './hosted-port';
 import { hostedRequestBody } from './hosted-transport';
@@ -118,6 +122,8 @@ describe('the module graph (#799)', () => {
 
   it('walks the entries it names, so it is not a walk over nothing', () => {
     expect(ENTRIES).toContain('ride-analysis/input.ts');
+    // #802: the step port to the rider's own computer, and what it imports.
+    expect(ENTRIES).toContain('ride-analysis/own-computer-step.ts');
     const walked = walk.closure(ENTRIES);
     for (const entry of ENTRIES) {
       expect(walked.modules, entry).toContain(entry);
@@ -290,6 +296,56 @@ describe('the body carries no picture (#799)', () => {
     ['own-computer', ownComputerShapedStep],
   ] as const)('passes a %s-shaped step carrying the input as text', (_path, step) => {
     expect(pictureBodyFaults(step(JSON.stringify(INPUT)), largest)).toStrictEqual([]);
+  });
+
+  it('passes every body a real run sends to the rider’s own computer (#802)', async () => {
+    const bodies: unknown[] = [];
+    const port = riderModelStepPort(
+      endpointDecision({ address: 'http://192.168.1.20:8080', model: 'm', switchedOn: true })
+        .endpoint,
+      {
+        send: async (_url, init) => {
+          const body = JSON.parse(typeof init.body === 'string' ? init.body : '') as {
+            response_format?: {
+              json_schema: { schema: { properties: { section?: { enum: number[] } } } };
+            };
+          };
+          bodies.push(body);
+          // A section answers for its own index, the position step its notes,
+          // the summary in prose: every step of a real run is reached.
+          const section = body.response_format?.json_schema.schema.properties.section?.enum[0];
+          const content =
+            body.response_format === undefined
+              ? 'A steady ride.'
+              : JSON.stringify(
+                  section === undefined ? { notes: 'Held.' } : { section, notes: 'Steady.' },
+                );
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ choices: [{ message: { content }, finish_reason: 'stop' }] }),
+            ),
+          );
+        },
+      },
+    );
+    const withPose: RideAnalysisInput = {
+      ...INPUT,
+      pose: { source: 'tablet', posed: 300, noRider: 2, unreadable: 1, differences: { knee: -2 } },
+    };
+    const outcome = await runAnalysis(withPose, {
+      port: port as NonNullable<typeof port>,
+      clock: {
+        now: () => 0,
+        delay: () => ({ elapsed: new Promise<void>(() => undefined), cancel: () => undefined }),
+      },
+      signal: new AbortController().signal,
+    });
+    // Three sections, the position step and the summary: a whole run.
+    expect(outcome.kind).toBe('written');
+    expect(bodies).toHaveLength(5);
+    for (const body of bodies) {
+      expect(pictureBodyFaults(body, largestArrayIn(withPose))).toStrictEqual([]);
+    }
   });
 
   it('fails the own-computer transport’s real picture body, on both of the first two rules', () => {

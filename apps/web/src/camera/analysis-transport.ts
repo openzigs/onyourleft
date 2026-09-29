@@ -12,6 +12,14 @@
  * Play Data Safety answers that describe it, because ADR 0029's amendment says
  * the three *"move together or not at all"*.
  *
+ * ⚠️ **Since [#802](https://github.com/openzigs/onyourleft/issues/802) the same
+ * call also carries the ride analysis's text steps** — a ride's numbers, never
+ * a picture — to the same address, through {@link riderModelStepPort}. Their
+ * body is not built here, because this module builds pictures into requests by
+ * design and the ride analysis must reach no picture type: it is
+ * `ride-analysis/own-computer-step.ts` §`stepRequestBody`, and the section
+ * below describes the picture request only.
+ *
  * ## What leaves, exactly
  *
  * {@link analysisRequestBody} is the whole of it, and ADR 0029 D-7's list is
@@ -70,15 +78,23 @@
 import type { AnalysisPort, AnalysisRequest } from './analysis-port';
 import type { AnalysisCall, AnalysisFailure, AnalysisOutcome } from './model-answer';
 import { ANALYSIS_PROMPTS } from './analysis-port';
-import {
-  addressSpaceOf,
-  completionsUrl,
-  isPrivateAddressLiteral,
-  type AddressSpace,
-  type AnalysisEndpoint,
-} from './analysis-endpoint';
+import { endpointTarget, type AddressSpace, type AnalysisEndpoint } from './analysis-endpoint';
 import { MAXIMUM_RESPONSE_BYTES, readAnalysisReply } from './analysis-response';
-import { boundedText } from './http-body';
+import {
+  boundedText,
+  type AnalysisSend,
+  type NativeAnalysisPost,
+  type NativeAnalysisReply,
+} from './http-body';
+import type { ModelStepPort } from '../ride-analysis/model-step-port';
+import { ownComputerStepPort } from '../ride-analysis/own-computer-step';
+
+export type {
+  AnalysisSend,
+  NativeAnalysisPost,
+  NativeAnalysisReply,
+  NativeAnalysisRequest,
+} from './http-body';
 
 /**
  * The largest picture this client will send, in bytes.
@@ -95,45 +111,12 @@ export const MAXIMUM_PICTURE_BYTES = 8 * 1024 * 1024;
  */
 export const MAXIMUM_ANSWER_TOKENS = 400;
 
-/** How a request is sent. The platform's own `fetch` in production. */
-export type AnalysisSend = (url: string, init: RequestInit) => Promise<Response>;
-
 /**
- * One request made OUTSIDE the WebView — [#553](https://github.com/openzigs/onyourleft/issues/553).
- *
- * The body is handed over as the JSON value it is, not as text, because the
- * native layer serialises a JSON body itself and a string it was handed would
- * be sent as a string.
+ * The platform's own `fetch` — **the one call this client makes to it**, which
+ * `privacy/no-network.test.ts` counts. The picture port and, since #802, the
+ * ride analysis's step port both default to it; neither names `fetch` itself.
  */
-export interface NativeAnalysisRequest {
-  readonly url: string;
-  readonly headers: Readonly<Record<string, string>>;
-  readonly json: Readonly<Record<string, unknown>>;
-}
-
-/** What a native request came back with: its status, and its body as text. */
-export interface NativeAnalysisReply {
-  readonly status: number;
-  readonly body: string;
-}
-
-/**
- * How a request is sent inside the Android shell: Capacitor's native HTTP,
- * which `apps/mobile/src/http/analysis-http.ts` is the one caller of.
- *
- * ⚠️ **Why a second way out at all**: validation 0002 Part AF measured the
- * shell's WebView blocking a plain-`http:` request to the rider's computer as
- * mixed content, before it left the device — so #387's path did not work in
- * the APK at all. The owner ruled on 2026-09-26 (#553): send it through native
- * HTTP, **only to the private-network address the rider saved**, and keep the
- * WebView's `allowMixedContent: false` for everything else. Android's
- * cleartext policy then has to allow plain `http:` for the whole app, because
- * a network security config cannot list a rider's address in advance — so
- * what limits it is this module: with `native` given, an address that is not
- * `analysis-endpoint.ts` §`isPrivateAddressLiteral` is answered
- * `address-not-numeric` and **`native` is never called**.
- */
-export type NativeAnalysisPost = (request: NativeAnalysisRequest) => Promise<NativeAnalysisReply>;
+const platformSend: AnalysisSend = async (url, init) => fetch(url, init);
 
 /** @see riderAnalysisPort */
 export interface AnalysisTransportOptions {
@@ -210,28 +193,19 @@ export function riderAnalysisPort(
   endpoint: AnalysisEndpoint | undefined,
   options: AnalysisTransportOptions = {},
 ): AnalysisPort | undefined {
-  if (endpoint?.switchedOn !== true) {
-    return undefined;
-  }
   // Re-checked here as well as where the endpoint was made: an endpoint is a
   // plain object, and one built by hand rather than by `endpointDecision`
-  // must not be the way round the rule.
-  let hostname: string;
-  try {
-    ({ hostname } = new URL(endpoint.address));
-  } catch {
+  // must not be the way round the rule (`analysis-endpoint.ts` §`endpointTarget`).
+  const target = endpointTarget(endpoint);
+  if (endpoint === undefined || target === undefined) {
     return undefined;
   }
-  const space = addressSpaceOf(hostname);
-  if (space === undefined) {
-    return undefined;
-  }
-  const url = completionsUrl(endpoint);
+  const { url } = target;
   if (options.native !== undefined) {
-    return nativeAnalysisPort(endpoint, url, options.native, isPrivateAddressLiteral(hostname));
+    return nativeAnalysisPort(endpoint, url, options.native, target.literal);
   }
-  const send: AnalysisSend = options.send ?? (async (url, init) => fetch(url, init));
-  const targetAddressSpace = space;
+  const send: AnalysisSend = options.send ?? platformSend;
+  const targetAddressSpace = target.space;
 
   return {
     askAboutFrame(request: AnalysisRequest): AnalysisCall {
@@ -300,7 +274,7 @@ export function riderAnalysisPort(
  * | The `fetch` path | Here |
  * |---|---|
  * | `redirect: 'error'` | the native layer is told not to follow one (`apps/mobile`), and a `3xx` that comes back is read by `analysis-response.ts` as not a model server |
- * | the address rule | {@link isPrivateAddressLiteral}, which is STRICTER: no name and no loopback, because the native request is outside every rule the WebView applies |
+ * | the address rule | `analysis-endpoint.ts` §`isPrivateAddressLiteral`, which is STRICTER: no name and no loopback, because the native request is outside every rule the WebView applies |
  * | the body | {@link analysisRequestBody}, the same four keys |
  * | `boundedText` | ⚠️ **weaker**: the native layer hands back the whole body, so the bound is applied after it has arrived rather than while it streams. `analysis-response.ts` still refuses anything over its limit |
  * | cancellation | the wait is abandoned and the outcome is `cancelled`; a native request cannot be aborted from here and runs to its end, its answer discarded |
@@ -386,4 +360,33 @@ export async function riderAnalysisSource(
   }
   const native = await loadNative();
   return () => riderAnalysisPort(endpoint(), { send, native });
+}
+
+/**
+ * **The ride analysis's step port to the rider's own computer, with the
+ * platform's `fetch` behind it** — [#802](https://github.com/openzigs/onyourleft/issues/802).
+ *
+ * The port itself is `ride-analysis/own-computer-step.ts`, which carries text
+ * and never a picture and so has to live apart from this module; what it
+ * cannot do on its own is reach the network, because this module holds the
+ * client's ONE `fetch` (`privacy/no-network.test.ts`). So this hands it that
+ * `fetch` — or, inside the Android shell, the native request, exactly as
+ * {@link riderAnalysisPort} is handed one — and nothing else.
+ *
+ * `undefined` for the reason {@link riderAnalysisPort} gives: with nothing
+ * configured and switched on there is no object that could send anything.
+ *
+ * ⚠️ **Nothing in the client calls it yet**: the post-ride ask that does is
+ * #804's, and until then "nothing is sent without a press" rests on there
+ * being no caller at all — `own-computer-step.test.ts` §"sends nothing
+ * without a press" holds that, and #804 has to name its press there.
+ */
+export function riderModelStepPort(
+  endpoint: AnalysisEndpoint | undefined,
+  options: AnalysisTransportOptions = {},
+): ModelStepPort | undefined {
+  return ownComputerStepPort(endpoint, {
+    send: options.send ?? platformSend,
+    ...(options.native === undefined ? {} : { native: options.native }),
+  });
 }
