@@ -52,14 +52,18 @@ function runs(project: Project, file: string, title: string): boolean {
   return true;
 }
 
+/** A spec with its comments removed: only code counts. */
+const codeOf = (spec: string): string =>
+  read(BROWSER, spec)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|\s)\/\/.*$/gm, '$1');
+
 /** Every describe tagged nightly, as `spec › title`, read from the sources. */
 function taggedDescribes(): string[] {
   const found: string[] = [];
   for (const spec of SPECS) {
     // Comments may name the tag in prose; only code counts.
-    const source = read(BROWSER, spec)
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/(^|\s)\/\/.*$/gm, '$1');
+    const source = codeOf(spec);
     const tagged = [...source.matchAll(/describe\(\s*'([^']+)',\s*\{\s*tag:\s*NIGHTLY\s*\}/g)];
     // Any other use of the tag — on a single test, spelt as a literal, or in a
     // form this pattern does not read — is refused rather than guessed at.
@@ -72,6 +76,26 @@ function taggedDescribes(): string[] {
     found.push(...tagged.map((match) => `${spec} › ${String(match[1])}`));
   }
   return found.sort();
+}
+
+/**
+ * The body of every describe tagged nightly, as `spec › title` → its code: from
+ * the tag to the next top-level `test.describe(`, or to the end of the file.
+ */
+function taggedBodies(): Map<string, string> {
+  const bodies = new Map<string, string>();
+  for (const spec of SPECS) {
+    const source = codeOf(spec);
+    for (const match of source.matchAll(/describe\(\s*'([^']+)',\s*\{\s*tag:\s*NIGHTLY\s*\}/g)) {
+      const start = match.index + match[0].length;
+      const next = source.indexOf('\ntest.describe(', start);
+      bodies.set(
+        `${spec} › ${String(match[1])}`,
+        source.slice(start, next === -1 ? undefined : next),
+      );
+    }
+  }
+  return bodies;
 }
 
 describe('the browser gate is split into a required run and a nightly one — #866', () => {
@@ -106,6 +130,22 @@ describe('the browser gate is split into a required run and a nightly one — #8
     for (const check of NIGHTLY_CHECKS) {
       expect(check.why.length, check.describe).toBeGreaterThan(20);
       expect(check.seconds, check.describe).not.toBe('');
+    }
+  });
+
+  it('reads no DEFAULT-world load from a nightly describe, so the world every rider gets stays required — #878’s review', () => {
+    // A nightly describe is about the realistic world (nightly.ts). One that
+    // reads the plain load (`game.html` with no query) is asserting something
+    // about the DEFAULT world, which then reaches main unchecked: #878's first
+    // cut did exactly that with #501's shader-compile case and D-7's "the
+    // default world fetches none of the realistic set". Those halves belong in
+    // a required describe, where the plain load is already paid for.
+    const bodies = taggedBodies();
+    expect(bodies.size).toBe(NIGHTLY_CHECKS.length);
+    for (const [describe, body] of bodies) {
+      expect(body.length, describe).toBeGreaterThan(100);
+      expect(body, `${describe} reads the plain load`).not.toMatch(/harnessRun\(\s*\)/);
+      expect(body, `${describe} pays for the plain load`).not.toMatch(/paysForTheLoad\(\s*''/);
     }
   });
 

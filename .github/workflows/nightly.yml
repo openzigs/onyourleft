@@ -40,8 +40,17 @@ on:
     - cron: '17 3 * * *'
   workflow_dispatch:
   pull_request:
+    # What decides what runs here, as well as this file (#878's review): a
+    # pull request that retags a describe or edits a moved check sees it run
+    # before merge. Still not required.
     paths:
       - .github/workflows/nightly.yml
+      - apps/web/browser/nightly.ts
+      - apps/web/browser/game.browser.spec.ts
+      - apps/web/browser/realistic.browser.spec.ts
+      - apps/web/playwright.config.ts
+      - apps/web/src/game/near-field.test.ts
+      - packages/fit/tools/fuzz/decode-fuzz.test.ts
 
 # Read-only by default. Only the reporting job widens it, to issues alone.
 permissions:
@@ -111,7 +120,12 @@ jobs:
   report:
     name: Report a red run
     needs: heavy
-    if: failure() && github.event_name != 'pull_request'
+    # `result` rather than `failure()`: a job stopped by its timeout-minutes
+    # ends `cancelled`, not `failed`, and a hung run must be reported too.
+    # (A run cancelled by hand is reported as well; that is the cheaper error.)
+    if: >-
+      always() && github.event_name != 'pull_request' &&
+      (needs.heavy.result == 'failure' || needs.heavy.result == 'cancelled')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # This job's token may write issues and nothing else -- not contents, not

@@ -2923,6 +2923,42 @@ test.describe('a bend to the right on the map is a bend to the right on the scre
  * the drawn road and nothing on the fixture reached that plane any more
  * (`game-harness.ts` §`nearFieldProbe` says why).
  */
+/**
+ * The DEFAULT world's halves of #501 and ADR 0026 D-7 — required, since
+ * #878's review.
+ *
+ * ⚠️ **These two used to sit in §"the realistic world — ADR 0026"**, and #866
+ * made that describe nightly, which took them out of the required job with it:
+ * a GLSL break in the stylised water or the stone bridge (an invisible mesh and
+ * a console line, never an exception) would have reached `main` unseen until
+ * the next morning, and no other case reads the plain load's `shaderErrors`.
+ * They read the plain load every describe above already pays for, so they cost
+ * the required job next to nothing. Their realistic halves, and the control
+ * that the realistic set's URLs are matched at all, stay in the nightly
+ * describe below. `nightly-split.test.ts` refuses a nightly describe that
+ * reads the plain load, so they cannot drift back.
+ */
+test.describe('the default world compiles its shaders and fetches none of the realistic set — #501, ADR 0026 D-7', () => {
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
+
+  test('compiles every shader it draws with — #501', async ({ harnessRun }) => {
+    // The stone bridge's world-metre projection and the water's band-limit are
+    // both hand-written GLSL spliced into three's own; an error in either is a
+    // log line and an invisible mesh, not a thrown exception.
+    expect((await harnessRun()).shaderErrors).toEqual([]);
+  });
+
+  test('fetches none of the realistic set, while it fetches its own models', async ({
+    harnessRun,
+  }) => {
+    const { requested } = await harnessRun();
+    // Non-vacuity: the list is the page's requests, not an empty one — the
+    // default world's own models were fetched through it.
+    expect(requested.filter((url) => url.endsWith('.glb')).length).toBeGreaterThan(0);
+    expect(requested.filter((url) => url.includes('/realistic/'))).toEqual([]);
+  });
+});
+
 test.describe(
   'scenery the camera passes is not cut by the near plane — #545',
   { tag: NIGHTLY },
@@ -2964,12 +3000,12 @@ test.describe(
  * ⚠️ **One page load for all of it** (#456's memo, `?realistic`): the realistic
  * set is about 31 MiB and a prefiltered sky, and every case here reads the one
  * run `game-harness.ts` §`realisticProbe` makes. The default load is the
- * other half of D-7 and is asserted below too: it fetches none of the set.
+ * other half of D-7, and since #878's review it is asserted in the REQUIRED
+ * describe above, not here: this describe is nightly (#866), and a nightly
+ * describe may not read the plain load (`nightly-split.test.ts`).
  */
 test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
   paysForTheRealisticLoad();
-  // Two cases compare against the plain page — second, for #286's reason.
-  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
 
   const realistic = async (
     run: (query?: string) => Promise<HarnessRun>,
@@ -3212,19 +3248,17 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(grounding.woodedTriangles).toBeLessThanOrEqual(124);
   });
 
-  test('compiles every shader it draws with, in both worlds — #501', async ({ harnessRun }) => {
-    // The stone bridge's world-metre projection and the water's band-limit are
-    // both hand-written GLSL spliced into three's own; an error in either is a
-    // log line and an invisible mesh, not a thrown exception.
-    expect((await harnessRun()).shaderErrors).toEqual([]);
+  test('compiles every shader it draws with — #501, the realistic half', async ({ harnessRun }) => {
+    // The default world's half is required: §"the default world compiles its
+    // shaders and fetches none of the realistic set".
     expect((await harnessRun('?realistic')).shaderErrors).toEqual([]);
   });
 
-  test('fetches the realistic set only when asked — the default world fetches none of it', async ({
+  test('fetches the realistic set when asked — the control for the default world fetching none', async ({
     harnessRun,
   }) => {
-    const plain = await harnessRun();
-    expect(plain.requested.filter((url) => url.includes('/realistic/'))).toEqual([]);
+    // The default world's half is required (the describe named above); this
+    // is what shows the filter it applies matches the set's URLs at all.
     const asked = await harnessRun('?realistic');
     expect(asked.requested.filter((url) => url.includes('/realistic/')).length).toBeGreaterThan(10);
   });

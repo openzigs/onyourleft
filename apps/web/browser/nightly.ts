@@ -63,11 +63,19 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
     describe: 'the realistic world — ADR 0026',
     seconds: '69 s: the `?realistic` load',
     why:
-      'how the opt-in realistic world looks and what it costs. Its one network claim — the ' +
-      'DEFAULT world fetches none of the realistic set — rests in the required job on ' +
-      '`realistic-offered.test.ts` (nothing reaches that world but the rider’s own choice) ' +
-      'and `precache.test.ts`, and the set is same-origin assets rather than anything about ' +
-      'the rider. The stylised road’s gradient contrast stays required (#242).',
+      'how the opt-in realistic world looks and what it costs. The DEFAULT world’s halves of ' +
+      'its cases — #501’s shader compile and D-7’s "fetches none of the realistic set" — are ' +
+      'NOT here: since #878’s review they are a required describe on the plain load, and ' +
+      '`nightly-split.test.ts` refuses a nightly describe that reads it. What this describe ' +
+      'still holds that is not purely appearance, disclosed so a reviewer need not open it: ' +
+      '(1) D-7’s fallback — a realistic rung with no files draws the stylised world and says ' +
+      'so; (2) #369, the realistic rider’s legs follow the cranks, the cadence rule the ' +
+      'stylised rider’s #349 case keeps required; (3) ⚠️ the realistic road’s gradient ' +
+      'CONTRAST after the light and AgX (#242, #425), an accessibility claim about a world a ' +
+      'rider can choose in Settings (#475). Keeping (3) required means paying the whole ' +
+      '`?realistic` load in the required job, which is the cost #866 exists to remove; it is ' +
+      'moved pending the owner’s explicit acknowledgement (#878’s review). The stylised ' +
+      'road’s gradient contrast stays required (#242).',
   },
   {
     spec: 'game.browser.spec.ts',
