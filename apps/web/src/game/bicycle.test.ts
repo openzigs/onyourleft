@@ -24,6 +24,16 @@ import { describe, expect, it } from 'vitest';
 
 import {
   advanceCrank,
+  ANKLE_SWING_RADIANS,
+  BREATH_PITCH_RADIANS,
+  BREATH_SECONDS,
+  cadenceTurns,
+  CRANK_PARKING_LEAN_RADIANS as PARKED_AT,
+  emptyRiderMotion,
+  pedallingShare,
+  PELVIS_ROLL_RADIANS,
+  riderMotion,
+  TRUNK_ROCK_RADIANS,
   bicycleRoll,
   BICYCLE_COLOURS,
   combinedLean,
@@ -1090,6 +1100,113 @@ describe('the inside pedal never touches the road — #546', () => {
         expect(moved).toBeLessThan(0.02);
         previous = here;
       }
+    }
+  });
+});
+
+describe('a rider who moves like a rider — #625', () => {
+  const HALF_PI = Math.PI / 2;
+
+  it('rocks the pelvis and the trunk toward the downstroke, by the cited amplitudes, and ankles each foot', () => {
+    // `+X`'s pedal is at the crank angle, so at a quarter turn it is half-way
+    // down its downstroke: the roll toward `+X` is a NEGATIVE roll.
+    const down = riderMotion(HALF_PI, 1, 0, emptyRiderMotion());
+    expect(down.pelvisRoll).toBeCloseTo(-PELVIS_ROLL_RADIANS, 12);
+    expect(down.trunkRoll).toBeCloseTo(-TRUNK_ROCK_RADIANS, 12);
+    // The `+X` heel drops through its downstroke; the other toe points.
+    expect(down.ankle[0]).toBeCloseTo(ANKLE_SWING_RADIANS, 12);
+    expect(down.ankle[1]).toBeCloseTo(-ANKLE_SWING_RADIANS, 12);
+    // Half a stroke on, everything the other way.
+    const up = riderMotion(3 * HALF_PI, 1, 0, emptyRiderMotion());
+    expect(up.pelvisRoll).toBeCloseTo(PELVIS_ROLL_RADIANS, 12);
+    expect(up.trunkRoll).toBeCloseTo(TRUNK_ROCK_RADIANS, 12);
+    expect(up.ankle[0]).toBeCloseTo(-ANKLE_SWING_RADIANS, 12);
+    expect(up.ankle[1]).toBeCloseTo(ANKLE_SWING_RADIANS, 12);
+    // The sources' figures, as radians: 2°, 3° (the small end of 3.4–7.2°),
+    // and half of a 24° ankle range.
+    expect((PELVIS_ROLL_RADIANS * 180) / Math.PI).toBeCloseTo(2, 9);
+    expect((TRUNK_ROCK_RADIANS * 180) / Math.PI).toBeCloseTo(3, 9);
+    expect((ANKLE_SWING_RADIANS * 180) / Math.PI).toBeCloseTo(12, 9);
+  });
+
+  it('draws no rock, no pelvis roll and no ankling with no cadence — and still breathes', () => {
+    const quarter = BREATH_SECONDS / 4;
+    for (const crank of [0, 0.7, HALF_PI, 2, Math.PI, 4.5]) {
+      const still = riderMotion(crank, 0, quarter, emptyRiderMotion());
+      expect(Math.abs(still.pelvisRoll)).toBe(0);
+      expect(Math.abs(still.trunkRoll)).toBe(0);
+      expect(Math.abs(still.ankle[0])).toBe(0);
+      expect(Math.abs(still.ankle[1])).toBe(0);
+      // A coasting rider breathes: a quarter of a breath is the peak.
+      expect(still.trunkPitch).toBeCloseTo(BREATH_PITCH_RADIANS, 12);
+    }
+  });
+
+  it('scales the stroke by how much of it is drawn, and refuses a share outside nought to one', () => {
+    const half = riderMotion(HALF_PI, 0.5, 0, emptyRiderMotion());
+    expect(half.trunkRoll).toBeCloseTo(-TRUNK_ROCK_RADIANS / 2, 12);
+    expect(riderMotion(HALF_PI, 7, 0, emptyRiderMotion()).trunkRoll).toBeCloseTo(
+      -TRUNK_ROCK_RADIANS,
+      12,
+    );
+    expect(Math.abs(riderMotion(HALF_PI, Number.NaN, 0, emptyRiderMotion()).trunkRoll)).toBe(0);
+    expect(Math.abs(riderMotion(HALF_PI, -1, 0, emptyRiderMotion()).trunkRoll)).toBe(0);
+    // A crank angle that is not a number rocks nothing, rather than writing a
+    // NaN into every bone of the body.
+    const lost = riderMotion(Number.NaN, 1, 0, emptyRiderMotion());
+    expect(Math.abs(lost.trunkRoll) + Math.abs(lost.pelvisRoll) + Math.abs(lost.ankle[0])).toBe(0);
+  });
+
+  it('breathes from the ride clock alone: one breath a period, and the same moment gives the same breath', () => {
+    const at = (seconds: number): number =>
+      riderMotion(1, 1, seconds, emptyRiderMotion()).trunkPitch;
+    expect(at(0)).toBeCloseTo(0, 12);
+    expect(at(BREATH_SECONDS / 4)).toBeCloseTo(BREATH_PITCH_RADIANS, 12);
+    expect(at((3 * BREATH_SECONDS) / 4)).toBeCloseTo(-BREATH_PITCH_RADIANS, 12);
+    expect(at(123.4)).toBeCloseTo(at(123.4 + BREATH_SECONDS), 12);
+    // A clock that is not a number breathes nothing rather than a NaN.
+    expect(riderMotion(1, 1, Number.NaN, emptyRiderMotion()).trunkPitch).toBe(0);
+  });
+
+  it('writes into the motion it is handed and returns it — nothing is made a frame', () => {
+    const into = emptyRiderMotion();
+    const ankle = into.ankle;
+    expect(riderMotion(1, 1, 3, into)).toBe(into);
+    expect(into.ankle).toBe(ankle);
+  });
+
+  it('fades the stroke out as a bend parks the cranks, over drawnCrankAngle’s own band', () => {
+    expect(pedallingShare(0)).toBe(1);
+    expect(pedallingShare(0.2)).toBe(1);
+    expect(pedallingShare(PARKED_AT)).toBe(0);
+    expect(pedallingShare(-PARKED_AT - 0.1)).toBe(0);
+    // Inside the band, strictly between and falling: where the crank is
+    // swinging to parked, the rock is fading, and it never jumps.
+    const band = (8 * Math.PI) / 180;
+    let previous = 1;
+    for (let step = 1; step < 20; step += 1) {
+      const share = pedallingShare(PARKED_AT - band + (band * step) / 20);
+      expect(share).toBeLessThan(previous);
+      expect(share).toBeGreaterThan(0);
+      expect(previous - share).toBeLessThan(0.12);
+      previous = share;
+    }
+    // Where drawnCrankAngle leaves the crank alone, the stroke is whole.
+    expect(drawnCrankAngle(1, PARKED_AT - band - 0.01)).toBe(1);
+    expect(pedallingShare(PARKED_AT - band - 0.01)).toBe(1);
+  });
+
+  it('turns the cranks and rocks the body on exactly the same readings — the HUD’s', () => {
+    const cases: readonly [SensorReading, boolean][] = [
+      [{ live: true, value: 90, paired: true }, true],
+      [{ live: false, value: 90, paired: true }, false],
+      [{ live: true, value: undefined, paired: true }, false],
+      [{ live: true, value: Number.NaN, paired: true }, false],
+    ];
+    for (const [reading, turns] of cases) {
+      expect(cadenceTurns(reading), JSON.stringify(reading)).toBe(turns);
+      // …and the cranks move on exactly those.
+      expect(advanceCrank(1, reading, 0.1) !== 1, JSON.stringify(reading)).toBe(turns);
     }
   });
 });

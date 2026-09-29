@@ -688,6 +688,39 @@ export default tseslint.config(
     },
   },
 
+  // --- Lucide: named imports from the package root, and nothing else --------
+  // #673, ADR 0034 D-2. `lucide-react/dynamic` maps every icon in the set to a
+  // lazy import, so a single `DynamicIcon` puts all of them in the build and —
+  // because the precache is derived from the build (#406) — in every rider's
+  // first download. The package declares no `exports` map, so every file under
+  // it is importable by path; refusing every subpath is what closes
+  // `lucide-react/dist/esm/DynamicIcon.mjs` as well as the documented one.
+  {
+    files: ['apps/web/**/*.{ts,tsx}'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'lucide-react',
+              importNames: ['DynamicIcon', 'dynamicIconImports', 'iconNames'],
+              message:
+                'Import each Lucide icon by name (ADR 0034 D-2): a dynamic icon puts the whole set in the build and the precache.',
+            },
+          ],
+          patterns: [
+            {
+              group: ['lucide-react/*'],
+              message:
+                'Import Lucide icons by name from `lucide-react` itself (ADR 0034 D-2). `lucide-react/dynamic` and its siblings put the whole set in the build and the precache.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+
   // --- The Durable Object adapter runs under workerd, not Node (#781) -------
   // `apps/instance/src/room/durable-object/` is loaded by `workerd` with no
   // Node compatibility flag, so a `node:` import or a `process` there is a
