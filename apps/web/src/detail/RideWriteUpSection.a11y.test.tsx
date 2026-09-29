@@ -48,6 +48,8 @@ afterEach(() => {
 
 const PORT: RideAnalysisPort = {
   availableSources: () => ['computer', 'hosted'],
+  previewHostedRequest: async () => Promise.resolve({ kind: 'shown', steps: [], total: 1 }),
+  hostedPreviewSeen: () => true,
   askForRideWriteUp: async () =>
     new Promise<AskOutcome>((resolve) => {
       settleAsk = resolve;

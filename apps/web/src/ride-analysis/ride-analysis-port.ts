@@ -51,6 +51,34 @@ export type AskOutcome =
   /** Nothing was saved, and any earlier write-up is untouched. `text` is from a fixed table. */
   | { readonly kind: 'failed'; readonly text: string };
 
+/**
+ * One step of a hosted run, exactly as the service will be sent it (#839):
+ * its two messages, masked. `step` counts from one, as the progress does.
+ */
+export interface HostedPreviewStep {
+  readonly step: number;
+  readonly system: string;
+  readonly user: string;
+}
+
+/**
+ * What "See what will be sent" shows (#839). Nothing is sent to show it.
+ *
+ * `steps` is every step a run sends before any reply — a note per section,
+ * and one on position when there is a pose summary. The last step, and its
+ * rewrite if there is one, also carry the notes the model wrote in reply,
+ * which cannot be known until it writes them; `total` counts them, and the
+ * page says they are masked the same way.
+ */
+export type HostedPreview =
+  | {
+      readonly kind: 'shown';
+      readonly steps: readonly HostedPreviewStep[];
+      readonly total: number;
+    }
+  /** Nothing to show, and nothing was sent. `text` is from a fixed table. */
+  | { readonly kind: 'failed'; readonly text: string };
+
 /** What the ride's page may ask. */
 export interface RideAnalysisPort {
   /**
@@ -70,4 +98,16 @@ export interface RideAnalysisPort {
     signal: AbortSignal,
     progress?: (progress: AskProgress) => void,
   ): Promise<AskOutcome>;
+  /**
+   * The masked text a hosted run of ride `activityId` would send, built the
+   * way the run builds it and masked by the same function with the same
+   * guard (#839). Sends nothing. Settles; never rejects.
+   */
+  previewHostedRequest(activityId: ActivityId): Promise<HostedPreview>;
+  /**
+   * Whether the rider has been shown a preview since the app was opened —
+   * the hosted consent's own lifetime. Until they have, the page shows the
+   * preview before the first hosted run rather than starting it (#839).
+   */
+  hostedPreviewSeen(): boolean;
 }

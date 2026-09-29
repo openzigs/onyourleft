@@ -961,6 +961,16 @@ const TINT_PRODUCT_MINIMUM = 0.04;
  * light from the sRGB bytes of the untinted reading, which is not the space
  * the tint is applied in (before the light and AgX) — hence a tolerance
  * derived from the measurement rather than from the bounds.
+ *
+ * ⚠️ **One-sided in practice, and this gate is not what holds a tint that is
+ * too STRONG** (#678). The tolerance sits around a prediction AgX draws at
+ * about 0.75 of its size, so a miss is roughly `|0.75k − 1|` for a scale
+ * error `k`: anything from about 0.8× to 1.87× passes, and a 1.5× brightness
+ * scored better than the correct build. The shader's arithmetic is held
+ * exactly, both ways, by `realistic-renderer.test.ts` §"#678", which evaluates
+ * the GLSL three is handed against `tintedLinear`. This case is the
+ * corroboration that a tint reaches the drawing buffer at all, and a floor on
+ * how weak it may be.
  */
 const TINT_SHIFT_TOLERANCE = 0.4;
 /**

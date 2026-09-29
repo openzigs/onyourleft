@@ -6990,6 +6990,11 @@ const INSTANCE_TINT = 'vColor.rgb *= instanceColor.rgb;';
  * below 2²⁴, so exact in a float), and `oylTinted` is `tintedLinear`, step for
  * step — the hue turned about the grey axis, the saturation scaled about the
  * luminance, the brightness scaled. `.x` is radians.
+ *
+ * ⚠️ Both functions are EVALUATED from the program three is handed, against
+ * `unpackInstanceTint` and `tintedLinear`, by `realistic-renderer.test.ts`
+ * §"#678" (`glsl-testing.ts` reads the subset they are written in). A step
+ * added here outside that subset is a red test naming what it cannot read.
  */
 const TINT_DECODE_GLSL = /* glsl */ `
   vec3 oylTintOf(float stored) {
