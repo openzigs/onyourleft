@@ -24,12 +24,18 @@
  * command, and never anything a trainer reads. The screen itself:
  *
  * - **takes out** what renders as nothing or reorders what is around it —
- *   `angle-claims.ts` §`INVISIBLE`: the soft hyphen, the zero-width
- *   characters, the directional marks, embeddings, overrides and isolates and
- *   the byte-order mark (#815's review: the store admits them on purpose and
- *   leaves them to this screen). Taking them out changes no word a rider can
- *   read, and it is the text WITHOUT them that the rules are matched against;
- * - **writes** a carriage return or a CRLF as a newline and a tab as a space;
+ *   `angle-claims.ts` §`INVISIBLE`: every default-ignorable code point and
+ *   every format character — the soft hyphen, the zero-width characters, the
+ *   directional marks, embeddings, overrides and isolates, the byte-order
+ *   mark, the tags, the variation selectors and the fillers (#815's review:
+ *   the store admits them on purpose and leaves them to this screen). Taking
+ *   them out changes no word a rider can read, and it is the text WITHOUT
+ *   them that the rules are matched against;
+ * - **writes** a carriage return, a CRLF, a line separator (U+2028) or a
+ *   paragraph separator (U+2029) as a newline — each renders as a line break
+ *   (#817's review) — and a tab as a space;
+ * - **withholds** a write-up that is not well-formed UTF-16 (a lone
+ *   surrogate, which is no character and renders as a replacement mark);
  * - **withholds** a write-up that still holds any other control character
  *   (C0, DEL, C1), is empty, or is longer than
  *   {@link MAXIMUM_WRITE_UP_CHARACTERS} — the store's own bound, imported
@@ -82,7 +88,8 @@ export type ScreenedWriteUp = string & { readonly [screened]: true };
  * Why a write-up was withheld — the kind of finding, never its words. The
  * angle kinds are `angle-claims.ts`'s; the rest are this screen's own.
  */
-export type ScreenReason = 'empty' | 'too-long' | 'control-character' | AngleClaimKind;
+export type ScreenReason =
+  'empty' | 'too-long' | 'ill-formed' | 'control-character' | AngleClaimKind;
 
 /** A write-up that is not shown, and every kind of reason it is not. */
 export interface WithheldWriteUp {
@@ -98,9 +105,14 @@ const CONTROL_BUT_NEWLINE = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/;
  * withheld. Never throws.
  */
 export function screenWriteUp(text: UntrustedText): ScreenedWriteUp | WithheldWriteUp {
+  // Before anything else: `normalize` and every `u` pattern below read a lone
+  // surrogate as if it were a character, and it is not one.
+  if (!text.isWellFormed()) {
+    return { withheld: ['ill-formed'] };
+  }
   const shown = text
     .normalize('NFC')
-    .replace(/\r\n?/g, '\n')
+    .replace(/\r\n?|[\u2028\u2029]/g, '\n')
     .replace(/\t/g, ' ')
     .replace(INVISIBLE, '')
     .trim();

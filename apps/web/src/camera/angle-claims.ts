@@ -73,17 +73,26 @@ export const DEGREE_ABBREVIATION = /\d\s*deg\b/i;
 export const DEGREE_WORD = /\bdegrees?\b/i;
 
 /**
- * The characters a rider cannot see and a regular expression can: the soft
- * hyphen (U+00AD), the Arabic letter mark (U+061C), the zero-width space,
- * non-joiner and joiner and the two directional marks (U+200B–U+200F), the
- * bidirectional embeddings and overrides (U+202A–U+202E), the word joiner and
- * the invisible operators (U+2060–U+2064), the bidirectional isolates
- * (U+2066–U+2069) and the byte-order mark (U+FEFF). One inside a word splits
- * it for `\b` and for nobody reading it (#564); a directional one can reorder
- * what a rider sees (#815's review). Every text is matched with them removed.
+ * The characters a rider cannot see and a regular expression can — every
+ * Unicode `Default_Ignorable_Code_Point` and every format character (`Cf`),
+ * by PROPERTY rather than by list. One inside a word splits it for `\b` and
+ * for nobody reading it (#564); a directional one can reorder what a rider
+ * sees (#815's review).
+ *
+ * ⚠️ It was a list until #817's review, which found five classes the list
+ * had missed getting `valgus` past the screen: the tag characters
+ * (U+E0000–E007F), the combining grapheme joiner (U+034F), the variation
+ * selectors (U+FE00–FE0F, U+E0100–E01EF), the Mongolian vowel separator
+ * (U+180E) and the Hangul fillers (U+115F, U+1160, U+3164, U+FFA0). A list
+ * fails open against the character nobody thought of; the two properties are
+ * the standard's own answer to "renders as nothing", kept current by the
+ * engine's Unicode tables. `Cf` also takes the few format characters that are
+ * not default-ignorable (the interlinear annotation marks, U+FFF9–FFFB), which
+ * over-reads on purpose. A control character (`Cc`) is in neither, so the
+ * write-up screen still sees and withholds one. Every text is matched with
+ * these removed.
  */
-export const INVISIBLE =
-  /[\u00ad\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g;
+export const INVISIBLE = /[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu;
 
 /**
  * The frontal plane, in the words a sentence about it would use: every term

@@ -101,6 +101,19 @@ describe('screenWriteUp — the angle and frontal-plane rules, at run time', () 
     ['a byte-order mark', 'val\ufeffgus'],
     ['a right-to-left override', 'val\u202egus'],
     ['a directional isolate', 'val\u2066gus'],
+    // #817's review: a list of characters misses whole classes. The set is the
+    // Unicode properties now, and each class below once got a word past it.
+    ['a tag space (U+E0020)', 'val\u{e0020}gus'],
+    ['a cancel tag (U+E007F)', 'val\u{e007f}gus'],
+    ['a combining grapheme joiner', 'val\u034fgus'],
+    ['a variation selector', 'val\ufe0fgus'],
+    ['a supplementary variation selector', 'val\u{e0100}gus'],
+    ['the Mongolian vowel separator', 'val\u180egus'],
+    ['a Hangul filler', 'val\u3164gus'],
+    ['a Hangul choseong filler', 'val\u115fgus'],
+    ['a Hangul jungseong filler', 'val\u1160gus'],
+    ['a halfwidth Hangul filler', 'val\uffa0gus'],
+    ['an interlinear annotation anchor', 'val\ufff9gus'],
   ])('reads through %s inside a word', (_name, word) => {
     expect(reasons(`Some knee ${word} appeared.`)).toEqual(['body-sideways']);
   });
@@ -172,6 +185,17 @@ describe('screenWriteUp — plain text only', () => {
 
   it('keeps a newline, writes a CRLF or a carriage return as one, and a tab as a space', () => {
     expect(shown('one\r\ntwo\rthree\nfour\tfive')).toBe('one\ntwo\nthree\nfour five');
+  });
+
+  it('writes a line or a paragraph separator as a newline, which is how it renders', () => {
+    expect(shown('one\u2028two\u2029three')).toBe('one\ntwo\nthree');
+  });
+
+  it('withholds a write-up holding a lone surrogate, which is no character at all', () => {
+    expect(reasons('knee \ud800 steady')).toEqual(['ill-formed']);
+    expect(reasons('steady \udfff')).toEqual(['ill-formed']);
+    // A pair is a character, and passes.
+    expect(shown('steady \u{1f6b4}')).toBe('steady \u{1f6b4}');
   });
 
   it('takes out every character that renders as nothing or reorders the text', () => {
