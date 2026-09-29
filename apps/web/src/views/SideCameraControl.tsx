@@ -241,8 +241,10 @@ function computerPicturesText(state: SideAnalysisState, looked: number): string 
  * Why the computer's answers came to nobody, when any did — #761. ⚠️ About
  * the computer's ANSWERS, never the body: which of them said nobody was there,
  * which placed too little to use, and which placed points no person on a
- * bicycle could have, which this tablet does not use. The last is the one a
- * rider can act on: it says their computer's model is guessing.
+ * bicycle could have. The last is the one a rider can act on: it says their
+ * computer's model is guessing. That the tablet uses NONE of these answers is
+ * a sentence of its own, because as a trailing clause it read as applying to
+ * the last count only (#813).
  */
 function computerNobodyText(state: SideAnalysisState): string {
   if (state.noRider === 0) {
@@ -252,8 +254,8 @@ function computerNobodyText(state: SideAnalysisState): string {
   return (
     ` Your computer said nobody was there in ${String(because['said-nobody'])}, ` +
     `found too little of you to use in ${String(because['too-few-points'])}, ` +
-    `and placed points no one on a bicycle could have in ${String(because.implausible)}, ` +
-    'which this tablet does not use.'
+    `and placed points no one on a bicycle could have in ${String(because.implausible)}. ` +
+    'This tablet uses none of those answers.'
   );
 }
 

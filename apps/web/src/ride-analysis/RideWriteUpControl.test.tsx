@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { auditAccessibility, formatViolations } from '../a11y/audit';
 import { HOSTED_CONSENT, HOSTED_MASKING_NOTICE } from '../camera/hosted-model';
-import { HOSTED_SENDS } from '../detail/write-up';
+import { COMPUTER_SENDS_LEAD, HOSTED_SENDS } from '../detail/write-up';
 import { stubActivity, stubDetail } from '../detail/testing';
 import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
 import { ActivityDetailView } from '../views/ActivityDetailView';
@@ -36,6 +36,7 @@ import {
   progressText,
   WRITE_UP_HEADING,
   WRITE_UP_SAVED,
+  WRITE_UP_SENDS_ID,
 } from './RideWriteUpControl';
 
 const ATHLETE = athleteId('athlete-a');
@@ -139,14 +140,29 @@ describe('which controls are offered', () => {
 });
 
 describe('what the hosted ask says it sends (#803, carried from #838’s review)', () => {
-  /** The paragraphs of the "what is sent" block every ask control is described by. */
+  /** The paragraphs of the "what is sent" block beside the ask controls. */
   function sendsParagraphs(): string[] {
-    const control = document.querySelector('.oyl-write-up__controls button');
-    const id = control?.getAttribute('aria-describedby') ?? '';
-    return [...(document.getElementById(id)?.querySelectorAll('p') ?? [])].map(
+    return [...(document.getElementById(WRITE_UP_SENDS_ID)?.querySelectorAll('p') ?? [])].map(
       (paragraph) => paragraph.textContent,
     );
   }
+
+  /** What a screen reader reads after an ask control's name: its description. */
+  function describedAs(label: string): string {
+    const ids = button(label).getAttribute('aria-describedby')?.split(/\s+/) ?? [];
+    return ids.map((id) => document.getElementById(id)?.textContent ?? `<missing ${id}>`).join(' ');
+  }
+
+  it('describes each ask by its own source’s lead sentence, not the whole block — #816', async () => {
+    await open(scriptedPort(['computer', 'hosted']));
+    expect(describedAs(ASK_LABEL.computer.first)).toBe(COMPUTER_SENDS_LEAD);
+    expect(describedAs(ASK_LABEL.hosted.other)).toBe(HOSTED_CONSENT.headline);
+    // The block it replaced read about ninety words on every focus.
+    for (const label of [ASK_LABEL.computer.first, ASK_LABEL.hosted.other]) {
+      expect(describedAs(label).split(/\s+/).length).toBeLessThan(20);
+    }
+    expectClean('each ask described by its lead');
+  });
 
   it('stands ADR 0035 D-9 C beside the hosted ask in full, but for the sentence about the switch', async () => {
     await open(scriptedPort(['hosted']));

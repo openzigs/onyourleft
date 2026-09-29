@@ -111,8 +111,20 @@ type State =
   | { readonly kind: 'running'; readonly said: string }
   | { readonly kind: 'ended'; readonly outcome: AskOutcome };
 
-/** The id of the "what is sent" paragraph, which every ask control is described by. */
-const SENDS_ID = 'oyl-write-up-sends';
+/** The id of the "what is sent" block. */
+export const WRITE_UP_SENDS_ID = 'oyl-write-up-sends';
+
+/**
+ * The id of each source's LEAD sentence in that block, which is what its ask
+ * control is described by — #816, from #838's review. Described by the whole
+ * block, every focus on a button read about ninety words aloud; the lead says
+ * what leaves and when, and the rest stands beside the button for anyone who
+ * reads on.
+ */
+export const WRITE_UP_SENDS_LEAD_ID: Readonly<Record<RideWriteUpSource, string>> = {
+  computer: 'oyl-write-up-sends-computer',
+  hosted: 'oyl-write-up-sends-hosted',
+};
 
 export interface RideWriteUpControlProps {
   readonly port: RideAnalysisPort;
@@ -220,7 +232,7 @@ export function RideWriteUpControl({
             key={source}
             variant="secondary"
             unavailable={busy}
-            describedBy={SENDS_ID}
+            describedBy={WRITE_UP_SENDS_LEAD_ID[source]}
             onClick={() => {
               ask(source);
             }}
@@ -261,10 +273,11 @@ export function RideWriteUpControl({
         (ADR 0035 D-9). Kept visible: it is what leaves the device, and when.
       */}
       <KeptVisible>
-        <div id={SENDS_ID}>
+        <div id={WRITE_UP_SENDS_ID}>
           {sources.includes('computer') ? (
             <p>
-              <strong>{COMPUTER_SENDS_LEAD}</strong> {COMPUTER_SENDS}
+              <strong id={WRITE_UP_SENDS_LEAD_ID.computer}>{COMPUTER_SENDS_LEAD}</strong>{' '}
+              {COMPUTER_SENDS}
             </p>
           ) : undefined}
           {/*
@@ -276,7 +289,9 @@ export function RideWriteUpControl({
           {sources.includes('hosted')
             ? HOSTED_SENDS.map((sentence, index) => (
                 <p key={sentence}>
-                  {index === 0 || index === HOSTED_SENDS.length - 1 ? (
+                  {index === 0 ? (
+                    <strong id={WRITE_UP_SENDS_LEAD_ID.hosted}>{sentence}</strong>
+                  ) : index === HOSTED_SENDS.length - 1 ? (
                     <strong>{sentence}</strong>
                   ) : (
                     sentence
