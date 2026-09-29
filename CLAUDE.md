@@ -277,7 +277,17 @@ apps/                 AGPL-3.0-or-later, without exception
                         and since #388 the ride's "Side camera" section — only
                         for a ride with a saved report, rendering only sentences
                         `camera/side-report-wording.ts` can produce, with an
-                        explicit "nothing to show" and no control of any kind
+                        explicit "nothing to show" and no control of any kind;
+                        and since #805 a model's WRITE-UP of the ride
+                        (`RideWriteUpSection.tsx`, `write-up.ts`), on EVERY
+                        ride and below that section, never in place of it —
+                        ADR 0035 D-9 A's framing above it, the text as ONE
+                        React text node (never markup or a link), and a saved
+                        row SCREENED AGAIN before a word is shown, because a
+                        row can be hand-edited. ⚠️ A failed, cancelled or
+                        withheld ask keeps the earlier write-up and says why
+                        ABOVE it (the owner's ruling of 2026-09-29); with no
+                        model set up it is one sentence and a link to Camera
     src/home/           where the app opens (#428) — one bounded store read
                         and no stream decode on every launch, the week and the
                         fitness line carried to today, and the empty state a
@@ -487,7 +497,14 @@ apps/                 AGPL-3.0-or-later, without exception
                         is no hosted STEP port until #803. ⚠️ The port is an
                         optional prop, so `ride-analysis-wiring.test.tsx`
                         drives the real shell at the detail route with it
-                        built as `main.tsx` builds it
+                        built as `main.tsx` builds it. ⚠️ Since #805 the
+                        control is RENDERED by `detail/RideWriteUpSection.tsx`
+                        rather than straight by the page, keeps its ask
+                        controls in the tab order (`aria-disabled`) while a
+                        run goes, and says beside them what will be sent, in
+                        ADR 0035 D-9 B's words, marked kept-visible. A port
+                        remembers a server that refused the `response_format`
+                        hint and stops offering it (#805, from #831's review)
     src/units/          which units a rider reads in (#238) — the one place a
                         number becomes a unit, the context a component asks,
                         and the source scan that stops a future screen writing
@@ -1384,11 +1401,6 @@ packages/             Apache-2.0, without exception
                       migration: `SCHEMA_MIGRATIONS` is not empty and
                       `ActivityStore` runs `upgradeWith` as a version's
                       `.upgrade()`
-  protocol/           ⚠️ NOT YET CREATED — #768. The wire format a race room
-                      and a client agree on (JSON frames, bounded decoding, a
-                      version handshake; ADR 0037 D-3), in the Apache-2.0 leaf
-                      so a client and any instance share one parser. Listed so
-                      the layout ~30 issues cite is fixed before it lands
 
 docs/
   architecture.md     layout, component boundaries, ADR index
@@ -1429,9 +1441,9 @@ ASSETS.toml           the provenance, licence and SHA-256 of every committed
 
 **`apps/web`, `apps/mobile`, `apps/instance`, `packages/domain`, `packages/sensors`, `packages/fit`,
 `packages/store`, `packages/physics` and — since [#768](https://github.com/openzigs/onyourleft/issues/768)
-— `packages/protocol` exist.**
-`apps/instance` was created by [#767](https://github.com/openzigs/onyourleft/issues/767) on
-2026-09-29, the first package that listens on a socket (ADR 0036).
+— `packages/protocol` exist.** `apps/instance` was created by
+[#767](https://github.com/openzigs/onyourleft/issues/767) on 2026-09-29, the first package that
+listens on a socket (ADR 0036).
 The first two were created by [#23](https://github.com/openzigs/onyourleft/issues/23) along with the
 workspace, the toolchain and the lockfile, `packages/sensors` by
 [#39](https://github.com/openzigs/onyourleft/issues/39), `packages/store` by
@@ -2068,12 +2080,10 @@ not.
   [`docs/architecture.md`](docs/architecture.md) §"`apps/web`: the shell, the design system and the
   accessibility baseline" records. ⚠️ This bullet used to list `react-router` as ADR 0005's, and a
   reviewer who remembers that is reading the old file.
-- **`packages/protocol`** — the wire format a race room and a client agree on, `Apache-2.0` by
-  path (ADR 0037 D-2). [#768](https://github.com/openzigs/onyourleft/issues/768) creates it and
-  adds it to `eslint.config.js`'s platform-isolation blocks (ADR 0036 D-3.a). ⚠️ This bullet used
-  to read *"`apps/api`, or anything else server-shaped. Not 'not yet' — not in Phase 1 at all"*
-  (owner decision D6), and a reviewer who remembers it is reading the old file: the server exists,
-  as `apps/instance` (§2, ADR 0036).
+- **`apps/api`** — and there never will be: the server is `apps/instance` (§2,
+  [ADR 0036](docs/adr/0036-a-self-hostable-instance-server-now.md)). ⚠️ This bullet used to read
+  *"`apps/api`, or anything else server-shaped. Not 'not yet' — not in Phase 1 at all"* (owner
+  decision D6), and a reviewer who remembers it is reading the old file.
 - **Any instance feature beyond metadata.** `apps/instance` answers `/health`, `/source`,
   `/openapi.json` and `/licences/third-party.txt` and nothing else yet: no account (#772), no sync
   (#776), no database (#769), no room anybody can reach (#780). ⚠️ The room **core** exists since
@@ -2348,14 +2358,15 @@ quotes run ids rather than estimates.
 | **Before**, `main` | [36559634387](https://github.com/openzigs/onyourleft/actions/runs/36559634387) | EPYC 9V74 | 970 s | | | |
 | **After**, #833 | [36582905894](https://github.com/openzigs/onyourleft/actions/runs/36582905894) attempt 2 | EPYC 7763 | 1223 s | 158 s | 384 s | 605 s |
 | **After**, #833 | [36582905894](https://github.com/openzigs/onyourleft/actions/runs/36582905894) attempt 1 | EPYC 9V74 | 1216 s | 154 s | 410 s | 581 s |
+| **After**, #833 | [36588252465](https://github.com/openzigs/onyourleft/actions/runs/36588252465) | EPYC 9V74 | 994 s | | | |
 
 **On the 7763 — the runner #771 names — the delta is +4 s** (1223 s against a mean of 1219 s over
 three `main` runs), inside the spread of `main` alone. The image check itself took about **10 s**
 inside the concurrent step, which grew by 3 s. The instance's Vitest project is 51 cases in well under
-a second. ⚠️ **The one 9V74 sample is +238 s** against two `main` runs on that CPU (985 s and
-970 s), and the growth is in Vitest (+110 s) and the browser gate (+86 s), neither of which this
-change touches. It is recorded, not explained: one sample on that CPU is not a measurement of
-anything. ⚠️ **The job was already past 15 minutes on the 7763 before this change** (1206–1231 s),
+a second. **On the 9V74 it is +16 s** on the second sample (994 s against 985 s and 970 s on
+`main`). ⚠️ The first 9V74 sample took 1216 s, and all of the extra time was in Vitest (+110 s) and
+the browser gate (+86 s), neither of which this change touches. The second sample did not repeat it,
+so it is recorded as runner variance, not as a cost. ⚠️ **The job was already past 15 minutes on the 7763 before this change** (1206–1231 s),
 so #771's "if the delta pushes a green run past 15 minutes" was already true of `main`. This
 change did not push it there, and moving something out of the job is #651's open question, not
 this one's.
@@ -4796,6 +4807,7 @@ top of an issue **supersedes its body**.
 | Which steps a model-written ride write-up is made of, what each prompt says, and why changing a shipped prompt is a new template version rather than an edit | `apps/web/src/ride-analysis/template.ts`, `apps/web/src/ride-analysis/template-v1.ts`, `template.test.ts` §`RECORDED_DIGESTS`, [#810](https://github.com/openzigs/onyourleft/issues/810) |
 | How a write-up's steps are run, what a weak model's failed step costs, what each budget is and why, and what a cancelled run keeps | `apps/web/src/ride-analysis/runner.ts` §`RUN_BUDGET_MILLISECONDS`, §`RUN_TOKEN_BUDGET`, §`RUN_FAILURE_TEXT`, `apps/web/src/ride-analysis/model-step-port.ts`, `runner-safety.test.ts`, [#811](https://github.com/openzigs/onyourleft/issues/811) |
 | What one press on a ride's page does, which source is offered first, what a cancel says on each path, and why a failed run keeps the earlier write-up | `apps/web/src/ride-analysis/ride-analysis.ts` §`CANCELLED_TEXT`, §`ASK_FAILURE_TEXT`, `apps/web/src/ride-analysis/ride-analysis-port.ts`, `apps/web/src/ride-analysis/RideWriteUpControl.tsx`, `ride-analysis-wiring.test.tsx`, [#804](https://github.com/openzigs/onyourleft/issues/804) |
+| How a model's write-up is shown on a ride's page, why a saved one is screened again, what every state says, and what a rider with no model set up sees | `apps/web/src/detail/RideWriteUpSection.tsx`, `apps/web/src/detail/write-up.ts` §`shownWriteUp`, `apps/web/src/camera/write-up-screen.ts` §`screenSavedWriteUp`, `RideWriteUpSection.test.tsx`, [#805](https://github.com/openzigs/onyourleft/issues/805) |
 | What a ride-analysis step sends to the rider's own computer, what it refuses to send, how a cut-off reply is told apart, and what a cancel does in the Android shell | `apps/web/src/ride-analysis/own-computer-step.ts`, `apps/web/src/camera/analysis-transport.ts` §`riderModelStepPort`, `docs/privacy-policy.md` §"A ride sent to your own computer", `own-computer-policy.test.ts`, [#802](https://github.com/openzigs/onyourleft/issues/802) |
 
 <!-- Last updated: 2026-09-17 by delivery:code-issue resolving #355 (the verge as a visibility constant, and the camera-cone gate that had been missing) -->

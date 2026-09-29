@@ -57,6 +57,13 @@ interface ButtonCommonProps {
    * something the same screen is about to supply.
    */
   readonly disabled?: boolean;
+  /**
+   * `aria-disabled`, for a button that cannot act just now and must stay in
+   * the tab order — #805's ask control while a write-up runs, the way
+   * `GameView.tsx`'s *Ride* is while a pacer is refused. ⚠️ **It stops no
+   * press**: a click still reaches `onClick`, and the caller refuses it there.
+   */
+  readonly unavailable?: boolean;
   /** The id of an element that explains this button, for `aria-describedby`. */
   readonly describedBy?: string;
   /**
@@ -128,6 +135,7 @@ export function Button({
   pressed,
   type = 'button',
   disabled = false,
+  unavailable = false,
   describedBy,
   focusOnMount = false,
   ref,
@@ -168,6 +176,7 @@ export function Button({
       type={type}
       onClick={onClick}
       disabled={disabled}
+      aria-disabled={unavailable ? true : undefined}
       aria-describedby={describedBy}
       // Only a toggle says which way it stands. `undefined` renders nothing,
       // so a primary or secondary is never announced as "not pressed".

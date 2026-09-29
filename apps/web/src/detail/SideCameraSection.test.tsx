@@ -268,6 +268,7 @@ describe('read back from the real store (CLAUDE.md §5)', () => {
           });
           return store.getSideCameraReport(owner, id);
         },
+        getRideWriteUp: async (owner, id) => store.getRideWriteUp(owner, id),
       };
       try {
         const section = await open({ athleteId: ATHLETE_A, store: slow }, ride.id);

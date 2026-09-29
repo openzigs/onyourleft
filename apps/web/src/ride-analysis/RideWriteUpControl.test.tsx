@@ -103,7 +103,7 @@ function expectClean(where: string): void {
 }
 
 describe('which controls are offered', () => {
-  it('offers nothing without a port, or with no source set up', async () => {
+  it('offers no control without a port, or with no source set up', async () => {
     await open(undefined);
     expect(document.body.textContent).not.toContain(WRITE_UP_HEADING);
     mounted?.unmount();
@@ -138,8 +138,21 @@ describe('a press, and only a press', () => {
     const [asked] = port.asks;
     expect(asked?.activityId).toBe(RIDE);
     expect(asked?.source).toBe('hosted');
-    // While it runs: Cancel, and no second ask.
-    expect(buttons()).toStrictEqual([CANCEL_LABEL]);
+    // While it runs (#805): the ask controls stay in the tab order, marked
+    // aria-disabled, beside Cancel — and a press on one asks nothing more.
+    expect(buttons()).toStrictEqual([
+      ASK_LABEL.computer.first,
+      ASK_LABEL.hosted.other,
+      CANCEL_LABEL,
+    ]);
+    for (const label of [ASK_LABEL.computer.first, ASK_LABEL.hosted.other]) {
+      expect(button(label).getAttribute('aria-disabled')).toBe('true');
+      expect(button(label).disabled).toBe(false);
+    }
+    expect(button(CANCEL_LABEL).hasAttribute('aria-disabled')).toBe(false);
+    await activateWithKeyboard(button(ASK_LABEL.computer.first));
+    expect(port.asks).toHaveLength(1);
+    expectClean('a write-up running');
     asked?.progress?.({ step: 2, total: 5 });
     await settle();
     expect(liveRegion()).toBe(progressText(2, 5));
@@ -148,6 +161,7 @@ describe('a press, and only a press', () => {
     await settle();
     expect(liveRegion()).toBe(WRITE_UP_SAVED);
     expect(buttons()).toStrictEqual([ASK_LABEL.computer.first, ASK_LABEL.hosted.other]);
+    expect(button(ASK_LABEL.computer.first).hasAttribute('aria-disabled')).toBe(false);
     expectClean('a write-up saved');
   });
 

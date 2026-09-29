@@ -2554,6 +2554,42 @@ p > label + input[type='file'] {
 }
 
 /*
+ * A model's write-up on a ride's page (#805).
+ *
+ * The controls wrap in a row with room between them, like the Ride screen's.
+ * An ask control that cannot act while a write-up runs carries `aria-disabled`
+ * rather than `disabled`, for the picker's reason above, and looks the way the
+ * picker's does.
+ *
+ * The write-up itself is ONE text node: `pre-wrap` keeps the paragraphs a
+ * model wrote as newlines, and `overflow-wrap: anywhere` breaks a string with
+ * no break opportunity — a long URL, say — rather than letting it scroll a
+ * phone's page sideways (SC 1.4.10; `browser/reflow.browser.spec.ts` walks
+ * the populated fixture's long write-up at 320 px).
+ */
+.oyl-write-up__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-write-up-section .oyl-button[aria-disabled='true'] {
+  cursor: not-allowed;
+  border-color: var(--oyl-color-border);
+  background: var(--oyl-color-surface);
+  color: var(--oyl-color-ink-muted);
+}
+
+.oyl-write-up__text {
+  margin-inline: 0;
+  padding-inline-start: var(--oyl-space-md);
+  border-inline-start: 4px solid var(--oyl-color-border);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/*
  * The OpenStreetMap credit.
  *
  * Muted but not hidden, and deliberately not smaller than the body text: ODbL

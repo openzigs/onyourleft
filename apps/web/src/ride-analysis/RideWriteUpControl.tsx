@@ -6,14 +6,21 @@
  *
  * The only production caller of `ride-analysis-port.ts`
  * §`askForRideWriteUp`, and so the one place a ride's numbers can start on
- * their way to a model. It renders nothing without a port or with no source
- * set up and switched on (#805's fallback is what a rider sees instead).
+ * their way to a model. It is rendered only with a port and a source set up
+ * and switched on; without one, `detail/RideWriteUpSection.tsx` renders
+ * #805's fallback instead.
  *
  * With a source, it offers one control per source, **the rider's own
  * computer first** (the owner's ruling 7), a Cancel while a run is going, and
  * a live region that says step *n* of *m* and then how it ended — a sentence
- * from the controller's fixed table, never a model's words. The write-up
- * itself is shown by #805; this says only that it was saved.
+ * from the controller's fixed table, never a model's words. Beside the
+ * controls it says what will be sent, in ADR 0035 D-9's approved words. The
+ * write-up itself is shown by `detail/RideWriteUpSection.tsx` (#805), which
+ * renders this and the heading above it; this says only that it was saved.
+ *
+ * ⚠️ **While a run goes the ask controls stay in the tab order** (#805),
+ * `aria-disabled` rather than `disabled`, for `design/Button.tsx`
+ * §`disabled`'s reason, and a press on one is refused here.
  *
  * ⚠️ **Leaving the page cancels the run.** A write-up nobody is waiting for is
  * work in the background, which ADR 0035 D-8 rules out.
@@ -24,6 +31,8 @@ import { useEffect, useRef, useState, type JSX } from 'react';
 import type { ActivityId } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
+import { KeptVisible } from '../design/MoreAbout';
+import { COMPUTER_SENDS, COMPUTER_SENDS_LEAD, HOSTED_SENDS_LEAD } from '../detail/write-up';
 import type { AskOutcome, RideAnalysisPort, RideWriteUpSource } from './ride-analysis-port';
 
 /** The section's heading. */
@@ -31,7 +40,7 @@ export const WRITE_UP_HEADING = 'A write-up by your model';
 
 /** What the section says before anything is pressed. */
 export const WRITE_UP_EXPLANATION =
-  'Ask the model you set up to write about this ride. It is sent this ride’s numbers, never a picture, and only when you press the button. A new write-up replaces the one this ride has.';
+  'Ask the model you set up to write about this ride. It is sent this ride’s numbers, never a picture, and only when you press the button. A finished write-up replaces the one this ride has; an attempt that fails leaves it as it was.';
 
 /** The control for each source, first and as the alternative. */
 export const ASK_LABEL: Readonly<Record<RideWriteUpSource, { first: string; other: string }>> = {
@@ -63,20 +72,28 @@ type State =
   | { readonly kind: 'running'; readonly said: string }
   | { readonly kind: 'ended'; readonly outcome: AskOutcome };
 
-const HEADING_ID = 'oyl-write-up-heading';
+/** The id of the "what is sent" paragraph, which every ask control is described by. */
+const SENDS_ID = 'oyl-write-up-sends';
 
 export interface RideWriteUpControlProps {
-  readonly port?: RideAnalysisPort | undefined;
+  readonly port: RideAnalysisPort;
   readonly activityId: ActivityId;
+  /**
+   * The sources to offer, the default first — read once by the section that
+   * renders this (`detail/RideWriteUpSection.tsx`), which renders the #805
+   * fallback instead when there are none.
+   */
+  readonly sources: readonly RideWriteUpSource[];
+  /** Told how every ask ended, so the section can show a new write-up or keep the old one. */
+  readonly onEnded?: (outcome: AskOutcome) => void;
 }
 
 export function RideWriteUpControl({
   port,
   activityId,
-}: RideWriteUpControlProps): JSX.Element | null {
-  // Read when the page opens: it asks only whether a port COULD be built, and
-  // sends nothing.
-  const [sources] = useState<readonly RideWriteUpSource[]>(() => port?.availableSources() ?? []);
+  sources,
+  onEnded,
+}: RideWriteUpControlProps): JSX.Element {
   const [state, setState] = useState<State>({ kind: 'idle' });
   const running = useRef<AbortController | undefined>(undefined);
 
@@ -89,11 +106,13 @@ export function RideWriteUpControl({
     [],
   );
 
-  if (port === undefined || sources.length === 0) {
-    return null;
-  }
-
   const ask = (source: RideWriteUpSource): void => {
+    // ⚠️ The controls stay in the tab order while a run goes (#805), marked
+    // `aria-disabled` — which is a promise to a screen reader and nothing
+    // more: a press still arrives here, and this is what refuses it.
+    if (running.current !== undefined) {
+      return;
+    }
     const controller = new AbortController();
     running.current = controller;
     setState({ kind: 'running', said: WRITE_UP_STARTING });
@@ -107,6 +126,7 @@ export function RideWriteUpControl({
         if (running.current === controller) {
           running.current = undefined;
           setState({ kind: 'ended', outcome });
+          onEnded?.(outcome);
         }
       });
   };
@@ -115,6 +135,7 @@ export function RideWriteUpControl({
     running.current?.abort();
   };
 
+  const busy = state.kind === 'running';
   const said =
     state.kind === 'running'
       ? state.said
@@ -125,30 +146,52 @@ export function RideWriteUpControl({
         : '';
 
   return (
-    <section aria-labelledby={HEADING_ID}>
-      <h3 id={HEADING_ID}>{WRITE_UP_HEADING}</h3>
-      <p className="oyl-muted">{WRITE_UP_EXPLANATION}</p>
-      {state.kind === 'running' ? (
-        <Button variant="secondary" onClick={cancel}>
-          {CANCEL_LABEL}
-        </Button>
-      ) : (
-        sources.map((source, index) => (
+    <>
+      <KeptVisible>
+        <p className="oyl-muted">{WRITE_UP_EXPLANATION}</p>
+      </KeptVisible>
+      <div className="oyl-write-up__controls">
+        {sources.map((source, index) => (
           <Button
             key={source}
             variant="secondary"
+            unavailable={busy}
+            describedBy={SENDS_ID}
             onClick={() => {
               ask(source);
             }}
           >
             {index === 0 ? ASK_LABEL[source].first : ASK_LABEL[source].other}
           </Button>
-        ))
-      )}
+        ))}
+        {busy ? (
+          <Button variant="secondary" onClick={cancel}>
+            {CANCEL_LABEL}
+          </Button>
+        ) : undefined}
+      </div>
+      {/*
+        #805: what will be sent, beside the press, in the approved words
+        (ADR 0035 D-9). Kept visible: it is what leaves the device, and when.
+      */}
+      <KeptVisible>
+        <div id={SENDS_ID}>
+          {sources.includes('computer') ? (
+            <p>
+              <strong>{COMPUTER_SENDS_LEAD}</strong> {COMPUTER_SENDS}
+            </p>
+          ) : undefined}
+          {sources.includes('hosted') ? (
+            <p>
+              <strong>{HOSTED_SENDS_LEAD}</strong>
+            </p>
+          ) : undefined}
+        </div>
+      </KeptVisible>
       {/* Rendered from the start, so a screen reader is listening before it changes. */}
       <p role="status" aria-live="polite">
         {said}
       </p>
-    </section>
+    </>
   );
 }
