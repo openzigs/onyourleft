@@ -90,6 +90,7 @@ import type { GamePort } from '../src/game/GameView';
 import type { GameTrainerPort } from '../src/game/trainer-port';
 import { CUES_STORAGE_KEY, DEFAULT_CUES, writeCuePreference } from '../src/game/cue-preference';
 import { AppShell } from '../src/shell/AppShell';
+import { viewGroupsLoaded } from './views-loaded';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
 
 // The shipping stylesheet, which is the whole point — see this file's header.
@@ -505,6 +506,8 @@ async function run(): Promise<void> {
     writeCuePreference(localStorage, { ...DEFAULT_CUES, enabled: true });
   }
 
+  // #674: the view groups first, so every view renders on the render that asks.
+  await viewGroupsLoaded();
   flushSync(() => {
     createRoot(host).render(
       <StrictMode>

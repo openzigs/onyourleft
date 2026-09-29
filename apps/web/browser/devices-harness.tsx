@@ -60,6 +60,7 @@ import type { RecordingCheckpointStore } from '../src/recording/recorder';
 import { browserClock, createRideController } from '../src/ride/controller';
 import { openWebBluetoothTrainer } from '../src/ride/trainer';
 import { AppShell } from '../src/shell/AppShell';
+import { viewGroupsLoaded } from './views-loaded';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
 
 import { STRAP_NAME, TRAINER_NAME } from './devices-fixture';
@@ -178,7 +179,9 @@ const forgets = (): { trainer: number; strap: number } => ({
   strap: fake.bench.device('strap').forgets,
 });
 
+// #674: the view groups first, so every view renders on the render that asks. @see viewGroupsLoaded
 try {
+  await viewGroupsLoaded();
   run();
   window.__oylDevices = { ready: true, errors, control, forgets };
 } catch (error: unknown) {

@@ -19,6 +19,7 @@ import type { Kysely } from 'kysely';
 import * as athletesKeysSessions from './0001-athletes-keys-sessions.ts';
 import * as activityRecords from './0002-activity-records.ts';
 import * as roomsAndResults from './0003-rooms-and-results.ts';
+import * as identity from './0004-identity.ts';
 
 /** A migration this repository accepts: both directions. */
 export interface InstanceMigration {
@@ -30,4 +31,5 @@ export const MIGRATIONS: Readonly<Record<string, InstanceMigration>> = {
   '0001-athletes-keys-sessions': athletesKeysSessions,
   '0002-activity-records': activityRecords,
   '0003-rooms-and-results': roomsAndResults,
+  '0004-identity': identity,
 };

@@ -57,6 +57,7 @@ afterEach(async () => {
   await harness?.destroy();
   harness = undefined;
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 function summary(id: string, overrides: Partial<ActivitySummary> = {}): ActivitySummary {
@@ -531,6 +532,30 @@ describe('#660 — a card list on a phone, a table where it fits', () => {
 
     expect(queryAll(document.body, '.oyl-activity-cards')).toHaveLength(0);
     expect(rowText()).toHaveLength(2);
+  });
+
+  it('measures the list again, before the paint, when it is shown after a choice — #758', async () => {
+    // A phone at a ride's own address: the list starts `hidden`, measures
+    // nothing, and stays the table it started as. On Back it used to be drawn
+    // as that table, and then as cards once the observer saw its width —
+    // re-creating the ride's link after `ListDetail` had returned focus to it.
+    // The observer here reports nothing, so only a synchronous measurement on
+    // the change of choice can make it cards by the time `rerender` returns.
+    observerReportingInTurn([]);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return { width: this.closest('[hidden]') === null ? 300 : 0 } as DOMRect;
+    });
+    const library = stubLibrary(OWNER, rides);
+    mounted = await mount(<ActivitiesView library={library} selected="outdoor" />);
+    await settle();
+    expect(document.querySelector('.oyl-library')?.closest('[hidden]')).not.toBeNull();
+
+    await mounted.rerender(<ActivitiesView library={library} />);
+
+    expect(document.querySelector('.oyl-library')?.closest('[hidden]')).toBeNull();
+    expect(queryAll(document.body, '.oyl-activity-cards > li')).toHaveLength(2);
   });
 
   it('puts the table in a focusable region named by its caption', async () => {
