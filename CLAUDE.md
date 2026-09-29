@@ -1284,9 +1284,21 @@ apps/                 AGPL-3.0-or-later, without exception
                         with no build step (`node src/main.ts`). It answers
                         `/health`, `/source` (AGPL-3.0 §13, ADR 0036 D-6),
                         `/openapi.json` and `/licences/third-party.txt`, and
-                        nothing else yet. ⚠️ **No runtime dependency at all**:
-                        its notices document says so and `check:notices` holds
-                        it. ⚠️ It must not depend on `apps/web` or
+                        nothing else yet. ⚠️ **One runtime dependency since
+                        #769, `kysely`** (ADR 0037 D-9's row): its notices
+                        document says so and `check:notices` holds it. Since
+                        #842 it also holds `src/store/` — the `SqlStore` port
+                        over SQLite (`node:sqlite` through Kysely, with a
+                        forty-line adapter because Kysely reads NO rows from
+                        `node:sqlite` as it is), three migrations each with a
+                        tested `down`, and a round-trip harness — and
+                        `src/blob/`, content-addressed blobs on local disk,
+                        in memory, or in an S3-compatible bucket. ⚠️ **Nothing
+                        calls either yet**: #772, #37 and #776 are their first
+                        consumers, and the Docker image installs no
+                        `node_modules` until one does. ⚠️ Only `src/store/` may
+                        import the driver or Kysely (`eslint.config.js`).
+                        ⚠️ It must not depend on `apps/web` or
                         `apps/mobile` (`boundaries/dependencies`), and nothing
                         in the client may import it: the client reaches an
                         instance over the network, through ONE module (#777,
@@ -1917,6 +1929,20 @@ pnpm --filter @onyourleft/instance run typecheck
 # it reads is in .env.example. Ctrl-C stops it. Not a gate, and nothing runs it.
 OYL_INSTANCE_COMMIT="$(git rev-parse HEAD)" pnpm --filter @onyourleft/instance start
 
+# Migrate an instance database file by hand (#769): `status`, `latest`, `up`
+# (one) or `down` (one), each printing the applied migrations and every table's
+# row count afterwards. ⚠️ `down` drops what the newest migration created, rows
+# and all. Run on 2026-09-29 against a file holding three athletes' fixture rows.
+pnpm --filter @onyourleft/instance run migrate <database file> status
+
+# The blob store's conformance suite against a REAL S3-compatible bucket (#770).
+# Unset, those cases SKIP loudly naming the five variables; CI sets none, so it
+# is not a gate. Run on 2026-09-29 against SeaweedFS 4.48 with signatures
+# enforced (and red with a wrong secret).
+OYL_INSTANCE_S3_ENDPOINT=… OYL_INSTANCE_S3_BUCKET=… OYL_INSTANCE_S3_REGION=… \
+  OYL_INSTANCE_S3_ACCESS_KEY_ID=… OYL_INSTANCE_S3_SECRET_ACCESS_KEY=… \
+  pnpm --filter @onyourleft/instance run test
+
 # Rewrite apps/instance/openapi.json from the route table (#36). The ONLY way
 # that file changes: `src/openapi.test.ts` fails when it is not what this
 # writes, so a route added without it is a red build. Read the diff after.
@@ -2069,8 +2095,11 @@ not.
   decision D6), and a reviewer who remembers it is reading the old file.
 - **Any instance feature beyond metadata.** `apps/instance` answers `/health`, `/source`,
   `/openapi.json` and `/licences/third-party.txt` and nothing else yet: no account (#772), no sync
-  (#776), no database (#769), no room (#779, #780). Do not write a command or a test that assumes
-  one of those exists.
+  (#776), no room (#779, #780). Do not write a command or a test that assumes one of those exists.
+  ⚠️ **The database and the blob store DO exist since #842** (#769, #770) — a reviewer who
+  remembers "no database (#769)" in this bullet is reading the old file — but no route and no
+  start-up path opens either: `main.ts` reads no database path, and the Docker image installs
+  no `node_modules`, so `kysely` is not in it. The first consumer wires both.
 
 #### What exists, and what each is **not** yet
 
