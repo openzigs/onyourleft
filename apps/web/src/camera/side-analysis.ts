@@ -89,7 +89,7 @@ import type {
   SidePoseOutcome,
 } from './side-analysis-port';
 import type { SidePicture } from './side-link-pictures';
-import { sideReportFrom } from './side-report';
+import { sideSessionFrom } from './side-report';
 import type { SideReportKeepingPort, SideReportSession } from './side-report-port';
 import type { SideCameraControlPort } from './side-pairing-port';
 
@@ -431,9 +431,11 @@ export class SideAnalysis implements SideAnalysisPort {
     const framing = this.#state.framing === 'checking' ? 'not-checked' : this.#state.framing;
     this.#set({ finished: true, framing });
     this.#keepReference(framing);
-    // #388: the report's sentences, and nothing they were made from, go to
-    // the ride this session filmed. The samples stay here, in memory only.
-    this.#report?.endSideReportSession(sideReportFrom(this.#poses.kept, this.#state));
+    // #388: the report's sentences go to the ride this session filmed, and
+    // since #801 the differences they were chosen from go with them (ADR 0035
+    // D-6). The samples themselves stay here, in memory only.
+    const { report, summary } = sideSessionFrom(this.#poses.kept, this.#state);
+    this.#report?.endSideReportSession(report, summary);
   }
 
   /**

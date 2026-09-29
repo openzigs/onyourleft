@@ -237,6 +237,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         against last third, sagittal only, each worded
                         "possibly" and holding no number; every sentence in
                         `side-report-wording.ts`; which ride it is saved with.
+                        ⚠️ Since #801 the DIFFERENCES the sentences were chosen
+                        from are kept too, as `side-session-summary.ts`, made
+                        in the same pass (`side-report.ts` §`sideSessionFrom`)
+                        and absent — never zeros — when nothing was compared
                         ⚠️ `no-absolute-angles.test.ts` beside them is a gate
                         over ALL of `src/`: a degree sign, the word, a
                         `'degree'` formatter or a frontal-plane word in any
@@ -4562,6 +4566,7 @@ top of an issue **supersedes its body**.
 | What the side camera's post-ride report may say, where every sentence lives, and why it has no numbers yet | `apps/web/src/camera/side-report.ts` §`MEASURED_SPREAD_DEGREES`, `apps/web/src/camera/side-report-wording.ts`, [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md) D-2, [#388](https://github.com/openzigs/onyourleft/issues/388) |
 | Whether live in-ride coaching exists, what its round trip to the rider's computer measured, and what a pose from a general vision model is worth | [`docs/spikes/0016-live-in-ride-coaching.md`](docs/spikes/0016-live-in-ride-coaching.md), [#389](https://github.com/openzigs/onyourleft/issues/389) |
 | Which ride a side-camera session's report is saved with, and when it is dropped instead | `apps/web/src/camera/side-report-keeper.ts` |
+| Where the side camera's pose summary is made, why it is absent rather than zeros, which poses it may read, and what exports and erases it | `apps/web/src/camera/side-report.ts` §`sideSessionFrom`, `apps/web/src/camera/side-session-summary.ts`, `apps/web/src/transfer/export-everything.ts` §`ManifestPoseSummary`, [#801](https://github.com/openzigs/onyourleft/issues/801) |
 | What stops any screen rendering an absolute joint angle or a frontal-plane word, and the three exemptions | `apps/web/src/camera/no-absolute-angles.ts` §`EXEMPT`, `apps/web/src/camera/no-absolute-angles.test.ts`, [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md) D-8 |
 | Why an empty side-camera section and a correct one cannot look the same, and why a stored sentence the app does not know is withheld | `apps/web/src/detail/SideCameraSection.tsx`, `SideCameraSection.test.tsx` |
 | What proves nothing on the report's path reaches a trainer | `apps/web/src/camera/side-report-safety.test.ts` |

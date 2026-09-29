@@ -40,6 +40,8 @@ const REPORT_PATH = [
   'camera/side-report-wording.ts',
   'camera/side-report-port.ts',
   'camera/side-report-keeper.ts',
+  // #801: the pose summary's type, on the path from the report to the store.
+  'camera/side-session-summary.ts',
   'detail/load.ts',
   'detail/SideCameraSection.tsx',
 ] as const;
@@ -109,6 +111,10 @@ describe('the report path reaches no trainer (#388, CLAUDE.md §6)', () => {
     // The walk follows imports: the section reaches the wording file.
     expect(closure(['detail/SideCameraSection.tsx']).modules).toContain(
       'camera/side-report-wording.ts',
+    );
+    // And the keeper reaches the summary it writes (#801).
+    expect(closure(['camera/side-report-keeper.ts']).modules).toContain(
+      'camera/side-session-summary.ts',
     );
   });
 

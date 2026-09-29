@@ -135,6 +135,15 @@ export const ERASE_REMOVES: readonly string[] = [
   // read off pictures of them — with each ride, and says it goes with the
   // athlete. `deleteAthlete`'s cascade is what makes the line true.
   'what the side camera’s report said about each ride it filmed',
+  // #801, by name, for the same reason: since ADR 0035 D-6 the report keeps
+  // the numbers its sentences were chosen from — how far each part of the
+  // rider moved between the start and the end of the session, and the counts
+  // behind that. Numbers read off pictures of the rider, on the report's own
+  // row, so `deleteAthlete`'s cascade that removes the report removes them.
+  'how much your position changed between the start and the end of each side-camera session, which is a set of numbers read off pictures of you',
+  // #801, the model write-up (#800, ADR 0035): a model's words about the
+  // rider's ride, kept with it. `deleteAthlete` cascades `rideWriteUps`.
+  'every write-up of a ride your own model or a hosted model wrote for you',
   // #518. Not a store row: the address, model name and key of a hosted model
   // the rider set up are kept in `localStorage` (`camera/hosted-model.ts`),
   // where `deleteAthlete` cannot see them. A key to the rider's own account at

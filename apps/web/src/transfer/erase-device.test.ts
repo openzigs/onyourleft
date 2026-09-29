@@ -17,6 +17,7 @@ import {
   createStoreHarness,
   framingReferenceFor,
   sideCameraReportFor,
+  rideWriteUpFor,
   resetFixtureIds,
   rideFor,
   routeFor,
@@ -128,6 +129,12 @@ describe('what the rider is told before they press it', () => {
     expect(ERASE_REMOVES.join(' ')).toContain('side camera');
   });
 
+  it('names the side camera’s pose summaries and the ride write-ups — #801', () => {
+    const text = ERASE_REMOVES.join(' ');
+    expect(text).toContain('how much your position changed');
+    expect(text).toContain('write-up of a ride');
+  });
+
   it('names the side camera’s reports — #388, the owner’s retention ruling', () => {
     expect(ERASE_REMOVES.join(' ')).toContain('side camera’s report');
   });
@@ -187,8 +194,11 @@ describe('erasing, against the real store', () => {
       await harness.write(async (store) => {
         await store.putActivity(ride);
         await store.putStreamSet(streamSetFor(ride, { sampleCount: 20 }));
-        // #388. The side camera's report on this ride, named in ERASE_REMOVES.
+        // #388. The side camera's report on this ride, named in ERASE_REMOVES —
+        // with its pose summary (#801), named there too.
         await store.putSideCameraReport(sideCameraReportFor(owner, ride.id));
+        // #801. A model's write-up of this ride, named in ERASE_REMOVES.
+        await store.putRideWriteUp(rideWriteUpFor(owner, ride.id));
       });
     }
     await harness.write(async (store) => {
@@ -231,6 +241,9 @@ describe('erasing, against the real store', () => {
     for (const id of erased) {
       const report = await harness.read(async (store) => store.getSideCameraReport(ATHLETE_A, id));
       expect(report).toBeUndefined();
+      // #801: the write-up line is true too.
+      const writeUp = await harness.read(async (store) => store.getRideWriteUp(ATHLETE_A, id));
+      expect(writeUp).toBeUndefined();
     }
   });
 

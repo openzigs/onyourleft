@@ -22,10 +22,29 @@ import {
 import { sideReportKeeper, type RideProgress, type RideProgressSource } from './side-report-keeper';
 import type { SideReport } from './side-report';
 import { SIDE_OBSERVATION_SENTENCES, SIDE_REPORT_OBSERVED } from './side-report-wording';
+import type { SideSessionSummary } from './side-session-summary';
 
 const REPORT: SideReport = {
   summary: SIDE_REPORT_OBSERVED,
   observations: [SIDE_OBSERVATION_SENTENCES.torso.decreased],
+};
+
+/** The differences REPORT's sentence was chosen from (#801) — deliberately not every kind. */
+const POSE: SideSessionSummary = {
+  source: 'computer',
+  differences: { torso: -9.5, elbow: 2.25, head: 0.01 },
+  posed: 2700,
+  noRider: 41,
+  unreadable: 6,
+};
+
+/** {@link POSE} as the store keeps it. */
+const KEPT_POSE = {
+  differences: { torso: -9.5, elbow: 2.25, head: 0.01 },
+  posed: 2700,
+  noRider: 41,
+  unreadable: 6,
+  source: 'computer',
 };
 
 /** A ride controller that moves when the test says, notifying as the real one does. */
@@ -91,7 +110,7 @@ describe('which ride a session’s report goes with', () => {
       athleteId: ATHLETE_A,
     }).beginSideReportSession();
     rides.start();
-    session.endSideReportSession(REPORT);
+    session.endSideReportSession(REPORT, POSE);
     // Not yet: the ride is not an activity until it is saved.
     expect(puts).toStrictEqual([]);
     rides.stopAndSave(RIDE);
@@ -101,7 +120,7 @@ describe('which ride a session’s report goes with', () => {
         activityId: RIDE,
         summary: REPORT.summary,
         observations: REPORT.observations,
-        pose: null,
+        pose: KEPT_POSE,
       },
     ]);
     expect(rides.listening()).toBe(0);
@@ -118,12 +137,13 @@ describe('which ride a session’s report goes with', () => {
       athleteId: ATHLETE_A,
     }).beginSideReportSession();
     rides.start();
-    session.endSideReportSession(REPORT);
+    session.endSideReportSession(REPORT, POSE);
     rides.set({ phase: 'stopped' });
     expect(puts).toStrictEqual([]);
     rides.set({ saveState: 'saving' });
     rides.set({ saveState: 'saved', savedActivityId: RIDE });
     expect(puts.map((put) => put.activityId)).toStrictEqual([RIDE]);
+    expect(puts.map((put) => put.pose)).toStrictEqual([KEPT_POSE]);
   });
 
   it('saves at once with a ride that was ridden and saved while the session was open', () => {
@@ -137,8 +157,9 @@ describe('which ride a session’s report goes with', () => {
     rides.start();
     rides.stopAndSave(RIDE);
     expect(puts).toStrictEqual([]);
-    session.endSideReportSession(REPORT);
+    session.endSideReportSession(REPORT, POSE);
     expect(puts.map((put) => put.activityId)).toStrictEqual([RIDE]);
+    expect(puts.map((put) => put.pose)).toStrictEqual([KEPT_POSE]);
   });
 
   it('drops the report when the ride it waited for was never saved', () => {
@@ -150,9 +171,11 @@ describe('which ride a session’s report goes with', () => {
       athleteId: ATHLETE_A,
     }).beginSideReportSession();
     rides.start();
-    session.endSideReportSession(REPORT);
+    session.endSideReportSession(REPORT, POSE);
     rides.stopAndSave(undefined, 'empty');
     expect(puts).toStrictEqual([]);
+    // The summary went with the sentences: nothing of it was written anywhere.
+    expect(puts.map((put) => put.pose)).toStrictEqual([]);
     expect(rides.listening()).toBe(0);
   });
 
@@ -167,7 +190,7 @@ describe('which ride a session’s report goes with', () => {
       athleteId: ATHLETE_A,
     }).beginSideReportSession();
     rides.start();
-    session.endSideReportSession(REPORT);
+    session.endSideReportSession(REPORT, POSE);
     rides.stopAndSave(undefined, 'failed');
     // The phase stays `stopped`, as the real controller leaves it.
     expect(rides.source.getSnapshot().phase).toBe('stopped');
@@ -184,7 +207,7 @@ describe('which ride a session’s report goes with', () => {
       athleteId: ATHLETE_A,
     }).beginSideReportSession();
     rides.start();
-    session.endSideReportSession(REPORT);
+    session.endSideReportSession(REPORT, POSE);
     rides.stopAndSave(undefined, 'failed');
     // A later ride (after #548's reset) saves; the report was already dropped.
     rides.set({ phase: 'idle', saveState: 'unavailable' });
@@ -203,7 +226,7 @@ describe('which ride a session’s report goes with', () => {
       athleteId: ATHLETE_A,
     }).beginSideReportSession();
     rides.start();
-    session.endSideReportSession(REPORT);
+    session.endSideReportSession(REPORT, POSE);
     rides.set({ phase: 'stopped' });
     expect(rides.listening()).toBe(1);
     rides.set({ phase: 'idle' });
@@ -219,7 +242,7 @@ describe('which ride a session’s report goes with', () => {
       store,
       athleteId: ATHLETE_A,
     }).beginSideReportSession();
-    session.endSideReportSession(REPORT);
+    session.endSideReportSession(REPORT, POSE);
     expect(puts).toStrictEqual([]);
     expect(rides.listening()).toBe(0);
   });
@@ -236,7 +259,7 @@ describe('which ride a session’s report goes with', () => {
     }).beginSideReportSession();
     rides.set({ saveState: 'saving' });
     rides.set({ saveState: 'saved', savedActivityId: activityId('recovered') });
-    session.endSideReportSession(REPORT);
+    session.endSideReportSession(REPORT, POSE);
     expect(puts).toStrictEqual([]);
   });
 
@@ -248,7 +271,7 @@ describe('which ride a session’s report goes with', () => {
       store,
       athleteId: ATHLETE_A,
     }).beginSideReportSession();
-    session.endSideReportSession(REPORT);
+    session.endSideReportSession(REPORT, POSE);
     expect(puts).toStrictEqual([]);
   });
 
@@ -261,7 +284,7 @@ describe('which ride a session’s report goes with', () => {
       athleteId: ATHLETE_A,
     }).beginSideReportSession();
     rides.start();
-    session.endSideReportSession(undefined);
+    session.endSideReportSession(undefined, undefined);
     rides.stopAndSave(RIDE);
     expect(puts).toStrictEqual([]);
     expect(rides.listening()).toBe(0);
@@ -277,9 +300,11 @@ describe('which ride a session’s report goes with', () => {
     }).beginSideReportSession();
     rides.start();
     rides.stopAndSave(RIDE);
-    session.endSideReportSession(REPORT);
-    session.endSideReportSession(REPORT);
+    session.endSideReportSession(REPORT, POSE);
+    session.endSideReportSession(REPORT, undefined);
     expect(puts).toHaveLength(1);
+    // The second end is ignored whole: it does not take the summary away.
+    expect(puts[0]?.pose).toStrictEqual(KEPT_POSE);
   });
 
   it('survives a store that will not keep the report', async () => {
@@ -292,9 +317,38 @@ describe('which ride a session’s report goes with', () => {
     rides.start();
     rides.stopAndSave(RIDE);
     expect(() => {
-      session.endSideReportSession(REPORT);
+      session.endSideReportSession(REPORT, POSE);
     }).not.toThrow();
     await Promise.resolve();
+  });
+});
+
+describe('the pose summary goes where the sentences go (#801)', () => {
+  function endedAfterSave(pose: SideSessionSummary | undefined) {
+    const rides = scriptedRides();
+    const { puts, store } = recordingStore();
+    const session = sideReportKeeper({
+      rides: rides.source,
+      store,
+      athleteId: ATHLETE_A,
+    }).beginSideReportSession();
+    rides.start();
+    session.endSideReportSession(REPORT, pose);
+    rides.stopAndSave(RIDE);
+    return puts;
+  }
+
+  it('writes null, never zeros, when the session compared nothing', () => {
+    expect(endedAfterSave(undefined).map((put) => put.pose)).toStrictEqual([null]);
+  });
+
+  it('writes the fields the store keeps and nothing a producer added beside them', () => {
+    const richer = {
+      ...POSE,
+      startedAt: 1_700_000_000,
+      differences: { ...POSE.differences, hips: 4 },
+    } as unknown as SideSessionSummary;
+    expect(endedAfterSave(richer).map((put) => put.pose)).toStrictEqual([KEPT_POSE]);
   });
 });
 
@@ -327,12 +381,39 @@ describe('against the real store (CLAUDE.md §5)', () => {
       athleteId: ATHLETE_A,
     }).beginSideReportSession();
     rides.start();
-    session.endSideReportSession(REPORT);
+    session.endSideReportSession(REPORT, POSE);
     rides.stopAndSave(ride.id);
     await Promise.all(writes);
     expect(writes).toHaveLength(1);
     const kept = await harness.read(async (store) => store.getSideCameraReport(ATHLETE_A, ride.id));
     expect(kept?.summary).toBe(REPORT.summary);
     expect(kept?.observations).toStrictEqual(REPORT.observations);
+    // #801: the summary, read back through the store's public read on a
+    // connection nothing wrote on — not from the keeper's memory.
+    expect(kept?.pose).toStrictEqual(KEPT_POSE);
+  });
+
+  it('reads back null, not a summary of zeros, for a report that compared nothing', async () => {
+    const ride = await seedRide(harness, ATHLETE_A);
+    const rides = scriptedRides();
+    const writes: Promise<void>[] = [];
+    const session = sideReportKeeper({
+      rides: rides.source,
+      store: {
+        putSideCameraReport: async (record) => {
+          const write = harness.write(async (store) => store.putSideCameraReport(record));
+          writes.push(write);
+          return write;
+        },
+      },
+      athleteId: ATHLETE_A,
+    }).beginSideReportSession();
+    rides.start();
+    session.endSideReportSession(REPORT, undefined);
+    rides.stopAndSave(ride.id);
+    await Promise.all(writes);
+    const kept = await harness.read(async (store) => store.getSideCameraReport(ATHLETE_A, ride.id));
+    expect(kept?.summary).toBe(REPORT.summary);
+    expect(kept?.pose).toBeNull();
   });
 });
