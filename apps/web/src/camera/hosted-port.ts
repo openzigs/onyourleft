@@ -18,7 +18,10 @@
  * - **This file imports nothing that names a picture**, and neither does the
  *   transport behind it. `hosted-transport.test.ts` §"cannot name a picture"
  *   reads both and fails on an import of the camera's frame types or on the
- *   request shape that carries an image.
+ *   request shape that carries an image. ⚠️ **That scan reads each file and
+ *   not what it imports**, and until #799 this file reached `CapturedFrame`
+ *   in two steps, through `analysis-port.ts`, for `UntrustedText`.
+ *   `no-picture-reachable.test.ts` walks the whole graph from here now.
  *
  * ## The first question carries no numbers at all
  *
@@ -38,7 +41,7 @@
  * the controller cannot keep this one alive by name.
  */
 
-import type { UntrustedText } from './analysis-port';
+import type { UntrustedText } from './model-answer';
 
 /** What this client may ask, as a closed set. */
 export type HostedQuestion = 'connection-check';
@@ -129,7 +132,7 @@ export const HOSTED_FAILURE_TEXT: Readonly<Record<HostedFailure, string>> = {
 
 /**
  * What came back. `description` is untrusted input for the reason
- * `analysis-port.ts` §`AnalysisOutcome` gives, and it goes no further than
+ * `model-answer.ts` §`AnalysisOutcome` gives, and it goes no further than
  * `useHostedCheck.ts`, which reduces it to "understood" and a length.
  */
 export type HostedOutcome =
