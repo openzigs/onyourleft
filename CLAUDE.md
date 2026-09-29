@@ -115,7 +115,15 @@ apps/                 AGPL-3.0-or-later, without exception
                         to Devices to Pair, through the real shell, the
                         real ride controller and the real Web Bluetooth
                         transport over the scripted stack; its control is
-                        the dead end #659 was filed against
+                        the dead end #659 was filed against. Since #855 it
+                        also holds identity.html and identity-harness.ts —
+                        the app's own non-extractable device key signing in
+                        to a REAL instance that `identity.browser.spec.ts`
+                        runs in its own Node process (#772's cross-platform
+                        criterion). ⚠️ The one place anything under
+                        `apps/web` reaches `apps/instance`, and it is the
+                        spec's NODE side, by a computed `import()` of the
+                        instance's test support — never a page, never `src/`
     public/             what Vite copies verbatim into `dist` (#405) — the web app
                         manifest and the three icons it names. A `.webmanifest`
                         is on neither LIC001's nor LIC002's extension list and
@@ -288,6 +296,14 @@ apps/                 AGPL-3.0-or-later, without exception
                         withheld ask keeps the earlier write-up and says why
                         ABOVE it (the owner's ruling of 2026-09-29); with no
                         model set up it is one sentence and a link to Camera
+    src/instance/       the client half of signing in to an instance (#772) and
+                        of linking this device to an athlete (#773): the local
+                        athlete first, then the device key, then challenge →
+                        sign → session, and the instance's athlete id kept on
+                        the device. ⚠️ It names NO `fetch` and nothing in the
+                        shipped client calls it yet: its transport is a
+                        parameter, and #777 is the one module allowed to call
+                        an instance, after #778's disclosures
     src/home/           where the app opens (#428) — one bounded store read
                         and no stream decode on every launch, the week and the
                         fitness line carried to today, and the empty state a
@@ -1301,13 +1317,21 @@ apps/                 AGPL-3.0-or-later, without exception
                         #842 it also holds `src/store/` — the `SqlStore` port
                         over SQLite (`node:sqlite` through Kysely, with a
                         forty-line adapter because Kysely reads NO rows from
-                        `node:sqlite` as it is), three migrations each with a
+                        `node:sqlite` as it is), four migrations each with a
                         tested `down`, and a round-trip harness — and
                         `src/blob/`, content-addressed blobs on local disk,
-                        in memory, or in an S3-compatible bucket. ⚠️ **Nothing
-                        calls either yet**: #772, #37 and #776 are their first
-                        consumers, and the Docker image installs no
-                        `node_modules` until one does. ⚠️ Only `src/store/` may
+                        in memory, or in an S3-compatible bucket. Since #855
+                        it also holds `src/auth/` — identity (#772, #773,
+                        #774): device-key challenge–response, sessions stored
+                        as SHA-256, room tickets (the room core's `Admit`),
+                        link codes, recovery codes, optional email recovery,
+                        display names and the ONE public projection of an
+                        athlete — and migration 0004. ⚠️ **The handler serves
+                        those routes only when HANDED an identity**, and
+                        `main.ts` hands it none: the Docker image installs no
+                        `node_modules`, so the entry point cannot open the
+                        store until #780 wires the box, and every identity
+                        route answers `unavailable` (503) until then. ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or
                         `apps/mobile` (`boundaries/dependencies`), and nothing
@@ -2121,8 +2145,10 @@ not.
   [ADR 0036](docs/adr/0036-a-self-hostable-instance-server-now.md)). ⚠️ This bullet used to read
   *"`apps/api`, or anything else server-shaped. Not 'not yet' — not in Phase 1 at all"* (owner
   decision D6), and a reviewer who remembers it is reading the old file.
-- **Any instance feature beyond metadata.** `apps/instance` answers `/health`, `/source`,
-  `/openapi.json` and `/licences/third-party.txt` and nothing else yet: no account (#772), no sync
+- **Any instance feature beyond metadata, on a RUNNING instance.** `apps/instance` answers
+  `/health`, `/source`, `/openapi.json` and `/licences/third-party.txt`; since #855 its route table
+  also holds the identity routes (#772–#774), which answer `unavailable` because `main.ts` hands the
+  handler no identity — no account on a running instance until #780 opens the store, no sync
   (#776), no room anybody can reach (#780). ⚠️ The room **core** exists since
   [#779](https://github.com/openzigs/onyourleft/issues/779) — `src/room/core/` — and nothing mounts
   it. Do not write a command or a test that assumes a reachable room exists.
@@ -2381,7 +2407,7 @@ outside the runner:
 
 | What | Where | Why |
 |---|---|---|
-| `apps/instance`'s unit and HTTP tests (the real listener on an ephemeral port) | the Vitest run, as one more project (`instance`) | no service, no second job; 51 cases in about 0.15 s locally |
+| `apps/instance`'s unit and HTTP tests (the real listener on an ephemeral port) | the Vitest run, as one more project (`instance`) | no service, no second job; 51 cases in about 0.15 s locally at #767, 299 at #855 (the identity routes' files add about 1 s of case time on an idle machine — the count ages, read the run) |
 | The Docker image, and `/health` inside the container | `Checks, concurrently`, as `instance image` | mostly a digest-pinned pull, so it waits rather than works — the step's shape |
 | The OpenAPI drift check (#36) | the Vitest run (`src/openapi.test.ts`) | it is a byte comparison, not a tool |
 | Rooms: the conformance suite on Node and on `workerd`, and the two-browser e2e spec with its fan-out control | **not built yet** — #779, #780, #781 | #771's last two criteria are owed by the first room, not by this scaffold |
@@ -2870,6 +2896,7 @@ browser runs**.
 | `loop.html`, `loop-harness.ts`, `loop.browser.spec.ts` | since #440, the start of a LOOP drawn by the real renderer at the real chase camera, with the road isolated by rendering each frame with and without its index list. It asserts the far road converges on the middle of the frame — the camera looks down the road it is on, measured through the centreline's camera since #499 put the product's on the rider's line — and its **control is a profile exactly as a pre-#440 build stored one** (the line, marked `loop` afterwards), which must look across the road instead. ⚠️ The cause was in `packages/domain`'s `routeProfile`, not the camera: see §9. ⚠️ Since #543 both frames are the road **as drawn before #543** (`unsmoothed`): the smoothing spreads the stored gap over 20 m, and the control stopped looking across the road (58.3 % of the width against 65 %). ⚠️ **Since #572 the page also measures the loop start the PRODUCT draws**, through the real `sceneFrame` and its own camera (52.5 %, held to the same 5 % with its margin published), and — because that chase view reads 52.7 % for the stored profile too, #543's mean giving the jump and the jog one heading — from straight above for a KINK, held to `MAXIMUM_CORRIDOR_JOINT_DEGREES` with the stored profile drawn by the product as its control (2.0°/3.1° against 25.7°/10.8°). `road-edges.ts` is `bend-harness.ts`'s edge walk, shared |
 | `sidecamera.html`, `sidecamera-harness.tsx`, `sidecamera.browser.spec.ts` | since [#528](https://github.com/openzigs/onyourleft/issues/528), the tripod phone's **filming sign**, driven into the filming state through the real `AppShell` and the screen's own controls, with the scripted link the unit tests use handed in through `AppShellProps.sideCameraLink` (there is no production link: #529, held by ADR 0033 D-0). At five phone viewports, both ways up, down to 320 px: the stage's box is the viewport and a 7 × 7 hit-test grid finds nothing but the sign and the shell's own camera indicator; the shell's header and navigation are absent; the word's em is at least 15 % of the short side and twice any other visible text, on one line; and exactly **one** control is on the page, 44 × 44, inside the viewport and topmost at its centre — also with the link lost and the countdown showing. Its **control** strips the stage's class from the live element and requires the same markup NOT to cover the screen. ⚠️ It measures CSS pixels, not a doorway: `theme.css` §"THE SIDE CAMERA" says what the floor comes to in millimetres on a typical phone, and that the legibility rule it is set against was read second-hand |
 | `devices.html`, `devices-harness.tsx`, `devices-fixture.ts`, `devices.browser.spec.ts` | since [#659](https://github.com/openzigs/onyourleft/issues/659), pairing on the Devices screen: the **real** `AppShell` opened at Home with a **real** ride controller over the **real** Web Bluetooth transport, whose `navigator.bluetooth` is `@onyourleft/sensors/web-bluetooth/testing`'s scripted stack (an FTMS trainer and a heart rate strap). The spec walks Home's own *"Pair a sensor or a smart trainer"* link → Devices → *Pair a smart trainer* with a real click, so the transport's user-activation check is the engine's; reads *"KICKR 1F2A: Connected"* back on Devices and on Ride, and Home's Trainer region saying *"Paired, and this app has not been given control."*, without a reload (the controller is above the router — ⚠️ Home's is a POSITIVE assertion since #659's review: a negated one passed over a Home that rendered no Trainer region); pairs a strap, forgets it — counting the page's calls to `BluetoothDevice.forget()` — and pairs it again; and at 390×844 holds the first pairing control above the fold at 44×44 with the closed `<details>` beneath the last control, and *one user gesture per device*, *no silent reconnect* and *no background recording* visible outside it (ADR 0003 D-7 rule 5). ⚠️ **Its control is the dead end**: `?control=dead-end` renders the same shell with no ride controller, and the same walk must fail AT the pairing control rather than on the way in. `devices-fixture.ts` exists because the spec runs in Node and importing the device names from the harness pulls the whole client into Playwright's transform |
+| `identity.html`, `identity-harness.ts`, `identity.browser.spec.ts` | since [#855](https://github.com/openzigs/onyourleft/issues/855) (#772's cross-platform criterion, ADR 0014 D-8), a statement signed by THIS browser's WebCrypto with the app's own device key — the store's non-extractable `CryptoKey` in IndexedDB, through the real `instance/sign-in.ts` — verified by a **real instance** (the real handler, identity routes and a SQLite file) running in the spec's own Node process, reached through `page.exposeFunction`. The same stored key signs in a second time as the same athlete. ⚠️ **Two controls**: a signature with one byte flipped in transit must be `bad_signature`, and a browser signing for another origin `wrong_instance`. ⚠️ The spec imports `apps/instance/src/auth/identity-testing.ts` by a COMPUTED path, because `apps/web`'s typecheck does not follow the instance's `.ts` specifiers; it is the one place `apps/web` reaches `apps/instance`, and it is Node-side test code — no page imports it |
 | `sidelink.html`, `sidelink-harness.ts`, `sidelink.browser.spec.ts` | since #529, the side-camera link paired end to end in the real engine: two peer connections in one page through the real offer and answer codes and the SDP `camera/side-link-sdp.ts` rebuilds, a start and a stop acknowledged across, and the offer drawn on a canvas and read back by the real reader. ⚠️ `playwright.config.ts` passes `--disable-features=WebRtcHideLocalIpsWithMdns` so the candidates are raw private addresses — the path spike 0012 found both Android WebViews take — rather than `.local` names a CI container may have no responder for. ⚠️ **Not two devices**, and not #541's packet capture |
 | `bend.html`, `bend-harness.ts`, `bend.browser.spec.ts` | since #543, a planner-sampled 20 m bend drawn by the real renderer and read back from **straight above** — a heading of nothing puts `cameraRig`'s eye over its target — with the road isolated the #440 way. Rays from the bend's centre find each edge; the edge is walked in 2 m chords and what is held to `MAXIMUM_CORRIDOR_JOINT_DEGREES` is the **kink**, a turn less its neighbours' mean, because a smooth inner edge turns 7° every two metres anyway. Its control is the road as drawn before #543 (`roadCorridor`'s `unsmoothed`), which must kink. `with-corridor.ts` rebuilds the ground and water around a swapped corridor, which the loop page needs too since #543: ground shaped for one road over another split 32 rows of it. ⚠️ Since #583 the sweep of rays starts on a ray that MISSES the road: it started at 0°, and #583's mirrored bend straddled 0° and read as two short edges (81.7° and 73.3° of turn) with nothing else wrong |
 | `reflow.html`, `reflow-harness.tsx`, `reflow.browser.spec.ts` | since [#660](https://github.com/openzigs/onyourleft/issues/660), WCAG 2.2 SC 1.4.10 (Reflow) on **every** route: the real `AppShell` over in-memory ports that are either empty or populated (forty rides with long and unbreakable names, a ride with a chart, laps, a map and a side-camera report, a segment with efforts, a route, a workout), opened at 320×256, 390×844 and 844×390. The routes come from `ALL_ROUTES` — imported, never listed — and the PAGE reads the same table and reports any route it was never asked to render, so a walk over a hand list fails; a parameterised route the harness has no fixture id for is a failure, not a skip. Each route must render its own `h1` and raise no uncaught error or unhandled rejection, the document must not scroll sideways, and every box that DOES scroll sideways must take focus, be a `region` and have a name. ⚠️ **Every route declares what its fixture puts on the page** — `reflow-harness.tsx` §`POPULATED`, a `Record` over `RouteId`, present when populated and ABSENT when empty — or why nothing on it comes from one; a route with no entry fails both walks. Until #683's review it was a `Partial` list of five, and emptying the routes, workouts and analysis fixtures left every walk green. ⚠️ **Five controls**: an over-wide element in `main` must fail at all three viewports; a region that cannot take focus, a region with no name and a focusable named box whose role is `group` must each fail; and the real `design/ScrollTable.tsx`, wider than the phone with visually hidden text at its far end, must pass — which is what caught that an absolutely positioned descendant escapes a scroll container that is not its containing block (`theme.css` §`.oyl-scroll-region`). It prints every route's margin. ⚠️ Not a real phone's fonts and not a text size above 100 %. ⚠️ **Since #672 the walk runs in BOTH palettes** (it said "not the dark theme (#654 P1-f)" until then), as do `controls-first`'s walks, `links`' and `button-hierarchy`'s colour reads — parametrised over `tokens.ts` §`THEMES` with Playwright's `colorScheme`, each asserting the page really is in that palette. ⚠️ **Every viewport runs dark as well as light.** For one commit the two LAYOUT walks ran dark at the phone only: #672's first CI run (36422201251), with every walk dark, finished in 19m48s, 12 s inside the job's then 20-minute stop, and its browser gate took 593 s. #682's 25 minutes and 840 s gave them back. The six dark cases the cut had dropped cost about 5.7 s each and 17 s of wall time locally, and 38.7 s summed (about 19 s of wall time) on the runner. On the run that put them back (36427026037, green) Playwright took 9.8 minutes of `GATE_BUDGET_MS`'s 14 (70 %), the gate's step 594 s, and the job 20m19s of its 25. ⚠️ That run's Vitest with coverage took 392 s against 255 s on the cut run (36424666303: job 14m32s, gate step 453 s), so the runner, not the dark walks, accounts for most of the gap between the two jobs |
@@ -3010,15 +3037,15 @@ command and its own CI step.
 ⚠️ **`vite.browser.config.ts` names every entry explicitly, and must.** Vite's multi-page mode
 discovers only `index.html`; a page added without a line in `build.rollupOptions.input` is simply
 not built, and the failure is a 404 while the spec runs rather than a build error — which reads
-like a server fault and sends the next person to `playwright.config.ts`. There are **sixteen** entries
+like a server fault and sends the next person to `playwright.config.ts`. There are **seventeen** entries
 today, not two — the map, the game, the HUD, the app shell, the game's stage (#373, #423), the
 Ride screen (#422), the loop start (#440), the bend (#543), the home screen (#428), the side
 camera's filming sign (#528), the side-camera link (#529), the pose model (#530), the owner's
-realistic page (ADR 0026 D-12), the capture tool, the reflow walk (#660) and the Devices pairing
-walk (#659) — and this sentence said *four* until #373, *seven* until #430's pull request, when it
+realistic page (ADR 0026 D-12), the capture tool, the reflow walk (#660), the Devices pairing
+walk (#659) and the device-key sign-in (#772) — and this sentence said *four* until #373, *seven* until #430's pull request, when it
 had been stale for two entries already, *ten* until #528, *eleven* until #529, *twelve* until #660,
-when it had been stale for two entries again (the bend and the pose model), and *fifteen* until
-#659, so read `build.rollupOptions.input` rather than this line. ⚠️ Since that pull request the harness build's
+when it had been stale for two entries again (the bend and the pose model), *fifteen* until
+#659 and *sixteen* until #855, so read `build.rollupOptions.input` rather than this line. ⚠️ Since that pull request the harness build's
 `publicDir` is the app's own `public/`, so the realistic world is served to both builds at the
 same path. #266 confirmed the trap by
 deleting its own line — the run died sixty seconds later inside `waitForFunction` with no mention
@@ -4845,6 +4872,13 @@ top of an issue **supersedes its body**.
 | Why the page has two palettes, how one is chosen before the first paint, and what the HUD keeps | `apps/web/src/design/tokens.ts` §`DARK_COLOUR_TOKENS`, `apps/web/src/design/theme-selection.ts`, `apps/web/tools/theme/theme-selection-plugin.ts`, `apps/web/browser/theme.browser.spec.ts`, [#672](https://github.com/openzigs/onyourleft/issues/672) |
 | Where a screen's longer explanation goes, which sentences may never be tucked, and what measures the fold | `apps/web/src/design/MoreAbout.tsx`, `apps/web/src/a11y/kept-visible.a11y.test.tsx`, `apps/web/browser/controls-first.browser.spec.ts`, [#666](https://github.com/openzigs/onyourleft/issues/666) |
 | What proves the HUD's live region is not hidden and moves nothing, and why that is not a screen reader | `apps/web/browser/hud.browser.spec.ts` §"#401", [#401](https://github.com/openzigs/onyourleft/issues/401) |
+| How a device signs in to an instance with its key, what each refusal code means, and why the nonce is spent before the signature is checked | `apps/instance/src/auth/identity.ts`, `packages/domain/src/identity/device-statement.ts`, [#772](https://github.com/openzigs/onyourleft/issues/772) |
+| Why a room's WebSocket carries a ticket and never the session token, and where the room core's `Admit` comes from | `apps/instance/src/auth/tickets.ts` |
+| What an instance stores of a session token, a recovery code, a link code or an email-recovery token, and what proves it | `apps/instance/src/auth/sign-in.test.ts`, `devices.test.ts` (`databaseBytes`) |
+| How a second device is linked, a key revoked, and an athlete with no device left gets back in | `apps/instance/src/auth/identity.ts` §`link`, §`revokeDevice`, §`recover`, [#773](https://github.com/openzigs/onyourleft/issues/773) |
+| What another rider may see of an athlete, and what stops a new column reaching them by default | `apps/instance/src/auth/public-athlete.ts`, [#774](https://github.com/openzigs/onyourleft/issues/774) |
+| Which display names are refused, and why each kind of character is its own reason | `packages/domain/src/identity/display-name.ts` |
+| Why the identity routes answer 503 on a running instance | `apps/instance/src/handler.ts` §`HandlerOptions.identity`, §4b |
 | Which steps a model-written ride write-up is made of, what each prompt says, and why changing a shipped prompt is a new template version rather than an edit | `apps/web/src/ride-analysis/template.ts`, `apps/web/src/ride-analysis/template-v1.ts`, `template.test.ts` §`RECORDED_DIGESTS`, [#810](https://github.com/openzigs/onyourleft/issues/810) |
 | How a write-up's steps are run, what a weak model's failed step costs, what each budget is and why, and what a cancelled run keeps | `apps/web/src/ride-analysis/runner.ts` §`RUN_BUDGET_MILLISECONDS`, §`RUN_TOKEN_BUDGET`, §`RUN_FAILURE_TEXT`, `apps/web/src/ride-analysis/model-step-port.ts`, `runner-safety.test.ts`, [#811](https://github.com/openzigs/onyourleft/issues/811) |
 | What one press on a ride's page does, which source is offered first, what a cancel says on each path, and why a failed run keeps the earlier write-up | `apps/web/src/ride-analysis/ride-analysis.ts` §`CANCELLED_TEXT`, §`ASK_FAILURE_TEXT`, `apps/web/src/ride-analysis/ride-analysis-port.ts`, `apps/web/src/ride-analysis/RideWriteUpControl.tsx`, `ride-analysis-wiring.test.tsx`, [#804](https://github.com/openzigs/onyourleft/issues/804) |
