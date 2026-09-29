@@ -1242,6 +1242,38 @@ describe('exporting the side camera’s reports (#388)', () => {
     });
   });
 
+  /**
+   * #816, from #819's review: both readers narrow their catch to
+   * `StoreDecodeError` and rethrow anything else, and nothing tested the
+   * rethrow. A plain `Error` is the store or this client being broken, and an
+   * export that swallowed it would list the ride as having no report.
+   */
+  it.each(['getSideCameraReport', 'getRideWriteUp'] as const)(
+    'does not swallow an error from %s that is not a row it cannot decode',
+    async (method) => {
+      await seedLibrary(1);
+      const broken = new Error('the store is broken');
+      await expect(
+        harness.read(async (store) =>
+          exportEverything({
+            store: new Proxy(store, {
+              get(target, property, receiver) {
+                if (property === method) {
+                  return () => Promise.reject(broken);
+                }
+                const value: unknown = Reflect.get(target, property, receiver);
+                return typeof value === 'function' ? value.bind(target) : value;
+              },
+            }),
+            athleteId: ATHLETE_A,
+            format: 'gpx',
+            onFile: () => undefined,
+          }),
+        ),
+      ).rejects.toBe(broken);
+    },
+  );
+
   it('carries no other athlete’s report', async () => {
     await seedLibrary(1);
     const theirs = rideFor(ATHLETE_B);
