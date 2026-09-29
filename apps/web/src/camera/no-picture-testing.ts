@@ -104,13 +104,52 @@ export function embeddedJson(text: string): unknown[] {
   return found;
 }
 
+/** The shortest wrapped line a run is followed across: under PEM's 64 and MIME's 76. */
+const WRAPPED_LINE_MINIMUM = 60;
+
 /**
- * A run of base64 long enough to be a picture with no `data:` prefix on it:
- * the standard and URL-safe alphabets, padding, and the line breaks MIME
- * wraps it at, but no space — so prose never makes one. 100 characters is 75
- * bytes, under the smallest image a camera frame could be (#822).
+ * A candidate run of base64: the standard and URL-safe alphabets and padding,
+ * with no space — so prose never makes one — either on one line or wrapped
+ * the way MIME (76) and PEM (64) wrap it. A wrapped line is only taken as
+ * part of a run when it is at least {@link WRAPPED_LINE_MINIMUM} long, so a
+ * list of words one per line is not one run (#823).
  */
-const BASE64_RUN = /[A-Za-z0-9+/_-](?:[A-Za-z0-9+/_=-]|\r?\n){99,}/;
+const BASE64_CANDIDATE = new RegExp(
+  `(?:[A-Za-z0-9+/_-]{${String(WRAPPED_LINE_MINIMUM)},}={0,2}\\r?\\n)*[A-Za-z0-9+/_=-]+`,
+  'g',
+);
+
+/**
+ * 100 characters is 75 bytes, under the smallest image a camera frame could
+ * be (#822).
+ */
+const BASE64_RUN_MINIMUM = 100;
+
+/**
+ * The least share of a run that is letters and digits. Base64 of any bytes is
+ * about 62/64 of them, with room for the padding.
+ */
+const BASE64_ALPHANUMERIC_SHARE = 0.9;
+
+/**
+ * Whether `text` holds a run of base64 long enough to be a picture with no
+ * `data:` prefix on it. Base64 is letters and digits but for two symbols in
+ * 64 and its padding, so a run that is mostly punctuation — a rule of dashes,
+ * underscores or `=`, with a word before or after it — is not base64 (#823).
+ */
+function hasBase64Run(text: string): boolean {
+  for (const [match] of text.matchAll(BASE64_CANDIDATE)) {
+    const run = match.replace(/\r?\n/g, '');
+    const alphanumeric = run.replace(/[^A-Za-z0-9]/g, '').length;
+    if (
+      run.length >= BASE64_RUN_MINIMUM &&
+      alphanumeric >= BASE64_ALPHANUMERIC_SHARE * run.length
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /**
  * Arrays that are the transport's own envelope rather than the ride's input:
@@ -140,9 +179,18 @@ function isEnvelopeArray(at: string, value: readonly unknown[]): boolean {
  *    found wherever it sits in the string, prose around it or not; and the
  *    transport's own `messages` and `content` lists are not held to it
  *    ({@link isEnvelopeArray}), so a ride with no sections is not a fault.
- * 4. **No long run of base64** in any string ({@link BASE64_RUN}), because a
+ * 4. **No long run of base64** in any string ({@link hasBase64Run}), because a
  *    picture sent as base64 text with no `data:` prefix passes the other three
  *    (#822).
+ *
+ * ## What it cannot see
+ *
+ * The rules are aimed at an ACCIDENTAL picture, not a disguised one. Pixels
+ * written as numbers separated by commas with no brackets round them are not
+ * JSON and not base64, so no rule reads them; base64 cut into pieces shorter
+ * than 100 characters across several strings, or wrapped at lines shorter
+ * than 60, is never one run; and any encoding other than base64 is not
+ * looked for (#823).
  */
 export function pictureBodyFaults(body: unknown, largestAllowed: number): string[] {
   const faults: string[] = [];
@@ -151,7 +199,7 @@ export function pictureBodyFaults(body: unknown, largestAllowed: number): string
       if (DATA_URL.test(value)) {
         faults.push(`${at} is a data URL`);
       }
-      if (BASE64_RUN.test(value)) {
+      if (hasBase64Run(value)) {
         faults.push(`${at} holds a long run of base64`);
       }
       embeddedJson(value).forEach((inner, index) => {

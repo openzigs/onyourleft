@@ -203,6 +203,29 @@ describe('the walk can fire (#799’s control)', () => {
     );
   });
 
+  it.each([
+    ["import W from '../camera/frame.ts?worker';", '../camera/frame.ts?worker'],
+    ["import I from './nothere?inline';", './nothere?inline'],
+    ["import U from './picture.png?url&worker';", './picture.png?url&worker'],
+  ])('refuses a query that is not exactly ?url or ?raw: %s (#823)', (line, specifier) => {
+    const walk = importWalk(planted({ 'ride-analysis/planted-entry.ts': `${line}\n` }));
+    expect(() => walk.closure(['ride-analysis/planted-entry.ts'])).toThrow(
+      `ride-analysis/planted-entry.ts imports ${specifier}, which the walk cannot resolve`,
+    );
+  });
+
+  it('refuses an existing file of code it does not walk, rather than skipping it (#823)', () => {
+    const walk = importWalk(
+      planted({
+        'ride-analysis/planted-entry.ts': "import { legacy } from './legacy.js';\n",
+        'ride-analysis/legacy.js': "export { frame as legacy } from '../camera/frame';\n",
+      }),
+    );
+    expect(() => walk.closure(['ride-analysis/planted-entry.ts'])).toThrow(
+      'ride-analysis/planted-entry.ts imports ./legacy.js, which the walk cannot resolve',
+    );
+  });
+
   it('passes over an asset handed over as a string, and a stylesheet that is there (#822)', () => {
     const walk = importWalk(
       planted({
@@ -442,6 +465,29 @@ describe('the body carries no picture (#799)', () => {
         expect.stringContaining('long run of base64'),
       ]);
       expect(pictureBodyFaults(hostedShapedStep('word '.repeat(400)), largest)).toStrictEqual([]);
+    });
+
+    it('passes a list of field names one per line, and a rule of dashes (#823)', () => {
+      const fields = [
+        'power',
+        'cadence',
+        'heartRate',
+        'speed',
+        'distance',
+        'movingMinutes',
+        'thresholdPower',
+        'massKilograms',
+        'coverage',
+        'sections',
+        'metrics',
+        'kind',
+      ].join('\n');
+      expect(fields.replace(/\n/g, '').length).toBeGreaterThanOrEqual(100);
+      expect(pictureBodyFaults(hostedShapedStep(fields), largest)).toStrictEqual([]);
+      expect(
+        pictureBodyFaults(hostedShapedStep(`Ride\n${'-'.repeat(120)}\nNotes`), largest),
+      ).toStrictEqual([]);
+      expect(pictureBodyFaults(hostedShapedStep('_'.repeat(120)), largest)).toStrictEqual([]);
     });
   });
 
