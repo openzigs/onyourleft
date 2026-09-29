@@ -441,7 +441,14 @@ apps/                 AGPL-3.0-or-later, without exception
                         `input.test.ts` walks a built input for all of it. A
                         gap is coverage, never a zero; W/kg only with a real
                         mass; the pose summary only with camera consent and
-                        never in a section. Nothing calls it yet (#810, #811)
+                        never in a section. Nothing calls it yet (#810, #811).
+                        Since #811 `runner.ts` runs a template's steps through
+                        `model-step-port.ts` — per-step and per-run time and
+                        token budgets, one parse-repair re-ask, a failed
+                        section LEFT OUT, the #798 screen and one rewrite —
+                        and saves nothing: a caller keeps a write-up only on
+                        `written`. Time is a `RunnerClock` it is handed.
+                        ⚠️ The port carries an `@unwired` until #804 wires it
     src/units/          which units a rider reads in (#238) — the one place a
                         number becomes a unit, the context a component asks,
                         and the source scan that stops a future screen writing
@@ -4585,5 +4592,6 @@ top of an issue **supersedes its body**.
 | Where a screen's longer explanation goes, which sentences may never be tucked, and what measures the fold | `apps/web/src/design/MoreAbout.tsx`, `apps/web/src/a11y/kept-visible.a11y.test.tsx`, `apps/web/browser/controls-first.browser.spec.ts`, [#666](https://github.com/openzigs/onyourleft/issues/666) |
 | What proves the HUD's live region is not hidden and moves nothing, and why that is not a screen reader | `apps/web/browser/hud.browser.spec.ts` §"#401", [#401](https://github.com/openzigs/onyourleft/issues/401) |
 | Which steps a model-written ride write-up is made of, what each prompt says, and why changing a shipped prompt is a new template version rather than an edit | `apps/web/src/ride-analysis/template.ts`, `apps/web/src/ride-analysis/template-v1.ts`, `template.test.ts` §`RECORDED_DIGESTS`, [#810](https://github.com/openzigs/onyourleft/issues/810) |
+| How a write-up's steps are run, what a weak model's failed step costs, what each budget is and why, and what a cancelled run keeps | `apps/web/src/ride-analysis/runner.ts` §`RUN_BUDGET_MILLISECONDS`, §`RUN_TOKEN_BUDGET`, §`RUN_FAILURE_TEXT`, `apps/web/src/ride-analysis/model-step-port.ts`, `runner-safety.test.ts`, [#811](https://github.com/openzigs/onyourleft/issues/811) |
 
 <!-- Last updated: 2026-09-17 by delivery:code-issue resolving #355 (the verge as a visibility constant, and the camera-cone gate that had been missing) -->
