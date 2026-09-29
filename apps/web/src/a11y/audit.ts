@@ -778,26 +778,68 @@ const listStructure: Rule = (doc) =>
       html: snippet(child),
     }));
 
+/**
+ * The landmark roles this rule compares, each with the tag that carries it
+ * implicitly.
+ */
+const COMPARED_LANDMARKS: readonly (readonly [role: string, tag: string])[] = [
+  ['navigation', 'nav'],
+  ['complementary', 'aside'],
+  ['region', 'section'],
+  ['form', 'form'],
+];
+
+function distinguishableViolation(
+  element: Element,
+  kind: string,
+  name: string,
+): AccessibilityViolation {
+  return {
+    rule: 'landmarks-are-distinguishable',
+    message:
+      `There is more than one ${kind} and this one is ${name === '' ? 'unnamed' : `named "${name}" like another`}. ` +
+      'A landmark list with two identical entries is a list you cannot navigate by.',
+    html: snippet(element),
+  };
+}
+
+/**
+ * Two landmarks of one role that a reader cannot tell apart.
+ *
+ * By TAG, as it always was: every `nav`, `aside`, `section` and `form`
+ * against the others of its tag. And since #690 by ROLE as well:
+ * `design/ScrollTable.tsx` makes every table a `div` with `role="region"`, and
+ * two tables captioned alike were two region landmarks of one name that a
+ * rule reading tags alone never saw. An element that declares a landmark role
+ * on another tag is compared with the others of that role, and with every
+ * NAMED element of the tag that carries it implicitly — an unnamed `section`
+ * is not a region landmark at all (HTML-AAM), so it is not held against one.
+ */
 const landmarksAreDistinguishable: Rule = (doc) => {
   const violations: AccessibilityViolation[] = [];
-  for (const tag of ['nav', 'aside', 'section', 'form']) {
-    const landmarks = [...doc.querySelectorAll(tag)].filter(
-      (element) => !isHiddenFromAssistiveTechnology(element),
-    );
-    if (landmarks.length < 2) {
+  const visible = (element: Element): boolean => !isHiddenFromAssistiveTechnology(element);
+  for (const [role, tag] of COMPARED_LANDMARKS) {
+    const landmarks = [...doc.querySelectorAll(tag)].filter(visible);
+    const names = landmarks.map((element) => landmarkName(element).toLowerCase());
+    if (landmarks.length >= 2) {
+      landmarks.forEach((element, index) => {
+        const name = names[index] ?? '';
+        if (name === '' || names.indexOf(name) !== index) {
+          violations.push(distinguishableViolation(element, `\`${tag}\``, name));
+        }
+      });
+    }
+
+    const declared = [...doc.querySelectorAll(`[role="${role}"]:not(${tag})`)].filter(visible);
+    const implicitNames = names.filter((name) => name !== '');
+    if (declared.length === 0 || declared.length + implicitNames.length < 2) {
       continue;
     }
-    const names = landmarks.map((element) => landmarkName(element).toLowerCase());
-    landmarks.forEach((element, index) => {
-      const name = names[index] ?? '';
-      if (name === '' || names.indexOf(name) !== index) {
-        violations.push({
-          rule: 'landmarks-are-distinguishable',
-          message:
-            `There is more than one \`${tag}\` and this one is ${name === '' ? 'unnamed' : `named "${name}" like another`}. ` +
-            'A landmark list with two identical entries is a list you cannot navigate by.',
-          html: snippet(element),
-        });
+    const declaredNames = declared.map((element) => landmarkName(element).toLowerCase());
+    declared.forEach((element, index) => {
+      const name = declaredNames[index] ?? '';
+      if (name === '' || declaredNames.indexOf(name) !== index || implicitNames.includes(name)) {
+        violations.push(distinguishableViolation(element, `\`${role}\` landmark`, name));
       }
     });
   }

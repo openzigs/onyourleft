@@ -82,6 +82,7 @@ import {
   POPULATED,
   PopulatedShell,
   SELECTIONS,
+  fixtureRide,
   type PopulatedExpectation,
 } from '../src/testing/populated-shell';
 
@@ -265,13 +266,20 @@ async function realMap(): Promise<MapPort> {
 /**
  * The Files screen's port, over this browser's own IndexedDB — #666. Without
  * one the screen shows its not-available sentence and none of its forms, and
- * the forms are what #654 measured at 3,554 px. A database of the harness's
- * own name, never written to: nothing on the walk imports a file.
+ * the forms are what #654 measured at 3,554 px.
+ *
+ * One database per walk (#690): the EMPTY walk's is never written to, and the
+ * POPULATED walk's holds {@link TRANSFER_RIDES} of the library's long-named
+ * rides, which is what puts the Export panel's ride chooser on the screen —
+ * a `<select>` whose options are those names. The import-outcome table is
+ * filled by {@link importOnTransfer}, on the populated walk's visit.
  */
-function transferPort(): TransferPort {
+const TRANSFER_RIDES = 3;
+
+function transferPort(populated: boolean): TransferPort {
   const now = unixSeconds(Math.floor(Date.now() / 1000));
   return {
-    store: openActivityStore('oyl-reflow-harness'),
+    store: openActivityStore(`oyl-reflow-harness-${populated ? 'populated' : 'empty'}`),
     athleteId: LOCAL_ATHLETE,
     newActivityId: () => activityId(crypto.randomUUID()),
     newRouteId: () => routeId(crypto.randomUUID()),
@@ -285,6 +293,71 @@ function transferPort(): TransferPort {
     athleteRow: localAthleteRecord(now),
   };
 }
+
+async function fillTransferStore(port: TransferPort): Promise<void> {
+  await port.store.ensureAthlete(port.athleteRow);
+  for (let index = 0; index < TRANSFER_RIDES; index += 1) {
+    if ((await port.store.getActivity(port.athleteId, fixtureRide(index).id)) === undefined) {
+      await port.store.putActivity({ ...fixtureRide(index), athleteId: port.athleteId });
+    }
+  }
+}
+
+/**
+ * A file name with no break opportunity in it, which is where an outcome row
+ * gets wide — and the bytes of no format this client reads, so the row says
+ * why it was refused.
+ */
+const UNREADABLE_FILE_NAME =
+  'an-export-from-another-platform-whose-name-has-no-break-opportunity-anywhere-in-it-at-all.fit';
+
+/**
+ * Import one file through the Files screen's own form, as a rider would, so
+ * its outcome table has a row — #690. `?data=populated` only, and only once:
+ * the table replaces its rows on each import.
+ */
+async function importOnTransfer(): Promise<void> {
+  if (document.querySelector('.oyl-main .oyl-scroll-region tbody tr') !== null) {
+    return;
+  }
+  const input = document.querySelector<HTMLInputElement>('#oyl-import-files');
+  if (input === null) {
+    throw new Error('the Files screen has no #oyl-import-files to import through');
+  }
+  const files = new DataTransfer();
+  files.items.add(new File([new Uint8Array([1, 2, 3, 4])], UNREADABLE_FILE_NAME));
+  input.files = files.files;
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+  await nextFrame();
+  const start = [...document.querySelectorAll<HTMLButtonElement>('.oyl-main button')].find(
+    (button) => button.textContent === 'Import 1 file',
+  );
+  if (start === undefined) {
+    throw new Error('choosing a file did not offer “Import 1 file”');
+  }
+  start.click();
+  const deadline = performance.now() + PATIENCE_MS;
+  while (document.querySelector('.oyl-main .oyl-scroll-region tbody tr') === null) {
+    if (performance.now() > deadline) {
+      throw new Error('the import never put a row in the outcome table');
+    }
+    await nextFrame();
+  }
+}
+
+/**
+ * What this page expects of each route — {@link POPULATED}, and for the Files
+ * screen its own (#690), because this page, unlike the shell's other callers,
+ * fills that screen's store and imports a file: both the ride chooser and the
+ * outcome table must be on the populated page, and neither on the empty one.
+ */
+const EXPECTATIONS: Record<RouteId, PopulatedExpectation> = {
+  ...POPULATED,
+  transfer: {
+    kind: 'fixture',
+    marker: '.oyl-main:has(#oyl-export-ride option):has(.oyl-scroll-region tbody tr)',
+  },
+};
 
 /**
  * A Bluetooth that answers "available" and is never asked to pair — #699's
@@ -300,13 +373,13 @@ const AVAILABLE_BLUETOOTH: CapabilityProbe = {
   secureContext: true,
 };
 
-function shell(populated: boolean): JSX.Element {
+function shell(populated: boolean, transfer: TransferPort): JSX.Element {
   const bluetooth = new URLSearchParams(window.location.search).get('bluetooth') === 'available';
   return (
     <PopulatedShell
       populated={populated}
       {...(bluetooth ? { capabilities: AVAILABLE_BLUETOOTH } : {})}
-      transfer={transferPort()}
+      transfer={transfer}
       map={realMap}
       basemap={{
         archiveUrl: new URL('/basemap-fixture.pmtiles', window.location.origin).toString(),
@@ -833,7 +906,14 @@ async function visit(hash: string): Promise<ReflowMeasurement> {
   window.location.hash = hash;
   const { route } = matchHash(hash);
   const headed = await untilHeading(route.title);
-  const quiet = await untilQuiet();
+  let quiet = await untilQuiet();
+  if (
+    route.id === 'transfer' &&
+    new URLSearchParams(window.location.search).get('data') === 'populated'
+  ) {
+    await importOnTransfer();
+    quiet = await untilQuiet();
+  }
   await document.fonts.ready;
   applyControl(control);
   if (new URLSearchParams(window.location.search).get('disclosures') === 'inline') {
@@ -843,7 +923,7 @@ async function visit(hash: string): Promise<ReflowMeasurement> {
   visited.add(route.id);
   // Read through a `Partial` view on purpose: the spec's "no entry" fault has
   // to be reachable if the `Record` type is ever loosened.
-  const expectation = (POPULATED as Partial<Record<RouteId, PopulatedExpectation>>)[route.id];
+  const expectation = (EXPECTATIONS as Partial<Record<RouteId, PopulatedExpectation>>)[route.id];
   const marker =
     expectation === undefined || expectation.kind === 'none' ? undefined : expectation.marker;
   const raised = errors.slice(reported);
@@ -923,7 +1003,7 @@ function applyPanesControl(): void {
   document.head.append(style);
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const host = document.querySelector('#shell');
   if (host === null) {
     throw new Error('reflow harness: #shell is missing from reflow.html');
@@ -938,8 +1018,12 @@ function main(): void {
   if (window.location.hash === '') {
     window.location.hash = '#/';
   }
+  const transfer = transferPort(data === 'populated');
+  if (data === 'populated') {
+    await fillTransferStore(transfer);
+  }
   flushSync(() => {
-    createRoot(host).render(<StrictMode>{shell(data === 'populated')}</StrictMode>);
+    createRoot(host).render(<StrictMode>{shell(data === 'populated', transfer)}</StrictMode>);
   });
   window.__oylReflow = {
     ready: true,
@@ -947,7 +1031,7 @@ function main(): void {
     data,
     parameters: PARAMETERS,
     selections: SELECTIONS,
-    populated: POPULATED,
+    populated: EXPECTATIONS,
     visit,
     unvisited: () => ALL_ROUTES.map((route) => route.id).filter((id) => !visited.has(id)),
   };
@@ -991,8 +1075,8 @@ main().catch((error: unknown) => {
     data: 'empty',
     parameters: PARAMETERS,
     selections: SELECTIONS,
-    populated: POPULATED,
+    populated: EXPECTATIONS,
     visit: () => Promise.reject(new Error('the reflow harness did not start')),
     unvisited: () => ALL_ROUTES.map((route) => route.id),
   };
-}
+});

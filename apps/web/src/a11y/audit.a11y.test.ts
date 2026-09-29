@@ -690,6 +690,53 @@ describe('landmark naming follows ARIA rather than the generic name algorithm', 
   });
 });
 
+describe('landmarks-are-distinguishable reads a declared role as well as a tag — #690', () => {
+  const region = (caption: string, id: string): string =>
+    `<div role="region" tabindex="0" aria-labelledby="${id}"><table><caption id="${id}">${caption}</caption><tr><td>1</td></tr></table></div>`;
+
+  it('fires on two table regions captioned alike', () => {
+    expect(rulesFiredBy(`${CLEAN_BODY}${region('Laps', 'a')}${region('Laps', 'b')}`)).toContain(
+      'landmarks-are-distinguishable',
+    );
+  });
+
+  it('accepts two table regions captioned apart', () => {
+    expect(rulesFiredBy(`${CLEAN_BODY}${region('Laps', 'a')}${region('Efforts', 'b')}`)).toEqual(
+      [],
+    );
+  });
+
+  it('fires on a table region named like a named section', () => {
+    expect(
+      rulesFiredBy(
+        `${CLEAN_BODY}<section aria-label="Laps"><p>x</p></section>${region('Laps', 'a')}`,
+      ),
+    ).toContain('landmarks-are-distinguishable');
+  });
+
+  it('does not hold an unnamed section, which is no landmark, against one table region', () => {
+    expect(
+      rulesFiredBy(`${CLEAN_BODY}<section><h2>Laps</h2></section>${region('Laps', 'a')}`),
+    ).toEqual([]);
+  });
+
+  it('does not count an unnamed section, so a lone unnamed region is not one of two', () => {
+    expect(
+      rulesFiredBy(
+        `${CLEAN_BODY}<section><h2>Laps</h2></section><div role="region"><p>x</p></div>`,
+      ),
+    ).not.toContain('landmarks-are-distinguishable');
+  });
+
+  it('fires on two navigation roles named alike, whatever their tags', () => {
+    expect(
+      rulesFiredBy(
+        `${CLEAN_BODY}<div role="navigation" aria-label="Primary"><a href="#/">Ride</a></div>`,
+      ),
+    ).toContain('landmarks-are-distinguishable');
+  });
+});
+
 describe('table-in-scroll-region asks for all three, and of the parent — #660', () => {
   const table = '<table id="t"><caption id="c">Laps</caption><tr><td>1</td></tr></table>';
 
