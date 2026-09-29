@@ -1705,8 +1705,27 @@ pnpm run typecheck
 pnpm run test
 
 # The same run with a coverage report. There is no percentage threshold and you
-# must not add one — see §5.
+# must not add one — see §5. ⚠️ Since #852 it is NOT the whole suite: it
+# `--exclude`s the two heaviest files, which the next command runs.
 pnpm run test:coverage
+
+# The files `test:coverage` excludes, with NO coverage (#852): the #545
+# near-field rides and the FIT decode fuzz, which V8's instrumentation slowed
+# about three times. They gate exactly as before; the coverage report stops
+# counting what they alone execute (§5). `pnpm run test` still runs everything.
+pnpm run test:uninstrumented
+
+# What stops those two lists coming apart (#852). Reads both scripts out of
+# package.json, asks `vitest list` what the whole suite and each half select,
+# and fails on a file in NEITHER run (CI would never run it) or in BOTH. ⚠️ An
+# `--exclude` glob is matched against each Vitest PROJECT's root, not the
+# repository's, which is why it compares selections rather than globs. Lists,
+# runs no test: under a second.
+pnpm run check:test-split
+
+# Its own suite. Fixture-driven; 25 cases on 2026-09-29 — the count is what the
+# run prints. Needs Node, so not in `check:repo`.
+bash scripts/check-test-split.test.sh
 
 # The accessibility gate (#48): every route in apps/web is rendered into a DOM
 # and audited, and the design tokens are checked for WCAG 2.2 AA contrast. This
@@ -2009,8 +2028,11 @@ npm view typescript-eslint peerDependencies.typescript
 # requires /source to name that commit. IMG001-IMG005: since #841 the base
 # image must be pinned by digest (IMG005) and is pulled as its own step, so a
 # Docker Hub that will not serve it is IMG004 -- the registry, named -- rather
-# than an IMG001 that reads like a broken Dockerfile. A base image already on
-# the machine is not pulled again. Removes the container and the image
+# than an IMG001 that reads like a broken Dockerfile. ⚠️ Since #852 that is
+# EVERY `FROM`, in any case, with options such as `--platform=` before the
+# image; a stage naming an earlier stage, and `scratch`, are not base images.
+# Until then it read the first line beginning `FROM` alone. A base image already
+# on the machine is not pulled again. Removes the container and the image
 # whatever happens. About 1 s with the base image cached and 2 s without on a
 # developer's machine, and 10 to 15 s on the CI runner, measured 2026-09-29.
 # In CI since #771 (§4c).
@@ -2018,8 +2040,8 @@ bash scripts/check-instance-image.sh
 
 # Its own suite (#841). A fake `docker`, `curl` and `sleep` go first on PATH,
 # the way check-third-party-notices.test.sh fakes `pnpm`, so it needs no Docker
-# and waits for nothing; every IMG id has a case that goes red. 43 cases on
-# 2026-09-29 -- the count is what the run prints.
+# and waits for nothing; every IMG id has a case that goes red. 60 cases on
+# 2026-09-29 (43 before #852) -- the count is what the run prints.
 bash scripts/check-instance-image.test.sh
 
 # The same image by hand, for #807's deployment. The commit is a REQUIRED build
@@ -2352,7 +2374,8 @@ push to `main`. It runs **exactly** the §4a commands and nothing else: `bash
 scripts/run-concurrently.test.sh`, the eight bare-clone script
 checks (`check-repo-rules`, `check-licence-hashes`, `check-env-example` and `check-doc-links`, each
 with its own fixture suite), `shellcheck scripts/*.sh`, then `pnpm install --frozen-lockfile`, `format:check`, `lint`,
-`typecheck`, `test:coverage`, `check:a11y-suite`,
+`typecheck`, `test:coverage`, `test:uninstrumented`, `check:test-split` and its suite
+`bash scripts/check-test-split.test.sh` (all three since [#852](https://github.com/openzigs/onyourleft/issues/852)), `check:a11y-suite`,
 `test:a11y`, `bash scripts/check-a11y-suite.test.sh`, `check:wiring`,
 `bash scripts/check-wiring.test.sh`, `check:capacitor`,
 `bash scripts/check-capacitor-generated.test.sh`, `check:cost-model`,
@@ -2367,21 +2390,24 @@ unexpectedly is exactly the one whose table you want, and a reporting step that 
 build is a percentage floor arriving by the back door, which §5 forbids.
 
 ⚠️ **Since [#651](https://github.com/openzigs/onyourleft/issues/651) one step, `Checks,
-concurrently`, runs twenty-four of those commands AT ONCE (twenty-two until #771 added the
-instance image, twenty-three until #841 added its suite), and a reviewer who remembers one step per
+concurrently`, runs twenty-six of those commands AT ONCE (twenty-two until #771 added the
+instance image, twenty-three until #841 added its suite, twenty-four until #852 added
+`check:test-split` and its suite), and a reviewer who remembers one step per
 command is reading the old file.** It runs the eight bare-clone script checks, `shellcheck`,
 `format:check`, `lint`, `typecheck`, `check:wiring`, `check:cost-model`, `check:licences`, `build`,
-the browser install, the instance image and six checker suites, after the install — the bare-clone checks need none
+the browser install, the instance image, `check:test-split` and seven checker suites, after the install — the bare-clone checks need none
 of it, but on their own before it they took 48 s with the runner otherwise idle. It goes through
 `scripts/run-concurrently.sh` (§4a), which labels every line with its command, waits on each
 process by itself and fails the step if **any** command failed — its own suite runs first, because
-a runner that swallowed a failure would make that step twenty-four gates removed and still look
+a runner that swallowed a failure would make that step twenty-six gates removed and still look
 green, and #651's pull request proved it red on the runner with one formatting defect (run
 36325105846: `format:check` FAILED, the other twelve then in that step finished, the job failed).
 ⚠️ **Anything that runs Vitest stays out of it**, and so do `check:capacitor` and `check:notices`,
 which each run their own install under the tree the linter is walking: Vitest's 5 s case
 timeout is already within a second of several cases on the slower runner, and beside other work
-three of them passed it (run 36324592730) — `test:a11y` and `test:coverage` each run alone. And
+three of them passed it (run 36324592730) — `test:a11y`, `test:coverage` and, since #852,
+`test:uninstrumented` each run alone. (`check:test-split` is in it: it runs `vitest list`, which
+runs no case and so has no timeout to miss.) And
 `test:coverage` and `test:browser` are **not** run together, though they are the two longest steps:
 run 36323764725 did it and both went red, because each is CPU-bound on its own.
 
@@ -2402,6 +2428,16 @@ each of those can do is turn `main` red on a day the service is down. For Docker
   builds, so a registry that will not serve it fails as `IMG004`, saying it is Docker Hub and not
   `apps/instance` — a re-run, not a fix. Before #841 it failed as `IMG001`, *"the Dockerfile did not
   build"*.
+- **Once the base image is held, the build does not ask the registry again — measured, not
+  assumed** ([#852](https://github.com/openzigs/onyourleft/issues/852), 2026-09-29). In a
+  `docker:29-dind` daemon (Docker Engine 29.8.1, its default image store) the pinned base was
+  pulled, the daemon's network was then **disconnected** (a request to `registry-1.docker.io` from
+  inside it failed to resolve), the build cache was pruned, and `docker build --no-cache` of
+  `apps/instance` succeeded in about a second with `load metadata for …@sha256:…` answered locally.
+  **Control**: the same disconnected daemon with the base image *not* held failed at exactly that
+  step, `failed to do request: Head "https://registry-1.docker.io/v2/…"`. So after `IMG004`'s pull
+  succeeds, a registry outage cannot surface as `IMG001`. ⚠️ Measured on 29.8.1 locally, not on the
+  runner's own Docker; a different engine or builder driver could resolve differently.
 - **The check stays in the required job, decided.** It is the only gate that the image builds and
   that `/source` names its commit (AGPL-3.0 §13), a second job could not block a merge, and it is
   exposed to one more registry than the job already was — the same trade as the install. Mirroring
@@ -2472,13 +2508,40 @@ be clear of what it stops (§4f's #423 reason), so this has to be answered **bef
 by raising the stop again. The time is in two steps: Vitest with coverage (379–393 s) and the
 browser gate (584–605 s). The candidates, in the order they cost least in what the job proves:
 
-1. **Run the heaviest Vitest files outside coverage instrumentation.** #651 measured the #545
-   near-field rides at 216 s and the FIT fuzz at 99 s under coverage, slowed about three times by
-   instrumenting their hot loops. Run them in their own uninstrumented Vitest invocation and they
-   still gate exactly as now; what changes is that the coverage **report** stops counting their
-   lines, which §5 says is a signal and not a gate. Estimated saving on the 7763: about 200 s,
-   from #651's ratio — **not measured**, so the first pull request to do it measures it. No owner
-   decision needed; this is the one to do first.
+1. **Run the heaviest Vitest files outside coverage instrumentation — DONE by
+   [#852](https://github.com/openzigs/onyourleft/issues/852), and it bought about one minute, not
+   three.** `test:coverage` `--exclude`s the #545 near-field rides and the FIT decode fuzz, and
+   `test:uninstrumented` runs them with no coverage in a step of its own (`Tests outside coverage`);
+   `check:test-split` holds the two lists to the whole suite, once each. They still gate exactly as
+   before; what the report lost is §5's to say. #651's ratio held — the pair took 28 s of test time
+   uninstrumented against 82 s instrumented locally, and 57 s against about 307 s on the runners —
+   but the saving is smaller than that ratio predicted, because the uninstrumented run is its own
+   Vitest start-up and its wall time is the near-field file alone (43 s of a 45 s step: two files,
+   two workers, one of them idle for most of it). Measured on the 7763, the runner #771 names:
+
+   | | Run | CPU | Job | Vitest with coverage | Tests outside coverage | Both | Browser gate |
+   |---|---|---|--:|--:|--:|--:|--:|
+   | **Before** #852 | [36602099227](https://github.com/openzigs/onyourleft/actions/runs/36602099227) | EPYC 7763 | 1256 s | 399 s | | 399 s | 608 s |
+   | **Before** #852 | [36610049975](https://github.com/openzigs/onyourleft/actions/runs/36610049975) | EPYC 7763 | 1257 s | 399 s | | 399 s | 610 s |
+   | **Before** #852 | [36613423129](https://github.com/openzigs/onyourleft/actions/runs/36613423129) | EPYC 7763 | 1296 s | 416 s | | 416 s | 621 s |
+   | **After** #852 | [36615071157](https://github.com/openzigs/onyourleft/actions/runs/36615071157) | EPYC 7763 | 1220 s | 297 s | 45 s | 342 s | 616 s |
+
+   **The two Vitest steps went from 399–416 s to 342 s: about −63 s, n = 1 after.** The job went
+   from 1256–1296 s to 1220 s, −50 s against the mean, inside what the browser gate alone varies
+   by. The "before" rows are other branches' pull requests on the same tree ancestry (#842, #839),
+   because no `main` run in that window printed its CPU; #850's own run
+   ([36612643969](https://github.com/openzigs/onyourleft/actions/runs/36612643969), the tree this
+   branch starts from) landed on a 9V74 at 1170 s with 376 s of coverage. **It did not free three
+   minutes**, which is the threshold #852 set for reporting back: the rest has to come from option
+   2 or from the browser gate, and both are the owner's. The next files by weight
+   (`realistic-textures`, `GameView`, `racing-line`, `line-on-the-road`: about 100 s of test time
+   under coverage on the 9V74) are slowed about 2× rather than 3× — measured locally, 29 s against
+   14 s — so moving them too would buy perhaps 25 s more of wall time and lose four more files from
+   the report.
+   ⚠️ **#771's second `main` sample on the 7763 is still owed**: the one `main` run after #850's
+   tree ([36615069379](https://github.com/openzigs/onyourleft/actions/runs/36615069379), 1150 s)
+   printed no CPU. The CPU line in these logs is not the runner's: it is printed by one Vitest
+   test (the racing-line timing), and only on some runs.
 2. **A second, non-required job for the heaviest gates**, nightly or on push to `main`. It would buy
    the most, and it is an **owner decision**: a job that is not `Repository rules` cannot block a
    merge (the warning at the top of this section), so whatever moves there stops being a gate on a
@@ -2780,6 +2843,7 @@ would otherwise be documented and unenforced, which is the gap this project keep
 | `boundaries/dependencies` | an import from `packages/*` into `apps/*`, in either the relative (`../../../apps/web/src/...`) or the workspace (`@onyourleft/web`) spelling. Dependencies point one way |
 | `@typescript-eslint/no-restricted-imports` in `packages/domain`, `packages/physics`, `packages/sensors/src`, `packages/sensors/protocol` and `packages/sensors/web-bluetooth` | naming **any** Node builtin — the list is derived from `builtinModules`, not typed out, so `events`, `util` and `stream/promises` fail exactly as `node:fs` does — or `react`, `react-dom`, `vite` or `dexie`, or a BLE library |
 | `no-restricted-globals` in `packages/domain`, `packages/physics`, `packages/sensors/src` and `packages/sensors/protocol` | naming a DOM global (`window`, `document`, `navigator`, `location`, `history`, `localStorage`, `sessionStorage`, `indexedDB`, `caches`), a Node global (`process`, `Buffer`, `__dirname`, `__filename`, `global`, `require`) or a network global (`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Request`, `Response`, `Headers`). This one **is** a named list; the closure is the typechecker below |
+| `no-restricted-globals` in `apps/instance/src`, **except the Node adapter** | naming a Node-only global — `Buffer`, `process`, `require`, `module`, `exports`, `__dirname`, `__filename`, `global`, `setImmediate`, `clearImmediate` — anywhere the core mounts unchanged under `workerd` ([ADR 0037](docs/adr/0037-instance-runtime-hosting-and-transport.md) D-2, [#852](https://github.com/openzigs/onyourleft/issues/852)). ⚠️ The exemption is **by file name, not directory**: `main.ts`, `node-listener.ts`, `store/node-sqlite.ts`, `blob/disk-blob-store.ts`, and tests and `*-testing.ts`/`testing/` support — so a new core file is covered with no edit and a new adapter file is a line in `eslint.config.js`. `fetch`, `Request`, `Response`, `Headers` and `crypto` are **not** listed: `workerd` has them and the handler is written against them. ⚠️ **This is the only gate for it on a pull request**: the wide `tsconfig.json` carries `@types/node`, so `process` typechecks, and the `workerd` suite is local-only. Probed: `Buffer`, `process` and `__dirname` in `pagination.ts` passed `eslint` before this block and are three errors after; `process` in `node-listener.ts` is still none. It names globals only — a `node:` **import** in the core is still caught by nothing but `workerd` |
 | `no-restricted-globals` in `packages/sensors/web-bluetooth` | naming any of the same list **except `navigator`** — the adapter is the transport boundary and `navigator.bluetooth` is the one platform API it exists to reach. The exception is derived by subtracting one name from the list above rather than restating it, so the two cannot drift |
 
 `packages/domain/tsconfig.json` narrows `lib` to `ES2024` and sets `types: []`. That is the closure
@@ -3841,6 +3905,16 @@ run — `packages/fit/vitest.config.ts` includes `tools/**/*.test.ts` — and th
 its output; including it in the report would only mix a generator's coverage into a codec's
 denominator. #107's observation that the report listed `apps/web` alone at 125 statements predated
 the second pattern and is no longer true: all six packages appear (`packages/physics` since #88).
+
+⚠️ **Since [#852](https://github.com/openzigs/onyourleft/issues/852) the report is taken WITHOUT
+two test files**, and a module only they exercise reads as untested in it. `test:coverage` excludes
+the #545 near-field rides and the FIT decode fuzz, which `test:uninstrumented` runs with no
+coverage (§4c says why: CI time). Measured locally on 2026-09-29, the total moved from 94.43 % of
+statements to 93.19 %, and almost all of it is two files: `apps/web/src/game/near-field.ts`
+**98.87 % → 23.22 %** and `near-field-testing.ts` 92.54 % → 0 %; `packages/fit/src/xml/` lost 12
+statements, and nothing else moved. Those two numbers are the instrumentation's absence, not the
+tests': read a low figure on either file as *not measured*, and run
+`pnpm exec vitest run --coverage apps/web/src/game/near-field.test.ts` for the real one.
 
 ### Verifying a *compile-time* guarantee
 
