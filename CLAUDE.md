@@ -2302,14 +2302,15 @@ quotes run ids rather than estimates.
 | **Before**, `main` | [36559634387](https://github.com/openzigs/onyourleft/actions/runs/36559634387) | EPYC 9V74 | 970 s | | | |
 | **After**, #833 | [36582905894](https://github.com/openzigs/onyourleft/actions/runs/36582905894) attempt 2 | EPYC 7763 | 1223 s | 158 s | 384 s | 605 s |
 | **After**, #833 | [36582905894](https://github.com/openzigs/onyourleft/actions/runs/36582905894) attempt 1 | EPYC 9V74 | 1216 s | 154 s | 410 s | 581 s |
+| **After**, #833 | [36588252465](https://github.com/openzigs/onyourleft/actions/runs/36588252465) | EPYC 9V74 | 994 s | | | |
 
 **On the 7763 — the runner #771 names — the delta is +4 s** (1223 s against a mean of 1219 s over
 three `main` runs), inside the spread of `main` alone. The image check itself took about **10 s**
 inside the concurrent step, which grew by 3 s. The instance's Vitest project is 51 cases in well under
-a second. ⚠️ **The one 9V74 sample is +238 s** against two `main` runs on that CPU (985 s and
-970 s), and the growth is in Vitest (+110 s) and the browser gate (+86 s), neither of which this
-change touches. It is recorded, not explained: one sample on that CPU is not a measurement of
-anything. ⚠️ **The job was already past 15 minutes on the 7763 before this change** (1206–1231 s),
+a second. **On the 9V74 it is +16 s** on the second sample (994 s against 985 s and 970 s on
+`main`). ⚠️ The first 9V74 sample took 1216 s, and all of the extra time was in Vitest (+110 s) and
+the browser gate (+86 s), neither of which this change touches. The second sample did not repeat it,
+so it is recorded as runner variance, not as a cost. ⚠️ **The job was already past 15 minutes on the 7763 before this change** (1206–1231 s),
 so #771's "if the delta pushes a green run past 15 minutes" was already true of `main`. This
 change did not push it there, and moving something out of the job is #651's open question, not
 this one's.
