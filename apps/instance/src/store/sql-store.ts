@@ -23,12 +23,17 @@
  *   and a session token are primary keys; a write that names one already held
  *   by another athlete is refused with {@link OwnershipConflictError} rather
  *   than taken as an update, which would hand one athlete's key to another.
+ *   A session naming a device key another athlete holds is refused the same
+ *   way, and the schema's composite foreign key refuses it beneath that.
+ * - **A revocation is final.** An upsert keeps a `revoked_at` already set, so
+ *   a routine put carrying `revokedAt: null` cannot un-revoke a key or a
+ *   session.
  * - **One operation at a time.** Kysely's SQLite driver has one connection and
  *   no lock, so two transactions started together would nest a `begin` inside
  *   another. {@link createSqlStore} queues every call behind the one before it.
  */
 
-import type { Kysely, Selectable } from 'kysely';
+import { sql, type Kysely, type Selectable } from 'kysely';
 import type {
   ActivityRecordTable,
   AthleteTable,
@@ -240,7 +245,10 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               revoked_at: key.revokedAt,
             })
             .onConflict((conflict) =>
-              conflict.column('public_key').doUpdateSet({ revoked_at: key.revokedAt }),
+              conflict.column('public_key').doUpdateSet({
+                // A revocation is never undone by a later put (#842's review).
+                revoked_at: sql`coalesce(device_key.revoked_at, excluded.revoked_at)`,
+              }),
             )
             .execute();
         });
@@ -269,6 +277,14 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           if (held !== undefined && held.athlete_id !== session.athleteId) {
             throw new OwnershipConflictError('That session belongs to another athlete.');
           }
+          const key = await trx
+            .selectFrom('device_key')
+            .select('athlete_id')
+            .where('public_key', '=', session.deviceKey)
+            .executeTakeFirst();
+          if (key !== undefined && key.athlete_id !== session.athleteId) {
+            throw new OwnershipConflictError('That device key belongs to another athlete.');
+          }
           await trx
             .insertInto('session')
             .values({
@@ -281,7 +297,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             .onConflict((conflict) =>
               conflict.column('token_sha256').doUpdateSet({
                 expires_at: session.expiresAt,
-                revoked_at: session.revokedAt,
+                revoked_at: sql`coalesce(session.revoked_at, excluded.revoked_at)`,
               }),
             )
             .execute();

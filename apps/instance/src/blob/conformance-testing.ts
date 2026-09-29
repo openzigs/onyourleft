@@ -87,6 +87,17 @@ export function describeBlobStoreConformance(
       expect(await (await open()).get(key)).toEqual(bytesOf('abc'));
     });
 
+    test('stores what it hashed, whatever the caller does to its array DURING the put', async ({
+      open,
+    }) => {
+      const bytes = bytesOf('abc');
+      const pending = (await open()).put(bytes);
+      bytes.fill(0);
+      const key = await pending;
+      expect(key).toBe(ABC_SHA256);
+      expect(await (await open()).get(key)).toEqual(bytesOf('abc'));
+    });
+
     test('accepts the digest the caller expected, and is idempotent', async ({ open }) => {
       const store = await open();
       expect(await store.put(bytesOf('abc'), ABC_SHA256)).toBe(ABC_SHA256);

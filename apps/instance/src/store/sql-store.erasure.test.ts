@@ -4,11 +4,17 @@
  * **An erased athlete leaves no row behind, in any table the schema has**
  * (#769; #35's criterion, server side).
  *
- * The athlete-scoped tables are found in the SCHEMA — every table with an
- * `athlete_id` column, read with `pragma_table_info` from the migrated
- * database — and not from `sql-store.ts`'s list or this file. So a table a
- * later migration adds (#13, #785) with an `athlete_id` fails here until
- * `eraseAthlete` empties it, rather than being quietly missed by both.
+ * The athlete-scoped tables are found in the SCHEMA — every table with a
+ * foreign key to `athlete`, read with `pragma_foreign_key_list` from the
+ * migrated database — and not from `sql-store.ts`'s list or this file. So a
+ * table a later migration adds (#13, #785) that references an athlete fails
+ * here until `eraseAthlete` empties it, rather than being quietly missed by
+ * both, whatever its column is called.
+ *
+ * Since #842's review it also holds the rule that made a session able to
+ * block ANOTHER athlete's erasure: a reference from one athlete-scoped table
+ * to another must carry `athlete_id` on both sides, so one athlete's row can
+ * never point at another's.
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -29,21 +35,39 @@ afterEach(async () => {
   harness = undefined;
 });
 
-/** Every table with an `athlete_id` column, from the database itself. */
-function athleteScopedTables(path: string): string[] {
+interface Reference {
+  readonly table: string;
+  readonly id: number;
+  readonly parent: string;
+  readonly from: string;
+  readonly to: string;
+}
+
+/** Every foreign key in the database, one row per column pair. */
+function references(path: string): Reference[] {
   const database = openDatabase(path);
   try {
-    return (
-      database
-        .prepare(
-          `SELECT DISTINCT m.name AS name FROM sqlite_schema AS m, pragma_table_info(m.name) AS c
-           WHERE m.type = 'table' AND c.name = 'athlete_id' ORDER BY m.name`,
-        )
-        .all() as { name: string }[]
-    ).map((row) => row.name);
+    return database
+      .prepare(
+        `SELECT m.name AS "table", f.id AS id, f."table" AS parent, f."from" AS "from", f."to" AS "to"
+         FROM sqlite_schema AS m, pragma_foreign_key_list(m.name) AS f
+         WHERE m.type = 'table' ORDER BY m.name, f.id, f.seq`,
+      )
+      .all() as unknown as Reference[];
   } finally {
     database.close();
   }
+}
+
+/** Every table with a foreign key to `athlete`, from the database itself. */
+function athleteScopedTables(path: string): string[] {
+  return [
+    ...new Set(
+      references(path)
+        .filter((reference) => reference.parent === 'athlete')
+        .map((reference) => reference.table),
+    ),
+  ].sort();
 }
 
 function rowsOf(path: string, table: string, column: string, athleteId: string): number {
@@ -89,6 +113,34 @@ describe('erasing an athlete (#769, #35)', () => {
     expect(rowsOf(harness.path, 'athlete', 'id', ATHLETE_B)).toBe(0);
     expect(rowsOf(harness.path, 'athlete', 'id', ATHLETE_A)).toBe(1);
     expect(await harness.read((store) => store.getAthlete(ATHLETE_B))).toBeUndefined();
+  });
+
+  it('names its owner in `athlete_id`, the column eraseAthlete deletes by', async () => {
+    harness = await createStoreHarness();
+    await harness.write(() => Promise.resolve());
+    const toAthlete = references(harness.path).filter((each) => each.parent === 'athlete');
+    expect(toAthlete.length).toBeGreaterThan(0);
+    for (const reference of toAthlete) {
+      expect(`${reference.table}.${reference.from}`).toBe(`${reference.table}.athlete_id`);
+    }
+  });
+
+  it('lets no athlete-scoped row reference another athlete’s row (#842 review)', async () => {
+    harness = await createStoreHarness();
+    await harness.write(() => Promise.resolve());
+    const all = references(harness.path);
+    const scoped = new Set(athleteScopedTables(harness.path));
+    const between = all.filter((each) => scoped.has(each.table) && scoped.has(each.parent));
+    expect(between.length, 'session → device_key is one such reference').toBeGreaterThan(0);
+    for (const reference of between) {
+      const pairs = all.filter(
+        (each) => each.table === reference.table && each.id === reference.id,
+      );
+      expect(
+        pairs.some((each) => each.from === 'athlete_id' && each.to === 'athlete_id'),
+        `${reference.table}.${reference.from} → ${reference.parent}.${reference.to}`,
+      ).toBe(true);
+    }
   });
 
   it('names every athlete-scoped table in the erasure list', async () => {

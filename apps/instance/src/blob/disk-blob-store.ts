@@ -63,7 +63,9 @@ export function createDiskBlobStore(root: string, options: DiskBlobStoreOptions 
   }
 
   return {
-    put: async (bytes, expectedSha256) => {
+    put: async (input, expectedSha256) => {
+      // One copy, taken before the first await: what is hashed is what is written.
+      const bytes = input.slice();
       const key = await keyFor(bytes, expectedSha256);
       if (await exists(key)) return key;
       await mkdir(incoming, { recursive: true });

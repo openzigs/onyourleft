@@ -23,9 +23,11 @@ const settled = <T>(operation: () => T): Promise<T> =>
 
 export function createMemoryBlobStore(blobs: MemoryBlobs = new Map()): BlobStore {
   return {
-    put: async (bytes, expectedSha256) => {
+    put: async (input, expectedSha256) => {
+      // Copied before the first await, so what is hashed is what is kept.
+      const bytes = input.slice();
       const key = await keyFor(bytes, expectedSha256);
-      if (!blobs.has(key)) blobs.set(key, bytes.slice());
+      if (!blobs.has(key)) blobs.set(key, bytes);
       return key;
     },
     get: (sha256) => settled(() => blobs.get(requireBlobKey(sha256))?.slice()),

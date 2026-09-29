@@ -87,7 +87,8 @@ function kyselyStatement(statement: StatementSync): SqliteStatement {
  * that upgrade fails with `SQLITE_BUSY` at once — the busy timeout does not
  * apply, because waiting cannot help a stale snapshot. Every transaction this
  * store opens writes, so each one takes the write lock up front instead.
- * `sql-store.concurrency.test.ts` is what showed it.
+ * `sql-store.concurrency.test.ts` is what showed it, and `node-sqlite.test.ts`
+ * holds it deterministically in one thread.
  */
 const BEGIN = /^\s*begin\s*$/i;
 

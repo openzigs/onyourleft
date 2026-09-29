@@ -6,6 +6,14 @@
  * Every table is `STRICT`, so SQLite refuses a value of the wrong type rather
  * than storing it, and `athlete_id` REFERENCES `athlete` (see `schema.ts` for
  * why that column name is load-bearing).
+ *
+ * ⚠️ **A session's device key must be ITS athlete's key, and the schema says
+ * so** (#842's review). `device_key` is `UNIQUE (public_key, athlete_id)` and
+ * `session (device_key, athlete_id)` references that pair, so a session naming
+ * another athlete's key is refused by SQLite itself — not only by
+ * `putSession`'s check. With the single-column reference it replaced, such a
+ * row was accepted and then made the OTHER athlete's erasure (#35) fail on a
+ * foreign key it could not satisfy.
  */
 
 import { sql, type Kysely } from 'kysely';
@@ -26,6 +34,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn('athlete_id', 'text', (column) => column.notNull().references('athlete.id'))
     .addColumn('added_at', 'integer', (column) => column.notNull())
     .addColumn('revoked_at', 'integer')
+    .addUniqueConstraint('device_key_owner', ['public_key', 'athlete_id'])
     .modifyEnd(sql`strict`)
     .execute();
   await db.schema
@@ -38,11 +47,15 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .createTable('session')
     .addColumn('token_sha256', 'text', (column) => column.primaryKey())
     .addColumn('athlete_id', 'text', (column) => column.notNull().references('athlete.id'))
-    .addColumn('device_key', 'text', (column) =>
-      column.notNull().references('device_key.public_key'),
-    )
+    .addColumn('device_key', 'text', (column) => column.notNull())
     .addColumn('expires_at', 'integer', (column) => column.notNull())
     .addColumn('revoked_at', 'integer')
+    .addForeignKeyConstraint(
+      'session_device_key_is_its_athletes',
+      ['device_key', 'athlete_id'],
+      'device_key',
+      ['public_key', 'athlete_id'],
+    )
     .modifyEnd(sql`strict`)
     .execute();
   await db.schema.createIndex('session_by_athlete').on('session').column('athlete_id').execute();

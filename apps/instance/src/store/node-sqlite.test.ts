@@ -94,4 +94,39 @@ describe('the pragmas every connection gets (#769)', () => {
     expect(Object.values(database.prepare('PRAGMA busy_timeout').get() ?? {})[0]).toBe(0);
     database.close();
   });
+
+  it('takes the write lock when a transaction BEGINS, deterministically, in one thread', async () => {
+    // `sql-store.concurrency.test.ts` shows the same in two threads, and can
+    // miss it when they happen not to overlap (#842's review saw 1 run in 11).
+    // Here the interleaving is written out: the transaction reads, a second
+    // connection tries to write, then the transaction writes. With a bare
+    // DEFERRED `begin` the second connection's write lands and the
+    // transaction's own write is refused mid-way; with `BEGIN IMMEDIATE` the
+    // second connection is the one refused, and the transaction commits.
+    directory = await mkdtemp(join(tmpdir(), 'oyl-instance-pragmas-'));
+    const path = join(directory, 'instance.sqlite');
+    const setup = openDatabase(path);
+    setup.exec(`CREATE TABLE t (a TEXT, b INTEGER)`);
+    setup.close();
+    const db = kyselyOver(kyselyDatabase(openDatabase(path, { busyTimeoutMilliseconds: 0 })));
+    const other = openDatabase(path, { busyTimeoutMilliseconds: 0 });
+    try {
+      await db.transaction().execute(async (trx) => {
+        await trx.selectFrom('t').selectAll().execute();
+        expect(() => other.prepare(`INSERT INTO t VALUES ('other', 0)`).run()).toThrow(
+          /database is locked/,
+        );
+        await trx.insertInto('t').values({ a: 'mine', b: 1 }).execute();
+      });
+      expect(
+        other
+          .prepare('SELECT a FROM t')
+          .all()
+          .map((row) => row.a),
+      ).toEqual(['mine']);
+    } finally {
+      other.close();
+      await db.destroy();
+    }
+  });
 });

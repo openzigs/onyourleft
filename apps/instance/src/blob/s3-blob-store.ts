@@ -12,12 +12,15 @@
  * `x-amz-content-sha256` the request is signed with, so the service itself
  * refuses a body that does not match.
  *
+ * A read is checked: bytes that do not hash to their key are
+ * {@link S3BlobIntegrityError}, never returned.
+ *
  * ⚠️ **What a failure says.** A status the store does not expect is
  * {@link S3BlobStoreError} carrying the method and the status — never the
  * response body, which is the service's and may echo the request.
  */
 
-import { keyFor, requireBlobKey, type BlobStore } from './blob-store.ts';
+import { keyFor, requireBlobKey, sha256Hex, type BlobStore } from './blob-store.ts';
 import { signS3Request, type S3Credentials } from './s3-signature.ts';
 
 /** SHA-256 of nothing: the payload hash of a request with no body. */
@@ -42,6 +45,18 @@ export class S3BlobStoreError extends Error {
     super(`The object store answered ${method} with ${status}.`);
     this.method = method;
     this.status = status;
+  }
+}
+
+/**
+ * The service answered a read with bytes that do not hash to their key. The
+ * bucket is off the box, so a read is checked rather than trusted; the bytes
+ * are never echoed.
+ */
+export class S3BlobIntegrityError extends Error {
+  override readonly name = 'S3BlobIntegrityError';
+  constructor() {
+    super('The object store answered GET with bytes that do not hash to their key.');
   }
 }
 
@@ -77,7 +92,9 @@ export function createS3BlobStore(options: S3BlobStoreOptions): BlobStore {
   }
 
   return {
-    put: async (bytes, expectedSha256) => {
+    put: async (input, expectedSha256) => {
+      // Copied before the first await, so what is hashed is what is sent.
+      const bytes = input.slice();
       const key = await keyFor(bytes, expectedSha256);
       const response = await request('PUT', key, bytes);
       if (!response.ok) throw new S3BlobStoreError('PUT', response.status);
@@ -89,7 +106,9 @@ export function createS3BlobStore(options: S3BlobStoreOptions): BlobStore {
       const response = await request('GET', key);
       if (response.status === 404) return undefined;
       if (!response.ok) throw new S3BlobStoreError('GET', response.status);
-      return new Uint8Array(await response.arrayBuffer());
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if ((await sha256Hex(bytes)) !== key) throw new S3BlobIntegrityError();
+      return bytes;
     },
     has: async (sha256) => exists(requireBlobKey(sha256)),
     delete: async (sha256) => {

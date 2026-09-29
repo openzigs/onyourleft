@@ -11,10 +11,15 @@
  *
  * Every command prints the applied migrations and each table's row count
  * afterwards, so a rollback's cost is on the screen rather than inferred.
+ * Only `latest` may create the file: `status`, `up` and `down` on a path that
+ * does not exist are refused with exit 2, so a mistyped path is an error
+ * rather than a new, empty database beside the real one.
+ *
  * ⚠️ `down` undoes the newest migration, and a migration that created a table
  * drops it — with its rows. Take a copy of the file first.
  */
 
+import { existsSync } from 'node:fs';
 import {
   appliedMigrations,
   migrateDownOne,
@@ -36,6 +41,10 @@ const [path, command] = process.argv.slice(2);
 const run = command === undefined ? undefined : COMMANDS[command];
 if (path === undefined || run === undefined) {
   process.stderr.write('usage: node tools/migrate.ts <database file> status|latest|up|down\n');
+  process.exit(2);
+}
+if (command !== 'latest' && !existsSync(path)) {
+  process.stderr.write(`There is no database at ${path}; only \`latest\` creates one.\n`);
   process.exit(2);
 }
 

@@ -3,6 +3,7 @@
 /** What the port does, each claim read back on a fresh connection (#769). */
 
 import { afterEach, describe, expect, it } from 'vitest';
+import { openDatabase } from './node-sqlite.ts';
 import { OwnershipConflictError } from './sql-store.ts';
 import {
   activityRecordFixture,
@@ -73,6 +74,37 @@ describe('SqlStore (#769)', () => {
     expect(session?.athleteId).toBe(ATHLETE_A);
   });
 
+  it('refuses a session that names another athlete’s device key (#842 review)', async () => {
+    const opened = await world();
+    const crossed = {
+      ...sessionFixture(ATHLETE_A),
+      tokenSha256: 'c'.repeat(64),
+      deviceKey: deviceKeyFixture(ATHLETE_B).publicKey,
+    };
+    await expect(opened.write((store) => store.putSession(crossed))).rejects.toBeInstanceOf(
+      OwnershipConflictError,
+    );
+    expect(await opened.read((store) => store.findSession(crossed.tokenSha256))).toBeUndefined();
+    // And B's erasure is not blocked by anything A holds.
+    await opened.write((store) => store.eraseAthlete(ATHLETE_B));
+    expect(await opened.read((store) => store.getAthlete(ATHLETE_B))).toBeUndefined();
+  });
+
+  it('refuses that session in the schema too, beneath the port’s check', async () => {
+    const opened = await world();
+    await opened.write(() => Promise.resolve());
+    const database = openDatabase(opened.path);
+    try {
+      expect(() =>
+        database
+          .prepare('INSERT INTO session VALUES (?, ?, ?, ?, NULL)')
+          .run('d'.repeat(64), ATHLETE_A, deviceKeyFixture(ATHLETE_B).publicKey, 1),
+      ).toThrow(/FOREIGN KEY/);
+    } finally {
+      database.close();
+    }
+  });
+
   it('updates what may change: a revocation, a display name, a result', async () => {
     const opened = await world();
     await opened.write(async (store) => {
@@ -91,6 +123,20 @@ describe('SqlStore (#769)', () => {
       ]);
       expect((await store.getRoom(SHARED_ROOM.id))?.visibility).toBe('public');
       expect(await store.listRoomResults(SHARED_ROOM.id)).toHaveLength(3);
+    });
+  });
+
+  it('never un-revokes a device key or a session on a later put (#842 review)', async () => {
+    const opened = await world();
+    await opened.write(async (store) => {
+      await store.putDeviceKey({ ...deviceKeyFixture(ATHLETE_A), revokedAt: 1_790_000_900 });
+      await store.putSession({ ...sessionFixture(ATHLETE_A), revokedAt: 1_790_000_901 });
+      await store.putDeviceKey({ ...deviceKeyFixture(ATHLETE_A), revokedAt: null });
+      await store.putSession({ ...sessionFixture(ATHLETE_A), revokedAt: null });
+    });
+    await opened.read(async (store) => {
+      expect((await store.listDeviceKeys(ATHLETE_A))[0]?.revokedAt).toBe(1_790_000_900);
+      expect((await store.listSessions(ATHLETE_A))[0]?.revokedAt).toBe(1_790_000_901);
     });
   });
 

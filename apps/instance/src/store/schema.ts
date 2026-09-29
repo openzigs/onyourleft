@@ -16,9 +16,12 @@
  *   store's shape), and converts at the one place it reads and writes a row.
  * - Times are integer **Unix seconds**, `packages/store`'s `UnixSeconds`.
  * - ⚠️ **Every athlete-scoped table names its owner in a column called
- *   `athlete_id`.** That is not a style note: the erasure test finds the
- *   athlete-scoped tables by that column, so a table that called it
- *   `rider_id` would be missed by the test and by `eraseAthlete` alike.
+ *   `athlete_id`.** That is not a style note: `eraseAthlete` deletes by that
+ *   column. The erasure test finds the athlete-scoped tables by their foreign
+ *   keys to `athlete` and fails on one whose column is called anything else,
+ *   and it requires a reference between two athlete-scoped tables to carry
+ *   `athlete_id` on both sides (#842's review: a session could otherwise name
+ *   another athlete's device key and block that athlete's erasure).
  * - A session stores the SHA-256 of its token and never the token, so a copy
  *   of this database authenticates nobody.
  */

@@ -3,6 +3,7 @@
 /** The migration tool, run as an operator runs it: a separate `node` process (#769). */
 
 import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -41,6 +42,17 @@ describe('tools/migrate.ts (#769)', () => {
     const up = migrate(path, 'up');
     expect(up.out).toMatch(/up: 1 migration\(s\) changed/);
     expect(up.out).toMatch(/0003-rooms-and-results/);
+  });
+
+  it('refuses status, up and down on a path with no database, and creates none', async () => {
+    directory = await mkdtemp(join(tmpdir(), 'oyl-instance-migrate-tool-'));
+    const mistyped = join(directory, 'instnace.sqlite');
+    for (const command of ['status', 'up', 'down']) {
+      const run = migrate(mistyped, command);
+      expect(run.status, command).toBe(2);
+      expect(run.out).toMatch(/There is no database at/);
+      expect(existsSync(mistyped), command).toBe(false);
+    }
   });
 
   it('refuses a command it does not know, with usage and exit 2', () => {

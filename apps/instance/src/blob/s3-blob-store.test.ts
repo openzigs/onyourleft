@@ -14,7 +14,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { createS3BlobStore, S3BlobStoreError } from './s3-blob-store.ts';
+import { createS3BlobStore, S3BlobIntegrityError, S3BlobStoreError } from './s3-blob-store.ts';
 import { amzDate, signS3Request } from './s3-signature.ts';
 import { ABC_SHA256, describeBlobStoreConformance } from './conformance-testing.ts';
 import type { BlobStore } from './blob-store.ts';
@@ -56,6 +56,7 @@ interface Sent {
   readonly method: string;
   readonly url: string;
   readonly headers: Record<string, string>;
+  readonly body: unknown;
 }
 
 function scripted(status: number, body = ''): { store: BlobStore; sent: Sent[] } {
@@ -72,6 +73,7 @@ function scripted(status: number, body = ''): { store: BlobStore; sent: Sent[] }
         method: init?.method ?? 'GET',
         url: input instanceof URL ? input.href : (input as string),
         headers: init?.headers as Record<string, string>,
+        body: init?.body,
       });
       return Promise.resolve(new Response(status === 204 ? null : body, { status }));
     },
@@ -101,6 +103,23 @@ describe('the S3 blob store, over a scripted fetch (#770)', () => {
     );
     await scripted(404).store.delete(ABC_SHA256);
     await scripted(204).store.delete(ABC_SHA256);
+  });
+
+  it('sends the bytes it hashed, whatever the caller does to its array during the put', async () => {
+    const { store, sent } = scripted(200);
+    const bytes = new TextEncoder().encode('abc');
+    const pending = store.put(bytes);
+    bytes.fill(0);
+    expect(await pending).toBe(ABC_SHA256);
+    expect(sent[0]!.body).toEqual(new TextEncoder().encode('abc'));
+  });
+
+  it('refuses bytes that do not hash to their key: the bucket is off the box', async () => {
+    const failure = await scripted(200, 'not abc')
+      .store.get(ABC_SHA256)
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(S3BlobIntegrityError);
+    expect((failure as Error).message).not.toContain('not abc');
   });
 
   it('turns any other status into an error naming the method and the status, never the body', async () => {
