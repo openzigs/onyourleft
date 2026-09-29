@@ -1914,7 +1914,8 @@ npm view typescript-eslint peerDependencies.typescript
 # the image's OWN healthcheck to answer /health inside the container, and
 # requires /source to name that commit. IMG001-IMG003. Removes the container
 # and the image whatever happens. About 1 s with the base image cached and
-# ~10 s without, measured 2026-09-29. In CI since #771 (§4c).
+# 2 s without on a developer's machine, and about 10 s on the CI runner,
+# measured 2026-09-29. In CI since #771 (§4c).
 bash scripts/check-instance-image.sh
 
 # The same image by hand, for #807's deployment. The commit is a REQUIRED build
@@ -2292,10 +2293,26 @@ outside the runner:
 **What it cost, measured on the runner** — see the table directly below this paragraph, which
 quotes run ids rather than estimates.
 
-| | Run | Job wall time |
-|---|---|--:|
-| **Before** (`main`, green) | [36574047878](https://github.com/openzigs/onyourleft/actions/runs/36574047878) | 985 s |
-| **Before** (`main`, green) | [36576722522](https://github.com/openzigs/onyourleft/actions/runs/36576722522) | 1231 s |
+| | Run | CPU | Job | `Checks, concurrently` | Vitest with coverage | Browser gate |
+|---|---|---|--:|--:|--:|--:|
+| **Before**, `main` | [36576722522](https://github.com/openzigs/onyourleft/actions/runs/36576722522) | EPYC 7763 | 1231 s | 155 s | 386 s | 616 s |
+| **Before**, `main` | [36569152175](https://github.com/openzigs/onyourleft/actions/runs/36569152175) | EPYC 7763 | 1221 s | | | |
+| **Before**, `main` | [36563116178](https://github.com/openzigs/onyourleft/actions/runs/36563116178) | EPYC 7763 | 1206 s | | | |
+| **Before**, `main` | [36574047878](https://github.com/openzigs/onyourleft/actions/runs/36574047878) | EPYC 9V74 | 985 s | 127 s | 300 s | 495 s |
+| **Before**, `main` | [36559634387](https://github.com/openzigs/onyourleft/actions/runs/36559634387) | EPYC 9V74 | 970 s | | | |
+| **After**, #833 | [36582905894](https://github.com/openzigs/onyourleft/actions/runs/36582905894) attempt 2 | EPYC 7763 | 1223 s | 158 s | 384 s | 605 s |
+| **After**, #833 | [36582905894](https://github.com/openzigs/onyourleft/actions/runs/36582905894) attempt 1 | EPYC 9V74 | 1216 s | 154 s | 410 s | 581 s |
+
+**On the 7763 — the runner #771 names — the delta is +4 s** (1223 s against a mean of 1219 s over
+three `main` runs), inside the spread of `main` alone. The image check itself took about **10 s**
+inside the concurrent step, which grew by 3 s. The instance's Vitest project is 51 cases in well under
+a second. ⚠️ **The one 9V74 sample is +238 s** against two `main` runs on that CPU (985 s and
+970 s), and the growth is in Vitest (+110 s) and the browser gate (+86 s), neither of which this
+change touches. It is recorded, not explained: one sample on that CPU is not a measurement of
+anything. ⚠️ **The job was already past 15 minutes on the 7763 before this change** (1206–1231 s),
+so #771's "if the delta pushes a green run past 15 minutes" was already true of `main`. This
+change did not push it there, and moving something out of the job is #651's open question, not
+this one's.
 
 ⚠️ **The runner is two cores, not four, and that is what bounds all of this.** `ubuntu-latest`
 reports four vCPUs, and `lscpu` on it reads `Thread(s) per core: 2`, `Core(s) per socket: 2` (run
