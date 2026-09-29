@@ -521,8 +521,8 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
 - **2026-09-29** — **The realistic world no longer draws the round contact blob.** The 2026-09-26
   entry above records that *"the realistic world still draws the contact blob"*; since
   [#626](https://github.com/openzigs/onyourleft/issues/626) it draws the realistic riders'
-  **bike-shaped shadow** instead, on the same `'contact'` rungs and in the same one instanced
-  transparent draw, and the stylised world keeps the blob and the shadow map exactly as #547 left
+  **bike-shaped shadow** instead, on the same `'contact'` rungs, as one instanced transparent draw
+  of its own that replaces the blob's — the draw-call count is unchanged — and the stylised world keeps the blob and the shadow map exactly as #547 left
   them. It is #626's option 1 — a silhouette, not the 512² shadow map: `rider-silhouette.ts` makes
   the rider and bicycle's side view once, when a view builds its realistic world (256 × 128, two
   bytes a texel, 64 KiB, no build byte), and `three-renderer.ts` §`RiderSilhouetteBelt` casts it

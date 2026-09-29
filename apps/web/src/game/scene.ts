@@ -429,12 +429,13 @@ function ridersOnTheRoad(
     // rule beside the bound that creates the difference.
     const clock: number = ghostClock(input.state);
     const at = ghostDistanceAt(input.ghost, seconds(clock));
+    const speed = ghostSpeed(input.ghost, clock);
     riders.push({
       kind: 'ghost',
       distance: at,
-      speed: ghostSpeed(input.ghost, clock),
+      speed,
       crankAngle: pedalling(at),
-      pedalling: ghostSpeed(input.ghost, clock) > 0,
+      pedalling: speed > 0,
     });
   }
   // #625: the ride's own clock, which a held or paused ride holds — never a

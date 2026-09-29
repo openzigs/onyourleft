@@ -184,6 +184,15 @@ export function rasteriseSilhouette(positions: Float32Array): RiderSilhouette {
  * across and `y·cos φ` up, so its shadow lands at `y·(t_a·cos φ − sin φ)`
  * across and `y·t_c·cos φ` along: the throw of a leaning rider is that.
  *
+ * ⚠️ **Only the height term is leaned — an approximation, stated.** A point
+ * `x` across the bicycle, leaned, lands at `x·(cos φ + t_a·sin φ)` across and
+ * gains `x·sin φ·t_c` along; both are dropped, so the picture's width is
+ * thrown as if the rider were upright. The error is at most `bounds.reach`
+ * times `|cos φ + t_a·sin φ − 1|` across and `sin φ·|t_c|` along — a few
+ * centimetres at `racing-line.ts`'s 38.7° cap. The lean branch is unit-tested
+ * for its sign only, and the browser gate rides a level, straight route, so
+ * no gate compares a LEANING silhouette with the twin (#872's review).
+ *
  * @returns whether this rider casts one — `false` for the ghost
  * (`contact-shadow.ts` §`CASTS_CONTACT_SHADOW`) and under a sun at or below the
  * horizon; `into` is then untouched. Allocates nothing.

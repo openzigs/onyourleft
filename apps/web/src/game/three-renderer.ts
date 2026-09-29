@@ -3112,6 +3112,8 @@ export class RiderSilhouetteBelt {
   readonly #mesh: InstancedMesh;
   readonly #throws: InstancedBufferAttribute;
   readonly #throw: SunThrow = { x: 0, z: 0 };
+  /** The `oylDarkness` uniform itself. @see setDarkness */
+  readonly #darkness = { value: CONTACT_SHADOW_DARKNESS };
   readonly #position = new Vector3();
   readonly #turn = new Quaternion();
   readonly #matrix = new Matrix4();
@@ -3139,7 +3141,7 @@ export class RiderSilhouetteBelt {
         uniforms: {
           oylSilhouette: { value: this.#texture },
           oylBounds: { value: new Vector4(zMin, zMax, height, reach) },
-          oylDarkness: { value: CONTACT_SHADOW_DARKNESS },
+          oylDarkness: this.#darkness,
         },
         vertexShader: SILHOUETTE_VERTEX,
         fragmentShader: SILHOUETTE_FRAGMENT,
@@ -3189,6 +3191,14 @@ export class RiderSilhouetteBelt {
       this.#mesh.count = 0;
       this.#mesh.visible = false;
     }
+  }
+
+  /**
+   * How dark a whole silhouette is — {@link CONTACT_SHADOW_DARKNESS} unless the
+   * browser gate's control asks otherwise. @see riderSilhouetteDarknessOf
+   */
+  setDarkness(darkness: number): void {
+    this.#darkness.value = darkness;
   }
 
   /** One silhouette per rider who casts one, under this frame's sun. Allocates nothing. */
@@ -9802,6 +9812,18 @@ export function riderSilhouettesOf(view: GameView, on: boolean): void {
 }
 
 /**
+ * Sets how dark a whole silhouette is drawn — #626's darkness gate, whose
+ * control draws it at `1`, full black, which the gate must refuse (#872's
+ * review: a shadow bounded in shape and not in darkness passed as black).
+ *
+ * @test-facing called by `game-harness.ts` for that control; a ride draws
+ * {@link CONTACT_SHADOW_DARKNESS} and nothing in the render path changes it
+ */
+export function riderSilhouetteDarknessOf(view: GameView, darkness: number): void {
+  if (view instanceof ThreeGameView) view.setRiderSilhouetteDarkness(darkness);
+}
+
+/**
  * The silhouette a view's realistic riders cast, while it draws the realistic
  * world — #626: the browser gate holds the SHIPPED shader's shadow to
  * `rider-silhouette.ts` §`silhouetteCoverage` over this very picture.
@@ -10927,6 +10949,11 @@ class ThreeGameView implements GameView {
   showRiderSilhouettes(on: boolean): void {
     this.#silhouetteShadows = on;
     this.#applyContactShadows();
+  }
+
+  /** @see riderSilhouetteDarknessOf */
+  setRiderSilhouetteDarkness(darkness: number): void {
+    this.#realistic?.shadows.setDarkness(darkness);
   }
 
   /** The realistic riders' silhouette, while a realistic world is drawn. @see realisticSilhouetteOf */

@@ -134,6 +134,7 @@ import {
   realisticShouldersOf,
   realisticRidersShownOf,
   realisticSilhouetteOf,
+  riderSilhouetteDarknessOf,
   riderSilhouettesOf,
   setBuildingOpenings,
   setRealisticTints,
@@ -149,6 +150,7 @@ import {
 } from '../src/game/three-renderer';
 import { groundBlobAlpha, groundUnder } from '../src/game/ground-blob';
 import { silhouetteCoverage, silhouetteThrow } from '../src/game/rider-silhouette';
+import { CONTACT_SHADOW_DARKNESS } from '../src/game/contact-shadow';
 import { clearOfTheCamera, nearPyramid, sceneryReach } from '../src/game/near-field';
 import {
   REALISTIC_SURFACES,
@@ -3305,9 +3307,22 @@ interface ShadowShape {
   readonly fill: number;
   readonly squareMetres: number;
   readonly agreement: number;
+  /**
+   * How much of the ENCODED ground pixel the shadow takes away where the twin
+   * says it covers the ground wholly — #872's review: the rest of the shape
+   * counts a point as shaded at a fifth darker, so it could not tell a shadow
+   * at the stated darkness from a black one. `0` where there was no twin.
+   */
+  readonly darkening: number;
 }
 
-const NO_SHADOW_SHAPE: ShadowShape = { fill: 0, squareMetres: 0, agreement: 0 };
+const NO_SHADOW_SHAPE: ShadowShape = { fill: 0, squareMetres: 0, agreement: 0, darkening: 0 };
+
+/**
+ * Where #626's twin says the silhouette covers the ground wholly, for the
+ * darkening read — its soft edges and the texture's filtering kept out.
+ */
+const SHADOW_CORE_COVERAGE = 0.95;
 
 /**
  * How high over the rider #626's shadow probe looks down from, and how far
@@ -4487,6 +4502,12 @@ export interface RealisticMeasurement {
    */
   readonly riderShadow: ShadowShape;
   readonly riderShadowControl: ShadowShape;
+  /**
+   * The silhouette drawn full black — `oylDarkness` 1 — through the same
+   * shader and read the same way: the control for `riderShadow.darkening`,
+   * which must be refused where the shipped shadow is kept (#872's review).
+   */
+  readonly riderShadowBlack: ShadowShape;
   /** How far the realistic frame differs from the stylised one across the whole picture, as a share. */
   readonly worldChangedShare: number;
   /**
@@ -4731,6 +4752,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   shoulderRockControl: 0,
   riderShadow: NO_SHADOW_SHAPE,
   riderShadowControl: NO_SHADOW_SHAPE,
+  riderShadowBlack: NO_SHADOW_SHAPE,
   worldChangedShare: 0,
   foliageOrder: { cut: 0, opaque: 0, cutBeforeOpaque: 0 },
   foliageOrderControl: { cut: 0, opaque: 0, cutBeforeOpaque: 0 },
@@ -6013,13 +6035,17 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   // control), and no contact shadow at all, which is what "shadowed" is read
   // against. A ground point is in shadow where it is at least a fifth darker
   // than with none: the silhouette's full darkness takes 0.45 off.
-  const riderShadow = ((): { readonly shape: ShadowShape; readonly control: ShadowShape } => {
+  const riderShadow = ((): {
+    readonly shape: ShadowShape;
+    readonly control: ShadowShape;
+    readonly black: ShadowShape;
+  } => {
     const base = riding(level, 400);
     const rider = base.markers.find((marker) => marker.kind === 'rider');
     const silhouette = realisticSilhouetteOf(view);
     const thrown = { x: 0, z: 0 };
     if (rider === undefined || silhouette === undefined) {
-      return { shape: NO_SHADOW_SHAPE, control: NO_SHADOW_SHAPE };
+      return { shape: NO_SHADOW_SHAPE, control: NO_SHADOW_SHAPE, black: NO_SHADOW_SHAPE };
     }
     silhouetteThrow(rider, base.world.sun, thrown);
     const above: SceneFrame = {
@@ -6075,6 +6101,9 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
       return whole();
     };
     const silhouetteDrawn = drawn();
+    riderSilhouetteDarknessOf(view, 1);
+    const blackDrawn = drawn();
+    riderSilhouetteDarknessOf(view, CONTACT_SHADOW_DARKNESS);
     riderSilhouettesOf(view, false);
     const blobDrawn = drawn();
     view.setQuality({ ...top, riderShadows: 'none' });
@@ -6086,10 +6115,16 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
       const at = (Math.round(y) * canvas.width + Math.round(x)) * 4;
       return relativeLuminanceOf(pixels[at] ?? 0, pixels[at + 1] ?? 0, pixels[at + 2] ?? 0);
     };
+    const encodedAt = (pixels: Uint8Array, x: number, y: number): number => {
+      const at = (Math.round(y) * canvas.width + Math.round(x)) * 4;
+      return (pixels[at] ?? 0) + (pixels[at + 1] ?? 0) + (pixels[at + 2] ?? 0);
+    };
     const shapeOf = (pixels: Uint8Array, twin: boolean): ShadowShape => {
       let covered = 0;
       let both = 0;
       let either = 0;
+      let coreDrawn = 0;
+      let coreBare = 0;
       let [acrossLow, acrossHigh, alongLow, alongHigh] = [Infinity, -Infinity, Infinity, -Infinity];
       for (let across = -2.5; across <= 2.5; across += SHADOW_GRID_METRES) {
         for (let along = -2.5; along <= 3; along += SHADOW_GRID_METRES) {
@@ -6104,7 +6139,12 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
           }
           const without = luminanceAt(bare, pixel.x, pixel.y);
           const shaded = luminanceAt(pixels, pixel.x, pixel.y) < 0.8 * without;
-          const predicted = twin && silhouetteCoverage(silhouette, thrown, across, along) > 0.5;
+          const coverage = twin ? silhouetteCoverage(silhouette, thrown, across, along) : 0;
+          const predicted = coverage > 0.5;
+          if (coverage >= SHADOW_CORE_COVERAGE) {
+            coreDrawn += encodedAt(pixels, pixel.x, pixel.y);
+            coreBare += encodedAt(bare, pixel.x, pixel.y);
+          }
           if (shaded && predicted) both += 1;
           if (shaded || predicted) either += 1;
           if (!shaded) continue;
@@ -6122,9 +6162,14 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
         fill: covered === 0 ? 0 : (covered * cell) / box,
         squareMetres: covered * cell,
         agreement: either === 0 ? 0 : both / either,
+        darkening: coreBare === 0 ? 0 : 1 - coreDrawn / coreBare,
       };
     };
-    return { shape: shapeOf(silhouetteDrawn, true), control: shapeOf(blobDrawn, false) };
+    return {
+      shape: shapeOf(silhouetteDrawn, true),
+      control: shapeOf(blobDrawn, false),
+      black: shapeOf(blackDrawn, true),
+    };
   })();
   phaseEnds('realistic: rider shadow — #626');
 
@@ -6398,6 +6443,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     shoulderRockControl,
     riderShadow: riderShadow.shape,
     riderShadowControl: riderShadow.control,
+    riderShadowBlack: riderShadow.black,
     worldChangedShare,
     air,
     atmosphere,
