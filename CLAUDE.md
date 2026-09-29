@@ -93,7 +93,7 @@ apps/                 AGPL-3.0-or-later, without exception
                         game.html?realistic. Since #616 the page counts
                         triangles at the WebGL draw calls and takes
                         `?layers=-vegetation` and the like, and
-                        realistic.browser.spec.ts is the gate on THOSE two
+                        realistic.browser.spec.ts (nightly since #866) is the gate on THOSE two
                         instruments only — the counter against three's own
                         `renderer.info`, and a control that must count 100 000
                         fewer. ⚠️ The layer switch changes nothing the product
@@ -1738,6 +1738,8 @@ pnpm run test:coverage
 # near-field rides and the FIT decode fuzz, which V8's instrumentation slowed
 # about three times. They gate exactly as before; the coverage report stops
 # counting what they alone execute (§5). `pnpm run test` still runs everything.
+# ⚠️ Since #866 CI runs this NIGHTLY (`.github/workflows/nightly.yml`), not in
+# `Repository rules`, so a break in either file is found the next morning.
 pnpm run test:uninstrumented
 
 # What stops those two lists coming apart (#852). Reads both scripts out of
@@ -1865,6 +1867,15 @@ pnpm run build
 # `PLAYWRIGHT_BROWSERS_PATH` set, revision matching) it runs as-is; on a bare
 # machine or a CI runner, install it first with the line below.
 pnpm run test:browser
+
+# ⚠️ Since #866 `test:browser` runs the `chromium` and `game` projects ONLY.
+# The describes tagged `@nightly` — a reviewed list in
+# `apps/web/browser/nightly.ts`, every one of them the opt-in realistic world —
+# run in the `nightly` project, one worker, from `.github/workflows/nightly.yml`,
+# which is NOT a required check. This is that run. About 1.3 minutes on a Mac;
+# `nightly-split.test.ts` (in `pnpm run test`) fails a tag the list does not
+# name and a test in both runs or in neither.
+pnpm run test:browser:nightly
 
 # The same gate with its HOSTED block turned on (#63). Renders the same harness
 # page against a real PMTiles archive over the internet and prints #63's eighth
@@ -2414,8 +2425,9 @@ push to `main`. It runs **exactly** the §4a commands and nothing else: `bash
 scripts/run-concurrently.test.sh`, the eight bare-clone script
 checks (`check-repo-rules`, `check-licence-hashes`, `check-env-example` and `check-doc-links`, each
 with its own fixture suite), `shellcheck scripts/*.sh`, then `pnpm install --frozen-lockfile`, `format:check`, `lint`,
-`typecheck`, `test:coverage`, `test:uninstrumented`, `check:test-split` and its suite
-`bash scripts/check-test-split.test.sh` (all three since [#852](https://github.com/openzigs/onyourleft/issues/852)), `check:a11y-suite`,
+`typecheck`, `test:coverage`, `check:test-split` and its suite
+`bash scripts/check-test-split.test.sh` (both since [#852](https://github.com/openzigs/onyourleft/issues/852); #852's
+`test:uninstrumented` runs nightly since [#866](https://github.com/openzigs/onyourleft/issues/866) — below), `check:a11y-suite`,
 `test:a11y`, `bash scripts/check-a11y-suite.test.sh`, `check:wiring`,
 `bash scripts/check-wiring.test.sh`, `check:capacitor`,
 `bash scripts/check-capacitor-generated.test.sh`, `check:cost-model`,
@@ -2445,8 +2457,8 @@ green, and #651's pull request proved it red on the runner with one formatting d
 ⚠️ **Anything that runs Vitest stays out of it**, and so do `check:capacitor` and `check:notices`,
 which each run their own install under the tree the linter is walking: Vitest's 5 s case
 timeout is already within a second of several cases on the slower runner, and beside other work
-three of them passed it (run 36324592730) — `test:a11y`, `test:coverage` and, since #852,
-`test:uninstrumented` each run alone. (`check:test-split` is in it: it runs `vitest list`, which
+three of them passed it (run 36324592730) — `test:a11y` and `test:coverage` each run alone
+(and `test:uninstrumented` did too, from #852 until #866 moved it to the nightly job). (`check:test-split` is in it: it runs `vitest list`, which
 runs no case and so has no timeout to miss.) And
 `test:coverage` and `test:browser` are **not** run together, though they are the two longest steps:
 run 36323764725 did it and both went red, because each is CPU-bound on its own.
@@ -2584,12 +2596,41 @@ browser gate (584–605 s). The candidates, in the order they cost least in what
    tree ([36615069379](https://github.com/openzigs/onyourleft/actions/runs/36615069379), 1150 s)
    printed no CPU. The CPU line in these logs is not the runner's: it is printed by one Vitest
    test (the racing-line timing), and only on some runs.
-2. **A second, non-required job for the heaviest gates**, nightly or on push to `main`. It would buy
-   the most, and it is an **owner decision**: a job that is not `Repository rules` cannot block a
-   merge (the warning at the top of this section), so whatever moves there stops being a gate on a
-   pull request and becomes a report after it. Nothing is moved there until the owner says which,
-   if any.
+2. **A second, non-required job for the heaviest gates — DONE by
+   [#866](https://github.com/openzigs/onyourleft/issues/866), on the owner's ruling of 2026-09-29.**
+   See §"The nightly job" below: what moved, what did not, and the trade.
 3. **Not a larger runner**: §8 — always charged, even on a public repository.
+
+#### The nightly job — #866
+
+⚠️ **[`.github/workflows/nightly.yml`](.github/workflows/nightly.yml) — `Nightly heavy checks` — is
+NOT a required check and cannot block a merge.** It runs at 03:17 UTC, on `workflow_dispatch`, and
+on a pull request that changes that file (so a change to it is seen running before it merges). A
+break in anything it runs is found **the next morning, not before the merge that caused it**: the
+owner accepted that trade on 2026-09-29 for the checks below and **only** for checks that are not
+safety gates. It must never be renamed `Repository rules` — the required context would then report
+twice — and `nightly-split.test.ts` fails if it is.
+
+| Moved out of `Repository rules` | Seconds it cost there (run 36634388848, EPYC 9V45) | Why it is not a safety gate |
+|---|--:|---|
+| `test:uninstrumented` — the #545 near-field rides and the FIT decode fuzz | 28 (its own step) | the near plane is drawing; the fuzz is a robustness sweep, and the decoder's named refusals (XXE, a bad CRC, the bounds) are unit tests that stay in `test:coverage` |
+| `game.browser.spec.ts` §"the realistic world — ADR 0026" and §"#545" | 69 (the `?realistic` load) | the opt-in realistic world's look and cost; its one network claim, that the DEFAULT world fetches none of it, rests in the required job on `realistic-offered.test.ts` and `precache.test.ts` |
+| `game.browser.spec.ts` §"the trees' levels of detail — #617" | 56 (the `?realistic&trees` load) | triangle and draw-call budgets in the realistic world |
+| `realistic.browser.spec.ts` — the owner's instruments (#616) | 36 | a measuring tool for a page that ships in no build |
+
+**What stays required, whatever it costs**: anything that gates trainer control; privacy (no
+network, no picture, masking, scoping, erasure); licences and notices; accessibility and layout;
+and the wiring gate. The browser half of the split is a Playwright **tag**: a describe carrying
+`@nightly` runs in the `nightly` project and in neither `chromium` nor `game`, so every test is in
+exactly one run by construction, and the tagged describes must equal the reviewed list in
+`apps/web/browser/nightly.ts`, each with its seconds and its reason — adding a tag anywhere else is
+a red `nightly-split.test.ts`, not a quiet move. `check:test-split`, still required, fails a Vitest
+file in neither run.
+
+**A red nightly run opens an issue titled `Nightly heavy checks failed`**, or comments on it while
+it is open, from a second job whose token holds `issues: write` and nothing else and which checks
+nothing out. Close the issue once a nightly run is green. The job that runs the checks is
+read-only, pins its actions to the same SHAs as `rules.yml`, and runs on `ubuntu-latest`.
 
 ⚠️ **The runner is two cores, not four, and that is what bounds all of this.** `ubuntu-latest`
 reports four vCPUs, and `lscpu` on it reads `Thread(s) per core: 2`, `Core(s) per socket: 2` (run
@@ -2606,8 +2647,11 @@ If CI ever needs a step this file does not list, **this
 file is wrong and gets fixed in the same PR**; CI must not accumulate private knowledge, because
 that is how a contributor's local green becomes CI's red with no explanation.
 
-⚠️ **There is exactly one step that is not a §4a command, and this is it:
-`sudo rm -f /etc/apt/sources.list.d/google-chrome.*`, before the browser install** — which since
+⚠️ **There are exactly two steps that are not §4a commands.** The first, since #866, is `Record
+the runner's CPU` — `lscpu`, filtered to the model and the core count — because two CPU models at
+different speeds serve `ubuntu-latest` and a duration means nothing without it (#864); it gates
+nothing. The second is this one:
+`sudo rm -f /etc/apt/sources.list.d/google-chrome.*`, before the browser install — which since
 #651 means before `Checks, concurrently`, the step the browser install runs in.
 It is recorded here rather than left as private CI knowledge, which is what the paragraph above
 forbids. `playwright install --with-deps` runs `apt-get update` across **every** source the runner

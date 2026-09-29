@@ -1,0 +1,139 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The heaviest checks that are NOT safety gates, run once a night -- #866.
+#
+# ⚠️ THIS IS NOT A REQUIRED CHECK AND CANNOT BLOCK A MERGE. `main` requires one
+# status check, `Repository rules` (rules.yml, CLAUDE.md section 4c), and this
+# workflow reports under a different name on purpose: renaming it to that would
+# make the required check report twice. A break in anything here is found the
+# next morning -- by the issue the `Report a red run` job opens -- and not
+# before the merge that caused it. The owner accepted that trade on 2026-09-29
+# for the checks moved here, and ONLY for checks that are not safety gates:
+# trainer control, privacy, licences and notices, accessibility and layout, and
+# the wiring gate all stay in the required job.
+#
+# What runs here, each moved out of rules.yml by #866:
+#
+#   test:uninstrumented -- the #545 near-field rides and the FIT decode fuzz,
+#   the two files #852 took out of coverage (28 s on run 36634388848). The
+#   fuzz is a robustness sweep over the decoder: the named refusals the
+#   decoder makes -- XXE, bad CRC, the bounds -- are unit tests that stay in
+#   the required `test:coverage`. `check:test-split`, which stays required,
+#   still fails a file that is in neither Vitest run.
+#
+#   test:browser:nightly -- every browser-gate describe tagged `@nightly`,
+#   which is the reviewed list in apps/web/browser/nightly.ts, with each
+#   describe's seconds and why it is not a safety gate. All of them draw the
+#   realistic world, a rung a rider chooses and is off by default (ADR 0026
+#   D-3). `nightly-split.test.ts`, in the required suite, fails a tag that
+#   list does not name and a script or workflow that stops running them.
+name: Nightly heavy checks
+
+# `schedule` and `workflow_dispatch`, plus a pull request that changes THIS
+# file: the only way to see a change to a scheduled workflow run before it is
+# merged is to run it on the pull request that makes it. It is not required
+# there either, and the reporting job does not run on a pull request.
+# The target-context pull-request trigger is banned (WF001) and is not here.
+on:
+  schedule:
+    # 03:17 UTC: off the hour, when scheduled runs queue longest.
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/nightly.yml
+
+# Read-only by default. Only the reporting job widens it, to issues alone.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  heavy:
+    name: Nightly heavy checks
+    # Standard label only: larger runners are charged even on a public
+    # repository (CLAUDE.md section 8).
+    runs-on: ubuntu-latest
+    # A stop, not a budget. The browser half stops itself first
+    # (playwright.config.ts GATE_BUDGET_MS).
+    timeout-minutes: 30
+    steps:
+      - name: Check out the repository
+        # Pinned to a full commit SHA, as in rules.yml:
+        #   gh api repos/actions/checkout/git/ref/tags/v7.0.1 --jq .object.sha
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Which CPU this run landed on (#864): two runner types with different
+      # speeds serve ubuntu-latest, and a duration means nothing without it.
+      - name: Record the runner's CPU
+        run: lscpu | grep -E '^(Model name|Thread|Core|Socket|CPU\(s\))'
+
+      - name: Set up Node
+        #   gh api repos/actions/setup-node/git/ref/tags/v7.0.0 --jq .object.sha
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable pnpm through corepack
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        run: |
+          corepack enable pnpm
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # rules.yml's `Drop the unrelated Chrome apt source`, for its reason.
+      - name: Drop the unrelated Chrome apt source
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
+                     /etc/apt/sources.list.d/google-chrome.sources
+
+      - name: Install the pinned Chromium
+        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+
+      - name: Tests outside coverage
+        run: pnpm run test:uninstrumented
+
+      # One worker: the realistic loads draw on the CPU through SwiftShader,
+      # and two of them side by side took about twice as long each (#651).
+      - name: Nightly browser checks
+        run: pnpm run test:browser:nightly
+
+  # A red nightly run has to be SEEN, or moving a check here is deleting it.
+  # Opens an issue the first time, and comments on it while it stays open.
+  report:
+    name: Report a red run
+    needs: heavy
+    if: failure() && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # This job's token may write issues and nothing else -- not contents, not
+    # pull requests. It checks nothing out and runs no repository code.
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the nightly issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          title='Nightly heavy checks failed'
+          body="The nightly run failed on ${HEAD_SHA}: ${RUN_URL}
+
+          These checks are not required and cannot block a merge (CLAUDE.md section 4c, #866), so this issue is how a break in them is seen. Close it once a nightly run is green again."
+          existing=$(gh issue list --state open --search "\"${title}\" in:title" --json number,title \
+            --jq ".[] | select(.title == \"${title}\") | .number" | head -n 1)
+          if [ -n "${existing}" ]; then
+            gh issue comment "${existing}" --body "${body}"
+          else
+            gh issue create --title "${title}" --body "${body}"
+          fi

@@ -60,6 +60,8 @@ import {
 import { modelFacts } from '../src/game/realistic-bytes-testing';
 import { REALISTIC_WOODED_DRAW_CALLS } from '../src/game/realistic-budget';
 
+import { NIGHTLY } from './nightly';
+
 /**
  * Said beside every frame time this spec publishes — #473. Since #473 the
  * harness TIMES frames built as `GameView` builds them, lent and drawn at once
@@ -569,7 +571,10 @@ const test = base.extend<object, { harnessRun: (query?: string) => Promise<Harne
  * Today that cannot happen — only the `game` project runs this file (the
  * `chromium` project `testIgnore`s it, `playwright.config.ts` §`projects`), and
  * that project is one group in one worker — but a second worker reading a
- * query would be, and refusing it would be a false failure. Only a worker that
+ * query would be, and refusing it would be a false failure. ⚠️ Since #866 it CAN
+ * happen: the `nightly` project runs this file's `@nightly` describes, and a
+ * bare `playwright test` runs it beside `game`, both reading the plain page's
+ * load. `test:browser` and `test:browser:nightly` never run the two together. Only a worker that
  * is gone — whose process no longer exists — left its load unfinished for good.
  *
  * ⚠️ **An entry is written to a temporary file and renamed over the old one**,
@@ -791,6 +796,17 @@ const TREES_LOAD_BUDGET_MS = 160_000;
  * that runner draws the same loads (about three and a half times). With the
  * ledger's refusal switched off, the same run took 158 s: 21 hooks each paid
  * a hung budget of their own.
+ */
+/*
+ * ⚠️ **Since #866 the sum above is the NIGHTLY run's, not the required
+ * gate's**, and a reviewer who reads it as the required job's margin is
+ * reading the old arithmetic. Every describe that reads `?realistic` or
+ * `?realistic&trees`, and `realistic.browser.spec.ts`, is tagged `@nightly`
+ * (`nightly.ts`) and runs in `.github/workflows/nightly.yml`, one worker, not
+ * in `Repository rules`. The required gate's worst case is now the plain page
+ * and `?shadow-map` hanging — 60 + 70 + about 30 + the rest of the gate — well
+ * inside `GATE_BUDGET_MS`; the nightly run's is 60 + 165 + 160 + that spec's
+ * two 150 s waits, also inside it, which is why 840 s did not move.
  */
 function paysForTheRealisticLoad(): void {
   paysForTheLoad('?realistic', REALISTIC_LOAD_BUDGET_MS);
@@ -2907,36 +2923,40 @@ test.describe('a bend to the right on the map is a bend to the right on the scre
  * the drawn road and nothing on the fixture reached that plane any more
  * (`game-harness.ts` §`nearFieldProbe` says why).
  */
-test.describe('scenery the camera passes is not cut by the near plane — #545', () => {
-  paysForTheRealisticLoad();
+test.describe(
+  'scenery the camera passes is not cut by the near plane — #545',
+  { tag: NIGHTLY },
+  () => {
+    paysForTheRealisticLoad();
 
-  test('shows no cut geometry at the closest pass, where the same frame uncut shows it', async ({
-    harnessRun,
-  }) => {
-    // The realistic load: the world the owner saw it in. It shares that one
-    // load with the realistic world's cases below.
-    const result = await harness(harnessRun, '?realistic');
-    expect(result.errors).toEqual([]);
-    const near = result.nearField;
-    console.info(
-      `#545 at ${String(near.distance)} m in the ${near.world} world, the cull dropped a ` +
-        `${near.cut.join(' and a ')} ${near.pivotMetres.toFixed(2)} m from the eye: ` +
-        `${String(near.shippedPixels)} pixels cut with the cull, ` +
-        `${String(near.controlPixels)} without it, ${String(near.noisePixels)} drawing it twice`,
-    );
-    // Non-vacuity: the probe drew the realistic world, and found a frame
-    // where the renderer's own cull had something to drop.
-    expect(near.world).toBe('realistic');
-    expect(near.cut.length).toBeGreaterThan(0);
-    // The noise floor is nothing: the same frame drawn twice is the same frame.
-    expect(near.noisePixels).toBe(0);
-    // The control — the defect, drawn: without the cull the near plane cuts
-    // what the camera is passing, and the nearer plane shows it.
-    expect(near.controlPixels).toBeGreaterThan(100);
-    // And with it, nothing stands between the two planes.
-    expect(near.shippedPixels).toBe(0);
-  });
-});
+    test('shows no cut geometry at the closest pass, where the same frame uncut shows it', async ({
+      harnessRun,
+    }) => {
+      // The realistic load: the world the owner saw it in. It shares that one
+      // load with the realistic world's cases below.
+      const result = await harness(harnessRun, '?realistic');
+      expect(result.errors).toEqual([]);
+      const near = result.nearField;
+      console.info(
+        `#545 at ${String(near.distance)} m in the ${near.world} world, the cull dropped a ` +
+          `${near.cut.join(' and a ')} ${near.pivotMetres.toFixed(2)} m from the eye: ` +
+          `${String(near.shippedPixels)} pixels cut with the cull, ` +
+          `${String(near.controlPixels)} without it, ${String(near.noisePixels)} drawing it twice`,
+      );
+      // Non-vacuity: the probe drew the realistic world, and found a frame
+      // where the renderer's own cull had something to drop.
+      expect(near.world).toBe('realistic');
+      expect(near.cut.length).toBeGreaterThan(0);
+      // The noise floor is nothing: the same frame drawn twice is the same frame.
+      expect(near.noisePixels).toBe(0);
+      // The control — the defect, drawn: without the cull the near plane cuts
+      // what the camera is passing, and the nearer plane shows it.
+      expect(near.controlPixels).toBeGreaterThan(100);
+      // And with it, nothing stands between the two planes.
+      expect(near.shippedPixels).toBe(0);
+    });
+  },
+);
 
 /**
  * The realistic world, in a real engine — ADR 0026, #425, #474, #369.
@@ -2946,7 +2966,7 @@ test.describe('scenery the camera passes is not cut by the near plane — #545',
  * run `game-harness.ts` §`realisticProbe` makes. The default load is the
  * other half of D-7 and is asserted below too: it fetches none of the set.
  */
-test.describe('the realistic world — ADR 0026', () => {
+test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
   paysForTheRealisticLoad();
   // Two cases compare against the plain page — second, for #286's reason.
   paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
@@ -3734,7 +3754,7 @@ test.describe('the realistic world — ADR 0026', () => {
  * world actually loaded ON IT — without `drawnWorld`, a page that fell back to
  * the stylised world would be measuring trees with no middle level at all.
  */
-test.describe('the trees’ levels of detail in the realistic world — #617', () => {
+test.describe('the trees’ levels of detail in the realistic world — #617', { tag: NIGHTLY }, () => {
   paysForTheLoad(TREES_QUERY, TREES_LOAD_BUDGET_MS);
 
   const trees = async (
