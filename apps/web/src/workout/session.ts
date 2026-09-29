@@ -441,6 +441,10 @@ const HELD_WHILE_LETTING_GO =
 const HELD_AFTER_LETTING_GO =
   'No more targets are being sent: this app has stopped driving the trainer.';
 
+/** A target held back once the trainer was detached (#732). Says nothing about resistance. */
+const HELD_AFTER_DISCONNECT =
+  'No more targets are being sent: this trainer is not connected to this app any more.';
+
 /**
  * What a rider is told about a refused write.
  *
@@ -460,8 +464,8 @@ function faultText(error: unknown): string {
   //
   // #729's review: only `'forget-running'` reaches this today — the workout's
   // targets go through `ride/controller.ts` §`gatedTargets`, which throws no
-  // other kind. The other two are the game handle's, and their messages are
-  // log sentences ("the ride controller has let the trainer go"), so a
+  // other kind. The other three are the game handle's, and their messages are
+  // log sentences ("the ride controller was disposed…"), so a
   // session that ever received one says its own words rather than the reason,
   // and neither claims the release completed: both are thrown while its Stop
   // may still be in flight, and it may be refused.
@@ -473,6 +477,8 @@ function faultText(error: unknown): string {
         return HELD_WHILE_LETTING_GO;
       case 'let-go':
         return HELD_AFTER_LETTING_GO;
+      case 'disconnected':
+        return HELD_AFTER_DISCONNECT;
     }
   }
   const message = error instanceof Error ? error.message : String(error);
