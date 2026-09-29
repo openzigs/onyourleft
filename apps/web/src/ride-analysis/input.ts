@@ -55,6 +55,25 @@
  * {@link MINIMUM_REPORTED_COVERAGE} it reports its coverage and no figure at
  * all — a mean over a tenth of a climb is not the climb's.
  *
+ * ## A stop is not a dropout, where that can be told — #816
+ *
+ * The grid is indexed on wall time and a pause leaves empty slots, exactly as
+ * a dropout does (`packages/domain/src/recording/session.ts`); the stored ride
+ * keeps its moving time and not where the pauses were. So:
+ *
+ * - **The whole ride's coverage is counted against its moving time**: the
+ *   share of the moving time's slots a channel reported, at most 1. A rider
+ *   who rode an hour and stopped for ninety minutes has a whole-ride power
+ *   coverage of 1, not 0.4, and their mean is sent (measured in
+ *   `input.test.ts` §"a long stop"). Counted against every slot, it was
+ *   withheld.
+ * - **A section's `minutes` and coverage are of ELAPSED time, stop included**,
+ *   because which of its slots were a stop is not stored. So the sections can
+ *   add up to more than `ride.movingMinutes`, and a section that fell wholly
+ *   in a stop reports coverage 0 and no figure, which is true of it: nothing
+ *   was ridden there. Counting a section against moving time would need the
+ *   pause intervals kept with the ride, which they are not.
+ *
  * ## The names are this project's own
  *
  * CLAUDE.md §6: the load metrics' familiar names are somebody's trademarks.
@@ -245,11 +264,26 @@ export function rideAnalysisInput(
         athlete?.thresholdPower === undefined ? null : Math.round(athlete.thresholdPower),
     },
     whole:
-      streams === undefined || sampleCount === 0 ? {} : metricsOver(streams, 0, sampleCount, mass),
+      streams === undefined || sampleCount === 0
+        ? {}
+        : metricsOver(streams, 0, sampleCount, mass, movingSlots(ride, streams)),
     sections:
       streams === undefined || sampleCount === 0 ? [] : sectionsOf(ride, streams, mass, options),
   };
   return pose === undefined ? input : { ...input, pose };
+}
+
+/**
+ * How many of the grid's slots the ride was moving for: its moving time over
+ * the sample interval, never more than the slots there are and never fewer
+ * than one. A moving time that is not a positive number counts every slot.
+ * @see the file comment, §"A stop is not a dropout".
+ */
+function movingSlots(ride: AnalysedRide, streams: AnalysedStreams): number {
+  const moving = Math.round(ride.movingTime / streams.sampleInterval);
+  return Number.isFinite(moving) && moving > 0
+    ? Math.min(moving, streams.sampleCount)
+    : streams.sampleCount;
 }
 
 // --- Sections ---------------------------------------------------------------
@@ -620,15 +654,21 @@ function gainOf(heights: readonly number[]): number | undefined {
 
 // --- Channels ---------------------------------------------------------------
 
+/**
+ * The channels over `[start, end)`. `slots` is what a channel's coverage is a
+ * share of: every slot in the stretch, unless the caller knows how many of
+ * them were ridden (the whole ride's moving time).
+ */
 function metricsOver(
   streams: AnalysedStreams,
   start: number,
   end: number,
   mass: Kilograms | undefined,
+  slots: number = end - start,
 ): MetricSummary {
-  const power = channelOver(streams.channels.power, start, end);
-  const heartRate = channelOver(streams.channels.heartRate, start, end);
-  const cadence = channelOver(streams.channels.cadence, start, end);
+  const power = channelOver(streams.channels.power, start, end, slots);
+  const heartRate = channelOver(streams.channels.heartRate, start, end, slots);
+  const cadence = channelOver(streams.channels.cadence, start, end, slots);
   const perKilogram =
     mass !== undefined && power?.mean !== undefined && power.max !== undefined
       ? {
@@ -653,6 +693,7 @@ function channelOver(
   samples: readonly (number | undefined)[] | undefined,
   start: number,
   end: number,
+  slots: number,
 ): Measured | undefined {
   if (samples === undefined || end <= start) {
     return undefined;
@@ -669,7 +710,9 @@ function channelOver(
     sum += value;
     max = Math.max(max, value);
   }
-  const coverage = present / (end - start);
+  // At most 1: a sample recorded in a slot the moving time did not count
+  // (an imported file's own moving time, say) is not more than full coverage.
+  const coverage = Math.min(1, present / slots);
   if (present === 0 || coverage < MINIMUM_REPORTED_COVERAGE) {
     return { coverage: rounded(coverage, 2) };
   }

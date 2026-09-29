@@ -662,6 +662,58 @@ describe('a gap is not a zero', () => {
   });
 });
 
+describe('a long stop — #816', () => {
+  /** An hour ridden, then ninety minutes stopped: every channel empty for the stop. */
+  async function coffeeStop(movingTime: number): Promise<RideAnalysisInput> {
+    const ride = rideFor(ATHLETE_A, {
+      elapsedTime: seconds(9000),
+      movingTime: seconds(movingTime),
+    });
+    const stop = { from: 3600, count: 5400 };
+    const from = await saved(
+      ride,
+      streamSetFor(ride, {
+        sampleCount: 9000,
+        gaps: (['power', 'heartRate', 'cadence', 'speed'] as const).map((channel) => ({
+          channel,
+          ...stop,
+        })),
+      }),
+    );
+    return inputFor(from);
+  }
+
+  it('counts the whole ride’s coverage against its moving time, so the stop does not withhold its power', async () => {
+    const input = await coffeeStop(3600);
+    expect(input.ride.movingMinutes).toBe(60);
+    expect(input.whole.power?.coverage).toBe(1);
+    expect(input.whole.power?.mean).toBeTypeOf('number');
+    expect(input.whole.heartRate?.coverage).toBe(1);
+  });
+
+  it('never reports more than full coverage when a file’s own moving time is shorter than what it recorded', async () => {
+    const ride = rideFor(ATHLETE_A, { elapsedTime: seconds(3600), movingTime: seconds(1800) });
+    const from = await saved(ride, streamSetFor(ride, { sampleCount: 3600 }));
+    expect(inputFor(from).whole.power?.coverage).toBe(1);
+  });
+
+  it('withholds it when the moving time does not know about the stop — the control', async () => {
+    // Counted against every slot, an hour of ninety minutes' more is 0.4.
+    const input = await coffeeStop(9000);
+    expect(input.whole.power).toStrictEqual({ coverage: 0.4 });
+  });
+
+  it('gives sections in elapsed time, so they add up to more than the moving time, and a stopped section reports nothing', async () => {
+    const input = await coffeeStop(3600);
+    const minutes = input.sections.reduce((sum, section) => sum + section.minutes, 0);
+    // Eight sections of 18.75 minutes, each rounded to a tenth.
+    expect(minutes).toBeCloseTo(150, 0);
+    expect(minutes).toBeGreaterThan(input.ride.movingMinutes);
+    const last = input.sections[input.sections.length - 1];
+    expect(last?.metrics.power).toStrictEqual({ coverage: 0 });
+  });
+});
+
 describe('the pose summary', () => {
   it.each([
     { present: true, consented: true, sent: true },
