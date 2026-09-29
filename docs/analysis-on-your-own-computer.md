@@ -113,8 +113,8 @@ turned on.
 
 The same computer can write about a ride. When you press the button on a ride's page that asks for
 an analysis, the app sends that ride's numbers — heart rate, cadence and power, your weight and
-watts per kilogram, your threshold power if you set one, how long the ride lasted, and how it went
-section by section — and, only if the side camera filmed that ride and you agreed to the camera, how
+watts per kilogram, your threshold power if you set one, how long the ride lasted, its distance, and
+each section's gradient and total climb, and how it went section by section — and, only if the side camera filmed that ride and you agreed to the camera, how
 a few measurements of your riding position changed between the start and the end of filming. **Never
 a picture**, and not your name, where you rode or when. Nothing is sent until you press the button.
 The [privacy policy](privacy-policy.md) says the same, under **A ride sent to your own computer**.
