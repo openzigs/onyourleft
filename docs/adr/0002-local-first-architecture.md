@@ -749,3 +749,24 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   people**. ⚠️ A reader who takes this entry as reopening peer-to-peer for this product is reading
   it too widely. It covers one rider's own two devices, paired by sight, for one session, and
   ADR 0033's header states that scope.
+
+- **2026-09-29** — **Owner decision D6 is lifted, so every sentence here that says Phase 1 has no
+  server is no longer a rule.** [ADR 0036](0036-a-self-hostable-instance-server-now.md) records the
+  owner's ruling of 2026-09-28: *"a **full instance server now**. This lifts owner decision D6 (no
+  server in Phase 1)"*. The statements that rest on D6 are the header's Deciders line (*"Phase 1 has
+  no server, no account and no network"*), Context's *"Owner decision D6 is unambiguous"*, B's
+  *"**Phase 1 is entirely local** (owner decision D6)"*, constraint 1 (*"No `apps/api` and nothing
+  server-shaped in Phase 1"*) and the Notes' *"Nothing here authorises creating `apps/api` or any other
+  server-shaped code in Phase 1."* **All five describe a prohibition that no longer holds**: an
+  instance is built now, as `apps/instance`, and it does decision C's four things. ⚠️ **Decision B
+  itself is NOT changed, and it is the part to keep reading**: *"The signed file plus its signed
+  summary is the canonical artefact"* still holds, and ADR 0036 D-3 turns it into four invariants —
+  nothing that works with no instance may start to need one (held by
+  `apps/web/src/privacy/no-network.test.ts`), the device copy is never deleted on an instance's
+  confirmation, the instance is never the only copy, and nothing the client refuses to send leaves
+  through it. Decision A's targets, C's four responsibilities, D, E, F, G and H are unchanged.
+  [ADR 0037](0037-instance-runtime-hosting-and-transport.md) decides how the instance is built and
+  hosted. ⚠️ **Why an amendment and not a superseding ADR**: the reversal is ADR 0036's, and it
+  supersedes D6, which is an owner decision rather than a decision of this ADR. What this entry
+  corrects is this document's **restatements** of D6, which are statements of fact about what the
+  program contains ([ADR 0013](0013-adr-amendments.md) D-3).

@@ -551,3 +551,23 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   unblocked on Q3 by this entry and remains blocked on #7. **No racing code is written by this
   amendment and none may be written now**, which is the same sentence as before Q6 was answered and
   for a different reason.
+- **2026-09-29** — **D-0's last block is lifted, and D-5 is superseded.** Two ADRs, written together:
+  - [ADR 0036](0036-a-self-hostable-instance-server-now.md) supersedes owner decision D6 on the owner's
+    ruling of 2026-09-28 (*"a **full instance server now**"*). The 2026-09-22 entry above ends
+    *"⚠️ **Only the first block stands**: 'there is no server in Phase 1'"*, and its §"What is still
+    blocked" says *"**Everything.** D-0's first block stands"*. **Neither is true any more**: that
+    block was D6, and none of D-0's three blocks remains. ADR 0036 D-4 records that **no other block is
+    re-imposed** — the counsel block stays lifted on #488 Q6, and the five questions stay answered.
+    Racing code may now be written, in the order [#16](https://github.com/openzigs/onyourleft/issues/16)'s
+    delivery queue of 2026-09-29 gives.
+  - [ADR 0038](0038-drafting-in-the-first-multiplayer-release.md) supersedes **D-5 alone** — *"The
+    first races have no drafting"* — on the owner's ruling that the first multiplayer release includes
+    drafting, and on the owner's acceptance that *"the patent-risk acceptance covers drafting"*. It
+    quotes and answers each of D-5's four reasons, and **keeps** D-5's last paragraph: a draft reduces
+    `C_D·A` and nothing else.
+
+  **Unchanged, by name**: D-1 to D-4, D-6 (a **public** room is still blocked on
+  [#83](https://github.com/openzigs/onyourleft/issues/83); the owner's 2026-09-28 answers add 18+ and
+  approval-required registration), D-7 — **D-7.4 included**, so no ghost enters a room, whatever
+  [ADR 0039](0039-racing-another-riders-ghost-on-consent.md) permits for a local replay — and the
+  publication rule of the 2026-09-22 entry.

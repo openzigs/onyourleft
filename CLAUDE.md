@@ -3824,7 +3824,13 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   prose. ⚠️ A reviewer who remembers this sentence being unenforced is reading the old file:
   deleting an ADR's `- **Status**: Accepted` line used to leave `check-repo-rules.sh` reporting
   clean at exit 0. Numbers are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
-  **and which are claimed by open issues** before you pick one. **The next free number is 0036.**
+  **and which are claimed by open issues** before you pick one. **The next free number is 0040.**
+  ⚠️ **0036 to 0039 are [ADR 0036](docs/adr/0036-a-self-hostable-instance-server-now.md) to
+  [ADR 0039](docs/adr/0039-racing-another-riders-ghost-on-consent.md)**, reserved and written together
+  by [#825](https://github.com/openzigs/onyourleft/issues/825) on 2026-09-29 for the race-server
+  decisions: the instance server now (owner decision D6 lifted), its runtime and transport, drafting,
+  and the cross-rider ghost on consent. A reviewer who remembers this sentence offering 0036 is
+  reading the old file.
   ⚠️ **0035 is [ADR 0035](docs/adr/0035-model-written-ride-write-ups.md)**, taken by
   [#796](https://github.com/openzigs/onyourleft/issues/796) for a ride write-up written by the
   rider's own model, and **0034 is reserved for [#673](https://github.com/openzigs/onyourleft/issues/673)**,
