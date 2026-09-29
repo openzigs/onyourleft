@@ -742,7 +742,10 @@ function published(measured: Measured): ChannelSummary {
  */
 function copiedPose(pose: SideSessionSummary): SideSessionSummary | undefined {
   const counts = [pose.posed, pose.noRider, pose.unreadable];
-  if (!SIDE_POSE_SOURCES.includes(pose.source) || !counts.every(Number.isFinite)) {
+  // A count of pictures is a whole number, never negative (#816): a fraction
+  // or a minus is not a count, and rounding one into shape would be sending a
+  // number nobody measured.
+  if (!SIDE_POSE_SOURCES.includes(pose.source) || !counts.every(isCount)) {
     return undefined;
   }
   const differences: Partial<Record<(typeof SIDE_OBSERVATION_KINDS)[number], number>> = {};
@@ -755,10 +758,14 @@ function copiedPose(pose: SideSessionSummary): SideSessionSummary | undefined {
   return {
     source: pose.source,
     differences,
-    posed: Math.round(pose.posed),
-    noRider: Math.round(pose.noRider),
-    unreadable: Math.round(pose.unreadable),
+    posed: pose.posed,
+    noRider: pose.noRider,
+    unreadable: pose.unreadable,
   };
+}
+
+function isCount(value: number): boolean {
+  return Number.isInteger(value) && value >= 0;
 }
 
 function rounded(value: number, places: number): number {

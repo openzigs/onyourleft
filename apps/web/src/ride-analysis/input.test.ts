@@ -769,6 +769,23 @@ describe('the pose summary', () => {
       expect(inputFor(from, { pose: broken, cameraConsented: true }).pose, count).toBeUndefined();
     }
   });
+
+  it('sends nothing for a summary whose counts are fractions or negative (#816)', async () => {
+    const ride = rideFor(ATHLETE_A);
+    const from = await saved(ride, streamSetFor(ride, { sampleCount: 600 }));
+    for (const count of ['posed', 'noRider', 'unreadable'] as const) {
+      for (const value of [2.5, -1, Number.POSITIVE_INFINITY]) {
+        const broken = { ...POSE, [count]: value };
+        expect(
+          inputFor(from, { pose: broken, cameraConsented: true }).pose,
+          `${count} ${String(value)}`,
+        ).toBeUndefined();
+      }
+    }
+    // Nought is a count: a session that turned nobody away.
+    const none = { ...POSE, noRider: 0, unreadable: 0 };
+    expect(inputFor(from, { pose: none, cameraConsented: true }).pose).toStrictEqual(none);
+  });
 });
 
 describe('the size of the input', () => {
