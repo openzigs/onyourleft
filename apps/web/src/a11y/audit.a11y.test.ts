@@ -24,6 +24,7 @@ import {
   auditAccessibility,
   formatViolations,
   isHiddenFromAssistiveTechnology,
+  keyboardReachableElements,
   tabbableElements,
 } from './audit';
 
@@ -351,6 +352,96 @@ describe('tabbableElements', () => {
           '<div role="button" aria-disabled="true">Start a ride</div>',
         ),
       ),
+    ).toEqual([]);
+  });
+});
+
+/**
+ * The tab order through a radio group (#698).
+ *
+ * Chromium makes a named radio group ONE tab stop — the checked radio, or the
+ * first when none is checked — and `controls-first.browser.spec.ts` holds the
+ * model to real Tab presses on Settings. These fixtures pin each branch.
+ */
+describe('tabbableElements and a radio group (#698)', () => {
+  function tabOrder(body: string): string[] {
+    return tabbableElements(documentWith(body)).map((element) => element.id);
+  }
+
+  function reachable(body: string): string[] {
+    return keyboardReachableElements(documentWith(body)).map((element) => element.id);
+  }
+
+  const GROUP = (checked: 'a' | 'b' | 'c' | '') => `
+    <button id="before" type="button">Before</button>
+    <input id="a" type="radio" name="units" ${checked === 'a' ? 'checked' : ''} />
+    <input id="b" type="radio" name="units" ${checked === 'b' ? 'checked' : ''} />
+    <input id="c" type="radio" name="units" ${checked === 'c' ? 'checked' : ''} />
+    <button id="after" type="button">After</button>
+  `;
+
+  it('stops on the checked radio and on no other', () => {
+    expect(tabOrder(GROUP('b'))).toEqual(['before', 'b', 'after']);
+  });
+
+  it('stops on the first radio when none is checked', () => {
+    expect(tabOrder(GROUP(''))).toEqual(['before', 'a', 'after']);
+  });
+
+  it('keeps every radio with no name, which is a group of one', () => {
+    expect(tabOrder('<input id="x" type="radio" /><input id="y" type="radio" checked />')).toEqual([
+      'x',
+      'y',
+    ]);
+  });
+
+  it('keeps one stop per group when two groups sit side by side', () => {
+    expect(
+      tabOrder(`
+        <input id="m" type="radio" name="units" checked /><input id="i" type="radio" name="units" />
+        <input id="l" type="radio" name="lap" /><input id="r" type="radio" name="lap" />
+      `),
+    ).toEqual(['m', 'l']);
+  });
+
+  it('keeps apart two groups of one name in two forms', () => {
+    expect(
+      tabOrder(`
+        <form><input id="p" type="radio" name="units" checked /><input id="q" type="radio" name="units" /></form>
+        <form><input id="s" type="radio" name="units" /><input id="t" type="radio" name="units" /></form>
+      `),
+    ).toEqual(['p', 's']);
+  });
+
+  it('stops twice on an unchecked group another control splits, as Chromium does', () => {
+    expect(
+      tabOrder(`
+        <input id="a" type="radio" name="units" />
+        <button id="between" type="button">Between</button>
+        <input id="b" type="radio" name="units" />
+      `),
+    ).toEqual(['a', 'between', 'b']);
+  });
+
+  it('takes a disabled first radio out, and the next one is the stop', () => {
+    expect(
+      tabOrder(`
+        <input id="a" type="radio" name="units" disabled />
+        <input id="b" type="radio" name="units" />
+      `),
+    ).toEqual(['b']);
+  });
+
+  it('reaches the rest of a group by arrow key once its stop is tabbable', () => {
+    expect(reachable(GROUP('b'))).toEqual(['before', 'a', 'b', 'c', 'after']);
+  });
+
+  it('reaches no radio of a group whose checked radio is out of the tab order', () => {
+    expect(
+      reachable(`
+        <input id="a" type="radio" name="units" />
+        <input id="b" type="radio" name="units" checked tabindex="-1" />
+      `),
     ).toEqual([]);
   });
 });

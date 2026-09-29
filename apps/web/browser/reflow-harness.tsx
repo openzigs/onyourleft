@@ -231,14 +231,13 @@ declare global {
     __oylTabKey?: (element: Element) => string;
     /**
      * `a11y/audit.ts` §`tabbableElements` over the live page, inside `main`,
-     * as keys — and, separately, the radios in it that a browser does NOT
-     * stop on: every radio of a named group but the checked one (or the first,
-     * when none is checked). The model counts each radio; a browser makes a
-     * group one tab stop and moves within it by arrow key. #666 found that
-     * difference by comparing the two (filed as #698), and it is reported
-     * apart from the sequence so that the rest can be compared exactly.
+     * as keys — and how many radios the page holds inside `main`, so a spec
+     * comparing it with real Tab presses can say it compared a radio group.
+     * Until #698 the model counted every radio and the radios a browser does
+     * not stop on were reported apart; the model now makes a named group one
+     * stop, as Chromium does, and the whole sequence is compared.
      */
-    __oylTabModel?: () => { readonly stops: string[]; readonly radiosWithinAGroup: string[] };
+    __oylTabModel?: () => { readonly stops: string[]; readonly radios: number };
     __oylReflow?: {
       readonly ready: boolean;
       readonly errors: readonly string[];
@@ -973,32 +972,18 @@ function tabKey(element: Element): string {
 }
 
 window.__oylTabKey = tabKey;
-/** A radio a browser reaches by arrow key within its group rather than by Tab. */
-function withinARadioGroup(element: Element): boolean {
-  if (!(element instanceof HTMLInputElement) || element.type !== 'radio' || element.name === '') {
-    return false;
-  }
-  const group = [...document.querySelectorAll<HTMLInputElement>('input[type="radio"]')].filter(
-    (radio) => radio.name === element.name && radio.form === element.form,
-  );
-  const stop = group.find((radio) => radio.checked) ?? group[0];
-  return stop !== element;
-}
-
 window.__oylTabModel = () => {
   const main = document.querySelector('main');
   const model = tabbableElements(document).filter(
     (element) => main?.contains(element) === true && element !== main,
   );
   return {
-    stops: model.filter((element) => !withinARadioGroup(element)).map(tabKey),
-    radiosWithinAGroup: model.filter(withinARadioGroup).map(tabKey),
+    stops: model.map(tabKey),
+    radios: main?.querySelectorAll('input[type="radio"]').length ?? 0,
   };
 };
 
-try {
-  main();
-} catch (error: unknown) {
+main().catch((error: unknown) => {
   errors.push(error instanceof Error ? error.message : String(error));
   window.__oylReflow = {
     ready: false,

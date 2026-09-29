@@ -72,7 +72,13 @@ import { answerTwoPanes } from '../testing/panes';
 import { SELECTED_HEADING_ID } from '../shell/ListDetail';
 import { hrefForSelection } from '../shell/routes';
 
-import { accessibleName, auditAccessibility, formatViolations, tabbableElements } from './audit';
+import {
+  accessibleName,
+  auditAccessibility,
+  formatViolations,
+  keyboardReachableElements,
+  tabbableElements,
+} from './audit';
 
 // `join` rather than `new URL(…, import.meta.url)`, which Vite rewrites into an asset URL.
 const THEME = readFileSync(
@@ -513,7 +519,10 @@ describe('criterion 3 — everything interactive is reachable by keyboard', () =
       for (const details of queryAll(document, 'details')) {
         details.setAttribute('open', '');
       }
-      const tabbable = new Set(tabbableElements(document));
+      // #698: a radio that is not its group's tab stop is reached by an arrow
+      // key from the one that is, so it counts as reachable when that stop is
+      // in the tab order — which `keyboardReachableElements` answers.
+      const tabbable = new Set(keyboardReachableElements(document));
       const controls = queryAll(
         document,
         'a[href], button, input, select, textarea, [role="button"]',

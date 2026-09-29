@@ -253,9 +253,100 @@ function tabStops(root: Document | Element, disclosed: boolean): HTMLElement[] {
  *   `<summary>`, or one outside any `<details>`, is ordinary content per the
  *   HTML standard's list of focusable areas, and is excluded unless it carries
  *   a `tabindex` of its own — see {@link isDetailsSummary}.
+ * - **A named radio group is one stop (#698)** — the checked radio, or the
+ *   first when none is checked — see {@link oneStopPerRadioGroup}. The others
+ *   are reached by arrow key, which {@link keyboardReachableElements} answers.
  */
 export function tabbableElements(root: Document | Element): HTMLElement[] {
-  return tabStops(root, false);
+  return oneStopPerRadioGroup(tabStops(root, false));
+}
+
+/**
+ * Everything a keyboard can put focus on as the page is drawn: the tab stops,
+ * and the radios an arrow key reaches from their group's stop (#698).
+ *
+ * The question "is this control reachable by keyboard?" is wider than "is it a
+ * tab stop?" for exactly one kind of control. A radio that is not its group's
+ * stop is never reached by Tab, and is reached by an arrow key from the one
+ * that is — so it is reachable when, and only when, its group has a stop.
+ */
+export function keyboardReachableElements(root: Document | Element): HTMLElement[] {
+  const candidates = tabStops(root, false);
+  const stops = oneStopPerRadioGroup(candidates);
+  const radioStops = stops.filter(isGroupedRadio);
+  return candidates.filter(
+    (element) =>
+      stops.includes(element) ||
+      (isGroupedRadio(element) && radioStops.some((stop) => inSameRadioGroup(stop, element))),
+  );
+}
+
+/**
+ * A radio button in a radio group: HTML's "radio button group" needs a
+ * non-empty `name`, so a radio with none is a group of one and is its own stop.
+ */
+function isGroupedRadio(element: Element): element is HTMLInputElement {
+  return (
+    element.tagName === 'INPUT' &&
+    (element.getAttribute('type') ?? '').toLowerCase() === 'radio' &&
+    (element.getAttribute('name') ?? '') !== ''
+  );
+}
+
+/**
+ * What puts two radios in one group, per the HTML standard: the same `name`,
+ * the same form owner (or both none) and the same tree.
+ */
+function inSameRadioGroup(a: HTMLInputElement, b: HTMLInputElement): boolean {
+  return a.name === b.name && a.form === b.form && a.getRootNode() === b.getRootNode();
+}
+
+/**
+ * The group of a grouped radio: every radio in its tree it shares one with,
+ * whatever the `root` a caller asked about, because a checked radio outside
+ * that root still decides which of these is the stop.
+ */
+function radioGroupOf(radio: HTMLInputElement): HTMLInputElement[] {
+  const tree = radio.getRootNode() as ParentNode;
+  return [...tree.querySelectorAll<HTMLInputElement>('input')].filter(
+    (other) => isGroupedRadio(other) && inSameRadioGroup(other, radio),
+  );
+}
+
+/**
+ * A named radio group is ONE tab stop, as a browser makes it (#698) — the
+ * model used to list every radio, and Chromium stops once per group.
+ *
+ * This is Chromium's own rule (`RadioInputType::IsKeyboardFocusable`), which
+ * the HTML standard leaves to the platform: a radio is a stop when it is
+ * checked, or when nothing in its group is checked — and never when the stop
+ * before it in the sequence is a radio of the same group, because Tab always
+ * leaves the group. So with one radio checked, that radio is the stop and no
+ * other; with none checked, the first radio the sequence meets is (the last,
+ * going backwards, which a forward order does not model). A group whose radios
+ * are split by some other control is met twice, and stops twice, as it does in
+ * the browser.
+ */
+function oneStopPerRadioGroup(candidates: HTMLElement[]): HTMLElement[] {
+  const stops: HTMLElement[] = [];
+  for (const element of candidates) {
+    if (isGroupedRadio(element)) {
+      const group = radioGroupOf(element);
+      if (!element.checked && group.some((radio) => radio.checked)) {
+        continue;
+      }
+      const previous = stops.at(-1);
+      if (
+        previous !== undefined &&
+        isGroupedRadio(previous) &&
+        inSameRadioGroup(previous, element)
+      ) {
+        continue;
+      }
+    }
+    stops.push(element);
+  }
+  return stops;
 }
 
 function textOf(element: Element): string {
