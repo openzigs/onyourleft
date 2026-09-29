@@ -81,6 +81,23 @@ describe('each kind of detail is masked with its placeholder (#839)', () => {
   });
 });
 
+describe('a coordinate written with its labels (#854 review)', () => {
+  it.each([
+    'lat 51.2503 lon -0.3302',
+    'Lat: 51.25, Long: -0.33',
+    'latitude=51.2503; longitude=-0.3302',
+    'LAT 51.2 LNG -0.3',
+  ])('%s', (text) => {
+    expect(maskForHosted(`At ${text} today.`, PATTERNS_ONLY)).toBe('At [coordinates] today.');
+  });
+
+  it('leaves a lone number after a word that is not a label', () => {
+    expect(maskForHosted('Lap 51.25 then long 12.5 min', PATTERNS_ONLY)).toBe(
+      'Lap 51.25 then long 12.5 min',
+    );
+  });
+});
+
 describe('ordinary cycling text is not masked (#839)', () => {
   it.each([
     'Box Hill',
@@ -129,6 +146,21 @@ describe('the rider’s words and zone labels (#839)', () => {
     expect(maskForHosted('Old Town Road, and rider@example.com', guard)).toBe(
       '[masked], and [email]',
     );
+  });
+
+  it('masks the whole of a listed word or label that starts inside another detail (#854 review)', () => {
+    // An overlap used to drop the later match, so the part of it past the
+    // earlier one left in clear: '12 Acacia Avenue Hotel' became '[address] Hotel'.
+    expect(
+      maskForHosted('Stayed at 12 Acacia Avenue Hotel.', { words: ['Avenue Hotel'], zones: [] }),
+    ).toBe('Stayed at [address].');
+    expect(maskForHosted('Past 12 Rose Lane Farm today', { words: ['Lane Farm'], zones: [] })).toBe(
+      'Past [address] today',
+    );
+    const zone = PLANTED_GUARD.zones[0] as MaskingGuard['zones'][number];
+    expect(
+      maskForHosted('From 3 Mill Road End', { words: [], zones: [{ ...zone, label: 'Road End' }] }),
+    ).toBe('From [address]');
   });
 
   it('ignores a one-character entry or label', () => {
@@ -202,6 +234,14 @@ describe('masking stays linear on text built to make a pattern backtrack (#839)'
     ['spaced digits', '1 '.repeat(10_000)],
     ['capitalised words after a number', '12 Aa Bb '.repeat(2_000)],
     ['decimals', '1.1 '.repeat(5_000)],
+    // #854's review: shapes that took over a second at 100 000 characters.
+    ['one long hyphenated word', `a${'-a'.repeat(50_000)}`],
+    ['a digit, then a long run of spaces', `1${' '.repeat(50_000)}x`],
+    ['a decimal, then a long run of spaces', `1.5${' '.repeat(50_000)}x`],
+    ['a decimal and a hemisphere, then spaces', `1.5N${' '.repeat(50_000)}x`],
+    ['two decimals far apart', `1.5${' '.repeat(50_000)}2.5${' '.repeat(50_000)}x`],
+    ['a decimal and a comma, then spaces', `1.5,${' '.repeat(50_000)}x`],
+    ['a labelled latitude, then spaces', `lat 1.5${' '.repeat(50_000)}x`],
   ])('%s', (_what, text) => {
     const started = performance.now();
     maskForHosted(text, PLANTED_GUARD);

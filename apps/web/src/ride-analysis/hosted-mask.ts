@@ -36,7 +36,7 @@
  * | `[link]` | a URL with a scheme, anything starting `www.`, and a bare domain ending in a common top-level domain |
  * | `[address]` | a house number followed by one to four capitalised words and a street word (`12 Acacia Avenue`); a German street word and number (`Hauptstraße 5`); a French, Spanish or Italian street with its number |
  * | `[postcode]` | a UK postcode; a US ZIP+4, or a five-digit ZIP after a state's two letters; an EU code with a country prefix (`D-10115`), a Dutch code (`1012 AB`), a Portuguese one (`1000-001`), or a four- or five-digit code followed by a capitalised place name (`75001 Paris`) |
- * | `[coordinates]` | a coordinate written as text: a decimal latitude and longitude pair with at least three decimals, whatever the spacing; either with hemisphere letters and any decimals; and degrees with minutes (and seconds) written with their symbols |
+ * | `[coordinates]` | a coordinate written as text: a decimal latitude and longitude pair with at least three decimals, whatever the spacing; either with hemisphere letters and any decimals; a pair written with its labels (`lat 51.25 lon -0.33`, either order) and any decimals; and degrees with minutes (and seconds) written with their symbols |
  * | `[place]` | the label of any of the rider's privacy zones, whole-word; and a decimal pair of ANY precision that falls inside one of their zones |
  * | `[masked]` | every entry of the rider's own word list (`@onyourleft/store` §`masked-words.ts`), whole-word |
  *
@@ -70,6 +70,10 @@
  *   area, a bare five-digit ZIP with no state, an address or a number spelled
  *   out in words ("oh-seven-seven…", "name at example dot com"), and degrees
  *   and minutes written without their symbols are not found.
+ * - A pair of numbers with two or fewer decimals that happens to fall inside
+ *   one of the rider's zones is masked as `[place]` even when it was not a
+ *   position (`0.98, 0.95` for a zone at that spot): the over-masking
+ *   direction, and a changed number the model is not told about.
  * - A one-character word-list entry or zone label is not matched: it would
  *   mask every "a" in the prompt. The Settings screen refuses one.
  * - A zone label or listed word is masked wherever it appears as a whole
@@ -363,12 +367,34 @@ const COORDINATE_DEGREE_HEMISPHERE =
   /(?<![\p{L}\p{N}])(?:\d{1,3}(?:[.,]\d+)?\s*\u00b0\s*[NSEWnsew](?!\p{L})|[NSEW]\s*\d{1,3}(?:[.,]\d+)?\s*\u00b0)/gu;
 /** A decimal pair with hemisphere letters, any precision: `51.5N 0.12W`. */
 const COORDINATE_PAIR_HEMISPHERE = new RegExp(
-  `(?<![\\p{L}\\p{N}.])\\d{1,2}(?:\\.\\d+)?\\s*\\u00b0?\\s*${HEMISPHERE_LAT}\\s*[,;/]?\\s*\\d{1,3}(?:\\.\\d+)?\\s*\\u00b0?\\s*${HEMISPHERE_LON}(?!\\p{L})`,
+  `(?<![\\p{L}\\p{N}.])\\d{1,2}(?:\\.\\d+)?(?:\\s*\\u00b0)?\\s*${HEMISPHERE_LAT}(?:\\s*[,;/])?\\s*\\d{1,3}(?:\\.\\d+)?(?:\\s*\\u00b0)?\\s*${HEMISPHERE_LON}(?!\\p{L})`,
   'gu',
 );
-/** A decimal pair, whatever the spacing. Checked in range before it is masked. */
+/**
+ * A decimal pair, whatever the spacing. Checked in range before it is masked.
+ * ⚠️ No two runs of `\s` may sit side by side with only optional text between
+ * them — `\s*\u00b0?\s*` is cubic on a decimal followed by a long run of
+ * spaces (#854's review hung on 20 000 of them); each optional piece carries
+ * its own leading `\s*` instead.
+ */
 const DECIMAL_PAIR =
-  /(?<![\p{L}\p{N}.])([-+−]?\d{1,2}\.(\d+))\s*\u00b0?\s*(?:[,;/]\s*|\s+)([-+−]?\d{1,3}\.(\d+))\s*\u00b0?(?![\p{N}.])/gu;
+  /(?<![\p{L}\p{N}.])([-+−]?\d{1,2}\.(\d+))(?:\s*\u00b0)?(?:\s*[,;/]\s*|\s+)([-+−]?\d{1,3}\.(\d+))(?:\s*\u00b0)?(?![\p{N}.])/gu;
+
+/** A label and its number: `lat 51.25`, `Longitude: -0.33`, `lng=-0.3`. */
+function labelled(label: string, degrees: string): string {
+  return `(?:${label})(?:\\s*[:=])?\\s*[-+−]?\\d{${degrees}}(?:\\.\\d+)?(?:\\s*\\u00b0)?`;
+}
+const LATITUDE_LABEL = 'latitude|lat';
+const LONGITUDE_LABEL = 'longitude|long|lng|lon';
+/**
+ * A pair written with its labels, either order, ANY precision — the labels say
+ * it is a position (#854's review). Both labels are needed: `long 12.5 min`
+ * alone is a ride.
+ */
+const COORDINATE_LABELLED = new RegExp(
+  `${START}(?:${labelled(LATITUDE_LABEL, '1,2')}(?:\\s*[,;/])?\\s*${labelled(LONGITUDE_LABEL, '1,3')}|${labelled(LONGITUDE_LABEL, '1,3')}(?:\\s*[,;/])?\\s*${labelled(LATITUDE_LABEL, '1,2')})(?![\\p{N}.])`,
+  'giu',
+);
 
 /** A found detail: where it is in the reading, and what replaces it. */
 interface Found {
@@ -491,6 +517,7 @@ function detailsIn(reading: string, guard: MaskingGuard): Found[] {
   findAll(COORDINATE_DMS, reading, 'coordinates', found);
   findAll(COORDINATE_DEGREE_HEMISPHERE, reading, 'coordinates', found);
   findAll(COORDINATE_PAIR_HEMISPHERE, reading, 'coordinates', found);
+  findAll(COORDINATE_LABELLED, reading, 'coordinates', found);
   findDecimalPairs(reading, guard.zones, found);
   findPhones(PHONE_INTERNATIONAL, reading, found);
   findPhones(PHONE_UK, reading, found);
@@ -521,12 +548,18 @@ export function maskForHosted(text: string, guard: MaskingGuard): string {
     // The earliest first, and of two starting together the longer — so an
     // address is not cut short by the postcode inside it.
     .sort((a, b) => a.start - b.start || b.end - a.end);
-  // Overlaps dropped, then a latitude and a longitude written as two
-  // coordinates joined into one: `51°30′N 0°7′W` is one place.
+  // Overlaps MERGED into one span under the earlier detail's placeholder —
+  // never dropped, because a later match running past an earlier one (a
+  // listed "Avenue Hotel" starting inside `12 Acacia Avenue`) would leave its
+  // tail in clear (#854's review). Then a latitude and a longitude written as
+  // two coordinates joined into one: `51°30′N 0°7′W` is one place.
   const kept: Found[] = [];
   for (const detail of found) {
     const last = kept.at(-1);
     if (last !== undefined && detail.start < last.end) {
+      if (detail.end > last.end) {
+        kept[kept.length - 1] = { ...last, end: detail.end };
+      }
       continue;
     }
     if (
