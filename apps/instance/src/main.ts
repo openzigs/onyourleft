@@ -29,6 +29,7 @@ const result = readConfig({
   port: process.env.OYL_INSTANCE_PORT,
   commit: process.env.OYL_INSTANCE_COMMIT,
   sourceUrl: process.env.OYL_INSTANCE_SOURCE_URL,
+  name: process.env.OYL_INSTANCE_NAME,
 });
 
 if (!result.ok) {

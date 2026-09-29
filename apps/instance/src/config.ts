@@ -37,12 +37,16 @@ export const DEFAULT_PORT = 8787;
 /** The largest request body the instance reads, in bytes, before answering `payload_too_large`. */
 export const DEFAULT_BODY_LIMIT_BYTES = 1024 * 1024;
 
+/** The longest name an operator may give their instance, in characters. */
+export const MAXIMUM_INSTANCE_NAME_LENGTH = 64;
+
 /** The raw values, as the environment gives them. */
 export interface RawConfig {
   readonly host?: string | undefined;
   readonly port?: string | undefined;
   readonly commit?: string | undefined;
   readonly sourceUrl?: string | undefined;
+  readonly name?: string | undefined;
 }
 
 /** A configuration the instance can start with. */
@@ -54,6 +58,13 @@ export interface Config {
   /** The URL `GET /source` answers with. */
   readonly sourceUrl: string;
   readonly bodyLimitBytes: number;
+  /**
+   * What the operator calls this instance, which a rider's app shows once it
+   * is connected (#777) — or `null`, and the app then names the instance by
+   * its address. Never invented here: a default name would be a name no
+   * operator chose.
+   */
+  readonly name: string | null;
 }
 
 export type ConfigResult =
@@ -61,6 +72,9 @@ export type ConfigResult =
   | { readonly ok: false; readonly problems: readonly string[] };
 
 const COMMIT = /^[0-9a-f]{40}$/;
+
+/** A character a rider's screen should never be handed in a name. */
+const UNSHOWABLE = /[\p{Cc}\p{Cf}\u2028\u2029]/u;
 
 const present = (value: string | undefined): value is string =>
   value !== undefined && value.trim() !== '';
@@ -114,11 +128,26 @@ export function readConfig(raw: RawConfig): ConfigResult {
     );
   }
 
+  let name: string | null = null;
+  if (present(raw.name)) {
+    const value = raw.name.trim();
+    // Shown to riders, so no control, bidirectional or invisible character —
+    // the rule a display name has (`@onyourleft/domain` §`checkDisplayName`),
+    // applied to the one other name the app renders from an instance.
+    if ([...value].length > MAXIMUM_INSTANCE_NAME_LENGTH || UNSHOWABLE.test(value)) {
+      problems.push(
+        `OYL_INSTANCE_NAME must be at most ${String(MAXIMUM_INSTANCE_NAME_LENGTH)} characters, with no control, bidirectional or invisible character.`,
+      );
+    } else {
+      name = value;
+    }
+  }
+
   if (problems.length > 0 || sourceUrl === undefined) {
     return { ok: false, problems };
   }
   return {
     ok: true,
-    config: { host, port, commit, sourceUrl, bodyLimitBytes: DEFAULT_BODY_LIMIT_BYTES },
+    config: { host, port, commit, sourceUrl, bodyLimitBytes: DEFAULT_BODY_LIMIT_BYTES, name },
   };
 }

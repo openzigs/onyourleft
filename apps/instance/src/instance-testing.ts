@@ -22,6 +22,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     commit: TEST_COMMIT,
     sourceUrl: `https://github.com/openzigs/onyourleft/tree/${TEST_COMMIT}`,
     bodyLimitBytes: 1024,
+    name: null,
     ...overrides,
   };
 }
