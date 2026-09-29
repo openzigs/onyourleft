@@ -24,6 +24,7 @@ import {
   type SigningKey,
 } from '@onyourleft/domain';
 
+import type { Config } from '../config.ts';
 import { startTestInstance, type TestInstance } from '../instance-testing.ts';
 import { openSqlStore } from '../store/open-sql-store.ts';
 import type { SqlStore } from '../store/sql-store.ts';
@@ -126,6 +127,14 @@ export async function startIdentityInstance(
      * one process do not reliably produce.
      */
     storeSeenBy?: (store: SqlStore) => SqlStore;
+    /** The listener's configuration, over the test defaults — an instance name, say (#777). */
+    config?: Partial<Config>;
+    /**
+     * The instance's origin is the listener's own `http://127.0.0.1:<port>`
+     * rather than {@link TEST_ORIGIN}, so a real browser that reached it by
+     * that address can sign for it (#777's browser gate).
+     */
+    originIsTheListener?: boolean;
   } = {},
 ): Promise<IdentityInstance> {
   const directory = await mkdtemp(join(tmpdir(), 'oyl-instance-identity-'));
@@ -133,24 +142,49 @@ export async function startIdentityInstance(
   const store = await openSqlStore(path);
   const clock: TestClock = { ms: 1_790_000_000_000 };
   const mail: { address: string; token: string }[] = [];
-  const { emailRecovery, storeSeenBy, ...rest } = options;
-  const identity = createIdentity({
-    ...rest,
-    store: storeSeenBy === undefined ? store : storeSeenBy(store),
-    origin: TEST_ORIGIN,
-    now: () => clock.ms,
-    ...(emailRecovery === true
-      ? {
-          emailRecovery: {
-            send: (address, token) => {
-              mail.push({ address, token });
-              return Promise.resolve();
+  const { emailRecovery, storeSeenBy, config, originIsTheListener, ...rest } = options;
+  const identityFor = (origin: string): Identity =>
+    createIdentity({
+      ...rest,
+      store: storeSeenBy === undefined ? store : storeSeenBy(store),
+      origin,
+      now: () => clock.ms,
+      ...(emailRecovery === true
+        ? {
+            emailRecovery: {
+              send: (address, token) => {
+                mail.push({ address, token });
+                return Promise.resolve();
+              },
             },
-          },
-        }
-      : {}),
-  });
-  const instance = await startTestInstance({ identity, config: { bodyLimitBytes: 16_384 } });
+          }
+        : {}),
+    });
+  const listenerConfig = { bodyLimitBytes: 16_384, ...config };
+  let identity: Identity;
+  let instance: TestInstance;
+  if (originIsTheListener === true) {
+    // The browser gate's case (#777): a real page signs for the address it
+    // really reached, which is known only once the listener has a port. So the
+    // handler is given a stand-in that forwards to the identity made then.
+    const made: { identity?: Identity } = {};
+    const forwarding = new Proxy({} as Identity, {
+      get: (_target, key) => {
+        const real = made.identity;
+        if (real === undefined) throw new Error('the identity was used before it was made');
+        const value = Reflect.get(real, key) as unknown;
+        return typeof value === 'function'
+          ? (value as (...args: unknown[]) => unknown).bind(real)
+          : value;
+      },
+    });
+    instance = await startTestInstance({ identity: forwarding, config: listenerConfig });
+    made.identity = identityFor(instance.url);
+    identity = made.identity;
+  } else {
+    identity = identityFor(TEST_ORIGIN);
+    instance = await startTestInstance({ identity, config: listenerConfig });
+  }
 
   const call: IdentityInstance['call'] = async (method, route, callOptions = {}) => {
     const headers: Record<string, string> = { ...callOptions.headers };

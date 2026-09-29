@@ -51,6 +51,7 @@ export type RouteId =
   | 'settings'
   | 'about'
   | 'credits'
+  | 'instance'
   | 'not-found';
 
 /**
@@ -409,6 +410,28 @@ export const CREDITS_ROUTE: RouteDefinition = {
 };
 
 /**
+ * Connecting this app to an instance (#777, #778, #773's device list).
+ *
+ * **Not in {@link ROUTES}**, for {@link CREDITS_ROUTE}'s reason: it is reached
+ * from Settings, whose own summary says nothing there is sent anywhere — so the
+ * one screen that sends something is its own page, with its own summary, and
+ * the list of what an instance receives above its Connect button (#778). In
+ * {@link ALL_ROUTES}, so the accessibility gate and the reflow walk audit it
+ * unasked. ⚠️ Its wording is DRAFT awaiting the owner's approval (#880).
+ */
+export const INSTANCE_ROUTE: RouteDefinition = {
+  id: 'instance',
+  group: 'more',
+  layout: 'prose',
+  path: '/settings/instance',
+  navLabel: 'Instance',
+  title: 'Connect to an instance',
+  summary:
+    'Sign in to an On Your Left instance with this device, to ride with other people. Your rides ' +
+    'stay on this device.',
+};
+
+/**
  * The tripod phone's side-camera screen (#528, ADR 0033).
  *
  * **Not in {@link ROUTES}**, for {@link CREDITS_ROUTE}'s reason: it is a mode
@@ -508,6 +531,7 @@ export const NOT_FOUND_ROUTE: RouteDefinition = {
 export const ALL_ROUTES: readonly RouteDefinition[] = [
   ...ROUTES,
   CREDITS_ROUTE,
+  INSTANCE_ROUTE,
   SIDE_CAMERA_ROUTE,
   ROUTE_BUILDER_ROUTE,
   ACTIVITY_DETAIL_ROUTE,

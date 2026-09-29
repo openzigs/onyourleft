@@ -288,6 +288,7 @@ function transferPort(populated: boolean): TransferPort {
     digest: webCryptoDigest,
     save: () => undefined,
     drafts: { forget: () => undefined },
+    instance: { forget: () => undefined },
     theme: { forget: () => undefined },
     hostedModel: { forget: () => undefined },
     athleteRow: localAthleteRecord(now),

@@ -62,6 +62,8 @@ import { WorkoutsView } from '../views/WorkoutsView';
 import { SegmentsView } from '../views/SegmentsView';
 import { RideSession } from '../ride/RideSession';
 import { SettingsView } from '../views/SettingsView';
+import { InstanceView } from '../views/InstanceView';
+import type { InstancePort } from '../instance/instance-port';
 import { UnitsProvider } from '../units/context';
 import type { UnitsPort } from '../units/store-port';
 import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
@@ -369,6 +371,12 @@ export interface AppShellProps {
    */
   readonly maskedWords?: MaskedWordsPort | undefined;
   /**
+   * The Connect screen's port (#777) — `instance/instance-port.ts`
+   * §`createInstancePort`, built in `main.tsx` and nowhere else. Without one
+   * the screen says this platform cannot connect.
+   */
+  readonly instance?: InstancePort | undefined;
+  /**
    * The rider's kit colour, read from the athlete row at start-up (#623).
    *
    * ⚠️ **The initial value only**, exactly like {@link riderMass}, and passed
@@ -561,6 +569,8 @@ function viewFor(
       );
     case 'about':
       return <AboutView />;
+    case 'instance':
+      return <InstanceView port={props.instance} />;
     case 'credits':
       // No props: the manifest is built into the bundle, so this is the one
       // view in the shell that needs nothing passed down. `CreditsView.tsx`

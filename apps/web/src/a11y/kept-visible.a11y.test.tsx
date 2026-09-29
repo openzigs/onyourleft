@@ -62,6 +62,7 @@ import { COMPUTER_SENDS, COMPUTER_SENDS_LEAD } from '../detail/write-up';
 import { WRITE_UP_EXPLANATION } from '../ride-analysis/RideWriteUpControl';
 import { RideView } from '../views/RideView';
 import { SETTINGS_KEPT_VISIBLE } from '../views/SettingsView';
+import { INSTANCE_CONNECTED_KEPT_VISIBLE, INSTANCE_KEPT_VISIBLE } from '../views/InstanceView';
 import { SIDE_CAMERA_KEPT_VISIBLE } from '../views/SideCameraView';
 
 interface Kept {
@@ -161,6 +162,9 @@ const KEPT: Record<RouteId, Kept> = {
   routes: { sentences: [], reason: NOTHING_TUCKED },
   about: { sentences: [], reason: `${NOTHING_TUCKED}: it is the page of prose` },
   credits: { sentences: [], reason: `${NOTHING_TUCKED}: it is the page of prose` },
+  // #778: what an instance receives, before sign-in and after; and, once
+  // connected (the populated walk), what disconnecting does and does not do.
+  instance: { sentences: INSTANCE_KEPT_VISIBLE, populated: INSTANCE_CONNECTED_KEPT_VISIBLE },
   'route-builder': { sentences: [], reason: NOTHING_TUCKED },
   'activity-detail': {
     sentences: [],
