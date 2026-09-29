@@ -32,8 +32,14 @@ import type { ActivityId } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
 import { KeptVisible } from '../design/MoreAbout';
+import { HOSTED_MASKING_NOTICE } from '../camera/hosted-model';
 import { COMPUTER_SENDS, COMPUTER_SENDS_LEAD, HOSTED_SENDS } from '../detail/write-up';
-import type { AskOutcome, RideAnalysisPort, RideWriteUpSource } from './ride-analysis-port';
+import type {
+  AskOutcome,
+  HostedPreview,
+  RideAnalysisPort,
+  RideWriteUpSource,
+} from './ride-analysis-port';
 
 /** The section's heading. */
 export const WRITE_UP_HEADING = 'A write-up by your model';
@@ -56,6 +62,34 @@ export const ASK_LABEL: Readonly<Record<RideWriteUpSource, { first: string; othe
 
 export const CANCEL_LABEL = 'Cancel the write-up';
 
+/** The control that shows what a hosted run would send (#839). Sends nothing. */
+export const PREVIEW_LABEL = 'See what will be sent';
+
+/** The preview's heading. */
+export const PREVIEW_HEADING = 'What your hosted model will be sent';
+
+/** Above the preview: what it is, and that nothing left to show it. */
+export const PREVIEW_INTRO =
+  'This is exactly what is sent, after masking. Nothing has been sent to show it you.';
+
+/** Below the preview: the steps it cannot show, and what masking is not. */
+export const PREVIEW_LATER =
+  'The last step also sends the notes your model writes in reply to these steps, masked the same way. Masking takes out what it can find; it cannot promise to catch everything.';
+
+/** Shown before the first hosted run since the app was opened: the preview, and this to go on. */
+export const PREVIEW_SEND_LABEL = 'Send this to your hosted model';
+
+/** While the preview is being made. */
+export const PREVIEW_READING = 'Reading this ride…';
+
+/** Closes the preview. */
+export const PREVIEW_CLOSE_LABEL = 'Close the preview';
+
+/** What one step's two messages are called in the preview. */
+export function previewStepLabel(step: number, total: number, part: 'system' | 'user'): string {
+  return `Step ${String(step)} of ${String(total)}: ${part === 'system' ? 'instructions' : 'this ride'}`;
+}
+
 /** What the live region says once a write-up is saved. */
 export const WRITE_UP_SAVED = 'The write-up is saved with this ride.';
 
@@ -66,6 +100,11 @@ export const WRITE_UP_STARTING = 'Asking for a write-up…';
 export function progressText(step: number, total: number): string {
   return `Step ${String(step)} of ${String(total)}.`;
 }
+
+/** The preview, while it is open. `confirming` is the one shown before a first hosted run. */
+type Preview =
+  | { readonly kind: 'loading'; readonly confirming: boolean }
+  | { readonly kind: 'open'; readonly preview: HostedPreview; readonly confirming: boolean };
 
 type State =
   | { readonly kind: 'idle' }
@@ -95,7 +134,15 @@ export function RideWriteUpControl({
   onEnded,
 }: RideWriteUpControlProps): JSX.Element {
   const [state, setState] = useState<State>({ kind: 'idle' });
+  const [preview, setPreview] = useState<Preview | undefined>(undefined);
   const running = useRef<AbortController | undefined>(undefined);
+  const mountedRef = useRef(true);
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+    },
+    [],
+  );
 
   // Leaving the page cancels whatever is running.
   useEffect(
@@ -106,6 +153,16 @@ export function RideWriteUpControl({
     [],
   );
 
+  /** Open the preview (#839). Reads the ride and masks it; sends nothing. */
+  const showPreview = (confirming: boolean): void => {
+    setPreview({ kind: 'loading', confirming });
+    void port.previewHostedRequest(activityId).then((shown) => {
+      if (mountedRef.current) {
+        setPreview({ kind: 'open', preview: shown, confirming });
+      }
+    });
+  };
+
   const ask = (source: RideWriteUpSource): void => {
     // ⚠️ The controls stay in the tab order while a run goes (#805), marked
     // `aria-disabled` — which is a promise to a screen reader and nothing
@@ -113,6 +170,13 @@ export function RideWriteUpControl({
     if (running.current !== undefined) {
       return;
     }
+    // #839: before the first hosted run since the app was opened, the rider
+    // sees exactly what will be sent, and sends it from there.
+    if (source === 'hosted' && !port.hostedPreviewSeen()) {
+      showPreview(true);
+      return;
+    }
+    setPreview(undefined);
     const controller = new AbortController();
     running.current = controller;
     setState({ kind: 'running', said: WRITE_UP_STARTING });
@@ -164,12 +228,34 @@ export function RideWriteUpControl({
             {index === 0 ? ASK_LABEL[source].first : ASK_LABEL[source].other}
           </Button>
         ))}
+        {sources.includes('hosted') && preview === undefined ? (
+          <Button
+            variant="secondary"
+            onClick={() => {
+              showPreview(false);
+            }}
+          >
+            {PREVIEW_LABEL}
+          </Button>
+        ) : undefined}
         {busy ? (
           <Button variant="secondary" onClick={cancel}>
             {CANCEL_LABEL}
           </Button>
         ) : undefined}
       </div>
+      {preview === undefined ? undefined : (
+        <HostedPreviewPanel
+          preview={preview}
+          busy={busy}
+          onSend={() => {
+            ask('hosted');
+          }}
+          onClose={() => {
+            setPreview(undefined);
+          }}
+        />
+      )}
       {/*
         #805: what will be sent, beside the press, in the approved words
         (ADR 0035 D-9). Kept visible: it is what leaves the device, and when.
@@ -198,6 +284,8 @@ export function RideWriteUpControl({
                 </p>
               ))
             : undefined}
+          {/* #839: after the approved words, what masking does and does not. */}
+          {sources.includes('hosted') ? <p>{HOSTED_MASKING_NOTICE}</p> : undefined}
         </div>
       </KeptVisible>
       {/* Rendered from the start, so a screen reader is listening before it changes. */}
@@ -205,5 +293,70 @@ export function RideWriteUpControl({
         {said}
       </p>
     </>
+  );
+}
+
+/** The id of the preview's heading. */
+const PREVIEW_HEADING_ID = 'oyl-write-up-preview-heading';
+
+/**
+ * The preview (#839): every step a hosted run sends before any reply, as the
+ * service will receive it — masked by `hosted-mask.ts` §`maskForHosted`, the
+ * function the request is built with. Each message is one text node in the
+ * write-up's own `pre-wrap` block, so what is shown is character for
+ * character what is sent.
+ */
+function HostedPreviewPanel({
+  preview,
+  busy,
+  onSend,
+  onClose,
+}: {
+  readonly preview: Preview;
+  readonly busy: boolean;
+  readonly onSend: () => void;
+  readonly onClose: () => void;
+}): JSX.Element {
+  const shown = preview.kind === 'open' ? preview.preview : undefined;
+  return (
+    <section className="oyl-write-up__preview" aria-labelledby={PREVIEW_HEADING_ID}>
+      <h4 id={PREVIEW_HEADING_ID}>{PREVIEW_HEADING}</h4>
+      {shown === undefined ? (
+        <p role="status">{PREVIEW_READING}</p>
+      ) : shown.kind === 'failed' ? (
+        <p role="status">{shown.text}</p>
+      ) : (
+        <>
+          <p>{PREVIEW_INTRO}</p>
+          <div className="oyl-write-up__controls">
+            {preview.confirming ? (
+              <Button variant="secondary" unavailable={busy} onClick={onSend}>
+                {PREVIEW_SEND_LABEL}
+              </Button>
+            ) : undefined}
+            <Button variant="secondary" onClick={onClose}>
+              {PREVIEW_CLOSE_LABEL}
+            </Button>
+          </div>
+          {shown.steps.map((step) => (
+            <div key={step.step}>
+              <p>
+                <strong>{previewStepLabel(step.step, shown.total, 'system')}</strong>
+              </p>
+              <p className="oyl-write-up__text" data-oyl-sent="system">
+                {step.system}
+              </p>
+              <p>
+                <strong>{previewStepLabel(step.step, shown.total, 'user')}</strong>
+              </p>
+              <p className="oyl-write-up__text" data-oyl-sent="user">
+                {step.user}
+              </p>
+            </div>
+          ))}
+          <p>{PREVIEW_LATER}</p>
+        </>
+      )}
+    </section>
   );
 }

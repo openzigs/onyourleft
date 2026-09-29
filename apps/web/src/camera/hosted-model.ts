@@ -99,6 +99,27 @@ export const HOSTED_CONSENT: {
     'and you can turn it off at any time.',
 };
 
+/**
+ * What masking does and does not do, said beside the hosted consent — #839,
+ * drafted for the owner to approve in ADR 0029's amendment of 2026-09-29
+ * (#839), which quotes it after {@link HOSTED_CONSENT} unchanged.
+ *
+ * ⚠️ **A paragraph of its own, not a sixth member of `HOSTED_CONSENT`.**
+ * That wording is the owner-approved ADR 0035 D-9 C, pinned word for word by
+ * `detail/write-up.test.ts`; this is new and awaits the owner's approval, so
+ * it is kept apart and stated after it, on the Camera page, beside the hosted
+ * ask on a ride's page, and in the preview. `hosted-model.test.ts` compares
+ * it with the newest amendment of ADR 0029. It names what is masked, says a
+ * name is masked only when it is on the rider's list, and says masking
+ * reduces what is sent and does not guarantee anything —
+ * `ride-analysis/hosted-mask.ts` §"What is NOT masked, and the limits" is why.
+ */
+export const HOSTED_MASKING_NOTICE =
+  'Before anything is sent to it, e-mail addresses, phone numbers, links, street addresses, ' +
+  'postcodes, coordinates, the names of your privacy zones and everything on your list of words ' +
+  'to mask are replaced with a placeholder. A name is masked only if it is on that list. Masking ' +
+  'reduces what is sent; it does not guarantee that nothing personal gets through.';
+
 /** Where the rider's answer is kept: this device's `localStorage`, and nothing else. */
 export type HostedModelStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 

@@ -29,6 +29,13 @@
  *   account, and the prompt spells the form out while the runner validates
  *   the reply either way.
  *
+ * ⚠️ **Every message is masked first** (#839): `ride-analysis/hosted-mask.ts`
+ * §`maskForHosted`, with the rider's word list and privacy zones read for that
+ * request through {@link HostedTransportOptions.guard}. A guard that cannot be
+ * read is a request not sent (`not-masked`), and
+ * `ride-analysis/hosted-mask-reachable.test.ts` reads this file and fails if a
+ * body is built any other way.
+ *
  * `hosted-transport.test.ts` pins both key sets and walks both bodies: their
  * only strings are those, and nothing in either is an image part or a `data:`
  * URL; `no-picture-reachable.test.ts` holds every body a real run sends to
@@ -70,6 +77,7 @@ import {
   type HostedRequest,
 } from './hosted-port';
 import { boundedText } from './http-body';
+import { maskForHosted, type MaskingGuard } from '../ride-analysis/hosted-mask';
 import { isTextOnlyStep } from '../ride-analysis/own-computer-step';
 import { isSealedStep } from '../ride-analysis/sealed-step';
 
@@ -81,6 +89,14 @@ export type HostedSend = (url: string, init: RequestInit) => Promise<Response>;
 
 /** @see hostedModelPort */
 export interface HostedTransportOptions {
+  /**
+   * The rider's masking guard — their word list and privacy zones — read
+   * afresh for every request (#839). ⚠️ **Required**: there is no hosted
+   * port without one, so no hosted request can be built unmasked. A guard
+   * that rejects is a request not sent (`not-masked`).
+   * `ride-analysis/hosted-mask.ts` §`readMaskingGuard` in production.
+   */
+  readonly guard: () => Promise<MaskingGuard>;
   /** Injected so a test needs no network. Defaults to the platform's `fetch`. */
   readonly send?: HostedSend | undefined;
 }
@@ -123,10 +139,17 @@ export function isBuiltRequest(request: HostedRequest): boolean {
  * Built from the question's NAME, or from the step's named fields, never from
  * the request object, so a member that was smuggled onto a request has no
  * path into the body even before {@link isBuiltRequest} refuses it.
+ *
+ * ⚠️ **Every message's text goes through `hosted-mask.ts` §`maskForHosted`**
+ * (#839), with the rider's guard, and this is the one place a hosted body is
+ * built — `hosted-mask-reachable.test.ts` reads this file and fails if the
+ * `fetch` below is handed a body built any other way. The model name is the
+ * rider's own setting and is sent as typed.
  */
 export function hostedRequestBody(
   model: string,
   request: HostedRequest,
+  guard: MaskingGuard,
 ): Readonly<Record<string, unknown>> {
   if ('step' in request) {
     const { step } = request;
@@ -136,8 +159,8 @@ export function hostedRequestBody(
       max_tokens: step.maximumTokens,
       temperature: step.temperature,
       messages: [
-        { role: 'system', content: step.system },
-        { role: 'user', content: step.user },
+        { role: 'system', content: maskForHosted(step.system, guard) },
+        { role: 'user', content: maskForHosted(step.user, guard) },
       ],
     };
   }
@@ -145,7 +168,7 @@ export function hostedRequestBody(
     model,
     stream: false,
     max_tokens: MAXIMUM_HOSTED_ANSWER_TOKENS,
-    messages: [{ role: 'user', content: HOSTED_PROMPTS[request.question] }],
+    messages: [{ role: 'user', content: maskForHosted(HOSTED_PROMPTS[request.question], guard) }],
   };
 }
 
@@ -215,7 +238,7 @@ function hostedOutcomeOf(status: number, body: string): HostedOutcome {
  */
 export function hostedModelPort(
   saved: HostedModel | undefined,
-  options: HostedTransportOptions = {},
+  options: HostedTransportOptions,
 ): HostedPort | undefined {
   if (saved === undefined) {
     return undefined;
@@ -243,6 +266,18 @@ export function hostedModelPort(
       });
 
       const work = async (): Promise<HostedOutcome> => {
+        // #839: the rider's guard, read for this request. Nothing is sent
+        // without it — a body masked with the patterns alone would look
+        // masked and still carry the rider's listed words.
+        let guard: MaskingGuard;
+        try {
+          guard = await options.guard();
+        } catch {
+          return failed('not-masked');
+        }
+        if (cancelled) {
+          return failed('cancelled');
+        }
         let status: number;
         let body: string | undefined;
         try {
@@ -254,7 +289,7 @@ export function hostedModelPort(
               'Content-Type': 'application/json',
               Authorization: `Bearer ${model.key}`,
             },
-            body: JSON.stringify(hostedRequestBody(model.model, request)),
+            body: JSON.stringify(hostedRequestBody(model.model, request, guard)),
             cache: 'no-store',
             credentials: 'omit',
             redirect: 'error',

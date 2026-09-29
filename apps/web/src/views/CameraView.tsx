@@ -93,6 +93,7 @@ import { HOSTED_FAILURE_TEXT } from '../camera/hosted-port';
 import {
   forgetHostedModel,
   HOSTED_CONSENT,
+  HOSTED_MASKING_NOTICE,
   HOSTED_MODEL_REFUSAL_TEXT,
   hostedModelDecisionKeepingKey,
   readHostedModel,
@@ -212,6 +213,7 @@ export const CAMERA_AGREED_KEPT_VISIBLE: readonly string[] = [
   ...HOSTED_CONSENT.paragraphs,
   HOSTED_CONSENT.notNeeded,
   HOSTED_CONSENT.offUntilOn,
+  HOSTED_MASKING_NOTICE,
 ];
 
 export const CAMERA_KEPT_VISIBLE: readonly string[] = [
@@ -1040,6 +1042,8 @@ function HostedSection({ controller }: { readonly controller: CameraController }
           {paragraph}
         </p>
       ))}
+      {/* #839: what masking does, and that it does not guarantee anything. */}
+      <p data-oyl-kept-visible="">{HOSTED_MASKING_NOTICE}</p>
       <p data-oyl-kept-visible="">
         <strong>{HOSTED_CONSENT.notNeeded}</strong>
       </p>

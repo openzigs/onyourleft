@@ -879,3 +879,65 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   | [`docs/privacy-policy.md`](../privacy-policy.md) | §"Questions sent to a service you chose, on your own key" says what a ride analysis sends, in the words above; the sentence promising to say so first is gone |
   | `apps/mobile/src/android/data-safety.ts` | **Health and fitness — health info** and **fitness info** are `collected: true, shared: true`. **Photos and videos stays `shared: false`**, and no location row moves: nothing sent carries a coordinate |
   | `apps/web/src/transfer/erase-device.ts` | The hosted line of `ERASE_CANNOT_REACH` names a ride's numbers as well as a question |
+- **2026-09-29** — **Everything the hosted path sends is masked first, and the consent says what
+  masking does and does not do — drafted by [#839](https://github.com/openzigs/onyourleft/issues/839)
+  for the owner to approve.** The owner's ruling on #839: add masking guardrails to everything the
+  AI analysis sends to the hosted model, with a preview and a rider-kept word list; the rider's own
+  computer, and their own instance, keep the full text. **Nothing in the entries above is edited**,
+  and the consent wording of the entry above — ADR 0035 D-9 C, which the owner approved — stands
+  unchanged; this entry adds one paragraph after it, and that paragraph is the part awaiting the
+  owner's approval.
+
+  **What is masked.** `apps/web/src/ride-analysis/hosted-mask.ts` §`maskForHosted` replaces, in
+  every message of every hosted request body, e-mail addresses (`[email]`), phone numbers
+  (`[phone]`), links (`[link]`), street addresses (`[address]`), postcodes (`[postcode]`),
+  coordinates written as text (`[coordinates]`), the labels of the rider's privacy zones and any
+  coordinate pair inside one (`[place]`), and every entry of the rider's own list of words to mask
+  (`[masked]`) — after invisible characters are removed and compatibility forms folded, the #798
+  lesson. The patterns, and what they deliberately do not find, are that file's header. Ride
+  numbers are not masked; they carry no coordinate, date or identifier already (#809).
+
+  **What it does not do.** Nothing can tell a person's or a place's name from any other word, so a
+  name is masked only when it is on the rider's list or is a privacy zone's label. Masking therefore
+  **reduces** what a hosted service is sent and **does not guarantee** that nothing personal gets
+  through, and the consent must say so.
+
+  **The consent screen's words for the hosted path: ADR 0035 D-9 C as the entry above quotes it,
+  unchanged, and then — drafted, for the owner's approval — one paragraph:**
+
+  > **This sends your ride to a service you have chosen, using your own key.**
+  >
+  > If you turn this on, each time you ask for a ride analysis, that ride's numbers are sent to the
+  > address you entered, using the key you entered: your heart rate, cadence and power, your weight
+  > and watts per kilogram, your threshold power, if you set one, how long the ride lasted, and how
+  > it went section by section. If the side camera filmed the ride, it is also sent how a few
+  > measurements of your riding position changed between the start and the end of filming. That is a
+  > company or a computer that is not yours and not ours, and we cannot see what they do with it or
+  > how long they keep it. We cannot delete it for you afterwards. Like any service you connect to,
+  > it also sees your internet address.
+  >
+  > It is never sent a picture — not a photograph of you, and nothing made from one. It is not sent
+  > your name, where you rode, or when.
+  >
+  > Your key is kept on this device, is sent only to the address you entered, and is never put in a
+  > file this app exports.
+  >
+  > **You do not need this.** Everything else in the app works without it, and a computer of your own
+  > can do the same analysis.
+  >
+  > This is off. It stays off until you turn it on, it is off again whenever the app is opened, and
+  > you can turn it off at any time.
+  >
+  > Before anything is sent to it, e-mail addresses, phone numbers, links, street addresses,
+  > postcodes, coordinates, the names of your privacy zones and everything on your list of words to
+  > mask are replaced with a placeholder. A name is masked only if it is on that list. Masking
+  > reduces what is sent; it does not guarantee that nothing personal gets through.
+
+  | Artefact | What changed in the same pull request |
+  |---|---|
+  | `apps/web/src/ride-analysis/hosted-mask.ts` | The one masking function, and the rider's guard read from the store for every request |
+  | `apps/web/src/camera/hosted-transport.ts` | Every message of every hosted body goes through `maskForHosted`; a port cannot be built without a guard, and a guard that cannot be read is a request not sent (`not-masked`) |
+  | `apps/web/src/camera/hosted-model.ts` | `HOSTED_MASKING_NOTICE` is the paragraph above, beside `HOSTED_CONSENT` on the Camera page and the ride's page; `hosted-model.test.ts` compares it with the NEWEST entry of this section |
+  | `apps/web/src/ride-analysis/RideWriteUpControl.tsx` | *See what will be sent* shows the masked text a hosted run sends, and is shown before the first hosted run since the app was opened; nothing is sent from it |
+  | `apps/web/src/athlete/MaskedWordsPanel.tsx`, `packages/store` | The rider's list of words to mask, on Settings, stored on the athlete row (`AthleteRecord.maskedWords`), erased with it, and not in the account export |
+  | [`docs/privacy-policy.md`](../privacy-policy.md) | §"Questions sent to a service you chose, on your own key" says what is masked, and that masking is not a guarantee |

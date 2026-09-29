@@ -51,6 +51,7 @@ import {
   SINGLE_PICTURE_PURPOSE_ALONE,
   SINGLE_PICTURE_TITLE,
 } from './CameraView';
+import { patternsOnlyGuard } from '../ride-analysis/personal-details-testing';
 
 let mounted: Mounted | undefined;
 
@@ -1053,7 +1054,7 @@ describe('a hosted model, on your own key — #518', () => {
     const controller = new CameraController({
       port: camera.port,
       schedule: manualSchedule().schedule,
-      hosted: () => hostedModelPort(readHostedModel(), { send }),
+      hosted: () => hostedModelPort(readHostedModel(), { guard: patternsOnlyGuard, send }),
     });
     controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
     mounted = await mount(<CameraView controller={controller} />);
