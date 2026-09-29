@@ -26,6 +26,7 @@
 
 import type { RideWriteUpRecord, RideWriteUpSourceRecord } from '@onyourleft/store';
 
+import { HOSTED_CONSENT } from '../camera/hosted-model';
 import { passedScreen, screenSavedWriteUp, type ScreenedWriteUp } from '../camera/write-up-screen';
 
 /**
@@ -54,12 +55,22 @@ export const COMPUTER_SENDS =
   'sent until you press the button, and nothing is sent in the background.';
 
 /**
- * ADR 0035 D-9 C's first sentence — the one piece of the hosted consent that
- * reads the same on a ride's page. The rest of C lands with the hosted path
- * (#803); no hosted source is built in production before then.
+ * ADR 0035 D-9 C, the hosted consent, as it stands beside the hosted ask on a
+ * ride's page (#803, carried from #838's review, where only its first sentence
+ * stood there): the headline, the three paragraphs and *"You do not need
+ * this"*, word for word from `camera/hosted-model.ts` §`HOSTED_CONSENT`.
+ *
+ * ⚠️ **All but C's last sentence, on purpose.** *"This is off. It stays off
+ * until you turn it on…"* describes the switch on the Camera page, and the
+ * hosted ask is offered only while that switch is ON — so on this page it
+ * would be false. `write-up.test.ts` pins the rest against the ADR, in order
+ * and with nothing between.
  */
-export const HOSTED_SENDS_LEAD =
-  'This sends your ride to a service you have chosen, using your own key.';
+export const HOSTED_SENDS: readonly string[] = [
+  HOSTED_CONSENT.headline,
+  ...HOSTED_CONSENT.paragraphs,
+  HOSTED_CONSENT.notNeeded,
+];
 
 /**
  * The fallback (#805): no model set up. One sentence, a link to where one can

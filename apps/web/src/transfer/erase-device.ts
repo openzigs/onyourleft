@@ -180,8 +180,12 @@ export const ERASE_CANNOT_REACH: readonly string[] = [
   // that frightens.
   'a photograph you sent to your own machine to be analysed, which is a copy that machine holds',
   // #518, ADR 0029's 2026-09-28 amendment. The hosted service is a third party
-  // and keeps what it keeps; this project cannot compel a deletion.
-  'a question you sent to a service you chose, on your own key, which is a copy that service holds',
+  // and keeps what it keeps; this project cannot compel a deletion. #803
+  // re-read it: the hosted path now sends a ride's numbers when the rider asks
+  // for an analysis (ADR 0029's 2026-09-29 amendment), so the line names them
+  // as well as a question — a line about a question alone would understate
+  // what that service may hold.
+  'a question or a ride’s numbers you sent to a service you chose, on your own key, which is a copy that service holds',
   // #804, from #828's review. The post-ride ask sends a ride's NUMBERS to the
   // rider's own computer (ADR 0035 D-9 B), and the privacy policy's erase
   // paragraph already says an erase cannot reach that copy;

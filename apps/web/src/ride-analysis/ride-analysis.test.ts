@@ -36,6 +36,11 @@ import { SOURCE_ROOT } from '../camera/import-walk-testing';
 import type { UntrustedText } from '../camera/model-answer';
 import { screenWriteUp, type ScreenedWriteUp } from '../camera/write-up-screen';
 import { stripComments } from '../units/no-inline-units';
+import { hostedModelDecision } from '../camera/hosted-model';
+import { hostedModelPort } from '../camera/hosted-transport';
+import { CameraController } from '../camera/session';
+import { manualSchedule, scriptedCamera } from '../camera/testing';
+import { hostedStepPort } from './hosted-step';
 import { modelServer, REPLY_MARKER, STILL_CLOCK, type ModelServer } from './model-server-testing';
 import type { ModelStepPort } from './model-step-port';
 import {
@@ -382,6 +387,53 @@ describe('the pose summary goes only with camera consent (owner ruling 5)', () =
     expect((await savedWriteUp(id))?.includedPose).toBe(false);
   });
 
+  /** The hosted model's step port, through the real controller and transport, over `server` (#803). */
+  function hostedOver(): () => ModelStepPort | undefined {
+    const service = hostedModelDecision({
+      address: 'https://models.example.invalid',
+      model: 'a-model',
+      key: 'fixture-hosted-key-DO-NOT-LEAK',
+    }).model;
+    const camera = new CameraController({
+      port: scriptedCamera().port,
+      schedule: manualSchedule().schedule,
+      hosted: () => hostedModelPort(service, { send: server.send }),
+    });
+    camera.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    camera.agreeToHosted(true);
+    return () => hostedStepPort(camera, () => true);
+  }
+
+  /** Whether any request carried the pose step's prompt — the hosted path sends no schema name. */
+  const poseSent = (): boolean =>
+    JSON.stringify(server.requests).includes('The side-camera comparison');
+
+  it('on the hosted model too (#803): sends the pose summary with the camera consent', async () => {
+    const id = await filmedRide();
+    const outcome = await ask({
+      hosted: hostedOver(),
+      cameraConsented: () => true,
+    }).askForRideWriteUp(id, 'hosted', live());
+    expect(outcome).toStrictEqual({ kind: 'written' });
+    expect(poseSent()).toBe(true);
+    expect((await savedWriteUp(id))?.source).toBe('hosted');
+    expect((await savedWriteUp(id))?.includedPose).toBe(true);
+  });
+
+  it('on the hosted model too (#803): leaves the pose field out without the camera consent', async () => {
+    const id = await filmedRide();
+    const outcome = await ask({
+      hosted: hostedOver(),
+      cameraConsented: () => false,
+    }).askForRideWriteUp(id, 'hosted', live());
+    expect(outcome).toStrictEqual({ kind: 'written' });
+    expect(server.requests.length).toBeGreaterThan(0);
+    expect(poseSent()).toBe(false);
+    expect(JSON.stringify(server.requests)).not.toContain('-9.5');
+    expect(JSON.stringify(server.requests)).not.toContain('"pose"');
+    expect((await savedWriteUp(id))?.includedPose).toBe(false);
+  });
+
   it('writes up a ride with no side-camera session at all', async () => {
     const id = await seededRide();
     const outcome = await ask({ cameraConsented: () => true }).askForRideWriteUp(
@@ -563,6 +615,12 @@ describe('main.tsx builds that port and hands it to the shell (ride-analysis-wir
     expect(builder).toMatch(/computer,/);
     expect(builder).toMatch(
       /cameraConsented: \(\) => camera\?\.state\(\)\.consent\.local \?\? false/,
+    );
+  });
+
+  it('builds the hosted source over the camera controller and the saved service (#803)', () => {
+    expect(builder).toMatch(
+      /hosted: \(\) => hostedStepPort\(camera, \(\) => readHostedModel\(\) !== undefined\)/,
     );
   });
 

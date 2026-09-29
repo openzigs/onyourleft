@@ -5,7 +5,9 @@
  * for the post-ride ask (#804). It answers every step of the analysis
  * template by what the request asks for: a section's note for a
  * `section_notes` step, a note for a `position_notes` step, and the summary
- * text it was given for anything else.
+ * text it was given for anything else. A step with no `response_format` hint —
+ * every hosted step (#803) — is read by the reply form its prompt spells out,
+ * so the same server stands behind the hosted transport's `send` too.
  *
  * Every reply carries {@link REPLY_MARKER} OUTSIDE the field the runner reads
  * (`choices[0].message.content`) — in the envelope, and in a reasoning field
@@ -41,6 +43,18 @@ function schemaNameOf(request: ModelServerRequest): string | undefined {
   return format?.json_schema?.name;
 }
 
+/**
+ * The step a prompt asks for, read off the reply form its last lines spell
+ * out — for a request with no `response_format` hint, which is every hosted
+ * step (#803).
+ */
+function formNameOf(prompt: string): string | undefined {
+  if (/in exactly this form: \{"section":\d+,"notes"/.test(prompt)) {
+    return 'section_notes';
+  }
+  return prompt.includes('in exactly this form: {"notes"') ? 'position_notes' : undefined;
+}
+
 /** How a {@link modelServer} answers, beyond its summary. */
 export interface ModelServerOptions {
   /**
@@ -68,7 +82,9 @@ export function modelServer(
         typeof init?.body === 'string' ? init.body : '{}',
       ) as ModelServerRequest;
       requests.push(request);
-      const name = schemaNameOf(request);
+      // A hosted step carries no `response_format` hint (#803), so where
+      // there is none the step is read off the prompt's own reply form.
+      const name = schemaNameOf(request) ?? formNameOf(contentOf(request));
       let content: string;
       if (name === 'section_notes') {
         const section = Number(/"section":(\d+)/.exec(contentOf(request))?.[1] ?? '0');

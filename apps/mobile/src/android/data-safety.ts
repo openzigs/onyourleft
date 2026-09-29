@@ -99,6 +99,8 @@ export interface DataSafetyAnswer {
  * ⚠️ **Since #804 the two health rows are collected too**, and a reviewer who
  * remembers "every row but two" is reading the old file: the post-ride ask
  * sends a ride's numbers to the rider's own computer on a press. See the rows.
+ * ⚠️ **Since #803 they are SHARED as well**: the same ask can go to a hosted
+ * model on the rider's own key, which is a third party.
  *
  * ⚠️ The health rows are here because Play's Health Content and Services policy
  * covers apps that are not primarily health apps — its own example is a game
@@ -180,14 +182,25 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     // is collected, on the Photos row's reasoning; `shared: false` and
     // `optional: true` on the same words — the destination is the rider's own
     // computer, the transfer is a specific user-initiated action, and nothing
-    // is set up by default. A hosted model being sent ride data (#803) is what
-    // moves this row to `shared: true`, in that pull request.
+    // is set up by default.
+    //
+    // ⚠️ **Re-answered by #803, and the answer CHANGED — shared: true.** A
+    // reviewer who remembers `shared: false` is reading #804's file. The
+    // hosted model on the rider's own key is now sent a ride's heart rate when
+    // the rider asks for an analysis on the hosted source (the owner's ruling 4
+    // on #795: *"health and fitness data shared with a third party the rider
+    // chose"*; ADR 0035 D-9 C; ADR 0029's 2026-09-29 amendment). That service
+    // is a third party — not the rider's own machine — so this is SHARING in
+    // Play's sense, and #803's criterion, written from that ruling, files it
+    // as shared rather than arguing Play's user-initiated exemption for a
+    // third party. Still optional: off by default,
+    // separately consented, and off again whenever the app is opened.
     dataType: 'Health and fitness — health info',
     collected: true,
-    shared: false,
+    shared: true,
     optional: true,
     purposes: ['App functionality'],
-    why: 'heart rate from a BLE strap, stored locally. In scope of the Health apps policy because it advances gameplay (#85). When the rider presses the button on a ride’s page that asks for a write-up (#804), that ride’s heart rate — as numbers, section by section — is sent to one computer the rider configured at an address on their own network and switched on, the same computer and rules as the Photos row. Nothing is set up by default, nothing is sent until the press, and nothing is sent in the background. It is not sent to this project, which runs no server, and not to any third party',
+    why: 'heart rate from a BLE strap, stored locally. In scope of the Health apps policy because it advances gameplay (#85). When the rider presses the button on a ride’s page that asks for a write-up (#804), that ride’s heart rate — as numbers, section by section — is sent to the source they chose: one computer the rider configured at an address on their own network and switched on, the same computer and rules as the Photos row; or (#803) a hosted model service the rider chose, at the https address they typed, on their own key, which is a third party — hence shared. The hosted path is off by default, separately consented, off again whenever the app is opened, and gated on that consent at every step. Nothing is set up by default, nothing is sent until the press, and nothing is sent in the background. It is not sent to this project, which runs no server',
   },
   {
     // ⚠️ **Re-answered by #804, and the answer CHANGED — collected: true.** A
@@ -196,15 +209,18 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     // ride's power, cadence, weight, watts per kilogram, threshold power and
     // length, section by section, to the rider's OWN computer on the press
     // (ADR 0035 D-9 B). Collected, not shared, optional — the health-info
-    // row's reasoning, and the Photos row's. The hosted path (#518) still
-    // sends only a fixed test question carrying none of it; #803, which sends
-    // ride data to a hosted model, moves this row to `shared: true`.
+    // row's reasoning, and the Photos row's.
+    //
+    // ⚠️ **Re-answered by #803, and the answer CHANGED — shared: true**, on
+    // the health-info row's reasoning: the hosted model on the rider's own key
+    // is now sent these numbers when the rider asks for an analysis on the
+    // hosted source (ruling 4 on #795; ADR 0035 D-9 C).
     dataType: 'Health and fitness — fitness info',
     collected: true,
-    shared: false,
+    shared: true,
     optional: true,
     purposes: ['App functionality'],
-    why: 'power, cadence, speed and distance from BLE sensors and the trainer, stored locally. When the rider presses the button on a ride’s page that asks for a write-up (#804), that ride’s power, cadence, the rider’s weight and watts per kilogram, their threshold power if set, and the ride’s length, section by section, are sent as numbers to one computer the rider configured at an address on their own network and switched on — the same computer and rules as the Photos row. Nothing is set up by default and nothing is sent until the press. It is not sent to this project or to any third party. A hosted model the rider sets up on their own key (#518) is sent only a fixed test question today, carrying none of it',
+    why: 'power, cadence, speed and distance from BLE sensors and the trainer, stored locally. When the rider presses the button on a ride’s page that asks for a write-up (#804), that ride’s power, cadence, the rider’s weight and watts per kilogram, their threshold power if set, and the ride’s length, section by section, are sent as numbers to the source they chose: one computer the rider configured at an address on their own network and switched on — the same computer and rules as the Photos row — or (#803) a hosted model service the rider chose, at the https address they typed, on their own key, which is a third party — hence shared. The hosted path is off by default, separately consented, off again whenever the app is opened, and gated on that consent at every step. Nothing is set up by default and nothing is sent until the press. It is not sent to this project, which runs no server. No position, altitude, date or identifier is sent on either path',
   },
   {
     dataType: 'Personal info',

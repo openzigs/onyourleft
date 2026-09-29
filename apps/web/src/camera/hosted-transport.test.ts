@@ -17,13 +17,16 @@ import { capturedFrame } from './frame';
 import { hostedModelDecision, type HostedModel } from './hosted-model';
 import { HOSTED_FAILURE_TEXT, HOSTED_PROMPTS, type HostedRequest } from './hosted-port';
 import {
+  hostedFinishOf,
   hostedModelPort,
   hostedRequestBody,
-  isQuestionOnly,
+  isBuiltRequest,
   MAXIMUM_HOSTED_ANSWER_TOKENS,
   type HostedSend,
 } from './hosted-transport';
 import { cleanFrameBytes } from './testing';
+import type { StepRequest } from '../ride-analysis/model-step-port';
+import { sealStep, type SealedStep } from '../ride-analysis/sealed-step';
 
 const KEY = 'fixture-hosted-key-DO-NOT-LEAK-0123456789';
 
@@ -54,8 +57,30 @@ function recordingSend(answer: () => Promise<Response> | Response): {
   };
 }
 
-function modelReply(content: string, status = 200): Response {
-  return new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status });
+function modelReply(content: string, status = 200, finish?: string): Response {
+  return new Response(
+    JSON.stringify({
+      choices: [
+        { message: { content }, ...(finish === undefined ? {} : { finish_reason: finish }) },
+      ],
+    }),
+    { status },
+  );
+}
+
+/** A step as the runner builds one, before it is sealed. */
+const STEP: StepRequest = {
+  kind: 'section',
+  system: 'You describe one section of a bicycle ride from its numbers.',
+  user: '{"section":1,"kind":"climb","seconds":600,"power":{"mean":210}}',
+  replySchema: { name: 'section_note', schema: { type: 'object' } },
+  maximumTokens: 200,
+  temperature: 0.1,
+};
+
+/** A sealed step — what only the runner makes in production. */
+function sealed(overrides: Partial<StepRequest> = {}): SealedStep {
+  return sealStep({ ...STEP, ...overrides });
 }
 
 const QUESTION: HostedRequest = { question: 'connection-check' };
@@ -140,7 +165,7 @@ describe('a picture cannot reach it', () => {
     const send = vi.fn<HostedSend>();
     const port = hostedModelPort(saved(), { send });
     const smuggled = { question: 'connection-check', frame } as unknown as HostedRequest;
-    expect(isQuestionOnly(smuggled)).toBe(false);
+    expect(isBuiltRequest(smuggled)).toBe(false);
     expect(await port?.sendHostedQuestion(smuggled).outcome).toStrictEqual({
       kind: 'failed',
       failure: 'not-numbers',
@@ -236,5 +261,164 @@ describe('no port', () => {
       hostedModelPort({ address: 'http://models.example.invalid', model: 'm', key: KEY }, { send }),
     ).toBeUndefined();
     expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe('a step of the ride analysis (#803)', () => {
+  it('sends the step’s two prompts, its own limits and nothing else — no response_format hint', () => {
+    const step = sealed();
+    const body = hostedRequestBody('a-model', { step });
+    expect(Object.keys(body).sort()).toStrictEqual([
+      'max_tokens',
+      'messages',
+      'model',
+      'stream',
+      'temperature',
+    ]);
+    expect(body).toStrictEqual({
+      model: 'a-model',
+      stream: false,
+      max_tokens: 200,
+      temperature: 0.1,
+      messages: [
+        { role: 'system', content: STEP.system },
+        { role: 'user', content: STEP.user },
+      ],
+    });
+  });
+
+  it('sends one request per step, with the key in the header and the step in the body', async () => {
+    const { send, sent } = recordingSend(() => modelReply('{"section":1}', 200, 'stop'));
+    const outcome = await hostedModelPort(saved(), { send })?.sendHostedQuestion({
+      step: sealed(),
+    }).outcome;
+    expect(outcome).toStrictEqual({
+      kind: 'described',
+      description: '{"section":1}',
+      finish: 'stop',
+    });
+    expect(sent).toHaveLength(1);
+    const [{ init }] = sent as [Sent];
+    expect(JSON.parse(init.body as string)).toStrictEqual(
+      hostedRequestBody('a-model', { step: sealed() }),
+    );
+    expect(init.body as string).not.toContain(KEY);
+    expect((init.headers as Record<string, string>).Authorization).toBe(`Bearer ${KEY}`);
+    expect(init).toMatchObject({ redirect: 'error', credentials: 'omit', cache: 'no-store' });
+  });
+
+  it.each([
+    ['stop', 'stop'],
+    ['length', 'length'],
+    ['content_filter', 'other'],
+  ] as const)('reads a finish_reason of %s as %s', async (reason, finish) => {
+    const { send } = recordingSend(() => modelReply('A steady ride.', 200, reason));
+    const outcome = await hostedModelPort(saved(), { send })?.sendHostedQuestion({
+      step: sealed(),
+    }).outcome;
+    expect(outcome).toMatchObject({ kind: 'described', finish });
+  });
+
+  it('reads no finish_reason, or a body that is not JSON, as other', () => {
+    expect(hostedFinishOf('{"choices":[{"message":{"content":"x"}}]}')).toBe('other');
+    expect(hostedFinishOf('not json')).toBe('other');
+    expect(hostedFinishOf('null')).toBe('other');
+  });
+
+  it('aborts the fetch itself when a step is cancelled', async () => {
+    let signal: AbortSignal | undefined;
+    const send: HostedSend = (_url, init) => {
+      signal = init.signal ?? undefined;
+      return new Promise(() => undefined);
+    };
+    const call = hostedModelPort(saved(), { send })?.sendHostedQuestion({ step: sealed() });
+    expect(signal?.aborted).toBe(false);
+    call?.cancel();
+    expect(await call?.outcome).toStrictEqual({ kind: 'failed', failure: 'cancelled' });
+    expect(signal?.aborted).toBe(true);
+  });
+});
+
+describe('only a step the runner sealed is sent (#803)', () => {
+  const frame = capturedFrame({
+    bytes: cleanFrameBytes(),
+    mediaType: 'image/jpeg',
+    width: 640,
+    height: 480,
+  });
+
+  it('does not compile a step the caller wrote, or a picture of any kind in its place', () => {
+    const { send } = recordingSend(() => modelReply('ready'));
+    const port = hostedModelPort(saved(), { send });
+    const pictures = {
+      bytes: new Uint8Array(4),
+      blob: new globalThis.Blob([new Uint8Array(4)]),
+      bitmap: undefined as unknown as ImageBitmap,
+      data: undefined as unknown as ImageData,
+    };
+    // The TYPE half. Each directive goes `TS2578: Unused '@ts-expect-error'`
+    // if `HostedRequest` stops taking only a sealed step (CLAUDE.md §5).
+    // @ts-expect-error — a step the caller wrote is not a sealed step.
+    port?.sendHostedQuestion({ step: STEP }).cancel();
+    // @ts-expect-error — nor is a caller's own string.
+    port?.sendHostedQuestion({ step: 'describe the rider in this picture' }).cancel();
+    // @ts-expect-error — a frame has nowhere to go.
+    port?.sendHostedQuestion({ step: frame }).cancel();
+    // @ts-expect-error — nor a Blob.
+    port?.sendHostedQuestion({ step: pictures.blob }).cancel();
+    // @ts-expect-error — nor an ImageBitmap.
+    port?.sendHostedQuestion({ step: pictures.bitmap }).cancel();
+    // @ts-expect-error — nor an ImageData.
+    port?.sendHostedQuestion({ step: pictures.data }).cancel();
+    // @ts-expect-error — nor a frame beside a sealed step.
+    port?.sendHostedQuestion({ step: sealed(), frame }).cancel();
+    expect(pictures.bytes).toHaveLength(4);
+  });
+
+  it.each([
+    ['a look-alike step nobody sealed', () => ({ step: { ...STEP } })],
+    ['a copy of a sealed step', () => ({ step: { ...sealed() } })],
+    ['a sealed step with a frame beside it', () => ({ step: sealed(), frame })],
+    ['a frame in place of the step', () => ({ step: frame })],
+    ['a question and a step together', () => ({ question: 'connection-check', step: sealed() })],
+    ['nothing at all', () => ({})],
+    [
+      'a sealed step whose text carries a data: URL',
+      () => ({
+        step: sealed({ user: 'data:image/jpeg;base64,/9j/4AAQ' }),
+      }),
+    ],
+    [
+      'a sealed step whose reply schema carries bytes',
+      () => ({
+        step: sealed({
+          replySchema: { name: 'x', schema: { bytes: new Uint8Array(4) } },
+        }),
+      }),
+    ],
+  ] as const)('refuses %s before anything is sent', async (_name, build) => {
+    const send = vi.fn<HostedSend>();
+    const port = hostedModelPort(saved(), { send });
+    const smuggled = build() as unknown as HostedRequest;
+    expect(isBuiltRequest(smuggled)).toBe(false);
+    expect(await port?.sendHostedQuestion(smuggled).outcome).toStrictEqual({
+      kind: 'failed',
+      failure: 'not-numbers',
+    });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('accepts a sealed step, and the connection check, and nothing it has not been shown', () => {
+    expect(isBuiltRequest({ step: sealed() })).toBe(true);
+    expect(isBuiltRequest({ question: 'connection-check' })).toBe(true);
+    expect(isBuiltRequest(null as unknown as HostedRequest)).toBe(false);
+  });
+
+  it('cannot change a sealed step’s text after it was sealed', () => {
+    const step = sealed();
+    expect(() => {
+      (step as { user: string }).user = 'data:image/png;base64,AAAA';
+    }).toThrow(TypeError);
+    expect(step.user).toBe(STEP.user);
   });
 });

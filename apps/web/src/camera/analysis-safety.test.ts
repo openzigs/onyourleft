@@ -42,6 +42,9 @@ import { passedScreen } from './write-up-screen';
 import { computerPoseEstimator } from './computer-pose';
 import { frameLeaksIn } from './notice';
 import { CameraController } from './session';
+import { hostedModelDecision } from './hosted-model';
+import { hostedModelPort } from './hosted-transport';
+import { hostedStepPort } from '../ride-analysis/hosted-step';
 import { manualSchedule, scriptedCamera, sizedFrameBytes } from './testing';
 
 const SOURCE_ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -242,7 +245,7 @@ describe('2. in the module graph, an answer cannot reach a trainer', () => {
 });
 
 describe('3. in the text, an answer is reduced before anything renders', () => {
-  it('reads `.description` in four production places, and none is a view', () => {
+  it('reads `.description` in six production places, and none is a view', () => {
     // ⚠️ It said ONE until #553: `computer-pose.ts` is the second, and it
     // reduces the answer to image-plane numbers or to `unreadable` before
     // anything else sees it — the test below runs a hostile answer through it.
@@ -257,6 +260,11 @@ describe('3. in the text, an answer is reduced before anything renders', () => {
         // #802: hands it to the runner as a step's text and reads nothing of
         // it — §"4." below holds where that text can go.
         join('ride-analysis', 'own-computer-step.ts'),
+        // #803: the hosted path's two halves of the same — the transport
+        // copies it out of the reply's reading, and the step port hands it to
+        // the runner as a step's text. §"4." holds both.
+        join('camera', 'hosted-transport.ts'),
+        join('ride-analysis', 'hosted-step.ts'),
       ].sort(),
     );
   });
@@ -405,6 +413,63 @@ describe('4. a ride analysis’s reply reaches only the runner (#802)', () => {
     expect(leaks).toHaveLength(1);
   });
 
+  /** The hosted path's step port over a service answering {@link HOSTILE} and the marker (#803). */
+  function hostileHostedStepPort(): ModelStepPort {
+    const service = hostedModelDecision({
+      address: 'https://models.example.invalid',
+      model: 'm',
+      key: 'fixture-hosted-key',
+    }).model;
+    const camera = new CameraController({
+      port: scriptedCamera().port,
+      schedule: manualSchedule().schedule,
+      hosted: () =>
+        hostedModelPort(service, {
+          send: async () =>
+            Promise.resolve(
+              new Response(
+                JSON.stringify({
+                  choices: [
+                    {
+                      message: {
+                        content: `${HOSTILE} ${MARKER}`,
+                        tool_calls: [{ function: { name: 'setTargetPower', arguments: '2000' } }],
+                      },
+                      finish_reason: 'stop',
+                    },
+                  ],
+                }),
+              ),
+            ),
+        }),
+    });
+    camera.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    camera.agreeToHosted(true);
+    const port = hostedStepPort(camera, () => true);
+    if (port === undefined) {
+      throw new Error('no hosted port');
+    }
+    return port;
+  }
+
+  it('1. on the hosted path too (#803), leaves the run only as a screened write-up, and logs nothing of it', async () => {
+    const before = JSON.stringify(ride);
+    const { outcome, leaks } = await logged(async () =>
+      runAnalysis(ride, {
+        port: hostileHostedStepPort(),
+        clock: stillClock,
+        signal: new AbortController().signal,
+      }),
+    );
+    expect(outcome.kind).toBe('written');
+    if (outcome.kind === 'written') {
+      expect(passedScreen(outcome.writeUp)).toBe(true);
+    }
+    expect(leaks).toStrictEqual([]);
+    // The reply changed nothing it was handed.
+    expect(JSON.stringify(ride)).toBe(before);
+  });
+
   /** The ride analysis's reply-carrying modules: whoever imports one holds a reply. */
   const REPLY_MODULE = /(?:^|\/)ride-analysis\/(?:model-step-port|own-computer-step)$/;
 
@@ -419,6 +484,14 @@ describe('4. a ride analysis’s reply reaches only the runner (#802)', () => {
     join('ride-analysis', 'runner.ts'),
     join('ride-analysis', 'own-computer-step.ts'),
     join('camera', 'analysis-transport.ts'),
+    // #803: the hosted path. The step port hands a reply to the runner and to
+    // nothing else; the transport reads one and applies the own-computer
+    // path's text-only rule to what it sends. The sealer holds a REQUEST,
+    // never a reply — it is here because it imports the port module for the
+    // step's type, and the rule below reads imports.
+    join('ride-analysis', 'hosted-step.ts'),
+    join('camera', 'hosted-transport.ts'),
+    join('ride-analysis', 'sealed-step.ts'),
   ];
 
   /** The modules outside {@link REPLY_HOLDERS} that import a reply module. */

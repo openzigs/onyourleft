@@ -61,6 +61,7 @@ import {
 } from './camera/analysis-transport';
 import { createRideAnalysis, platformRunnerClock } from './ride-analysis/ride-analysis';
 import type { RideAnalysisPort } from './ride-analysis/ride-analysis-port';
+import { hostedStepPort } from './ride-analysis/hosted-step';
 import { hostedModelEraser, readHostedModel } from './camera/hosted-model';
 import { hostedModelPort } from './camera/hosted-transport';
 import { keepThisRide } from './camera/keep';
@@ -764,8 +765,12 @@ async function buildRiderAnalysis(): Promise<() => ReturnType<typeof riderAnalys
  * ⚠️ **The step port is built by `riderModelStepSource`, not here**, for the
  * reason `buildRiderAnalysis` gives: inside the Android shell it must be the
  * native request, and that choice has to be somewhere a test can see it.
- * There is no hosted source yet — #803 adds one — so a rider with only a
- * hosted model set up is offered no control.
+ * The hosted model (#803) is the second source, and the rider's own computer
+ * is offered first when both are set up (ruling 7). It is offered only while
+ * the rider has turned it on since the app was opened and a service is saved,
+ * and every step goes through `CameraController.askHostedModel`, which checks
+ * the hosted consent again — `ride-analysis/hosted-step.ts`. With no camera
+ * there is no controller to hold that consent, so there is no hosted source.
  *
  * The camera's consent is read at the press, not now: it is held in memory
  * and turned on on the Camera screen, and the pose summary goes into the
@@ -782,6 +787,9 @@ async function buildRideAnalysis(camera: CameraController | undefined): Promise<
     store: localStore(),
     athleteId: LOCAL_ATHLETE,
     computer,
+    ...(camera === undefined
+      ? {}
+      : { hosted: () => hostedStepPort(camera, () => readHostedModel() !== undefined) }),
     nativeShell,
     cameraConsented: () => camera?.state().consent.local ?? false,
     clock: platformRunnerClock(),
