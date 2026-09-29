@@ -1565,6 +1565,9 @@ export function createRideController(options: RideControllerOptions): RideContro
   const endManualErg = (): void => {
     manual?.erg.close();
     manual = undefined;
+    // #758 (#655's nit): the answer describes the writer just closed. Kept, it
+    // came back on the next rescue whose pending target was the same number.
+    held = undefined;
   };
 
   /** The hand-set target's writer over this control, built on first use. */

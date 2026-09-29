@@ -2741,6 +2741,20 @@ assert_violation "the three-stage form is refused: the middle grep can die of SI
   'scripts/example.test.sh:3:'
 
 new_fixture
+write_script "x=\"${DOLLAR}(printf a ${P}" "  grep -q a)\""
+assert_violation "a pipe that ENDS a line, into grep -q on the next, is refused (#758)" SH001 \
+  'scripts/example.test.sh:4: a pipeline into'
+
+new_fixture
+write_script "printf a ${P}" "" "  # a comment between" "grep --quiet a || :"
+assert_violation "and with a blank line and a comment between the two (#758)" SH001 \
+  'scripts/example.test.sh:6:'
+
+new_fixture
+write_script "true ${P}${P}" "  grep -q a <<< a" "printf a ${P}" "  grep -c a || :"
+assert_clean "a line ending in \`||\`, or piped into a grep without -q, is not refused (#758)"
+
+new_fixture
 mkdir -p "${fixture_root}/tools"
 printf '%s\n' '#!/usr/bin/env bash' "printf x ${P} grep -q x" > "${fixture_root}/tools/probe.sh"
 assert_violation "a shell script outside scripts/ is walked as well" SH001 'tools/probe.sh:2:'
