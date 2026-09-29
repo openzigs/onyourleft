@@ -461,3 +461,19 @@ package **declares**; ADR 0001's cautions about declared-versus-actual licensing
 (`react-native-ble-plx` declaring MIT in its manifest and Apache-2.0 in its `LICENSE`; `fit-file-parser`
 detected as NOASSERTION despite a verbatim MIT file) apply here too, and #24's dependency gate is
 where that discrepancy gets caught mechanically.
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-09-29** — **Two deferrals here are discharged.** F's *"Phase 3, the instance — deferred to
+  #7"* and J's *"Real-time transport: deferred to #16, and nothing is scaffolded for it"* are both
+  decided by [ADR 0037](0037-instance-runtime-hosting-and-transport.md): the instance database is
+  **SQLite through Kysely**, driven by Node's own `node:sqlite`, and the transport is **WebSocket**.
+  F's three constraints on the instance database — mirror the local store's shape, reversible
+  migrations with a **tested** down path, and a permissive or AGPL-side licence — are **kept**, and
+  ADR 0037 D-5 and D-6 say how each is met; `drizzle-kit` stays eliminated for F's own reason.
+  J's sentence that *"The layout leaves room for an always-on service as a sibling under `apps/`; it
+  creates nothing now"* is no longer a description of the plan: owner decision D6 is lifted by
+  [ADR 0036](0036-a-self-hostable-instance-server-now.md), and that sibling is `apps/instance`. Nothing
+  else in this ADR changes.
