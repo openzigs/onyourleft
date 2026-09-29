@@ -16,11 +16,6 @@
  * and a frame to every connection every tick — and PRINTS the time rather
  * than asserting it: a wall-clock bound in a unit suite fails on a slow
  * runner for reasons that have nothing to do with the room.
- *
- * ⚠️ **The case has a timeout of its own**: {@link CASE_TIMEOUT_MS}. On the CI
- * runner under coverage it printed 5 060, 5 281 and 5 554 ms on 2026-09-29 —
- * past Vitest's default 5 s, which turned `main` red at 12d922b — and #682's
- * rule is that no case runs above half its timeout.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -29,12 +24,17 @@ import { createRoom, type Outbound } from './core/room.ts';
 import { admitByTable, FLAT_COURSE, helloText, reportText } from './core/room-testing.ts';
 import { roomSettings } from './core/settings.ts';
 
+/**
+ * Vitest's own 5 s case timeout IS a wall-clock bound, the one the header
+ * says this file does not assert: on `main` this case took 4 817 ms on an
+ * EPYC 9V74 runner and 5 552 ms (a timeout) on an EPYC 7763, under coverage.
+ * So it gets a stop for a hung loop, well clear of any runner, not a budget.
+ */
+const HUNG_AFTER_MS = 60_000;
+
 const TICKS = 60;
 const ROOMS = 2;
 const RIDERS_PER_ROOM = 100;
-
-/** Over twice the slowest CI run measured (5 554 ms under coverage). */
-const CASE_TIMEOUT_MS = 15_000;
 
 describe('200 riders — #779', () => {
   it(
@@ -84,6 +84,6 @@ describe('200 riders — #779', () => {
         expect(seats.every((seat) => seat.flags === 0 && seat.distanceMetres > 0)).toBe(true);
       }
     },
-    CASE_TIMEOUT_MS,
+    HUNG_AFTER_MS,
   );
 });

@@ -34,12 +34,17 @@ import {
  * Which words of the disclosure name each key a prompt's JSON carries. A key
  * that only groups other keys names the grouping's meaning, which the rider
  * is told as the list's framing.
+ *
+ * ⚠️ Every phrase is more than one word (#847, from #848's review): a single
+ * common word such as *power* is found somewhere in any long disclosure, so it
+ * would name its figure whether or not the list did. `the table names nothing
+ * by a single word` holds that.
  */
 const NAMED_BY: Readonly<Record<string, string>> = {
   // The whole ride.
   ride: "that ride's numbers",
   movingMinutes: 'how long the ride lasted',
-  distanceKilometres: 'distance',
+  distanceKilometres: 'its distance',
   whole: "that ride's numbers",
   // The rider.
   rider: 'your weight',
@@ -47,9 +52,9 @@ const NAMED_BY: Readonly<Record<string, string>> = {
   thresholdPower: 'your threshold power, if you set one',
   // A stretch's metrics.
   metrics: 'heart rate, cadence and power',
-  power: 'power',
-  heartRate: 'heart rate',
-  cadence: 'cadence',
+  power: 'cadence and power',
+  heartRate: 'heart rate, cadence',
+  cadence: 'heart rate, cadence and power',
   coverage: 'heart rate, cadence and power',
   mean: 'heart rate, cadence and power',
   max: 'heart rate, cadence and power',
@@ -151,7 +156,11 @@ function sentKeys(text: string): Set<string> {
   return keys;
 }
 
-/** The user half of every prompt a template builds from {@link FULL}. */
+/**
+ * Both halves — system and user — of every prompt a template builds from
+ * {@link FULL}. The system half is walked too (#847, from #848's review): a
+ * figure moved into it is sent all the same.
+ */
 function promptsOf(template: AnalysisTemplate): string[] {
   const [section, position, summary, rewrite] = template.steps;
   const prompts = [
@@ -160,7 +169,7 @@ function promptsOf(template: AnalysisTemplate): string[] {
     summary.prompt(FULL, EARLIER),
     rewrite.prompt(FULL, EARLIER, ['angle-sign']),
   ];
-  return prompts.flatMap((prompt) => (prompt === undefined ? [] : [prompt.user]));
+  return prompts.flatMap((prompt) => (prompt === undefined ? [] : [prompt.system, prompt.user]));
 }
 
 const DISCLOSURES = {
@@ -203,6 +212,24 @@ describe.each(
 });
 
 describe('the check can fail (#845)', () => {
+  it('the table names nothing by a single word — #847', () => {
+    const single = Object.entries(NAMED_BY).filter(([, phrase]) => !/\s/.test(phrase.trim()));
+    expect(single, 'a one-word phrase is found in any long text').toStrictEqual([]);
+  });
+
+  it('walks the system half of every prompt as well as the user half — #847', () => {
+    for (const template of ANALYSIS_TEMPLATES) {
+      const walked = promptsOf(template);
+      const system = template.steps[0].prompt(FULL, 1)?.system;
+      expect(system?.length).toBeGreaterThan(0);
+      expect(walked, `${template.id} v${template.version}`).toContain(system);
+    }
+    // And a figure there is read like one in the user half.
+    expect(sentKeys('Rules.\nFigures: {"hiddenFigure":1}')).toStrictEqual(
+      new Set(['hiddenFigure']),
+    );
+  });
+
   it('finds a figure the table does not name', () => {
     expect(
       sentKeys('Section 1: {"index":1,"newFigure":2}\nReply: {"notes":"…"} as text'),
