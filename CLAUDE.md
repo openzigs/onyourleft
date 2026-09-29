@@ -1330,11 +1330,36 @@ apps/                 AGPL-3.0-or-later, without exception
                         timers, `performance`, `Math.random` and `ws`.
                         `clock.ts` maps a client's `atMs` onto the room's
                         clock, because the two are never the same clock.
-                        ⚠️ **NOT mounted yet** — #780 (Node, `ws`) and #781
-                        (Durable Object) are the adapters, and `main.ts`
-                        imports none of it. ⚠️ Its workspace dependencies are
+                        ⚠️ **Mounted by one adapter, and not by the
+                        instance**: #781's Durable Object (below) runs it
+                        under `workerd` in tests only, and #780 (Node, `ws`)
+                        is not built — `main.ts` imports none of it. ⚠️ Its workspace dependencies are
                         TypeScript with extensionless relative imports, which
                         `node src/main.ts` cannot load: #780 owns that
+    src/room/durable-object/
+                        the room core as a Cloudflare Durable Object (#781,
+                        ADR 0037 D-2's second adapter), BUILT AND NOT DEPLOYED
+                        (the owner's Q3/Q6): one object per room, every socket
+                        through the Hibernation API with its connection in
+                        its attachment, the 1 Hz tick as a storage alarm that
+                        is not re-set once the room leaves countdown/running
+                        (so an emptied room stops billing), and a lobby
+                        restored after eviction by REPLAYING a log of the
+                        core's own calls — with the admission's recorded
+                        answers, so a ticket is verified once per hello and
+                        never again. ⚠️ A room evicted after it left the lobby
+                        is not restored: it refuses its sockets `room-closed`.
+                        ⚠️ Platform-free by `tsconfig.durable-object.json`
+                        (ES2024, no `types`) and an eslint block; what it
+                        needs of the runtime is ports in `platform.ts`, not
+                        `@cloudflare/workers-types`. ⚠️ **No production
+                        Worker entry**: which room an object serves and where
+                        its course comes from are #790's.
+                        `worker-under-test.ts` is the only thing `workerd`
+                        loads, and only for `test:workerd` (§4a). Held to the
+                        core by `src/room/conformance.test.ts` — one script,
+                        every adapter, byte-identical text per socket; #780
+                        adds itself to that file's `ADAPTERS`
 
 packages/             Apache-2.0, without exception
   domain/             units, core types, validation, signing, analysis (#25)
@@ -1705,8 +1730,27 @@ pnpm run typecheck
 pnpm run test
 
 # The same run with a coverage report. There is no percentage threshold and you
-# must not add one — see §5.
+# must not add one — see §5. ⚠️ Since #852 it is NOT the whole suite: it
+# `--exclude`s the two heaviest files, which the next command runs.
 pnpm run test:coverage
+
+# The files `test:coverage` excludes, with NO coverage (#852): the #545
+# near-field rides and the FIT decode fuzz, which V8's instrumentation slowed
+# about three times. They gate exactly as before; the coverage report stops
+# counting what they alone execute (§5). `pnpm run test` still runs everything.
+pnpm run test:uninstrumented
+
+# What stops those two lists coming apart (#852). Reads both scripts out of
+# package.json, asks `vitest list` what the whole suite and each half select,
+# and fails on a file in NEITHER run (CI would never run it) or in BOTH. ⚠️ An
+# `--exclude` glob is matched against each Vitest PROJECT's root, not the
+# repository's, which is why it compares selections rather than globs. Lists,
+# runs no test: under a second.
+pnpm run check:test-split
+
+# Its own suite. Fixture-driven; 25 cases on 2026-09-29 — the count is what the
+# run prints. Needs Node, so not in `check:repo`.
+bash scripts/check-test-split.test.sh
 
 # The accessibility gate (#48): every route in apps/web is rendered into a DOM
 # and audited, and the design tokens are checked for WCAG 2.2 AA contrast. This
@@ -1952,6 +1996,19 @@ pnpm --filter @onyourleft/mobile run native:closure
 pnpm --filter @onyourleft/instance run test
 pnpm --filter @onyourleft/instance run typecheck
 
+# The Durable Object adapter (#781) under a REAL workerd, run on 2026-09-29:
+# the conformance script through the adapter under workerd, the tick as a real
+# storage alarm that stops once an emptied race finishes, and a lobby evicted
+# by the runtime itself (after ~10 s idle) and restored. It bundles
+# src/room/durable-object/worker-under-test.ts with rolldown, runs the pinned
+# `workerd` binary on 127.0.0.1 with SQLite storage in a temporary directory,
+# and needs NO Cloudflare account, token or network. About 35 s, most of it
+# waiting on the runtime's own clock. ⚠️ NOT in CI and NOT in `pnpm run test`
+# (§4c): `vitest.config.ts` excludes `*.workerd.test.ts`, and
+# `src/room/conformance.test.ts` runs there against the reference and the
+# adapter under in-memory fakes, with its workerd block reported SKIPPED.
+pnpm --filter @onyourleft/instance run test:workerd
+
 # Start the instance on this machine, on 127.0.0.1:8787. ⚠️ It REFUSES to start
 # without a commit or a source URL (AGPL-3.0 §13, ADR 0036 D-6); every variable
 # it reads is in .env.example. Ctrl-C stops it. Not a gate, and nothing runs it.
@@ -2009,8 +2066,11 @@ npm view typescript-eslint peerDependencies.typescript
 # requires /source to name that commit. IMG001-IMG005: since #841 the base
 # image must be pinned by digest (IMG005) and is pulled as its own step, so a
 # Docker Hub that will not serve it is IMG004 -- the registry, named -- rather
-# than an IMG001 that reads like a broken Dockerfile. A base image already on
-# the machine is not pulled again. Removes the container and the image
+# than an IMG001 that reads like a broken Dockerfile. ⚠️ Since #852 that is
+# EVERY `FROM`, in any case, with options such as `--platform=` before the
+# image; a stage naming an earlier stage, and `scratch`, are not base images.
+# Until then it read the first line beginning `FROM` alone. A base image already
+# on the machine is not pulled again. Removes the container and the image
 # whatever happens. About 1 s with the base image cached and 2 s without on a
 # developer's machine, and 10 to 15 s on the CI runner, measured 2026-09-29.
 # In CI since #771 (§4c).
@@ -2018,8 +2078,8 @@ bash scripts/check-instance-image.sh
 
 # Its own suite (#841). A fake `docker`, `curl` and `sleep` go first on PATH,
 # the way check-third-party-notices.test.sh fakes `pnpm`, so it needs no Docker
-# and waits for nothing; every IMG id has a case that goes red. 43 cases on
-# 2026-09-29 -- the count is what the run prints.
+# and waits for nothing; every IMG id has a case that goes red. 60 cases on
+# 2026-09-29 (43 before #852) -- the count is what the run prints.
 bash scripts/check-instance-image.test.sh
 
 # The same image by hand, for #807's deployment. The commit is a REQUIRED build
@@ -2134,8 +2194,10 @@ not.
 - **Any instance feature beyond metadata.** `apps/instance` answers `/health`, `/source`,
   `/openapi.json` and `/licences/third-party.txt` and nothing else yet: no account (#772), no sync
   (#776), no room anybody can reach (#780). ⚠️ The room **core** exists since
-  [#779](https://github.com/openzigs/onyourleft/issues/779) — `src/room/core/` — and nothing mounts
-  it. Do not write a command or a test that assumes a reachable room exists.
+  [#779](https://github.com/openzigs/onyourleft/issues/779) — `src/room/core/` — and the only
+  thing that mounts it is [#781](https://github.com/openzigs/onyourleft/issues/781)'s Durable
+  Object adapter, under a local `workerd` in `test:workerd` and **deployed nowhere**. Do not write a
+  command or a test that assumes a reachable room exists.
   ⚠️ **The database and the blob store DO exist since #842** (#769, #770) — a reviewer who
   remembers "no database (#769)" in this bullet is reading the old file — but no route and no
   start-up path opens either: `main.ts` reads no database path, and the Docker image installs
@@ -2352,7 +2414,8 @@ push to `main`. It runs **exactly** the §4a commands and nothing else: `bash
 scripts/run-concurrently.test.sh`, the eight bare-clone script
 checks (`check-repo-rules`, `check-licence-hashes`, `check-env-example` and `check-doc-links`, each
 with its own fixture suite), `shellcheck scripts/*.sh`, then `pnpm install --frozen-lockfile`, `format:check`, `lint`,
-`typecheck`, `test:coverage`, `check:a11y-suite`,
+`typecheck`, `test:coverage`, `test:uninstrumented`, `check:test-split` and its suite
+`bash scripts/check-test-split.test.sh` (all three since [#852](https://github.com/openzigs/onyourleft/issues/852)), `check:a11y-suite`,
 `test:a11y`, `bash scripts/check-a11y-suite.test.sh`, `check:wiring`,
 `bash scripts/check-wiring.test.sh`, `check:capacitor`,
 `bash scripts/check-capacitor-generated.test.sh`, `check:cost-model`,
@@ -2367,21 +2430,24 @@ unexpectedly is exactly the one whose table you want, and a reporting step that 
 build is a percentage floor arriving by the back door, which §5 forbids.
 
 ⚠️ **Since [#651](https://github.com/openzigs/onyourleft/issues/651) one step, `Checks,
-concurrently`, runs twenty-four of those commands AT ONCE (twenty-two until #771 added the
-instance image, twenty-three until #841 added its suite), and a reviewer who remembers one step per
+concurrently`, runs twenty-six of those commands AT ONCE (twenty-two until #771 added the
+instance image, twenty-three until #841 added its suite, twenty-four until #852 added
+`check:test-split` and its suite), and a reviewer who remembers one step per
 command is reading the old file.** It runs the eight bare-clone script checks, `shellcheck`,
 `format:check`, `lint`, `typecheck`, `check:wiring`, `check:cost-model`, `check:licences`, `build`,
-the browser install, the instance image and six checker suites, after the install — the bare-clone checks need none
+the browser install, the instance image, `check:test-split` and seven checker suites, after the install — the bare-clone checks need none
 of it, but on their own before it they took 48 s with the runner otherwise idle. It goes through
 `scripts/run-concurrently.sh` (§4a), which labels every line with its command, waits on each
 process by itself and fails the step if **any** command failed — its own suite runs first, because
-a runner that swallowed a failure would make that step twenty-four gates removed and still look
+a runner that swallowed a failure would make that step twenty-six gates removed and still look
 green, and #651's pull request proved it red on the runner with one formatting defect (run
 36325105846: `format:check` FAILED, the other twelve then in that step finished, the job failed).
 ⚠️ **Anything that runs Vitest stays out of it**, and so do `check:capacitor` and `check:notices`,
 which each run their own install under the tree the linter is walking: Vitest's 5 s case
 timeout is already within a second of several cases on the slower runner, and beside other work
-three of them passed it (run 36324592730) — `test:a11y` and `test:coverage` each run alone. And
+three of them passed it (run 36324592730) — `test:a11y`, `test:coverage` and, since #852,
+`test:uninstrumented` each run alone. (`check:test-split` is in it: it runs `vitest list`, which
+runs no case and so has no timeout to miss.) And
 `test:coverage` and `test:browser` are **not** run together, though they are the two longest steps:
 run 36323764725 did it and both went red, because each is CPU-bound on its own.
 
@@ -2402,6 +2468,16 @@ each of those can do is turn `main` red on a day the service is down. For Docker
   builds, so a registry that will not serve it fails as `IMG004`, saying it is Docker Hub and not
   `apps/instance` — a re-run, not a fix. Before #841 it failed as `IMG001`, *"the Dockerfile did not
   build"*.
+- **Once the base image is held, the build does not ask the registry again — measured, not
+  assumed** ([#852](https://github.com/openzigs/onyourleft/issues/852), 2026-09-29). In a
+  `docker:29-dind` daemon (Docker Engine 29.8.1, its default image store) the pinned base was
+  pulled, the daemon's network was then **disconnected** (a request to `registry-1.docker.io` from
+  inside it failed to resolve), the build cache was pruned, and `docker build --no-cache` of
+  `apps/instance` succeeded in about a second with `load metadata for …@sha256:…` answered locally.
+  **Control**: the same disconnected daemon with the base image *not* held failed at exactly that
+  step, `failed to do request: Head "https://registry-1.docker.io/v2/…"`. So after `IMG004`'s pull
+  succeeds, a registry outage cannot surface as `IMG001`. ⚠️ Measured on 29.8.1 locally, not on the
+  runner's own Docker; a different engine or builder driver could resolve differently.
 - **The check stays in the required job, decided.** It is the only gate that the image builds and
   that `/source` names its commit (AGPL-3.0 §13), a second job could not block a merge, and it is
   exposed to one more registry than the job already was — the same trade as the install. Mirroring
@@ -2414,7 +2490,9 @@ each of those can do is turn `main` red on a day the service is down. For Docker
 | `apps/instance`'s unit and HTTP tests (the real listener on an ephemeral port) | the Vitest run, as one more project (`instance`) | no service, no second job; 51 cases in about 0.15 s locally |
 | The Docker image, and `/health` inside the container | `Checks, concurrently`, as `instance image` | mostly a digest-pinned pull, so it waits rather than works — the step's shape |
 | The OpenAPI drift check (#36) | the Vitest run (`src/openapi.test.ts`) | it is a byte comparison, not a tool |
-| Rooms: the conformance suite on Node and on `workerd`, and the two-browser e2e spec with its fan-out control | **not built yet** — #779, #780, #781 | #771's last two criteria are owed by the first room, not by this scaffold |
+| Rooms: the conformance suite (`src/room/conformance.test.ts`) against the reference and the Durable Object adapter under in-memory fakes, and the adapter's own cases under fakes | the Vitest run (`instance`) | #781; well under a second. #780's Node adapter joins the same file |
+| Rooms: the Durable Object adapter under a real `workerd` | **not CI** — `test:workerd`, a local command (§4a), decided by #781 | about 35 s, most of it waiting on the runtime's alarms and its ten-second eviction, which a job already past fifteen minutes on the 7763 cannot spend on every pull request; its logic runs in CI under the fakes. ⚠️ **The 35 s is a LOCAL figure** (34.6 s again on #781's review, on a Mac) — the suite has never run on the runner, so this decision rests on the local figure and #771's *"measure its cost on the runner before deciding"* is not met. ⚠️ The ~130 MB `workerd` binary is still downloaded by CI's install (§8) |
+| Rooms: the two-browser e2e spec with its fan-out control | **not built yet** — #780 | #771's last criterion is owed by the first room a browser can reach |
 | A load test, and a Cloudflare bill | **not CI** (#792, #464) | a measurement and an account, not gates |
 
 **What it cost, measured on the runner** — see the table directly below this paragraph, which
@@ -2472,13 +2550,40 @@ be clear of what it stops (§4f's #423 reason), so this has to be answered **bef
 by raising the stop again. The time is in two steps: Vitest with coverage (379–393 s) and the
 browser gate (584–605 s). The candidates, in the order they cost least in what the job proves:
 
-1. **Run the heaviest Vitest files outside coverage instrumentation.** #651 measured the #545
-   near-field rides at 216 s and the FIT fuzz at 99 s under coverage, slowed about three times by
-   instrumenting their hot loops. Run them in their own uninstrumented Vitest invocation and they
-   still gate exactly as now; what changes is that the coverage **report** stops counting their
-   lines, which §5 says is a signal and not a gate. Estimated saving on the 7763: about 200 s,
-   from #651's ratio — **not measured**, so the first pull request to do it measures it. No owner
-   decision needed; this is the one to do first.
+1. **Run the heaviest Vitest files outside coverage instrumentation — DONE by
+   [#852](https://github.com/openzigs/onyourleft/issues/852), and it bought about one minute, not
+   three.** `test:coverage` `--exclude`s the #545 near-field rides and the FIT decode fuzz, and
+   `test:uninstrumented` runs them with no coverage in a step of its own (`Tests outside coverage`);
+   `check:test-split` holds the two lists to the whole suite, once each. They still gate exactly as
+   before; what the report lost is §5's to say. #651's ratio held — the pair took 28 s of test time
+   uninstrumented against 82 s instrumented locally, and 57 s against about 307 s on the runners —
+   but the saving is smaller than that ratio predicted, because the uninstrumented run is its own
+   Vitest start-up and its wall time is the near-field file alone (43 s of a 45 s step: two files,
+   two workers, one of them idle for most of it). Measured on the 7763, the runner #771 names:
+
+   | | Run | CPU | Job | Vitest with coverage | Tests outside coverage | Both | Browser gate |
+   |---|---|---|--:|--:|--:|--:|--:|
+   | **Before** #852 | [36602099227](https://github.com/openzigs/onyourleft/actions/runs/36602099227) | EPYC 7763 | 1256 s | 399 s | | 399 s | 608 s |
+   | **Before** #852 | [36610049975](https://github.com/openzigs/onyourleft/actions/runs/36610049975) | EPYC 7763 | 1257 s | 399 s | | 399 s | 610 s |
+   | **Before** #852 | [36613423129](https://github.com/openzigs/onyourleft/actions/runs/36613423129) | EPYC 7763 | 1296 s | 416 s | | 416 s | 621 s |
+   | **After** #852 | [36615071157](https://github.com/openzigs/onyourleft/actions/runs/36615071157) | EPYC 7763 | 1220 s | 297 s | 45 s | 342 s | 616 s |
+
+   **The two Vitest steps went from 399–416 s to 342 s: about −63 s, n = 1 after.** The job went
+   from 1256–1296 s to 1220 s, −50 s against the mean, inside what the browser gate alone varies
+   by. The "before" rows are other branches' pull requests on the same tree ancestry (#842, #839),
+   because no `main` run in that window printed its CPU; #850's own run
+   ([36612643969](https://github.com/openzigs/onyourleft/actions/runs/36612643969), the tree this
+   branch starts from) landed on a 9V74 at 1170 s with 376 s of coverage. **It did not free three
+   minutes**, which is the threshold #852 set for reporting back: the rest has to come from option
+   2 or from the browser gate, and both are the owner's. The next files by weight
+   (`realistic-textures`, `GameView`, `racing-line`, `line-on-the-road`: about 100 s of test time
+   under coverage on the 9V74) are slowed about 2× rather than 3× — measured locally, 29 s against
+   14 s — so moving them too would buy perhaps 25 s more of wall time and lose four more files from
+   the report.
+   ⚠️ **#771's second `main` sample on the 7763 is still owed**: the one `main` run after #850's
+   tree ([36615069379](https://github.com/openzigs/onyourleft/actions/runs/36615069379), 1150 s)
+   printed no CPU. The CPU line in these logs is not the runner's: it is printed by one Vitest
+   test (the racing-line timing), and only on some runs.
 2. **A second, non-required job for the heaviest gates**, nightly or on push to `main`. It would buy
    the most, and it is an **owner decision**: a job that is not `Repository rules` cannot block a
    merge (the warning at the top of this section), so whatever moves there stops being a gate on a
@@ -2780,6 +2885,7 @@ would otherwise be documented and unenforced, which is the gap this project keep
 | `boundaries/dependencies` | an import from `packages/*` into `apps/*`, in either the relative (`../../../apps/web/src/...`) or the workspace (`@onyourleft/web`) spelling. Dependencies point one way |
 | `@typescript-eslint/no-restricted-imports` in `packages/domain`, `packages/physics`, `packages/sensors/src`, `packages/sensors/protocol` and `packages/sensors/web-bluetooth` | naming **any** Node builtin — the list is derived from `builtinModules`, not typed out, so `events`, `util` and `stream/promises` fail exactly as `node:fs` does — or `react`, `react-dom`, `vite` or `dexie`, or a BLE library |
 | `no-restricted-globals` in `packages/domain`, `packages/physics`, `packages/sensors/src` and `packages/sensors/protocol` | naming a DOM global (`window`, `document`, `navigator`, `location`, `history`, `localStorage`, `sessionStorage`, `indexedDB`, `caches`), a Node global (`process`, `Buffer`, `__dirname`, `__filename`, `global`, `require`) or a network global (`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Request`, `Response`, `Headers`). This one **is** a named list; the closure is the typechecker below |
+| `no-restricted-globals` in `apps/instance/src`, **except the Node adapter** | naming a Node-only global — `Buffer`, `process`, `require`, `module`, `exports`, `__dirname`, `__filename`, `global`, `setImmediate`, `clearImmediate` — anywhere the core mounts unchanged under `workerd` ([ADR 0037](docs/adr/0037-instance-runtime-hosting-and-transport.md) D-2, [#852](https://github.com/openzigs/onyourleft/issues/852)). ⚠️ The exemption is **by file name, not directory**: `main.ts`, `node-listener.ts`, `store/node-sqlite.ts`, `blob/disk-blob-store.ts`, and tests and `*-testing.ts`/`testing/` support — so a new core file is covered with no edit and a new adapter file is a line in `eslint.config.js`. `fetch`, `Request`, `Response`, `Headers` and `crypto` are **not** listed: `workerd` has them and the handler is written against them. ⚠️ **This is the only gate for it on a pull request**: the wide `tsconfig.json` carries `@types/node`, so `process` typechecks, and the `workerd` suite is local-only. Probed: `Buffer`, `process` and `__dirname` in `pagination.ts` passed `eslint` before this block and are three errors after; `process` in `node-listener.ts` is still none. It names globals only — a `node:` **import** in the core is still caught by nothing but `workerd` |
 | `no-restricted-globals` in `packages/sensors/web-bluetooth` | naming any of the same list **except `navigator`** — the adapter is the transport boundary and `navigator.bluetooth` is the one platform API it exists to reach. The exception is derived by subtracting one name from the list above rather than restating it, so the two cannot drift |
 
 `packages/domain/tsconfig.json` narrows `lib` to `ES2024` and sets `types: []`. That is the closure
@@ -3842,6 +3948,16 @@ its output; including it in the report would only mix a generator's coverage int
 denominator. #107's observation that the report listed `apps/web` alone at 125 statements predated
 the second pattern and is no longer true: all six packages appear (`packages/physics` since #88).
 
+⚠️ **Since [#852](https://github.com/openzigs/onyourleft/issues/852) the report is taken WITHOUT
+two test files**, and a module only they exercise reads as untested in it. `test:coverage` excludes
+the #545 near-field rides and the FIT decode fuzz, which `test:uninstrumented` runs with no
+coverage (§4c says why: CI time). Measured locally on 2026-09-29, the total moved from 94.43 % of
+statements to 93.19 %, and almost all of it is two files: `apps/web/src/game/near-field.ts`
+**98.87 % → 23.22 %** and `near-field-testing.ts` 92.54 % → 0 %; `packages/fit/src/xml/` lost 12
+statements, and nothing else moved. Those two numbers are the instrumentation's absence, not the
+tests': read a low figure on either file as *not measured*, and run
+`pnpm exec vitest run --coverage apps/web/src/game/near-field.test.ts` for the real one.
+
 ### Verifying a *compile-time* guarantee
 
 A brand, a nominal type or a `@ts-expect-error` is only a guarantee while its absence breaks the
@@ -4303,9 +4419,13 @@ because the copy under `node_modules/.pnpm` is read too.
 **An install script is a decision, recorded in `pnpm-workspace.yaml`.** pnpm 11 does not run
 dependency build scripts until `allowBuilds` names them, and leaves `pnpm install` exiting 1 until
 each is answered `true` or `false`. Answer it rather than deleting the entry: an install script runs
-arbitrary code with your privileges before any lint or test gate sees the package. The one entry
-today is `unrs-resolver`, answered `false` — it ships prebuilt native bindings as platform optional
-dependencies, so the script has nothing to do.
+arbitrary code with your privileges before any lint or test gate sees the package. There are two
+entries, both answered `false` for the same reason: `unrs-resolver` ships prebuilt native bindings
+as platform optional dependencies, so its script has nothing to do; and `workerd` (since
+[#781](https://github.com/openzigs/onyourleft/issues/781)) is a binary in its platform package
+(`@cloudflare/workerd-<os>-<arch>`), whose script only re-links it or, when that package is
+missing, downloads it from npm at install time. ⚠️ That package is ~130 MB, so every install —
+CI's included — downloads it, though CI runs nothing that uses it (§4c).
 
 **That block is therefore a security-relevant file on every fork pull request.** CI installs from the
 *fork's* `pnpm-workspace.yaml`, so flipping an entry to `true` and adding a dependency is what makes
@@ -4493,6 +4613,10 @@ top of an issue **supersedes its body**.
 | What the owner actually decided about the camera, and which of the four answers changes a promise | [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) §Amendments, [#495](https://github.com/openzigs/onyourleft/issues/495) |
 | What the no-network promise becomes, the one egress it does not cover, and the three artefacts that move with it | [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) §Amendments §Q1, `apps/web/src/privacy/no-network.test.ts`, [`docs/privacy-policy.md`](docs/privacy-policy.md) |
 | Which one module may send anything off the device, and what goes red for a second | `apps/web/src/camera/analysis-transport.ts`, `apps/web/src/privacy/no-network.test.ts` §`PERMITTED_NETWORK_CALLS`, [#387](https://github.com/openzigs/onyourleft/issues/387) |
+| What is masked before anything is sent to a hosted model, what is deliberately not, and why the original text is replaced rather than the folded reading | `apps/web/src/ride-analysis/hosted-mask.ts`, [#839](https://github.com/openzigs/onyourleft/issues/839) |
+| What proves no hosted request skips the masking, and the planted details it looks for | `apps/web/src/ride-analysis/hosted-mask-reachable.test.ts`, `apps/web/src/ride-analysis/personal-details-testing.ts` |
+| Where the rider's list of words to mask is kept, why it is not in the account export, and why the screen refuses what the store would silently drop | `packages/store/src/masked-words.ts`, `apps/web/src/athlete/masked-words.ts`, `apps/web/src/athlete/MaskedWordsPanel.tsx` |
+| Why the ride page shows what a hosted run will send before the first one, and why that preview is the sent text | `apps/web/src/ride-analysis/ride-analysis.ts` §`previewHostedRequest`, `apps/web/src/ride-analysis/RideWriteUpControl.tsx` §`HostedPreviewPanel` |
 | Whether a hosted model on the rider's own key may be used, why it is never sent a picture, where the key lives and what stops it reaching a log, an error, an export or `packages/store` | `apps/web/src/camera/hosted-model.ts`, `apps/web/src/camera/hosted-transport.ts`, `apps/web/src/camera/hosted-key.test.ts`, `apps/web/src/camera/session.ts` §`agreeToHosted`, [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) §Amendments 2026-09-28, [#518](https://github.com/openzigs/onyourleft/issues/518) |
 | How the tablet and the tripod phone connect with no server, what a stranger on the same Wi-Fi can and cannot do, and why the no-network gate cannot see WebRTC yet | [ADR 0033](docs/adr/0033-side-camera-link.md) D-1, D-4, D-9, [#532](https://github.com/openzigs/onyourleft/issues/532) |
 | Why the rider's computer must be on their own network by its spelling, and why a hosted model cannot be typed in | `apps/web/src/camera/analysis-endpoint.ts` §`addressSpaceOf`, [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) §Amendments §Q1 |
@@ -4900,6 +5024,7 @@ top of an issue **supersedes its body**.
 | When a session's placement becomes the next framing reference, and why a failed check keeps the old one | `apps/web/src/camera/side-analysis.ts` §`REFERENCE_MOVES_ON`, [#388](https://github.com/openzigs/onyourleft/issues/388) |
 | What the side camera's post-ride report may say, where every sentence lives, and why it has no numbers yet | `apps/web/src/camera/side-report.ts` §`MEASURED_SPREAD_DEGREES`, `apps/web/src/camera/side-report-wording.ts`, [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md) D-2, [#388](https://github.com/openzigs/onyourleft/issues/388) |
 | Whether live in-ride coaching exists, what its round trip to the rider's computer measured, and what a pose from a general vision model is worth | [`docs/spikes/0016-live-in-ride-coaching.md`](docs/spikes/0016-live-in-ride-coaching.md), [#389](https://github.com/openzigs/onyourleft/issues/389) |
+| How riders would talk in a room (a Discord bot, the Social SDK, or our own WebRTC), why a voice link alone cannot enforce a ban, and why the bot needs no dependency | [`docs/spikes/0017-voice-chat-for-rooms.md`](docs/spikes/0017-voice-chat-for-rooms.md), [#794](https://github.com/openzigs/onyourleft/issues/794) |
 | Which ride a side-camera session's report is saved with, and when it is dropped instead | `apps/web/src/camera/side-report-keeper.ts` |
 | Where the side camera's pose summary is made, why it is absent rather than zeros, which poses it may read, and what exports and erases it | `apps/web/src/camera/side-report.ts` §`sideSessionFrom`, `apps/web/src/camera/side-session-summary.ts`, `apps/web/src/transfer/export-everything.ts` §`ManifestPoseSummary`, [#801](https://github.com/openzigs/onyourleft/issues/801) |
 | What stops any screen rendering an absolute joint angle or a frontal-plane word, and the three exemptions | `apps/web/src/camera/no-absolute-angles.ts` §`EXEMPT`, `apps/web/src/camera/no-absolute-angles.test.ts`, [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md) D-8 |

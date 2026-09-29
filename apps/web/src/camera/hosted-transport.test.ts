@@ -27,6 +27,8 @@ import {
 import { cleanFrameBytes } from './testing';
 import type { StepRequest } from '../ride-analysis/model-step-port';
 import { sealStep, type SealedStep } from '../ride-analysis/sealed-step';
+import { PLANTED_GUARD, patternsOnlyGuard } from '../ride-analysis/personal-details-testing';
+import { PATTERNS_ONLY, type MaskingGuard } from '../ride-analysis/hosted-mask';
 
 const KEY = 'fixture-hosted-key-DO-NOT-LEAK-0123456789';
 
@@ -104,7 +106,7 @@ function stringsIn(value: unknown, into: string[] = []): string[] {
 
 describe('what leaves', () => {
   it('is the model, the fixed prompt, and two limits — and nothing else', () => {
-    const body = hostedRequestBody('a-model', QUESTION);
+    const body = hostedRequestBody('a-model', QUESTION, PATTERNS_ONLY);
     expect(Object.keys(body).sort()).toStrictEqual(['max_tokens', 'messages', 'model', 'stream']);
     expect(body).toStrictEqual({
       model: 'a-model',
@@ -115,7 +117,7 @@ describe('what leaves', () => {
   });
 
   it('carries no image part and no data: URL anywhere in it', () => {
-    const strings = stringsIn(hostedRequestBody('a-model', QUESTION));
+    const strings = stringsIn(hostedRequestBody('a-model', QUESTION, PATTERNS_ONLY));
     for (const text of strings) {
       expect(text).not.toMatch(/^data:/);
       expect(text).not.toMatch(/image/i);
@@ -124,7 +126,7 @@ describe('what leaves', () => {
 
   it('sends the key in the Authorization header and nowhere else', async () => {
     const { send, sent } = recordingSend(() => modelReply('ready'));
-    const port = hostedModelPort(saved(), { send });
+    const port = hostedModelPort(saved(), { guard: patternsOnlyGuard, send });
     const outcome = await port?.sendHostedQuestion(QUESTION).outcome;
     expect(outcome?.kind).toBe('described');
     expect(sent).toHaveLength(1);
@@ -153,7 +155,7 @@ describe('a picture cannot reach it', () => {
 
   it('does not compile a request that carries a frame', () => {
     const { send } = recordingSend(() => modelReply('ready'));
-    const port = hostedModelPort(saved(), { send });
+    const port = hostedModelPort(saved(), { guard: patternsOnlyGuard, send });
     // The TYPE half. Deleting the excess property turns this directive into
     // `TS2578: Unused '@ts-expect-error'`, which is CLAUDE.md §5's mutation.
     // @ts-expect-error — a hosted request is a question name and nothing else.
@@ -163,7 +165,7 @@ describe('a picture cannot reach it', () => {
 
   it('refuses one smuggled past the compiler, before anything is sent', async () => {
     const send = vi.fn<HostedSend>();
-    const port = hostedModelPort(saved(), { send });
+    const port = hostedModelPort(saved(), { guard: patternsOnlyGuard, send });
     const smuggled = { question: 'connection-check', frame } as unknown as HostedRequest;
     expect(isBuiltRequest(smuggled)).toBe(false);
     expect(await port?.sendHostedQuestion(smuggled).outcome).toStrictEqual({
@@ -175,7 +177,7 @@ describe('a picture cannot reach it', () => {
 
   it('refuses a question it does not know', async () => {
     const send = vi.fn<HostedSend>();
-    const port = hostedModelPort(saved(), { send });
+    const port = hostedModelPort(saved(), { guard: patternsOnlyGuard, send });
     const unknown = { question: 'describe-the-rider' } as unknown as HostedRequest;
     expect((await port?.sendHostedQuestion(unknown).outcome)?.kind).toBe('failed');
     expect(send).not.toHaveBeenCalled();
@@ -212,19 +214,28 @@ describe('when the other end misbehaves', () => {
     [413, 'failed-on-service'],
   ] as const)('reads a %i as %s', async (status, failure) => {
     const { send } = recordingSend(() => modelReply('ready', status));
-    const outcome = await hostedModelPort(saved(), { send })?.sendHostedQuestion(QUESTION).outcome;
+    const outcome = await hostedModelPort(saved(), {
+      guard: patternsOnlyGuard,
+      send,
+    })?.sendHostedQuestion(QUESTION).outcome;
     expect(outcome).toStrictEqual({ kind: 'failed', failure });
   });
 
   it('reads a reply that is not a model’s as malformed', async () => {
     const { send } = recordingSend(() => new Response('{"hello":1}', { status: 200 }));
-    const outcome = await hostedModelPort(saved(), { send })?.sendHostedQuestion(QUESTION).outcome;
+    const outcome = await hostedModelPort(saved(), {
+      guard: patternsOnlyGuard,
+      send,
+    })?.sendHostedQuestion(QUESTION).outcome;
     expect(outcome).toStrictEqual({ kind: 'failed', failure: 'malformed' });
   });
 
   it('puts nothing of a rejection in the outcome — its message may quote the key', async () => {
     const send: HostedSend = () => Promise.reject(new Error(`refused Bearer ${KEY}`));
-    const outcome = await hostedModelPort(saved(), { send })?.sendHostedQuestion(QUESTION).outcome;
+    const outcome = await hostedModelPort(saved(), {
+      guard: patternsOnlyGuard,
+      send,
+    })?.sendHostedQuestion(QUESTION).outcome;
     expect(outcome).toStrictEqual({ kind: 'failed', failure: 'unreachable' });
     expect(JSON.stringify(outcome)).not.toContain(KEY);
   });
@@ -235,7 +246,13 @@ describe('when the other end misbehaves', () => {
       signal = init.signal ?? undefined;
       return new Promise(() => undefined);
     };
-    const call = hostedModelPort(saved(), { send })?.sendHostedQuestion(QUESTION);
+    const call = hostedModelPort(saved(), { guard: patternsOnlyGuard, send })?.sendHostedQuestion(
+      QUESTION,
+    );
+    // Sent once the rider's guard has been read (#839).
+    await vi.waitFor(() => {
+      expect(signal).toBeDefined();
+    });
     call?.cancel();
     call?.cancel();
     expect(await call?.outcome).toStrictEqual({ kind: 'failed', failure: 'cancelled' });
@@ -252,13 +269,16 @@ describe('when the other end misbehaves', () => {
 
 describe('no port', () => {
   it('for nothing saved', () => {
-    expect(hostedModelPort(undefined)).toBeUndefined();
+    expect(hostedModelPort(undefined, { guard: patternsOnlyGuard })).toBeUndefined();
   });
 
   it('for a hand-built service that the rules would refuse', () => {
     const send = vi.fn<HostedSend>();
     expect(
-      hostedModelPort({ address: 'http://models.example.invalid', model: 'm', key: KEY }, { send }),
+      hostedModelPort(
+        { address: 'http://models.example.invalid', model: 'm', key: KEY },
+        { guard: patternsOnlyGuard, send },
+      ),
     ).toBeUndefined();
     expect(send).not.toHaveBeenCalled();
   });
@@ -267,7 +287,7 @@ describe('no port', () => {
 describe('a step of the ride analysis (#803)', () => {
   it('sends the step’s two prompts, its own limits and nothing else — no response_format hint', () => {
     const step = sealed();
-    const body = hostedRequestBody('a-model', { step });
+    const body = hostedRequestBody('a-model', { step }, PATTERNS_ONLY);
     expect(Object.keys(body).sort()).toStrictEqual([
       'max_tokens',
       'messages',
@@ -289,7 +309,10 @@ describe('a step of the ride analysis (#803)', () => {
 
   it('sends one request per step, with the key in the header and the step in the body', async () => {
     const { send, sent } = recordingSend(() => modelReply('{"section":1}', 200, 'stop'));
-    const outcome = await hostedModelPort(saved(), { send })?.sendHostedQuestion({
+    const outcome = await hostedModelPort(saved(), {
+      guard: patternsOnlyGuard,
+      send,
+    })?.sendHostedQuestion({
       step: sealed(),
     }).outcome;
     expect(outcome).toStrictEqual({
@@ -300,7 +323,7 @@ describe('a step of the ride analysis (#803)', () => {
     expect(sent).toHaveLength(1);
     const [{ init }] = sent as [Sent];
     expect(JSON.parse(init.body as string)).toStrictEqual(
-      hostedRequestBody('a-model', { step: sealed() }),
+      hostedRequestBody('a-model', { step: sealed() }, PATTERNS_ONLY),
     );
     expect(init.body as string).not.toContain(KEY);
     expect((init.headers as Record<string, string>).Authorization).toBe(`Bearer ${KEY}`);
@@ -313,7 +336,10 @@ describe('a step of the ride analysis (#803)', () => {
     ['content_filter', 'other'],
   ] as const)('reads a finish_reason of %s as %s', async (reason, finish) => {
     const { send } = recordingSend(() => modelReply('A steady ride.', 200, reason));
-    const outcome = await hostedModelPort(saved(), { send })?.sendHostedQuestion({
+    const outcome = await hostedModelPort(saved(), {
+      guard: patternsOnlyGuard,
+      send,
+    })?.sendHostedQuestion({
       step: sealed(),
     }).outcome;
     expect(outcome).toMatchObject({ kind: 'described', finish });
@@ -331,7 +357,12 @@ describe('a step of the ride analysis (#803)', () => {
       signal = init.signal ?? undefined;
       return new Promise(() => undefined);
     };
-    const call = hostedModelPort(saved(), { send })?.sendHostedQuestion({ step: sealed() });
+    const call = hostedModelPort(saved(), { guard: patternsOnlyGuard, send })?.sendHostedQuestion({
+      step: sealed(),
+    });
+    await vi.waitFor(() => {
+      expect(signal).toBeDefined();
+    });
     expect(signal?.aborted).toBe(false);
     call?.cancel();
     expect(await call?.outcome).toStrictEqual({ kind: 'failed', failure: 'cancelled' });
@@ -349,7 +380,7 @@ describe('only a step the runner sealed is sent (#803)', () => {
 
   it('does not compile a step the caller wrote, or a picture of any kind in its place', () => {
     const { send } = recordingSend(() => modelReply('ready'));
-    const port = hostedModelPort(saved(), { send });
+    const port = hostedModelPort(saved(), { guard: patternsOnlyGuard, send });
     const pictures = {
       bytes: new Uint8Array(4),
       blob: new globalThis.Blob([new Uint8Array(4)]),
@@ -398,7 +429,7 @@ describe('only a step the runner sealed is sent (#803)', () => {
     ],
   ] as const)('refuses %s before anything is sent', async (_name, build) => {
     const send = vi.fn<HostedSend>();
-    const port = hostedModelPort(saved(), { send });
+    const port = hostedModelPort(saved(), { guard: patternsOnlyGuard, send });
     const smuggled = build() as unknown as HostedRequest;
     expect(isBuiltRequest(smuggled)).toBe(false);
     expect(await port?.sendHostedQuestion(smuggled).outcome).toStrictEqual({
@@ -420,5 +451,62 @@ describe('only a step the runner sealed is sent (#803)', () => {
       (step as { user: string }).user = 'data:image/png;base64,AAAA';
     }).toThrow(TypeError);
     expect(step.user).toBe(STEP.user);
+  });
+});
+
+describe('every hosted body is masked with the rider’s guard (#839)', () => {
+  it('masks a step’s two prompts, and a real guard’s words and zones with them', () => {
+    const step = sealed({
+      system: 'Write to priya@example.com about Kestrel Farm.',
+      user: 'Rode from Oakbrook past 12 Acacia Avenue.',
+    });
+    const body = hostedRequestBody('a-model', { step }, PLANTED_GUARD);
+    expect(body.messages).toStrictEqual([
+      { role: 'system', content: 'Write to [email] about [masked].' },
+      { role: 'user', content: 'Rode from [place] past [address].' },
+    ]);
+    // The model name is the rider's own setting and is sent as typed.
+    expect(hostedRequestBody('Kestrel Farm', { step }, PLANTED_GUARD).model).toBe('Kestrel Farm');
+  });
+
+  it('sends the masked body it built, read with the guard for that request', async () => {
+    const { send, sent } = recordingSend(() => modelReply('ok', 200, 'stop'));
+    const guard = vi.fn(async () => Promise.resolve(PLANTED_GUARD));
+    const step = sealed({ user: 'Home is Kestrel Farm.' });
+    await hostedModelPort(saved(), { guard, send })?.sendHostedQuestion({ step }).outcome;
+    expect(guard).toHaveBeenCalledTimes(1);
+    const [{ init }] = sent as [Sent];
+    expect(init.body as string).not.toContain('Kestrel');
+    expect(JSON.parse(init.body as string)).toStrictEqual(
+      hostedRequestBody('a-model', { step }, PLANTED_GUARD),
+    );
+  });
+
+  it('sends nothing when the guard cannot be read, and says so', async () => {
+    const send = vi.fn<HostedSend>();
+    const outcome = await hostedModelPort(saved(), {
+      guard: async () => Promise.reject(new Error('the store is blocked')),
+      send,
+    })?.sendHostedQuestion({ step: sealed() }).outcome;
+    expect(outcome).toStrictEqual({ kind: 'failed', failure: 'not-masked' });
+    expect(send).not.toHaveBeenCalled();
+    expect(HOSTED_FAILURE_TEXT['not-masked']).toContain('nothing was sent');
+  });
+
+  it('sends nothing when cancelled while the guard is being read', async () => {
+    const send = vi.fn<HostedSend>();
+    let release: (guard: MaskingGuard) => void = () => undefined;
+    const call = hostedModelPort(saved(), {
+      guard: async () =>
+        new Promise<MaskingGuard>((resolve) => {
+          release = resolve;
+        }),
+      send,
+    })?.sendHostedQuestion({ step: sealed() });
+    call?.cancel();
+    release(PATTERNS_ONLY);
+    expect(await call?.outcome).toStrictEqual({ kind: 'failed', failure: 'cancelled' });
+    await Promise.resolve();
+    expect(send).not.toHaveBeenCalled();
   });
 });

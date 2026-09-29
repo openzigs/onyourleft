@@ -397,7 +397,7 @@ describe('a server that refuses the response_format hint (#804, from #828’s re
   it('remembers a refusal: the next structured step on the same port goes without the hint (#805)', async () => {
     const { send, sent } = recordingSend((init) =>
       bodyText(init).includes('response_format')
-        ? new Response('', { status: 400 })
+        ? new Response('{"error":"unknown field response_format"}', { status: 400 })
         : reply('{"section":1,"notes":"Steady."}'),
     );
     const port = portWith(send);
@@ -414,6 +414,39 @@ describe('a server that refuses the response_format hint (#804, from #828’s re
     expect(bodyOf(fresh.sent[0] as Sent)).toHaveProperty('response_format');
   });
 
+  it('retries, and does NOT remember, a 400 whose body does not name the hint (#816)', async () => {
+    // A 400 for another reason that clears on the retry says nothing about
+    // the hint; remembering it would drop the hint for the port's whole life.
+    let calls = 0;
+    const { send, sent } = recordingSend(() => {
+      calls += 1;
+      return calls === 1
+        ? new Response('{"error":"model is loading"}', { status: 400 })
+        : reply('{"section":1,"notes":"Steady."}');
+    });
+    const port = portWith(send);
+    expect((await port.runModelStep(STEP, live())).kind).toBe('answered');
+    expect(sent).toHaveLength(2);
+    await port.runModelStep(STEP, live());
+    expect(sent).toHaveLength(3);
+    expect(bodyOf(sent[2] as Sent)).toHaveProperty('response_format');
+  });
+
+  it.each(['response_format', 'JSON_SCHEMA'])(
+    'remembers a refusal whose body names the hint as %s',
+    async (named) => {
+      const { send, sent } = recordingSend((init) =>
+        bodyText(init).includes('response_format')
+          ? new Response(`{"error":"unsupported: ${named}"}`, { status: 422 })
+          : reply('{"section":1,"notes":"Steady."}'),
+      );
+      const port = portWith(send);
+      await port.runModelStep(STEP, live());
+      await port.runModelStep(STEP, live());
+      expect(sent).toHaveLength(3);
+    },
+  );
+
   it('does not remember a refusal when the unhinted request failed as well', async () => {
     const { send, sent } = recordingSend(() => new Response('', { status: 400 }));
     const port = portWith(send);
@@ -429,7 +462,7 @@ describe('a server that refuses the response_format hint (#804, from #828’s re
       requests.push(request);
       return Promise.resolve(
         'response_format' in request.json
-          ? { status: 422, body: '' }
+          ? { status: 422, body: '{"detail":"response_format is not supported"}' }
           : {
               status: 200,
               body: JSON.stringify({

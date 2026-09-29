@@ -789,6 +789,34 @@ describe('version 12 to version 13 — #800, the first record migration', () => 
     expect(SIDE_REPORT_POSE_SUMMARY.description).toMatch(/down drops/);
   });
 
+  /**
+   * #816, from #815's review: `down` carries the same `copiedIfArray` guard
+   * as `up`, and until now no test sent a malformed row through it. A
+   * downgrade that threw on one hand-edited report would strand every other.
+   */
+  it('down carries a malformed report across unchanged rather than throwing, and still drops its pose', () => {
+    const malformed = {
+      activityId: 'ride-bad',
+      athleteId: 'athlete-a',
+      summary: 'Edited.',
+      observations: 42,
+      pose: null,
+    } as unknown as PersistedSideCameraReport;
+    expect(SIDE_REPORT_POSE_SUMMARY.down(malformed)).toStrictEqual({
+      activityId: 'ride-bad',
+      athleteId: 'athlete-a',
+      summary: 'Edited.',
+      observations: 42,
+    });
+  });
+
+  it('down copies a well-formed observation list rather than sharing it', () => {
+    const kept: PersistedSideCameraReport = { ...V12_REPORTS[0]!, pose: null };
+    const rolledBack = SIDE_REPORT_POSE_SUMMARY.down(kept);
+    expect(rolledBack.observations).toStrictEqual(kept.observations);
+    expect(rolledBack.observations).not.toBe(kept.observations);
+  });
+
   it('is pure — the fixture is not mutated', () => {
     const before = structuredClone(V12_REPORTS);
     migrateDown(SIDE_REPORT_POSE_SUMMARY, migrateUp(SIDE_REPORT_POSE_SUMMARY, V12_REPORTS));

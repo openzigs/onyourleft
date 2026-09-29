@@ -47,6 +47,7 @@ import { hostedModelPort } from './hosted-transport';
 import { hostedStepPort } from '../ride-analysis/hosted-step';
 import { manualSchedule, scriptedCamera, sizedFrameBytes } from './testing';
 import { specifiersIn } from './import-walk-testing';
+import { patternsOnlyGuard } from '../ride-analysis/personal-details-testing';
 
 const SOURCE_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -459,6 +460,7 @@ describe('4. a ride analysis’s reply reaches only the runner (#802)', () => {
       schedule: manualSchedule().schedule,
       hosted: () =>
         hostedModelPort(service, {
+          guard: patternsOnlyGuard,
           send: async () =>
             Promise.resolve(
               new Response(
