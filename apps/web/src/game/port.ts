@@ -34,6 +34,7 @@
  * hardware, and it is recorded as outstanding in `README.md` beside this file.
  */
 
+import type { PlacedStand } from './gantry';
 import type { KitColour } from '@onyourleft/store';
 
 import type { HorizonRelief, TerrainMesh } from './landform';
@@ -250,6 +251,13 @@ export interface SceneFrame {
    * comparison include the water moving.
    */
   readonly water: WaterFrame;
+  /**
+   * The start and finish gantries and the boards before them, within reach of
+   * the rider, placed on the drawn road — #679 (`gantry.ts` §`linesNear`).
+   * Empty everywhere else on a route, which is what makes them cost nothing
+   * there. Only the realistic world draws them.
+   */
+  readonly lines: readonly PlacedStand[];
 }
 
 /** What {@link SceneFrame.water} carries. */

@@ -161,6 +161,7 @@ import {
   DynamicDrawUsage,
   EquirectangularReflectionMapping,
   Euler,
+  FileLoader,
   FogExp2,
   Group,
   HalfFloatType,
@@ -205,7 +206,9 @@ import {
   Vector3,
   WebGLRenderer,
   type Bone,
-  type DataTexture,
+  DataTexture,
+  RedFormat,
+  UnsignedByteType,
   type Material,
   type Object3D,
   type SkinnedMesh,
@@ -331,6 +334,10 @@ import {
   type StructureSurface,
 } from './realistic-assets';
 import { REALISTIC_TRANSCODER_DIRECTORY } from './transcoder-files';
+import { LABEL_FONT } from '../map/basemap';
+import { BANNER_CELLS, bannerAtlas, readGlyphRange, type BannerAtlas } from './banner-atlas';
+import { bannerCells } from './gantry-wording';
+import { bannerPlace, standBoxes, standPoint, type PlacedStand, type StandBox } from './gantry';
 import {
   FOLIAGE_SWAY_METRES,
   FOLIAGE_WAVES,
@@ -5180,6 +5187,11 @@ interface RealisticWorld {
   readonly rider: RealisticRiderMaps;
   /** The bicycle's four drawn maps — #624. */
   readonly bicycle: RealisticBicycleMaps;
+  /**
+   * The gantries' lettering — #679: one byte of coverage a texel, from the
+   * app's own glyph range. Absent where the loaders read no glyphs.
+   */
+  readonly banners?: { readonly atlas: BannerAtlas; readonly texture: DataTexture };
 }
 
 /**
@@ -5206,6 +5218,13 @@ export interface RealisticLoaders {
    * {@link loadRealisticWorld} calls it whether the load succeeded or not.
    */
   readonly dispose?: () => void;
+  /**
+   * Reads a glyph range file's bytes — #679: the gantries' banners are
+   * lettered from the map's own glyphs (`banner-atlas.ts`). Optional, for a
+   * test's loaders that build a world with no banners; the product's supply
+   * it, and the browser gate reads the lettering off the drawing buffer.
+   */
+  readonly glyphs?: (url: string) => Promise<Uint8Array>;
 }
 
 /**
@@ -5346,6 +5365,12 @@ function productRealisticLoaders(): RealisticLoaders {
     model: (url) => loaders().model(url),
     texture: (url) => loaders().texture(url),
     sky: (url) => loaders().sky(url),
+    // Through three's own loader, as every other realistic file is: the one
+    // network rule this client keeps names no `fetch` here (`no-network.test.ts`).
+    glyphs: async (url) =>
+      new Uint8Array(
+        (await new FileLoader().setResponseType('arraybuffer').loadAsync(url)) as ArrayBuffer,
+      ),
     dispose: () => {
       built?.dispose();
       built = undefined;
@@ -5579,6 +5604,13 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     });
   try {
     const sky = texture(() => loaders.sky(realisticUrl(REALISTIC_SKY)));
+    // #679: the map's own glyph range, for the gantries' banners.
+    const glyphs =
+      loaders.glyphs === undefined
+        ? Promise.resolve(undefined)
+        : started(() =>
+            (loaders.glyphs as (url: string) => Promise<Uint8Array>)(BANNER_GLYPHS_URL),
+          );
     const road = {
       colour: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.road.colour))),
       normal: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.road.normal))),
@@ -5648,6 +5680,7 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     // makes this a rider's path) that is most of the set. So a failure waits
     // for the loads still in flight, and then releases all of them.
     const settled = await Promise.allSettled([
+      glyphs,
       sky,
       road.colour,
       road.normal,
@@ -5777,6 +5810,9 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     // threw, must leave the world a view draws intact — the first version of
     // this released first and lost both, which `realistic-renderer.test.ts`
     // §"never half a world" caught.
+    const glyphBytes = await glyphs;
+    const banners = glyphBytes === undefined ? undefined : bannerTextureOf(glyphBytes);
+    if (banners !== undefined) loaded.textures.push(banners.texture);
     const previous = realisticWorld;
     realisticWorld = {
       sky: skyRead,
@@ -5789,6 +5825,7 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       body,
       rider: riderTextures,
       bicycle,
+      ...(banners === undefined ? {} : { banners }),
     };
     // #545: the near-plane cull's shapes, built now rather than on a frame.
     warmNearFieldShapes('realistic');
@@ -5920,6 +5957,7 @@ export function realisticWorldLoaded(): boolean {
 /** Releases a realistic world that another has replaced. */
 function releaseRealisticWorld(world: RealisticWorld): void {
   world.sky.texture.dispose();
+  world.banners?.texture.dispose();
   for (const texture of [
     world.road.colour,
     world.road.normal,
@@ -7123,6 +7161,8 @@ const FOLIAGE = {
   oylSunDirect: { value: 0.5 },
   /** 1 in the product; 0 is the browser gate's control, today's unlit strip. @see impostorsLitOf */
   oylImpostorLit: { value: 1 },
+  /** 1 in the product; 0 holds every plant still. @see foliageStillOf */
+  oylSwayScale: { value: 1 },
 };
 
 /** Which layers of a merged tree material are leaves — #630. @see mergeShapeMaterials */
@@ -7138,11 +7178,12 @@ const SWAYING = new WeakSet<Material>();
 const FOLIAGE_SWAY_COMMON = /* glsl */ `
 uniform float oylWindTime;
 uniform vec2 oylWindDirection;
+uniform float oylSwayScale;
 float oylSwayWave(float phase) {
-  return ${FOLIAGE_WAVES.map(
+  return oylSwayScale * (${FOLIAGE_WAVES.map(
     ([rate, weight, phases]) =>
       `${glslFloat(weight)} * sin(oylWindTime * ${glslFloat(rate)} + phase * ${glslFloat(phases)})`,
-  ).join(' + ')};
+  ).join(' + ')});
 }
 float oylSwayPhase(vec2 place) {
   return fract(sin(dot(floor(place * 10.0), vec2(12.9898, 78.233))) * 43758.5453) * 6.2831853;
@@ -7178,6 +7219,7 @@ function withFoliageSwayOf(shape: RealisticShape): void {
       earlier(shader, renderer);
       shader.uniforms['oylWindTime'] = FOLIAGE.oylWindTime;
       shader.uniforms['oylWindDirection'] = FOLIAGE.oylWindDirection;
+      shader.uniforms['oylSwayScale'] = FOLIAGE.oylSwayScale;
       if (layers.length > 1) shader.uniforms['oylSwayLayer'] = { value: weights };
       shader.vertexShader = replacedOrThrown(
         replacedOrThrown(
@@ -7208,6 +7250,267 @@ function withFoliageSwayOf(shape: RealisticShape): void {
     material.customProgramCacheKey = () => `${earlierKey}|oyl-breeze-${String(layers.length)}`;
     material.needsUpdate = true;
   }
+}
+
+/**
+ * The glyph range the gantries' banners are lettered from — #679: the map's
+ * own, `0-255`, which holds every character `gantry-wording.ts` uses (Latin
+ * capitals, digits, `k`, `m`, `i` and a space). Served from `public/glyphs/`,
+ * precached with the app, and fetched here once a load.
+ */
+const BANNER_GLYPHS_URL = `${import.meta.env.BASE_URL}glyphs/${LABEL_FONT}/0-255.pbf`;
+
+/**
+ * The banners' atlas as a texture — #679. One byte of coverage a texel, red
+ * only, uploaded as it is (row 0 the bottom, which is `v = 0`), mipmapped
+ * because a banner is seen from 400 m. 512 × 1024 bytes: 0.67 MiB with its
+ * mips, under #679's 1 MiB. @see banner-atlas.ts
+ */
+function bannerTextureOf(glyphRange: Uint8Array): {
+  readonly atlas: BannerAtlas;
+  readonly texture: DataTexture;
+} {
+  const atlas = bannerAtlas(readGlyphRange(glyphRange), bannerCells());
+  const texture = new DataTexture(
+    atlas.coverage,
+    atlas.width,
+    atlas.height,
+    RedFormat,
+    UnsignedByteType,
+  );
+  texture.generateMipmaps = true;
+  texture.minFilter = LinearMipmapLinearFilter;
+  texture.unpackAlignment = 1;
+  texture.needsUpdate = true;
+  return { atlas, texture };
+}
+
+/** The gantries' colours: galvanised steel, a white barrier, and the banner. This repository's own. */
+const GANTRY_METAL = 0x8c9299;
+const GANTRY_BARRIER = 0xe4e6e3;
+const BANNER_GROUND = 0x1f3b5c;
+const BANNER_LETTERING = 0xf4f4f0;
+
+/** The most boxes and banners the belt draws: two gantries and a board, with room. */
+const GANTRY_BOX_CAPACITY = 96;
+const GANTRY_BANNER_CAPACITY = 4;
+
+/**
+ * The start and finish gantries, their barriers and the boards before them —
+ * #679. Realistic rungs only (ADR 0026 D-3): the belt belongs to
+ * {@link RealisticDrawing}, so the stylised world has none.
+ *
+ * **Two draw calls, and none away from a line**: every box — legs, beam,
+ * barrier pieces, board posts — is one instance of one unit box, and every
+ * banner one instance of one quad whose instance attribute says which cell of
+ * the atlas it wears. A frame whose `lines` are empty hides both meshes.
+ *
+ * ⚠️ **The banner faces the rider and reads left to right**: its quad's `x`
+ * is the road's normal — the rider's RIGHT, `(−headingZ, headingX)`, since
+ * #583 the map's right as well as the screen's — its `y` up and its `z`
+ * AGAINST the heading, toward a rider riding at it: a proper rotation, so the
+ * quad's front face is toward the rider and `u` runs to their right.
+ * `gantry.test.ts` holds that from the camera.
+ */
+export class GantryBelt {
+  readonly #boxes: InstancedMesh;
+  readonly #banners: InstancedMesh;
+  readonly #cells: InstancedBufferAttribute;
+  readonly #atlas: BannerAtlas | undefined;
+  readonly #matrix = new Matrix4();
+  readonly #colour = new Color();
+  #shown = true;
+  /** Whether the browser gate has turned the gantries off — its control. */
+  #switchedOn = true;
+
+  constructor(banners?: { readonly atlas: BannerAtlas; readonly texture: DataTexture }) {
+    this.#atlas = banners?.atlas;
+    const boxMaterial = withAtmosphere(
+      constructed(new MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, metalness: 0.2 })),
+    );
+    this.#boxes = new InstancedMesh(new BoxGeometry(1, 1, 1), boxMaterial, GANTRY_BOX_CAPACITY);
+    this.#boxes.instanceMatrix.setUsage(DynamicDrawUsage);
+    this.#boxes.count = 0;
+    this.#boxes.frustumCulled = false;
+    this.#boxes.visible = false;
+    const quad = new PlaneGeometry(1, 1);
+    this.#cells = new InstancedBufferAttribute(new Float32Array(GANTRY_BANNER_CAPACITY), 1);
+    this.#cells.setUsage(DynamicDrawUsage);
+    quad.setAttribute('oylCell', this.#cells);
+    this.#banners = new InstancedMesh(
+      quad,
+      bannerMaterial(banners?.texture),
+      GANTRY_BANNER_CAPACITY,
+    );
+    this.#banners.instanceMatrix.setUsage(DynamicDrawUsage);
+    this.#banners.count = 0;
+    this.#banners.frustumCulled = false;
+    this.#banners.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#boxes);
+    scene.add(this.#banners);
+  }
+
+  /** The two meshes. For `three-renderer.test.ts` and the browser gate's counts. */
+  get meshes(): { readonly boxes: InstancedMesh; readonly banners: InstancedMesh } {
+    return { boxes: this.#boxes, banners: this.#banners };
+  }
+
+  setShown(on: boolean): void {
+    this.#shown = on;
+    if (!on) {
+      this.#boxes.visible = false;
+      this.#banners.visible = false;
+    }
+  }
+
+  /** @see gantriesShownOf */
+  switchOn(on: boolean): void {
+    this.#switchedOn = on;
+  }
+
+  /** This frame's stands: their boxes and their banners, and nothing where there are none. */
+  update(lines: readonly PlacedStand[]): void {
+    let boxes = 0;
+    let banners = 0;
+    if (this.#shown && this.#switchedOn) {
+      for (const line of lines) {
+        for (const box of standBoxes(line.stand.kind)) {
+          if (boxes >= GANTRY_BOX_CAPACITY) break;
+          this.#placeBox(boxes, line, box);
+          this.#colour.setHex(box.role === 'barrier' ? GANTRY_BARRIER : GANTRY_METAL);
+          this.#boxes.setColorAt(boxes, this.#colour);
+          boxes += 1;
+        }
+        const cell = this.#atlas?.cells.get(line.stand.text);
+        if (cell === undefined || banners >= GANTRY_BANNER_CAPACITY) continue;
+        const place = bannerPlace(line.stand.kind);
+        const at = standPoint(line, place.across, place.up, place.along);
+        this.#matrix.set(
+          -line.headingZ * place.width,
+          0,
+          -line.headingX,
+          at.x,
+          0,
+          place.height,
+          0,
+          at.y,
+          line.headingX * place.width,
+          0,
+          -line.headingZ,
+          at.z,
+          0,
+          0,
+          0,
+          1,
+        );
+        this.#banners.setMatrixAt(banners, this.#matrix);
+        this.#cells.setX(banners, cell);
+        banners += 1;
+      }
+    }
+    this.#boxes.count = boxes;
+    this.#banners.count = banners;
+    this.#boxes.instanceMatrix.needsUpdate = boxes > 0;
+    if (this.#boxes.instanceColor !== null) this.#boxes.instanceColor.needsUpdate = boxes > 0;
+    this.#banners.instanceMatrix.needsUpdate = banners > 0;
+    this.#cells.needsUpdate = banners > 0;
+    this.#boxes.visible = boxes > 0;
+    this.#banners.visible = banners > 0;
+  }
+
+  /** One box: its axes are the stand's, scaled by its size. */
+  #placeBox(slot: number, line: PlacedStand, box: StandBox): void {
+    const at = standPoint(line, box.across, box.up, box.along);
+    // The same right-handed frame as the banner's — right, up, toward the
+    // rider — so no box is drawn inside out.
+    this.#matrix.set(
+      -line.headingZ * box.width,
+      0,
+      -line.headingX * box.depth,
+      at.x,
+      0,
+      box.height,
+      0,
+      at.y,
+      line.headingX * box.width,
+      0,
+      -line.headingZ * box.depth,
+      at.z,
+      0,
+      0,
+      0,
+      1,
+    );
+    this.#boxes.setMatrixAt(slot, this.#matrix);
+  }
+
+  dispose(): void {
+    this.#boxes.geometry.dispose();
+    (this.#boxes.material as Material).dispose();
+    this.#boxes.dispose();
+    this.#banners.geometry.dispose();
+    (this.#banners.material as Material).dispose();
+    this.#banners.dispose();
+  }
+}
+
+/**
+ * The banner's material — #679: lit like the world round it, its colour the
+ * banner's ground where the atlas has no lettering and the lettering's where
+ * it has, from the cell the instance names. Constructed here (D-11).
+ */
+function bannerMaterial(atlas: Texture | undefined): MeshStandardMaterial {
+  const material = constructed(
+    new MeshStandardMaterial({
+      color: 0xffffff,
+      map: atlas ?? null,
+      roughness: 0.8,
+      metalness: 0,
+    }),
+  );
+  const cells = String(BANNER_CELLS);
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms['bannerGround'] = { value: new Color(BANNER_GROUND) };
+    shader.uniforms['bannerLettering'] = { value: new Color(BANNER_LETTERING) };
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.vertexShader,
+        '#include <common>',
+        '#include <common>\nattribute float oylCell;',
+        'vertex',
+        "#679's banner",
+      ),
+      '#include <uv_vertex>',
+      `#include <uv_vertex>
+#ifdef USE_MAP
+vMapUv = vec2(uv.x, (oylCell + uv.y) / ${cells}.0);
+#endif`,
+      'vertex',
+      "#679's banner",
+    );
+    shader.fragmentShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.fragmentShader,
+        '#include <common>',
+        '#include <common>\nuniform vec3 bannerGround;\nuniform vec3 bannerLettering;',
+        'fragment',
+        "#679's banner",
+      ),
+      '#include <map_fragment>',
+      `#ifdef USE_MAP
+diffuseColor.rgb = mix(bannerGround, bannerLettering, texture2D(map, vMapUv).r);
+#else
+diffuseColor.rgb = bannerGround;
+#endif`,
+      'fragment',
+      "#679's banner",
+    );
+  };
+  material.customProgramCacheKey = () => `oyl-banner-${cells}`;
+  return withAtmosphere(material);
 }
 
 function impostorQuad(): BufferGeometry {
@@ -7391,6 +7694,7 @@ function impostorMaterial(
   material.uniforms['oylImpostorLit'] = FOLIAGE.oylImpostorLit;
   material.uniforms['oylWindTime'] = FOLIAGE.oylWindTime;
   material.uniforms['oylWindDirection'] = FOLIAGE.oylWindDirection;
+  material.uniforms['oylSwayScale'] = FOLIAGE.oylSwayScale;
   // #619 lever 2: the strip is mipmapped, so the far band sheds with the rest.
   // #622: its fog is three's chunk like any other, so it breathes the same air.
   return constructed(withAtmosphere(withTextureLodBias(material)));
@@ -8381,8 +8685,9 @@ const GROUND_BLEND_SHARES_GLSL = /* glsl */ `
   oylGroundWorld = diffuseColor.rgb;
   float oylFromEdge = abs(vFields.y) - ${glslFloat(ROAD_EDGE_METRES)};
   float oylVerge = (1.0 - smoothstep(${glslFloat(VERGE_BLEND_METRES[0])}, ${glslFloat(VERGE_BLEND_METRES[1])}, oylFromEdge)) * groundShares.x;
-  float oylSlope = degrees(acos(clamp(vOylGroundUp, -1.0, 1.0)));
-  float oylRock = smoothstep(${glslFloat(ROCK_SLOPE_DEGREES[0])}, ${glslFloat(ROCK_SLOPE_DEGREES[1])}, oylSlope) * groundShares.y;
+  // The slope, as the cosine the normal's vertical already is: steeper is a
+  // SMALLER cosine, so the step runs from the steep end's cosine to the gentle one's.
+  float oylRock = (1.0 - smoothstep(${glslFloat(Math.cos((ROCK_SLOPE_DEGREES[1] * Math.PI) / 180))}, ${glslFloat(Math.cos((ROCK_SLOPE_DEGREES[0] * Math.PI) / 180))}, vOylGroundUp)) * groundShares.y;
   float oylScree = smoothstep(treeLine - ${glslFloat(SCREE_BAND_METRES)}, treeLine + ${glslFloat(SCREE_BAND_METRES)}, vOylGround.y) * groundShares.z;
   oylRockShare = max(oylRock, oylScree);
   oylVergeShare = oylVerge * (1.0 - oylRockShare);
@@ -9984,6 +10289,8 @@ class RealisticDrawing {
   readonly primitives: ScatterBelt;
   readonly riders: RealisticRiderBelt;
   readonly grounding: GroundBlobBelt;
+  /** The start and finish gantries — #679. */
+  readonly gantries: GantryBelt;
   readonly road: MeshStandardMaterial;
   readonly ground: MeshStandardMaterial;
   readonly environment: Texture;
@@ -10031,6 +10338,7 @@ class RealisticDrawing {
     this.riders = new RealisticRiderBelt(world.body, world.bicycle, world.rider);
     this.riders.setRiderKit(riderKit);
     this.grounding = new GroundBlobBelt();
+    this.gantries = new GantryBelt(world.banners);
     this.#casterLists = [this.vegetation.grounded, this.#structureCasters];
     this.road = photographicRoadMaterial(world.road.colour, world.road.normal);
     this.ground = photographicGroundMaterial(
@@ -10052,6 +10360,7 @@ class RealisticDrawing {
     this.primitives.addTo(scene);
     this.riders.addTo(scene);
     this.grounding.addTo(scene);
+    this.gantries.addTo(scene);
   }
 
   setShown(on: boolean): void {
@@ -10060,6 +10369,7 @@ class RealisticDrawing {
     this.primitives.setShown(on);
     this.riders.setShown(on);
     this.grounding.setShown(on);
+    this.gantries.setShown(on);
   }
 
   /** Every scenery belt, handed the same frame. */
@@ -10119,6 +10429,7 @@ class RealisticDrawing {
     this.primitives.dispose();
     this.riders.dispose();
     this.grounding.dispose();
+    this.gantries.dispose();
     this.road.dispose();
     this.ground.dispose();
     this.environment.dispose();
@@ -10183,6 +10494,7 @@ export function evictRealisticWorldFromGpu(): void {
   const world = realisticWorld;
   if (world === undefined) return;
   world.sky.texture.dispose();
+  world.banners?.texture.dispose();
   for (const texture of [
     world.road.colour,
     world.road.normal,
@@ -10466,7 +10778,49 @@ export function horizonFromSkyOf(view: GameView, on: boolean): void {
 }
 
 /**
- * Lights the realistic trees' far band by the world's sun, or (`false`) draws
+ * Holds every realistic plant still, or lets the breeze move it again — #630.
+ * Module state, for `FOLIAGE`'s reason. For the browser gate's measurements
+ * of the trees' LEVELS (#617, #639), which compare two drawings of the same
+ * frame pixel for pixel and are about which level draws, not about motion:
+ * the breeze has its own gate.
+ *
+ * @test-facing read by `game-harness.ts`; the product never holds the leaves.
+ */
+export function foliageStillOf(still: boolean): void {
+  FOLIAGE.oylSwayScale.value = still ? 0 : 1;
+}
+
+/**
+ * Turns a view's gantries off, or on again — #679. The browser gate's
+ * control: with them off, the probe aimed at a banner must read what is
+ * behind it.
+ *
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`;
+ * the product always draws them.
+ */
+export function gantriesShownOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.gantriesShown(on);
+}
+
+/**
+ * How many gantry boxes and banners a view drew in its last frame — #679.
+ *
+ * @test-facing read by `game-harness.ts`, which requires some near a line and
+ * none mid-route.
+ */
+export function gantryCountsOf(view: GameView): {
+  readonly boxes: number;
+  readonly banners: number;
+} {
+  const meshes = view instanceof ThreeGameView ? view.gantryMeshes : undefined;
+  return {
+    boxes: meshes?.boxes.visible === true ? meshes.boxes.count : 0,
+    banners: meshes?.banners.visible === true ? meshes.banners.count : 0,
+  };
+}
+
+/**
+ * Relights the realistic trees' far band by the world's sun, or (`false`) draws
  * the strips as they were before #630 — the browser gate's control. Module
  * state, for `FOLIAGE`'s reason: every view shares the loaded world's
  * materials.
@@ -10961,6 +11315,8 @@ class ThreeGameView implements GameView {
           this.#camera.aspect,
           this.#drawing,
           nearFieldShapes(this.#drawing),
+          // #630: the realistic foliage sways, so it is cleared by its sway too.
+          this.#drawing === 'realistic' ? FOLIAGE_SWAY_METRES : 0,
         )
       : frame.scatter;
     this.#scatter.update(scenery, frame.camera);
@@ -10973,6 +11329,8 @@ class ThreeGameView implements GameView {
       frame.world.sun,
     );
     this.#realistic?.riders.place(frame.markers);
+    // #679: the gantries at the lines in reach, and none anywhere else.
+    this.#realistic?.gantries.update(frame.lines);
     this.#updateMarkers(frame.markers);
     this.#updateShadows(frame);
     this.#placeCamera(rig);
@@ -11242,6 +11600,17 @@ class ThreeGameView implements GameView {
     const shares =
       this.#realistic === undefined ? undefined : GROUND_BLEND_SHARES.get(this.#realistic.ground);
     shares?.set(verge, rock, scree);
+  }
+
+  /** @see gantriesShownOf */
+  gantriesShown(on: boolean): void {
+    this.#realistic?.gantries.switchOn(on);
+  }
+
+  /** @see gantryMeshesOf */
+  get gantryMeshes():
+    { readonly boxes: InstancedMesh; readonly banners: InstancedMesh } | undefined {
+    return this.#realistic?.gantries.meshes;
   }
 
   /** @see roadWearOf */

@@ -146,9 +146,14 @@ import {
   roadWearOf,
   groundBlendOf,
   impostorsLitOf,
+  foliageStillOf,
+  gantriesShownOf,
+  gantryCountsOf,
   waterFresnelOf,
   waterReflectsOf,
 } from '../src/game/three-renderer';
+import { bannerPlace, standPoint } from '../src/game/gantry';
+import { FINISH_WORD } from '../src/game/gantry-wording';
 import { PATCH_CELL_METRES, patchInCell, WHEEL_TRACK_OFFSETS_METRES } from '../src/game/road-wear';
 import { groundBlobAlpha, groundUnder } from '../src/game/ground-blob';
 import { clearOfTheCamera, nearPyramid, sceneryReach } from '../src/game/near-field';
@@ -4405,6 +4410,8 @@ export interface RealisticMeasurement {
   readonly groundBlend: GroundBlendMeasurement;
   /** #630: the far band lit by the world's sun, and a tree in the breeze. @see foliageProbe */
   readonly foliage: FoliageMeasurement;
+  /** #679: a finish gantry's banner, read, and what the gantries cost. @see gantryProbe */
+  readonly gantry: GantryMeasurement;
   /** #629: a lake's near and grazing water, reflecting and held. @see waterReflectionProbe */
   readonly waterReflection: WaterReflectionMeasurement;
   /**
@@ -5265,7 +5272,15 @@ function foliageProbe(
   });
   // Undithered: a dithered hand-over draws the first rank as the band between
   // the full mesh and the middle one, whatever `near` says (`tree-levels.ts`).
-  setTreeLevels({ ...REALISTIC_TREE_LEVELS, near: 0, middle: 0, dithered: false });
+  setTreeLevels({
+    ...REALISTIC_TREE_LEVELS,
+    near: 0,
+    middle: 0,
+    dithered: false,
+    // At its level at once, so two draws settle a turn: this probe is about
+    // light, not the hand-over.
+    handOverFrames: 1,
+  });
   const farCanvas = document.createElement('canvas');
   let far: GameView;
   try {
@@ -5283,18 +5298,24 @@ function foliageProbe(
     target: GameView,
     context: WebGL2RenderingContext,
     frame: SceneFrame,
+    renders = 11,
   ): Uint8Array => {
-    for (let at = 0; at < 11; at += 1) target.render(frame);
+    for (let at = 0; at < renders; at += 1) target.render(frame);
     return readRegion(context, 0, 0, canvas.width, canvas.height);
   };
   const width = canvas.width;
   const sides = (): { sun: number; shade: number; pixels: number } => {
-    const empty = settled(far, farGl, { ...turned, scatter: [] });
+    const empty = settled(far, farGl, { ...turned, scatter: [] }, 2);
     let sunTotal = 0;
     let shadeTotal = 0;
     let pixels = 0;
     for (let turn = 0; turn < 8; turn += 1) {
-      const drawn = settled(far, farGl, { ...turned, scatter: [treeAt(45, (turn * Math.PI) / 4)] });
+      const drawn = settled(
+        far,
+        farGl,
+        { ...turned, scatter: [treeAt(45, (turn * Math.PI) / 4)] },
+        2,
+      );
       let low = width;
       let high = -1;
       const tree: number[] = [];
@@ -5388,6 +5409,137 @@ function foliageProbe(
   };
 }
 
+/**
+ * A finish gantry 30 m ahead, on a level road due north — #679. A strip of
+ * the drawing buffer aimed from geometry at the middle of its banner is read
+ * for its lettering: the variance of relative luminance over the strip's
+ * mean, and its mean colour. Then the same frame with the gantries off (the
+ * first control: the strip must read what is behind), and the draw calls and
+ * triangles the gantries add there and — the second control — half-way along
+ * the route, out of reach of every line.
+ */
+export interface GantryMeasurement {
+  readonly measured: boolean;
+  /** Whether the finish was in the frame's lines at all. */
+  readonly inReach: boolean;
+  readonly lettering: number;
+  readonly letteringOff: number;
+  readonly mean: readonly number[];
+  readonly meanOff: readonly number[];
+  /** Draw calls and triangles the gantries add, near the line and mid-route. */
+  readonly callsNear: number;
+  readonly trianglesNear: number;
+  readonly callsMiddle: number;
+  readonly trianglesMiddle: number;
+  /** What the belt drew near the line: boxes and banners. */
+  readonly boxes: number;
+  readonly banners: number;
+}
+
+const NO_GANTRY: GantryMeasurement = {
+  measured: false,
+  inReach: false,
+  lettering: 0,
+  letteringOff: 0,
+  mean: [],
+  meanOff: [],
+  callsNear: 0,
+  trianglesNear: 0,
+  callsMiddle: 0,
+  trianglesMiddle: 0,
+  boxes: 0,
+  banners: 0,
+};
+
+/** The strip read on the banner, in pixels: wide, because the lettering runs across it. */
+const BANNER_STRIP = { width: 41, height: 9 } as const;
+
+/** @see GantryMeasurement */
+function gantryProbe(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  riding: (profile: ReturnType<typeof northRoute>, distance: number) => SceneFrame,
+): GantryMeasurement {
+  const route = northRoute(3_000, () => 10);
+  const total = route.totalDistance as number;
+  const bare = (frame: SceneFrame): SceneFrame => ({ ...frame, markers: [], scatter: [] });
+  const near = bare(riding(route, total - 30));
+  const middle = bare(riding(route, total / 2));
+  const finish = near.lines.find((line) => line.stand.text === FINISH_WORD);
+  if (finish === undefined) return { ...NO_GANTRY, measured: true };
+  const place = bannerPlace('gantry');
+  // A little above the banner's middle: the main word's row.
+  const aim = standPoint(finish, place.across, place.up + place.height * 0.1, place.along);
+  const centre = pixelFor(near, canvas, aim);
+  const read = (): { contrast: number; mean: number[] } => {
+    view.render(near);
+    view.render(near);
+    const pixels = readRegion(
+      gl,
+      Math.round(centre.x) - (BANNER_STRIP.width - 1) / 2,
+      Math.round(centre.y) - (BANNER_STRIP.height - 1) / 2,
+      BANNER_STRIP.width,
+      BANNER_STRIP.height,
+    );
+    const values: number[] = [];
+    const mean = [0, 0, 0];
+    for (let at = 0; at < pixels.length; at += 4) {
+      values.push(relativeLuminanceOf(pixels[at] ?? 0, pixels[at + 1] ?? 0, pixels[at + 2] ?? 0));
+      for (let channel = 0; channel < 3; channel += 1) {
+        mean[channel] = (mean[channel] ?? 0) + (pixels[at + channel] ?? 0) / (pixels.length / 4);
+      }
+    }
+    const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+    const contrast =
+      average > 0
+        ? values.reduce((sum, value) => sum + (value / average - 1) ** 2, 0) / values.length
+        : 0;
+    return { contrast, mean };
+  };
+  const cost = (frame: SceneFrame): { calls: number; triangles: number } => {
+    const once = (): { calls: number; triangles: number } => {
+      let result = { calls: 0, triangles: 0 };
+      view.render(frame);
+      countingTriangles((triangles, calls) => {
+        view.render(frame);
+        result = { calls: calls(), triangles: triangles() };
+      });
+      return result;
+    };
+    const on = once();
+    gantriesShownOf(view, false);
+    const off = once();
+    gantriesShownOf(view, true);
+    return { calls: on.calls - off.calls, triangles: on.triangles - off.triangles };
+  };
+  const drawn = read();
+  const counts = gantryCountsOf(view);
+  gantriesShownOf(view, false);
+  let off: ReturnType<typeof read>;
+  try {
+    off = read();
+  } finally {
+    gantriesShownOf(view, true);
+  }
+  const atTheLine = cost(near);
+  const midRoute = cost(middle);
+  return {
+    measured: true,
+    inReach: true,
+    lettering: drawn.contrast,
+    letteringOff: off.contrast,
+    mean: drawn.mean,
+    meanOff: off.mean,
+    callsNear: atTheLine.calls,
+    trianglesNear: atTheLine.triangles,
+    callsMiddle: midRoute.calls,
+    trianglesMiddle: midRoute.triangles,
+    boxes: counts.boxes,
+    banners: counts.banners,
+  };
+}
+
 /** What {@link airProbe} reports when it did not run. */
 const NO_AIR: AirMeasurement = {
   measured: false,
@@ -5412,6 +5564,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   roadWear: NO_ROAD_WEAR,
   groundBlend: NO_GROUND_BLEND,
   foliage: NO_FOLIAGE,
+  gantry: NO_GANTRY,
   waterReflection: NO_WATER_REFLECTION,
   atmosphere: {
     realisticTaught: 0,
@@ -6686,6 +6839,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const foliage = foliageProbe(view, gl, canvas, riding, top);
   phaseEnds('realistic: foliage — #630');
 
+  // #679: the finish gantry, read, and what the gantries cost.
+  const gantry = gantryProbe(view, gl, canvas, riding);
+  phaseEnds('realistic: gantry — #679');
+
   // #629: the water, on the lake.
   const waterReflection = waterReflectionProbe(view, gl, canvas, riding);
   phaseEnds('realistic: water reflection — #629');
@@ -6965,6 +7122,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     roadWear,
     groundBlend,
     foliage,
+    gantry,
     waterReflection,
     waterReflectsAfterStepDown,
     textures,
@@ -7305,6 +7463,13 @@ async function treeLevelRun(): Promise<TreeLevelMeasurement> {
   const top = REALISTIC_LADDER[0] as QualitySettings;
   await threeGameRenderer.loadRealisticWorld();
   phaseEnds('trees: loadRealisticWorld');
+  // #630: in still air. Every measurement of this load compares two drawings
+  // of one frame pixel for pixel — two levels, two material layouts — and is
+  // about WHICH level draws; the breeze moves a merged and an unmerged tree by
+  // a rounding apart (3 pixels of 230 400, measured), and has its own gate on
+  // the `?realistic` load. Module state and this load's alone: the page is
+  // this load's.
+  foliageStillOf(true);
   const riding = (profile: ReturnType<typeof northRoute>, distance: number): SceneFrame => {
     const start = atStartLine(profile);
     return sceneFrame({

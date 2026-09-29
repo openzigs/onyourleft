@@ -59,6 +59,8 @@ import {
 import type { KitColour } from '@onyourleft/store';
 
 import { DEFAULT_RIDER_MASS_KILOGRAMS } from '../athlete/mass';
+import { UnitsProvider } from '../units/context';
+import { START_WORD, toGoText } from './gantry-wording';
 
 /** Two kilometres of road that rises and falls, so a gradient is in play. */
 function testRoute(): RidableRoute {
@@ -1192,6 +1194,42 @@ describe('GameView — each rung draws at its own frame cap (#476)', () => {
  * here is what the renderer was actually **handed**, frame after frame, rather
  * than what `bicycle.ts` would do with a number if somebody passed it one.
  */
+/**
+ * The board before a line reads in the rider's own units — #679. The frame is
+ * where they arrive, so what is asserted is what the renderer was HANDED, for
+ * `SceneInput.botDistance`'s reason below.
+ */
+describe('GameView — the lines read in the rider’s own units (#679)', () => {
+  it('hands the renderer the start gantry, and a board in miles to a rider in miles', async () => {
+    const frames: SceneFrame[] = [];
+    mounted = await mount(
+      <UnitsProvider units="imperial">
+        <GameView
+          port={pedallingPort(testRoute(), undefined, () => LIVE_CADENCE)}
+          renderer={() => Promise.resolve(capturingRenderer(frames))}
+          now={() => nowMs}
+        />
+      </UnitsProvider>,
+    );
+    await settle();
+    await clickThrough(rideButton());
+    await pump(4, CRANK_FRAME_MS);
+    const texts = new Set(frames.flatMap((frame) => frame.lines.map((line) => line.stand.text)));
+    expect(texts.has(START_WORD)).toBe(true);
+    // The test route is 2 km: a mile before its end is within reach of its start.
+    expect(texts.has(toGoText('imperial'))).toBe(true);
+    expect(texts.has(toGoText('metric'))).toBe(false);
+  });
+
+  it('and no board in miles to a rider in kilometres', async () => {
+    const frames = await startRiding({ pacer: false });
+    await pump(4, CRANK_FRAME_MS);
+    const texts = new Set(frames.flatMap((frame) => frame.lines.map((line) => line.stand.text)));
+    expect(texts.has(START_WORD)).toBe(true);
+    expect(texts.has(toGoText('imperial'))).toBe(false);
+  });
+});
+
 describe('GameView — the cranks turn at the rider’s own cadence (#349)', () => {
   /** How far the cranks had turned on each frame the renderer was given. */
   function crankAngles(frames: readonly SceneFrame[]): readonly number[] {

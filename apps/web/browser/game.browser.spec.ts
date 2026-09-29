@@ -703,6 +703,16 @@ const REALISTIC_LOAD_BUDGET_MS = 165_000;
 const TREES_LOAD_BUDGET_MS = 160_000;
 
 /**
+ * #679: the least lettering contrast a banner strip must read (a variance of
+ * relative luminance over the strip's mean) — **0.05** — the most — **2** —
+ * and #679's ceiling on what a gantry and its barriers may add near a line:
+ * **1 000** triangles.
+ */
+const GANTRY_LETTERING_FLOOR = 0.05;
+const GANTRY_LETTERING_CEILING = 2;
+const GANTRY_TRIANGLE_CEILING = 1_000;
+
+/**
  * #630: how much lighter the far band's sun side must read than its shade
  * side, as a share, averaged over eight turns of the tree — **0.05** — and the
  * most it may: **0.8**. And how many of a tree's pixels must move between two
@@ -3403,6 +3413,37 @@ test.describe('the realistic world — ADR 0026', () => {
     expect(foliage.swayChanged).toBeGreaterThan(SWAY_MINIMUM_PIXELS);
     expect(foliage.swayChanged).toBeLessThan(foliage.treePixels);
     expect(foliage.heldChanged).toBe(0);
+  });
+
+  test('stands a gantry at the finish, lettered from the app’s own glyphs, for two calls and only there — #679', async ({
+    harnessRun,
+  }) => {
+    const { gantry } = await realistic(harnessRun);
+    expect(gantry.measured).toBe(true);
+    expect(gantry.inReach).toBe(true);
+    console.log(
+      `the finish gantry's banner: lettering ${gantry.lettering.toFixed(4)} (mean ` +
+        `${gantry.mean.map((c) => c.toFixed(0)).join('/')}); with the gantries off ` +
+        `${gantry.letteringOff.toFixed(4)} (${gantry.meanOff.map((c) => c.toFixed(0)).join('/')}). ` +
+        `Near the line +${String(gantry.callsNear)} calls, +${String(gantry.trianglesNear)} triangles ` +
+        `(${String(gantry.boxes)} boxes, ${String(gantry.banners)} banners); mid-route ` +
+        `+${String(gantry.callsMiddle)} and +${String(gantry.trianglesMiddle)}`,
+    );
+    // The banner was drawn, and its lettering reads: a floor on the contrast
+    // across the strip, and a ceiling.
+    expect(gantry.banners).toBe(1);
+    expect(gantry.lettering).toBeGreaterThan(GANTRY_LETTERING_FLOOR);
+    expect(gantry.lettering).toBeLessThan(GANTRY_LETTERING_CEILING);
+    // Control 1: with the gantries off, the same strip reads what is behind
+    // it — the sky — which has no lettering.
+    expect(gantry.letteringOff).toBeLessThan(GANTRY_LETTERING_FLOOR);
+    // The cost: two draw calls near the line, inside #679's triangle ceiling.
+    expect(gantry.callsNear).toBe(2);
+    expect(gantry.trianglesNear).toBeGreaterThan(0);
+    expect(gantry.trianglesNear).toBeLessThanOrEqual(GANTRY_TRIANGLE_CEILING);
+    // Control 2: mid-route, nothing at all.
+    expect(gantry.callsMiddle).toBe(0);
+    expect(gantry.trianglesMiddle).toBe(0);
   });
 
   test('lets the water reflect the sky it is under, by Fresnel — the grazing water reflects more — #629', async ({
