@@ -78,7 +78,10 @@ export function listen(
       void send(errorResponse('validation_failed'), outgoing);
       return;
     }
-    handler(request)
+    // The peer's address, for the identity routes' rate limits (#772). It is
+    // never logged (`log.ts`), and behind a proxy it is the proxy's — which is
+    // #775's to weigh, since a per-address limit there limits everyone at once.
+    handler(request, { address: incoming.socket.remoteAddress ?? null })
       .catch(() => errorResponse('internal'))
       .then((response) => send(response, outgoing))
       .catch(() => outgoing.destroy());

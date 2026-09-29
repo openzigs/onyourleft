@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import type { Config } from './config.ts';
-import { JSON_TYPE } from './errors.ts';
+import { IDENTITY_ROUTES } from './auth/routes.ts';
+import { json, type Route, type Schema } from './route-kit.ts';
 
 /**
  * The instance's routes, as ONE table the handler dispatches on and the
@@ -15,9 +15,12 @@ import { JSON_TYPE } from './errors.ts';
  * entry declares — `openapi.test.ts` holds by calling every route through the
  * real listener and checking the body against the declared schema.
  *
+ * The identity routes (#772, #773, #774) are `auth/routes.ts`'s, appended
+ * here, so there is still one table.
+ *
  * ## Versioning
  *
- * These four are the instance's own **metadata** and are not versioned: what
+ * The four below are the instance's own **metadata** and are not versioned: what
  * is running, where its source is, what its API is, and what third-party
  * software it includes. They only ever gain fields. The API a client syncs
  * through lives under `/v1/` from its first route (#776), and a breaking change
@@ -25,55 +28,8 @@ import { JSON_TYPE } from './errors.ts';
  * §"The instance" records the rule.
  */
 
-/** The subset of JSON Schema the specification uses, and the contract test checks. */
-export type Schema =
-  | {
-      readonly type: 'object';
-      readonly properties: Readonly<Record<string, Schema>>;
-      readonly required: readonly string[];
-      readonly additionalProperties: false;
-    }
-  | { readonly type: 'object'; readonly description: string }
-  | { readonly type: 'array'; readonly items: Schema }
-  | { readonly type: 'string' | ['string', 'null']; readonly format?: 'uri' }
-  | { readonly type: 'integer' | 'boolean' }
-  | { readonly type: 'string'; readonly enum: readonly string[] }
-  | { readonly $ref: string };
-
-/** What a route is handed. */
-export interface RouteContext {
-  readonly request: Request;
-  readonly url: URL;
-  /**
-   * The request's body, already read — within the instance's limit, or the
-   * route would not have been called. `null` when there is none. A route reads
-   * this and never `request.body`, which the size check has consumed.
-   */
-  readonly body: Uint8Array | null;
-  readonly config: Config;
-  /** The instance's package version. */
-  readonly version: string;
-  /** The instance's own third-party notices document. */
-  readonly notices: string;
-  /** The generated specification. */
-  readonly specification: unknown;
-}
-
-export interface Route {
-  readonly method: 'GET';
-  readonly path: string;
-  readonly operationId: string;
-  readonly summary: string;
-  readonly response:
-    | { readonly contentType: 'application/json'; readonly schema: Schema }
-    | { readonly contentType: 'text/plain' };
-  readonly handle: (context: RouteContext) => Response | Promise<Response>;
-}
-
-/** A JSON body, with the media type every JSON body here carries. */
-export function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { 'content-type': JSON_TYPE } });
-}
+export type { Route, RouteContext, Schema } from './route-kit.ts';
+export { json } from './route-kit.ts';
 
 const commitSchema: Schema = { type: ['string', 'null'] };
 
@@ -141,4 +97,5 @@ export const ROUTES: readonly Route[] = [
     handle: ({ notices }) =>
       new Response(notices, { headers: { 'content-type': 'text/plain; charset=utf-8' } }),
   },
+  ...IDENTITY_ROUTES,
 ];
