@@ -92,6 +92,12 @@ export {
 
 export type { KitColour } from './kit-colour';
 export { DEFAULT_KIT_COLOUR, isKitColour, KIT_COLOURS, parseKitColour } from './kit-colour';
+export {
+  MAXIMUM_MASKED_WORD_LENGTH,
+  MAXIMUM_MASKED_WORDS,
+  parseMaskedWords,
+  tidyMaskedWord,
+} from './masked-words';
 
 // --- Visibility (ADR 0004 decision A) ---------------------------------------
 

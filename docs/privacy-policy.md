@@ -68,6 +68,7 @@ your own action:
 | Health and fitness data — heart rate, power, cadence | a Bluetooth heart-rate strap, power meter or smart trainer |
 | Routes, segments, efforts and workouts | drawn in the app, or imported from a file you choose |
 | A threshold power and a unit preference | typed by you in Settings |
+| Your list of words to mask before anything is sent to a hosted model — a street, a town, a name | typed by you in Settings; kept with your rides on this device, not put in the account export, and *Erase everything* removes it |
 | Whether the app is shown light or dark, if you chose one | chosen by you in Settings, and kept in this device's browser storage; *Erase everything* removes it |
 | A signing keypair, used to sign your own activity records | generated on the device the first time it is needed |
 | Pictures from the camera — only the ones you chose to keep | the camera, if you turn it on and then turn on "keep the pictures from this ride" for that ride. Otherwise a picture is thrown away as soon as it has been looked at |
@@ -302,6 +303,14 @@ for you afterwards. Like any service you connect to, it also sees your internet 
 - **What is not sent:** never a picture, and nothing made from one beyond those few differences in
   position. Not your name, not where you rode — no position, no height above sea level — not when,
   and not an identifier.
+- **What is masked first:** before anything is sent to the service, e-mail addresses, phone
+  numbers, links, street addresses, postcodes, coordinates written as text, the names you gave your
+  privacy zones, and everything on your list of *Words to mask* in Settings are replaced with a
+  placeholder such as `[email]` or `[place]`. A name is masked only if it is on that list: nothing
+  can tell a person's or a place's name from any other word. Masking reduces what is sent; it does
+  not guarantee that nothing personal gets through. *See what will be sent*, on a ride's page, shows
+  exactly what will be sent after masking, and sends nothing. Your own computer is sent the text in
+  full.
 - **Your key:** the key you typed, sent in the request's `Authorization` header to the address you
   typed and to nowhere else. It is kept in this device's browser storage, is never put in a file the
   app exports, is never shown again once saved, and *Forget this service and key* or *Erase

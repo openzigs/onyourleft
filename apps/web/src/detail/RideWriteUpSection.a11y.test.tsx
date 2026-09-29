@@ -16,11 +16,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { auditAccessibility, formatViolations, tabbableElements } from '../a11y/audit';
 import type { AskOutcome, RideAnalysisPort } from '../ride-analysis/ride-analysis-port';
-import { ASK_LABEL, CANCEL_LABEL } from '../ride-analysis/RideWriteUpControl';
+import { ASK_LABEL, CANCEL_LABEL, WRITE_UP_SENDS_ID } from '../ride-analysis/RideWriteUpControl';
 import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
 import { ActivityDetailView } from '../views/ActivityDetailView';
 
 import { stubActivity, stubDetail, type StubRide } from './testing';
+import { COMPUTER_SENDS_LEAD } from './write-up';
 
 const ATHLETE = athleteId('athlete-a');
 const RIDE = activityId('ride-1');
@@ -47,6 +48,8 @@ afterEach(() => {
 
 const PORT: RideAnalysisPort = {
   availableSources: () => ['computer', 'hosted'],
+  previewHostedRequest: async () => Promise.resolve({ kind: 'shown', steps: [], total: 1 }),
+  hostedPreviewSeen: () => true,
   askForRideWriteUp: async () =>
     new Promise<AskOutcome>((resolve) => {
       settleAsk = resolve;
@@ -118,10 +121,12 @@ describe('every state of the write-up passes the audit', () => {
     expectClean('failed, the earlier write-up standing');
   });
 
-  it('describes each ask control by what it would send', async () => {
+  it('describes each ask control by the lead of what it would send, the rest beside it', async () => {
     await open(undefined);
     const control = button(ASK_LABEL.computer.first);
     const described = document.getElementById(control.getAttribute('aria-describedby') ?? '');
-    expect(described?.textContent).toContain('Never a picture.');
+    // #816: the lead alone, not the ninety-word block read on every focus.
+    expect(described?.textContent).toBe(COMPUTER_SENDS_LEAD);
+    expect(document.getElementById(WRITE_UP_SENDS_ID)?.textContent).toContain('Never a picture.');
   });
 });

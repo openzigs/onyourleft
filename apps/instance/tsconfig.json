@@ -17,5 +17,5 @@
     "allowImportingTsExtensions": true,
     "erasableSyntaxOnly": true
   },
-  "include": ["src/**/*.ts", "tools/**/*.ts", "vitest.config.ts"]
+  "include": ["src/**/*.ts", "tools/**/*.ts", "vitest.config.ts", "vitest.workerd.config.ts"]
 }

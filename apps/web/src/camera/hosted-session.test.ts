@@ -14,6 +14,7 @@ import { hostedModelDecision, type HostedModel } from './hosted-model';
 import { hostedModelPort, type HostedSend } from './hosted-transport';
 import { CameraController } from './session';
 import { manualSchedule, scriptedCamera } from './testing';
+import { patternsOnlyGuard } from '../ride-analysis/personal-details-testing';
 
 const AGREED = { acknowledgedBystanders: true, allowLocal: true, allowHosted: false } as const;
 const KEY = 'fixture-hosted-key-DO-NOT-LEAK-0123456789';
@@ -50,7 +51,7 @@ function controllerWith(send: HostedSend, analysisSend?: AnalysisSend): CameraCo
     port: scriptedCamera().port,
     schedule: manualSchedule().schedule,
     analysis: () => riderAnalysisPort(local, { send: analysisSend }),
-    hosted: () => hostedModelPort(service(), { send }),
+    hosted: () => hostedModelPort(service(), { guard: patternsOnlyGuard, send }),
   });
 }
 
@@ -78,7 +79,9 @@ describe('consenting to local analysis does not enable the hosted model', () => 
   });
 
   it('never looks up the service before consent', async () => {
-    const lookUp = vi.fn(() => hostedModelPort(service(), { send: answering() }));
+    const lookUp = vi.fn(() =>
+      hostedModelPort(service(), { guard: patternsOnlyGuard, send: answering() }),
+    );
     const controller = new CameraController({
       port: scriptedCamera().port,
       schedule: manualSchedule().schedule,
@@ -103,7 +106,7 @@ describe('the hosted model’s own consent', () => {
     const controller = new CameraController({
       port: camera.port,
       schedule: manualSchedule().schedule,
-      hosted: () => hostedModelPort(service(), { send }),
+      hosted: () => hostedModelPort(service(), { guard: patternsOnlyGuard, send }),
     });
     controller.agree(AGREED);
     expect(controller.agreeToHosted(true).refusal).toBeUndefined();
@@ -118,7 +121,7 @@ describe('the hosted model’s own consent', () => {
     const controller = new CameraController({
       port: scriptedCamera().port,
       schedule: manualSchedule().schedule,
-      hosted: () => hostedModelPort(undefined),
+      hosted: () => hostedModelPort(undefined, { guard: patternsOnlyGuard }),
     });
     controller.agree(AGREED);
     controller.agreeToHosted(true);

@@ -58,11 +58,24 @@
 import { COMPLETIONS_PATH, MAXIMUM_MODEL_NAME_LENGTH } from './analysis-endpoint';
 
 /**
+ * The Camera page's button that sends a hosted service its one test question
+ * (`views/CameraView.tsx`, `ask('connection-check')`).
+ *
+ * ⚠️ {@link HOSTED_CONSENT} names this button by its label (#847), so the
+ * label is written once, here: renaming the button changes the consent, and
+ * `hosted-model.test.ts` then fails against ADR 0029's newest amendment
+ * rather than the consent naming a button that is no longer there.
+ */
+export const HOSTED_TEST_QUESTION_LABEL = 'Send a test question to the service';
+
+/**
  * The consent screen's words — ADR 0035 D-9 C, as the owner approved them,
  * and quoted by ADR 0029's 2026-09-29 amendment (#803), which replaces the
  * 2026-09-28 amendment's wording now that the hosted path sends a ride's
  * numbers — and since #845 by the amendment after it, which names the
- * distance, each section's gradient and total climb, and the connection check.
+ * distance, each section's gradient and total climb, and the connection check,
+ * and since #847 by the entry after that, which says the check goes when the
+ * rider presses {@link HOSTED_TEST_QUESTION_LABEL} rather than on a save.
  *
  * ⚠️ **Do not improve this.** `hosted-model.test.ts` reads the NEWEST
  * amendment of ADR 0029 and compares, the way `consent.test.ts` pins D-5.
@@ -89,8 +102,8 @@ export const HOSTED_CONSENT: {
       'what they do with it or how long they keep it. We cannot delete it for you afterwards. Like ' +
       'any service you connect to, it also sees your internet address.',
     'It is never sent a picture — not a photograph of you, and nothing made from one. It is not ' +
-      'sent your name, where you rode, or when. When you save a service, the app sends it one ' +
-      'test question, containing none of your data, to check it answers.',
+      `sent your name, where you rode, or when. When you press '${HOSTED_TEST_QUESTION_LABEL}', ` +
+      'the app sends it one test question, containing none of your data, to check it answers.',
     'Your key is kept on this device, is sent only to the address you entered, and is never put in ' +
       'a file this app exports.',
   ],
@@ -101,6 +114,27 @@ export const HOSTED_CONSENT: {
     'This is off. It stays off until you turn it on, it is off again whenever the app is opened, ' +
     'and you can turn it off at any time.',
 };
+
+/**
+ * What masking does and does not do, said beside the hosted consent — #839,
+ * drafted for the owner to approve in ADR 0029's amendment of 2026-09-29
+ * (#839), which quotes it after {@link HOSTED_CONSENT} unchanged.
+ *
+ * ⚠️ **A paragraph of its own, not a sixth member of `HOSTED_CONSENT`.**
+ * That wording is the owner-approved ADR 0035 D-9 C, pinned word for word by
+ * `detail/write-up.test.ts`; this is new and awaits the owner's approval, so
+ * it is kept apart and stated after it, on the Camera page, beside the hosted
+ * ask on a ride's page, and in the preview. `hosted-model.test.ts` compares
+ * it with the newest amendment of ADR 0029. It names what is masked, says a
+ * name is masked only when it is on the rider's list, and says masking
+ * reduces what is sent and does not guarantee anything —
+ * `ride-analysis/hosted-mask.ts` §"What is NOT masked, and the limits" is why.
+ */
+export const HOSTED_MASKING_NOTICE =
+  'Before anything is sent to it, e-mail addresses, phone numbers, links, street addresses, ' +
+  'postcodes, coordinates, the names of your privacy zones and everything on your list of words ' +
+  'to mask are replaced with a placeholder. A name is masked only if it is on that list. Masking ' +
+  'reduces what is sent; it does not guarantee that nothing personal gets through.';
 
 /** Where the rider's answer is kept: this device's `localStorage`, and nothing else. */
 export type HostedModelStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;

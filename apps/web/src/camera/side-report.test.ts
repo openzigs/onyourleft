@@ -18,8 +18,8 @@ import {
   OBSERVATION_THRESHOLDS,
   observedChanges,
   renderableChanges,
-  sideReportFrom,
   sideSessionFrom,
+  type SideReport,
   type SideReportLooked,
   type SideSessionLooked,
   type SideReportSample,
@@ -120,6 +120,19 @@ function session(
     // About 80 rpm at five pictures a second, so the crank lands everywhere.
     pose: poseAt(index < count / 2 ? early : late, index * 1.7, mirrored),
   }));
+}
+
+/**
+ * A session's sentences alone. #816: the product's `sideReportFrom` had no
+ * caller and hard-coded where the poses came from, so it was deleted and these
+ * tests read the one function the product calls, with the place the sentences
+ * do not depend on stated here.
+ */
+function sideReportFrom(
+  samples: readonly SideReportSample[],
+  looked: SideReportLooked,
+): SideReport | undefined {
+  return sideSessionFrom(samples, { ...looked, place: 'tablet' }).report;
 }
 
 function lookedAt(samples: readonly SideReportSample[]): SideReportLooked {

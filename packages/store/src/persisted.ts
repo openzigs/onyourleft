@@ -81,6 +81,7 @@ import {
   SIDE_SESSION_SOURCES,
 } from './records';
 import { parseKitColour } from './kit-colour';
+import { parseMaskedWords } from './masked-words';
 import { parseUnitSystem } from './unit-system';
 import { DEFAULT_VISIBILITY, parseVisibility } from './visibility';
 
@@ -98,6 +99,8 @@ export interface PersistedAthlete {
   units?: string;
   /** @see AthleteRecord.kitColour — a palette key, stored as its bare word. */
   kitColour?: string;
+  /** @see AthleteRecord.maskedWords — the rider's own words, as they were saved. */
+  maskedWords?: string[];
 }
 
 /** @see ActivityRecord */
@@ -394,6 +397,9 @@ export function toPersistedAthlete(record: AthleteRecord): PersistedAthlete {
   if (record.kitColour !== undefined) {
     row.kitColour = record.kitColour;
   }
+  if (record.maskedWords !== undefined) {
+    row.maskedWords = [...parseMaskedWords(record.maskedWords)];
+  }
   return row;
 }
 
@@ -454,6 +460,11 @@ export function fromPersistedAthlete(row: PersistedAthlete): AthleteRecord {
   // §6): nothing that is not a palette key leaves this function.
   if (row.kitColour !== undefined) {
     record.kitColour = parseKitColour(row.kitColour);
+  }
+  // #839. Absent stays absent; present is tidied rather than refused, for
+  // `units`' reason — `masked-words.ts` §"What a stored list may hold".
+  if (row.maskedWords !== undefined) {
+    record.maskedWords = parseMaskedWords(row.maskedWords);
   }
   return record;
 }

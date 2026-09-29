@@ -688,6 +688,27 @@ export default tseslint.config(
     },
   },
 
+  // --- The Durable Object adapter runs under workerd, not Node (#781) -------
+  // `apps/instance/src/room/durable-object/` is loaded by `workerd` with no
+  // Node compatibility flag, so a `node:` import or a `process` there is a
+  // load error at run time. `tsconfig.durable-object.json` is the closure (no
+  // `lib` but ES2024, no `types`); this is the fast duplicate. The runtime's
+  // own `Response` and `WebSocketPair` are reached in one place,
+  // `worker-under-test.ts`, through `globalThis` and the ports in
+  // `platform.ts`, so no bare platform global is needed here. The tests and
+  // the `*-testing.ts` fakes run in Node, under Vitest, and are exempt.
+  {
+    files: ['apps/instance/src/room/durable-object/**/*.ts'],
+    ignores: ['**/*.test.ts', '**/*-testing.ts'],
+    rules: platformIsolation([
+      {
+        group: ['ws', 'ws/*'],
+        message:
+          'The Durable Object adapter uses the platform’s WebSocket, never `ws` (ADR 0037 D-2).',
+      },
+    ]),
+  },
+
   // --- The announcer's core is pure: time arrives as a parameter -------------
   // #396. `apps/web/src/game/hud/announce.ts` decides whether a rider hears a
   // sentence, and its whole test suite drives it with a fake clock — which is

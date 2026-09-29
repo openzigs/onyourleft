@@ -1330,11 +1330,36 @@ apps/                 AGPL-3.0-or-later, without exception
                         timers, `performance`, `Math.random` and `ws`.
                         `clock.ts` maps a client's `atMs` onto the room's
                         clock, because the two are never the same clock.
-                        ⚠️ **NOT mounted yet** — #780 (Node, `ws`) and #781
-                        (Durable Object) are the adapters, and `main.ts`
-                        imports none of it. ⚠️ Its workspace dependencies are
+                        ⚠️ **Mounted by one adapter, and not by the
+                        instance**: #781's Durable Object (below) runs it
+                        under `workerd` in tests only, and #780 (Node, `ws`)
+                        is not built — `main.ts` imports none of it. ⚠️ Its workspace dependencies are
                         TypeScript with extensionless relative imports, which
                         `node src/main.ts` cannot load: #780 owns that
+    src/room/durable-object/
+                        the room core as a Cloudflare Durable Object (#781,
+                        ADR 0037 D-2's second adapter), BUILT AND NOT DEPLOYED
+                        (the owner's Q3/Q6): one object per room, every socket
+                        through the Hibernation API with its connection in
+                        its attachment, the 1 Hz tick as a storage alarm that
+                        is not re-set once the room leaves countdown/running
+                        (so an emptied room stops billing), and a lobby
+                        restored after eviction by REPLAYING a log of the
+                        core's own calls — with the admission's recorded
+                        answers, so a ticket is verified once per hello and
+                        never again. ⚠️ A room evicted after it left the lobby
+                        is not restored: it refuses its sockets `room-closed`.
+                        ⚠️ Platform-free by `tsconfig.durable-object.json`
+                        (ES2024, no `types`) and an eslint block; what it
+                        needs of the runtime is ports in `platform.ts`, not
+                        `@cloudflare/workers-types`. ⚠️ **No production
+                        Worker entry**: which room an object serves and where
+                        its course comes from are #790's.
+                        `worker-under-test.ts` is the only thing `workerd`
+                        loads, and only for `test:workerd` (§4a). Held to the
+                        core by `src/room/conformance.test.ts` — one script,
+                        every adapter, byte-identical text per socket; #780
+                        adds itself to that file's `ADAPTERS`
 
 packages/             Apache-2.0, without exception
   domain/             units, core types, validation, signing, analysis (#25)
@@ -1971,6 +1996,19 @@ pnpm --filter @onyourleft/mobile run native:closure
 pnpm --filter @onyourleft/instance run test
 pnpm --filter @onyourleft/instance run typecheck
 
+# The Durable Object adapter (#781) under a REAL workerd, run on 2026-09-29:
+# the conformance script through the adapter under workerd, the tick as a real
+# storage alarm that stops once an emptied race finishes, and a lobby evicted
+# by the runtime itself (after ~10 s idle) and restored. It bundles
+# src/room/durable-object/worker-under-test.ts with rolldown, runs the pinned
+# `workerd` binary on 127.0.0.1 with SQLite storage in a temporary directory,
+# and needs NO Cloudflare account, token or network. About 35 s, most of it
+# waiting on the runtime's own clock. ⚠️ NOT in CI and NOT in `pnpm run test`
+# (§4c): `vitest.config.ts` excludes `*.workerd.test.ts`, and
+# `src/room/conformance.test.ts` runs there against the reference and the
+# adapter under in-memory fakes, with its workerd block reported SKIPPED.
+pnpm --filter @onyourleft/instance run test:workerd
+
 # Start the instance on this machine, on 127.0.0.1:8787. ⚠️ It REFUSES to start
 # without a commit or a source URL (AGPL-3.0 §13, ADR 0036 D-6); every variable
 # it reads is in .env.example. Ctrl-C stops it. Not a gate, and nothing runs it.
@@ -2156,8 +2194,10 @@ not.
 - **Any instance feature beyond metadata.** `apps/instance` answers `/health`, `/source`,
   `/openapi.json` and `/licences/third-party.txt` and nothing else yet: no account (#772), no sync
   (#776), no room anybody can reach (#780). ⚠️ The room **core** exists since
-  [#779](https://github.com/openzigs/onyourleft/issues/779) — `src/room/core/` — and nothing mounts
-  it. Do not write a command or a test that assumes a reachable room exists.
+  [#779](https://github.com/openzigs/onyourleft/issues/779) — `src/room/core/` — and the only
+  thing that mounts it is [#781](https://github.com/openzigs/onyourleft/issues/781)'s Durable
+  Object adapter, under a local `workerd` in `test:workerd` and **deployed nowhere**. Do not write a
+  command or a test that assumes a reachable room exists.
   ⚠️ **The database and the blob store DO exist since #842** (#769, #770) — a reviewer who
   remembers "no database (#769)" in this bullet is reading the old file — but no route and no
   start-up path opens either: `main.ts` reads no database path, and the Docker image installs
@@ -2450,7 +2490,9 @@ each of those can do is turn `main` red on a day the service is down. For Docker
 | `apps/instance`'s unit and HTTP tests (the real listener on an ephemeral port) | the Vitest run, as one more project (`instance`) | no service, no second job; 51 cases in about 0.15 s locally |
 | The Docker image, and `/health` inside the container | `Checks, concurrently`, as `instance image` | mostly a digest-pinned pull, so it waits rather than works — the step's shape |
 | The OpenAPI drift check (#36) | the Vitest run (`src/openapi.test.ts`) | it is a byte comparison, not a tool |
-| Rooms: the conformance suite on Node and on `workerd`, and the two-browser e2e spec with its fan-out control | **not built yet** — #779, #780, #781 | #771's last two criteria are owed by the first room, not by this scaffold |
+| Rooms: the conformance suite (`src/room/conformance.test.ts`) against the reference and the Durable Object adapter under in-memory fakes, and the adapter's own cases under fakes | the Vitest run (`instance`) | #781; well under a second. #780's Node adapter joins the same file |
+| Rooms: the Durable Object adapter under a real `workerd` | **not CI** — `test:workerd`, a local command (§4a), decided by #781 | about 35 s, most of it waiting on the runtime's alarms and its ten-second eviction, which a job already past fifteen minutes on the 7763 cannot spend on every pull request; its logic runs in CI under the fakes. ⚠️ **The 35 s is a LOCAL figure** (34.6 s again on #781's review, on a Mac) — the suite has never run on the runner, so this decision rests on the local figure and #771's *"measure its cost on the runner before deciding"* is not met. ⚠️ The ~130 MB `workerd` binary is still downloaded by CI's install (§8) |
+| Rooms: the two-browser e2e spec with its fan-out control | **not built yet** — #780 | #771's last criterion is owed by the first room a browser can reach |
 | A load test, and a Cloudflare bill | **not CI** (#792, #464) | a measurement and an account, not gates |
 
 **What it cost, measured on the runner** — see the table directly below this paragraph, which
@@ -4377,9 +4419,13 @@ because the copy under `node_modules/.pnpm` is read too.
 **An install script is a decision, recorded in `pnpm-workspace.yaml`.** pnpm 11 does not run
 dependency build scripts until `allowBuilds` names them, and leaves `pnpm install` exiting 1 until
 each is answered `true` or `false`. Answer it rather than deleting the entry: an install script runs
-arbitrary code with your privileges before any lint or test gate sees the package. The one entry
-today is `unrs-resolver`, answered `false` — it ships prebuilt native bindings as platform optional
-dependencies, so the script has nothing to do.
+arbitrary code with your privileges before any lint or test gate sees the package. There are two
+entries, both answered `false` for the same reason: `unrs-resolver` ships prebuilt native bindings
+as platform optional dependencies, so its script has nothing to do; and `workerd` (since
+[#781](https://github.com/openzigs/onyourleft/issues/781)) is a binary in its platform package
+(`@cloudflare/workerd-<os>-<arch>`), whose script only re-links it or, when that package is
+missing, downloads it from npm at install time. ⚠️ That package is ~130 MB, so every install —
+CI's included — downloads it, though CI runs nothing that uses it (§4c).
 
 **That block is therefore a security-relevant file on every fork pull request.** CI installs from the
 *fork's* `pnpm-workspace.yaml`, so flipping an entry to `true` and adding a dependency is what makes
@@ -4567,6 +4613,10 @@ top of an issue **supersedes its body**.
 | What the owner actually decided about the camera, and which of the four answers changes a promise | [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) §Amendments, [#495](https://github.com/openzigs/onyourleft/issues/495) |
 | What the no-network promise becomes, the one egress it does not cover, and the three artefacts that move with it | [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) §Amendments §Q1, `apps/web/src/privacy/no-network.test.ts`, [`docs/privacy-policy.md`](docs/privacy-policy.md) |
 | Which one module may send anything off the device, and what goes red for a second | `apps/web/src/camera/analysis-transport.ts`, `apps/web/src/privacy/no-network.test.ts` §`PERMITTED_NETWORK_CALLS`, [#387](https://github.com/openzigs/onyourleft/issues/387) |
+| What is masked before anything is sent to a hosted model, what is deliberately not, and why the original text is replaced rather than the folded reading | `apps/web/src/ride-analysis/hosted-mask.ts`, [#839](https://github.com/openzigs/onyourleft/issues/839) |
+| What proves no hosted request skips the masking, and the planted details it looks for | `apps/web/src/ride-analysis/hosted-mask-reachable.test.ts`, `apps/web/src/ride-analysis/personal-details-testing.ts` |
+| Where the rider's list of words to mask is kept, why it is not in the account export, and why the screen refuses what the store would silently drop | `packages/store/src/masked-words.ts`, `apps/web/src/athlete/masked-words.ts`, `apps/web/src/athlete/MaskedWordsPanel.tsx` |
+| Why the ride page shows what a hosted run will send before the first one, and why that preview is the sent text | `apps/web/src/ride-analysis/ride-analysis.ts` §`previewHostedRequest`, `apps/web/src/ride-analysis/RideWriteUpControl.tsx` §`HostedPreviewPanel` |
 | Whether a hosted model on the rider's own key may be used, why it is never sent a picture, where the key lives and what stops it reaching a log, an error, an export or `packages/store` | `apps/web/src/camera/hosted-model.ts`, `apps/web/src/camera/hosted-transport.ts`, `apps/web/src/camera/hosted-key.test.ts`, `apps/web/src/camera/session.ts` §`agreeToHosted`, [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) §Amendments 2026-09-28, [#518](https://github.com/openzigs/onyourleft/issues/518) |
 | How the tablet and the tripod phone connect with no server, what a stranger on the same Wi-Fi can and cannot do, and why the no-network gate cannot see WebRTC yet | [ADR 0033](docs/adr/0033-side-camera-link.md) D-1, D-4, D-9, [#532](https://github.com/openzigs/onyourleft/issues/532) |
 | Why the rider's computer must be on their own network by its spelling, and why a hosted model cannot be typed in | `apps/web/src/camera/analysis-endpoint.ts` §`addressSpaceOf`, [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) §Amendments §Q1 |
