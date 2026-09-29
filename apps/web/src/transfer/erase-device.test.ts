@@ -25,6 +25,9 @@ import {
   streamSetFor,
   workoutFor,
 } from '@onyourleft/store/testing';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import type { ActivityId } from '@onyourleft/store';
 import { unixSeconds } from '@onyourleft/domain';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -180,8 +183,30 @@ describe('what the rider is told before they press it', () => {
     // The list is short on purpose and every entry is a fact about the
     // architecture. If it ever grows a "we will ask other instances" line, that
     // line must arrive with the instance that makes it true.
-    // Five since #518, whose hosted path made the fifth true.
-    expect(ERASE_CANNOT_REACH.length).toBeLessThanOrEqual(5);
+    // Five since #518, whose hosted path made the fifth true; six since #804,
+    // whose press sends a ride's numbers to the rider's own computer.
+    expect(ERASE_CANNOT_REACH.length).toBeLessThanOrEqual(6);
+  });
+
+  it('names the ride’s numbers sent to the rider’s own computer, as the privacy policy does — #804', () => {
+    const policy = readFileSync(
+      fileURLToPath(new URL('../../../../docs/privacy-policy.md', import.meta.url)),
+      'utf8',
+    );
+    const erase = policy.slice(
+      policy.indexOf('## Deleting your data'),
+      policy.indexOf('## Children'),
+    );
+    const straight = (text: string): string => text.replace(/[‘’]/g, "'").replace(/\s+/g, ' ');
+    // The policy's erase paragraph says it…
+    expect(straight(erase)).toContain("a ride's numbers you sent to your own computer");
+    expect(straight(erase)).toContain('which is a copy that computer holds');
+    // …and so does the screen, before the rider presses anything.
+    const line = ERASE_CANNOT_REACH.find((entry) =>
+      straight(entry).includes("a ride's numbers you sent to your own computer"),
+    );
+    expect(line).toBeDefined();
+    expect(straight(line ?? '')).toContain('which is a copy that computer holds');
   });
 });
 

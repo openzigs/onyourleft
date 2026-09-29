@@ -21,6 +21,7 @@ import {
   STRUCTURED_TEMPERATURE,
   type RunFailure,
   type RunnerClock,
+  type RunProgress,
   type RunOutcome,
 } from './runner';
 import { ANALYSIS_TEMPLATES, CURRENT_ANALYSIS_TEMPLATE, type AnalysisTemplate } from './template';
@@ -373,6 +374,10 @@ describe('a structured reply that is not the contract', () => {
     expect(repair?.user).toContain('in exactly the form and schema asked for above');
     expect(repair?.replySchema).toStrictEqual(first?.replySchema);
     expect(repair?.user).not.toContain('not json at all');
+    // #804, from #826's review: the re-ask is structured too. Swapping in the
+    // prose temperature left every test green until this line.
+    expect(repair?.temperature).toBe(STRUCTURED_TEMPERATURE);
+    expect(repair?.temperature).not.toBe(PROSE_TEMPERATURE);
   });
 
   it('names the wrong form, rather than invalid JSON, when the reply parsed', async () => {
@@ -536,14 +541,46 @@ describe('the summary and the screen', () => {
     expect(failedAs(outcome)).toBe('withheld-by-screen');
   });
 
-  it('withholds the run when the rewrite does not answer', async () => {
-    const { outcome } = await run(rideWith(1), [
-      note(1),
-      ANGLED_SUMMARY,
-      { failure: 'failed-on-machine' },
-    ]);
-    expect(failedAs(outcome)).toBe('withheld-by-screen');
+  // #804, carried from #826's review: a rewrite that never answered is the
+  // summary not finishing, and saying the screen withheld it twice was untrue.
+  it.each<[string, Step]>([
+    ['a transport failure', { failure: 'failed-on-machine' }],
+    ['a reply cut off at its length', { ...GOOD_SUMMARY, finish: 'length' }],
+    ['its deadline', { hangs: true, advance: 120_001 }],
+  ])('fails as no-summary, not withheld, when the rewrite ends in %s', async (_, bad) => {
+    const { outcome, port } = await run(rideWith(1), [note(1), ANGLED_SUMMARY, bad]);
+    expect(port.requests[2]?.kind).toBe('rewrite');
+    expect(failedAs(outcome)).toBe('no-summary');
   });
+
+  it('fails as no-summary when the rewrite’s prompt is over its bound, and sends nothing', async () => {
+    const [sectionStep, positionStep, summaryStep, rewriteStep] = CURRENT_ANALYSIS_TEMPLATE.steps;
+    const template: AnalysisTemplate = {
+      ...CURRENT_ANALYSIS_TEMPLATE,
+      steps: [
+        sectionStep,
+        positionStep,
+        summaryStep,
+        { ...rewriteStep, bounds: { ...rewriteStep.bounds, maximumInputCharacters: 10 } },
+      ],
+    };
+    const { outcome, port } = await run(rideWith(1), [note(1), ANGLED_SUMMARY], template);
+    expect(port.requests.map((request) => request.kind)).toStrictEqual(['section', 'summary']);
+    expect(failedAs(outcome)).toBe('no-summary');
+  });
+
+  it.each<[string, string]>([
+    ['empty', '   '],
+    ['too long', 'x'.repeat(20_000)],
+    ['holding a control character', 'A steady ride.\u0007'],
+  ])(
+    'withholds a run whose summary and rewrite were both %s, in a sentence that names no rule about a body',
+    async (_, text) => {
+      const { outcome } = await run(rideWith(1), [note(1), { answer: text }, { answer: text }]);
+      expect(failedAs(outcome)).toBe('withheld-by-screen');
+      expect(RUN_FAILURE_TEXT['withheld-by-screen']).not.toMatch(/body|twice|angle/i);
+    },
+  );
 
   it.each<[string, Step]>([
     ['a transport failure', { failure: 'unreachable' }],
@@ -764,5 +801,58 @@ describe('what a failed run says', () => {
     ]);
     expect(failedAs(outcome)).toBe('withheld-by-screen');
     expect(JSON.stringify(outcome)).not.toContain('MARKER');
+  });
+});
+
+// --- Progress (#804) -------------------------------------------------------------------------
+
+describe('progress', () => {
+  async function progressOf(
+    input: RideAnalysisInput,
+    script: readonly Step[],
+  ): Promise<{ seen: RunProgress[]; outcome: RunOutcome }> {
+    const clock = manualClock();
+    const seen: RunProgress[] = [];
+    const outcome = await runAnalysis(input, {
+      port: scriptedPort(clock, script),
+      clock,
+      signal: new AbortController().signal,
+      progress: (progress) => {
+        seen.push(progress);
+      },
+    });
+    return { seen, outcome };
+  }
+
+  it('reports step n of m for each planned step, and only that', async () => {
+    const { seen } = await progressOf(rideWith(2, true), [
+      note(1),
+      note(2),
+      POSITION_NOTE,
+      GOOD_SUMMARY,
+    ]);
+    expect(seen).toStrictEqual([
+      { step: 1, total: 4 },
+      { step: 2, total: 4 },
+      { step: 3, total: 4 },
+      { step: 4, total: 4 },
+    ]);
+    for (const progress of seen) {
+      expect(Object.keys(progress).sort()).toStrictEqual(['step', 'total']);
+    }
+  });
+
+  it('does not count a re-ask or the rewrite as a step of their own', async () => {
+    const { seen, outcome } = await progressOf(rideWith(1), [
+      { answer: 'not json' },
+      note(1),
+      ANGLED_SUMMARY,
+      GOOD_SUMMARY,
+    ]);
+    expect(outcome.kind).toBe('written');
+    expect(seen).toStrictEqual([
+      { step: 1, total: 2 },
+      { step: 2, total: 2 },
+    ]);
   });
 });

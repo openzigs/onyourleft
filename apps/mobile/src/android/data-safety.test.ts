@@ -205,8 +205,24 @@ describe('the declaration filed on Play', () => {
       answer.dataType.startsWith('Health and fitness'),
     );
     expect(health.length).toBeGreaterThanOrEqual(2);
-    for (const answer of health) {
-      expect(answer.collected, answer.dataType).toBe(false);
+  });
+
+  it('answers both health rows as collected, optional and not shared — #804', () => {
+    // #804's press sends a ride's heart rate, power and cadence, as numbers,
+    // to the rider's own computer — the photos row's answer, for the photos
+    // row's reasons, re-filed in the same pull request as the button.
+    for (const dataType of [
+      'Health and fitness — health info',
+      'Health and fitness — fitness info',
+    ]) {
+      const answer = DATA_SAFETY_DECLARATION.find((row) => row.dataType === dataType);
+      expect(answer, dataType).toBeDefined();
+      expect(answer?.collected, dataType).toBe(true);
+      expect(answer?.shared, dataType).toBe(false);
+      expect(answer?.optional, dataType).toBe(true);
+      expect(answer?.purposes, dataType).toStrictEqual(['App functionality']);
+      expect(answer?.why, dataType).toContain('#804');
+      expect(answer?.why, dataType).toContain('their own network');
     }
   });
 
@@ -246,11 +262,16 @@ describe('the declaration filed on Play', () => {
     expect(photos?.shared).toBe(false);
   });
 
-  it('collects nothing else — the map and the camera, and nothing more', () => {
+  it('collects nothing else — the map, the camera and the post-ride ask, and nothing more', () => {
     const collected = DATA_SAFETY_DECLARATION.filter((answer) => answer.collected).map(
       (answer) => answer.dataType,
     );
-    expect(collected).toStrictEqual(['Location — approximate location', 'Photos and videos']);
+    expect(collected).toStrictEqual([
+      'Location — approximate location',
+      'Health and fitness — health info',
+      'Health and fitness — fitness info',
+      'Photos and videos',
+    ]);
     for (const answer of DATA_SAFETY_DECLARATION) {
       expect(answer.shared, answer.dataType).toBe(false);
     }

@@ -54,7 +54,13 @@ import {
   platformMediaDevices,
 } from './camera/browser-camera';
 import { readAnalysisEndpoint } from './camera/analysis-endpoint';
-import { riderAnalysisPort, riderAnalysisSource } from './camera/analysis-transport';
+import {
+  riderAnalysisPort,
+  riderAnalysisSource,
+  riderModelStepSource,
+} from './camera/analysis-transport';
+import { createRideAnalysis, platformRunnerClock } from './ride-analysis/ride-analysis';
+import type { RideAnalysisPort } from './ride-analysis/ride-analysis-port';
 import { hostedModelEraser, readHostedModel } from './camera/hosted-model';
 import { hostedModelPort } from './camera/hosted-transport';
 import { keepThisRide } from './camera/keep';
@@ -752,6 +758,38 @@ async function buildRiderAnalysis(): Promise<() => ReturnType<typeof riderAnalys
 }
 
 /**
+ * The post-ride ask (#804): one press on a ride's page runs the analysis agent
+ * on the rider's own computer and saves the screened write-up with the ride.
+ *
+ * ⚠️ **The step port is built by `riderModelStepSource`, not here**, for the
+ * reason `buildRiderAnalysis` gives: inside the Android shell it must be the
+ * native request, and that choice has to be somewhere a test can see it.
+ * There is no hosted source yet — #803 adds one — so a rider with only a
+ * hosted model set up is offered no control.
+ *
+ * The camera's consent is read at the press, not now: it is held in memory
+ * and turned on on the Camera screen, and the pose summary goes into the
+ * input only while it covers the camera (the owner's ruling 5 on #795).
+ */
+async function buildRideAnalysis(camera: CameraController | undefined): Promise<RideAnalysisPort> {
+  const nativeShell = isNativeShell(platformCapacitor());
+  const computer = await riderModelStepSource(
+    nativeShell,
+    async () => (await import('@onyourleft/mobile')).capacitorAnalysisPost(),
+    readAnalysisEndpoint,
+  );
+  return createRideAnalysis({
+    store: localStore(),
+    athleteId: LOCAL_ATHLETE,
+    computer,
+    nativeShell,
+    cameraConsented: () => camera?.state().consent.local ?? false,
+    clock: platformRunnerClock(),
+    now: () => unixSeconds(Math.floor(Date.now() / 1000)),
+  });
+}
+
+/**
  * The camera, or nothing (#382).
  *
  * ⚠️ **`undefined` is an ordinary state and is the right answer surprisingly
@@ -849,6 +887,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   // before the platform, because the ride controller reads its presence (#390).
   const riderAnalysis = await buildRiderAnalysis();
   const camera = await buildCameraController(riderAnalysis);
+  const rideAnalysis = await buildRideAnalysis(camera);
   // #529. One per tab, like the camera: the tablet's pairing is held by the
   // port so that leaving the Camera screen to ride does not end it. None
   // where there is no WebRTC — both side-camera screens then say so.
@@ -932,6 +971,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           transfer={buildTransferPort()}
           library={buildLibraryPort()}
           detail={buildDetailPort()}
+          rideAnalysis={rideAnalysis}
           analysis={buildAnalysisPort()}
           segments={buildSegmentPort()}
           match={buildMatchPort()}

@@ -66,6 +66,8 @@ import {
 } from '../detail/load';
 import type { SharedTrack } from '../detail/privacy';
 import { SideCameraSection } from '../detail/SideCameraSection';
+import type { RideAnalysisPort } from '../ride-analysis/ride-analysis-port';
+import { RideWriteUpControl } from '../ride-analysis/RideWriteUpControl';
 import {
   CHART_POINTS,
   DEFAULT_SERIES,
@@ -125,6 +127,11 @@ export interface ActivityDetailViewProps {
    * `SettingsView`'s `announcements` prop has.
    */
   readonly preferences?: PreferenceStorage | undefined;
+  /**
+   * The post-ride ask (#804), or `undefined` for none — and then no control is
+   * offered. `ride-analysis/RideWriteUpControl.tsx` is the press.
+   */
+  readonly writeUp?: RideAnalysisPort | undefined;
 }
 
 /**
@@ -165,6 +172,7 @@ export function ActivityDetailView({
   map,
   basemap,
   preferences,
+  writeUp,
 }: ActivityDetailViewProps): JSX.Element {
   // Read once, when the screen opens: the switch is on the Settings screen, so
   // it cannot change while this one is showing.
@@ -529,6 +537,13 @@ export function ActivityDetailView({
         report renders nothing here at all.
       */}
       <SideCameraSection sideCamera={sideCamera} />
+
+      {/*
+        #804. The press that asks the rider's model for a write-up of this
+        ride, below the side camera's report (ADR 0035). It sends nothing
+        until it is pressed; #805 shows what it saved.
+      */}
+      <RideWriteUpControl port={writeUp} activityId={activity.id} />
 
       {activity.hasPosition ? (
         <>

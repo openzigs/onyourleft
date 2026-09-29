@@ -441,16 +441,16 @@ apps/                 AGPL-3.0-or-later, without exception
                         `input.test.ts` walks a built input for all of it. A
                         gap is coverage, never a zero; W/kg only with a real
                         mass; the pose summary only with camera consent and
-                        never in a section. Nothing calls it yet (#810, #811).
+                        never in a section. ⚠️ Called since #804 (below).
                         Since #811 `runner.ts` runs a template's steps through
                         `model-step-port.ts` — per-step and per-run time and
                         token budgets, one parse-repair re-ask, a failed
                         section LEFT OUT, the #798 screen and one rewrite —
                         and saves nothing: a caller keeps a write-up only on
                         `written`. Time is a `RunnerClock` it is handed.
-                        ⚠️ The port carries an `@unwired` until #804 wires it
-                        — on its two DECLARATIONS since #802, not the file,
-                        because #802 made the file reachable. Since #802
+                        ⚠️ Its two `@unwired` tags came off with #804 —
+                        a reviewer who remembers them is reading the old
+                        file. Since #802
                         `own-computer-step.ts` is the step port to the rider's
                         own computer: text only (a step with any other field,
                         a byte array or a `data:` URL is refused as
@@ -459,7 +459,19 @@ apps/                 AGPL-3.0-or-later, without exception
                         sends through `camera/analysis-transport.ts`
                         §`riderModelStepPort`, which hands it the client's ONE
                         `fetch`; ⚠️ it is NOT in that module because that
-                        module builds pictures and this one must reach none
+                        module builds pictures and this one must reach none.
+                        Since #804 `ride-analysis.ts` is the post-ride ASK
+                        behind `ride-analysis-port.ts`: one press on a ride's
+                        page (`RideWriteUpControl.tsx`, the only caller) reads
+                        the ride, runs the agent through the step port
+                        `main.tsx` builds with `riderModelStepSource`, and
+                        saves ONLY a `ScreenedWriteUp`, replacing the ride's
+                        write-up; any failure leaves the earlier one as it
+                        was. The rider's own computer is offered first; there
+                        is no hosted STEP port until #803. ⚠️ The port is an
+                        optional prop, so `ride-analysis-wiring.test.tsx`
+                        drives the real shell at the detail route with it
+                        built as `main.tsx` builds it
     src/units/          which units a rider reads in (#238) — the one place a
                         number becomes a unit, the context a component asks,
                         and the source scan that stops a future screen writing
@@ -4610,6 +4622,7 @@ top of an issue **supersedes its body**.
 | What proves the HUD's live region is not hidden and moves nothing, and why that is not a screen reader | `apps/web/browser/hud.browser.spec.ts` §"#401", [#401](https://github.com/openzigs/onyourleft/issues/401) |
 | Which steps a model-written ride write-up is made of, what each prompt says, and why changing a shipped prompt is a new template version rather than an edit | `apps/web/src/ride-analysis/template.ts`, `apps/web/src/ride-analysis/template-v1.ts`, `template.test.ts` §`RECORDED_DIGESTS`, [#810](https://github.com/openzigs/onyourleft/issues/810) |
 | How a write-up's steps are run, what a weak model's failed step costs, what each budget is and why, and what a cancelled run keeps | `apps/web/src/ride-analysis/runner.ts` §`RUN_BUDGET_MILLISECONDS`, §`RUN_TOKEN_BUDGET`, §`RUN_FAILURE_TEXT`, `apps/web/src/ride-analysis/model-step-port.ts`, `runner-safety.test.ts`, [#811](https://github.com/openzigs/onyourleft/issues/811) |
+| What one press on a ride's page does, which source is offered first, what a cancel says on each path, and why a failed run keeps the earlier write-up | `apps/web/src/ride-analysis/ride-analysis.ts` §`CANCELLED_TEXT`, §`ASK_FAILURE_TEXT`, `apps/web/src/ride-analysis/ride-analysis-port.ts`, `apps/web/src/ride-analysis/RideWriteUpControl.tsx`, `ride-analysis-wiring.test.tsx`, [#804](https://github.com/openzigs/onyourleft/issues/804) |
 | What a ride-analysis step sends to the rider's own computer, what it refuses to send, how a cut-off reply is told apart, and what a cancel does in the Android shell | `apps/web/src/ride-analysis/own-computer-step.ts`, `apps/web/src/camera/analysis-transport.ts` §`riderModelStepPort`, `docs/privacy-policy.md` §"A ride sent to your own computer", `own-computer-policy.test.ts`, [#802](https://github.com/openzigs/onyourleft/issues/802) |
 
 <!-- Last updated: 2026-09-17 by delivery:code-issue resolving #355 (the verge as a visibility constant, and the camera-cone gate that had been missing) -->
