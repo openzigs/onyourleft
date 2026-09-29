@@ -96,6 +96,38 @@ const kindSchema: Schema = {
 export const SYNC_ROUTES: readonly Route[] = [
   {
     method: 'GET',
+    path: '/v1/account/export',
+    operationId: 'exportAccount',
+    summary:
+      'Everything this instance holds about you, machine-readable: every activity’s signed record and the address of its original file — your own true track, unobfuscated — every item as you sent it, your public keys, your names and your results. Says what it leaves out, and why.',
+    ...SESSION,
+    errors: ['unauthenticated', 'not_found'],
+    response: {
+      contentType: 'application/json',
+      schema: {
+        type: 'object',
+        description:
+          '`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail`, `activities` (each with its `record` and its `file` address), `items`, `results` and `notIncluded`.',
+      },
+    },
+    handle: async (context) => answer(await syncOf(context).exportAccount(callerOf(context))),
+  },
+  {
+    method: 'DELETE',
+    path: '/v1/account',
+    operationId: 'eraseAccount',
+    summary:
+      'Remove your account from THIS instance: every row, and every original file no other rider also sent. It cannot reach a copy anyone already downloaded, or another instance. Safe to repeat after a failure.',
+    ...SESSION,
+    errors: ['unauthenticated'],
+    response: { contentType: 'none' },
+    handle: async (context) => {
+      await syncOf(context).eraseAccount(callerOf(context).athleteId);
+      return noContent();
+    },
+  },
+  {
+    method: 'GET',
     path: '/v1/sync/manifest',
     operationId: 'getSyncManifest',
     summary:

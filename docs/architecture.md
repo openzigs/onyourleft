@@ -1241,8 +1241,9 @@ decided how it is built. [#767](https://github.com/openzigs/onyourleft/issues/76
 **What it does today is small on purpose**: four metadata routes, and — since #855 (#772, #773,
 #774) — the identity routes under `/v1/auth/`, which a handler serves only when it is HANDED an
 identity service over a store. The Node entry point is not handed one yet (see "Identity" below),
-so a running instance still answers the metadata alone. No sync and no reachable room exists yet
-— #776 and #780 build them.
+so a running instance still answers the metadata alone. Since #881 (#37, #38, #776, #35) the sync
+routes exist on the same terms — served only by a handler handed a sync service over a store and a
+blob store (see "Sync" below). No reachable room exists yet — #780 builds it.
 
 **The device is canonical and a rider with no instance loses nothing** (ADR 0036 D-3). Nothing in
 `apps/web` or `apps/mobile` imports the instance, and nothing may: a client reaches it over the
@@ -1342,6 +1343,38 @@ sequenceDiagram
 | The client half | `apps/web/src/instance/sign-in.ts`: the local athlete first, then the device key, then challenge → sign → session, and the instance's athlete id kept on the device. It takes its transport as a parameter and names no `fetch`: #777 supplies the one module allowed to call an instance, after #778's disclosures | `apps/web/src/instance/` |
 | Across platforms | `apps/web/browser/identity.browser.spec.ts`: the browser signs with the app's own non-extractable key in IndexedDB, and a real instance running in the spec's process verifies it, with a flipped signature byte and another instance's origin as controls | the browser gate |
 
+#### Sync (#37, #38, #776, #35)
+
+Everything a device syncs is **the caller's own**: every route takes the athlete from the session
+and never from the request, and another athlete's ride, file or item is `not_found`. Two riders who
+send identical bytes each hold their own record of them, keyed `(athlete, content)`.
+
+```mermaid
+sequenceDiagram
+    participant D as Device (apps/web/src/instance/sync.ts)
+    participant I as Instance (apps/instance/src/sync/)
+    D->>I: GET /v1/sync/manifest?cursor= (receivedAt, id)
+    I-->>D: [{kind, key, digest, receivedAt, deleted, activityId}], next
+    D->>I: GET /v1/sync/records/{content}, GET /v1/sync/files/{content}
+    D->>D: verify signature AND file hash (ADR 0014 D-6) BEFORE writing
+    D->>I: POST /v1/sync/records {record, file} — what the instance is missing
+    D->>I: POST /v1/sync/items/{kind}/{key} {body} — write-ups, side-camera reports
+```
+
+| Concern | Decision | Where |
+|---|---|---|
+| Ingestion (#37) | Refused in order, each with its own code: the file's type **from its bytes** (`file_type_unsupported`), that it decodes to at least one sample (`file_undecodable`), then ADR 0014 D-6's answers (`record_malformed`, `record_unsupported`, `record_signature_mismatch`, `record_content_mismatch`), then `record_not_your_key`. Nothing is written until every check passes. The file goes to the blob store, then the record and its manifest row in ONE transaction; a failed transaction takes the file back unless another athlete's record holds it, under a per-file lock. A duplicate is decided by the primary key and answers the first record | `src/sync/sync.ts` §`ingest`, `src/sync/activity-file.ts` |
+| The manifest (#776) | `sync_item` (migration 0005): every activity and item, and a tombstone for each one deleted. Paged by `(receivedAt, seq)`, where `seq` is `AUTOINCREMENT` and `receivedAt` is written as `max(now, the newest)`, so no row is ever inserted behind a cursor a reader holds | `src/store/sql-store.ts` §`nextReceivedAt` |
+| Items (#776's 2026-09-29 addition) | `write-up`, `side-camera-report` (the pose summary inside it), `goal`, `note`, `document` — stored byte for byte as the device sent them; the device copy is canonical (ADR 0036). The client syncs the first two; goals, notes and documents wait for #836 on the device | `src/sync/sync.ts` §`putItem` |
+| Reads (#38) | The caller's own activities only — no read of another athlete's exists, because nothing records who may see whose ride. The list is ONE query a page; streams are served in full or at `?points=`, bucket means with a gap left `null`, and **never a position**; every response is `no-store` | `src/sync/sync.ts` §`owned`, §`streams` |
+| Export (#35) | `GET /v1/account/export`: the account as JSON, each activity's signed record and the address of its ORIGINAL file (the true track, unobfuscated), every item, public keys only, and a list of what is left out and why | `src/sync/sync.ts` §`exportAccount` |
+| Deletion (#35) | `DELETE /v1/account`: files first — each one no other athlete also holds — then every row, in tables **derived from the schema's foreign keys at the time of the call**, then a sweep of files a concurrent upload added. A failure part way is retried safely. It reaches THIS instance only: not a copy already downloaded, and not another instance | `src/sync/sync.ts` §`eraseAccount`, `src/store/sql-store.ts` §`athleteTablesInErasureOrder` |
+| The client (#776) | `apps/web/src/instance/sync.ts`: pull, verifying before any write, through the rider's own import path; then push, signing a FIT of each ride the instance lacks with the device key. A pulled record is NOT kept on the device — `putActivityRecord` refuses another device's key, and that rule stands — so a pulled ride is never signed again. It names no `fetch`: #777 wires the transport | `apps/web/src/instance/sync.ts` |
+
+⚠️ **Not wired to a running box yet.** `main.ts` hands the handler neither identity nor sync (#780),
+and the shipped client calls none of this (#777), so every sync route answers `unavailable` on a
+running instance and a rider's device sends nothing.
+
 #### The API contract (#36)
 
 | Concern | Decision | Where |
@@ -1363,8 +1396,8 @@ breaking whether or not this repository's own client notices. `info.version` in 
 the API's version, not the package's.
 
 ⚠️ **What the contract does not have yet, and who owes it.** Since #855 the identity routes
-produce `unauthenticated`, `rate_limited` and `validation_failed` and take JSON bodies; the
-pagination parser still has no caller until #776's first list.
+produce `unauthenticated`, `rate_limited` and `validation_failed` and take JSON bodies; since #881
+the pagination parser has its first callers, the sync manifest and the activity list.
 
 ### The realistic world: what is built, and how a rider chooses it
 

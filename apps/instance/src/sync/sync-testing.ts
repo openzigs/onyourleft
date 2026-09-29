@@ -138,6 +138,14 @@ export const SYNC_HAPPY_CALLS: Readonly<
     const { token, content } = await riderWithRide(world);
     return authorised(world, token, 'GET', `/v1/sync/files/${content}`);
   },
+  exportAccount: async (world) => {
+    const { token } = await riderWithRide(world);
+    return authorised(world, token, 'GET', '/v1/account/export');
+  },
+  eraseAccount: async (world) => {
+    const { token } = await riderWithRide(world);
+    return authorised(world, token, 'DELETE', '/v1/account');
+  },
   getSyncManifest: async (world) => {
     const { token } = await riderWithRide(world);
     return authorised(world, token, 'GET', '/v1/sync/manifest');

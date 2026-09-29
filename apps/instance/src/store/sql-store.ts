@@ -315,11 +315,12 @@ export interface SqlStore {
    */
   ingestActivity(ingestion: ActivityIngestion): Promise<Ingested>;
   /**
-   * Whether ANY athlete holds a record of this file. Not athlete-scoped, by
-   * design: a blob is shared by every athlete who sent the same bytes, and
-   * this is what says whether removing it would take somebody else's file.
+   * Whether ANY athlete — or any but `exceptAthleteId` — holds a record of
+   * this file. Not athlete-scoped, by design: a blob is shared by every
+   * athlete who sent the same bytes, and this is what says whether removing
+   * it would take somebody else's file. It answers a boolean, never a row.
    */
-  isContentHeld(contentSha256: string): Promise<boolean>;
+  isContentHeld(contentSha256: string, exceptAthleteId?: string): Promise<boolean>;
   /** #38: one page of this athlete's live activities, newest first, in ONE query. */
   listActivityPage(
     athleteId: string,
@@ -1140,14 +1141,14 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         }),
       ),
 
-    isContentHeld: (contentSha256) =>
+    isContentHeld: (contentSha256, exceptAthleteId) =>
       exclusive(async () => {
-        const row = await db
+        let query = db
           .selectFrom('activity_record')
           .select('athlete_id')
-          .where('content_sha256', '=', contentSha256)
-          .limit(1)
-          .executeTakeFirst();
+          .where('content_sha256', '=', contentSha256);
+        if (exceptAthleteId !== undefined) query = query.where('athlete_id', '!=', exceptAthleteId);
+        const row = await query.limit(1).executeTakeFirst();
         return row !== undefined;
       }),
 

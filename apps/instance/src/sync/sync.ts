@@ -58,6 +58,7 @@ import { encodeCursor, parsePageRequest, type Page } from '../pagination.ts';
 import {
   SYNC_KINDS,
   type ActivityRecord,
+  type ManifestPosition,
   type SqlStore,
   type SyncKind,
 } from '../store/sql-store.ts';
@@ -152,7 +153,76 @@ export const ITEM_KINDS: readonly Exclude<SyncKind, 'activity'>[] = SYNC_KINDS.f
   (kind): kind is Exclude<SyncKind, 'activity'> => kind !== 'activity',
 );
 
+/**
+ * Everything this instance holds about an athlete, machine-readable (#35, and
+ * the EU Data Act's Chapter II): every activity as its signed record with the
+ * address of its ORIGINAL file — the rider's own true track, unobfuscated,
+ * because privacy zones protect a rider from others and not from themselves —
+ * and every item exactly as it was sent.
+ */
+export interface AccountExport {
+  readonly format: 'onyourleft.instance-account';
+  readonly version: 1;
+  /** Unix seconds. */
+  readonly exportedAt: number;
+  readonly athlete: {
+    readonly id: string;
+    readonly displayName: string;
+    readonly createdAt: number;
+    readonly registrationState: string;
+  };
+  readonly displayNameChanges: readonly {
+    readonly previousName: string;
+    readonly changedAt: number;
+  }[];
+  /** PUBLIC keys only: the instance never holds a private one (ADR 0014 D-3). */
+  readonly deviceKeys: readonly {
+    readonly publicKey: string;
+    readonly addedAt: number;
+    readonly lastUsedAt: number | null;
+    readonly revokedAt: number | null;
+  }[];
+  readonly recoveryEmail: string | null;
+  readonly activities: readonly {
+    readonly contentSha256: string;
+    readonly recordSha256: string;
+    readonly receivedAt: number;
+    readonly record: SignedActivityRecord;
+    /** Where the original file is: `GET` it with the same session. */
+    readonly file: string;
+  }[];
+  readonly items: readonly {
+    readonly kind: SyncKind;
+    readonly key: string;
+    readonly body: string;
+    readonly digest: string;
+    readonly receivedAt: number;
+  }[];
+  readonly results: readonly {
+    readonly roomId: string;
+    readonly finishMs: number | null;
+    readonly flags: number;
+  }[];
+  /** What is on the instance and deliberately NOT in this file, and why. */
+  readonly notIncluded: readonly string[];
+}
+
+/** What the export says it leaves out. Fixed sentences; nothing from the account. */
+export const EXPORT_LEAVES_OUT: readonly string[] = [
+  'Session tokens, recovery codes, link codes and email-recovery tokens: the instance keeps only a hash of each, and a hash is of no use to you.',
+  'Items you deleted: the instance keeps only that they were deleted, so your other devices can delete them too.',
+  'Other riders’ results in the rooms you rode in: they are theirs.',
+];
+
 export interface Sync {
+  /** #35: everything this instance holds about the caller. */
+  exportAccount(caller: Caller): Promise<Outcome<AccountExport>>;
+  /**
+   * #35: remove the athlete from this instance — every row, and every file
+   * no other athlete also holds. Safe to call again after a failure part way:
+   * files go first, while the rows that name them are still there to be found.
+   */
+  eraseAccount(athleteId: string): Promise<void>;
   /** #776: the caller's manifest, `(receivedAt, id)`-paged, tombstones included. */
   manifest(caller: Caller, query: URLSearchParams): Promise<Outcome<Page<ManifestEntry>>>;
   /** #776: one of the caller's signed records, for a device to verify before it writes. */
@@ -270,6 +340,87 @@ export function createSync(options: SyncOptions): Sync {
     ITEM_KINDS.find((each) => each === kind);
 
   return {
+    exportAccount: async (caller) => {
+      const athlete = await store.getAthlete(caller.athleteId);
+      if (athlete === undefined) return refuse('not_found');
+      const records = await store.listActivityRecords(caller.athleteId);
+      const activities = [];
+      for (const record of records) {
+        activities.push({
+          contentSha256: record.contentSha256,
+          recordSha256: toHex(await sha256Bytes(record.signedRecord)),
+          receivedAt: record.receivedAt,
+          record: storedRecord(record),
+          file: `/v1/sync/files/${record.contentSha256}`,
+        });
+      }
+      const items = [];
+      let after: ManifestPosition | undefined;
+      for (;;) {
+        const page = await store.listSyncManifest(caller.athleteId, after, 500);
+        for (const row of page) {
+          if (row.kind === 'activity' || row.body === null || row.digest === null) continue;
+          items.push({
+            kind: row.kind,
+            key: row.key,
+            body: new TextDecoder().decode(row.body),
+            digest: row.digest,
+            receivedAt: row.receivedAt,
+          });
+        }
+        const last = page.at(-1);
+        if (page.length < 500 || last === undefined) break;
+        after = { receivedAt: last.receivedAt, seq: last.seq };
+      }
+      return {
+        ok: true,
+        value: {
+          format: 'onyourleft.instance-account',
+          version: 1,
+          exportedAt: seconds(),
+          athlete: {
+            id: athlete.id,
+            displayName: athlete.displayName,
+            createdAt: athlete.createdAt,
+            registrationState: athlete.registrationState,
+          },
+          displayNameChanges: (await store.listDisplayNameChanges(caller.athleteId)).map(
+            (change) => ({ previousName: change.previousName, changedAt: change.changedAt }),
+          ),
+          deviceKeys: (await store.listDeviceKeys(caller.athleteId)).map((key) => ({
+            publicKey: key.publicKey,
+            addedAt: key.addedAt,
+            lastUsedAt: key.lastUsedAt,
+            revokedAt: key.revokedAt,
+          })),
+          recoveryEmail: (await store.getRecoveryEmail(caller.athleteId))?.address ?? null,
+          activities,
+          items,
+          results: (await store.listResults(caller.athleteId)).map((result) => ({
+            roomId: result.roomId,
+            finishMs: result.finishMs,
+            flags: result.flags,
+          })),
+          notIncluded: EXPORT_LEAVES_OUT,
+        },
+      };
+    },
+
+    eraseAccount: async (athleteId) => {
+      // Files first, while this athlete's rows still name them: a failure here
+      // leaves the rows, so a retry finds the same files again (#35).
+      for (const record of await store.listActivityRecords(athleteId)) {
+        await lock.hold(record.contentSha256, async () => {
+          if (!(await store.isContentHeld(record.contentSha256, athleteId))) {
+            await blobs.delete(record.contentSha256);
+          }
+        });
+      }
+      const erased = await store.eraseAthlete(athleteId);
+      // A record that arrived while the files were going is swept here.
+      for (const contentSha256 of erased) await collect(contentSha256);
+    },
+
     manifest: async (caller, query) => {
       const request = parsePageRequest(query);
       if (!request.ok) return refuse('validation_failed', request.fields);
