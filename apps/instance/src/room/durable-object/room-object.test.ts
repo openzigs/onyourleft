@@ -24,7 +24,9 @@ import {
   START,
   UPGRADE,
 } from './fake-runtime-testing.ts';
-import { connectionOf, LOBBY_LOG_LIMIT, LOBBY_LOG_PREFIX } from './room-object.ts';
+import { createTicketBook } from '../../auth/tickets.ts';
+import { connectionOf, DurableRoom, LOBBY_LOG_LIMIT, LOBBY_LOG_PREFIX } from './room-object.ts';
+import { FAKE_PLATFORM, FakeContext, type FakeReply } from './fake-runtime-testing.ts';
 
 /** Fires the alarm the adapter set, at the time it asked for, as the platform does. */
 async function fireAlarm(harness: FakeRoomHarness): Promise<number> {
@@ -369,5 +371,69 @@ describe('what the adapter sends is what the core said, encoded', () => {
     ann.closedByClient = true; // gone, and the platform has not said so yet
     await fireAlarm(harness);
     expect(types(bea).at(-1)).toBe('frame');
+  });
+});
+
+describe('tickets from the instance’s own book — #780 wiring #772 into this adapter', () => {
+  function ticketedRoom(now: { ms: number }) {
+    let n = 0;
+    const tickets = createTicketBook(
+      () => now.ms,
+      () => `t${String((n += 1))}`,
+    );
+    return new DurableRoom<FakeReply>(new FakeContext(), {
+      settings: conformanceSettings(),
+      tickets,
+      roomId: 'room-7',
+      now: () => now.ms,
+      platform: FAKE_PLATFORM,
+    });
+  }
+  const mint = (room: DurableRoom<FakeReply>, body: unknown) =>
+    room.fetch({
+      method: 'POST',
+      url: 'https://room.test/room-7/tickets',
+      headers: { get: () => null },
+      text: () => Promise.resolve(JSON.stringify(body)),
+    });
+
+  it('mints a ticket for the Worker in front, admits one hello with it, and refuses it spent — closing 4003', async () => {
+    const now = { ms: 1_000 };
+    const room = ticketedRoom(now);
+    const reply = await mint(room, { athleteId: 'ann', declaredMassKilograms: 70 });
+    expect(reply.status).toBe(200);
+    const { ticket } = JSON.parse((reply as { text: string }).text) as { ticket: string };
+    const first = await openSocket(room);
+    await room.webSocketMessage(first, helloText(ticket));
+    expect(types(first)).toEqual(['welcome']);
+    const again = await openSocket(room);
+    await room.webSocketMessage(again, helloText(ticket));
+    expect(types(again)).toEqual(['refuse', 'closed']);
+    expect([again.closeCode, again.closeReason]).toEqual([4003, 'ticket-refused']);
+    // The spent ticket changed nothing: still one seat, still Ann's.
+    expect((await room.view()).seats.map((seat) => seat.athleteId)).toEqual(['ann']);
+  });
+
+  it('refuses a ticket past its thirty seconds, and a mint that names nobody', async () => {
+    const now = { ms: 1_000 };
+    const room = ticketedRoom(now);
+    const reply = await mint(room, { athleteId: 'ann', declaredMassKilograms: 70 });
+    const { ticket } = JSON.parse((reply as { text: string }).text) as { ticket: string };
+    now.ms += 30_001;
+    const late = await openSocket(room);
+    await room.webSocketMessage(late, helloText(ticket));
+    expect(late.closeCode).toBe(4003);
+    expect((await mint(room, { declaredMassKilograms: 70 })).status).toBe(400);
+  });
+
+  it('has no ticket path at all for a room mounted without a book', async () => {
+    const harness = new FakeRoomHarness(conformanceSettings(), admitConformance, false);
+    const reply = await harness.room.fetch({
+      method: 'POST',
+      url: 'https://room.test/room/tickets',
+      headers: { get: () => null },
+      text: () => Promise.resolve('{"athleteId":"ann","declaredMassKilograms":70}'),
+    });
+    expect(reply.status).toBe(404);
   });
 });

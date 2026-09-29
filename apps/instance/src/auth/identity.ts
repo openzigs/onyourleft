@@ -260,7 +260,7 @@ export function createIdentity(options: IdentityOptions): Identity {
   const perKey = createRateLimiter(limits.challengePerKey, now);
   const perAddress = createRateLimiter(limits.challengePerAddress, now);
   const emailPerAddress = createRateLimiter(limits.emailRecoveryPerAddress, now);
-  const tickets = createTicketBook(now);
+  const tickets = createTicketBook(now, () => randomToken(32));
 
   /** Check a statement for `purpose`, spend its nonce, and verify it. Answers the key. */
   async function proven(statement: unknown, purpose: DevicePurpose): Promise<Outcome<string>> {
