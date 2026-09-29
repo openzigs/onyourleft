@@ -46,6 +46,7 @@ import { hostedModelDecision } from './hosted-model';
 import { hostedModelPort } from './hosted-transport';
 import { hostedStepPort } from '../ride-analysis/hosted-step';
 import { manualSchedule, scriptedCamera, sizedFrameBytes } from './testing';
+import { specifiersIn } from './import-walk-testing';
 
 const SOURCE_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -135,11 +136,24 @@ function code(path: string): string {
   return stripComments(readFileSync(join(SOURCE_ROOT, path), 'utf8'));
 }
 
+/**
+ * Whether `source` imports a module whose specifier matches `pattern`, in ANY
+ * spelling: a side-effect `import '…'`, a dynamic `import('…')`, a re-export,
+ * either quote.
+ *
+ * ⚠️ It matched `from '…'` alone until #821, so a holder that pulled a trainer
+ * module in with `import '../ride/controller';` or `await import(…)` passed
+ * the check below. It reads the TypeScript parser's specifiers through the
+ * walker the other safety gates share, and §"reads every spelling" plants
+ * each form.
+ */
+function importsIn(source: string, pattern: RegExp, fileName?: string): boolean {
+  return specifiersIn(stripComments(source), fileName).some((specifier) => pattern.test(specifier));
+}
+
 /** Whether `path` imports a module whose specifier matches `pattern`. */
 function imports(path: string, pattern: RegExp): boolean {
-  return [...code(path).matchAll(/from\s+'([^']+)'/g)].some((match) =>
-    pattern.test(match[1] ?? ''),
-  );
+  return importsIn(readFileSync(join(SOURCE_ROOT, path), 'utf8'), pattern, path);
 }
 
 /**
@@ -229,6 +243,26 @@ describe('2. in the module graph, an answer cannot reach a trainer', () => {
     ];
     const reaching = holders.filter((path) => imports(path, TRAINER_MODULE));
     expect(reaching).toStrictEqual([]);
+  });
+
+  it.each([
+    ['a named import', "import { request } from '../ride/controller';"],
+    ['a side-effect import', "import '../ride/controller';"],
+    ['a dynamic import', "const lazy = await import('../game/gradient');"],
+    ['a re-export', "export * from '../workout/session';"],
+    ['a double-quoted import', 'import { x } from "@onyourleft/sensors/protocol";'],
+    ['a type import', "type T = import('../ride/trainer').Trainer;"],
+  ])('reads every spelling of a trainer import: %s (#821)', (_form, line) => {
+    expect(importsIn(`// a holder\n${line}\n`, TRAINER_MODULE, 'camera/planted.ts')).toBe(true);
+  });
+
+  it('is not fooled by a trainer path that is only a string or a comment (#821)', () => {
+    const source = [
+      "// import '../ride/controller';",
+      "const text = `import '../ride/controller'`;",
+      "const path = '../game/gradient';",
+    ].join('\n');
+    expect(importsIn(source, TRAINER_MODULE, 'camera/planted.ts')).toBe(false);
   });
 
   it('would notice a holder that did import one', () => {
@@ -500,9 +534,7 @@ describe('4. a ride analysis’s reply reaches only the runner (#802)', () => {
       .filter((path) => !REPLY_HOLDERS.includes(path))
       .filter((path) => !REPLY_MODULE.test(path.replace(/\.tsx?$/, '')))
       .filter((path) =>
-        [...stripComments(read(path)).matchAll(/from\s+'([^']+)'/g)].some((match) =>
-          /(?:^|\/)(?:model-step-port|own-computer-step)$/.test(match[1] ?? ''),
-        ),
+        importsIn(read(path), /(?:^|\/)(?:model-step-port|own-computer-step)$/, path),
       );
   }
 
