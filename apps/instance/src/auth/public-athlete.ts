@@ -26,6 +26,9 @@
 
 import type { Athlete } from '../store/sql-store.ts';
 
+/** What other riders see in place of a name a moderator hid (#83): `identity.ts`'s default. */
+export const HIDDEN_DISPLAY_NAME = 'Rider';
+
 export type ColumnClass = 'public' | 'private';
 
 /** Every column of the `athlete` table, and whether another rider may see it. */
@@ -34,6 +37,9 @@ export const ATHLETE_COLUMNS: Readonly<Record<string, ColumnClass>> = {
   display_name: 'public',
   created_at: 'private',
   registration_state: 'private',
+  // Moderation (#83): other riders see the EFFECT of a hidden name, never the flag.
+  suspended_at: 'private',
+  display_name_hidden_at: 'private',
 };
 
 /** What another rider may see of an athlete. */
@@ -42,7 +48,16 @@ export interface PublicAthlete {
   readonly displayName: string;
 }
 
-/** The projection. Named fields only: a row is never spread into a response. */
-export function publicAthlete(athlete: Athlete): PublicAthlete {
-  return { athleteId: athlete.id, displayName: athlete.displayName };
+/**
+ * The projection. Named fields only: a row is never spread into a response. A
+ * name a moderator hid (#83) is shown as {@link HIDDEN_DISPLAY_NAME}.
+ */
+export function publicAthlete(
+  athlete: Athlete & { readonly displayNameHiddenAt?: number | null },
+): PublicAthlete {
+  const hidden = athlete.displayNameHiddenAt !== undefined && athlete.displayNameHiddenAt !== null;
+  return {
+    athleteId: athlete.id,
+    displayName: hidden ? HIDDEN_DISPLAY_NAME : athlete.displayName,
+  };
 }

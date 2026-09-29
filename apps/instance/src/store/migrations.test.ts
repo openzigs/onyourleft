@@ -64,7 +64,7 @@ async function migrationsOnDisk(): Promise<[string, Partial<InstanceMigration>][
  * fixture row, or its rollback is checked over an empty table.
  */
 const FIXTURE_ROWS: Readonly<Record<string, string>> = {
-  athlete: `INSERT INTO athlete VALUES ('a', 'A', 1, 'active')`,
+  athlete: `INSERT INTO athlete (id, display_name, created_at, registration_state) VALUES ('a', 'A', 1, 'active')`,
   device_key: `INSERT INTO device_key (public_key, athlete_id, added_at, revoked_at) VALUES ('key-a', 'a', 2, NULL)`,
   session: `INSERT INTO session VALUES ('${'0'.repeat(64)}', 'a', 'key-a', 3, NULL)`,
   activity_record: `INSERT INTO activity_record VALUES ('a', '${'1'.repeat(64)}', x'00ff', 4)`,
@@ -73,9 +73,12 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   auth_challenge: `INSERT INTO auth_challenge VALUES ('${'3'.repeat(64)}', 'key-b', 5, NULL)`,
   recovery_code: `INSERT INTO recovery_code VALUES ('${'4'.repeat(64)}', 'a', 6, NULL)`,
   link_code: `INSERT INTO link_code VALUES ('${'5'.repeat(64)}', 'a', 'key-a', 7, NULL)`,
-  display_name_change: `INSERT INTO display_name_change (athlete_id, previous_name, changed_at) VALUES ('a', 'Old', 8)`,
+  display_name_change: `INSERT INTO display_name_change (id, athlete_id, previous_name, changed_at) VALUES (1, 'a', 'Old', 8)`,
   recovery_email: `INSERT INTO recovery_email VALUES ('a', 'a@example.org')`,
   email_recovery_token: `INSERT INTO email_recovery_token VALUES ('${'6'.repeat(64)}', 'a', 9, NULL)`,
+  block: `INSERT INTO block VALUES ('a', 'b', 10)`,
+  report: `INSERT INTO report (id, athlete_id, target_athlete_id, reason, created_at) VALUES (1, 'a', 'b', 'Why', 11)`,
+  moderation_log: `INSERT INTO moderation_log (id, actor_athlete_id, action, target_athlete_id, reason, at) VALUES (1, 'a', 'suspend', 'b', 'Why', 12)`,
 };
 
 interface Snapshot {

@@ -78,6 +78,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     method: 'POST',
     path: '/v1/auth/challenge',
     operationId: 'createChallenge',
+    reaches: 'own',
     summary:
       'A single-use nonce, good for 60 seconds, for a device to sign with its key. Rate-limited per key and per address.',
     identity: true,
@@ -94,6 +95,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     method: 'POST',
     path: '/v1/auth/session',
     operationId: 'createSession',
+    reaches: 'own',
     summary:
       'Sign in with a signed `oyl-auth-v1` statement. A key the instance has not seen registers a new athlete, and only then are the recovery codes in the answer.',
     identity: true,
@@ -128,6 +130,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     method: 'GET',
     path: '/v1/auth/session',
     operationId: 'getSession',
+    reaches: 'own',
     summary: 'Who this session is: the athlete, as other riders see them.',
     identity: true,
     auth: 'session',
@@ -139,6 +142,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     method: 'DELETE',
     path: '/v1/auth/session',
     operationId: 'deleteSession',
+    reaches: 'own',
     summary: 'Sign out: the session is revoked on the instance, not only forgotten by the device.',
     identity: true,
     auth: 'session',
@@ -153,6 +157,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     method: 'POST',
     path: '/v1/auth/display-name',
     operationId: 'setDisplayName',
+    reaches: 'own',
     summary:
       'Change the display name: 1–32 characters, no control, bidirectional or invisible character. Rate-limited, and the old name is kept for moderation.',
     identity: true,
@@ -167,6 +172,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     method: 'GET',
     path: '/v1/athletes/{athleteId}',
     operationId: 'getAthlete',
+    reaches: { athlete: 'athleteId' },
     summary: 'What another rider may see of an athlete: the display name, and nothing else.',
     identity: true,
     auth: 'session',
@@ -179,6 +185,10 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     method: 'POST',
     path: '/v1/rooms/{roomId}/ticket',
     operationId: 'createRoomTicket',
+    reaches: {
+      exempt:
+        'a room’s riders see each other: blocking inside a room is room moderation, #789’s (ADR 0028 D-6.4)',
+    },
     summary:
       'A ticket for one room’s WebSocket hello: single use, 30 seconds. The socket never carries the session token.',
     identity: true,
@@ -205,6 +215,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     method: 'GET',
     path: '/v1/auth/devices',
     operationId: 'listDevices',
+    reaches: 'own',
     summary: 'This athlete’s device keys: when each was added and last used, and which is asking.',
     identity: true,
     auth: 'session',
@@ -231,6 +242,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     method: 'POST',
     path: '/v1/auth/devices/{publicKey}/revoke',
     operationId: 'revokeDevice',
+    reaches: 'own',
     summary:
       'Revoke one of this athlete’s device keys and its sessions. The last key needs one of the athlete’s recovery codes, which is checked and not spent.',
     identity: true,
@@ -251,6 +263,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     method: 'POST',
     path: '/v1/auth/link-codes',
     operationId: 'createLinkCode',
+    reaches: 'own',
     summary:
       'A single-use code, good for 5 minutes, that adds another device’s own key to this athlete.',
     identity: true,
@@ -266,6 +279,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     method: 'POST',
     path: '/v1/auth/link',
     operationId: 'linkDevice',
+    reaches: 'own',
     summary:
       'Add this device’s key to the athlete whose other device minted the code, with a signed `oyl-link-v1` statement.',
     identity: true,
@@ -279,6 +293,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     method: 'POST',
     path: '/v1/auth/recover',
     operationId: 'recoverAccount',
+    reaches: 'own',
     summary:
       'Add this device’s key to an athlete with a recovery code, or with an emailed token where the operator enabled email recovery, and a signed `oyl-recover-v1` statement.',
     identity: true,
@@ -300,6 +315,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     method: 'POST',
     path: '/v1/auth/recover/email',
     operationId: 'requestEmailRecovery',
+    reaches: 'own',
     summary:
       'Email a single-use recovery link to an address, if an athlete registered it. The same answer either way. `not_found` where the operator has not enabled email recovery.',
     identity: true,

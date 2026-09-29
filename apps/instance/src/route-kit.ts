@@ -59,6 +59,24 @@ export interface RouteContext {
   readonly caller: Caller | undefined;
 }
 
+/**
+ * Whether, and how, a route reaches ANOTHER athlete (#83). Required on every
+ * route, so a new one cannot be added without saying — and
+ * `moderation/choke-point.test.ts` walks the table and holds each to it.
+ *
+ * - `'own'` — the instance's metadata, or the caller's own account and data.
+ * - `{ athlete: name }` — the path's `{name}` segment is another athlete. The
+ *   handler asks the choke point (`moderation.ts` §`canSee`) before calling the
+ *   route, and answers `not_found` when the caller may not see them: the same
+ *   answer as for an athlete who does not exist.
+ * - `'moderation'` — the instance's moderators only; anybody else gets
+ *   `not_found`, as though the route were not there.
+ * - `{ exempt: reason }` — it reaches other athletes, and does not ask the
+ *   choke point, for the reason given.
+ */
+export type Reach =
+  'own' | { readonly athlete: string } | 'moderation' | { readonly exempt: string };
+
 export interface Route {
   readonly method: 'GET' | 'POST' | 'DELETE';
   /** The path, with `{name}` for a segment the route reads from `params`. */
@@ -70,6 +88,8 @@ export interface Route {
    * identity answers `unavailable` without calling it.
    */
   readonly identity?: true;
+  /** Whether the route reaches another athlete, and how (#83). */
+  readonly reaches: Reach;
   /** The route needs a signed-in device: `Authorization: Bearer <session token>`. */
   readonly auth?: 'session';
   /** The JSON body the route reads, for the specification. */

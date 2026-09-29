@@ -128,7 +128,85 @@ function send(
   });
 }
 
+/** The owner's device, named to the world as a moderator (#83). */
+let moderator: TestDevice;
+
+async function moderatorToken(world: IdentityInstance): Promise<string> {
+  return (await world.signIn(moderator)).body.sessionToken as string;
+}
+
+/** Another rider, signed in: their id. */
+async function anotherAthlete(world: IdentityInstance): Promise<string> {
+  return (await world.signIn(await testDevice())).body.athleteId as string;
+}
+
+async function moderatorAction(world: IdentityInstance, path: string): Promise<Response> {
+  const target = await anotherAthlete(world);
+  return send(
+    world,
+    'POST',
+    `/v1/moderation/athletes/${target}/${path}`,
+    await moderatorToken(world),
+    {
+      reason: 'Checked against the rules',
+    },
+  );
+}
+
 const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
+  listBlocks: async (world) => send(world, 'GET', '/v1/blocks', (await signedIn(world)).token),
+  blockAthlete: async (world) =>
+    send(world, 'POST', `/v1/blocks/${await anotherAthlete(world)}`, (await signedIn(world)).token),
+  unblockAthlete: async (world) =>
+    send(
+      world,
+      'DELETE',
+      `/v1/blocks/${await anotherAthlete(world)}`,
+      (await signedIn(world)).token,
+    ),
+  reportAthlete: async (world) =>
+    send(world, 'POST', '/v1/reports', (await signedIn(world)).token, {
+      athleteId: await anotherAthlete(world),
+      reason: 'Abusive display name',
+    }),
+  listOpenReports: async (world) =>
+    send(world, 'GET', '/v1/moderation/reports', await moderatorToken(world)),
+  dismissReport: async (world) => {
+    const target = await anotherAthlete(world);
+    await send(world, 'POST', '/v1/reports', (await signedIn(world)).token, {
+      athleteId: target,
+      reason: 'Abusive display name',
+    });
+    const token = await moderatorToken(world);
+    const queue = (await (await send(world, 'GET', '/v1/moderation/reports', token)).json()) as {
+      reports: { reportId: number; targetAthleteId: string }[];
+    };
+    const report = queue.reports.find((each) => each.targetAthleteId === target);
+    return send(
+      world,
+      'POST',
+      `/v1/moderation/reports/${String(report?.reportId)}/dismiss`,
+      token,
+      {
+        reason: 'Not against the rules',
+      },
+    );
+  },
+  suspendAthlete: (world) => moderatorAction(world, 'suspend'),
+  unsuspendAthlete: async (world) => {
+    const target = await anotherAthlete(world);
+    const token = await moderatorToken(world);
+    await send(world, 'POST', `/v1/moderation/athletes/${target}/suspend`, token, {
+      reason: 'Cheating',
+    });
+    return send(world, 'POST', `/v1/moderation/athletes/${target}/unsuspend`, token, {
+      reason: 'Appeal upheld',
+    });
+  },
+  hideDisplayName: (world) => moderatorAction(world, 'hide-display-name'),
+  getModerationLog: async (world) =>
+    send(world, 'GET', '/v1/moderation/log', await moderatorToken(world)),
+
   createChallenge: async (world) =>
     send(world, 'POST', '/v1/auth/challenge', undefined, {
       publicKey: (await testDevice()).publicKey,
@@ -212,7 +290,11 @@ describe('every route answers with the shape its entry declares', () => {
   let world: IdentityInstance;
   beforeAll(async () => {
     instance = await startTestInstance();
-    world = await startIdentityInstance({ emailRecovery: true });
+    moderator = await testDevice();
+    world = await startIdentityInstance({
+      emailRecovery: true,
+      moderators: { owner: moderator.publicKey },
+    });
   });
   afterAll(async () => {
     await instance.listening.close();
@@ -250,6 +332,8 @@ describe('every route answers with the shape its entry declares', () => {
     async (_, route) => {
       const call = HAPPY_CALLS[route.operationId];
       if (call === undefined) throw new Error(`no happy call for ${route.operationId}`);
+      // A minute on, so every call has the per-address challenge allowance to itself.
+      world.clock.ms += 60_000;
       const response = await call(world);
       if (route.response.contentType === 'none') {
         expect(response.status, await response.clone().text()).toBe(204);

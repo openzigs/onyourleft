@@ -61,6 +61,12 @@ import {
 import { declaredMassAdmissible } from '@onyourleft/physics';
 
 import type { ErrorCode, FieldProblem } from '../errors.ts';
+import {
+  createModeration,
+  type Moderation,
+  type ModerationLimits,
+  type Moderators,
+} from '../moderation/moderation.ts';
 import type { Admit } from '../room/core/room.ts';
 import {
   OwnershipConflictError,
@@ -76,7 +82,7 @@ import {
   sha256Hex,
   verifyEd25519,
 } from './crypto.ts';
-import { publicAthlete, type PublicAthlete } from './public-athlete.ts';
+import { HIDDEN_DISPLAY_NAME, publicAthlete, type PublicAthlete } from './public-athlete.ts';
 import { createRateLimiter, type RateLimit } from './rate-limit.ts';
 import { createTicketBook, type MintedTicket } from './tickets.ts';
 
@@ -90,8 +96,8 @@ export const LINK_CODE_LIFETIME_SECONDS = 5 * 60;
 export const EMAIL_RECOVERY_LIFETIME_SECONDS = 30 * 60;
 /** How many recovery codes a new athlete is shown (ruling Q1). */
 export const RECOVERY_CODE_COUNT = 10;
-/** The name a new athlete has until they choose one. */
-export const DEFAULT_DISPLAY_NAME = 'Rider';
+/** The name a new athlete has until they choose one — and what others see of a hidden one (#83). */
+export const DEFAULT_DISPLAY_NAME = HIDDEN_DISPLAY_NAME;
 
 /** The limits, all per minute unless named otherwise. */
 export interface IdentityLimits {
@@ -130,6 +136,9 @@ export interface IdentityOptions {
   /** Email recovery: absent unless the operator enabled it (ruling Q1). */
   readonly emailRecovery?: RecoveryMailer;
   readonly limits?: IdentityLimits;
+  /** The device keys of the owner and the deputy, who moderate (#83, ruling Q13). */
+  readonly moderators?: Moderators;
+  readonly moderationLimits?: ModerationLimits;
 }
 
 export type Outcome<T> =
@@ -175,6 +184,8 @@ export interface DeviceView {
 
 export interface Identity {
   readonly origin: string;
+  /** Blocking, reporting and the moderators' tools (#83), over the same store and clock. */
+  readonly moderation: Moderation;
   readonly emailRecoveryEnabled: boolean;
   challenge(
     publicKey: unknown,
@@ -261,6 +272,12 @@ export function createIdentity(options: IdentityOptions): Identity {
   const perAddress = createRateLimiter(limits.challengePerAddress, now);
   const emailPerAddress = createRateLimiter(limits.emailRecoveryPerAddress, now);
   const tickets = createTicketBook(now);
+  const moderation = createModeration({
+    store,
+    now,
+    ...(options.moderators === undefined ? {} : { moderators: options.moderators }),
+    ...(options.moderationLimits === undefined ? {} : { limits: options.moderationLimits }),
+  });
 
   /** Check a statement for `purpose`, spend its nonce, and verify it. Answers the key. */
   async function proven(statement: unknown, purpose: DevicePurpose): Promise<Outcome<string>> {
@@ -383,6 +400,7 @@ export function createIdentity(options: IdentityOptions): Identity {
 
   return {
     origin,
+    moderation,
     emailRecoveryEnabled: mailer !== undefined,
 
     async challenge(publicKey, address) {
@@ -408,6 +426,10 @@ export function createIdentity(options: IdentityOptions): Identity {
       if (key.revokedAt !== null) return refuse('key_revoked');
       const athlete = await store.getAthlete(key.athleteId);
       if (athlete === undefined) return refuse('unauthenticated');
+      // Every key the athlete holds is refused, not only the one that was
+      // named in a report: a ban that binds one key is worthless (ADR 0028
+      // D-6.2, #775). Told to the athlete themselves, and to nobody else.
+      if (athlete.suspendedAt !== null) return refuse('account_suspended');
       const session = await openSession(key);
       return {
         ok: true,
@@ -433,6 +455,10 @@ export function createIdentity(options: IdentityOptions): Identity {
       if (key === undefined || key.revokedAt !== null || key.athleteId !== session.athleteId) {
         return undefined;
       }
+      // A suspension revokes every session as it happens (`sql-store.ts`
+      // §`moderate`); this is the same rule read again, per request.
+      const athlete = await store.getAthlete(session.athleteId);
+      if (athlete === undefined || athlete.suspendedAt !== null) return undefined;
       return { athleteId: session.athleteId, deviceKey: session.deviceKey, tokenSha256 };
     },
 
@@ -442,9 +468,10 @@ export function createIdentity(options: IdentityOptions): Identity {
 
     async me(caller) {
       const athlete = await store.getAthlete(caller.athleteId);
+      // The athlete's own name, even where a moderator hid it from others.
       return athlete === undefined
         ? refuse('not_found')
-        : { ok: true, value: publicAthlete(athlete) };
+        : { ok: true, value: { athleteId: athlete.id, displayName: athlete.displayName } };
     },
 
     async profile(athleteId) {

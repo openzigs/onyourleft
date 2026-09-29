@@ -33,16 +33,19 @@
  *   another. {@link createSqlStore} queues every call behind the one before it.
  */
 
-import { sql, type Kysely, type Selectable } from 'kysely';
+import { sql, type Kysely, type Selectable, type Transaction } from 'kysely';
 import type {
   ActivityRecordTable,
   AthleteTable,
+  BlockTable,
   DeviceKeyTable,
   DisplayNameChangeTable,
   EmailRecoveryTokenTable,
   InstanceDatabase,
   LinkCodeTable,
+  ModerationLogTable,
   RecoveryCodeTable,
+  ReportTable,
   ResultTable,
   RoomTable,
   SessionTable,
@@ -54,6 +57,14 @@ export interface Athlete {
   /** Unix seconds. */
   readonly createdAt: number;
   readonly registrationState: string;
+}
+
+/** An athlete as the store holds them: what was written, and what moderation set (#83). */
+export interface AthleteRecord extends Athlete {
+  /** When a moderator suspended the account, or `null`. */
+  readonly suspendedAt: number | null;
+  /** When a moderator hid the display name, or `null`. */
+  readonly displayNameHiddenAt: number | null;
 }
 
 export interface DeviceKey {
@@ -171,13 +182,67 @@ export interface Registration {
   readonly recoveryEmail?: string;
 }
 
+/** One athlete blocking another (#83). */
+export interface Block {
+  /** The blocker. */
+  readonly athleteId: string;
+  readonly blockedAthleteId: string;
+  readonly createdAt: number;
+}
+
+/** A report (#83): its reporter is `athleteId`. */
+export interface Report {
+  readonly id: number;
+  readonly athleteId: string;
+  readonly targetAthleteId: string;
+  readonly reason: string;
+  readonly createdAt: number;
+  readonly closedAt: number | null;
+  readonly closedByAthleteId: string | null;
+  readonly outcome: string | null;
+}
+
+/** What a moderator may do (#83, #775). */
+export type ModerationActionKind =
+  | 'suspend'
+  | 'unsuspend'
+  | 'hide_display_name'
+  | 'dismiss_report'
+  | 'approve_registration'
+  | 'refuse_registration';
+
+/** One moderator action, as it is asked for and as it is logged. */
+export interface ModerationAction {
+  readonly action: ModerationActionKind;
+  readonly actorAthleteId: string;
+  readonly targetAthleteId: string | null;
+  /** The report this action decides, if any: it is closed with the action as its outcome. */
+  readonly reportId: number | null;
+  readonly reason: string;
+  readonly at: number;
+}
+
+/** One entry of the append-only moderation log. */
+export interface ModerationLogEntry extends ModerationAction {
+  readonly id: number;
+}
+
+/**
+ * What asking for a moderator action did. It is `applied` — and logged, in the
+ * same transaction — or it changed nothing and logged nothing.
+ */
+export type ModerationOutcome =
+  | { readonly outcome: 'applied'; readonly logId: number }
+  | { readonly outcome: 'not_found' }
+  | { readonly outcome: 'not_applicable' };
+
 /** What storing an activity record did: a retried sync of the same file is `duplicate`. */
 export type PutOutcome = 'stored' | 'duplicate';
 
 /** The storage port. */
 export interface SqlStore {
   putAthlete(athlete: Athlete): Promise<void>;
-  getAthlete(athleteId: string): Promise<Athlete | undefined>;
+  getAthlete(athleteId: string): Promise<AthleteRecord | undefined>;
 
   putDeviceKey(key: DeviceKeyWrite): Promise<void>;
   listDeviceKeys(athleteId: string): Promise<readonly DeviceKey[]>;
@@ -242,6 +307,31 @@ export interface SqlStore {
   /** A room's finish order is every rider's, by design: not athlete-scoped. */
   listRoomResults(roomId: string): Promise<readonly Result[]>;
 
+  /** Block (#83). Idempotent: blocking twice keeps the first row. */
+  putBlock(athleteId: string, blockedAthleteId: string, at: number): Promise<void>;
+  /** Unblock. `false` when this athlete had no such block. */
+  deleteBlock(athleteId: string, blockedAthleteId: string): Promise<boolean>;
+  listBlocks(athleteId: string): Promise<readonly Block[]>;
+  /** Whether either of two athletes blocks the other: a pair, so not one athlete's read. */
+  blockedEitherWay(first: string, second: string): Promise<boolean>;
+
+  /** A report (#83). Answers its id. */
+  putReport(
+    report: Pick<Report, 'athleteId' | 'targetAthleteId' | 'reason' | 'createdAt'>,
+  ): Promise<number>;
+  /** The reports this athlete made. */
+  listReports(athleteId: string): Promise<readonly Report[]>;
+  /** The moderators' queue: every report not yet decided, oldest first. */
+  listOpenReports(): Promise<readonly Report[]>;
+
+  /**
+   * Apply a moderator action and append it to the log, in ONE transaction:
+   * an action that is applied is logged, and one that is not changes nothing.
+   */
+  moderate(action: ModerationAction): Promise<ModerationOutcome>;
+  /** The moderation log, oldest first. */
+  listModerationLog(): Promise<readonly ModerationLogEntry[]>;
+
   /** Remove every row this athlete owns, the athlete included (#35). */
   eraseAthlete(athleteId: string): Promise<void>;
 
@@ -268,14 +358,45 @@ export const ATHLETE_TABLES_IN_ERASURE_ORDER = [
   'display_name_change',
   'recovery_email',
   'email_recovery_token',
+  'block',
+  'report',
   'device_key',
 ] as const satisfies readonly (keyof InstanceDatabase)[];
 
-const athleteFrom = (row: Selectable<AthleteTable>): Athlete => ({
+const athleteFrom = (row: Selectable<AthleteTable>): AthleteRecord => ({
   id: row.id,
   displayName: row.display_name,
   createdAt: row.created_at,
   registrationState: row.registration_state,
+  suspendedAt: row.suspended_at,
+  displayNameHiddenAt: row.display_name_hidden_at,
+});
+
+const blockFrom = (row: Selectable<BlockTable>): Block => ({
+  athleteId: row.athlete_id,
+  blockedAthleteId: row.blocked_athlete_id,
+  createdAt: row.created_at,
+});
+
+const reportFrom = (row: Selectable<ReportTable>): Report => ({
+  id: row.id,
+  athleteId: row.athlete_id,
+  targetAthleteId: row.target_athlete_id,
+  reason: row.reason,
+  createdAt: row.created_at,
+  closedAt: row.closed_at,
+  closedByAthleteId: row.closed_by_athlete_id,
+  outcome: row.outcome,
+});
+
+const moderationLogFrom = (row: Selectable<ModerationLogTable>): ModerationLogEntry => ({
+  id: row.id,
+  action: row.action as ModerationActionKind,
+  actorAthleteId: row.actor_athlete_id,
+  targetAthleteId: row.target_athlete_id,
+  reportId: row.report_id,
+  reason: row.reason,
+  at: row.at,
 });
 
 const deviceKeyFrom = (row: Selectable<DeviceKeyTable>): DeviceKey => ({
@@ -354,6 +475,51 @@ const resultFrom = (row: Selectable<ResultTable>): Result => ({
   finishMs: row.finish_ms,
   flags: row.flags,
 });
+
+/**
+ * A moderator action's effect on its target, inside the action's transaction.
+ * `false` when the athlete is not in a state the action applies to.
+ */
+async function applyToAthlete(
+  trx: Transaction<InstanceDatabase>,
+  action: ModerationAction,
+  target: Selectable<AthleteTable>,
+): Promise<boolean> {
+  const at = action.at;
+  const athlete = trx.updateTable('athlete').where('id', '=', target.id);
+  switch (action.action) {
+    case 'suspend': {
+      if (target.suspended_at !== null) return false;
+      await athlete.set({ suspended_at: at }).execute();
+      // A suspension binds EVERY key at once (#775, ADR 0028 D-6.2): no session
+      // the athlete holds outlives it, whichever device it was opened on.
+      await trx
+        .updateTable('session')
+        .set({ revoked_at: sql<number>`coalesce(revoked_at, ${at})` })
+        .where('athlete_id', '=', target.id)
+        .execute();
+      return true;
+    }
+    case 'unsuspend':
+      if (target.suspended_at === null) return false;
+      await athlete.set({ suspended_at: null }).execute();
+      return true;
+    case 'hide_display_name':
+      if (target.display_name_hidden_at !== null) return false;
+      await athlete.set({ display_name_hidden_at: at }).execute();
+      return true;
+    case 'approve_registration':
+      if (target.registration_state !== 'pending') return false;
+      await athlete.set({ registration_state: 'active' }).execute();
+      return true;
+    case 'refuse_registration':
+      if (target.registration_state !== 'pending') return false;
+      await athlete.set({ registration_state: 'refused' }).execute();
+      return true;
+    case 'dismiss_report':
+      return true;
+  }
+}
 
 /** The store over an already-migrated database. */
 export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
@@ -675,7 +841,8 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             .execute();
           await trx
             .updateTable('athlete')
-            .set({ display_name: name })
+            // A new name is new content: a moderator's hide was of the old one (#83).
+            .set({ display_name: name, display_name_hidden_at: null })
             .where('id', '=', athleteId)
             .execute();
           return true;
@@ -941,12 +1108,175 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         ).map(resultFrom),
       ),
 
+    putBlock: (athleteId, blockedAthleteId, at) =>
+      exclusive(async () => {
+        await db
+          .insertInto('block')
+          .values({ athlete_id: athleteId, blocked_athlete_id: blockedAthleteId, created_at: at })
+          .onConflict((conflict) =>
+            conflict.columns(['athlete_id', 'blocked_athlete_id']).doNothing(),
+          )
+          .execute();
+      }),
+
+    deleteBlock: (athleteId, blockedAthleteId) =>
+      exclusive(async () => {
+        const deleted = await db
+          .deleteFrom('block')
+          .where('athlete_id', '=', athleteId)
+          .where('blocked_athlete_id', '=', blockedAthleteId)
+          .executeTakeFirst();
+        return deleted.numDeletedRows > 0n;
+      }),
+
+    listBlocks: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('block')
+            .selectAll()
+            .where('athlete_id', '=', athleteId)
+            .orderBy('blocked_athlete_id')
+            .execute()
+        ).map(blockFrom),
+      ),
+
+    blockedEitherWay: (first, second) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('block')
+          .select('athlete_id')
+          .where((where) =>
+            where.or([
+              where.and([
+                where('athlete_id', '=', first),
+                where('blocked_athlete_id', '=', second),
+              ]),
+              where.and([
+                where('athlete_id', '=', second),
+                where('blocked_athlete_id', '=', first),
+              ]),
+            ]),
+          )
+          .executeTakeFirst();
+        return row !== undefined;
+      }),
+
+    putReport: (report) =>
+      exclusive(async () => {
+        const inserted = await db
+          .insertInto('report')
+          .values({
+            athlete_id: report.athleteId,
+            target_athlete_id: report.targetAthleteId,
+            reason: report.reason,
+            created_at: report.createdAt,
+            closed_at: null,
+            closed_by_athlete_id: null,
+            outcome: null,
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow();
+        return inserted.id;
+      }),
+
+    listReports: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('report')
+            .selectAll()
+            .where('athlete_id', '=', athleteId)
+            .orderBy('id')
+            .execute()
+        ).map(reportFrom),
+      ),
+
+    listOpenReports: () =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('report')
+            .selectAll()
+            .where('closed_at', 'is', null)
+            .orderBy('id')
+            .execute()
+        ).map(reportFrom),
+      ),
+
+    moderate: (action) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx): Promise<ModerationOutcome> => {
+          if (action.reportId !== null) {
+            const report = await trx
+              .selectFrom('report')
+              .select(['target_athlete_id', 'closed_at'])
+              .where('id', '=', action.reportId)
+              .executeTakeFirst();
+            if (report === undefined) return { outcome: 'not_found' };
+            if (report.closed_at !== null) return { outcome: 'not_applicable' };
+            if (
+              action.targetAthleteId !== null &&
+              report.target_athlete_id !== action.targetAthleteId
+            ) {
+              return { outcome: 'not_found' };
+            }
+          } else if (action.action === 'dismiss_report') {
+            return { outcome: 'not_found' };
+          }
+          if (action.action !== 'dismiss_report') {
+            if (action.targetAthleteId === null) return { outcome: 'not_found' };
+            const target = await trx
+              .selectFrom('athlete')
+              .selectAll()
+              .where('id', '=', action.targetAthleteId)
+              .executeTakeFirst();
+            if (target === undefined) return { outcome: 'not_found' };
+            const applied = await applyToAthlete(trx, action, target);
+            if (!applied) return { outcome: 'not_applicable' };
+          }
+          if (action.reportId !== null) {
+            await trx
+              .updateTable('report')
+              .set({
+                closed_at: action.at,
+                closed_by_athlete_id: action.actorAthleteId,
+                outcome: action.action,
+              })
+              .where('id', '=', action.reportId)
+              .execute();
+          }
+          const logged = await trx
+            .insertInto('moderation_log')
+            .values({
+              actor_athlete_id: action.actorAthleteId,
+              action: action.action,
+              target_athlete_id: action.targetAthleteId,
+              report_id: action.reportId,
+              reason: action.reason,
+              at: action.at,
+            })
+            .returning('id')
+            .executeTakeFirstOrThrow();
+          return { outcome: 'applied', logId: logged.id };
+        }),
+      ),
+
+    listModerationLog: () =>
+      exclusive(async () =>
+        (await db.selectFrom('moderation_log').selectAll().orderBy('id').execute()).map(
+          moderationLogFrom,
+        ),
+      ),
+
     eraseAthlete: (athleteId) =>
       exclusive(async () => {
         await db.transaction().execute(async (trx) => {
           for (const table of ATHLETE_TABLES_IN_ERASURE_ORDER) {
             await trx.deleteFrom(table).where('athlete_id', '=', athleteId).execute();
           }
+          // Another athlete's block OF this one names nobody once they are gone (#83).
+          await trx.deleteFrom('block').where('blocked_athlete_id', '=', athleteId).execute();
           await trx.deleteFrom('athlete').where('id', '=', athleteId).execute();
         });
       }),

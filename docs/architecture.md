@@ -1342,6 +1342,20 @@ sequenceDiagram
 | The client half | `apps/web/src/instance/sign-in.ts`: the local athlete first, then the device key, then challenge → sign → session, and the instance's athlete id kept on the device. It takes its transport as a parameter and names no `fetch`: #777 supplies the one module allowed to call an instance, after #778's disclosures | `apps/web/src/instance/` |
 | Across platforms | `apps/web/browser/identity.browser.spec.ts`: the browser signs with the app's own non-extractable key in IndexedDB, and a real instance running in the spec's process verifies it, with a flipped signature byte and another instance's origin as controls | the browser gate |
 
+#### Moderation (#83) and registration (#775)
+
+Moderation is enforced at **one choke point**, which every route passes through. Blocking is not
+checked separately in each feature. The operator's side is [`docs/moderation.md`](moderation.md).
+
+| Concern | Decision | Where |
+|---|---|---|
+| The choke point | Every route declares whom it reaches (`Route.reaches`, required by the type): its caller's own data, another athlete named in its path, the moderators only, or an exemption with a reason. For a route that names another athlete, the handler asks `canSee(viewer, subject)` before the route runs. If the answer is no, it returns `not_found`, byte for byte what an athlete who does not exist gets. `canSee` is true only for an existing, active, unsuspended athlete where neither athlete blocks the other | `src/handler.ts` §`reachable`, `src/moderation/moderation.ts` §`canSee` |
+| Walked from the table | `choke-point.test.ts` sorts `ROUTES` by that declaration. It calls every athlete-reaching route as a blocked rider, as the blocker and about a suspended rider, and every moderators' route as an ordinary rider. It fails on an "own" route that names an athlete in its path or its body | `src/moderation/choke-point.test.ts` |
+| Not told | Block, unblock and report answer `204` whether or not the athlete named exists, so none of them reveals that a block is there | `src/moderation/routes.ts` |
+| The log | `moderation_log`, append-only in the schema: two triggers abort any `UPDATE` or `DELETE`. An action and its entry are one transaction (`SqlStore.moderate`). The log has no foreign key to `athlete`, so erasing an account does not erase what a moderator did to it. The erasure test lists every column that names an athlete without a foreign key, and says what erasure does to each | migration `0005-moderation`, `sql-store.erasure.test.ts` |
+| Suspension | Revokes every session in the same transaction, and is checked again on every request. Sign-in is refused for every key the athlete holds (`account_suspended`, told only to them). Nothing is deleted | `sql-store.ts` §`applyToAthlete`, `identity.ts` |
+| Moderators | The owner and one deputy (ruling Q13), each named by a **device key** in configuration, so a moderator can be named before their account exists. Nobody moderates a moderator | `moderation.ts` §`roleOf` |
+
 #### The API contract (#36)
 
 | Concern | Decision | Where |

@@ -10,6 +10,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { MIGRATIONS } from '../src/store/migrations/index.ts';
+
 const TOOL = fileURLToPath(new URL('./migrate.ts', import.meta.url));
 
 let directory: string | undefined;
@@ -28,20 +30,25 @@ describe('tools/migrate.ts (#769)', () => {
     directory = await mkdtemp(join(tmpdir(), 'oyl-instance-migrate-tool-'));
     const path = join(directory, 'instance.sqlite');
 
+    // The newest migration, read from the list rather than written here, so a
+    // migration added by any later change does not have to edit this test.
+    const names = Object.keys(MIGRATIONS);
+    const newest = names.at(-1) as string;
+
     const latest = migrate(path, 'latest');
     expect(latest.status, latest.out).toBe(0);
-    expect(latest.out).toMatch(/latest: 4 migration\(s\) changed/);
-    expect(latest.out).toMatch(/applied: 0001-[^\n]*, 0004-identity\n/);
+    expect(latest.out).toContain(`latest: ${String(names.length)} migration(s) changed`);
+    expect(latest.out).toContain(`applied: ${names.join(', ')}\n`);
     expect(latest.out).toMatch(/ {2}result: 0 row\(s\)/);
 
     const down = migrate(path, 'down');
     expect(down.out).toMatch(/down: 1 migration\(s\) changed/);
-    expect(down.out).not.toMatch(/0004-identity/);
-    expect(down.out).not.toMatch(/ {2}display_name_change:/);
+    expect(down.out).not.toContain(newest);
+    expect(down.out).toContain(`applied: ${names.slice(0, -1).join(', ')}\n`);
 
     const up = migrate(path, 'up');
     expect(up.out).toMatch(/up: 1 migration\(s\) changed/);
-    expect(up.out).toMatch(/0004-identity/);
+    expect(up.out).toContain(newest);
   });
 
   it('refuses status, up and down on a path with no database, and creates none', async () => {

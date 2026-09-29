@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { IDENTITY_ROUTES } from './auth/routes.ts';
+import { MODERATION_ROUTES } from './moderation/routes.ts';
 import { json, type Route, type Schema } from './route-kit.ts';
 
 /**
@@ -15,8 +16,9 @@ import { json, type Route, type Schema } from './route-kit.ts';
  * entry declares — `openapi.test.ts` holds by calling every route through the
  * real listener and checking the body against the declared schema.
  *
- * The identity routes (#772, #773, #774) are `auth/routes.ts`'s, appended
- * here, so there is still one table.
+ * The identity routes (#772, #773, #774) are `auth/routes.ts`'s and the
+ * moderation routes (#83, #775) `moderation/routes.ts`'s, appended here, so
+ * there is still one table.
  *
  * ## Versioning
  *
@@ -38,6 +40,7 @@ export const ROUTES: readonly Route[] = [
     method: 'GET',
     path: '/health',
     operationId: 'getHealth',
+    reaches: 'own',
     summary: 'Whether the instance is answering, and which build it is.',
     response: {
       contentType: 'application/json',
@@ -58,6 +61,7 @@ export const ROUTES: readonly Route[] = [
     method: 'GET',
     path: '/source',
     operationId: 'getSource',
+    reaches: 'own',
     summary:
       'Where the exact source of the running build is — the offer AGPL-3.0 §13 requires (ADR 0036 D-6).',
     response: {
@@ -80,6 +84,7 @@ export const ROUTES: readonly Route[] = [
     method: 'GET',
     path: '/openapi.json',
     operationId: 'getSpecification',
+    reaches: 'own',
     summary: 'This specification.',
     response: {
       contentType: 'application/json',
@@ -91,6 +96,7 @@ export const ROUTES: readonly Route[] = [
     method: 'GET',
     path: '/licences/third-party.txt',
     operationId: 'getThirdPartyNotices',
+    reaches: 'own',
     summary:
       'The licence and notice of every third-party package this instance includes, generated and gated by `check:notices`.',
     response: { contentType: 'text/plain' },
@@ -98,4 +104,5 @@ export const ROUTES: readonly Route[] = [
       new Response(notices, { headers: { 'content-type': 'text/plain; charset=utf-8' } }),
   },
   ...IDENTITY_ROUTES,
+  ...MODERATION_ROUTES,
 ];

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import type { Identity } from './auth/identity.ts';
+import type { Caller, Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
 import { errorResponse } from './errors.ts';
 import { logRequest, logUnhandled, type LogSink } from './log.ts';
@@ -33,7 +33,14 @@ import { ROUTES, type Route } from './routes.ts';
  *    (`unavailable` when this instance was given none), a signed-in session
  *    (`unauthenticated`, with `WWW-Authenticate: Bearer`), and a JSON object
  *    body (`validation_failed`).
- * 4. **The route's own answer**, and anything it throws is `internal` in the
+ * 4. **Whom the route reaches** (#83) — THE choke point. A route that names
+ *    another athlete in its path is called only when `moderation.ts`
+ *    §`canSee` says the caller may see them; otherwise the answer is
+ *    `not_found`, byte for byte what an athlete who does not exist gets, and
+ *    it comes BEFORE the body is looked at, so not even a malformed request
+ *    can tell the two apart. A moderators' route is `not_found` to everybody
+ *    else. No route checks a block for itself.
+ * 5. **The route's own answer**, and anything it throws is `internal` in the
  *    one error shape — no message, no stack, no path (#36, ADR 0004 D) — while
  *    the log gets the error's name alone (`log.ts`).
  */
@@ -148,6 +155,22 @@ export function createHandler(options: HandlerOptions): Handler {
   const now = options.now ?? (() => performance.now());
   const specification = openApiDocument(routes);
 
+  /** Step 4: whether the caller may reach whom the route reaches. */
+  async function reachable(
+    matched: Route,
+    params: Record<string, string>,
+    caller: Caller | undefined,
+  ): Promise<boolean> {
+    const reach = matched.reaches;
+    if (reach === 'own') return true;
+    if (typeof reach === 'object' && 'exempt' in reach) return true;
+    const moderation = options.identity?.moderation;
+    if (caller === undefined || moderation === undefined) return false;
+    if (reach === 'moderation') return (await moderation.roleOf(caller.athleteId)) !== undefined;
+    const subject = params[reach.athlete];
+    return subject !== undefined && (await moderation.canSee(caller.athleteId, subject));
+  }
+
   async function answer(
     matched: Route,
     params: Record<string, string>,
@@ -158,13 +181,14 @@ export function createHandler(options: HandlerOptions): Handler {
   ): Promise<Response> {
     const identity = options.identity;
     if (matched.identity === true && identity === undefined) return errorResponse('unavailable');
-    let caller;
+    let caller: Caller | undefined;
     if (matched.auth === 'session') {
       caller = await identity?.authenticate(request.headers.get('authorization'));
       if (caller === undefined) {
         return errorResponse('unauthenticated', { headers: { 'www-authenticate': 'Bearer' } });
       }
     }
+    if (!(await reachable(matched, params, caller))) return errorResponse('not_found');
     const parsed = matched.request === undefined ? {} : jsonObject(body);
     if (parsed === undefined) {
       return errorResponse('validation_failed', {

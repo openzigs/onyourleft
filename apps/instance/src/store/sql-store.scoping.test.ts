@@ -77,6 +77,11 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   listEmailRecoveryTokens: {
     probe: (store, athleteId) => store.listEmailRecoveryTokens(athleteId),
   },
+  listBlocks: { probe: (store, athleteId) => store.listBlocks(athleteId) },
+  listReports: {
+    probe: async (store, athleteId) =>
+      (await store.listReports(athleteId)).map((report) => ({ athleteId: report.athleteId })),
+  },
 
   findSession: {
     notAScopedRead: 'authentication: the token is what names the athlete (#772)',
@@ -108,6 +113,15 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   putActivityRecord: { notAScopedRead: 'a write' },
   putRoom: { notAScopedRead: 'a write' },
   putResult: { notAScopedRead: 'a write' },
+  blockedEitherWay: {
+    notAScopedRead: 'a pair of athletes, either way round: the choke point asks it (#83)',
+  },
+  listOpenReports: { notAScopedRead: 'the moderators’ queue: every open report (#83)' },
+  listModerationLog: { notAScopedRead: 'the moderators’ record: every action (#83)' },
+  putBlock: { notAScopedRead: 'a write' },
+  deleteBlock: { notAScopedRead: 'a write; scoping is sql-store.moderation.test.ts’s' },
+  putReport: { notAScopedRead: 'a write' },
+  moderate: { notAScopedRead: 'a moderator’s write; sql-store.moderation.test.ts' },
   eraseAthlete: { notAScopedRead: 'erasure: sql-store.erasure.test.ts' },
   close: { notAScopedRead: 'not a read' },
 };
