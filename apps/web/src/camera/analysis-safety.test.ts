@@ -181,6 +181,10 @@ const IMPORTERS: Readonly<
   // It takes the request path and the model-name bound from the endpoint rule,
   // so the two paths cannot disagree about either; it can hold no answer.
   [join('camera', 'hosted-model.ts')]: 'reuses the address rule',
+  // #798: the run-time screen on a model's write-up. It takes an answer and
+  // hands back plain text or the kinds of finding, and the check below holds
+  // it to importing no trainer module like every other holder.
+  [join('camera', 'write-up-screen.ts')]: 'holds an answer',
 };
 
 /** The modules through which anything reaches a trainer's control point. */

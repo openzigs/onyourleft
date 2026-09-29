@@ -207,6 +207,12 @@ describe('the scan itself can fire', () => {
     ["'knee val\\u200dgus'", 'zero-width joiner'],
     ["'knee val\\u2060gus'", 'word joiner'],
     ["'142 de\\u00adgrees'", 'soft hyphen in the degree word'],
+    // #817's review: the Unicode classes a character list missed.
+    ["'knee val\\u{e0020}gus'", 'tag character'],
+    ["'knee val\\u034fgus'", 'combining grapheme joiner'],
+    ["'knee val\\ufe0fgus'", 'variation selector'],
+    ["'knee val\\u180egus'", 'Mongolian vowel separator'],
+    ["'knee val\\u3164gus'", 'Hangul filler'],
   ])('catches a word split by an invisible character: %s (%s)', (literal) => {
     expect(angleClaimsIn('x.ts', `const s = ${literal};`)).toHaveLength(1);
   });
