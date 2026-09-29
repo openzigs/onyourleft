@@ -1294,7 +1294,22 @@ packages/             Apache-2.0, without exception
                         because the method is not on the type it holds
     web-bluetooth/      the browser transport (#40) — the one place a BluetoothDevice exists
   physics/            cycling power/speed model, Martin et al. 1998 (#88), and
-                      the synthetic rider that composes #92's rule with it
+                      the synthetic rider that composes #92's rule with it; and
+                      since #487 the coefficient set a ride runs (`riding.ts`,
+                      moved out of `apps/web/src/game/rider.ts` so a race room
+                      runs the game's own set), `PHYSICS_VERSION`, and the race
+                      room's plausibility rule (`plausibility.ts`, ADR 0028 D-2
+                      rules 1–4, Q3's ceilings as a parameter default).
+                      ⚠️ A breach FLAGS and never rejects, and an inadmissible
+                      report coasts the rider at zero — never their last power
+  protocol/           the race-room wire format (#768) — every message, the
+                      encoder, a bounded decoder that refuses rather than
+                      throws, and the version handshake. ⚠️ NO production
+                      dependency, not even a workspace one: a room passes its
+                      `PHYSICS_VERSION` in, and `physics-agreement.test.ts`
+                      holds the restated bounds equal to physics'. A report
+                      carries power, never a position, and no message carries
+                      a coordinate (`coordinates.test.ts`)
   store/              local activity, stream, recording-checkpoint, signed-record,
                       segment, effort and route store, and the round-trip harness
                       (#26-#28, #46, #61, #64, #66, #89); since #388 the side
@@ -1345,7 +1360,8 @@ ASSETS.toml           the provenance, licence and SHA-256 of every committed
 ```
 
 **`apps/web`, `apps/mobile`, `packages/domain`, `packages/sensors`, `packages/fit`,
-`packages/store` and `packages/physics` exist.**
+`packages/store`, `packages/physics` and — since [#768](https://github.com/openzigs/onyourleft/issues/768)
+— `packages/protocol` exist.**
 The first two were created by [#23](https://github.com/openzigs/onyourleft/issues/23) along with the
 workspace, the toolchain and the lockfile, `packages/sensors` by
 [#39](https://github.com/openzigs/onyourleft/issues/39), `packages/store` by
@@ -1370,6 +1386,7 @@ cover the paths, so a package arrives inside the rules rather than beside them.
 | `packages/fit` | FIT / GPX / TCX decode and encode | Anything server-specific; anything under `apps/` |
 | `packages/sensors` | BLE sensor and trainer abstraction (`src/`), and the Web Bluetooth transport (`web-bluetooth/`) | `src/`: **any platform API at all**, and any BLE library. `web-bluetooth/`: every platform global except `navigator`. Web Bluetooth types must not escape above the transport boundary |
 | `packages/physics` | Power → speed. Pure computation. | Any rendering, BLE or platform API |
+| `packages/protocol` | The race-room wire format: messages, a bounded decoder, the version handshake (#768) | **Any platform API at all**, as `packages/domain` — and any production dependency |
 | `packages/store` | Local activity, stream, **recording-checkpoint** and **signed-record** persistence, the device keypair, and its migrations | Anything under `apps/` |
 
 ---
