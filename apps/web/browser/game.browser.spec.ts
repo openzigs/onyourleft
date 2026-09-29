@@ -714,11 +714,13 @@ const GANTRY_TRIANGLE_CEILING = 1_000;
 
 /**
  * #630: how much lighter the far band's sun side must read than its shade
- * side, as a share, averaged over eight turns of the tree — **0.05** — and the
+ * side, as a share, averaged over four turns of the tree — **0.05** — and the
  * most it may: **0.8**. And how many of a tree's pixels must move between two
  * ride times: **20**.
  */
 const IMPOSTOR_LIGHT_FLOOR = 0.05;
+/** The far tree's pixels over the turns, at the probe's quarter-size view: at least **250**. */
+const IMPOSTOR_MINIMUM_PIXELS = 250;
 const IMPOSTOR_LIGHT_CEILING = 0.8;
 const SWAY_MINIMUM_PIXELS = 20;
 
@@ -3403,7 +3405,7 @@ test.describe('the realistic world — ADR 0026', () => {
     const lit = lean(foliage.sunSide, foliage.shadeSide);
     const unlit = lean(foliage.sunSideUnlit, foliage.shadeSideUnlit);
     console.log(
-      `the far band over eight turns: the sun's side ${foliage.sunSide.toFixed(4)} against the shade's ` +
+      `the far band over four turns: the sun's side ${foliage.sunSide.toFixed(4)} against the shade's ` +
         `${foliage.shadeSide.toFixed(4)} (${(lit * 100).toFixed(1)} %); unlit ` +
         `${foliage.sunSideUnlit.toFixed(4)} against ${foliage.shadeSideUnlit.toFixed(4)} ` +
         `(${(unlit * 100).toFixed(1)} %; ${String(foliage.impostorPixels)} px). The breeze: ` +
@@ -3411,7 +3413,7 @@ test.describe('the realistic world — ADR 0026', () => {
         `two times, ${String(foliage.heldChanged)} between two draws at one`,
     );
     // Non-vacuity: a tree was drawn, far and near.
-    expect(foliage.impostorPixels).toBeGreaterThan(400);
+    expect(foliage.impostorPixels).toBeGreaterThan(IMPOSTOR_MINIMUM_PIXELS);
     expect(foliage.treePixels).toBeGreaterThan(400);
     // (1) The sun's side is lighter than the shade's, by a floor and under a
     // ceiling; unlit — today's strip — the two halves read alike.

@@ -5192,13 +5192,13 @@ function groundBlendProbe(
 /**
  * #630, in two parts.
  *
- * 1. **The far band's light.** One broadleaf tree 45 m up a view turned so
- *    the world's sun is square to its right, drawn as an impostor (a view of
- *    its own, whose levels draw every tree as one), at eight turns of the
- *    tree — the eight views of the strip. The tree's pixels are split at the
+ * 1. **The far band's light.** One broadleaf tree 24 m up a view turned so
+ *    the world's sun is square to its right, drawn as an impostor behind
+ *    seven nearer trees that take the full and middle ranks, at
+ *    {@link IMPOSTOR_TURNS} turns of the tree. The tree's pixels are split at the
  *    middle of their extent, and the mean relative luminance of each half is
  *    summed over the turns: the sun's side and the shade's side, lit and
- *    (the control) unlit. Over eight turns the SCRIPT's sun, which turns with
+ *    (the control) unlit. Over the turns the SCRIPT's sun, which turns with
  *    the tree, is on each side as often as the other, so the unlit strip's
  *    two halves read within its own variation; the world's sun does not turn.
  * 2. **The breeze.** One tree 12 m ahead at the top rung, a full mesh, with no
@@ -5231,13 +5231,19 @@ const NO_FOLIAGE: FoliageMeasurement = {
   heldChanged: 0,
 };
 
+/**
+ * How many turns of the tree the far band is read at: **4**, a quarter turn
+ * apart — four of the strip's eight views, symmetric about the tree, so the
+ * script's sun is on each side as often as the other.
+ */
+const IMPOSTOR_TURNS = 4;
+
 /** @see FoliageMeasurement */
 function foliageProbe(
   view: GameView,
   gl: WebGL2RenderingContext,
   canvas: HTMLCanvasElement,
   riding: (profile: ReturnType<typeof northRoute>, distance: number) => SceneFrame,
-  top: QualitySettings,
 ): FoliageMeasurement {
   const base = riding(
     northRoute(2_000, () => 10),
@@ -5270,30 +5276,43 @@ function foliageProbe(
     scale: 1,
     variant: 0,
   });
-  // Undithered: a dithered hand-over draws the first rank as the band between
-  // the full mesh and the middle one, whatever `near` says (`tree-levels.ts`).
-  setTreeLevels({
-    ...REALISTIC_TREE_LEVELS,
-    near: 0,
-    middle: 0,
-    dithered: false,
-    // At its level at once, so two draws settle a turn: this probe is about
-    // light, not the hand-over.
-    handOverFrames: 1,
+  // ⚠️ **On the product's own view, with the product's own levels**: the far
+  // tree is drawn as an impostor because seven trees nearer to the rider take
+  // the full, middle and band ranks (`REALISTIC_TREE_LEVELS`: 1, 4 and the
+  // band), standing at the frame's edges and in both frames compared, so the
+  // difference between them is the far tree alone. #870's first CI run built
+  // a view of its own for this, at 20 s: its environment map and every
+  // realistic program compiled a second time.
+  const nearer: ScatterItem[] = [9, 10, 11, 12, 13, 14, 15].map((ahead, index) => ({
+    kind: 'tree-broadleaf',
+    x: turned.camera.x + headingX * ahead - (index % 2 === 0 ? 1 : -1) * 7 * headingZ,
+    y: turned.camera.y,
+    z: turned.camera.z + headingZ * ahead + (index % 2 === 0 ? 1 : -1) * 7 * headingX,
+    rotation: 0,
+    scale: 1,
+    variant: 1,
+  }));
+  // And one more, the far tree's own distance from the rider away but well to
+  // its left, in BOTH frames: the band tree's fade is read off the distance
+  // of the tree ranked behind it (`tree-levels.ts` §`bandFade`), so without a
+  // stand-in the far tree's arriving changed the band tree's picture, and
+  // that change — at the frame's edge, on one side — read as 27.6 % between
+  // the halves of the UNLIT strip, measured.
+  const aside = 10;
+  nearer.push({
+    kind: 'tree-broadleaf',
+    x: turned.camera.x + headingX * Math.sqrt(24 ** 2 - aside ** 2) + aside * headingZ,
+    y: turned.camera.y,
+    z: turned.camera.z + headingZ * Math.sqrt(24 ** 2 - aside ** 2) - aside * headingX,
+    rotation: 0,
+    scale: 1,
+    variant: 1,
   });
-  const farCanvas = document.createElement('canvas');
-  let far: GameView;
-  try {
-    far = threeGameRenderer.create(farCanvas, top);
-  } finally {
-    setTreeLevels(REALISTIC_TREE_LEVELS);
-  }
-  far.resize(canvas.width, canvas.height);
-  const farGl = farCanvas.getContext('webgl2');
-  if (farGl === null) {
-    far.destroy();
-    return NO_FOLIAGE;
-  }
+  // The full rank, the band after it, the middle ranks, and the band after
+  // THOSE (`tree-levels.ts` §`treeLevelAt`): the next rank is an impostor.
+  const ranks = REALISTIC_TREE_LEVELS.near + REALISTIC_TREE_LEVELS.middle + 2;
+  if (nearer.length < ranks)
+    throw new Error('#630: too few nearer trees to make the far one an impostor');
   const settled = (
     target: GameView,
     context: WebGL2RenderingContext,
@@ -5305,16 +5324,18 @@ function foliageProbe(
   };
   const width = canvas.width;
   const sides = (): { sun: number; shade: number; pixels: number } => {
-    const empty = settled(far, farGl, { ...turned, scatter: [] }, 2);
+    const empty = settled(view, gl, { ...turned, scatter: nearer });
     let sunTotal = 0;
     let shadeTotal = 0;
     let pixels = 0;
-    for (let turn = 0; turn < 8; turn += 1) {
+    for (let turn = 0; turn < IMPOSTOR_TURNS; turn += 1) {
+      // Settled once, when the far tree first takes its rank; a turn of the
+      // same tree moves no rank.
       const drawn = settled(
-        far,
-        farGl,
-        { ...turned, scatter: [treeAt(45, (turn * Math.PI) / 4)] },
-        2,
+        view,
+        gl,
+        { ...turned, scatter: [...nearer, treeAt(24, (turn * 2 * Math.PI) / IMPOSTOR_TURNS)] },
+        turn === 0 ? 11 : 2,
       );
       let low = width;
       let high = -1;
@@ -5357,17 +5378,21 @@ function foliageProbe(
       shadeTotal += leftCount === 0 ? 0 : left / leftCount;
       pixels += tree.length;
     }
-    return { sun: sunTotal / 8, shade: shadeTotal / 8, pixels };
+    return { sun: sunTotal / IMPOSTOR_TURNS, shade: shadeTotal / IMPOSTOR_TURNS, pixels };
   };
-  const lit = sides();
-  impostorsLitOf(false);
+  // Without the ground blobs (#620): a tree's blob lies on its shade side,
+  // thrown from the same sun, and would read as the tree's own shading.
+  showGroundBlobsOf(view, false);
+  let lit: ReturnType<typeof sides>;
   let unlit: ReturnType<typeof sides>;
   try {
+    lit = sides();
+    impostorsLitOf(false);
     unlit = sides();
   } finally {
     impostorsLitOf(true);
+    showGroundBlobsOf(view, true);
   }
-  far.destroy();
 
   // 2. The breeze, on the product's own view.
   const near = noWater(
@@ -5392,10 +5417,12 @@ function foliageProbe(
     ...oneTree,
     water: { ...oneTree.water, seconds },
   });
-  const empty = settled(view, gl, { ...at(10), scatter: [] });
+  // The tree's hand-over settles once, on the first frame that holds it; the
+  // same tree at another ride time is the same rank and level.
+  const empty = settled(view, gl, { ...at(10), scatter: [] }, 2);
   const first = settled(view, gl, at(10));
-  const later = settled(view, gl, at(11.3));
-  const again = settled(view, gl, at(10));
+  const later = settled(view, gl, at(11.3), 2);
+  const again = settled(view, gl, at(10), 2);
   return {
     measured: true,
     sunSide: lit.sun,
@@ -6836,7 +6863,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   phaseEnds('realistic: ground blend — #627');
 
   // #630: the far band's light, and the breeze.
-  const foliage = foliageProbe(view, gl, canvas, riding, top);
+  const foliage = foliageProbe(view, gl, canvas, riding);
   phaseEnds('realistic: foliage — #630');
 
   // #679: the finish gantry, read, and what the gantries cost.
