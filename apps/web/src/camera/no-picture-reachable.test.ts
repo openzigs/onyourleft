@@ -77,6 +77,8 @@ import {
   type ReadSource,
 } from './import-walk-testing';
 import { largestArrayIn, PICTURE_NAME, pictureBodyFaults } from './no-picture-testing';
+import { patternsOnlyGuard } from '../ride-analysis/personal-details-testing';
+import { PATTERNS_ONLY } from '../ride-analysis/hosted-mask';
 
 /** The modules #799 names as picture modules whatever their code says. */
 const MINIMUM_PICTURE_MODULES = [
@@ -294,7 +296,9 @@ describe('the body carries no picture (#799)', () => {
   it.each(Object.keys(HOSTED_PROMPTS) as HostedQuestion[])(
     'passes the hosted %s body the transport really sends',
     (question) => {
-      expect(pictureBodyFaults(hostedRequestBody('m', { question }), largest)).toStrictEqual([]);
+      expect(
+        pictureBodyFaults(hostedRequestBody('m', { question }, PATTERNS_ONLY), largest),
+      ).toStrictEqual([]);
     },
   );
 
@@ -368,6 +372,7 @@ describe('the body carries no picture (#799)', () => {
       schedule: manualSchedule().schedule,
       hosted: () =>
         hostedModelPort(service, {
+          guard: patternsOnlyGuard,
           send: async (url, init) => {
             bodies.push(JSON.parse(typeof init.body === 'string' ? init.body : '') as unknown);
             return server.send(url, init);
@@ -513,7 +518,10 @@ describe('the body carries no picture (#799)', () => {
 
     it('passes the hosted body the transport really sends, for a ride with no sections', () => {
       expect(
-        pictureBodyFaults(hostedRequestBody('m', { question: 'connection-check' }), none),
+        pictureBodyFaults(
+          hostedRequestBody('m', { question: 'connection-check' }, PATTERNS_ONLY),
+          none,
+        ),
       ).toStrictEqual([]);
     });
 

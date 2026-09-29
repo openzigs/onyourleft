@@ -38,6 +38,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import ts from 'typescript';
+
 import { stripComments } from '../units/no-inline-units';
 
 /** `apps/web/src`, on disk. */
@@ -53,14 +55,47 @@ export const readFromDisk: ReadSource = (path) => {
 };
 
 /**
- * Every module specifier in `code`: `from '…'`, a bare `import '…'`, and — since
- * #561's review — a dynamic `import('…')` with a literal, so a lazily loaded
- * module is walked like a static one.
+ * Every module specifier in `code`: `from '…'`, a bare `import '…'`, a dynamic
+ * `import('…')` with a literal, `export … from '…'`, `import x = require('…')`
+ * and a type's `import('…')` — in source order, in either quote.
+ *
+ * ⚠️ **Read by the TypeScript parser since #821, not by a pattern.** The
+ * pattern it replaced took single quotes only and had to be kept in step by
+ * hand with every spelling somebody remembered; the parser knows them all, and
+ * it cannot mistake a specifier-shaped string inside a template or a comment
+ * for an import. `fileName` decides only whether JSX is parsed.
  */
-export function specifiersIn(code: string): string[] {
-  return [...code.matchAll(/(?:\bfrom\s+|\bimport\s*\(\s*|\bimport\s+)'([^']+)'/g)].map(
-    (match) => match[1] ?? '',
+export function specifiersIn(code: string, fileName = 'module.tsx'): string[] {
+  const source = ts.createSourceFile(
+    fileName,
+    code,
+    ts.ScriptTarget.Latest,
+    false,
+    fileName.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
   );
+  const found: string[] = [];
+  const literal = (node: ts.Node | undefined): void => {
+    if (node !== undefined && ts.isStringLiteralLike(node)) {
+      found.push(node.text);
+    }
+  };
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+      literal(node.moduleSpecifier);
+    } else if (
+      ts.isImportEqualsDeclaration(node) &&
+      ts.isExternalModuleReference(node.moduleReference)
+    ) {
+      literal(node.moduleReference.expression);
+    } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      literal(node.arguments[0]);
+    } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) {
+      literal(node.argument.literal);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return found;
 }
 
 /** One module's imports: relative ones resolved to paths under `src`, bare ones as written. */
@@ -107,7 +142,7 @@ export function importWalk(read: ReadSource = readFromDisk): {
     }
     const local: string[] = [];
     const bare: string[] = [];
-    for (const specifier of specifiersIn(stripComments(source))) {
+    for (const specifier of specifiersIn(stripComments(source), path)) {
       if (!specifier.startsWith('.')) {
         bare.push(specifier);
         continue;

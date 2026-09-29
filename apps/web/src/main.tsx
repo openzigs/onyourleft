@@ -65,6 +65,7 @@ import type { RideAnalysisPort } from './ride-analysis/ride-analysis-port';
 import { hostedStepPort } from './ride-analysis/hosted-step';
 import { hostedModelEraser, readHostedModel } from './camera/hosted-model';
 import { hostedModelPort } from './camera/hosted-transport';
+import { readMaskingGuard } from './ride-analysis/hosted-mask';
 import { keepThisRide } from './camera/keep';
 import { shellCameraNotice } from './camera/shell-camera';
 import { CameraController } from './camera/session';
@@ -99,6 +100,7 @@ import type { LibraryPort } from './library/store-port';
 import type { TransferPort } from './transfer/store-port';
 import type { UnitsPort } from './units/store-port';
 import type { AthleteKitColourPort } from './athlete/kit-colour-port';
+import type { MaskedWordsPort } from './athlete/masked-words-port';
 import type { AthleteMassPort } from './athlete/store-port';
 
 const found = document.getElementById('root');
@@ -700,6 +702,14 @@ function buildAthleteKitColourPort(): AthleteKitColourPort {
 }
 
 /**
+ * The rider's words to mask (#839), over the same connection. The hosted
+ * transport reads the same row for every request (`buildCameraController`).
+ */
+function buildMaskedWordsPort(): MaskedWordsPort {
+  return { store: localStore(), athleteId: LOCAL_ATHLETE };
+}
+
+/**
  * Watch for a new version of the app, or not (#407).
  *
  * `undefined` wherever `registerServiceWorker` did not register one — inside
@@ -791,6 +801,8 @@ async function buildRideAnalysis(camera: CameraController | undefined): Promise<
     ...(camera === undefined
       ? {}
       : { hosted: () => hostedStepPort(camera, () => readHostedModel() !== undefined) }),
+    // #839: the preview masks with the same guard the transport reads.
+    hostedGuard: async () => readMaskingGuard(localStore(), LOCAL_ATHLETE),
     nativeShell,
     cameraConsented: () => camera?.state().consent.local ?? false,
     clock: platformRunnerClock(),
@@ -868,7 +880,13 @@ async function buildCameraController(
   // `CameraController.askHostedModel` checks that first. It is sent a
   // question, never a picture, and it is an `https:` origin, so the WebView's
   // own `fetch` carries it on both platforms.
-  const hosted = (): ReturnType<typeof hostedModelPort> => hostedModelPort(readHostedModel());
+  // #839. Every hosted request is masked with the rider's own guard — their
+  // word list and privacy zones, read afresh for each request — and a
+  // request whose guard cannot be read is not sent.
+  const hosted = (): ReturnType<typeof hostedModelPort> =>
+    hostedModelPort(readHostedModel(), {
+      guard: async () => readMaskingGuard(localStore(), LOCAL_ATHLETE),
+    });
   if (!isNativeShell(platformCapacitor())) {
     return new CameraController({ port, keep, analysis, hosted });
   }
@@ -968,6 +986,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           // substituted, and a default applied here would be a second.
           {...(athlete?.mass === undefined ? {} : { riderMass: athlete.mass })}
           athleteKit={buildAthleteKitColourPort()}
+          maskedWords={buildMaskedWordsPort()}
           // #623: the stored kit colour, undefaulted — `game/bicycle.ts`
           // §`riderKitFor` is the one place a missing one becomes the house kit.
           {...(athlete?.kitColour === undefined ? {} : { kitColour: athlete.kitColour })}

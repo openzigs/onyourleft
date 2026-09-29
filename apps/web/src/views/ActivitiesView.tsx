@@ -157,14 +157,19 @@ function sortOptionFor(orderBy: ActivityOrder, direction: SortDirection): SortOp
  * of three. An update made in a LAYOUT effect is flushed before the browser
  * paints, so the width is read here first and the observer only follows later
  * changes. `reflow.browser.spec.ts` §"the first frame" samples every frame
- * from navigation and fails on a table before cards.
+ * from navigation and fails on a table before cards — which guards the
+ * synchronous first read above, and not the choice of a layout effect over an
+ * ordinary one: nothing has shown that it tells the two apart (#690).
  *
  * Where there is no `ResizeObserver` — jsdom — nothing is measured and it
  * stays a table. A width of nought is read as "not laid out" rather than as a
  * phone, because jsdom reports nought for every box and a real container of
  * nought width has nothing to lay out.
  */
-function useLibraryLayout(present: boolean): [RefObject<HTMLDivElement | null>, LibraryLayout] {
+function useLibraryLayout(
+  present: boolean,
+  selected: string | undefined,
+): [RefObject<HTMLDivElement | null>, LibraryLayout] {
   const container = useRef<HTMLDivElement | null>(null);
   const [layout, setLayout] = useState<LibraryLayout>('table');
   useLayoutEffect(() => {
@@ -197,7 +202,15 @@ function useLibraryLayout(present: boolean): [RefObject<HTMLDivElement | null>, 
       observer.disconnect();
     };
     // Re-attached when a library arrives: with none, there is no container.
-  }, [present]);
+    // ⚠️ And measured again whenever the choice changes (#758). On one pane
+    // the list is `hidden` while a ride is chosen, so it can come back at a
+    // width it never had while shown: a phone opened at a ride's own address,
+    // or turned with the ride open. The observer would see the new width only
+    // after `ListDetail`'s passive effect had returned focus to the old
+    // layout's link, and the redraw dropped it. This layout effect runs in the
+    // commit that removes `hidden`, and its update is flushed before any
+    // passive effect, so focus returns to the link that stays.
+  }, [present, selected]);
   return [container, layout];
 }
 
@@ -231,7 +244,7 @@ export function ActivitiesView({ library, selected }: ActivitiesViewProps): JSX.
   const [armed, setArmed] = useState<string | undefined>(undefined);
   const [reloads, setReloads] = useState(0);
   const units = useUnits();
-  const [container, layout] = useLibraryLayout(library !== undefined);
+  const [container, layout] = useLibraryLayout(library !== undefined, selected);
   const listCaptionId = useId();
 
   const load = useCallback(async (): Promise<void> => {

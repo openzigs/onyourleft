@@ -1251,9 +1251,11 @@ That is why D-9 puts the rule at capture and why the check on it is a refusal ra
 in this repository as `apps/instance`; [ADR 0037](adr/0037-instance-runtime-hosting-and-transport.md)
 decided how it is built. [#767](https://github.com/openzigs/onyourleft/issues/767) scaffolded it and
 [#36](https://github.com/openzigs/onyourleft/issues/36) gave it an API contract and an error model.
-**What it does today is small on purpose**: it answers four metadata routes and nothing else. No
-account, no sync and no room exists yet — #772, #776 and #779/#780 build them. The database (#769)
-and the blob store (#770) exist since #842 and nothing calls them yet; see "Storage" below.
+**What it does today is small on purpose**: four metadata routes, and — since #855 (#772, #773,
+#774) — the identity routes under `/v1/auth/`, which a handler serves only when it is HANDED an
+identity service over a store. The Node entry point is not handed one yet (see "Identity" below),
+so a running instance still answers the metadata alone. No sync and no reachable room exists yet
+— #776 and #780 build them.
 
 **The device is canonical and a rider with no instance loses nothing** (ADR 0036 D-3). Nothing in
 `apps/web` or `apps/mobile` imports the instance, and nothing may: a client reaches it over the
@@ -1269,7 +1271,9 @@ flowchart LR
     handler --> errors[src/errors.ts<br/>the one error shape]
     handler --> log[src/log.ts<br/>no body, token or coordinate]
   end
-  do[Durable Object adapter, #781<br/>not built] -.-> handler
+  core[src/room/core/<br/>the room core, #779]
+  do[src/room/durable-object/<br/>Durable Object adapter, #781<br/>not deployed] --> core
+  do -.->|whether it also mounts the handler is #790's| handler
   docker[Dockerfile<br/>first deploy, #807] --> main
 ```
 
@@ -1277,6 +1281,16 @@ flowchart LR
 names nothing from Node, so the Node listener that fronts it today and the Durable Object adapter
 (#781) mount the same code (ADR 0037 D-2). Every rule — the body limit, routing, the error shape,
 the log — is the handler's, so two adapters cannot disagree about any of them.
+
+**The Durable Object adapter mounts the room core, not the handler — so far.**
+[#781](https://github.com/openzigs/onyourleft/issues/781) built it: one object per room, every
+socket through the Hibernation API, the tick as a storage alarm that is not re-set once a room stops
+running, and a lobby that survives eviction by replaying a log of the core's own calls. Whether the
+managed platform hosts rooms only or the whole instance is left to #790 (ADR 0037 D-2), so nothing
+routes HTTP to it and there is no production Worker entry. It is **deployed nowhere**; it runs under
+a local `workerd` in `test:workerd` (`CLAUDE.md` §4a). `src/room/conformance.test.ts` drives the
+core directly and every adapter with one script and requires byte-identical text on every socket —
+#780's Node adapter joins that file.
 
 **No build step, and one third-party runtime dependency.** Node 24 strips the types and runs
 `src/main.ts` as committed, so the tsconfig adds `allowImportingTsExtensions` and
@@ -1301,9 +1315,45 @@ because the only other answer is `main`, which is not what is running.
 | Proof | A round-trip harness whose read cannot be served by the writing connection, run red against three broken stores; athlete scoping enumerated from the port's keys over three athletes; erasure against every table with a foreign key to `athlete`, found in the schema, with every reference between two athlete-scoped tables carrying `athlete_id` on both sides (#842 review: a session could name another athlete's key and block that erasure); two writer THREADS with no `SQLITE_BUSY` escaping, and a busy-timeout-0 control that must see one | `src/store/testing/`, `src/store/*.test.ts` |
 | Blobs | Content-addressed by SHA-256 (Web Crypto, so portable): `put`/`get`/`has`/`delete`, a key refused unless it is 64 lowercase hex characters, before any path or URL is made. Local disk by default (write to `incoming/`, fsync, rename — a `SIGKILL` mid-write leaves nothing under the final name), an in-memory fake, and S3-compatible over `fetch` with its own SigV4 (reproducing AWS's worked example). One conformance suite runs all three; the bucket half only when `OYL_INSTANCE_S3_*` is set | `src/blob/` |
 
-⚠️ **Nothing calls either yet.** `main.ts` opens no database, and the Docker image copies `src/`
-without installing `node_modules`, so a route that imports the store needs the image to install
-`kysely` first — the first consumer's work (#772, #37, #776).
+⚠️ **The identity routes are the store's first consumer (#855), and `main.ts` still opens no
+database.** The Docker image copies `src/` without installing `node_modules`, so the entry point
+cannot import `kysely` until the image installs it — #780's work, with the box's database path.
+Until then the handler is built without an identity and every identity route answers
+`unavailable` (503).
+
+#### Identity (#772, #773, #774)
+
+An athlete on an instance is **a set of device keys** and nothing else — no password anywhere
+(ruling Q12). Each key is a device's ADR 0014 key, which keeps signing that device's records
+unchanged; the instance only ever verifies.
+
+```mermaid
+sequenceDiagram
+    participant D as Device (apps/web)
+    participant I as Instance
+    D->>I: POST /v1/auth/challenge {publicKey}
+    I-->>D: {nonce, expiresAt (+60 s)}
+    D->>D: sign RFC 8785 {purpose:"oyl-auth-v1", instanceOrigin, nonce, publicKey, issuedAt}
+    D->>I: POST /v1/auth/session {statement, signature}
+    I-->>D: {sessionToken (shown once), expiresAt, athleteId, recoveryCodes (first time only)}
+    D->>I: POST /v1/rooms/{roomId}/ticket (Bearer)
+    I-->>D: {ticket (one room, one hello, 30 s)}
+```
+
+| Concern | Decision | Where |
+|---|---|---|
+| What is signed | `@onyourleft/domain`'s `deviceStatementBytes`: five members, RFC 8785, canonicalised once for the browser and the instance (ADR 0014 D-8). `purpose` is one of `oyl-auth-v1`, `oyl-link-v1` and `oyl-recover-v1`, so a sign-in cannot add a key and no activity record (which has no `purpose`) verifies as a statement; `instanceOrigin` binds it to one instance | `packages/domain/src/identity/device-statement.ts` |
+| Refusals, in order | `wrong_purpose`, `wrong_instance`, `challenge_unknown` / `challenge_used` / `challenge_expired` (the nonce is spent before the signature is checked, so a replay of a whole request is `challenge_used`), `bad_signature`, `key_revoked`. Each is its own code | `apps/instance/src/auth/identity.ts` |
+| Secrets at rest | The SHA-256 of every secret handed out — session tokens, recovery codes, link codes, email-recovery tokens — never the secret. A test searches the database file, its WAL and its index for each one | `src/auth/`, migration `0004-identity` |
+| Registration | The first key an instance sees registers an athlete, where registration is `open` (the default until #775 adds its modes); the answer carries ten one-time recovery codes, once | `identity.ts` §`register` |
+| Rooms | A **ticket**, never the session token, in the hello: minted against a live session for one room, spent on admission, 30 s. Kept in memory by the process that runs the room; `TicketBook.admitterFor(roomId)` is the room core's `Admit` (#779). #781's Durable Object adapter plugs it in when it lands | `src/auth/tickets.ts` |
+| Other devices | A signed-in device mints a 5-minute, single-use **link code**; the new device signs `oyl-link-v1` with its OWN key. Revoking a key revokes its sessions and unspent link codes; the last key needs a recovery code the athlete holds (checked, not spent). A revoked key's records stay valid (ADR 0014 D-6) | `identity.ts` |
+| Every device lost | A recovery code, or — only where the operator hands the identity a mail transport — an emailed single-use link (30 minutes). With email recovery off, no address is accepted or stored | `identity.ts` §`recover`, §`requestEmailRecovery` |
+| What other riders see | ONE projection, `publicAthlete`: the id and the display name. Every `athlete` column is classified public or private and a test reads the migrated table's columns; a declared mass travels only in a ticket and reaches no other rider | `src/auth/public-athlete.ts` |
+| Display names | 1–32 scalar values after NFC; control, bidirectional and invisible characters refused, each by name. At most three changes a day; every earlier name is kept for moderation (#789) | `packages/domain/src/identity/display-name.ts`, `display_name_change` |
+| Rate limits | In memory, fixed windows: a challenge per key and per address (the address from the adapter, never logged). Behind a proxy the address is the proxy's — #775's to weigh | `src/auth/rate-limit.ts` |
+| The client half | `apps/web/src/instance/sign-in.ts`: the local athlete first, then the device key, then challenge → sign → session, and the instance's athlete id kept on the device. It takes its transport as a parameter and names no `fetch`: #777 supplies the one module allowed to call an instance, after #778's disclosures | `apps/web/src/instance/` |
+| Across platforms | `apps/web/browser/identity.browser.spec.ts`: the browser signs with the app's own non-extractable key in IndexedDB, and a real instance running in the spec's process verifies it, with a flipped signature byte and another instance's origin as controls | the browser gate |
 
 #### The API contract (#36)
 
@@ -1311,12 +1361,13 @@ without installing `node_modules`, so a route that imports the store needs the i
 |---|---|---|
 | The specification | OpenAPI 3.1, **generated** from the route table the handler dispatches on, committed as `apps/instance/openapi.json` and served at `GET /openapi.json`. `src/openapi.test.ts` fails when the committed file is not what the table generates, and calls every route through the real listener to check its body against the declared schema | `src/routes.ts`, `src/openapi.ts` |
 | Errors | One shape, `{ "error": { "code", "message", "fields"? } }`. `code` is stable and machine-readable; `message` is a fixed sentence per code and **never carries a value from the request** — ADR 0004 D widened to every field, because the instance cannot tell where a stranger's client put a coordinate. Another athlete's resource is `not_found`, never a 403 | `src/errors.ts` |
-| Codes | `validation_failed` 400 (with `fields`, each naming a field and a problem), `unauthenticated` 401, `not_found` 404, `method_not_allowed` 405 (with `Allow`), `payload_too_large` 413, `rate_limited` 429, `internal` 500. Adding a code is an addition; renaming one is breaking | `src/errors.ts` §`ERROR_STATUS` |
+| Codes | `validation_failed` 400 (with `fields`, each naming a field and a problem), `unauthenticated` 401, `not_found` 404, `method_not_allowed` 405 (with `Allow`), `payload_too_large` 413, `rate_limited` 429, `internal` 500 — and since #855 identity's: the seven sign-in refusals and `code_unknown` / `code_used` / `code_expired` (401), `registration_closed` 403, `key_in_use` and `last_device` 409, `unavailable` 503. Several codes share a status, and the specification names every code a status can carry. Adding a code is an addition; renaming one is breaking | `src/errors.ts` §`ERROR_STATUS` |
 | An unhandled exception | `internal`, with no message, stack or path; the log gets the error's **name** alone | `src/handler.ts`, `src/log.ts` |
 | Request bodies | Bounded before routing: a declared length over the limit is refused unread, and an undeclared one is read only up to the limit | `src/handler.ts` §`boundedBody` |
 | Pagination | **Keyset, never offset**: a list is ordered by (sort key, id) and a page is the next `limit` rows after an opaque cursor. Every row present when a listing begins is returned exactly once however many are inserted between pages; an offset control in the test shows the failure it prevents. `limit` defaults to 50 and is at most 200 | `src/pagination.ts` |
 
-**Versioning.** The four metadata routes — `/health`, `/source`, `/openapi.json`,
+**Versioning.** The identity routes live under `/v1/` (#772's diagram named `/auth/…`; these are
+those paths, versioned). The four metadata routes — `/health`, `/source`, `/openapi.json`,
 `/licences/third-party.txt` — are unversioned and only ever gain fields. The API a client syncs
 through lives under `/v1/` from its first route (#776). **A breaking change is `/v2/` served beside
 `/v1/`, never an edit to `/v1/`**, because anyone can run an instance and a third party implements
@@ -1324,10 +1375,9 @@ against this contract (#36's revision block): a change that would break a strang
 breaking whether or not this repository's own client notices. `info.version` in the specification is
 the API's version, not the package's.
 
-⚠️ **What the contract does not have yet, and who owes it.** `unauthenticated` and `rate_limited` are
-defined and their shape is tested, but no route produces either: authentication is #772's and a rate
-limiter is not built. No route takes input yet, so a validation failure is produced only by the
-pagination parser, which no route calls until #776's first list. #36 stays open for those.
+⚠️ **What the contract does not have yet, and who owes it.** Since #855 the identity routes
+produce `unauthenticated`, `rate_limited` and `validation_failed` and take JSON bodies; the
+pagination parser still has no caller until #776's first list.
 
 ### The realistic world: what is built, and how a rider chooses it
 
@@ -1507,6 +1557,7 @@ knows which numbers an *open pull request* has claimed; the rules see the tree, 
 | [0014](spikes/0014-godot-beneath-the-webview.md) | Can Godot render the trainer game's world in a native view beneath the Capacitor WebView, driven from TypeScript with the DOM HUD on top, and what does it cost on the Pixel Tablet against three.js? ([#433](https://github.com/openzigs/onyourleft/issues/433), for [#434](https://github.com/openzigs/onyourleft/issues/434)) | **It can be built, and on the stylised world it is not measurably better.** Godot 4.7.1's Android library (`GodotFragment`, not LibGodot's C API) drew the product's own geometry and placements beneath a transparent WebView from released parts, with no engine patch; the DOM HUD kept its touches, and after two host lines its accessibility tree was exactly the DOM. Both engines held 60 Hz with the same present-interval percentiles (p99 16.76 against 16.79 ms over 20 minutes), the GPU sat near idle under both (242 against 256 MHz), and neither heated the tablet; Godot used about 0.57 of a core less CPU, structurally (20 Hz frames interpolated, against 60 Hz frames built in JS). **Three pre-registered kill conditions trip as written**: K4, not measurably better; K6, +69.6 MiB of APK for arm64 (26.1 MiB compressed), and memory with shadows + MSAA 2×; and K8, nine permissive licences ADR 0015 has not ruled on. **K3, the bridge, is unmeasured as written, which the criterion counts as not a pass**: its share clause needs at least ten minutes, and the late share was recorded only on 5-minute runs (1.76 % of steps over 50 ms, 0.88 % with a geometry window sent a tenth as often); the 20-minute run's median-window p99 was 51.5 ms, which bounds its share at 0.5 % or more | The kill criterion was committed before the first measurement. Pixel Tablet, Android 17, WebView 153, Godot 4.7.1 and 4.7.2 (a patch bump by version string alone), 2026-09-26, with SurfaceFlinger present times, GPU DVFS, thermals, `top` and `meminfo` from both renderers in one APK. ⚠️ **iOS not reached, no live BLE, no power rail, and the realistic world not drawn in Godot.** The code is on the unmerged branch `spike/issue-433-godot-code`, and the pull request says `Refs #433` |
 | [0015](spikes/0015-godot-realistic-world.md) | Does Godot pull ahead of three.js on the **realistic** world (ADR 0026), the scene three.js finds hardest on the Pixel Tablet? The second spike of the owner's 2026-09-26 ruling on [#433](https://github.com/openzigs/onyourleft/issues/433), for [#434](https://github.com/openzigs/onyourleft/issues/434) | **On the GPU, yes; four pre-registered kill conditions trip anyway.** Godot 4.7.1 drew the committed CC0 realistic set, loaded through its own importer (nothing re-authored), at 96 % of three.js's triangles, and over the 20-minute pair held 60 Hz with the GPU clocked **30 % lower** (494 against 708 MHz), about 0.7 of a core less CPU and a skin 1.8 °C cooler, so K4 (not measurably better) does **not** trip, unlike on the stylised world in 0014. K3 (1.66 % of steps late against 1 %), K5 (0.19 % of frames over 20 ms against 0.12 %), K6 (APK +91.8 MiB) and K8 (the same unruled licences) trip as written. Memory does not favour Godot: 81 MiB of compressed textures, but the process is 238 MiB larger. ⚠️ How much of the GPU gap is Godot's compressed (ETC2) textures against three.js's decoded RGBA8, rather than the engine, was not isolated | The owner's Pixel Tablet, 2026-09-26, one debug APK holding both renderers; kill criterion committed before measuring (`7497dde`). ⚠️ **One tablet that never throttled**: no slower device and not ADR 0008 D-4's 3 GB floor, where the GPU margin would matter; no iOS. ⚠️ **The Godot rider was not at parity**: it stood in its A-pose at the bicycle's origin, not seated and not holding the bar, in the wrong tint, with one lean for body and bicycle and no contact shadow, and the owner, looking at the tablet on 2026-09-26, found it poor. Parity means porting `bicycle.ts`'s procedural rider and its animation, which was not measured. #459's water shader and the ground's field pattern were not ported either, and the Godot page drew DOM panels and a debug log the three.js control did not. Code and results on `spike/issue-433-godot-realistic-code`, never merged |
 | [0016](spikes/0016-live-in-ride-coaching.md) | Should live in-ride coaching exist at all, and what does its round trip to the rider's own computer cost? The owner's 2026-09-28 ruling on [#389](https://github.com/openzigs/onyourleft/issues/389) | **Not yet, and build nothing.** The model leg measured 2 252.6 / 3 192.4 ms p50 / p95 warm and 8 114.1 ms cold for a 4.3 B vision model on an M4 Pro over loopback (HTTP itself 0.2 ms); the tablet's legs are a procedure with empty cells. That model scattered one identical picture's landmarks across half the frame (17 accepted poses of 21 answers) and gave poses for pictures of nobody, which the product's reader accepted. And an in-ride utterance needs [ADR 0033](adr/0033-side-camera-link.md) D-6 amended (a constraint on this path that defers #389, not a refusal) and may conflict with [ADR 0030](adr/0030-what-the-app-may-say-about-a-body.md) R7 as its 2026-09-23 amendment reads condition 5 — though that amendment also keeps D-7's live silence rule unchanged — so two owner rulings come first. Safety analysis, a typed sketch of D-7 and six draft sub-issues are in it, none filed | A MacBook Pro (M4 Pro, 24 GB) on 2026-09-28, with a drawn stand-in picture and two no-rider controls. ⚠️ **No tablet, no phone, no LAN and no photograph.** **0016 rather than 0009** because [#471](https://github.com/openzigs/onyourleft/pull/471), still open, claims 0009 |
+| [0017](spikes/0017-voice-chat-for-rooms.md) | How should riders talk to each other in rooms: a Discord bot that makes a voice channel per room, the Discord Social SDK in the app, or WebRTC of our own? The owner's 2026-09-28 request on [#794](https://github.com/openzigs/onyourleft/issues/794) | **Recommends a Discord bot on the instance, over REST with no dependency, and a link in the app.** The instance knows when a room closes, so the channel is deleted then and no gateway connection is needed. A link alone cannot enforce a ban on a rider already in voice, so private rooms use link only (with the channel rotated when a rider is removed) and public rooms need Discord account linking. The Social SDK is rejected: no web build, a revocable non-OSI grant, and Discord gets every rider's voice and identity. Our own WebRTC is deferred: a relayed 20-rider room would need about 12 Mbit/s of the home box's upload at an assumed 32 kbit/s a voice. **The owner's choice is not recorded yet**, and the draft sub-issues are not filed | Documentation, licences (`npm view`, `gh api`) and this repository, read 2026-09-29 at `12fb177`. ⚠️ **Nothing measured**: the five device questions (V1–V5) are a procedure with empty cells, and the Social SDK Terms answered `403` and were read only through a summary |
 
 ## Hardware validation procedures
 

@@ -21,8 +21,9 @@
  * 1. **The chain it reads is there**: {@link PLAUSIBILITY_LANDMARKS}. A pose
  *    missing any of them cannot be checked, and a pose that cannot be
  *    checked is not accepted.
- * 2. **Top to bottom**: the ear (when given) above the shoulder, the shoulder
- *    above the hip, the hip above the ankle, the knee above the ankle. The
+ * 2. **Top to bottom**: the ear (when given) not far below the shoulder
+ *    ({@link EAR_BELOW_SHOULDER_TOLERANCE}), the shoulder above the hip,
+ *    the hip above the ankle, the knee above the ankle. The
  *    knee against the hip is deliberately not checked: at the top of the
  *    stroke a low saddle puts the knee level with the hip or above it.
  * 3. **The knee is bent**: {@link MAXIMUM_KNEE_OPENING_COSINE}.
@@ -67,10 +68,40 @@ export const PLAUSIBILITY_LANDMARKS = [
  * stroke, which is an opening of about 145° to 155°; that figure is second-hand
  * and was not read from a primary source for this change. 170° leaves 15°
  * past the straightest of it for a model's placement error and a saddle set
- * too high. What it catches is the straight line a hallucination draws from
- * hip to ankle: the spike's accepted blank-picture pose opened at about 174°.
+ * too high.
+ *
+ * ## What it has caught — ⚠️ nothing yet, on the answers saved
+ *
+ * It is a guard against a failure not yet seen reaching it: the straight
+ * line a hallucination might draw from hip to ankle. Run over every answer in
+ * `model-answers-testing.ts` (`pose-plausibility-answers.test.ts` counts
+ * them), it rejects **none**: every answer that places the whole chain breaks
+ * the top-to-bottom order first, and shoulder-below-hip does almost all of
+ * that work. Taken alone it would refuse three of the spike's noise answers,
+ * whose legs open at 175° to 180°, but each of those had its shoulder below
+ * its hip. ⚠️ **This comment used to cite "the spike's accepted blank-picture
+ * pose", opening at about 174°, as what the rule catches**, and #808's review
+ * found that answer's JSON does not close: it is unreadable and never reaches
+ * this file (#813).
  */
 export const MAXIMUM_KNEE_OPENING_COSINE = Math.cos((170 * Math.PI) / 180);
+
+/**
+ * How far below the shoulder the ear may be, as a share of the trunk's length
+ * from shoulder to hip, before the head is said to be below the shoulder.
+ *
+ * ## Provenance — ⚠️ the author's choice (#813)
+ *
+ * A rider in the drops or on aerobars can carry their head level with their
+ * shoulders, and a pose program of the rider's own — the use ADR 0033's
+ * 2026-09-28 amendment keeps this path for — places each end with an error of
+ * its own, so an ear a few pixels under a level shoulder is a rider, not a
+ * hallucination. A quarter of the trunk is a head dropped well past level.
+ * Scaled to the trunk so the allowance is the same whether the rider fills
+ * the picture or a corner of it. The two saved answers this rule refuses put
+ * the ear 0.34 and 2.2 trunks below the shoulder.
+ */
+export const EAR_BELOW_SHOULDER_TOLERANCE = 0.25;
 
 /**
  * Each segment's length over another's, lowest and highest, in the picture's
@@ -146,7 +177,7 @@ export function implausibility(pose: SidePose): Implausibility | undefined {
   }
   // The picture's y grows downward, so "above" is a smaller y.
   const ear = at('ear');
-  if (ear !== undefined && ear.y >= shoulder.y) {
+  if (ear !== undefined && ear.y - shoulder.y > EAR_BELOW_SHOULDER_TOLERANCE * trunk) {
     return 'head-below-shoulder';
   }
   if (shoulder.y >= hip.y) {

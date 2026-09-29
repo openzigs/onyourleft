@@ -309,6 +309,75 @@ test.describe('#670 — two panes on a landscape tablet', () => {
   }
 });
 
+/**
+ * The two panes' headings are level — #730.
+ *
+ * At two panes `ListDetail.tsx` puts the pane skip link before the list's
+ * `<h2>`, so the heading was not `:first-child` and kept `h2`'s 40 px top
+ * margin: the list's heading sat 40 px below the detail's on every list–detail
+ * route. `theme.css` §`.oyl-pane-skip + h2` takes the margin away. The control
+ * puts the 40 px back on that one rule and requires the headings apart again.
+ */
+async function paneHeadingTops(
+  page: Page,
+): Promise<{ readonly list: number | null; readonly detail: number | null }> {
+  return page.evaluate(() => {
+    const top = (pane: string): number | null =>
+      document
+        .querySelector(`[data-oyl-pane="${pane}"]:not([hidden]) :is(h2, h3)`)
+        ?.getBoundingClientRect().top ?? null;
+    return { list: top('list'), detail: top('detail') };
+  });
+}
+
+test.describe('#730 — the two panes’ headings are level', () => {
+  for (const control of [false, true]) {
+    test(
+      control
+        ? 'the control — with the 40 px gap back, they are not'
+        : 'at two panes, on every list–detail route',
+      async ({ page }) => {
+        await open(page, TABLET_IN_THE_SHELL);
+        if (control) {
+          await page.addStyleTag({
+            content: '.oyl-pane-skip + h2 { margin-top: var(--oyl-space-xl) !important; }',
+          });
+        }
+        const lines: string[] = [];
+        let measured = 0;
+        for (const route of LIST_DETAIL) {
+          for (const hash of [
+            hrefFor(route),
+            hrefForSelection(route, await selectionOf(page, route)),
+          ]) {
+            const seen = await visit(page, route, hash);
+            expect(seen.listDetail?.panes, `${route.id}: panes decided`).toBe('2');
+            const tops = await paneHeadingTops(page);
+            lines.push(
+              `${hash}: list heading ${tops.list?.toFixed(0) ?? '—'}, ` +
+                `detail heading ${tops.detail?.toFixed(0) ?? '—'}`,
+            );
+            expect(tops.list, `${hash}: the list pane has no heading`).not.toBeNull();
+            if (tops.list === null || tops.detail === null) continue;
+            measured += 1;
+            const apart = Math.abs(tops.list - tops.detail);
+            if (control) {
+              expect(apart, `${hash}: the control left the headings level`).toBeGreaterThan(30);
+            } else {
+              expect(
+                apart,
+                `${hash}: the list's heading and the detail's are not level`,
+              ).toBeLessThanOrEqual(1);
+            }
+          }
+        }
+        console.log(`[#730]${control ? ' control' : ''}\n  ${lines.join('\n  ')}`);
+        expect(measured, 'no route had a heading in both panes').toBeGreaterThan(0);
+      },
+    );
+  }
+});
+
 test.describe('#670 — one pane below 840 px', () => {
   for (const viewport of ONE_PANE) {
     test(`one pane, no sideways scroll, and back returns to the item at ${viewport.name}`, async ({
@@ -351,6 +420,11 @@ test.describe('#670 — one pane below 840 px', () => {
         // the focus was timing, which is why the case was flaky rather than
         // red; a list that was drawn again at all is what this asserts, and
         // that is not timing (`ActivitiesView.tsx` §`useLibraryLayout`).
+        // ⚠️ But it reads the expando at ONE moment, so a redraw that lands
+        // after this `evaluate` still passes: before the fix it went red only
+        // 2 times in 20 (#758). The deterministic gate is
+        // `ActivitiesView.test.tsx` §"#738" and §"#758"; this is the
+        // corroboration in a real engine.
         expect(
           await item.evaluate(
             (link) => (link as HTMLElement & { oylLeftFrom?: true }).oylLeftFrom === true,
@@ -930,6 +1004,27 @@ async function scrollPageToEnd(page: Page): Promise<void> {
   await settleScroll(page);
 }
 
+/**
+ * Focus the skip link WITHOUT the scroll a focus call makes, and say so (#726,
+ * from #731's review). A plain `focus()` from the page's end scrolls the link
+ * — and so the page — back to the top before Enter is pressed, so the jump
+ * the skip link makes contributed nothing to what was measured after it:
+ * `mainRef.current?.focus({ preventScroll: true })` left both cases green.
+ * Measured this way, the jump left the `h1` at y = −10 150 on the control's
+ * layout, which is why `AppShell.tsx` §`skipToContent` scrolls `main` in.
+ */
+async function focusSkipLinkInPlace(page: Page): Promise<void> {
+  const before = await page.evaluate(() => window.scrollY);
+  await page.locator('.oyl-skip-link').evaluate((link) => {
+    (link as HTMLElement).focus({ preventScroll: true });
+  });
+  await expect(page.locator('.oyl-skip-link')).toBeFocused();
+  expect(
+    await page.evaluate(() => window.scrollY),
+    'focusing the skip link moved the page, so the jump it makes is not what is measured',
+  ).toBe(before);
+}
+
 /** Where `main`'s h1 is, against the header (or the inset band) and the fold. */
 async function h1Landing(page: Page): Promise<{
   top: number;
@@ -1084,7 +1179,7 @@ test.describe('#723 — two panes scroll on their own', () => {
       // From the page's furthest scroll, so the skip link has the 52 px of
       // footer line to undo rather than landing where the page already was.
       await scrollPageToEnd(page);
-      await page.locator('.oyl-skip-link').focus();
+      await focusSkipLinkInPlace(page);
       await page.keyboard.press('Enter');
       await expect(page.locator('main')).toBeFocused();
       await settleScroll(page);
@@ -1127,7 +1222,7 @@ test.describe('#723 — two panes scroll on their own', () => {
         `${route.id}: scrolled ${String(before.scrollY)} px, the h1 at ` +
           `${before.top.toFixed(0)}–${before.bottom.toFixed(0)} still read as in view`,
       ).toBe(true);
-      await page.locator('.oyl-skip-link').focus();
+      await focusSkipLinkInPlace(page);
       await page.keyboard.press('Enter');
       await expect(page.locator('main')).toBeFocused();
       await settleScroll(page);

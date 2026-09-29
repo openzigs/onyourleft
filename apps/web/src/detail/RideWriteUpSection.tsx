@@ -55,6 +55,8 @@ import {
   missingSectionsText,
   shownWriteUp,
   WRITE_UP_EARLIER,
+  WRITE_UP_EARLIER_NOT_READ,
+  WRITE_UP_EARLIER_READING,
   WRITE_UP_FRAMING_LEAD,
   WRITE_UP_FRAMING_REST,
   WRITE_UP_NOT_ASKED,
@@ -95,7 +97,8 @@ function Saved({
   earlier,
 }: {
   readonly saved: WriteUpOverview;
-  readonly earlier: boolean;
+  /** The sentence that says this is the earlier write-up, when it is. */
+  readonly earlier: string | undefined;
 }): JSX.Element | null {
   if (saved.kind === 'none') {
     return null;
@@ -110,7 +113,7 @@ function Saved({
   const missing = missingSectionsText(shown.missingSections);
   return (
     <div className="oyl-write-up">
-      {earlier ? <p className="oyl-write-up__state">{WRITE_UP_EARLIER}</p> : undefined}
+      {earlier === undefined ? undefined : <p className="oyl-write-up__state">{earlier}</p>}
       <p>
         <strong>{WRITE_UP_FRAMING_LEAD}</strong> {WRITE_UP_FRAMING_REST}
       </p>
@@ -135,13 +138,35 @@ export function RideWriteUpSection({
   const [sources] = useState<readonly RideWriteUpSource[]>(() => port?.availableSources() ?? []);
   const [saved, setSaved] = useState<WriteUpOverview>(initial);
   const [last, setLast] = useState<AskOutcome | undefined>(undefined);
+  // Between a write-up being saved and it being read back, what is on the page
+  // is still the EARLIER one (#816).
+  const [readBack, setReadBack] = useState<'done' | 'reading' | 'failed'>('done');
 
   const ended = (outcome: AskOutcome): void => {
     setLast(outcome);
     if (outcome.kind === 'written') {
-      void reread().then(setSaved);
+      setReadBack('reading');
+      // `reread` is documented never to throw; a rejection is caught all the
+      // same, so it cannot become an unhandled one, and the page says the new
+      // write-up is saved rather than passing the old one off as it.
+      reread().then(
+        (overview) => {
+          setSaved(overview);
+          setReadBack('done');
+        },
+        () => {
+          setReadBack('failed');
+        },
+      );
     }
   };
+
+  let earlier: string | undefined;
+  if (last?.kind === 'failed') {
+    earlier = WRITE_UP_EARLIER;
+  } else if (last?.kind === 'written' && readBack !== 'done') {
+    earlier = readBack === 'reading' ? WRITE_UP_EARLIER_READING : WRITE_UP_EARLIER_NOT_READ;
+  }
 
   if (sources.length === 0 && saved.kind === 'none') {
     // The fallback: today's page and one sentence. No heading, no request.
@@ -159,7 +184,7 @@ export function RideWriteUpSection({
       {saved.kind === 'none' && last === undefined ? (
         <p className="oyl-write-up__state">{WRITE_UP_NOT_ASKED}</p>
       ) : undefined}
-      <Saved saved={saved} earlier={last?.kind === 'failed'} />
+      <Saved saved={saved} earlier={earlier} />
     </section>
   );
 }

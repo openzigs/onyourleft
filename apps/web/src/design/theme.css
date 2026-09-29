@@ -343,7 +343,15 @@ h3:first-child {
 .oyl-skip-link {
   position: absolute;
   left: var(--oyl-space-sm);
-  top: var(--oyl-space-sm);
+  /*
+   * Below the status bar (#726). The link has no positioned ancestor, so it is
+   * placed against the initial containing block and NOT below `body`'s
+   * safe-area padding: with the tablet's 36 px top inset a bare
+   * `--oyl-space-sm` put its top 28 px under the status bar, which a device
+   * draws over the WebView. `shell.browser.spec.ts` §"#726" measures it with
+   * the insets applied to the engine.
+   */
+  top: calc(var(--oyl-space-sm) + var(--oyl-safe-top));
   z-index: 10;
   padding: var(--oyl-space-sm) var(--oyl-space-md);
   background: var(--oyl-color-canvas);
@@ -818,6 +826,16 @@ h3:first-child {
   min-height: 2.75rem;
 }
 
+/*
+ * The list's heading opens its pane (#730). The skip link comes before it in
+ * the DOM, so the heading is not `:first-child` at two panes and kept the
+ * 40 px `h2` gap — the list's heading sat 40 px below the detail's on every
+ * list–detail route. `list-detail.browser.spec.ts` §"#730" holds them level.
+ */
+.oyl-pane-skip + h2 {
+  margin-top: 0;
+}
+
 /* One item of a pane's list: its link, and a line of facts. */
 .oyl-pane-list {
   list-style: none;
@@ -1034,6 +1052,18 @@ h3:first-child {
  * because the clearance is measured, and the table is kept because it is the
  * argument for the query.
  */
+/*
+ * Where the header does NOT stick, a fragment jump — the skip link, and the
+ * focus move on every route change — scrolls `main` to the top of the
+ * viewport, which is under the status bar when the top inset is non-zero
+ * (#726): with the tablet's 36 px the `h1` landed 24 px down, its top 12 px
+ * under the bar. The inset is the margin; it is 0 px in any desktop browser.
+ * The sticky query below replaces it with a margin that clears the header too.
+ */
+.oyl-main {
+  scroll-margin-top: var(--oyl-safe-top);
+}
+
 @media (min-width: 64rem) and (min-height: 40rem) {
   .oyl-header {
     position: sticky;
@@ -2579,6 +2609,33 @@ p > label + input[type='file'] {
   border-color: var(--oyl-color-border);
   background: var(--oyl-color-surface);
   color: var(--oyl-color-ink-muted);
+}
+
+/*
+ * The rider's words to mask (#839, `athlete/MaskedWordsPanel.tsx`). One row an
+ * entry, its Remove beside it and wrapping under it on a narrow screen, and
+ * the entry itself broken anywhere — a rider may list an unbreakable village
+ * name, which would otherwise scroll a phone's page sideways (SC 1.4.10).
+ */
+.oyl-masked-words__list {
+  display: grid;
+  gap: var(--oyl-space-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.oyl-masked-words__list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-masked-words__word {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .oyl-write-up__text {

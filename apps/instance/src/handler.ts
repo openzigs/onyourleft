@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import type { Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
 import { errorResponse } from './errors.ts';
 import { logRequest, logUnhandled, type LogSink } from './log.ts';
 import { openApiDocument } from './openapi.ts';
+import type { ClientInfo } from './route-kit.ts';
 import { ROUTES, type Route } from './routes.ts';
 
 /**
@@ -24,13 +26,19 @@ import { ROUTES, type Route } from './routes.ts';
  *    past it — never buffered whole first. So a stranger cannot make the
  *    instance hold an unbounded upload in memory by leaving the header off.
  * 2. **The route**, by path: none is `not_found`; a path with no route for the
- *    method is `method_not_allowed` with an `Allow` header.
- * 3. **The route's own answer**, and anything it throws is `internal` in the
+ *    method is `method_not_allowed` with an `Allow` header. A `{name}` segment
+ *    matches one segment of letters, digits, `_` and `-`, and nothing else —
+ *    so a value the route reads from `params` is never a path or a query.
+ * 3. **What the route declares it needs** (#772): the instance's accounts
+ *    (`unavailable` when this instance was given none), a signed-in session
+ *    (`unauthenticated`, with `WWW-Authenticate: Bearer`), and a JSON object
+ *    body (`validation_failed`).
+ * 4. **The route's own answer**, and anything it throws is `internal` in the
  *    one error shape — no message, no stack, no path (#36, ADR 0004 D) — while
  *    the log gets the error's name alone (`log.ts`).
  */
 
-export type Handler = (request: Request) => Promise<Response>;
+export type Handler = (request: Request, client?: ClientInfo) => Promise<Response>;
 
 export interface HandlerOptions {
   readonly config: Config;
@@ -41,6 +49,47 @@ export interface HandlerOptions {
   readonly routes?: readonly Route[];
   /** Milliseconds, for the log's duration. */
   readonly now?: () => number;
+  /**
+   * The instance's accounts (#772). Absent, every route that needs them
+   * answers `unavailable`: the Node entry point does not open a database yet
+   * (the self-hosted box's wiring is #780's), so it serves the metadata alone.
+   */
+  readonly identity?: Identity;
+}
+
+/** A path parameter's value: one segment, of these characters only. */
+const PARAMETER = /^[A-Za-z0-9_-]{1,128}$/;
+
+/** The route's `{name}` values when `pathname` matches its pattern, or `undefined`. */
+export function matchPath(pattern: string, pathname: string): Record<string, string> | undefined {
+  const want = pattern.split('/');
+  const have = pathname.split('/');
+  if (want.length !== have.length) return undefined;
+  const params: Record<string, string> = {};
+  for (const [index, segment] of want.entries()) {
+    const value = have[index] as string;
+    const name = /^\{([A-Za-z]+)\}$/.exec(segment)?.[1];
+    if (name === undefined) {
+      if (segment !== value) return undefined;
+    } else {
+      if (!PARAMETER.test(value)) return undefined;
+      params[name] = value;
+    }
+  }
+  return params;
+}
+
+/** The body as a JSON object, or `undefined` when it is not one. */
+function jsonObject(body: Uint8Array | null): Record<string, unknown> | undefined {
+  if (body === null) return {};
+  try {
+    const parsed: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(body));
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Headers every response carries, whatever produced it. */
@@ -99,7 +148,46 @@ export function createHandler(options: HandlerOptions): Handler {
   const now = options.now ?? (() => performance.now());
   const specification = openApiDocument(routes);
 
-  return async (request) => {
+  async function answer(
+    matched: Route,
+    params: Record<string, string>,
+    request: Request,
+    url: URL,
+    body: Uint8Array | null,
+    client: ClientInfo,
+  ): Promise<Response> {
+    const identity = options.identity;
+    if (matched.identity === true && identity === undefined) return errorResponse('unavailable');
+    let caller;
+    if (matched.auth === 'session') {
+      caller = await identity?.authenticate(request.headers.get('authorization'));
+      if (caller === undefined) {
+        return errorResponse('unauthenticated', { headers: { 'www-authenticate': 'Bearer' } });
+      }
+    }
+    const parsed = matched.request === undefined ? {} : jsonObject(body);
+    if (parsed === undefined) {
+      return errorResponse('validation_failed', {
+        fields: [{ field: 'body', problem: 'must be a JSON object' }],
+      });
+    }
+    return matched.handle({
+      request,
+      url,
+      body,
+      json: parsed,
+      params,
+      client,
+      config: options.config,
+      version: options.version,
+      notices: options.notices,
+      specification,
+      identity,
+      caller,
+    });
+  }
+
+  return async (request, client = { address: null }) => {
     const started = now();
     let route: Route | undefined;
     let response: Response;
@@ -109,21 +197,19 @@ export function createHandler(options: HandlerOptions): Handler {
       if (body === TOO_LARGE) {
         response = errorResponse('payload_too_large');
       } else {
-        const atPath = routes.filter((candidate) => candidate.path === url.pathname);
-        route = atPath.find((candidate) => candidate.method === request.method);
-        if (route !== undefined) {
-          response = await route.handle({
-            request,
-            url,
-            body,
-            config: options.config,
-            version: options.version,
-            notices: options.notices,
-            specification,
-          });
+        const atPath = routes.flatMap((candidate) => {
+          const params = matchPath(candidate.path, url.pathname);
+          return params === undefined ? [] : [{ candidate, params }];
+        });
+        const found = atPath.find(({ candidate }) => candidate.method === request.method);
+        route = found?.candidate;
+        if (found !== undefined) {
+          response = await answer(found.candidate, found.params, request, url, body, client);
         } else if (atPath.length > 0) {
           response = errorResponse('method_not_allowed', {
-            headers: { allow: atPath.map((candidate) => candidate.method).join(', ') },
+            headers: {
+              allow: [...new Set(atPath.map(({ candidate }) => candidate.method))].join(', '),
+            },
           });
         } else {
           response = errorResponse('not_found');

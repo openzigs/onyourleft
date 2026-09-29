@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import manifest from '../package.json' with { type: 'json' };
 import { ERROR_CODES, ERROR_STATUS, errorResponse } from './errors.ts';
-import { createHandler } from './handler.ts';
+import { createHandler, matchPath } from './handler.ts';
 import {
   startTestInstance,
   TEST_COMMIT,
@@ -147,7 +147,7 @@ describe('the one error shape (#36)', () => {
         return new Response('ok');
       },
     };
-    const posting: Route = { ...echo, method: 'POST' as 'GET' };
+    const posting: Route = { ...echo, method: 'POST' };
     const handler = createHandler({
       config: testConfig(),
       version: '1',
@@ -205,5 +205,25 @@ describe('GET /licences/third-party.txt', () => {
     const response = await fetch(`${instance.url}/licences/third-party.txt`);
     expect(response.headers.get('content-type')).toBe('text/plain; charset=utf-8');
     expect(await response.text()).toBe('Name: something\n');
+  });
+});
+
+describe('a route’s `{name}` segments (#772)', () => {
+  it('match one segment of letters, digits, `_` and `-`, and nothing else', () => {
+    expect(matchPath('/v1/rooms/{roomId}/ticket', '/v1/rooms/room-1_A/ticket')).toEqual({
+      roomId: 'room-1_A',
+    });
+    for (const refused of [
+      '/v1/rooms/../ticket',
+      '/v1/rooms/a.b/ticket',
+      '/v1/rooms/a%2Fb/ticket',
+      '/v1/rooms//ticket',
+      '/v1/rooms/a/b/ticket',
+      `/v1/rooms/${'a'.repeat(129)}/ticket`,
+    ]) {
+      expect(matchPath('/v1/rooms/{roomId}/ticket', refused), refused).toBeUndefined();
+    }
+    expect(matchPath('/health', '/health')).toEqual({});
+    expect(matchPath('/health', '/healthz')).toBeUndefined();
   });
 });
