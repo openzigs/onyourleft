@@ -20,6 +20,13 @@
  * their modules. A bare specifier (`react`, `@onyourleft/sensors`) is recorded
  * and not followed.
  *
+ * A relative specifier whose query is exactly `?url` or `?raw` is an asset
+ * handed over as a string and is not followed; one naming an existing
+ * stylesheet or JSON file is not followed either. **Any other relative
+ * specifier that does not resolve to a `.ts`/`.tsx` module is an error** —
+ * a `?worker` or `?inline` query, an existing `.js` file — never a module
+ * quietly left out of the walk (#822, #823).
+ *
  * ## What it cannot see
  *
  * A specifier that is not a string literal (`import(name)`), and a module a
@@ -77,6 +84,12 @@ export interface ImportClosure {
 
 const RESOLUTION_SUFFIXES = ['', '.ts', '.tsx', '/index.ts', '/index.tsx'] as const;
 
+/** The only queries that hand a module over as a string: `?url` and `?raw`, alone. */
+const ASSET_QUERY = /^[^?]+\?(?:url|raw)$/;
+
+/** Files that are there and hold no code to walk: stylesheets and data. */
+const INERT_EXTENSION = /\.(?:css|json)$/;
+
 /** A walker over `read`. */
 export function importWalk(read: ReadSource = readFromDisk): {
   readonly importsOf: (path: string) => ModuleImports;
@@ -99,10 +112,28 @@ export function importWalk(read: ReadSource = readFromDisk): {
         bare.push(specifier);
         continue;
       }
-      const file = resolveFile(posix.normalize(posix.join(posix.dirname(path), specifier)));
+      // A `?url` or `?raw` import is an asset handed over as a string, not a
+      // module: there is nothing in it to walk. EXACTLY those two — `?worker`
+      // names a module that runs, and `?inline` or `?url&worker` is not a
+      // string either, so any other query falls through to the error (#823).
+      if (ASSET_QUERY.test(specifier)) {
+        continue;
+      }
+      const base = posix.normalize(posix.join(posix.dirname(path), specifier));
+      const file = resolveFile(base);
       if (file !== undefined) {
         local.push(file);
+        continue;
       }
+      // A stylesheet imported for its side effect, or JSON, is there and is
+      // not code. A named list, so an existing `.js`, `.mjs` or `.jsx` — code
+      // that can import a picture — is refused rather than skipped (#823).
+      if (INERT_EXTENSION.test(base) && read(base) !== undefined) {
+        continue;
+      }
+      // #822: a relative import that resolves to nothing used to be dropped
+      // here in silence, so the walk passed over whatever it really named.
+      throw new Error(`${path} imports ${specifier}, which the walk cannot resolve`);
     }
     return { local, bare };
   };
