@@ -233,6 +233,9 @@ export const PERMITTED_NETWORK_CALLS: readonly {
   readonly primitive: string;
   readonly count: number;
 }[] = [
+  // ⚠️ Still ONE since #802: the ride analysis's text steps to the rider's own
+  // computer (`ride-analysis/own-computer-step.ts`) are handed this same call
+  // by `analysis-transport.ts` §`riderModelStepPort`, rather than a second.
   { module: join('camera', 'analysis-transport.ts'), primitive: 'fetch', count: 1 },
   // #529, ADR 0033 D-9 step 2: the side-camera link, and exactly one naming of
   // the constructor. What it is pointed at — no ICE server of any kind — is
@@ -517,7 +520,8 @@ describe('the client', () => {
     }));
     expect(
       networkFindingsOutside(files, PERMITTED_NETWORK_CALLS),
-      'docs/privacy-policy.md says this client sends nothing except one picture to a computer the ' +
+      'docs/privacy-policy.md says this client sends nothing except one picture, or a ride’s ' +
+        'numbers when the rider asks for an analysis (#802), to a computer the ' +
         'rider configured and switched on, a start and a stop to a side-camera phone the rider ' +
         'paired by scanning, and a question — never a picture — to a hosted service on the ' +
         'rider’s own key; that is now false, and the policy and the Data Safety form are what ' +
@@ -609,8 +613,8 @@ describe('the Android shell’s own source — #553', () => {
     expect(files.length).toBeGreaterThan(10);
     expect(
       networkFindingsOutside(files, PERMITTED_MOBILE_NETWORK_CALLS),
-      'docs/privacy-policy.md says the shell sends one picture to the rider’s own computer through ' +
-        'native HTTP and nothing else; that is now false, and the policy and the Data Safety form ' +
+      'docs/privacy-policy.md says the shell sends one picture, or a ride’s numbers (#802), to ' +
+        'the rider’s own computer through native HTTP and nothing else; that is now false, and the policy and the Data Safety form ' +
         'are what must change',
     ).toEqual([]);
   });

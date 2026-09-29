@@ -341,6 +341,45 @@ export function completionsUrl(endpoint: AnalysisEndpoint): string {
   return `${endpoint.address}${COMPLETIONS_PATH}`;
 }
 
+/** Where one request to the rider's computer goes, once the address rule has passed it. */
+export interface EndpointTarget {
+  /** {@link completionsUrl}. */
+  readonly url: string;
+  /** Sent as the `fetch` path's `targetAddressSpace`. */
+  readonly space: AddressSpace;
+  /** {@link isPrivateAddressLiteral}: whether the native path may send to it at all. */
+  readonly literal: boolean;
+}
+
+/**
+ * The endpoint as a place a request may go — or `undefined`, which is what
+ * nothing configured, something configured and switched off, and an address
+ * the rule no longer accepts all mean.
+ *
+ * ⚠️ **Re-checked at every port, not only where the endpoint was made**: an
+ * endpoint is a plain object, and one built by hand rather than by
+ * {@link endpointDecision} must not be the way round the rule. Moved here by
+ * [#802](https://github.com/openzigs/onyourleft/issues/802) out of
+ * `analysis-transport.ts` §`riderAnalysisPort`, unchanged, so the picture port
+ * and the ride analysis's step port apply ONE rule rather than two copies.
+ */
+export function endpointTarget(endpoint: AnalysisEndpoint | undefined): EndpointTarget | undefined {
+  if (endpoint?.switchedOn !== true) {
+    return undefined;
+  }
+  let hostname: string;
+  try {
+    ({ hostname } = new URL(endpoint.address));
+  } catch {
+    return undefined;
+  }
+  const space = addressSpaceOf(hostname);
+  if (space === undefined) {
+    return undefined;
+  }
+  return { url: completionsUrl(endpoint), space, literal: isPrivateAddressLiteral(hostname) };
+}
+
 /**
  * The rider's configured computer, or `undefined` — which is what an empty
  * device answers, what a malformed row answers, and what a row naming an

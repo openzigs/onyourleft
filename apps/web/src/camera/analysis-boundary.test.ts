@@ -34,6 +34,11 @@ const MAY_NAME_HTTP_TYPES: readonly string[] = [
   TRANSPORT,
   join('camera', 'hosted-transport.ts'),
   join('camera', 'http-body.ts'),
+  // #802: the ride analysis's step port to the rider's own computer. It builds
+  // the request the one `fetch` in `analysis-transport.ts` sends, and cannot
+  // live in that module, which carries pictures by design
+  // (`no-picture-reachable.test.ts`).
+  join('ride-analysis', 'own-computer-step.ts'),
 ];
 
 /**

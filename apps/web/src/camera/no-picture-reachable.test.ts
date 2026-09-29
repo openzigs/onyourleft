@@ -25,9 +25,12 @@
  *    names the chain, and a planted picture module nobody listed is found by
  *    the derivation alone.
  * 3. **The body.** A ride-analysis request body, in either transport's shape,
- *    carries no picture part, no data URL and no array longer than the
- *    input's own largest ({@link pictureBodyFaults}); each rule has a red
- *    fixture, and the own-computer transport's real picture body is one.
+ *    carries no picture part, no data URL, no array longer than the input's
+ *    own largest and no long run of base64 ({@link pictureBodyFaults}); each
+ *    rule has a red fixture, and the own-computer transport's real picture
+ *    body is one. Since #822, JSON wrapped in prose is found, the transport's
+ *    own `messages` and `content` lists are not bounded, and a relative import
+ *    the walk cannot resolve fails the walk.
  *
  * ## The entries, and the ones still to come
  *
@@ -35,11 +38,13 @@
  * `ride-analysis/`, derived rather than listed, so #809's input builder is
  * walked today and #810's prompt builders and #811's runner are walked the day
  * they land there. ⚠️ A step-request type or body builder added to
- * `analysis-transport.ts` itself (#802) CANNOT be walked: that module carries
- * pictures by design, for `side-pose` and `connection-check`. #802 has to put
- * the ride-analysis request and its builder in a module of their own and add
- * it to {@link ENTRIES}, and #802 and #803 hold their bodies to
- * {@link pictureBodyFaults}.
+ * `analysis-transport.ts` itself CANNOT be walked: that module carries
+ * pictures by design, for `side-pose` and `connection-check`. So #802 put the
+ * ride-analysis request and its builder in a module of their own,
+ * `ride-analysis/own-computer-step.ts`, which the derivation above walks, and
+ * moved the send types it needs out of the transport into `http-body.ts`; and
+ * §"the body carries no picture" holds every body a real run sends through it
+ * to {@link pictureBodyFaults}. #803 owes the same for the hosted path.
  */
 
 import { readdirSync } from 'node:fs';
@@ -50,7 +55,9 @@ import { describe, expect, it } from 'vitest';
 import { stripComments } from '../units/no-inline-units';
 import type { RideAnalysisInput } from '../ride-analysis/input';
 
-import { analysisRequestBody } from './analysis-transport';
+import { analysisRequestBody, riderModelStepPort } from './analysis-transport';
+import { endpointDecision } from './analysis-endpoint';
+import { runAnalysis } from '../ride-analysis/runner';
 import { capturedFrame } from './frame';
 import { HOSTED_PROMPTS, type HostedQuestion } from './hosted-port';
 import { hostedRequestBody } from './hosted-transport';
@@ -115,6 +122,8 @@ describe('the module graph (#799)', () => {
 
   it('walks the entries it names, so it is not a walk over nothing', () => {
     expect(ENTRIES).toContain('ride-analysis/input.ts');
+    // #802: the step port to the rider's own computer, and what it imports.
+    expect(ENTRIES).toContain('ride-analysis/own-computer-step.ts');
     const walked = walk.closure(ENTRIES);
     for (const entry of ENTRIES) {
       expect(walked.modules, entry).toContain(entry);
@@ -187,6 +196,57 @@ describe('the walk can fire (#799’s control)', () => {
   it('refuses to walk an entry that is not there, rather than passing over it', () => {
     expect(() => importWalk().closure(['ride-analysis/not-there.ts'])).toThrow(/not there/);
   });
+
+  it('refuses a relative import it cannot resolve, rather than dropping it (#822)', () => {
+    const walk = importWalk(
+      planted({
+        'ride-analysis/planted-entry.ts': "import { help } from './planted-helper';\n",
+        'ride-analysis/planted-helper.ts': "export { frame } from '../camera/fram';\n",
+      }),
+    );
+    expect(() => walk.closure(['ride-analysis/planted-entry.ts'])).toThrow(
+      'ride-analysis/planted-helper.ts imports ../camera/fram, which the walk cannot resolve',
+    );
+  });
+
+  it.each([
+    ["import W from '../camera/frame.ts?worker';", '../camera/frame.ts?worker'],
+    ["import I from './nothere?inline';", './nothere?inline'],
+    ["import U from './picture.png?url&worker';", './picture.png?url&worker'],
+  ])('refuses a query that is not exactly ?url or ?raw: %s (#823)', (line, specifier) => {
+    const walk = importWalk(planted({ 'ride-analysis/planted-entry.ts': `${line}\n` }));
+    expect(() => walk.closure(['ride-analysis/planted-entry.ts'])).toThrow(
+      `ride-analysis/planted-entry.ts imports ${specifier}, which the walk cannot resolve`,
+    );
+  });
+
+  it('refuses an existing file of code it does not walk, rather than skipping it (#823)', () => {
+    const walk = importWalk(
+      planted({
+        'ride-analysis/planted-entry.ts': "import { legacy } from './legacy.js';\n",
+        'ride-analysis/legacy.js': "export { frame as legacy } from '../camera/frame';\n",
+      }),
+    );
+    expect(() => walk.closure(['ride-analysis/planted-entry.ts'])).toThrow(
+      'ride-analysis/planted-entry.ts imports ./legacy.js, which the walk cannot resolve',
+    );
+  });
+
+  it('passes over an asset handed over as a string, and a stylesheet that is there (#822)', () => {
+    const walk = importWalk(
+      planted({
+        'ride-analysis/planted-entry.ts': [
+          "import url from './picture.png?url';",
+          "import text from './notes.txt?raw';",
+          "import '../design/theme.css';",
+          '',
+        ].join('\n'),
+      }),
+    );
+    expect([...walk.closure(['ride-analysis/planted-entry.ts']).modules]).toStrictEqual([
+      'ride-analysis/planted-entry.ts',
+    ]);
+  });
 });
 
 /** A ride with three sections: the input's largest array is three long. */
@@ -238,6 +298,56 @@ describe('the body carries no picture (#799)', () => {
     expect(pictureBodyFaults(step(JSON.stringify(INPUT)), largest)).toStrictEqual([]);
   });
 
+  it('passes every body a real run sends to the rider’s own computer (#802)', async () => {
+    const bodies: unknown[] = [];
+    const port = riderModelStepPort(
+      endpointDecision({ address: 'http://192.168.1.20:8080', model: 'm', switchedOn: true })
+        .endpoint,
+      {
+        send: async (_url, init) => {
+          const body = JSON.parse(typeof init.body === 'string' ? init.body : '') as {
+            response_format?: {
+              json_schema: { schema: { properties: { section?: { enum: number[] } } } };
+            };
+          };
+          bodies.push(body);
+          // A section answers for its own index, the position step its notes,
+          // the summary in prose: every step of a real run is reached.
+          const section = body.response_format?.json_schema.schema.properties.section?.enum[0];
+          const content =
+            body.response_format === undefined
+              ? 'A steady ride.'
+              : JSON.stringify(
+                  section === undefined ? { notes: 'Held.' } : { section, notes: 'Steady.' },
+                );
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ choices: [{ message: { content }, finish_reason: 'stop' }] }),
+            ),
+          );
+        },
+      },
+    );
+    const withPose: RideAnalysisInput = {
+      ...INPUT,
+      pose: { source: 'tablet', posed: 300, noRider: 2, unreadable: 1, differences: { knee: -2 } },
+    };
+    const outcome = await runAnalysis(withPose, {
+      port: port as NonNullable<typeof port>,
+      clock: {
+        now: () => 0,
+        delay: () => ({ elapsed: new Promise<void>(() => undefined), cancel: () => undefined }),
+      },
+      signal: new AbortController().signal,
+    });
+    // Three sections, the position step and the summary: a whole run.
+    expect(outcome.kind).toBe('written');
+    expect(bodies).toHaveLength(5);
+    for (const body of bodies) {
+      expect(pictureBodyFaults(body, largestArrayIn(withPose))).toStrictEqual([]);
+    }
+  });
+
   it('fails the own-computer transport’s real picture body, on both of the first two rules', () => {
     const frame = capturedFrame({
       bytes: cleanFrameBytes(),
@@ -285,6 +395,156 @@ describe('the body carries no picture (#799)', () => {
     expect(pictureBodyFaults({ values: [1, 2, 3, 4] }, largest)).toStrictEqual([
       'body.values has 4 entries, more than 3',
     ]);
+  });
+
+  describe('JSON wrapped in prose (#822)', () => {
+    const pixels = Array.from({ length: 64 * 48 }, (_unused, index) => index % 256);
+    const json = JSON.stringify({ ...INPUT, pixels });
+
+    it.each([
+      ['before it', `Here is the ride as JSON: ${json}`],
+      ['after it', `${json}\nSay what the rider did.`],
+      ['on both sides', `The ride: ${json} — answer in one paragraph.`],
+      ['after a bracket that is not JSON', `Read this [carefully]: ${json}`],
+    ])('finds a pixel buffer with prose %s', (_where, text) => {
+      for (const step of [hostedShapedStep, ownComputerShapedStep]) {
+        expect(pictureBodyFaults(step(text), largest)).toStrictEqual([
+          expect.stringContaining(`has ${pixels.length} entries`),
+        ]);
+      }
+    });
+
+    it('finds every JSON value in one string, not only the first', () => {
+      expect(
+        pictureBodyFaults(
+          hostedShapedStep(`First ${JSON.stringify(INPUT)}, then ${JSON.stringify({ pixels })}.`),
+          largest,
+        ),
+      ).toStrictEqual([expect.stringContaining('(json 1).pixels has')]);
+    });
+
+    it('passes the input wrapped in prose', () => {
+      expect(
+        pictureBodyFaults(
+          ownComputerShapedStep(`The ride: ${JSON.stringify(INPUT)} — say what happened.`),
+          largest,
+        ),
+      ).toStrictEqual([]);
+    });
+  });
+
+  describe('the transport’s own envelope (#822)', () => {
+    const emptyRide: RideAnalysisInput = { ...INPUT, sections: [] };
+    const none = largestArrayIn(emptyRide);
+
+    it('measures an empty ride’s largest array as nothing', () => {
+      expect(none).toBe(0);
+    });
+
+    it.each([
+      ['hosted', (text: string) => ({ role: 'user', content: text })],
+      [
+        'own-computer',
+        (text: string) => ({
+          role: 'user',
+          content: [
+            { type: 'text', text: 'The ride:' },
+            { type: 'text', text },
+          ],
+        }),
+      ],
+    ] as const)('passes a clean two-message %s body for a ride with no sections', (_path, user) => {
+      const body = {
+        model: 'm',
+        stream: false,
+        messages: [
+          { role: 'system', content: 'You describe rides.' },
+          user(JSON.stringify(emptyRide)),
+        ],
+      };
+      expect(pictureBodyFaults(body, none)).toStrictEqual([]);
+    });
+
+    it('passes the hosted body the transport really sends, for a ride with no sections', () => {
+      expect(
+        pictureBodyFaults(hostedRequestBody('m', { question: 'connection-check' }), none),
+      ).toStrictEqual([]);
+    });
+
+    it('still bounds a messages or content list that is not messages or parts', () => {
+      expect(pictureBodyFaults({ messages: [1, 2, 3, 4] }, largest)).toStrictEqual([
+        'body.messages has 4 entries, more than 3',
+      ]);
+      expect(
+        pictureBodyFaults({ messages: [{ role: 'user', content: [1, 2, 3, 4] }] }, largest),
+      ).toStrictEqual(['body.messages[0].content has 4 entries, more than 3']);
+    });
+
+    it('still bounds a list called messages inside the input', () => {
+      expect(
+        pictureBodyFaults(
+          hostedShapedStep(JSON.stringify({ messages: [{}, {}, {}, {}] })),
+          largest,
+        ),
+      ).toStrictEqual([expect.stringContaining('(json 0).messages has 4 entries')]);
+    });
+  });
+
+  describe('bare base64 (#822)', () => {
+    const base64 = btoa(String.fromCharCode(...cleanFrameBytes()));
+
+    it.each([
+      ['hosted', hostedShapedStep],
+      ['own-computer', ownComputerShapedStep],
+    ] as const)('fails a %s-shaped step carrying a picture as base64 text', (_path, step) => {
+      expect(pictureBodyFaults(step(`The rider: ${base64}`), largest)).toStrictEqual([
+        expect.stringContaining('long run of base64'),
+      ]);
+    });
+
+    it('fails base64 wrapped at 76 characters, and base64 inside the input', () => {
+      const wrapped = base64.match(/.{1,76}/g)?.join('\r\n') ?? '';
+      expect(pictureBodyFaults(hostedShapedStep(wrapped), largest)).toStrictEqual([
+        expect.stringContaining('long run of base64'),
+      ]);
+      expect(
+        pictureBodyFaults(hostedShapedStep(JSON.stringify({ ...INPUT, frame: base64 })), largest),
+      ).toStrictEqual([
+        expect.stringContaining('body.messages[0].content holds a long run'),
+        expect.stringContaining('(json 0).frame holds a long run'),
+      ]);
+    });
+
+    it('passes a run one short of the bound, and a long sentence', () => {
+      expect(pictureBodyFaults(hostedShapedStep('A'.repeat(99)), largest)).toStrictEqual([]);
+      expect(pictureBodyFaults(hostedShapedStep('A'.repeat(100)), largest)).toStrictEqual([
+        expect.stringContaining('long run of base64'),
+      ]);
+      expect(pictureBodyFaults(hostedShapedStep('word '.repeat(400)), largest)).toStrictEqual([]);
+    });
+
+    it('passes a list of field names one per line, and a rule of dashes (#823)', () => {
+      const fields = [
+        'power',
+        'cadence',
+        'heartRate',
+        'speed',
+        'distance',
+        'movingMinutes',
+        'thresholdPower',
+        'massKilograms',
+        'coverage',
+        'sections',
+        'metrics',
+        'kind',
+      ].join('\n');
+      expect(fields.replace(/\n/g, '').length).toBeGreaterThanOrEqual(100);
+      expect(pictureBodyFaults(hostedShapedStep(fields), largest)).toStrictEqual([]);
+      expect(
+        pictureBodyFaults(hostedShapedStep(`Ride\n${'-'.repeat(120)}\nNotes`), largest),
+      ).toStrictEqual([]);
+      expect(pictureBodyFaults(hostedShapedStep('_'.repeat(120)), largest)).toStrictEqual([]);
+    });
   });
 
   it('reads English with a colon in it as English', () => {
