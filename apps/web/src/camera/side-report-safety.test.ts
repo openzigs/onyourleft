@@ -24,15 +24,12 @@
  *    (`detail/SideCameraSection.test.tsx`), so there is nothing on it to press.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { stripComments } from '../units/no-inline-units';
-
-const SOURCE_ROOT = fileURLToPath(new URL('..', import.meta.url));
+import { importWalk, SOURCE_ROOT, specifiersIn } from './import-walk-testing';
 
 /** Every module a side-camera report passes through, from pose numbers to the page. */
 const REPORT_PATH = [
@@ -40,6 +37,8 @@ const REPORT_PATH = [
   'camera/side-report-wording.ts',
   'camera/side-report-port.ts',
   'camera/side-report-keeper.ts',
+  // #801: the pose summary's type, on the path from the report to the store.
+  'camera/side-session-summary.ts',
   'detail/load.ts',
   'detail/SideCameraSection.tsx',
 ] as const;
@@ -49,57 +48,10 @@ const TRAINER_MODULE =
   /(?:^|\/)(?:ride\/(?:controller|trainer|RideSession)|game\/(?:gradient|trainer-port|GameView)|workout\/)|@onyourleft\/sensors/;
 
 /**
- * Every module specifier in `code`: `from '…'`, a bare `import '…'`, and — since
- * #561's review — a dynamic `import('…')` with a literal, so a lazily loaded
- * controller on the report's path is walked like a static one.
+ * The walk, shared with `no-picture-reachable.test.ts` since #799 —
+ * `import-walk-testing.ts` is where it lives and says what it cannot see.
  */
-function specifiersIn(code: string): string[] {
-  return [...code.matchAll(/(?:\bfrom\s+|\bimport\s*\(\s*|\bimport\s+)'([^']+)'/g)].map(
-    (match) => match[1] ?? '',
-  );
-}
-
-/** The relative imports of one module, resolved to files under `src`. */
-function importsOf(path: string): { readonly local: string[]; readonly bare: string[] } {
-  const code = stripComments(readFileSync(join(SOURCE_ROOT, path), 'utf8'));
-  const specifiers = specifiersIn(code);
-  const local: string[] = [];
-  const bare: string[] = [];
-  for (const specifier of specifiers) {
-    if (!specifier.startsWith('.')) {
-      bare.push(specifier);
-      continue;
-    }
-    const base = resolve(dirname(join(SOURCE_ROOT, path)), specifier);
-    const file = ['.ts', '.tsx', '/index.ts', '/index.tsx']
-      .map((suffix) => `${base}${suffix}`)
-      .find((candidate) => existsSync(candidate));
-    if (file !== undefined) {
-      local.push(relative(SOURCE_ROOT, file));
-    }
-  }
-  return { local, bare };
-}
-
-/** Every module reachable from `roots`, and every bare specifier any of them imports. */
-function closure(roots: readonly string[]): { modules: Set<string>; bare: Set<string> } {
-  const modules = new Set<string>();
-  const bare = new Set<string>();
-  const queue = [...roots];
-  while (queue.length > 0) {
-    const next = queue.pop();
-    if (next === undefined || modules.has(next)) {
-      continue;
-    }
-    modules.add(next);
-    const found = importsOf(next);
-    for (const specifier of found.bare) {
-      bare.add(specifier);
-    }
-    queue.push(...found.local);
-  }
-  return { modules, bare };
-}
+const { closure } = importWalk();
 
 describe('the report path reaches no trainer (#388, CLAUDE.md §6)', () => {
   it('has the modules it names, so the walk is not over nothing', () => {
@@ -109,6 +61,10 @@ describe('the report path reaches no trainer (#388, CLAUDE.md §6)', () => {
     // The walk follows imports: the section reaches the wording file.
     expect(closure(['detail/SideCameraSection.tsx']).modules).toContain(
       'camera/side-report-wording.ts',
+    );
+    // And the keeper reaches the summary it writes (#801).
+    expect(closure(['camera/side-report-keeper.ts']).modules).toContain(
+      'camera/side-session-summary.ts',
     );
   });
 

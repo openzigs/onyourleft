@@ -36,7 +36,7 @@
  * those.
  */
 
-import type { AnalysisOutcome, UntrustedText } from './analysis-port';
+import type { AnalysisOutcome, UntrustedText } from './model-answer';
 
 /**
  * The most this client reads of an answer, in bytes.

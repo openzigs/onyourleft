@@ -135,8 +135,14 @@ function imports(path: string, pattern: RegExp): boolean {
   );
 }
 
+/**
+ * ⚠️ `model-answer.ts` since #799: `UntrustedText` and the outcome that carries
+ * it moved there out of `analysis-port.ts`, so a module importing only it holds
+ * an answer as surely as one importing the port did. Without it here,
+ * `hosted-port.ts` dropped out of the importers below with nothing going red.
+ */
 const ANALYSIS_MODULE =
-  /(?:^|\/)analysis-(?:port|endpoint|transport|response)$|(?:^|\/)useAnalysis$/;
+  /(?:^|\/)analysis-(?:port|endpoint|transport|response)$|(?:^|\/)(?:useAnalysis|model-answer)$/;
 
 /**
  * Every module outside the analysis files that may import them, and why.
@@ -188,7 +194,7 @@ const TRAINER_MODULE =
 describe('2. in the module graph, an answer cannot reach a trainer', () => {
   it('has analysis modules to check at all', () => {
     const analysis = sources().filter((path) => ANALYSIS_MODULE.test(path.replace(/\.tsx?$/, '')));
-    expect(analysis.length).toBe(5);
+    expect(analysis.length).toBe(6);
   });
 
   it('is imported only by the modules listed, and they are the ones that exist', () => {

@@ -51,7 +51,8 @@
  * — applies unchanged.
  */
 
-import type { AnalysisCall, AnalysisFailure, AnalysisPort, UntrustedText } from './analysis-port';
+import type { AnalysisPort } from './analysis-port';
+import type { AnalysisCall, AnalysisFailure, UntrustedText } from './model-answer';
 import { capturedFrame, FRAME_MEDIA_TYPE } from './frame';
 import { MINIMUM_SHARED_LANDMARKS } from './framing';
 import { implausibility } from './pose-plausibility';
