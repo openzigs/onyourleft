@@ -15,6 +15,7 @@ import { stripComments } from '../units/no-inline-units';
 import {
   forgetHostedModel,
   HOSTED_CONSENT,
+  HOSTED_MASKING_NOTICE,
   HOSTED_MODEL_REFUSAL_TEXT,
   HOSTED_MODEL_STORAGE_KEY,
   HOSTED_TEST_QUESTION_LABEL,
@@ -110,9 +111,15 @@ describe('the hosted consent wording is the one ADR 0029’s newest amendment qu
           .filter((line) => line.trimStart().startsWith('>'))
           .join('\n'),
       );
-    const previous = quoted(entries.at(-2)?.index, entries.at(-1)?.index);
-    const newest = quoted(entries.at(-1)?.index);
-    expect(previous).toContain('When you save a service, the app sends it one test question');
+    // The #845 entry is found by what it quotes, not by its position: later
+    // entries (#847's correction, #839's masking) are appended after it.
+    const quotes = entries.map((entry, at) => quoted(entry.index, entries[at + 1]?.index));
+    const newest = quotes.at(-1) ?? '';
+    expect(
+      quotes.some((each) =>
+        each.includes('When you save a service, the app sends it one test question'),
+      ),
+    ).toBe(true);
     expect(newest).toContain(HOSTED_CONSENT.paragraphs.map(asProse).join(' '));
     expect(newest).not.toContain('When you save a service');
   });
@@ -147,6 +154,41 @@ describe('the hosted consent wording is the one ADR 0029’s newest amendment qu
     expect(all).not.toContain('Today it is sent only a test question');
     expect(HOSTED_CONSENT.notNeeded).toContain('You do not need this');
     expect(HOSTED_CONSENT.offUntilOn).toContain('This is off');
+  });
+});
+
+describe('what masking does is said beside the consent, as ADR 0029’s newest amendment drafts it (#839)', () => {
+  const amendment = newestAmendment(readFileSync(ADR_0029, 'utf8'));
+
+  it('appears in the newest amendment word for word, after the consent unchanged', () => {
+    expect(amendment).toContain('#839');
+    const consent = asProse(
+      [
+        HOSTED_CONSENT.headline,
+        ...HOSTED_CONSENT.paragraphs,
+        HOSTED_CONSENT.notNeeded,
+        HOSTED_CONSENT.offUntilOn,
+      ].join(' '),
+    );
+    expect(amendment).toContain(`${consent} ${asProse(HOSTED_MASKING_NOTICE)}`);
+  });
+
+  it('names what is masked, that names need the list, and that it is not a guarantee', () => {
+    for (const kind of [
+      'e-mail addresses',
+      'phone numbers',
+      'links',
+      'street addresses',
+      'postcodes',
+      'coordinates',
+      'privacy zones',
+      'list of words to mask',
+    ]) {
+      expect(HOSTED_MASKING_NOTICE).toContain(kind);
+    }
+    expect(HOSTED_MASKING_NOTICE).toContain('A name is masked only if it is on that list.');
+    expect(HOSTED_MASKING_NOTICE).toContain('reduces what is sent');
+    expect(HOSTED_MASKING_NOTICE).toContain('does not guarantee');
   });
 });
 

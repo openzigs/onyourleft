@@ -141,6 +141,7 @@ import type {
   WorkoutRecord,
 } from './records';
 import { parseKitColour, type KitColour } from './kit-colour';
+import { parseMaskedWords } from './masked-words';
 import type { UnitSystem } from './unit-system';
 import type {
   NewRecordingChunk,
@@ -702,6 +703,39 @@ export class ActivityStore {
       const updated: AthleteRecord = {
         ...fromPersistedAthlete(row),
         kitColour: parseKitColour(kitColour),
+      };
+      await this.#athletes.put(toPersistedAthlete(updated));
+      return updated;
+    });
+  }
+
+  /**
+   * Replaces the rider's own list of words masked before anything is sent to
+   * a hosted model, leaving every other field alone (#839).
+   *
+   * Narrow for {@link setAthleteThresholds}' reason. The list is replaced
+   * whole — the screen edits a copy and writes it back — and it goes through
+   * `parseMaskedWords` on its way in as well as on its way out, so what is
+   * written is always a tidy list. An empty list is written as one, which is
+   * a rider who removed their last word, not a rider who never had any.
+   *
+   * Read and write in one transaction, for {@link ensureAthlete}'s reason.
+   *
+   * @returns the stored record, or `undefined` if there is no such athlete —
+   * which is not an error, for {@link setAthleteThresholds}' reason.
+   */
+  async setAthleteMaskedWords(
+    id: AthleteId,
+    words: readonly string[],
+  ): Promise<AthleteRecord | undefined> {
+    return this.#db.transaction('rw', [this.#athletes], async () => {
+      const row = await this.#athletes.get(id);
+      if (row === undefined) {
+        return undefined;
+      }
+      const updated: AthleteRecord = {
+        ...fromPersistedAthlete(row),
+        maskedWords: parseMaskedWords(words),
       };
       await this.#athletes.put(toPersistedAthlete(updated));
       return updated;

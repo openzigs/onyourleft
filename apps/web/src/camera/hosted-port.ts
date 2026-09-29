@@ -88,6 +88,11 @@ export type HostedFailure =
    * run-time half of "never a picture". Reached without a request being made.
    */
   | 'not-numbers'
+  /**
+   * The rider's masking list or privacy zones could not be read on this
+   * device, so the request could not be masked and was not sent (#839).
+   */
+  | 'not-masked'
   /** The request never reached an answer. A browser says nothing more to a page. */
   | 'unreachable'
   /** The deadline passed with no answer. Set by `useHostedCheck.ts`, never by a port. */
@@ -129,6 +134,8 @@ export const HOSTED_FAILURE_TEXT: Readonly<Record<HostedFailure, string>> = {
   'not-configured': 'No service is saved. Enter its address, model and your key above first.',
   'not-numbers':
     'This app only sends a hosted model a question and numbers, and this request carried something else, so nothing was sent.',
+  'not-masked':
+    'Your list of words to mask, or your privacy zones, could not be read on this device, so nothing could be masked and nothing was sent.',
   unreachable:
     'The service could not be reached. Check the address, that this device is online, and that the service accepts requests from an app like this one.',
   'no-answer': 'The service has not answered yet. If it answers, this will change by itself.',

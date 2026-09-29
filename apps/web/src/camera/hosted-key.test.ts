@@ -32,6 +32,7 @@ import type { RideAnalysisInput } from '../ride-analysis/input';
 import { STILL_CLOCK } from '../ride-analysis/model-server-testing';
 import { askFailureText } from '../ride-analysis/ride-analysis';
 import { runAnalysis } from '../ride-analysis/runner';
+import { patternsOnlyGuard } from '../ride-analysis/personal-details-testing';
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 const KEY = 'fixture-hosted-key-DO-NOT-LEAK-0123456789';
@@ -116,7 +117,7 @@ describe('no log line carries it', () => {
     const controller = new CameraController({
       port: scriptedCamera().port,
       schedule: manualSchedule().schedule,
-      hosted: () => hostedModelPort(model, { send }),
+      hosted: () => hostedModelPort(model, { guard: patternsOnlyGuard, send }),
     });
     controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
     controller.agreeToHosted(true);
@@ -185,7 +186,7 @@ describe('no log line, failure or sentence carries it through a ride analysis (#
     const controller = new CameraController({
       port: scriptedCamera().port,
       schedule: manualSchedule().schedule,
-      hosted: () => hostedModelPort(model, { send }),
+      hosted: () => hostedModelPort(model, { guard: patternsOnlyGuard, send }),
     });
     controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
     controller.agreeToHosted(true);

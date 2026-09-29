@@ -74,6 +74,8 @@ function scriptedPort(sources: readonly RideWriteUpSource[]): RideAnalysisPort &
   return {
     asks,
     availableSources: () => sources,
+    previewHostedRequest: async () => Promise.resolve({ kind: 'shown', steps: [], total: 1 }),
+    hostedPreviewSeen: () => true,
     askForRideWriteUp: async (_id, source) =>
       new Promise<AskOutcome>((resolve) => {
         asks.push({ source, settle: resolve });

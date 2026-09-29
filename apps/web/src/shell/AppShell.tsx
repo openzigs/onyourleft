@@ -65,6 +65,7 @@ import { SettingsView } from '../views/SettingsView';
 import { UnitsProvider } from '../units/context';
 import type { UnitsPort } from '../units/store-port';
 import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
+import type { MaskedWordsPort } from '../athlete/masked-words-port';
 import type { AthleteMassPort } from '../athlete/store-port';
 import type { RideController } from '../ride/controller';
 import type { CapabilityProbe } from '../support/bluetooth-support';
@@ -362,6 +363,12 @@ export interface AppShellProps {
    */
   readonly athleteKit?: AthleteKitColourPort | undefined;
   /**
+   * The settings screen's read and write of the rider's words to mask (#839).
+   * Optional like every other port here; without one the panel says there is
+   * no store to keep a list in.
+   */
+  readonly maskedWords?: MaskedWordsPort | undefined;
+  /**
    * The rider's kit colour, read from the athlete row at start-up (#623).
    *
    * ⚠️ **The initial value only**, exactly like {@link riderMass}, and passed
@@ -549,6 +556,7 @@ function viewFor(
           onKitColourChange={kit.onChange}
           {...(props.storage === undefined ? {} : { storage: props.storage })}
           basemap={props.basemap}
+          maskedWords={props.maskedWords}
         />
       );
     case 'about':
