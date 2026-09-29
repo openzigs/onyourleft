@@ -880,6 +880,134 @@
         }
       }
     },
+    "/v1/auth/recovery-email": {
+      "post": {
+        "operationId": "setRecoveryEmail",
+        "summary": "Give an address for email recovery: a single-use link, good for 24 hours, is mailed to it, and the address recovers nothing until that link is followed. The same answer whether or not the address is already held. `not_found` where the operator has not enabled email recovery.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "address": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "address"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/auth/recovery-email/confirm": {
+      "post": {
+        "operationId": "confirmRecoveryEmail",
+        "summary": "Follow the link mailed to a recovery address, signed in as the athlete who gave it: the address is bound, replacing any earlier one. `address_in_use` when it is already another account’s.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "token"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "description": "One of `unauthenticated`, `code_unknown`, `code_used`, `code_expired`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/address_in_use"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/auth/session": {
       "post": {
         "operationId": "createSession",
@@ -1217,6 +1345,7 @@
                   "method_not_allowed",
                   "key_in_use",
                   "last_device",
+                  "address_in_use",
                   "payload_too_large",
                   "rate_limited",
                   "internal",
@@ -1422,6 +1551,16 @@
       },
       "last_device": {
         "description": "`last_device` (409), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "address_in_use": {
+        "description": "`address_in_use` (409), in the one error shape.",
         "content": {
           "application/json": {
             "schema": {

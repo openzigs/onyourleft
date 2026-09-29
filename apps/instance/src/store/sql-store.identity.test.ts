@@ -12,6 +12,7 @@ import {
   ATHLETE_A,
   ATHLETE_B,
   ATHLETE_C,
+  confirmationTokenFixture,
   createStoreHarness,
   deviceKeyFixture,
   FIXTURE_RENAME_LIMIT,
@@ -175,7 +176,7 @@ describe('device keys (#772, #773)', () => {
     expect((await opened.read((store) => store.findDeviceKey(key)))?.lastUsedAt).toBe(7);
   });
 
-  it('registers a new athlete with their first key, codes and address, or nothing', async () => {
+  it('registers a new athlete with their first key, codes and a confirmation, or nothing', async () => {
     const opened = await world();
     await expect(
       opened.write((store) =>
@@ -193,25 +194,114 @@ describe('device keys (#772, #773)', () => {
     await opened.write((store) => store.registerAthlete(registrationFixture('athlete-d')));
     expect((await opened.read((store) => store.getAthlete('athlete-d')))?.id).toBe('athlete-d');
     expect(await opened.read((store) => store.listRecoveryCodes('athlete-d'))).toHaveLength(1);
-    expect((await opened.read((store) => store.getRecoveryEmail('athlete-d')))?.address).toBe(
-      'athlete-d@example.org',
-    );
+    // Given, not bound (#865).
+    expect(await opened.read((store) => store.getRecoveryEmail('athlete-d'))).toBeUndefined();
+    expect(
+      await opened.read((store) => store.findRecoveryEmail('athlete-d@example.org')),
+    ).toBeUndefined();
+    expect(await opened.read((store) => store.listEmailConfirmations('athlete-d'))).toEqual([
+      {
+        tokenSha256: confirmationTokenFixture('athlete-d'),
+        athleteId: 'athlete-d',
+        address: 'athlete-d@example.org',
+        expiresAt: 1_790_086_400,
+        usedAt: null,
+      },
+    ]);
   });
+});
 
-  it('registers a second athlete whose address is already held, and leaves the address where it was (#861)', async () => {
+describe('confirming a recovery address (#865)', () => {
+  const token = confirmationTokenFixture('athlete-d');
+
+  it('binds the address only when its token is spent, once, before it expires', async () => {
     const opened = await world();
     await opened.write((store) => store.registerAthlete(registrationFixture('athlete-d')));
+    expect(
+      await opened.write((store) => store.confirmRecoveryEmail('athlete-d', token, 1_790_086_400)),
+    ).toEqual({ outcome: 'expired' });
+    expect(await opened.read((store) => store.getRecoveryEmail('athlete-d'))).toBeUndefined();
+    expect(
+      await opened.write((store) => store.confirmRecoveryEmail('athlete-d', token, 1_790_000_500)),
+    ).toEqual({ outcome: 'taken', athleteId: 'athlete-d' });
+    expect(await opened.read((store) => store.getRecoveryEmail('athlete-d'))).toEqual({
+      athleteId: 'athlete-d',
+      address: 'athlete-d@example.org',
+    });
+    expect(
+      await opened.write((store) => store.confirmRecoveryEmail('athlete-d', token, 1_790_000_501)),
+    ).toEqual({ outcome: 'used' });
+    expect(
+      await opened.write((store) => store.confirmRecoveryEmail('athlete-d', 'e4'.repeat(32), 1)),
+    ).toEqual({ outcome: 'unknown' });
+  });
+
+  it('spends a token only as the athlete it was given for: another athlete’s is unknown', async () => {
+    const opened = await world();
+    await opened.write((store) => store.registerAthlete(registrationFixture('athlete-d')));
+    for (const other of [ATHLETE_A, ATHLETE_B, ATHLETE_C]) {
+      expect(
+        await opened.write((store) => store.confirmRecoveryEmail(other, token, 1_790_000_500)),
+      ).toEqual({ outcome: 'unknown' });
+      expect((await opened.read((store) => store.getRecoveryEmail(other)))?.address).toBe(
+        `${other}@example.org`,
+      );
+    }
+    const [pending] = await opened.read((store) => store.listEmailConfirmations('athlete-d'));
+    expect(pending?.usedAt).toBeNull();
+  });
+
+  it('refuses an address another athlete confirmed first, spending and binding nothing', async () => {
+    const opened = await world();
     await opened.write((store) =>
       store.registerAthlete({
-        ...registrationFixture('athlete-e'),
-        recoveryEmail: 'athlete-d@example.org',
+        ...registrationFixture('athlete-d'),
+        recoveryEmailConfirmation: {
+          tokenSha256: token,
+          address: `${ATHLETE_A}@example.org`,
+          expiresAt: 1_790_086_400,
+        },
       }),
     );
-    expect((await opened.read((store) => store.getAthlete('athlete-e')))?.id).toBe('athlete-e');
-    expect(await opened.read((store) => store.getRecoveryEmail('athlete-e'))).toBeUndefined();
     expect(
-      (await opened.read((store) => store.findRecoveryEmail('athlete-d@example.org')))?.athleteId,
-    ).toBe('athlete-d');
+      await opened.write((store) => store.confirmRecoveryEmail('athlete-d', token, 1_790_000_500)),
+    ).toEqual({ outcome: 'held' });
+    expect(await opened.read((store) => store.getRecoveryEmail('athlete-d'))).toBeUndefined();
+    expect(
+      (await opened.read((store) => store.findRecoveryEmail(`${ATHLETE_A}@example.org`)))
+        ?.athleteId,
+    ).toBe(ATHLETE_A);
+    const [pending] = await opened.read((store) => store.listEmailConfirmations('athlete-d'));
+    expect(pending?.usedAt).toBeNull();
+  });
+
+  it('replaces the athlete’s own address with a newly confirmed one', async () => {
+    const opened = await world();
+    await opened.write((store) =>
+      store.putEmailConfirmation({
+        tokenSha256: token,
+        athleteId: ATHLETE_B,
+        address: 'new-b@example.org',
+        expiresAt: 1_790_086_400,
+      }),
+    );
+    expect(
+      (await opened.write((store) => store.confirmRecoveryEmail(ATHLETE_B, token, 1_790_000_500)))
+        .outcome,
+    ).toBe('taken');
+    expect(await opened.read((store) => store.getRecoveryEmail(ATHLETE_B))).toEqual({
+      athleteId: ATHLETE_B,
+      address: 'new-b@example.org',
+    });
+    expect(
+      await opened.read((store) => store.findRecoveryEmail(`${ATHLETE_B}@example.org`)),
+    ).toBeUndefined();
+    // Nobody else's binding moved.
+    for (const other of [ATHLETE_A, ATHLETE_C]) {
+      expect((await opened.read((store) => store.getRecoveryEmail(other)))?.address).toBe(
+        `${other}@example.org`,
+      );
+    }
   });
 });
 

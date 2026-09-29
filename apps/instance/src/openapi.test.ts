@@ -205,6 +205,19 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
   },
   requestEmailRecovery: (world) =>
     send(world, 'POST', '/v1/auth/recover/email', undefined, { address: 'anna@example.org' }),
+  setRecoveryEmail: async (world) =>
+    send(world, 'POST', '/v1/auth/recovery-email', (await signedIn(world)).token, {
+      address: 'bea@example.org',
+    }),
+  confirmRecoveryEmail: async (world) => {
+    const { token } = await signedIn(world);
+    await world.call('POST', '/v1/auth/recovery-email', {
+      token,
+      body: { address: 'cat@example.org' },
+    });
+    const mailed = world.confirmations.at(-1)?.token;
+    return send(world, 'POST', '/v1/auth/recovery-email/confirm', token, { token: mailed });
+  },
 };
 
 describe('every route answers with the shape its entry declares', () => {

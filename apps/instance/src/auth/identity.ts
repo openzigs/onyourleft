@@ -34,7 +34,8 @@
  * ## What is stored
  *
  * The SHA-256 of every secret the instance hands out — session tokens,
- * recovery codes, link codes, email-recovery tokens — and never the secret.
+ * recovery codes, link codes, email-recovery and address-confirmation
+ * tokens — and never the secret.
  * Tickets and rate-limit counts live in memory (`tickets.ts`,
  * `rate-limit.ts`). A copy of the database authenticates nobody.
  *
@@ -44,7 +45,12 @@
  * device, holding its OWN new key, signs a LINK statement and presents the
  * code, and its key is added. Every device lost: a recovery code, or — only
  * where the operator enabled it — an emailed link, adds a key the same way
- * with a RECOVER statement. A revoked key's records stay valid: verification
+ * with a RECOVER statement. ⚠️ An address given for email recovery is bound
+ * only once the athlete follows the single-use, 24-hour link mailed to it,
+ * from a device signed in as them (#865): until then it recovers nothing, and
+ * giving an address answers the same whether or not somebody holds it.
+ * Revoking the last key and renaming are refused by the STORE, in the
+ * transaction that writes (#867). A revoked key's records stay valid: verification
  * is by the record and the key in it (ADR 0014 D-6), never by the key's
  * status here.
  */
@@ -88,6 +94,8 @@ export const SESSION_LIFETIME_SECONDS = 30 * 24 * 60 * 60;
 export const LINK_CODE_LIFETIME_SECONDS = 5 * 60;
 /** An emailed recovery link's life. */
 export const EMAIL_RECOVERY_LIFETIME_SECONDS = 30 * 60;
+/** The life of the link that confirms a recovery address (#865). */
+export const EMAIL_CONFIRMATION_LIFETIME_SECONDS = 24 * 60 * 60;
 /** How many recovery codes a new athlete is shown (ruling Q1). */
 export const RECOVERY_CODE_COUNT = 10;
 /** The name a new athlete has until they choose one. */
@@ -112,11 +120,18 @@ export const DEFAULT_LIMITS: IdentityLimits = {
 };
 
 /**
- * How an emailed recovery link reaches a rider. The instance has no mail
- * transport of its own; an operator who enables email recovery supplies one.
+ * How an emailed link reaches a rider. The instance has no mail transport of
+ * its own; an operator who enables email recovery supplies one.
  */
 export interface RecoveryMailer {
+  /** A recovery link: the token goes in `POST /v1/auth/recover`'s `emailToken`. */
   send(address: string, token: string): Promise<void>;
+  /**
+   * The link that confirms `address` is the athlete's (#865): the token goes
+   * in `POST /v1/auth/recovery-email/confirm`, from the athlete's signed-in
+   * device. Until it does, the address recovers nothing.
+   */
+  confirm(address: string, token: string): Promise<void>;
 }
 
 export interface IdentityOptions {
@@ -202,6 +217,10 @@ export interface Identity {
     proof: { readonly recoveryCode?: unknown; readonly emailToken?: unknown },
   ): Promise<Outcome<{ athleteId: string }>>;
   requestEmailRecovery(address: unknown, client: string | null): Promise<Outcome<null>>;
+  /** Give an address for recovery: mails a link to confirm it, and binds nothing (#865). */
+  setRecoveryEmail(caller: Caller, address: unknown): Promise<Outcome<null>>;
+  /** Follow that link, signed in as the athlete who gave the address (#865). */
+  confirmRecoveryEmail(caller: Caller, token: unknown): Promise<Outcome<null>>;
 }
 
 const refuse = (code: ErrorCode, fields?: readonly FieldProblem[]): Outcome<never> =>
@@ -260,6 +279,7 @@ export function createIdentity(options: IdentityOptions): Identity {
   const perKey = createRateLimiter(limits.challengePerKey, now);
   const perAddress = createRateLimiter(limits.challengePerAddress, now);
   const emailPerAddress = createRateLimiter(limits.emailRecoveryPerAddress, now);
+  const confirmationsPerAddress = createRateLimiter(limits.emailRecoveryPerAddress, now);
   const tickets = createTicketBook(now);
 
   /** Check a statement for `purpose`, spend its nonce, and verify it. Answers the key. */
@@ -341,6 +361,35 @@ export function createIdentity(options: IdentityOptions): Identity {
     return { sessionToken, expiresAt };
   }
 
+  /**
+   * A confirmation for an address an athlete gave (#865): the token to mail,
+   * and what the store keeps of it. `undefined` when the address has had its
+   * share of mail this hour, so that giving somebody's address again and
+   * again cannot flood their mailbox — and the answer is the same either way.
+   */
+  async function confirmationFor(
+    address: string,
+  ): Promise<
+    { token: string; tokenSha256: string; address: string; expiresAt: number } | undefined
+  > {
+    if (!confirmationsPerAddress.allow(address)) return undefined;
+    const token = randomToken(32);
+    return {
+      token,
+      tokenSha256: await sha256Hex(token),
+      address,
+      expiresAt: seconds() + EMAIL_CONFIRMATION_LIFETIME_SECONDS,
+    };
+  }
+
+  /** A valid address, normalised, or the refusal. */
+  function addressOf(value: unknown, field: string): Outcome<string> {
+    if (typeof value !== 'string' || !EMAIL.test(value.trim())) {
+      return invalid(field, 'must be an email address');
+    }
+    return { ok: true, value: value.trim().toLowerCase() };
+  }
+
   async function register(
     publicKey: string,
     fields: { readonly displayName?: unknown; readonly recoveryEmail?: unknown },
@@ -358,11 +407,14 @@ export function createIdentity(options: IdentityOptions): Identity {
       if (mailer === undefined) {
         return invalid('recoveryEmail', 'this instance does not offer email recovery');
       }
-      if (typeof fields.recoveryEmail !== 'string' || !EMAIL.test(fields.recoveryEmail.trim())) {
-        return invalid('recoveryEmail', 'must be an email address');
-      }
-      recoveryEmail = fields.recoveryEmail.trim().toLowerCase();
+      const address = addressOf(fields.recoveryEmail, 'recoveryEmail');
+      if (!address.ok) return address;
+      recoveryEmail = address.value;
     }
+    // Not bound: confirmed later, by whoever reads the mailbox (#865). So the
+    // answer cannot depend on whether somebody already holds the address.
+    const confirmation =
+      recoveryEmail === undefined ? undefined : await confirmationFor(recoveryEmail);
     const athleteId = randomHex(16);
     const recoveryCodes = Array.from({ length: RECOVERY_CODE_COUNT }, readableCode);
     const at = seconds();
@@ -372,9 +424,23 @@ export function createIdentity(options: IdentityOptions): Identity {
       recoveryCodeSha256s: await Promise.all(
         recoveryCodes.map((code) => sha256Hex(normalisedCode(code))),
       ),
-      ...(recoveryEmail === undefined ? {} : { recoveryEmail }),
+      ...(confirmation === undefined
+        ? {}
+        : {
+            recoveryEmailConfirmation: {
+              tokenSha256: confirmation.tokenSha256,
+              address: confirmation.address,
+              expiresAt: confirmation.expiresAt,
+            },
+          }),
     });
     const session = await openSession({ athleteId, publicKey });
+    if (confirmation !== undefined && mailer !== undefined) {
+      // The athlete exists and their recovery codes are about to be shown for
+      // the only time: a mail transport that fails must not turn that into an
+      // error. They can give the address again from a signed-in device.
+      await mailer.confirm(confirmation.address, confirmation.token).catch(() => undefined);
+    }
     return {
       ok: true,
       value: { ...session, athleteId, displayName, registered: true, recoveryCodes },
@@ -547,10 +613,9 @@ export function createIdentity(options: IdentityOptions): Identity {
 
     async requestEmailRecovery(address, client) {
       if (mailer === undefined) return refuse('not_found');
-      if (typeof address !== 'string' || !EMAIL.test(address.trim())) {
-        return invalid('address', 'must be an email address');
-      }
-      const normalised = address.trim().toLowerCase();
+      const given = addressOf(address, 'address');
+      if (!given.ok) return given;
+      const normalised = given.value;
       if (!emailPerAddress.allow(normalised) || !perAddress.allow(client ?? 'unknown')) {
         return refuse('rate_limited');
       }
@@ -567,6 +632,44 @@ export function createIdentity(options: IdentityOptions): Identity {
         await mailer.send(held.address, token);
       }
       return { ok: true, value: null };
+    },
+
+    async setRecoveryEmail(caller, address) {
+      if (mailer === undefined) return refuse('not_found');
+      const given = addressOf(address, 'address');
+      if (!given.ok) return given;
+      // The same answer whether or not somebody holds the address (#865): a
+      // link goes to it either way, and only following it binds anything.
+      const confirmation = await confirmationFor(given.value);
+      if (confirmation !== undefined) {
+        await store.putEmailConfirmation({
+          tokenSha256: confirmation.tokenSha256,
+          athleteId: caller.athleteId,
+          address: confirmation.address,
+          expiresAt: confirmation.expiresAt,
+        });
+        await mailer.confirm(confirmation.address, confirmation.token);
+      }
+      return { ok: true, value: null };
+    },
+
+    async confirmRecoveryEmail(caller, token) {
+      if (mailer === undefined) return refuse('not_found');
+      if (typeof token !== 'string') return invalid('token', 'must be a string');
+      // Signed in as the athlete who gave the address, and nobody else: a
+      // stranger who gives YOUR address cannot have you bind it to THEIR
+      // account by following the link they caused to be sent (#865). The
+      // store scopes the token to the caller, so theirs is `code_unknown`.
+      const taken = await store.confirmRecoveryEmail(
+        caller.athleteId,
+        await sha256Hex(token),
+        seconds(),
+      );
+      if (taken.outcome === 'taken') return { ok: true, value: null };
+      // Only the reader of the mailbox holds the token, so telling them the
+      // address is another account's tells nobody else anything.
+      if (taken.outcome === 'held') return refuse('address_in_use');
+      return refuse(takeRefusal(taken.outcome, 'code'));
     },
   };
 }

@@ -41,6 +41,7 @@ import type {
   DisplayNameChangeTable,
   EmailRecoveryTokenTable,
   InstanceDatabase,
+  RecoveryEmailConfirmationTable,
   LinkCodeTable,
   RecoveryCodeTable,
   ResultTable,
@@ -155,20 +156,38 @@ export interface EmailRecoveryToken {
   readonly usedAt: number | null;
 }
 
+/**
+ * An address an athlete gave for email recovery, waiting for them to follow
+ * the link mailed to it (#865). The token is stored as its SHA-256.
+ */
+export interface EmailConfirmation {
+  readonly tokenSha256: string;
+  readonly athleteId: string;
+  readonly address: string;
+  readonly expiresAt: number;
+  readonly usedAt: number | null;
+}
+
+/**
+ * What spending a confirmation did: {@link Take}, or `held` when another
+ * athlete's confirmed address it is — refused, and nothing spent.
+ */
+export type ConfirmOutcome = Take<{ readonly athleteId: string }> | { readonly outcome: 'held' };
+
 /** A new athlete, their first key and their recovery codes, written together or not at all. */
 export interface Registration {
   readonly athlete: Athlete;
   readonly key: DeviceKeyWrite;
   readonly recoveryCodeSha256s: readonly string[];
   /**
-   * Only where the operator enabled email recovery. An address another
-   * athlete already holds is NOT bound, and the registration still succeeds
-   * (#861): refusing it, or failing on the UNIQUE index, would tell anybody
-   * which addresses ride here. The address is unverified, so the first
-   * athlete to give it keeps it; confirming an address before binding it is
-   * #865.
+   * Only where the operator enabled email recovery: the address the athlete
+   * gave, as a confirmation waiting for its link (#865). ⚠️ **Nothing is
+   * bound here**, whoever holds the address: an address is bound only by
+   * {@link SqlStore.confirmRecoveryEmail}, so an address typed at
+   * registration — somebody else's included — is usable for recovery by
+   * nobody until the mailbox's reader follows the link.
    */
-  readonly recoveryEmail?: string;
+  readonly recoveryEmailConfirmation?: Omit<EmailConfirmation, 'athleteId' | 'usedAt'>;
 }
 
 /** What revoking a device key did (#867). */
@@ -248,6 +267,20 @@ export interface SqlStore {
   listDisplayNameChanges(athleteId: string): Promise<readonly DisplayNameChange[]>;
 
   getRecoveryEmail(athleteId: string): Promise<RecoveryEmail | undefined>;
+  /** An address given for recovery, waiting to be confirmed (#865). Binds nothing. */
+  putEmailConfirmation(confirmation: Omit<EmailConfirmation, 'usedAt'>): Promise<void>;
+  listEmailConfirmations(athleteId: string): Promise<readonly EmailConfirmation[]>;
+  /**
+   * Spend one of THIS athlete's confirmation tokens and bind its address to
+   * them, replacing any address they had, in one transaction (#865). Another
+   * athlete's token is `unknown`. `held` — and nothing spent or bound — when
+   * the address is already another athlete's.
+   */
+  confirmRecoveryEmail(
+    athleteId: string,
+    tokenSha256: string,
+    now: number,
+  ): Promise<ConfirmOutcome>;
   /** Email recovery: the address is what names the athlete. */
   findRecoveryEmail(address: string): Promise<RecoveryEmail | undefined>;
   putEmailRecoveryToken(token: Omit<EmailRecoveryToken, 'usedAt'>): Promise<void>;
@@ -302,6 +335,7 @@ export const ATHLETE_TABLES_IN_ERASURE_ORDER = [
   'recovery_code',
   'display_name_change',
   'recovery_email',
+  'recovery_email_confirmation',
   'email_recovery_token',
   'device_key',
 ] as const satisfies readonly (keyof InstanceDatabase)[];
@@ -345,6 +379,16 @@ const displayNameChangeFrom = (row: Selectable<DisplayNameChangeTable>): Display
 const emailRecoveryTokenFrom = (row: Selectable<EmailRecoveryTokenTable>): EmailRecoveryToken => ({
   tokenSha256: row.token_sha256,
   athleteId: row.athlete_id,
+  expiresAt: row.expires_at,
+  usedAt: row.used_at,
+});
+
+const emailConfirmationFrom = (
+  row: Selectable<RecoveryEmailConfirmationTable>,
+): EmailConfirmation => ({
+  tokenSha256: row.token_sha256,
+  athleteId: row.athlete_id,
+  address: row.address,
   expiresAt: row.expires_at,
   usedAt: row.used_at,
 });
@@ -582,13 +626,18 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               })
               .execute();
           }
-          if (registration.recoveryEmail !== undefined) {
+          const confirmation = registration.recoveryEmailConfirmation;
+          if (confirmation !== undefined) {
+            // A confirmation, never a binding (#865): see `Registration`.
             await trx
-              .insertInto('recovery_email')
-              .values({ athlete_id: athlete.id, address: registration.recoveryEmail })
-              // In the transaction, so two registrations racing for one
-              // address cannot both reach the index: the second binds nothing.
-              .onConflict((conflict) => conflict.column('address').doNothing())
+              .insertInto('recovery_email_confirmation')
+              .values({
+                token_sha256: confirmation.tokenSha256,
+                athlete_id: athlete.id,
+                address: confirmation.address,
+                expires_at: confirmation.expiresAt,
+                used_at: null,
+              })
               .execute();
           }
         }),
@@ -769,6 +818,69 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           .executeTakeFirst();
         return row === undefined ? undefined : { athleteId: row.athlete_id, address: row.address };
       }),
+
+    putEmailConfirmation: (confirmation) =>
+      exclusive(async () => {
+        await db
+          .insertInto('recovery_email_confirmation')
+          .values({
+            token_sha256: confirmation.tokenSha256,
+            athlete_id: confirmation.athleteId,
+            address: confirmation.address,
+            expires_at: confirmation.expiresAt,
+            used_at: null,
+          })
+          .execute();
+      }),
+
+    listEmailConfirmations: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('recovery_email_confirmation')
+            .selectAll()
+            .where('athlete_id', '=', athleteId)
+            .orderBy('token_sha256')
+            .execute()
+        ).map(emailConfirmationFrom),
+      ),
+
+    confirmRecoveryEmail: (athleteId, tokenSha256, now) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx): Promise<ConfirmOutcome> => {
+          const row = await trx
+            .selectFrom('recovery_email_confirmation')
+            .selectAll()
+            .where('athlete_id', '=', athleteId)
+            .where('token_sha256', '=', tokenSha256)
+            .executeTakeFirst();
+          const outcome = outcomeOf(row, now);
+          if (outcome !== 'spendable' || row === undefined) {
+            return { outcome: outcome === 'spendable' ? 'unknown' : outcome };
+          }
+          const holder = await trx
+            .selectFrom('recovery_email')
+            .select('athlete_id')
+            .where('address', '=', row.address)
+            .executeTakeFirst();
+          if (holder !== undefined && holder.athlete_id !== row.athlete_id) {
+            return { outcome: 'held' };
+          }
+          await trx
+            .insertInto('recovery_email')
+            .values({ athlete_id: row.athlete_id, address: row.address })
+            .onConflict((conflict) =>
+              conflict.column('athlete_id').doUpdateSet({ address: row.address }),
+            )
+            .execute();
+          await trx
+            .updateTable('recovery_email_confirmation')
+            .set({ used_at: now })
+            .where('token_sha256', '=', tokenSha256)
+            .execute();
+          return { outcome: 'taken', athleteId: row.athlete_id };
+        }),
+      ),
 
     findRecoveryEmail: (address) =>
       exclusive(async () => {

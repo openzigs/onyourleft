@@ -314,4 +314,49 @@ export const IDENTITY_ROUTES: readonly Route[] = [
       return outcome.ok ? noContent() : answer(outcome);
     },
   },
+  {
+    method: 'POST',
+    path: '/v1/auth/recovery-email',
+    operationId: 'setRecoveryEmail',
+    summary:
+      'Give an address for email recovery: a single-use link, good for 24 hours, is mailed to it, and the address recovers nothing until that link is followed. The same answer whether or not the address is already held. `not_found` where the operator has not enabled email recovery.',
+    identity: true,
+    auth: 'session',
+    request: object({ address: string }),
+    errors: ['unauthenticated', 'validation_failed'],
+    response: { contentType: 'none' },
+    handle: async (context) => {
+      const outcome = await identityOf(context).setRecoveryEmail(
+        callerOf(context),
+        context.json.address,
+      );
+      return outcome.ok ? noContent() : answer(outcome);
+    },
+  },
+  {
+    method: 'POST',
+    path: '/v1/auth/recovery-email/confirm',
+    operationId: 'confirmRecoveryEmail',
+    summary:
+      'Follow the link mailed to a recovery address, signed in as the athlete who gave it: the address is bound, replacing any earlier one. `address_in_use` when it is already another account’s.',
+    identity: true,
+    auth: 'session',
+    request: object({ token: string }),
+    errors: [
+      'unauthenticated',
+      'validation_failed',
+      'code_unknown',
+      'code_used',
+      'code_expired',
+      'address_in_use',
+    ],
+    response: { contentType: 'none' },
+    handle: async (context) => {
+      const outcome = await identityOf(context).confirmRecoveryEmail(
+        callerOf(context),
+        context.json.token,
+      );
+      return outcome.ok ? noContent() : answer(outcome);
+    },
+  },
 ];

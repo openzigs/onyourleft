@@ -19,7 +19,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { ROUTES } from '../routes.ts';
 import { sha256Hex, verifyEd25519 } from './crypto.ts';
-import { EMAIL_RECOVERY_LIFETIME_SECONDS, LINK_CODE_LIFETIME_SECONDS } from './identity.ts';
+import {
+  EMAIL_CONFIRMATION_LIFETIME_SECONDS,
+  EMAIL_RECOVERY_LIFETIME_SECONDS,
+  LINK_CODE_LIFETIME_SECONDS,
+} from './identity.ts';
 import {
   startIdentityInstance,
   testDevice,
@@ -50,6 +54,17 @@ async function registered(w: IdentityInstance, extra: Record<string, unknown> = 
     token: session.body.sessionToken as string,
     recoveryCodes: session.body.recoveryCodes as string[],
   };
+}
+
+/** Follow the link the instance mailed to `address`, as the signed-in athlete (#865). */
+async function confirm(w: IdentityInstance, token: string, address: string): Promise<void> {
+  const mailed = w.confirmations.filter((each) => each.address === address).at(-1);
+  if (mailed === undefined) throw new Error('no confirmation was mailed to that address');
+  const answer = await w.call('POST', '/v1/auth/recovery-email/confirm', {
+    token,
+    body: { token: mailed.token },
+  });
+  expect(answer.status, JSON.stringify(answer.body)).toBe(204);
 }
 
 async function mintLinkCode(w: IdentityInstance, token: string): Promise<string> {
@@ -411,6 +426,7 @@ describe('email recovery (ruling Q1): off unless the operator enables it', () =>
   it('on: a link is single-use, time-limited and stored as a hash — and an unknown address gets the same answer', async () => {
     const w = await start({ emailRecovery: true });
     const anna = await registered(w, { recoveryEmail: 'Anna@Example.org' });
+    await confirm(w, anna.token, 'anna@example.org');
     const asked = await w.call('POST', '/v1/auth/recover/email', {
       body: { address: 'anna@example.org' },
     });
@@ -444,32 +460,165 @@ describe('email recovery (ruling Q1): off unless the operator enables it', () =>
   });
 });
 
-describe('an address somebody already gave (#861)', () => {
-  it('registers the second athlete with the same answer, binds nothing, and mails only the first', async () => {
-    const w = await start({ emailRecovery: true });
-    const first = await w.signIn(await testDevice(), { recoveryEmail: 'victim@example.org' });
-    const second = await w.signIn(await testDevice(), { recoveryEmail: 'Victim@Example.org' });
-    expect(first.status).toBe(200);
-    expect(second.status, JSON.stringify(second.body)).toBe(200);
-    expect(Object.keys(second.body).sort()).toEqual(Object.keys(first.body).sort());
-    expect(second.body.registered).toBe(true);
-    const firstId = first.body.athleteId as string;
-    const secondId = second.body.athleteId as string;
-    expect(secondId).not.toBe(firstId);
-    expect(await w.freshRead((store) => store.getRecoveryEmail(secondId))).toBeUndefined();
-    expect((await w.freshRead((store) => store.getRecoveryEmail(firstId)))?.address).toBe(
-      'victim@example.org',
-    );
+describe('a recovery address is bound only once it is confirmed (#865)', () => {
+  const confirmLink = (w: IdentityInstance, token: string, emailed: unknown) =>
+    w.call('POST', '/v1/auth/recovery-email/confirm', { token, body: { token: emailed } });
+  const bound = (w: IdentityInstance, athleteId: string) =>
+    w.freshRead((store) => store.getRecoveryEmail(athleteId));
 
-    await w.call('POST', '/v1/auth/recover/email', { body: { address: 'victim@example.org' } });
-    expect(w.mail).toHaveLength(1);
-    const { token } = w.mail[0] as { token: string };
+  it('two athletes, one address: the one who gave it first binds nothing, the mailbox’s reader binds it, and every answer is the same', async () => {
+    const w = await start({ emailRecovery: true });
+    // Mallory gives Anna's address first, then Anna gives her own.
+    const mallory = await w.signIn(await testDevice(), { recoveryEmail: 'anna@example.org' });
+    const annaDevice = await testDevice();
+    const anna = await w.signIn(annaDevice, { recoveryEmail: 'Anna@Example.org' });
+    expect(mallory.status).toBe(200);
+    expect(anna.status, JSON.stringify(anna.body)).toBe(200);
+    expect(Object.keys(anna.body).sort()).toEqual(Object.keys(mallory.body).sort());
+    const malloryId = mallory.body.athleteId as string;
+    const annaId = anna.body.athleteId as string;
+    const malloryToken = mallory.body.sessionToken as string;
+    const annaToken = anna.body.sessionToken as string;
+
+    // Nothing is bound yet, for either of them, and a link went to the
+    // mailbox each time — the only place a token goes.
+    expect(await bound(w, malloryId)).toBeUndefined();
+    expect(await bound(w, annaId)).toBeUndefined();
+    expect(w.confirmations.map((each) => each.address)).toEqual([
+      'anna@example.org',
+      'anna@example.org',
+    ]);
+    const [forMallory, forAnna] = w.confirmations.map((each) => each.token) as [string, string];
+    expect(await w.databaseBytes()).not.toContain(forMallory);
+    expect(await w.databaseBytes()).not.toContain(forAnna);
+
+    // An unconfirmed address recovers nothing: no recovery link is mailed.
     expect(
-      (await w.freshRead((store) => store.listEmailRecoveryTokens(firstId))).map(
+      (await w.call('POST', '/v1/auth/recover/email', { body: { address: 'anna@example.org' } }))
+        .status,
+    ).toBe(204);
+    expect(w.mail).toEqual([]);
+
+    // Anna, reading her mail, follows the link Mallory caused: it is not
+    // hers, and binds nothing to Mallory's account. Nor can Mallory spend
+    // Anna's link, or her own through Anna's session.
+    expect(codeOf((await confirmLink(w, annaToken, forMallory)).body)).toBe('code_unknown');
+    expect(codeOf((await confirmLink(w, malloryToken, forAnna)).body)).toBe('code_unknown');
+    expect(await bound(w, malloryId)).toBeUndefined();
+
+    // Anna follows her own: the address is hers, once.
+    expect((await confirmLink(w, annaToken, forAnna)).status).toBe(204);
+    expect(await bound(w, annaId)).toEqual({ athleteId: annaId, address: 'anna@example.org' });
+    expect(await bound(w, malloryId)).toBeUndefined();
+    const again = await confirmLink(w, annaToken, forAnna);
+    expect(again.status).toBe(401);
+    expect(codeOf(again.body)).toBe('code_used');
+
+    // Giving an address somebody holds answers exactly as giving a free one.
+    const held = await w.call('POST', '/v1/auth/recovery-email', {
+      token: malloryToken,
+      body: { address: 'anna@example.org' },
+    });
+    const free = await w.call('POST', '/v1/auth/recovery-email', {
+      token: malloryToken,
+      body: { address: 'mallory@example.org' },
+    });
+    expect(held).toEqual(free);
+    expect(held.status).toBe(204);
+    expect(await bound(w, malloryId)).toBeUndefined();
+
+    // And recovery by email now reaches Anna, and only Anna.
+    await w.call('POST', '/v1/auth/recover/email', { body: { address: 'anna@example.org' } });
+    expect(w.mail).toHaveLength(1);
+    const { token: recovery } = w.mail[0] as { token: string };
+    expect(
+      (await w.freshRead((store) => store.listEmailRecoveryTokens(annaId))).map(
         (each) => each.tokenSha256,
       ),
-    ).toEqual([await sha256Hex(token)]);
-    expect(await w.freshRead((store) => store.listEmailRecoveryTokens(secondId))).toEqual([]);
+    ).toEqual([await sha256Hex(recovery)]);
+    expect(await w.freshRead((store) => store.listEmailRecoveryTokens(malloryId))).toEqual([]);
+
+    // No address and no token reaches the log.
+    const logged = w.instance.lines.join('\n').toLowerCase();
+    expect(w.instance.lines.length).toBeGreaterThan(5);
+    for (const secret of [
+      forMallory,
+      forAnna,
+      recovery,
+      'anna@example.org',
+      'mallory@example.org',
+    ]) {
+      expect(logged).not.toContain(secret.toLowerCase());
+    }
+  });
+
+  it('registers the athlete, codes and all, when the mail transport fails', async () => {
+    const w = await start({ emailRecovery: 'failing' });
+    const anna = await registered(w, { recoveryEmail: 'anna@example.org' });
+    expect(anna.recoveryCodes).toHaveLength(10);
+    expect(await bound(w, anna.athleteId)).toBeUndefined();
+  });
+
+  it('a link is time-limited: after 24 hours it is code_expired and binds nothing', async () => {
+    const w = await start({ emailRecovery: true });
+    const anna = await registered(w, { recoveryEmail: 'anna@example.org' });
+    const { token } = w.confirmations[0] as { token: string };
+    w.clock.ms += EMAIL_CONFIRMATION_LIFETIME_SECONDS * 1000;
+    const late = await confirmLink(w, anna.token, token);
+    expect(late.status).toBe(401);
+    expect(codeOf(late.body)).toBe('code_expired');
+    expect(await bound(w, anna.athleteId)).toBeUndefined();
+    // Giving it again mails a fresh link, which does bind.
+    await w.call('POST', '/v1/auth/recovery-email', {
+      token: anna.token,
+      body: { address: 'anna@example.org' },
+    });
+    const fresh = (w.confirmations[1] as { token: string }).token;
+    expect((await confirmLink(w, anna.token, fresh)).status).toBe(204);
+    expect((await bound(w, anna.athleteId))?.address).toBe('anna@example.org');
+  });
+
+  it('refuses an address another account already confirmed: address_in_use, and nothing moves', async () => {
+    const w = await start({ emailRecovery: true });
+    const first = await registered(w, { recoveryEmail: 'shared@example.org' });
+    await confirm(w, first.token, 'shared@example.org');
+    // The same person's second account: they read the mailbox, so they are
+    // told, and the first account keeps its address.
+    const second = await registered(w, { recoveryEmail: 'shared@example.org' });
+    const { token } = w.confirmations.at(-1) as { token: string };
+    const refused = await confirmLink(w, second.token, token);
+    expect(refused.status).toBe(409);
+    expect(codeOf(refused.body)).toBe('address_in_use');
+    expect(await bound(w, second.athleteId)).toBeUndefined();
+    expect((await bound(w, first.athleteId))?.address).toBe('shared@example.org');
+  });
+
+  it('mails an address at most its hourly share of links, and answers the same when it stops', async () => {
+    const w = await start({ emailRecovery: true });
+    const anna = await registered(w);
+    const answers = [];
+    for (let n = 0; n < 5; n += 1) {
+      answers.push(
+        await w.call('POST', '/v1/auth/recovery-email', {
+          token: anna.token,
+          body: { address: 'someone@example.org' },
+        }),
+      );
+    }
+    expect(new Set(answers.map((each) => JSON.stringify(each))).size).toBe(1);
+    expect(w.confirmations).toHaveLength(3);
+  });
+
+  it('off: the routes are not there', async () => {
+    const w = await start();
+    const anna = await registered(w);
+    const given = await w.call('POST', '/v1/auth/recovery-email', {
+      token: anna.token,
+      body: { address: 'anna@example.org' },
+    });
+    expect(given.status).toBe(404);
+    expect((await confirmLink(w, anna.token, 'a'.repeat(43))).status).toBe(404);
+    expect(await w.databaseBytes()).not.toContain('anna@example.org');
   });
 });
 
