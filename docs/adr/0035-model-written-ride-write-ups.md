@@ -466,3 +466,77 @@ sentence is true of **app** text only.
 - **The screen's matchers and the source scan's drift apart.** #798's shared module exists to stop
   that. A second copy of the list anywhere is a defect.
 
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-09-29** — **D-9's wordings B and C did not name every figure a ride analysis sends, and
+  the owner approved completing them.** The review of
+  [#843](https://github.com/openzigs/onyourleft/pull/843) ([#803](https://github.com/openzigs/onyourleft/issues/803))
+  found that `apps/web/src/ride-analysis/template-v1.ts` sends `distanceKilometres`,
+  `meanGradientPercent` and `elevationGainMetres`, and neither wording named them. The owner ruled
+  on [#845](https://github.com/openzigs/onyourleft/issues/845) on 2026-09-29: both lists add
+  *"distance, and each section's gradient and total climb"*, and the hosted consent adds *"When you
+  save a service, the app sends it one test question, containing none of your data, to check it
+  answers."* **Nothing in D-9 is edited**; the wordings below replace B and C where the code and the
+  privacy policy quote them, and ADR 0029 gains an entry quoting C.
+
+  ⚠️ **Where the added phrase sits is the author's choice**: after *"how long the ride lasted"*, as
+  *"its distance, and each section's gradient and total climb"*, beside the other figures that
+  describe the ride rather than the rider.
+
+  **B, as amended:**
+
+  > **A ride sent to your own computer, when you ask for an analysis.** When you press the button on
+  > a ride's page, that ride's numbers go to the computer you set up: heart rate, cadence and power,
+  > your weight and watts per kilogram, your threshold power, if you set one, how long the ride
+  > lasted, its distance, and each section's gradient and total climb, and how it went section by
+  > section. If the side camera filmed the ride, and you agreed to the camera, it also gets how a
+  > few measurements of your riding position changed between the start and the end of filming.
+  > Never a picture. Nothing is sent until you press the button, and nothing is sent in the
+  > background.
+
+  **C, as amended:**
+
+  > **This sends your ride to a service you have chosen, using your own key.**
+  >
+  > If you turn this on, each time you ask for a ride analysis, that ride's numbers are sent to the
+  > address you entered, using the key you entered: your heart rate, cadence and power, your weight
+  > and watts per kilogram, your threshold power, if you set one, how long the ride lasted, its
+  > distance, and each section's gradient and total climb, and how it went section by section. If
+  > the side camera filmed the ride, it is also sent how a few measurements of your riding position
+  > changed between the start and the end of filming. That is a company or a computer that is not
+  > yours and not ours, and we cannot see what they do with it or how long they keep it. We cannot
+  > delete it for you afterwards. Like any service you connect to, it also sees your internet
+  > address.
+  >
+  > It is never sent a picture — not a photograph of you, and nothing made from one. It is not sent
+  > your name, where you rode, or when. When you save a service, the app sends it one test question,
+  > containing none of your data, to check it answers.
+  >
+  > Your key is kept on this device, is sent only to the address you entered, and is never put in a
+  > file this app exports.
+  >
+  > **You do not need this.** Everything else in the app works without it, and a computer of your own
+  > can do the same analysis.
+  >
+  > This is off. It stays off until you turn it on, it is off again whenever the app is opened, and
+  > you can turn it off at any time.
+
+  ⚠️ **The test question is not sent when a service is saved.** On the Camera page, *Save this
+  service* sends nothing; the test question goes when the rider, with the hosted model turned on,
+  presses *Send a test question to the service*. The sentence is quoted as approved, and whether to
+  reword it is the owner's decision, filed as [#847](https://github.com/openzigs/onyourleft/issues/847).
+
+  **What holds the lists complete.** `apps/web/src/ride-analysis/sent-fields.test.ts` builds every
+  prompt each template in `template.ts` §`ANALYSIS_TEMPLATES` makes from an input with every
+  optional figure present, collects every key of the JSON those prompts carry, and requires each
+  key to be named by a phrase in both B and C. A field added to a template without a change of
+  wording is a red build.
+
+  | Artefact | What changed in the same pull request |
+  |---|---|
+  | `apps/web/src/detail/write-up.ts` | `COMPUTER_SENDS` is B above |
+  | `apps/web/src/camera/hosted-model.ts` | `HOSTED_CONSENT` is C above |
+  | [`docs/privacy-policy.md`](../privacy-policy.md) | The own-computer paragraph is B, the hosted section carries C's first two paragraphs, and the sharing line reads *"We never sell your data. The only sharing is the analysis you choose to send to a service you set up."*, which agrees with Play Data Safety's fitness and health rows, declared shared |
+  | `apps/mobile/src/android/data-safety.ts` | The fitness-info row's description names the distance, gradient and climb |
