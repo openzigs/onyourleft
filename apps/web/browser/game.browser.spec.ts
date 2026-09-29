@@ -59,6 +59,7 @@ import {
 } from '../src/game/realistic-assets';
 import { modelFacts } from '../src/game/realistic-bytes-testing';
 import { REALISTIC_WOODED_DRAW_CALLS } from '../src/game/realistic-budget';
+import { WORN_ROAD_CONTRAST_FLOOR } from '../src/game/road-wear';
 
 /**
  * Said beside every frame time this spec publishes — #473. Since #473 the
@@ -698,6 +699,18 @@ const REALISTIC_LOAD_BUDGET_MS = 165_000;
  * run after (36396660625). 160 s is 1.52 times 105.
  */
 const TREES_LOAD_BUDGET_MS = 160_000;
+
+/**
+ * #628: how much lighter a wheel track must read than its lane's middle, as a
+ * share of relative luminance after the light and AgX — **0.01** — and the
+ * most it may: **0.08**. `road-wear.ts` §`WHEEL_TRACK_LIGHTEN` asks for 0.05
+ * of the diffuse colour and the wear's clamp allows 0.06; AgX and the track's
+ * flatter relief bring that to about 0.025 read back (2.47 % on a Mac,
+ * 2026-09-29), and the same two strips read −0.09 % with the wear off — the
+ * control holds that under the floor.
+ */
+const WHEEL_TRACK_FLOOR = 0.01;
+const WHEEL_TRACK_CEILING = 0.08;
 
 /**
  * Pays for the `?realistic` load in a `beforeAll` with its own budget — #607.
@@ -3234,7 +3247,8 @@ test.describe('the realistic world — ADR 0026', () => {
       `the realistic road's gradient after the light and AgX — climb ${measured.climbLuminance.toFixed(4)}, ` +
         `descent ${measured.descentLuminance.toFixed(4)}: ` +
         `${contrast(measured.climbLuminance, measured.descentLuminance).toFixed(3)}:1 against ` +
-        `${String(MINIMUM_TINT_CONTRAST_RATIO)}:1; the level control ` +
+        `${String(MINIMUM_TINT_CONTRAST_RATIO)}:1 (${contrast(measured.unwornClimbLuminance, measured.unwornDescentLuminance).toFixed(3)}:1 ` +
+        `with #628's wear off); the level control ` +
         `${contrast(measured.levelClimbLuminance, measured.levelDescentLuminance).toFixed(4)}:1`,
     );
     // The criterion, read off the drawing buffer: the tint still separates the
@@ -3243,6 +3257,12 @@ test.describe('the realistic world — ADR 0026', () => {
     expect(contrast(measured.climbLuminance, measured.descentLuminance)).toBeGreaterThanOrEqual(
       MINIMUM_TINT_CONTRAST_RATIO,
     );
+    // #628: and WITH the wear on, the road keeps most of its margin — 3.5 of
+    // the 3.97 it read before, which `road-wear.ts` §`MAXIMUM_WEAR_SHARE` is
+    // solved against.
+    expect(contrast(measured.climbLuminance, measured.descentLuminance)).toBeGreaterThanOrEqual(
+      WORN_ROAD_CONTRAST_FLOOR,
+    );
     // The control: the same probe on two level roads reads alike, so what was
     // measured above is the tint and not where the probe landed.
     expect(contrast(measured.levelClimbLuminance, measured.levelDescentLuminance)).toBeLessThan(
@@ -3250,6 +3270,30 @@ test.describe('the realistic world — ADR 0026', () => {
     );
     // And the photograph reached the GPU: this world samples textures.
     expect(measured.texturesCreated).toBeGreaterThan(5);
+  });
+
+  test('wears the road: a wheel track reads lighter than its lane, and not with the wear off — #628', async ({
+    harnessRun,
+  }) => {
+    const { roadWear } = await realistic(harnessRun);
+    expect(roadWear.measured).toBe(true);
+    const share = (track: number, middle: number): number => track / middle - 1;
+    const worn = share(roadWear.track, roadWear.middle);
+    const control = share(roadWear.trackControl, roadWear.middleControl);
+    console.log(
+      `the worn road at ${roadWear.distance.toFixed(0)} m: the wheel track ${roadWear.track.toFixed(4)} ` +
+        `against its lane ${roadWear.middle.toFixed(4)} (${(worn * 100).toFixed(2)} %); ` +
+        `with the wear off ${roadWear.trackControl.toFixed(4)} against ${roadWear.middleControl.toFixed(4)} ` +
+        `(${(control * 100).toFixed(2)} %)`,
+    );
+    // A floor AND a ceiling (#621, #678): the track is lighter by more than
+    // the photograph's own spread, and by no more than the wear's clamp could
+    // make it after the light.
+    expect(worn).toBeGreaterThan(WHEEL_TRACK_FLOOR);
+    expect(worn).toBeLessThan(WHEEL_TRACK_CEILING);
+    // The control: with the wear off the same two strips read alike, so the
+    // difference above is the wear and not the grain, the sheen or the angle.
+    expect(Math.abs(control)).toBeLessThan(WHEEL_TRACK_FLOOR);
   });
 
   test('hands the GPU every realistic texture compressed, and the RGBA8 control is labelled a fallback — #618', async ({

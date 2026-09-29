@@ -142,7 +142,9 @@ import {
   nearFieldOf,
   nearFieldShapes,
   showGroundBlobsOf,
+  roadWearOf,
 } from '../src/game/three-renderer';
+import { PATCH_CELL_METRES, patchInCell, WHEEL_TRACK_OFFSETS_METRES } from '../src/game/road-wear';
 import { groundBlobAlpha, groundUnder } from '../src/game/ground-blob';
 import { clearOfTheCamera, nearPyramid, sceneryReach } from '../src/game/near-field';
 import {
@@ -4391,6 +4393,8 @@ export interface RealisticMeasurement {
   readonly measured: boolean;
   /** #622: the air, read and predicted. @see airProbe */
   readonly air: AirMeasurement;
+  /** #628: the worn road's wheel track against its lane, worn and not. @see roadWearProbe */
+  readonly roadWear: RoadWearMeasurement;
   /**
    * #622: visible meshes that three fogs, in the realistic frame and in the
    * same frame drawn stylised — how many breathe the realistic air, and how
@@ -4437,6 +4441,9 @@ export interface RealisticMeasurement {
   /** Mean relative luminance of the road 20 m ahead, on the steepest climb and descent, and on the level. */
   readonly climbLuminance: number;
   readonly descentLuminance: number;
+  /** #628: the climb and the descent with the road's wear off — published, for the margin the wear spent. */
+  readonly unwornClimbLuminance: number;
+  readonly unwornDescentLuminance: number;
   readonly levelClimbLuminance: number;
   readonly levelDescentLuminance: number;
   /** Pixels that changed when the rider's cranks turned, and when the cadence went and they were held. */
@@ -4632,6 +4639,137 @@ export interface HorizonReading {
   readonly darkestAboveRelief: number;
 }
 
+/**
+ * The realistic road's wheel track against its lane's middle — #628. Mean
+ * relative luminances, each over a 5 × 5 window at every one of
+ * {@link WEAR_PROBE_AHEAD} metres up the road, on the left lane's two wheel
+ * tracks (`road-wear.ts` §`WHEEL_TRACK_OFFSETS_METRES`) and at that lane's
+ * middle, on a level road — with the wear on, and (the control) off.
+ */
+export interface RoadWearMeasurement {
+  readonly measured: boolean;
+  /** Route distance of the frame the probe chose: one with no patch in its span. */
+  readonly distance: number;
+  readonly track: number;
+  readonly middle: number;
+  readonly trackControl: number;
+  readonly middleControl: number;
+}
+
+const NO_ROAD_WEAR: RoadWearMeasurement = {
+  measured: false,
+  distance: 0,
+  track: 0,
+  middle: 0,
+  trackControl: 0,
+  middleControl: 0,
+};
+
+/** How far up the road the wheel track is read, in metres: past the rider's back (`NEAR_ROAD_PROBE`). */
+const WEAR_PROBE_AHEAD: readonly number[] = [14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26];
+
+/**
+ * A level road on a bearing of {@link WEAR_PROBE_BEARING_DEGREES} — #628.
+ *
+ * ⚠️ **Not due north, measured.** The asphalt is mapped in world metres, so on
+ * a road running along an axis a strip a fixed distance across it samples ONE
+ * column of the photograph all the way up — and two such columns differed by
+ * 7.7 % with the wear off, which is no control at all. On a slant the strip
+ * crosses the tile's columns as it goes, and the photograph averages out.
+ */
+function slantedLevelRoute(): ReturnType<typeof northRoute> {
+  const bearing = (WEAR_PROBE_BEARING_DEGREES * Math.PI) / 180;
+  const metresPerDegree = 111_320;
+  const points: RoutePoint[] = [];
+  for (let along = 0; along <= 2_000; along += 10) {
+    const north = along * Math.cos(bearing);
+    const east = along * Math.sin(bearing);
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(51.5 + north / metresPerDegree),
+        degreesLongitude(-0.12 + east / (metresPerDegree * Math.cos((51.5 * Math.PI) / 180))),
+      ),
+      elevation: altitudeMetres(10),
+    });
+  }
+  return routeProfile(points, { loop: false });
+}
+
+/** The bearing of {@link slantedLevelRoute}, in degrees: **37**, an axis-free angle. */
+const WEAR_PROBE_BEARING_DEGREES = 37;
+
+/** The left lane's middle, across the road — the lane the rider is not in (`NEAR_ROAD_PROBE`). */
+const LEFT_LANE_MIDDLE_METRES = -1.75;
+
+/**
+ * @see RoadWearMeasurement
+ *
+ * ⚠️ **On a stretch with no patch**: a patch's tone is a wear term too, and
+ * one lying on half of the probe would read as a wheel track's difference or
+ * hide one. The frame is chosen by the patches' own rule
+ * (`road-wear.ts` §`patchInCell`), not by looking.
+ */
+function roadWearProbe(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  riding: (profile: ReturnType<typeof northRoute>, distance: number) => SceneFrame,
+  route: ReturnType<typeof northRoute>,
+): RoadWearMeasurement {
+  // The left lane's INNER track. ⚠️ Not the outer one, measured: at 2.55 m
+  // out it is 0.8 m from the edge line, and at this camera a 5 × 5 window 26 m
+  // up the road reaches the paint — the lane read flat to 0.1 % from 0.7 m to
+  // 2.1 m out with the wear off, and 6 % brighter at 2.5 m.
+  const tracks = WHEEL_TRACK_OFFSETS_METRES.filter((offset) => offset < 0 && offset > -2);
+  const clear = (distance: number): boolean => {
+    const from = distance + Math.min(...WEAR_PROBE_AHEAD) - 6;
+    const to = distance + Math.max(...WEAR_PROBE_AHEAD) + 6;
+    for (
+      let cell = Math.floor(from / PATCH_CELL_METRES) - 1;
+      cell <= Math.floor(to / PATCH_CELL_METRES) + 1;
+      cell += 1
+    ) {
+      const patch = patchInCell(cell);
+      if (
+        patch !== undefined &&
+        patch.distance + patch.length > from &&
+        patch.distance - patch.length < to
+      ) {
+        return false;
+      }
+    }
+    return true;
+  };
+  let distance = 400;
+  while (!clear(distance) && distance < 1_200) distance += 5;
+  const frame: SceneFrame = { ...riding(route, distance), markers: [], scatter: [] };
+  const read = (across: readonly number[]): number => {
+    let total = 0;
+    for (const ahead of WEAR_PROBE_AHEAD) {
+      for (const each of across) {
+        total += meanLuminanceAround(gl, pixelFor(frame, canvas, onTheRoad(frame, ahead, each)), 2);
+      }
+    }
+    return total / (WEAR_PROBE_AHEAD.length * across.length);
+  };
+  view.render(frame);
+  view.render(frame);
+  const worn = { track: read(tracks), middle: read([LEFT_LANE_MIDDLE_METRES]) };
+  roadWearOf(view, false);
+  view.render(frame);
+  view.render(frame);
+  const control = { track: read(tracks), middle: read([LEFT_LANE_MIDDLE_METRES]) };
+  roadWearOf(view, true);
+  return {
+    measured: true,
+    distance,
+    track: worn.track,
+    middle: worn.middle,
+    trackControl: control.track,
+    middleControl: control.middle,
+  };
+}
+
 /** What {@link airProbe} reports when it did not run. */
 const NO_AIR: AirMeasurement = {
   measured: false,
@@ -4653,6 +4791,7 @@ const NO_AIR: AirMeasurement = {
 const NO_REALISTIC: RealisticMeasurement = {
   measured: false,
   air: NO_AIR,
+  roadWear: NO_ROAD_WEAR,
   atmosphere: {
     realisticTaught: 0,
     realisticUntaught: 0,
@@ -4678,6 +4817,8 @@ const NO_REALISTIC: RealisticMeasurement = {
   drawCallsWithoutRoad: 0,
   climbLuminance: 0,
   descentLuminance: 0,
+  unwornClimbLuminance: 0,
+  unwornDescentLuminance: 0,
   levelClimbLuminance: 0,
   levelDescentLuminance: 0,
   crankTurnPixels: 0,
@@ -5911,8 +6052,17 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const air = airProbe(view, gl, canvas, riding);
   phaseEnds('realistic: air — #622');
 
+  // #628: the wheel track, before the climb and descent are read with the wear on.
+  const roadWear = roadWearProbe(view, gl, canvas, riding, slantedLevelRoute());
+  phaseEnds('realistic: road wear — #628');
+
   const climbLuminance = roadLuminance(riding(climb, 400));
   const descentLuminance = roadLuminance(riding(descent, 400));
+  // #628: the same two with the wear off — what the wear spent of the margin.
+  roadWearOf(view, false);
+  const unwornClimbLuminance = roadLuminance(riding(climb, 400));
+  const unwornDescentLuminance = roadLuminance(riding(descent, 400));
+  roadWearOf(view, true);
   const levelClimbLuminance = roadLuminance(riding(level, 400));
   const levelDescentLuminance = roadLuminance(riding(level, 400));
 
@@ -6177,6 +6327,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
 
   return {
     measured: true,
+    roadWear,
     textures,
     firstFrameMs,
     fallbackWorld,
@@ -6197,6 +6348,8 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     drawCallsWithoutRoad,
     climbLuminance,
     descentLuminance,
+    unwornClimbLuminance,
+    unwornDescentLuminance,
     levelClimbLuminance,
     levelDescentLuminance,
     crankTurnPixels: pixelsChanged(atRest, turned),

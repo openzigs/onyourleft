@@ -330,6 +330,23 @@ import {
 } from './realistic-assets';
 import { REALISTIC_TRANSCODER_DIRECTORY } from './transcoder-files';
 import {
+  CARRIAGEWAY_HALF_METRES,
+  DUST_BAND_METRES,
+  DUST_LIGHTEN,
+  MAXIMUM_ROAD_PATCHES,
+  MAXIMUM_WEAR_SHARE,
+  PAINT_WEAR,
+  ROAD_PATCH_FLOATS,
+  roadPatchUniforms,
+  WHEEL_TRACK_EDGE_METRES,
+  WHEEL_TRACK_HALF_WIDTH_METRES,
+  WHEEL_TRACK_LIGHTEN,
+  WHEEL_TRACK_OFFSETS_METRES,
+  WHEEL_TRACK_RELIEF,
+  WHEEL_TRACK_ROUGHNESS,
+  writeRoadAcross,
+} from './road-wear';
+import {
   REALISTIC_GROUND_BLOBS,
   REALISTIC_NEAR_MESHES,
   REALISTIC_STRUCTURE_ITEMS,
@@ -7565,12 +7582,39 @@ export function photographicRoadMaterial(colour: Texture, normal: Texture): Mesh
       side: DoubleSide,
     }),
   );
+  const wear = { patches: new Float32Array(MAXIMUM_ROAD_PATCHES * ROAD_PATCH_FLOATS), on: 1 };
+  ROAD_WEAR.set(material, wear);
   material.onBeforeCompile = (shader) => {
     shader.uniforms['tileMetres'] = { value: REALISTIC_SURFACES.road.tileMetres };
+    // #628: the patches lying in this frame's corridor, and the switch the
+    // browser gate's control turns off. The SAME objects every compile, so a
+    // program compiled again still reads what `#updateRoad` writes.
+    shader.uniforms['roadPatches'] = { value: wear.patches };
+    shader.uniforms['roadWear'] = {
+      get value(): number {
+        return wear.on;
+      },
+    };
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nuniform float tileMetres;')
-      .replace('#include <uv_vertex>', `#include <uv_vertex>\n${PLANAR_UV}`);
+      .replace(
+        '#include <common>',
+        `#include <common>\nuniform float tileMetres;\n${ROAD_WEAR_VERTEX_PARS}`,
+      )
+      .replace('#include <uv_vertex>', `#include <uv_vertex>\n${PLANAR_UV}\n${ROAD_WEAR_VERTEX}`);
     shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>\n${DETAIL_COMMON}\n${ROAD_WEAR_FRAGMENT_PARS}`,
+      )
+      .replace('#include <color_fragment>', `#include <color_fragment>\n${ROAD_WEAR_FRAGMENT}`)
+      .replace(
+        '#include <roughnessmap_fragment>',
+        `#include <roughnessmap_fragment>\nroughnessFactor *= mix(1.0, ${glslFloat(WHEEL_TRACK_ROUGHNESS)}, oylTrackShare);`,
+      )
+      .replace(
+        '#include <normal_fragment_maps>',
+        `#include <normal_fragment_maps>\nnormal = normalize(mix(normal, nonPerturbedNormal, ${glslFloat(1 - WHEEL_TRACK_RELIEF)} * oylTrackShare));`,
+      )
       // ⚠️ **Every face is lit as facing UP, whichever way it is wound.**
       // `terrain.ts` §`roadIndices` keeps the winding consistent within a lane
       // and says it is not relied on — the stylised road is unlit, so it never
@@ -7606,10 +7650,78 @@ material.specularF90 *= ${ROAD_SHEEN.toFixed(3)};`,
 `,
       );
   };
-  material.customProgramCacheKey = () => 'oyl-photographic-road';
+  material.customProgramCacheKey = () => 'oyl-photographic-road-worn';
   // #619 lever 2 and #622's air, chained after the assignment above.
   return withAtmosphere(withTextureLodBias(material));
 }
+
+/**
+ * What each photographic road material wears — #628: the patches in this
+ * frame's corridor (world-space rectangles, `road-wear.ts`
+ * §`roadPatchUniforms`) and whether wear is drawn at all. Keyed by material
+ * because a view builds its own road material with its drawing.
+ */
+const ROAD_WEAR = new WeakMap<Material, { readonly patches: Float32Array; on: number }>();
+
+/** The road's across-position attribute's name — #628. @see writeRoadAcross */
+const ROAD_ACROSS_ATTRIBUTE = 'oylAcross';
+
+const ROAD_WEAR_VERTEX_PARS = /* glsl */ `
+attribute float ${ROAD_ACROSS_ATTRIBUTE};
+varying float vRoadAcross;
+varying vec2 vRoadWorld;
+`;
+
+const ROAD_WEAR_VERTEX = /* glsl */ `
+vRoadAcross = ${ROAD_ACROSS_ATTRIBUTE};
+vRoadWorld = (modelMatrix * vec4(position, 1.0)).xz;
+`;
+
+const ROAD_WEAR_FRAGMENT_PARS = /* glsl */ `
+uniform vec4 roadPatches[${String(MAXIMUM_ROAD_PATCHES * 2)}];
+uniform float roadWear;
+varying float vRoadAcross;
+varying vec2 vRoadWorld;
+`;
+
+/**
+ * The wear — #628, after `color_fragment`, so the vertex colour is known: a
+ * fragment whose vertex colour is paint (`terrain.ts` §`MARKING_COLOUR`, far
+ * brighter than any tint) has its paint worn; everything else is carriageway,
+ * whose every term together is clamped to `road-wear.ts`
+ * §`MAXIMUM_WEAR_SHARE` — the arithmetic that keeps the gradient cue.
+ * `oylTrackShare` is read again by the roughness and the normal below it.
+ */
+const ROAD_WEAR_FRAGMENT = /* glsl */ `
+float oylTrackShare = 0.0;
+{
+  float oylTrack = 0.0;
+${WHEEL_TRACK_OFFSETS_METRES.map(
+  (offset) =>
+    `  oylTrack = max(oylTrack, 1.0 - smoothstep(${glslFloat(WHEEL_TRACK_HALF_WIDTH_METRES)}, ${glslFloat(WHEEL_TRACK_HALF_WIDTH_METRES + WHEEL_TRACK_EDGE_METRES)}, abs(vRoadAcross - (${glslFloat(offset)}))));`,
+).join('\n')}
+  oylTrack *= roadWear;
+  float oylWorn = ${glslFloat(WHEEL_TRACK_LIGHTEN)} * oylTrack;
+  oylWorn += ${glslFloat(DUST_LIGHTEN)} * roadWear
+    * smoothstep(${glslFloat(CARRIAGEWAY_HALF_METRES - DUST_BAND_METRES)}, ${glslFloat(CARRIAGEWAY_HALF_METRES)}, abs(vRoadAcross));
+  for (int oylAt = 0; oylAt < ${String(MAXIMUM_ROAD_PATCHES)}; oylAt += 1) {
+    vec4 oylPlace = roadPatches[oylAt * 2];
+    vec4 oylSize = roadPatches[oylAt * 2 + 1];
+    vec2 oylFrom = vRoadWorld - oylPlace.xy;
+    float oylAlong = abs(dot(oylFrom, oylPlace.zw));
+    float oylAcross = abs(dot(oylFrom, vec2(-oylPlace.w, oylPlace.z)));
+    float oylInside = (1.0 - smoothstep(oylSize.x - 0.08, oylSize.x, oylAlong))
+      * (1.0 - smoothstep(oylSize.y - 0.08, oylSize.y, oylAcross));
+    oylWorn += oylSize.z * oylInside * step(0.0001, oylSize.x) * roadWear;
+  }
+  float oylCarriageway = 1.0 + clamp(oylWorn, ${glslFloat(-MAXIMUM_WEAR_SHARE)}, ${glslFloat(MAXIMUM_WEAR_SHARE)});
+  float oylPaint = smoothstep(0.35, 0.55, dot(vColor.rgb, vec3(0.2126, 0.7152, 0.0722)));
+  float oylFaded = 1.0 - ${glslFloat(PAINT_WEAR)} * roadWear
+    * smoothstep(0.35, 0.85, oylNoise(vRoadWorld * 0.13) * 0.7 + oylNoise(vRoadWorld * 1.7) * 0.3);
+  diffuseColor.rgb *= mix(oylCarriageway, oylFaded, oylPaint);
+  oylTrackShare = oylTrack * (1.0 - oylPaint);
+}
+`;
 
 /**
  * How much of its specular reflection the photographic road keeps: **0.25** —
@@ -9639,6 +9751,19 @@ export function horizonFromSkyOf(view: GameView, on: boolean): void {
 }
 
 /**
+ * Takes the realistic road's wear off, or puts it back — #628. The browser
+ * gate's control: with the wear off, the wheel track must read back no
+ * different from the lane's middle, or the difference the gate measured was
+ * the photograph's own grain and the light.
+ *
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`;
+ * the product never turns the wear off.
+ */
+export function roadWearOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.roadWear(on);
+}
+
+/**
  * Takes the realistic bicycle's rubber normal map off, or puts it back — #624.
  * The browser gate's control: with the tread off, the front tyre must read
  * back flatter than the floor the product's tread is held above, or the
@@ -10336,6 +10461,12 @@ class ThreeGameView implements GameView {
     return this.#realistic?.grounding.mesh;
   }
 
+  /** @see roadWearOf */
+  roadWear(on: boolean): void {
+    const wear = this.#realistic === undefined ? undefined : ROAD_WEAR.get(this.#realistic.road);
+    if (wear !== undefined) wear.on = on ? 1 : 0;
+  }
+
   /** @see filterWaterRipplesOf */
   filterWaterRipples(on: boolean): void {
     this.#water.setRippleFilter(on);
@@ -10644,6 +10775,12 @@ class ThreeGameView implements GameView {
       const up = new Float32Array(this.#vertexCapacity);
       for (let at = 1; at < up.length; at += 3) up[at] = 1;
       this.#roadGeometry.setAttribute('normal', new BufferAttribute(up, 3));
+      // #628: how far across the road each vertex is, which only the
+      // realistic road's wear reads. @see writeRoadAcross
+      this.#roadGeometry.setAttribute(
+        ROAD_ACROSS_ATTRIBUTE,
+        new BufferAttribute(new Float32Array(this.#vertexCapacity / 3), 1),
+      );
     }
     if (indices.length > this.#indexCapacity) {
       this.#indexCapacity = indices.length;
@@ -10660,6 +10797,16 @@ class ThreeGameView implements GameView {
     // guard here would be a branch no test could take — the shape #242's own
     // review removed from `roadTint`.
     upload(this.#roadGeometry.getIndex() as BufferAttribute, indices);
+    // #628: the realistic road's wear — the across-position and the patches in
+    // this corridor. Only while the realistic road is drawn: the stylised
+    // material reads neither, and the stylised frame pays for neither.
+    const wear = this.#realistic === undefined ? undefined : ROAD_WEAR.get(this.#realistic.road);
+    if (this.#drawing === 'realistic' && wear !== undefined) {
+      const across = this.#roadGeometry.getAttribute(ROAD_ACROSS_ATTRIBUTE) as BufferAttribute;
+      writeRoadAcross(frame.corridor, across.array as Float32Array);
+      across.needsUpdate = true;
+      roadPatchUniforms(frame.corridor, wear.patches);
+    }
     // Draw only the triangles this frame actually has, so a shorter corridor
     // does not draw stale ones left in the buffer from a longer one.
     this.#roadGeometry.setDrawRange(0, indices.length);
