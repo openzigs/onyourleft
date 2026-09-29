@@ -291,13 +291,24 @@ describe('the realistic textures stay compressed on the GPU — #618', () => {
         (sum, model) =>
           sum +
           modelFacts(join(PUBLIC, 'realistic', model.file)).images.length +
-          (model.impostor === undefined ? 0 : 1),
+          (model.impostor === undefined ? 0 : 1) +
+          // #630: its normal strip.
+          (model.impostorNormals === undefined ? 0 : 1),
         0,
       );
     expect(worn.length).toBeGreaterThanOrEqual(40);
     expect(worn.length).toBe(images);
     expect(new Set(worn.map((texture) => texture.role))).toEqual(
-      new Set(['road', 'ground', 'structure', 'model', 'impostor', 'bicycle', 'rider']),
+      new Set([
+        'road',
+        'ground',
+        'structure',
+        'model',
+        'impostor',
+        'impostor-normals',
+        'bicycle',
+        'rider',
+      ]),
     );
     expect(everyTextureCompressed(report)).toBe(true);
     for (const texture of worn) {

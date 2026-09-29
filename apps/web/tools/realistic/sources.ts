@@ -681,6 +681,13 @@ const TREE_SCRIPT = 'blender/process_tree.py';
  */
 const IMPOSTOR_KTX2: Ktx2Step = { encoding: 'colour-alpha', origin: 'bottom-left' };
 
+/**
+ * How an impostor's NORMAL strip is encoded — #630: as a normal map is (UASTC,
+ * linear), and flipped for the colour strip's reason, so the two strips' texels
+ * line up under one texture coordinate.
+ */
+const IMPOSTOR_NORMALS_KTX2: Ktx2Step = { encoding: 'normal', origin: 'bottom-left' };
+
 /** Where a drawn map's script lives — #624. @see OutputRecipe */
 export const DRAW_SCRIPT = 'draw-bicycle-maps.ts';
 
@@ -880,6 +887,14 @@ function tree(name: string, from: string, object: string, triangles: string): Ou
           file: `${name}-impostor.ktx2`,
           made: `${name}-impostor.png`,
           ktx2: IMPOSTOR_KTX2,
+        },
+        // #630: the same eight views' normals, so the runtime lights the far
+        // band by the world's sun rather than by the script's.
+        {
+          file: `${name}-impostor-normals.ktx2`,
+          made: `${name}-impostor-normals.png`,
+          ktx2: IMPOSTOR_NORMALS_KTX2,
+          modified: `the eight views of the full scan the impostor strip is rendered from, as NORMALS: Cycles' normal pass on one thread, in the plant's own frame in three's axes (x across, y up, z the model's front), encoded n * 0.5 + 0.5 with the background the zero vector`,
         },
       ],
     },

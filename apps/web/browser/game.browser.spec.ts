@@ -703,6 +703,16 @@ const REALISTIC_LOAD_BUDGET_MS = 165_000;
 const TREES_LOAD_BUDGET_MS = 160_000;
 
 /**
+ * #630: how much lighter the far band's sun side must read than its shade
+ * side, as a share, averaged over eight turns of the tree — **0.05** — and the
+ * most it may: **0.8**. And how many of a tree's pixels must move between two
+ * ride times: **20**.
+ */
+const IMPOSTOR_LIGHT_FLOOR = 0.05;
+const IMPOSTOR_LIGHT_CEILING = 0.8;
+const SWAY_MINIMUM_PIXELS = 20;
+
+/**
  * #627's figures for the ground's contrast (`game-harness.ts`
  * §`GroundBlendMeasurement`, a variance of relative luminance over a
  * square's mean): the least a bank of rock must differ from level grass
@@ -1061,7 +1071,9 @@ function realisticImageCount(): number {
       (sum, model) =>
         sum +
         modelFacts(join(REALISTIC_PUBLIC, model.file)).images.length +
-        (model.impostor === undefined ? 0 : 1),
+        (model.impostor === undefined ? 0 : 1) +
+        // #630: its normal strip.
+        (model.impostorNormals === undefined ? 0 : 1),
       0,
     )
   );
@@ -3360,6 +3372,37 @@ test.describe('the realistic world — ADR 0026', () => {
     // are not under, and a normal map's relief shows more in one.
     expect(blend.bankControl).toBeLessThanOrEqual(grassControl.high * BLEND_LIGHT_FACTOR);
     expect(blend.bankControl).toBeGreaterThanOrEqual(grassControl.low / BLEND_LIGHT_FACTOR);
+  });
+
+  test('lights the far band by the world’s sun, and moves the foliage on the ride’s clock — #630', async ({
+    harnessRun,
+  }) => {
+    const { foliage } = await realistic(harnessRun);
+    expect(foliage.measured).toBe(true);
+    const lean = (sun: number, shade: number): number => sun / shade - 1;
+    const lit = lean(foliage.sunSide, foliage.shadeSide);
+    const unlit = lean(foliage.sunSideUnlit, foliage.shadeSideUnlit);
+    console.log(
+      `the far band over eight turns: the sun's side ${foliage.sunSide.toFixed(4)} against the shade's ` +
+        `${foliage.shadeSide.toFixed(4)} (${(lit * 100).toFixed(1)} %); unlit ` +
+        `${foliage.sunSideUnlit.toFixed(4)} against ${foliage.shadeSideUnlit.toFixed(4)} ` +
+        `(${(unlit * 100).toFixed(1)} %; ${String(foliage.impostorPixels)} px). The breeze: ` +
+        `${String(foliage.swayChanged)} of the tree's ${String(foliage.treePixels)} px moved between ` +
+        `two times, ${String(foliage.heldChanged)} between two draws at one`,
+    );
+    // Non-vacuity: a tree was drawn, far and near.
+    expect(foliage.impostorPixels).toBeGreaterThan(400);
+    expect(foliage.treePixels).toBeGreaterThan(400);
+    // (1) The sun's side is lighter than the shade's, by a floor and under a
+    // ceiling; unlit — today's strip — the two halves read alike.
+    expect(lit).toBeGreaterThan(IMPOSTOR_LIGHT_FLOOR);
+    expect(lit).toBeLessThan(IMPOSTOR_LIGHT_CEILING);
+    expect(Math.abs(unlit)).toBeLessThan(IMPOSTOR_LIGHT_FLOOR);
+    // (2) The silhouette moves between two ride times, by some of its pixels
+    // and not by the whole tree; and at one time, not at all.
+    expect(foliage.swayChanged).toBeGreaterThan(SWAY_MINIMUM_PIXELS);
+    expect(foliage.swayChanged).toBeLessThan(foliage.treePixels);
+    expect(foliage.heldChanged).toBe(0);
   });
 
   test('lets the water reflect the sky it is under, by Fresnel — the grazing water reflects more — #629', async ({

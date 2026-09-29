@@ -393,7 +393,8 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
    * each a KTX2 file, whose own header says its size and encoding.
    */
   const textures = (): readonly {
-    readonly role: 'surface' | 'structure' | 'model' | 'impostor' | 'bicycle' | 'rider';
+    readonly role:
+      'surface' | 'structure' | 'model' | 'impostor' | 'impostor-normals' | 'bicycle' | 'rider';
     readonly facts: Ktx2Facts;
   }[] => [
     // #623: the rider's kit, relief and occlusion.
@@ -430,6 +431,15 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
         ...(model.impostor === undefined
           ? []
           : [{ role: 'impostor' as const, facts: fileKtx2Facts(at(model.impostor)) }]),
+        // #630: the strip's normals, priced as the normal maps they are.
+        ...(model.impostorNormals === undefined
+          ? []
+          : [
+              {
+                role: 'impostor-normals' as const,
+                facts: fileKtx2Facts(at(model.impostorNormals)),
+              },
+            ]),
       ]),
     ),
   ];
@@ -497,7 +507,9 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
         `Colour maps ${mib(sum((each) => standalone(each) && each.facts.scheme === 'etc1s'))}, ` +
         `normal maps ${mib(sum((each) => standalone(each) && each.facts.scheme === 'uastc'))}, ` +
         `maps inside a GLB ${mib(sum((each) => each.role === 'model'))}, ` +
-        `impostors ${mib(sum((each) => each.role === 'impostor'))}; the sky alone ${mib(skyBytes())}`,
+        `impostors ${mib(sum((each) => each.role === 'impostor'))}, ` +
+        `their normals (#630) ${mib(sum((each) => each.role === 'impostor-normals'))}; ` +
+        `the sky alone ${mib(skyBytes())}`,
     );
     expect(total).toBeLessThanOrEqual(REALISTIC_TEXTURE_MEMORY_BYTES);
     // #618's criterion: it FALLS, from the 136 MiB the RGBA8 set was estimated at.

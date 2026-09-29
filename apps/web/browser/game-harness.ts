@@ -145,6 +145,7 @@ import {
   showGroundBlobsOf,
   roadWearOf,
   groundBlendOf,
+  impostorsLitOf,
   waterFresnelOf,
   waterReflectsOf,
 } from '../src/game/three-renderer';
@@ -4402,6 +4403,8 @@ export interface RealisticMeasurement {
   readonly roadWear: RoadWearMeasurement;
   /** #627: a steep bank against level grass, blended and not. @see groundBlendProbe */
   readonly groundBlend: GroundBlendMeasurement;
+  /** #630: the far band lit by the world's sun, and a tree in the breeze. @see foliageProbe */
+  readonly foliage: FoliageMeasurement;
   /** #629: a lake's near and grazing water, reflecting and held. @see waterReflectionProbe */
   readonly waterReflection: WaterReflectionMeasurement;
   /**
@@ -5179,6 +5182,212 @@ function groundBlendProbe(
   };
 }
 
+/**
+ * #630, in two parts.
+ *
+ * 1. **The far band's light.** One broadleaf tree 45 m up a view turned so
+ *    the world's sun is square to its right, drawn as an impostor (a view of
+ *    its own, whose levels draw every tree as one), at eight turns of the
+ *    tree — the eight views of the strip. The tree's pixels are split at the
+ *    middle of their extent, and the mean relative luminance of each half is
+ *    summed over the turns: the sun's side and the shade's side, lit and
+ *    (the control) unlit. Over eight turns the SCRIPT's sun, which turns with
+ *    the tree, is on each side as often as the other, so the unlit strip's
+ *    two halves read within its own variation; the world's sun does not turn.
+ * 2. **The breeze.** One tree 12 m ahead at the top rung, a full mesh, with no
+ *    water in the frame (whose ripples run on the same clock): the pixels
+ *    that differ between the ride at two times, and — the control — between
+ *    two draws at the same time.
+ */
+export interface FoliageMeasurement {
+  readonly measured: boolean;
+  readonly sunSide: number;
+  readonly shadeSide: number;
+  readonly sunSideUnlit: number;
+  readonly shadeSideUnlit: number;
+  /** How many of the impostor tree's pixels were read, summed over the turns. */
+  readonly impostorPixels: number;
+  readonly treePixels: number;
+  readonly swayChanged: number;
+  readonly heldChanged: number;
+}
+
+const NO_FOLIAGE: FoliageMeasurement = {
+  measured: false,
+  sunSide: 0,
+  shadeSide: 0,
+  sunSideUnlit: 0,
+  shadeSideUnlit: 0,
+  impostorPixels: 0,
+  treePixels: 0,
+  swayChanged: 0,
+  heldChanged: 0,
+};
+
+/** @see FoliageMeasurement */
+function foliageProbe(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  riding: (profile: ReturnType<typeof northRoute>, distance: number) => SceneFrame,
+  top: QualitySettings,
+): FoliageMeasurement {
+  const base = riding(
+    northRoute(2_000, () => 10),
+    400,
+  );
+  const noWater = (frame: SceneFrame): SceneFrame => ({
+    ...frame,
+    markers: [],
+    water: {
+      ...frame.water,
+      surface: { ...frame.water.surface, indices: new Uint32Array(0) },
+      bridges: [],
+    },
+  });
+  // 1. The far band. The view turned so the sun is on the right.
+  const sun = base.world.sun;
+  const flat = Math.hypot(sun.x, sun.z) || 1;
+  const headingX = sun.z / flat;
+  const headingZ = -sun.x / flat;
+  const turned: SceneFrame = noWater({
+    ...base,
+    camera: { ...base.camera, headingX, headingZ },
+  });
+  const treeAt = (ahead: number, rotation: number): ScatterItem => ({
+    kind: 'tree-broadleaf',
+    x: turned.camera.x + headingX * ahead,
+    y: turned.camera.y,
+    z: turned.camera.z + headingZ * ahead,
+    rotation,
+    scale: 1,
+    variant: 0,
+  });
+  // Undithered: a dithered hand-over draws the first rank as the band between
+  // the full mesh and the middle one, whatever `near` says (`tree-levels.ts`).
+  setTreeLevels({ ...REALISTIC_TREE_LEVELS, near: 0, middle: 0, dithered: false });
+  const farCanvas = document.createElement('canvas');
+  let far: GameView;
+  try {
+    far = threeGameRenderer.create(farCanvas, top);
+  } finally {
+    setTreeLevels(REALISTIC_TREE_LEVELS);
+  }
+  far.resize(canvas.width, canvas.height);
+  const farGl = farCanvas.getContext('webgl2');
+  if (farGl === null) {
+    far.destroy();
+    return NO_FOLIAGE;
+  }
+  const settled = (
+    target: GameView,
+    context: WebGL2RenderingContext,
+    frame: SceneFrame,
+  ): Uint8Array => {
+    for (let at = 0; at < 11; at += 1) target.render(frame);
+    return readRegion(context, 0, 0, canvas.width, canvas.height);
+  };
+  const width = canvas.width;
+  const sides = (): { sun: number; shade: number; pixels: number } => {
+    const empty = settled(far, farGl, { ...turned, scatter: [] });
+    let sunTotal = 0;
+    let shadeTotal = 0;
+    let pixels = 0;
+    for (let turn = 0; turn < 8; turn += 1) {
+      const drawn = settled(far, farGl, { ...turned, scatter: [treeAt(45, (turn * Math.PI) / 4)] });
+      let low = width;
+      let high = -1;
+      const tree: number[] = [];
+      for (let pixel = 0; pixel < drawn.length / 4; pixel += 1) {
+        const at = pixel * 4;
+        if (
+          Math.abs((drawn[at] ?? 0) - (empty[at] ?? 0)) +
+            Math.abs((drawn[at + 1] ?? 0) - (empty[at + 1] ?? 0)) +
+            Math.abs((drawn[at + 2] ?? 0) - (empty[at + 2] ?? 0)) >
+          6
+        ) {
+          tree.push(pixel);
+          low = Math.min(low, pixel % width);
+          high = Math.max(high, pixel % width);
+        }
+      }
+      const middle = (low + high) / 2;
+      let right = 0;
+      let rightCount = 0;
+      let left = 0;
+      let leftCount = 0;
+      for (const pixel of tree) {
+        const at = pixel * 4;
+        const luminance = relativeLuminanceOf(
+          drawn[at] ?? 0,
+          drawn[at + 1] ?? 0,
+          drawn[at + 2] ?? 0,
+        );
+        if (pixel % width > middle) {
+          right += luminance;
+          rightCount += 1;
+        } else {
+          left += luminance;
+          leftCount += 1;
+        }
+      }
+      // The sun is on the right: the right half is its side.
+      sunTotal += rightCount === 0 ? 0 : right / rightCount;
+      shadeTotal += leftCount === 0 ? 0 : left / leftCount;
+      pixels += tree.length;
+    }
+    return { sun: sunTotal / 8, shade: shadeTotal / 8, pixels };
+  };
+  const lit = sides();
+  impostorsLitOf(false);
+  let unlit: ReturnType<typeof sides>;
+  try {
+    unlit = sides();
+  } finally {
+    impostorsLitOf(true);
+  }
+  far.destroy();
+
+  // 2. The breeze, on the product's own view.
+  const near = noWater(
+    riding(
+      northRoute(2_000, () => 10),
+      400,
+    ),
+  );
+  const oneTree: SceneFrame = {
+    ...near,
+    scatter: [
+      {
+        kind: 'tree-broadleaf',
+        ...onTheRoad(near, 14, -6),
+        rotation: 0.3,
+        scale: 1,
+        variant: 0,
+      },
+    ],
+  };
+  const at = (seconds: number): SceneFrame => ({
+    ...oneTree,
+    water: { ...oneTree.water, seconds },
+  });
+  const empty = settled(view, gl, { ...at(10), scatter: [] });
+  const first = settled(view, gl, at(10));
+  const later = settled(view, gl, at(11.3));
+  const again = settled(view, gl, at(10));
+  return {
+    measured: true,
+    sunSide: lit.sun,
+    shadeSide: lit.shade,
+    sunSideUnlit: unlit.sun,
+    shadeSideUnlit: unlit.shade,
+    impostorPixels: lit.pixels,
+    treePixels: pixelsChanged(first, empty),
+    swayChanged: pixelsChanged(first, later),
+    heldChanged: pixelsChanged(first, again),
+  };
+}
+
 /** What {@link airProbe} reports when it did not run. */
 const NO_AIR: AirMeasurement = {
   measured: false,
@@ -5202,6 +5411,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   air: NO_AIR,
   roadWear: NO_ROAD_WEAR,
   groundBlend: NO_GROUND_BLEND,
+  foliage: NO_FOLIAGE,
   waterReflection: NO_WATER_REFLECTION,
   atmosphere: {
     realisticTaught: 0,
@@ -6472,6 +6682,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const groundBlend = groundBlendProbe(view, gl, canvas, riding);
   phaseEnds('realistic: ground blend — #627');
 
+  // #630: the far band's light, and the breeze.
+  const foliage = foliageProbe(view, gl, canvas, riding, top);
+  phaseEnds('realistic: foliage — #630');
+
   // #629: the water, on the lake.
   const waterReflection = waterReflectionProbe(view, gl, canvas, riding);
   phaseEnds('realistic: water reflection — #629');
@@ -6750,6 +6964,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     measured: true,
     roadWear,
     groundBlend,
+    foliage,
     waterReflection,
     waterReflectsAfterStepDown,
     textures,

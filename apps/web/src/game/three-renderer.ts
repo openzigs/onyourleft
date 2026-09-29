@@ -332,6 +332,16 @@ import {
 } from './realistic-assets';
 import { REALISTIC_TRANSCODER_DIRECTORY } from './transcoder-files';
 import {
+  FOLIAGE_SWAY_METRES,
+  FOLIAGE_WAVES,
+  foliageWindDirection,
+  IMPOSTOR_CROWN_SHARE,
+  IMPOSTOR_RELIGHT_RANGE,
+  SCRIPT_SKY_SHARE,
+  scriptSunToward,
+  WOOD_SWAY_SHARE,
+} from './foliage-light';
+import {
   ROAD_EDGE_METRES,
   ROCK_SLOPE_DEGREES,
   SCREE_BAND_METRES,
@@ -5104,7 +5114,12 @@ export interface RealisticShape {
   readonly extent: number;
   readonly triangles: number;
   /** The far band's billboard, for a tree. */
-  readonly impostor?: { readonly material: ShaderMaterial; readonly texture: Texture };
+  readonly impostor?: {
+    readonly material: ShaderMaterial;
+    readonly texture: Texture;
+    /** The same views' normals — #630. Absent in a world a test built without them. */
+    readonly normals?: Texture;
+  };
   /**
    * The middle level of detail, for a tree — #617. Its parts wear the near
    * parts' OWN materials, paired by material name, so it adds no material, no
@@ -5372,7 +5387,15 @@ const BLOCK_FORMATS: ReadonlyMap<number, RealisticTextureFormat> = new Map([
 /** One realistic texture, as the GPU is handed it. */
 interface RealisticTextureReport {
   readonly role:
-    'road' | 'ground' | 'structure' | 'model' | 'impostor' | 'bicycle' | 'rider' | 'sky';
+    | 'road'
+    | 'ground'
+    | 'structure'
+    | 'model'
+    | 'impostor'
+    | 'impostor-normals'
+    | 'bicycle'
+    | 'rider'
+    | 'sky';
   readonly format: RealisticTextureFormat;
   /** Whether the GPU holds it in a block format — never true of a fallback. */
   readonly compressed: boolean;
@@ -5467,6 +5490,7 @@ export function realisticTextureReport(): readonly RealisticTextureReport[] {
       for (const part of shape.parts)
         for (const map of texturesOf(part.material)) add(map, 'model');
       add(shape.impostor?.texture, 'impostor');
+      add(shape.impostor?.normals, 'impostor-normals');
     }
   }
   return out;
@@ -5503,6 +5527,7 @@ export function uploadRealisticTexturesOf(view: GameView, textures?: readonly Te
             shapes.flatMap((shape) => [
               ...shape.parts.flatMap((part) => texturesOf(part.material)),
               shape.impostor?.texture ?? null,
+              shape.impostor?.normals ?? null,
             ]),
           ),
         ].filter((texture): texture is Texture => texture !== null));
@@ -5595,19 +5620,26 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     }));
     const shapes = REALISTIC_VEGETATION_KINDS.map((kind) => ({
       kind,
-      models: REALISTIC_VEGETATION[kind].map(({ name, file, impostor, middle }) => ({
-        name,
-        scene: model(() => loaders.model(realisticUrl(file))),
-        // #617: the tree's middle level, loaded and settled with everything else.
-        middle:
-          middle === undefined
-            ? Promise.resolve(undefined)
-            : model(() => loaders.model(realisticUrl(middle))),
-        strip:
-          impostor === undefined
-            ? Promise.resolve(undefined)
-            : texture(() => loaders.texture(realisticUrl(impostor))),
-      })),
+      models: REALISTIC_VEGETATION[kind].map(
+        ({ name, file, impostor, impostorNormals, middle }) => ({
+          name,
+          scene: model(() => loaders.model(realisticUrl(file))),
+          // #617: the tree's middle level, loaded and settled with everything else.
+          middle:
+            middle === undefined
+              ? Promise.resolve(undefined)
+              : model(() => loaders.model(realisticUrl(middle))),
+          strip:
+            impostor === undefined
+              ? Promise.resolve(undefined)
+              : texture(() => loaders.texture(realisticUrl(impostor))),
+          // #630: the strip's normals, loaded and settled with everything else.
+          normals:
+            impostorNormals === undefined
+              ? Promise.resolve(undefined)
+              : texture(() => loaders.texture(realisticUrl(impostorNormals))),
+        }),
+      ),
     }));
     // ⚠️ **Every load is SETTLED before anything is decided — #478.** This was
     // a `Promise.all`, which rejects on the first failure while every other
@@ -5629,7 +5661,9 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       ...riderMaps.map((each) => each.texture),
       ...bicycleMaps.map((each) => each.texture),
       ...structureMaps.flatMap((each) => [each.colour, each.normal]),
-      ...shapes.flatMap((each) => each.models.flatMap((one) => [one.scene, one.strip, one.middle])),
+      ...shapes.flatMap((each) =>
+        each.models.flatMap((one) => [one.scene, one.strip, one.normals, one.middle]),
+      ),
     ]);
     for (const outcome of settled) {
       if (outcome.status === 'rejected') throw outcome.reason;
@@ -5638,7 +5672,12 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     for (const each of shapes) {
       const prepared: RealisticShape[] = [];
       for (const one of each.models) {
-        const near = prepareRealisticShape(await one.scene, one.name, await one.strip);
+        const near = prepareRealisticShape(
+          await one.scene,
+          one.name,
+          await one.strip,
+          await one.normals,
+        );
         loaded.shapes.push(near);
         const middleScene = await one.middle;
         const levelled =
@@ -5648,6 +5687,8 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
         // is the browser gate loading its control. @see setRealisticMaterialsMerged
         const shape = realisticMaterialsMerged ? mergeShapeMaterials(levelled, one.name) : levelled;
         loaded.shapes[loaded.shapes.length - 1] = shape;
+        // #630: every plant's foliage sways, and a rock does not.
+        if (each.kind !== 'rock') withFoliageSwayOf(shape);
         prepared.push(shape);
       }
       vegetation.set(each.kind, prepared);
@@ -5860,6 +5901,7 @@ function releaseRealisticShape(shape: RealisticShape): void {
     part.material.dispose();
   }
   shape.impostor?.texture.dispose();
+  shape.impostor?.normals?.dispose();
   shape.impostor?.material.dispose();
   // #617: the middle level's geometry is its own; its materials are the near parts'.
   for (const part of shape.middle?.parts ?? []) part.geometry.dispose();
@@ -5936,6 +5978,7 @@ export function prepareRealisticShape(
   source: Object3D,
   name: string,
   impostorStrip?: Texture,
+  impostorNormals?: Texture,
 ): RealisticShape {
   source.updateWorldMatrix(false, true);
   const parts: RealisticPart[] = [];
@@ -5986,7 +6029,11 @@ export function prepareRealisticShape(
   const impostor =
     impostorStrip === undefined
       ? undefined
-      : { texture: impostorStrip, material: impostorMaterial(impostorStrip, extras) };
+      : {
+          texture: impostorStrip,
+          material: impostorMaterial(impostorStrip, extras, impostorNormals),
+          ...(impostorNormals === undefined ? {} : { normals: impostorNormals }),
+        };
   return { name, parts, extent, triangles, ...(impostor === undefined ? {} : { impostor }) };
 }
 
@@ -6207,6 +6254,8 @@ export function mergeShapeMaterials(shape: RealisticShape, name: string): Realis
   );
   withTextureLodBias(material);
   withAtmosphere(material);
+  // #630: which layers are leaves, for the breeze. @see withFoliageSwayOf
+  FOLIAGE_LAYERS.set(material, cut);
   withMaterialLayers(material, {
     colours: layers.map((each) => each.color.clone()),
     normalScales: layers.map((each) => each.normalScale.clone()),
@@ -7061,6 +7110,106 @@ function withTreeDither(material: MeshStandardMaterial): void {
 }
 
 /** A unit quad standing on its bottom edge: x in [−0.5, 0.5], y in [0, 1]. */
+/**
+ * The uniforms every realistic plant's breeze and every impostor's light read
+ * — #630 — written once a frame by the view that draws, for `ATMOSPHERE`'s
+ * reason: several views share the loaded world's materials.
+ */
+const FOLIAGE = {
+  oylWindTime: { value: 0 },
+  oylWindDirection: { value: new Vector2(...foliageWindDirection()) },
+  oylSunToward: { value: new Vector3(0, 1, 0) },
+  oylSunAmbient: { value: 0.5 },
+  oylSunDirect: { value: 0.5 },
+  /** 1 in the product; 0 is the browser gate's control, today's unlit strip. @see impostorsLitOf */
+  oylImpostorLit: { value: 1 },
+};
+
+/** Which layers of a merged tree material are leaves — #630. @see mergeShapeMaterials */
+const FOLIAGE_LAYERS = new WeakMap<Material, readonly boolean[]>();
+
+/** Materials already taught the breeze. */
+const SWAYING = new WeakSet<Material>();
+
+/**
+ * The breeze, in GLSL: the three waves of `foliage-light.ts`
+ * §`FOLIAGE_WAVES`, and a tree's phase hashed from where it stands.
+ */
+const FOLIAGE_SWAY_COMMON = /* glsl */ `
+uniform float oylWindTime;
+uniform vec2 oylWindDirection;
+float oylSwayWave(float phase) {
+  return ${FOLIAGE_WAVES.map(
+    ([rate, weight, phases]) =>
+      `${glslFloat(weight)} * sin(oylWindTime * ${glslFloat(rate)} + phase * ${glslFloat(phases)})`,
+  ).join(' + ')};
+}
+float oylSwayPhase(vec2 place) {
+  return fract(sin(dot(floor(place * 10.0), vec2(12.9898, 78.233))) * 43758.5453) * 6.2831853;
+}
+`;
+
+/**
+ * Teaches every material a realistic plant wears the breeze — #630: a push
+ * along `foliage-light.ts` §`foliageWindDirection`, of
+ * `FOLIAGE_SWAY_METRES` at the top of the plant, falling off as the square of
+ * the height, and a {@link WOOD_SWAY_SHARE} of that for a layer that is not
+ * leaves. In the vertex shader before three instances the vertex, turned into
+ * the instance's own frame, so a tree of any turn and size is pushed the same
+ * way by the same metres. Idempotent.
+ */
+function withFoliageSwayOf(shape: RealisticShape): void {
+  const materials = new Set<Material>(
+    [...shape.parts, ...(shape.middle?.parts ?? [])].map((part) => part.material),
+  );
+  const height = shape.extent;
+  for (const material of materials) {
+    if (SWAYING.has(material)) continue;
+    SWAYING.add(material);
+    const layers = FOLIAGE_LAYERS.get(material) ?? [material.alphaTest > 0];
+    const weights = layers.map((leaves) => (leaves ? 1 : WOOD_SWAY_SHARE));
+    const weight =
+      layers.length > 1
+        ? `oylSwayLayer[int(oylLayer + 0.5)]`
+        : glslFloat(weights[0] ?? WOOD_SWAY_SHARE);
+    const earlier = material.onBeforeCompile.bind(material);
+    const earlierKey = material.customProgramCacheKey();
+    material.onBeforeCompile = (shader, renderer) => {
+      earlier(shader, renderer);
+      shader.uniforms['oylWindTime'] = FOLIAGE.oylWindTime;
+      shader.uniforms['oylWindDirection'] = FOLIAGE.oylWindDirection;
+      if (layers.length > 1) shader.uniforms['oylSwayLayer'] = { value: weights };
+      shader.vertexShader = replacedOrThrown(
+        replacedOrThrown(
+          shader.vertexShader,
+          '#include <common>',
+          `#include <common>\n${FOLIAGE_SWAY_COMMON}${
+            layers.length > 1 ? `uniform float oylSwayLayer[${String(layers.length)}];\n` : ''
+          }`,
+          'vertex',
+          "#630's breeze",
+        ),
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+#ifdef USE_INSTANCING
+{
+  vec3 oylCentre = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+  float oylRise = clamp(position.y / ${glslFloat(height)}, 0.0, 1.0);
+  vec2 oylPush = oylWindDirection
+    * (${glslFloat(FOLIAGE_SWAY_METRES)} * oylSwayWave(oylSwayPhase(oylCentre.xz)) * oylRise * oylRise * ${weight});
+  mat3 oylBasis = mat3(instanceMatrix);
+  transformed += transpose(oylBasis) * vec3(oylPush.x, 0.0, oylPush.y) / dot(oylBasis[0], oylBasis[0]);
+}
+#endif`,
+        'vertex',
+        "#630's breeze",
+      );
+    };
+    material.customProgramCacheKey = () => `${earlierKey}|oyl-breeze-${String(layers.length)}`;
+    material.needsUpdate = true;
+  }
+}
+
 function impostorQuad(): BufferGeometry {
   return new PlaneGeometry(1, 1).translate(0, 0.5, 0);
 }
@@ -7071,13 +7220,17 @@ function impostorQuad(): BufferGeometry {
  * from the scan the strip was rendered from. Constructed here — D-11 — and
  * alpha-tested so it depth-sorts with the near meshes.
  *
- * ⚠️ **Unlit**: the strip was rendered lit, by the pipeline's own sun. It is
- * fogged, tone mapped and colour-managed exactly as a lit material is, so it
- * fades into the horizon with everything else.
+ * ⚠️ **Lit by the world's sun since #630**, where it was unlit: the strip was
+ * rendered lit, by the pipeline's own sun, so each texel is relit from the
+ * normal strip the pipeline bakes beside it — the world's shade over the
+ * script's (`foliage-light.ts`). It is fogged, tone mapped and colour-managed
+ * exactly as a lit material is, so it fades into the horizon with everything
+ * else. And it sways with the meshes, as a shear of the quad.
  */
 function impostorMaterial(
   strip: Texture,
   extras: Readonly<Record<string, unknown>>,
+  normals?: Texture,
 ): ShaderMaterial {
   const frames = Number(extras['oyl_impostor_frames']);
   const ortho = Number(extras['oyl_impostor_scale']);
@@ -7091,11 +7244,21 @@ function impostorMaterial(
     image?.width !== undefined && image.height !== undefined && image.height > 0
       ? image.width / frames / image.height
       : 0.5;
+  const scriptSun = scriptSunToward();
   const material = new ShaderMaterial({
-    uniforms: UniformsUtils.merge([UniformsLib.fog, { strip: { value: null } }]),
+    uniforms: UniformsUtils.merge([
+      UniformsLib.fog,
+      { strip: { value: null }, stripNormals: { value: null } },
+    ]),
     fog: true,
     side: DoubleSide,
     defines: {
+      ...(normals === undefined ? {} : { OYL_LIT_IMPOSTOR: '' }),
+      TREE_HEIGHT: height.toFixed(5),
+      TREE_WIDTH: (Number(extras['oyl_scan_width']) > 0
+        ? Number(extras['oyl_scan_width'])
+        : height
+      ).toFixed(5),
       FRAMES: frames.toFixed(1),
       QUAD_W: (ortho * frameAspect).toFixed(5),
       QUAD_H: ortho.toFixed(5),
@@ -7109,7 +7272,12 @@ function impostorMaterial(
       varying vec2 vStripUv;
       varying vec2 vOylKeep;
       varying vec3 vOylTint;
+      varying vec2 vOylAcross;
+      varying vec2 vOylAlong;
+      varying vec2 vOylFacing;
+      varying vec2 vOylCrown;
       ${TINT_DECODE_GLSL}
+      ${FOLIAGE_SWAY_COMMON}
       void main() {
         #ifdef USE_INSTANCING_COLOR
           vOylKeep = instanceColor.xy;
@@ -7131,6 +7299,19 @@ function impostorMaterial(
         vec3 world = centre
           + right * position.x * QUAD_W * size
           + vec3(0.0, QUAD_BOTTOM + position.y * QUAD_H, 0.0) * size;
+        // #630: the breeze, as a shear of the quad matching the meshes' push.
+        float oylRise = clamp((QUAD_BOTTOM + position.y * QUAD_H) / TREE_HEIGHT, 0.0, 1.0);
+        world.xz += oylWindDirection
+          * (${glslFloat(FOLIAGE_SWAY_METRES)} * oylSwayWave(oylSwayPhase(centre.xz)) * oylRise * oylRise);
+        vOylAcross = normalize(across.xz + vec2(1e-6, 0.0));
+        vOylFacing = facing;
+        // Where on the crown this corner is: across the quad, and up it from
+        // the crown's middle (half the scan's height), each in [-1, 1].
+        vOylCrown = vec2(
+          position.x * 2.0 * QUAD_W / TREE_WIDTH,
+          ((QUAD_BOTTOM + position.y * QUAD_H) / TREE_HEIGHT) * 2.0 - 1.0
+        );
+        vOylAlong = normalize(along.xz + vec2(0.0, 1e-6));
         vStripUv = vec2((frame + uv.x) / FRAMES, uv.y);
         vec4 mvPosition = viewMatrix * vec4(world, 1.0);
         gl_Position = projectionMatrix * mvPosition;
@@ -7141,14 +7322,58 @@ function impostorMaterial(
       #include <common>
       #include <fog_pars_fragment>
       uniform sampler2D strip;
+      uniform sampler2D stripNormals;
+      uniform vec3 oylSunToward;
+      uniform float oylSunAmbient;
+      uniform float oylSunDirect;
+      uniform float oylImpostorLit;
       varying vec2 vStripUv;
       varying vec2 vOylKeep;
       varying vec3 vOylTint;
+      varying vec2 vOylAcross;
+      varying vec2 vOylAlong;
+      varying vec2 vOylFacing;
+      varying vec2 vOylCrown;
       ${TINT_APPLY_GLSL}
       void main() {
         ${TREE_DITHER_DISCARD}
         vec4 texel = texture2D(strip, vStripUv);
         if (texel.a < ${REALISTIC_ALPHA_CUTOFF.toFixed(2)}) discard;
+        #ifdef OYL_LIT_IMPOSTOR
+        {
+          // #630: relit by the world's sun, from the strip's own normals.
+          vec3 oylLocal = texture2D(stripNormals, vStripUv).xyz * 2.0 - 1.0;
+          if (dot(oylLocal, oylLocal) > 0.0025) {
+            vec3 oylAcrossW = vec3(vOylAcross.x, 0.0, vOylAcross.y);
+            vec3 oylAlongW = vec3(vOylAlong.x, 0.0, vOylAlong.y);
+            // The baked normal, turned into the world with the instance.
+            vec3 oylBakedW = oylAcrossW * oylLocal.x + vec3(0.0, oylLocal.y, 0.0) + oylAlongW * oylLocal.z;
+            // ⚠️ **And the crown's own**, measured: a leaf card's normal in
+            // Cycles' pass faces the camera that rendered it whichever way
+            // the card is turned, so the strip's normals over a canopy
+            // average toward the viewer and carry no left or right — the
+            // first version relit a tree 45 m off by 1 % between its sides.
+            // So the texel's place on a sphere round the crown carries the
+            // shape (${String(Math.round(IMPOSTOR_CROWN_SHARE * 100))} %), and the strip the detail.
+            vec3 oylRight = vec3(vOylFacing.y, 0.0, -vOylFacing.x);
+            vec3 oylToward = vec3(vOylFacing.x, 0.0, vOylFacing.y);
+            vec2 oylOn = clamp(vOylCrown, -1.0, 1.0);
+            vec3 oylCrownW = oylRight * oylOn.x + vec3(0.0, oylOn.y, 0.0)
+              + oylToward * sqrt(max(1.0 - dot(oylOn, oylOn), 0.0));
+            vec3 oylWorld = normalize(
+              mix(oylBakedW, oylCrownW, ${glslFloat(IMPOSTOR_CROWN_SHARE)}) + vec3(0.0, 1e-4, 0.0)
+            );
+            // The same normal in the plant's frame, where the script's sun is.
+            vec3 oylInPlant = vec3(dot(oylWorld, oylAcrossW), oylWorld.y, dot(oylWorld, oylAlongW));
+            float oylUnder = (oylSunAmbient + oylSunDirect * max(dot(oylWorld, oylSunToward), 0.0))
+              / max(oylSunAmbient + oylSunDirect * 0.5, 1e-4);
+            float oylBaked = (${glslFloat(SCRIPT_SKY_SHARE)} + max(dot(oylInPlant, vec3(${scriptSun.map((each) => each.toFixed(5)).join(', ')})), 0.0))
+              / ${glslFloat(SCRIPT_SKY_SHARE + 0.5)};
+            float oylRelit = clamp(oylUnder / oylBaked, ${glslFloat(IMPOSTOR_RELIGHT_RANGE[0])}, ${glslFloat(IMPOSTOR_RELIGHT_RANGE[1])});
+            texel.rgb *= mix(1.0, oylRelit, oylImpostorLit);
+          }
+        }
+        #endif
         // #621: the same tint the tree's meshes wear, on the light it was baked with.
         gl_FragColor = vec4(oylTinted(texel.rgb, vOylTint), 1.0);
         #include <tonemapping_fragment>
@@ -7158,6 +7383,14 @@ function impostorMaterial(
     `,
   });
   (material.uniforms['strip'] as { value: Texture | null }).value = strip;
+  // #630: the normals, and the world's sun as this frame's view wrote it.
+  (material.uniforms['stripNormals'] as { value: Texture | null }).value = normals ?? null;
+  material.uniforms['oylSunToward'] = FOLIAGE.oylSunToward;
+  material.uniforms['oylSunAmbient'] = FOLIAGE.oylSunAmbient;
+  material.uniforms['oylSunDirect'] = FOLIAGE.oylSunDirect;
+  material.uniforms['oylImpostorLit'] = FOLIAGE.oylImpostorLit;
+  material.uniforms['oylWindTime'] = FOLIAGE.oylWindTime;
+  material.uniforms['oylWindDirection'] = FOLIAGE.oylWindDirection;
   // #619 lever 2: the strip is mipmapped, so the far band sheds with the rest.
   // #622: its fog is three's chunk like any other, so it breathes the same air.
   return constructed(withAtmosphere(withTextureLodBias(material)));
@@ -9970,6 +10203,7 @@ export function evictRealisticWorldFromGpu(): void {
       }
       for (const part of shape.middle?.parts ?? []) part.geometry.dispose();
       shape.impostor?.texture.dispose();
+      shape.impostor?.normals?.dispose();
     }
   }
   for (const maps of world.structures.values()) {
@@ -10229,6 +10463,19 @@ function warmNearFieldShapes(world: DrawnWorld): void {
  */
 export function horizonFromSkyOf(view: GameView, on: boolean): void {
   if (view instanceof ThreeGameView) view.horizonFromSky(on);
+}
+
+/**
+ * Lights the realistic trees' far band by the world's sun, or (`false`) draws
+ * the strips as they were before #630 — the browser gate's control. Module
+ * state, for `FOLIAGE`'s reason: every view shares the loaded world's
+ * materials.
+ *
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`;
+ * the product always lights them.
+ */
+export function impostorsLitOf(on: boolean): void {
+  FOLIAGE.oylImpostorLit.value = on ? 1 : 0;
 }
 
 /**
@@ -10649,6 +10896,13 @@ class ThreeGameView implements GameView {
     // #622, for the same reason. Only the realistic world's materials read
     // these, so a stylised frame has nothing to write.
     if (this.#drawing === 'realistic') {
+      // #630: the ride's clock for the breeze, and the world's sun for the far band.
+      FOLIAGE.oylWindTime.value = frame.water.seconds;
+      FOLIAGE.oylSunToward.value
+        .set(frame.world.sun.x, frame.world.sun.y, frame.world.sun.z)
+        .normalize();
+      FOLIAGE.oylSunAmbient.value = frame.world.sun.ambient;
+      FOLIAGE.oylSunDirect.value = frame.world.sun.direct;
       ATMOSPHERE.oylFogTable.value.set(this.#airOutput);
       ATMOSPHERE.oylFogShare.value = this.#air?.share ?? 0;
       ATMOSPHERE.oylSkyTurn.value = this.#air?.turn ?? 0;

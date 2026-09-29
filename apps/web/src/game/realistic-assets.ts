@@ -286,6 +286,12 @@ export interface RealisticModel {
    */
   readonly impostor?: string;
   /**
+   * The same eight views' normals, for a tree — #630: what lights the far band
+   * by the world's sun (`three-renderer.ts` §`impostorMaterial`). Present
+   * exactly when {@link impostor} is.
+   */
+  readonly impostorNormals?: string;
+  /**
    * The middle level of detail, for a tree — #617: the same scan thinned to
    * `realistic-budget.ts` §`REALISTIC_TRIANGLES`' `tree-middle`, carrying no
    * image, drawn between the nearest trees and the impostors
@@ -309,12 +315,14 @@ export const REALISTIC_VEGETATION: Readonly<
       name: 'island_tree_02',
       file: 'island_tree_02.glb',
       impostor: 'island_tree_02-impostor.ktx2',
+      impostorNormals: 'island_tree_02-impostor-normals.ktx2',
       middle: 'island_tree_02-middle.glb',
     },
     {
       name: 'tree_small_02',
       file: 'tree_small_02.glb',
       impostor: 'tree_small_02-impostor.ktx2',
+      impostorNormals: 'tree_small_02-impostor-normals.ktx2',
       middle: 'tree_small_02-middle.glb',
     },
   ],
@@ -323,12 +331,14 @@ export const REALISTIC_VEGETATION: Readonly<
       name: 'fir_sapling_medium_a',
       file: 'fir_sapling_medium_a.glb',
       impostor: 'fir_sapling_medium_a-impostor.ktx2',
+      impostorNormals: 'fir_sapling_medium_a-impostor-normals.ktx2',
       middle: 'fir_sapling_medium_a-middle.glb',
     },
     {
       name: 'fir_sapling_medium_b',
       file: 'fir_sapling_medium_b.glb',
       impostor: 'fir_sapling_medium_b-impostor.ktx2',
+      impostorNormals: 'fir_sapling_medium_b-impostor-normals.ktx2',
       middle: 'fir_sapling_medium_b-middle.glb',
     },
   ],
@@ -454,7 +464,7 @@ export function realisticFiles(): readonly string[] {
     REALISTIC_SURFACES.rock.normal,
     ...REALISTIC_VEGETATION_KINDS.flatMap((kind) =>
       REALISTIC_VEGETATION[kind].flatMap((model) =>
-        [model.file, model.impostor, model.middle].filter(
+        [model.file, model.impostor, model.impostorNormals, model.middle].filter(
           (file): file is string => file !== undefined,
         ),
       ),
