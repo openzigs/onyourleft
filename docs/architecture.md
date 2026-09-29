@@ -1239,7 +1239,8 @@ in this repository as `apps/instance`; [ADR 0037](adr/0037-instance-runtime-host
 decided how it is built. [#767](https://github.com/openzigs/onyourleft/issues/767) scaffolded it and
 [#36](https://github.com/openzigs/onyourleft/issues/36) gave it an API contract and an error model.
 **What it does today is small on purpose**: it answers four metadata routes and nothing else. No
-account, no sync, no database and no room exists yet — #772, #776, #769 and #779/#780 build them.
+account, no sync and no room exists yet — #772, #776 and #779/#780 build them. The database (#769)
+and the blob store (#770) exist since #842 and nothing calls them yet; see "Storage" below.
 
 **The device is canonical and a rider with no instance loses nothing** (ADR 0036 D-3). Nothing in
 `apps/web` or `apps/mobile` imports the instance, and nothing may: a client reaches it over the
@@ -1264,9 +1265,11 @@ names nothing from Node, so the Node listener that fronts it today and the Durab
 (#781) mount the same code (ADR 0037 D-2). Every rule — the body limit, routing, the error shape,
 the log — is the handler's, so two adapters cannot disagree about any of them.
 
-**No build step and no runtime dependency.** Node 24 strips the types and runs `src/main.ts` as
-committed, so the tsconfig adds `allowImportingTsExtensions` and `erasableSyntaxOnly`. The instance
-imports nothing but Node, which `apps/instance/third-party.txt` states and `check:notices` holds —
+**No build step, and one third-party runtime dependency.** Node 24 strips the types and runs
+`src/main.ts` as committed, so the tsconfig adds `allowImportingTsExtensions` and
+`erasableSyntaxOnly`. The instance imports nothing but Node, this repository's own packages and —
+since #769, in `src/store/` alone — `kysely` (ADR 0037 D-9), which
+`apps/instance/third-party.txt` states and `check:notices` holds —
 and that document is **the instance's own**, served at `GET /licences/third-party.txt` and kept out
 of the app's notices (§4g of `CLAUDE.md`), because a rider's device carries none of it.
 
@@ -1274,6 +1277,20 @@ of the app's notices (§4g of `CLAUDE.md`), because a rider's device carries non
 at the build's commit, or with the URL an operator who modified their instance configured. The
 instance refuses to start knowing neither, and the Docker build refuses to build without the commit,
 because the only other answer is `main`, which is not what is running.
+
+#### Storage (#769, #770)
+
+| Concern | Decision | Where |
+|---|---|---|
+| The port | `SqlStore`: athletes, device keys, sessions, signed activity records, rooms and results, and `eraseAthlete`. Every athlete-scoped read takes the athlete first and filters on it; a device key or session token held by one athlete is never re-pointed at another | `src/store/sql-store.ts` |
+| The driver | SQLite through `node:sqlite` (ADR 0037 D-5's first option; `better-sqlite3` not taken). ⚠️ **Kysely 0.29.6 reads no rows from `node:sqlite` as it is** — it calls `all()` only when `stmt.reader` is set, which `StatementSync` lacks — so `node-sqlite.ts` adapts it (`reader` from the column count, parameters spread) and rewrites Kysely's bare `begin` to `BEGIN IMMEDIATE`, because a DEFERRED transaction that upgrades to a writer in WAL fails with `SQLITE_BUSY` whatever the busy timeout. WAL and a 5 s busy timeout on every connection. The one file that names `node:sqlite`, and `src/store/` the only directory that may name it or Kysely (`eslint.config.js`) | `src/store/node-sqlite.ts`, `open-sql-store.ts` |
+| Migrations | Kysely's `Migrator`, over a list that REQUIRES `down` (Kysely's is optional and its `migrateDown` skips one without). `migrations.test.ts` reads the directory, and for each migration applies `1…n-1`, `n`, `down(n)` and `up(n)`, comparing `sqlite_schema` and fixture rows each time. `tools/migrate.ts` is the operator's hand tool | `src/store/migrations/`, `migrate.ts` |
+| Proof | A round-trip harness whose read cannot be served by the writing connection, run red against three broken stores; athlete scoping enumerated from the port's keys over three athletes; erasure against every table with a foreign key to `athlete`, found in the schema, with every reference between two athlete-scoped tables carrying `athlete_id` on both sides (#842 review: a session could name another athlete's key and block that erasure); two writer THREADS with no `SQLITE_BUSY` escaping, and a busy-timeout-0 control that must see one | `src/store/testing/`, `src/store/*.test.ts` |
+| Blobs | Content-addressed by SHA-256 (Web Crypto, so portable): `put`/`get`/`has`/`delete`, a key refused unless it is 64 lowercase hex characters, before any path or URL is made. Local disk by default (write to `incoming/`, fsync, rename — a `SIGKILL` mid-write leaves nothing under the final name), an in-memory fake, and S3-compatible over `fetch` with its own SigV4 (reproducing AWS's worked example). One conformance suite runs all three; the bucket half only when `OYL_INSTANCE_S3_*` is set | `src/blob/` |
+
+⚠️ **Nothing calls either yet.** `main.ts` opens no database, and the Docker image copies `src/`
+without installing `node_modules`, so a route that imports the store needs the image to install
+`kysely` first — the first consumer's work (#772, #37, #776).
 
 #### The API contract (#36)
 
