@@ -169,6 +169,17 @@ export interface AthleteRecord {
    * the machine drawing it.
    */
   readonly kitColour?: KitColour;
+
+  /**
+   * The rider's own words that are always masked before anything is sent to
+   * a hosted model (#839) — a street, a town, a family member's name.
+   *
+   * Optional, so it stays off the migration path for the reason
+   * `thresholdPower` gives above: a row written before #839 reads back with no
+   * list, which is an empty one. `masked-words.ts` says what an entry may be
+   * and why the list is on the athlete and not in the account export.
+   */
+  readonly maskedWords?: readonly string[];
 }
 
 /** One recorded or imported ride. */

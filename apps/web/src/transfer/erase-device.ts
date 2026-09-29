@@ -84,6 +84,9 @@ export const ERASE_REMOVES: readonly string[] = [
   'the signed record of every ride this device recorded, which nothing can re-create afterwards',
   'every recording this device is still holding, finished or not',
   'your privacy zones',
+  // #839. On the athlete row, so `deleteAthlete` takes it; named because a
+  // rider who listed a family member's name will look for it here.
+  'your list of words to mask',
   'your saved routes and workouts',
   'your segments and every effort on them',
   'your thresholds',

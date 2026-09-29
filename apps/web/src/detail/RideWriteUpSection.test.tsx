@@ -22,13 +22,17 @@ import type {
   RideWriteUpSource,
 } from '../ride-analysis/ride-analysis-port';
 import { ASK_LABEL, WRITE_UP_HEADING, WRITE_UP_SAVED } from '../ride-analysis/RideWriteUpControl';
+import { RideWriteUpSection } from './RideWriteUpSection';
 import { SIDE_CAMERA_HEADING } from './SideCameraSection';
 import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
 import { ActivityDetailView } from '../views/ActivityDetailView';
 
+import type { WriteUpOverview } from './load';
 import { stubActivity, stubDetail, type StubRide } from './testing';
 import {
   WRITE_UP_EARLIER,
+  WRITE_UP_EARLIER_NOT_READ,
+  WRITE_UP_EARLIER_READING,
   WRITE_UP_FRAMING_LEAD,
   WRITE_UP_FRAMING_REST,
   WRITE_UP_NOT_ASKED,
@@ -70,6 +74,8 @@ function scriptedPort(sources: readonly RideWriteUpSource[]): RideAnalysisPort &
   return {
     asks,
     availableSources: () => sources,
+    previewHostedRequest: async () => Promise.resolve({ kind: 'shown', steps: [], total: 1 }),
+    hostedPreviewSeen: () => true,
     askForRideWriteUp: async (_id, source) =>
       new Promise<AskOutcome>((resolve) => {
         asks.push({ source, settle: resolve });
@@ -273,6 +279,74 @@ describe('the pairs that must not look alike', () => {
     expect(quote()?.textContent).toBe('The second write-up.');
     expect(text()).not.toContain(WRITE_UP_EARLIER);
     expect(text()).not.toContain('The first write-up.');
+  });
+});
+
+describe('between a write-up being saved and it being read back — #816', () => {
+  /** The section alone, with a read-back the test settles by hand. */
+  async function openSection(port: RideAnalysisPort): Promise<{
+    resolve(overview: WriteUpOverview): void;
+    reject(error: unknown): void;
+  }> {
+    let resolve: (overview: WriteUpOverview) => void = () => undefined;
+    let reject: (error: unknown) => void = () => undefined;
+    mounted = await mount(
+      <main>
+        <h1>Ride details</h1>
+        <RideWriteUpSection
+          port={port}
+          activityId={RIDE}
+          initial={{ kind: 'saved', record: writeUp('The first write-up.') }}
+          reread={async () =>
+            new Promise<WriteUpOverview>((onResolve, onReject) => {
+              resolve = onResolve;
+              reject = onReject;
+            })
+          }
+        />
+      </main>,
+    );
+    await settle();
+    return {
+      resolve: (overview) => {
+        resolve(overview);
+      },
+      reject: (error) => {
+        reject(error);
+      },
+    };
+  }
+
+  it('says the write-up still shown is the earlier one until the new one is read back', async () => {
+    const port = scriptedPort(['computer']);
+    const readBack = await openSection(port);
+    await activateWithKeyboard(button(ASK_LABEL.computer.first));
+    port.asks[0]?.settle({ kind: 'written' });
+    await settle();
+    expect(liveRegion()).toBe(WRITE_UP_SAVED);
+    expect(quote()?.textContent).toBe('The first write-up.');
+    expect(text()).toContain(WRITE_UP_EARLIER_READING);
+    // Not the failure's sentence: nothing failed.
+    expect(text()).not.toContain(WRITE_UP_EARLIER);
+
+    readBack.resolve({ kind: 'saved', record: writeUp('The second write-up.') });
+    await settle();
+    expect(quote()?.textContent).toBe('The second write-up.');
+    expect(text()).not.toContain(WRITE_UP_EARLIER_READING);
+  });
+
+  it('catches a read-back that fails, and still does not pass the old write-up off as the new one', async () => {
+    const port = scriptedPort(['computer']);
+    const readBack = await openSection(port);
+    await activateWithKeyboard(button(ASK_LABEL.computer.first));
+    port.asks[0]?.settle({ kind: 'written' });
+    await settle();
+    // Vitest fails the run on an unhandled rejection, so this also holds the catch.
+    readBack.reject(new Error('the store went away'));
+    await settle();
+    expect(quote()?.textContent).toBe('The first write-up.');
+    expect(text()).toContain(WRITE_UP_EARLIER_NOT_READ);
+    expect(text()).not.toContain(WRITE_UP_EARLIER_READING);
   });
 });
 
