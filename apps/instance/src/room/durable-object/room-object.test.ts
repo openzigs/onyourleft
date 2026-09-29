@@ -261,6 +261,33 @@ describe('a lobby survives eviction — #781 criterion 3', () => {
   });
 });
 
+describe('what the lobby log records', () => {
+  it('writes every call the core is made in the lobby — a start and a tick that leave it a lobby included — and replays them', async () => {
+    const settings = roomSettings({ ...conformanceSettings(), kind: 'ride' });
+    const harness = new FakeRoomHarness(settings, admitConformance, false);
+    await harness.room.fetch(START); // a group ride starts itself: in its lobby this is a no-op
+    harness.nowMs = 1_000;
+    await harness.room.alarm(); // nothing asked for it, and a lobby does not tick
+    const log = await harness.ctx.storage.list<{ op: string }>({ prefix: LOBBY_LOG_PREFIX });
+    expect([...log.values()].map((event) => event.op)).toEqual(['start', 'tick']);
+    harness.evict();
+    expect(await harness.room.view()).toEqual({
+      phase: 'lobby',
+      tick: 0,
+      seats: [],
+      finishOrder: [],
+    });
+  });
+
+  it('reads a socket that errored as a socket that closed', async () => {
+    const harness = new FakeRoomHarness(conformanceSettings(), admitConformance, false);
+    const ann = await hello(harness, 'ann');
+    ann.closedByClient = true;
+    await harness.room.webSocketError(ann);
+    expect((await harness.room.view()).seats).toEqual([]);
+  });
+});
+
 describe('the lobby log is bounded', () => {
   it(`takes no new socket, and closes a sender, once ${String(LOBBY_LOG_LIMIT)} calls are written`, async () => {
     const harness = new FakeRoomHarness(conformanceSettings(), admitConformance, false);
