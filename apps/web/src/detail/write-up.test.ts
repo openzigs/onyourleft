@@ -42,10 +42,14 @@ function asProse(markdown: string): string {
     .trim();
 }
 
-/** The block quote after `heading` in ADR 0035 and before `next`. */
-function quotedAfter(heading: string, next: string): string {
+/**
+ * The block quote after `heading` in ADR 0035 and before `next` — the FIRST
+ * `heading`, or with `newest` the last, which is how a wording amended twice
+ * is read at its newest (#847).
+ */
+function quotedAfter(heading: string, next: string, newest = false): string {
   const adr = read(ADR_0035);
-  const start = adr.indexOf(heading);
+  const start = newest ? adr.lastIndexOf(heading) : adr.indexOf(heading);
   const end = adr.indexOf(next, start + heading.length);
   if (start < 0 || end < 0) {
     return '';
@@ -76,10 +80,13 @@ describe('the approved wording, word for word (ADR 0035 D-9)', () => {
     expect(`${COMPUTER_SENDS_LEAD} ${COMPUTER_SENDS}`).toBe(approved);
   });
 
-  it('stands wording C, as amended, beside the hosted ask, all but the sentence about the switch — #803, #845', () => {
-    const approved = quotedAfter('**C, as amended:**', '⚠️ **The test question');
+  it('stands wording C, as amended, beside the hosted ask, all but the sentence about the switch — #803, #845, #847', () => {
+    // The NEWEST C: #847's entry replaced #845's test-question sentence.
+    const approved = quotedAfter('**C, as amended:**', '| Artefact', true);
     expect(approved.length).toBeGreaterThan(900);
-    expect(approved).toContain('one test question, containing none of your data');
+    expect(approved).toContain(
+      "When you press 'Send a test question to the service', the app sends it one test question",
+    );
     expect(`${HOSTED_SENDS.join(' ')} ${HOSTED_CONSENT.offUntilOn}`).toBe(approved);
     // More than the headline: #838's review found only the first sentence here.
     expect(HOSTED_SENDS.length).toBe(5);
@@ -92,6 +99,13 @@ describe('the approved wording, word for word (ADR 0035 D-9)', () => {
     expect(originalC.length).toBeGreaterThan(900);
     expect(`${COMPUTER_SENDS_LEAD} ${COMPUTER_SENDS}`).not.toBe(originalB);
     expect(`${HOSTED_SENDS.join(' ')} ${HOSTED_CONSENT.offUntilOn}`).not.toBe(originalC);
+  });
+
+  it('would notice #845’s C, which said the test question goes on a save — the control, #847', () => {
+    const c845 = quotedAfter('**C, as amended:**', '⚠️ **The test question');
+    expect(c845).toContain('When you save a service, the app sends it one test question');
+    expect(c845).not.toBe(quotedAfter('**C, as amended:**', '| Artefact', true));
+    expect(`${HOSTED_SENDS.join(' ')} ${HOSTED_CONSENT.offUntilOn}`).not.toBe(c845);
   });
 });
 

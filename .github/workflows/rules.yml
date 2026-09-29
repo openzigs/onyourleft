@@ -280,7 +280,11 @@ jobs:
       #   Mostly a pull of the digest-pinned base image and a few COPY layers,
       #   so it is waiting rather than working and belongs here. The instance's
       #   Vitest project needs no step: it is one more project in the Vitest
-      #   run below (CLAUDE.md section 4c says what that cost).
+      #   run below (CLAUDE.md section 4c says what that cost). ⚠️ The pull is
+      #   from Docker Hub, the one registry this job needs that nothing else
+      #   does; a Docker Hub outage turns this red as IMG004, which names the
+      #   registry rather than the Dockerfile (#841, CLAUDE.md section 4c).
+      #   Its suite fakes `docker` on PATH and needs no Docker.
       #
       # Every one of these is also what it was before #651 in every other way:
       # the same command, and its failure fails the job. Most checkers need
@@ -319,6 +323,7 @@ jobs:
           'build' 'pnpm run build'
           'playwright install' 'pnpm --filter @onyourleft/web exec playwright install --with-deps chromium'
           'instance image' 'bash scripts/check-instance-image.sh'
+          'instance image checker tests' 'bash scripts/check-instance-image.test.sh'
 
       # #48's fourth acceptance criterion: automated accessibility checks run on
       # every route and fail the build on a violation. The checks are Vitest

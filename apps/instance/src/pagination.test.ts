@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { errorResponse } from './errors.ts';
 import {
@@ -152,5 +152,39 @@ describe('the page request, and its validation errors', () => {
       'limit',
       'cursor',
     ]);
+  });
+});
+
+describe('the cursor needs no Node (#841, ADR 0037 D-2)', () => {
+  // Every byte value's base64 digits, `+` and `/` among them, and text that is
+  // not ASCII — what a base64url written out by hand gets wrong.
+  const positions: readonly Position[] = [
+    { key: '2026-09-01', id: 'ride-1' },
+    { key: '>>>???', id: 'Zürich — 東京 🚲' },
+    { key: '', id: '' },
+    { key: 'a'.repeat(1), id: 'bb' },
+  ];
+  // Taken while Node's `Buffer` is still there, as the wire form to hold to.
+  const byBuffer = positions.map((position) =>
+    Buffer.from(JSON.stringify([position.key, position.id]), 'utf8').toString('base64url'),
+  );
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('writes and reads a cursor with Buffer gone, as a Durable Object has it', () => {
+    vi.stubGlobal('Buffer', undefined);
+    positions.forEach((position, index) => {
+      const cursor = encodeCursor(position);
+      expect(cursor).toBe(byBuffer[index]);
+      expect(decodeCursor(cursor)).toEqual(position);
+    });
+  });
+
+  it('refuses text that is not base64url at all, with Buffer gone', () => {
+    vi.stubGlobal('Buffer', undefined);
+    expect(decodeCursor('a')).toBeUndefined();
+    expect(decodeCursor('Pz8_')).toBeUndefined();
   });
 });

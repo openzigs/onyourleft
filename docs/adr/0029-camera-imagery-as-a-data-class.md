@@ -922,14 +922,58 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   |---|---|
   | `apps/web/src/camera/hosted-model.ts` | `HOSTED_CONSENT` is the wording above, and `hosted-model.test.ts` compares it with this, the NEWEST entry |
   | [`docs/privacy-policy.md`](../privacy-policy.md) | The hosted section's list names the distance, gradient and climb, and the sharing line reads *"We never sell your data. The only sharing is the analysis you choose to send to a service you set up."* |
+- **2026-09-29** — **The test-question sentence of the entry above is replaced: the question goes
+  when the rider presses the button, not when a service is saved.** The entry above quoted, as
+  approved, *"When you save a service, the app sends it one test question, containing none of your
+  data, to check it answers."*, and said the app does not do that: *Save this service* sends
+  nothing, and the test question goes only when the rider, with the hosted model turned on, presses
+  *Send a test question to the service*. The owner ruled on
+  [#847](https://github.com/openzigs/onyourleft/issues/847) on 2026-09-29 that the sentence is
+  replaced, word for word, by *"When you press 'Send a test question to the service', the app sends
+  it one test question, containing none of your data, to check it answers."* — the first of #847's
+  two options; the app is not changed. **Nothing in the entries above is edited**, and every other
+  word of ADR 0035 D-9 C, as its amendments complete it, stands.
+
+  **The consent screen's words for the hosted path, from ADR 0035 D-9 C as amended:**
+
+  > **This sends your ride to a service you have chosen, using your own key.**
+  >
+  > If you turn this on, each time you ask for a ride analysis, that ride's numbers are sent to the
+  > address you entered, using the key you entered: your heart rate, cadence and power, your weight
+  > and watts per kilogram, your threshold power, if you set one, how long the ride lasted, its
+  > distance, and each section's gradient and total climb, and how it went section by section. If
+  > the side camera filmed the ride, it is also sent how a few measurements of your riding position
+  > changed between the start and the end of filming. That is a company or a computer that is not
+  > yours and not ours, and we cannot see what they do with it or how long they keep it. We cannot
+  > delete it for you afterwards. Like any service you connect to, it also sees your internet
+  > address.
+  >
+  > It is never sent a picture — not a photograph of you, and nothing made from one. It is not sent
+  > your name, where you rode, or when. When you press 'Send a test question to the service', the
+  > app sends it one test question, containing none of your data, to check it answers.
+  >
+  > Your key is kept on this device, is sent only to the address you entered, and is never put in a
+  > file this app exports.
+  >
+  > **You do not need this.** Everything else in the app works without it, and a computer of your own
+  > can do the same analysis.
+  >
+  > This is off. It stays off until you turn it on, it is off again whenever the app is opened, and
+  > you can turn it off at any time.
+
+  | Artefact | What changed in the same pull request |
+  |---|---|
+  | `apps/web/src/camera/hosted-model.ts` | `HOSTED_CONSENT` is the wording above, and `hosted-model.test.ts` compares it with this, the NEWEST entry. The button's label is `HOSTED_TEST_QUESTION_LABEL`, which the consent and `views/CameraView.tsx` both read, so renaming the button changes the consent |
+  | `apps/web/src/views/CameraView.test.tsx` | Requires the button the Camera page renders to read exactly `HOSTED_TEST_QUESTION_LABEL` |
+
 - **2026-09-29** — **Everything the hosted path sends is masked first, and the consent says what
   masking does and does not do — drafted by [#839](https://github.com/openzigs/onyourleft/issues/839)
   for the owner to approve.** The owner's ruling on #839: add masking guardrails to everything the
   AI analysis sends to the hosted model, with a preview and a rider-kept word list; the rider's own
   computer, and their own instance, keep the full text. **Nothing in the entries above is edited**,
-  and the consent wording of the entry above — ADR 0035 D-9 C as amended, which the owner approved
-  on #845 — stands unchanged; this entry adds one paragraph after it, and that paragraph is the part
-  awaiting the owner's approval.
+  and the consent wording of the entries above — ADR 0035 D-9 C as amended on #845 and corrected on
+  #847, both approved by the owner — stands unchanged; this entry adds one paragraph after it, which
+  the owner approved on 2026-09-29 (#854).
 
   **What is masked.** `apps/web/src/ride-analysis/hosted-mask.ts` §`maskForHosted` replaces, in
   every message of every hosted request body, e-mail addresses (`[email]`), phone numbers
@@ -961,8 +1005,8 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   > address.
   >
   > It is never sent a picture — not a photograph of you, and nothing made from one. It is not sent
-  > your name, where you rode, or when. When you save a service, the app sends it one test question,
-  > containing none of your data, to check it answers.
+  > your name, where you rode, or when. When you press 'Send a test question to the service', the
+  > app sends it one test question, containing none of your data, to check it answers.
   >
   > Your key is kept on this device, is sent only to the address you entered, and is never put in a
   > file this app exports.
