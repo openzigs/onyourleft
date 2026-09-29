@@ -678,7 +678,7 @@ describe('what the tablet says about the pictures — #530', () => {
     await send(3);
     expect(shown()).toContain(
       'Your computer said nobody was there in 0, found too little of you to use in 0, ' +
-        'and placed points no one on a bicycle could have in 3, which this tablet does not use.',
+        'and placed points no one on a bicycle could have in 3. This tablet uses none of those answers.',
     );
   });
 

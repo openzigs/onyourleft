@@ -317,7 +317,7 @@ export function ownComputerStepPort(
         return 'kind' in first ? first : stepReplyFrom(first);
       }
       const second = await once(withoutHint(step));
-      hint.retried(second);
+      hint.retried(first, second);
       return 'kind' in second ? second : stepReplyFrom(second);
     },
   };
@@ -330,20 +330,41 @@ export function ownComputerStepPort(
  * that port goes without it, so a server that refuses the hint is not sent
  * every structured step twice. An unhinted request that fails as well says
  * nothing about the hint, and is not remembered.
+ *
+ * ⚠️ **Only a refusal that NAMES the hint is remembered** (#816, from #838's
+ * review): {@link namesTheHint}. Any 400 or 422 is still retried once without
+ * it, but a 400 for some other reason — a server busy loading a model, say —
+ * that happened to clear on the retry would otherwise take the hint off every
+ * later step for the rest of the port's life.
  */
 function hintMemory(): {
   shape(step: StepRequest): StepRequest;
-  retried(reply: NativeAnalysisReply | StepReply): void;
+  retried(refusal: NativeAnalysisReply | StepReply, reply: NativeAnalysisReply | StepReply): void;
 } {
   let refused = false;
   return {
     shape: (step) => (refused && step.replySchema !== undefined ? withoutHint(step) : step),
-    retried(reply) {
-      if (!('kind' in reply) && reply.status >= 200 && reply.status < 300) {
+    retried(refusal, reply) {
+      if (
+        !('kind' in refusal) &&
+        namesTheHint(refusal.body) &&
+        !('kind' in reply) &&
+        reply.status >= 200 &&
+        reply.status < 300
+      ) {
         refused = true;
       }
     },
   };
+}
+
+/**
+ * Whether a refusal's body names the hint: `response_format` or `json_schema`,
+ * in any case. The body is the server's and untrusted; it is searched for the
+ * two words and nothing of it is kept or shown.
+ */
+function namesTheHint(body: string): boolean {
+  return /response_format|json_schema/i.test(body);
 }
 
 /**
@@ -430,7 +451,7 @@ function nativeStepPort(
           return 'kind' in first ? first : stepReplyFrom(first);
         }
         const second = await once(withoutHint(step));
-        hint.retried(second);
+        hint.retried(first, second);
         return 'kind' in second ? second : stepReplyFrom(second);
       })();
       try {
