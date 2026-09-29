@@ -20,6 +20,12 @@
  * their modules. A bare specifier (`react`, `@onyourleft/sensors`) is recorded
  * and not followed.
  *
+ * A relative specifier with a query (`?url`, `?raw`) is an asset handed over as
+ * a string and is not followed; one naming an existing non-code file (a
+ * stylesheet) is not followed either. **Any other relative specifier that does
+ * not resolve to a module is an error**, never a module quietly left out of
+ * the walk (#822).
+ *
  * ## What it cannot see
  *
  * A specifier that is not a string literal (`import(name)`), and a module a
@@ -99,10 +105,24 @@ export function importWalk(read: ReadSource = readFromDisk): {
         bare.push(specifier);
         continue;
       }
-      const file = resolveFile(posix.normalize(posix.join(posix.dirname(path), specifier)));
+      // A `?url` or `?raw` import is an asset handed over as a string, not a
+      // module: there is nothing in it to walk.
+      if (specifier.includes('?')) {
+        continue;
+      }
+      const base = posix.normalize(posix.join(posix.dirname(path), specifier));
+      const file = resolveFile(base);
       if (file !== undefined) {
         local.push(file);
+        continue;
       }
+      // A stylesheet imported for its side effect is there and is not code.
+      if (!/\.tsx?$/.test(base) && /\.[a-z0-9]+$/i.test(base) && read(base) !== undefined) {
+        continue;
+      }
+      // #822: a relative import that resolves to nothing used to be dropped
+      // here in silence, so the walk passed over whatever it really named.
+      throw new Error(`${path} imports ${specifier}, which the walk cannot resolve`);
     }
     return { local, bare };
   };
