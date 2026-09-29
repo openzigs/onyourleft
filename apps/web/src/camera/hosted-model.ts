@@ -58,11 +58,24 @@
 import { COMPLETIONS_PATH, MAXIMUM_MODEL_NAME_LENGTH } from './analysis-endpoint';
 
 /**
+ * The Camera page's button that sends a hosted service its one test question
+ * (`views/CameraView.tsx`, `ask('connection-check')`).
+ *
+ * ⚠️ {@link HOSTED_CONSENT} names this button by its label (#847), so the
+ * label is written once, here: renaming the button changes the consent, and
+ * `hosted-model.test.ts` then fails against ADR 0029's newest amendment
+ * rather than the consent naming a button that is no longer there.
+ */
+export const HOSTED_TEST_QUESTION_LABEL = 'Send a test question to the service';
+
+/**
  * The consent screen's words — ADR 0035 D-9 C, as the owner approved them,
  * and quoted by ADR 0029's 2026-09-29 amendment (#803), which replaces the
  * 2026-09-28 amendment's wording now that the hosted path sends a ride's
  * numbers — and since #845 by the amendment after it, which names the
- * distance, each section's gradient and total climb, and the connection check.
+ * distance, each section's gradient and total climb, and the connection check,
+ * and since #847 by the entry after that, which says the check goes when the
+ * rider presses {@link HOSTED_TEST_QUESTION_LABEL} rather than on a save.
  *
  * ⚠️ **Do not improve this.** `hosted-model.test.ts` reads the NEWEST
  * amendment of ADR 0029 and compares, the way `consent.test.ts` pins D-5.
@@ -89,8 +102,8 @@ export const HOSTED_CONSENT: {
       'what they do with it or how long they keep it. We cannot delete it for you afterwards. Like ' +
       'any service you connect to, it also sees your internet address.',
     'It is never sent a picture — not a photograph of you, and nothing made from one. It is not ' +
-      'sent your name, where you rode, or when. When you save a service, the app sends it one ' +
-      'test question, containing none of your data, to check it answers.',
+      `sent your name, where you rode, or when. When you press '${HOSTED_TEST_QUESTION_LABEL}', ` +
+      'the app sends it one test question, containing none of your data, to check it answers.',
     'Your key is kept on this device, is sent only to the address you entered, and is never put in ' +
       'a file this app exports.',
   ],
