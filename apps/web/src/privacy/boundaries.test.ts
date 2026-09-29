@@ -70,6 +70,7 @@ import { routeShare } from '../routes/share';
 import { exportActivity } from '../transfer/export-activity';
 
 import { coordinatesIn, insideZone } from './boundaries';
+import { PATTERNS_ONLY } from '../ride-analysis/hosted-mask';
 
 /** Small enough to be quick, long enough to enter a zone and leave it again. */
 const SAMPLE_COUNT = 400;
@@ -377,13 +378,13 @@ describe('the picture sent to the rider’s own computer carries no coordinate b
 describe('the hosted question carries no coordinate at all — #518', () => {
   it('has none in any field of the body', () => {
     expect(
-      coordinatesIn(hostedRequestBody('a-model', { question: 'connection-check' })),
+      coordinatesIn(hostedRequestBody('a-model', { question: 'connection-check' }, PATTERNS_ONLY)),
     ).toStrictEqual([]);
   });
 
   it('would find one if a field carried it', () => {
     const body = {
-      ...hostedRequestBody('a-model', { question: 'connection-check' }),
+      ...hostedRequestBody('a-model', { question: 'connection-check' }, PATTERNS_ONLY),
       where: { latitude: 51.5, longitude: -0.12 },
     };
     expect(coordinatesIn(body)).toHaveLength(1);

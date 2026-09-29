@@ -12,7 +12,7 @@ import { activityId, athleteId, type ActivityId } from '@onyourleft/store';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { auditAccessibility, formatViolations } from '../a11y/audit';
-import { HOSTED_CONSENT } from '../camera/hosted-model';
+import { HOSTED_CONSENT, HOSTED_MASKING_NOTICE } from '../camera/hosted-model';
 import { COMPUTER_SENDS_LEAD, HOSTED_SENDS } from '../detail/write-up';
 import { stubActivity, stubDetail } from '../detail/testing';
 import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
@@ -22,10 +22,17 @@ import type {
   AskProgress,
   RideAnalysisPort,
   RideWriteUpSource,
+  HostedPreview,
 } from './ride-analysis-port';
 import {
   ASK_LABEL,
   CANCEL_LABEL,
+  PREVIEW_CLOSE_LABEL,
+  PREVIEW_INTRO,
+  PREVIEW_LABEL,
+  PREVIEW_LATER,
+  PREVIEW_SEND_LABEL,
+  previewStepLabel,
   progressText,
   WRITE_UP_HEADING,
   WRITE_UP_SAVED,
@@ -50,6 +57,8 @@ function scriptedPort(sources: readonly RideWriteUpSource[]): RideAnalysisPort &
   return {
     asks,
     availableSources: () => sources,
+    previewHostedRequest: async () => Promise.resolve({ kind: 'shown', steps: [], total: 1 }),
+    hostedPreviewSeen: () => true,
     askForRideWriteUp: async (id, source, signal, progress) =>
       new Promise<AskOutcome>((resolve) => {
         asks.push({ activityId: id, source, signal, progress, settle: resolve });
@@ -116,13 +125,17 @@ describe('which controls are offered', () => {
 
   it('offers the rider’s own computer first and the hosted model as the alternative', async () => {
     await open(scriptedPort(['computer', 'hosted']));
-    expect(buttons()).toStrictEqual([ASK_LABEL.computer.first, ASK_LABEL.hosted.other]);
+    expect(buttons()).toStrictEqual([
+      ASK_LABEL.computer.first,
+      ASK_LABEL.hosted.other,
+      PREVIEW_LABEL,
+    ]);
     expectClean('both sources offered');
   });
 
   it('offers the one source that is set up, alone', async () => {
     await open(scriptedPort(['hosted']));
-    expect(buttons()).toStrictEqual([ASK_LABEL.hosted.first]);
+    expect(buttons()).toStrictEqual([ASK_LABEL.hosted.first, PREVIEW_LABEL]);
   });
 });
 
@@ -154,7 +167,7 @@ describe('what the hosted ask says it sends (#803, carried from #838’s review)
   it('stands ADR 0035 D-9 C beside the hosted ask in full, but for the sentence about the switch', async () => {
     await open(scriptedPort(['hosted']));
     // `write-up.test.ts` pins HOSTED_SENDS to the ADR; this pins what renders to it.
-    expect(sendsParagraphs()).toStrictEqual([...HOSTED_SENDS]);
+    expect(sendsParagraphs()).toStrictEqual([...HOSTED_SENDS, HOSTED_MASKING_NOTICE]);
     expect(sendsParagraphs().join(' ')).toContain('your heart rate, cadence and power');
     expect(document.body.textContent).not.toContain(HOSTED_CONSENT.offUntilOn);
     expectClean('the hosted wording');
@@ -163,13 +176,14 @@ describe('what the hosted ask says it sends (#803, carried from #838’s review)
   it('says both, in order, when both sources are offered', async () => {
     await open(scriptedPort(['computer', 'hosted']));
     const said = sendsParagraphs();
-    expect(said).toHaveLength(1 + HOSTED_SENDS.length);
-    expect(said.slice(1)).toStrictEqual([...HOSTED_SENDS]);
+    expect(said).toHaveLength(2 + HOSTED_SENDS.length);
+    expect(said.slice(1)).toStrictEqual([...HOSTED_SENDS, HOSTED_MASKING_NOTICE]);
   });
 
   it('says none of it where only the rider’s computer is offered', async () => {
     await open(scriptedPort(['computer']));
     expect(document.body.textContent).not.toContain(HOSTED_CONSENT.headline);
+    expect(document.body.textContent).not.toContain(HOSTED_MASKING_NOTICE);
   });
 });
 
@@ -193,6 +207,7 @@ describe('a press, and only a press', () => {
     expect(buttons()).toStrictEqual([
       ASK_LABEL.computer.first,
       ASK_LABEL.hosted.other,
+      PREVIEW_LABEL,
       CANCEL_LABEL,
     ]);
     for (const label of [ASK_LABEL.computer.first, ASK_LABEL.hosted.other]) {
@@ -210,7 +225,11 @@ describe('a press, and only a press', () => {
     asked?.settle({ kind: 'written' });
     await settle();
     expect(liveRegion()).toBe(WRITE_UP_SAVED);
-    expect(buttons()).toStrictEqual([ASK_LABEL.computer.first, ASK_LABEL.hosted.other]);
+    expect(buttons()).toStrictEqual([
+      ASK_LABEL.computer.first,
+      ASK_LABEL.hosted.other,
+      PREVIEW_LABEL,
+    ]);
     expect(button(ASK_LABEL.computer.first).hasAttribute('aria-disabled')).toBe(false);
     expectClean('a write-up saved');
   });
@@ -254,5 +273,103 @@ describe('stopping a run', () => {
     first?.progress?.({ step: 1, total: 3 });
     await settle();
     expect(liveRegion()).toBe('Stopped.');
+  });
+});
+
+describe('the preview of what a hosted run sends (#839)', () => {
+  const SHOWN: HostedPreview = {
+    kind: 'shown',
+    steps: [
+      { step: 1, system: 'Instructions one.', user: 'Section one near [place].' },
+      { step: 2, system: 'Instructions two.', user: 'Section two.' },
+    ],
+    total: 3,
+  };
+
+  function previewingPort(
+    seen: boolean,
+    shown: HostedPreview = SHOWN,
+  ): ReturnType<typeof scriptedPort> & { readonly previews: number[] } {
+    const base = scriptedPort(['computer', 'hosted']);
+    const previews: number[] = [];
+    let wasSeen = seen;
+    return {
+      ...base,
+      previews,
+      hostedPreviewSeen: () => wasSeen,
+      previewHostedRequest: async () => {
+        previews.push(1);
+        wasSeen = true;
+        return Promise.resolve(shown);
+      },
+    };
+  }
+
+  function sentTexts(): string[] {
+    return [...document.querySelectorAll('[data-oyl-sent]')].map((node) => node.textContent);
+  }
+
+  it('shows the preview before the first hosted run, and sends only from it', async () => {
+    const port = previewingPort(false);
+    await open(port);
+    await activateWithKeyboard(button(ASK_LABEL.hosted.other));
+    await settle();
+    expect(port.asks).toHaveLength(0);
+    expect(port.previews).toHaveLength(1);
+    expect(document.body.textContent).toContain(PREVIEW_INTRO);
+    expect(document.body.textContent).toContain(PREVIEW_LATER);
+    expect(sentTexts()).toStrictEqual([
+      'Instructions one.',
+      'Section one near [place].',
+      'Instructions two.',
+      'Section two.',
+    ]);
+    expect(document.body.textContent).toContain(previewStepLabel(2, 3, 'user'));
+    expectClean('the preview before a first hosted run');
+
+    await activateWithKeyboard(button(PREVIEW_SEND_LABEL));
+    expect(port.asks.map((ask) => ask.source)).toStrictEqual(['hosted']);
+    // The preview closes when the run starts.
+    expect(sentTexts()).toStrictEqual([]);
+  });
+
+  it('goes straight to the run once a preview has been seen', async () => {
+    const port = previewingPort(true);
+    await open(port);
+    await activateWithKeyboard(button(ASK_LABEL.hosted.other));
+    expect(port.asks).toHaveLength(1);
+    expect(port.previews).toHaveLength(0);
+  });
+
+  it('shows the preview at any time from its own control, with nothing to send from it', async () => {
+    const port = previewingPort(true);
+    await open(port);
+    await activateWithKeyboard(button(PREVIEW_LABEL));
+    await settle();
+    expect(port.previews).toHaveLength(1);
+    expect(port.asks).toHaveLength(0);
+    expect(sentTexts()).toHaveLength(4);
+    expect(() => button(PREVIEW_SEND_LABEL)).toThrow();
+    expectClean('the preview opened on its own');
+    await activateWithKeyboard(button(PREVIEW_CLOSE_LABEL));
+    expect(sentTexts()).toStrictEqual([]);
+    expect(buttons()).toContain(PREVIEW_LABEL);
+  });
+
+  it('says why when there is nothing to show, and offers nothing to send', async () => {
+    const port = previewingPort(false, { kind: 'failed', text: 'Nothing to show.' });
+    await open(port);
+    await activateWithKeyboard(button(ASK_LABEL.hosted.other));
+    await settle();
+    expect(document.body.textContent).toContain('Nothing to show.');
+    expect(() => button(PREVIEW_SEND_LABEL)).toThrow();
+    expect(port.asks).toHaveLength(0);
+  });
+
+  it('offers no preview when the hosted model is not a source', async () => {
+    await open(previewingPort(false));
+    mounted?.unmount();
+    await open(scriptedPort(['computer']));
+    expect(() => button(PREVIEW_LABEL)).toThrow();
   });
 });

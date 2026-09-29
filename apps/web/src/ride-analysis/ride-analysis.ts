@@ -70,10 +70,13 @@ import type {
 
 import type { SideSessionSummary } from '../camera/side-session-summary';
 import type { ScreenedWriteUp } from '../camera/write-up-screen';
+import { maskForHosted, type MaskingGuard } from './hosted-mask';
 import { rideAnalysisInput, type RideAnalysisInput } from './input';
 import type {
   AskOutcome,
   AskProgress,
+  HostedPreview,
+  HostedPreviewStep,
   RideAnalysisPort,
   RideWriteUpSource,
 } from './ride-analysis-port';
@@ -147,6 +150,12 @@ export interface RideAnalysisOptions {
   readonly now: () => UnixSeconds;
   /** {@link CURRENT_ANALYSIS_TEMPLATE} unless a test says otherwise. */
   readonly template?: AnalysisTemplate;
+  /**
+   * The rider's masking guard, for the preview (#839) — the same reader the
+   * hosted transport is handed in `main.tsx`, so the preview masks with what
+   * the request will be masked with. Absent, there is no preview to show.
+   */
+  readonly hostedGuard?: () => Promise<MaskingGuard>;
 }
 
 /** Why an ask ended with nothing saved, beyond a run's own failures. */
@@ -196,6 +205,32 @@ export const ASK_FAILURE_TEXT: Readonly<Record<Exclude<AskFailure, 'cancelled'>,
   'not-saved':
     'The write-up could not be saved on this device, so nothing was kept. Any earlier write-up of this ride is unchanged.',
 };
+
+/** Why a preview shows nothing (#839). Nothing is sent either way. */
+export type PreviewFailure = 'not-read' | 'not-masked';
+
+/** What a preview that shows nothing says. */
+export const PREVIEW_FAILURE_TEXT: Readonly<Record<PreviewFailure, string>> = {
+  'not-read': 'This ride could not be read on this device, so there is nothing to show.',
+  'not-masked':
+    'Your list of words to mask, or your privacy zones, could not be read on this device, so nothing can be shown or sent.',
+};
+
+/**
+ * Every step a run sends before any reply, in the order it sends them — a
+ * note per section, then one on position when the template builds one. The
+ * runner's own order (`runner.ts` §`runAnalysis`); `hosted-mask-reachable.test.ts`
+ * holds the two equal by comparing this with what a real run sent.
+ */
+function stepsBeforeAnyReply(
+  input: RideAnalysisInput,
+  template: AnalysisTemplate,
+): { readonly system: string; readonly user: string }[] {
+  const [sectionStep, positionStep] = template.steps;
+  const prompts = input.sections.map(({ index }) => sectionStep.prompt(input, index));
+  const position = positionStep.prompt(input);
+  return position === undefined ? prompts : [...prompts, position];
+}
 
 /** The sentence for `why` on `path`. */
 export function askFailureText(why: AskFailure, path: CancelPath): string {
@@ -247,10 +282,71 @@ export function createRideAnalysis(options: RideAnalysisOptions): RideAnalysisPo
   const pathOf = (source: RideWriteUpSource): CancelPath =>
     source === 'hosted' ? 'hosted' : options.nativeShell ? 'computer-shell' : 'computer-browser';
 
+  /** The ride's input, or `undefined` when the ride cannot be read or is not this rider's. */
+  const readInput = async (activityId: ActivityId): Promise<RideAnalysisInput | undefined> => {
+    try {
+      const ride = await store.getActivity(owner, activityId);
+      if (ride === undefined) {
+        return undefined;
+      }
+      const [streams, athlete, laps, report, route] = await Promise.all([
+        store.getStreamSet(owner, activityId),
+        store.getAthlete(owner),
+        store.listLaps(owner, activityId),
+        store.getSideCameraReport(owner, activityId),
+        ride.routeId === undefined ? undefined : store.getRoute(owner, ride.routeId),
+      ]);
+      const pose = poseFrom(report);
+      return rideAnalysisInput(ride, streams, athlete, {
+        templateVersion: template.version,
+        laps,
+        ...(route === undefined ? {} : { route: route.profile }),
+        ...(pose === undefined ? {} : { pose }),
+        cameraConsented: options.cameraConsented(),
+      });
+    } catch {
+      // Nothing of the error is read: the store's messages name records.
+      return undefined;
+    }
+  };
+
+  /** Held for as long as this controller — the tab — is: the consent's own lifetime. */
+  let previewSeen = false;
+
   return {
     availableSources(): readonly RideWriteUpSource[] {
       const order: readonly RideWriteUpSource[] = ['computer', 'hosted'];
       return order.filter((source) => portFor(source) !== undefined);
+    },
+
+    hostedPreviewSeen(): boolean {
+      return previewSeen;
+    },
+
+    async previewHostedRequest(activityId: ActivityId): Promise<HostedPreview> {
+      const input = await readInput(activityId);
+      if (input === undefined) {
+        return { kind: 'failed', text: PREVIEW_FAILURE_TEXT['not-read'] };
+      }
+      let guard: MaskingGuard;
+      try {
+        if (options.hostedGuard === undefined) {
+          throw new Error('no guard');
+        }
+        guard = await options.hostedGuard();
+      } catch {
+        return { kind: 'failed', text: PREVIEW_FAILURE_TEXT['not-masked'] };
+      }
+      const steps: HostedPreviewStep[] = stepsBeforeAnyReply(input, template).map(
+        (prompt, index) => ({
+          step: index + 1,
+          system: maskForHosted(prompt.system, guard),
+          user: maskForHosted(prompt.user, guard),
+        }),
+      );
+      previewSeen = true;
+      // The summary step, after every step above — as the runner counts them.
+      return { kind: 'shown', steps, total: steps.length + 1 };
     },
 
     async askForRideWriteUp(
@@ -271,29 +367,8 @@ export function createRideAnalysis(options: RideAnalysisOptions): RideAnalysisPo
         return failed('cancelled');
       }
 
-      let input: RideAnalysisInput;
-      try {
-        const ride = await store.getActivity(owner, activityId);
-        if (ride === undefined) {
-          return failed('not-read');
-        }
-        const [streams, athlete, laps, report, route] = await Promise.all([
-          store.getStreamSet(owner, activityId),
-          store.getAthlete(owner),
-          store.listLaps(owner, activityId),
-          store.getSideCameraReport(owner, activityId),
-          ride.routeId === undefined ? undefined : store.getRoute(owner, ride.routeId),
-        ]);
-        const pose = poseFrom(report);
-        input = rideAnalysisInput(ride, streams, athlete, {
-          templateVersion: template.version,
-          laps,
-          ...(route === undefined ? {} : { route: route.profile }),
-          ...(pose === undefined ? {} : { pose }),
-          cameraConsented: options.cameraConsented(),
-        });
-      } catch {
-        // Nothing of the error is read: the store's messages name records.
+      const input = await readInput(activityId);
+      if (input === undefined) {
         return failed('not-read');
       }
 
