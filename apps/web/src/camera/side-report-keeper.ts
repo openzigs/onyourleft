@@ -64,6 +64,14 @@
  * `unavailable` — so the report stays in memory until the tab goes. Nothing is
  * written, which is the rule's outcome; only the memory is held longer.
  *
+ * ## The pose summary goes where the sentences go (#801)
+ *
+ * The session's pose summary — differences only, `side-report.ts`
+ * §`sideSessionFrom` — is held beside the sentences and written in the same
+ * put, so every rule above applies to it unchanged: saved with the ride, and
+ * dropped with the sentences on `empty`, `failed` or no ride. A report with no
+ * summary is written with `pose: null`, never with a summary of zeros.
+ *
  * ## What it does not do
  *
  * - **No retry and no queue.** A put that fails is dropped: the report is a
@@ -72,10 +80,18 @@
  *   only, like the pose numbers it came from.
  */
 
-import type { ActivityId, AthleteId, SideCameraReportRecord } from '@onyourleft/store';
+import {
+  SIDE_SESSION_KINDS,
+  type ActivityId,
+  type AthleteId,
+  type SideCameraReportRecord,
+  type SideSessionKind,
+  type SideSessionSummaryRecord,
+} from '@onyourleft/store';
 
 import type { SideReport } from './side-report';
 import type { SideReportKeepingPort, SideReportSession } from './side-report-port';
+import type { SideSessionSummary } from './side-session-summary';
 
 /** The part of the ride controller's snapshot this reads. */
 export interface RideProgress {
@@ -126,6 +142,7 @@ function openSession(options: SideReportKeeperOptions): SideReportSession {
   let candidate: ActivityId | undefined;
   let ended = false;
   let report: SideReport | undefined;
+  let pose: SideSessionSummary | undefined;
   let unsubscribe: (() => void) | undefined;
 
   const observe = (): void => {
@@ -155,7 +172,9 @@ function openSession(options: SideReportKeeperOptions): SideReportSession {
     unsubscribe = undefined;
     const ride = candidate;
     const said = report;
+    const summary = pose;
     report = undefined;
+    pose = undefined;
     if (ride === undefined || said === undefined) {
       return;
     }
@@ -165,9 +184,9 @@ function openSession(options: SideReportKeeperOptions): SideReportSession {
         activityId: ride,
         summary: said.summary,
         observations: said.observations,
-        // No pose summary is kept yet. The store holds one since schema
-        // version 13 (#800); what writes it, differences only, is #801.
-        pose: null,
+        // #801: the differences, with the sentences, by the same rule and in
+        // the same put — so a ride never has one without the other.
+        pose: summary === undefined ? null : summaryRecordOf(summary),
       })
       .catch(() => {
         // Nothing of the error is read: a storage error can name the key it
@@ -180,12 +199,16 @@ function openSession(options: SideReportKeeperOptions): SideReportSession {
   observe();
 
   return {
-    endSideReportSession(said: SideReport | undefined): void {
+    endSideReportSession(
+      said: SideReport | undefined,
+      measured: SideSessionSummary | undefined,
+    ): void {
       if (ended) {
         return;
       }
       ended = true;
       report = said;
+      pose = measured;
       if (said === undefined) {
         unsubscribe?.();
         unsubscribe = undefined;
@@ -196,5 +219,26 @@ function openSession(options: SideReportKeeperOptions): SideReportSession {
       }
       // Otherwise a ride is under way: `observe` settles when it finishes.
     },
+  };
+}
+
+/**
+ * The summary as the store keeps it, field by field — never the object spread,
+ * so a field a later producer adds is not written until this says so.
+ */
+function summaryRecordOf(summary: SideSessionSummary): SideSessionSummaryRecord {
+  const differences: Partial<Record<SideSessionKind, number>> = {};
+  for (const kind of SIDE_SESSION_KINDS) {
+    const difference = summary.differences[kind];
+    if (difference !== undefined) {
+      differences[kind] = difference;
+    }
+  }
+  return {
+    differences,
+    posed: summary.posed,
+    noRider: summary.noRider,
+    unreadable: summary.unreadable,
+    source: summary.source,
   };
 }

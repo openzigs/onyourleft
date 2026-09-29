@@ -25,6 +25,7 @@ import type {
   DeviceKeyRecord,
   FramingReferenceRecord,
   SideCameraReportRecord,
+  RideWriteUpRecord,
   LapRecord,
   ListActivitiesOptions,
   NewActivity,
@@ -146,6 +147,12 @@ export interface AccountStore {
     owner: AthleteId,
     activity: ActivityId,
   ): Promise<SideCameraReportRecord | undefined>;
+  /**
+   * A model's write-up of one ride — #800, ADR 0035: the athlete's own data,
+   * so it travels in the account export (ADR 0004 E) beside the ride it is
+   * about, #801's criterion. Read per ride, like the report.
+   */
+  getRideWriteUp(owner: AthleteId, activity: ActivityId): Promise<RideWriteUpRecord | undefined>;
 }
 
 /**

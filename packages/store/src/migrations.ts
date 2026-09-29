@@ -102,9 +102,9 @@ export type AnyRecordMigration = RecordMigration<unknown, unknown>;
  * over version-12 rows cannot see.** A version-12 row has nowhere to hold one,
  * so a report kept at version 13 with a summary loses it on the way back; its
  * sentences survive. The runtime path back is still export → downgrade →
- * re-import (the file comment). ⚠️ The account export does NOT carry the
- * summary yet — `export-everything.ts` names a report's fields one by one and
- * `pose` is not among them until #801 — so today a downgrade loses it either way.
+ * re-import (the file comment). Since #801 the account export carries the
+ * summary (`export-everything.ts` §`ManifestPoseSummary`), so an export taken
+ * before a downgrade still holds it.
  *
  * ⚠️ **Both halves are total over whatever is on disk, not only over the
  * declared shape** (#815's review). `up` runs inside Dexie's versionchange

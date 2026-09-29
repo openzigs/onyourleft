@@ -770,8 +770,9 @@ real state that only a field-by-field comparison notices; `firstWriteUpStoreFact
 nineteenth) acknowledges a second write-up and keeps the first — CLAUDE.md §5's *wrong time*.
 `ride-write-up-store.test.ts` holds both red/green pairs.
 
-⚠️ **Nothing writes either yet.** `side-report-keeper.ts` writes `pose: null` until #801 computes
-the summary, and the write-up's writer and reader are #804's.
+⚠️ **Since #801 the summary is written**: `side-report-keeper.ts` puts the session's summary with
+its sentences, or `null` when the session compared nothing. Nothing writes a write-up yet; its
+writer and reader are #804's.
 
 ## Not in this package
 

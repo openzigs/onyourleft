@@ -105,11 +105,17 @@
 
 import type { SignedActivityRecord, UnixSeconds } from '@onyourleft/domain';
 import {
+  SIDE_SESSION_KINDS,
   StoreDecodeError,
   type ActivityId,
   type AthleteId,
   type FramingCheckRecord,
+  type RideWriteUpRecord,
+  type RideWriteUpSourceRecord,
   type SideCameraReportRecord,
+  type SideSessionKind,
+  type SideSessionSourceRecord,
+  type SideSessionSummaryRecord,
 } from '@onyourleft/store';
 
 import { ActivityExportError, exportActivity, fileStemOf } from './export-activity';
@@ -145,8 +151,9 @@ export interface ManifestEntry {
    * when it was not filmed, for {@link signedRecord}'s reason: an omitted
    * member cannot be told from one the export dropped.
    *
-   * Sentences only, because that is all that is kept: no picture and no pose
-   * number is on the row to export.
+   * The sentences, and since #801 the session's pose summary under `pose` —
+   * differences only (ADR 0035 D-6), `null` when the session compared
+   * nothing. No picture and no pose point is on the row to export.
    *
    * ⚠️ **A report on this device that could not be read is the third value,
    * `{ unreadable: … }`**, and neither `null` nor an aborted export (#561's
@@ -159,9 +166,47 @@ export interface ManifestEntry {
     | {
         readonly summary: string;
         readonly observations: readonly string[];
+        readonly pose: ManifestPoseSummary | null;
       }
     | { readonly unreadable: string }
     | null;
+  /**
+   * A model's write-up of this ride — #800, ADR 0035 — or **`null`** when no
+   * model was asked, and `{ unreadable: … }` for a row this build cannot read,
+   * both for {@link sideCameraReport}'s reasons. Named field by field
+   * ({@link ManifestRideWriteUp}), never the row spread.
+   */
+  readonly rideWriteUp: ManifestRideWriteUp | { readonly unreadable: string } | null;
+}
+
+/**
+ * A side-camera session's pose summary as the manifest carries it — #801, the
+ * store's `SideSessionSummaryRecord` named field by field so a field added to
+ * the record is not exported until this says so. Late-minus-early differences
+ * per sagittal kind (a kind not compared is absent, never zero), the counts
+ * behind them, and where the poses came from. Nothing keyed to a time.
+ */
+export interface ManifestPoseSummary {
+  readonly differences: Readonly<Partial<Record<SideSessionKind, number>>>;
+  readonly posed: number;
+  readonly noRider: number;
+  readonly unreadable: number;
+  readonly source: SideSessionSourceRecord;
+}
+
+/**
+ * A ride write-up as the manifest carries it — #801's criterion, the store's
+ * `RideWriteUpRecord` named field by field, less the two keys the entry
+ * already carries (the ride's id, and the athlete the whole archive is).
+ */
+export interface ManifestRideWriteUp {
+  readonly text: string;
+  readonly templateId: string;
+  readonly templateVersion: string;
+  readonly source: RideWriteUpSourceRecord;
+  readonly includedPose: boolean;
+  readonly missingSections: readonly number[];
+  readonly writtenAt: UnixSeconds;
 }
 
 /**
@@ -172,6 +217,10 @@ export interface ManifestEntry {
  */
 export const SIDE_CAMERA_REPORT_UNREADABLE =
   'this ride has a side-camera report on this device that could not be read, so this archive does not contain it';
+
+/** What the manifest says of a ride write-up on this device that could not be read — the same rule. */
+export const RIDE_WRITE_UP_UNREADABLE =
+  'this ride has a write-up on this device that could not be read, so this archive does not contain it';
 
 /**
  * Where an export stopped, in the terms the list is ordered by.
@@ -665,6 +714,9 @@ export async function exportEverything(
     // #388. Read with the ride, so it is inside this run's bound and in the
     // manifest entry of the ride it is about.
     const sideReport = await readSideCameraReport(store, athleteId, summary.id);
+    // #801. The write-up is the same kind of thing — about this ride, kept
+    // with it — so it is read at the same moment and listed on the same entry.
+    const writeUp = await readRideWriteUp(store, athleteId, summary.id);
     const recordName = stored === undefined ? undefined : signedRecordFileName(fileName);
 
     let outcome: AccountExportOutcome;
@@ -732,7 +784,17 @@ export async function exportEverything(
           ? null
           : sideReport === 'unreadable'
             ? { unreadable: SIDE_CAMERA_REPORT_UNREADABLE }
-            : { summary: sideReport.summary, observations: [...sideReport.observations] },
+            : {
+                summary: sideReport.summary,
+                observations: [...sideReport.observations],
+                pose: sideReport.pose === null ? null : manifestPoseOf(sideReport.pose),
+              },
+      rideWriteUp:
+        writeUp === undefined
+          ? null
+          : writeUp === 'unreadable'
+            ? { unreadable: RIDE_WRITE_UP_UNREADABLE }
+            : manifestWriteUpOf(writeUp),
     });
     outcomes.push(outcome);
     options.onProgress?.({ completed: outcomes.length, total: wanted.length, outcome });
@@ -840,6 +902,56 @@ export async function exportEverything(
       (more || cancelled > 0) && lastFinished !== undefined
         ? { startedAt: lastFinished.startedAt, activityId: lastFinished.id }
         : undefined,
+  };
+}
+
+/**
+ * One ride's write-up, `undefined` when it has none, or `'unreadable'` —
+ * {@link readSideCameraReport}'s rule, for its reason.
+ */
+async function readRideWriteUp(
+  store: AccountStore,
+  athleteId: AthleteId,
+  activityId: ActivityId,
+): Promise<RideWriteUpRecord | 'unreadable' | undefined> {
+  try {
+    return await store.getRideWriteUp(athleteId, activityId);
+  } catch (error) {
+    if (error instanceof StoreDecodeError) {
+      return 'unreadable';
+    }
+    throw error;
+  }
+}
+
+/** A pose summary, field by field. @see ManifestPoseSummary */
+function manifestPoseOf(pose: SideSessionSummaryRecord): ManifestPoseSummary {
+  const differences: Partial<Record<SideSessionKind, number>> = {};
+  for (const kind of SIDE_SESSION_KINDS) {
+    const difference = pose.differences[kind];
+    if (difference !== undefined) {
+      differences[kind] = difference;
+    }
+  }
+  return {
+    differences,
+    posed: pose.posed,
+    noRider: pose.noRider,
+    unreadable: pose.unreadable,
+    source: pose.source,
+  };
+}
+
+/** A write-up, field by field. @see ManifestRideWriteUp */
+function manifestWriteUpOf(writeUp: RideWriteUpRecord): ManifestRideWriteUp {
+  return {
+    text: writeUp.text,
+    templateId: writeUp.templateId,
+    templateVersion: writeUp.templateVersion,
+    source: writeUp.source,
+    includedPose: writeUp.includedPose,
+    missingSections: [...writeUp.missingSections],
+    writtenAt: writeUp.writtenAt,
   };
 }
 

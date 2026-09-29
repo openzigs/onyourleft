@@ -8,17 +8,20 @@
  */
 
 import { MAXIMUM_SIDE_REPORT_SENTENCE } from '@onyourleft/store';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import { MAXIMUM_POSE_SAMPLES, PoseSamples } from './side-analysis';
 import type { SidePose, SidePoseLandmark } from './side-analysis-port';
 import {
   MEASURED_SPREAD_DEGREES,
   MINIMUM_SESSION_MILLISECONDS,
+  OBSERVATION_THRESHOLDS,
   observedChanges,
   renderableChanges,
   sideReportFrom,
+  sideSessionFrom,
   type SideReportLooked,
+  type SideSessionLooked,
   type SideReportSample,
 } from './side-report';
 import {
@@ -36,6 +39,7 @@ import {
   SIDE_REPORT_UNCHANGED_IN_PART,
   SIDE_REPORT_UNREADABLE,
 } from './side-report-wording';
+import type { SideSessionSummary } from './side-session-summary';
 
 /** How the rider sits, as the camera sees them. Lengths are shares of the picture. */
 interface Posture {
@@ -416,5 +420,164 @@ describe('degrees are computed and never rendered (the owner’s gate on #385)',
 
   it('computes nothing for a session too short to have thirds', () => {
     expect(observedChanges(session(BASE, BASE, 5), 3)).toStrictEqual([]);
+  });
+});
+
+describe('the pose summary, from the same pass as the sentences (#801)', () => {
+  function outcome(samples: readonly SideReportSample[], place: 'tablet' | 'computer' = 'tablet') {
+    return sideSessionFrom(samples, { ...lookedAt(samples), place });
+  }
+
+  /** Which kind an observation sentence is about, and which way. */
+  function sentenceOf(sentence: string): { kind: string; increased: boolean } {
+    for (const kind of SIDE_OBSERVATION_KINDS) {
+      if (SIDE_OBSERVATION_SENTENCES[kind].increased === sentence) {
+        return { kind, increased: true };
+      }
+      if (SIDE_OBSERVATION_SENTENCES[kind].decreased === sentence) {
+        return { kind, increased: false };
+      }
+    }
+    throw new Error(`not an observation: ${sentence}`);
+  }
+
+  const sessions: readonly [string, SideReportSample[]][] = [
+    ['nothing changed', session(BASE)],
+    ['a lower upper body', session(BASE, { ...BASE, torso: 35 })],
+    ['a straighter knee', session(BASE, { ...BASE, hipY: 0.46 })],
+    ['a more bent elbow', session(BASE, { ...BASE, elbow: 130 })],
+    ['the head further forward', session(BASE, { ...BASE, head: 0.2 })],
+    ['sitting further back, facing left', session(BASE, { ...BASE, hipX: 0.42 }, 9, true)],
+    [
+      'several at once',
+      session(BASE, { ...BASE, torso: 60, elbow: 130, head: 0.25, hipX: 0.47, hipY: 0.46 }),
+    ],
+    ['a change below its threshold', session(BASE, { ...BASE, torso: 47 })],
+    ['no ankle anywhere', without(session(BASE, { ...BASE, torso: 35 }), 'ankle')],
+  ];
+
+  it.each(sessions)(
+    '%s: every observation has a difference of its sign that clears its threshold, and no other kind does',
+    (_what, samples) => {
+      const { report: said, summary } = outcome(samples);
+      expect(said).toStrictEqual(report(samples));
+      expect(summary).toBeDefined();
+      const differences = summary?.differences ?? {};
+      const observed = new Set<string>();
+      for (const sentence of said?.observations ?? []) {
+        const { kind, increased } = sentenceOf(sentence);
+        observed.add(kind);
+        const difference = differences[kind as keyof typeof differences];
+        expect(difference, kind).toBeDefined();
+        expect(Math.sign(difference ?? 0), kind).toBe(increased ? 1 : -1);
+        expect(Math.abs(difference ?? 0), kind).toBeGreaterThanOrEqual(
+          OBSERVATION_THRESHOLDS[kind as keyof typeof OBSERVATION_THRESHOLDS],
+        );
+      }
+      for (const [kind, difference] of Object.entries(differences)) {
+        if (!observed.has(kind)) {
+          expect(Math.abs(difference), kind).toBeLessThan(
+            OBSERVATION_THRESHOLDS[kind as keyof typeof OBSERVATION_THRESHOLDS],
+          );
+        }
+      }
+    },
+  );
+
+  it('carries the session’s counts and where its poses came from', () => {
+    const samples = session(BASE, { ...BASE, torso: 35 });
+    const looked: SideSessionLooked = {
+      model: 'ready',
+      posed: samples.length,
+      noRider: 40,
+      unreadable: 7,
+      place: 'computer',
+    };
+    const { summary } = sideSessionFrom(samples, looked);
+    expect(summary?.source).toBe('computer');
+    expect(summary?.posed).toBe(samples.length);
+    expect(summary?.noRider).toBe(40);
+    expect(summary?.unreadable).toBe(7);
+    expect(outcome(samples, 'tablet').summary?.source).toBe('tablet');
+  });
+
+  it('leaves out a kind it could not compare — absent, never zero', () => {
+    // No ankle: the knee and the saddle need it.
+    const { summary } = outcome(without(session(BASE), 'ankle'));
+    expect(Object.keys(summary?.differences ?? {}).sort()).toStrictEqual([
+      'elbow',
+      'head',
+      'torso',
+    ]);
+  });
+
+  it('holds every kind when all five were compared', () => {
+    const { summary } = outcome(session(BASE));
+    expect(Object.keys(summary?.differences ?? {}).sort()).toStrictEqual(
+      [...SIDE_OBSERVATION_KINDS].sort(),
+    );
+  });
+
+  describe('is absent when nothing was compared', () => {
+    const tooShort = session(BASE, { ...BASE, torso: 60 }, 5);
+    const noWrist = session(BASE, { ...BASE, torso: 60 }).map((sample) => ({
+      ...sample,
+      pose: {
+        ...sample.pose,
+        landmarks: sample.pose.landmarks.filter((mark) => mark.name !== 'wrist'),
+      },
+    }));
+    const long = session(BASE, { ...BASE, torso: 60 });
+    const cases: readonly [string, SideReportSample[], SideSessionLooked, string | undefined][] = [
+      ['too short', tooShort, { ...lookedAt(tooShort), place: 'tablet' }, SIDE_REPORT_TOO_SHORT],
+      [
+        'no kind readable',
+        noWrist,
+        { ...lookedAt(noWrist), place: 'tablet' },
+        SIDE_REPORT_UNREADABLE,
+      ],
+      [
+        'mostly nobody',
+        long,
+        { ...lookedAt(long), noRider: long.length + 1, place: 'computer' },
+        SIDE_REPORT_UNREADABLE,
+      ],
+      [
+        'no model',
+        [],
+        { model: 'unavailable', posed: 0, noRider: 0, unreadable: 0, place: 'tablet' },
+        SIDE_REPORT_NO_MODEL,
+      ],
+      [
+        'never filmed',
+        [],
+        { model: 'waiting', posed: 0, noRider: 0, unreadable: 0, place: 'tablet' },
+        undefined,
+      ],
+    ];
+    it.each(cases)('%s', (_what, samples, looked, summarySentence) => {
+      const result = sideSessionFrom(samples, looked);
+      expect(result.report?.summary).toBe(summarySentence);
+      expect(result.summary).toBeUndefined();
+    });
+  });
+
+  it('attaches nothing to a time in the ride (ADR 0033 D-3)', () => {
+    expectTypeOf<keyof SideSessionSummary>().toEqualTypeOf<
+      'source' | 'differences' | 'posed' | 'noRider' | 'unreadable'
+    >();
+    const { summary } = outcome(session(BASE, { ...BASE, torso: 35 }));
+    expect(Object.keys(summary ?? {}).sort()).toStrictEqual([
+      'differences',
+      'noRider',
+      'posed',
+      'source',
+      'unreadable',
+    ]);
+    const text = JSON.stringify(summary);
+    expect(text).not.toMatch(/millisecond|sequence|time|offset|second|landmark|"x"|"y"/i);
+    for (const value of Object.values(summary?.differences ?? {})) {
+      expect(typeof value).toBe('number');
+    }
   });
 });
