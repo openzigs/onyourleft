@@ -394,6 +394,57 @@ describe('a server that refuses the response_format hint (#804, from #828’s re
     expect(requests[1]?.json).not.toHaveProperty('response_format');
   });
 
+  it('remembers a refusal: the next structured step on the same port goes without the hint (#805)', async () => {
+    const { send, sent } = recordingSend((init) =>
+      bodyText(init).includes('response_format')
+        ? new Response('', { status: 400 })
+        : reply('{"section":1,"notes":"Steady."}'),
+    );
+    const port = portWith(send);
+    await port.runModelStep(STEP, live());
+    expect(sent).toHaveLength(2);
+    const answer = await port.runModelStep(STEP, live());
+    expect(answer.kind).toBe('answered');
+    // One request, not two: the hint is not offered again.
+    expect(sent).toHaveLength(3);
+    expect(bodyOf(sent[2] as Sent)).not.toHaveProperty('response_format');
+    // A different port has not been refused, and still offers it.
+    const fresh = recordingSend(() => reply('{"section":1,"notes":"Steady."}'));
+    await portWith(fresh.send).runModelStep(STEP, live());
+    expect(bodyOf(fresh.sent[0] as Sent)).toHaveProperty('response_format');
+  });
+
+  it('does not remember a refusal when the unhinted request failed as well', async () => {
+    const { send, sent } = recordingSend(() => new Response('', { status: 400 }));
+    const port = portWith(send);
+    await port.runModelStep(STEP, live());
+    await port.runModelStep(STEP, live());
+    expect(sent).toHaveLength(4);
+    expect(bodyOf(sent[2] as Sent)).toHaveProperty('response_format');
+  });
+
+  it('remembers a refusal inside the Android shell too', async () => {
+    const requests: NativeAnalysisRequest[] = [];
+    const native: NativeAnalysisPost = async (request) => {
+      requests.push(request);
+      return Promise.resolve(
+        'response_format' in request.json
+          ? { status: 422, body: '' }
+          : {
+              status: 200,
+              body: JSON.stringify({
+                choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+              }),
+            },
+      );
+    };
+    const port = riderModelStepPort(endpoint(), { native });
+    await port?.runModelStep(STEP, live());
+    await port?.runModelStep(STEP, live());
+    expect(requests).toHaveLength(3);
+    expect(requests[2]?.json).not.toHaveProperty('response_format');
+  });
+
   it('does not retry once the step was cancelled', async () => {
     const cancel = new AbortController();
     const { send, sent } = recordingSend(() => {

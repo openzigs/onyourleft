@@ -3,7 +3,8 @@
 /**
  * The whole app, handed in-memory ports that are either EMPTY (a device that
  * has recorded nothing) or POPULATED (forty rides with long names, a ride with
- * a track, a chart, laps and a side-camera report, a segment with efforts, a
+ * a track, a chart, laps, a side-camera report and — since #805 — a model's
+ * long write-up with the ask control set up, a segment with efforts, a
  * route — on the Routes screen and in the game's picker — a workout).
  *
  * Moved out of `browser/reflow-harness.tsx` by #668 unchanged, so that two
@@ -50,6 +51,7 @@ import {
   workoutId,
   type ActivityRecord,
   type AthleteRecord,
+  type RideWriteUpRecord,
   type SegmentEffortRecord,
   type SegmentRecord,
 } from '@onyourleft/store';
@@ -63,6 +65,7 @@ import type { SidePairingPort } from '../camera/side-pairing-port';
 import { scriptedSidePairing } from '../camera/testing';
 import { SIDE_OBSERVATION_SENTENCES, SIDE_REPORT_OBSERVED } from '../camera/side-report-wording';
 import { stubActivity, stubDetail, stubLap } from '../detail/testing';
+import type { AskOutcome, RideAnalysisPort } from '../ride-analysis/ride-analysis-port';
 import { stubEffortPort } from '../efforts/testing';
 import { stubLibrary } from '../library/testing';
 import { idleSnapshot, ridingSnapshot, stubRideController } from '../ride/testing';
@@ -219,6 +222,42 @@ function ride(index: number): ActivityRecord {
   });
 }
 
+/** An unbreakable string a model might write — a URL with no break opportunity in it. */
+export const WRITE_UP_UNBREAKABLE =
+  'https://example.invalid/an-unbreakable-string-a-model-might-write-with-no-space-or-hyphen-anywhere-in-it/' +
+  'x'.repeat(120);
+
+/** The populated fixture's saved write-up (#805). */
+const POPULATED_WRITE_UP: RideWriteUpRecord = {
+  activityId: activityId(RIDE_ID),
+  athleteId: ATHLETE,
+  text: [
+    'A long, steady ride. The first hour was evenly paced, with power held close to the same figure on every climb and cadence settling after the first ten minutes.',
+    'The middle sections were harder: heart rate drifted upwards while power stayed level, which usually means the effort was catching up with you rather than the road getting steeper.',
+    `A string with no break in it, the way a model sometimes writes one: ${WRITE_UP_UNBREAKABLE}`,
+    'The last section eased off, and the ride finished at a comfortable pace.',
+  ].join('\n\n'),
+  templateId: 'ride-write-up',
+  templateVersion: '1',
+  source: 'computer',
+  includedPose: true,
+  missingSections: [2, 3],
+  writtenAt: unixSeconds(NOW),
+};
+
+/**
+ * The post-ride ask, set up with the rider's own computer (#805, carried from
+ * #831's review): without it every route gate built the shell with no port,
+ * so the ask control and what it says is sent were never laid out. It never
+ * answers — a walk never presses it.
+ */
+function rideAnalysisPort(): RideAnalysisPort {
+  return {
+    availableSources: () => ['computer'],
+    askForRideWriteUp: async () => new Promise<AskOutcome>(() => undefined),
+  };
+}
+
 function detailPort(populated: boolean): ReturnType<typeof stubDetail> {
   const count = 1800;
   const track = Array.from({ length: count }, (_unused, index) =>
@@ -242,6 +281,10 @@ function detailPort(populated: boolean): ReturnType<typeof stubDetail> {
     laps: Array.from({ length: 12 }, (_unused, index) =>
       stubLap(index, { activityId: activityId(RIDE_ID), athleteId: ATHLETE }),
     ),
+    // #805: a long write-up, with paragraphs and one unbreakable string, so
+    // the reflow walk lays it out at 320 px — and a pose summary and two
+    // missing sections, so every line under it renders.
+    ...(populated ? { writeUp: POPULATED_WRITE_UP } : {}),
     sideCamera: {
       athleteId: ATHLETE,
       activityId: activityId(RIDE_ID),
@@ -422,6 +465,7 @@ export function PopulatedShell({
       athleteMass={athleteMassPort()}
       library={stubLibrary(ATHLETE, rides)}
       detail={detailPort(populated)}
+      rideAnalysis={rideAnalysisPort()}
       analysis={stubAnalysis(
         ATHLETE,
         rides.map((activity) => ({

@@ -40,6 +40,13 @@ import { modelServer, REPLY_MARKER, STILL_CLOCK, type ModelServer } from './mode
 import { createRideAnalysis } from './ride-analysis';
 import type { RideAnalysisPort } from './ride-analysis-port';
 import { ASK_LABEL, WRITE_UP_HEADING, WRITE_UP_SAVED } from './RideWriteUpControl';
+import { RUN_FAILURE_TEXT } from './runner';
+import {
+  WRITE_UP_EARLIER,
+  WRITE_UP_FRAMING_LEAD,
+  WRITE_UP_NOT_ASKED,
+  WRITE_UP_SET_UP_BEFORE,
+} from '../detail/write-up';
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
 
@@ -79,12 +86,13 @@ afterEach(async () => {
 async function builtAsMainBuildsIt(
   nativeShell = false,
   native?: NativeAnalysisPost,
+  setUp: () => AnalysisEndpoint | undefined = endpoint,
 ): Promise<RideAnalysisPort> {
   const computer = await riderModelStepSource(
     nativeShell,
     async () =>
       native === undefined ? Promise.reject(new Error('no native here')) : Promise.resolve(native),
-    () => endpoint(),
+    setUp,
     server.send,
   );
   return createRideAnalysis({
@@ -139,6 +147,11 @@ function liveRegion(): string {
   return document.querySelector('[role="status"][aria-live="polite"]')?.textContent ?? '';
 }
 
+/** Whether the page shows the server's current summary as the write-up (#805). */
+function writeUpShown(): boolean {
+  return document.querySelector('.oyl-write-up__text')?.textContent === server.summary;
+}
+
 async function savedWriteUp(id: ActivityId): Promise<RideWriteUpRecord | undefined> {
   return harness.read(async (reader) => reader.getRideWriteUp(ATHLETE_A, id));
 }
@@ -162,6 +175,7 @@ describe('the real detail route, with the port main.tsx builds', () => {
     // The press.
     await activateWithKeyboard(askButton() as HTMLButtonElement);
     await until(() => liveRegion() === WRITE_UP_SAVED, 'the write-up is saved');
+    await until(() => writeUpShown(), 'the write-up is shown');
     expect(server.requests.length).toBeGreaterThan(0);
 
     const saved = await savedWriteUp(id);
@@ -170,6 +184,67 @@ describe('the real detail route, with the port main.tsx builds', () => {
     // Nothing of a raw reply outside its validated field reached the row or the page.
     expect(JSON.stringify(saved)).not.toContain(REPLY_MARKER);
     expect(document.body.innerHTML).not.toContain(REPLY_MARKER);
+  });
+
+  it('shows the saved write-up on the page, framed, once it is written (#805)', async () => {
+    const id = await seededRide();
+    await openShell(`/activities/${id}`, await builtAsMainBuildsIt());
+    await until(() => askButton() !== undefined, 'the ask button appears');
+    expect(document.body.textContent).toContain(WRITE_UP_NOT_ASKED);
+    await activateWithKeyboard(askButton() as HTMLButtonElement);
+    await until(
+      () => document.querySelector('.oyl-write-up__text')?.textContent === server.summary,
+      'the write-up is shown',
+    );
+    expect(document.body.textContent).toContain(WRITE_UP_FRAMING_LEAD);
+    expect(document.body.textContent).not.toContain(WRITE_UP_NOT_ASKED);
+  });
+
+  it('keeps the earlier write-up when a new run is withheld, and says why above it (#805, the owner’s ruling)', async () => {
+    const id = await seededRide();
+    const port = await builtAsMainBuildsIt();
+    await openShell(`/activities/${id}`, port);
+    await until(() => askButton() !== undefined, 'the ask button appears');
+    await activateWithKeyboard(askButton() as HTMLButtonElement);
+    await until(() => liveRegion() === WRITE_UP_SAVED, 'the first write-up is saved');
+    await until(() => writeUpShown(), 'the first write-up is shown');
+    const first = await savedWriteUp(id);
+
+    // Every summary and every rewrite now states an angle, so the screen
+    // withholds the run twice and nothing is kept.
+    server.summary = 'Your knee opened to 142° at the bottom of the stroke.';
+    await activateWithKeyboard(askButton() as HTMLButtonElement);
+    await until(
+      () => liveRegion() === RUN_FAILURE_TEXT['withheld-by-screen'],
+      'the run is withheld',
+    );
+    expect(await savedWriteUp(id)).toStrictEqual(first);
+    const quote = document.querySelector('.oyl-write-up__text');
+    expect(quote?.textContent).toBe(first?.text);
+    expect(document.body.textContent).toContain(WRITE_UP_EARLIER);
+    expect(document.body.textContent).not.toContain('142°');
+    const status = document.querySelector('[role="status"][aria-live="polite"]');
+    expect(
+      (status?.compareDocumentPosition(quote as Node) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+  });
+
+  it('with no model set up, is today’s page and one sentence, and sends nothing (#805’s fallback)', async () => {
+    const id = await seededRide();
+    const port = await builtAsMainBuildsIt(false, undefined, () => undefined);
+    await openShell(`/activities/${id}`, port);
+    await until(
+      () => document.body.textContent.includes(WRITE_UP_SET_UP_BEFORE),
+      'the set-up sentence appears',
+    );
+    expect(document.body.textContent).not.toContain(WRITE_UP_HEADING);
+    expect(askButton()).toBeUndefined();
+    // The page goes on to read its traces; let it finish before the store
+    // closes, and count again after, so a late request is counted too.
+    for (let turn = 0; turn < 40; turn += 1) {
+      await settle();
+    }
+    expect(server.requests).toHaveLength(0);
   });
 
   it('goes through the native request inside the shell, and never through fetch', async () => {
@@ -189,6 +264,8 @@ describe('the real detail route, with the port main.tsx builds', () => {
     const fetchedBefore = server.requests.length;
     await activateWithKeyboard(askButton() as HTMLButtonElement);
     await until(() => liveRegion() === WRITE_UP_SAVED, 'the write-up is saved');
+    // #805: the page reads the new write-up back; let it, before the store closes.
+    await until(() => writeUpShown(), 'the write-up is shown');
     // Every request the server saw came through the native double.
     expect(natives).toBe(server.requests.length - fetchedBefore);
     expect((await savedWriteUp(id))?.text).toBe(server.summary);

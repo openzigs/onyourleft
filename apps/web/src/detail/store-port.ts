@@ -25,6 +25,7 @@ import type {
   AthleteId,
   LapRecord,
   PrivacyZoneRecord,
+  RideWriteUpRecord,
   Samples,
   SideCameraReportRecord,
   StreamChannel,
@@ -60,6 +61,13 @@ export interface DetailStore {
     owner: AthleteId,
     id: ActivityId,
   ): Promise<SideCameraReportRecord | undefined>;
+  /**
+   * The model's write-up saved with this ride, or `undefined` for a ride
+   * nobody asked a model about — #805. One point lookup of a bounded text
+   * (`MAXIMUM_WRITE_UP_CHARACTERS`). It is shown only after the page screens
+   * it again (`detail/write-up.ts` §`shownWriteUp`).
+   */
+  getRideWriteUp(owner: AthleteId, id: ActivityId): Promise<RideWriteUpRecord | undefined>;
 }
 
 export interface DetailPort {
