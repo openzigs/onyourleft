@@ -54,7 +54,7 @@ function quotedAfter(heading: string, next: string): string {
     adr
       .slice(start, end)
       .split('\n')
-      .filter((line) => line.startsWith('>'))
+      .filter((line) => line.trimStart().startsWith('>'))
       .join('\n'),
   );
 }
@@ -67,18 +67,31 @@ describe('the approved wording, word for word (ADR 0035 D-9)', () => {
     expect(`${WRITE_UP_FRAMING_LEAD} ${WRITE_UP_FRAMING_REST}`).toBe(approved);
   });
 
-  it('says what the rider’s own computer is sent in wording B', () => {
-    const approved = quotedAfter('**B — own computer', '**C — hosted');
+  // B and C as ADR 0035's 2026-09-29 amendment completed them (#845). The
+  // body's D-9 still quotes the originals, and an ADR body is never edited.
+  it('says what the rider’s own computer is sent in wording B, as amended — #845', () => {
+    const approved = quotedAfter('**B, as amended:**', '**C, as amended:**');
     expect(approved.length).toBeGreaterThan(400);
+    expect(approved).toContain("its distance, and each section's gradient and total climb");
     expect(`${COMPUTER_SENDS_LEAD} ${COMPUTER_SENDS}`).toBe(approved);
   });
 
-  it('stands wording C beside the hosted ask, all but the sentence about the switch — #803', () => {
-    const approved = quotedAfter('**C — hosted', '⚠️ **A says');
+  it('stands wording C, as amended, beside the hosted ask, all but the sentence about the switch — #803, #845', () => {
+    const approved = quotedAfter('**C, as amended:**', '⚠️ **The test question');
     expect(approved.length).toBeGreaterThan(900);
+    expect(approved).toContain('one test question, containing none of your data');
     expect(`${HOSTED_SENDS.join(' ')} ${HOSTED_CONSENT.offUntilOn}`).toBe(approved);
     // More than the headline: #838's review found only the first sentence here.
     expect(HOSTED_SENDS.length).toBe(5);
+  });
+
+  it('would notice the body’s original B and C, which no longer ship — the control', () => {
+    const originalB = quotedAfter('**B — own computer', '**C — hosted');
+    const originalC = quotedAfter('**C — hosted', '⚠️ **A says');
+    expect(originalB.length).toBeGreaterThan(400);
+    expect(originalC.length).toBeGreaterThan(900);
+    expect(`${COMPUTER_SENDS_LEAD} ${COMPUTER_SENDS}`).not.toBe(originalB);
+    expect(`${HOSTED_SENDS.join(' ')} ${HOSTED_CONSENT.offUntilOn}`).not.toBe(originalC);
   });
 });
 

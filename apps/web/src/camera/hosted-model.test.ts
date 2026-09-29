@@ -82,6 +82,9 @@ describe('the hosted consent wording is the one ADR 0029’s newest amendment qu
     expect(asProse(markdown)).toContain('D-7 — The hosted path');
     expect(amendment).toMatch(/^- 2026-09-29 — /);
     expect(amendment).toContain('ADR 0035 D-9 C');
+    // #845: the completed wording, not #803's.
+    expect(amendment).toContain("its distance, and each section's gradient and total climb");
+    expect(amendment).toContain('one test question, containing none of your data');
   });
 
   it('appears in the newest amendment word for word, every part and in order', () => {
@@ -105,6 +108,8 @@ describe('the hosted consent wording is the one ADR 0029’s newest amendment qu
     expect(all).toContain('never sent a picture');
     expect(all).toContain('using the key you entered');
     expect(all).toContain('your heart rate, cadence and power');
+    expect(all).toContain("each section's gradient and total climb");
+    expect(all).toContain('When you save a service, the app sends it one test question');
     expect(all).toContain('We cannot delete it for you afterwards');
     expect(all).not.toContain('Today it is sent only a test question');
     expect(HOSTED_CONSENT.notNeeded).toContain('You do not need this');

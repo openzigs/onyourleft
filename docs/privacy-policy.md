@@ -255,10 +255,10 @@ built in, suggested or named.
 **A ride sent to your own computer, when you ask for an analysis.** When you press the button on
 a ride's page, that ride's numbers go to the computer you set up: heart rate, cadence and power,
 your weight and watts per kilogram, your threshold power, if you set one, how long the ride
-lasted, and how it went section by section. If the side camera filmed the ride, and you agreed to
-the camera, it also gets how a few measurements of your riding position changed between the start
-and the end of filming. Never a picture. Nothing is sent until you press the button, and nothing
-is sent in the background.
+lasted, its distance, and each section's gradient and total climb, and how it went section by
+section. If the side camera filmed the ride, and you agreed to the camera, it also gets how a few
+measurements of your riding position changed between the start and the end of filming. Never a
+picture. Nothing is sent until you press the button, and nothing is sent in the background.
 
 - **Where it goes, and how:** to the same computer, at the same address, by the same rules as
   **Pictures sent to your own computer** above — only an address on your own network, never a
@@ -287,9 +287,10 @@ is off until you turn it on — and off again whenever the app is opened. **It i
 **This sends your ride to a service you have chosen, using your own key.** If you turn this on,
 each time you ask for a ride analysis, that ride's numbers are sent to the address you entered,
 using the key you entered: your heart rate, cadence and power, your weight and watts per kilogram,
-your threshold power, if you set one, how long the ride lasted, and how it went section by section.
-If the side camera filmed the ride, it is also sent how a few measurements of your riding position
-changed between the start and the end of filming. That is a company or a computer that is not yours
+your threshold power, if you set one, how long the ride lasted, its distance, and each section's
+gradient and total climb, and how it went section by section. If the side camera filmed the ride,
+it is also sent how a few measurements of your riding position changed between the start and the
+end of filming. That is a company or a computer that is not yours
 and not ours, and we cannot see what they do with it or how long they keep it. We cannot delete it
 for you afterwards. Like any service you connect to, it also sees your internet address.
 
@@ -347,7 +348,8 @@ can do the same analysis.
   Google's MediaPipe, which runs the side camera's pose model on your tablet — contains a usage
   logger, and the app blocks every request it would make (see **A second phone you pair as a side
   camera** above).
-- No sale or sharing of personal information. Nothing is transmitted to us or to anybody else
+- We never sell your data. The only sharing is the analysis you choose to send to a service you
+  set up. Nothing is transmitted to us or to anybody else
   except the pictures and the rides you choose to send to your own computer, the questions and the
   rides you choose to send to a service of your own choosing, and the map tile requests described above, whose record our Cloudflare account can see for up to 7 days and which we neither use nor
   share.
