@@ -340,7 +340,8 @@ export function specifiersOf(source) {
 }
 
 /**
- * The module scripts every app's own `index.html` loads.
+ * The module scripts every app's own `index.html` loads — or, for an app with
+ * no page, the file its `package.json` names as `main` (#767's instance).
  *
  * Read from the page rather than written down here, so a client that stops
  * mounting `main.tsx` cannot leave this checking a file nothing loads. ⚠️
@@ -359,7 +360,19 @@ export function entryPoints(root) {
   for (const app of apps) {
     if (!app.isDirectory()) continue;
     const page = join(root, 'apps', app.name, 'index.html');
-    if (!existsSync(page)) continue;
+    if (!existsSync(page)) {
+      // An app with no page is a program Node starts — `apps/instance` (#767),
+      // which runs `node src/main.ts` — and its entry is its manifest's `main`,
+      // the same file its `start` script and its Dockerfile run. Read from the
+      // manifest rather than written down here, for the page's reason.
+      const manifest = join(root, 'apps', app.name, 'package.json');
+      if (!existsSync(manifest)) continue;
+      const main = JSON.parse(readFileSync(manifest, 'utf8')).main;
+      if (typeof main !== 'string') continue;
+      const file = fileFor(resolve(join(root, 'apps', app.name), main));
+      if (file !== undefined) found.push(file);
+      continue;
+    }
     for (const match of readFileSync(page, 'utf8').matchAll(
       /<script[^>]*\ssrc=["']([^"']+)["']/g,
     )) {

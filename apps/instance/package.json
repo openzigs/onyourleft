@@ -1,0 +1,19 @@
+{
+  "name": "@onyourleft/instance",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "description": "The self-hostable instance server (ADR 0036, ADR 0037) — a fetch-style handler and a thin Node listener. Nothing but Node itself at runtime.",
+  "main": "./src/main.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit --project tsconfig.json",
+    "test": "vitest run",
+    "start": "node src/main.ts",
+    "openapi:generate": "node tools/write-openapi.ts"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3",
+    "vitest": "4.1.11"
+  }
+}

@@ -155,6 +155,9 @@ apps/                 AGPL-3.0-or-later, without exception
                         one action that turns it into a route (#232)
     src/views/          one component per route (#48)
   mobile/             Capacitor shell wrapping the same web build (Phase 3)
+  instance/           the self-hostable instance server (#767, ADR 0036/0037):
+                        a fetch-style handler behind a thin node:http listener,
+                        run by Node 24 as TypeScript. See "The instance" below
 
 packages/             Apache-2.0, without exception
   domain/             units, core types, validation, signing, analysis
@@ -217,6 +220,7 @@ checkable.
 |---|---|---|---|---|
 | `apps/web` | AGPL-3.0-or-later | Routing, screens, design system, accessibility baseline, the live ride screen, file import and export | — | #48–#51 |
 | `apps/mobile` | AGPL-3.0-or-later | Capacitor shell, native permissions, foreground service | — | #85, #87 |
+| `apps/instance` | AGPL-3.0-or-later | The self-hostable instance server: a fetch-style handler, its Node listener, the API contract and error model, and the `GET /source` offer. See "The instance" below | `apps/web` and `apps/mobile` — and the client may not import it; it reaches an instance over the network, through one module (#777) | #767, #36 |
 | `packages/domain` | Apache-2.0 | Canonical units and types; every conversion in the program; signing/verification; analysis computations; **the segment matcher, the effort it produces and the comparison of two of them** (#66, #67); **the route profile** (#89) | **Any platform API at all** — no DOM, no Node globals, no I/O, no network types | #25, #61, #66, #75–#78, #89 |
 | `packages/fit` | Apache-2.0 | FIT / GPX / TCX decode and encode | Anything server-specific; anything under `apps/`; **anything carrying the Garmin FIT Protocol License — see [ADR 0006](adr/0006-fit-codec-licensing.md)** | #29–#32 |
 | `packages/sensors/src` | Apache-2.0 | BLE sensor and trainer abstraction, and the simulator | **Any platform API at all**, as `packages/domain` — plus any BLE library, because an abstraction that names one has chosen it for all three stacks | #39, #44 |
@@ -1227,6 +1231,73 @@ only screen that names them shows **a count**.
 JavaScript structure for finite numeric `latitude`/`longitude`; an Exif GPS IFD is bytes, so a
 boundary declared over a payload containing a frame is **green for a reason unrelated to the frame**.
 That is why D-9 puts the rule at capture and why the check on it is a refusal rather than a walk.
+
+### The instance: one handler, two adapters, and a contract generated from the code
+
+[ADR 0036](adr/0036-a-self-hostable-instance-server-now.md) lifted owner decision D6 and put a server
+in this repository as `apps/instance`; [ADR 0037](adr/0037-instance-runtime-hosting-and-transport.md)
+decided how it is built. [#767](https://github.com/openzigs/onyourleft/issues/767) scaffolded it and
+[#36](https://github.com/openzigs/onyourleft/issues/36) gave it an API contract and an error model.
+**What it does today is small on purpose**: it answers four metadata routes and nothing else. No
+account, no sync, no database and no room exists yet — #772, #776, #769 and #779/#780 build them.
+
+**The device is canonical and a rider with no instance loses nothing** (ADR 0036 D-3). Nothing in
+`apps/web` or `apps/mobile` imports the instance, and nothing may: a client reaches it over the
+network through one module (#777), which is the one `no-network.test.ts` will admit.
+
+```mermaid
+flowchart LR
+  subgraph apps/instance
+    main[src/main.ts<br/>reads env, starts] --> listener[src/node-listener.ts<br/>node:http adapter]
+    listener --> handler[src/handler.ts<br/>Request to Response]
+    handler --> routes[src/routes.ts<br/>the route table]
+    routes --> spec[src/openapi.ts<br/>generates openapi.json]
+    handler --> errors[src/errors.ts<br/>the one error shape]
+    handler --> log[src/log.ts<br/>no body, token or coordinate]
+  end
+  do[Durable Object adapter, #781<br/>not built] -.-> handler
+  docker[Dockerfile<br/>first deploy, #807] --> main
+```
+
+**One fetch-style handler, thin adapters.** `createHandler` is a `Request → Response` function and
+names nothing from Node, so the Node listener that fronts it today and the Durable Object adapter
+(#781) mount the same code (ADR 0037 D-2). Every rule — the body limit, routing, the error shape,
+the log — is the handler's, so two adapters cannot disagree about any of them.
+
+**No build step and no runtime dependency.** Node 24 strips the types and runs `src/main.ts` as
+committed, so the tsconfig adds `allowImportingTsExtensions` and `erasableSyntaxOnly`. The instance
+imports nothing but Node, which `apps/instance/third-party.txt` states and `check:notices` holds —
+and that document is **the instance's own**, served at `GET /licences/third-party.txt` and kept out
+of the app's notices (§4g of `CLAUDE.md`), because a rider's device carries none of it.
+
+**The source offer is an endpoint** (ADR 0036 D-6). `GET /source` answers with this repository's tree
+at the build's commit, or with the URL an operator who modified their instance configured. The
+instance refuses to start knowing neither, and the Docker build refuses to build without the commit,
+because the only other answer is `main`, which is not what is running.
+
+#### The API contract (#36)
+
+| Concern | Decision | Where |
+|---|---|---|
+| The specification | OpenAPI 3.1, **generated** from the route table the handler dispatches on, committed as `apps/instance/openapi.json` and served at `GET /openapi.json`. `src/openapi.test.ts` fails when the committed file is not what the table generates, and calls every route through the real listener to check its body against the declared schema | `src/routes.ts`, `src/openapi.ts` |
+| Errors | One shape, `{ "error": { "code", "message", "fields"? } }`. `code` is stable and machine-readable; `message` is a fixed sentence per code and **never carries a value from the request** — ADR 0004 D widened to every field, because the instance cannot tell where a stranger's client put a coordinate. Another athlete's resource is `not_found`, never a 403 | `src/errors.ts` |
+| Codes | `validation_failed` 400 (with `fields`, each naming a field and a problem), `unauthenticated` 401, `not_found` 404, `method_not_allowed` 405 (with `Allow`), `payload_too_large` 413, `rate_limited` 429, `internal` 500. Adding a code is an addition; renaming one is breaking | `src/errors.ts` §`ERROR_STATUS` |
+| An unhandled exception | `internal`, with no message, stack or path; the log gets the error's **name** alone | `src/handler.ts`, `src/log.ts` |
+| Request bodies | Bounded before routing: a declared length over the limit is refused unread, and an undeclared one is read only up to the limit | `src/handler.ts` §`boundedBody` |
+| Pagination | **Keyset, never offset**: a list is ordered by (sort key, id) and a page is the next `limit` rows after an opaque cursor. Every row present when a listing begins is returned exactly once however many are inserted between pages; an offset control in the test shows the failure it prevents. `limit` defaults to 50 and is at most 200 | `src/pagination.ts` |
+
+**Versioning.** The four metadata routes — `/health`, `/source`, `/openapi.json`,
+`/licences/third-party.txt` — are unversioned and only ever gain fields. The API a client syncs
+through lives under `/v1/` from its first route (#776). **A breaking change is `/v2/` served beside
+`/v1/`, never an edit to `/v1/`**, because anyone can run an instance and a third party implements
+against this contract (#36's revision block): a change that would break a stranger's client is
+breaking whether or not this repository's own client notices. `info.version` in the specification is
+the API's version, not the package's.
+
+⚠️ **What the contract does not have yet, and who owes it.** `unauthenticated` and `rate_limited` are
+defined and their shape is tested, but no route produces either: authentication is #772's and a rate
+limiter is not built. No route takes input yet, so a validation failure is produced only by the
+pagination parser, which no route calls until #776's first list. #36 stays open for those.
 
 ### The realistic world: what is built, and how a rider chooses it
 
