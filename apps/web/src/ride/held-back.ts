@@ -12,7 +12,10 @@
  * - The game's gradient handle (`ride/controller.ts` §`simulationControl`)
  *   refuses a gradient while its trainer is being let go so it can be
  *   forgotten (`'letting-go-to-forget'`, #659's review),
- * - and once the controller has been disposed (`'let-go'`, #695).
+ * - once the controller has been disposed (`'let-go'`, #695),
+ * - and once its trainer has been detached — forgotten, or its pairing
+ *   undone — so the client it wrote through is closed (`'disconnected'`,
+ *   #732).
  *
  * The machine refused nothing in any of them, so the loop that wrote it must
  * not tell the rider "the trainer refused that target" — and it tells this
@@ -61,13 +64,19 @@ export class TargetHeldBack extends Error {
    * - `'let-go'` — the ride controller was disposed (#695) and is letting the
    *   trainer go; its Stop may still be on the wire, or refused. Permanent:
    *   nothing this controller handed out writes again.
+   * - `'disconnected'` — #732: the trainer this handle drives has been
+   *   detached (Forget finished, or its pairing was undone) and the client is
+   *   closed. Permanent for this handle: a trainer paired again is a new
+   *   client, and a new handle. Before it, the closed client's own
+   *   `not-connected` error reached the rider as "The trainer refused that
+   *   gradient. The next one will be sent again.", and both halves were false.
    *
    * `game/gradient.ts` §`faultText` words each one for the road;
    * `workout/session.ts` §`faultText` says a `'forget-running'` message
    * verbatim and words the other two itself, though it only ever receives
    * `'forget-running'` today.
    */
-  readonly hold: 'forget-running' | 'letting-go-to-forget' | 'let-go';
+  readonly hold: 'forget-running' | 'letting-go-to-forget' | 'let-go' | 'disconnected';
 
   constructor(hold: TargetHeldBack['hold'], reason: string) {
     super(reason);

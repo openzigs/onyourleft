@@ -57,17 +57,55 @@ const errorSchema: Schema = {
 };
 
 function operation(route: Route): Record<string, unknown> {
-  const success =
-    route.response.contentType === 'application/json'
-      ? { 'application/json': { schema: route.response.schema } }
-      : { 'text/plain': { schema: { type: 'string' } } };
-  const responses: Record<string, unknown> = {
-    '200': { description: 'OK', content: success },
-  };
-  for (const code of EVERY_ROUTE) {
-    responses[String(ERROR_STATUS[code])] = { $ref: `#/components/responses/${code}` };
+  const responses: Record<string, unknown> = {};
+  if (route.response.contentType === 'none') {
+    responses['204'] = { description: 'No content' };
+  } else {
+    const success =
+      route.response.contentType === 'application/json'
+        ? { 'application/json': { schema: route.response.schema } }
+        : { 'text/plain': { schema: { type: 'string' } } };
+    responses['200'] = { description: 'OK', content: success };
   }
-  return { operationId: route.operationId, summary: route.summary, responses };
+  const codes = new Set<ErrorCode>([...EVERY_ROUTE, ...(route.errors ?? [])]);
+  if (route.identity === true) codes.add('unavailable');
+  // Several codes share a status, so a status names every code it may carry.
+  const byStatus = new Map<number, ErrorCode[]>();
+  for (const code of ERROR_CODES) {
+    if (!codes.has(code)) continue;
+    const status = ERROR_STATUS[code];
+    byStatus.set(status, [...(byStatus.get(status) ?? []), code]);
+  }
+  for (const [status, sharing] of [...byStatus].sort(([left], [right]) => left - right)) {
+    responses[String(status)] =
+      sharing.length === 1
+        ? { $ref: `#/components/responses/${sharing[0] as string}` }
+        : {
+            description: `One of ${sharing.map((code) => `\`${code}\``).join(', ')}, in the one error shape.`,
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          };
+  }
+  const parameters = [...route.path.matchAll(/\{([A-Za-z]+)\}/g)].map((match) => ({
+    name: match[1],
+    in: 'path',
+    required: true,
+    schema: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,128}$' },
+  }));
+  return {
+    operationId: route.operationId,
+    summary: route.summary,
+    ...(parameters.length > 0 ? { parameters } : {}),
+    ...(route.auth === 'session' ? { security: [{ session: [] }] } : {}),
+    ...(route.request === undefined
+      ? {}
+      : {
+          requestBody: {
+            required: true,
+            content: { 'application/json': { schema: route.request } },
+          },
+        }),
+    responses,
+  };
 }
 
 /** The OpenAPI 3.1 document for a route table. Deterministic: same table, same bytes. */
@@ -97,7 +135,18 @@ export function openApiDocument(routes: readonly Route[]): Record<string, unknow
       },
     },
     paths,
-    components: { schemas: { Error: errorSchema }, responses },
+    components: {
+      schemas: { Error: errorSchema },
+      responses,
+      securitySchemes: {
+        session: {
+          type: 'http',
+          scheme: 'bearer',
+          description:
+            'A session token from `POST /v1/auth/session`. Never a WebSocket credential: a room takes a ticket.',
+        },
+      },
+    },
   };
 }
 

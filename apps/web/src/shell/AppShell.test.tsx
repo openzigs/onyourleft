@@ -158,6 +158,28 @@ describe('the header', () => {
       // The icon is decoration; the word is the name.
       expect(link.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
     }
+    // #673, ADR 0034: Lucide's icons, one each, in the shell's own class and
+    // colour, at one stroke — and never named by a `<title>` inside the SVG.
+    const icons = primary.map((a) => a.querySelector('svg'));
+    expect(
+      icons.map((svg) =>
+        [...(svg?.classList ?? [])].find((name) => /^lucide-/.test(name) && name !== 'lucide-icon'),
+      ),
+    ).toEqual([
+      'lucide-house',
+      'lucide-bike',
+      'lucide-rotate-ccw-clock',
+      'lucide-route',
+      'lucide-ellipsis',
+    ]);
+    for (const svg of icons) {
+      expect(svg?.classList.contains('oyl-nav-icon')).toBe(true);
+      expect(svg?.getAttribute('stroke')).toBe('currentColor');
+      expect(svg?.querySelector('title')).toBeNull();
+    }
+    expect(new Set(icons.map((svg) => svg?.getAttribute('stroke-width')))).toEqual(
+      new Set(['1.8']),
+    );
   });
 
   it('lists the current group’s pages, and only that group’s', async () => {

@@ -42,6 +42,8 @@
 import { act, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
+import { startedViewLoads, viewLoadsSettled } from '../shell/lazy-view';
+
 // React refuses to run `act` outside an environment that has declared itself
 // one, and the refusal is a warning rather than a failure — so without this the
 // suite would render, miss every effect, and report passes. Set here rather
@@ -89,7 +91,41 @@ async function inAct(work: () => void): Promise<void> {
     work();
     await Promise.resolve();
   });
+  await viewsArrived();
 }
+
+/**
+ * Wait for every view the shell has started loading, and let React render it.
+ *
+ * #674: all but Home arrive in a chunk of their own (`shell/lazy-view.tsx`),
+ * so the render that asks for one shows the loading fallback and the view is
+ * in the DOM only once its `import()` resolves — which in this suite is a
+ * module transform away, not a microtask. Without this every assertion after
+ * a navigation reads "Loading this page…". A view that arrives can start
+ * another load (a route that renders a second lazy view), so it loops until a
+ * pass starts nothing new.
+ */
+async function viewsArrived(): Promise<void> {
+  while (startedViewLoads() > viewLoadsSeen) {
+    viewLoadsSeen = startedViewLoads();
+    await act(async () => {
+      await viewLoadsSettled();
+    });
+    // The view is committed now, and its own effects have run — which is where
+    // the ones that read a port start their promise. `inAct`'s one microtask,
+    // again, for them.
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+}
+
+/**
+ * How many view loads {@link viewsArrived} has already waited for. Module
+ * state, like the loads it counts: a view's chunk is loaded once per module
+ * registry, which is once per test file.
+ */
+let viewLoadsSeen = 0;
 
 /**
  * Mount an element into a fresh container attached to `document.body`.
@@ -152,6 +188,7 @@ export async function settle(): Promise<void> {
       setTimeout(resolve, 0);
     });
   });
+  await viewsArrived();
 }
 
 /**

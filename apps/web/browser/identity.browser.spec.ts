@@ -1,0 +1,114 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * A browser's signature, verified by the Node instance — #772's
+ * cross-platform criterion (ADR 0014 D-8). Read `identity-harness.ts` first.
+ *
+ * The instance runs in THIS process: the real handler behind the real Node
+ * listener, the real identity routes and a real SQLite file, from
+ * `apps/instance`'s own test support. It is imported by a computed path
+ * because `apps/instance` is written for Node's type stripping (`.ts`
+ * specifiers) and `apps/web`'s typecheck does not follow those; the shape it
+ * is used through is written down here.
+ */
+
+import { expect, test, type Page } from '@playwright/test';
+
+import type { IdentityHarness } from './identity-harness';
+
+interface IdentityInstance {
+  readonly url: string;
+  call(
+    method: string,
+    path: string,
+    options?: { body?: unknown },
+  ): Promise<{ status: number; body: unknown }>;
+  freshRead<T>(
+    read: (store: {
+      listDeviceKeys(athleteId: string): Promise<readonly { publicKey: string }[]>;
+    }) => Promise<T>,
+  ): Promise<T>;
+  close(): Promise<void>;
+}
+
+interface IdentityTesting {
+  readonly TEST_ORIGIN: string;
+  startIdentityInstance(): Promise<IdentityInstance>;
+}
+
+const INSTANCE_TESTING = new URL('../../instance/src/auth/identity-testing.ts', import.meta.url)
+  .href;
+
+let testing: IdentityTesting;
+let world: IdentityInstance;
+
+test.beforeAll(async () => {
+  testing = (await import(INSTANCE_TESTING)) as IdentityTesting;
+});
+
+test.beforeEach(async () => {
+  world = await testing.startIdentityInstance();
+});
+
+test.afterEach(async () => {
+  await world.close();
+});
+
+async function openHarness(
+  page: Page,
+  tamper: (body: Record<string, unknown>) => Record<string, unknown> = (body) => body,
+): Promise<void> {
+  await page.exposeFunction('oylInstancePost', (path: string, body: Record<string, unknown>) =>
+    world.call('POST', path, { body: path === '/v1/auth/session' ? tamper(body) : body }),
+  );
+  const response = await page.goto('/identity.html');
+  expect(
+    response?.status(),
+    'identity.html did not load — is it named in vite.browser.config.ts build.rollupOptions.input?',
+  ).toBe(200);
+  await page.waitForFunction(() => window.__oylIdentity !== undefined);
+}
+
+function signIn(page: Page, origin: string, database = 'identity-gate') {
+  return page.evaluate(
+    ([o, d]) => (window.__oylIdentity as IdentityHarness).signIn(o as string, d as string),
+    [origin, database],
+  );
+}
+
+test.describe('the device key, from the browser to the Node instance (#772)', () => {
+  test('a statement the browser signed registers an athlete, and the same stored key signs in again', async ({
+    page,
+  }) => {
+    await openHarness(page);
+    const first = await signIn(page, testing.TEST_ORIGIN);
+    expect(first.registered).toBe(true);
+    expect(first.recoveryCodes).toHaveLength(10);
+
+    const second = await signIn(page, testing.TEST_ORIGIN);
+    expect(second.registered).toBe(false);
+    expect(second.instanceAthleteId).toBe(first.instanceAthleteId);
+
+    const keys = await world.freshRead((store) => store.listDeviceKeys(first.instanceAthleteId));
+    expect(keys).toHaveLength(1);
+    // The browser kept the instance's athlete id on the device.
+    const kept = await page.evaluate(() => localStorage.getItem('oyl.instance.account.v1'));
+    expect(kept).toContain(first.instanceAthleteId);
+  });
+
+  test('the control: one flipped signature byte in transit is refused by the instance', async ({
+    page,
+  }) => {
+    await openHarness(page, (body) => {
+      const signature = body.signature as string;
+      const flipped = (signature[0] === 'a' ? 'b' : 'a') + signature.slice(1);
+      return { ...body, signature: flipped };
+    });
+    await expect(signIn(page, testing.TEST_ORIGIN)).rejects.toThrow(/bad_signature/);
+  });
+
+  test('the control: a browser signing for another instance is refused', async ({ page }) => {
+    await openHarness(page);
+    await expect(signIn(page, 'https://other.example')).rejects.toThrow(/wrong_instance/);
+  });
+});
