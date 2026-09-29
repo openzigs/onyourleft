@@ -826,6 +826,16 @@ h3:first-child {
   min-height: 2.75rem;
 }
 
+/*
+ * The list's heading opens its pane (#730). The skip link comes before it in
+ * the DOM, so the heading is not `:first-child` at two panes and kept the
+ * 40 px `h2` gap — the list's heading sat 40 px below the detail's on every
+ * list–detail route. `list-detail.browser.spec.ts` §"#730" holds them level.
+ */
+.oyl-pane-skip + h2 {
+  margin-top: 0;
+}
+
 /* One item of a pane's list: its link, and a line of facts. */
 .oyl-pane-list {
   list-style: none;

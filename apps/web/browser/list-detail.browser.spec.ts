@@ -309,6 +309,75 @@ test.describe('#670 — two panes on a landscape tablet', () => {
   }
 });
 
+/**
+ * The two panes' headings are level — #730.
+ *
+ * At two panes `ListDetail.tsx` puts the pane skip link before the list's
+ * `<h2>`, so the heading was not `:first-child` and kept `h2`'s 40 px top
+ * margin: the list's heading sat 40 px below the detail's on every list–detail
+ * route. `theme.css` §`.oyl-pane-skip + h2` takes the margin away. The control
+ * puts the 40 px back on that one rule and requires the headings apart again.
+ */
+async function paneHeadingTops(
+  page: Page,
+): Promise<{ readonly list: number | null; readonly detail: number | null }> {
+  return page.evaluate(() => {
+    const top = (pane: string): number | null =>
+      document
+        .querySelector(`[data-oyl-pane="${pane}"]:not([hidden]) :is(h2, h3)`)
+        ?.getBoundingClientRect().top ?? null;
+    return { list: top('list'), detail: top('detail') };
+  });
+}
+
+test.describe('#730 — the two panes’ headings are level', () => {
+  for (const control of [false, true]) {
+    test(
+      control
+        ? 'the control — with the 40 px gap back, they are not'
+        : 'at two panes, on every list–detail route',
+      async ({ page }) => {
+        await open(page, TABLET_IN_THE_SHELL);
+        if (control) {
+          await page.addStyleTag({
+            content: '.oyl-pane-skip + h2 { margin-top: var(--oyl-space-xl) !important; }',
+          });
+        }
+        const lines: string[] = [];
+        let measured = 0;
+        for (const route of LIST_DETAIL) {
+          for (const hash of [
+            hrefFor(route),
+            hrefForSelection(route, await selectionOf(page, route)),
+          ]) {
+            const seen = await visit(page, route, hash);
+            expect(seen.listDetail?.panes, `${route.id}: panes decided`).toBe('2');
+            const tops = await paneHeadingTops(page);
+            lines.push(
+              `${hash}: list heading ${tops.list?.toFixed(0) ?? '—'}, ` +
+                `detail heading ${tops.detail?.toFixed(0) ?? '—'}`,
+            );
+            expect(tops.list, `${hash}: the list pane has no heading`).not.toBeNull();
+            if (tops.list === null || tops.detail === null) continue;
+            measured += 1;
+            const apart = Math.abs(tops.list - tops.detail);
+            if (control) {
+              expect(apart, `${hash}: the control left the headings level`).toBeGreaterThan(30);
+            } else {
+              expect(
+                apart,
+                `${hash}: the list's heading and the detail's are not level`,
+              ).toBeLessThanOrEqual(1);
+            }
+          }
+        }
+        console.log(`[#730]${control ? ' control' : ''}\n  ${lines.join('\n  ')}`);
+        expect(measured, 'no route had a heading in both panes').toBeGreaterThan(0);
+      },
+    );
+  }
+});
+
 test.describe('#670 — one pane below 840 px', () => {
   for (const viewport of ONE_PANE) {
     test(`one pane, no sideways scroll, and back returns to the item at ${viewport.name}`, async ({
