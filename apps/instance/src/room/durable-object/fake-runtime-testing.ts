@@ -29,6 +29,16 @@ import { DurableRoom } from './room-object.ts';
 /** The platform's limit on a serialised attachment (developers.cloudflare.com, read 2026-09-28). */
 export const MAXIMUM_ATTACHMENT_BYTES = 16_384;
 
+/**
+ * The platform's limit on the keys one storage call may take: 128 per
+ * `get`/`put`/`delete` (developers.cloudflare.com, the SQLite storage API and
+ * the KV API pages, read 2026-09-29). ⚠️ A local `workerd` does NOT enforce
+ * it — #781's review sent 200 lobby reports through one and it started — so
+ * this fake is the only thing in the repository that goes red for a call
+ * over it.
+ */
+export const MAXIMUM_KEYS_PER_STORAGE_CALL = 128;
+
 export class FakeSocket implements HibernatableSocket {
   /** Every text the object sent, and {@link CLOSED_BY_ROOM} where the object closed it. */
   readonly sent: string[] = [];
@@ -76,6 +86,13 @@ export class FakeStorage implements DurableStorage {
     return Promise.resolve();
   }
   delete(keys: string[]): Promise<number> {
+    if (keys.length > MAXIMUM_KEYS_PER_STORAGE_CALL) {
+      return Promise.reject(
+        new RangeError(
+          `a storage call takes at most 128 keys, and was given ${String(keys.length)}`,
+        ),
+      );
+    }
     return Promise.resolve(keys.filter((key) => this.#values.delete(key)).length);
   }
   list<T>(options: { readonly prefix: string }): Promise<Map<string, T>> {

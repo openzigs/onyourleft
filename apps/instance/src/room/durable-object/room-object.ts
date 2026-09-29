@@ -46,9 +46,14 @@
  *   answers the admission gave, in order. Attachments alone cannot hold a
  *   lobby: a rider who left takes their socket and its attachment with them,
  *   and the next rider's seat number depends on them having been there.
- *   Replaying the core's own calls needs no knowledge of the core's insides, so
- *   a change to the core cannot quietly break a restore — the same calls give
- *   the same room, which is `room.test.ts`'s determinism claim.
+ *   Replaying the core's own calls needs no knowledge of the core's insides:
+ *   the same calls to the same core give the same room, which is
+ *   `room.test.ts`'s determinism claim. ⚠️ **The same core** is the condition,
+ *   and a code release breaks it: a release restarts the object (ADR 0037
+ *   D-8.2), and the new core replays a log the old one wrote. If the core's
+ *   behaviour changed in between, the restored lobby can differ from what its
+ *   still-open sockets were told. The log carries no version, so nothing
+ *   detects that; a lobby that spans a release is the case it can happen in.
  * - **The admission is not asked again** on a replay: the log holds what it
  *   answered, so a ticket that has since expired, or an admission that costs a
  *   round trip, does not change a restored lobby.
@@ -124,6 +129,16 @@ export const LOBBY_LOG_PREFIX = 'lobby/';
  * reference for the same inputs, and only past 2 048 calls in one lobby.
  */
 export const LOBBY_LOG_LIMIT = 2048;
+
+/**
+ * The most keys one storage call may take: 128 per `get`/`put`/`delete` on
+ * this platform (developers.cloudflare.com, read 2026-09-29), where a lobby
+ * log may hold up to {@link LOBBY_LOG_LIMIT}. So the log is deleted in batches
+ * of this. ⚠️ A local `workerd` does not enforce the limit (#781's review
+ * measured it), so `FakeStorage.delete` refuses a longer call instead, and is
+ * the only thing that would go red if this were one call again.
+ */
+const STORAGE_KEYS_PER_CALL = 128;
 
 const NEXT_CONNECTION_KEY = 'next-connection';
 const LEFT_LOBBY_KEY = 'left-lobby';
@@ -246,7 +261,12 @@ export class DurableRoom<Reply> {
     const live = await this.#ready();
     const connection = connectionOf(socket);
     if (connection === undefined || live.lost) {
-      if (live.lost) socket.send(refusal());
+      // A socket that throws on the refusal is still closed.
+      try {
+        if (live.lost) socket.send(refusal());
+      } catch {
+        // Already going.
+      }
       socket.close(1011, 'no room for this socket');
       return;
     }
@@ -365,9 +385,18 @@ export class DurableRoom<Reply> {
     await this.#ctx.storage.put(key, event);
   }
 
+  /**
+   * ⚠️ The marker and the connection counter are **never cleared**: once a
+   * room has left its lobby, this object answers 410 for ever and keeps those
+   * two keys in billed storage. Whether a room's name is reused, and when its
+   * object's storage is deleted, is the Worker in front's to decide —
+   * [#790](https://github.com/openzigs/onyourleft/issues/790).
+   */
   async #leaveLobby(live: Live): Promise<void> {
     const keys = [...(await this.#ctx.storage.list({ prefix: LOBBY_LOG_PREFIX })).keys()];
-    if (keys.length > 0) await this.#ctx.storage.delete(keys);
+    for (let from = 0; from < keys.length; from += STORAGE_KEYS_PER_CALL) {
+      await this.#ctx.storage.delete(keys.slice(from, from + STORAGE_KEYS_PER_CALL));
+    }
     live.lobbyLength = 0;
     await this.#ctx.storage.put(LEFT_LOBBY_KEY, true);
   }
