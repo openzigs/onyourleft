@@ -185,6 +185,10 @@ packages/             Apache-2.0, without exception
     protocol/           the GATT profile clients (#41, #42, #43); no platform API either
     web-bluetooth/      the browser transport (#40); the one place a BluetoothDevice exists
   physics/            cycling power/speed model — Martin et al. 1998, as separate terms
+                      and, since #487, the coefficient set a ride runs and the
+                      race room's plausibility rule (ADR 0028 D-2 rules 1–4)
+  protocol/           the race-room wire format (#768): messages, a bounded
+                      decoder and the version handshake; no dependency at all
   store/              local activity, stream and recording-checkpoint store
 
 docs/
@@ -216,12 +220,14 @@ checkable.
 |---|---|---|---|---|
 | `apps/web` | AGPL-3.0-or-later | Routing, screens, design system, accessibility baseline, the live ride screen, file import and export | — | #48–#51 |
 | `apps/mobile` | AGPL-3.0-or-later | Capacitor shell, native permissions, foreground service | — | #85, #87 |
+| `apps/instance` | AGPL-3.0-or-later | The self-hostable instance server: a fetch-style handler, its Node listener, the API contract and error model, and the `GET /source` offer. See "The instance" below | `apps/web` and `apps/mobile` — and the client may not import it; it reaches an instance over the network, through one module (#777) | #767, #36 |
 | `packages/domain` | Apache-2.0 | Canonical units and types; every conversion in the program; signing/verification; analysis computations; **the segment matcher, the effort it produces and the comparison of two of them** (#66, #67); **the route profile** (#89) | **Any platform API at all** — no DOM, no Node globals, no I/O, no network types | #25, #61, #66, #75–#78, #89 |
 | `packages/fit` | Apache-2.0 | FIT / GPX / TCX decode and encode | Anything server-specific; anything under `apps/`; **anything carrying the Garmin FIT Protocol License — see [ADR 0006](adr/0006-fit-codec-licensing.md)** | #29–#32 |
 | `packages/sensors/src` | Apache-2.0 | BLE sensor and trainer abstraction, and the simulator | **Any platform API at all**, as `packages/domain` — plus any BLE library, because an abstraction that names one has chosen it for all three stacks | #39, #44 |
 | `packages/sensors/protocol` | Apache-2.0 | The GATT profile clients: Heart Rate, Cycling Speed and Cadence and Cycling Power — service and characteristic UUIDs, bounds-checked payload decoding, and the `GattProfile` seam itself | **Any platform API at all**, as `packages/sensors/src` — it is compiled by the same platform-free program, because the same decoders serve the browser adapter and the native stacks | #41, #42 |
 | `packages/sensors/web-bluetooth` | Apache-2.0 | The browser transport: the `DeviceId → device/server/service/characteristic` map, the global GATT operation queue, the profile registry `packages/sensors/protocol` fills, and — since #49 — the **production `FitnessMachineChannel`**, which is the only place in the program that writes to a GATT characteristic | Anything server-specific; every platform global except `navigator`. **Web Bluetooth types must not escape above the transport boundary** | #40, #49 |
-| `packages/physics` | Apache-2.0 | Power → speed, as separately testable terms | Any rendering, BLE or platform API | #88 |
+| `packages/physics` | Apache-2.0 | Power → speed, as separately testable terms; since #487 the coefficient set a ride and a race run, `PHYSICS_VERSION`, and the race room's plausibility rule | Any rendering, BLE or platform API | #88, #487 |
+| `packages/protocol` | Apache-2.0 | The race-room wire format: every message, the encoder, a bounded decoder that refuses rather than throws, and the version handshake | **Any platform API at all**, and any production dependency | #768 |
 | `packages/store` | Apache-2.0 | Local activity and stream persistence, its migrations, and the round-trip test harness | Anything under `apps/` | #26, #27, #28 |
 
 `packages/domain` is filled in as of [#25](https://github.com/openzigs/onyourleft/issues/25): the

@@ -36,7 +36,12 @@ import {
   type RoutePoint,
 } from '@onyourleft/domain';
 
-import { MARTIN_1998_COEFFICIENTS } from '@onyourleft/physics';
+import {
+  MARTIN_1998_COEFFICIENTS,
+  RIDING_POSITION_DRAG_AREAS,
+  ridingCoefficients,
+  ROAD_ROLLING_RESISTANCE_COEFFICIENT,
+} from '@onyourleft/physics';
 
 import { riderMassFor } from '../athlete/mass';
 import {
@@ -45,6 +50,7 @@ import {
   RIDING_POSITIONS,
   RIDING_POSITION_ORDER,
   rideConditionsFor,
+  ridingPositionDragArea,
   type RidingPosition,
 } from './rider';
 import { GameSimulation, SIMULATION_STEP_SECONDS, type RiderInput } from './simulation';
@@ -328,6 +334,18 @@ describe('#365 — the rider is not a track racer unless they say so', () => {
     );
     expect(new Set(areas).size).toBe(1);
     expect(areas[0]).toBe(GAME_ROLLING_RESISTANCE_COEFFICIENT);
+  });
+
+  it('rides the one coefficient set a race room runs — #487, ADR 0028 D-1', () => {
+    // The numbers moved to `@onyourleft/physics` so a room, which cannot import
+    // this file, runs the same set. The game must read that set, not a copy.
+    for (const position of RIDING_POSITION_ORDER) {
+      expect(ridingPositionDragArea(position)).toBe(RIDING_POSITION_DRAG_AREAS[position]);
+      expect(rideConditionsFor(kilograms(71), position).coefficients).toEqual(
+        ridingCoefficients(position),
+      );
+    }
+    expect(GAME_ROLLING_RESISTANCE_COEFFICIENT).toBe(ROAD_ROLLING_RESISTANCE_COEFFICIENT);
   });
 
   it('does not ride the paper’s smooth-asphalt tyres', () => {

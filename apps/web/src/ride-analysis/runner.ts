@@ -156,7 +156,7 @@ export type RunFailure =
   | 'out-of-tokens'
   /** More than half the section steps failed. */
   | 'too-few-sections'
-  /** The summary step failed: no answer, a reply cut off, or its prompt over its bound. */
+  /** The summary step, or its rewrite, failed: no answer, a reply cut off, or its prompt over its bound. */
   | 'no-summary'
   /** The summary and its one rewrite were both withheld by the screen (#798). */
   | 'withheld-by-screen';
@@ -178,8 +178,13 @@ export const RUN_FAILURE_TEXT: Readonly<Record<RunFailure, string>> = {
     'The model could not describe enough of the ride’s sections, so the write-up was stopped and nothing was kept. A larger model may do better.',
   'no-summary':
     'The model did not finish the write-up, so nothing was kept. Check that it is running, then try again.',
+  // ⚠️ Neutral about WHICH check, on purpose (#804, carried from #826's
+  // review): it used to say the write-up "broke this app’s rules about what
+  // may be said about a body, twice", which is untrue of a summary withheld
+  // only for being empty, too long or holding a control character. A rewrite
+  // that never answered is not this failure at all — it is `no-summary`.
   'withheld-by-screen':
-    'The model’s write-up broke this app’s rules about what may be said about a body, twice, so it is not shown and nothing was kept.',
+    'The model’s write-up did not pass this app’s checks on what may be shown, even after it was asked to rewrite it, so it is not shown and nothing was kept.',
 };
 
 /** How a run ended. */
@@ -193,6 +198,17 @@ export type RunOutcome =
     }
   | { readonly kind: 'failed'; readonly why: RunFailure };
 
+/**
+ * Where a run is, as a step number and the steps planned — and nothing else:
+ * no step kind, no prompt and no reply (#804). `total` is the sections, the
+ * position step when the input has a pose summary, and the summary. A re-ask
+ * and the rewrite are not new steps: they report the step they repair.
+ */
+export interface RunProgress {
+  readonly step: number;
+  readonly total: number;
+}
+
 /** What {@link runAnalysis} is given besides the input. */
 export interface RunOptions {
   readonly port: ModelStepPort;
@@ -201,6 +217,8 @@ export interface RunOptions {
   readonly signal: AbortSignal;
   /** The template to run: {@link CURRENT_ANALYSIS_TEMPLATE} unless a test says otherwise. */
   readonly template?: AnalysisTemplate;
+  /** Told as each planned step starts. @see RunProgress */
+  readonly progress?: (progress: RunProgress) => void;
 }
 
 // --- The parse-repair re-ask ----------------------------------------------------
@@ -288,6 +306,15 @@ export async function runAnalysis(
   const template = options.template ?? CURRENT_ANALYSIS_TEMPLATE;
   const runEndsAt = clock.now() + RUN_BUDGET_MILLISECONDS;
   let tokensAskedFor = 0;
+  let stepsStarted = 0;
+  // Known before the first step: the position step runs exactly when the
+  // template builds it a prompt, which it does exactly when there is a pose summary.
+  const total = input.sections.length + (input.pose === undefined ? 0 : 1) + 1;
+  /** Report the next planned step. Nothing of the step is said. */
+  const starting = (): void => {
+    stepsStarted += 1;
+    options.progress?.({ step: Math.min(stepsStarted, total), total });
+  };
 
   /** Send one prompt and wait for its reply, within every bound. */
   const ask = async (
@@ -371,6 +398,7 @@ export async function runAnalysis(
     bounds: AnalysisStepBounds,
     accept: (text: string) => Note | undefined,
   ): Promise<Note | undefined> => {
+    starting();
     const first = await ask(kind, prompt, bounds, STRUCTURED_TEMPERATURE);
     if (first === undefined) {
       return undefined;
@@ -434,6 +462,7 @@ export async function runAnalysis(
             missingSections: [...failedSections],
           };
 
+    starting();
     const summary = await ask(
       'summary',
       summaryStep.prompt(input, earlier),
@@ -459,8 +488,14 @@ export async function runAnalysis(
       rewriteStep.bounds,
       PROSE_TEMPERATURE,
     );
-    const rescreened = rewrite === undefined ? undefined : screenWriteUp(rewrite.text);
-    return rescreened !== undefined && passedScreen(rescreened)
+    // A rewrite that did not answer — a transport failure, its deadline, a
+    // reply cut off, or its prompt over its bound — is the summary not
+    // finishing, not the screen withholding anything (#804, from #826's review).
+    if (rewrite === undefined) {
+      return { kind: 'failed', why: 'no-summary' };
+    }
+    const rescreened = screenWriteUp(rewrite.text);
+    return passedScreen(rescreened)
       ? written(rescreened)
       : { kind: 'failed', why: 'withheld-by-screen' };
   } catch (error) {

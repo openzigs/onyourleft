@@ -39,6 +39,10 @@ const MAY_NAME_HTTP_TYPES: readonly string[] = [
   // live in that module, which carries pictures by design
   // (`no-picture-reachable.test.ts`).
   join('ride-analysis', 'own-computer-step.ts'),
+  // #804: test support, never shipped — a model server as a `fetch` double,
+  // which has to build the `Response` a server would. Named by path, so a
+  // production module beside it that named one would still be a finding.
+  join('ride-analysis', 'model-server-testing.ts'),
 ];
 
 /**
