@@ -48,9 +48,14 @@
 import { altitudeMetres, degreesCelsius, kilograms, type Kilograms } from '@onyourleft/domain';
 import {
   airDensityKilogramsPerCubicMetre,
-  withDragArea,
+  RIDING_POSITION_DRAG_AREAS,
+  ridingCoefficients,
+  ROAD_ROLLING_RESISTANCE_COEFFICIENT,
   type RideConditions,
+  type RidingPosition,
 } from '@onyourleft/physics';
+
+export type { RidingPosition };
 
 /**
  * What the bicycle under the rider weighs, in kilograms.
@@ -97,18 +102,24 @@ const SEA_LEVEL_AIR_DENSITY = airDensityKilogramsPerCubicMetre(
   degreesCelsius(15),
 );
 
-/**
- * How the rider is sitting on the bicycle — #365.
+/*
+ * How the rider is sitting on the bicycle — #365. `RidingPosition` is
+ * `@onyourleft/physics`'s since #487, re-exported above.
  *
  * ⚠️ **A position and not a number in a box**, which is #365's first criterion.
  * A drag area is a wind-tunnel measurement in square metres and nobody knows
  * their own; where their hands are is something every rider can answer without
  * being taught anything.
  */
-export type RidingPosition = 'upright' | 'hoods' | 'drops';
 
 /**
  * What each position is called on the picker, and the drag area it is ridden at.
+ *
+ * ⚠️ **The drag areas are read from `@onyourleft/physics` since #487** and a
+ * reviewer who remembers the three literals here is reading the old file. A
+ * race room runs exactly the game's set (ADR 0028 D-1) and may not import this
+ * file, so the numbers moved to where both can read them. The labels are the
+ * picker's and stayed.
  *
  * ⚠️ **A `Record` keyed by the union rather than an array**, so the lookup in
  * {@link ridingPositionDragArea} is total: there is no fallback branch, and
@@ -126,9 +137,12 @@ export const RIDING_POSITIONS: Readonly<
     }
   >
 > = {
-  upright: { label: 'Sitting up, hands on the tops', dragAreaSquareMetres: 0.42 },
-  hoods: { label: 'On the hoods', dragAreaSquareMetres: 0.36 },
-  drops: { label: 'In the drops', dragAreaSquareMetres: 0.31 },
+  upright: {
+    label: 'Sitting up, hands on the tops',
+    dragAreaSquareMetres: RIDING_POSITION_DRAG_AREAS.upright,
+  },
+  hoods: { label: 'On the hoods', dragAreaSquareMetres: RIDING_POSITION_DRAG_AREAS.hoods },
+  drops: { label: 'In the drops', dragAreaSquareMetres: RIDING_POSITION_DRAG_AREAS.drops },
 };
 
 /** The order the picker offers them in: most air pushed first. */
@@ -189,6 +203,11 @@ export const DEFAULT_RIDING_POSITION: RidingPosition = 'hoods';
  * `packages/physics/README.md` §2 is explicit that Martin measures the
  * *product* and reports only the product, that the 0.88 × 0.30 split is that
  * package's own, and that a single factor is *"meaningless"*.
+ *
+ * @test-facing since #487 the ride is built by `@onyourleft/physics`'
+ * `ridingCoefficients`, so nothing in production looks a drag area up here;
+ * this stays as the provenance ADR 0028 D-1 cites, and `rider.test.ts` holds
+ * it equal to the physics' own table so the two cannot drift.
  */
 export function ridingPositionDragArea(position: RidingPosition): number {
   return RIDING_POSITIONS[position].dragAreaSquareMetres;
@@ -215,8 +234,15 @@ export function ridingPositionDragArea(position: RidingPosition): number {
  * roughly 0.8 km/h on its own — smaller than the drag change and not
  * negligible, which is why it is moved deliberately rather than left because it
  * was harder to defend than the drag area.
+ *
+ * ⚠️ The number is `@onyourleft/physics`' `ROAD_ROLLING_RESISTANCE_COEFFICIENT`
+ * since #487, for the reason on {@link RIDING_POSITIONS}.
+ *
+ * @test-facing since #487 {@link rideConditionsFor} takes the figure through
+ * `ridingCoefficients`; `rider.test.ts` asserts every position rides at this
+ * name, which ADR 0028 D-1 cites.
  */
-export const GAME_ROLLING_RESISTANCE_COEFFICIENT = 0.005;
+export const GAME_ROLLING_RESISTANCE_COEFFICIENT = ROAD_ROLLING_RESISTANCE_COEFFICIENT;
 
 /**
  * What to ride an athlete of this mass, in this position, under.
@@ -239,9 +265,9 @@ export function rideConditionsFor(
     // why every rider was simulated with Martin's track-racer drag area.
     // `simulation.ts` already threaded `conditions.coefficients` through to
     // `advance`; the missing half was here, upstream of it.
-    coefficients: {
-      ...withDragArea(ridingPositionDragArea(position)),
-      rollingResistanceCoefficient: GAME_ROLLING_RESISTANCE_COEFFICIENT,
-    },
+    //
+    // Since #487 this is `ridingCoefficients`, the same call a race room makes,
+    // so the game and a race cannot build the set two ways.
+    coefficients: ridingCoefficients(position),
   };
 }
