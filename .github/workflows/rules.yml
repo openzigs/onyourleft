@@ -274,6 +274,14 @@ jobs:
       #   runner, with the passwordless sudo ubuntu-latest grants. It is mostly
       #   a ~170 MB download, which is why it is here rather than on its own.
       #
+      #   instance image -- #767/#771. Builds apps/instance/Dockerfile, waits
+      #   for the image's own healthcheck to answer /health INSIDE the
+      #   container, and requires /source to name the commit (AGPL-3.0 s13).
+      #   Mostly a pull of the digest-pinned base image and a few COPY layers,
+      #   so it is waiting rather than working and belongs here. The instance's
+      #   Vitest project needs no step: it is one more project in the Vitest
+      #   run below (CLAUDE.md section 4c says what that cost).
+      #
       # Every one of these is also what it was before #651 in every other way:
       # the same command, and its failure fails the job. Most checkers need
       # Node, which is why none of them is in `check:repo`, the bare-clone set.
@@ -310,6 +318,7 @@ jobs:
           'dependency licences' 'pnpm run check:licences'
           'build' 'pnpm run build'
           'playwright install' 'pnpm --filter @onyourleft/web exec playwright install --with-deps chromium'
+          'instance image' 'bash scripts/check-instance-image.sh'
 
       # #48's fourth acceptance criterion: automated accessibility checks run on
       # every route and fail the build on a violation. The checks are Vitest

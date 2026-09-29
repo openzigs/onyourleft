@@ -1,0 +1,13 @@
+THIRD-PARTY SOFTWARE IN THIS ON YOUR LEFT INSTANCE
+
+This instance server includes software written by other people, each part
+under its own licence. This document reproduces every one of those licences'
+notices, as the packages themselves ship them. The instance itself is
+AGPL-3.0-or-later, and GET /source says where its source is.
+
+Generated from the installed dependency tree by
+scripts/check-third-party-notices.mjs. Do not edit it by hand.
+
+In the instance (0 packages)
+  (none — the instance runs on Node alone)
+

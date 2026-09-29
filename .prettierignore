@@ -47,3 +47,9 @@ apps/mobile/android/app/src/main/assets/capacitor.config.json
 apps/mobile/android/app/src/main/assets/capacitor.plugins.json
 apps/mobile/android/app/src/main/res/xml/config.xml
 apps/mobile/android/capacitor-cordova-android-plugins/
+
+# The instance's API specification (#36), GENERATED from its route table by
+# `pnpm --filter @onyourleft/instance run openapi:generate` and compared BYTE
+# for byte by `apps/instance/src/openapi.test.ts`. Prettier would fold its short
+# arrays onto one line and the two would disagree about every regeneration.
+apps/instance/openapi.json

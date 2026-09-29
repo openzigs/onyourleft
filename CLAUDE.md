@@ -13,14 +13,30 @@ layout and component boundaries are in [`docs/architecture.md`](docs/architectur
 **On Your Left** — a free, open alternative to Strava + Zwift for cycling: ride tracking, indoor
 smart-trainer control, and live sensor capture over **Bluetooth Low Energy**.
 
-The first milestone (v0.1) is deliberately small and **entirely local**: pair a BLE trainer, record a
-ride, store it, view it. **No server, no account, no hosting bill.** A server arrives in Phase 4 with
-[#7](https://github.com/openzigs/onyourleft/issues/7).
+The first milestone (v0.1) was deliberately small and **entirely local**: pair a BLE trainer, record
+a ride, store it, view it, with no server, no account and no hosting bill. **That client is still the
+whole product for a rider who wants nothing more**, and it stays that way.
 
-> ⚠️ **There is no server in Phase 1.** Do not add one, do not scaffold `apps/api`, and do not write
-> a command, config or test that assumes one exists. This is owner decision D6 and it is the single
-> most common thing to get wrong here, because most of this program's issue text was written before
-> it.
+**There is now a server as well: `apps/instance`**, the one self-hostable instance
+([ADR 0036](docs/adr/0036-a-self-hostable-instance-server-now.md), the owner's ruling of 2026-09-28;
+[ADR 0037](docs/adr/0037-instance-runtime-hosting-and-transport.md) for how it is built). Accounts
+(#6), sync and ingestion (#7), self-hosting (#17) and race rooms (#16) are built on it. Its first
+deploy is a Docker image on the owner's own machine behind a Cloudflare Tunnel (#807) — **no hosting
+bill is implied**, and no issue may take a paid service as a prerequisite (ADR 0036 D-7).
+
+> ⚠️ **The device is canonical, and a rider with no instance loses nothing.** That is the part of
+> the old rule that survives, as ADR 0036 D-3's four invariants: (a) no feature that works with no
+> instance today may start to require one — `apps/web/src/privacy/no-network.test.ts` admits
+> exactly one module for instance traffic (#777) and nothing else; (b) the device copy is never
+> deleted on an instance's confirmation (#47); (c) the instance never becomes the only place a
+> rider's data is (#776); (d) nothing the client refuses to send leaves through the instance
+> (#777). A change that makes any of the four false is a change to an ADR, not a review note.
+>
+> ⚠️ **This section used to forbid a server.** It said *"There is no server in Phase 1. Do not add
+> one, do not scaffold `apps/api`"* — owner decision D6, which ADR 0036 supersedes. A reviewer who
+> remembers that sentence is reading the old file, and an issue body that repeats it predates the
+> ruling (§8, "Read the issue's revision block first"). **The server is `apps/instance`, not
+> `apps/api`**: no package of that name exists or is planned.
 
 ---
 
@@ -1261,6 +1277,24 @@ apps/                 AGPL-3.0-or-later, without exception
                         instrument every #615 issue is measured with. The
                         summary's arithmetic IS decidable, so it has a Vitest
                         suite (`tools/**/*.test.mjs`, in the mobile project)
+  instance/           the self-hostable instance server (#767, ADR 0036, ADR 0037)
+                        — one fetch-style handler (`Request → Response`,
+                        `src/handler.ts`) behind a thin `node:http` listener
+                        (`src/node-listener.ts`), run as TypeScript by Node 24
+                        with no build step (`node src/main.ts`). It answers
+                        `/health`, `/source` (AGPL-3.0 §13, ADR 0036 D-6),
+                        `/openapi.json` and `/licences/third-party.txt`, and
+                        nothing else yet. ⚠️ **No runtime dependency at all**:
+                        its notices document says so and `check:notices` holds
+                        it. ⚠️ It must not depend on `apps/web` or
+                        `apps/mobile` (`boundaries/dependencies`), and nothing
+                        in the client may import it: the client reaches an
+                        instance over the network, through ONE module (#777,
+                        ADR 0036 D-3.a). The route table (`src/routes.ts`) is
+                        what the handler dispatches on AND what
+                        `openapi.json` is generated from (#36). `Dockerfile`
+                        is the first deploy target; `scripts/check-instance-image.sh`
+                        builds it and asks `/health` inside the container
 
 packages/             Apache-2.0, without exception
   domain/             units, core types, validation, signing, analysis (#25)
@@ -1388,9 +1422,11 @@ ASSETS.toml           the provenance, licence and SHA-256 of every committed
                       a public issue
 ```
 
-**`apps/web`, `apps/mobile`, `packages/domain`, `packages/sensors`, `packages/fit`,
+**`apps/web`, `apps/mobile`, `apps/instance`, `packages/domain`, `packages/sensors`, `packages/fit`,
 `packages/store`, `packages/physics` and — since [#768](https://github.com/openzigs/onyourleft/issues/768)
-— `packages/protocol` exist.**
+— `packages/protocol` exist.** `apps/instance` was created by
+[#767](https://github.com/openzigs/onyourleft/issues/767) on 2026-09-29, the first package that
+listens on a socket (ADR 0036).
 The first two were created by [#23](https://github.com/openzigs/onyourleft/issues/23) along with the
 workspace, the toolchain and the lockfile, `packages/sensors` by
 [#39](https://github.com/openzigs/onyourleft/issues/39), `packages/store` by
@@ -1417,6 +1453,7 @@ cover the paths, so a package arrives inside the rules rather than beside them.
 | `packages/physics` | Power → speed. Pure computation. | Any rendering, BLE or platform API |
 | `packages/protocol` | The race-room wire format: messages, a bounded decoder, the version handshake (#768) | **Any platform API at all**, as `packages/domain` — and any production dependency |
 | `packages/store` | Local activity, stream, **recording-checkpoint** and **signed-record** persistence, the device keypair, and its migrations | Anything under `apps/` |
+| `apps/instance` | The instance server: HTTP now, rooms later. AGPL-3.0-or-later by path | `apps/web` and `apps/mobile` — and the client must not import it either. Any runtime dependency outside ADR 0037 D-9's table without a row like it |
 
 ---
 
@@ -1845,8 +1882,9 @@ bash scripts/check-dependency-licences.test.sh
 # Runs its own `pnpm install --frozen-lockfile` (#298's reason, section 4k),
 # regenerates apps/web/public/licences/third-party.txt and
 # apps/web/src/credits/third-party-contents.txt from the union of every
-# workspace package's distributed closure, and fails (NOT001-NOT008) when either
-# committed file is not what it writes. About 2 s on a warm install locally and
+# workspace package's distributed closure — every package but a SERVER, since
+# #767 — and apps/instance/third-party.txt from the instance's own, and fails
+# (NOT001-NOT008) when any committed file is not what it writes. About 2 s on a warm install locally and
 # 4 s in CI, measured 2026-09-27 (this line said twenty until #676's review
 # measured it). `notices:generate`
 # is the same run with --write, and is how a dependency bump is repaired: run
@@ -1855,8 +1893,8 @@ pnpm run check:notices
 pnpm run notices:generate
 
 # Its own suite. Fixture-driven, with a fake `pnpm` on PATH so the real
-# union code is what runs; the count is what the run prints (96 on 2026-09-27;
-# 68 before #676's review).
+# union code is what runs; the count is what the run prints (133 on 2026-09-29,
+# with #767's server cases; 96 on 2026-09-27; 68 before #676's review).
 # Needs Node, so not in `check:repo`.
 bash scripts/check-third-party-notices.test.sh
 
@@ -1865,6 +1903,24 @@ bash scripts/check-third-party-notices.test.sh
 # and NOT in CI: it needs a JDK and an Android SDK. Without its report that
 # test skips loudly, naming this command; with a stale one it fails.
 pnpm --filter @onyourleft/mobile run native:closure
+
+# The instance server (#767), run on 2026-09-29. Its tests are the `instance`
+# Vitest project, so `pnpm run test` and `test:coverage` already run them (and
+# the coverage report lists `apps/instance/src`); these run the package alone.
+# Every test that speaks HTTP does it through the real listener on a port the
+# operating system chose.
+pnpm --filter @onyourleft/instance run test
+pnpm --filter @onyourleft/instance run typecheck
+
+# Start the instance on this machine, on 127.0.0.1:8787. ⚠️ It REFUSES to start
+# without a commit or a source URL (AGPL-3.0 §13, ADR 0036 D-6); every variable
+# it reads is in .env.example. Ctrl-C stops it. Not a gate, and nothing runs it.
+OYL_INSTANCE_COMMIT="$(git rev-parse HEAD)" pnpm --filter @onyourleft/instance start
+
+# Rewrite apps/instance/openapi.json from the route table (#36). The ONLY way
+# that file changes: `src/openapi.test.ts` fails when it is not what this
+# writes, so a route added without it is a red build. Read the diff after.
+pnpm --filter @onyourleft/instance run openapi:generate
 
 # All eight bare-clone script checks in one command.
 pnpm run check:repo
@@ -1892,6 +1948,21 @@ shellcheck scripts/*.sh
 # Requires npm and network access.
 # Check whether typed linting has caught up with TypeScript 7 yet (see §8).
 npm view typescript-eslint peerDependencies.typescript
+
+# Requires Docker, and the network the first time (the base image is pulled by
+# digest). Builds apps/instance/Dockerfile with the tree's commit, waits for
+# the image's OWN healthcheck to answer /health inside the container, and
+# requires /source to name that commit. IMG001-IMG003. Removes the container
+# and the image whatever happens. About 1 s with the base image cached and
+# 2 s without on a developer's machine, and about 10 s on the CI runner,
+# measured 2026-09-29. In CI since #771 (§4c).
+bash scripts/check-instance-image.sh
+
+# The same image by hand, for #807's deployment. The commit is a REQUIRED build
+# argument: the build fails without it, rather than an instance that cannot
+# say which source it is.
+docker build --build-arg OYL_INSTANCE_COMMIT="$(git rev-parse HEAD)" -t onyourleft-instance apps/instance
+docker run --rm -p 127.0.0.1:8787:8787 onyourleft-instance
 ```
 
 `scripts/check-repo-rules.sh` enforces:
@@ -1992,8 +2063,14 @@ not.
   [`docs/architecture.md`](docs/architecture.md) §"`apps/web`: the shell, the design system and the
   accessibility baseline" records. ⚠️ This bullet used to list `react-router` as ADR 0005's, and a
   reviewer who remembers that is reading the old file.
-- **`apps/api`, or anything else server-shaped.** Not "not yet" — not in Phase 1 at all. Owner
-  decision D6.
+- **`apps/api`** — and there never will be: the server is `apps/instance` (§2,
+  [ADR 0036](docs/adr/0036-a-self-hostable-instance-server-now.md)). ⚠️ This bullet used to read
+  *"`apps/api`, or anything else server-shaped. Not 'not yet' — not in Phase 1 at all"* (owner
+  decision D6), and a reviewer who remembers it is reading the old file.
+- **Any instance feature beyond metadata.** `apps/instance` answers `/health`, `/source`,
+  `/openapi.json` and `/licences/third-party.txt` and nothing else yet: no account (#772), no sync
+  (#776), no database (#769), no room (#779, #780). Do not write a command or a test that assumes
+  one of those exists.
 
 #### What exists, and what each is **not** yet
 
@@ -2212,21 +2289,23 @@ with its own fixture suite), `shellcheck scripts/*.sh`, then `pnpm install --fro
 `bash scripts/check-capacitor-generated.test.sh`, `check:cost-model`,
 `bash scripts/check-cost-model.test.sh`, `bash scripts/coverage-summary.test.sh`, `build`,
 `playwright install --with-deps chromium`, `test:browser`, `bash scripts/check-dependency-licences.test.sh`, `check:licences`,
-`bash scripts/check-third-party-notices.test.sh` and `check:notices` — then
+`bash scripts/check-third-party-notices.test.sh`, `check:notices` and — since
+[#771](https://github.com/openzigs/onyourleft/issues/771) — `bash scripts/check-instance-image.sh` — then
 publishes the coverage table to the run summary and uploads the HTML report as an artefact.
 Those last two carry `if: always()` and cannot fail the job: the run where coverage moved
 unexpectedly is exactly the one whose table you want, and a reporting step that can fail a
 build is a percentage floor arriving by the back door, which §5 forbids.
 
 ⚠️ **Since [#651](https://github.com/openzigs/onyourleft/issues/651) one step, `Checks,
-concurrently`, runs twenty-two of those commands AT ONCE, and a reviewer who remembers one step per
+concurrently`, runs twenty-three of those commands AT ONCE (twenty-two until #771 added the
+instance image), and a reviewer who remembers one step per
 command is reading the old file.** It runs the eight bare-clone script checks, `shellcheck`,
 `format:check`, `lint`, `typecheck`, `check:wiring`, `check:cost-model`, `check:licences`, `build`,
-the browser install and five checker suites, after the install — the bare-clone checks need none
+the browser install, the instance image and five checker suites, after the install — the bare-clone checks need none
 of it, but on their own before it they took 48 s with the runner otherwise idle. It goes through
 `scripts/run-concurrently.sh` (§4a), which labels every line with its command, waits on each
 process by itself and fails the step if **any** command failed — its own suite runs first, because
-a runner that swallowed a failure would make that step twenty-two gates removed and still look
+a runner that swallowed a failure would make that step twenty-three gates removed and still look
 green, and #651's pull request proved it red on the runner with one formatting defect (run
 36325105846: `format:check` FAILED, the other twelve then in that step finished, the job failed).
 ⚠️ **Anything that runs Vitest stays out of it**, and so do `check:capacitor` and `check:notices`,
@@ -2235,6 +2314,44 @@ timeout is already within a second of several cases on the slower runner, and be
 three of them passed it (run 36324592730) — `test:a11y` and `test:coverage` each run alone. And
 `test:coverage` and `test:browser` are **not** run together, though they are the two longest steps:
 run 36323764725 did it and both went red, because each is CPU-bound on its own.
+
+⚠️ **The instance ([#771](https://github.com/openzigs/onyourleft/issues/771)) is tested inside this
+same job and adds no step of its own but one**, decided against the three constraints that bound
+everything here — one required context, a budget already spent, and no gate that needs a service
+outside the runner:
+
+| What | Where | Why |
+|---|---|---|
+| `apps/instance`'s unit and HTTP tests (the real listener on an ephemeral port) | the Vitest run, as one more project (`instance`) | no service, no second job; 51 cases in about 0.15 s locally |
+| The Docker image, and `/health` inside the container | `Checks, concurrently`, as `instance image` | mostly a digest-pinned pull, so it waits rather than works — the step's shape |
+| The OpenAPI drift check (#36) | the Vitest run (`src/openapi.test.ts`) | it is a byte comparison, not a tool |
+| Rooms: the conformance suite on Node and on `workerd`, and the two-browser e2e spec with its fan-out control | **not built yet** — #779, #780, #781 | #771's last two criteria are owed by the first room, not by this scaffold |
+| A load test, and a Cloudflare bill | **not CI** (#792, #464) | a measurement and an account, not gates |
+
+**What it cost, measured on the runner** — see the table directly below this paragraph, which
+quotes run ids rather than estimates.
+
+| | Run | CPU | Job | `Checks, concurrently` | Vitest with coverage | Browser gate |
+|---|---|---|--:|--:|--:|--:|
+| **Before**, `main` | [36576722522](https://github.com/openzigs/onyourleft/actions/runs/36576722522) | EPYC 7763 | 1231 s | 155 s | 386 s | 616 s |
+| **Before**, `main` | [36569152175](https://github.com/openzigs/onyourleft/actions/runs/36569152175) | EPYC 7763 | 1221 s | | | |
+| **Before**, `main` | [36563116178](https://github.com/openzigs/onyourleft/actions/runs/36563116178) | EPYC 7763 | 1206 s | | | |
+| **Before**, `main` | [36574047878](https://github.com/openzigs/onyourleft/actions/runs/36574047878) | EPYC 9V74 | 985 s | 127 s | 300 s | 495 s |
+| **Before**, `main` | [36559634387](https://github.com/openzigs/onyourleft/actions/runs/36559634387) | EPYC 9V74 | 970 s | | | |
+| **After**, #833 | [36582905894](https://github.com/openzigs/onyourleft/actions/runs/36582905894) attempt 2 | EPYC 7763 | 1223 s | 158 s | 384 s | 605 s |
+| **After**, #833 | [36582905894](https://github.com/openzigs/onyourleft/actions/runs/36582905894) attempt 1 | EPYC 9V74 | 1216 s | 154 s | 410 s | 581 s |
+| **After**, #833 | [36588252465](https://github.com/openzigs/onyourleft/actions/runs/36588252465) | EPYC 9V74 | 994 s | | | |
+
+**On the 7763 — the runner #771 names — the delta is +4 s** (1223 s against a mean of 1219 s over
+three `main` runs), inside the spread of `main` alone. The image check itself took about **10 s**
+inside the concurrent step, which grew by 3 s. The instance's Vitest project is 51 cases in well under
+a second. **On the 9V74 it is +16 s** on the second sample (994 s against 985 s and 970 s on
+`main`). ⚠️ The first 9V74 sample took 1216 s, and all of the extra time was in Vitest (+110 s) and
+the browser gate (+86 s), neither of which this change touches. The second sample did not repeat it,
+so it is recorded as runner variance, not as a cost. ⚠️ **The job was already past 15 minutes on the 7763 before this change** (1206–1231 s),
+so #771's "if the delta pushes a green run past 15 minutes" was already true of `main`. This
+change did not push it there, and moving something out of the job is #651's open question, not
+this one's.
 
 ⚠️ **The runner is two cores, not four, and that is what bounds all of this.** `ubuntu-latest`
 reports four vCPUs, and `lscpu` on it reads `Thread(s) per core: 2`, `Core(s) per socket: 2` (run
@@ -3050,6 +3167,15 @@ its text, so it could never have seen this. The second half is a separate gate:
 | Files copied out of a package | `copiedIntoBuild` is a reviewed list; what holds it complete is the **build**, not `check:notices`, which deliberately needs no build. `apps/web/tools/notices/copied-into-build.ts` is a plugin in the product's `vite.config.ts` that fails `pnpm run build` when the bundle holds a non-code asset (not `.js`/`.css`/`.html`/`.map`) that came from a package — no origin module at all, which is how a plugin's `emitFile` arrives, or one under `node_modules` — and the list does not name it; and when the list names a file the build did not write. ⚠️ **Its limits**: it reads the one product build, so the service-worker sub-build and the harness build are not read; `public/` is not in the bundle and is `ASSETS.toml`'s; and a package's bytes passed off as this repository's own source (copied into `src/` and imported from there) look like ours, which is `ASSET001`'s to catch |
 | Where a rider reads it | Credits §"Software this app includes", reached from About. The screen inlines the document's **contents** (the list, ~5 KiB) rather than the document (~125 KiB); both are the generator's output and `check:notices` compares both |
 
+⚠️ **A SERVER is not in the app's union, and has a document of its own**
+([#767](https://github.com/openzigs/onyourleft/issues/767)). `SERVERS` in the script names
+`apps/instance`: its distributed closure — with every workspace package its manifest names — is
+written to `apps/instance/third-party.txt`, which the instance serves at
+`GET /licences/third-party.txt`, and is **excluded** from `apps/web/public/licences/third-party.txt`,
+because a rider's device carries none of it. A server dependency with no licence file is `NOT003`
+with no reviewed escape yet: the first one is a decision to make with the package in front of you.
+Today the instance's closure is empty and its document says so.
+
 ⚠️ **The text is read from the files, never from the manifest.** `lucide-react`'s manifest says
 `ISC`; its `LICENSE` is ISC **and** MIT, for the icons derived from Feather. The field is printed as
 what a package declares, and the notice is every licence file it ships — the fixture suite's
@@ -3222,7 +3348,10 @@ well typed.**
 | `WIRE004` | an export marked `@test-facing` that no test, spec or browser harness reads (nor any held `@test-facing` export one does) — it is dead; **or** either tag on an export production DOES name — the exemption is stale ([#438](https://github.com/openzigs/onyourleft/issues/438)) |
 
 **The entry point is read out of `apps/*/index.html`**, so it is the page Vite actually builds
-rather than a path written down twice. ⚠️ **`apps/web/browser/` is deliberately NOT an entry
+rather than a path written down twice — **or, for an app with no page, out of its `package.json`'s
+`main`** (since [#767](https://github.com/openzigs/onyourleft/issues/767)): `apps/instance` is
+started as `node src/main.ts`, and without this every `*-port.ts` it grows would be reported as
+reached by nothing. Two fixture cases pin both directions. ⚠️ **`apps/web/browser/` is deliberately NOT an entry
 point**: a harness page is a gate, and #236 is exactly what happens when a harness's own canvas is
 mistaken for the product's. Neither is a test — every one of the five defects was unit-tested and
 green, so a test calling something is not evidence that anything ships it.
@@ -3933,8 +4062,10 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   2026-09-22 answering all six. Read the **amendment** rather than §"What the owner has not
   decided", which is now a record of what was asked: **Q5 changed D-4** (W/kg categories are
   deferred, not shipped, so the Q3 plausibility flags are the only guard in the first cut) and
-  **Q6 lifted D-0's counsel block** while its "#7, no server in Phase 1" block stands, so nothing
-  may still be built.
+  **Q6 lifted D-0's counsel block** while its "#7, no server in Phase 1" block stood, so nothing
+  could be built then. ⚠️ **That last block is lifted too** —
+  [ADR 0036](docs/adr/0036-a-self-hostable-instance-server-now.md) D-4, 2026-09-29 — and a reviewer
+  who remembers it standing is reading the old file.
   ⚠️ **0027 is [ADR 0027](docs/adr/0027-a-tab-left-behind-by-another-tabs-update.md)**, taken by
   [#483](https://github.com/openzigs/onyourleft/issues/483) for the state a tab is left in when
   ANOTHER tab's update takes over — a reviewer who remembers this sentence offering 0027 is reading
@@ -4096,8 +4227,9 @@ off during `gatt.connect()` produces no event and no rejection. #40's queue boun
 for that reason; anything else awaiting a GATT promise must too.
 
 **Read the issue's revision block first.** Most issue bodies in this repository predate owner
-decisions D2, D5 and D6, and several state things that are now false — including "#18 is still open"
-(it is merged) and package layouts that include `apps/api` or ANT+. The quoted revision block at the
+decisions D2, D5 and D6 (D6 itself since superseded by ADR 0036), and several state things that are
+now false — including "#18 is still open" (it is merged), "there is no server" (there is:
+`apps/instance`) and package layouts that include `apps/api` or ANT+. The quoted revision block at the
 top of an issue **supersedes its body**.
 
 ---
