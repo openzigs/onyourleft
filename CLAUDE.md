@@ -2627,6 +2627,21 @@ exactly one run by construction, and the tagged describes must equal the reviewe
 a red `nightly-split.test.ts`, not a quiet move. `check:test-split`, still required, fails a Vitest
 file in neither run.
 
+**What it bought, on the runner, with the CPU each run printed** — n = 1 after, so read it as one
+sample and not a figure:
+
+| | Run | CPU | Job | Vitest with coverage | Tests outside coverage | Browser gate |
+|---|---|---|--:|--:|--:|--:|
+| **Before** #866 (after #852) | [36615071157](https://github.com/openzigs/onyourleft/actions/runs/36615071157) | EPYC 7763 | 1220 s | 297 s | 45 s | 616 s |
+| **Before** #866, `main` | [36634388848](https://github.com/openzigs/onyourleft/actions/runs/36634388848) | EPYC 9V45 | 860 s | 199 s | 28 s | 431 s |
+| **After** #866 | [36637978753](https://github.com/openzigs/onyourleft/actions/runs/36637978753) | EPYC 7763 | 887 s | 296 s | — | 338 s |
+
+On the 7763 that is **−333 s** of job: 45 s of Vitest and 278 s of browser gate, the gate's four game
+loads now two (the plain page 25 s, `?shadow-map` 39 s). The nightly run on the pull request that
+made it took 281 s on an Intel Xeon 6973P-C
+([36637979054](https://github.com/openzigs/onyourleft/actions/runs/36637979054)): 35 s of Vitest
+and 201 s of browser checks.
+
 **A red nightly run opens an issue titled `Nightly heavy checks failed`**, or comments on it while
 it is open, from a second job whose token holds `issues: write` and nothing else and which checks
 nothing out. Close the issue once a nightly run is green. The job that runs the checks is
