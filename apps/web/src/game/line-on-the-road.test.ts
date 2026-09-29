@@ -30,6 +30,7 @@ import {
   RIDER_HALF_WIDTH_METRES,
   combinedLean,
   lowestPedalHeight,
+  pedallingShare,
 } from './bicycle';
 import { createGradientSession } from './gradient';
 import type { RiderMarker, SceneFrame } from './port';
@@ -531,5 +532,71 @@ describe('a racer’s cranks in a tight bend — #546', () => {
     const route = northRoute(2_000, () => 0);
     const frame = frameOf(route, stateAt(route, 1_000, 12), { crankAngle: 1.234 });
     expect(markerOf(frame, 'rider').crankAngle).toBe(1.234);
+  });
+});
+
+describe('what each rider is drawn pedalling with, and on whose clock — #625', () => {
+  it('draws the rider’s stroke exactly when the caller says a reading turns the cranks, and never by default', () => {
+    const route = northRoute(2_000, () => 0);
+    const state = stateAt(route, 1_000, 10);
+    expect(
+      markerOf(frameOf(route, state, { crankAngle: 1, pedalling: true }), 'rider').pedalling,
+    ).toBe(1);
+    expect(
+      markerOf(frameOf(route, state, { crankAngle: 1, pedalling: false }), 'rider').pedalling,
+    ).toBe(0);
+    // Absent is the start line and a harness frame: a rider who is not pedalling.
+    expect(markerOf(frameOf(route, state, { crankAngle: 1 }), 'rider').pedalling).toBe(0);
+  });
+
+  it('draws the pacer and the ghost pedalling while they move, and still when they do not', () => {
+    const route = northRoute(2_000, () => 0);
+    const ghost = buildGhostTrack({ elapsedSeconds: [0, 1_000], distanceMetres: [0, 9_000] });
+    const moving = frameOf(route, stateAt(route, 1_000, 10, { distance: 1_020, speed: 9 }, 100), {
+      botDistance: 1_020,
+      ghost,
+    });
+    expect(markerOf(moving, 'bot').pedalling).toBe(1);
+    expect(markerOf(moving, 'ghost').pedalling).toBe(1);
+    const stopped = frameOf(route, stateAt(route, 1_000, 10, { distance: 1_020, speed: 0 }, 100), {
+      botDistance: 1_020,
+    });
+    expect(markerOf(stopped, 'bot').pedalling).toBe(0);
+  });
+
+  it('fades every rider’s stroke as the cranks are parked in a tight bend — #546', () => {
+    const route = hairpinRoute(10);
+    const ghost = buildGhostTrack({ elapsedSeconds: [0, 1_000], distanceMetres: [0, 14_000] });
+    let faded = 0;
+    for (let at = 380; at <= 460; at += 0.7) {
+      const frame = frameOf(
+        route,
+        stateAt(route, at, 14, { distance: at + 10, speed: 14 }, at / 14),
+        { botDistance: at + 10, ghost, crankAngle: at, pedalling: true },
+      );
+      for (const marker of frame.markers) {
+        expect(marker.pedalling).toBeCloseTo(pedallingShare(marker.lean), 12);
+        if (Math.abs(marker.lean) >= CRANK_PARKING_LEAN_RADIANS) {
+          expect(marker.pedalling).toBe(0);
+          faded += 1;
+        }
+      }
+    }
+    // Non-vacuity: #546's own hairpin parks all three.
+    expect(faded).toBeGreaterThan(30);
+  });
+
+  it('carries the ride’s own clock — `ridden`, which a held or paused ride holds — on every marker', () => {
+    const route = northRoute(2_000, () => 0);
+    const ghost = buildGhostTrack({ elapsedSeconds: [0, 1_000], distanceMetres: [0, 9_000] });
+    const state = { ...stateAt(route, 1_000, 10, { distance: 1_020, speed: 9 }, 37.25) };
+    // The wall clock of the ride has run on; the ridden time has not.
+    const frame = frameOf(
+      route,
+      { ...state, elapsed: seconds(400) },
+      { botDistance: 1_020, ghost },
+    );
+    expect(frame.markers).toHaveLength(3);
+    for (const marker of frame.markers) expect(marker.rideSeconds).toBe(37.25);
   });
 });
