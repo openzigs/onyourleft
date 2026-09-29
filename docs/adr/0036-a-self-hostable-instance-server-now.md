@@ -119,12 +119,12 @@ is wrong.
 ### D-3 — What does NOT change, as sentences a test can hold
 
 The instance **adds** reachability, indexing, authority and enforcement. It does **not** take
-ownership. Four invariants, each with what holds it:
+ownership. Four invariants. (a) and (b) name what holds them; (c) and (d) have **no test yet** and
+name the issue that owes one:
 
 **(a) No feature that works with no instance today may start to require one.** Recording, the store,
 pairing, trainer control, the game, the library, analysis, routes, workouts, import and export all
-work with the network off (ADR 0002's 2026-09-19 amendment, and the browser gate's offline spec,
-`apps/web/browser/offline.browser.spec.ts`). A rider who never connects to an instance is a **fully
+work with the network off (ADR 0002's 2026-09-19 amendment). A rider who never connects to an instance is a **fully
 supported state and loses nothing** that works today.
 
 - **What holds it**: `apps/web/src/privacy/no-network.test.ts` §`PERMITTED_NETWORK_CALLS` gains
@@ -134,8 +134,17 @@ supported state and loses nothing** that works today.
   net layer opens its room socket **through** it rather than naming a network primitive of its own.
   *The author's choice*: #762 names "#782 / #777", and one module for both is the narrower reading.
   A second module gaining an entry is a change to this ADR, not a review note.
-- **What else must stay green**: `offline.browser.spec.ts` unchanged. A feature moving behind a
-  network call makes that spec red, which is the point.
+- ⚠️ **That test scans `apps/web/src` and `apps/mobile/src`, and nothing under `packages/`.** A
+  socket opened from a new package — `packages/protocol` ([#768](https://github.com/openzigs/onyourleft/issues/768))
+  is the likely one — would not be seen by it. So **#768 adds its package to `eslint.config.js`'s
+  platform-isolation blocks**, whose `no-restricted-globals` list already names `fetch`,
+  `WebSocket`, `XMLHttpRequest` and `EventSource` (`CLAUDE.md` §4d), and any other new package that
+  #777's module imports takes the same rule. Without that, "exactly one module" holds for the apps
+  and not for what they import.
+- ⚠️ **`offline.browser.spec.ts` is not a guard for this.** It holds that the app shell and the
+  renderer chunk load with the network off; it does not exercise recording, pairing, the library or
+  any other feature listed above, so a feature moved behind a network call could leave it green.
+  `no-network.test.ts` is the guard.
 
 **(b) The device copy is never deleted on an instance's confirmation.**
 [#47](https://github.com/openzigs/onyourleft/issues/47)'s upload queue removes a ride from its
@@ -149,11 +158,21 @@ server acknowledging a copy does not make the server's copy the canonical one. #
 the instance sends may delete a device row. Leaving an instance costs a re-sync (ADR 0002 D), never
 the history.
 
+- **What holds it**: nothing yet. [#776](https://github.com/openzigs/onyourleft/issues/776), which
+  builds sync and is the first code that can receive an instruction from an instance, owes the test:
+  an erase on the instance, a sync, and every device row read back on a fresh connection.
+
 **(d) Nothing the client already refuses to send starts to leave through the instance.** ADR 0004's
 strip-before-upload is the client-side layer and the instance's enforcement is the second (ADR 0002
 constraint 2). Camera imagery stays on the device ([ADR 0029](0029-camera-imagery-as-a-data-class.md)),
 and the rider's own analysis endpoint ([ADR 0035](0035-model-written-ride-write-ups.md)) is the
 rider's computer, not this instance.
+
+- **What holds it**: nothing yet for the instance. `apps/web/src/privacy/boundaries.ts` is the
+  registry of boundaries where data leaves the athlete's control, checked against the files on disk
+  (#34). [#777](https://github.com/openzigs/onyourleft/issues/777) owes a `departing` entry for every
+  payload its module sends, so the privacy-zone trim is asserted there, and a test that no camera
+  type can reach its module.
 
 ### D-4 — ADR 0028 D-0's last block is lifted by this ADR, and no other block is re-imposed
 
@@ -250,10 +269,11 @@ About screen ([ADR 0025](0025-app-store-additional-permission.md) D-7).
 |---|---|
 | #766 | Rewrites `CLAUDE.md` §1, §2 and §4b to name `apps/instance`, and cites this ADR. It keeps a sentence saying that the device is canonical and that a rider without an instance loses nothing (D-3) |
 | #767 | Replaces `pnpm-workspace.yaml`'s D6 comment; builds `GET /source` (D-6); lands inside every licence, wiring and notices gate |
-| #777 | Is the one module D-3.a admits; shows the instance's source link (D-6) |
+| #768 | Adds `packages/protocol` to `eslint.config.js`'s platform-isolation blocks, so it cannot name a network global (D-3.a) |
+| #777 | Is the one module D-3.a admits; registers every payload it sends as a `departing` boundary and proves no camera type reaches it (D-3.d); shows the instance's source link (D-6) |
 | #782 | Opens its socket through #777's module and names no network primitive itself |
 | #47 | Never deletes a device row on confirmation (D-3.b), with the read-back test |
-| #776 | Finalises ADR 0014's record format (D-5) |
+| #776 | Finalises ADR 0014's record format (D-5); the erase-then-sync read-back test (D-3.c) |
 | #807 | Runs the first instance on the owner's machine; takes no paid dependency (D-7) |
 
 ---
@@ -261,14 +281,16 @@ About screen ([ADR 0025](0025-app-store-additional-permission.md) D-7).
 ## What would make this ADR wrong
 
 - **A feature that works offline today starts to need the instance.** Then D-3.a was written and
-  ignored. `offline.browser.spec.ts` and `no-network.test.ts` are the two places that go red; a
-  change that edits either to make room for a second instance module is the change to stop.
+  ignored. `no-network.test.ts` is the place that goes red (and, for a package, the lint rule D-3.a
+  asks #768 to add); a change that edits either to make room for a second instance module is the
+  change to stop.
 - **The instance becomes the canonical copy in practice** — a server-side edit a device cannot
   reproduce, or a "restore from instance" that overwrites a device row. Then ADR 0002 B no longer
   describes the program and needs a superseding ADR, not an amendment.
 - **Hosting turns out to need a paid service after all** — for example the home upload cannot carry
-  one room (ADR 0037 D-7 gives the arithmetic). Then D-7's "no bill" becomes the owner's decision
+  one room (ADR 0037 D-8.3 gives the arithmetic). Then D-7's "no bill" becomes the owner's decision
   again, and #790 moves earlier.
 - **Nothing mechanical checks D-1, D-2, D-4, D-5 or D-7.** ADR 0007's *"Which of D1–D7 a machine
   checks: none of them"* applies to them. D-3.a and D-6 are the only decisions here with a test
-  behind them: `no-network.test.ts`, and #767's commit-in-the-URL test.
+  behind them: `no-network.test.ts`, and #767's commit-in-the-URL test. D-3.b, D-3.c and D-3.d have
+  tests **owed**, by #47, #776 and #777, and until those land nothing checks them either.

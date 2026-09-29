@@ -92,7 +92,7 @@ D-5 is decided on that.
 ⚠️ **One figure was not verified first-hand.** A **100-second** idle timeout for proxied WebSockets on
 Cloudflare's Free and Pro plans is widely reported in third-party guides and in a search summary, but
 Cloudflare's own WebSocket page read on 2026-09-29 states no number, and its connection-limits page
-lists HTTP/2 and proxy idle timeouts (400 s and 900 s) and nothing for WebSockets. D-7 is written so
+lists HTTP/2 and proxy idle timeouts (400 s and 900 s) and nothing for WebSockets. D-8 is written so
 that it does not depend on the number.
 
 ---
@@ -149,7 +149,7 @@ agree on — `packages/physics`, and the wire format in `packages/protocol`
   library's own server default, so the setting turns it **on**. What the operator trades, from
   spike 0013 §5, per 50-rider room-hour at 1 Hz: compression **halves outbound wire bytes** (160.9 MB
   to 79.2 MB) and **doubles resident memory** (326 to 700 MiB for 20 rooms over 180 s). On a home
-  connection the upload is the scarce resource (D-7), so an operator whose upload binds before memory
+  connection the upload is the scarce resource (D-8), so an operator whose upload binds before memory
   should turn it on; on a rented box with tens of terabytes of bundled traffic, leave it off.
 
 ### D-4 — The tick model: server-authoritative, ingest at 2 Hz, fan-out at 1 Hz, clients interpolate
@@ -199,7 +199,7 @@ are the cheap direction.
 - **SQLite** is the dialect both adapters share (Durable Object storage and D1 are SQLite). It needs
   no second service, which ADR 0002 A's *"must not require … a managed database"* asks for.
 - **WAL mode, one writer**: one process owns the database file and every write goes through it.
-  Room processes (D-6) do not write the database during a race; results reach the writer at the end.
+  Room processes (D-7) do not write the database during a race; results reach the writer at the end.
 - **Kysely** 0.29.6 (MIT) is the query builder and the migrator. It has an `up`/`down` migrator and
   `migrateDown()`, and it supports SQLite and Postgres, so the Postgres adapter below stays open.
 - **The driver is `node:sqlite`** — *the author's choice*, where #763 recommended `better-sqlite3`.
@@ -253,6 +253,15 @@ for an hour. *The author's choice*: the compression-off rows are lower, but noth
 they climb over an hour the way the compressed hour did (five times its 180-second figure), so the
 only planning figure with an hour behind it is the one quoted. #792 is the run that narrows it.
 
+⚠️ **Every figure in this table, in D-3's compression trade and in D-8.3's wire bytes was measured
+under `workerd`, and D-1 chooses Node.** Nothing here establishes that they transfer. Wire bytes
+depend on the protocol and the frames, so they should carry over closely; CPU per rider depends on
+the engine's JIT and should be of the same order; **memory per rider is the figure most likely to
+differ**, because `ws` with `permessage-deflate` on allocates a zlib context per socket and
+`workerd`'s own allocation is not Node's. So the planning figure above is a `workerd` figure used as a
+placeholder, and **#792 must run on the runtime D-1 chose** — Node 24 and `ws` — or it does not
+replace it.
+
 ### D-8 — The first deployment is a Docker image on the owner's home machine, behind a Cloudflare Tunnel
 
 Per Q3 and Q6: a **Docker image** of `apps/instance`, run on the owner's Windows machine (WSL or
@@ -282,7 +291,9 @@ Docker), reached through a **Cloudflare Tunnel**, with no hosting bill
    measured. At 10 Mbit/s that is ~27 rooms; a 100-rider room costs about four times a 50-rider one
    (D-7). **The owner's actual upload has not been measured**; #807 measures it and states the
    figure. Inbound (the 2 Hz ingest) is the download direction and is not the limit: spike 0013 §3
-   measured ~37 MB per room-hour at 1 Hz, ACKs included.
+   measured ~37 MB per room-hour at **1 Hz** ingest, ACKs for the outbound included. D-4 decides 2 Hz,
+which roughly doubles the ingest share of that — up to about 75 MB per room-hour, an estimate nobody
+has measured. It is still the download direction and still not the limit.
 
 ### D-9 — Licences of what this ADR adopts, predicted before install
 
@@ -332,7 +343,7 @@ that, and #767's criterion says so.
 | #780 | Process per core with a router; compression off by default and an operator setting; room size 50, up to 100 |
 | #781 | Mounts the same core under a Durable Object; one conformance suite; protocol pings for keepalive |
 | #782 | 2 Hz ingest, interpolation, keepalive at most every 30 s, automatic rejoin |
-| #792 | Runs many rooms for an hour with compression on and off, and replaces D-7's planning figure |
+| #792 | Runs many rooms for an hour with compression on and off, **on Node 24 and `ws` (D-1), not `workerd`**, and replaces D-7's planning figure |
 | #807 | Measures the home upload and states it; Docker image; tunnel with WebSockets |
 
 ---

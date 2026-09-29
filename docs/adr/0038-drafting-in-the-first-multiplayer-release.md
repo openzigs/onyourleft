@@ -97,10 +97,11 @@ gradient — ADR 0028 D-5's last paragraph, kept word for word in substance.
 ### D-2 — Inputs, output and the arithmetic it may use
 
 - **Inputs**, for each other rider within the window: the **longitudinal gap** in metres, along the
-  route (ADR 0028 D-7.3: riders are placed by distance along a route), and the **lateral offset** in
-  metres. **Not** a boolean "drafting".
-- **The window**: riders ahead with a gap of at most **30 m** and a lateral offset of at most
-  **0.75 m** (D-3.3 and D-3.4). Riders behind within **30 m** and **0.75 m** for `k_ahead_of`.
+  route (ADR 0028 D-7.3: riders are placed by distance along a route). **Nothing else about another
+  rider's position, and no lateral offset** — D-3.4 says why. **Not** a boolean "drafting".
+- **The window**: riders ahead with a gap of at most **30 m** (D-3.3). Riders behind within **30 m**
+  for `k_ahead_of`. A rider whose gap to this one is **below 0.05 m either way is level**: neither
+  ahead of nor behind this rider, and neither shelters the other (D-3.6).
 - **Output**: `k`. The riding position does **not** enter `k` in this version (D-3.5); it enters the
   `C_D·A` that `k` multiplies, which ADR 0028 D-1 fixes per race.
 - ⚠️ **Only `+ − × ÷` and `Math.sqrt`.** No `Math.exp`, no `Math.pow`, no trigonometry.
@@ -151,12 +152,24 @@ in a way both sources correct.
 - **Below 0.05 m the 0.05 m value holds.** The paper calls 0.05 m *"a theoretical minimum distance"*,
   and the game has no collisions.
 
-**D-3.4 — Lateral offset: unsourced — the author's choice.** The 2018 paper is single-file only. A
-rider ahead gives its full effect when the lateral offset is at most **0.25 m**, none at **0.75 m** or
-more, and linearly between: `k = 1 − (1 − k_inline) × w`, with `w` falling from 1 to 0 across that
-band. [#786](https://github.com/openzigs/onyourleft/issues/786) either cites a source for these two
-numbers (the 2018 peloton paper is the candidate) or ships them as declared unsourced constants in
-`packages/physics/README.md` §2's provenance table. It may not ship them as though they were read.
+**D-3.4 — Lateral offset is not an input in version 1: every rider is modelled in single file.**
+There is nothing authoritative to read it from. A room places a rider **only** by distance along the
+route (ADR 0028 D-7.3), and D-4 has the room compute `k` from its own positions. The only lateral
+position in the program is a **drawing**: `racing-line.ts` puts each rider on a line through a bend,
+and `scene.ts` §`lateralOf` moves two riders apart so their sprites do not overlap. `lateralOf` is
+itself computed from the longitudinal gap, so it adds nothing a room does not already have, and a
+function written to keep pictures apart must never decide who gets shelter. So:
+
+- **The model takes no lateral argument.** [#786](https://github.com/openzigs/onyourleft/issues/786)'s
+  function has no parameter for one. A lateral input cannot then be passed as `0` by a room and as a
+  drawn offset by a client, which would make the two disagree about `k`.
+- **What this costs**: a rider 0.05 m or more ahead of another shelters them fully, however the two
+  are drawn. Two riders the renderer draws side by side, half a wheel apart, are modelled as one
+  behind the other. Riders exactly level (D-2's 0.05 m) shelter neither way.
+- **Adding lateral position is a new `physicsVersion`**, not an amendment. It needs two things this
+  program does not have: a lateral position the **room** holds (a steering input the rider controls,
+  sent and re-simulated like power), and a source for the width of the wake (the 2018 peloton paper is
+  the candidate). The renderer's line stays a drawing either way.
 
 **D-3.5 — The riding position is not an input in this version, and why.** The 2018 figures are for a
 time-trial position (aero helmet, time-trial bars, a disk wheel, a frontal area of 0.34 m²). A race
@@ -173,10 +186,14 @@ reads Blocken 2013 in full; if it gives gap-dependent values per position, a pos
 **D-3.6 — The combination rule for more than one rider ahead.**
 
 1. A **chain** is a run of riders ahead, each inside the window of the one behind it. A rider's depth
-   is the length of the chain ahead of them, capped at 5.
-2. For each rider ahead inside the window, compute `k` from that rider's gap, lateral offset and
-   chain depth. **Take the lowest** — the best single shelter. Shelters do **not** compound by
-   multiplication: two riders side by side ahead are not a double draft, and D-3.1's depth rows
+   is the length of the chain ahead of them, capped at 5. **Riders level with each other** (D-2: less
+   than 0.05 m apart) **count as one place** in the chain, so two riders side by side ahead are not a
+   double draft.
+2. `k_behind` is D-3.1's row for that depth, **at this rider's own gap to the nearest rider ahead** —
+   the wheel they are on. Gaps further up the chain do not enter. ⚠️ **Unsourced — the author's
+   choice**: every line the paper measured is evenly spaced, so it says nothing about a chain whose
+   gaps differ; using the rider's own gap is the simplest rule that gives a rider who drops off a
+   wheel less shelter at once. Shelters do **not** compound by multiplication: D-3.1's depth rows
    already carry the in-line compounding the paper measured.
 3. Multiply by `k_ahead_of` for the nearest rider behind (D-3.2).
 4. **The floor follows from the table**: `0.425 × 0.976 ≈ 0.415`. The lowest drag the 2018 paper
@@ -184,13 +201,17 @@ reads Blocken 2013 in full; if it gives gap-dependent values per position, a pos
    model sits about 4 % above the paper's deepest single-file rider. ⚠️ **The peloton figure is not
    the floor, on purpose — the author's choice.** A rider *"well embedded in the core of the peloton"*
    can be at *"5–10%"* of an isolated rider's drag (Blocken 2018 pelotons, at one remove). That needs
-   a staggered, many-rider formation the lateral model of D-3.4 does not represent. Reaching it is a
-   new `physicsVersion` with a source for its lateral terms, not a lower constant.
+   a staggered, many-rider formation the single-file model of D-3.4 cannot represent. Reaching it is a
+   new `physicsVersion` with a room-held lateral position and a source for its lateral terms, not a
+   lower constant.
 
 **The check the table was held to.** Applying D-3.6 to the paper's own 3-rider lines: at 0.05 m the
 middle rider is modelled at `0.641 × 0.976 = 0.626` against **0.617** measured; at 1 m, `0.665 ×
-0.992 = 0.660` against **0.655**. At 0.15 m, the deepest rider of a 9-rider line is modelled at `0.433
-× 0.980 = 0.424` against **0.407** measured. So the model **errs toward less draft** by at most about
+0.992 = 0.660` against **0.655**. At 0.15 m, **rider 7 of a 9-rider line** — depth 6, capped at 5,
+with rider 8 behind — is modelled at `0.433 × 0.980 = 0.424` against **0.407** measured. That 0.407 is
+the one figure here read from the paper's **text** rather than a figure image: §5 calls it *"the
+minimum drag of the 9-rider paceline in Fig. 10, i.e. 40.7%"*, and §4.3 places that minimum at
+*"position 7, although the difference with position 8 is very minor"*. So the model **errs toward less draft** by at most about
 4 % of drag in the configurations the paper measured. [#786](https://github.com/openzigs/onyourleft/issues/786)
 turns these three comparisons into tests.
 
@@ -272,10 +293,11 @@ acceptance covers drafting"** (quoted in full in Context).
 
 ### What this costs, stated plainly
 
-- **Version 1 is position-blind** (D-3.5) and single-file (D-3.4, D-3.6). A group riding side by side
-  gets less draft than it would on a road, and a road position gets a time-trial position's curve.
-- **Two constants are unsourced**: the 30 m reach and the lateral band. They are named, and #786 must
-  either source them or keep saying so.
+- **Version 1 is position-blind** (D-3.5) and single-file (D-3.4, D-3.6). A rider drawn beside
+  another, half a wheel back, gets a full draft the picture does not show; riders exactly level get
+  none. A road position gets a time-trial position's curve.
+- **Two rules are unsourced**: the 30 m reach (D-3.3) and using the rider's own gap for a chain whose
+  gaps differ (D-3.6 step 2). They are named, and #786 must either source them or keep saying so.
 - **A draft model makes position matter**, so a room's authoritative positions (ADR 0028 D-2) now
   decide more than the finish order. A rider on a bad connection is drafted by where the room thinks
   they are.
@@ -285,8 +307,8 @@ acceptance covers drafting"** (quoted in full in Context).
 
 | Issue | Constraint |
 |---|---|
-| #786 | D-1's caller-supplied multiplier; D-2's arithmetic; D-3's table, with the three comparisons of D-3's check as tests; provenance rows in `packages/physics/README.md` §2, the two unsourced constants marked so; read Blocken 2013 in full (D-3.5) |
-| #787 | The room computes `k` (D-4); the indicator as a percentage of aerodynamic drag (D-5) and #327's criteria |
+| #786 | D-1's caller-supplied multiplier; D-2's arithmetic; D-3's table, with the three comparisons of D-3's check as tests; **no lateral parameter** (D-3.4), and a test that two riders under 0.05 m apart shelter neither way (D-2, D-3.6); provenance rows in `packages/physics/README.md` §2, the two unsourced rules marked so; read Blocken 2013 in full (D-3.5) |
+| #787 | The room computes `k` (D-4) from distance along the route alone — never from `racing-line.ts` or `scene.ts` §`lateralOf` (D-3.4); the indicator as a percentage of aerodynamic drag (D-5) and #327's criteria |
 | #782 | Predicts `k` for the rider's own screen and accepts the room's correction |
 | #327 | Answered by this ADR; stays open only for the indicator's criteria, which #787 carries |
 
@@ -297,8 +319,9 @@ acceptance covers drafting"** (quoted in full in Context).
 - **Blocken 2013's full paper, read, gives gap-dependent values per position that differ from the 2018
   time-trial table by more than D-3's check tolerates.** Then version 1's position-blindness is the
   wrong simplification and a position axis is owed before races depend on it.
-- **Riders find the draft feels wrong at the edges** — a surge at 30 m, or no shelter when riding
-  half a wheel to one side. Those are the two unsourced constants, and they are the first to revisit.
+- **Riders find the draft feels wrong at the edges** — a surge at 30 m, or a full draft while drawn
+  half a wheel to one side. Those are the 30 m reach and the single-file model (D-3.4), and they are
+  the first to revisit; the second needs a room-held lateral position before it can change.
 - **A granted or pending claim turns up that recites a drafting model in a virtual environment.**
   Then D-7's acceptance was made without it, and the owner decides again.
 - **The agreement vectors show a room and a phone disagreeing on `k`.** Then either a transcendental

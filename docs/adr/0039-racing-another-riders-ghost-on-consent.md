@@ -120,6 +120,12 @@ rider **explicitly consented** to that ride being raced, and **only** under D-2 
    exported or posted.
 5. **The other rider's attempt reaches this device only through the instance**, and only because its
    owner set the consent ([#776](https://github.com/openzigs/onyourleft/issues/776), two-way sync).
+   ⚠️ **This is narrower than ADR 0021 D-4.6, and the narrowing is the author's choice.** D-4.6 asks
+   only that the data arrive *"through the other rider's own act"*, which a file the other rider sent
+   by hand would also satisfy. Version 1 admits one path, the instance, because it is the only one
+   where the consent flag is read by a query (#793) rather than inferred from how a file arrived.
+   Admitting a second path — a file, say — is a new decision that must say where its consent is
+   recorded, not a reading of D-4.6.
 
 ### D-3 — ADR 0021 D-4's seven constraints, binding, each with where a reviewer checks it
 
