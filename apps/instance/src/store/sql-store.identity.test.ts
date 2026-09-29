@@ -143,6 +143,22 @@ describe('device keys (#772, #773)', () => {
       'athlete-d@example.org',
     );
   });
+
+  it('registers a second athlete whose address is already held, and leaves the address where it was (#861)', async () => {
+    const opened = await world();
+    await opened.write((store) => store.registerAthlete(registrationFixture('athlete-d')));
+    await opened.write((store) =>
+      store.registerAthlete({
+        ...registrationFixture('athlete-e'),
+        recoveryEmail: 'athlete-d@example.org',
+      }),
+    );
+    expect((await opened.read((store) => store.getAthlete('athlete-e')))?.id).toBe('athlete-e');
+    expect(await opened.read((store) => store.getRecoveryEmail('athlete-e'))).toBeUndefined();
+    expect(
+      (await opened.read((store) => store.findRecoveryEmail('athlete-d@example.org')))?.athleteId,
+    ).toBe('athlete-d');
+  });
 });
 
 describe('sessions (#772)', () => {

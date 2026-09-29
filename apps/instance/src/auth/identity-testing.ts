@@ -120,6 +120,12 @@ export interface IdentityInstance {
 export async function startIdentityInstance(
   options: Partial<Omit<IdentityOptions, 'store' | 'origin' | 'now' | 'emailRecovery'>> & {
     emailRecovery?: boolean;
+    /**
+     * What the identity sees in place of the real store — for putting a
+     * check-then-write race in a known order, which two concurrent calls in
+     * one process do not reliably produce.
+     */
+    storeSeenBy?: (store: SqlStore) => SqlStore;
   } = {},
 ): Promise<IdentityInstance> {
   const directory = await mkdtemp(join(tmpdir(), 'oyl-instance-identity-'));
@@ -127,10 +133,10 @@ export async function startIdentityInstance(
   const store = await openSqlStore(path);
   const clock: TestClock = { ms: 1_790_000_000_000 };
   const mail: { address: string; token: string }[] = [];
-  const { emailRecovery, ...rest } = options;
+  const { emailRecovery, storeSeenBy, ...rest } = options;
   const identity = createIdentity({
     ...rest,
-    store,
+    store: storeSeenBy === undefined ? store : storeSeenBy(store),
     origin: TEST_ORIGIN,
     now: () => clock.ms,
     ...(emailRecovery === true

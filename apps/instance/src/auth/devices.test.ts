@@ -115,8 +115,54 @@ describe('linking a second device', () => {
     const w = await start();
     const first = await registered(w);
     const other = await registered(w);
-    const answer = await link(w, other.device, await mintLinkCode(w, first.token));
+    const code = await mintLinkCode(w, first.token);
+    const answer = await link(w, other.device, code);
     expect(codeOf(answer.body)).toBe('key_in_use');
+    // A refusal spends nothing: the same code still links a new device (#861).
+    expect((await link(w, await testDevice(), code)).status).toBe(200);
+  });
+
+  it('refuses a key that another link registered after this one checked: key_in_use, never a 500 (#861)', async () => {
+    const shared = await testDevice();
+    // The race in a known order: this identity's check never sees the shared
+    // key, as if the other link had not landed yet when it looked.
+    const w = await start({
+      storeSeenBy: (store) => ({
+        ...store,
+        findDeviceKey: (publicKey) =>
+          publicKey === shared.publicKey
+            ? Promise.resolve(undefined)
+            : store.findDeviceKey(publicKey),
+      }),
+    });
+    const anna = await registered(w);
+    const ben = await registered(w);
+    expect((await link(w, shared, await mintLinkCode(w, anna.token))).status).toBe(200);
+    const late = await link(w, shared, await mintLinkCode(w, ben.token));
+    expect(late.status, JSON.stringify(late.body)).toBe(409);
+    expect(codeOf(late.body)).toBe('key_in_use');
+    const annaKeys = await w.freshRead((store) => store.listDeviceKeys(anna.athleteId));
+    expect(annaKeys.map((key) => key.publicKey)).toContain(shared.publicKey);
+  });
+
+  it('spends no recovery code on a key that is already registered: key_in_use (#861)', async () => {
+    const w = await start();
+    const lost = await registered(w);
+    const other = await registered(w);
+    const code = lost.recoveryCodes[0] as string;
+    const recover = async (device: TestDevice) =>
+      w.call('POST', '/v1/auth/recover', {
+        body: {
+          ...(await device.statement(await w.nonceFor(device), { purpose: RECOVER_PURPOSE })),
+          recoveryCode: code,
+        },
+      });
+    const refused = await recover(other.device);
+    expect(refused.status).toBe(409);
+    expect(codeOf(refused.body)).toBe('key_in_use');
+    const codes = await w.freshRead((store) => store.listRecoveryCodes(lost.athleteId));
+    expect(codes.filter((each) => each.usedAt === null)).toHaveLength(10);
+    expect((await recover(await testDevice())).body).toEqual({ athleteId: lost.athleteId });
   });
 
   it('refuses a sign-in statement presented as a link: wrong_purpose', async () => {
@@ -351,6 +397,35 @@ describe('email recovery (ruling Q1): off unless the operator enables it', () =>
     const late = (w.mail[1] as { token: string }).token;
     w.clock.ms += EMAIL_RECOVERY_LIFETIME_SECONDS * 1000;
     expect(codeOf((await recover(late)).body)).toBe('code_expired');
+  });
+});
+
+describe('an address somebody already gave (#861)', () => {
+  it('registers the second athlete with the same answer, binds nothing, and mails only the first', async () => {
+    const w = await start({ emailRecovery: true });
+    const first = await w.signIn(await testDevice(), { recoveryEmail: 'victim@example.org' });
+    const second = await w.signIn(await testDevice(), { recoveryEmail: 'Victim@Example.org' });
+    expect(first.status).toBe(200);
+    expect(second.status, JSON.stringify(second.body)).toBe(200);
+    expect(Object.keys(second.body).sort()).toEqual(Object.keys(first.body).sort());
+    expect(second.body.registered).toBe(true);
+    const firstId = first.body.athleteId as string;
+    const secondId = second.body.athleteId as string;
+    expect(secondId).not.toBe(firstId);
+    expect(await w.freshRead((store) => store.getRecoveryEmail(secondId))).toBeUndefined();
+    expect((await w.freshRead((store) => store.getRecoveryEmail(firstId)))?.address).toBe(
+      'victim@example.org',
+    );
+
+    await w.call('POST', '/v1/auth/recover/email', { body: { address: 'victim@example.org' } });
+    expect(w.mail).toHaveLength(1);
+    const { token } = w.mail[0] as { token: string };
+    expect(
+      (await w.freshRead((store) => store.listEmailRecoveryTokens(firstId))).map(
+        (each) => each.tokenSha256,
+      ),
+    ).toEqual([await sha256Hex(token)]);
+    expect(await w.freshRead((store) => store.listEmailRecoveryTokens(secondId))).toEqual([]);
   });
 });
 

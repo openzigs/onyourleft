@@ -160,7 +160,14 @@ export interface Registration {
   readonly athlete: Athlete;
   readonly key: DeviceKeyWrite;
   readonly recoveryCodeSha256s: readonly string[];
-  /** Only where the operator enabled email recovery. */
+  /**
+   * Only where the operator enabled email recovery. An address another
+   * athlete already holds is NOT bound, and the registration still succeeds
+   * (#861): refusing it, or failing on the UNIQUE index, would tell anybody
+   * which addresses ride here. The address is unverified, so the first
+   * athlete to give it keeps it; confirming an address before binding it is
+   * #865.
+   */
   readonly recoveryEmail?: string;
 }
 
@@ -522,6 +529,9 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             await trx
               .insertInto('recovery_email')
               .values({ athlete_id: athlete.id, address: registration.recoveryEmail })
+              // In the transaction, so two registrations racing for one
+              // address cannot both reach the index: the second binds nothing.
+              .onConflict((conflict) => conflict.column('address').doNothing())
               .execute();
           }
         }),

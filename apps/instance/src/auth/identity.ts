@@ -62,7 +62,12 @@ import { declaredMassAdmissible } from '@onyourleft/physics';
 
 import type { ErrorCode, FieldProblem } from '../errors.ts';
 import type { Admit } from '../room/core/room.ts';
-import type { DeviceKey, SqlStore, Take } from '../store/sql-store.ts';
+import {
+  OwnershipConflictError,
+  type DeviceKey,
+  type SqlStore,
+  type Take,
+} from '../store/sql-store.ts';
 import {
   isPublicKey,
   isSignature,
@@ -294,13 +299,28 @@ export function createIdentity(options: IdentityOptions): Identity {
     return { ok: true, value: claimed.publicKey };
   }
 
+  /**
+   * Whether a key is already registered here. Asked BEFORE a link code or a
+   * recovery code is spent (#861): a refusal that used one up cost a rider a
+   * code for nothing.
+   */
+  async function keyInUse(publicKey: string): Promise<boolean> {
+    return (await store.findDeviceKey(publicKey)) !== undefined;
+  }
+
   /** Add a key a device proved it holds to `athleteId`. */
   async function addKey(
     athleteId: string,
     publicKey: string,
   ): Promise<Outcome<{ athleteId: string }>> {
-    if ((await store.findDeviceKey(publicKey)) !== undefined) return refuse('key_in_use');
-    await store.putDeviceKey({ publicKey, athleteId, addedAt: seconds(), revokedAt: null });
+    try {
+      await store.putDeviceKey({ publicKey, athleteId, addedAt: seconds(), revokedAt: null });
+    } catch (error) {
+      // The store checks ownership in its own transaction, so a key linked
+      // twice at once is refused there; it is the same refusal, not a 500.
+      if (error instanceof OwnershipConflictError) return refuse('key_in_use');
+      throw error;
+    }
     return { ok: true, value: { athleteId } };
   }
 
@@ -509,6 +529,7 @@ export function createIdentity(options: IdentityOptions): Identity {
       if (typeof linkCode !== 'string') return invalid('linkCode', 'must be a string');
       const proof = await proven(statement, LINK_PURPOSE);
       if (!proof.ok) return proof;
+      if (await keyInUse(proof.value)) return refuse('key_in_use');
       const taken = await store.takeLinkCode(await sha256Hex(normalisedCode(linkCode)), seconds());
       if (taken.outcome !== 'taken') return refuse(takeRefusal(taken.outcome, 'code'));
       return addKey(taken.athleteId, proof.value);
@@ -523,6 +544,7 @@ export function createIdentity(options: IdentityOptions): Identity {
       }
       const key = await proven(statement, RECOVER_PURPOSE);
       if (!key.ok) return key;
+      if (await keyInUse(key.value)) return refuse('key_in_use');
       const taken = byEmail
         ? await store.takeEmailRecoveryToken(await sha256Hex(secret), seconds())
         : await store.takeRecoveryCode(await sha256Hex(normalisedCode(secret)), seconds());

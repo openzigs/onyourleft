@@ -58,7 +58,10 @@ async function ticketFor(
   });
   expect(answer.status, JSON.stringify(answer.body)).toBe(200);
   const body = answer.body as { ticket: string; expiresAt: number };
-  expect(body.expiresAt - w.clock.ms).toBeLessThanOrEqual(30_000);
+  // Unix SECONDS, like every other expiresAt in the API (#861's review).
+  expect(Number.isInteger(body.expiresAt)).toBe(true);
+  expect(body.expiresAt * 1000 - w.clock.ms).toBeGreaterThan(0);
+  expect(body.expiresAt * 1000 - w.clock.ms).toBeLessThanOrEqual(30_000);
   return body.ticket;
 }
 

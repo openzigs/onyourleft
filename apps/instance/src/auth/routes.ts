@@ -196,7 +196,9 @@ export const IDENTITY_ROUTES: readonly Route[] = [
           context.params.roomId ?? '',
           context.json.declaredMassKilograms,
         ),
-        (minted) => ({ ticket: minted.ticket, expiresAt: minted.expiresAtMs }),
+        // Unix seconds, like every other expiresAt here; rounded down, so a
+        // client never believes a ticket outlives the book that holds it.
+        (minted) => ({ ticket: minted.ticket, expiresAt: Math.floor(minted.expiresAtMs / 1000) }),
       ),
   },
   {
