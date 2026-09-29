@@ -586,6 +586,113 @@ test.describe('a cold start with the network off', () => {
     }
   });
 
+  test('renders a route in every lazily loaded group, each chunk from the worker — #674', async () => {
+    // Since #674 every navigation group but Home is a chunk of its own that
+    // the shell `import()`s on first visit. The precache is derived from the
+    // build (#406), so the chunks should be in it with no edit anywhere — and
+    // this is what says a rider in a basement can still open each group. The
+    // control in the cold-start case above still proves the network is off.
+    const second = await session(profile);
+    await second.context.setOffline(true);
+    const scripts: { readonly url: string; readonly fromWorker: boolean }[] = [];
+    second.page.on('response', (response) => {
+      if (response.url().startsWith(PRODUCT_ORIGIN) && response.url().endsWith('.js')) {
+        scripts.push({ url: response.url(), fromWorker: response.fromServiceWorker() });
+      }
+    });
+    try {
+      await second.page.goto(`${PRODUCT_ORIGIN}/`);
+      await expect(second.page.locator('h1')).toHaveText('Home');
+      for (const [group, path, title] of [
+        ['ride', '/ride', 'Ride'],
+        ['history', '/activities', 'Activities'],
+        ['routes', '/routes', 'Routes'],
+        ['more', '/settings', 'Settings'],
+      ] as const) {
+        await second.page.evaluate((hash: string) => {
+          window.location.hash = hash;
+        }, `#${path}`);
+        await expect(second.page.locator('h1')).toHaveText(title);
+        await expect(second.page.locator('main [data-oyl-view-loading]')).toHaveCount(0);
+        await expect(second.page.locator('main')).not.toContainText('Could not load this page');
+        // More than the shell's own heading and summary: the view itself.
+        expect(
+          await second.page.locator('main > *').count(),
+          `${group}: main holds only the shell's heading and summary`,
+        ).toBeGreaterThan(2);
+        // ⚠️ Fetched at SOME point in the session rather than on this
+        // navigation: `main.tsx` preloads every group once Home is idle, so
+        // the chunk may already have arrived. Each group chunk is named for
+        // its module under `src/shell/lazy/`.
+        expect(
+          scripts.some(({ url }) => new RegExp(`/assets/${group}-[^/]+\\.js$`).test(url)),
+          `${group}: its chunk was never fetched, so it was not a chunk of its own`,
+        ).toBe(true);
+      }
+      expect(scripts.length).toBeGreaterThan(0);
+      for (const script of scripts) {
+        expect(script.fromWorker, `${script.url} was not served by the worker`).toBe(true);
+      }
+    } finally {
+      await second.close();
+    }
+  });
+
+  test('says a view whose chunk cannot be fetched could not be loaded, and reloads — #674', async () => {
+    // ADR 0027's tab left behind is an old bundle asking for a chunk the new
+    // worker's cache no longer holds. Simulated here with no worker at all —
+    // `serviceWorkers: 'block'`, so nothing can answer from a cache — and every
+    // script request after Home aborted, which is what that tab sees.
+    const blocked = mkdtempSync(join(tmpdir(), 'oyl-offline-blocked-'));
+    const context = await chromium.launchPersistentContext(blocked, {
+      args: LAUNCH_ARGS,
+      serviceWorkers: 'block',
+    });
+    const page = context.pages()[0] ?? (await context.newPage());
+    // Every script the entry does not load itself: read out of the built
+    // `index.html`, so Home still renders and every lazy chunk is refused —
+    // including the preload `main.tsx` starts once Home is idle, which must
+    // fail in silence and leave the visit to say so.
+    const entryScripts = new Set(
+      [...readFileSync(join(DIST, 'index.html'), 'utf8').matchAll(/\/(assets\/[^"]+\.js)"/g)].map(
+        (match) => `/${match[1] ?? ''}`,
+      ),
+    );
+    let aborted = 0;
+    const chunk = (url: URL): boolean =>
+      url.pathname.startsWith('/assets/') &&
+      url.pathname.endsWith('.js') &&
+      !entryScripts.has(url.pathname);
+    await page.route(chunk, async (route) => {
+      aborted += 1;
+      await route.abort('internetdisconnected');
+    });
+    try {
+      expect(entryScripts.size, 'index.html names no script').toBeGreaterThan(0);
+      await page.goto(`${PRODUCT_ORIGIN}/`);
+      await expect(page.locator('h1')).toHaveText('Home');
+      await page.evaluate(() => {
+        window.location.hash = '#/settings';
+      });
+      await expect(page.locator('h1')).toHaveText('Settings');
+      await expect(page.locator('main')).toContainText('Could not load this page');
+      const reload = page.locator('main button', { hasText: 'Reload the app' });
+      await expect(reload).toBeVisible();
+      expect(aborted, 'no chunk was requested, so nothing was simulated').toBeGreaterThan(0);
+
+      // The repair: once the chunk can be fetched again, Reload brings the page.
+      await page.unroute(chunk);
+      await reload.click();
+      await expect(page.locator('h1')).toHaveText('Settings');
+      await expect(page.locator('main')).not.toContainText('Could not load this page');
+      await expect(page.locator('main [data-oyl-view-loading]')).toHaveCount(0);
+      expect(await page.locator('main > *').count()).toBeGreaterThan(2);
+    } finally {
+      await context.close();
+      rmSync(blocked, { recursive: true, force: true });
+    }
+  });
+
   test('asks the browser for persistent storage, exactly once — #409', async () => {
     // ⚠️ **This asserts the CALL, not `persisted()`, and that is a measurement
     // rather than a preference.** #409 asks for the round trip to be read back

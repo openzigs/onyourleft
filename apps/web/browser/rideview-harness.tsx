@@ -83,6 +83,7 @@ import { scriptedSidePairing } from '../src/camera/testing';
 import { RIDE_NOTIFICATION_REFUSED, type RideSnapshot } from '../src/ride/controller';
 import { ridingSnapshot, stubRideController } from '../src/ride/testing';
 import { AppShell } from '../src/shell/AppShell';
+import { viewGroupsLoaded } from './views-loaded';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
 import { workoutRescueText } from '../src/workout/rescue-text';
 import { workoutStub } from '../src/workouts/testing';
@@ -673,6 +674,8 @@ async function run(): Promise<void> {
   }
   window.location.hash = '#/ride';
 
+  // #674: the view groups first, so every view renders on the render that asks.
+  await viewGroupsLoaded();
   flushSync(() => {
     createRoot(host).render(
       <StrictMode>
