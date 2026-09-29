@@ -144,6 +144,7 @@ import {
   nearFieldShapes,
   showGroundBlobsOf,
   roadWearOf,
+  groundBlendOf,
   waterFresnelOf,
   waterReflectsOf,
 } from '../src/game/three-renderer';
@@ -4399,6 +4400,8 @@ export interface RealisticMeasurement {
   readonly air: AirMeasurement;
   /** #628: the worn road's wheel track against its lane, worn and not. @see roadWearProbe */
   readonly roadWear: RoadWearMeasurement;
+  /** #627: a steep bank against level grass, blended and not. @see groundBlendProbe */
+  readonly groundBlend: GroundBlendMeasurement;
   /** #629: a lake's near and grazing water, reflecting and held. @see waterReflectionProbe */
   readonly waterReflection: WaterReflectionMeasurement;
   /**
@@ -4975,6 +4978,207 @@ function waterReflectionProbe(
   };
 }
 
+/**
+ * A steep bank against level grass beside it, on #458's hill — #627. Each is a
+ * {@link BLEND_WINDOW}-pixel square, and what is read in it is the texture's
+ * own contrast: the variance of each pixel's relative luminance over the
+ * square's mean, which the light on a bank (a scale on the whole square)
+ * leaves alone.
+ *
+ * The squares are FOUND, not aimed: the bank is where taking the rock blend
+ * off changes the picture, and the level grass is ground that neither the
+ * rock nor the verge changes. Several level squares are read, whose range is
+ * the grass-to-grass spread the control is held to.
+ */
+export interface GroundBlendMeasurement {
+  readonly measured: boolean;
+  /** Pixels the rock blend changed, and how many candidate squares lay wholly inside them. */
+  readonly rockPixels: number;
+  readonly bankSquares: number;
+  /** The contrast of the bank, and of up to {@link LEVEL_SQUARES} level squares, as drawn. */
+  readonly bank: number;
+  readonly levels: readonly number[];
+  /** The same squares with the rock blend off: the control. */
+  readonly bankControl: number;
+  readonly levelsControl: readonly number[];
+}
+
+const NO_GROUND_BLEND: GroundBlendMeasurement = {
+  measured: false,
+  rockPixels: 0,
+  bankSquares: 0,
+  bank: 0,
+  levels: [],
+  bankControl: 0,
+  levelsControl: [],
+};
+
+/**
+ * How many level squares are read, each at least three squares' width from
+ * the others: their range is the grass-to-grass spread.
+ */
+const LEVEL_SQUARES = 8;
+
+/** The side of a square {@link groundBlendProbe} reads, in pixels. */
+const BLEND_WINDOW = 9;
+
+/** Where on #458's hill the probe stands: on its 10 % climb. */
+const BLEND_PROBE_DISTANCE = 520;
+
+/** How far from the steep ground {@link groundBlendProbe}'s camera stands, and how far above it. */
+const BLEND_PROBE_STAND_METRES = 14;
+const BLEND_PROBE_RISE_METRES = 4;
+
+/** @see GroundBlendMeasurement */
+function groundBlendProbe(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  riding: (profile: ReturnType<typeof northRoute>, distance: number) => SceneFrame,
+): GroundBlendMeasurement {
+  const ridden = riding(hillRoute(), BLEND_PROBE_DISTANCE);
+  // ⚠️ **Turned to face the steepest ground, and raised**, measured: from the
+  // chase camera on this climb the only ground past 40° is 40 m or more off
+  // the road, a strip 20 rows high at the horizon with no 9-pixel square
+  // wholly inside it. So the camera is stood {@link BLEND_PROBE_STAND_METRES}
+  // from the steep vertex nearest the rider, looking at it from above.
+  const mesh = ridden.terrain.mesh;
+  let steep = -1;
+  let best = Number.POSITIVE_INFINITY;
+  for (let vertex = 0; vertex < mesh.normals.length / 3; vertex += 1) {
+    if ((mesh.normals[vertex * 3 + 1] ?? 1) > Math.cos((45 * Math.PI) / 180)) continue;
+    const apart = Math.hypot(
+      (mesh.vertices[vertex * 3] ?? 0) - ridden.camera.x,
+      (mesh.vertices[vertex * 3 + 2] ?? 0) - ridden.camera.z,
+    );
+    if (apart < best) {
+      best = apart;
+      steep = vertex;
+    }
+  }
+  if (steep < 0) return { ...NO_GROUND_BLEND, measured: true };
+  const at = {
+    x: mesh.vertices[steep * 3] ?? 0,
+    y: mesh.vertices[steep * 3 + 1] ?? 0,
+    z: mesh.vertices[steep * 3 + 2] ?? 0,
+  };
+  const towardX = at.x - ridden.camera.x;
+  const towardZ = at.z - ridden.camera.z;
+  const toward = Math.hypot(towardX, towardZ) || 1;
+  const headingX = towardX / toward;
+  const headingZ = towardZ / toward;
+  const frame: SceneFrame = {
+    ...ridden,
+    markers: [],
+    scatter: [],
+    camera: {
+      ...ridden.camera,
+      x: at.x - headingX * BLEND_PROBE_STAND_METRES,
+      z: at.z - headingZ * BLEND_PROBE_STAND_METRES,
+      headingX,
+      headingZ,
+      eyeRoadY: at.y + BLEND_PROBE_RISE_METRES,
+      targetRoadY: at.y,
+    },
+  };
+  const bare: SceneFrame = {
+    ...frame,
+    terrain: {
+      ...frame.terrain,
+      mesh: { ...frame.terrain.mesh, indices: new Uint32Array(0) },
+    },
+  };
+  const whole = (scene: SceneFrame): Uint8Array => {
+    view.render(scene);
+    view.render(scene);
+    return readRegion(gl, 0, 0, canvas.width, canvas.height);
+  };
+  const noGround = whole(bare);
+  const drawn = whole(frame);
+  groundBlendOf(view, 1, 0, 1);
+  const rockless = whole(frame);
+  groundBlendOf(view, 0, 0, 1);
+  const bareGrass = whole(frame);
+  groundBlendOf(view, 1, 1, 1);
+  const width = canvas.width;
+  const differs = (a: Uint8Array, b: Uint8Array, at: number): boolean =>
+    Math.abs((a[at] ?? 0) - (b[at] ?? 0)) +
+      Math.abs((a[at + 1] ?? 0) - (b[at + 1] ?? 0)) +
+      Math.abs((a[at + 2] ?? 0) - (b[at + 2] ?? 0)) >
+    3;
+  let rockPixels = 0;
+  const rock = new Uint8Array(width * canvas.height);
+  const grass = new Uint8Array(width * canvas.height);
+  for (let pixel = 0; pixel < rock.length; pixel += 1) {
+    const at = pixel * 4;
+    const ground = differs(drawn, noGround, at);
+    if (ground && differs(drawn, rockless, at)) {
+      rock[pixel] = 1;
+      rockPixels += 1;
+    }
+    if (ground && !differs(drawn, rockless, at) && !differs(drawn, bareGrass, at)) grass[pixel] = 1;
+  }
+  const whollyIn = (mask: Uint8Array, x: number, y: number): boolean => {
+    for (let dy = 0; dy < BLEND_WINDOW; dy += 1) {
+      for (let dx = 0; dx < BLEND_WINDOW; dx += 1) {
+        if (mask[(y + dy) * width + x + dx] !== 1) return false;
+      }
+    }
+    return true;
+  };
+  const banks: [number, number][] = [];
+  const levels: [number, number][] = [];
+  for (let y = 0; y + BLEND_WINDOW < canvas.height; y += 3) {
+    for (let x = 0; x + BLEND_WINDOW < width; x += 3) {
+      if (whollyIn(rock, x, y)) banks.push([x, y]);
+      else if (whollyIn(grass, x, y)) levels.push([x, y]);
+    }
+  }
+  const contrast = (pixels: Uint8Array, [x, y]: readonly [number, number]): number => {
+    const values: number[] = [];
+    for (let dy = 0; dy < BLEND_WINDOW; dy += 1) {
+      for (let dx = 0; dx < BLEND_WINDOW; dx += 1) {
+        const at = ((y + dy) * width + x + dx) * 4;
+        values.push(relativeLuminanceOf(pixels[at] ?? 0, pixels[at + 1] ?? 0, pixels[at + 2] ?? 0));
+      }
+    }
+    const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+    if (!(mean > 0)) return 0;
+    return values.reduce((sum, value) => sum + (value / mean - 1) ** 2, 0) / values.length;
+  };
+  // The bank square nearest the bottom of the frame (the nearest, and the
+  // largest on screen); two level squares nearest the same row.
+  const bank = [...banks].sort((a, b) => a[1] - b[1])[0];
+  if (bank === undefined || levels.length < 2) {
+    return { ...NO_GROUND_BLEND, measured: true, rockPixels, bankSquares: banks.length };
+  }
+  const byRow = [...levels].sort(
+    (a, b) => Math.abs(a[1] - bank[1]) - Math.abs(b[1] - bank[1]) || a[0] - b[0],
+  );
+  const chosen: [number, number][] = [];
+  for (const square of byRow) {
+    if (chosen.length >= LEVEL_SQUARES) break;
+    if (
+      chosen.every(
+        (other) =>
+          Math.max(Math.abs(other[0] - square[0]), Math.abs(other[1] - square[1])) >=
+          BLEND_WINDOW * 3,
+      )
+    ) {
+      chosen.push(square);
+    }
+  }
+  return {
+    measured: true,
+    rockPixels,
+    bankSquares: banks.length,
+    bank: contrast(drawn, bank),
+    levels: chosen.map((square) => contrast(drawn, square)),
+    bankControl: contrast(rockless, bank),
+    levelsControl: chosen.map((square) => contrast(rockless, square)),
+  };
+}
+
 /** What {@link airProbe} reports when it did not run. */
 const NO_AIR: AirMeasurement = {
   measured: false,
@@ -4997,6 +5201,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   measured: false,
   air: NO_AIR,
   roadWear: NO_ROAD_WEAR,
+  groundBlend: NO_GROUND_BLEND,
   waterReflection: NO_WATER_REFLECTION,
   atmosphere: {
     realisticTaught: 0,
@@ -6263,6 +6468,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const roadWear = roadWearProbe(view, gl, canvas, riding, slantedLevelRoute());
   phaseEnds('realistic: road wear — #628');
 
+  // #627: the ground, on the hill.
+  const groundBlend = groundBlendProbe(view, gl, canvas, riding);
+  phaseEnds('realistic: ground blend — #627');
+
   // #629: the water, on the lake.
   const waterReflection = waterReflectionProbe(view, gl, canvas, riding);
   phaseEnds('realistic: water reflection — #629');
@@ -6540,6 +6749,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   return {
     measured: true,
     roadWear,
+    groundBlend,
     waterReflection,
     waterReflectsAfterStepDown,
     textures,

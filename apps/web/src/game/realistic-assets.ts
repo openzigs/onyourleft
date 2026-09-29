@@ -81,7 +81,20 @@ export interface SurfaceMaps {
   readonly tileMetres: number;
 }
 
-export const REALISTIC_SURFACES: { readonly road: SurfaceMaps; readonly ground: SurfaceMaps } = {
+/**
+ * The road's and the ground's surfaces — and since #627 the two the ground
+ * blends into: `verge`, earth and gravel along the road's edge, and `rock`,
+ * bare stone on a steep bank and scree above the tree line
+ * (`ground-blend.ts`). Their repeats are this repository's own: gravel at
+ * 2.5 m and stones at 3 m, near the scans' own sizes (Poly Haven's
+ * `dimensions`, 2.48 m and 3 m) so a pebble is about a pebble's size.
+ */
+export const REALISTIC_SURFACES: {
+  readonly road: SurfaceMaps;
+  readonly ground: SurfaceMaps;
+  readonly verge: SurfaceMaps;
+  readonly rock: SurfaceMaps;
+} = {
   road: {
     colour: 'asphalt_02_diff_1k.ktx2',
     normal: 'asphalt_02_nor_gl_1k.ktx2',
@@ -91,6 +104,16 @@ export const REALISTIC_SURFACES: { readonly road: SurfaceMaps; readonly ground: 
     colour: 'sparse_grass_diff_1k.ktx2',
     normal: 'sparse_grass_nor_gl_1k.ktx2',
     tileMetres: 4,
+  },
+  verge: {
+    colour: 'gravelly_sand_diff_512.ktx2',
+    normal: 'gravelly_sand_nor_gl_512.ktx2',
+    tileMetres: 2.5,
+  },
+  rock: {
+    colour: 'rocks_ground_05_diff_512.ktx2',
+    normal: 'rocks_ground_05_nor_gl_512.ktx2',
+    tileMetres: 3,
   },
 };
 
@@ -425,6 +448,10 @@ export function realisticFiles(): readonly string[] {
     REALISTIC_SURFACES.road.normal,
     REALISTIC_SURFACES.ground.colour,
     REALISTIC_SURFACES.ground.normal,
+    REALISTIC_SURFACES.verge.colour,
+    REALISTIC_SURFACES.verge.normal,
+    REALISTIC_SURFACES.rock.colour,
+    REALISTIC_SURFACES.rock.normal,
     ...REALISTIC_VEGETATION_KINDS.flatMap((kind) =>
       REALISTIC_VEGETATION[kind].flatMap((model) =>
         [model.file, model.impostor, model.middle].filter(

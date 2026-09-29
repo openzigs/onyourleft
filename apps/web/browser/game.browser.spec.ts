@@ -703,6 +703,25 @@ const REALISTIC_LOAD_BUDGET_MS = 165_000;
 const TREES_LOAD_BUDGET_MS = 160_000;
 
 /**
+ * #627's figures for the ground's contrast (`game-harness.ts`
+ * §`GroundBlendMeasurement`, a variance of relative luminance over a
+ * square's mean): the least a bank of rock must differ from level grass
+ * beside it, the most it may, and how much rock must have been drawn at all.
+ */
+const BLEND_MARGIN = 0.01;
+const BLEND_CEILING = 1;
+const BLEND_MINIMUM_ROCK_PIXELS = 200;
+/**
+ * How many times the grass's highest contrast the bank must read — **4** — and
+ * how far the control may stray outside the grass's range, as a factor —
+ * **1.5**. On a Mac on 2026-09-29 the bank read 0.096 against grass of 0.0017
+ * to 0.0058, and 0.0081 with the rock off: 1.4 times the grass's highest,
+ * which is the raking light on grass the level squares do not have.
+ */
+const BLEND_FACTOR = 4;
+const BLEND_LIGHT_FACTOR = 1.5;
+
+/**
  * #629: how much larger the grazing water's Fresnel term, read back, must be
  * than the near water's — **0.2** — and the most either may read: **1.05**, a
  * whole reflection and the read-back's own spread.
@@ -1023,7 +1042,7 @@ const REALISTIC_PUBLIC = fileURLToPath(new URL('../public/realistic/', import.me
 
 /**
  * How many images the realistic world holds, once per image — #618's review:
- * four surface maps, two a photographic structure surface, the bicycle's four
+ * eight surface maps (#627 added the verge and the rock), two a photographic structure surface, the bicycle's four
  * (#624), and every image in
  * a vegetation model plus its impostor, read off the committed files exactly as
  * `realistic-textures.test.ts` reads them.
@@ -1031,7 +1050,8 @@ const REALISTIC_PUBLIC = fileURLToPath(new URL('../public/realistic/', import.me
 function realisticImageCount(): number {
   const models = REALISTIC_VEGETATION_KINDS.flatMap((kind) => REALISTIC_VEGETATION[kind]);
   return (
-    4 +
+    // The road, the grass, and #627's verge and rock: two maps each.
+    8 +
     2 * PHOTOGRAPHIC_STRUCTURE_SURFACES.length +
     // #624: the bicycle's four drawn maps.
     REALISTIC_BICYCLE_MAP_NAMES.length +
@@ -3306,6 +3326,42 @@ test.describe('the realistic world — ADR 0026', () => {
     expect(Math.abs(control)).toBeLessThan(WHEEL_TRACK_FLOOR);
   });
 
+  test('blends the ground: a steep bank reads as rock where level grass beside it does not — #627', async ({
+    harnessRun,
+  }) => {
+    const { groundBlend: blend } = await realistic(harnessRun);
+    expect(blend.measured).toBe(true);
+    const range = (values: readonly number[]): { low: number; high: number } => ({
+      low: Math.min(...values),
+      high: Math.max(...values),
+    });
+    const grass = range(blend.levels);
+    const grassControl = range(blend.levelsControl);
+    console.log(
+      `the ground's contrast on the hill: a bank ${blend.bank.toFixed(4)} against level grass ` +
+        `${grass.low.toFixed(4)} to ${grass.high.toFixed(4)}; with the rock off ` +
+        `${blend.bankControl.toFixed(4)} against ${grassControl.low.toFixed(4)} to ` +
+        `${grassControl.high.toFixed(4)} (${String(blend.rockPixels)} px of rock, ` +
+        `${String(blend.bankSquares)} squares, ${String(blend.levels.length)} level)`,
+    );
+    // Non-vacuity: there was a bank, the blend drew rock on it, and there is
+    // level grass enough beside it to know how grass reads.
+    expect(blend.rockPixels).toBeGreaterThan(BLEND_MINIMUM_ROCK_PIXELS);
+    expect(blend.bankSquares).toBeGreaterThan(0);
+    expect(blend.levels.length).toBeGreaterThanOrEqual(4);
+    // The bank reads unlike any of the grass beside it, by a margin — and by
+    // no more than a photograph can (a ceiling).
+    expect(blend.bank - grass.high).toBeGreaterThan(BLEND_MARGIN);
+    expect(blend.bank).toBeGreaterThan(grass.high * BLEND_FACTOR);
+    expect(blend.bank).toBeLessThan(BLEND_CEILING);
+    // The control: with the rock blend off the bank is grass again, and reads
+    // inside the grass-to-grass spread — widened by BLEND_LIGHT_FACTOR either
+    // way, because the bank is grass under a raking light the level squares
+    // are not under, and a normal map's relief shows more in one.
+    expect(blend.bankControl).toBeLessThanOrEqual(grassControl.high * BLEND_LIGHT_FACTOR);
+    expect(blend.bankControl).toBeGreaterThanOrEqual(grassControl.low / BLEND_LIGHT_FACTOR);
+  });
+
   test('lets the water reflect the sky it is under, by Fresnel — the grazing water reflects more — #629', async ({
     harnessRun,
   }) => {
@@ -3350,7 +3406,7 @@ test.describe('the realistic world — ADR 0026', () => {
   }) => {
     const { textures, firstFrameMs, loadMs } = await realistic(harnessRun);
     // Non-vacuity, and EXACT (#618's review — a floor let up to eight maps go
-    // missing): four surface maps, fourteen structure maps, and every map in a
+    // missing): eight surface maps, fourteen structure maps, and every map in a
     // model plus its impostor, once per IMAGE, read off the committed files the
     // way `realistic-textures.test.ts` reads them.
     expect(textures.worn.length).toBe(realisticImageCount());

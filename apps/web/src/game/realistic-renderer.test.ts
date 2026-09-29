@@ -1766,7 +1766,9 @@ describe('a failed load releases everything it loaded, including what arrives la
     expect(outcome.loaded).toBe(false);
     await new Promise((resolve) => setTimeout(resolve, 50));
     const surfaces = held.filter((one) => one.url.includes('_512.ktx2'));
-    expect(surfaces.length).toBe(2 * PHOTOGRAPHIC_STRUCTURE_SURFACES.length);
+    // The structures' maps, and since #627 the ground's verge and rock, which
+    // are made at the same size by the same script.
+    expect(surfaces.length).toBe(2 * PHOTOGRAPHIC_STRUCTURE_SURFACES.length + 4);
     expect(surfaces.filter((one) => !one.released).map((one) => one.url)).toEqual([]);
   });
 

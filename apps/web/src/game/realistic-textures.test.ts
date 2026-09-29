@@ -276,13 +276,14 @@ describe('the realistic textures stay compressed on the GPU — #618', () => {
     const renderer = await loadedOn(TABLET);
     const report = renderer.realisticTextureReport();
     const worn = report.filter((texture) => texture.role !== 'sky');
-    // Non-vacuity: the whole set — four surface maps, fourteen structure maps,
+    // Non-vacuity: the whole set — eight surface maps (#627's verge and rock
+    // among them), fourteen structure maps,
     // the bicycle's four (#624), four impostors and every map inside a tree,
     // shrub and rock — ONCE PER IMAGE, read off the committed files: a fir's
     // live and dead branches are two textures over one image, which three
     // uploads once.
     const images =
-      4 +
+      8 +
       2 * PHOTOGRAPHIC_STRUCTURE_SURFACES.length +
       REALISTIC_BICYCLE_MAP_NAMES.length +
       REALISTIC_RIDER_MAP_NAMES.length +

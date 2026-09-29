@@ -332,6 +332,12 @@ import {
 } from './realistic-assets';
 import { REALISTIC_TRANSCODER_DIRECTORY } from './transcoder-files';
 import {
+  ROAD_EDGE_METRES,
+  ROCK_SLOPE_DEGREES,
+  SCREE_BAND_METRES,
+  VERGE_BLEND_METRES,
+} from './ground-blend';
+import {
   CARRIAGEWAY_HALF_METRES,
   DUST_BAND_METRES,
   DUST_LIGHTEN,
@@ -3697,6 +3703,8 @@ export class TerrainBelt {
   readonly #fieldSpan = { value: 90 };
   /** How many fields a lap has, which the patchwork wraps by — #468 review B3. @see TerrainMesh.fieldCount */
   readonly #fieldCount = { value: 1 };
+  /** Where the tree line is, for the realistic ground's scree — #627. @see TerrainMesh.treeLine */
+  readonly #treeLine = { value: NO_TREE_LINE };
   readonly #materials = {
     lit: withSurfaceDetail(
       new MeshLambertMaterial({ color: UNSET_COLOUR, vertexColors: true }),
@@ -3759,9 +3767,13 @@ export class TerrainBelt {
     this.#mount();
   }
 
-  /** The field span and count the photographic ground's patchwork reads. */
-  get fields(): { readonly span: { value: number }; readonly count: { value: number } } {
-    return { span: this.#fieldSpan, count: this.#fieldCount };
+  /** The field span and count the photographic ground's patchwork reads, and — #627 — the tree line. */
+  get fields(): {
+    readonly span: { value: number };
+    readonly count: { value: number };
+    readonly treeLine: { value: number };
+  } {
+    return { span: this.#fieldSpan, count: this.#fieldCount, treeLine: this.#treeLine };
   }
 
   /** The surface detail, on or off — #425. @see QualitySettings.surfaceDetail */
@@ -3828,6 +3840,7 @@ export class TerrainBelt {
     }
     this.#fieldSpan.value = ground.fieldSpan;
     this.#fieldCount.value = ground.fieldCount;
+    this.#treeLine.value = ground.treeLine;
     this.#indicesPerBand = ground.indicesPerBand;
     this.#indexCount = ground.indices.length;
     this.#applyRange();
@@ -5134,6 +5147,9 @@ interface RealisticWorld {
   readonly sky: RealisticSky;
   readonly road: { readonly colour: Texture; readonly normal: Texture };
   readonly ground: { readonly colour: Texture; readonly normal: Texture };
+  /** The ground's verge and its rock and scree — #627. */
+  readonly verge: { readonly colour: Texture; readonly normal: Texture };
+  readonly rock: { readonly colour: Texture; readonly normal: Texture };
   readonly vegetation: ReadonlyMap<RealisticVegetationKind, readonly RealisticShape[]>;
   /** The structures' photographic surfaces — ADR 0026 D-12 layer 3, #475. */
   readonly structures: ReadonlyMap<
@@ -5431,6 +5447,14 @@ export function realisticTextureReport(): readonly RealisticTextureReport[] {
   add(world.sky.texture, 'sky');
   for (const map of [world.road.colour, world.road.normal]) add(map, 'road');
   for (const map of [world.ground.colour, world.ground.normal]) add(map, 'ground');
+  for (const map of [
+    world.verge.colour,
+    world.verge.normal,
+    world.rock.colour,
+    world.rock.normal,
+  ]) {
+    add(map, 'ground');
+  }
   for (const maps of world.structures.values()) {
     add(maps.colour, 'structure');
     add(maps.normal, 'structure');
@@ -5468,6 +5492,10 @@ export function uploadRealisticTexturesOf(view: GameView, textures?: readonly Te
           world.road.normal,
           world.ground.colour,
           world.ground.normal,
+          world.verge.colour,
+          world.verge.normal,
+          world.rock.colour,
+          world.rock.normal,
           ...[...world.structures.values()].flatMap((maps) => [maps.colour, maps.normal]),
           ...REALISTIC_BICYCLE_MAP_NAMES.map((map) => world.bicycle[map]),
           ...REALISTIC_RIDER_MAP_NAMES.map((map) => world.rider[map]),
@@ -5534,6 +5562,15 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       colour: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.ground.colour))),
       normal: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.ground.normal))),
     };
+    // #627: the ground's verge, rock and scree, loaded and settled with the rest.
+    const verge = {
+      colour: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.verge.colour))),
+      normal: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.verge.normal))),
+    };
+    const rock = {
+      colour: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.rock.colour))),
+      normal: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.rock.normal))),
+    };
     const rider = model(() => loaders.model(realisticUrl(REALISTIC_RIDER)));
     // #623: the rider's three maps, loaded and settled with everything else.
     const riderMaps = REALISTIC_RIDER_MAP_NAMES.map((map) => ({
@@ -5584,6 +5621,10 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       road.normal,
       ground.colour,
       ground.normal,
+      verge.colour,
+      verge.normal,
+      rock.colour,
+      rock.normal,
       rider,
       ...riderMaps.map((each) => each.texture),
       ...bicycleMaps.map((each) => each.texture),
@@ -5613,13 +5654,30 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     }
     const [skyTexture, roadColour, roadNormal, groundColour, groundNormal, body] =
       await Promise.all([sky, road.colour, road.normal, ground.colour, ground.normal, rider]);
-    for (const surface of [roadColour, roadNormal, groundColour, groundNormal]) {
+    const [vergeColour, vergeNormal, rockColour, rockNormal] = await Promise.all([
+      verge.colour,
+      verge.normal,
+      rock.colour,
+      rock.normal,
+    ]);
+    for (const surface of [
+      roadColour,
+      roadNormal,
+      groundColour,
+      groundNormal,
+      vergeColour,
+      vergeNormal,
+      rockColour,
+      rockNormal,
+    ]) {
       surface.wrapS = RepeatWrapping;
       surface.wrapT = RepeatWrapping;
       surface.minFilter = LinearMipmapLinearFilter;
     }
     roadColour.colorSpace = SRGBColorSpace;
     groundColour.colorSpace = SRGBColorSpace;
+    vergeColour.colorSpace = SRGBColorSpace;
+    rockColour.colorSpace = SRGBColorSpace;
     const structures = new Map<
       Exclude<StructureSurface, 'painted'>,
       { readonly colour: Texture; readonly normal: Texture }
@@ -5683,6 +5741,8 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       sky: skyRead,
       road: { colour: roadColour, normal: roadNormal },
       ground: { colour: groundColour, normal: groundNormal },
+      verge: { colour: vergeColour, normal: vergeNormal },
+      rock: { colour: rockColour, normal: rockNormal },
       vegetation,
       structures,
       body,
@@ -5823,6 +5883,10 @@ function releaseRealisticWorld(world: RealisticWorld): void {
     world.road.normal,
     world.ground.colour,
     world.ground.normal,
+    world.verge.colour,
+    world.verge.normal,
+    world.rock.colour,
+    world.rock.normal,
   ]) {
     texture.dispose();
   }
@@ -7993,6 +8057,132 @@ const PLANAR_UV = /* glsl */ `
 `;
 
 /**
+ * The two surfaces the realistic ground blends into, and where the tree line
+ * is — #627. Absent in a world a test built without them, which draws the
+ * grass everywhere as before. @see photographicGroundMaterial
+ */
+interface GroundBlendMaps {
+  readonly verge?: { readonly colour: Texture; readonly normal: Texture };
+  readonly rock?: { readonly colour: Texture; readonly normal: Texture };
+  /** `landform.ts` §`TerrainMesh.treeLine`, written by `TerrainBelt.update`. */
+  readonly treeLine: { value: number };
+}
+
+/**
+ * A tree line no ground reaches, until a frame says where it is: finite,
+ * because a shader handed an infinity for a `smoothstep` edge divides nothing
+ * by nothing.
+ */
+const NO_TREE_LINE = 1e9;
+
+/**
+ * Each ground material's blend switches — #627: verge, rock and scree, each 1
+ * in the product and 0 in the browser gate's control. @see groundBlendOf
+ */
+const GROUND_BLEND_SHARES = new WeakMap<Material, Vector3>();
+
+const GROUND_BLEND_VERTEX_PARS = /* glsl */ `
+varying vec3 vOylGround;
+varying float vOylGroundUp;
+`;
+
+/** World position and the ground normal's vertical, before any map perturbs it. */
+const GROUND_BLEND_VERTEX = /* glsl */ `
+vOylGround = (modelMatrix * vec4(position, 1.0)).xyz;
+vOylGroundUp = normalize(mat3(modelMatrix) * normal).y;
+`;
+
+/**
+ * The blend's shares, its samplers, and the normal map as the blend reads it.
+ *
+ * ⚠️ **Branched, so the two new surfaces cost nothing where they are not**
+ * (#627's cost ceiling): each is sampled only where its share is above zero,
+ * with `textureGrad` and derivatives taken OUTSIDE the branch — an implicit
+ * derivative inside non-uniform control flow is undefined in GLSL — and scaled
+ * by the rung's LOD bias as `withTextureLodBias` would have (#619 lever 2).
+ * The grass is sampled everywhere, as before.
+ */
+const GROUND_BLEND_FRAGMENT_PARS = /* glsl */ `
+uniform sampler2D vergeMap;
+uniform sampler2D vergeNormalMap;
+uniform sampler2D rockMap;
+uniform sampler2D rockNormalMap;
+uniform float treeLine;
+uniform vec3 groundShares;
+varying vec3 vOylGround;
+varying float vOylGroundUp;
+float oylVergeShare = 0.0;
+float oylRockShare = 0.0;
+vec3 oylVergeTexel = vec3(1.0);
+vec3 oylRockTexel = vec3(1.0);
+vec3 oylGroundWorld = vec3(1.0);
+vec2 oylVergeUv() { return vOylGround.xz / ${glslFloat(REALISTIC_SURFACES.verge.tileMetres)}; }
+vec2 oylRockUv() { return vOylGround.xz / ${glslFloat(REALISTIC_SURFACES.rock.tileMetres)}; }
+vec3 oylGroundNormal(vec2 grassUv) {
+  vec3 grass = texture2D(normalMap, grassUv).xyz;
+  float oylBias = exp2(oylTextureLodBias);
+  vec2 vergeUv = oylVergeUv();
+  vec2 vergeDx = dFdx(vergeUv) * oylBias;
+  vec2 vergeDy = dFdy(vergeUv) * oylBias;
+  vec2 rockUv = oylRockUv();
+  vec2 rockDx = dFdx(rockUv) * oylBias;
+  vec2 rockDy = dFdy(rockUv) * oylBias;
+  vec3 texel = grass;
+  if (oylVergeShare > 0.0) {
+    texel = mix(texel, textureGrad(vergeNormalMap, vergeUv, vergeDx, vergeDy).xyz, oylVergeShare);
+  }
+  if (oylRockShare > 0.0) {
+    texel = mix(texel, textureGrad(rockNormalMap, rockUv, rockDx, rockDy).xyz, oylRockShare);
+  }
+  return texel;
+}
+`;
+
+/**
+ * The shares, and the two surfaces' colours — inside the ground's map block,
+ * before the grass multiplies the world's colour in, so each surface is ITS
+ * photograph over its own mean times the world's colour (#627: the world's
+ * per-route colour still leads).
+ */
+const GROUND_BLEND_SHARES_GLSL = /* glsl */ `
+  oylGroundWorld = diffuseColor.rgb;
+  float oylFromEdge = abs(vFields.y) - ${glslFloat(ROAD_EDGE_METRES)};
+  float oylVerge = (1.0 - smoothstep(${glslFloat(VERGE_BLEND_METRES[0])}, ${glslFloat(VERGE_BLEND_METRES[1])}, oylFromEdge)) * groundShares.x;
+  float oylSlope = degrees(acos(clamp(vOylGroundUp, -1.0, 1.0)));
+  float oylRock = smoothstep(${glslFloat(ROCK_SLOPE_DEGREES[0])}, ${glslFloat(ROCK_SLOPE_DEGREES[1])}, oylSlope) * groundShares.y;
+  float oylScree = smoothstep(treeLine - ${glslFloat(SCREE_BAND_METRES)}, treeLine + ${glslFloat(SCREE_BAND_METRES)}, vOylGround.y) * groundShares.z;
+  oylRockShare = max(oylRock, oylScree);
+  oylVergeShare = oylVerge * (1.0 - oylRockShare);
+  {
+    float oylBias = exp2(oylTextureLodBias);
+    vec2 vergeUv = oylVergeUv();
+    vec2 vergeDx = dFdx(vergeUv) * oylBias;
+    vec2 vergeDy = dFdy(vergeUv) * oylBias;
+    vec2 rockUv = oylRockUv();
+    vec2 rockDx = dFdx(rockUv) * oylBias;
+    vec2 rockDy = dFdy(rockUv) * oylBias;
+    if (oylVergeShare > 0.0) {
+      oylVergeTexel = textureGrad(vergeMap, vergeUv, vergeDx, vergeDy).rgb
+        / max(textureLod(vergeMap, vec2(0.5), 16.0).rgb, vec3(1e-3));
+    }
+    if (oylRockShare > 0.0) {
+      oylRockTexel = textureGrad(rockMap, rockUv, rockDx, rockDy).rgb
+        / max(textureLod(rockMap, vec2(0.5), 16.0).rgb, vec3(1e-3));
+    }
+  }
+`;
+
+/** Mixed in over the grass and its patchwork, times the landform's own vertex colour. */
+const GROUND_BLEND_MIX = /* glsl */ `
+{
+  float oylOther = oylVergeShare + oylRockShare;
+  vec3 oylSurfaces = oylGroundWorld * vColor.rgb
+    * (oylVergeTexel * oylVergeShare + oylRockTexel * oylRockShare);
+  diffuseColor.rgb = diffuseColor.rgb * (1.0 - oylOther) + oylSurfaces;
+}
+`;
+
+/**
  * The ground's photographic material — #425.
  *
  * The grass photograph brings grain, clumps and light; the hue stays
@@ -8009,6 +8199,7 @@ export function photographicGroundMaterial(
   normal: Texture,
   fieldSpan: { value: number },
   fieldCount: { value: number },
+  blend: GroundBlendMaps = { treeLine: { value: NO_TREE_LINE } },
 ): MeshStandardMaterial {
   const material = constructed(
     new MeshStandardMaterial({
@@ -8021,16 +8212,54 @@ export function photographicGroundMaterial(
       metalness: 0,
     }),
   );
+  // #627: the switches the browser gate's control turns — verge, rock, scree.
+  const shares = new Vector3(1, 1, 1);
+  GROUND_BLEND_SHARES.set(material, shares);
+  const blended = blend.verge !== undefined && blend.rock !== undefined;
   material.onBeforeCompile = (shader) => {
     shader.uniforms['tileMetres'] = { value: REALISTIC_SURFACES.ground.tileMetres };
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nuniform float tileMetres;')
-      .replace('#include <uv_vertex>', `#include <uv_vertex>\n${PLANAR_UV}`);
+      .replace(
+        '#include <common>',
+        `#include <common>\nuniform float tileMetres;\n${blended ? GROUND_BLEND_VERTEX_PARS : ''}`,
+      )
+      .replace(
+        '#include <uv_vertex>',
+        `#include <uv_vertex>\n${PLANAR_UV}\n${blended ? GROUND_BLEND_VERTEX : ''}`,
+      );
+    if (blended) {
+      shader.uniforms['vergeMap'] = { value: blend.verge?.colour };
+      shader.uniforms['vergeNormalMap'] = { value: blend.verge?.normal };
+      shader.uniforms['rockMap'] = { value: blend.rock?.colour };
+      shader.uniforms['rockNormalMap'] = { value: blend.rock?.normal };
+      shader.uniforms['treeLine'] = blend.treeLine;
+      shader.uniforms['groundShares'] = { value: shares };
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <normalmap_pars_fragment>',
+          `#include <normalmap_pars_fragment>\n${GROUND_BLEND_FRAGMENT_PARS}`,
+        )
+        .replace(
+          '#include <normal_fragment_maps>',
+          ShaderChunk.normal_fragment_maps.replace(
+            'vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;',
+            'vec3 mapN = oylGroundNormal( vNormalMapUv ) * 2.0 - 1.0;',
+          ),
+        )
+        // After `color_fragment` AND #460's patchwork, which the surface detail
+        // splices in directly after it: the verge and the rock are mixed in
+        // over the patchwork, so the field pattern shows where the grass does.
+        .replace(
+          '#include <alphamap_fragment>',
+          `${GROUND_BLEND_MIX}\n#include <alphamap_fragment>`,
+        );
+    }
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <map_fragment>',
       /* glsl */ `
 #ifdef USE_MAP
 {
+${blended ? GROUND_BLEND_SHARES_GLSL : ''}
   vec3 oylNear = texture2D(map, vMapUv).rgb;
   vec3 oylFar = texture2D(map, vMapUv * 0.111 + vec2(0.37, 0.61)).rgb;
   float oylFarShare = smoothstep(8.0, 120.0, -vViewPosition.z);
@@ -8042,7 +8271,8 @@ export function photographicGroundMaterial(
 `,
     );
   };
-  material.customProgramCacheKey = () => 'oyl-photographic-ground';
+  material.customProgramCacheKey = () =>
+    blended ? 'oyl-photographic-ground-blended' : 'oyl-photographic-ground';
   // #460's patchwork, chained after the photograph rather than replacing it,
   // and #619 lever 2's bias after both.
   return withAtmosphere(
@@ -9534,7 +9764,11 @@ class RealisticDrawing {
   constructor(
     world: RealisticWorld,
     renderer: WebGLRenderer,
-    fields: { readonly span: { value: number }; readonly count: { value: number } },
+    fields: {
+      readonly span: { value: number };
+      readonly count: { value: number };
+      readonly treeLine: { value: number };
+    },
     /**
      * The kit the rider chose — #623. Required, so a view whose world arrives
      * after the rider was dressed cannot build a realistic rider in the house
@@ -9548,6 +9782,10 @@ class RealisticDrawing {
       world.road.normal,
       world.ground.colour,
       world.ground.normal,
+      world.verge.colour,
+      world.verge.normal,
+      world.rock.colour,
+      world.rock.normal,
     ]) {
       texture.anisotropy = anisotropy;
     }
@@ -9567,6 +9805,8 @@ class RealisticDrawing {
       world.ground.normal,
       fields.span,
       fields.count,
+      // #627: the verge, the rock and scree, and where the tree line is.
+      { verge: world.verge, rock: world.rock, treeLine: fields.treeLine },
     );
     const generator = new PMREMGenerator(renderer);
     this.environment = generator.fromEquirectangular(world.sky.texture).texture;
@@ -9715,6 +9955,10 @@ export function evictRealisticWorldFromGpu(): void {
     world.road.normal,
     world.ground.colour,
     world.ground.normal,
+    world.verge.colour,
+    world.verge.normal,
+    world.rock.colour,
+    world.rock.normal,
   ]) {
     texture.dispose();
   }
@@ -9985,6 +10229,19 @@ function warmNearFieldShapes(world: DrawnWorld): void {
  */
 export function horizonFromSkyOf(view: GameView, on: boolean): void {
   if (view instanceof ThreeGameView) view.horizonFromSky(on);
+}
+
+/**
+ * Sets how much of each of the realistic ground's blends is drawn — #627:
+ * verge, rock and scree, each 1 in the product. The browser gate's control
+ * takes the rock to 0, and a steep bank must then read as the level grass
+ * beside it does.
+ *
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`;
+ * the product always draws all three.
+ */
+export function groundBlendOf(view: GameView, verge: number, rock: number, scree: number): void {
+  if (view instanceof ThreeGameView) view.groundBlend(verge, rock, scree);
 }
 
 /**
@@ -10724,6 +10981,13 @@ class ThreeGameView implements GameView {
   /** @see groundBlobsOf */
   get groundBlobMesh(): InstancedMesh | undefined {
     return this.#realistic?.grounding.mesh;
+  }
+
+  /** @see groundBlendOf */
+  groundBlend(verge: number, rock: number, scree: number): void {
+    const shares =
+      this.#realistic === undefined ? undefined : GROUND_BLEND_SHARES.get(this.#realistic.ground);
+    shares?.set(verge, rock, scree);
   }
 
   /** @see roadWearOf */
