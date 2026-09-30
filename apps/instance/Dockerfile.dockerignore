@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The build context's allowlist for apps/instance/Dockerfile, whose context is
+# the repository root (#780). BuildKit reads `<Dockerfile>.dockerignore` for
+# that Dockerfile alone. Everything is left out, and then only what the image
+# is built from is let back in: the lockfile and the workspace manifest, the
+# instance and the three packages it imports — with their tests, their test
+# support and anything installed left out again.
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!apps/instance/package.json
+!apps/instance/LICENSE
+!apps/instance/third-party.txt
+!apps/instance/src
+!packages/domain/package.json
+!packages/domain/LICENSE
+!packages/domain/src
+!packages/physics/package.json
+!packages/physics/LICENSE
+!packages/physics/src
+!packages/protocol/package.json
+!packages/protocol/LICENSE
+!packages/protocol/src
+**/node_modules
+**/*.test.ts
+**/*-testing.ts
+**/testing
+**/fixtures

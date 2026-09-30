@@ -1,0 +1,103 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The project's first instance, on the owner's own machine (#807, ADR 0037
+# D-8): the instance, its deploy-time migrate step, a scheduled backup, and
+# `cloudflared`, which dials OUT to Cloudflare so the router opens no port.
+# `docs/self-hosting/home-machine.md` is the guide; `deploy.sh` beside this
+# file is the one command (#52).
+#
+# Every variable is in `.env` beside this file (copy `instance.env.example`;
+# the repository's own `.env.example` lists each, ENV001). The tunnel token
+# is a secret: it lives in that file on the box and nowhere else.
+#
+# ⚠️ NOTHING PUBLISHES A PORT but the one line marked LOCAL DEBUGGING ONLY,
+# commented out. The tunnel reaches the instance over this project's own
+# network, by name; the internet reaches it only through Cloudflare.
+
+name: onyourleft
+
+x-instance-image: &instance-image
+  image: ${OYL_INSTANCE_IMAGE:-onyourleft-instance:local}
+
+services:
+  # The deploy's migrate step (#791): runs to completion before the instance
+  # starts, and the instance never migrates. A box coming back from a reboot
+  # does not re-run it — Docker restarts the instance itself — and the
+  # instance waits, not ready, if a migration is somehow still running.
+  migrate:
+    <<: *instance-image
+    command: ['node', 'src/operator/cli.ts', 'migrate']
+    volumes:
+      - data:/data
+    restart: 'no'
+    # The image's healthcheck asks the SERVER, which this does not run.
+    healthcheck:
+      disable: true
+
+  instance:
+    <<: *instance-image
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    environment:
+      OYL_INSTANCE_ORIGIN: ${OYL_INSTANCE_ORIGIN:?set OYL_INSTANCE_ORIGIN to the tunnel's public hostname, https://…}
+      OYL_INSTANCE_REGISTRATION: ${OYL_INSTANCE_REGISTRATION:-closed}
+      OYL_INSTANCE_ROOM_WORKERS: ${OYL_INSTANCE_ROOM_WORKERS:-}
+      OYL_INSTANCE_WS_COMPRESSION: ${OYL_INSTANCE_WS_COMPRESSION:-off}
+      OYL_INSTANCE_METRICS: ${OYL_INSTANCE_METRICS:-off}
+      OYL_INSTANCE_METRICS_TOKEN: ${OYL_INSTANCE_METRICS_TOKEN:-}
+      # Every connection's peer is cloudflared, so the rate limits read the
+      # rider's own address from the header Cloudflare writes (#895, B3).
+      # Safe here because nothing reaches the instance but the tunnel.
+      OYL_INSTANCE_CLIENT_ADDRESS_HEADER: cf-connecting-ip
+    volumes:
+      - data:/data
+    # Docker waits this long after SIGTERM before it kills the instance: the
+    # rooms are told the server is stopping and final results written first.
+    stop_grace_period: 20s
+    # LOCAL DEBUGGING ONLY — never with the tunnel's hostname pointing here:
+    # ports: ['127.0.0.1:8787:8787']
+
+  # Cloudflare Tunnel (ADR 0037 D-8). Outbound only. Pinned by digest, as
+  # every image here is: `docker buildx imagetools inspect
+  # cloudflare/cloudflared:2026.9.3`, read 2026-09-29. Apache-2.0.
+  tunnel:
+    image: cloudflare/cloudflared:2026.9.3@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c
+    command: ['tunnel', '--no-autoupdate', 'run']
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env beside this file}
+    depends_on:
+      - instance
+    restart: unless-stopped
+
+  # The scheduled backup (#791 criterion 7, #807): an online snapshot into a
+  # second directory on the box, and a copy of it OFF the box — a USB drive
+  # or a share, whatever OYL_OFFBOX_DIR names. The newest OYL_BACKUP_KEEP of
+  # each are kept.
+  backup:
+    <<: *instance-image
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      disable: true
+    entrypoint: ['sh', '-c']
+    command:
+      - >-
+        while true; do
+        node src/operator/cli.ts backup /backups --keep "$${OYL_BACKUP_KEEP}" --copy-to /offbox;
+        sleep "$${OYL_BACKUP_INTERVAL_SECONDS}";
+        done
+    environment:
+      OYL_BACKUP_KEEP: ${OYL_BACKUP_KEEP:-14}
+      OYL_BACKUP_INTERVAL_SECONDS: ${OYL_BACKUP_INTERVAL_SECONDS:-21600}
+    volumes:
+      - data:/data
+      - ${OYL_BACKUP_DIR:?set OYL_BACKUP_DIR to a directory on this machine for the snapshots}:/backups
+      - ${OYL_OFFBOX_DIR:?set OYL_OFFBOX_DIR to a drive or share that is NOT this machine}:/offbox
+
+volumes:
+  # The one volume: the SQLite database and the blobs.
+  data:

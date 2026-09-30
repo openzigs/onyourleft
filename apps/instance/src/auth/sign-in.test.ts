@@ -10,7 +10,7 @@ import { contentHashOf, RECORD_FORMAT, signActivityRecord, LINK_PURPOSE } from '
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { sha256Hex } from './crypto.ts';
-import { CHALLENGE_LIFETIME_SECONDS, RECOVERY_CODE_COUNT } from './identity.ts';
+import { CHALLENGE_LIFETIME_SECONDS, DEFAULT_LIMITS, RECOVERY_CODE_COUNT } from './identity.ts';
 import {
   startIdentityInstance,
   TEST_ORIGIN,
@@ -253,11 +253,9 @@ describe('rate limits on /v1/auth/challenge', () => {
   it('refuses one address past its limit, whatever key it names', async () => {
     const w = await start({
       limits: {
+        ...DEFAULT_LIMITS,
         challengePerKey: { limit: 100, windowMs: 60_000 },
         challengePerAddress: { limit: 5, windowMs: 60_000 },
-        renamesPerWindow: 3,
-        renameWindowSeconds: 86_400,
-        emailRecoveryPerAddress: { limit: 3, windowMs: 3_600_000 },
       },
     });
     const statuses: number[] = [];

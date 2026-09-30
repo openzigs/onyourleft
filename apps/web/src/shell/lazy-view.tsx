@@ -34,6 +34,7 @@
 
 import {
   Component,
+  createElement,
   lazy,
   type ComponentType,
   type JSX,
@@ -46,9 +47,16 @@ import { StatusMessage } from '../design/StatusMessage';
 
 /** A view's chunk could not be fetched or evaluated. */
 export class ViewChunkError extends Error {
-  constructor(cause: unknown) {
+  /**
+   * Called once {@link ViewBoundary} has put this failure on screen, so the
+   * view that threw it asks again on its next visit — see {@link lazyView}.
+   */
+  readonly askAgainNextVisit: () => void;
+
+  constructor(cause: unknown, askAgainNextVisit: () => void = () => undefined) {
     super('A page of the app could not be loaded.', { cause });
     this.name = 'ViewChunkError';
+    this.askAgainNextVisit = askAgainNextVisit;
   }
 }
 
@@ -74,8 +82,9 @@ export function startedViewLoads(): number {
  *
  * ⚠️ **A failure is not remembered**, a success is. A preload that failed on a
  * flaky connection must not leave the group broken until a reload: the next
- * visit asks again. What IS remembered is the module, so a second view of the
- * same group renders without suspending at all — see {@link lazyView}.
+ * load asks again. What IS remembered is the module, so a second view of the
+ * same group renders without suspending at all — see {@link lazyView}, which
+ * is what makes a view's next VISIT a new load (#871).
  */
 export interface ViewGroup<M> {
   /** Load the group's module, or return the load already under way. */
@@ -134,25 +143,57 @@ export function preloadViewGroups(groups: readonly ViewGroup<unknown>[]): void {
  * synchronously when the callback runs synchronously, so a group that has
  * arrived is handed over as a thenable that does exactly that, and the view
  * renders on the render that asked for it.
+ *
+ * ## Why a failed view is rebuilt, and when (#871)
+ *
+ * ⚠️ React's `lazy` remembers a rejected load for good: every later render of
+ * the same wrapper throws the same error without calling the loader again. A
+ * wrapper built once, as `AppShell` builds these at module scope, would so
+ * show "Could not load this page" on every later visit — after the network
+ * came back, and after the idle preload or a sibling view had loaded the group
+ * — until the rider pressed Reload. So the component this returns renders
+ * whichever wrapper is CURRENT, and a failure replaces it.
+ *
+ * ⚠️ **Only once the failure is on screen.** The rejection carries
+ * {@link ViewChunkError.askAgainNextVisit}, and {@link ViewBoundary} calls it
+ * from `componentDidCatch` — after the commit. Replacing the wrapper inside
+ * the rejection instead would hand React's own retry of the errored render a
+ * fresh loader, which imports again, rejects again while the network is off,
+ * and loops. The boundary renders no children once it has caught, and
+ * `AppShell` keys it by route, so the next render of this view is the next
+ * visit.
  */
 export function lazyView<M, P extends object>(
   group: ViewGroup<M>,
   pick: (module: M) => ComponentType<P>,
-): LazyExoticComponent<ComponentType<P>> {
-  return lazy(() => {
-    const arrived = group.loaded();
-    if (arrived !== undefined) {
-      const settled = { default: pick(arrived) };
-      const now: PromiseLike<typeof settled> = {
-        then: (onFulfilled) => {
-          onFulfilled?.(settled);
-          return now as never;
+): ComponentType<P> {
+  const build = (): LazyExoticComponent<ComponentType<P>> =>
+    lazy(() => {
+      const arrived = group.loaded();
+      if (arrived !== undefined) {
+        const settled = { default: pick(arrived) };
+        const now: PromiseLike<typeof settled> = {
+          then: (onFulfilled) => {
+            onFulfilled?.(settled);
+            return now as never;
+          },
+        };
+        return now as Promise<typeof settled>;
+      }
+      return group.load().then(
+        (module) => ({ default: pick(module) }),
+        (error: unknown) => {
+          throw new ViewChunkError(error instanceof ViewChunkError ? error.cause : error, () => {
+            current = build();
+          });
         },
-      };
-      return now as Promise<typeof settled>;
-    }
-    return group.load().then((module) => ({ default: pick(module) }));
-  });
+      );
+    });
+  let current = build();
+  function LazyView(props: P): JSX.Element {
+    return createElement(current, props);
+  }
+  return LazyView;
 }
 
 /** What `main` holds while a view's chunk is on its way. */
@@ -197,6 +238,12 @@ export class ViewBoundary extends Component<ViewBoundaryProps, ViewBoundaryState
 
   static getDerivedStateFromError(error: unknown): ViewBoundaryState {
     return { error: error instanceof Error ? error : new Error(String(error)) };
+  }
+
+  override componentDidCatch(error: unknown): void {
+    if (error instanceof ViewChunkError) {
+      error.askAgainNextVisit();
+    }
   }
 
   override render(): ReactNode {

@@ -5,7 +5,13 @@ import { connect } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { Handler } from './handler.ts';
-import { listen, REQUEST_ORIGIN, requestUrl, type Listening } from './node-listener.ts';
+import {
+  clientAddress,
+  listen,
+  REQUEST_ORIGIN,
+  requestUrl,
+  type Listening,
+} from './node-listener.ts';
 
 /**
  * The Node adapter's own two promises (#841): a request-target cannot move the
@@ -145,5 +151,55 @@ describe('a response is pulled no faster than the client reads it (#841)', () =>
     // Loopback socket buffers hold a few MiB; unbounded buffering pulls all 64.
     expect(pulledWhileStalled).toBeGreaterThan(0);
     expect(pulledWhileStalled).toBeLessThan(CHUNKS / 2);
+  });
+});
+
+describe('the client address behind a proxy — #895 review B3', () => {
+  const behindTheTunnel = (headers: Record<string, string | string[]>) => ({
+    headers,
+    socket: { remoteAddress: '172.18.0.3' } as never,
+  });
+
+  it('is the peer unless the operator named a header', () => {
+    expect(clientAddress(behindTheTunnel({ 'cf-connecting-ip': '203.0.113.9' }), undefined)).toBe(
+      '172.18.0.3',
+    );
+  });
+
+  it('is the named header’s address when the operator named one', () => {
+    expect(
+      clientAddress(behindTheTunnel({ 'cf-connecting-ip': ' 203.0.113.9 ' }), 'cf-connecting-ip'),
+    ).toBe('203.0.113.9');
+  });
+
+  it('falls back to the peer for a header that is missing, empty, repeated or a list', () => {
+    const cases: Record<string, string | string[]>[] = [
+      {},
+      { 'cf-connecting-ip': '' },
+      { 'cf-connecting-ip': ['203.0.113.9', '198.51.100.1'] },
+      { 'cf-connecting-ip': '203.0.113.9, 198.51.100.1' },
+    ];
+    for (const headers of cases) {
+      expect(clientAddress(behindTheTunnel(headers), 'cf-connecting-ip')).toBe('172.18.0.3');
+    }
+  });
+
+  it('gives two riders behind one proxy two rate-limit buckets, through the real listener', async () => {
+    const seen: (string | null)[] = [];
+    const listening = await listen(
+      (_request, client) => {
+        seen.push(client?.address ?? null);
+        return Promise.resolve(new Response('ok'));
+      },
+      { host: '127.0.0.1', port: 0, clientAddressHeader: 'cf-connecting-ip' },
+    );
+    try {
+      for (const address of ['203.0.113.9', '198.51.100.1']) {
+        await fetch(`${listening.url}/health`, { headers: { 'cf-connecting-ip': address } });
+      }
+    } finally {
+      await listening.close();
+    }
+    expect(seen).toEqual(['203.0.113.9', '198.51.100.1']);
   });
 });

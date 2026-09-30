@@ -202,6 +202,18 @@ describe('the walk can fire (#799’s control)', () => {
     ).toStrictEqual(['ride-analysis/planted-entry.ts → camera/planted-picture.ts']);
   });
 
+  it('follows an import after a regex literal holding `/*` (#864)', () => {
+    const walk = importWalk(
+      planted({
+        'ride-analysis/planted-entry.ts':
+          "const q = /[/*]/;\nimport type { CapturedFrame } from '../camera/frame';\n// */\nexport { q };\n",
+      }),
+    );
+    expect(picturesReached(walk.closure(['ride-analysis/planted-entry.ts']), FORBIDDEN)).toContain(
+      'ride-analysis/planted-entry.ts → camera/frame.ts',
+    );
+  });
+
   it('refuses to walk an entry that is not there, rather than passing over it', () => {
     expect(() => importWalk().closure(['ride-analysis/not-there.ts'])).toThrow(/not there/);
   });

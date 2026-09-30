@@ -92,10 +92,44 @@ export interface Listening {
   readonly close: () => Promise<void>;
 }
 
+/**
+ * The client's address for the rate limits: the peer's, or — when the
+ * operator names one — the address a proxy in front of the instance wrote into
+ * a header. Behind Cloudflare's tunnel every connection's peer is
+ * `cloudflared`, so without it every rider shares one rate-limit bucket (#895's
+ * review, B3); Cloudflare writes the rider's own address into
+ * `CF-Connecting-IP` and a client cannot set it through Cloudflare.
+ * ⚠️ Name a header ONLY when every request reaches the instance through the
+ * proxy that writes it: a client that can reach the port directly can put any
+ * address it likes in any header. A header that is missing, repeated or empty
+ * falls back to the peer.
+ */
+export function clientAddress(
+  incoming: Pick<IncomingMessage, 'headers' | 'socket'>,
+  addressHeader: string | undefined,
+): string | null {
+  if (addressHeader !== undefined) {
+    const value = incoming.headers[addressHeader];
+    if (typeof value === 'string' && value.trim() !== '' && !value.includes(',')) {
+      return value.trim();
+    }
+  }
+  return incoming.socket.remoteAddress ?? null;
+}
+
 /** Start listening. Port 0 asks the operating system for a free one, which is what the tests do. */
 export function listen(
   handler: Handler,
-  { host, port }: { readonly host: string; readonly port: number },
+  {
+    host,
+    port,
+    clientAddressHeader,
+  }: {
+    readonly host: string;
+    readonly port: number;
+    /** A header, lower case, that carries the client's address (`clientAddress`). */
+    readonly clientAddressHeader?: string | undefined;
+  },
 ): Promise<Listening> {
   const server = createServer((incoming, outgoing) => {
     let request: Request;
@@ -105,10 +139,10 @@ export function listen(
       send(errorResponse('validation_failed'), outgoing).catch(() => outgoing.destroy());
       return;
     }
-    // The peer's address, for the identity routes' rate limits (#772). It is
-    // never logged (`log.ts`), and behind a proxy it is the proxy's — which is
-    // #775's to weigh, since a per-address limit there limits everyone at once.
-    handler(request, { address: incoming.socket.remoteAddress ?? null })
+    // The client's address, for the identity routes' rate limits (#772). It is
+    // never logged (`log.ts`); behind a proxy it is the proxy's unless the
+    // operator named the header that proxy writes (`clientAddress`).
+    handler(request, { address: clientAddress(incoming, clientAddressHeader) })
       .catch(() => errorResponse('internal'))
       .then((response) => send(response, outgoing))
       .catch(() => outgoing.destroy());

@@ -1301,7 +1301,9 @@ SH001_PATTERN="(^|[^|])\\${SH001_PIPE}[[:space:]]*grep[[:space:]]([^|]*[[:space:
 # second pass below reads a `grep -q` that OPENS a line whose last code line
 # before it ends in a single pipe -- blank and comment lines between are
 # skipped, as bash skips them. A pipe that opens the grep's own line, after a
-# backslash continuation, is the pattern above's.
+# backslash continuation, is the pattern above's; a pipe FOLLOWED by a
+# backslash continuation is this pass's too (#864), which drops the backslash
+# before it asks whether the line ends in a pipe.
 SH001_GREP_OPENS="^[[:space:]]*grep[[:space:]]([^|]*[[:space:]])?(-[a-zA-Z]*q|--quiet)"
 # A bracket, never a backslash: `awk -v` processes escapes in the value, and
 # `\|` came out as a bare `|` -- an alternation that matched every line.
@@ -1313,7 +1315,13 @@ sh001_trailing_pipes() {
   awk -v opens="${SH001_GREP_OPENS}" -v ends="${SH001_PIPE_ENDS}" '
     /^[[:space:]]*(#|$)/ { next }
     piped && $0 ~ opens { print NR ":" $0 }
-    { piped = ($0 ~ ends) }
+    {
+      # A backslash continuation after the pipe (#864) joins the next line
+      # just the same: `x=$(printf a |` then a backslash, then `grep -q a)`.
+      line = $0
+      sub(/[[:space:]]*\\[[:space:]]*$/, "", line)
+      piped = (line ~ ends)
+    }
   ' "$1"
 }
 
