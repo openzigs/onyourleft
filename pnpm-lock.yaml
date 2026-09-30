@@ -137,8 +137,8 @@ importers:
         specifier: 1.48.0
         version: 1.48.0(react@19.3.0)
       maplibre-gl:
-        specifier: 6.10.0
-        version: 6.10.0
+        specifier: 6.11.2
+        version: 6.11.2
       pmtiles:
         specifier: 4.5.0
         version: 4.5.0
@@ -177,8 +177,8 @@ importers:
         specifier: 6.2.5
         version: 6.2.5
       fit-file-parser:
-        specifier: 5.0.2
-        version: 5.0.2
+        specifier: 6.1.2
+        version: 6.1.2
       jsdom:
         specifier: 30.0.1
         version: 30.0.1
@@ -208,8 +208,8 @@ importers:
         version: link:../domain
     devDependencies:
       fit-file-parser:
-        specifier: 5.0.2
-        version: 5.0.2
+        specifier: 6.1.2
+        version: 6.1.2
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -1314,8 +1314,8 @@ packages:
     resolution: {integrity: sha512-78/PXT1wlLLDgTzDs7sjq9hzz0vXD+zn+7wypEe4fXQxCmdmqfGsEPQxmiCSQI3ajFV91bVSsvNtrJRiW6nGng==}
     engines: {node: '>=10'}
 
-  fit-file-parser@5.0.2:
-    resolution: {integrity: sha512-X30bjaoIV4huPxt2Z16zBhaOurn2xKNEGOyEsxHrQOvHZ+pLZUa0TBRJSsLFQtZzDOOc/xM+mIhdfPw1tds80w==}
+  fit-file-parser@6.1.2:
+    resolution: {integrity: sha512-HFPRiFvXyvrU9ujEr5IEIJtvC+Mi0db9JR/zYA0tcBq7+AjgFkPZ58oScU+9Q9k8vMOjOwGQiA8DMpJuGzg79g==}
 
   flat-cache@6.1.23:
     resolution: {integrity: sha512-f++BY9pTk+983xK1FLzlLpmM0i0z+jHmx3QESGkURMXujQZz1k5wzwX6hjnQ8goaD0B+sYnDK1yZ6MTyZfUaqA==}
@@ -1608,8 +1608,8 @@ packages:
     resolution: {integrity: sha512-hXdUTZYIVOt1Ex//jAQi+wTZZpUpwBj/0QsOzqegb3rGMMeJiSEu5xLHnYfBrRV4RH2+OCSOO95Is/7x1WJ4bw==}
     engines: {node: '>=10'}
 
-  maplibre-gl@6.10.0:
-    resolution: {integrity: sha512-pZIJ1/rsB1jDjT3eBTfMaeSY45lRKdCuZtqXqTnkUrn0UJO9IwtbywT5ym3/cz57MGEELwAwQSYjB/Fj9TlktQ==}
+  maplibre-gl@6.11.2:
+    resolution: {integrity: sha512-Xh06pxoipjX/Ad1sUPGhiNh9go9naCNGZZ1IJm3sIeqK1kYGuMaMDSTIGDQ2igOLfVyukJU7kvEOA089VO7Z7g==}
     engines: {node: '>=16.14.0', npm: '>=8.1.0'}
 
   mdn-data@2.27.1:
@@ -3201,7 +3201,7 @@ snapshots:
       locate-path: 6.0.0
       path-exists: 4.0.0
 
-  fit-file-parser@5.0.2:
+  fit-file-parser@6.1.2:
     dependencies:
       buffer: 6.0.3
 
@@ -3469,7 +3469,7 @@ snapshots:
     dependencies:
       semver: 7.8.5
 
-  maplibre-gl@6.10.0:
+  maplibre-gl@6.11.2:
     dependencies:
       '@mapbox/point-geometry': 1.1.0
       '@mapbox/tiny-sdf': 2.2.0

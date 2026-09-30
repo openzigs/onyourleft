@@ -18,7 +18,7 @@
  * block of this repository or its lockfile** (R1, R4).
  *
  * ⚠️ That sentence **used to name `fit-file-parser` as well**. Since #31 it is
- * a devDependency of this package — MIT, pinned at 5.0.2, imported from one
+ * a devDependency of this package — MIT, pinned at 6.1.2, imported from one
  * test file and never from `src/` — adopted under #31's revision block, which
  * struck "validate with the SDK's own checker" under R1. Not a number in this
  * file came from it: it exists to read this package's output and *disagree*.

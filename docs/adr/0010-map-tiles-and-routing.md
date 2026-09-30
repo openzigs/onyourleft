@@ -743,3 +743,13 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   and the licence table's read date is 2026-09-22. The dated read at `v6.7.0` in the *Options
   considered* table above is a **record of what was read on 2026-09-02** and is correct as such.
   ([#489](https://github.com/openzigs/onyourleft/issues/489))
+- **2026-09-30** — D-1's client library has moved another minor version: **MapLibre GL JS is
+  `6.11.2`**, taken from [Dependabot #756](https://github.com/openzigs/onyourleft/pull/756) with
+  §4f's browser gate re-run against it (the map spec 21 of 21 green, its opt-in hosted block
+  included). The decision is unaffected: its `LICENSE.txt` is byte-identical to 6.10.0's, still
+  BSD-3-Clause, and its dependencies are the same, so the closure did not move. The figures that
+  moved are corrected in [`docs/architecture.md`](../architecture.md) §"The map dependencies": the
+  lazy map chunk is **1 036 kB minified** at 6.11.2 against 1 031 kB at 6.10.0 built from the same
+  tree. The 1 006 kB in the entry above was right for #489's tree; the chunk carries this app's own
+  map code as well as MapLibre's and has grown with it since, so that figure describes neither
+  build today. The licence table's read date is 2026-09-30. ([#756](https://github.com/openzigs/onyourleft/pull/756))

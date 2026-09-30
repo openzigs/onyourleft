@@ -176,11 +176,13 @@ const renderer: MapRenderer = {
      * drawing buffer. `harness.ts` §`MapLoadResult.trackPainted` does now, and
      * applying the line once the style has loaded is what turns it green.
      *
-     * ⚠️ **`style.load`, not `load`.** In MapLibre 6.10.0 `load` fires only
-     * once every visible tile has loaded or failed, so waiting on it would hold
-     * the rider's own line hostage to the tile host — indefinitely on a hung
-     * request, since the PMTiles protocol sets no timeout. The track source is
-     * part of the style, so `getSource` answers as soon as `style.load` fires.
+     * ⚠️ **`style.load`, not `load`.** In MapLibre 6.10.0 — and in 6.11.2,
+     * whose `Map.loaded()` and tile-manager `loaded()` are unchanged (#756) —
+     * `load` fires only once every visible tile has loaded or failed, so
+     * waiting on it would hold the rider's own line hostage to the tile host
+     * — indefinitely on a hung request, since the PMTiles protocol sets no
+     * timeout. The track source is part of the style, so `getSource` answers
+     * as soon as `style.load` fires.
      * `undefined` here means nothing is waiting, which is different from a
      * track of `undefined` waiting to clear the line — hence the wrapper.
      */
