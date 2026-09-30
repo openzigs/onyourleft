@@ -553,7 +553,13 @@ in one chunk per group (Ride, History, Routes, More), one module each under `src
 loaded with a literal `import()` through `src/shell/lazy-view.tsx`. While a group arrives, `main`
 holds a one-line loading status under the route's own `h1`, so the focus the shell puts on `main`
 survives the view replacing it; a chunk that cannot be fetched says so with a Reload control, which
-is also ADR 0027's left-behind tab. `main.tsx` preloads every group once Home is idle, and a group
+is also ADR 0027's left-behind tab. ⚠️ **Since [#871](https://github.com/openzigs/onyourleft/issues/871)
+a later visit asks again**, and a reader who remembers #674's text claiming that is reading a claim
+that was false when it was written: React's `lazy` remembers a rejection for good, so a view that
+failed once showed the failure on every visit until Reload. `lazyView` now replaces a failed view's
+wrapper once the boundary has put the failure on screen (`componentDidCatch`) — never inside the
+rejection, where React's own retry of the errored render would import again and loop while the
+network is off. `main.tsx` preloads every group once Home is idle, and a group
 already in memory renders without suspending, because React holds a fallback on screen for about
 300 ms once it has shown one. The precache needs no edit: it is derived from the build (#406).
 `apps/web/tools/bundle/entry-graph.ts` fails `pnpm run build` if any view a group module names is in
