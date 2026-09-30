@@ -72,12 +72,20 @@ export type EmbedFailure =
   | 'too-long'
   /**
    * The server answered, about ITSELF rather than the input: a 404 (Ollama's
-   * answer for a model that has not been pulled), a 429, or any 5xx. Every
-   * item would fare the same, so a sweep stops on it as on `unreachable`
-   * (#928's review) — marking each item failed would hold every one back an
-   * hour on a fresh instance whose model is pulled a minute later.
+   * answer for a model that has not been pulled) or a 429. Every item would
+   * fare the same, so a sweep stops on it as on `unreachable` (#928's review)
+   * — marking each item failed would hold every one back an hour on a fresh
+   * instance whose model is pulled a minute later.
    */
   | 'unavailable'
+  /**
+   * Any 5xx. It may be about the server or about THIS input — Ollama answers
+   * 500 `json: unsupported value: NaN` for a text its model makes a NaN of
+   * (ollama/ollama#13572) — and the status cannot tell the two apart, so the
+   * sweep (`history.ts` §`catchUp`) asks about the next item to find out
+   * (#928's second review).
+   */
+  | 'server-error'
   /** Any other refusal: a 4xx about this input. */
   | 'refused'
   /** An answer that is not one vector per input, all of one finite, non-zero dimension. */
@@ -96,11 +104,11 @@ export interface Embedder {
 
 /**
  * Whether a refusal is about the server rather than the input: 404 (a model
- * not pulled, or no such endpoint), 429 (too busy) or any 5xx. Every other 4xx
- * is about what was sent.
+ * not pulled, or no such endpoint) or 429 (too busy). A 5xx is neither for
+ * certain, and is `server-error`; every other 4xx is about what was sent.
  */
 function isAboutTheServer(status: number): boolean {
-  return status === 404 || status === 429 || status >= 500;
+  return status === 404 || status === 429;
 }
 
 /** The convention string a row records for a pair of prefixes. Stable: it is compared. */
@@ -168,6 +176,7 @@ export function createOllamaEmbedder(options: OllamaEmbedderOptions): Embedder {
       if (!response.ok && isAboutTheServer(response.status)) {
         return { ok: false, why: 'unavailable' };
       }
+      if (response.status >= 500) return { ok: false, why: 'server-error' };
       let body: unknown;
       try {
         body = await response.json();

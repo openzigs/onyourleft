@@ -218,7 +218,7 @@ describe('keeping the index (ADR 0040 D-1, D-4, D-7)', () => {
     expect(embedder.calls.filter((call) => call.purpose === 'document')).toStrictEqual([]);
   });
 
-  it.each<EmbedFailure>(['unreachable', 'not-local', 'unresolved', 'unavailable'])(
+  it.each<EmbedFailure>(['unreachable', 'not-local', 'unresolved', 'unavailable', 'server-error'])(
     'stops a catch-up when the model cannot be asked (%s), and says so',
     async (failure) => {
       const embedder = scriptedEmbedder();
@@ -269,6 +269,75 @@ describe('keeping the index (ADR 0040 D-1, D-4, D-7)', () => {
       ).toStrictEqual([]);
     },
   );
+
+  it('marks the one item the model answers 500 for, and indexes every other athlete’s after it — #928', async () => {
+    const embedder = scriptedEmbedder();
+    const made = await syncWorld(2, { embedder });
+    world = made.world;
+    const [anna, ben] = made.riders as [Rider, Rider];
+    // Ollama's 500 for a text its model makes a NaN of (ollama/ollama#13572).
+    embedder.failFor = (text) => (text.includes('nan') ? 'server-error' : undefined);
+    embedder.failWith = 'unreachable';
+    // The NaN item is the OLDEST on the instance, so it heads every sweep.
+    await put(anna, 'note', 'n1', { text: 'A nan note.' });
+    await put(anna, 'note', 'n2', { text: 'Threshold intervals went well.' });
+    await put(ben, 'goal', 'g1', { text: 'Threshold by spring.' });
+    await world.history.idle();
+    embedder.failWith = undefined;
+    expect(await world.history.catchUp()).toEqual({ indexed: 3, failed: 1, stopped: null });
+    expect((await search(anna, ask('threshold'))).body.passages).toHaveLength(1);
+    expect((await search(ben, ask('threshold'))).body.passages).toHaveLength(1);
+    // Marked, so the next sweep does not stop on it again inside its hour.
+    expect(await world.history.catchUp()).toEqual({ indexed: 0, failed: 0, stopped: null });
+  });
+
+  it('marks nothing when the model answers 500 for every item — #928', async () => {
+    const embedder = scriptedEmbedder();
+    const made = await syncWorld(1, { embedder });
+    world = made.world;
+    const [anna] = made.riders as [Rider];
+    embedder.failWith = 'server-error';
+    await put(anna, 'note', 'n1', { text: 'x' });
+    await put(anna, 'note', 'n2', { text: 'y' });
+    await put(anna, 'note', 'n3', { text: 'z' });
+    await world.history.idle();
+    const before = embedder.calls.length;
+    expect(await world.history.catchUp()).toEqual({
+      indexed: 0,
+      failed: 0,
+      stopped: 'server-error',
+    });
+    // Two items asked about, and then it stopped: the server is at fault.
+    expect(embedder.calls.length - before).toBe(2);
+    expect(
+      await world.freshRead((store) =>
+        store.listPendingHistorySources(['note'], embedder.model, embedder.convention, 10),
+      ),
+    ).toHaveLength(3);
+    // The model recovers: all three are indexed, none was held back an hour.
+    embedder.failWith = undefined;
+    expect(await world.history.catchUp()).toEqual({ indexed: 3, failed: 0, stopped: null });
+  });
+
+  it('leaves a lone item the model answers 500 for unmarked, with nothing else to ask about — #928', async () => {
+    const embedder = scriptedEmbedder();
+    const made = await syncWorld(1, { embedder });
+    world = made.world;
+    const [anna] = made.riders as [Rider];
+    embedder.failFor = (text) => (text.includes('nan') ? 'server-error' : undefined);
+    await put(anna, 'note', 'n1', { text: 'A nan note.' });
+    await world.history.idle();
+    expect(await world.history.catchUp()).toEqual({
+      indexed: 0,
+      failed: 0,
+      stopped: 'server-error',
+    });
+    expect(
+      await world.freshRead((store) =>
+        store.listPendingHistorySources(['note'], embedder.model, embedder.convention, 10),
+      ),
+    ).toHaveLength(1);
+  });
 
   it('tries a marked item again once its hour is up, and not before — #918 item 2', async () => {
     const embedder = scriptedEmbedder();

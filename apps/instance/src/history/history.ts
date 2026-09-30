@@ -28,6 +28,12 @@
  * again on every sweep, so one bad item stopped indexing for the whole
  * instance. A marked item is tried again {@link FAILED_RETRY_SECONDS} later.
  *
+ * ⚠️ **A 5xx is pinned on an item only when another item succeeds** (#928's
+ * second review). A 5xx may be about the server or about the input, so the
+ * item is held unmarked and the NEXT item is asked about: if the model
+ * answers that, the held item is marked `failed`; if not, the sweep stops
+ * with neither marked, as it does for an unreachable model.
+ *
  * ## Asking it (D-2, D-3, D-8)
  *
  * {@link History.search} ranks the CALLER's passages — the athlete is the
@@ -291,56 +297,90 @@ export function createHistory(options: HistoryOptions): History {
       indexed += 1;
       if (outcome === 'failed') failed += 1;
     };
+    // One item's passages, embedded: its vectors, an outcome about THIS item
+    // to mark it with, or a reason to stop the sweep.
+    const embedAll = async (
+      passages: readonly string[],
+    ): Promise<
+      | { readonly kind: 'vectors'; readonly vectors: readonly Float32Array[] }
+      | { readonly kind: 'mark'; readonly outcome: 'too-long' | 'failed' }
+      | { readonly kind: 'stop'; readonly why: EmbedFailure }
+    > => {
+      const vectors: Float32Array[] = [];
+      for (let at = 0; at < passages.length; at += EMBEDDING_BATCH) {
+        const answer = await embedder.embed(passages.slice(at, at + EMBEDDING_BATCH), 'document');
+        if (answer.ok) {
+          vectors.push(...answer.vectors);
+          continue;
+        }
+        // An answer about THIS item — the model was reached, and said no, or
+        // answered wrongly: mark it and go on (#918).
+        if (answer.why === 'too-long') return { kind: 'mark', outcome: 'too-long' };
+        if (answer.why === 'refused' || answer.why === 'malformed') {
+          return { kind: 'mark', outcome: 'failed' };
+        }
+        // No answer at all, an address that may not be asked, a server that
+        // answered about itself, or a 5xx that may be either.
+        return { kind: 'stop', why: answer.why };
+      }
+      if (vectors.some((vector) => vector.length !== vectors[0]?.length)) {
+        return { kind: 'mark', outcome: 'failed' };
+      }
+      return { kind: 'vectors', vectors };
+    };
+    // ⚠️ An item a 5xx was answered for, held UNMARKED while the next item is
+    // asked about (#928's second review). A 5xx may be the server's or this
+    // input's — Ollama answers 500 for a text its model makes a NaN of — and
+    // the pending list is instance-wide and oldest first, so stopping on it
+    // would stop every athlete's indexing behind that one item for ever. If
+    // the model then answers about another item, the 5xx was this item's: it
+    // is marked `failed` (tried again in an hour, as a refusal is) and the
+    // sweep goes on. If it does not, the sweep stops with neither marked.
+    type Pending = Awaited<ReturnType<typeof store.listPendingHistorySources>>[number];
+    let held: Pending | undefined;
+    const isHeld = (source: Pending): boolean =>
+      held !== undefined &&
+      source.athleteId === held.athleteId &&
+      source.kind === held.kind &&
+      source.key === held.key;
     // Bounded, so a store that kept answering the same page could not spin for ever.
     for (let round = 0; round < 100_000; round += 1) {
-      const pending = await store.listPendingHistorySources(
-        INDEXED_KINDS,
-        embedder.model,
-        embedder.convention,
-        SWEEP_PAGE,
-        Math.floor(now() / 1000) - FAILED_RETRY_SECONDS,
-      );
-      if (pending.length === 0) return { indexed, failed, stopped: null };
+      const pending = (
+        await store.listPendingHistorySources(
+          INDEXED_KINDS,
+          embedder.model,
+          embedder.convention,
+          SWEEP_PAGE,
+          Math.floor(now() / 1000) - FAILED_RETRY_SECONDS,
+        )
+      ).filter((source) => !isHeld(source));
+      // Nothing else to ask about: a held item stays unmarked, and waits.
+      if (pending.length === 0) {
+        return { indexed, failed, stopped: held === undefined ? null : 'server-error' };
+      }
       for (const source of pending) {
         const cut = cutSource(source.kind, source.body);
         if (cut.kind !== 'passages') {
           await write(source, cut.kind, []);
           continue;
         }
-        const vectors: Float32Array[] = [];
-        let gaveUp: 'too-long' | 'failed' | undefined;
-        for (let at = 0; at < cut.passages.length; at += EMBEDDING_BATCH) {
-          const answer = await embedder.embed(
-            cut.passages.slice(at, at + EMBEDDING_BATCH),
-            'document',
-          );
-          if (answer.ok) {
-            vectors.push(...answer.vectors);
+        const result = await embedAll(cut.passages);
+        if (result.kind === 'stop') {
+          if (result.why === 'server-error' && held === undefined) {
+            held = source;
             continue;
           }
-          // An answer about THIS item — the model was reached, and said no,
-          // or answered wrongly: mark it and go on (#918).
-          if (answer.why === 'too-long') {
-            gaveUp = 'too-long';
-            break;
-          }
-          if (answer.why === 'refused' || answer.why === 'malformed') {
-            gaveUp = 'failed';
-            break;
-          }
-          // No answer at all, an address that may not be asked, or a server
-          // that answered about itself (a model not pulled, a 5xx): every item
-          // after this one would fare the same. Stop, and let them wait (D-6).
-          return { indexed, failed, stopped: answer.why };
+          // Every item after this one would fare the same. Stop, and let them
+          // wait (D-6) — a held item with them, unmarked.
+          return { indexed, failed, stopped: result.why };
         }
-        if (
-          gaveUp === undefined &&
-          vectors.some((vector) => vector.length !== vectors[0]?.length)
-        ) {
-          gaveUp = 'failed';
+        // The model answered about this item, so a held 5xx was the held item's.
+        if (held !== undefined) {
+          await write(held, 'failed', []);
+          held = undefined;
         }
-        if (gaveUp !== undefined) {
-          await write(source, gaveUp, []);
+        if (result.kind === 'mark') {
+          await write(source, result.outcome, []);
           continue;
         }
         await write(
@@ -349,7 +389,7 @@ export function createHistory(options: HistoryOptions): History {
           cut.passages.map((text, ordinal) => ({
             ordinal,
             text,
-            vector: vectors[ordinal] ?? new Float32Array(),
+            vector: result.vectors[ordinal] ?? new Float32Array(),
           })),
         );
       }
