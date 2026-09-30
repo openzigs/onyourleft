@@ -84,10 +84,12 @@ describe('one frame of a room ride — #782, #783', () => {
       0,
     );
     expect(sim.correcting).toBe(false);
-    // 40 m in the second since the frame before, at the room's 12 m/s, is
-    // explainable (#922): 8 m + 12 m/s × (1 s + the 2 s correction).
+    // 12 m in the second since the frame before is explainable (#922): the
+    // local rider is standing, so the room's 12 m/s is believed only to 2 m/s
+    // (#928's review, `correction.ts` §`admittedRoomSpeed`), and
+    // 8 m + 2 m/s × (1 s + the 2 s correction) is 14 m.
     roomFrame(
-      connection([], { rider: { ...rider(0, 40), speedMetresPerSecond: 12 }, atLocalMs: 1_000 }),
+      connection([], { rider: { ...rider(0, 12), speedMetresPerSecond: 12 }, atLocalMs: 1_000 }),
       memory,
       sim,
       1_000,
@@ -129,9 +131,10 @@ describe('one frame of a room ride — #782, #783', () => {
       1_000,
     );
     expect(sim.correcting).toBe(false);
-    // The control: the same frame 40 m out is acted on.
+    // The control: the same frame 12 m out is acted on — 14 m is what a
+    // standing rider and a room's word of 12 m/s explain in a second.
     roomFrame(
-      connection([], { rider: { ...rider(0, 40), speedMetresPerSecond: 12 }, atLocalMs: 2_000 }),
+      connection([], { rider: { ...rider(0, 12), speedMetresPerSecond: 12 }, atLocalMs: 2_000 }),
       memory,
       sim,
       2_000,

@@ -1277,7 +1277,6 @@ describe('a room’s correction reaches the trainer gently — #782', () => {
     await flushRoom();
     room.accept();
     room.welcome(0);
-    const welcomedAt = nowMs;
     // A minute and a half up the 4 % climb, the trainer on the road's own grade.
     await pumpWith(clock, 180);
     const before = writes.length;
@@ -1295,8 +1294,6 @@ describe('a room’s correction reaches the trainer gently — #782', () => {
     // explains it, account for since the ride began (`correction.ts`
     // §`explainableMetres`, §`admittedRoomSpeed`) — which, ninety seconds in,
     // is more than this.
-    // The frame is the room's word for NOW (a tick a second since the welcome),
-    // so it is not carried forward on top.
     room.frame(1, [frameRider(0, 1_250, 8)]);
     await pumpWith(clock, 16);
     // …and on after the correction has finished, until the trainer is on the
