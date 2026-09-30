@@ -17,7 +17,8 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { TEST_ORIGIN, testDevice } from './auth/identity-testing.ts';
-import { startInstance, type StartedInstance } from './instance.ts';
+import { startInstance, type InstanceOptions, type StartedInstance } from './instance.ts';
+import type { SweepTimers } from './node-listener.ts';
 import { testConfig } from './instance-testing.ts';
 import { joinRoom, type RoomClient } from './room/node/router-testing.ts';
 import { until } from './room/node/node-room-testing.ts';
@@ -55,9 +56,14 @@ function serverConfig(databasePath: string, overrides: Partial<ServerConfig> = {
   return { ...read.config, blobsPath: join(databasePath, '..', 'blobs'), ...overrides };
 }
 
-async function start(databasePath: string, overrides: Partial<ServerConfig> = {}) {
+async function start(
+  databasePath: string,
+  overrides: Partial<ServerConfig> = {},
+  timing: Pick<InstanceOptions, 'now' | 'sweepTimers'> = {},
+) {
   const lines: string[] = [];
   running = await startInstance({
+    ...timing,
     config: testConfig({ bodyLimitBytes: 16_384, registration: 'open' }),
     server: serverConfig(databasePath, overrides),
     version: '9.8.7',
@@ -69,7 +75,11 @@ async function start(databasePath: string, overrides: Partial<ServerConfig> = {}
 }
 
 /** A rider signed in over HTTP: challenge, sign with a device key, session. */
-async function signIn(url: string, displayName: string) {
+async function signIn(
+  url: string,
+  displayName: string,
+  issuedAt: number = Math.floor(Date.now() / 1000),
+) {
   const device = await testDevice();
   const challenge = (await (
     await fetch(`${url}/v1/auth/challenge`, {
@@ -83,7 +93,7 @@ async function signIn(url: string, displayName: string) {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        ...(await device.statement(challenge.nonce, { issuedAt: Math.floor(Date.now() / 1000) })),
+        ...(await device.statement(challenge.nonce, { issuedAt })),
         displayName,
       }),
     })
@@ -113,6 +123,63 @@ function cli(databasePath: string, ...args: string[]) {
 function wsUrl(url: string): string {
   return url.replace('http://', 'ws://');
 }
+
+describe('the running instance forgets every rate-limited address when its window ends — #892', () => {
+  // The privacy policy: the project's instance holds an internet address "in
+  // memory only, for at most an hour". Until the merge with #895 nothing built
+  // an identity on a running instance, so nothing ran the sweep; now
+  // `startInstance` builds one, and must run it.
+  it('sweeps on every minute boundary once the store is open, with no further request, and stops on stop', async () => {
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    // A pinned epoch, as `identity-testing.ts` pins one: 13 min 20 s into an
+    // hour and 20 s into a minute, so the next minute boundary is never the
+    // hour's. Seeded from `Date.now()` it failed in the last minute of every
+    // hour (#892's merge review).
+    const clock = { ms: 1_790_000_000_000 };
+    const pending: { at: number; run: () => void }[] = [];
+    let cleared = 0;
+    const timers: SweepTimers = {
+      now: () => clock.ms,
+      setTimeout: (run, delayMs) => {
+        const entry = { at: clock.ms + delayMs, run };
+        pending.push(entry);
+        return entry;
+      },
+      clearTimeout: (handle) => {
+        const at = pending.indexOf(handle as { at: number; run: () => void });
+        if (at >= 0) pending.splice(at, 1);
+        cleared += 1;
+      },
+    };
+    const { instance } = await start(path, {}, { now: () => clock.ms, sweepTimers: timers });
+    await instance.opened;
+    await signIn(instance.url, 'Ann Rider', Math.floor(clock.ms / 1000));
+    const held = instance.heldRateLimitKeys();
+    expect(held).toBeGreaterThan(1);
+    // The minute's limits end on the next minute boundary…
+    expect(pending).toHaveLength(1);
+    const minute = pending.shift()!;
+    expect(minute.at % 60_000).toBe(0);
+    clock.ms = minute.at;
+    minute.run();
+    const afterMinute = instance.heldRateLimitKeys();
+    expect(afterMinute).toBeLessThan(held);
+    // …and the hour's — the registration counted against the address — on
+    // the hour, which is the policy's bound.
+    expect(afterMinute).toBeGreaterThan(0);
+    expect(pending).toHaveLength(1);
+    const next = pending.shift()!;
+    clock.ms = Math.ceil(next.at / 3_600_000) * 3_600_000;
+    next.run();
+    expect(instance.heldRateLimitKeys()).toBe(0);
+    expect(pending).toHaveLength(1);
+    await instance.stop();
+    running = undefined;
+    expect(cleared).toBe(1);
+    expect(pending).toHaveLength(0);
+  }, 30_000);
+});
 
 describe('the entry point opens the store — #780 (from #861: every identity route answered 503)', () => {
   it('signs a rider in, mints a ticket over HTTP, and a room worker admits it once — the second time closes 4003', async () => {

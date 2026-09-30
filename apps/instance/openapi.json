@@ -65,6 +65,51 @@
         }
       }
     },
+    "/instance": {
+      "get": {
+        "operationId": "getInstance",
+        "summary": "What the operator calls this instance, or null — the name a rider’s app shows once connected (#777).",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          }
+        }
+      }
+    },
     "/licences/third-party.txt": {
       "get": {
         "operationId": "getThirdPartyNotices",

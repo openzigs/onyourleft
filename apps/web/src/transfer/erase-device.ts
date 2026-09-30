@@ -195,6 +195,11 @@ export const ERASE_CANNOT_REACH: readonly string[] = [
   // `erase-device.test.ts` holds the two texts together.
   'a ride’s numbers you sent to your own computer for a write-up, which is a copy that computer holds',
   'a photograph you copied off this device yourself, which is wherever you copied it to',
+  // #777, #778. An erase forgets this device's sign-in to an instance
+  // (`instance/instance-port.ts` §`instanceEraser`) and sends nothing; the
+  // account the instance holds, and anything it received, are the instance's.
+  // ⚠️ Draft wording awaiting the owner's approval (#880).
+  'your account on an instance you connected to, and anything it received, which is a copy that instance holds',
 ];
 
 /** The reason an erase is refused, or `undefined` when it is not. */
@@ -319,6 +324,8 @@ export async function eraseDevice(
     readonly theme?: EraseSideStores | undefined;
     /** The hosted model and its key (#518) — `camera/hosted-model.ts` §`hostedModelEraser`. */
     readonly hostedModel?: EraseSideStores | undefined;
+    /** This device's sign-in to an instance (#777) — `instance/instance-port.ts` §`instanceEraser`. */
+    readonly instance?: EraseSideStores | undefined;
     readonly athlete?: AthleteRecord | undefined;
   } = {},
 ): Promise<EraseOutcome> {
@@ -326,6 +333,7 @@ export async function eraseDevice(
   options.drafts?.forget();
   options.theme?.forget();
   options.hostedModel?.forget();
+  options.instance?.forget();
   if (options.athlete !== undefined) {
     await store.ensureAthlete(options.athlete);
   }

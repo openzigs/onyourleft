@@ -1257,7 +1257,7 @@ That is why D-9 puts the rule at capture and why the check on it is a refusal ra
 in this repository as `apps/instance`; [ADR 0037](adr/0037-instance-runtime-hosting-and-transport.md)
 decided how it is built. [#767](https://github.com/openzigs/onyourleft/issues/767) scaffolded it and
 [#36](https://github.com/openzigs/onyourleft/issues/36) gave it an API contract and an error model.
-**What it does today is small on purpose**: four metadata routes, and — since #855 (#772, #773,
+**What it does today is small on purpose**: five metadata routes, and — since #855 (#772, #773,
 #774) — the identity routes under `/v1/auth/`, which a handler serves only when it is HANDED an
 identity service over a store. ⚠️ **Since #780 the Node entry point opens the store and serves
 rooms**, and a reviewer who remembers "a running instance still answers the metadata alone" is
@@ -1300,6 +1300,24 @@ flowchart LR
 names nothing from Node, so the Node listener that fronts it today and the Durable Object adapter
 (#781) mount the same code (ADR 0037 D-2). Every rule — the body limit, routing, the error shape,
 the log — is the handler's, so two adapters cannot disagree about any of them.
+
+**Any origin may read an answer, and none may send a credential (#777).** A rider's app is
+never on the instance's origin — a browser tab, the Android shell's `https://localhost`, a
+developer's `http://localhost` — so without CORS a browser would refuse to hand the app any answer.
+Every response carries `Access-Control-Allow-Origin: *`, and an `OPTIONS` preflight to a path the
+route table serves answers `204` with that route's own methods (anything else is the usual
+`not_found`). `*` is safe here and only here because the instance reads **no cookie**: a session is
+a bearer token in `Authorization`, and `Access-Control-Allow-Credentials` is never sent, so a page
+the rider happens to visit cannot act as them. ⚠️ Two things follow for the deployment (#807), not
+for this code: behind a Cloudflare Tunnel every client arrives as cloudflared's loopback, so the
+per-address rate limits in `auth/identity.ts` become one shared bucket until the listener reads
+`CF-Connecting-IP`; and a public page calling an instance on `http://localhost` may, in Chrome,
+also need `Access-Control-Allow-Private-Network` on the preflight.
+
+**`GET /instance` answers the operator's name for it** — `OYL_INSTANCE_NAME` (`.env.example`),
+refused at start-up if it holds a control, bidirectional or invisible character, or `null` when it
+is unset. The instance never makes one up: the Connect screen says "This instance has no name"
+instead.
 
 **The Durable Object adapter mounts the room core, not the handler — so far.**
 [#781](https://github.com/openzigs/onyourleft/issues/781) built it: one object per room, every
@@ -1454,8 +1472,8 @@ sends nothing.
 | Pagination | **Keyset, never offset**: a list is ordered by (sort key, id) and a page is the next `limit` rows after an opaque cursor. Every row present when a listing begins is returned exactly once however many are inserted between pages; an offset control in the test shows the failure it prevents. `limit` defaults to 50 and is at most 200 | `src/pagination.ts` |
 
 **Versioning.** The identity routes live under `/v1/` (#772's diagram named `/auth/…`; these are
-those paths, versioned). The four metadata routes — `/health`, `/source`, `/openapi.json`,
-`/licences/third-party.txt` — are unversioned and only ever gain fields. The API a client syncs
+those paths, versioned). The five metadata routes — `/health`, `/source`, `/openapi.json`,
+`/licences/third-party.txt` and `/instance` (#777) — are unversioned and only ever gain fields. The API a client syncs
 through lives under `/v1/` from its first route (#776). **A breaking change is `/v2/` served beside
 `/v1/`, never an edit to `/v1/`**, because anyone can run an instance and a third party implements
 against this contract (#36's revision block): a change that would break a stranger's client is

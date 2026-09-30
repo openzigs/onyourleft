@@ -77,6 +77,9 @@ export const REGISTRATION_MODES: readonly RegistrationMode[] = [
 /** The mode an instance registers in when the operator sets none: nobody new (#891's merge review). */
 export const DEFAULT_REGISTRATION: RegistrationMode = 'closed';
 
+/** The longest name an operator may give their instance, in characters. */
+export const MAXIMUM_INSTANCE_NAME_LENGTH = 64;
+
 /** The raw values, as the environment gives them. */
 export interface RawConfig {
   readonly host?: string | undefined;
@@ -90,6 +93,7 @@ export interface RawConfig {
   readonly publicRoomMinRides?: string | undefined;
   readonly clientAddressHeader?: string | undefined;
   readonly trustedProxies?: string | undefined;
+  readonly name?: string | undefined;
 }
 
 /** A configuration the instance can start with. */
@@ -112,6 +116,13 @@ export interface Config {
    * `client-address.ts` §`normalisedAddress` writes it. Empty: loopback only.
    */
   readonly trustedProxies: readonly string[];
+  /**
+   * What the operator calls this instance, which a rider's app shows once it
+   * is connected (#777) — or `null`, and the app then names the instance by
+   * its address. Never invented here: a default name would be a name no
+   * operator chose.
+   */
+  readonly name: string | null;
 }
 
 export type ConfigResult =
@@ -121,6 +132,9 @@ export type ConfigResult =
 const COMMIT = /^[0-9a-f]{40}$/;
 const DEVICE_KEY = /^[0-9a-f]{64}$/;
 const HEADER = /^[a-z0-9-]{1,64}$/;
+
+/** A character a rider's screen should never be handed in a name. */
+const UNSHOWABLE = /[\p{Cc}\p{Cf}\u2028\u2029]/u;
 
 const present = (value: string | undefined): value is string =>
   value !== undefined && value.trim() !== '';
@@ -244,6 +258,21 @@ export function readConfig(raw: RawConfig): ConfigResult {
     }
   }
 
+  let instanceName: string | null = null;
+  if (present(raw.name)) {
+    const value = raw.name.trim();
+    // Shown to riders, so no control, bidirectional or invisible character —
+    // the rule a display name has (`@onyourleft/domain` §`checkDisplayName`),
+    // applied to the one other name the app renders from an instance.
+    if ([...value].length > MAXIMUM_INSTANCE_NAME_LENGTH || UNSHOWABLE.test(value)) {
+      problems.push(
+        `OYL_INSTANCE_NAME must be at most ${String(MAXIMUM_INSTANCE_NAME_LENGTH)} characters, with no control, bidirectional or invisible character.`,
+      );
+    } else {
+      instanceName = value;
+    }
+  }
+
   if (problems.length > 0 || sourceUrl === undefined) {
     return { ok: false, problems };
   }
@@ -260,6 +289,7 @@ export function readConfig(raw: RawConfig): ConfigResult {
       publicRooms,
       clientAddressHeader,
       trustedProxies,
+      name: instanceName,
     },
   };
 }
