@@ -1256,6 +1256,34 @@ apps/                 AGPL-3.0-or-later, without exception
                         three's own tint by the instance colour out of every
                         realistic material; the stylised belt allocates no
                         instance colour at all
+    src/game/road-wear.ts, ground-blend.ts, foliage-light.ts
+                        the realistic world's surfaces (#870: #628, #627, #630)
+                        — where the road is worn and by how much (every colour
+                        term clamped to 0.04, solved from the 3.889 : 1 the
+                        road reads with the wear off, with 0.01 left for the
+                        wheel track's specular term, to keep 3.5 : 1 — ⚠️ the
+                        first cut solved 0.06 from a stale 3.97, whose worst
+                        case was 3.449, #879's review), which surface the
+                        ground is by verge, slope
+                        and tree line, and the far band's light and the
+                        foliage's breeze. ⚠️ **The breeze is VISUAL and reads
+                        no rider's wind** (#326), runs on the ride's clock, and
+                        grows the near-plane cull by its reach (`near-field.ts`
+                        §`nearPyramid`'s `grow`); the `?realistic&trees` load
+                        measures in still air (`foliageStillOf`)
+    src/game/gantry.ts, gantry-wording.ts, banner-atlas.ts
+                        the start and finish gantries (#679) — at the lines and
+                        nowhere else (`SceneFrame.lines` is empty away from
+                        one), every word in ONE module, lettered at load from
+                        the map's own `0-255.pbf`: no font, no binary and no
+                        ASSETS.toml row of their own. ⚠️ A distance on a
+                        board is `units/format.ts`', never typed. ⚠️ Every
+                        barrier piece stands on the DRAWN road at its own
+                        route distance (`PlacedStand.boxes`), never along the
+                        line's tangent, which on a 60 m circuit put one on the
+                        centre line (#879's review); a banner that cannot be
+                        lettered costs the banners, never the realistic world
+                        (`three-renderer.ts` §`bannersOf`)
     src/game/route-fixtures-testing.ts
                         routes built from arithmetic for the landform, the water
                         and the settlements to be asserted over — a hill, a
@@ -5233,6 +5261,11 @@ top of an issue **supersedes its body**.
 | Where the rider's creases are, and what proves the baked normal map has them | `rider_kit.py` §`CREASES`, `apps/web/src/game/realistic-textures.test.ts` §"the dressed rider — #623" |
 | Why two realistic trees or houses of one shape are not the same colour, how far the tint may move, and why a tree's levels cannot disagree about it | `apps/web/src/game/instance-tint.ts` §`FOLIAGE_TINT`, §`MASONRY_TINT`, `three-renderer.ts` §`withInstanceChannels`, `apps/web/browser/game-harness.ts` §`tintProbe`, [#621](https://github.com/openzigs/onyourleft/issues/621) |
 | Why the realistic structures are built from numbers and wear CC0 photographs, and why a house is two belts | `apps/web/src/game/realistic-assets.ts` §`REALISTIC_STRUCTURE_SURFACES`, `three-renderer.ts` §`RealisticStructureBelts`, [#475](https://github.com/openzigs/onyourleft/issues/475) |
+| Why the realistic road's wear cannot spend the gradient cue, and where a patch lies | `apps/web/src/game/road-wear.ts` §`MAXIMUM_WEAR_SHARE`, §`roadPatchUniforms`, [#628](https://github.com/openzigs/onyourleft/issues/628) |
+| Where the realistic ground turns to verge, rock and scree, and why no attribute was added for it | `apps/web/src/game/ground-blend.ts`, `three-renderer.ts` §`photographicGroundMaterial`, [#627](https://github.com/openzigs/onyourleft/issues/627) |
+| What the realistic water reflects, and what its glint can clip | `apps/web/src/game/three-renderer.ts` §`reflectingWaterFragment`, [#629](https://github.com/openzigs/onyourleft/issues/629) |
+| Why a far tree is lit by a crown sphere as well as its baked normals, and why the foliage's breeze is not the rider's wind | `apps/web/src/game/foliage-light.ts`, `three-renderer.ts` §`impostorMaterial`, [#630](https://github.com/openzigs/onyourleft/issues/630) |
+| Where the gantries stand, what they say, and where their lettering comes from | `apps/web/src/game/gantry.ts`, `gantry-wording.ts`, `banner-atlas.ts`, [#679](https://github.com/openzigs/onyourleft/issues/679) |
 | Why the water stays a shader in the realistic world, and what it reflects there | `apps/web/src/game/three-renderer.ts` §`WaterBelt.update`, `realistic-light.ts` §`reflectedSkyColour` |
 | What frame rate each rung of the quality ladder draws at, and why the top TWO are the display's own | `apps/web/src/game/quality.ts` §`QUALITY_LADDER` "The owner's rulings", [#476](https://github.com/openzigs/onyourleft/issues/476), [#482](https://github.com/openzigs/onyourleft/issues/482) |
 | What "frame rate given up" means when #245, #425 and #459 say scenery, detail and water go first | `apps/web/src/game/quality.ts` §`QUALITY_LADDER` "What frame rate given up means, precisely" |

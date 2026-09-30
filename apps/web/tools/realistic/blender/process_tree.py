@@ -9,7 +9,8 @@ Run by `process-assets.ts`, never by hand:
         [<maps|nomaps>]
 
 `impostor` also writes `<out>-impostor.png` beside the GLB (the `.glb` suffix
-swapped for `-impostor.png`). `all` treats every face as foliage, for a shrub
+swapped for `-impostor.png`), and since #630 `<out>-impostor-normals.png`, the
+same eight views' normals. `all` treats every face as foliage, for a shrub
 whose leaves are its whole shape; `auto` splits wood from foliage by material.
 `nomaps` exports the materials with no image at all -- #617's middle level of
 detail, which wears the near file's maps at runtime rather than carrying a
@@ -33,7 +34,9 @@ two runs keep the same cards.
    `fir_sapling_medium` holds three saplings, and each shipped variant is one
    of them. Stand it on the origin.
 2. Render eight orthographic views round the FULL scan onto one transparent
-   strip -- the far band's impostor. Before anything is thinned: the far band
+   strip -- the far band's impostor -- and (#630) the same eight views'
+   NORMALS onto a second strip, so the runtime can light the impostor by the
+   world's own sun rather than by this script's. Before anything is thinned: the far band
    is a picture, so it may as well be a picture of every leaf (spike 0005,
    "What these taught #430", 3).
 3. Split the geometry into WOOD and FOLIAGE. By material NAME first and blend
@@ -84,6 +87,10 @@ WANT_MAPS = len(args) < 8 or args[7] == "maps"
 if len(args) >= 8 and args[7] not in ("maps", "nomaps"):
     raise SystemExit(f"maps|nomaps expected, not {args[7]}")
 OUT_IMPOSTOR = OUT_GLB[: -len(".glb")] + "-impostor.png"
+OUT_IMPOSTOR_NORMALS = OUT_GLB[: -len(".glb")] + "-impostor-normals.png"
+# #630: samples a pixel for the normal pass. The pass is data, not light: a
+# few samples only anti-alias the silhouette and the leaf edges.
+NORMAL_SAMPLES = 8
 
 # The strip: eight views, each FRAME_W x FRAME_H. The far band starts where a
 # 9 m tree is about 250 px tall on the tablet, so 512 px frames are twice what
@@ -225,6 +232,76 @@ if WANT_IMPOSTOR:
     out.file_format = "PNG"
     out.save()
     bpy.data.images.remove(out)
+
+    # --- 2b. #630: the same eight views' NORMALS ------------------------------
+    # AFTER the colour strip, and every setting it changes is put back below,
+    # so the colour strip and everything after it are the bytes they were.
+    #
+    # The convention, which `three-renderer.ts` section impostorMaterial reads:
+    # the plant's OWN frame in three's axes -- x across, y up, z the model's
+    # front (Blender's -Y) -- which is Blender's world here, because the plant
+    # stands unrotated on the origin; encoded n * 0.5 + 0.5, no alpha (the
+    # colour strip's alpha is the silhouette), and the background 0.5 grey,
+    # the zero vector. Cycles' Normal pass, which respects the leaves' alpha:
+    # a pixel's normal is the first surface at least `pass_alpha_threshold`
+    # opaque.
+    view_layer = scene.view_layers[0]
+    view_layer.use_pass_normal = True
+    scene.use_nodes = True
+    tree = scene.node_tree
+    for node in list(tree.nodes):
+        tree.nodes.remove(node)
+    layers = tree.nodes.new("CompositorNodeRLayers")
+    separate = tree.nodes.new("CompositorNodeSeparateColor")
+    combine = tree.nodes.new("CompositorNodeCombineColor")
+    composite = tree.nodes.new("CompositorNodeComposite")
+    tree.links.new(layers.outputs["Normal"], separate.inputs["Image"])
+    # (x, y, z) in Blender to (x, z, -y) in three, each * 0.5 + 0.5.
+    for channel, source, sign in (("Red", "Red", 0.5), ("Green", "Blue", 0.5), ("Blue", "Green", -0.5)):
+        scale = tree.nodes.new("CompositorNodeMath")
+        scale.operation = "MULTIPLY_ADD"
+        scale.use_clamp = True
+        scale.inputs[1].default_value = sign
+        scale.inputs[2].default_value = 0.5
+        tree.links.new(separate.outputs[source], scale.inputs[0])
+        tree.links.new(scale.outputs[0], combine.inputs[channel])
+    tree.links.new(combine.outputs["Image"], composite.inputs["Image"])
+    samples = scene.cycles.samples
+    scene.cycles.samples = NORMAL_SAMPLES
+    scene.render.film_transparent = False
+    scene.render.image_settings.color_mode = "RGB"
+    scene.view_settings.view_transform = "Raw"
+    normals = np.zeros((FRAME_H, FRAME_W * IMPOSTOR_FRAMES, 3), dtype=np.float32)
+    for frame in range(IMPOSTOR_FRAMES):
+        angle = 2 * math.pi * frame / IMPOSTOR_FRAMES
+        camera.location = (math.sin(angle) * distance, -math.cos(angle) * distance, height / 2)
+        camera.rotation_euler = (math.pi / 2, 0, angle)
+        path = f"{OUT_IMPOSTOR_NORMALS}.frame{frame}.png"
+        scene.render.filepath = path
+        bpy.ops.render.render(write_still=True)
+        image = bpy.data.images.load(path)
+        image.colorspace_settings.name = "Non-Color"
+        pixels = np.array(image.pixels[:], dtype=np.float32).reshape(FRAME_H, FRAME_W, 4)
+        normals[:, frame * FRAME_W : (frame + 1) * FRAME_W, :] = pixels[:, :, :3]
+        bpy.data.images.remove(image)
+    out = bpy.data.images.new("impostor-normals", FRAME_W * IMPOSTOR_FRAMES, FRAME_H, alpha=False)
+    out.colorspace_settings.name = "Non-Color"
+    rgba = np.ones((FRAME_H, FRAME_W * IMPOSTOR_FRAMES, 4), dtype=np.float32)
+    rgba[:, :, :3] = normals
+    out.pixels.foreach_set(rgba.ravel())
+    out.filepath_raw = OUT_IMPOSTOR_NORMALS
+    out.file_format = "PNG"
+    out.save()
+    bpy.data.images.remove(out)
+    # Put back everything the colour strip was rendered with.
+    for node in list(tree.nodes):
+        tree.nodes.remove(node)
+    scene.use_nodes = False
+    view_layer.use_pass_normal = False
+    scene.cycles.samples = samples
+    scene.render.film_transparent = True
+    scene.render.image_settings.color_mode = "RGBA"
+    scene.view_settings.view_transform = "Standard"
     bpy.data.objects.remove(camera, do_unlink=True)
     bpy.data.objects.remove(sun_obj, do_unlink=True)
     report.update(

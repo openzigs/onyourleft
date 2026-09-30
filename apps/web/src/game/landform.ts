@@ -71,6 +71,7 @@
 
 import { distanceOnRoute, elevationAt, gradeAt, type RouteProfile } from '@onyourleft/domain';
 
+import { treeLineHeight } from './ground-blend';
 import { slotHash, uniformFrom } from './seeded';
 import { DRY, waterNearRoute, waterShaping, waterways, type WaterShaping } from './waterways';
 import {
@@ -313,6 +314,11 @@ export interface TerrainMesh {
    */
   readonly fieldCount: number;
   /**
+   * The tree line as a height in this corridor's frame — #627: where the
+   * realistic ground turns to scree. `ground-blend.ts` §`treeLineHeight`.
+   */
+  readonly treeLine: number;
+  /**
    * Which build lent {@link vertices}, {@link normals}, {@link colours} and
    * {@link fields} — #469. Absent on a mesh somebody owns outright (a copy, or
    * one built by hand in a test).
@@ -516,6 +522,7 @@ export function terrainCorridor(
     indicesPerBand: Math.max(0, rows - 1) * 2 * 6,
     fieldSpan: fieldSpanMetres(profile),
     fieldCount: Math.max(1, Math.round(profile.totalDistance / FIELD_SPAN_METRES)),
+    treeLine: treeLineHeight(origin),
     lease: terrainLease,
   };
 }

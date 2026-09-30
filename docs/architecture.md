@@ -1440,6 +1440,21 @@ world is whole and off by default: the buildings had no openings
 seam, plus a soak route with no lake and no wall
 ([#501](https://github.com/openzigs/onyourleft/issues/501)).
 
+**The world's surfaces since [#870](https://github.com/openzigs/onyourleft/issues/870)** (bundle R2
+of #615), and a reader who remembers the water reflecting only the HDRI's two bands is reading the
+old file. All of it is the realistic rungs' alone; the stylised world did not move.
+
+| What | Where | What holds it |
+|---|---|---|
+| The ground blended by verge, slope and tree line ([#627](https://github.com/openzigs/onyourleft/issues/627)) — two new CC0 surfaces, 512 px KTX2 | `game/ground-blend.ts`, `three-renderer.ts` §`photographicGroundMaterial` — from the `fields` attribute, the normal and the height the ground already had, sampled only where a share is above zero | `ground-blend.test.ts`; `game.browser.spec.ts` §"#627", with the rock blend off as the control |
+| The road worn: wheel tracks, patches by route distance, a dusty edge, worn paint ([#628](https://github.com/openzigs/onyourleft/issues/628)) — every colour term clamped to 0.04, solved from the 3.889 : 1 read with the wear off and a 0.01 allowance for the wheel track's specular term, to keep the gradient cue's 3.5 : 1 (worst case 3.519) | `game/road-wear.ts`, `three-renderer.ts` §`photographicRoadMaterial`; one float attribute, the across-position | `road-wear.test.ts`; `game.browser.spec.ts` §"#628", the wear off as the control |
+| The water reflecting the scene's own PMREM environment, by Schlick's Fresnel, with the sun's glint clamped to white ([#629](https://github.com/openzigs/onyourleft/issues/629)) | `three-renderer.ts` §`reflectingWaterFragment`, §`WaterBelt.setEnvironment` | `realistic-water.test.ts`; `game.browser.spec.ts` §"#629", Fresnel held as the control |
+| The far band relit by the world's sun from a baked normal strip and the crown's shape; every plant swaying on the ride's clock, a VISUAL breeze that does not read the rider's wind ([#630](https://github.com/openzigs/onyourleft/issues/630)) | `tools/realistic/blender/process_tree.py` step 2b; `game/foliage-light.ts`; `three-renderer.ts` §`impostorMaterial`, §`withFoliageSwayOf`; `near-field.ts` §`nearPyramid`'s `grow` | `foliage-light.test.ts`; `game.browser.spec.ts` §"#630", unlit and one-time controls |
+| Start and finish gantries, barriers and a "to go" board, lettered at load from the map's own glyph range in the rider's units ([#679](https://github.com/openzigs/onyourleft/issues/679)) | `game/gantry.ts`, `game/gantry-wording.ts` (every word), `game/banner-atlas.ts`, `three-renderer.ts` §`GantryBelt`; `SceneFrame.lines` | `gantry.test.ts` (every barrier corner against the drawn centreline on bending circuits and a hairpin, the tangent placement as the control), `banner-atlas.test.ts`, `GameView.test.tsx` §"#679"; `game.browser.spec.ts` §"#679", gantries off and mid-route as the controls |
+
+Every one of these ends with the owner's tablet measurement (validation 0002 Part AH), listed on
+[#733](https://github.com/openzigs/onyourleft/issues/733).
+
 **The buildings' shapes are `apps/web/src/game/buildings.ts` since
 [#500](https://github.com/openzigs/onyourleft/issues/500)**, and a reader who remembers a house as a
 brick block under a gable built in `three-renderer.ts` is reading the old file. It is a pure
