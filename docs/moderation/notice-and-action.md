@@ -1,10 +1,10 @@
 # Notice-and-action, content reports and complaints: the procedure for the project's instance
 
-> **DRAFT, pending the owner's approval.** This is a draft for the owner to review. It is **not
-> legal advice**, and no lawyer has checked it. It is not the procedure in force until the owner has
-> approved it and the product changes it depends on exist.
+> **Adopted by the owner on 2026-09-30.** It is **not legal advice**, and no lawyer has checked
+> it.
+> It cannot be followed in full until the product changes it depends on exist (below).
 
-- **Date of this draft**: 2026-09-30
+- **Date**: 2026-09-30
 - **Issues**: [#887](https://github.com/openzigs/onyourleft/issues/887) (EU DSA Art. 16) and
   [#886](https://github.com/openzigs/onyourleft/issues/886) (UK Online Safety Act ss.20–21). Public
   rooms ([#788](https://github.com/openzigs/onyourleft/issues/788)) stay blocked until the owner
@@ -21,29 +21,29 @@
   recorded on [#886](https://github.com/openzigs/onyourleft/issues/886#issuecomment-5911594101)
   ([second comment](https://github.com/openzigs/onyourleft/issues/886#issuecomment-5911633018)) and on
   [#887](https://github.com/openzigs/onyourleft/issues/887#issuecomment-5911594478)
-  ([second comment](https://github.com/openzigs/onyourleft/issues/887#issuecomment-5911633500)).
+  ([second comment](https://github.com/openzigs/onyourleft/issues/887#issuecomment-5911633500)),
+  with later comments on [#886](https://github.com/openzigs/onyourleft/issues/886#issuecomment-5913128189) (the Discord link),
+  [#886](https://github.com/openzigs/onyourleft/issues/886#issuecomment-5913273878) and
+  [#887](https://github.com/openzigs/onyourleft/issues/887#issuecomment-5913274367) (the contact address and the
+  sign-off).
 - **Public rooms wait for [#907](https://github.com/openzigs/onyourleft/issues/907),
   [#910](https://github.com/openzigs/onyourleft/issues/910) and
   [#911](https://github.com/openzigs/onyourleft/issues/911)** (owner, 2026-09-30): reporting without an
   account, a statement of reasons the rider can read, and complaints and appeals. Private rooms can
   ship before them.
-- ⚠️ **Before final sign-off, three Ofcom documents must be read in a browser**: the Risk
-  Assessment Guidance (with the current Risk Profiles), the Children's Access Assessments Guidance
-  and the Record-Keeping Guidance. None of them could be read for this draft (spike 0019 §5 items
-  1–3). The owner recorded this as still open on 2026-09-30.
 - **Related drafts**: [statements of reasons](statement-of-reasons.md),
   [illegal content risk assessment](illegal-content-risk-assessment.md). The tools a moderator has are
   in [`docs/moderation.md`](../moderation.md).
 
-## Sign-off (left blank for the owner)
+## Sign-off
 
 | | |
 |---|---|
-| Procedure approved on | |
-| Contact address chosen | |
-| Conflict-of-interest option chosen (see "A notice or complaint about the moderator") | |
-| Target times chosen (see "Target times") | |
-| Signature | |
+| Procedure approved on | 2026-09-30, by the owner: *"Safety draft looks good"* |
+| Contact address chosen | [matt@openzigs.ai](mailto:matt@openzigs.ai) |
+| Conflict-of-interest option chosen (see "A notice or complaint about the moderator") | The owner decides it, declares the conflict in the statement of reasons, and logs it |
+| Target times chosen (see "Target times") | 48 hours for notices of illegal content; 7 days for other reports and complaints |
+| Signature | The owner, 2026-09-30 |
 
 ## One moderator, and what that supersedes
 
@@ -60,7 +60,7 @@ that criterion is superseded by #905.** This procedure is written for one person
 | **The notice page on the instance** (for example `/report`), for anybody, with or without an account | Anybody: users and people who are not users | **Not built.** Filed as [#907](https://github.com/openzigs/onyourleft/issues/907) |
 | **A link from the app** to that page, from the report control and from About | Riders | **Not built.** Filed as [#907](https://github.com/openzigs/onyourleft/issues/907) |
 | **The legal and contact page on the instance** (for example `/legal`), naming the points of contact and the notice page | Anybody | **Not built.** Filed as [#908](https://github.com/openzigs/onyourleft/issues/908) |
-| **The private contact address** `<CONTACT-ADDRESS — owner to choose>` | Anybody | **Not chosen.** It is also the address for statements of reasons that cannot be delivered in the app, and for requests to delete |
+| **The private contact address** [matt@openzigs.ai](mailto:matt@openzigs.ai) | Anybody | **Chosen** (owner, 2026-09-30). It is also the address for statements of reasons that cannot be delivered in the app, and for requests to delete |
 | **Reporting a rider** in the app (#83), and in a room (#789) | Signed-in riders only | #83's report exists. #789's in-room report is not built |
 
 ⚠️ **Until #907 exists and the address is chosen, a person who is not a rider has no way to send a

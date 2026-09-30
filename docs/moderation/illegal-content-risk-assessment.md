@@ -1,11 +1,9 @@
 # Illegal content risk assessment: the project's instance with public rooms enabled
 
-> **DRAFT, pending the owner's approval.** This is a draft for the owner to review. It is **not
-> legal advice**, and no lawyer has checked it. It is not a completed assessment under the Online
-> Safety Act 2023 until the owner has reviewed it, changed what they disagree with, and signed the
-> block below.
+> **Adopted by the owner on 2026-09-30.** It is **not legal advice**, and no lawyer has checked
+> it.
 
-- **Date of this draft**: 2026-09-30
+- **Date**: 2026-09-30
 - **Issue**: [#886](https://github.com/openzigs/onyourleft/issues/886). Public rooms
   ([#788](https://github.com/openzigs/onyourleft/issues/788)) stay blocked until the owner approves
   this document and the others in this directory.
@@ -19,33 +17,39 @@
   recorded on [#886](https://github.com/openzigs/onyourleft/issues/886#issuecomment-5911594101)
   ([second comment](https://github.com/openzigs/onyourleft/issues/886#issuecomment-5911633018)) and on
   [#887](https://github.com/openzigs/onyourleft/issues/887#issuecomment-5911594478)
-  ([second comment](https://github.com/openzigs/onyourleft/issues/887#issuecomment-5911633500)).
+  ([second comment](https://github.com/openzigs/onyourleft/issues/887#issuecomment-5911633500)),
+  with later comments on [#886](https://github.com/openzigs/onyourleft/issues/886#issuecomment-5913128189) (the Discord link),
+  [#886](https://github.com/openzigs/onyourleft/issues/886#issuecomment-5913273878) and
+  [#887](https://github.com/openzigs/onyourleft/issues/887#issuecomment-5913274367) (the contact address and the
+  sign-off).
+- **Where this document says "proposed"**, the proposal is adopted by the owner's sign-off of
+  2026-09-30, whose words were *"Safety draft looks good"*. The owner made no change to any proposal.
 - **Public rooms wait for [#907](https://github.com/openzigs/onyourleft/issues/907),
   [#910](https://github.com/openzigs/onyourleft/issues/910) and
   [#911](https://github.com/openzigs/onyourleft/issues/911)** (owner, 2026-09-30): reporting without an
   account, a statement of reasons the rider can read, and complaints and appeals. Private rooms can
   ship before them.
-- ⚠️ **Before final sign-off, three Ofcom documents must be read in a browser**: the Risk
+- ⚠️ **Still open: three Ofcom guidance documents have not yet been read in full**: the Risk
   Assessment Guidance (with the current Risk Profiles), the Children's Access Assessments Guidance
-  and the Record-Keeping Guidance. None of them could be read for this draft (spike 0019 §5 items
-  1–3). The owner recorded this as still open on 2026-09-30.
+  and the Record-Keeping Guidance (spike 0019 §5 items 1–3). They are to be read before the first
+  review, which is due within 3 months of opening (owner, 2026-09-30).
 - **Related drafts**: [children's access assessment](childrens-access-assessment.md),
   [notice-and-action and complaints](notice-and-action.md),
   [statements of reasons](statement-of-reasons.md), [DSA scope](dsa-scope.md). The operator's
   guide is [`docs/moderation.md`](../moderation.md).
 
-## Sign-off (left blank for the owner)
+## Sign-off
 
 | | |
 |---|---|
-| Service assessed | |
-| Assessment completed on | |
-| Completed by | |
-| Named person responsible for the assessment | |
-| Approved by | |
-| Current Ofcom Risk Profiles consulted (version and date) | |
-| Next review due | |
-| Signature | |
+| Service assessed | The project's instance with public rooms enabled (below) |
+| Assessment completed on | 2026-09-30 |
+| Completed by | The owner |
+| Named person responsible for the assessment | The owner (also the ICU A2 accountable individual) |
+| Approved by | The owner, 2026-09-30: *"Safety draft looks good"* |
+| Current Ofcom Risk Profiles consulted (version and date) | **Not yet read in full.** The version headed 16 December 2024 was relied on (O9, above). To be read before the first review |
+| Next review due | Within 3 months of opening |
+| Signature | The owner, 2026-09-30 |
 
 O9 Table 8 lists what the record must contain. The rows above follow that list.
 
@@ -88,7 +92,7 @@ owner is in the UK and the app is in English. This draft assumes that it does.
 | **Race results** | A finish order after a race, with display names and each rider's power-to-weight (W/kg), never watts, for riders other than the viewer | #785 (ruling Q17), ADR 0028 D-7.7 |
 | **The public room listing** | Rooms riders created on their own routes, ordered by start time then creation time. No featured, recommended or operator-pinned slot | #788, ADR 0028 D-7.1 |
 | **Room chat** | ⚠️ **There is none today, and no issue read builds one.** Riders cannot send one another text on the instance | — |
-| **The Discord voice link** | A link, in a room, to a voice channel on Discord that a bot made for that room. The voice itself is on Discord, not on the instance. The spike 0018 recommendation (awaiting the owner) holds account linking for public rooms | #794, [spike 0018](../spikes/0018-discord-terms-for-a-self-hosted-voice-bot.md) |
+| **The Discord voice link** | A link, in a room, to a voice channel on Discord that a bot made for that room. The voice itself is on Discord, not on the instance. **Not part of the service assessed** (owner, 2026-09-30; below). The spike 0018 recommendation (awaiting the owner) holds account linking for public rooms | #794, [spike 0018](../spikes/0018-discord-terms-for-a-self-hosted-voice-bot.md) |
 | **Plausibility flags** | Shown to **every rider in the race**, beside the flagged rider's result and display name, with the duration the flag was raised for. A flag is generated by the instance from the room's own re-simulation, not by a rider. Each flag is also filed as a report to the moderator | #785, ADR 0028 D-2 rule 3; #789 |
 | **Reports** | Seen by the moderator only, not by other riders | #83, #789 |
 
@@ -97,12 +101,16 @@ video uploaded or shown, no direct messages, no follower or friend graph, no fee
 livestreaming on the instance, and no recommender algorithm. A rider's rides are synced to the
 instance (#776) but are not shown to other riders (`docs/moderation.md`).
 
-**OPEN, for the owner and a lawyer: the Discord link.** Whether Discord-hosted voice is part of
-*this* service is not settled by the text read. The instance does not host, store or relay the
-voice. It shows a link, and its bot creates and deletes the channel. s.55(4)(b) treats a bot as a
-user only where it is *"not controlled by or on behalf of the provider"*. The owner's bot would be
-controlled by the provider. This draft assesses the link as a feature that sends riders to a
-service where the instance's moderation does not reach, and does not assess Discord's own service.
+**The Discord voice link is not part of the service assessed** (owner decision, 2026-09-30). Voice
+happens on Discord, under Discord's terms and moderation. The instance only creates a channel and
+shares an invite. s.55(4)(b) treats a bot as a user only where it is *"not controlled by or on behalf
+of the provider"*; the owner's bot is controlled by the provider, and what it does on the instance
+is create the channel and share the invite. This assessment names the link and its risks, and does
+not assess Discord's own service:
+
+- **An invite shared in a room.** The link sends riders to a service with voice and messaging where
+  the instance's moderation does not reach.
+- **Riders' Discord usernames are visible to each other** on Discord.
 
 ### The user base (s.9(5)(a))
 
@@ -122,20 +130,21 @@ service where the instance's moderation does not reach, and does not assess Disc
 illegal content, with each kind separately assessed*. O9 says there were 17 kinds in its December
 2024 text. Spike 0019 records that two further priority offences were created in December 2025
 (serious self-harm and cyberflashing), so the current count may differ. The current Risk Profiles
-could not be read (spike §5 item 2). **Before sign-off, a person with a browser must take the full
+could not be read (spike §5 item 2). **Before the first review, a person with a browser must take the full
 list from the current Risk Profiles and add a row for every kind not below.** The rows below are the
 kinds named in the risk factors and measures that spike 0019 quotes.
 
 ## Step 2: assess the risk of harm
 
-Levels use O9's scale: negligible or no risk, low, medium, high. ⚠️ **Every level below is a
-proposal for the owner, except harassment and stalking, which the owner rated on 2026-09-30.**
+Levels use O9's scale: negligible or no risk, low, medium, high. ⚠️ **Every level below is adopted by the owner's
+sign-off of this assessment on 2026-09-30 (*"Safety draft looks good"*); harassment and stalking the
+owner rated separately, the same day.**
 O9: a *low* level needs evidence and *"no or few specific risk factors"*.
 A *negligible* level where some risk factors are present *"will normally need comprehensive
 evidence"*. There is no usage evidence yet, because the service has not opened. The first review
 must replace reasoning with evidence (Step 4).
 
-| Kind of illegal harm | Relevant risk factors (O9) | Proposed level | Reasons |
+| Kind of illegal harm | Relevant risk factors (O9) | Level | Reasons |
 |---|---|---|---|
 | Harassment, stalking, threats and abuse | User profiles; **posting or sending location information** | **Low** (owner, 2026-09-30) | **The owner rated harassment and stalking through shared routes and public plausibility flags low on 2026-09-30**, naming three mitigations: privacy-zone trims, no position in rooms, and no location in flags. The owner must be able to defend this rating. A display name can carry abuse. A plausibility flag is shown to every rider in a race beside the flagged rider's name (#785), so a flag that is wrong, or read as an accusation of cheating, could draw abuse towards that rider; it is generated by the instance, not by a rider, and it is also a report the moderator handles (#789). A route shown to strangers in a public room is location information, and O9 says it *"may be used by potential perpetrators to track the whereabouts of survivors and victims"*. Mitigations: routes starting in a privacy zone are refused (#784), the listing shows no coordinates (#788), routes are deleted when the room closes unless the creator separately shared them, blocking will keep two riders out of the same public room (#789, not built yet), and there is no messaging. ⚠️ A route that starts just outside a privacy zone, or a rider with no privacy zone, still reveals a place the rider rides from |
 | Controlling or coercive behaviour | Posting or sending location information | **Low** | As above. The instance offers no way to follow a rider's rides |
@@ -247,8 +256,8 @@ them.
 project the owner is also the governance body, and this record says so.
 
 **Review.** s.9(3) requires the assessment to be kept up to date. Ofcom recommends a review at least
-every 12 months (O2; O9 ¶2.45). The first review should come **within three months of public rooms
-opening** (proposed; an owner decision), because the levels above rest on reasoning, and it should
+every 12 months (O2; O9 ¶2.45). The first review is due **within 3 months of opening** (owner,
+2026-09-30), because the levels above rest on reasoning, and it should
 use the report queue, the moderation log and [#912](https://github.com/openzigs/onyourleft/issues/912)'s
 record as evidence.
 
@@ -272,10 +281,9 @@ as a significant change that needs a further assessment **before** it ships:
    browser (spike §5 item 2).
 3. Whether to run Ofcom's interactive scope checker and toolkit and attach the output (owner; spike
    §2 Q5).
-4. Whether the Discord link is part of the service assessed (owner and lawyer).
-5. Reading the three Ofcom documents named at the top (the Risk Assessment Guidance, the Children's
-   Access Assessments Guidance and the Record-Keeping Guidance) in a browser before final sign-off.
-6. The contact address, `<CONTACT-ADDRESS — owner to choose>` (owner).
+4. Reading the three Ofcom documents named at the top (the Risk Assessment Guidance, the Children's
+   Access Assessments Guidance and the Record-Keeping Guidance) in full, before the first review.
 
 Decided by the owner on 2026-09-30, and no longer open here: the level for harassment and stalking
-(low), and the ICU A2 accountable individual (the owner, who is also the governance body).
+(low), the ICU A2 accountable individual (the owner, who is also the governance body), that the
+Discord voice link is not part of the service assessed, and the contact address.

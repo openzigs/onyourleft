@@ -1,6 +1,6 @@
 # On Your Left — privacy policy
 
-**Last updated: 2026-09-29.** This is the policy for the On Your Left Android app
+**Last updated: 2026-09-30.** This is the policy for the On Your Left Android app
 (`dev.openzigs.onyourleft`) and for the web client it is built from. It is the policy linked from the
 app's About page and from the Google Play listing, and those two links point at this file
 ([#95](https://github.com/openzigs/onyourleft/issues/95)).
@@ -220,8 +220,8 @@ already holds stays there.
 
 **Deleting what an instance holds.** Disconnecting is all this version of the app can do: it cannot
 remove a device from your account on an instance, change or remove your name there, or erase your
-account there. Ask the instance's operator to do them. For the project's own instance, that is this project's maintainer: ask as described under
-**Contact** below. For anybody else's instance, ask whoever runs it.
+account there. Ask the instance's operator to do them. For the project's own instance, that is this project's maintainer: ask privately by email, as
+described under **Contact** below, and not in a public issue. For anybody else's instance, ask whoever runs it.
 
 ## A second phone you pair as a side camera
 
@@ -453,7 +453,11 @@ commit in the repository above. The date at the top is the date of the last subs
 
 ## Contact
 
-Open an issue at <https://github.com/openzigs/onyourleft/issues>. For anything that is a security or
-privacy **vulnerability**, use
+For a request to delete what the project's own instance holds, a notice of illegal content, or a
+complaint, write to [matt@openzigs.ai](mailto:matt@openzigs.ai). Do not put a request about your own
+data in a public issue.
+
+For anything that is not personal, open an issue at <https://github.com/openzigs/onyourleft/issues>.
+For anything that is a security or privacy **vulnerability**, use
 [private vulnerability reporting](https://github.com/openzigs/onyourleft/security/advisories/new)
 rather than a public issue — `SECURITY.md` says why.

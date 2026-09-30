@@ -1,11 +1,11 @@
 # The EU Digital Services Act and the project's instance: scope, Art. 13 and Art. 19
 
-> **DRAFT, pending the owner's approval.** This is a reading for the owner to review. It is **not
-> legal advice**, and no lawyer has checked it. **It is not a legal ruling on whether the DSA
+> **Adopted by the owner on 2026-09-30.** It is **not legal advice**, and no lawyer has checked
+> it. **It is not a legal ruling on whether the DSA
 > applies.** It records what the texts read say, and the owner's working position of 2026-09-30
 > (§6). Where the text runs out, the questions are still for a lawyer.
 
-- **Date of this draft**: 2026-09-30
+- **Date**: 2026-09-30
 - **Issue**: [#887](https://github.com/openzigs/onyourleft/issues/887), whose third criterion asks
   that *"Whether Art. 19's exclusion applies to the project is decided and recorded"*. This document
   records the reading, and the owner's decision of 2026-09-30 in §6.
@@ -13,11 +13,11 @@
   recorded on [#886](https://github.com/openzigs/onyourleft/issues/886#issuecomment-5911594101)
   ([second comment](https://github.com/openzigs/onyourleft/issues/886#issuecomment-5911633018)) and on
   [#887](https://github.com/openzigs/onyourleft/issues/887#issuecomment-5911594478)
-  ([second comment](https://github.com/openzigs/onyourleft/issues/887#issuecomment-5911633500)).
-- ⚠️ **Before final sign-off, three Ofcom documents must be read in a browser**: the Risk
-  Assessment Guidance (with the current Risk Profiles), the Children's Access Assessments Guidance
-  and the Record-Keeping Guidance. None of them could be read for this draft (spike 0019 §5 items
-  1–3). The owner recorded this as still open on 2026-09-30.
+  ([second comment](https://github.com/openzigs/onyourleft/issues/887#issuecomment-5911633500)),
+  with later comments on [#886](https://github.com/openzigs/onyourleft/issues/886#issuecomment-5913128189) (the Discord link),
+  [#886](https://github.com/openzigs/onyourleft/issues/886#issuecomment-5913273878) and
+  [#887](https://github.com/openzigs/onyourleft/issues/887#issuecomment-5913274367) (the contact address and the
+  sign-off).
 - **Sources relied on**: [spike 0019](../spikes/0019-online-safety-act-and-dsa-read-for-the-projects-instance.md)
   §3, read first-hand on 2026-09-30: Regulation (EU) 2022/2065 as published in OJ L 277, 27.10.2022
   (E1), Directive (EU) 2015/1535 Art. 1(1)(b) (E2), Recommendation 2003/361/EC (E3), Directive
@@ -25,17 +25,17 @@
   versions of the DSA, and any amendment after 2022, were not checked**, and **no case law was read**
   (spike §5 items 8 and 11).
 
-## Sign-off (left blank for the owner)
+## Sign-off
 
 | | |
 |---|---|
-| Does the DSA apply to the project's instance? | |
-| Decided by (owner, or a lawyer's advice relied on) | |
-| If it applies: hosting service only, or online platform? | |
-| If it applies: micro or small enterprise under Rec. 2003/361? | |
-| If it applies: Art. 13 legal representative (name, Member State) | |
-| If it does not apply: comply with Arts 16 and 17 voluntarily? | |
-| Signature and date | |
+| Does the DSA apply to the project's instance? | Treated as probably not applying: a free service, one person, not provided for remuneration (§6) |
+| Decided by (owner, or a lawyer's advice relied on) | The owner, 2026-09-30. No lawyer's advice |
+| If it applies: hosting service only, or online platform? | Not answered: treated as not applying |
+| If it applies: micro or small enterprise under Rec. 2003/361? | Not answered: treated as not applying |
+| If it applies: Art. 13 legal representative (name, Member State) | None appointed: treated as not applying |
+| If it does not apply: comply with Arts 16 and 17 voluntarily? | Yes |
+| Signature and date | The owner, 2026-09-30: *"Safety draft looks good"* |
 
 ## 1. Is it an "information society service" at all?
 
@@ -155,4 +155,3 @@ this position.
 3. Whether approval registration keeps the instance outside "online platform" (§3; lawyer).
 4. Who the Art. 13 representative would be, if needed (§5; owner).
 5. Consolidated text and later amendments of the DSA, not checked (spike §5 item 8).
-6. The three Ofcom documents named at the top, to be read in a browser before final sign-off.

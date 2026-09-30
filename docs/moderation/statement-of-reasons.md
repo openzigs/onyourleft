@@ -1,9 +1,9 @@
 # Statements of reasons, and what a notifier is told: templates for the project's instance
 
-> **DRAFT, pending the owner's approval.** These are drafts for the owner to review. They are **not
-> legal advice**, and no lawyer has checked them.
+> **Adopted by the owner on 2026-09-30.** These are **not legal advice**, and no lawyer has checked
+> them.
 
-- **Date of this draft**: 2026-09-30
+- **Date**: 2026-09-30
 - **Issue**: [#887](https://github.com/openzigs/onyourleft/issues/887). The procedure that uses these
   templates is [notice-and-action](notice-and-action.md).
 - **Sources relied on**: [spike 0019](../spikes/0019-online-safety-act-and-dsa-read-for-the-projects-instance.md)
@@ -17,19 +17,19 @@
   recorded on [#886](https://github.com/openzigs/onyourleft/issues/886#issuecomment-5911594101)
   ([second comment](https://github.com/openzigs/onyourleft/issues/886#issuecomment-5911633018)) and on
   [#887](https://github.com/openzigs/onyourleft/issues/887#issuecomment-5911594478)
-  ([second comment](https://github.com/openzigs/onyourleft/issues/887#issuecomment-5911633500)).
-- ⚠️ **Before final sign-off, three Ofcom documents must be read in a browser**: the Risk
-  Assessment Guidance (with the current Risk Profiles), the Children's Access Assessments Guidance
-  and the Record-Keeping Guidance. None of them could be read for this draft (spike 0019 §5 items
-  1–3). The owner recorded this as still open on 2026-09-30.
+  ([second comment](https://github.com/openzigs/onyourleft/issues/887#issuecomment-5911633500)),
+  with later comments on [#886](https://github.com/openzigs/onyourleft/issues/886#issuecomment-5913128189) (the Discord link),
+  [#886](https://github.com/openzigs/onyourleft/issues/886#issuecomment-5913273878) and
+  [#887](https://github.com/openzigs/onyourleft/issues/887#issuecomment-5913274367) (the contact address and the
+  sign-off).
 
-## Sign-off (left blank for the owner)
+## Sign-off
 
 | | |
 |---|---|
-| Templates approved on | |
-| Delivery channel chosen (see "OPEN: where a statement is delivered") | |
-| Signature | |
+| Templates approved on | 2026-09-30, by the owner: *"Safety draft looks good"* |
+| Delivery channel chosen (see "OPEN: where a statement is delivered") | Not chosen. Public rooms wait for #910; until then a rider can write to [matt@openzigs.ai](mailto:matt@openzigs.ai) |
+| Signature | The owner, 2026-09-30 |
 
 ## When a statement is owed
 
@@ -61,7 +61,7 @@ there is none: a suspended rider cannot sign in at all.
   **suspended or not**.
 - **Public rooms wait for #910**, with [#907](https://github.com/openzigs/onyourleft/issues/907) and
   [#911](https://github.com/openzigs/onyourleft/issues/911) (owner, 2026-09-30). Private rooms can ship
-  before them. A rider who writes to `<CONTACT-ADDRESS — owner to choose>` can be sent theirs.
+  before them. A rider who writes to [matt@openzigs.ai](mailto:matt@openzigs.ai) can be sent theirs.
 
 **The Transparency Database is not owed** unless the instance is an online platform that is not
 micro or small. Art. 24(5) applies to *"providers of online platforms"*, and Art. 19 exempts micro and
@@ -107,7 +107,7 @@ rider's personal details into the reason (`docs/moderation.md`).
 >
 > **6. What you can do about it** *(Art. 17(3)(f))*:
 > - **Ask us to look again.** [How to appeal: [#911](https://github.com/openzigs/onyourleft/issues/911),
->   not built yet; until then, write to `<CONTACT-ADDRESS — owner to choose>`.] [If the matter
+>   not built yet; until then, write to [matt@openzigs.ai](mailto:matt@openzigs.ai).] [If the matter
 >   involves the moderator, the moderator decides it, as the owner decided on 2026-09-30: see
 >   [notice-and-action](notice-and-action.md#a-notice-or-complaint-about-the-moderator).]
 > - **Out-of-court dispute settlement.** [certified body and how to reach it, only if the owner or a
@@ -133,5 +133,5 @@ redress in respect of that decision"*. Art. 16(6): if automated means were used,
 > items]. [Why, in a sentence.] No automated means were used: a person decided.
 >
 > If you disagree, you can [ask us to look again: [#911](https://github.com/openzigs/onyourleft/issues/911),
-> or write to `<CONTACT-ADDRESS — owner to choose>`], or go to a court. [If the content is on Discord:
+> or write to [matt@openzigs.ai](mailto:matt@openzigs.ai)], or go to a court. [If the content is on Discord:
 > report it to Discord, which decides what happens to content on its service.]
