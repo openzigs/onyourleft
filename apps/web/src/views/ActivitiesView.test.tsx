@@ -558,6 +558,43 @@ describe('#660 — a card list on a phone, a table where it fits', () => {
     expect(queryAll(document.body, '.oyl-activity-cards > li')).toHaveLength(2);
   });
 
+  it('keeps one ResizeObserver while the choice changes — #864', async () => {
+    // Re-measuring on a change of choice is its own layout effect: the
+    // observer is made when the library arrives and not again per choice.
+    let made = 0;
+    let released = 0;
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor() {
+          made += 1;
+        }
+        observe(): void {
+          // Reports nothing: the layout here comes from the measurement.
+        }
+        disconnect(): void {
+          released += 1;
+        }
+        unobserve(): void {
+          // Nothing to release.
+        }
+      },
+    );
+    const library = stubLibrary(OWNER, rides);
+    mounted = await mount(<ActivitiesView library={library} />);
+    await settle();
+    const before = made;
+    const releasedBefore = released;
+    expect(before).toBeGreaterThan(0);
+
+    await mounted.rerender(<ActivitiesView library={library} selected="outdoor" />);
+    await mounted.rerender(<ActivitiesView library={library} />);
+    await mounted.rerender(<ActivitiesView library={library} selected="indoor" />);
+
+    expect(made).toBe(before);
+    expect(released).toBe(releasedBefore);
+  });
+
   it('puts the table in a focusable region named by its caption', async () => {
     mounted = await mount(<ActivitiesView library={stubLibrary(OWNER, rides)} />);
     await settle();

@@ -1420,21 +1420,39 @@ const NEVER_PUT_AWAY: readonly (readonly [query: string, beside: string, words: 
 ];
 
 /**
- * The stage measured on a frame that has both notices in the cell. The
+ * The stage measured on a SETTLED frame that has both notices in the cell. The
  * refusing trainer's fault can be absent for a frame (`ride-harness.tsx`
  * §`REFUSED`), so the check and the measurement are one evaluation.
+ *
+ * ⚠️ **The first frame with both is not always the settled one** (#871): on
+ * `main` the pair beside Eased at 360×752 measured 55 px above the rider on 2
+ * of 8 local runs and 69 px on the other six, and 41 px once on CI (#868's
+ * first run). So a measurement counts only when the next poll, both notices
+ * still present, reads the same notice cell — two equal consecutive readings
+ * of its box. The cell and not the whole stage: the ride is running, and a
+ * reading's box may change width with its value between any two polls.
  */
 async function measureWithBoth(page: Page, words: string): Promise<StageMeasurement> {
   let found: StageMeasurement | undefined;
+  let previous: string | undefined;
   await expect
     .poll(async () => {
-      found = await page.evaluate((beside) => {
+      const reading = await page.evaluate((beside) => {
         const text = document.querySelector('.oyl-hud__notices')?.textContent ?? '';
         return text.includes(beside) && text.includes('Keep the screen on')
           ? window.__oylRide?.measure()
           : undefined;
       }, words);
-      return found !== undefined;
+      const key =
+        reading === undefined
+          ? undefined
+          : JSON.stringify(
+              reading.panels.find((each) => each.name.includes('oyl-hud__notices'))?.box,
+            );
+      const settled = key !== undefined && key === previous;
+      previous = key;
+      found = settled ? reading : undefined;
+      return settled;
     })
     .toBe(true);
   if (found === undefined) throw new Error('unreachable');

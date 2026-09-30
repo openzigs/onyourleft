@@ -44,6 +44,9 @@ export class FakeSocket implements HibernatableSocket {
   readonly sent: string[] = [];
   closedByObject = false;
   closedByClient = false;
+  /** The code and reason the object closed it with (`close-codes.ts`). */
+  closeCode: number | undefined;
+  closeReason: string | undefined;
   #attachment: string | undefined;
 
   send(message: string): void {
@@ -51,9 +54,11 @@ export class FakeSocket implements HibernatableSocket {
     this.sent.push(message);
   }
 
-  close(): void {
+  close(code?: number, reason?: string): void {
     if (this.closedByObject) return;
     this.closedByObject = true;
+    this.closeCode = code;
+    this.closeReason = reason;
     this.sent.push(CLOSED_BY_ROOM);
   }
 

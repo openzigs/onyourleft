@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { startTestInstance, type TestInstance } from './instance-testing.ts';
-import { loggedMethod, logUnhandled } from './log.ts';
+import { logEvent, loggedMethod, logUnhandled, REDACTED } from './log.ts';
 
 let running: TestInstance | undefined;
 afterEach(async () => {
@@ -77,5 +77,34 @@ describe('what the instance logs about a request (#767)', () => {
   it('logs a method it does not know as OTHER', () => {
     expect(loggedMethod('GET')).toBe('GET');
     expect(loggedMethod(`X-${TOKEN}`)).toBe('OTHER');
+  });
+
+  it('passes every line through one redaction: a token, a signature, a latitude and a display name do not survive — #791', () => {
+    const lines: string[] = [];
+    const signature = 'ab'.repeat(64);
+    logEvent((line) => lines.push(line), 'sign-in', {
+      sessionToken: TOKEN,
+      signature,
+      latitude: Number(LATITUDE),
+      displayName: 'Ann Rider',
+      nested: { lat: LATITUDE },
+      // Under a key that IS loggable, a long secret is still cut.
+      code: signature,
+      status: 401,
+    });
+    const written = lines.join('');
+    for (const secret of [TOKEN, signature, LATITUDE, '51.50', 'Ann Rider']) {
+      expect(written).not.toContain(secret);
+    }
+    expect(JSON.parse(lines[0] ?? '{}')).toEqual({
+      event: 'sign-in',
+      sessionToken: REDACTED,
+      signature: REDACTED,
+      latitude: REDACTED,
+      displayName: REDACTED,
+      nested: REDACTED,
+      code: REDACTED,
+      status: 401,
+    });
   });
 });

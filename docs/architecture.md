@@ -553,7 +553,13 @@ in one chunk per group (Ride, History, Routes, More), one module each under `src
 loaded with a literal `import()` through `src/shell/lazy-view.tsx`. While a group arrives, `main`
 holds a one-line loading status under the route's own `h1`, so the focus the shell puts on `main`
 survives the view replacing it; a chunk that cannot be fetched says so with a Reload control, which
-is also ADR 0027's left-behind tab. `main.tsx` preloads every group once Home is idle, and a group
+is also ADR 0027's left-behind tab. ⚠️ **Since [#871](https://github.com/openzigs/onyourleft/issues/871)
+a later visit asks again**, and a reader who remembers #674's text claiming that is reading a claim
+that was false when it was written: React's `lazy` remembers a rejection for good, so a view that
+failed once showed the failure on every visit until Reload. `lazyView` now replaces a failed view's
+wrapper once the boundary has put the failure on screen (`componentDidCatch`) — never inside the
+rejection, where React's own retry of the errored render would import again and loop while the
+network is off. `main.tsx` preloads every group once Home is idle, and a group
 already in memory renders without suspending, because React holds a fallback on screen for about
 300 ms once it has shown one. The precache needs no edit: it is derived from the build (#406).
 `apps/web/tools/bundle/entry-graph.ts` fails `pnpm run build` if any view a group module names is in
@@ -1253,9 +1259,16 @@ decided how it is built. [#767](https://github.com/openzigs/onyourleft/issues/76
 [#36](https://github.com/openzigs/onyourleft/issues/36) gave it an API contract and an error model.
 **What it does today is small on purpose**: four metadata routes, and — since #855 (#772, #773,
 #774) — the identity routes under `/v1/auth/`, which a handler serves only when it is HANDED an
-identity service over a store. The Node entry point is not handed one yet (see "Identity" below),
-so a running instance still answers the metadata alone. No sync and no reachable room exists yet
-— #776 and #780 build them.
+identity service over a store. ⚠️ **Since #780 the Node entry point opens the store and serves
+rooms**, and a reviewer who remembers "a running instance still answers the metadata alone" is
+reading the old paragraph: `src/instance.ts` opens the store (never migrating it — the deploy's
+`migrate` step does, #791), hands the handler the accounts on it, and serves room sockets through a
+router and one room-worker process per core (`src/room/node/`, below). What a rider cannot do yet is
+create a room ([#784](https://github.com/openzigs/onyourleft/issues/784)) or join one from the app
+([#782](https://github.com/openzigs/onyourleft/issues/782)); an operator opens rooms with
+`node src/operator/cli.ts room-open`. The first deployment and its runbook are
+[`self-hosting/home-machine.md`](self-hosting/home-machine.md) and
+[`operating-an-instance.md`](operating-an-instance.md).
 
 **The device is canonical and a rider with no instance loses nothing** (ADR 0036 D-3). Nothing in
 `apps/web` or `apps/mobile` imports the instance, and nothing may: a client reaches it over the
@@ -1264,7 +1277,11 @@ network through one module (#777), which is the one `no-network.test.ts` will ad
 ```mermaid
 flowchart LR
   subgraph apps/instance
-    main[src/main.ts<br/>reads env, starts] --> listener[src/node-listener.ts<br/>node:http adapter]
+    main[src/main.ts<br/>resolve hook, then serve.ts] --> inst[src/instance.ts<br/>store, accounts, router]
+    inst --> listener[src/node-listener.ts<br/>node:http adapter]
+    inst --> router[src/room/node/router.ts<br/>a worker per core, #780]
+    router -->|socket handle over IPC| worker[src/room/node/worker.ts<br/>ws + room-host.ts]
+    worker --> core
     listener --> handler[src/handler.ts<br/>Request to Response]
     handler --> routes[src/routes.ts<br/>the route table]
     routes --> spec[src/openapi.ts<br/>generates openapi.json]
@@ -1290,12 +1307,25 @@ managed platform hosts rooms only or the whole instance is left to #790 (ADR 003
 routes HTTP to it and there is no production Worker entry. It is **deployed nowhere**; it runs under
 a local `workerd` in `test:workerd` (`CLAUDE.md` §4a). `src/room/conformance.test.ts` drives the
 core directly and every adapter with one script and requires byte-identical text on every socket —
-#780's Node adapter joins that file.
+#780's Node adapter, over real `ws` sockets, is in that file since #780.
 
-**No build step, and one third-party runtime dependency.** Node 24 strips the types and runs
+**The Node adapter serves the rooms** ([#780](https://github.com/openzigs/onyourleft/issues/780)).
+The HTTP process accepts a socket at `GET /v1/rooms/{roomId}/socket`, refuses it before any room
+state changes when the instance is not ready (503) or the room is unknown (404), and otherwise places
+the room on a room worker — by a hash of its id over the workers alive, then by a table, so one room
+is never split — and hands the socket over as a handle. The worker completes the WebSocket handshake
+(compression off unless the operator turns it on, Q16), looks a hello's ticket up once in the HTTP
+process's book, runs the room's 1 Hz tick, lets go of a client that stops reading, and pings every
+socket for the tunnel. Results are handed back to the HTTP process — the one writer (ADR 0037 D-5) —
+as each becomes final. A worker that dies has its rooms' sockets closed `1011 room-lost` by the
+router, which keeps an unread copy of each, and a new worker takes its place.
+
+**No build step, and two third-party runtime dependencies.** Node 24 strips the types and runs
 `src/main.ts` as committed, so the tsconfig adds `allowImportingTsExtensions` and
-`erasableSyntaxOnly`. The instance imports nothing but Node, this repository's own packages and —
-since #769, in `src/store/` alone — `kysely` (ADR 0037 D-9), which
+`erasableSyntaxOnly`; this repository's packages name no extension on their relative imports, and
+`src/node-imports.ts` is the resolve hook that lets Node load them (#780). The instance imports
+nothing but Node, this repository's own packages, `kysely` (since #769, in `src/store/` alone) and
+`ws` (since #780, in `src/room/node/`) — both ADR 0037 D-9's rows — which
 `apps/instance/third-party.txt` states and `check:notices` holds —
 and that document is **the instance's own**, served at `GET /licences/third-party.txt` and kept out
 of the app's notices (§4g of `CLAUDE.md`), because a rider's device carries none of it.
@@ -1557,7 +1587,8 @@ knows which numbers an *open pull request* has claimed; the rules see the tree, 
 | [0014](spikes/0014-godot-beneath-the-webview.md) | Can Godot render the trainer game's world in a native view beneath the Capacitor WebView, driven from TypeScript with the DOM HUD on top, and what does it cost on the Pixel Tablet against three.js? ([#433](https://github.com/openzigs/onyourleft/issues/433), for [#434](https://github.com/openzigs/onyourleft/issues/434)) | **It can be built, and on the stylised world it is not measurably better.** Godot 4.7.1's Android library (`GodotFragment`, not LibGodot's C API) drew the product's own geometry and placements beneath a transparent WebView from released parts, with no engine patch; the DOM HUD kept its touches, and after two host lines its accessibility tree was exactly the DOM. Both engines held 60 Hz with the same present-interval percentiles (p99 16.76 against 16.79 ms over 20 minutes), the GPU sat near idle under both (242 against 256 MHz), and neither heated the tablet; Godot used about 0.57 of a core less CPU, structurally (20 Hz frames interpolated, against 60 Hz frames built in JS). **Three pre-registered kill conditions trip as written**: K4, not measurably better; K6, +69.6 MiB of APK for arm64 (26.1 MiB compressed), and memory with shadows + MSAA 2×; and K8, nine permissive licences ADR 0015 has not ruled on. **K3, the bridge, is unmeasured as written, which the criterion counts as not a pass**: its share clause needs at least ten minutes, and the late share was recorded only on 5-minute runs (1.76 % of steps over 50 ms, 0.88 % with a geometry window sent a tenth as often); the 20-minute run's median-window p99 was 51.5 ms, which bounds its share at 0.5 % or more | The kill criterion was committed before the first measurement. Pixel Tablet, Android 17, WebView 153, Godot 4.7.1 and 4.7.2 (a patch bump by version string alone), 2026-09-26, with SurfaceFlinger present times, GPU DVFS, thermals, `top` and `meminfo` from both renderers in one APK. ⚠️ **iOS not reached, no live BLE, no power rail, and the realistic world not drawn in Godot.** The code is on the unmerged branch `spike/issue-433-godot-code`, and the pull request says `Refs #433` |
 | [0015](spikes/0015-godot-realistic-world.md) | Does Godot pull ahead of three.js on the **realistic** world (ADR 0026), the scene three.js finds hardest on the Pixel Tablet? The second spike of the owner's 2026-09-26 ruling on [#433](https://github.com/openzigs/onyourleft/issues/433), for [#434](https://github.com/openzigs/onyourleft/issues/434) | **On the GPU, yes; four pre-registered kill conditions trip anyway.** Godot 4.7.1 drew the committed CC0 realistic set, loaded through its own importer (nothing re-authored), at 96 % of three.js's triangles, and over the 20-minute pair held 60 Hz with the GPU clocked **30 % lower** (494 against 708 MHz), about 0.7 of a core less CPU and a skin 1.8 °C cooler, so K4 (not measurably better) does **not** trip, unlike on the stylised world in 0014. K3 (1.66 % of steps late against 1 %), K5 (0.19 % of frames over 20 ms against 0.12 %), K6 (APK +91.8 MiB) and K8 (the same unruled licences) trip as written. Memory does not favour Godot: 81 MiB of compressed textures, but the process is 238 MiB larger. ⚠️ How much of the GPU gap is Godot's compressed (ETC2) textures against three.js's decoded RGBA8, rather than the engine, was not isolated | The owner's Pixel Tablet, 2026-09-26, one debug APK holding both renderers; kill criterion committed before measuring (`7497dde`). ⚠️ **One tablet that never throttled**: no slower device and not ADR 0008 D-4's 3 GB floor, where the GPU margin would matter; no iOS. ⚠️ **The Godot rider was not at parity**: it stood in its A-pose at the bicycle's origin, not seated and not holding the bar, in the wrong tint, with one lean for body and bicycle and no contact shadow, and the owner, looking at the tablet on 2026-09-26, found it poor. Parity means porting `bicycle.ts`'s procedural rider and its animation, which was not measured. #459's water shader and the ground's field pattern were not ported either, and the Godot page drew DOM panels and a debug log the three.js control did not. Code and results on `spike/issue-433-godot-realistic-code`, never merged |
 | [0016](spikes/0016-live-in-ride-coaching.md) | Should live in-ride coaching exist at all, and what does its round trip to the rider's own computer cost? The owner's 2026-09-28 ruling on [#389](https://github.com/openzigs/onyourleft/issues/389) | **Not yet, and build nothing.** The model leg measured 2 252.6 / 3 192.4 ms p50 / p95 warm and 8 114.1 ms cold for a 4.3 B vision model on an M4 Pro over loopback (HTTP itself 0.2 ms); the tablet's legs are a procedure with empty cells. That model scattered one identical picture's landmarks across half the frame (17 accepted poses of 21 answers) and gave poses for pictures of nobody, which the product's reader accepted. And an in-ride utterance needs [ADR 0033](adr/0033-side-camera-link.md) D-6 amended (a constraint on this path that defers #389, not a refusal) and may conflict with [ADR 0030](adr/0030-what-the-app-may-say-about-a-body.md) R7 as its 2026-09-23 amendment reads condition 5 — though that amendment also keeps D-7's live silence rule unchanged — so two owner rulings come first. Safety analysis, a typed sketch of D-7 and six draft sub-issues are in it, none filed | A MacBook Pro (M4 Pro, 24 GB) on 2026-09-28, with a drawn stand-in picture and two no-rider controls. ⚠️ **No tablet, no phone, no LAN and no photograph.** **0016 rather than 0009** because [#471](https://github.com/openzigs/onyourleft/pull/471), still open, claims 0009 |
-| [0017](spikes/0017-voice-chat-for-rooms.md) | How should riders talk to each other in rooms: a Discord bot that makes a voice channel per room, the Discord Social SDK in the app, or WebRTC of our own? The owner's 2026-09-28 request on [#794](https://github.com/openzigs/onyourleft/issues/794) | **Recommends a Discord bot on the instance, over REST with no dependency, and a link in the app.** The instance knows when a room closes, so the channel is deleted then and no gateway connection is needed. A link alone cannot enforce a ban on a rider already in voice, so private rooms use link only (with the channel rotated when a rider is removed) and public rooms need Discord account linking. The Social SDK is rejected: no web build, a revocable non-OSI grant, and Discord gets every rider's voice and identity. Our own WebRTC is deferred: a relayed 20-rider room would need about 12 Mbit/s of the home box's upload at an assumed 32 kbit/s a voice. **The owner's choice is not recorded yet**, and the draft sub-issues are not filed | Documentation, licences (`npm view`, `gh api`) and this repository, read 2026-09-29 at `12fb177`. ⚠️ **Nothing measured**: the five device questions (V1–V5) are a procedure with empty cells, and the Social SDK Terms answered `403` and were read only through a summary |
+| [0017](spikes/0017-voice-chat-for-rooms.md) | How should riders talk to each other in rooms: a Discord bot that makes a voice channel per room, the Discord Social SDK in the app, or WebRTC of our own? The owner's 2026-09-28 request on [#794](https://github.com/openzigs/onyourleft/issues/794) | **Recommends a Discord bot on the instance, over REST with no dependency, and a link in the app.** The instance knows when a room closes, so the channel is deleted then and no gateway connection is needed. A link alone cannot enforce a ban on a rider already in voice, so private rooms use link only (with the channel rotated when a rider is removed) and public rooms need Discord account linking. The Social SDK is rejected: no web build, a revocable non-OSI grant, and Discord gets every rider's voice and identity. Our own WebRTC is deferred: a relayed 20-rider room would need about 12 Mbit/s of the home box's upload at an assumed 32 kbit/s a voice. **The owner chose option A (the bot) on #794 on 2026-09-29** (spike 0018 reads Discord's terms for it); the spike itself is unedited and still says the choice is not recorded, which was true on the day |  Documentation, licences (`npm view`, `gh api`) and this repository, read 2026-09-29 at `12fb177`. ⚠️ **Nothing measured**: the five device questions (V1–V5) are a procedure with empty cells, and the Social SDK Terms answered `403` and were read only through a summary |
+| [0018](spikes/0018-discord-terms-for-a-self-hosted-voice-bot.md) | What does a self-hosted operator agree to under Discord's Developer Terms, Developer Policy and Social SDK Terms when running the voice bot the owner chose in [#794](https://github.com/openzigs/onyourleft/issues/794)? ([#873](https://github.com/openzigs/onyourleft/issues/873)) | **Option A can ship, with changes; nothing read forbids the pattern.** The operator is the developer. No Application ID, client ID, secret or token may be in the repository or in any artefact this project distributes (*"developer credentials may not be embedded in open source projects"*); the Terms say nothing about an operator's own configuration. The instance builds the OAuth2 authorise URL because one web build and one APK serve every instance, not because the Terms require it, and the `client_id` reaches the rider's browser in the redirect whatever is done — how that fits with *"treat them as Discord confidential information"* is left open. API Data, which includes the bot token and client secret, must be encrypted at rest, each operator needs a privacy policy covering Discord, and rate limits are a term of the licence. `guilds.join` is allowed with explicit, labelled consent. Whether the Social SDK Terms (with a non-compete clause) reach plain OAuth2 account linking is not settled. **Recommendation, awaiting the owner** (Q1): ship private-room voice first and hold public-room linking for Discord's written answer. Five questions are put to the owner and none is decided. The Social SDK licence grant is quoted first-hand | The three agreements read in full on 2026-09-29 through the help centre's own JSON API, because the HTML pages answer `403` (a Cloudflare challenge); API docs read as Markdown. ⚠️ **Not legal advice**, and Discord's user Terms and Community Guidelines were not read |
 
 ## Hardware validation procedures
 

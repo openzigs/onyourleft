@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Migration 0005 (#865): a recovery address is bound only once it is
+ * Migration 0006 (#865): a recovery address is bound only once it is
  * confirmed.
  *
  * - **`recovery_email_confirmation`** — an address an athlete gave, waiting

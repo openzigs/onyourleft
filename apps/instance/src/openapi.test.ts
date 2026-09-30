@@ -15,6 +15,7 @@ import {
 } from './auth/identity-testing.ts';
 import { startTestInstance, type TestInstance } from './instance-testing.ts';
 import { openApiDocument, openApiText } from './openapi.ts';
+import { assessReadiness } from './readiness.ts';
 import { ROUTES, type Schema } from './routes.ts';
 
 /**
@@ -203,6 +204,8 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
       recoveryCode: code,
     });
   },
+  startRoom: async (world) =>
+    send(world, 'POST', '/v1/rooms/room-1/start', (await signedIn(world)).token),
   requestEmailRecovery: (world) =>
     send(world, 'POST', '/v1/auth/recover/email', undefined, { address: 'anna@example.org' }),
   setRecoveryEmail: async (world) =>
@@ -224,8 +227,21 @@ describe('every route answers with the shape its entry declares', () => {
   let instance: TestInstance;
   let world: IdentityInstance;
   beforeAll(async () => {
-    instance = await startTestInstance();
-    world = await startIdentityInstance({ emailRecovery: true });
+    // Probes that answer as a healthy instance with metrics on, so /ready and
+    // /metrics answer their success; a probe-less instance is the other half.
+    const probes = {
+      ready: () =>
+        assessReadiness({
+          database: () => Promise.resolve(true),
+          migrations: () => Promise.resolve('at-head' as const),
+          rooms: () => true,
+        }),
+      metrics: (authorization: string | null) =>
+        Promise.resolve(authorization === null ? 'oyl_rooms{worker="0"} 0\n' : undefined),
+      startRoom: () => Promise.resolve('started' as const),
+    };
+    instance = await startTestInstance({ probes });
+    world = await startIdentityInstance({ emailRecovery: true, probes });
   });
   afterAll(async () => {
     await instance.listening.close();

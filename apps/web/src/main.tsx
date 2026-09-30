@@ -1037,7 +1037,9 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   // browser is idle after the first paint keeps them off Home's critical path
   // and off the rider's first press of Ride, which would otherwise show
   // "Loading this page…" for React's reveal throttle (`shell/lazy-view.tsx`
-  // §`lazyView`). A failure here is swallowed and asked again on the visit.
+  // §`lazyView`). A failure here is swallowed and asked again on the visit —
+  // on every later visit too, since #871 (`lazyView` §"Why a failed view is
+  // rebuilt").
   afterFirstPaint(() => {
     preloadViewGroups(VIEW_GROUPS);
   });

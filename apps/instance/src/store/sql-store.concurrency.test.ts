@@ -31,10 +31,22 @@ afterEach(async () => {
   directory = undefined;
 });
 
-function writer(path: string, prefix: string, busyTimeoutMilliseconds?: number): Promise<string[]> {
+/**
+ * The control's writers write longer: whether two threads collide is timing,
+ * and on a busy two-core machine (#780's room tests share the run) 300 writes
+ * each could finish without overlapping — the control then passed nothing.
+ */
+const CONTROL_WRITES_PER_THREAD = 3_000;
+
+function writer(
+  path: string,
+  prefix: string,
+  busyTimeoutMilliseconds?: number,
+  count = WRITES_PER_THREAD,
+): Promise<string[]> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(WORKER, {
-      workerData: { path, prefix, count: WRITES_PER_THREAD, busyTimeoutMilliseconds },
+      workerData: { path, prefix, count, busyTimeoutMilliseconds },
     });
     worker.once('message', (errors: string[]) => resolve(errors));
     worker.once('error', reject);
@@ -70,7 +82,10 @@ describe('two writers on one database (#769)', () => {
     { timeout: 30_000 },
     async () => {
       const path = await migrated();
-      const errors = await Promise.all([writer(path, 'left', 0), writer(path, 'right', 0)]);
+      const errors = await Promise.all([
+        writer(path, 'left', 0, CONTROL_WRITES_PER_THREAD),
+        writer(path, 'right', 0, CONTROL_WRITES_PER_THREAD),
+      ]);
       expect(errors.flat().some((message) => /database is locked/.test(message))).toBe(true);
     },
   );

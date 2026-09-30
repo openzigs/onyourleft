@@ -57,6 +57,8 @@ export interface IncomingRequest {
   readonly method: string;
   readonly url: string;
   readonly headers: { get(name: string): string | null };
+  /** The body as text — `Request.text()` — for `POST …/tickets`. */
+  text?(): Promise<string>;
 }
 
 /**

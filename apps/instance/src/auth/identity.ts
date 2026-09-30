@@ -332,7 +332,7 @@ export function createIdentity(options: IdentityOptions): Identity {
   const confirmationsPerPair = createRateLimiter(limits.confirmationsPerAthleteAddress, now);
   const confirmationsPerAddress = createRateLimiter(limits.confirmationsPerAddress, now);
   const firstLinksPerAddress = createRateLimiter(limits.firstLinksPerAddress, now);
-  const tickets = createTicketBook(now);
+  const tickets = createTicketBook(now, () => randomToken(32));
 
   /** Check a statement for `purpose`, spend its nonce, and verify it. Answers the key. */
   async function proven(statement: unknown, purpose: DevicePurpose): Promise<Outcome<string>> {
