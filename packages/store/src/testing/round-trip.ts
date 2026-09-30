@@ -43,6 +43,7 @@ import type {
   SideCameraReportRecord,
   RideWriteUpRecord,
   RouteRecord,
+  SyncBaseRecord,
   SegmentEndpointRecord,
   SegmentRecord,
   WorkoutRecord,
@@ -807,6 +808,43 @@ export async function assertRideWriteUpRoundTrip(
   }
   if (read.missingSections.join() !== writeUp.missingSections.join()) {
     throw new RoundTripFailure('rideWriteUp.missingSections: is not the list kept');
+  }
+  return read;
+}
+
+/**
+ * Keeps a sync base row, **deletes the ride it names**, closes every
+ * connection, and reads the athlete's base back through `listSyncBase` — the
+ * read a sync makes (#776, #893's review).
+ *
+ * The delete is the point: a base row is the device's memory that a synced
+ * ride was deleted here, so it has to be there AFTER the ride is gone.
+ * `fakes.ts` §`cascadingSyncBaseStoreFactory` answers every write and loses
+ * the row with the ride; `memoryWriteStoreFactory` never writes it.
+ *
+ * @throws {RoundTripFailure}
+ */
+export async function assertSyncBaseRoundTrip(
+  harness: StoreHarness,
+  base: SyncBaseRecord,
+): Promise<SyncBaseRecord> {
+  const rows = await harness.roundTrip(
+    async (store) => {
+      await store.putSyncBase(base);
+      await store.deleteActivity(base.athleteId, base.activityId);
+    },
+    async (store) => store.listSyncBase(base.athleteId),
+  );
+  const read = rows.find((row) => row.kind === base.kind && row.key === base.key);
+  if (read === undefined) {
+    throw new RoundTripFailure(
+      `the sync base for ${base.kind} ${base.key} was kept and reported success, and after its ride was deleted a fresh connection cannot see it`,
+    );
+  }
+  for (const field of ['athleteId', 'activityId', 'localDigest', 'remoteDigest'] as const) {
+    if (read[field] !== base[field]) {
+      throw new RoundTripFailure(`syncBase.${field}: is not the value kept`);
+    }
   }
   return read;
 }

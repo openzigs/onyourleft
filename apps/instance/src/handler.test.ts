@@ -141,6 +141,7 @@ describe('the one error shape (#36)', () => {
       path: '/echo',
       operationId: 'echo',
       summary: 'test',
+      reaches: 'own',
       response: { contentType: 'text/plain' },
       handle: ({ body }) => {
         seen.push(body);
@@ -168,6 +169,7 @@ describe('the one error shape (#36)', () => {
       path: '/throws',
       operationId: 'throws',
       summary: 'test',
+      reaches: 'own',
       response: { contentType: 'text/plain' },
       handle: () => {
         const error = new TypeError(secret);

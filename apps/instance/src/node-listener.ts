@@ -6,6 +6,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { ReadableStream as WebReadableStream } from 'node:stream/web';
 
+import { clientAddress } from './client-address.ts';
 import { errorResponse } from './errors.ts';
 import type { Handler } from './handler.ts';
 
@@ -113,9 +114,10 @@ export interface Sweep {
  * and the address counted in it is gone by the sweep that follows.
  *
  * The timer lives here, in the Node adapter, so `src/auth/` reads no clock and
- * schedules nothing (#856). ⚠️ Nothing calls this with an identity yet:
- * `main.ts` builds no `Identity`, so the project's instance holds no address
- * at all today. Whatever wires one into `main.ts` hands `listen` its sweep.
+ * schedules nothing (#856). `instance.ts` §`startInstance` runs it once the
+ * store is open and an identity exists, and stops it in `stop` — the identity
+ * is made after the listener, so it does not pass through `listen`'s own
+ * `sweep` option.
  */
 export function sweepOnBoundaries(sweep: Sweep, timers: SweepTimers = NODE_TIMERS): () => void {
   if (!(Number.isSafeInteger(sweep.periodMs) && sweep.periodMs > 0)) {
@@ -153,11 +155,22 @@ export function listen(
   {
     host,
     port,
+    clientAddressHeader,
+    trustedProxies,
     sweep,
     timers,
   }: {
     readonly host: string;
     readonly port: number;
+    /**
+     * The header a local proxy puts the client's address in (#775), or `null`.
+     * REQUIRED, like `trustedProxies`, so a caller that forgets to pass the
+     * operator's setting is a compile error rather than a quiet default
+     * (#891's merge review).
+     */
+    readonly clientAddressHeader: string | null;
+    /** The proxies the header is believed from besides loopback (#891's review); `[]` for loopback only. */
+    readonly trustedProxies: readonly string[];
     /** Run on every boundary of its period while the listener is up, and stopped by `close`. */
     readonly sweep?: Sweep;
     readonly timers?: SweepTimers;
@@ -171,10 +184,17 @@ export function listen(
       send(errorResponse('validation_failed'), outgoing).catch(() => outgoing.destroy());
       return;
     }
-    // The peer's address, for the identity routes' rate limits (#772). It is
-    // never logged (`log.ts`), and behind a proxy it is the proxy's — which is
-    // #775's to weigh, since a per-address limit there limits everyone at once.
-    handler(request, { address: incoming.socket.remoteAddress ?? null })
+    // The client's address, for the per-address rate limits (#772, #775). It
+    // is never logged (`log.ts`). Behind a proxy the operator runs, the
+    // socket's peer is the proxy for everybody, so the header the operator
+    // named is read instead — from a trusted proxy only (`client-address.ts`).
+    const address = clientAddress(
+      incoming.socket.remoteAddress ?? null,
+      request.headers,
+      clientAddressHeader,
+      trustedProxies,
+    );
+    handler(request, { address })
       .catch(() => errorResponse('internal'))
       .then((response) => send(response, outgoing))
       .catch(() => outgoing.destroy());

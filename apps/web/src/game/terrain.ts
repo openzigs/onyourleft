@@ -372,7 +372,7 @@ const ROAD_HALF_WIDTH_METRES = ROAD_WIDTH_METRES / 2;
  * world was drawn as a mirror of its map, so the normal was the map's left and
  * the screen's right. Since #583 it is the right on both.
  */
-const COLUMN_OFFSETS: readonly number[] = [
+export const COLUMN_OFFSETS: readonly number[] = [
   ROAD_HALF_WIDTH_METRES,
   ROAD_HALF_WIDTH_METRES - EDGE_LINE_WIDTH_METRES,
   ROAD_HALF_WIDTH_METRES - EDGE_LINE_WIDTH_METRES,

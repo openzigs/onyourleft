@@ -1652,6 +1652,8 @@ function frameWithScatter(): SceneFrame {
       bridges: [],
       seconds: 0,
     },
+    // #679: no line in reach.
+    lines: [],
   };
 }
 

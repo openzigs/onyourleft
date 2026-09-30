@@ -19,7 +19,8 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { openDatabase } from './node-sqlite.ts';
-import { ATHLETE_TABLES_IN_ERASURE_ORDER } from './sql-store.ts';
+import { openKysely } from './open-sql-store.ts';
+import { athleteTablesInErasureOrder } from './sql-store.ts';
 import {
   ATHLETE_A,
   ATHLETE_B,
@@ -78,6 +79,57 @@ function rowsOf(path: string, table: string, column: string, athleteId: string):
         .prepare(`SELECT count(*) AS n FROM "${table}" WHERE "${column}" = ?`)
         .get(athleteId) as { n: number }
     ).n;
+  } finally {
+    database.close();
+  }
+}
+
+/**
+ * Every column that names an athlete WITHOUT a foreign key to `athlete` (#83),
+ * and what erasing that athlete does to the rows naming them. A reference with
+ * a foreign key is found by {@link athleteScopedTables}; one without is found
+ * here by its NAME, from the schema — every column ending `athlete_id` — so a
+ * later table that names an athlete another way fails until it says which.
+ *
+ * - `erased`: `eraseAthlete` deletes the rows naming the erased athlete.
+ * - `kept`: the rows stay, naming an id that no longer resolves to anybody,
+ *   and the reason is recorded here.
+ */
+const NAMED_WITHOUT_A_FOREIGN_KEY: Readonly<
+  Record<string, { readonly erased: true } | { readonly kept: string }>
+> = {
+  // Neither of the next two can carry a foreign key even in principle: since
+  // #891's review each may name an id NOBODY ever held, stored so that a
+  // rider's own block list and report allowance say nothing about who exists.
+  'block.blocked_athlete_id': { erased: true },
+  'report.target_athlete_id': {
+    kept: 'the report is the REPORTER’s row, and a moderator still decides it',
+  },
+  'report.closed_by_athlete_id': { kept: 'who decided a report is part of the audit trail' },
+  'moderation_log.actor_athlete_id': {
+    kept: 'the audit log is append-only: erasing an account does not erase what was done (#83)',
+  },
+  'moderation_log.target_athlete_id': {
+    kept: 'the audit log is append-only: a suspended rider cannot erase their record (#83)',
+  },
+};
+
+/** Every `table.column` ending `athlete_id` that has no foreign key, from the database. */
+function namedWithoutForeignKey(path: string): string[] {
+  const database = openDatabase(path);
+  try {
+    const columns = database
+      .prepare(
+        `SELECT m.name AS "table", c.name AS "column"
+         FROM sqlite_schema AS m, pragma_table_info(m.name) AS c
+         WHERE m.type = 'table' AND m.name NOT LIKE 'kysely_%' AND c.name LIKE '%athlete_id'
+         ORDER BY m.name, c.name`,
+      )
+      .all() as unknown as { table: string; column: string }[];
+    const withKey = new Set(references(path).map((each) => `${each.table}.${each.from}`));
+    return columns
+      .map((each) => `${each.table}.${each.column}`)
+      .filter((column) => !withKey.has(column));
   } finally {
     database.close();
   }
@@ -143,9 +195,84 @@ describe('erasing an athlete (#769, #35)', () => {
     }
   });
 
-  it('names every athlete-scoped table in the erasure list', async () => {
+  it('says, for every column that names an athlete with no foreign key, what erasure does (#83)', async () => {
+    harness = await createStoreHarness();
+    await harness.write(seedWorld);
+    const columns = namedWithoutForeignKey(harness.path);
+    expect(columns.length).toBeGreaterThan(0);
+    expect(columns).toEqual(Object.keys(NAMED_WITHOUT_A_FOREIGN_KEY).sort());
+
+    const count = (column: string, athleteId: string): number => {
+      const [table, name] = column.split('.') as [string, string];
+      return rowsOf(harness!.path, table, name, athleteId);
+    };
+    // The log and a report's decision only exist once a moderator acts.
+    await harness.write(async (store) => {
+      const [report] = await store.listReports(ATHLETE_A);
+      await store.moderate({
+        action: 'suspend',
+        actorAthleteId: ATHLETE_B,
+        targetAthleteId: report!.targetAthleteId,
+        reportId: report!.id,
+        reason: 'Seen',
+        at: 1_790_001_000,
+      });
+      await store.moderate({
+        action: 'hide_display_name',
+        actorAthleteId: ATHLETE_A,
+        targetAthleteId: ATHLETE_B,
+        reportId: null,
+        reason: 'Seen',
+        at: 1_790_001_000,
+      });
+    });
+    for (const column of columns) {
+      expect(count(column, ATHLETE_B), `${column} names B before`).toBeGreaterThan(0);
+    }
+    await harness.write((store) => store.eraseAthlete(ATHLETE_B));
+    for (const column of columns) {
+      const rule = NAMED_WITHOUT_A_FOREIGN_KEY[column]!;
+      if ('erased' in rule) {
+        expect(count(column, ATHLETE_B), `${column} erased`).toBe(0);
+      } else {
+        expect(count(column, ATHLETE_B), `${column} kept: ${rule.kept}`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('derives the tables it erases from the schema, children before the tables they reference', async () => {
     harness = await createStoreHarness();
     await harness.write(() => Promise.resolve());
-    expect([...ATHLETE_TABLES_IN_ERASURE_ORDER].sort()).toEqual(athleteScopedTables(harness.path));
+    const db = openKysely(harness.path);
+    try {
+      const order = await athleteTablesInErasureOrder(db);
+      expect([...order].sort()).toEqual(athleteScopedTables(harness.path));
+      expect(order, 'migration 0009’s manifest is found with no list naming it').toContain(
+        'sync_item',
+      );
+      const scoped = new Set<string>(order);
+      for (const reference of references(harness.path)) {
+        if (!scoped.has(reference.table) || !scoped.has(reference.parent)) continue;
+        if (reference.table === reference.parent) continue;
+        expect(
+          order.indexOf(reference.table as never),
+          `${reference.table} before ${reference.parent}`,
+        ).toBeLessThan(order.indexOf(reference.parent as never));
+      }
+    } finally {
+      await db.destroy();
+    }
+  });
+
+  it('answers the files the erased athlete held, for the blob sweep (#35)', async () => {
+    harness = await createStoreHarness();
+    await harness.write(seedWorld);
+    const held = (await harness.read((store) => store.listActivityRecords(ATHLETE_B)))
+      .map((record) => record.contentSha256)
+      .sort();
+    expect(held.length).toBeGreaterThan(0);
+    const erased = await harness.write((store) => store.eraseAthlete(ATHLETE_B));
+    expect([...erased].sort()).toEqual(held);
+    expect(await harness.write((store) => store.eraseAthlete(ATHLETE_B)), 'idempotent').toEqual([]);
   });
 });

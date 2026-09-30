@@ -6,8 +6,10 @@
  * `auth/routes.ts` can both use it without importing each other.
  */
 
+import type { Readiness } from './readiness.ts';
 import type { Caller, Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
+import type { Sync } from './sync/sync.ts';
 import { JSON_TYPE, type ErrorCode } from './errors.ts';
 
 /** The subset of JSON Schema the specification uses, and the contract test checks. */
@@ -21,7 +23,9 @@ export type Schema =
   | { readonly type: 'object'; readonly description: string }
   | { readonly type: 'array'; readonly items: Schema }
   | { readonly type: 'string' | ['string', 'null']; readonly format?: 'uri' }
-  | { readonly type: 'integer' | 'number' | 'boolean' | ['integer', 'null'] }
+  | {
+      readonly type: 'integer' | 'number' | 'boolean' | ['integer', 'null'] | ['number', 'null'];
+    }
   | { readonly type: 'string'; readonly enum: readonly string[] }
   | { readonly $ref: string };
 
@@ -29,6 +33,23 @@ export type Schema =
 export interface ClientInfo {
   /** The peer's address, for rate limits only — never logged. `null` when unknown. */
   readonly address: string | null;
+}
+
+/**
+ * What a running instance can say about itself and its rooms (#780, #791),
+ * handed to the handler by `instance.ts`. Absent — a test's handler, or a
+ * mount with no rooms — `/ready` is not ready and `/metrics` is not served.
+ */
+export interface InstanceProbes {
+  ready(): Promise<Readiness>;
+  /**
+   * The metrics document, when the operator turned it on
+   * (`OYL_INSTANCE_METRICS`) — for a request whose `Authorization` carries
+   * the operator's token; `undefined` for any other.
+   */
+  readonly metrics?: (authorization: string | null) => Promise<string | undefined>;
+  /** Start a race's countdown, for an athlete seated in it. */
+  readonly startRoom?: (roomId: string, athleteId: string) => Promise<'started' | 'not_found'>;
 }
 
 /** What a route is handed. */
@@ -57,7 +78,28 @@ export interface RouteContext {
   readonly identity: Identity | undefined;
   /** The signed-in caller, for a route that declares `auth: 'session'`. */
   readonly caller: Caller | undefined;
+  /** Sync (#37, #776). Present for every route that declares `sync`; the handler sees to it. */
+  readonly sync: Sync | undefined;
+  readonly probes: InstanceProbes | undefined;
 }
+
+/**
+ * Whether, and how, a route reaches ANOTHER athlete (#83). Required on every
+ * route, so a new one cannot be added without saying — and
+ * `moderation/choke-point.test.ts` walks the table and holds each to it.
+ *
+ * - `'own'` — the instance's metadata, or the caller's own account and data.
+ * - `{ athlete: name }` — the path's `{name}` segment is another athlete. The
+ *   handler asks the choke point (`moderation.ts` §`canSee`) before calling the
+ *   route, and answers `not_found` when the caller may not see them: the same
+ *   answer as for an athlete who does not exist.
+ * - `'moderation'` — the instance's moderators only; anybody else gets
+ *   `not_found`, as though the route were not there.
+ * - `{ exempt: reason }` — it reaches other athletes, and does not ask the
+ *   choke point, for the reason given.
+ */
+export type Reach =
+  'own' | { readonly athlete: string } | 'moderation' | { readonly exempt: string };
 
 export interface Route {
   readonly method: 'GET' | 'POST' | 'DELETE';
@@ -70,6 +112,18 @@ export interface Route {
    * identity answers `unavailable` without calling it.
    */
   readonly identity?: true;
+  /**
+   * The route needs the instance's sync store and blobs (#37). An instance
+   * handed none answers `unavailable` without calling it.
+   */
+  readonly sync?: true;
+  /** Whether the route reaches another athlete, and how (#83). */
+  readonly reaches: Reach;
+  /**
+   * An athlete awaiting approval (#775) may call this route. Every other
+   * session route answers such a caller `registration_pending`.
+   */
+  readonly admitsPending?: true;
   /** The route needs a signed-in device: `Authorization: Bearer <session token>`. */
   readonly auth?: 'session';
   /** The JSON body the route reads, for the specification. */
@@ -79,6 +133,8 @@ export interface Route {
   readonly response:
     | { readonly contentType: 'application/json'; readonly schema: Schema }
     | { readonly contentType: 'text/plain' }
+    /** Bytes, exactly as they were stored: an original activity file (#35, #776). */
+    | { readonly contentType: 'application/octet-stream' }
     /** 204, no body. */
     | { readonly contentType: 'none' };
   readonly handle: (context: RouteContext) => Response | Promise<Response>;

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import type { Identity } from './auth/identity.ts';
+import type { Caller, Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
 import { errorResponse } from './errors.ts';
 import { logRequest, logUnhandled, type LogSink } from './log.ts';
 import { openApiDocument } from './openapi.ts';
-import type { ClientInfo } from './route-kit.ts';
+import type { ClientInfo, InstanceProbes } from './route-kit.ts';
+import type { Sync } from './sync/sync.ts';
 import { ROUTES, type Route } from './routes.ts';
 
 /**
@@ -31,9 +32,17 @@ import { ROUTES, type Route } from './routes.ts';
  *    so a value the route reads from `params` is never a path or a query.
  * 3. **What the route declares it needs** (#772): the instance's accounts
  *    (`unavailable` when this instance was given none), a signed-in session
- *    (`unauthenticated`, with `WWW-Authenticate: Bearer`), and a JSON object
- *    body (`validation_failed`).
- * 4. **The route's own answer**, and anything it throws is `internal` in the
+ *    (`unauthenticated`, with `WWW-Authenticate: Bearer`) — one that is not
+ *    awaiting approval unless the route `admitsPending` (#775,
+ *    `registration_pending`) — and a JSON object body (`validation_failed`).
+ * 4. **Whom the route reaches** (#83) — THE choke point. A route that names
+ *    another athlete in its path is called only when `moderation.ts`
+ *    §`canSee` says the caller may see them; otherwise the answer is
+ *    `not_found`, byte for byte what an athlete who does not exist gets, and
+ *    it comes BEFORE the body is looked at, so not even a malformed request
+ *    can tell the two apart. A moderators' route is `not_found` to everybody
+ *    else. No route checks a block for itself.
+ * 5. **The route's own answer**, and anything it throws is `internal` in the
  *    one error shape — no message, no stack, no path (#36, ADR 0004 D) — while
  *    the log gets the error's name alone (`log.ts`).
  *
@@ -59,6 +68,14 @@ import { ROUTES, type Route } from './routes.ts';
  * send with `curl`. `Access-Control-Allow-Credentials` is therefore never
  * sent, and must not be — with it, `*` is refused by browsers, and a list of
  * origins that did carry credentials would be a different threat model.
+ *
+ * **A preflight reaches nobody** (#891's choke point, step 4): it calls no
+ * route and reads no store, and its answer depends on the PATH's shape alone
+ * — the same `204` for an athlete who exists, one who blocked the caller and
+ * one who does not, and for a moderators' route the same list of methods a
+ * `method_not_allowed` there already names to anybody. A browser sends no
+ * `Authorization` on a preflight, so there is no caller to ask the choke point
+ * about; the real request that follows is asked, as every request is.
  */
 
 export type Handler = (request: Request, client?: ClientInfo) => Promise<Response>;
@@ -78,6 +95,19 @@ export interface HandlerOptions {
    * (the self-hosted box's wiring is #780's), so it serves the metadata alone.
    */
   readonly identity?: Identity;
+  /** What `/ready`, `/metrics` and a room's start ask (#780, #791). */
+  readonly probes?: InstanceProbes;
+  /**
+   * Called as each response goes out: the route PATTERN it matched (or
+   * `null`), its status, and its error code when it is an error — what
+   * `/metrics` counts (`metrics.ts`). Never the path, never a value.
+   */
+  readonly observe?: (route: string | null, status: number, code: string | undefined) => void;
+  /**
+   * Sync (#37, #776): the store and the blobs a device syncs through. Absent,
+   * every route that needs it answers `unavailable`, as for identity.
+   */
+  readonly sync?: Sync;
 }
 
 /** A path parameter's value: one segment, of these characters only. */
@@ -167,6 +197,19 @@ async function boundedBody(
   return body;
 }
 
+/** An error response's `error.code`, read from a copy of its body; `undefined` for anything else. */
+async function errorCodeOf(response: Response): Promise<string | undefined> {
+  if (response.status < 400) return undefined;
+  if (!(response.headers.get('content-type') ?? '').startsWith('application/json'))
+    return undefined;
+  try {
+    const body = (await response.clone().json()) as { error?: { code?: unknown } };
+    return typeof body.error?.code === 'string' ? body.error.code : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function withHeaders(response: Response): Response {
   const headers = new Headers(response.headers);
   for (const [name, value] of Object.entries(ALWAYS)) headers.set(name, value);
@@ -182,6 +225,22 @@ export function createHandler(options: HandlerOptions): Handler {
   const now = options.now ?? (() => performance.now());
   const specification = openApiDocument(routes);
 
+  /** Step 4: whether the caller may reach whom the route reaches. */
+  async function reachable(
+    matched: Route,
+    params: Record<string, string>,
+    caller: Caller | undefined,
+  ): Promise<boolean> {
+    const reach = matched.reaches;
+    if (reach === 'own') return true;
+    if (typeof reach === 'object' && 'exempt' in reach) return true;
+    const moderation = options.identity?.moderation;
+    if (caller === undefined || moderation === undefined) return false;
+    if (reach === 'moderation') return (await moderation.roleOf(caller.athleteId)) !== undefined;
+    const subject = params[reach.athlete];
+    return subject !== undefined && (await moderation.canSee(caller.athleteId, subject));
+  }
+
   async function answer(
     matched: Route,
     params: Record<string, string>,
@@ -192,13 +251,20 @@ export function createHandler(options: HandlerOptions): Handler {
   ): Promise<Response> {
     const identity = options.identity;
     if (matched.identity === true && identity === undefined) return errorResponse('unavailable');
-    let caller;
+    if (matched.sync === true && options.sync === undefined) return errorResponse('unavailable');
+    let caller: Caller | undefined;
     if (matched.auth === 'session') {
       caller = await identity?.authenticate(request.headers.get('authorization'));
       if (caller === undefined) {
         return errorResponse('unauthenticated', { headers: { 'www-authenticate': 'Bearer' } });
       }
+      // An athlete awaiting approval reaches their own account and nothing
+      // else (#775): not other riders, not rooms, not reports.
+      if (caller.standing === 'pending' && matched.admitsPending !== true) {
+        return errorResponse('registration_pending');
+      }
     }
+    if (!(await reachable(matched, params, caller))) return errorResponse('not_found');
     const parsed = matched.request === undefined ? {} : jsonObject(body);
     if (parsed === undefined) {
       return errorResponse('validation_failed', {
@@ -218,6 +284,8 @@ export function createHandler(options: HandlerOptions): Handler {
       specification,
       identity,
       caller,
+      sync: options.sync,
+      probes: options.probes,
     });
   }
 
@@ -271,6 +339,9 @@ export function createHandler(options: HandlerOptions): Handler {
       status: response.status,
       ms: now() - started,
     });
+    if (options.observe !== undefined) {
+      options.observe(route?.path ?? null, response.status, await errorCodeOf(response));
+    }
     return withHeaders(response);
   };
 }

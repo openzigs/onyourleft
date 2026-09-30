@@ -63,6 +63,18 @@ const STATEMENT_PROPERTIES: Readonly<Record<string, Schema>> = {
 
 const publicAthleteSchema = object({ athleteId: string, displayName: string });
 
+const accountSchema = object({
+  athleteId: string,
+  displayName: string,
+  registrationState: { type: 'string', enum: ['active', 'pending'] },
+  adultConfirmedAt: nullableInteger,
+  moderatorRole: { type: ['string', 'null'] },
+  publicRooms: object({
+    eligible: { type: 'boolean' },
+    reasons: { type: 'array', items: string },
+  }),
+});
+
 const STATEMENT_ERRORS = [
   'validation_failed',
   'wrong_purpose',
@@ -78,6 +90,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     method: 'POST',
     path: '/v1/auth/challenge',
     operationId: 'createChallenge',
+    reaches: 'own',
     summary:
       'A single-use nonce, good for 60 seconds, for a device to sign with its key. Rate-limited per key and per address.',
     identity: true,
@@ -94,14 +107,31 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     method: 'POST',
     path: '/v1/auth/session',
     operationId: 'createSession',
+    reaches: 'own',
     summary:
-      'Sign in with a signed `oyl-auth-v1` statement. A key the instance has not seen registers a new athlete, and only then are the recovery codes in the answer.',
+      'Sign in with a signed `oyl-auth-v1` statement. A key the instance has not seen registers a new athlete as the registration mode allows — awaiting approval by default — and only then are the recovery codes in the answer. New registrations are rate-limited per client address.',
     identity: true,
     request: object(
-      { ...STATEMENT_PROPERTIES, displayName: string, recoveryEmail: string },
+      {
+        ...STATEMENT_PROPERTIES,
+        displayName: string,
+        recoveryEmail: string,
+        inviteCode: string,
+        confirmsAdult: { type: 'boolean' },
+      },
       Object.keys(STATEMENT_PROPERTIES),
     ),
-    errors: [...STATEMENT_ERRORS, 'key_revoked', 'registration_closed'],
+    errors: [
+      ...STATEMENT_ERRORS,
+      'key_revoked',
+      'registration_closed',
+      'registration_refused',
+      'account_suspended',
+      'code_unknown',
+      'code_used',
+      'code_expired',
+      'rate_limited',
+    ],
     response: {
       contentType: 'application/json',
       schema: object(
@@ -111,23 +141,39 @@ export const IDENTITY_ROUTES: readonly Route[] = [
           athleteId: string,
           displayName: string,
           registered: { type: 'boolean' },
+          registrationState: { type: 'string', enum: ['active', 'pending'] },
           recoveryCodes: { type: 'array', items: string },
         },
-        ['sessionToken', 'expiresAt', 'athleteId', 'displayName', 'registered'],
+        [
+          'sessionToken',
+          'expiresAt',
+          'athleteId',
+          'displayName',
+          'registered',
+          'registrationState',
+        ],
       ),
     },
     handle: async (context) =>
       answer(
-        await identityOf(context).signIn(context.json, {
-          displayName: context.json.displayName,
-          recoveryEmail: context.json.recoveryEmail,
-        }),
+        await identityOf(context).signIn(
+          context.json,
+          {
+            displayName: context.json.displayName,
+            recoveryEmail: context.json.recoveryEmail,
+            inviteCode: context.json.inviteCode,
+            confirmsAdult: context.json.confirmsAdult,
+          },
+          context.client.address,
+        ),
       ),
   },
   {
     method: 'GET',
     path: '/v1/auth/session',
     operationId: 'getSession',
+    reaches: 'own',
+    admitsPending: true,
     summary: 'Who this session is: the athlete, as other riders see them.',
     identity: true,
     auth: 'session',
@@ -139,6 +185,8 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     method: 'DELETE',
     path: '/v1/auth/session',
     operationId: 'deleteSession',
+    reaches: 'own',
+    admitsPending: true,
     summary: 'Sign out: the session is revoked on the instance, not only forgotten by the device.',
     identity: true,
     auth: 'session',
@@ -153,6 +201,8 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     method: 'POST',
     path: '/v1/auth/display-name',
     operationId: 'setDisplayName',
+    reaches: 'own',
+    admitsPending: true,
     summary:
       'Change the display name: 1–32 characters, no control, bidirectional or invisible character. Rate-limited, and the old name is kept for moderation.',
     identity: true,
@@ -167,6 +217,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     method: 'GET',
     path: '/v1/athletes/{athleteId}',
     operationId: 'getAthlete',
+    reaches: { athlete: 'athleteId' },
     summary: 'What another rider may see of an athlete: the display name, and nothing else.',
     identity: true,
     auth: 'session',
@@ -179,12 +230,16 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     method: 'POST',
     path: '/v1/rooms/{roomId}/ticket',
     operationId: 'createRoomTicket',
+    reaches: {
+      exempt:
+        'a room’s riders see each other: blocking inside a room is room moderation, #789’s (ADR 0028 D-6.4)',
+    },
     summary:
-      'A ticket for one room’s WebSocket hello: single use, 30 seconds. The socket never carries the session token.',
+      'A ticket for one room’s WebSocket hello: single use, 30 seconds. The socket never carries the session token. A public room needs an eligible account (`GET /v1/auth/account`).',
     identity: true,
     auth: 'session',
     request: object({ declaredMassKilograms: { type: 'number' } }),
-    errors: ['unauthenticated', 'validation_failed'],
+    errors: ['unauthenticated', 'validation_failed', 'not_eligible'],
     response: {
       contentType: 'application/json',
       schema: object({ ticket: string, expiresAt: integer }),
@@ -205,6 +260,8 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     method: 'GET',
     path: '/v1/auth/devices',
     operationId: 'listDevices',
+    reaches: 'own',
+    admitsPending: true,
     summary: 'This athlete’s device keys: when each was added and last used, and which is asking.',
     identity: true,
     auth: 'session',
@@ -231,6 +288,8 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     method: 'POST',
     path: '/v1/auth/devices/{publicKey}/revoke',
     operationId: 'revokeDevice',
+    reaches: 'own',
+    admitsPending: true,
     summary:
       'Revoke one of this athlete’s device keys and its sessions. The last key needs one of the athlete’s recovery codes, which is checked and not spent.',
     identity: true,
@@ -251,6 +310,8 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     method: 'POST',
     path: '/v1/auth/link-codes',
     operationId: 'createLinkCode',
+    reaches: 'own',
+    admitsPending: true,
     summary:
       'A single-use code, good for 5 minutes, that adds another device’s own key to this athlete.',
     identity: true,
@@ -266,6 +327,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     method: 'POST',
     path: '/v1/auth/link',
     operationId: 'linkDevice',
+    reaches: 'own',
     summary:
       'Add this device’s key to the athlete whose other device minted the code, with a signed `oyl-link-v1` statement.',
     identity: true,
@@ -279,6 +341,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     method: 'POST',
     path: '/v1/auth/recover',
     operationId: 'recoverAccount',
+    reaches: 'own',
     summary:
       'Add this device’s key to an athlete with a recovery code, or with an emailed token where the operator enabled email recovery, and a signed `oyl-recover-v1` statement.',
     identity: true,
@@ -300,6 +363,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     method: 'POST',
     path: '/v1/auth/recover/email',
     operationId: 'requestEmailRecovery',
+    reaches: 'own',
     summary:
       'Email a single-use recovery link to an address, if an athlete registered it. The same answer either way. `not_found` where the operator has not enabled email recovery.',
     identity: true,
@@ -310,6 +374,85 @@ export const IDENTITY_ROUTES: readonly Route[] = [
       const outcome = await identityOf(context).requestEmailRecovery(
         context.json.address,
         context.client.address,
+      );
+      return outcome.ok ? noContent() : answer(outcome);
+    },
+  },
+  {
+    method: 'GET',
+    path: '/v1/auth/account',
+    operationId: 'getAccount',
+    reaches: 'own',
+    admitsPending: true,
+    summary:
+      'This athlete’s own account: whether it is approved, when they confirmed they are 18 or over, any moderator role, and whether they may join a public room — and if not, every reason why.',
+    identity: true,
+    auth: 'session',
+    errors: ['unauthenticated'],
+    response: { contentType: 'application/json', schema: accountSchema },
+    handle: async (context) => answer(await identityOf(context).account(callerOf(context))),
+  },
+  {
+    method: 'POST',
+    path: '/v1/auth/adult',
+    operationId: 'confirmAdult',
+    reaches: 'own',
+    admitsPending: true,
+    summary:
+      'Confirm that the rider is 18 or over, which public rooms require (ruling Q5). Only the confirmation and its date are kept: no date of birth is asked for or stored.',
+    identity: true,
+    auth: 'session',
+    request: object({ confirmed: { type: 'boolean' } }),
+    errors: ['unauthenticated', 'validation_failed'],
+    response: { contentType: 'application/json', schema: accountSchema },
+    handle: async (context) =>
+      answer(await identityOf(context).confirmAdult(callerOf(context), context.json.confirmed)),
+  },
+  {
+    method: 'POST',
+    path: '/v1/auth/recovery-email',
+    operationId: 'setRecoveryEmail',
+    reaches: 'own',
+    admitsPending: true,
+    summary:
+      'Give an address for email recovery: a single-use link, good for 24 hours, is mailed to it, and the address recovers nothing until that link is followed. The same answer whether or not the address is already held. `rate_limited` when this athlete has given addresses too often this hour; `internal` when the mail could not be sent, and then nothing is stored. `not_found` where the operator has not enabled email recovery.',
+    identity: true,
+    auth: 'session',
+    request: object({ address: string }),
+    errors: ['unauthenticated', 'validation_failed'],
+    response: { contentType: 'none' },
+    handle: async (context) => {
+      const outcome = await identityOf(context).setRecoveryEmail(
+        callerOf(context),
+        context.json.address,
+      );
+      return outcome.ok ? noContent() : answer(outcome);
+    },
+  },
+  {
+    method: 'POST',
+    path: '/v1/auth/recovery-email/confirm',
+    operationId: 'confirmRecoveryEmail',
+    reaches: 'own',
+    admitsPending: true,
+    summary:
+      'Follow the link mailed to a recovery address, signed in as the athlete who gave it: the address is bound, replacing any earlier one. `address_in_use` when it is already another account’s.',
+    identity: true,
+    auth: 'session',
+    request: object({ token: string }),
+    errors: [
+      'unauthenticated',
+      'validation_failed',
+      'code_unknown',
+      'code_used',
+      'code_expired',
+      'address_in_use',
+    ],
+    response: { contentType: 'none' },
+    handle: async (context) => {
+      const outcome = await identityOf(context).confirmRecoveryEmail(
+        callerOf(context),
+        context.json.token,
       );
       return outcome.ok ? noContent() : answer(outcome);
     },

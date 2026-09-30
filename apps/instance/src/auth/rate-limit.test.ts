@@ -68,15 +68,16 @@ describe('sweepPeriodMs', () => {
   });
 });
 
-describe('whatever builds an identity for the running instance hands the listener its sweep', () => {
-  // `main.ts` builds no `Identity` yet, so the project's instance counts no
-  // address today. The day it does, the sweep must come with it, or the
-  // policy's "at most an hour" is false again: a tripwire on the entry point.
-  it('main.ts passes sweepRateLimits to listen wherever it creates an identity', () => {
-    const main = readFileSync(new URL('../main.ts', import.meta.url), 'utf8');
-    if (main.includes('createIdentity(')) {
-      expect(main).toContain('sweepRateLimits');
-      expect(main).toContain('rateLimitSweepPeriodMs');
-    }
+describe('whatever builds an identity for the running instance runs its sweep', () => {
+  // Since the merge with #895, `instance.ts` §`startInstance` builds the
+  // running instance's `Identity`, so the project's instance counts addresses.
+  // The sweep must come with it, or the policy's "at most an hour" is false
+  // again: a tripwire on the one place that builds it. `instance.test.ts`
+  // §"#892" drives the sweep through a started instance.
+  it('instance.ts runs sweepRateLimits on its period wherever it creates an identity', () => {
+    const started = readFileSync(new URL('../instance.ts', import.meta.url), 'utf8');
+    expect(started).toContain('createIdentity(');
+    expect(started).toContain('sweepRateLimits');
+    expect(started).toContain('rateLimitSweepPeriodMs');
   });
 });

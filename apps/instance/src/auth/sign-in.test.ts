@@ -10,7 +10,7 @@ import { contentHashOf, RECORD_FORMAT, signActivityRecord, LINK_PURPOSE } from '
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { sha256Hex } from './crypto.ts';
-import { CHALLENGE_LIFETIME_SECONDS, RECOVERY_CODE_COUNT } from './identity.ts';
+import { CHALLENGE_LIFETIME_SECONDS, DEFAULT_LIMITS, RECOVERY_CODE_COUNT } from './identity.ts';
 import {
   startIdentityInstance,
   TEST_ORIGIN,
@@ -235,12 +235,19 @@ describe('what the rate limits hold, and for how long — #892 review', () => {
     const w = await start();
     expect(w.identity.rateLimitSweepPeriodMs).toBe(60_000);
     const device = await testDevice();
+    // A challenge counts the address; the key is counted only once a valid
+    // signature spends a challenge (#891), so a whole sign-in is what holds
+    // it — with the per-address registration count of a new account.
     expect((await w.identity.challenge(device.publicKey, '203.0.113.9')).ok).toBe(true);
-    expect(w.identity.heldRateLimitKeys()).toBe(2);
+    expect(w.identity.heldRateLimitKeys()).toBe(1);
+    await w.signIn(device);
+    // 203.0.113.9 and the test's own loopback address, per address; the key,
+    // proven; and loopback again, for the registration it made.
+    expect(w.identity.heldRateLimitKeys()).toBe(4);
     const end = (Math.floor(w.clock.ms / 60_000) + 1) * 60_000;
     w.clock.ms = end - 1;
     w.identity.sweepRateLimits();
-    expect(w.identity.heldRateLimitKeys()).toBe(2);
+    expect(w.identity.heldRateLimitKeys()).toBe(4);
     w.clock.ms = end;
     w.identity.sweepRateLimits();
     expect(w.identity.heldRateLimitKeys()).toBe(0);
@@ -265,36 +272,89 @@ describe('what the rate limits hold, and for how long — #892 review', () => {
   });
 });
 
+describe('what the rate limits hold after the merge with #889 and #891 — #892', () => {
+  // #889's confirmation limits and #891's registration limit hold keys too —
+  // an athlete, an address pair, an email address, an internet address — and
+  // every one of them is swept at the end of its hour.
+  it('forgets the registration and confirmation keys when their hour ends', async () => {
+    const w = await start({ emailRecovery: true });
+    const answer = await w.signIn(await testDevice());
+    const token = answer.body.sessionToken as string;
+    const given = await w.call('POST', '/v1/auth/recovery-email', {
+      token,
+      body: { address: 'rider@example.org' },
+    });
+    expect(given.status).toBe(204);
+    const minuteEnd = (Math.floor(w.clock.ms / 60_000) + 1) * 60_000;
+    w.clock.ms = minuteEnd;
+    w.identity.sweepRateLimits();
+    // The test harness's registration limit is a minute long; the three
+    // confirmation limits are an hour long, and still held.
+    expect(w.identity.heldRateLimitKeys()).toBe(3);
+    const hourEnd = (Math.floor(w.clock.ms / 3_600_000) + 1) * 3_600_000;
+    w.clock.ms = hourEnd - 1;
+    w.identity.sweepRateLimits();
+    expect(w.identity.heldRateLimitKeys()).toBe(3);
+    w.clock.ms = hourEnd;
+    w.identity.sweepRateLimits();
+    expect(w.identity.heldRateLimitKeys()).toBe(0);
+  });
+});
+
 describe('rate limits on /v1/auth/challenge', () => {
-  it('refuses the eleventh challenge for one key in a minute, and allows it the next minute', async () => {
+  it('refuses the eleventh SIGN-IN of one key in a minute, and allows it the next minute', async () => {
     const w = await start();
     const device = await testDevice();
-    for (let n = 0; n < 10; n += 1) {
-      expect(
-        (await w.call('POST', '/v1/auth/challenge', { body: { publicKey: device.publicKey } }))
-          .status,
-      ).toBe(200);
-    }
+    for (let n = 0; n < 10; n += 1) expect((await w.signIn(device)).status).toBe(200);
     const over = await w.call('POST', '/v1/auth/challenge', {
       body: { publicKey: device.publicKey },
     });
     expect(over.status).toBe(429);
     expect(codeOf(over.body)).toBe('rate_limited');
     w.clock.ms += 60_000;
-    expect(
-      (await w.call('POST', '/v1/auth/challenge', { body: { publicKey: device.publicKey } }))
-        .status,
-    ).toBe(200);
+    expect((await w.signIn(device)).status).toBe(200);
+  });
+
+  it('does not let a stranger asking for a key’s challenges lock its holder out (#861’s review)', async () => {
+    const w = await start();
+    const device = await testDevice();
+    // A public key is in every signed record, so anybody can ask for its challenges.
+    for (let n = 0; n < 20; n += 1) {
+      expect(
+        (await w.call('POST', '/v1/auth/challenge', { body: { publicKey: device.publicKey } }))
+          .status,
+      ).toBe(200);
+    }
+    expect((await w.signIn(device)).status).toBe(200);
+  });
+
+  it('gives a client whose address is unknown no shared per-address bucket (#861’s review)', async () => {
+    const w = await start({
+      limits: { ...DEFAULT_LIMITS, challengePerAddress: { limit: 2, windowMs: 60_000 } },
+    });
+    const ask = (publicKey: string) =>
+      w.instance.handler(
+        new Request('http://instance.invalid/v1/auth/challenge', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ publicKey }),
+        }),
+        { address: null },
+      );
+    // One busy client with no address…
+    for (let n = 0; n < 5; n += 1) {
+      expect((await ask(n.toString(16).padStart(2, '0').repeat(32))).status).toBe(200);
+    }
+    // …and another is still answered.
+    expect((await ask('ab'.repeat(32))).status).toBe(200);
   });
 
   it('refuses one address past its limit, whatever key it names', async () => {
     const w = await start({
       limits: {
+        ...DEFAULT_LIMITS,
         challengePerKey: { limit: 100, windowMs: 60_000 },
         challengePerAddress: { limit: 5, windowMs: 60_000 },
-        renamesPerWindow: 3,
-        renameWindowSeconds: 86_400,
-        emailRecoveryPerAddress: { limit: 3, windowMs: 3_600_000 },
       },
     });
     const statuses: number[] = [];

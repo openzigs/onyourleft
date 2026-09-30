@@ -64,11 +64,13 @@ function operation(route: Route): Record<string, unknown> {
     const success =
       route.response.contentType === 'application/json'
         ? { 'application/json': { schema: route.response.schema } }
-        : { 'text/plain': { schema: { type: 'string' } } };
+        : route.response.contentType === 'application/octet-stream'
+          ? { 'application/octet-stream': { schema: { type: 'string', format: 'binary' } } }
+          : { 'text/plain': { schema: { type: 'string' } } };
     responses['200'] = { description: 'OK', content: success };
   }
   const codes = new Set<ErrorCode>([...EVERY_ROUTE, ...(route.errors ?? [])]);
-  if (route.identity === true) codes.add('unavailable');
+  if (route.identity === true || route.sync === true) codes.add('unavailable');
   // Several codes share a status, so a status names every code it may carry.
   const byStatus = new Map<number, ErrorCode[]>();
   for (const code of ERROR_CODES) {

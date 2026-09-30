@@ -13,6 +13,8 @@
  * says what it showed and why every constant stood.
  */
 
+import { BANNER_CELL_HEIGHT, BANNER_CELL_WIDTH, BANNER_CELLS } from './banner-atlas';
+import { standBoxes } from './gantry';
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -45,6 +47,7 @@ import {
   REALISTIC_RIDER_SURFACES,
   REALISTIC_BUILD_BYTES,
   REALISTIC_FRAME_TRIANGLES,
+  REALISTIC_GANTRY_TRIANGLES,
   REALISTIC_GROUND_BLOBS,
   REALISTIC_NEAR_MESHES,
   REALISTIC_STRUCTURE_ITEMS,
@@ -117,6 +120,9 @@ function worstVegetation(levels: TreeLevels = REALISTIC_TREE_LEVELS): number {
   );
 }
 
+/** A box's triangles: six faces, two each. */
+const BOX_TRIANGLES = 12;
+
 describe('each committed file inside its class’s budget — ADR 0026 D-6', () => {
   it('keeps every model at or under its kind’s triangles', () => {
     for (const kind of REALISTIC_VEGETATION_KINDS) {
@@ -150,7 +156,13 @@ describe('each committed file inside its class’s budget — ADR 0026 D-6', () 
       return Math.max(size.width, size.height);
     };
     expect(largest(REALISTIC_SKY)).toBeLessThanOrEqual(REALISTIC_TEXTURE_PIXELS.sky);
-    for (const maps of [REALISTIC_SURFACES.road, REALISTIC_SURFACES.ground]) {
+    for (const maps of [
+      REALISTIC_SURFACES.road,
+      REALISTIC_SURFACES.ground,
+      // #627: the ground's verge, rock and scree.
+      REALISTIC_SURFACES.verge,
+      REALISTIC_SURFACES.rock,
+    ]) {
       expect(largest(maps.colour), maps.colour).toBeLessThanOrEqual(
         REALISTIC_TEXTURE_PIXELS.surface,
       );
@@ -299,8 +311,13 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     readonly structureItems: number;
     readonly heaviestStructure: number;
     readonly blobs: number;
+    readonly gantries: number;
   } => {
     return {
+      // #679: two gantries and the board before a line, a quad a banner.
+      gantries:
+        2 * (standBoxes('gantry').length * BOX_TRIANGLES + 2) +
+        (standBoxes('board').length * BOX_TRIANGLES + 2),
       // #620: the ground blobs, every one the belt has room for, a quad each.
       blobs: REALISTIC_GROUND_BLOBS * GROUND_BLOB_TRIANGLES,
       vegetation: worstVegetation(),
@@ -314,13 +331,16 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
   };
 
   it('holds the worst frame the caps allow under the frame’s triangles, structures included — #506', () => {
-    const { vegetation, riders, structureItems, heaviestStructure, blobs } = worstFrame();
+    const { vegetation, riders, structureItems, heaviestStructure, blobs, gantries } = worstFrame();
     // ⚠️ #506: until this the sum stopped at the riders, and 240 structures
     // at up to 640 triangles each went into no sum at all. This is the line
     // that is red on the tree #506 was filed against.
-    expect(vegetation + riders + structureItems * heaviestStructure + blobs).toBeLessThanOrEqual(
-      REALISTIC_FRAME_TRIANGLES,
-    );
+    expect(
+      vegetation + riders + structureItems * heaviestStructure + blobs + gantries,
+    ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
+    // #679: the gantries inside their own ceiling, and a real sum.
+    expect(gantries).toBeLessThanOrEqual(REALISTIC_GANTRY_TRIANGLES);
+    expect(gantries).toBeGreaterThan(REALISTIC_GANTRY_TRIANGLES / 2);
     // Non-vacuity: the structures are a real share of the frame — a village
     // of detailed buildings — rather than a term that rounds to nothing.
     expect(structureItems * heaviestStructure).toBeGreaterThan(10_000);
@@ -328,9 +348,9 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
   });
 
   it('holds it with every structure at its CEILING too, so a building may grow to its budget — #506', () => {
-    const { vegetation, riders, structureItems, blobs } = worstFrame();
+    const { vegetation, riders, structureItems, blobs, gantries } = worstFrame();
     expect(
-      vegetation + riders + structureItems * REALISTIC_TRIANGLES.structure + blobs,
+      vegetation + riders + structureItems * REALISTIC_TRIANGLES.structure + blobs + gantries,
     ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
     // And the figure the rungs spend is the one `realistic-budget.ts` states.
     expect(structureItems).toBe(REALISTIC_STRUCTURE_ITEMS);
@@ -388,7 +408,8 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
    * each a KTX2 file, whose own header says its size and encoding.
    */
   const textures = (): readonly {
-    readonly role: 'surface' | 'structure' | 'model' | 'impostor' | 'bicycle' | 'rider';
+    readonly role:
+      'surface' | 'structure' | 'model' | 'impostor' | 'impostor-normals' | 'bicycle' | 'rider';
     readonly facts: Ktx2Facts;
   }[] => [
     // #623: the rider's kit, relief and occlusion.
@@ -401,7 +422,12 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
       role: 'bicycle' as const,
       facts: fileKtx2Facts(at(REALISTIC_BICYCLE_MAPS[map])),
     })),
-    ...[REALISTIC_SURFACES.road, REALISTIC_SURFACES.ground].flatMap((maps) =>
+    ...[
+      REALISTIC_SURFACES.road,
+      REALISTIC_SURFACES.ground,
+      REALISTIC_SURFACES.verge,
+      REALISTIC_SURFACES.rock,
+    ].flatMap((maps) =>
       [maps.colour, maps.normal].map((file) => ({
         role: 'surface' as const,
         facts: fileKtx2Facts(at(file)),
@@ -420,6 +446,15 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
         ...(model.impostor === undefined
           ? []
           : [{ role: 'impostor' as const, facts: fileKtx2Facts(at(model.impostor)) }]),
+        // #630: the strip's normals, priced as the normal maps they are.
+        ...(model.impostorNormals === undefined
+          ? []
+          : [
+              {
+                role: 'impostor-normals' as const,
+                facts: fileKtx2Facts(at(model.impostorNormals)),
+              },
+            ]),
       ]),
     ),
   ];
@@ -443,7 +478,7 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
 
   it('commits every texture but the sky as KTX2, a full mipmap chain each — #618', () => {
     const all = textures();
-    // Non-vacuity: the whole set, read — four surface maps, fourteen structure
+    // Non-vacuity: the whole set, read — eight surface maps, fourteen structure
     // maps, four impostors and every map in a tree, shrub and rock.
     expect(all.length).toBeGreaterThanOrEqual(40);
     for (const { role, facts } of all) {
@@ -473,8 +508,17 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
         sum + estimatedTextureBytes({ ...facts, bytesPerTexel: 4, mipmapped: true }),
       0,
     );
+    // #679: the banners' atlas, made at load from the app's glyphs — one
+    // byte a texel, uncompressed, with its mips; in no committed file.
+    const banners = estimatedTextureBytes({
+      width: BANNER_CELL_WIDTH,
+      height: BANNER_CELL_HEIGHT * BANNER_CELLS,
+      bytesPerTexel: 1,
+      mipmapped: true,
+    });
+    expect(banners).toBeLessThanOrEqual(2 ** 20);
     // #626: and the riders' silhouette, made at runtime at its own ceiling.
-    const total = compressed + skyBytes() + REALISTIC_RIDER_SILHOUETTE_BYTES;
+    const total = compressed + skyBytes() + REALISTIC_RIDER_SILHOUETTE_BYTES + banners;
     const before = decoded + skyBytes();
     const mib = (bytes: number): string => (bytes / 2 ** 20).toFixed(1);
     const tablet = (facts: Ktx2Facts): number =>
@@ -488,7 +532,9 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
         `Colour maps ${mib(sum((each) => standalone(each) && each.facts.scheme === 'etc1s'))}, ` +
         `normal maps ${mib(sum((each) => standalone(each) && each.facts.scheme === 'uastc'))}, ` +
         `maps inside a GLB ${mib(sum((each) => each.role === 'model'))}, ` +
-        `impostors ${mib(sum((each) => each.role === 'impostor'))}; the sky alone ${mib(skyBytes())}`,
+        `impostors ${mib(sum((each) => each.role === 'impostor'))}, ` +
+        `their normals (#630) ${mib(sum((each) => each.role === 'impostor-normals'))}; ` +
+        `the banners (#679) ${mib(banners)}; the sky alone ${mib(skyBytes())}`,
     );
     expect(total).toBeLessThanOrEqual(REALISTIC_TEXTURE_MEMORY_BYTES);
     // #618's criterion: it FALLS, from the 136 MiB the RGBA8 set was estimated at.

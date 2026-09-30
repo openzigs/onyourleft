@@ -269,12 +269,34 @@ export function nearPyramid(
   rig: CameraRig,
   aspect: number,
   near: number = NEAR_PLANE_METRES,
+  grow = 0,
 ): NearPyramid {
   const forward = unit(minus(rig.target, rig.eye));
   const right = unit(cross(forward, vector(0, 1, 0)));
   const up = cross(right, forward);
-  const across = near * horizontalSpread(aspect);
-  const rise = near * verticalHalfTangent(aspect);
+  // #630: grown by `grow` on every side, for a shape that MOVES by up to that
+  // much — the realistic foliage's breeze. The apex is drawn back along the
+  // axis until each side plane stands `grow` further out (a plane through the
+  // apex moves out by the distance times the sine of its half-angle, so the
+  // narrower half-angle decides), and the near plane moves on by `grow`: a
+  // pyramid holding every point within `grow` of the one it grew from.
+  const spread = horizontalSpread(aspect);
+  const halfTangent = verticalHalfTangent(aspect);
+  const narrowest = Math.min(spread, halfTangent);
+  const back = grow > 0 ? grow / (narrowest / Math.hypot(1, narrowest)) : 0;
+  if (back > 0) {
+    rig = {
+      eye: {
+        x: rig.eye.x - forward.x * back,
+        y: rig.eye.y - forward.y * back,
+        z: rig.eye.z - forward.z * back,
+      },
+      target: rig.target,
+    };
+    near += back + grow;
+  }
+  const across = near * spread;
+  const rise = near * halfTangent;
   const corner = (side: number, height: number): RigPoint =>
     vector(
       rig.eye.x + forward.x * near + right.x * across * side + up.x * rise * height,
@@ -746,8 +768,10 @@ export function clearOfTheCamera(
   aspect: number,
   world: DrawnWorld,
   shapesOf: ShapesOf,
+  /** How far a shape may move from where it stands — #630's breeze. @see nearPyramid */
+  grow = 0,
 ): readonly ScatterItem[] {
-  const pyramid = nearPyramid(rig, aspect);
+  const pyramid = nearPyramid(rig, aspect, NEAR_PLANE_METRES, grow);
   let kept: ScatterItem[] | undefined;
   for (let index = 0; index < items.length; index += 1) {
     const item = items[index] as ScatterItem;

@@ -8,6 +8,13 @@ import ts from 'typescript';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  importWalk,
+  readFromDisk,
+  type ImportClosure,
+  type ReadSource,
+} from '../camera/import-walk-testing';
+
+import {
   instanceHttp,
   InstanceUnreachableError,
   MAXIMUM_INSTANCE_ANSWER_BYTES,
@@ -125,14 +132,67 @@ describe('no camera type can reach the instance module — ADR 0036 D-3 (d)', ()
       const source = readFileSync(join(DIRECTORY, name), 'utf8');
       for (const specifier of importsOf(source)) {
         expect(specifier, `${name} imports ${specifier}`).not.toMatch(/camera|side-link|pose/);
-        // Only this directory and the two packages whose types it signs with.
-        expect(
-          specifier.startsWith('./') || specifier === '@onyourleft/domain',
-          `${name} imports ${specifier}`,
-        ).toBe(true);
       }
       expect(source, name).not.toMatch(/CapturedFrame|FrameBytes|\bframe\b/i);
     }
+  });
+
+  /**
+   * ⚠️ **Walked, not read one module deep, since the merge with #893.** #892
+   * held every module here to importing only this directory and
+   * `@onyourleft/domain`; #893's `sync.ts` imports `@onyourleft/store` and the
+   * activity-file codec in `transfer/`, which it needs to sign and export a
+   * ride. So what is held now is the whole closure: every module an instance
+   * module reaches, however far, stays out of the camera and names no frame,
+   * and the only packages it reaches are the three that cannot import a
+   * client module at all (`boundaries/dependencies`, CLAUDE.md §4d).
+   */
+  const PACKAGES_REACHED = ['@onyourleft/domain', '@onyourleft/fit', '@onyourleft/store'];
+
+  /** A module's code without its comments: a comment that says "frame" carries none. */
+  function codeOf(path: string, source: string): string {
+    const kind = path.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+    const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, false, kind);
+    return ts.createPrinter({ removeComments: true }).printFile(file);
+  }
+
+  function cameraFaults(walked: ImportClosure, read: ReadSource): string[] {
+    const faults: string[] = [];
+    for (const path of walked.modules) {
+      const chain = (walked.chainTo(path) ?? [path]).join(' → ');
+      if (/(^|\/)(camera|side-link|pose)/.test(path)) faults.push(`reaches ${chain}`);
+      else if (/CapturedFrame|FrameBytes|\bframe\b/i.test(codeOf(path, read(path) ?? ''))) {
+        faults.push(`names a frame: ${chain}`);
+      }
+    }
+    for (const specifier of walked.bare) {
+      if (!PACKAGES_REACHED.includes(specifier)) faults.push(`imports ${specifier}`);
+    }
+    return faults;
+  }
+
+  const roots = modules.map((name) => `instance/${name}`);
+
+  it('reaches no camera module, no frame and no other package, however far it is walked', () => {
+    const walked = importWalk().closure(roots);
+    // Past this directory: the walk is not over nothing.
+    expect([...walked.modules]).toContain('transfer/export-activity.ts');
+    expect(cameraFaults(walked, readFromDisk)).toEqual([]);
+  });
+
+  it('would find a camera module two imports away — the walk is not vacuous', () => {
+    const planted: ReadSource = (path) =>
+      path === 'instance/sync.ts'
+        ? `${readFromDisk(path) ?? ''}\nimport { helper } from '../transfer/helper';\n`
+        : path === 'transfer/helper.ts'
+          ? "import { capturedFrame } from '../camera/frame';\nexport const helper = 1;\n"
+          : readFromDisk(path);
+    expect(cameraFaults(importWalk(planted).closure(roots), planted)).toEqual(
+      expect.arrayContaining([
+        'reaches instance/sync.ts → transfer/helper.ts → camera/frame.ts',
+        'names a frame: instance/sync.ts → transfer/helper.ts',
+      ]),
+    );
   });
 
   it('would see a camera import — the rule is not vacuous', () => {

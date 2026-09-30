@@ -106,6 +106,8 @@ import type {
   FramingReferenceRecord,
   SideCameraReportRecord,
   RideWriteUpRecord,
+  SyncBaseKind,
+  SyncBaseRecord,
   NewActivity,
   NewLap,
   RouteRecord,
@@ -934,5 +936,36 @@ export function rideWriteUpFor(
     includedPose: version % 2 === 1,
     missingSections: version % 2 === 0 ? [] : [2, 5],
     writtenAt: unixSeconds(FIXTURE_EPOCH + 300_000 + version),
+  };
+}
+
+/**
+ * One sync base row — #776, after #893's review.
+ *
+ * ⚠️ **Different digests per athlete, per ride and per kind**, so a scoping
+ * probe that returned somebody else's row cannot hand back something that
+ * matches. An activity's key is a content hash; an item's is the ride's id.
+ */
+export function syncBaseFor(
+  owner: AthleteId,
+  activity: ActivityId,
+  kind: SyncBaseKind = 'activity',
+): SyncBaseRecord {
+  const digestOf = (seed: string): string => {
+    let hex = '';
+    for (let index = 0; hex.length < 64; index += 1) {
+      const code = (seed.charCodeAt(index % seed.length) * 31 + index * 7) % 256;
+      hex += code.toString(16).padStart(2, '0');
+    }
+    return hex.slice(0, 64);
+  };
+  const content = digestOf(`${owner}|${activity}|content`);
+  return {
+    athleteId: owner,
+    kind,
+    key: kind === 'activity' ? content : activity,
+    activityId: activity,
+    localDigest: digestOf(`${owner}|${activity}|${kind}|local`),
+    remoteDigest: digestOf(`${owner}|${activity}|${kind}|remote`),
   };
 }

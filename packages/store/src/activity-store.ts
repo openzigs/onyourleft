@@ -104,6 +104,7 @@ import {
   fromPersistedRideWriteUp,
   rideWriteUpProblem,
   toPersistedRideWriteUp,
+  syncBaseProblem,
   fromPersistedRoute,
   fromPersistedWorkout,
   toPersistedCameraFrame,
@@ -130,6 +131,8 @@ import type {
   FramingReferenceRecord,
   SideCameraReportRecord,
   RideWriteUpRecord,
+  SyncBaseKind,
+  SyncBaseRecord,
   LapRecord,
   NewActivity,
   NewLap,
@@ -339,6 +342,12 @@ export interface AthleteDeletionCounts {
    * their body.
    */
   readonly rideWriteUps: number;
+  /**
+   * The sync base rows removed — #776, after #893's review: what this device
+   * and its instance last agreed on, ride by ride. With them gone the device
+   * syncs as a fresh device: it pulls, and deletes nothing on the instance.
+   */
+  readonly syncBases: number;
 }
 
 /**
@@ -524,6 +533,10 @@ export class ActivityStore {
 
   get #rideWriteUps(): Table<PersistedRideWriteUp, string> {
     return this.#db.table<PersistedRideWriteUp, string>(TABLE.rideWriteUps);
+  }
+
+  get #syncBases(): Table<SyncBaseRecord, [string, string, string]> {
+    return this.#db.table<SyncBaseRecord, [string, string, string]>(TABLE.syncBases);
   }
 
   // --- Athletes -------------------------------------------------------------
@@ -875,6 +888,7 @@ export class ActivityStore {
         this.#framingReferences,
         this.#sideCameraReports,
         this.#rideWriteUps,
+        this.#syncBases,
       ],
       async () => {
         // The signed records and the device key go with the athlete. The key is
@@ -951,6 +965,9 @@ export class ActivityStore {
           .where(INDEX.rideWriteUpByAthlete)
           .equals(id)
           .delete();
+        // #776. What this device last agreed with the instance: an erased
+        // device is a fresh one, which pulls and deletes nothing there.
+        const syncBases = await this.#syncBases.where(INDEX.syncBaseByAthlete).equals(id).delete();
         await this.#athletes.delete(id);
         return {
           activities,
@@ -966,6 +983,7 @@ export class ActivityStore {
           framingReferences,
           sideCameraReports,
           rideWriteUps,
+          syncBases,
         };
       },
     );
@@ -1823,6 +1841,68 @@ export class ActivityStore {
       .equals([owner, activity])
       .first();
     return row === undefined ? undefined : fromPersistedRideWriteUp(row);
+  }
+
+  // --- The sync base (#776, #893's review) ----------------------------------
+
+  /**
+   * Records what this device and its instance agreed on for one ride or one
+   * item of a ride, **replacing** the row for the same athlete, kind and key.
+   *
+   * The athlete must exist; the ride need not — `records.ts`
+   * §`SyncBaseRecord` says why a base row outlives its ride.
+   *
+   * @throws {StoreReferentialError} if `record.athleteId` names no athlete.
+   * @throws {StoreValidationError} naming the field and the constraint.
+   */
+  async putSyncBase(record: SyncBaseRecord): Promise<void> {
+    const problem = syncBaseProblem(record);
+    if (problem !== undefined) {
+      throw new StoreValidationError(problem);
+    }
+    // Only the six fields, whatever the caller spread in.
+    const row: SyncBaseRecord = {
+      athleteId: record.athleteId,
+      kind: record.kind,
+      key: record.key,
+      activityId: record.activityId,
+      localDigest: record.localDigest,
+      remoteDigest: record.remoteDigest,
+    };
+    await this.#db.transaction('rw', [this.#athletes, this.#syncBases], async () => {
+      await this.#requireAthlete(record.athleteId);
+      await this.#syncBases.put(row);
+    });
+  }
+
+  /**
+   * Every sync base row of this athlete's. A sync reads the whole base once:
+   * it is two digests a ride, so a library of thousands is a few hundred KiB.
+   *
+   * @throws {StoreDecodeError} if a row on disk is not a sync base row — a
+   * hand-edited one is refused rather than believed.
+   */
+  async listSyncBase(owner: AthleteId): Promise<SyncBaseRecord[]> {
+    const rows = await this.#syncBases.where(INDEX.syncBaseByAthlete).equals(owner).toArray();
+    return rows.map((row) => {
+      const problem = syncBaseProblem(row);
+      if (problem !== undefined) {
+        throw new StoreDecodeError(problem);
+      }
+      return row;
+    });
+  }
+
+  /** Forgets one row of this athlete's base. `false` when there was none. */
+  async deleteSyncBase(owner: AthleteId, kind: SyncBaseKind, key: string): Promise<boolean> {
+    return this.#db.transaction('rw', [this.#syncBases], async () => {
+      const held = await this.#syncBases.get([owner, kind, key]);
+      if (held === undefined) {
+        return false;
+      }
+      await this.#syncBases.delete([owner, kind, key]);
+      return true;
+    });
   }
 
   // --- Segment efforts (#66) ------------------------------------------------

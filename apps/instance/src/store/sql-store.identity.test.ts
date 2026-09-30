@@ -12,8 +12,10 @@ import {
   ATHLETE_A,
   ATHLETE_B,
   ATHLETE_C,
+  confirmationTokenFixture,
   createStoreHarness,
   deviceKeyFixture,
+  FIXTURE_RENAME_LIMIT,
   registrationFixture,
   seedWorld,
   sessionFixture,
@@ -85,9 +87,13 @@ describe('device keys (#772, #773)', () => {
   it('revokes one athlete’s key, its sessions and its link codes, and nobody else’s', async () => {
     const opened = await world();
     const key = deviceKeyFixture(ATHLETE_B).publicKey;
+    // B's only key, so it needs one of B's codes (#867).
+    const [code] = registrationFixture(ATHLETE_B).recoveryCodeSha256s;
     expect(
-      await opened.write((store) => store.revokeDeviceKey(ATHLETE_B, key, 1_790_001_000)),
-    ).toBe(true);
+      await opened.write((store) =>
+        store.revokeDeviceKey(ATHLETE_B, key, 1_790_001_000, code ?? null),
+      ),
+    ).toBe('revoked');
     const b = await opened.read((store) => store.findDeviceKey(key));
     expect(b?.revokedAt).toBe(1_790_001_000);
     const session = await opened.read((store) =>
@@ -108,8 +114,57 @@ describe('device keys (#772, #773)', () => {
   it('will not revoke a key as an athlete who does not hold it', async () => {
     const opened = await world();
     const key = deviceKeyFixture(ATHLETE_B).publicKey;
-    expect(await opened.write((store) => store.revokeDeviceKey(ATHLETE_A, key, 5))).toBe(false);
+    const [codeOfA] = registrationFixture(ATHLETE_A).recoveryCodeSha256s;
+    expect(
+      await opened.write((store) => store.revokeDeviceKey(ATHLETE_A, key, 5, codeOfA ?? null)),
+    ).toBe('not_found');
     expect((await opened.read((store) => store.findDeviceKey(key)))?.revokedAt).toBeNull();
+  });
+
+  describe('the last-key rule, in the transaction that revokes (#867)', () => {
+    const key = deviceKeyFixture(ATHLETE_B).publicKey;
+    const [codeOfB] = registrationFixture(ATHLETE_B).recoveryCodeSha256s as [string];
+    const [codeOfA] = registrationFixture(ATHLETE_A).recoveryCodeSha256s as [string];
+
+    it('refuses the last live key with no code, another athlete’s code, or a spent one', async () => {
+      const opened = await world();
+      for (const proof of [null, codeOfA, 'f0'.repeat(32)]) {
+        expect(await opened.write((store) => store.revokeDeviceKey(ATHLETE_B, key, 5, proof))).toBe(
+          'last_device',
+        );
+      }
+      await opened.write((store) => store.takeRecoveryCode(codeOfB, 6));
+      expect(await opened.write((store) => store.revokeDeviceKey(ATHLETE_B, key, 7, codeOfB))).toBe(
+        'last_device',
+      );
+      expect((await opened.read((store) => store.findDeviceKey(key)))?.revokedAt).toBeNull();
+    });
+
+    it('revokes the last live key with a held code, and does not spend the code', async () => {
+      const opened = await world();
+      expect(await opened.write((store) => store.revokeDeviceKey(ATHLETE_B, key, 5, codeOfB))).toBe(
+        'revoked',
+      );
+      expect((await opened.read((store) => store.findDeviceKey(key)))?.revokedAt).toBe(5);
+      const codes = await opened.read((store) => store.listRecoveryCodes(ATHLETE_B));
+      expect(codes.map((code) => code.usedAt)).toEqual([null]);
+    });
+
+    it('needs no code while another key is live, and counts only live keys', async () => {
+      const opened = await world();
+      const second = { ...deviceKeyFixture(ATHLETE_B), publicKey: 'second-key-of-b' };
+      await opened.write((store) => store.putDeviceKey(second));
+      expect(
+        await opened.write((store) => store.revokeDeviceKey(ATHLETE_B, second.publicKey, 5, null)),
+      ).toBe('revoked');
+      // Revoking an already revoked key again is not the last-key case.
+      expect(
+        await opened.write((store) => store.revokeDeviceKey(ATHLETE_B, second.publicKey, 6, null)),
+      ).toBe('revoked');
+      expect(await opened.write((store) => store.revokeDeviceKey(ATHLETE_B, key, 7, null))).toBe(
+        'last_device',
+      );
+    });
   });
 
   it('records when a key was last used, for its own athlete only', async () => {
@@ -121,7 +176,7 @@ describe('device keys (#772, #773)', () => {
     expect((await opened.read((store) => store.findDeviceKey(key)))?.lastUsedAt).toBe(7);
   });
 
-  it('registers a new athlete with their first key, codes and address, or nothing', async () => {
+  it('registers a new athlete with their first key, codes and a confirmation, or nothing', async () => {
     const opened = await world();
     await expect(
       opened.write((store) =>
@@ -139,25 +194,157 @@ describe('device keys (#772, #773)', () => {
     await opened.write((store) => store.registerAthlete(registrationFixture('athlete-d')));
     expect((await opened.read((store) => store.getAthlete('athlete-d')))?.id).toBe('athlete-d');
     expect(await opened.read((store) => store.listRecoveryCodes('athlete-d'))).toHaveLength(1);
-    expect((await opened.read((store) => store.getRecoveryEmail('athlete-d')))?.address).toBe(
-      'athlete-d@example.org',
-    );
+    // Given, not bound (#865).
+    expect(await opened.read((store) => store.getRecoveryEmail('athlete-d'))).toBeUndefined();
+    expect(
+      await opened.read((store) => store.findRecoveryEmail('athlete-d@example.org')),
+    ).toBeUndefined();
+    expect(await opened.read((store) => store.listEmailConfirmations('athlete-d'))).toEqual([
+      {
+        tokenSha256: confirmationTokenFixture('athlete-d'),
+        athleteId: 'athlete-d',
+        address: 'athlete-d@example.org',
+        expiresAt: 1_790_086_400,
+        usedAt: null,
+      },
+    ]);
   });
+});
 
-  it('registers a second athlete whose address is already held, and leaves the address where it was (#861)', async () => {
+describe('confirming a recovery address (#865)', () => {
+  const token = confirmationTokenFixture('athlete-d');
+
+  it('binds the address only when its token is spent, once, before it expires', async () => {
     const opened = await world();
     await opened.write((store) => store.registerAthlete(registrationFixture('athlete-d')));
+    expect(
+      await opened.write((store) => store.confirmRecoveryEmail('athlete-d', token, 1_790_086_400)),
+    ).toEqual({ outcome: 'expired' });
+    expect(await opened.read((store) => store.getRecoveryEmail('athlete-d'))).toBeUndefined();
+    expect(
+      await opened.write((store) => store.confirmRecoveryEmail('athlete-d', token, 1_790_000_500)),
+    ).toEqual({ outcome: 'taken', athleteId: 'athlete-d' });
+    expect(await opened.read((store) => store.getRecoveryEmail('athlete-d'))).toEqual({
+      athleteId: 'athlete-d',
+      address: 'athlete-d@example.org',
+    });
+    expect(
+      await opened.write((store) => store.confirmRecoveryEmail('athlete-d', token, 1_790_000_501)),
+    ).toEqual({ outcome: 'used' });
+    expect(
+      await opened.write((store) => store.confirmRecoveryEmail('athlete-d', 'e4'.repeat(32), 1)),
+    ).toEqual({ outcome: 'unknown' });
+  });
+
+  it('spends a token only as the athlete it was given for: another athlete’s is unknown', async () => {
+    const opened = await world();
+    await opened.write((store) => store.registerAthlete(registrationFixture('athlete-d')));
+    for (const other of [ATHLETE_A, ATHLETE_B, ATHLETE_C]) {
+      expect(
+        await opened.write((store) => store.confirmRecoveryEmail(other, token, 1_790_000_500)),
+      ).toEqual({ outcome: 'unknown' });
+      expect((await opened.read((store) => store.getRecoveryEmail(other)))?.address).toBe(
+        `${other}@example.org`,
+      );
+    }
+    const [pending] = await opened.read((store) => store.listEmailConfirmations('athlete-d'));
+    expect(pending?.usedAt).toBeNull();
+  });
+
+  it('refuses an address another athlete confirmed first, spending and binding nothing', async () => {
+    const opened = await world();
     await opened.write((store) =>
       store.registerAthlete({
-        ...registrationFixture('athlete-e'),
-        recoveryEmail: 'athlete-d@example.org',
+        ...registrationFixture('athlete-d'),
+        recoveryEmailConfirmation: {
+          tokenSha256: token,
+          address: `${ATHLETE_A}@example.org`,
+          expiresAt: 1_790_086_400,
+        },
       }),
     );
-    expect((await opened.read((store) => store.getAthlete('athlete-e')))?.id).toBe('athlete-e');
-    expect(await opened.read((store) => store.getRecoveryEmail('athlete-e'))).toBeUndefined();
     expect(
-      (await opened.read((store) => store.findRecoveryEmail('athlete-d@example.org')))?.athleteId,
-    ).toBe('athlete-d');
+      await opened.write((store) => store.confirmRecoveryEmail('athlete-d', token, 1_790_000_500)),
+    ).toEqual({ outcome: 'held' });
+    expect(await opened.read((store) => store.getRecoveryEmail('athlete-d'))).toBeUndefined();
+    expect(
+      (await opened.read((store) => store.findRecoveryEmail(`${ATHLETE_A}@example.org`)))
+        ?.athleteId,
+    ).toBe(ATHLETE_A);
+    const [pending] = await opened.read((store) => store.listEmailConfirmations('athlete-d'));
+    expect(pending?.usedAt).toBeNull();
+  });
+
+  it('replaces the athlete’s own address with a newly confirmed one', async () => {
+    const opened = await world();
+    await opened.write((store) =>
+      store.putEmailConfirmation({
+        tokenSha256: token,
+        athleteId: ATHLETE_B,
+        address: 'new-b@example.org',
+        expiresAt: 1_790_086_400,
+      }),
+    );
+    expect(
+      (await opened.write((store) => store.confirmRecoveryEmail(ATHLETE_B, token, 1_790_000_500)))
+        .outcome,
+    ).toBe('taken');
+    expect(await opened.read((store) => store.getRecoveryEmail(ATHLETE_B))).toEqual({
+      athleteId: ATHLETE_B,
+      address: 'new-b@example.org',
+    });
+    expect(
+      await opened.read((store) => store.findRecoveryEmail(`${ATHLETE_B}@example.org`)),
+    ).toBeUndefined();
+    // Nobody else's binding moved.
+    for (const other of [ATHLETE_A, ATHLETE_C]) {
+      expect((await opened.read((store) => store.getRecoveryEmail(other)))?.address).toBe(
+        `${other}@example.org`,
+      );
+    }
+  });
+});
+
+describe('pending confirmations are bounded: one an athlete (#883)', () => {
+  it('replaces the athlete’s earlier unconfirmed link, keeps a spent one, and touches nobody else’s', async () => {
+    const opened = await world();
+    const confirmation = (athleteId: string, tokenSha256: string, address: string) =>
+      opened.write((store) =>
+        store.putEmailConfirmation({
+          tokenSha256,
+          athleteId,
+          address,
+          expiresAt: 1_790_086_400,
+        }),
+      );
+    const spent = 'a'.repeat(64);
+    await confirmation(ATHLETE_B, spent, 'spent-b@example.org');
+    expect(
+      (await opened.write((store) => store.confirmRecoveryEmail(ATHLETE_B, spent, 1_790_000_500)))
+        .outcome,
+    ).toBe('taken');
+    await confirmation(ATHLETE_C, 'c'.repeat(64), 'c-pending@example.org');
+    for (let n = 0; n < 5; n += 1) {
+      await confirmation(ATHLETE_B, n.toString(16).repeat(64), `b-${n}@example.org`);
+    }
+    const kept = await opened.read((store) => store.listEmailConfirmations(ATHLETE_B));
+    expect(kept.filter((each) => each.usedAt === null).map((each) => each.address)).toEqual([
+      'b-4@example.org',
+    ]);
+    expect(kept.filter((each) => each.usedAt !== null).map((each) => each.address)).toContain(
+      'spent-b@example.org',
+    );
+    // The replaced link spends nothing: it is simply unknown now.
+    expect(
+      await opened.write((store) =>
+        store.confirmRecoveryEmail(ATHLETE_B, '3'.repeat(64), 1_790_000_600),
+      ),
+    ).toEqual({ outcome: 'unknown' });
+    expect(
+      (await opened.read((store) => store.listEmailConfirmations(ATHLETE_C))).map(
+        (each) => each.address,
+      ),
+    ).toContain('c-pending@example.org');
   });
 });
 
@@ -225,14 +412,45 @@ describe('recovery and link codes (#773)', () => {
 describe('display names (#774)', () => {
   it('keeps every earlier name, for one athlete only', async () => {
     const opened = await world();
-    await opened.write((store) => store.renameAthlete(ATHLETE_B, 'Third', 1_790_002_000));
+    expect(
+      await opened.write((store) =>
+        store.renameAthlete(ATHLETE_B, 'Third', 1_790_002_000, FIXTURE_RENAME_LIMIT),
+      ),
+    ).toBe('renamed');
     expect((await opened.read((store) => store.getAthlete(ATHLETE_B)))?.displayName).toBe('Third');
     expect(await opened.read((store) => store.listDisplayNameChanges(ATHLETE_B))).toEqual([
       { athleteId: ATHLETE_B, previousName: `Rider ${ATHLETE_B}`, changedAt: 1_790_000_300 },
       { athleteId: ATHLETE_B, previousName: `Renamed ${ATHLETE_B}`, changedAt: 1_790_002_000 },
     ]);
     expect(await opened.read((store) => store.listDisplayNameChanges(ATHLETE_A))).toHaveLength(1);
-    expect(await opened.write((store) => store.renameAthlete('nobody', 'x', 1))).toBe(false);
+    expect(
+      await opened.write((store) => store.renameAthlete('nobody', 'x', 1, FIXTURE_RENAME_LIMIT)),
+    ).toBe('not_found');
+  });
+
+  it('counts the limit in the transaction that renames: this athlete’s changes, in the window (#867)', async () => {
+    const opened = await world();
+    // The fixture renamed each athlete once, at 1_790_000_300.
+    const limit = { count: 2, windowSeconds: 1_000 };
+    const at = 1_790_000_300 + 500;
+    expect(await opened.write((store) => store.renameAthlete(ATHLETE_B, 'Second', at, limit))).toBe(
+      'renamed',
+    );
+    expect(
+      await opened.write((store) => store.renameAthlete(ATHLETE_B, 'Third', at + 1, limit)),
+    ).toBe('rate_limited');
+    expect((await opened.read((store) => store.getAthlete(ATHLETE_B)))?.displayName).toBe('Second');
+    expect(await opened.read((store) => store.listDisplayNameChanges(ATHLETE_B))).toHaveLength(2);
+    // Another athlete's changes are not counted against B's, and nor is A's
+    // own fixture rename once it has left the window.
+    expect(
+      await opened.write((store) => store.renameAthlete(ATHLETE_A, 'Other', at + 1, limit)),
+    ).toBe('renamed');
+    expect(
+      await opened.write((store) =>
+        store.renameAthlete(ATHLETE_B, 'Later', 1_790_000_300 + 1_000, limit),
+      ),
+    ).toBe('renamed');
   });
 });
 

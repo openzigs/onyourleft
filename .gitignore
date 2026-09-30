@@ -15,3 +15,6 @@ coverage/
 # that a `git add` of a path inside it has to be forced. Never force it: that
 # commits another branch's whole tree (#148).
 .claude/
+
+# The home deploy's record of what it deployed (#52): a file on the box.
+apps/instance/deploy/home/.deployed

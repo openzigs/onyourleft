@@ -1273,8 +1273,10 @@ describe('the instance is disclosed, class by class — #778', () => {
   });
 
   it('offers only ways of deleting that this build has — #892 review', () => {
-    // No screen removes a device or changes the name, and no route erases an
-    // account (`SqlStore.eraseAthlete` has no production caller). A policy
+    // No screen removes a device or changes the name, and nothing a rider can
+    // reach erases an account: `DELETE /v1/account` (#893) is a sync route,
+    // which a running instance answers `unavailable` because `instance.ts`
+    // hands the handler no sync, and no screen calls it. A policy
     // telling a rider to do those "on the instance" names paths that do not
     // exist, so each such instruction is refused, here and across the policy.
     const whole = normalised(policy);
