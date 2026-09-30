@@ -353,10 +353,11 @@ describe('ingesting a signed record (#37)', () => {
 });
 
 /**
- * #37's budget for a four-hour ride, end to end through the listener: 10 s for
+ * #37's budget for a four-hour ride, end to end through the listener: 3 s for
  * the largest of the three formats — a 3.3 MB GPX with heart rate and cadence
- * on every point, which took 2.0 s on a 2024 laptop — so a two-core CI runner
- * under coverage stays inside it. A FIT file of the same ride is several times
- * smaller. The figure each run measures is printed beside the budget.
+ * on every point, which took about 0.1 s on a 2024 laptop — so a two-core CI
+ * runner under coverage stays inside it. A FIT file of the same ride is
+ * several times smaller. The figure each run measures is printed beside the
+ * budget.
  */
-const INGEST_BUDGET_MS = 10_000;
+const INGEST_BUDGET_MS = 3_000;
