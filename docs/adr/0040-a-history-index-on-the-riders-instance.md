@@ -88,6 +88,14 @@ And the masking ruling, verbatim:
 > and a rider word list, with a preview. The rider's own computer and instance keep the full text.
 > The ADR records this.
 
+⚠️ **One reading of the rulings departs from their words, for the confirmation to cover.** Answer 2
+calls the default an exception to *"ADR 0031 D-3/D-4's 'name no model' rule"*. This ADR supersedes
+**D-4 only** and leaves D-3 standing (see *Does NOT supersede* above, and D-5): D-4 is the rule that
+names no vendor or default, while D-3 is about a **hosted** model needing a named ADR, and a local
+embedding model is not hosted. D-5 still records what D-3 asks of a named model — its card and its
+licence, read on a date — so nothing D-3 protects is lost. If the owner meant D-3 to be superseded
+as well, that is one line of an amendment.
+
 ### What was measured and read, and by whom
 
 The research on #834 (2026-09-29, the body's §1 to §5) is the evidence this ADR rests on; it is
@@ -146,8 +154,8 @@ medical condition, text written by somebody else aimed at a model.
 
 | Content | What a passage is cut from | Screened before indexing |
 |---|---|---|
-| Past write-ups | A saved write-up that passes [ADR 0035](0035-model-written-ride-write-ups.md) D-4's screen **on the instance, at indexing time** | Yes, D-8 |
-| Ride and section summaries | The same figures #809's input builder produces for a ride (`apps/web/src/ride-analysis/input.ts`), as text | No model text in them |
+| Past write-ups | A saved write-up as synced — the device saves only a `ScreenedWriteUp` — screened **again on the device** by [ADR 0035](0035-model-written-ride-write-ups.md) D-4's screen when it comes back from retrieval | Yes, D-8, on the device |
+| Ride and section summaries | Text the **device** builds from #809's input builder (`apps/web/src/ride-analysis/input.ts`) and syncs as a source row of its own | No model text in them |
 | Goals and notes | The rider's text, as synced | No — it is the rider's own |
 | Training plans and reference documents | The rider's plain text or Markdown, as synced (#836: no PDF, no image) | No — it is the rider's own |
 
@@ -169,6 +177,31 @@ medical condition, text written by somebody else aimed at a model.
    names no day). A route or climb is described by its length, gradient and climb, never its name.
 3. **The rider's own text is not filtered** on the way in: it is theirs, and it is kept whole on
    their instance (the masking ruling). What protects it on the hosted path is D-9.
+
+**Where the screen and the summary builder run: on the device, and nowhere else** — *the author's
+choice*. `apps/instance` may not import `apps/web` (`boundaries/dependencies`), and ADR 0035 D-4
+requires **one** set of matchers (`apps/web/src/camera/angle-claims.ts`, `write-up-screen.ts`), so
+a copy under `apps/instance` is ruled out. Two ways remain, and the first is taken:
+
+- **Taken: the device does both.** The device already builds #809's input and already screens every
+  write-up before it saves one. It renders a ride's summary passages as text and syncs them as a
+  source row beside the ride (#776 owes the row kind; D-1 holds, because the index is still derived
+  from synced rows), and it screens every retrieved write-up **again on arrival**, before it enters
+  a prompt — which is also where a row hand-edited on the instance is caught. The instance holds,
+  embeds and ranks text, and interprets none of it.
+- **Not taken: move both into a `packages/` module** both apps import. That moves AGPL-3.0 code under
+  Apache-2.0 by the path rule (§3 of `CLAUDE.md`), which is a relicensing question for the owner
+  rather than a refactor, and it would put a screen on the instance that the device must run again
+  anyway. If the owner wants the instance to screen at indexing time too, that is the route, and an
+  amendment.
+
+**A passage's relative age is computed at retrieval, never stored** — *the author's choice*. *"How
+long before the ride being written about"* differs for every query, so the row holds no age and the
+embedded text holds none. When the instance returns a passage it computes the age in whole weeks
+from the source row's own date and the date of the ride being written about (named in the request by
+its synced id, so no date travels in it), and returns it as a short label **beside** the passage,
+not inside it. The label is **not** part of the 900-character passage budget; it **is** part of the
+history step's input, allowed about 40 characters a passage inside D-8's 9 900.
 
 ### D-3 — Every row is scoped to one athlete, and there is no cross-athlete retrieval, ever
 
@@ -261,14 +294,37 @@ reports, never a cut vector.
 > **private address**, or a **Compose service name**. This mirrors
 > [ADR 0029](0029-camera-imagery-as-a-data-class.md)'s Q1 amendment for the device.
 
-- **What counts** (*the author's reading*, for #835 to build and test): a loopback literal or
-  `localhost`; an IPv4 or IPv6 literal in a private, link-local or unique-local range — the ranges
-  `apps/web/src/camera/analysis-endpoint.ts` §`addressSpaceOf` calls `local`; and a **single-label**
-  hostname (no dot), which is what a Compose service name is. Anything with a dot that is not such a
-  literal — a public name, a `.local` mDNS name included — is refused, because a name can resolve
-  anywhere. The address is checked **when the configuration is read**, and an instance with a
+- **What counts as configured** (*the author's reading*, for #835 to build and test): a loopback
+  literal or `localhost`; an IPv4 or IPv6 literal in a private, link-local, shared (`100.64.0.0/10`)
+  or unique-local range — the ranges `apps/web/src/camera/analysis-endpoint.ts` §`addressSpaceOf`
+  calls `loopback` or `local`; and a **single-label** hostname (no dot), which is what a Compose
+  service name is. Anything else is refused — a public name, and a `.local`, `.home.arpa` or
+  `.internal` name too. The configuration is checked **when it is read**, and an instance with a
   refused address starts with the history index **off** and says why, rather than refusing to start
   at all: the rest of the instance does not depend on it.
+- **What counts as connected — the half that makes the rule a promise rather than a spelling.** A
+  name is not an address: a single-label name can be completed by a resolver's search domain, and
+  any name can resolve anywhere. So on **every** connection the instance resolves the configured
+  name itself, **requires every address it resolves to to be in the same ranges**, and connects to
+  the address it checked — never re-resolving between the check and the connect, which is the gap a
+  rebinding answer uses. A name that resolves to any address outside those ranges, or to none, is
+  refused for that request, and D-6's last bullet applies: nothing is sent anywhere. #835 tests it
+  with a stub resolver: a single-label name answering with a public address is refused, and the
+  same name answering with a private one is accepted, as the control. With that check, *"ride data
+  never leaves the rider's machine"* no longer depends on how the box's DNS is configured.
+- ⚠️ **This is NOT the device's rule, and it inverts it in two places, on purpose — for the owner
+  to confirm knowingly.** `addressSpaceOf` **refuses** a single-label name and **accepts** `.local`,
+  `.home.arpa` and `.internal`. Its reason is that a page is told nothing about where a name
+  resolved to, so it can only accept names that are local by construction, and a single-label name
+  is completed by a search domain the page cannot see. The instance **can** see where a name
+  resolved to, so it checks the answer instead (the bullet above), which is strictly stronger than
+  either spelling rule; and it accepts single-label names because a Compose service name is one,
+  which the owner's ruling names. It refuses `.local`, `.home.arpa` and `.internal` **not** because
+  they are less safe once the answer is checked, but because the owner's list names three forms and
+  these are none of them, and mDNS is not answered inside a Compose network anyway. Widening the
+  list to them is an amendment, not a review note. The owner's words *"This mirrors ADR 0029's Q1
+  amendment"* are therefore read as *the same intent — local only, fail closed — on a machine that
+  can check more*, not as the same list.
 - **The Ollama port is never published and never tunnelled.** Its API has no authentication
   (research §2, *measured*), so the project's example Compose file puts Ollama on the instance's
   network with **no published port**, and the Cloudflare Tunnel ([#807](https://github.com/openzigs/onyourleft/issues/807))
@@ -305,14 +361,16 @@ reports, never a cut vector.
   |---|---|
   | Passages returned | **at most 6** |
   | One passage | **at most 900 characters** |
-  | The history step's input | about **9 900 characters**, `max_tokens` **400** |
+  | The history step's input | about **9 900 characters**, the age labels (D-2) included, `max_tokens` **400** |
   | Its output, the note that reaches the summary | **at most 300 characters** |
 
   A passage longer than 900 characters is split by the instance when it is indexed, never cut when
   it is returned. If `template.test.ts`'s real numbers disagree with these, the test's numbers win
   and this table is corrected by an amendment.
-- **A retrieved write-up is screened again** through ADR 0035 D-4's matchers before it is indexed
-  and again before it is returned; a write-up that fails is neither.
+- **A retrieved write-up is screened again on the device** through ADR 0035 D-4's matchers when it
+  arrives, before it reaches the history step's prompt; one that fails is dropped from that run and
+  the rider is not shown it (D-2, *Where the screen runs*). The device saved it screened, so a
+  failure here means the row changed on the instance.
 - **Passages are data, never instructions.** They reach the prompt inside a labelled data fence that
   a passage **cannot close**: a fence marker inside passage text is escaped or the passage is
   refused. The step's instructions say the fenced text is data. (OWASP LLM01:2025, *"Segregate and
@@ -385,14 +443,17 @@ own — Play's *"Other user-generated content"* is the likely one — answered b
 stores it, re-reading Play's definitions on the day.
 
 **Drafted wording, for the owner's approval** — the disclosure #836 asks this ADR to approve, shown
-beside the goals and notes field and the documents list:
+beside the goals and notes field and the documents list. It is shown whether or not an instance is
+connected, so its first sentence is conditional: a rider with no instance is a supported state (ADR
+0036 D-3(a)), and for them nothing here leaves the device through an instance:
 
-> **What you write here goes to your instance and to the model you chose.** Your goals, notes and
-> documents are kept on this device and copied to your instance when it syncs. Your instance keeps a
-> searchable copy so the analysis can look back at your history, and it is worked out by a model on
-> that machine, not sent anywhere else to do it. When you ask for an analysis, the parts that match
-> are sent to the model you set up — on your own computer, or, if you turned it on, a service you
-> chose, after the details on your list are masked.
+> **What you write here is kept on this device. If you connect an instance, it goes there too, and
+> to the model you chose.** When an instance is connected, your goals, notes and documents are
+> copied to it when it syncs. It keeps a searchable copy so the analysis can look back at your
+> history, and that copy is worked out by a model on that machine, not sent anywhere else to do it.
+> When you ask for an analysis, the parts that match are sent to the model you set up — on your own
+> computer, or, if you turned it on, a service you chose, after the details on your list are
+> masked.
 >
 > A model reads this text. If a document came from somewhere else, it may contain instructions
 > written for a model; the app treats everything here as information, not instructions, but no
@@ -429,7 +490,7 @@ beside the goals and notes field and the documents list:
 
 | Issue | Constraint |
 |---|---|
-| #835 | Builds the index as D-4, scoped as D-3, with a tested `down`; the embedding client as D-5 to D-7 (`truncate: false`, prefixes, address rule, fail closed, model on every row); the history step and its budget as D-8, with the three-part injection test; erasure as D-10; extends #799's gate to the server path and holds the pose summary out of the index |
+| #835 | Builds the index as D-4, scoped as D-3, with a tested `down`; the embedding client as D-5 to D-7 (`truncate: false`, prefixes, the address rule on the configured name **and** on every resolved address it connects to, fail closed, model on every row); the history step and its budget as D-8, with the three-part injection test and the relative age computed at retrieval; the summary source rows the device builds and syncs (D-2), and **no** copy of the screen's matchers or of #809's input builder under `apps/instance`; erasure as D-10; extends #799's gate to the server path and holds the pose summary out of the index |
 | #836 | Keeps goals, notes **and documents** on the device first and syncs them (D-1); states limits in characters (a ride note of at most 900 characters is one passage); ships the D-11 wording once the owner approves it |
 | #803's successor | The pull request that first sends history to the hosted model carries the ADR 0029 amendment, the policy and Play Data Safety changes together (D-9) |
 | #777 | `ERASE_CANNOT_REACH`'s instance line covers the index once it ships (D-10) |
@@ -446,6 +507,8 @@ beside the goals and notes field and the documents list:
 - **An embedding address that is not local**, whether a public name configured by hand or a
   fallback added "for when the box is off". The owner's reason for D-5's exception is that nothing
   leaves the machine; a remote embedding service removes the reason and the exception with it.
+  So does **a connection to an address nobody checked**: a name accepted by its spelling and
+  resolved again after the check (D-6).
 - **Retrieved text reaching any step but the history step**, or a step's bound, address or order
   changing because of what a passage said.
 - **The project's documentation naming a model under a non-OSI licence** — `embeddinggemma` first,
