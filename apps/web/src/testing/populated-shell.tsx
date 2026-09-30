@@ -239,7 +239,9 @@ function fixtureDraft(): RouteDraft {
  * The draft is local storage rather than a port (`routing/draft-storage.ts`),
  * so it is the one fixture this shell cannot hand over as a prop — and a walk
  * of the empty fixture after a populated one on the same origin would
- * otherwise find the populated draft still there.
+ * otherwise find the populated draft still there. In the Vitest suite,
+ * `hierarchy-walk.tsx` §`openRoute`'s unmount takes it away (#864), so a later
+ * test in the same file does not find it either.
  */
 export function seedRouteDraft(populated: boolean, storage: Storage): void {
   if (populated) {
