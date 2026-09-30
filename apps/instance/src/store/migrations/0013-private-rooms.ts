@@ -30,8 +30,12 @@
  *   lets an erased rider's row go while the others' results still show that
  *   somebody was there: a gap in the places is shown as "a rider", with
  *   nothing of theirs in it.
+ * - **`room_course.finishers`** (#785): how many riders crossed the line —
+ *   the highest place written. It is what shows a LAST-placed rider who
+ *   erased their account as "a rider" too, where a gap between two places
+ *   could not. A count and nothing else: it names nobody.
  *
- * `down` drops the three columns and the two tables, rows and all. What goes
+ * `down` drops the four columns and the two tables, rows and all. What goes
  * is what this migration added: a room's membership and code (the rooms and
  * their courses stay, and without a code nobody new can join them) and three
  * figures of each result.
@@ -69,6 +73,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .column('athlete_id')
     .execute();
 
+  await db.schema.alterTable('room_course').addColumn('finishers', 'integer').execute();
   await db.schema.alterTable('result').addColumn('place', 'integer').execute();
   await db.schema.alterTable('result').addColumn('watts_per_kilogram', 'real').execute();
   await db.schema
@@ -81,6 +86,7 @@ export async function down(db: Kysely<unknown>): Promise<void> {
   await db.schema.alterTable('result').dropColumn('flagged_seconds').execute();
   await db.schema.alterTable('result').dropColumn('watts_per_kilogram').execute();
   await db.schema.alterTable('result').dropColumn('place').execute();
+  await db.schema.alterTable('room_course').dropColumn('finishers').execute();
   await db.schema.dropIndex('room_member_by_athlete').execute();
   await db.schema.dropTable('room_member').execute();
   await db.schema.dropTable('private_room').execute();

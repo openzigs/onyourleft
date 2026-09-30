@@ -75,7 +75,7 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   result: `INSERT INTO result (room_id, athlete_id, finish_ms, flags) VALUES ('room', 'a', 1000, 0)`,
   private_room: `INSERT INTO private_room VALUES ('room', '${'c'.repeat(64)}', 0, 16, NULL)`,
   room_member: `INSERT INTO room_member VALUES ('room', 'a', 'creator', 17)`,
-  room_course: `INSERT INTO room_course VALUES ('room', 450, '[[0,0],[150,2]]', 'hoods', NULL, 2000, NULL, NULL)`,
+  room_course: `INSERT INTO room_course (room_id, length_metres, grades, riding_position, capacity, countdown_ms, rejoin_window_ms, race_started_at) VALUES ('room', 450, '[[0,0],[150,2]]', 'hoods', NULL, 2000, NULL, NULL)`,
   auth_challenge: `INSERT INTO auth_challenge VALUES ('${'3'.repeat(64)}', 'key-b', 5, NULL)`,
   recovery_code: `INSERT INTO recovery_code VALUES ('${'4'.repeat(64)}', 'a', 6, NULL)`,
   link_code: `INSERT INTO link_code VALUES ('${'5'.repeat(64)}', 'a', 'key-a', 7, NULL)`,

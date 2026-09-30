@@ -235,11 +235,11 @@ export const IDENTITY_ROUTES: readonly Route[] = [
         'a room’s riders see each other: blocking inside a room is room moderation, #789’s (ADR 0028 D-6.4)',
     },
     summary:
-      'A ticket for one room’s WebSocket hello: single use, 30 seconds. The socket never carries the session token. A public room needs an eligible account (`GET /v1/auth/account`).',
+      'A ticket for one room’s WebSocket hello: single use, 30 seconds. The socket never carries the session token. A public room needs an eligible account (`GET /v1/auth/account`); a room a rider made needs its creator or a rider who joined it by its code, while it is open (#784).',
     identity: true,
     auth: 'session',
     request: object({ declaredMassKilograms: { type: 'number' } }),
-    errors: ['unauthenticated', 'validation_failed', 'not_eligible'],
+    errors: ['unauthenticated', 'validation_failed', 'not_eligible', 'not_found'],
     response: {
       contentType: 'application/json',
       schema: object({ ticket: string, expiresAt: integer }),

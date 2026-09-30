@@ -132,6 +132,12 @@ export interface RoomCourse {
   readonly rejoinWindowMs: number | null;
   /** Unix seconds: when this race left its lobby, or `null`. Set by {@link SqlStore.markRaceStarted}. */
   readonly raceStartedAt: number | null;
+  /**
+   * How many riders crossed the line — the highest place a result was written
+   * with (#785) — absent before the first. Written by {@link SqlStore.putResult}
+   * and never by a course's own put.
+   */
+  readonly finishers?: number;
 }
 
 export interface Result {
@@ -1079,6 +1085,7 @@ const roomCourseFrom = (row: Selectable<RoomCourseTable>): RoomCourse => ({
   countdownMs: row.countdown_ms,
   rejoinWindowMs: row.rejoin_window_ms,
   raceStartedAt: row.race_started_at,
+  ...(row.finishers === null ? {} : { finishers: row.finishers }),
 });
 
 const resultFrom = (row: Selectable<ResultTable>): Result => ({
@@ -2226,13 +2233,24 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           watts_per_kilogram: result.wattsPerKilogram,
           flagged_seconds: JSON.stringify(result.flaggedDurationsSeconds),
         };
-        await db
-          .insertInto('result')
-          .values({ room_id: result.roomId, athlete_id: result.athleteId, ...figures })
-          .onConflict((conflict) =>
-            conflict.columns(['room_id', 'athlete_id']).doUpdateSet(figures),
-          )
-          .execute();
+        const place = result.place;
+        await db.transaction().execute(async (trx) => {
+          await trx
+            .insertInto('result')
+            .values({ room_id: result.roomId, athlete_id: result.athleteId, ...figures })
+            .onConflict((conflict) =>
+              conflict.columns(['room_id', 'athlete_id']).doUpdateSet(figures),
+            )
+            .execute();
+          // The field's size survives its riders (#785): a count, naming nobody.
+          if (place !== null) {
+            await trx
+              .updateTable('room_course')
+              .set({ finishers: sql<number>`max(coalesce(finishers, 0), ${place})` })
+              .where('room_id', '=', result.roomId)
+              .execute();
+          }
+        });
       }),
 
     listResults: (athleteId) =>

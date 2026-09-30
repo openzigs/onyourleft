@@ -2,9 +2,10 @@
 
 import { lookup } from 'node:dns/promises';
 import { mkdir } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { createIdentity, type Identity } from './auth/identity.ts';
+import { createDiskBlobStore } from './blob/disk-blob-store.ts';
 import { identitySettings, type Config } from './config.ts';
 import { createHandler, type Handler } from './handler.ts';
 import type { Resolver } from './history/address.ts';
@@ -17,6 +18,7 @@ import { assessReadiness, type MigrationState } from './readiness.ts';
 import type { InstanceProbes } from './route-kit.ts';
 import { planFor } from './room/room-plan.ts';
 import { RoomRouter, type RoomLookup } from './room/node/router.ts';
+import { createRooms, type Rooms } from './rooms/rooms.ts';
 import type { ServerConfig } from './server-config.ts';
 import { MIGRATE_COMMAND, migrationState, openServingStore } from './store/serving.ts';
 import type { SqlStore } from './store/sql-store.ts';
@@ -122,7 +124,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   let store: SqlStore | undefined;
   let identity: Identity | undefined;
   let history: History | undefined;
-  /** Stops the rate-limit sweep, once an identity exists to sweep (#892). */
+  let rooms: Rooms | undefined;
+  /** Stops the rate-limit sweeps, once an identity exists to sweep (#892). */
   let stopSweeping = (): void => undefined;
   let stopping = false;
   const counters = new HttpCounters();
@@ -131,6 +134,10 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     if (store === undefined) return { kind: 'unknown' };
     const room = await store.getRoom(roomId);
     if (room === undefined) return { kind: 'unknown' };
+    // #784: a rider's room that is over is never opened again — its route is
+    // gone, and a group ride that closed would otherwise reopen empty.
+    const made = await store.getPrivateRoom(roomId);
+    if (made !== undefined && made.closedAt !== null) return { kind: 'ended' };
     const course = await store.getRoomCourse(roomId);
     const plan = planFor(room, course);
     const started = course?.raceStartedAt !== null && course?.raceStartedAt !== undefined;
@@ -153,6 +160,10 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     },
     onRaceStarted: async (roomId) => {
       await store?.markRaceStarted(roomId, Math.floor(now() / 1000));
+    },
+    // #784: a room that is over lets its route go.
+    onRoomClosed: async (roomId, phase) => {
+      await rooms?.roomLetGo(roomId, phase);
     },
     ready: (): boolean => store !== undefined && router.healthy(),
     event: (event, detail) => {
@@ -239,12 +250,26 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         ...identitySettings(options.config),
         now,
       });
-      handler = createHandler({ ...handlerOptions, identity, history });
+      // #784, #785: riders' rooms. Their routes are kept apart from the
+      // synced files — under the blob directory's `rooms/` — and live only as
+      // long as their room (`rooms/rooms.ts`), so a backup does not carry them.
+      const people = identity;
+      rooms = createRooms({
+        store,
+        routes: createDiskBlobStore(join(server.blobsPath, 'rooms')),
+        nameFor: async (viewerId, subjectId) => {
+          if (!(await people.moderation.canSee(viewerId, subjectId))) return undefined;
+          const profile = await people.profile(subjectId);
+          return profile.ok ? profile.value.displayName : undefined;
+        },
+        now,
+      });
+      handler = createHandler({ ...handlerOptions, identity, history, rooms });
       // The identity's rate limits hold internet addresses; the privacy
       // policy says for at most an hour. Each window's keys are forgotten on
       // the boundary it ends on, whether or not anybody asks again (#892).
       const swept = identity;
-      stopSweeping = sweepOnBoundaries(
+      const stopIdentity = sweepOnBoundaries(
         {
           periodMs: swept.rateLimitSweepPeriodMs,
           run: () => {
@@ -253,6 +278,22 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         },
         options.sweepTimers,
       );
+      // The rooms' join limit is keyed by address too (#784), under the same
+      // promise: held for at most an hour, forgotten at its window's end.
+      const roomsSwept = rooms;
+      const stopRooms = sweepOnBoundaries(
+        {
+          periodMs: roomsSwept.rateLimitSweepPeriodMs,
+          run: () => {
+            roomsSwept.sweepRateLimits();
+          },
+        },
+        options.sweepTimers,
+      );
+      stopSweeping = () => {
+        stopIdentity();
+        stopRooms();
+      };
     }
     // Whatever was synced while the model was off, or under another model, is indexed now (D-7).
     history.schedule();
@@ -300,7 +341,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     listening,
     router,
     opened,
-    heldRateLimitKeys: () => identity?.heldRateLimitKeys() ?? 0,
+    heldRateLimitKeys: () =>
+      (identity?.heldRateLimitKeys() ?? 0) + (rooms?.heldRateLimitKeys() ?? 0),
     async stop() {
       stopping = true;
       stopSweeping();

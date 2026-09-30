@@ -90,7 +90,19 @@ const EXEMPT: Readonly<
   },
   startRoom: {
     heldElsewhere:
-      'names a room, not an athlete, and starts only a race the caller is seated in — seated by a ticket, which is the choke point for entering a room; who may start one is #785’s',
+      'names a room, not an athlete, and starts only a race the caller is seated and connected in — seated by a ticket, which is the choke point for entering a room (#785’s rule)',
+  },
+  joinRoom: {
+    heldElsewhere:
+      'names a room by its code, never an athlete; a room’s members are whoever holds its code (ADR 0028 D-6.3), and blocking inside a room is #789’s',
+  },
+  getRoomRoute: {
+    heldElsewhere:
+      'the creator’s route, relayed to the members of their own room (#784); it names no athlete',
+  },
+  getRoomResults: {
+    heldElsewhere:
+      'a race’s result for its riders only; every other rider in it is named through the choke point itself (`canSee`), and one the caller may not see is “a rider” with no name (rooms/rooms.test.ts)',
   },
 };
 

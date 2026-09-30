@@ -877,6 +877,16 @@ export function createIdentity(options: IdentityOptions): Identity {
       }
       const room = await store.getRoom(roomId);
       if (room === undefined) return refuse('not_found');
+      // #784: a room a rider made is for its members — its creator, and
+      // whoever joined by its code — and only while it is not over. Anybody
+      // else is told what a room that does not exist tells them.
+      const made = await store.getPrivateRoom(roomId);
+      if (
+        made !== undefined &&
+        (made.closedAt !== null || !(await store.isRoomMember(roomId, caller.athleteId)))
+      ) {
+        return refuse('not_found');
+      }
       if (room.visibility === 'public') {
         const held = await account(caller.athleteId);
         if (held === undefined || !held.publicRooms.eligible) return refuse('not_eligible');

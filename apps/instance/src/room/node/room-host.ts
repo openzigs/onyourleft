@@ -11,6 +11,7 @@ import {
   type Outbound,
   type Room,
   type RoomPhase,
+  type RoomView,
 } from '../core/room.ts';
 import type { RoomSettings } from '../core/settings.ts';
 
@@ -129,6 +130,28 @@ export interface RoomResult {
   readonly wattsPerKilogram: number | null;
   /** The durations of every plausibility ceiling breached, shortest first (#785). */
   readonly flaggedDurationsSeconds: readonly number[];
+}
+
+/**
+ * Every race rider whose result is final in `view` — they crossed the line or
+ * did not finish — as the result the HTTP process stores (#780, #785): the
+ * place from the room's own finish order, and the figures the race publishes.
+ */
+export function finalResults(view: RoomView, frameIntervalMs: number): RoomResult[] {
+  return view.seats.flatMap((seat): RoomResult[] => {
+    if (seat.state !== 'finished' && seat.state !== 'dnf') return [];
+    return [
+      {
+        athleteId: seat.athleteId,
+        finishMs:
+          seat.finishedAtTicks === null ? null : Math.round(seat.finishedAtTicks * frameIntervalMs),
+        flags: seat.flags,
+        place: seat.state === 'finished' ? view.finishOrder.indexOf(seat.riderId) + 1 : null,
+        wattsPerKilogram: seat.wattsPerKilogram,
+        flaggedDurationsSeconds: seat.flaggedDurationsSeconds,
+      },
+    ];
+  });
 }
 
 /**
@@ -268,7 +291,15 @@ export class RoomHost {
 
   /**
    * Starts a race's countdown. With `athleteId`, only if that athlete has a
-   * connected seat in it — the provisional rule until #785 decides who may.
+   * connected seat in it.
+   *
+   * **Who may start a race — #785's decision: any rider seated and connected
+   * in it.** Not its creator alone: a room has no leader (ADR 0028 D-7.2,
+   * "nobody leading a session"), and #784 lists a creator's powers as making
+   * the room, closing it and removing a rider — none of which directs anybody's
+   * ride. Starting is no one rider's power; it is anybody's who is on the line.
+   * Before #785 this was #895's provisional rule, and it is kept because it is
+   * the one that gives nobody a role.
    */
   start(roomId: string, athleteId?: string): boolean {
     const hosted = this.#rooms.get(roomId);
@@ -466,22 +497,10 @@ export class RoomHost {
 
   #reportResults(hosted: HostedRoom): void {
     if (hosted.settings.kind !== 'race' || this.#options.onResult === undefined) return;
-    const view = hosted.room.view();
-    for (const seat of view.seats) {
-      if (hosted.reported.has(seat.athleteId)) continue;
-      if (seat.state !== 'finished' && seat.state !== 'dnf') continue;
-      hosted.reported.add(seat.athleteId);
-      this.#options.onResult(hosted.roomId, {
-        athleteId: seat.athleteId,
-        finishMs:
-          seat.finishedAtTicks === null
-            ? null
-            : Math.round(seat.finishedAtTicks * hosted.settings.frameIntervalMs),
-        flags: seat.flags,
-        place: seat.state === 'finished' ? view.finishOrder.indexOf(seat.riderId) + 1 : null,
-        wattsPerKilogram: seat.wattsPerKilogram,
-        flaggedDurationsSeconds: seat.flaggedDurationsSeconds,
-      });
+    for (const result of finalResults(hosted.room.view(), hosted.settings.frameIntervalMs)) {
+      if (hosted.reported.has(result.athleteId)) continue;
+      hosted.reported.add(result.athleteId);
+      this.#options.onResult(hosted.roomId, result);
     }
   }
 

@@ -110,6 +110,8 @@ export interface RoomCourseTable {
   readonly rejoin_window_ms: number | null;
   /** Unix seconds: when this race left its lobby. It is never a lobby again. */
   readonly race_started_at: number | null;
+  /** How many riders crossed the line: the highest place written (#785, 0013). */
+  readonly finishers: Generated<number | null>;
 }
 
 /** One athlete's result in one room. */

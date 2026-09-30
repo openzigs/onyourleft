@@ -15,6 +15,7 @@ import {
 } from './auth/identity-testing.ts';
 import { startTestInstance, type TestInstance } from './instance-testing.ts';
 import { SYNC_HAPPY_CALLS } from './sync/sync-testing.ts';
+import { madeRoom, riderIn, roomBody } from './rooms/rooms-testing.ts';
 import { openApiDocument, openApiText } from './openapi.ts';
 import { assessReadiness } from './readiness.ts';
 import { ROUTES, type Schema } from './routes.ts';
@@ -332,6 +333,35 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
   },
   startRoom: async (world) =>
     send(world, 'POST', '/v1/rooms/room-1/start', (await signedIn(world)).token),
+  createRoom: async (world) =>
+    send(world, 'POST', '/v1/rooms', (await signedIn(world)).token, roomBody()),
+  joinRoom: async (world) => {
+    const room = await madeRoom(world, (await signedIn(world)).token);
+    return send(world, 'POST', '/v1/rooms/join', (await signedIn(world)).token, {
+      code: room.code,
+    });
+  },
+  getRoomRoute: async (world) => {
+    const { token } = await signedIn(world);
+    const room = await madeRoom(world, token);
+    return send(world, 'GET', `/v1/rooms/${room.roomId}/route`, token);
+  },
+  getRoomResults: async (world) => {
+    const rider = await riderIn(world, await testDevice());
+    const room = await madeRoom(world, rider.token);
+    await world.freshRead((store) =>
+      store.putResult({
+        roomId: room.roomId,
+        athleteId: rider.athleteId,
+        finishMs: 61_000,
+        flags: 1,
+        place: 1,
+        wattsPerKilogram: 7.21,
+        flaggedDurationsSeconds: [60],
+      }),
+    );
+    return send(world, 'GET', `/v1/rooms/${room.roomId}/results`, rider.token);
+  },
   requestEmailRecovery: (world) =>
     send(world, 'POST', '/v1/auth/recover/email', undefined, { address: 'anna@example.org' }),
   setRecoveryEmail: async (world) =>

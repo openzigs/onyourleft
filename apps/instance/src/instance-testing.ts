@@ -6,6 +6,7 @@ import type { InstanceProbes } from './route-kit.ts';
 import { createHandler, type Handler } from './handler.ts';
 import type { Route } from './routes.ts';
 import type { History } from './history/history.ts';
+import type { Rooms } from './rooms/rooms.ts';
 import type { Sync } from './sync/sync.ts';
 import { listen, type Listening } from './node-listener.ts';
 
@@ -51,6 +52,7 @@ export async function startTestInstance(
     identity?: Identity;
     sync?: Sync;
     history?: History;
+    rooms?: Rooms;
     probes?: InstanceProbes;
   } = {},
 ): Promise<TestInstance> {
@@ -65,6 +67,7 @@ export async function startTestInstance(
     ...(options.identity === undefined ? {} : { identity: options.identity }),
     ...(options.sync === undefined ? {} : { sync: options.sync }),
     ...(options.history === undefined ? {} : { history: options.history }),
+    ...(options.rooms === undefined ? {} : { rooms: options.rooms }),
     ...(options.probes === undefined ? {} : { probes: options.probes }),
   });
   const listening = await listen(handler, {

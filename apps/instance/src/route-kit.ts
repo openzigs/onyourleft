@@ -10,6 +10,7 @@ import type { Readiness } from './readiness.ts';
 import type { Caller, Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
 import type { History } from './history/history.ts';
+import type { Rooms } from './rooms/rooms.ts';
 import type { Sync } from './sync/sync.ts';
 import { JSON_TYPE, type ErrorCode } from './errors.ts';
 
@@ -55,7 +56,10 @@ export interface InstanceProbes {
    * the operator's token; `undefined` for any other.
    */
   readonly metrics?: (authorization: string | null) => Promise<string | undefined>;
-  /** Start a race's countdown, for an athlete seated in it. */
+  /**
+   * Start a race's countdown, for an athlete seated and connected in it — the
+   * rule #785 decided (`room/node/room-host.ts` §`start`).
+   */
   readonly startRoom?: (roomId: string, athleteId: string) => Promise<'started' | 'not_found'>;
 }
 
@@ -89,6 +93,8 @@ export interface RouteContext {
   readonly sync: Sync | undefined;
   /** The history index (#835). Present for every route that declares `history`; the handler sees to it. */
   readonly history: History | undefined;
+  /** Riders' rooms (#784, #785). Present for every route that declares `rooms`; the handler sees to it. */
+  readonly rooms: Rooms | undefined;
   readonly probes: InstanceProbes | undefined;
 }
 
@@ -131,6 +137,11 @@ export interface Route {
    * none answers `unavailable` without calling it.
    */
   readonly history?: true;
+  /**
+   * The route needs riders' rooms (#784, #785): the store and the rooms' own
+   * route blobs. An instance handed none answers `unavailable` without calling it.
+   */
+  readonly rooms?: true;
   /** Whether the route reaches another athlete, and how (#83). */
   readonly reaches: Reach;
   /**

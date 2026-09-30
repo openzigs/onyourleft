@@ -40,7 +40,7 @@ export type ToWorker =
       readonly type: 'start';
       readonly id: number;
       readonly roomId: string;
-      /** Only a rider seated and connected in the room may start it. */
+      /** Only a rider seated and connected in the room may start it (#785's rule). */
       readonly athleteId: string;
     }
   | { readonly type: 'metrics'; readonly id: number }
