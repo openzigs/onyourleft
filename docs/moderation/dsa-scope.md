@@ -117,7 +117,9 @@ obligations"*.
 - **Art. 13(1)**: *"Providers of intermediary services which do not have an establishment in the Union
   but which offer services in the Union shall designate, in writing, a legal or natural person to act
   as their legal representative in one of the Member States where the provider offers its services."*
-  Art. 13(3): the representative *"can be held liable for non-compliance"*. Art. 13(4): their name,
+  Art. 13(3): *"It shall be possible for the designated legal representative to be held liable for
+  non-compliance with obligations under this Regulation, without prejudice to the liability and legal
+  actions that could be initiated against the provider of intermediary services."* Art. 13(4): their name,
   postal address, email address and telephone number go to the Digital Services Coordinator of that
   Member State and are published.
 - The owner is in the UK. **If** the DSA applies, Art. 13 requires a real person or company in a Member
@@ -131,7 +133,7 @@ Nothing here recommends one. Each is an owner decision.
 | Option | What it means |
 |---|---|
 | **1. Take a lawyer's view on §1 and §2 first** | Public rooms stay blocked until then |
-| **2. Treat the DSA as applying** | Meet Arts 11–14 and 16–18 (the drafts in this directory are written to), and appoint an Art. 13 representative |
+| **2. Treat the DSA as applying** | Meet Arts 11–14 and 16–18. The drafts here cover Arts 16–18; Arts 11–12 need [#908](https://github.com/openzigs/onyourleft/issues/908) and Art. 14 needs [#909](https://github.com/openzigs/onyourleft/issues/909). Appoint an Art. 13 representative |
 | **3. Treat it as not applying, and follow Arts 16 and 17 anyway** | The [notice-and-action procedure](notice-and-action.md) and [statements of reasons](statement-of-reasons.md) are needed for the UK Act in any case, so most of the cost is paid already. No Art. 13 representative. The risk is being wrong about §1 or §2 |
 | **4. Do not offer the project's instance in the Union** | A factual change to §2. Its legal effect is not in the texts read |
 

@@ -98,10 +98,10 @@ on the side of caution in making your assessment."*
 | **Self-declared 18+ confirmations** | Every public-room rider will have confirmed. | O5: *"you should not rely on this data alone to conclude that you do not have a significant number of users who are children"* |
 | **Human approval of each account** | The owner sees a name and a confirmation. | ⚠️ **OPEN.** Whether it is admissible evidence, and how much it weighs, is not answered by the texts read. It is not evidence of age |
 | **Benefits to children** (O4 factor) | Training, ride recording and a trainer game benefit a junior cyclist as much as an adult. | Points towards "likely" |
-| **Content appealing to children** (O4 factor) | Routes, rides, races and a game. | Points towards "likely" for the game and races |
-| **Design appealing to children** (O4 factor) | A 3D trainer game with riders on a road. The app is not designed for children, and nothing in it targets them. | Mixed |
+| **Content appealing to children** (O4 factor) | Routes, rides, races and a game. Cycling has junior riders and junior racing, and races are the kind of content a junior cyclist would look for. | Points towards "likely" for the game and races |
+| **Design appealing to children** (O4 factor) | A 3D trainer game with riders on a road, which a junior cyclist could use as readily as an adult. The app is not designed for children, and nothing in it targets them. | Mixed |
 | **Children in the commercial strategy** (O4 factor) | There is no commercial strategy. | Points towards "not likely" |
-| **Is it publicly known that such services are used by children?** (O5's example) | Cycling has junior riders and junior racing. Whether children use smart-trainer apps of this kind is a fact the owner can check. | Points towards "likely" unless evidence says otherwise |
+| **Is it publicly known that the service is used by children?** (O5's example) | Nothing is known about this service: it has not opened. Whether it becomes known that children use it, or smart-trainer apps of this kind, is a fact the owner can check. | No evidence either way yet |
 | **Ofcom's own expectation** | O7: *"we anticipate that most Part 3 services that do not use highly effective age assurance are likely to be accessed by children within the meaning of the Act."* | Points towards "likely" |
 
 ## The conclusion, left for the owner

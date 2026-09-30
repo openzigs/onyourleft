@@ -68,9 +68,13 @@ rider's personal details into the reason (`docs/moderation.md`).
 >
 > **1. What we did** *(Art. 17(3)(a))*: we [hid your display name | hid [item: the listing of your
 > room "…" | the route you shared in room … | your result in race …] | removed you from room … |
-> suspended your account]. [It applies to this instance only. | It applies until [date]. | It has no
-> end date; see part 6.] We did not delete anything: your rides are still on your device, and on this
-> instance.
+> suspended your account].
+>
+> - **Where it applies**: [everywhere this instance can be reached | only in …]
+> - **How long**: [until [date] | no end date; see part 6]
+>
+> [We did not delete anything: your rides are still on your device, and on this instance. | We
+> deleted [item], and [what is kept, if anything].]
 >
 > **2. Why, and what we relied on** *(Art. 17(3)(b))*: [We acted on a notice sent to us on [date]. |
 > We found it ourselves on [date].] The facts: [what the content was and what it did, without anybody's
@@ -94,8 +98,8 @@ rider's personal details into the reason (`docs/moderation.md`).
 >   not built yet; until then, write to `<CONTACT-ADDRESS — owner to choose>`.] [If the decision was
 >   the moderator's about a matter involving themselves, say who reviews it: see the option the owner
 >   chose in [notice-and-action](notice-and-action.md#a-notice-or-complaint-about-the-moderator).]
-> - **Out-of-court dispute settlement.** [Only if the owner or a lawyer decides that DSA Art. 21
->   applies. Otherwise leave this line out and say nothing about it.]
+> - **Out-of-court dispute settlement.** [certified body and how to reach it, only if the owner or a
+>   lawyer decides DSA Art. 21 applies | Not available for this decision.]
 > - **A court.** You can take the decision to a court under the law of your country. *(Recital 55:
 >   "the recipient of the service should always have a right to effective remedy before a court".)*
 

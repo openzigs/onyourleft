@@ -82,7 +82,7 @@ record by hand. OSA s.23 requires written records, and Ofcom can ask for them (O
 
 DSA Art. 16(4): *"Where the notice contains the electronic contact information of the individual or
 entity that submitted it, the provider of hosting services shall, without undue delay, send a
-confirmation of receipt."* The wording is in [statements of reasons](statement-of-reasons.md#confirmation-of-receipt).
+confirmation of receipt of the notice to that individual or entity."* The wording is in [statements of reasons](statement-of-reasons.md#confirmation-of-receipt).
 
 ### 3. Put it in order
 
@@ -92,7 +92,10 @@ Take notices in this order, whatever order they arrived in:
    delay"*. DSA Art. 18(1): where the provider becomes aware of information giving rise to a suspicion
    of *"a criminal offence involving a threat to the life or safety of a person or persons"*, it
    *"shall promptly inform the law enforcement or judicial authorities of the Member State or Member
-   States concerned"*, or under Art. 18(2), those where its legal representative is, or Europol.
+   States concerned"*. Art. 18(2), where that Member State cannot be identified: *"Where the provider
+   of hosting services cannot identify with reasonable certainty the Member State concerned, it shall
+   inform the law enforcement authorities of the Member State in which it is established or where its
+   legal representative resides or is established or inform Europol, or both."*
    ⚠️ Art. 18 applies only if the DSA applies ([DSA scope](dsa-scope.md)). For a threat in the UK,
    this draft proposes contacting the police. That is an operational step, and no UK text read
    requires it.
@@ -152,8 +155,8 @@ display name or lifting a suspension. The route is filed as
 [#911](https://github.com/openzigs/onyourleft/issues/911). A suspended rider cannot sign in today,
 so #911 must reach them some other way.
 
-ICU D13 is the Codes' measure on manifestly unfounded complaints. Its text was not read line by line
-(spike §1, O1). Proposed until it is: record the complaint and why it was judged unfounded, and say so
+ICU D13 is the Codes' measure on manifestly unfounded complaints. Spike 0019 quotes only its
+applicability line (D13.1), not what it asks, so until its text is quoted here, the proposal is: record the complaint and why it was judged unfounded, and say so
 to the complainant.
 
 ## A notice or complaint about the moderator
