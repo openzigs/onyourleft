@@ -61,7 +61,7 @@ export async function serveHost(
     wss.handleUpgrade(request, socket, head, (ws) => {
       socketId += 1;
       onAccept?.(ws);
-      host().accept(ROOM_ID, settings, ws, `s${String(socketId)}`, startedBy);
+      host().accept(ROOM_ID, settings, ws, `s${String(socketId)}`, false, startedBy);
     });
   });
   await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));

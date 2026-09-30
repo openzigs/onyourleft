@@ -11,7 +11,7 @@ import { identitySettings, type Config } from './config.ts';
 import { createHandler, type Handler } from './handler.ts';
 import type { Resolver } from './history/address.ts';
 import { createOllamaEmbedder } from './history/embedder.ts';
-import { createHistory, type History } from './history/history.ts';
+import { createHistory, RETRY_PERIOD_MS, type History } from './history/history.ts';
 import { logEvent, type LogSink } from './log.ts';
 import { HttpCounters, renderMetrics } from './metrics.ts';
 import { listen, sweepOnBoundaries, type Listening, type SweepTimers } from './node-listener.ts';
@@ -128,6 +128,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   let rooms: Rooms | undefined;
   /** Stops the rate-limit sweeps, once an identity exists to sweep (#892). */
   let stopSweeping = (): void => undefined;
+  let stopRetrying = (): void => undefined;
   let stopping = false;
   const counters = new HttpCounters();
 
@@ -323,6 +324,21 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     }
     // Whatever was synced while the model was off, or under another model, is indexed now (D-7).
     history.schedule();
+    // And again every few minutes, so a model started after the instance —
+    // or one that went away and came back — is picked up with no sync and no
+    // restart, and an item it refused is tried again once its hour is up (#918).
+    if (settings.kind === 'on') {
+      const indexer = history;
+      stopRetrying = sweepOnBoundaries(
+        {
+          periodMs: RETRY_PERIOD_MS,
+          run: () => {
+            indexer.schedule();
+          },
+        },
+        options.sweepTimers,
+      );
+    }
     logEvent(log, 'ready', {
       identity: identity !== undefined,
       registration: options.config.registration,
@@ -372,6 +388,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     async stop() {
       stopping = true;
       stopSweeping();
+      stopRetrying();
       await router.stop();
       await listening.close();
       await history?.idle();

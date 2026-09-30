@@ -93,6 +93,7 @@ process.on('message', (message: ToWorker, handle?: Socket) => {
             roomSettings,
             ws,
             message.socketId,
+            message.started,
             message.plan.startedBy,
           );
         },

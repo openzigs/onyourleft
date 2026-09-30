@@ -6,14 +6,28 @@
  * what it says.
  */
 
-import { describe, expect, it } from 'vitest';
+import { kilograms } from '@onyourleft/domain';
+import type { StoredActivityRecord } from '@onyourleft/store';
+import {
+  ATHLETE_A,
+  createStoreHarness,
+  indexedDbStoreFactory,
+  seedAthletes,
+  seedRide,
+  streamSetFor,
+  type PersistentStore,
+  type StoreHarness,
+} from '@onyourleft/store/testing';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { RideAnalysisInput } from './input';
 import {
   RIDE_SUMMARY_FORMAT,
   RIDE_SUMMARY_VERSION,
   rideSummaryBody,
+  rideSummaryOf,
   rideSummaryPassages,
+  type RideSummaryStore,
 } from './ride-summary';
 
 const INPUT: RideAnalysisInput = {
@@ -87,5 +101,79 @@ describe('a ride’s summary', () => {
       version: RIDE_SUMMARY_VERSION,
       passages: rideSummaryPassages(INPUT),
     });
+  });
+});
+
+describe('a ride’s summary, read once per content hash — #918 item 4', () => {
+  let harness: StoreHarness;
+  let writer: PersistentStore;
+  beforeEach(async () => {
+    harness = createStoreHarness();
+    await seedAthletes(harness);
+    writer = indexedDbStoreFactory.open(harness.databaseName);
+  });
+  afterEach(async () => {
+    writer.close();
+    await harness.destroy();
+  });
+
+  /** The store, counting its stream reads, with a signed record whose content hash the test sets. */
+  function counted(signed: { contentHash: string | undefined }) {
+    let streamReads = 0;
+    const store = writer as unknown as RideSummaryStore;
+    const wrapped: RideSummaryStore = {
+      getActivity: (owner, id) => store.getActivity(owner, id),
+      getStreamSet: (owner, id) => {
+        streamReads += 1;
+        return store.getStreamSet(owner, id);
+      },
+      getAthlete: (id) => store.getAthlete(id),
+      listLaps: (owner, id) => store.listLaps(owner, id),
+      getRoute: (owner, id) => store.getRoute(owner, id),
+      getSideCameraReport: (owner, id) => store.getSideCameraReport(owner, id),
+      getActivityRecord: (owner, activityId) =>
+        Promise.resolve(
+          signed.contentHash === undefined
+            ? undefined
+            : ({
+                athleteId: owner,
+                activityId,
+                record: { contentHash: signed.contentHash },
+              } as unknown as StoredActivityRecord),
+        ),
+    };
+    return { wrapped, reads: () => streamReads };
+  }
+
+  it('reads a signed ride’s streams once, and again only when what it is built from changes', async () => {
+    const ride = await seedRide(harness, ATHLETE_A);
+    await harness.write((store) => store.putStreamSet(streamSetFor(ride, { sampleCount: 600 })));
+    const signed = { contentHash: 'sha256:one' as string | undefined };
+    const { wrapped, reads } = counted(signed);
+    const summary = rideSummaryOf(wrapped, ATHLETE_A);
+
+    const first = await summary(ride.id);
+    expect(first).toBeDefined();
+    expect(await summary(ride.id)).toBe(first);
+    expect(reads()).toBe(1);
+
+    // A new file for the ride: a new content hash, read again.
+    signed.contentHash = 'sha256:two';
+    expect(await summary(ride.id)).toBe(first);
+    expect(reads()).toBe(2);
+
+    // The rider's weight changes what power per kilogram says: read again.
+    await writer.setAthleteMass(ATHLETE_A, kilograms(70));
+    const weighed = await summary(ride.id);
+    expect(reads()).toBe(3);
+    expect(weighed).not.toBe(first);
+    expect(await summary(ride.id)).toBe(weighed);
+    expect(reads()).toBe(3);
+
+    // With no signed record there is no content hash to trust: read every time.
+    signed.contentHash = undefined;
+    await summary(ride.id);
+    await summary(ride.id);
+    expect(reads()).toBe(5);
   });
 });

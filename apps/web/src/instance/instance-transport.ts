@@ -162,10 +162,18 @@ function parsed(text: string): unknown {
  * normalise away, no `?` or `#` to push the rest into a query or a fragment,
  * no `%` to smuggle either past this check, and no `\`, which the URL parser
  * reads as `/`. See the module header, and #782's review (B1).
+ *
+ * ⚠️ **And no C0 control character** (#922): the URL parser strips a tab, a
+ * line feed and a carriage return from anywhere in a URL, so
+ * `/v1/rooms/.\t./auth/x` passed the segment check here and was sent as
+ * `/v1/auth/x`. The rest of C0 is refused with them: none has any business
+ * in a path this module is handed.
  */
 function isPlainPath(path: string): boolean {
   if (!path.startsWith('/') || path.startsWith('//')) return false;
   if (/[?#%\\]/.test(path)) return false;
+  // eslint-disable-next-line no-control-regex -- refusing control characters is the point
+  if (/[\u0000-\u001f]/u.test(path)) return false;
   return path
     .slice(1)
     .split('/')

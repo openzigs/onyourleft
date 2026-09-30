@@ -288,7 +288,7 @@ export interface HistorySourceTable {
   readonly source_digest: string;
   readonly model: string;
   readonly convention: string;
-  readonly outcome: 'indexed' | 'empty' | 'too-long' | 'picture';
+  readonly outcome: 'indexed' | 'empty' | 'too-long' | 'picture' | 'failed';
   readonly passages: number;
   readonly indexed_at: number;
 }

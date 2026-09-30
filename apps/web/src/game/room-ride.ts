@@ -134,6 +134,9 @@ export function roomFrame(
   const own = room.own();
   const local = simulation.state.ride.distance as number;
   if (own !== undefined && own.atLocalMs !== memory.correctedFrom) {
+    // The frame before, or — on the first — when the ride began: how long the
+    // two could have been coming apart for (#922).
+    const since = memory.correctedFrom ?? nowMs - (simulation.state.ridden as number) * 1000;
     memory.correctedFrom = own.atLocalMs;
     const error = roomErrorMetres(
       {
@@ -141,7 +144,11 @@ export function roomFrame(
         speedMetresPerSecond: own.rider.speedMetresPerSecond,
         atLocalMs: own.atLocalMs,
       },
-      local,
+      {
+        distanceMetres: local,
+        speedMetresPerSecond: simulation.state.ride.speed,
+        sinceLocalMs: since,
+      },
       nowMs,
     );
     if (error !== undefined) simulation.correctToward(error);

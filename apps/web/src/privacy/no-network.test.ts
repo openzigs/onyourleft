@@ -79,6 +79,40 @@
  * gained exactly one entry with the same three fixtures as #387's, and the
  * configuration the scan cannot see is asserted in
  * `camera/side-link-transport.test.ts`.
+ *
+ * ## What a text scan cannot see (#922)
+ *
+ * It reads spellings, line by line, and a spelling is not a value. These
+ * ways of reaching a primitive pass it, and are written down here rather
+ * than chased with patterns that would each find the next one:
+ *
+ * - **An alias.** `const g = globalThis; g.fetch(u)`, or `const { WebSocket:
+ *   W } = window; new W(u)` — the name reaches the primitive through a
+ *   binding the scan does not follow. (The destructuring form names
+ *   `WebSocket` and is found; renaming the binding afterwards is not.)
+ * - **A computed name.** `Reflect.get(globalThis, name)`, or
+ *   `globalThis['fe' + 'tch']`, with the name built at run time: there is no
+ *   spelling of the primitive in the source at all.
+ * - **A primitive handed in.** A module given `fetch` as a parameter calls
+ *   whatever it was given; the gate holds the module that HANDS it over, and
+ *   that is where the one permitted `fetch` lives.
+ *
+ * - **Other spellings of a literal key** (#928's second review): a
+ *   parenthesised object, `(globalThis)['fetch'](u)`; a method of the
+ *   primitive, `window['fetch'].call(window, u)`; a key taken into a binding,
+ *   `const f = globalThis['fetch']`; a comment between the key and the
+ *   call's parenthesis; and anything split across lines, which a
+ *   line-by-line scan cannot see. And one false positive, from the name's
+ *   leading boundary: `obj.self['WebSocket']` and `foo.window['fetch'](u)`
+ *   match, though neither is the global object.
+ *
+ * What IS matched: the bare name; the name through `globalThis`, `window` or
+ * `self` with `.` or `?.` (#782's review, #922); the same through a cast,
+ * `(globalThis as any).WebSocket` (#922); a call through `?.(` (#922); and a
+ * literal key, `globalThis['fetch'](u)` or `window?.["WebSocket"]` (#928's
+ * review).
+ * A review of any module that reaches the global object by another road is
+ * the gate for the rest.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
@@ -94,6 +128,39 @@ import { stripComments } from '../units/no-inline-units';
 const SOURCE_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 /**
+ * The global object, reached as a name — `globalThis`, `window`, `self` — or
+ * as that name cast, `(globalThis as any)`, and then a member access, `.` or
+ * `?.`. #922 added the optional chain and the cast: `globalThis?.WebSocket`,
+ * `window?.fetch(` and `(globalThis as any).WebSocket` all passed the gate.
+ */
+const GLOBAL_OBJECT = String.raw`(?:(?<![\w$])(?:globalThis|window|self)|\(\s*(?:globalThis|window|self)\s+as\s+[^()]*\))`;
+const VIA_GLOBAL = String.raw`${GLOBAL_OBJECT}\s*\??\.\s*`;
+
+/**
+ * The global object's member by a LITERAL key: `globalThis['fetch']`,
+ * `window?.["WebSocket"]`, `` self[`EventSource`] `` (#928's review). A
+ * literal is a spelling; a key built at run time is not, and is a limit.
+ */
+function viaGlobalKey(name: string): string {
+  return String.raw`${GLOBAL_OBJECT}\s*(?:\?\.\s*)?\[\s*(?:'${name}'|"${name}"|\`${name}\`)\s*\]`;
+}
+
+/** A call's opening parenthesis, directly or through an optional call, `?.(`. */
+const CALLED = String.raw`\s*(?:\?\.\s*)?\(`;
+
+/**
+ * A primitive's row: its bare name, or the name reached through the global
+ * object, by a member access or a literal key. `keyTail` follows the key's
+ * `]`, where a word boundary could never match.
+ */
+function primitive(name: string, tail: string, keyTail = ''): RegExp {
+  return new RegExp(
+    String.raw`(?<![\w.$])${name}${tail}|${VIA_GLOBAL}${name}${tail}|${viaGlobalKey(name)}${keyTail}`,
+    'g',
+  );
+}
+
+/**
  * The primitives that can move bytes off the device.
  *
  * ⚠️ Matched with a preceding boundary, so `prefetch(`, `refetch(` and a method
@@ -104,28 +171,16 @@ const NETWORK_PRIMITIVES: readonly { readonly name: string; readonly pattern: Re
   // ⚠️ Each of these four is TWO spellings in one row, since #782's review
   // (B2): the bare name, with `.` in the lookbehind so `store.fetchRides(` and
   // `scope.fetch = …` stay quiet, OR the name reached through the global
-  // object — `globalThis.`, `window.` or `self.` — which that lookbehind used
-  // to skip, so `new globalThis.WebSocket(u)` anywhere in the client passed
-  // the gate. One row per primitive rather than a second row, so a line naming
-  // both spellings is one finding and the module-and-primitive count below is
-  // not doubled. #529 closed the same hole for `RTCPeerConnection`.
-  {
-    name: 'fetch',
-    pattern: /(?<![\w.$])fetch\s*\(|(?<![\w$])(?:globalThis|window|self)\s*\.\s*fetch\s*\(/g,
-  },
-  {
-    name: 'XMLHttpRequest',
-    pattern:
-      /(?<![\w.$])XMLHttpRequest\b|(?<![\w$])(?:globalThis|window|self)\s*\.\s*XMLHttpRequest\b/g,
-  },
-  {
-    name: 'WebSocket',
-    pattern: /(?<![\w.$])WebSocket\b|(?<![\w$])(?:globalThis|window|self)\s*\.\s*WebSocket\b/g,
-  },
-  {
-    name: 'EventSource',
-    pattern: /(?<![\w.$])EventSource\b|(?<![\w$])(?:globalThis|window|self)\s*\.\s*EventSource\b/g,
-  },
+  // object — `globalThis.`, `window.` or `self.`, and since #922 through `?.`
+  // and a cast ({@link VIA_GLOBAL}) — which that lookbehind used to skip, so
+  // `new globalThis.WebSocket(u)` anywhere in the client passed the gate. One
+  // row per primitive rather than a second row, so a line naming both
+  // spellings is one finding and the module-and-primitive count below is not
+  // doubled. #529 closed the same hole for `RTCPeerConnection`.
+  { name: 'fetch', pattern: primitive('fetch', CALLED, CALLED) },
+  { name: 'XMLHttpRequest', pattern: primitive('XMLHttpRequest', String.raw`\b`) },
+  { name: 'WebSocket', pattern: primitive('WebSocket', String.raw`\b`) },
+  { name: 'EventSource', pattern: primitive('EventSource', String.raw`\b`) },
   { name: 'sendBeacon', pattern: /\.sendBeacon\s*\(/g },
   { name: 'navigator.sendBeacon', pattern: /(?<![\w.$])navigator\s*\.\s*sendBeacon\b/g },
   // #529, ADR 0033 D-9 step 1. ⚠️ **No `.` in the lookbehind, unlike every
@@ -175,6 +230,41 @@ describe('the scan itself', () => {
     expect(networkCallsIn('const s = new WebSocket(url);')).toHaveLength(1);
     expect(networkCallsIn('new EventSource(url)')).toHaveLength(1);
     expect(networkCallsIn('navigator.sendBeacon(url, body);').length).toBeGreaterThan(0);
+  });
+
+  it('finds a primitive through an optional chain or a cast of the global object — #922', () => {
+    // Each of these passed the gate before #922.
+    for (const [line, primitive] of [
+      ['const Socket = globalThis?.WebSocket;', 'WebSocket'],
+      ['await window?.fetch(url);', 'fetch'],
+      ['new (globalThis as any).WebSocket(url)', 'WebSocket'],
+      ['(window as unknown as { fetch: F }).fetch(url)', 'fetch'],
+      ['const r = await self?.fetch?.(url);', 'fetch'],
+      ['const r = await fetch?.(url);', 'fetch'],
+      ['new (globalThis as Window).EventSource(url)', 'EventSource'],
+      ['new window?.XMLHttpRequest()', 'XMLHttpRequest'],
+      // A literal key (#928's review).
+      ["await globalThis['fetch'](url);", 'fetch'],
+      ['new window["WebSocket"](url)', 'WebSocket'],
+      ['const S = self?.[`EventSource`];', 'EventSource'],
+      ["new (globalThis as any)[ 'XMLHttpRequest' ]()", 'XMLHttpRequest'],
+    ] as const) {
+      expect(
+        networkCallsIn(line).map((found) => found.primitive),
+        line,
+      ).toEqual([primitive]);
+    }
+    // Still quiet: a member of something that is not the global object, and a cast of one.
+    for (const line of [
+      'store?.fetchRides(x)',
+      'client?.fetch(url)',
+      '(scope as Worker).fetchAll()',
+      'const prefetch = (x) => x;',
+      "cache['fetch'](url)",
+      "globalThis['fetchRides'](x)",
+    ]) {
+      expect(networkCallsIn(line), line).toEqual([]);
+    }
   });
 
   it('finds a WebRTC peer connection, however it is reached — #529, ADR 0033 D-9', () => {

@@ -39,8 +39,7 @@ import {
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { orderedRows, PAGE_SIZE } from '../library/rows';
-import type { RideInputStore } from '../ride-analysis/read-input';
-import { rideSummaryOf } from '../ride-analysis/ride-summary';
+import { rideSummaryOf, type RideSummaryStore } from '../ride-analysis/ride-summary';
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
 import { importActivityFiles } from '../transfer/import-batch';
 import { linkThisDevice, signInToInstance, type InstanceTransport } from './sign-in';
@@ -211,7 +210,7 @@ function syncDependencies(on: Device, store: SyncDependencies['store']): SyncDep
     now: () => NOW,
     timeZone: 'Europe/London',
     // The harness hands the whole ActivityStore, which reads a ride's input.
-    rideSummary: rideSummaryOf(store as unknown as RideInputStore, LOCAL_ATHLETE),
+    rideSummary: rideSummaryOf(store as unknown as RideSummaryStore, LOCAL_ATHLETE),
     // The athlete's keys, from the instance's device list (#898).
     athleteKeys: () => athleteKeysFrom(on.transport.sync),
     newDocumentId: () => crypto.randomUUID(),
@@ -402,7 +401,7 @@ describe('two-way sync through the real instance (#776)', () => {
     expect(pulled).toMatchObject({ summariesPushed: 0 });
     await b.harness.write((store) => store.setAthleteMass(LOCAL_ATHLETE, kilograms(70)));
     const onB = await b.harness.read((store) =>
-      rideSummaryOf(store as unknown as RideInputStore, LOCAL_ATHLETE)(ids[0]!),
+      rideSummaryOf(store as unknown as RideSummaryStore, LOCAL_ATHLETE)(ids[0]!),
     );
     expect(onB).not.toBe(JSON.stringify(await instanceItem(a, 'ride-summary', ids[0]!)));
     const bAgain = await b.harness.write((store) => syncWithInstance(syncDependencies(b, store)));

@@ -9,10 +9,18 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { DEFAULT_LIMITS } from '../auth/identity.ts';
 import type { IdentityInstance } from '../auth/identity-testing.ts';
 import { syncWorld } from '../sync/sync-testing.ts';
 import type { EmbedFailure } from './embedder.ts';
-import { dot, labelFor, MAXIMUM_SEARCH_CHARACTERS, relativeAge } from './history.ts';
+import {
+  dot,
+  FAILED_RETRY_SECONDS,
+  labelFor,
+  MAXIMUM_SEARCH_CHARACTERS,
+  relativeAge,
+  rideStarts,
+} from './history.ts';
 import { scriptedEmbedder, scriptedVector, SCRIPTED_DIMENSION } from './history-testing.ts';
 
 type Rider = Awaited<ReturnType<typeof syncWorld>>['riders'][number];
@@ -104,7 +112,7 @@ describe('keeping the index (ADR 0040 D-1, D-4, D-7)', () => {
 
     embedder.failWith = undefined;
     const report = await world.history.catchUp();
-    expect(report).toEqual({ indexed: 1, stopped: null });
+    expect(report).toEqual({ indexed: 1, failed: 0, stopped: null });
     expect((await search(anna, ask('recovery'))).body.passages).toHaveLength(1);
   });
 
@@ -116,7 +124,7 @@ describe('keeping the index (ADR 0040 D-1, D-4, D-7)', () => {
     await put(anna, 'goal', 'g1', { text: 'Ride a century by June.' });
     await world.history.idle();
     const calls = embedder.calls.length;
-    expect(await world.history.catchUp()).toEqual({ indexed: 0, stopped: null });
+    expect(await world.history.catchUp()).toEqual({ indexed: 0, failed: 0, stopped: null });
     await put(anna, 'goal', 'g1', { text: 'Ride a century by June.' });
     await world.history.idle();
     expect(embedder.calls.length).toBe(calls);
@@ -165,7 +173,7 @@ describe('keeping the index (ADR 0040 D-1, D-4, D-7)', () => {
         ok: true,
         value: { passages: [] },
       });
-      expect(await after.catchUp()).toEqual({ indexed: 1, stopped: null });
+      expect(await after.catchUp()).toEqual({ indexed: 1, failed: 0, stopped: null });
       expect(second.calls.map((call) => call.texts)).toContainEqual(['Sweet spot intervals.']);
       const found = await after.search(caller, ask('sweet spot'));
       expect(found.ok && found.value.passages).toHaveLength(1);
@@ -210,8 +218,8 @@ describe('keeping the index (ADR 0040 D-1, D-4, D-7)', () => {
     expect(embedder.calls.filter((call) => call.purpose === 'document')).toStrictEqual([]);
   });
 
-  it.each<EmbedFailure>(['refused', 'malformed', 'not-local'])(
-    'stops a catch-up when the model answers %s, and says so',
+  it.each<EmbedFailure>(['unreachable', 'not-local', 'unresolved', 'unavailable', 'server-error'])(
+    'stops a catch-up when the model cannot be asked (%s), and says so',
     async (failure) => {
       const embedder = scriptedEmbedder();
       const made = await syncWorld(1, { embedder });
@@ -219,10 +227,235 @@ describe('keeping the index (ADR 0040 D-1, D-4, D-7)', () => {
       const [anna] = made.riders as [Rider];
       embedder.failWith = failure;
       await put(anna, 'note', 'n1', { text: 'x' });
+      await put(anna, 'note', 'n2', { text: 'y' });
       await world.history.idle();
-      expect(await world.history.catchUp()).toEqual({ indexed: 0, stopped: failure });
+      expect(await world.history.catchUp()).toEqual({ indexed: 0, failed: 0, stopped: failure });
+      // Nothing was marked: both wait for the model.
+      expect(
+        await world.freshRead((store) =>
+          store.listPendingHistorySources(['note'], embedder.model, embedder.convention, 10),
+        ),
+      ).toHaveLength(2);
     },
   );
+
+  it.each<EmbedFailure>(['refused', 'malformed'])(
+    'marks an item the model answers %s for and goes past it, so one item cannot stop the rest — #918 item 2',
+    async (failure) => {
+      const embedder = scriptedEmbedder();
+      const made = await syncWorld(1, { embedder });
+      world = made.world;
+      const [anna] = made.riders as [Rider];
+      embedder.failFor = (text) => (text.includes('poison') ? failure : undefined);
+      // The poison item is the OLDEST, so it is first on every sweep.
+      await put(anna, 'note', 'n1', { text: 'A poison note.' });
+      await put(anna, 'note', 'n2', { text: 'Threshold intervals went well.' });
+      await put(anna, 'goal', 'g1', { text: 'Threshold by spring.' });
+      await world.history.idle();
+      // The two after it are indexed; the poison one is marked, not retried.
+      expect((await search(anna, ask('threshold'))).body.passages).toHaveLength(2);
+      const asked = embedder.calls.filter((call) => call.purpose === 'document').length;
+      expect(await world.history.catchUp()).toEqual({ indexed: 0, failed: 0, stopped: null });
+      expect(embedder.calls.filter((call) => call.purpose === 'document')).toHaveLength(asked);
+      expect(
+        await world.freshRead((store) =>
+          store.listPendingHistorySources(
+            ['note', 'goal'],
+            embedder.model,
+            embedder.convention,
+            10,
+          ),
+        ),
+      ).toStrictEqual([]);
+    },
+  );
+
+  it('marks the one item the model answers 500 for, and indexes every other athlete’s after it — #928', async () => {
+    const embedder = scriptedEmbedder();
+    const made = await syncWorld(2, { embedder });
+    world = made.world;
+    const [anna, ben] = made.riders as [Rider, Rider];
+    // Ollama's 500 for a text its model makes a NaN of (ollama/ollama#13572).
+    embedder.failFor = (text) => (text.includes('nan') ? 'server-error' : undefined);
+    embedder.failWith = 'unreachable';
+    // The NaN item is the OLDEST on the instance, so it heads every sweep.
+    await put(anna, 'note', 'n1', { text: 'A nan note.' });
+    await put(anna, 'note', 'n2', { text: 'Threshold intervals went well.' });
+    await put(ben, 'goal', 'g1', { text: 'Threshold by spring.' });
+    await world.history.idle();
+    embedder.failWith = undefined;
+    expect(await world.history.catchUp()).toEqual({ indexed: 3, failed: 1, stopped: null });
+    expect((await search(anna, ask('threshold'))).body.passages).toHaveLength(1);
+    expect((await search(ben, ask('threshold'))).body.passages).toHaveLength(1);
+    // Marked, so the next sweep does not stop on it again inside its hour.
+    expect(await world.history.catchUp()).toEqual({ indexed: 0, failed: 0, stopped: null });
+  });
+
+  it('does not ask about a held item again when it ends a page, and reaches the page after — #928', async () => {
+    const embedder = scriptedEmbedder();
+    const made = await syncWorld(1, { embedder });
+    world = made.world;
+    const [anna] = made.riders as [Rider];
+    embedder.failFor = (text) => (text.includes('nan') ? 'server-error' : undefined);
+    embedder.failWith = 'unreachable';
+    // A sweep reads sixteen at a time: the NaN item is the sixteenth, and the
+    // only item that could clear it is on the next page.
+    for (let index = 1; index <= 15; index += 1) {
+      await put(anna, 'note', `n${index}`, { text: `Fine note ${index}.` });
+    }
+    await put(anna, 'note', 'n16', { text: 'A nan note.' });
+    await put(anna, 'note', 'n17', { text: 'The seventeenth.' });
+    await world.history.idle();
+    embedder.failWith = undefined;
+    const before = embedder.calls.length;
+    expect(await world.history.catchUp()).toEqual({ indexed: 17, failed: 1, stopped: null });
+    expect(embedder.calls.length - before).toBe(17);
+  });
+
+  it('marks two adjacent items the model answers 500 for, and indexes another athlete’s after them — #928', async () => {
+    const embedder = scriptedEmbedder();
+    const made = await syncWorld(2, { embedder });
+    world = made.world;
+    const [anna, ben] = made.riders as [Rider, Rider];
+    embedder.failFor = (text) => (text.includes('nan') ? 'server-error' : undefined);
+    embedder.failWith = 'unreachable';
+    // A rider who saved the same text twice: two NaN items, side by side, at the
+    // head of the instance-wide queue. Holding only one of them halted every sweep.
+    await put(anna, 'note', 'n1', { text: 'A nan note.' });
+    await put(anna, 'note', 'n2', { text: 'A nan note.' });
+    await put(ben, 'goal', 'g1', { text: 'Threshold by spring.' });
+    await world.history.idle();
+    embedder.failWith = undefined;
+    expect(await world.history.catchUp()).toEqual({ indexed: 3, failed: 2, stopped: null });
+    expect((await search(ben, ask('threshold'))).body.passages).toHaveLength(1);
+    expect(await world.history.catchUp()).toEqual({ indexed: 0, failed: 0, stopped: null });
+  });
+
+  it('marks three items the model answers 500 for across a page boundary — #928', async () => {
+    const embedder = scriptedEmbedder();
+    const made = await syncWorld(1, { embedder });
+    world = made.world;
+    const [anna] = made.riders as [Rider];
+    embedder.failFor = (text) => (text.includes('nan') ? 'server-error' : undefined);
+    embedder.failWith = 'unreachable';
+    // Fifteen fine items, then the sixteenth to eighteenth are NaN (a page ends
+    // after the sixteenth), then one fine item on the next page.
+    for (let index = 1; index <= 15; index += 1) {
+      await put(anna, 'note', `n${index}`, { text: `Fine note ${index}.` });
+    }
+    for (let index = 16; index <= 18; index += 1) {
+      await put(anna, 'note', `n${index}`, { text: `A nan note ${index}.` });
+    }
+    await put(anna, 'note', 'n19', { text: 'The nineteenth.' });
+    await world.history.idle();
+    embedder.failWith = undefined;
+    expect(await world.history.catchUp()).toEqual({ indexed: 19, failed: 3, stopped: null });
+  });
+
+  it('asks at most one page of items in an outage, and marks none of them — #928', async () => {
+    const embedder = scriptedEmbedder();
+    const made = await syncWorld(1, { embedder });
+    world = made.world;
+    const [anna] = made.riders as [Rider];
+    embedder.failWith = 'server-error';
+    for (let index = 1; index <= 20; index += 1) {
+      await put(anna, 'note', `n${index}`, { text: `Note ${index}.` });
+    }
+    await world.history.idle();
+    const before = embedder.calls.length;
+    expect(await world.history.catchUp()).toEqual({
+      indexed: 0,
+      failed: 0,
+      stopped: 'server-error',
+    });
+    expect(embedder.calls.length - before).toBe(16);
+    expect(
+      await world.freshRead((store) =>
+        store.listPendingHistorySources(['note'], embedder.model, embedder.convention, 50),
+      ),
+    ).toHaveLength(20);
+  });
+
+  it('marks nothing when the model answers 500 for every item — #928', async () => {
+    const embedder = scriptedEmbedder();
+    const made = await syncWorld(1, { embedder });
+    world = made.world;
+    const [anna] = made.riders as [Rider];
+    embedder.failWith = 'server-error';
+    await put(anna, 'note', 'n1', { text: 'x' });
+    await put(anna, 'note', 'n2', { text: 'y' });
+    await put(anna, 'note', 'n3', { text: 'z' });
+    await world.history.idle();
+    const before = embedder.calls.length;
+    expect(await world.history.catchUp()).toEqual({
+      indexed: 0,
+      failed: 0,
+      stopped: 'server-error',
+    });
+    // Every item in the page asked about once, not one answer, and then it
+    // stopped: the server is at fault, and nothing is marked.
+    expect(embedder.calls.length - before).toBe(3);
+    expect(
+      await world.freshRead((store) =>
+        store.listPendingHistorySources(['note'], embedder.model, embedder.convention, 10),
+      ),
+    ).toHaveLength(3);
+    // The model recovers: all three are indexed, none was held back an hour.
+    embedder.failWith = undefined;
+    expect(await world.history.catchUp()).toEqual({ indexed: 3, failed: 0, stopped: null });
+  });
+
+  it('leaves a lone item the model answers 500 for unmarked, with nothing else to ask about — #928', async () => {
+    const embedder = scriptedEmbedder();
+    const made = await syncWorld(1, { embedder });
+    world = made.world;
+    const [anna] = made.riders as [Rider];
+    embedder.failFor = (text) => (text.includes('nan') ? 'server-error' : undefined);
+    await put(anna, 'note', 'n1', { text: 'A nan note.' });
+    await world.history.idle();
+    expect(await world.history.catchUp()).toEqual({
+      indexed: 0,
+      failed: 0,
+      stopped: 'server-error',
+    });
+    expect(
+      await world.freshRead((store) =>
+        store.listPendingHistorySources(['note'], embedder.model, embedder.convention, 10),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('tries a marked item again once its hour is up, and not before — #918 item 2', async () => {
+    const embedder = scriptedEmbedder();
+    const made = await syncWorld(1, { embedder });
+    world = made.world;
+    const [anna] = made.riders as [Rider];
+    embedder.failFor = (text) => (text.includes('odd') ? 'refused' : undefined);
+    await put(anna, 'note', 'n1', { text: 'An odd note about cadence.' });
+    await world.history.idle();
+    expect((await search(anna, ask('cadence'))).body.passages).toStrictEqual([]);
+    // The refusal was transient: the model takes it now.
+    embedder.failFor = undefined;
+    world.clock.ms += (FAILED_RETRY_SECONDS - 1) * 1000;
+    expect(await world.history.catchUp()).toEqual({ indexed: 0, failed: 0, stopped: null });
+    world.clock.ms += 1000;
+    expect(await world.history.catchUp()).toEqual({ indexed: 1, failed: 0, stopped: null });
+    expect((await search(anna, ask('cadence'))).body.passages).toHaveLength(1);
+  });
+
+  it('counts an item marked failed in the report', async () => {
+    const embedder = scriptedEmbedder();
+    const made = await syncWorld(1, { embedder });
+    world = made.world;
+    const [anna] = made.riders as [Rider];
+    embedder.failWith = 'unreachable';
+    await put(anna, 'note', 'n1', { text: 'A poison note.' });
+    await put(anna, 'note', 'n2', { text: 'Fine.' });
+    await world.history.idle();
+    embedder.failWith = undefined;
+    embedder.failFor = (text) => (text.includes('poison') ? 'malformed' : undefined);
+    expect(await world.history.catchUp()).toEqual({ indexed: 2, failed: 1, stopped: null });
+  });
 
   it('records an item the model says is too long, and does not try it again', async () => {
     const embedder = scriptedEmbedder();
@@ -233,7 +466,7 @@ describe('keeping the index (ADR 0040 D-1, D-4, D-7)', () => {
     await put(anna, 'note', 'n1', { text: 'x' });
     await world.history.idle();
     embedder.failWith = undefined;
-    expect(await world.history.catchUp()).toEqual({ indexed: 0, stopped: null });
+    expect(await world.history.catchUp()).toEqual({ indexed: 0, failed: 0, stopped: null });
   });
 });
 
@@ -373,6 +606,50 @@ describe('asking it (ADR 0040 D-3, D-8)', () => {
   });
 });
 
+describe('how often it may be asked — #918 item 3', () => {
+  it('refuses a rider past their searches a minute, embeds nothing for them, and leaves another rider alone', async () => {
+    const embedder = scriptedEmbedder();
+    const made = await syncWorld(2, { embedder });
+    world = made.world;
+    const [anna, ben] = made.riders as [Rider, Rider];
+    const { limit, windowMs } = DEFAULT_LIMITS.historySearchesPerAthlete;
+    // At the start of a window, so the whole allowance falls inside it.
+    world.clock.ms = (Math.floor(world.clock.ms / windowMs) + 1) * windowMs;
+    for (let index = 0; index < limit; index += 1) {
+      expect((await search(anna, ask('hills'))).status).toBe(200);
+    }
+    const queries = embedder.calls.filter((call) => call.purpose === 'query').length;
+    const over = await search(anna, ask('hills'));
+    expect(over.status).toBe(429);
+    expect(over.body).toMatchObject({ error: { code: 'rate_limited' } });
+    // A malformed request past the limit is refused the same way: it counts.
+    expect((await search(anna, { query: '' })).status).toBe(429);
+    expect(embedder.calls.filter((call) => call.purpose === 'query')).toHaveLength(queries);
+    expect((await search(ben, ask('hills'))).status).toBe(200);
+    // The next window has a fresh allowance.
+    world.clock.ms += windowMs;
+    expect((await search(anna, ask('hills'))).status).toBe(200);
+  });
+
+  it('forgets the athlete when their window ends, with no further request (#892’s sweep)', async () => {
+    const made = await syncWorld(1);
+    world = made.world;
+    const [anna] = made.riders as [Rider];
+    const { windowMs } = DEFAULT_LIMITS.historySearchesPerAthlete;
+    // Past the sign-in's own minute-long keys, so only the search's key is new.
+    world.clock.ms = (Math.floor(world.clock.ms / windowMs) + 1) * windowMs;
+    world.identity.sweepRateLimits();
+    const before = world.identity.heldRateLimitKeys();
+    expect((await search(anna, ask('hills'))).status).toBe(200);
+    expect(world.identity.heldRateLimitKeys()).toBe(before + 1);
+    // Swept on its own window's boundary, as every limit is.
+    expect(windowMs % world.identity.rateLimitSweepPeriodMs).toBe(0);
+    world.clock.ms += windowMs;
+    world.identity.sweepRateLimits();
+    expect(world.identity.heldRateLimitKeys()).toBe(0);
+  });
+});
+
 describe('erase and export (ADR 0040 D-10)', () => {
   it('deletes an item’s passages with the item, and every passage with the account', async () => {
     const made = await syncWorld(2);
@@ -431,6 +708,34 @@ describe('erase and export (ADR 0040 D-10)', () => {
 });
 
 describe('the pieces', () => {
+  it('dates only the rides it is asked about, and reads no record past the last it needs — #918 item 5', () => {
+    let read = 0;
+    const record = (activityId: string, startedAt: number) => ({
+      get signedRecord() {
+        read += 1;
+        return new TextEncoder().encode(JSON.stringify({ claims: { activityId, startedAt } }));
+      },
+    });
+    const records = [
+      record('a', 1),
+      record('b', 2),
+      { signedRecord: new TextEncoder().encode('not json') },
+      record('c', 3),
+      ...Array.from({ length: 50 }, (_, index) => record(`other-${String(index)}`, index)),
+    ];
+    const starts = rideStarts(records, new Set(['c', 'a']));
+    expect([...starts]).toStrictEqual([
+      ['a', 1],
+      ['c', 3],
+    ]);
+    // `a`, `b` and `c`: the fifty after them are never parsed.
+    expect(read).toBe(3);
+    // A ride with no record reads them all, and dates nothing.
+    read = 0;
+    expect(rideStarts(records, new Set(['missing'])).size).toBe(0);
+    expect(read).toBe(53);
+  });
+
   it('ages a ride in whole weeks either way, and says nothing it cannot know', () => {
     expect(relativeAge(0, 6 * 24 * 3600)).toBe(' the same week');
     expect(relativeAge(0, WEEK)).toBe(' 1 week earlier');

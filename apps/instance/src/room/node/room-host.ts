@@ -3,7 +3,7 @@
 import { encodeMessage, MAXIMUM_MESSAGE_BYTES } from '@onyourleft/protocol';
 import type { WebSocket } from 'ws';
 
-import { closeFrames, TOO_SLOW, type CloseFrame } from '../close-codes.ts';
+import { closeFrames, REFUSAL_CLOSE, TOO_SLOW, type CloseFrame } from '../close-codes.ts';
 import {
   createRoom,
   type Admission,
@@ -272,20 +272,40 @@ export class RoomHost {
   }
 
   /**
-   * Takes a socket the router placed here, for room `roomId` with these
-   * settings. `startedBy` is read from the plan that OPENS the room and kept
-   * for its life; a room with no plan behind it (the conformance script, a
-   * test) has no creator, so any seated rider may start it.
+   * Takes a socket the router placed here, for room `roomId` with these settings.
+   *
+   * `startedBy` is read from the plan that OPENS the room and kept for its
+   * life; a room with no plan behind it (the conformance script, a test) has
+   * no creator, so any seated rider may start it.
+   *
+   * ⚠️ `started` is the router's word that the room is a race that has left
+   * its lobby (#897). Such a room is JOINED here only if this host still
+   * holds it. The router forgets where a room is placed only when this
+   * host's `room-closed` reaches it, so a rejoin sent while that message is
+   * in flight lands on a host that has let the room go — and opening it
+   * again would open a lobby for a race that has already finished. It is
+   * refused `room-closed` instead, as the router refuses a started race no
+   * worker holds.
    */
   accept(
     roomId: string,
     settings: RoomSettings,
     socket: WebSocket,
     socketId: string,
+    started = false,
     startedBy: RaceStarter = 'any-seated-rider',
   ): void {
     if (this.#stopping) {
       socket.close(1001, 'server-stopping');
+      return;
+    }
+    if (started && !this.#rooms.has(roomId)) {
+      this.#count('room-closed');
+      socket.on('error', () => undefined);
+      socket.on('close', () => this.#options.onSocketClosed?.(socketId));
+      socket.send(encodeMessage({ type: 'refuse', reason: 'room-closed' }));
+      const frame = REFUSAL_CLOSE['room-closed'];
+      socket.close(frame.code, frame.reason);
       return;
     }
     const hosted = this.#rooms.get(roomId) ?? this.#open(roomId, settings, startedBy);

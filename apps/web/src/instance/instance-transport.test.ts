@@ -74,6 +74,26 @@ describe('the one transport to an instance — #777', () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
+  it('refuses a path holding any C0 control character, which the URL parser strips — #922', async () => {
+    const send = answering(200, '{}');
+    const http = instanceHttp(ORIGIN, send);
+    // The reproduction: the parser drops the tab, and `.\t.` becomes `..`.
+    expect(new URL(`${ORIGIN}/v1/rooms/.\t./auth/x`).pathname).toBe('/v1/auth/x');
+    for (let code = 0; code < 0x20; code += 1) {
+      const path = `/v1/rooms/.${String.fromCharCode(code)}./auth/x`;
+      await expect(
+        http.call('POST', path, { token: 't' }),
+        `U+${code.toString(16)}`,
+      ).rejects.toMatchObject({
+        why: 'refused-path',
+      });
+    }
+    expect(send).not.toHaveBeenCalled();
+    // A space is not a control character, and is sent as the parser encodes it.
+    await http.call('GET', '/v1/files/a b');
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
   it('builds both of a room’s paths from one checked id — #782 review (B1)', () => {
     expect(roomPath('room-1', 'ticket')).toBe('/v1/rooms/room-1/ticket');
     expect(roomPath('room-1', 'socket')).toBe('/v1/rooms/room-1/socket');

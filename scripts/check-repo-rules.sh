@@ -130,9 +130,17 @@ report() {
 # under any of them cannot reach a commit from this checkout at all, and a key
 # committed on the branch a worktree holds is REL001's business on that branch,
 # where this same script runs.
+#
+# ⚠️ `__pycache__` since #900: Python writes one beside any module a script
+# imports, and the realistic pipeline's Blender scripts import siblings
+# (`rider_kit.py`, `gltf_import.py`). Until #900 the only thing keeping a
+# stray `.pyc` out of ASSET001 was each script setting
+# `sys.dont_write_bytecode` before its import -- one forgotten line from a
+# red build with no fix but deleting a directory nobody made on purpose.
+# `.gitignore` names it too, which is what every entry here rests on.
 GENERATED=(
   -name node_modules -o -name dist -o -name build -o -name coverage -o -name .git
-  -o -name .claude -o -name .gradle -o -name .DS_Store
+  -o -name .claude -o -name .gradle -o -name .DS_Store -o -name __pycache__
   -o -name capacitor-cordova-android-plugins
   -o -path '*/main/assets/public'
   -o -path '*/main/res/xml/config.xml'
