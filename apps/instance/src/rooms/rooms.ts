@@ -46,7 +46,9 @@
  * is over — a race finished, a group ride past its empty grace — unless
  * another open room rides the same bytes. A closed room is never opened again.
  * ⚠️ **A room nobody ever rides is never over**, so its route stays until the
- * operator deletes it: an expiry for an unridden room is not built.
+ * operator deletes it: an expiry for an unridden room is not built. What bounds
+ * it is {@link MAXIMUM_OPEN_ROOMS_PER_ATHLETE}: one athlete holds at most five
+ * rooms that are not over, whatever the rate of making them.
  */
 
 import { PHYSICS_VERSION, type RidingPosition } from '@onyourleft/physics';
