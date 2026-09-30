@@ -490,6 +490,7 @@ describe('the side-camera link carries no coordinate at all — #529', () => {
     controlMessageText({ t: 'start', n: 0 }),
     controlMessageText({ t: 'stop', n: 1 }),
     controlMessageText({ t: 'ping' }),
+    controlMessageText({ t: 'welcome' }),
     controlMessageText({ t: 'hello', k: 'AQIDBA' }),
     controlMessageText({ t: 'ack', n: 1 }),
     controlMessageText({ t: 'state', report: { state: 'filming' } }),
