@@ -27,7 +27,8 @@
  *   all, so no record verifies as a statement and no statement as a record.
  *   The three purposes below are distinct for the same reason: a device
  *   signing in cannot have its signature used to LINK a key or RECOVER an
- *   account, which add a key to an athlete rather than open a session.
+ *   account, which add a key to an athlete rather than open a session, nor
+ *   to ERASE one.
  *
  * Not a secret, and not a record: nothing here is stored.
  */
@@ -43,8 +44,16 @@ export const LINK_PURPOSE = 'oyl-link-v1';
 /** Adding this device's key to an athlete with a recovery code, every other device lost (#773). */
 export const RECOVER_PURPOSE = 'oyl-recover-v1';
 
+/**
+ * Deleting the account on an instance (#898): the step-up `DELETE /v1/account`
+ * asks for when no recovery code is given. A stolen session token cannot make
+ * one, and neither can a signed-in statement, whose purpose differs.
+ */
+export const ERASE_ACCOUNT_PURPOSE = 'oyl-erase-account-v1';
+
 /** Every purpose an instance accepts, each at exactly one route. */
-export type DevicePurpose = typeof AUTH_PURPOSE | typeof LINK_PURPOSE | typeof RECOVER_PURPOSE;
+export type DevicePurpose =
+  typeof AUTH_PURPOSE | typeof LINK_PURPOSE | typeof RECOVER_PURPOSE | typeof ERASE_ACCOUNT_PURPOSE;
 
 /** The five members a device signs. */
 export interface DeviceStatement {

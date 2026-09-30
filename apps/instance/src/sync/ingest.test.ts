@@ -10,12 +10,19 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { testDevice, type IdentityInstance } from '../auth/identity-testing.ts';
+import { testDevice, type IdentityInstance, type TestDevice } from '../auth/identity-testing.ts';
 import { DEFAULT_BODY_LIMIT_BYTES } from '../config.ts';
 import type { SqlStore } from '../store/sql-store.ts';
 import { sha256Bytes, toBase64 } from './sync.ts';
-import { corpusFile, longGpx, signedRecordOf, syncWorld, uploadBody } from './sync-testing.ts';
-import { toHex } from '@onyourleft/domain';
+import {
+  claimsFor,
+  corpusFile,
+  longGpx,
+  signedRecordOf,
+  syncWorld,
+  uploadBody,
+} from './sync-testing.ts';
+import { contentHashOf, LINK_PURPOSE, signActivityRecord, toHex } from '@onyourleft/domain';
 
 let world: IdentityInstance | undefined;
 afterEach(async () => {
@@ -422,3 +429,81 @@ describe('ingesting a signed record (#37)', () => {
  * budget.
  */
 const INGEST_BUDGET_MS = 3_000;
+
+describe('a record signed by a revoked key (#898)', () => {
+  /**
+   * A rider with two devices, the second revoked from the first at the
+   * world's clock: the second's key, and when it was revoked.
+   */
+  async function revokedSecondKey() {
+    const setup = await syncWorld(1);
+    world = setup.world;
+    const [rider] = setup.riders;
+    const minted = await world.call('POST', '/v1/auth/link-codes', { token: rider!.token });
+    const second = await testDevice();
+    const linked = await world.call('POST', '/v1/auth/link', {
+      body: {
+        ...(await second.statement(await world.nonceFor(second), { purpose: LINK_PURPOSE })),
+        linkCode: (minted.body as { linkCode: string }).linkCode,
+      },
+    });
+    expect(linked.status, JSON.stringify(linked.body)).toBe(200);
+    world.clock.ms += 10_000;
+    const revokedAt = Math.floor(world.clock.ms / 1000);
+    const revoked = await world.call('POST', `/v1/auth/devices/${second.publicKey}/revoke`, {
+      token: rider!.token,
+      body: {},
+    });
+    expect(revoked.status, JSON.stringify(revoked.body)).toBe(204);
+    return { rider: rider!, second, revokedAt };
+  }
+
+  async function signedBy(device: TestDevice, bytes: Uint8Array, startedAt: number) {
+    return {
+      record: await signActivityRecord(
+        {
+          claims: claimsFor('ride-late', { startedAt }),
+          contentHash: await contentHashOf(bytes, sha256Bytes),
+        },
+        device.signingKey,
+      ),
+      file: toBase64(bytes),
+    };
+  }
+
+  it('is accepted for a ride that started before the key was revoked', async () => {
+    const { rider, second, revokedAt } = await revokedSecondKey();
+    const bytes = corpusFile('nominal-outdoor-ride.fit');
+    const answer = await post(world!, rider.token, await signedBy(second, bytes, revokedAt - 1));
+    expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+    expect((await stored(world!, rider.athleteId)).records).toHaveLength(1);
+  });
+
+  it.each([
+    ['at the moment it was revoked', 0],
+    ['after it was revoked', 3600],
+  ])('is refused for a ride that started %s, and nothing is stored', async (_, after) => {
+    const { rider, second, revokedAt } = await revokedSecondKey();
+    const bytes = corpusFile('nominal-outdoor-ride.fit');
+    const answer = await post(
+      world!,
+      rider.token,
+      await signedBy(second, bytes, revokedAt + after),
+    );
+    expect(answer.status).toBe(422);
+    expect(codeOf(answer.body)).toBe('record_key_revoked');
+    expect((await stored(world!, rider.athleteId)).records).toEqual([]);
+    expect(world!.blobs.size).toBe(0);
+  });
+
+  it('is the revoked key’s rule only: the same late ride signed by a live key is accepted — the control', async () => {
+    const { rider, revokedAt } = await revokedSecondKey();
+    const bytes = corpusFile('nominal-outdoor-ride.fit');
+    const answer = await post(
+      world!,
+      rider.token,
+      await signedBy(rider.device, bytes, revokedAt + 3600),
+    );
+    expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+  });
+});

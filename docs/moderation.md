@@ -171,10 +171,15 @@ refuses to undo 0007 while the log holds a single entry, and changes nothing.
 - **It does not reach the rider's device.** Their rides are on their phone. The app's own export
   (#35) reads the phone, not the instance, so a suspension cannot stop a rider taking their own data
   away.
-- ⚠️ **A suspended rider cannot sign in, so they cannot use an instance-side export while they are
-  suspended.** #775 requires every one of their keys to be refused at sign-in. Their device still
-  holds their rides. If they ask for a copy of what only the instance holds, lifting the suspension
-  is the one way to give it to them today.
+- **It does not stop a rider leaving.** A suspended rider still cannot sign in (#775), but since
+  #898 their app can open a **way-out session** (`POST /v1/auth/leave-session`, signed with one of
+  their device keys). It lasts an hour and reaches exactly two things: the account export
+  (`GET /v1/account/export`) and deleting the account (`DELETE /v1/account`, which needs one of their
+  recovery codes or a fresh signature from one of their devices, like anyone's). Everything else
+  answers `account_suspended`. Lifting the suspension ends the way-out session; they then sign in as
+  usual. ⚠️ This used to say lifting the suspension was the only way to give a suspended rider
+  their data, and a moderator who remembers that is reading the old file. Deleting the account keeps
+  the moderation log, as above.
 - **It does not stop a new identity.** A device key costs nothing to make. What a new identity has
   to get past is your registration mode (above): with approval-required registration, a banned
   rider with a new key is back in your queue, not back on your instance.

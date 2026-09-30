@@ -38,16 +38,30 @@
  *    the signed record and the original file are fetched, and **the signature
  *    and the file's hash are verified BEFORE anything is written** (ADR 0014
  *    D-6); a record that does not verify is not written, and the report names
- *    which of D-6's answers it got. The file is imported through the SAME path
+ *    which of D-6's answers it got. ⚠️ **Nor is a record signed by a key that
+ *    is not one of the athlete's own** (#898): a signature proves who signed,
+ *    not whose ride it is — "Whose key it is" below. The file is imported
+ *    through the SAME path
  *    a rider's own import takes (`transfer/import-batch.ts`), under the
  *    record's own activity id, so the ride library reads it like any other.
- * 3. **A tombstoned ride** — deleted on another device — is deleted here, with
- *    its write-up and report. (Whether an unsigned tombstone should be able to
- *    do that is an owner question on #893.)
+ * 3. **A tombstoned ride** — deleted on another device — is **kept here**
+ *    (#898, the owner's ruling of 2026-09-30). A tombstone is unsigned, and
+ *    the device is canonical (ADR 0036 D-3): it hides the ride on the instance
+ *    and from devices that do not hold it yet, and never deletes a copy the
+ *    rider did not delete on THIS device. Nothing of that ride is sent again —
+ *    not the ride, its write-up, report, summary or consent — so the instance
+ *    keeps it hidden; its base row stays, so the ride is still known here.
+ *    ⚠️ A reviewer who remembers "deleted here, with its write-up and report"
+ *    is reading the old file.
  * 4. **A local ride the instance lacks** is written out as FIT by the export
  *    path (`transfer/export-activity.ts`), signed by this device's key, its
  *    record kept locally, and sent to `POST /v1/sync/records` — idempotent, so
- *    a push that did not hear its answer is simply sent again.
+ *    a push that did not hear its answer is simply sent again. ⚠️ **Its base
+ *    row is written BEFORE it is sent** (#901): a push the instance stored and
+ *    whose answer was lost is then a synced ride all the same, so if the rider
+ *    deletes it here before the next sync it is deleted there, not pulled
+ *    back. A push that did not arrive leaves a base row the ride's own next
+ *    push, or rule 7, settles.
  * 5. **Each write-up and side-camera report of a ride on this device**, as
  *    JSON with the device's own athlete id left out (every device's local
  *    athlete is `local`):
@@ -72,6 +86,43 @@
  *    means off wins: a "yes" is never re-granted by a sync that cannot tell
  *    which device changed.
  * 7. The base forgets a ride neither side holds any more.
+ *
+ * ## Whose key it is (#898, the owner's decision 4 of 2026-09-30)
+ *
+ * A pulled record's key is checked against the athlete's keys **rather than
+ * trusting the instance**. The instance's device list comes from the same
+ * server that serves the record, so a compromised instance that forged a
+ * record would simply list the forging key. So a record is taken only when
+ * its key is one THIS device trusts:
+ *
+ * - **this device's own key**, always ({@link SyncDependencies.signingKey});
+ * - **a key admitted on this device** — `packages/store`
+ *   §`TrustedDeviceKeyRecord`, written only by {@link admitDeviceKey}, which a
+ *   screen on this device calls when the rider confirms another of their
+ *   devices. Nothing the instance says admits a key.
+ *
+ * ⚠️ **No trust on first use.** The instance's list is never used to seed the
+ * set, not even at the first sync: that is the moment a device knows least,
+ * and a list read then is exactly the instance's say-so the owner ruled out.
+ * The cost, said plainly: a device that has admitted no other device's key
+ * pulls no ride another device signed. Each is refused as `key-not-admitted`
+ * (not saved, not remembered in the base, so the next sync after the rider
+ * admits the key pulls it), and the key is named in
+ * {@link SyncReport.keysToConfirm} for the screen that asks. The link flow
+ * (#773) does not admit a key either: a link code carries no key, so the
+ * device that is linked never learns the other device's key from it.
+ *
+ * The instance's list ({@link SyncDependencies.athleteKeys}) is still read,
+ * for two things that only ever NARROW trust: a key it does not list is
+ * refused (`not-your-key` — a record of another athlete's, or of a device the
+ * rider removed), and a key it says was revoked vouches only for a ride that
+ * started before the revocation (`key-revoked`). A lying instance can hide a
+ * revocation that way, but it cannot make this device take a key the rider
+ * never admitted. ⚠️ And the start time is the one the record's own key
+ * signed: the revocation rule bounds an honest device that syncs late, and
+ * refuses what a revoked key dates after its revocation — it does not stop a
+ * thief holding the key who backdates the ride. Nothing on the device can
+ * tell a backdated start from a true one.
  *
  * ⚠️ **A pulled record is not kept on this device.** `packages/store`'s
  * `putActivityRecord` refuses a record signed by a key that is not THIS
@@ -107,13 +158,30 @@
  *    of a deletion are carried, against the base:
  *    - here, and not here now, and in the base: **the rider deleted it
  *      here**, so it is deleted on the instance (and deleting a document
- *      there takes its passages and vectors in the same transaction — #835);
+ *      there takes its passages and vectors in the same transaction — #835)
+ *      — **unless another device changed it there since the base** (#924):
+ *      then the delete is not sent, and the newer text is pulled back, so a
+ *      delete never silently takes words typed elsewhere;
  *    - tombstoned on the instance, and unchanged here since the base:
- *      another device deleted it, so it is deleted here — rule 3's choice
- *      for a ride, and the owner question on #893 is the same one;
+ *      another device deleted it, so it is deleted here. ⚠️ **Not rule 3's
+ *      choice for a ride** since #898: the owner's ruling that a tombstone
+ *      never deletes a device's copy is about rides. A text deleted here this
+ *      way is one this device had not changed since the base, so no word typed
+ *      HERE is lost — and a text changed here is pushed back instead.
+ *      ⚠️ That delete is unsigned, so the words typed on the OTHER device
+ *      go on a say-so rule 3 refuses for a ride: whether a text should be
+ *      kept here like a ride is the owner's question, put on #924 by #926's
+ *      review (N3), and unanswered;
  *    - otherwise the three ways of rule 5: the same is remembered, a change
  *      only there is pulled, a change here (or a copy the instance lacks) is
- *      pushed.
+ *      pushed — ⚠️ **and a change on BOTH sides keeps both** (#924, the
+ *      owner's ruling of 2026-09-30): changed here and changed there since the
+ *      base, or held on both sides with no base and different words, the
+ *      other device's version is first saved HERE as a new document, a
+ *      visible conflict copy the rider can merge ({@link conflictCopyName}),
+ *      and only then is this device's pushed. Typed text is never lost
+ *      silently: if the copy cannot be kept (the rider has 50 documents), the
+ *      push is not made either, and the sync reports `conflict-not-kept`.
  *    A pulled text is written through the store's own validating write, so a
  *    body that is not one (too long, a control character, a 51st document)
  *    is not stored and is reported.
@@ -144,7 +212,12 @@ import type {
   SyncBaseRecord,
 } from '@onyourleft/store';
 
-import { GOALS_KEY } from '@onyourleft/store';
+import {
+  GOALS_KEY,
+  MAXIMUM_DOCUMENT_NAME_CHARACTERS,
+  tidyRiderText,
+  withoutBidiControls,
+} from '@onyourleft/store';
 
 import { exportActivity } from '../transfer/export-activity';
 import { importActivityFiles } from '../transfer/import-batch';
@@ -180,13 +253,18 @@ export type SyncStore = TransferStore &
     | 'putRiderText'
     | 'listRiderTexts'
     | 'deleteRiderText'
+    | 'listTrustedDeviceKeys'
   >;
 
 export interface SyncDependencies {
   readonly transport: SyncTransport;
   readonly store: SyncStore;
   readonly athleteId: AthleteId;
-  /** This device's signing key — `ensureDeviceSigningKey`, bound. Asked for only to push. */
+  /**
+   * This device's signing key — `ensureDeviceSigningKey`, bound. Asked for to
+   * push, and for its public key when a pulled record is checked: this
+   * device's own key is always trusted (#898).
+   */
   readonly signingKey: () => Promise<SigningKey>;
   readonly sha256: Sha256;
   readonly verifier: SignatureVerifier;
@@ -199,6 +277,82 @@ export interface SyncDependencies {
    * §`rideSummaryOf`, bound to this store and athlete.
    */
   readonly rideSummary: (activityId: ActivityId) => Promise<string | undefined>;
+  /**
+   * The athlete's device keys as the INSTANCE lists them (#898) — used only
+   * to narrow trust: a pulled record signed by a key it does not list is
+   * refused, and one signed by a key since revoked only vouches for a ride
+   * that started before it was revoked. Asked for at most once a sync, and
+   * only when there is something to pull; a list that cannot be read pulls
+   * nothing. It never ADMITS a key: a key must also be this device's own or
+   * admitted here ({@link admitDeviceKey}) — the module header's "Whose key
+   * it is".
+   */
+  readonly athleteKeys: () => Promise<readonly AthleteKey[]>;
+  /**
+   * A new document's id — `crypto.randomUUID`, bound — for a conflict copy
+   * (#924): the other device's version of a goal, note or document, kept
+   * beside this device's when both changed.
+   */
+  readonly newDocumentId: () => string;
+}
+
+/**
+ * Admit another of the rider's devices' keys on THIS device (#898), so a sync
+ * takes the rides it signed. The ONE way a key becomes trusted: called by a
+ * screen on this device once the rider has confirmed it is theirs — never
+ * with a key only because an instance listed it. `publicKey` is 64 lowercase
+ * hex, as a signed record carries it; the store refuses anything else.
+ *
+ * Nothing in the shipped client calls it yet, as nothing calls
+ * {@link syncWithInstance}: the screen that asks is part of wiring sync in.
+ */
+export async function admitDeviceKey(
+  store: Pick<ActivityStore, 'putTrustedDeviceKey'>,
+  athleteId: AthleteId,
+  publicKey: string,
+  now: UnixSeconds,
+): Promise<void> {
+  await store.putTrustedDeviceKey({ athleteId, publicKey, admittedAt: now });
+}
+
+/** The keys a pulled record is checked against (#898), read once a sync. */
+interface KeyTrust {
+  /** The instance's list — it narrows trust, and never widens it. */
+  readonly listed: readonly AthleteKey[];
+  /** This device's own public key, lowercase hex: always trusted. */
+  readonly own: string;
+  /** The keys admitted on this device ({@link admitDeviceKey}). */
+  readonly admitted: ReadonlySet<string>;
+}
+
+/** One of the athlete's device keys, as {@link SyncDependencies.athleteKeys} gives it. */
+export interface AthleteKey {
+  /** Lowercase hex, as a signed record carries it. */
+  readonly publicKey: string;
+  /** Unix seconds, or `null` for a live key. */
+  readonly revokedAt: number | null;
+}
+
+/**
+ * The athlete's keys, from `GET /v1/auth/devices` (#773) — the source
+ * {@link SyncDependencies.athleteKeys} is meant to be bound to. Throws when the
+ * instance does not answer with a list, so nothing is pulled on a guess.
+ */
+export async function athleteKeysFrom(transport: SyncTransport): Promise<readonly AthleteKey[]> {
+  const answer = await transport.json('GET', '/v1/auth/devices');
+  const rows = (answer.body as { devices?: unknown } | null)?.devices;
+  if (answer.status !== 200 || !Array.isArray(rows))
+    throw new InstanceSyncError(codeOf(answer.body));
+  return rows.map((row: unknown) => {
+    const { publicKey, revokedAt } = (row ?? {}) as { publicKey?: unknown; revokedAt?: unknown };
+    if (
+      typeof publicKey !== 'string' ||
+      !(revokedAt === null || (typeof revokedAt === 'number' && Number.isFinite(revokedAt)))
+    ) {
+      throw new InstanceSyncError('malformed-devices');
+    }
+    return { publicKey, revokedAt };
+  });
 }
 
 /** The two item kinds this device syncs beside its rides. */
@@ -232,7 +386,11 @@ export interface SyncReport {
   readonly summariesPushed: number;
   /** Rides deleted on this device since the last sync, now deleted on the instance too. */
   readonly deletedOnInstance: number;
-  readonly deleted: number;
+  /**
+   * Rides another device deleted on the instance that this device still
+   * holds (#898): KEPT here, and hidden there. Never deleted by a sync.
+   */
+  readonly hiddenOnInstance: number;
   /** Rides whose "may be raced" consent was sent to the instance (#793). */
   readonly consentsPushed: number;
   /** Rides whose consent was taken from the instance — set or revoked on another device. */
@@ -245,6 +403,19 @@ export interface SyncReport {
   readonly textsDeleted: number;
   /** Goals, notes and documents deleted on the instance, because the rider deleted them here. */
   readonly textsDeletedOnInstance: number;
+  /**
+   * Goals, notes and documents changed on this device AND on another (#924):
+   * this device's pushed, the other's kept here as a new document to merge.
+   * Counted in {@link SyncReport.textsPushed} as well.
+   */
+  readonly textConflicts: number;
+  /**
+   * Keys that signed a record the instance served and this device refused as
+   * `key-not-admitted` (#898): listed by the instance as the athlete's, and
+   * never admitted HERE. Each is a question for the rider — is this one of
+   * your devices? — and {@link admitDeviceKey} is the answer "yes".
+   */
+  readonly keysToConfirm: readonly string[];
   readonly failures: readonly SyncFailure[];
 }
 
@@ -320,14 +491,27 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
   let itemsPulled = 0;
   let itemsPushed = 0;
   let summariesPushed = 0;
-  let deleted = 0;
+  let hiddenOnInstance = 0;
   let deletedOnInstance = 0;
+  /** Rides this device holds that the instance hides: nothing of them is sent (#898). */
+  const hidden = new Set<string>();
+  let trust: Promise<KeyTrust> | undefined;
+  /** Which keys a pulled record may be signed by: read once, and only if something is pulled (#898). */
+  const keyTrust = (): Promise<KeyTrust> =>
+    (trust ??= (async () => ({
+      listed: await dependencies.athleteKeys(),
+      own: toHex((await dependencies.signingKey()).publicKey),
+      admitted: new Set((await store.listTrustedDeviceKeys(athleteId)).map((row) => row.publicKey)),
+    }))());
+  /** Keys the instance listed and this device has not admitted, that signed a record (#898). */
+  const keysToConfirm = new Set<string>();
   let consentsPushed = 0;
   let consentsPulled = 0;
   let textsPulled = 0;
   let textsPushed = 0;
   let textsDeleted = 0;
   let textsDeletedOnInstance = 0;
+  let textConflicts = 0;
 
   const manifest = await readManifest(transport);
   const remote = new Map(manifest.map((entry) => [keyOf(entry.kind, entry.key), entry]));
@@ -392,7 +576,9 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
       }
       continue;
     }
-    const outcome = await pullRide(dependencies, entry.key);
+    const outcome = await pullRide(dependencies, entry.key, keyTrust, (key) =>
+      keysToConfirm.add(key),
+    );
     if (typeof outcome === 'string') {
       failures.push({ kind: 'activity', key: entry.key, reason: outcome });
       continue;
@@ -414,16 +600,23 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
   }
 
   // --- A ride deleted on another device ---------------------------------------
+  // KEPT here (#898): a tombstone is unsigned and the device is canonical
+  // (ADR 0036 D-3). It hides the ride on the instance; it never deletes a copy
+  // the rider did not delete on THIS device.
   for (const entry of manifest) {
     if (entry.kind !== 'activity' || !entry.deleted) continue;
     // A tombstone names no ride (its record is gone), and on the device that
     // PUSHED the ride its key is the hash of the FIT it exported, which is not
     // the ride's `originalFile` — so the base is what says which ride it is
-    // (#893's re-review, N1).
+    // (#893's re-review, N1). So the base row STAYS while the ride is here.
     const known = base.get(keyOf('activity', entry.key));
     const ride = await localRide(entry.activityId ?? known?.activityId ?? null, entry.key);
-    if (ride !== undefined && (await store.deleteActivity(athleteId, ride.id))) deleted += 1;
-    if (known !== undefined) await forgetRide(entry.key, rideOf(known));
+    if (ride !== undefined) {
+      hidden.add(ride.id);
+      hiddenOnInstance += 1;
+    } else if (known !== undefined) {
+      await forgetRide(entry.key, rideOf(known));
+    }
   }
 
   // --- Push: rides -----------------------------------------------------------
@@ -432,29 +625,36 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
   );
   const rides = await localRides(store, athleteId);
   const onDevice = new Set<string>(rides);
+  /**
+   * A push's base rows, written BEFORE it is sent (#901): the ride's, so a
+   * push whose answer is lost is still known as synced — a local delete then
+   * deletes it on the instance rather than pulling it back — and its consent's
+   * "off", which is what the instance creates a pushed ride with: a "yes"
+   * given here before the push is then a change here, and the next sync sends
+   * it rather than losing it to the "off wins" rule below (#793, #915's
+   * review).
+   */
+  const pending = async (id: ActivityId, content: string): Promise<void> => {
+    await remember({
+      kind: 'activity',
+      key: content,
+      activityId: id,
+      localDigest: content,
+      remoteDigest: content,
+    });
+    const off = await consentDigest(false, sha256);
+    await remember({
+      kind: 'race-consent',
+      key: id,
+      activityId: id,
+      localDigest: off,
+      remoteDigest: off,
+    });
+  };
   for (const id of rides) {
-    const outcome = await pushRide(dependencies, id, onInstance);
+    const outcome = await pushRide(dependencies, id, onInstance, (content) => pending(id, content));
     if (typeof outcome !== 'string') {
       pushed += 1;
-      await remember({
-        kind: 'activity',
-        key: outcome.content,
-        activityId: id,
-        localDigest: outcome.content,
-        remoteDigest: outcome.content,
-      });
-      // The instance creates a pushed ride with its consent off, so that is
-      // the consent's base: a "yes" given here before this push is a change
-      // here, and the next sync sends it rather than losing it to the "off
-      // wins" rule below (#793, #915's review).
-      const off = await consentDigest(false, sha256);
-      await remember({
-        kind: 'race-consent',
-        key: id,
-        activityId: id,
-        localDigest: off,
-        remoteDigest: off,
-      });
     } else if (outcome !== 'held') {
       failures.push({ kind: 'activity', key: id, reason: outcome });
     }
@@ -462,6 +662,9 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
 
   // --- Write-ups and side-camera reports, three ways -------------------------
   for (const id of rides) {
+    // Hidden on the instance by another device's delete: nothing of it is
+    // sent back, or the instance would hold a write-up of a ride it hides.
+    if (hidden.has(id)) continue;
     for (const kind of ITEM_KINDS) {
       const entry = remote.get(keyOf(kind, id));
       const remoteDigest = entry === undefined || entry.deleted ? null : entry.digest;
@@ -592,6 +795,8 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
   // --- Each ride's summary, for the rider's history (#835) -------------------
   // Derived from the ride, so never pulled and never in the base (rule 7).
   for (const id of rides) {
+    // A hidden ride's summary would put it back in the rider's history (#898).
+    if (hidden.has(id)) continue;
     const entry = remote.get(keyOf(SUMMARY_KIND, id));
     const remoteDigest = entry === undefined || entry.deleted ? null : entry.digest;
     // A ride another device signed is that device's to describe, once described.
@@ -615,7 +820,8 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
 
   // --- The rider's goals, ride notes and documents (#836) --------------------
   const textKeys: [RiderTextKind, string][] = [['goal', GOALS_KEY]];
-  for (const id of rides) textKeys.push(['note', id]);
+  // A hidden ride's note would put it back on the instance (#898).
+  for (const id of rides) if (!hidden.has(id)) textKeys.push(['note', id]);
   const documentKeys = new Set<string>([
     ...(await store.listRiderTexts(athleteId, 'document')).map((row) => row.key),
     ...manifest.filter((entry) => entry.kind === 'document').map((entry) => entry.key),
@@ -628,7 +834,10 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     else if (outcome === 'pushed') textsPushed += 1;
     else if (outcome === 'deleted') textsDeleted += 1;
     else if (outcome === 'deleted-on-instance') textsDeletedOnInstance += 1;
-    else if (outcome !== 'same') failures.push({ kind, key, reason: outcome });
+    else if (outcome === 'kept-both') {
+      textsPushed += 1;
+      textConflicts += 1;
+    } else if (outcome !== 'same') failures.push({ kind, key, reason: outcome });
   }
 
   // --- The base forgets what neither side holds any more ---------------------
@@ -643,7 +852,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     itemsPulled,
     itemsPushed,
     summariesPushed,
-    deleted,
+    hiddenOnInstance,
     deletedOnInstance,
     consentsPushed,
     consentsPulled,
@@ -651,6 +860,8 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     textsPushed,
     textsDeleted,
     textsDeletedOnInstance,
+    textConflicts,
+    keysToConfirm: [...keysToConfirm].sort(),
     failures,
   };
 
@@ -673,7 +884,13 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
         return 'same';
       }
       if (known !== undefined) {
-        // Synced before, and not here now: the rider deleted it HERE.
+        // Synced before, and not here now: the rider deleted it HERE — over
+        // the copy the base knows. Another device changed it there since, so
+        // the delete would take words the rider never saw: pull them instead
+        // (#924).
+        if (remoteDigest !== known.remoteDigest) {
+          return pullText(kind, key, remoteDigest, activityId);
+        }
         const answer = await transport.json(
           'DELETE',
           `/v1/sync/items/${kind}/${encodeURIComponent(key)}`,
@@ -703,6 +920,17 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
       if (remoteDigest === known.remoteDigest) return 'same';
       return pullText(kind, key, remoteDigest, activityId);
     }
+    // Changed here and ALSO changed there since the base — or on both sides
+    // with no base to tell: keep the other device's version as a conflict
+    // copy before this device's goes over it (#924).
+    const changedThere =
+      remoteDigest !== null && (known === undefined || remoteDigest !== known.remoteDigest);
+    let keptBoth = false;
+    if (changedThere) {
+      const copied = await keepConflictCopy(kind, key, local);
+      if (copied !== 'kept') return copied;
+      keptBoth = true;
+    }
     // Changed here, never synced, or gone from the instance: this device's
     // copy is canonical (ADR 0036 D-3).
     const answer = await transport.json(
@@ -712,7 +940,64 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     );
     if (answer.status !== 200) return codeOf(answer.body);
     await remember({ kind, key, activityId, localDigest, remoteDigest: localDigest });
-    return 'pushed';
+    return keptBoth ? 'kept-both' : 'pushed';
+  }
+
+  /**
+   * The instance's copy of a goal, note or document, saved HERE as a new
+   * document the rider can see and merge (#924), before this device's copy
+   * replaces it there. Answers `kept`, an instance error code, or
+   * `conflict-not-kept` when the store refuses it — the 51st document, say —
+   * in which case nothing is pushed over the other device's words.
+   */
+  async function keepConflictCopy(
+    kind: RiderTextKind,
+    key: string,
+    local: RiderTextRecord,
+  ): Promise<string> {
+    const answer = await transport.json('GET', `/v1/sync/items/${kind}/${encodeURIComponent(key)}`);
+    if (answer.status !== 200) return codeOf(answer.body);
+    try {
+      const body = JSON.parse((answer.body as { body: string }).body) as {
+        text?: unknown;
+        name?: unknown;
+      };
+      if (typeof body.text !== 'string') return 'conflict-not-kept';
+      // Kept already: a push that failed after the copy was saved leaves the
+      // base where it was, so the next sync comes here again — and must not
+      // save the same words a second time, and a third (#926's review, N4).
+      // Any document of the rider's that holds these words exactly keeps
+      // them; the text being synced is not one, whatever it holds.
+      const texts = tidyRiderText(body.text);
+      const held = await store.listRiderTexts(athleteId, 'document');
+      if (held.some((row) => !(kind === 'document' && row.key === key) && row.text === texts)) {
+        return 'kept';
+      }
+      const ride =
+        kind === 'note' ? await store.getActivity(athleteId, key as ActivityId) : undefined;
+      const copyKey = dependencies.newDocumentId();
+      await store.putRiderText({
+        athleteId,
+        kind: 'document',
+        key: copyKey,
+        name: conflictCopyName(
+          kind,
+          kind === 'document'
+            ? typeof body.name === 'string'
+              ? body.name
+              : (local.name ?? '')
+            : (ride?.name ?? ''),
+        ),
+        text: body.text,
+        savedAt: dependencies.now(),
+      });
+      // Sent in this sync, as any new document is, so the rider's other
+      // devices see it too.
+      textKeys.push(['document', copyKey]);
+    } catch {
+      return 'conflict-not-kept';
+    }
+    return 'kept';
   }
 
   /** One goal, note or document from the instance, through the store's own validating write. */
@@ -768,6 +1053,31 @@ function riderTextBody(record: RiderTextRecord): string {
   return JSON.stringify(
     record.kind === 'document' ? { name: record.name, text: record.text } : { text: record.text },
   );
+}
+
+/**
+ * The name of a conflict copy (#924): what it is a copy of, and that it came
+ * from another device — the rider's cue to merge it and remove it. Kept on
+ * one line, without a bidirectional control (#920's review), and within a
+ * document name's length.
+ */
+export function conflictCopyName(kind: RiderTextKind, of: string): string {
+  const suffix = ' (from another device)';
+  const cleaned = withoutBidiControls(of)
+    // eslint-disable-next-line no-control-regex -- a control character is what is removed
+    .replace(/[\u0000-\u001F\u007F-\u009F]+/gu, ' ')
+    .trim();
+  const what =
+    kind === 'goal'
+      ? 'Goals'
+      : kind === 'note'
+        ? cleaned === ''
+          ? 'Ride note'
+          : `Ride note on ${cleaned}`
+        : cleaned === ''
+          ? 'Document'
+          : cleaned;
+  return `${what.slice(0, MAXIMUM_DOCUMENT_NAME_CHARACTERS - suffix.length).trim()}${suffix}`;
 }
 
 /** The ride a ride's base row names — every base row but a goal's or a document's names one. */
@@ -856,6 +1166,9 @@ function localItem(
 async function pullRide(
   dependencies: SyncDependencies,
   content: string,
+  keyTrust: () => Promise<KeyTrust>,
+  /** Told a key the instance listed and this device has not admitted. */
+  unadmitted: (publicKey: string) => void,
 ): Promise<{ readonly activityId: ActivityId } | string> {
   const { transport, store, athleteId, sha256, verifier } = dependencies;
   const recordAnswer = await transport.json('GET', `/v1/sync/records/${content}`);
@@ -873,6 +1186,27 @@ async function pullRide(
   );
   if (verification.status !== 'verified') return verification.status;
   const claims: ActivityClaims = verification.record.claims;
+  // Whose it is, not only who signed it (#898): never the instance's say-so.
+  // The module header's "Whose key it is" says why each of these.
+  let trust: KeyTrust;
+  try {
+    trust = await keyTrust();
+  } catch {
+    return 'keys-unavailable';
+  }
+  const signer = verification.record.publicKey;
+  const own = signer === trust.own;
+  const listed = trust.listed.find((key) => key.publicKey === signer);
+  if (listed === undefined && !own) return 'not-your-key';
+  if (!own && !trust.admitted.has(signer)) {
+    unadmitted(signer);
+    return 'key-not-admitted';
+  }
+  // The start time is signed by the key under suspicion: this bounds an
+  // honest late sync and a revoked key's own later dates, not a thief who
+  // backdates (the module header).
+  const revokedAt = listed?.revokedAt ?? null;
+  if (revokedAt !== null && claims.startedAt >= revokedAt) return 'key-revoked';
 
   const report = await importActivityFiles({
     // A FIT file carries no name, so the import takes one from the file's
@@ -907,6 +1241,8 @@ async function pushRide(
   dependencies: SyncDependencies,
   id: ActivityId,
   onInstance: ReadonlySet<string>,
+  /** Told the content hash just BEFORE it is sent (#901). */
+  pending: (content: string) => Promise<void>,
 ): Promise<{ readonly content: string } | string> {
   const { transport, store, athleteId, sha256 } = dependencies;
   const kept = await store.getActivityRecord(athleteId, id);
@@ -941,14 +1277,14 @@ async function pushRide(
     // The record vouches for bytes this device can no longer write.
     return 'file-changed';
   }
-  if (onInstance.has(toHex(parseContentHash(contentHash)))) return 'held';
+  const content = toHex(parseContentHash(contentHash));
+  if (onInstance.has(content)) return 'held';
+  await pending(content);
   const answer = await transport.json('POST', '/v1/sync/records', {
     record,
     file: toBase64(bytes),
   });
-  return answer.status === 200
-    ? { content: toHex(parseContentHash(contentHash)) }
-    : codeOf(answer.body);
+  return answer.status === 200 ? { content } : codeOf(answer.body);
 }
 
 /** The claims a ride's record makes: #62's list row, and never a coordinate. */

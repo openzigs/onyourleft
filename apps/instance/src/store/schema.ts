@@ -73,7 +73,12 @@ export interface SessionTable {
   readonly device_key: string;
   readonly expires_at: number;
   readonly revoked_at: number | null;
+  /** What the session reaches (#898): `leave` only a suspended athlete's way out. Added by migration 0012. */
+  readonly scope: SessionScope;
 }
+
+/** What a session reaches (#898, migration 0012). */
+export type SessionScope = 'full' | 'leave';
 
 /** A signed activity record an athlete sent (ADR 0014's canonical bytes). */
 export interface ActivityRecordTable {

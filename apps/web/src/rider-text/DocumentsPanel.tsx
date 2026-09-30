@@ -60,6 +60,17 @@ export function documentRemoved(name: string): string {
   return `Removed “${name}”. It is removed from your instance at the next sync.`;
 }
 
+/**
+ * Asked before a document is removed (#924, the owner's ruling of 2026-09-30):
+ * removing it here removes the instance's copy at the next sync, and the words
+ * are the rider's own.
+ */
+export const DOCUMENT_REMOVE_QUESTION = 'Remove this document?';
+
+/** The two answers to {@link DOCUMENT_REMOVE_QUESTION}. */
+export const DOCUMENT_REMOVE_YES = 'Yes, remove it';
+export const DOCUMENT_REMOVE_NO = 'Keep it';
+
 /** Said when a chosen file could not be read (#920's review). Nothing changed. */
 export const DOCUMENT_FILE_NOT_READ =
   'That file could not be read, so it was not added. Choose it again.';
@@ -84,6 +95,10 @@ export function DocumentsPanel({
   const [documents, setDocuments] = useState<readonly RiderTextRecord[] | undefined>(undefined);
   const [unreadable, setUnreadable] = useState(false);
   const [message, setMessage] = useState<Message | undefined>(undefined);
+  /** The document whose removal is being asked about (#924), or `undefined`. */
+  const [confirming, setConfirming] = useState<string | undefined>(undefined);
+  /** The document whose removal was just declined: its *Remove* takes focus back. */
+  const [declined, setDeclined] = useState<string | undefined>(undefined);
   const inputId = useId();
 
   const reload = useCallback(async (): Promise<void> => {
@@ -149,6 +164,7 @@ export function DocumentsPanel({
   }
 
   async function remove(document: RiderTextRecord): Promise<void> {
+    setConfirming(undefined);
     if (port === undefined) return;
     const name = document.name ?? '';
     try {
@@ -202,14 +218,49 @@ export function DocumentsPanel({
                     {document.name}{' '}
                     <span className="oyl-muted">({documentSize(document.text)})</span>
                   </span>{' '}
-                  <Button
-                    variant="secondary"
-                    onClick={() => {
-                      void remove(document);
-                    }}
-                  >
-                    Remove<span className="oyl-visually-hidden"> {document.name}</span>
-                  </Button>
+                  {confirming === document.key ? (
+                    // The question REPLACES the Remove the rider pressed, so its
+                    // safe answer takes focus (#557's rule): nothing is removed
+                    // by a second press landing where the first one did.
+                    <span
+                      className="oyl-rider-text__confirm"
+                      role="group"
+                      aria-label={`${DOCUMENT_REMOVE_QUESTION} ${document.name ?? ''}`}
+                    >
+                      <span>{DOCUMENT_REMOVE_QUESTION}</span>{' '}
+                      <Button
+                        variant="secondary"
+                        onClick={() => {
+                          void remove(document);
+                        }}
+                      >
+                        {DOCUMENT_REMOVE_YES}
+                        <span className="oyl-visually-hidden"> {document.name}</span>
+                      </Button>{' '}
+                      <Button
+                        variant="secondary"
+                        focusOnMount
+                        onClick={() => {
+                          setConfirming(undefined);
+                          setDeclined(document.key);
+                        }}
+                      >
+                        {DOCUMENT_REMOVE_NO}
+                        <span className="oyl-visually-hidden"> {document.name}</span>
+                      </Button>
+                    </span>
+                  ) : (
+                    <Button
+                      variant="secondary"
+                      focusOnMount={declined === document.key}
+                      onClick={() => {
+                        setDeclined(undefined);
+                        setConfirming(document.key);
+                      }}
+                    >
+                      Remove<span className="oyl-visually-hidden"> {document.name}</span>
+                    </Button>
+                  )}
                 </li>
               ))}
             </ul>

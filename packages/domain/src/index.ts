@@ -236,6 +236,7 @@ export { utf8Encode } from './identity/utf8';
 export type { DevicePurpose, DeviceStatement } from './identity/device-statement';
 export {
   AUTH_PURPOSE,
+  ERASE_ACCOUNT_PURPOSE,
   deviceStatementBytes,
   LINK_PURPOSE,
   RECOVER_PURPOSE,

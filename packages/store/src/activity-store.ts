@@ -105,6 +105,7 @@ import {
   rideWriteUpProblem,
   toPersistedRideWriteUp,
   syncBaseProblem,
+  trustedDeviceKeyProblem,
   fromPersistedRoute,
   fromPersistedWorkout,
   toPersistedCameraFrame,
@@ -135,6 +136,7 @@ import type {
   RiderTextRecord,
   SyncBaseKind,
   SyncBaseRecord,
+  TrustedDeviceKeyRecord,
   LapRecord,
   NewActivity,
   NewLap,
@@ -356,6 +358,12 @@ export interface AthleteDeletionCounts {
    * rider wrote or added; an erase takes all of it.
    */
   readonly riderTexts: number;
+  /**
+   * The other devices' keys admitted on this device removed — #898. With them
+   * gone a sync takes no record another device signed until each is admitted
+   * again.
+   */
+  readonly trustedDeviceKeys: number;
 }
 
 /**
@@ -541,6 +549,10 @@ export class ActivityStore {
 
   get #rideWriteUps(): Table<PersistedRideWriteUp, string> {
     return this.#db.table<PersistedRideWriteUp, string>(TABLE.rideWriteUps);
+  }
+
+  get #trustedDeviceKeys(): Table<TrustedDeviceKeyRecord, [string, string]> {
+    return this.#db.table<TrustedDeviceKeyRecord, [string, string]>(TABLE.trustedDeviceKeys);
   }
 
   get #syncBases(): Table<SyncBaseRecord, [string, string, string]> {
@@ -902,6 +914,7 @@ export class ActivityStore {
         this.#rideWriteUps,
         this.#syncBases,
         this.#riderTexts,
+        this.#trustedDeviceKeys,
       ],
       async () => {
         // The signed records and the device key go with the athlete. The key is
@@ -986,6 +999,11 @@ export class ActivityStore {
           .where(INDEX.riderTextByAthlete)
           .equals(id)
           .delete();
+        // #898. The keys admitted here: an erased device trusts only its own.
+        const trustedDeviceKeys = await this.#trustedDeviceKeys
+          .where(INDEX.trustedDeviceKeyByAthlete)
+          .equals(id)
+          .delete();
         await this.#athletes.delete(id);
         return {
           activities,
@@ -1003,6 +1021,7 @@ export class ActivityStore {
           rideWriteUps,
           syncBases,
           riderTexts,
+          trustedDeviceKeys,
         };
       },
     );
@@ -2118,6 +2137,20 @@ export class ActivityStore {
     return rows.map(checkedRiderText).sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   }
 
+  /**
+   * The keys of this athlete's texts of one kind, in key order, WITHOUT
+   * reading a row — so a reader that must not lose the good rows to one bad
+   * one (the account export, #924) can read each on its own with
+   * {@link ActivityStore.getRiderText}.
+   */
+  async listRiderTextKeys(owner: AthleteId, kind: RiderTextKind): Promise<string[]> {
+    const keys = await this.#riderTexts
+      .where(INDEX.riderTextByAthleteAndKind)
+      .equals([owner, kind])
+      .primaryKeys();
+    return keys.map((key) => key[2]).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  }
+
   /** Removes one of this athlete's texts. `false` when there was none. */
   async deleteRiderText(owner: AthleteId, kind: RiderTextKind, key: string): Promise<boolean> {
     return this.#db.transaction('rw', [this.#riderTexts], async () => {
@@ -2128,6 +2161,58 @@ export class ActivityStore {
       await this.#riderTexts.delete([owner, kind, key]);
       return true;
     });
+  }
+
+  // --- Trusted device keys (#898) -------------------------------------------
+
+  /**
+   * Admits one of the athlete's other devices' keys on THIS device, so a sync
+   * takes a record it signed (`records.ts` §`TrustedDeviceKeyRecord`).
+   * Admitting a key already admitted keeps the first admission's time.
+   *
+   * @throws {StoreReferentialError} if `record.athleteId` names no athlete.
+   * @throws {StoreValidationError} naming the field and the constraint.
+   */
+  async putTrustedDeviceKey(record: TrustedDeviceKeyRecord): Promise<void> {
+    const problem = trustedDeviceKeyProblem(record);
+    if (problem !== undefined) {
+      throw new StoreValidationError(problem);
+    }
+    // Only the three fields, whatever the caller spread in.
+    const row: TrustedDeviceKeyRecord = {
+      athleteId: record.athleteId,
+      publicKey: record.publicKey,
+      admittedAt: record.admittedAt,
+    };
+    await this.#db.transaction('rw', [this.#athletes, this.#trustedDeviceKeys], async () => {
+      await this.#requireAthlete(record.athleteId);
+      if ((await this.#trustedDeviceKeys.get([row.athleteId, row.publicKey])) !== undefined) {
+        return;
+      }
+      await this.#trustedDeviceKeys.put(row);
+    });
+  }
+
+  /**
+   * Every key admitted on this device for this athlete, in key order.
+   *
+   * @throws {StoreDecodeError} if a row on disk is not one — a hand-edited
+   * row is refused rather than believed.
+   */
+  async listTrustedDeviceKeys(owner: AthleteId): Promise<TrustedDeviceKeyRecord[]> {
+    const rows = await this.#trustedDeviceKeys
+      .where(INDEX.trustedDeviceKeyByAthlete)
+      .equals(owner)
+      .toArray();
+    return rows
+      .map((row) => {
+        const problem = trustedDeviceKeyProblem(row);
+        if (problem !== undefined) {
+          throw new StoreDecodeError(problem);
+        }
+        return row;
+      })
+      .sort((a, b) => (a.publicKey < b.publicKey ? -1 : a.publicKey > b.publicKey ? 1 : 0));
   }
 
   // --- Segment efforts (#66) ------------------------------------------------
