@@ -83,7 +83,7 @@ export interface CameraPose {
   readonly targetRoadY: number;
 }
 
-/** A marker on the road: the rider, the bot (#92), or the ghost (#93). */
+/** A marker on the road: the rider, the bot (#92), the ghost (#93), or another real rider in a room (#783). */
 export interface RiderMarker {
   /**
    * Which of the three this is.
@@ -104,7 +104,7 @@ export interface RiderMarker {
    * `docs/validation/0002-android-shell-and-game.md` Part N rather than in
    * anybody's assertion here.
    */
-  readonly kind: 'rider' | 'bot' | 'ghost';
+  readonly kind: 'rider' | 'bot' | 'ghost' | 'remote';
   /**
    * Where the bicycle's origin is — on the road surface between its two tyre
    * contacts. ⚠️ **On the rider's LINE since #499, not on the centreline**: up

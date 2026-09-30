@@ -170,8 +170,20 @@ import ts from 'typescript';
  * from the graph this gate walks. What the prefix buys is that deleting
  * `main.tsx`'s call to `registerServiceWorker` is a red build — measured, both
  * ways round, in #406.
+ *
+ * ⚠️ **`apps/web/src/net/` since #782's review.** A room is a client seam on
+ * the same footing as `game/` and `ride/`: until then only `room-port.ts` was
+ * watched, by its suffix, and a session, a snapshot buffer or an interest set
+ * nothing reached would have passed. ⚠️ Like every prefix here it holds
+ * exports and port methods, not a class's members — `RoomSession.finish`
+ * (#785's) has no production reader and this gate cannot say so.
  */
-const WATCHED_PREFIXES = ['apps/web/src/game/', 'apps/web/src/ride/', 'apps/web/src/offline/'];
+const WATCHED_PREFIXES = [
+  'apps/web/src/game/',
+  'apps/web/src/ride/',
+  'apps/web/src/offline/',
+  'apps/web/src/net/',
+];
 const WATCHED_SUFFIX = /-port\.ts$/;
 
 /**

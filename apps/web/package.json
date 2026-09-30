@@ -25,6 +25,7 @@
     "@onyourleft/fit": "workspace:*",
     "@onyourleft/mobile": "workspace:*",
     "@onyourleft/physics": "workspace:*",
+    "@onyourleft/protocol": "workspace:*",
     "@onyourleft/sensors": "workspace:*",
     "@onyourleft/store": "workspace:*",
     "jsqr": "1.4.0",

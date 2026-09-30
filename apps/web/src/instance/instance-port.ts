@@ -286,22 +286,40 @@ export function instanceEraser(storage: Pick<InstanceStorage, 'removeItem'> | un
   };
 }
 
+/** The instance this device is signed in to, and the token it holds for it. */
+export interface HeldInstanceSession {
+  readonly http: InstanceHttp;
+  readonly token: string;
+}
+
+/**
+ * The instance and the token this device holds, or `undefined` for neither —
+ * read from THIS device's storage every time, so a disconnect is seen at once.
+ * The one reader of the pair: {@link createInstancePort} asks it, and so does a
+ * room's port (`net/room-port.ts`, #782) when it mints a ticket.
+ */
+export function heldInstanceSession(
+  storage: InstanceStorage,
+  send?: InstanceSend,
+): HeldInstanceSession | undefined {
+  const account = readInstanceAccount(storage);
+  const token = account === undefined ? undefined : sessionTokenFor(storage, account.origin);
+  if (account === undefined || token === undefined) return undefined;
+  try {
+    return { http: instanceHttp(account.origin, send), token };
+  } catch {
+    // An address stored by an older build that this one refuses: nothing is sent to it.
+    return undefined;
+  }
+}
+
 /** The production {@link InstancePort}: `main.tsx` builds it, and nothing else in the client. */
 export function createInstancePort(dependencies: InstancePortDependencies): InstancePort {
   const { storage } = dependencies;
 
   /** The instance and the token this device holds, or `undefined` for neither. */
-  function held(): { readonly http: InstanceHttp; readonly token: string } | undefined {
-    const account = readInstanceAccount(storage);
-    const token = account === undefined ? undefined : sessionTokenFor(storage, account.origin);
-    if (account === undefined || token === undefined) return undefined;
-    try {
-      return { http: instanceHttp(account.origin, dependencies.send), token };
-    } catch {
-      // An address stored by an older build that this one refuses: nothing is sent to it.
-      return undefined;
-    }
-  }
+  const held = (): HeldInstanceSession | undefined =>
+    heldInstanceSession(storage, dependencies.send);
 
   return {
     current: async () => {

@@ -104,6 +104,7 @@ import type { AthleteKitColourPort } from './athlete/kit-colour-port';
 import type { MaskedWordsPort } from './athlete/masked-words-port';
 import type { RiderTextPort } from './rider-text/rider-text-port';
 import { createInstancePort, instanceEraser, type InstancePort } from './instance/instance-port';
+import { createRoomPort, type RoomPort } from './net/room-port';
 import type { AthleteMassPort } from './athlete/store-port';
 
 const found = document.getElementById('root');
@@ -748,6 +749,25 @@ function buildInstancePort(): InstancePort | undefined {
 }
 
 /**
+ * The game's room port (#782, #783): the ONE production place a room port is
+ * built, so `check:wiring` reports `createRoomPort` if this goes. Over the
+ * instance this device signed in to (`instance/instance-port.ts`), through the
+ * one instance module (ADR 0036 D-3 (a)); a device signed in to none sends
+ * nothing and rides alone. A joined room holds the ride controller's
+ * foreground service in the Android shell, so the socket survives the screen
+ * going off (#524).
+ *
+ * `undefined` where there is no `localStorage` to read a sign-in from.
+ */
+function buildRoomPort(rideController: RideController | undefined): RoomPort | undefined {
+  if (typeof localStorage === 'undefined') return undefined;
+  return createRoomPort({
+    storage: localStorage,
+    ...(rideController === undefined ? {} : { keepAlive: () => rideController.keepAliveForRoom() }),
+  });
+}
+
+/**
  * Watch for a new version of the app, or not (#407).
  *
  * `undefined` wherever `registerServiceWorker` did not register one — inside
@@ -1007,6 +1027,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   const storage = platformStorage();
   // Built once: a port per render would make the Connect screen re-read the instance on every draw.
   const instance = buildInstancePort();
+  // #782: built once, for the Connect screen's reason above.
+  const room = buildRoomPort(rideController);
   const root = createRoot(container);
   const draw = (update: UpdateWatcher | undefined): void => {
     root.render(
@@ -1029,6 +1051,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           maskedWords={buildMaskedWordsPort()}
           riderText={buildRiderTextPort()}
           {...(instance === undefined ? {} : { instance })}
+          {...(room === undefined ? {} : { room })}
           // #623: the stored kit colour, undefaulted — `game/bicycle.ts`
           // §`riderKitFor` is the one place a missing one becomes the house kit.
           {...(athlete?.kitColour === undefined ? {} : { kitColour: athlete.kitColour })}

@@ -39,6 +39,7 @@ import { KIT_COLOURS } from '@onyourleft/store';
 import { TRANSCODER_FILES, transcoderSource } from '../../tools/basis/transcoder-plugin';
 
 import { KIT_PALETTE, PACER_KIT, type RiderKit } from './bicycle';
+import { REALISTIC_REMOTE_RIDERS } from './realistic-budget';
 import {
   albedoBytes,
   toldApartFaults,
@@ -553,7 +554,8 @@ describe('the dressed rider — #623', () => {
     const riders = renderer.realisticRidersOfLoadedWorld();
     if (riders === undefined) throw new Error('no world');
     const bodies = riders.bodies;
-    expect(bodies).toHaveLength(3);
+    // #783: the rider, the pacer, the ghost, and a room's nearest remote riders.
+    expect(bodies).toHaveLength(3 + REALISTIC_REMOTE_RIDERS);
     let meshes = 0;
     riders.group.traverse((node) => {
       const mesh = node as unknown as { isMesh?: boolean; material?: unknown; name: string };
@@ -564,8 +566,9 @@ describe('the dressed rider — #623', () => {
       // The file's own helmet is not drawn a second time beside the instanced one.
       expect(mesh.name === 'helmet' && node !== (riders.helmets as unknown), mesh.name).toBe(false);
     });
-    // Three bodies, and the frame, rubber, metal, cranks and helmets: eight draws, as before.
-    expect(meshes).toBe(8);
+    // Three bodies, and the frame, rubber, metal, cranks and helmets: eight draws, as before —
+    // and #783's two remote bodies, each hidden (so not drawn) on a frame with no room.
+    expect(meshes).toBe(8 + REALISTIC_REMOTE_RIDERS);
     for (const body of bodies) {
       const material = body.material as unknown as Record<string, unknown>;
       expect(material['map']).toBeTruthy();

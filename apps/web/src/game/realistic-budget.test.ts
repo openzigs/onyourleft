@@ -50,6 +50,9 @@ import {
   REALISTIC_GANTRY_TRIANGLES,
   REALISTIC_GROUND_BLOBS,
   REALISTIC_NEAR_MESHES,
+  REALISTIC_REMOTE_RIDERS,
+  REALISTIC_REMOTE_STYLISED_RIDERS,
+  REALISTIC_REMOTE_TRIANGLES,
   REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_TEXTURE_CEILING_PIXELS,
   REALISTIC_RIDER_SILHOUETTE_BYTES,
@@ -75,7 +78,9 @@ import {
   realisticStructureTriangles,
   realisticStructureTrianglesOf,
   ScatterBelt,
+  stylisedRiderTriangles,
 } from './three-renderer';
+import { MAXIMUM_DRAWN_RIDERS } from '../net/interest';
 
 const SHIPPED = fileURLToPath(new URL('../../public/realistic/', import.meta.url));
 const WEB = fileURLToPath(new URL('../../', import.meta.url));
@@ -345,6 +350,48 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     // of detailed buildings — rather than a term that rounds to nothing.
     expect(structureItems * heaviestStructure).toBeGreaterThan(10_000);
     expect(heaviestStructure).toBeGreaterThan(300);
+  });
+
+  it('holds it with a room’s remote riders in it too: two realistic and the stylised rest — #783', () => {
+    const { vegetation, riders, structureItems, blobs, gantries } = worstFrame();
+    const stylised = stylisedRiderTriangles();
+    const remote =
+      REALISTIC_REMOTE_RIDERS * (riderTriangles + realisticBicycleTriangles()) +
+      REALISTIC_REMOTE_STYLISED_RIDERS * stylised;
+    // At every structure's CEILING, the frame the #506 case above allows.
+    expect(
+      vegetation +
+        riders +
+        structureItems * REALISTIC_TRIANGLES.structure +
+        blobs +
+        gantries +
+        remote,
+    ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
+    // Non-vacuity: the stylised term is real, and the room's whole K drawn
+    // stylised would NOT fit — which is why the rule stops at 24.
+    expect(stylised).toBeGreaterThan(1_000);
+    expect(
+      vegetation +
+        riders +
+        structureItems * REALISTIC_TRIANGLES.structure +
+        blobs +
+        gantries +
+        REALISTIC_REMOTE_RIDERS * (riderTriangles + realisticBicycleTriangles()) +
+        MAXIMUM_DRAWN_RIDERS * stylised,
+    ).toBeGreaterThan(REALISTIC_FRAME_TRIANGLES);
+    // #681 stays blocked: this is two bodies, not a pack.
+    expect(REALISTIC_REMOTE_RIDERS).toBeLessThanOrEqual(2);
+    // The browser gate's ceiling: inside what the worst frame leaves, and the
+    // rule's own worst inside it.
+    expect(
+      vegetation +
+        riders +
+        structureItems * REALISTIC_TRIANGLES.structure +
+        blobs +
+        gantries +
+        REALISTIC_REMOTE_TRIANGLES,
+    ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
+    expect(remote).toBeLessThanOrEqual(REALISTIC_REMOTE_TRIANGLES);
   });
 
   it('holds it with every structure at its CEILING too, so a building may grow to its budget — #506', () => {

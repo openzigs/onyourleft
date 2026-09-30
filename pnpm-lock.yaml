@@ -124,6 +124,9 @@ importers:
       '@onyourleft/physics':
         specifier: workspace:*
         version: link:../../packages/physics
+      '@onyourleft/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
       '@onyourleft/sensors':
         specifier: workspace:*
         version: link:../../packages/sensors

@@ -953,6 +953,18 @@ export interface RideController {
    * before the client is closed. Idempotent.
    */
   dispose(): void;
+  /**
+   * Hold the platform's keep-alive (#524's foreground service) for a joined
+   * room — #782 — and return its release. The room's socket lives in this
+   * process, so the screen going off must not end it any more than it may end
+   * a recording's sensor links.
+   *
+   * ⚠️ **One service, counted.** A recording and a room each hold it; it is
+   * let go only when neither does, so leaving a room mid-recording does not
+   * stop the service a recording is riding on, and stopping the recording
+   * does not stop the one a room is. Releasing twice is releasing once.
+   */
+  keepAliveForRoom(): () => void;
 }
 
 interface SensorEntry {
@@ -1313,6 +1325,8 @@ export function createRideController(options: RideControllerOptions): RideContro
 
   /** Whether {@link RideControllerOptions.keepAlive} was last asked to keep. */
   let keptAlive = false;
+  /** How many joined rooms hold the keep-alive — #782. @see RideController.keepAliveForRoom */
+  let roomHolds = 0;
   /** Bumped on every keep-alive transition, so a late answer cannot restart a stopped ride's service. */
   let keepAliveGeneration = 0;
   /** @see RideSnapshot.notificationNotice */
@@ -1507,7 +1521,8 @@ export function createRideController(options: RideControllerOptions): RideContro
     // phase alone, that first render let the foreground service go with the
     // ride's last writes still in flight — with the screen off, exactly the
     // writes #524 exists to protect. `finishing` holds it until they land.
-    const wanted = !disposed && (rideInProgress(phase) || finishing);
+    // #782: a joined room holds it too — its socket is in this process.
+    const wanted = !disposed && (rideInProgress(phase) || finishing || roomHolds > 0);
     if (wanted === keptAlive || options.keepAlive === undefined) {
       return;
     }
@@ -2974,6 +2989,18 @@ export function createRideController(options: RideControllerOptions): RideContro
 
     async tickNow(): Promise<void> {
       await controller.tick(now());
+    },
+
+    keepAliveForRoom(): () => void {
+      roomHolds += 1;
+      changed();
+      let held = true;
+      return () => {
+        if (!held) return;
+        held = false;
+        roomHolds -= 1;
+        changed();
+      };
     },
 
     dispose(): void {

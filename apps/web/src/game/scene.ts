@@ -96,6 +96,16 @@ export interface SceneInput {
   /** The rider's own previous attempt, when they chose to race one. Optional. */
   readonly ghost?: GhostTrack | undefined;
   /**
+   * Other real riders in a room, where to draw them — #783: the interest set's
+   * riders (`net/interest.ts`), each at the distance `net/snapshots.ts`
+   * interpolated. Absent, or empty, on every ride with no room.
+   *
+   * ⚠️ **A distance and a speed, and nothing else**, on purpose: no name, no
+   * power, no mass. What a renderer is handed about another rider is where they
+   * are, and `GameView.test.tsx` §"#783" walks every frame for a mass.
+   */
+  readonly remoteRiders?: readonly RemoteRiderInput[] | undefined;
+  /**
    * The most scenery this frame may carry — the current quality rung's
    * `scatterItems`, #245.
    *
@@ -151,6 +161,15 @@ export interface SceneInput {
    * feature, so a ride that forgot it rides the line.
    */
   readonly centreline?: boolean | undefined;
+}
+
+/** Another real rider, where to draw them — #783. @see SceneInput.remoteRiders */
+export interface RemoteRiderInput {
+  /** The room's id for them, which decides their side of the road when level with another. */
+  readonly riderId: number;
+  /** Along the route, the room's odometer, in metres. */
+  readonly distanceMetres: number;
+  readonly speedMetresPerSecond: number;
 }
 
 /** Builds one frame. */
@@ -359,7 +378,14 @@ const LINE_GIVEN_UP = 1 - (DRAWN_LIMIT_METRES - SIDE_BY_SIDE_METRES) / LINE_LIMI
  * normal's negative side and the ghost to its positive side, so all three level
  * at once are three abreast.
  */
-const LEVEL_LANES: Readonly<Record<RiderMarker['kind'], number>> = { rider: 0, bot: -1, ghost: 1 };
+const LEVEL_LANES: Readonly<Record<RiderMarker['kind'], number>> = {
+  rider: 0,
+  bot: -1,
+  ghost: 1,
+  // #783: a remote rider's side is its own (`Rider.lane`, by rider id), so two
+  // of them level with each other are not drawn in one place.
+  remote: 1,
+};
 
 /**
  * The riders of one frame on `corridor` — what {@link sceneFrame} draws as its
@@ -393,6 +419,8 @@ interface Rider {
   readonly crankAngle: number | undefined;
   /** Whether a reading turns this rider's cranks, before a bend parks them. @see RiderMarker.pedalling */
   readonly pedalling: boolean;
+  /** The side of the line it moves to when level, where the kind's is not enough. @see LEVEL_LANES */
+  readonly lane?: number | undefined;
 }
 
 /**
@@ -455,6 +483,27 @@ function ridersOnTheRoad(
       pedalling: speed > 0,
     });
   }
+  // #783: every other real rider in the room's drawn set — but only those on
+  // the corridor this frame built. `markerAt` clamps a rider beyond it to its
+  // far end, which is right for ONE pacer "somewhere up there" and would stack
+  // a room's worth of riders on one spot on the horizon.
+  const first = corridor.centre[0];
+  const last = corridor.centre[corridor.centre.length - 1];
+  for (const remote of input.remoteRiders ?? []) {
+    if (first === undefined || last === undefined) break;
+    if (remote.distanceMetres < first.along || remote.distanceMetres > last.along) continue;
+    riders.push({
+      kind: 'remote',
+      distance: remote.distanceMetres,
+      speed: remote.speedMetresPerSecond,
+      // ⚠️ From their own odometer at a fixed gear, never an invented rate: a
+      // frame carries no cadence (`@onyourleft/protocol` §`FrameRider`), and
+      // `bicycle.ts` §`simulatedCrankAngle` is the rule for a rider with none.
+      crankAngle: pedalling(remote.distanceMetres),
+      pedalling: remote.speedMetresPerSecond > 0,
+      lane: remote.riderId % 2 === 0 ? -1 : 1,
+    });
+  }
   // #625: the ride's own clock, which a held or paused ride holds — never a
   // wall clock. @see RiderMarker.rideSeconds
   const rideClock: number = ghostClock(input.state);
@@ -503,7 +552,8 @@ function lateralOf(rider: Rider, riders: readonly Rider[], line: RacingLine): nu
   }
   const onLine = lineOffsetAt(line, rider.distance);
   return (
-    onLine * (1 - LINE_GIVEN_UP * level) + LEVEL_LANES[rider.kind] * SIDE_BY_SIDE_METRES * level
+    onLine * (1 - LINE_GIVEN_UP * level) +
+    (rider.lane ?? LEVEL_LANES[rider.kind]) * SIDE_BY_SIDE_METRES * level
   );
 }
 

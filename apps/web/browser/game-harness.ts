@@ -156,7 +156,9 @@ import {
   gantryCountsOf,
   waterFresnelOf,
   waterReflectsOf,
+  remoteRiderControlOf,
 } from '../src/game/three-renderer';
+import { MAXIMUM_DRAWN_SET } from '../src/net/interest';
 import { bannerPlace, standPoint } from '../src/game/gantry';
 import { FINISH_WORD } from '../src/game/gantry-wording';
 import { PATCH_CELL_METRES, patchInCell, WHEEL_TRACK_OFFSETS_METRES } from '../src/game/road-wear';
@@ -561,6 +563,16 @@ declare global {
       readonly drawCallsWithScatter: number;
       /** Draw calls for the identical frame with `scatter` emptied. */
       readonly drawCallsWithoutScatter: number;
+      /**
+       * #783: the same scenery-free frame with a full room in it —
+       * {@link remoteRidersInRoom} remote riders beside the rider and the
+       * pacer — and the draw calls it cost, which must be the frame's own.
+       */
+      readonly roomDrawCalls: number;
+      /** The same, with #783's control on: every remote rider a mesh of its own. */
+      readonly roomDrawCallsEachOwnMesh: number;
+      /** How many remote markers that frame carried — so the room was really there. */
+      readonly remoteRidersInRoom: number;
       /**
        * How many pixels beside the road changed when the scenery was added.
        *
@@ -4441,9 +4453,34 @@ function kitProbe(
   };
 }
 
+/**
+ * #783: what a full room of other riders adds to a realistic frame, counted
+ * at the draw calls with #616's counter — the rule on, and its control off.
+ */
+export interface RoomTriangles {
+  readonly measured: boolean;
+  /** The wooded frame, alone. */
+  readonly without: number;
+  /** The same frame with {@link remoteRiders} remote riders in it. */
+  readonly with: number;
+  /** The same, with the realistic world's rule for them off: every one drawn. */
+  readonly withoutTheRule: number;
+  readonly remoteRiders: number;
+}
+
+const NO_ROOM_TRIANGLES: RoomTriangles = {
+  measured: false,
+  without: 0,
+  with: 0,
+  withoutTheRule: 0,
+  remoteRiders: 0,
+};
+
 /** What the `?realistic` run measures — ADR 0026. @see realisticProbe */
 export interface RealisticMeasurement {
   readonly measured: boolean;
+  /** #783: a room's riders in the realistic world. @see RoomTriangles */
+  readonly room: RoomTriangles;
   /** #622: the air, read and predicted. @see airProbe */
   readonly air: AirMeasurement;
   /** #628: the worn road's wheel track against its lane, worn and not. @see roadWearProbe */
@@ -5688,6 +5725,7 @@ const NO_AIR: AirMeasurement = {
 
 const NO_REALISTIC: RealisticMeasurement = {
   measured: false,
+  room: NO_ROOM_TRIANGLES,
   air: NO_AIR,
   roadWear: NO_ROAD_WEAR,
   groundBlend: NO_GROUND_BLEND,
@@ -7404,8 +7442,24 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     view.setQuality(top);
     dressedWithNoDrawing = meanRgbOf(readKitSquare(view, gl, kitSquareOnce));
   }
-  view.destroy();
   phaseEnds('realistic: the kit, dressed with no drawing — #623');
+  // #783: a full room in the wooded frame, rule on and off, with #616's
+  // counter. The drawing is rebuilt above, so the frames settle first.
+  const crowded = withRoom(wooded, MAXIMUM_DRAWN_SET);
+  const roomBare = woodedFrameOf(view, gl, wooded).triangles;
+  const roomWith = woodedFrameOf(view, gl, crowded).triangles;
+  remoteRiderControlOf(view, 'no-realistic-rule');
+  const roomWithoutTheRule = woodedFrameOf(view, gl, crowded).triangles;
+  remoteRiderControlOf(view, 'none');
+  const room: RoomTriangles = {
+    measured: true,
+    without: roomBare,
+    with: roomWith,
+    withoutTheRule: roomWithoutTheRule,
+    remoteRiders: crowded.markers.filter((marker) => marker.kind === 'remote').length,
+  };
+  view.destroy();
+  phaseEnds('realistic: a room of other riders — #783');
 
   console.log(
     `realistic: loaded in ${loadMs.toFixed(0)} ms; a frame ${realisticFrameMs.toFixed(1)} ms against ` +
@@ -7418,6 +7472,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
 
   return {
     measured: true,
+    room,
     roadWear,
     groundBlend,
     gantry,
@@ -7880,6 +7935,9 @@ function emptyHarness(errors: readonly string[]): NonNullable<Window['__oylGameH
     scatterKindCount: 0,
     drawCallsWithScatter: 0,
     drawCallsWithoutScatter: 0,
+    roomDrawCalls: 0,
+    roomDrawCallsEachOwnMesh: 0,
+    remoteRidersInRoom: 0,
     sceneryPixelsChanged: 0,
     sceneryPixelWith: NOWHERE,
     sceneryPixelWithout: NOWHERE,
@@ -7931,6 +7989,28 @@ function emptyHarness(errors: readonly string[]): NonNullable<Window['__oylGameH
     trees: NO_TREES,
     errors,
   };
+}
+
+/**
+ * `frame` with `count` other real riders on the road ahead of the rider — #783:
+ * the rider's own marker copied, as a room's `remote` kind, a few metres apart
+ * along the road's heading, the shape `scene.ts` gives a room's drawn set.
+ */
+function withRoom(frame: SceneFrame, count: number): SceneFrame {
+  const rider = frame.markers.find((marker) => marker.kind === 'rider');
+  if (rider === undefined) return frame;
+  const remote = Array.from({ length: count }, (_, index) => {
+    const ahead = 4 + index * 0.9;
+    const across = index % 2 === 0 ? -1.2 : 1.2;
+    return {
+      ...rider,
+      kind: 'remote' as const,
+      x: rider.x + rider.headingX * ahead - rider.headingZ * across,
+      z: rider.z + rider.headingZ * ahead + rider.headingX * across,
+      crankAngle: index * 0.37,
+    };
+  });
+  return { ...frame, markers: [...frame.markers, ...remote] };
 }
 
 async function run(): Promise<void> {
@@ -8025,6 +8105,9 @@ async function run(): Promise<void> {
   let scatterKindCount = 0;
   let drawCallsWithScatter = 0;
   let drawCallsWithoutScatter = 0;
+  let roomDrawCalls = 0;
+  let roomDrawCallsEachOwnMesh = 0;
+  let remoteRidersInRoom = 0;
   let sceneryPixelsChanged = 0;
   let sceneryPixelWith: Pixel = NOWHERE;
   let sceneryPixelWithout: Pixel = NOWHERE;
@@ -8294,6 +8377,31 @@ async function run(): Promise<void> {
         view.render(frameAt(ON_THE_DESCENT_METRES));
         resourcesAfterSecondSweep = resources();
         phaseEnds('default: second sweep');
+
+        // #783: a whole room of other riders — the interest set at its
+        // largest — in the scenery-free frame. ⚠️ After the second sweep, and
+        // counted in no `framesDrawn`: the frame and resource counts above
+        // are the loop's own, and the control's 105 belts are GPU buffers
+        // those counts must not see. They are instances of the
+        // rider's four meshes, so the frame must cost exactly what it did; the
+        // control puts each in a mesh of its own, which must not. Read off the
+        // plain load alone — @see SHADOW_MAP_LOAD.
+        if (!SHADOW_MAP_LOAD) {
+          const room = withRoom(withoutScenery, MAXIMUM_DRAWN_SET);
+          remoteRidersInRoom = room.markers.filter((marker) => marker.kind === 'remote').length;
+          view.render(room);
+          const beforeRoom = calls();
+          view.render(room);
+          roomDrawCalls = calls() - beforeRoom;
+          remoteRiderControlOf(view, 'each-own-mesh');
+          view.render(room);
+          const beforeOwn = calls();
+          view.render(room);
+          roomDrawCallsEachOwnMesh = calls() - beforeOwn;
+          remoteRiderControlOf(view, 'none');
+          view.render(withoutScenery);
+          phaseEnds('default: a room of other riders');
+        }
 
         // ------------------------------------------------ the light — #286
         //
@@ -8659,6 +8767,9 @@ async function run(): Promise<void> {
     scatterKindCount,
     drawCallsWithScatter,
     drawCallsWithoutScatter,
+    roomDrawCalls,
+    roomDrawCallsEachOwnMesh,
+    remoteRidersInRoom,
     sceneryPixelsChanged,
     sceneryPixelWith,
     sceneryPixelWithout,

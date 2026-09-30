@@ -72,6 +72,7 @@ import type { WorkoutPort } from '../workouts/store-port';
 import { CameraIndicator } from '../camera/indicator';
 import type { CameraController } from '../camera/session';
 import type { SideCameraLinkPort } from '../camera/side-camera-link-port';
+import type { RoomPort } from '../net/room-port';
 import type { SidePairingPort } from '../camera/side-pairing-port';
 import type { ThermalPort } from '../game/thermal-port';
 
@@ -201,6 +202,17 @@ export interface AppShellProps {
    * `undefined` where this platform has no WebRTC; both screens then say so.
    */
   readonly sidePairing?: SidePairingPort | undefined;
+  /**
+   * Other real riders — #782, #783: the room port `main.tsx` builds over the
+   * instance this device is connected to. Handed to the game, which joins a
+   * room only when it is given one to join (#784 is the room code).
+   */
+  readonly room?: RoomPort | undefined;
+  /**
+   * Which room the game joins. ⚠️ `main.tsx` supplies none: a room is entered
+   * by its code, which is #784's. The browser gate supplies one.
+   */
+  readonly roomId?: string | undefined;
   /**
    * Android's thermal forecast, for the game's quality ladder (#247). Absent
    * in a browser. @see game/thermal-port.ts
@@ -523,6 +535,9 @@ function viewFor(
           // #551. The side camera's line on the HUD, its Stop, and its link
           // going said through the HUD's one region.
           {...(props.sidePairing === undefined ? {} : { sidePairing: props.sidePairing })}
+          // #782, #783: other real riders, over the instance.
+          {...(props.room === undefined ? {} : { room: props.room })}
+          {...(props.roomId === undefined ? {} : { roomId: props.roomId })}
         />
       );
     case 'segment-detail':

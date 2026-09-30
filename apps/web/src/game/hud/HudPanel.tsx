@@ -175,6 +175,13 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    */
   readonly sideCamera?:
     { readonly line: string | undefined; readonly onStop: (() => void) | undefined } | undefined;
+  /**
+   * The room's one control — #783: follow the next rider near you, by the
+   * room's own rider order (never by who is ahead), so the gap field is to
+   * ONE chosen rider and nothing on the HUD ranks the room. `undefined` on a
+   * ride with no room, and when nobody else is near.
+   */
+  readonly onFollowNext?: (() => void) | undefined;
   readonly standingNotice?:
     | {
         readonly content: ReactNode;
@@ -331,6 +338,15 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
               </button>
             )}
           </div>
+        )}
+        {props.onFollowNext === undefined ? null : (
+          <button
+            type="button"
+            className="oyl-button oyl-button--secondary oyl-hud__follow"
+            onClick={props.onFollowNext}
+          >
+            Follow<span className="oyl-visually-hidden"> the next rider near you</span>
+          </button>
         )}
         {props.sound}
       </div>

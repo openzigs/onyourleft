@@ -112,9 +112,12 @@ export interface DataSafetyAnswer {
  * data — so every other row is unmoved by it, and each says so where it used
  * to say "this project runs no server". ⚠️ The rows are revised for the build
  * that ships instance support (#778), and a later build that syncs rides
- * (#776) or joins a room (#782) moves the precise-location and health rows
- * again, in its own pull request. Draft wording awaiting the owner's approval
- * (#880).
+ * (#776) or joins a room moves the precise-location and health rows
+ * again, in its own pull request. ⚠️ #782 shipped the room code — power and
+ * cadence twice a second, and the declared weight once, to the instance
+ * running a room — with NO way into a room in the product: the first build
+ * that offers one (#784's room code) is the one that moves the health rows.
+ * Draft wording awaiting the owner's approval (#880).
  *
  * ⚠️ The health rows are here because Play's Health Content and Services policy
  * covers apps that are not primarily health apps — its own example is a game

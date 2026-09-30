@@ -274,6 +274,8 @@ export function stubRideController(initial: RideSnapshot = idleSnapshot()): Stub
     endWorkout: () => {
       calls.endWorkout += 1;
     },
+    // #782: the Ride screen holds no room; `controller.test.ts` §"#782" drives the real one.
+    keepAliveForRoom: () => () => undefined,
     tick: async () => {
       calls.tick += 1;
       return Promise.resolve();
