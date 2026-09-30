@@ -3650,6 +3650,12 @@
                               "string",
                               "null"
                             ]
+                          },
+                          "mayBeRaced": {
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
                           }
                         },
                         "required": [
@@ -3658,7 +3664,8 @@
                           "digest",
                           "receivedAt",
                           "deleted",
-                          "activityId"
+                          "activityId",
+                          "mayBeRaced"
                         ],
                         "additionalProperties": false
                       }
@@ -3859,6 +3866,92 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/sync/records/{content}/race-consent": {
+      "post": {
+        "operationId": "setRaceConsent",
+        "summary": "Say whether another rider may race a ghost of one of your rides, by the SHA-256 of its file. Off unless you set it, and revocable: a ride set back to false is not served as raceable on the next read. Not part of the signed record, and never inferred from how a ride is shared.",
+        "parameters": [
+          {
+            "name": "content",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "mayBeRaced": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "mayBeRaced"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "mayBeRaced": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "mayBeRaced"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
           },
           "401": {
             "$ref": "#/components/responses/unauthenticated"

@@ -51,6 +51,7 @@ const ACTIVITY: ActivityRecord = {
   distance: metres(40_000),
   visibility: 'private',
   hasPosition: false,
+  mayBeRaced: false,
   createdAt: unixSeconds(1_700_004_200),
 };
 

@@ -44,6 +44,7 @@
  * | `publishedRouteStoreFactory` | *wrong layer* — a default applied on the way in, in the unsafe direction | the route comes back complete and correct, and **shared with everybody** |
  * | `truncatedWorkoutStoreFactory` | *wrong layer* — a layer above dropped the last block on its way in | the workout comes back with the right name and a valid shape, **ending early** |
  * | `unscopedAttemptStoreFactory` | *cross-athlete exposure* — a **read** that matched on route and forgot the rider | every ride is written and read back correctly, and the ghost list contains a stranger's ride |
+ * | `consentIgnoredStoreFactory` | *cross-athlete exposure* — the cross-rider **read** that forgot the rider's consent (#793) | every ride and every consent is written and read back correctly, and the raceable list holds a ride its rider never agreed to be raced on |
  * | `staleUnitsStoreFactory` | *wrong layer* — the narrow write computed the row and returned it without persisting it | the call answers with a row saying `imperial`, and a fresh connection still says metric |
  * | `roundedMassStoreFactory` | *wrong layer* — a layer above tidied a mass to a whole kilogram on its way in | the row comes back with a mass, a plausible one, and a pound reading that is no longer what the rider typed |
  * | `misfiledKitColourStoreFactory` | *wrong storage* — the right table and the right row, under a key the reader does not use | the call answers with the chosen colour, and a fresh connection reads the house kit |
@@ -138,6 +139,9 @@ function bindStore(real: ActivityStore): PersistentStore {
     findActivityByOriginalFileHash: async (owner, sha256) =>
       real.findActivityByOriginalFileHash(owner, sha256),
     listRouteAttempts: async (owner, route, limit) => real.listRouteAttempts(owner, route, limit),
+    listRaceableAttempts: async (query, limit) => real.listRaceableAttempts(query, limit),
+    setActivityMayBeRaced: async (owner, activity, mayBeRaced) =>
+      real.setActivityMayBeRaced(owner, activity, mayBeRaced),
     deleteActivity: async (owner, id) => real.deleteActivity(owner, id),
     putLap: async (record) => real.putLap(record),
     listLaps: async (owner, activity) => real.listLaps(owner, activity),
@@ -777,6 +781,66 @@ export function unscopedAttemptStoreFactory(): StoreFactory {
             .limit(limit)
             .toArray();
           return rows.map(fromPersistedActivity);
+        },
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A repository whose cross-rider ghost read **ignores the "may be raced"
+ * consent** — #793's fake, and ADR 0021 D-5.3's.
+ *
+ * It still leaves the requester's own rides out and still asks each athlete's
+ * `[athleteId+routeId]` index, so the ONE thing wrong with it is the flag: it
+ * answers "every other rider's ride on this route", which is what the read
+ * would be if `.filter((row) => row.mayBeRaced === true)` were deleted from
+ * `activity-store.ts` §`listRaceableAttempts`, or if a later change sourced
+ * the ghost from the share setting instead (ADR 0039 D-4.6). Every write is
+ * the real store's, so every consent is on disk and correct — only the read
+ * is broken, which is why no write-path fake could stand in for this one.
+ *
+ * `activity-store.race-consent.test.ts` runs the same assertion body against
+ * it and requires the red half to see a ride its rider never consented to.
+ */
+export function consentIgnoredStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      const raw = new Dexie(name);
+      SCHEMA_VERSIONS.forEach((stores, index) => {
+        raw.version(index + 1).stores(stores);
+      });
+      const activities = raw.table<PersistedActivity, string>(TABLE.activities);
+      const athletes = raw.table<PersistedAthlete, string>(TABLE.athletes);
+      return {
+        ...bindStore(real),
+        close: () => {
+          real.close();
+          raw.close();
+        },
+        listRaceableAttempts: async (
+          query: { readonly route: RouteId; readonly requester: AthleteId },
+          limit: number = 10,
+        ): Promise<readonly ActivityRecord[]> => {
+          const rows: PersistedActivity[] = [];
+          for (const athlete of await athletes.toCollection().primaryKeys()) {
+            if (athlete === query.requester) continue;
+            // The bug, written out: the same index, and no consent.
+            rows.push(
+              ...(await activities
+                .where('[athleteId+routeId]')
+                .equals([athlete, query.route])
+                .toArray()),
+            );
+          }
+          return rows
+            .map(fromPersistedActivity)
+            .sort((a, b) => b.startedAt - a.startedAt)
+            .slice(0, limit);
         },
       };
     },

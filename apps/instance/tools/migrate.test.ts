@@ -43,8 +43,10 @@ describe('tools/migrate.ts (#769)', () => {
     expect(down.out).toMatch(/down: 1 migration\(s\) changed/);
     expect(down.out).not.toContain(LAST);
     expect(down.out).toContain(`applied: ${NAMES.slice(0, -1).join(', ')}\n`);
-    // The newest migration (0009, #776) is the one that creates `sync_item`.
-    expect(down.out).not.toMatch(/ {2}sync_item:/);
+    // The newest migration (0010, #793) adds a column and no table, so one
+    // down leaves every table — `sync_item`, 0009's, included — in the count.
+    expect(down.out).toMatch(/ {2}sync_item:/);
+    expect(down.out).toMatch(/ {2}activity_record:/);
 
     const up = migrate(path, 'up');
     expect(up.out).toMatch(/up: 1 migration\(s\) changed/);

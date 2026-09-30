@@ -56,6 +56,7 @@ import {
 import type {
   ActivityId,
   ActivityRecord,
+  ActivitySummary,
   AthleteId,
   LapRecord,
   StreamSet,
@@ -501,7 +502,7 @@ function trackActivityOf(activity: ActivityRecord, laps: readonly ExportLap[]): 
  * the one place a stored name reaches a filesystem API: a name of `../../x` has
  * to come out as a name and not as a path.
  */
-export function fileStemOf(activity: ActivityRecord): string {
+export function fileStemOf(activity: ActivitySummary): string {
   return safeFileStem(activity.name, `activity-${activity.id}`);
 }
 
