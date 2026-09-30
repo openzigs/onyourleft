@@ -472,6 +472,16 @@ export interface SidePeerNetworkOptions {
    * the engine's next state change putting it right. Default `false`.
    */
   readonly strandsHandedChannels?: boolean | undefined;
+  /**
+   * Whether the FIRST message the ANSWERING end sends on `control` is lost,
+   * wherever it is sent from, with no error and the channel still `open`, while
+   * every message after it arrives — #568's first mode in general form. The
+   * engine lost the phone's secret sent inside `ondatachannel`; nothing has
+   * shown that a secret sent from anywhere else cannot be lost the same way,
+   * and when it is, whatever the phone sends next reaches the tablet FIRST.
+   * It is still recorded in `sent`. Default `false`.
+   */
+  readonly losesAnsweringEndsFirstControlMessage?: boolean | undefined;
 }
 
 /** A scripted peer, with what a test needs to see of it. */
@@ -533,6 +543,7 @@ export function sidePeerNetwork(options: SidePeerNetworkOptions = {}): {
     maxMessageSize: options.maxMessageSize ?? 262_144,
     losesSendsInDataChannelEvent: options.losesSendsInDataChannelEvent ?? false,
     strandsHandedChannels: options.strandsHandedChannels ?? false,
+    losesAnsweringEndsFirstControlMessage: options.losesAnsweringEndsFirstControlMessage ?? false,
     connects: options.connects ?? true,
     gathers: options.gathers ?? true,
     addresses: options.addresses ?? ((index: number) => [`192.168.1.${String(10 + index)}`]),
@@ -619,6 +630,7 @@ interface FakeNetwork {
   readonly maxMessageSize: number;
   readonly losesSendsInDataChannelEvent: boolean;
   readonly strandsHandedChannels: boolean;
+  readonly losesAnsweringEndsFirstControlMessage: boolean;
   readonly gathers: boolean;
   readonly addresses: (index: number) => readonly string[];
   tryConnect(): void;
@@ -644,6 +656,8 @@ function connect(offerer: FakeSidePeer, answerer: FakeSidePeer): void {
     twin.twin = channel;
     channel.twin = twin;
     twin.readyState = 'open';
+    twin.losesNext =
+      offerer.network.losesAnsweringEndsFirstControlMessage && channel.label === 'control';
     answerer.channels.push(twin);
     twin.handedOver = offerer.network.losesSendsInDataChannelEvent;
     answerer.ondatachannel?.({ channel: twin });
@@ -671,6 +685,8 @@ class FakeSideChannel implements ScriptedSideChannel {
   handedOver = false;
   /** Says `connecting` and still hears the other end — #568's second mode. */
   stranded = false;
+  /** The next message this end sends is lost, and only that one (#568). */
+  losesNext = false;
   onopen: (() => void) | null = null;
   onclose: (() => void) | null = null;
   onmessage: ((event: { readonly data: unknown }) => void) | null = null;
@@ -705,6 +721,10 @@ class FakeSideChannel implements ScriptedSideChannel {
       this.sentBinary.push(data.slice(0));
     }
     const twin = this.twin;
+    if (this.losesNext) {
+      this.losesNext = false;
+      return;
+    }
     if (this.network.dropped || twin === undefined || this.handedOver) {
       return;
     }

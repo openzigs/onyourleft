@@ -25,12 +25,17 @@ describe('what the phone accepts from the tablet', () => {
       verdict: 'matches',
     });
     expect(tabletMessageFrom('{"t":"ping"}')).toEqual({ t: 'ping' });
+    expect(tabletMessageFrom(controlMessageText({ t: 'welcome' }))).toEqual({ t: 'welcome' });
   });
 
   it('refuses the phone’s own column — a tablet does not say hello or acknowledge', () => {
     expect(tabletMessageFrom('{"t":"hello","k":"x"}')).toBeUndefined();
     expect(tabletMessageFrom('{"t":"ack","n":1}')).toBeUndefined();
     expect(tabletMessageFrom('{"t":"state","s":"filming"}')).toBeUndefined();
+  });
+
+  it('refuses a welcome from the phone’s side — only the tablet welcomes (#568)', () => {
+    expect(phoneMessageFrom('{"t":"welcome"}')).toBeUndefined();
   });
 
   it('refuses an unknown type, an extra field, a bad number, a non-string and an oversized message', () => {
@@ -40,6 +45,8 @@ describe('what the phone accepts from the tablet', () => {
     expect(tabletMessageFrom('{"t":"start","n":1.5}')).toBeUndefined();
     expect(tabletMessageFrom('{"t":"start"}')).toBeUndefined();
     expect(tabletMessageFrom('{"t":"ping","extra":true}')).toBeUndefined();
+    // A welcome carries nothing (#568), so a field on one is refused.
+    expect(tabletMessageFrom('{"t":"welcome","k":"x"}')).toBeUndefined();
     expect(tabletMessageFrom('not json')).toBeUndefined();
     expect(tabletMessageFrom('[1]')).toBeUndefined();
     expect(tabletMessageFrom(new Uint8Array(4))).toBeUndefined();
