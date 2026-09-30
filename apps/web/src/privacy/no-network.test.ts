@@ -1419,7 +1419,13 @@ describe('the instance is disclosed, class by class — #778', () => {
     expect(section).toContain("ask the instance's operator");
     expect(section).toContain("for the project's own instance, that is this project's maintainer");
     expect(section).toContain('as described under contact below');
-    expect(normalised(policySection(policy, 'Contact'))).toContain('open an issue');
+    // #886/#887: a request about a rider's own data goes to the owner's private
+    // address, never a public issue; the issue tracker is for what is not personal.
+    const contact = normalised(policySection(policy, 'Contact'));
+    expect(contact).toContain('matt@openzigs.ai');
+    expect(contact).toContain('do not put a request about your own data in a public issue');
+    expect(contact).toContain('for anything that is not personal, open an issue');
+    expect(section).toContain('ask privately by email');
   });
 
   it('names only Disconnect, the operator or Discord in every "how to delete it" cell — #892 second review', () => {

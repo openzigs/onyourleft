@@ -232,9 +232,9 @@ already holds stays there.
 
 **Deleting what an instance holds.** Disconnecting is all this version of the app can do: it cannot
 remove a device from your account on an instance, change or remove your name there, or erase your
-account there. Ask the instance's operator to do them. For the project's own instance, that is this project's maintainer: ask as described under
-**Contact** below, by email to **matt@openzigs.ai**, for any of them or for your account there to be
-erased, until the app can do them itself. For anybody else's instance, ask whoever runs it.
+account there. Ask the instance's operator to do them. For the project's own instance, that is this project's maintainer: ask privately by email, to
+**matt@openzigs.ai**, as described under **Contact** below and not in a public issue, for any of them or for your account there to
+be erased, until the app can do them itself. For anybody else's instance, ask whoever runs it.
 
 ## A second phone you pair as a side camera
 
@@ -472,8 +472,11 @@ commit in the repository above. The date at the top is the date of the last subs
 
 ## Contact
 
-To ask us to delete what we hold about you, email **matt@openzigs.ai**. For anything else, open an
-issue at <https://github.com/openzigs/onyourleft/issues>. For anything that is a security or
-privacy **vulnerability**, use
+For a request to delete what the project's own instance holds, a notice of illegal content, or a
+complaint, write to [matt@openzigs.ai](mailto:matt@openzigs.ai). Do not put a request about your own
+data in a public issue.
+
+For anything that is not personal, open an issue at <https://github.com/openzigs/onyourleft/issues>.
+For anything that is a security or privacy **vulnerability**, use
 [private vulnerability reporting](https://github.com/openzigs/onyourleft/security/advisories/new)
 rather than a public issue — `SECURITY.md` says why.
