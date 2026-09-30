@@ -114,6 +114,14 @@ export interface SeatView {
    * who has not finished. The Node adapter persists it as the result (#780).
    */
   readonly finishedAtTicks: number | null;
+  /**
+   * The rider's mean power over every second the room simulated them, per
+   * kilogram of their declared mass (`ceilings.ts`) — what a race's result
+   * publishes beside them (#785, ruling Q17). `null` before the first tick.
+   */
+  readonly wattsPerKilogram: number | null;
+  /** The durations of every plausibility ceiling this rider breached, shortest first (#785). */
+  readonly flaggedDurationsSeconds: readonly number[];
 }
 
 export interface RoomView {
@@ -128,7 +136,10 @@ export interface RoomView {
 export interface Room {
   receive(connection: ConnectionId, text: string, nowMs: number): Outbound[];
   disconnect(connection: ConnectionId, nowMs: number): Outbound[];
-  /** Starts a race's countdown. A group ride starts itself on its first rider. */
+  /**
+   * Starts a race's countdown, and tells every seated rider how long it is
+   * (`countdown`, #785). A group ride starts itself on its first rider.
+   */
   start(nowMs: number): Outbound[];
   tick(nowMs: number): Outbound[];
   view(): RoomView;
@@ -225,7 +236,7 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
     ];
   }
 
-  function attach(seat: Seat, connection: ConnectionId): Outbound[] {
+  function attach(seat: Seat, connection: ConnectionId, nowMs: number): Outbound[] {
     const out: Outbound[] = [];
     if (seat.connection !== undefined && seat.connection !== connection) {
       // The same athlete on a second socket: the newer one is the rider.
@@ -242,7 +253,23 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
     seat.lastAdmittedSequence = undefined;
     seat.latest = undefined;
     byConnection.set(connection, seat);
-    return [...out, ...welcome(connection, seat)];
+    return [...out, ...welcome(connection, seat), ...countdownTo(connection, nowMs)];
+  }
+
+  /**
+   * A race's countdown, to one connection, while there is one (#785): how long
+   * until the first tick, from NOW on the room's clock. A duration and never
+   * an instant, so a client's own clock never enters it.
+   */
+  function countdownTo(connection: ConnectionId, nowMs: number): Outbound[] {
+    if (settings.kind !== 'race' || phase !== 'countdown') return [];
+    return [
+      {
+        kind: 'send',
+        connection,
+        message: { type: 'countdown', startsInMs: Math.max(0, startsAtMs - nowMs) },
+      },
+    ];
   }
 
   function hello(connection: ConnectionId, ticket: string, nowMs: number): Outbound[] {
@@ -263,7 +290,7 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
       if (existing.state === 'dnf') {
         return refuseAndClose(connection, 'room-closed');
       }
-      return attach(existing, connection);
+      return attach(existing, connection, nowMs);
     }
     if (settings.kind === 'race' && phase === 'running') {
       return refuseAndClose(connection, 'room-closed');
@@ -293,7 +320,7 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
       phase = 'countdown';
       startsAtMs = nowMs + settings.countdownMs;
     }
-    return attach(seat, connection);
+    return attach(seat, connection, nowMs);
   }
 
   function report(seat: Seat, message: Report, nowMs: number): void {
@@ -458,11 +485,12 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
     },
 
     start(nowMs) {
-      if (settings.kind === 'race' && phase === 'lobby') {
-        phase = 'countdown';
-        startsAtMs = nowMs + settings.countdownMs;
-      }
-      return [];
+      if (settings.kind !== 'race' || phase !== 'lobby') return [];
+      phase = 'countdown';
+      startsAtMs = nowMs + settings.countdownMs;
+      return seated().flatMap((seat) =>
+        seat.connection === undefined ? [] : countdownTo(seat.connection, nowMs),
+      );
     },
 
     tick(nowMs) {
@@ -514,6 +542,8 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
           speedMetresPerSecond: seat.ride.speed,
           flags: flagsOf(seat),
           finishedAtTicks: seat.state === 'finished' ? seat.finishedAt : null,
+          wattsPerKilogram: seat.ceilings.wattsPerKilogram,
+          flaggedDurationsSeconds: seat.ceilings.flaggedDurationsSeconds,
         })),
         finishOrder: finishOrder(),
       };

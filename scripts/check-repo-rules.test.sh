@@ -2487,6 +2487,110 @@ append_asset_entry apps/web/public/realistic/sky.hdr CC0-1.0 \
   "$(fixture_digest apps/web/public/realistic/sky.hdr)"
 assert_clean "an asset committed as its upstream bytes owes no derivation record"
 
+# --- ASSET008: a vector or animation file, text or not (#937) ----------------
+#
+# ASSET001 finds binaries by content and so is blind to an `.svg` or a Lottie
+# `.json`, both of which are text. Every red case here has a green complement
+# for the reason given above ASSET001: "no findings" and "the walk never saw
+# the file" read the same from an exit code.
+
+write_svg() {
+  mkdir -p "$(dirname "${fixture_root}/$1")"
+  printf '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4"/></svg>\n' \
+    > "${fixture_root}/$1"
+}
+
+# A minimal Lottie document: the three top-level keys the rule sniffs for,
+# with a nested object carrying a `"v"` of its own to keep the walk honest.
+write_lottie_json() {
+  mkdir -p "$(dirname "${fixture_root}/$1")"
+  printf '{\n  "v": "5.7.4",\n  "fr": 30,\n  "ip": 0, "op": 60, "w": 100, "h": 100,\n  "layers": [ { "ty": 4, "ks": { "o": { "a": 0, "k": 100 } } } ]\n}\n' \
+    > "${fixture_root}/$1"
+}
+
+new_fixture
+write_good_app web
+write_svg apps/web/public/illustrations/rider.svg
+assert_violation "an unnamed .svg under apps/ is rejected" ASSET008 \
+  "apps/web/public/illustrations/rider.svg: a vector or animation file that ASSETS.toml does not name"
+
+new_fixture
+write_good_app web
+write_svg apps/web/public/illustrations/rider.svg
+append_asset_entry apps/web/public/illustrations/rider.svg CC0-1.0 \
+  "$(fixture_digest apps/web/public/illustrations/rider.svg)"
+assert_clean "a named CC0 .svg under apps/ passes"
+
+new_fixture
+write_good_app web
+write_svg apps/web/public/illustrations/rider.svg
+append_asset_entry apps/web/public/illustrations/rider.svg CC-BY-SA-4.0 \
+  "$(fixture_digest apps/web/public/illustrations/rider.svg)"
+assert_violation "a named CC-BY-SA-4.0 .svg is rejected, by ASSET004" ASSET004 \
+  "apps/web/public/illustrations/rider.svg: licence CC-BY-SA-4.0 is not permitted"
+
+# The extension is matched whatever its case: `.SVG` is what some exporters
+# write, and a rule keyed on the lower-case spelling alone is a rename away
+# from passing over it.
+new_fixture
+write_good_package domain
+write_svg packages/domain/fixtures/Logo.SVG
+assert_violation "an unnamed .SVG under packages/ is rejected, whatever the case" ASSET008 \
+  "packages/domain/fixtures/Logo.SVG: a vector or animation file"
+
+new_fixture
+write_good_app web
+write_lottie_json apps/web/public/animations/spin.json
+assert_violation "an unnamed Lottie .json is rejected" ASSET008 \
+  "apps/web/public/animations/spin.json: a vector or animation file"
+
+new_fixture
+write_good_app web
+write_lottie_json apps/web/public/animations/spin.json
+append_asset_entry apps/web/public/animations/spin.json CC0-1.0 \
+  "$(fixture_digest apps/web/public/animations/spin.json)"
+assert_clean "a named CC0 Lottie .json passes"
+
+# ⚠️ The complement the sniff has to get right: a `package.json` is JSON, lives
+# under apps/, is named in no manifest -- and is not an animation. So is a
+# document that carries the three names only NESTED, or only inside a string,
+# which a grep for the keys would have read as Lottie.
+new_fixture
+write_good_app web
+printf '{ "name": "@onyourleft/web", "license": "AGPL-3.0-or-later", "version": "0.1.0", "scripts": { "v": "x", "fr": "y", "layers": "z" },\n  "description": "\\"v\\": 1, \\"fr\\": 2, \\"layers\\": []" }\n' \
+  > "${fixture_root}/apps/web/package.json"
+printf '[ { "v": "5.7.4", "fr": 30, "layers": [] } ]\n' > "${fixture_root}/apps/web/list.json"
+assert_clean "a package.json-shaped .json, and Lottie keys only nested, are not Lottie"
+
+# A `.riv` is binary. It is reported as ASSET008 rather than ASSET001 -- one file,
+# one finding, naming its kind -- so the binary sniff must not claim it first.
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/animations/rider.riv
+assert_violation_and_silence "an unnamed .riv is rejected as ASSET008, not ASSET001" \
+  ASSET008 "apps/web/public/animations/rider.riv: a vector or animation file" ASSET001
+
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/animations/rider.lottie
+assert_violation "an unnamed .lottie is rejected" ASSET008 \
+  "apps/web/public/animations/rider.lottie: a vector or animation file"
+
+# Pruned trees are not walked: a dependency's own SVG is its package's concern
+# (DEP001 and the notices gate), and a build's output is not committed.
+new_fixture
+write_good_app web
+write_svg apps/web/node_modules/some-icons/icon.svg
+write_svg apps/web/dist/assets/icon.svg
+assert_clean "an .svg under node_modules or dist is not walked"
+
+# Outside apps/ and packages/ nothing ships, so a documentation diagram is not
+# this rule's business.
+new_fixture
+write_good_app web
+write_svg docs/diagram.svg
+assert_clean "an .svg under docs/ is not reported"
+
 # --- ASSET005: the manifest itself ------------------------------------------
 #
 # ⚠️ This is the rule without which the four above are the vacuous pass they

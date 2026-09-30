@@ -50,6 +50,7 @@ import {
 import {
   RoomSession,
   type RoomLink,
+  type RoomRace,
   type RoomSample,
   type RoomSessionStatus,
   type RoomTimers,
@@ -70,6 +71,12 @@ export interface RoomJoin {
   readonly declaredMassKilograms: number | undefined;
   /** Read at every report: the rider's power and cadence NOW. */
   readonly sample: () => RoomSample;
+  /**
+   * The SHA-256 of the route this device rides for the room — #784: the
+   * room's `welcome.routeRef` must name the same bytes, or the room is left.
+   * Absent for a room this device did not fetch a route for.
+   */
+  readonly routeSha256?: string | undefined;
 }
 
 /** One room, joined: kept joined until {@link RoomConnection.leave}. */
@@ -78,6 +85,11 @@ export interface RoomConnection {
   status(): RoomSessionStatus;
   /** Every other rider, where to draw them at `localMs` (`snapshots.ts`). */
   others(localMs: number): readonly DrawnRemoteRider[];
+  /**
+   * Where a race is — waiting, counting down, running, finished with its
+   * order — or `not-a-race` for a group ride (#785). @see RoomRace
+   */
+  race(): RoomRace;
   /** The room's newest word on THIS rider, for `correction.ts`. */
   own(): { readonly rider: DrawnRemoteRider; readonly atLocalMs: number } | undefined;
   /** Leave: close the socket, stop reconnecting, let the screen sleep. */
@@ -187,6 +199,7 @@ export function roomPortOver(
         now: options.now ?? (() => performance.now()),
         physicsVersion: PHYSICS_VERSION,
         sample: request.sample,
+        routeSha256: request.routeSha256,
         acceptFrame: options.acceptFrame,
         onChange: () => {
           // A session that has stopped trying no longer needs the screen off.
@@ -200,6 +213,7 @@ export function roomPortOver(
       return {
         status: () => session.status,
         others: (localMs) => session.others(localMs),
+        race: () => session.race(),
         own: () => session.own(),
         leave: () => {
           session.leave();

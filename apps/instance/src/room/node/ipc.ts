@@ -6,7 +6,7 @@
  * `socket`.
  */
 
-import type { Admission } from '../core/room.ts';
+import type { Admission, RoomPhase } from '../core/room.ts';
 import type { RoomPlan } from '../room-plan.ts';
 import type { HostMetrics, RoomResult } from './room-host.ts';
 
@@ -45,7 +45,11 @@ export type ToWorker =
       readonly type: 'start';
       readonly id: number;
       readonly roomId: string;
-      /** Only a rider seated and connected in the room may start it. */
+      /**
+       * Only the room's creator, seated and connected, may start it — the
+       * owner's ruling of 2026-09-30 (`room-host.ts` §`start`); any seated
+       * rider in a room an operator opened, which has no creator.
+       */
       readonly athleteId: string;
     }
   | { readonly type: 'metrics'; readonly id: number }
@@ -61,7 +65,8 @@ export type FromWorker =
     }
   | { readonly type: 'result'; readonly roomId: string; readonly result: RoomResult }
   | { readonly type: 'race-started'; readonly roomId: string }
-  | { readonly type: 'room-closed'; readonly roomId: string }
+  | { readonly type: 'race-finished'; readonly roomId: string }
+  | { readonly type: 'room-closed'; readonly roomId: string; readonly phase: RoomPhase }
   | { readonly type: 'socket-closed'; readonly socketId: string }
   | {
       readonly type: 'metrics';

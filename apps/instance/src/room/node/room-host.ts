@@ -11,8 +11,10 @@ import {
   type Outbound,
   type Room,
   type RoomPhase,
+  type RoomView,
 } from '../core/room.ts';
 import type { RoomSettings } from '../core/settings.ts';
+import type { RaceStarter } from '../room-plan.ts';
 
 /**
  * The room core (#779) mounted on Node and `ws` — the self-host adapter,
@@ -91,8 +93,19 @@ export interface HostOptions {
    * process records it, as the Durable Object keeps its `left-lobby` marker.
    */
   readonly onRaceStarted?: (roomId: string) => void;
-  /** A room has closed and holds no socket: forget where it was placed. */
-  readonly onRoomClosed?: (roomId: string) => void;
+  /**
+   * A race is over — every rider across the line or out of it (#785). Its
+   * result may be read from here, and not before: ADR 0028 D-7.7's "after the
+   * race is decided", held by the instance rather than only by the client.
+   */
+  readonly onRaceFinished?: (roomId: string) => void;
+  /**
+   * A room has closed and holds no socket: forget where it was placed. `phase`
+   * says whether it is over — `finished` (a race) or `closed` (a group ride
+   * past its empty grace) — or only emptied in its lobby, which a later
+   * socket opens again (#784: only a room that is over lets its route go).
+   */
+  readonly onRoomClosed?: (roomId: string, phase: RoomPhase) => void;
   /** A socket this host held has closed, however it closed. */
   readonly onSocketClosed?: (socketId: string) => void;
   /** Unsent bytes past which a client is terminated. {@link DEFAULT_MAXIMUM_BUFFERED_BYTES}. */
@@ -113,6 +126,39 @@ export interface RoomResult {
   /** Milliseconds from the start to the line, or `null` for a rider who did not finish. */
   readonly finishMs: number | null;
   readonly flags: number;
+  /**
+   * Where they finished, 1 first, from the room's own finish order — or
+   * `null` for a rider who did not (#785). Kept so that a rider who later
+   * erases their account leaves a gap the others' results show as "a rider",
+   * with nothing of theirs in it.
+   */
+  readonly place: number | null;
+  /** Mean power over the race per kilogram of declared mass (ruling Q17), or `null`. */
+  readonly wattsPerKilogram: number | null;
+  /** The durations of every plausibility ceiling breached, shortest first (#785). */
+  readonly flaggedDurationsSeconds: readonly number[];
+}
+
+/**
+ * Every race rider whose result is final in `view` — they crossed the line or
+ * did not finish — as the result the HTTP process stores (#780, #785): the
+ * place from the room's own finish order, and the figures the race publishes.
+ */
+export function finalResults(view: RoomView, frameIntervalMs: number): RoomResult[] {
+  return view.seats.flatMap((seat): RoomResult[] => {
+    if (seat.state !== 'finished' && seat.state !== 'dnf') return [];
+    return [
+      {
+        athleteId: seat.athleteId,
+        finishMs:
+          seat.finishedAtTicks === null ? null : Math.round(seat.finishedAtTicks * frameIntervalMs),
+        flags: seat.flags,
+        place: seat.state === 'finished' ? view.finishOrder.indexOf(seat.riderId) + 1 : null,
+        wattsPerKilogram: seat.wattsPerKilogram,
+        flaggedDurationsSeconds: seat.flaggedDurationsSeconds,
+      },
+    ];
+  });
 }
 
 /**
@@ -153,6 +199,8 @@ interface Connection {
 interface HostedRoom {
   readonly roomId: string;
   readonly settings: RoomSettings;
+  /** Who may start it, from the plan it was opened with: `room-plan.ts` §`RaceStarter`. */
+  readonly startedBy: RaceStarter;
   readonly room: Room;
   readonly connections: Map<ConnectionId, Connection>;
   nextConnection: number;
@@ -163,6 +211,7 @@ interface HostedRoom {
   /** Athletes whose result has been handed on. */
   readonly reported: Set<string>;
   raceStarted: boolean;
+  raceFinished: boolean;
 }
 
 export interface HostMetrics {
@@ -172,6 +221,16 @@ export interface HostMetrics {
   readonly tickLatenessP50Ms: number | null;
   readonly tickLatenessP99Ms: number | null;
   readonly refusals: Readonly<Record<string, number>>;
+}
+
+/** Whether `athleteId` may start `hosted`'s race: {@link RoomHost.start}. */
+function mayStart(hosted: HostedRoom, athleteId: string): boolean {
+  if (hosted.startedBy !== 'any-seated-rider' && hosted.startedBy.creator !== athleteId) {
+    return false;
+  }
+  return hosted.room
+    .view()
+    .seats.some((seat) => seat.athleteId === athleteId && seat.state === 'connected');
 }
 
 function isTicking(phase: RoomPhase): boolean {
@@ -215,6 +274,10 @@ export class RoomHost {
   /**
    * Takes a socket the router placed here, for room `roomId` with these settings.
    *
+   * `startedBy` is read from the plan that OPENS the room and kept for its
+   * life; a room with no plan behind it (the conformance script, a test) has
+   * no creator, so any seated rider may start it.
+   *
    * ⚠️ `started` is the router's word that the room is a race that has left
    * its lobby (#897). Such a room is JOINED here only if this host still
    * holds it. The router forgets where a room is placed only when this
@@ -230,6 +293,7 @@ export class RoomHost {
     socket: WebSocket,
     socketId: string,
     started = false,
+    startedBy: RaceStarter = 'any-seated-rider',
   ): void {
     if (this.#stopping) {
       socket.close(1001, 'server-stopping');
@@ -244,7 +308,7 @@ export class RoomHost {
       socket.close(frame.code, frame.reason);
       return;
     }
-    const hosted = this.#rooms.get(roomId) ?? this.#open(roomId, settings);
+    const hosted = this.#rooms.get(roomId) ?? this.#open(roomId, settings, startedBy);
     const connection: Connection = {
       id: hosted.nextConnection,
       socketId,
@@ -277,20 +341,24 @@ export class RoomHost {
   }
 
   /**
-   * Starts a race's countdown. With `athleteId`, only if that athlete has a
-   * connected seat in it — the provisional rule until #785 decides who may.
+   * Starts a race's countdown. With `athleteId`, only if that athlete may
+   * start it and has a connected seat in it.
+   *
+   * **Who may start a race — the owner's ruling of 2026-09-30: the room's
+   * creator.** A rider's room (#784) is started by the athlete who made it,
+   * seated and connected in it, and by nobody else; a room an operator opened,
+   * which has no creator, by any rider seated and connected in it
+   * (`room-plan.ts` §`RaceStarter`). ⚠️ **It reverses #785's first rule** —
+   * "any rider seated and connected, because a room has no leader (ADR 0028
+   * D-7.2)" — and a reviewer who remembers that is reading the old file.
+   * Starting directs nobody's ride once it has begun: every rider still rides
+   * their own power on the same road, and the creator has no other power in
+   * it.
    */
   start(roomId: string, athleteId?: string): boolean {
     const hosted = this.#rooms.get(roomId);
     if (hosted === undefined) return false;
-    if (
-      athleteId !== undefined &&
-      !hosted.room
-        .view()
-        .seats.some((seat) => seat.athleteId === athleteId && seat.state === 'connected')
-    ) {
-      return false;
-    }
+    if (athleteId !== undefined && !mayStart(hosted, athleteId)) return false;
     this.#call(hosted, (room) => room.start(this.#options.now()));
     return true;
   }
@@ -368,11 +436,12 @@ export class RoomHost {
     }
   }
 
-  #open(roomId: string, settings: RoomSettings): HostedRoom {
+  #open(roomId: string, settings: RoomSettings, startedBy: RaceStarter): HostedRoom {
     const admitted = new Map<string, Admission | undefined>();
     const hosted: HostedRoom = {
       roomId,
       settings,
+      startedBy,
       // The core's admission is synchronous; the answer was fetched before the
       // hello reached it (`#receive`), and is spent here.
       room: createRoom(settings, (ticket) => {
@@ -387,6 +456,7 @@ export class RoomHost {
       nextTickAtMs: undefined,
       reported: new Set(),
       raceStarted: false,
+      raceFinished: false,
     };
     this.#rooms.set(roomId, hosted);
     return hosted;
@@ -434,6 +504,10 @@ export class RoomHost {
       hosted.raceStarted = true;
       this.#options.onRaceStarted?.(hosted.roomId);
     }
+    if (hosted.settings.kind === 'race' && phase === 'finished' && !hosted.raceFinished) {
+      hosted.raceFinished = true;
+      this.#options.onRaceFinished?.(hosted.roomId);
+    }
     if (isTicking(phase)) this.#scheduleTick(hosted);
     else this.#stopTimer(hosted);
     this.#closeIfDone(hosted);
@@ -476,18 +550,10 @@ export class RoomHost {
 
   #reportResults(hosted: HostedRoom): void {
     if (hosted.settings.kind !== 'race' || this.#options.onResult === undefined) return;
-    for (const seat of hosted.room.view().seats) {
-      if (hosted.reported.has(seat.athleteId)) continue;
-      if (seat.state !== 'finished' && seat.state !== 'dnf') continue;
-      hosted.reported.add(seat.athleteId);
-      this.#options.onResult(hosted.roomId, {
-        athleteId: seat.athleteId,
-        finishMs:
-          seat.finishedAtTicks === null
-            ? null
-            : Math.round(seat.finishedAtTicks * hosted.settings.frameIntervalMs),
-        flags: seat.flags,
-      });
+    for (const result of finalResults(hosted.room.view(), hosted.settings.frameIntervalMs)) {
+      if (hosted.reported.has(result.athleteId)) continue;
+      hosted.reported.add(result.athleteId);
+      this.#options.onResult(hosted.roomId, result);
     }
   }
 
@@ -531,7 +597,7 @@ export class RoomHost {
     if (isTicking(phase)) return;
     this.#stopTimer(hosted);
     this.#rooms.delete(hosted.roomId);
-    this.#options.onRoomClosed?.(hosted.roomId);
+    this.#options.onRoomClosed?.(hosted.roomId, phase);
   }
 
   #ping(): void {

@@ -325,7 +325,13 @@ describe('priority is an ORDER, not a politeness', () => {
     // #551: the three safety statuses, then the side camera's lost link —
     // spoken to everyone, and ranked below the climb (see below).
     // #782: and the room's lost connection, for the same reason.
-    expect(ALWAYS_SPOKEN).toEqual([...PRIORITY.slice(0, 3), 'side-camera-lost', 'room-lost']);
+    // #785: and a race's countdown, start and end.
+    expect(ALWAYS_SPOKEN).toEqual([
+      ...PRIORITY.slice(0, 3),
+      'side-camera-lost',
+      'room-lost',
+      'room-race',
+    ]);
     expect(PRIORITY.indexOf('distance-tick')).toBeLessThan(PRIORITY.indexOf('power'));
   });
 
@@ -367,6 +373,28 @@ describe('priority is an ORDER, not a politeness', () => {
       { ...ON, powerEverySeconds: 'never' },
     );
     expect(said[1]).toBe('Climb in 250 metres, 6 percent');
+  });
+});
+
+describe('a room’s race and its riders — #784, #785', () => {
+  it('ranks the race below the lost room, then a rider coming and going, all above every reading', () => {
+    expect(PRIORITY.indexOf('room-race')).toBe(PRIORITY.indexOf('room-lost') + 1);
+    expect(PRIORITY.indexOf('room-rider')).toBe(PRIORITY.indexOf('room-race') + 1);
+    for (const reading of ['power-off-target', 'distance-tick', 'power'] as const) {
+      expect(PRIORITY.indexOf('room-rider')).toBeLessThan(PRIORITY.indexOf(reading));
+    }
+  });
+
+  it('says a race’s start with announcements off, and a rider joining only with them on', () => {
+    const race = { kind: 'room-race', text: 'Go.' } as const;
+    const joined = { kind: 'room-rider', text: 'A rider joined the room.' } as const;
+    expect(run([{ now: 0, events: [race] }], { ...DEFAULT_ANNOUNCEMENTS }).said).toEqual(['Go.']);
+    expect(run([{ now: 0, events: [joined] }], { ...DEFAULT_ANNOUNCEMENTS }).said).toEqual([
+      undefined,
+    ]);
+    expect(run([{ now: 0, events: [joined] }], { ...ON, powerEverySeconds: 'never' }).said).toEqual(
+      ['A rider joined the room.'],
+    );
   });
 });
 

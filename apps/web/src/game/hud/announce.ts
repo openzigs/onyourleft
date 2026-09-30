@@ -29,6 +29,8 @@
  * | 5 | a climb or a descent ahead | event (#399) | attested | no |
  * | 5a | the side camera's link lost | event (#551) | ADR 0033 D-5 | **yes** — #551 |
  * | 5a′ | the room's connection lost | event (#782) | ruling Q3/Q6 | **yes** — #782 |
+ * | 5a″ | a race's countdown, its start and its end | event (#785) | the room's own word | **yes** — #785 |
+ * | 5a‴ | a rider joined or left the room | event (#784) | #784's criterion | no |
  * | 5b | the ride may stop if the screen goes off | event (#647) | #524 | no |
  * | 5c | a *Set* the stall rescue held, answered | event (#655) | #445's press answer | no — the form's own `live` answer says it instead |
  * | 6 | power off an acknowledged target | ≥ 10 % for ≥ 5 s | attested | no |
@@ -52,6 +54,8 @@
  * | `climb-ahead` | `GameView` | `hud/climb-ahead.ts` |
  * | `side-camera-lost` | `GameView` and `ride/RideAnnouncer.tsx` | `ride/side-camera.ts` §`sideCameraLostEvent` |
  * | `room-lost` | `GameView` | `net/room-port.ts` §`RoomConnection.status` going to `lost` (#782) |
+ * | `room-race` | `GameView` | `game/room-ride.ts` §`raceEvent`, from `RoomConnection.race` (#785) |
+ * | `room-rider` | `GameView` | `game/room-ride.ts` §`riderEvents`, from the room's frames (#784) |
  * | `screen-off-risk` | `GameView` and `ride/RideAnnouncer.tsx` | `RideSnapshot.keepAliveFailed` (#647) |
  * | `erg-held` | `ride/RideAnnouncer.tsx` | `TrainerSnapshot.ergHeld` (#655) |
  * | readings | `GameView` | `fields.ts` §`hudReadings` |
@@ -102,6 +106,16 @@
  * riders would otherwise never get. A rank of its own, numbered 5a′ for 5a's
  * reason.
  *
+ * ⚠️ **Ranks 5a″ and 5a‴ are #785's and #784's.** A race's countdown, its
+ * "go" and its end are the room's word on what the rider is doing — held on
+ * the line, riding, done — so they are in {@link ALWAYS_SPOKEN}, for the
+ * room-lost reason: a rider who cannot see the notice would otherwise pedal
+ * against a start line nothing tells them has lifted. A rider joining or
+ * leaving the room is #784's "announced by the HUD's live region when
+ * announcements are on": the lowest room event, and never with them off —
+ * nothing about it changes what the rider must do. Below the room's lost
+ * connection both, and above every reading.
+ *
  * ⚠️ **Rank 5b is #647's**: the platform refused to keep the ride alive, so
  * it may stop if the screen goes off. BELOW the side camera, because that has
  * a 30-second clock on it and this has none — the ride is not lost until the
@@ -132,7 +146,7 @@
  * §`simulationControl`). ⚠️ **Not in {@link ALWAYS_SPOKEN}**: with
  * announcements off the form speaks it, and this region says nothing new.
  *
- * ## ⚠️ Five kinds are spoken with announcements OFF — {@link ALWAYS_SPOKEN}
+ * ## ⚠️ Six kinds are spoken with announcements OFF — {@link ALWAYS_SPOKEN}
  *
  * #395's table says the safety rows are *"on when announcements are on"*, and
  * this module departs from that cell on purpose. Those three sentences were
@@ -191,6 +205,8 @@ export type AnnouncementEvent =
   | { readonly kind: 'climb-ahead'; readonly text: string }
   | { readonly kind: 'side-camera-lost'; readonly text: string }
   | { readonly kind: 'room-lost'; readonly text: string }
+  | { readonly kind: 'room-race'; readonly text: string }
+  | { readonly kind: 'room-rider'; readonly text: string }
   | { readonly kind: 'screen-off-risk'; readonly text: string }
   | { readonly kind: 'erg-held'; readonly text: string };
 
@@ -210,6 +226,8 @@ export const PRIORITY: readonly AnnouncementKind[] = [
   'climb-ahead',
   'side-camera-lost',
   'room-lost',
+  'room-race',
+  'room-rider',
   'screen-off-risk',
   'erg-held',
   'power-off-target',
@@ -228,10 +246,12 @@ export const ALWAYS_SPOKEN: readonly AnnouncementKind[] = [
   'side-camera-lost',
   // #782: the room gone is a status, for the side camera's reason. @see the module note, rank 5a′
   'room-lost',
+  // #785: a race held, started and over is the room's word on what the rider is doing. Rank 5a″.
+  'room-race',
 ];
 
 /**
- * What the announcer does with announcements off: the five status kinds and
+ * What the announcer does with announcements off: the six status kinds and
  * nothing else — every reading and every optional event is `'never'`.
  */
 function statusOnly(preference: AnnouncementPreference): AnnouncementPreference {

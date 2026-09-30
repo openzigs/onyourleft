@@ -9,7 +9,7 @@ import { encodeMessage } from '@onyourleft/protocol';
 import { WebSocketServer } from 'ws';
 
 import { REFUSAL_CLOSE, ROOM_LOST, type CloseFrame } from '../close-codes.ts';
-import type { Admission } from '../core/room.ts';
+import type { Admission, RoomPhase } from '../core/room.ts';
 import type { RoomPlan } from '../room-plan.ts';
 import type { FromWorker, ToWorker, UpgradeRequest, WorkerSettings } from './ipc.ts';
 import type { HostMetrics, RoomResult } from './room-host.ts';
@@ -94,6 +94,14 @@ export interface RouterOptions {
   readonly admit: (roomId: string, ticket: string) => Admission | undefined;
   readonly onResult?: (roomId: string, result: RoomResult) => Promise<void>;
   readonly onRaceStarted?: (roomId: string) => Promise<void>;
+  /** A race is over (#785): its results may be read from now. */
+  readonly onRaceFinished?: (roomId: string) => Promise<void>;
+  /**
+   * A worker let a room go (#784): `phase` is where the room was — `finished`
+   * or `closed` when it is over, `lobby` when its lobby only emptied and a later
+   * socket may open it again.
+   */
+  readonly onRoomClosed?: (roomId: string, phase: RoomPhase) => Promise<void>;
   /** Whether rooms may be admitted at all yet (`/ready`). */
   readonly ready?: () => boolean;
   /** Something happened an operator should see. No coordinate, no id, no secret. */
@@ -238,15 +246,24 @@ export class RoomRouter {
     return this.#slots.length > 0 && this.#slots.every((slot) => slot.alive);
   }
 
+  /**
+   * Whether a live worker holds `roomId` — somebody is in it, or a race is
+   * still running in it (#784: the rooms' sweep ends only a room nobody is
+   * riding).
+   */
+  holds(roomId: string): boolean {
+    return this.#placement.get(roomId)?.alive === true;
+  }
+
   /** Which worker holds a room, by process id, or `undefined` if it is not placed. */
   placementOf(roomId: string): number | undefined {
     return this.#placement.get(roomId)?.child.pid;
   }
 
   /**
-   * Starts a race's countdown on the worker holding it, for an athlete seated
-   * and connected in it. Who may start a race is #785's to decide; this is the
-   * provisional rule.
+   * Starts a race's countdown on the worker holding it, for the athlete who
+   * may start it — its creator, seated and connected (the owner's ruling of
+   * 2026-09-30), `room-host.ts` §`start`.
    */
   startRoom(roomId: string, athleteId: string): Promise<boolean> {
     const slot = this.#placement.get(roomId);
@@ -418,8 +435,12 @@ export class RoomRouter {
       case 'race-started':
         this.#track(this.#options.onRaceStarted?.(message.roomId));
         return;
+      case 'race-finished':
+        this.#track(this.#options.onRaceFinished?.(message.roomId));
+        return;
       case 'room-closed':
         if (this.#placement.get(message.roomId) === slot) this.#placement.delete(message.roomId);
+        this.#track(this.#options.onRoomClosed?.(message.roomId, message.phase));
         return;
       case 'socket-closed': {
         const copy = slot.sockets.get(message.socketId);

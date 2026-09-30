@@ -120,3 +120,84 @@ test.describe('two riders in one room on a real instance — #782', () => {
     }
   });
 });
+
+test.describe('a group ride made, shared by its code, joined and ridden — #784', () => {
+  // An instance of its own: an instance registers three riders an address an
+  // hour (#775), and the describe above has spent this address's three.
+  let own: RoomGateInstance;
+  test.beforeAll(async () => {
+    const testing = (await import(ROOM_GATE_TESTING)) as RoomGateTesting;
+    own = await testing.startRoomGateInstance();
+  });
+  test.afterAll(async () => {
+    await own.close();
+  });
+
+  test('the joining page draws the maker’s route, fetched by hash and checked, and the two ride together; an altered route is refused', async ({
+    browser,
+  }) => {
+    const signedIn = async (name: string): Promise<Page> => {
+      const context = await browser.newContext({ baseURL: HARNESS_ORIGIN });
+      const page = await context.newPage();
+      expect((await page.goto('/room.html'))?.status()).toBe(200);
+      await page.waitForFunction(() => window.__oylRoom !== undefined);
+      const connected = await page.evaluate(
+        ([address, who]) => (window.__oylRoom as RoomHarness).signIn(address, who),
+        [own.origin, name] as const,
+      );
+      expect(connected.kind, `${name} signed in`).toBe('connected');
+      return page;
+    };
+    const drawn = (page: Page): Promise<readonly string[]> =>
+      page.evaluate(() => (window.__oylRoom as RoomHarness).drawn());
+
+    const maker = await signedIn('Dee');
+    const made = await maker.evaluate(() => (window.__oylRoom as RoomHarness).make());
+    expect(made.kind).toBe('made');
+    if (made.kind !== 'made') return;
+    expect(made.code).toMatch(/^[0-9A-Z]{5}-[0-9A-Z]{5}-[0-9A-Z]{5}$/);
+
+    // The control: a page whose copy of the route is altered on its way in
+    // must refuse it and draw nothing — the check is against the room's hash.
+    const control = await signedIn('Eli');
+    const refused = await control.evaluate(
+      (code) => (window.__oylRoom as RoomHarness).enter(code, true),
+      made.code,
+    );
+    expect(refused).toEqual({ kind: 'refused', reason: 'not-the-rooms-route' });
+    expect(await drawn(control)).toEqual([]);
+
+    const friend = await signedIn('Fay');
+    const joined = await friend.evaluate(
+      (code) => (window.__oylRoom as RoomHarness).enter(code.toLowerCase(), false),
+      made.code,
+    );
+    expect(joined).toEqual({ kind: 'entered', roomId: made.roomId });
+    // The friend drew exactly the road the maker's own page drew.
+    const makerDrew = await drawn(maker);
+    expect(makerDrew.length).toBeGreaterThan(0);
+    expect(makerDrew[0]?.length ?? 0).toBeGreaterThan(100);
+    expect(await drawn(friend)).toEqual(makerDrew);
+
+    // And they ride it together, each seeing the other move.
+    await maker.evaluate(() => {
+      (window.__oylRoom as RoomHarness).ride(220);
+    });
+    await friend.evaluate(() => {
+      (window.__oylRoom as RoomHarness).ride(180);
+    });
+    await expect.poll(async () => (await sample(maker)).others.length, { timeout: 15_000 }).toBe(1);
+    await expect
+      .poll(async () => (await sample(friend)).others.length, { timeout: 15_000 })
+      .toBe(1);
+    expect(await seesAnotherMove(maker, 2.5)).toBe(true);
+    expect(await seesAnotherMove(friend, 2.5)).toBe(true);
+
+    for (const page of [maker, friend, control]) {
+      await page.evaluate(() => {
+        (window.__oylRoom as RoomHarness).leave();
+      });
+      await page.context().close();
+    }
+  });
+});

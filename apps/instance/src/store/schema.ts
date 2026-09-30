@@ -115,6 +115,10 @@ export interface RoomCourseTable {
   readonly rejoin_window_ms: number | null;
   /** Unix seconds: when this race left its lobby. It is never a lobby again. */
   readonly race_started_at: number | null;
+  /** How many riders crossed the line: the highest place written (#785, 0013). */
+  readonly finishers: Generated<number | null>;
+  /** Unix seconds: when this race's room said it was over — everybody off the road (#785, 0013). */
+  readonly race_finished_at: Generated<number | null>;
 }
 
 /** One athlete's result in one room. */
@@ -123,6 +127,32 @@ export interface ResultTable {
   readonly athlete_id: string;
   readonly finish_ms: number | null;
   readonly flags: number;
+  /** 1 first, from the room's finish order; `null` for a rider who did not finish (#785, 0013). */
+  readonly place: number | null;
+  /** Mean power over the race per kilogram of declared mass (ruling Q17), or `null`. */
+  readonly watts_per_kilogram: number | null;
+  /** JSON: the durations, in seconds, of every plausibility ceiling breached. */
+  readonly flagged_seconds: Generated<string>;
+}
+
+/** A room a rider made, and the digest of its code (#784, migration 0013). */
+export interface PrivateRoomTable {
+  readonly room_id: string;
+  /** SHA-256 of the room code, lower-case hex. Never the code. */
+  readonly code_sha256: string;
+  /** 1 when the shared route is ridden as a loop. */
+  readonly route_loop: number;
+  readonly created_at: number;
+  /** Unix seconds: when the room was over. Never opened again after. */
+  readonly closed_at: number | null;
+}
+
+/** Who may be ticketed into a private room (#784, migration 0013). */
+export interface RoomMemberTable {
+  readonly room_id: string;
+  readonly athlete_id: string;
+  readonly role: 'creator' | 'rider';
+  readonly joined_at: number;
 }
 
 /** A nonce issued to a public key (#772). Not athlete-scoped: see migration 0004. */
@@ -286,6 +316,8 @@ export interface InstanceDatabase {
   readonly room: RoomTable;
   readonly room_course: RoomCourseTable;
   readonly result: ResultTable;
+  readonly private_room: PrivateRoomTable;
+  readonly room_member: RoomMemberTable;
   readonly auth_challenge: AuthChallengeTable;
   readonly recovery_code: RecoveryCodeTable;
   readonly link_code: LinkCodeTable;

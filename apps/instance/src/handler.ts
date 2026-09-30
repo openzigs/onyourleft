@@ -7,6 +7,7 @@ import { logRequest, logUnhandled, type LogSink } from './log.ts';
 import { openApiDocument } from './openapi.ts';
 import type { ClientInfo, InstanceProbes } from './route-kit.ts';
 import type { History } from './history/history.ts';
+import type { Rooms } from './rooms/rooms.ts';
 import type { Sync } from './sync/sync.ts';
 import { ROUTES, type Route } from './routes.ts';
 
@@ -116,6 +117,11 @@ export interface HandlerOptions {
    * answers `unavailable`, and a device's analysis runs without history.
    */
   readonly history?: History;
+  /**
+   * Riders' rooms (#784, #785). Absent, every route that needs them answers
+   * `unavailable`: an instance with no accounts has no rooms to make.
+   */
+  readonly rooms?: Rooms;
 }
 
 /** A path parameter's value: one segment, of these characters only. */
@@ -268,6 +274,7 @@ export function createHandler(options: HandlerOptions): Handler {
     if (matched.history === true && options.history === undefined) {
       return errorResponse('unavailable');
     }
+    if (matched.rooms === true && options.rooms === undefined) return errorResponse('unavailable');
     let caller: Caller | undefined;
     if (matched.auth === 'session') {
       caller = await identity?.authenticate(request.headers.get('authorization'));
@@ -307,6 +314,7 @@ export function createHandler(options: HandlerOptions): Handler {
       caller,
       sync: options.sync,
       history: options.history,
+      rooms: options.rooms,
       probes: options.probes,
     });
   }

@@ -105,6 +105,7 @@ import type { MaskedWordsPort } from './athlete/masked-words-port';
 import type { RiderTextPort } from './rider-text/rider-text-port';
 import { createInstancePort, instanceEraser, type InstancePort } from './instance/instance-port';
 import { createRoomPort, type RoomPort } from './net/room-port';
+import { createRoomsPort, type RoomsPort } from './net/rooms-port';
 import type { AthleteMassPort } from './athlete/store-port';
 
 const found = document.getElementById('root');
@@ -768,6 +769,24 @@ function buildRoomPort(rideController: RideController | undefined): RoomPort | u
 }
 
 /**
+ * A rider's rooms (#784, #785): making one on your own route, joining one by
+ * its code, starting a race and reading its result — the ONE production place
+ * a rooms port is built, so `check:wiring` reports `createRoomsPort` if this
+ * goes. Over the instance this device signed in to, through the one instance
+ * module (ADR 0036 D-3 (a)); the privacy zones a route is checked against are
+ * read from this device's store, before anything is sent.
+ *
+ * `undefined` where there is no `localStorage` to read a sign-in from.
+ */
+function buildRoomsPort(): RoomsPort | undefined {
+  if (typeof localStorage === 'undefined') return undefined;
+  return createRoomsPort({
+    storage: localStorage,
+    zones: () => localStore().listPrivacyZones(LOCAL_ATHLETE),
+  });
+}
+
+/**
  * Watch for a new version of the app, or not (#407).
  *
  * `undefined` wherever `registerServiceWorker` did not register one — inside
@@ -1029,6 +1048,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   const instance = buildInstancePort();
   // #782: built once, for the Connect screen's reason above.
   const room = buildRoomPort(rideController);
+  // #784, #785: built once, for the same reason.
+  const rooms = buildRoomsPort();
   const root = createRoot(container);
   const draw = (update: UpdateWatcher | undefined): void => {
     root.render(
@@ -1052,6 +1073,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           riderText={buildRiderTextPort()}
           {...(instance === undefined ? {} : { instance })}
           {...(room === undefined ? {} : { room })}
+          {...(rooms === undefined ? {} : { rooms })}
           // #623: the stored kit colour, undefaulted — `game/bicycle.ts`
           // §`riderKitFor` is the one place a missing one becomes the house kit.
           {...(athlete?.kitColour === undefined ? {} : { kitColour: athlete.kitColour })}

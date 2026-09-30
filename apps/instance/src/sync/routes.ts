@@ -175,6 +175,11 @@ export const SYNC_ROUTES: readonly Route[] = [
         statement: context.json.statement,
       });
       if (!stepped.ok) return answer(stepped);
+      // #784: the rooms this rider made are over first — nobody joins them
+      // again, and their routes are deleted — while their rows still say
+      // which rooms those are. A room whose creator is gone however it
+      // happened is ended by the rooms' sweep too (`rooms/rooms.ts`).
+      await context.rooms?.closeRoomsMadeBy(caller.athleteId);
       await syncOf(context).eraseAccount(caller.athleteId);
       return noContent();
     },

@@ -367,7 +367,7 @@ export function decodeClientMessage(
   return decodeWith<ClientMessage>(text, CLIENT_MESSAGE_TYPES, expectations);
 }
 
-/** Decode what a **client** receives: a `welcome`, `refuse`, `frame` or `finish`. */
+/** Decode what a **client** receives: a `welcome`, `refuse`, `frame`, `countdown` or `finish`. */
 export function decodeRoomMessage(text: string): Decoded<RoomMessage> {
   return decodeWith<RoomMessage>(text, ROOM_MESSAGE_TYPES, undefined);
 }

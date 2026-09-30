@@ -14,6 +14,7 @@
  * room → client   welcome { riderId, routeRef: { sha256 }, roomConfig } | refuse { reason }
  * client → room   report  { sequence, atMs, powerWatts, cadenceRpm? }        every 500 ms
  * room → client   frame   { tick, ackSequence?, riders: [[id, dm, cm/s, draft %, flags]] }   every 1 s
+ * room → client   countdown { startsInMs }                                  a race only
  * room → client   finish  { order: [riderId, …] }                            a race only
  * ```
  *
@@ -141,6 +142,27 @@ export interface Frame {
   readonly riders: readonly FrameRider[];
 }
 
+/**
+ * A race's countdown has begun — #785. Sent to every seated rider when the
+ * race is started, and to a rider who joins or rejoins during it.
+ *
+ * ⚠️ **A duration, never an instant.** `startsInMs` is how long after the room
+ * SENT it the first tick is, on the room's own clock. A client counts it down
+ * from when it arrived on its own clock, so a client whose clock is minutes
+ * off still shows the right number, and it is the room's first frame — never
+ * the client's countdown — that lets the ride go (ADR 0028 D-2: the room's
+ * position is the one that counts).
+ *
+ * Added while version 1 has no rider on it (#784 is the first way into a
+ * room): a client of an earlier build drops a message whose type it does not
+ * know (`net/room-session.ts`), and a room never sends it to one that asked
+ * for nothing else, so {@link PROTOCOL_VERSION} is unchanged.
+ */
+export interface Countdown {
+  readonly type: 'countdown';
+  readonly startsInMs: number;
+}
+
 /** The result of a race: rider ids in finishing order. */
 export interface Finish {
   readonly type: 'finish';
@@ -151,7 +173,7 @@ export interface Finish {
 export type ClientMessage = Hello | Report;
 
 /** What a room may send. */
-export type RoomMessage = Welcome | Refuse | Frame | Finish;
+export type RoomMessage = Welcome | Refuse | Frame | Countdown | Finish;
 
 /** Every message. */
 export type ProtocolMessage = ClientMessage | RoomMessage;

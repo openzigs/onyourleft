@@ -6,6 +6,7 @@ import { MODERATION_ROUTES } from './moderation/routes.ts';
 import { assessReadiness } from './readiness.ts';
 import { json, type Route, type Schema } from './route-kit.ts';
 import { HISTORY_ROUTES } from './history/routes.ts';
+import { ROOM_ROUTES } from './rooms/routes.ts';
 import { SYNC_ROUTES } from './sync/routes.ts';
 
 /**
@@ -196,16 +197,17 @@ export const ROUTES: readonly Route[] = [
   ...MODERATION_ROUTES,
   ...SYNC_ROUTES,
   ...HISTORY_ROUTES,
+  ...ROOM_ROUTES,
   {
     method: 'POST',
     path: '/v1/rooms/{roomId}/start',
     operationId: 'startRoom',
     reaches: {
       exempt:
-        'a race’s riders share its countdown: who may start one is #785’s, and blocking inside a room is #789’s (ADR 0028 D-6.4)',
+        'a race’s riders share its countdown, and blocking inside a room is #789’s (ADR 0028 D-6.4)',
     },
     summary:
-      'Starts a race’s countdown, for an athlete seated in it. Provisional: who may start a race is #785’s to decide.',
+      'Starts a race’s countdown, for the athlete who made the room, seated and connected in it — the owner’s ruling of 2026-09-30 (a room an operator opened has no creator, and any athlete seated and connected in it may start it). `not_found` for anybody else, and for a race that is not waiting.',
     identity: true,
     auth: 'session',
     errors: ['unauthenticated', 'not_found', 'unavailable'],

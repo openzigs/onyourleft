@@ -168,6 +168,10 @@ export const MESSAGE_FIELDS = {
       },
     },
   },
+  countdown: {
+    // An hour at most: no room is configured with a longer countdown (#785).
+    startsInMs: { shape: { kind: 'integer', minimum: 0, maximum: 3_600_000 } },
+  },
   finish: {
     order: {
       shape: { kind: 'array', items: RIDER_ID, maximumLength: MAXIMUM_RIDERS, distinct: true },
@@ -183,5 +187,6 @@ export const ROOM_MESSAGE_TYPES: readonly RoomMessage['type'][] = [
   'welcome',
   'refuse',
   'frame',
+  'countdown',
   'finish',
 ];

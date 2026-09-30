@@ -72,6 +72,7 @@ const MESSAGES: readonly ProtocolMessage[] = [
       },
     ],
   },
+  { type: 'countdown', startsInMs: 10_000 },
   { type: 'finish', order: [9, 3, 12] },
 ];
 
@@ -97,7 +98,7 @@ describe('decode(encode(m)) ≡ m', () => {
 
   it('covers every message type', () => {
     expect(new Set(MESSAGES.map((message) => message.type))).toEqual(
-      new Set(['hello', 'report', 'welcome', 'refuse', 'frame', 'finish']),
+      new Set(['hello', 'report', 'welcome', 'refuse', 'frame', 'countdown', 'finish']),
     );
   });
 

@@ -3444,10 +3444,417 @@
         }
       }
     },
+    "/v1/rooms": {
+      "post": {
+        "operationId": "createRoom",
+        "summary": "Make a PRIVATE room — a group ride or a race — on the caller’s own route, and get its code (#784). The route is the creator’s own GPX, relayed to the members for the room’s lifetime and deleted once it is over. No field makes a room public.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "group",
+                      "race"
+                    ]
+                  },
+                  "ridingPosition": {
+                    "type": "string",
+                    "enum": [
+                      "upright",
+                      "hoods",
+                      "drops"
+                    ]
+                  },
+                  "loop": {
+                    "type": "boolean"
+                  },
+                  "lengthMetres": {
+                    "type": "number"
+                  },
+                  "grades": {
+                    "type": "array",
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    }
+                  },
+                  "gpx": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "ridingPosition",
+                  "loop",
+                  "lengthMetres",
+                  "grades",
+                  "gpx"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "roomId": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "routeSha256": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "roomId",
+                    "code",
+                    "routeSha256"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/rooms/join": {
+      "post": {
+        "operationId": "joinRoom",
+        "summary": "Join a private room by its code (#784). Rate-limited per athlete and per address, right or wrong; a code that is wrong, unknown or for a room that is over is `not_found`, the same answer every time.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "roomId": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "group",
+                        "race"
+                      ]
+                    },
+                    "ridingPosition": {
+                      "type": "string",
+                      "enum": [
+                        "upright",
+                        "hoods",
+                        "drops"
+                      ]
+                    },
+                    "loop": {
+                      "type": "boolean"
+                    },
+                    "routeSha256": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "roomId",
+                    "kind",
+                    "ridingPosition",
+                    "loop",
+                    "routeSha256"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/rooms/{roomId}/results": {
+      "get": {
+        "operationId": "getRoomResults",
+        "summary": "A race’s result, for its riders only (#785, ruling Q2), and only once the room has said the race is over — `not_found` while it runs (ADR 0028 D-7.7): finishers by place, then those who did not finish. Per rider, a display name — or none, for a rider who erased their account or whom the caller may not see — a time, and power-to-weight: never watts (ADR 0028’s 2026-09-22 amendment). Every plausibility flag is shown to every rider, by the duration it was raised for.",
+        "parameters": [
+          {
+            "name": "roomId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "place": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "displayName": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "you": {
+                            "type": "boolean"
+                          },
+                          "finishMs": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "wattsPerKilogram": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "flags": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "durationSeconds": {
+                                  "type": "integer"
+                                },
+                                "overWattsPerKilogram": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "durationSeconds",
+                                "overWattsPerKilogram"
+                              ],
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": [
+                          "place",
+                          "displayName",
+                          "you",
+                          "finishMs",
+                          "wattsPerKilogram",
+                          "flags"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "rows"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/rooms/{roomId}/route": {
+      "get": {
+        "operationId": "getRoomRoute",
+        "summary": "A private room’s route, exactly as its creator’s app sent it, for its members while it is open (#784). The client checks the bytes against the room’s `routeRef`.",
+        "parameters": [
+          {
+            "name": "roomId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sha256": {
+                      "type": "string"
+                    },
+                    "gpx": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sha256",
+                    "gpx"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/rooms/{roomId}/start": {
       "post": {
         "operationId": "startRoom",
-        "summary": "Starts a race’s countdown, for an athlete seated in it. Provisional: who may start a race is #785’s to decide.",
+        "summary": "Starts a race’s countdown, for the athlete who made the room, seated and connected in it — the owner’s ruling of 2026-09-30 (a room an operator opened has no creator, and any athlete seated and connected in it may start it). `not_found` for anybody else, and for a race that is not waiting.",
         "parameters": [
           {
             "name": "roomId",
@@ -3514,7 +3921,7 @@
     "/v1/rooms/{roomId}/ticket": {
       "post": {
         "operationId": "createRoomTicket",
-        "summary": "A ticket for one room’s WebSocket hello: single use, 30 seconds. The socket never carries the session token. A public room needs an eligible account (`GET /v1/auth/account`).",
+        "summary": "A ticket for one room’s WebSocket hello: single use, 30 seconds. The socket never carries the session token. A public room needs an eligible account (`GET /v1/auth/account`); a room a rider made needs its creator or a rider who joined it by its code, while it is open (#784).",
         "parameters": [
           {
             "name": "roomId",

@@ -77,6 +77,13 @@ export const INSTANCE_TIMEOUT_MILLISECONDS = 15_000;
 /** The largest answer the app reads from an instance. */
 export const MAXIMUM_INSTANCE_ANSWER_BYTES = 256 * 1024;
 
+/**
+ * The largest answer ONE call may ask to read instead — a room's route (#784),
+ * which is up to the instance's 900 KiB of GPX in a JSON string. Asked for by
+ * {@link InstanceCallOptions.maximumAnswerBytes}, and never more than this.
+ */
+export const MAXIMUM_ROOM_ROUTE_ANSWER_BYTES = 2 * 1024 * 1024;
+
 /** How a request is sent. The platform's own `fetch` in production. */
 export type InstanceSend = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -89,6 +96,12 @@ export interface InstanceAnswer {
 export interface InstanceCallOptions {
   readonly body?: Readonly<Record<string, unknown>>;
   readonly token?: string;
+  /**
+   * A larger answer than {@link MAXIMUM_INSTANCE_ANSWER_BYTES}, for the one
+   * call that needs it (a room's route, #784) — clamped to
+   * {@link MAXIMUM_ROOM_ROUTE_ANSWER_BYTES}.
+   */
+  readonly maximumAnswerBytes?: number;
 }
 
 /** One instance, reached over HTTP. */
@@ -109,7 +122,7 @@ export class InstanceUnreachableError extends Error {
   }
 }
 
-async function boundedText(response: Response): Promise<string> {
+async function boundedText(response: Response, limit: number): Promise<string> {
   if (response.body === null) return '';
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -119,7 +132,7 @@ async function boundedText(response: Response): Promise<string> {
       const { done, value } = await reader.read();
       if (done) break;
       read += value.byteLength;
-      if (read > MAXIMUM_INSTANCE_ANSWER_BYTES) throw new InstanceUnreachableError('too-large');
+      if (read > limit) throw new InstanceUnreachableError('too-large');
       chunks.push(value);
     }
   } finally {
@@ -205,7 +218,11 @@ export function instanceHttp(origin: string, send?: InstanceSend): InstanceHttp 
       } catch {
         throw new InstanceUnreachableError('no-answer');
       }
-      return { status: response.status, body: parsed(await boundedText(response)) };
+      const limit = Math.min(
+        options.maximumAnswerBytes ?? MAXIMUM_INSTANCE_ANSWER_BYTES,
+        MAXIMUM_ROOM_ROUTE_ANSWER_BYTES,
+      );
+      return { status: response.status, body: parsed(await boundedText(response, limit)) };
     },
   };
 }
@@ -242,11 +259,15 @@ export function isRoomId(roomId: string): boolean {
 
 /**
  * The ONE builder of a room's paths on an instance — the ticket's
- * (`POST /v1/rooms/{roomId}/ticket`) and the socket's — so that both apply
+ * (`POST /v1/rooms/{roomId}/ticket`), the socket's, and since #784 and #785 the
+ * route's, the result's and the start's — so that every one applies
  * {@link isRoomId}. Throws {@link InstanceUnreachableError} `refused-path`,
  * having built nothing, for any other id (#782's review, B1).
  */
-export function roomPath(roomId: string, kind: 'ticket' | 'socket'): string {
+export function roomPath(
+  roomId: string,
+  kind: 'ticket' | 'socket' | 'route' | 'results' | 'start',
+): string {
   if (!isRoomId(roomId)) throw new InstanceUnreachableError('refused-path');
   return `/v1/rooms/${roomId}/${kind}`;
 }

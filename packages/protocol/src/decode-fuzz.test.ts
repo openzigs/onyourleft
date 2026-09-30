@@ -78,6 +78,7 @@ const SEEDS: readonly string[] = (
         { riderId: 2, decimetres: 1190, centimetresPerSecond: 960, draftPercent: 25, flags: 2 },
       ],
     },
+    { type: 'countdown', startsInMs: 9_000 },
     { type: 'finish', order: [2, 1] },
   ] satisfies ProtocolMessage[]
 )

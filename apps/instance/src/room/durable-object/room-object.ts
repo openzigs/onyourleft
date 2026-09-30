@@ -100,7 +100,11 @@
  *   settings; that is #790's, with the question of whether this platform hosts
  *   rooms only or the whole instance (ADR 0037 D-2).
  * - **Who may start a race.** `POST …/start` starts it; the Worker in front is
- *   what decides who may send that.
+ *   what decides who may send that. The owner ruled on 2026-09-30 — a rider's
+ *   room is started by its creator, seated and connected in it; an operator's
+ *   room, which has none, by any rider seated and connected
+ *   (`room/room-plan.ts` §`RaceStarter`, `room/node/room-host.ts` §`start`) —
+ *   and the Worker in front (#790) is what will apply it here.
  */
 
 import { encodeMessage, type RoomMessage } from '@onyourleft/protocol';

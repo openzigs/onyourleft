@@ -7,6 +7,7 @@ import { join } from 'node:path';
 
 import { PHYSICS_VERSION } from '@onyourleft/physics';
 
+import { DEFAULT_BODY_LIMIT_BYTES } from '../config.ts';
 import { testConfig } from '../instance-testing.ts';
 import { startInstance, type StartedInstance } from '../instance.ts';
 import { readServerConfig } from '../server-config.ts';
@@ -77,10 +78,15 @@ export async function startRoomGateInstance(): Promise<RoomGateInstance> {
 
   const port = await freePort();
   const origin = `http://127.0.0.1:${String(port)}`;
-  const server = readServerConfig({ database, origin, roomWorkers: '1' }, 1);
+  // The blobs in the same temporary directory: a room's route is kept there (#784).
+  const server = readServerConfig(
+    { database, blobs: join(directory, 'blobs'), origin, roomWorkers: '1' },
+    1,
+  );
   if (!server.ok) throw new Error(server.problems.join('; '));
   const instance: StartedInstance = await startInstance({
-    config: testConfig({ port, registration: 'open' }),
+    // The production body limit: a room's route (#784) is well past a test's 1 KiB.
+    config: testConfig({ port, registration: 'open', bodyLimitBytes: DEFAULT_BODY_LIMIT_BYTES }),
     server: server.config,
     version: '0.0.0',
     notices: 'notices',
