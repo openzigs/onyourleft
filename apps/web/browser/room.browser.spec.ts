@@ -152,9 +152,7 @@ test.describe('a group ride made, shared by its code, joined and ridden — #784
       page.evaluate(() => (window.__oylRoom as RoomHarness).drawn());
 
     const maker = await signedIn('Dee');
-    const made = (await maker.evaluate(() =>
-      (window.__oylRoom as RoomHarness).make(),
-    ));
+    const made = await maker.evaluate(() => (window.__oylRoom as RoomHarness).make());
     expect(made.kind).toBe('made');
     if (made.kind !== 'made') return;
     expect(made.code).toMatch(/^[0-9A-Z]{5}-[0-9A-Z]{5}-[0-9A-Z]{5}$/);
@@ -162,18 +160,18 @@ test.describe('a group ride made, shared by its code, joined and ridden — #784
     // The control: a page whose copy of the route is altered on its way in
     // must refuse it and draw nothing — the check is against the room's hash.
     const control = await signedIn('Eli');
-    const refused = (await control.evaluate(
+    const refused = await control.evaluate(
       (code) => (window.__oylRoom as RoomHarness).enter(code, true),
       made.code,
-    ));
+    );
     expect(refused).toEqual({ kind: 'refused', reason: 'not-the-rooms-route' });
     expect(await drawn(control)).toEqual([]);
 
     const friend = await signedIn('Fay');
-    const joined = (await friend.evaluate(
+    const joined = await friend.evaluate(
       (code) => (window.__oylRoom as RoomHarness).enter(code.toLowerCase(), false),
       made.code,
-    ));
+    );
     expect(joined).toEqual({ kind: 'entered', roomId: made.roomId });
     // The friend drew exactly the road the maker's own page drew.
     const makerDrew = await drawn(maker);
