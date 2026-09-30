@@ -312,6 +312,70 @@ describe('keeping the index (ADR 0040 D-1, D-4, D-7)', () => {
     expect(embedder.calls.length - before).toBe(17);
   });
 
+  it('marks two adjacent items the model answers 500 for, and indexes another athlete’s after them — #928', async () => {
+    const embedder = scriptedEmbedder();
+    const made = await syncWorld(2, { embedder });
+    world = made.world;
+    const [anna, ben] = made.riders as [Rider, Rider];
+    embedder.failFor = (text) => (text.includes('nan') ? 'server-error' : undefined);
+    embedder.failWith = 'unreachable';
+    // A rider who saved the same text twice: two NaN items, side by side, at the
+    // head of the instance-wide queue. Holding only one of them halted every sweep.
+    await put(anna, 'note', 'n1', { text: 'A nan note.' });
+    await put(anna, 'note', 'n2', { text: 'A nan note.' });
+    await put(ben, 'goal', 'g1', { text: 'Threshold by spring.' });
+    await world.history.idle();
+    embedder.failWith = undefined;
+    expect(await world.history.catchUp()).toEqual({ indexed: 3, failed: 2, stopped: null });
+    expect((await search(ben, ask('threshold'))).body.passages).toHaveLength(1);
+    expect(await world.history.catchUp()).toEqual({ indexed: 0, failed: 0, stopped: null });
+  });
+
+  it('marks three items the model answers 500 for across a page boundary — #928', async () => {
+    const embedder = scriptedEmbedder();
+    const made = await syncWorld(1, { embedder });
+    world = made.world;
+    const [anna] = made.riders as [Rider];
+    embedder.failFor = (text) => (text.includes('nan') ? 'server-error' : undefined);
+    embedder.failWith = 'unreachable';
+    // Fifteen fine items, then the sixteenth to eighteenth are NaN (a page ends
+    // after the sixteenth), then one fine item on the next page.
+    for (let index = 1; index <= 15; index += 1) {
+      await put(anna, 'note', `n${index}`, { text: `Fine note ${index}.` });
+    }
+    for (let index = 16; index <= 18; index += 1) {
+      await put(anna, 'note', `n${index}`, { text: `A nan note ${index}.` });
+    }
+    await put(anna, 'note', 'n19', { text: 'The nineteenth.' });
+    await world.history.idle();
+    embedder.failWith = undefined;
+    expect(await world.history.catchUp()).toEqual({ indexed: 19, failed: 3, stopped: null });
+  });
+
+  it('asks at most one page of items in an outage, and marks none of them — #928', async () => {
+    const embedder = scriptedEmbedder();
+    const made = await syncWorld(1, { embedder });
+    world = made.world;
+    const [anna] = made.riders as [Rider];
+    embedder.failWith = 'server-error';
+    for (let index = 1; index <= 20; index += 1) {
+      await put(anna, 'note', `n${index}`, { text: `Note ${index}.` });
+    }
+    await world.history.idle();
+    const before = embedder.calls.length;
+    expect(await world.history.catchUp()).toEqual({
+      indexed: 0,
+      failed: 0,
+      stopped: 'server-error',
+    });
+    expect(embedder.calls.length - before).toBe(16);
+    expect(
+      await world.freshRead((store) =>
+        store.listPendingHistorySources(['note'], embedder.model, embedder.convention, 50),
+      ),
+    ).toHaveLength(20);
+  });
+
   it('marks nothing when the model answers 500 for every item — #928', async () => {
     const embedder = scriptedEmbedder();
     const made = await syncWorld(1, { embedder });
@@ -328,8 +392,9 @@ describe('keeping the index (ADR 0040 D-1, D-4, D-7)', () => {
       failed: 0,
       stopped: 'server-error',
     });
-    // Two items asked about, and then it stopped: the server is at fault.
-    expect(embedder.calls.length - before).toBe(2);
+    // Every item in the page asked about once, not one answer, and then it
+    // stopped: the server is at fault, and nothing is marked.
+    expect(embedder.calls.length - before).toBe(3);
     expect(
       await world.freshRead((store) =>
         store.listPendingHistorySources(['note'], embedder.model, embedder.convention, 10),

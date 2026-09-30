@@ -328,21 +328,27 @@ export function createHistory(options: HistoryOptions): History {
       }
       return { kind: 'vectors', vectors };
     };
-    // ⚠️ An item a 5xx was answered for, held UNMARKED while the next item is
-    // asked about (#928's second review). A 5xx may be the server's or this
+    // ⚠️ Items a 5xx was answered for, held UNMARKED while the sweep asks about
+    // the ones after them (#928's reviews). A 5xx may be the server's or the
     // input's — Ollama answers 500 for a text its model makes a NaN of — and
-    // the pending list is instance-wide and oldest first, so stopping on it
-    // would stop every athlete's indexing behind that one item for ever. If
-    // the model then answers about another item, the 5xx was this item's: it
-    // is marked `failed` (tried again in an hour, as a refusal is) and the
-    // sweep goes on. If it does not, the sweep stops with neither marked.
+    // the pending list is instance-wide and oldest first, so stopping on one
+    // would stop every athlete's indexing behind it for ever. It is a SET, not
+    // one item: a rider who saves the same text twice makes two such items side
+    // by side, and holding only one of them brought the halt back (#928's third
+    // review). The first time the model answers about any item, every held 5xx
+    // was its own item's: each is marked `failed` (tried again in an hour, as a
+    // refusal is) and the sweep goes on. Only a page in which the model answered
+    // about nothing stops the sweep, with every held item still unmarked — so an
+    // outage costs at most one page of requests a sweep.
     type Pending = Awaited<ReturnType<typeof store.listPendingHistorySources>>[number];
-    let held: Pending | undefined;
+    const held: Pending[] = [];
     const isHeld = (source: Pending): boolean =>
-      held !== undefined &&
-      source.athleteId === held.athleteId &&
-      source.kind === held.kind &&
-      source.key === held.key;
+      held.some(
+        (item) =>
+          source.athleteId === item.athleteId &&
+          source.kind === item.kind &&
+          source.key === item.key,
+      );
     // Bounded, so a store that kept answering the same page could not spin for ever.
     for (let round = 0; round < 100_000; round += 1) {
       const pending = (
@@ -354,10 +360,11 @@ export function createHistory(options: HistoryOptions): History {
           Math.floor(now() / 1000) - FAILED_RETRY_SECONDS,
         )
       ).filter((source) => !isHeld(source));
-      // Nothing else to ask about: a held item stays unmarked, and waits.
+      // Nothing else to ask about: held items stay unmarked, and wait.
       if (pending.length === 0) {
-        return { indexed, failed, stopped: held === undefined ? null : 'server-error' };
+        return { indexed, failed, stopped: held.length === 0 ? null : 'server-error' };
       }
+      let answered = false;
       for (const source of pending) {
         const cut = cutSource(source.kind, source.body);
         if (cut.kind !== 'passages') {
@@ -366,19 +373,17 @@ export function createHistory(options: HistoryOptions): History {
         }
         const result = await embedAll(cut.passages);
         if (result.kind === 'stop') {
-          if (result.why === 'server-error' && held === undefined) {
-            held = source;
+          if (result.why === 'server-error') {
+            held.push(source);
             continue;
           }
           // Every item after this one would fare the same. Stop, and let them
-          // wait (D-6) — a held item with them, unmarked.
+          // wait (D-6) — the held items with them, unmarked.
           return { indexed, failed, stopped: result.why };
         }
-        // The model answered about this item, so a held 5xx was the held item's.
-        if (held !== undefined) {
-          await write(held, 'failed', []);
-          held = undefined;
-        }
+        // The model answered about this item, so every held 5xx was its own item's.
+        answered = true;
+        for (const item of held.splice(0)) await write(item, 'failed', []);
         if (result.kind === 'mark') {
           await write(source, result.outcome, []);
           continue;
@@ -393,6 +398,8 @@ export function createHistory(options: HistoryOptions): History {
           })),
         );
       }
+      // A whole page and not one answer: the server, not an input. Stop, marking nothing.
+      if (held.length > 0 && !answered) return { indexed, failed, stopped: 'server-error' };
     }
     return { indexed, failed, stopped: null };
   };
