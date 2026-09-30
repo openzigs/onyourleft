@@ -62,6 +62,8 @@ import { StrictMode, type JSX } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 
+import { viewGroupsLoaded } from './views-loaded';
+
 import { unixSeconds } from '@onyourleft/domain';
 import { activityId, openActivityStore, routeId } from '@onyourleft/store';
 
@@ -1067,16 +1069,19 @@ window.__oylTabModel = () => {
   };
 };
 
-main().catch((error: unknown) => {
-  errors.push(error instanceof Error ? error.message : String(error));
-  window.__oylReflow = {
-    ready: false,
-    errors,
-    data: 'empty',
-    parameters: PARAMETERS,
-    selections: SELECTIONS,
-    populated: EXPECTATIONS,
-    visit: () => Promise.reject(new Error('the reflow harness did not start')),
-    unvisited: () => ALL_ROUTES.map((route) => route.id),
-  };
-});
+// #674: the view groups first, so every view renders on the render that asks. @see viewGroupsLoaded
+viewGroupsLoaded()
+  .then(() => main())
+  .catch((error: unknown) => {
+    errors.push(error instanceof Error ? error.message : String(error));
+    window.__oylReflow = {
+      ready: false,
+      errors,
+      data: 'empty',
+      parameters: PARAMETERS,
+      selections: SELECTIONS,
+      populated: EXPECTATIONS,
+      visit: () => Promise.reject(new Error('the reflow harness did not start')),
+      unvisited: () => ALL_ROUTES.map((route) => route.id),
+    };
+  });

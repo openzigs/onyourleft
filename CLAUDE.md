@@ -93,7 +93,7 @@ apps/                 AGPL-3.0-or-later, without exception
                         game.html?realistic. Since #616 the page counts
                         triangles at the WebGL draw calls and takes
                         `?layers=-vegetation` and the like, and
-                        realistic.browser.spec.ts is the gate on THOSE two
+                        realistic.browser.spec.ts (nightly since #866) is the gate on THOSE two
                         instruments only — the counter against three's own
                         `renderer.info`, and a control that must count 100 000
                         fewer. ⚠️ The layer switch changes nothing the product
@@ -188,6 +188,11 @@ apps/                 AGPL-3.0-or-later, without exception
                         inline palette script into every page Vite builds —
                         product and harness — straight after the charset, so
                         the first frame is in the right palette (#672)
+    tools/bundle/       two rules the product build checks about itself and
+                        fails on (#673, #674): the Lucide icon modules in the
+                        bundle are exactly the icons the source imports
+                        (ADR 0034 D-2), and no view `shell/lazy/` names is in
+                        the entry chunk's static graph
     tools/precache/     what the worker precaches, as a pure function over the
                         build's output (#406) — build-time code, so it lives
                         beside the icon generator rather than in `src/`
@@ -428,8 +433,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         and since #427 the navigation: four groups recorded on
                         the route table itself (`routes.ts` §`NavGroupId`), a
                         bar on a compact window and a rail on a wider one, and
-                        the icons, authored here as inline SVG rather than
-                        installed — no icon set is a dependency; and since
+                        the icons — ⚠️ Lucide's since #673 (ADR 0034:
+                        `lucide-react`, named imports only; a reviewer who
+                        remembers "authored here as inline SVG, no icon set
+                        is a dependency" is reading the old file); and since
                         #670 `ListDetail.tsx`, the list beside its detail on
                         Activities, Workouts and Routes — two panes from the
                         ONE breakpoint `theme.css` §`--oyl-list-detail-from`
@@ -439,7 +446,15 @@ apps/                 AGPL-3.0-or-later, without exception
                         ⚠️ Every selection pushes a history entry at BOTH
                         widths, on purpose (`ListDetail.tsx` §History), and
                         the panes' skip link goes list → detail only, at two
-                        panes only
+                        panes only. ⚠️ Since #674 every view but Home and
+                        the not-found page is LAZY: one module per navigation
+                        group under `lazy/`, loaded with a literal `import()`
+                        through `lazy-view.tsx` (a loading line under the
+                        `h1`, and a Reload on a chunk that cannot be fetched),
+                        preloaded by `main.tsx` once Home is idle. A view
+                        imported by name from the entry's graph fails
+                        `pnpm run build` (`tools/bundle/entry-graph.ts`), and
+                        the jsdom `mount`/`settle` wait for the loads
     src/support/        browser-capability detection and its notice (#48), and
                         since #409 whether this browser may throw a rider's
                         history away — the one place `persist()` is asked for,
@@ -657,7 +672,13 @@ apps/                 AGPL-3.0-or-later, without exception
                         — the distances it was checked at are validation 0002
                         Part N. `simulatedCrankAngle` turns the other two's
                         cranks from their own ODOMETER at a fixed gear, which
-                        is neither a reading nor a rate anybody invented
+                        is neither a reading nor a rate anybody invented.
+                        ⚠️ **Since #625 the realistic body MOVES** — pelvis
+                        roll, trunk rock, a head held level, ankling
+                        (`riderMotion`, amplitudes cited) — only while the
+                        marker's `pedalling` says a reading turns the cranks,
+                        and a breath on the RIDE's clock (`rideSeconds`), so a
+                        held ride holds it. The stylised rider does not move
     src/game/racing-line.ts
                         the line each rider rides through a bend, and the lean
                         (#499) — the least PEAK curvature inside the
@@ -718,8 +739,14 @@ apps/                 AGPL-3.0-or-later, without exception
                         device now stores `oyl.game.riderShadowMap = off` to
                         not get it. The blob is the FALLBACK — every rung after
                         the first step down (`keepsShadowMap`'s latch is
-                        unchanged), the realistic world, and a device that
-                        turned the map off. ⚠️ **The ghost casts no MAP shadow
+                        unchanged), and a device that turned the map off.
+                        ⚠️ **Since #626 NOT the realistic world**, which casts
+                        a bike-shaped silhouette on the same rungs instead
+                        (`rider-silhouette.ts`, `three-renderer.ts`
+                        §`RiderSilhouetteBelt`): the rider's side view made
+                        once, thrown along the sun each frame by a shader whose
+                        TypeScript twin is `silhouetteCoverage`, and which the
+                        browser gate holds to that twin. ⚠️ **The ghost casts no MAP shadow
                         either**, and did until #547: it shares the rider's
                         meshes, so `three-renderer.ts` §`RiderBelt` hands the
                         pass the casters only, by this file's table. The ride's
@@ -1799,6 +1826,8 @@ pnpm run test:coverage
 # near-field rides and the FIT decode fuzz, which V8's instrumentation slowed
 # about three times. They gate exactly as before; the coverage report stops
 # counting what they alone execute (§5). `pnpm run test` still runs everything.
+# ⚠️ Since #866 CI runs this NIGHTLY (`.github/workflows/nightly.yml`), not in
+# `Repository rules`, so a break in either file is found the next morning.
 pnpm run test:uninstrumented
 
 # What stops those two lists coming apart (#852). Reads both scripts out of
@@ -1926,6 +1955,15 @@ pnpm run build
 # `PLAYWRIGHT_BROWSERS_PATH` set, revision matching) it runs as-is; on a bare
 # machine or a CI runner, install it first with the line below.
 pnpm run test:browser
+
+# ⚠️ Since #866 `test:browser` runs the `chromium` and `game` projects ONLY.
+# The describes tagged `@nightly` — a reviewed list in
+# `apps/web/browser/nightly.ts`, every one of them the opt-in realistic world —
+# run in the `nightly` project, one worker, from `.github/workflows/nightly.yml`,
+# which is NOT a required check. This is that run. About 1.3 minutes on a Mac;
+# `nightly-split.test.ts` (in `pnpm run test`) fails a tag the list does not
+# name and a test in both runs or in neither.
+pnpm run test:browser:nightly
 
 # The same gate with its HOSTED block turned on (#63). Renders the same harness
 # page against a real PMTiles archive over the internet and prints #63's eighth
@@ -2470,7 +2508,9 @@ devDependency, because `three` ships no types of its own) and — since #529 —
 `jsqr` 1.4.0 (Apache-2.0), both **zero-dependency** runtime dependencies of `apps/web`, which draw and
 read the side camera's pairing QR codes and are named in exactly one file,
 `apps/web/src/camera/side-link-qr.ts` and loaded from it with `import()` only while pairing, so
-neither is in the entry chunk, are
+neither is in the entry chunk, and — since #673 — `lucide-react` 1.48.0 (ISC, with MIT for the
+icons derived from Feather; **zero dependencies**, a runtime dependency of `apps/web`, named imports
+only — [ADR 0034](docs/adr/0034-lucide-icons.md)), are
 installed;
 
 ⚠️ **`three` is pinned at 0.185.1 rather than at the current 0.186.0 deliberately, and since #489
@@ -2511,8 +2551,9 @@ push to `main`. It runs **exactly** the §4a commands and nothing else: `bash
 scripts/run-concurrently.test.sh`, the eight bare-clone script
 checks (`check-repo-rules`, `check-licence-hashes`, `check-env-example` and `check-doc-links`, each
 with its own fixture suite), `shellcheck scripts/*.sh`, then `pnpm install --frozen-lockfile`, `format:check`, `lint`,
-`typecheck`, `test:coverage`, `test:uninstrumented`, `check:test-split` and its suite
-`bash scripts/check-test-split.test.sh` (all three since [#852](https://github.com/openzigs/onyourleft/issues/852)), `check:a11y-suite`,
+`typecheck`, `test:coverage`, `check:test-split` and its suite
+`bash scripts/check-test-split.test.sh` (both since [#852](https://github.com/openzigs/onyourleft/issues/852); #852's
+`test:uninstrumented` runs nightly since [#866](https://github.com/openzigs/onyourleft/issues/866) — below), `check:a11y-suite`,
 `test:a11y`, `bash scripts/check-a11y-suite.test.sh`, `check:wiring`,
 `bash scripts/check-wiring.test.sh`, `check:capacitor`,
 `bash scripts/check-capacitor-generated.test.sh`, `check:cost-model`,
@@ -2542,8 +2583,8 @@ green, and #651's pull request proved it red on the runner with one formatting d
 ⚠️ **Anything that runs Vitest stays out of it**, and so do `check:capacitor` and `check:notices`,
 which each run their own install under the tree the linter is walking: Vitest's 5 s case
 timeout is already within a second of several cases on the slower runner, and beside other work
-three of them passed it (run 36324592730) — `test:a11y`, `test:coverage` and, since #852,
-`test:uninstrumented` each run alone. (`check:test-split` is in it: it runs `vitest list`, which
+three of them passed it (run 36324592730) — `test:a11y` and `test:coverage` each run alone
+(and `test:uninstrumented` did too, from #852 until #866 moved it to the nightly job). (`check:test-split` is in it: it runs `vitest list`, which
 runs no case and so has no timeout to miss.) And
 `test:coverage` and `test:browser` are **not** run together, though they are the two longest steps:
 run 36323764725 did it and both went red, because each is CPU-bound on its own.
@@ -2682,12 +2723,56 @@ browser gate (584–605 s). The candidates, in the order they cost least in what
    tree ([36615069379](https://github.com/openzigs/onyourleft/actions/runs/36615069379), 1150 s)
    printed no CPU. The CPU line in these logs is not the runner's: it is printed by one Vitest
    test (the racing-line timing), and only on some runs.
-2. **A second, non-required job for the heaviest gates**, nightly or on push to `main`. It would buy
-   the most, and it is an **owner decision**: a job that is not `Repository rules` cannot block a
-   merge (the warning at the top of this section), so whatever moves there stops being a gate on a
-   pull request and becomes a report after it. Nothing is moved there until the owner says which,
-   if any.
+2. **A second, non-required job for the heaviest gates — DONE by
+   [#866](https://github.com/openzigs/onyourleft/issues/866), on the owner's ruling of 2026-09-29.**
+   See §"The nightly job" below: what moved, what did not, and the trade.
 3. **Not a larger runner**: §8 — always charged, even on a public repository.
+
+#### The nightly job — #866
+
+⚠️ **[`.github/workflows/nightly.yml`](.github/workflows/nightly.yml) — `Nightly heavy checks` — is
+NOT a required check and cannot block a merge.** It runs at 03:17 UTC, on `workflow_dispatch`, and
+on a pull request that changes that file (so a change to it is seen running before it merges). A
+break in anything it runs is found **the next morning, not before the merge that caused it**: the
+owner accepted that trade on 2026-09-29 for the checks below and **only** for checks that are not
+safety gates. It must never be renamed `Repository rules` — the required context would then report
+twice — and `nightly-split.test.ts` fails if it is.
+
+| Moved out of `Repository rules` | Seconds it cost there (run 36634388848, EPYC 9V45) | Why it is not a safety gate |
+|---|--:|---|
+| `test:uninstrumented` — the #545 near-field rides and the FIT decode fuzz | 28 (its own step) | the near plane is drawing; the fuzz is a robustness sweep, and the decoder's named refusals (XXE, a bad CRC, the bounds) are unit tests that stay in `test:coverage` |
+| `game.browser.spec.ts` §"the realistic world — ADR 0026" and §"#545" | 69 (the `?realistic` load) | the opt-in realistic world's look and cost; its one network claim, that the DEFAULT world fetches none of it, rests in the required job on `realistic-offered.test.ts` and `precache.test.ts` |
+| `game.browser.spec.ts` §"the trees' levels of detail — #617" | 56 (the `?realistic&trees` load) | triangle and draw-call budgets in the realistic world |
+| `realistic.browser.spec.ts` — the owner's instruments (#616) | 36 | a measuring tool for a page that ships in no build |
+
+**What stays required, whatever it costs**: anything that gates trainer control; privacy (no
+network, no picture, masking, scoping, erasure); licences and notices; accessibility and layout;
+and the wiring gate. The browser half of the split is a Playwright **tag**: a describe carrying
+`@nightly` runs in the `nightly` project and in neither `chromium` nor `game`, so every test is in
+exactly one run by construction, and the tagged describes must equal the reviewed list in
+`apps/web/browser/nightly.ts`, each with its seconds and its reason — adding a tag anywhere else is
+a red `nightly-split.test.ts`, not a quiet move. `check:test-split`, still required, fails a Vitest
+file in neither run.
+
+**What it bought, on the runner, with the CPU each run printed** — n = 1 after, so read it as one
+sample and not a figure:
+
+| | Run | CPU | Job | Vitest with coverage | Tests outside coverage | Browser gate |
+|---|---|---|--:|--:|--:|--:|
+| **Before** #866 (after #852) | [36615071157](https://github.com/openzigs/onyourleft/actions/runs/36615071157) | EPYC 7763 | 1220 s | 297 s | 45 s | 616 s |
+| **Before** #866, `main` | [36634388848](https://github.com/openzigs/onyourleft/actions/runs/36634388848) | EPYC 9V45 | 860 s | 199 s | 28 s | 431 s |
+| **After** #866 | [36637978753](https://github.com/openzigs/onyourleft/actions/runs/36637978753) | EPYC 7763 | 887 s | 296 s | — | 338 s |
+
+On the 7763 that is **−333 s** of job: 45 s of Vitest and 278 s of browser gate, the gate's four game
+loads now two (the plain page 25 s, `?shadow-map` 39 s). The nightly run on the pull request that
+made it took 281 s on an Intel Xeon 6973P-C
+([36637979054](https://github.com/openzigs/onyourleft/actions/runs/36637979054)): 35 s of Vitest
+and 201 s of browser checks.
+
+**A red nightly run opens an issue titled `Nightly heavy checks failed`**, or comments on it while
+it is open, from a second job whose token holds `issues: write` and nothing else and which checks
+nothing out. Close the issue once a nightly run is green. The job that runs the checks is
+read-only, pins its actions to the same SHAs as `rules.yml`, and runs on `ubuntu-latest`.
 
 ⚠️ **The runner is two cores, not four, and that is what bounds all of this.** `ubuntu-latest`
 reports four vCPUs, and `lscpu` on it reads `Thread(s) per core: 2`, `Core(s) per socket: 2` (run
@@ -2704,8 +2789,11 @@ If CI ever needs a step this file does not list, **this
 file is wrong and gets fixed in the same PR**; CI must not accumulate private knowledge, because
 that is how a contributor's local green becomes CI's red with no explanation.
 
-⚠️ **There is exactly one step that is not a §4a command, and this is it:
-`sudo rm -f /etc/apt/sources.list.d/google-chrome.*`, before the browser install** — which since
+⚠️ **There are exactly two steps that are not §4a commands.** The first, since #866, is `Record
+the runner's CPU` — `lscpu`, filtered to the model and the core count — because two CPU models at
+different speeds serve `ubuntu-latest` and a duration means nothing without it (#864); it gates
+nothing. The second is this one:
+`sudo rm -f /etc/apt/sources.list.d/google-chrome.*`, before the browser install — which since
 #651 means before `Checks, concurrently`, the step the browser install runs in.
 It is recorded here rather than left as private CI knowledge, which is what the paragraph above
 forbids. `playwright install --with-deps` runs `apt-get update` across **every** source the runner
@@ -3132,7 +3220,7 @@ browser runs**.
 | `hosted-archive.ts` | what that third block decides **without** a network: which archive, which origins it may then reach, and where to put the ride inside whatever coverage the archive's own header declares. Pure, with `hosted-archive.test.ts` beside it in the Vitest suite — which is the answer to "a skipped block rots unseen" |
 | `pmtiles-fixture.ts` | a PMTiles v3 archive written from arithmetic, so the gate has a basemap to render. Emitted into `browser/dist` by `vite.browser.config.ts`, never committed, and carrying no OpenStreetMap data. ⚠️ It used to be the **only** file here with a Vitest test beside it; `hosted-archive.ts` is the second, and `apps/web/vitest.config.ts`'s `browser/**/*.test.ts` covers both |
 | `game.html`, `game-harness.ts` | since #91, the same idea for the renderer: a page that builds a scene through the **real** `game/three-renderer.ts` and the **real** `terrain.ts` |
-| `game.browser.spec.ts` | its spec — the renderer constructs against a live context, the geometry is one a driver accepts, and a frame reaches the drawing buffer (read back with `readPixels`, because `render` not throwing is a weaker claim). ⚠️ Since #430's pull request it also has §"the realistic world", on **one** extra load, `game.html?realistic`: the D-7 fallback, D-11 over a live scene, the one-call road, the gradient tint's contrast read off the drawing buffer **after the light and AgX**, the realistic rider's legs against the cranks, and the step down — and that the DEFAULT load fetches none of the realistic set. Since #499 it also reads the rider back off-centre and ROLLED at a 20 m hairpin's apex, through the centreline's camera held still, with the same rider drawn upright at the same place and the centreline rider as its two controls (`game-harness.ts` §`lineProbe`). Since #546 it also reads the rider on a STRAIGHT right of the frame's middle, with the centreline rider — #499's straight — as the control that must fail. ⚠️ **Since #546 the harness's `inTheFrame` and `onTheRoad` take the screen's right as the road's normal `(−headingZ, headingX)`** — they took `(headingZ, −headingX)`, the screen's LEFT, and every probe was symmetric about a camera on the centreline, so nothing noticed until #546 moved the camera 1.75 m right with the rider. ⚠️ **Since #583 it reads which way a bend TURNS** (`game-harness.ts` §`bendProbe`): `hairpinRoute(20)`, a right-hand bend on the map, must draw its far road right of its near road, and its mirror — which is, point for point, what every build before #583 drew for it — must draw it left. The #499 case also requires that hairpin's apex rider on the RIGHT of the frame; it read 22.1 % before #583 and passed, because its sign checks were symmetric. Since #620 the `?realistic` load also reads the ground in a tree's blob against the ground 5 m away (`game-harness.ts` §`groundBlobProbe`), blobs drawn and hidden, and holds the darkening to 0.3 ± 0.05 of the encoded pixel — a floor AND a ceiling, #621's review — with the hidden pair as the control. ⚠️ **It reads a tree 7 m ahead, not 25**: on a 640 × 360 canvas ground 30 m from a 2 m eye is under a pixel a metre, and the first version read half the darkening for that reason alone. Since #686's review it also reads the SHIPPED shader's road clip (`game-harness.ts` §`groundBlobClip`): the harness swaps the blob mesh's clip attributes for its own copies — nothing in the product can force a plane — puts a plane through that tree's blob, and requires the kept half to darken by the blob's alpha there and the clipped half by under 0.02, with both halves darkening under a no-op control |
+| `game.browser.spec.ts` | its spec — the renderer constructs against a live context, the geometry is one a driver accepts, and a frame reaches the drawing buffer (read back with `readPixels`, because `render` not throwing is a weaker claim). ⚠️ Since #430's pull request it also has §"the realistic world", on **one** extra load, `game.html?realistic`: the D-7 fallback, D-11 over a live scene, the one-call road, the gradient tint's contrast read off the drawing buffer **after the light and AgX**, the realistic rider's legs against the cranks, and the step down — and that the DEFAULT load fetches none of the realistic set. ⚠️ **Since #866 every `?realistic` and `?realistic&trees` describe is `@nightly`** (`browser/nightly.ts`) — run by `test:browser:nightly`, not by this gate, and unable to block a merge; a reviewer who remembers the realistic world as part of `test:browser` is reading the old file. The DEFAULT world's halves — #501's shader compile and "fetches none of the realistic set" — stay required in their own describe on the plain load (#878's review), and `nightly-split.test.ts` refuses a nightly describe that reads the plain load. Since #499 it also reads the rider back off-centre and ROLLED at a 20 m hairpin's apex, through the centreline's camera held still, with the same rider drawn upright at the same place and the centreline rider as its two controls (`game-harness.ts` §`lineProbe`). Since #546 it also reads the rider on a STRAIGHT right of the frame's middle, with the centreline rider — #499's straight — as the control that must fail. ⚠️ **Since #546 the harness's `inTheFrame` and `onTheRoad` take the screen's right as the road's normal `(−headingZ, headingX)`** — they took `(headingZ, −headingX)`, the screen's LEFT, and every probe was symmetric about a camera on the centreline, so nothing noticed until #546 moved the camera 1.75 m right with the rider. ⚠️ **Since #583 it reads which way a bend TURNS** (`game-harness.ts` §`bendProbe`): `hairpinRoute(20)`, a right-hand bend on the map, must draw its far road right of its near road, and its mirror — which is, point for point, what every build before #583 drew for it — must draw it left. The #499 case also requires that hairpin's apex rider on the RIGHT of the frame; it read 22.1 % before #583 and passed, because its sign checks were symmetric. Since #620 the `?realistic` load also reads the ground in a tree's blob against the ground 5 m away (`game-harness.ts` §`groundBlobProbe`), blobs drawn and hidden, and holds the darkening to 0.3 ± 0.05 of the encoded pixel — a floor AND a ceiling, #621's review — with the hidden pair as the control. ⚠️ **It reads a tree 7 m ahead, not 25**: on a 640 × 360 canvas ground 30 m from a 2 m eye is under a pixel a metre, and the first version read half the darkening for that reason alone. Since #686's review it also reads the SHIPPED shader's road clip (`game-harness.ts` §`groundBlobClip`): the harness swaps the blob mesh's clip attributes for its own copies — nothing in the product can force a plane — puts a plane through that tree's blob, and requires the kept half to darken by the blob's alpha there and the clipped half by under 0.02, with both halves darkening under a no-op control |
 | `hud.html`, `hud-harness.tsx` | since #266, the ride HUD: the **real** `game/hud/HudPanel.tsx` under the **real** `design/theme.css`, on the **real** stage `GameView` gives it, with every field populated and all three of #259's settled outcome words. ⚠️ **Until #423 that was the `oyl-shell` → `oyl-main` → `oyl-game` chain, and a reviewer who remembers it is reading the old file**: the HUD is laid over a `position: fixed` stage now, so its containing block is the viewport whatever is above it, and the old chain would have gone on measuring a stacked layout a rider only gets at 320×256. One thing on this page is the harness's own and it says so: each stage is `position: relative` and `100vh` tall, because six fixed stages are six panels on top of one another. A **`.tsx`**, and the first React in this directory |
 | `hud.browser.spec.ts` | its spec — no `.oyl-hud__value` overflows its grid track at a phone in either orientation, at **360 px** (where #423's first layout ran the third primary reading off the screen) and at a landscape tablet, read back from the browser's own layout. Its **control panels** are the half that makes a green run mean something; ⚠️ since #423 the control moves the words into the primary list as well as stripping #259's class, because every word is a secondary reading now and at 1.5 rem it would spill by under three pixels, which is not a control |
 | `shell.html`, `shell-harness.tsx` | since #307's review, the app **shell**: the **real** `shell/AppShell.tsx` with the **real** `ROUTES` table under the **real** `design/theme.css`. The second `.tsx` here. ⚠️ Its spacer goes **inside `.oyl-main`** and the file says why at length — after `.oyl-shell` the header scrolls out of its own sticky containing block and measures 0 px, and inside `.oyl-shell` `main` stays shorter than the viewport so a focus scroll never consults `scroll-margin-top`. Each mistake made a different assertion pass over nothing. ⚠️ Since #316 it also renders the **real** `design/Button.tsx` in both variants, with `RideView`'s own labels, because a shell handed no ports renders **zero** controls on all eleven routes and a size assertion over an empty list passes. Since #667, `?controls=specimens` adds the native form controls — a file input, checkbox and radio rows in both markups the views use, a `<select>`, a range and a progress bar — and `&base-select=off` deletes the `@supports (appearance: base-select)` block through the CSSOM, which is the select's control |
@@ -4375,9 +4463,10 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   reading the old file.
   ⚠️ **0035 is [ADR 0035](docs/adr/0035-model-written-ride-write-ups.md)**, taken by
   [#796](https://github.com/openzigs/onyourleft/issues/796) for a ride write-up written by the
-  rider's own model, and **0034 is reserved for [#673](https://github.com/openzigs/onyourleft/issues/673)**,
-  whose title names it; it is not written. A reviewer who remembers this sentence offering 0034 is
-  reading the old file.
+  rider's own model, and **0034 is [ADR 0034](docs/adr/0034-lucide-icons.md)**, reserved for
+  [#673](https://github.com/openzigs/onyourleft/issues/673) and written by it on 2026-09-29 (bundle
+  [#857](https://github.com/openzigs/onyourleft/issues/857)): icons come from Lucide. A reviewer who
+  remembers this sentence calling 0034 reserved and unwritten is reading the old file.
   ⚠️ **0033 is [ADR 0033](docs/adr/0033-side-camera-link.md)**, taken by
   [#527](https://github.com/openzigs/onyourleft/issues/527) for the side-camera link. A reviewer who
   remembers this sentence offering 0033 is reading the old file.

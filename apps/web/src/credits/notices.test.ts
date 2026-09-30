@@ -122,3 +122,30 @@ describe('reading the contents', () => {
     ]);
   });
 });
+
+describe('Lucide’s notice travels with its icons — #673, ADR 0034', () => {
+  /** The section the generator wrote for `lucide-react`, up to the next package. */
+  const section = ((): string => {
+    const start = DOCUMENT.indexOf('Name: lucide-react\n');
+    const end = DOCUMENT.indexOf('\n========', start);
+    return start === -1 ? '' : DOCUMENT.slice(start, end === -1 ? undefined : end);
+  })();
+
+  it('carries the ISC licence the package declares', () => {
+    expect(section).toContain('Licence: ISC');
+    expect(section).toContain('Copyright (c) 2026 Lucide Icons and Contributors');
+    expect(section).toContain('Permission to use, copy, modify, and/or distribute this software');
+  });
+
+  it('carries the MIT licence of the icons derived from Feather, which the manifest field does not name', () => {
+    // ⚠️ The package's `license` field says ISC and nothing else; the second
+    // licence is only in its LICENSE file. A notice built from the field would
+    // pass the ISC half and drop this one.
+    expect(section).toContain('The following Lucide icons are derived from the Feather project:');
+    expect(section).toContain('The MIT License (MIT) (for the icons listed above)');
+    expect(section).toContain('Copyright (c) 2013-present Cole Bemis');
+    expect(section).toContain(
+      'Permission is hereby granted, free of charge, to any person obtaining',
+    );
+  });
+});

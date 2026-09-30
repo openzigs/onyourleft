@@ -1270,6 +1270,30 @@ describe('GameView — the cranks turn at the rider’s own cadence (#349)', () 
     expect(afterwards.length).toBeGreaterThan(4);
     expect(new Set(afterwards)).toEqual(new Set([stoppedAt]));
   });
+
+  /** Whether the rider was drawn pedalling on each frame — #625. */
+  function pedalling(frames: readonly SceneFrame[]): readonly number[] {
+    return frames.map(
+      (frame) => frame.markers.find((each) => each.kind === 'rider')?.pedalling ?? Number.NaN,
+    );
+  }
+
+  it('hands the renderer a pedalling rider exactly while a cadence reports, and a still one when it goes — #625', async () => {
+    // ⚠️ `SceneInput.pedalling` is optional the safe way round, so a GameView
+    // that stopped supplying it would draw every realistic rider still and
+    // pass every other test. This reads what the renderer was handed.
+    let reported: SensorReading = LIVE_CADENCE;
+    const frames = await startRiding({ pacer: false, cadence: () => reported });
+    await pump(8, CRANK_FRAME_MS);
+    const whilePedalling = pedalling(frames).slice(-4);
+    expect(new Set(whilePedalling)).toEqual(new Set([1]));
+    const seen = frames.length;
+    reported = { value: undefined, live: false, paired: true };
+    await pump(8, CRANK_FRAME_MS);
+    const afterwards = pedalling(frames.slice(seen)).slice(-4);
+    expect(afterwards).toHaveLength(4);
+    expect(new Set(afterwards)).toEqual(new Set([0]));
+  });
 });
 
 /**
