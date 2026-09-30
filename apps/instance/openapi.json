@@ -364,6 +364,226 @@
         }
       }
     },
+    "/v1/auth/account": {
+      "get": {
+        "operationId": "getAccount",
+        "summary": "This athlete’s own account: whether it is approved, when they confirmed they are 18 or over, any moderator role, and whether they may join a public room — and if not, every reason why.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "athleteId": {
+                      "type": "string"
+                    },
+                    "displayName": {
+                      "type": "string"
+                    },
+                    "registrationState": {
+                      "type": "string",
+                      "enum": [
+                        "active",
+                        "pending"
+                      ]
+                    },
+                    "adultConfirmedAt": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "moderatorRole": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "publicRooms": {
+                      "type": "object",
+                      "properties": {
+                        "eligible": {
+                          "type": "boolean"
+                        },
+                        "reasons": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "eligible",
+                        "reasons"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "athleteId",
+                    "displayName",
+                    "registrationState",
+                    "adultConfirmedAt",
+                    "moderatorRole",
+                    "publicRooms"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/auth/adult": {
+      "post": {
+        "operationId": "confirmAdult",
+        "summary": "Confirm that the rider is 18 or over, which public rooms require (ruling Q5). Only the confirmation and its date are kept: no date of birth is asked for or stored.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "confirmed": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "confirmed"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "athleteId": {
+                      "type": "string"
+                    },
+                    "displayName": {
+                      "type": "string"
+                    },
+                    "registrationState": {
+                      "type": "string",
+                      "enum": [
+                        "active",
+                        "pending"
+                      ]
+                    },
+                    "adultConfirmedAt": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "moderatorRole": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "publicRooms": {
+                      "type": "object",
+                      "properties": {
+                        "eligible": {
+                          "type": "boolean"
+                        },
+                        "reasons": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "eligible",
+                        "reasons"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "athleteId",
+                    "displayName",
+                    "registrationState",
+                    "adultConfirmedAt",
+                    "moderatorRole",
+                    "publicRooms"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/auth/challenge": {
       "post": {
         "operationId": "createChallenge",
@@ -1118,7 +1338,7 @@
     "/v1/auth/session": {
       "post": {
         "operationId": "createSession",
-        "summary": "Sign in with a signed `oyl-auth-v1` statement. A key the instance has not seen registers a new athlete, and only then are the recovery codes in the answer.",
+        "summary": "Sign in with a signed `oyl-auth-v1` statement. A key the instance has not seen registers a new athlete as the registration mode allows — awaiting approval by default — and only then are the recovery codes in the answer. New registrations are rate-limited per client address.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1149,6 +1369,12 @@
                   },
                   "recoveryEmail": {
                     "type": "string"
+                  },
+                  "inviteCode": {
+                    "type": "string"
+                  },
+                  "confirmsAdult": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -1187,6 +1413,13 @@
                     "registered": {
                       "type": "boolean"
                     },
+                    "registrationState": {
+                      "type": "string",
+                      "enum": [
+                        "active",
+                        "pending"
+                      ]
+                    },
                     "recoveryCodes": {
                       "type": "array",
                       "items": {
@@ -1199,7 +1432,8 @@
                     "expiresAt",
                     "athleteId",
                     "displayName",
-                    "registered"
+                    "registered",
+                    "registrationState"
                   ],
                   "additionalProperties": false
                 }
@@ -1210,7 +1444,7 @@
             "$ref": "#/components/responses/validation_failed"
           },
           "401": {
-            "description": "One of `wrong_purpose`, `wrong_instance`, `challenge_unknown`, `challenge_used`, `challenge_expired`, `bad_signature`, `key_revoked`, in the one error shape.",
+            "description": "One of `wrong_purpose`, `wrong_instance`, `challenge_unknown`, `challenge_used`, `challenge_expired`, `bad_signature`, `key_revoked`, `code_unknown`, `code_used`, `code_expired`, in the one error shape.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1220,7 +1454,14 @@
             }
           },
           "403": {
-            "$ref": "#/components/responses/registration_closed"
+            "description": "One of `registration_closed`, `account_suspended`, `registration_refused`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "404": {
             "$ref": "#/components/responses/not_found"
@@ -1333,6 +1574,1103 @@
         }
       }
     },
+    "/v1/blocks": {
+      "get": {
+        "operationId": "listBlocks",
+        "summary": "The athletes this athlete has blocked.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "athleteIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "athleteIds"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/blocks/{athleteId}": {
+      "post": {
+        "operationId": "blockAthlete",
+        "summary": "Block an athlete: neither of you sees or reaches the other, whoever blocked whom. Answers the same whether or not the athlete exists, and is kept for any well-formed id. An account may hold 1000 blocks.",
+        "parameters": [
+          {
+            "name": "athleteId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "unblockAthlete",
+        "summary": "Remove a block this athlete made. Answers the same whether or not there was one.",
+        "parameters": [
+          {
+            "name": "athleteId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/moderation/athletes/{athleteId}/hide-display-name": {
+      "post": {
+        "operationId": "hideDisplayName",
+        "summary": "Hide an athlete’s display name from other riders until they choose another. Written to the moderation log.",
+        "parameters": [
+          {
+            "name": "athleteId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  },
+                  "reportId": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "logId": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "logId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/moderation_not_applicable"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/moderation/athletes/{athleteId}/suspend": {
+      "post": {
+        "operationId": "suspendAthlete",
+        "summary": "Suspend an account: every one of its keys is refused, its sessions end, and other riders stop seeing it. Nothing it owns is deleted. Written to the moderation log.",
+        "parameters": [
+          {
+            "name": "athleteId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  },
+                  "reportId": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "logId": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "logId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/moderation_not_applicable"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/moderation/athletes/{athleteId}/unsuspend": {
+      "post": {
+        "operationId": "unsuspendAthlete",
+        "summary": "Lift a suspension. Written to the moderation log.",
+        "parameters": [
+          {
+            "name": "athleteId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  },
+                  "reportId": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "logId": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "logId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/moderation_not_applicable"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/moderation/invites": {
+      "post": {
+        "operationId": "createInvite",
+        "summary": "A single-use invitation, good for seven days, for an instance whose registration is invite-only. Written to the moderation log.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "inviteCode": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "inviteCode",
+                    "expiresAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/moderation/log": {
+      "get": {
+        "operationId": "getModerationLog",
+        "summary": "Every moderator action, oldest first. Append-only.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "entries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "logId": {
+                            "type": "integer"
+                          },
+                          "action": {
+                            "type": "string"
+                          },
+                          "actorAthleteId": {
+                            "type": "string"
+                          },
+                          "targetAthleteId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "reportId": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "at": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "logId",
+                          "action",
+                          "actorAthleteId",
+                          "targetAthleteId",
+                          "reportId",
+                          "reason",
+                          "at"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "entries"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/moderation/registrations": {
+      "get": {
+        "operationId": "listPendingRegistrations",
+        "summary": "The approval queue (#775): every athlete awaiting a moderator’s decision, oldest first, and whether each has confirmed they are 18 or over.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "registrations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "athleteId": {
+                            "type": "string"
+                          },
+                          "displayName": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "integer"
+                          },
+                          "adultConfirmed": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "athleteId",
+                          "displayName",
+                          "createdAt",
+                          "adultConfirmed"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "registrations"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/moderation/registrations/{athleteId}/approve": {
+      "post": {
+        "operationId": "approveRegistration",
+        "summary": "Approve an account awaiting approval. Written to the moderation log.",
+        "parameters": [
+          {
+            "name": "athleteId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  },
+                  "reportId": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "logId": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "logId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/moderation_not_applicable"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/moderation/registrations/{athleteId}/refuse": {
+      "post": {
+        "operationId": "refuseRegistration",
+        "summary": "Refuse an account awaiting approval: its every key is refused at sign-in from then on. Written to the moderation log.",
+        "parameters": [
+          {
+            "name": "athleteId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  },
+                  "reportId": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "logId": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "logId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/moderation_not_applicable"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/moderation/reports": {
+      "get": {
+        "operationId": "listOpenReports",
+        "summary": "The moderators’ queue: every report not yet decided, oldest first.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "reports": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "reportId": {
+                            "type": "integer"
+                          },
+                          "reporterAthleteId": {
+                            "type": "string"
+                          },
+                          "targetAthleteId": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "reportId",
+                          "reporterAthleteId",
+                          "targetAthleteId",
+                          "reason",
+                          "createdAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "reports"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/moderation/reports/{reportId}/dismiss": {
+      "post": {
+        "operationId": "dismissReport",
+        "summary": "Dismiss a report, with a reason. Written to the moderation log.",
+        "parameters": [
+          {
+            "name": "reportId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "logId": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "logId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/moderation_not_applicable"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/reports": {
+      "post": {
+        "operationId": "reportAthlete",
+        "summary": "Report an athlete to this instance’s moderators, with a reason. Rate-limited per reporter. Answers the same whether or not the athlete exists.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "athleteId": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "athleteId",
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/rooms/{roomId}/start": {
       "post": {
         "operationId": "startRoom",
@@ -1403,7 +2741,7 @@
     "/v1/rooms/{roomId}/ticket": {
       "post": {
         "operationId": "createRoomTicket",
-        "summary": "A ticket for one room’s WebSocket hello: single use, 30 seconds. The socket never carries the session token.",
+        "summary": "A ticket for one room’s WebSocket hello: single use, 30 seconds. The socket never carries the session token. A public room needs an eligible account (`GET /v1/auth/account`).",
         "parameters": [
           {
             "name": "roomId",
@@ -1469,6 +2807,9 @@
           "401": {
             "$ref": "#/components/responses/unauthenticated"
           },
+          "403": {
+            "$ref": "#/components/responses/not_eligible"
+          },
           "404": {
             "$ref": "#/components/responses/not_found"
           },
@@ -1515,10 +2856,15 @@
                   "code_used",
                   "code_expired",
                   "registration_closed",
+                  "account_suspended",
+                  "registration_pending",
+                  "registration_refused",
+                  "not_eligible",
                   "not_found",
                   "method_not_allowed",
                   "key_in_use",
                   "last_device",
+                  "moderation_not_applicable",
                   "address_in_use",
                   "payload_too_large",
                   "rate_limited",
@@ -1693,6 +3039,46 @@
           }
         }
       },
+      "account_suspended": {
+        "description": "`account_suspended` (403), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "registration_pending": {
+        "description": "`registration_pending` (403), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "registration_refused": {
+        "description": "`registration_refused` (403), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "not_eligible": {
+        "description": "`not_eligible` (403), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
       "not_found": {
         "description": "`not_found` (404), in the one error shape.",
         "content": {
@@ -1725,6 +3111,16 @@
       },
       "last_device": {
         "description": "`last_device` (409), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "moderation_not_applicable": {
+        "description": "`moderation_not_applicable` (409), in the one error shape.",
         "content": {
           "application/json": {
             "schema": {

@@ -49,13 +49,10 @@ async function instance(pingIntervalMs: string) {
   // The origin is filled in once the port is known: a device signs it.
   const port = 30_000 + Math.floor(Math.random() * 20_000);
   const origin = `http://127.0.0.1:${String(port)}`;
-  const server = readServerConfig(
-    { database: path, origin, registration: 'open', roomWorkers: '1', pingIntervalMs },
-    1,
-  );
+  const server = readServerConfig({ database: path, origin, roomWorkers: '1', pingIntervalMs }, 1);
   if (!server.ok) throw new Error(server.problems.join(' '));
   running = await startInstance({
-    config: testConfig({ port, bodyLimitBytes: 16_384 }),
+    config: testConfig({ port, bodyLimitBytes: 16_384, registration: 'open' }),
     server: server.config,
     version: '0',
     notices: '',

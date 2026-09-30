@@ -27,9 +27,25 @@
  * 4. `bad_signature` — the key did not sign these bytes.
  * 5. `key_revoked` — it did, and the key has been revoked (#773).
  *
- * A key the instance has never seen **registers** a new athlete when the
- * instance's registration is open, and the answer carries the ten recovery
- * codes, once (ruling Q1). #775 owns the other registration modes.
+ * A key the instance has never seen **registers** a new athlete, as the
+ * instance's registration mode allows (#775), and the answer carries the ten
+ * recovery codes, once (ruling Q1):
+ *
+ * - `approval` — **the default** (rulings Q5 and Q13): the athlete is created
+ *   `pending`, with a session that reaches their own account and nothing
+ *   else, until the owner or the deputy approves or refuses them;
+ * - `invite` — only with a moderator's single-use invitation, spent in the
+ *   same transaction that registers;
+ * - `open` — active at once;
+ * - `closed` — `registration_closed`.
+ *
+ * A key the operator named as the owner's or the deputy's registers active in
+ * every mode, or approval-required registration could never approve its
+ * first rider — and a PENDING account signing in with one (the key was named
+ * after the account registered) is activated there and then, and logged,
+ * because no moderator may approve a moderator (#891's review). New registrations are limited per client address
+ * (`rate-limit.ts` §`addressKey`), and a refused or suspended athlete's every
+ * key is refused at sign-in.
  *
  * ## What is stored
  *
@@ -66,9 +82,23 @@ import {
 } from '@onyourleft/domain';
 import { declaredMassAdmissible } from '@onyourleft/physics';
 
+import { DEFAULT_REGISTRATION, type RegistrationMode } from '../config.ts';
 import type { ErrorCode, FieldProblem } from '../errors.ts';
+import {
+  DEFAULT_PUBLIC_ROOM_THRESHOLDS,
+  publicRoomEligibility,
+  type Eligibility,
+  type PublicRoomThresholds,
+} from '../moderation/eligibility.ts';
+import {
+  createModeration,
+  type Moderation,
+  type ModerationLimits,
+  type Moderators,
+} from '../moderation/moderation.ts';
 import type { Admit } from '../room/core/room.ts';
 import {
+  InviteRefusedError,
   OwnershipConflictError,
   type DeviceKey,
   type SqlStore,
@@ -82,8 +112,8 @@ import {
   sha256Hex,
   verifyEd25519,
 } from './crypto.ts';
-import { publicAthlete, type PublicAthlete } from './public-athlete.ts';
-import { createRateLimiter, type RateLimit } from './rate-limit.ts';
+import { HIDDEN_DISPLAY_NAME, publicAthlete, type PublicAthlete } from './public-athlete.ts';
+import { addressKey, createRateLimiter, type RateLimit } from './rate-limit.ts';
 import { createTicketBook, type MintedTicket } from './tickets.ts';
 
 /** A challenge's life: #772's "+60 s". */
@@ -94,12 +124,14 @@ export const SESSION_LIFETIME_SECONDS = 30 * 24 * 60 * 60;
 export const LINK_CODE_LIFETIME_SECONDS = 5 * 60;
 /** An emailed recovery link's life. */
 export const EMAIL_RECOVERY_LIFETIME_SECONDS = 30 * 60;
+/** An invitation's life (#775). */
+export const INVITE_LIFETIME_SECONDS = 7 * 24 * 60 * 60;
 /** The life of the link that confirms a recovery address (#865). */
 export const EMAIL_CONFIRMATION_LIFETIME_SECONDS = 24 * 60 * 60;
 /** How many recovery codes a new athlete is shown (ruling Q1). */
 export const RECOVERY_CODE_COUNT = 10;
-/** The name a new athlete has until they choose one. */
-export const DEFAULT_DISPLAY_NAME = 'Rider';
+/** The name a new athlete has until they choose one — and what others see of a hidden one (#83). */
+export const DEFAULT_DISPLAY_NAME = HIDDEN_DISPLAY_NAME;
 
 /** The limits, all per minute unless named otherwise. */
 export interface IdentityLimits {
@@ -109,6 +141,8 @@ export interface IdentityLimits {
   readonly renamesPerWindow: number;
   readonly renameWindowSeconds: number;
   readonly emailRecoveryPerAddress: RateLimit;
+  /** New accounts per client address (#775). */
+  readonly registrationPerAddress: RateLimit;
   /**
    * Confirmation mail (#865, #883), three limits and one exception — see
    * {@link IdentityLimits.confirmationsPerAthleteAddress}. How many times one
@@ -162,6 +196,7 @@ export const DEFAULT_LIMITS: IdentityLimits = {
   renamesPerWindow: 3,
   renameWindowSeconds: 24 * 60 * 60,
   emailRecoveryPerAddress: { limit: 3, windowMs: 60 * 60_000 },
+  registrationPerAddress: { limit: 3, windowMs: 60 * 60_000 },
   confirmationRequestsPerAthlete: { limit: 5, windowMs: 60 * 60_000 },
   confirmationsPerAthleteAddress: { limit: 3, windowMs: 60 * 60_000 },
   confirmationsPerAddress: { limit: 10, windowMs: 60 * 60_000 },
@@ -189,11 +224,16 @@ export interface IdentityOptions {
   readonly origin: string;
   /** Unix milliseconds. */
   readonly now?: () => number;
-  /** #775 adds approval-required and invite-only. */
-  readonly registration?: 'open' | 'closed';
+  /** How this instance takes new riders (#775). Unset is `closed` (`config.ts` §`DEFAULT_REGISTRATION`). */
+  readonly registration?: RegistrationMode;
+  /** Public-room eligibility's thresholds (#775). */
+  readonly publicRooms?: PublicRoomThresholds;
   /** Email recovery: absent unless the operator enabled it (ruling Q1). */
   readonly emailRecovery?: RecoveryMailer;
   readonly limits?: IdentityLimits;
+  /** The device keys of the owner and the deputy, who moderate (#83, ruling Q13). */
+  readonly moderators?: Moderators;
+  readonly moderationLimits?: ModerationLimits;
 }
 
 export type Outcome<T> =
@@ -205,6 +245,11 @@ export interface Caller {
   readonly athleteId: string;
   readonly deviceKey: string;
   readonly tokenSha256: string;
+  /**
+   * `pending` for an athlete awaiting approval (#775): the handler lets such a
+   * caller reach only the routes that declare `admitsPending`.
+   */
+  readonly standing: 'active' | 'pending';
 }
 
 /** What a device sends to prove it holds a key. */
@@ -224,6 +269,8 @@ export interface SessionGranted {
   readonly athleteId: string;
   readonly displayName: string;
   readonly registered: boolean;
+  /** `pending` until a moderator approves an approval-required registration (#775). */
+  readonly registrationState: string;
   /** Only when this sign-in registered the athlete: shown once, and never again. */
   readonly recoveryCodes?: readonly string[];
 }
@@ -237,8 +284,30 @@ export interface DeviceView {
   readonly thisDevice: boolean;
 }
 
+/** What an athlete sees of their own account (#775). */
+export interface Account {
+  readonly athleteId: string;
+  readonly displayName: string;
+  readonly registrationState: string;
+  readonly adultConfirmedAt: number | null;
+  readonly moderatorRole: 'owner' | 'deputy' | null;
+  readonly publicRooms: Eligibility;
+}
+
+/** What a registration may carry beyond the signed statement. */
+export interface RegistrationFields {
+  readonly displayName?: unknown;
+  readonly recoveryEmail?: unknown;
+  /** `invite` mode: a moderator's invitation. */
+  readonly inviteCode?: unknown;
+  /** `true` when the rider confirms they are 18 or over (ruling Q5). */
+  readonly confirmsAdult?: unknown;
+}
+
 export interface Identity {
   readonly origin: string;
+  /** Blocking, reporting and the moderators' tools (#83), over the same store and clock. */
+  readonly moderation: Moderation;
   readonly emailRecoveryEnabled: boolean;
   challenge(
     publicKey: unknown,
@@ -246,12 +315,22 @@ export interface Identity {
   ): Promise<Outcome<{ nonce: string; expiresAt: number }>>;
   signIn(
     statement: unknown,
-    registration: { readonly displayName?: unknown; readonly recoveryEmail?: unknown },
+    registration: RegistrationFields,
+    address?: string | null,
   ): Promise<Outcome<SessionGranted>>;
   /** The caller behind an `Authorization` header, or `undefined`. */
   authenticate(authorization: string | null): Promise<Caller | undefined>;
   signOut(caller: Caller): Promise<void>;
   me(caller: Caller): Promise<Outcome<PublicAthlete>>;
+  /** The caller's own account: registration, 18+ confirmation, role, eligibility (#775). */
+  account(caller: Caller): Promise<Outcome<Account>>;
+  /** Record the caller's confirmation that they are 18 or over (#775). */
+  confirmAdult(caller: Caller, confirmed: unknown): Promise<Outcome<Account>>;
+  /** A moderator mints a single-use invitation, logged (#775). */
+  mintInvite(
+    caller: Caller,
+    reason: unknown,
+  ): Promise<Outcome<{ inviteCode: string; expiresAt: number }>>;
   profile(athleteId: string): Promise<Outcome<PublicAthlete>>;
   rename(caller: Caller, displayName: unknown): Promise<Outcome<PublicAthlete>>;
   ticket(caller: Caller, roomId: string, declaredMass: unknown): Promise<Outcome<MintedTicket>>;
@@ -323,7 +402,16 @@ export function createIdentity(options: IdentityOptions): Identity {
   const now = options.now ?? (() => Date.now());
   const seconds = (): number => Math.floor(now() / 1000);
   const limits = options.limits ?? DEFAULT_LIMITS;
-  const registration = options.registration ?? 'open';
+  const registration = options.registration ?? DEFAULT_REGISTRATION;
+  const publicRooms = options.publicRooms ?? DEFAULT_PUBLIC_ROOM_THRESHOLDS;
+  // ⚠️ In memory, like every limit below and unlike the report limit
+  // (`moderation.ts`, counted from the store): a restart — or, under the
+  // Durable Object adapter, an eviction — hands every address a fresh
+  // allowance (#891's review). Counting registrations from the database would
+  // mean storing each rider's address beside their account, which this
+  // instance deliberately never does (`log.ts`); what bounds identities is
+  // approval, which a restart does not reset. `docs/moderation.md` says so.
+  const registrations = createRateLimiter(limits.registrationPerAddress, now);
   const mailer = options.emailRecovery;
   const perKey = createRateLimiter(limits.challengePerKey, now);
   const perAddress = createRateLimiter(limits.challengePerAddress, now);
@@ -333,6 +421,12 @@ export function createIdentity(options: IdentityOptions): Identity {
   const confirmationsPerAddress = createRateLimiter(limits.confirmationsPerAddress, now);
   const firstLinksPerAddress = createRateLimiter(limits.firstLinksPerAddress, now);
   const tickets = createTicketBook(now, () => randomToken(32));
+  const moderation = createModeration({
+    store,
+    now,
+    ...(options.moderators === undefined ? {} : { moderators: options.moderators }),
+    ...(options.moderationLimits === undefined ? {} : { limits: options.moderationLimits }),
+  });
 
   /** Check a statement for `purpose`, spend its nonce, and verify it. Answers the key. */
   async function proven(statement: unknown, purpose: DevicePurpose): Promise<Outcome<string>> {
@@ -368,6 +462,10 @@ export function createIdentity(options: IdentityOptions): Identity {
     if (!(await verifyEd25519(claimed.publicKey, bytes, claimed.signature))) {
       return refuse('bad_signature');
     }
+    // The per-key limit counts only a challenge spent by a valid signature
+    // (#861's review): a public key is not secret, so counting every challenge
+    // let anybody lock its holder out.
+    perKey.count(claimed.publicKey);
     return { ok: true, value: claimed.publicKey };
   }
 
@@ -411,6 +509,29 @@ export function createIdentity(options: IdentityOptions): Identity {
     });
     await store.touchDeviceKey(key.athleteId, key.publicKey, at);
     return { sessionToken, expiresAt };
+  }
+
+  /** Whether `publicKey` is one the operator named as a moderator's. */
+  function moderatorKey(publicKey: string): boolean {
+    const named = options.moderators ?? {};
+    return publicKey === named.owner || publicKey === named.deputy;
+  }
+
+  async function account(athleteId: string): Promise<Account | undefined> {
+    const athlete = await store.getAthlete(athleteId);
+    if (athlete === undefined) return undefined;
+    return {
+      athleteId: athlete.id,
+      displayName: athlete.displayName,
+      registrationState: athlete.registrationState,
+      adultConfirmedAt: athlete.adultConfirmedAt,
+      moderatorRole: (await moderation.roleOf(athlete.id)) ?? null,
+      publicRooms: publicRoomEligibility(
+        { ...athlete, completedRides: await store.countActivityRecords(athlete.id) },
+        publicRooms,
+        seconds(),
+      ),
+    };
   }
 
   /**
@@ -460,9 +581,18 @@ export function createIdentity(options: IdentityOptions): Identity {
 
   async function register(
     publicKey: string,
-    fields: { readonly displayName?: unknown; readonly recoveryEmail?: unknown },
+    fields: RegistrationFields,
+    address: string | null,
   ): Promise<Outcome<SessionGranted>> {
-    if (registration !== 'open') return refuse('registration_closed');
+    const moderator = moderatorKey(publicKey);
+    if (!moderator && registration === 'closed') return refuse('registration_closed');
+    const invited = !moderator && registration === 'invite';
+    if (invited && typeof fields.inviteCode !== 'string') {
+      return invalid('inviteCode', 'this instance registers riders by invitation only');
+    }
+    if (fields.confirmsAdult !== undefined && typeof fields.confirmsAdult !== 'boolean') {
+      return invalid('confirmsAdult', 'must be true or false');
+    }
     let displayName = DEFAULT_DISPLAY_NAME;
     if (fields.displayName !== undefined) {
       if (typeof fields.displayName !== 'string') return invalid('displayName', 'must be a string');
@@ -475,33 +605,49 @@ export function createIdentity(options: IdentityOptions): Identity {
       if (mailer === undefined) {
         return invalid('recoveryEmail', 'this instance does not offer email recovery');
       }
-      const address = addressOf(fields.recoveryEmail, 'recoveryEmail');
-      if (!address.ok) return address;
-      recoveryEmail = address.value;
+      const given = addressOf(fields.recoveryEmail, 'recoveryEmail');
+      if (!given.ok) return given;
+      recoveryEmail = given.value;
+    }
+    // Counted per client address, only for a NEW account (#775). An address
+    // the adapter could not give shares one bucket: failing closed slows
+    // registration, where one busy client could otherwise open the door.
+    if (!registrations.allow(address === null ? 'unknown' : addressKey(address))) {
+      return refuse('rate_limited');
     }
     const athleteId = randomHex(16);
     const at = seconds();
+    const registrationState = !moderator && registration === 'approval' ? 'pending' : 'active';
     // Not bound: confirmed later, by whoever reads the mailbox (#865). So the
     // answer cannot depend on whether somebody already holds the address.
     const confirmation =
       recoveryEmail === undefined ? undefined : await confirmationFor(athleteId, recoveryEmail, at);
     const recoveryCodes = Array.from({ length: RECOVERY_CODE_COUNT }, readableCode);
-    await store.registerAthlete({
-      athlete: { id: athleteId, displayName, createdAt: at, registrationState: 'active' },
-      key: { publicKey, athleteId, addedAt: at, revokedAt: null },
-      recoveryCodeSha256s: await Promise.all(
-        recoveryCodes.map((code) => sha256Hex(normalisedCode(code))),
-      ),
-      ...(confirmation === undefined
-        ? {}
-        : {
-            recoveryEmailConfirmation: {
-              tokenSha256: confirmation.tokenSha256,
-              address: confirmation.address,
-              expiresAt: confirmation.expiresAt,
-            },
-          }),
-    });
+    try {
+      await store.registerAthlete({
+        athlete: { id: athleteId, displayName, createdAt: at, registrationState },
+        key: { publicKey, athleteId, addedAt: at, revokedAt: null },
+        recoveryCodeSha256s: await Promise.all(
+          recoveryCodes.map((code) => sha256Hex(normalisedCode(code))),
+        ),
+        ...(confirmation === undefined
+          ? {}
+          : {
+              recoveryEmailConfirmation: {
+                tokenSha256: confirmation.tokenSha256,
+                address: confirmation.address,
+                expiresAt: confirmation.expiresAt,
+              },
+            }),
+        ...(fields.confirmsAdult === true ? { adultConfirmedAt: at } : {}),
+        ...(invited
+          ? { inviteCodeSha256: await sha256Hex(normalisedCode(fields.inviteCode as string)) }
+          : {}),
+      });
+    } catch (error) {
+      if (error instanceof InviteRefusedError) return refuse(takeRefusal(error.outcome, 'code'));
+      throw error;
+    }
     const session = await openSession({ athleteId, publicKey });
     if (confirmation !== undefined && mailer !== undefined) {
       // The athlete exists and their recovery codes are about to be shown for
@@ -511,20 +657,32 @@ export function createIdentity(options: IdentityOptions): Identity {
     }
     return {
       ok: true,
-      value: { ...session, athleteId, displayName, registered: true, recoveryCodes },
+      value: {
+        ...session,
+        athleteId,
+        displayName,
+        registered: true,
+        registrationState,
+        recoveryCodes,
+      },
     };
   }
 
   return {
     origin,
+    moderation,
     emailRecoveryEnabled: mailer !== undefined,
 
     async challenge(publicKey, address) {
       if (!isPublicKey(publicKey))
         return invalid('publicKey', 'must be 64 lowercase hex characters');
       // Both limits are counted, so a caller over one does not escape the other.
-      const keyAllowed = perKey.allow(publicKey);
-      const addressAllowed = perAddress.allow(address ?? 'unknown');
+      // Per key, only challenges a valid signature spent are counted (`proven`),
+      // so a stranger asking for a key's challenges cannot lock its holder
+      // out. Per address, an address the adapter did not know is NOT one
+      // shared bucket (#861's review): the per-key limit still holds for it.
+      const keyAllowed = perKey.peek(publicKey);
+      const addressAllowed = address === null || perAddress.allow(addressKey(address));
       if (!keyAllowed || !addressAllowed) return refuse('rate_limited');
       const at = seconds();
       await store.pruneChallenges(at - CHALLENGE_LIFETIME_SECONDS);
@@ -534,14 +692,35 @@ export function createIdentity(options: IdentityOptions): Identity {
       return { ok: true, value: { nonce, expiresAt } };
     },
 
-    async signIn(statement, fields) {
+    async signIn(statement, fields, address = null) {
       const proof = await proven(statement, AUTH_PURPOSE);
       if (!proof.ok) return proof;
       const key = await store.findDeviceKey(proof.value);
-      if (key === undefined) return register(proof.value, fields);
+      if (key === undefined) return register(proof.value, fields, address);
       if (key.revokedAt !== null) return refuse('key_revoked');
       const athlete = await store.getAthlete(key.athleteId);
       if (athlete === undefined) return refuse('unauthenticated');
+      // Every key the athlete holds is refused, not only the one that was
+      // named in a report: a ban that binds one key is worthless (ADR 0028
+      // D-6.2, #775). Told to the athlete themselves, and to nobody else.
+      if (athlete.suspendedAt !== null) return refuse('account_suspended');
+      if (athlete.registrationState === 'refused') return refuse('registration_refused');
+      let registrationState = athlete.registrationState;
+      // The owner signed in before the operator set their key, so registered
+      // pending — and nobody may approve a moderator, so nothing could ever
+      // let them in (#891's review). A key the operator now names activates
+      // its pending account at sign-in, logged like any moderator action.
+      if (registrationState === 'pending' && moderatorKey(proof.value)) {
+        const activated = await store.moderate({
+          action: 'activate_moderator_key',
+          actorAthleteId: athlete.id,
+          targetAthleteId: athlete.id,
+          reportId: null,
+          reason: 'Signed in with a device key the operator named as a moderator’s.',
+          at: seconds(),
+        });
+        if (activated.outcome === 'applied') registrationState = 'active';
+      }
       const session = await openSession(key);
       return {
         ok: true,
@@ -550,6 +729,7 @@ export function createIdentity(options: IdentityOptions): Identity {
           athleteId: athlete.id,
           displayName: athlete.displayName,
           registered: false,
+          registrationState,
         },
       };
     },
@@ -567,7 +747,19 @@ export function createIdentity(options: IdentityOptions): Identity {
       if (key === undefined || key.revokedAt !== null || key.athleteId !== session.athleteId) {
         return undefined;
       }
-      return { athleteId: session.athleteId, deviceKey: session.deviceKey, tokenSha256 };
+      // A suspension revokes every session as it happens (`sql-store.ts`
+      // §`moderate`); this is the same rule read again, per request.
+      const athlete = await store.getAthlete(session.athleteId);
+      if (athlete === undefined || athlete.suspendedAt !== null) return undefined;
+      if (athlete.registrationState !== 'active' && athlete.registrationState !== 'pending') {
+        return undefined;
+      }
+      return {
+        athleteId: session.athleteId,
+        deviceKey: session.deviceKey,
+        tokenSha256,
+        standing: athlete.registrationState === 'pending' ? 'pending' : 'active',
+      };
     },
 
     async signOut(caller) {
@@ -576,9 +768,42 @@ export function createIdentity(options: IdentityOptions): Identity {
 
     async me(caller) {
       const athlete = await store.getAthlete(caller.athleteId);
+      // The athlete's own name, even where a moderator hid it from others.
       return athlete === undefined
         ? refuse('not_found')
-        : { ok: true, value: publicAthlete(athlete) };
+        : { ok: true, value: { athleteId: athlete.id, displayName: athlete.displayName } };
+    },
+
+    async account(caller) {
+      const held = await account(caller.athleteId);
+      return held === undefined ? refuse('not_found') : { ok: true, value: held };
+    },
+
+    async confirmAdult(caller, confirmed) {
+      // Only `true`: a confirmation is a statement the rider makes, and there
+      // is nothing to un-state — the first date is kept. No birth date is asked.
+      if (confirmed !== true) return invalid('confirmed', 'must be true');
+      await store.confirmAdult(caller.athleteId, seconds());
+      const held = await account(caller.athleteId);
+      return held === undefined ? refuse('not_found') : { ok: true, value: held };
+    },
+
+    async mintInvite(caller, reason) {
+      if (typeof reason !== 'string' || reason.trim() === '') {
+        return invalid('reason', 'must not be empty');
+      }
+      const inviteCode = readableCode();
+      const at = seconds();
+      const expiresAt = at + INVITE_LIFETIME_SECONDS;
+      await store.mintInviteCode(
+        {
+          codeSha256: await sha256Hex(normalisedCode(inviteCode)),
+          athleteId: caller.athleteId,
+          expiresAt,
+        },
+        { reason: reason.trim(), at },
+      );
+      return { ok: true, value: { inviteCode, expiresAt } };
     },
 
     async profile(athleteId) {
@@ -606,7 +831,12 @@ export function createIdentity(options: IdentityOptions): Identity {
       if (typeof declaredMass !== 'number' || !declaredMassAdmissible(declaredMass)) {
         return invalid('declaredMassKilograms', 'must be a mass a room admits, in kilograms');
       }
-      if ((await store.getRoom(roomId)) === undefined) return refuse('not_found');
+      const room = await store.getRoom(roomId);
+      if (room === undefined) return refuse('not_found');
+      if (room.visibility === 'public') {
+        const held = await account(caller.athleteId);
+        if (held === undefined || !held.publicRooms.eligible) return refuse('not_eligible');
+      }
       return {
         ok: true,
         value: tickets.mint(roomId, {
@@ -684,7 +914,8 @@ export function createIdentity(options: IdentityOptions): Identity {
       const given = addressOf(address, 'address');
       if (!given.ok) return given;
       const normalised = given.value;
-      if (!emailPerAddress.allow(normalised) || !perAddress.allow(client ?? 'unknown')) {
+      const clientAllowed = client === null || perAddress.allow(addressKey(client));
+      if (!emailPerAddress.allow(normalised) || !clientAllowed) {
         return refuse('rate_limited');
       }
       // The same answer whether or not the address is known, so it cannot be

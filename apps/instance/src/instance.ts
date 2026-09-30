@@ -4,7 +4,7 @@ import { mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 import { createIdentity, type Identity } from './auth/identity.ts';
-import type { Config } from './config.ts';
+import { identitySettings, type Config } from './config.ts';
 import { createHandler, type Handler } from './handler.ts';
 import { logEvent, type LogSink } from './log.ts';
 import { HttpCounters, renderMetrics } from './metrics.ts';
@@ -180,7 +180,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   const listening = await listen((request, client) => handler(request, client), {
     host: options.config.host,
     port: options.config.port,
-    clientAddressHeader: server.clientAddressHeader,
+    clientAddressHeader: options.config.clientAddressHeader,
+    trustedProxies: options.config.trustedProxies,
   });
   listening.server.on('upgrade', (request, socket, head) => {
     if (!router.upgrade(request, socket, head)) socket.destroy();
@@ -192,14 +193,14 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       identity = createIdentity({
         store,
         origin: server.origin,
-        registration: server.registration,
+        ...identitySettings(options.config),
         now,
       });
       handler = createHandler({ ...handlerOptions, identity });
     }
     logEvent(log, 'ready', {
       identity: identity !== undefined,
-      registration: server.registration,
+      registration: options.config.registration,
       workers: server.roomWorkers,
       compression: server.compression,
       metrics: server.metrics,

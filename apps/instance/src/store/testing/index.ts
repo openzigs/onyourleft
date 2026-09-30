@@ -159,7 +159,16 @@ export async function assertAthleteRoundTrip(
     (store) => store.putAthlete(athlete),
     (store) => store.getAthlete(athlete.id),
   );
-  if (JSON.stringify(read) !== JSON.stringify(athlete)) {
+  const written =
+    read === undefined
+      ? undefined
+      : {
+          id: read.id,
+          displayName: read.displayName,
+          createdAt: read.createdAt,
+          registrationState: read.registrationState,
+        };
+  if (JSON.stringify(written) !== JSON.stringify(athlete)) {
     throw new RoundTripFailure('The athlete came back different.');
   }
 }
@@ -248,6 +257,24 @@ export async function seedWorld(store: SqlStore): Promise<void> {
       tokenSha256: hexOf(`email-${athlete}`),
       athleteId: athlete,
       expiresAt: 1_790_000_900,
+    });
+    // Migration 0005's (#83): each blocks both others, and reports the one after
+    // them. Both, so erasing one athlete — which also removes the blocks OF
+    // them — still leaves every other athlete a block of their own.
+    const next = ATHLETES[(ATHLETES.indexOf(athlete) + 1) % ATHLETES.length] as string;
+    for (const other of ATHLETES) {
+      if (other !== athlete) await store.putBlock(athlete, other, 1_790_000_400);
+    }
+    // Migration 0006's (#775): an invitation each.
+    await store.mintInviteCode(
+      { codeSha256: hexOf(`invite-${athlete}`), athleteId: athlete, expiresAt: 1_790_600_000 },
+      { reason: 'Seeded', at: 1_790_000_450 },
+    );
+    await store.putReport({
+      athleteId: athlete,
+      targetAthleteId: next,
+      reason: `Report by ${athlete}`,
+      createdAt: 1_790_000_500,
     });
   }
 }

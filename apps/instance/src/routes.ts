@@ -2,6 +2,7 @@
 
 import { IDENTITY_ROUTES } from './auth/routes.ts';
 import { errorResponse } from './errors.ts';
+import { MODERATION_ROUTES } from './moderation/routes.ts';
 import { assessReadiness } from './readiness.ts';
 import { json, type Route, type Schema } from './route-kit.ts';
 
@@ -17,8 +18,9 @@ import { json, type Route, type Schema } from './route-kit.ts';
  * entry declares — `openapi.test.ts` holds by calling every route through the
  * real listener and checking the body against the declared schema.
  *
- * The identity routes (#772, #773, #774) are `auth/routes.ts`'s, appended
- * here, so there is still one table.
+ * The identity routes (#772, #773, #774) are `auth/routes.ts`'s and the
+ * moderation routes (#83, #775) `moderation/routes.ts`'s, appended here, so
+ * there is still one table.
  *
  * ## Versioning
  *
@@ -40,6 +42,7 @@ export const ROUTES: readonly Route[] = [
     method: 'GET',
     path: '/health',
     operationId: 'getHealth',
+    reaches: 'own',
     summary: 'Whether the instance is answering, and which build it is.',
     response: {
       contentType: 'application/json',
@@ -60,6 +63,7 @@ export const ROUTES: readonly Route[] = [
     method: 'GET',
     path: '/source',
     operationId: 'getSource',
+    reaches: 'own',
     summary:
       'Where the exact source of the running build is — the offer AGPL-3.0 §13 requires (ADR 0036 D-6).',
     response: {
@@ -82,6 +86,7 @@ export const ROUTES: readonly Route[] = [
     method: 'GET',
     path: '/openapi.json',
     operationId: 'getSpecification',
+    reaches: 'own',
     summary: 'This specification.',
     response: {
       contentType: 'application/json',
@@ -93,6 +98,7 @@ export const ROUTES: readonly Route[] = [
     method: 'GET',
     path: '/licences/third-party.txt',
     operationId: 'getThirdPartyNotices',
+    reaches: 'own',
     summary:
       'The licence and notice of every third-party package this instance includes, generated and gated by `check:notices`.',
     response: { contentType: 'text/plain' },
@@ -103,6 +109,7 @@ export const ROUTES: readonly Route[] = [
     method: 'GET',
     path: '/ready',
     operationId: 'getReadiness',
+    reaches: 'own',
     summary:
       'Whether riders may be sent here yet: the database answers, its migrations are at head, and every room worker is alive (#791). 503 with the same body when not.',
     response: {
@@ -148,6 +155,7 @@ export const ROUTES: readonly Route[] = [
     method: 'GET',
     path: '/metrics',
     operationId: 'getMetrics',
+    reaches: 'own',
     summary:
       'Rooms, riders, tick lateness and refusals in the Prometheus text format — only when the operator turned it on (OYL_INSTANCE_METRICS), and only for a request carrying the operator’s token as `Authorization: Bearer`; `not_found` otherwise. No label is an athlete, a name, a room or a coordinate.',
     errors: ['not_found'],
@@ -164,10 +172,15 @@ export const ROUTES: readonly Route[] = [
     },
   },
   ...IDENTITY_ROUTES,
+  ...MODERATION_ROUTES,
   {
     method: 'POST',
     path: '/v1/rooms/{roomId}/start',
     operationId: 'startRoom',
+    reaches: {
+      exempt:
+        'a race’s riders share its countdown: who may start one is #785’s, and blocking inside a room is #789’s (ADR 0028 D-6.4)',
+    },
     summary:
       'Starts a race’s countdown, for an athlete seated in it. Provisional: who may start a race is #785’s to decide.',
     identity: true,

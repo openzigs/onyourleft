@@ -47,10 +47,17 @@ services:
       OYL_INSTANCE_WS_COMPRESSION: ${OYL_INSTANCE_WS_COMPRESSION:-off}
       OYL_INSTANCE_METRICS: ${OYL_INSTANCE_METRICS:-off}
       OYL_INSTANCE_METRICS_TOKEN: ${OYL_INSTANCE_METRICS_TOKEN:-}
+      OYL_INSTANCE_OWNER_KEY: ${OYL_INSTANCE_OWNER_KEY:-}
+      OYL_INSTANCE_DEPUTY_KEY: ${OYL_INSTANCE_DEPUTY_KEY:-}
+      OYL_INSTANCE_PUBLIC_ROOM_MIN_ACCOUNT_DAYS: ${OYL_INSTANCE_PUBLIC_ROOM_MIN_ACCOUNT_DAYS:-}
+      OYL_INSTANCE_PUBLIC_ROOM_MIN_RIDES: ${OYL_INSTANCE_PUBLIC_ROOM_MIN_RIDES:-}
       # Every connection's peer is cloudflared, so the rate limits read the
-      # rider's own address from the header Cloudflare writes (#895, B3).
-      # Safe here because nothing reaches the instance but the tunnel.
+      # rider's own address from the header Cloudflare writes (#895, B3) —
+      # and believe it ONLY from cloudflared's own address below (#891, #903
+      # item 4): another container on this network, or a port published for
+      # local debugging, arrives from somewhere else and is counted as itself.
       OYL_INSTANCE_CLIENT_ADDRESS_HEADER: cf-connecting-ip
+      OYL_INSTANCE_TRUSTED_PROXIES: 172.30.87.10
     volumes:
       - data:/data
     # Docker waits this long after SIGTERM before it kills the instance: the
@@ -70,6 +77,12 @@ services:
     depends_on:
       - instance
     restart: unless-stopped
+    # A FIXED address, so the instance can name it as the one proxy whose
+    # client-address header it believes (OYL_INSTANCE_TRUSTED_PROXIES above).
+    # Change both together if 172.30.87.0/24 is already used on this machine.
+    networks:
+      default:
+        ipv4_address: 172.30.87.10
 
   # The scheduled backup (#791 criterion 7, #807): an online snapshot into a
   # second directory on the box, and a copy of it OFF the box — a USB drive
@@ -97,6 +110,14 @@ services:
       - data:/data
       - ${OYL_BACKUP_DIR:?set OYL_BACKUP_DIR to a directory on this machine for the snapshots}:/backups
       - ${OYL_OFFBOX_DIR:?set OYL_OFFBOX_DIR to a drive or share that is NOT this machine}:/offbox
+
+networks:
+  # The project's own network, with a subnet stated so cloudflared's address
+  # can be fixed (above). Nothing else in it is trusted with the header.
+  default:
+    ipam:
+      config:
+        - subnet: 172.30.87.0/24
 
 volumes:
   # The one volume: the SQLite database and the blobs.

@@ -33,17 +33,21 @@
  *   another. {@link createSqlStore} queues every call behind the one before it.
  */
 
-import { sql, type Kysely, type Selectable } from 'kysely';
+import { sql, type Kysely, type Selectable, type Transaction } from 'kysely';
 import type {
   ActivityRecordTable,
   AthleteTable,
+  BlockTable,
   DeviceKeyTable,
   DisplayNameChangeTable,
   EmailRecoveryTokenTable,
   InstanceDatabase,
-  RecoveryEmailConfirmationTable,
+  InviteCodeTable,
   LinkCodeTable,
+  ModerationLogTable,
   RecoveryCodeTable,
+  RecoveryEmailConfirmationTable,
+  ReportTable,
   ResultTable,
   RoomCourseTable,
   RoomTable,
@@ -56,6 +60,22 @@ export interface Athlete {
   /** Unix seconds. */
   readonly createdAt: number;
   readonly registrationState: string;
+}
+
+/** An athlete as the store holds them: what was written, and what moderation set (#83). */
+export interface AthleteRecord extends Athlete {
+  /** When a moderator suspended the account, or `null`. */
+  readonly suspendedAt: number | null;
+  /** When a moderator hid the display name, or `null`. */
+  readonly displayNameHiddenAt: number | null;
+  /** When the rider confirmed they are 18 or over, or `null` (#775). Never a birth date. */
+  readonly adultConfirmedAt: number | null;
+  /**
+   * When the account became active — registered active, or approved — or
+   * `null` while it has never been (#775). Public-room eligibility counts an
+   * account's age from here, not from when it registered (#891's review).
+   */
+  readonly activatedAt: number | null;
 }
 
 export interface DeviceKey {
@@ -203,7 +223,104 @@ export interface Registration {
    * nobody until the mailbox's reader follows the link.
    */
   readonly recoveryEmailConfirmation?: Omit<EmailConfirmation, 'athleteId' | 'usedAt'>;
+  /** The rider confirmed they are 18 or over as they registered (#775): when. */
+  readonly adultConfirmedAt?: number;
+  /**
+   * An invitation to spend in the same transaction (#775's invite-only mode),
+   * so a registration that fails leaves the invitation unspent, and one
+   * invitation cannot register two athletes. A refusal throws
+   * {@link InviteRefusedError}.
+   */
+  readonly inviteCodeSha256?: string;
 }
+
+/** A moderator's invitation, as its SHA-256 (#775). */
+export interface InviteCode {
+  readonly codeSha256: string;
+  /** The moderator who minted it. */
+  readonly athleteId: string;
+  readonly expiresAt: number;
+  readonly usedAt: number | null;
+}
+
+/** A registration's invitation could not be spent: why. */
+export class InviteRefusedError extends Error {
+  override readonly name = 'InviteRefusedError';
+  readonly outcome: 'unknown' | 'used' | 'expired';
+  constructor(outcome: 'unknown' | 'used' | 'expired') {
+    super(`The invitation is ${outcome}.`);
+    this.outcome = outcome;
+  }
+}
+
+/** One athlete blocking another (#83). */
+export interface Block {
+  /** The blocker. */
+  readonly athleteId: string;
+  readonly blockedAthleteId: string;
+  readonly createdAt: number;
+}
+
+/** A report (#83): its reporter is `athleteId`. */
+export interface Report {
+  readonly id: number;
+  readonly athleteId: string;
+  readonly targetAthleteId: string;
+  readonly reason: string;
+  readonly createdAt: number;
+  readonly closedAt: number | null;
+  readonly closedByAthleteId: string | null;
+  readonly outcome: string | null;
+}
+
+/** What a moderator may do (#83, #775). */
+export type ModerationActionKind =
+  | 'suspend'
+  | 'unsuspend'
+  | 'hide_display_name'
+  | 'dismiss_report'
+  | 'approve_registration'
+  | 'refuse_registration'
+  /**
+   * The instance's, not a moderator's: a pending account whose key the
+   * operator named as a moderator's signed in, and was activated, because
+   * nobody may approve a moderator (#891's review). Its actor is the account.
+   */
+  | 'activate_moderator_key';
+
+/** One moderator action, as it is asked for and as it is logged. */
+export interface ModerationAction {
+  readonly action: ModerationActionKind;
+  readonly actorAthleteId: string;
+  readonly targetAthleteId: string | null;
+  /** The report this action decides, if any: it is closed with the action as its outcome. */
+  readonly reportId: number | null;
+  readonly reason: string;
+  readonly at: number;
+}
+
+/**
+ * Everything the log records: the actions, a moderator minting an invitation
+ * (#775), and a moderator's attempt to act on a moderator — themselves
+ * included — which was refused and changed nothing (#891's review).
+ */
+export type LoggedActionKind =
+  ModerationActionKind | 'mint_invite' | `refused_${ModerationActionKind}`;
+
+/** One entry of the append-only moderation log. */
+export interface ModerationLogEntry extends Omit<ModerationAction, 'action'> {
+  readonly id: number;
+  readonly action: LoggedActionKind;
+}
+
+/**
+ * What asking for a moderator action did. It is `applied` — and logged, in the
+ * same transaction — or it changed nothing and logged nothing.
+ */
+export type ModerationOutcome =
+  | { readonly outcome: 'applied'; readonly logId: number }
+  | { readonly outcome: 'not_found' }
+  | { readonly outcome: 'not_applicable' };
 
 /** What revoking a device key did (#867). */
 export type RevokeOutcome = 'revoked' | 'not_found' | 'last_device';
@@ -223,7 +340,7 @@ export type PutOutcome = 'stored' | 'duplicate';
 /** The storage port. */
 export interface SqlStore {
   putAthlete(athlete: Athlete): Promise<void>;
-  getAthlete(athleteId: string): Promise<Athlete | undefined>;
+  getAthlete(athleteId: string): Promise<AthleteRecord | undefined>;
 
   putDeviceKey(key: DeviceKeyWrite): Promise<void>;
   listDeviceKeys(athleteId: string): Promise<readonly DeviceKey[]>;
@@ -336,6 +453,69 @@ export interface SqlStore {
   /** A room's finish order is every rider's, by design: not athlete-scoped. */
   listRoomResults(roomId: string): Promise<readonly Result[]>;
 
+  /** Block (#83). Idempotent: blocking twice keeps the first row. */
+  putBlock(athleteId: string, blockedAthleteId: string, at: number): Promise<void>;
+  /** Unblock. `false` when this athlete had no such block. */
+  deleteBlock(athleteId: string, blockedAthleteId: string): Promise<boolean>;
+  listBlocks(athleteId: string): Promise<readonly Block[]>;
+  /**
+   * What `viewerId` may know of `subjectId`, in ONE query (#83, #891's
+   * review): the subject's standing and whether either blocks the other, or
+   * `undefined` when there is no such athlete. A pair, so not one athlete's read.
+   */
+  sight(
+    viewerId: string,
+    subjectId: string,
+  ): Promise<
+    | {
+        readonly registrationState: string;
+        readonly suspendedAt: number | null;
+        readonly blocked: boolean;
+      }
+    | undefined
+  >;
+
+  /**
+   * A report (#83). Answers its id. `closedAs` stores it already closed, with
+   * that outcome and no moderator: a report about nobody, which must count
+   * toward the reporter's allowance and must never reach the queue.
+   */
+  putReport(
+    report: Pick<Report, 'athleteId' | 'targetAthleteId' | 'reason' | 'createdAt'> & {
+      readonly closedAs?: string;
+    },
+  ): Promise<number>;
+  /** The reports this athlete made. */
+  listReports(athleteId: string): Promise<readonly Report[]>;
+  /** The moderators' queue: every report not yet decided, oldest first. */
+  listOpenReports(): Promise<readonly Report[]>;
+
+  /**
+   * Apply a moderator action and append it to the log, in ONE transaction:
+   * an action that is applied is logged, and one that is not changes nothing.
+   */
+  moderate(action: ModerationAction): Promise<ModerationOutcome>;
+  /**
+   * Log an action that was REFUSED — a moderator acting on a moderator — as
+   * `refused_<action>`, changing nothing else. Answers the log entry's id.
+   */
+  logRefusedAction(action: ModerationAction): Promise<number>;
+  /** The moderation log, oldest first. */
+  listModerationLog(): Promise<readonly ModerationLogEntry[]>;
+
+  /** Record that the athlete confirmed they are 18 or over (#775). The first date is kept. */
+  confirmAdult(athleteId: string, at: number): Promise<boolean>;
+  /** The moderators' approval queue: every athlete awaiting approval, oldest first (#775). */
+  listPendingAthletes(): Promise<readonly AthleteRecord[]>;
+  /** How many rides the athlete has synced: public-room eligibility counts them (#775). */
+  countActivityRecords(athleteId: string): Promise<number>;
+  /** A moderator's invitation, and its entry in the moderation log, together (#775). */
+  mintInviteCode(
+    code: Omit<InviteCode, 'usedAt'>,
+    log: { readonly reason: string; readonly at: number },
+  ): Promise<void>;
+  listInviteCodes(athleteId: string): Promise<readonly InviteCode[]>;
+
   /** Remove every row this athlete owns, the athlete included (#35). */
   eraseAthlete(athleteId: string): Promise<void>;
 
@@ -363,14 +543,55 @@ export const ATHLETE_TABLES_IN_ERASURE_ORDER = [
   'recovery_email',
   'recovery_email_confirmation',
   'email_recovery_token',
+  'block',
+  'report',
+  'invite_code',
   'device_key',
 ] as const satisfies readonly (keyof InstanceDatabase)[];
 
-const athleteFrom = (row: Selectable<AthleteTable>): Athlete => ({
+const athleteFrom = (row: Selectable<AthleteTable>): AthleteRecord => ({
   id: row.id,
   displayName: row.display_name,
   createdAt: row.created_at,
   registrationState: row.registration_state,
+  suspendedAt: row.suspended_at,
+  displayNameHiddenAt: row.display_name_hidden_at,
+  adultConfirmedAt: row.adult_confirmed_at,
+  activatedAt: row.activated_at,
+});
+
+const inviteCodeFrom = (row: Selectable<InviteCodeTable>): InviteCode => ({
+  codeSha256: row.code_sha256,
+  athleteId: row.athlete_id,
+  expiresAt: row.expires_at,
+  usedAt: row.used_at,
+});
+
+const blockFrom = (row: Selectable<BlockTable>): Block => ({
+  athleteId: row.athlete_id,
+  blockedAthleteId: row.blocked_athlete_id,
+  createdAt: row.created_at,
+});
+
+const reportFrom = (row: Selectable<ReportTable>): Report => ({
+  id: row.id,
+  athleteId: row.athlete_id,
+  targetAthleteId: row.target_athlete_id,
+  reason: row.reason,
+  createdAt: row.created_at,
+  closedAt: row.closed_at,
+  closedByAthleteId: row.closed_by_athlete_id,
+  outcome: row.outcome,
+});
+
+const moderationLogFrom = (row: Selectable<ModerationLogTable>): ModerationLogEntry => ({
+  id: row.id,
+  action: row.action as LoggedActionKind,
+  actorAthleteId: row.actor_athlete_id,
+  targetAthleteId: row.target_athlete_id,
+  reportId: row.report_id,
+  reason: row.reason,
+  at: row.at,
 });
 
 const deviceKeyFrom = (row: Selectable<DeviceKeyTable>): DeviceKey => ({
@@ -471,6 +692,59 @@ const resultFrom = (row: Selectable<ResultTable>): Result => ({
   flags: row.flags,
 });
 
+/**
+ * A moderator action's effect on its target, inside the action's transaction.
+ * `false` when the athlete is not in a state the action applies to.
+ */
+async function applyToAthlete(
+  trx: Transaction<InstanceDatabase>,
+  action: ModerationAction,
+  target: Selectable<AthleteTable>,
+): Promise<boolean> {
+  const at = action.at;
+  const athlete = trx.updateTable('athlete').where('id', '=', target.id);
+  switch (action.action) {
+    case 'suspend': {
+      if (target.suspended_at !== null) return false;
+      await athlete.set({ suspended_at: at }).execute();
+      // A suspension binds EVERY key at once (#775, ADR 0028 D-6.2): no session
+      // the athlete holds outlives it, whichever device it was opened on.
+      await trx
+        .updateTable('session')
+        .set({ revoked_at: sql<number>`coalesce(revoked_at, ${at})` })
+        .where('athlete_id', '=', target.id)
+        .execute();
+      return true;
+    }
+    case 'unsuspend':
+      if (target.suspended_at === null) return false;
+      await athlete.set({ suspended_at: null }).execute();
+      return true;
+    case 'hide_display_name':
+      if (target.display_name_hidden_at !== null) return false;
+      await athlete.set({ display_name_hidden_at: at }).execute();
+      return true;
+    case 'approve_registration':
+    case 'activate_moderator_key':
+      if (target.registration_state !== 'pending') return false;
+      await athlete.set({ registration_state: 'active', activated_at: at }).execute();
+      return true;
+    case 'refuse_registration':
+      if (target.registration_state !== 'pending') return false;
+      await athlete.set({ registration_state: 'refused' }).execute();
+      // A rider awaiting approval holds a session to see how it went; a
+      // refusal ends it, as a suspension does.
+      await trx
+        .updateTable('session')
+        .set({ revoked_at: sql<number>`coalesce(revoked_at, ${at})` })
+        .where('athlete_id', '=', target.id)
+        .execute();
+      return true;
+    case 'dismiss_report':
+      return true;
+  }
+}
+
 /** The store over an already-migrated database. */
 export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
   let queue: Promise<unknown> = Promise.resolve();
@@ -490,11 +764,18 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             display_name: athlete.displayName,
             created_at: athlete.createdAt,
             registration_state: athlete.registrationState,
+            activated_at: athlete.registrationState === 'active' ? athlete.createdAt : null,
           })
           .onConflict((conflict) =>
             conflict.column('id').doUpdateSet({
               display_name: athlete.displayName,
               registration_state: athlete.registrationState,
+              // The first activation is kept; an account written active for
+              // the first time here is active from when it was created.
+              activated_at:
+                athlete.registrationState === 'active'
+                  ? sql<number>`coalesce(activated_at, ${athlete.createdAt})`
+                  : sql<number | null>`activated_at`,
             }),
           )
           .execute();
@@ -626,6 +907,20 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           if (key.athleteId !== athlete.id) {
             throw new OwnershipConflictError('A first key must be its own athlete’s.');
           }
+          if (registration.inviteCodeSha256 !== undefined) {
+            const invite = await trx
+              .selectFrom('invite_code')
+              .selectAll()
+              .where('code_sha256', '=', registration.inviteCodeSha256)
+              .executeTakeFirst();
+            const outcome = outcomeOf(invite, athlete.createdAt);
+            if (outcome !== 'spendable') throw new InviteRefusedError(outcome);
+            await trx
+              .updateTable('invite_code')
+              .set({ used_at: athlete.createdAt })
+              .where('code_sha256', '=', registration.inviteCodeSha256)
+              .execute();
+          }
           const held = await trx
             .selectFrom('device_key')
             .select('athlete_id')
@@ -641,6 +936,8 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               display_name: athlete.displayName,
               created_at: athlete.createdAt,
               registration_state: athlete.registrationState,
+              adult_confirmed_at: registration.adultConfirmedAt ?? null,
+              activated_at: athlete.registrationState === 'active' ? athlete.createdAt : null,
             })
             .execute();
           await trx
@@ -808,7 +1105,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         db.transaction().execute(async (trx): Promise<RenameOutcome> => {
           const row = await trx
             .selectFrom('athlete')
-            .select('display_name')
+            .select(['display_name', 'display_name_hidden_at'])
             .where('id', '=', athleteId)
             .executeTakeFirst();
           if (row === undefined) return 'not_found';
@@ -826,7 +1123,12 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             .execute();
           await trx
             .updateTable('athlete')
-            .set({ display_name: name })
+            // A new name is new content: a moderator's hide was of the old one
+            // (#83). The SAME name is not new, and stays hidden (#891's review).
+            .set({
+              display_name: name,
+              display_name_hidden_at: name === row.display_name ? row.display_name_hidden_at : null,
+            })
             .where('id', '=', athleteId)
             .execute();
           return 'renamed';
@@ -1199,12 +1501,280 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         ).map(resultFrom),
       ),
 
+    putBlock: (athleteId, blockedAthleteId, at) =>
+      exclusive(async () => {
+        await db
+          .insertInto('block')
+          .values({ athlete_id: athleteId, blocked_athlete_id: blockedAthleteId, created_at: at })
+          .onConflict((conflict) =>
+            conflict.columns(['athlete_id', 'blocked_athlete_id']).doNothing(),
+          )
+          .execute();
+      }),
+
+    deleteBlock: (athleteId, blockedAthleteId) =>
+      exclusive(async () => {
+        const deleted = await db
+          .deleteFrom('block')
+          .where('athlete_id', '=', athleteId)
+          .where('blocked_athlete_id', '=', blockedAthleteId)
+          .executeTakeFirst();
+        return deleted.numDeletedRows > 0n;
+      }),
+
+    listBlocks: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('block')
+            .selectAll()
+            .where('athlete_id', '=', athleteId)
+            .orderBy('blocked_athlete_id')
+            .execute()
+        ).map(blockFrom),
+      ),
+
+    sight: (viewerId, subjectId) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('athlete')
+          .select((eb) => [
+            'registration_state',
+            'suspended_at',
+            eb
+              .exists(
+                eb
+                  .selectFrom('block')
+                  .select('block.athlete_id')
+                  .where((where) =>
+                    where.or([
+                      where.and([
+                        where('block.athlete_id', '=', viewerId),
+                        where('block.blocked_athlete_id', '=', subjectId),
+                      ]),
+                      where.and([
+                        where('block.athlete_id', '=', subjectId),
+                        where('block.blocked_athlete_id', '=', viewerId),
+                      ]),
+                    ]),
+                  ),
+              )
+              .as('blocked'),
+          ])
+          .where('athlete.id', '=', subjectId)
+          .executeTakeFirst();
+        return row === undefined
+          ? undefined
+          : {
+              registrationState: row.registration_state,
+              suspendedAt: row.suspended_at,
+              blocked: Number(row.blocked) === 1,
+            };
+      }),
+
+    putReport: (report) =>
+      exclusive(async () => {
+        const inserted = await db
+          .insertInto('report')
+          .values({
+            athlete_id: report.athleteId,
+            target_athlete_id: report.targetAthleteId,
+            reason: report.reason,
+            created_at: report.createdAt,
+            closed_at: report.closedAs === undefined ? null : report.createdAt,
+            closed_by_athlete_id: null,
+            outcome: report.closedAs ?? null,
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow();
+        return inserted.id;
+      }),
+
+    listReports: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('report')
+            .selectAll()
+            .where('athlete_id', '=', athleteId)
+            .orderBy('id')
+            .execute()
+        ).map(reportFrom),
+      ),
+
+    listOpenReports: () =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('report')
+            .selectAll()
+            .where('closed_at', 'is', null)
+            .orderBy('id')
+            .execute()
+        ).map(reportFrom),
+      ),
+
+    moderate: (action) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx): Promise<ModerationOutcome> => {
+          if (action.reportId !== null) {
+            const report = await trx
+              .selectFrom('report')
+              .select(['target_athlete_id', 'closed_at'])
+              .where('id', '=', action.reportId)
+              .executeTakeFirst();
+            if (report === undefined) return { outcome: 'not_found' };
+            if (report.closed_at !== null) return { outcome: 'not_applicable' };
+            if (
+              action.targetAthleteId !== null &&
+              report.target_athlete_id !== action.targetAthleteId
+            ) {
+              return { outcome: 'not_found' };
+            }
+          } else if (action.action === 'dismiss_report') {
+            return { outcome: 'not_found' };
+          }
+          if (action.action !== 'dismiss_report') {
+            if (action.targetAthleteId === null) return { outcome: 'not_found' };
+            const target = await trx
+              .selectFrom('athlete')
+              .selectAll()
+              .where('id', '=', action.targetAthleteId)
+              .executeTakeFirst();
+            if (target === undefined) return { outcome: 'not_found' };
+            const applied = await applyToAthlete(trx, action, target);
+            if (!applied) return { outcome: 'not_applicable' };
+          }
+          if (action.reportId !== null) {
+            await trx
+              .updateTable('report')
+              .set({
+                closed_at: action.at,
+                closed_by_athlete_id: action.actorAthleteId,
+                outcome: action.action,
+              })
+              .where('id', '=', action.reportId)
+              .execute();
+          }
+          const logged = await trx
+            .insertInto('moderation_log')
+            .values({
+              actor_athlete_id: action.actorAthleteId,
+              action: action.action,
+              target_athlete_id: action.targetAthleteId,
+              report_id: action.reportId,
+              reason: action.reason,
+              at: action.at,
+            })
+            .returning('id')
+            .executeTakeFirstOrThrow();
+          return { outcome: 'applied', logId: logged.id };
+        }),
+      ),
+
+    logRefusedAction: (action) =>
+      exclusive(async () => {
+        const logged = await db
+          .insertInto('moderation_log')
+          .values({
+            actor_athlete_id: action.actorAthleteId,
+            action: `refused_${action.action}`,
+            target_athlete_id: action.targetAthleteId,
+            report_id: action.reportId,
+            reason: action.reason,
+            at: action.at,
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow();
+        return logged.id;
+      }),
+
+    listModerationLog: () =>
+      exclusive(async () =>
+        (await db.selectFrom('moderation_log').selectAll().orderBy('id').execute()).map(
+          moderationLogFrom,
+        ),
+      ),
+
+    confirmAdult: (athleteId, at) =>
+      exclusive(async () => {
+        const updated = await db
+          .updateTable('athlete')
+          .set({ adult_confirmed_at: sql<number>`coalesce(adult_confirmed_at, ${at})` })
+          .where('id', '=', athleteId)
+          .executeTakeFirst();
+        return updated.numUpdatedRows > 0n;
+      }),
+
+    listPendingAthletes: () =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('athlete')
+            .selectAll()
+            .where('registration_state', '=', 'pending')
+            .orderBy('created_at')
+            .orderBy('id')
+            .execute()
+        ).map(athleteFrom),
+      ),
+
+    countActivityRecords: (athleteId) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('activity_record')
+          .select((eb) => eb.fn.countAll<number>().as('n'))
+          .where('athlete_id', '=', athleteId)
+          .executeTakeFirstOrThrow();
+        return Number(row.n);
+      }),
+
+    mintInviteCode: (code, log) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          await trx
+            .insertInto('invite_code')
+            .values({
+              code_sha256: code.codeSha256,
+              athlete_id: code.athleteId,
+              expires_at: code.expiresAt,
+              used_at: null,
+            })
+            .execute();
+          await trx
+            .insertInto('moderation_log')
+            .values({
+              actor_athlete_id: code.athleteId,
+              action: 'mint_invite',
+              target_athlete_id: null,
+              report_id: null,
+              reason: log.reason,
+              at: log.at,
+            })
+            .execute();
+        }),
+      ),
+
+    listInviteCodes: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('invite_code')
+            .selectAll()
+            .where('athlete_id', '=', athleteId)
+            .orderBy('code_sha256')
+            .execute()
+        ).map(inviteCodeFrom),
+      ),
+
     eraseAthlete: (athleteId) =>
       exclusive(async () => {
         await db.transaction().execute(async (trx) => {
           for (const table of ATHLETE_TABLES_IN_ERASURE_ORDER) {
             await trx.deleteFrom(table).where('athlete_id', '=', athleteId).execute();
           }
+          // Another athlete's block OF this one names nobody once they are gone (#83).
+          await trx.deleteFrom('block').where('blocked_athlete_id', '=', athleteId).execute();
           await trx.deleteFrom('athlete').where('id', '=', athleteId).execute();
         });
       }),

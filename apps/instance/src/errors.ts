@@ -31,7 +31,9 @@
  * `CLAUDE.md` §6 lists, leaked through a status code. #36 names the case
  * "forbidden/not-found" and this is the one code for it. `registration_closed`
  * (#772) is a 403 about the INSTANCE — it registers nobody — and names no
- * athlete's resource.
+ * athlete's resource; `account_suspended` (#83) is a 403 sent only to the
+ * suspended athlete's own devices, about their own account. A block is never
+ * a 403: a request about somebody who blocked you is `not_found` (#83).
  */
 
 /** Every code this instance can send, and the HTTP status each one is sent with. */
@@ -49,10 +51,15 @@ export const ERROR_STATUS = {
   code_used: 401,
   code_expired: 401,
   registration_closed: 403,
+  account_suspended: 403,
+  registration_pending: 403,
+  registration_refused: 403,
+  not_eligible: 403,
   not_found: 404,
   method_not_allowed: 405,
   key_in_use: 409,
   last_device: 409,
+  moderation_not_applicable: 409,
   address_in_use: 409,
   payload_too_large: 413,
   rate_limited: 429,
@@ -98,6 +105,11 @@ const MESSAGES: Record<ErrorCode, string> = {
   code_used: 'That code has already been used.',
   code_expired: 'That code has expired.',
   registration_closed: 'This instance is not registering new riders.',
+  account_suspended: 'This account has been suspended by the instance’s moderators.',
+  registration_pending: 'This account is waiting for the instance’s moderators to approve it.',
+  registration_refused: 'The instance’s moderators did not approve this account.',
+  not_eligible: 'This account cannot join a public room yet. Your account page says why.',
+  moderation_not_applicable: 'That action does not apply to that account or report as it stands.',
   key_in_use: 'That device key is already registered here.',
   last_device: 'This is your last device. Revoking it needs one of your recovery codes.',
   address_in_use: 'That address is already the recovery address of another account here.',

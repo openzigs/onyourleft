@@ -43,7 +43,8 @@ describe('tools/migrate.ts (#769)', () => {
     expect(down.out).toMatch(/down: 1 migration\(s\) changed/);
     expect(down.out).not.toContain(LAST);
     expect(down.out).toContain(`applied: ${NAMES.slice(0, -1).join(', ')}\n`);
-    expect(down.out).not.toMatch(/ {2}recovery_email_confirmation:/);
+    // The newest migration (0008, #775) is the one that creates `invite_code`.
+    expect(down.out).not.toMatch(/ {2}invite_code:/);
 
     const up = migrate(path, 'up');
     expect(up.out).toMatch(/up: 1 migration\(s\) changed/);

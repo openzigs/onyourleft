@@ -34,6 +34,20 @@ export interface AthleteTable {
   readonly display_name: string;
   readonly created_at: number;
   readonly registration_state: string;
+  /** When a moderator suspended the account, or `null` (#83). Added by migration 0007. */
+  readonly suspended_at: number | null;
+  /** When a moderator hid the display name, or `null` (#83). Added by migration 0007. */
+  readonly display_name_hidden_at: number | null;
+  /**
+   * When the rider confirmed they are 18 or over, or `null` (#775, ruling Q5).
+   * A confirmation's date, never a birth date. Added by migration 0008.
+   */
+  readonly adult_confirmed_at: number | null;
+  /**
+   * When the account became active — registered active, or approved — or
+   * `null` while it never has (#775). Added by migration 0008.
+   */
+  readonly activated_at: number | null;
 }
 
 /** An Ed25519 public key an athlete signs with (ADR 0014). */
@@ -164,6 +178,46 @@ export interface RecoveryEmailConfirmationTable {
   readonly used_at: number | null;
 }
 
+/** One athlete blocking another (#83): the blocker's row. */
+export interface BlockTable {
+  readonly athlete_id: string;
+  /** No foreign key: `eraseAthlete` removes the rows naming an erased athlete (migration 0007). */
+  readonly blocked_athlete_id: string;
+  readonly created_at: number;
+}
+
+/** A report (#83): the reporter's row. */
+export interface ReportTable {
+  readonly id: Generated<number>;
+  readonly athlete_id: string;
+  readonly target_athlete_id: string;
+  readonly reason: string;
+  readonly created_at: number;
+  readonly closed_at: number | null;
+  readonly closed_by_athlete_id: string | null;
+  readonly outcome: string | null;
+}
+
+/** One moderator action (#83). Append-only: the schema refuses an UPDATE or a DELETE. */
+export interface ModerationLogTable {
+  readonly id: Generated<number>;
+  readonly actor_athlete_id: string;
+  readonly action: string;
+  readonly target_athlete_id: string | null;
+  readonly report_id: number | null;
+  readonly reason: string;
+  readonly at: number;
+}
+
+/** A single-use invitation a moderator minted, as its SHA-256 (#775). */
+export interface InviteCodeTable {
+  readonly code_sha256: string;
+  /** The moderator who minted it. */
+  readonly athlete_id: string;
+  readonly expires_at: number;
+  readonly used_at: number | null;
+}
+
 /** Every table, by name. */
 export interface InstanceDatabase {
   readonly athlete: AthleteTable;
@@ -180,4 +234,8 @@ export interface InstanceDatabase {
   readonly recovery_email: RecoveryEmailTable;
   readonly email_recovery_token: EmailRecoveryTokenTable;
   readonly recovery_email_confirmation: RecoveryEmailConfirmationTable;
+  readonly block: BlockTable;
+  readonly report: ReportTable;
+  readonly moderation_log: ModerationLogTable;
+  readonly invite_code: InviteCodeTable;
 }

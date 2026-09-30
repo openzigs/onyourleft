@@ -28,7 +28,7 @@ import { startTestInstance, type TestInstance } from '../instance-testing.ts';
 import { openSqlStore } from '../store/open-sql-store.ts';
 import type { SqlStore } from '../store/sql-store.ts';
 import type { InstanceProbes } from '../route-kit.ts';
-import { createIdentity, type Identity, type IdentityOptions } from './identity.ts';
+import { createIdentity, DEFAULT_LIMITS, type Identity, type IdentityOptions } from './identity.ts';
 
 /** The origin every test instance states. */
 export const TEST_ORIGIN = 'https://ride.example';
@@ -142,6 +142,14 @@ export async function startIdentityInstance(
   const confirmations: { address: string; token: string }[] = [];
   const { emailRecovery, storeSeenBy, probes, ...rest } = options;
   const identity = createIdentity({
+    // The identity tests predate registration modes (#775) and register
+    // riders as they sign in; a test of a mode names it. The default an
+    // instance really starts with is `approval`, asserted in registration.test.ts.
+    registration: 'open',
+    // Every test rider signs in from one loopback address, so the per-address
+    // registration limit (#775) would be what these tests measured. A test of
+    // that limit sets it.
+    limits: { ...DEFAULT_LIMITS, registrationPerAddress: { limit: 10_000, windowMs: 60_000 } },
     ...rest,
     store: storeSeenBy === undefined ? store : storeSeenBy(store),
     origin: TEST_ORIGIN,
