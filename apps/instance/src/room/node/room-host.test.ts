@@ -31,12 +31,20 @@ async function hosted(settings: RoomSettings, options: Partial<HostOptions>) {
     pingIntervalMs: 0,
     ...options,
   });
-  const served = await serveHost(() => host, settings);
+  const accepted: WebSocket[] = [];
+  const served = await serveHost(
+    () => host,
+    settings,
+    { noServer: true },
+    (ws) => {
+      accepted.push(ws);
+    },
+  );
   cleanups.push(async () => {
     await host.stop({ code: 1001, reason: 'server-stopping' }, 200);
     await served.close();
   });
-  return { host, url: served.url };
+  return { host, url: served.url, accepted };
 }
 
 function client(url: string, options: ConstructorParameters<typeof WebSocket>[2] = {}) {
@@ -73,7 +81,7 @@ describe('backpressure — #780 criterion 4', () => {
     // in the minutes a 1 Hz room would take — and times every tick.
     let nowMs = 0;
     const LIMIT = 64 * 1024;
-    const { host, url } = await hosted(
+    const { host, url, accepted } = await hosted(
       roomSettings({
         kind: 'ride',
         ridingPosition: 'hoods',
@@ -107,12 +115,19 @@ describe('backpressure — #780 criterion 4', () => {
     await stalled.open;
     stalled.socket.send(helloText('ticket-stalled'));
     await until(() => host.view('conformance')?.seats.length === 100, 'a full room');
-    // It stops reading: nothing more is taken off its socket.
-    stopReading((stalled.socket as unknown as { _socket: Socket })._socket);
+    // It stops reading. What the SERVER sees of that is a socket whose writes
+    // never drain — the kernel's buffers are full — and that is made exactly
+    // so: its side of the connection is corked, so every frame sent to it
+    // waits in this process and counts in `bufferedAmount`. Stopping the
+    // client's read instead depends on how much the kernel buffers first:
+    // about a megabyte on macOS and several on the CI runner's Linux, where
+    // the same test ran past its 60 s before the limit was reached.
+    const stalledOnServer = accepted.at(-1) as unknown as { _socket: Socket };
+    stalledOnServer._socket.cork();
 
     const tickMs: number[] = [];
     let ticks = 0;
-    while ((host.metrics().refusals['too-slow'] ?? 0) === 0 && ticks < 5_000) {
+    while ((host.metrics().refusals['too-slow'] ?? 0) === 0 && ticks < 200) {
       nowMs += 1_000;
       const started = performance.now();
       host.tick('conformance');
@@ -142,17 +157,6 @@ describe('backpressure — #780 criterion 4', () => {
     expect(tickMs[Math.floor(tickMs.length * 0.99)]).toBeLessThan(500);
   }, 60_000);
 });
-
-/** Stops a socket reading for good: the kernel's buffers fill, and then the sender's. */
-function stopReading(socket: Socket): void {
-  const handle = (socket as unknown as { _handle: { readStop(): number; reading: boolean } })
-    ._handle;
-  socket.pause();
-  socket.resume = () => socket;
-  socket._read = () => undefined;
-  handle.reading = false;
-  handle.readStop();
-}
 
 /** A TCP proxy that closes both sides after `idleMs` with no byte in either direction. */
 async function idleClosingProxy(target: string, idleMs: number) {

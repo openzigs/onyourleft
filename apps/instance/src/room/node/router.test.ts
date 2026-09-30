@@ -153,6 +153,21 @@ describe('what is refused before any room state changes — #780 criterion 1', (
     expect(late.messages).toEqual([{ type: 'refuse', reason: 'room-closed' }]);
   });
 
+  it('refuses a started race no worker holds — the restart case (the live case is instance.test.ts §B1)', async () => {
+    harness = await startRouter({
+      workers: 1,
+      lookup: (roomId) =>
+        Promise.resolve(
+          roomId === 'running'
+            ? { kind: 'open', plan: ridePlan(roomId) }
+            : { kind: 'started', plan: ridePlan(roomId) },
+        ),
+    });
+    const after = await join('interrupted', 'ticket-ann');
+    expect(await after.closed).toEqual({ code: 4005, reason: 'room-closed' });
+    expect(after.messages).toEqual([{ type: 'refuse', reason: 'room-closed' }]);
+  });
+
   it('closes a hello with no ticket, a bad ticket, and a spent ticket with their documented codes — and seats nobody', async () => {
     const spent = new Set<string>();
     harness = await startRouter({

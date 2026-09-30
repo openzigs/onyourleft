@@ -48,6 +48,8 @@ export async function serveHost(
   host: () => RoomHost,
   settings: RoomSettings,
   serverOptions: ConstructorParameters<typeof WebSocketServer>[0] = { noServer: true },
+  /** Every server-side socket as it is accepted, in order: a test may reach into one. */
+  onAccept?: (ws: WebSocket) => void,
 ): Promise<{ readonly url: string; readonly server: Server; close(): Promise<void> }> {
   const wss = new WebSocketServer({ ...serverOptions, noServer: true });
   const server = createServer();
@@ -55,6 +57,7 @@ export async function serveHost(
   server.on('upgrade', (request, socket, head) => {
     wss.handleUpgrade(request, socket, head, (ws) => {
       socketId += 1;
+      onAccept?.(ws);
       host().accept(ROOM_ID, settings, ws, `s${String(socketId)}`);
     });
   });

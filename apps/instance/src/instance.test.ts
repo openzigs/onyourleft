@@ -260,6 +260,78 @@ describe('migrations are a deploy step — #791 criteria 5 and 8', () => {
   }, 60_000);
 });
 
+describe('a race rider who drops mid-race rejoins it — #895 review B1', () => {
+  it('rejoins the running race through the real instance and router, with a fresh ticket, into the same seat', async () => {
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    expect(
+      cli(
+        path,
+        'room-open',
+        'race-rejoin',
+        '--kind',
+        'race',
+        '--length',
+        '100000',
+        '--countdown',
+        '0',
+      ).status,
+    ).toBe(0);
+    const { instance } = await start(path);
+    const ann = await signIn(instance.url, 'Ann');
+    const bob = await signIn(instance.url, 'Bob');
+    const annFirst = await joinRoom(
+      wsUrl(instance.url),
+      'race-rejoin',
+      await ticket(instance.url, ann.sessionToken, 'race-rejoin'),
+    );
+    const bobSocket = await joinRoom(
+      wsUrl(instance.url),
+      'race-rejoin',
+      await ticket(instance.url, bob.sessionToken, 'race-rejoin'),
+    );
+    clients.push(annFirst, bobSocket);
+    await until(() => annFirst.messages.length > 0 && bobSocket.messages.length > 0, 'welcomes');
+    const annSeat = annFirst.messages[0]?.type === 'welcome' ? annFirst.messages[0].riderId : -1;
+    const started = await fetch(`${instance.url}/v1/rooms/race-rejoin/start`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${ann.sessionToken}` },
+    });
+    expect(started.status).toBe(200);
+    await until(
+      () => bobSocket.messages.some((m) => m.type === 'frame'),
+      'the race running',
+      15_000,
+    );
+    // The race has left its lobby, and the store says so.
+    const fresh = openServingStore(path);
+    try {
+      for (let i = 0; (await fresh.getRoomCourse('race-rejoin'))?.raceStartedAt == null; i += 1) {
+        if (i > 100) throw new Error('the race was never marked started');
+        await new Promise((done) => setTimeout(done, 50));
+      }
+    } finally {
+      await fresh.close();
+    }
+
+    // Ann's connection drops — a tunnel restart — and she comes back at once.
+    annFirst.socket.terminate();
+    const annAgain = await joinRoom(
+      wsUrl(instance.url),
+      'race-rejoin',
+      await ticket(instance.url, ann.sessionToken, 'race-rejoin'),
+    );
+    clients.push(annAgain);
+    await until(() => annAgain.messages.length > 0, 'an answer to the rejoin', 15_000);
+    expect(annAgain.messages[0]).toMatchObject({ type: 'welcome', riderId: annSeat });
+    await until(
+      () => annAgain.messages.some((m) => m.type === 'frame'),
+      'frames after the rejoin',
+      15_000,
+    );
+  }, 60_000);
+});
+
 describe('graceful shutdown drains rooms — #780 criterion 6', () => {
   it('on SIGTERM mid-race tells the riders the server is stopping, and the result already final is on disk', async () => {
     const dir = await freshDirectory();

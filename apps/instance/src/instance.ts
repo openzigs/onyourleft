@@ -96,11 +96,11 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     const room = await store.getRoom(roomId);
     if (room === undefined) return { kind: 'unknown' };
     const course = await store.getRoomCourse(roomId);
-    if (course?.raceStartedAt !== null && course?.raceStartedAt !== undefined) {
-      return { kind: 'ended' };
-    }
     const plan = planFor(room, course);
-    return plan === undefined ? { kind: 'unknown' } : { kind: 'open', plan };
+    const started = course?.raceStartedAt !== null && course?.raceStartedAt !== undefined;
+    if (plan === undefined) return started ? { kind: 'ended' } : { kind: 'unknown' };
+    // Live on a worker, it is rejoined there; on none, the router refuses it.
+    return started ? { kind: 'started', plan } : { kind: 'open', plan };
   };
 
   const router: RoomRouter = new RoomRouter({

@@ -52,20 +52,32 @@ import type { HostMetrics, RoomResult } from './room-host.ts';
  * - **Not ready** (the database is still being migrated, `serve.ts`):
  *   `503` before the upgrade.
  * - **No such room**, or one this build cannot open (`room-plan.ts`): `404`.
- * - **A race that has already left its lobby** — finished, or interrupted by
- *   a restart (#807: an interrupted race does not resume): the handshake is
- *   completed HERE and the socket is sent `refuse room-closed` and closed
- *   `4005`, so a rejoining client is told in words rather than by a failed
- *   upgrade.
+ * - **A race that has left its lobby and that no live worker holds** —
+ *   finished and emptied, or interrupted by a restart (#807: an interrupted
+ *   race does not resume): the handshake is completed HERE and the socket is
+ *   sent `refuse room-closed` and closed `4005`, so a rejoining client is told
+ *   in words rather than by a failed upgrade. A started race a worker DOES
+ *   hold is routed to it, so a rider who dropped mid-race rejoins
+ *   (#895's review, B1).
  * - A ticket that is missing, wrong or spent is the ROOM's refusal, at hello
  *   (`room-host.ts`, `close-codes.ts`).
  */
 
 export const ROOM_SOCKET_PATH = /^\/v1\/rooms\/([A-Za-z0-9_-]{1,128})\/socket$/;
 
-/** What the router is told about a room id. */
+/**
+ * What the router is told about a room id.
+ *
+ * `started` is a race that has left its lobby. It is still LIVE while a
+ * worker holds it — a rider who dropped rejoins it there, into the same
+ * seat — and it is closed only when no worker does: after it finished and
+ * emptied, or after the instance restarted in the middle of it (#807: an
+ * interrupted race does not resume). The router decides which, because only
+ * the router knows where rooms are placed.
+ */
 export type RoomLookup =
   | { readonly kind: 'open'; readonly plan: RoomPlan }
+  | { readonly kind: 'started'; readonly plan: RoomPlan }
   | { readonly kind: 'ended' }
   | { readonly kind: 'unknown' };
 
@@ -285,7 +297,11 @@ export class RoomRouter {
       refuseHttp(socket, 404, 'Not Found');
       return;
     }
-    if (found.kind === 'ended') {
+    // A started race is joined where it is still running, and only there: a
+    // started race no live worker holds is never opened again as a lobby.
+    const live = this.#placement.get(roomId);
+    const running = found.kind === 'started' && live?.alive === true;
+    if (found.kind === 'ended' || (found.kind === 'started' && !running)) {
       resumeReading(socket);
       this.#refuser.handleUpgrade(request, socket, head, (ws) => {
         ws.send(encodeMessage({ type: 'refuse', reason: 'room-closed' }));
