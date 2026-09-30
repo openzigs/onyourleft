@@ -39,7 +39,7 @@ Part 1 — in the app (41 packages)
   jsqr 1.4.0 — Apache-2.0
   kdbush 4.1.0 — ISC
   lucide-react 1.48.0 — ISC
-  maplibre-gl 6.10.0 — BSD-3-Clause
+  maplibre-gl 6.11.2 — BSD-3-Clause
   minimist 1.2.8 — MIT
   murmurhash-js 1.0.0 — MIT
   pbf 5.1.2 — BSD-3-Clause
