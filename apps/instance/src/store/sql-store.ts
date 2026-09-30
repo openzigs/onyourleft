@@ -44,6 +44,7 @@ import type {
   LinkCodeTable,
   RecoveryCodeTable,
   ResultTable,
+  RoomCourseTable,
   RoomTable,
   SessionTable,
 } from './schema.ts';
@@ -91,6 +92,20 @@ export interface Room {
   readonly visibility: 'private' | 'public';
   readonly routeSha256: string;
   readonly physicsVersion: number;
+}
+
+/** A room's course, as the room core needs it (#780): never geometry. */
+export interface RoomCourse {
+  readonly roomId: string;
+  readonly lengthMetres: number;
+  /** `[fromMetres, percent]` steps, the first from 0, ascending. */
+  readonly grades: readonly (readonly [number, number])[];
+  readonly ridingPosition: 'upright' | 'hoods' | 'drops';
+  readonly capacity: number | null;
+  readonly countdownMs: number | null;
+  readonly rejoinWindowMs: number | null;
+  /** Unix seconds: when this race left its lobby, or `null`. Set by {@link SqlStore.markRaceStarted}. */
+  readonly raceStartedAt: number | null;
 }
 
 export interface Result {
@@ -236,6 +251,11 @@ export interface SqlStore {
 
   putRoom(room: Room): Promise<void>;
   getRoom(roomId: string): Promise<Room | undefined>;
+  /** A room's course. A room is nobody's, so this is not athlete-scoped. */
+  putRoomCourse(course: RoomCourse): Promise<void>;
+  getRoomCourse(roomId: string): Promise<RoomCourse | undefined>;
+  /** A race left its lobby at `at` (Unix seconds). The first time is kept. */
+  markRaceStarted(roomId: string, at: number): Promise<void>;
 
   putResult(result: Result): Promise<void>;
   listResults(athleteId: string): Promise<readonly Result[]>;
@@ -346,6 +366,17 @@ const roomFrom = (row: Selectable<RoomTable>): Room => ({
   visibility: row.visibility,
   routeSha256: row.route_sha256,
   physicsVersion: row.physics_version,
+});
+
+const roomCourseFrom = (row: Selectable<RoomCourseTable>): RoomCourse => ({
+  roomId: row.room_id,
+  lengthMetres: row.length_metres,
+  grades: JSON.parse(row.grades) as [number, number][],
+  ridingPosition: row.riding_position,
+  capacity: row.capacity,
+  countdownMs: row.countdown_ms,
+  rejoinWindowMs: row.rejoin_window_ms,
+  raceStartedAt: row.race_started_at,
 });
 
 const resultFrom = (row: Selectable<ResultTable>): Result => ({
@@ -897,6 +928,43 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           .where('id', '=', roomId)
           .executeTakeFirst();
         return row === undefined ? undefined : roomFrom(row);
+      }),
+
+    putRoomCourse: (course) =>
+      exclusive(async () => {
+        const row = {
+          length_metres: course.lengthMetres,
+          grades: JSON.stringify(course.grades),
+          riding_position: course.ridingPosition,
+          capacity: course.capacity,
+          countdown_ms: course.countdownMs,
+          rejoin_window_ms: course.rejoinWindowMs,
+        };
+        await db
+          .insertInto('room_course')
+          .values({ room_id: course.roomId, race_started_at: course.raceStartedAt, ...row })
+          .onConflict((conflict) => conflict.column('room_id').doUpdateSet(row))
+          .execute();
+      }),
+
+    getRoomCourse: (roomId) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('room_course')
+          .selectAll()
+          .where('room_id', '=', roomId)
+          .executeTakeFirst();
+        return row === undefined ? undefined : roomCourseFrom(row);
+      }),
+
+    markRaceStarted: (roomId, at) =>
+      exclusive(async () => {
+        await db
+          .updateTable('room_course')
+          .set({ race_started_at: at })
+          .where('room_id', '=', roomId)
+          .where('race_started_at', 'is', null)
+          .execute();
       }),
 
     putResult: (result) =>

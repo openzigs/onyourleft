@@ -253,7 +253,18 @@ const SQL_DRIVER_IMPORT_PATTERNS = [
  */
 const INSTANCE_NODE_ADAPTER_FILES = [
   'apps/instance/src/main.ts',
+  'apps/instance/src/serve.ts',
   'apps/instance/src/node-listener.ts',
+  'apps/instance/src/operator/cli.ts',
+  'apps/instance/src/operator/run.ts',
+  'apps/instance/src/room/node/router.ts',
+  'apps/instance/src/room/node/worker.ts',
+  'apps/instance/src/room/node/worker-main.ts',
+  'apps/instance/src/instance.ts',
+  'apps/instance/src/node-imports.ts',
+  'apps/instance/src/operator/commands.ts',
+  'apps/instance/src/store/backup.ts',
+  'apps/instance/src/store/serving.ts',
   'apps/instance/src/store/node-sqlite.ts',
   'apps/instance/src/blob/disk-blob-store.ts',
   'apps/instance/src/**/*.test.ts',

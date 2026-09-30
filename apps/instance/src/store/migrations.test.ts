@@ -70,10 +70,14 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   activity_record: `INSERT INTO activity_record VALUES ('a', '${'1'.repeat(64)}', x'00ff', 4)`,
   room: `INSERT INTO room VALUES ('room', 'race', 'private', '${'2'.repeat(64)}', 1)`,
   result: `INSERT INTO result VALUES ('room', 'a', 1000, 0)`,
+  room_course: `INSERT INTO room_course VALUES ('room', 450, '[[0,0],[150,2]]', 'hoods', NULL, 2000, NULL, NULL)`,
   auth_challenge: `INSERT INTO auth_challenge VALUES ('${'3'.repeat(64)}', 'key-b', 5, NULL)`,
   recovery_code: `INSERT INTO recovery_code VALUES ('${'4'.repeat(64)}', 'a', 6, NULL)`,
   link_code: `INSERT INTO link_code VALUES ('${'5'.repeat(64)}', 'a', 'key-a', 7, NULL)`,
-  display_name_change: `INSERT INTO display_name_change (athlete_id, previous_name, changed_at) VALUES ('a', 'Old', 8)`,
+  // An explicit id, so the second seeding is a conflict rather than a second
+  // row: with no id the autoincrement made one, and any migration after 0004
+  // read that as its `down` adding a row (#780, the first such migration).
+  display_name_change: `INSERT INTO display_name_change (id, athlete_id, previous_name, changed_at) VALUES (1, 'a', 'Old', 8)`,
   recovery_email: `INSERT INTO recovery_email VALUES ('a', 'a@example.org')`,
   email_recovery_token: `INSERT INTO email_recovery_token VALUES ('${'6'.repeat(64)}', 'a', 9, NULL)`,
 };

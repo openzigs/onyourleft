@@ -9,7 +9,8 @@
  * adapter runs here under fakes on every `pnpm run test`; under a real
  * `workerd` it runs with `pnpm --filter @onyourleft/instance run test:workerd`,
  * which provides `workerd` and switches the last block on. #780's Node adapter
- * joins {@link ADAPTERS} and changes nothing else in this file.
+ * — real `ws` sockets over loopback into the adapter's `RoomHost` — joined
+ * {@link ADAPTERS} and changed nothing else in this file.
  */
 
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
@@ -25,6 +26,7 @@ import {
   type Transcript,
 } from './conformance-testing.ts';
 import { fakeDurableRoom } from './durable-object/fake-runtime-testing.ts';
+import { nodeRoom } from './node/node-room-testing.ts';
 import type { Workerd } from './workerd-testing.ts';
 
 declare module 'vitest' {
@@ -38,6 +40,7 @@ const underWorkerd = inject('workerd') === true;
 
 const ADAPTERS: readonly (() => RoomUnderTest)[] = [
   () => fakeDurableRoom(conformanceSettings(), admitConformance),
+  () => nodeRoom(conformanceSettings(), admitConformance),
 ];
 
 let reference: Transcript;

@@ -24,7 +24,10 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { openSqlStore } from '../open-sql-store.ts';
+import type { Kysely } from 'kysely';
+import { migrateToLatest } from '../migrate.ts';
+import { MIGRATIONS, type InstanceMigration } from '../migrations/index.ts';
+import { openKysely, openSqlStore } from '../open-sql-store.ts';
 import type {
   ActivityRecord,
   Athlete,
@@ -252,4 +255,26 @@ export function registrationFixture(athleteId: string): Registration {
     recoveryCodeSha256s: [hexOf(`recovery-${athleteId}`)],
     recoveryEmail: `${athleteId}@example.org`,
   };
+}
+
+/**
+ * A database file migrated through all but the newest `leaveOut` migrations
+ * (#791): what a box coming back from a reboot looks like before its deploy's
+ * migrate step has finished.
+ */
+export async function migrateAllBut(path: string, leaveOut: number): Promise<void> {
+  const names = Object.keys(MIGRATIONS);
+  const db = openKysely(path) as unknown as Kysely<unknown>;
+  try {
+    await migrateToLatest(
+      db,
+      Object.fromEntries(
+        names
+          .slice(0, names.length - leaveOut)
+          .map((name) => [name, MIGRATIONS[name] as InstanceMigration]),
+      ),
+    );
+  } finally {
+    await db.destroy();
+  }
 }

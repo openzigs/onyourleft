@@ -126,6 +126,47 @@ describe('SqlStore (#769)', () => {
     });
   });
 
+  it('keeps a room’s course, its grade steps in order, and replaces it whole on a second put (#780)', async () => {
+    const opened = await world();
+    const course = {
+      roomId: SHARED_ROOM.id,
+      lengthMetres: 450.5,
+      grades: [
+        [0, 0],
+        [150, 2],
+        [300, -1.5],
+      ] as const,
+      ridingPosition: 'hoods' as const,
+      capacity: null,
+      countdownMs: 2_000,
+      rejoinWindowMs: null,
+      raceStartedAt: null,
+    };
+    await opened.write((store) => store.putRoomCourse(course));
+    expect(await opened.read((store) => store.getRoomCourse(SHARED_ROOM.id))).toEqual(course);
+    await opened.write((store) =>
+      store.putRoomCourse({ ...course, capacity: 80, grades: [[0, 1]], countdownMs: null }),
+    );
+    expect(await opened.read((store) => store.getRoomCourse(SHARED_ROOM.id))).toEqual({
+      ...course,
+      capacity: 80,
+      grades: [[0, 1]],
+      countdownMs: null,
+    });
+    expect(await opened.read((store) => store.getRoomCourse('nowhere'))).toBeUndefined();
+    // A race that left its lobby stays marked, at the first time it did.
+    await opened.write(async (store) => {
+      await store.markRaceStarted(SHARED_ROOM.id, 1_790_000_100);
+      await store.markRaceStarted(SHARED_ROOM.id, 1_790_000_200);
+    });
+    expect((await opened.read((store) => store.getRoomCourse(SHARED_ROOM.id)))?.raceStartedAt).toBe(
+      1_790_000_100,
+    );
+    await expect(
+      opened.write((store) => store.putRoomCourse({ ...course, roomId: 'nowhere' })),
+    ).rejects.toThrow(/FOREIGN KEY/);
+  });
+
   it('never un-revokes a device key or a session on a later put (#842 review)', async () => {
     const opened = await world();
     await opened.write(async (store) => {

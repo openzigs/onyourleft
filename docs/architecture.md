@@ -1259,9 +1259,16 @@ decided how it is built. [#767](https://github.com/openzigs/onyourleft/issues/76
 [#36](https://github.com/openzigs/onyourleft/issues/36) gave it an API contract and an error model.
 **What it does today is small on purpose**: four metadata routes, and — since #855 (#772, #773,
 #774) — the identity routes under `/v1/auth/`, which a handler serves only when it is HANDED an
-identity service over a store. The Node entry point is not handed one yet (see "Identity" below),
-so a running instance still answers the metadata alone. No sync and no reachable room exists yet
-— #776 and #780 build them.
+identity service over a store. ⚠️ **Since #780 the Node entry point opens the store and serves
+rooms**, and a reviewer who remembers "a running instance still answers the metadata alone" is
+reading the old paragraph: `src/instance.ts` opens the store (never migrating it — the deploy's
+`migrate` step does, #791), hands the handler the accounts on it, and serves room sockets through a
+router and one room-worker process per core (`src/room/node/`, below). What a rider cannot do yet is
+create a room ([#784](https://github.com/openzigs/onyourleft/issues/784)) or join one from the app
+([#782](https://github.com/openzigs/onyourleft/issues/782)); an operator opens rooms with
+`node src/operator/cli.ts room-open`. The first deployment and its runbook are
+[`self-hosting/home-machine.md`](self-hosting/home-machine.md) and
+[`operating-an-instance.md`](operating-an-instance.md).
 
 **The device is canonical and a rider with no instance loses nothing** (ADR 0036 D-3). Nothing in
 `apps/web` or `apps/mobile` imports the instance, and nothing may: a client reaches it over the
@@ -1270,7 +1277,11 @@ network through one module (#777), which is the one `no-network.test.ts` will ad
 ```mermaid
 flowchart LR
   subgraph apps/instance
-    main[src/main.ts<br/>reads env, starts] --> listener[src/node-listener.ts<br/>node:http adapter]
+    main[src/main.ts<br/>resolve hook, then serve.ts] --> inst[src/instance.ts<br/>store, accounts, router]
+    inst --> listener[src/node-listener.ts<br/>node:http adapter]
+    inst --> router[src/room/node/router.ts<br/>a worker per core, #780]
+    router -->|socket handle over IPC| worker[src/room/node/worker.ts<br/>ws + room-host.ts]
+    worker --> core
     listener --> handler[src/handler.ts<br/>Request to Response]
     handler --> routes[src/routes.ts<br/>the route table]
     routes --> spec[src/openapi.ts<br/>generates openapi.json]
@@ -1296,12 +1307,25 @@ managed platform hosts rooms only or the whole instance is left to #790 (ADR 003
 routes HTTP to it and there is no production Worker entry. It is **deployed nowhere**; it runs under
 a local `workerd` in `test:workerd` (`CLAUDE.md` §4a). `src/room/conformance.test.ts` drives the
 core directly and every adapter with one script and requires byte-identical text on every socket —
-#780's Node adapter joins that file.
+#780's Node adapter, over real `ws` sockets, is in that file since #780.
 
-**No build step, and one third-party runtime dependency.** Node 24 strips the types and runs
+**The Node adapter serves the rooms** ([#780](https://github.com/openzigs/onyourleft/issues/780)).
+The HTTP process accepts a socket at `GET /v1/rooms/{roomId}/socket`, refuses it before any room
+state changes when the instance is not ready (503) or the room is unknown (404), and otherwise places
+the room on a room worker — by a hash of its id over the workers alive, then by a table, so one room
+is never split — and hands the socket over as a handle. The worker completes the WebSocket handshake
+(compression off unless the operator turns it on, Q16), looks a hello's ticket up once in the HTTP
+process's book, runs the room's 1 Hz tick, lets go of a client that stops reading, and pings every
+socket for the tunnel. Results are handed back to the HTTP process — the one writer (ADR 0037 D-5) —
+as each becomes final. A worker that dies has its rooms' sockets closed `1011 room-lost` by the
+router, which keeps an unread copy of each, and a new worker takes its place.
+
+**No build step, and two third-party runtime dependencies.** Node 24 strips the types and runs
 `src/main.ts` as committed, so the tsconfig adds `allowImportingTsExtensions` and
-`erasableSyntaxOnly`. The instance imports nothing but Node, this repository's own packages and —
-since #769, in `src/store/` alone — `kysely` (ADR 0037 D-9), which
+`erasableSyntaxOnly`; this repository's packages name no extension on their relative imports, and
+`src/node-imports.ts` is the resolve hook that lets Node load them (#780). The instance imports
+nothing but Node, this repository's own packages, `kysely` (since #769, in `src/store/` alone) and
+`ws` (since #780, in `src/room/node/`) — both ADR 0037 D-9's rows — which
 `apps/instance/third-party.txt` states and `check:notices` holds —
 and that document is **the instance's own**, served at `GET /licences/third-party.txt` and kept out
 of the app's notices (§4g of `CLAUDE.md`), because a rider's device carries none of it.
