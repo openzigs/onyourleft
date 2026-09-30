@@ -45,6 +45,7 @@ const host = new RoomHost({
     }),
   onResult: (roomId, result) => send({ type: 'result', roomId, result }),
   onRaceStarted: (roomId) => send({ type: 'race-started', roomId }),
+  onRaceFinished: (roomId) => send({ type: 'race-finished', roomId }),
   onRoomClosed: (roomId, phase) => send({ type: 'room-closed', roomId, phase }),
   onSocketClosed: (socketId) => send({ type: 'socket-closed', socketId }),
   maxBufferedBytes: settings.maxBufferedBytes,

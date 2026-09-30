@@ -151,4 +151,61 @@ describe('a rider’s room — #784', () => {
       expect(await store.countOpenPrivateRoomsWithRoute(ROUTE, 'one')).toBe(0);
     });
   });
+
+  it('lists the open rooms an athlete MADE, for their erasure — nobody else’s, none they joined, none over', async () => {
+    const opened = await world();
+    await opened.write(async (store) => {
+      await store.createPrivateRoom(newRoom('b-one', 'f', ATHLETE_B));
+      await store.createPrivateRoom(newRoom('b-two', 'g', ATHLETE_B));
+      await store.createPrivateRoom(newRoom('b-over', 'i', ATHLETE_B));
+      await store.createPrivateRoom(newRoom('c-one', 'h', ATHLETE_C));
+      await store.addRoomMember('c-one', ATHLETE_B, 1_790_001_500);
+      await store.closePrivateRoom('b-over', 1_790_001_600);
+    });
+    await opened.read(async (store) => {
+      expect(await store.listOpenPrivateRoomsMadeBy(ATHLETE_B)).toEqual(['b-one', 'b-two']);
+      expect(await store.listOpenPrivateRoomsMadeBy(ATHLETE_C)).toEqual(['c-one']);
+      expect(await store.listOpenPrivateRoomsMadeBy(ATHLETE_A)).toEqual([SHARED_PRIVATE_ROOM.id]);
+    });
+  });
+
+  it('lists every open room for the sweep: its age, whether its race started, and whether its creator is still here', async () => {
+    const opened = await world();
+    await opened.write(async (store) => {
+      await store.createPrivateRoom(newRoom('started', 'j', ATHLETE_B));
+      await store.markRaceStarted('started', 1_790_001_700);
+      await store.createPrivateRoom(newRoom('orphan', 'k', ATHLETE_C));
+      await store.createPrivateRoom(newRoom('shut', 'l', ATHLETE_C));
+      await store.closePrivateRoom('shut', 1_790_001_800);
+      await store.eraseAthlete(ATHLETE_C);
+    });
+    const rooms = await opened.read((store) => store.listOpenPrivateRooms());
+    expect(rooms).toEqual([
+      { roomId: 'orphan', createdAt: 1_790_001_000, raceStarted: false, creatorPresent: false },
+      {
+        roomId: SHARED_PRIVATE_ROOM.id,
+        createdAt: 1_790_000_600,
+        raceStarted: false,
+        creatorPresent: true,
+      },
+      { roomId: 'started', createdAt: 1_790_001_000, raceStarted: true, creatorPresent: true },
+    ]);
+  });
+
+  it('keeps the first time a race was said to be over', async () => {
+    const opened = await world();
+    await opened.write(async (store) => {
+      await store.createPrivateRoom(newRoom('raced', 'm'));
+    });
+    expect(
+      (await opened.read((store) => store.getRoomCourse('raced')))?.raceFinishedAt,
+    ).toBeUndefined();
+    await opened.write(async (store) => {
+      await store.markRaceFinished('raced', 1_790_002_000);
+      await store.markRaceFinished('raced', 1_790_003_000);
+    });
+    expect((await opened.read((store) => store.getRoomCourse('raced')))?.raceFinishedAt).toBe(
+      1_790_002_000,
+    );
+  });
 });

@@ -90,6 +90,8 @@ export interface RouterOptions {
   readonly admit: (roomId: string, ticket: string) => Admission | undefined;
   readonly onResult?: (roomId: string, result: RoomResult) => Promise<void>;
   readonly onRaceStarted?: (roomId: string) => Promise<void>;
+  /** A race is over (#785): its results may be read from now. */
+  readonly onRaceFinished?: (roomId: string) => Promise<void>;
   /**
    * A worker let a room go (#784): `phase` is where the room was — `finished`
    * or `closed` when it is over, `lobby` when its lobby only emptied and a later
@@ -238,6 +240,15 @@ export class RoomRouter {
   /** Whether every worker is alive. */
   healthy(): boolean {
     return this.#slots.length > 0 && this.#slots.every((slot) => slot.alive);
+  }
+
+  /**
+   * Whether a live worker holds `roomId` — somebody is in it, or a race is
+   * still running in it (#784: the rooms' sweep ends only a room nobody is
+   * riding).
+   */
+  holds(roomId: string): boolean {
+    return this.#placement.get(roomId)?.alive === true;
   }
 
   /** Which worker holds a room, by process id, or `undefined` if it is not placed. */
@@ -415,6 +426,9 @@ export class RoomRouter {
         return;
       case 'race-started':
         this.#track(this.#options.onRaceStarted?.(message.roomId));
+        return;
+      case 'race-finished':
+        this.#track(this.#options.onRaceFinished?.(message.roomId));
         return;
       case 'room-closed':
         if (this.#placement.get(message.roomId) === slot) this.#placement.delete(message.roomId);

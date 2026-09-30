@@ -380,6 +380,8 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
         flaggedDurationsSeconds: [60],
       }),
     );
+    // Read once the race is over, and not before (#785, ADR 0028 D-7.7).
+    await world.freshRead((store) => store.markRaceFinished(room.roomId, 1_790_000_100));
     return send(world, 'GET', `/v1/rooms/${room.roomId}/results`, rider.token);
   },
   requestEmailRecovery: (world) =>

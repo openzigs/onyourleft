@@ -117,6 +117,8 @@ export interface RoomCourseTable {
   readonly race_started_at: number | null;
   /** How many riders crossed the line: the highest place written (#785, 0013). */
   readonly finishers: Generated<number | null>;
+  /** Unix seconds: when this race's room said it was over — everybody off the road (#785, 0013). */
+  readonly race_finished_at: Generated<number | null>;
 }
 
 /** One athlete's result in one room. */

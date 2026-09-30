@@ -93,6 +93,12 @@ export interface HostOptions {
    */
   readonly onRaceStarted?: (roomId: string) => void;
   /**
+   * A race is over — every rider across the line or out of it (#785). Its
+   * result may be read from here, and not before: ADR 0028 D-7.7's "after the
+   * race is decided", held by the instance rather than only by the client.
+   */
+  readonly onRaceFinished?: (roomId: string) => void;
+  /**
    * A room has closed and holds no socket: forget where it was placed. `phase`
    * says whether it is over — `finished` (a race) or `closed` (a group ride
    * past its empty grace) — or only emptied in its lobby, which a later
@@ -202,6 +208,7 @@ interface HostedRoom {
   /** Athletes whose result has been handed on. */
   readonly reported: Set<string>;
   raceStarted: boolean;
+  raceFinished: boolean;
 }
 
 export interface HostMetrics {
@@ -408,6 +415,7 @@ export class RoomHost {
       nextTickAtMs: undefined,
       reported: new Set(),
       raceStarted: false,
+      raceFinished: false,
     };
     this.#rooms.set(roomId, hosted);
     return hosted;
@@ -454,6 +462,10 @@ export class RoomHost {
     if (hosted.settings.kind === 'race' && phase !== 'lobby' && !hosted.raceStarted) {
       hosted.raceStarted = true;
       this.#options.onRaceStarted?.(hosted.roomId);
+    }
+    if (hosted.settings.kind === 'race' && phase === 'finished' && !hosted.raceFinished) {
+      hosted.raceFinished = true;
+      this.#options.onRaceFinished?.(hosted.roomId);
     }
     if (isTicking(phase)) this.#scheduleTick(hosted);
     else this.#stopTimer(hosted);

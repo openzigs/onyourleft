@@ -30,7 +30,8 @@ import { until } from './room/node/node-room-testing.ts';
 import { readServerConfig, type ServerConfig } from './server-config.ts';
 import { migrateForDeploy, migratingMarker, openServingStore } from './store/serving.ts';
 import { migrateAllBut } from './store/testing/index.ts';
-import { roomBody } from './rooms/rooms-testing.ts';
+import { ROOM_GPX, roomBody } from './rooms/rooms-testing.ts';
+import { ROOM_SWEEP_PERIOD_MS } from './rooms/rooms.ts';
 
 const INSTANCE = fileURLToPath(new URL('..', import.meta.url));
 const MAIN = fileURLToPath(new URL('./main.ts', import.meta.url));
@@ -169,6 +170,13 @@ describe('the running instance forgets every rate-limited address when its windo
       { timing: { now: () => clock.ms, sweepTimers: timers } },
     );
     await instance.opened;
+    // #784: the rooms' sweep is armed beside it, on the next ten-minute
+    // boundary, through the same timers. Held apart here, so what follows
+    // reads the rate limits' alone.
+    expect(pending).toHaveLength(2);
+    const roomsSweep = pending.find((entry) => entry.at % ROOM_SWEEP_PERIOD_MS === 0);
+    expect(roomsSweep?.at).toBe(Math.ceil(clock.ms / ROOM_SWEEP_PERIOD_MS) * ROOM_SWEEP_PERIOD_MS);
+    pending.splice(pending.indexOf(roomsSweep!), 1);
     await signIn(instance.url, 'Ann Rider', Math.floor(clock.ms / 1000));
     const held = instance.heldRateLimitKeys();
     expect(held).toBeGreaterThan(1);
@@ -191,7 +199,8 @@ describe('the running instance forgets every rate-limited address when its windo
     expect(pending).toHaveLength(1);
     await instance.stop();
     running = undefined;
-    expect(cleared).toBe(1);
+    // Both sweeps are stopped: the rate limits' and the rooms'.
+    expect(cleared).toBe(2);
     expect(pending).toHaveLength(0);
   }, 30_000);
 });
@@ -789,5 +798,49 @@ describe('a rider’s race on the running instance — #784, #785', () => {
     const late = await joinRoom(wsUrl(instance.url), roomId, undefined);
     clients.push(late);
     expect(await late.closed).toMatchObject({ code: 4005 });
+  }, 30_000);
+
+  it('ends, as it opens, a race a restart interrupted, and lets its route go — a lobby nobody started it keeps', async () => {
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const first = await start(path);
+    const ann = await signIn(first.instance.url, 'Ann');
+    const make = async (body: Record<string, unknown>) =>
+      (await (
+        await fetch(`${first.instance.url}/v1/rooms`, {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${ann.sessionToken}`,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        })
+      ).json()) as { roomId: string; routeSha256: string };
+    const interrupted = await make(roomBody());
+    const waiting = await make(roomBody({ lengthMetres: 300, gpx: `${ROOM_GPX} ` }));
+    const fileOf = (sha256: string) =>
+      join(serverConfig(path).blobsPath, 'rooms', 'objects', sha256.slice(0, 2), sha256);
+    // The race had left its lobby when the instance stopped.
+    const store = openServingStore(path);
+    try {
+      await store.markRaceStarted(interrupted.roomId, 1);
+    } finally {
+      await store.close();
+    }
+    await first.instance.stop();
+    running = undefined;
+    expect(existsSync(fileOf(interrupted.routeSha256))).toBe(true);
+
+    const second = await start(path);
+    await second.instance.opened;
+    await until(() => !existsSync(fileOf(interrupted.routeSha256)), 'the route deleted', 10_000);
+    const fresh = openServingStore(path);
+    try {
+      expect((await fresh.getPrivateRoom(interrupted.roomId))?.closedAt).not.toBeNull();
+      expect((await fresh.getPrivateRoom(waiting.roomId))?.closedAt).toBeNull();
+    } finally {
+      await fresh.close();
+    }
+    expect(existsSync(fileOf(waiting.routeSha256))).toBe(true);
   }, 30_000);
 });

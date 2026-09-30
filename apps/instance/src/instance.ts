@@ -19,7 +19,7 @@ import { assessReadiness, type MigrationState } from './readiness.ts';
 import type { InstanceProbes } from './route-kit.ts';
 import { planFor } from './room/room-plan.ts';
 import { RoomRouter, type RoomLookup } from './room/node/router.ts';
-import { createRooms, type Rooms } from './rooms/rooms.ts';
+import { createRooms, ROOM_SWEEP_PERIOD_MS, type Rooms } from './rooms/rooms.ts';
 import type { ServerConfig } from './server-config.ts';
 import { MIGRATE_COMMAND, migrationState, openServingStore } from './store/serving.ts';
 import type { SqlStore } from './store/sql-store.ts';
@@ -162,6 +162,10 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     onRaceStarted: async (roomId) => {
       await store?.markRaceStarted(roomId, Math.floor(now() / 1000));
     },
+    // #785: a race's result may be read from here, and not before.
+    onRaceFinished: async (roomId) => {
+      await store?.markRaceFinished(roomId, Math.floor(now() / 1000));
+    },
     // #784: a room that is over lets its route go.
     onRoomClosed: async (roomId, phase) => {
       await rooms?.roomLetGo(roomId, phase);
@@ -273,7 +277,25 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       // promise, so ONE sweep runs both, on every boundary either's windows end.
       const swept = identity;
       const roomsSwept = rooms;
-      stopSweeping = sweepOnBoundaries(
+      // #784: rooms that are over and that no worker closed — nobody riding a
+      // day after they were made, a race a restart interrupted, a creator who
+      // is gone — end here and let their routes go. Once now, for whatever a
+      // restart left, and every ten minutes after.
+      const endRooms = (): void => {
+        void roomsSwept
+          .sweep((roomId) => router.holds(roomId))
+          .catch((error: unknown) => {
+            logEvent(log, 'rooms-sweep-failed', {
+              error: error instanceof Error ? error.name : 'unknown',
+            });
+          });
+      };
+      endRooms();
+      const stopEndingRooms = sweepOnBoundaries(
+        { periodMs: ROOM_SWEEP_PERIOD_MS, run: endRooms },
+        options.sweepTimers,
+      );
+      const stopRateLimitSweep = sweepOnBoundaries(
         {
           periodMs: sweepPeriodMs([
             { limit: 1, windowMs: swept.rateLimitSweepPeriodMs },
@@ -286,6 +308,10 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         },
         options.sweepTimers,
       );
+      stopSweeping = () => {
+        stopRateLimitSweep();
+        stopEndingRooms();
+      };
     }
     // Whatever was synced while the model was off, or under another model, is indexed now (D-7).
     history.schedule();

@@ -12,7 +12,7 @@
  * GET  /v1/rooms/{roomId}/route  → { sha256, gpx }                     members only, while open
  * POST /v1/rooms/{roomId}/ticket (auth/routes.ts)                      members only, for a rider's room
  * POST /v1/rooms/{roomId}/start  (routes.ts)                           any rider seated and connected
- * GET  /v1/rooms/{roomId}/results → publication.ts                     the race's riders only
+ * GET  /v1/rooms/{roomId}/results → publication.ts                     the race's riders only, once it is over
  * ```
  *
  * ## Private, and only private
@@ -43,12 +43,26 @@
  *
  * The route is kept in a blob store of its own (`instance.ts`: the blob
  * directory's `rooms/`, outside the synced files), and deleted once the room
- * is over — a race finished, a group ride past its empty grace — unless
- * another open room rides the same bytes. A closed room is never opened again.
- * ⚠️ **A room nobody ever rides is never over**, so its route stays until the
- * operator deletes it: an expiry for an unridden room is not built. What bounds
- * it is {@link MAXIMUM_OPEN_ROOMS_PER_ATHLETE}: one athlete holds at most five
- * rooms that are not over, whatever the rate of making them.
+ * is over, unless another open room rides the same bytes. A closed room is
+ * never opened again. A room is over — {@link Rooms.roomLetGo}, {@link
+ * Rooms.sweep} and {@link Rooms.closeRoomsMadeBy}, all through ONE close — when:
+ *
+ * 1. **a race finished**, or **a group ride was empty past its grace** — the
+ *    worker that held it lets it go;
+ * 2. **nobody is riding it {@link UNRIDDEN_ROOM_LIFETIME_MS} after it was
+ *    made** — whether or not anybody ever joined it (the sweep, every
+ *    {@link ROOM_SWEEP_PERIOD_MS} and once as the instance opens);
+ * 3. **a race that had started is held by no worker** — the instance restarted
+ *    in the middle of it, and a started race is never opened again (#807's
+ *    ruling): the same sweep, the first time it runs;
+ * 4. **its creator erased their account** — before their rows go
+ *    (`sync/routes.ts` §`eraseAccount`), and by the sweep for a room whose
+ *    creator is gone however that happened. A rider still connected to it
+ *    rides on — the route is on their device already — but nobody joins it,
+ *    by its code or by a socket, and the instance holds no copy.
+ *
+ * {@link MAXIMUM_OPEN_ROOMS_PER_ATHLETE} still bounds what one athlete holds
+ * at once, whatever the rate of making rooms.
  */
 
 import { PHYSICS_VERSION, type RidingPosition } from '@onyourleft/physics';
@@ -90,6 +104,17 @@ export const MAXIMUM_GRADE_PERCENT = 40;
  * friends at once.
  */
 export const MAXIMUM_OPEN_ROOMS_PER_ATHLETE = 5;
+
+/**
+ * How long a room nobody is riding stays open after it was made — #784: a
+ * day, and then it is over and its route deleted. ⚠️ The author's number: long
+ * enough to make a room in the morning for friends to ride that evening. A room
+ * somebody is riding at that moment is not ended by it; it ends as rule 1 says.
+ */
+export const UNRIDDEN_ROOM_LIFETIME_MS = 24 * 60 * 60_000;
+
+/** How often the instance looks for rooms that are over and nobody closed: ten minutes. */
+export const ROOM_SWEEP_PERIOD_MS = 10 * 60_000;
 
 /** How often a rider may make a room, try a code, and from one address. */
 export interface RoomLimits {
@@ -147,6 +172,18 @@ export interface Rooms {
   results(caller: Caller, roomId: string): Promise<Outcome<PublishedResult>>;
   /** A room worker let `roomId` go at `phase` (`room/node/router.ts`). */
   roomLetGo(roomId: string, phase: RoomPhase): Promise<void>;
+  /**
+   * Ends every room nobody is riding that should be over — made more than
+   * {@link UNRIDDEN_ROOM_LIFETIME_MS} ago, a race that started, or one whose
+   * creator is gone — and deletes their routes. `holds` is whether a live
+   * worker holds a room (`RoomRouter.holds`). Answers how many it ended.
+   */
+  sweep(holds: (roomId: string) => boolean): Promise<number>;
+  /**
+   * Ends every room `athleteId` made that is not over, and deletes their
+   * routes — for an account being erased (#784), before its rows go.
+   */
+  closeRoomsMadeBy(athleteId: string): Promise<void>;
   sweepRateLimits(): void;
   readonly rateLimitSweepPeriodMs: number;
   heldRateLimitKeys(): number;
@@ -213,6 +250,20 @@ export function createRooms(options: RoomsOptions): Rooms {
   const joinsPerAddress = createRateLimiter(limits.joinsPerAddress, now);
   const code = options.code ?? (() => newRoomCode());
   const seconds = (): number => Math.floor(now() / 1000);
+
+  /**
+   * THE one way a room is over (#784): closed, never to open again, and its
+   * route deleted unless another open room rides the same bytes. `true` the
+   * first time, `false` for a room already over or not a rider's room.
+   */
+  async function over(roomId: string): Promise<boolean> {
+    const room = await store.getRoom(roomId);
+    if (room === undefined || !(await store.closePrivateRoom(roomId, seconds()))) return false;
+    if ((await store.countOpenPrivateRoomsWithRoute(room.routeSha256, roomId)) === 0) {
+      await routes.delete(room.routeSha256);
+    }
+    return true;
+  }
 
   /** A private room this athlete may see into: a member of it, and the room not over. */
   async function openRoomOf(caller: Caller, roomId: string) {
@@ -333,6 +384,13 @@ export function createRooms(options: RoomsOptions): Rooms {
     },
 
     async results(caller, roomId) {
+      // Not while the race runs (ADR 0028 D-7.7): a rider over the line
+      // could otherwise read the order of the riders behind them as they
+      // cross it. Over is the room saying so — everybody across the line or
+      // out of it. A race a restart interrupted was never decided, and has no
+      // result to publish.
+      const course = await store.getRoomCourse(roomId);
+      if (course?.raceFinishedAt === undefined) return refuse('not_found');
       const results = await store.listRoomResults(roomId);
       // A race's riders only (ruling Q2): an athlete with a result in it. Not
       // a member who never rode, and not a stranger — both are `not_found`.
@@ -343,7 +401,6 @@ export function createRooms(options: RoomsOptions): Rooms {
       for (const result of results) {
         names.set(result.athleteId, await options.nameFor(caller.athleteId, result.athleteId));
       }
-      const course = await store.getRoomCourse(roomId);
       return {
         ok: true,
         value: publishRace(
@@ -357,11 +414,23 @@ export function createRooms(options: RoomsOptions): Rooms {
     async roomLetGo(roomId, phase) {
       // A lobby that emptied is not over: a later socket opens it again.
       if (phase !== 'finished' && phase !== 'closed') return;
-      const room = await store.getRoom(roomId);
-      if (room === undefined || !(await store.closePrivateRoom(roomId, seconds()))) return;
-      if ((await store.countOpenPrivateRoomsWithRoute(room.routeSha256, roomId)) === 0) {
-        await routes.delete(room.routeSha256);
+      await over(roomId);
+    },
+
+    async sweep(holds) {
+      const oldest = seconds() - UNRIDDEN_ROOM_LIFETIME_MS / 1000;
+      let ended = 0;
+      for (const room of await store.listOpenPrivateRooms()) {
+        if (holds(room.roomId)) continue;
+        if (room.raceStarted || !room.creatorPresent || room.createdAt <= oldest) {
+          if (await over(room.roomId)) ended += 1;
+        }
       }
+      return ended;
+    },
+
+    async closeRoomsMadeBy(athleteId) {
+      for (const roomId of await store.listOpenPrivateRoomsMadeBy(athleteId)) await over(roomId);
     },
 
     sweepRateLimits() {

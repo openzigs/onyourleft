@@ -145,6 +145,23 @@ export interface RoomCourse {
    * and never by a course's own put.
    */
   readonly finishers?: number;
+  /**
+   * Unix seconds: when the race's room said it was over — every rider across
+   * the line or out of it (#785, ADR 0028 D-7.7) — absent until then. Written
+   * by {@link SqlStore.markRaceFinished} and never by a course's own put.
+   */
+  readonly raceFinishedAt?: number;
+}
+
+/** A private room that is not over, as the rooms' sweep reads it (#784). */
+export interface OpenPrivateRoom {
+  readonly roomId: string;
+  /** Unix seconds. */
+  readonly createdAt: number;
+  /** A race that left its lobby: it can never be opened again as one. */
+  readonly raceStarted: boolean;
+  /** Whether its creator still has an account here. */
+  readonly creatorPresent: boolean;
 }
 
 export interface Result {
@@ -716,6 +733,8 @@ export interface SqlStore {
   getRoomCourse(roomId: string): Promise<RoomCourse | undefined>;
   /** A race left its lobby at `at` (Unix seconds). The first time is kept. */
   markRaceStarted(roomId: string, at: number): Promise<void>;
+  /** #785: a race's room said it was over at `at` (Unix seconds). The first time is kept. */
+  markRaceFinished(roomId: string, at: number): Promise<void>;
 
   /**
    * #784: a rider's room — the room, its course, its code's digest and the
@@ -735,6 +754,14 @@ export interface SqlStore {
   closePrivateRoom(roomId: string, at: number): Promise<boolean>;
   /** #784: how many rooms this athlete made that are not over — a count of their own, never a row. */
   countOpenPrivateRoomsMadeBy(athleteId: string): Promise<number>;
+  /** #784: the ids of the rooms this athlete made that are not over — for their erasure. */
+  listOpenPrivateRoomsMadeBy(athleteId: string): Promise<readonly string[]>;
+  /**
+   * #784: every private room that is not over, for the sweep that ends the
+   * ones nobody is riding. Bounded by the cap on rooms per athlete
+   * (`rooms/rooms.ts` §`MAXIMUM_OPEN_ROOMS_PER_ATHLETE`).
+   */
+  listOpenPrivateRooms(): Promise<readonly OpenPrivateRoom[]>;
   /**
    * How many private rooms other than `exceptRoomId` that are not over ride a
    * route by this digest — its blob is shared by all of them (#784).
@@ -1102,6 +1129,7 @@ const roomCourseFrom = (row: Selectable<RoomCourseTable>): RoomCourse => ({
   rejoinWindowMs: row.rejoin_window_ms,
   raceStartedAt: row.race_started_at,
   ...(row.finishers === null ? {} : { finishers: row.finishers }),
+  ...(row.race_finished_at === null ? {} : { raceFinishedAt: row.race_finished_at }),
 });
 
 const resultFrom = (row: Selectable<ResultTable>): Result => ({
@@ -2133,6 +2161,16 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           .execute();
       }),
 
+    markRaceFinished: (roomId, at) =>
+      exclusive(async () => {
+        await db
+          .updateTable('room_course')
+          .set({ race_finished_at: at })
+          .where('room_id', '=', roomId)
+          .where('race_finished_at', 'is', null)
+          .execute();
+      }),
+
     createPrivateRoom: (created) =>
       exclusive(() =>
         db.transaction().execute(async (trx): Promise<'created' | 'code-taken'> => {
@@ -2252,6 +2290,49 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           .executeTakeFirstOrThrow();
         return Number(row.n);
       }),
+
+    listOpenPrivateRoomsMadeBy: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('room_member')
+            .innerJoin('private_room', 'private_room.room_id', 'room_member.room_id')
+            .select('room_member.room_id')
+            .where('room_member.athlete_id', '=', athleteId)
+            .where('room_member.role', '=', 'creator')
+            .where('private_room.closed_at', 'is', null)
+            .orderBy('room_member.room_id')
+            .execute()
+        ).map((row) => row.room_id),
+      ),
+
+    listOpenPrivateRooms: () =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('private_room')
+            .innerJoin('room_course', 'room_course.room_id', 'private_room.room_id')
+            .leftJoin('room_member', (join) =>
+              join
+                .onRef('room_member.room_id', '=', 'private_room.room_id')
+                .on('room_member.role', '=', 'creator'),
+            )
+            .select([
+              'private_room.room_id',
+              'private_room.created_at',
+              'room_course.race_started_at',
+              'room_member.athlete_id',
+            ])
+            .where('private_room.closed_at', 'is', null)
+            .orderBy('private_room.room_id')
+            .execute()
+        ).map((row) => ({
+          roomId: row.room_id,
+          createdAt: row.created_at,
+          raceStarted: row.race_started_at !== null,
+          creatorPresent: row.athlete_id !== null,
+        })),
+      ),
 
     countOpenPrivateRoomsWithRoute: (routeSha256, exceptRoomId) =>
       exclusive(async () => {

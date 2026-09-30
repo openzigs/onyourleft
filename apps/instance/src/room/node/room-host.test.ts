@@ -287,4 +287,46 @@ describe('results — handed on as each becomes final, not at the end', () => {
     ).toBe(false);
     expect(host.view('conformance')?.phase).toBe('running');
   }, 10_000);
+
+  it('says a race is over once, when the last rider is off the road — and not while one finisher waits', async () => {
+    const finished: string[] = [];
+    let nowMs = 0;
+    const { host, url } = await hosted(
+      roomSettings({
+        kind: 'race',
+        ridingPosition: 'hoods',
+        course: { ...FLAT_COURSE, lengthMetres: 40 },
+        countdownMs: 0,
+      }),
+      { now: () => nowMs, driven: true, onRaceFinished: (roomId) => finished.push(roomId) },
+    );
+    const ann = client(url);
+    const bob = client(url);
+    await Promise.all([ann.open, bob.open]);
+    ann.socket.send(helloText('ticket-ann'));
+    bob.socket.send(helloText('ticket-bob'));
+    await until(() => host.view('conformance')?.seats.length === 2, 'both seated');
+    host.start('conformance');
+    let second = 1;
+    const ride = async (riders: readonly (typeof ann)[]): Promise<void> => {
+      nowMs = second * 1000 - 500;
+      for (const each of riders) each.socket.send(reportText(second, nowMs, 600));
+      await new Promise((done) => setTimeout(done, 5));
+      nowMs = second * 1000;
+      host.tick('conformance');
+      second += 1;
+    };
+    while (
+      second <= 12 &&
+      host.view('conformance')?.seats.every((seat) => seat.state !== 'finished')
+    ) {
+      await ride([ann]);
+    }
+    expect(host.view('conformance')?.phase).toBe('running');
+    expect(finished).toEqual([]);
+    while (second <= 40 && host.view('conformance')?.phase !== 'finished') await ride([bob]);
+    expect(host.view('conformance')?.phase).toBe('finished');
+    host.tick('conformance');
+    expect(finished).toEqual(['conformance']);
+  }, 10_000);
 });

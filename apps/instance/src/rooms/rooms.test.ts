@@ -20,7 +20,11 @@ import { roomSettings } from '../room/core/settings.ts';
 import { helloText, reportText } from '../room/core/room-testing.ts';
 import { finalResults } from '../room/node/room-host.ts';
 import { sha256Hex } from '../blob/blob-store.ts';
-import { DEFAULT_ROOM_LIMITS, MAXIMUM_OPEN_ROOMS_PER_ATHLETE } from './rooms.ts';
+import {
+  DEFAULT_ROOM_LIMITS,
+  MAXIMUM_OPEN_ROOMS_PER_ATHLETE,
+  UNRIDDEN_ROOM_LIFETIME_MS,
+} from './rooms.ts';
 import { erasedAccount, madeRoom, riderIn, ROOM_GPX, roomBody } from './rooms-testing.ts';
 import { normaliseRoomCode } from './code.ts';
 
@@ -308,6 +312,143 @@ describe('a room that is over lets its route go — #784', () => {
   });
 });
 
+describe('a room whose creator erases their account is over — #784', () => {
+  it('ends every room they made — its route gone, nobody let in — and leaves the other athletes’ rooms as they were', async () => {
+    const w = await open();
+    const [anna, bea, cat, dan] = [await rider(w), await rider(w), await rider(w), await rider(w)];
+    // Anna's own route, and a second room of hers on the route Cat's room rides.
+    const annasOwn = await madeRoom(w, anna.token, {
+      kind: 'group',
+      gpx: ROOM_GPX.replace('51.502000', '51.503000'),
+    });
+    const annasShared = await madeRoom(w, anna.token);
+    const cats = await madeRoom(w, cat.token);
+    expect(cats.routeSha256).toBe(annasShared.routeSha256);
+    for (const code of [annasOwn.code, cats.code]) {
+      await w.call('POST', '/v1/rooms/join', { token: bea.token, body: { code } });
+    }
+
+    expect((await erasedAccount(w, anna)).status).toBe(204);
+
+    // Anna's rooms are over: her own route is deleted from the instance…
+    expect(w.roomRoutes.has(annasOwn.routeSha256)).toBe(false);
+    await w.freshRead(async (store) => {
+      expect((await store.getPrivateRoom(annasOwn.roomId))?.closedAt).not.toBeNull();
+      expect((await store.getPrivateRoom(annasShared.roomId))?.closedAt).not.toBeNull();
+      expect((await store.getPrivateRoom(cats.roomId))?.closedAt).toBeNull();
+    });
+    // …a member who joined it is not handed it, nor a ticket into it…
+    expect(
+      (await w.call('GET', `/v1/rooms/${annasOwn.roomId}/route`, { token: bea.token })).status,
+    ).toBe(404);
+    expect(
+      (
+        await w.call('POST', `/v1/rooms/${annasOwn.roomId}/ticket`, {
+          token: bea.token,
+          body: { declaredMassKilograms: 70 },
+        })
+      ).status,
+    ).toBe(404);
+    // …and nobody new joins it by its code.
+    expect(
+      (await w.call('POST', '/v1/rooms/join', { token: dan.token, body: { code: annasOwn.code } }))
+        .status,
+    ).toBe(404);
+
+    // Cat's room is untouched: the route it shares with Anna's second room stays,
+    // its member is handed it, and a new rider still joins it.
+    expect(w.roomRoutes.has(cats.routeSha256)).toBe(true);
+    const got = await w.call('GET', `/v1/rooms/${cats.roomId}/route`, { token: bea.token });
+    expect(got.status).toBe(200);
+    expect(got.body).toEqual({ sha256: cats.routeSha256, gpx: ROOM_GPX });
+    expect(
+      (await w.call('POST', '/v1/rooms/join', { token: dan.token, body: { code: cats.code } }))
+        .status,
+    ).toBe(200);
+  });
+
+  it('refuses the erasure without its step-up, and ends none of their rooms then', async () => {
+    const w = await open();
+    const anna = await rider(w);
+    const room = await madeRoom(w, anna.token);
+    expect(
+      (await w.call('DELETE', '/v1/account', { token: anna.token, body: {} })).status,
+    ).not.toBe(204);
+    expect(w.roomRoutes.has(room.routeSha256)).toBe(true);
+    await w.freshRead(async (store) => {
+      expect((await store.getPrivateRoom(room.roomId))?.closedAt).toBeNull();
+    });
+  });
+});
+
+describe('a room nobody rides is over within a day — #784', () => {
+  const nobodyIn = (): boolean => false;
+
+  it('ends a room nobody is riding a day after it was made, whether or not anybody joined it, and lets its route go', async () => {
+    const w = await open();
+    const anna = await rider(w);
+    const bea = await rider(w);
+    const never = await madeRoom(w, anna.token, { kind: 'group' });
+    const joined = await madeRoom(w, anna.token, {
+      gpx: ROOM_GPX.replace('51.502000', '51.504000'),
+    });
+    await w.call('POST', '/v1/rooms/join', { token: bea.token, body: { code: joined.code } });
+    w.clock.ms += UNRIDDEN_ROOM_LIFETIME_MS - 1000;
+    expect(await w.rooms.sweep(nobodyIn)).toBe(0);
+    expect(w.roomRoutes.has(never.routeSha256)).toBe(true);
+    w.clock.ms += 1000;
+    expect(await w.rooms.sweep(nobodyIn)).toBe(2);
+    expect(w.roomRoutes.has(never.routeSha256)).toBe(false);
+    expect(w.roomRoutes.has(joined.routeSha256)).toBe(false);
+    expect(
+      (await w.call('POST', '/v1/rooms/join', { token: bea.token, body: { code: never.code } }))
+        .status,
+    ).toBe(404);
+    // Over counts against nobody's five any more.
+    await w.freshRead(async (store) => {
+      expect(await store.countOpenPrivateRoomsMadeBy(anna.athleteId)).toBe(0);
+    });
+    // And a second sweep has nothing left to end.
+    expect(await w.rooms.sweep(nobodyIn)).toBe(0);
+  });
+
+  it('does not end a room somebody is riding at that moment', async () => {
+    const w = await open();
+    const anna = await rider(w);
+    const room = await madeRoom(w, anna.token, { kind: 'group' });
+    w.clock.ms += 2 * UNRIDDEN_ROOM_LIFETIME_MS;
+    expect(await w.rooms.sweep((roomId) => roomId === room.roomId)).toBe(0);
+    expect(w.roomRoutes.has(room.routeSha256)).toBe(true);
+  });
+
+  it('ends at once a race that had started and that no worker holds — a restart interrupted it', async () => {
+    const w = await open();
+    const anna = await rider(w);
+    const started = await madeRoom(w, anna.token);
+    const waiting = await madeRoom(w, anna.token, {
+      gpx: ROOM_GPX.replace('51.502000', '51.505000'),
+    });
+    await w.freshRead((store) => store.markRaceStarted(started.roomId, 1_790_000_010));
+    expect(await w.rooms.sweep(nobodyIn)).toBe(1);
+    await w.freshRead(async (store) => {
+      expect((await store.getPrivateRoom(started.roomId))?.closedAt).not.toBeNull();
+      // A lobby nobody has started opens again, and is kept until its day is up.
+      expect((await store.getPrivateRoom(waiting.roomId))?.closedAt).toBeNull();
+      expect(await store.countOpenPrivateRoomsMadeBy(anna.athleteId)).toBe(1);
+    });
+    expect(w.roomRoutes.has(waiting.routeSha256)).toBe(true);
+  });
+
+  it('ends a room whose creator is gone however they went', async () => {
+    const w = await open();
+    const anna = await rider(w);
+    const room = await madeRoom(w, anna.token, { kind: 'group' });
+    await w.freshRead((store) => store.eraseAthlete(anna.athleteId));
+    expect(await w.rooms.sweep(nobodyIn)).toBe(1);
+    expect(w.roomRoutes.has(room.routeSha256)).toBe(false);
+  });
+});
+
 /**
  * A race ridden through the room core, its final results stored as the Node
  * adapter stores them (`room-host.ts` §`finalResults`).
@@ -345,6 +486,8 @@ async function ridden(
     for (const result of finalResults(room.view(), 1000)) {
       await store.putResult({ roomId, ...result });
     }
+    // The room said it was over, as the Node adapter's `onRaceFinished` records.
+    await store.markRaceFinished(roomId, 1_790_000_100);
   });
 }
 
@@ -386,6 +529,29 @@ describe('a race’s result — #785', () => {
       expect(JSON.stringify(got.body)).not.toMatch(/"(watts|power)[A-Za-z]*"(?<!PerKilogram")/i);
     }
   }, 30_000);
+
+  it('is not read by anybody while the race runs — not even a rider already over the line (ADR 0028 D-7.7)', async () => {
+    const w = await open();
+    const [anna, bea] = [await rider(w), await rider(w)];
+    const room = await madeRoom(w, anna.token);
+    await w.call('POST', '/v1/rooms/join', { token: bea.token, body: { code: room.code } });
+    // Anna crossed the line; Bea is still riding.
+    await w.freshRead((store) =>
+      store.putResult({
+        roomId: room.roomId,
+        athleteId: anna.athleteId,
+        finishMs: 600_000,
+        flags: 0,
+        place: 1,
+        wattsPerKilogram: 4,
+        flaggedDurationsSeconds: [],
+      }),
+    );
+    const as = (token: string) => w.call('GET', `/v1/rooms/${room.roomId}/results`, { token });
+    expect((await as(anna.token)).status).toBe(404);
+    await w.freshRead((store) => store.markRaceFinished(room.roomId, 1_790_000_200));
+    expect((await as(anna.token)).status).toBe(200);
+  });
 
   it('is read by the race’s riders only: a member who did not ride, and a stranger, are refused', async () => {
     const w = await open();

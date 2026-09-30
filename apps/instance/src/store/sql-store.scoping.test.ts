@@ -226,6 +226,7 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   putRoom: { notAScopedRead: 'a write' },
   putRoomCourse: { notAScopedRead: 'a write' },
   markRaceStarted: { notAScopedRead: 'a write' },
+  markRaceFinished: { notAScopedRead: 'a write' },
   putResult: { notAScopedRead: 'a write' },
   createPrivateRoom: { notAScopedRead: 'a write; its creator is the caller (rooms/rooms.test.ts)' },
   getPrivateRoom: { notAScopedRead: 'a room belongs to no athlete' },
@@ -241,6 +242,13 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   countOpenPrivateRoomsMadeBy: {
     notAScopedRead:
       'a count of the CALLER’s own open rooms, never a row; sql-store.rooms.test.ts holds another athlete’s rooms out of it',
+  },
+  listOpenPrivateRoomsMadeBy: {
+    notAScopedRead:
+      'the ids of the CALLER’s own open rooms, for their erasure — never another table’s rows; sql-store.rooms.test.ts holds the other athletes’ rooms out of it',
+  },
+  listOpenPrivateRooms: {
+    notAScopedRead: 'the rooms’ sweep: every open room, by id and age, naming nobody (#784)',
   },
   countOpenPrivateRoomsWithRoute: {
     notAScopedRead: 'blob collection: a count across rooms, never a row (#784)',

@@ -56,6 +56,7 @@ export type FromWorker =
     }
   | { readonly type: 'result'; readonly roomId: string; readonly result: RoomResult }
   | { readonly type: 'race-started'; readonly roomId: string }
+  | { readonly type: 'race-finished'; readonly roomId: string }
   | { readonly type: 'room-closed'; readonly roomId: string; readonly phase: RoomPhase }
   | { readonly type: 'socket-closed'; readonly socketId: string }
   | {
