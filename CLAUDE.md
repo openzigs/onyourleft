@@ -1438,7 +1438,20 @@ apps/                 AGPL-3.0-or-later, without exception
                         where streams come from — so `packages/fit`'s XML
                         reader, which refuses a `<!DOCTYPE`, is on a
                         network-facing path for the first time
-                        (`src/sync/ingest.test.ts` pins it there). ⚠️ Only `src/store/` may
+                        (`src/sync/ingest.test.ts` pins it there). Since
+                        #835 it also holds `src/history/` — the history index
+                        (ADR 0040): migration 0010's passages and unit
+                        vectors, cut from synced write-ups, ride summaries,
+                        goals, notes and documents (never a side-camera
+                        report), embedded by a LOCAL Ollama (`truncate:
+                        false`, the model's prefixes, `nomic-embed-text` by
+                        default) and ranked by a dot product, and
+                        `POST /v1/history/search`. ⚠️ The embedding address
+                        is refused unless local, and every name is resolved
+                        and checked on EVERY request (`address.ts`); a
+                        refused or unset address turns the index off, never
+                        the instance. `src/instance.ts` mounts it; sync does
+                        not feed it yet (above). ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or
                         `apps/mobile` (`boundaries/dependencies`), and nothing
@@ -5367,6 +5380,9 @@ top of an issue **supersedes its body**.
 | How a model's write-up is shown on a ride's page, why a saved one is screened again, what every state says, and what a rider with no model set up sees | `apps/web/src/detail/RideWriteUpSection.tsx`, `apps/web/src/detail/write-up.ts` §`shownWriteUp`, `apps/web/src/camera/write-up-screen.ts` §`screenSavedWriteUp`, `RideWriteUpSection.test.tsx`, [#805](https://github.com/openzigs/onyourleft/issues/805) |
 | What a ride-analysis step sends to the rider's own computer, what it refuses to send, how a cut-off reply is told apart, and what a cancel does in the Android shell | `apps/web/src/ride-analysis/own-computer-step.ts`, `apps/web/src/camera/analysis-transport.ts` §`riderModelStepPort`, `docs/privacy-policy.md` §"A ride sent to your own computer", `own-computer-policy.test.ts`, [#802](https://github.com/openzigs/onyourleft/issues/802) |
 | What a ride analysis sends to a hosted model on the rider's key, why only a step the runner sealed can be sent, where the consent is checked on every step, and what the consent, the policy and Play Data Safety say about it | `apps/web/src/ride-analysis/hosted-step.ts`, `apps/web/src/ride-analysis/sealed-step.ts`, `apps/web/src/camera/hosted-transport.ts` §`isBuiltRequest`, `apps/web/src/camera/hosted-model.ts` §`HOSTED_CONSENT`, [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) §Amendments 2026-09-29, `docs/privacy-policy.md` §"Questions sent to a service you chose, on your own key", `apps/mobile/src/android/data-safety.ts`, [#803](https://github.com/openzigs/onyourleft/issues/803) |
+| Where the history index lives, what it may never hold, where its embedding model may be, and what a model change does | `apps/instance/src/history/`, `apps/instance/src/store/migrations/0010-history-index.ts`, [ADR 0040](docs/adr/0040-a-history-index-on-the-riders-instance.md), `docs/operating-an-instance.md` §"The history index", [#835](https://github.com/openzigs/onyourleft/issues/835) |
+| Which step a passage of the rider's history reaches, how it is fenced, what happens to a reply that obeys a planted note, and why a hosted run never gets one | `apps/web/src/ride-analysis/template-v2.ts` §`HISTORY_FENCE_BEGIN`, `apps/web/src/ride-analysis/history.ts`, `apps/web/src/ride-analysis/template.ts` §`acceptHistoryNote`, `apps/web/src/ride-analysis/hosted-step.ts`, `apps/web/src/ride-analysis/history.test.ts` §"a note planted with instructions" |
+| What a ride summary synced for the rider's history says, and which device may replace it | `apps/web/src/ride-analysis/ride-summary.ts`, `apps/web/src/instance/sync.ts` rule 7 |
 | Whether the rider's instance may keep a searchable index of their history for the AI analysis, where the embeddings are computed, what the index may never hold, and how retrieved text reaches the model | [ADR 0040](docs/adr/0040-a-history-index-on-the-riders-instance.md), [#835](https://github.com/openzigs/onyourleft/issues/835), [#836](https://github.com/openzigs/onyourleft/issues/836) |
 
 <!-- Last updated: 2026-09-29 by delivery:code-issue resolving #841 (the Docker Hub dependency named, the image checker's suite, and where CI time comes from next) -->

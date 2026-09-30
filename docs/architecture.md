@@ -1430,7 +1430,7 @@ sequenceDiagram
 |---|---|---|
 | Ingestion (#37) | Refused in order, each with its own code: the file's type **from its bytes** (`file_type_unsupported`), that it decodes to at least one sample (`file_undecodable`), then ADR 0014 D-6's answers (`record_malformed`, `record_unsupported`, `record_signature_mismatch`, `record_content_mismatch`), then `record_not_your_key`. Nothing is written until every check passes. The file goes to the blob store, then the record and its manifest row in ONE transaction; a failed transaction takes the file back unless another athlete's record holds it, under a per-file lock. A duplicate is decided by the primary key and answers the first record | `src/sync/sync.ts` §`ingest`, `src/sync/activity-file.ts` |
 | The manifest (#776) | `sync_item` (migration 0009): every activity and item, and a tombstone for each one deleted. Paged by `(receivedAt, seq)`, where `seq` is `AUTOINCREMENT` and `receivedAt` is written as `max(now, the newest)`, so no row is ever inserted behind a cursor a reader holds | `src/store/sql-store.ts` §`nextReceivedAt` |
-| Items (#776's 2026-09-29 addition) | `write-up`, `side-camera-report` (the pose summary inside it), `goal`, `note`, `document` — stored byte for byte as the device sent them; the device copy is canonical (ADR 0036). The client syncs the first two; goals, notes and documents wait for #836 on the device | `src/sync/sync.ts` §`putItem` |
+| Items (#776's 2026-09-29 addition) | `write-up`, `ride-summary` (since #835), `side-camera-report` (the pose summary inside it), `goal`, `note`, `document` — stored byte for byte as the device sent them; the device copy is canonical (ADR 0036). The client syncs write-ups, side-camera reports and ride summaries; goals, notes and documents wait for #836 on the device | `src/sync/sync.ts` §`putItem` |
 | Reads (#38) | The caller's own activities only — no read of another athlete's exists, because nothing records who may see whose ride. The list is ONE query a page; streams are served in full or at `?points=`, bucket means with a gap left `null`, and **never a position**; every response is `no-store` | `src/sync/sync.ts` §`owned`, §`streams` |
 | Export (#35) | `GET /v1/account/export`: the account as JSON, each activity's signed record and the address of its ORIGINAL file (the true track, unobfuscated), every item, public keys only, the blocks and reports the athlete made (#83; whom, why and when, and never how a report was decided, which would say whether an id is real), any recovery address given and its confirmation's state (never the token's hash), and a list of what is left out and why — the moderation log and reports ABOUT them among it | `src/sync/sync.ts` §`exportAccount` |
 | Deletion (#35) | `DELETE /v1/account`: files first — each one no other athlete also holds — then every row, in tables **derived from the schema's foreign keys at the time of the call**, and another athlete's block OF this one (`block.blocked_athlete_id` has no foreign key, #83; a report ABOUT them and the moderation log are kept, and `sql-store.erasure.test.ts` says why for every such column), then a sweep of files a concurrent upload added. A failure part way is retried safely. It reaches THIS instance only: not a copy already downloaded, and not another instance | `src/sync/sync.ts` §`eraseAccount`, `src/store/sql-store.ts` §`athleteTablesInErasureOrder` |
@@ -1441,6 +1441,44 @@ but no sync: wiring one over the blob directory it already configures (`OYL_INST
 is left to a follow-up rather than done in #893's merge, and the shipped client calls none of this
 (#777), so every sync route answers `unavailable` on a running instance and a rider's device
 sends nothing.
+
+#### The history index (#835, ADR 0040)
+
+A searchable index of each rider's synced history, which the post-ride write-up may look back at.
+**An index, never a store of record** (D-1): every row is cut from a live synced item, and deleting
+them all loses nothing, because a catch-up makes them again.
+
+```mermaid
+sequenceDiagram
+    participant D as Device (apps/web)
+    participant I as Instance (apps/instance/src/history/)
+    participant O as Local embedding model (Ollama, no published port)
+    D->>I: POST /v1/sync/items/ride-summary/{ride} — passages the DEVICE built from #809's input
+    I->>I: cut every write-up, ride summary, goal, note and document into passages of ≤ 900 characters
+    I->>O: POST /api/embed {model, input: "search_document: …", truncate: false} — to an address checked local
+    I->>I: one transaction: still live with that body? then keep passages, vectors, model, dimension, prefixes
+    D->>I: POST /v1/history/search {query, rideId, limit ≤ 6, characters ≤ 5 400}
+    I->>O: embed the query ("search_query: …")
+    I-->>D: the CALLER's best passages of THIS model, each with a label ("Write-up of a ride 3 weeks earlier")
+    D->>D: accept the shape, screen a write-up again, fence the rest as data: template v2's history step
+```
+
+| Concern | Decision | Where |
+|---|---|---|
+| Rows | `history_source` (one per item indexed: its digest, model, prefix convention, outcome) and `history_passage` (text, model, dimension, convention, a unit `Float32` vector as a BLOB), migration 0010. Both name `athlete_id`, so the schema-derived erasure takes them; a put or a delete of the item drops its rows in the SAME transaction (`replaceSyncRow`) | `src/store/migrations/0010-history-index.ts`, `src/store/sql-store.ts` |
+| Ranking | Brute force: a dot product of unit vectors in TypeScript over the caller's rows of the configured model, dimension and convention only (D-4, D-7). `sqlite-vec` is the named fallback, owed only if a query on the owner's box passes 250 ms | `src/history/history.ts` §`search` |
+| The model | Ollama's `/api/embed` by plain `fetch`, `truncate: false`, the model's own prefixes; defaults to `nomic-embed-text` (Apache-2.0, the owner's ruling, D-5). A change of model or prefixes makes every item pending again; until it has caught up, retrieval returns fewer passages rather than a mixture | `src/history/embedder.ts` |
+| The address (D-6) | Configured: localhost, a loopback or private literal, or a single-label name — anything else turns the index OFF (never the instance), and says why. Connected: the name is resolved on every request, every address must be local, and the request goes to the checked address with `redirect: 'error'` | `src/history/address.ts`, `src/config.ts` §`readHistorySettings` |
+| What is never indexed | A side-camera report (the pose summary, D-2 item 1) and any item carrying a `data:` URL; the rider's own text is otherwise kept whole | `src/history/passages.ts` |
+| Scoping (D-3) | The athlete is the session's; `sql-store.scoping.test.ts` probes the index's reads with three athletes, and `history.test.ts` searches as each | |
+| Export and erasure (D-10) | The export says which model built the index and how many passages, never the passages or vectors; `DELETE /v1/account` takes them with everything else | `src/sync/sync.ts` §`exportAccount` |
+| The device's half | Template version 2's history step is the ONE step a passage reaches, inside a fence no passage can close, and its note is accepted and screened before the summary is shown it. Retrieval runs before the run, on the rider's own computer's path only (a hosted step port refuses a history step until D-9's disclosures change), and an unreachable instance is a sentence, never a failed run | `apps/web/src/ride-analysis/history.ts`, `template-v2.ts`, `ride-analysis.ts` |
+
+⚠️ **Mounted on a running box, fed by nothing yet.** `src/instance.ts` builds the index and serves
+`/v1/history/search` when `OYL_INSTANCE_EMBEDDING_URL` is set, but it hands the handler no sync
+(above, and #898), so no item reaches it; and the shipped client asks for no history, because the
+one transport that may call an instance is #777's. Whoever wires either owes ADR 0040 D-11's
+disclosures first.
 
 #### The API contract (#36)
 
