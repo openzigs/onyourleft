@@ -91,8 +91,13 @@ export interface HostOptions {
    * process records it, as the Durable Object keeps its `left-lobby` marker.
    */
   readonly onRaceStarted?: (roomId: string) => void;
-  /** A room has closed and holds no socket: forget where it was placed. */
-  readonly onRoomClosed?: (roomId: string) => void;
+  /**
+   * A room has closed and holds no socket: forget where it was placed. `phase`
+   * says whether it is over — `finished` (a race) or `closed` (a group ride
+   * past its empty grace) — or only emptied in its lobby, which a later
+   * socket opens again (#784: only a room that is over lets its route go).
+   */
+  readonly onRoomClosed?: (roomId: string, phase: RoomPhase) => void;
   /** A socket this host held has closed, however it closed. */
   readonly onSocketClosed?: (socketId: string) => void;
   /** Unsent bytes past which a client is terminated. {@link DEFAULT_MAXIMUM_BUFFERED_BYTES}. */
@@ -113,6 +118,17 @@ export interface RoomResult {
   /** Milliseconds from the start to the line, or `null` for a rider who did not finish. */
   readonly finishMs: number | null;
   readonly flags: number;
+  /**
+   * Where they finished, 1 first, from the room's own finish order — or
+   * `null` for a rider who did not (#785). Kept so that a rider who later
+   * erases their account leaves a gap the others' results show as "a rider",
+   * with nothing of theirs in it.
+   */
+  readonly place: number | null;
+  /** Mean power over the race per kilogram of declared mass (ruling Q17), or `null`. */
+  readonly wattsPerKilogram: number | null;
+  /** The durations of every plausibility ceiling breached, shortest first (#785). */
+  readonly flaggedDurationsSeconds: readonly number[];
 }
 
 /**
@@ -450,7 +466,8 @@ export class RoomHost {
 
   #reportResults(hosted: HostedRoom): void {
     if (hosted.settings.kind !== 'race' || this.#options.onResult === undefined) return;
-    for (const seat of hosted.room.view().seats) {
+    const view = hosted.room.view();
+    for (const seat of view.seats) {
       if (hosted.reported.has(seat.athleteId)) continue;
       if (seat.state !== 'finished' && seat.state !== 'dnf') continue;
       hosted.reported.add(seat.athleteId);
@@ -461,6 +478,9 @@ export class RoomHost {
             ? null
             : Math.round(seat.finishedAtTicks * hosted.settings.frameIntervalMs),
         flags: seat.flags,
+        place: seat.state === 'finished' ? view.finishOrder.indexOf(seat.riderId) + 1 : null,
+        wattsPerKilogram: seat.wattsPerKilogram,
+        flaggedDurationsSeconds: seat.flaggedDurationsSeconds,
       });
     }
   }
@@ -505,7 +525,7 @@ export class RoomHost {
     if (isTicking(phase)) return;
     this.#stopTimer(hosted);
     this.#rooms.delete(hosted.roomId);
-    this.#options.onRoomClosed?.(hosted.roomId);
+    this.#options.onRoomClosed?.(hosted.roomId, phase);
   }
 
   #ping(): void {

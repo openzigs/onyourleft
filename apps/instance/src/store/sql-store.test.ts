@@ -111,7 +111,14 @@ describe('SqlStore (#769)', () => {
       await store.putDeviceKey({ ...deviceKeyFixture(ATHLETE_A), revokedAt: 1_790_000_900 });
       await store.putSession({ ...sessionFixture(ATHLETE_A), revokedAt: 1_790_000_901 });
       await store.putAthlete({ ...athleteFixture(ATHLETE_A), displayName: 'Renamed' });
-      await store.putResult({ ...resultFixture(ATHLETE_A), finishMs: 1, flags: 2 });
+      await store.putResult({
+        ...resultFixture(ATHLETE_A),
+        finishMs: 1,
+        flags: 2,
+        place: 2,
+        wattsPerKilogram: 4.25,
+        flaggedDurationsSeconds: [1200, 3600],
+      });
       await store.putRoom({ ...SHARED_ROOM, visibility: 'public' });
     });
     await opened.read(async (store) => {
@@ -119,7 +126,16 @@ describe('SqlStore (#769)', () => {
       expect((await store.listSessions(ATHLETE_A))[0]?.revokedAt).toBe(1_790_000_901);
       expect((await store.getAthlete(ATHLETE_A))?.displayName).toBe('Renamed');
       expect(await store.listResults(ATHLETE_A)).toEqual([
-        { roomId: SHARED_ROOM.id, athleteId: ATHLETE_A, finishMs: 1, flags: 2 },
+        {
+          roomId: SHARED_ROOM.id,
+          athleteId: ATHLETE_A,
+          finishMs: 1,
+          flags: 2,
+          // #785's three, read back through a fresh connection.
+          place: 2,
+          wattsPerKilogram: 4.25,
+          flaggedDurationsSeconds: [1200, 3600],
+        },
       ]);
       expect((await store.getRoom(SHARED_ROOM.id))?.visibility).toBe('public');
       expect(await store.listRoomResults(SHARED_ROOM.id)).toHaveLength(3);

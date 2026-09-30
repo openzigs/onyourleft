@@ -278,6 +278,13 @@ describe('results — handed on as each becomes final, not at the end', () => {
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({ athleteId: 'ann', flags: expect.any(Number) as number });
     expect(results[0]?.finishMs).toBeGreaterThan(0);
+    // #785: the place the room gave, and the published figure — W/kg, never watts.
+    expect(results[0]?.place).toBe(1);
+    expect(results[0]?.wattsPerKilogram).toBeGreaterThan(5);
+    expect(results[0]?.flaggedDurationsSeconds).toEqual([]);
+    expect(
+      Object.keys(results[0] ?? {}).some((key) => /watts(?!PerKilogram)|power/i.test(key)),
+    ).toBe(false);
     expect(host.view('conformance')?.phase).toBe('running');
   }, 10_000);
 });

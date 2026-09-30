@@ -195,6 +195,18 @@ export const SHARED_ROOM: Room = {
   physicsVersion: 1,
 };
 
+/**
+ * A room one athlete made and the other two joined by its code (#784,
+ * migration 0013): a `room_member` row for each of the three.
+ */
+export const SHARED_PRIVATE_ROOM: Room = {
+  id: 'room-private',
+  kind: 'group',
+  visibility: 'private',
+  routeSha256: 'e'.repeat(64),
+  physicsVersion: 1,
+};
+
 const hexOf = (seed: string): string =>
   [...seed]
     .map((character) => character.charCodeAt(0).toString(16).padStart(2, '0'))
@@ -230,7 +242,15 @@ export function activityRecordFixture(athleteId: string, seed = 'ride'): Activit
 }
 
 export function resultFixture(athleteId: string, roomId = SHARED_ROOM.id): Result {
-  return { roomId, athleteId, finishMs: 3_600_000, flags: 0 };
+  return {
+    roomId,
+    athleteId,
+    finishMs: 3_600_000,
+    flags: 0,
+    place: null,
+    wattsPerKilogram: 3.5,
+    flaggedDurationsSeconds: [],
+  };
 }
 
 /** A rename limit the fixtures never reach. */
@@ -354,6 +374,27 @@ export async function seedWorld(store: SqlStore): Promise<void> {
       reason: `Report by ${athlete}`,
       createdAt: 1_790_000_500,
     });
+  }
+  // Migration 0013's (#784): ATHLETE_A made a room, and the other two joined it.
+  await store.createPrivateRoom({
+    room: SHARED_PRIVATE_ROOM,
+    course: {
+      roomId: SHARED_PRIVATE_ROOM.id,
+      lengthMetres: 1_000,
+      grades: [[0, 0]],
+      ridingPosition: 'hoods',
+      capacity: null,
+      countdownMs: 0,
+      rejoinWindowMs: null,
+      raceStartedAt: null,
+    },
+    codeSha256: hexOf('code-of-the-private-room'),
+    routeLoop: false,
+    creatorAthleteId: ATHLETE_A,
+    createdAt: 1_790_000_600,
+  });
+  for (const athlete of ATHLETES) {
+    await store.addRoomMember(SHARED_PRIVATE_ROOM.id, athlete, 1_790_000_700);
   }
 }
 

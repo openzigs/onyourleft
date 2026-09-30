@@ -223,6 +223,20 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   putRoomCourse: { notAScopedRead: 'a write' },
   markRaceStarted: { notAScopedRead: 'a write' },
   putResult: { notAScopedRead: 'a write' },
+  createPrivateRoom: { notAScopedRead: 'a write; its creator is the caller (rooms/rooms.test.ts)' },
+  getPrivateRoom: { notAScopedRead: 'a room belongs to no athlete' },
+  findPrivateRoomByCode: {
+    notAScopedRead: 'a room by its code’s digest: whoever holds the code may join (#784)',
+  },
+  addRoomMember: { notAScopedRead: 'a write' },
+  isRoomMember: {
+    notAScopedRead:
+      'a yes or no for ONE (room, athlete) pair, never a row; rooms/rooms.test.ts holds a non-member refused',
+  },
+  closePrivateRoom: { notAScopedRead: 'a write' },
+  countOpenPrivateRoomsWithRoute: {
+    notAScopedRead: 'blob collection: a count across rooms, never a row (#784)',
+  },
   sight: {
     notAScopedRead: 'a pair of athletes, either way round: the choke point asks it (#83)',
   },

@@ -48,6 +48,7 @@ import type {
   RecoveryCodeTable,
   RecoveryEmailConfirmationTable,
   ReportTable,
+  PrivateRoomTable,
   ResultTable,
   RoomCourseTable,
   RoomTable,
@@ -138,6 +139,36 @@ export interface Result {
   readonly athleteId: string;
   readonly finishMs: number | null;
   readonly flags: number;
+  /** 1 first, from the room's own finish order; `null` for a rider who did not finish (#785). */
+  readonly place: number | null;
+  /** Mean power over the race per kilogram of declared mass (ruling Q17), or `null`. Never watts. */
+  readonly wattsPerKilogram: number | null;
+  /** The durations of every plausibility ceiling breached, shortest first (#785). */
+  readonly flaggedDurationsSeconds: readonly number[];
+}
+
+/** A room a rider made (#784, migration 0013). */
+export interface PrivateRoom {
+  readonly roomId: string;
+  /** SHA-256 of the room code, lower-case hex. The code itself is never stored. */
+  readonly codeSha256: string;
+  /** Whether the shared route is ridden as a loop. */
+  readonly routeLoop: boolean;
+  /** Unix seconds. */
+  readonly createdAt: number;
+  /** Unix seconds: when the room was over, or `null` while it is not. */
+  readonly closedAt: number | null;
+}
+
+/** Everything one rider's new room is, written together (#784). */
+export interface NewPrivateRoom {
+  readonly room: Room;
+  readonly course: RoomCourse;
+  readonly codeSha256: string;
+  readonly routeLoop: boolean;
+  readonly creatorAthleteId: string;
+  /** Unix seconds. */
+  readonly createdAt: number;
 }
 
 /** A nonce issued to a public key (#772). */
@@ -667,6 +698,28 @@ export interface SqlStore {
   /** A race left its lobby at `at` (Unix seconds). The first time is kept. */
   markRaceStarted(roomId: string, at: number): Promise<void>;
 
+  /**
+   * #784: a rider's room — the room, its course, its code's digest and the
+   * creator's membership — in ONE transaction, or `code-taken`, writing
+   * nothing, when another room already has that code's digest (a collision
+   * the caller answers by drawing another).
+   */
+  createPrivateRoom(created: NewPrivateRoom): Promise<'created' | 'code-taken'>;
+  getPrivateRoom(roomId: string): Promise<PrivateRoom | undefined>;
+  /** The private room whose code has this digest — open or closed — or `undefined`. */
+  findPrivateRoomByCode(codeSha256: string): Promise<PrivateRoom | undefined>;
+  /** #784: `athleteId` may be ticketed into `roomId`. Idempotent: the first row is kept. */
+  addRoomMember(roomId: string, athleteId: string, at: number): Promise<void>;
+  /** Whether `athleteId` may be ticketed into `roomId`: its creator, or joined by its code. */
+  isRoomMember(roomId: string, athleteId: string): Promise<boolean>;
+  /** #784: the room is over. `true` the first time, `false` when it already was. */
+  closePrivateRoom(roomId: string, at: number): Promise<boolean>;
+  /**
+   * How many private rooms other than `exceptRoomId` that are not over ride a
+   * route by this digest — its blob is shared by all of them (#784).
+   */
+  countOpenPrivateRoomsWithRoute(routeSha256: string, exceptRoomId: string): Promise<number>;
+
   putResult(result: Result): Promise<void>;
   listResults(athleteId: string): Promise<readonly Result[]>;
   /** A room's finish order is every rider's, by design: not athlete-scoped. */
@@ -1033,6 +1086,17 @@ const resultFrom = (row: Selectable<ResultTable>): Result => ({
   athleteId: row.athlete_id,
   finishMs: row.finish_ms,
   flags: row.flags,
+  place: row.place,
+  wattsPerKilogram: row.watts_per_kilogram,
+  flaggedDurationsSeconds: JSON.parse(row.flagged_seconds) as number[],
+});
+
+const privateRoomFrom = (row: Selectable<PrivateRoomTable>): PrivateRoom => ({
+  roomId: row.room_id,
+  codeSha256: row.code_sha256,
+  routeLoop: row.route_loop === 1,
+  createdAt: row.created_at,
+  closedAt: row.closed_at,
 });
 
 /**
@@ -2033,20 +2097,140 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           .execute();
       }),
 
-    putResult: (result) =>
+    createPrivateRoom: (created) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx): Promise<'created' | 'code-taken'> => {
+          const taken = await trx
+            .selectFrom('private_room')
+            .select('room_id')
+            .where('code_sha256', '=', created.codeSha256)
+            .executeTakeFirst();
+          if (taken !== undefined) return 'code-taken';
+          const { room, course } = created;
+          await trx
+            .insertInto('room')
+            .values({
+              id: room.id,
+              kind: room.kind,
+              visibility: room.visibility,
+              route_sha256: room.routeSha256,
+              physics_version: room.physicsVersion,
+            })
+            .execute();
+          await trx
+            .insertInto('room_course')
+            .values({
+              room_id: room.id,
+              length_metres: course.lengthMetres,
+              grades: JSON.stringify(course.grades),
+              riding_position: course.ridingPosition,
+              capacity: course.capacity,
+              countdown_ms: course.countdownMs,
+              rejoin_window_ms: course.rejoinWindowMs,
+              race_started_at: null,
+            })
+            .execute();
+          await trx
+            .insertInto('private_room')
+            .values({
+              room_id: room.id,
+              code_sha256: created.codeSha256,
+              route_loop: created.routeLoop ? 1 : 0,
+              created_at: created.createdAt,
+              closed_at: null,
+            })
+            .execute();
+          await trx
+            .insertInto('room_member')
+            .values({
+              room_id: room.id,
+              athlete_id: created.creatorAthleteId,
+              role: 'creator',
+              joined_at: created.createdAt,
+            })
+            .execute();
+          return 'created';
+        }),
+      ),
+
+    getPrivateRoom: (roomId) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('private_room')
+          .selectAll()
+          .where('room_id', '=', roomId)
+          .executeTakeFirst();
+        return row === undefined ? undefined : privateRoomFrom(row);
+      }),
+
+    findPrivateRoomByCode: (codeSha256) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('private_room')
+          .selectAll()
+          .where('code_sha256', '=', codeSha256)
+          .executeTakeFirst();
+        return row === undefined ? undefined : privateRoomFrom(row);
+      }),
+
+    addRoomMember: (roomId, athleteId, at) =>
       exclusive(async () => {
         await db
+          .insertInto('room_member')
+          .values({ room_id: roomId, athlete_id: athleteId, role: 'rider', joined_at: at })
+          .onConflict((conflict) => conflict.columns(['room_id', 'athlete_id']).doNothing())
+          .execute();
+      }),
+
+    isRoomMember: (roomId, athleteId) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('room_member')
+          .select('role')
+          .where('room_id', '=', roomId)
+          .where('athlete_id', '=', athleteId)
+          .executeTakeFirst();
+        return row !== undefined;
+      }),
+
+    closePrivateRoom: (roomId, at) =>
+      exclusive(async () => {
+        const updated = await db
+          .updateTable('private_room')
+          .set({ closed_at: at })
+          .where('room_id', '=', roomId)
+          .where('closed_at', 'is', null)
+          .executeTakeFirst();
+        return Number(updated.numUpdatedRows) > 0;
+      }),
+
+    countOpenPrivateRoomsWithRoute: (routeSha256, exceptRoomId) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('private_room')
+          .innerJoin('room', 'room.id', 'private_room.room_id')
+          .select((eb) => eb.fn.countAll<number>().as('n'))
+          .where('room.route_sha256', '=', routeSha256)
+          .where('private_room.room_id', '!=', exceptRoomId)
+          .where('private_room.closed_at', 'is', null)
+          .executeTakeFirstOrThrow();
+        return Number(row.n);
+      }),
+
+    putResult: (result) =>
+      exclusive(async () => {
+        const figures = {
+          finish_ms: result.finishMs,
+          flags: result.flags,
+          place: result.place,
+          watts_per_kilogram: result.wattsPerKilogram,
+          flagged_seconds: JSON.stringify(result.flaggedDurationsSeconds),
+        };
+        await db
           .insertInto('result')
-          .values({
-            room_id: result.roomId,
-            athlete_id: result.athleteId,
-            finish_ms: result.finishMs,
-            flags: result.flags,
-          })
+          .values({ room_id: result.roomId, athlete_id: result.athleteId, ...figures })
           .onConflict((conflict) =>
-            conflict
-              .columns(['room_id', 'athlete_id'])
-              .doUpdateSet({ finish_ms: result.finishMs, flags: result.flags }),
+            conflict.columns(['room_id', 'athlete_id']).doUpdateSet(figures),
           )
           .execute();
       }),

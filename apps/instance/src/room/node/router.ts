@@ -9,7 +9,7 @@ import { encodeMessage } from '@onyourleft/protocol';
 import { WebSocketServer } from 'ws';
 
 import { REFUSAL_CLOSE, ROOM_LOST, type CloseFrame } from '../close-codes.ts';
-import type { Admission } from '../core/room.ts';
+import type { Admission, RoomPhase } from '../core/room.ts';
 import type { RoomPlan } from '../room-plan.ts';
 import type { FromWorker, ToWorker, UpgradeRequest, WorkerSettings } from './ipc.ts';
 import type { HostMetrics, RoomResult } from './room-host.ts';
@@ -90,6 +90,12 @@ export interface RouterOptions {
   readonly admit: (roomId: string, ticket: string) => Admission | undefined;
   readonly onResult?: (roomId: string, result: RoomResult) => Promise<void>;
   readonly onRaceStarted?: (roomId: string) => Promise<void>;
+  /**
+   * A worker let a room go (#784): `phase` is where the room was — `finished`
+   * or `closed` when it is over, `lobby` when its lobby only emptied and a later
+   * socket may open it again.
+   */
+  readonly onRoomClosed?: (roomId: string, phase: RoomPhase) => Promise<void>;
   /** Whether rooms may be admitted at all yet (`/ready`). */
   readonly ready?: () => boolean;
   /** Something happened an operator should see. No coordinate, no id, no secret. */
@@ -413,6 +419,7 @@ export class RoomRouter {
         return;
       case 'room-closed':
         if (this.#placement.get(message.roomId) === slot) this.#placement.delete(message.roomId);
+        this.#track(this.#options.onRoomClosed?.(message.roomId, message.phase));
         return;
       case 'socket-closed': {
         const copy = slot.sockets.get(message.socketId);

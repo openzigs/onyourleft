@@ -6,7 +6,7 @@
  * `socket`.
  */
 
-import type { Admission } from '../core/room.ts';
+import type { Admission, RoomPhase } from '../core/room.ts';
 import type { RoomPlan } from '../room-plan.ts';
 import type { HostMetrics, RoomResult } from './room-host.ts';
 
@@ -56,7 +56,7 @@ export type FromWorker =
     }
   | { readonly type: 'result'; readonly roomId: string; readonly result: RoomResult }
   | { readonly type: 'race-started'; readonly roomId: string }
-  | { readonly type: 'room-closed'; readonly roomId: string }
+  | { readonly type: 'room-closed'; readonly roomId: string; readonly phase: RoomPhase }
   | { readonly type: 'socket-closed'; readonly socketId: string }
   | {
       readonly type: 'metrics';
