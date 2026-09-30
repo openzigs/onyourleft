@@ -294,3 +294,23 @@ About screen ([ADR 0025](0025-app-store-additional-permission.md) D-7).
   checks: none of them"* applies to them. D-3.a and D-6 are the only decisions here with a test
   behind them: `no-network.test.ts`, and #767's commit-in-the-URL test. D-3.b, D-3.c and D-3.d have
   tests **owed**, by #47, #776 and #777, and until those land nothing checks them either.
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-09-29** — **The instance will hold a second kind of rider data, and D-3.d's *"the rider's own
+  analysis endpoint is the rider's computer, not this instance"* stops being the whole picture when
+  it ships.** [ADR 0040](0040-a-history-index-on-the-riders-instance.md) (#834) records the owner's
+  ruling of 2026-09-29 that the rider's instance keeps a searchable index of their write-ups, ride
+  summaries, goals, notes and documents for the AI analysis, with embeddings computed on the
+  instance by a local model. **D-3's four invariants are unchanged, and ADR 0040 D-1 is written to
+  keep them**: every index row is derived from a row the device synced, so the index is rebuildable
+  and never a store of record; goals, notes and documents originate on the device, which keeps (c);
+  a rider with no instance gets the write-up without history and loses nothing, which keeps (a); and
+  no picture, and not the pose summary, enters the index, which keeps (d). The analysis endpoint
+  that **writes** a write-up is still the rider's computer or a hosted service they chose; what the
+  instance adds is the history it retrieves from. Nothing is built by this entry; #835 builds the
+  index, #836 the places a rider writes.

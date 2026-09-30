@@ -472,3 +472,20 @@ licence that is not on a list fails whether the tag was right or not.
   does not scan dependencies. D-3 would be breached by something no gate here can see.
 - **The Kimi K3 License is revised.** Every quotation is dated 2026-09-22 from the file; a later
   version is a new read.
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-09-29** — **D-4's *"no default endpoint"* and *"no vendor is named in source"* no longer
+  hold for one model: the instance's embedding model.** [ADR 0040](0040-a-history-index-on-the-riders-instance.md)
+  (#834) records the owner's ruling of 2026-09-29 that `apps/instance` defaults to
+  `nomic-embed-text` v1.5 (`nomic-ai/nomic-embed-text-v1.5`, declared licence `apache-2.0`, read
+  2026-09-29), served by a local Ollama at an address the instance refuses unless it is loopback,
+  private or a Compose service name. The owner's reason is that nothing leaves the rider's machine.
+  **The reversal is ADR 0040's**, and it is narrow: D-4 stands for the generative model on every
+  path and for everything the client ships, and D-2, D-3 and D-5 are unchanged. ADR 0040 D-5 adds
+  one rule beside D-2: a model this project's documentation names as an example must be admissible
+  under D-2, so `embeddinggemma` (`gemma`, non-OSI and use-restricted) is never named.
