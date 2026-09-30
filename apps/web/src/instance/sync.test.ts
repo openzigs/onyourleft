@@ -616,4 +616,99 @@ describe('two-way sync through the real instance (#776)', () => {
     expect(await b.sync()).toMatchObject({ consentsPulled: 0, consentsPushed: 0, failures: [] });
     expect(await raceableOnInstance(world.path)).toStrictEqual([]);
   }, 60_000);
+
+  // #915's review: with NO race-consent base — every ride synced before store
+  // v15, or against an instance before migration 0010 — a device still saying
+  // "yes" pushed it over a revocation made on another device. Off wins.
+  it('lets "off" win when a device has no consent base, so a device still saying yes cannot re-grant a revoked consent (#793)', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const ride = a.ids[0]!;
+    expect(await a.sync()).toMatchObject({ pushed: 1, failures: [] });
+    await a.on.harness.write((store) => store.setActivityMayBeRaced(LOCAL_ATHLETE, ride, true));
+    expect(await a.sync()).toMatchObject({ consentsPushed: 1, failures: [] });
+
+    const b = await linkedDevice(world.url, origin, a.on);
+    expect(await b.sync()).toMatchObject({ pulled: 1, failures: [] });
+    expect(
+      (await b.on.harness.read((store) => store.getActivity(LOCAL_ATHLETE, ride)))?.mayBeRaced,
+    ).toBe(true);
+
+    await a.on.harness.write((store) => store.setActivityMayBeRaced(LOCAL_ATHLETE, ride, false));
+    expect(await a.sync()).toMatchObject({ consentsPushed: 1, failures: [] });
+    expect(await raceableOnInstance(world.path)).toStrictEqual([]);
+
+    // B loses its base, as a ride synced before the consent existed has none.
+    expect(
+      await b.on.harness.write((store) =>
+        store.deleteSyncBase(LOCAL_ATHLETE, 'race-consent', ride),
+      ),
+    ).toBe(true);
+
+    expect(await b.sync()).toMatchObject({ consentsPulled: 1, consentsPushed: 0, failures: [] });
+    expect(
+      (await b.on.harness.read((store) => store.getActivity(LOCAL_ATHLETE, ride)))?.mayBeRaced,
+    ).toBe(false);
+    expect(await raceableOnInstance(world.path)).toStrictEqual([]);
+  }, 60_000);
+
+  // The other half of "off wins": with no base, a device saying "no" sends it,
+  // rather than taking a "yes" it cannot tell was given after its own "no".
+  it('sends a device’s "off" over the instance’s "yes" when there is no consent base (#793)', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const ride = a.ids[0]!;
+    expect(await a.sync()).toMatchObject({ pushed: 1, failures: [] });
+    await a.on.harness.write((store) => store.setActivityMayBeRaced(LOCAL_ATHLETE, ride, true));
+    expect(await a.sync()).toMatchObject({ consentsPushed: 1, failures: [] });
+    const b = await linkedDevice(world.url, origin, a.on);
+    expect(await b.sync()).toMatchObject({ pulled: 1, failures: [] });
+
+    await b.on.harness.write(async (store) => {
+      await store.setActivityMayBeRaced(LOCAL_ATHLETE, ride, false);
+      await store.deleteSyncBase(LOCAL_ATHLETE, 'race-consent', ride);
+    });
+    expect(await b.sync()).toMatchObject({ consentsPushed: 1, consentsPulled: 0, failures: [] });
+    expect(await raceableOnInstance(world.path)).toStrictEqual([]);
+  }, 60_000);
+
+  // The converse, which "off wins" must not cost: a "yes" given before the
+  // ride's FIRST sync has a base (the instance's "off" at push), so it is sent.
+  it('sends a consent given before the ride’s first sync on the next one, rather than taking the instance’s default "off" (#793)', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const ride = a.ids[0]!;
+    await a.on.harness.write((store) => store.setActivityMayBeRaced(LOCAL_ATHLETE, ride, true));
+    expect(await a.sync()).toMatchObject({ pushed: 1, failures: [] });
+    expect(await a.sync()).toMatchObject({ consentsPushed: 1, consentsPulled: 0, failures: [] });
+    expect(
+      (await a.on.harness.read((store) => store.getActivity(LOCAL_ATHLETE, ride)))?.mayBeRaced,
+    ).toBe(true);
+    expect(await raceableOnInstance(world.path)).toHaveLength(1);
+  }, 60_000);
+
+  // And a ride PULLED while its consent was off keeps that "off" as its base,
+  // so a "yes" later given on the other device reaches this one rather than
+  // being revoked by it under "off wins".
+  it('takes a consent granted on another device after this device pulled the ride with it off (#793)', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const ride = a.ids[0]!;
+    expect(await a.sync()).toMatchObject({ pushed: 1, failures: [] });
+    const b = await linkedDevice(world.url, origin, a.on);
+    expect(await b.sync()).toMatchObject({ pulled: 1, failures: [] });
+
+    await a.on.harness.write((store) => store.setActivityMayBeRaced(LOCAL_ATHLETE, ride, true));
+    expect(await a.sync()).toMatchObject({ consentsPushed: 1, failures: [] });
+
+    expect(await b.sync()).toMatchObject({ consentsPulled: 1, consentsPushed: 0, failures: [] });
+    expect(
+      (await b.on.harness.read((store) => store.getActivity(LOCAL_ATHLETE, ride)))?.mayBeRaced,
+    ).toBe(true);
+    expect(await raceableOnInstance(world.path)).toHaveLength(1);
+  }, 60_000);
 });

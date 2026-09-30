@@ -7,7 +7,7 @@
  * **`activity_record.may_be_raced`** is `0` or `1`, and `0` on every row this
  * adds it to: nobody gave a consent that did not exist, and ADR 0039 D-2.1 is
  * "off by default". It is set only by the ride's own rider, through
- * `PUT /v1/sync/records/{content}/race-consent`, which a device sends when the
+ * `POST /v1/sync/records/{content}/race-consent`, which a device sends when the
  * rider changes it (`apps/web/src/instance/sync.ts`). ⚠️ **It is NOT in the
  * signed record**: a consent is revocable, and a signed record is not.
  *

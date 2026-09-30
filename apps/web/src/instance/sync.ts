@@ -65,7 +65,12 @@
  *    (`POST /v1/sync/records/{content}/race-consent`); unchanged here and moved
  *    there, it is taken. So a revocation reaches the instance in one sync, and
  *    a device that still says "yes" cannot put it back. A ride this device
- *    pulls takes the instance's consent with it.
+ *    pulls takes the instance's consent with it (the two then agree, and that
+ *    is remembered as the base in the same sync), and a ride it pushes starts
+ *    from the instance's "off", which is remembered as its base. **With no
+ *    base** (a ride synced before the consent existed), the two differing
+ *    means off wins: a "yes" is never re-granted by a sync that cannot tell
+ *    which device changed.
  * 7. The base forgets a ride neither side holds any more.
  *
  * ⚠️ **A pulled record is not kept on this device.** `packages/store`'s
@@ -380,6 +385,18 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
         localDigest: outcome.content,
         remoteDigest: outcome.content,
       });
+      // The instance creates a pushed ride with its consent off, so that is
+      // the consent's base: a "yes" given here before this push is a change
+      // here, and the next sync sends it rather than losing it to the "off
+      // wins" rule below (#793, #915's review).
+      const off = await consentDigest(false, sha256);
+      await remember({
+        kind: 'race-consent',
+        key: id,
+        activityId: id,
+        localDigest: off,
+        remoteDigest: off,
+      });
     } else if (outcome !== 'held') {
       failures.push({ kind: 'activity', key: id, reason: outcome });
     }
@@ -445,7 +462,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
   // After the rides, so a ride pushed in this sync has its content key in the
   // base. The same rule as an item's: a change here is pushed, a change there
   // on an unchanged copy here is pulled — so a device that still says "yes"
-  // cannot put back a consent another device revoked.
+  // cannot put back a consent another device revoked. With no base, off wins.
   const contentOf = new Map(
     [...base.values()]
       .filter((row) => row.kind === 'activity')
@@ -473,9 +490,16 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
       await remember({ kind: 'race-consent', key: id, activityId: id, localDigest, remoteDigest });
       continue;
     }
-    if (known !== undefined && known.localDigest === localDigest) {
-      // Unchanged here since the last sync, and the instance's moved: another
-      // device set or revoked it. Take it.
+    // Unchanged here since the last sync, and the instance's moved: another
+    // device set or revoked it — take it. With NO base (every ride synced
+    // before store v15, or against an instance that predates migration 0010)
+    // neither side can be shown to have changed, so OFF wins: a device still
+    // saying "yes" takes a "no", and a device saying "no" sends it. A consent
+    // is never granted by a sync that cannot tell who gave it (ADR 0021
+    // D-5.1, off by default; #915's review).
+    const takeTheInstances =
+      known === undefined ? remote === false : known.localDigest === localDigest;
+    if (takeTheInstances) {
       if (await store.setActivityMayBeRaced(athleteId, id, remote)) {
         consentsPulled += 1;
         await remember({
