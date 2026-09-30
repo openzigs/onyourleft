@@ -86,10 +86,14 @@ export function isLoopbackHost(hostname: string): boolean {
 }
 
 /**
- * `localhost:8787`, `ride.example:8443/` — a host and a port, with no scheme.
- * Whatever follows the port is left for the path rule to refuse.
+ * `localhost:8787`, `ride.example:8443/`, `192.0.2.7:8787` — a host and a
+ * port, with no scheme. Whatever follows the port is left for the path rule to
+ * refuse. ⚠️ The host must be `localhost` or have a dot in it (#892's second
+ * review): with any word allowed, `javascript:1`, `tel:123` and `mailto:1234`
+ * read as a host and a port and were accepted as `https://javascript:1`,
+ * where a scheme is what they are.
  */
-const BARE_HOST_AND_PORT = /^[^\s:/?#\\@]+:\d+(?:[/?#\\]|$)/;
+const BARE_HOST_AND_PORT = /^(?:localhost|[a-z0-9-]+(?:\.[a-z0-9-]+)+):\d+(?:[/?#\\]|$)/i;
 
 /**
  * Whether the text after `scheme:` is an authority and at most one `/`.

@@ -85,6 +85,15 @@ describe('which instance addresses the app will talk to — #777', () => {
     });
   });
 
+  it('reads a scheme followed by digits as a scheme, not as a host and a port — #892 second review', () => {
+    for (const typed of ['javascript:1', 'tel:123', 'mailto:1234', 'data:8', 'file:80']) {
+      expect(instanceAddress(typed), typed).toEqual({ kind: 'refused', why: 'not-a-web-address' });
+    }
+    // A dotted host and an IP literal with a port are still hosts.
+    expect(instanceAddress('192.0.2.7:8787')).toMatchObject({ origin: 'https://192.0.2.7:8787' });
+    expect(instanceAddress('LOCALHOST:8787')).toMatchObject({ origin: 'https://localhost:8787' });
+  });
+
   it('refuses a dot path that URL would fold into / — #892 review', () => {
     // `new URL('https://ride.example/..').pathname` is `/`, so a check of the
     // parsed path alone let each of these through as a bare origin.

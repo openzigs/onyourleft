@@ -228,6 +228,43 @@ describe('the session token', () => {
   });
 });
 
+describe('what the rate limits hold, and for how long — #892 review', () => {
+  // The privacy policy: the project's instance holds an internet address "in
+  // memory only, for at most an hour". The sweep, with no further request.
+  it('forgets an address and a key when their minute ends, with no further request', async () => {
+    const w = await start();
+    expect(w.identity.rateLimitSweepPeriodMs).toBe(60_000);
+    const device = await testDevice();
+    expect((await w.identity.challenge(device.publicKey, '203.0.113.9')).ok).toBe(true);
+    expect(w.identity.heldRateLimitKeys()).toBe(2);
+    const end = (Math.floor(w.clock.ms / 60_000) + 1) * 60_000;
+    w.clock.ms = end - 1;
+    w.identity.sweepRateLimits();
+    expect(w.identity.heldRateLimitKeys()).toBe(2);
+    w.clock.ms = end;
+    w.identity.sweepRateLimits();
+    expect(w.identity.heldRateLimitKeys()).toBe(0);
+  });
+
+  it('forgets an email address when its hour ends, and the internet address at its minute', async () => {
+    const w = await start({ emailRecovery: true });
+    expect((await w.identity.requestEmailRecovery('rider@example.org', '203.0.113.9')).ok).toBe(
+      true,
+    );
+    expect(w.identity.heldRateLimitKeys()).toBe(2);
+    w.clock.ms = (Math.floor(w.clock.ms / 60_000) + 1) * 60_000;
+    w.identity.sweepRateLimits();
+    expect(w.identity.heldRateLimitKeys()).toBe(1);
+    const hourEnd = (Math.floor(w.clock.ms / 3_600_000) + 1) * 3_600_000;
+    w.clock.ms = hourEnd - 1;
+    w.identity.sweepRateLimits();
+    expect(w.identity.heldRateLimitKeys()).toBe(1);
+    w.clock.ms = hourEnd;
+    w.identity.sweepRateLimits();
+    expect(w.identity.heldRateLimitKeys()).toBe(0);
+  });
+});
+
 describe('rate limits on /v1/auth/challenge', () => {
   it('refuses the eleventh challenge for one key in a minute, and allows it the next minute', async () => {
     const w = await start();

@@ -1147,6 +1147,13 @@ function policySection(markdown: string, heading: string): string {
  * carries them out (#892's review): no in-app screen removes a device or
  * changes the name, and no instance route erases an account. If one is built,
  * its phrase comes off this list in the same change that ships it.
+ *
+ * ⚠️ A denylist is a TRIPWIRE, not a proof (#892's second review): a synonym —
+ * "delete your account on the instance" — is on no list and passes it. What
+ * proves the section names no unbuilt path is the positive rule beside it,
+ * {@link deletionRouteFaults}: every "How to delete it" cell names
+ * *Disconnect*, the operator, or Discord (a separate service the rider acts on
+ * themselves), or is a dash for a class this version does not send.
  */
 const UNBUILT_DELETION_PATHS: readonly string[] = [
   'remove the device from your account on the instance',
@@ -1156,6 +1163,31 @@ const UNBUILT_DELETION_PATHS: readonly string[] = [
   'until it is erased on the instance',
   'erase it on the instance',
 ];
+
+/**
+ * Every "How to delete it" cell of the instance section's table that names no
+ * route this build has: *Disconnect*, the instance's operator, Discord, or a
+ * dash (#892's second review). Answers the offending cells, normalised.
+ */
+function deletionRouteFaults(section: string): readonly string[] {
+  const rows = section
+    .split('\n')
+    .filter((line) => line.startsWith('|'))
+    .map((line) => line.split('|').slice(1, -1));
+  const heading = rows.findIndex((cells) =>
+    normalised(cells.at(-1) ?? '').includes('how to delete'),
+  );
+  if (heading === -1) return ['no "how to delete it" column'];
+  const cells = rows.slice(heading + 2).map((cells) => normalised(cells.at(-1) ?? '').trim());
+  if (cells.length === 0) return ['no rows under "how to delete it"'];
+  return cells.filter(
+    (cell) =>
+      cell !== '—' &&
+      !cell.includes('disconnect') &&
+      !cell.includes('operator') &&
+      !cell.includes('discord'),
+  );
+}
 
 describe('the instance is disclosed, class by class — #778', () => {
   const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -1229,7 +1261,10 @@ describe('the instance is disclosed, class by class — #778', () => {
 
   it('says what the project’s own instance and Cloudflare keep of an internet address — #892 review', () => {
     // `apps/instance/src/log.ts` writes no address; the rate limiter holds one
-    // in memory for a window of at most an hour.
+    // in memory for a window of at most an hour, and forgets it when that
+    // window ends with no further request — `apps/instance/src/auth/
+    // rate-limit.test.ts` and `sign-in.test.ts` §"what the rate limits hold"
+    // drive the clock past the window and read the address gone.
     expect(section).toContain('does not write your address to its log or its database');
     expect(section).toContain('in memory only, for at most an hour');
     // The tile section's wording, for the same Cloudflare account.
@@ -1253,6 +1288,22 @@ describe('the instance is disclosed, class by class — #778', () => {
     expect(section).toContain("for the project's own instance, that is this project's maintainer");
     expect(section).toContain('as described under contact below');
     expect(normalised(policySection(policy, 'Contact'))).toContain('open an issue');
+  });
+
+  it('names only Disconnect, the operator or Discord in every "how to delete it" cell — #892 second review', () => {
+    expect(deletionRouteFaults(policySection(policy, 'An instance you connect to'))).toEqual([]);
+    // The prose paragraph under the table says the same.
+    expect(section).toContain('disconnecting is all this version of the app can do');
+    expect(section).toContain("ask the instance's operator to do them");
+  });
+
+  it('would find a synonym the denylist misses — the positive rule is not vacuous', () => {
+    const table =
+      '| Data | What | When | How to delete it |\n| --- | --- | --- | --- |\n' +
+      '| A key | sent | always | delete your account on the instance |\n' +
+      '| A name | sent | always | *Disconnect* |\n';
+    expect(deletionRouteFaults(table)).toEqual(['delete your account on the instance']);
+    expect(deletionRouteFaults('no table here')).toEqual(['no "how to delete it" column']);
   });
 
   it('would find an unbuilt deletion path — the rule is not vacuous', () => {

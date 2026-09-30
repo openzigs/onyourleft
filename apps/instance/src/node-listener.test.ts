@@ -5,7 +5,14 @@ import { connect } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { Handler } from './handler.ts';
-import { listen, REQUEST_ORIGIN, requestUrl, type Listening } from './node-listener.ts';
+import {
+  listen,
+  REQUEST_ORIGIN,
+  requestUrl,
+  sweepOnBoundaries,
+  type Listening,
+  type SweepTimers,
+} from './node-listener.ts';
 
 /**
  * The Node adapter's own two promises (#841): a request-target cannot move the
@@ -145,5 +152,82 @@ describe('a response is pulled no faster than the client reads it (#841)', () =>
     // Loopback socket buffers hold a few MiB; unbounded buffering pulls all 64.
     expect(pulledWhileStalled).toBeGreaterThan(0);
     expect(pulledWhileStalled).toBeLessThan(CHUNKS / 2);
+  });
+});
+
+/** Timers a test runs by hand: a clock, and the one pending timeout. */
+function handTimers(startMs: number): SweepTimers & {
+  clock: { ms: number };
+  pending: { at: number; run: () => void } | undefined;
+  cleared: number;
+  fire(): void;
+} {
+  const timers = {
+    clock: { ms: startMs },
+    pending: undefined as { at: number; run: () => void } | undefined,
+    cleared: 0,
+    now: () => timers.clock.ms,
+    setTimeout: (run: () => void, delayMs: number) => {
+      timers.pending = { at: timers.clock.ms + delayMs, run };
+      return timers.pending;
+    },
+    clearTimeout: (handle: unknown) => {
+      if (handle === timers.pending) timers.pending = undefined;
+      timers.cleared += 1;
+    },
+    fire() {
+      const due = timers.pending;
+      if (due === undefined) throw new Error('nothing is scheduled');
+      timers.pending = undefined;
+      timers.clock.ms = Math.max(timers.clock.ms, due.at);
+      due.run();
+    },
+  };
+  return timers;
+}
+
+describe('the rate-limit sweep runs on every boundary — #892 review', () => {
+  it('schedules each sweep for the next multiple of its period, however late the last one fired', () => {
+    const timers = handTimers(120_017);
+    const runs: number[] = [];
+    const stop = sweepOnBoundaries(
+      { periodMs: 60_000, run: () => runs.push(timers.clock.ms) },
+      timers,
+    );
+    expect(timers.pending?.at).toBe(180_000);
+    timers.fire();
+    expect(runs).toEqual([180_000]);
+    expect(timers.pending?.at).toBe(240_000);
+    // A timer that fires 5 s late does not push the next boundary back.
+    timers.clock.ms = 245_000;
+    timers.fire();
+    expect(runs).toEqual([180_000, 245_000]);
+    expect(timers.pending?.at).toBe(300_000);
+    stop();
+    expect(timers.pending).toBeUndefined();
+  });
+
+  it('refuses a period that is not a positive whole number', () => {
+    expect(() => sweepOnBoundaries({ periodMs: 0, run: () => undefined }, handTimers(0))).toThrow(
+      RangeError,
+    );
+  });
+
+  it('is started by listen and stopped by close', async () => {
+    const timers = handTimers(0);
+    let runs = 0;
+    const handler: Handler = () => Promise.resolve(new Response(null, { status: 204 }));
+    running = await listen(handler, {
+      host: '127.0.0.1',
+      port: 0,
+      sweep: { periodMs: 60_000, run: () => (runs += 1) },
+      timers,
+    });
+    expect(timers.pending?.at).toBe(60_000);
+    timers.fire();
+    expect(runs).toBe(1);
+    await running.close();
+    running = undefined;
+    expect(timers.pending).toBeUndefined();
   });
 });

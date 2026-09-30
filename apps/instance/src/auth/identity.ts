@@ -77,7 +77,7 @@ import {
   verifyEd25519,
 } from './crypto.ts';
 import { publicAthlete, type PublicAthlete } from './public-athlete.ts';
-import { createRateLimiter, type RateLimit } from './rate-limit.ts';
+import { createRateLimiter, sweepPeriodMs, type RateLimit } from './rate-limit.ts';
 import { createTicketBook, type MintedTicket } from './tickets.ts';
 
 /** A challenge's life: #772's "+60 s". */
@@ -202,6 +202,18 @@ export interface Identity {
     proof: { readonly recoveryCode?: unknown; readonly emailToken?: unknown },
   ): Promise<Outcome<{ athleteId: string }>>;
   requestEmailRecovery(address: unknown, client: string | null): Promise<Outcome<null>>;
+  /**
+   * Forget every rate-limit key — an internet address, a public key, an email
+   * address — whose window has ended (#892's review). The Node adapter runs it
+   * on every {@link rateLimitSweepPeriodMs} boundary, which is what keeps the
+   * privacy policy's "in memory only, for at most an hour" true on an instance
+   * nobody asks again.
+   */
+  sweepRateLimits(): void;
+  /** The period {@link sweepRateLimits} must run on: every window ends on one of its boundaries. */
+  readonly rateLimitSweepPeriodMs: number;
+  /** How many rate-limit keys are held now, across every limit. */
+  heldRateLimitKeys(): number;
 }
 
 const refuse = (code: ErrorCode, fields?: readonly FieldProblem[]): Outcome<never> =>
@@ -381,9 +393,24 @@ export function createIdentity(options: IdentityOptions): Identity {
     };
   }
 
+  const limiters = [perKey, perAddress, emailPerAddress];
+
   return {
     origin,
     emailRecoveryEnabled: mailer !== undefined,
+    rateLimitSweepPeriodMs: sweepPeriodMs([
+      limits.challengePerKey,
+      limits.challengePerAddress,
+      limits.emailRecoveryPerAddress,
+    ]),
+
+    sweepRateLimits() {
+      for (const limiter of limiters) limiter.sweep();
+    },
+
+    heldRateLimitKeys() {
+      return limiters.reduce((held, limiter) => held + limiter.size, 0);
+    },
 
     async challenge(publicKey, address) {
       if (!isPublicKey(publicKey))
