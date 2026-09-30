@@ -373,6 +373,12 @@ export interface SyncItem {
 /** A manifest row: the item, and a live activity's signed record beside it. */
 export interface ManifestRow extends SyncItem {
   readonly signedRecord: Uint8Array | null;
+  /**
+   * A live activity's "may be raced" consent (#793), or `null` for anything
+   * else — so a device can tell the instance's copy of the consent from its
+   * own without a request per ride.
+   */
+  readonly mayBeRaced: boolean | null;
 }
 
 /** A position in the manifest's order. */
@@ -603,6 +609,25 @@ export interface SqlStore {
   ): Promise<readonly ManifestRow[]>;
   getActivityRecord(athleteId: string, contentSha256: string): Promise<ActivityRecord | undefined>;
   listActivityRecords(athleteId: string): Promise<readonly ActivityRecord[]>;
+  /**
+   * #793: set or revoke the "may be raced" consent on one of THIS athlete's
+   * records (ADR 0021 D-5.1). `false`, and nothing written, when the athlete
+   * holds no such record — another athlete's ride is not theirs to consent for.
+   */
+  setActivityMayBeRaced(
+    athleteId: string,
+    contentSha256: string,
+    mayBeRaced: boolean,
+  ): Promise<boolean>;
+  /**
+   * #793: other athletes' records whose riders consented to their being
+   * raced, newest first — what this instance would serve as raceable (ADR
+   * 0039 D-2). ⚠️ **Cross-athlete by design**, and never the requester's own
+   * (their own attempts are #93's, not this). The consent is required: a
+   * record whose rider revoked it is not returned on the next read. Nothing
+   * serves it over HTTP yet; #331 is its first caller.
+   */
+  listRaceableActivities(requester: string, limit: number): Promise<readonly ActivityRecord[]>;
 
   /**
    * #835: live items of `kinds`, of any athlete, that have no index row for
@@ -900,7 +925,9 @@ const sessionFrom = (row: Selectable<SessionTable>): Session => ({
   revokedAt: row.revoked_at,
 });
 
-const activityRecordFrom = (row: Selectable<ActivityRecordTable>): ActivityRecord => ({
+const activityRecordFrom = (
+  row: Omit<Selectable<ActivityRecordTable>, 'may_be_raced'>,
+): ActivityRecord => ({
   athleteId: row.athlete_id,
   contentSha256: row.content_sha256,
   signedRecord: row.signed_record,
@@ -1730,6 +1757,33 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         ).map(activityRecordFrom),
       ),
 
+    setActivityMayBeRaced: (athleteId, contentSha256, mayBeRaced) =>
+      exclusive(async () => {
+        const updated = await db
+          .updateTable('activity_record')
+          .set({ may_be_raced: mayBeRaced ? 1 : 0 })
+          .where('athlete_id', '=', athleteId)
+          .where('content_sha256', '=', contentSha256)
+          .executeTakeFirst();
+        return updated.numUpdatedRows > 0n;
+      }),
+
+    listRaceableActivities: (requester, limit) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('activity_record')
+            .select(['athlete_id', 'content_sha256', 'signed_record', 'received_at'])
+            .where('may_be_raced', '=', 1)
+            .where('athlete_id', '!=', requester)
+            .orderBy('received_at', 'desc')
+            .orderBy('athlete_id')
+            .orderBy('content_sha256')
+            .limit(limit)
+            .execute()
+        ).map(activityRecordFrom),
+      ),
+
     ingestActivity: (ingestion) =>
       exclusive(() =>
         db.transaction().execute(async (trx) => {
@@ -1896,6 +1950,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           )
           .selectAll('sync_item')
           .select('activity_record.signed_record as signed_record')
+          .select('activity_record.may_be_raced as may_be_raced')
           .where('sync_item.athlete_id', '=', athleteId);
         if (after !== undefined) {
           query = query.where(
@@ -1907,7 +1962,11 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           .orderBy('sync_item.seq')
           .limit(limit)
           .execute();
-        return rows.map((row) => ({ ...syncItemFrom(row), signedRecord: row.signed_record }));
+        return rows.map((row) => ({
+          ...syncItemFrom(row),
+          signedRecord: row.signed_record,
+          mayBeRaced: row.may_be_raced === null ? null : row.may_be_raced === 1,
+        }));
       }),
 
     putRoom: (room) =>

@@ -81,6 +81,7 @@ function ride(owner = OWNER, overrides: Partial<ActivityRecord> = {}): ActivityR
     distance: 30_000 as ActivityRecord['distance'],
     visibility: 'private',
     hasPosition: true,
+    mayBeRaced: false,
     createdAt: NOW,
     ...overrides,
   };

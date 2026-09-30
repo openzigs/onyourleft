@@ -207,6 +207,14 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   deleteSyncItem: {
     notAScopedRead: 'a write; its scoping is sync/manifest.test.ts’s (cross-athlete DELETE)',
   },
+  setActivityMayBeRaced: {
+    notAScopedRead:
+      'a write; its scoping is sync/race-consent.test.ts’s (another athlete’s record, asked for as the caller)',
+  },
+  listRaceableActivities: {
+    notAScopedRead:
+      'cross-athlete BY DESIGN (ADR 0039 D-2): other riders’ consented rides, never the requester’s own; sync/race-consent.test.ts holds the consent and the exclusion',
+  },
   isContentHeld: {
     notAScopedRead:
       'blob collection: whether ANY athlete holds a file, answered as a boolean and never as a row (#35)',

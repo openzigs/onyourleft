@@ -161,6 +161,7 @@ export const SYNC_ROUTES: readonly Route[] = [
             receivedAt: integer,
             deleted: { type: 'boolean' },
             activityId: { type: ['string', 'null'] },
+            mayBeRaced: { type: ['boolean', 'null'] },
           }),
         },
         next: { type: ['string', 'null'] },
@@ -184,6 +185,29 @@ export const SYNC_ROUTES: readonly Route[] = [
     },
     handle: async (context) =>
       answer(await syncOf(context).record(callerOf(context), context.params.content ?? '')),
+  },
+  {
+    method: 'POST',
+    path: '/v1/sync/records/{content}/race-consent',
+    operationId: 'setRaceConsent',
+    reaches: 'own',
+    summary:
+      'Say whether another rider may race a ghost of one of your rides, by the SHA-256 of its file. Off unless you set it, and revocable: a ride set back to false is not served as raceable on the next read. Not part of the signed record, and never inferred from how a ride is shared.',
+    ...SESSION,
+    request: object({ mayBeRaced: { type: 'boolean' } }),
+    errors: ['unauthenticated', 'validation_failed', 'not_found'],
+    response: {
+      contentType: 'application/json',
+      schema: object({ mayBeRaced: { type: 'boolean' } }),
+    },
+    handle: async (context) =>
+      answer(
+        await syncOf(context).setRaceConsent(
+          callerOf(context),
+          context.params.content ?? '',
+          context.json,
+        ),
+      ),
   },
   {
     method: 'POST',

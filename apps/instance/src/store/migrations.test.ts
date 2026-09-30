@@ -70,7 +70,7 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   athlete: `INSERT INTO athlete (id, display_name, created_at, registration_state) VALUES ('a', 'A', 1, 'active')`,
   device_key: `INSERT INTO device_key (public_key, athlete_id, added_at, revoked_at) VALUES ('key-a', 'a', 2, NULL)`,
   session: `INSERT INTO session VALUES ('${'0'.repeat(64)}', 'a', 'key-a', 3, NULL)`,
-  activity_record: `INSERT INTO activity_record VALUES ('a', '${'1'.repeat(64)}', x'00ff', 4)`,
+  activity_record: `INSERT INTO activity_record (athlete_id, content_sha256, signed_record, received_at) VALUES ('a', '${'1'.repeat(64)}', x'00ff', 4)`,
   room: `INSERT INTO room VALUES ('room', 'race', 'private', '${'2'.repeat(64)}', 1)`,
   result: `INSERT INTO result VALUES ('room', 'a', 1000, 0)`,
   room_course: `INSERT INTO room_course VALUES ('room', 450, '[[0,0],[150,2]]', 'hoods', NULL, 2000, NULL, NULL)`,

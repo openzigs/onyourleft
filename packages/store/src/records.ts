@@ -325,6 +325,30 @@ export interface ActivityRecord {
    */
   readonly originalFile?: OriginalFileReference;
 
+  /**
+   * Whether the rider has said this ride **may be raced** as a ghost by another
+   * rider (#793, ADR 0021 D-5.1, ADR 0039 D-2.1).
+   *
+   * ⚠️ **Its own record, and never the share setting.** `visibility` says who
+   * may SEE a ride; this says whether a stranger may RACE it, and ADR 0021
+   * D-5.1 is explicit that sharing a ride is not consent to being raced. A
+   * cross-rider ghost read that consulted `visibility` instead of this is the
+   * finding ADR 0039 D-4.6 names.
+   *
+   * **`false` unless the rider turned it on**, per ride, and revocable: the
+   * ride detail view is the one place it is set (`setActivityMayBeRaced`). It
+   * is required rather than optional so "off" is a stored fact on every row,
+   * which is why version 15 is a record migration
+   * (`migrations.ts` §`ACTIVITY_MAY_BE_RACED`) rather than an optional field.
+   *
+   * ⚠️ **A `true` here does not make the ride a ghost.** Nothing in this
+   * build offers another rider's ride as one — #331 does that, after the
+   * consent-scoped store test (`activity-store.race-consent.test.ts`) has
+   * merged, and a ride whose privacy-zone trim touches the raced route is
+   * still refused.
+   */
+  readonly mayBeRaced: boolean;
+
   readonly createdAt: UnixSeconds;
 }
 
@@ -483,13 +507,17 @@ export const DEFAULT_PRIVACY_ZONE_RADIUS_METRES = 500;
 
 /**
  * What `putActivity` accepts: an `ActivityRecord` with `visibility` optional,
- * because ADR 0004's default is applied here rather than demanded of callers.
+ * because ADR 0004's default is applied here rather than demanded of callers —
+ * and, since #793, `mayBeRaced` optional for the same reason: its default,
+ * off, is applied by the store.
  *
  * Everything else is required. A default for a duration or a distance would be
  * a guess written into the athlete's data.
  */
-export type NewActivity = Omit<ActivityRecord, 'visibility'> & {
+export type NewActivity = Omit<ActivityRecord, 'visibility' | 'mayBeRaced'> & {
   readonly visibility?: Visibility;
+  /** Off unless given — {@link ActivityRecord.mayBeRaced}. */
+  readonly mayBeRaced?: boolean;
 };
 
 /**
@@ -508,8 +536,11 @@ export type NewLap = Omit<LapRecord, 'athleteId'>;
  * record in this package holds stream bytes in the first place. The type exists
  * anyway, because #27 adds blob references to the activity record and the list
  * path must already have a shape that cannot carry them.
+ *
+ * ⚠️ **Nor does it carry `mayBeRaced`** (#793): no list row reads the consent,
+ * and the one screen that does — the ride's own page — reads the whole ride.
  */
-export type ActivitySummary = Omit<ActivityRecord, 'originalFile'>;
+export type ActivitySummary = Omit<ActivityRecord, 'originalFile' | 'mayBeRaced'>;
 
 // --- #66: efforts, and the sweep that finds them ----------------------------
 
@@ -1160,14 +1191,19 @@ export interface RideWriteUpRecord {
  *
  * `activity` is a ride, keyed by its signed file's content hash (64 lowercase
  * hex); `write-up` and `side-camera-report` are keyed by the ride's own id.
+ * `race-consent` (#793) is a ride's "may be raced" consent, keyed by the
+ * ride's own id, its digests those of `{"mayBeRaced":true}` or `…false}`: a
+ * base is what stops a device that still says "yes" putting a consent back
+ * after another device revoked it.
  */
-export type SyncBaseKind = 'activity' | 'write-up' | 'side-camera-report';
+export type SyncBaseKind = 'activity' | 'write-up' | 'side-camera-report' | 'race-consent';
 
 /** Every {@link SyncBaseKind}, in the order a sync visits them. */
 export const SYNC_BASE_KINDS: readonly SyncBaseKind[] = [
   'activity',
   'write-up',
   'side-camera-report',
+  'race-consent',
 ];
 
 /**

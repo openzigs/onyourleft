@@ -104,4 +104,5 @@ export {
   thinnedGeometryStoreFactory,
   truncatedWorkoutStoreFactory,
   unscopedAttemptStoreFactory,
+  consentIgnoredStoreFactory,
 } from './fakes';

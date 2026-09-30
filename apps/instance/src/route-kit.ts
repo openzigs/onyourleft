@@ -25,7 +25,13 @@ export type Schema =
   | { readonly type: 'array'; readonly items: Schema }
   | { readonly type: 'string' | ['string', 'null']; readonly format?: 'uri' }
   | {
-      readonly type: 'integer' | 'number' | 'boolean' | ['integer', 'null'] | ['number', 'null'];
+      readonly type:
+        | 'integer'
+        | 'number'
+        | 'boolean'
+        | ['integer', 'null']
+        | ['number', 'null']
+        | ['boolean', 'null'];
     }
   | { readonly type: 'string'; readonly enum: readonly string[] }
   | { readonly $ref: string };
