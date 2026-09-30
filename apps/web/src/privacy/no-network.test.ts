@@ -101,10 +101,31 @@ const SOURCE_ROOT = fileURLToPath(new URL('..', import.meta.url));
  * silenced within a week, which is the failure mode a noisy rule has.
  */
 const NETWORK_PRIMITIVES: readonly { readonly name: string; readonly pattern: RegExp }[] = [
-  { name: 'fetch', pattern: /(?<![\w.$])fetch\s*\(/g },
-  { name: 'XMLHttpRequest', pattern: /(?<![\w.$])XMLHttpRequest\b/g },
-  { name: 'WebSocket', pattern: /(?<![\w.$])WebSocket\b/g },
-  { name: 'EventSource', pattern: /(?<![\w.$])EventSource\b/g },
+  // ⚠️ Each of these four is TWO spellings in one row, since #782's review
+  // (B2): the bare name, with `.` in the lookbehind so `store.fetchRides(` and
+  // `scope.fetch = …` stay quiet, OR the name reached through the global
+  // object — `globalThis.`, `window.` or `self.` — which that lookbehind used
+  // to skip, so `new globalThis.WebSocket(u)` anywhere in the client passed
+  // the gate. One row per primitive rather than a second row, so a line naming
+  // both spellings is one finding and the module-and-primitive count below is
+  // not doubled. #529 closed the same hole for `RTCPeerConnection`.
+  {
+    name: 'fetch',
+    pattern: /(?<![\w.$])fetch\s*\(|(?<![\w$])(?:globalThis|window|self)\s*\.\s*fetch\s*\(/g,
+  },
+  {
+    name: 'XMLHttpRequest',
+    pattern:
+      /(?<![\w.$])XMLHttpRequest\b|(?<![\w$])(?:globalThis|window|self)\s*\.\s*XMLHttpRequest\b/g,
+  },
+  {
+    name: 'WebSocket',
+    pattern: /(?<![\w.$])WebSocket\b|(?<![\w$])(?:globalThis|window|self)\s*\.\s*WebSocket\b/g,
+  },
+  {
+    name: 'EventSource',
+    pattern: /(?<![\w.$])EventSource\b|(?<![\w$])(?:globalThis|window|self)\s*\.\s*EventSource\b/g,
+  },
   { name: 'sendBeacon', pattern: /\.sendBeacon\s*\(/g },
   { name: 'navigator.sendBeacon', pattern: /(?<![\w.$])navigator\s*\.\s*sendBeacon\b/g },
   // #529, ADR 0033 D-9 step 1. ⚠️ **No `.` in the lookbehind, unlike every
@@ -177,6 +198,31 @@ describe('the scan itself', () => {
     expect(networkCallsIn('await Capacitor.Plugins.CapacitorHttp.request(o);')).toHaveLength(1);
     expect(networkCallsIn("registerPlugin('CapacitorHttp')")).toHaveLength(1);
     expect(networkCallsIn('const MyCapacitorHttpish = 1;')).toEqual([]);
+  });
+
+  it('finds the four reached through the global object, one finding a line — #782 review (B2)', () => {
+    // Before #782's review every one of these passed the gate: the lookbehind
+    // that keeps `store.fetchRides(` quiet skipped `globalThis.` too.
+    for (const [source, primitive] of [
+      ['const s = new globalThis.WebSocket(u);', 'WebSocket'],
+      ['const s = new window.WebSocket(u);', 'WebSocket'],
+      ['const s = new self . WebSocket(u);', 'WebSocket'],
+      ['void globalThis.fetch(url);', 'fetch'],
+      ['void window.fetch(url, init);', 'fetch'],
+      ['void self.fetch(url);', 'fetch'],
+      ['const e = new globalThis.EventSource(url);', 'EventSource'],
+      ['const e = new window.EventSource(url);', 'EventSource'],
+      ['const x = new globalThis.XMLHttpRequest();', 'XMLHttpRequest'],
+      ['const x = new window.XMLHttpRequest();', 'XMLHttpRequest'],
+    ] as const) {
+      expect(networkCallsIn(source), source).toEqual([expect.objectContaining({ primitive })]);
+    }
+    // Both spellings on one line are one finding, not two.
+    expect(networkCallsIn('const S = globalThis.WebSocket ?? WebSocket;')).toHaveLength(1);
+    // And a member of something else is still not one.
+    expect(networkCallsIn('const rides = await myself.fetchRides();')).toEqual([]);
+    expect(networkCallsIn('scope.fetch = narrowed;')).toEqual([]);
+    expect(networkCallsIn('const w = mywindow.WebSocket;')).toEqual([]);
   });
 
   it('does not fire on a name that merely contains one', () => {
@@ -597,6 +643,22 @@ describe('the narrowed gate itself — #387', () => {
         PERMITTED_NETWORK_CALLS,
       );
       expect(findings, path).toEqual([expect.stringContaining(path)]);
+    }
+  });
+
+  it('goes red for a WebSocket reached through the global object in the room code — #782 review (B2)', () => {
+    for (const source of [
+      'const socket = new globalThis.WebSocket(url);',
+      'const socket = new window.WebSocket(url);',
+      'void globalThis.fetch(url);',
+    ]) {
+      const path = join('net', 'room-port.ts');
+      const elsewhere: ScannedFile = { path, source };
+      const findings = networkFindingsOutside(
+        [instance, elsewhere, hosted, transport, link, fence],
+        PERMITTED_NETWORK_CALLS,
+      );
+      expect(findings, source).toEqual([expect.stringContaining(path)]);
     }
   });
 
