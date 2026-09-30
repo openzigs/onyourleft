@@ -269,6 +269,14 @@ export function tabbableElements(root: Document | Element): HTMLElement[] {
  * tab stop?" for exactly one kind of control. A radio that is not its group's
  * stop is never reached by Tab, and is reached by an arrow key from the one
  * that is — so it is reachable when, and only when, its group has a stop.
+ *
+ * ⚠️ **A grouped radio with `tabindex="-1"` is counted as UNREACHABLE (#864)**,
+ * even when its group has a stop. The candidates are the tab stops, and a
+ * negative `tabindex` takes an element out of them before the group is
+ * considered — whether an arrow key would still land on it differs between
+ * engines and is not modelled here. That is the conservative direction: a
+ * control this answers "unreachable" for fails the audit rather than passing
+ * it, so the cost of the simplification is a false finding, never a missed one.
  */
 export function keyboardReachableElements(root: Document | Element): HTMLElement[] {
   const candidates = tabStops(root, false);
@@ -780,13 +788,21 @@ const listStructure: Rule = (doc) =>
 
 /**
  * The landmark roles this rule compares, each with the tag that carries it
- * implicitly.
+ * implicitly, and whether that tag is the landmark even with no name.
+ *
+ * HTML-AAM maps `nav` and `aside` to their landmark roles unconditionally, and
+ * `section` and `form` only when they have an accessible name — so an unnamed
+ * `nav` IS a navigation landmark and an unnamed `section` is no region (#864).
  */
-const COMPARED_LANDMARKS: readonly (readonly [role: string, tag: string])[] = [
-  ['navigation', 'nav'],
-  ['complementary', 'aside'],
-  ['region', 'section'],
-  ['form', 'form'],
+const COMPARED_LANDMARKS: readonly (readonly [
+  role: string,
+  tag: string,
+  landmarkWhenUnnamed: boolean,
+])[] = [
+  ['navigation', 'nav', true],
+  ['complementary', 'aside', true],
+  ['region', 'section', false],
+  ['form', 'form', false],
 ];
 
 function distinguishableViolation(
@@ -812,13 +828,15 @@ function distinguishableViolation(
  * two tables captioned alike were two region landmarks of one name that a
  * rule reading tags alone never saw. An element that declares a landmark role
  * on another tag is compared with the others of that role, and with every
- * NAMED element of the tag that carries it implicitly — an unnamed `section`
- * is not a region landmark at all (HTML-AAM), so it is not held against one.
+ * element of the tag that carries it implicitly and IS that landmark — every
+ * `nav` and `aside`, named or not, but only a NAMED `section` or `form`: an
+ * unnamed `section` is not a region landmark at all (HTML-AAM), so it is not
+ * held against one (#864).
  */
 const landmarksAreDistinguishable: Rule = (doc) => {
   const violations: AccessibilityViolation[] = [];
   const visible = (element: Element): boolean => !isHiddenFromAssistiveTechnology(element);
-  for (const [role, tag] of COMPARED_LANDMARKS) {
+  for (const [role, tag, landmarkWhenUnnamed] of COMPARED_LANDMARKS) {
     const landmarks = [...doc.querySelectorAll(tag)].filter(visible);
     const names = landmarks.map((element) => landmarkName(element).toLowerCase());
     if (landmarks.length >= 2) {
@@ -832,7 +850,12 @@ const landmarksAreDistinguishable: Rule = (doc) => {
 
     const declared = [...doc.querySelectorAll(`[role="${role}"]:not(${tag})`)].filter(visible);
     const implicitNames = names.filter((name) => name !== '');
-    if (declared.length === 0 || declared.length + implicitNames.length < 2) {
+    // ⚠️ Until #864 this counted NAMED implicit landmarks only, which is right
+    // for `section` and `form` and wrong for `nav` and `aside`: an unnamed
+    // `<nav>` beside an unnamed `<div role="navigation">` is two navigation
+    // landmarks a reader cannot tell apart, and gave no violation.
+    const implicitCount = landmarkWhenUnnamed ? landmarks.length : implicitNames.length;
+    if (declared.length === 0 || declared.length + implicitCount < 2) {
       continue;
     }
     const declaredNames = declared.map((element) => landmarkName(element).toLowerCase());
