@@ -72,7 +72,7 @@ import {
 import type { SimulationParameters } from '@onyourleft/sensors/protocol';
 import { deviceId } from '@onyourleft/sensors';
 import { createSimulator, ftmsTrainer } from '@onyourleft/sensors/simulator';
-import { recordingSessionId } from '@onyourleft/store';
+import { activityId, recordingSessionId } from '@onyourleft/store';
 import { ATHLETE_A, createStoreHarness, seedAthletes } from '@onyourleft/store/testing';
 
 import { createRideController } from '../ride/controller';
@@ -738,6 +738,7 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
   async function onTheBench(refuseControl: boolean) {
     const harness = createStoreHarness();
     await seedAthletes(harness);
+    const savedIds: string[] = [];
     const { transport, bench } = createSimulator({
       devices: [ftmsTrainer({ id: 'kickr', name: 'KICKR 1F2A' })],
     });
@@ -760,12 +761,31 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
       newSessionId: () => recordingSessionId('ride-1'),
       now: () => bench.now,
       openTrainer: simulatedOpenTrainer(bench, { written, refuseControl }),
+      // #784: the ride is saved to the library as `main.tsx` saves one, through
+      // the real store, so what a group ride leaves in it can be read back.
+      rideSave: {
+        newActivityId: () => activityId('the-ride'),
+        timeZone: 'Europe/London',
+        store: {
+          putActivity: (record) =>
+            harness.write(async (store) => {
+              const id = await store.putActivity(record);
+              savedIds.push(id);
+              return id;
+            }),
+          putStreamSet: (set) => harness.write(async (store) => store.putStreamSet(set)),
+          deleteActivity: (owner, id) =>
+            harness.write(async (store) => store.deleteActivity(owner, id)),
+        },
+      },
     });
     await controller.pair('trainer');
     return {
       controller,
       written,
       bench,
+      harness,
+      savedIds,
       machine: () => bench.device(deviceId('kickr')).inspect().ftms,
       done: async () => {
         controller.dispose();
@@ -859,6 +879,61 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
     expect(snapshot.phase).toBe('recording');
     expect(snapshot.elapsedSeconds).toBeGreaterThanOrEqual(before + 9);
     expect(mounted?.container.textContent).toContain('connection was lost');
+    await rig.done();
+  });
+
+  it('saves a group ride to the library exactly as a solo ride, with nothing of any other rider in it (#784)', async () => {
+    const rig = await onTheBench(false);
+    await rig.controller.start();
+    const clock = new ManualClock();
+    const room = new ScriptedRoom();
+    mounted = await mount(
+      <GameView
+        port={pedallingPort(hillRoute())}
+        trainer={gameTrainerPortOver(rig.controller)}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+        now={() => nowMs}
+        room={roomPortOver(() => room.link(), { timers: clock, now: () => nowMs })}
+        roomId="room-1"
+        riderMass={kilograms(72)}
+      />,
+    );
+    await settle();
+    await clickThrough(buttonStarting('Ride '));
+    await flush();
+    room.accept();
+    room.welcome(0);
+    // Two other riders, at distances and speeds nothing of this rider's could
+    // be, with seat numbers nothing else here uses.
+    const OTHERS = [frameRider(41, 777.7, 13.37), frameRider(42, 1234.5, 11.11)];
+    for (let index = 0; index < 20; index += 1) {
+      await clock.advance(FRAME_MS);
+      if (index % 2 === 1) {
+        room.frame(index, [frameRider(0, index * 3), ...OTHERS]);
+        rig.bench.advance(seconds(1));
+        await rig.controller.tick(rig.bench.now);
+      }
+      await pump(1);
+    }
+    // The room was really in the ride: its riders were drawn.
+    expect(mounted?.container.textContent).toContain('Nearby');
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    await flush();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+    expect(rig.savedIds).toEqual(['the-ride']);
+    // Read back on a fresh connection, as the library reads it.
+    const [activity, streams] = await rig.harness.read(async (store) => [
+      await store.getActivity(ATHLETE_A, activityId('the-ride')),
+      await store.getStreamSet(ATHLETE_A, activityId('the-ride')),
+    ]);
+    expect(activity).toBeDefined();
+    const everything = JSON.stringify({ activity, streams }, (_key, value: unknown) =>
+      value instanceof Float64Array || value instanceof Float32Array ? [...value] : value,
+    );
+    for (const trace of ['777.7', '1234.5', '13.37', '11.11', 'room-1', '"riderId"']) {
+      expect(everything, trace).not.toContain(trace);
+    }
     await rig.done();
   });
 

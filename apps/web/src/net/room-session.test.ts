@@ -76,6 +76,41 @@ describe('joining a room — #782', () => {
     expect(s.status).toMatchObject({ kind: 'joined', riderId: 3 });
   });
 
+  it('checks the welcome’s routeRef against the route this device rides, and leaves a room riding other bytes — #784', async () => {
+    const riding = 'a'.repeat(64);
+    for (const [expected, joins] of [
+      [riding, true],
+      [undefined, true],
+      ['b'.repeat(64), false],
+    ] as const) {
+      const room = new ScriptedRoom();
+      const clock = new ManualClock();
+      const s = new RoomSession({
+        roomId: 'room-1',
+        link: room.link(),
+        timers: clock,
+        now: clock.now,
+        physicsVersion: PHYSICS_VERSION,
+        sample: () => ({ powerWatts: 200 }),
+        random: () => 0,
+        routeSha256: expected,
+      });
+      await flush();
+      room.accept();
+      room.welcome(3); // routeRef: 'a' × 64
+      if (joins) {
+        expect(s.status).toMatchObject({ kind: 'joined', riderId: 3 });
+        continue;
+      }
+      expect(s.status).toEqual({ kind: 'refused', reason: 'not-the-rooms-route' });
+      expect(room.socket.closedByClient).toBe(true);
+      // Left, and not retried: no report is sent and no second socket opened.
+      await clock.advance(30_000);
+      expect(room.sockets).toHaveLength(1);
+      expect(room.socket.sent.filter((m) => m.type === 'report')).toEqual([]);
+    }
+  });
+
   it('asks for no ticket for a room id no instance could route: refused, and never retried — #782 review (B1)', async () => {
     const room = new ScriptedRoom();
     const clock = new ManualClock();
@@ -269,5 +304,38 @@ describe('frames — #782', () => {
     expect(s.others(clock.now() + 5_000).map((r) => r.riderId)).toEqual([4]);
     expect(s.own()?.rider.distanceMetres).toBe(20);
     expect(s.own()?.atLocalMs).toBe(1_000);
+  });
+});
+
+describe('a race, as the room says it — #785', () => {
+  it('waits, counts down on the room’s duration from when it arrived, runs at the first frame, and finishes with the room’s order', async () => {
+    const room = new ScriptedRoom();
+    const clock = new ManualClock();
+    const s = session(room, clock);
+    await flush();
+    room.accept();
+    room.welcome(3, 'race');
+    expect(s.race()).toEqual({ kind: 'waiting' });
+    await clock.advance(2_000);
+    room.send({ type: 'countdown', startsInMs: 10_000 });
+    // A duration from its arrival on THIS clock — never an instant the room named.
+    expect(s.race()).toEqual({ kind: 'counting', endsAtLocalMs: 12_000 });
+    // Counting down is not running: only the room's first frame starts the race.
+    await clock.advance(11_000);
+    expect(s.race().kind).toBe('counting');
+    room.frame(1, [frameRider(3, 4)]);
+    expect(s.race()).toEqual({ kind: 'running' });
+    room.send({ type: 'finish', order: [5, 3] });
+    expect(s.race()).toEqual({ kind: 'finished', order: [5, 3] });
+    expect(s.finish).toEqual({ type: 'finish', order: [5, 3] });
+  });
+
+  it('is never a race in a group ride, whatever arrives', async () => {
+    const room = new ScriptedRoom();
+    const clock = new ManualClock();
+    const s = await joined(room, clock);
+    room.send({ type: 'countdown', startsInMs: 5_000 });
+    room.frame(1, [frameRider(3, 4)]);
+    expect(s.race()).toEqual({ kind: 'not-a-race' });
   });
 });

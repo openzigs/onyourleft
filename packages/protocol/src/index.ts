@@ -21,6 +21,7 @@
 
 export type {
   ClientMessage,
+  Countdown,
   Finish,
   Frame,
   FrameRider,

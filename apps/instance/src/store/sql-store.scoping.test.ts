@@ -226,7 +226,37 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   putRoom: { notAScopedRead: 'a write' },
   putRoomCourse: { notAScopedRead: 'a write' },
   markRaceStarted: { notAScopedRead: 'a write' },
+  markRaceFinished: { notAScopedRead: 'a write' },
   putResult: { notAScopedRead: 'a write' },
+  createPrivateRoom: { notAScopedRead: 'a write; its creator is the caller (rooms/rooms.test.ts)' },
+  getPrivateRoom: { notAScopedRead: 'a room belongs to no athlete' },
+  findPrivateRoomByCode: {
+    notAScopedRead: 'a room by its code’s digest: whoever holds the code may join (#784)',
+  },
+  addRoomMember: { notAScopedRead: 'a write' },
+  isRoomMember: {
+    notAScopedRead:
+      'a yes or no for ONE (room, athlete) pair, never a row; rooms/rooms.test.ts holds a non-member refused',
+  },
+  getRoomCreator: {
+    notAScopedRead:
+      'ONE athlete id a room’s plan carries so the room alone decides who starts it (the owner’s ruling of 2026-09-30), never a row; sql-store.rooms.test.ts holds a member who did not make it out of it',
+  },
+  closePrivateRoom: { notAScopedRead: 'a write' },
+  countOpenPrivateRoomsMadeBy: {
+    notAScopedRead:
+      'a count of the CALLER’s own open rooms, never a row; sql-store.rooms.test.ts holds another athlete’s rooms out of it',
+  },
+  listOpenPrivateRoomsMadeBy: {
+    notAScopedRead:
+      'the ids of the CALLER’s own open rooms, for their erasure — never another table’s rows; sql-store.rooms.test.ts holds the other athletes’ rooms out of it',
+  },
+  listOpenPrivateRooms: {
+    notAScopedRead: 'the rooms’ sweep: every open room, by id and age, naming nobody (#784)',
+  },
+  countOpenPrivateRoomsWithRoute: {
+    notAScopedRead: 'blob collection: a count across rooms, never a row (#784)',
+  },
   sight: {
     notAScopedRead: 'a pair of athletes, either way round: the choke point asks it (#83)',
   },

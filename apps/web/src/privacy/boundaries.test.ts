@@ -38,7 +38,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { decodeGpx } from '@onyourleft/fit';
+import { decodeGpx, decodeGpxRoute } from '@onyourleft/fit';
 import {
   ATHLETE_A,
   createStoreHarness,
@@ -67,6 +67,7 @@ import { controlMessageText, phoneMessageFrom } from '../camera/side-link-messag
 import { cleanFrameBytes } from '../camera/testing';
 import { sharedTrack } from '../detail/privacy';
 import { routeShare } from '../routes/share';
+import { sharedRoomRoute } from '../rooms/share';
 import { exportActivity } from '../transfer/export-activity';
 import { createInstancePort } from '../instance/instance-port';
 import type { InstanceSend } from '../instance/instance-transport';
@@ -159,12 +160,21 @@ const BOUNDARIES: readonly Boundary[] = [
   },
   {
     module: 'instance/instance-transport.ts',
-    what: 'a device’s public key, a signed statement and a display name, sent to an instance the rider chose (#777)',
+    what: 'a device’s public key, a signed statement and a display name, sent to an instance the rider chose (#777) — and since #784 a room’s route, which `rooms/share.ts` declares and checks',
     // ⚠️ Departing: an instance is somebody's server — the rider's own, the
     // project's, or a third party's (ADR 0036 D-3 (d)). This build sends it no
     // ride and no position; the walk below reads every body a connection
     // sends and finds no coordinate at all, and when sync (#776) starts
     // sending a ride through this module it is here that the trim is asserted.
+    direction: 'departing',
+  },
+  {
+    module: 'rooms/share.ts',
+    what: 'the route a room is made on, relayed to the riders its maker shares its code with (#784)',
+    // ⚠️ Departing: the maker's own route, leaving their device for an
+    // instance and the people they invite. It is REFUSED — not trimmed — when
+    // any of it is inside one of their zones (a route missing a stretch is a
+    // different route), and the case below reads the GPX that does leave.
     direction: 'departing',
   },
   {
@@ -354,6 +364,24 @@ describe('a departing payload carries no coordinate inside a privacy zone', () =
     expect(shared.segments).toStrictEqual([]);
     expect(shared.startsAtIndex).toBeUndefined();
     expect(coordinatesIn(shared)).toStrictEqual([]);
+  });
+});
+
+describe('a room’s route leaves only when none of it is in a zone — #784', () => {
+  it('refuses a route that crosses a zone, and what does depart has no point in any', () => {
+    const route = routeFor(ATHLETE_A, { loop: false, spacingMetres: 10, sideMetres: 400 });
+    const zone = zoneOver(route.profile.positions);
+    expect(sharedRoomRoute(route, [zone]).kind).toBe('refused');
+    // The same route with the zone elsewhere departs — the fixture is one
+    // where something really leaves, so "nothing inside" is not vacuous.
+    const far = { ...zone, centre: geographicPosition(degreesLatitude(0), degreesLongitude(0)) };
+    const shared = sharedRoomRoute(route, [far]);
+    if (shared.kind !== 'shared') throw new Error(`refused: ${shared.reason}`);
+    const found = coordinatesIn(decodeGpxRoute(shared.gpx).profile.positions);
+    expect(found.length).toBeGreaterThan(0);
+    expect(insideZone(found, far, route.id)).toStrictEqual([]);
+    // And the zone the route crosses WOULD have been found in it.
+    expect(insideZone(found, zone, route.id).length).toBeGreaterThan(0);
   });
 });
 

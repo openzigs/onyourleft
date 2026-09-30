@@ -35,6 +35,7 @@ import { createSync, type Sync } from '../sync/sync.ts';
 import { openSqlStore } from '../store/open-sql-store.ts';
 import type { SqlStore } from '../store/sql-store.ts';
 import type { InstanceProbes } from '../route-kit.ts';
+import { createRooms, type RoomLimits, type Rooms } from '../rooms/rooms.ts';
 import { createIdentity, DEFAULT_LIMITS, type Identity, type IdentityOptions } from './identity.ts';
 
 /** The origin every test instance states. */
@@ -127,6 +128,10 @@ export interface IdentityInstance {
   readonly sync: Sync;
   /** The history index over the same store (#835): sync schedules a catch-up after each item. */
   readonly history: History;
+  /** Riders' rooms (#784, #785), over the same store. */
+  readonly rooms: Rooms;
+  /** Rooms' routes, as the memory blob store keeps them: a store of their own, not sync's. */
+  readonly roomRoutes: MemoryBlobs;
   /** A second, fresh store on the same file — a read the instance's store did not serve. */
   freshRead<T>(read: (store: SqlStore) => Promise<T>): Promise<T>;
   close(): Promise<void>;
@@ -163,6 +168,10 @@ export async function startIdentityInstance(
      * that address can sign for it (#777's browser gate).
      */
     originIsTheListener?: boolean;
+    /** The rooms' rate limits (#784): the defaults unless a test of them sets its own. */
+    roomLimits?: RoomLimits;
+    /** A new room code each call — `code.ts`'s unless a test needs a known one. */
+    roomCode?: () => string;
   } = {},
 ): Promise<IdentityInstance> {
   const directory = await mkdtemp(join(tmpdir(), 'oyl-instance-identity-'));
@@ -181,6 +190,8 @@ export async function startIdentityInstance(
     embedder,
     config,
     originIsTheListener,
+    roomLimits,
+    roomCode,
     ...rest
   } = options;
   const identityFor = (origin: string): Identity =>
@@ -230,11 +241,30 @@ export async function startIdentityInstance(
     },
   });
   const listenerConfig = { bodyLimitBytes: bodyLimitBytes ?? 16_384, ...config };
+  const roomRoutes: MemoryBlobs = new Map();
+  // The rooms read names through the identity the listener is given, which
+  // for the browser gate is only made once the listener has a port.
+  const people: { identity?: Identity } = {};
+  const rooms = createRooms({
+    store,
+    routes: createMemoryBlobStore(roomRoutes),
+    nameFor: async (viewerId, subjectId) => {
+      const identity = people.identity;
+      if (identity === undefined) return undefined;
+      if (!(await identity.moderation.canSee(viewerId, subjectId))) return undefined;
+      const profile = await identity.profile(subjectId);
+      return profile.ok ? profile.value.displayName : undefined;
+    },
+    now: () => clock.ms,
+    ...(roomLimits === undefined ? {} : { limits: roomLimits }),
+    ...(roomCode === undefined ? {} : { code: roomCode }),
+  });
   const started = (identity: Identity): Promise<TestInstance> =>
     startTestInstance({
       identity,
       sync,
       history,
+      rooms,
       config: listenerConfig,
       ...(probes === undefined ? {} : { probes }),
     });
@@ -262,6 +292,7 @@ export async function startIdentityInstance(
     identity = identityFor(TEST_ORIGIN);
     instance = await started(identity);
   }
+  people.identity = identity;
 
   const call: IdentityInstance['call'] = async (method, route, callOptions = {}) => {
     const headers: Record<string, string> = { ...callOptions.headers };
@@ -295,6 +326,8 @@ export async function startIdentityInstance(
     blobs,
     sync,
     history,
+    rooms,
+    roomRoutes,
     confirmations,
     call,
     nonceFor,

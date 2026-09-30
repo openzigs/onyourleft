@@ -622,3 +622,135 @@ describe('who can be in a room — ruling Q18', () => {
     ]);
   });
 });
+
+describe('a race’s countdown — #785', () => {
+  it('tells every seated rider how long the countdown is, and a rider who joins during it how long is left', () => {
+    const room = testRoom({ countdownMs: 10_000 });
+    room.receive(1, helloText('ticket-ann'), 0);
+    room.receive(2, helloText('ticket-bob'), 0);
+    const started = room.start(2_000);
+    expect(sentTo(started, 1)).toEqual([{ type: 'countdown', startsInMs: 10_000 }]);
+    expect(sentTo(started, 2)).toEqual([{ type: 'countdown', startsInMs: 10_000 }]);
+    // A rider joining 4 s in is welcomed, then told the 6 s that are left.
+    const late = sentTo(room.receive(3, helloText('ticket-cat'), 6_000), 3);
+    expect(late.map((m) => m.type)).toEqual(['welcome', 'countdown']);
+    expect(late[1]).toEqual({ type: 'countdown', startsInMs: 6_000 });
+    // A second start changes nothing and says nothing.
+    expect(room.start(7_000)).toEqual([]);
+  });
+
+  it('says nothing of a countdown in a lobby, or once the race is running', () => {
+    const room = testRoom({ countdownMs: 1_000 });
+    expect(sentTo(room.receive(1, helloText('ticket-ann'), 0), 1).map((m) => m.type)).toEqual([
+      'welcome',
+    ]);
+    room.start(0);
+    room.tick(1_000);
+    expect(room.view().phase).toBe('running');
+    room.disconnect(1, 1_100);
+    expect(sentTo(room.receive(2, helloText('ticket-ann'), 1_200), 2).map((m) => m.type)).toEqual([
+      'welcome',
+    ]);
+  });
+
+  it('starts riders whose clocks are 5 s apart on the SAME tick: the room’s clock, never theirs', () => {
+    // Three clients, one 5 s slow, one on time, one 5 s fast. Each reports
+    // twice a second on its OWN clock through the countdown and after it.
+    const skews = { 1: -5_000, 2: 0, 3: 5_000 } as const;
+    const room = testRoom({ countdownMs: 3_000 });
+    for (const connection of [1, 2, 3]) {
+      room.receive(connection, helloText(`ticket-r${String(connection)}`), 0);
+    }
+    room.start(0);
+    const firstMoved = new Map<number, number>();
+    let sequence = 0;
+    for (let half = 1; half <= 20; half += 1) {
+      const now = half * 500;
+      sequence += 1;
+      for (const [connection, skew] of Object.entries(skews)) {
+        room.receive(Number(connection), reportText(sequence, now + 100_000 + skew, 250), now);
+      }
+      if (now % SECOND === 0) {
+        room.tick(now);
+        // And none is coasted once the race runs: every report, on every
+        // client's clock, is judged on the room's.
+        if (room.view().phase === 'running') {
+          expect(room.view().seats.map((seat) => seat.flags & FLAG_COASTING)).toEqual([0, 0, 0]);
+        }
+        for (const seat of room.view().seats) {
+          if (seat.distanceMetres > 0 && !firstMoved.has(seat.riderId)) {
+            firstMoved.set(seat.riderId, room.view().tick);
+          }
+        }
+      }
+    }
+    expect(firstMoved.size).toBe(3);
+    expect(new Set(firstMoved.values())).toEqual(new Set([1]));
+  });
+});
+
+describe('the finish order’s tie rule — #785', () => {
+  it('breaks a tie to the same share of a tick by seat: the rider who took a seat first', () => {
+    // Identical riders at identical power cross at exactly the same point in
+    // the same tick. The stated rule: the lower rider id — the earlier seat.
+    const course = { ...FLAT_COURSE, lengthMetres: 100 };
+    const room = testRoom({ countdownMs: 0, course });
+    room.receive(1, helloText('ticket-zed'), 0); // rider 0
+    room.receive(2, helloText('ticket-amy'), 0); // rider 1
+    room.start(0);
+    for (let t = 0; t < 60 && room.view().phase !== 'finished'; t += 1) {
+      second(room, t, { 1: 300, 2: 300 });
+    }
+    const [zed, amy] = room.view().seats;
+    expect(zed?.finishedAtTicks).toBe(amy?.finishedAtTicks);
+    expect(room.view().finishOrder).toEqual([0, 1]);
+  });
+});
+
+describe('no keep-together — ruling Q9, #784', () => {
+  it('lets the gap between two riders at different powers grow exactly as their own physics says, for 120 ticks', () => {
+    const room = runningRace(['ann', 'bob'], {
+      course: { ...FLAT_COURSE, lengthMetres: 100_000 },
+    });
+    const conditions = ridingConditions(kilograms(70), 'hoods');
+    let ann = START_OF_RIDE;
+    let bob = START_OF_RIDE;
+    let gap = 0;
+    for (let t = 0; t < 120; t += 1) {
+      second(room, t, { 1: 180, 2: 280 });
+      const step = { grade: gradePercent(0), duration: seconds(1) };
+      ann = advance(ann, { ...step, power: watts(180) }, conditions);
+      bob = advance(bob, { ...step, power: watts(280) }, conditions);
+      expect(distanceOf(room, 0)).toBe(ann.distance);
+      expect(distanceOf(room, 1)).toBe(bob.distance);
+      const now = distanceOf(room, 1) - distanceOf(room, 0);
+      expect(now).toBeGreaterThan(gap);
+      gap = now;
+    }
+    expect(gap).toBeGreaterThan(100);
+  });
+});
+
+describe('what a result publishes — #785, ruling Q17', () => {
+  it('keeps each rider’s mean power-to-weight over the seconds simulated, coasted seconds at 0 W', () => {
+    const room = runningRace(['ann'], { course: { ...FLAT_COURSE, lengthMetres: 100_000 } });
+    for (let t = 0; t < 10; t += 1) second(room, t, t < 5 ? { 1: 350 } : {});
+    const [seat] = room.view().seats;
+    expect(seat?.wattsPerKilogram).toBeCloseTo((5 * 350) / 10 / 70, 12);
+    expect(testRoom().view().seats).toEqual([]);
+  });
+
+  it('names the duration of every ceiling breached, once each, and none for a rider inside them', () => {
+    const room = testRoom({ countdownMs: 0 }, { tiny: 40 });
+    room.receive(1, helloText('ticket-tiny'), 0);
+    room.receive(2, helloText('ticket-ann'), 0);
+    room.start(0);
+    // 800 W at 40 kg is 20 W/kg: over the 5 s ceiling (18), and — held for a
+    // minute — over the 1 min one (10) too.
+    for (let t = 0; t < 70; t += 1) second(room, t, { 1: 800, 2: 200 });
+    const [tiny, ann] = room.view().seats;
+    expect(tiny?.flaggedDurationsSeconds).toEqual([5, 60]);
+    expect(ann?.flaggedDurationsSeconds).toEqual([]);
+    expect(ann?.wattsPerKilogram).toBeCloseTo(200 / 70, 12);
+  });
+});

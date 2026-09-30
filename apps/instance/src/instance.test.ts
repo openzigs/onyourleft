@@ -11,6 +11,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -30,6 +31,8 @@ import { until } from './room/node/node-room-testing.ts';
 import { readServerConfig, type ServerConfig } from './server-config.ts';
 import { migrateForDeploy, migratingMarker, openServingStore } from './store/serving.ts';
 import { migrateAllBut } from './store/testing/index.ts';
+import { ROOM_GPX, roomBody } from './rooms/rooms-testing.ts';
+import { ROOM_SWEEP_PERIOD_MS } from './rooms/rooms.ts';
 
 const INSTANCE = fileURLToPath(new URL('..', import.meta.url));
 const MAIN = fileURLToPath(new URL('./main.ts', import.meta.url));
@@ -168,6 +171,13 @@ describe('the running instance forgets every rate-limited address when its windo
       { timing: { now: () => clock.ms, sweepTimers: timers } },
     );
     await instance.opened;
+    // #784: the rooms' sweep is armed beside it, on the next ten-minute
+    // boundary, through the same timers. Held apart here, so what follows
+    // reads the rate limits' alone.
+    expect(pending).toHaveLength(2);
+    const roomsSweep = pending.find((entry) => entry.at % ROOM_SWEEP_PERIOD_MS === 0);
+    expect(roomsSweep?.at).toBe(Math.ceil(clock.ms / ROOM_SWEEP_PERIOD_MS) * ROOM_SWEEP_PERIOD_MS);
+    pending.splice(pending.indexOf(roomsSweep!), 1);
     await signIn(instance.url, 'Ann Rider', Math.floor(clock.ms / 1000));
     const held = instance.heldRateLimitKeys();
     expect(held).toBeGreaterThan(1);
@@ -190,7 +200,8 @@ describe('the running instance forgets every rate-limited address when its windo
     expect(pending).toHaveLength(1);
     await instance.stop();
     running = undefined;
-    expect(cleared).toBe(1);
+    // Both sweeps are stopped: the rate limits' and the rooms'.
+    expect(cleared).toBe(2);
     expect(pending).toHaveLength(0);
   }, 30_000);
 });
@@ -713,17 +724,28 @@ describe('the history index on the running instance — #835', () => {
     } finally {
       await writer.close();
     }
-    /** Run the retry timer that is due, as the clock reaching it would. */
+    /**
+     * The next five-minute boundary anything is armed for. #784's rooms sweep
+     * is armed on the same timers every ten minutes, so a boundary may hold
+     * it beside the retry.
+     */
+    const nextBoundary = (): number | undefined => {
+      const due = pending.filter((entry) => entry.at % RETRY_PERIOD_MS === 0);
+      return due.length === 0 ? undefined : Math.min(...due.map((entry) => entry.at));
+    };
+    /** Run every timer due at that boundary, the retry among them, as the clock reaching it would. */
     const fireRetry = (): void => {
-      const retry = pending.find((entry) => entry.at % RETRY_PERIOD_MS === 0);
-      if (retry === undefined) throw new Error('no retry is armed');
-      clock.ms = retry.at;
-      pending.splice(pending.indexOf(retry), 1);
-      retry.run();
+      const at = nextBoundary();
+      if (at === undefined) throw new Error('no retry is armed');
+      clock.ms = at;
+      for (const entry of pending.filter((each) => each.at === at)) {
+        pending.splice(pending.indexOf(entry), 1);
+        entry.run();
+      }
     };
     // The first retry is due on the next five-minute boundary, 100 s away,
     // and finds the model down: it stops, and embeds nothing.
-    expect(pending.find((entry) => entry.at % RETRY_PERIOD_MS === 0)?.at).toBe(clock.ms + 100_000);
+    expect(nextBoundary()).toBe(clock.ms + 100_000);
     fireRetry();
     await until(
       () =>
@@ -743,5 +765,197 @@ describe('the history index on the running instance — #835', () => {
     await instance.stop();
     running = undefined;
     expect(pending).toStrictEqual([]);
+  }, 30_000);
+});
+
+describe('a rider’s race on the running instance — #784, #785', () => {
+  it('is made and joined by code over HTTP, started by its creator alone, and lets its route go when it is over', async () => {
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance, lines } = await start(path);
+    const url = instance.url;
+    const call = async (method: string, route: string, token: string, body?: unknown) => {
+      const response = await fetch(`${url}${route}`, {
+        method,
+        headers: {
+          authorization: `Bearer ${token}`,
+          ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+      const text = await response.text();
+      return { status: response.status, body: (text === '' ? null : JSON.parse(text)) as unknown };
+    };
+    const ann = await signIn(url, 'Ann');
+    const bob = await signIn(url, 'Bob');
+    const cat = await signIn(url, 'Cat');
+    const made = await call('POST', '/v1/rooms', ann.sessionToken, roomBody({ lengthMetres: 40 }));
+    expect(made.status).toBe(200);
+    const room = made.body as { roomId: string; code: string; routeSha256: string };
+    const routeFile = join(
+      serverConfig(path).blobsPath,
+      'rooms',
+      'objects',
+      room.routeSha256.slice(0, 2),
+      room.routeSha256,
+    );
+    expect(existsSync(routeFile)).toBe(true);
+    for (const rider of [bob, cat]) {
+      expect(
+        (await call('POST', '/v1/rooms/join', rider.sessionToken, { code: room.code })).status,
+      ).toBe(200);
+    }
+
+    const annSocket = await joinRoom(
+      wsUrl(url),
+      room.roomId,
+      await ticket(url, ann.sessionToken, room.roomId),
+    );
+    const bobSocket = await joinRoom(
+      wsUrl(url),
+      room.roomId,
+      await ticket(url, bob.sessionToken, room.roomId),
+    );
+    clients.push(annSocket, bobSocket);
+    await until(() => annSocket.messages.length > 0 && bobSocket.messages.length > 0, 'welcomes');
+
+    // The owner's ruling of 2026-09-30: only the room's creator, on the line,
+    // starts the race. Cat joined by the code but is not on the line; Bob is
+    // on it and did not make the room — both refused, and the race waits.
+    expect((await call('POST', `/v1/rooms/${room.roomId}/start`, cat.sessionToken)).status).toBe(
+      404,
+    );
+    expect((await call('POST', `/v1/rooms/${room.roomId}/start`, bob.sessionToken)).status).toBe(
+      404,
+    );
+    expect([annSocket, bobSocket].some((s) => s.messages.some((m) => m.type === 'countdown'))).toBe(
+      false,
+    );
+    expect((await call('POST', `/v1/rooms/${room.roomId}/start`, ann.sessionToken)).status).toBe(
+      200,
+    );
+    // Everybody on the line is told how long the countdown is.
+    await until(
+      () => [annSocket, bobSocket].every((s) => s.messages.some((m) => m.type === 'countdown')),
+      'the countdown said to both',
+      5_000,
+    );
+    let sequence = 0;
+    const pedal = setInterval(() => {
+      sequence += 1;
+      annSocket.report(sequence, 900);
+      bobSocket.report(sequence, 700);
+    }, 250);
+    try {
+      await until(
+        () => annSocket.messages.some((m) => m.type === 'finish'),
+        'the race finished',
+        30_000,
+      );
+    } finally {
+      clearInterval(pedal);
+    }
+    // Both riders' results are the race's result, for its riders only.
+    for (let i = 0; ; i += 1) {
+      const got = await call('GET', `/v1/rooms/${room.roomId}/results`, ann.sessionToken);
+      if (got.status === 200 && (got.body as { rows: unknown[] }).rows.length === 2) break;
+      if (i > 100) throw new Error('the results were never written');
+      await new Promise((done) => setTimeout(done, 50));
+    }
+    expect((await call('GET', `/v1/rooms/${room.roomId}/results`, cat.sessionToken)).status).toBe(
+      404,
+    );
+
+    // The riders leave; the room is over, and lets its route go.
+    annSocket.socket.close();
+    bobSocket.socket.close();
+    await until(() => !existsSync(routeFile), 'the route deleted', 10_000);
+    expect((await call('GET', `/v1/rooms/${room.roomId}/route`, ann.sessionToken)).status).toBe(
+      404,
+    );
+    // Never a lobby again: a socket for it is told the room is closed.
+    const late = await joinRoom(wsUrl(url), room.roomId, undefined);
+    clients.push(late);
+    expect((await late.closed).code).toBe(4005);
+    // And no line the instance wrote carries the code.
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) expect(line).not.toContain(room.code.replace(/-/g, ''));
+  }, 90_000);
+
+  it('never opens a group ride that is over as a lobby again', async () => {
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance } = await start(path);
+    const ann = await signIn(instance.url, 'Ann');
+    const made = await fetch(`${instance.url}/v1/rooms`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${ann.sessionToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify(roomBody({ kind: 'group' })),
+    });
+    const { roomId } = (await made.json()) as { roomId: string };
+    // Open: a socket is taken, and welcomed.
+    const first = await joinRoom(
+      wsUrl(instance.url),
+      roomId,
+      await ticket(instance.url, ann.sessionToken, roomId),
+    );
+    clients.push(first);
+    await until(() => first.messages[0]?.type === 'welcome', 'a welcome');
+    first.socket.close();
+    await first.closed;
+    // Over — as its room worker would record it past the empty grace.
+    const store = openServingStore(path);
+    try {
+      expect(await store.closePrivateRoom(roomId, 1)).toBe(true);
+    } finally {
+      await store.close();
+    }
+    const late = await joinRoom(wsUrl(instance.url), roomId, undefined);
+    clients.push(late);
+    expect(await late.closed).toMatchObject({ code: 4005 });
+  }, 30_000);
+
+  it('ends, as it opens, a race a restart interrupted, and lets its route go — a lobby nobody started it keeps', async () => {
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const first = await start(path);
+    const ann = await signIn(first.instance.url, 'Ann');
+    const make = async (body: Record<string, unknown>) =>
+      (await (
+        await fetch(`${first.instance.url}/v1/rooms`, {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${ann.sessionToken}`,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        })
+      ).json()) as { roomId: string; routeSha256: string };
+    const interrupted = await make(roomBody());
+    const waiting = await make(roomBody({ lengthMetres: 300, gpx: `${ROOM_GPX} ` }));
+    const fileOf = (sha256: string) =>
+      join(serverConfig(path).blobsPath, 'rooms', 'objects', sha256.slice(0, 2), sha256);
+    // The race had left its lobby when the instance stopped.
+    const store = openServingStore(path);
+    try {
+      await store.markRaceStarted(interrupted.roomId, 1);
+    } finally {
+      await store.close();
+    }
+    await first.instance.stop();
+    running = undefined;
+    expect(existsSync(fileOf(interrupted.routeSha256))).toBe(true);
+
+    const second = await start(path);
+    await second.instance.opened;
+    await until(() => !existsSync(fileOf(interrupted.routeSha256)), 'the route deleted', 10_000);
+    const fresh = openServingStore(path);
+    try {
+      expect((await fresh.getPrivateRoom(interrupted.roomId))?.closedAt).not.toBeNull();
+      expect((await fresh.getPrivateRoom(waiting.roomId))?.closedAt).toBeNull();
+    } finally {
+      await fresh.close();
+    }
+    expect(existsSync(fileOf(waiting.routeSha256))).toBe(true);
   }, 30_000);
 });

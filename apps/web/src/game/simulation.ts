@@ -533,6 +533,22 @@ export class GameSimulation {
     this.#correction = { remaining: errorMetres, perStep: errorMetres / steps };
   }
 
+  /**
+   * Holds the ride where it is up to `nowMs`: that time is never ridden — #785.
+   *
+   * A race's rider waits on the start line until the ROOM starts the race
+   * (`net/room-session.ts` §`RoomRace`), whatever they pedal meanwhile, and the
+   * wait must not be ridden afterwards either: {@link advanceTo} derives its
+   * steps from the origin, so without this the first frame of the race would
+   * run up to {@link MAXIMUM_STEPS_PER_ADVANCE} steps of the wait at the rider's
+   * power and put them metres up the road at "Go". So the origin moves up with
+   * the wait, and a held ride owes no step — the same rider, the same state,
+   * the same clocks.
+   */
+  holdAt(nowMs: number): void {
+    this.#originMs = nowMs - this.#stepsCredited * SIMULATION_STEP_SECONDS * 1000;
+  }
+
   /** Whether a correction toward a room is still being applied. @see correctToward */
   get correcting(): boolean {
     return this.#correction !== undefined;

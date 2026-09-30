@@ -21,6 +21,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { CLOSED_BY_ROOM, type RoomUnderTest, type Transcript } from '../conformance-testing.ts';
 import type { Admit, ConnectionId } from '../core/room.ts';
 import type { RoomSettings } from '../core/settings.ts';
+import type { RaceStarter } from '../room-plan.ts';
 import { RoomHost, type HostOptions } from './room-host.ts';
 
 const ROOM_ID = 'conformance';
@@ -50,6 +51,8 @@ export async function serveHost(
   serverOptions: ConstructorParameters<typeof WebSocketServer>[0] = { noServer: true },
   /** Every server-side socket as it is accepted, in order: a test may reach into one. */
   onAccept?: (ws: WebSocket) => void,
+  /** Who may start the race, as a plan would say: `room-plan.ts` §`RaceStarter`. */
+  startedBy: RaceStarter = 'any-seated-rider',
 ): Promise<{ readonly url: string; readonly server: Server; close(): Promise<void> }> {
   const wss = new WebSocketServer({ ...serverOptions, noServer: true });
   const server = createServer();
@@ -58,7 +61,7 @@ export async function serveHost(
     wss.handleUpgrade(request, socket, head, (ws) => {
       socketId += 1;
       onAccept?.(ws);
-      host().accept(ROOM_ID, settings, ws, `s${String(socketId)}`);
+      host().accept(ROOM_ID, settings, ws, `s${String(socketId)}`, false, startedBy);
     });
   });
   await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));

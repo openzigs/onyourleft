@@ -127,6 +127,13 @@ const SCENES: readonly Scene[] = [
     query: '?sounds=on&paused=yes',
     surfaces: ['game-hud'],
   },
+  // #785: a private race waiting on its line, with *Start the race* on the HUD.
+  {
+    name: 'the game, a race on its line',
+    page: 'ride',
+    query: '?room=race',
+    surfaces: ['game-hud'],
+  },
 ];
 
 interface Box {

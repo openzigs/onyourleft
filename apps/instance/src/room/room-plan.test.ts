@@ -32,7 +32,7 @@ const COURSE: RoomCourse = {
 
 describe('a stored room, as the room core’s settings — #780', () => {
   it('reads a group room as a ride, and carries its course and settings over', () => {
-    const plan = planFor(ROOM, COURSE);
+    const plan = planFor(ROOM, COURSE, 'any-seated-rider');
     expect(plan).toMatchObject({ kind: 'ride', ridingPosition: 'drops', lengthMetres: 450 });
     const settings = settingsFromPlan(plan!);
     expect(settings.kind).toBe('ride');
@@ -43,16 +43,25 @@ describe('a stored room, as the room core’s settings — #780', () => {
     expect([0, 149.9, 150, 299, 300, 449].map(settings.course.gradePercentAt)).toEqual([
       0, 0, 2, 2, -1, -1,
     ]);
-    expect(settingsFromPlan(planFor({ ...ROOM, kind: 'race' }, COURSE)!).kind).toBe('race');
+    expect(
+      settingsFromPlan(planFor({ ...ROOM, kind: 'race' }, COURSE, 'any-seated-rider')!).kind,
+    ).toBe('race');
+  });
+
+  it('carries who may start the race — the owner’s ruling of 2026-09-30', () => {
+    expect(planFor(ROOM, COURSE, { creator: 'ann' })?.startedBy).toEqual({ creator: 'ann' });
+    expect(planFor(ROOM, COURSE, 'any-seated-rider')?.startedBy).toBe('any-seated-rider');
   });
 
   it('opens nothing without a course, or for another physics version', () => {
-    expect(planFor(ROOM, undefined)).toBeUndefined();
-    expect(planFor({ ...ROOM, physicsVersion: PHYSICS_VERSION + 1 }, COURSE)).toBeUndefined();
+    expect(planFor(ROOM, undefined, 'any-seated-rider')).toBeUndefined();
+    expect(
+      planFor({ ...ROOM, physicsVersion: PHYSICS_VERSION + 1 }, COURSE, 'any-seated-rider'),
+    ).toBeUndefined();
   });
 
   it('refuses grade steps that do not start at 0 or that go backwards', () => {
-    const plan = planFor(ROOM, COURSE)!;
+    const plan = planFor(ROOM, COURSE, 'any-seated-rider')!;
     expect(() => settingsFromPlan({ ...plan, grades: [[10, 1]] })).toThrow(RoomSettingsError);
     expect(() =>
       settingsFromPlan({

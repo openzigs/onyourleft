@@ -16,6 +16,7 @@ import type { Frame } from '@onyourleft/protocol';
 import { admitByTable, FLAT_COURSE, helloText, reportText } from '../core/room-testing.ts';
 import { roomSettings, type RoomSettings } from '../core/settings.ts';
 import { serveHost, until } from './node-room-testing.ts';
+import type { RaceStarter } from '../room-plan.ts';
 import { RoomHost, type HostOptions, type RoomResult } from './room-host.ts';
 
 const admit = admitByTable();
@@ -24,7 +25,11 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-async function hosted(settings: RoomSettings, options: Partial<HostOptions>) {
+async function hosted(
+  settings: RoomSettings,
+  options: Partial<HostOptions>,
+  startedBy: RaceStarter = 'any-seated-rider',
+) {
   const host = new RoomHost({
     now: () => Date.now(),
     admit: (_roomId, ticket) => Promise.resolve(admit(ticket)),
@@ -39,6 +44,7 @@ async function hosted(settings: RoomSettings, options: Partial<HostOptions>) {
     (ws) => {
       accepted.push(ws);
     },
+    startedBy,
   );
   cleanups.push(async () => {
     await host.stop({ code: 1001, reason: 'server-stopping' }, 200);
@@ -248,6 +254,57 @@ describe('the keepalive — #780 criterion 8, through a proxy that closes idle s
   }, 10_000);
 });
 
+describe('who may start a race — the owner’s ruling of 2026-09-30', () => {
+  const race = (): RoomSettings =>
+    roomSettings({
+      kind: 'race',
+      ridingPosition: 'hoods',
+      course: { ...FLAT_COURSE, lengthMetres: 40 },
+      countdownMs: 10_000,
+    });
+
+  async function onTheLine(startedBy: RaceStarter) {
+    const { host, url } = await hosted(race(), { driven: true }, startedBy);
+    const ann = client(url);
+    const bob = client(url);
+    await Promise.all([ann.open, bob.open]);
+    ann.socket.send(helloText('ticket-ann'));
+    bob.socket.send(helloText('ticket-bob'));
+    await until(
+      () =>
+        host.view('conformance')?.seats.filter((seat) => seat.state === 'connected').length === 2,
+      'both seated and connected',
+    );
+    return host;
+  }
+
+  it('refuses a rider who did not make the room, and one not on the line, and starts it for its creator', async () => {
+    const host = await onTheLine({ creator: 'ann' });
+    // Bob is seated and connected, and did not make the room.
+    expect(host.start('conformance', 'bob')).toBe(false);
+    // Somebody not seated at all.
+    expect(host.start('conformance', 'cat')).toBe(false);
+    expect(host.view('conformance')?.phase).toBe('lobby');
+    // Ann made it, and is on the line.
+    expect(host.start('conformance', 'ann')).toBe(true);
+    expect(host.view('conformance')?.phase).toBe('countdown');
+  }, 10_000);
+
+  it('refuses everybody in a rider’s room whose creator is gone — it fails closed', async () => {
+    const host = await onTheLine({ creator: null });
+    expect(host.start('conformance', 'ann')).toBe(false);
+    expect(host.start('conformance', 'bob')).toBe(false);
+    expect(host.view('conformance')?.phase).toBe('lobby');
+  }, 10_000);
+
+  it('lets any rider on the line start a room an operator opened, which has no creator', async () => {
+    const host = await onTheLine('any-seated-rider');
+    expect(host.start('conformance', 'cat')).toBe(false);
+    expect(host.start('conformance', 'bob')).toBe(true);
+    expect(host.view('conformance')?.phase).toBe('countdown');
+  }, 10_000);
+});
+
 describe('results — handed on as each becomes final, not at the end', () => {
   it('reports a finisher at once, with their time, while the rest of the race rides on', async () => {
     const results: RoomResult[] = [];
@@ -278,6 +335,55 @@ describe('results — handed on as each becomes final, not at the end', () => {
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({ athleteId: 'ann', flags: expect.any(Number) as number });
     expect(results[0]?.finishMs).toBeGreaterThan(0);
+    // #785: the place the room gave, and the published figure — W/kg, never watts.
+    expect(results[0]?.place).toBe(1);
+    expect(results[0]?.wattsPerKilogram).toBeGreaterThan(5);
+    expect(results[0]?.flaggedDurationsSeconds).toEqual([]);
+    expect(
+      Object.keys(results[0] ?? {}).some((key) => /watts(?!PerKilogram)|power/i.test(key)),
+    ).toBe(false);
     expect(host.view('conformance')?.phase).toBe('running');
+  }, 10_000);
+
+  it('says a race is over once, when the last rider is off the road — and not while one finisher waits', async () => {
+    const finished: string[] = [];
+    let nowMs = 0;
+    const { host, url } = await hosted(
+      roomSettings({
+        kind: 'race',
+        ridingPosition: 'hoods',
+        course: { ...FLAT_COURSE, lengthMetres: 40 },
+        countdownMs: 0,
+      }),
+      { now: () => nowMs, driven: true, onRaceFinished: (roomId) => finished.push(roomId) },
+    );
+    const ann = client(url);
+    const bob = client(url);
+    await Promise.all([ann.open, bob.open]);
+    ann.socket.send(helloText('ticket-ann'));
+    bob.socket.send(helloText('ticket-bob'));
+    await until(() => host.view('conformance')?.seats.length === 2, 'both seated');
+    host.start('conformance');
+    let second = 1;
+    const ride = async (riders: readonly (typeof ann)[]): Promise<void> => {
+      nowMs = second * 1000 - 500;
+      for (const each of riders) each.socket.send(reportText(second, nowMs, 600));
+      await new Promise((done) => setTimeout(done, 5));
+      nowMs = second * 1000;
+      host.tick('conformance');
+      second += 1;
+    };
+    while (
+      second <= 12 &&
+      host.view('conformance')?.seats.every((seat) => seat.state !== 'finished')
+    ) {
+      await ride([ann]);
+    }
+    expect(host.view('conformance')?.phase).toBe('running');
+    expect(finished).toEqual([]);
+    while (second <= 40 && host.view('conformance')?.phase !== 'finished') await ride([bob]);
+    expect(host.view('conformance')?.phase).toBe('finished');
+    host.tick('conformance');
+    expect(finished).toEqual(['conformance']);
   }, 10_000);
 });

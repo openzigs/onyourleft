@@ -18,6 +18,23 @@ import type { RoomKind } from '@onyourleft/protocol';
 import type { Room, RoomCourse } from '../store/sql-store.ts';
 import { roomSettings, RoomSettingsError, type RoomSettings } from './core/settings.ts';
 
+/**
+ * Who may start a race — **the owner's ruling of 2026-09-30: its creator.**
+ *
+ * - `{ creator }` — a rider's room (#784): only the athlete who made it, and
+ *   only while they are seated and connected in it. `{ creator: null }` is a
+ *   rider's room whose creator row is gone: nobody may start it (erasing an
+ *   account ends its rooms first, so this is a moment at most) — it fails
+ *   closed rather than falling back to any rider.
+ * - `'any-seated-rider'` — a room an operator opened from the command line
+ *   (`operator/commands.ts` §`room open`), which has no creator: any rider
+ *   seated and connected in it, as #785 first ruled for every room.
+ *
+ * Enforced by the room itself (`node/room-host.ts` §`start`); the HTTP
+ * process only reads it from the store, as the rest of a plan.
+ */
+export type RaceStarter = { readonly creator: string | null } | 'any-seated-rider';
+
 export interface RoomPlan {
   readonly roomId: string;
   readonly kind: RoomKind;
@@ -28,6 +45,8 @@ export interface RoomPlan {
   readonly capacity: number | null;
   readonly countdownMs: number | null;
   readonly rejoinWindowMs: number | null;
+  /** Who may start it, if it is a race: {@link RaceStarter}. */
+  readonly startedBy: RaceStarter;
 }
 
 /**
@@ -35,7 +54,11 @@ export interface RoomPlan {
  * build: it has no course, or it was made for another physics version (ADR
  * 0028 D-2 rule 5 — its riders would be simulated by different arithmetic).
  */
-export function planFor(room: Room, course: RoomCourse | undefined): RoomPlan | undefined {
+export function planFor(
+  room: Room,
+  course: RoomCourse | undefined,
+  startedBy: RaceStarter,
+): RoomPlan | undefined {
   if (course === undefined || room.physicsVersion !== PHYSICS_VERSION) return undefined;
   return {
     roomId: room.id,
@@ -47,6 +70,7 @@ export function planFor(room: Room, course: RoomCourse | undefined): RoomPlan | 
     capacity: course.capacity,
     countdownMs: course.countdownMs,
     rejoinWindowMs: course.rejoinWindowMs,
+    startedBy,
   };
 }
 

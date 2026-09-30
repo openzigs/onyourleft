@@ -23,10 +23,11 @@ report, not a page view.
 You choose whether to connect, and to which one: nothing is sent to any instance until you type its
 address and press *Connect*. Connecting sends this device's public key, the name other riders will
 see if you type one, and — as with any server — your internet address and your device or browser
-type. Nothing else of yours: this version of the app sends no ride, route, position or heart rate to
-an instance. It is described under **An instance
-you connect to** below, class by class, with what each one will receive when the features that
-send it arrive.
+type. Nothing else of yours unless you **make or join a private room** — a group ride or a race
+with people you share a code with: then the route you choose for a room you make, your power and
+cadence while you ride in one, your declared weight once as you join, and a race's result go to that
+instance. It sends no ride and no heart rate to an instance. It is described under **An instance
+you connect to** below, class by class.
 
 That is not a promise about our intentions. It is a property of the software: the code this project
 writes contains exactly **four** network calls, and each can do only the one thing described below —
@@ -102,7 +103,10 @@ there. It is sent to that instance and is not kept on this device.
 ## Location
 
 A ride can carry positions, and a route is a line on a map, so the app holds location data on your
-device. **A ride's positions are never transmitted** — not to us and not to anybody else. The one
+device. **A ride's positions are never transmitted** — not to us and not to anybody else. **A route
+is sent only if you make a private room on it** (see **An instance you connect to**), to the instance
+running the room and the riders you share its code with, and a route that starts, ends or passes
+inside one of your privacy zones is refused before anything is sent. The one
 thing that says anything about where you rode is the map's tile request, described under **What
 leaves the device**: the tiles asked for say roughly where you rode, and the host sees that while it
 answers the request. What Cloudflare keeps afterwards is your IP address, the time, and your device
@@ -137,6 +141,10 @@ ride sent to your own computer** below).
 - **Signing in to an instance you chose to connect to.** This device's public key, the name other
   riders will see if you type one, and — as with any server — your internet address and your device
   or browser type. See **An instance you connect to** above.
+- **A private room you make or join on that instance.** The route of a room you make — refused
+  before anything is sent if any of it is inside one of your privacy zones — the code you type to
+  join one, your power and cadence while you ride in one, the weight you declare once as you join,
+  and after a race its result. See **An instance you connect to** above.
 - **A picture sent to your own computer, if you set one up and switch it on.** See **Pictures sent
   to your own computer** below.
 - **A ride's numbers sent to your own computer, when you ask for an analysis of it** — never a
@@ -205,9 +213,9 @@ somewhere else.
 | The name other riders see | sent to that instance each time you press *Connect* with a name typed. The instance keeps it with your account only the first time it sees this device, and ignores it after that. If your name there is ever changed, the instance also keeps each earlier name, and when it changed, with your account, for moderation | when you press *Connect* | this version of the app cannot change or remove it, or the earlier names: ask the instance's operator, as described under **Deleting what an instance holds** below |
 | Your internet address, and your device or browser type | seen by the instance, and by Cloudflare on the way to the project's own instance, as by any server you connect to. The project's own instance does not write your address to its log or its database: it holds it in memory only, for at most an hour, to limit how many requests one address can make. Cloudflare keeps a record of each request to the project's instance — your IP address, the time, and your device or browser type — that our Cloudflare account can see for up to 7 days, as it does for a map request; we do not use it or share it. Anybody else's instance decides for itself | every time the app talks to the instance | the project's own instance keeps no copy of your address to delete, and Cloudflare's record ages out of what our Cloudflare account can see after 7 days — we cannot delete it on request. For anybody else's instance, ask its operator |
 | Your rides, including their positions | **not sent by this version of the app.** A later version that syncs rides ([#776](https://github.com/openzigs/onyourleft/issues/776)) will send a ride you choose to sync — its positions included, trimmed by your privacy zones where it is shared with anybody else — and this policy will say so, and be dated, before it does | not in this version | — |
-| In a room: power, cadence, the weight you declare, and your display name | **not sent by this version of the app**, which has no way to enter a room yet ([#784](https://github.com/openzigs/onyourleft/issues/784)). The code that will send them is in this version ([#782](https://github.com/openzigs/onyourleft/issues/782)): once a room can be entered, your power and cadence go to the instance running it twice a second while you ride in it — never your position: the room works out where you are from your power — and the weight you declare goes once as you join, for the room to simulate you, and is not shown to anybody. The other riders see where you are on the room's road; never your weight or your watts ([#783](https://github.com/openzigs/onyourleft/issues/783)) | not in this version | — |
-| The route of a group ride | **not sent by this version of the app.** When group rides arrive, the route the ride's creator chose is shared with the other riders in it | not in this version | — |
-| Race results | **not in this version.** When races arrive, a race's results are kept on the instance, visible to that race's participants only, until your account on the instance is erased | not in this version | ask the instance's operator to erase your account, as described under **Deleting what an instance holds** below |
+| In a room: power, cadence, the weight you declare, and your display name | **only if you make or join a private room** ([#784](https://github.com/openzigs/onyourleft/issues/784), [#785](https://github.com/openzigs/onyourleft/issues/785)) — a group ride or a race on one rider's route, joined by a code they share. While you ride in one, your power and cadence go to the instance running it twice a second — never your position: the room works out where you are from your power — and the weight you declare goes once as you join, for the room to simulate you, and is not shown to anybody. The code you type to join goes once, in the request and never in an address, and the instance keeps only a fingerprint of a room's code, never the code. The other riders in the room see where you are on the room's road, and your name; never your weight or your watts. The instance keeps, with your account, which rooms you made or joined | while you ride in a room; the code, when you press *Join the room* | your power, cadence and weight are not kept after the ride; to have the list of rooms you made or joined erased, ask the instance's operator to erase your account, as described under **Deleting what an instance holds** below |
+| The route of a room you make | **only if you make a private room** ([#784](https://github.com/openzigs/onyourleft/issues/784)): the route you choose — its roads and heights, not its name and no times — goes to the instance, which shows it to the riders you share the room's code with. A route that starts, ends or passes inside one of your privacy zones is refused before anything is sent. The route is deleted from the instance when the room is over, and a room is over when a race in it has finished; when a group ride in it has had nobody in it for a minute; when a race in it was interrupted because the instance restarted; when nobody is riding in it a day after it was made, whether or not anybody ever joined it; or when you erase your account on that instance. Anybody still riding in the room when it ends rides on, but nobody else can join it | when you press *Make a room* | deleted by the instance when the room is over — within about a day of being made, unless somebody is riding in it then, and at once if you erase your account there; to have it deleted sooner, ask the instance's operator |
+| Race results | **only if you ride a private race** ([#785](https://github.com/openzigs/onyourleft/issues/785)): when you cross the line, the instance keeps your result — your place, your time, your power-to-weight over the race (watts per kilogram, W/kg) and any plausibility flag the room raised, which says only the length of time over which your power-to-weight went past the room's ceiling — visible to that race's participants only, until your account on the instance is erased. Nobody can see a race's result until every rider is across the line or out of the race, and a race interrupted because the instance restarted publishes no result. Every rider in the race sees every rider's result, flags included; beside another rider it shows power-to-weight and never watts, and this device alone shows your own watts beside your own result. Nobody sees your weight | when you cross the line | ask the instance's operator to erase your account, as described under **Deleting what an instance holds** below. The other riders' results for that race stay, and show you as "a rider", with no name and nothing of yours |
 | Your voice, in a room's voice chat | **never sent by this app.** Where an instance offers voice chat, it happens on **Discord**, a separate service you choose to use: Discord receives your voice, and other riders in the voice channel see your Discord username and picture. If you link your Discord account to your account on the instance, the instance keeps your Discord id with your account | only if you join the voice chat, or link your Discord account | leave the voice channel or unlink your Discord account; what Discord keeps is Discord's, under its own privacy policy |
 
 **Public rooms are for adults.** Where an instance offers public rooms — rooms anybody on that
@@ -447,7 +455,8 @@ which ages out of what our Cloudflare account can see after 7 days.
 
 **Asking us to delete what we hold.** What this project holds about you is your account on the
 project's own instance, if you connected to it: its device keys, your name there and any earlier
-names, your account id and any Discord id you linked. Email **matt@openzigs.ai** to have it
+names, your account id and any Discord id you linked, which private rooms you made or joined, and
+your results in any race you rode there — and, while a room you made is open, its route. Erasing your account there ends every room you made and deletes its route. Email **matt@openzigs.ai** to have it
 deleted, until the app can erase an account on an instance itself.
 
 ## Children

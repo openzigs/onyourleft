@@ -146,13 +146,13 @@ export class ScriptedRoom {
     this.socket.events.onText(encodeMessage(message));
   }
 
-  welcome(riderId: number): void {
+  welcome(riderId: number, kind: 'ride' | 'race' = 'ride'): void {
     this.send({
       type: 'welcome',
       riderId,
       routeRef: { sha256: 'a'.repeat(64) },
       roomConfig: {
-        kind: 'ride',
+        kind,
         ridingPosition: 'hoods',
         reportIntervalMs: REPORT_INTERVAL_MS,
         frameIntervalMs: FRAME_INTERVAL_MS,

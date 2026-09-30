@@ -45,7 +45,8 @@ const host = new RoomHost({
     }),
   onResult: (roomId, result) => send({ type: 'result', roomId, result }),
   onRaceStarted: (roomId) => send({ type: 'race-started', roomId }),
-  onRoomClosed: (roomId) => send({ type: 'room-closed', roomId }),
+  onRaceFinished: (roomId) => send({ type: 'race-finished', roomId }),
+  onRoomClosed: (roomId, phase) => send({ type: 'room-closed', roomId, phase }),
   onSocketClosed: (socketId) => send({ type: 'socket-closed', socketId }),
   maxBufferedBytes: settings.maxBufferedBytes,
   pingIntervalMs: settings.pingIntervalMs,
@@ -87,7 +88,14 @@ process.on('message', (message: ToWorker, handle?: Socket) => {
         handle,
         Buffer.from(message.head, 'base64'),
         (ws) => {
-          host.accept(message.plan.roomId, roomSettings, ws, message.socketId, message.started);
+          host.accept(
+            message.plan.roomId,
+            roomSettings,
+            ws,
+            message.socketId,
+            message.started,
+            message.plan.startedBy,
+          );
         },
       );
       // A handshake `ws` refused (a bad key, a wrong version) destroys the

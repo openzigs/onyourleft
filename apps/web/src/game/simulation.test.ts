@@ -639,3 +639,34 @@ describe('correcting toward a room — #782', () => {
     expect(simulation.correcting).toBe(false);
   });
 });
+
+describe('held on a race’s start line — #785', () => {
+  it('rides none of the wait, and after it rides exactly as a ride that started when the race did', () => {
+    // A rider pedals 250 W through a 12.3 s countdown, held, then rides 20 s.
+    const held = new GameSimulation(hillyRoute());
+    held.advanceTo(1_000_000, PEDALLING);
+    for (let nowMs = 1_000_000; nowMs <= 1_012_300; nowMs += 16) held.holdAt(nowMs);
+    expect(held.state.ride.distance).toBe(0);
+    for (let nowMs = 1_012_300 + 16; nowMs <= 1_032_300; nowMs += 16) {
+      held.advanceTo(nowMs, PEDALLING);
+    }
+    held.advanceTo(1_032_300, PEDALLING);
+    // The control: a ride that simply began at the start of the race.
+    const fresh = runAt(16, 20);
+    expect(held.state.ride.distance).toBe(fresh.state.ride.distance);
+    expect(held.state.ride.distance).toBeGreaterThan(0);
+  });
+
+  it('holds a ride already under way where it is, keeping its partial step', () => {
+    const simulation = new GameSimulation(hillyRoute());
+    simulation.advanceTo(0, PEDALLING);
+    simulation.advanceTo(5_025, PEDALLING);
+    const at = simulation.state.ride.distance;
+    const pending = simulation.pendingSecondsAt(5_025);
+    simulation.holdAt(60_000);
+    expect(simulation.pendingSecondsAt(60_000)).toBeCloseTo(0, 12);
+    simulation.advanceTo(60_000, PEDALLING);
+    expect(simulation.state.ride.distance).toBe(at);
+    expect(pending).toBeGreaterThan(0);
+  });
+});

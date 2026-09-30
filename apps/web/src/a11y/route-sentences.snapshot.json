@@ -43,7 +43,10 @@
     "A GPX imported on the Files screen becomes a ride and will not appear here; that screen offers to make a route from it too.",
     "There are two ways to get one:",
     "Import a GPX file on the Routes screen — a course from a route planner, read on this device.",
-    "Draw one on this device — place waypoints and have the roads between them worked out."
+    "Draw one on this device — place waypoints and have the roads between them worked out.",
+    "Ride with others",
+    "A private group ride or race is held on an instance.",
+    "Connect this device to one in Settings to make a room or join one by its code."
   ],
   "workouts empty": [
     "Workouts",
@@ -774,7 +777,10 @@
     "Wind direction, degrees it blows from",
     "Box Hill, Leith Hill and every lane between them the long way round",
     "Race your best — ride it once first",
-    "Ride Box Hill, Leith Hill and every lane between them the long way round"
+    "Ride Box Hill, Leith Hill and every lane between them the long way round",
+    "Ride with others",
+    "A private group ride or race is held on an instance.",
+    "Connect this device to one in Settings to make a room or join one by its code."
   ],
   "workouts populated": [
     "Workouts",
