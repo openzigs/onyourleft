@@ -15,6 +15,7 @@ import { metres, unixSeconds } from '@onyourleft/domain';
 import {
   activityId,
   cameraFrameId,
+  ensureDeviceSigningKey,
   openActivityStore,
   recordingSessionId,
   routeId,
@@ -101,6 +102,7 @@ import type { TransferPort } from './transfer/store-port';
 import type { UnitsPort } from './units/store-port';
 import type { AthleteKitColourPort } from './athlete/kit-colour-port';
 import type { MaskedWordsPort } from './athlete/masked-words-port';
+import { createInstancePort, instanceEraser, type InstancePort } from './instance/instance-port';
 import type { AthleteMassPort } from './athlete/store-port';
 
 const found = document.getElementById('root');
@@ -658,6 +660,7 @@ function buildTransferPort(): TransferPort | undefined {
     drafts: browserDraftStorage(typeof localStorage === 'undefined' ? undefined : localStorage),
     theme: themeEraser(window),
     hostedModel: hostedModelEraser(),
+    instance: instanceEraser(typeof localStorage === 'undefined' ? undefined : localStorage),
     athleteRow: localAthleteRecord(unixSeconds(Math.floor(Date.now() / 1000))),
   };
 }
@@ -707,6 +710,26 @@ function buildAthleteKitColourPort(): AthleteKitColourPort {
  */
 function buildMaskedWordsPort(): MaskedWordsPort {
   return { store: localStore(), athleteId: LOCAL_ATHLETE };
+}
+
+/**
+ * The Connect screen's port (#777): the ONE production place an instance port
+ * is built, so `check:wiring` reports `createInstancePort` if this goes.
+ *
+ * `undefined` where there is no `localStorage` to keep a sign-in in, or no
+ * WebCrypto to sign with: the screen then says it cannot connect here rather
+ * than offering a Connect button that cannot work.
+ */
+function buildInstancePort(): InstancePort | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  return createInstancePort({
+    storage: localStorage,
+    ensureLocalAthlete: () =>
+      ensureLocalAthlete(localStore(), unixSeconds(Math.floor(Date.now() / 1000))),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+  });
 }
 
 /**
@@ -967,6 +990,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
     : undefined;
   // Read once: two calls would be two reads of a global for one prop.
   const storage = platformStorage();
+  // Built once: a port per render would make the Connect screen re-read the instance on every draw.
+  const instance = buildInstancePort();
   const root = createRoot(container);
   const draw = (update: UpdateWatcher | undefined): void => {
     root.render(
@@ -987,6 +1012,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(athlete?.mass === undefined ? {} : { riderMass: athlete.mass })}
           athleteKit={buildAthleteKitColourPort()}
           maskedWords={buildMaskedWordsPort()}
+          {...(instance === undefined ? {} : { instance })}
           // #623: the stored kit colour, undefaulted — `game/bicycle.ts`
           // §`riderKitFor` is the one place a missing one becomes the house kit.
           {...(athlete?.kitColour === undefined ? {} : { kitColour: athlete.kitColour })}

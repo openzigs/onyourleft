@@ -33,7 +33,10 @@ interface IdentityInstance {
 
 interface IdentityTesting {
   readonly TEST_ORIGIN: string;
-  startIdentityInstance(): Promise<IdentityInstance>;
+  startIdentityInstance(options?: {
+    originIsTheListener?: boolean;
+    config?: { name?: string };
+  }): Promise<IdentityInstance>;
 }
 
 const INSTANCE_TESTING = new URL('../../instance/src/auth/identity-testing.ts', import.meta.url)
@@ -110,5 +113,54 @@ test.describe('the device key, from the browser to the Node instance (#772)', ()
   test('the control: a browser signing for another instance is refused', async ({ page }) => {
     await openHarness(page);
     await expect(signIn(page, 'https://other.example')).rejects.toThrow(/wrong_instance/);
+  });
+});
+
+test.describe('the production transport, from the browser to the Node instance (#777)', () => {
+  test('connects cross-origin with the real fetch, and a reload reads the names back from the instance', async ({
+    page,
+  }) => {
+    // Its own instance, at the address the page really reaches — another
+    // origin than the page's, so the instance's CORS answers are in the path.
+    const own = await testing.startIdentityInstance({
+      originIsTheListener: true,
+      config: { name: 'Lanes of the Weald' },
+    });
+    try {
+      await openHarness(page);
+      const requests: string[] = [];
+      page.on('request', (request) => {
+        if (request.url().startsWith(own.url))
+          requests.push(`${request.method()} ${request.url()}`);
+      });
+      const result = await page.evaluate(
+        ([address]) =>
+          (window.__oylIdentity as IdentityHarness).connect(address as string, 'instance-gate'),
+        [own.url],
+      );
+      expect(result.connected).toMatchObject({ kind: 'connected' });
+      expect(result.current).toMatchObject({
+        kind: 'connected',
+        origin: own.url,
+        instanceName: 'Lanes of the Weald',
+        displayName: 'Anna',
+      });
+      expect(result.devices).toMatchObject({ kind: 'listed' });
+      // The requests went from the page to the instance, preflights included.
+      expect(
+        requests.some((line) => line.startsWith('POST') && line.endsWith('/v1/auth/session')),
+      ).toBe(true);
+
+      const reloaded = await page.evaluate(() =>
+        (window.__oylIdentity as IdentityHarness).reload('instance-gate'),
+      );
+      expect(reloaded).toMatchObject({
+        kind: 'connected',
+        instanceName: 'Lanes of the Weald',
+        displayName: 'Anna',
+      });
+    } finally {
+      await own.close();
+    }
   });
 });

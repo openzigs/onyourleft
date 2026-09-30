@@ -48,7 +48,12 @@
 
 import type { Transaction } from 'dexie';
 
-import type { PersistedSideCameraReport, PersistedSideCameraReportV12 } from './persisted';
+import type {
+  PersistedActivity,
+  PersistedActivityV14,
+  PersistedSideCameraReport,
+  PersistedSideCameraReportV12,
+} from './persisted';
 import { TABLE } from './schema';
 
 /**
@@ -154,12 +159,51 @@ function copiedIfArray<T>(value: T[]): T[] {
 }
 
 /**
+ * Version 15 — #793: every activity gains its **"may be raced"** consent,
+ * `false` (ADR 0021 D-5.1, ADR 0039 D-2.1).
+ *
+ * `up` writes `mayBeRaced: false` onto every ride written at version 14 or
+ * before. That is not a guess about those riders: the consent did not exist
+ * when they recorded, so none of them gave it, and "off by default" is the
+ * ADR's own rule. It overwrites whatever a hand-edited row held under that
+ * name, for the same reason — a consent nobody could have given is not
+ * carried across.
+ *
+ * `down` removes the field. ⚠️ **A consent given at version 15 is lost on the
+ * way back, and that is the safe direction on purpose**: a version-14 build
+ * has no idea the field exists, so it could neither show it nor honour a
+ * revocation of it. After a downgrade and an upgrade the ride is not raceable
+ * until the rider says so again. The account export does not carry the flag,
+ * so export → downgrade → re-import loses it the same way.
+ *
+ * Total over whatever is on disk (#815's review): it copies every key and
+ * never throws, so one odd row cannot stop the database opening.
+ */
+export const ACTIVITY_MAY_BE_RACED: RecordMigration<PersistedActivityV14, PersistedActivity> = {
+  toVersion: 15,
+  table: TABLE.activities,
+  description:
+    'gave every activity a "may be raced" consent, false for every ride written before; down drops a consent given since',
+  up(before: PersistedActivityV14): PersistedActivity {
+    return { ...before, mayBeRaced: false };
+  },
+  down(after: PersistedActivity): PersistedActivityV14 {
+    const before: Partial<PersistedActivity> = { ...after };
+    delete before.mayBeRaced;
+    return before as PersistedActivityV14;
+  },
+};
+
+/**
  * Every migration this build knows how to apply, in ascending `toVersion`.
  *
  * `ActivityStore` hands each one to Dexie as the `.upgrade()` of the version it
  * produces, so adding an entry here is the whole of wiring it in.
  */
-export const SCHEMA_MIGRATIONS: readonly AnyRecordMigration[] = [SIDE_REPORT_POSE_SUMMARY];
+export const SCHEMA_MIGRATIONS: readonly AnyRecordMigration[] = [
+  SIDE_REPORT_POSE_SUMMARY,
+  ACTIVITY_MAY_BE_RACED,
+];
 
 /**
  * Applies `up` to every record. Pure; returns a new array.

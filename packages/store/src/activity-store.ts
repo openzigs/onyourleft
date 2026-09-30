@@ -1012,6 +1012,10 @@ export class ActivityStore {
     const row = toPersistedActivity({
       ...record,
       visibility: record.visibility ?? DEFAULT_VISIBILITY,
+      // Off unless the caller says otherwise (#793, ADR 0021 D-5.1), and
+      // written explicitly for `visibility`'s reason: "off by default" must be
+      // true of the stored row, not only of this code path.
+      mayBeRaced: record.mayBeRaced ?? false,
     });
     await this.#db.transaction('rw', [this.#athletes, this.#activities], async () => {
       await this.#requireAthlete(record.athleteId);
@@ -1185,6 +1189,91 @@ export class ActivityStore {
       .limit(limit)
       .toArray();
     return rows.map(fromPersistedActivity);
+  }
+
+  /**
+   * Other riders' rides on one route that **their riders agreed may be
+   * raced**, newest first — the cross-rider ghost candidates of ADR 0039 D-2
+   * (#793).
+   *
+   * Two conditions, and a test for each:
+   *
+   * 1. **The consent flag is required** (ADR 0021 D-5.1). A ride shared with
+   *    the world but not marked `mayBeRaced` is not returned: sharing a ride
+   *    is not consent to being raced. `activity-store.race-consent.test.ts`
+   *    runs the same assertion against `consentIgnoredStoreFactory`, which
+   *    answers this read without the flag, and requires it to go red.
+   * 2. **The requester's own rides are excluded.** Their own attempts are
+   *    `listRouteAttempts`' — #93's own ghost — and this read is the other
+   *    set; one list holding both would blur which consent a ghost stands on.
+   *
+   * ⚠️ **Nothing in this build calls it.** It is the privacy half ADR 0021
+   * D-5.3 requires to exist and be proved to fail BEFORE the patent half is
+   * relaxed; #331 is its first caller, in a later pull request, and must not
+   * touch `activity-store.ghost-scope.test.ts` in the same one (ADR 0039
+   * D-2.3). And it does not decide whether a ride is OFFERED: a ride whose
+   * rider's privacy-zone trim touches the raced route is refused as well
+   * (ADR 0021 D-5.2), which needs that rider's zones and is not this read's.
+   *
+   * ⚠️ **It is not scoped to one athlete, on purpose**, and the first
+   * parameter is an object rather than `owner` so the scoping enumeration does
+   * not mistake it for an owner-scoped read. It walks the athletes on this
+   * device and asks each one's `[athleteId+routeId]` index, so it needs no
+   * index that answers "rides on this route" without an athlete —
+   * `schema.ts` §`STORES_V15` says why there must never be one.
+   */
+  async listRaceableAttempts(
+    query: { readonly route: RouteId; readonly requester: AthleteId },
+    limit: number = ROUTE_ATTEMPT_LIMIT,
+  ): Promise<readonly ActivityRecord[]> {
+    if (!Number.isInteger(limit) || limit < 1) {
+      throw new StoreValidationError(`limit must be a positive integer, received ${limit}`);
+    }
+    const { route, requester } = query;
+    return this.#db.transaction('r', [this.#athletes, this.#activities], async () => {
+      const athletes = await this.#athletes.toCollection().primaryKeys();
+      const rows: PersistedActivity[] = [];
+      for (const athlete of athletes) {
+        if (athlete === requester) continue;
+        rows.push(
+          ...(await this.#activities
+            .where(INDEX.activityByAthleteAndRoute)
+            .equals([athlete, route])
+            .filter((row) => row.mayBeRaced === true)
+            .toArray()),
+        );
+      }
+      return rows
+        .map(fromPersistedActivity)
+        .sort((a, b) => b.startedAt - a.startedAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+        .slice(0, limit);
+    });
+  }
+
+  /**
+   * Sets or revokes one of this athlete's rides' **"may be raced"** consent
+   * (#793, ADR 0021 D-5.1): the narrow write behind the ride detail view's
+   * control. Answers `false`, and writes nothing, when the athlete holds no
+   * such ride — another athlete's ride is not theirs to consent for.
+   */
+  async setActivityMayBeRaced(
+    owner: AthleteId,
+    activity: ActivityId,
+    mayBeRaced: boolean,
+  ): Promise<boolean> {
+    if (typeof mayBeRaced !== 'boolean') {
+      throw new StoreValidationError('mayBeRaced must be true or false');
+    }
+    return this.#db.transaction('rw', [this.#activities], async () => {
+      const row = await this.#activities.get(activity);
+      if (row === undefined || row.athleteId !== owner) {
+        return false;
+      }
+      await this.#activities.put(
+        toPersistedActivity({ ...fromPersistedActivity(row), mayBeRaced }),
+      );
+      return true;
+    });
   }
 
   /**

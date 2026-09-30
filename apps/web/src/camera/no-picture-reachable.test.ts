@@ -60,6 +60,7 @@ import type { RideAnalysisInput } from '../ride-analysis/input';
 
 import { analysisRequestBody, riderModelStepPort } from './analysis-transport';
 import { endpointDecision } from './analysis-endpoint';
+import { acceptHistoryAnswer } from '../ride-analysis/history';
 import { runAnalysis } from '../ride-analysis/runner';
 import { capturedFrame } from './frame';
 import { HOSTED_PROMPTS, type HostedQuestion } from './hosted-port';
@@ -106,8 +107,16 @@ function modulesUnder(directory: string): string[] {
     .sort();
 }
 
-/** Every module a model request is built from. */
-const ENTRIES = [...HOSTED_ENTRIES, ...modulesUnder('ride-analysis')] as const;
+/**
+ * The app's half of the history index (#835, ADR 0040 D-2 item 1): the sync
+ * that pushes a ride's summary to the rider's instance. Its retrieval half is
+ * `ride-analysis/history.ts`, walked with the rest of that directory; the
+ * instance's half is `apps/instance/src/history/no-picture.test.ts`.
+ */
+const HISTORY_ENTRIES = ['instance/sync.ts'] as const;
+
+/** Every module a model request is built from, or history is indexed from. */
+const ENTRIES = [...HOSTED_ENTRIES, ...HISTORY_ENTRIES, ...modulesUnder('ride-analysis')] as const;
 
 /** Every module under `camera/` whose code names a picture. */
 function derivedPictureModules(paths: readonly string[], read: ReadSource): string[] {
@@ -131,6 +140,10 @@ describe('the module graph (#799)', () => {
 
   it('walks the entries it names, so it is not a walk over nothing', () => {
     expect(ENTRIES).toContain('ride-analysis/input.ts');
+    // #835: the history's retrieval, its summary builder, and the sync that pushes it.
+    expect(ENTRIES).toContain('ride-analysis/history.ts');
+    expect(ENTRIES).toContain('ride-analysis/ride-summary.ts');
+    expect(ENTRIES).toContain('instance/sync.ts');
     // #802: the step port to the rider's own computer, and what it imports.
     expect(ENTRIES).toContain('ride-analysis/own-computer-step.ts');
     const walked = walk.closure(ENTRIES);
@@ -362,10 +375,17 @@ describe('the body carries no picture (#799)', () => {
         delay: () => ({ elapsed: new Promise<void>(() => undefined), cancel: () => undefined }),
       },
       signal: new AbortController().signal,
+      // #835: a passage of the rider's history, so the history step is reached too.
+      history:
+        acceptHistoryAnswer(
+          { passages: [{ kind: 'note', label: 'Your note', text: 'Hill repeats felt strong.' }] },
+          { limit: 6, characters: 5_400 },
+        ) ?? [],
     });
-    // Three sections, the position step and the summary: a whole run.
+    // Three sections, the position step, the history step and the summary: a whole run.
     expect(outcome.kind).toBe('written');
-    expect(bodies).toHaveLength(5);
+    expect(outcome.kind === 'written' && outcome.history).toBe('used');
+    expect(bodies).toHaveLength(6);
     for (const body of bodies) {
       expect(pictureBodyFaults(body, largestArrayIn(withPose))).toStrictEqual([]);
     }
@@ -402,10 +422,19 @@ describe('the body carries no picture (#799)', () => {
       port: port as NonNullable<typeof port>,
       clock: STILL_CLOCK,
       signal: new AbortController().signal,
+      // #835: a passage of the rider's history, which the hosted path refuses to send (ADR 0040 D-9).
+      history:
+        acceptHistoryAnswer(
+          { passages: [{ kind: 'note', label: 'Your note', text: 'Hill repeats felt strong.' }] },
+          { limit: 6, characters: 5_400 },
+        ) ?? [],
     });
-    // Three sections, the position step and the summary: a whole run.
+    // Three sections, the position step and the summary: the history step is
+    // refused before a byte of it is sent, and the run goes on without it.
     expect(outcome.kind).toBe('written');
+    expect(outcome.kind === 'written' && outcome.history).toBe('failed');
     expect(bodies).toHaveLength(5);
+    expect(JSON.stringify(bodies)).not.toContain('Hill repeats');
     for (const body of bodies) {
       expect(pictureBodyFaults(body, largestArrayIn(withPose))).toStrictEqual([]);
     }

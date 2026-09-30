@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { lookup } from 'node:dns/promises';
 import { mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 import { createIdentity, type Identity } from './auth/identity.ts';
 import { identitySettings, type Config } from './config.ts';
 import { createHandler, type Handler } from './handler.ts';
+import type { Resolver } from './history/address.ts';
+import { createOllamaEmbedder } from './history/embedder.ts';
+import { createHistory, type History } from './history/history.ts';
 import { logEvent, type LogSink } from './log.ts';
 import { HttpCounters, renderMetrics } from './metrics.ts';
-import { listen, type Listening } from './node-listener.ts';
+import { listen, sweepOnBoundaries, type Listening, type SweepTimers } from './node-listener.ts';
 import { assessReadiness, type MigrationState } from './readiness.ts';
 import type { InstanceProbes } from './route-kit.ts';
 import { planFor } from './room/room-plan.ts';
@@ -40,6 +44,14 @@ import type { SqlStore } from './store/sql-store.ts';
  * which is what Docker sends.
  */
 
+/**
+ * Every address a name resolves to, as the operating system's resolver gives
+ * them — what the history index's embedding address is checked against on
+ * every connection (ADR 0040 D-6).
+ */
+export const systemResolver: Resolver = async (hostname) =>
+  (await lookup(hostname, { all: true, verbatim: true })).map((entry) => entry.address);
+
 /** The instance will not start, and says why — with the command that fixes it. */
 export class InstanceRefusal extends Error {
   override readonly name = 'InstanceRefusal';
@@ -55,6 +67,10 @@ export interface InstanceOptions {
   readonly now?: () => number;
   /** How often a waiting instance looks at the migration again. */
   readonly migrationPollMs?: number;
+  /** How the embedding model's name is resolved: {@link systemResolver} unless a test says otherwise. */
+  readonly resolve?: Resolver;
+  /** The timers the rate-limit sweep runs on (#892) — Node's own unless a test's. */
+  readonly sweepTimers?: SweepTimers;
 }
 
 export interface StartedInstance {
@@ -63,6 +79,8 @@ export interface StartedInstance {
   readonly router: RoomRouter;
   /** Resolves once the store is open and rooms may be admitted. */
   readonly opened: Promise<void>;
+  /** How many rate-limit keys — internet addresses among them — the accounts hold now (#892). */
+  heldRateLimitKeys(): number;
   stop(): Promise<void>;
 }
 
@@ -103,6 +121,9 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
 
   let store: SqlStore | undefined;
   let identity: Identity | undefined;
+  let history: History | undefined;
+  /** Stops the rate-limit sweep, once an identity exists to sweep (#892). */
+  let stopSweeping = (): void => undefined;
   let stopping = false;
   const counters = new HttpCounters();
 
@@ -189,6 +210,28 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
 
   const open = (): void => {
     store = openServingStore(path);
+    // The history index (#835, ADR 0040). Off, and saying why, when no local
+    // embedding model is configured; the rest of the instance does not care.
+    const settings = options.config.history;
+    history = createHistory({
+      store,
+      embedder:
+        settings.kind === 'on'
+          ? createOllamaEmbedder({
+              settings: settings.embedding,
+              resolve: options.resolve ?? systemResolver,
+            })
+          : undefined,
+      log,
+      now,
+    });
+    logEvent(
+      log,
+      'history-index',
+      settings.kind === 'on'
+        ? { state: 'on', model: settings.embedding.model }
+        : { state: 'off', code: settings.code },
+    );
     if (server.origin !== null) {
       identity = createIdentity({
         store,
@@ -196,8 +239,23 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         ...identitySettings(options.config),
         now,
       });
-      handler = createHandler({ ...handlerOptions, identity });
+      handler = createHandler({ ...handlerOptions, identity, history });
+      // The identity's rate limits hold internet addresses; the privacy
+      // policy says for at most an hour. Each window's keys are forgotten on
+      // the boundary it ends on, whether or not anybody asks again (#892).
+      const swept = identity;
+      stopSweeping = sweepOnBoundaries(
+        {
+          periodMs: swept.rateLimitSweepPeriodMs,
+          run: () => {
+            swept.sweepRateLimits();
+          },
+        },
+        options.sweepTimers,
+      );
     }
+    // Whatever was synced while the model was off, or under another model, is indexed now (D-7).
+    history.schedule();
     logEvent(log, 'ready', {
       identity: identity !== undefined,
       registration: options.config.registration,
@@ -218,6 +276,10 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       const poll = async (): Promise<void> => {
         if (stopping) return;
         const state = await migrationState(path).catch((): MigrationState => 'migrating');
+        // `stop()` may have run while the state was being read: opening now
+        // would open a store and start a rate-limit sweep that nothing stops
+        // (#892's merge review).
+        if (stopping) return;
         if (state === 'at-head') {
           open();
           done();
@@ -238,10 +300,13 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     listening,
     router,
     opened,
+    heldRateLimitKeys: () => identity?.heldRateLimitKeys() ?? 0,
     async stop() {
       stopping = true;
+      stopSweeping();
       await router.stop();
       await listening.close();
+      await history?.idle();
       await store?.close();
     },
   };

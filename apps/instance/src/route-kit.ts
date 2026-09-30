@@ -9,6 +9,7 @@
 import type { Readiness } from './readiness.ts';
 import type { Caller, Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
+import type { History } from './history/history.ts';
 import type { Sync } from './sync/sync.ts';
 import { JSON_TYPE, type ErrorCode } from './errors.ts';
 
@@ -24,7 +25,13 @@ export type Schema =
   | { readonly type: 'array'; readonly items: Schema }
   | { readonly type: 'string' | ['string', 'null']; readonly format?: 'uri' }
   | {
-      readonly type: 'integer' | 'number' | 'boolean' | ['integer', 'null'] | ['number', 'null'];
+      readonly type:
+        | 'integer'
+        | 'number'
+        | 'boolean'
+        | ['integer', 'null']
+        | ['number', 'null']
+        | ['boolean', 'null'];
     }
   | { readonly type: 'string'; readonly enum: readonly string[] }
   | { readonly $ref: string };
@@ -80,6 +87,8 @@ export interface RouteContext {
   readonly caller: Caller | undefined;
   /** Sync (#37, #776). Present for every route that declares `sync`; the handler sees to it. */
   readonly sync: Sync | undefined;
+  /** The history index (#835). Present for every route that declares `history`; the handler sees to it. */
+  readonly history: History | undefined;
   readonly probes: InstanceProbes | undefined;
 }
 
@@ -117,6 +126,11 @@ export interface Route {
    * handed none answers `unavailable` without calling it.
    */
   readonly sync?: true;
+  /**
+   * The route needs the history index (#835, ADR 0040). An instance handed
+   * none answers `unavailable` without calling it.
+   */
+  readonly history?: true;
   /** Whether the route reaches another athlete, and how (#83). */
   readonly reaches: Reach;
   /**

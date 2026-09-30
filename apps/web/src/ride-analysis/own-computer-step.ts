@@ -90,7 +90,13 @@ export const STEP_REQUEST_FIELDS: readonly (keyof StepRequest)[] = [
   'temperature',
 ];
 
-const STEP_KINDS: readonly AnalysisStepKind[] = ['section', 'position', 'summary', 'rewrite'];
+const STEP_KINDS: readonly AnalysisStepKind[] = [
+  'section',
+  'position',
+  'history',
+  'summary',
+  'rewrite',
+];
 
 /**
  * A `data:` URL anywhere in a string. A prompt is this repository's words and

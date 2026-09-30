@@ -911,8 +911,8 @@ alternatives are there.
 | Test runner | Vitest 4.1.11 |
 | Coverage gate | **no percentage** — every new code path covered by a test proven to fail without the change |
 | Linter / formatter | ESLint 10 + typescript-eslint + Prettier 3 |
-| Map rendering | **MapLibre GL JS 6.10.0** + **`pmtiles` 4.5.0**, both BSD-3-Clause — installed by #63, in `apps/web` (ADR 0010 D-1) |
-| Basemap | Protomaps basemap as a PMTiles archive on storage this project controls. ⚠️ **This row used to read "not published yet — #53" and no longer does**: #53 published a continental-US extract of a pinned daily build on 2026-09-16, and #63's browser gate has rendered from it. ⚠️ **Since #534 every build draws it by default** — `apps/web/src/map/basemap.ts` §`PUBLISHED_BASEMAP_URL`, a committed constant because `.gitignore` refuses a committed `.env.production`; `VITE_BASEMAP_PMTILES_URL` overrides it and `none` turns the map off. ⚠️ **Since the owner's decision of 2026-09-25 a rider can turn the tiles off too**: Settings' *Ride map* switch, on by default and kept on the device (`apps/web/src/map/tiles-preference.ts`), which builds a style with no source at all, so the tile host is contacted by nothing while the ride's line and the OpenStreetMap credit still render. ⚠️ **A published archive object must never be deleted or renamed while any shipped build names it.** The URL is baked into every web bundle and every APK, dated object name included, and an installed APK is not updated when #53 publishes a newer build — so deleting `basemap-us-20260914.pmtiles` would take the map away from every old client, silently (one request, two console errors, no message: #535's review measured it). A newer build is published beside it under a new name, and the old one is removed only once no build in use can name it. A reviewer who remembers "it is not in `.env.example`" is reading the old row: the template now documents it as the default. Coverage is the contiguous US at z0–15; outside it the map is the ride's line on a plain background and no tile is requested (`map.browser.spec.ts` §"a ride outside the archive’s coverage"). Its host is named in `docs/privacy-policy.md` and the Data Safety declaration, and `privacy/no-network.test.ts` fails when it moves without them. The gate's *default* archive is still the synthetic one built by `apps/web/browser/pmtiles-fixture.ts`, which contains no OpenStreetMap data. ⚠️ **Since #578 the map carries place and road names**, set in Roboto v2.138 (Apache-2.0, the last release before Roboto moved to OFL) from signed-distance glyph ranges `apps/web/tools/glyphs/` generates from the committed font into `apps/web/public/glyphs/Roboto-Regular/`, with the font's own licence beside them. The style names them at the relative `./glyphs/{fontstack}/{range}.pbf`, so no request leaves the app's origin for a label and the privacy policy is unchanged; they are precached (586 KiB). ⚠️ MapLibre 6.10 draws a glyph from the device's own font whenever a range cannot be fetched, so a missing range degrades the typeface rather than blanking the label — `map.browser.spec.ts` §"place names" measures that and asserts on the requests rather than the ink |
+| Map rendering | **MapLibre GL JS 6.11.2** + **`pmtiles` 4.5.0**, both BSD-3-Clause — installed by #63, in `apps/web` (ADR 0010 D-1) |
+| Basemap | Protomaps basemap as a PMTiles archive on storage this project controls. ⚠️ **This row used to read "not published yet — #53" and no longer does**: #53 published a continental-US extract of a pinned daily build on 2026-09-16, and #63's browser gate has rendered from it. ⚠️ **Since #534 every build draws it by default** — `apps/web/src/map/basemap.ts` §`PUBLISHED_BASEMAP_URL`, a committed constant because `.gitignore` refuses a committed `.env.production`; `VITE_BASEMAP_PMTILES_URL` overrides it and `none` turns the map off. ⚠️ **Since the owner's decision of 2026-09-25 a rider can turn the tiles off too**: Settings' *Ride map* switch, on by default and kept on the device (`apps/web/src/map/tiles-preference.ts`), which builds a style with no source at all, so the tile host is contacted by nothing while the ride's line and the OpenStreetMap credit still render. ⚠️ **A published archive object must never be deleted or renamed while any shipped build names it.** The URL is baked into every web bundle and every APK, dated object name included, and an installed APK is not updated when #53 publishes a newer build — so deleting `basemap-us-20260914.pmtiles` would take the map away from every old client, silently (one request, two console errors, no message: #535's review measured it). A newer build is published beside it under a new name, and the old one is removed only once no build in use can name it. A reviewer who remembers "it is not in `.env.example`" is reading the old row: the template now documents it as the default. Coverage is the contiguous US at z0–15; outside it the map is the ride's line on a plain background and no tile is requested (`map.browser.spec.ts` §"a ride outside the archive’s coverage"). Its host is named in `docs/privacy-policy.md` and the Data Safety declaration, and `privacy/no-network.test.ts` fails when it moves without them. The gate's *default* archive is still the synthetic one built by `apps/web/browser/pmtiles-fixture.ts`, which contains no OpenStreetMap data. ⚠️ **Since #578 the map carries place and road names**, set in Roboto v2.138 (Apache-2.0, the last release before Roboto moved to OFL) from signed-distance glyph ranges `apps/web/tools/glyphs/` generates from the committed font into `apps/web/public/glyphs/Roboto-Regular/`, with the font's own licence beside them. The style names them at the relative `./glyphs/{fontstack}/{range}.pbf`, so no request leaves the app's origin for a label and the privacy policy is unchanged; they are precached (586 KiB). ⚠️ MapLibre (6.10, and 6.11 since #756) draws a glyph from the device's own font whenever a range cannot be fetched, so a missing range degrades the typeface rather than blanking the label — `map.browser.spec.ts` §"place names" measures that and asserts on the requests rather than the ink |
 | Third-party licence notices | **Generated and committed, then gated** ([#664](https://github.com/openzigs/onyourleft/issues/664)). `scripts/check-third-party-notices.mjs` reads the union of every workspace package's `--prod` closure through the same `discoverPackages`/`readClosure` `check:licences` uses, copies each package's own `LICENSE`/`LICENCE`/`COPYING`/`NOTICE` text verbatim, adds the APK's native libraries from the reviewed `apps/mobile/native-closure.json` (held to Gradle by `apps/mobile/src/android/native-closure.test.ts` where Gradle has run) and writes `apps/web/public/licences/third-party.txt` — served from `dist`, precached, in the APK — and its contents to `apps/web/src/credits/third-party-contents.txt`, which the Credits screen inlines. `check:notices` regenerates both after its own frozen install and fails on any difference; CLAUDE.md §4g "Admitted is not the same as noticed" is the rest |
 | Real-time transport | deferred to [#16](https://github.com/openzigs/onyourleft/issues/16) |
 
@@ -922,15 +922,18 @@ keeps that list; the commands are in section 4a.
 
 ### The map dependencies, recorded because #63's definition of done asks for it
 
-| Package | Version installed | Licence, verified from the installed tree on 2026-09-22 |
+| Package | Version installed | Licence, verified from the installed tree on 2026-09-30 |
 |---|---|---|
-| `maplibre-gl` | **6.10.0** | BSD-3-Clause |
+| `maplibre-gl` | **6.11.2** | BSD-3-Clause |
 | `pmtiles` | **4.5.0** | BSD-3-Clause |
 
 ⚠️ **`maplibre-gl` read 6.7.0 here until [#489](https://github.com/openzigs/onyourleft/issues/489)**,
 which took Dependabot's 6.10.0 after re-running the browser gate against it; a reviewer who
 remembers 6.7.0 is reading the old file. The bump added `bidi-js` and `require-from-string` to the
-closure below, both MIT, so its licence sentence is unchanged.
+closure below, both MIT, so its licence sentence is unchanged. ⚠️ **And it read 6.10.0 until
+[#756](https://github.com/openzigs/onyourleft/pull/756)**, which took 6.11.2 with the browser gate
+re-run: its `LICENSE.txt` is byte-identical to 6.10.0's and its dependencies are the same, so the
+closure did not move. `pmtiles` was not bumped; its licence was re-read from the installed tree the same day.
 
 Both land in `apps/web`, which is AGPL-3.0-or-later; BSD-3 is admissible there and under `packages/`
 alike, and what keeps them in `apps/` is the DOM rather than the licence (ADR 0010 D-1 says so in as
@@ -939,7 +942,10 @@ reaches `packages/*` — unlike the devDependencies that arrive there through Vi
 §3 records as the trap.
 
 Their closure adds BSD-2-Clause, ISC, MIT and one `(MIT OR Apache-2.0)` and no GPL, no AGPL and
-nothing non-OSI. `maplibre-gl` is **1 006 kB minified** (977 kB at 6.7.0), which is why `apps/web/src/map/maplibre.ts` is
+nothing non-OSI. The lazy map chunk is **1 036 kB minified** at 6.11.2, against 1 031 kB for 6.10.0
+built from the same tree on 2026-09-30 (it said 1 006 kB here for 6.10.0 at #489, and 977 kB at
+6.7.0; the chunk carries this app's map code as well as MapLibre's, so it moves with that code
+too), which is why `apps/web/src/map/maplibre.ts` is
 reached through a dynamic `import()` and lands in its own chunk: a rider who only opens indoor rides
 never downloads it.
 
@@ -955,7 +961,7 @@ tiles and draws none of them, with no error anywhere.
 `maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url`. **`?worker&url` and not `?url`**: the dist
 worker imports its sibling `maplibre-gl-shared.mjs`, so a verbatim copy of one file fails on its
 first import and produces the same blank map by a different route. `pnpm run build` emits
-`assets/maplibre-gl-worker-*.js` (~486 kB, referenced only from the lazy map chunk, so the code
+`assets/maplibre-gl-worker-*.js` (~509 kB at 6.11.2, referenced only from the lazy map chunk, so the code
 split is unaffected).
 
 This was found by #63's browser gate only once it had a real archive to render — see below.
@@ -1257,7 +1263,7 @@ That is why D-9 puts the rule at capture and why the check on it is a refusal ra
 in this repository as `apps/instance`; [ADR 0037](adr/0037-instance-runtime-hosting-and-transport.md)
 decided how it is built. [#767](https://github.com/openzigs/onyourleft/issues/767) scaffolded it and
 [#36](https://github.com/openzigs/onyourleft/issues/36) gave it an API contract and an error model.
-**What it does today is small on purpose**: four metadata routes, and — since #855 (#772, #773,
+**What it does today is small on purpose**: five metadata routes, and — since #855 (#772, #773,
 #774) — the identity routes under `/v1/auth/`, which a handler serves only when it is HANDED an
 identity service over a store. ⚠️ **Since #780 the Node entry point opens the store and serves
 rooms**, and a reviewer who remembers "a running instance still answers the metadata alone" is
@@ -1300,6 +1306,24 @@ flowchart LR
 names nothing from Node, so the Node listener that fronts it today and the Durable Object adapter
 (#781) mount the same code (ADR 0037 D-2). Every rule — the body limit, routing, the error shape,
 the log — is the handler's, so two adapters cannot disagree about any of them.
+
+**Any origin may read an answer, and none may send a credential (#777).** A rider's app is
+never on the instance's origin — a browser tab, the Android shell's `https://localhost`, a
+developer's `http://localhost` — so without CORS a browser would refuse to hand the app any answer.
+Every response carries `Access-Control-Allow-Origin: *`, and an `OPTIONS` preflight to a path the
+route table serves answers `204` with that route's own methods (anything else is the usual
+`not_found`). `*` is safe here and only here because the instance reads **no cookie**: a session is
+a bearer token in `Authorization`, and `Access-Control-Allow-Credentials` is never sent, so a page
+the rider happens to visit cannot act as them. ⚠️ Two things follow for the deployment (#807), not
+for this code: behind a Cloudflare Tunnel every client arrives as cloudflared's loopback, so the
+per-address rate limits in `auth/identity.ts` become one shared bucket until the listener reads
+`CF-Connecting-IP`; and a public page calling an instance on `http://localhost` may, in Chrome,
+also need `Access-Control-Allow-Private-Network` on the preflight.
+
+**`GET /instance` answers the operator's name for it** — `OYL_INSTANCE_NAME` (`.env.example`),
+refused at start-up if it holds a control, bidirectional or invisible character, or `null` when it
+is unset. The instance never makes one up: the Connect screen says "This instance has no name"
+instead.
 
 **The Durable Object adapter mounts the room core, not the handler — so far.**
 [#781](https://github.com/openzigs/onyourleft/issues/781) built it: one object per room, every
@@ -1430,7 +1454,7 @@ sequenceDiagram
 |---|---|---|
 | Ingestion (#37) | Refused in order, each with its own code: the file's type **from its bytes** (`file_type_unsupported`), that it decodes to at least one sample (`file_undecodable`), then ADR 0014 D-6's answers (`record_malformed`, `record_unsupported`, `record_signature_mismatch`, `record_content_mismatch`), then `record_not_your_key`. Nothing is written until every check passes. The file goes to the blob store, then the record and its manifest row in ONE transaction; a failed transaction takes the file back unless another athlete's record holds it, under a per-file lock. A duplicate is decided by the primary key and answers the first record | `src/sync/sync.ts` §`ingest`, `src/sync/activity-file.ts` |
 | The manifest (#776) | `sync_item` (migration 0009): every activity and item, and a tombstone for each one deleted. Paged by `(receivedAt, seq)`, where `seq` is `AUTOINCREMENT` and `receivedAt` is written as `max(now, the newest)`, so no row is ever inserted behind a cursor a reader holds | `src/store/sql-store.ts` §`nextReceivedAt` |
-| Items (#776's 2026-09-29 addition) | `write-up`, `side-camera-report` (the pose summary inside it), `goal`, `note`, `document` — stored byte for byte as the device sent them; the device copy is canonical (ADR 0036). The client syncs the first two; goals, notes and documents wait for #836 on the device | `src/sync/sync.ts` §`putItem` |
+| Items (#776's 2026-09-29 addition) | `write-up`, `ride-summary` (since #835), `side-camera-report` (the pose summary inside it), `goal`, `note`, `document` — stored byte for byte as the device sent them; the device copy is canonical (ADR 0036). The client syncs write-ups, side-camera reports and ride summaries; goals, notes and documents wait for #836 on the device | `src/sync/sync.ts` §`putItem` |
 | Reads (#38) | The caller's own activities only — no read of another athlete's exists, because nothing records who may see whose ride. The list is ONE query a page; streams are served in full or at `?points=`, bucket means with a gap left `null`, and **never a position**; every response is `no-store` | `src/sync/sync.ts` §`owned`, §`streams` |
 | Export (#35) | `GET /v1/account/export`: the account as JSON, each activity's signed record and the address of its ORIGINAL file (the true track, unobfuscated), every item, public keys only, the blocks and reports the athlete made (#83; whom, why and when, and never how a report was decided, which would say whether an id is real), any recovery address given and its confirmation's state (never the token's hash), and a list of what is left out and why — the moderation log and reports ABOUT them among it | `src/sync/sync.ts` §`exportAccount` |
 | Deletion (#35) | `DELETE /v1/account`: files first — each one no other athlete also holds — then every row, in tables **derived from the schema's foreign keys at the time of the call**, and another athlete's block OF this one (`block.blocked_athlete_id` has no foreign key, #83; a report ABOUT them and the moderation log are kept, and `sql-store.erasure.test.ts` says why for every such column), then a sweep of files a concurrent upload added. A failure part way is retried safely. It reaches THIS instance only: not a copy already downloaded, and not another instance | `src/sync/sync.ts` §`eraseAccount`, `src/store/sql-store.ts` §`athleteTablesInErasureOrder` |
@@ -1441,6 +1465,44 @@ but no sync: wiring one over the blob directory it already configures (`OYL_INST
 is left to a follow-up rather than done in #893's merge, and the shipped client calls none of this
 (#777), so every sync route answers `unavailable` on a running instance and a rider's device
 sends nothing.
+
+#### The history index (#835, ADR 0040)
+
+A searchable index of each rider's synced history, which the post-ride write-up may look back at.
+**An index, never a store of record** (D-1): every row is cut from a live synced item, and deleting
+them all loses nothing, because a catch-up makes them again.
+
+```mermaid
+sequenceDiagram
+    participant D as Device (apps/web)
+    participant I as Instance (apps/instance/src/history/)
+    participant O as Local embedding model (Ollama, no published port)
+    D->>I: POST /v1/sync/items/ride-summary/{ride} — passages the DEVICE built from #809's input
+    I->>I: cut every write-up, ride summary, goal, note and document into passages of ≤ 900 characters
+    I->>O: POST /api/embed {model, input: "search_document: …", truncate: false} — to an address checked local
+    I->>I: one transaction: still live with that body? then keep passages, vectors, model, dimension, prefixes
+    D->>I: POST /v1/history/search {query, rideId, limit ≤ 6, characters ≤ 5 400}
+    I->>O: embed the query ("search_query: …")
+    I-->>D: the CALLER's best passages of THIS model, each with a label ("Write-up of a ride 3 weeks earlier")
+    D->>D: accept the shape, screen a write-up again, fence the rest as data: template v2's history step
+```
+
+| Concern | Decision | Where |
+|---|---|---|
+| Rows | `history_source` (one per item indexed: its digest, model, prefix convention, outcome) and `history_passage` (text, model, dimension, convention, a unit `Float32` vector as a BLOB), migration 0010. Both name `athlete_id`, so the schema-derived erasure takes them; a put or a delete of the item drops its rows in the SAME transaction (`replaceSyncRow`) | `src/store/migrations/0010-history-index.ts`, `src/store/sql-store.ts` |
+| Ranking | Brute force: a dot product of unit vectors in TypeScript over the caller's rows of the configured model, dimension and convention only (D-4, D-7). `sqlite-vec` is the named fallback, owed only if a query on the owner's box passes 250 ms | `src/history/history.ts` §`search` |
+| The model | Ollama's `/api/embed` by plain `fetch`, `truncate: false`, the model's own prefixes; defaults to `nomic-embed-text` (Apache-2.0, the owner's ruling, D-5). A change of model or prefixes makes every item pending again; until it has caught up, retrieval returns fewer passages rather than a mixture | `src/history/embedder.ts` |
+| The address (D-6) | Configured: localhost, a loopback or private literal, or a single-label name — anything else turns the index OFF (never the instance), and says why. Connected: the name is resolved on every request, every address must be local, and the request goes to the checked address with `redirect: 'error'` | `src/history/address.ts`, `src/config.ts` §`readHistorySettings` |
+| What is never indexed | A side-camera report (the pose summary, D-2 item 1) and any item carrying a `data:` URL; the rider's own text is otherwise kept whole | `src/history/passages.ts` |
+| Scoping (D-3) | The athlete is the session's; `sql-store.scoping.test.ts` probes the index's reads with three athletes, and `history.test.ts` searches as each | |
+| Export and erasure (D-10) | The export says which model built the index and how many passages, never the passages or vectors; `DELETE /v1/account` takes them with everything else | `src/sync/sync.ts` §`exportAccount` |
+| The device's half | Template version 2's history step is the ONE step a passage reaches, inside a fence no passage can close, and its note is accepted and screened before the summary is shown it. Retrieval runs before the run, on the rider's own computer's path only (a hosted step port refuses a history step until D-9's disclosures change), and an unreachable instance is a sentence, never a failed run | `apps/web/src/ride-analysis/history.ts`, `template-v2.ts`, `ride-analysis.ts` |
+
+⚠️ **Mounted on a running box, fed by nothing yet.** `src/instance.ts` builds the index and serves
+`/v1/history/search` when `OYL_INSTANCE_EMBEDDING_URL` is set, but it hands the handler no sync
+(above, and #898), so no item reaches it; and the shipped client asks for no history, because the
+one transport that may call an instance is #777's. Whoever wires either owes ADR 0040 D-11's
+disclosures first.
 
 #### The API contract (#36)
 
@@ -1454,8 +1516,8 @@ sends nothing.
 | Pagination | **Keyset, never offset**: a list is ordered by (sort key, id) and a page is the next `limit` rows after an opaque cursor. Every row present when a listing begins is returned exactly once however many are inserted between pages; an offset control in the test shows the failure it prevents. `limit` defaults to 50 and is at most 200 | `src/pagination.ts` |
 
 **Versioning.** The identity routes live under `/v1/` (#772's diagram named `/auth/…`; these are
-those paths, versioned). The four metadata routes — `/health`, `/source`, `/openapi.json`,
-`/licences/third-party.txt` — are unversioned and only ever gain fields. The API a client syncs
+those paths, versioned). The five metadata routes — `/health`, `/source`, `/openapi.json`,
+`/licences/third-party.txt` and `/instance` (#777) — are unversioned and only ever gain fields. The API a client syncs
 through lives under `/v1/` from its first route (#776). **A breaking change is `/v2/` served beside
 `/v1/`, never an edit to `/v1/`**, because anyone can run an instance and a third party implements
 against this contract (#36's revision block): a change that would break a stranger's client is

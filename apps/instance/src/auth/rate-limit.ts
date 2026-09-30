@@ -5,10 +5,20 @@
  *
  * Kept in memory on purpose: a limit exists to bound what one caller can make
  * the instance do in a minute, and forgetting the counts on a restart costs
- * one window's allowance at most. The count is bounded too — a window's keys
- * are dropped when the window turns over — so a stranger sending a new public
- * key with every request grows it by one entry a request for one window and
- * no longer.
+ * one window's allowance at most.
+ *
+ * ⚠️ **A key is held for no longer than its window** (#892's review). The
+ * privacy policy says the project's instance holds an internet address "in
+ * memory only, for at most an hour", and a key here IS an address. Replacing
+ * the counts only inside {@link RateLimiter.allow} did not keep that promise:
+ * an address stayed until the NEXT request after its window ended, which on a
+ * quiet instance is days. So a window's keys are dropped when the window ends
+ * whether or not anybody asks again — by {@link RateLimiter.sweep}, which the
+ * Node adapter runs on every {@link sweepPeriodMs} boundary
+ * (`node-listener.ts` §`sweepOnBoundaries`). Windows are aligned to multiples
+ * of their length from the epoch, so a sweep on each boundary ends a key's
+ * life at the end of its window, never later. No clock is read here: time is
+ * the `now` this is handed.
  */
 
 export interface RateLimit {
@@ -31,11 +41,16 @@ export interface RateLimiter {
    * of a window differently from the rest (#883).
    */
   take(key: string): number;
+  /** Forget every key whose window has ended. */
+  sweep(): void;
+  /** How many keys are held now. */
+  readonly size: number;
 }
 
 export function createRateLimiter(rate: RateLimit, now: () => number): RateLimiter {
   let window = Number.NaN;
   let counts = new Map<string, number>();
+  /** The counts of the current window, dropped when the window they were taken in has ended. */
   function current(): Map<string, number> {
     const at = Math.floor(now() / rate.windowMs);
     if (at !== window) {
@@ -57,7 +72,23 @@ export function createRateLimiter(rate: RateLimit, now: () => number): RateLimit
       take(key);
     },
     take,
+    sweep: () => {
+      current();
+    },
+    get size() {
+      return counts.size;
+    },
   };
+}
+
+/**
+ * The period a sweep has to run on for every one of `rates` to be swept at the
+ * end of each of its windows: their greatest common divisor, since each
+ * window's boundaries are multiples of its own length.
+ */
+export function sweepPeriodMs(rates: readonly RateLimit[]): number {
+  const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+  return rates.reduce((period, rate) => gcd(rate.windowMs, period), 0);
 }
 
 /**

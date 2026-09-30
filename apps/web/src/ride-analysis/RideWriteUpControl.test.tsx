@@ -38,6 +38,7 @@ import {
   WRITE_UP_SAVED,
   WRITE_UP_SENDS_ID,
 } from './RideWriteUpControl';
+import { HISTORY_NOTICE_TEXT } from './ride-analysis';
 
 const ATHLETE = athleteId('athlete-a');
 const RIDE = activityId('ride-1');
@@ -241,6 +242,15 @@ describe('a press, and only a press', () => {
     port.asks[0]?.settle({ kind: 'failed', text: 'A fixed sentence from the table.' });
     await settle();
     expect(liveRegion()).toBe('A fixed sentence from the table.');
+  });
+
+  it('says what a saved write-up had to leave out of the rider’s history (#835)', async () => {
+    const port = scriptedPort(['computer']);
+    await open(port);
+    await activateWithKeyboard(button(ASK_LABEL.computer.first));
+    port.asks[0]?.settle({ kind: 'written', notice: HISTORY_NOTICE_TEXT.unreachable });
+    await settle();
+    expect(liveRegion()).toBe(`${WRITE_UP_SAVED} ${HISTORY_NOTICE_TEXT.unreachable}`);
   });
 });
 

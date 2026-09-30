@@ -65,6 +65,51 @@
         }
       }
     },
+    "/instance": {
+      "get": {
+        "operationId": "getInstance",
+        "summary": "What the operator calls this instance, or null — the name a rider’s app shows once connected (#777).",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          }
+        }
+      }
+    },
     "/licences/third-party.txt": {
       "get": {
         "operationId": "getThirdPartyNotices",
@@ -349,7 +394,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "description": "`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail`, `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations` and `notIncluded`."
+                  "description": "`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail`, `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations`, `historyIndex` (which model built the history index, and how many passages — never the passages or vectors) and `notIncluded`."
                 }
               }
             }
@@ -2200,6 +2245,119 @@
         }
       }
     },
+    "/v1/history/search": {
+      "post": {
+        "operationId": "searchHistory",
+        "summary": "The passages of YOUR history — past write-ups, ride summaries, goals, notes and documents you synced — that best match `query`, at most `limit` of them (1–6) and `characters` in all (1–5400); a passage is never cut to fit. `rideId`, the synced id of the ride being written about, leaves that ride out and dates the others against it in whole weeks. `query` is at most 2000 characters. `unavailable` when this instance has no embedding model, or cannot reach it.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string"
+                  },
+                  "limit": {
+                    "type": "integer"
+                  },
+                  "characters": {
+                    "type": "integer"
+                  },
+                  "rideId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "query",
+                  "limit",
+                  "characters"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "passages": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "write-up",
+                              "ride-summary",
+                              "goal",
+                              "note",
+                              "document"
+                            ]
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "text": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "label",
+                          "text"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "passages"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/moderation/athletes/{athleteId}/hide-display-name": {
       "post": {
         "operationId": "hideDisplayName",
@@ -3624,6 +3782,7 @@
                             "enum": [
                               "activity",
                               "write-up",
+                              "ride-summary",
                               "side-camera-report",
                               "goal",
                               "note",
@@ -3650,6 +3809,12 @@
                               "string",
                               "null"
                             ]
+                          },
+                          "mayBeRaced": {
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
                           }
                         },
                         "required": [
@@ -3658,7 +3823,8 @@
                           "digest",
                           "receivedAt",
                           "deleted",
-                          "activityId"
+                          "activityId",
+                          "mayBeRaced"
                         ],
                         "additionalProperties": false
                       }
@@ -3859,6 +4025,92 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/sync/records/{content}/race-consent": {
+      "post": {
+        "operationId": "setRaceConsent",
+        "summary": "Say whether another rider may race a ghost of one of your rides, by the SHA-256 of its file. Off unless you set it, and revocable: a ride set back to false is not served as raceable on the next read. Not part of the signed record, and never inferred from how a ride is shared.",
+        "parameters": [
+          {
+            "name": "content",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "mayBeRaced": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "mayBeRaced"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "mayBeRaced": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "mayBeRaced"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
           },
           "401": {
             "$ref": "#/components/responses/unauthenticated"

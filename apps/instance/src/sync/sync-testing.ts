@@ -154,6 +154,12 @@ export const SYNC_HAPPY_CALLS: Readonly<
     const { token, content } = await riderWithRide(world);
     return authorised(world, token, 'GET', `/v1/sync/records/${content}`);
   },
+  setRaceConsent: async (world) => {
+    const { token, content } = await riderWithRide(world);
+    return authorised(world, token, 'POST', `/v1/sync/records/${content}/race-consent`, {
+      mayBeRaced: true,
+    });
+  },
   putSyncItem: async (world) => {
     const { token } = await signedInRider(world);
     return authorised(world, token, 'POST', '/v1/sync/items/write-up/ride-1', { body: '{}' });

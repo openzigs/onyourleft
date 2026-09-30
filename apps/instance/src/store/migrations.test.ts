@@ -70,7 +70,7 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   athlete: `INSERT INTO athlete (id, display_name, created_at, registration_state) VALUES ('a', 'A', 1, 'active')`,
   device_key: `INSERT INTO device_key (public_key, athlete_id, added_at, revoked_at) VALUES ('key-a', 'a', 2, NULL)`,
   session: `INSERT INTO session VALUES ('${'0'.repeat(64)}', 'a', 'key-a', 3, NULL)`,
-  activity_record: `INSERT INTO activity_record VALUES ('a', '${'1'.repeat(64)}', x'00ff', 4)`,
+  activity_record: `INSERT INTO activity_record (athlete_id, content_sha256, signed_record, received_at) VALUES ('a', '${'1'.repeat(64)}', x'00ff', 4)`,
   room: `INSERT INTO room VALUES ('room', 'race', 'private', '${'2'.repeat(64)}', 1)`,
   result: `INSERT INTO result VALUES ('room', 'a', 1000, 0)`,
   room_course: `INSERT INTO room_course VALUES ('room', 450, '[[0,0],[150,2]]', 'hoods', NULL, 2000, NULL, NULL)`,
@@ -88,6 +88,8 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   report: `INSERT INTO report (id, athlete_id, target_athlete_id, reason, created_at) VALUES (1, 'a', 'b', 'Why', 11)`,
   invite_code: `INSERT INTO invite_code VALUES ('${'8'.repeat(64)}', 'a', 13, NULL)`,
   sync_item: `INSERT INTO sync_item (seq, athlete_id, kind, item_key, digest, body, received_at, deleted_at) VALUES (1, 'a', 'write-up', 'ride-1', '${'9'.repeat(64)}', x'7b7d', 14, NULL)`,
+  history_source: `INSERT INTO history_source VALUES ('a', 'write-up', 'ride-1', '${'9'.repeat(64)}', 'm', 'c', 'indexed', 1, 15)`,
+  history_passage: `INSERT INTO history_passage VALUES ('a', 'write-up', 'ride-1', 0, 'A ride.', 'm', 2, 'c', x'0000803f00000000')`,
   moderation_log: `INSERT INTO moderation_log (id, actor_athlete_id, action, target_athlete_id, reason, at) VALUES (1, 'a', 'suspend', 'b', 'Why', 12)`,
 };
 

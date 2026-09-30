@@ -98,7 +98,7 @@ const activityProperties = { contentSha256: string, receivedAt: integer, claims:
 
 const kindSchema: Schema = {
   type: 'string',
-  enum: ['activity', 'write-up', 'side-camera-report', 'goal', 'note', 'document'],
+  enum: ['activity', 'write-up', 'ride-summary', 'side-camera-report', 'goal', 'note', 'document'],
 };
 
 export const SYNC_ROUTES: readonly Route[] = [
@@ -118,7 +118,7 @@ export const SYNC_ROUTES: readonly Route[] = [
       schema: {
         type: 'object',
         description:
-          '`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail`, `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations` and `notIncluded`.',
+          '`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail`, `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations`, `historyIndex` (which model built the history index, and how many passages — never the passages or vectors) and `notIncluded`.',
       },
     },
     handle: async (context) => answer(await syncOf(context).exportAccount(callerOf(context))),
@@ -161,6 +161,7 @@ export const SYNC_ROUTES: readonly Route[] = [
             receivedAt: integer,
             deleted: { type: 'boolean' },
             activityId: { type: ['string', 'null'] },
+            mayBeRaced: { type: ['boolean', 'null'] },
           }),
         },
         next: { type: ['string', 'null'] },
@@ -184,6 +185,29 @@ export const SYNC_ROUTES: readonly Route[] = [
     },
     handle: async (context) =>
       answer(await syncOf(context).record(callerOf(context), context.params.content ?? '')),
+  },
+  {
+    method: 'POST',
+    path: '/v1/sync/records/{content}/race-consent',
+    operationId: 'setRaceConsent',
+    reaches: 'own',
+    summary:
+      'Say whether another rider may race a ghost of one of your rides, by the SHA-256 of its file. Off unless you set it, and revocable: a ride set back to false is not served as raceable on the next read. Not part of the signed record, and never inferred from how a ride is shared.',
+    ...SESSION,
+    request: object({ mayBeRaced: { type: 'boolean' } }),
+    errors: ['unauthenticated', 'validation_failed', 'not_found'],
+    response: {
+      contentType: 'application/json',
+      schema: object({ mayBeRaced: { type: 'boolean' } }),
+    },
+    handle: async (context) =>
+      answer(
+        await syncOf(context).setRaceConsent(
+          callerOf(context),
+          context.params.content ?? '',
+          context.json,
+        ),
+      ),
   },
   {
     method: 'POST',

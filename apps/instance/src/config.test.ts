@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_HOST, DEFAULT_PORT, readConfig } from './config.ts';
+import { DEFAULT_HOST, DEFAULT_PORT, readConfig, readHistorySettings } from './config.ts';
 
 const COMMIT = 'fedcba9876543210fedcba9876543210fedcba98';
 
@@ -22,6 +22,12 @@ describe('readConfig', () => {
         publicRooms: { minimumAccountDays: 7, minimumCompletedRides: 3 },
         clientAddressHeader: null,
         trustedProxies: [],
+        history: {
+          kind: 'off',
+          code: 'not-set',
+          reason: 'OYL_INSTANCE_EMBEDDING_URL is not set, so no embedding model is configured.',
+        },
+        name: null,
       },
     });
   });
@@ -56,6 +62,21 @@ describe('readConfig', () => {
     for (const port of ['-1', '65536', '80a', '1.5']) {
       expect(readConfig({ commit: COMMIT, port }).ok).toBe(false);
     }
+  });
+
+  it('reads the instance’s name, trimmed — #777', () => {
+    const result = readConfig({ commit: COMMIT, name: '  Lanes of the Weald ' });
+    expect(result.ok && result.config.name).toBe('Lanes of the Weald');
+    const blank = readConfig({ commit: COMMIT, name: '   ' });
+    expect(blank.ok && blank.config.name).toBeNull();
+  });
+
+  it('refuses a name a rider’s screen should not be handed, or one too long — #777', () => {
+    for (const name of ['a\u202Eb', 'a\u200Bb', 'line\nbreak', 'x'.repeat(65)]) {
+      const result = readConfig({ commit: COMMIT, name });
+      expect(result.ok ? [] : result.problems.join(' ')).toContain('OYL_INSTANCE_NAME');
+    }
+    expect(readConfig({ commit: COMMIT, name: 'x'.repeat(64) }).ok).toBe(true);
   });
 
   it('reports every problem, not only the first', () => {
@@ -134,5 +155,83 @@ describe('readConfig', () => {
         'OYL_INSTANCE_TRUSTED_PROXIES',
       );
     }
+  });
+});
+
+describe('the history index’s settings (#835, ADR 0040 D-5, D-6)', () => {
+  it('turns the index off, never the instance, when no address is set', () => {
+    expect(readHistorySettings({})).toEqual({
+      kind: 'off',
+      code: 'not-set',
+      reason: 'OYL_INSTANCE_EMBEDDING_URL is not set, so no embedding model is configured.',
+    });
+    expect(readHistorySettings({ embeddingUrl: '  ' }).kind).toBe('off');
+  });
+
+  it('defaults to nomic-embed-text with its own prefixes, and to no prefix for any other model', () => {
+    expect(readHistorySettings({ embeddingUrl: 'http://ollama:11434' })).toEqual({
+      kind: 'on',
+      embedding: {
+        endpoint: new URL('http://ollama:11434'),
+        model: 'nomic-embed-text',
+        documentPrefix: 'search_document: ',
+        queryPrefix: 'search_query: ',
+      },
+    });
+    const other = readHistorySettings({
+      embeddingUrl: 'http://127.0.0.1:11434/',
+      embeddingModel: 'all-minilm:l6-v2',
+    });
+    expect(other.kind === 'on' && other.embedding).toMatchObject({
+      model: 'all-minilm:l6-v2',
+      documentPrefix: '',
+      queryPrefix: '',
+    });
+  });
+
+  it('uses a prefix exactly as set, trailing space included, and reads a blank one as unset', () => {
+    const set = readHistorySettings({
+      embeddingUrl: 'http://ollama:11434',
+      embeddingDocumentPrefix: 'passage: ',
+      embeddingQueryPrefix: '',
+    });
+    expect(set.kind === 'on' && set.embedding.documentPrefix).toBe('passage: ');
+    expect(set.kind === 'on' && set.embedding.queryPrefix).toBe('search_query: ');
+    const control = readHistorySettings({
+      embeddingUrl: 'http://ollama:11434',
+      embeddingQueryPrefix: 'a\u0007b',
+    });
+    expect(control.kind).toBe('off');
+  });
+
+  it.each([
+    ['a public name', 'http://embeddings.example.org:11434', 'not-local', 'refused'],
+    ['a .local name', 'http://box.local:11434', 'not-local', 'refused'],
+    ['a .internal name', 'http://ollama.internal:11434', 'not-local', 'refused'],
+    ['a public address', 'http://8.8.8.8:11434', 'not-local', 'refused'],
+    ['a path', 'http://ollama:11434/api', 'not-origin', 'no path'],
+    ['credentials', 'http://user:secret@ollama:11434', 'not-origin', 'address alone'],
+    ['a query', 'http://ollama:11434/?a=b', 'not-origin', 'address alone'],
+    ['another scheme', 'ftp://ollama', 'not-a-url', 'http:'],
+    ['not a URL', 'ollama:11434', 'not-a-url', 'http:'],
+    ['nonsense', '::::', 'not-a-url', 'not a URL'],
+  ])('turns the index off for %s, and says why', (_case, embeddingUrl, code, why) => {
+    const settings = readHistorySettings({ embeddingUrl });
+    expect(settings.kind === 'off' && settings.code).toBe(code);
+    expect(settings.kind === 'off' ? settings.reason : '').toContain(why);
+  });
+
+  it('refuses a model name that is not one, and starts the instance anyway', () => {
+    const settings = readHistorySettings({
+      embeddingUrl: 'http://ollama:11434',
+      embeddingModel: 'a model; rm -rf',
+    });
+    expect(settings.kind).toBe('off');
+    const whole = readConfig({
+      commit: COMMIT,
+      embeddingUrl: 'http://embeddings.example.org',
+    });
+    expect(whole.ok).toBe(true);
+    expect(whole.ok && whole.config.history.kind).toBe('off');
   });
 });

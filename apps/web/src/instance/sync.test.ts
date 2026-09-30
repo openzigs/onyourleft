@@ -21,7 +21,7 @@
 
 import { fileURLToPath } from 'node:url';
 
-import { toHex, unixSeconds, type ActivityClaims } from '@onyourleft/domain';
+import { kilograms, toHex, unixSeconds, type ActivityClaims } from '@onyourleft/domain';
 import {
   activityId as toActivityId,
   ensureDeviceSigningKey,
@@ -38,6 +38,8 @@ import {
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { orderedRows, PAGE_SIZE } from '../library/rows';
+import type { RideInputStore } from '../ride-analysis/read-input';
+import { rideSummaryOf } from '../ride-analysis/ride-summary';
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
 import { importActivityFiles } from '../transfer/import-batch';
 import { linkThisDevice, signInToInstance, type InstanceTransport } from './sign-in';
@@ -49,6 +51,8 @@ interface TestDevice {
 
 interface IdentityInstance {
   readonly url: string;
+  /** The instance's database file, for a read on a store the instance never touched. */
+  readonly path: string;
   readonly blobs: Map<string, Uint8Array>;
   close(): Promise<void>;
 }
@@ -63,15 +67,44 @@ interface SyncTesting {
   corpusFile(name: string): Uint8Array;
 }
 
+/** The part of the instance's store #793's test reads: what it would serve as raceable. */
+interface InstanceStoreModule {
+  openSqlStore(path: string): Promise<{
+    listRaceableActivities(
+      requester: string,
+      limit: number,
+    ): Promise<readonly { readonly athleteId: string; readonly contentSha256: string }[]>;
+    close(): Promise<void>;
+  }>;
+}
+
 const INSTANCE = (path: string): string =>
   fileURLToPath(new URL(`../../../instance/src/${path}`, import.meta.url));
 
 let instanceTesting: InstanceTesting;
 let syncTesting: SyncTesting;
+let instanceStore: InstanceStoreModule;
 beforeAll(async () => {
   instanceTesting = (await import(INSTANCE('auth/identity-testing.ts'))) as InstanceTesting;
   syncTesting = (await import(INSTANCE('sync/sync-testing.ts'))) as SyncTesting;
+  instanceStore = (await import(INSTANCE('store/open-sql-store.ts'))) as InstanceStoreModule;
 });
+
+/**
+ * What the instance would serve as raceable to a rider who is not A — read on
+ * a store opened for this read alone, so nothing the instance holds in memory
+ * can answer it (#793).
+ */
+async function raceableOnInstance(path: string): Promise<string[]> {
+  const fresh = await instanceStore.openSqlStore(path);
+  try {
+    return (await fresh.listRaceableActivities('a-stranger', 100)).map(
+      (record) => record.contentSha256,
+    );
+  } finally {
+    await fresh.close();
+  }
+}
 
 let world: IdentityInstance | undefined;
 let harnesses: StoreHarness[] = [];
@@ -170,6 +203,8 @@ function syncDependencies(on: Device, store: SyncDependencies['store']): SyncDep
     verifier: webCryptoVerifier,
     now: () => NOW,
     timeZone: 'Europe/London',
+    // The harness hands the whole ActivityStore, which reads a ride's input.
+    rideSummary: rideSummaryOf(store as unknown as RideInputStore, LOCAL_ATHLETE),
   };
 }
 
@@ -266,11 +301,37 @@ describe('two-way sync through the real instance (#776)', () => {
     const signedInA = await signInToInstance(signInDependencies(origin, a));
     a.transport.setToken(signedInA.sessionToken);
     const pushed = await a.harness.write((store) => syncWithInstance(syncDependencies(a, store)));
-    expect(pushed).toMatchObject({ pushed: 3, itemsPushed: 2, pulled: 0, failures: [] });
+    expect(pushed).toMatchObject({
+      pushed: 3,
+      itemsPushed: 2,
+      summariesPushed: 3,
+      pulled: 0,
+      failures: [],
+    });
+
+    // #835: every ride's summary is on the instance for the rider's history —
+    // passages the device built, and nothing that names or places the ride.
+    for (const id of ids) {
+      const summary = await instanceItem(a, 'ride-summary', id);
+      expect(summary?.format).toBe('onyourleft.ride-summary');
+      const passages = summary?.passages as string[] | undefined;
+      expect(passages?.[0]).toMatch(
+        /^A ride of [0-9.]+ minutes of riding over [0-9.]+ kilometres\./,
+      );
+      const rows = await libraryRows(a.harness);
+      for (const row of rows) expect(JSON.stringify(summary)).not.toContain(row.name);
+      expect(JSON.stringify(summary)).not.toContain(id);
+    }
 
     // Nothing the second time: every push is answered from the manifest.
     const again = await a.harness.write((store) => syncWithInstance(syncDependencies(a, store)));
-    expect(again).toMatchObject({ pushed: 0, itemsPushed: 0, pulled: 0, failures: [] });
+    expect(again).toMatchObject({
+      pushed: 0,
+      itemsPushed: 0,
+      summariesPushed: 0,
+      pulled: 0,
+      failures: [],
+    });
 
     // A fresh device B, linked to A's athlete with a code A minted.
     const code = await a.transport.sync.json('POST', '/v1/auth/link-codes');
@@ -298,9 +359,23 @@ describe('two-way sync through the real instance (#776)', () => {
     );
     expect(report).toEqual(sideCameraReportFor(LOCAL_ATHLETE, ids[1]!));
 
-    // And B pushes nothing back: it pulled these, it did not ride them.
+    // And B pushes nothing back: it pulled these, it did not ride them — not
+    // even its own reading of their summaries, which is A's to describe
+    // (#835), though B's reads differently once B knows the rider's weight.
+    expect(pulled).toMatchObject({ summariesPushed: 0 });
+    await b.harness.write((store) => store.setAthleteMass(LOCAL_ATHLETE, kilograms(70)));
+    const onB = await b.harness.read((store) =>
+      rideSummaryOf(store as unknown as RideInputStore, LOCAL_ATHLETE)(ids[0]!),
+    );
+    expect(onB).not.toBe(JSON.stringify(await instanceItem(a, 'ride-summary', ids[0]!)));
     const bAgain = await b.harness.write((store) => syncWithInstance(syncDependencies(b, store)));
-    expect(bAgain).toMatchObject({ pushed: 0, itemsPushed: 0, pulled: 0, failures: [] });
+    expect(bAgain).toMatchObject({
+      pushed: 0,
+      itemsPushed: 0,
+      summariesPushed: 0,
+      pulled: 0,
+      failures: [],
+    });
     // …and never signs them: a ride B pulled is not a ride B vouches for.
     for (const id of ids) {
       expect(await b.harness.read((store) => store.getActivityRecord(LOCAL_ATHLETE, id))).toBe(
@@ -422,6 +497,13 @@ describe('two-way sync through the real instance (#776)', () => {
     expect(manifest.find((entry) => entry.kind === 'write-up' && entry.key === gone)?.deleted).toBe(
       true,
     );
+    // #835: its summary too, so the history index keeps nothing of it (ADR 0040 D-10).
+    expect(
+      manifest.find((entry) => entry.kind === 'ride-summary' && entry.key === gone)?.deleted,
+    ).toBe(true);
+    expect(
+      manifest.find((entry) => entry.kind === 'ride-summary' && entry.key === kept)?.deleted,
+    ).toBe(false);
     expect(
       manifest
         .filter((entry) => entry.kind === 'activity' && !entry.deleted)
@@ -547,5 +629,137 @@ describe('two-way sync through the real instance (#776)', () => {
       rideWriteUpFor(LOCAL_ATHLETE, id!, 2),
     );
     expect((await instanceItem(a.on, 'write-up', id!))?.templateVersion).toBe('1.2');
+  }, 60_000);
+
+  it('carries a ride’s “may be raced” consent to the instance, and a revocation on device A takes it out of what the instance serves within one sync (#793)', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const ride = a.ids[0]!;
+
+    // Off by default: the first sync sends the ride and no consent.
+    const first = await a.sync();
+    expect(first).toMatchObject({ pushed: 1, consentsPushed: 0, failures: [] });
+    expect(await raceableOnInstance(world.path)).toStrictEqual([]);
+
+    // The rider allows it on A: one sync, and the instance serves it.
+    await a.on.harness.write((store) => store.setActivityMayBeRaced(LOCAL_ATHLETE, ride, true));
+    expect(await a.sync()).toMatchObject({ consentsPushed: 1, failures: [] });
+    const served = await raceableOnInstance(world.path);
+    expect(served).toHaveLength(1);
+
+    // A second device of the same rider pulls the ride — and its consent with it.
+    const b = await linkedDevice(world.url, origin, a.on);
+    expect(await b.sync()).toMatchObject({ pulled: 1, consentsPushed: 0, failures: [] });
+    const onB = await b.on.harness.read((store) => store.getActivity(LOCAL_ATHLETE, ride));
+    expect(onB?.mayBeRaced).toBe(true);
+
+    // The rider revokes it on A: within ONE sync the instance no longer serves it.
+    await a.on.harness.write((store) => store.setActivityMayBeRaced(LOCAL_ATHLETE, ride, false));
+    expect(await a.sync()).toMatchObject({ consentsPushed: 1, failures: [] });
+    expect(await raceableOnInstance(world.path)).toStrictEqual([]);
+
+    // B, which still says "yes", takes the revocation rather than putting the
+    // consent back — the three-way rule, not "the device wins".
+    expect(await b.sync()).toMatchObject({ consentsPulled: 1, consentsPushed: 0, failures: [] });
+    const revokedOnB = await b.on.harness.read((store) => store.getActivity(LOCAL_ATHLETE, ride));
+    expect(revokedOnB?.mayBeRaced).toBe(false);
+    expect(await b.sync()).toMatchObject({ consentsPulled: 0, consentsPushed: 0, failures: [] });
+    expect(await raceableOnInstance(world.path)).toStrictEqual([]);
+  }, 60_000);
+
+  // #915's review: with NO race-consent base — every ride synced before store
+  // v15, or against an instance before migration 0011 — a device still saying
+  // "yes" pushed it over a revocation made on another device. Off wins.
+  it('lets "off" win when a device has no consent base, so a device still saying yes cannot re-grant a revoked consent (#793)', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const ride = a.ids[0]!;
+    expect(await a.sync()).toMatchObject({ pushed: 1, failures: [] });
+    await a.on.harness.write((store) => store.setActivityMayBeRaced(LOCAL_ATHLETE, ride, true));
+    expect(await a.sync()).toMatchObject({ consentsPushed: 1, failures: [] });
+
+    const b = await linkedDevice(world.url, origin, a.on);
+    expect(await b.sync()).toMatchObject({ pulled: 1, failures: [] });
+    expect(
+      (await b.on.harness.read((store) => store.getActivity(LOCAL_ATHLETE, ride)))?.mayBeRaced,
+    ).toBe(true);
+
+    await a.on.harness.write((store) => store.setActivityMayBeRaced(LOCAL_ATHLETE, ride, false));
+    expect(await a.sync()).toMatchObject({ consentsPushed: 1, failures: [] });
+    expect(await raceableOnInstance(world.path)).toStrictEqual([]);
+
+    // B loses its base, as a ride synced before the consent existed has none.
+    expect(
+      await b.on.harness.write((store) =>
+        store.deleteSyncBase(LOCAL_ATHLETE, 'race-consent', ride),
+      ),
+    ).toBe(true);
+
+    expect(await b.sync()).toMatchObject({ consentsPulled: 1, consentsPushed: 0, failures: [] });
+    expect(
+      (await b.on.harness.read((store) => store.getActivity(LOCAL_ATHLETE, ride)))?.mayBeRaced,
+    ).toBe(false);
+    expect(await raceableOnInstance(world.path)).toStrictEqual([]);
+  }, 60_000);
+
+  // The other half of "off wins": with no base, a device saying "no" sends it,
+  // rather than taking a "yes" it cannot tell was given after its own "no".
+  it('sends a device’s "off" over the instance’s "yes" when there is no consent base (#793)', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const ride = a.ids[0]!;
+    expect(await a.sync()).toMatchObject({ pushed: 1, failures: [] });
+    await a.on.harness.write((store) => store.setActivityMayBeRaced(LOCAL_ATHLETE, ride, true));
+    expect(await a.sync()).toMatchObject({ consentsPushed: 1, failures: [] });
+    const b = await linkedDevice(world.url, origin, a.on);
+    expect(await b.sync()).toMatchObject({ pulled: 1, failures: [] });
+
+    await b.on.harness.write(async (store) => {
+      await store.setActivityMayBeRaced(LOCAL_ATHLETE, ride, false);
+      await store.deleteSyncBase(LOCAL_ATHLETE, 'race-consent', ride);
+    });
+    expect(await b.sync()).toMatchObject({ consentsPushed: 1, consentsPulled: 0, failures: [] });
+    expect(await raceableOnInstance(world.path)).toStrictEqual([]);
+  }, 60_000);
+
+  // The converse, which "off wins" must not cost: a "yes" given before the
+  // ride's FIRST sync has a base (the instance's "off" at push), so it is sent.
+  it('sends a consent given before the ride’s first sync on the next one, rather than taking the instance’s default "off" (#793)', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const ride = a.ids[0]!;
+    await a.on.harness.write((store) => store.setActivityMayBeRaced(LOCAL_ATHLETE, ride, true));
+    expect(await a.sync()).toMatchObject({ pushed: 1, failures: [] });
+    expect(await a.sync()).toMatchObject({ consentsPushed: 1, consentsPulled: 0, failures: [] });
+    expect(
+      (await a.on.harness.read((store) => store.getActivity(LOCAL_ATHLETE, ride)))?.mayBeRaced,
+    ).toBe(true);
+    expect(await raceableOnInstance(world.path)).toHaveLength(1);
+  }, 60_000);
+
+  // And a ride PULLED while its consent was off keeps that "off" as its base,
+  // so a "yes" later given on the other device reaches this one rather than
+  // being revoked by it under "off wins".
+  it('takes a consent granted on another device after this device pulled the ride with it off (#793)', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const ride = a.ids[0]!;
+    expect(await a.sync()).toMatchObject({ pushed: 1, failures: [] });
+    const b = await linkedDevice(world.url, origin, a.on);
+    expect(await b.sync()).toMatchObject({ pulled: 1, failures: [] });
+
+    await a.on.harness.write((store) => store.setActivityMayBeRaced(LOCAL_ATHLETE, ride, true));
+    expect(await a.sync()).toMatchObject({ consentsPushed: 1, failures: [] });
+
+    expect(await b.sync()).toMatchObject({ consentsPulled: 1, consentsPushed: 0, failures: [] });
+    expect(
+      (await b.on.harness.read((store) => store.getActivity(LOCAL_ATHLETE, ride)))?.mayBeRaced,
+    ).toBe(true);
+    expect(await raceableOnInstance(world.path)).toHaveLength(1);
   }, 60_000);
 });

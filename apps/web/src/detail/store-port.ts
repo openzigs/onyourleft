@@ -26,6 +26,8 @@ import type {
   LapRecord,
   PrivacyZoneRecord,
   RideWriteUpRecord,
+  RouteId,
+  RouteRecord,
   Samples,
   SideCameraReportRecord,
   StreamChannel,
@@ -68,6 +70,17 @@ export interface DetailStore {
    * it again (`detail/write-up.ts` §`shownWriteUp`).
    */
   getRideWriteUp(owner: AthleteId, id: ActivityId): Promise<RideWriteUpRecord | undefined>;
+  /**
+   * Set or revoke this ride's "may be raced" consent (#793) — the narrow write
+   * behind `RaceConsentSection`. `false` when the athlete holds no such ride.
+   */
+  setActivityMayBeRaced(owner: AthleteId, id: ActivityId, mayBeRaced: boolean): Promise<boolean>;
+  /**
+   * The saved route a ride was ridden on (#793), read only for a ride that
+   * names one, so the page can say whether a privacy zone touches it
+   * (ADR 0021 D-5.2). One point lookup.
+   */
+  getRoute(owner: AthleteId, id: RouteId): Promise<RouteRecord | undefined>;
 }
 
 export interface DetailPort {

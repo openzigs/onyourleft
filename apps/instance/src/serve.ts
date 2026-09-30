@@ -32,6 +32,11 @@ const http = readConfig({
   publicRoomMinRides: process.env.OYL_INSTANCE_PUBLIC_ROOM_MIN_RIDES,
   clientAddressHeader: process.env.OYL_INSTANCE_CLIENT_ADDRESS_HEADER,
   trustedProxies: process.env.OYL_INSTANCE_TRUSTED_PROXIES,
+  embeddingUrl: process.env.OYL_INSTANCE_EMBEDDING_URL,
+  embeddingModel: process.env.OYL_INSTANCE_EMBEDDING_MODEL,
+  embeddingDocumentPrefix: process.env.OYL_INSTANCE_EMBEDDING_DOCUMENT_PREFIX,
+  embeddingQueryPrefix: process.env.OYL_INSTANCE_EMBEDDING_QUERY_PREFIX,
+  name: process.env.OYL_INSTANCE_NAME,
 });
 const server = readServerConfig(
   {
@@ -51,6 +56,12 @@ const problems = [...(http.ok ? [] : http.problems), ...(server.ok ? [] : server
 if (!http.ok || !server.ok) {
   for (const problem of problems) process.stderr.write(`instance: ${problem}\n`);
   process.exit(1);
+}
+
+// The history index is never a reason not to start (ADR 0040 D-6), so a
+// refused embedding address is said here, whole, and the instance goes on.
+if (http.config.history.kind === 'off' && http.config.history.code !== 'not-set') {
+  process.stderr.write(`instance: the history index is off: ${http.config.history.reason}\n`);
 }
 
 const notices = readFileSync(new URL('../third-party.txt', import.meta.url), 'utf8');

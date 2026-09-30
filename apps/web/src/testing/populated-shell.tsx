@@ -74,6 +74,7 @@ import { addWaypoint, emptyDraft, type RouteDraft } from '../routing/draft';
 import { DRAFT_STORAGE_KEY, serialiseDraft } from '../routing/draft-storage';
 import { stubMatchPort } from '../segments/match-testing';
 import { stubSegments } from '../segments/testing';
+import { scriptedInstance } from '../instance/testing';
 import { AppShell, type AppShellProps } from '../shell/AppShell';
 import type { RouteId } from '../shell/routes';
 import type { CapabilityProbe } from '../support/bluetooth-support';
@@ -183,6 +184,8 @@ export const POPULATED: Record<RouteId, PopulatedExpectation> = {
     kind: 'none',
     reason: 'no pairing is ever made, so it shows its before-pairing state in both walks',
   },
+  // #777/#773: connected, the instance's devices are listed; not, the form.
+  instance: { kind: 'fixture', marker: '.oyl-main .oyl-instance__devices li' },
   'not-found': { kind: 'none', reason: 'static: a heading and the route list' },
 };
 
@@ -542,6 +545,7 @@ export function PopulatedShell({
       settings={settingsPort()}
       athleteMass={athleteMassPort()}
       maskedWords={maskedWordsPort(populated)}
+      instance={scriptedInstance({ connected: populated }).port}
       library={stubLibrary(ATHLETE, rides)}
       detail={detailPort(populated)}
       rideAnalysis={rideAnalysisPort()}

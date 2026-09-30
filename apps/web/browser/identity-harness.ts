@@ -16,19 +16,40 @@
  * cross into Node exactly as sent and are verified there by the instance's
  * own code.
  *
- * ⚠️ **What it does not prove**: anything about a phone's WebView, or about
- * the production transport, which is #777's and does not exist yet. The page
+ * Since #777 it also drives the PRODUCTION instance port, whose transport is
+ * the real `fetch` in `instance-transport.ts`, cross-origin from this page to
+ * the instance's own listener — so the instance's CORS answers, the transport's
+ * request settings and a real browser's refusal rules are all in the path.
+ *
+ * ⚠️ **What it does not prove**: anything about a phone's WebView. The page
  * publishes the result on `window.__oylIdentity` and asserts nothing.
  */
 
 import { unixSeconds } from '@onyourleft/domain';
 import { ensureDeviceSigningKey, openActivityStore } from '@onyourleft/store';
 
+import {
+  createInstancePort,
+  type ConnectOutcome,
+  type DevicesOutcome,
+  type InstanceState,
+} from '../src/instance/instance-port';
 import { signInToInstance, type SignedIn } from '../src/instance/sign-in';
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../src/local-athlete';
 
 export interface IdentityHarness {
   signIn(origin: string, database: string): Promise<SignedIn>;
+  /**
+   * #777: the PRODUCTION instance port — the real `instance-transport.ts`
+   * `fetch`, cross-origin to the instance the spec runs — connecting, then
+   * reading back what a reload would show, and the device list.
+   */
+  connect(
+    address: string,
+    database: string,
+  ): Promise<{ connected: ConnectOutcome; current: InstanceState; devices: DevicesOutcome }>;
+  /** A fresh port over the same `localStorage` — the reload — and what it reads. */
+  reload(database: string): Promise<InstanceState>;
 }
 
 declare global {
@@ -42,7 +63,22 @@ declare global {
   }
 }
 
+function portOver(database: string) {
+  const store = openActivityStore(database);
+  return createInstancePort({
+    storage: localStorage,
+    ensureLocalAthlete: () => ensureLocalAthlete(store, unixSeconds(Math.floor(Date.now() / 1000))),
+    signingKey: () => ensureDeviceSigningKey(store, LOCAL_ATHLETE),
+  });
+}
+
 window.__oylIdentity = {
+  connect: async (address, database) => {
+    const port = portOver(database);
+    const connected = await port.connect(address, 'Anna');
+    return { connected, current: await port.current(), devices: await port.devices() };
+  },
+  reload: async (database) => portOver(database).current(),
   signIn: (origin, database) => {
     const store = openActivityStore(database);
     return signInToInstance({

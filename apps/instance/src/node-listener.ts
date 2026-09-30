@@ -85,6 +85,62 @@ async function send(response: Response, outgoing: ServerResponse): Promise<void>
   await pipeline(Readable.fromWeb(response.body as WebReadableStream<Uint8Array>), outgoing);
 }
 
+/** The timers {@link sweepOnBoundaries} schedules with — Node's own, or a test's. */
+export interface SweepTimers {
+  readonly now: () => number;
+  readonly setTimeout: (run: () => void, delayMs: number) => unknown;
+  readonly clearTimeout: (handle: unknown) => void;
+}
+
+const NODE_TIMERS: SweepTimers = {
+  now: () => Date.now(),
+  setTimeout: (run, delayMs) => setTimeout(run, delayMs).unref(),
+  clearTimeout: (handle) => {
+    clearTimeout(handle as ReturnType<typeof setTimeout>);
+  },
+};
+
+/** Something to run on every boundary of a period, such as `Identity.sweepRateLimits`. */
+export interface Sweep {
+  readonly periodMs: number;
+  readonly run: () => void;
+}
+
+/**
+ * Run `sweep.run` on every multiple of `sweep.periodMs` from the epoch, and
+ * answer how to stop it (#892's review). The boundaries are computed from the
+ * clock each time rather than by a fixed interval, so a late timer never makes
+ * the next sweep later: a rate-limit window ends on one of these boundaries,
+ * and the address counted in it is gone by the sweep that follows.
+ *
+ * The timer lives here, in the Node adapter, so `src/auth/` reads no clock and
+ * schedules nothing (#856). `instance.ts` §`startInstance` runs it once the
+ * store is open and an identity exists, and stops it in `stop` — the identity
+ * is made after the listener, so it does not pass through `listen`'s own
+ * `sweep` option.
+ */
+export function sweepOnBoundaries(sweep: Sweep, timers: SweepTimers = NODE_TIMERS): () => void {
+  if (!(Number.isSafeInteger(sweep.periodMs) && sweep.periodMs > 0)) {
+    throw new RangeError('a sweep period must be a positive whole number of milliseconds');
+  }
+  let handle: unknown;
+  let stopped = false;
+  const arm = (): void => {
+    const at = timers.now();
+    const next = (Math.floor(at / sweep.periodMs) + 1) * sweep.periodMs;
+    handle = timers.setTimeout(() => {
+      if (stopped) return;
+      sweep.run();
+      arm();
+    }, next - at);
+  };
+  arm();
+  return () => {
+    stopped = true;
+    timers.clearTimeout(handle);
+  };
+}
+
 /** A running listener: where it is, and how to stop it. */
 export interface Listening {
   readonly server: Server;
@@ -101,6 +157,8 @@ export function listen(
     port,
     clientAddressHeader,
     trustedProxies,
+    sweep,
+    timers,
   }: {
     readonly host: string;
     readonly port: number;
@@ -113,6 +171,9 @@ export function listen(
     readonly clientAddressHeader: string | null;
     /** The proxies the header is believed from besides loopback (#891's review); `[]` for loopback only. */
     readonly trustedProxies: readonly string[];
+    /** Run on every boundary of its period while the listener is up, and stopped by `close`. */
+    readonly sweep?: Sweep;
+    readonly timers?: SweepTimers;
   },
 ): Promise<Listening> {
   const server = createServer((incoming, outgoing) => {
@@ -142,6 +203,7 @@ export function listen(
     server.once('error', reject);
     server.listen(port, host, () => {
       server.off('error', reject);
+      const stopSweeping = sweep === undefined ? () => undefined : sweepOnBoundaries(sweep, timers);
       const address = server.address() as AddressInfo;
       const shown = address.family === 'IPv6' ? `[${address.address}]` : address.address;
       resolve({
@@ -149,6 +211,7 @@ export function listen(
         url: `http://${shown}:${String(address.port)}`,
         close: () =>
           new Promise<void>((done, failed) => {
+            stopSweeping();
             server.close((error) => (error === undefined ? done() : failed(error)));
             server.closeAllConnections();
           }),
