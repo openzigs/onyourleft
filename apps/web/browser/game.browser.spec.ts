@@ -3519,12 +3519,98 @@ test.describe('the realistic world — ADR 0026', () => {
     expect(Math.abs(red - houseRed)).toBeGreaterThan(KIT_TINTS_APART);
   });
 
+  /**
+   * #625: how far the realistic rider's shoulders must move across the
+   * bicycle between two frames half a stroke apart, and at most: 2.5 cm and
+   * 8 cm. `bicycle.ts` §`TRUNK_ROCK_RADIANS` puts 3.8 cm there on the body the
+   * jsdom half poses; the ceiling is about twice that, which a rock of 6° or
+   * more would pass.
+   */
+  const SHOULDER_ROCK_FLOOR_METRES = 0.025;
+  const SHOULDER_ROCK_CEILING_METRES = 0.08;
+
+  /**
+   * #626: how much of its own bounding rectangle a bicycle's shadow may fill —
+   * under 0.6, where the round blob, a solid ellipse, fills about π/4 (0.785).
+   * ⚠️ Not the aspect #626 named: a cast shadow is long along the sun's throw
+   * whatever casts it, and `realistic-textures.test.ts` prints the table.
+   */
+  const RIDER_SHADOW_FILL_BELOW = 0.6;
+  /**
+   * The silhouette's darkness where it covers the ground wholly, as the share
+   * of the ENCODED pixel it takes away — `contact-shadow.ts`
+   * §`CONTACT_SHADOW_DARKNESS`, written here a second time on purpose, as
+   * #620's `GROUND_BLOB_STATED` is. ± 0.05 is a CHOSEN tolerance, #620's.
+   * #872's review: a floor on the shape alone passed a black shadow.
+   */
+  const RIDER_SHADOW_STATED = 0.45;
+  const RIDER_SHADOW_WINDOW = [RIDER_SHADOW_STATED - 0.05, RIDER_SHADOW_STATED + 0.05] as const;
+
   test('turns the realistic rider’s legs with the cranks, and holds them when the cadence goes — #369, #349', async ({
     harnessRun,
   }) => {
     const measured = await realistic(harnessRun);
     expect(measured.crankTurnPixels).toBeGreaterThan(50);
     expect(measured.crankHeldPixels).toBe(0);
+  });
+
+  test('rocks the realistic rider’s shoulders with the stroke, and not with the cadence gone — #625', async ({
+    harnessRun,
+  }) => {
+    const measured = await realistic(harnessRun);
+    console.log(
+      `#625: shoulders half a stroke apart ${(measured.shoulderRock * 100).toFixed(2)} cm across ` +
+        `the bicycle pedalling; control, no cadence: ${(measured.shoulderRockControl * 100).toFixed(3)} cm`,
+    );
+    // The stated amount: 2.5 cm, against the 3.8 cm `bicycle.ts`'s 3° rock
+    // puts there (the jsdom half measures the same bones).
+    expect(measured.shoulderRock).toBeGreaterThan(SHOULDER_ROCK_FLOOR_METRES);
+    // A ceiling too, so a rock many times the cited 3° is not a pass.
+    expect(measured.shoulderRock).toBeLessThan(SHOULDER_ROCK_CEILING_METRES);
+    // THE CONTROL: the same two frames with no cadence reading.
+    expect(measured.shoulderRockControl).toBeLessThan(1e-6);
+  });
+
+  test('grounds the realistic riders with the shape of a bicycle, cast as the shipped shader and its twin agree — #626', async ({
+    harnessRun,
+  }) => {
+    const measured = await realistic(harnessRun);
+    const describe = (shape: typeof measured.riderShadow): string =>
+      `fills ${shape.fill.toFixed(2)} of its rectangle, ${shape.squareMetres.toFixed(2)} m², ` +
+      `agreement with the twin ${shape.agreement.toFixed(2)}, darkening ${shape.darkening.toFixed(3)}`;
+    console.log(
+      `#626: the silhouette ${describe(measured.riderShadow)}; ` +
+        `control, the round blob: ${describe(measured.riderShadowControl)}; ` +
+        `control, drawn black: ${describe(measured.riderShadowBlack)}`,
+    );
+    // A bicycle's shadow — two wheels, a frame, a body and the gaps between
+    // them — fills well under its own rectangle. `realistic-textures.test.ts`
+    // measures 0.39 to 0.50 at every heading and both ends of the sun's band.
+    expect(measured.riderShadow.fill).toBeGreaterThan(0.2);
+    expect(measured.riderShadow.fill).toBeLessThan(RIDER_SHADOW_FILL_BELOW);
+    // A whole rider's shadow, not a speck, and not the road.
+    expect(measured.riderShadow.squareMetres).toBeGreaterThan(0.3);
+    expect(measured.riderShadow.squareMetres).toBeLessThan(2);
+    // What the SHIPPED shader drew is what `silhouetteCoverage` says it should:
+    // #620's lesson, a twin in TypeScript is not the shader.
+    expect(measured.riderShadow.agreement).toBeGreaterThan(0.75);
+    // And as dark as stated, from both sides. The core the twin calls wholly
+    // covered still reads about 0.92 of full black (filtering and the soft
+    // reach), so the stated darkness is the shadow's darkening over the black
+    // copy's — the same cover under both, divided out.
+    const darkness = measured.riderShadow.darkening / measured.riderShadowBlack.darkening;
+    expect(darkness).toBeGreaterThan(RIDER_SHADOW_WINDOW[0]);
+    expect(darkness).toBeLessThan(RIDER_SHADOW_WINDOW[1]);
+    // …over a core that really is covered, or that ratio would divide noise…
+    expect(measured.riderShadowBlack.darkening).toBeGreaterThan(0.8);
+    // …and a ceiling on the pixels themselves. THE DARKNESS CONTROL: the same
+    // silhouette drawn full black keeps its shape and is refused by it.
+    expect(measured.riderShadow.darkening).toBeLessThan(RIDER_SHADOW_WINDOW[1]);
+    expect(measured.riderShadowBlack.agreement).toBeGreaterThan(0.75);
+    expect(measured.riderShadowBlack.darkening).toBeGreaterThan(RIDER_SHADOW_WINDOW[1]);
+    // THE CONTROL: the round blob is a solid ellipse, about π/4 of its rectangle.
+    expect(measured.riderShadowControl.fill).toBeGreaterThan(RIDER_SHADOW_FILL_BELOW);
+    expect(measured.riderShadowControl.squareMetres).toBeGreaterThan(0.3);
   });
 
   test('draws the distant hills between the ground and the sky, converging on the sky, with no hard edge — #544', async ({

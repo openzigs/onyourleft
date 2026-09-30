@@ -139,7 +139,7 @@ export type RouteLayout = 'prose' | 'instruments' | 'dashboard' | 'list-detail';
  */
 export type NavGroupId = 'home' | 'ride' | 'history' | 'routes' | 'more';
 
-/** The icons the navigation draws. Inline SVG authored here — `NavIcon.tsx`. */
+/** The icons the navigation draws — Lucide's, named in `NavIcon.tsx` (ADR 0034). */
 export type NavIconName = 'home' | 'ride' | 'history' | 'routes' | 'more';
 
 export interface NavGroup {
