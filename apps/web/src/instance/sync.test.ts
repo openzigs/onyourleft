@@ -21,7 +21,7 @@
 
 import { fileURLToPath } from 'node:url';
 
-import { toHex, unixSeconds, type ActivityClaims } from '@onyourleft/domain';
+import { kilograms, toHex, unixSeconds, type ActivityClaims } from '@onyourleft/domain';
 import {
   activityId as toActivityId,
   ensureDeviceSigningKey,
@@ -329,8 +329,14 @@ describe('two-way sync through the real instance (#776)', () => {
     expect(report).toEqual(sideCameraReportFor(LOCAL_ATHLETE, ids[1]!));
 
     // And B pushes nothing back: it pulled these, it did not ride them — not
-    // even its own reading of their summaries, which is A's to describe (#835).
+    // even its own reading of their summaries, which is A's to describe
+    // (#835), though B's reads differently once B knows the rider's weight.
     expect(pulled).toMatchObject({ summariesPushed: 0 });
+    await b.harness.write((store) => store.setAthleteMass(LOCAL_ATHLETE, kilograms(70)));
+    const onB = await b.harness.read((store) =>
+      rideSummaryOf(store as unknown as RideInputStore, LOCAL_ATHLETE)(ids[0]!),
+    );
+    expect(onB).not.toBe(JSON.stringify(await instanceItem(a, 'ride-summary', ids[0]!)));
     const bAgain = await b.harness.write((store) => syncWithInstance(syncDependencies(b, store)));
     expect(bAgain).toMatchObject({
       pushed: 0,
