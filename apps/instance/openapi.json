@@ -2390,7 +2390,7 @@
     "/v1/history/search": {
       "post": {
         "operationId": "searchHistory",
-        "summary": "The passages of YOUR history — past write-ups, ride summaries, goals, notes and documents you synced — that best match `query`, at most `limit` of them (1–6) and `characters` in all (1–5400); a passage is never cut to fit. `rideId`, the synced id of the ride being written about, leaves that ride out and dates the others against it in whole weeks. `query` is at most 2000 characters. `unavailable` when this instance has no embedding model, or cannot reach it.",
+        "summary": "The passages of YOUR history — past write-ups, ride summaries, goals, notes and documents you synced — that best match `query`, at most `limit` of them (1–6) and `characters` in all (1–5400); a passage is never cut to fit. `rideId`, the synced id of the ride being written about, leaves that ride out and dates the others against it in whole weeks. `query` is at most 2000 characters. `rate_limited` past 30 searches a minute on an instance with the default limits. `unavailable` when this instance has no embedding model, or cannot reach it.",
         "security": [
           {
             "session": []

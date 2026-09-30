@@ -171,6 +171,30 @@ describe('the start and finish gantries — #679', () => {
     expect(LINE_DRAW_BEHIND_METRES + reach).toBeLessThan(VIEW_BEHIND_METRES);
   });
 
+  it('stands no barrier past either end of a point-to-point route — #902', () => {
+    for (const route of [hillRoute(), valleyRoute(), unlooped(circuitRoute(200))]) {
+      const total = route.totalDistance as number;
+      let dropped = 0;
+      for (const rider of [5, total - 5]) {
+        for (const line of frameAt(route, rider).lines) {
+          const kept = standBoxes(line.stand.kind).filter(
+            (box) =>
+              line.stand.distance + box.along >= 0 && line.stand.distance + box.along <= total,
+          );
+          expect(line.boxes).toHaveLength(kept.length);
+          dropped += standBoxes(line.stand.kind).length - kept.length;
+        }
+      }
+      // The start's barriers behind the line and the finish's beyond it: gone.
+      expect(dropped).toBeGreaterThan(0);
+    }
+    // The control: a loop keeps every piece, on the road either side of its line.
+    const loop = circuitRoute(200);
+    for (const line of frameAt(loop, 5).lines) {
+      expect(line.boxes).toHaveLength(standBoxes(line.stand.kind).length);
+    }
+  });
+
   describe('on a bend, every box stands clear of the DRAWN carriageway — #879', () => {
     type Point = { readonly x: number; readonly z: number };
     /** The least distance from a point to the frame's drawn centreline, as a polyline. */
@@ -259,7 +283,12 @@ describe('the start and finish gantries — #679', () => {
       console.info(
         `#679 ${name}: nearest box corner ${shipped.toFixed(2)} m from the drawn centreline`,
       );
-      // Outside the carriageway. ⚠️ Not the barrier's full 0.31 m inner
+      // Outside the carriageway. What this prints, measured 2026-09-30 (#902):
+      // 3.75 m on circuitRoute(200), 3.67 m on (100), 3.57 m on (60) and
+      // 3.65 m at the hairpin's start — against a 3.5 m half-width, so the
+      // 60 m circuit clears by 7 cm. ⚠️ #879's pull request quoted 3.78,
+      // 3.75, 3.59 and 3.72 m; those were not what this test printed.
+      // ⚠️ Not the barrier's full 0.31 m inner
       // margin on the smallest loops: a loop shorter than the corridor is
       // drawn twice over, its near stretch from the smoothed 2 m pieces and
       // its far one from the route's own points, which on a 60 m circuit lie
@@ -267,6 +296,34 @@ describe('the start and finish gantries — #679', () => {
       // against both.
       expect(shipped).toBeGreaterThan(HALF);
     });
+
+    it.each([200, 100])(
+      'stands no finish barrier on the start road of a %s m circuit not ticked as a loop — #902',
+      (length) => {
+        // Past the finish there is no route, and a piece placed there ran
+        // straight on — which on a closed route is where the start road is.
+        // That road is drawn in the frame at the start, and the finish's
+        // pieces in the frame near it; both in one world, from one origin.
+        const route = unlooped(circuitRoute(length));
+        const total = route.totalDistance as number;
+        const startRoad = frameAt(route, 5);
+        const finish = frameAt(route, total - 30).lines.filter(
+          (line) => line.stand.kind === 'gantry' && line.stand.distance === total,
+        );
+        expect(finish).toHaveLength(1);
+        let least = Number.POSITIVE_INFINITY;
+        for (const placed of finish[0]!.boxes) {
+          if (placed.box.width > ROAD_WIDTH_METRES) continue;
+          for (const corner of corners(placed)) {
+            least = Math.min(least, fromCentre(startRoad, corner));
+          }
+        }
+        console.info(
+          `#902 ${String(length)} m circuit, not a loop: nearest finish-barrier corner ${least.toFixed(2)} m from the start road's centreline`,
+        );
+        expect(least).toBeGreaterThan(HALF);
+      },
+    );
 
     it('and the tangent placement it replaced does not (the control)', () => {
       // The review's measurement, reproduced: a 60 m circuit put a barrier on
@@ -437,7 +494,10 @@ describe('the start and finish gantries — #679', () => {
     const route = northRoute(3_000, () => 0);
     belt.update(frameAt(route, (route.totalDistance as number) - 40).lines);
     expect(belt.meshes.boxes.visible).toBe(true);
-    expect(belt.meshes.boxes.count).toBe(standBoxes('gantry').length);
+    // The finish's pieces beyond the line are off the route, and are not drawn (#902).
+    expect(belt.meshes.boxes.count).toBe(
+      standBoxes('gantry').filter((box) => box.along <= 0).length,
+    );
     // No atlas was handed over, so no banner: never a banner with no lettering.
     expect(belt.meshes.banners.visible).toBe(false);
     belt.update([]);

@@ -6,9 +6,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   cutSource,
+  holdsDataUrl,
   INDEXED_KINDS,
   MAXIMUM_PASSAGE_CHARACTERS,
   MAXIMUM_PASSAGES_PER_SOURCE,
+  MAXIMUM_SOURCE_CHARACTERS,
   splitBlock,
 } from './passages.ts';
 
@@ -74,6 +76,124 @@ describe('which items are cut, and from what', () => {
     expect(cutSource('write-up', bytes({ text: 'x', extra: png }))).toEqual({ kind: 'picture' });
     // The control: the word "data" is not a picture.
     expect(cutSource('note', bytes({ text: 'The data: power held.' })).kind).toBe('passages');
+  });
+
+  it('finds a picture behind a JSON escape, and one with no media type — #918 item 1', () => {
+    // The two bodies #917's review got past the raw-text check. A JSON `\u003a`
+    // is a colon only once the body is parsed.
+    const escaped = '{"text":"see data\\u003aimage/png;base64,iVBORw0KGgo="}';
+    expect(JSON.parse(escaped)).toEqual({ text: 'see data:image/png;base64,iVBORw0KGgo=' });
+    expect(cutSource('note', bytes(escaped))).toEqual({ kind: 'picture' });
+    // RFC 2397: `data:[<mediatype>][;base64],<data>` — the type may be left out.
+    expect(cutSource('document', bytes('pasted data:;base64,iVBORw0KGgo='))).toEqual({
+      kind: 'picture',
+    });
+    expect(cutSource('note', bytes({ text: 'data:,plain' }))).toEqual({ kind: 'picture' });
+    // In a key, and deep in a ride summary's other fields.
+    expect(cutSource('write-up', bytes({ text: 'x', ['data:;base64,AA==']: 1 }))).toEqual({
+      kind: 'picture',
+    });
+    expect(
+      cutSource('ride-summary', bytes({ passages: ['ok'], more: [[{ a: 'data:image/png,x' }]] })),
+    ).toEqual({ kind: 'picture' });
+  });
+
+  it('finds a picture split across two JSON strings, which no one parsed string holds — #928 review', () => {
+    // The header in one passage and the payload in the next: each parsed
+    // string alone holds no `data:…,`, and the base64 would be indexed as a
+    // passage of its own. The raw text holds it.
+    const split = { passages: ['see data:image/png;base64', ',iVBORw0KGgo'] };
+    expect(cutSource('ride-summary', bytes(split))).toEqual({ kind: 'picture' });
+    // The header in a key and the payload in its value.
+    expect(
+      cutSource('document', bytes({ text: 'hi', 'data:image/png;base64': ',iVBORw0KGgo=' })),
+    ).toEqual({ kind: 'picture' });
+    // The control: the same two passages with no `data:` are passages.
+    expect(cutSource('ride-summary', bytes({ passages: ['see image/png', ',iVBOR'] }))).toEqual({
+      kind: 'passages',
+      passages: ['see image/png', ',iVBOR'],
+    });
+  });
+
+  it('finds a split picture with whitespace or an escape between the halves — #928 second review', () => {
+    for (const raw of [
+      // A space, then a newline, before the comma between the two strings.
+      '{"passages":["see data:image/png;base64" , ",iVBORw0KGgo"]}',
+      '{"passages":["see data:image/png;base64"\n,",iVBORw0KGgo"]}',
+      // A split AND an escaped colon: neither the raw text nor one parsed string holds it.
+      '{"passages":["see data\\u003aimage/png;base64",",iVBORw0KGgo"]}',
+      // The key/value form, written with a space either side of the colon.
+      '{"text":"hi","data:image/png;base64" : ",iVBORw0KGgo="}',
+    ]) {
+      expect(cutSource('ride-summary', new TextEncoder().encode(raw)), raw).toEqual({
+        kind: 'picture',
+      });
+    }
+    // The control: the same shape with no `data:` is passages.
+    expect(
+      cutSource(
+        'ride-summary',
+        new TextEncoder().encode('{"passages":["see image/png" , ",iVBOR"]}'),
+      ),
+    ).toEqual({ kind: 'passages', passages: ['see image/png', ',iVBOR'] });
+  });
+
+  it('matches what /\\bdata:[^,\\s]*,/iu matches, and nothing else', () => {
+    const pattern = /\bdata:[^,\s]*,/iu;
+    for (const text of [
+      'data:image/png;base64,AA',
+      'DATA:;base64,AA',
+      'data:,',
+      'x data:a/b c, then a comma',
+      'data: , spaced',
+      'metadata:x/y,',
+      'data:a/data:b,',
+      'data:\u00a0,',
+      'data:a/b',
+      'no scheme at all, here',
+      'data:x data:y,',
+    ]) {
+      expect(holdsDataUrl(text), text).toBe(pattern.test(text));
+    }
+  });
+
+  it('looks for a picture in linear time, however the body is made — #924 item 7', () => {
+    // Each of these took seconds under a regular expression (passages.ts
+    // §holdsDataUrl has the figures): 74 s, 4.4 s and 6.1 s at this size. The
+    // scan takes milliseconds; the bound is generous for a slow runner and
+    // still far under any of them.
+    const size = MAXIMUM_SOURCE_CHARACTERS - 10;
+    for (const hostile of [
+      `data:a/${'a'.repeat(size)}`,
+      'data:a/'.repeat(Math.floor(size / 7)),
+      'data:'.repeat(Math.floor(size / 5)),
+    ]) {
+      const started = performance.now();
+      expect(holdsDataUrl(hostile)).toBe(false);
+      expect(cutSource('document', bytes(hostile)).kind).not.toBe('picture');
+      expect(performance.now() - started).toBeLessThan(1_000);
+    }
+  });
+
+  it('refuses a body longer than it reads before it looks for anything in it — #924 item 7', () => {
+    // A body whose TEXT is short, padded past the limit in a field nothing
+    // reads: were the length not checked first, it would be parsed and
+    // scanned whole, and cut into one passage.
+    const padded = { text: 'Short.', pad: ' '.repeat(MAXIMUM_SOURCE_CHARACTERS) };
+    expect(cutSource('note', bytes(padded))).toEqual({ kind: 'too-long' });
+    expect(cutSource('note', bytes({ ...padded, pad: '' }))).toEqual({
+      kind: 'passages',
+      passages: ['Short.'],
+    });
+    // One under is read: a picture there is still a picture.
+    const picture = `data:,${'x'.repeat(MAXIMUM_SOURCE_CHARACTERS - 6)}`;
+    expect(picture.length).toBe(MAXIMUM_SOURCE_CHARACTERS);
+    expect(cutSource('document', bytes(picture))).toEqual({ kind: 'picture' });
+  });
+
+  it('reads a body nested deeper than any stack, rather than throwing on it', () => {
+    const deep = `${'['.repeat(100_000)}"data:,x"${']'.repeat(100_000)}`;
+    expect(cutSource('ride-summary', bytes(deep))).toEqual({ kind: 'picture' });
   });
 
   it('refuses an item that would take more passages than one item may, rather than keeping part of it', () => {

@@ -58,7 +58,11 @@ import type { HostMetrics, RoomResult } from './room-host.ts';
  *   sent `refuse room-closed` and closed `4005`, so a rejoining client is told
  *   in words rather than by a failed upgrade. A started race a worker DOES
  *   hold is routed to it, so a rider who dropped mid-race rejoins
- *   (#895's review, B1).
+ *   (#895's review, B1). ⚠️ "Holds" is the router's placement, which a
+ *   worker's `room-closed` clears only when it ARRIVES: a rejoin routed while
+ *   it is in flight reaches a worker that has let the room go, and that
+ *   worker refuses it `room-closed` rather than opening a lobby (#897,
+ *   `room-host.ts` §`accept`).
  * - A ticket that is missing, wrong or spent is the ROOM's refusal, at hello
  *   (`room-host.ts`, `close-codes.ts`).
  */
@@ -340,6 +344,9 @@ export class RoomRouter {
       type: 'socket',
       socketId,
       plan: found.plan,
+      // A started race is joined only where it is still held: the worker
+      // checks, because a `room-closed` it sent may still be in flight (#897).
+      started: found.kind === 'started',
       request: copy,
       head: head.toString('base64'),
     };
