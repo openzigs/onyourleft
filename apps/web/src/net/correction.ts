@@ -20,6 +20,15 @@
  * the room is a few metres behind a rider accelerating hard, and chasing that
  * would pull a rider back on every sprint.
  *
+ * ⚠️ **And over {@link explainableMetres} it is ignored** (#922): the most
+ * the two could have come apart since the frame before, at the faster of
+ * the room's speed for this rider and the local one. Before #922 there was a
+ * floor and no ceiling, so a room — buggy or hostile — could move the rider
+ * any distance along the route with one frame. A frame that far out leaves
+ * the local odometer alone. After a legitimate drop the frames are far apart
+ * and so is the bound: 55 s at 10 m/s is 550 m, and a correction that size
+ * still goes through.
+ *
  * ## How it is applied — `simulation.ts` §`correctToward`
  *
  * Spread over {@link CORRECTION_SECONDS}, a share per fixed step, and **never
@@ -64,6 +73,21 @@ export const CORRECTION_SECONDS = 2;
  */
 export const CORRECTION_GRADE_STEP_PERCENT_PER_SECOND = 1;
 
+/**
+ * How far the local odometer and the room's may have come apart since the
+ * frame before this one, in metres: the faster of the two speeds, over the
+ * time since that frame plus a correction's own {@link CORRECTION_SECONDS}
+ * (the last correction may still have been under way), plus
+ * {@link CORRECTION_THRESHOLD_METRES} for the latency the threshold is for.
+ * #922. Chosen, from what the frames themselves say.
+ */
+export function explainableMetres(fasterMetresPerSecond: number, sinceSeconds: number): number {
+  return (
+    CORRECTION_THRESHOLD_METRES +
+    Math.max(0, fasterMetresPerSecond) * (Math.max(0, sinceSeconds) + CORRECTION_SECONDS)
+  );
+}
+
 /** The room's word on where this rider is. */
 export interface RoomPosition {
   readonly distanceMetres: number;
@@ -72,19 +96,34 @@ export interface RoomPosition {
   readonly atLocalMs: number;
 }
 
+/** What the local simulation knows, beside the room's frame (#922). */
+export interface LocalPosition {
+  readonly distanceMetres: number;
+  readonly speedMetresPerSecond: number;
+  /**
+   * The LOCAL instant the frame before this one described — or, for the
+   * first frame of a ride, when the ride began — in milliseconds.
+   */
+  readonly sinceLocalMs: number;
+}
+
 /**
  * How far the room places this rider ahead of where the local simulation has
  * them at `nowMs` — negative when behind — or `undefined` when the two agree
- * to within {@link CORRECTION_THRESHOLD_METRES}.
+ * to within {@link CORRECTION_THRESHOLD_METRES}, or disagree by more than
+ * {@link explainableMetres} (#922), which is no correction to make.
  */
 export function roomErrorMetres(
   room: RoomPosition,
-  localDistanceMetres: number,
+  local: LocalPosition,
   nowMs: number,
 ): number | undefined {
   const carried = Math.max(0, nowMs - room.atLocalMs) / 1000;
   const roomNow = room.distanceMetres + room.speedMetresPerSecond * carried;
-  const error = roomNow - localDistanceMetres;
+  const error = roomNow - local.distanceMetres;
   if (!Number.isFinite(error) || Math.abs(error) <= CORRECTION_THRESHOLD_METRES) return undefined;
+  const faster = Math.max(room.speedMetresPerSecond, local.speedMetresPerSecond);
+  const since = (nowMs - local.sinceLocalMs) / 1000;
+  if (!(Math.abs(error) <= explainableMetres(faster, since))) return undefined;
   return error;
 }

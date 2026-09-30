@@ -84,11 +84,37 @@ describe('one frame of a room ride — #782, #783', () => {
       0,
     );
     expect(sim.correcting).toBe(false);
+    // 40 m in the second since the frame before, at the room's 12 m/s, is
+    // explainable (#922): 8 m + 12 m/s × (1 s + the 2 s correction).
     roomFrame(
-      connection([], { rider: { ...rider(0, 40), speedMetresPerSecond: 0 }, atLocalMs: 1_000 }),
+      connection([], { rider: { ...rider(0, 40), speedMetresPerSecond: 12 }, atLocalMs: 1_000 }),
       memory,
       sim,
       1_000,
+    );
+    expect(sim.correcting).toBe(true);
+  });
+
+  it('leaves the rider where they are for a frame 50 km out — #922', () => {
+    const sim = simulation();
+    const memory = roomRideState();
+    roomFrame(connection([], { rider: rider(0, 0), atLocalMs: 0 }), memory, sim, 0);
+    roomFrame(
+      connection([], {
+        rider: { ...rider(0, 50_000), speedMetresPerSecond: 12 },
+        atLocalMs: 1_000,
+      }),
+      memory,
+      sim,
+      1_000,
+    );
+    expect(sim.correcting).toBe(false);
+    // The control: the same frame 40 m out is acted on.
+    roomFrame(
+      connection([], { rider: { ...rider(0, 40), speedMetresPerSecond: 12 }, atLocalMs: 2_000 }),
+      memory,
+      sim,
+      2_000,
     );
     expect(sim.correcting).toBe(true);
   });
