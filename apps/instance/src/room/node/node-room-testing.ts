@@ -31,6 +31,7 @@ interface Client {
   readonly received: string[];
   hungUp: boolean;
   closed: Promise<void>;
+  isClosed: boolean;
 }
 
 /** Waits until `check` holds, polling each turn of the event loop, or throws after `ms`. */
@@ -112,10 +113,12 @@ export function nodeRoom(settings: RoomSettings, admit: Admit): RoomUnderTest {
         received,
         hungUp: false,
         closed: Promise.resolve(),
+        isClosed: false,
       };
       entry.closed = new Promise<void>((done) => {
         socket.on('close', () => {
           if (!entry.hungUp) received.push(CLOSED_BY_ROOM);
+          entry.isClosed = true;
           done();
         });
       });
@@ -150,20 +153,17 @@ export function nodeRoom(settings: RoomSettings, admit: Admit): RoomUnderTest {
       return Promise.resolve();
     },
     async transcript(): Promise<Transcript> {
-      const sent = new Map<ConnectionId, number>();
-      // A connection the host has let go no longer has a count; what it was
-      // sent is final once its close has arrived.
+      // A socket still held by the host has arrived when it has received as
+      // many messages as the host sent it. One the host has let go was closed
+      // — by the room or by its client — and is final once the client has
+      // seen the close: its close event comes after every message before it.
       await until(() => {
-        for (const [id, count] of host.sentCounts(ROOM_ID)) sent.set(id, count);
-        return [...clients.values()].every(
-          (c) => c.hungUp || c.received.length >= (sent.get(c.connection) ?? 0),
-        );
+        const counts = host.sentCounts(ROOM_ID);
+        return [...clients.values()].every((c) => {
+          const count = counts.get(c.connection);
+          return count === undefined ? c.isClosed : c.received.length >= count;
+        });
       }, 'every socket to receive what it was sent');
-      await Promise.all(
-        [...clients.values()]
-          .filter((c) => c.received.at(-1) === CLOSED_BY_ROOM || c.hungUp)
-          .map((c) => c.closed),
-      );
       return Object.fromEntries([...clients].map(([label, c]) => [label, [...c.received]]));
     },
     async dispose() {

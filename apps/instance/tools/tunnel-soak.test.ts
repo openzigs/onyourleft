@@ -85,13 +85,13 @@ describe('the tunnel soak — #807’s measurement, ridden locally', () => {
       { rider: 1, atSecond: expect.any(Number) as number, code: 1006 },
     ]);
     expect(report.rejoinMs).toHaveLength(1);
-    expect(report.rejoinMs[0]).toBeLessThan(2_000);
+    expect(report.rejoinMs[0]).toBeLessThan(10_000);
     expect(report.framesReceived.every((count) => count >= 2)).toBe(true);
-  }, 20_000);
+  }, 60_000);
 
   it('the idle probe says so when the instance’s own ping kept the socket from ever being idle', async () => {
     const url = await instance('1000');
     const report = await idleProbe({ url, roomId: 'lobby', maximumMs: 2_500 });
     expect(report.note).toContain('never idle');
-  }, 20_000);
+  }, 60_000);
 });

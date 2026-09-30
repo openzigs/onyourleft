@@ -56,7 +56,8 @@ import type { RoomSettings } from '../core/settings.ts';
  * protocol ping, which keeps a quiet lobby's socket alive through a proxy that
  * closes idle connections (Cloudflare's tunnel, ADR 0037 D-8.1: the host's
  * own ping, beside the client's). A socket that has not answered the previous
- * ping — no pong and no message — is terminated as dead.
+ * ping — no pong and no message — for two pings running is terminated as
+ * dead: one missed answer is a busy moment, two is a peer that has gone.
  *
  * ## Results
  *
@@ -143,8 +144,8 @@ interface Connection {
   gone: boolean;
   /** Everything this socket sent is handled in order through this chain. */
   chain: Promise<void>;
-  /** Answered the last ping, or sent something since it. */
-  alive: boolean;
+  /** Pings sent since it last answered one or sent anything. */
+  unanswered: number;
   /** Messages sent to it, closes included: tests compare it with what arrived. */
   sent: number;
 }
@@ -225,13 +226,13 @@ export class RoomHost {
       closedByRoom: false,
       gone: false,
       chain: Promise.resolve(),
-      alive: true,
+      unanswered: 0,
       sent: 0,
     };
     hosted.nextConnection += 1;
     hosted.connections.set(connection.id, connection);
     socket.on('message', (data, isBinary) => {
-      connection.alive = true;
+      connection.unanswered = 0;
       // The protocol is text; a binary frame is not a message and is dropped,
       // as a malformed report from a rider is (and as the Durable Object does).
       if (isBinary) return;
@@ -239,7 +240,7 @@ export class RoomHost {
       connection.chain = connection.chain.then(() => this.#receive(hosted, connection, text));
     });
     socket.on('pong', () => {
-      connection.alive = true;
+      connection.unanswered = 0;
     });
     socket.on('error', () => {
       // A socket error is followed by its close; the close is what is handled.
@@ -511,11 +512,11 @@ export class RoomHost {
     for (const hosted of this.#rooms.values()) {
       for (const connection of hosted.connections.values()) {
         if (connection.gone) continue;
-        if (!connection.alive) {
+        if (connection.unanswered >= 2) {
           connection.socket.terminate();
           continue;
         }
-        connection.alive = false;
+        connection.unanswered += 1;
         connection.socket.ping();
       }
     }

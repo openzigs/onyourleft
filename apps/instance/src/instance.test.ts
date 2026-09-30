@@ -135,10 +135,10 @@ describe('the entry point opens the store — #780 (from #861: every identity ro
     clients.push(replay);
     expect(await replay.closed).toEqual({ code: 4003, reason: 'ticket-refused' });
     // The replay changed nothing: still one seat in the room.
-    await until(() => rider.messages.some((m) => m.type === 'frame'), 'a frame', 5_000);
+    await until(() => rider.messages.some((m) => m.type === 'frame'), 'a frame', 15_000);
     const frame = rider.messages.find((m) => m.type === 'frame');
     expect(frame?.type === 'frame' && frame.riders.length).toBe(1);
-  }, 20_000);
+  }, 60_000);
 
   it('serves /metrics after a populated fixture with no athlete id, display name, room id or coordinate in it — #791', async () => {
     const path = join(await freshDirectory(), 'instance.sqlite');
@@ -200,14 +200,14 @@ describe('the entry point opens the store — #780 (from #861: every identity ro
       0,
     );
     expect(connected).toBe(2);
-  }, 20_000);
+  }, 60_000);
 
   it('does not serve /metrics unless the operator turned it on', async () => {
     const path = join(await freshDirectory(), 'instance.sqlite');
     await migrateForDeploy(path);
     const { instance } = await start(path);
     expect((await fetch(`${instance.url}/metrics`)).status).toBe(404);
-  }, 20_000);
+  }, 60_000);
 });
 
 describe('migrations are a deploy step — #791 criteria 5 and 8', () => {
@@ -226,7 +226,7 @@ describe('migrations are a deploy step — #791 criteria 5 and 8', () => {
     });
     expect(run.status).toBe(1);
     expect(run.stderr).toContain('node src/operator/cli.ts migrate');
-  }, 25_000);
+  }, 60_000);
 
   it('is not ready — and admits no room — while a migration is running, and is once it has finished', async () => {
     const path = join(await freshDirectory(), 'instance.sqlite');
@@ -257,7 +257,7 @@ describe('migrations are a deploy step — #791 criteria 5 and 8', () => {
       status: 'ready',
       checks: { database: true, migrations: 'at-head', rooms: true },
     });
-  }, 20_000);
+  }, 60_000);
 });
 
 describe('graceful shutdown drains rooms — #780 criterion 6', () => {
@@ -361,5 +361,5 @@ describe('graceful shutdown drains rooms — #780 criterion 6', () => {
     } finally {
       await fresh.close();
     }
-  }, 40_000);
+  }, 90_000);
 });

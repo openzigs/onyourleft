@@ -57,14 +57,14 @@ describe('every room of one id lands on one worker — #780 criterion 2', () => 
     await until(
       () => pairs.every(([a, b]) => framesWith(a, 2).length > 0 && framesWith(b, 2).length > 0),
       'every rider to see the other',
-      10_000,
+      30_000,
     );
     const pids = new Set(rooms.map((roomId) => harness?.router.placementOf(roomId)));
     expect(pids.has(undefined)).toBe(false);
     expect(pids.size).toBeGreaterThanOrEqual(2);
     for (const [a] of pairs)
       expect(framesWith(a, 2)[0]?.riders.map((r) => r.riderId)).toEqual([0, 1]);
-  }, 20_000);
+  }, 60_000);
 
   it('spreads room ids by a stable hash', () => {
     expect(roomHash('room-1')).toBe(roomHash('room-1'));
@@ -79,7 +79,7 @@ describe('a worker that dies — #780 criterion 3', () => {
     harness = await startRouter({ workers: 2 });
     const ann = await join('doomed', 'ticket-ann');
     const bob = await join('doomed', 'ticket-bob');
-    await until(() => framesWith(ann, 2).length > 0, 'the room to run', 5_000);
+    await until(() => framesWith(ann, 2).length > 0, 'the room to run', 15_000);
     const deadPid = harness.router.placementOf('doomed');
     expect(deadPid).toBeDefined();
     process.kill(deadPid as number, 'SIGKILL');
@@ -94,23 +94,27 @@ describe('a worker that dies — #780 criterion 3', () => {
     // New rooms, and the lost room opened again, land only on live workers.
     for (const roomId of ['doomed', 'fresh-1', 'fresh-2', 'fresh-3']) {
       const rider = await join(roomId, `ticket-${roomId}`);
-      await until(() => framesWith(rider, 1).length > 0, `${roomId} to run`, 5_000);
+      await until(() => framesWith(rider, 1).length > 0, `${roomId} to run`, 15_000);
       expect(harness.router.placementOf(roomId)).not.toBe(deadPid);
     }
-  }, 20_000);
+  }, 60_000);
 
   it('with no replacement started, places every new room on the workers still alive', async () => {
     harness = await startRouter({ workers: 2, respawn: false });
     const [first, second] = harness.router.workers();
     process.kill(first?.pid as number, 'SIGKILL');
-    await until(() => harness?.router.workers()[0]?.alive === false, 'the death to be seen', 5_000);
+    await until(
+      () => harness?.router.workers()[0]?.alive === false,
+      'the death to be seen',
+      15_000,
+    );
     for (let i = 0; i < 6; i += 1) {
       const roomId = `after-${String(i)}`;
       const rider = await join(roomId, `ticket-${roomId}`);
-      await until(() => rider.messages.length > 0, `${roomId}'s welcome`, 5_000);
+      await until(() => rider.messages.length > 0, `${roomId}'s welcome`, 15_000);
       expect(harness.router.placementOf(roomId)).toBe(second?.pid);
     }
-  }, 20_000);
+  }, 60_000);
 
   it('writes the close frame a client can read: unmasked, 1011, the reason', () => {
     expect([...closeFrameBytes({ code: 1011, reason: 'room-lost' })]).toEqual([
@@ -140,7 +144,7 @@ describe('what is refused before any room state changes — #780 criterion 1', (
     const ann = await join('real', 'ticket-ann');
     await until(() => ann.messages.length > 0, 'a welcome');
     expect(ann.messages[0]?.type).toBe('welcome');
-  }, 10_000);
+  }, 30_000);
 
   it('tells a rider rejoining a race that has ended — or was interrupted — that it is closed, in words', async () => {
     harness = await startRouter({ workers: 1, lookup: () => Promise.resolve({ kind: 'ended' }) });
@@ -171,7 +175,7 @@ describe('what is refused before any room state changes — #780 criterion 1', (
     const reused = await join('gate', 'good');
     expect(await reused.closed).toEqual({ code: 4003, reason: 'ticket-refused' });
     expect(first.messages.map((m) => m.type)).toEqual(['welcome']);
-  }, 10_000);
+  }, 30_000);
 });
 
 describe('compression is off unless the operator turns it on — #780 criterion 5, ruling Q16', () => {

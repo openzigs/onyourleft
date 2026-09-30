@@ -134,11 +134,12 @@ describe('backpressure — #780 criterion 4', () => {
     );
     // …and no tick waited on the stalled socket. A 100-rider tick is about
     // 10 ms of physics on a developer's machine (measured: median 10.5 ms,
-    // worst 147 ms with a collection in it); the bound is a quarter of the
-    // frame interval, 250 ms, which a tick that waited for the stalled
-    // socket to drain would miss by the whole stall.
+    // worst 147 ms with a collection in it), and coverage and a two-core
+    // runner slow it several times over; the bound is half the frame
+    // interval, 500 ms, which a tick that waited for the stalled socket to
+    // drain would miss by the whole stall.
     tickMs.sort((a, b) => a - b);
-    expect(tickMs[Math.floor(tickMs.length * 0.99)]).toBeLessThan(250);
+    expect(tickMs[Math.floor(tickMs.length * 0.99)]).toBeLessThan(500);
   }, 60_000);
 });
 
