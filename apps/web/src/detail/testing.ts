@@ -27,6 +27,8 @@ import {
   type LapRecord,
   type PrivacyZoneRecord,
   type RideWriteUpRecord,
+  type RouteId,
+  type RouteRecord,
   type Samples,
   type SideCameraReportRecord,
   type StreamChannel,
@@ -49,6 +51,10 @@ export interface StubRide {
   readonly sideCamera?: SideCameraReportRecord | 'unreadable';
   /** #805: the model's write-up saved with this ride, or `'unreadable'` for a row that will not decode. */
   readonly writeUp?: RideWriteUpRecord | 'unreadable';
+  /** #793: the saved route the ride names in `routeId`, when it names one. */
+  readonly route?: RouteRecord;
+  /** #793: `'refuse'` makes the consent write answer `false` and change nothing. */
+  readonly consentWrite?: 'refuse';
 }
 
 export interface StubDetail extends DetailPort {
@@ -85,6 +91,7 @@ export function stubActivity(overrides: Partial<ActivityRecord> = {}): ActivityR
     distance: metres(42_195),
     visibility: DEFAULT_VISIBILITY,
     hasPosition: false,
+    mayBeRaced: false,
     createdAt: unixSeconds(1_760_003_600),
     ...overrides,
   };
@@ -139,9 +146,20 @@ export function stubDetail(
           encodedBytes: sampleCount * present.length * 2,
         };
 
+  // The consent is the one field the page writes, so the stub keeps it and a
+  // re-read answers with what was written — a fresh read, not the object the
+  // test built (CLAUDE.md §5, "wrong harness").
+  let mayBeRaced = ride.activity.mayBeRaced;
   const store: DetailStore = {
     getActivity: (_owner: AthleteId, id: ActivityId) =>
-      Promise.resolve(id === ride.activity.id ? ride.activity : undefined),
+      Promise.resolve(id === ride.activity.id ? { ...ride.activity, mayBeRaced } : undefined),
+    setActivityMayBeRaced: (_owner: AthleteId, id: ActivityId, wanted: boolean) => {
+      if (id !== ride.activity.id || ride.consentWrite === 'refuse') return Promise.resolve(false);
+      mayBeRaced = wanted;
+      return Promise.resolve(true);
+    },
+    getRoute: (_owner: AthleteId, id: RouteId) =>
+      Promise.resolve(ride.route?.id === id ? ride.route : undefined),
     getStreamSetSummary: (_owner: AthleteId, id: ActivityId) => {
       summaryReads.push(summaryReads.length);
       return Promise.resolve(id === ride.activity.id ? summary : undefined);

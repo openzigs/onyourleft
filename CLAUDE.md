@@ -1671,7 +1671,17 @@ packages/             Apache-2.0, without exception
                       instance last agreed on, two digests a ride and an
                       item. ⚠️ A ride's base row OUTLIVES `deleteActivity` on
                       purpose — it is the device's record that a synced ride
-                      was deleted here — and goes with `deleteAthlete`
+                      was deleted here — and goes with `deleteAthlete`.
+                      Since #793, at version 15 (the SECOND record
+                      migration), every ride's "may be raced" consent,
+                      `mayBeRaced`, off by default: never the share setting
+                      (ADR 0021 D-5.1). `listRaceableAttempts` is the
+                      consent-scoped cross-rider read and
+                      `activity-store.race-consent.test.ts` its test, red
+                      against `consentIgnoredStoreFactory`. ⚠️ Nothing calls
+                      it yet — #331, in a LATER pull request, and it must not
+                      touch `activity-store.ghost-scope.test.ts` in the same
+                      one (ADR 0039 D-2.3)
 
 docs/
   architecture.md     layout, component boundaries, ADR index
@@ -5468,5 +5478,6 @@ top of an issue **supersedes its body**.
 | Which step a passage of the rider's history reaches, how it is fenced, what happens to a reply that obeys a planted note, and why a hosted run never gets one | `apps/web/src/ride-analysis/template-v2.ts` §`HISTORY_FENCE_BEGIN`, `apps/web/src/ride-analysis/history.ts`, `apps/web/src/ride-analysis/template.ts` §`acceptHistoryNote`, `apps/web/src/ride-analysis/hosted-step.ts`, `apps/web/src/ride-analysis/history.test.ts` §"a note planted with instructions" |
 | What a ride summary synced for the rider's history says, and which device may replace it | `apps/web/src/ride-analysis/ride-summary.ts`, `apps/web/src/instance/sync.ts` rule 7 |
 | Whether the rider's instance may keep a searchable index of their history for the AI analysis, where the embeddings are computed, what the index may never hold, and how retrieved text reaches the model | [ADR 0040](docs/adr/0040-a-history-index-on-the-riders-instance.md), [#835](https://github.com/openzigs/onyourleft/issues/835), [#836](https://github.com/openzigs/onyourleft/issues/836) |
+| What the project's instance owes under the UK Online Safety Act and the EU DSA before public rooms, and what is still the owner's to decide (drafts pending the owner's approval, not legal advice) | [`docs/moderation/`](docs/moderation/illegal-content-risk-assessment.md), [spike 0019](docs/spikes/0019-online-safety-act-and-dsa-read-for-the-projects-instance.md), [#886](https://github.com/openzigs/onyourleft/issues/886), [#887](https://github.com/openzigs/onyourleft/issues/887) |
 
 <!-- Last updated: 2026-09-29 by delivery:code-issue resolving #841 (the Docker Hub dependency named, the image checker's suite, and where CI time comes from next) -->

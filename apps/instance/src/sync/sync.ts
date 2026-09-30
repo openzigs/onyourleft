@@ -139,6 +139,8 @@ export interface ManifestEntry {
   readonly deleted: boolean;
   /** Which ride a live activity is — its record's `claims.activityId` — or `null`. */
   readonly activityId: string | null;
+  /** A live activity's "may be raced" consent (#793), or `null` for anything else. */
+  readonly mayBeRaced: boolean | null;
 }
 
 /** A signed record, as a pulling device fetches it (#776). */
@@ -206,6 +208,8 @@ export interface AccountExport {
     readonly record: SignedActivityRecord;
     /** Where the original file is: `GET` it with the same session. */
     readonly file: string;
+    /** The rider's "may be raced" consent on this ride (#793). Not in the signed record. */
+    readonly mayBeRaced: boolean;
   }[];
   readonly items: readonly {
     readonly kind: SyncKind;
@@ -281,6 +285,16 @@ export interface Sync {
   manifest(caller: Caller, query: URLSearchParams): Promise<Outcome<Page<ManifestEntry>>>;
   /** #776: one of the caller's signed records, for a device to verify before it writes. */
   record(caller: Caller, contentSha256: string): Promise<Outcome<PulledRecord>>;
+  /**
+   * #793: set or revoke the "may be raced" consent on one of the caller's
+   * rides, by the SHA-256 of its file (ADR 0021 D-5.1). `not_found` for a ride
+   * the caller does not hold — another athlete's included.
+   */
+  setRaceConsent(
+    caller: Caller,
+    contentSha256: string,
+    body: Readonly<Record<string, unknown>>,
+  ): Promise<Outcome<{ readonly mayBeRaced: boolean }>>;
   /** #776: store an item — a write-up, a side-camera report, a goal, a note, a document. */
   putItem(
     caller: Caller,
@@ -397,22 +411,16 @@ export function createSync(options: SyncOptions): Sync {
     exportAccount: async (caller) => {
       const athlete = await store.getAthlete(caller.athleteId);
       if (athlete === undefined) return refuse('not_found');
-      const records = await store.listActivityRecords(caller.athleteId);
-      const activities = [];
-      for (const record of records) {
-        activities.push({
-          contentSha256: record.contentSha256,
-          recordSha256: toHex(await sha256Bytes(record.signedRecord)),
-          receivedAt: record.receivedAt,
-          record: storedRecord(record),
-          file: `/v1/sync/files/${record.contentSha256}`,
-        });
-      }
       const items = [];
+      // Each live ride's consent, which the manifest carries beside it (#793).
+      const consent = new Map<string, boolean>();
       let after: ManifestPosition | undefined;
       for (;;) {
         const page = await store.listSyncManifest(caller.athleteId, after, 500);
         for (const row of page) {
+          if (row.kind === 'activity' && row.mayBeRaced !== null) {
+            consent.set(row.key, row.mayBeRaced);
+          }
           if (row.kind === 'activity' || row.body === null || row.digest === null) continue;
           items.push({
             kind: row.kind,
@@ -425,6 +433,18 @@ export function createSync(options: SyncOptions): Sync {
         const last = page.at(-1);
         if (page.length < 500 || last === undefined) break;
         after = { receivedAt: last.receivedAt, seq: last.seq };
+      }
+      const records = await store.listActivityRecords(caller.athleteId);
+      const activities = [];
+      for (const record of records) {
+        activities.push({
+          contentSha256: record.contentSha256,
+          recordSha256: toHex(await sha256Bytes(record.signedRecord)),
+          receivedAt: record.receivedAt,
+          record: storedRecord(record),
+          file: `/v1/sync/files/${record.contentSha256}`,
+          mayBeRaced: consent.get(record.contentSha256) ?? false,
+        });
       }
       return {
         ok: true,
@@ -528,6 +548,7 @@ export function createSync(options: SyncOptions): Sync {
                 ? null
                 : storedRecord({ ...row, contentSha256: row.key, signedRecord: row.signedRecord })
                     .claims.activityId,
+            mayBeRaced: row.signedRecord === null ? null : row.mayBeRaced,
           })),
           next:
             rows.length > limit && last !== undefined
@@ -548,6 +569,14 @@ export function createSync(options: SyncOptions): Sync {
           receivedAt: held.receivedAt,
         },
       };
+    },
+
+    setRaceConsent: async (caller, contentSha256, body) => {
+      if (!BLOB_KEY.test(contentSha256)) return refuse('not_found');
+      const { mayBeRaced } = body;
+      if (typeof mayBeRaced !== 'boolean') return invalid('mayBeRaced', 'must be true or false');
+      const set = await store.setActivityMayBeRaced(caller.athleteId, contentSha256, mayBeRaced);
+      return set ? { ok: true, value: { mayBeRaced } } : refuse('not_found');
     },
 
     putItem: async (caller, kind, key, body) => {

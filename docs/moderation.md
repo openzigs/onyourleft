@@ -195,3 +195,19 @@ The owner ruled (#16, Q5) that **public rooms are 18 and over**. The age is self
 date of birth is ever collected. Registration also needs approval. The UK Online Safety Act and EU
 Digital Services Act assessments come before public rooms go live. If you run your own instance,
 you owe your own.
+
+### Drafts pending owner approval
+
+These are drafts for the project's own instance, written on 2026-09-30 for #886 and #887. None of
+them is approved yet, and none of them is legal advice. Public rooms stay off until the owner signs
+them off.
+
+- [Illegal content risk assessment](moderation/illegal-content-risk-assessment.md) (UK Online Safety
+  Act)
+- [Children's access assessment](moderation/childrens-access-assessment.md) (UK Online Safety Act)
+- [Notice-and-action, content reports and complaints](moderation/notice-and-action.md) (EU DSA
+  Art. 16, and the Act's ss.20–21)
+- [Statements of reasons](moderation/statement-of-reasons.md) (EU DSA Art. 17)
+- [The DSA's scope, Art. 13 and Art. 19](moderation/dsa-scope.md)
+- The reading they rest on:
+  [spike 0019](spikes/0019-online-safety-act-and-dsa-read-for-the-projects-instance.md)
