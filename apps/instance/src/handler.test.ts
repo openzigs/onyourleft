@@ -201,6 +201,60 @@ describe('the one error shape (#36)', () => {
   });
 });
 
+describe('a rider’s app on another origin — #777', () => {
+  it('lets any origin read every answer, errors included, and never with credentials', async () => {
+    const instance = await start();
+    for (const path of ['/health', '/instance', '/nothing-here']) {
+      const response = await fetch(`${instance.url}${path}`, {
+        headers: { origin: 'https://localhost' },
+      });
+      expect(response.headers.get('access-control-allow-origin')).toBe('*');
+      // Bearer tokens only: nothing may ride on a browser's ambient credentials.
+      expect(response.headers.get('access-control-allow-credentials')).toBeNull();
+    }
+  });
+
+  it('answers a preflight to a served path with its methods and the app’s two headers', async () => {
+    const instance = await start();
+    const response = await fetch(`${instance.url}/health`, {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'https://localhost',
+        'access-control-request-method': 'GET',
+        'access-control-request-headers': 'authorization',
+      },
+    });
+    expect(response.status).toBe(204);
+    expect(response.headers.get('access-control-allow-origin')).toBe('*');
+    expect(response.headers.get('access-control-allow-methods')).toBe('GET');
+    expect(response.headers.get('access-control-allow-headers')).toBe(
+      'authorization, content-type',
+    );
+    expect(response.headers.get('access-control-max-age')).toBe('600');
+  });
+
+  it('does not answer a preflight to a path no route serves', async () => {
+    const instance = await start();
+    const response = await fetch(`${instance.url}/nothing-here`, { method: 'OPTIONS' });
+    expect(response.status).toBe(404);
+    expectErrorShape(await response.json(), 'not_found');
+  });
+});
+
+describe('GET /instance — #777', () => {
+  it('answers the name the operator configured', async () => {
+    const instance = await start({ config: { name: 'Lanes of the Weald' } });
+    const response = await fetch(`${instance.url}/instance`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ name: 'Lanes of the Weald' });
+  });
+
+  it('answers null, never an invented name, when none is configured', async () => {
+    const instance = await start();
+    expect(await (await fetch(`${instance.url}/instance`)).json()).toEqual({ name: null });
+  });
+});
+
 describe('GET /licences/third-party.txt', () => {
   it('serves the notices the instance was handed, as text', async () => {
     const instance = await start({ notices: 'Name: something\n' });

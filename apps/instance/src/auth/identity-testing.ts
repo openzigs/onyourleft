@@ -26,6 +26,7 @@ import {
 
 import { createMemoryBlobStore, type MemoryBlobs } from '../blob/memory-blob-store.ts';
 import type { BlobStore } from '../blob/blob-store.ts';
+import type { Config } from '../config.ts';
 import { startTestInstance, type TestInstance } from '../instance-testing.ts';
 import { createSync, type Sync } from '../sync/sync.ts';
 import { openSqlStore } from '../store/open-sql-store.ts';
@@ -144,6 +145,14 @@ export async function startIdentityInstance(
     bodyLimitBytes?: number;
     /** What `/ready`, `/metrics` and a room's start answer (#780). */
     probes?: InstanceProbes;
+    /** The listener's configuration, over the test defaults — an instance name, say (#777). */
+    config?: Partial<Config>;
+    /**
+     * The instance's origin is the listener's own `http://127.0.0.1:<port>`
+     * rather than {@link TEST_ORIGIN}, so a real browser that reached it by
+     * that address can sign for it (#777's browser gate).
+     */
+    originIsTheListener?: boolean;
   } = {},
 ): Promise<IdentityInstance> {
   const directory = await mkdtemp(join(tmpdir(), 'oyl-instance-identity-'));
@@ -159,38 +168,41 @@ export async function startIdentityInstance(
     syncStoreSeenBy,
     blobStoreSeenBy,
     bodyLimitBytes,
+    config,
+    originIsTheListener,
     ...rest
   } = options;
-  const identity = createIdentity({
-    // The identity tests predate registration modes (#775) and register
-    // riders as they sign in; a test of a mode names it. The default an
-    // instance really starts with is `approval`, asserted in registration.test.ts.
-    registration: 'open',
-    // Every test rider signs in from one loopback address, so the per-address
-    // registration limit (#775) would be what these tests measured. A test of
-    // that limit sets it.
-    limits: { ...DEFAULT_LIMITS, registrationPerAddress: { limit: 10_000, windowMs: 60_000 } },
-    ...rest,
-    store: storeSeenBy === undefined ? store : storeSeenBy(store),
-    origin: TEST_ORIGIN,
-    now: () => clock.ms,
-    ...(emailRecovery === true || emailRecovery === 'failing'
-      ? {
-          emailRecovery: {
-            send: (address, token) => {
-              if (emailRecovery === 'failing') return Promise.reject(new Error('no mail'));
-              mail.push({ address, token });
-              return Promise.resolve();
+  const identityFor = (origin: string): Identity =>
+    createIdentity({
+      // The identity tests predate registration modes (#775) and register
+      // riders as they sign in; a test of a mode names it. The default an
+      // instance really starts with is `approval`, asserted in registration.test.ts.
+      registration: 'open',
+      // Every test rider signs in from one loopback address, so the per-address
+      // registration limit (#775) would be what these tests measured. A test of
+      // that limit sets it.
+      limits: { ...DEFAULT_LIMITS, registrationPerAddress: { limit: 10_000, windowMs: 60_000 } },
+      ...rest,
+      store: storeSeenBy === undefined ? store : storeSeenBy(store),
+      origin,
+      now: () => clock.ms,
+      ...(emailRecovery === true || emailRecovery === 'failing'
+        ? {
+            emailRecovery: {
+              send: (address, token) => {
+                if (emailRecovery === 'failing') return Promise.reject(new Error('no mail'));
+                mail.push({ address, token });
+                return Promise.resolve();
+              },
+              confirm: (address, token) => {
+                if (emailRecovery === 'failing') return Promise.reject(new Error('no mail'));
+                confirmations.push({ address, token });
+                return Promise.resolve();
+              },
             },
-            confirm: (address, token) => {
-              if (emailRecovery === 'failing') return Promise.reject(new Error('no mail'));
-              confirmations.push({ address, token });
-              return Promise.resolve();
-            },
-          },
-        }
-      : {}),
-  });
+          }
+        : {}),
+    });
   const blobs: MemoryBlobs = new Map();
   const memoryBlobs = createMemoryBlobStore(blobs);
   const sync = createSync({
@@ -198,12 +210,38 @@ export async function startIdentityInstance(
     blobs: blobStoreSeenBy === undefined ? memoryBlobs : blobStoreSeenBy(memoryBlobs),
     now: () => clock.ms,
   });
-  const instance = await startTestInstance({
-    identity,
-    sync,
-    config: { bodyLimitBytes: bodyLimitBytes ?? 16_384 },
-    ...(probes === undefined ? {} : { probes }),
-  });
+  const listenerConfig = { bodyLimitBytes: bodyLimitBytes ?? 16_384, ...config };
+  const started = (identity: Identity): Promise<TestInstance> =>
+    startTestInstance({
+      identity,
+      sync,
+      config: listenerConfig,
+      ...(probes === undefined ? {} : { probes }),
+    });
+  let identity: Identity;
+  let instance: TestInstance;
+  if (originIsTheListener === true) {
+    // The browser gate's case (#777): a real page signs for the address it
+    // really reached, which is known only once the listener has a port. So the
+    // handler is given a stand-in that forwards to the identity made then.
+    const made: { identity?: Identity } = {};
+    const forwarding = new Proxy({} as Identity, {
+      get: (_target, key) => {
+        const real = made.identity;
+        if (real === undefined) throw new Error('the identity was used before it was made');
+        const value = Reflect.get(real, key) as unknown;
+        return typeof value === 'function'
+          ? (value as (...args: unknown[]) => unknown).bind(real)
+          : value;
+      },
+    });
+    instance = await started(forwarding);
+    made.identity = identityFor(instance.url);
+    identity = made.identity;
+  } else {
+    identity = identityFor(TEST_ORIGIN);
+    instance = await started(identity);
+  }
 
   const call: IdentityInstance['call'] = async (method, route, callOptions = {}) => {
     const headers: Record<string, string> = { ...callOptions.headers };

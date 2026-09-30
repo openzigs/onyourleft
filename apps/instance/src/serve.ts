@@ -32,6 +32,7 @@ const http = readConfig({
   publicRoomMinRides: process.env.OYL_INSTANCE_PUBLIC_ROOM_MIN_RIDES,
   clientAddressHeader: process.env.OYL_INSTANCE_CLIENT_ADDRESS_HEADER,
   trustedProxies: process.env.OYL_INSTANCE_TRUSTED_PROXIES,
+  name: process.env.OYL_INSTANCE_NAME,
 });
 const server = readServerConfig(
   {

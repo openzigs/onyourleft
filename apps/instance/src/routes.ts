@@ -26,9 +26,9 @@ import { SYNC_ROUTES } from './sync/routes.ts';
  *
  * ## Versioning
  *
- * The four below are the instance's own **metadata** and are not versioned: what
- * is running, where its source is, what its API is, and what third-party
- * software it includes. They only ever gain fields. The API a client syncs
+ * The five below are the instance's own **metadata** and are not versioned: what
+ * is running, what it is called (#777), where its source is, what its API is,
+ * and what third-party software it includes. They only ever gain fields. The API a client syncs
  * through lives under `/v1/` from its first route (#776), and a breaking change
  * to it is `/v2/` served beside `/v1/`, never an edit — `docs/architecture.md`
  * §"The instance" records the rule.
@@ -60,6 +60,24 @@ export const ROUTES: readonly Route[] = [
       },
     },
     handle: ({ version, config }) => json({ status: 'ok', version, commit: config.commit }),
+  },
+  {
+    method: 'GET',
+    path: '/instance',
+    operationId: 'getInstance',
+    reaches: 'own',
+    summary:
+      'What the operator calls this instance, or null — the name a rider’s app shows once connected (#777).',
+    response: {
+      contentType: 'application/json',
+      schema: {
+        type: 'object',
+        properties: { name: { type: ['string', 'null'] } },
+        required: ['name'],
+        additionalProperties: false,
+      },
+    },
+    handle: ({ config }) => json({ name: config.name }),
   },
   {
     method: 'GET',

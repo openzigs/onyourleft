@@ -10,6 +10,8 @@
  * `PUBLIC_ROUTE_WARNING` is a constant and not a string in a component.
  */
 
+import { instanceEraser, INSTANCE_SESSION_STORAGE_KEY } from '../instance/instance-port';
+import { INSTANCE_ACCOUNT_STORAGE_KEY } from '../instance/sign-in';
 import {
   ATHLETE_A,
   cameraFrameFor,
@@ -201,8 +203,28 @@ describe('what the rider is told before they press it', () => {
     // architecture. If it ever grows a "we will ask other instances" line, that
     // line must arrive with the instance that makes it true.
     // Five since #518, whose hosted path made the fifth true; six since #804,
-    // whose press sends a ride's numbers to the rider's own computer.
-    expect(ERASE_CANNOT_REACH.length).toBeLessThanOrEqual(6);
+    // whose press sends a ride's numbers to the rider's own computer; seven
+    // since #777, which connects this device to an instance — and arrived
+    // with it, as this comment asked.
+    expect(ERASE_CANNOT_REACH.length).toBeLessThanOrEqual(7);
+  });
+
+  it('names what an instance holds, as the privacy policy does — #777, #778', () => {
+    const policy = readFileSync(
+      fileURLToPath(new URL('../../../../docs/privacy-policy.md', import.meta.url)),
+      'utf8',
+    );
+    const erase = policy.slice(
+      policy.indexOf('## Deleting your data'),
+      policy.indexOf('## Children'),
+    );
+    const straight = (text: string): string => text.replace(/[‘’]/g, "'").replace(/\s+/g, ' ');
+    expect(straight(erase)).toContain('your account on an instance you connected to');
+    expect(straight(erase)).toContain('which is a copy that instance holds');
+    const line = ERASE_CANNOT_REACH.find((entry) =>
+      straight(entry).includes('your account on an instance you connected to'),
+    );
+    expect(straight(line ?? '')).toContain('which is a copy that instance holds');
   });
 
   it('names the ride’s numbers sent to the rider’s own computer, as the privacy policy does — #804', () => {
@@ -382,6 +404,36 @@ describe('erasing, against the real store', () => {
       }),
     );
     expect(forgotten).toStrictEqual(['hosted-model']);
+  });
+
+  it('forgets this device’s sign-in to an instance after the cascade, over real storage (#777)', async () => {
+    await seedAthletes(harness);
+    await seed(ATHLETE_A, 1);
+    const kept = new Map<string, string>([
+      [INSTANCE_SESSION_STORAGE_KEY, 'token'],
+      [INSTANCE_ACCOUNT_STORAGE_KEY, '{"origin":"https://ride.example"}'],
+      ['oyl.units.other', 'kept'],
+    ]);
+    await harness.write(async (store) =>
+      eraseDevice(store, ATHLETE_A, {
+        instance: instanceEraser({ removeItem: (key) => void kept.delete(key) }),
+      }),
+    );
+    expect([...kept.keys()]).toStrictEqual(['oyl.units.other']);
+  });
+
+  it('does not forget the instance sign-in when the cascade threw (#777)', async () => {
+    const forgotten: string[] = [];
+    const refusing = {
+      deleteAthlete: () => Promise.reject(new Error('refused')),
+      ensureAthlete: () => Promise.reject(new Error('unreachable')),
+    };
+    await expect(
+      eraseDevice(refusing, ATHLETE_A, {
+        instance: { forget: () => void forgotten.push('instance') },
+      }),
+    ).rejects.toThrow('refused');
+    expect(forgotten).toStrictEqual([]);
   });
 
   it('does not forget the hosted key when the cascade threw (#518)', async () => {

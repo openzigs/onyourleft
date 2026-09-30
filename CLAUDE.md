@@ -326,6 +326,20 @@ apps/                 AGPL-3.0-or-later, without exception
                         fitness line carried to today, and the empty state a
                         new rider sees first. ⚠️ `#/` is Home since #428 and
                         the Ride screen is `#/ride`
+    src/instance/       connecting this app to an instance (#777) — which
+                        addresses it will talk to (`https:`, and `http:` only
+                        to this machine's loopback, refused before any
+                        request), the ONE module `no-network.test.ts` permits
+                        for instance traffic (`instance-transport.ts`, one
+                        `fetch`; a room's socket goes through it, never beside
+                        it — ADR 0036 D-3), signing in with the device key
+                        (#772's `sign-in.ts`), and `instance-port.ts`, whose
+                        `createInstancePort` only `main.tsx` names, so
+                        deleting that wiring is a red `check:wiring`. The
+                        session token and the address are kept on the DEVICE,
+                        not the athlete row (ADR 0020 D-2's question, answered
+                        the other way in the port's header). The screen is
+                        `views/InstanceView.tsx` at `#/settings/instance`
     src/library/        the activity library's row model, its port and its stub (#62),
                         and since #660 `layout.ts` — whether it is a table or a
                         list of cards, from the width the library is GIVEN
@@ -2413,6 +2427,11 @@ not.
   ⚠️ **Sync is BUILT and unreachable** (#881: #37, #38, #776, #35): `src/sync/` and the client half
   in `apps/web/src/instance/sync.ts` exist, but `src/instance.ts` hands the handler no sync, so every
   sync route answers `unavailable` on a running instance, and no client calls one until #777.
+  ⚠️ **`GET /instance` answers the operator's `OYL_INSTANCE_NAME` or `null` since #777**, never a
+  made-up default, and **every answer carries `Access-Control-Allow-Origin: *`**, with a preflight
+  to a routed path answering `204`, because the rider's app is always on another origin; it is safe
+  only because the instance reads no cookie and never sends `Allow-Credentials` (`src/handler.ts`
+  argues it).
 
 #### What exists, and what each is **not** yet
 
@@ -2491,13 +2510,16 @@ three editing this list on its own branch and conflicting with the other two.
     `@types/node` for the generator under `tools/`, and `tsconfig.platform-free.json` compiles
     `src/` alone with `lib: ["ES2024"]` and `types: []`. A `TextDecoder` in `src/` is therefore a
     compile error, which is why the codec carries its own UTF-8 reader **and its own XML reader**.
-    ⚠️ **`fit-file-parser` 5.0.2 (MIT) is now a devDependency of `packages/fit`**, imported from
+    ⚠️ **`fit-file-parser` 6.1.2 (MIT) is now a devDependency of `packages/fit`**, imported from
     one test file (`tools/fixture-corpus/third-party-acceptance.test.ts`) and never from `src/`. It
     is the independent third-party FIT reader #31's acceptance criterion requires, adopted under
     that issue's revision block, which struck "validate with the SDK's own checker" under
     ADR 0006 R1. `packages/fit/README.md` §1 records the reconciliation; that README's declaration
     no longer claims the package depends on nothing named `fit-file-parser`, and a reviewer
-    expecting the old sentence should read the new one.
+    expecting the old sentence should read the new one. ⚠️ **It was 5.0.2 until #755**: 6.1.2's
+    effective message and type tables differ from 5.0.2's only by two sub-sports (153
+    `mountain_enduro`, 154 `mountain_downhill`), and it parses every corpus file and the #138
+    uploads to identical output in both `list` and `cascade` mode.
     ⚠️ **Since [#89](https://github.com/openzigs/onyourleft/issues/89) it also holds
     `src/route/`**, `decodeGpxRoute` — the #32 decoder composed with
     `@onyourleft/domain`'s route profile, and the only place the codec and the profile meet. That
@@ -2569,7 +2591,7 @@ and routing it through `web-crypto.ts` would destroy the independence it exists 
 React 19, React DOM, Vite, — since #26 — `dexie` 4.4.5 and `fake-indexeddb` 6.2.5 (both
 Apache-2.0, both zero-dependency, both under `packages/store`) and — since #40 —
 `@types/web-bluetooth` 0.0.21 (MIT, zero-dependency, types only, a devDependency of
-`packages/sensors`) and — since #31 — `fit-file-parser` 5.0.2 (MIT, a devDependency of
+`packages/sensors`) and — since #31 — `fit-file-parser` **6.1.2** (MIT, a devDependency of
 `packages/fit` **and, since #51, of `apps/web` too**, whose closure is `buffer` MIT → `base64-js`
 MIT and `ieee754` BSD-3-Clause) and — since #63 — `maplibre-gl` **6.11.2** and `pmtiles` 4.5.0 (both
 BSD-3-Clause, both runtime dependencies of `apps/web`, whose closure adds BSD-2-Clause, ISC, MIT and
@@ -5365,6 +5387,11 @@ top of an issue **supersedes its body**.
 | Why the page has two palettes, how one is chosen before the first paint, and what the HUD keeps | `apps/web/src/design/tokens.ts` §`DARK_COLOUR_TOKENS`, `apps/web/src/design/theme-selection.ts`, `apps/web/tools/theme/theme-selection-plugin.ts`, `apps/web/browser/theme.browser.spec.ts`, [#672](https://github.com/openzigs/onyourleft/issues/672) |
 | Where a screen's longer explanation goes, which sentences may never be tucked, and what measures the fold | `apps/web/src/design/MoreAbout.tsx`, `apps/web/src/a11y/kept-visible.a11y.test.tsx`, `apps/web/browser/controls-first.browser.spec.ts`, [#666](https://github.com/openzigs/onyourleft/issues/666) |
 | What proves the HUD's live region is not hidden and moves nothing, and why that is not a screen reader | `apps/web/browser/hud.browser.spec.ts` §"#401", [#401](https://github.com/openzigs/onyourleft/issues/401) |
+| Which instance addresses the app will talk to, and why `http:` is refused before any request | `apps/web/src/instance/address.ts`, [#777](https://github.com/openzigs/onyourleft/issues/777) |
+| The one module that may talk to an instance, what it sends, and why a room's socket goes through it | `apps/web/src/instance/instance-transport.ts`, `apps/web/src/privacy/no-network.test.ts` §`PERMITTED_NETWORK_CALLS`, [ADR 0036](docs/adr/0036-a-self-hostable-instance-server-now.md) D-3 |
+| Why the instance answers `Access-Control-Allow-Origin: *`, and why that is safe with bearer tokens | `apps/instance/src/handler.ts` §"A rider's app is on another origin", `apps/web/browser/identity.browser.spec.ts` §"#777" |
+| Where a sign-in to an instance is kept, why on the device and not the athlete row, and what Disconnect and an erase remove | `apps/web/src/instance/instance-port.ts` §"What the device keeps", §`instanceEraser` |
+| What the privacy policy says an instance receives, class by class, and what pins it | [`docs/privacy-policy.md`](docs/privacy-policy.md) §"An instance you connect to", `apps/web/src/privacy/no-network.test.ts` §"#778" |
 | How a device signs in to an instance with its key, what each refusal code means, and why the nonce is spent before the signature is checked | `apps/instance/src/auth/identity.ts`, `packages/domain/src/identity/device-statement.ts`, [#772](https://github.com/openzigs/onyourleft/issues/772) |
 | Why a room's WebSocket carries a ticket and never the session token, and where the room core's `Admit` comes from | `apps/instance/src/auth/tickets.ts` |
 | What an instance stores of a session token, a recovery code, a link code or an email-recovery token, and what proves it | `apps/instance/src/auth/sign-in.test.ts`, `devices.test.ts` (`databaseBytes`) |

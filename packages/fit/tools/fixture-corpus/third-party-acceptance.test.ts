@@ -10,7 +10,7 @@
  *
  * ## The reader, and why this one
  *
- * **`fit-file-parser` 5.0.2 (MIT)**, an exact pin in `packages/fit`'s
+ * **`fit-file-parser` 6.1.2 (MIT)**, an exact pin in `packages/fit`'s
  * `devDependencies`. It is never shipped and never imported from `src/`.
  *
  * #31's revision block rules on this directly. The struck criterion was
@@ -141,7 +141,7 @@ const DIFFERENTIAL_FIXTURES = [
   'heart-rate-16-bit.fit',
 ] as const;
 
-describe('fit-file-parser 5.0.2 cannot tell a re-encode from the file it came from', () => {
+describe('fit-file-parser 6.1.2 cannot tell a re-encode from the file it came from', () => {
   it.each(DIFFERENTIAL_FIXTURES)('%s', (name) => {
     const before = readWithThirdParty(fixture(name));
     const after = readWithThirdParty(reencoded(name));
@@ -159,7 +159,7 @@ describe('fit-file-parser 5.0.2 cannot tell a re-encode from the file it came fr
   });
 });
 
-describe('fit-file-parser 5.0.2 reading this encoder’s output', () => {
+describe('fit-file-parser 6.1.2 reading this encoder’s output', () => {
   it('reads an outdoor ride, channel for channel', () => {
     const bytes = reencoded('nominal-outdoor-ride.fit');
     const third = readWithThirdParty(bytes);
