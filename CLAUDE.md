@@ -334,8 +334,9 @@ apps/                 AGPL-3.0-or-later, without exception
                         once-per-application protocol registration, and the one
                         file that names MapLibre. Since #578 it labels places
                         and road names from glyphs the app ships, at a RELATIVE
-                        `glyphs` URL so they add no origin. ⚠️ MapLibre 6.10
-                        draws text in the device's font when a range cannot be
+                        `glyphs` URL so they add no origin. ⚠️ MapLibre (6.10,
+                        and 6.11 since #756) draws text in the device's font
+                        when a range cannot be
                         fetched, so a label painting proves nothing about the
                         glyphs — the browser gate asserts the requests. Since
                         #672 every colour the map paints is in `basemap.ts`
@@ -2570,11 +2571,13 @@ Apache-2.0, both zero-dependency, both under `packages/store`) and — since #40
 `@types/web-bluetooth` 0.0.21 (MIT, zero-dependency, types only, a devDependency of
 `packages/sensors`) and — since #31 — `fit-file-parser` 5.0.2 (MIT, a devDependency of
 `packages/fit` **and, since #51, of `apps/web` too**, whose closure is `buffer` MIT → `base64-js`
-MIT and `ieee754` BSD-3-Clause) and — since #63 — `maplibre-gl` **6.10.0** and `pmtiles` 4.5.0 (both
+MIT and `ieee754` BSD-3-Clause) and — since #63 — `maplibre-gl` **6.11.2** and `pmtiles` 4.5.0 (both
 BSD-3-Clause, both runtime dependencies of `apps/web`, whose closure adds BSD-2-Clause, ISC, MIT and
 one `(MIT OR Apache-2.0)` and no GPL, AGPL or non-OSI licence — ⚠️ **this said 6.7.0 until #489**,
 which took 6.10.0 with the browser gate re-run; the bump added `bidi-js` and `require-from-string`
-to that closure, both MIT, so the sentence above still describes it) and — also since #63 —
+to that closure, both MIT, so the sentence above still describes it; and **6.10.0 until #756**,
+which took 6.11.2 with the browser gate re-run and changed no dependency of `maplibre-gl` at all)
+and — also since #63 —
 `@playwright/test` 1.63.0 (Apache-2.0, with `playwright` and `playwright-core`, all three
 Apache-2.0; a devDependency of `apps/web`, and the only dependency in the workspace that pins a
 **browser** as well as a version — see §4f) and — since #91 — `three` **0.185.1** (MIT,
@@ -3511,7 +3514,14 @@ and #91's 60-minute measured run on the device floor is still outstanding.
 the harness's 404 made **MapLibre retry a failed source** so the network never went idle, and a
 reviewer who remembers that is reading the old file. #535's review measured MapLibre **6.10.0**: an
 archive answering 404 is requested **once**, raises two `console.error`s and is not requested again
-over ten seconds; a connection dropped mid-request is requested **twice** and then left alone. The
+over ten seconds; a connection dropped mid-request is requested **twice** and then left alone.
+⚠️ **#756 re-measured it on 6.11.2 with 6.10.0 as the control, and half of that did not
+reproduce.** The 404 half held on both: one request, two `console.error`s, nothing more over ten
+seconds. A dropped connection was requested **once** on both, not twice — whether it was reset at
+the request (Playwright's `route.abort('connectionreset')`) or cut 100 bytes into a 206 body by a
+local server — with the same two errors. So the "twice" is not a change between the two versions;
+it came from a way of dropping the connection that #535 did not record and #756 did not find. The
+request is pmtiles' `FetchSource`, which is 4.5.0 in both runs. The
 advice stands for a reason that does not depend on any retry policy: `networkidle` resolves just as
 happily over a page that requested **nothing**, which is what a broken protocol registration looks
 like. Wait on the event you mean (`waitForRequest`), which fails immediately when the request is

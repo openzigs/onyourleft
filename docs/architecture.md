@@ -911,8 +911,8 @@ alternatives are there.
 | Test runner | Vitest 4.1.11 |
 | Coverage gate | **no percentage** — every new code path covered by a test proven to fail without the change |
 | Linter / formatter | ESLint 10 + typescript-eslint + Prettier 3 |
-| Map rendering | **MapLibre GL JS 6.10.0** + **`pmtiles` 4.5.0**, both BSD-3-Clause — installed by #63, in `apps/web` (ADR 0010 D-1) |
-| Basemap | Protomaps basemap as a PMTiles archive on storage this project controls. ⚠️ **This row used to read "not published yet — #53" and no longer does**: #53 published a continental-US extract of a pinned daily build on 2026-09-16, and #63's browser gate has rendered from it. ⚠️ **Since #534 every build draws it by default** — `apps/web/src/map/basemap.ts` §`PUBLISHED_BASEMAP_URL`, a committed constant because `.gitignore` refuses a committed `.env.production`; `VITE_BASEMAP_PMTILES_URL` overrides it and `none` turns the map off. ⚠️ **Since the owner's decision of 2026-09-25 a rider can turn the tiles off too**: Settings' *Ride map* switch, on by default and kept on the device (`apps/web/src/map/tiles-preference.ts`), which builds a style with no source at all, so the tile host is contacted by nothing while the ride's line and the OpenStreetMap credit still render. ⚠️ **A published archive object must never be deleted or renamed while any shipped build names it.** The URL is baked into every web bundle and every APK, dated object name included, and an installed APK is not updated when #53 publishes a newer build — so deleting `basemap-us-20260914.pmtiles` would take the map away from every old client, silently (one request, two console errors, no message: #535's review measured it). A newer build is published beside it under a new name, and the old one is removed only once no build in use can name it. A reviewer who remembers "it is not in `.env.example`" is reading the old row: the template now documents it as the default. Coverage is the contiguous US at z0–15; outside it the map is the ride's line on a plain background and no tile is requested (`map.browser.spec.ts` §"a ride outside the archive’s coverage"). Its host is named in `docs/privacy-policy.md` and the Data Safety declaration, and `privacy/no-network.test.ts` fails when it moves without them. The gate's *default* archive is still the synthetic one built by `apps/web/browser/pmtiles-fixture.ts`, which contains no OpenStreetMap data. ⚠️ **Since #578 the map carries place and road names**, set in Roboto v2.138 (Apache-2.0, the last release before Roboto moved to OFL) from signed-distance glyph ranges `apps/web/tools/glyphs/` generates from the committed font into `apps/web/public/glyphs/Roboto-Regular/`, with the font's own licence beside them. The style names them at the relative `./glyphs/{fontstack}/{range}.pbf`, so no request leaves the app's origin for a label and the privacy policy is unchanged; they are precached (586 KiB). ⚠️ MapLibre 6.10 draws a glyph from the device's own font whenever a range cannot be fetched, so a missing range degrades the typeface rather than blanking the label — `map.browser.spec.ts` §"place names" measures that and asserts on the requests rather than the ink |
+| Map rendering | **MapLibre GL JS 6.11.2** + **`pmtiles` 4.5.0**, both BSD-3-Clause — installed by #63, in `apps/web` (ADR 0010 D-1) |
+| Basemap | Protomaps basemap as a PMTiles archive on storage this project controls. ⚠️ **This row used to read "not published yet — #53" and no longer does**: #53 published a continental-US extract of a pinned daily build on 2026-09-16, and #63's browser gate has rendered from it. ⚠️ **Since #534 every build draws it by default** — `apps/web/src/map/basemap.ts` §`PUBLISHED_BASEMAP_URL`, a committed constant because `.gitignore` refuses a committed `.env.production`; `VITE_BASEMAP_PMTILES_URL` overrides it and `none` turns the map off. ⚠️ **Since the owner's decision of 2026-09-25 a rider can turn the tiles off too**: Settings' *Ride map* switch, on by default and kept on the device (`apps/web/src/map/tiles-preference.ts`), which builds a style with no source at all, so the tile host is contacted by nothing while the ride's line and the OpenStreetMap credit still render. ⚠️ **A published archive object must never be deleted or renamed while any shipped build names it.** The URL is baked into every web bundle and every APK, dated object name included, and an installed APK is not updated when #53 publishes a newer build — so deleting `basemap-us-20260914.pmtiles` would take the map away from every old client, silently (one request, two console errors, no message: #535's review measured it). A newer build is published beside it under a new name, and the old one is removed only once no build in use can name it. A reviewer who remembers "it is not in `.env.example`" is reading the old row: the template now documents it as the default. Coverage is the contiguous US at z0–15; outside it the map is the ride's line on a plain background and no tile is requested (`map.browser.spec.ts` §"a ride outside the archive’s coverage"). Its host is named in `docs/privacy-policy.md` and the Data Safety declaration, and `privacy/no-network.test.ts` fails when it moves without them. The gate's *default* archive is still the synthetic one built by `apps/web/browser/pmtiles-fixture.ts`, which contains no OpenStreetMap data. ⚠️ **Since #578 the map carries place and road names**, set in Roboto v2.138 (Apache-2.0, the last release before Roboto moved to OFL) from signed-distance glyph ranges `apps/web/tools/glyphs/` generates from the committed font into `apps/web/public/glyphs/Roboto-Regular/`, with the font's own licence beside them. The style names them at the relative `./glyphs/{fontstack}/{range}.pbf`, so no request leaves the app's origin for a label and the privacy policy is unchanged; they are precached (586 KiB). ⚠️ MapLibre (6.10, and 6.11 since #756) draws a glyph from the device's own font whenever a range cannot be fetched, so a missing range degrades the typeface rather than blanking the label — `map.browser.spec.ts` §"place names" measures that and asserts on the requests rather than the ink |
 | Third-party licence notices | **Generated and committed, then gated** ([#664](https://github.com/openzigs/onyourleft/issues/664)). `scripts/check-third-party-notices.mjs` reads the union of every workspace package's `--prod` closure through the same `discoverPackages`/`readClosure` `check:licences` uses, copies each package's own `LICENSE`/`LICENCE`/`COPYING`/`NOTICE` text verbatim, adds the APK's native libraries from the reviewed `apps/mobile/native-closure.json` (held to Gradle by `apps/mobile/src/android/native-closure.test.ts` where Gradle has run) and writes `apps/web/public/licences/third-party.txt` — served from `dist`, precached, in the APK — and its contents to `apps/web/src/credits/third-party-contents.txt`, which the Credits screen inlines. `check:notices` regenerates both after its own frozen install and fails on any difference; CLAUDE.md §4g "Admitted is not the same as noticed" is the rest |
 | Real-time transport | deferred to [#16](https://github.com/openzigs/onyourleft/issues/16) |
 
@@ -922,15 +922,18 @@ keeps that list; the commands are in section 4a.
 
 ### The map dependencies, recorded because #63's definition of done asks for it
 
-| Package | Version installed | Licence, verified from the installed tree on 2026-09-22 |
+| Package | Version installed | Licence, verified from the installed tree on 2026-09-30 |
 |---|---|---|
-| `maplibre-gl` | **6.10.0** | BSD-3-Clause |
+| `maplibre-gl` | **6.11.2** | BSD-3-Clause |
 | `pmtiles` | **4.5.0** | BSD-3-Clause |
 
 ⚠️ **`maplibre-gl` read 6.7.0 here until [#489](https://github.com/openzigs/onyourleft/issues/489)**,
 which took Dependabot's 6.10.0 after re-running the browser gate against it; a reviewer who
 remembers 6.7.0 is reading the old file. The bump added `bidi-js` and `require-from-string` to the
-closure below, both MIT, so its licence sentence is unchanged.
+closure below, both MIT, so its licence sentence is unchanged. ⚠️ **And it read 6.10.0 until
+[#756](https://github.com/openzigs/onyourleft/pull/756)**, which took 6.11.2 with the browser gate
+re-run: its `LICENSE.txt` is byte-identical to 6.10.0's and its dependencies are the same, so the
+closure did not move. `pmtiles` was not bumped; its licence was re-read from the installed tree the same day.
 
 Both land in `apps/web`, which is AGPL-3.0-or-later; BSD-3 is admissible there and under `packages/`
 alike, and what keeps them in `apps/` is the DOM rather than the licence (ADR 0010 D-1 says so in as
@@ -939,7 +942,10 @@ reaches `packages/*` — unlike the devDependencies that arrive there through Vi
 §3 records as the trap.
 
 Their closure adds BSD-2-Clause, ISC, MIT and one `(MIT OR Apache-2.0)` and no GPL, no AGPL and
-nothing non-OSI. `maplibre-gl` is **1 006 kB minified** (977 kB at 6.7.0), which is why `apps/web/src/map/maplibre.ts` is
+nothing non-OSI. The lazy map chunk is **1 036 kB minified** at 6.11.2, against 1 031 kB for 6.10.0
+built from the same tree on 2026-09-30 (it said 1 006 kB here for 6.10.0 at #489, and 977 kB at
+6.7.0; the chunk carries this app's map code as well as MapLibre's, so it moves with that code
+too), which is why `apps/web/src/map/maplibre.ts` is
 reached through a dynamic `import()` and lands in its own chunk: a rider who only opens indoor rides
 never downloads it.
 
@@ -955,7 +961,7 @@ tiles and draws none of them, with no error anywhere.
 `maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url`. **`?worker&url` and not `?url`**: the dist
 worker imports its sibling `maplibre-gl-shared.mjs`, so a verbatim copy of one file fails on its
 first import and produces the same blank map by a different route. `pnpm run build` emits
-`assets/maplibre-gl-worker-*.js` (~486 kB, referenced only from the lazy map chunk, so the code
+`assets/maplibre-gl-worker-*.js` (~509 kB at 6.11.2, referenced only from the lazy map chunk, so the code
 split is unaffected).
 
 This was found by #63's browser gate only once it had a real archive to render — see below.

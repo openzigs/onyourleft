@@ -83,8 +83,8 @@ export const FONT_STACK = 'Roboto-Regular';
  * | 7680–7935 | Latin Extended Additional: Vietnamese |
  * | 8192–8447 | general punctuation: ’ – — as a name may spell them |
  *
- * ⚠️ **A code point outside these is not a blank.** MapLibre 6.10 answers a
- * range the server does not have by drawing that glyph itself, from whatever
+ * ⚠️ **A code point outside these is not a blank.** MapLibre 6.10 (and 6.11)
+ * answers a range the server does not have by drawing that glyph itself, from whatever
  * font the device has (`glyph_manager.ts` §`_downloadAndCacheRangePromise`),
  * and warns once. So a Cyrillic name renders in the device's font rather than
  * in Roboto, and costs one 404 — which is the trade taken to keep the
