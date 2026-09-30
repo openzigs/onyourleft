@@ -73,6 +73,7 @@ import { CameraIndicator } from '../camera/indicator';
 import type { CameraController } from '../camera/session';
 import type { SideCameraLinkPort } from '../camera/side-camera-link-port';
 import type { RoomPort } from '../net/room-port';
+import type { RoomsPort } from '../net/rooms-port';
 import type { SidePairingPort } from '../camera/side-pairing-port';
 import type { ThermalPort } from '../game/thermal-port';
 
@@ -209,10 +210,17 @@ export interface AppShellProps {
    */
   readonly room?: RoomPort | undefined;
   /**
-   * Which room the game joins. ⚠️ `main.tsx` supplies none: a room is entered
-   * by its code, which is #784's. The browser gate supplies one.
+   * Which room the game joins, when the shell is told one — the browser gate
+   * and a test. ⚠️ The product enters a room on the game's own picker since
+   * #784 (`rooms/RoomPanel.tsx`), through {@link rooms}; `main.tsx` names none.
    */
   readonly roomId?: string | undefined;
+  /**
+   * A rider's rooms — #784, #785: `main.tsx` builds it over the instance this
+   * device is connected to (`net/rooms-port.ts`), and the game's picker makes
+   * and joins rooms through it.
+   */
+  readonly rooms?: RoomsPort | undefined;
   /**
    * Android's thermal forecast, for the game's quality ladder (#247). Absent
    * in a browser. @see game/thermal-port.ts
@@ -538,6 +546,7 @@ function viewFor(
           // #782, #783: other real riders, over the instance.
           {...(props.room === undefined ? {} : { room: props.room })}
           {...(props.roomId === undefined ? {} : { roomId: props.roomId })}
+          {...(props.rooms === undefined ? {} : { rooms: props.rooms })}
         />
       );
     case 'segment-detail':

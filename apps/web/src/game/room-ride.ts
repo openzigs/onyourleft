@@ -14,8 +14,9 @@
 
 import { pacerGap } from '@onyourleft/domain';
 
+import type { AnnouncementEvent } from './hud/announce';
 import type { RoomConnection } from '../net/room-port';
-import type { RoomSessionStatus } from '../net/room-session';
+import type { RoomRace, RoomSessionStatus } from '../net/room-session';
 import { InterestSet } from '../net/interest';
 import { roomErrorMetres } from '../net/correction';
 import type { RemoteRiderInput } from './scene';
@@ -191,4 +192,108 @@ export function nextToFollow(
   if (ids.length === 0) return undefined;
   if (current === undefined) return ids[0];
   return ids.find((id) => id > current) ?? ids[0];
+}
+
+/**
+ * Whether a race's rider is held on the start line — #785: from joining until
+ * the room's first frame, whatever they pedal. `GameView` holds the simulation
+ * (`simulation.ts` §`holdAt`) for exactly as long as this says so. A group ride
+ * is never held: it starts on its first rider (`apps/instance` §`room.ts`).
+ */
+export function heldOnTheLine(race: RoomRace | undefined): boolean {
+  return race?.kind === 'waiting' || race?.kind === 'counting';
+}
+
+/** The label the HUD gives a race's notice. */
+export const RACE_NOTICE_LABEL = 'Race';
+
+/**
+ * What the HUD says about a race while there is anything to say — ⚠️ draft
+ * wording awaiting the owner's approval, like every sentence in the room work.
+ * Nothing here ranks anybody: ADR 0028 D-7.7 and ruling Q8, no live standings.
+ */
+export const RACE_TEXT = {
+  waiting:
+    'You are on the start line. The race starts when a rider on the line starts it — you can too.',
+  counting: (seconds: number): string =>
+    `The race starts in ${String(seconds)} second${seconds === 1 ? '' : 's'}.`,
+  finished: 'The race is over. End the ride to see its result.',
+  go: 'Go.',
+} as const;
+
+/** The whole seconds left of a countdown at `localMs`, never below nought. */
+export function countdownSeconds(endsAtLocalMs: number, localMs: number): number {
+  return Math.max(0, Math.ceil((endsAtLocalMs - localMs) / 1000));
+}
+
+/** The race's notice now, or nothing while it runs. */
+export function raceNotice(race: RoomRace | undefined, localMs: number): string | undefined {
+  switch (race?.kind) {
+    case 'waiting':
+      return RACE_TEXT.waiting;
+    case 'counting':
+      return RACE_TEXT.counting(countdownSeconds(race.endsAtLocalMs, localMs));
+    case 'finished':
+      return RACE_TEXT.finished;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * What the HUD's one region says when a race changes — #785, `announce.ts`
+ * rank 5a″: the countdown as it begins, "Go" at the first frame, and its end.
+ * `said` is the kind last announced; nothing is said twice for one kind.
+ */
+export function raceEvent(
+  said: RoomRace['kind'] | undefined,
+  race: RoomRace | undefined,
+  localMs: number,
+): { readonly said: RoomRace['kind'] | undefined; readonly event?: AnnouncementEvent } {
+  const kind = race?.kind;
+  if (kind === said || race === undefined) return { said: kind };
+  switch (race.kind) {
+    case 'counting':
+      return {
+        said: kind,
+        event: {
+          kind: 'room-race',
+          text: RACE_TEXT.counting(countdownSeconds(race.endsAtLocalMs, localMs)),
+        },
+      };
+    case 'running':
+      return { said: kind, event: { kind: 'room-race', text: RACE_TEXT.go } };
+    case 'finished':
+      return { said: kind, event: { kind: 'room-race', text: RACE_TEXT.finished } };
+    default:
+      return { said: kind };
+  }
+}
+
+/** A rider joining or leaving, as the HUD's region says it (#784). */
+export const RIDER_TEXT = {
+  joined: (count: number): string =>
+    count === 1 ? 'A rider joined the room.' : `${String(count)} riders joined the room.`,
+  left: (count: number): string =>
+    count === 1 ? 'A rider left the room.' : `${String(count)} riders left the room.`,
+} as const;
+
+/**
+ * Riders who came into the room's frames and went out of them since the last
+ * look — #784, `announce.ts` rank 5a‴, said only with announcements on. The
+ * first look is the room as it was found, and nobody "joined" it. Nobody is
+ * named: a frame carries a seat and never a person.
+ */
+export function riderEvents(
+  seen: ReadonlySet<number> | undefined,
+  now: readonly number[],
+): { readonly seen: ReadonlySet<number>; readonly events: readonly AnnouncementEvent[] } {
+  const current = new Set(now);
+  if (seen === undefined) return { seen: current, events: [] };
+  const joined = [...current].filter((id) => !seen.has(id)).length;
+  const left = [...seen].filter((id) => !current.has(id)).length;
+  const events: AnnouncementEvent[] = [];
+  if (joined > 0) events.push({ kind: 'room-rider', text: RIDER_TEXT.joined(joined) });
+  if (left > 0) events.push({ kind: 'room-rider', text: RIDER_TEXT.left(left) });
+  return { seen: current, events };
 }

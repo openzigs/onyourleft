@@ -105,8 +105,18 @@ import {
 import { FramePacer } from './frame-pacer';
 import { sceneFrame } from './scene';
 import type { RoomConnection, RoomPort } from '../net/room-port';
+import type { RoomRace } from '../net/room-session';
+import type { EnteredRoom, RoomsPort } from '../net/rooms-port';
+import { Button } from '../design/Button';
+import { RaceResult } from '../rooms/RaceResult';
+import { RoomPanel } from '../rooms/RoomPanel';
 import {
+  heldOnTheLine,
   nextToFollow,
+  RACE_NOTICE_LABEL,
+  raceEvent,
+  raceNotice,
+  riderEvents,
   ROOM_LOST_SPOKEN,
   ROOM_NOTICE_LABEL,
   roomFrame,
@@ -358,12 +368,19 @@ export interface GameViewProps {
    */
   readonly room?: RoomPort | undefined;
   /**
-   * Which room a ride joins. ⚠️ **Nothing in the product supplies one yet** —
-   * entering a room by its code is #784's — so today only a test and the
-   * browser gate ride in a room; the port is wired so that #784 is a field
-   * and not a seam.
+   * Which room a ride joins, when the shell names one — a test and the browser
+   * gate. ⚠️ **The product's own source since #784 is the picker's room panel**
+   * (`rooms/RoomPanel.tsx`): a room made on one of the rider's routes, or joined
+   * by its code, is entered there and ridden from there, and wins over this.
    */
   readonly roomId?: string | undefined;
+  /**
+   * A rider's rooms — #784, #785: making one on your own route, joining one by
+   * its code, starting a race and reading its result (`net/rooms-port.ts`).
+   * `main.tsx` builds it over the instance this device is connected to.
+   * Absent, the picker's room panel says where to connect and offers nothing.
+   */
+  readonly rooms?: RoomsPort | undefined;
 }
 
 type Phase = 'choosing' | 'riding' | 'paused';
@@ -513,6 +530,35 @@ export function GameView(props: GameViewProps): JSX.Element {
   const [windSpeed, setWindSpeed] = useState('');
   const [windFrom, setWindFrom] = useState(String(DEFAULT_WIND_FROM_BEARING));
   const [phase, setPhase] = useState<Phase>('choosing');
+  /**
+   * The room this device is in — made or joined on the picker's room panel
+   * (#784). A ref beside it for {@link begin}, which reads it at the press.
+   */
+  const [entered, setEnteredState] = useState<EnteredRoom | undefined>(undefined);
+  const enteredRef = useRef<EnteredRoom | undefined>(undefined);
+  const setEntered = useCallback((room: EnteredRoom | undefined) => {
+    enteredRef.current = room;
+    setEnteredState(room);
+  }, []);
+  /**
+   * A race this ride was in that the room said is over — #785: its result is
+   * shown on the picker once the ride ends, and never before the room says so.
+   */
+  const [raceOver, setRaceOver] = useState<
+    | { readonly roomId: string; readonly finishers: number; readonly ownWatts: number | undefined }
+    | undefined
+  >(undefined);
+  /** Whether a press on *Start the race* is on its way, and what it was told (#785). */
+  const [starting, setStarting] = useState<'asking' | 'refused' | undefined>(undefined);
+  /**
+   * What the race's notice says, as a key the tick sets — #785. A rider held
+   * on the line has a simulation state that does not change, so the tick's
+   * `setState` of it schedules no render; this does, when the race moves on
+   * or its countdown loses a second, and not otherwise.
+   */
+  const [, setRaceShown] = useState('');
+  /** The words last set, so an unchanged notice costs no render at all (#482's rule). */
+  const raceShownRef = useRef('');
   const [state, setState] = useState<GameState | undefined>(undefined);
   /**
    * The rung the ride is drawing at. Only the LEVEL is state — #482.
@@ -819,6 +865,18 @@ export function GameView(props: GameViewProps): JSX.Element {
   const roomFrameRef = useRef<RoomFrame | undefined>(undefined);
   /** Whether the room's lost connection has been said, so it is said once per loss. */
   const roomLostSaidRef = useRef(false);
+  /** The id of the room this ride is in, for the race's start and its result (#785). */
+  const roomIdRef = useRef<string | undefined>(undefined);
+  /** The race's last state said through the HUD's region (#785). */
+  const raceSaidRef = useRef<RoomRace['kind'] | undefined>(undefined);
+  /** The other riders the room's frames held at the last look (#784). */
+  const ridersSeenRef = useRef<ReadonlySet<number> | undefined>(undefined);
+  /**
+   * The rider's own power over the race, on this device: summed watt-seconds
+   * and seconds while it runs — shown beside their own line of the result and
+   * nowhere else (ADR 0028's publication rule; #785).
+   */
+  const raceWattsRef = useRef({ wattSeconds: 0, seconds: 0 });
 
   const port = props.port;
 
@@ -1052,11 +1110,20 @@ export function GameView(props: GameViewProps): JSX.Element {
       roomRef.current = undefined;
       roomFrameRef.current = undefined;
       roomLostSaidRef.current = false;
-      if (props.room !== undefined && props.roomId !== undefined && port !== undefined) {
+      raceSaidRef.current = undefined;
+      ridersSeenRef.current = undefined;
+      raceWattsRef.current = { wattSeconds: 0, seconds: 0 };
+      setRaceOver(undefined);
+      setStarting(undefined);
+      // #784: the room entered on the picker's panel, when there is one —
+      // else the shell's, which only a test and the browser gate name.
+      const roomId = enteredRef.current?.roomId ?? props.roomId;
+      roomIdRef.current = roomId;
+      if (props.room !== undefined && roomId !== undefined && port !== undefined) {
         const sensorsNow = port;
         roomStateRef.current = roomRideState();
         roomRef.current = props.room.join({
-          roomId: props.roomId,
+          roomId,
           // #782's review (N5): the weight the rider DECLARED, or none. A
           // rider with none is not ticketed at a default (ADR 0028 D-1: the
           // room races the declared mass); the room refuses as
@@ -1281,7 +1348,24 @@ export function GameView(props: GameViewProps): JSX.Element {
       // samples of a live sensor on one frame, which is a HUD and a pair of
       // legs describing different instants.
       const sensors = port.readSensors();
-      simulation.advanceTo(at, sensors.rider);
+      // #785: a race's rider is held on the start line until the ROOM starts
+      // the race — its first frame — and the wait is never ridden afterwards
+      // (`simulation.ts` §`holdAt`). The trainer is still given the rider's own
+      // road's grade at the line: nothing about a room reaches it.
+      const race = roomRef.current?.race();
+      if (heldOnTheLine(race)) {
+        simulation.holdAt(at);
+      } else {
+        simulation.advanceTo(at, sensors.rider);
+      }
+      if (race?.kind === 'running') {
+        const dt = Math.max(0, (at - lastFrameAt) / 1000);
+        const power = sensors.rider.live ? (sensors.rider.power as number) : 0;
+        raceWattsRef.current = {
+          wattSeconds: raceWattsRef.current.wattSeconds + power * dt,
+          seconds: raceWattsRef.current.seconds + dt,
+        };
+      }
       // #782, #783: the room — a correction toward it when a new frame says
       // so (never backwards, `simulation.ts` §`correctToward`), and the other
       // riders to draw. Nothing here writes to the trainer: the gradient
@@ -1402,6 +1486,27 @@ export function GameView(props: GameViewProps): JSX.Element {
         events.push({ kind: 'room-lost', text: ROOM_LOST_SPOKEN });
       } else if (!roomLost) {
         roomLostSaidRef.current = false;
+      }
+      // #785: the race's countdown, its start and its end, each said once —
+      // and on the HUD, re-rendered as it moves (@see setRaceShown).
+      const raceWords = raceNotice(race, at) ?? '';
+      if (raceWords !== raceShownRef.current) {
+        raceShownRef.current = raceWords;
+        setRaceShown(raceWords);
+      }
+      const raced = raceEvent(raceSaidRef.current, race, at);
+      raceSaidRef.current = raced.said;
+      if (raced.event !== undefined) events.push(raced.event);
+      // #784: a rider joining or leaving the room, with announcements on.
+      // The room as it was found is the baseline: nobody "joined" it. So not
+      // until the room has sent this rider a frame.
+      if (room !== undefined && room.own() !== undefined) {
+        const seen = riderEvents(
+          ridersSeenRef.current,
+          room.others(at).map((rider) => rider.riderId),
+        );
+        ridersSeenRef.current = seen.seen;
+        events.push(...seen.events);
       }
       const side = sidePairingRef.current?.currentSideCamera()?.control.sideControlState();
       const sideLost = sideCameraLostEvent(sideLostRef.current, side);
@@ -1635,44 +1740,89 @@ export function GameView(props: GameViewProps): JSX.Element {
     // One snapshot read for both notices, so they describe the same moment.
     const trainerNow = props.trainer?.readTrainer();
     return (
-      <RoutePicker
-        routes={routes}
-        // ⚠️ Read **here** rather than reusing the ride's captured state: a
-        // workout started or ended on the Ride screen changes what is true
-        // before the next press. A snapshot read, so it costs a property access
-        // per render and never opens a connection — and asks nothing (#503).
-        trainerNotice={trainerRoadNotice(trainerNow ?? NO_GAME_TRAINER, 'before-ride')}
-        // #509: whether the press has asked and the trainer has not answered.
-        asking={asking}
-        // #503: what the press on Ride will do to the trainer, said before it.
-        trainerPromise={trainerRoadPromise(trainerNow ?? NO_GAME_TRAINER)}
-        // #475: a snapshot read for the trainer notice's reason — a rider who
-        // changes the choice in Settings and comes back sees it here at once.
-        worldChosen={readRealisticWorldChoice(deviceStorage())}
-        releaseNotice={trainerNow?.releaseFault}
-        withGhost={withGhost}
-        onGhost={setWithGhost}
-        withPacer={withPacer}
-        onPacer={setWithPacer}
-        intensity={intensity}
-        onIntensity={setIntensity}
-        choice={pacerChoice(withPacer, intensity)}
-        withWind={withWind}
-        onWind={setWithWind}
-        windSpeed={windSpeed}
-        onWindSpeed={setWindSpeed}
-        windFrom={windFrom}
-        onWindFrom={setWindFrom}
-        air={windChoice(withWind, windSpeed, windFrom, units)}
-        windUnit={speedUnit(units)}
-        position={position}
-        onPosition={setPosition}
-        onStart={start}
-      />
+      <>
+        {raceOver === undefined || props.rooms === undefined ? undefined : (
+          // #785: the result of the race this rider just rode, once the room
+          // said it was over — and never while it ran.
+          <RaceResult
+            rooms={props.rooms}
+            roomId={raceOver.roomId}
+            finishers={raceOver.finishers}
+            ownWatts={raceOver.ownWatts}
+          />
+        )}
+        <RoutePicker
+          routes={routes}
+          // ⚠️ Read **here** rather than reusing the ride's captured state: a
+          // workout started or ended on the Ride screen changes what is true
+          // before the next press. A snapshot read, so it costs a property access
+          // per render and never opens a connection — and asks nothing (#503).
+          trainerNotice={trainerRoadNotice(trainerNow ?? NO_GAME_TRAINER, 'before-ride')}
+          // #509: whether the press has asked and the trainer has not answered.
+          asking={asking}
+          // #503: what the press on Ride will do to the trainer, said before it.
+          trainerPromise={trainerRoadPromise(trainerNow ?? NO_GAME_TRAINER)}
+          // #475: a snapshot read for the trainer notice's reason — a rider who
+          // changes the choice in Settings and comes back sees it here at once.
+          worldChosen={readRealisticWorldChoice(deviceStorage())}
+          releaseNotice={trainerNow?.releaseFault}
+          withGhost={withGhost}
+          onGhost={setWithGhost}
+          withPacer={withPacer}
+          onPacer={setWithPacer}
+          intensity={intensity}
+          onIntensity={setIntensity}
+          choice={pacerChoice(withPacer, intensity)}
+          withWind={withWind}
+          onWind={setWithWind}
+          windSpeed={windSpeed}
+          onWindSpeed={setWindSpeed}
+          windFrom={windFrom}
+          onWindFrom={setWindFrom}
+          air={windChoice(withWind, windSpeed, windFrom, units)}
+          windUnit={speedUnit(units)}
+          position={position}
+          onPosition={setPosition}
+          onStart={start}
+        />
+        {/*
+          #784, #785: a room on one of the rider's own routes, or one a friend
+          shared by its code. Ridden with no ghost, no pacer and no wind — a
+          room rides everybody alike (ADR 0028 D-1, D-7.4) — at the room's
+          own riding position.
+        */}
+        <RoomPanel
+          rooms={props.rooms}
+          routes={routes ?? []}
+          weightDeclared={!riderMassFor(props.riderMass).assumed}
+          position={position}
+          entered={entered}
+          onEnter={setEntered}
+          onRide={(room) => {
+            void start(
+              {
+                id: `room-${room.roomId}`,
+                name: 'The room’s route',
+                profile: room.profile,
+                attempts: 0,
+              },
+              false,
+              undefined,
+              undefined,
+              room.ridingPosition,
+            );
+          }}
+        />
+      </>
     );
   }
 
   const sensors = port?.readSensors() ?? NO_SENSORS;
+  // #785: where the race is, read during render like `sensors` — the tick's
+  // `setState` is what schedules this render.
+  const race = roomRef.current?.race();
+  // The countdown's seconds are read on the loop's own clock.
+  const renderedAt = (props.now ?? (() => performance.now()))();
   // ⚠️ Read during render rather than held in state — see {@link gradientRef}.
   // The tick's own `setState` is what schedules this render, so it is fresh.
   const gradient = gradientRef.current?.state();
@@ -1806,6 +1956,18 @@ export function GameView(props: GameViewProps): JSX.Element {
           setPhase((current) => (current === 'paused' ? 'riding' : 'paused'));
         }}
         onEnd={() => {
+          // #785: a race the room said is over has a result, shown on the
+          // picker once the ride has ended — and only then.
+          const over = roomRef.current?.race();
+          const roomId = roomIdRef.current;
+          if (over?.kind === 'finished' && roomId !== undefined) {
+            const { wattSeconds, seconds } = raceWattsRef.current;
+            setRaceOver({
+              roomId,
+              finishers: over.order.length,
+              ownWatts: seconds > 0 ? wattSeconds / seconds : undefined,
+            });
+          }
           teardown();
           setPhase('choosing');
           setChosen(undefined);
@@ -1889,6 +2051,39 @@ export function GameView(props: GameViewProps): JSX.Element {
             <StatusMessage key="room" tone="warning" label={ROOM_NOTICE_LABEL}>
               {roomNotice(roomRef.current?.status())}
             </StatusMessage>
+          ),
+          // #785: a race held on its line, counting down, or over — the room's
+          // word, never a standing (ADR 0028 D-7.7): nothing here orders
+          // anybody. *Start the race* is any rider's on the line (#785's rule:
+          // a room has no leader, D-7.2), and it says what came of the press.
+          race === undefined || raceNotice(race, renderedAt) === undefined ? undefined : (
+            <div key="race" className="oyl-hud__race">
+              <StatusMessage tone="info" label={RACE_NOTICE_LABEL}>
+                {raceNotice(race, renderedAt)}
+                {starting === 'refused'
+                  ? ' The race could not be started from here: it may have been started already.'
+                  : ''}
+              </StatusMessage>
+              {race.kind === 'waiting' && props.rooms !== undefined ? (
+                <Button
+                  size="ride"
+                  unavailable={starting === 'asking'}
+                  onClick={() => {
+                    const rooms = props.rooms;
+                    const roomId = roomIdRef.current;
+                    if (starting === 'asking' || rooms === undefined || roomId === undefined) {
+                      return;
+                    }
+                    setStarting('asking');
+                    void rooms.start(roomId).then((answer) => {
+                      setStarting(answer.kind === 'started' ? undefined : 'refused');
+                    });
+                  }}
+                >
+                  Start the race
+                </Button>
+              ) : undefined}
+            </div>
           ),
           // #647: the ride being recorded may stop if the screen goes off.
           // After the side camera, in `announce.ts`'s order (`screen-off-risk`

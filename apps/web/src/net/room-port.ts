@@ -50,6 +50,7 @@ import {
 import {
   RoomSession,
   type RoomLink,
+  type RoomRace,
   type RoomSample,
   type RoomSessionStatus,
   type RoomTimers,
@@ -78,6 +79,11 @@ export interface RoomConnection {
   status(): RoomSessionStatus;
   /** Every other rider, where to draw them at `localMs` (`snapshots.ts`). */
   others(localMs: number): readonly DrawnRemoteRider[];
+  /**
+   * Where a race is — waiting, counting down, running, finished with its
+   * order — or `not-a-race` for a group ride (#785). @see RoomRace
+   */
+  race(): RoomRace;
   /** The room's newest word on THIS rider, for `correction.ts`. */
   own(): { readonly rider: DrawnRemoteRider; readonly atLocalMs: number } | undefined;
   /** Leave: close the socket, stop reconnecting, let the screen sleep. */
@@ -200,6 +206,7 @@ export function roomPortOver(
       return {
         status: () => session.status,
         others: (localMs) => session.others(localMs),
+        race: () => session.race(),
         own: () => session.own(),
         leave: () => {
           session.leave();

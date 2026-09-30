@@ -271,3 +271,36 @@ describe('frames — #782', () => {
     expect(s.own()?.atLocalMs).toBe(1_000);
   });
 });
+
+describe('a race, as the room says it — #785', () => {
+  it('waits, counts down on the room’s duration from when it arrived, runs at the first frame, and finishes with the room’s order', async () => {
+    const room = new ScriptedRoom();
+    const clock = new ManualClock();
+    const s = session(room, clock);
+    await flush();
+    room.accept();
+    room.welcome(3, 'race');
+    expect(s.race()).toEqual({ kind: 'waiting' });
+    await clock.advance(2_000);
+    room.send({ type: 'countdown', startsInMs: 10_000 });
+    // A duration from its arrival on THIS clock — never an instant the room named.
+    expect(s.race()).toEqual({ kind: 'counting', endsAtLocalMs: 12_000 });
+    // Counting down is not running: only the room's first frame starts the race.
+    await clock.advance(11_000);
+    expect(s.race().kind).toBe('counting');
+    room.frame(1, [frameRider(3, 4)]);
+    expect(s.race()).toEqual({ kind: 'running' });
+    room.send({ type: 'finish', order: [5, 3] });
+    expect(s.race()).toEqual({ kind: 'finished', order: [5, 3] });
+    expect(s.finish).toEqual({ type: 'finish', order: [5, 3] });
+  });
+
+  it('is never a race in a group ride, whatever arrives', async () => {
+    const room = new ScriptedRoom();
+    const clock = new ManualClock();
+    const s = await joined(room, clock);
+    room.send({ type: 'countdown', startsInMs: 5_000 });
+    room.frame(1, [frameRider(3, 4)]);
+    expect(s.race()).toEqual({ kind: 'not-a-race' });
+  });
+});

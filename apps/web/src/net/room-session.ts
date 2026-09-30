@@ -136,6 +136,23 @@ export interface RoomSample {
   readonly cadenceRpm?: number | undefined;
 }
 
+/**
+ * Where a RACE is, as this client knows it — #785. A group ride is always
+ * `not-a-race`.
+ *
+ * ⚠️ **The room's word, never this client's clock.** `counting` holds the local
+ * instant the room's countdown should end, computed from when its `countdown`
+ * arrived — a duration the room sent, so a client clock minutes out shows the
+ * right number — but `running` begins only with the room's first FRAME: a
+ * rider is held on the line until the room itself says the race is on.
+ */
+export type RoomRace =
+  | { readonly kind: 'not-a-race' }
+  | { readonly kind: 'waiting' }
+  | { readonly kind: 'counting'; readonly endsAtLocalMs: number }
+  | { readonly kind: 'running' }
+  | { readonly kind: 'finished'; readonly order: readonly number[] };
+
 /** Where a session is. */
 export type RoomSessionStatus =
   | { readonly kind: 'connecting' }
@@ -197,6 +214,11 @@ export class RoomSession {
   #lostSince: number | undefined;
   #snapshots: SnapshotBuffer | undefined;
   #finish: Finish | undefined;
+  /** The room's countdown, and the local instant it arrived (#785). */
+  #countdown: { readonly startsInMs: number; readonly atLocalMs: number } | undefined;
+  /** Whether the room has sent a frame: a race is on from its first (#785). */
+  #framed = false;
+  #kind: 'race' | 'ride' | undefined;
   /** How many times a welcome has arrived: 1 is the join, more are rejoins. */
   #welcomes = 0;
   #riderId: number | undefined;
@@ -224,13 +246,25 @@ export class RoomSession {
   }
 
   /**
-   * A race's finish order, once the room has sent it. ⚠️ No production reader
-   * yet: showing a race's result is #785's, and nothing here renders it. Not a
-   * tag `check:wiring` can hold — it does not look at class members — so the
-   * gap is named here and on #785.
+   * A race's finish order, once the room has sent it — read through
+   * {@link race}, which `room-port.ts` hands the game (#785). Not a tag
+   * `check:wiring` can hold, since it does not look at class members:
+   * `room-port.test.ts` §"#785" reads it through the port.
    */
   get finish(): Finish | undefined {
     return this.#finish;
+  }
+
+  /** Where a race is, as the room has said — see {@link RoomRace}. */
+  race(): RoomRace {
+    if (this.#kind !== 'race') return { kind: 'not-a-race' };
+    if (this.#finish !== undefined) return { kind: 'finished', order: this.#finish.order };
+    if (this.#framed) return { kind: 'running' };
+    const countdown = this.#countdown;
+    if (countdown !== undefined) {
+      return { kind: 'counting', endsAtLocalMs: countdown.atLocalMs + countdown.startsInMs };
+    }
+    return { kind: 'waiting' };
   }
 
   /** Every OTHER rider, drawn at `localMs` less the render delay. @see SnapshotBuffer.at */
@@ -332,6 +366,7 @@ export class RoomSession {
             // starts the buffer.
             this.#snapshots ??= new SnapshotBuffer(message.roomConfig.frameIntervalMs);
             this.#riderId = message.riderId;
+            this.#kind = message.roomConfig.kind;
             this.#startReporting(message.roomConfig.reportIntervalMs);
             this.#setStatus({
               kind: 'joined',
@@ -345,7 +380,12 @@ export class RoomSession {
             return;
           case 'frame':
             if (this.#options.acceptFrame?.() === false) return;
+            this.#framed = true;
             this.#snapshots?.push(message, this.#options.now());
+            return;
+          case 'countdown':
+            this.#countdown = { startsInMs: message.startsInMs, atLocalMs: this.#options.now() };
+            this.#options.onChange?.();
             return;
           case 'finish':
             this.#finish = message;

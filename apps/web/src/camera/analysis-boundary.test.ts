@@ -43,6 +43,9 @@ const MAY_NAME_HTTP_TYPES: readonly string[] = [
   // which has to build the `Response` a server would. Named by path, so a
   // production module beside it that named one would still be a finding.
   join('ride-analysis', 'model-server-testing.ts'),
+  // #784, #785: test support, never shipped — an instance's rooms routes as a
+  // `fetch` double, which has to build the `Response` the instance would.
+  join('rooms', 'rooms-testing.ts'),
   // #777: the one transport to an instance (ADR 0036 D-3 (a)). Its port,
   // `instance/instance-port.ts`, names no HTTP type — only what it read.
   join('instance', 'instance-transport.ts'),
