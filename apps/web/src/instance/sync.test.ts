@@ -39,8 +39,7 @@ import {
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { orderedRows, PAGE_SIZE } from '../library/rows';
-import type { RideInputStore } from '../ride-analysis/read-input';
-import { rideSummaryOf } from '../ride-analysis/ride-summary';
+import { rideSummaryOf, type RideSummaryStore } from '../ride-analysis/ride-summary';
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
 import { importActivityFiles } from '../transfer/import-batch';
 import { linkThisDevice, signInToInstance, type InstanceTransport } from './sign-in';
@@ -211,7 +210,7 @@ function syncDependencies(on: Device, store: SyncDependencies['store']): SyncDep
     now: () => NOW,
     timeZone: 'Europe/London',
     // The harness hands the whole ActivityStore, which reads a ride's input.
-    rideSummary: rideSummaryOf(store as unknown as RideInputStore, LOCAL_ATHLETE),
+    rideSummary: rideSummaryOf(store as unknown as RideSummaryStore, LOCAL_ATHLETE),
     // The athlete's keys, from the instance's device list (#898).
     athleteKeys: () => athleteKeysFrom(on.transport.sync),
     newDocumentId: () => crypto.randomUUID(),
@@ -402,7 +401,7 @@ describe('two-way sync through the real instance (#776)', () => {
     expect(pulled).toMatchObject({ summariesPushed: 0 });
     await b.harness.write((store) => store.setAthleteMass(LOCAL_ATHLETE, kilograms(70)));
     const onB = await b.harness.read((store) =>
-      rideSummaryOf(store as unknown as RideInputStore, LOCAL_ATHLETE)(ids[0]!),
+      rideSummaryOf(store as unknown as RideSummaryStore, LOCAL_ATHLETE)(ids[0]!),
     );
     expect(onB).not.toBe(JSON.stringify(await instanceItem(a, 'ride-summary', ids[0]!)));
     const bAgain = await b.harness.write((store) => syncWithInstance(syncDependencies(b, store)));
@@ -1183,7 +1182,7 @@ describe('the rider’s goals, ride notes and documents (#836)', () => {
     expect(await b.sync()).toMatchObject({ textsPushed: 0, textsPulled: 0, failures: [] });
   }, 60_000);
 
-  it('deletes on the instance a document the rider deleted here, and on the other device at its next sync', async () => {
+  it('deletes on the instance a document the rider deleted here, and KEEPS the other device’s copy (#924, N3)', async () => {
     world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
     const origin = instanceTesting.TEST_ORIGIN;
     const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
@@ -1199,14 +1198,86 @@ describe('the rider’s goals, ride notes and documents (#836)', () => {
     const entry = (await manifestOf(a.on)).find((item) => item.kind === 'document');
     expect(entry?.deleted).toBe(true);
 
-    // B held it unchanged, so it goes there too — and is not pushed back.
-    expect(await b.sync()).toMatchObject({ textsDeleted: 1, textsPushed: 0, failures: [] });
-    expect(
-      await b.on.harness.read((store) => store.listRiderTexts(LOCAL_ATHLETE, 'document')),
-    ).toStrictEqual([]);
+    // B held it unchanged. The delete is unsigned, so, as for a ride (#898
+    // rule 1), B KEEPS its copy — and does not push it back (#924, the
+    // owner's ruling on #926's review, N3).
+    const heldOnB = () =>
+      b.on.harness.read((store) => store.listRiderTexts(LOCAL_ATHLETE, 'document'));
+    expect(await b.sync()).toMatchObject({
+      textsHiddenOnInstance: 1,
+      textsPushed: 0,
+      textsPulled: 0,
+      failures: [],
+    });
+    expect((await heldOnB()).map((row) => [row.key, row.name, row.text])).toStrictEqual([
+      [plan.key, plan.name, plan.text],
+    ]);
+    expect(await instanceItem(a.on, 'document', plan.key)).toBeUndefined();
+    // The base row stays, so the next sync finds it kept again, not new.
+    expect(await b.sync()).toMatchObject({
+      textsHiddenOnInstance: 1,
+      textsPushed: 0,
+      failures: [],
+    });
+    expect(await instanceItem(a.on, 'document', plan.key)).toBeUndefined();
     // And A, which deleted it, does not pull it back from anywhere.
     expect(await a.sync()).toMatchObject({ textsPulled: 0, textsPushed: 0, failures: [] });
-    expect(await b.sync()).toMatchObject({ textsPulled: 0, textsPushed: 0, failures: [] });
+    expect(
+      await a.on.harness.read((store) => store.listRiderTexts(LOCAL_ATHLETE, 'document')),
+    ).toStrictEqual([]);
+
+    // The rider removes it on B by hand: gone there, and nothing is asked of
+    // the instance again.
+    await b.on.harness.write((store) => store.deleteRiderText(LOCAL_ATHLETE, 'document', plan.key));
+    expect(await b.sync()).toMatchObject({
+      textsHiddenOnInstance: 0,
+      textsDeletedOnInstance: 0,
+      textsPushed: 0,
+      textsPulled: 0,
+      failures: [],
+    });
+    expect(await heldOnB()).toStrictEqual([]);
+  }, 60_000);
+
+  it('keeps a goal another device deleted, and pushes it again only once it is changed here (#924, N3)', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const goal = riderTextFor(LOCAL_ATHLETE, 'goal');
+    await a.on.harness.write((store) => store.putRiderText(goal));
+    expect(await a.sync()).toMatchObject({ textsPushed: 1, failures: [] });
+    const b = await linkedDevice(world.url, origin, a.on);
+    expect(await b.sync()).toMatchObject({ textsPulled: 1, failures: [] });
+
+    await a.on.harness.write((store) => store.deleteRiderText(LOCAL_ATHLETE, 'goal', 'goals'));
+    expect(await a.sync()).toMatchObject({ textsDeletedOnInstance: 1, failures: [] });
+    expect(await b.sync()).toMatchObject({
+      textsHiddenOnInstance: 1,
+      textsPushed: 0,
+      failures: [],
+    });
+    const goalOnB = () =>
+      b.on.harness.read((store) => store.getRiderText(LOCAL_ATHLETE, 'goal', 'goals'));
+    expect((await goalOnB())?.text).toBe(goal.text);
+
+    // New words typed on B are the rider's, and go out like any change.
+    await b.on.harness.write((store) => store.putRiderText({ ...goal, text: 'A faster century.' }));
+    expect(await b.sync()).toMatchObject({
+      textsHiddenOnInstance: 0,
+      textsPushed: 1,
+      failures: [],
+    });
+    expect(await instanceItem(a.on, 'goal', 'goals')).toStrictEqual({ text: 'A faster century.' });
+
+    // And A, which deleted it, takes the new words back on its next sync: A
+    // holds no copy and forgot its base, so the instance's goal is new to it.
+    // This goes further than "never pushed back" — the owner is asked to
+    // confirm it on #934 — and this pins what A holds, so a change is seen.
+    const goalOnA = () =>
+      a.on.harness.read((store) => store.getRiderText(LOCAL_ATHLETE, 'goal', 'goals'));
+    expect(await goalOnA()).toBeUndefined();
+    expect(await a.sync()).toMatchObject({ textsPulled: 1, textsPushed: 0, failures: [] });
+    expect((await goalOnA())?.text).toBe('A faster century.');
   }, 60_000);
 
   it('takes a goal another device changed, and pushes one changed here', async () => {

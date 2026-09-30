@@ -2798,6 +2798,8 @@ write_binary_asset node_modules/somedep/blob.bin
 write_binary_asset apps/web/dist/bundle.wasm
 write_binary_asset .claude/worktrees/other-branch/apps/web/public/models/rider.glb
 write_binary_asset apps/mobile/android/.gradle/8.14.3/fileHashes/fileHashes.bin
+# #900: the bytecode Python writes beside an imported sibling module.
+write_binary_asset apps/web/tools/realistic/blender/__pycache__/rider_kit.cpython-311.pyc
 assert_clean "a binary in a generated, ignored or vendored tree is pruned"
 
 new_fixture
@@ -2805,6 +2807,13 @@ write_good_app web
 write_binary_asset apps/web/src/models/rider.glb
 assert_violation "the same binary one directory across from a pruned one is found" ASSET001 \
   "apps/web/src/models/rider.glb: a committed binary"
+
+# #900's complement: a `.pyc` NOT under `__pycache__` is a committed binary.
+new_fixture
+write_good_app web
+write_binary_asset apps/web/tools/realistic/blender/rider_kit.pyc
+assert_violation "a bytecode file outside __pycache__ is found" ASSET001 \
+  "apps/web/tools/realistic/blender/rider_kit.pyc: a committed binary"
 
 # --- SH001: no shell pipeline into `grep -q` (#743) --------------------------
 #

@@ -31,6 +31,8 @@ export interface ScriptedEmbedder extends Embedder {
   readonly calls: ScriptedCall[];
   /** Answer every request with this failure from now on; `undefined` answers again. */
   failWith: EmbedFailure | undefined;
+  /** Answer a request holding a text this names a failure for with that failure (#918's poison item). */
+  failFor: ((text: string) => EmbedFailure | undefined) | undefined;
 }
 
 function bucket(word: string): number {
@@ -64,11 +66,14 @@ export function scriptedEmbedder(
     }),
     calls,
     failWith: undefined,
+    failFor: undefined,
     embed(texts, purpose): Promise<EmbedOutcome> {
       calls.push({ texts: [...texts], purpose });
       if (embedder.failWith !== undefined) {
         return Promise.resolve({ ok: false, why: embedder.failWith });
       }
+      const poisoned = texts.map((text) => embedder.failFor?.(text)).find(Boolean);
+      if (poisoned !== undefined) return Promise.resolve({ ok: false, why: poisoned });
       return Promise.resolve({ ok: true, vectors: texts.map(scriptedVector) });
     },
   };

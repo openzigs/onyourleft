@@ -703,6 +703,37 @@ export const DRAWN_TOOL = `Node.js 24 (.nvmrc), then ${PINNED_KTX}`;
 /** The date #624's maps were drawn and dedicated — a drawn row's `read`. */
 export const DRAWN_ON = '2026-09-27';
 
+/**
+ * What `realistic:process --check` requires of a run's REPORT, as well as of
+ * its bytes — #900 item 2, by output file.
+ *
+ * `island_tree_02`'s scan repeats one triangle, and #696 made the importer
+ * drop the same copy every run (`blender/gltf_import.py`). Only about one run
+ * in fifty kept the other copy before that, so comparing the files alone
+ * passed about 98 % of the time with #696's fix removed. The report says how
+ * many repeated triangles were dropped, and a count that is not the one the
+ * committed files were made with is a run that did not reproduce them.
+ */
+export const EXPECTED_REPORTS: Readonly<Record<string, Readonly<Record<string, number>>>> = {
+  'island_tree_02.glb': { repeatedTrianglesDropped: 1 },
+  'island_tree_02-middle.glb': { repeatedTrianglesDropped: 1 },
+};
+
+/** Why a run's report is not what {@link EXPECTED_REPORTS} requires of `file`, or nothing. */
+export function reportFaults(file: string, report: unknown): readonly string[] {
+  const expected = EXPECTED_REPORTS[file];
+  if (expected === undefined) return [];
+  const fields = typeof report === 'object' && report !== null ? report : {};
+  return Object.entries(expected).flatMap(([field, value]) => {
+    const said = (fields as Readonly<Record<string, unknown>>)[field];
+    return said === value
+      ? []
+      : [
+          `${file}: its report says ${field} ${JSON.stringify(said) ?? 'nothing'}, not ${String(value)}`,
+        ];
+  });
+}
+
 /** The rider's script, and the one file its kit's numbers are in — #623. */
 export const RIDER_SCRIPT = 'blender/process_rider.py';
 export const RIDER_KIT = `${PIPELINE_DIRECTORY}blender/rider_kit.py`;

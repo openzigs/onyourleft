@@ -17,7 +17,22 @@
  * never a mixture (D-7).
  *
  * It **fails closed**: when the model cannot be reached the sweep stops, the
- * items wait, and nothing is embedded anywhere else (D-6).
+ * items wait, and nothing is embedded anywhere else (D-6). A running instance
+ * tries again every {@link RETRY_PERIOD_MS} (`instance.ts`), so a model started
+ * after the instance is picked up with no sync and no restart (#918).
+ *
+ * ⚠️ **One item the model refuses does not stop the rest** (#918). A model
+ * that answers one item `refused` or `malformed` has answered — it is
+ * reachable — so that item is marked `failed` and the sweep goes on past it.
+ * Before #918 the sweep stopped there, and the same oldest item came first
+ * again on every sweep, so one bad item stopped indexing for the whole
+ * instance. A marked item is tried again {@link FAILED_RETRY_SECONDS} later.
+ *
+ * ⚠️ **A 5xx is pinned on an item only when another item succeeds** (#928's
+ * second review). A 5xx may be about the server or about the input, so the
+ * item is held unmarked and the NEXT item is asked about: if the model
+ * answers that, the held item is marked `failed`; if not, the sweep stops
+ * with neither marked, as it does for an unreachable model.
  *
  * ## Asking it (D-2, D-3, D-8)
  *
@@ -35,7 +50,12 @@
 import type { Caller, Outcome } from '../auth/identity.ts';
 import type { FieldProblem } from '../errors.ts';
 import { logEvent, type LogSink } from '../log.ts';
-import type { HistoryIndexSummary, SqlStore, SyncKind } from '../store/sql-store.ts';
+import type {
+  HistoryIndexSummary,
+  HistoryOutcome,
+  SqlStore,
+  SyncKind,
+} from '../store/sql-store.ts';
 import type { EmbedFailure, Embedder } from './embedder.ts';
 import { cutSource, INDEXED_KINDS, RIDE_KINDS } from './passages.ts';
 
@@ -45,6 +65,15 @@ export const MAXIMUM_SEARCH_PASSAGES = 6;
 /** The largest character budget one search may state: six passages of 900 (D-8). */
 export const MAXIMUM_SEARCH_CHARACTERS = 5_400;
 
+/**
+ * How many times one athlete may search their history a minute, unless the
+ * operator's limits say otherwise (#918): `identity.ts`
+ * §`IdentityLimits.historySearchesPerAthlete` says why. Here rather than
+ * there so the route's description can name it without importing the
+ * accounts.
+ */
+export const DEFAULT_HISTORY_SEARCHES = { limit: 30, windowMs: 60_000 } as const;
+
 /** The longest query the instance embeds. */
 export const MAXIMUM_QUERY_CHARACTERS = 2_000;
 
@@ -53,6 +82,21 @@ export const EMBEDDING_BATCH = 16;
 
 /** How many pending items one round of a catch-up reads. */
 const SWEEP_PAGE = 16;
+
+/**
+ * How often a running instance starts a catch-up of its own (#918): **5
+ * minutes**. What it is for is a model that was not running when the instance
+ * started, or went away: nothing else would try again until the next sync.
+ * One query when nothing is pending. Chosen.
+ */
+export const RETRY_PERIOD_MS = 5 * 60_000;
+
+/**
+ * How long an item the model refused waits before it is tried again (#918):
+ * **one hour** — a transient refusal heals, and an item the model will never
+ * take costs one request an hour. Chosen.
+ */
+export const FAILED_RETRY_SECONDS = 60 * 60;
 
 /** One passage, as the caller is sent it. */
 export interface RetrievedPassage {
@@ -73,8 +117,10 @@ export interface HistorySearch {
 
 /** How a catch-up ended. */
 export interface CatchUpReport {
-  /** Items written: with passages, or found to have none. */
+  /** Items written: with passages, or found to have none, or marked `failed`. */
   readonly indexed: number;
+  /** Of those, the items the model refused or answered wrongly for, marked and gone past (#918). */
+  readonly failed: number;
   /** Why it stopped early, or `null` when nothing was left to index. */
   readonly stopped: EmbedFailure | 'off' | null;
 }
@@ -165,20 +211,29 @@ export function dot(a: Float32Array, b: Float32Array): number {
   return sum;
 }
 
-/** When each of an athlete's rides started, by its activity id, read from its signed records. */
-function rideStarts(
+/**
+ * When each ride in `wanted` started, by its activity id, read from the
+ * athlete's signed records — and no more of them than it takes (#918 item 5):
+ * a search dates at most six passages and the ride it is about, and used to
+ * parse every record the athlete had to do it.
+ */
+export function rideStarts(
   records: readonly { readonly signedRecord: Uint8Array }[],
+  wanted: ReadonlySet<string>,
 ): ReadonlyMap<string, number> {
   const starts = new Map<string, number>();
+  const decoder = new TextDecoder();
   for (const record of records) {
+    if (starts.size === wanted.size) break;
     try {
       const claims = (
-        JSON.parse(new TextDecoder().decode(record.signedRecord)) as {
+        JSON.parse(decoder.decode(record.signedRecord)) as {
           claims?: { activityId?: unknown; startedAt?: unknown };
         }
       ).claims;
-      if (typeof claims?.activityId === 'string' && typeof claims.startedAt === 'number') {
-        starts.set(claims.activityId, claims.startedAt);
+      const id = claims?.activityId;
+      if (typeof id === 'string' && wanted.has(id) && typeof claims?.startedAt === 'number') {
+        starts.set(id, claims.startedAt);
       }
     } catch {
       // A record that does not parse dates nothing.
@@ -222,11 +277,12 @@ export function createHistory(options: HistoryOptions): History {
   let again = false;
 
   const catchUp = async (): Promise<CatchUpReport> => {
-    if (embedder === undefined) return { indexed: 0, stopped: 'off' };
+    if (embedder === undefined) return { indexed: 0, failed: 0, stopped: 'off' };
     let indexed = 0;
+    let failed = 0;
     const write = async (
       source: { athleteId: string; kind: SyncKind; key: string; digest: string },
-      outcome: 'indexed' | 'empty' | 'too-long' | 'picture',
+      outcome: HistoryOutcome,
       passages: readonly { ordinal: number; text: string; vector: Float32Array }[],
     ): Promise<void> => {
       await store.putHistoryIndex({
@@ -239,42 +295,98 @@ export function createHistory(options: HistoryOptions): History {
         now: Math.floor(now() / 1000),
       });
       indexed += 1;
+      if (outcome === 'failed') failed += 1;
     };
+    // One item's passages, embedded: its vectors, an outcome about THIS item
+    // to mark it with, or a reason to stop the sweep.
+    const embedAll = async (
+      passages: readonly string[],
+    ): Promise<
+      | { readonly kind: 'vectors'; readonly vectors: readonly Float32Array[] }
+      | { readonly kind: 'mark'; readonly outcome: 'too-long' | 'failed' }
+      | { readonly kind: 'stop'; readonly why: EmbedFailure }
+    > => {
+      const vectors: Float32Array[] = [];
+      for (let at = 0; at < passages.length; at += EMBEDDING_BATCH) {
+        const answer = await embedder.embed(passages.slice(at, at + EMBEDDING_BATCH), 'document');
+        if (answer.ok) {
+          vectors.push(...answer.vectors);
+          continue;
+        }
+        // An answer about THIS item — the model was reached, and said no, or
+        // answered wrongly: mark it and go on (#918).
+        if (answer.why === 'too-long') return { kind: 'mark', outcome: 'too-long' };
+        if (answer.why === 'refused' || answer.why === 'malformed') {
+          return { kind: 'mark', outcome: 'failed' };
+        }
+        // No answer at all, an address that may not be asked, a server that
+        // answered about itself, or a 5xx that may be either.
+        return { kind: 'stop', why: answer.why };
+      }
+      if (vectors.some((vector) => vector.length !== vectors[0]?.length)) {
+        return { kind: 'mark', outcome: 'failed' };
+      }
+      return { kind: 'vectors', vectors };
+    };
+    // ⚠️ Items a 5xx was answered for, held UNMARKED while the sweep asks about
+    // the ones after them (#928's reviews). A 5xx may be the server's or the
+    // input's — Ollama answers 500 for a text its model makes a NaN of — and
+    // the pending list is instance-wide and oldest first, so stopping on one
+    // would stop every athlete's indexing behind it for ever. It is a SET, not
+    // one item: a rider who saves the same text twice makes two such items side
+    // by side, and holding only one of them brought the halt back (#928's third
+    // review). The first time the model answers about any item, every held 5xx
+    // was its own item's: each is marked `failed` (tried again in an hour, as a
+    // refusal is) and the sweep goes on. Only a page in which the model answered
+    // about nothing stops the sweep, with every held item still unmarked — so an
+    // outage costs at most one page of requests a sweep.
+    type Pending = Awaited<ReturnType<typeof store.listPendingHistorySources>>[number];
+    const held: Pending[] = [];
+    const isHeld = (source: Pending): boolean =>
+      held.some(
+        (item) =>
+          source.athleteId === item.athleteId &&
+          source.kind === item.kind &&
+          source.key === item.key,
+      );
     // Bounded, so a store that kept answering the same page could not spin for ever.
     for (let round = 0; round < 100_000; round += 1) {
-      const pending = await store.listPendingHistorySources(
-        INDEXED_KINDS,
-        embedder.model,
-        embedder.convention,
-        SWEEP_PAGE,
-      );
-      if (pending.length === 0) return { indexed, stopped: null };
+      const pending = (
+        await store.listPendingHistorySources(
+          INDEXED_KINDS,
+          embedder.model,
+          embedder.convention,
+          SWEEP_PAGE,
+          Math.floor(now() / 1000) - FAILED_RETRY_SECONDS,
+        )
+      ).filter((source) => !isHeld(source));
+      // Nothing else to ask about: held items stay unmarked, and wait.
+      if (pending.length === 0) {
+        return { indexed, failed, stopped: held.length === 0 ? null : 'server-error' };
+      }
+      let answered = false;
       for (const source of pending) {
         const cut = cutSource(source.kind, source.body);
         if (cut.kind !== 'passages') {
           await write(source, cut.kind, []);
           continue;
         }
-        const vectors: Float32Array[] = [];
-        let tooLong = false;
-        for (let at = 0; at < cut.passages.length; at += EMBEDDING_BATCH) {
-          const answer = await embedder.embed(
-            cut.passages.slice(at, at + EMBEDDING_BATCH),
-            'document',
-          );
-          if (!answer.ok && answer.why === 'too-long') {
-            tooLong = true;
-            break;
+        const result = await embedAll(cut.passages);
+        if (result.kind === 'stop') {
+          if (result.why === 'server-error') {
+            held.push(source);
+            continue;
           }
-          if (!answer.ok) return { indexed, stopped: answer.why };
-          vectors.push(...answer.vectors);
+          // Every item after this one would fare the same. Stop, and let them
+          // wait (D-6) — the held items with them, unmarked.
+          return { indexed, failed, stopped: result.why };
         }
-        if (tooLong) {
-          await write(source, 'too-long', []);
+        // The model answered about this item, so every held 5xx was its own item's.
+        answered = true;
+        for (const item of held.splice(0)) await write(item, 'failed', []);
+        if (result.kind === 'mark') {
+          await write(source, result.outcome, []);
           continue;
-        }
-        if (vectors.some((vector) => vector.length !== vectors[0]?.length)) {
-          return { indexed, stopped: 'malformed' };
         }
         await write(
           source,
@@ -282,12 +394,14 @@ export function createHistory(options: HistoryOptions): History {
           cut.passages.map((text, ordinal) => ({
             ordinal,
             text,
-            vector: vectors[ordinal] ?? new Float32Array(),
+            vector: result.vectors[ordinal] ?? new Float32Array(),
           })),
         );
       }
+      // A whole page and not one answer: the server, not an input. Stop, marking nothing.
+      if (held.length > 0 && !answered) return { indexed, failed, stopped: 'server-error' };
     }
-    return { indexed, stopped: null };
+    return { indexed, failed, stopped: null };
   };
 
   const schedule = (): void => {
@@ -304,6 +418,7 @@ export function createHistory(options: HistoryOptions): History {
           if (options.log !== undefined && (report.indexed > 0 || report.stopped !== null)) {
             logEvent(options.log, 'history-indexed', {
               indexed: report.indexed,
+              failed: report.failed,
               stopped: report.stopped,
             });
           }
@@ -362,10 +477,17 @@ export function createHistory(options: HistoryOptions): History {
         spent += entry.passage.text.length;
       }
 
-      const dated = chosen.some(({ passage }) => RIDE_KINDS.includes(passage.kind));
-      const starts = dated
-        ? rideStarts(await store.listActivityRecords(caller.athleteId))
-        : new Map<string, number>();
+      // Only the rides a chosen passage is about, and the one being written about.
+      const wanted = new Set(
+        chosen
+          .filter(({ passage }) => RIDE_KINDS.includes(passage.kind))
+          .map(({ passage }) => passage.key),
+      );
+      if (wanted.size > 0 && request.rideId !== undefined) wanted.add(request.rideId);
+      const starts =
+        wanted.size > 0
+          ? rideStarts(await store.listActivityRecords(caller.athleteId), wanted)
+          : new Map<string, number>();
       const about = request.rideId === undefined ? undefined : starts.get(request.rideId);
       return {
         ok: true,

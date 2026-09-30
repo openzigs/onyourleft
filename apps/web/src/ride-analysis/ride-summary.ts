@@ -22,7 +22,7 @@
  * load-metric name (CLAUDE.md §6).
  */
 
-import type { ActivityId, AthleteId } from '@onyourleft/store';
+import type { ActivityId, AthleteId, StoredActivityRecord } from '@onyourleft/store';
 
 import type { ChannelSummary, MetricSummary, RideAnalysisInput, SectionSummary } from './input';
 import { readRideInput, type RideInputStore } from './read-input';
@@ -123,18 +123,91 @@ export function rideSummaryBody(input: RideAnalysisInput): string {
 }
 
 /**
+ * What {@link rideSummaryOf} reads beyond the input: the ride's signed
+ * record, whose content hash its cache is keyed on.
+ */
+export interface RideSummaryStore extends RideInputStore {
+  getActivityRecord(owner: AthleteId, id: ActivityId): Promise<StoredActivityRecord | undefined>;
+}
+
+/**
+ * The most summaries one binding of {@link rideSummaryOf} keeps: **2 000**, a
+ * few kilobytes each. The oldest is dropped past it. Chosen.
+ */
+export const SUMMARY_CACHE_ENTRIES = 2_000;
+
+/**
+ * What a summary is built from, as a key — or `undefined` when the ride has
+ * no signed record, whose content hash is what says its file has not changed.
+ *
+ * The ride's content hash (its streams, laps and figures, as the record
+ * vouches for them), and the three things read beside it that a summary can
+ * change with: the athlete's mass (power per kilogram), their threshold, and
+ * the saved route's profile, by its id and when it was last edited.
+ */
+async function summaryKey(
+  store: RideSummaryStore,
+  owner: AthleteId,
+  activityId: ActivityId,
+): Promise<string | undefined> {
+  try {
+    const [signed, ride, athlete] = await Promise.all([
+      store.getActivityRecord(owner, activityId),
+      store.getActivity(owner, activityId),
+      store.getAthlete(owner),
+    ]);
+    if (signed === undefined || ride === undefined) return undefined;
+    const route =
+      ride.routeId === undefined ? undefined : await store.getRoute(owner, ride.routeId);
+    return JSON.stringify([
+      activityId,
+      signed.record.contentHash,
+      athlete?.mass ?? null,
+      athlete?.thresholdPower ?? null,
+      ride.routeId ?? null,
+      route?.updatedAt ?? null,
+    ]);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * The summary body of ride `activityId`, read from `store` — or `undefined`
  * when the ride cannot be read. What `instance/sync.ts` pushes beside the ride.
+ *
+ * ⚠️ **Cached by the ride's content hash** (#918 item 4), for as long as this
+ * binding lives: a sync asks for every signed ride's summary, and building
+ * one reads and decodes the ride's whole stream set. A ride whose file,
+ * athlete mass, threshold and route are unchanged is not read again
+ * ({@link summaryKey}); a ride with no signed record is read every time.
  */
 export function rideSummaryOf(
-  store: RideInputStore,
+  store: RideSummaryStore,
   owner: AthleteId,
 ): (activityId: ActivityId) => Promise<string | undefined> {
+  // ⚠️ One cache per BINDING (#928's review): it saves a stream read only
+  // while the function this returns outlives a sync. A caller that binds
+  // afresh for every sync — as `sync.test.ts` §`syncDependencies` does — reads
+  // every stream every time; #898, which wires sync, has to keep one binding
+  // per athlete across syncs for this to pay. Per binding is also what keeps
+  // it to one athlete: the key names none.
+  const cache = new Map<string, string>();
   return async (activityId) => {
+    const key = await summaryKey(store, owner, activityId);
+    const kept = key === undefined ? undefined : cache.get(key);
+    if (kept !== undefined) return kept;
     const input = await readRideInput(store, owner, activityId, {
       templateVersion: SUMMARY_INPUT_VERSION,
       cameraConsented: false,
     });
-    return input === undefined ? undefined : rideSummaryBody(input);
+    if (input === undefined) return undefined;
+    const body = rideSummaryBody(input);
+    if (key !== undefined) {
+      cache.set(key, body);
+      const oldest = cache.keys().next();
+      if (cache.size > SUMMARY_CACHE_ENTRIES && oldest.done !== true) cache.delete(oldest.value);
+    }
+    return body;
   };
 }

@@ -18,7 +18,7 @@ import {
 import { GameSimulation } from './simulation';
 import { northRoute } from './route-fixtures-testing';
 import { airDensityKilogramsPerCubicMetre } from '@onyourleft/physics';
-import { altitudeMetres, degreesCelsius, kilograms } from '@onyourleft/domain';
+import { altitudeMetres, degreesCelsius, kilograms, watts } from '@onyourleft/domain';
 
 const rider = (riderId: number, distanceMetres: number): DrawnRemoteRider => ({
   riderId,
@@ -84,11 +84,60 @@ describe('one frame of a room ride — #782, #783', () => {
       0,
     );
     expect(sim.correcting).toBe(false);
+    // 12 m in the second since the frame before is explainable (#922): the
+    // local rider is standing, so the room's 12 m/s is believed only to 2 m/s
+    // (#928's review, `correction.ts` §`admittedRoomSpeed`), and
+    // 8 m + 2 m/s × (1 s + the 2 s correction) is 14 m.
     roomFrame(
-      connection([], { rider: { ...rider(0, 40), speedMetresPerSecond: 0 }, atLocalMs: 1_000 }),
+      connection([], { rider: { ...rider(0, 12), speedMetresPerSecond: 12 }, atLocalMs: 1_000 }),
       memory,
       sim,
       1_000,
+    );
+    expect(sim.correcting).toBe(true);
+  });
+
+  it('measures the first frame’s bound from when the ride began — #922', () => {
+    // Thirty seconds ridden at 200 W, and then the first frame: the room
+    // has the rider 250 m on. At the room's 10 m/s that is explainable over
+    // thirty seconds, and would not be over the two a correction lasts.
+    const sim = simulation();
+    for (let at = 0; at <= 30_000; at += 100) sim.advanceTo(at, { power: watts(200), live: true });
+    expect(sim.state.ridden as number).toBeCloseTo(30, 6);
+    const local = sim.state.ride.distance as number;
+    roomFrame(
+      connection([], {
+        rider: { ...rider(0, local + 250), speedMetresPerSecond: 10 },
+        atLocalMs: 30_000,
+      }),
+      roomRideState(),
+      sim,
+      30_000,
+    );
+    expect(sim.correcting).toBe(true);
+  });
+
+  it('leaves the rider where they are for a frame 50 km out — #922', () => {
+    const sim = simulation();
+    const memory = roomRideState();
+    roomFrame(connection([], { rider: rider(0, 0), atLocalMs: 0 }), memory, sim, 0);
+    roomFrame(
+      connection([], {
+        rider: { ...rider(0, 50_000), speedMetresPerSecond: 12 },
+        atLocalMs: 1_000,
+      }),
+      memory,
+      sim,
+      1_000,
+    );
+    expect(sim.correcting).toBe(false);
+    // The control: the same frame 12 m out is acted on — 14 m is what a
+    // standing rider and a room's word of 12 m/s explain in a second.
+    roomFrame(
+      connection([], { rider: { ...rider(0, 12), speedMetresPerSecond: 12 }, atLocalMs: 2_000 }),
+      memory,
+      sim,
+      2_000,
     );
     expect(sim.correcting).toBe(true);
   });

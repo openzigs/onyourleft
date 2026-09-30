@@ -65,6 +65,7 @@ import {
   kilograms,
   routeProfile,
   seconds,
+  SIMULATION_SETPOINT_INTERVAL_SECONDS,
   watts,
   type RoutePoint,
 } from '@onyourleft/domain';
@@ -1276,17 +1277,24 @@ describe('a room’s correction reaches the trainer gently — #782', () => {
     await flushRoom();
     room.accept();
     room.welcome(0);
-    // Ten seconds up the 4 % climb, the trainer on the road's own grade.
-    await pumpWith(clock, 20);
+    // A minute and a half up the 4 % climb, the trainer on the road's own grade.
+    await pumpWith(clock, 180);
     const before = writes.length;
     expect(before).toBeGreaterThan(0);
     expect(writes.at(-1)?.grade).toBeGreaterThan(3);
-    // The room puts the rider 1 100 m on — over the top and onto the 4 %
+    const along = (): number => drawn.at(-1)?.markers[0]?.z ?? 0;
+    // Still on the climb, whose top is at 1 000 m.
+    expect(along()).toBeLessThan(900);
+    // The room puts the rider at 1 250 m — over the top and onto the 4 %
     // descent — in ONE frame: a two-second correction, and an 8 % change of
     // grade the trainer is then walked through at the stated rate, most of it
-    // after the correction itself has finished.
-    const along = (): number => drawn.at(-1)?.markers[0]?.z ?? 0;
-    room.frame(1, [frameRider(0, along() + 1_100, 10)]);
+    // after the correction itself has finished. At a speed a rider could be
+    // going (#928's review): since #922 a room may move the rider only as far
+    // as the local speed, and the room's speed so far as the local one
+    // explains it, account for since the ride began (`correction.ts`
+    // §`explainableMetres`, §`admittedRoomSpeed`) — which, ninety seconds in,
+    // is more than this.
+    room.frame(1, [frameRider(0, 1_250, 8)]);
     await pumpWith(clock, 16);
     // …and on after the correction has finished, until the trainer is on the
     // road again: a write that fell short of the road is owed, not forgotten.
@@ -1296,7 +1304,14 @@ describe('a room’s correction reaches the trainer gently — #782', () => {
     for (let index = 1; index < during.length; index += 1) {
       const step = Math.abs((during[index]?.grade ?? 0) - (during[index - 1]?.grade ?? 0));
       const seconds = ((during[index]?.at ?? 0) - (during[index - 1]?.at ?? 0)) / 1000;
-      expect(step).toBeLessThanOrEqual(CORRECTION_GRADE_STEP_PERCENT_PER_SECOND * seconds + 1e-9);
+      // Seconds capped at one write interval (#928's review): the write before
+      // the correction was 80 s earlier, and measured from it an 8 % jump
+      // would pass.
+      expect(step).toBeLessThanOrEqual(
+        CORRECTION_GRADE_STEP_PERCENT_PER_SECOND *
+          Math.min(seconds, SIMULATION_SETPOINT_INTERVAL_SECONDS) +
+          1e-9,
+      );
     }
     expect(writes.at(-1)?.grade).toBeLessThan(-3);
   });

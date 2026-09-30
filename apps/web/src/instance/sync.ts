@@ -163,15 +163,16 @@
  *      then the delete is not sent, and the newer text is pulled back, so a
  *      delete never silently takes words typed elsewhere;
  *    - tombstoned on the instance, and unchanged here since the base:
- *      another device deleted it, so it is deleted here. ⚠️ **Not rule 3's
- *      choice for a ride** since #898: the owner's ruling that a tombstone
- *      never deletes a device's copy is about rides. A text deleted here this
- *      way is one this device had not changed since the base, so no word typed
- *      HERE is lost — and a text changed here is pushed back instead.
- *      ⚠️ That delete is unsigned, so the words typed on the OTHER device
- *      go on a say-so rule 3 refuses for a ride: whether a text should be
- *      kept here like a ride is the owner's question, put on #924 by #926's
- *      review (N3), and unanswered;
+ *      another device deleted it (or the instance tombstoned it), and it is
+ *      **KEPT here** (#924, the owner's ruling of 2026-09-30 on #926's review,
+ *      N3): rule 3 applied to text. The delete is unsigned, so, as for a
+ *      ride, it hides the text on the instance and never deletes a copy the
+ *      rider did not delete on THIS device. It is not pushed back, so the
+ *      instance keeps it hidden; its base row stays, so the next sync finds
+ *      it kept again rather than new. The rider removes it here by hand.
+ *      ⚠️ A reviewer who remembers "deleted here too" is reading the old
+ *      file. A text CHANGED here since the base is new words typed here, and
+ *      is pushed back like any change;
  *    - otherwise the three ways of rule 5: the same is remembered, a change
  *      only there is pulled, a change here (or a copy the instance lacks) is
  *      pushed — ⚠️ **and a change on BOTH sides keeps both** (#924, the
@@ -399,8 +400,12 @@ export interface SyncReport {
   readonly textsPulled: number;
   /** Goals, notes and documents pushed to the instance (#836). */
   readonly textsPushed: number;
-  /** Goals, notes and documents deleted here, because another device deleted them (#836). */
-  readonly textsDeleted: number;
+  /**
+   * Goals, notes and documents another device deleted on the instance that
+   * this device still holds unchanged (#924): KEPT here, and hidden there.
+   * Never deleted by a sync — the rider removes one by hand.
+   */
+  readonly textsHiddenOnInstance: number;
   /** Goals, notes and documents deleted on the instance, because the rider deleted them here. */
   readonly textsDeletedOnInstance: number;
   /**
@@ -509,7 +514,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
   let consentsPulled = 0;
   let textsPulled = 0;
   let textsPushed = 0;
-  let textsDeleted = 0;
+  let textsHiddenOnInstance = 0;
   let textsDeletedOnInstance = 0;
   let textConflicts = 0;
 
@@ -832,7 +837,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     const outcome = await syncRiderText(kind, key);
     if (outcome === 'pulled') textsPulled += 1;
     else if (outcome === 'pushed') textsPushed += 1;
-    else if (outcome === 'deleted') textsDeleted += 1;
+    else if (outcome === 'hidden-on-instance') textsHiddenOnInstance += 1;
     else if (outcome === 'deleted-on-instance') textsDeletedOnInstance += 1;
     else if (outcome === 'kept-both') {
       textsPushed += 1;
@@ -858,7 +863,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     consentsPulled,
     textsPulled,
     textsPushed,
-    textsDeleted,
+    textsHiddenOnInstance,
     textsDeletedOnInstance,
     textConflicts,
     keysToConfirm: [...keysToConfirm].sort(),
@@ -911,10 +916,9 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     }
     const unchangedHere = known !== undefined && known.localDigest === localDigest;
     if (unchangedHere && remoteDigest === null && entry?.deleted === true) {
-      // Unchanged here since the last sync, and deleted on another device.
-      await store.deleteRiderText(athleteId, kind, key);
-      await forget();
-      return 'deleted';
+      // Unchanged here since the last sync, and deleted on another device:
+      // KEPT here, and not pushed back (#924, N3). The base row stays.
+      return 'hidden-on-instance';
     }
     if (unchangedHere && remoteDigest !== null) {
       if (remoteDigest === known.remoteDigest) return 'same';
