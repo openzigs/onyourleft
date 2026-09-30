@@ -215,8 +215,15 @@ export const RACE_NOTICE_LABEL = 'Race';
  * Nothing here ranks anybody: ADR 0028 D-7.7 and ruling Q8, no live standings.
  */
 export const RACE_TEXT = {
+  /**
+   * For the rider who made the room: only they may start it (the owner's
+   * ruling of 2026-09-30, `apps/instance` §`room-host.ts` `start`).
+   */
   waiting:
-    'You are on the start line. The race starts when a rider on the line starts it — you can too.',
+    'You are on the start line. You made this room: start the race when your riders are here.',
+  /** For a rider who joined by the code, who is offered no *Start the race*. */
+  waitingForItsMaker:
+    'You are on the start line. The race starts when the rider who made the room starts it.',
   counting: (seconds: number): string =>
     `The race starts in ${String(seconds)} second${seconds === 1 ? '' : 's'}.`,
   finished: 'The race is over. End the ride to see its result.',
@@ -228,11 +235,18 @@ export function countdownSeconds(endsAtLocalMs: number, localMs: number): number
   return Math.max(0, Math.ceil((endsAtLocalMs - localMs) / 1000));
 }
 
-/** The race's notice now, or nothing while it runs. */
-export function raceNotice(race: RoomRace | undefined, localMs: number): string | undefined {
+/**
+ * The race's notice now, or nothing while it runs. `madeIt` is whether this
+ * rider made the room, and so is the one who starts it.
+ */
+export function raceNotice(
+  race: RoomRace | undefined,
+  localMs: number,
+  madeIt: boolean,
+): string | undefined {
   switch (race?.kind) {
     case 'waiting':
-      return RACE_TEXT.waiting;
+      return madeIt ? RACE_TEXT.waiting : RACE_TEXT.waitingForItsMaker;
     case 'counting':
       return RACE_TEXT.counting(countdownSeconds(race.endsAtLocalMs, localMs));
     case 'finished':

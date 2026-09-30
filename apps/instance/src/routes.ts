@@ -207,7 +207,7 @@ export const ROUTES: readonly Route[] = [
         'a race’s riders share its countdown, and blocking inside a room is #789’s (ADR 0028 D-6.4)',
     },
     summary:
-      'Starts a race’s countdown, for any athlete seated and connected in it — #785’s rule: a room has no leader (ADR 0028 D-7.2), so starting is no one rider’s power. `not_found` for anybody else, and for a race that is not waiting.',
+      'Starts a race’s countdown, for the athlete who made the room, seated and connected in it — the owner’s ruling of 2026-09-30 (a room an operator opened has no creator, and any athlete seated and connected in it may start it). `not_found` for anybody else, and for a race that is not waiting.',
     identity: true,
     auth: 'session',
     errors: ['unauthenticated', 'not_found', 'unavailable'],

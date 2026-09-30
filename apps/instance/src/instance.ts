@@ -140,7 +140,15 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     const made = await store.getPrivateRoom(roomId);
     if (made !== undefined && made.closedAt !== null) return { kind: 'ended' };
     const course = await store.getRoomCourse(roomId);
-    const plan = planFor(room, course);
+    // The owner's ruling of 2026-09-30: a rider's room is started by its
+    // creator alone; a room an operator opened has none (`RaceStarter`).
+    const plan = planFor(
+      room,
+      course,
+      made === undefined
+        ? 'any-seated-rider'
+        : { creator: (await store.getRoomCreator(roomId)) ?? null },
+    );
     const started = course?.raceStartedAt !== null && course?.raceStartedAt !== undefined;
     if (plan === undefined) return started ? { kind: 'ended' } : { kind: 'unknown' };
     // Live on a worker, it is rejoined there; on none, the router refuses it.

@@ -120,7 +120,7 @@ export interface RoomsPort {
   }): Promise<CreateRoomAnswer>;
   /** Join a room by the code a friend shared, and fetch and check its route. */
   join(code: string): Promise<JoinRoomAnswer>;
-  /** Start a race's countdown — any rider seated and connected in it may (#785's rule). */
+  /** Start a race's countdown — only the rider who made the room may (the owner's ruling of 2026-09-30). */
   start(roomId: string): Promise<StartRaceAnswer>;
   /** A race's result, for its riders only. */
   results(roomId: string): Promise<RaceResultAnswer>;

@@ -257,8 +257,9 @@ export class RoomRouter {
   }
 
   /**
-   * Starts a race's countdown on the worker holding it, for an athlete seated
-   * and connected in it — #785's rule, `room-host.ts` §`start`.
+   * Starts a race's countdown on the worker holding it, for the athlete who
+   * may start it — its creator, seated and connected (the owner's ruling of
+   * 2026-09-30), `room-host.ts` §`start`.
    */
   startRoom(roomId: string, athleteId: string): Promise<boolean> {
     const slot = this.#placement.get(roomId);

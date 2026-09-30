@@ -1356,9 +1356,14 @@ D-6.4). The room's **code** is 75 bits (fifteen symbols of Crockford's base 32) 
 shown once to its creator and stored only as its SHA-256; `POST /v1/rooms/join` takes it in a body,
 never a path, and is rate-limited per athlete and per address, right or wrong. A member —
 the creator, or an athlete who joined by the code — is the only one ticketed into the room
-(`auth/identity.ts` §`ticket`) or handed its route. **A race is started by any rider seated and
-connected in it** (#785's decision: a room has no leader, ADR 0028 D-7.2, so starting is nobody's
-role — `room/node/room-host.ts` §`start`), and the room tells every seated rider how long its
+(`auth/identity.ts` §`ticket`) or handed its route. **A race is started by its creator alone**,
+seated and connected in it — the owner's ruling of 2026-09-30, which reverses #785's first rule
+("any rider seated and connected: a room has no leader, ADR 0028 D-7.2"). The instance reads the
+creator from `room_member` into the room's plan (`room/room-plan.ts` §`RaceStarter`) and the room
+itself refuses anybody else (`room/node/room-host.ts` §`start`); a room an operator opened with
+`room open` has no creator, and any rider seated and connected in it may start it. The client
+offers *Start the race* to the rider who made the room and says to everybody else who will. The
+room tells every seated rider how long its
 countdown is (`@onyourleft/protocol`'s `countdown`: a duration, never an instant). A rider's result
 is written as they cross the line (#807's amendment) with their place, time, mean W/kg and the
 durations of any ceiling they breached (`room/core/ceilings.ts`); `GET /v1/rooms/{roomId}/results`

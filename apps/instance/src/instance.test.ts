@@ -661,7 +661,7 @@ describe('the history index on the running instance — #835', () => {
 });
 
 describe('a rider’s race on the running instance — #784, #785', () => {
-  it('is made and joined by code over HTTP, started by any rider on the line, and lets its route go when it is over', async () => {
+  it('is made and joined by code over HTTP, started by its creator alone, and lets its route go when it is over', async () => {
     const path = join(await freshDirectory(), 'instance.sqlite');
     await migrateForDeploy(path);
     const { instance, lines } = await start(path);
@@ -711,12 +711,19 @@ describe('a rider’s race on the running instance — #784, #785', () => {
     clients.push(annSocket, bobSocket);
     await until(() => annSocket.messages.length > 0 && bobSocket.messages.length > 0, 'welcomes');
 
-    // #785's rule: any rider seated and connected may start the race — and
-    // only such a rider. Cat joined by the code but is not on the line.
+    // The owner's ruling of 2026-09-30: only the room's creator, on the line,
+    // starts the race. Cat joined by the code but is not on the line; Bob is
+    // on it and did not make the room — both refused, and the race waits.
     expect((await call('POST', `/v1/rooms/${room.roomId}/start`, cat.sessionToken)).status).toBe(
       404,
     );
     expect((await call('POST', `/v1/rooms/${room.roomId}/start`, bob.sessionToken)).status).toBe(
+      404,
+    );
+    expect([annSocket, bobSocket].some((s) => s.messages.some((m) => m.type === 'countdown'))).toBe(
+      false,
+    );
+    expect((await call('POST', `/v1/rooms/${room.roomId}/start`, ann.sessionToken)).status).toBe(
       200,
     );
     // Everybody on the line is told how long the countdown is.

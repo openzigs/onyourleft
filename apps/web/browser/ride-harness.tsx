@@ -309,8 +309,9 @@ const PAUSED = new URLSearchParams(window.location.search).get('paused') === 'ye
 
 /**
  * `ride.html?room=race` — #785: the ride is in a private race that is waiting
- * on its start line, so the HUD carries the race's notice and *Start the
- * race* — a ride-time control (#669's ruling names *Start*), measured by
+ * on its start line, made by this rider, so the HUD carries the race's notice
+ * and *Start the race* — the room's maker's alone since the owner's ruling of
+ * 2026-09-30 — a ride-time control (#669's ruling names *Start*), measured by
  * `ride-targets.browser.spec.ts`. The room is the scripted one the unit tests
  * use (`net/testing.ts`): welcomed as a race and sent no frame, so the race
  * waits for as long as the page is open.
@@ -323,6 +324,8 @@ const RACE_PORTS =
     : {
         room: roomPortOver(() => RACE_ROOM.link(), {}),
         roomId: 'harness-race',
+        // The owner's ruling of 2026-09-30: only its maker is offered *Start the race*.
+        madeTheRoom: true,
         riderMass: kilograms(72),
         rooms: {
           create: () => Promise.resolve({ kind: 'unreachable' as const }),

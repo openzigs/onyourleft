@@ -238,6 +238,10 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
     notAScopedRead:
       'a yes or no for ONE (room, athlete) pair, never a row; rooms/rooms.test.ts holds a non-member refused',
   },
+  getRoomCreator: {
+    notAScopedRead:
+      'ONE athlete id a room’s plan carries so the room alone decides who starts it (the owner’s ruling of 2026-09-30), never a row; sql-store.rooms.test.ts holds a member who did not make it out of it',
+  },
   closePrivateRoom: { notAScopedRead: 'a write' },
   countOpenPrivateRoomsMadeBy: {
     notAScopedRead:

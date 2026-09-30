@@ -11,7 +11,7 @@
  *                                  rate-limited; the joiner becomes a member
  * GET  /v1/rooms/{roomId}/route  → { sha256, gpx }                     members only, while open
  * POST /v1/rooms/{roomId}/ticket (auth/routes.ts)                      members only, for a rider's room
- * POST /v1/rooms/{roomId}/start  (routes.ts)                           any rider seated and connected
+ * POST /v1/rooms/{roomId}/start  (routes.ts)                           its creator, seated and connected
  * GET  /v1/rooms/{roomId}/results → publication.ts                     the race's riders only, once it is over
  * ```
  *

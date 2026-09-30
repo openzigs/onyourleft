@@ -375,6 +375,13 @@ export interface GameViewProps {
    */
   readonly roomId?: string | undefined;
   /**
+   * Whether the rider made the shell's {@link roomId} — a test and the browser
+   * gate. Only the room's creator is offered *Start the race* (the owner's
+   * ruling of 2026-09-30). The product knows it from the room the panel
+   * entered, which carries its code only for the rider who made it.
+   */
+  readonly madeTheRoom?: boolean | undefined;
+  /**
    * A rider's rooms — #784, #785: making one on your own route, joining one by
    * its code, starting a race and reading its result (`net/rooms-port.ts`).
    * `main.tsx` builds it over the instance this device is connected to.
@@ -880,6 +887,11 @@ export function GameView(props: GameViewProps): JSX.Element {
   const roomLostSaidRef = useRef(false);
   /** The id of the room this ride is in, for the race's start and its result (#785). */
   const roomIdRef = useRef<string | undefined>(undefined);
+  /**
+   * Whether this rider made that room, and so is the one who starts its race
+   * — the owner's ruling of 2026-09-30. Nobody else is offered the control.
+   */
+  const madeTheRoomRef = useRef(false);
   /** The race's last state said through the HUD's region (#785). */
   const raceSaidRef = useRef<RoomRace['kind'] | undefined>(undefined);
   /** The other riders the room's frames held at the last look (#784). */
@@ -1138,6 +1150,12 @@ export function GameView(props: GameViewProps): JSX.Element {
           ? entered.roomId
           : props.roomId;
       roomIdRef.current = roomId;
+      // The panel's room carries its code for the rider who made it, and only
+      // for them (`net/rooms-port.ts` §`EnteredRoom.code`).
+      madeTheRoomRef.current =
+        entered !== undefined && entered.roomId === roomId
+          ? entered.code !== undefined
+          : props.madeTheRoom === true;
       if (props.room !== undefined && roomId !== undefined && port !== undefined) {
         const sensorsNow = port;
         roomStateRef.current = roomRideState();
@@ -1512,7 +1530,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       }
       // #785: the race's countdown, its start and its end, each said once —
       // and on the HUD, re-rendered as it moves (@see setRaceShown).
-      const raceWords = raceNotice(race, at) ?? '';
+      const raceWords = raceNotice(race, at, madeTheRoomRef.current) ?? '';
       if (raceWords !== raceShownRef.current) {
         raceShownRef.current = raceWords;
         setRaceShown(raceWords);
@@ -2080,17 +2098,20 @@ export function GameView(props: GameViewProps): JSX.Element {
           ),
           // #785: a race held on its line, counting down, or over — the room's
           // word, never a standing (ADR 0028 D-7.7): nothing here orders
-          // anybody. *Start the race* is any rider's on the line (#785's rule:
-          // a room has no leader, D-7.2), and it says what came of the press.
-          race === undefined || raceNotice(race, renderedAt) === undefined ? undefined : (
+          // anybody. *Start the race* is offered to the rider who made the
+          // room and to nobody else (the owner's ruling of 2026-09-30; the
+          // instance refuses anybody else's start too), whose notice says who
+          // will; and it says what came of the press.
+          race === undefined ||
+          raceNotice(race, renderedAt, madeTheRoomRef.current) === undefined ? undefined : (
             <div key="race" className="oyl-hud__race">
               <StatusMessage tone="info" label={RACE_NOTICE_LABEL}>
-                {raceNotice(race, renderedAt)}
+                {raceNotice(race, renderedAt, madeTheRoomRef.current)}
                 {starting === 'refused'
                   ? ' The race could not be started from here: it may have been started already.'
                   : ''}
               </StatusMessage>
-              {race.kind === 'waiting' && props.rooms !== undefined ? (
+              {race.kind === 'waiting' && props.rooms !== undefined && madeTheRoomRef.current ? (
                 <Button
                   size="ride"
                   unavailable={starting === 'asking'}

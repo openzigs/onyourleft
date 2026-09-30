@@ -215,6 +215,8 @@ export interface AppShellProps {
    * #784 (`rooms/RoomPanel.tsx`), through {@link rooms}; `main.tsx` names none.
    */
   readonly roomId?: string | undefined;
+  /** Whether the rider made {@link roomId} — the browser gate and a test (`GameView`). */
+  readonly madeTheRoom?: boolean | undefined;
   /**
    * A rider's rooms — #784, #785: `main.tsx` builds it over the instance this
    * device is connected to (`net/rooms-port.ts`), and the game's picker makes
@@ -546,6 +548,7 @@ function viewFor(
           // #782, #783: other real riders, over the instance.
           {...(props.room === undefined ? {} : { room: props.room })}
           {...(props.roomId === undefined ? {} : { roomId: props.roomId })}
+          {...(props.madeTheRoom === undefined ? {} : { madeTheRoom: props.madeTheRoom })}
           {...(props.rooms === undefined ? {} : { rooms: props.rooms })}
         />
       );

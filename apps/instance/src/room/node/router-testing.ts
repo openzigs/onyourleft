@@ -29,6 +29,7 @@ export function ridePlan(roomId: string, overrides: Partial<RoomPlan> = {}): Roo
     capacity: null,
     countdownMs: 0,
     rejoinWindowMs: null,
+    startedBy: 'any-seated-rider',
     ...overrides,
   };
 }

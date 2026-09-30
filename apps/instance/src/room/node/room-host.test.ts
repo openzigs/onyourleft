@@ -16,6 +16,7 @@ import type { Frame } from '@onyourleft/protocol';
 import { admitByTable, FLAT_COURSE, helloText, reportText } from '../core/room-testing.ts';
 import { roomSettings, type RoomSettings } from '../core/settings.ts';
 import { serveHost, until } from './node-room-testing.ts';
+import type { RaceStarter } from '../room-plan.ts';
 import { RoomHost, type HostOptions, type RoomResult } from './room-host.ts';
 
 const admit = admitByTable();
@@ -24,7 +25,11 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-async function hosted(settings: RoomSettings, options: Partial<HostOptions>) {
+async function hosted(
+  settings: RoomSettings,
+  options: Partial<HostOptions>,
+  startedBy: RaceStarter = 'any-seated-rider',
+) {
   const host = new RoomHost({
     now: () => Date.now(),
     admit: (_roomId, ticket) => Promise.resolve(admit(ticket)),
@@ -39,6 +44,7 @@ async function hosted(settings: RoomSettings, options: Partial<HostOptions>) {
     (ws) => {
       accepted.push(ws);
     },
+    startedBy,
   );
   cleanups.push(async () => {
     await host.stop({ code: 1001, reason: 'server-stopping' }, 200);
@@ -245,6 +251,57 @@ describe('the keepalive — #780 criterion 8, through a proxy that closes idle s
     await until(() => silent.closed !== undefined, 'the silent peer to be let go', 3_000);
     expect(silent.closed?.code).toBe(1006);
     await until(() => host.view('conformance')?.seats[0]?.state === 'held', 'the seat to be held');
+  }, 10_000);
+});
+
+describe('who may start a race — the owner’s ruling of 2026-09-30', () => {
+  const race = (): RoomSettings =>
+    roomSettings({
+      kind: 'race',
+      ridingPosition: 'hoods',
+      course: { ...FLAT_COURSE, lengthMetres: 40 },
+      countdownMs: 10_000,
+    });
+
+  async function onTheLine(startedBy: RaceStarter) {
+    const { host, url } = await hosted(race(), { driven: true }, startedBy);
+    const ann = client(url);
+    const bob = client(url);
+    await Promise.all([ann.open, bob.open]);
+    ann.socket.send(helloText('ticket-ann'));
+    bob.socket.send(helloText('ticket-bob'));
+    await until(
+      () =>
+        host.view('conformance')?.seats.filter((seat) => seat.state === 'connected').length === 2,
+      'both seated and connected',
+    );
+    return host;
+  }
+
+  it('refuses a rider who did not make the room, and one not on the line, and starts it for its creator', async () => {
+    const host = await onTheLine({ creator: 'ann' });
+    // Bob is seated and connected, and did not make the room.
+    expect(host.start('conformance', 'bob')).toBe(false);
+    // Somebody not seated at all.
+    expect(host.start('conformance', 'cat')).toBe(false);
+    expect(host.view('conformance')?.phase).toBe('lobby');
+    // Ann made it, and is on the line.
+    expect(host.start('conformance', 'ann')).toBe(true);
+    expect(host.view('conformance')?.phase).toBe('countdown');
+  }, 10_000);
+
+  it('refuses everybody in a rider’s room whose creator is gone — it fails closed', async () => {
+    const host = await onTheLine({ creator: null });
+    expect(host.start('conformance', 'ann')).toBe(false);
+    expect(host.start('conformance', 'bob')).toBe(false);
+    expect(host.view('conformance')?.phase).toBe('lobby');
+  }, 10_000);
+
+  it('lets any rider on the line start a room an operator opened, which has no creator', async () => {
+    const host = await onTheLine('any-seated-rider');
+    expect(host.start('conformance', 'cat')).toBe(false);
+    expect(host.start('conformance', 'bob')).toBe(true);
+    expect(host.view('conformance')?.phase).toBe('countdown');
   }, 10_000);
 });
 

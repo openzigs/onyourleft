@@ -1638,10 +1638,14 @@ apps/                 AGPL-3.0-or-later, without exception
                         function**, `publication.ts` §`publishRace` — W/kg,
                         never watts; flags by duration, on the W/kg side; an
                         erased rider or one the viewer may not see is "a
-                        rider" — to the race's riders only. ⚠️ **Who may start
-                        a race is decided (#785): any rider seated and
-                        connected in it** — a room has no leader (ADR 0028
-                        D-7.2); `room/node/room-host.ts` §`start`. ⚠️ Results
+                        rider" — to the race's riders only. ⚠️ **Only a
+                        room's CREATOR may start its race** (the owner's
+                        ruling of 2026-09-30, reversing #785's "any rider
+                        seated and connected"): the plan carries it
+                        (`room/room-plan.ts` §`RaceStarter`) and
+                        `room/node/room-host.ts` §`start` refuses anybody
+                        else; an operator's `room open` room has no creator,
+                        so any seated rider starts it. ⚠️ Results
                         are NOT signed by the instance (no ADR gives it a key);
                         `docs/architecture.md` §"A rider's room" says why.
                         Migration 0013 holds it, after #926's 0012
@@ -2550,7 +2554,7 @@ not.
   rooms from the game's picker — a reviewer who remembers "no room anybody can reach" or "a way for a
   rider to make a room does not exist" in this bullet is reading the old file. What does not exist
   is a public room (#907, #910, #911; ADR 0028 D-6.4): nothing makes a room `public`. Who may start
-  a race is decided by #785 — any rider seated and connected in it. Nothing is deployed: the home
+  a race is decided by the owner (2026-09-30) — the room's creator, seated and connected in it. Nothing is deployed: the home
   deployment (#807) is the owner's to run. The Durable Object adapter
   ([#781](https://github.com/openzigs/onyourleft/issues/781)) is still **deployed nowhere**.
   ⚠️ **Sync is BUILT and unreachable** (#881: #37, #38, #776, #35): `src/sync/` and the client half

@@ -115,6 +115,10 @@ describe('a rider’s room — #784', () => {
       // The creator keeps their role: adding them again as a rider changes nothing.
       await store.addRoomMember('ours', ATHLETE_B, 1_790_001_400);
       expect(await store.isRoomMember('ours', ATHLETE_B)).toBe(true);
+      // The owner's ruling of 2026-09-30: its creator is who may start it —
+      // never a rider who joined, and nobody for a room nobody made.
+      expect(await store.getRoomCreator('ours')).toBe(ATHLETE_B);
+      expect(await store.getRoomCreator('no-such-room')).toBeUndefined();
     });
   });
 

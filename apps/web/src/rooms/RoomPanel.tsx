@@ -18,10 +18,11 @@
  *
  * ## No leader — ADR 0028 D-7.2
  *
- * Nothing here directs another rider: making a room gives its maker a code to
- * share and nothing else. There is no "follow me", no pace, no pause and no
- * move for anybody but yourself, and a race is started by any rider on its
- * line (#785's rule, `apps/instance` §`room-host.ts` `start`).
+ * Nothing here directs another rider's ride: making a room gives its maker a
+ * code to share, and — the owner's ruling of 2026-09-30 — the start of its
+ * race, and nothing else. There is no "follow me", no pace, no pause and no
+ * move for anybody but yourself once it runs (`apps/instance` §`room-host.ts`
+ * `start`; it reverses #785's first rule, any rider on the line).
  *
  * ## The code
  *
@@ -84,7 +85,7 @@ export const ROOMS_WHAT_IS_SENT =
   'weight once as you join; the other riders see your name and where you are on the road, ' +
   'and after a race its result: your name, place, time, watts per kilogram and any flag the ' +
   'room raised for a figure past its limit. The route is deleted from the instance when the ' +
-  'room is over — at the latest a day after it was made, unless somebody is riding in it then.';
+  'room is over — within about a day of being made, unless somebody is riding in it then.';
 
 export interface RoomPanelProps {
   /** `undefined` where this device has no instance to hold a room. */
@@ -155,7 +156,9 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
         <StatusMessage tone="info" label={ROOM_KIND_LABEL[entered.kind]} live>
           You are in a {entered.kind === 'race' ? 'race' : 'group ride'} on the room’s route.
           {entered.kind === 'race'
-            ? ' The race starts when a rider on the line starts it.'
+            ? entered.code === undefined
+              ? ' The race starts when the rider who made the room starts it.'
+              : ' You start the race, from the ride, when your riders are on the line.'
             : ' Ride whenever you like; there is no leader and no result.'}
         </StatusMessage>
         {entered.code === undefined ? undefined : (

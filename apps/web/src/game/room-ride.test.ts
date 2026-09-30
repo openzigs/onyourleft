@@ -11,6 +11,7 @@ import {
   nextToFollow,
   raceEvent,
   raceNotice,
+  RACE_TEXT,
   riderEvents,
   roomFrame,
   roomNotice,
@@ -145,17 +146,23 @@ describe('a race on the HUD — #785', () => {
   });
 
   it('counts the countdown down in whole seconds, on this device’s clock, never below nought', () => {
-    expect(raceNotice({ kind: 'counting', endsAtLocalMs: 10_000 }, 2_500)).toBe(
+    expect(raceNotice({ kind: 'counting', endsAtLocalMs: 10_000 }, 2_500, true)).toBe(
       'The race starts in 8 seconds.',
     );
-    expect(raceNotice({ kind: 'counting', endsAtLocalMs: 10_000 }, 9_100)).toBe(
+    expect(raceNotice({ kind: 'counting', endsAtLocalMs: 10_000 }, 9_100, true)).toBe(
       'The race starts in 1 second.',
     );
-    expect(raceNotice({ kind: 'counting', endsAtLocalMs: 10_000 }, 12_000)).toBe(
+    expect(raceNotice({ kind: 'counting', endsAtLocalMs: 10_000 }, 12_000, true)).toBe(
       'The race starts in 0 seconds.',
     );
-    expect(raceNotice({ kind: 'running' }, 0)).toBeUndefined();
-    expect(raceNotice({ kind: 'not-a-race' }, 0)).toBeUndefined();
+    expect(raceNotice({ kind: 'running' }, 0, true)).toBeUndefined();
+    expect(raceNotice({ kind: 'not-a-race' }, 0, true)).toBeUndefined();
+  });
+
+  it('tells the rider who made the room to start it, and one who joined who will — the owner’s ruling of 2026-09-30', () => {
+    expect(raceNotice({ kind: 'waiting' }, 0, true)).toBe(RACE_TEXT.waiting);
+    expect(raceNotice({ kind: 'waiting' }, 0, false)).toBe(RACE_TEXT.waitingForItsMaker);
+    expect(RACE_TEXT.waitingForItsMaker).toContain('the rider who made the room starts it');
   });
 
   it('says each change of the race once — the countdown, “Go”, and its end', () => {

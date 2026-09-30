@@ -40,7 +40,11 @@ export type ToWorker =
       readonly type: 'start';
       readonly id: number;
       readonly roomId: string;
-      /** Only a rider seated and connected in the room may start it (#785's rule). */
+      /**
+       * Only the room's creator, seated and connected, may start it — the
+       * owner's ruling of 2026-09-30 (`room-host.ts` §`start`); any seated
+       * rider in a room an operator opened, which has no creator.
+       */
       readonly athleteId: string;
     }
   | { readonly type: 'metrics'; readonly id: number }

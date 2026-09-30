@@ -28,12 +28,13 @@ import { encodeMessage, type RoomMessage } from '@onyourleft/protocol';
 import type { GamePort, RidableRoute } from '../game/GameView';
 import type { GameRenderer } from '../game/port';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from '../game/hud/announce-preference';
-import { ROOM_REFUSED_TEXT } from '../game/room-ride';
+import { RACE_TEXT, ROOM_REFUSED_TEXT } from '../game/room-ride';
 import type { InstanceSocketEvents, OpenInstanceSocket } from '../instance/instance-transport';
 import { INSTANCE_SESSION_STORAGE_KEY } from '../instance/instance-port';
 import { INSTANCE_ACCOUNT_STORAGE_KEY } from '../instance/sign-in';
 import { createRoomPort } from '../net/room-port';
 import { createRoomsPort } from '../net/rooms-port';
+import { routeDigest } from './share';
 import { ASK_FOR_RESULT_LABEL, RACE_LEFT_EARLY_TEXT, RACE_NOT_OVER_TEXT } from './RaceResult';
 import { AppShell } from '../shell/AppShell';
 import type { CapabilityProbe } from '../support/bluetooth-support';
@@ -380,11 +381,54 @@ describe('a private race — #785', () => {
     return { instance, sockets, sha256 };
   }
 
-  it('holds the rider on the line until the room starts the race, whatever they pedal, and any rider may start it', async () => {
-    const { instance, sockets } = await inARace();
+  /** A race this rider MADE on their own route, ridden and welcomed. */
+  async function inARaceTheyMade(): Promise<{
+    instance: ScriptedInstance;
+    sockets: ReturnType<typeof handPlayedSockets>;
+  }> {
+    const instance = new ScriptedInstance();
+    const sockets = handPlayedSockets();
+    await shell(instance, sockets);
+    const race = [...document.querySelectorAll<HTMLInputElement>('input[type="radio"]')].find(
+      (each) => each.closest('label')?.textContent?.startsWith('Race') === true,
+    );
+    if (race === undefined) throw new Error('no Race choice');
+    await act(async () => {
+      race.click();
+      await Promise.resolve();
+    });
+    await press('Make a room');
+    expect(document.body.textContent).toContain('Its code is ABCDE-FGHJK-MNPQR.');
+    const sent = instance.seen.find((each) => each.path === '/v1/rooms')?.body as { gpx: string };
+    await press('Ride in the room');
+    await settle();
+    await sockets.say({
+      type: 'welcome',
+      riderId: 1,
+      routeRef: { sha256: await routeDigest(sent.gpx) },
+      roomConfig: {
+        kind: 'race',
+        ridingPosition: 'hoods',
+        reportIntervalMs: 500,
+        frameIntervalMs: 1000,
+      },
+    });
+    return { instance, sockets };
+  }
+
+  it('offers a rider who joined by the code no start, and says the room’s maker starts it — the owner’s ruling of 2026-09-30', async () => {
+    const { instance } = await inARace();
+    await frame(2);
+    expect(document.body.textContent).toContain(RACE_TEXT.waitingForItsMaker);
+    expect(button('Start the race')).toBeUndefined();
+    expect(instance.seen.some((each) => each.path.endsWith('/start'))).toBe(false);
+  });
+
+  it('holds the rider on the line until the room starts the race, whatever they pedal, and its maker starts it', async () => {
+    const { instance, sockets } = await inARaceTheyMade();
     await frame(5);
     const atTheLine = reading('To go');
-    expect(document.body.textContent).toContain('You are on the start line.');
+    expect(document.body.textContent).toContain(RACE_TEXT.waiting);
     // Pedalling 240 W for five seconds moved nothing: the rider is held.
     await frame(5);
     expect(reading('To go')).toBe(atTheLine);
@@ -392,7 +436,7 @@ describe('a private race — #785', () => {
     await press('Start the race');
     expect(instance.seen.at(-1)).toMatchObject({
       method: 'POST',
-      path: '/v1/rooms/room-race/start',
+      path: '/v1/rooms/room-abc/start',
     });
     await sockets.say({ type: 'countdown', startsInMs: 10_000 });
     await frame(1, 3_000);

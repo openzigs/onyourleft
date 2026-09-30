@@ -750,6 +750,13 @@ export interface SqlStore {
   addRoomMember(roomId: string, athleteId: string, at: number): Promise<void>;
   /** Whether `athleteId` may be ticketed into `roomId`: its creator, or joined by its code. */
   isRoomMember(roomId: string, athleteId: string): Promise<boolean>;
+  /**
+   * The athlete who made `roomId` (#784), or `undefined` — a room with no
+   * creator row: an operator's (`room open`), or one whose creator erased
+   * their account. Read so the room can hold its start to its creator (the
+   * owner's ruling of 2026-09-30, `room/room-plan.ts` §`RaceStarter`).
+   */
+  getRoomCreator(roomId: string): Promise<string | undefined>;
   /** #784: the room is over. `true` the first time, `false` when it already was. */
   closePrivateRoom(roomId: string, at: number): Promise<boolean>;
   /** #784: how many rooms this athlete made that are not over — a count of their own, never a row. */
@@ -2265,6 +2272,17 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           .where('athlete_id', '=', athleteId)
           .executeTakeFirst();
         return row !== undefined;
+      }),
+
+    getRoomCreator: (roomId) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('room_member')
+          .select('athlete_id')
+          .where('room_id', '=', roomId)
+          .where('role', '=', 'creator')
+          .executeTakeFirst();
+        return row?.athlete_id;
       }),
 
     closePrivateRoom: (roomId, at) =>

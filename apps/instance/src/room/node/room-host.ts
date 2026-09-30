@@ -14,6 +14,7 @@ import {
   type RoomView,
 } from '../core/room.ts';
 import type { RoomSettings } from '../core/settings.ts';
+import type { RaceStarter } from '../room-plan.ts';
 
 /**
  * The room core (#779) mounted on Node and `ws` — the self-host adapter,
@@ -198,6 +199,8 @@ interface Connection {
 interface HostedRoom {
   readonly roomId: string;
   readonly settings: RoomSettings;
+  /** Who may start it, from the plan it was opened with: `room-plan.ts` §`RaceStarter`. */
+  readonly startedBy: RaceStarter;
   readonly room: Room;
   readonly connections: Map<ConnectionId, Connection>;
   nextConnection: number;
@@ -218,6 +221,16 @@ export interface HostMetrics {
   readonly tickLatenessP50Ms: number | null;
   readonly tickLatenessP99Ms: number | null;
   readonly refusals: Readonly<Record<string, number>>;
+}
+
+/** Whether `athleteId` may start `hosted`'s race: {@link RoomHost.start}. */
+function mayStart(hosted: HostedRoom, athleteId: string): boolean {
+  if (hosted.startedBy !== 'any-seated-rider' && hosted.startedBy.creator !== athleteId) {
+    return false;
+  }
+  return hosted.room
+    .view()
+    .seats.some((seat) => seat.athleteId === athleteId && seat.state === 'connected');
 }
 
 function isTicking(phase: RoomPhase): boolean {
@@ -258,13 +271,24 @@ export class RoomHost {
     }
   }
 
-  /** Takes a socket the router placed here, for room `roomId` with these settings. */
-  accept(roomId: string, settings: RoomSettings, socket: WebSocket, socketId: string): void {
+  /**
+   * Takes a socket the router placed here, for room `roomId` with these
+   * settings. `startedBy` is read from the plan that OPENS the room and kept
+   * for its life; a room with no plan behind it (the conformance script, a
+   * test) has no creator, so any seated rider may start it.
+   */
+  accept(
+    roomId: string,
+    settings: RoomSettings,
+    socket: WebSocket,
+    socketId: string,
+    startedBy: RaceStarter = 'any-seated-rider',
+  ): void {
     if (this.#stopping) {
       socket.close(1001, 'server-stopping');
       return;
     }
-    const hosted = this.#rooms.get(roomId) ?? this.#open(roomId, settings);
+    const hosted = this.#rooms.get(roomId) ?? this.#open(roomId, settings, startedBy);
     const connection: Connection = {
       id: hosted.nextConnection,
       socketId,
@@ -297,28 +321,24 @@ export class RoomHost {
   }
 
   /**
-   * Starts a race's countdown. With `athleteId`, only if that athlete has a
-   * connected seat in it.
+   * Starts a race's countdown. With `athleteId`, only if that athlete may
+   * start it and has a connected seat in it.
    *
-   * **Who may start a race — #785's decision: any rider seated and connected
-   * in it.** Not its creator alone: a room has no leader (ADR 0028 D-7.2,
-   * "nobody leading a session"), and #784 lists a creator's powers as making
-   * the room, closing it and removing a rider — none of which directs anybody's
-   * ride. Starting is no one rider's power; it is anybody's who is on the line.
-   * Before #785 this was #895's provisional rule, and it is kept because it is
-   * the one that gives nobody a role.
+   * **Who may start a race — the owner's ruling of 2026-09-30: the room's
+   * creator.** A rider's room (#784) is started by the athlete who made it,
+   * seated and connected in it, and by nobody else; a room an operator opened,
+   * which has no creator, by any rider seated and connected in it
+   * (`room-plan.ts` §`RaceStarter`). ⚠️ **It reverses #785's first rule** —
+   * "any rider seated and connected, because a room has no leader (ADR 0028
+   * D-7.2)" — and a reviewer who remembers that is reading the old file.
+   * Starting directs nobody's ride once it has begun: every rider still rides
+   * their own power on the same road, and the creator has no other power in
+   * it.
    */
   start(roomId: string, athleteId?: string): boolean {
     const hosted = this.#rooms.get(roomId);
     if (hosted === undefined) return false;
-    if (
-      athleteId !== undefined &&
-      !hosted.room
-        .view()
-        .seats.some((seat) => seat.athleteId === athleteId && seat.state === 'connected')
-    ) {
-      return false;
-    }
+    if (athleteId !== undefined && !mayStart(hosted, athleteId)) return false;
     this.#call(hosted, (room) => room.start(this.#options.now()));
     return true;
   }
@@ -396,11 +416,12 @@ export class RoomHost {
     }
   }
 
-  #open(roomId: string, settings: RoomSettings): HostedRoom {
+  #open(roomId: string, settings: RoomSettings, startedBy: RaceStarter): HostedRoom {
     const admitted = new Map<string, Admission | undefined>();
     const hosted: HostedRoom = {
       roomId,
       settings,
+      startedBy,
       // The core's admission is synchronous; the answer was fetched before the
       // hello reached it (`#receive`), and is spent here.
       room: createRoom(settings, (ticket) => {
