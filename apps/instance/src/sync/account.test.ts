@@ -134,7 +134,7 @@ describe('exporting an account (#35)', () => {
     }
   });
 
-  it('exports the blocks and the reports the athlete made (#83), and not who decided a report', async () => {
+  it('exports the blocks and the reports the athlete made (#83), and not how a report was decided', async () => {
     const setup = await syncWorld(2);
     world = setup.world;
     const [anna, ben] = setup.riders;
@@ -156,23 +156,61 @@ describe('exporting an account (#35)', () => {
       ['number', { blockedAthleteId: nobody }],
     ]);
     expect(exported.reports.map(({ createdAt, ...rest }) => [typeof createdAt, rest])).toEqual([
-      [
-        'number',
-        {
-          targetAthleteId: ben!.athleteId,
-          reason: 'Abusive display name',
-          closedAt: null,
-          outcome: null,
-        },
-      ],
+      ['number', { targetAthleteId: ben!.athleteId, reason: 'Abusive display name' }],
     ]);
     expect(exported.athlete).toMatchObject({ suspendedAt: null, displayNameHiddenAt: null });
+    expect(typeof exported.athlete.activatedAt, 'activatedAt, #893 review F4').toBe('number');
     // Ben's own export says nothing of the report about him: it is Anna's.
     const bens: AccountExport = await readJson(
       await authorised(world, ben!.token, 'GET', '/v1/account/export'),
     );
     expect(bens.reports).toEqual([]);
     expect(JSON.stringify(bens)).not.toContain(anna!.athleteId);
+  });
+
+  it('exports a report about an id nobody holds exactly as one about a rider (#893 review F1)', async () => {
+    const setup = await syncWorld(2);
+    world = setup.world;
+    const [anna, ben] = setup.riders;
+    const nobody = 'f'.repeat(32);
+    for (const target of [ben!.athleteId, nobody]) {
+      const answer = await authorised(world, anna!.token, 'POST', '/v1/reports', {
+        athleteId: target,
+        reason: 'Abusive display name',
+      });
+      expect(answer.status).toBe(204);
+    }
+    // The control: the instance DID store the two differently.
+    const stored = await world.freshRead((store) => store.listReports(anna!.athleteId));
+    expect(new Set(stored.map((report) => report.outcome)).size).toBe(2);
+
+    const exported: AccountExport = await readJson(
+      await authorised(world, anna!.token, 'GET', '/v1/account/export'),
+    );
+    const byTarget = new Map(
+      exported.reports.map(({ targetAthleteId, ...rest }) => [targetAthleteId, rest]),
+    );
+    expect([...byTarget.keys()].sort()).toEqual([ben!.athleteId, nobody].sort());
+    expect(byTarget.get(nobody)).toEqual(byTarget.get(ben!.athleteId));
+  });
+
+  it('exports a recovery address waiting to be confirmed, and never its token (#893 review F2)', async () => {
+    const setup = await syncWorld(1, { emailRecovery: true });
+    world = setup.world;
+    const [anna] = setup.riders;
+    const address = 'waiting@example.org';
+    expect(
+      (await authorised(world, anna!.token, 'POST', '/v1/auth/recovery-email', { address })).status,
+    ).toBeLessThan(300);
+    const text = await (await authorised(world, anna!.token, 'GET', '/v1/account/export')).text();
+    const exported = JSON.parse(text) as AccountExport;
+    expect(exported.recoveryEmail).toBeNull();
+    expect(exported.recoveryEmailConfirmations.map((each) => [each.address, each.usedAt])).toEqual([
+      [address, null],
+    ]);
+    const tokens = await world.freshRead((store) => store.listEmailConfirmations(anna!.athleteId));
+    expect(tokens.length).toBe(1);
+    for (const token of tokens) expect(text).not.toContain(token.tokenSha256);
   });
 
   it('exports nothing of another athlete’s', async () => {

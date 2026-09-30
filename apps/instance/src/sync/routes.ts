@@ -110,7 +110,7 @@ export const SYNC_ROUTES: readonly Route[] = [
     // A rider awaiting approval (#775) may still take their data out and erase it (#35).
     admitsPending: true,
     summary:
-      'Everything this instance holds about you, machine-readable: every activity’s signed record and the address of its original file — your own true track, unobfuscated — every item as you sent it, your public keys, your names, your results, your blocks and the reports you made. Says what it leaves out, and why.',
+      'Everything this instance holds about you, machine-readable: every activity’s signed record and the address of its original file — your own true track, unobfuscated — every item as you sent it, your public keys, your names, your results, your blocks, the reports you made and the recovery addresses you gave. Says what it leaves out, and why.',
     ...SESSION,
     errors: ['unauthenticated', 'not_found'],
     response: {
@@ -118,7 +118,7 @@ export const SYNC_ROUTES: readonly Route[] = [
       schema: {
         type: 'object',
         description:
-          '`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail`, `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports` and `notIncluded`.',
+          '`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail`, `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations` and `notIncluded`.',
       },
     },
     handle: async (context) => answer(await syncOf(context).exportAccount(callerOf(context))),

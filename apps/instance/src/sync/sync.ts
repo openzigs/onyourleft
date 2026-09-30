@@ -176,6 +176,8 @@ export interface AccountExport {
     readonly displayNameHiddenAt: number | null;
     /** When the rider confirmed they are 18 or over, or `null` (#775). */
     readonly adultConfirmedAt: number | null;
+    /** When the account became active — registered active, or approved — or `null` (#775). */
+    readonly activatedAt: number | null;
   };
   readonly displayNameChanges: readonly {
     readonly previousName: string;
@@ -212,15 +214,24 @@ export interface AccountExport {
   /** The athletes this one blocked (#83): the id they gave, whether or not anybody holds it. */
   readonly blocks: readonly { readonly blockedAthleteId: string; readonly createdAt: number }[];
   /**
-   * The reports this athlete made (#83), and how each was decided — but not
-   * WHICH moderator decided it: that is the moderators', not the reporter's.
+   * The reports this athlete made (#83): whom, why and when — and NOT how or
+   * whether one was decided. A report about an id nobody holds is stored
+   * already closed (`no_such_athlete`), so a decision would tell the reporter
+   * which ids are real, and which action a moderator took (#893's review).
    */
   readonly reports: readonly {
     readonly targetAthleteId: string;
     readonly reason: string;
     readonly createdAt: number;
-    readonly closedAt: number | null;
-    readonly outcome: string | null;
+  }[];
+  /**
+   * Recovery addresses given and waiting to be confirmed, or spent (#865): the
+   * address in plain text, as the instance holds it, and never the token's hash.
+   */
+  readonly recoveryEmailConfirmations: readonly {
+    readonly address: string;
+    readonly expiresAt: number;
+    readonly usedAt: number | null;
   }[];
   /** What is on the instance and deliberately NOT in this file, and why. */
   readonly notIncluded: readonly string[];
@@ -228,10 +239,11 @@ export interface AccountExport {
 
 /** What the export says it leaves out. Fixed sentences; nothing from the account. */
 export const EXPORT_LEAVES_OUT: readonly string[] = [
-  'Session tokens, recovery codes, link codes and email-recovery tokens: the instance keeps only a hash of each, and a hash is of no use to you.',
+  'Session tokens, recovery codes, link codes, email-recovery tokens and the tokens mailed to confirm a recovery address: the instance keeps only a hash of each, and a hash is of no use to you.',
   'Items you deleted: the instance keeps only that they were deleted, so your other devices can delete them too.',
   'Other riders’ results in the rooms you rode in: they are theirs.',
-  'Invitations you minted as a moderator, and an email address waiting to be confirmed: the instance keeps only a hash of each code, and a hash is of no use to you.',
+  'Invitations you minted as a moderator: the instance keeps only a hash of each code, and a hash is of no use to you.',
+  'How a report you made was decided, and when: that is the moderators’ record, not the reporter’s.',
   'The moderation log: what moderators did, and to whom, is the instance’s audit trail and is kept even when an account is deleted. Ask the instance’s operator for what it says about you.',
   'Reports other riders made about you: they are the reporters’, and naming them would tell you who they are.',
 ];
@@ -408,6 +420,7 @@ export function createSync(options: SyncOptions): Sync {
             suspendedAt: athlete.suspendedAt,
             displayNameHiddenAt: athlete.displayNameHiddenAt,
             adultConfirmedAt: athlete.adultConfirmedAt,
+            activatedAt: athlete.activatedAt,
           },
           displayNameChanges: (await store.listDisplayNameChanges(caller.athleteId)).map(
             (change) => ({ previousName: change.previousName, changedAt: change.changedAt }),
@@ -434,9 +447,14 @@ export function createSync(options: SyncOptions): Sync {
             targetAthleteId: report.targetAthleteId,
             reason: report.reason,
             createdAt: report.createdAt,
-            closedAt: report.closedAt,
-            outcome: report.outcome,
           })),
+          recoveryEmailConfirmations: (await store.listEmailConfirmations(caller.athleteId))
+            .map((confirmation) => ({
+              address: confirmation.address,
+              expiresAt: confirmation.expiresAt,
+              usedAt: confirmation.usedAt,
+            }))
+            .sort((a, b) => a.expiresAt - b.expiresAt),
           notIncluded: EXPORT_LEAVES_OUT,
         },
       };
