@@ -272,6 +272,25 @@ describe('what the rate limits hold, and for how long — #892 review', () => {
   });
 });
 
+describe('how long a rate limit may hold anything — #892', () => {
+  // The privacy policy's "in memory only, for at most an hour" rests on this:
+  // a key is swept at the end of its window, so no window may be longer than
+  // an hour. Every `RateLimit` in the defaults is found by its shape, so a
+  // limit added later is held here with no edit.
+  it('has no default window longer than an hour', () => {
+    const windows = Object.entries(DEFAULT_LIMITS).flatMap(([name, value]) =>
+      typeof value === 'object' && value !== null && 'windowMs' in value
+        ? [[name, (value as { windowMs: number }).windowMs] as const]
+        : [],
+    );
+    expect(windows.length).toBeGreaterThanOrEqual(8);
+    for (const [name, windowMs] of windows) {
+      expect(windowMs, name).toBeGreaterThan(0);
+      expect(windowMs, name).toBeLessThanOrEqual(60 * 60_000);
+    }
+  });
+});
+
 describe('what the rate limits hold after the merge with #889 and #891 — #892', () => {
   // #889's confirmation limits and #891's registration limit hold keys too —
   // an athlete, an address pair, an email address, an internet address — and

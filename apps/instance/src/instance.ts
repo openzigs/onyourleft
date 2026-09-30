@@ -237,6 +237,10 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       const poll = async (): Promise<void> => {
         if (stopping) return;
         const state = await migrationState(path).catch((): MigrationState => 'migrating');
+        // `stop()` may have run while the state was being read: opening now
+        // would open a store and start a rate-limit sweep that nothing stops
+        // (#892's merge review).
+        if (stopping) return;
         if (state === 'at-head') {
           open();
           done();

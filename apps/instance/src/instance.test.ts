@@ -75,7 +75,11 @@ async function start(
 }
 
 /** A rider signed in over HTTP: challenge, sign with a device key, session. */
-async function signIn(url: string, displayName: string) {
+async function signIn(
+  url: string,
+  displayName: string,
+  issuedAt: number = Math.floor(Date.now() / 1000),
+) {
   const device = await testDevice();
   const challenge = (await (
     await fetch(`${url}/v1/auth/challenge`, {
@@ -89,7 +93,7 @@ async function signIn(url: string, displayName: string) {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        ...(await device.statement(challenge.nonce, { issuedAt: Math.floor(Date.now() / 1000) })),
+        ...(await device.statement(challenge.nonce, { issuedAt })),
         displayName,
       }),
     })
@@ -128,7 +132,11 @@ describe('the running instance forgets every rate-limited address when its windo
   it('sweeps on every minute boundary once the store is open, with no further request, and stops on stop', async () => {
     const path = join(await freshDirectory(), 'instance.sqlite');
     await migrateForDeploy(path);
-    const clock = { ms: Date.now() };
+    // A pinned epoch, as `identity-testing.ts` pins one: 13 min 20 s into an
+    // hour and 20 s into a minute, so the next minute boundary is never the
+    // hour's. Seeded from `Date.now()` it failed in the last minute of every
+    // hour (#892's merge review).
+    const clock = { ms: 1_790_000_000_000 };
     const pending: { at: number; run: () => void }[] = [];
     let cleared = 0;
     const timers: SweepTimers = {
@@ -146,7 +154,7 @@ describe('the running instance forgets every rate-limited address when its windo
     };
     const { instance } = await start(path, {}, { now: () => clock.ms, sweepTimers: timers });
     await instance.opened;
-    await signIn(instance.url, 'Ann Rider');
+    await signIn(instance.url, 'Ann Rider', Math.floor(clock.ms / 1000));
     const held = instance.heldRateLimitKeys();
     expect(held).toBeGreaterThan(1);
     // The minute's limits end on the next minute boundary…

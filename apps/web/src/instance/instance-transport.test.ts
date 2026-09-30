@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { SyncStore } from './sync';
+
 import {
   importWalk,
   readFromDisk,
@@ -127,14 +129,82 @@ describe('no camera type can reach the instance module — ADR 0036 D-3 (d)', ()
     );
   });
 
-  it('imports nothing from the camera, and names no frame', () => {
-    for (const name of modules) {
-      const source = readFileSync(join(DIRECTORY, name), 'utf8');
-      for (const specifier of importsOf(source)) {
-        expect(specifier, `${name} imports ${specifier}`).not.toMatch(/camera|side-link|pose/);
-      }
-      expect(source, name).not.toMatch(/CapturedFrame|FrameBytes|\bframe\b/i);
+  /**
+   * ⚠️ **The instance modules THEMSELVES are held to a wider pattern than
+   * what they reach** (#892's merge review). The walk below allows
+   * `@onyourleft/store` whole, and that package exports `CameraFrameRecord` —
+   * a kept picture's JPEG bytes — which `CapturedFrame|FrameBytes|frame` does
+   * not match. A module here that imported it, or called `listCameraFrames`,
+   * passed every gate. So a module in `instance/` may not name a camera frame
+   * in any spelling, in code or in what it imports; comments are stripped, so
+   * a sentence saying why is not a finding. The wider pattern is NOT applied
+   * to what the walk reaches: `transfer/store-port.ts`'s `AccountStore` is the
+   * one port that returns a picture, for the account export, by design.
+   */
+  const PICTURE_IN_AN_INSTANCE_MODULE =
+    /CapturedFrame|FrameBytes|CameraFrame|\bframes?\b|\bjpe?g\b|\bpicture/i;
+
+  function namedImportsOf(source: string): readonly string[] {
+    const file = ts.createSourceFile('module.ts', source, ts.ScriptTarget.Latest, true);
+    return file.statements.filter(ts.isImportDeclaration).flatMap((statement) => {
+      const bindings = statement.importClause?.namedBindings;
+      return bindings !== undefined && ts.isNamedImports(bindings)
+        ? bindings.elements.map((element) => (element.propertyName ?? element.name).text)
+        : [];
+    });
+  }
+
+  function instanceModuleFaults(name: string, source: string): string[] {
+    const faults: string[] = [];
+    for (const specifier of importsOf(source)) {
+      if (/camera|side-link|pose/.test(specifier)) faults.push(`${name} imports ${specifier}`);
     }
+    for (const imported of namedImportsOf(source)) {
+      if (/frame|picture|jpe?g/i.test(imported)) faults.push(`${name} imports ${imported}`);
+    }
+    const found = PICTURE_IN_AN_INSTANCE_MODULE.exec(codeOf(name, source));
+    if (found !== null) faults.push(`${name} names ${found[0]}`);
+    return faults;
+  }
+
+  it('imports nothing from the camera, and names no frame — in any spelling', () => {
+    for (const name of modules) {
+      expect(instanceModuleFaults(name, readFileSync(join(DIRECTORY, name), 'utf8'))).toEqual([]);
+    }
+  });
+
+  it('gives sync no way to read a kept picture — pinned at compile time', () => {
+    // `SyncStore` is what sync may do to the device's store. The directives
+    // below are the pin: give it `listCameraFrames`, `countCameraFrames` or
+    // `putCameraFrame` and each becomes TS2578 (an unused directive), and a
+    // method whose name says Frame turns the last line red as well.
+    const store = {} as SyncStore;
+    // @ts-expect-error — sync cannot list a kept picture.
+    expect(store.listCameraFrames).toBeUndefined();
+    // @ts-expect-error — nor count them.
+    expect(store.countCameraFrames).toBeUndefined();
+    // @ts-expect-error — nor write one.
+    expect(store.putCameraFrame).toBeUndefined();
+    const framed: [
+      Extract<keyof SyncStore, `${string}${'Frame' | 'frame' | 'Picture'}${string}`>,
+    ] extends [never]
+      ? true
+      : false = true;
+    expect(framed).toBe(true);
+  });
+
+  it('would find a kept picture imported from the store package — the rule is not vacuous', () => {
+    const sync = readFileSync(join(DIRECTORY, 'sync.ts'), 'utf8');
+    const planted =
+      "import type { CameraFrameRecord } from '@onyourleft/store';\n" +
+      sync +
+      '\nexport async function leak(store: { listCameraFrames(o: string): Promise<CameraFrameRecord[]> }) {\n' +
+      "  return (await store.listCameraFrames('a')).map((record) => record.bytes);\n}\n";
+    expect(instanceModuleFaults('sync.ts', planted)).toEqual(
+      expect.arrayContaining(['sync.ts imports CameraFrameRecord', 'sync.ts names CameraFrame']),
+    );
+    // A comment saying why is not a finding.
+    expect(instanceModuleFaults('sync.ts', `// no CameraFrameRecord here\n${sync}`)).toEqual([]);
   });
 
   /**
