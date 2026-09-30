@@ -79,11 +79,13 @@ commit="$(git -C "${ROOT}" rev-parse HEAD)" || fail 'could not read the commit w
 # names an EARLIER stage (`FROM build AS run`) or `scratch` pulls nothing and
 # is not a base image. Anything this cannot read -- a `FROM` split over a line
 # continuation, an image from an `ARG` -- has no digest to show and fails,
-# which is the direction a check should fail in.
+# which is the direction a check should fail in. A last line with no newline
+# after it is read too (#864): `read` returns non-zero on it while still
+# filling `line`, so a bare `while read` skipped an unpinned final `FROM`.
 bases=()
 stages=' '
 from_lines=0
-while IFS= read -r line; do
+while IFS= read -r line || [ -n "${line}" ]; do
   read -r -a words <<< "${line}"
   [ "${#words[@]}" -gt 0 ] || continue
   [ "$(printf '%s' "${words[0]}" | tr '[:upper:]' '[:lower:]')" = from ] || continue
