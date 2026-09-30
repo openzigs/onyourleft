@@ -99,7 +99,9 @@
  *
  * What IS matched: the bare name; the name through `globalThis`, `window` or
  * `self` with `.` or `?.` (#782's review, #922); the same through a cast,
- * `(globalThis as any).WebSocket` (#922); and a call through `?.(` (#922).
+ * `(globalThis as any).WebSocket` (#922); a call through `?.(` (#922); and a
+ * literal key, `globalThis['fetch'](u)` or `window?.["WebSocket"]` (#928's
+ * review).
  * A review of any module that reaches the global object by another road is
  * the gate for the rest.
  */
@@ -122,14 +124,31 @@ const SOURCE_ROOT = fileURLToPath(new URL('..', import.meta.url));
  * `?.`. #922 added the optional chain and the cast: `globalThis?.WebSocket`,
  * `window?.fetch(` and `(globalThis as any).WebSocket` all passed the gate.
  */
-const VIA_GLOBAL = String.raw`(?:(?<![\w$])(?:globalThis|window|self)|\(\s*(?:globalThis|window|self)\s+as\s+[^()]*\))\s*\??\.\s*`;
+const GLOBAL_OBJECT = String.raw`(?:(?<![\w$])(?:globalThis|window|self)|\(\s*(?:globalThis|window|self)\s+as\s+[^()]*\))`;
+const VIA_GLOBAL = String.raw`${GLOBAL_OBJECT}\s*\??\.\s*`;
+
+/**
+ * The global object's member by a LITERAL key: `globalThis['fetch']`,
+ * `window?.["WebSocket"]`, `` self[`EventSource`] `` (#928's review). A
+ * literal is a spelling; a key built at run time is not, and is a limit.
+ */
+function viaGlobalKey(name: string): string {
+  return String.raw`${GLOBAL_OBJECT}\s*(?:\?\.\s*)?\[\s*(?:'${name}'|"${name}"|\`${name}\`)\s*\]`;
+}
 
 /** A call's opening parenthesis, directly or through an optional call, `?.(`. */
 const CALLED = String.raw`\s*(?:\?\.\s*)?\(`;
 
-/** A primitive's row: its bare name, or the name reached through the global object. */
-function primitive(name: string, tail: string): RegExp {
-  return new RegExp(String.raw`(?<![\w.$])${name}${tail}|${VIA_GLOBAL}${name}${tail}`, 'g');
+/**
+ * A primitive's row: its bare name, or the name reached through the global
+ * object, by a member access or a literal key. `keyTail` follows the key's
+ * `]`, where a word boundary could never match.
+ */
+function primitive(name: string, tail: string, keyTail = ''): RegExp {
+  return new RegExp(
+    String.raw`(?<![\w.$])${name}${tail}|${VIA_GLOBAL}${name}${tail}|${viaGlobalKey(name)}${keyTail}`,
+    'g',
+  );
 }
 
 /**
@@ -149,7 +168,7 @@ const NETWORK_PRIMITIVES: readonly { readonly name: string; readonly pattern: Re
   // row per primitive rather than a second row, so a line naming both
   // spellings is one finding and the module-and-primitive count below is not
   // doubled. #529 closed the same hole for `RTCPeerConnection`.
-  { name: 'fetch', pattern: primitive('fetch', CALLED) },
+  { name: 'fetch', pattern: primitive('fetch', CALLED, CALLED) },
   { name: 'XMLHttpRequest', pattern: primitive('XMLHttpRequest', String.raw`\b`) },
   { name: 'WebSocket', pattern: primitive('WebSocket', String.raw`\b`) },
   { name: 'EventSource', pattern: primitive('EventSource', String.raw`\b`) },
@@ -215,6 +234,11 @@ describe('the scan itself', () => {
       ['const r = await fetch?.(url);', 'fetch'],
       ['new (globalThis as Window).EventSource(url)', 'EventSource'],
       ['new window?.XMLHttpRequest()', 'XMLHttpRequest'],
+      // A literal key (#928's review).
+      ["await globalThis['fetch'](url);", 'fetch'],
+      ['new window["WebSocket"](url)', 'WebSocket'],
+      ['const S = self?.[`EventSource`];', 'EventSource'],
+      ["new (globalThis as any)[ 'XMLHttpRequest' ]()", 'XMLHttpRequest'],
     ] as const) {
       expect(
         networkCallsIn(line).map((found) => found.primitive),
@@ -227,6 +251,8 @@ describe('the scan itself', () => {
       'client?.fetch(url)',
       '(scope as Worker).fetchAll()',
       'const prefetch = (x) => x;',
+      "cache['fetch'](url)",
+      "globalThis['fetchRides'](x)",
     ]) {
       expect(networkCallsIn(line), line).toEqual([]);
     }

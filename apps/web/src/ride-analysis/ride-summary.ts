@@ -186,6 +186,12 @@ export function rideSummaryOf(
   store: RideSummaryStore,
   owner: AthleteId,
 ): (activityId: ActivityId) => Promise<string | undefined> {
+  // ⚠️ One cache per BINDING (#928's review): it saves a stream read only
+  // while the function this returns outlives a sync. A caller that binds
+  // afresh for every sync — as `sync.test.ts` §`syncDependencies` does — reads
+  // every stream every time; #898, which wires sync, has to keep one binding
+  // per athlete across syncs for this to pay. Per binding is also what keeps
+  // it to one athlete: the key names none.
   const cache = new Map<string, string>();
   return async (activityId) => {
     const key = await summaryKey(store, owner, activityId);
