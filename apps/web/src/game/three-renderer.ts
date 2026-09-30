@@ -7554,8 +7554,9 @@ const BANNER_GLYPHS_URL = `${import.meta.env.BASE_URL}glyphs/${LABEL_FONT}/0-255
 /**
  * The banners' atlas as a texture — #679. One byte of coverage a texel, red
  * only, uploaded as it is (row 0 the bottom, which is `v = 0`), mipmapped
- * because a banner is seen from 400 m. 512 × 1024 bytes: 0.67 MiB with its
- * mips, under #679's 1 MiB. @see banner-atlas.ts
+ * because a banner is seen from 375 m (`gantry.ts`
+ * §`LINE_DRAW_AHEAD_METRES`). 512 × 1024 bytes: 0.67 MiB with its mips,
+ * under #679's 1 MiB. @see banner-atlas.ts
  */
 function bannerTextureOf(
   glyphRange: Uint8Array,
