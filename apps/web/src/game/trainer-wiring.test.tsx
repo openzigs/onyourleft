@@ -1285,8 +1285,12 @@ describe('a room’s correction reaches the trainer gently — #782', () => {
     // descent — in ONE frame: a two-second correction, and an 8 % change of
     // grade the trainer is then walked through at the stated rate, most of it
     // after the correction itself has finished.
+    // ⚠️ At 100 m/s since #922: a room may move the rider only as far as
+    // the faster speed explains since the ride began (`correction.ts`
+    // §`explainableMetres`), and 1 100 m in the ten seconds ridden needs
+    // that. A fixture's speed, not a rider's; what is held here is the grade.
     const along = (): number => drawn.at(-1)?.markers[0]?.z ?? 0;
-    room.frame(1, [frameRider(0, along() + 1_100, 10)]);
+    room.frame(1, [frameRider(0, along() + 1_100, 100)]);
     await pumpWith(clock, 16);
     // …and on after the correction has finished, until the trainer is on the
     // road again: a write that fell short of the road is owed, not forgotten.
