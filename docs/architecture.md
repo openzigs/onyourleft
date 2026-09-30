@@ -553,7 +553,13 @@ in one chunk per group (Ride, History, Routes, More), one module each under `src
 loaded with a literal `import()` through `src/shell/lazy-view.tsx`. While a group arrives, `main`
 holds a one-line loading status under the route's own `h1`, so the focus the shell puts on `main`
 survives the view replacing it; a chunk that cannot be fetched says so with a Reload control, which
-is also ADR 0027's left-behind tab. `main.tsx` preloads every group once Home is idle, and a group
+is also ADR 0027's left-behind tab. ⚠️ **Since [#871](https://github.com/openzigs/onyourleft/issues/871)
+a later visit asks again**, and a reader who remembers #674's text claiming that is reading a claim
+that was false when it was written: React's `lazy` remembers a rejection for good, so a view that
+failed once showed the failure on every visit until Reload. `lazyView` now replaces a failed view's
+wrapper once the boundary has put the failure on screen (`componentDidCatch`) — never inside the
+rejection, where React's own retry of the errored render would import again and loop while the
+network is off. `main.tsx` preloads every group once Home is idle, and a group
 already in memory renders without suspending, because React holds a fallback on screen for about
 300 ms once it has shown one. The precache needs no edit: it is derived from the build (#406).
 `apps/web/tools/bundle/entry-graph.ts` fails `pnpm run build` if any view a group module names is in
@@ -1253,9 +1259,16 @@ decided how it is built. [#767](https://github.com/openzigs/onyourleft/issues/76
 [#36](https://github.com/openzigs/onyourleft/issues/36) gave it an API contract and an error model.
 **What it does today is small on purpose**: four metadata routes, and — since #855 (#772, #773,
 #774) — the identity routes under `/v1/auth/`, which a handler serves only when it is HANDED an
-identity service over a store. The Node entry point is not handed one yet (see "Identity" below),
-so a running instance still answers the metadata alone. No sync and no reachable room exists yet
-— #776 and #780 build them.
+identity service over a store. ⚠️ **Since #780 the Node entry point opens the store and serves
+rooms**, and a reviewer who remembers "a running instance still answers the metadata alone" is
+reading the old paragraph: `src/instance.ts` opens the store (never migrating it — the deploy's
+`migrate` step does, #791), hands the handler the accounts on it, and serves room sockets through a
+router and one room-worker process per core (`src/room/node/`, below). What a rider cannot do yet is
+create a room ([#784](https://github.com/openzigs/onyourleft/issues/784)) or join one from the app
+([#782](https://github.com/openzigs/onyourleft/issues/782)); an operator opens rooms with
+`node src/operator/cli.ts room-open`. The first deployment and its runbook are
+[`self-hosting/home-machine.md`](self-hosting/home-machine.md) and
+[`operating-an-instance.md`](operating-an-instance.md).
 
 **The device is canonical and a rider with no instance loses nothing** (ADR 0036 D-3). Nothing in
 `apps/web` or `apps/mobile` imports the instance, and nothing may: a client reaches it over the
@@ -1264,7 +1277,11 @@ network through one module (#777), which is the one `no-network.test.ts` will ad
 ```mermaid
 flowchart LR
   subgraph apps/instance
-    main[src/main.ts<br/>reads env, starts] --> listener[src/node-listener.ts<br/>node:http adapter]
+    main[src/main.ts<br/>resolve hook, then serve.ts] --> inst[src/instance.ts<br/>store, accounts, router]
+    inst --> listener[src/node-listener.ts<br/>node:http adapter]
+    inst --> router[src/room/node/router.ts<br/>a worker per core, #780]
+    router -->|socket handle over IPC| worker[src/room/node/worker.ts<br/>ws + room-host.ts]
+    worker --> core
     listener --> handler[src/handler.ts<br/>Request to Response]
     handler --> routes[src/routes.ts<br/>the route table]
     routes --> spec[src/openapi.ts<br/>generates openapi.json]
@@ -1290,12 +1307,25 @@ managed platform hosts rooms only or the whole instance is left to #790 (ADR 003
 routes HTTP to it and there is no production Worker entry. It is **deployed nowhere**; it runs under
 a local `workerd` in `test:workerd` (`CLAUDE.md` §4a). `src/room/conformance.test.ts` drives the
 core directly and every adapter with one script and requires byte-identical text on every socket —
-#780's Node adapter joins that file.
+#780's Node adapter, over real `ws` sockets, is in that file since #780.
 
-**No build step, and one third-party runtime dependency.** Node 24 strips the types and runs
+**The Node adapter serves the rooms** ([#780](https://github.com/openzigs/onyourleft/issues/780)).
+The HTTP process accepts a socket at `GET /v1/rooms/{roomId}/socket`, refuses it before any room
+state changes when the instance is not ready (503) or the room is unknown (404), and otherwise places
+the room on a room worker — by a hash of its id over the workers alive, then by a table, so one room
+is never split — and hands the socket over as a handle. The worker completes the WebSocket handshake
+(compression off unless the operator turns it on, Q16), looks a hello's ticket up once in the HTTP
+process's book, runs the room's 1 Hz tick, lets go of a client that stops reading, and pings every
+socket for the tunnel. Results are handed back to the HTTP process — the one writer (ADR 0037 D-5) —
+as each becomes final. A worker that dies has its rooms' sockets closed `1011 room-lost` by the
+router, which keeps an unread copy of each, and a new worker takes its place.
+
+**No build step, and two third-party runtime dependencies.** Node 24 strips the types and runs
 `src/main.ts` as committed, so the tsconfig adds `allowImportingTsExtensions` and
-`erasableSyntaxOnly`. The instance imports nothing but Node, this repository's own packages and —
-since #769, in `src/store/` alone — `kysely` (ADR 0037 D-9), which
+`erasableSyntaxOnly`; this repository's packages name no extension on their relative imports, and
+`src/node-imports.ts` is the resolve hook that lets Node load them (#780). The instance imports
+nothing but Node, this repository's own packages, `kysely` (since #769, in `src/store/` alone) and
+`ws` (since #780, in `src/room/node/`) — both ADR 0037 D-9's rows — which
 `apps/instance/third-party.txt` states and `check:notices` holds —
 and that document is **the instance's own**, served at `GET /licences/third-party.txt` and kept out
 of the app's notices (§4g of `CLAUDE.md`), because a rider's device carries none of it.
@@ -1344,11 +1374,11 @@ sequenceDiagram
 |---|---|---|
 | What is signed | `@onyourleft/domain`'s `deviceStatementBytes`: five members, RFC 8785, canonicalised once for the browser and the instance (ADR 0014 D-8). `purpose` is one of `oyl-auth-v1`, `oyl-link-v1` and `oyl-recover-v1`, so a sign-in cannot add a key and no activity record (which has no `purpose`) verifies as a statement; `instanceOrigin` binds it to one instance | `packages/domain/src/identity/device-statement.ts` |
 | Refusals, in order | `wrong_purpose`, `wrong_instance`, `challenge_unknown` / `challenge_used` / `challenge_expired` (the nonce is spent before the signature is checked, so a replay of a whole request is `challenge_used`), `bad_signature`, `key_revoked`. Each is its own code | `apps/instance/src/auth/identity.ts` |
-| Secrets at rest | The SHA-256 of every secret handed out — session tokens, recovery codes, link codes, email-recovery tokens — never the secret. A test searches the database file, its WAL and its index for each one | `src/auth/`, migration `0004-identity` |
-| Registration | The first key an instance sees registers an athlete as the mode allows (#775): `approval` — **the default** — `invite`, `open` or `closed`. The answer carries ten one-time recovery codes, once | `identity.ts` §`register`, `config.ts` |
+| Secrets at rest | The SHA-256 of every secret handed out — session tokens, recovery codes, link codes, email-recovery and address-confirmation tokens, invitation codes — never the secret. A test searches the database file, its WAL and its index for each one | `src/auth/`, migrations `0004-identity`, `0006-recovery-email-confirmation`, `0008-registration` |
+| Registration | The first key an instance sees registers an athlete as the mode allows (#775): `approval` — **the default** — `invite`, `open` or `closed`, read by `config.ts` (the home deployment's compose file sets `closed` unless its `.env` says otherwise). The answer carries ten one-time recovery codes, once | `identity.ts` §`register`, `config.ts` |
 | Rooms | A **ticket**, never the session token, in the hello: minted against a live session for one room, spent on admission, 30 s. Kept in memory by the process that runs the room; `TicketBook.admitterFor(roomId)` is the room core's `Admit` (#779). #781's Durable Object adapter plugs it in when it lands | `src/auth/tickets.ts` |
-| Other devices | A signed-in device mints a 5-minute, single-use **link code**; the new device signs `oyl-link-v1` with its OWN key. Revoking a key revokes its sessions and unspent link codes; the last key needs a recovery code the athlete holds (checked, not spent). A revoked key's records stay valid (ADR 0014 D-6) | `identity.ts` |
-| Every device lost | A recovery code, or — only where the operator hands the identity a mail transport — an emailed single-use link (30 minutes). With email recovery off, no address is accepted or stored | `identity.ts` §`recover`, §`requestEmailRecovery` |
+| Other devices | A signed-in device mints a 5-minute, single-use **link code**; the new device signs `oyl-link-v1` with its OWN key. Revoking a key revokes its sessions and unspent link codes; the last key needs a recovery code the athlete holds (checked, not spent). ⚠️ Since #867 the **store** refuses the last key (`last_device`) and a rename past the limit (`rate_limited`) in the transaction that writes, so two requests at once cannot both pass a check made in an earlier call. A revoked key's records stay valid (ADR 0014 D-6) | `identity.ts`, `sql-store.ts` §`revokeDeviceKey`, §`renameAthlete` |
+| Every device lost | A recovery code, or — only where the operator hands the identity a mail transport — an emailed single-use link (30 minutes). With email recovery off, no address is accepted or stored. ⚠️ Since #865 an address given — at registration or by `POST /v1/auth/recovery-email` — is **bound only once the athlete follows a single-use, 24-hour link mailed to it, from a device signed in as them** (`POST /v1/auth/recovery-email/confirm`); until then it recovers nothing, giving one answers the same whether or not it is held, and an address another account confirmed first is `address_in_use` to the mailbox's reader alone. ⚠️ Since #883 the confirmation mail is limited per athlete (`rate_limited`), per (athlete, address) so no athlete can spend another's share, and per address in all — except an athlete's first link of the hour, which always goes, so a stranger cannot starve an address's owner; an athlete has one unconfirmed link at a time | `identity.ts` §`recover`, §`requestEmailRecovery`, §`setRecoveryEmail`, §`confirmRecoveryEmail` |
 | What other riders see | ONE projection, `publicAthlete`: the id and the display name. Every `athlete` column is classified public or private and a test reads the migrated table's columns; a declared mass travels only in a ticket and reaches no other rider | `src/auth/public-athlete.ts` |
 | Display names | 1–32 scalar values after NFC; control, bidirectional and invisible characters refused, each by name. At most three changes a day; every earlier name is kept for moderation (#789) | `packages/domain/src/identity/display-name.ts`, `display_name_change` |
 | Rate limits | In memory, fixed windows, per address (never logged) and per key. Since #775 the per-key limit counts only challenges spent by a valid signature, because a public key is not secret and anyone could otherwise lock its holder out. An unknown address shares no challenge bucket. An IPv6 client is counted by its /64. Behind a proxy, the address comes from a header the operator names, read only from loopback or a proxy the operator lists in `OYL_INSTANCE_TRUSTED_PROXIES` (#891's review: any private peer included Docker's bridge gateway). The registration and challenge limits reset on a restart; the report limit is counted from the database | `src/auth/rate-limit.ts`, `src/client-address.ts` |
@@ -1365,7 +1395,7 @@ checked separately in each feature. The operator's side is [`docs/moderation.md`
 | The choke point | Every route declares whom it reaches (`Route.reaches`, required by the type): its caller's own data, another athlete named in its path, the moderators only, or an exemption with a reason. For a route that names another athlete, the handler asks `canSee(viewer, subject)` before the route runs. If the answer is no, it returns `not_found`, byte for byte what an athlete who does not exist gets. `canSee` is true only for an existing, active, unsuspended athlete where neither athlete blocks the other | `src/handler.ts` §`reachable`, `src/moderation/moderation.ts` §`canSee` |
 | Walked from the table | `choke-point.test.ts` sorts `ROUTES` by that declaration. It calls every athlete-reaching route as a blocked rider, as the blocker and about a suspended rider, and every moderators' route as an ordinary rider. It fails on an "own" route that names an athlete in its path or its body | `src/moderation/choke-point.test.ts` |
 | Not told | Block, unblock and report answer `204` whether or not the athlete named exists, so none of them reveals that a block is there. ⚠️ Nor does anything they leave behind (#891's review): a block is stored for any well-formed id, so `GET /v1/blocks` echoes the caller's own input, and a report about nobody is stored closed (`no_such_athlete`), so it spends the reporter's hourly allowance like any other. `canSee` is one query whatever the answer | `src/moderation/moderation.ts`, `choke-point.test.ts` (one caller per case) |
-| The log | `moderation_log`, append-only in the schema: two triggers abort any `UPDATE` or `DELETE`. An action and its entry are one transaction (`SqlStore.moderate`). The log has no foreign key to `athlete`, so erasing an account does not erase what a moderator did to it. The erasure test lists every column that names an athlete without a foreign key, and says what erasure does to each | migration `0005-moderation`, `sql-store.erasure.test.ts` |
+| The log | `moderation_log`, append-only in the schema: two triggers abort any `UPDATE` or `DELETE`. An action and its entry are one transaction (`SqlStore.moderate`). The log has no foreign key to `athlete`, so erasing an account does not erase what a moderator did to it. The erasure test lists every column that names an athlete without a foreign key, and says what erasure does to each | migration `0007-moderation`, `sql-store.erasure.test.ts` |
 | Suspension | Revokes every session in the same transaction, and is checked again on every request. Sign-in is refused for every key the athlete holds (`account_suspended`, told only to them). Nothing is deleted | `sql-store.ts` §`applyToAthlete`, `identity.ts` |
 | Moderators | The owner and one deputy (ruling Q13), each named by a **device key** in configuration, so a moderator can be named before their account exists. Nobody moderates a moderator, and a moderator does not dismiss a report about themselves: each attempt is refused and logged as `refused_<action>`. A pending account signing in with a key the operator named later is activated and logged (`activate_moderator_key`) | `moderation.ts` §`roleOf`, `identity.ts` §`signIn` |
 | Registration modes (#775) | `OYL_INSTANCE_REGISTRATION`, and **`approval` when unset**. A pending athlete gets a session that reaches only routes declaring `admitsPending` (their own account); the owner or the deputy approve or refuse, and each decision is logged. The named moderators' keys register active in every mode. New accounts: 3 an hour per client address | `identity.ts` §`register`, `moderation/routes.ts` |

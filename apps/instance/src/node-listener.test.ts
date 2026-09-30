@@ -4,6 +4,7 @@ import { connect } from 'node:net';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { clientAddress } from './client-address.ts';
 import type { Handler } from './handler.ts';
 import { listen, REQUEST_ORIGIN, requestUrl, type Listening } from './node-listener.ts';
 
@@ -145,5 +146,79 @@ describe('a response is pulled no faster than the client reads it (#841)', () =>
     // Loopback socket buffers hold a few MiB; unbounded buffering pulls all 64.
     expect(pulledWhileStalled).toBeGreaterThan(0);
     expect(pulledWhileStalled).toBeLessThan(CHUNKS / 2);
+  });
+});
+
+describe('the client address behind a proxy — #895 review B3, #903 item 4', () => {
+  // The home box (`deploy/home/compose.yaml`): cloudflared at the fixed
+  // address the compose network gives it, and the instance trusts that one.
+  const TUNNEL = '172.30.87.10';
+  const TRUSTED = [TUNNEL];
+  const fromPeer = (peer: string, entries: Record<string, string> = {}) =>
+    [peer, new Headers(entries)] as const;
+
+  it('is the peer unless the operator named a header', () => {
+    expect(
+      clientAddress(...fromPeer(TUNNEL, { 'cf-connecting-ip': '203.0.113.9' }), null, TRUSTED),
+    ).toBe(TUNNEL);
+  });
+
+  it('is the named header’s address when the peer is a trusted proxy', () => {
+    expect(
+      clientAddress(
+        ...fromPeer(TUNNEL, { 'cf-connecting-ip': ' 203.0.113.9 ' }),
+        'cf-connecting-ip',
+        TRUSTED,
+      ),
+    ).toBe('203.0.113.9');
+  });
+
+  it('is the peer when the header is named but the peer is not a trusted proxy — ONE rule, #903 item 4', () => {
+    // Another container on the compose network, or a published port's bridge
+    // gateway: it can type any header it likes, so it is not believed.
+    for (const peer of ['172.30.87.3', '172.17.0.1', '203.0.113.200']) {
+      expect(
+        clientAddress(
+          ...fromPeer(peer, { 'cf-connecting-ip': '198.51.100.1' }),
+          'cf-connecting-ip',
+          TRUSTED,
+        ),
+        peer,
+      ).toBe(peer);
+    }
+  });
+
+  it('falls back to the peer for a header that is missing, empty, repeated or a list', () => {
+    const repeated = new Headers();
+    repeated.append('cf-connecting-ip', '203.0.113.9');
+    repeated.append('cf-connecting-ip', '198.51.100.1');
+    const cases: Headers[] = [
+      new Headers(),
+      new Headers({ 'cf-connecting-ip': '' }),
+      repeated,
+      new Headers({ 'cf-connecting-ip': '203.0.113.9, 198.51.100.1' }),
+    ];
+    for (const headers of cases) {
+      expect(clientAddress(TUNNEL, headers, 'cf-connecting-ip', TRUSTED)).toBe(TUNNEL);
+    }
+  });
+
+  it('gives two riders behind one proxy two rate-limit buckets, through the real listener', async () => {
+    const seen: (string | null)[] = [];
+    const listening = await listen(
+      (_request, client) => {
+        seen.push(client?.address ?? null);
+        return Promise.resolve(new Response('ok'));
+      },
+      { host: '127.0.0.1', port: 0, clientAddressHeader: 'cf-connecting-ip' },
+    );
+    try {
+      for (const address of ['203.0.113.9', '198.51.100.1']) {
+        await fetch(`${listening.url}/health`, { headers: { 'cf-connecting-ip': address } });
+      }
+    } finally {
+      await listening.close();
+    }
+    expect(seen).toEqual(['203.0.113.9', '198.51.100.1']);
   });
 });

@@ -27,6 +27,7 @@ import {
 import { startTestInstance, type TestInstance } from '../instance-testing.ts';
 import { openSqlStore } from '../store/open-sql-store.ts';
 import type { SqlStore } from '../store/sql-store.ts';
+import type { InstanceProbes } from '../route-kit.ts';
 import { createIdentity, DEFAULT_LIMITS, type Identity, type IdentityOptions } from './identity.ts';
 
 /** The origin every test instance states. */
@@ -93,6 +94,8 @@ export interface IdentityInstance {
   readonly path: string;
   /** Mail an email-recovery link would have sent, when email recovery is on. */
   readonly mail: { address: string; token: string }[];
+  /** Mail a link confirming a recovery address would have sent (#865). */
+  readonly confirmations: { address: string; token: string }[];
   /** POST or GET a JSON body; answers the status and the parsed body. */
   call(
     method: string,
@@ -119,13 +122,16 @@ export interface IdentityInstance {
 
 export async function startIdentityInstance(
   options: Partial<Omit<IdentityOptions, 'store' | 'origin' | 'now' | 'emailRecovery'>> & {
-    emailRecovery?: boolean;
+    /** `'failing'`: email recovery on, with a mail transport that rejects every send. */
+    emailRecovery?: boolean | 'failing';
     /**
      * What the identity sees in place of the real store — for putting a
      * check-then-write race in a known order, which two concurrent calls in
      * one process do not reliably produce.
      */
     storeSeenBy?: (store: SqlStore) => SqlStore;
+    /** What `/ready`, `/metrics` and a room's start answer (#780). */
+    probes?: InstanceProbes;
   } = {},
 ): Promise<IdentityInstance> {
   const directory = await mkdtemp(join(tmpdir(), 'oyl-instance-identity-'));
@@ -133,7 +139,8 @@ export async function startIdentityInstance(
   const store = await openSqlStore(path);
   const clock: TestClock = { ms: 1_790_000_000_000 };
   const mail: { address: string; token: string }[] = [];
-  const { emailRecovery, storeSeenBy, ...rest } = options;
+  const confirmations: { address: string; token: string }[] = [];
+  const { emailRecovery, storeSeenBy, probes, ...rest } = options;
   const identity = createIdentity({
     // The identity tests predate registration modes (#775) and register
     // riders as they sign in; a test of a mode names it. The default an
@@ -147,18 +154,28 @@ export async function startIdentityInstance(
     store: storeSeenBy === undefined ? store : storeSeenBy(store),
     origin: TEST_ORIGIN,
     now: () => clock.ms,
-    ...(emailRecovery === true
+    ...(emailRecovery === true || emailRecovery === 'failing'
       ? {
           emailRecovery: {
             send: (address, token) => {
+              if (emailRecovery === 'failing') return Promise.reject(new Error('no mail'));
               mail.push({ address, token });
+              return Promise.resolve();
+            },
+            confirm: (address, token) => {
+              if (emailRecovery === 'failing') return Promise.reject(new Error('no mail'));
+              confirmations.push({ address, token });
               return Promise.resolve();
             },
           },
         }
       : {}),
   });
-  const instance = await startTestInstance({ identity, config: { bodyLimitBytes: 16_384 } });
+  const instance = await startTestInstance({
+    identity,
+    config: { bodyLimitBytes: 16_384 },
+    ...(probes === undefined ? {} : { probes }),
+  });
 
   const call: IdentityInstance['call'] = async (method, route, callOptions = {}) => {
     const headers: Record<string, string> = { ...callOptions.headers };
@@ -189,6 +206,7 @@ export async function startIdentityInstance(
     clock,
     path,
     mail,
+    confirmations,
     call,
     nonceFor,
     signIn: async (device, extra = {}) => {

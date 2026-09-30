@@ -61,7 +61,10 @@ async function migrationsOnDisk(): Promise<[string, Partial<InstanceMigration>][
 /**
  * One row for each table, so a rollback that lost rows it should have kept
  * is visible. ⚠️ A table with no entry here fails the test: a new table owes a
- * fixture row, or its rollback is checked over an empty table.
+ * fixture row, or its rollback is checked over an empty table. Each row names
+ * its whole primary key, so seeding a second time adds nothing: a generated
+ * id would add a second row, which the first migration after its table's
+ * (0005, #865) then reads as a `down` that kept too much.
  */
 const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   athlete: `INSERT INTO athlete (id, display_name, created_at, registration_state) VALUES ('a', 'A', 1, 'active')`,
@@ -70,15 +73,20 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   activity_record: `INSERT INTO activity_record VALUES ('a', '${'1'.repeat(64)}', x'00ff', 4)`,
   room: `INSERT INTO room VALUES ('room', 'race', 'private', '${'2'.repeat(64)}', 1)`,
   result: `INSERT INTO result VALUES ('room', 'a', 1000, 0)`,
+  room_course: `INSERT INTO room_course VALUES ('room', 450, '[[0,0],[150,2]]', 'hoods', NULL, 2000, NULL, NULL)`,
   auth_challenge: `INSERT INTO auth_challenge VALUES ('${'3'.repeat(64)}', 'key-b', 5, NULL)`,
   recovery_code: `INSERT INTO recovery_code VALUES ('${'4'.repeat(64)}', 'a', 6, NULL)`,
   link_code: `INSERT INTO link_code VALUES ('${'5'.repeat(64)}', 'a', 'key-a', 7, NULL)`,
+  // An explicit id, so the second seeding is a conflict rather than a second
+  // row: with no id the autoincrement made one, and any migration after 0004
+  // read that as its `down` adding a row (#780, the first such migration).
   display_name_change: `INSERT INTO display_name_change (id, athlete_id, previous_name, changed_at) VALUES (1, 'a', 'Old', 8)`,
   recovery_email: `INSERT INTO recovery_email VALUES ('a', 'a@example.org')`,
   email_recovery_token: `INSERT INTO email_recovery_token VALUES ('${'6'.repeat(64)}', 'a', 9, NULL)`,
+  recovery_email_confirmation: `INSERT INTO recovery_email_confirmation VALUES ('${'7'.repeat(64)}', 'a', 'a@example.org', 10, NULL)`,
   block: `INSERT INTO block VALUES ('a', 'b', 10)`,
   report: `INSERT INTO report (id, athlete_id, target_athlete_id, reason, created_at) VALUES (1, 'a', 'b', 'Why', 11)`,
-  invite_code: `INSERT INTO invite_code VALUES ('${'7'.repeat(64)}', 'a', 13, NULL)`,
+  invite_code: `INSERT INTO invite_code VALUES ('${'8'.repeat(64)}', 'a', 13, NULL)`,
   moderation_log: `INSERT INTO moderation_log (id, actor_athlete_id, action, target_athlete_id, reason, at) VALUES (1, 'a', 'suspend', 'b', 'Why', 12)`,
 };
 
@@ -89,7 +97,7 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
  * holds the refusal.
  */
 const EMPTY_FOR_ITS_OWN_DOWN: Readonly<Record<string, string>> = {
-  '0005-moderation': 'moderation_log',
+  '0007-moderation': 'moderation_log',
 };
 
 interface Snapshot {
@@ -225,11 +233,11 @@ describe('the migrations (#769)', () => {
     }
   });
 
-  it('refuses to undo 0005 while the moderation log holds an entry, and changes nothing (#891)', async () => {
+  it('refuses to undo 0007 while the moderation log holds an entry, and changes nothing (#891)', async () => {
     const path = await freshPath();
     await withKysely(path, (db) => migrateToLatest(db));
     await withKysely(path, async (db) => {
-      while ((await appliedMigrations(db)).at(-1) !== '0005-moderation') {
+      while ((await appliedMigrations(db)).at(-1) !== '0007-moderation') {
         await migrateDownOne(db);
       }
     });
@@ -241,7 +249,7 @@ describe('the migrations (#769)', () => {
     );
     expect(snapshot(path)).toEqual(before);
     await withKysely(path, async (db) => {
-      expect((await appliedMigrations(db)).at(-1)).toBe('0005-moderation');
+      expect((await appliedMigrations(db)).at(-1)).toBe('0007-moderation');
     });
   });
 

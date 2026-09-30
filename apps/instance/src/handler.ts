@@ -5,7 +5,7 @@ import type { Config } from './config.ts';
 import { errorResponse } from './errors.ts';
 import { logRequest, logUnhandled, type LogSink } from './log.ts';
 import { openApiDocument } from './openapi.ts';
-import type { ClientInfo } from './route-kit.ts';
+import type { ClientInfo, InstanceProbes } from './route-kit.ts';
 import { ROUTES, type Route } from './routes.ts';
 
 /**
@@ -63,6 +63,14 @@ export interface HandlerOptions {
    * (the self-hosted box's wiring is #780's), so it serves the metadata alone.
    */
   readonly identity?: Identity;
+  /** What `/ready`, `/metrics` and a room's start ask (#780, #791). */
+  readonly probes?: InstanceProbes;
+  /**
+   * Called as each response goes out: the route PATTERN it matched (or
+   * `null`), its status, and its error code when it is an error — what
+   * `/metrics` counts (`metrics.ts`). Never the path, never a value.
+   */
+  readonly observe?: (route: string | null, status: number, code: string | undefined) => void;
 }
 
 /** A path parameter's value: one segment, of these characters only. */
@@ -141,6 +149,19 @@ async function boundedBody(
   return body;
 }
 
+/** An error response's `error.code`, read from a copy of its body; `undefined` for anything else. */
+async function errorCodeOf(response: Response): Promise<string | undefined> {
+  if (response.status < 400) return undefined;
+  if (!(response.headers.get('content-type') ?? '').startsWith('application/json'))
+    return undefined;
+  try {
+    const body = (await response.clone().json()) as { error?: { code?: unknown } };
+    return typeof body.error?.code === 'string' ? body.error.code : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function withHeaders(response: Response): Response {
   const headers = new Headers(response.headers);
   for (const [name, value] of Object.entries(ALWAYS)) headers.set(name, value);
@@ -214,6 +235,7 @@ export function createHandler(options: HandlerOptions): Handler {
       specification,
       identity,
       caller,
+      probes: options.probes,
     });
   }
 
@@ -255,6 +277,9 @@ export function createHandler(options: HandlerOptions): Handler {
       status: response.status,
       ms: now() - started,
     });
+    if (options.observe !== undefined) {
+      options.observe(route?.path ?? null, response.status, await errorCodeOf(response));
+    }
     return withHeaders(response);
   };
 }

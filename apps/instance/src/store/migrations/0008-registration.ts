@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Migration 0006 (#775): what registration modes and public-room eligibility
+ * Migration 0008 (#775): what registration modes and public-room eligibility
  * need beyond 0001's `athlete.registration_state`.
  *
  * - **`athlete.adult_confirmed_at`** — when the rider confirmed they are 18 or

@@ -13,6 +13,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { MIGRATIONS } from '../src/store/migrations/index.ts';
 
 const TOOL = fileURLToPath(new URL('./migrate.ts', import.meta.url));
+/** Read from the registry, so a new migration does not make this test stale (#865). */
+const NAMES = Object.keys(MIGRATIONS);
+const LAST = NAMES.at(-1) as string;
 
 let directory: string | undefined;
 afterEach(async () => {
@@ -30,25 +33,22 @@ describe('tools/migrate.ts (#769)', () => {
     directory = await mkdtemp(join(tmpdir(), 'oyl-instance-migrate-tool-'));
     const path = join(directory, 'instance.sqlite');
 
-    // The newest migration, read from the list rather than written here, so a
-    // migration added by any later change does not have to edit this test.
-    const names = Object.keys(MIGRATIONS);
-    const newest = names.at(-1) as string;
-
     const latest = migrate(path, 'latest');
     expect(latest.status, latest.out).toBe(0);
-    expect(latest.out).toContain(`latest: ${String(names.length)} migration(s) changed`);
-    expect(latest.out).toContain(`applied: ${names.join(', ')}\n`);
+    expect(latest.out).toContain(`latest: ${NAMES.length} migration(s) changed`);
+    expect(latest.out).toContain(`applied: ${NAMES.join(', ')}\n`);
     expect(latest.out).toMatch(/ {2}result: 0 row\(s\)/);
 
     const down = migrate(path, 'down');
     expect(down.out).toMatch(/down: 1 migration\(s\) changed/);
-    expect(down.out).not.toContain(newest);
-    expect(down.out).toContain(`applied: ${names.slice(0, -1).join(', ')}\n`);
+    expect(down.out).not.toContain(LAST);
+    expect(down.out).toContain(`applied: ${NAMES.slice(0, -1).join(', ')}\n`);
+    // The newest migration (0008, #775) is the one that creates `invite_code`.
+    expect(down.out).not.toMatch(/ {2}invite_code:/);
 
     const up = migrate(path, 'up');
     expect(up.out).toMatch(/up: 1 migration\(s\) changed/);
-    expect(up.out).toContain(newest);
+    expect(up.out).toContain(LAST);
   });
 
   it('refuses status, up and down on a path with no database, and creates none', async () => {

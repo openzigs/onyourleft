@@ -67,14 +67,23 @@
  * `refuse room-closed`, closes it, and refuses new ones with 410: a lost race is
  * said to be lost rather than reopened as an empty lobby.
  *
- * ## Tickets: one admission at hello, and never per message
+ * ## Tickets: one lookup at hello, and never per message
  *
  * The core asks its admission once, when a hello arrives, and never for a
- * report (`room.ts` §`hello`); this adapter hands it `options.admit` and adds
- * no other check. So a ticket is verified **once per connection** — by a
- * signature or by one lookup, whichever #772 builds — and a report costs no
- * round trip. There is no ticket verifier here to hand in: #772 is not built,
- * and until it is, whoever mounts this class supplies one.
+ * report (`room.ts` §`hello`). So a ticket is verified **once per
+ * connection**, and a report costs no round trip.
+ *
+ * **Which: one lookup, in this object's own book** (#780's wiring of #772's
+ * `auth/tickets.ts`). A ticket is thirty seconds, one room and one hello, and
+ * a room is one object — so the book that minted a ticket can be the book the
+ * room asks, in memory, with nothing signed and no key to hold or rotate. The
+ * Worker in front authenticates the rider's session and posts
+ * `{athleteId, declaredMassKilograms}` to `POST …/tickets`; the object mints
+ * from {@link DurableRoomOptions.tickets} and answers `{ticket, expiresAtMs}`.
+ * ⚠️ That path trusts its caller: the Worker in front (#790) must never route
+ * a client's own request to it. An eviction forgets every unspent ticket,
+ * which only means a rider asks for another; a signed ticket would survive
+ * one and was not worth a key for that.
  *
  * ## The keepalive is the platform's
  *
@@ -95,6 +104,8 @@
  */
 
 import { encodeMessage, type RoomMessage } from '@onyourleft/protocol';
+
+import { closeFrames } from '../close-codes.ts';
 
 import {
   createRoom,
@@ -162,10 +173,26 @@ type Call =
   | Omit<Extract<LobbyEvent, { op: 'receive' }>, 'admissions'>
   | Exclude<LobbyEvent, { op: 'receive' }>;
 
+/** A ticket book, as `auth/tickets.ts` builds one: what this adapter mints from and admits by. */
+export interface RoomTickets {
+  mint(
+    roomId: string,
+    admission: Admission,
+  ): { readonly ticket: string; readonly expiresAtMs: number };
+  admitterFor(roomId: string): Admit;
+}
+
 export interface DurableRoomOptions<Reply> {
   readonly settings: RoomSettings;
-  /** Verifies a hello's ticket. Called once per hello, never per report. */
-  readonly admit: Admit;
+  /**
+   * Verifies a hello's ticket. Called once per hello, never per report.
+   * Absent, the room admits by {@link tickets}' book for {@link roomId}.
+   */
+  readonly admit?: Admit;
+  /** The book `POST …/tickets` mints from, and the room admits by when no `admit` is given. */
+  readonly tickets?: RoomTickets;
+  /** This object's room, as the book names it. Required with `tickets`. */
+  readonly roomId?: string;
   /** The room's time, in milliseconds. `Date.now` under `workerd`. */
   readonly now: () => number;
   readonly platform: WorkersPlatform<Reply>;
@@ -248,6 +275,9 @@ export class DurableRoom<Reply> {
       live.sockets.set(connection, server);
       return platform.upgraded(client);
     }
+    if (request.method === 'POST' && pathOf(request.url).endsWith('/tickets')) {
+      return this.#mint(request);
+    }
     if (request.method === 'POST' && pathOf(request.url).endsWith('/start')) {
       if (live.lost) return platform.status(410, 'this room was lost when it was evicted');
       const nowMs = this.#options.now();
@@ -255,6 +285,34 @@ export class DurableRoom<Reply> {
       return platform.status(200, 'started');
     }
     return platform.status(404, 'not found');
+  }
+
+  /** `POST …/tickets` from the Worker in front: a ticket for one athlete, from this room's book. */
+  async #mint(request: IncomingRequest): Promise<Reply> {
+    const { platform, tickets, roomId } = this.#options;
+    if (tickets === undefined || roomId === undefined || request.text === undefined) {
+      return platform.status(404, 'not found');
+    }
+    let body: unknown;
+    try {
+      body = JSON.parse(await request.text());
+    } catch {
+      body = undefined;
+    }
+    const { athleteId, declaredMassKilograms } = (body ?? {}) as Record<string, unknown>;
+    if (
+      typeof athleteId !== 'string' ||
+      athleteId === '' ||
+      typeof declaredMassKilograms !== 'number' ||
+      !Number.isFinite(declaredMassKilograms)
+    ) {
+      return platform.status(400, 'expected {athleteId, declaredMassKilograms}');
+    }
+    const minted = tickets.mint(roomId, { athleteId, declaredMassKilograms });
+    return platform.status(
+      200,
+      JSON.stringify({ ticket: minted.ticket, expiresAtMs: minted.expiresAtMs }),
+    );
   }
 
   async webSocketMessage(socket: HibernatableSocket, message: string | ArrayBuffer): Promise<void> {
@@ -362,6 +420,7 @@ export class DurableRoom<Reply> {
   }
 
   #apply(live: Live, out: readonly Outbound[]): void {
+    const frames = closeFrames(out);
     for (const o of out) {
       const socket = live.sockets.get(o.connection);
       if (socket === undefined) continue;
@@ -374,7 +433,8 @@ export class DurableRoom<Reply> {
         }
       } else {
         live.sockets.delete(o.connection);
-        socket.close(1000, 'closed by the room');
+        const frame = frames.get(o.connection);
+        socket.close(frame?.code, frame?.reason);
       }
     }
   }
@@ -401,6 +461,13 @@ export class DurableRoom<Reply> {
     await this.#ctx.storage.put(LEFT_LOBBY_KEY, true);
   }
 
+  #admitter(): Admit {
+    const { admit, tickets, roomId } = this.#options;
+    if (admit !== undefined) return admit;
+    if (tickets !== undefined && roomId !== undefined) return tickets.admitterFor(roomId);
+    return () => undefined;
+  }
+
   #ready(): Promise<Live> {
     this.#live ??= this.#restore();
     return this.#live;
@@ -410,7 +477,7 @@ export class DurableRoom<Reply> {
     if (live.replaying !== undefined) {
       return live.replaying.shift() ?? undefined;
     }
-    const admission = this.#options.admit(ticket);
+    const admission = this.#admitter()(ticket);
     live.recorded.push(admission ?? null);
     return admission;
   }

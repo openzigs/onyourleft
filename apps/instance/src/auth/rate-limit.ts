@@ -25,6 +25,12 @@ export interface RateLimiter {
   peek(key: string): boolean;
   /** Count one against `key`, whatever the count is. */
   count(key: string): void;
+  /**
+   * Count one request against `key` and answer how many it has made in this
+   * window, this one included — for a caller that treats the first request
+   * of a window differently from the rest (#883).
+   */
+  take(key: string): number;
 }
 
 export function createRateLimiter(rate: RateLimit, now: () => number): RateLimiter {
@@ -38,18 +44,19 @@ export function createRateLimiter(rate: RateLimit, now: () => number): RateLimit
     }
     return counts;
   }
-  function count(key: string): number {
+  function take(key: string): number {
     const held = current();
     const next = (held.get(key) ?? 0) + 1;
     held.set(key, next);
     return next;
   }
   return {
-    allow: (key) => count(key) <= rate.limit,
+    allow: (key) => take(key) <= rate.limit,
     peek: (key) => (current().get(key) ?? 0) < rate.limit,
     count: (key) => {
-      count(key);
+      take(key);
     },
+    take,
   };
 }
 

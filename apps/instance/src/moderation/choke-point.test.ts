@@ -88,6 +88,10 @@ const EXEMPT: Readonly<
     heldElsewhere:
       'names a room, not an athlete; blocking inside a room is #789’s (room moderation), and suspension is held by the session, which a suspended account no longer has',
   },
+  startRoom: {
+    heldElsewhere:
+      'names a room, not an athlete, and starts only a race the caller is seated in — seated by a ticket, which is the choke point for entering a room; who may start one is #785’s',
+  },
 };
 
 /**

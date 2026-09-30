@@ -98,6 +98,39 @@
         }
       }
     },
+    "/metrics": {
+      "get": {
+        "operationId": "getMetrics",
+        "summary": "Rooms, riders, tick lateness and refusals in the Prometheus text format — only when the operator turned it on (OYL_INSTANCE_METRICS), and only for a request carrying the operator’s token as `Authorization: Bearer`; `not_found` otherwise. No label is an athlete, a name, a room or a coordinate.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          }
+        }
+      }
+    },
     "/openapi.json": {
       "get": {
         "operationId": "getSpecification",
@@ -110,6 +143,80 @@
                 "schema": {
                   "type": "object",
                   "description": "An OpenAPI 3.1 document."
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "operationId": "getReadiness",
+        "summary": "Whether riders may be sent here yet: the database answers, its migrations are at head, and every room worker is alive (#791). 503 with the same body when not.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ready",
+                        "not_ready"
+                      ]
+                    },
+                    "checks": {
+                      "type": "object",
+                      "properties": {
+                        "database": {
+                          "type": "boolean"
+                        },
+                        "migrations": {
+                          "type": "string",
+                          "enum": [
+                            "at-head",
+                            "migrating",
+                            "behind",
+                            "ahead",
+                            "unknown"
+                          ]
+                        },
+                        "rooms": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "database",
+                        "migrations",
+                        "rooms"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "checks"
+                  ],
+                  "additionalProperties": false
                 }
               }
             }
@@ -1084,6 +1191,134 @@
           },
           "405": {
             "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/auth/recovery-email": {
+      "post": {
+        "operationId": "setRecoveryEmail",
+        "summary": "Give an address for email recovery: a single-use link, good for 24 hours, is mailed to it, and the address recovers nothing until that link is followed. The same answer whether or not the address is already held. `rate_limited` when this athlete has given addresses too often this hour; `internal` when the mail could not be sent, and then nothing is stored. `not_found` where the operator has not enabled email recovery.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "address": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "address"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/auth/recovery-email/confirm": {
+      "post": {
+        "operationId": "confirmRecoveryEmail",
+        "summary": "Follow the link mailed to a recovery address, signed in as the athlete who gave it: the address is bound, replacing any earlier one. `address_in_use` when it is already another account’s.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "token"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "description": "One of `unauthenticated`, `code_unknown`, `code_used`, `code_expired`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/address_in_use"
           },
           "413": {
             "$ref": "#/components/responses/payload_too_large"
@@ -2436,6 +2671,73 @@
         }
       }
     },
+    "/v1/rooms/{roomId}/start": {
+      "post": {
+        "operationId": "startRoom",
+        "summary": "Starts a race’s countdown, for an athlete seated in it. Provisional: who may start a race is #785’s to decide.",
+        "parameters": [
+          {
+            "name": "roomId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "started"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/rooms/{roomId}/ticket": {
       "post": {
         "operationId": "createRoomTicket",
@@ -2563,6 +2865,7 @@
                   "key_in_use",
                   "last_device",
                   "moderation_not_applicable",
+                  "address_in_use",
                   "payload_too_large",
                   "rate_limited",
                   "internal",
@@ -2818,6 +3121,16 @@
       },
       "moderation_not_applicable": {
         "description": "`moderation_not_applicable` (409), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "address_in_use": {
+        "description": "`address_in_use` (409), in the one error shape.",
         "content": {
           "application/json": {
             "schema": {

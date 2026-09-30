@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Migration 0005 (#83): blocking, reporting, suspension and the moderation
+ * Migration 0007 (#83): blocking, reporting, suspension and the moderation
  * audit log.
  *
  * - **`block`** — one athlete (`athlete_id`, the BLOCKER) blocking another
@@ -21,7 +21,7 @@
  *   what a moderator did to it, or the audit trail would be something a
  *   suspended rider could delete (`sql-store.erasure.test.ts` states the
  *   exception, and `docs/moderation.md` tells an operator). And `down` is
- *   refused while the log holds a single entry, so migrating back past 0005
+ *   refused while the log holds a single entry, so migrating back past 0007
  *   cannot delete it either.
  * - **`athlete.suspended_at`** — when the account was suspended, or `null`.
  * - **`athlete.display_name_hidden_at`** — a moderator hid the display name
@@ -103,7 +103,7 @@ export async function down(db: Kysely<unknown>): Promise<void> {
   const logged = await sql<{ n: number }>`select count(*) as n from moderation_log`.execute(db);
   if (Number(logged.rows[0]?.n ?? 0) > 0) {
     throw new ModerationLogNotEmptyError(
-      'Migration 0005 cannot be undone: the moderation log holds entries, and undoing it would delete them. Nothing was changed.',
+      'Migration 0007 cannot be undone: the moderation log holds entries, and undoing it would delete them. Nothing was changed.',
     );
   }
   await sql`drop trigger moderation_log_no_delete`.execute(db);

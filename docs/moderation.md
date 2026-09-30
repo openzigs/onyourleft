@@ -84,7 +84,16 @@ you trust. From anywhere else it ignores the header, because anybody could have 
 
 A proxy you trust is **loopback** (`127.0.0.1`, `::1`) or an address you list in
 `OYL_INSTANCE_TRUSTED_PROXIES`, separated by commas, written as the connection reports it. If you
-list nothing, only loopback is trusted.
+list nothing, only loopback is trusted. That is **one rule** (#903 item 4): the header is read only
+when you named it **and** the connection comes from a trusted proxy. Naming the header alone never
+makes a stranger's copy of it believed.
+
+**The home deployment** (`apps/instance/deploy/home/compose.yaml`) does this for you: `cloudflared`
+runs on the project's own compose network at the fixed address `172.30.87.10`, and the instance is
+given `OYL_INSTANCE_CLIENT_ADDRESS_HEADER=cf-connecting-ip` and
+`OYL_INSTANCE_TRUSTED_PROXIES=172.30.87.10`. Any other container on that network, and a port
+published for local debugging, arrives from another address and is counted as itself
+([`docs/self-hosting/home-machine.md`](self-hosting/home-machine.md)).
 
 ⚠️ **In Docker, publish the port on `127.0.0.1` only**, as in
 `docker run -p 127.0.0.1:8787:8787 …`. A port Docker publishes reaches the container from the bridge
@@ -151,8 +160,8 @@ It also means **do not write a rider's personal details into a reason**. Write w
 Erasure deletes a rider's own reports and blocks, and every block that other riders made of them.
 Reports other riders made **about** them stay in your queue, so you can still decide them.
 
-⚠️ **Migrating the database back past migration 0005 would delete the log**, so `migrate … down`
-refuses to undo 0005 while the log holds a single entry, and changes nothing.
+⚠️ **Migrating the database back past migration 0007 would delete the log**, so `migrate … down`
+refuses to undo 0007 while the log holds a single entry, and changes nothing.
 
 ## What a suspension does not do
 
