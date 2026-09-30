@@ -203,6 +203,7 @@ function bindStore(real: ActivityStore): PersistentStore {
     putRiderText: async (record) => real.putRiderText(record),
     getRiderText: async (owner, kind, key) => real.getRiderText(owner, kind, key),
     listRiderTexts: async (owner, kind) => real.listRiderTexts(owner, kind),
+    listRiderTextKeys: async (owner, kind) => real.listRiderTextKeys(owner, kind),
     deleteRiderText: async (owner, kind, key) => real.deleteRiderText(owner, kind, key),
   };
 }

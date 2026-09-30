@@ -823,6 +823,18 @@ const PROBES: readonly ScopingProbe[] = [
     },
   },
   {
+    member: 'listRiderTextKeys',
+    leaks: "the keys of another athlete's documents or notes — which rides they wrote about",
+    async run(store, mine) {
+      await expect(store.listRiderTextKeys(mine.owner, 'document')).resolves.toStrictEqual([
+        mine.document.key,
+      ]);
+      await expect(store.listRiderTextKeys(mine.owner, 'note')).resolves.toStrictEqual([
+        mine.note.key,
+      ]);
+    },
+  },
+  {
     member: 'deleteRiderText',
     leaks: "another athlete's goals or documents, deleted by a rider who deleted their own",
     async run(store, mine, theirs) {

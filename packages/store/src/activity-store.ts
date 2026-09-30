@@ -2118,6 +2118,20 @@ export class ActivityStore {
     return rows.map(checkedRiderText).sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   }
 
+  /**
+   * The keys of this athlete's texts of one kind, in key order, WITHOUT
+   * reading a row — so a reader that must not lose the good rows to one bad
+   * one (the account export, #924) can read each on its own with
+   * {@link ActivityStore.getRiderText}.
+   */
+  async listRiderTextKeys(owner: AthleteId, kind: RiderTextKind): Promise<string[]> {
+    const keys = await this.#riderTexts
+      .where(INDEX.riderTextByAthleteAndKind)
+      .equals([owner, kind])
+      .primaryKeys();
+    return keys.map((key) => key[2]).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  }
+
   /** Removes one of this athlete's texts. `false` when there was none. */
   async deleteRiderText(owner: AthleteId, kind: RiderTextKind, key: string): Promise<boolean> {
     return this.#db.transaction('rw', [this.#riderTexts], async () => {
