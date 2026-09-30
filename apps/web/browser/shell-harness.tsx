@@ -425,6 +425,112 @@ function HierarchySpecimens(): JSX.Element {
 }
 
 /**
+ * `?illustration=specimens` renders the menus' house style (#936): a heading
+ * at the display step, one drawing painted with every illustration colour,
+ * and one element that moves the way a menu may.
+ *
+ * ⚠️ **Why specimens.** No screen draws art, a display heading or motion yet —
+ * #938 onwards do — and a token no rule paints is the defect
+ * `theme.a11y.test.ts` §"every token is painted by something" exists for. So
+ * the rules the kit will use (`theme.css` §`.oyl-illo__*`, §`.oyl-display`,
+ * §`.oyl-motion-enter`) are painted here with the shipping stylesheet, and
+ * `shell.browser.spec.ts` §"#936" measures them. What the harness supplies is
+ * the shapes and the words.
+ *
+ * The drawing is `aria-hidden` and carries no text, which is the house rule.
+ * The heading's last word is long on purpose: at the display step it is wider
+ * than a 320 px viewport, so the reflow case measures the wrap rather than a
+ * heading that happened to fit.
+ */
+const ILLUSTRATION_SPECIMENS = 'specimens';
+
+/**
+ * `&motion-rule-off=<condition>` is the motion case's CONTROL (#936): the same
+ * page with every `@media` block whose condition contains `<condition>` —
+ * `prefers-reduced-motion` or `update` — deleted from the shipping sheet
+ * through the CSSOM. The spec requires the specimen's transition to RUN there
+ * under the same emulated preference, which is what proves the positive case
+ * measured the block rather than a transition that never started. It
+ * publishes how many blocks it removed, and the spec requires one.
+ */
+function removeMediaBlocks(condition: string): number {
+  let removed = 0;
+  for (const sheet of [...document.styleSheets]) {
+    const rules = sheet.cssRules;
+    for (let index = rules.length - 1; index >= 0; index -= 1) {
+      const rule = rules[index];
+      if (rule instanceof CSSMediaRule && rule.conditionText.includes(condition)) {
+        sheet.deleteRule(index);
+        removed += 1;
+      }
+    }
+  }
+  return removed;
+}
+
+/**
+ * `&update=slow` applies the `@media (update: slow)` block as a screen that
+ * cannot cheaply repaint would (#936). ⚠️ **The engine cannot be told it is
+ * such a screen**: neither Playwright nor the DevTools protocol emulates the
+ * `update` feature (`Emulation.setEmulatedMedia` accepts it and
+ * `matchMedia('(update: slow)')` still answers no, measured on the pinned
+ * Chromium). So the block's condition is rewritten to `all` through the
+ * CSSOM, which applies exactly what the block says, and nothing else. What
+ * this cannot prove is that a real e-ink panel matches the query — that is the
+ * platform's. It publishes how many blocks it forced, and the spec requires one.
+ */
+function forceSlowUpdate(): number {
+  let forced = 0;
+  for (const sheet of [...document.styleSheets]) {
+    for (const rule of [...sheet.cssRules]) {
+      if (rule instanceof CSSMediaRule && rule.conditionText.includes('update: slow')) {
+        rule.media.mediaText = 'all';
+        forced += 1;
+      }
+    }
+  }
+  return forced;
+}
+
+function IllustrationSpecimens(): JSX.Element {
+  return (
+    <section data-oyl-illustration="true" aria-label="Illustration specimens">
+      <h2 className="oyl-display" data-oyl-display="true">
+        Choose a transcontinental ride
+      </h2>
+      <svg
+        aria-hidden="true"
+        data-oyl-illustration-drawing="true"
+        focusable="false"
+        viewBox="0 0 320 120"
+        width="100%"
+      >
+        <rect className="oyl-illo__sky" data-oyl-illo="illoSky" width="320" height="120" />
+        <circle className="oyl-illo__sun" data-oyl-illo="illoSun" cx="250" cy="34" r="16" />
+        <path
+          className="oyl-illo__hill-far"
+          data-oyl-illo="illoHillFar"
+          d="M0 78 Q80 44 160 70 T320 60 V120 H0 Z"
+        />
+        <path
+          className="oyl-illo__hill-near"
+          data-oyl-illo="illoHillNear"
+          d="M0 96 Q100 70 200 92 T320 88 V120 H0 Z"
+        />
+        <path
+          className="oyl-illo__road"
+          data-oyl-illo="illoRoad"
+          d="M150 120 Q170 104 210 96 L216 97 Q182 106 170 120 Z"
+        />
+      </svg>
+      <p className="oyl-motion-enter" data-oyl-motion-specimen="true" data-oyl-entered="false">
+        This line fades up into place.
+      </p>
+    </section>
+  );
+}
+
+/**
  * The camera half of this page — #382, and it is **opt-in through the query
  * string**.
  *
@@ -696,6 +802,25 @@ function main(): void {
     }
     if (params.get('hover-rule') === HOVER_RULE_OFF) {
       document.documentElement.dataset['oylHoverRuleRemoved'] = String(removeLighterHover());
+    }
+  }
+
+  if (params.get('illustration') === ILLUSTRATION_SPECIMENS) {
+    const illustration = document.createElement('div');
+    region.append(illustration);
+    flushSync(() => {
+      createRoot(illustration).render(
+        <StrictMode>
+          <IllustrationSpecimens />
+        </StrictMode>,
+      );
+    });
+    const off = params.get('motion-rule-off');
+    if (off !== null) {
+      document.documentElement.dataset['oylMotionRulesRemoved'] = String(removeMediaBlocks(off));
+    }
+    if (params.get('update') === 'slow') {
+      document.documentElement.dataset['oylSlowUpdateForced'] = String(forceSlowUpdate());
     }
   }
 

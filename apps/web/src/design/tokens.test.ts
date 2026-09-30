@@ -27,8 +27,15 @@ import {
   ELEVATION_DIRECTION,
   ELEVATION_SURFACES,
   FONT_SIZE_TOKENS,
+  ILLUSTRATION_DEPTH,
+  ILLUSTRATION_TOKENS,
   MAXIMUM_ELEVATION_STEP,
   MINIMUM_ELEVATION_STEP,
+  MINIMUM_ILLUSTRATION_STEP,
+  MOTION_DURATION_MS,
+  MOTION_EASING,
+  MOTION_FOR_SCRIPT,
+  MOTION_TOKENS,
   TYPE_SCALE_BASE_REM,
   TYPE_SCALE_RATIO,
   TYPE_SCALE_STEPS,
@@ -182,6 +189,92 @@ describe('the type scale follows its stated ratio', () => {
       expect(value, `${name} is "${value}", which does not scale with the reader`).toMatch(
         /^[\d.]+rem$/,
       );
+    }
+  });
+});
+
+describe('the illustration palette (#936)', () => {
+  it('names every `illo*` token, and only those', () => {
+    // A sixth illustration colour added to the palettes but not to this list
+    // would get no focus-ring pair, since those pairs are built from the list.
+    expect([...ILLUSTRATION_TOKENS].sort()).toEqual(
+      Object.keys(COLOUR_TOKENS)
+        .filter((token) => token.startsWith('illo'))
+        .sort(),
+    );
+  });
+
+  it('puts every illustration token but the sun in the landscape, once', () => {
+    expect([...ILLUSTRATION_DEPTH].sort()).toEqual(
+      ILLUSTRATION_TOKENS.filter((token) => token !== 'illoSun').sort(),
+    );
+  });
+
+  describe.each(THEMES)('in the %s palette', (theme) => {
+    const colours = paletteColours(theme);
+
+    it('goes the way the elevation ramp goes, nearer layer by nearer layer', () => {
+      // Aerial perspective in light (far is paler), the night in dark (far
+      // sinks) — and, either way, the direction #672 gave a raised surface.
+      for (let index = 1; index < ILLUSTRATION_DEPTH.length; index += 1) {
+        const behind = relativeLuminance(colours[ILLUSTRATION_DEPTH[index - 1] ?? 'illoSky']);
+        const here = relativeLuminance(colours[ILLUSTRATION_DEPTH[index] ?? 'illoSky']);
+        const message = `${theme}: ${ILLUSTRATION_DEPTH[index] ?? '?'} is not ${ELEVATION_DIRECTION[theme]} than the layer behind it`;
+        if (ELEVATION_DIRECTION[theme] === 'darker') {
+          expect(here, message).toBeLessThan(behind);
+        } else {
+          expect(here, message).toBeGreaterThan(behind);
+        }
+      }
+    });
+
+    it('separates each layer from the one behind it enough to be seen', () => {
+      for (let index = 1; index < ILLUSTRATION_DEPTH.length; index += 1) {
+        const behind = ILLUSTRATION_DEPTH[index - 1] ?? 'illoSky';
+        const here = ILLUSTRATION_DEPTH[index] ?? 'illoSky';
+        const step = contrastRatio(colours[here], colours[behind]);
+        expect(
+          step,
+          `${theme}: ${behind} → ${here} is ${step.toFixed(3)}:1, one flat shape`,
+        ).toBeGreaterThanOrEqual(MINIMUM_ILLUSTRATION_STEP);
+      }
+    });
+  });
+});
+
+describe('the motion tokens (#936)', () => {
+  it('declares each duration for CSS as the number of milliseconds it names', () => {
+    for (const [name, ms] of Object.entries(MOTION_DURATION_MS)) {
+      expect(MOTION_TOKENS[name as keyof typeof MOTION_DURATION_MS]).toBe(`${String(ms)}ms`);
+    }
+  });
+
+  it('declares the easing for CSS as the same four numbers', () => {
+    expect(MOTION_TOKENS.easeStandard).toBe(
+      `cubic-bezier(${MOTION_EASING.standard.map(String).join(', ')})`,
+    );
+  });
+
+  it('hands Motion the same durations in seconds, on the same curve', () => {
+    // Motion reads `duration` in seconds; a table in milliseconds would be a
+    // thousand times slower and nothing else would notice.
+    expect(Object.keys(MOTION_FOR_SCRIPT).sort()).toEqual(Object.keys(MOTION_DURATION_MS).sort());
+    for (const [name, ms] of Object.entries(MOTION_DURATION_MS)) {
+      const script = MOTION_FOR_SCRIPT[name as keyof typeof MOTION_DURATION_MS];
+      expect(script.duration * 1000).toBeCloseTo(ms, 9);
+      expect(script.ease).toEqual(MOTION_EASING.standard);
+    }
+  });
+
+  it('keeps short under medium, and short at a press’s feedback (120 ms or less)', () => {
+    expect(MOTION_DURATION_MS.short).toBeLessThanOrEqual(120);
+    expect(MOTION_DURATION_MS.short).toBeLessThan(MOTION_DURATION_MS.medium);
+  });
+
+  it('eases without overshoot: every control point is inside the unit square', () => {
+    for (const value of MOTION_EASING.standard) {
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThanOrEqual(1);
     }
   });
 });

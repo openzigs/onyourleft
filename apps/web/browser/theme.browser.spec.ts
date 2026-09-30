@@ -54,7 +54,12 @@ import { expect, test, type Page } from '@playwright/test';
 
 import { PRODUCT_ORIGIN } from '../playwright.config';
 import { THEME_STORAGE_KEY } from '../src/design/theme-selection';
-import { paletteColours, type ColourToken, type Theme } from '../src/design/tokens';
+import {
+  DARK_COLOUR_TOKENS,
+  paletteColours,
+  type ColourToken,
+  type Theme,
+} from '../src/design/tokens';
 import { THEME_SELECTION_MARKER } from '../tools/theme/theme-selection-plugin';
 import { ALL_ROUTES, hrefFor } from '../src/shell/routes';
 
@@ -548,7 +553,12 @@ test.describe('#672 — the HUD is the same in both palettes', () => {
 
       // The control: the pin deleted, the SAME reads must see the mute toggle
       // and the warning notice follow the page — what #744's review measured.
-      expect(await unpinTheHud(page), 'the pin was not found to delete').toBe(29);
+      // Every page colour token and `color-scheme` — counted from the palette
+      // rather than written down, so a new token (#936's five, which moved it
+      // from 29) does not turn the control red for a reason unrelated to it.
+      expect(await unpinTheHud(page), 'the pin was not found to delete').toBe(
+        Object.keys(DARK_COLOUR_TOKENS).length + 1,
+      );
       const unpinned = await readHudPaint(page);
       const unpinnedPixels = await pixels(page);
       const movedWithoutThePin = moved(light, unpinned).join('\n');

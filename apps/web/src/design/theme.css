@@ -69,6 +69,14 @@
   --oyl-color-danger-ink: #7a1d1d;
   --oyl-color-danger-border: #a83232;
 
+  /* The illustration palette (#936) — decoration, painted only by art. What
+     may be drawn OVER each is a pair in `tokens.ts` §CONTRAST_REQUIREMENTS. */
+  --oyl-color-illo-sky: #cfe4ef;
+  --oyl-color-illo-sun: #f4c65a;
+  --oyl-color-illo-hill-far: #a7d3a3;
+  --oyl-color-illo-hill-near: #7db678;
+  --oyl-color-illo-road: #6f726c;
+
   --oyl-space-xs: 0.25rem;
   --oyl-space-sm: 0.5rem;
   --oyl-space-md: 1rem;
@@ -82,8 +90,20 @@
   --oyl-font-size-lg: 1.25rem;
   --oyl-font-size-xl: 1.5625rem;
   --oyl-font-size-xxl: 1.953125rem;
+  /* Step 4, a menu's hero title (#936) — `.oyl-display` below. */
+  --oyl-font-size-display: 2.44140625rem;
   /* A live ride metric. See tokens.ts — this one has an acceptance criterion. */
   --oyl-font-size-metric: 3.814697265625rem;
+
+  /*
+   * The menus' motion (#936). Every duration in this file reads one of these,
+   * and `theme.a11y.test.ts` refuses a duration literal above 200 ms anywhere
+   * in it, so the ceiling cannot be walked round by writing a number. Motion
+   * (ADR 0041) reads the same values from `tokens.ts` §MOTION_FOR_SCRIPT.
+   */
+  --oyl-motion-short: 120ms;
+  --oyl-motion-medium: 200ms;
+  --oyl-motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
 
   --oyl-radius: 0.375rem;
   --oyl-measure: 68ch;
@@ -191,6 +211,14 @@
   --oyl-color-danger-surface: #3a1818;
   --oyl-color-danger-ink: #f4b8b8;
   --oyl-color-danger-border: #d46a6a;
+
+  /* Nearer is LIGHTER here, as the elevation ramp is (`tokens.ts`
+     §ILLUSTRATION_DEPTH). */
+  --oyl-color-illo-sky: #152637;
+  --oyl-color-illo-sun: #9a7a30;
+  --oyl-color-illo-hill-far: #1d3a2b;
+  --oyl-color-illo-hill-near: #2f5d3b;
+  --oyl-color-illo-road: #5f6a63;
 }
 
 *,
@@ -266,6 +294,26 @@ h2 {
 h3 {
   font-size: var(--oyl-font-size-lg);
   margin-top: var(--oyl-space-lg);
+}
+
+/*
+ * THE DISPLAY STEP — #936, the owner's D-5 on #935: a menu's hero title, one
+ * rung above the view title on the same ladder, in the page's own `system-ui`
+ * at a heavier weight. No font file: a display face would be a new asset, and
+ * the one committed face is the map's Roboto for a licence reason (§3 of
+ * CLAUDE.md, #578). A class, not an element rule, because the `h1` a hero
+ * title sits in is still the view's `h1` and keeps its place in the outline.
+ *
+ * `overflow-wrap: break-word` because one long word at 39 px is wider than a
+ * 320 px viewport less its padding, and SC 1.4.10 forbids the sideways scroll
+ * that would follow; `shell.browser.spec.ts` §"#936" measures it there.
+ */
+.oyl-display {
+  font-size: var(--oyl-font-size-display);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  overflow-wrap: break-word;
 }
 
 /*
@@ -1141,8 +1189,8 @@ h3:first-child {
   background: var(--oyl-color-accent);
   color: var(--oyl-color-accent-ink);
   transition:
-    background-color 120ms ease,
-    border-color 120ms ease;
+    background-color var(--oyl-motion-short) var(--oyl-motion-ease-standard),
+    border-color var(--oyl-motion-short) var(--oyl-motion-ease-standard);
 }
 
 /*
@@ -1935,7 +1983,7 @@ select {
   max-width: 100%;
   min-height: 2.75rem;
   padding: var(--oyl-space-sm) 2rem var(--oyl-space-sm) var(--oyl-space-sm);
-  transition: border-color 120ms ease;
+  transition: border-color var(--oyl-motion-short) var(--oyl-motion-ease-standard);
 }
 
 select:hover:not(:disabled) {
@@ -2712,9 +2760,60 @@ p > label + input[type='file'] {
 }
 
 /*
- * Motion is opt-in. Nothing in the shell animates today; the block is here so
- * that the first thing that does inherits the preference rather than being
- * retrofitted with it.
+ * THE ILLUSTRATION KIT'S PAINT — #936, the menus' house style
+ * (`docs/architecture.md` §"House style for the menus").
+ *
+ * One class per illustration colour, for the shapes #938's kit draws: a shape
+ * says which layer it is and this file says what colour that layer is, in
+ * either palette, so no drawing ever names a colour. `fill` because the kit is
+ * SVG. Art is `aria-hidden` and carries no text; a word or a control drawn
+ * over it declares its pair in `tokens.ts` §CONTRAST_REQUIREMENTS first.
+ */
+.oyl-illo__sky {
+  fill: var(--oyl-color-illo-sky);
+}
+
+.oyl-illo__sun {
+  fill: var(--oyl-color-illo-sun);
+}
+
+.oyl-illo__hill-far {
+  fill: var(--oyl-color-illo-hill-far);
+}
+
+.oyl-illo__hill-near {
+  fill: var(--oyl-color-illo-hill-near);
+}
+
+.oyl-illo__road {
+  fill: var(--oyl-color-illo-road);
+}
+
+/*
+ * THE MENUS' MOTION — #936. Something arriving: it fades up into place over
+ * `--oyl-motion-medium` on the one easing curve. `data-oyl-entered='false'` is
+ * the state before it has arrived, so a screen sets it, lets a frame pass, and
+ * clears it. Epic #935's rule: motion explains a change of place, is 200 ms or
+ * less, never loops, and is never on a ride-time screen. The two blocks below
+ * (`prefers-reduced-motion`, and `update: slow` near the end of the file)
+ * collapse it, which `shell.browser.spec.ts` §"#936" measures with
+ * `document.getAnimations()`.
+ */
+.oyl-motion-enter {
+  transition:
+    opacity var(--oyl-motion-medium) var(--oyl-motion-ease-standard),
+    transform var(--oyl-motion-medium) var(--oyl-motion-ease-standard);
+}
+
+.oyl-motion-enter[data-oyl-entered='false'] {
+  opacity: 0;
+  transform: translateY(0.5rem);
+}
+
+/*
+ * Motion is opt-in. Every duration in this file is a `--oyl-motion-*` token
+ * (#936), and this block collapses every one of them for a reader who asked
+ * for less motion.
  */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -2857,6 +2956,11 @@ p > label + input[type='file'] {
   --oyl-color-danger-surface: #fbe8e8;
   --oyl-color-danger-ink: #7a1d1d;
   --oyl-color-danger-border: #a83232;
+  --oyl-color-illo-sky: #cfe4ef;
+  --oyl-color-illo-sun: #f4c65a;
+  --oyl-color-illo-hill-far: #a7d3a3;
+  --oyl-color-illo-hill-near: #7db678;
+  --oyl-color-illo-road: #6f726c;
 
   color: var(--oyl-color-hud-ink);
   display: flex;
