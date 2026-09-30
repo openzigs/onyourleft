@@ -1368,10 +1368,13 @@ sequenceDiagram
     participant I as Instance (apps/instance/src/sync/)
     D->>I: GET /v1/sync/manifest?cursor= (receivedAt, id)
     I-->>D: [{kind, key, digest, receivedAt, deleted, activityId}], next
-    D->>I: GET /v1/sync/records/{content}, GET /v1/sync/files/{content}
+    D->>D: read its sync base — what the two agreed on last time
+    D->>I: DELETE /v1/sync/items/{kind}/{key} — a synced ride deleted HERE, items first
+    D->>I: GET /v1/sync/records/{content}, GET /v1/sync/files/{content} — never synced here
     D->>D: verify signature AND file hash (ADR 0014 D-6) BEFORE writing
     D->>I: POST /v1/sync/records {record, file} — what the instance is missing
-    D->>I: POST /v1/sync/items/{kind}/{key} {body} — write-ups, side-camera reports
+    D->>I: POST /v1/sync/items/{kind}/{key} {body} — an item changed HERE
+    D->>I: GET /v1/sync/items/{kind}/{key} — an item unchanged here that moved THERE
 ```
 
 | Concern | Decision | Where |
@@ -1382,7 +1385,7 @@ sequenceDiagram
 | Reads (#38) | The caller's own activities only — no read of another athlete's exists, because nothing records who may see whose ride. The list is ONE query a page; streams are served in full or at `?points=`, bucket means with a gap left `null`, and **never a position**; every response is `no-store` | `src/sync/sync.ts` §`owned`, §`streams` |
 | Export (#35) | `GET /v1/account/export`: the account as JSON, each activity's signed record and the address of its ORIGINAL file (the true track, unobfuscated), every item, public keys only, and a list of what is left out and why | `src/sync/sync.ts` §`exportAccount` |
 | Deletion (#35) | `DELETE /v1/account`: files first — each one no other athlete also holds — then every row, in tables **derived from the schema's foreign keys at the time of the call**, then a sweep of files a concurrent upload added. A failure part way is retried safely. It reaches THIS instance only: not a copy already downloaded, and not another instance | `src/sync/sync.ts` §`eraseAccount`, `src/store/sql-store.ts` §`athleteTablesInErasureOrder` |
-| The client (#776) | `apps/web/src/instance/sync.ts`: pull, verifying before any write, through the rider's own import path; then push, signing a FIT of each ride the instance lacks with the device key. A pulled record is NOT kept on the device — `putActivityRecord` refuses another device's key, and that rule stands — so a pulled ride is never signed again. It names no `fetch`: #777 wires the transport | `apps/web/src/instance/sync.ts` |
+| The client (#776) | `apps/web/src/instance/sync.ts`: **the device's change wins** (ADR 0036 D-3). Each copy is read against the device's **sync base** — what it and the instance agreed on at the last sync (`packages/store` §`SyncBaseRecord`, schema v14), a row that outlives its ride so the device remembers deleting it. A synced ride missing here is deleted on the instance, its items first, and never pulled back; a ride never synced here is pulled, verified before any write, through the rider's own import path; a ride the instance lacks is pushed, as a FIT signed with the device key; an item changed here is pushed, and only an item unchanged here whose instance copy moved is pulled. ⚠️ #893's first draft pulled whatever differed, before pushing — which pulled back a ride deleted here and overwrote a write-up replaced here, and its review found both. A pulled record is NOT kept on the device — `putActivityRecord` refuses another device's key, and that rule stands — so a pulled ride is never signed again. It names no `fetch`: #777 wires the transport | `apps/web/src/instance/sync.ts` |
 
 ⚠️ **Not wired to a running box yet.** `main.ts` hands the handler neither identity nor sync (#780),
 and the shipped client calls none of this (#777), so every sync route answers `unavailable` on a
