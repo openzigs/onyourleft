@@ -267,7 +267,15 @@ apps/                 AGPL-3.0-or-later, without exception
                         pairing code) uses a HUD token so it does not flip, and
                         the HUD keeps the LIGHT palette whatever the page is in:
                         `theme.css` §`.oyl-hud` restates every page colour token
-                        at its light value, for the controls and notices inside it
+                        at its light value, for the controls and notices inside it.
+                        Since #936 the menus' house style is tokens: five `illo*`
+                        colours (decoration: what is drawn OVER one declares a
+                        pair, and the focus ring is paired with each), a
+                        `display` type step, and `--oyl-motion-*` — no duration
+                        literal above 200 ms anywhere in `theme.css`, and Motion
+                        (ADR 0041, installed by #945) reads the same values from
+                        `tokens.ts` §`MOTION_FOR_SCRIPT`. `shell.html?illustration=
+                        specimens` paints them until a screen does
     src/camera/side-report*.ts
                         the side camera's post-ride report (#388) — the pose
                         numbers of one session reduced to SENTENCES, first third
@@ -4670,7 +4678,10 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   prose. ⚠️ A reviewer who remembers this sentence being unenforced is reading the old file:
   deleting an ADR's `- **Status**: Accepted` line used to leave `check-repo-rules.sh` reporting
   clean at exit 0. Numbers are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
-  **and which are claimed by open issues** before you pick one. **The next free number is 0041.**
+  **and which are claimed by open issues** before you pick one. **The next free number is 0042.**
+  ⚠️ **0041 is [ADR 0041](docs/adr/0041-motion-for-menu-animation.md)**, taken by
+  [#936](https://github.com/openzigs/onyourleft/issues/936) for Motion in the menus. A reviewer who
+  remembers this sentence offering 0041 is reading the old file.
   ⚠️ **0040 is [ADR 0040](docs/adr/0040-a-history-index-on-the-riders-instance.md)**, taken by
   [#834](https://github.com/openzigs/onyourleft/issues/834) on 2026-09-29 for the history index on
   the rider's instance. A reviewer who remembers this sentence offering 0040 is reading the old file.

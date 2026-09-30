@@ -582,7 +582,8 @@ it did not have, and each is checkable rather than a matter of taste:
   its own, and which palette paints is decided before the first paint by
   `design/theme-selection.ts`'s inline script, which `tools/theme/` writes into every page. The ride
   HUD keeps the light palette in both (`theme.css` §`.oyl-hud`).
-- **The type scale has a ratio**: base 1 rem, ratio 1.25, steps −1 to 3 for reading and 6 for a live
+- **The type scale has a ratio**: base 1 rem, ratio 1.25, steps −1 to 3 for reading, 4 for a menu's
+  hero title (`display`, since [#936](https://github.com/openzigs/onyourleft/issues/936)) and 6 for a live
   ride metric. The sizes are literals and `tokens.test.ts` re-derives them — a ladder computed from
   its own ratio agrees by construction and could not fail.
 - **Every token is painted by a rule.** `theme.a11y.test.ts` fails on a custom property no `var()`
@@ -741,6 +742,44 @@ erase cannot reach, the camera and anyone else in the room, Web Bluetooth's limi
 view in a `*_KEPT_VISIBLE` constant and held by `a11y/kept-visible.a11y.test.tsx`; the Camera screen
 tucks nothing and got its first control above the fold by putting the side camera's way in first.
 `apps/web/browser/controls-first.browser.spec.ts` measures the fold on every route.
+
+#### House style for the menus
+
+[#936](https://github.com/openzigs/onyourleft/issues/936), on the owner's decisions on epic
+[#935](https://github.com/openzigs/onyourleft/issues/935). The menus are to read as a place to ride
+rather than a form to fill in, and the style is set as tokens before any art is drawn:
+
+- **The illustration style is flat, geometric landscape art drawn from code in this repository**
+  (D-1): sky, hills, a road ribbon, a sun, and a rider built from `game/bicycle.ts`'s proportions,
+  as the app icons (`tools/icons/`) and the bicycle already are. It is ours, so it needs no
+  `ASSETS.toml` row and cannot be a copy of anyone's look.
+- **Art paints with tokens, never literals.** Five illustration colours (`tokens.ts` §`illoSky`,
+  `illoSun`, `illoHillFar`, `illoHillNear`, `illoRoad`) have a value in each palette, and a shape
+  takes its colour from a class (`theme.css` §`.oyl-illo__*`). The landscape is a ramp like
+  elevation (`tokens.ts` §`ILLUSTRATION_DEPTH`): nearer is darker in light and lighter in dark.
+- **Art is decoration.** A drawing is `aria-hidden`, carries no text (WCAG 2.2 SC 1.4.5), and says
+  nothing the words beside it do not. So no illustration colour owes contrast against another. What
+  a screen draws **over** art owes a declared pair: a hero title and its line on the sky, a card's
+  title on the far hills, a primary button's edge on the near hill, and the focus ring on every
+  illustration colour. All of them are in `CONTRAST_REQUIREMENTS`, measured in both palettes. A new
+  kind of text or control over art declares its pair before it is drawn.
+- **One display step, no font file** (D-5): `--oyl-font-size-display`, step 4 of the ladder, in the
+  page's `system-ui` at weight 800 (`theme.css` §`.oyl-display`), wrapping a long word rather than
+  scrolling a 320 px page sideways.
+- **Motion is short, and the reader can turn it off.** Two durations, `--oyl-motion-short` (120 ms)
+  and `--oyl-motion-medium` (200 ms), and one easing curve. Every transition in `theme.css` reads
+  them, and `theme.a11y.test.ts` refuses a duration literal above 200 ms. The
+  `prefers-reduced-motion` and `update: slow` blocks collapse all of it, which
+  `browser/shell.browser.spec.ts` §"#936" measures with `document.getAnimations()`. Script animation
+  is Motion ([ADR 0041](adr/0041-motion-for-menu-animation.md)): lazily loaded, menu routes only,
+  never during a ride or while the shell is immersive, and it reads the same values from
+  `tokens.ts` §`MOTION_FOR_SCRIPT`. Nothing loops.
+- **Nothing copies another product's look.** [ADR 0009](adr/0009-clean-room-posture.md) L1 forbids
+  reproducing a competitor's layout, colour palette and icon set as a set. No part of the house style
+  is drawn with another product's screenshot open.
+
+`browser/shell.html?illustration=specimens` paints every new token until a screen does (#938
+onwards).
 
 ### `apps/web/src/transfer`: import and export, and the sample grid nobody else owns
 
@@ -1828,6 +1867,7 @@ share one.
 | [0038](adr/0038-drafting-in-the-first-multiplayer-release.md) | **Drafting in the first multiplayer release**: a caller-supplied multiplier on `C_D·A` from Blocken et al. 2018's paceline figures, piecewise-linear and transcendental-free, with two constants declared unsourced. Supersedes ADR 0028 D-5 only, answers its four reasons, and records the owner's patent-risk decision as a decision, not a finding | #764 |
 | [0039](adr/0039-racing-another-riders-ghost-on-consent.md) | **Racing another rider's ghost, on that rider's consent**: ADR 0021 D-7's Option B, on the owner's decision alone. Supersedes ADR 0007 D4's first ❌ and ADR 0021 D-1 and nothing else; ADR 0007 D5 step 1 is **not** met and the ADR says so. ADR 0021 D-4 and D-5 now bind, and no ghost enters a live room | #765 |
 | [0040](adr/0040-a-history-index-on-the-riders-instance.md) | **A searchable index of the rider's history on their own instance, for the AI analysis**: an index and never a store of record (every row derived from a synced source, so ADR 0036 D-3 holds), scoped to one athlete, brute-force cosine over an ordinary SQLite table with `sqlite-vec` 0.1.9 the named fallback, embeddings by a local model at a local address only (`nomic-embed-text` v1.5 the owner's default, a narrow supersession of ADR 0031 D-4 and ADR 0035 D-3), a separate history step budgeted in characters, and masked history on the hosted path. **Subject to the owner's confirmation** | #834 |
+| [0041](adr/0041-motion-for-menu-animation.md) | **Motion animates the menus**: `motion` admitted under ADR 0034 D-5 for this and nothing else, lazily loaded through `LazyMotion`, on menu routes only and never during a ride or while immersive, `MotionConfig reducedMotion="user"` beside the stylesheet's reduced-motion blocks, and every duration and easing from `tokens.ts` §`MOTION_FOR_SCRIPT`. Installed by #945, not by the issue that wrote it | #936 |
 
 **0012 is deliberately absent from that list and is not free** — see the row for it below.
 ⚠️ **0021 is no longer absent**: [#330](https://github.com/openzigs/onyourleft/issues/330) wrote it
@@ -1904,8 +1944,9 @@ still a proposal.
 | 0038 | #764 — drafting in the first multiplayer release | [Written](adr/0038-drafting-in-the-first-multiplayer-release.md), 2026-09-29, in the same pull request as 0036. |
 | 0039 | #765 — racing another rider's ghost, on consent | [Written](adr/0039-racing-another-riders-ghost-on-consent.md), 2026-09-29, in the same pull request as 0036. |
 | 0040 | #834 — a history index on the rider's instance for the AI analysis | [Written](adr/0040-a-history-index-on-the-riders-instance.md), 2026-09-29. ADR 0031, ADR 0035 and ADR 0036 each gained an appended amendment in the same pull request. |
+| 0041 | #936 — Motion for the menus' animation | [Written](adr/0041-motion-for-menu-animation.md), 2026-09-30. It admits a dependency that #945 installs. |
 
-**The next free number is 0041.** 0040 was taken by [#834](https://github.com/openzigs/onyourleft/issues/834) on 2026-09-29, and ⚠️ this sentence said *"the next free number is 0040"* until then. 0036 to 0039 were taken together by [#825](https://github.com/openzigs/onyourleft/issues/825) on 2026-09-29, one pull request for four decisions, and ⚠️ this sentence said *"the next free number is 0036"* until then. 0035 was taken by [#796](https://github.com/openzigs/onyourleft/issues/796) on 2026-09-28, and **0034 was reserved for [#673](https://github.com/openzigs/onyourleft/issues/673)** and is written since 2026-09-29 ([ADR 0034](adr/0034-lucide-icons.md), bundle [#857](https://github.com/openzigs/onyourleft/issues/857)) — a reviewer who remembers this sentence calling it *"not written"* is reading the old file. ⚠️ This sentence said *"the next free number is 0034"* until then. 0033 was taken by [#527](https://github.com/openzigs/onyourleft/issues/527) on 2026-09-25. Every number from 0001 to 0028 is written — **0021 included, since
+**The next free number is 0042.** 0041 was taken by [#936](https://github.com/openzigs/onyourleft/issues/936) on 2026-09-30, and ⚠️ this sentence said *"the next free number is 0041"* until then. 0040 was taken by [#834](https://github.com/openzigs/onyourleft/issues/834) on 2026-09-29, and ⚠️ this sentence said *"the next free number is 0040"* until then. 0036 to 0039 were taken together by [#825](https://github.com/openzigs/onyourleft/issues/825) on 2026-09-29, one pull request for four decisions, and ⚠️ this sentence said *"the next free number is 0036"* until then. 0035 was taken by [#796](https://github.com/openzigs/onyourleft/issues/796) on 2026-09-28, and **0034 was reserved for [#673](https://github.com/openzigs/onyourleft/issues/673)** and is written since 2026-09-29 ([ADR 0034](adr/0034-lucide-icons.md), bundle [#857](https://github.com/openzigs/onyourleft/issues/857)) — a reviewer who remembers this sentence calling it *"not written"* is reading the old file. ⚠️ This sentence said *"the next free number is 0034"* until then. 0033 was taken by [#527](https://github.com/openzigs/onyourleft/issues/527) on 2026-09-25. Every number from 0001 to 0028 is written — **0021 included, since
 2026-09-22** — 0029, 0030 and 0031 were taken by the camera-decision work ([#378](https://github.com/openzigs/onyourleft/issues/378)–[#381](https://github.com/openzigs/onyourleft/issues/381))
 in a pull request opened the same day as #248's and #330's, and 0032 was taken by #248. ⚠️ **This sentence said *"the next free
 number is 0029"* and that 0021 was a live reservation, and both stopped being true on 2026-09-22**;
