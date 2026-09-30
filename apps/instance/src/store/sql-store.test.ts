@@ -97,7 +97,9 @@ describe('SqlStore (#769)', () => {
     try {
       expect(() =>
         database
-          .prepare('INSERT INTO session VALUES (?, ?, ?, ?, NULL)')
+          .prepare(
+            'INSERT INTO session (token_sha256, athlete_id, device_key, expires_at, revoked_at) VALUES (?, ?, ?, ?, NULL)',
+          )
           .run('d'.repeat(64), ATHLETE_A, deviceKeyFixture(ATHLETE_B).publicKey, 1),
       ).toThrow(/FOREIGN KEY/);
     } finally {

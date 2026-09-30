@@ -30,6 +30,9 @@ import { RIDER_TEXT_MODEL_WARNING } from './disclosure';
 import { DOCUMENT_REFUSAL_TEXT } from './document-file';
 import {
   DOCUMENT_FILE_NOT_READ,
+  DOCUMENT_REMOVE_NO,
+  DOCUMENT_REMOVE_QUESTION,
+  DOCUMENT_REMOVE_YES,
   DOCUMENTS_EMPTY,
   DOCUMENTS_FULL,
   DOCUMENTS_NOT_READ,
@@ -97,6 +100,14 @@ async function choose(file: File): Promise<void> {
   await settle();
 }
 
+/** Press the button whose accessible text is `name`, with the keyboard. */
+async function pressNamed(name: string): Promise<void> {
+  const button = [...document.querySelectorAll('button')].find((each) => each.textContent === name);
+  if (button === undefined) throw new Error(`no button named ${name}`);
+  await activateWithKeyboard(button);
+  await settle();
+}
+
 function listed(): string[] {
   return [...document.querySelectorAll('.oyl-rider-text__name')].map((node) => node.textContent);
 }
@@ -144,11 +155,12 @@ describe('the documents panel (#836)', () => {
       savedAt: unixSeconds(1),
     });
     await open(portOver(writer));
-    const remove = [...document.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Remove Base plan.md',
-    );
-    if (remove === undefined) throw new Error('no remove control named for the document');
-    await activateWithKeyboard(remove);
+    await pressNamed('Remove Base plan.md');
+    // Asked first (#924): nothing is removed by the first press.
+    expect(document.body.textContent).toContain(DOCUMENT_REMOVE_QUESTION);
+    expect(listed()).toStrictEqual(['Base plan.md (19 characters)']);
+    expect(await kept()).toHaveLength(1);
+    await pressNamed(`${DOCUMENT_REMOVE_YES} Base plan.md`);
     await settle();
     await settle();
     expect(status()).toContain(documentRemoved('Base plan.md'));
@@ -213,15 +225,35 @@ describe('the documents panel (#836)', () => {
     );
     await open(memory.port);
     memory.failNext = new Error('the disk is locked');
-    const remove = [...document.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Remove Base plan.md',
-    );
-    if (remove === undefined) throw new Error('no remove control named for the document');
-    await activateWithKeyboard(remove);
+    await pressNamed('Remove Base plan.md');
+    await pressNamed(`${DOCUMENT_REMOVE_YES} Base plan.md`);
     await settle();
     await settle();
     expect(status()).toContain(documentsFailure('the disk is locked'));
     expect(listed()).toStrictEqual(['Base plan.md (19 characters)']);
+  });
+
+  it('asks before removing, and keeps the document when the rider says keep it (#924)', async () => {
+    await writer.putRiderText({
+      athleteId: ATHLETE_A,
+      kind: 'document',
+      key: 'plan',
+      name: 'Base plan.md',
+      text: 'Three rides a week.',
+      savedAt: unixSeconds(1),
+    });
+    await open(portOver(writer));
+    await pressNamed('Remove Base plan.md');
+    const group = document.querySelector('[role="group"]');
+    expect(group?.getAttribute('aria-label')).toBe(`${DOCUMENT_REMOVE_QUESTION} Base plan.md`);
+    // The safe answer has focus, so a second press where the first one was removes nothing.
+    expect(document.activeElement?.textContent).toBe(`${DOCUMENT_REMOVE_NO} Base plan.md`);
+    await pressNamed(`${DOCUMENT_REMOVE_NO} Base plan.md`);
+    await settle();
+    expect(document.body.textContent).not.toContain(DOCUMENT_REMOVE_QUESTION);
+    expect(document.activeElement?.textContent).toBe('Remove Base plan.md');
+    expect(listed()).toStrictEqual(['Base plan.md (19 characters)']);
+    expect(await kept()).toHaveLength(1);
   });
 
   it('offers no picker without a store, and says why', async () => {

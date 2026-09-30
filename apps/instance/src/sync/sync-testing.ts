@@ -100,7 +100,7 @@ export async function syncWorld(
   options: Parameters<typeof startIdentityInstance>[0] = {},
 ): Promise<{
   world: IdentityInstance;
-  riders: { device: TestDevice; token: string; athleteId: string }[];
+  riders: { device: TestDevice; token: string; athleteId: string; recoveryCodes: string[] }[];
 }> {
   // Room for a real activity file; the tests of the limit itself set their own.
   const world = await startIdentityInstance({ bodyLimitBytes: 256 * 1024, ...options });
@@ -112,6 +112,7 @@ export async function syncWorld(
       device,
       token: session.body.sessionToken as string,
       athleteId: session.body.athleteId as string,
+      recoveryCodes: session.body.recoveryCodes as string[],
     });
   }
   return { world, riders };
@@ -143,8 +144,9 @@ export const SYNC_HAPPY_CALLS: Readonly<
     return authorised(world, token, 'GET', '/v1/account/export');
   },
   eraseAccount: async (world) => {
-    const { token } = await riderWithRide(world);
-    return authorised(world, token, 'DELETE', '/v1/account');
+    const { token, recoveryCodes } = await riderWithRide(world);
+    // The step-up deleting an account needs (#898).
+    return authorised(world, token, 'DELETE', '/v1/account', { recoveryCode: recoveryCodes[0] });
   },
   getSyncManifest: async (world) => {
     const { token } = await riderWithRide(world);
@@ -193,7 +195,11 @@ const NOMINAL = (): Uint8Array => corpusFile('nominal-ride.gpx');
 async function signedInRider(world: IdentityInstance) {
   const device = await testDevice();
   const session = await world.signIn(device);
-  return { device, token: session.body.sessionToken as string };
+  return {
+    device,
+    token: session.body.sessionToken as string,
+    recoveryCodes: session.body.recoveryCodes as string[],
+  };
 }
 
 /** A signed-in rider who has synced one ride, and its content hash. */

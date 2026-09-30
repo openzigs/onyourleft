@@ -13,7 +13,10 @@
  * body, and none reads another athlete's data, so none asks `canSee`. The
  * account export and erasure alone admit an athlete awaiting approval (#775),
  * so a rider can always take their data out and delete it; the rest answer
- * such a caller `registration_pending`, like every other session route.
+ * such a caller `registration_pending`, like every other session route. The
+ * same two, and no other route anywhere, admit a SUSPENDED athlete's way-out
+ * session (#898, `admitsSuspended`). Deleting the account needs a step-up
+ * beyond the session token (#898, `identity.ts` §`stepUp`).
  *
  * ⚠️ **Every response here carries `cache-control: no-store`**, and not
  * because a route remembered to: the handler sets it on EVERY response
@@ -107,8 +110,10 @@ export const SYNC_ROUTES: readonly Route[] = [
     path: '/v1/account/export',
     operationId: 'exportAccount',
     reaches: 'own',
-    // A rider awaiting approval (#775) may still take their data out and erase it (#35).
+    // A rider awaiting approval (#775), or suspended (#898), may still take
+    // their data out and erase it (#35).
     admitsPending: true,
+    admitsSuspended: true,
     summary:
       'Everything this instance holds about you, machine-readable: every activity’s signed record and the address of its original file — your own true track, unobfuscated — every item as you sent it, your public keys, your names, your results, your blocks, the reports you made and the recovery addresses you gave. Says what it leaves out, and why.',
     ...SESSION,
@@ -128,15 +133,49 @@ export const SYNC_ROUTES: readonly Route[] = [
     path: '/v1/account',
     operationId: 'eraseAccount',
     reaches: 'own',
-    // A rider awaiting approval (#775) may still take their data out and erase it (#35).
+    // A rider awaiting approval (#775), or suspended (#898), may still take
+    // their data out and erase it (#35).
     admitsPending: true,
+    admitsSuspended: true,
     summary:
-      'Remove your account from THIS instance: every row, and every original file no other rider also sent. It cannot reach a copy anyone already downloaded, or another instance. Safe to repeat after a failure.',
+      'Remove your account from THIS instance: every row, and every original file no other rider also sent. It cannot reach a copy anyone already downloaded, or another instance. Safe to repeat after a failure. Needs a step-up beyond the session (#898): one of your recovery codes (checked, not spent), or an `oyl-erase-account-v1` statement signed just now by one of your own live device keys. The moderation log is kept.',
     ...SESSION,
-    errors: ['unauthenticated'],
+    request: object(
+      {
+        recoveryCode: string,
+        statement: {
+          type: 'object',
+          description:
+            'A signed `oyl-erase-account-v1` device statement: purpose, instanceOrigin, nonce (from `POST /v1/auth/challenge`), publicKey, issuedAt and signature.',
+        },
+      },
+      [],
+    ),
+    errors: [
+      'unauthenticated',
+      'validation_failed',
+      'step_up_required',
+      'code_unknown',
+      'wrong_purpose',
+      'wrong_instance',
+      'challenge_unknown',
+      'challenge_used',
+      'challenge_expired',
+      'bad_signature',
+      'key_revoked',
+    ],
     response: { contentType: 'none' },
     handle: async (context) => {
-      await syncOf(context).eraseAccount(callerOf(context).athleteId);
+      const caller = callerOf(context);
+      // A session token alone does not delete an account (#898): the handler
+      // declares `identity` on every sync route, so it is here.
+      if (context.identity === undefined) throw new Error('sync route called without identity');
+      const stepped = await context.identity.stepUp(caller, {
+        recoveryCode: context.json.recoveryCode,
+        statement: context.json.statement,
+      });
+      if (!stepped.ok) return answer(stepped);
+      await syncOf(context).eraseAccount(caller.athleteId);
       return noContent();
     },
   },
@@ -279,7 +318,7 @@ export const SYNC_ROUTES: readonly Route[] = [
     operationId: 'ingestRecord',
     reaches: 'own',
     summary:
-      'Send a signed activity record with its original file (base64). Checked in order — the file’s type from its bytes, that it decodes, the record’s signature and content hash, that the key is yours — and stored only if every check passes. The same file sent again answers the first record.',
+      'Send a signed activity record with its original file (base64). Checked in order — the file’s type from its bytes, that it decodes, the record’s signature and content hash, that the key is yours — and, for a key since revoked, that the ride started before it was — and stored only if every check passes. The same file sent again answers the first record.',
     ...SESSION,
     request: object({ record: recordSchema, file: string }),
     errors: [
@@ -292,6 +331,7 @@ export const SYNC_ROUTES: readonly Route[] = [
       'record_signature_mismatch',
       'record_content_mismatch',
       'record_not_your_key',
+      'record_key_revoked',
     ],
     response: {
       contentType: 'application/json',

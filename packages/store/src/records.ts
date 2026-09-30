@@ -1313,3 +1313,32 @@ export interface RiderTextRecord {
   /** When it was last saved on this device. */
   readonly savedAt: UnixSeconds;
 }
+
+/**
+ * One of the athlete's OTHER devices' public keys, admitted on THIS device —
+ * #898, the owner's decision 4 of 2026-09-30: a pulled record's key is checked
+ * against the athlete's own keys **rather than trusting the instance**.
+ *
+ * ## Why it is kept here
+ *
+ * The instance's device list (`GET /v1/auth/devices`) comes from the same
+ * server that serves the record, so a compromised instance that forged a
+ * record would list the forging key too. A key is therefore trusted for a
+ * pulled record only if it was admitted on THIS device — never because the
+ * instance named it. This device's own key is trusted without a row: it is
+ * `deviceKeys`' own, and a sync reads it from there.
+ *
+ * ## What it holds
+ *
+ * A public key — 64 lowercase hex, as a signed record carries it — and when
+ * it was admitted. Public keys identify, they do not sign, so nothing here is
+ * secret; but a row is still the athlete's, and an erase takes every one.
+ */
+export interface TrustedDeviceKeyRecord {
+  /** Whose. **Every read of this record filters on it.** */
+  readonly athleteId: AthleteId;
+  /** The raw 32-byte public key, as 64 lowercase hex. */
+  readonly publicKey: string;
+  /** When it was admitted on this device. */
+  readonly admittedAt: UnixSeconds;
+}
