@@ -13,8 +13,24 @@
   read first-hand on 2026-09-30: DSA (Regulation (EU) 2022/2065, OJ L 277, 27.10.2022) Arts 16–18 and
   recitals 50, 52 and 54; OSA ss.10, 20, 20A, 21, 23 and 66; Ofcom's Illegal content Codes of
   Practice (O1).
-- **Whether the DSA applies to the project at all is open.** See [DSA scope](dsa-scope.md). This
-  procedure is written to meet Art. 16 either way, because the UK duties need most of the same steps.
+- **The owner treats the DSA as probably not applying** (2026-09-30: a free service, one person, not
+  provided for remuneration), and **follows Arts 16 and 17 voluntarily anyway**. See
+  [DSA scope](dsa-scope.md). This procedure is written to meet Art. 16 for that reason, and because
+  the UK duties need most of the same steps.
+- **Owner decisions of 2026-09-30** are written into this draft where they apply. They were
+  recorded on [#886](https://github.com/openzigs/onyourleft/issues/886#issuecomment-5911594101)
+  ([second comment](https://github.com/openzigs/onyourleft/issues/886#issuecomment-5911633018)) and on
+  [#887](https://github.com/openzigs/onyourleft/issues/887#issuecomment-5911594478)
+  ([second comment](https://github.com/openzigs/onyourleft/issues/887#issuecomment-5911633500)).
+- **Public rooms wait for [#907](https://github.com/openzigs/onyourleft/issues/907),
+  [#910](https://github.com/openzigs/onyourleft/issues/910) and
+  [#911](https://github.com/openzigs/onyourleft/issues/911)** (owner, 2026-09-30): reporting without an
+  account, a statement of reasons the rider can read, and complaints and appeals. Private rooms can
+  ship before them.
+- ⚠️ **Before final sign-off, three Ofcom documents must be read in a browser**: the Risk
+  Assessment Guidance (with the current Risk Profiles), the Children's Access Assessments Guidance
+  and the Record-Keeping Guidance. None of them could be read for this draft (spike 0019 §5 items
+  1–3). The owner recorded this as still open on 2026-09-30.
 - **Related drafts**: [statements of reasons](statement-of-reasons.md),
   [illegal content risk assessment](illegal-content-risk-assessment.md). The tools a moderator has are
   in [`docs/moderation.md`](../moderation.md).
@@ -173,24 +189,29 @@ item 1 decides what the software does. This section is the procedure around it.
 - If the notice names content the moderator provided (their display name, their room), the moderator
   may **remove their own content at once**. Removing it needs no judgement about anybody else.
 - The moderator never uses a moderator's tools to act on the notifier because of the notice.
-- The notifier is told that the notice is about the moderator, and which option below handles it.
+- The notifier is told that the notice is about the moderator, and how it is handled (below).
 
-**The options, for the owner to choose one** (an owner decision, recorded in the sign-off block):
+**The owner's decision of 2026-09-30**: the owner decides it, **declares the conflict in the
+statement of reasons**, and **logs it**, consistent with
+[#905](https://github.com/openzigs/onyourleft/issues/905). The declaration goes in the
+[statement of reasons](statement-of-reasons.md#the-template-a-restriction).
 
-| Option | How it works | Cost |
-|---|---|---|
-| **1. A named reviewer, who is not a moderator** | The owner names one person, outside the moderation tooling, who decides notices and appeals about the moderator. The moderator carries out their decision | A second person is needed after all, for this narrow role. It does not reverse #905, because the reviewer holds no moderator key |
-| **2. Another operator reviews** | An arrangement with the operator of another instance to decide such notices | Depends on somebody else, and on there being another operator |
-| **3. Self-review, declared** | The moderator decides, writes a conflict-of-interest statement into the record, waits a stated time before deciding, and tells the notifier they can go to a court (DSA recital 55: a right to an effective remedy before a court) | Weakest. ICU D12.3 asks for complaints to go to *"an appropriate individual"*, and whether a conflicted one qualifies is not answered by the texts read |
-| **4. Remove and review later** | For a notice about the moderator's own content, remove it first and decide afterwards | Covers only content, not complaints about how the moderator acted |
+⚠️ ICU D12.3 asks for complaints to go to *"an appropriate individual"*, and whether a conflicted one
+qualifies is not answered by the texts read.
 
 ## Target times
 
 The texts read say *"without undue delay"*, *"promptly"* and *"swiftly"*, and give one fixed time: 48
-hours under s.10(3A). **The owner chooses targets** for the rest and records them in the sign-off
-block. They are not legal limits. For a single volunteer moderator the targets must be ones they can
-keep, including while away. What happens to the queue when the only moderator is away is part of the
-same decision.
+hours under s.10(3A).
+
+**The owner's targets, 2026-09-30:**
+
+| What | Target |
+|---|---|
+| Notices of illegal content (s.10(3A)) | **48 hours** |
+| Other reports and complaints | **7 days** |
+
+What happens to the queue when the only moderator is away is not decided.
 
 ## What this procedure does not cover
 

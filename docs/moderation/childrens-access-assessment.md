@@ -1,9 +1,9 @@
 # Children's access assessment: the project's instance with public rooms enabled
 
 > **DRAFT, pending the owner's approval.** This is a draft for the owner to review. It is **not
-> legal advice**, and no lawyer has checked it. **Its conclusion is left for the owner.** It is not
-> a children's access assessment under the Online Safety Act 2023 until the owner has chosen a
-> conclusion, recorded the evidence for it, and signed the block below.
+> legal advice**, and no lawyer has checked it. **The owner chose its conclusion on 2026-09-30**
+> (option B, below). It is not a children's access assessment under the Online Safety Act 2023 until
+> the owner has signed the block below.
 
 - **Date of this draft**: 2026-09-30
 - **Issue**: [#886](https://github.com/openzigs/onyourleft/issues/886). Public rooms
@@ -15,6 +15,15 @@
   highly effective age assurance (O6) and its age assurance page (O7). ⚠️ **Ofcom's Children's
   Access Assessments Guidance PDF could not be read** (403, and an empty extraction; spike §5
   item 1). It must be read before sign-off.
+- **Owner decisions of 2026-09-30** are written into this draft where they apply. They were
+  recorded on [#886](https://github.com/openzigs/onyourleft/issues/886#issuecomment-5911594101)
+  ([second comment](https://github.com/openzigs/onyourleft/issues/886#issuecomment-5911633018)) and on
+  [#887](https://github.com/openzigs/onyourleft/issues/887#issuecomment-5911594478)
+  ([second comment](https://github.com/openzigs/onyourleft/issues/887#issuecomment-5911633500)).
+- ⚠️ **Before final sign-off, three Ofcom documents must be read in a browser**: the Risk
+  Assessment Guidance (with the current Risk Profiles), the Children's Access Assessments Guidance
+  and the Record-Keeping Guidance. None of them could be read for this draft (spike 0019 §5 items
+  1–3). The owner recorded this as still open on 2026-09-30.
 - **Related drafts**: [illegal content risk assessment](illegal-content-risk-assessment.md), which
   describes the service and its features.
 
@@ -72,9 +81,8 @@ gate that met s.35(2) would settle Stage 1 for that part only.
 
 **What the text points to at Stage 1**: with self-declaration and human approval as the only
 measures, the texts read do not allow the conclusion that it is not possible for children to access
-the service or any part of it. The assessment therefore goes to Stage 2. The owner decides whether
-to record that conclusion, or to adopt highly effective age assurance for some part and re-run
-Stage 1 for that part (option C below).
+the service or any part of it. The assessment therefore goes to Stage 2. The owner did not
+adopt highly effective age assurance (option C below), and chose option B at Stage 2 on 2026-09-30.
 
 ## Stage 2: is the child user condition met?
 
@@ -101,10 +109,27 @@ on the side of caution in making your assessment."*
 | **Content appealing to children** (O4 factor) | Routes, rides, races and a game. Cycling has junior riders and junior racing, and races are the kind of content a junior cyclist would look for. | Points towards "likely" for the game and races |
 | **Design appealing to children** (O4 factor) | A 3D trainer game with riders on a road, which a junior cyclist could use as readily as an adult. The app is not designed for children, and nothing in it targets them. | Mixed |
 | **Children in the commercial strategy** (O4 factor) | There is no commercial strategy. | Points towards "not likely" |
-| **Is it publicly known that the service is used by children?** (O5's example) | Nothing is known about this service: it has not opened. Whether it becomes known that children use it, or smart-trainer apps of this kind, is a fact the owner can check. | No evidence either way yet |
+| **Is it publicly known that the service is used by children?** (O5's example) | Nothing is known about this service: it has not opened. Whether it becomes known that children use it is a fact the owner can check once it opens. | No evidence either way yet |
 | **Ofcom's own expectation** | O7: *"we anticipate that most Part 3 services that do not use highly effective age assurance are likely to be accessed by children within the meaning of the Act."* | Points towards "likely" |
 
-## The conclusion, left for the owner
+## The conclusion: option B, the owner's decision of 2026-09-30
+
+**The owner concluded on 2026-09-30 that the service is not likely to be accessed by children**
+(option B: the child user condition is not met). The evidence recorded for it:
+
+- registration is `approval`: the owner sees every sign-up;
+- riders confirm they are 18 or over;
+- it is a cycling-training instance.
+
+**Review it within 3 months of the instance opening** (owner, 2026-09-30).
+
+⚠️ **As this draft notes, Ofcom may not accept this evidence alone.** O5 advises against relying on
+self-declared age data alone, approval by a person is not evidence of age, and O7 expects most
+services without highly effective age assurance to be likely to be accessed by children (see the
+table above).
+
+The three options the draft weighed are kept below as the record of what was considered.
+
 
 ### Option A: conclude that the service is likely to be accessed by children
 
@@ -135,6 +160,7 @@ on the side of caution in making your assessment."*
 
 ### Whatever is chosen
 
+- The owner's review: within 3 months of the instance opening (above).
 - Repeat the assessment **not more than one year apart** (s.36(3)), and before any significant change
   (s.36(4)(a)). The list of significant changes in the
   [risk assessment](illegal-content-risk-assessment.md#step-4-report-review-and-update) applies here
@@ -148,10 +174,13 @@ on the side of caution in making your assessment."*
 
 ## Open points this draft does not settle
 
-1. The conclusion: A, B or C (owner).
-2. Whether human approval is admissible as Stage 2 evidence (lawyer).
-3. Ofcom's Children's Access Assessments Guidance, which could not be fetched (spike §5 item 1).
-4. What ss.11–12 would require under option A (not read).
-5. Whether any EU rule on minors applies. Spike 0019 records an EU "KIDS ACT" proposal second-hand
+1. Whether human approval is admissible as Stage 2 evidence (lawyer).
+2. The three Ofcom documents named at the top (the Risk Assessment Guidance, the Children's Access
+   Assessments Guidance and the Record-Keeping Guidance), to be read in a browser before final
+   sign-off (spike §5 items 1–3).
+3. What ss.11–12 would require under option A (not read).
+4. Whether any EU rule on minors applies. Spike 0019 records an EU "KIDS ACT" proposal second-hand
    only (source S1), and DSA Art. 14(3) applies only to a service *"primarily directed at minors or
    … predominantly used by them"*.
+
+Decided by the owner on 2026-09-30, and no longer open here: the conclusion (option B).

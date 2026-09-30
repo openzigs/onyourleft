@@ -9,9 +9,19 @@
 - **Sources relied on**: [spike 0019](../spikes/0019-online-safety-act-and-dsa-read-for-the-projects-instance.md)
   §3 Q8, read first-hand on 2026-09-30: DSA Arts 16(4)–(5) and 17(1)–(5), and recitals 54 and 55; and
   the Commission's Transparency Database FAQ (E5, updated 7 July 2025).
-- **Whether the DSA applies to the project at all is open.** See [DSA scope](dsa-scope.md). The
-  templates are written to meet Art. 17 either way. Telling a rider why they were restricted is good
-  moderation whatever the law requires.
+- **The owner treats the DSA as probably not applying** (2026-09-30: a free service, one person, not
+  provided for remuneration), and **follows Arts 16 and 17 voluntarily anyway**. See
+  [DSA scope](dsa-scope.md). Telling a rider why they were restricted is good moderation whatever the
+  law requires.
+- **Owner decisions of 2026-09-30** are written into this draft where they apply. They were
+  recorded on [#886](https://github.com/openzigs/onyourleft/issues/886#issuecomment-5911594101)
+  ([second comment](https://github.com/openzigs/onyourleft/issues/886#issuecomment-5911633018)) and on
+  [#887](https://github.com/openzigs/onyourleft/issues/887#issuecomment-5911594478)
+  ([second comment](https://github.com/openzigs/onyourleft/issues/887#issuecomment-5911633500)).
+- ⚠️ **Before final sign-off, three Ofcom documents must be read in a browser**: the Risk
+  Assessment Guidance (with the current Risk Profiles), the Children's Access Assessments Guidance
+  and the Record-Keeping Guidance. None of them could be read for this draft (spike 0019 §5 items
+  1–3). The owner recorded this as still open on 2026-09-30.
 
 ## Sign-off (left blank for the owner)
 
@@ -49,9 +59,9 @@ there is none: a suspended rider cannot sign in at all.
 - The product change is filed as [#910](https://github.com/openzigs/onyourleft/issues/910): store the
   Art. 17(3) fields with each log entry, and let the affected rider read their statements in the app,
   **suspended or not**.
-- Until then, the owner decides (sign-off block) whether to hold public rooms back, or to deliver
-  statements some other way. A rider who writes to `<CONTACT-ADDRESS — owner to choose>` can be sent
-  theirs.
+- **Public rooms wait for #910**, with [#907](https://github.com/openzigs/onyourleft/issues/907) and
+  [#911](https://github.com/openzigs/onyourleft/issues/911) (owner, 2026-09-30). Private rooms can ship
+  before them. A rider who writes to `<CONTACT-ADDRESS — owner to choose>` can be sent theirs.
 
 **The Transparency Database is not owed** unless the instance is an online platform that is not
 micro or small. Art. 24(5) applies to *"providers of online platforms"*, and Art. 19 exempts micro and
@@ -78,7 +88,9 @@ rider's personal details into the reason (`docs/moderation.md`).
 >
 > **2. Why, and what we relied on** *(Art. 17(3)(b))*: [We acted on a notice sent to us on [date]. |
 > We found it ourselves on [date].] The facts: [what the content was and what it did, without anybody's
-> personal details]. [We are not telling you who sent the notice. | We are telling you who sent the
+> personal details]. [If the matter involves the moderator: this decision was taken by the moderator,
+> in a matter that involves them. We declare that conflict of interest here, and the decision is
+> logged.] [We are not telling you who sent the notice. | We are telling you who sent the
 > notice because you cannot see why the content is illegal without knowing that: [name].] *(DSA recital
 > 54: only where necessary to identify the illegality.)*
 >
@@ -95,9 +107,9 @@ rider's personal details into the reason (`docs/moderation.md`).
 >
 > **6. What you can do about it** *(Art. 17(3)(f))*:
 > - **Ask us to look again.** [How to appeal: [#911](https://github.com/openzigs/onyourleft/issues/911),
->   not built yet; until then, write to `<CONTACT-ADDRESS — owner to choose>`.] [If the decision was
->   the moderator's about a matter involving themselves, say who reviews it: see the option the owner
->   chose in [notice-and-action](notice-and-action.md#a-notice-or-complaint-about-the-moderator).]
+>   not built yet; until then, write to `<CONTACT-ADDRESS — owner to choose>`.] [If the matter
+>   involves the moderator, the moderator decides it, as the owner decided on 2026-09-30: see
+>   [notice-and-action](notice-and-action.md#a-notice-or-complaint-about-the-moderator).]
 > - **Out-of-court dispute settlement.** [certified body and how to reach it, only if the owner or a
 >   lawyer decides DSA Art. 21 applies | Not available for this decision.]
 > - **A court.** You can take the decision to a court under the law of your country. *(Recital 55:
@@ -109,8 +121,8 @@ DSA Art. 16(4): sent *"without undue delay"* where the notice gave electronic co
 
 > We received your notice on [date and time], about [the items it names]. We have given it the
 > reference [reference]. We will tell you what we decide, and what you can do if you disagree. [If
-> the notice is about the moderator: this notice is about the person who moderates this instance, so
-> it will be decided as [the option the owner chose].]
+> the notice is about the moderator: this notice is about the person who moderates this instance.
+> They will decide it, declare that conflict of interest in the decision, and log it.]
 
 ## Decision on a notice
 

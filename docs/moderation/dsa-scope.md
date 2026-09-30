@@ -1,14 +1,23 @@
 # The EU Digital Services Act and the project's instance: scope, Art. 13 and Art. 19
 
 > **DRAFT, pending the owner's approval.** This is a reading for the owner to review. It is **not
-> legal advice**, and no lawyer has checked it. **It does not decide whether the DSA applies.** It
-> records what the texts read say and leaves the decision to the owner, and where the text runs out,
-> to a lawyer.
+> legal advice**, and no lawyer has checked it. **It is not a legal ruling on whether the DSA
+> applies.** It records what the texts read say, and the owner's working position of 2026-09-30
+> (§6). Where the text runs out, the questions are still for a lawyer.
 
 - **Date of this draft**: 2026-09-30
 - **Issue**: [#887](https://github.com/openzigs/onyourleft/issues/887), whose third criterion asks
   that *"Whether Art. 19's exclusion applies to the project is decided and recorded"*. This document
-  records the reading. The decision is the owner's, in the block below.
+  records the reading, and the owner's decision of 2026-09-30 in §6.
+- **Owner decisions of 2026-09-30** are written into this draft where they apply. They were
+  recorded on [#886](https://github.com/openzigs/onyourleft/issues/886#issuecomment-5911594101)
+  ([second comment](https://github.com/openzigs/onyourleft/issues/886#issuecomment-5911633018)) and on
+  [#887](https://github.com/openzigs/onyourleft/issues/887#issuecomment-5911594478)
+  ([second comment](https://github.com/openzigs/onyourleft/issues/887#issuecomment-5911633500)).
+- ⚠️ **Before final sign-off, three Ofcom documents must be read in a browser**: the Risk
+  Assessment Guidance (with the current Risk Profiles), the Children's Access Assessments Guidance
+  and the Record-Keeping Guidance. None of them could be read for this draft (spike 0019 §5 items
+  1–3). The owner recorded this as still open on 2026-09-30.
 - **Sources relied on**: [spike 0019](../spikes/0019-online-safety-act-and-dsa-read-for-the-projects-instance.md)
   §3, read first-hand on 2026-09-30: Regulation (EU) 2022/2065 as published in OJ L 277, 27.10.2022
   (E1), Directive (EU) 2015/1535 Art. 1(1)(b) (E2), Recommendation 2003/361/EC (E3), Directive
@@ -126,16 +135,17 @@ obligations"*.
   State, who can be held liable. That is a cost and a person, and **no micro or small exemption applies
   to it**. **OPEN, for the owner.**
 
-## 6. What the owner can choose between
+## 6. The owner's decision
 
-Nothing here recommends one. Each is an owner decision.
+**On 2026-09-30 the owner decided to treat the DSA as probably not applying** (a free service, one
+person, not provided for remuneration). **Articles 16 and 17 are followed voluntarily anyway**,
+through the [notice-and-action procedure](notice-and-action.md) and the
+[statements of reasons](statement-of-reasons.md).
 
-| Option | What it means |
-|---|---|
-| **1. Take a lawyer's view on §1 and §2 first** | Public rooms stay blocked until then |
-| **2. Treat the DSA as applying** | Meet Arts 11–14 and 16–18. The drafts here cover Arts 16–18; Arts 11–12 need [#908](https://github.com/openzigs/onyourleft/issues/908) and Art. 14 needs [#909](https://github.com/openzigs/onyourleft/issues/909). Appoint an Art. 13 representative |
-| **3. Treat it as not applying, and follow Arts 16 and 17 anyway** | The [notice-and-action procedure](notice-and-action.md) and [statements of reasons](statement-of-reasons.md) are needed for the UK Act in any case, so most of the cost is paid already. No Art. 13 representative. The risk is being wrong about §1 or §2 |
-| **4. Do not offer the project's instance in the Union** | A factual change to §2. Its legal effect is not in the texts read |
+This was option 3 of the draft, which recorded what it means: those two documents are needed for the
+UK Act in any case, so most of the cost is paid already; no Art. 13 representative is appointed; and
+the risk is being wrong about §1 or §2. The open points below are the questions that could change
+this position.
 
 ## Open points this draft does not settle
 
@@ -145,3 +155,4 @@ Nothing here recommends one. Each is an owner decision.
 3. Whether approval registration keeps the instance outside "online platform" (§3; lawyer).
 4. Who the Art. 13 representative would be, if needed (§5; owner).
 5. Consolidated text and later amendments of the DSA, not checked (spike §5 item 8).
+6. The three Ofcom documents named at the top, to be read in a browser before final sign-off.
