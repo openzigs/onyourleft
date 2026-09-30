@@ -55,6 +55,7 @@ import {
   cameraFrameFor,
   framingReferenceFor,
   rideWriteUpFor,
+  syncBaseFor,
   sideCameraReportFor,
 } from './testing';
 import { ensureDeviceSigningKey, webCryptoSha256, webCryptoVerifier } from './web-crypto';
@@ -289,7 +290,9 @@ describe('the production registry', () => {
     // ⚠️ Version 13 (#800) is the first that changes an existing record: every
     // side-camera report gains a REQUIRED `pose`. That is the first entry, and
     // the reason this test used to say "empty" and does not now.
-    expect(SCHEMA_VERSION).toBe(13);
+    // Version 14 (#776, #893's review) adds `syncBases`: a new store again,
+    // with no rows to migrate, so the registry does not grow.
+    expect(SCHEMA_VERSION).toBe(14);
     expect(SCHEMA_MIGRATIONS).toStrictEqual([SIDE_REPORT_POSE_SUMMARY]);
   });
 
@@ -909,5 +912,38 @@ describe('version 12 to version 13 — #800, the first record migration', () => 
     } finally {
       store.close();
     }
+  });
+});
+
+describe('version 13 to version 14 — #776’s sync base (#893’s review)', () => {
+  /**
+   * Additive: rows written at version 13 survive the reopen at 14, and the
+   * new store is usable on a database that predates it.
+   */
+  it('keeps every version-13 record and makes the sync base usable', async () => {
+    const v13 = new Dexie(databaseName);
+    SCHEMA_VERSIONS.slice(0, 13).forEach((stores, index) => {
+      v13.version(index + 1).stores(stores);
+    });
+    await v13.table(TABLE.athletes).put({ id: 'athlete-a', displayName: 'A', createdAt: 1 });
+    const beforeVersion = v13.backendDB().version;
+    v13.close();
+
+    const owner = athleteId('athlete-a');
+    const store = openActivityStore(databaseName);
+    const athlete = await store.getAthlete(owner);
+    const empty = await store.listSyncBase(owner);
+    const base = syncBaseFor(owner, activityId('ride-before-14'));
+    await store.putSyncBase(base);
+    store.close();
+
+    const reopened = openActivityStore(databaseName);
+    const kept = await reopened.listSyncBase(owner);
+    reopened.close();
+
+    expect(beforeVersion).toBe(13 * 10);
+    expect(athlete?.displayName).toBe('A');
+    expect(empty).toStrictEqual([]);
+    expect(kept).toStrictEqual([base]);
   });
 });
