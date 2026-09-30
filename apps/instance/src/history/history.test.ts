@@ -605,7 +605,9 @@ describe('erase and export (ADR 0040 D-10)', () => {
 
     const erased = await fetch(`${world.url}/v1/account`, {
       method: 'DELETE',
-      headers: { authorization: `Bearer ${anna.token}` },
+      headers: { authorization: `Bearer ${anna.token}`, 'content-type': 'application/json' },
+      // The step-up deleting an account needs (#898).
+      body: JSON.stringify({ recoveryCode: anna.recoveryCodes[0] }),
     });
     expect(erased.status).toBe(204);
     const left = await world.freshRead(async (store) => ({

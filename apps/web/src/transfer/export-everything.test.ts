@@ -508,11 +508,13 @@ describe('the rider’s goals, ride notes and documents — #836, ADR 0040 D-10'
     });
   });
 
-  it('says a kind could not be read, carries nothing of it, and still writes the rest', async () => {
+  it('says a row could not be read, carries nothing of it, and still writes every good row beside it (#924)', async () => {
     await seedLibrary(1);
+    const good = { ...riderTextFor(ATHLETE_A, 'document'), key: 'a-good-one', name: 'Kept' };
     await harness.write(async (store) => {
       await store.putRiderText(riderTextFor(ATHLETE_A, 'goal'));
       await store.putRiderText(riderTextFor(ATHLETE_A, 'document'));
+      await store.putRiderText(good);
     });
     // A row a later build — or a hand — wrote, which this build refuses.
     await harness.discard();
@@ -541,7 +543,11 @@ describe('the rider’s goals, ride notes and documents — #836, ADR 0040 D-10'
 
     const { files, report } = await runExport();
     const texts = manifestOf(files)['riderTexts'] as Record<string, unknown>;
-    expect(texts['documents']).toStrictEqual({ unreadable: RIDER_TEXTS_UNREADABLE });
+    // The good document is kept; the bad one is a placeholder carrying nothing of it.
+    expect(texts['documents']).toStrictEqual([
+      { name: good.name, text: good.text, savedAt: good.savedAt },
+      { unreadable: RIDER_TEXTS_UNREADABLE },
+    ]);
     expect((texts['goals'] as { text: string }).text).toBe(riderTextFor(ATHLETE_A, 'goal').text);
     expect(JSON.stringify(texts)).not.toContain('zzzz');
     expect(report.exported).toBe(1);

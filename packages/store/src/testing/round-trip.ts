@@ -45,6 +45,7 @@ import type {
   RouteRecord,
   SyncBaseRecord,
   RiderTextRecord,
+  TrustedDeviceKeyRecord,
   SegmentEndpointRecord,
   SegmentRecord,
   WorkoutRecord,
@@ -887,6 +888,34 @@ export async function assertRiderTextRoundTrip(
     if (read[field] !== text[field]) {
       throw new RoundTripFailure(`riderText.${field}: is not the value kept`);
     }
+  }
+  return read;
+}
+
+/**
+ * Admits a trusted device key, closes every connection, and reads the
+ * athlete's keys back through `listTrustedDeviceKeys` — the read a sync makes
+ * before it takes a pulled record (#898). `memoryWriteStoreFactory` answers
+ * the write and keeps nothing.
+ *
+ * @throws {RoundTripFailure}
+ */
+export async function assertTrustedDeviceKeyRoundTrip(
+  harness: StoreHarness,
+  key: TrustedDeviceKeyRecord,
+): Promise<TrustedDeviceKeyRecord> {
+  const rows = await harness.roundTrip(
+    async (store) => store.putTrustedDeviceKey(key),
+    async (store) => store.listTrustedDeviceKeys(key.athleteId),
+  );
+  const read = rows.find((row) => row.publicKey === key.publicKey);
+  if (read === undefined) {
+    throw new RoundTripFailure(
+      `the trusted key ${key.publicKey} was admitted and reported success, and a fresh connection cannot see it`,
+    );
+  }
+  if (read.athleteId !== key.athleteId || read.admittedAt !== key.admittedAt) {
+    throw new RoundTripFailure('trustedDeviceKey: is not the value kept');
   }
   return read;
 }

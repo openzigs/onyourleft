@@ -215,19 +215,23 @@ export interface ManifestRideWriteUp {
  * The rider's own goals, ride notes and documents as the manifest carries them
  * (#836, ADR 0040 D-10) — the device is where they are kept (D-1), so this is
  * where a rider leaving takes them from. Field by field, never the row: the
- * athlete is the archive's own. `{ unreadable }` where a row of that kind on
- * this device could not be read, for {@link SIDE_CAMERA_REPORT_UNREADABLE}'s
- * reason — and carrying nothing of the row, which is free text.
+ * athlete is the archive's own. `{ unreadable }` in the place of a row this
+ * device could not read, for {@link SIDE_CAMERA_REPORT_UNREADABLE}'s reason —
+ * carrying nothing of the row, which is free text. ⚠️ **Row by row, since
+ * #924**: one bad row used to stand for its whole kind, and a rider leaving
+ * lost every good document with it.
  */
 export interface ManifestRiderTexts {
   readonly goals:
     { readonly text: string; readonly savedAt: number } | null | { readonly unreadable: string };
-  readonly rideNotes:
-    | readonly { readonly activityId: string; readonly text: string; readonly savedAt: number }[]
-    | { readonly unreadable: string };
-  readonly documents:
-    | readonly { readonly name: string; readonly text: string; readonly savedAt: number }[]
-    | { readonly unreadable: string };
+  readonly rideNotes: readonly (
+    | { readonly activityId: string; readonly text: string; readonly savedAt: number }
+    | { readonly unreadable: string }
+  )[];
+  readonly documents: readonly (
+    | { readonly name: string; readonly text: string; readonly savedAt: number }
+    | { readonly unreadable: string }
+  )[];
 }
 
 /** What the manifest says of goals, notes or documents on this device that could not be read. */
@@ -955,47 +959,53 @@ async function readRideWriteUp(
   }
 }
 
-/** Every goal, ride note and document of the rider's, field by field. @see ManifestRiderTexts */
+/**
+ * Every goal, ride note and document of the rider's, field by field, EACH ROW
+ * READ ON ITS OWN (#924): the keys first, which reads no row, then every row
+ * by itself, so a row this build cannot read is `{ unreadable }` in its place
+ * and the good rows beside it are still in the archive. @see ManifestRiderTexts
+ */
 async function readRiderTexts(
   store: AccountStore,
   athleteId: AthleteId,
 ): Promise<ManifestRiderTexts> {
-  const read = async (
-    kind: RiderTextKind,
-  ): Promise<readonly RiderTextRecord[] | { readonly unreadable: string }> => {
-    try {
-      return await store.listRiderTexts(athleteId, kind);
-    } catch (error) {
-      if (error instanceof StoreDecodeError) {
-        return { unreadable: RIDER_TEXTS_UNREADABLE };
+  const readEach = async (kind: RiderTextKind): Promise<(RiderTextRecord | 'unreadable')[]> => {
+    const rows: (RiderTextRecord | 'unreadable')[] = [];
+    for (const key of await store.listRiderTextKeys(athleteId, kind)) {
+      try {
+        const row = await store.getRiderText(athleteId, kind, key);
+        if (row !== undefined) rows.push(row);
+      } catch (error) {
+        if (!(error instanceof StoreDecodeError)) throw error;
+        rows.push('unreadable');
       }
-      throw error;
     }
+    return rows;
   };
+  const unreadable = { unreadable: RIDER_TEXTS_UNREADABLE } as const;
   const [goals, notes, documents] = await Promise.all([
-    read('goal'),
-    read('note'),
-    read('document'),
+    readEach('goal'),
+    readEach('note'),
+    readEach('document'),
   ]);
+  const [goal] = goals;
   return {
     goals:
-      'unreadable' in goals
-        ? goals
-        : goals[0] === undefined
-          ? null
-          : { text: goals[0].text, savedAt: goals[0].savedAt },
-    rideNotes:
-      'unreadable' in notes
-        ? notes
-        : notes.map((note) => ({ activityId: note.key, text: note.text, savedAt: note.savedAt })),
-    documents:
-      'unreadable' in documents
-        ? documents
-        : documents.map((document) => ({
-            name: document.name ?? '',
-            text: document.text,
-            savedAt: document.savedAt,
-          })),
+      goal === undefined
+        ? null
+        : goal === 'unreadable'
+          ? unreadable
+          : { text: goal.text, savedAt: goal.savedAt },
+    rideNotes: notes.map((note) =>
+      note === 'unreadable'
+        ? unreadable
+        : { activityId: note.key, text: note.text, savedAt: note.savedAt },
+    ),
+    documents: documents.map((document) =>
+      document === 'unreadable'
+        ? unreadable
+        : { name: document.name ?? '', text: document.text, savedAt: document.savedAt },
+    ),
   };
 }
 

@@ -63,6 +63,7 @@ import {
   rideWriteUpFor,
   syncBaseFor,
   riderTextFor,
+  trustedDeviceKeyFor,
   sideCameraReportFor,
 } from './testing';
 import { ensureDeviceSigningKey, webCryptoSha256, webCryptoVerifier } from './web-crypto';
@@ -303,7 +304,8 @@ describe('the production registry', () => {
     // ⚠️ Version 15 (#793) is the second record migration: every activity
     // gains a REQUIRED `mayBeRaced`, false. So the registry holds two.
     // Version 16 (#836) adds `riderTexts`: a new store, so nothing again.
-    expect(SCHEMA_VERSION).toBe(16);
+    // Version 17 (#898) adds `trustedDeviceKeys`: a new store, nothing again.
+    expect(SCHEMA_VERSION).toBe(17);
     expect(SCHEMA_MIGRATIONS).toStrictEqual([SIDE_REPORT_POSE_SUMMARY, ACTIVITY_MAY_BE_RACED]);
   });
 
@@ -1101,5 +1103,40 @@ describe('version 15 to version 16 — #836’s rider texts', () => {
     expect(kept).toStrictEqual([base]);
     expect(empty).toStrictEqual([]);
     expect(read).toStrictEqual(goal);
+  });
+});
+
+describe('version 16 to version 17 — #898’s trusted device keys', () => {
+  /**
+   * Additive: rows written at version 16 survive the reopen at 17, and the
+   * new store is usable on a database that predates it.
+   */
+  it('keeps every version-16 record and makes trusted device keys usable', async () => {
+    const v16 = new Dexie(databaseName);
+    SCHEMA_VERSIONS.slice(0, 16).forEach((stores, index) => {
+      v16.version(index + 1).stores(stores);
+    });
+    await v16.table(TABLE.athletes).put({ id: 'athlete-a', displayName: 'A', createdAt: 1 });
+    const goal = riderTextFor(athleteId('athlete-a'), 'goal');
+    await v16.table(TABLE.riderTexts).put(goal);
+    const beforeVersion = v16.backendDB().version;
+    v16.close();
+
+    const owner = athleteId('athlete-a');
+    const store = openActivityStore(databaseName);
+    const kept = await store.getRiderText(owner, 'goal', 'goals');
+    const empty = await store.listTrustedDeviceKeys(owner);
+    const key = trustedDeviceKeyFor(owner);
+    await store.putTrustedDeviceKey(key);
+    store.close();
+
+    const reopened = openActivityStore(databaseName);
+    const read = await reopened.listTrustedDeviceKeys(owner);
+    reopened.close();
+
+    expect(beforeVersion).toBe(16 * 10);
+    expect(kept).toStrictEqual(goal);
+    expect(empty).toStrictEqual([]);
+    expect(read).toStrictEqual([key]);
   });
 });

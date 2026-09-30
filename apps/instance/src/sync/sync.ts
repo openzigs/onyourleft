@@ -29,8 +29,17 @@
  *    `record_content_mismatch`. A record that does not verify is REFUSED, not
  *    stored unverified (#37's revision).
  * 5. `record_not_your_key` — it verifies, and the key that signed it is not
- *    one of the caller's (revoked keys count: a key's records stay valid after
- *    it is revoked, ADR 0014 D-6).
+ *    one of the caller's.
+ * 6. `record_key_revoked` — the key is the caller's and has been revoked, and
+ *    the ride the record describes started at or after the revocation (#898).
+ *    A revoked key's records of rides BEFORE it was revoked stay valid (ADR
+ *    0014 D-6), so a device that synced late still delivers them. ⚠️ The
+ *    start time is signed by the very key under suspicion, so this bounds an
+ *    honest late sync and refuses a record a revoked key dates after its
+ *    revocation; it does NOT stop a thief holding the key who backdates the
+ *    ride. There is no trustworthy start time to use instead: a late device
+ *    legitimately delivers after the revocation, so when the record arrived
+ *    cannot tell the two apart (#926's review).
  *
  * Only then is anything written: the file to the blob store, then the record
  * and its manifest row in one transaction. If the transaction fails, the file
@@ -655,8 +664,14 @@ export function createSync(options: SyncOptions): Sync {
       }
       const verified = verification.record;
       const keys = await store.listDeviceKeys(caller.athleteId);
-      if (!keys.some((key) => key.publicKey === verified.publicKey)) {
-        return refuse('record_not_your_key');
+      const signer = keys.find((key) => key.publicKey === verified.publicKey);
+      if (signer === undefined) return refuse('record_not_your_key');
+      // A revoked key signs only for rides that started before it was revoked
+      // (#898): both are Unix seconds, and a ride starting AT the revocation
+      // is after it. The start is the key's own claim, so a backdated one
+      // passes — the header says what this does and does not stop.
+      if (signer.revokedAt !== null && verified.claims.startedAt >= signer.revokedAt) {
+        return refuse('record_key_revoked');
       }
 
       const contentSha256 = toHex(digest);

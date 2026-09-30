@@ -65,6 +65,17 @@
  * only once the athlete follows the single-use, 24-hour link mailed to it,
  * from a device signed in as them (#865): until then it recovers nothing, and
  * giving an address answers the same whether or not somebody holds it.
+ * ## A suspended rider's way out — #898
+ *
+ * A suspension ends every session and refuses sign-in, and still leaves the
+ * rider able to take their data out and delete their account: a signed
+ * `oyl-auth-v1` statement at `POST /v1/auth/leave-session` opens a session
+ * whose scope is `leave` (migration 0012), for an hour, which the handler lets
+ * reach exactly the routes that declare `admitsSuspended`. It authenticates
+ * nobody once the suspension is lifted. Deleting the account — from any
+ * session — needs a step-up ({@link Identity.stepUp}): a recovery code, or a
+ * fresh `oyl-erase-account-v1` statement from one of the athlete's live keys.
+ *
  * Revoking the last key and renaming are refused by the STORE, in the
  * transaction that writes (#867). A revoked key's records stay valid: verification
  * is by the record and the key in it (ADR 0014 D-6), never by the key's
@@ -74,6 +85,7 @@
 import {
   AUTH_PURPOSE,
   checkDisplayName,
+  ERASE_ACCOUNT_PURPOSE,
   deviceStatementBytes,
   LINK_PURPOSE,
   RECOVER_PURPOSE,
@@ -101,6 +113,7 @@ import {
   InviteRefusedError,
   OwnershipConflictError,
   type DeviceKey,
+  type SessionScope,
   type SqlStore,
   type Take,
 } from '../store/sql-store.ts';
@@ -121,6 +134,11 @@ import { createTicketBook, type MintedTicket } from './tickets.ts';
 export const CHALLENGE_LIFETIME_SECONDS = 60;
 /** A session's life. */
 export const SESSION_LIFETIME_SECONDS = 30 * 24 * 60 * 60;
+/**
+ * A suspended athlete's way-out session's life (#898): long enough to take
+ * the data out and delete the account, and no longer.
+ */
+export const LEAVE_SESSION_LIFETIME_SECONDS = 60 * 60;
 /** A link code's life: #773's "≤ 5 minutes". */
 export const LINK_CODE_LIFETIME_SECONDS = 5 * 60;
 /** An emailed recovery link's life. */
@@ -259,9 +277,18 @@ export interface Caller {
   readonly tokenSha256: string;
   /**
    * `pending` for an athlete awaiting approval (#775): the handler lets such a
-   * caller reach only the routes that declare `admitsPending`.
+   * caller reach only the routes that declare `admitsPending`. `suspended`
+   * for a suspended athlete's way-out session (#898): only the routes that
+   * declare `admitsSuspended` — the account export and deletion.
    */
-  readonly standing: 'active' | 'pending';
+  readonly standing: 'active' | 'pending' | 'suspended';
+}
+
+/** What a step-up may carry (#898): one of the athlete's recovery codes, or a fresh signature. */
+export interface StepUpProof {
+  readonly recoveryCode?: unknown;
+  /** A signed `oyl-erase-account-v1` statement from one of the athlete's live keys. */
+  readonly statement?: unknown;
 }
 
 /** What a device sends to prove it holds a key. */
@@ -333,6 +360,22 @@ export interface Identity {
   /** The caller behind an `Authorization` header, or `undefined`. */
   authenticate(authorization: string | null): Promise<Caller | undefined>;
   signOut(caller: Caller): Promise<void>;
+  /**
+   * A suspended athlete's way out (#898): a signed `oyl-auth-v1` statement
+   * from one of their live keys opens a session that reaches the account
+   * export and deletion and nothing else, for an hour. `not_suspended` for an
+   * athlete who is not suspended, who signs in as usual.
+   */
+  openLeaveSession(
+    statement: unknown,
+  ): Promise<Outcome<{ sessionToken: string; expiresAt: number; athleteId: string }>>;
+  /**
+   * Whether the caller proved, just now, more than holding a session token
+   * (#898): one of their unspent recovery codes (checked, not spent — as for
+   * revoking the last device), or an `oyl-erase-account-v1` statement signed
+   * by one of their own live keys. `step_up_required` when neither is given.
+   */
+  stepUp(caller: Caller, proof: StepUpProof): Promise<Outcome<null>>;
   me(caller: Caller): Promise<Outcome<PublicAthlete>>;
   /** The caller's own account: registration, 18+ confirmation, role, eligibility (#775). */
   account(caller: Caller): Promise<Outcome<Account>>;
@@ -527,16 +570,19 @@ export function createIdentity(options: IdentityOptions): Identity {
 
   async function openSession(
     key: Pick<DeviceKey, 'athleteId' | 'publicKey'>,
+    scope: SessionScope = 'full',
   ): Promise<{ sessionToken: string; expiresAt: number }> {
     const sessionToken = randomToken(32);
     const at = seconds();
-    const expiresAt = at + SESSION_LIFETIME_SECONDS;
+    const expiresAt =
+      at + (scope === 'leave' ? LEAVE_SESSION_LIFETIME_SECONDS : SESSION_LIFETIME_SECONDS);
     await store.putSession({
       tokenSha256: await sha256Hex(sessionToken),
       athleteId: key.athleteId,
       deviceKey: key.publicKey,
       expiresAt,
       revokedAt: null,
+      scope,
     });
     await store.touchDeviceKey(key.athleteId, key.publicKey, at);
     return { sessionToken, expiresAt };
@@ -816,10 +862,18 @@ export function createIdentity(options: IdentityOptions): Identity {
       if (key === undefined || key.revokedAt !== null || key.athleteId !== session.athleteId) {
         return undefined;
       }
-      // A suspension revokes every session as it happens (`sql-store.ts`
-      // §`moderate`); this is the same rule read again, per request.
       const athlete = await store.getAthlete(session.athleteId);
-      if (athlete === undefined || athlete.suspendedAt !== null) return undefined;
+      if (athlete === undefined) return undefined;
+      // A way-out session (#898) is a SUSPENDED athlete's and nobody else's:
+      // once the suspension is lifted it authenticates nobody, and the rider
+      // signs in as usual. It is never a full session.
+      const leaving = session.scope === 'leave';
+      if (leaving !== (athlete.suspendedAt !== null)) {
+        // A suspension revokes every full session as it happens
+        // (`sql-store.ts` §`moderate`); this is the same rule read again, per
+        // request.
+        return undefined;
+      }
       if (athlete.registrationState !== 'active' && athlete.registrationState !== 'pending') {
         return undefined;
       }
@@ -827,12 +881,60 @@ export function createIdentity(options: IdentityOptions): Identity {
         athleteId: session.athleteId,
         deviceKey: session.deviceKey,
         tokenSha256,
-        standing: athlete.registrationState === 'pending' ? 'pending' : 'active',
+        standing: leaving
+          ? 'suspended'
+          : athlete.registrationState === 'pending'
+            ? 'pending'
+            : 'active',
       };
     },
 
     async signOut(caller) {
       await store.revokeSession(caller.athleteId, caller.tokenSha256, seconds());
+    },
+
+    async openLeaveSession(statement) {
+      const proof = await proven(statement, AUTH_PURPOSE);
+      if (!proof.ok) return proof;
+      const key = await store.findDeviceKey(proof.value);
+      // A key nobody holds registers nobody here: this is a way out, not in.
+      if (key === undefined) return refuse('unauthenticated');
+      if (key.revokedAt !== null) return refuse('key_revoked');
+      const athlete = await store.getAthlete(key.athleteId);
+      if (athlete === undefined) return refuse('unauthenticated');
+      if (athlete.suspendedAt === null) return refuse('not_suspended');
+      const session = await openSession(key, 'leave');
+      return { ok: true, value: { ...session, athleteId: athlete.id } };
+    },
+
+    async stepUp(caller, stepUpProof) {
+      const { recoveryCode, statement } = stepUpProof;
+      // One proof, not two: a client that sends both has a bug worth seeing,
+      // and ignoring one would leave its challenge unspent (#926's review).
+      if (recoveryCode !== undefined && statement !== undefined) {
+        return invalid('statement', 'must not be sent with a recoveryCode: send one of the two');
+      }
+      if (recoveryCode !== undefined) {
+        if (typeof recoveryCode !== 'string') {
+          return invalid('recoveryCode', 'must be a string');
+        }
+        // Checked and not spent, as for revoking the last device (#867): the
+        // account is about to go, and a refusal must not cost the rider a code.
+        const held = await store.hasRecoveryCode(
+          caller.athleteId,
+          await sha256Hex(normalisedCode(recoveryCode)),
+        );
+        return held ? { ok: true, value: null } : refuse('code_unknown');
+      }
+      if (statement === undefined) return refuse('step_up_required');
+      const signed = await proven(statement, ERASE_ACCOUNT_PURPOSE);
+      if (!signed.ok) return signed;
+      // One of the caller's OWN keys, and a live one: a key another athlete
+      // holds proves nothing about this account.
+      const key = await store.findDeviceKey(signed.value);
+      if (key?.athleteId !== caller.athleteId) return refuse('step_up_required');
+      if (key.revokedAt !== null) return refuse('key_revoked');
+      return { ok: true, value: null };
     },
 
     async me(caller) {

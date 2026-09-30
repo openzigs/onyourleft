@@ -110,6 +110,7 @@ import type {
   SyncBaseRecord,
   RiderTextKind,
   RiderTextRecord,
+  TrustedDeviceKeyRecord,
   NewActivity,
   NewLap,
   RouteRecord,
@@ -1023,4 +1024,23 @@ export function riderTextFor(
         text: `# Base plan for ${mark}\n\n- Week 1:\tthree rides.`,
       };
   }
+}
+
+/**
+ * One trusted device key — #898: another device's public key, admitted on
+ * this one. ⚠️ **A different key per athlete and per `seed`**, so a scoping
+ * probe that returned somebody else's key cannot hand back one that matches.
+ */
+export function trustedDeviceKeyFor(owner: AthleteId, seed = 0): TrustedDeviceKeyRecord {
+  let hex = '';
+  const text = `${owner}|${String(seed)}|trusted`;
+  for (let index = 0; hex.length < 64; index += 1) {
+    const code = (text.charCodeAt(index % text.length) * 37 + index * 11) % 256;
+    hex += code.toString(16).padStart(2, '0');
+  }
+  return {
+    athleteId: owner,
+    publicKey: hex.slice(0, 64),
+    admittedAt: unixSeconds(FIXTURE_EPOCH + 500_000 + ATHLETES.indexOf(owner) + seed),
+  };
 }

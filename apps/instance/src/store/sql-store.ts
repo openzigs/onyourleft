@@ -51,12 +51,13 @@ import type {
   ResultTable,
   RoomCourseTable,
   RoomTable,
+  SessionScope,
   SessionTable,
   SyncItemTable,
   SyncKind,
 } from './schema.ts';
 
-export type { SyncKind } from './schema.ts';
+export type { SessionScope, SyncKind } from './schema.ts';
 
 export interface Athlete {
   readonly id: string;
@@ -102,6 +103,12 @@ export interface Session {
   readonly deviceKey: string;
   readonly expiresAt: number;
   readonly revokedAt: number | null;
+  /**
+   * What the session reaches (#898). Absent on a write is `full`; a read
+   * always says. `leave` is a suspended athlete's way out: the account
+   * export and deletion, and nothing else (`handler.ts`).
+   */
+  readonly scope?: SessionScope;
 }
 
 export interface ActivityRecord {
@@ -516,6 +523,12 @@ export interface SqlStore {
   pruneChallenges(before: number): Promise<number>;
 
   listRecoveryCodes(athleteId: string): Promise<readonly RecoveryCode[]>;
+  /**
+   * Whether `codeSha256` is one of THIS athlete's unspent recovery codes —
+   * checked, not spent (#898's step-up for deleting an account, as
+   * {@link SqlStore.revokeDeviceKey} checks one for the last key).
+   */
+  hasRecoveryCode(athleteId: string, codeSha256: string): Promise<boolean>;
   /** Spend a recovery code, whoever's it is: the code is what names the athlete. */
   takeRecoveryCode(codeSha256: string, now: number): Promise<Take<{ readonly athleteId: string }>>;
 
@@ -931,6 +944,7 @@ const sessionFrom = (row: Selectable<SessionTable>): Session => ({
   deviceKey: row.device_key,
   expiresAt: row.expires_at,
   revokedAt: row.revoked_at,
+  scope: row.scope,
 });
 
 const activityRecordFrom = (
@@ -1402,6 +1416,18 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         ).map(recoveryCodeFrom),
       ),
 
+    hasRecoveryCode: (athleteId, codeSha256) =>
+      exclusive(
+        async () =>
+          (await db
+            .selectFrom('recovery_code')
+            .select('code_sha256')
+            .where('athlete_id', '=', athleteId)
+            .where('code_sha256', '=', codeSha256)
+            .where('used_at', 'is', null)
+            .executeTakeFirst()) !== undefined,
+      ),
+
     takeRecoveryCode: (codeSha256, now) =>
       exclusive(() =>
         db.transaction().execute(async (trx) => {
@@ -1681,6 +1707,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               device_key: session.deviceKey,
               expires_at: session.expiresAt,
               revoked_at: session.revokedAt,
+              scope: session.scope ?? 'full',
             })
             .onConflict((conflict) =>
               conflict.column('token_sha256').doUpdateSet({

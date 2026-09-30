@@ -42,6 +42,7 @@ export type {
   RiderTextRecord,
   SyncBaseKind,
   SyncBaseRecord,
+  TrustedDeviceKeyRecord,
   RideWriteUpSourceRecord,
   LapRecord,
   NewActivity,

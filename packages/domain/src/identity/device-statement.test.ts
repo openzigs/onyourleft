@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { canonicalJson } from './canonical';
 import {
   AUTH_PURPOSE,
+  ERASE_ACCOUNT_PURPOSE,
   deviceStatementBytes,
   LINK_PURPOSE,
   RECOVER_PURPOSE,
@@ -47,7 +48,9 @@ describe('the statement a device signs for an instance (#772)', () => {
   });
 
   it('has three purposes, all distinct', () => {
-    expect(new Set([AUTH_PURPOSE, LINK_PURPOSE, RECOVER_PURPOSE]).size).toBe(3);
+    expect(new Set([AUTH_PURPOSE, LINK_PURPOSE, RECOVER_PURPOSE, ERASE_ACCOUNT_PURPOSE]).size).toBe(
+      4,
+    );
   });
 
   it('is not the canonical form of anything that lacks a purpose — an activity record has none', () => {
