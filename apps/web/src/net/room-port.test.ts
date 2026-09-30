@@ -9,7 +9,7 @@ import type {
   InstanceSocketEvents,
   OpenInstanceSocket,
 } from '../instance/instance-transport';
-import { createRoomPort } from './room-port';
+import { createRoomPort, roomPortOver } from './room-port';
 import { flush, ManualClock } from './testing';
 
 const ORIGIN = 'https://ride.example';
@@ -139,5 +139,25 @@ describe('the production room port — #782', () => {
     }).join({ roomId: 'room-1', declaredMassKilograms: 71, sample: () => ({ powerWatts: 0 }) });
     await flush();
     expect(release).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a link that fails at once — #782', () => {
+  it('reports it as lost, after the caller holds the connection, and throws nothing', async () => {
+    const clock = new ManualClock();
+    const connection = roomPortOver(
+      () => ({
+        ticket: () => {
+          throw new Error('no instance');
+        },
+        open: () => {
+          throw new Error('never');
+        },
+      }),
+      { timers: clock, now: clock.now, keepAlive: () => () => undefined },
+    ).join({ roomId: 'room-1', declaredMassKilograms: 71, sample: () => ({ powerWatts: 0 }) });
+    await flush();
+    expect(connection.status().kind).toBe('lost');
+    connection.leave();
   });
 });

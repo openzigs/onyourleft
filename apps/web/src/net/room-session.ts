@@ -242,6 +242,9 @@ export class RoomSession {
   }
 
   async #connect(): Promise<void> {
+    // Never synchronously inside the constructor: a link that answered at once
+    // would report a change before the caller holds the session it is about.
+    await Promise.resolve();
     if (this.#finished()) return;
     const { link, roomId } = this.#options;
     let answer: TicketAnswer;
