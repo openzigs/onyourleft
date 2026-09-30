@@ -243,7 +243,11 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
       if (stopped) {
         return;
       }
-      if ((bounded || owed) && sent !== undefined) {
+      // A correction's whole walk is owed from its first sample to the moment
+      // the trainer is on the road's own grade again — which is usually AFTER
+      // the correction: the rider is moved before the road under them turns.
+      if (bounded) owed = true;
+      if (owed && sent !== undefined) {
         // #782: toward the road at a bounded rate, on the driver's own clock.
         if (!(at - sent.at >= SIMULATION_SETPOINT_INTERVAL_SECONDS)) return;
         const raw = gradeAt(profile, distanceOnRoute(profile, metres(distance)));
@@ -252,11 +256,11 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
           : 0;
         const step = CORRECTION_GRADE_STEP_PERCENT_PER_SECOND * (at - sent.at);
         const grade = Math.max(sent.grade - step, Math.min(sent.grade + step, road));
-        owed = grade !== road;
+        if (!bounded && grade === road) owed = false;
         // The driver is told nothing it would believe it wrote, so when this
         // hands back it writes the road afresh rather than trusting a deadband.
         driver.restart();
-        if (Math.abs(grade - sent.grade) < SIMULATION_GRADE_DEADBAND_PERCENT && !owed) return;
+        if (Math.abs(grade - sent.grade) < SIMULATION_GRADE_DEADBAND_PERCENT) return;
         sent = { grade, at };
         fault = undefined;
         writer.offer({ grade: gradePercent(grade) });
