@@ -189,6 +189,35 @@ describe('what is refused before any room state changes — #780 criterion 1', (
     expect(after.messages).toEqual([{ type: 'refuse', reason: 'room-closed' }]);
   });
 
+  it('refuses a rejoin that reaches a worker after it let the room go, rather than opening a lobby — #897', async () => {
+    // The window #897 is about: a worker has closed a finished race and sent
+    // `room-closed`, and the router has not read it yet, so its placement
+    // still names that worker. A rejoin routed then reaches a worker that
+    // holds no such room. The router is put in exactly that state: the first
+    // upgrade places the room on the one worker, whose plan it cannot open —
+    // so the worker never holds it, and never sends `room-closed` to clear
+    // the placement either.
+    let lookups = 0;
+    harness = await startRouter({
+      workers: 1,
+      lookup: (roomId) => {
+        lookups += 1;
+        return Promise.resolve(
+          lookups === 1
+            ? { kind: 'open', plan: ridePlan(roomId, { grades: [[5, 0]] }) }
+            : { kind: 'started', plan: ridePlan(roomId) },
+        );
+      },
+    });
+    await expect(join('finished', 'ticket-ann')).rejects.toThrow();
+    expect(harness.router.placementOf('finished')).toBeDefined();
+    // The rejoin: routed to the worker, because the placement says it holds it.
+    const rejoin = await join('finished', 'ticket-ann');
+    expect(await rejoin.closed).toEqual({ code: 4005, reason: 'room-closed' });
+    expect(rejoin.messages).toEqual([{ type: 'refuse', reason: 'room-closed' }]);
+    expect(lookups).toBe(2);
+  }, 30_000);
+
   it('closes a hello with no ticket, a bad ticket, and a spent ticket with their documented codes — and seats nobody', async () => {
     const spent = new Set<string>();
     harness = await startRouter({

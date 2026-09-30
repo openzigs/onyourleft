@@ -31,6 +31,11 @@ export type ToWorker =
       readonly type: 'socket';
       readonly socketId: string;
       readonly plan: RoomPlan;
+      /**
+       * The room is a race that has left its lobby (#897): the worker joins
+       * it only if it still holds it, and otherwise refuses `room-closed`.
+       */
+      readonly started: boolean;
       readonly request: UpgradeRequest;
       /** Bytes the HTTP parser read past the request head, base64 — almost always empty. */
       readonly head: string;
