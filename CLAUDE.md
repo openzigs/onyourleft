@@ -336,8 +336,8 @@ apps/                 AGPL-3.0-or-later, without exception
                         and road names from glyphs the app ships, at a RELATIVE
                         `glyphs` URL so they add no origin. ⚠️ MapLibre (6.10,
                         and 6.11 since #756) draws text in the device's font
-                        when a range cannot be
-                        fetched, so a label painting proves nothing about the
+                        when a range cannot be fetched, so a label painting
+                        proves nothing about the
                         glyphs — the browser gate asserts the requests. Since
                         #672 every colour the map paints is in `basemap.ts`
                         §`MAP_COLOURS`, one table per palette, CHECKED against
@@ -3517,11 +3517,12 @@ archive answering 404 is requested **once**, raises two `console.error`s and is 
 over ten seconds; a connection dropped mid-request is requested **twice** and then left alone.
 ⚠️ **#756 re-measured it on 6.11.2 with 6.10.0 as the control, and half of that did not
 reproduce.** The 404 half held on both: one request, two `console.error`s, nothing more over ten
-seconds. A dropped connection was requested **once** on both, not twice — whether it was reset at
-the request (Playwright's `route.abort('connectionreset')`) or cut 100 bytes into a 206 body by a
-local server — with the same two errors. So the "twice" is not a change between the two versions;
-it came from a way of dropping the connection that #535 did not record and #756 did not find. The
-request is pmtiles' `FetchSource`, which is 4.5.0 in both runs. The
+seconds. A dropped connection was requested **once** on both, not twice, with the same two errors
+— by #535's own recorded method (`route.abort('internetdisconnected')`), by
+`route.abort('connectionreset')`, and cut 100 bytes into a 206 body by a local server. So the
+"twice" is not a change between the two versions, and it does not reproduce today on either by the
+method that produced it; why it once did is not known. The request is pmtiles' `FetchSource`, which
+is 4.5.0 in both runs. The
 advice stands for a reason that does not depend on any retry policy: `networkidle` resolves just as
 happily over a page that requested **nothing**, which is what a broken protocol registration looks
 like. Wait on the event you mean (`waitForRequest`), which fails immediately when the request is

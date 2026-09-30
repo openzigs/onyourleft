@@ -225,8 +225,9 @@ const PLACE_NAME_RANGES = [
  * **twice** and then left alone. Whatever the first version met was an older
  * MapLibre, or something else, and the retry claim is withdrawn rather than
  * kept as folklore. #756 re-measured 6.11.2 against 6.10.0: a 404 is still asked
- * for once, and a dropped connection was asked for once on BOTH versions — the
- * "twice" did not reproduce on either (CLAUDE.md §4f says how it was dropped).
+ * for once, and a connection dropped by #535's own method
+ * (`route.abort('internetdisconnected')`) was asked for once on BOTH versions,
+ * so the "twice" does not reproduce on either (CLAUDE.md §4f).
  *
  * The advice still holds, for a reason that does not depend on MapLibre's
  * retry policy: `networkidle` resolves just as happily over a page that asked
@@ -851,8 +852,8 @@ test.describe('the dark map — #672', () => {
  *
  * ⚠️ **"A label painted" cannot, on its own, tell the app's glyphs from the
  * device's font — and that is a finding, not a caveat.** MapLibre 6.10 (and
- * 6.11) draws a glyph itself, with TinySDF and whatever font the browser has, whenever the
- * style has no `glyphs` URL or the URL cannot serve a range
+ * 6.11) draws a glyph itself, with TinySDF and whatever font the browser has,
+ * whenever the style has no `glyphs` URL or the URL cannot serve a range
  * (`glyph_manager.ts` §`_getAndCacheGlyphsPromise`). So a style with no glyphs
  * at all **still labels the map**, and the positive case's ink assertion would
  * be green over a regression that deleted every range file. The issue's

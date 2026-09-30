@@ -750,5 +750,6 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   BSD-3-Clause, and its dependencies are the same, so the closure did not move. The figures that
   moved are corrected in [`docs/architecture.md`](../architecture.md) §"The map dependencies": the
   lazy map chunk is **1 036 kB minified** at 6.11.2 against 1 031 kB at 6.10.0 built from the same
-  tree, so the 1 006 kB in the entry above no longer describes either, and the licence table's read
-  date is 2026-09-30. ([#756](https://github.com/openzigs/onyourleft/pull/756))
+  tree. The 1 006 kB in the entry above was right for #489's tree; the chunk carries this app's own
+  map code as well as MapLibre's and has grown with it since, so that figure describes neither
+  build today. The licence table's read date is 2026-09-30. ([#756](https://github.com/openzigs/onyourleft/pull/756))
