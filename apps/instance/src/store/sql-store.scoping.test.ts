@@ -133,9 +133,15 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   putDeviceKey: { notAScopedRead: 'a write; ownership is sql-store.test.ts’s' },
   putSession: { notAScopedRead: 'a write; ownership is sql-store.test.ts’s' },
   putActivityRecord: { notAScopedRead: 'a write' },
-  ingestActivity: { notAScopedRead: 'a write; its scoping is sync.test.ts’s' },
-  putSyncItem: { notAScopedRead: 'a write; its scoping is sync.test.ts’s' },
-  deleteSyncItem: { notAScopedRead: 'a write; its scoping is sync.test.ts’s' },
+  ingestActivity: {
+    notAScopedRead: 'a write; its scoping is sync/ingest.test.ts’s (two athletes, one file)',
+  },
+  putSyncItem: {
+    notAScopedRead: 'a write; its scoping is sync/manifest.test.ts’s (cross-athlete PUT)',
+  },
+  deleteSyncItem: {
+    notAScopedRead: 'a write; its scoping is sync/manifest.test.ts’s (cross-athlete DELETE)',
+  },
   isContentHeld: {
     notAScopedRead:
       'blob collection: whether ANY athlete holds a file, answered as a boolean and never as a row (#35)',

@@ -252,6 +252,67 @@ describe('ingesting a signed record (#37)', () => {
       ]);
       expect(world.blobs.size).toBe(0);
     });
+
+    // #893's review: the first time the GPX and TCX reader sits on a path a
+    // network reaches. A DTD is where an entity is declared, so a document
+    // carrying one is refused outright — XXE and entity expansion together —
+    // and this pins it on the SERVER's path, so swapping the reader is red here.
+    it.each([
+      [
+        'an entity-expansion ("billion laughs") GPX',
+        `<?xml version="1.0"?>
+<!DOCTYPE gpx [
+  <!ENTITY a "aaaaaaaaaa">
+  <!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">
+  <!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;">
+  <!ENTITY d "&c;&c;&c;&c;&c;&c;&c;&c;&c;&c;">
+  <!ENTITY e "&d;&d;&d;&d;&d;&d;&d;&d;&d;&d;">
+  <!ENTITY f "&e;&e;&e;&e;&e;&e;&e;&e;&e;&e;">
+  <!ENTITY g "&f;&f;&f;&f;&f;&f;&f;&f;&f;&f;">
+  <!ENTITY h "&g;&g;&g;&g;&g;&g;&g;&g;&g;&g;">
+]>
+<gpx version="1.1" creator="&h;" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk><name>&h;</name><trkseg>
+    <trkpt lat="51.5" lon="-0.12"><time>2026-09-01T08:00:00Z</time></trkpt>
+    <trkpt lat="51.5001" lon="-0.12"><time>2026-09-01T08:00:01Z</time></trkpt>
+  </trkseg></trk>
+</gpx>`,
+      ],
+      [
+        'an external-entity (XXE) TCX',
+        `<?xml version="1.0"?>
+<!DOCTYPE TrainingCenterDatabase [ <!ENTITY secret SYSTEM "file:///etc/passwd"> ]>
+<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2">
+  <Activities><Activity Sport="Biking"><Id>&secret;</Id>
+    <Lap StartTime="2026-09-01T08:00:00Z"><Track>
+      <Trackpoint><Time>2026-09-01T08:00:00Z</Time></Trackpoint>
+      <Trackpoint><Time>2026-09-01T08:00:01Z</Time></Trackpoint>
+    </Track></Lap>
+  </Activity></Activities>
+</TrainingCenterDatabase>`,
+      ],
+    ])('refuses %s with a DOCTYPE, promptly, and stores nothing', async (_, text) => {
+      const setup = await syncWorld(1);
+      world = setup.world;
+      const [rider] = setup.riders;
+      const started = performance.now();
+      const answer = await post(
+        world,
+        rider!.token,
+        await uploadBody(rider!.device, new TextEncoder().encode(text)),
+      );
+      const took = performance.now() - started;
+      expect([answer.status, codeOf(answer.body)]).toEqual([422, 'file_undecodable']);
+      // Nothing expanded: a reader that resolved the entities would build
+      // 10^8 characters before answering, or read the file it was pointed at.
+      expect(JSON.stringify(answer.body)).not.toContain('aaaaaaaaaa');
+      expect(JSON.stringify(answer.body)).not.toContain('root:');
+      expect(took).toBeLessThan(2_000);
+      const read = await stored(world, rider!.athleteId);
+      expect(read.records).toEqual([]);
+      expect(read.manifest).toEqual([]);
+      expect(world.blobs.size).toBe(0);
+    });
   });
 
   describe('a body over the limit is refused before it is read', () => {

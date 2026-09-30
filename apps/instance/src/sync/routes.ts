@@ -12,7 +12,8 @@
  * because a route remembered to: the handler sets it on EVERY response
  * (`handler.ts` §`ALWAYS`). A private activity served with a publicly
  * cacheable header is a disclosure that survives the fix (#38), and
- * `sync-routes.test.ts` reads the header off every read route here.
+ * `reads.test.ts` ("sends a private ride with no-store…") reads the header
+ * off every read route here.
  */
 
 import { errorResponse } from '../errors.ts';
