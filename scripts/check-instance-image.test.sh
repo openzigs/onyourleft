@@ -283,6 +283,13 @@ assert_exit 'a base image pinned by tag alone fails' 1
 assert_says 'as IMG005, naming it' 'IMG005 apps/instance/Dockerfile'"'"'s base image is not pinned by digest: node:24.21.0-bookworm-slim'
 assert_not_asked 'without pulling a mutable tag' 'docker pull'
 
+# #864: a last line with no newline after it was never read.
+new_fixture
+printf 'FROM %s AS build\nFROM node:22' "${PINNED}" > "${tmp}/repo/apps/instance/Dockerfile"
+run_check
+assert_exit 'an unpinned final FROM with no newline after it fails' 1
+assert_says 'as IMG005, naming it' 'not pinned by digest: node:22'
+
 new_fixture
 printf '# no base image\n' > "${tmp}/repo/apps/instance/Dockerfile"
 run_check

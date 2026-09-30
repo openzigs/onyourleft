@@ -245,6 +245,75 @@ const SQL_DRIVER_IMPORT_PATTERNS = [
   },
 ];
 
+/**
+ * The instance's Node adapter, by file name (#852): the entry point, the HTTP
+ * listener, the `node:sqlite` driver and the disk blob store, plus tests and
+ * test support, which run on Node by definition. Everything else under
+ * `apps/instance/src/` mounts unchanged under `workerd` (ADR 0037 D-2).
+ */
+const INSTANCE_NODE_ADAPTER_FILES = [
+  'apps/instance/src/main.ts',
+  'apps/instance/src/serve.ts',
+  'apps/instance/src/node-listener.ts',
+  'apps/instance/src/operator/cli.ts',
+  'apps/instance/src/operator/run.ts',
+  'apps/instance/src/room/node/router.ts',
+  'apps/instance/src/room/node/worker.ts',
+  'apps/instance/src/room/node/worker-main.ts',
+  'apps/instance/src/instance.ts',
+  'apps/instance/src/node-imports.ts',
+  'apps/instance/src/operator/commands.ts',
+  'apps/instance/src/store/backup.ts',
+  'apps/instance/src/store/serving.ts',
+  'apps/instance/src/store/node-sqlite.ts',
+  'apps/instance/src/blob/disk-blob-store.ts',
+  'apps/instance/src/**/*.test.ts',
+  'apps/instance/src/**/*-testing.ts',
+  'apps/instance/src/**/testing/**',
+];
+
+/** Node-only globals the instance core may not name (#852). */
+const INSTANCE_NODE_ONLY_GLOBALS = [
+  'Buffer',
+  'process',
+  'require',
+  'module',
+  'exports',
+  '__dirname',
+  '__filename',
+  'global',
+  'setImmediate',
+  'clearImmediate',
+];
+
+const INSTANCE_NODE_ONLY_MESSAGE =
+  'The instance core mounts unchanged under workerd, which has no Node globals (ADR 0037 D-2, #852). Take what you need as a parameter, or put Node-only code in an adapter file and name it in the ignores of eslint.config.js’s instance block.';
+
+/**
+ * The same names reached as a property of the global object (#864):
+ * `globalThis.process`, `self.Buffer`, `window.require`. `no-restricted-globals`
+ * reads identifiers only, so a member expression passed it.
+ */
+const INSTANCE_NODE_ONLY_PROPERTIES = ['globalThis', 'window', 'self', 'global'].flatMap((object) =>
+  INSTANCE_NODE_ONLY_GLOBALS.map((property) => ({
+    object,
+    property,
+    message: INSTANCE_NODE_ONLY_MESSAGE,
+  })),
+);
+
+/**
+ * A Node builtin, in either spelling, imported by the instance core (#864) —
+ * the same derived list the platform-isolated packages use.
+ */
+const INSTANCE_NODE_IMPORT_PATTERNS = [
+  {
+    group: ['node:*', ...NODE_BUILTIN_SPECIFIERS],
+    message:
+      'The instance core mounts unchanged under workerd, which loads no Node builtin (ADR 0037 D-2, #864). Put Node-only code in an adapter file and name it in the ignores of eslint.config.js’s instance block.',
+  },
+];
+
 export default tseslint.config(
   {
     ignores: [
@@ -603,41 +672,44 @@ export default tseslint.config(
   // replaces this one under `src/room/core/`; that block's own list already
   // carries every name here but `module`, `exports` and `clearImmediate`,
   // which its `lib`-narrowed tsconfig makes compile errors anyway.
+  //
+  // #864: a bare name is not the only spelling. `globalThis.process` and
+  // `globalThis.Buffer` are MEMBER expressions, which `no-restricted-globals`
+  // never looks at (probed: 0 errors before), so the same names are refused as
+  // properties of every object that is the global one — and the room core's
+  // block, which replaces `no-restricted-properties` under `src/room/core/`,
+  // carries the same entries. And a `node:` IMPORT, which no global rule can
+  // see, is refused here too, derived from `builtinModules` exactly as the
+  // platform-isolated packages derive it: until #864 it was caught only by the
+  // local `workerd` suite.
   {
     files: ['apps/instance/src/**/*.ts'],
-    ignores: [
-      'apps/instance/src/main.ts',
-      'apps/instance/src/serve.ts',
-      'apps/instance/src/node-listener.ts',
-      'apps/instance/src/operator/cli.ts',
-      'apps/instance/src/operator/run.ts',
-      'apps/instance/src/room/node/router.ts',
-      'apps/instance/src/room/node/worker.ts',
-      'apps/instance/src/store/node-sqlite.ts',
-      'apps/instance/src/blob/disk-blob-store.ts',
-      'apps/instance/src/**/*.test.ts',
-      'apps/instance/src/**/*-testing.ts',
-      'apps/instance/src/**/testing/**',
-    ],
+    ignores: INSTANCE_NODE_ADAPTER_FILES,
     rules: {
       'no-restricted-globals': [
         'error',
-        ...[
-          'Buffer',
-          'process',
-          'require',
-          'module',
-          'exports',
-          '__dirname',
-          '__filename',
-          'global',
-          'setImmediate',
-          'clearImmediate',
-        ].map((name) => ({
+        ...INSTANCE_NODE_ONLY_GLOBALS.map((name) => ({
           name,
-          message:
-            'The instance core mounts unchanged under workerd, which has no Node globals (ADR 0037 D-2, #852). Take what you need as a parameter, or put Node-only code in an adapter file and name it in this block’s ignores.',
+          message: INSTANCE_NODE_ONLY_MESSAGE,
         })),
+      ],
+      'no-restricted-properties': ['error', ...INSTANCE_NODE_ONLY_PROPERTIES],
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        { patterns: [...INSTANCE_NODE_IMPORT_PATTERNS, ...SQL_DRIVER_IMPORT_PATTERNS] },
+      ],
+    },
+  },
+  // The same import rule for `src/store/`, WITHOUT the SQL patterns: that
+  // directory is the one place Kysely may be named (#769), and flat config
+  // keeps the last setting of a rule, so the block above had to leave it out.
+  {
+    files: ['apps/instance/src/store/**/*.ts'],
+    ignores: INSTANCE_NODE_ADAPTER_FILES,
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        { patterns: INSTANCE_NODE_IMPORT_PATTERNS },
       ],
     },
   },
@@ -689,6 +761,9 @@ export default tseslint.config(
           message:
             'The room core is deterministic: the same calls give byte-identical frames (#779).',
         },
+        // #864: this block replaces the instance core's `no-restricted-properties`
+        // here, so it carries the same `globalThis.process` refusals.
+        ...INSTANCE_NODE_ONLY_PROPERTIES,
       ],
     },
   },
@@ -700,6 +775,11 @@ export default tseslint.config(
   // first download. The package declares no `exports` map, so every file under
   // it is importable by path; refusing every subpath is what closes
   // `lucide-react/dist/esm/DynamicIcon.mjs` as well as the documented one.
+  //
+  // ⚠️ Flat config keeps the LAST setting of a rule for a file, so a later block
+  // that sets `@typescript-eslint/no-restricted-imports` for any file under
+  // `apps/web` silently drops these bans there (#871, from #868's review). Such
+  // a block restates these entries rather than replacing them.
   {
     files: ['apps/web/**/*.{ts,tsx}'],
     rules: {
