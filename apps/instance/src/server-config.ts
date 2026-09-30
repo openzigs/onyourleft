@@ -18,6 +18,7 @@ export interface RawServerConfig {
   readonly roomWorkers?: string | undefined;
   readonly compression?: string | undefined;
   readonly metrics?: string | undefined;
+  readonly pingIntervalMs?: string | undefined;
 }
 
 export interface ServerConfig {
@@ -109,6 +110,19 @@ export function readServerConfig(raw: RawServerConfig, cores: number): ServerCon
   const compression = onOff(raw.compression, 'OYL_INSTANCE_WS_COMPRESSION', problems);
   const metrics = onOff(raw.metrics, 'OYL_INSTANCE_METRICS', problems);
 
+  let pingIntervalMs = DEFAULT_PING_INTERVAL_MS;
+  if (present(raw.pingIntervalMs)) {
+    const text = raw.pingIntervalMs.trim();
+    const value = /^[0-9]+$/.test(text) ? Number(text) : Number.NaN;
+    if (!Number.isInteger(value) || (value !== 0 && value < 1_000) || value > 600_000) {
+      problems.push(
+        'OYL_INSTANCE_PING_INTERVAL_MS must be 0 (no ping) or a whole number of milliseconds from 1000 to 600000.',
+      );
+    } else {
+      pingIntervalMs = value;
+    }
+  }
+
   if (problems.length > 0) return { ok: false, problems };
   return {
     ok: true,
@@ -121,7 +135,7 @@ export function readServerConfig(raw: RawServerConfig, cores: number): ServerCon
       compression,
       metrics,
       maxBufferedBytes: DEFAULT_MAXIMUM_BUFFERED_BYTES,
-      pingIntervalMs: DEFAULT_PING_INTERVAL_MS,
+      pingIntervalMs,
     },
   };
 }

@@ -35,6 +35,7 @@ const server = readServerConfig(
     roomWorkers: process.env.OYL_INSTANCE_ROOM_WORKERS,
     compression: process.env.OYL_INSTANCE_WS_COMPRESSION,
     metrics: process.env.OYL_INSTANCE_METRICS,
+    pingIntervalMs: process.env.OYL_INSTANCE_PING_INTERVAL_MS,
   },
   availableParallelism(),
 );

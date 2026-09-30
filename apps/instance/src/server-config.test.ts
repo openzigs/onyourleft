@@ -42,4 +42,15 @@ describe('readServerConfig (#780, #791)', () => {
     const many = readServerConfig({ roomWorkers: 'x', registration: 'maybe', metrics: '1' }, 1);
     expect(many.ok ? 0 : many.problems.length).toBe(3);
   });
+
+  it('pings every 25 s unless told otherwise, and 0 turns the ping off (to measure a tunnel’s idle timeout)', () => {
+    expect(readServerConfig({}, 1)).toMatchObject({ config: { pingIntervalMs: 25_000 } });
+    expect(readServerConfig({ pingIntervalMs: '0' }, 1)).toMatchObject({
+      config: { pingIntervalMs: 0 },
+    });
+    expect(readServerConfig({ pingIntervalMs: '10000' }, 1)).toMatchObject({
+      config: { pingIntervalMs: 10_000 },
+    });
+    expect(readServerConfig({ pingIntervalMs: '50' }, 1).ok).toBe(false);
+  });
 });
