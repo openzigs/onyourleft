@@ -1528,6 +1528,28 @@ the API's version, not the package's.
 produce `unauthenticated`, `rate_limited` and `validation_failed` and take JSON bodies; since #881
 the pagination parser has its first callers, the sync manifest and the activity list.
 
+### A room, from the client: `apps/web/src/net/`
+
+[#782](https://github.com/openzigs/onyourleft/issues/782) and
+[#783](https://github.com/openzigs/onyourleft/issues/783) put the client's half of a room in
+`apps/web/src/net/`, platform-free except through what it is handed:
+
+| Module | What it decides |
+|---|---|
+| `room-session.ts` | one room, joined and kept joined: the hello and its single-use ticket, a power report every 500 ms (which is also the keepalive, ADR 0037 D-8.1), and rejoining with a fresh ticket inside the room's 60 s window. Refusals are final; a lost socket is retried |
+| `room-port.ts` | what the game may ask of a room, and the one production implementation. It mints the ticket and opens the socket **through `instance/instance-transport.ts`**, the one module the client may reach an instance through (ADR 0036 D-3 (a)) |
+| `snapshots.ts` | the room's frames, drawn 1.5 frames behind so a rider is interpolated rather than extrapolated |
+| `interest.ts` | which K of the room's riders are drawn, with hysteresis so the set does not flicker |
+| `correction.ts` | how far the room says this rider is out, and how that is applied: over 2 s, never backwards, the trainer's grade changing by at most 1 % a second |
+
+⚠️ **A room's paths come from one builder**, `instance-transport.ts` §`roomPath`, which refuses a room
+id the instance could not route; `InstanceHttp.call` refuses a path with a dot segment, `?`, `#`, `%`
+or `\`; and `RoomSession` refuses such an id for good before a ticket is asked for. Until #919's
+review the ticket's path was built from the id unchecked and could steer the rider's bearer-token
+POST. ⚠️ **No ticket without a declared weight**: a rider who has set none is told to, and is not raced
+at a default (ADR 0028 D-1). ⚠️ `check:wiring` watches this directory since that review, for exports
+and port methods only (CLAUDE.md §4j).
+
 ### The realistic world: what is built, and how a rider chooses it
 
 [ADR 0026](adr/0026-realistic-game-world.md) builds the realistic world in four layers and offers it
@@ -1675,6 +1697,15 @@ each probe's pixel from the numbers the shader was handed — three mixes fog in
 after everything else, so the prediction is exact — and holds it from both sides, with the table
 flattened as the control. Whether it helps or fights #544's lifted ridge is the owner's, by eye, in
 validation 0002 Part AH §"The #622 rows", after Part AG.
+
+**Other real riders in the realistic world (#783).** A realistic frame draws the **2** remote riders
+nearest the rider in the realistic body, the next **24** with the stylised rider, and no more; the
+stylised world draws the room's whole K. `realistic-budget.ts` §`REALISTIC_REMOTE_RIDERS` and
+§`REALISTIC_REMOTE_STYLISED_RIDERS` carry the arithmetic against D-6's triangle ceiling, and
+`three-renderer.ts` §`realisticRemoteSplit` is the rule. ⚠️ **This is not a D-3 exception**: D-3
+forbids a *pack asset* from one world beside one from the other, and the stylised rider is not a pack
+asset — it is `bicycle.ts`'s own geometry — which is also what #783 asks for (*"drawn with the
+stylised rider or an impostor, per a stated rule"*).
 
 ## Spike write-ups
 
