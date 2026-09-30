@@ -165,7 +165,7 @@ describe('exportActivity — a file this project can read back', () => {
     const file = await exportFrom(open, ride.id, 'fit');
     const thirdParty = await readWithThirdParty(file.bytes);
 
-    // `fit-file-parser` 5.0.2 (MIT), a devDependency that is never shipped —
+    // `fit-file-parser` 6.1.2 (MIT), a devDependency that is never shipped —
     // #31's revision block names it, and ADR 0006 R1 rules out Garmin's own
     // checker. It was written from the same public protocol documentation as
     // this project's codec and from nothing else in common.

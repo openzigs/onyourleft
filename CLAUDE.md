@@ -2509,13 +2509,16 @@ three editing this list on its own branch and conflicting with the other two.
     `@types/node` for the generator under `tools/`, and `tsconfig.platform-free.json` compiles
     `src/` alone with `lib: ["ES2024"]` and `types: []`. A `TextDecoder` in `src/` is therefore a
     compile error, which is why the codec carries its own UTF-8 reader **and its own XML reader**.
-    ⚠️ **`fit-file-parser` 5.0.2 (MIT) is now a devDependency of `packages/fit`**, imported from
+    ⚠️ **`fit-file-parser` 6.1.2 (MIT) is now a devDependency of `packages/fit`**, imported from
     one test file (`tools/fixture-corpus/third-party-acceptance.test.ts`) and never from `src/`. It
     is the independent third-party FIT reader #31's acceptance criterion requires, adopted under
     that issue's revision block, which struck "validate with the SDK's own checker" under
     ADR 0006 R1. `packages/fit/README.md` §1 records the reconciliation; that README's declaration
     no longer claims the package depends on nothing named `fit-file-parser`, and a reviewer
-    expecting the old sentence should read the new one.
+    expecting the old sentence should read the new one. ⚠️ **It was 5.0.2 until #755**: 6.1.2's
+    effective message and type tables differ from 5.0.2's only by two sub-sports (153
+    `mountain_enduro`, 154 `mountain_downhill`), and it parses every corpus file and the #138
+    uploads to identical output in both `list` and `cascade` mode.
     ⚠️ **Since [#89](https://github.com/openzigs/onyourleft/issues/89) it also holds
     `src/route/`**, `decodeGpxRoute` — the #32 decoder composed with
     `@onyourleft/domain`'s route profile, and the only place the codec and the profile meet. That
@@ -2587,7 +2590,7 @@ and routing it through `web-crypto.ts` would destroy the independence it exists 
 React 19, React DOM, Vite, — since #26 — `dexie` 4.4.5 and `fake-indexeddb` 6.2.5 (both
 Apache-2.0, both zero-dependency, both under `packages/store`) and — since #40 —
 `@types/web-bluetooth` 0.0.21 (MIT, zero-dependency, types only, a devDependency of
-`packages/sensors`) and — since #31 — `fit-file-parser` 5.0.2 (MIT, a devDependency of
+`packages/sensors`) and — since #31 — `fit-file-parser` **6.1.2** (MIT, a devDependency of
 `packages/fit` **and, since #51, of `apps/web` too**, whose closure is `buffer` MIT → `base64-js`
 MIT and `ieee754` BSD-3-Clause) and — since #63 — `maplibre-gl` **6.10.0** and `pmtiles` 4.5.0 (both
 BSD-3-Clause, both runtime dependencies of `apps/web`, whose closure adds BSD-2-Clause, ISC, MIT and

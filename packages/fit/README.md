@@ -32,7 +32,7 @@ was read.
 ### `fit-file-parser` is a test-time devDependency, and that is a ruling rather than a lapse
 
 ⚠️ The sentence above **used to say** that `fit-file-parser` appeared in no dependency block either.
-It now does, pinned exactly at **5.0.2 (MIT)** in this package's `devDependencies`. That changed with
+It now does, pinned exactly at **6.1.2 (MIT)** in this package's `devDependencies`. That changed with
 #31 and it changed because #31's revision block ruled on it directly.
 
 The original acceptance criterion was *"validating with the SDK's own checker rather than our own"*.
