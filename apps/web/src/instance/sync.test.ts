@@ -492,4 +492,60 @@ describe('two-way sync through the real instance (#776)', () => {
     // Nothing moves on the next sync.
     expect(await a.sync()).toMatchObject({ itemsPulled: 0, itemsPushed: 0, failures: [] });
   }, 60_000);
+  // #893's re-review, N1: the device that RECORDED and pushed a ride finds it
+  // by the base, since the tombstone names no ride and the ride's own
+  // `originalFile` is not the hash of the FIT it exported.
+  it('deletes a ride another device deleted on the device that pushed it, with its write-up', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, [
+      'nominal-outdoor-ride.fit',
+      'paused-laps.fit',
+    ]);
+    const [gone, kept] = a.ids;
+    await a.on.harness.write((store) => store.putRideWriteUp(rideWriteUpFor(LOCAL_ATHLETE, gone!)));
+    expect(await a.sync()).toMatchObject({ pushed: 2, itemsPushed: 1, failures: [] });
+
+    const b = await linkedDevice(world.url, origin, a.on);
+    expect(await b.sync()).toMatchObject({ pulled: 2, itemsPulled: 1, failures: [] });
+    await b.on.harness.write((store) => store.deleteActivity(LOCAL_ATHLETE, gone!));
+    expect(await b.sync()).toMatchObject({ deletedOnInstance: 1, failures: [] });
+
+    expect(await a.sync()).toMatchObject({ deleted: 1, pushed: 0, failures: [] });
+    expect((await libraryRows(a.on.harness)).map((row) => row.id)).toEqual([kept]);
+    expect(await a.on.harness.read((store) => store.getRideWriteUp(LOCAL_ATHLETE, gone!))).toBe(
+      undefined,
+    );
+    // …and it stays deleted: A does not push it back.
+    expect(await a.sync()).toMatchObject({ pushed: 0, pulled: 0, deleted: 0, failures: [] });
+    expect(await libraryRows(a.on.harness)).toHaveLength(1);
+  }, 60_000);
+
+  // #893's re-review, N3: an item PULLED is remembered as synced, so when
+  // another device later replaces it, this device takes the new copy rather
+  // than pushing the one it pulled back over it.
+  it('remembers a pulled write-up, so a later change on another device is pulled rather than overwritten', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const [id] = a.ids;
+    await a.on.harness.write((store) =>
+      store.putRideWriteUp(rideWriteUpFor(LOCAL_ATHLETE, id!, 1)),
+    );
+    expect(await a.sync()).toMatchObject({ itemsPushed: 1, failures: [] });
+
+    const b = await linkedDevice(world.url, origin, a.on);
+    expect(await b.sync()).toMatchObject({ pulled: 1, itemsPulled: 1, failures: [] });
+
+    await a.on.harness.write((store) =>
+      store.putRideWriteUp(rideWriteUpFor(LOCAL_ATHLETE, id!, 2)),
+    );
+    expect(await a.sync()).toMatchObject({ itemsPushed: 1, failures: [] });
+
+    expect(await b.sync()).toMatchObject({ itemsPulled: 1, itemsPushed: 0, failures: [] });
+    expect(await b.on.harness.read((store) => store.getRideWriteUp(LOCAL_ATHLETE, id!))).toEqual(
+      rideWriteUpFor(LOCAL_ATHLETE, id!, 2),
+    );
+    expect((await instanceItem(a.on, 'write-up', id!))?.templateVersion).toBe('1.2');
+  }, 60_000);
 });

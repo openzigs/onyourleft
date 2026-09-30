@@ -330,9 +330,13 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
   // --- A ride deleted on another device ---------------------------------------
   for (const entry of manifest) {
     if (entry.kind !== 'activity' || !entry.deleted) continue;
-    const ride = await localRide(entry.activityId, entry.key);
-    if (ride !== undefined && (await store.deleteActivity(athleteId, ride.id))) deleted += 1;
+    // A tombstone names no ride (its record is gone), and on the device that
+    // PUSHED the ride its key is the hash of the FIT it exported, which is not
+    // the ride's `originalFile` — so the base is what says which ride it is
+    // (#893's re-review, N1).
     const known = base.get(keyOf('activity', entry.key));
+    const ride = await localRide(entry.activityId ?? known?.activityId ?? null, entry.key);
+    if (ride !== undefined && (await store.deleteActivity(athleteId, ride.id))) deleted += 1;
     if (known !== undefined) await forgetRide(entry.key, known.activityId);
   }
 
