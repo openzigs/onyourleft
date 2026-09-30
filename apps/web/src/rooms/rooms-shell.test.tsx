@@ -205,6 +205,18 @@ async function shell(
   await settle();
 }
 
+/**
+ * Settle until the page says `text`. Making a room digests the route with
+ * WebCrypto, which is not a microtask: a fixed number of settles was not
+ * always enough on a loaded machine.
+ */
+async function untilSaid(text: string): Promise<void> {
+  for (let i = 0; i < 50 && !(document.body.textContent ?? '').includes(text); i += 1) {
+    await settle();
+  }
+  expect(document.body.textContent).toContain(text);
+}
+
 async function joinByCode(code: string): Promise<void> {
   const input = [...document.querySelectorAll<HTMLInputElement>('input')].find(
     (each) => each.closest('label')?.textContent?.startsWith('Room code') === true,
@@ -348,8 +360,8 @@ describe('making a room — #784', () => {
     const clear = new ScriptedInstance();
     await shell(clear, handPlayedSockets());
     await press('Make a room');
+    await untilSaid('Its code is ABCDE-FGHJK-MNPQR.');
     expect(clear.seen.map((each) => each.path)).toEqual(['/v1/rooms']);
-    expect(document.body.textContent).toContain('Its code is ABCDE-FGHJK-MNPQR.');
   });
 });
 
@@ -398,7 +410,7 @@ describe('a private race — #785', () => {
       await Promise.resolve();
     });
     await press('Make a room');
-    expect(document.body.textContent).toContain('Its code is ABCDE-FGHJK-MNPQR.');
+    await untilSaid('Its code is ABCDE-FGHJK-MNPQR.');
     const sent = instance.seen.find((each) => each.path === '/v1/rooms')?.body as { gpx: string };
     await press('Ride in the room');
     await settle();
