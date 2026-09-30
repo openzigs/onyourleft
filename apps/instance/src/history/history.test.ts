@@ -218,7 +218,7 @@ describe('keeping the index (ADR 0040 D-1, D-4, D-7)', () => {
     expect(embedder.calls.filter((call) => call.purpose === 'document')).toStrictEqual([]);
   });
 
-  it.each<EmbedFailure>(['unreachable', 'not-local', 'unresolved'])(
+  it.each<EmbedFailure>(['unreachable', 'not-local', 'unresolved', 'unavailable'])(
     'stops a catch-up when the model cannot be asked (%s), and says so',
     async (failure) => {
       const embedder = scriptedEmbedder();

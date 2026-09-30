@@ -328,7 +328,8 @@ export function createHistory(options: HistoryOptions): History {
             gaveUp = 'failed';
             break;
           }
-          // No answer at all, or an address that may not be asked: every item
+          // No answer at all, an address that may not be asked, or a server
+          // that answered about itself (a model not pulled, a 5xx): every item
           // after this one would fare the same. Stop, and let them wait (D-6).
           return { indexed, failed, stopped: answer.why };
         }

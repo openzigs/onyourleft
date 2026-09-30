@@ -70,7 +70,15 @@ export type EmbedFailure =
   | 'unreachable'
   /** The server said an input was longer than the model's context. */
   | 'too-long'
-  /** Any other refusal. */
+  /**
+   * The server answered, about ITSELF rather than the input: a 404 (Ollama's
+   * answer for a model that has not been pulled), a 429, or any 5xx. Every
+   * item would fare the same, so a sweep stops on it as on `unreachable`
+   * (#928's review) — marking each item failed would hold every one back an
+   * hour on a fresh instance whose model is pulled a minute later.
+   */
+  | 'unavailable'
+  /** Any other refusal: a 4xx about this input. */
   | 'refused'
   /** An answer that is not one vector per input, all of one finite, non-zero dimension. */
   | 'malformed';
@@ -84,6 +92,15 @@ export interface Embedder {
   /** The prefix convention, as every row records it (ADR 0040 D-7). */
   readonly convention: string;
   embed(texts: readonly string[], purpose: EmbedPurpose): Promise<EmbedOutcome>;
+}
+
+/**
+ * Whether a refusal is about the server rather than the input: 404 (a model
+ * not pulled, or no such endpoint), 429 (too busy) or any 5xx. Every other 4xx
+ * is about what was sent.
+ */
+function isAboutTheServer(status: number): boolean {
+  return status === 404 || status === 429 || status >= 500;
 }
 
 /** The convention string a row records for a pair of prefixes. Stable: it is compared. */
@@ -147,6 +164,9 @@ export function createOllamaEmbedder(options: OllamaEmbedderOptions): Embedder {
         });
       } catch {
         return { ok: false, why: 'unreachable' };
+      }
+      if (!response.ok && isAboutTheServer(response.status)) {
+        return { ok: false, why: 'unavailable' };
       }
       let body: unknown;
       try {
