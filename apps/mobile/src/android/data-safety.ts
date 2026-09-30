@@ -398,6 +398,204 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
 ];
 
 /**
+ * One way a collected row's data leaves the device
+ * ([#562](https://github.com/openzigs/onyourleft/issues/562)).
+ *
+ * Play's section-level question *"Is all of the user data collected by your
+ * app encrypted in transit?"* is about PATHS, not data types: one type can
+ * leave by two paths, one encrypted and one not (Photos and videos does). So
+ * the answer is checked against this list rather than typed beside it, and
+ * {@link sectionAnswerFaults} requires every collected row to leave by at
+ * least one path here — a new collected row with no path cannot slip past the
+ * encryption check by being absent from it.
+ */
+export interface DataPath {
+  /** A stable name, which {@link EncryptedInTransitAnswer.exceptions} cites. */
+  readonly id: string;
+  /** The {@link DataSafetyAnswer.dataType}s that travel by it. */
+  readonly dataTypes: readonly string[];
+  /**
+   * Whether EVERY request on this path is encrypted between the device and
+   * where it goes. `false` when any address the app accepts for it can be a
+   * plain `http:` one across a network. `data-safety.test.ts` holds each
+   * answer to the rule in `apps/web` that decides which addresses are
+   * accepted, in both directions.
+   */
+  readonly encryptedInTransit: boolean;
+  /** Why. Read in review; never asserted. */
+  readonly why: string;
+}
+
+/** Every path a collected row leaves the device by. #562. */
+export const DATA_PATHS: readonly DataPath[] = [
+  {
+    id: 'map-tiles',
+    dataTypes: ['Location — approximate location'],
+    encryptedInTransit: true,
+    why: 'the basemap is fetched from https://tiles.openzigs.com (apps/web/src/map/basemap.ts §PUBLISHED_BASEMAP_URL); the IP address the row declares is seen over that TLS connection',
+  },
+  {
+    id: 'instance',
+    dataTypes: [
+      'Location — approximate location',
+      'Personal info — Name',
+      'Personal info — User IDs',
+      'Device or other IDs',
+    ],
+    encryptedInTransit: true,
+    why: 'an instance is reached over https:// and wss:// only; a plain http:// address is refused unless it is this device’s own loopback (localhost), where nothing crosses a network (apps/web/src/instance/address.ts §instanceAddress). The project’s own instance is reached through Cloudflare Tunnel: TLS to Cloudflare’s edge, and an encrypted tunnel from there',
+  },
+  {
+    id: 'own-computer',
+    dataTypes: [
+      'Photos and videos',
+      'Health and fitness — health info',
+      'Health and fitness — fitness info',
+    ],
+    encryptedInTransit: false,
+    why: 'a picture (#387, #553) or a ride’s numbers (#804) go to a computer the rider named on their own network, and the address may be plain http:// (apps/web/src/camera/analysis-endpoint.ts §endpointDecision). It is encrypted only when the rider’s address starts with https://',
+  },
+  {
+    id: 'hosted-model',
+    dataTypes: ['Health and fitness — health info', 'Health and fitness — fitness info'],
+    encryptedInTransit: true,
+    why: 'a hosted model on the rider’s own key is reached over https:// only; an http:// address is refused before anything is sent (apps/web/src/camera/hosted-model.ts §hostedModelDecision, #803)',
+  },
+  {
+    id: 'side-camera',
+    dataTypes: ['Photos and videos'],
+    encryptedInTransit: true,
+    why: 'pictures from a paired side-camera phone to the rider’s tablet go over a WebRTC data channel, which is DTLS-encrypted and cannot be switched off (ADR 0033 D-1). Play exempts end-to-end encrypted transfer, so this path is not what makes the Photos row collected; it is listed so the encryption answer covers every way a picture moves',
+  },
+];
+
+/**
+ * The Play Console Help page the section-level answers were read against, and
+ * what it said. #562's criterion asks for a cited reading, dated.
+ */
+export const SECTION_ANSWERS_PLAY_HELP = {
+  title: 'Provide information for Google Play’s Data safety section',
+  url: 'https://support.google.com/googleplay/android-developer/answer/10787469',
+  read: '2026-09-30',
+  encryption:
+    'the form asks “whether or not all of the user data collected by your app is encrypted in transit”, answered Yes or No, and says to “follow best industry standards to safely encrypt your app’s data in transit. Common encryption protocols include TLS (Transport Layer Security) and HTTPS.” The form has no field for an exception',
+  deletion:
+    'the form asks “whether or not you provide a way for users to request that their data is deleted”, answered Yes or No. “There is no prescribed mechanism … Common examples … may include but are not limited to: in-app features, contact forms, or a dedicated email alias.” Its FAQ allows the answer “if you provide users with a mechanism to request data deletion; or automatically initiate deletion or anonymization of collected data within 90 days of collection”',
+} as const;
+
+/** Where a rider sends a request to delete what this project holds. #562. */
+export const DELETION_REQUEST_EMAIL = 'matt@openzigs.ai';
+
+/** Play's *"Is all of the user data collected by your app encrypted in transit?"* */
+export interface EncryptedInTransitAnswer {
+  readonly answer: boolean;
+  /**
+   * The {@link DataPath.id}s of every path that is NOT encrypted, when the
+   * answer is Yes anyway. Play's form cannot carry them; the privacy policy
+   * does, and `data-safety.test.ts` holds it to saying so.
+   */
+  readonly exceptions: readonly string[];
+  readonly why: string;
+}
+
+/** Play's *"Do you provide a way for users to request that their data is deleted?"* */
+export interface DeletionRequestAnswer {
+  readonly answer: boolean;
+  /** How a rider asks, in words. Required when the answer is Yes. */
+  readonly how: string;
+  readonly why: string;
+}
+
+/** The section-level answers, filed once for the whole form. #562. */
+export interface DataSafetySectionAnswers {
+  readonly encryptedInTransit: EncryptedInTransitAnswer;
+  readonly deletionRequests: DeletionRequestAnswer;
+}
+
+/**
+ * The section-level answers filed on Play, beside the per-type rows above.
+ *
+ * ⚠️ **Both are the owner's decisions of 2026-09-30, on #562**, and the
+ * owner enters them in Play Console; this file is the record a reviewer reads.
+ *
+ * ⚠️ **"Encrypted in transit" is Yes with one exception, and Play's form has
+ * no place to state the exception.** #562's own body expected No, because the
+ * rider's own computer can be a plain `http:` address. The owner chose Yes and
+ * to disclose the exception, which the privacy policy does (**Pictures sent to
+ * your own computer**, **A ride sent to your own computer**). The owner's
+ * words named *"a picture"*; the same path carries a ride's numbers since
+ * #804, so the exception is the PATH, and both are named.
+ */
+export const DATA_SAFETY_SECTION_ANSWERS: DataSafetySectionAnswers = {
+  encryptedInTransit: {
+    answer: true,
+    exceptions: ['own-computer'],
+    why: 'the owner’s decision of 2026-09-30 (#562): Yes, with one stated exception. Map tile requests, an instance and a hosted model are reached over https:// (or wss://) only, and a side camera’s pictures travel over an encrypted WebRTC channel. The exception is a picture or a ride’s numbers the rider sends to a computer on their own home network, which can travel over plain http:// — the privacy policy says so where it describes that computer. Play’s form is Yes or No and cannot carry the exception',
+  },
+  deletionRequests: {
+    answer: true,
+    how: `by email to ${DELETION_REQUEST_EMAIL}, until in-app deletion on an instance (#906) ships`,
+    why: `the owner’s decision of 2026-09-30 (#562): Yes. What this project holds about a rider is their account on the project’s own instance — its device keys, display name and earlier names, account id and any linked Discord id — and a request to ${DELETION_REQUEST_EMAIL} is how it is deleted until #906 adds deletion in the app. Cloudflare’s record of map and instance requests (the IP address, the time, and the device or browser type) is Cloudflare’s, not this project’s: this project can see it for up to 7 days and cannot delete it on request, and how long Cloudflare itself keeps it is not something this project controls or can confirm. This answer rests on the deletion requests this project can act on, not on that record. A picture or a ride’s numbers sent to the rider’s own computer is held by that computer, and anything sent to a hosted service on the rider’s own key is held by that service, not by this project. Everything else is on the device, where Files → Erase this device deletes it`,
+  },
+};
+
+/**
+ * Every reason the section-level answers are not supported by the rows and
+ * the paths — empty when they are. #562.
+ *
+ * Reasons rather than a boolean, for {@link locationClaimFaults}' reason.
+ */
+export function sectionAnswerFaults(
+  declaration: readonly DataSafetyAnswer[],
+  paths: readonly DataPath[],
+  section: DataSafetySectionAnswers | undefined,
+): readonly string[] {
+  const faults: string[] = [];
+  const collected = declaration.filter((row) => row.collected).map((row) => row.dataType);
+  if (collected.length === 0) {
+    return faults;
+  }
+  if (section === undefined) {
+    faults.push(
+      `${String(collected.length)} rows are collected and the section-level answers are absent`,
+    );
+    return faults;
+  }
+  for (const dataType of collected) {
+    if (!paths.some((path) => path.dataTypes.includes(dataType))) {
+      faults.push(`${dataType} is collected and leaves by no recorded path`);
+    }
+  }
+  for (const path of paths) {
+    for (const dataType of path.dataTypes) {
+      if (!collected.includes(dataType)) {
+        faults.push(`path ${path.id} carries ${dataType}, which is not a collected row`);
+      }
+    }
+  }
+  const { encryptedInTransit, deletionRequests } = section;
+  const unencrypted = paths.filter((path) => !path.encryptedInTransit).map((path) => path.id);
+  if (encryptedInTransit.answer) {
+    for (const id of unencrypted) {
+      if (!encryptedInTransit.exceptions.includes(id)) {
+        faults.push(
+          `encrypted in transit is answered Yes, and path ${id} can be plain http without being a stated exception`,
+        );
+      }
+    }
+  }
+  for (const id of encryptedInTransit.exceptions) {
+    if (!unencrypted.includes(id)) {
+      faults.push(`exception ${id} names no unencrypted path`);
+    }
+  }
+  if (deletionRequests.answer && deletionRequests.how.trim() === '') {
+    faults.push('deletion requests are answered Yes with no way to make one');
+  }
+  return faults;
+}
+
+/**
  * The permissions Android counts as location access.
  *
  * ⚠️ `ACCESS_BACKGROUND_LOCATION` is in the list and is NOT bounded by

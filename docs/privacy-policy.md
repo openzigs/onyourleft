@@ -1,6 +1,6 @@
 # On Your Left — privacy policy
 
-**Last updated: 2026-09-29.** This is the policy for the On Your Left Android app
+**Last updated: 2026-09-30.** This is the policy for the On Your Left Android app
 (`dev.openzigs.onyourleft`) and for the web client it is built from. It is the policy linked from the
 app's About page and from the Google Play listing, and those two links point at this file
 ([#95](https://github.com/openzigs/onyourleft/issues/95)).
@@ -125,7 +125,11 @@ Three things worth being precise about:
 
 ## What leaves the device
 
-Only these, and only when you do them:
+Only these, and only when you do them. Everything below that the app sends travels **encrypted on
+the way** — `https://`, `wss://`, or an encrypted WebRTC link — **except** a picture or a ride's
+numbers sent to your own computer, which travels unencrypted when your computer's address starts
+with `http://` (see **Pictures sent to your own computer** and **A
+ride sent to your own computer** below).
 
 - **A file you export.** FIT, GPX, TCX, a workout, or a whole-account export. It goes wherever you
   put it and it is then out of the app's hands.
@@ -221,7 +225,8 @@ already holds stays there.
 **Deleting what an instance holds.** Disconnecting is all this version of the app can do: it cannot
 remove a device from your account on an instance, change or remove your name there, or erase your
 account there. Ask the instance's operator to do them. For the project's own instance, that is this project's maintainer: ask as described under
-**Contact** below. For anybody else's instance, ask whoever runs it.
+**Contact** below, by email to **matt@openzigs.ai**, for any of them or for your account there to be
+erased, until the app can do them itself. For anybody else's instance, ask whoever runs it.
 
 ## A second phone you pair as a side camera
 
@@ -440,6 +445,11 @@ operator to erase (see **Deleting what an instance holds**), and Cloudflare's re
 your IP address, the time, and your device or browser type — which we cannot delete on request and
 which ages out of what our Cloudflare account can see after 7 days.
 
+**Asking us to delete what we hold.** What this project holds about you is your account on the
+project's own instance, if you connected to it: its device keys, your name there and any earlier
+names, your account id and any Discord id you linked. Email **matt@openzigs.ai** to have it
+deleted, until the app can erase an account on an instance itself.
+
 ## Children
 
 The app is not directed at children. On its own it collects nothing from anybody, including them,
@@ -453,7 +463,8 @@ commit in the repository above. The date at the top is the date of the last subs
 
 ## Contact
 
-Open an issue at <https://github.com/openzigs/onyourleft/issues>. For anything that is a security or
+To ask us to delete what we hold about you, email **matt@openzigs.ai**. For anything else, open an
+issue at <https://github.com/openzigs/onyourleft/issues>. For anything that is a security or
 privacy **vulnerability**, use
 [private vulnerability reporting](https://github.com/openzigs/onyourleft/security/advisories/new)
 rather than a public issue — `SECURITY.md` says why.
