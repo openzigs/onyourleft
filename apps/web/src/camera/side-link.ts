@@ -1210,6 +1210,11 @@ export class PhoneSideLink implements SideCameraLinkPort {
       return;
     }
     if (!this.#welcomed) {
+      // Between its secret and the welcome the phone has no silence check of
+      // its own: these pings are dropped before `#heard()` and its heartbeat
+      // has not started. What ends a phone that is never welcomed is the
+      // constructor's CONNECT_LIMIT_MILLISECONDS, or the tablet closing
+      // `control` (its three-second `unanswered` does, for a lost secret).
       if (message.t === 'ping') {
         // One of the opening pings, sent before the tablet had the secret.
         return;

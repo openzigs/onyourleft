@@ -749,8 +749,12 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
     the tablet sends before proof carries anything. A picture on `frames` before proof still ends the
     pairing; it cannot be sent before the welcome now, and was taken only while filming before.
   - **Cost.** One more message before the phone is `connected`, a round trip of spike 0012's
-    72–158 ms. A tablet and a phone on builds from either side of this change cannot pair: the older
-    end refuses the other's message as one D-3 does not list, which is D-4's rule working as written.
+    72–158 ms. A tablet and a phone on builds from either side of this change cannot pair, and the
+    two directions fail differently. A newer tablet's `welcome` is refused by an older phone as a
+    message D-3 does not list, which is D-4's rule working as written. An older tablet never sends
+    one, so nothing is refused: a newer phone waits silently for a welcome until its 15-second
+    connect limit closes the channel, the tablet shows *"Link lost"* about three seconds after
+    proving it, and the pairing ends as `link-lost`.
   `camera/side-link.ts` §"Why the phone says nothing more until it is welcomed" is the record, and
   `side-link.test.ts` reproduces the lost secret with `testing.ts`
   §`losesAnsweringEndsFirstControlMessage`: on the code before this entry the tablet ended that

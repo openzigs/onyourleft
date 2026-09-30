@@ -375,20 +375,30 @@ describe('pairing, through both codes', () => {
     });
   });
 
-  it('ends the phone’s link on anything but a ping before it has sent its secret — #568', async () => {
-    const { port, network } = setUp();
-    const tablet = await offer(port);
-    network.drop();
-    const phone = await answer(port, tablet.offerCode);
-    await tablet.acceptSidePhoneCode(phone.answerCode);
-    await flushSideLink();
-    network.restore();
-    // Only a tablet that has proved the phone welcomes it, and it cannot
-    // have proved a phone that has not sent its secret.
-    network.peers[1]?.channels.find((c) => c.label === CONTROL_CHANNEL)?.deliver('{"t":"welcome"}');
-    await flushSideLink();
-    expect(phone.link.sideLinkCondition()).toBe('ended');
-  });
+  // Every message the tablet sends only once it has proved the phone, not
+  // only the welcome: the rule is "anything but a ping", and a future special
+  // case for `welcome` must not reopen the path for the others.
+  it.each([
+    ['a welcome', '{"t":"welcome"}'],
+    ['a command', '{"t":"start","n":1}'],
+    ['a framing reference', '{"t":"reference","reference":{}}'],
+  ])(
+    'ends the phone’s link on anything but a ping before it has sent its secret — %s (#568)',
+    async (_, message) => {
+      const { port, network } = setUp();
+      const tablet = await offer(port);
+      network.drop();
+      const phone = await answer(port, tablet.offerCode);
+      await tablet.acceptSidePhoneCode(phone.answerCode);
+      await flushSideLink();
+      network.restore();
+      // Only a tablet that has proved the phone welcomes, commands or shares,
+      // and it cannot have proved a phone that has not sent its secret.
+      network.peers[1]?.channels.find((c) => c.label === CONTROL_CHANNEL)?.deliver(message);
+      await flushSideLink();
+      expect(phone.link.sideLinkCondition()).toBe('ended');
+    },
+  );
 
   it('says nothing until the tablet has spoken, and answers its repeated opening ping', async () => {
     const context = setUp();

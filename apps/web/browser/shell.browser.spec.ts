@@ -828,8 +828,11 @@ for (const viewport of HEADER_VIEWPORTS) {
       ).toBeGreaterThanOrEqual(viewport.insets.top);
       // Moved below the inset, and still drawn over whatever is there: a
       // link pushed down under the header, or under #671's band, is as
-      // useless as one under the status bar. The no-inset case above is the
-      // hit test's own apparatus control.
+      // useless as one under the status bar. This discriminates only where
+      // the header sticks (the tablet at 1280×800): M9, `z-index: 4` on the
+      // link, turns it red there. At the other viewports nothing overlaps
+      // the link once it is below the band, so it cannot fail; the top-edge
+      // assertion above (M8) is the gate at all of them.
       expect(
         read.linkTopmost,
         'with the insets applied, the focused skip link is not the topmost thing at its own centre',
