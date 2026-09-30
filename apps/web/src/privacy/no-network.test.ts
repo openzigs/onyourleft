@@ -262,6 +262,13 @@ export const PERMITTED_NETWORK_CALLS: readonly {
   // What leaves is argued in the module's header and walked for a coordinate
   // by `privacy/boundaries.test.ts`; `docs/privacy-policy.md` names it.
   { module: join('instance', 'instance-transport.ts'), primitive: 'fetch', count: 1 },
+  // #782: a room's socket, opened THROUGH that same module (its
+  // §`instanceRoomSocket`) — a second primitive in the one instance module,
+  // never a second module. ADR 0036 D-3 (a) admits one module for instance
+  // traffic, and this list now pins exactly one `fetch` AND exactly one
+  // `WebSocket` to it: a WebSocket anywhere else in the client, a second one
+  // here, or this one gone, is a red run (the fixtures below, "#782").
+  { module: join('instance', 'instance-transport.ts'), primitive: 'WebSocket', count: 1 },
 ];
 
 /** One source file, by its path relative to `apps/web/src`. */
@@ -302,11 +309,16 @@ export function networkFindingsOutside(
         );
         continue;
       }
-      counted.set(file.path, (counted.get(file.path) ?? 0) + 1);
+      // ⚠️ Keyed by the module AND the primitive since #782, when one module
+      // was first permitted two: keyed by the module alone, its one `fetch`
+      // and its one `WebSocket` summed to two and each rule read "2 where the
+      // policy describes 1".
+      const key = `${file.path}\u0000${finding.primitive}`;
+      counted.set(key, (counted.get(key) ?? 0) + 1);
     }
   }
   for (const rule of permitted) {
-    const seen = counted.get(rule.module) ?? 0;
+    const seen = counted.get(`${rule.module}\u0000${rule.primitive}`) ?? 0;
     if (seen !== rule.count) {
       findings.push(
         `${rule.module} — ${String(seen)} ${rule.primitive} call(s) where the policy describes ${String(rule.count)}`,
@@ -340,7 +352,9 @@ describe('the narrowed gate itself — #387', () => {
   const INSTANCE = join('instance', 'instance-transport.ts');
   const instance: ScannedFile = {
     path: INSTANCE,
-    source: 'const sender: InstanceSend = send ?? (async (url, init) => fetch(url, init));',
+    source:
+      'const sender: InstanceSend = send ?? (async (url, init) => fetch(url, init));\n' +
+      'const platformSocket = (url, events) => { const socket = new WebSocket(url); return socket; };',
   };
   const quiet: ScannedFile = { path: join('views', 'CameraView.tsx'), source: 'const x = 1;' };
 
@@ -544,20 +558,65 @@ describe('the narrowed gate itself — #387', () => {
   });
 
   it('goes red for a different primitive inside the instance transport', () => {
-    const socket: ScannedFile = {
+    const source: ScannedFile = {
       path: INSTANCE,
-      source: `${instance.source}\nconst s = new WebSocket('wss://ride.example');`,
+      source: `${instance.source}\nconst s = new EventSource('https://ride.example/v1/events');`,
     };
     const findings = networkFindingsOutside(
-      [socket, hosted, transport, link, fence],
+      [source, hosted, transport, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
-    expect(findings[0]).toContain('WebSocket');
+    expect(findings[0]).toContain('EventSource');
+  });
+
+  // #782: the room's socket, pinned like the fetch beside it — ONE module for
+  // instance traffic (ADR 0036 D-3 (a)), and in it exactly one WebSocket.
+  it('goes red for a second WebSocket inside the instance transport — #782', () => {
+    const twice: ScannedFile = {
+      path: INSTANCE,
+      source: `${instance.source}\nconst s = new WebSocket('wss://ride.example/elsewhere');`,
+    };
+    const findings = networkFindingsOutside(
+      [twice, hosted, transport, link, fence],
+      PERMITTED_NETWORK_CALLS,
+    );
+    expect(findings).toEqual([expect.stringContaining('2 WebSocket')]);
+  });
+
+  it('goes red for a WebSocket anywhere else, the room code included — #782', () => {
+    for (const path of [
+      join('net', 'room-port.ts'),
+      join('net', 'room-session.ts'),
+      join('instance', 'instance-port.ts'),
+      join('game', 'GameView.tsx'),
+    ]) {
+      const elsewhere: ScannedFile = { path, source: 'const socket = new WebSocket(url);' };
+      const findings = networkFindingsOutside(
+        [instance, elsewhere, hosted, transport, link, fence],
+        PERMITTED_NETWORK_CALLS,
+      );
+      expect(findings, path).toEqual([expect.stringContaining(path)]);
+    }
+  });
+
+  it('goes red when the instance transport’s WebSocket is gone — #782', () => {
+    const emptied: ScannedFile = {
+      path: INSTANCE,
+      source: 'const sender: InstanceSend = send ?? (async (url, init) => fetch(url, init));',
+    };
+    const findings = networkFindingsOutside(
+      [emptied, hosted, transport, link, fence],
+      PERMITTED_NETWORK_CALLS,
+    );
+    expect(findings).toEqual([expect.stringContaining('0 WebSocket')]);
   });
 
   it('goes red when the instance transport’s fetch is gone', () => {
-    const emptied: ScannedFile = { path: INSTANCE, source: 'const sender = send;' };
+    const emptied: ScannedFile = {
+      path: INSTANCE,
+      source: 'const sender = send;\nconst socket = new WebSocket(url);',
+    };
     const findings = networkFindingsOutside(
       [emptied, hosted, transport, link, fence],
       PERMITTED_NETWORK_CALLS,
@@ -600,7 +659,8 @@ describe('the client', () => {
         'numbers when the rider asks for an analysis (#802), to a computer the ' +
         'rider configured and switched on, a start and a stop to a side-camera phone the rider ' +
         'paired by scanning, a question — never a picture — to a hosted service on the ' +
-        'rider’s own key, and a sign-in to an instance the rider chose (#777); that is now ' +
+        'rider’s own key, a sign-in to an instance the rider chose (#777), and a room’s ' +
+        'power reports to that instance (#782); that is now ' +
         'false, and the policy and the Data Safety form are what ' +
         'must change',
     ).toEqual([]);

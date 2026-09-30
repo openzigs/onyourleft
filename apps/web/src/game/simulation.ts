@@ -87,6 +87,8 @@ import {
   type Wind,
 } from '@onyourleft/domain';
 
+import { CORRECTION_SECONDS } from '../net/correction';
+
 /**
  * The simulation's fixed step, in seconds.
  *
@@ -476,6 +478,12 @@ export class GameSimulation {
   #previous:
     { readonly riderDistance: number; readonly botDistance: number | undefined } | undefined;
 
+  /**
+   * A correction toward a room's position still being applied — #782,
+   * {@link correctToward}. `undefined` on every ride with no room.
+   */
+  #correction: { readonly remaining: number; readonly perStep: number } | undefined;
+
   constructor(setup: SimulationSetup) {
     this.#setup = setup;
     this.#course = botCourseFor(setup);
@@ -499,6 +507,35 @@ export class GameSimulation {
       // still-air ride they did not choose.
       ...headwindField(this.#headwindAt(START_OF_RIDE.distance)),
     };
+  }
+
+  /**
+   * Move the rider toward where a room places them — #782, ADR 0028 D-2:
+   * `errorMetres` ahead (negative: behind), spread over
+   * `net/correction.ts` §`CORRECTION_SECONDS` of fixed steps, replacing any
+   * correction still under way.
+   *
+   * ⚠️ **Never backwards.** A step's share of a negative correction is taken
+   * from what that step rode and no more, so the odometer never decreases: a
+   * rider the room has behind them is slowed, down to held, and never moved
+   * back — which is also what keeps a ghost's and a pacer's gaps, the trainer's
+   * grade and the recording from ever seeing a rider reverse.
+   *
+   * Only the odometer moves: the speed, the power, the bot and every clock are
+   * the simulation's own, so a ride with no room is the ride it always was.
+   */
+  correctToward(errorMetres: number): void {
+    if (!Number.isFinite(errorMetres) || errorMetres === 0) {
+      this.#correction = undefined;
+      return;
+    }
+    const steps = Math.max(1, Math.round(CORRECTION_SECONDS / SIMULATION_STEP_SECONDS));
+    this.#correction = { remaining: errorMetres, perStep: errorMetres / steps };
+  }
+
+  /** Whether a correction toward a room is still being applied. @see correctToward */
+  get correcting(): boolean {
+    return this.#correction !== undefined;
   }
 
   /** The current state. Read by the renderer and the HUD; written by nobody else. */
@@ -619,6 +656,18 @@ export class GameSimulation {
         // would give a rider a tailwind all the way out and all the way back.
         this.#conditionsAt(ride.distance),
       );
+      // #782: a room's correction, a share per step — and never below where
+      // this step began. @see correctToward
+      const correction = this.#correction;
+      if (correction !== undefined) {
+        const size = Math.min(Math.abs(correction.perStep), Math.abs(correction.remaining));
+        let delta = Math.sign(correction.remaining) * size;
+        if (delta < 0) delta = Math.max(delta, previousRide.distance - ride.distance);
+        ride = { ...ride, distance: metres(ride.distance + delta) };
+        const left = correction.remaining - delta;
+        this.#correction =
+          Math.abs(left) < 1e-9 ? undefined : { remaining: left, perStep: correction.perStep };
+      }
       if (course !== undefined && bot !== undefined) {
         // ⚠️ **In the same loop as the rider, at the same step, and through
         // `advanceBot` rather than through `advance` directly.** Both halves are

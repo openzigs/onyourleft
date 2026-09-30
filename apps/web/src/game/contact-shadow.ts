@@ -95,6 +95,8 @@ export const CASTS_CONTACT_SHADOW: Readonly<Record<RiderMarker['kind'], boolean>
   rider: true,
   bot: true,
   ghost: false,
+  // #783: another real rider is really here, so they are grounded as the rider is.
+  remote: true,
 };
 
 /**

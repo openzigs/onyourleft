@@ -18,6 +18,7 @@ import {
 
 import {
   instanceHttp,
+  instanceRoomSocket,
   InstanceUnreachableError,
   MAXIMUM_INSTANCE_ANSWER_BYTES,
   type InstanceSend,
@@ -269,5 +270,38 @@ describe('no camera type can reach the instance module — ADR 0036 D-3 (d)', ()
     expect(importsOf("import { capturedFrame } from '../camera/frame';\n")).toEqual([
       '../camera/frame',
     ]);
+  });
+});
+
+describe('a room’s socket, through the same one module — #782', () => {
+  const quiet = { onOpen: () => undefined, onText: () => undefined, onClose: () => undefined };
+
+  it('opens the room’s own path on the address’s socket origin, wss for https and ws for loopback', () => {
+    const urls: string[] = [];
+    const open = (url: string) => {
+      urls.push(url);
+      return { send: () => undefined, close: () => undefined };
+    };
+    instanceRoomSocket(ORIGIN, 'room_1-a', quiet, open);
+    instanceRoomSocket('http://127.0.0.1:8787', 'room', quiet, open);
+    expect(urls).toEqual([
+      'wss://ride.example/v1/rooms/room_1-a/socket',
+      'ws://127.0.0.1:8787/v1/rooms/room/socket',
+    ]);
+  });
+
+  it('opens nothing for an origin the address rule refuses, or a room id that is a path', () => {
+    const open = vi.fn(() => ({ send: () => undefined, close: () => undefined }));
+    for (const origin of ['http://ride.example', 'https://ride.example/', 'ride.example']) {
+      expect(() => instanceRoomSocket(origin, 'room', quiet, open), origin).toThrow(
+        InstanceUnreachableError,
+      );
+    }
+    for (const room of ['', '../auth', 'a/b', 'x?y', 'x'.repeat(129)]) {
+      expect(() => instanceRoomSocket(ORIGIN, room, quiet, open), room).toThrow(
+        InstanceUnreachableError,
+      );
+    }
+    expect(open).not.toHaveBeenCalled();
   });
 });

@@ -63,6 +63,7 @@ import {
   degreesLongitude,
   geographicPosition,
   routeProfile,
+  seconds,
   watts,
   type RoutePoint,
 } from '@onyourleft/domain';
@@ -73,6 +74,9 @@ import { recordingSessionId } from '@onyourleft/store';
 import { ATHLETE_A, createStoreHarness, seedAthletes } from '@onyourleft/store/testing';
 
 import { createRideController } from '../ride/controller';
+import { CORRECTION_GRADE_STEP_PERCENT_PER_SECOND } from '../net/correction';
+import { roomPortOver } from '../net/room-port';
+import { frameRider, ManualClock, ScriptedRoom } from '../net/testing';
 import { simulatedOpenTrainer } from '../ride/simulated-trainer-testing';
 
 /**
@@ -759,6 +763,7 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
     return {
       controller,
       written,
+      bench,
       machine: () => bench.device(deviceId('kickr')).inspect().ftms,
       done: async () => {
         controller.dispose();
@@ -807,6 +812,50 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
     // client that holds control, so a grade here is the whole path working.
     expect(rig.written.some((write) => write[0] === 0x11)).toBe(true);
     expect(rig.machine()?.simulation?.grade).toBeGreaterThan(0);
+    await rig.done();
+  });
+
+  it('keeps recording on this device while the room is lost — the recorder does not depend on the room (#782)', async () => {
+    const rig = await onTheBench(false);
+    await rig.controller.start();
+    const clock = new ManualClock();
+    const room = new ScriptedRoom();
+    mounted = await mount(
+      <GameView
+        port={pedallingPort(hillRoute())}
+        trainer={gameTrainerPortOver(rig.controller)}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+        now={() => nowMs}
+        room={roomPortOver(() => room.link(), { timers: clock, now: () => nowMs })}
+        roomId="room-1"
+      />,
+    );
+    await settle();
+    await clickThrough(buttonStarting('Ride '));
+    await flush();
+    room.accept();
+    room.welcome(0);
+    const rideFor = async (frames: number): Promise<void> => {
+      // The bench keeps whole seconds; the game's frames are half of one.
+      for (let index = 0; index < frames; index += 1) {
+        await clock.advance(FRAME_MS);
+        if (index % 2 === 1) {
+          rig.bench.advance(seconds(1));
+          await rig.controller.tick(rig.bench.now);
+        }
+        await pump(1);
+      }
+    };
+    await rideFor(10);
+    const before = rig.controller.getSnapshot().elapsedSeconds;
+    // The room goes, and nothing answers for the rest of the test.
+    room.ticketAnswer = () => ({ kind: 'unreachable' });
+    room.closeFromServer(1006);
+    await rideFor(20);
+    const snapshot = rig.controller.getSnapshot();
+    expect(snapshot.phase).toBe('recording');
+    expect(snapshot.elapsedSeconds).toBeGreaterThanOrEqual(before + 9);
+    expect(mounted?.container.textContent).toContain('connection was lost');
     await rig.done();
   });
 
@@ -1182,3 +1231,81 @@ describe('the ride gives the screen back, and does not take it again — #566’
     expect(lock.page.live()).toBe(0);
   });
 });
+
+describe('a room’s correction reaches the trainer gently — #782', () => {
+  it('changes the gradient sent to the trainer by at most the stated step a second while the rider is corrected', async () => {
+    const writes: { readonly grade: number; readonly at: number }[] = [];
+    const commands: Commands = { written: [], releases: [], requests: [] };
+    const port = trainerPort(READY, commands);
+    const timed: GameTrainerPort = {
+      ...port,
+      readTrainer: () => {
+        const found = port.readTrainer();
+        if (found.control === undefined) return found;
+        const control = found.control;
+        return {
+          ...found,
+          control: {
+            ...control,
+            setSimulationParameters: async (parameters) => {
+              writes.push({ grade: parameters.grade, at: nowMs });
+              return control.setSimulationParameters(parameters);
+            },
+          },
+        };
+      },
+    };
+    const clock = new ManualClock();
+    const room = new ScriptedRoom();
+    const drawn: SceneFrame[] = [];
+    mounted = await mount(
+      <GameView
+        port={pedallingPort(hillRoute())}
+        trainer={timed}
+        renderer={() => Promise.resolve(capturingRenderer(drawn))}
+        now={() => nowMs}
+        room={roomPortOver(() => room.link(), { timers: clock, now: () => nowMs })}
+        roomId="room-1"
+      />,
+    );
+    await settle();
+    await clickThrough(buttonStarting('Ride '));
+    await flushRoom();
+    room.accept();
+    room.welcome(0);
+    // Ten seconds up the 4 % climb, the trainer on the road's own grade.
+    await pumpWith(clock, 20);
+    const before = writes.length;
+    expect(before).toBeGreaterThan(0);
+    expect(writes.at(-1)?.grade).toBeGreaterThan(3);
+    // The room puts the rider 1 100 m on — over the top and onto the 4 %
+    // descent — and says so on every frame for eight seconds.
+    const along = (): number => drawn.at(-1)?.markers[0]?.z ?? 0;
+    const target = along() + 1_100;
+    for (let tick = 1; tick <= 16; tick += 1) {
+      room.frame(tick, [frameRider(0, target + tick * 5, 10)]);
+      await pumpWith(clock, 1);
+    }
+    const during = writes.slice(before - 1);
+    expect(during.length).toBeGreaterThan(3);
+    for (let index = 1; index < during.length; index += 1) {
+      const step = Math.abs((during[index]?.grade ?? 0) - (during[index - 1]?.grade ?? 0));
+      const seconds = ((during[index]?.at ?? 0) - (during[index - 1]?.at ?? 0)) / 1000;
+      expect(step).toBeLessThanOrEqual(CORRECTION_GRADE_STEP_PERCENT_PER_SECOND * seconds + 1e-9);
+    }
+    // And it walks all the way to the descent the rider is now on, afterwards.
+    await pumpWith(clock, 40);
+    expect(writes.at(-1)?.grade).toBeLessThan(-3);
+  });
+});
+
+async function flushRoom(): Promise<void> {
+  for (let index = 0; index < 5; index += 1) await settle();
+}
+
+async function pumpWith(clock: ManualClock, count: number): Promise<void> {
+  for (let index = 0; index < count; index += 1) {
+    await clock.advance(FRAME_MS);
+    await pump(1);
+  }
+}

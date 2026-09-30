@@ -28,6 +28,7 @@
  * | 4 | the next workout block, ahead of it | event (#398) | safety | no |
  * | 5 | a climb or a descent ahead | event (#399) | attested | no |
  * | 5a | the side camera's link lost | event (#551) | ADR 0033 D-5 | **yes** — #551 |
+ * | 5a′ | the room's connection lost | event (#782) | ruling Q3/Q6 | **yes** — #782 |
  * | 5b | the ride may stop if the screen goes off | event (#647) | #524 | no |
  * | 5c | a *Set* the stall rescue held, answered | event (#655) | #445's press answer | no — the form's own `live` answer says it instead |
  * | 6 | power off an acknowledged target | ≥ 10 % for ≥ 5 s | attested | no |
@@ -50,6 +51,7 @@
  * | `interval-ahead` | `ride/RideAnnouncer.tsx` | `ride/lookahead.ts` |
  * | `climb-ahead` | `GameView` | `hud/climb-ahead.ts` |
  * | `side-camera-lost` | `GameView` and `ride/RideAnnouncer.tsx` | `ride/side-camera.ts` §`sideCameraLostEvent` |
+ * | `room-lost` | `GameView` | `net/room-port.ts` §`RoomConnection.status` going to `lost` (#782) |
  * | `screen-off-risk` | `GameView` and `ride/RideAnnouncer.tsx` | `RideSnapshot.keepAliveFailed` (#647) |
  * | `erg-held` | `ride/RideAnnouncer.tsx` | `TrainerSnapshot.ergHeld` (#655) |
  * | readings | `GameView` | `fields.ts` §`hudReadings` |
@@ -88,6 +90,18 @@
  * spending that clock. It is numbered 5a rather than renumbering 6 to 8,
  * because those numbers are quoted in #395 and in the pull requests since.
  *
+ * ⚠️ **Rank 5a′ is #782's**: the room's connection went — the tunnel's idle
+ * close, an edge restart, a phone changing network (ruling Q3/Q6: routine,
+ * not an edge case). The ride goes on recording on this device and the
+ * connection comes back by itself; what the rider must be TOLD is that the
+ * other riders on the road have stopped moving because the room is gone, not
+ * because they stopped — which is the silent freeze #782 forbids. Below the
+ * side camera, which has a 30-second clock on it; above every reading. Said
+ * once when it goes, and in {@link ALWAYS_SPOKEN} for the side camera's
+ * reason: the notice on the HUD is a status a rider who cannot see the frozen
+ * riders would otherwise never get. A rank of its own, numbered 5a′ for 5a's
+ * reason.
+ *
  * ⚠️ **Rank 5b is #647's**: the platform refused to keep the ride alive, so
  * it may stop if the screen goes off. BELOW the side camera, because that has
  * a 30-second clock on it and this has none — the ride is not lost until the
@@ -118,7 +132,7 @@
  * §`simulationControl`). ⚠️ **Not in {@link ALWAYS_SPOKEN}**: with
  * announcements off the form speaks it, and this region says nothing new.
  *
- * ## ⚠️ Four kinds are spoken with announcements OFF — {@link ALWAYS_SPOKEN}
+ * ## ⚠️ Five kinds are spoken with announcements OFF — {@link ALWAYS_SPOKEN}
  *
  * #395's table says the safety rows are *"on when announcements are on"*, and
  * this module departs from that cell on purpose. Those three sentences were
@@ -176,6 +190,7 @@ export type AnnouncementEvent =
   | { readonly kind: 'interval-ahead'; readonly text: string }
   | { readonly kind: 'climb-ahead'; readonly text: string }
   | { readonly kind: 'side-camera-lost'; readonly text: string }
+  | { readonly kind: 'room-lost'; readonly text: string }
   | { readonly kind: 'screen-off-risk'; readonly text: string }
   | { readonly kind: 'erg-held'; readonly text: string };
 
@@ -194,6 +209,7 @@ export const PRIORITY: readonly AnnouncementKind[] = [
   'interval-ahead',
   'climb-ahead',
   'side-camera-lost',
+  'room-lost',
   'screen-off-risk',
   'erg-held',
   'power-off-target',
@@ -210,10 +226,12 @@ export const ALWAYS_SPOKEN: readonly AnnouncementKind[] = [
   'workout-fault',
   'interval-now',
   'side-camera-lost',
+  // #782: the room gone is a status, for the side camera's reason. @see the module note, rank 5a′
+  'room-lost',
 ];
 
 /**
- * What the announcer does with announcements off: the four status kinds and
+ * What the announcer does with announcements off: the five status kinds and
  * nothing else — every reading and every optional event is `'never'`.
  */
 function statusOnly(preference: AnnouncementPreference): AnnouncementPreference {

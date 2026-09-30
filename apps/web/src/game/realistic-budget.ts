@@ -457,6 +457,38 @@ export const REALISTIC_GROUND_BLOBS =
 export const REALISTIC_STRUCTURE_MESHES = 35;
 
 /**
+ * How many OTHER real riders in a room wear the realistic body — #783: **2**,
+ * the nearest two. `three-renderer.ts` §`realisticRemoteSplit` is the rule.
+ *
+ * ⚠️ **Small on purpose, and this is not #681.** #681 (a pack of ~10 computer
+ * riders with a rider level of detail) is blocked on the tablet showing room
+ * for it; two remote bodies are 28 612 triangles (a body at 8 998 and a
+ * bicycle at 5 308, twice), which the worst frame below has room for with the
+ * stylised riders beside them, and nothing more is spent until the tablet has
+ * measured a room.
+ */
+export const REALISTIC_REMOTE_RIDERS = 2;
+
+/**
+ * How many more remote riders a realistic frame draws, with the STYLISED
+ * rider (1 208 triangles each) — #783: **24**. Beyond those, a realistic frame
+ * draws no more remote riders; the stylised world draws the room's whole K.
+ *
+ * | Part of the worst frame | Triangles |
+ * |---|--:|
+ * | The worst frame #617 left, every structure at its ceiling (§`REALISTIC_STRUCTURE_ITEMS`) | 234 650 |
+ * | The gantries and the ground blobs at their ceilings | 1 124 |
+ * | Two realistic remote riders, 2 × (8 998 + 5 308) | 28 612 |
+ * | Left under {@link REALISTIC_FRAME_TRIANGLES} | 35 614 |
+ * | ÷ the stylised rider's 1 208 | 29.5 |
+ *
+ * and 24 rather than 29, so the frame holds with about 6 600 triangles to
+ * spare. `realistic-budget.test.ts` §"#783" re-adds it from the committed
+ * files; the browser gate counts it with #616's counter.
+ */
+export const REALISTIC_REMOTE_STYLISED_RIDERS = 24;
+
+/**
  * The most triangles a realistic frame may submit: **300 000**, about 1.2 times
  * the all-on 252 024 #457 drew on the tablet. What it is held against is the
  * worst case the caps above allow — every near slot filled with the heaviest

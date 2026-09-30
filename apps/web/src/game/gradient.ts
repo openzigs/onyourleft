@@ -96,7 +96,13 @@
 
 import {
   createSimulationDriver,
+  distanceOnRoute,
+  gradeAt,
+  gradePercent,
+  MAX_SIMULATED_GRADE_PERCENT,
   metres,
+  SIMULATION_GRADE_DEADBAND_PERCENT,
+  SIMULATION_SETPOINT_INTERVAL_SECONDS,
   unixSeconds,
   type GradePercent,
   type RouteProfile,
@@ -107,6 +113,7 @@ import { createSimulationWriter, type SimulationWriter } from '@onyourleft/senso
 
 import type { GradientTrainer } from './trainer-port';
 import { TargetHeldBack } from '../ride/held-back';
+import { CORRECTION_GRADE_STEP_PERCENT_PER_SECOND } from '../net/correction';
 
 export interface GradientSessionOptions {
   /** The route being ridden. The driver reads its grade at the rider's distance. */
@@ -161,8 +168,15 @@ export interface GradientSession {
    * @param distance the rider's own odometer in metres, **not** wrapped onto
    * the route. `distanceOnRoute` does the wrap inside the driver, so a second
    * lap re-rides the same hills.
+   * @param bounded that the rider is being moved toward a room's position
+   * (#782, `net/correction.ts`), so the gradient written may change by at most
+   * `CORRECTION_GRADE_STEP_PERCENT_PER_SECOND` a second. ⚠️ A write that falls
+   * short of the road is OWED: the next samples keep walking toward the road
+   * at the same rate after the correction ends, and only when the trainer is
+   * on the road's own grade does the driver take over again — so a bounded
+   * write never leaves the trainer holding a grade the road does not have.
    */
-  sample(at: Seconds, distance: number): void;
+  sample(at: Seconds, distance: number, bounded?: boolean): void;
   /**
    * End the ride and let the trainer go — `control.letGo()`, an FTMS Stop
    * (#372). @see the module note, "Two", for what that does not do.
@@ -182,6 +196,10 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
   const driver: SimulationDriver = createSimulationDriver({ profile });
   let fault: string | undefined;
   let stopped = false;
+  /** The grade last handed to the writer, and the ride second it was. */
+  let sent: { readonly grade: number; readonly at: number } | undefined;
+  /** A bounded write left the trainer short of the road. @see GradientSession.sample */
+  let owed = false;
 
   const writer: SimulationWriter = createSimulationWriter(control, {
     onError: (error: unknown) => {
@@ -193,15 +211,22 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
       // failure, with this code thinking it had already corrected it. That is
       // `SimulationDriver.restart`'s stated purpose, word for word.
       driver.restart();
+      // #782: and the bounded path's own memory of what was written, for the
+      // same reason — the next write is a fresh one.
+      sent = undefined;
+      owed = false;
       changed();
     },
   });
 
   const snapshot = (): GradientSessionState => ({
-    // ⚠️ Read off the driver rather than tracked here. A second copy would
-    // disagree with the deadband the moment `restart` cleared one and not the
-    // other, and `SimulationDriver.last` exists so that a UI does not need one.
-    asked: driver.last()?.grade,
+    // ⚠️ What was last handed to the writer — the driver's setpoint, or since
+    // #782 a bounded one. Until #782 this read `driver.last()`, which is right
+    // only while the driver is the one writer: a bounded write restarts it, and
+    // it would have reported nothing asked while the trainer was being walked
+    // up a hill. Both writers set it, and a refused write clears it with the
+    // driver's own `restart`, so the two cannot disagree about a fault.
+    asked: sent === undefined ? undefined : gradePercent(sent.grade),
     writes: writer.attempted(),
     coalesced: writer.coalesced(),
     fault,
@@ -214,8 +239,28 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
   return {
     state: snapshot,
 
-    sample(at: Seconds, distance: number): void {
+    sample(at: Seconds, distance: number, bounded = false): void {
       if (stopped) {
+        return;
+      }
+      if ((bounded || owed) && sent !== undefined) {
+        // #782: toward the road at a bounded rate, on the driver's own clock.
+        if (!(at - sent.at >= SIMULATION_SETPOINT_INTERVAL_SECONDS)) return;
+        const raw = gradeAt(profile, distanceOnRoute(profile, metres(distance)));
+        const road = Number.isFinite(raw)
+          ? Math.max(-MAX_SIMULATED_GRADE_PERCENT, Math.min(MAX_SIMULATED_GRADE_PERCENT, raw))
+          : 0;
+        const step = CORRECTION_GRADE_STEP_PERCENT_PER_SECOND * (at - sent.at);
+        const grade = Math.max(sent.grade - step, Math.min(sent.grade + step, road));
+        owed = grade !== road;
+        // The driver is told nothing it would believe it wrote, so when this
+        // hands back it writes the road afresh rather than trusting a deadband.
+        driver.restart();
+        if (Math.abs(grade - sent.grade) < SIMULATION_GRADE_DEADBAND_PERCENT && !owed) return;
+        sent = { grade, at };
+        fault = undefined;
+        writer.offer({ grade: gradePercent(grade) });
+        changed();
         return;
       }
       const setpoint = driver.sample({
@@ -229,6 +274,7 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
         return;
       }
       fault = undefined;
+      sent = { grade: setpoint.grade, at };
       writer.offer({ grade: setpoint.grade });
       changed();
     },

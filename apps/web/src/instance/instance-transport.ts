@@ -35,6 +35,28 @@
  * - **A size limit on the answer** ({@link MAXIMUM_INSTANCE_ANSWER_BYTES}),
  *   read in chunks and abandoned past it, so an instance cannot make the app
  *   hold an unbounded body.
+ *
+ * ## A room's socket — #782
+ *
+ * {@link instanceRoomSocket} is the ONE place the client opens a WebSocket,
+ * and it is here rather than in a module of its own because ADR 0036 D-3 (a)
+ * admits exactly one module for instance traffic: `no-network.test.ts`
+ * §`PERMITTED_NETWORK_CALLS` pins one `fetch` AND one `WebSocket` to this
+ * file, and either primitive anywhere else in the client is a red build.
+ *
+ * - **Only a room's socket path** is opened — `/v1/rooms/{roomId}/socket` on
+ *   the address's own `socketOrigin` (`wss:` for `https:`, `ws:` for a
+ *   loopback `http:`, `address.ts`), with a room id the instance's own router
+ *   would accept. A caller cannot point it anywhere else.
+ * - **Text only.** A binary message is not the wire format
+ *   (`@onyourleft/protocol`), and the socket is closed on one.
+ * - **No credential rides on the socket**: the hello carries a single-use,
+ *   30-second ticket minted over {@link InstanceHttp.call} (#772), never the
+ *   session token, and a browser WebSocket sends no `Authorization` header.
+ * - **What leaves** is `net/room-session.ts`'s hello and reports — a ticket, a
+ *   power in watts, a cadence and the client's own clock; never a position
+ *   (`@onyourleft/protocol` has no field for one, and
+ *   `net/room-session.test.ts` walks every sent message for a coordinate).
  */
 
 import { instanceAddress } from './address';
@@ -152,4 +174,88 @@ export function instanceHttp(origin: string, send?: InstanceSend): InstanceHttp 
       return { status: response.status, body: parsed(await boundedText(response)) };
     },
   };
+}
+
+/**
+ * What a room's socket is to the rest of the client — deliberately not the
+ * platform's own type, so no other module can name it (#782).
+ */
+export interface InstanceSocket {
+  /** Send one text message. Dropped when the socket is not open. */
+  send(text: string): void;
+  /** Close it. Idempotent. */
+  close(code?: number, reason?: string): void;
+}
+
+/** What a room's socket tells its owner. */
+export interface InstanceSocketEvents {
+  onOpen(): void;
+  onText(text: string): void;
+  /** Always called once, whether the socket closed cleanly, failed to open or errored. */
+  onClose(code: number, reason: string): void;
+}
+
+/** How a socket is opened. The platform's own in production. */
+export type OpenInstanceSocket = (url: string, events: InstanceSocketEvents) => InstanceSocket;
+
+/** A room id the instance's router accepts (`room/node/router.ts` §`ROOM_SOCKET_PATH`). */
+const ROOM_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+/** RFC 6455 §7.4.1: the endpoint received a type of data it cannot accept. */
+const UNSUPPORTED_DATA = 1003;
+
+/** `readyState` of an open socket (WHATWG WebSockets §"The WebSocket interface"). */
+const OPEN = 1;
+
+const platformSocket: OpenInstanceSocket = (url, events) => {
+  const socket = new WebSocket(url);
+  let closed = false;
+  socket.addEventListener('open', () => {
+    events.onOpen();
+  });
+  socket.addEventListener('message', (event: MessageEvent<unknown>) => {
+    if (typeof event.data === 'string') {
+      events.onText(event.data);
+    } else {
+      socket.close(UNSUPPORTED_DATA, 'text-only');
+    }
+  });
+  socket.addEventListener('close', (event: CloseEvent) => {
+    if (closed) return;
+    closed = true;
+    events.onClose(event.code, event.reason);
+  });
+  return {
+    send: (text) => {
+      if (socket.readyState === OPEN) socket.send(text);
+    },
+    close: (code, reason) => {
+      try {
+        socket.close(code ?? 1000, reason);
+      } catch {
+        // An invalid code or an already-closing socket: nothing else to do.
+      }
+    },
+  };
+};
+
+/**
+ * Open one room's socket on the instance at `origin`. Throws
+ * {@link InstanceUnreachableError} at once, having opened nothing, for an
+ * origin `address.ts` refuses or a room id the instance could not route.
+ */
+export function instanceRoomSocket(
+  origin: string,
+  roomId: string,
+  events: InstanceSocketEvents,
+  open?: OpenInstanceSocket,
+): InstanceSocket {
+  const decision = instanceAddress(origin);
+  if (decision.kind !== 'accepted' || decision.origin !== origin) {
+    throw new InstanceUnreachableError('refused-address');
+  }
+  if (!ROOM_ID.test(roomId)) {
+    throw new InstanceUnreachableError('refused-path');
+  }
+  return (open ?? platformSocket)(`${decision.socketOrigin}/v1/rooms/${roomId}/socket`, events);
 }
