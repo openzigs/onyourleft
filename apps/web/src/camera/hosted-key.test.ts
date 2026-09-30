@@ -219,7 +219,8 @@ describe('what the filed statements say', () => {
   it('the privacy policy names the hosted exception, as numbers and never a picture', () => {
     expect(policy).toContain('## Questions sent to a service you chose, on your own key');
     expect(policy).toContain('never a picture');
-    expect(policy).toContain('exactly **three** network calls');
+    // Four since #777 (an instance sign-in); the hosted question is still one of them.
+    expect(policy).toContain('exactly **four** network calls');
   });
 
   it('Play’s Photos and videos row stays shared: false and says why', () => {

@@ -266,6 +266,13 @@ export interface TransferPort {
    */
   readonly hostedModel: DraftStore;
   /**
+   * This device's sign-in to an instance and its address in `localStorage`
+   * (#777), so an erase can forget them — `instance/instance-port.ts`
+   * §`instanceEraser`. Required for `theme`'s reason: an erase mints a new
+   * key, and a token left behind would sign in as the identity just erased.
+   */
+  readonly instance: DraftStore;
+  /**
    * The row to recreate after an erase.
    *
    * Erasing removes the athlete row every write path checks, and

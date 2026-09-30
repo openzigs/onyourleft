@@ -31,6 +31,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     clientAddressHeader: null,
     trustedProxies: [],
     history: { kind: 'off', code: 'not-set', reason: 'A test instance has no embedding model.' },
+    name: null,
     ...overrides,
   };
 }

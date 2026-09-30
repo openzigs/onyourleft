@@ -69,6 +69,7 @@ export async function emptyTransferPort(options: { readonly withRide?: boolean }
     drafts: { forget: () => undefined },
     theme: { forget: () => undefined },
     hostedModel: { forget: () => undefined },
+    instance: { forget: () => undefined },
     athleteRow: { id: ATHLETE_A, displayName: 'You', createdAt: unixSeconds(1_760_000_000) },
   };
   return { port, harness };
