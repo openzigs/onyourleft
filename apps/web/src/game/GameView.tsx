@@ -414,6 +414,14 @@ const PACER_PROBLEM_ID = 'oyl-game-pacer-problem';
 const WIND_PROBLEM_ID = 'oyl-game-wind-problem';
 
 /**
+ * The id a room's road rides under — #784: never one of the rider's own route
+ * ids (those are the store's), so a ride on it is known to be the room's.
+ */
+function roomRouteId(roomId: string): string {
+  return `room:${roomId}`;
+}
+
+/**
  * How long a standing trainer notice stays open before it gets out of the
  * way, in seconds of RIDE — #437.
  *
@@ -1115,9 +1123,15 @@ export function GameView(props: GameViewProps): JSX.Element {
       raceWattsRef.current = { wattSeconds: 0, seconds: 0 };
       setRaceOver(undefined);
       setStarting(undefined);
-      // #784: the room entered on the picker's panel, when there is one —
-      // else the shell's, which only a test and the browser gate name.
-      const roomId = enteredRef.current?.roomId ?? props.roomId;
+      // #784: the room entered on the picker's panel — but only for a ride
+      // started from the panel, on the room's own road: a rider in a room who
+      // presses *Ride* on one of their own routes rides it alone. Else the
+      // shell's room, which only a test and the browser gate name.
+      const entered = enteredRef.current;
+      const roomId =
+        entered !== undefined && route.id === roomRouteId(entered.roomId)
+          ? entered.roomId
+          : props.roomId;
       roomIdRef.current = roomId;
       if (props.room !== undefined && roomId !== undefined && port !== undefined) {
         const sensorsNow = port;
@@ -1801,7 +1815,7 @@ export function GameView(props: GameViewProps): JSX.Element {
           onRide={(room) => {
             void start(
               {
-                id: `room-${room.roomId}`,
+                id: roomRouteId(room.roomId),
                 name: 'The room’s route',
                 profile: room.profile,
                 attempts: 0,

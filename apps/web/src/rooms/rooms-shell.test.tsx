@@ -236,6 +236,21 @@ describe('a group ride joined by its code — #784', () => {
     expect(reading('To go')).toMatch(/^2\.5/);
   });
 
+  it('rides one of the rider’s own routes ALONE, even while a room is entered', async () => {
+    const instance = new ScriptedInstance();
+    const { gpx, sha256 } = await roomRoute(2_500);
+    instance.offer('room-joined', 'group', gpx, sha256);
+    const sockets = handPlayedSockets();
+    await shell(instance, sockets);
+    await joinByCode('ABCDE-FGHJK-MNPQR');
+    await press(`Ride ${OWN_ROUTE.name}`);
+    await settle();
+    // No ticket and no socket: the rider's own route is not the room's road.
+    expect(instance.seen.some((each) => each.path.endsWith('/ticket'))).toBe(false);
+    expect(sockets.urls).toEqual([]);
+    expect(reading('To go')).toMatch(/^3\.0/);
+  });
+
   it('announces a rider joining and leaving, with announcements on — and nothing for the room as it was found', async () => {
     localStorage.setItem(
       ANNOUNCEMENTS_STORAGE_KEY,
