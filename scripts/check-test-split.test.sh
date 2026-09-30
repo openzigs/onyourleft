@@ -195,6 +195,7 @@ assert_says 'and names the script' '`test:uninstrumented` is'
 new_fixture "${COVERAGE}" 'vitest run $SLOW'
 run_check
 assert_red 'a variable in test:uninstrumented fails'
+assert_says 'and says it is the refusal, not an empty selection' '"$"'
 
 printf '\n%d passed, %d failed\n' "${pass}" "${fail}"
 [ "${fail}" -eq 0 ] || exit 1

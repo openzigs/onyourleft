@@ -1801,7 +1801,7 @@ pnpm run test:uninstrumented
 # runs no test: under a second.
 pnpm run check:test-split
 
-# Its own suite. Fixture-driven; 32 cases on 2026-09-29 (25 before #864) — the count is what the
+# Its own suite. Fixture-driven; 33 cases on 2026-09-29 (25 before #864, 32 before its review) — the count is what the
 # run prints. Needs Node, so not in `check:repo`.
 bash scripts/check-test-split.test.sh
 
@@ -2575,13 +2575,16 @@ quotes run ids rather than estimates.
 | **After**, #833 | [36582905894](https://github.com/openzigs/onyourleft/actions/runs/36582905894) attempt 2 | EPYC 7763 | 1223 s | 158 s | 384 s | 605 s |
 | **After**, #833 | [36582905894](https://github.com/openzigs/onyourleft/actions/runs/36582905894) attempt 1 | EPYC 9V74 | 1216 s | 154 s | 410 s | 581 s |
 | **After**, #833 | [36588252465](https://github.com/openzigs/onyourleft/actions/runs/36588252465) | EPYC 9V74 | 994 s | | | |
+| **After**, #833, `main` at #853 | [36615487288](https://github.com/openzigs/onyourleft/actions/runs/36615487288) | EPYC 7763 | 1276 s | 169 s | 417 s | 609 s |
 
 ⚠️ **This paragraph used to say "the delta is +4 s" on the 7763, and that was one run inside a 25 s
 spread** ([#841](https://github.com/openzigs/onyourleft/issues/841)): **no measurable change, n = 1
 on the 7763**, where #771 asked for two. The 1223 s run against a mean of 1219 s over three `main`
 runs is inside the spread of `main` alone. The image check itself took about **10 s**
 inside the concurrent step, which grew by 3 s. The instance's Vitest project is 51 cases in well under
-a second. **On the 9V74 it is +16 s** on the second sample (994 s against 985 s and 970 s on
+a second. ⚠️ **A reviewer who remembers "n = 1 on the 7763" is reading the old file**: the second
+7763 sample is the 36615487288 row above, found by #864, and what it does and does not say is the
+paragraph after this one. **On the 9V74 it is +16 s** on the second sample (994 s against 985 s and 970 s on
 `main`). ⚠️ The first 9V74 sample took 1216 s, and all of the extra time was in Vitest (+110 s) and
 the browser gate (+86 s), neither of which this change touches. The second sample did not repeat it,
 so it is recorded as runner variance, not as a cost. ⚠️ **The job was already past 15 minutes on the 7763 before this change** (1206–1231 s),
@@ -2607,7 +2610,10 @@ it every run's.
 
 **The runs since, read on 2026-09-29 for #841, and why they settle nothing about #771.** No second
 `main` run after #833 has landed on a 7763 yet, so the 7763 comparison is still n = 1 — it is owed
-by the next one, and its id goes in the table above. What did land says the runner, not the change,
+by the next one, and its id goes in the table above. ⚠️ **That sample has since landed, and a
+reviewer who remembers the 7763 comparison as owed is reading the old file**: it is
+[36615487288](https://github.com/openzigs/onyourleft/actions/runs/36615487288), in the table above,
+and §"#771's second 7763 sample" above says why it is n = 2 and still not a cost. What did land says the runner, not the change,
 is the variable:
 
 | | Run | CPU | Job | `Checks, concurrently` | Vitest with coverage | Browser gate |
@@ -2666,7 +2672,11 @@ browser gate (584–605 s). The candidates, in the order they cost least in what
    ⚠️ **#771's second `main` sample on the 7763 is still owed**: the one `main` run after #850's
    tree ([36615069379](https://github.com/openzigs/onyourleft/actions/runs/36615069379), 1150 s)
    printed no CPU. The CPU line in these logs is not the runner's: it is printed by one Vitest
-   test (the racing-line timing), and only on some runs.
+   test (the racing-line timing), and only on some runs. ⚠️ **It is no longer owed, and a reviewer
+   who remembers it as owed is reading the old file**: #864 found it in an earlier `main` run,
+   [36615487288](https://github.com/openzigs/onyourleft/actions/runs/36615487288) (EPYC 7763,
+   1276 s) — §"#771's second 7763 sample" above — and since #866 the `Record the runner's CPU`
+   step prints every run's CPU.
 2. **A second, non-required job for the heaviest gates — DONE by
    [#866](https://github.com/openzigs/onyourleft/issues/866), on the owner's ruling of 2026-09-29.**
    See §"The nightly job" below: what moved, what did not, and the trade.
@@ -3015,7 +3025,7 @@ would otherwise be documented and unenforced, which is the gap this project keep
 | `boundaries/dependencies` | an import from `packages/*` into `apps/*`, in either the relative (`../../../apps/web/src/...`) or the workspace (`@onyourleft/web`) spelling. Dependencies point one way |
 | `@typescript-eslint/no-restricted-imports` in `packages/domain`, `packages/physics`, `packages/sensors/src`, `packages/sensors/protocol` and `packages/sensors/web-bluetooth` | naming **any** Node builtin — the list is derived from `builtinModules`, not typed out, so `events`, `util` and `stream/promises` fail exactly as `node:fs` does — or `react`, `react-dom`, `vite` or `dexie`, or a BLE library |
 | `no-restricted-globals` in `packages/domain`, `packages/physics`, `packages/sensors/src` and `packages/sensors/protocol` | naming a DOM global (`window`, `document`, `navigator`, `location`, `history`, `localStorage`, `sessionStorage`, `indexedDB`, `caches`), a Node global (`process`, `Buffer`, `__dirname`, `__filename`, `global`, `require`) or a network global (`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Request`, `Response`, `Headers`). This one **is** a named list; the closure is the typechecker below |
-| `no-restricted-globals` in `apps/instance/src`, **except the Node adapter** | naming a Node-only global — `Buffer`, `process`, `require`, `module`, `exports`, `__dirname`, `__filename`, `global`, `setImmediate`, `clearImmediate` — anywhere the core mounts unchanged under `workerd` ([ADR 0037](docs/adr/0037-instance-runtime-hosting-and-transport.md) D-2, [#852](https://github.com/openzigs/onyourleft/issues/852)). ⚠️ The exemption is **by file name, not directory**: `main.ts`, `node-listener.ts`, `store/node-sqlite.ts`, `blob/disk-blob-store.ts`, and tests and `*-testing.ts`/`testing/` support — so a new core file is covered with no edit and a new adapter file is a line in `eslint.config.js`. `fetch`, `Request`, `Response`, `Headers` and `crypto` are **not** listed: `workerd` has them and the handler is written against them. ⚠️ **This is the only gate for it on a pull request**: the wide `tsconfig.json` carries `@types/node`, so `process` typechecks, and the `workerd` suite is local-only. Probed: `Buffer`, `process` and `__dirname` in `pagination.ts` passed `eslint` before this block and are three errors after; `process` in `node-listener.ts` is still none. ⚠️ **Since [#864](https://github.com/openzigs/onyourleft/issues/864) it is three rules, not one**: `no-restricted-properties` refuses the same names as properties of `globalThis`, `window`, `self` and `global` (`globalThis.process` is a member expression, which the globals rule never reads — probed: 0 errors before), and `@typescript-eslint/no-restricted-imports` refuses a Node builtin in either spelling, derived from `builtinModules` like the row above — a `node:` import in the core used to be caught by nothing but `workerd`. The room core's own block carries the property entries too, because flat config keeps the last setting of a rule. Probed on the four directories (the core, `store/`, `room/core/`, `room/durable-object/`) with `node:fs`, `path`, `globalThis.process`, `globalThis.Buffer` and `self.require`: none of the three member forms and neither import was an error in the core or `store/` before, and all five are after |
+| `no-restricted-globals` in `apps/instance/src`, **except the Node adapter** | naming a Node-only global — `Buffer`, `process`, `require`, `module`, `exports`, `__dirname`, `__filename`, `global`, `setImmediate`, `clearImmediate` — anywhere the core mounts unchanged under `workerd` ([ADR 0037](docs/adr/0037-instance-runtime-hosting-and-transport.md) D-2, [#852](https://github.com/openzigs/onyourleft/issues/852)). ⚠️ The exemption is **by file name, not directory**: `main.ts`, `node-listener.ts`, `store/node-sqlite.ts`, `blob/disk-blob-store.ts`, and tests and `*-testing.ts`/`testing/` support — so a new core file is covered with no edit and a new adapter file is a line in `eslint.config.js`. `fetch`, `Request`, `Response`, `Headers` and `crypto` are **not** listed: `workerd` has them and the handler is written against them. ⚠️ **This is the only gate for it on a pull request**: the wide `tsconfig.json` carries `@types/node`, so `process` typechecks, and the `workerd` suite is local-only. Probed: `Buffer`, `process` and `__dirname` in `pagination.ts` passed `eslint` before this block and are three errors after; `process` in `node-listener.ts` is still none. ⚠️ **Since [#864](https://github.com/openzigs/onyourleft/issues/864) it is three rules, not one**: `no-restricted-properties` refuses the same names as properties of `globalThis`, `window`, `self` and `global` (`globalThis.process` is a member expression, which the globals rule never reads — probed: 0 errors before), and `@typescript-eslint/no-restricted-imports` refuses a Node builtin in either spelling, derived from `builtinModules` like the row above — a `node:` import in the core used to be caught by nothing but `workerd`. The room core's own block carries the property entries too, because flat config keeps the last setting of a rule. Probed on the four directories (the core, `store/`, `room/core/`, `room/durable-object/`) with `node:fs`, `path`, `globalThis.process`, `globalThis.Buffer` and `self.require`: none of the three member forms and neither import was an error in the core or `store/` before, and all five are after. ⚠️ **It matches the object by NAME**, so an alias (`const g = globalThis; g.process`) or a computed key (`globalThis['pro' + 'cess']`) is not caught — the lint rule is the fast guard, and `test:workerd` is still the only thing that runs the core without Node's globals |
 | `no-restricted-globals` in `packages/sensors/web-bluetooth` | naming any of the same list **except `navigator`** — the adapter is the transport boundary and `navigator.bluetooth` is the one platform API it exists to reach. The exception is derived by subtracting one name from the list above rather than restating it, so the two cannot drift |
 
 `packages/domain/tsconfig.json` narrows `lib` to `ES2024` and sets `types: []`. That is the closure
