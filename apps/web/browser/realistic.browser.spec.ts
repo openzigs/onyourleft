@@ -30,6 +30,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 import { REALISTIC_WOODED_DRAW_CALLS } from '../src/game/realistic-budget';
 
+import { NIGHTLY } from './nightly';
 import { LAYERS } from './realistic/config';
 import type { RealisticSample } from './realistic-harness';
 
@@ -75,7 +76,7 @@ async function ride(
   return { result, page: published };
 }
 
-test.describe('the realistic page’s instruments — #616', () => {
+test.describe('the realistic page’s instruments — #616', { tag: NIGHTLY }, () => {
   test('counts triangles as three does, and switching the vegetation off removes them', async ({
     page,
   }) => {

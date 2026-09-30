@@ -36,6 +36,7 @@ import { flushSync } from 'react-dom';
 import { CameraController } from '../src/camera/session';
 import { scriptedLink } from '../src/camera/testing';
 import { AppShell } from '../src/shell/AppShell';
+import { viewGroupsLoaded } from './views-loaded';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
 
 // The shipping stylesheet, which is the whole point — see this file's header.
@@ -249,6 +250,8 @@ async function run(): Promise<void> {
   });
   const link = scriptedLink();
 
+  // #674: the view groups first, so every view renders on the render that asks.
+  await viewGroupsLoaded();
   flushSync(() => {
     createRoot(host).render(
       <StrictMode>
