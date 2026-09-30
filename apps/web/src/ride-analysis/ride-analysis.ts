@@ -55,23 +55,13 @@
  */
 
 import type { UnixSeconds } from '@onyourleft/domain';
-import type {
-  ActivityId,
-  ActivityRecord,
-  AthleteId,
-  AthleteRecord,
-  LapRecord,
-  RideWriteUpRecord,
-  RouteId,
-  RouteRecord,
-  SideCameraReportRecord,
-  StreamSet,
-} from '@onyourleft/store';
+import type { ActivityId, AthleteId, RideWriteUpRecord } from '@onyourleft/store';
 
-import type { SideSessionSummary } from '../camera/side-session-summary';
 import type { ScreenedWriteUp } from '../camera/write-up-screen';
+import type { HistoryPassage, HistorySource } from './history';
 import { maskForHosted, type MaskingGuard } from './hosted-mask';
-import { rideAnalysisInput, type RideAnalysisInput } from './input';
+import type { RideAnalysisInput } from './input';
+import { readRideInput, type RideInputStore } from './read-input';
 import type {
   AskOutcome,
   AskProgress,
@@ -107,16 +97,7 @@ export type ScreenedRideWriteUp = Omit<RideWriteUpRecord, 'text'> & {
 };
 
 /** What the ask reads and writes. `ActivityStore` satisfies it as it stands. */
-export interface RideAnalysisStore {
-  getActivity(owner: AthleteId, id: ActivityId): Promise<ActivityRecord | undefined>;
-  getStreamSet(owner: AthleteId, id: ActivityId): Promise<StreamSet | undefined>;
-  getAthlete(id: AthleteId): Promise<AthleteRecord | undefined>;
-  listLaps(owner: AthleteId, id: ActivityId): Promise<LapRecord[]>;
-  getRoute(owner: AthleteId, id: RouteId): Promise<RouteRecord | undefined>;
-  getSideCameraReport(
-    owner: AthleteId,
-    id: ActivityId,
-  ): Promise<SideCameraReportRecord | undefined>;
+export interface RideAnalysisStore extends RideInputStore {
   /** Replaces the ride's write-up. Only ever handed screened text. */
   putRideWriteUp(record: ScreenedRideWriteUp): Promise<void>;
 }
@@ -156,6 +137,15 @@ export interface RideAnalysisOptions {
    * the request will be masked with. Absent, there is no preview to show.
    */
   readonly hostedGuard?: () => Promise<MaskingGuard>;
+  /**
+   * The rider's instance, for their history (#835, ADR 0040 D-8) — looked up
+   * again at every ask, `undefined` when no instance is connected. Absent or
+   * `undefined`, a run has no history step and says nothing about one: a rider
+   * with no instance loses nothing (ADR 0036 D-3(a)). ⚠️ `main.tsx` hands none
+   * until #777's transport exists — see `history.ts` §"What this module does
+   * NOT do".
+   */
+  readonly history?: () => HistorySource | undefined;
 }
 
 /** Why an ask ended with nothing saved, beyond a run's own failures. */
@@ -205,6 +195,20 @@ export const ASK_FAILURE_TEXT: Readonly<Record<Exclude<AskFailure, 'cancelled'>,
   'not-saved':
     'The write-up could not be saved on this device, so nothing was kept. Any earlier write-up of this ride is unchanged.',
 };
+
+/**
+ * What a written write-up says about the rider's history, when it has
+ * something to say (#835, ADR 0040 D-8): the instance was asked and could not
+ * be used, or the model's note on it could not be. Nothing is said when no
+ * instance is connected, or the run was on a hosted model, which is never
+ * sent history (D-9) — neither is a failure.
+ */
+export const HISTORY_NOTICE_TEXT = {
+  unreachable:
+    'Your instance could not be reached, so this write-up does not look back at your earlier rides.',
+  failed:
+    'The model could not compare this ride with your earlier rides, so this write-up leaves that out.',
+} as const;
 
 /** Why a preview shows nothing (#839). Nothing is sent either way. */
 export type PreviewFailure = 'not-read' | 'not-masked';
@@ -256,21 +260,6 @@ export function platformRunnerClock(): RunnerClock {
   };
 }
 
-/** A pose summary as the input reads it, copied field by field from the stored one. */
-function poseFrom(report: SideCameraReportRecord | undefined): SideSessionSummary | undefined {
-  const pose = report?.pose;
-  if (pose === null || pose === undefined) {
-    return undefined;
-  }
-  return {
-    source: pose.source,
-    differences: { ...pose.differences },
-    posed: pose.posed,
-    noRider: pose.noRider,
-    unreadable: pose.unreadable,
-  };
-}
-
 /** The post-ride ask. @see the file comment. */
 export function createRideAnalysis(options: RideAnalysisOptions): RideAnalysisPort {
   const { store, athleteId: owner, clock } = options;
@@ -283,32 +272,11 @@ export function createRideAnalysis(options: RideAnalysisOptions): RideAnalysisPo
     source === 'hosted' ? 'hosted' : options.nativeShell ? 'computer-shell' : 'computer-browser';
 
   /** The ride's input, or `undefined` when the ride cannot be read or is not this rider's. */
-  const readInput = async (activityId: ActivityId): Promise<RideAnalysisInput | undefined> => {
-    try {
-      const ride = await store.getActivity(owner, activityId);
-      if (ride === undefined) {
-        return undefined;
-      }
-      const [streams, athlete, laps, report, route] = await Promise.all([
-        store.getStreamSet(owner, activityId),
-        store.getAthlete(owner),
-        store.listLaps(owner, activityId),
-        store.getSideCameraReport(owner, activityId),
-        ride.routeId === undefined ? undefined : store.getRoute(owner, ride.routeId),
-      ]);
-      const pose = poseFrom(report);
-      return rideAnalysisInput(ride, streams, athlete, {
-        templateVersion: template.version,
-        laps,
-        ...(route === undefined ? {} : { route: route.profile }),
-        ...(pose === undefined ? {} : { pose }),
-        cameraConsented: options.cameraConsented(),
-      });
-    } catch {
-      // Nothing of the error is read: the store's messages name records.
-      return undefined;
-    }
-  };
+  const readInput = (activityId: ActivityId): Promise<RideAnalysisInput | undefined> =>
+    readRideInput(store, owner, activityId, {
+      templateVersion: template.version,
+      cameraConsented: options.cameraConsented(),
+    });
 
   /** Held for as long as this controller — the tab — is: the consent's own lifetime. */
   let previewSeen = false;
@@ -372,11 +340,35 @@ export function createRideAnalysis(options: RideAnalysisOptions): RideAnalysisPo
         return failed('not-read');
       }
 
+      // The rider's history (#835), asked of their instance BEFORE the run so
+      // the runner stays pure. Only for the rider's own computer: a hosted
+      // model is never sent it until ADR 0040 D-9's disclosures change.
+      const instance = source === 'computer' ? options.history?.() : undefined;
+      let passages: readonly HistoryPassage[] = [];
+      let historyNotice: string | undefined;
+      if (instance !== undefined && template.history !== undefined) {
+        const retrieved = await instance.retrieve({
+          query: template.history.query(input),
+          rideId: activityId,
+          limit: template.history.passages,
+          characters: template.history.characters,
+        });
+        if (retrieved.kind === 'passages') {
+          passages = retrieved.passages;
+        } else {
+          historyNotice = HISTORY_NOTICE_TEXT.unreachable;
+        }
+      }
+      if (signal.aborted) {
+        return failed('cancelled');
+      }
+
       const outcome = await runAnalysis(input, {
         port,
         clock,
         signal,
         template,
+        history: passages,
         ...(progress === undefined ? {} : { progress }),
       });
       // A cancel that landed after the last reply is already `cancelled` here:
@@ -400,7 +392,12 @@ export function createRideAnalysis(options: RideAnalysisOptions): RideAnalysisPo
       } catch {
         return failed('not-saved');
       }
-      return { kind: 'written' };
+      if (outcome.history === 'failed') {
+        historyNotice = HISTORY_NOTICE_TEXT.failed;
+      }
+      return historyNotice === undefined
+        ? { kind: 'written' }
+        : { kind: 'written', notice: historyNotice };
     },
   };
 }

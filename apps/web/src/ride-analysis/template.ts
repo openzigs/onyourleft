@@ -52,11 +52,17 @@
 
 import { MAXIMUM_WRITE_UP_CHARACTERS } from '@onyourleft/store';
 
+import { passedScreen, screenSavedWriteUp } from '../camera/write-up-screen';
+import type { HistoryPassage } from './history';
 import type { RideAnalysisInput } from './input';
 import { ANALYSIS_TEMPLATE_V1 } from './template-v1';
+import { ANALYSIS_TEMPLATE_V2 } from './template-v2';
 
-/** What each step of the outline is. */
-export type AnalysisStepKind = 'section' | 'position' | 'summary' | 'rewrite';
+/**
+ * What each step of the outline is. `history` since version 2 (#835, ADR
+ * 0040 D-8): the ONE step shown passages of the rider's own history.
+ */
+export type AnalysisStepKind = 'section' | 'position' | 'history' | 'summary' | 'rewrite';
 
 /**
  * When the runner runs a step.
@@ -67,7 +73,8 @@ export type AnalysisStepKind = 'section' | 'position' | 'summary' | 'rewrite';
  * - `if-screen-fails`: once, and only when the summary fails the screen (#798,
  *   ADR 0035 D-4's *"one rewrite, then withheld"*).
  */
-export type AnalysisStepRuns = 'per-section' | 'with-pose' | 'once' | 'if-screen-fails';
+export type AnalysisStepRuns =
+  'per-section' | 'with-pose' | 'with-history' | 'once' | 'if-screen-fails';
 
 /**
  * A step's bounds, declared on the step so the runner (#811) reads them rather
@@ -117,12 +124,26 @@ export interface PositionNote {
   readonly [validated]: 'position';
 }
 
+/**
+ * The history step's reply, once {@link acceptHistoryNote} has accepted it —
+ * the only thing of the rider's history the summary is ever shown (#835).
+ */
+export interface HistoryNote {
+  readonly notes: string;
+  readonly [validated]: 'history';
+}
+
 /** What the summary and rewrite steps are given from the steps before them. */
 export interface EarlierNotes {
   /** Every section note that was accepted, in any order. */
   readonly sections: readonly SectionNote[];
   /** The position note, when the step ran and its reply was accepted. */
   readonly position?: PositionNote;
+  /**
+   * The history note, when a version-2 template's history step ran and its
+   * reply was accepted (#835). A version-1 summary never reads it.
+   */
+  readonly history?: HistoryNote;
   /** The 1-based indexes of the sections whose step failed. */
   readonly failedSections: readonly number[];
 }
@@ -173,6 +194,29 @@ export interface PositionStep {
   readonly prompt: (input: RideAnalysisInput) => StepPrompt | undefined;
 }
 
+/**
+ * The history step (#835, ADR 0040 D-8): shown the passages the rider's
+ * instance returned, inside a data fence, and asked for one short note on how
+ * this ride compares. It is the ONLY step a passage reaches; the summary sees
+ * the accepted note and nothing else of the history.
+ */
+export interface HistoryStep {
+  readonly kind: 'history';
+  readonly runs: 'with-history';
+  readonly bounds: AnalysisStepBounds;
+  /** The most passages the step's prompt has room for, which the instance is asked for. */
+  readonly passages: number;
+  /** The most characters of passage text, all passages together, which the instance is asked for. */
+  readonly characters: number;
+  /** What the instance is asked to match: built from the input, and versioned with the template. */
+  readonly query: (input: RideAnalysisInput) => string;
+  /** `undefined` when there is no passage: the step does not run. */
+  readonly prompt: (
+    input: RideAnalysisInput,
+    passages: readonly HistoryPassage[],
+  ) => StepPrompt | undefined;
+}
+
 export interface SummaryStep {
   readonly kind: 'summary';
   readonly runs: 'once';
@@ -198,6 +242,13 @@ export interface AnalysisTemplate {
   /** Kept with every saved write-up (#800). Never reused for different words. */
   readonly version: string;
   readonly steps: readonly [SectionStep, PositionStep, SummaryStep, RewriteStep];
+  /**
+   * The history step, since version 2 (#835). It runs after position and
+   * before the summary, only when the rider's instance returned passages.
+   * Kept beside `steps` rather than in it so a version without one is the
+   * same shape it was shipped as.
+   */
+  readonly history?: HistoryStep;
 }
 
 /**
@@ -205,10 +256,13 @@ export interface AnalysisTemplate {
  * write-up names one of these, and removing it would leave that name pointing
  * at nothing.
  */
-export const ANALYSIS_TEMPLATES: readonly AnalysisTemplate[] = [ANALYSIS_TEMPLATE_V1];
+export const ANALYSIS_TEMPLATES: readonly AnalysisTemplate[] = [
+  ANALYSIS_TEMPLATE_V1,
+  ANALYSIS_TEMPLATE_V2,
+];
 
 /** The template a new write-up is made with: the newest. */
-export const CURRENT_ANALYSIS_TEMPLATE: AnalysisTemplate = ANALYSIS_TEMPLATE_V1;
+export const CURRENT_ANALYSIS_TEMPLATE: AnalysisTemplate = ANALYSIS_TEMPLATE_V2;
 
 /** The template a saved write-up names, or `undefined` when no such template was ever shipped. */
 export function analysisTemplate(id: string, version: string): AnalysisTemplate | undefined {
@@ -304,6 +358,32 @@ export function acceptPositionNote(reply: string): PositionNote | undefined {
   const record = jsonObject(reply, ['notes']);
   const notes = record === undefined ? undefined : plainText(record.notes, MAXIMUM_NOTE_CHARACTERS);
   return notes === undefined ? undefined : ({ notes } as PositionNote);
+}
+
+/**
+ * The longest the history step's note may be: 300 characters (ADR 0040 D-8),
+ * which is what keeps the summary and the rewrite inside their bounds with
+ * the note beside everything else they are shown.
+ */
+export const MAXIMUM_HISTORY_NOTE_CHARACTERS = 300;
+
+/**
+ * The history step's reply, accepted: JSON `{ "notes": "<plain text, at most
+ * {@link MAXIMUM_HISTORY_NOTE_CHARACTERS}>" }` and nothing else — AND passing
+ * the write-up screen (#798, ADR 0035 D-4). The history step is the one step
+ * shown text somebody other than this app wrote (a note, a document, an
+ * earlier write-up), so a reply that obeyed something planted in it is refused
+ * here like any other bad reply, before the summary could be shown it (ADR
+ * 0040 D-8, OWASP LLM01:2025).
+ */
+export function acceptHistoryNote(reply: string): HistoryNote | undefined {
+  const record = jsonObject(reply, ['notes']);
+  const notes =
+    record === undefined ? undefined : plainText(record.notes, MAXIMUM_HISTORY_NOTE_CHARACTERS);
+  if (notes === undefined || !passedScreen(screenSavedWriteUp(notes))) {
+    return undefined;
+  }
+  return { notes } as HistoryNote;
 }
 
 /**

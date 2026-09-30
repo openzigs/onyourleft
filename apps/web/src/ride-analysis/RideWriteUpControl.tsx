@@ -217,7 +217,9 @@ export function RideWriteUpControl({
       ? state.said
       : state.kind === 'ended'
         ? state.outcome.kind === 'written'
-          ? WRITE_UP_SAVED
+          ? state.outcome.notice === undefined
+            ? WRITE_UP_SAVED
+            : `${WRITE_UP_SAVED} ${state.outcome.notice}`
           : state.outcome.text
         : '';
 
