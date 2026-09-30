@@ -20,6 +20,8 @@ import {
   instanceHttp,
   instanceRoomSocket,
   InstanceUnreachableError,
+  isRoomId,
+  roomPath,
   MAXIMUM_INSTANCE_ANSWER_BYTES,
   type InstanceSend,
 } from './instance-transport';
@@ -46,6 +48,39 @@ describe('the one transport to an instance — #777', () => {
       await expect(http.call('GET', path), path).rejects.toThrow(InstanceUnreachableError);
     }
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it('sends no path fetch would rewrite: no dot segment, query, fragment, escape or backslash — #782 review (B1)', async () => {
+    const send = answering(200, '{}');
+    const http = instanceHttp(ORIGIN, send);
+    for (const path of [
+      // The reproduction: a room id that steered the ticket's bearer POST.
+      '/v1/rooms/x/../../auth/devices/PK/revoke?/ticket',
+      '/v1/rooms/../x/ticket',
+      '/v1/./auth/session',
+      '/v1/auth/..',
+      '/v1/auth/session?x=1',
+      '/v1/auth/session#x',
+      '/v1/rooms/%2E%2E/ticket',
+      '/v1/rooms\\..\\auth/session',
+    ]) {
+      await expect(http.call('POST', path, { token: 't' }), path).rejects.toMatchObject({
+        why: 'refused-path',
+      });
+    }
+    expect(send).not.toHaveBeenCalled();
+    // A segment that merely CONTAINS a dot is a name, not a dot segment.
+    await http.call('GET', '/v1/files/a.b..c');
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('builds both of a room’s paths from one checked id — #782 review (B1)', () => {
+    expect(roomPath('room-1', 'ticket')).toBe('/v1/rooms/room-1/ticket');
+    expect(roomPath('room-1', 'socket')).toBe('/v1/rooms/room-1/socket');
+    for (const roomId of ['../x', 'x/../../auth/devices/PK/revoke?', 'a?b', 'a%2F', 'a.b', '']) {
+      expect(() => roomPath(roomId, 'ticket'), roomId).toThrow(InstanceUnreachableError);
+      expect(isRoomId(roomId), roomId).toBe(false);
+    }
   });
 
   it('sends JSON with the bearer token, follows no redirect and carries nothing ambient', async () => {

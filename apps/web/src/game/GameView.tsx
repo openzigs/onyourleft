@@ -1057,7 +1057,13 @@ export function GameView(props: GameViewProps): JSX.Element {
         roomStateRef.current = roomRideState();
         roomRef.current = props.room.join({
           roomId: props.roomId,
-          declaredMassKilograms: riderMassFor(props.riderMass).mass,
+          // #782's review (N5): the weight the rider DECLARED, or none. A
+          // rider with none is not ticketed at a default (ADR 0028 D-1: the
+          // room races the declared mass); the room refuses as
+          // `no-declared-mass` and the HUD asks for a weight.
+          declaredMassKilograms: riderMassFor(props.riderMass).assumed
+            ? undefined
+            : riderMassFor(props.riderMass).mass,
           sample: () => {
             const now = sensorsNow.readSensors();
             return {

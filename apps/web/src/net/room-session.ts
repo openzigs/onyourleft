@@ -59,7 +59,11 @@ import {
   type RoomConfig,
 } from '@onyourleft/protocol';
 
-import type { InstanceSocket, InstanceSocketEvents } from '../instance/instance-transport';
+import {
+  isRoomId,
+  type InstanceSocket,
+  type InstanceSocketEvents,
+} from '../instance/instance-transport';
 import { SnapshotBuffer, type DrawnRemoteRider } from './snapshots';
 
 /** The first reconnect waits this long; each after doubles it. */
@@ -90,11 +94,26 @@ const TICKET_REFUSALS_RETRIED = 2;
 /** Close codes a room ends a connection with that mean "do not come back" (`close-codes.ts`). */
 const FINAL_CLOSE_CODES: ReadonlySet<number> = new Set([4001, 4002, 4004, 4005, 4006]);
 
+/**
+ * Why no ticket will come, however often it is asked — each its own sentence
+ * in `game/room-ride.ts` §`ROOM_REFUSED_TEXT` (#782's review, N6):
+ *
+ * - `not-signed-in` — this device holds no session on the instance, or the
+ *   instance answered 401;
+ * - `not-eligible` — 403: the account may not join this room;
+ * - `no-such-room` — 404: the instance has no room by that id;
+ * - `no-declared-mass` — the rider has declared no weight, so no ticket is
+ *   asked for at all (ADR 0028 D-1: a default is not a declaration);
+ * - `instance-refused` — any other 4xx but 429.
+ */
+export type TicketRefusal =
+  'not-signed-in' | 'not-eligible' | 'no-such-room' | 'no-declared-mass' | 'instance-refused';
+
 /** A ticket, or why there is none. */
 export type TicketAnswer =
   | { readonly kind: 'ticket'; readonly ticket: string }
-  /** The instance refused: not signed in, or not eligible for this room. */
-  | { readonly kind: 'refused' }
+  /** The instance refused, or would: final. */
+  | { readonly kind: 'refused'; readonly reason: TicketRefusal }
   /** Nothing answered: try again later. */
   | { readonly kind: 'unreachable' };
 
@@ -124,7 +143,11 @@ export type RoomSessionStatus =
   /** Connection lost; reconnecting by itself. `since` is the local instant it went. */
   | { readonly kind: 'lost'; readonly since: number }
   /** The room said no, and will keep saying it. */
-  | { readonly kind: 'refused'; readonly reason: RefuseReason | 'not-signed-in' | 'replaced' }
+  | {
+      readonly kind: 'refused';
+      /** `invalid-room`: an id no instance could route, refused before anything is sent. */
+      readonly reason: RefuseReason | TicketRefusal | 'replaced' | 'invalid-room';
+    }
   /** Lost for longer than the room keeps a seat. */
   | { readonly kind: 'gone' }
   /** The rider left. */
@@ -247,6 +270,13 @@ export class RoomSession {
     await Promise.resolve();
     if (this.#finished()) return;
     const { link, roomId } = this.#options;
+    // #782's review (B1): an id the instance could not route is refused for
+    // good HERE, before a ticket is asked for — never lost and retried, since
+    // every retry would be one more request built from it.
+    if (!isRoomId(roomId)) {
+      this.#setStatus({ kind: 'refused', reason: 'invalid-room' });
+      return;
+    }
     let answer: TicketAnswer;
     try {
       answer = await link.ticket(roomId);
@@ -255,7 +285,7 @@ export class RoomSession {
     }
     if (this.#finished()) return;
     if (answer.kind === 'refused') {
-      this.#setStatus({ kind: 'refused', reason: 'not-signed-in' });
+      this.#setStatus({ kind: 'refused', reason: answer.reason });
       return;
     }
     if (answer.kind === 'unreachable') {

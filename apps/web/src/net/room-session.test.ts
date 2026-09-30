@@ -76,9 +76,27 @@ describe('joining a room — #782', () => {
     expect(s.status).toMatchObject({ kind: 'joined', riderId: 3 });
   });
 
+  it('asks for no ticket for a room id no instance could route: refused, and never retried — #782 review (B1)', async () => {
+    const room = new ScriptedRoom();
+    const clock = new ManualClock();
+    const s = new RoomSession({
+      roomId: 'x/../../auth/devices/PK/revoke?',
+      link: room.link(),
+      timers: clock,
+      now: clock.now,
+      physicsVersion: PHYSICS_VERSION,
+      sample: () => ({ powerWatts: 0 }),
+    });
+    await flush();
+    await clock.advance(120_000);
+    expect(s.status).toEqual({ kind: 'refused', reason: 'invalid-room' });
+    expect(room.masses).toEqual([]);
+    expect(room.sockets).toHaveLength(0);
+  });
+
   it('opens nothing when this device holds no session: refused, and never retried', async () => {
     const room = new ScriptedRoom();
-    room.ticketAnswer = () => ({ kind: 'refused' });
+    room.ticketAnswer = () => ({ kind: 'refused', reason: 'not-signed-in' });
     const clock = new ManualClock();
     const s = session(room, clock);
     await flush();

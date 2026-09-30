@@ -32,7 +32,7 @@ import { flush, frameRider, ManualClock, ScriptedRoom } from '../net/testing';
 import { REJOIN_GIVE_UP_MS } from '../net/room-session';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import type { GameRenderer, SceneFrame } from './port';
-import { ROOM_LOST_SPOKEN, ROOM_LOST_TEXT } from './room-ride';
+import { ROOM_LOST_SPOKEN, ROOM_LOST_TEXT, ROOM_REFUSED_TEXT } from './room-ride';
 
 /** Five level kilometres. */
 function levelRoute(): RidableRoute {
@@ -124,6 +124,7 @@ function portFor(room: ScriptedRoom): RoomPort {
 async function rideInRoom(
   room: ScriptedRoom,
   inRoom = true,
+  declared = true,
 ): Promise<{ readonly drawn: SceneFrame[] }> {
   const roomId = inRoom ? 'room-1' : undefined;
   const drawn: SceneFrame[] = [];
@@ -132,7 +133,7 @@ async function rideInRoom(
       port={pedallingPort(levelRoute())}
       renderer={() => Promise.resolve(capturingRenderer(drawn))}
       now={() => nowMs}
-      riderMass={kilograms(DECLARED_MASS)}
+      {...(declared ? { riderMass: kilograms(DECLARED_MASS) } : {})}
       room={portFor(room)}
       {...(roomId === undefined ? {} : { roomId })}
     />,
@@ -226,6 +227,17 @@ describe('a ride in a room — #782, #783', () => {
       expect(keys.filter((key) => /mass|kilogram|weight/i.test(key))).toEqual([]);
       expect(numbers).not.toContain(DECLARED_MASS);
     }
+  });
+
+  it('asks for no ticket for a rider with no declared weight, says why, and rides on — #782 review (N5)', async () => {
+    const room = new ScriptedRoom();
+    const { drawn } = await rideInRoom(room, true, false);
+    await pump(12);
+    // No ticket, so no weight — default or otherwise — left the device.
+    expect(room.masses).toEqual([]);
+    expect(room.sockets).toEqual([]);
+    expect(hudText()).toContain(ROOM_REFUSED_TEXT['no-declared-mass']);
+    expect(drawn.length).toBeGreaterThan(5);
   });
 
   it('shows the gap to ONE chosen rider, by seat, with no watts beside them, and no standings — #783', async () => {

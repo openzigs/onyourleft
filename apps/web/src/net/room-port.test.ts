@@ -111,22 +111,97 @@ describe('the production room port — #782', () => {
     expect(connection.own()).toBeUndefined();
   });
 
-  it('opens no socket for a room id the instance could not route', async () => {
+  // #782's review (B1): the ticket's POST carries the rider's session token,
+  // so a hostile id must reach neither it nor the socket — and must be refused
+  // for good, since every retry would send it again.
+  for (const roomId of ['../x', 'x/../../auth/devices/PK/revoke?', 'room-1?', 'room%2F..', 'a.b', '']) {
+    it(`sends nothing, opens nothing and retries nothing for the room id ${JSON.stringify(roomId)}`, async () => {
+      const send = ticketing();
+      const sockets = recordingSockets();
+      const clock = new ManualClock();
+      const connection = createRoomPort({
+        storage: storageWith(SIGNED_IN),
+        send,
+        openSocket: sockets.open,
+        timers: clock,
+        now: clock.now,
+      }).join({ roomId, declaredMassKilograms: 71, sample: () => ({ powerWatts: 0 }) });
+      await flush();
+      await clock.advance(120_000);
+      expect(send).not.toHaveBeenCalled();
+      expect(sockets.urls).toEqual([]);
+      expect(connection.status()).toEqual({ kind: 'refused', reason: 'invalid-room' });
+      connection.leave();
+    });
+  }
+
+  it('asks for no ticket, and sends no weight, for a rider who declared none — #782 review (N5)', async () => {
+    const send = ticketing();
     const sockets = recordingSockets();
     const clock = new ManualClock();
     const connection = createRoomPort({
       storage: storageWith(SIGNED_IN),
-      send: ticketing(),
+      send,
       openSocket: sockets.open,
       timers: clock,
       now: clock.now,
-    }).join({ roomId: '../x', declaredMassKilograms: 71, sample: () => ({ powerWatts: 0 }) });
+    }).join({
+      roomId: 'room-1',
+      declaredMassKilograms: undefined,
+      sample: () => ({ powerWatts: 0 }),
+    });
     await flush();
-    await flush();
+    await clock.advance(120_000);
+    expect(send).not.toHaveBeenCalled();
     expect(sockets.urls).toEqual([]);
-    expect(connection.status().kind).toBe('lost');
-    connection.leave();
+    expect(connection.status()).toEqual({ kind: 'refused', reason: 'no-declared-mass' });
   });
+
+  // #782's review (N6): each "never" the instance can say is its own reason.
+  for (const [status, reason] of [
+    [401, 'not-signed-in'],
+    [403, 'not-eligible'],
+    [404, 'no-such-room'],
+    [400, 'instance-refused'],
+    [409, 'instance-refused'],
+  ] as const) {
+    it(`reads a ${String(status)} to the ticket as refused for good: ${reason}`, async () => {
+      const send = vi.fn(() => Promise.resolve(new Response('{}', { status })));
+      const clock = new ManualClock();
+      const connection = createRoomPort({
+        storage: storageWith(SIGNED_IN),
+        send,
+        openSocket: recordingSockets().open,
+        timers: clock,
+        now: clock.now,
+      }).join({ roomId: 'room-1', declaredMassKilograms: 71, sample: () => ({ powerWatts: 0 }) });
+      await flush();
+      await flush();
+      await clock.advance(120_000);
+      expect(connection.status()).toEqual({ kind: 'refused', reason });
+      expect(send).toHaveBeenCalledTimes(1);
+    });
+  }
+
+  for (const status of [429, 500, 503]) {
+    it(`reads a ${String(status)} to the ticket as unreachable, and tries again`, async () => {
+      const send = vi.fn(() => Promise.resolve(new Response('{}', { status })));
+      const clock = new ManualClock();
+      const connection = createRoomPort({
+        storage: storageWith(SIGNED_IN),
+        send,
+        openSocket: recordingSockets().open,
+        timers: clock,
+        now: clock.now,
+      }).join({ roomId: 'room-1', declaredMassKilograms: 71, sample: () => ({ powerWatts: 0 }) });
+      await flush();
+      await flush();
+      expect(connection.status().kind).toBe('lost');
+      await clock.advance(2_000);
+      expect(send.mock.calls.length).toBeGreaterThan(1);
+      connection.leave();
+    });
+  }
 
   it('lets the screen sleep once the room refuses for good', async () => {
     const release = vi.fn();

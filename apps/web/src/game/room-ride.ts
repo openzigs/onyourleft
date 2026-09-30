@@ -52,6 +52,18 @@ export const ROOM_REFUSED_TEXT: Readonly<
   'not-signed-in':
     'This device is not signed in to the room’s instance, so you are riding on your own.',
   replaced: 'You joined this room on another device, so this one left it.',
+  // #782's review: each refusal the instance can give says what it is (N6),
+  // and a rider with no declared weight is asked for one rather than raced at
+  // a default (N5).
+  'not-eligible':
+    'Your account on the room’s instance cannot join this room, so you are riding on your own.',
+  'no-such-room': 'The room’s instance has no such room, so you are riding on your own.',
+  'instance-refused':
+    'The room’s instance would not let this device in, so you are riding on your own.',
+  'no-declared-mass':
+    'Set your weight in Settings to ride in a room: a room rides you at the weight you declare. ' +
+    'You are riding on your own.',
+  'invalid-room': 'That is not a room this app can join, so you are riding on your own.',
 };
 
 /** The label the HUD gives the room: never anything but this word. */

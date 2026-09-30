@@ -26,7 +26,14 @@
  *   refused origin throws before `fetch` is reached — so a caller that skipped
  *   the check still sends nothing over `http:` to another machine.
  * - **Only a path**, starting with `/` and not `//`, is appended to that
- *   origin: a caller cannot point a request at another host.
+ *   origin: a caller cannot point a request at another host. ⚠️ **And only a
+ *   plain one, since #782's review**: a path holding a `.` or `..` segment, a
+ *   `?`, a `#`, a `%` or a `\` is refused before anything is sent. `fetch`
+ *   normalises dot segments (and a `\` is a `/` to the URL parser), so
+ *   `/v1/rooms/x/../../auth/devices/K/revoke?/ticket` used to leave as a
+ *   bearer-authenticated `POST /v1/auth/devices/K/revoke` — the caller that
+ *   built it from a room id had checked nothing. No caller here sends a query;
+ *   one that needs to is given a structured parameter, never a string.
  * - `redirect: 'error'` — a redirect would carry a session token somewhere the
  *   rider did not type. `credentials: 'omit'`, `referrerPolicy: 'no-referrer'`,
  *   `cache: 'no-store'`: nothing ambient rides along, and nothing is kept.
@@ -47,7 +54,10 @@
  * - **Only a room's socket path** is opened — `/v1/rooms/{roomId}/socket` on
  *   the address's own `socketOrigin` (`wss:` for `https:`, `ws:` for a
  *   loopback `http:`, `address.ts`), with a room id the instance's own router
- *   would accept. A caller cannot point it anywhere else.
+ *   would accept. ⚠️ Both of a room's paths — the ticket's and the socket's —
+ *   come from ONE builder, {@link roomPath}, which refuses any other id; until
+ *   #782's review only the socket's was checked, and the ticket's POST
+ *   carried the rider's session token wherever a hostile id steered it.
  * - **Text only.** A binary message is not the wire format
  *   (`@onyourleft/protocol`), and the socket is closed on one.
  * - **No credential rides on the socket**: the hello carries a single-use,
@@ -134,6 +144,22 @@ function parsed(text: string): unknown {
 }
 
 /**
+ * Whether `path` is one this module appends to an origin: absolute, not
+ * protocol-relative, and PLAIN — no `.` or `..` segment for `fetch` to
+ * normalise away, no `?` or `#` to push the rest into a query or a fragment,
+ * no `%` to smuggle either past this check, and no `\`, which the URL parser
+ * reads as `/`. See the module header, and #782's review (B1).
+ */
+function isPlainPath(path: string): boolean {
+  if (!path.startsWith('/') || path.startsWith('//')) return false;
+  if (/[?#%\\]/.test(path)) return false;
+  return path
+    .slice(1)
+    .split('/')
+    .every((segment) => segment !== '.' && segment !== '..');
+}
+
+/**
  * The transport to one instance. Throws {@link InstanceUnreachableError} at
  * once, having sent nothing, for an origin `address.ts` refuses.
  */
@@ -146,7 +172,7 @@ export function instanceHttp(origin: string, send?: InstanceSend): InstanceHttp 
   return {
     origin,
     call: async (method, path, options = {}) => {
-      if (!path.startsWith('/') || path.startsWith('//')) {
+      if (!isPlainPath(path)) {
         throw new InstanceUnreachableError('refused-path');
       }
       const headers: Record<string, string> = { accept: 'application/json' };
@@ -201,6 +227,22 @@ export type OpenInstanceSocket = (url: string, events: InstanceSocketEvents) => 
 /** A room id the instance's router accepts (`room/node/router.ts` §`ROOM_SOCKET_PATH`). */
 const ROOM_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
+/** Whether the instance's router could route `roomId` — and so whether a room path may be built from it. */
+export function isRoomId(roomId: string): boolean {
+  return ROOM_ID.test(roomId);
+}
+
+/**
+ * The ONE builder of a room's paths on an instance — the ticket's
+ * (`POST /v1/rooms/{roomId}/ticket`) and the socket's — so that both apply
+ * {@link isRoomId}. Throws {@link InstanceUnreachableError} `refused-path`,
+ * having built nothing, for any other id (#782's review, B1).
+ */
+export function roomPath(roomId: string, kind: 'ticket' | 'socket'): string {
+  if (!isRoomId(roomId)) throw new InstanceUnreachableError('refused-path');
+  return `/v1/rooms/${roomId}/${kind}`;
+}
+
 /** RFC 6455 §7.4.1: the endpoint received a type of data it cannot accept. */
 const UNSUPPORTED_DATA = 1003;
 
@@ -254,8 +296,5 @@ export function instanceRoomSocket(
   if (decision.kind !== 'accepted' || decision.origin !== origin) {
     throw new InstanceUnreachableError('refused-address');
   }
-  if (!ROOM_ID.test(roomId)) {
-    throw new InstanceUnreachableError('refused-path');
-  }
-  return (open ?? platformSocket)(`${decision.socketOrigin}/v1/rooms/${roomId}/socket`, events);
+  return (open ?? platformSocket)(`${decision.socketOrigin}${roomPath(roomId, 'socket')}`, events);
 }

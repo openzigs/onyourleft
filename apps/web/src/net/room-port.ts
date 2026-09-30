@@ -43,6 +43,7 @@ import { PHYSICS_VERSION } from '@onyourleft/physics';
 import { heldInstanceSession, type InstanceStorage } from '../instance/instance-port';
 import {
   instanceRoomSocket,
+  roomPath,
   type InstanceSend,
   type OpenInstanceSocket,
 } from '../instance/instance-transport';
@@ -62,8 +63,11 @@ export interface RoomJoin {
   /**
    * The rider's declared mass, in kilograms, for the ticket (ADR 0028 D-1).
    * ⚠️ Sent to the instance, and handed to nothing the renderer reads.
+   * `undefined` when the rider has declared none: then no ticket is asked
+   * for and the room refuses as `no-declared-mass` (#782's review, N5) — a
+   * default weight is not a declaration, and a room would race it as one.
    */
-  readonly declaredMassKilograms: number;
+  readonly declaredMassKilograms: number | undefined;
   /** Read at every report: the rider's power and cadence NOW. */
   readonly sample: () => RoomSample;
 }
@@ -114,8 +118,11 @@ function instanceRoomLink(options: RoomPortOptions, declaredMassKilograms: numbe
   return {
     ticket: async (roomId): Promise<TicketAnswer> => {
       const session = heldInstanceSession(options.storage, options.send);
-      if (session === undefined) return { kind: 'refused' };
-      const answer = await session.http.call('POST', `/v1/rooms/${roomId}/ticket`, {
+      if (session === undefined) return { kind: 'refused', reason: 'not-signed-in' };
+      // `roomPath` refuses an id the router could not route, so the rider's
+      // session token can only ever reach the room's own ticket (#782's
+      // review, B1). `RoomSession` refuses such an id before this is reached.
+      const answer = await session.http.call('POST', roomPath(roomId, 'ticket'), {
         token: session.token,
         body: { declaredMassKilograms },
       });
@@ -123,10 +130,7 @@ function instanceRoomLink(options: RoomPortOptions, declaredMassKilograms: numbe
       if (answer.status === 200 && typeof ticket === 'string' && ticket !== '') {
         return { kind: 'ticket', ticket };
       }
-      if (answer.status >= 400 && answer.status < 500 && answer.status !== 429) {
-        return { kind: 'refused' };
-      }
-      return { kind: 'unreachable' };
+      return refusalFor(answer.status) ?? { kind: 'unreachable' };
     },
     open: (roomId, events) => {
       const session = heldInstanceSession(options.storage, options.send);
@@ -135,6 +139,34 @@ function instanceRoomLink(options: RoomPortOptions, declaredMassKilograms: numbe
     },
   };
 }
+
+/**
+ * What a ticket request's status means, when it means "never" — the
+ * instance's own error statuses (`apps/instance/src/errors.ts`): 401
+ * `unauthenticated`, 403 `not_eligible`, and 404 for a room it does not have.
+ * 429 and 5xx are `undefined`: try again later.
+ */
+function refusalFor(status: number): TicketAnswer | undefined {
+  if (status === 401) return { kind: 'refused', reason: 'not-signed-in' };
+  if (status === 403) return { kind: 'refused', reason: 'not-eligible' };
+  if (status === 404) return { kind: 'refused', reason: 'no-such-room' };
+  if (status >= 400 && status < 500 && status !== 429) {
+    return { kind: 'refused', reason: 'instance-refused' };
+  }
+  return undefined;
+}
+
+/**
+ * The link a join with no declared mass gets: it asks for no ticket and opens
+ * nothing, so no weight — default or otherwise — reaches any instance, and
+ * the session is refused as `no-declared-mass` (#782's review, N5).
+ */
+const NO_DECLARED_MASS: RoomLink = {
+  ticket: () => Promise.resolve({ kind: 'refused', reason: 'no-declared-mass' }),
+  open: () => {
+    throw new Error('no ticket was asked for');
+  },
+};
 
 /** A port over a {@link RoomLink} — the production one, or a test's scripted room. */
 export function roomPortOver(
@@ -147,7 +179,10 @@ export function roomPortOver(
       let released = false;
       const session = new RoomSession({
         roomId: request.roomId,
-        link: link(request.declaredMassKilograms),
+        link:
+          request.declaredMassKilograms === undefined
+            ? NO_DECLARED_MASS
+            : link(request.declaredMassKilograms),
         timers: options.timers ?? PLATFORM_TIMERS,
         now: options.now ?? (() => performance.now()),
         physicsVersion: PHYSICS_VERSION,
