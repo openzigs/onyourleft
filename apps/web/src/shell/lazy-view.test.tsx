@@ -217,6 +217,88 @@ describe('a lazily loaded view — #674', () => {
     expect(chunk.imports()).toBe(2);
   });
 
+  describe('a view that failed once — #871', () => {
+    /** Leave the view, as a route change does (`AppShell` keys the boundary by route). */
+    function away(): void {
+      act(() => {
+        root?.render(<p>Elsewhere</p>);
+      });
+    }
+
+    async function back(View: ElementType): Promise<void> {
+      await act(async () => {
+        root?.render(shell(View));
+        await Promise.resolve();
+      });
+    }
+
+    async function failed(): Promise<{
+      readonly chunk: ReturnType<typeof held>;
+      readonly group: ReturnType<typeof viewGroup<Views>>;
+      readonly View: ElementType;
+    }> {
+      const chunk = held();
+      const group = viewGroup(chunk.load);
+      const View = lazyView(group, (views) => views.First);
+      await render(shell(View), () => undefined);
+      await act(async () => {
+        chunk.reject(new TypeError('Failed to fetch dynamically imported module'));
+        await Promise.resolve();
+      });
+      expect(container?.textContent).toContain('Could not load this page');
+      return { chunk, group, View };
+    }
+
+    it('renders on a later visit once its group has arrived some other way', async () => {
+      const { chunk, group, View } = await failed();
+      // The idle preload, or a sibling view of the same group, succeeds.
+      const arriving = group.load();
+      chunk.resolve();
+      await arriving;
+      away();
+      await back(View);
+      expect(container?.textContent).toBe('The view');
+      expect(chunk.imports()).toBe(2);
+    });
+
+    it('asks again on a later visit when the network has come back', async () => {
+      const { chunk, View } = await failed();
+      away();
+      await back(View);
+      expect(chunk.imports()).toBe(2);
+      expect(container?.textContent).toBe('Loading this page…');
+      await act(async () => {
+        chunk.resolve();
+        await Promise.resolve();
+      });
+      expect(container?.textContent).toBe('The view');
+    });
+
+    it('does not ask again by itself while the failure is on screen', async () => {
+      // Rebuilding the view as soon as it rejected would have React's own retry
+      // of the errored render import it again, and again, for as long as the
+      // network stayed off. Only a later visit asks.
+      const { chunk } = await failed();
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(chunk.imports()).toBe(1);
+      expect(container?.textContent).toContain('Could not load this page');
+    });
+
+    it('says so again on a later visit that fails too', async () => {
+      const { chunk, View } = await failed();
+      away();
+      await back(View);
+      await act(async () => {
+        chunk.reject(new TypeError('still offline'));
+        await Promise.resolve();
+      });
+      expect(container?.textContent).toContain('Could not load this page');
+      expect(chunk.imports()).toBe(2);
+    });
+  });
+
   it('preloads every group, and a group that fails to preload raises nothing', async () => {
     const good = held();
     const bad = held();

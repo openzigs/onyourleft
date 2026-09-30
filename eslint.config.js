@@ -764,6 +764,11 @@ export default tseslint.config(
   // first download. The package declares no `exports` map, so every file under
   // it is importable by path; refusing every subpath is what closes
   // `lucide-react/dist/esm/DynamicIcon.mjs` as well as the documented one.
+  //
+  // ⚠️ Flat config keeps the LAST setting of a rule for a file, so a later block
+  // that sets `@typescript-eslint/no-restricted-imports` for any file under
+  // `apps/web` silently drops these bans there (#871, from #868's review). Such
+  // a block restates these entries rather than replacing them.
   {
     files: ['apps/web/**/*.{ts,tsx}'],
     rules: {
