@@ -1326,12 +1326,25 @@ apps/                 AGPL-3.0-or-later, without exception
                         as SHA-256, room tickets (the room core's `Admit`),
                         link codes, recovery codes, optional email recovery,
                         display names and the ONE public projection of an
-                        athlete — and migration 0004. ⚠️ **The handler serves
-                        those routes only when HANDED an identity**, and
-                        `main.ts` hands it none: the Docker image installs no
-                        `node_modules`, so the entry point cannot open the
-                        store until #780 wires the box, and every identity
-                        route answers `unavailable` (503) until then. ⚠️ Only `src/store/` may
+                        athlete — and migration 0004. ⚠️ **Since #780 the
+                        entry point OPENS the store** — a reviewer who
+                        remembers every identity route answering
+                        `unavailable` on a running instance is reading the
+                        old file: `main.ts` registers a resolve hook
+                        (`src/node-imports.ts`) and imports `serve.ts`, which
+                        starts `src/instance.ts` — the store opened and NEVER
+                        migrated (the deploy runs `node src/operator/cli.ts
+                        migrate` first; an un-migrated database is refused,
+                        naming it, and one being migrated waits with
+                        `/ready` 503), the accounts on it when
+                        `OYL_INSTANCE_ORIGIN` is set, and the room router.
+                        `/ready` and `/metrics` (operator-enabled) since
+                        #791, and every log line through `log.ts`
+                        §`redacted`. `src/operator/` is the operator's CLI
+                        (migrate, backup, restore, verify, room-open);
+                        `deploy/home/` is #807's compose file and #52's
+                        `deploy.sh`; `tools/tunnel-soak.ts` is #807's tunnel
+                        measurement. ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or
                         `apps/mobile` (`boundaries/dependencies`), and nothing
@@ -1340,8 +1353,14 @@ apps/                 AGPL-3.0-or-later, without exception
                         ADR 0036 D-3.a). The route table (`src/routes.ts`) is
                         what the handler dispatches on AND what
                         `openapi.json` is generated from (#36). `Dockerfile`
-                        is the first deploy target; `scripts/check-instance-image.sh`
-                        builds it and asks `/health` inside the container
+                        is the first deploy target — built from the
+                        REPOSITORY ROOT since #780, cut to an allowlist by
+                        `Dockerfile.dockerignore`, with the production
+                        closure (`kysely`, `ws`, three workspace packages)
+                        installed from the lockfile;
+                        `scripts/check-instance-image.sh` builds it, runs the
+                        migrate step in it, and asks `/health` inside the
+                        container and `/ready` from outside
     src/room/core/      the room core (#779): one room as a deterministic
                         state machine — hello, capacity (50, up to 100),
                         countdown, a 1 Hz tick that re-simulates every rider
@@ -1354,12 +1373,30 @@ apps/                 AGPL-3.0-or-later, without exception
                         timers, `performance`, `Math.random` and `ws`.
                         `clock.ts` maps a client's `atMs` onto the room's
                         clock, because the two are never the same clock.
-                        ⚠️ **Mounted by one adapter, and not by the
-                        instance**: #781's Durable Object (below) runs it
-                        under `workerd` in tests only, and #780 (Node, `ws`)
-                        is not built — `main.ts` imports none of it. ⚠️ Its workspace dependencies are
-                        TypeScript with extensionless relative imports, which
-                        `node src/main.ts` cannot load: #780 owns that
+                        ⚠️ **Mounted by two adapters since #780**, and a
+                        reviewer who remembers "not by the instance" is
+                        reading the old file: the Node adapter
+                        (`src/room/node/`, below) serves it, and #781's
+                        Durable Object runs it under `workerd` in tests only.
+                        Its workspace dependencies' extensionless imports load
+                        under `node src/main.ts` through `src/node-imports.ts`
+    src/room/node/      the Node adapter (#780, ADR 0037 D-2's first): the
+                        router (`router.ts`) forks one room worker per core,
+                        places every socket of one room on one worker and
+                        hands it over as a handle (keeping an unread copy, so
+                        a dead worker's rooms are closed `1011 room-lost`);
+                        `room-host.ts` mounts the core on `ws` sockets in a
+                        worker — a hello's ticket looked up once in the HTTP
+                        process's book, backpressure (a client past 256 KiB
+                        unsent is let go), a 25 s protocol ping for the
+                        tunnel, results written as each becomes final, and
+                        `permessage-deflate` OFF unless the operator sets
+                        `OYL_INSTANCE_WS_COMPRESSION=on` (Q16). ⚠️ The router
+                        stops the HTTP process READING a socket with the
+                        handle's own `readStop`: `pause()` alone let it read
+                        the hello the worker then never saw (`router.ts`
+                        §`stopReading`). `close-codes.ts` beside it is both
+                        adapters' close codes (1001, 1008, 1011, 4001–4008)
     src/room/durable-object/
                         the room core as a Cloudflare Durable Object (#781,
                         ADR 0037 D-2's second adapter), BUILT AND NOT DEPLOYED
@@ -2034,9 +2071,30 @@ pnpm --filter @onyourleft/instance run typecheck
 pnpm --filter @onyourleft/instance run test:workerd
 
 # Start the instance on this machine, on 127.0.0.1:8787. ⚠️ It REFUSES to start
-# without a commit or a source URL (AGPL-3.0 §13, ADR 0036 D-6); every variable
-# it reads is in .env.example. Ctrl-C stops it. Not a gate, and nothing runs it.
+# without a commit or a source URL (AGPL-3.0 §13, ADR 0036 D-6), and — since
+# #780 — against a database that is not migrated (run `operator migrate`
+# below first; the default database is data/instance.sqlite). Accounts and
+# rooms need OYL_INSTANCE_ORIGIN; every variable it reads is in .env.example.
+# Ctrl-C (SIGTERM) closes every room socket 1001 and writes final results.
+# Not a gate, and nothing runs it. Run on 2026-09-29.
 OYL_INSTANCE_COMMIT="$(git rev-parse HEAD)" pnpm --filter @onyourleft/instance start
+
+# The operator's commands (#791), run on 2026-09-29 — the same ones the image
+# runs (`node src/operator/cli.ts …`): `migrate` (the deploy's step; the
+# server never migrates), `backup <dir> [--keep N] [--copy-to <dir>]` (an
+# online VACUUM INTO and the blobs), `restore <snapshot> [--force]` (checked
+# against the snapshot's manifest), `verify`, and `room-open <id> --kind
+# ride|race --length <m>` (until #784/#785). They act on OYL_INSTANCE_DATABASE
+# and OYL_INSTANCE_BLOBS. docs/operating-an-instance.md says what each does.
+pnpm --filter @onyourleft/instance run operator migrate
+
+# #807's tunnel measurement, from a machine that is NOT the box: two riders,
+# one room, through the public hostname, for 30 minutes — every disconnect,
+# every rejoin's time, the longest silence. `--idle-probe` measures the
+# tunnel's idle timeout (with OYL_INSTANCE_PING_INTERVAL_MS=0 on the box for
+# the run). NOT a gate: it needs the real tunnel. Run locally against the
+# image for one minute on 2026-09-29 (no disconnect, 59 frames each).
+pnpm --filter @onyourleft/instance run tunnel-soak --url https://… --room … --minutes 30
 
 # Migrate an instance database file by hand (#769): `status`, `latest`, `up`
 # (one) or `down` (one), each printing the applied migrations and every table's
@@ -2085,9 +2143,13 @@ shellcheck scripts/*.sh
 npm view typescript-eslint peerDependencies.typescript
 
 # Requires Docker, and the network the first time (the base image is pulled by
-# digest). Builds apps/instance/Dockerfile with the tree's commit, waits for
-# the image's OWN healthcheck to answer /health inside the container, and
-# requires /source to name that commit. IMG001-IMG005: since #841 the base
+# digest). Builds apps/instance/Dockerfile with the tree's commit — from the
+# REPOSITORY ROOT since #780, installing the production closure from the
+# lockfile inside the build, which needs the npm registry — runs the migrate
+# step in the image (IMG006), waits for the image's OWN healthcheck to answer
+# /health inside the container, requires /source to name that commit, and
+# since #780 requires /ready to be `ready` (IMG007: the store opened, so its
+# runtime dependencies are in the image). IMG001-IMG005: since #841 the base
 # image must be pinned by digest (IMG005) and is pulled as its own step, so a
 # Docker Hub that will not serve it is IMG004 -- the registry, named -- rather
 # than an IMG001 that reads like a broken Dockerfile. ⚠️ Since #852 that is
@@ -2102,15 +2164,26 @@ bash scripts/check-instance-image.sh
 
 # Its own suite (#841). A fake `docker`, `curl` and `sleep` go first on PATH,
 # the way check-third-party-notices.test.sh fakes `pnpm`, so it needs no Docker
-# and waits for nothing; every IMG id has a case that goes red. 60 cases on
-# 2026-09-29 (43 before #852) -- the count is what the run prints.
+# and waits for nothing; every IMG id has a case that goes red. 69 cases on
+# 2026-09-29 (60 before #780, 43 before #852) -- the count is what the run prints.
 bash scripts/check-instance-image.test.sh
 
-# The same image by hand, for #807's deployment. The commit is a REQUIRED build
-# argument: the build fails without it, rather than an instance that cannot
-# say which source it is.
-docker build --build-arg OYL_INSTANCE_COMMIT="$(git rev-parse HEAD)" -t onyourleft-instance apps/instance
-docker run --rm -p 127.0.0.1:8787:8787 onyourleft-instance
+# The same image by hand. The commit is a REQUIRED build argument: the build
+# fails without it, rather than an instance that cannot say which source it
+# is. ⚠️ The context is the REPOSITORY ROOT since #780 (`-f`), and the server
+# refuses an un-migrated volume, so the migrate step runs first.
+docker build --build-arg OYL_INSTANCE_COMMIT="$(git rev-parse HEAD)" -f apps/instance/Dockerfile -t onyourleft-instance .
+docker run --rm -v oyl-data:/data onyourleft-instance node src/operator/cli.ts migrate
+docker run --rm -v oyl-data:/data -p 127.0.0.1:8787:8787 onyourleft-instance
+
+# #807's deployment and #52's one command, on a machine with Docker Compose and
+# a filled-in apps/instance/deploy/home/.env (template: instance.env.example
+# there): builds this checkout, snapshots the data, migrates, starts, waits for
+# /ready, and rolls itself back if the new build is not ready. `--rollback` by
+# hand. docs/self-hosting/home-machine.md is the guide. Performed and timed on
+# a Mac with Docker 29.5.3 on 2026-09-29 (deploy 10 s, rollback with a restore
+# 9 s); the owner's Windows box is issue #733's. NOT a gate.
+bash apps/instance/deploy/home/deploy.sh
 ```
 
 `scripts/check-repo-rules.sh` enforces:
@@ -2215,19 +2288,17 @@ not.
   [ADR 0036](docs/adr/0036-a-self-hostable-instance-server-now.md)). ⚠️ This bullet used to read
   *"`apps/api`, or anything else server-shaped. Not 'not yet' — not in Phase 1 at all"* (owner
   decision D6), and a reviewer who remembers it is reading the old file.
-- **Any instance feature beyond metadata, on a RUNNING instance.** `apps/instance` answers
-  `/health`, `/source`, `/openapi.json` and `/licences/third-party.txt`; since #855 its route table
-  also holds the identity routes (#772–#774), which answer `unavailable` because `main.ts` hands the
-  handler no identity — no account on a running instance until #780 opens the store, no sync
-  (#776), no room anybody can reach (#780). ⚠️ The room **core** exists since
-  [#779](https://github.com/openzigs/onyourleft/issues/779) — `src/room/core/` — and the only
-  thing that mounts it is [#781](https://github.com/openzigs/onyourleft/issues/781)'s Durable
-  Object adapter, under a local `workerd` in `test:workerd` and **deployed nowhere**. Do not write a
-  command or a test that assumes a reachable room exists.
-  ⚠️ **The database and the blob store DO exist since #842** (#769, #770) — a reviewer who
-  remembers "no database (#769)" in this bullet is reading the old file — but no route and no
-  start-up path opens either: `main.ts` reads no database path, and the Docker image installs
-  no `node_modules`, so `kysely` is not in it. The first consumer wires both.
+- **A room a rider can create.** ⚠️ Since [#780](https://github.com/openzigs/onyourleft/issues/780)
+  a running instance opens its store, serves accounts (with `OYL_INSTANCE_ORIGIN` set) and serves
+  rooms through the Node adapter — a reviewer who remembers "no account on a running instance" and
+  "no room anybody can reach" in this bullet is reading the old file. What does not exist is a way
+  for a RIDER to make a room: until [#784](https://github.com/openzigs/onyourleft/issues/784) and
+  [#785](https://github.com/openzigs/onyourleft/issues/785) the operator opens one
+  (`node src/operator/cli.ts room-open`), and who may start a race is provisional
+  (`POST /v1/rooms/{roomId}/start`, any athlete seated in it). No client joins a room yet
+  ([#782](https://github.com/openzigs/onyourleft/issues/782)), and nothing is deployed: the home
+  deployment (#807) is the owner's to run. The Durable Object adapter
+  ([#781](https://github.com/openzigs/onyourleft/issues/781)) is still **deployed nowhere**.
 
 #### What exists, and what each is **not** yet
 
@@ -2516,7 +2587,8 @@ each of those can do is turn `main` red on a day the service is down. For Docker
 | `apps/instance`'s unit and HTTP tests (the real listener on an ephemeral port) | the Vitest run, as one more project (`instance`) | no service, no second job; 51 cases in about 0.15 s locally at #767, 299 at #855 (the identity routes' files add about 1 s of case time on an idle machine — the count ages, read the run) |
 | The Docker image, and `/health` inside the container | `Checks, concurrently`, as `instance image` | mostly a digest-pinned pull, so it waits rather than works — the step's shape |
 | The OpenAPI drift check (#36) | the Vitest run (`src/openapi.test.ts`) | it is a byte comparison, not a tool |
-| Rooms: the conformance suite (`src/room/conformance.test.ts`) against the reference and the Durable Object adapter under in-memory fakes, and the adapter's own cases under fakes | the Vitest run (`instance`) | #781; well under a second. #780's Node adapter joins the same file |
+| Rooms: the conformance suite (`src/room/conformance.test.ts`) against the reference, the Durable Object adapter under in-memory fakes and — since #780 — the Node adapter over real `ws` sockets on loopback | the Vitest run (`instance`) | #781, #780; a few seconds |
+| Rooms: the Node adapter's router with real forked room workers, backpressure, the keepalive through a fake idle-closing proxy, and a SIGTERM mid-race through `node src/main.ts` | the Vitest run (`instance`) | #780, #791. ⚠️ These wait on real 1 Hz ticks and real processes — the instance's slowest files (`router.test.ts`, `room-host.test.ts`, `instance.test.ts`), about 45 s of case time locally |
 | Rooms: the Durable Object adapter under a real `workerd` | **not CI** — `test:workerd`, a local command (§4a), decided by #781 | about 35 s, most of it waiting on the runtime's alarms and its ten-second eviction, which a job already past fifteen minutes on the 7763 cannot spend on every pull request; its logic runs in CI under the fakes. ⚠️ **The 35 s is a LOCAL figure** (34.6 s again on #781's review, on a Mac) — the suite has never run on the runner, so this decision rests on the local figure and #771's *"measure its cost on the runner before deciding"* is not met. ⚠️ The ~130 MB `workerd` binary is still downloaded by CI's install (§8) |
 | Rooms: the two-browser e2e spec with its fan-out control | **not built yet** — #780 | #771's last criterion is owed by the first room a browser can reach |
 | A load test, and a Cloudflare bill | **not CI** (#792, #464) | a measurement and an account, not gates |
@@ -3440,7 +3512,8 @@ written to `apps/instance/third-party.txt`, which the instance serves at
 `GET /licences/third-party.txt`, and is **excluded** from `apps/web/public/licences/third-party.txt`,
 because a rider's device carries none of it. A server dependency with no licence file is `NOT003`
 with no reviewed escape yet: the first one is a decision to make with the package in front of you.
-Today the instance's closure is empty and its document says so.
+Today the instance's closure is `kysely` and, since #780, `ws` — both MIT (ADR 0037 D-9) — and
+its document says so; this sentence said the closure was empty until #780 read it.
 
 ⚠️ **The text is read from the files, never from the manifest.** `lucide-react`'s manifest says
 `ISC`; its `LICENSE` is ISC **and** MIT, for the icons derived from Feather. The field is printed as
