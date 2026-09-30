@@ -40,10 +40,8 @@
  *    D-6); a record that does not verify is not written, and the report names
  *    which of D-6's answers it got. ⚠️ **Nor is a record signed by a key that
  *    is not one of the athlete's own** (#898): a signature proves who signed,
- *    not whose ride it is, so the key is checked against
- *    {@link SyncDependencies.athleteKeys} — and a key since revoked vouches
- *    only for a ride that started before it was revoked, the instance's own
- *    rule. The file is imported through the SAME path
+ *    not whose ride it is — "Whose key it is" below. The file is imported
+ *    through the SAME path
  *    a rider's own import takes (`transfer/import-batch.ts`), under the
  *    record's own activity id, so the ride library reads it like any other.
  * 3. **A tombstoned ride** — deleted on another device — is **kept here**
@@ -89,6 +87,43 @@
  *    which device changed.
  * 7. The base forgets a ride neither side holds any more.
  *
+ * ## Whose key it is (#898, the owner's decision 4 of 2026-09-30)
+ *
+ * A pulled record's key is checked against the athlete's keys **rather than
+ * trusting the instance**. The instance's device list comes from the same
+ * server that serves the record, so a compromised instance that forged a
+ * record would simply list the forging key. So a record is taken only when
+ * its key is one THIS device trusts:
+ *
+ * - **this device's own key**, always ({@link SyncDependencies.signingKey});
+ * - **a key admitted on this device** — `packages/store`
+ *   §`TrustedDeviceKeyRecord`, written only by {@link admitDeviceKey}, which a
+ *   screen on this device calls when the rider confirms another of their
+ *   devices. Nothing the instance says admits a key.
+ *
+ * ⚠️ **No trust on first use.** The instance's list is never used to seed the
+ * set, not even at the first sync: that is the moment a device knows least,
+ * and a list read then is exactly the instance's say-so the owner ruled out.
+ * The cost, said plainly: a device that has admitted no other device's key
+ * pulls no ride another device signed. Each is refused as `key-not-admitted`
+ * (not saved, not remembered in the base, so the next sync after the rider
+ * admits the key pulls it), and the key is named in
+ * {@link SyncReport.keysToConfirm} for the screen that asks. The link flow
+ * (#773) does not admit a key either: a link code carries no key, so the
+ * device that is linked never learns the other device's key from it.
+ *
+ * The instance's list ({@link SyncDependencies.athleteKeys}) is still read,
+ * for two things that only ever NARROW trust: a key it does not list is
+ * refused (`not-your-key` — a record of another athlete's, or of a device the
+ * rider removed), and a key it says was revoked vouches only for a ride that
+ * started before the revocation (`key-revoked`). A lying instance can hide a
+ * revocation that way, but it cannot make this device take a key the rider
+ * never admitted. ⚠️ And the start time is the one the record's own key
+ * signed: the revocation rule bounds an honest device that syncs late, and
+ * refuses what a revoked key dates after its revocation — it does not stop a
+ * thief holding the key who backdates the ride. Nothing on the device can
+ * tell a backdated start from a true one.
+ *
  * ⚠️ **A pulled record is not kept on this device.** `packages/store`'s
  * `putActivityRecord` refuses a record signed by a key that is not THIS
  * device's (ADR 0014 D-7: one key per device, no rotation in this phase), and
@@ -132,7 +167,11 @@
  *      choice for a ride** since #898: the owner's ruling that a tombstone
  *      never deletes a device's copy is about rides. A text deleted here this
  *      way is one this device had not changed since the base, so no word typed
- *      HERE is lost — and a text changed here is pushed back instead;
+ *      HERE is lost — and a text changed here is pushed back instead.
+ *      ⚠️ That delete is unsigned, so the words typed on the OTHER device
+ *      go on a say-so rule 3 refuses for a ride: whether a text should be
+ *      kept here like a ride is the owner's question, put on #924 by #926's
+ *      review (N3), and unanswered;
  *    - otherwise the three ways of rule 5: the same is remembered, a change
  *      only there is pulled, a change here (or a copy the instance lacks) is
  *      pushed — ⚠️ **and a change on BOTH sides keeps both** (#924, the
@@ -176,6 +215,7 @@ import type {
 import {
   GOALS_KEY,
   MAXIMUM_DOCUMENT_NAME_CHARACTERS,
+  tidyRiderText,
   withoutBidiControls,
 } from '@onyourleft/store';
 
@@ -213,13 +253,18 @@ export type SyncStore = TransferStore &
     | 'putRiderText'
     | 'listRiderTexts'
     | 'deleteRiderText'
+    | 'listTrustedDeviceKeys'
   >;
 
 export interface SyncDependencies {
   readonly transport: SyncTransport;
   readonly store: SyncStore;
   readonly athleteId: AthleteId;
-  /** This device's signing key — `ensureDeviceSigningKey`, bound. Asked for only to push. */
+  /**
+   * This device's signing key — `ensureDeviceSigningKey`, bound. Asked for to
+   * push, and for its public key when a pulled record is checked: this
+   * device's own key is always trusted (#898).
+   */
   readonly signingKey: () => Promise<SigningKey>;
   readonly sha256: Sha256;
   readonly verifier: SignatureVerifier;
@@ -233,15 +278,14 @@ export interface SyncDependencies {
    */
   readonly rideSummary: (activityId: ActivityId) => Promise<string | undefined>;
   /**
-   * The athlete's device keys (#898): a pulled record signed by a key that is
-   * not one of them is refused, and one signed by a key since revoked only
-   * vouches for a ride that started before it was revoked. Asked for at most
-   * once a sync, and only when there is something to pull; a list that cannot
-   * be read pulls nothing. ⚠️ Read from the instance's own device list
-   * ({@link athleteKeysFrom}), which is a second route checked against the
-   * record, not a key pinned on this device: it stops a record that is not
-   * the athlete's being pulled, and cannot stop an instance that lies the
-   * same way on both routes.
+   * The athlete's device keys as the INSTANCE lists them (#898) — used only
+   * to narrow trust: a pulled record signed by a key it does not list is
+   * refused, and one signed by a key since revoked only vouches for a ride
+   * that started before it was revoked. Asked for at most once a sync, and
+   * only when there is something to pull; a list that cannot be read pulls
+   * nothing. It never ADMITS a key: a key must also be this device's own or
+   * admitted here ({@link admitDeviceKey}) — the module header's "Whose key
+   * it is".
    */
   readonly athleteKeys: () => Promise<readonly AthleteKey[]>;
   /**
@@ -250,6 +294,35 @@ export interface SyncDependencies {
    * beside this device's when both changed.
    */
   readonly newDocumentId: () => string;
+}
+
+/**
+ * Admit another of the rider's devices' keys on THIS device (#898), so a sync
+ * takes the rides it signed. The ONE way a key becomes trusted: called by a
+ * screen on this device once the rider has confirmed it is theirs — never
+ * with a key only because an instance listed it. `publicKey` is 64 lowercase
+ * hex, as a signed record carries it; the store refuses anything else.
+ *
+ * Nothing in the shipped client calls it yet, as nothing calls
+ * {@link syncWithInstance}: the screen that asks is part of wiring sync in.
+ */
+export async function admitDeviceKey(
+  store: Pick<ActivityStore, 'putTrustedDeviceKey'>,
+  athleteId: AthleteId,
+  publicKey: string,
+  now: UnixSeconds,
+): Promise<void> {
+  await store.putTrustedDeviceKey({ athleteId, publicKey, admittedAt: now });
+}
+
+/** The keys a pulled record is checked against (#898), read once a sync. */
+interface KeyTrust {
+  /** The instance's list — it narrows trust, and never widens it. */
+  readonly listed: readonly AthleteKey[];
+  /** This device's own public key, lowercase hex: always trusted. */
+  readonly own: string;
+  /** The keys admitted on this device ({@link admitDeviceKey}). */
+  readonly admitted: ReadonlySet<string>;
 }
 
 /** One of the athlete's device keys, as {@link SyncDependencies.athleteKeys} gives it. */
@@ -336,6 +409,13 @@ export interface SyncReport {
    * Counted in {@link SyncReport.textsPushed} as well.
    */
   readonly textConflicts: number;
+  /**
+   * Keys that signed a record the instance served and this device refused as
+   * `key-not-admitted` (#898): listed by the instance as the athlete's, and
+   * never admitted HERE. Each is a question for the rider — is this one of
+   * your devices? — and {@link admitDeviceKey} is the answer "yes".
+   */
+  readonly keysToConfirm: readonly string[];
   readonly failures: readonly SyncFailure[];
 }
 
@@ -415,9 +495,16 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
   let deletedOnInstance = 0;
   /** Rides this device holds that the instance hides: nothing of them is sent (#898). */
   const hidden = new Set<string>();
-  let keys: Promise<readonly AthleteKey[]> | undefined;
-  /** The athlete's keys, read once, and only if something is pulled (#898). */
-  const athleteKeys = (): Promise<readonly AthleteKey[]> => (keys ??= dependencies.athleteKeys());
+  let trust: Promise<KeyTrust> | undefined;
+  /** Which keys a pulled record may be signed by: read once, and only if something is pulled (#898). */
+  const keyTrust = (): Promise<KeyTrust> =>
+    (trust ??= (async () => ({
+      listed: await dependencies.athleteKeys(),
+      own: toHex((await dependencies.signingKey()).publicKey),
+      admitted: new Set((await store.listTrustedDeviceKeys(athleteId)).map((row) => row.publicKey)),
+    }))());
+  /** Keys the instance listed and this device has not admitted, that signed a record (#898). */
+  const keysToConfirm = new Set<string>();
   let consentsPushed = 0;
   let consentsPulled = 0;
   let textsPulled = 0;
@@ -489,7 +576,9 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
       }
       continue;
     }
-    const outcome = await pullRide(dependencies, entry.key, athleteKeys);
+    const outcome = await pullRide(dependencies, entry.key, keyTrust, (key) =>
+      keysToConfirm.add(key),
+    );
     if (typeof outcome === 'string') {
       failures.push({ kind: 'activity', key: entry.key, reason: outcome });
       continue;
@@ -772,6 +861,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     textsDeleted,
     textsDeletedOnInstance,
     textConflicts,
+    keysToConfirm: [...keysToConfirm].sort(),
     failures,
   };
 
@@ -873,6 +963,16 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
         name?: unknown;
       };
       if (typeof body.text !== 'string') return 'conflict-not-kept';
+      // Kept already: a push that failed after the copy was saved leaves the
+      // base where it was, so the next sync comes here again — and must not
+      // save the same words a second time, and a third (#926's review, N4).
+      // Any document of the rider's that holds these words exactly keeps
+      // them; the text being synced is not one, whatever it holds.
+      const texts = tidyRiderText(body.text);
+      const held = await store.listRiderTexts(athleteId, 'document');
+      if (held.some((row) => !(kind === 'document' && row.key === key) && row.text === texts)) {
+        return 'kept';
+      }
       const ride =
         kind === 'note' ? await store.getActivity(athleteId, key as ActivityId) : undefined;
       const copyKey = dependencies.newDocumentId();
@@ -1066,7 +1166,9 @@ function localItem(
 async function pullRide(
   dependencies: SyncDependencies,
   content: string,
-  athleteKeys: () => Promise<readonly AthleteKey[]>,
+  keyTrust: () => Promise<KeyTrust>,
+  /** Told a key the instance listed and this device has not admitted. */
+  unadmitted: (publicKey: string) => void,
 ): Promise<{ readonly activityId: ActivityId } | string> {
   const { transport, store, athleteId, sha256, verifier } = dependencies;
   const recordAnswer = await transport.json('GET', `/v1/sync/records/${content}`);
@@ -1085,15 +1187,26 @@ async function pullRide(
   if (verification.status !== 'verified') return verification.status;
   const claims: ActivityClaims = verification.record.claims;
   // Whose it is, not only who signed it (#898): never the instance's say-so.
-  let held: readonly AthleteKey[];
+  // The module header's "Whose key it is" says why each of these.
+  let trust: KeyTrust;
   try {
-    held = await athleteKeys();
+    trust = await keyTrust();
   } catch {
     return 'keys-unavailable';
   }
-  const signer = held.find((key) => key.publicKey === verification.record.publicKey);
-  if (signer === undefined) return 'not-your-key';
-  if (signer.revokedAt !== null && claims.startedAt >= signer.revokedAt) return 'key-revoked';
+  const signer = verification.record.publicKey;
+  const own = signer === trust.own;
+  const listed = trust.listed.find((key) => key.publicKey === signer);
+  if (listed === undefined && !own) return 'not-your-key';
+  if (!own && !trust.admitted.has(signer)) {
+    unadmitted(signer);
+    return 'key-not-admitted';
+  }
+  // The start time is signed by the key under suspicion: this bounds an
+  // honest late sync and a revoked key's own later dates, not a thief who
+  // backdates (the module header).
+  const revokedAt = listed?.revokedAt ?? null;
+  if (revokedAt !== null && claims.startedAt >= revokedAt) return 'key-revoked';
 
   const report = await importActivityFiles({
     // A FIT file carries no name, so the import takes one from the file's
