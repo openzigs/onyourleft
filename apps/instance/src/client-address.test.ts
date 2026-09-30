@@ -96,7 +96,12 @@ describe('the Node listener (#775)', () => {
   async function echoAddress(clientAddressHeader: string | null): Promise<Listening> {
     const handler: Handler = (_request, client) =>
       Promise.resolve(Response.json({ address: client?.address ?? null }));
-    running = await listen(handler, { host: '127.0.0.1', port: 0, clientAddressHeader });
+    running = await listen(handler, {
+      host: '127.0.0.1',
+      port: 0,
+      clientAddressHeader,
+      trustedProxies: [],
+    });
     return running;
   }
 

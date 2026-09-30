@@ -187,8 +187,8 @@ Running an instance for other people is a set of duties as well as a box:
   `OYL_INSTANCE_TRUSTED_PROXIES`. From any other peer the header is ignored
   ([`docs/moderation.md`](moderation.md) §"Behind a proxy or a tunnel").
 - **Registration** (`OYL_INSTANCE_REGISTRATION`) is `approval`, `invite`, `open` or `closed`. Unset,
-  the instance itself uses `approval`; the home deployment's compose file uses `closed` unless `.env`
-  says otherwise. The owner and the deputy are named by device key (`OYL_INSTANCE_OWNER_KEY`,
+  it is `closed`; the project's image sets `approval`, and the home deployment's compose file uses
+  `closed` unless `.env` says otherwise. The owner and the deputy are named by device key (`OYL_INSTANCE_OWNER_KEY`,
   `OYL_INSTANCE_DEPUTY_KEY`) — [`docs/moderation.md`](moderation.md).
 - **Blocking, reporting and moderation** ([#83](https://github.com/openzigs/onyourleft/issues/83)):
   riders block and report each other, and the owner and the deputy suspend, hide names and decide

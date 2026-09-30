@@ -29,7 +29,12 @@ async function echoUrl(): Promise<Listening> {
       Response.json({ host: url.host, path: url.pathname, query: url.search }),
     );
   };
-  running = await listen(handler, { host: '127.0.0.1', port: 0 });
+  running = await listen(handler, {
+    host: '127.0.0.1',
+    port: 0,
+    clientAddressHeader: null,
+    trustedProxies: [],
+  });
   return running;
 }
 
@@ -111,6 +116,8 @@ describe('a response is pulled no faster than the client reads it (#841)', () =>
     running = await listen(() => Promise.resolve(new Response(null, { status: 204 })), {
       host: '127.0.0.1',
       port: 0,
+      clientAddressHeader: null,
+      trustedProxies: [],
     });
     const response = await raw(running, '/');
     expect(response.startsWith('HTTP/1.1 204 ')).toBe(true);
@@ -132,7 +139,12 @@ describe('a response is pulled no faster than the client reads it (#841)', () =>
           }),
         ),
       );
-    running = await listen(handler, { host: '127.0.0.1', port: 0 });
+    running = await listen(handler, {
+      host: '127.0.0.1',
+      port: 0,
+      clientAddressHeader: null,
+      trustedProxies: [],
+    });
     const { hostname, port } = new URL(running.url);
     const socket = connect(Number(port), hostname, () => {
       socket.write('GET / HTTP/1.1\r\nHost: x\r\n\r\n');
@@ -210,7 +222,7 @@ describe('the client address behind a proxy — #895 review B3, #903 item 4', ()
         seen.push(client?.address ?? null);
         return Promise.resolve(new Response('ok'));
       },
-      { host: '127.0.0.1', port: 0, clientAddressHeader: 'cf-connecting-ip' },
+      { host: '127.0.0.1', port: 0, clientAddressHeader: 'cf-connecting-ip', trustedProxies: [] },
     );
     try {
       for (const address of ['203.0.113.9', '198.51.100.1']) {

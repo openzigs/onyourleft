@@ -49,8 +49,9 @@ export async function startTestInstance(
   } = {},
 ): Promise<TestInstance> {
   const lines: string[] = [];
+  const config = testConfig(options.config);
   const handler = createHandler({
-    config: testConfig(options.config),
+    config,
     version: '9.8.7',
     notices: options.notices ?? 'notices',
     log: (line) => lines.push(line),
@@ -58,6 +59,11 @@ export async function startTestInstance(
     ...(options.identity === undefined ? {} : { identity: options.identity }),
     ...(options.probes === undefined ? {} : { probes: options.probes }),
   });
-  const listening = await listen(handler, { host: '127.0.0.1', port: 0 });
+  const listening = await listen(handler, {
+    host: '127.0.0.1',
+    port: 0,
+    clientAddressHeader: config.clientAddressHeader,
+    trustedProxies: config.trustedProxies,
+  });
   return { handler, listening, url: listening.url, lines };
 }

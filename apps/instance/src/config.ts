@@ -24,9 +24,11 @@
  * ## Registration and moderation — #775, #83
  *
  * - **`OYL_INSTANCE_REGISTRATION`**: `open`, `approval`, `invite` or `closed`.
- *   ⚠️ **Unset is `approval`** — the owner's ruling (#16, Q5 and Q13,
- *   2026-09-28) — so an instance somebody starts without reading this does not
- *   let anybody in unseen.
+ *   Case does not matter. ⚠️ **Unset is `closed`** (#891's merge review): an
+ *   instance somebody starts without reading this registers nobody, as main's
+ *   instance did before the modes existed. The PROJECT's instance registers by
+ *   `approval` — the owner's rulings (#16, Q5 and Q13, 2026-09-28) are about
+ *   it — and its image sets that (`Dockerfile`).
  * - **`OYL_INSTANCE_OWNER_KEY`** and **`OYL_INSTANCE_DEPUTY_KEY`**: the two
  *   moderators' device keys, 64 lowercase hex characters each (ruling Q13).
  * - **`OYL_INSTANCE_PUBLIC_ROOM_MIN_ACCOUNT_DAYS`** and
@@ -72,8 +74,8 @@ export const REGISTRATION_MODES: readonly RegistrationMode[] = [
   'closed',
 ];
 
-/** The mode an instance registers in when the operator sets none (#775, rulings Q5 and Q13). */
-export const DEFAULT_REGISTRATION: RegistrationMode = 'approval';
+/** The mode an instance registers in when the operator sets none: nobody new (#891's merge review). */
+export const DEFAULT_REGISTRATION: RegistrationMode = 'closed';
 
 /** The raw values, as the environment gives them. */
 export interface RawConfig {
@@ -174,7 +176,7 @@ export function readConfig(raw: RawConfig): ConfigResult {
 
   let registration = DEFAULT_REGISTRATION;
   if (present(raw.registration)) {
-    const value = raw.registration.trim();
+    const value = raw.registration.trim().toLowerCase();
     if ((REGISTRATION_MODES as readonly string[]).includes(value)) {
       registration = value as RegistrationMode;
     } else {

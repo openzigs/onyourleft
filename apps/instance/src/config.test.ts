@@ -17,7 +17,7 @@ describe('readConfig', () => {
         commit: COMMIT,
         sourceUrl: `https://github.com/openzigs/onyourleft/tree/${COMMIT}`,
         bodyLimitBytes: 1024 * 1024,
-        registration: 'approval',
+        registration: 'closed',
         moderators: {},
         publicRooms: { minimumAccountDays: 7, minimumCompletedRides: 3 },
         clientAddressHeader: null,
@@ -63,14 +63,25 @@ describe('readConfig', () => {
     expect(result.ok ? 0 : result.problems.length).toBe(3);
   });
 
-  it('registers by approval when nothing is set (#775, rulings Q5 and Q13), and reads each mode', () => {
+  it('registers nobody when nothing is set (#891 merge review), and reads each mode', () => {
     const unset = readConfig({ commit: COMMIT });
-    expect(unset.ok && unset.config.registration).toBe('approval');
+    expect(unset.ok && unset.config.registration).toBe('closed');
     for (const mode of ['open', 'approval', 'invite', 'closed']) {
       const result = readConfig({ commit: COMMIT, registration: ` ${mode} ` });
       expect(result.ok && result.config.registration).toBe(mode);
     }
     expect(readConfig({ commit: COMMIT, registration: 'anyone' }).ok).toBe(false);
+  });
+
+  it('reads the registration mode whatever its case, as main’s reader did (`Closed`, `APPROVAL`)', () => {
+    for (const [given, mode] of [
+      ['Closed', 'closed'],
+      ['APPROVAL', 'approval'],
+      ['Invite', 'invite'],
+    ] as const) {
+      const result = readConfig({ commit: COMMIT, registration: given });
+      expect(result.ok && result.config.registration, given).toBe(mode);
+    }
   });
 
   it('names the owner and the deputy by device key, and refuses anything else (#83, ruling Q13)', () => {

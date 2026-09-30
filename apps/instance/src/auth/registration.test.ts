@@ -69,11 +69,11 @@ async function signInFrom(
   });
 }
 
-describe('the default registration mode (#775, rulings Q5 and Q13)', () => {
-  it('is approval-required, on an instance started with nothing configured', async () => {
+describe('the default registration mode (#775; the project’s image: rulings Q5 and Q13)', () => {
+  it('is closed, on an instance started with nothing configured (#891 merge review, decision 21)', async () => {
     const configured = readConfig({ commit: TEST_COMMIT });
     if (!configured.ok) throw new Error(configured.problems.join(' '));
-    expect(configured.config.registration).toBe('approval');
+    expect(configured.config.registration).toBe('closed');
 
     const directory = await mkdtemp(join(tmpdir(), 'oyl-instance-default-'));
     const store = await openSqlStore(join(directory, 'instance.sqlite'));
@@ -103,15 +103,8 @@ describe('the default registration mode (#775, rulings Q5 and Q13)', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(await device.statement(nonce)),
     });
-    const body = (await session.json()) as { registrationState: string; athleteId: string };
-    expect(session.status).toBe(200);
-    expect(body.registrationState).toBe('pending');
-    const fresh = await openSqlStore(join(directory, 'instance.sqlite'));
-    try {
-      expect((await fresh.getAthlete(body.athleteId))?.registrationState).toBe('pending');
-    } finally {
-      await fresh.close();
-    }
+    expect(session.status).toBe(403);
+    expect(codeOf((await session.json()) as Record<string, unknown>)).toBe('registration_closed');
   });
 
   it('is what the project’s image is configured with', () => {

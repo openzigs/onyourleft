@@ -99,15 +99,20 @@ export function listen(
   {
     host,
     port,
-    clientAddressHeader = null,
-    trustedProxies = [],
+    clientAddressHeader,
+    trustedProxies,
   }: {
     readonly host: string;
     readonly port: number;
-    /** The header a local proxy puts the client's address in (#775), or `null`. */
-    readonly clientAddressHeader?: string | null;
-    /** The proxies the header is believed from besides loopback (#891's review). */
-    readonly trustedProxies?: readonly string[];
+    /**
+     * The header a local proxy puts the client's address in (#775), or `null`.
+     * REQUIRED, like `trustedProxies`, so a caller that forgets to pass the
+     * operator's setting is a compile error rather than a quiet default
+     * (#891's merge review).
+     */
+    readonly clientAddressHeader: string | null;
+    /** The proxies the header is believed from besides loopback (#891's review); `[]` for loopback only. */
+    readonly trustedProxies: readonly string[];
   },
 ): Promise<Listening> {
   const server = createServer((incoming, outgoing) => {
