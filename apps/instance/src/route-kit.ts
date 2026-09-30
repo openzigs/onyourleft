@@ -138,6 +138,15 @@ export interface Route {
    * session route answers such a caller `registration_pending`.
    */
   readonly admitsPending?: true;
+  /**
+   * A SUSPENDED athlete may call this route, through the way-out session
+   * `POST /v1/auth/leave-session` opens (#898). Every other session route
+   * answers such a caller `account_suspended`. ⚠️ Declared on exactly two
+   * routes — the account export and the account deletion — and
+   * `moderation/choke-point.test.ts` walks the table and fails if any other
+   * route declares it.
+   */
+  readonly admitsSuspended?: true;
   /** The route needs a signed-in device: `Authorization: Bearer <session token>`. */
   readonly auth?: 'session';
   /** The JSON body the route reads, for the specification. */
