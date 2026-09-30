@@ -34,6 +34,7 @@
  * hardware, and it is recorded as outstanding in `README.md` beside this file.
  */
 
+import type { PlacedStand } from './gantry';
 import type { KitColour } from '@onyourleft/store';
 
 import type { HorizonRelief, TerrainMesh } from './landform';
@@ -166,6 +167,29 @@ export interface RiderMarker {
    */
   readonly bodyLean: number;
   /**
+   * How much of the pedal stroke's motion this rider is drawn with, 0 to 1 —
+   * #625: the realistic body's rock, pelvis roll and ankling are scaled by it
+   * (`bicycle.ts` §`riderMotion`).
+   *
+   * **Nought whenever the cranks are not being turned by a reading**: the
+   * rider's is 1 exactly while the HUD shows a cadence (#349 — `GameView`
+   * hands `scene.ts` `bicycle.ts` §`cadenceTurns`), the pacer's and the
+   * ghost's while they are moving, and every rider's eases to nought as the
+   * cranks are parked in a tight bend (#546, `bicycle.ts` §`pedallingShare`).
+   *
+   * Required, on {@link lean}'s argument: an optional share nobody supplied
+   * would compile, render, and draw every realistic rider as still as they
+   * were before #625.
+   */
+  readonly pedalling: number;
+  /**
+   * The ride's own clock at this frame, in seconds — #625's breath. The
+   * simulation's `ridden` time (`simulation.ts` §`ghostClock`), so a held or a
+   * paused ride holds it, and it is never a wall clock. Required for
+   * {@link pedalling}'s reason.
+   */
+  readonly rideSeconds: number;
+  /**
    * How far the cranks have turned, in radians — #349, #368.
    *
    * ⚠️ **All three carry one now, and this note used to say only the rider's
@@ -250,6 +274,13 @@ export interface SceneFrame {
    * comparison include the water moving.
    */
   readonly water: WaterFrame;
+  /**
+   * The start and finish gantries and the boards before them, within reach of
+   * the rider, placed on the drawn road — #679 (`gantry.ts` §`linesNear`).
+   * Empty everywhere else on a route, which is what makes them cost nothing
+   * there. Only the realistic world draws them.
+   */
+  readonly lines: readonly PlacedStand[];
 }
 
 /** What {@link SceneFrame.water} carries. */

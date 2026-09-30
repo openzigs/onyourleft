@@ -40,7 +40,9 @@ import type {
   RiderExtent,
   TreeHandOver,
   TreeLevelMeasurement,
+  WaterBand,
 } from './game-harness';
+import { FRESNEL_CONTROL, FRESNEL_REFERENCE, WATER_BAND_ROWS } from './realistic-surfaces-fixture';
 import { MINIMUM_TINT_CONTRAST_RATIO } from '../src/game/terrain';
 import { type InstanceTint, NO_TINT, tintedLinear } from '../src/game/instance-tint';
 import { GROUND_BLOB_DARKNESS } from '../src/game/ground-blob';
@@ -59,6 +61,9 @@ import {
 } from '../src/game/realistic-assets';
 import { modelFacts } from '../src/game/realistic-bytes-testing';
 import { REALISTIC_WOODED_DRAW_CALLS } from '../src/game/realistic-budget';
+import { SURFACE_WEAR_ALLOWANCE, WORN_ROAD_CONTRAST_FLOOR } from '../src/game/road-wear';
+
+import { NIGHTLY } from './nightly';
 
 /**
  * Said beside every frame time this spec publishes — #473. Since #473 the
@@ -569,7 +574,10 @@ const test = base.extend<object, { harnessRun: (query?: string) => Promise<Harne
  * Today that cannot happen — only the `game` project runs this file (the
  * `chromium` project `testIgnore`s it, `playwright.config.ts` §`projects`), and
  * that project is one group in one worker — but a second worker reading a
- * query would be, and refusing it would be a false failure. Only a worker that
+ * query would be, and refusing it would be a false failure. ⚠️ Since #866 it CAN
+ * happen: the `nightly` project runs this file's `@nightly` describes, and a
+ * bare `playwright test` runs it beside `game`, both reading the plain page's
+ * load. `test:browser` and `test:browser:nightly` never run the two together. Only a worker that
  * is gone — whose process no longer exists — left its load unfinished for good.
  *
  * ⚠️ **An entry is written to a temporary file and renamed over the old one**,
@@ -700,6 +708,67 @@ const REALISTIC_LOAD_BUDGET_MS = 165_000;
 const TREES_LOAD_BUDGET_MS = 160_000;
 
 /**
+ * #679: the least lettering contrast a banner strip must read (a variance of
+ * relative luminance over the strip's mean) — **0.05** — the most — **2** —
+ * and #679's ceiling on what a gantry and its barriers may add near a line:
+ * **1 000** triangles.
+ */
+const GANTRY_LETTERING_FLOOR = 0.05;
+const GANTRY_LETTERING_CEILING = 2;
+const GANTRY_TRIANGLE_CEILING = 1_000;
+
+/**
+ * #630: how much lighter the far band's sun side must read than its shade
+ * side, as a share, averaged over four turns of the tree — **0.05** — and the
+ * most it may: **0.8**. And how many of a tree's pixels must move between two
+ * ride times: **20**.
+ */
+const IMPOSTOR_LIGHT_FLOOR = 0.05;
+/** The far tree's pixels over the turns, at the probe's quarter-size view: at least **250**. */
+const IMPOSTOR_MINIMUM_PIXELS = 250;
+const IMPOSTOR_LIGHT_CEILING = 0.8;
+const SWAY_MINIMUM_PIXELS = 20;
+
+/**
+ * #627's figures for the ground's contrast (`game-harness.ts`
+ * §`GroundBlendMeasurement`, a variance of relative luminance over a
+ * square's mean): the least a bank of rock must differ from level grass
+ * beside it, the most it may, and how much rock must have been drawn at all.
+ */
+const BLEND_MARGIN = 0.01;
+const BLEND_CEILING = 1;
+const BLEND_MINIMUM_ROCK_PIXELS = 200;
+/**
+ * How many times the grass's highest contrast the bank must read — **4** — and
+ * how far the control may stray outside the grass's range, as a factor —
+ * **1.5**. On a Mac on 2026-09-29 the bank read 0.096 against grass of 0.0017
+ * to 0.0058, and 0.0081 with the rock off: 1.4 times the grass's highest,
+ * which is the raking light on grass the level squares do not have.
+ */
+const BLEND_FACTOR = 4;
+const BLEND_LIGHT_FACTOR = 1.5;
+
+/**
+ * #629: how much larger the grazing water's Fresnel term, read back, must be
+ * than the near water's — **0.2** — and the most either may read: **1.05**, a
+ * whole reflection and the read-back's own spread.
+ */
+const WATER_FRESNEL_MARGIN = 0.2;
+const WATER_FRESNEL_CEILING = 1.05;
+
+/**
+ * #628: how much lighter a wheel track must read than its lane's middle, as a
+ * share of relative luminance after the light and AgX — **0.01** — and the
+ * most it may: **0.08**. `road-wear.ts` §`WHEEL_TRACK_LIGHTEN` asks for 0.04
+ * of the diffuse colour, the wear's clamp; AgX and the track's flatter relief
+ * bring that to 1.69 % read back (a Mac, 2026-09-29, #879; 2.47 % at #628's
+ * first 0.05), and the same two strips read −0.09 % with the wear off — the
+ * control holds that under the floor.
+ */
+const WHEEL_TRACK_FLOOR = 0.01;
+const WHEEL_TRACK_CEILING = 0.08;
+
+/**
  * Pays for the `?realistic` load in a `beforeAll` with its own budget — #607.
  *
  * ⚠️ **It is the fail-fast as much as the budget, and the fail-fast is the
@@ -791,6 +860,17 @@ const TREES_LOAD_BUDGET_MS = 160_000;
  * that runner draws the same loads (about three and a half times). With the
  * ledger's refusal switched off, the same run took 158 s: 21 hooks each paid
  * a hung budget of their own.
+ */
+/*
+ * ⚠️ **Since #866 the sum above is the NIGHTLY run's, not the required
+ * gate's**, and a reviewer who reads it as the required job's margin is
+ * reading the old arithmetic. Every describe that reads `?realistic` or
+ * `?realistic&trees`, and `realistic.browser.spec.ts`, is tagged `@nightly`
+ * (`nightly.ts`) and runs in `.github/workflows/nightly.yml`, one worker, not
+ * in `Repository rules`. The required gate's worst case is now the plain page
+ * and `?shadow-map` hanging — 60 + 70 + about 30 + the rest of the gate — well
+ * inside `GATE_BUDGET_MS`; the nightly run's is 60 + 165 + 160 + that spec's
+ * two 150 s waits, also inside it, which is why 840 s did not move.
  */
 function paysForTheRealisticLoad(): void {
   paysForTheLoad('?realistic', REALISTIC_LOAD_BUDGET_MS);
@@ -1010,7 +1090,7 @@ const REALISTIC_PUBLIC = fileURLToPath(new URL('../public/realistic/', import.me
 
 /**
  * How many images the realistic world holds, once per image — #618's review:
- * four surface maps, two a photographic structure surface, the bicycle's four
+ * eight surface maps (#627 added the verge and the rock), two a photographic structure surface, the bicycle's four
  * (#624), and every image in
  * a vegetation model plus its impostor, read off the committed files exactly as
  * `realistic-textures.test.ts` reads them.
@@ -1018,7 +1098,8 @@ const REALISTIC_PUBLIC = fileURLToPath(new URL('../public/realistic/', import.me
 function realisticImageCount(): number {
   const models = REALISTIC_VEGETATION_KINDS.flatMap((kind) => REALISTIC_VEGETATION[kind]);
   return (
-    4 +
+    // The road, the grass, and #627's verge and rock: two maps each.
+    8 +
     2 * PHOTOGRAPHIC_STRUCTURE_SURFACES.length +
     // #624: the bicycle's four drawn maps.
     REALISTIC_BICYCLE_MAP_NAMES.length +
@@ -1028,7 +1109,9 @@ function realisticImageCount(): number {
       (sum, model) =>
         sum +
         modelFacts(join(REALISTIC_PUBLIC, model.file)).images.length +
-        (model.impostor === undefined ? 0 : 1),
+        (model.impostor === undefined ? 0 : 1) +
+        // #630: its normal strip.
+        (model.impostorNormals === undefined ? 0 : 1),
       0,
     )
   );
@@ -2917,36 +3000,76 @@ test.describe('a bend to the right on the map is a bend to the right on the scre
  * the drawn road and nothing on the fixture reached that plane any more
  * (`game-harness.ts` §`nearFieldProbe` says why).
  */
-test.describe('scenery the camera passes is not cut by the near plane — #545', () => {
-  paysForTheRealisticLoad();
+/**
+ * The DEFAULT world's halves of #501 and ADR 0026 D-7 — required, since
+ * #878's review.
+ *
+ * ⚠️ **These two used to sit in §"the realistic world — ADR 0026"**, and #866
+ * made that describe nightly, which took them out of the required job with it:
+ * a GLSL break in the stylised water or the stone bridge (an invisible mesh and
+ * a console line, never an exception) would have reached `main` unseen until
+ * the next morning, and no other case reads the plain load's `shaderErrors`.
+ * They read the plain load every describe above already pays for, so they cost
+ * the required job next to nothing. Their realistic halves, and the control
+ * that the realistic set's URLs are matched at all, stay in the nightly
+ * describe below. `nightly-split.test.ts` refuses a nightly describe that
+ * reads the plain load, so they cannot drift back.
+ */
+test.describe('the default world compiles its shaders and fetches none of the realistic set — #501, ADR 0026 D-7', () => {
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
 
-  test('shows no cut geometry at the closest pass, where the same frame uncut shows it', async ({
+  test('compiles every shader it draws with — #501', async ({ harnessRun }) => {
+    // The stone bridge's world-metre projection and the water's band-limit are
+    // both hand-written GLSL spliced into three's own; an error in either is a
+    // log line and an invisible mesh, not a thrown exception.
+    expect((await harnessRun()).shaderErrors).toEqual([]);
+  });
+
+  test('fetches none of the realistic set, while it fetches its own models', async ({
     harnessRun,
   }) => {
-    // The realistic load: the world the owner saw it in. It shares that one
-    // load with the realistic world's cases below.
-    const result = await harness(harnessRun, '?realistic');
-    expect(result.errors).toEqual([]);
-    const near = result.nearField;
-    console.info(
-      `#545 at ${String(near.distance)} m in the ${near.world} world, the cull dropped a ` +
-        `${near.cut.join(' and a ')} ${near.pivotMetres.toFixed(2)} m from the eye: ` +
-        `${String(near.shippedPixels)} pixels cut with the cull, ` +
-        `${String(near.controlPixels)} without it, ${String(near.noisePixels)} drawing it twice`,
-    );
-    // Non-vacuity: the probe drew the realistic world, and found a frame
-    // where the renderer's own cull had something to drop.
-    expect(near.world).toBe('realistic');
-    expect(near.cut.length).toBeGreaterThan(0);
-    // The noise floor is nothing: the same frame drawn twice is the same frame.
-    expect(near.noisePixels).toBe(0);
-    // The control — the defect, drawn: without the cull the near plane cuts
-    // what the camera is passing, and the nearer plane shows it.
-    expect(near.controlPixels).toBeGreaterThan(100);
-    // And with it, nothing stands between the two planes.
-    expect(near.shippedPixels).toBe(0);
+    const { requested } = await harnessRun();
+    // Non-vacuity: the list is the page's requests, not an empty one — the
+    // default world's own models were fetched through it.
+    expect(requested.filter((url) => url.endsWith('.glb')).length).toBeGreaterThan(0);
+    expect(requested.filter((url) => url.includes('/realistic/'))).toEqual([]);
   });
 });
+
+test.describe(
+  'scenery the camera passes is not cut by the near plane — #545',
+  { tag: NIGHTLY },
+  () => {
+    paysForTheRealisticLoad();
+
+    test('shows no cut geometry at the closest pass, where the same frame uncut shows it', async ({
+      harnessRun,
+    }) => {
+      // The realistic load: the world the owner saw it in. It shares that one
+      // load with the realistic world's cases below.
+      const result = await harness(harnessRun, '?realistic');
+      expect(result.errors).toEqual([]);
+      const near = result.nearField;
+      console.info(
+        `#545 at ${String(near.distance)} m in the ${near.world} world, the cull dropped a ` +
+          `${near.cut.join(' and a ')} ${near.pivotMetres.toFixed(2)} m from the eye: ` +
+          `${String(near.shippedPixels)} pixels cut with the cull, ` +
+          `${String(near.controlPixels)} without it, ${String(near.noisePixels)} drawing it twice`,
+      );
+      // Non-vacuity: the probe drew the realistic world, and found a frame
+      // where the renderer's own cull had something to drop.
+      expect(near.world).toBe('realistic');
+      expect(near.cut.length).toBeGreaterThan(0);
+      // The noise floor is nothing: the same frame drawn twice is the same frame.
+      expect(near.noisePixels).toBe(0);
+      // The control — the defect, drawn: without the cull the near plane cuts
+      // what the camera is passing, and the nearer plane shows it.
+      expect(near.controlPixels).toBeGreaterThan(100);
+      // And with it, nothing stands between the two planes.
+      expect(near.shippedPixels).toBe(0);
+    });
+  },
+);
 
 /**
  * The realistic world, in a real engine — ADR 0026, #425, #474, #369.
@@ -2954,12 +3077,12 @@ test.describe('scenery the camera passes is not cut by the near plane — #545',
  * ⚠️ **One page load for all of it** (#456's memo, `?realistic`): the realistic
  * set is about 31 MiB and a prefiltered sky, and every case here reads the one
  * run `game-harness.ts` §`realisticProbe` makes. The default load is the
- * other half of D-7 and is asserted below too: it fetches none of the set.
+ * other half of D-7, and since #878's review it is asserted in the REQUIRED
+ * describe above, not here: this describe is nightly (#866), and a nightly
+ * describe may not read the plain load (`nightly-split.test.ts`).
  */
-test.describe('the realistic world — ADR 0026', () => {
+test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
   paysForTheRealisticLoad();
-  // Two cases compare against the plain page — second, for #286's reason.
-  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
 
   const realistic = async (
     run: (query?: string) => Promise<HarnessRun>,
@@ -3202,19 +3325,17 @@ test.describe('the realistic world — ADR 0026', () => {
     expect(grounding.woodedTriangles).toBeLessThanOrEqual(124);
   });
 
-  test('compiles every shader it draws with, in both worlds — #501', async ({ harnessRun }) => {
-    // The stone bridge's world-metre projection and the water's band-limit are
-    // both hand-written GLSL spliced into three's own; an error in either is a
-    // log line and an invisible mesh, not a thrown exception.
-    expect((await harnessRun()).shaderErrors).toEqual([]);
+  test('compiles every shader it draws with — #501, the realistic half', async ({ harnessRun }) => {
+    // The default world's half is required: §"the default world compiles its
+    // shaders and fetches none of the realistic set".
     expect((await harnessRun('?realistic')).shaderErrors).toEqual([]);
   });
 
-  test('fetches the realistic set only when asked — the default world fetches none of it', async ({
+  test('fetches the realistic set when asked — the control for the default world fetching none', async ({
     harnessRun,
   }) => {
-    const plain = await harnessRun();
-    expect(plain.requested.filter((url) => url.includes('/realistic/'))).toEqual([]);
+    // The default world's half is required (the describe named above); this
+    // is what shows the filter it applies matches the set's URLs at all.
     const asked = await harnessRun('?realistic');
     expect(asked.requested.filter((url) => url.includes('/realistic/')).length).toBeGreaterThan(10);
   });
@@ -3244,7 +3365,8 @@ test.describe('the realistic world — ADR 0026', () => {
       `the realistic road's gradient after the light and AgX — climb ${measured.climbLuminance.toFixed(4)}, ` +
         `descent ${measured.descentLuminance.toFixed(4)}: ` +
         `${contrast(measured.climbLuminance, measured.descentLuminance).toFixed(3)}:1 against ` +
-        `${String(MINIMUM_TINT_CONTRAST_RATIO)}:1; the level control ` +
+        `${String(MINIMUM_TINT_CONTRAST_RATIO)}:1 (${contrast(measured.unwornClimbLuminance, measured.unwornDescentLuminance).toFixed(3)}:1 ` +
+        `with #628's wear off); the level control ` +
         `${contrast(measured.levelClimbLuminance, measured.levelDescentLuminance).toFixed(4)}:1`,
     );
     // The criterion, read off the drawing buffer: the tint still separates the
@@ -3252,6 +3374,12 @@ test.describe('the realistic world — ADR 0026', () => {
     expect(measured.descentLuminance).toBeGreaterThan(measured.climbLuminance);
     expect(contrast(measured.climbLuminance, measured.descentLuminance)).toBeGreaterThanOrEqual(
       MINIMUM_TINT_CONTRAST_RATIO,
+    );
+    // #628: and WITH the wear on, the road keeps most of its margin — 3.5 of
+    // the 3.889 it reads with the wear off, which `road-wear.ts`
+    // §`MAXIMUM_WEAR_SHARE` is solved against (with the surface's allowance).
+    expect(contrast(measured.climbLuminance, measured.descentLuminance)).toBeGreaterThanOrEqual(
+      WORN_ROAD_CONTRAST_FLOOR,
     );
     // The control: the same probe on two level roads reads alike, so what was
     // measured above is the tint and not where the probe landed.
@@ -3262,12 +3390,174 @@ test.describe('the realistic world — ADR 0026', () => {
     expect(measured.texturesCreated).toBeGreaterThan(5);
   });
 
+  test('wears the road: a wheel track reads lighter than its lane, and not with the wear off — #628', async ({
+    harnessRun,
+  }) => {
+    const { roadWear } = await realistic(harnessRun);
+    expect(roadWear.measured).toBe(true);
+    const share = (track: number, middle: number): number => track / middle - 1;
+    const worn = share(roadWear.track, roadWear.middle);
+    const control = share(roadWear.trackControl, roadWear.middleControl);
+    console.log(
+      `the worn road at ${roadWear.distance.toFixed(0)} m: the wheel track ${roadWear.track.toFixed(4)} ` +
+        `against its lane ${roadWear.middle.toFixed(4)} (${(worn * 100).toFixed(2)} %); ` +
+        `with the wear off ${roadWear.trackControl.toFixed(4)} against ${roadWear.middleControl.toFixed(4)} ` +
+        `(${(control * 100).toFixed(2)} %)`,
+    );
+    // A floor AND a ceiling (#621, #678): the track is lighter by more than
+    // the photograph's own spread, and by no more than the wear's clamp could
+    // make it after the light.
+    expect(worn).toBeGreaterThan(WHEEL_TRACK_FLOOR);
+    expect(worn).toBeLessThan(WHEEL_TRACK_CEILING);
+    // The control: with the wear off the same two strips read alike, so the
+    // difference above is the wear and not the grain, the sheen or the angle.
+    expect(Math.abs(control)).toBeLessThan(WHEEL_TRACK_FLOOR);
+    // #879: what the colour clamp does not reach — the track's roughness and
+    // relief, through the specular term — on the two tints the cue is between.
+    // Each is read against the same strips with the wear OFF, so the
+    // photograph's grain under them divides out.
+    const bySlope = new Map(roadWear.slopes.map((reading) => [reading.slope, reading]));
+    const moved = (slope: 'climb' | 'descent', mode: 'surface' | 'worn'): number => {
+      const reading = bySlope.get(slope);
+      if (reading === undefined) throw new Error(`no ${slope} read`);
+      return (
+        share(reading[mode].track, reading[mode].middle) -
+        share(reading.off.track, reading.off.middle)
+      );
+    };
+    for (const slope of ['climb', 'descent'] as const) {
+      console.log(
+        `the wheel track on the steepest ${slope}: its surface alone ` +
+          `${(moved(slope, 'surface') * 100).toFixed(2)} %, the whole wear ` +
+          `${(moved(slope, 'worn') * 100).toFixed(2)} %`,
+      );
+    }
+    // The allowance the arithmetic spends, the WRONG way for the cue — a
+    // lighter climb or a darker descent — and a ceiling the other way.
+    expect(moved('climb', 'surface')).toBeLessThan(SURFACE_WEAR_ALLOWANCE);
+    expect(moved('descent', 'surface')).toBeGreaterThan(-SURFACE_WEAR_ALLOWANCE);
+    for (const slope of ['climb', 'descent'] as const) {
+      expect(Math.abs(moved(slope, 'surface'))).toBeLessThan(WHEEL_TRACK_CEILING);
+    }
+    // Its controls, that the strips are on the wheel track and the switch took
+    // effect: on the descent the whole wear reads the track lighter, and on the
+    // climb the surface alone reads it darker by more than the grain's spread.
+    expect(moved('descent', 'worn')).toBeGreaterThan(WHEEL_TRACK_FLOOR);
+    expect(moved('climb', 'surface')).toBeLessThan(-WHEEL_TRACK_FLOOR);
+  });
+
+  test('blends the ground: a steep bank reads as rock where level grass beside it does not — #627', async ({
+    harnessRun,
+  }) => {
+    const { groundBlend: blend } = await realistic(harnessRun);
+    expect(blend.measured).toBe(true);
+    const range = (values: readonly number[]): { low: number; high: number } => ({
+      low: Math.min(...values),
+      high: Math.max(...values),
+    });
+    const grass = range(blend.levels);
+    const grassControl = range(blend.levelsControl);
+    console.log(
+      `the ground's contrast on the hill: a bank ${blend.bank.toFixed(4)} against level grass ` +
+        `${grass.low.toFixed(4)} to ${grass.high.toFixed(4)}; with the rock off ` +
+        `${blend.bankControl.toFixed(4)} against ${grassControl.low.toFixed(4)} to ` +
+        `${grassControl.high.toFixed(4)} (${String(blend.rockPixels)} px of rock, ` +
+        `${String(blend.bankSquares)} squares, ${String(blend.levels.length)} level)`,
+    );
+    // Non-vacuity: there was a bank, the blend drew rock on it, and there is
+    // level grass enough beside it to know how grass reads.
+    expect(blend.rockPixels).toBeGreaterThan(BLEND_MINIMUM_ROCK_PIXELS);
+    expect(blend.bankSquares).toBeGreaterThan(0);
+    expect(blend.levels.length).toBeGreaterThanOrEqual(4);
+    // The bank reads unlike any of the grass beside it, by a margin — and by
+    // no more than a photograph can (a ceiling).
+    expect(blend.bank - grass.high).toBeGreaterThan(BLEND_MARGIN);
+    expect(blend.bank).toBeGreaterThan(grass.high * BLEND_FACTOR);
+    expect(blend.bank).toBeLessThan(BLEND_CEILING);
+    // The control: with the rock blend off the bank is grass again, and reads
+    // inside the grass-to-grass spread — widened by BLEND_LIGHT_FACTOR either
+    // way, because the bank is grass under a raking light the level squares
+    // are not under, and a normal map's relief shows more in one.
+    expect(blend.bankControl).toBeLessThanOrEqual(grassControl.high * BLEND_LIGHT_FACTOR);
+    expect(blend.bankControl).toBeGreaterThanOrEqual(grassControl.low / BLEND_LIGHT_FACTOR);
+  });
+
+  test('stands a gantry at the finish, lettered from the app’s own glyphs, for two calls and only there — #679', async ({
+    harnessRun,
+  }) => {
+    const { gantry } = await realistic(harnessRun);
+    expect(gantry.measured).toBe(true);
+    expect(gantry.inReach).toBe(true);
+    console.log(
+      `the finish gantry's banner: lettering ${gantry.lettering.toFixed(4)} (mean ` +
+        `${gantry.mean.map((c) => c.toFixed(0)).join('/')}); with the gantries off ` +
+        `${gantry.letteringOff.toFixed(4)} (${gantry.meanOff.map((c) => c.toFixed(0)).join('/')}). ` +
+        `Near the line +${String(gantry.callsNear)} calls, +${String(gantry.trianglesNear)} triangles ` +
+        `(${String(gantry.boxes)} boxes, ${String(gantry.banners)} banners); mid-route ` +
+        `+${String(gantry.callsMiddle)} and +${String(gantry.trianglesMiddle)}`,
+    );
+    // The banner was drawn, and its lettering reads: a floor on the contrast
+    // across the strip, and a ceiling.
+    expect(gantry.banners).toBe(1);
+    expect(gantry.lettering).toBeGreaterThan(GANTRY_LETTERING_FLOOR);
+    expect(gantry.lettering).toBeLessThan(GANTRY_LETTERING_CEILING);
+    // Control 1: with the gantries off, the same strip reads what is behind
+    // it — the sky — which has no lettering.
+    expect(gantry.letteringOff).toBeLessThan(GANTRY_LETTERING_FLOOR);
+    // The cost: two draw calls near the line, inside #679's triangle ceiling.
+    expect(gantry.callsNear).toBe(2);
+    expect(gantry.trianglesNear).toBeGreaterThan(0);
+    expect(gantry.trianglesNear).toBeLessThanOrEqual(GANTRY_TRIANGLE_CEILING);
+    // Control 2: mid-route, nothing at all.
+    expect(gantry.callsMiddle).toBe(0);
+    expect(gantry.trianglesMiddle).toBe(0);
+  });
+
+  test('lets the water reflect the sky it is under, by Fresnel — the grazing water reflects more — #629', async ({
+    harnessRun,
+  }) => {
+    const measured = await realistic(harnessRun);
+    const water = measured.waterReflection;
+    expect(water.measured).toBe(true);
+    // Non-vacuity: a lake, many rows deep, and the realistic water drew it —
+    // the environment map, which the stylised ladder's top must not keep.
+    expect(water.reflects).toBe(true);
+    expect(measured.waterReflectsAfterStepDown).toBe(false);
+    // Each band's Fresnel term, read back: the drawn frame's departure from
+    // the water's own body, against the reference's at a known F. The fog,
+    // the sky and the body cancel (`game-harness.ts` §`WaterReflectionMeasurement`).
+    const fresnel = (band: WaterBand, drawn: number): number =>
+      (FRESNEL_REFERENCE * (drawn - band.body)) / (band.reference - band.body);
+    const near = fresnel(water.near, water.near.drawn);
+    const far = fresnel(water.far, water.far.drawn);
+    const nearControl = fresnel(water.near, water.near.control);
+    const farControl = fresnel(water.far, water.far.control);
+    console.log(
+      `the lake's Fresnel term read back: near ${near.toFixed(3)}, grazing ${far.toFixed(3)}; ` +
+        `held at ${String(FRESNEL_CONTROL)}, ${nearControl.toFixed(3)} and ${farControl.toFixed(3)} ` +
+        `(${String(water.rows)} rows, ${String(water.pixels)} px)`,
+    );
+    expect(water.rows).toBeGreaterThan(WATER_BAND_ROWS * 2);
+    expect(water.pixels).toBeGreaterThan(1_000);
+    // Fresnel-shaped, bounded both ways: the grazing water reflects much more
+    // of the sky than the near water, the near water is still water (F0 is
+    // 0.02, not 0), and neither reads past a whole reflection.
+    expect(far - near).toBeGreaterThan(WATER_FRESNEL_MARGIN);
+    expect(near).toBeGreaterThan(0);
+    expect(far).toBeLessThan(WATER_FRESNEL_CEILING);
+    // The control: Fresnel held at a constant reads that constant in both
+    // bands, within 2 % — so the difference above is the Fresnel term and not
+    // the fog, the angle to the sun or which part of the sky a band faces.
+    expect(Math.abs(farControl - nearControl)).toBeLessThan(0.02 * FRESNEL_CONTROL);
+    expect(Math.abs(nearControl - FRESNEL_CONTROL)).toBeLessThan(0.02 * FRESNEL_CONTROL);
+  });
+
   test('hands the GPU every realistic texture compressed, and the RGBA8 control is labelled a fallback — #618', async ({
     harnessRun,
   }) => {
     const { textures, firstFrameMs, loadMs } = await realistic(harnessRun);
     // Non-vacuity, and EXACT (#618's review — a floor let up to eight maps go
-    // missing): four surface maps, fourteen structure maps, and every map in a
+    // missing): eight surface maps, fourteen structure maps, and every map in a
     // model plus its impostor, once per IMAGE, read off the committed files the
     // way `realistic-textures.test.ts` reads them.
     expect(textures.worn.length).toBe(realisticImageCount());
@@ -3519,12 +3809,98 @@ test.describe('the realistic world — ADR 0026', () => {
     expect(Math.abs(red - houseRed)).toBeGreaterThan(KIT_TINTS_APART);
   });
 
+  /**
+   * #625: how far the realistic rider's shoulders must move across the
+   * bicycle between two frames half a stroke apart, and at most: 2.5 cm and
+   * 8 cm. `bicycle.ts` §`TRUNK_ROCK_RADIANS` puts 3.8 cm there on the body the
+   * jsdom half poses; the ceiling is about twice that, which a rock of 6° or
+   * more would pass.
+   */
+  const SHOULDER_ROCK_FLOOR_METRES = 0.025;
+  const SHOULDER_ROCK_CEILING_METRES = 0.08;
+
+  /**
+   * #626: how much of its own bounding rectangle a bicycle's shadow may fill —
+   * under 0.6, where the round blob, a solid ellipse, fills about π/4 (0.785).
+   * ⚠️ Not the aspect #626 named: a cast shadow is long along the sun's throw
+   * whatever casts it, and `realistic-textures.test.ts` prints the table.
+   */
+  const RIDER_SHADOW_FILL_BELOW = 0.6;
+  /**
+   * The silhouette's darkness where it covers the ground wholly, as the share
+   * of the ENCODED pixel it takes away — `contact-shadow.ts`
+   * §`CONTACT_SHADOW_DARKNESS`, written here a second time on purpose, as
+   * #620's `GROUND_BLOB_STATED` is. ± 0.05 is a CHOSEN tolerance, #620's.
+   * #872's review: a floor on the shape alone passed a black shadow.
+   */
+  const RIDER_SHADOW_STATED = 0.45;
+  const RIDER_SHADOW_WINDOW = [RIDER_SHADOW_STATED - 0.05, RIDER_SHADOW_STATED + 0.05] as const;
+
   test('turns the realistic rider’s legs with the cranks, and holds them when the cadence goes — #369, #349', async ({
     harnessRun,
   }) => {
     const measured = await realistic(harnessRun);
     expect(measured.crankTurnPixels).toBeGreaterThan(50);
     expect(measured.crankHeldPixels).toBe(0);
+  });
+
+  test('rocks the realistic rider’s shoulders with the stroke, and not with the cadence gone — #625', async ({
+    harnessRun,
+  }) => {
+    const measured = await realistic(harnessRun);
+    console.log(
+      `#625: shoulders half a stroke apart ${(measured.shoulderRock * 100).toFixed(2)} cm across ` +
+        `the bicycle pedalling; control, no cadence: ${(measured.shoulderRockControl * 100).toFixed(3)} cm`,
+    );
+    // The stated amount: 2.5 cm, against the 3.8 cm `bicycle.ts`'s 3° rock
+    // puts there (the jsdom half measures the same bones).
+    expect(measured.shoulderRock).toBeGreaterThan(SHOULDER_ROCK_FLOOR_METRES);
+    // A ceiling too, so a rock many times the cited 3° is not a pass.
+    expect(measured.shoulderRock).toBeLessThan(SHOULDER_ROCK_CEILING_METRES);
+    // THE CONTROL: the same two frames with no cadence reading.
+    expect(measured.shoulderRockControl).toBeLessThan(1e-6);
+  });
+
+  test('grounds the realistic riders with the shape of a bicycle, cast as the shipped shader and its twin agree — #626', async ({
+    harnessRun,
+  }) => {
+    const measured = await realistic(harnessRun);
+    const describe = (shape: typeof measured.riderShadow): string =>
+      `fills ${shape.fill.toFixed(2)} of its rectangle, ${shape.squareMetres.toFixed(2)} m², ` +
+      `agreement with the twin ${shape.agreement.toFixed(2)}, darkening ${shape.darkening.toFixed(3)}`;
+    console.log(
+      `#626: the silhouette ${describe(measured.riderShadow)}; ` +
+        `control, the round blob: ${describe(measured.riderShadowControl)}; ` +
+        `control, drawn black: ${describe(measured.riderShadowBlack)}`,
+    );
+    // A bicycle's shadow — two wheels, a frame, a body and the gaps between
+    // them — fills well under its own rectangle. `realistic-textures.test.ts`
+    // measures 0.39 to 0.50 at every heading and both ends of the sun's band.
+    expect(measured.riderShadow.fill).toBeGreaterThan(0.2);
+    expect(measured.riderShadow.fill).toBeLessThan(RIDER_SHADOW_FILL_BELOW);
+    // A whole rider's shadow, not a speck, and not the road.
+    expect(measured.riderShadow.squareMetres).toBeGreaterThan(0.3);
+    expect(measured.riderShadow.squareMetres).toBeLessThan(2);
+    // What the SHIPPED shader drew is what `silhouetteCoverage` says it should:
+    // #620's lesson, a twin in TypeScript is not the shader.
+    expect(measured.riderShadow.agreement).toBeGreaterThan(0.75);
+    // And as dark as stated, from both sides. The core the twin calls wholly
+    // covered still reads about 0.92 of full black (filtering and the soft
+    // reach), so the stated darkness is the shadow's darkening over the black
+    // copy's — the same cover under both, divided out.
+    const darkness = measured.riderShadow.darkening / measured.riderShadowBlack.darkening;
+    expect(darkness).toBeGreaterThan(RIDER_SHADOW_WINDOW[0]);
+    expect(darkness).toBeLessThan(RIDER_SHADOW_WINDOW[1]);
+    // …over a core that really is covered, or that ratio would divide noise…
+    expect(measured.riderShadowBlack.darkening).toBeGreaterThan(0.8);
+    // …and a ceiling on the pixels themselves. THE DARKNESS CONTROL: the same
+    // silhouette drawn full black keeps its shape and is refused by it.
+    expect(measured.riderShadow.darkening).toBeLessThan(RIDER_SHADOW_WINDOW[1]);
+    expect(measured.riderShadowBlack.agreement).toBeGreaterThan(0.75);
+    expect(measured.riderShadowBlack.darkening).toBeGreaterThan(RIDER_SHADOW_WINDOW[1]);
+    // THE CONTROL: the round blob is a solid ellipse, about π/4 of its rectangle.
+    expect(measured.riderShadowControl.fill).toBeGreaterThan(RIDER_SHADOW_FILL_BELOW);
+    expect(measured.riderShadowControl.squareMetres).toBeGreaterThan(0.3);
   });
 
   test('draws the distant hills between the ground and the sky, converging on the sky, with no hard edge — #544', async ({
@@ -3744,7 +4120,7 @@ test.describe('the realistic world — ADR 0026', () => {
  * world actually loaded ON IT — without `drawnWorld`, a page that fell back to
  * the stylised world would be measuring trees with no middle level at all.
  */
-test.describe('the trees’ levels of detail in the realistic world — #617', () => {
+test.describe('the trees’ levels of detail in the realistic world — #617', { tag: NIGHTLY }, () => {
   paysForTheLoad(TREES_QUERY, TREES_LOAD_BUDGET_MS);
 
   const trees = async (
@@ -3756,6 +4132,37 @@ test.describe('the trees’ levels of detail in the realistic world — #617', (
     expect(result.trees.drawnWorld).toBe('realistic');
     return result.trees;
   };
+
+  test('lights the far band by the world’s sun, and moves the foliage on the ride’s clock — #630', async ({
+    harnessRun,
+  }) => {
+    const { foliage } = await trees(harnessRun);
+    expect(foliage.measured).toBe(true);
+    const lean = (sun: number, shade: number): number => sun / shade - 1;
+    const lit = lean(foliage.sunSide, foliage.shadeSide);
+    const unlit = lean(foliage.sunSideUnlit, foliage.shadeSideUnlit);
+    console.log(
+      `the far band over four turns: the sun's side ${foliage.sunSide.toFixed(4)} against the shade's ` +
+        `${foliage.shadeSide.toFixed(4)} (${(lit * 100).toFixed(1)} %); unlit ` +
+        `${foliage.sunSideUnlit.toFixed(4)} against ${foliage.shadeSideUnlit.toFixed(4)} ` +
+        `(${(unlit * 100).toFixed(1)} %; ${String(foliage.impostorPixels)} px). The breeze: ` +
+        `${String(foliage.swayChanged)} of the tree's ${String(foliage.treePixels)} px moved between ` +
+        `two times, ${String(foliage.heldChanged)} between two draws at one`,
+    );
+    // Non-vacuity: a tree was drawn, far and near.
+    expect(foliage.impostorPixels).toBeGreaterThan(IMPOSTOR_MINIMUM_PIXELS);
+    expect(foliage.treePixels).toBeGreaterThan(400);
+    // (1) The sun's side is lighter than the shade's, by a floor and under a
+    // ceiling; unlit — today's strip — the two halves read alike.
+    expect(lit).toBeGreaterThan(IMPOSTOR_LIGHT_FLOOR);
+    expect(lit).toBeLessThan(IMPOSTOR_LIGHT_CEILING);
+    expect(Math.abs(unlit)).toBeLessThan(IMPOSTOR_LIGHT_FLOOR);
+    // (2) The silhouette moves between two ride times, by some of its pixels
+    // and not by the whole tree; and at one time, not at all.
+    expect(foliage.swayChanged).toBeGreaterThan(SWAY_MINIMUM_PIXELS);
+    expect(foliage.swayChanged).toBeLessThan(foliage.treePixels);
+    expect(foliage.heldChanged).toBe(0);
+  });
 
   test('submits at least 60 000 fewer triangles with the trees’ middle level — #617', async ({
     harnessRun,

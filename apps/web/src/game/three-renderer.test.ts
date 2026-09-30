@@ -1608,7 +1608,20 @@ function frameWithScatter(): SceneFrame {
       quadCount: 1,
     },
     camera: POSE,
-    markers: [{ kind: 'rider', x: 0, y: 0, z: 0, headingX: 0, headingZ: 1, lean: 0, bodyLean: 0 }],
+    markers: [
+      {
+        kind: 'rider',
+        x: 0,
+        y: 0,
+        z: 0,
+        headingX: 0,
+        headingZ: 1,
+        lean: 0,
+        bodyLean: 0,
+        pedalling: 0,
+        rideSeconds: 0,
+      },
+    ],
     world: {
       skyColour: 0x88aaff,
       groundColour: 0x557744,
@@ -1639,6 +1652,8 @@ function frameWithScatter(): SceneFrame {
       bridges: [],
       seconds: 0,
     },
+    // #679: no line in reach.
+    lines: [],
   };
 }
 
@@ -2569,6 +2584,8 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
       headingZ: facing.headingZ ?? 1,
       lean: 0,
       bodyLean: 0,
+      pedalling: 0,
+      rideSeconds: 0,
       ...(crankAngle === undefined ? {} : { crankAngle }),
     };
   }
@@ -3372,6 +3389,8 @@ describe('the riders lean into a bend — #499', () => {
       headingZ: heading[1],
       lean,
       bodyLean: 0,
+      pedalling: 0,
+      rideSeconds: 0,
       crankAngle,
     };
   }

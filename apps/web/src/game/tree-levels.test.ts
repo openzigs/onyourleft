@@ -464,3 +464,100 @@ describe('the hand-over’s promises, over seeded roads — #617’s second revi
     ]);
   });
 });
+
+/**
+ * The most any tree's split may move in one frame, whatever the constants say:
+ * **0.2** — a fifth of the tree's drawing handed from one level to another, so
+ * a hand-over takes at least five frames. The browser gate's
+ * `MAXIMUM_HAND_OVER_SHARE` is the same fifth, of the picture.
+ *
+ * ⚠️ **A number of its own on purpose — #649.** Every bound above is
+ * {@link STEP}, which is `1 / REALISTIC_TREE_LEVELS.handOverFrames`: set the
+ * product's pacing to `1` — the hard hand-over #617's review removed — and
+ * each bound follows it up to a whole level a frame, and stays green. This one
+ * does not follow the constant, so removing the pacing is a red test here.
+ */
+const MAXIMUM_SPLIT_MOVE_PER_FRAME = 0.2;
+
+describe('a rank that JUMPS in one frame — #649', () => {
+  const trees: Tree[] = [5, 8, 12, 17, 23, 30, 38, 47, 57].map((d) => ({ id: d, d }));
+  const bandAlone: TreeLevels = { ...REALISTIC_TREE_LEVELS, handOverFrames: 1 };
+  const pacingAlone: TreeLevels = { ...REALISTIC_TREE_LEVELS, dithered: false };
+  const neither: TreeLevels = { ...REALISTIC_TREE_LEVELS, dithered: false, handOverFrames: 1 };
+
+  /**
+   * The largest one-frame move of any split while `removed` trees drop out of
+   * the scatter between one frame and the next and the ride goes on for 40
+   * frames, and how far the splits moved in all over those frames.
+   */
+  function removing(
+    levels: TreeLevels,
+    removed: readonly number[],
+  ): { readonly largest: number; readonly total: number } {
+    const handOver = handOverFor(levels);
+    let last = frame(handOver, trees, levels);
+    // Settle first, so what is measured is the jump and nothing before it.
+    for (let at = 0; at < 40; at += 1) last = frame(handOver, trees, levels);
+    const left = trees.filter((tree) => !removed.includes(tree.id));
+    let largest = 0;
+    let total = 0;
+    for (let at = 0; at < 40; at += 1) {
+      const next = frame(handOver, left, levels);
+      const step = largestChange(last, next);
+      largest = Math.max(largest, step);
+      total += step;
+      last = next;
+    }
+    return { largest, total };
+  }
+
+  for (const [name, removed] of [
+    ['the nearest tree', [5]],
+    ['a tree in the middle ranks', [17]],
+    ['two nearer trees at once', [5, 8]],
+  ] as const) {
+    it(`moves no tree more than a fifth a frame when the scatter drops ${name}`, () => {
+      const product = removing(REALISTIC_TREE_LEVELS, removed);
+      expect(product.largest).toBeLessThanOrEqual(MAXIMUM_SPLIT_MOVE_PER_FRAME);
+      // Not vacuous: the trees behind DO hand over — a product that never
+      // changed level would move nothing and pass the bound above.
+      expect(product.total).toBeGreaterThan(0.5);
+      // Pacing alone is what holds this case: without the band it still walks.
+      expect(removing(pacingAlone, removed).largest).toBeLessThanOrEqual(
+        MAXIMUM_SPLIT_MOVE_PER_FRAME,
+      );
+    });
+
+    it(`jumps when the scatter drops ${name} and nothing paces it, which is the control`, () => {
+      // The band alone does NOT hold a rank jump: that is what pacing is for.
+      expect(removing(bandAlone, removed).largest).toBeGreaterThan(MAXIMUM_SPLIT_MOVE_PER_FRAME);
+      expect(removing(neither, removed).largest).toBeGreaterThan(MAXIMUM_SPLIT_MOVE_PER_FRAME);
+    });
+  }
+
+  /**
+   * The largest one-frame move while every tree but one walks out past it at
+   * 0.1 m a frame — the browser probe's shape, where ranks SWAP and never jump.
+   */
+  function walkingOut(levels: TreeLevels): number {
+    const handOver = handOverFor(levels);
+    const watched = { id: 1_000, d: 20 };
+    const others = [2, 4, 6, 8, 10, 12, 14].map((d) => ({ id: d, d }));
+    let last = frame(handOver, [watched, ...others], levels);
+    let largest = 0;
+    for (let at = 1; at <= 300; at += 1) {
+      const moved = others.map((tree) => ({ ...tree, d: tree.d + 0.1 * at }));
+      const next = frame(handOver, [watched, ...moved], levels);
+      largest = Math.max(largest, largestChange(last, next));
+      last = next;
+    }
+    return largest;
+  }
+
+  it('holds a swap with the band alone, which is the case the band is for', () => {
+    expect(walkingOut(REALISTIC_TREE_LEVELS)).toBeLessThanOrEqual(MAXIMUM_SPLIT_MOVE_PER_FRAME);
+    expect(walkingOut(bandAlone)).toBeLessThanOrEqual(MAXIMUM_SPLIT_MOVE_PER_FRAME);
+    // The control: with neither, the swap is a whole level in one frame.
+    expect(walkingOut(neither)).toBeGreaterThan(MAXIMUM_SPLIT_MOVE_PER_FRAME);
+  });
+});

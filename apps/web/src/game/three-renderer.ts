@@ -158,15 +158,20 @@ import {
   CylinderGeometry,
   DirectionalLight,
   DoubleSide,
+  DataTexture,
   DynamicDrawUsage,
   EquirectangularReflectionMapping,
+  Euler,
+  FileLoader,
   FogExp2,
   Group,
   HalfFloatType,
   InstancedBufferAttribute,
   InstancedMesh,
+  LinearFilter,
   LinearMipmapLinearFilter,
   LoadingManager,
+  Matrix3,
   Matrix4,
   Mesh,
   MeshBasicMaterial,
@@ -194,16 +199,19 @@ import {
   RGBA_S3TC_DXT5_Format,
   RGB_PVRTC_4BPPV1_Format,
   RGBAFormat,
+  RGFormat,
   SRGBColorSpace,
   TorusGeometry,
+  UnsignedByteType,
+  RedFormat,
   ShaderChunk,
   UniformsLib,
   UniformsUtils,
   Vector2,
   Vector3,
+  Vector4,
   WebGLRenderer,
   type Bone,
-  type DataTexture,
   type Material,
   type Object3D,
   type SkinnedMesh,
@@ -255,8 +263,11 @@ import {
   RIDER_PALETTE,
   emptyRiderJoints,
   riderKitFor,
+  emptyRiderMotion,
   legBones,
   riderJoints,
+  riderMotion,
+  type RiderMotion,
   type JointPoint,
   type RiderKit,
   type RiderPart,
@@ -273,6 +284,16 @@ import {
   tyreUv,
   type Uv,
 } from './bicycle-surfaces';
+import {
+  rasteriseSilhouette,
+  silhouetteThrow,
+  SILHOUETTE_ALONG_TEXELS,
+  SILHOUETTE_EDGE_METRES,
+  SILHOUETTE_MARGIN_METRES,
+  SILHOUETTE_TAPS,
+  SILHOUETTE_UP_TEXELS,
+  type RiderSilhouette,
+} from './rider-silhouette';
 import {
   CASTS_CONTACT_SHADOW,
   CONTACT_SHADOW_DARKNESS,
@@ -329,6 +350,49 @@ import {
   type StructureSurface,
 } from './realistic-assets';
 import { REALISTIC_TRANSCODER_DIRECTORY } from './transcoder-files';
+import { LABEL_FONT } from '../map/basemap';
+import {
+  BANNER_CELLS,
+  bannerAtlas,
+  readGlyphRange,
+  type BannerAtlas,
+  type BannerCell,
+} from './banner-atlas';
+import { bannerCells } from './gantry-wording';
+import { bannerPlace, boxPoint, standPoint, type PlacedBox, type PlacedStand } from './gantry';
+import {
+  FOLIAGE_SWAY_METRES,
+  FOLIAGE_WAVES,
+  foliageWindDirection,
+  IMPOSTOR_CROWN_SHARE,
+  IMPOSTOR_RELIGHT_RANGE,
+  SCRIPT_SKY_SHARE,
+  scriptSunToward,
+  WOOD_SWAY_SHARE,
+} from './foliage-light';
+import {
+  ROAD_EDGE_METRES,
+  ROCK_SLOPE_DEGREES,
+  SCREE_BAND_METRES,
+  VERGE_BLEND_METRES,
+} from './ground-blend';
+import {
+  CARRIAGEWAY_HALF_METRES,
+  DUST_BAND_METRES,
+  DUST_LIGHTEN,
+  MAXIMUM_ROAD_PATCHES,
+  MAXIMUM_WEAR_SHARE,
+  PAINT_WEAR,
+  ROAD_PATCH_FLOATS,
+  roadPatchUniforms,
+  WHEEL_TRACK_EDGE_METRES,
+  WHEEL_TRACK_HALF_WIDTH_METRES,
+  WHEEL_TRACK_LIGHTEN,
+  WHEEL_TRACK_OFFSETS_METRES,
+  WHEEL_TRACK_RELIEF,
+  WHEEL_TRACK_ROUGHNESS,
+  writeRoadAcross,
+} from './road-wear';
 import {
   REALISTIC_GROUND_BLOBS,
   REALISTIC_NEAR_MESHES,
@@ -3071,6 +3135,219 @@ function contactShadowGeometry(): BufferGeometry {
 }
 
 /**
+ * The realistic riders' bike-shaped shadow — #626, option 1: the side view
+ * `rider-silhouette.ts` makes once, cast along `world.ts`'s one sun by a
+ * fragment shader, **one instanced transparent draw for all of them**, in
+ * place of the round blob {@link ContactShadowBelt} draws. The stylised world
+ * keeps the blob and the map (#547) exactly as it had them.
+ *
+ * Drawn the way the blob is, and for its reasons: transparent with no depth
+ * write, depth-tested, lifted {@link CONTACT_SHADOW_LIFT_METRES} and
+ * polygon-offset toward the camera, black with an alpha no darker than
+ * {@link CONTACT_SHADOW_DARKNESS}. Not fogged: it lies under a rider, where
+ * the fog has taken next to nothing (the blob's own #622 argument).
+ *
+ * ⚠️ **One texture, 64 KiB, and no depth pass**: the quad a rider is drawn
+ * over is its cast silhouette's footprint on the road, and each fragment walks
+ * up the heights that could have cast onto it (`rider-silhouette.ts`
+ * §`silhouetteCoverage` is the same arithmetic in TypeScript). The ghost
+ * casts none (`contact-shadow.ts` §`CASTS_CONTACT_SHADOW`).
+ */
+export class RiderSilhouetteBelt {
+  readonly #texture: DataTexture;
+  readonly #material: ShaderMaterial;
+  readonly #mesh: InstancedMesh;
+  readonly #throws: InstancedBufferAttribute;
+  readonly #throw: SunThrow = { x: 0, z: 0 };
+  /** The `oylDarkness` uniform itself. @see setDarkness */
+  readonly #darkness = { value: CONTACT_SHADOW_DARKNESS };
+  readonly #position = new Vector3();
+  readonly #turn = new Quaternion();
+  readonly #matrix = new Matrix4();
+  readonly #up = new Vector3(0, 1, 0);
+  readonly #unit = new Vector3(1, 1, 1);
+  #shown = false;
+
+  constructor(silhouette: RiderSilhouette) {
+    this.#texture = new DataTexture(
+      silhouette.texels,
+      SILHOUETTE_ALONG_TEXELS,
+      SILHOUETTE_UP_TEXELS,
+      RGFormat,
+      UnsignedByteType,
+    );
+    this.#texture.magFilter = LinearFilter;
+    this.#texture.minFilter = LinearFilter;
+    this.#texture.generateMipmaps = false;
+    this.#texture.wrapS = ClampToEdgeWrapping;
+    this.#texture.wrapT = ClampToEdgeWrapping;
+    this.#texture.needsUpdate = true;
+    const { zMin, zMax, height, reach } = silhouette.bounds;
+    this.#material = constructed(
+      new ShaderMaterial({
+        uniforms: {
+          oylSilhouette: { value: this.#texture },
+          oylBounds: { value: new Vector4(zMin, zMax, height, reach) },
+          oylDarkness: this.#darkness,
+        },
+        vertexShader: SILHOUETTE_VERTEX,
+        fragmentShader: SILHOUETTE_FRAGMENT,
+        transparent: true,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -4,
+      }),
+    );
+    const geometry = new BufferGeometry();
+    // A unit square in (x, z), facing +Y: the vertex shader stretches it over
+    // each rider's cast footprint. Wound for +Y — the blob's reason.
+    geometry.setAttribute(
+      'position',
+      new BufferAttribute(new Float32Array([0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1]), 3),
+    );
+    geometry.setIndex([0, 2, 1, 0, 3, 2]);
+    this.#throws = new InstancedBufferAttribute(new Float32Array(RIDDEN_KINDS.length * 2), 2);
+    this.#throws.setUsage(DynamicDrawUsage);
+    geometry.setAttribute('oylThrow', this.#throws);
+    this.#mesh = new InstancedMesh(geometry, this.#material, RIDDEN_KINDS.length);
+    this.#mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+    this.#mesh.count = 0;
+    this.#mesh.frustumCulled = false;
+    this.#mesh.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The one mesh. For the tests and the harness. */
+  get mesh(): InstancedMesh {
+    return this.#mesh;
+  }
+
+  /** Whether a material is this belt's — kept out of the realistic air, as the blob's is. */
+  wears(material: Material): boolean {
+    return material === this.#material;
+  }
+
+  /** Whether the silhouettes are drawn at all. */
+  setShown(on: boolean): void {
+    this.#shown = on;
+    if (!on) {
+      this.#mesh.count = 0;
+      this.#mesh.visible = false;
+    }
+  }
+
+  /**
+   * How dark a whole silhouette is — {@link CONTACT_SHADOW_DARKNESS} unless the
+   * browser gate's control asks otherwise. @see riderSilhouetteDarknessOf
+   */
+  setDarkness(darkness: number): void {
+    this.#darkness.value = darkness;
+  }
+
+  /** One silhouette per rider who casts one, under this frame's sun. Allocates nothing. */
+  place(markers: readonly RiderMarker[], sun: SunStyle): void {
+    if (!this.#shown) {
+      return;
+    }
+    let slot = 0;
+    for (const marker of markers) {
+      if (slot >= RIDDEN_KINDS.length) {
+        break;
+      }
+      if (!silhouetteThrow(marker, sun, this.#throw)) {
+        continue;
+      }
+      this.#position.set(marker.x, marker.y + CONTACT_SHADOW_LIFT_METRES, marker.z);
+      this.#turn.setFromAxisAngle(this.#up, Math.atan2(marker.headingX, marker.headingZ));
+      this.#mesh.setMatrixAt(slot, this.#matrix.compose(this.#position, this.#turn, this.#unit));
+      this.#throws.setXY(slot, this.#throw.x, this.#throw.z);
+      slot += 1;
+    }
+    this.#mesh.count = slot;
+    this.#mesh.instanceMatrix.needsUpdate = true;
+    this.#throws.needsUpdate = true;
+    this.#mesh.visible = slot > 0;
+  }
+
+  dispose(): void {
+    this.#mesh.geometry.dispose();
+    this.#mesh.dispose();
+    this.#material.dispose();
+    this.#texture.dispose();
+  }
+}
+
+/** The silhouette's quad, stretched over one rider's cast footprint. @see RiderSilhouetteBelt */
+const SILHOUETTE_VERTEX = /* glsl */ `
+attribute vec2 oylThrow;
+uniform vec4 oylBounds;
+varying vec2 vOylGround;
+varying vec2 vOylThrow;
+void main() {
+  float margin = ${glslFloat(SILHOUETTE_MARGIN_METRES)};
+  float topAcross = oylBounds.z * oylThrow.x;
+  float topAlong = oylBounds.z * oylThrow.y;
+  float edge = oylBounds.w + margin;
+  float across = mix(min(0.0, topAcross) - edge, max(0.0, topAcross) + edge, position.x);
+  float along = mix(
+    oylBounds.x + min(0.0, topAlong) - margin,
+    oylBounds.y + max(0.0, topAlong) + margin,
+    position.z
+  );
+  vOylGround = vec2(across, along);
+  vOylThrow = oylThrow;
+  gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(across, 0.0, along, 1.0);
+}
+`;
+
+/**
+ * How covered a point on the road is by the cast silhouette — #626.
+ * `rider-silhouette.ts` §`silhouetteCoverage` is this, in TypeScript.
+ */
+const SILHOUETTE_FRAGMENT = /* glsl */ `
+uniform sampler2D oylSilhouette;
+uniform vec4 oylBounds;
+uniform float oylDarkness;
+varying vec2 vOylGround;
+varying vec2 vOylThrow;
+void main() {
+  float height = oylBounds.z;
+  float reach = oylBounds.w;
+  float low = 0.0;
+  float high = height;
+  if (abs(vOylThrow.x) > 1e-4) {
+    float a = (vOylGround.x - reach) / vOylThrow.x;
+    float b = (vOylGround.x + reach) / vOylThrow.x;
+    low = max(0.0, min(a, b));
+    high = min(height, max(a, b));
+  }
+  if (high < low) discard;
+  float cover = 0.0;
+  for (int tap = 0; tap < ${String(SILHOUETTE_TAPS)}; tap++) {
+    float y = low + (high - low) * (float(tap) + 0.5) / ${glslFloat(SILHOUETTE_TAPS)};
+    float z = vOylGround.y - y * vOylThrow.y;
+    float x = abs(vOylGround.x - y * vOylThrow.x);
+    vec2 uv = vec2((z - oylBounds.x) / (oylBounds.y - oylBounds.x), y / height);
+    if (uv.x < 0.0 || uv.x >= 1.0 || uv.y < 0.0 || uv.y >= 1.0) continue;
+    vec2 texel = texture2D(oylSilhouette, uv).rg;
+    float edge = texel.g * reach;
+    float inside = 1.0 - smoothstep(
+      edge - ${glslFloat(SILHOUETTE_EDGE_METRES)},
+      edge + ${glslFloat(SILHOUETTE_EDGE_METRES)},
+      x
+    );
+    cover = max(cover, texel.r * inside);
+  }
+  if (cover <= 0.0) discard;
+  gl_FragColor = vec4(0.0, 0.0, 0.0, oylDarkness * cover);
+}
+`;
+
+/**
  * The ground under the realistic scenery — #620: one soft dark ellipse under
  * every tree, shrub and rock the realistic world draws as a mesh and every
  * structure it draws, **one instanced transparent draw for all of them**,
@@ -3678,6 +3955,8 @@ export class TerrainBelt {
   readonly #fieldSpan = { value: 90 };
   /** How many fields a lap has, which the patchwork wraps by — #468 review B3. @see TerrainMesh.fieldCount */
   readonly #fieldCount = { value: 1 };
+  /** Where the tree line is, for the realistic ground's scree — #627. @see TerrainMesh.treeLine */
+  readonly #treeLine = { value: NO_TREE_LINE };
   readonly #materials = {
     lit: withSurfaceDetail(
       new MeshLambertMaterial({ color: UNSET_COLOUR, vertexColors: true }),
@@ -3740,9 +4019,13 @@ export class TerrainBelt {
     this.#mount();
   }
 
-  /** The field span and count the photographic ground's patchwork reads. */
-  get fields(): { readonly span: { value: number }; readonly count: { value: number } } {
-    return { span: this.#fieldSpan, count: this.#fieldCount };
+  /** The field span and count the photographic ground's patchwork reads, and — #627 — the tree line. */
+  get fields(): {
+    readonly span: { value: number };
+    readonly count: { value: number };
+    readonly treeLine: { value: number };
+  } {
+    return { span: this.#fieldSpan, count: this.#fieldCount, treeLine: this.#treeLine };
   }
 
   /** The surface detail, on or off — #425. @see QualitySettings.surfaceDetail */
@@ -3809,6 +4092,7 @@ export class TerrainBelt {
     }
     this.#fieldSpan.value = ground.fieldSpan;
     this.#fieldCount.value = ground.fieldCount;
+    this.#treeLine.value = ground.treeLine;
     this.#indicesPerBand = ground.indicesPerBand;
     this.#indexCount = ground.indices.length;
     this.#applyRange();
@@ -4418,6 +4702,107 @@ void main() {
 }
 `;
 
+/**
+ * The realistic water's fragment — #629: #459's shader with its two-colour
+ * sky replaced by the scene's own prefiltered environment map, sampled along
+ * the reflection of the view ray about the rippled normal, and a glint of
+ * `world.ts`'s one sun.
+ *
+ * - **The environment, not a second sky.** The same PMREM map the realistic
+ *   world's materials are lit by (ADR 0026 D-9), through three's own
+ *   `textureCubeUV` at roughness 0 and three's own rotation of it, so a cloud
+ *   in the sky is the cloud in the lake. It is scaled by `environmentScale`,
+ *   which brings the zenith band down to the brightness #459's water was tuned
+ *   against (`realistic-light.ts` §`reflectedSkyColour`'s own target): this
+ *   shader is not tone mapped, so the photograph's radiance at its own
+ *   brightness would be white.
+ * - **Fresnel is Schlick's**, with F0 = 0.02 for water, as #459's was. The
+ *   browser gate holds it (`fresnelHeld` ≥ 0 is its control).
+ * - **The glint** is a specular lobe toward the sun, of at most
+ *   {@link WATER_GLINT_PEAK} added in linear light, and ⚠️ **what it can clip,
+ *   stated (ADR 0026 D-10)**: the sum is clamped to 1 per channel, the
+ *   output's white, so a glint on a bright sky's reflection saturates to white
+ *   rather than overflowing — which is what a glint is.
+ *
+ * Built by replacing lines of {@link WATER_FRAGMENT}, each asserted, so the
+ * stylised water's shader is not touched at all.
+ */
+function reflectingWaterFragment(): string {
+  const swaps: readonly (readonly [string, string])[] = [
+    [
+      'uniform vec3 skyColour;',
+      `uniform vec3 skyColour;
+uniform sampler2D envMap;
+uniform mat3 envMapRotation;
+uniform float environmentScale;
+uniform vec3 sunDirection;
+uniform vec3 sunGlint;
+uniform float fresnelHeld;
+#include <cube_uv_reflection_fragment>`,
+    ],
+    [
+      'float fresnel = 0.02 + 0.98 * pow(1.0 - facing, 5.0);',
+      'float fresnel = fresnelHeld >= 0.0 ? fresnelHeld : 0.02 + 0.98 * pow(1.0 - facing, 5.0);',
+    ],
+    [
+      'vec3 sky = mix(horizonColour, skyColour, smoothstep(0.0, 0.4, r.y));',
+      `vec3 sky = textureCubeUV(envMap, envMapRotation * normalize(vec3(r.x, max(r.y, 0.0), r.z)), 0.0).rgb * environmentScale;
+  float glint = pow(max(dot(r, sunDirection), 0.0), ${glslFloat(WATER_GLINT_EXPONENT)});`,
+    ],
+    [
+      'gl_FragColor = vec4(mix(body, sky, fresnel), 1.0);',
+      'gl_FragColor = vec4(min(mix(body, sky, fresnel) + sunGlint * glint * fresnel, vec3(1.0)), 1.0);',
+    ],
+  ];
+  let text = WATER_FRAGMENT;
+  for (const [from, to] of swaps) {
+    if (!text.includes(from)) {
+      throw new Error(
+        `the water shader no longer holds "${from}", where #629's reflection is spliced in`,
+      );
+    }
+    text = text.replace(from, to);
+  }
+  return text;
+}
+
+/**
+ * How sharp the realistic water's sun glint is: a lobe of `cos^600` about the
+ * sun's reflection, about 5.5° across at half height — #629. This
+ * repository's own figure: tight enough to read as a glint off ripples rather
+ * than a sheen, wide enough that the band-limited ripples still scatter it.
+ */
+const WATER_GLINT_EXPONENT = 600;
+
+/**
+ * The most the glint adds, in linear light: **0.6** of the sun's own colour at
+ * the lobe's peak, before Fresnel — #629. @see reflectingWaterFragment for what
+ * it can clip.
+ */
+const WATER_GLINT_PEAK = 0.6;
+
+/** The glint's colour at its peak: a warm white, times {@link WATER_GLINT_PEAK}. */
+const WATER_GLINT_COLOUR = new Color(1, 0.96, 0.88).multiplyScalar(WATER_GLINT_PEAK);
+
+/**
+ * `defines` three writes for a material whose environment is a PMREM cube UV
+ * map of this height — #629. The water is a `ShaderMaterial`, which three
+ * does not give an environment, so they are written here from three's own
+ * arithmetic (`WebGLProgram.js` §`generateCubeUVSize`, 0.185.1), and a test
+ * holds this to it.
+ */
+export function cubeUvDefines(imageHeight: number): Record<string, string> {
+  const maxMip = Math.log2(imageHeight) - 2;
+  const texelHeight = 1 / imageHeight;
+  const texelWidth = 1 / (3 * Math.max(2 ** maxMip, 7 * 16));
+  return {
+    ENVMAP_TYPE_CUBE_UV: '',
+    CUBEUV_TEXEL_WIDTH: String(texelWidth),
+    CUBEUV_TEXEL_HEIGHT: String(texelHeight),
+    CUBEUV_MAX_MIP: `${String(maxMip)}.0`,
+  };
+}
+
 /** Relative luminance of a colour in the linear working space, Rec. 709. */
 function linearLuminance(colour: Color): number {
   return 0.2126 * colour.r + 0.7152 * colour.g + 0.0722 * colour.b;
@@ -4459,6 +4844,20 @@ export class WaterBelt {
     ]),
   });
   readonly #flat = new MeshBasicMaterial({ color: WATER_DEEP_COLOUR, side: DoubleSide });
+  /**
+   * The realistic water — #629: the same ripples reflecting the scene's own
+   * environment map, built for the environment it is handed. @see setEnvironment
+   */
+  #reflecting: { readonly environment: Texture; readonly material: ShaderMaterial } | undefined;
+  /** The environment the realistic rungs reflect. @see setEnvironment */
+  #environment: Texture | undefined;
+  /** Its turn about the vertical, the scene's `environmentRotation.y`, set every frame. */
+  #environmentTurn = 0;
+  #drawn: QualitySettings['water'] = 'shaded';
+  /** Fresnel as the product computes it (−1), or held at a constant — the browser gate's control. */
+  #fresnelHeld = -1;
+  readonly #rotation = new Matrix4();
+  readonly #turn = new Euler();
   readonly #mesh: Mesh;
   #vertexCapacity = 0;
   #indexCapacity = 0;
@@ -4481,7 +4880,11 @@ export class WaterBelt {
    * @see withAtmosphere
    */
   wears(material: Material): boolean {
-    return material === this.#shaded || material === this.#flat;
+    return (
+      material === this.#shaded ||
+      material === this.#flat ||
+      material === this.#reflecting?.material
+    );
   }
 
   get mesh(): Mesh {
@@ -4509,7 +4912,49 @@ export class WaterBelt {
 
   /** @see QualitySettings.water */
   setDrawn(drawn: QualitySettings['water']): void {
-    this.#mesh.material = drawn === 'shaded' ? this.#shaded : this.#flat;
+    this.#drawn = drawn;
+    this.#mount();
+  }
+
+  /**
+   * The environment the realistic rungs reflect — #629. `undefined` on every
+   * stylised rung, which keeps #459's shader, and on a realistic rung until a
+   * world is loaded: `reflectedSkyColour`'s one colour is then the fallback.
+   */
+  setEnvironment(environment: Texture | undefined): void {
+    if (environment === this.#environment) return;
+    this.#environment = environment;
+    if (environment !== undefined && this.#reflecting?.environment !== environment) {
+      this.#reflecting?.material.dispose();
+      this.#reflecting = { environment, material: reflectingWaterMaterial(environment) };
+    }
+    this.#mount();
+  }
+
+  /** The environment's turn about the vertical this frame — the scene's `environmentRotation.y`. */
+  setEnvironmentTurn(turn: number): void {
+    this.#environmentTurn = turn;
+  }
+
+  /** Whether the water reflects an environment map now — #629. @see waterReflectsOf */
+  get reflects(): boolean {
+    return this.#mesh.material === this.#reflecting?.material && this.#environment !== undefined;
+  }
+
+  /** Fresnel held at a constant, or (`undefined`) computed — #629's control. @see waterFresnelOf */
+  holdFresnel(held: number | undefined): void {
+    this.#fresnelHeld = held ?? -1;
+  }
+
+  #mount(): void {
+    if (this.#drawn !== 'shaded') {
+      this.#mesh.material = this.#flat;
+      return;
+    }
+    this.#mesh.material =
+      this.#environment !== undefined && this.#reflecting !== undefined
+        ? this.#reflecting.material
+        : this.#shaded;
   }
 
   /**
@@ -4550,6 +4995,29 @@ export class WaterBelt {
       horizon.setRGB(...reflectedSkyColour(reflection.horizon, linearLuminance(horizon)));
     }
     (uniforms['time'] as { value: number }).value = seconds;
+    // #629: the realistic water's own uniforms, from the same frame.
+    const reflecting = this.#reflecting?.material.uniforms as
+      Record<string, { value: unknown } | undefined> | undefined;
+    if (reflecting !== undefined && this.#environment !== undefined) {
+      (reflecting['skyColour']?.value as Color).copy(sky);
+      (reflecting['horizonColour']?.value as Color).copy(horizon);
+      (reflecting['time'] as { value: number }).value = seconds;
+      (reflecting['fresnelHeld'] as { value: number }).value = this.#fresnelHeld;
+      (reflecting['sunDirection']?.value as Vector3)
+        .set(world.sun.x, world.sun.y, world.sun.z)
+        .normalize();
+      // three's own rotation of an environment (WebGLMaterials, 0.185.1): the
+      // scene's `environmentRotation` as a matrix, transposed.
+      this.#turn.set(0, this.#environmentTurn, 0);
+      (reflecting['envMapRotation']?.value as Matrix3)
+        .setFromMatrix4(this.#rotation.makeRotationFromEuler(this.#turn))
+        .transpose();
+      (reflecting['environmentScale'] as { value: number }).value =
+        reflection === undefined ? 0 : environmentScaleFor(reflection.zenith, linearLuminance(sky));
+      (reflecting['rippleFilter'] as { value: number }).value = (
+        uniforms['rippleFilter'] as { value: number }
+      ).value;
+    }
     if (surface.vertices.length > this.#vertexCapacity) {
       this.#vertexCapacity = Math.max(surface.vertices.length, this.#vertexCapacity * 2);
       this.#geometry.setAttribute(
@@ -4579,7 +5047,58 @@ export class WaterBelt {
     this.#geometry.dispose();
     this.#shaded.dispose();
     this.#flat.dispose();
+    this.#reflecting?.material.dispose();
   }
+}
+
+/**
+ * The realistic water's material for one environment map — #629.
+ * @see reflectingWaterFragment
+ */
+function reflectingWaterMaterial(environment: Texture): ShaderMaterial {
+  const height = (environment.image as { height?: number } | null)?.height ?? 256;
+  const material = constructed(
+    new ShaderMaterial({
+      vertexShader: WATER_VERTEX,
+      fragmentShader: reflectingWaterFragment(),
+      fog: true,
+      side: DoubleSide,
+      defines: cubeUvDefines(height),
+      uniforms: UniformsUtils.merge([
+        UniformsLib.fog,
+        {
+          skyColour: { value: new Color(UNSET_COLOUR) },
+          horizonColour: { value: new Color(UNSET_COLOUR) },
+          deepColour: { value: new Color(WATER_DEEP_COLOUR) },
+          shallowColour: { value: new Color(WATER_SHALLOW_COLOUR) },
+          time: { value: 0 },
+          rippleFilter: { value: 1 },
+          envMap: { value: null },
+          envMapRotation: { value: new Matrix3() },
+          environmentScale: { value: 0 },
+          sunDirection: { value: new Vector3(0, 1, 0) },
+          sunGlint: { value: WATER_GLINT_COLOUR.clone() },
+          fresnelHeld: { value: -1 },
+        },
+      ]),
+    }),
+  );
+  // After the merge, which clones every texture it is handed: the water reads
+  // THE environment map, not a copy of it.
+  (material.uniforms['envMap'] as { value: Texture | null }).value = environment;
+  return material;
+}
+
+/**
+ * What the environment map is multiplied by in the water — #629: the factor
+ * that takes the photograph's zenith band to `target`, the luminance #459's
+ * water was tuned against (`realistic-light.ts` §`reflectedSkyColour`'s
+ * target), so the brightest part of a reflection is where the stylised
+ * water's sky was, and the rest follows the photograph.
+ */
+function environmentScaleFor(zenith: LinearColour, target: number): number {
+  const measured = 0.2126 * zenith[0] + 0.7152 * zenith[1] + 0.0722 * zenith[2];
+  return measured > 0 && target > 0 ? target / measured : 0;
 }
 
 /**
@@ -4837,7 +5356,12 @@ export interface RealisticShape {
   readonly extent: number;
   readonly triangles: number;
   /** The far band's billboard, for a tree. */
-  readonly impostor?: { readonly material: ShaderMaterial; readonly texture: Texture };
+  readonly impostor?: {
+    readonly material: ShaderMaterial;
+    readonly texture: Texture;
+    /** The same views' normals — #630. Absent in a world a test built without them. */
+    readonly normals?: Texture;
+  };
   /**
    * The middle level of detail, for a tree — #617. Its parts wear the near
    * parts' OWN materials, paired by material name, so it adds no material, no
@@ -4880,6 +5404,9 @@ interface RealisticWorld {
   readonly sky: RealisticSky;
   readonly road: { readonly colour: Texture; readonly normal: Texture };
   readonly ground: { readonly colour: Texture; readonly normal: Texture };
+  /** The ground's verge and its rock and scree — #627. */
+  readonly verge: { readonly colour: Texture; readonly normal: Texture };
+  readonly rock: { readonly colour: Texture; readonly normal: Texture };
   readonly vegetation: ReadonlyMap<RealisticVegetationKind, readonly RealisticShape[]>;
   /** The structures' photographic surfaces — ADR 0026 D-12 layer 3, #475. */
   readonly structures: ReadonlyMap<
@@ -4895,6 +5422,11 @@ interface RealisticWorld {
   readonly rider: RealisticRiderMaps;
   /** The bicycle's four drawn maps — #624. */
   readonly bicycle: RealisticBicycleMaps;
+  /**
+   * The gantries' lettering — #679: one byte of coverage a texel, from the
+   * app's own glyph range. Absent where the loaders read no glyphs.
+   */
+  readonly banners?: { readonly atlas: BannerAtlas; readonly texture: DataTexture };
 }
 
 /**
@@ -4921,6 +5453,13 @@ export interface RealisticLoaders {
    * {@link loadRealisticWorld} calls it whether the load succeeded or not.
    */
   readonly dispose?: () => void;
+  /**
+   * Reads a glyph range file's bytes — #679: the gantries' banners are
+   * lettered from the map's own glyphs (`banner-atlas.ts`). Optional, for a
+   * test's loaders that build a world with no banners; the product's supply
+   * it, and the browser gate reads the lettering off the drawing buffer.
+   */
+  readonly glyphs?: (url: string) => Promise<Uint8Array>;
 }
 
 /**
@@ -5061,6 +5600,12 @@ function productRealisticLoaders(): RealisticLoaders {
     model: (url) => loaders().model(url),
     texture: (url) => loaders().texture(url),
     sky: (url) => loaders().sky(url),
+    // Through three's own loader, as every other realistic file is: the one
+    // network rule this client keeps names no `fetch` here (`no-network.test.ts`).
+    glyphs: async (url) =>
+      new Uint8Array(
+        (await new FileLoader().setResponseType('arraybuffer').loadAsync(url)) as ArrayBuffer,
+      ),
     dispose: () => {
       built?.dispose();
       built = undefined;
@@ -5102,7 +5647,15 @@ const BLOCK_FORMATS: ReadonlyMap<number, RealisticTextureFormat> = new Map([
 /** One realistic texture, as the GPU is handed it. */
 interface RealisticTextureReport {
   readonly role:
-    'road' | 'ground' | 'structure' | 'model' | 'impostor' | 'bicycle' | 'rider' | 'sky';
+    | 'road'
+    | 'ground'
+    | 'structure'
+    | 'model'
+    | 'impostor'
+    | 'impostor-normals'
+    | 'bicycle'
+    | 'rider'
+    | 'sky';
   readonly format: RealisticTextureFormat;
   /** Whether the GPU holds it in a block format — never true of a fallback. */
   readonly compressed: boolean;
@@ -5177,6 +5730,14 @@ export function realisticTextureReport(): readonly RealisticTextureReport[] {
   add(world.sky.texture, 'sky');
   for (const map of [world.road.colour, world.road.normal]) add(map, 'road');
   for (const map of [world.ground.colour, world.ground.normal]) add(map, 'ground');
+  for (const map of [
+    world.verge.colour,
+    world.verge.normal,
+    world.rock.colour,
+    world.rock.normal,
+  ]) {
+    add(map, 'ground');
+  }
   for (const maps of world.structures.values()) {
     add(maps.colour, 'structure');
     add(maps.normal, 'structure');
@@ -5189,6 +5750,7 @@ export function realisticTextureReport(): readonly RealisticTextureReport[] {
       for (const part of shape.parts)
         for (const map of texturesOf(part.material)) add(map, 'model');
       add(shape.impostor?.texture, 'impostor');
+      add(shape.impostor?.normals, 'impostor-normals');
     }
   }
   return out;
@@ -5214,6 +5776,10 @@ export function uploadRealisticTexturesOf(view: GameView, textures?: readonly Te
           world.road.normal,
           world.ground.colour,
           world.ground.normal,
+          world.verge.colour,
+          world.verge.normal,
+          world.rock.colour,
+          world.rock.normal,
           ...[...world.structures.values()].flatMap((maps) => [maps.colour, maps.normal]),
           ...REALISTIC_BICYCLE_MAP_NAMES.map((map) => world.bicycle[map]),
           ...REALISTIC_RIDER_MAP_NAMES.map((map) => world.rider[map]),
@@ -5221,6 +5787,7 @@ export function uploadRealisticTexturesOf(view: GameView, textures?: readonly Te
             shapes.flatMap((shape) => [
               ...shape.parts.flatMap((part) => texturesOf(part.material)),
               shape.impostor?.texture ?? null,
+              shape.impostor?.normals ?? null,
             ]),
           ),
         ].filter((texture): texture is Texture => texture !== null));
@@ -5272,6 +5839,15 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     });
   try {
     const sky = texture(() => loaders.sky(realisticUrl(REALISTIC_SKY)));
+    // #679: the map's own glyph range, for the gantries' banners.
+    // ⚠️ A glyph range that cannot be read costs the banners and nothing else
+    // (#879's review): it resolves to nothing rather than failing the world.
+    const glyphs =
+      loaders.glyphs === undefined
+        ? Promise.resolve(undefined)
+        : started(() =>
+            (loaders.glyphs as (url: string) => Promise<Uint8Array>)(BANNER_GLYPHS_URL),
+          ).catch(() => undefined);
     const road = {
       colour: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.road.colour))),
       normal: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.road.normal))),
@@ -5279,6 +5855,15 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     const ground = {
       colour: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.ground.colour))),
       normal: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.ground.normal))),
+    };
+    // #627: the ground's verge, rock and scree, loaded and settled with the rest.
+    const verge = {
+      colour: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.verge.colour))),
+      normal: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.verge.normal))),
+    };
+    const rock = {
+      colour: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.rock.colour))),
+      normal: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.rock.normal))),
     };
     const rider = model(() => loaders.model(realisticUrl(REALISTIC_RIDER)));
     // #623: the rider's three maps, loaded and settled with everything else.
@@ -5304,19 +5889,26 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     }));
     const shapes = REALISTIC_VEGETATION_KINDS.map((kind) => ({
       kind,
-      models: REALISTIC_VEGETATION[kind].map(({ name, file, impostor, middle }) => ({
-        name,
-        scene: model(() => loaders.model(realisticUrl(file))),
-        // #617: the tree's middle level, loaded and settled with everything else.
-        middle:
-          middle === undefined
-            ? Promise.resolve(undefined)
-            : model(() => loaders.model(realisticUrl(middle))),
-        strip:
-          impostor === undefined
-            ? Promise.resolve(undefined)
-            : texture(() => loaders.texture(realisticUrl(impostor))),
-      })),
+      models: REALISTIC_VEGETATION[kind].map(
+        ({ name, file, impostor, impostorNormals, middle }) => ({
+          name,
+          scene: model(() => loaders.model(realisticUrl(file))),
+          // #617: the tree's middle level, loaded and settled with everything else.
+          middle:
+            middle === undefined
+              ? Promise.resolve(undefined)
+              : model(() => loaders.model(realisticUrl(middle))),
+          strip:
+            impostor === undefined
+              ? Promise.resolve(undefined)
+              : texture(() => loaders.texture(realisticUrl(impostor))),
+          // #630: the strip's normals, loaded and settled with everything else.
+          normals:
+            impostorNormals === undefined
+              ? Promise.resolve(undefined)
+              : texture(() => loaders.texture(realisticUrl(impostorNormals))),
+        }),
+      ),
     }));
     // ⚠️ **Every load is SETTLED before anything is decided — #478.** This was
     // a `Promise.all`, which rejects on the first failure while every other
@@ -5325,16 +5917,23 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     // makes this a rider's path) that is most of the set. So a failure waits
     // for the loads still in flight, and then releases all of them.
     const settled = await Promise.allSettled([
+      glyphs,
       sky,
       road.colour,
       road.normal,
       ground.colour,
       ground.normal,
+      verge.colour,
+      verge.normal,
+      rock.colour,
+      rock.normal,
       rider,
       ...riderMaps.map((each) => each.texture),
       ...bicycleMaps.map((each) => each.texture),
       ...structureMaps.flatMap((each) => [each.colour, each.normal]),
-      ...shapes.flatMap((each) => each.models.flatMap((one) => [one.scene, one.strip, one.middle])),
+      ...shapes.flatMap((each) =>
+        each.models.flatMap((one) => [one.scene, one.strip, one.normals, one.middle]),
+      ),
     ]);
     for (const outcome of settled) {
       if (outcome.status === 'rejected') throw outcome.reason;
@@ -5343,7 +5942,12 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     for (const each of shapes) {
       const prepared: RealisticShape[] = [];
       for (const one of each.models) {
-        const near = prepareRealisticShape(await one.scene, one.name, await one.strip);
+        const near = prepareRealisticShape(
+          await one.scene,
+          one.name,
+          await one.strip,
+          await one.normals,
+        );
         loaded.shapes.push(near);
         const middleScene = await one.middle;
         const levelled =
@@ -5353,19 +5957,38 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
         // is the browser gate loading its control. @see setRealisticMaterialsMerged
         const shape = realisticMaterialsMerged ? mergeShapeMaterials(levelled, one.name) : levelled;
         loaded.shapes[loaded.shapes.length - 1] = shape;
+        // #630: every plant's foliage sways, and a rock does not.
+        if (each.kind !== 'rock') withFoliageSwayOf(shape);
         prepared.push(shape);
       }
       vegetation.set(each.kind, prepared);
     }
     const [skyTexture, roadColour, roadNormal, groundColour, groundNormal, body] =
       await Promise.all([sky, road.colour, road.normal, ground.colour, ground.normal, rider]);
-    for (const surface of [roadColour, roadNormal, groundColour, groundNormal]) {
+    const [vergeColour, vergeNormal, rockColour, rockNormal] = await Promise.all([
+      verge.colour,
+      verge.normal,
+      rock.colour,
+      rock.normal,
+    ]);
+    for (const surface of [
+      roadColour,
+      roadNormal,
+      groundColour,
+      groundNormal,
+      vergeColour,
+      vergeNormal,
+      rockColour,
+      rockNormal,
+    ]) {
       surface.wrapS = RepeatWrapping;
       surface.wrapT = RepeatWrapping;
       surface.minFilter = LinearMipmapLinearFilter;
     }
     roadColour.colorSpace = SRGBColorSpace;
     groundColour.colorSpace = SRGBColorSpace;
+    vergeColour.colorSpace = SRGBColorSpace;
+    rockColour.colorSpace = SRGBColorSpace;
     const structures = new Map<
       Exclude<StructureSurface, 'painted'>,
       { readonly colour: Texture; readonly normal: Texture }
@@ -5424,16 +6047,22 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     // threw, must leave the world a view draws intact — the first version of
     // this released first and lost both, which `realistic-renderer.test.ts`
     // §"never half a world" caught.
+    const glyphBytes = await glyphs;
+    const banners = bannersOf(glyphBytes);
+    if (banners !== undefined) loaded.textures.push(banners.texture);
     const previous = realisticWorld;
     realisticWorld = {
       sky: skyRead,
       road: { colour: roadColour, normal: roadNormal },
       ground: { colour: groundColour, normal: groundNormal },
+      verge: { colour: vergeColour, normal: vergeNormal },
+      rock: { colour: rockColour, normal: rockNormal },
       vegetation,
       structures,
       body,
       rider: riderTextures,
       bicycle,
+      ...(banners === undefined ? {} : { banners }),
     };
     // #545: the near-plane cull's shapes, built now rather than on a frame.
     warmNearFieldShapes('realistic');
@@ -5546,6 +6175,7 @@ function releaseRealisticShape(shape: RealisticShape): void {
     part.material.dispose();
   }
   shape.impostor?.texture.dispose();
+  shape.impostor?.normals?.dispose();
   shape.impostor?.material.dispose();
   // #617: the middle level's geometry is its own; its materials are the near parts'.
   for (const part of shape.middle?.parts ?? []) part.geometry.dispose();
@@ -5564,11 +6194,16 @@ export function realisticWorldLoaded(): boolean {
 /** Releases a realistic world that another has replaced. */
 function releaseRealisticWorld(world: RealisticWorld): void {
   world.sky.texture.dispose();
+  world.banners?.texture.dispose();
   for (const texture of [
     world.road.colour,
     world.road.normal,
     world.ground.colour,
     world.ground.normal,
+    world.verge.colour,
+    world.verge.normal,
+    world.rock.colour,
+    world.rock.normal,
   ]) {
     texture.dispose();
   }
@@ -5618,6 +6253,7 @@ export function prepareRealisticShape(
   source: Object3D,
   name: string,
   impostorStrip?: Texture,
+  impostorNormals?: Texture,
 ): RealisticShape {
   source.updateWorldMatrix(false, true);
   const parts: RealisticPart[] = [];
@@ -5668,7 +6304,11 @@ export function prepareRealisticShape(
   const impostor =
     impostorStrip === undefined
       ? undefined
-      : { texture: impostorStrip, material: impostorMaterial(impostorStrip, extras) };
+      : {
+          texture: impostorStrip,
+          material: impostorMaterial(impostorStrip, extras, impostorNormals),
+          ...(impostorNormals === undefined ? {} : { normals: impostorNormals }),
+        };
   return { name, parts, extent, triangles, ...(impostor === undefined ? {} : { impostor }) };
 }
 
@@ -5889,6 +6529,8 @@ export function mergeShapeMaterials(shape: RealisticShape, name: string): Realis
   );
   withTextureLodBias(material);
   withAtmosphere(material);
+  // #630: which layers are leaves, for the breeze. @see withFoliageSwayOf
+  FOLIAGE_LAYERS.set(material, cut);
   withMaterialLayers(material, {
     colours: layers.map((each) => each.color.clone()),
     normalScales: layers.map((each) => each.normalScale.clone()),
@@ -6748,6 +7390,397 @@ function withTreeDither(material: MeshStandardMaterial): void {
 }
 
 /** A unit quad standing on its bottom edge: x in [−0.5, 0.5], y in [0, 1]. */
+/**
+ * The uniforms every realistic plant's breeze and every impostor's light read
+ * — #630 — written once a frame by the view that draws, for `ATMOSPHERE`'s
+ * reason: several views share the loaded world's materials.
+ */
+const FOLIAGE = {
+  oylWindTime: { value: 0 },
+  oylWindDirection: { value: new Vector2(...foliageWindDirection()) },
+  oylSunToward: { value: new Vector3(0, 1, 0) },
+  oylSunAmbient: { value: 0.5 },
+  oylSunDirect: { value: 0.5 },
+  /** 1 in the product; 0 is the browser gate's control, today's unlit strip. @see impostorsLitOf */
+  oylImpostorLit: { value: 1 },
+  /** 1 in the product; 0 holds every plant still. @see foliageStillOf */
+  oylSwayScale: { value: 1 },
+};
+
+/** Which layers of a merged tree material are leaves — #630. @see mergeShapeMaterials */
+const FOLIAGE_LAYERS = new WeakMap<Material, readonly boolean[]>();
+
+/** Materials already taught the breeze. */
+const SWAYING = new WeakSet<Material>();
+
+/**
+ * The breeze, in GLSL: the three waves of `foliage-light.ts`
+ * §`FOLIAGE_WAVES`, and a tree's phase hashed from where it stands.
+ */
+const FOLIAGE_SWAY_COMMON = /* glsl */ `
+uniform float oylWindTime;
+uniform vec2 oylWindDirection;
+uniform float oylSwayScale;
+float oylSwayWave(float phase) {
+  return oylSwayScale * (${FOLIAGE_WAVES.map(
+    ([rate, weight, phases]) =>
+      `${glslFloat(weight)} * sin(oylWindTime * ${glslFloat(rate)} + phase * ${glslFloat(phases)})`,
+  ).join(' + ')});
+}
+float oylSwayPhase(vec2 place) {
+  return fract(sin(dot(floor(place * 10.0), vec2(12.9898, 78.233))) * 43758.5453) * 6.2831853;
+}
+`;
+
+/**
+ * Teaches every material a realistic plant wears the breeze — #630: a push
+ * along `foliage-light.ts` §`foliageWindDirection`, of
+ * `FOLIAGE_SWAY_METRES` at the top of the plant, falling off as the square of
+ * the height, and a {@link WOOD_SWAY_SHARE} of that for a layer that is not
+ * leaves. In the vertex shader before three instances the vertex, turned into
+ * the instance's own frame, so a tree of any turn and size is pushed the same
+ * way by the same metres. Idempotent.
+ */
+function withFoliageSwayOf(shape: RealisticShape): void {
+  const materials = new Set<Material>(
+    [...shape.parts, ...(shape.middle?.parts ?? [])].map((part) => part.material),
+  );
+  const height = shape.extent;
+  for (const material of materials) {
+    if (SWAYING.has(material)) continue;
+    SWAYING.add(material);
+    const layers = FOLIAGE_LAYERS.get(material) ?? [material.alphaTest > 0];
+    const weights = layers.map((leaves) => (leaves ? 1 : WOOD_SWAY_SHARE));
+    const weight =
+      layers.length > 1
+        ? `oylSwayLayer[int(oylLayer + 0.5)]`
+        : glslFloat(weights[0] ?? WOOD_SWAY_SHARE);
+    const earlier = material.onBeforeCompile.bind(material);
+    const earlierKey = material.customProgramCacheKey();
+    material.onBeforeCompile = (shader, renderer) => {
+      earlier(shader, renderer);
+      shader.uniforms['oylWindTime'] = FOLIAGE.oylWindTime;
+      shader.uniforms['oylWindDirection'] = FOLIAGE.oylWindDirection;
+      shader.uniforms['oylSwayScale'] = FOLIAGE.oylSwayScale;
+      if (layers.length > 1) shader.uniforms['oylSwayLayer'] = { value: weights };
+      shader.vertexShader = replacedOrThrown(
+        replacedOrThrown(
+          shader.vertexShader,
+          '#include <common>',
+          `#include <common>\n${FOLIAGE_SWAY_COMMON}${
+            layers.length > 1 ? `uniform float oylSwayLayer[${String(layers.length)}];\n` : ''
+          }`,
+          'vertex',
+          "#630's breeze",
+        ),
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+#ifdef USE_INSTANCING
+{
+  vec3 oylCentre = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+  float oylRise = clamp(position.y / ${glslFloat(height)}, 0.0, 1.0);
+  vec2 oylPush = oylWindDirection
+    * (${glslFloat(FOLIAGE_SWAY_METRES)} * oylSwayWave(oylSwayPhase(oylCentre.xz)) * oylRise * oylRise * ${weight});
+  mat3 oylBasis = mat3(instanceMatrix);
+  transformed += transpose(oylBasis) * vec3(oylPush.x, 0.0, oylPush.y) / dot(oylBasis[0], oylBasis[0]);
+}
+#endif`,
+        'vertex',
+        "#630's breeze",
+      );
+    };
+    material.customProgramCacheKey = () => `${earlierKey}|oyl-breeze-${String(layers.length)}`;
+    material.needsUpdate = true;
+  }
+}
+
+/**
+ * The glyph range the gantries' banners are lettered from — #679: the map's
+ * own, `0-255`, which holds every character `gantry-wording.ts` uses (Latin
+ * capitals, digits, `k`, `m`, `i` and a space). Served from `public/glyphs/`,
+ * precached with the app, and fetched here once a load.
+ */
+const BANNER_GLYPHS_URL = `${import.meta.env.BASE_URL}glyphs/${LABEL_FONT}/0-255.pbf`;
+
+/**
+ * The banners' atlas as a texture — #679. One byte of coverage a texel, red
+ * only, uploaded as it is (row 0 the bottom, which is `v = 0`), mipmapped
+ * because a banner is seen from 400 m. 512 × 1024 bytes: 0.67 MiB with its
+ * mips, under #679's 1 MiB. @see banner-atlas.ts
+ */
+function bannerTextureOf(
+  glyphRange: Uint8Array,
+  cells: readonly BannerCell[],
+): {
+  readonly atlas: BannerAtlas;
+  readonly texture: DataTexture;
+} {
+  const atlas = bannerAtlas(readGlyphRange(glyphRange), cells);
+  const texture = new DataTexture(
+    atlas.coverage,
+    atlas.width,
+    atlas.height,
+    RedFormat,
+    UnsignedByteType,
+  );
+  texture.generateMipmaps = true;
+  texture.minFilter = LinearMipmapLinearFilter;
+  texture.unpackAlignment = 1;
+  texture.needsUpdate = true;
+  return { atlas, texture };
+}
+
+/**
+ * The banners, or none — #679, and #879's review. The banners are decoration:
+ * a range that is absent, malformed, or lacks a glyph a word needs costs a
+ * gantry its lettering (`GantryBelt` draws no banner without an atlas) and
+ * never the realistic world a rider chose, which is what a throw here used to
+ * cost. Nothing is logged: the product logs nothing, and the gantry itself is
+ * the visible sign. `banner-atlas.test.ts` builds the atlas through it, and
+ * holds a malformed range and an undrawable word to no banners.
+ */
+export function bannersOf(
+  glyphRange: Uint8Array | undefined,
+  cells: readonly BannerCell[] = bannerCells(),
+): { readonly atlas: BannerAtlas; readonly texture: DataTexture } | undefined {
+  if (glyphRange === undefined) return undefined;
+  try {
+    return bannerTextureOf(glyphRange, cells);
+  } catch {
+    return undefined;
+  }
+}
+
+/** The gantries' colours: galvanised steel, a white barrier, and the banner. This repository's own. */
+const GANTRY_METAL = 0x8c9299;
+const GANTRY_BARRIER = 0xe4e6e3;
+const BANNER_GROUND = 0x1f3b5c;
+const BANNER_LETTERING = 0xf4f4f0;
+
+/** The most boxes and banners the belt draws: two gantries and a board, with room. */
+const GANTRY_BOX_CAPACITY = 96;
+const GANTRY_BANNER_CAPACITY = 4;
+
+/**
+ * The start and finish gantries, their barriers and the boards before them —
+ * #679. Realistic rungs only (ADR 0026 D-3): the belt belongs to
+ * {@link RealisticDrawing}, so the stylised world has none.
+ *
+ * **Two draw calls, and none away from a line**: every box — legs, beam,
+ * barrier pieces, board posts — is one instance of one unit box, and every
+ * banner one instance of one quad whose instance attribute says which cell of
+ * the atlas it wears. A frame whose `lines` are empty hides both meshes.
+ *
+ * ⚠️ **The banner faces the rider and reads left to right**: its quad's `x`
+ * is the road's normal — the rider's RIGHT, `(−headingZ, headingX)`, since
+ * #583 the map's right as well as the screen's — its `y` up and its `z`
+ * AGAINST the heading, toward a rider riding at it: a proper rotation, so the
+ * quad's front face is toward the rider and `u` runs to their right.
+ * `gantry.test.ts` holds that from the camera.
+ */
+export class GantryBelt {
+  readonly #boxes: InstancedMesh;
+  readonly #banners: InstancedMesh;
+  readonly #cells: InstancedBufferAttribute;
+  readonly #atlas: BannerAtlas | undefined;
+  readonly #matrix = new Matrix4();
+  readonly #colour = new Color();
+  #shown = true;
+  /** Whether the browser gate has turned the gantries off — its control. */
+  #switchedOn = true;
+
+  constructor(banners?: { readonly atlas: BannerAtlas; readonly texture: DataTexture }) {
+    this.#atlas = banners?.atlas;
+    const boxMaterial = withAtmosphere(
+      constructed(new MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, metalness: 0.2 })),
+    );
+    this.#boxes = new InstancedMesh(new BoxGeometry(1, 1, 1), boxMaterial, GANTRY_BOX_CAPACITY);
+    this.#boxes.instanceMatrix.setUsage(DynamicDrawUsage);
+    this.#boxes.count = 0;
+    this.#boxes.frustumCulled = false;
+    this.#boxes.visible = false;
+    const quad = new PlaneGeometry(1, 1);
+    this.#cells = new InstancedBufferAttribute(new Float32Array(GANTRY_BANNER_CAPACITY), 1);
+    this.#cells.setUsage(DynamicDrawUsage);
+    quad.setAttribute('oylCell', this.#cells);
+    this.#banners = new InstancedMesh(
+      quad,
+      bannerMaterial(banners?.texture),
+      GANTRY_BANNER_CAPACITY,
+    );
+    this.#banners.instanceMatrix.setUsage(DynamicDrawUsage);
+    this.#banners.count = 0;
+    this.#banners.frustumCulled = false;
+    this.#banners.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#boxes);
+    scene.add(this.#banners);
+  }
+
+  /** The two meshes. For `three-renderer.test.ts` and the browser gate's counts. */
+  get meshes(): { readonly boxes: InstancedMesh; readonly banners: InstancedMesh } {
+    return { boxes: this.#boxes, banners: this.#banners };
+  }
+
+  setShown(on: boolean): void {
+    this.#shown = on;
+    if (!on) {
+      this.#boxes.visible = false;
+      this.#banners.visible = false;
+    }
+  }
+
+  /** @see gantriesShownOf */
+  switchOn(on: boolean): void {
+    this.#switchedOn = on;
+  }
+
+  /** This frame's stands: their boxes and their banners, and nothing where there are none. */
+  update(lines: readonly PlacedStand[]): void {
+    let boxes = 0;
+    let banners = 0;
+    if (this.#shown && this.#switchedOn) {
+      for (const line of lines) {
+        for (const placed of line.boxes) {
+          const box = placed.box;
+          if (boxes >= GANTRY_BOX_CAPACITY) break;
+          this.#placeBox(boxes, placed);
+          this.#colour.setHex(box.role === 'barrier' ? GANTRY_BARRIER : GANTRY_METAL);
+          this.#boxes.setColorAt(boxes, this.#colour);
+          boxes += 1;
+        }
+        const cell = this.#atlas?.cells.get(line.stand.text);
+        if (cell === undefined || banners >= GANTRY_BANNER_CAPACITY) continue;
+        const place = bannerPlace(line.stand.kind);
+        const at = standPoint(line, place.across, place.up, place.along);
+        this.#matrix.set(
+          -line.headingZ * place.width,
+          0,
+          -line.headingX,
+          at.x,
+          0,
+          place.height,
+          0,
+          at.y,
+          line.headingX * place.width,
+          0,
+          -line.headingZ,
+          at.z,
+          0,
+          0,
+          0,
+          1,
+        );
+        this.#banners.setMatrixAt(banners, this.#matrix);
+        this.#cells.setX(banners, cell);
+        banners += 1;
+      }
+    }
+    this.#boxes.count = boxes;
+    this.#banners.count = banners;
+    this.#boxes.instanceMatrix.needsUpdate = boxes > 0;
+    if (this.#boxes.instanceColor !== null) this.#boxes.instanceColor.needsUpdate = boxes > 0;
+    this.#banners.instanceMatrix.needsUpdate = banners > 0;
+    this.#cells.needsUpdate = banners > 0;
+    this.#boxes.visible = boxes > 0;
+    this.#banners.visible = banners > 0;
+  }
+
+  /** One box: its axes are the road's at its own distance, scaled by its size. */
+  #placeBox(slot: number, line: PlacedBox): void {
+    const box = line.box;
+    const at = boxPoint(line, box.across, box.up);
+    // The same right-handed frame as the banner's — right, up, toward the
+    // rider — so no box is drawn inside out.
+    this.#matrix.set(
+      -line.headingZ * box.width,
+      0,
+      -line.headingX * box.depth,
+      at.x,
+      0,
+      box.height,
+      0,
+      at.y,
+      line.headingX * box.width,
+      0,
+      -line.headingZ * box.depth,
+      at.z,
+      0,
+      0,
+      0,
+      1,
+    );
+    this.#boxes.setMatrixAt(slot, this.#matrix);
+  }
+
+  dispose(): void {
+    this.#boxes.geometry.dispose();
+    (this.#boxes.material as Material).dispose();
+    this.#boxes.dispose();
+    this.#banners.geometry.dispose();
+    (this.#banners.material as Material).dispose();
+    this.#banners.dispose();
+  }
+}
+
+/**
+ * The banner's material — #679: lit like the world round it, its colour the
+ * banner's ground where the atlas has no lettering and the lettering's where
+ * it has, from the cell the instance names. Constructed here (D-11).
+ */
+function bannerMaterial(atlas: Texture | undefined): MeshStandardMaterial {
+  const material = constructed(
+    new MeshStandardMaterial({
+      color: 0xffffff,
+      map: atlas ?? null,
+      roughness: 0.8,
+      metalness: 0,
+    }),
+  );
+  const cells = String(BANNER_CELLS);
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms['bannerGround'] = { value: new Color(BANNER_GROUND) };
+    shader.uniforms['bannerLettering'] = { value: new Color(BANNER_LETTERING) };
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.vertexShader,
+        '#include <common>',
+        '#include <common>\nattribute float oylCell;',
+        'vertex',
+        "#679's banner",
+      ),
+      '#include <uv_vertex>',
+      `#include <uv_vertex>
+#ifdef USE_MAP
+vMapUv = vec2(uv.x, (oylCell + uv.y) / ${cells}.0);
+#endif`,
+      'vertex',
+      "#679's banner",
+    );
+    shader.fragmentShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.fragmentShader,
+        '#include <common>',
+        '#include <common>\nuniform vec3 bannerGround;\nuniform vec3 bannerLettering;',
+        'fragment',
+        "#679's banner",
+      ),
+      '#include <map_fragment>',
+      `#ifdef USE_MAP
+diffuseColor.rgb = mix(bannerGround, bannerLettering, texture2D(map, vMapUv).r);
+#else
+diffuseColor.rgb = bannerGround;
+#endif`,
+      'fragment',
+      "#679's banner",
+    );
+  };
+  material.customProgramCacheKey = () => `oyl-banner-${cells}`;
+  return withAtmosphere(material);
+}
+
 function impostorQuad(): BufferGeometry {
   return new PlaneGeometry(1, 1).translate(0, 0.5, 0);
 }
@@ -6758,13 +7791,17 @@ function impostorQuad(): BufferGeometry {
  * from the scan the strip was rendered from. Constructed here — D-11 — and
  * alpha-tested so it depth-sorts with the near meshes.
  *
- * ⚠️ **Unlit**: the strip was rendered lit, by the pipeline's own sun. It is
- * fogged, tone mapped and colour-managed exactly as a lit material is, so it
- * fades into the horizon with everything else.
+ * ⚠️ **Lit by the world's sun since #630**, where it was unlit: the strip was
+ * rendered lit, by the pipeline's own sun, so each texel is relit from the
+ * normal strip the pipeline bakes beside it — the world's shade over the
+ * script's (`foliage-light.ts`). It is fogged, tone mapped and colour-managed
+ * exactly as a lit material is, so it fades into the horizon with everything
+ * else. And it sways with the meshes, as a shear of the quad.
  */
 function impostorMaterial(
   strip: Texture,
   extras: Readonly<Record<string, unknown>>,
+  normals?: Texture,
 ): ShaderMaterial {
   const frames = Number(extras['oyl_impostor_frames']);
   const ortho = Number(extras['oyl_impostor_scale']);
@@ -6778,11 +7815,21 @@ function impostorMaterial(
     image?.width !== undefined && image.height !== undefined && image.height > 0
       ? image.width / frames / image.height
       : 0.5;
+  const scriptSun = scriptSunToward();
   const material = new ShaderMaterial({
-    uniforms: UniformsUtils.merge([UniformsLib.fog, { strip: { value: null } }]),
+    uniforms: UniformsUtils.merge([
+      UniformsLib.fog,
+      { strip: { value: null }, stripNormals: { value: null } },
+    ]),
     fog: true,
     side: DoubleSide,
     defines: {
+      ...(normals === undefined ? {} : { OYL_LIT_IMPOSTOR: '' }),
+      TREE_HEIGHT: height.toFixed(5),
+      TREE_WIDTH: (Number(extras['oyl_scan_width']) > 0
+        ? Number(extras['oyl_scan_width'])
+        : height
+      ).toFixed(5),
       FRAMES: frames.toFixed(1),
       QUAD_W: (ortho * frameAspect).toFixed(5),
       QUAD_H: ortho.toFixed(5),
@@ -6796,7 +7843,12 @@ function impostorMaterial(
       varying vec2 vStripUv;
       varying vec2 vOylKeep;
       varying vec3 vOylTint;
+      varying vec2 vOylAcross;
+      varying vec2 vOylAlong;
+      varying vec2 vOylFacing;
+      varying vec2 vOylCrown;
       ${TINT_DECODE_GLSL}
+      ${FOLIAGE_SWAY_COMMON}
       void main() {
         #ifdef USE_INSTANCING_COLOR
           vOylKeep = instanceColor.xy;
@@ -6818,6 +7870,19 @@ function impostorMaterial(
         vec3 world = centre
           + right * position.x * QUAD_W * size
           + vec3(0.0, QUAD_BOTTOM + position.y * QUAD_H, 0.0) * size;
+        // #630: the breeze, as a shear of the quad matching the meshes' push.
+        float oylRise = clamp((QUAD_BOTTOM + position.y * QUAD_H) / TREE_HEIGHT, 0.0, 1.0);
+        world.xz += oylWindDirection
+          * (${glslFloat(FOLIAGE_SWAY_METRES)} * oylSwayWave(oylSwayPhase(centre.xz)) * oylRise * oylRise);
+        vOylAcross = normalize(across.xz + vec2(1e-6, 0.0));
+        vOylFacing = facing;
+        // Where on the crown this corner is: across the quad, and up it from
+        // the crown's middle (half the scan's height), each in [-1, 1].
+        vOylCrown = vec2(
+          position.x * 2.0 * QUAD_W / TREE_WIDTH,
+          ((QUAD_BOTTOM + position.y * QUAD_H) / TREE_HEIGHT) * 2.0 - 1.0
+        );
+        vOylAlong = normalize(along.xz + vec2(0.0, 1e-6));
         vStripUv = vec2((frame + uv.x) / FRAMES, uv.y);
         vec4 mvPosition = viewMatrix * vec4(world, 1.0);
         gl_Position = projectionMatrix * mvPosition;
@@ -6828,14 +7893,58 @@ function impostorMaterial(
       #include <common>
       #include <fog_pars_fragment>
       uniform sampler2D strip;
+      uniform sampler2D stripNormals;
+      uniform vec3 oylSunToward;
+      uniform float oylSunAmbient;
+      uniform float oylSunDirect;
+      uniform float oylImpostorLit;
       varying vec2 vStripUv;
       varying vec2 vOylKeep;
       varying vec3 vOylTint;
+      varying vec2 vOylAcross;
+      varying vec2 vOylAlong;
+      varying vec2 vOylFacing;
+      varying vec2 vOylCrown;
       ${TINT_APPLY_GLSL}
       void main() {
         ${TREE_DITHER_DISCARD}
         vec4 texel = texture2D(strip, vStripUv);
         if (texel.a < ${REALISTIC_ALPHA_CUTOFF.toFixed(2)}) discard;
+        #ifdef OYL_LIT_IMPOSTOR
+        {
+          // #630: relit by the world's sun, from the strip's own normals.
+          vec3 oylLocal = texture2D(stripNormals, vStripUv).xyz * 2.0 - 1.0;
+          if (dot(oylLocal, oylLocal) > 0.0025) {
+            vec3 oylAcrossW = vec3(vOylAcross.x, 0.0, vOylAcross.y);
+            vec3 oylAlongW = vec3(vOylAlong.x, 0.0, vOylAlong.y);
+            // The baked normal, turned into the world with the instance.
+            vec3 oylBakedW = oylAcrossW * oylLocal.x + vec3(0.0, oylLocal.y, 0.0) + oylAlongW * oylLocal.z;
+            // ⚠️ **And the crown's own**, measured: a leaf card's normal in
+            // Cycles' pass faces the camera that rendered it whichever way
+            // the card is turned, so the strip's normals over a canopy
+            // average toward the viewer and carry no left or right — the
+            // first version relit a tree 45 m off by 1 % between its sides.
+            // So the texel's place on a sphere round the crown carries the
+            // shape (${String(Math.round(IMPOSTOR_CROWN_SHARE * 100))} %), and the strip the detail.
+            vec3 oylRight = vec3(vOylFacing.y, 0.0, -vOylFacing.x);
+            vec3 oylToward = vec3(vOylFacing.x, 0.0, vOylFacing.y);
+            vec2 oylOn = clamp(vOylCrown, -1.0, 1.0);
+            vec3 oylCrownW = oylRight * oylOn.x + vec3(0.0, oylOn.y, 0.0)
+              + oylToward * sqrt(max(1.0 - dot(oylOn, oylOn), 0.0));
+            vec3 oylWorld = normalize(
+              mix(oylBakedW, oylCrownW, ${glslFloat(IMPOSTOR_CROWN_SHARE)}) + vec3(0.0, 1e-4, 0.0)
+            );
+            // The same normal in the plant's frame, where the script's sun is.
+            vec3 oylInPlant = vec3(dot(oylWorld, oylAcrossW), oylWorld.y, dot(oylWorld, oylAlongW));
+            float oylUnder = (oylSunAmbient + oylSunDirect * max(dot(oylWorld, oylSunToward), 0.0))
+              / max(oylSunAmbient + oylSunDirect * 0.5, 1e-4);
+            float oylBaked = (${glslFloat(SCRIPT_SKY_SHARE)} + max(dot(oylInPlant, vec3(${scriptSun.map((each) => each.toFixed(5)).join(', ')})), 0.0))
+              / ${glslFloat(SCRIPT_SKY_SHARE + 0.5)};
+            float oylRelit = clamp(oylUnder / oylBaked, ${glslFloat(IMPOSTOR_RELIGHT_RANGE[0])}, ${glslFloat(IMPOSTOR_RELIGHT_RANGE[1])});
+            texel.rgb *= mix(1.0, oylRelit, oylImpostorLit);
+          }
+        }
+        #endif
         // #621: the same tint the tree's meshes wear, on the light it was baked with.
         gl_FragColor = vec4(oylTinted(texel.rgb, vOylTint), 1.0);
         #include <tonemapping_fragment>
@@ -6845,6 +7954,15 @@ function impostorMaterial(
     `,
   });
   (material.uniforms['strip'] as { value: Texture | null }).value = strip;
+  // #630: the normals, and the world's sun as this frame's view wrote it.
+  (material.uniforms['stripNormals'] as { value: Texture | null }).value = normals ?? null;
+  material.uniforms['oylSunToward'] = FOLIAGE.oylSunToward;
+  material.uniforms['oylSunAmbient'] = FOLIAGE.oylSunAmbient;
+  material.uniforms['oylSunDirect'] = FOLIAGE.oylSunDirect;
+  material.uniforms['oylImpostorLit'] = FOLIAGE.oylImpostorLit;
+  material.uniforms['oylWindTime'] = FOLIAGE.oylWindTime;
+  material.uniforms['oylWindDirection'] = FOLIAGE.oylWindDirection;
+  material.uniforms['oylSwayScale'] = FOLIAGE.oylSwayScale;
   // #619 lever 2: the strip is mipmapped, so the far band sheds with the rest.
   // #622: its fog is three's chunk like any other, so it breathes the same air.
   return constructed(withAtmosphere(withTextureLodBias(material)));
@@ -7570,12 +8688,49 @@ export function photographicRoadMaterial(colour: Texture, normal: Texture): Mesh
       side: DoubleSide,
     }),
   );
+  const wear = {
+    patches: new Float32Array(MAXIMUM_ROAD_PATCHES * ROAD_PATCH_FLOATS),
+    on: 1,
+    colour: 1,
+  };
+  ROAD_WEAR.set(material, wear);
   material.onBeforeCompile = (shader) => {
     shader.uniforms['tileMetres'] = { value: REALISTIC_SURFACES.road.tileMetres };
+    // #628: the patches lying in this frame's corridor, and the switch the
+    // browser gate's control turns off. The SAME objects every compile, so a
+    // program compiled again still reads what `#updateRoad` writes.
+    shader.uniforms['roadPatches'] = { value: wear.patches };
+    shader.uniforms['roadWear'] = {
+      get value(): number {
+        return wear.on;
+      },
+    };
+    // #879: the colour terms alone, for the browser gate's surface-only read.
+    shader.uniforms['roadWearColour'] = {
+      get value(): number {
+        return wear.colour;
+      },
+    };
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nuniform float tileMetres;')
-      .replace('#include <uv_vertex>', `#include <uv_vertex>\n${PLANAR_UV}`);
+      .replace(
+        '#include <common>',
+        `#include <common>\nuniform float tileMetres;\n${ROAD_WEAR_VERTEX_PARS}`,
+      )
+      .replace('#include <uv_vertex>', `#include <uv_vertex>\n${PLANAR_UV}\n${ROAD_WEAR_VERTEX}`);
     shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>\n${DETAIL_COMMON}\n${ROAD_WEAR_FRAGMENT_PARS}`,
+      )
+      .replace('#include <color_fragment>', `#include <color_fragment>\n${ROAD_WEAR_FRAGMENT}`)
+      .replace(
+        '#include <roughnessmap_fragment>',
+        `#include <roughnessmap_fragment>\nroughnessFactor *= mix(1.0, ${glslFloat(WHEEL_TRACK_ROUGHNESS)}, oylTrackShare);`,
+      )
+      .replace(
+        '#include <normal_fragment_maps>',
+        `#include <normal_fragment_maps>\nnormal = normalize(mix(normal, nonPerturbedNormal, ${glslFloat(1 - WHEEL_TRACK_RELIEF)} * oylTrackShare));`,
+      )
       // ⚠️ **Every face is lit as facing UP, whichever way it is wound.**
       // `terrain.ts` §`roadIndices` keeps the winding consistent within a lane
       // and says it is not relied on — the stylised road is unlit, so it never
@@ -7611,10 +8766,82 @@ material.specularF90 *= ${ROAD_SHEEN.toFixed(3)};`,
 `,
       );
   };
-  material.customProgramCacheKey = () => 'oyl-photographic-road';
+  material.customProgramCacheKey = () => 'oyl-photographic-road-worn';
   // #619 lever 2 and #622's air, chained after the assignment above.
   return withAtmosphere(withTextureLodBias(material));
 }
+
+/**
+ * What each photographic road material wears — #628: the patches in this
+ * frame's corridor (world-space rectangles, `road-wear.ts`
+ * §`roadPatchUniforms`) and whether wear is drawn at all. Keyed by material
+ * because a view builds its own road material with its drawing.
+ */
+const ROAD_WEAR = new WeakMap<
+  Material,
+  { readonly patches: Float32Array; on: number; colour: number }
+>();
+
+/** The road's across-position attribute's name — #628. @see writeRoadAcross */
+const ROAD_ACROSS_ATTRIBUTE = 'oylAcross';
+
+const ROAD_WEAR_VERTEX_PARS = /* glsl */ `
+attribute float ${ROAD_ACROSS_ATTRIBUTE};
+varying float vRoadAcross;
+varying vec2 vRoadWorld;
+`;
+
+const ROAD_WEAR_VERTEX = /* glsl */ `
+vRoadAcross = ${ROAD_ACROSS_ATTRIBUTE};
+vRoadWorld = (modelMatrix * vec4(position, 1.0)).xz;
+`;
+
+const ROAD_WEAR_FRAGMENT_PARS = /* glsl */ `
+uniform vec4 roadPatches[${String(MAXIMUM_ROAD_PATCHES * 2)}];
+uniform float roadWear;
+uniform float roadWearColour;
+varying float vRoadAcross;
+varying vec2 vRoadWorld;
+`;
+
+/**
+ * The wear — #628, after `color_fragment`, so the vertex colour is known: a
+ * fragment whose vertex colour is paint (`terrain.ts` §`MARKING_COLOUR`, far
+ * brighter than any tint) has its paint worn; everything else is carriageway,
+ * whose every term together is clamped to `road-wear.ts`
+ * §`MAXIMUM_WEAR_SHARE` — the arithmetic that keeps the gradient cue.
+ * `oylTrackShare` is read again by the roughness and the normal below it.
+ */
+const ROAD_WEAR_FRAGMENT = /* glsl */ `
+float oylTrackShare = 0.0;
+{
+  float oylTrack = 0.0;
+${WHEEL_TRACK_OFFSETS_METRES.map(
+  (offset) =>
+    `  oylTrack = max(oylTrack, 1.0 - smoothstep(${glslFloat(WHEEL_TRACK_HALF_WIDTH_METRES)}, ${glslFloat(WHEEL_TRACK_HALF_WIDTH_METRES + WHEEL_TRACK_EDGE_METRES)}, abs(vRoadAcross - (${glslFloat(offset)}))));`,
+).join('\n')}
+  oylTrack *= roadWear;
+  float oylWorn = ${glslFloat(WHEEL_TRACK_LIGHTEN)} * oylTrack;
+  oylWorn += ${glslFloat(DUST_LIGHTEN)} * roadWear
+    * smoothstep(${glslFloat(CARRIAGEWAY_HALF_METRES - DUST_BAND_METRES)}, ${glslFloat(CARRIAGEWAY_HALF_METRES)}, abs(vRoadAcross));
+  for (int oylAt = 0; oylAt < ${String(MAXIMUM_ROAD_PATCHES)}; oylAt += 1) {
+    vec4 oylPlace = roadPatches[oylAt * 2];
+    vec4 oylSize = roadPatches[oylAt * 2 + 1];
+    vec2 oylFrom = vRoadWorld - oylPlace.xy;
+    float oylAlong = abs(dot(oylFrom, oylPlace.zw));
+    float oylAcross = abs(dot(oylFrom, vec2(-oylPlace.w, oylPlace.z)));
+    float oylInside = (1.0 - smoothstep(oylSize.x - 0.08, oylSize.x, oylAlong))
+      * (1.0 - smoothstep(oylSize.y - 0.08, oylSize.y, oylAcross));
+    oylWorn += oylSize.z * oylInside * step(0.0001, oylSize.x) * roadWear;
+  }
+  float oylCarriageway = 1.0 + roadWearColour * clamp(oylWorn, ${glslFloat(-MAXIMUM_WEAR_SHARE)}, ${glslFloat(MAXIMUM_WEAR_SHARE)});
+  float oylPaint = smoothstep(0.35, 0.55, dot(vColor.rgb, vec3(0.2126, 0.7152, 0.0722)));
+  float oylFaded = 1.0 - ${glslFloat(PAINT_WEAR)} * roadWear * roadWearColour
+    * smoothstep(0.35, 0.85, oylNoise(vRoadWorld * 0.13) * 0.7 + oylNoise(vRoadWorld * 1.7) * 0.3);
+  diffuseColor.rgb *= mix(oylCarriageway, oylFaded, oylPaint);
+  oylTrackShare = oylTrack * (1.0 - oylPaint);
+}
+`;
 
 /**
  * How much of its specular reflection the photographic road keeps: **0.25** —
@@ -7649,6 +8876,133 @@ const PLANAR_UV = /* glsl */ `
 `;
 
 /**
+ * The two surfaces the realistic ground blends into, and where the tree line
+ * is — #627. Absent in a world a test built without them, which draws the
+ * grass everywhere as before. @see photographicGroundMaterial
+ */
+interface GroundBlendMaps {
+  readonly verge?: { readonly colour: Texture; readonly normal: Texture };
+  readonly rock?: { readonly colour: Texture; readonly normal: Texture };
+  /** `landform.ts` §`TerrainMesh.treeLine`, written by `TerrainBelt.update`. */
+  readonly treeLine: { value: number };
+}
+
+/**
+ * A tree line no ground reaches, until a frame says where it is: finite,
+ * because a shader handed an infinity for a `smoothstep` edge divides nothing
+ * by nothing.
+ */
+const NO_TREE_LINE = 1e9;
+
+/**
+ * Each ground material's blend switches — #627: verge, rock and scree, each 1
+ * in the product and 0 in the browser gate's control. @see groundBlendOf
+ */
+const GROUND_BLEND_SHARES = new WeakMap<Material, Vector3>();
+
+const GROUND_BLEND_VERTEX_PARS = /* glsl */ `
+varying vec3 vOylGround;
+varying float vOylGroundUp;
+`;
+
+/** World position and the ground normal's vertical, before any map perturbs it. */
+const GROUND_BLEND_VERTEX = /* glsl */ `
+vOylGround = (modelMatrix * vec4(position, 1.0)).xyz;
+vOylGroundUp = normalize(mat3(modelMatrix) * normal).y;
+`;
+
+/**
+ * The blend's shares, its samplers, and the normal map as the blend reads it.
+ *
+ * ⚠️ **Branched, so the two new surfaces cost nothing where they are not**
+ * (#627's cost ceiling): each is sampled only where its share is above zero,
+ * with `textureGrad` and derivatives taken OUTSIDE the branch — an implicit
+ * derivative inside non-uniform control flow is undefined in GLSL — and scaled
+ * by the rung's LOD bias as `withTextureLodBias` would have (#619 lever 2).
+ * The grass is sampled everywhere, as before.
+ */
+const GROUND_BLEND_FRAGMENT_PARS = /* glsl */ `
+uniform sampler2D vergeMap;
+uniform sampler2D vergeNormalMap;
+uniform sampler2D rockMap;
+uniform sampler2D rockNormalMap;
+uniform float treeLine;
+uniform vec3 groundShares;
+varying vec3 vOylGround;
+varying float vOylGroundUp;
+float oylVergeShare = 0.0;
+float oylRockShare = 0.0;
+vec3 oylVergeTexel = vec3(1.0);
+vec3 oylRockTexel = vec3(1.0);
+vec3 oylGroundWorld = vec3(1.0);
+vec2 oylVergeUv() { return vOylGround.xz / ${glslFloat(REALISTIC_SURFACES.verge.tileMetres)}; }
+vec2 oylRockUv() { return vOylGround.xz / ${glslFloat(REALISTIC_SURFACES.rock.tileMetres)}; }
+vec3 oylGroundNormal(vec2 grassUv) {
+  vec3 grass = texture2D(normalMap, grassUv).xyz;
+  float oylBias = exp2(oylTextureLodBias);
+  vec2 vergeUv = oylVergeUv();
+  vec2 vergeDx = dFdx(vergeUv) * oylBias;
+  vec2 vergeDy = dFdy(vergeUv) * oylBias;
+  vec2 rockUv = oylRockUv();
+  vec2 rockDx = dFdx(rockUv) * oylBias;
+  vec2 rockDy = dFdy(rockUv) * oylBias;
+  vec3 texel = grass;
+  if (oylVergeShare > 0.0) {
+    texel = mix(texel, textureGrad(vergeNormalMap, vergeUv, vergeDx, vergeDy).xyz, oylVergeShare);
+  }
+  if (oylRockShare > 0.0) {
+    texel = mix(texel, textureGrad(rockNormalMap, rockUv, rockDx, rockDy).xyz, oylRockShare);
+  }
+  return texel;
+}
+`;
+
+/**
+ * The shares, and the two surfaces' colours — inside the ground's map block,
+ * before the grass multiplies the world's colour in, so each surface is ITS
+ * photograph over its own mean times the world's colour (#627: the world's
+ * per-route colour still leads).
+ */
+const GROUND_BLEND_SHARES_GLSL = /* glsl */ `
+  oylGroundWorld = diffuseColor.rgb;
+  float oylFromEdge = abs(vFields.y) - ${glslFloat(ROAD_EDGE_METRES)};
+  float oylVerge = (1.0 - smoothstep(${glslFloat(VERGE_BLEND_METRES[0])}, ${glslFloat(VERGE_BLEND_METRES[1])}, oylFromEdge)) * groundShares.x;
+  // The slope, as the cosine the normal's vertical already is: steeper is a
+  // SMALLER cosine, so the step runs from the steep end's cosine to the gentle one's.
+  float oylRock = (1.0 - smoothstep(${glslFloat(Math.cos((ROCK_SLOPE_DEGREES[1] * Math.PI) / 180))}, ${glslFloat(Math.cos((ROCK_SLOPE_DEGREES[0] * Math.PI) / 180))}, vOylGroundUp)) * groundShares.y;
+  float oylScree = smoothstep(treeLine - ${glslFloat(SCREE_BAND_METRES)}, treeLine + ${glslFloat(SCREE_BAND_METRES)}, vOylGround.y) * groundShares.z;
+  oylRockShare = max(oylRock, oylScree);
+  oylVergeShare = oylVerge * (1.0 - oylRockShare);
+  {
+    float oylBias = exp2(oylTextureLodBias);
+    vec2 vergeUv = oylVergeUv();
+    vec2 vergeDx = dFdx(vergeUv) * oylBias;
+    vec2 vergeDy = dFdy(vergeUv) * oylBias;
+    vec2 rockUv = oylRockUv();
+    vec2 rockDx = dFdx(rockUv) * oylBias;
+    vec2 rockDy = dFdy(rockUv) * oylBias;
+    if (oylVergeShare > 0.0) {
+      oylVergeTexel = textureGrad(vergeMap, vergeUv, vergeDx, vergeDy).rgb
+        / max(textureLod(vergeMap, vec2(0.5), 16.0).rgb, vec3(1e-3));
+    }
+    if (oylRockShare > 0.0) {
+      oylRockTexel = textureGrad(rockMap, rockUv, rockDx, rockDy).rgb
+        / max(textureLod(rockMap, vec2(0.5), 16.0).rgb, vec3(1e-3));
+    }
+  }
+`;
+
+/** Mixed in over the grass and its patchwork, times the landform's own vertex colour. */
+const GROUND_BLEND_MIX = /* glsl */ `
+{
+  float oylOther = oylVergeShare + oylRockShare;
+  vec3 oylSurfaces = oylGroundWorld * vColor.rgb
+    * (oylVergeTexel * oylVergeShare + oylRockTexel * oylRockShare);
+  diffuseColor.rgb = diffuseColor.rgb * (1.0 - oylOther) + oylSurfaces;
+}
+`;
+
+/**
  * The ground's photographic material — #425.
  *
  * The grass photograph brings grain, clumps and light; the hue stays
@@ -7665,6 +9019,7 @@ export function photographicGroundMaterial(
   normal: Texture,
   fieldSpan: { value: number },
   fieldCount: { value: number },
+  blend: GroundBlendMaps = { treeLine: { value: NO_TREE_LINE } },
 ): MeshStandardMaterial {
   const material = constructed(
     new MeshStandardMaterial({
@@ -7677,16 +9032,54 @@ export function photographicGroundMaterial(
       metalness: 0,
     }),
   );
+  // #627: the switches the browser gate's control turns — verge, rock, scree.
+  const shares = new Vector3(1, 1, 1);
+  GROUND_BLEND_SHARES.set(material, shares);
+  const blended = blend.verge !== undefined && blend.rock !== undefined;
   material.onBeforeCompile = (shader) => {
     shader.uniforms['tileMetres'] = { value: REALISTIC_SURFACES.ground.tileMetres };
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nuniform float tileMetres;')
-      .replace('#include <uv_vertex>', `#include <uv_vertex>\n${PLANAR_UV}`);
+      .replace(
+        '#include <common>',
+        `#include <common>\nuniform float tileMetres;\n${blended ? GROUND_BLEND_VERTEX_PARS : ''}`,
+      )
+      .replace(
+        '#include <uv_vertex>',
+        `#include <uv_vertex>\n${PLANAR_UV}\n${blended ? GROUND_BLEND_VERTEX : ''}`,
+      );
+    if (blended) {
+      shader.uniforms['vergeMap'] = { value: blend.verge?.colour };
+      shader.uniforms['vergeNormalMap'] = { value: blend.verge?.normal };
+      shader.uniforms['rockMap'] = { value: blend.rock?.colour };
+      shader.uniforms['rockNormalMap'] = { value: blend.rock?.normal };
+      shader.uniforms['treeLine'] = blend.treeLine;
+      shader.uniforms['groundShares'] = { value: shares };
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <normalmap_pars_fragment>',
+          `#include <normalmap_pars_fragment>\n${GROUND_BLEND_FRAGMENT_PARS}`,
+        )
+        .replace(
+          '#include <normal_fragment_maps>',
+          ShaderChunk.normal_fragment_maps.replace(
+            'vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;',
+            'vec3 mapN = oylGroundNormal( vNormalMapUv ) * 2.0 - 1.0;',
+          ),
+        )
+        // After `color_fragment` AND #460's patchwork, which the surface detail
+        // splices in directly after it: the verge and the rock are mixed in
+        // over the patchwork, so the field pattern shows where the grass does.
+        .replace(
+          '#include <alphamap_fragment>',
+          `${GROUND_BLEND_MIX}\n#include <alphamap_fragment>`,
+        );
+    }
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <map_fragment>',
       /* glsl */ `
 #ifdef USE_MAP
 {
+${blended ? GROUND_BLEND_SHARES_GLSL : ''}
   vec3 oylNear = texture2D(map, vMapUv).rgb;
   vec3 oylFar = texture2D(map, vMapUv * 0.111 + vec2(0.37, 0.61)).rgb;
   float oylFarShare = smoothstep(8.0, 120.0, -vViewPosition.z);
@@ -7698,7 +9091,8 @@ export function photographicGroundMaterial(
 `,
     );
   };
-  material.customProgramCacheKey = () => 'oyl-photographic-ground';
+  material.customProgramCacheKey = () =>
+    blended ? 'oyl-photographic-ground-blended' : 'oyl-photographic-ground';
   // #460's patchwork, chained after the photograph rather than replacing it,
   // and #619 lever 2's bias after both.
   return withAtmosphere(
@@ -7810,6 +9204,12 @@ export class RealisticRiderBelt {
   readonly #alongTheBicycle = new Vector3(0, 0, 1);
   readonly #roll = new Quaternion();
   readonly #unit = new Vector3(1, 1, 1);
+  /** #625's scratch: the motion, the head held level, and a world turn. */
+  readonly #motion = emptyRiderMotion();
+  readonly #headHeld = new Quaternion();
+  readonly #spin = new Quaternion();
+  readonly #alongWorld = new Vector3();
+  readonly #acrossWorld = new Vector3();
   #shown = true;
 
   constructor(body: Object3D, maps: RealisticBicycleMaps, dressed: RealisticRiderMaps) {
@@ -7930,6 +9330,75 @@ export class RealisticRiderBelt {
     return this.#helmets;
   }
 
+  /**
+   * The rider and bicycle seen from the side, with the cranks level — #626's
+   * silhouette, made from THIS belt's own body, posed by this belt's own
+   * `#pose`, and the bicycle's own meshes, so the shadow is the shape that is
+   * drawn. Made once, when a view builds its realistic world; it poses slot 0
+   * at the origin and leaves it hidden, so it must run before a frame is
+   * placed, which `RealisticDrawing`'s constructor is.
+   */
+  silhouette(): RiderSilhouette {
+    const level: RiderMarker = {
+      kind: 'rider',
+      x: 0,
+      y: 0,
+      z: 0,
+      headingX: 0,
+      headingZ: 1,
+      lean: 0,
+      bodyLean: 0,
+      pedalling: 0,
+      rideSeconds: 0,
+      crankAngle: Math.PI / 2,
+    };
+    this.#placeOne(0, level);
+    const rider = this.#riders[0] as RealisticRiderSlot;
+    rider.root.updateMatrixWorld(true);
+    const corners: number[] = [];
+    const vertex = new Vector3();
+    const pushed = (geometry: BufferGeometry, at: (index: number) => Vector3): void => {
+      const index = geometry.index;
+      const count = index === null ? geometry.getAttribute('position').count : index.count;
+      for (let corner = 0; corner < count; corner += 1) {
+        const point = at(index === null ? corner : index.getX(corner));
+        corners.push(point.x, point.y, point.z);
+      }
+    };
+    // The body, skinned where this pose put it, into the bicycle's frame —
+    // which is the world's here: the belt's group has no parent yet.
+    const body = rider.body;
+    pushed(body.geometry, (index) =>
+      body.getVertexPosition(index, vertex).applyMatrix4(body.matrixWorld),
+    );
+    // The bicycle's meshes, the crankset and the helmet, as slot 0 draws them.
+    for (const mesh of [this.#frame, this.#rubber, this.#metal, this.#cranks, this.#helmets]) {
+      mesh.getMatrixAt(0, this.#matrix);
+      const at = mesh.geometry.getAttribute('position');
+      pushed(mesh.geometry, (index) =>
+        vertex.fromBufferAttribute(at, index).applyMatrix4(this.#matrix),
+      );
+    }
+    rider.root.visible = false;
+    return rasteriseSilhouette(new Float32Array(corners));
+  }
+
+  /**
+   * The first drawn rider's shoulders — the middle of its two upper arms'
+   * heads — in world space, written into `into`; `false` when none is drawn.
+   * #625's browser gate. @see realisticShouldersOf
+   */
+  shouldersOf(into: { x: number; y: number; z: number }): boolean {
+    const rider = this.#riders[0];
+    if (rider === undefined || !rider.root.visible) return false;
+    const left = boneOf(rider.bones, 'upperarm01.L').getWorldPosition(this.#a);
+    const right = boneOf(rider.bones, 'upperarm01.R').getWorldPosition(this.#b);
+    into.x = (left.x + right.x) / 2;
+    into.y = (left.y + right.y) / 2;
+    into.z = (left.z + right.z) / 2;
+    return true;
+  }
+
   /** Every rider's body. For the tests. */
   get bodies(): readonly SkinnedMesh[] {
     return this.#riders.map((rider) => rider.body);
@@ -8005,7 +9474,10 @@ export class RealisticRiderBelt {
     const tint = this.#tint.setHex(RIDER_TINTS[marker.kind]);
     rider.material.color.copy(tint);
     rider.root.updateMatrixWorld(true);
-    this.#pose(rider, rider.angle, marker.bodyLean);
+    // #625: how this rider moves on top of the joints — from the crank angle
+    // it is drawn at, how much of the stroke is drawn, and the RIDE's clock.
+    const motion = riderMotion(rider.angle, marker.pedalling, marker.rideSeconds, this.#motion);
+    this.#pose(rider, rider.angle, marker.bodyLean, motion);
     const world = rider.root.matrixWorld;
     for (const mesh of [this.#frame, this.#rubber, this.#metal]) {
       mesh.setMatrixAt(slot, world);
@@ -8024,14 +9496,45 @@ export class RealisticRiderBelt {
     this.#helmets.setColorAt(slot, tint);
   }
 
-  /** Aims one rider's bones at `bicycle.ts`'s joints for a crank angle. */
-  #pose(rider: RealisticRiderSlot, crankAngle: number, bodyLean: number): void {
+  /**
+   * Aims one rider's bones at `bicycle.ts`'s joints for a crank angle, and
+   * moves them by `motion` — #625.
+   *
+   * The motion is applied in the order that keeps what #369 and #546 fix:
+   *
+   * 1. The pelvis rolls about the bicycle's long axis BEFORE the hips are
+   *    found, so the hips' middle is still put on the saddle and each leg's
+   *    two-bone solve starts from the rolled hip — the feet stay on the pedals.
+   *    (Each half about its own head; the two meet at the body's middle.)
+   * 2. The back is aimed as before, at `bodyLean` (#546), and the head's world
+   *    orientation read there. Then it is aimed again at the rocked and
+   *    breathing back, and the HEAD is turned back to what it was: the
+   *    shoulders move and the head stays level, looking up the road.
+   * 3. The arms are solved from wherever the shoulders now are to the grips,
+   *    so the hands stay on the bar: the arms absorb the rock.
+   * 4. Each foot turns about the bicycle's `+X` at its own ankle, which is the
+   *    point the shin is aimed at, so ankling moves no pedal.
+   */
+  #pose(
+    rider: RealisticRiderSlot,
+    crankAngle: number,
+    bodyLean: number,
+    motion: RiderMotion,
+  ): void {
     for (let index = 0; index < rider.ordered.length; index += 1) {
       const bone = rider.ordered[index] as Bone;
       bone.quaternion.copy(rider.restQuaternions[index] as Quaternion);
       bone.position.copy(rider.restPositions[index] as Vector3);
     }
     rider.root.updateMatrixWorld(true);
+    const along = this.#alongWorld.set(0, 0, 1).transformDirection(rider.root.matrixWorld);
+    const across = this.#acrossWorld.set(1, 0, 0).transformDirection(rider.root.matrixWorld);
+    const skeletonRoot = boneOf(rider.bones, 'root');
+    // 1. #625: the pelvis rolls toward the downstroke — its two halves, and
+    // not the skeleton's root, so the back and the head start from where they
+    // would have with no motion and the head can be held exactly there (2).
+    this.#turnInWorld(boneOf(rider.bones, 'pelvis.L'), along, motion.pelvisRoll);
+    this.#turnInWorld(boneOf(rider.bones, 'pelvis.R'), along, motion.pelvisRoll);
     // #546: the shoulders held back toward upright against the bicycle; the
     // back is aimed at them below, so the MakeHuman body rolls about its hips.
     const joints = riderJoints(crankAngle, this.#joints, bodyLean);
@@ -8043,7 +9546,6 @@ export class RealisticRiderBelt {
       .add(boneOf(rider.bones, 'upperleg01.R').getWorldPosition(this.#b))
       .multiplyScalar(0.5);
     const shift = toWorld(joints.hips, this.#b).sub(hips);
-    const skeletonRoot = boneOf(rider.bones, 'root');
     skeletonRoot.parent?.getWorldQuaternion(this.#parent);
     shift.applyQuaternion(this.#parent.invert()).divideScalar(this.#scale);
     skeletonRoot.position.add(shift);
@@ -8051,6 +9553,20 @@ export class RealisticRiderBelt {
     // The back, from the hips towards the shoulders.
     toWorld(joints.shoulders, this.#c).sub(toWorld(joints.hips, this.#d));
     this.#aim(rider, 'spine05', 'neck01', this.#c);
+    // 2. #625: the head as the unrocked back holds it, then the rock and the
+    // breath, then the head put back — level, looking up the road.
+    const head = boneOf(rider.bones, 'head');
+    head.getWorldQuaternion(this.#headHeld);
+    if (motion.trunkRoll !== 0 || motion.trunkPitch !== 0) {
+      riderJoints(crankAngle, this.#joints, bodyLean + motion.trunkRoll);
+      toWorld(joints.shoulders, this.#c).sub(toWorld(joints.hips, this.#d));
+      this.#c.applyQuaternion(this.#spin.setFromAxisAngle(across, motion.trunkPitch));
+      this.#aim(rider, 'spine05', 'neck01', this.#c);
+      this.#parent.identity();
+      head.parent?.getWorldQuaternion(this.#parent);
+      head.quaternion.copy(this.#parent.invert().multiply(this.#headHeld));
+      head.updateMatrixWorld(true);
+    }
     const forward = this.#e.set(0, 0, 1).transformDirection(rider.root.matrixWorld);
     for (const index of [0, 1] as const) {
       const suffix = index === 0 ? 'L' : 'R';
@@ -8078,7 +9594,24 @@ export class RealisticRiderBelt {
       const knee = twoBoneJoint(hip, foot, thigh, shin, forward, this.#d);
       this.#aim(rider, `upperleg01.${suffix}`, `lowerleg01.${suffix}`, this.#c.copy(knee).sub(hip));
       this.#aim(rider, `lowerleg01.${suffix}`, `foot.${suffix}`, this.#c.copy(foot).sub(knee));
+      // 4. #625: ankling. A toe lifted is a turn of MINUS the dorsiflexion
+      // about `+X`, which takes `+Z` toward `−Y`.
+      this.#turnInWorld(boneOf(rider.bones, `foot.${suffix}`), across, -motion.ankle[index]);
     }
+  }
+
+  /**
+   * Turns `bone` by `angle` about `axis`, both in world space, and updates it
+   * and everything under it — #625. Nothing at a zero angle. Allocates nothing.
+   */
+  #turnInWorld(bone: Bone, axis: Vector3, angle: number): void {
+    if (angle === 0) return;
+    bone.getWorldQuaternion(this.#world);
+    this.#spin.setFromAxisAngle(axis, angle);
+    this.#parent.identity();
+    bone.parent?.getWorldQuaternion(this.#parent);
+    bone.quaternion.copy(this.#parent.invert().multiply(this.#spin.multiply(this.#world)));
+    bone.updateMatrixWorld(true);
   }
 
   #length(rider: RealisticRiderSlot, from: string, to: string): number {
@@ -9176,7 +10709,13 @@ class RealisticDrawing {
   readonly structures: RealisticStructureBelts;
   readonly primitives: ScatterBelt;
   readonly riders: RealisticRiderBelt;
+  /** The riders' bike-shaped shadow, made from the riders just built — #626. */
+  readonly shadows: RiderSilhouetteBelt;
+  /** What {@link shadows} casts. For the browser gate. */
+  readonly silhouette: RiderSilhouette;
   readonly grounding: GroundBlobBelt;
+  /** The start and finish gantries — #679. */
+  readonly gantries: GantryBelt;
   readonly road: MeshStandardMaterial;
   readonly ground: MeshStandardMaterial;
   readonly environment: Texture;
@@ -9190,7 +10729,11 @@ class RealisticDrawing {
   constructor(
     world: RealisticWorld,
     renderer: WebGLRenderer,
-    fields: { readonly span: { value: number }; readonly count: { value: number } },
+    fields: {
+      readonly span: { value: number };
+      readonly count: { value: number };
+      readonly treeLine: { value: number };
+    },
     /**
      * The kit the rider chose — #623. Required, so a view whose world arrives
      * after the rider was dressed cannot build a realistic rider in the house
@@ -9204,6 +10747,10 @@ class RealisticDrawing {
       world.road.normal,
       world.ground.colour,
       world.ground.normal,
+      world.verge.colour,
+      world.verge.normal,
+      world.rock.colour,
+      world.rock.normal,
     ]) {
       texture.anisotropy = anisotropy;
     }
@@ -9215,7 +10762,10 @@ class RealisticDrawing {
     });
     this.riders = new RealisticRiderBelt(world.body, world.bicycle, world.rider);
     this.riders.setRiderKit(riderKit);
+    this.silhouette = this.riders.silhouette();
+    this.shadows = new RiderSilhouetteBelt(this.silhouette);
     this.grounding = new GroundBlobBelt();
+    this.gantries = new GantryBelt(world.banners);
     this.#casterLists = [this.vegetation.grounded, this.#structureCasters];
     this.road = photographicRoadMaterial(world.road.colour, world.road.normal);
     this.ground = photographicGroundMaterial(
@@ -9223,6 +10773,8 @@ class RealisticDrawing {
       world.ground.normal,
       fields.span,
       fields.count,
+      // #627: the verge, the rock and scree, and where the tree line is.
+      { verge: world.verge, rock: world.rock, treeLine: fields.treeLine },
     );
     const generator = new PMREMGenerator(renderer);
     this.environment = generator.fromEquirectangular(world.sky.texture).texture;
@@ -9234,7 +10786,9 @@ class RealisticDrawing {
     this.structures.addTo(scene);
     this.primitives.addTo(scene);
     this.riders.addTo(scene);
+    this.shadows.addTo(scene);
     this.grounding.addTo(scene);
+    this.gantries.addTo(scene);
   }
 
   setShown(on: boolean): void {
@@ -9243,6 +10797,9 @@ class RealisticDrawing {
     this.primitives.setShown(on);
     this.riders.setShown(on);
     this.grounding.setShown(on);
+    this.gantries.setShown(on);
+    // #626: shown only by the view, on a rung that grounds riders by contact.
+    if (!on) this.shadows.setShown(false);
   }
 
   /** Every scenery belt, handed the same frame. */
@@ -9301,7 +10858,9 @@ class RealisticDrawing {
     this.structures.dispose();
     this.primitives.dispose();
     this.riders.dispose();
+    this.shadows.dispose();
     this.grounding.dispose();
+    this.gantries.dispose();
     this.road.dispose();
     this.ground.dispose();
     this.environment.dispose();
@@ -9366,11 +10925,16 @@ export function evictRealisticWorldFromGpu(): void {
   const world = realisticWorld;
   if (world === undefined) return;
   world.sky.texture.dispose();
+  world.banners?.texture.dispose();
   for (const texture of [
     world.road.colour,
     world.road.normal,
     world.ground.colour,
     world.ground.normal,
+    world.verge.colour,
+    world.verge.normal,
+    world.rock.colour,
+    world.rock.normal,
   ]) {
     texture.dispose();
   }
@@ -9382,6 +10946,7 @@ export function evictRealisticWorldFromGpu(): void {
       }
       for (const part of shape.middle?.parts ?? []) part.geometry.dispose();
       shape.impostor?.texture.dispose();
+      shape.impostor?.normals?.dispose();
     }
   }
   for (const maps of world.structures.values()) {
@@ -9423,6 +10988,67 @@ export interface SceneMaterial {
  */
 export function drawnWorldOf(view: GameView): QualitySettings['world'] {
   return view instanceof ThreeGameView ? view.drawnWorld : 'stylised';
+}
+
+/**
+ * Draws the realistic riders' shadow as the #626 silhouette (`true`, what a
+ * ride draws) or as the round blob it replaced (`false`) — the browser gate's
+ * control, which must read round.
+ *
+ * @test-facing called by `game-harness.ts` for the #626 control; nothing in
+ * the render path turns the silhouette off
+ */
+export function riderSilhouettesOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.showRiderSilhouettes(on);
+}
+
+/**
+ * Sets how dark a whole silhouette is drawn — #626's darkness gate, whose
+ * control draws it at `1`, full black, which the gate must refuse (#872's
+ * review: a shadow bounded in shape and not in darkness passed as black).
+ *
+ * @test-facing called by `game-harness.ts` for that control; a ride draws
+ * {@link CONTACT_SHADOW_DARKNESS} and nothing in the render path changes it
+ */
+export function riderSilhouetteDarknessOf(view: GameView, darkness: number): void {
+  if (view instanceof ThreeGameView) view.setRiderSilhouetteDarkness(darkness);
+}
+
+/**
+ * The silhouette a view's realistic riders cast, while it draws the realistic
+ * world — #626: the browser gate holds the SHIPPED shader's shadow to
+ * `rider-silhouette.ts` §`silhouetteCoverage` over this very picture.
+ *
+ * @test-facing read by `game-harness.ts`; nothing in the render path asks
+ */
+export function realisticSilhouetteOf(view: GameView): RiderSilhouette | undefined {
+  return view instanceof ThreeGameView ? view.realisticSilhouette : undefined;
+}
+
+/**
+ * Draws a view's realistic riders, or leaves them out while their shadows are
+ * still cast — #626: the browser gate reads a shadow the rider would otherwise
+ * stand on.
+ *
+ * @test-facing called by `game-harness.ts`; nothing in the render path hides
+ * the riders while drawing their shadows
+ */
+export function realisticRidersShownOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.showRealisticRiders(on);
+}
+
+/**
+ * Where the realistic rider's shoulders were in a view's last frame, in world
+ * space — #625: the browser gate reads them on two frames half a pedal stroke
+ * apart. `undefined` for a view drawing no realistic rider.
+ *
+ * @test-facing read by `game-harness.ts` for the browser gate's rock
+ * assertion; nothing in the render path needs to ask
+ */
+export function realisticShouldersOf(
+  view: GameView,
+): { readonly x: number; readonly y: number; readonly z: number } | undefined {
+  return view instanceof ThreeGameView ? view.realisticShoulders() : undefined;
 }
 
 /**
@@ -9644,6 +11270,114 @@ export function horizonFromSkyOf(view: GameView, on: boolean): void {
 }
 
 /**
+ * Holds every realistic plant still, or lets the breeze move it again — #630.
+ * Module state, for `FOLIAGE`'s reason. For the browser gate's measurements
+ * of the trees' LEVELS (#617, #639), which compare two drawings of the same
+ * frame pixel for pixel and are about which level draws, not about motion:
+ * the breeze has its own gate.
+ *
+ * @test-facing read by `game-harness.ts`; the product never holds the leaves.
+ */
+export function foliageStillOf(still: boolean): void {
+  FOLIAGE.oylSwayScale.value = still ? 0 : 1;
+}
+
+/**
+ * Turns a view's gantries off, or on again — #679. The browser gate's
+ * control: with them off, the probe aimed at a banner must read what is
+ * behind it.
+ *
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`;
+ * the product always draws them.
+ */
+export function gantriesShownOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.gantriesShown(on);
+}
+
+/**
+ * How many gantry boxes and banners a view drew in its last frame — #679.
+ *
+ * @test-facing read by `game-harness.ts`, which requires some near a line and
+ * none mid-route.
+ */
+export function gantryCountsOf(view: GameView): {
+  readonly boxes: number;
+  readonly banners: number;
+} {
+  const meshes = view instanceof ThreeGameView ? view.gantryMeshes : undefined;
+  return {
+    boxes: meshes?.boxes.visible === true ? meshes.boxes.count : 0,
+    banners: meshes?.banners.visible === true ? meshes.banners.count : 0,
+  };
+}
+
+/**
+ * Relights the realistic trees' far band by the world's sun, or (`false`) draws
+ * the strips as they were before #630 — the browser gate's control. Module
+ * state, for `FOLIAGE`'s reason: every view shares the loaded world's
+ * materials.
+ *
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`;
+ * the product always lights them.
+ */
+export function impostorsLitOf(on: boolean): void {
+  FOLIAGE.oylImpostorLit.value = on ? 1 : 0;
+}
+
+/**
+ * Sets how much of each of the realistic ground's blends is drawn — #627:
+ * verge, rock and scree, each 1 in the product. The browser gate's control
+ * takes the rock to 0, and a steep bank must then read as the level grass
+ * beside it does.
+ *
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`;
+ * the product always draws all three.
+ */
+export function groundBlendOf(view: GameView, verge: number, rock: number, scree: number): void {
+  if (view instanceof ThreeGameView) view.groundBlend(verge, rock, scree);
+}
+
+/**
+ * Takes the realistic road's wear off, or puts it back — #628. The browser
+ * gate's control: with the wear off, the wheel track must read back no
+ * different from the lane's middle, or the difference the gate measured was
+ * the photograph's own grain and the light. `'surface'` keeps only what a
+ * wheel track does to the roughness and the relief — the specular term, which
+ * the colour clamp does not reach (#879's review) — so the gate can read it
+ * against `road-wear.ts` §`SURFACE_WEAR_ALLOWANCE`.
+ *
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`;
+ * the product never turns the wear off.
+ */
+export function roadWearOf(view: GameView, on: boolean | 'surface'): void {
+  if (view instanceof ThreeGameView) view.roadWear(on);
+}
+
+/**
+ * Holds the realistic water's Fresnel term at a constant, or (`undefined`)
+ * lets it be computed again — #629. The browser gate's control: held, a near
+ * and a grazing patch of the same lake must read alike, or the difference the
+ * gate measured was the fog or the sky and not the Fresnel term.
+ *
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`;
+ * the product always computes Fresnel.
+ */
+export function waterFresnelOf(view: GameView, held: number | undefined): void {
+  if (view instanceof ThreeGameView) view.waterFresnel(held);
+}
+
+/**
+ * Whether a view's water reflects the scene's environment map — #629: on a
+ * realistic rung with a world loaded, and never on a stylised one.
+ *
+ * @test-facing read by `game-harness.ts`, which requires it on the realistic
+ * view and off after the step down.
+ */
+export function waterReflectsOf(view: GameView): boolean {
+  return view instanceof ThreeGameView && view.waterReflects;
+}
+
+/**
  * Takes the realistic bicycle's rubber normal map off, or puts it back — #624.
  * The browser gate's control: with the tread off, the front tyre must read
  * back flatter than the floor the product's tread is held above, or the
@@ -9839,6 +11573,12 @@ class ThreeGameView implements GameView {
   /** The `riderShadows` the view is drawing with, so a change is seen once. */
   #riderShadows: QualitySettings['riderShadows'] | undefined;
   /**
+   * Whether the realistic world grounds its riders with the silhouette —
+   * #626. Only the browser gate's control turns it off, to draw the round
+   * blob it replaced. @see riderSilhouettesOf
+   */
+  #silhouetteShadows = true;
+  /**
    * The world, as three objects built once and mutated thereafter — #240's
    * NFR-3. Every one of them is a fixed instance: the sky is the `Color` the
    * scene's background *is*, the fog is the `FogExp2` the scene holds, and the
@@ -10011,6 +11751,13 @@ class ThreeGameView implements GameView {
     // #622, for the same reason. Only the realistic world's materials read
     // these, so a stylised frame has nothing to write.
     if (this.#drawing === 'realistic') {
+      // #630: the ride's clock for the breeze, and the world's sun for the far band.
+      FOLIAGE.oylWindTime.value = frame.water.seconds;
+      FOLIAGE.oylSunToward.value
+        .set(frame.world.sun.x, frame.world.sun.y, frame.world.sun.z)
+        .normalize();
+      FOLIAGE.oylSunAmbient.value = frame.world.sun.ambient;
+      FOLIAGE.oylSunDirect.value = frame.world.sun.direct;
       ATMOSPHERE.oylFogTable.value.set(this.#airOutput);
       ATMOSPHERE.oylFogShare.value = this.#air?.share ?? 0;
       ATMOSPHERE.oylSkyTurn.value = this.#air?.turn ?? 0;
@@ -10043,6 +11790,9 @@ class ThreeGameView implements GameView {
       this.#air,
     );
     this.#valleyMiddle = frame.terrain.horizon.middle;
+    // #629: the realistic water reflects the scene's environment, turned as
+    // the scene turns it (`#updateWorld`, which has run above).
+    this.#water.setEnvironmentTurn(this.#scene.environmentRotation.y);
     this.#water.update(
       frame.water.surface,
       frame.world,
@@ -10066,6 +11816,8 @@ class ThreeGameView implements GameView {
           this.#camera.aspect,
           this.#drawing,
           nearFieldShapes(this.#drawing),
+          // #630: the realistic foliage sways, so it is cleared by its sway too.
+          this.#drawing === 'realistic' ? FOLIAGE_SWAY_METRES : 0,
         )
       : frame.scatter;
     this.#scatter.update(scenery, frame.camera);
@@ -10078,6 +11830,8 @@ class ThreeGameView implements GameView {
       frame.world.sun,
     );
     this.#realistic?.riders.place(frame.markers);
+    // #679: the gantries at the lines in reach, and none anywhere else.
+    this.#realistic?.gantries.update(frame.lines);
     this.#updateMarkers(frame.markers);
     this.#updateShadows(frame);
     this.#placeCamera(rig);
@@ -10187,6 +11941,8 @@ class ThreeGameView implements GameView {
     // ADR 0026. Which world this rung draws — after everything above, so the
     // realistic belts it may build are budgeted by the same rung.
     this.#applyWorld(settings.world);
+    // #626: after the world, because which contact shadow is drawn depends on it.
+    this.#applyContactShadows();
     this.#applySize();
   }
 
@@ -10238,6 +11994,7 @@ class ThreeGameView implements GameView {
     this.#scene.background =
       drawing === undefined || loaded === undefined ? this.#sky : loaded.sky.texture;
     this.#scene.environment = drawing?.environment ?? null;
+    this.#water.setEnvironment(drawing?.environment);
     if (this.#renderer !== undefined) {
       this.#renderer.toneMapping = realistic ? AgXToneMapping : NoToneMapping;
       this.#renderer.toneMappingExposure = REALISTIC_EXPOSURE;
@@ -10247,6 +12004,12 @@ class ThreeGameView implements GameView {
       this.#realistic = undefined;
       evictRealisticWorldFromGpu();
     }
+  }
+
+  /** The realistic rider's shoulders in the last frame. @see realisticShouldersOf */
+  realisticShoulders(): { x: number; y: number; z: number } | undefined {
+    const into = { x: 0, y: 0, z: 0 };
+    return this.#realistic?.riders.shouldersOf(into) === true ? into : undefined;
   }
 
   /** How many scenery items the last frame drew, in the world it drew. @see sceneryDrawnOf */
@@ -10341,6 +12104,42 @@ class ThreeGameView implements GameView {
     return this.#realistic?.grounding.mesh;
   }
 
+  /** @see groundBlendOf */
+  groundBlend(verge: number, rock: number, scree: number): void {
+    const shares =
+      this.#realistic === undefined ? undefined : GROUND_BLEND_SHARES.get(this.#realistic.ground);
+    shares?.set(verge, rock, scree);
+  }
+
+  /** @see gantriesShownOf */
+  gantriesShown(on: boolean): void {
+    this.#realistic?.gantries.switchOn(on);
+  }
+
+  /** @see gantryMeshesOf */
+  get gantryMeshes():
+    { readonly boxes: InstancedMesh; readonly banners: InstancedMesh } | undefined {
+    return this.#realistic?.gantries.meshes;
+  }
+
+  /** @see roadWearOf */
+  roadWear(on: boolean | 'surface'): void {
+    const wear = this.#realistic === undefined ? undefined : ROAD_WEAR.get(this.#realistic.road);
+    if (wear === undefined) return;
+    wear.on = on === false ? 0 : 1;
+    wear.colour = on === true ? 1 : 0;
+  }
+
+  /** @see waterFresnelOf */
+  waterFresnel(held: number | undefined): void {
+    this.#water.holdFresnel(held);
+  }
+
+  /** @see waterReflectsOf */
+  get waterReflects(): boolean {
+    return this.#water.reflects;
+  }
+
   /** @see filterWaterRipplesOf */
   filterWaterRipples(on: boolean): void {
     this.#water.setRippleFilter(on);
@@ -10427,7 +12226,10 @@ class ThreeGameView implements GameView {
           constructed: isConstructedMaterial(material),
           fogged: (material as Partial<MeshBasicMaterial>).fog === true,
           atmospheric: breathesTheAir(material),
-          shared: this.#water.wears(material) || this.#contactShadows.wears(material),
+          shared:
+            this.#water.wears(material) ||
+            this.#contactShadows.wears(material) ||
+            this.#realistic?.shadows.wears(material) === true,
         });
       }
     });
@@ -10477,12 +12279,47 @@ class ThreeGameView implements GameView {
     this.#riders.recompile();
     this.#shadowCatcher.visible = map;
     this.#shadowCatcher.material.needsUpdate = true;
-    this.#contactShadows.setShown(riderShadows === 'contact');
+    this.#applyContactShadows();
+  }
+
+  /**
+   * Which of the two contact shadows a `'contact'` rung draws — #626: the
+   * realistic riders' bike-shaped silhouette in the realistic world, the round
+   * blob in the stylised one. Never both, and neither on a `'map'` or
+   * `'none'` rung.
+   */
+  #applyContactShadows(): void {
+    const contact = this.#riderShadows === 'contact';
+    const silhouette = this.#drawing === 'realistic' && this.#silhouetteShadows;
+    this.#contactShadows.setShown(contact && !silhouette);
+    this.#realistic?.shadows.setShown(contact && silhouette);
+  }
+
+  /** @see riderSilhouettesOf */
+  showRiderSilhouettes(on: boolean): void {
+    this.#silhouetteShadows = on;
+    this.#applyContactShadows();
+  }
+
+  /** @see riderSilhouetteDarknessOf */
+  setRiderSilhouetteDarkness(darkness: number): void {
+    this.#realistic?.shadows.setDarkness(darkness);
+  }
+
+  /** The realistic riders' silhouette, while a realistic world is drawn. @see realisticSilhouetteOf */
+  get realisticSilhouette(): RiderSilhouette | undefined {
+    return this.#realistic?.silhouette;
+  }
+
+  /** @see realisticRidersShownOf */
+  showRealisticRiders(on: boolean): void {
+    this.#realistic?.riders.setShown(on);
   }
 
   /** Where this frame's shadows fall — #426. */
   #updateShadows(frame: SceneFrame): void {
     this.#contactShadows.place(frame.markers, frame.world.sun);
+    this.#realistic?.shadows.place(frame.markers, frame.world.sun);
     if (this.#riderShadows === 'map') {
       const pose = frame.camera;
       this.#lighting.aimShadowAt(pose.x, pose.y, pose.z, frame.world.sun);
@@ -10649,6 +12486,12 @@ class ThreeGameView implements GameView {
       const up = new Float32Array(this.#vertexCapacity);
       for (let at = 1; at < up.length; at += 3) up[at] = 1;
       this.#roadGeometry.setAttribute('normal', new BufferAttribute(up, 3));
+      // #628: how far across the road each vertex is, which only the
+      // realistic road's wear reads. @see writeRoadAcross
+      this.#roadGeometry.setAttribute(
+        ROAD_ACROSS_ATTRIBUTE,
+        new BufferAttribute(new Float32Array(this.#vertexCapacity / 3), 1),
+      );
     }
     if (indices.length > this.#indexCapacity) {
       this.#indexCapacity = indices.length;
@@ -10665,6 +12508,16 @@ class ThreeGameView implements GameView {
     // guard here would be a branch no test could take — the shape #242's own
     // review removed from `roadTint`.
     upload(this.#roadGeometry.getIndex() as BufferAttribute, indices);
+    // #628: the realistic road's wear — the across-position and the patches in
+    // this corridor. Only while the realistic road is drawn: the stylised
+    // material reads neither, and the stylised frame pays for neither.
+    const wear = this.#realistic === undefined ? undefined : ROAD_WEAR.get(this.#realistic.road);
+    if (this.#drawing === 'realistic' && wear !== undefined) {
+      const across = this.#roadGeometry.getAttribute(ROAD_ACROSS_ATTRIBUTE) as BufferAttribute;
+      writeRoadAcross(frame.corridor, across.array as Float32Array);
+      across.needsUpdate = true;
+      roadPatchUniforms(frame.corridor, wear.patches);
+    }
     // Draw only the triangles this frame actually has, so a shorter corridor
     // does not draw stale ones left in the buffer from a longer one.
     this.#roadGeometry.setDrawRange(0, indices.length);

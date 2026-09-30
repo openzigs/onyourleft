@@ -26,6 +26,8 @@ import type { SqlStore } from './sql-store.ts';
 import {
   activityRecordFixture,
   ATHLETES,
+  SHARED_CONTENT_SHA256,
+  syncItemFixtures,
   createStoreHarness,
   seedWorld,
   type StoreHarness,
@@ -61,6 +63,31 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
         );
         if (row !== undefined) found.push(row);
       }
+      // And the file every athlete sent: the same key, three owners (#776).
+      const shared = await store.getActivityRecord(athleteId, SHARED_CONTENT_SHA256);
+      if (shared !== undefined) found.push(shared);
+      return found;
+    },
+  },
+  listActivityPage: {
+    probe: async (store, athleteId) =>
+      (await store.listActivityPage(athleteId, undefined, 1000)).map((row) => row.record),
+  },
+  listSyncManifest: {
+    probe: (store, athleteId) => store.listSyncManifest(athleteId, undefined, 1000),
+  },
+  getSyncItem: {
+    probe: async (store, athleteId) => {
+      // Every athlete's key of every kind, asked as the caller (#776's addition).
+      const found: Owned[] = [];
+      for (const owner of ATHLETES) {
+        for (const item of syncItemFixtures(owner)) {
+          const row = await store.getSyncItem(athleteId, item.kind, item.key);
+          if (row !== undefined) found.push(row);
+        }
+        const activity = await store.getSyncItem(athleteId, 'activity', SHARED_CONTENT_SHA256);
+        if (activity !== undefined) found.push(activity);
+      }
       return found;
     },
   },
@@ -74,8 +101,26 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   getRecoveryEmail: {
     probe: async (store, athleteId) => one(await store.getRecoveryEmail(athleteId)),
   },
+  listEmailConfirmations: {
+    probe: (store, athleteId) => store.listEmailConfirmations(athleteId),
+  },
   listEmailRecoveryTokens: {
     probe: (store, athleteId) => store.listEmailRecoveryTokens(athleteId),
+  },
+  listBlocks: { probe: (store, athleteId) => store.listBlocks(athleteId) },
+  listInviteCodes: { probe: (store, athleteId) => store.listInviteCodes(athleteId) },
+  countActivityRecords: {
+    // A count, held to the caller's own rows: an unscoped count is every
+    // athlete's, which the listing (probed above) is not.
+    probe: async (store, athleteId) => {
+      const own = await store.listActivityRecords(athleteId);
+      const counted = await store.countActivityRecords(athleteId);
+      return counted === own.length ? own : [{ athleteId: `counted ${String(counted)}` }];
+    },
+  },
+  listReports: {
+    probe: async (store, athleteId) =>
+      (await store.listReports(athleteId)).map((report) => ({ athleteId: report.athleteId })),
   },
 
   findSession: {
@@ -100,14 +145,45 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   putLinkCode: { notAScopedRead: 'a write; the schema holds the minting key to its athlete' },
   renameAthlete: { notAScopedRead: 'a write; scoping is sql-store.test.ts’s' },
   putEmailRecoveryToken: { notAScopedRead: 'a write' },
+  putEmailConfirmation: { notAScopedRead: 'a write' },
+  confirmRecoveryEmail: { notAScopedRead: 'a write; scoping is sql-store.identity.test.ts’s' },
   getRoom: { notAScopedRead: 'a room belongs to no athlete' },
+  getRoomCourse: { notAScopedRead: 'a room’s course belongs to the room, not to an athlete' },
   listRoomResults: { notAScopedRead: 'a finish order is every rider’s, by design (ADR 0037)' },
   putAthlete: { notAScopedRead: 'a write' },
   putDeviceKey: { notAScopedRead: 'a write; ownership is sql-store.test.ts’s' },
   putSession: { notAScopedRead: 'a write; ownership is sql-store.test.ts’s' },
   putActivityRecord: { notAScopedRead: 'a write' },
+  ingestActivity: {
+    notAScopedRead: 'a write; its scoping is sync/ingest.test.ts’s (two athletes, one file)',
+  },
+  putSyncItem: {
+    notAScopedRead: 'a write; its scoping is sync/manifest.test.ts’s (cross-athlete PUT)',
+  },
+  deleteSyncItem: {
+    notAScopedRead: 'a write; its scoping is sync/manifest.test.ts’s (cross-athlete DELETE)',
+  },
+  isContentHeld: {
+    notAScopedRead:
+      'blob collection: whether ANY athlete holds a file, answered as a boolean and never as a row (#35)',
+  },
   putRoom: { notAScopedRead: 'a write' },
+  putRoomCourse: { notAScopedRead: 'a write' },
+  markRaceStarted: { notAScopedRead: 'a write' },
   putResult: { notAScopedRead: 'a write' },
+  sight: {
+    notAScopedRead: 'a pair of athletes, either way round: the choke point asks it (#83)',
+  },
+  listOpenReports: { notAScopedRead: 'the moderators’ queue: every open report (#83)' },
+  listModerationLog: { notAScopedRead: 'the moderators’ record: every action (#83)' },
+  putBlock: { notAScopedRead: 'a write' },
+  deleteBlock: { notAScopedRead: 'a write; scoping is sql-store.moderation.test.ts’s' },
+  putReport: { notAScopedRead: 'a write' },
+  moderate: { notAScopedRead: 'a moderator’s write; sql-store.moderation.test.ts' },
+  logRefusedAction: { notAScopedRead: 'a write to the moderators’ log; moderation.test.ts' },
+  listPendingAthletes: { notAScopedRead: 'the moderators’ approval queue (#775)' },
+  confirmAdult: { notAScopedRead: 'a write; registration.test.ts' },
+  mintInviteCode: { notAScopedRead: 'a moderator’s write, logged with it (#775)' },
   eraseAthlete: { notAScopedRead: 'erasure: sql-store.erasure.test.ts' },
   close: { notAScopedRead: 'not a read' },
 };

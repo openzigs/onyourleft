@@ -259,6 +259,29 @@ export const STRUCTURE_TEXTURES: readonly {
   { id: 'forest_leaves_02', colourFile: 'forest_leaves_02_diffuse_1k.jpg' },
 ];
 
+/**
+ * The two surfaces the realistic ground blends into beside the grass — #627,
+ * each a Poly Haven CC0 texture: its id, and its 1K colour map's file name.
+ *
+ * - `gravelly_sand` — the worn VERGE along the road's edge: earth and gravel
+ *   where wheels and feet go and grass does not.
+ * - `rocks_ground_05` — bare ROCK where the landform is steep, and SCREE above
+ *   the tree line: stones on earth, which serves both, so the ground needs two
+ *   new surfaces and not three (#627's "at most two").
+ *
+ * Downsized to {@link STRUCTURE_TEXTURE_PIXELS} by the same script as the
+ * structures' maps, and encoded as KTX2: at 512 px the two pairs are about
+ * 0.9 MB of build and 0.7 MiB estimated on the device, where the 1K pairs the
+ * road and the grass wear would be about 3 MB of build — #627's ceiling.
+ */
+export const GROUND_BLEND_TEXTURES: readonly {
+  readonly id: string;
+  readonly colourFile: string;
+}[] = [
+  { id: 'gravelly_sand', colourFile: 'gravelly_sand_diff_1k.jpg' },
+  { id: 'rocks_ground_05', colourFile: 'rocks_ground_05_diff_1k.jpg' },
+];
+
 /** The side, in pixels, the pipeline downsizes a structure's maps to. */
 export const STRUCTURE_TEXTURE_PIXELS = 512;
 
@@ -329,6 +352,10 @@ export const SOURCES: readonly AssetSource[] = [
   polyHaven('shrub_02', { type: 'model', resolution: '1k' }),
   polyHaven('boulder_01', { type: 'model', resolution: '1k' }),
   ...STRUCTURE_TEXTURES.map((texture) =>
+    polyHaven(texture.id, { type: 'texture', resolution: '1k', maps: ['Diffuse', 'nor_gl'] }),
+  ),
+  // #627: the ground's verge, rock and scree.
+  ...GROUND_BLEND_TEXTURES.map((texture) =>
     polyHaven(texture.id, { type: 'texture', resolution: '1k', maps: ['Diffuse', 'nor_gl'] }),
   ),
   {
@@ -654,6 +681,13 @@ const TREE_SCRIPT = 'blender/process_tree.py';
  */
 const IMPOSTOR_KTX2: Ktx2Step = { encoding: 'colour-alpha', origin: 'bottom-left' };
 
+/**
+ * How an impostor's NORMAL strip is encoded — #630: as a normal map is (UASTC,
+ * linear), and flipped for the colour strip's reason, so the two strips' texels
+ * line up under one texture coordinate.
+ */
+const IMPOSTOR_NORMALS_KTX2: Ktx2Step = { encoding: 'normal', origin: 'bottom-left' };
+
 /** Where a drawn map's script lives — #624. @see OutputRecipe */
 export const DRAW_SCRIPT = 'draw-bicycle-maps.ts';
 
@@ -739,7 +773,7 @@ export const OUTPUTS: readonly OutputSpec[] = [
     modified:
       'collapse-decimated from 66 122 to about 2 400 triangles, its colour and normal maps downsized to 512 px and its roughness map dropped; stood on its base; ambient occlusion baked into a vertex colour against a ground plane',
   },
-  ...STRUCTURE_TEXTURES.flatMap((texture) => {
+  ...[...STRUCTURE_TEXTURES, ...GROUND_BLEND_TEXTURES].flatMap((texture) => {
     const made = structureMapFiles(texture.id);
     return [
       structureMap(made.colour, texture.id, texture.colourFile, 'colour'),
@@ -853,6 +887,14 @@ function tree(name: string, from: string, object: string, triangles: string): Ou
           file: `${name}-impostor.ktx2`,
           made: `${name}-impostor.png`,
           ktx2: IMPOSTOR_KTX2,
+        },
+        // #630: the same eight views' normals, so the runtime lights the far
+        // band by the world's sun rather than by the script's.
+        {
+          file: `${name}-impostor-normals.ktx2`,
+          made: `${name}-impostor-normals.png`,
+          ktx2: IMPOSTOR_NORMALS_KTX2,
+          modified: `the eight views of the full scan the impostor strip is rendered from, as NORMALS: Cycles' normal pass on one thread, in the plant's own frame in three's axes (x across, y up, z the model's front), encoded n * 0.5 + 0.5 with the background the zero vector`,
         },
       ],
     },

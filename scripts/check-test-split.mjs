@@ -38,7 +38,9 @@
  * 1. `test:coverage` is `vitest run --coverage` followed only by
  *    `--exclude <glob>` pairs, and `test:uninstrumented` is `vitest run`
  *    followed only by path filters. Anything else is a shape this cannot
- *    check, and fails.
+ *    check, and fails — and so is a script holding anything the shell would
+ *    read before Vitest does: a quote, a backslash, a glob, `$`, a
+ *    separator (#864).
  * 2. The uninstrumented run selects at least one file, and every one of its
  *    filters selects exactly one.
  * 3. No file is in both runs.
@@ -59,13 +61,40 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
+ * The characters a script may hold for splitting it on spaces to give the
+ * words `sh` would give (#864). pnpm runs a script through `sh -c`, which
+ * reads quotes, backslashes, `$`, backticks, globs, `~`, comments and command
+ * separators before Vitest sees an argument — so `'a b'` is one word to the
+ * shell and two here, and an unquoted `*` names whatever files it matches in
+ * the directory the script runs from. Rather than re-implement the shell's
+ * word splitting, a script holding anything else is REFUSED: it fails closed,
+ * naming the characters, and a path needing one is renamed.
+ */
+const SHELL_PLAIN = /^[A-Za-z0-9_./@:=+,%\- ]*$/;
+
+/** The words of `script` as `sh` would split them. Throws if that is not certain. */
+function shellWords(name, script) {
+  if (!SHELL_PLAIN.test(script)) {
+    const odd = [...new Set(script.replace(/[A-Za-z0-9_./@:=+,%\- ]/g, ''))]
+      .map((character) => JSON.stringify(character))
+      .join(' ');
+    throw new Error(
+      `\`${name}\` is \`${script}\`, which holds ${odd}: \`sh\` reads quoting, globs, ` +
+        'variables and separators in a script before Vitest does, and this check splits on ' +
+        'spaces, so it refuses what it would read differently. Use plain paths.',
+    );
+  }
+  return script.trim().split(/ +/);
+}
+
+/**
  * The `--exclude` globs `test:coverage` passes. Throws on any other shape.
  */
 export function excludesFrom(script) {
   if (typeof script !== 'string' || script.trim() === '') {
     throw new Error('package.json has no `test:coverage` script for this check to verify.');
   }
-  const tokens = script.trim().split(/\s+/);
+  const tokens = shellWords('test:coverage', script);
   const shape =
     '`vitest run --coverage` followed only by `--exclude <glob>` pairs. ' +
     'Change this script and check-test-split.mjs together.';
@@ -92,7 +121,7 @@ export function filtersFrom(script) {
   if (typeof script !== 'string' || script.trim() === '') {
     throw new Error('package.json has no `test:uninstrumented` script for this check to verify.');
   }
-  const tokens = script.trim().split(/\s+/);
+  const tokens = shellWords('test:uninstrumented', script);
   const filters = tokens.slice(2);
   if (
     tokens[0] !== 'vitest' ||

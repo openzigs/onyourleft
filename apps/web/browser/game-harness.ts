@@ -94,6 +94,7 @@ import {
   circuitRoute,
   hairpinRoute,
   hillRoute,
+  lakeValleyRoute,
   northRoute,
   valleyRoute,
 } from '../src/game/route-fixtures-testing';
@@ -131,6 +132,11 @@ import {
   sceneMaterialsOf,
   type DrawnPiece,
   sceneryDrawnOf,
+  realisticShouldersOf,
+  realisticRidersShownOf,
+  realisticSilhouetteOf,
+  riderSilhouetteDarknessOf,
+  riderSilhouettesOf,
   setBuildingOpenings,
   setRealisticTints,
   setRealisticMaterialsMerged,
@@ -142,8 +148,21 @@ import {
   nearFieldOf,
   nearFieldShapes,
   showGroundBlobsOf,
+  roadWearOf,
+  groundBlendOf,
+  impostorsLitOf,
+  foliageStillOf,
+  gantriesShownOf,
+  gantryCountsOf,
+  waterFresnelOf,
+  waterReflectsOf,
 } from '../src/game/three-renderer';
+import { bannerPlace, standPoint } from '../src/game/gantry';
+import { FINISH_WORD } from '../src/game/gantry-wording';
+import { PATCH_CELL_METRES, patchInCell, WHEEL_TRACK_OFFSETS_METRES } from '../src/game/road-wear';
 import { groundBlobAlpha, groundUnder } from '../src/game/ground-blob';
+import { silhouetteCoverage, silhouetteThrow } from '../src/game/rider-silhouette';
+import { CONTACT_SHADOW_DARKNESS } from '../src/game/contact-shadow';
 import { clearOfTheCamera, nearPyramid, sceneryReach } from '../src/game/near-field';
 import {
   REALISTIC_SURFACES,
@@ -161,6 +180,7 @@ import {
 import { HARD_SWAP_TREE_LEVELS, REALISTIC_TREE_LEVELS } from '../src/game/realistic-budget';
 import type { TreeLevels } from '../src/game/tree-levels';
 import { COUNTED_DRAWS, trianglesInDraw } from './realistic/draws';
+import { FRESNEL_CONTROL, FRESNEL_REFERENCE, WATER_BAND_ROWS } from './realistic-surfaces-fixture';
 import {
   scatterSeed,
   STRUCTURE_KINDS,
@@ -2577,6 +2597,8 @@ function colourProbes(probe: SceneFrame): {
           headingZ: pose.headingZ,
           lean: 0,
           bodyLean: 0,
+          pedalling: 0,
+          rideSeconds: 0,
           crankAngle: at,
         },
       ],
@@ -3292,6 +3314,39 @@ function pixelFor(
  * the camera with them, so the right lane at 1.5 m is behind their back.
  */
 const NEAR_ROAD_PROBE = { ahead: 20, across: -1.5 } as const;
+
+/** A shadow's shape read off the drawing buffer — #626. @see RealisticMeasurement.riderShadow */
+interface ShadowShape {
+  readonly fill: number;
+  readonly squareMetres: number;
+  readonly agreement: number;
+  /**
+   * How much of the ENCODED ground pixel the shadow takes away where the twin
+   * says it covers the ground wholly — #872's review: the rest of the shape
+   * counts a point as shaded at a fifth darker, so it could not tell a shadow
+   * at the stated darkness from a black one. `0` where there was no twin.
+   */
+  readonly darkening: number;
+}
+
+const NO_SHADOW_SHAPE: ShadowShape = { fill: 0, squareMetres: 0, agreement: 0, darkening: 0 };
+
+/**
+ * Where #626's twin says the silhouette covers the ground wholly, for the
+ * darkening read — its soft edges and the texture's filtering kept out.
+ */
+const SHADOW_CORE_COVERAGE = 0.95;
+
+/**
+ * How high over the rider #626's shadow probe looks down from, and how far
+ * apart the ground points it reads are: 6 m and 5 cm — a pixel or two a point
+ * on the 640 × 360 canvas, with the whole 5 m square a shadow can reach in the
+ * frame.
+ */
+const SHADOW_ALTITUDE_METRES = 6;
+/** How long #626's probe's heading is: a thousandth of a unit. @see SHADOW_ALTITUDE_METRES */
+const SHADOW_HEADING_SHARE = 0.001;
+const SHADOW_GRID_METRES = 0.05;
 
 /**
  * The same lane, 150 m up the road: the only difference between the two
@@ -4391,6 +4446,14 @@ export interface RealisticMeasurement {
   readonly measured: boolean;
   /** #622: the air, read and predicted. @see airProbe */
   readonly air: AirMeasurement;
+  /** #628: the worn road's wheel track against its lane, worn and not. @see roadWearProbe */
+  readonly roadWear: RoadWearMeasurement;
+  /** #627: a steep bank against level grass, blended and not. @see groundBlendProbe */
+  readonly groundBlend: GroundBlendMeasurement;
+  /** #679: a finish gantry's banner, read, and what the gantries cost. @see gantryProbe */
+  readonly gantry: GantryMeasurement;
+  /** #629: a lake's near and grazing water, reflecting and held. @see waterReflectionProbe */
+  readonly waterReflection: WaterReflectionMeasurement;
   /**
    * #622: visible meshes that three fogs, in the realistic frame and in the
    * same frame drawn stylised — how many breathe the realistic air, and how
@@ -4437,11 +4500,38 @@ export interface RealisticMeasurement {
   /** Mean relative luminance of the road 20 m ahead, on the steepest climb and descent, and on the level. */
   readonly climbLuminance: number;
   readonly descentLuminance: number;
+  /** #628: the climb and the descent with the road's wear off — published, for the margin the wear spent. */
+  readonly unwornClimbLuminance: number;
+  readonly unwornDescentLuminance: number;
   readonly levelClimbLuminance: number;
   readonly levelDescentLuminance: number;
   /** Pixels that changed when the rider's cranks turned, and when the cadence went and they were held. */
   readonly crankTurnPixels: number;
   readonly crankHeldPixels: number;
+  /**
+   * How far the realistic rider's shoulders moved ACROSS the bicycle between
+   * two frames half a pedal stroke apart, in metres — #625: pedalling, and
+   * the control with no cadence, which must not move them.
+   */
+  readonly shoulderRock: number;
+  readonly shoulderRockControl: number;
+  /**
+   * The realistic rider's shadow read off the drawing buffer from straight
+   * above, the rider left out so it cannot hide it — #626. `fill` is how much
+   * of its own bounding rectangle, along and across the bicycle, the shadow
+   * covers; `agreement` how much of the shadow drawn and of
+   * `rider-silhouette.ts` §`silhouetteCoverage`'s shadow is the same ground
+   * (the two covered sets' intersection over their union). The control is the
+   * round blob #626 replaced, drawn under the same sun.
+   */
+  readonly riderShadow: ShadowShape;
+  readonly riderShadowControl: ShadowShape;
+  /**
+   * The silhouette drawn full black — `oylDarkness` 1 — through the same
+   * shader and read the same way: the control for `riderShadow.darkening`,
+   * which must be refused where the shipped shadow is kept (#872's review).
+   */
+  readonly riderShadowBlack: ShadowShape;
   /** How far the realistic frame differs from the stylised one across the whole picture, as a share. */
   readonly worldChangedShare: number;
   /**
@@ -4473,6 +4563,8 @@ export interface RealisticMeasurement {
   readonly sceneryDrawnBudgeted: number;
   /** After stepping down to the stylised ladder: which world, and how many physically based meshes remain visible. */
   readonly afterStepDownWorld: string;
+  /** #629: whether the water still reflected the environment map after the step down — it must not. */
+  readonly waterReflectsAfterStepDown: boolean;
   readonly afterStepDownStandard: number;
   /**
    * #501's review: whether the bridges wore the photographed stone on the
@@ -4592,6 +4684,12 @@ export interface TreeLevelMeasurement {
    */
   readonly nearestVisibleTriangles: number;
   readonly nearestVisibleTrianglesControl: number;
+  /**
+   * #630: the far band lit by the world's sun, and a tree in the breeze — on
+   * this load, not `?realistic`, where #870's first CI run found it the
+   * heaviest of R2's probes. @see foliageProbe
+   */
+  readonly foliage: FoliageMeasurement;
 }
 
 /**
@@ -4632,6 +4730,944 @@ export interface HorizonReading {
   readonly darkestAboveRelief: number;
 }
 
+/**
+ * The realistic road's wheel track against its lane's middle — #628. Mean
+ * relative luminances, each over a 5 × 5 window at every one of
+ * {@link WEAR_PROBE_AHEAD} metres up the road, on the left lane's two wheel
+ * tracks (`road-wear.ts` §`WHEEL_TRACK_OFFSETS_METRES`) and at that lane's
+ * middle, on a level road — with the wear on, and (the control) off.
+ */
+export interface RoadWearMeasurement {
+  readonly measured: boolean;
+  /** Route distance of the frame the probe chose: one with no patch in its span. */
+  readonly distance: number;
+  readonly track: number;
+  readonly middle: number;
+  readonly trackControl: number;
+  readonly middleControl: number;
+  /**
+   * #879: the same two strips on the steepest climb and the steepest descent
+   * the gradient probe reads — the two tints the cue is between — each with
+   * the wear off, with only the wheel track's roughness and relief on
+   * (`roadWearOf(view, 'surface')`: the specular term the colour clamp does
+   * not reach), and with the whole wear on.
+   */
+  readonly slopes: readonly SlopeWearReading[];
+}
+
+/** One slope's wheel track against its lane — #879. @see RoadWearMeasurement.slopes */
+export interface SlopeWearReading {
+  readonly slope: 'climb' | 'descent';
+  readonly off: { readonly track: number; readonly middle: number };
+  readonly surface: { readonly track: number; readonly middle: number };
+  readonly worn: { readonly track: number; readonly middle: number };
+}
+
+const NO_ROAD_WEAR: RoadWearMeasurement = {
+  measured: false,
+  distance: 0,
+  track: 0,
+  middle: 0,
+  trackControl: 0,
+  middleControl: 0,
+  slopes: [],
+};
+
+/** How far up the road the wheel track is read, in metres: past the rider's back (`NEAR_ROAD_PROBE`). */
+const WEAR_PROBE_AHEAD: readonly number[] = [14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26];
+
+/**
+ * A level road on a bearing of {@link WEAR_PROBE_BEARING_DEGREES} — #628.
+ *
+ * ⚠️ **Not due north, measured.** The asphalt is mapped in world metres, so on
+ * a road running along an axis a strip a fixed distance across it samples ONE
+ * column of the photograph all the way up — and two such columns differed by
+ * 7.7 % with the wear off, which is no control at all. On a slant the strip
+ * crosses the tile's columns as it goes, and the photograph averages out.
+ */
+function slantedLevelRoute(grade = 0): ReturnType<typeof northRoute> {
+  const bearing = (WEAR_PROBE_BEARING_DEGREES * Math.PI) / 180;
+  const metresPerDegree = 111_320;
+  const points: RoutePoint[] = [];
+  for (let along = 0; along <= 2_000; along += 10) {
+    const north = along * Math.cos(bearing);
+    const east = along * Math.sin(bearing);
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(51.5 + north / metresPerDegree),
+        degreesLongitude(-0.12 + east / (metresPerDegree * Math.cos((51.5 * Math.PI) / 180))),
+      ),
+      elevation: altitudeMetres(10 + Math.max(0, -grade) * 2_000 + along * grade),
+    });
+  }
+  return routeProfile(points, { loop: false });
+}
+
+/** The bearing of {@link slantedLevelRoute}, in degrees: **37**, an axis-free angle. */
+const WEAR_PROBE_BEARING_DEGREES = 37;
+
+/** The left lane's middle, across the road — the lane the rider is not in (`NEAR_ROAD_PROBE`). */
+const LEFT_LANE_MIDDLE_METRES = -1.75;
+
+/**
+ * @see RoadWearMeasurement
+ *
+ * ⚠️ **On a stretch with no patch**: a patch's tone is a wear term too, and
+ * one lying on half of the probe would read as a wheel track's difference or
+ * hide one. The frame is chosen by the patches' own rule
+ * (`road-wear.ts` §`patchInCell`), not by looking.
+ */
+function roadWearProbe(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  riding: (profile: ReturnType<typeof northRoute>, distance: number) => SceneFrame,
+  route: ReturnType<typeof northRoute>,
+  slopeRoutes: readonly {
+    readonly slope: SlopeWearReading['slope'];
+    readonly route: ReturnType<typeof northRoute>;
+  }[],
+): RoadWearMeasurement {
+  // The left lane's INNER track. ⚠️ Not the outer one, measured: at 2.55 m
+  // out it is 0.8 m from the edge line, and at this camera a 5 × 5 window 26 m
+  // up the road reaches the paint — the lane read flat to 0.1 % from 0.7 m to
+  // 2.1 m out with the wear off, and 6 % brighter at 2.5 m.
+  const tracks = WHEEL_TRACK_OFFSETS_METRES.filter((offset) => offset < 0 && offset > -2);
+  const clear = (distance: number): boolean => {
+    const from = distance + Math.min(...WEAR_PROBE_AHEAD) - 6;
+    const to = distance + Math.max(...WEAR_PROBE_AHEAD) + 6;
+    for (
+      let cell = Math.floor(from / PATCH_CELL_METRES) - 1;
+      cell <= Math.floor(to / PATCH_CELL_METRES) + 1;
+      cell += 1
+    ) {
+      const patch = patchInCell(cell);
+      if (
+        patch !== undefined &&
+        patch.distance + patch.length > from &&
+        patch.distance - patch.length < to
+      ) {
+        return false;
+      }
+    }
+    return true;
+  };
+  let distance = 400;
+  while (!clear(distance) && distance < 1_200) distance += 5;
+  let frame: SceneFrame = { ...riding(route, distance), markers: [], scatter: [] };
+  const read = (across: readonly number[]): number => {
+    let total = 0;
+    for (const ahead of WEAR_PROBE_AHEAD) {
+      for (const each of across) {
+        total += meanLuminanceAround(gl, pixelFor(frame, canvas, onTheRoad(frame, ahead, each)), 2);
+      }
+    }
+    return total / (WEAR_PROBE_AHEAD.length * across.length);
+  };
+  view.render(frame);
+  view.render(frame);
+  const worn = { track: read(tracks), middle: read([LEFT_LANE_MIDDLE_METRES]) };
+  roadWearOf(view, false);
+  view.render(frame);
+  view.render(frame);
+  const control = { track: read(tracks), middle: read([LEFT_LANE_MIDDLE_METRES]) };
+  // #879: on the climb and the descent — off, the surface terms alone, and
+  // the whole wear.
+  const slopes = slopeRoutes.map(({ slope, route: onSlope }): SlopeWearReading => {
+    frame = { ...riding(onSlope, distance), markers: [], scatter: [] };
+    const readAs = (mode: boolean | 'surface'): { track: number; middle: number } => {
+      roadWearOf(view, mode);
+      view.render(frame);
+      view.render(frame);
+      return { track: read(tracks), middle: read([LEFT_LANE_MIDDLE_METRES]) };
+    };
+    const off = readAs(false);
+    const surface = readAs('surface');
+    const worn = readAs(true);
+    return { slope, off, surface, worn };
+  });
+  return {
+    measured: true,
+    distance,
+    track: worn.track,
+    middle: worn.middle,
+    trackControl: control.track,
+    middleControl: control.middle,
+    slopes,
+  };
+}
+
+/**
+ * A lake's water near the camera and at a grazing angle further off — #629.
+ * Mean relative luminances (linear) over the bottom and the top
+ * {@link WATER_BAND_ROWS} rows of the lake's pixels (where drawing the water
+ * changed the frame), in four renders of one frame: as the product draws it;
+ * with Fresnel held at 0 — the water's own body, no sky; held at
+ * {@link FRESNEL_REFERENCE} — the reference; and held at
+ * {@link FRESNEL_CONTROL} — the control.
+ *
+ * ⚠️ **Why a reference, measured.** The first version divided each band by the
+ * body alone and read the grazing water LESS reflective than the near (1.31
+ * against 1.59): the far band is mostly fog, which pulls any ratio to 1. The
+ * fog mixes in linear light AFTER the Fresnel mix, so `(L − L₀) = (1 − f)·F·(S
+ * − B)` for a band's fog share `f`, sky `S` and body `B`, and dividing by the
+ * same difference at a KNOWN F cancels the fog, the sky and the body:
+ * `F = F_ref · (L − L₀) / (L_ref − L₀)`. The control is the same arithmetic on
+ * a frame drawn at another constant F, which must read that constant in both
+ * bands.
+ */
+export interface WaterReflectionMeasurement {
+  readonly measured: boolean;
+  /** Whether the view's water reflected the environment map. */
+  readonly reflects: boolean;
+  /** How many of the frame's pixels were water, and in how many rows. */
+  readonly pixels: number;
+  readonly rows: number;
+  /** Each band: as drawn, the body (F = 0), the reference and the control. */
+  readonly near: WaterBand;
+  readonly far: WaterBand;
+}
+
+/** One band's four read-backs. @see WaterReflectionMeasurement */
+export interface WaterBand {
+  readonly drawn: number;
+  readonly body: number;
+  readonly reference: number;
+  readonly control: number;
+}
+
+const NO_BAND: WaterBand = { drawn: 0, body: 0, reference: 0, control: 0 };
+
+const NO_WATER_REFLECTION: WaterReflectionMeasurement = {
+  measured: false,
+  reflects: false,
+  pixels: 0,
+  rows: 0,
+  near: NO_BAND,
+  far: NO_BAND,
+};
+
+/** How much higher than the chase camera #629's probe looks at the lake from, in metres. */
+const LAKE_PROBE_RISE_METRES = 10;
+
+/** Where on `lakeValleyRoute` the camera stands: inside its lake's stretch, which runs from about 1 329 m to 1 668 m. */
+const LAKE_PROBE_DISTANCE = 1_360;
+
+/** @see WaterReflectionMeasurement */
+function waterReflectionProbe(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  riding: (profile: ReturnType<typeof northRoute>, distance: number) => SceneFrame,
+): WaterReflectionMeasurement {
+  const base = riding(lakeValleyRoute(), LAKE_PROBE_DISTANCE);
+  // ⚠️ **Turned to face the lake, and raised**, measured: looking up the
+  // road, the lake (16 m to 110 m off it, `waterways.ts` §`LAKE_NEAR_METRES`)
+  // enters the frame only far ahead, so all 29 rows of it were grazing — a
+  // Fresnel term of 0.71 in the nearest band and 0.79 in the farthest — and
+  // faced square on from the chase camera's height the bank hid all but 24
+  // rows. From {@link LAKE_PROBE_RISE_METRES} higher the near shore is about
+  // 30° below the eye and the far shore about 6°. The side the lake lies on
+  // is read off the lake's own vertices.
+  const facing = (side: number): SceneFrame => ({
+    ...base,
+    markers: [],
+    scatter: [],
+    camera: {
+      ...base.camera,
+      headingX: side,
+      headingZ: 0,
+      eyeRoadY: base.camera.eyeRoadY + LAKE_PROBE_RISE_METRES,
+    },
+  });
+  // Which side the lake is on, read off its own vertices rather than by
+  // drawing both ways: `x` is west, so a lake west of the camera is `+x`.
+  const surface = base.water.surface.vertices;
+  let across = 0;
+  for (let at = 0; at < surface.length; at += 3) across += (surface[at] ?? 0) - base.camera.x;
+  const frame = facing(across >= 0 ? 1 : -1);
+  const dry: SceneFrame = {
+    ...frame,
+    water: {
+      ...frame.water,
+      surface: { ...frame.water.surface, indices: new Uint32Array(0) },
+      bridges: [],
+    },
+  };
+  const whole = (scene: SceneFrame): Uint8Array => {
+    view.render(scene);
+    view.render(scene);
+    return readRegion(gl, 0, 0, canvas.width, canvas.height);
+  };
+  const withoutWater = whole(dry);
+  const product = whole(frame);
+  const reflects = waterReflectsOf(view);
+  waterFresnelOf(view, 0);
+  const body = whole(frame);
+  waterFresnelOf(view, FRESNEL_REFERENCE);
+  const reference = whole(frame);
+  waterFresnelOf(view, FRESNEL_CONTROL);
+  const control = whole(frame);
+  waterFresnelOf(view, undefined);
+  const width = canvas.width;
+  // Water is where drawing it changed the pixel. Rows are bottom-up, as
+  // `readPixels` returns them: row 0 is the bottom of the frame, the nearest.
+  const rowsWithWater: number[] = [];
+  let pixels = 0;
+  const isWater = (at: number): boolean =>
+    Math.abs((product[at] ?? 0) - (withoutWater[at] ?? 0)) +
+      Math.abs((product[at + 1] ?? 0) - (withoutWater[at + 1] ?? 0)) +
+      Math.abs((product[at + 2] ?? 0) - (withoutWater[at + 2] ?? 0)) >
+    6;
+  // Only a pixel whose four neighbours are water too: a shore pixel is part
+  // bank, and the bank does not answer Fresnel.
+  const inside = (row: number, column: number): boolean =>
+    row > 0 &&
+    column > 0 &&
+    row + 1 < canvas.height &&
+    column + 1 < width &&
+    isWater((row * width + column) * 4) &&
+    isWater(((row - 1) * width + column) * 4) &&
+    isWater(((row + 1) * width + column) * 4) &&
+    isWater((row * width + column - 1) * 4) &&
+    isWater((row * width + column + 1) * 4);
+  for (let row = 0; row < canvas.height; row += 1) {
+    let any = false;
+    for (let column = 0; column < width; column += 1) {
+      if (isWater((row * width + column) * 4)) {
+        any = true;
+        pixels += 1;
+      }
+    }
+    if (any) rowsWithWater.push(row);
+  }
+  const rowsInside = rowsWithWater.filter((row) => {
+    for (let column = 1; column + 1 < width; column += 1) if (inside(row, column)) return true;
+    return false;
+  });
+  const band = (rows: readonly number[], pixelsOf: Uint8Array): number => {
+    let total = 0;
+    let count = 0;
+    for (const row of rows) {
+      for (let column = 0; column < width; column += 1) {
+        const at = (row * width + column) * 4;
+        if (!inside(row, column)) continue;
+        total += relativeLuminanceOf(
+          pixelsOf[at] ?? 0,
+          pixelsOf[at + 1] ?? 0,
+          pixelsOf[at + 2] ?? 0,
+        );
+        count += 1;
+      }
+    }
+    return count === 0 ? 0 : total / count;
+  };
+  const nearRows = rowsInside.slice(0, WATER_BAND_ROWS);
+  const farRows = rowsInside.slice(-WATER_BAND_ROWS);
+  const bandOf = (rows: readonly number[]): WaterBand => ({
+    drawn: band(rows, product),
+    body: band(rows, body),
+    reference: band(rows, reference),
+    control: band(rows, control),
+  });
+  return {
+    measured: true,
+    reflects,
+    pixels,
+    rows: rowsWithWater.length,
+    near: bandOf(nearRows),
+    far: bandOf(farRows),
+  };
+}
+
+/**
+ * A steep bank against level grass beside it, on #458's hill — #627. Each is a
+ * {@link BLEND_WINDOW}-pixel square, and what is read in it is the texture's
+ * own contrast: the variance of each pixel's relative luminance over the
+ * square's mean, which the light on a bank (a scale on the whole square)
+ * leaves alone.
+ *
+ * The squares are FOUND, not aimed: the bank is where taking the rock blend
+ * off changes the picture, and the level grass is ground that neither the
+ * rock nor the verge changes. Several level squares are read, whose range is
+ * the grass-to-grass spread the control is held to.
+ */
+export interface GroundBlendMeasurement {
+  readonly measured: boolean;
+  /** Pixels the rock blend changed, and how many candidate squares lay wholly inside them. */
+  readonly rockPixels: number;
+  readonly bankSquares: number;
+  /** The contrast of the bank, and of up to {@link LEVEL_SQUARES} level squares, as drawn. */
+  readonly bank: number;
+  readonly levels: readonly number[];
+  /** The same squares with the rock blend off: the control. */
+  readonly bankControl: number;
+  readonly levelsControl: readonly number[];
+}
+
+const NO_GROUND_BLEND: GroundBlendMeasurement = {
+  measured: false,
+  rockPixels: 0,
+  bankSquares: 0,
+  bank: 0,
+  levels: [],
+  bankControl: 0,
+  levelsControl: [],
+};
+
+/**
+ * How many level squares are read, each at least three squares' width from
+ * the others: their range is the grass-to-grass spread.
+ */
+const LEVEL_SQUARES = 8;
+
+/** The side of a square {@link groundBlendProbe} reads, in pixels. */
+const BLEND_WINDOW = 9;
+
+/** Where on #458's hill the probe stands: on its 10 % climb. */
+const BLEND_PROBE_DISTANCE = 520;
+
+/** How far from the steep ground {@link groundBlendProbe}'s camera stands, and how far above it. */
+const BLEND_PROBE_STAND_METRES = 14;
+const BLEND_PROBE_RISE_METRES = 4;
+
+/** @see GroundBlendMeasurement */
+function groundBlendProbe(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  riding: (profile: ReturnType<typeof northRoute>, distance: number) => SceneFrame,
+): GroundBlendMeasurement {
+  const ridden = riding(hillRoute(), BLEND_PROBE_DISTANCE);
+  // ⚠️ **Turned to face the steepest ground, and raised**, measured: from the
+  // chase camera on this climb the only ground past 40° is 40 m or more off
+  // the road, a strip 20 rows high at the horizon with no 9-pixel square
+  // wholly inside it. So the camera is stood {@link BLEND_PROBE_STAND_METRES}
+  // from the steep vertex nearest the rider, looking at it from above.
+  const mesh = ridden.terrain.mesh;
+  let steep = -1;
+  let best = Number.POSITIVE_INFINITY;
+  for (let vertex = 0; vertex < mesh.normals.length / 3; vertex += 1) {
+    if ((mesh.normals[vertex * 3 + 1] ?? 1) > Math.cos((45 * Math.PI) / 180)) continue;
+    const apart = Math.hypot(
+      (mesh.vertices[vertex * 3] ?? 0) - ridden.camera.x,
+      (mesh.vertices[vertex * 3 + 2] ?? 0) - ridden.camera.z,
+    );
+    if (apart < best) {
+      best = apart;
+      steep = vertex;
+    }
+  }
+  if (steep < 0) return { ...NO_GROUND_BLEND, measured: true };
+  const at = {
+    x: mesh.vertices[steep * 3] ?? 0,
+    y: mesh.vertices[steep * 3 + 1] ?? 0,
+    z: mesh.vertices[steep * 3 + 2] ?? 0,
+  };
+  const towardX = at.x - ridden.camera.x;
+  const towardZ = at.z - ridden.camera.z;
+  const toward = Math.hypot(towardX, towardZ) || 1;
+  const headingX = towardX / toward;
+  const headingZ = towardZ / toward;
+  const frame: SceneFrame = {
+    ...ridden,
+    markers: [],
+    scatter: [],
+    camera: {
+      ...ridden.camera,
+      x: at.x - headingX * BLEND_PROBE_STAND_METRES,
+      z: at.z - headingZ * BLEND_PROBE_STAND_METRES,
+      headingX,
+      headingZ,
+      eyeRoadY: at.y + BLEND_PROBE_RISE_METRES,
+      targetRoadY: at.y,
+    },
+  };
+  const bare: SceneFrame = {
+    ...frame,
+    terrain: {
+      ...frame.terrain,
+      mesh: { ...frame.terrain.mesh, indices: new Uint32Array(0) },
+    },
+  };
+  const whole = (scene: SceneFrame): Uint8Array => {
+    view.render(scene);
+    view.render(scene);
+    return readRegion(gl, 0, 0, canvas.width, canvas.height);
+  };
+  const noGround = whole(bare);
+  const drawn = whole(frame);
+  groundBlendOf(view, 1, 0, 1);
+  const rockless = whole(frame);
+  groundBlendOf(view, 0, 0, 1);
+  const bareGrass = whole(frame);
+  groundBlendOf(view, 1, 1, 1);
+  const width = canvas.width;
+  const differs = (a: Uint8Array, b: Uint8Array, at: number): boolean =>
+    Math.abs((a[at] ?? 0) - (b[at] ?? 0)) +
+      Math.abs((a[at + 1] ?? 0) - (b[at + 1] ?? 0)) +
+      Math.abs((a[at + 2] ?? 0) - (b[at + 2] ?? 0)) >
+    3;
+  let rockPixels = 0;
+  const rock = new Uint8Array(width * canvas.height);
+  const grass = new Uint8Array(width * canvas.height);
+  for (let pixel = 0; pixel < rock.length; pixel += 1) {
+    const at = pixel * 4;
+    const ground = differs(drawn, noGround, at);
+    if (ground && differs(drawn, rockless, at)) {
+      rock[pixel] = 1;
+      rockPixels += 1;
+    }
+    if (ground && !differs(drawn, rockless, at) && !differs(drawn, bareGrass, at)) grass[pixel] = 1;
+  }
+  const whollyIn = (mask: Uint8Array, x: number, y: number): boolean => {
+    for (let dy = 0; dy < BLEND_WINDOW; dy += 1) {
+      for (let dx = 0; dx < BLEND_WINDOW; dx += 1) {
+        if (mask[(y + dy) * width + x + dx] !== 1) return false;
+      }
+    }
+    return true;
+  };
+  const banks: [number, number][] = [];
+  const levels: [number, number][] = [];
+  for (let y = 0; y + BLEND_WINDOW < canvas.height; y += 3) {
+    for (let x = 0; x + BLEND_WINDOW < width; x += 3) {
+      if (whollyIn(rock, x, y)) banks.push([x, y]);
+      else if (whollyIn(grass, x, y)) levels.push([x, y]);
+    }
+  }
+  const contrast = (pixels: Uint8Array, [x, y]: readonly [number, number]): number => {
+    const values: number[] = [];
+    for (let dy = 0; dy < BLEND_WINDOW; dy += 1) {
+      for (let dx = 0; dx < BLEND_WINDOW; dx += 1) {
+        const at = ((y + dy) * width + x + dx) * 4;
+        values.push(relativeLuminanceOf(pixels[at] ?? 0, pixels[at + 1] ?? 0, pixels[at + 2] ?? 0));
+      }
+    }
+    const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+    if (!(mean > 0)) return 0;
+    return values.reduce((sum, value) => sum + (value / mean - 1) ** 2, 0) / values.length;
+  };
+  // The bank square nearest the bottom of the frame (the nearest, and the
+  // largest on screen); two level squares nearest the same row.
+  const bank = [...banks].sort((a, b) => a[1] - b[1])[0];
+  if (bank === undefined || levels.length < 2) {
+    return { ...NO_GROUND_BLEND, measured: true, rockPixels, bankSquares: banks.length };
+  }
+  const byRow = [...levels].sort(
+    (a, b) => Math.abs(a[1] - bank[1]) - Math.abs(b[1] - bank[1]) || a[0] - b[0],
+  );
+  const chosen: [number, number][] = [];
+  for (const square of byRow) {
+    if (chosen.length >= LEVEL_SQUARES) break;
+    if (
+      chosen.every(
+        (other) =>
+          Math.max(Math.abs(other[0] - square[0]), Math.abs(other[1] - square[1])) >=
+          BLEND_WINDOW * 3,
+      )
+    ) {
+      chosen.push(square);
+    }
+  }
+  return {
+    measured: true,
+    rockPixels,
+    bankSquares: banks.length,
+    bank: contrast(drawn, bank),
+    levels: chosen.map((square) => contrast(drawn, square)),
+    bankControl: contrast(rockless, bank),
+    levelsControl: chosen.map((square) => contrast(rockless, square)),
+  };
+}
+
+/**
+ * #630, in two parts.
+ *
+ * 1. **The far band's light.** One broadleaf tree 24 m up a view turned so
+ *    the world's sun is square to its right, drawn as an impostor behind
+ *    seven nearer trees that take the full and middle ranks, at
+ *    {@link IMPOSTOR_TURNS} turns of the tree. The tree's pixels are split at the
+ *    middle of their extent, and the mean relative luminance of each half is
+ *    summed over the turns: the sun's side and the shade's side, lit and
+ *    (the control) unlit. Over the turns the SCRIPT's sun, which turns with
+ *    the tree, is on each side as often as the other, so the unlit strip's
+ *    two halves read within its own variation; the world's sun does not turn.
+ * 2. **The breeze.** One tree 12 m ahead at the top rung, a full mesh, with no
+ *    water in the frame (whose ripples run on the same clock): the pixels
+ *    that differ between the ride at two times, and — the control — between
+ *    two draws at the same time.
+ */
+export interface FoliageMeasurement {
+  readonly measured: boolean;
+  readonly sunSide: number;
+  readonly shadeSide: number;
+  readonly sunSideUnlit: number;
+  readonly shadeSideUnlit: number;
+  /** How many of the impostor tree's pixels were read, summed over the turns. */
+  readonly impostorPixels: number;
+  readonly treePixels: number;
+  readonly swayChanged: number;
+  readonly heldChanged: number;
+}
+
+const NO_FOLIAGE: FoliageMeasurement = {
+  measured: false,
+  sunSide: 0,
+  shadeSide: 0,
+  sunSideUnlit: 0,
+  shadeSideUnlit: 0,
+  impostorPixels: 0,
+  treePixels: 0,
+  swayChanged: 0,
+  heldChanged: 0,
+};
+
+/**
+ * How many turns of the tree the far band is read at: **4**, a quarter turn
+ * apart — four of the strip's eight views, symmetric about the tree, so the
+ * script's sun is on each side as often as the other.
+ */
+const IMPOSTOR_TURNS = 4;
+
+/** @see FoliageMeasurement */
+function foliageProbe(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  canvas: { readonly width: number; readonly height: number },
+  riding: (profile: ReturnType<typeof northRoute>, distance: number) => SceneFrame,
+): FoliageMeasurement {
+  const base = riding(
+    northRoute(2_000, () => 10),
+    400,
+  );
+  const noWater = (frame: SceneFrame): SceneFrame => ({
+    ...frame,
+    markers: [],
+    water: {
+      ...frame.water,
+      surface: { ...frame.water.surface, indices: new Uint32Array(0) },
+      bridges: [],
+    },
+  });
+  // 1. The far band. The view turned so the sun is on the right.
+  const sun = base.world.sun;
+  const flat = Math.hypot(sun.x, sun.z) || 1;
+  const headingX = sun.z / flat;
+  const headingZ = -sun.x / flat;
+  const turned: SceneFrame = noWater({
+    ...base,
+    camera: { ...base.camera, headingX, headingZ },
+  });
+  const treeAt = (ahead: number, rotation: number): ScatterItem => ({
+    kind: 'tree-broadleaf',
+    x: turned.camera.x + headingX * ahead,
+    y: turned.camera.y,
+    z: turned.camera.z + headingZ * ahead,
+    rotation,
+    scale: 1,
+    variant: 0,
+  });
+  // ⚠️ **On the product's own view, with the product's own levels**: the far
+  // tree is drawn as an impostor because seven trees nearer to the rider take
+  // the full, middle and band ranks (`REALISTIC_TREE_LEVELS`: 1, 4 and the
+  // band), standing at the frame's edges and in both frames compared, so the
+  // difference between them is the far tree alone. #870's first CI run built
+  // a view of its own for this, at 20 s: its environment map and every
+  // realistic program compiled a second time.
+  const nearer: ScatterItem[] = [9, 10, 11, 12, 13, 14, 15].map((ahead, index) => ({
+    kind: 'tree-broadleaf',
+    x: turned.camera.x + headingX * ahead - (index % 2 === 0 ? 1 : -1) * 7 * headingZ,
+    y: turned.camera.y,
+    z: turned.camera.z + headingZ * ahead + (index % 2 === 0 ? 1 : -1) * 7 * headingX,
+    rotation: 0,
+    scale: 1,
+    variant: 1,
+  }));
+  // And one more, the far tree's own distance from the rider away but well to
+  // its left, in BOTH frames: the band tree's fade is read off the distance
+  // of the tree ranked behind it (`tree-levels.ts` §`bandFade`), so without a
+  // stand-in the far tree's arriving changed the band tree's picture, and
+  // that change — at the frame's edge, on one side — read as 27.6 % between
+  // the halves of the UNLIT strip, measured.
+  const aside = 10;
+  nearer.push({
+    kind: 'tree-broadleaf',
+    x: turned.camera.x + headingX * Math.sqrt(24 ** 2 - aside ** 2) + aside * headingZ,
+    y: turned.camera.y,
+    z: turned.camera.z + headingZ * Math.sqrt(24 ** 2 - aside ** 2) - aside * headingX,
+    rotation: 0,
+    scale: 1,
+    variant: 1,
+  });
+  // The full rank, the band after it, the middle ranks, and the band after
+  // THOSE (`tree-levels.ts` §`treeLevelAt`): the next rank is an impostor.
+  const ranks = REALISTIC_TREE_LEVELS.near + REALISTIC_TREE_LEVELS.middle + 2;
+  if (nearer.length < ranks)
+    throw new Error('#630: too few nearer trees to make the far one an impostor');
+  const settled = (
+    target: GameView,
+    context: WebGL2RenderingContext,
+    frame: SceneFrame,
+    renders = 11,
+  ): Uint8Array => {
+    for (let at = 0; at < renders; at += 1) target.render(frame);
+    return readRegion(context, 0, 0, canvas.width, canvas.height);
+  };
+  const width = canvas.width;
+  /** The mean relative luminance of a picture's pixels either side of a column. */
+  const halves = (
+    picture: Uint8Array,
+    tree: readonly number[],
+    middle: number,
+  ): { right: number; left: number } => {
+    let right = 0;
+    let rightCount = 0;
+    let left = 0;
+    let leftCount = 0;
+    for (const pixel of tree) {
+      const at = pixel * 4;
+      const luminance = relativeLuminanceOf(
+        picture[at] ?? 0,
+        picture[at + 1] ?? 0,
+        picture[at + 2] ?? 0,
+      );
+      if (pixel % width > middle) {
+        right += luminance;
+        rightCount += 1;
+      } else {
+        left += luminance;
+        leftCount += 1;
+      }
+    }
+    return {
+      right: rightCount === 0 ? 0 : right / rightCount,
+      left: leftCount === 0 ? 0 : left / leftCount,
+    };
+  };
+  // Without the ground blobs (#620): a tree's blob lies on its shade side,
+  // thrown from the same sun, and would read as the tree's own shading.
+  showGroundBlobsOf(view, false);
+  const lit = { sun: 0, shade: 0, pixels: 0 };
+  const unlit = { sun: 0, shade: 0 };
+  try {
+    const empty = settled(view, gl, { ...turned, scatter: nearer });
+    for (let turn = 0; turn < IMPOSTOR_TURNS; turn += 1) {
+      // Settled once, when the far tree first takes its rank; a turn of the
+      // same tree moves no rank. The unlit strip is one more draw of the SAME
+      // frame, a uniform apart, so the tree's pixels are the same pixels.
+      const frame: SceneFrame = {
+        ...turned,
+        scatter: [...nearer, treeAt(24, (turn * 2 * Math.PI) / IMPOSTOR_TURNS)],
+      };
+      const drawn = settled(view, gl, frame, turn === 0 ? 11 : 2);
+      impostorsLitOf(false);
+      const plain = settled(view, gl, frame, 1);
+      impostorsLitOf(true);
+      let low = width;
+      let high = -1;
+      const tree: number[] = [];
+      for (let pixel = 0; pixel < drawn.length / 4; pixel += 1) {
+        const at = pixel * 4;
+        if (
+          Math.abs((drawn[at] ?? 0) - (empty[at] ?? 0)) +
+            Math.abs((drawn[at + 1] ?? 0) - (empty[at + 1] ?? 0)) +
+            Math.abs((drawn[at + 2] ?? 0) - (empty[at + 2] ?? 0)) >
+          6
+        ) {
+          tree.push(pixel);
+          low = Math.min(low, pixel % width);
+          high = Math.max(high, pixel % width);
+        }
+      }
+      const middle = (low + high) / 2;
+      // The sun is on the right: the right half is its side.
+      const litHalves = halves(drawn, tree, middle);
+      const plainHalves = halves(plain, tree, middle);
+      lit.sun += litHalves.right / IMPOSTOR_TURNS;
+      lit.shade += litHalves.left / IMPOSTOR_TURNS;
+      unlit.sun += plainHalves.right / IMPOSTOR_TURNS;
+      unlit.shade += plainHalves.left / IMPOSTOR_TURNS;
+      lit.pixels += tree.length;
+    }
+  } finally {
+    impostorsLitOf(true);
+    showGroundBlobsOf(view, true);
+  }
+
+  // 2. The breeze, on the product's own view.
+  const near = noWater(
+    riding(
+      northRoute(2_000, () => 10),
+      400,
+    ),
+  );
+  const oneTree: SceneFrame = {
+    ...near,
+    scatter: [
+      {
+        kind: 'tree-broadleaf',
+        ...onTheRoad(near, 14, -6),
+        rotation: 0.3,
+        scale: 1,
+        variant: 0,
+      },
+    ],
+  };
+  const at = (seconds: number): SceneFrame => ({
+    ...oneTree,
+    water: { ...oneTree.water, seconds },
+  });
+  // The tree's hand-over settles once, on the first frame that holds it; the
+  // same tree at another ride time is the same rank and level.
+  const empty = settled(view, gl, { ...at(10), scatter: [] }, 2);
+  const first = settled(view, gl, at(10));
+  const later = settled(view, gl, at(11.3), 2);
+  const again = settled(view, gl, at(10), 2);
+  return {
+    measured: true,
+    sunSide: lit.sun,
+    shadeSide: lit.shade,
+    sunSideUnlit: unlit.sun,
+    shadeSideUnlit: unlit.shade,
+    impostorPixels: lit.pixels,
+    treePixels: pixelsChanged(first, empty),
+    swayChanged: pixelsChanged(first, later),
+    heldChanged: pixelsChanged(first, again),
+  };
+}
+
+/**
+ * A finish gantry 30 m ahead, on a level road due north — #679. A strip of
+ * the drawing buffer aimed from geometry at the middle of its banner is read
+ * for its lettering: the variance of relative luminance over the strip's
+ * mean, and its mean colour. Then the same frame with the gantries off (the
+ * first control: the strip must read what is behind), and the draw calls and
+ * triangles the gantries add there and — the second control — half-way along
+ * the route, out of reach of every line.
+ */
+export interface GantryMeasurement {
+  readonly measured: boolean;
+  /** Whether the finish was in the frame's lines at all. */
+  readonly inReach: boolean;
+  readonly lettering: number;
+  readonly letteringOff: number;
+  readonly mean: readonly number[];
+  readonly meanOff: readonly number[];
+  /** Draw calls and triangles the gantries add, near the line and mid-route. */
+  readonly callsNear: number;
+  readonly trianglesNear: number;
+  readonly callsMiddle: number;
+  readonly trianglesMiddle: number;
+  /** What the belt drew near the line: boxes and banners. */
+  readonly boxes: number;
+  readonly banners: number;
+}
+
+const NO_GANTRY: GantryMeasurement = {
+  measured: false,
+  inReach: false,
+  lettering: 0,
+  letteringOff: 0,
+  mean: [],
+  meanOff: [],
+  callsNear: 0,
+  trianglesNear: 0,
+  callsMiddle: 0,
+  trianglesMiddle: 0,
+  boxes: 0,
+  banners: 0,
+};
+
+/** The strip read on the banner, in pixels: wide, because the lettering runs across it. */
+const BANNER_STRIP = { width: 41, height: 9 } as const;
+
+/** @see GantryMeasurement */
+function gantryProbe(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  riding: (profile: ReturnType<typeof northRoute>, distance: number) => SceneFrame,
+): GantryMeasurement {
+  const route = northRoute(3_000, () => 10);
+  const total = route.totalDistance as number;
+  const bare = (frame: SceneFrame): SceneFrame => ({ ...frame, markers: [], scatter: [] });
+  const near = bare(riding(route, total - 30));
+  const middle = bare(riding(route, total / 2));
+  const finish = near.lines.find((line) => line.stand.text === FINISH_WORD);
+  if (finish === undefined) return { ...NO_GANTRY, measured: true };
+  const place = bannerPlace('gantry');
+  // A little above the banner's middle: the main word's row.
+  const aim = standPoint(finish, place.across, place.up + place.height * 0.1, place.along);
+  const centre = pixelFor(near, canvas, aim);
+  const read = (): { contrast: number; mean: number[] } => {
+    view.render(near);
+    view.render(near);
+    const pixels = readRegion(
+      gl,
+      Math.round(centre.x) - (BANNER_STRIP.width - 1) / 2,
+      Math.round(centre.y) - (BANNER_STRIP.height - 1) / 2,
+      BANNER_STRIP.width,
+      BANNER_STRIP.height,
+    );
+    const values: number[] = [];
+    const mean = [0, 0, 0];
+    for (let at = 0; at < pixels.length; at += 4) {
+      values.push(relativeLuminanceOf(pixels[at] ?? 0, pixels[at + 1] ?? 0, pixels[at + 2] ?? 0));
+      for (let channel = 0; channel < 3; channel += 1) {
+        mean[channel] = (mean[channel] ?? 0) + (pixels[at + channel] ?? 0) / (pixels.length / 4);
+      }
+    }
+    const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+    const contrast =
+      average > 0
+        ? values.reduce((sum, value) => sum + (value / average - 1) ** 2, 0) / values.length
+        : 0;
+    return { contrast, mean };
+  };
+  const cost = (frame: SceneFrame): { calls: number; triangles: number } => {
+    const once = (): { calls: number; triangles: number } => {
+      let result = { calls: 0, triangles: 0 };
+      view.render(frame);
+      countingTriangles((triangles, calls) => {
+        view.render(frame);
+        result = { calls: calls(), triangles: triangles() };
+      });
+      return result;
+    };
+    const on = once();
+    gantriesShownOf(view, false);
+    const off = once();
+    gantriesShownOf(view, true);
+    return { calls: on.calls - off.calls, triangles: on.triangles - off.triangles };
+  };
+  const drawn = read();
+  const counts = gantryCountsOf(view);
+  gantriesShownOf(view, false);
+  let off: ReturnType<typeof read>;
+  try {
+    off = read();
+  } finally {
+    gantriesShownOf(view, true);
+  }
+  const atTheLine = cost(near);
+  const midRoute = cost(middle);
+  return {
+    measured: true,
+    inReach: true,
+    lettering: drawn.contrast,
+    letteringOff: off.contrast,
+    mean: drawn.mean,
+    meanOff: off.mean,
+    callsNear: atTheLine.calls,
+    trianglesNear: atTheLine.triangles,
+    callsMiddle: midRoute.calls,
+    trianglesMiddle: midRoute.triangles,
+    boxes: counts.boxes,
+    banners: counts.banners,
+  };
+}
+
 /** What {@link airProbe} reports when it did not run. */
 const NO_AIR: AirMeasurement = {
   measured: false,
@@ -4653,6 +5689,10 @@ const NO_AIR: AirMeasurement = {
 const NO_REALISTIC: RealisticMeasurement = {
   measured: false,
   air: NO_AIR,
+  roadWear: NO_ROAD_WEAR,
+  groundBlend: NO_GROUND_BLEND,
+  gantry: NO_GANTRY,
+  waterReflection: NO_WATER_REFLECTION,
   atmosphere: {
     realisticTaught: 0,
     realisticUntaught: 0,
@@ -4678,10 +5718,17 @@ const NO_REALISTIC: RealisticMeasurement = {
   drawCallsWithoutRoad: 0,
   climbLuminance: 0,
   descentLuminance: 0,
+  unwornClimbLuminance: 0,
+  unwornDescentLuminance: 0,
   levelClimbLuminance: 0,
   levelDescentLuminance: 0,
   crankTurnPixels: 0,
   crankHeldPixels: 0,
+  shoulderRock: 0,
+  shoulderRockControl: 0,
+  riderShadow: NO_SHADOW_SHAPE,
+  riderShadowControl: NO_SHADOW_SHAPE,
+  riderShadowBlack: NO_SHADOW_SHAPE,
   worldChangedShare: 0,
   foliageOrder: { cut: 0, opaque: 0, cutBeforeOpaque: 0 },
   foliageOrderControl: { cut: 0, opaque: 0, cutBeforeOpaque: 0 },
@@ -4692,6 +5739,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   sceneryDrawnTop: 0,
   sceneryDrawnBudgeted: 0,
   afterStepDownWorld: '',
+  waterReflectsAfterStepDown: false,
   afterStepDownStandard: 0,
   bridgesWearStone: false,
   bridgesWearStoneAfterStepDown: false,
@@ -4737,6 +5785,7 @@ const NO_TREES: TreeLevelMeasurement = {
   handOverOffScreenCovered: 0,
   nearestVisibleTriangles: 0,
   nearestVisibleTrianglesControl: 0,
+  foliage: NO_FOLIAGE,
 };
 
 /** Relative luminance of an sRGB pixel, WCAG 2.2's own formula. */
@@ -5911,8 +6960,32 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const air = airProbe(view, gl, canvas, riding);
   phaseEnds('realistic: air — #622');
 
+  // #628: the wheel track, before the climb and descent are read with the wear on.
+  const roadWear = roadWearProbe(view, gl, canvas, riding, slantedLevelRoute(), [
+    { slope: 'climb', route: slantedLevelRoute(steepness) },
+    { slope: 'descent', route: slantedLevelRoute(-steepness) },
+  ]);
+  phaseEnds('realistic: road wear — #628');
+
+  // #627: the ground, on the hill.
+  const groundBlend = groundBlendProbe(view, gl, canvas, riding);
+  phaseEnds('realistic: ground blend — #627');
+
+  // #679: the finish gantry, read, and what the gantries cost.
+  const gantry = gantryProbe(view, gl, canvas, riding);
+  phaseEnds('realistic: gantry — #679');
+
+  // #629: the water, on the lake.
+  const waterReflection = waterReflectionProbe(view, gl, canvas, riding);
+  phaseEnds('realistic: water reflection — #629');
+
   const climbLuminance = roadLuminance(riding(climb, 400));
   const descentLuminance = roadLuminance(riding(descent, 400));
+  // #628: the same two with the wear off — what the wear spent of the margin.
+  roadWearOf(view, false);
+  const unwornClimbLuminance = roadLuminance(riding(climb, 400));
+  const unwornDescentLuminance = roadLuminance(riding(descent, 400));
+  roadWearOf(view, true);
   const levelClimbLuminance = roadLuminance(riding(level, 400));
   const levelDescentLuminance = roadLuminance(riding(level, 400));
 
@@ -5933,7 +7006,174 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const turned = whole();
   view.render(withCrank(undefined));
   const held = whole();
+  // #625: the shoulders read off the belt's own bones on two frames half a
+  // stroke apart — pedalling, and with no cadence (the control).
+  const shoulderAcross = (angle: number, pedalling: number): number => {
+    const frame: SceneFrame = {
+      ...wooded,
+      scatter: [],
+      markers: wooded.markers.map((marker) =>
+        marker.kind === 'rider' ? { ...marker, crankAngle: angle, pedalling } : marker,
+      ),
+    };
+    view.render(frame);
+    const rider = frame.markers.find((marker) => marker.kind === 'rider');
+    const at = realisticShouldersOf(view);
+    if (rider === undefined || at === undefined) return Number.NaN;
+    // Across the bicycle: its own +X, `(headingZ, −headingX)`.
+    return at.x * rider.headingZ - at.z * rider.headingX;
+  };
+  const shoulderRock = Math.abs(shoulderAcross(Math.PI / 2, 1) - shoulderAcross(1.5 * Math.PI, 1));
+  const shoulderRockControl = Math.abs(
+    shoulderAcross(Math.PI / 2, 0) - shoulderAcross(1.5 * Math.PI, 0),
+  );
   phaseEnds('realistic: road luminance and cranks');
+
+  // #626: the rider's shadow from 6 m straight above — nearly: a heading a
+  // thousandth of a unit long puts `cameraRig`'s eye and target a few
+  // millimetres apart over the rider, and still tells three which way the
+  // picture is up, where a heading of nothing does not — with the rider left
+  // out, drawn three ways: the silhouette, the round blob it replaced (the
+  // control), and no contact shadow at all, which is what "shadowed" is read
+  // against. A ground point is in shadow where it is at least a fifth darker
+  // than with none: the silhouette's full darkness takes 0.45 off.
+  const riderShadow = ((): {
+    readonly shape: ShadowShape;
+    readonly control: ShadowShape;
+    readonly black: ShadowShape;
+  } => {
+    const base = riding(level, 400);
+    const rider = base.markers.find((marker) => marker.kind === 'rider');
+    const silhouette = realisticSilhouetteOf(view);
+    const thrown = { x: 0, z: 0 };
+    if (rider === undefined || silhouette === undefined) {
+      return { shape: NO_SHADOW_SHAPE, control: NO_SHADOW_SHAPE, black: NO_SHADOW_SHAPE };
+    }
+    silhouetteThrow(rider, base.world.sun, thrown);
+    const above: SceneFrame = {
+      ...base,
+      scatter: [],
+      markers: [rider],
+      camera: {
+        x: rider.x,
+        y: rider.y,
+        z: rider.z,
+        headingX: SHADOW_HEADING_SHARE * rider.headingX,
+        headingZ: SHADOW_HEADING_SHARE * rider.headingZ,
+        eyeRoadY: rider.y + SHADOW_ALTITUDE_METRES - CAMERA_ABOVE_METRES,
+        targetRoadY: rider.y,
+      },
+    };
+    // `inTheFrame`'s projection, with the right-hand vector normalised: it
+    // takes the pose's heading as a unit vector, and this one is not.
+    const rig = cameraRig(above.camera);
+    const forwardLength = Math.hypot(
+      rig.target.x - rig.eye.x,
+      rig.target.y - rig.eye.y,
+      rig.target.z - rig.eye.z,
+    );
+    const forward = {
+      x: (rig.target.x - rig.eye.x) / forwardLength,
+      y: (rig.target.y - rig.eye.y) / forwardLength,
+      z: (rig.target.z - rig.eye.z) / forwardLength,
+    };
+    const right = { x: -rider.headingZ, z: rider.headingX };
+    const up = {
+      x: -right.z * forward.y,
+      y: right.z * forward.x - right.x * forward.z,
+      z: right.x * forward.y,
+    };
+    const aspect = canvas.width / canvas.height;
+    const tangent = verticalHalfTangent(aspect);
+    const overhead = (point: {
+      readonly x: number;
+      readonly y: number;
+      readonly z: number;
+    }): { readonly x: number; readonly y: number } => {
+      const to = { x: point.x - rig.eye.x, y: point.y - rig.eye.y, z: point.z - rig.eye.z };
+      const depth = to.x * forward.x + to.y * forward.y + to.z * forward.z;
+      const across = (1 + (to.x * right.x + to.z * right.z) / (depth * tangent * aspect)) / 2;
+      const down = (1 - (to.x * up.x + to.y * up.y + to.z * up.z) / (depth * tangent)) / 2;
+      return { x: canvas.width * across, y: canvas.height * (1 - down) };
+    };
+    realisticRidersShownOf(view, false);
+    const drawn = (): Uint8Array => {
+      view.render(above);
+      view.render(above);
+      return whole();
+    };
+    const silhouetteDrawn = drawn();
+    riderSilhouetteDarknessOf(view, 1);
+    const blackDrawn = drawn();
+    riderSilhouetteDarknessOf(view, CONTACT_SHADOW_DARKNESS);
+    riderSilhouettesOf(view, false);
+    const blobDrawn = drawn();
+    view.setQuality({ ...top, riderShadows: 'none' });
+    const bare = drawn();
+    view.setQuality(top);
+    riderSilhouettesOf(view, true);
+    realisticRidersShownOf(view, true);
+    const luminanceAt = (pixels: Uint8Array, x: number, y: number): number => {
+      const at = (Math.round(y) * canvas.width + Math.round(x)) * 4;
+      return relativeLuminanceOf(pixels[at] ?? 0, pixels[at + 1] ?? 0, pixels[at + 2] ?? 0);
+    };
+    const encodedAt = (pixels: Uint8Array, x: number, y: number): number => {
+      const at = (Math.round(y) * canvas.width + Math.round(x)) * 4;
+      return (pixels[at] ?? 0) + (pixels[at + 1] ?? 0) + (pixels[at + 2] ?? 0);
+    };
+    const shapeOf = (pixels: Uint8Array, twin: boolean): ShadowShape => {
+      let covered = 0;
+      let both = 0;
+      let either = 0;
+      let coreDrawn = 0;
+      let coreBare = 0;
+      let [acrossLow, acrossHigh, alongLow, alongHigh] = [Infinity, -Infinity, Infinity, -Infinity];
+      for (let across = -2.5; across <= 2.5; across += SHADOW_GRID_METRES) {
+        for (let along = -2.5; along <= 3; along += SHADOW_GRID_METRES) {
+          const point = {
+            x: rider.x + across * rider.headingZ + along * rider.headingX,
+            y: rider.y,
+            z: rider.z - across * rider.headingX + along * rider.headingZ,
+          };
+          const pixel = overhead(point);
+          if (pixel.x < 0 || pixel.y < 0 || pixel.x >= canvas.width || pixel.y >= canvas.height) {
+            continue;
+          }
+          const without = luminanceAt(bare, pixel.x, pixel.y);
+          const shaded = luminanceAt(pixels, pixel.x, pixel.y) < 0.8 * without;
+          const coverage = twin ? silhouetteCoverage(silhouette, thrown, across, along) : 0;
+          const predicted = coverage > 0.5;
+          if (coverage >= SHADOW_CORE_COVERAGE) {
+            coreDrawn += encodedAt(pixels, pixel.x, pixel.y);
+            coreBare += encodedAt(bare, pixel.x, pixel.y);
+          }
+          if (shaded && predicted) both += 1;
+          if (shaded || predicted) either += 1;
+          if (!shaded) continue;
+          covered += 1;
+          acrossLow = Math.min(acrossLow, across);
+          acrossHigh = Math.max(acrossHigh, across);
+          alongLow = Math.min(alongLow, along);
+          alongHigh = Math.max(alongHigh, along);
+        }
+      }
+      const cell = SHADOW_GRID_METRES * SHADOW_GRID_METRES;
+      const box =
+        (acrossHigh - acrossLow + SHADOW_GRID_METRES) * (alongHigh - alongLow + SHADOW_GRID_METRES);
+      return {
+        fill: covered === 0 ? 0 : (covered * cell) / box,
+        squareMetres: covered * cell,
+        agreement: either === 0 ? 0 : both / either,
+        darkening: coreBare === 0 ? 0 : 1 - coreDrawn / coreBare,
+      };
+    };
+    return {
+      shape: shapeOf(silhouetteDrawn, true),
+      control: shapeOf(blobDrawn, false),
+      black: shapeOf(blackDrawn, true),
+    };
+  })();
+  phaseEnds('realistic: rider shadow — #626');
 
   // #500: a house on the road 24 m ahead, turned to face the camera, and its
   // front ground-floor window read back — then the same square on a view
@@ -6147,6 +7387,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   view.setQuality(QUALITY_LADDER[0] as QualitySettings);
   view.render(wooded);
   const afterStepDownWorld = drawnWorldOf(view);
+  const waterReflectsAfterStepDown = waterReflectsOf(view);
   const bridgesWearStoneAfterStepDown = bridgesWearStoneOf(view);
   const afterStepDownStandard = sceneMaterialsOf(view).filter(
     (each) => each.visible && each.type === 'MeshStandardMaterial',
@@ -6177,6 +7418,11 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
 
   return {
     measured: true,
+    roadWear,
+    groundBlend,
+    gantry,
+    waterReflection,
+    waterReflectsAfterStepDown,
     textures,
     firstFrameMs,
     fallbackWorld,
@@ -6197,10 +7443,17 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     drawCallsWithoutRoad,
     climbLuminance,
     descentLuminance,
+    unwornClimbLuminance,
+    unwornDescentLuminance,
     levelClimbLuminance,
     levelDescentLuminance,
     crankTurnPixels: pixelsChanged(atRest, turned),
     crankHeldPixels: pixelsChanged(turned, held),
+    shoulderRock,
+    shoulderRockControl,
+    riderShadow: riderShadow.shape,
+    riderShadowControl: riderShadow.control,
+    riderShadowBlack: riderShadow.black,
     worldChangedShare,
     air,
     atmosphere,
@@ -6302,6 +7555,8 @@ function treeLevelProbe(
   width: number,
   height: number,
   top: QualitySettings,
+  /** #630's probe, run last on the product's own view. */
+  foliage: (view: GameView, gl: WebGL2RenderingContext) => FoliageMeasurement,
 ): Pick<
   TreeLevelMeasurement,
   | 'drawnWorld'
@@ -6314,6 +7569,7 @@ function treeLevelProbe(
   | 'handOverOffScreenCovered'
   | 'nearestVisibleTriangles'
   | 'nearestVisibleTrianglesControl'
+  | 'foliage'
 > & { readonly woodedPicture: Uint8Array } {
   const build = (levels: TreeLevels): { view: GameView; gl: WebGL2RenderingContext } => {
     setTreeLevels(levels);
@@ -6475,6 +7731,9 @@ function treeLevelProbe(
     rankOnly: 'in-view',
   });
   phaseEnds('trees: nearest visible');
+  // #630, last, on the product's view: nothing after it reads that view.
+  const foliageMeasured = withLevels(REALISTIC_TREE_LEVELS, foliage);
+  phaseEnds('trees: foliage — #630');
   productView?.view.destroy();
   console.log(
     `#617: the wooded view submits ${String(product.triangles)} triangles against ` +
@@ -6493,6 +7752,7 @@ function treeLevelProbe(
     handOverOffScreenCovered: offScreen,
     nearestVisibleTriangles,
     nearestVisibleTrianglesControl,
+    foliage: foliageMeasured,
   };
 }
 
@@ -6513,6 +7773,13 @@ async function treeLevelRun(): Promise<TreeLevelMeasurement> {
   const top = REALISTIC_LADDER[0] as QualitySettings;
   await threeGameRenderer.loadRealisticWorld();
   phaseEnds('trees: loadRealisticWorld');
+  // #630: in still air. Every measurement of this load compares two drawings
+  // of one frame pixel for pixel — two levels, two material layouts — and is
+  // about WHICH level draws; the breeze moves a merged and an unmerged tree by
+  // a rounding apart (3 pixels of 230 400, measured). Its own probe, last on
+  // this load, lets the breeze move again (§`foliageProbe`). Module state and
+  // this load's alone: the page is this load's.
+  foliageStillOf(true);
   const riding = (profile: ReturnType<typeof northRoute>, distance: number): SceneFrame => {
     const start = atStartLine(profile);
     return sceneFrame({
@@ -6530,7 +7797,15 @@ async function treeLevelRun(): Promise<TreeLevelMeasurement> {
     ),
     markers: [],
   };
-  const { woodedPicture, ...probed } = treeLevelProbe(wooded, level, 640, 360, top);
+  const { woodedPicture, ...probed } = treeLevelProbe(wooded, level, 640, 360, top, (view, gl) => {
+    // The breeze moves again for #630's own probe, and is held after it.
+    foliageStillOf(false);
+    try {
+      return foliageProbe(view, gl, { width: 640, height: 360 }, riding);
+    } finally {
+      foliageStillOf(true);
+    }
+  });
   // #639's control: the world loaded as it was before #639, each tree's parts
   // one per material, and the same wooded frame on a fresh view at the same
   // size, drawn twice as the product's was.

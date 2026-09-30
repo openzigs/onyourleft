@@ -39,6 +39,8 @@
 
 import { defineConfig, devices } from '@playwright/test';
 
+import { NIGHTLY } from './browser/nightly';
+
 /**
  * A fixed, unusual port.
  *
@@ -168,10 +170,20 @@ export const LAUNCH_ARGS = [
  * budget of its own hangs: Playwright stops, marks what was running as
  * interrupted and what had not started as not run, and exits non-zero.
  */
+/*
+ * ⚠️ Since #866 the realistic loads and `realistic.browser.spec.ts` run in the
+ * `nightly` project, from a workflow of their own, so the required gate's
+ * worst case is far inside this and the arithmetic above is the NIGHTLY run's
+ * (`game.browser.spec.ts` §`paysForTheRealisticLoad` says which). It stays
+ * 840 s because the same config stops both runs.
+ */
 export const GATE_BUDGET_MS = 840_000;
 
 /** The game spec, which runs as a project of its own — see `projects`. */
 const GAME_SPEC = /game\.browser\.spec\.ts$/;
+
+/** A test tagged {@link NIGHTLY}, which runs in the `nightly` project and no other — #866. */
+const TAGGED_NIGHTLY = new RegExp(NIGHTLY);
 
 export default defineConfig({
   testDir: './browser',
@@ -253,8 +265,28 @@ export default defineConfig({
   //
   // Not a second browser and not a second job — one `playwright test`, one
   // Chromium, the one `Repository rules` check (CLAUDE.md §4c).
+  //
+  // ⚠️ **A third project since #866, `nightly`, and it is NOT part of the
+  // gate.** Every test tagged `@nightly` (`browser/nightly.ts`, a reviewed
+  // list) runs there and in neither project above, and every other test runs
+  // in exactly one of those two and not there — `nightly-split.test.ts` holds
+  // that by construction. `test:browser` names `chromium` and `game`;
+  // `test:browser:nightly` names `nightly` and runs from
+  // `.github/workflows/nightly.yml`, which cannot block a merge. A bare
+  // `playwright test` runs all three, the nightly loads beside the game's.
   projects: [
-    { name: 'chromium', testIgnore: GAME_SPEC, use: devices['Desktop Chrome'] },
-    { name: 'game', testMatch: GAME_SPEC, use: devices['Desktop Chrome'] },
+    {
+      name: 'chromium',
+      testIgnore: GAME_SPEC,
+      grepInvert: TAGGED_NIGHTLY,
+      use: devices['Desktop Chrome'],
+    },
+    {
+      name: 'game',
+      testMatch: GAME_SPEC,
+      grepInvert: TAGGED_NIGHTLY,
+      use: devices['Desktop Chrome'],
+    },
+    { name: 'nightly', grep: TAGGED_NIGHTLY, use: devices['Desktop Chrome'] },
   ],
 });

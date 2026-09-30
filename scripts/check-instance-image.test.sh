@@ -65,6 +65,8 @@ new_fixture() {
   printf '0\n' > "${tmp}/fake/pull"
   printf '0\n' > "${tmp}/fake/build"
   printf '0\n' > "${tmp}/fake/run"
+  printf '0\n' > "${tmp}/fake/migrate"
+  printf '{"status":"ready","checks":{}}' > "${tmp}/fake/ready"
   printf '1\n' > "${tmp}/fake/healthy-after"   # the probe answers on this attempt; 0 = never
   printf 'true\n' > "${tmp}/fake/running"
   printf '0\n' > "${tmp}/fake/curl"
@@ -84,7 +86,11 @@ case "$1" in
     esac ;;
   pull) exit "$(cat "${fake}/pull")" ;;
   build) exit "$(cat "${fake}/build")" ;;
+  volume) exit 0 ;;
   run)
+    case "$*" in
+      *' migrate'*) exit "$(cat "${fake}/migrate")" ;;
+    esac
     code="$(cat "${fake}/run")"
     [ "${code}" = 0 ] && : > "${fake}/started"
     exit "${code}" ;;
@@ -109,7 +115,12 @@ FAKE
 #!/usr/bin/env bash
 printf 'curl %s\n' "$*" >> "${OYL_FAKE_DIR}/calls"
 code="$(cat "${OYL_FAKE_DIR}/curl")"
-[ "${code}" = 0 ] && cat "${OYL_FAKE_DIR}/source"
+if [ "${code}" = 0 ]; then
+  case "$*" in
+    */ready*) cat "${OYL_FAKE_DIR}/ready" ;;
+    *) cat "${OYL_FAKE_DIR}/source" ;;
+  esac
+fi
 exit "${code}"
 FAKE
   printf '#!/usr/bin/env bash\nexit 0\n' > "${tmp}/bin/sleep"
@@ -143,6 +154,12 @@ run_check
 assert_exit 'a healthy image that names its commit passes' 0
 assert_says 'and says which commit' "/source names ${commit}"
 assert_asked 'builds with the commit the tree is at' "--build-arg OYL_INSTANCE_COMMIT=${commit}"
+assert_asked 'from the repository root, with the instance'"'"'s Dockerfile (#780)' \
+  "-f ${tmp}/repo/apps/instance/Dockerfile -t onyourleft-instance:check-"
+assert_asked 'runs the migrate step in the image on the volume, before the server' \
+  'node src/operator/cli.ts migrate'
+assert_asked 'asks /ready through the published port' 'http://127.0.0.1:49999/ready'
+assert_asked 'removes the volume' 'docker volume rm -f onyourleft-instance-check-'
 assert_asked 'pulls the base image it read out of the Dockerfile' "docker pull --quiet ${PINNED}"
 assert_asked 'runs the image'"'"'s OWN healthcheck, not a probe of its own' \
   "docker exec onyourleft-instance-check-"
@@ -242,6 +259,21 @@ assert_says 'as IMG004, naming Docker Hub rather than the Dockerfile' 'IMG004 th
 assert_says 'and saying it is not this tree' 'not a defect in apps/instance'
 assert_not_asked 'without trying to build' 'docker build'
 
+# --- IMG006 and IMG007 (#780, #791) ---------------------------------------------
+
+new_fixture
+set_fake migrate 1
+run_check
+assert_exit 'a migrate step that fails in the image fails' 1
+assert_says 'as IMG006, naming the command' 'IMG006 the migrate step (node src/operator/cli.ts migrate) failed in the image.'
+assert_not_asked 'and starts no server on an un-migrated volume' '--detach'
+
+new_fixture
+printf '{"status":"not_ready","checks":{"database":false}}' > "${tmp}/fake/ready"
+run_check
+assert_exit 'an image whose store did not open fails' 1
+assert_says 'as IMG007, with what /ready said' 'IMG007 /ready is not ready: {"status":"not_ready"'
+
 # --- IMG005 ------------------------------------------------------------------------
 
 new_fixture
@@ -250,6 +282,13 @@ run_check
 assert_exit 'a base image pinned by tag alone fails' 1
 assert_says 'as IMG005, naming it' 'IMG005 apps/instance/Dockerfile'"'"'s base image is not pinned by digest: node:24.21.0-bookworm-slim'
 assert_not_asked 'without pulling a mutable tag' 'docker pull'
+
+# #864: a last line with no newline after it was never read.
+new_fixture
+printf 'FROM %s AS build\nFROM node:22' "${PINNED}" > "${tmp}/repo/apps/instance/Dockerfile"
+run_check
+assert_exit 'an unpinned final FROM with no newline after it fails' 1
+assert_says 'as IMG005, naming it' 'not pinned by digest: node:22'
 
 new_fixture
 printf '# no base image\n' > "${tmp}/repo/apps/instance/Dockerfile"

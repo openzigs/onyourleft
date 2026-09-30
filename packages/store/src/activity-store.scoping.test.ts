@@ -102,6 +102,7 @@ import type {
   FramingReferenceRecord,
   SideCameraReportRecord,
   RideWriteUpRecord,
+  SyncBaseRecord,
   MatchCheckpointRecord,
   PrivacyZoneRecord,
   SegmentEffortRecord,
@@ -118,6 +119,7 @@ import {
   framingReferenceFor,
   sideCameraReportFor,
   rideWriteUpFor,
+  syncBaseFor,
   createStoreHarness,
   effortFor,
   extractableDeviceKey,
@@ -171,6 +173,7 @@ interface World {
   readonly reference: FramingReferenceRecord;
   readonly report: SideCameraReportRecord;
   readonly writeUp: RideWriteUpRecord;
+  readonly syncBase: SyncBaseRecord;
 }
 
 /** A distinct 64-character lowercase hex digest per athlete. */
@@ -236,6 +239,10 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
   const report = sideCameraReportFor(owner, ride.id);
   // #800. Different text per athlete, on this athlete's own ride.
   const writeUp = rideWriteUpFor(owner, ride.id);
+  // #776 (#893's review). Different digests per athlete. The item row's key is
+  // the ride's id, and the ACTIVITY row's key is a content hash — the same
+  // shape two riders who sent the same file would share.
+  const syncBase = syncBaseFor(owner, ride.id, 'write-up');
 
   await harness.write(async (store) => {
     await store.putRoute(route);
@@ -257,6 +264,7 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     await store.putFramingReference(reference);
     await store.putSideCameraReport(report);
     await store.putRideWriteUp(writeUp);
+    await store.putSyncBase(syncBase);
     await store.setActivityLoadSummary(owner, ride.id, {
       effortWeightedPower: watts(210 + ATHLETES.indexOf(owner)),
       loadCoveredTime: seconds(SAMPLE_COUNT),
@@ -278,6 +286,7 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     reference,
     report,
     writeUp,
+    syncBase,
   };
 }
 
@@ -734,6 +743,27 @@ const PROBES: readonly ScopingProbe[] = [
       await expect(store.getRideWriteUp(mine.owner, theirs.ride.id)).resolves.toBeUndefined();
       const theirsRead = await store.getRideWriteUp(theirs.owner, theirs.ride.id);
       expect(theirsRead?.text).toBe(theirs.writeUp.text);
+    },
+  },
+  {
+    member: 'listSyncBase',
+    leaks:
+      'which rides another athlete synced and deleted, and the digests of their write-ups — a sync of mine would then push deletes of their rides',
+    async run(store, mine) {
+      const rows = await store.listSyncBase(mine.owner);
+      expect(rows).toStrictEqual([mine.syncBase]);
+    },
+  },
+  {
+    member: 'deleteSyncBase',
+    leaks:
+      "another athlete's record of what they synced, so their next sync pulls back a ride they deleted",
+    async run(store, mine, theirs) {
+      // Their key, asked for as ME: nothing of theirs goes, and the answer says so.
+      await expect(
+        store.deleteSyncBase(mine.owner, theirs.syncBase.kind, theirs.syncBase.key),
+      ).resolves.toBe(false);
+      await expect(store.listSyncBase(theirs.owner)).resolves.toStrictEqual([theirs.syncBase]);
     },
   },
 ];

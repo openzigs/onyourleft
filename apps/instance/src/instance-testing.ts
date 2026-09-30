@@ -2,8 +2,10 @@
 
 import type { Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
+import type { InstanceProbes } from './route-kit.ts';
 import { createHandler, type Handler } from './handler.ts';
 import type { Route } from './routes.ts';
+import type { Sync } from './sync/sync.ts';
 import { listen, type Listening } from './node-listener.ts';
 
 /**
@@ -22,6 +24,11 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     commit: TEST_COMMIT,
     sourceUrl: `https://github.com/openzigs/onyourleft/tree/${TEST_COMMIT}`,
     bodyLimitBytes: 1024,
+    registration: 'approval',
+    moderators: {},
+    publicRooms: { minimumAccountDays: 7, minimumCompletedRides: 3 },
+    clientAddressHeader: null,
+    trustedProxies: [],
     ...overrides,
   };
 }
@@ -39,17 +46,27 @@ export async function startTestInstance(
     routes?: readonly Route[];
     notices?: string;
     identity?: Identity;
+    sync?: Sync;
+    probes?: InstanceProbes;
   } = {},
 ): Promise<TestInstance> {
   const lines: string[] = [];
+  const config = testConfig(options.config);
   const handler = createHandler({
-    config: testConfig(options.config),
+    config,
     version: '9.8.7',
     notices: options.notices ?? 'notices',
     log: (line) => lines.push(line),
     ...(options.routes === undefined ? {} : { routes: options.routes }),
     ...(options.identity === undefined ? {} : { identity: options.identity }),
+    ...(options.sync === undefined ? {} : { sync: options.sync }),
+    ...(options.probes === undefined ? {} : { probes: options.probes }),
   });
-  const listening = await listen(handler, { host: '127.0.0.1', port: 0 });
+  const listening = await listen(handler, {
+    host: '127.0.0.1',
+    port: 0,
+    clientAddressHeader: config.clientAddressHeader,
+    trustedProxies: config.trustedProxies,
+  });
   return { handler, listening, url: listening.url, lines };
 }

@@ -35,7 +35,7 @@
  * | `surfaces` | the road, the ground, the hills on the horizon | the same meshes, in their photographed materials |
  * | `vegetation` | the trees, shrubs and rocks | their near meshes |
  * | `impostors` | — (there are none) | the far trees' billboards |
- * | `structures` | buildings, walls, hedges, fences, signposts | the same, photographed |
+ * | `structures` | buildings, walls, hedges, fences, signposts | the same, photographed, and since #679 the start and finish gantries |
  * | `water` | streams, lakes, bridges | the same |
  * | `riders` | the three riders, their contact shadows and the shadow map's catcher | the MakeHuman riders, and the same shadows |
  *
@@ -64,12 +64,14 @@ import { SCENERY_KINDS, type SceneryKind } from '../../src/game/scatter';
 import {
   BridgeBelt,
   ContactShadowBelt,
+  GantryBelt,
   GroundBlobBelt,
   HorizonRing,
   RealisticRiderBelt,
   RealisticStructureBelts,
   RealisticVegetationBelt,
   RiderBelt,
+  RiderSilhouetteBelt,
   ScatterBelt,
   SkyDome,
   TerrainBelt,
@@ -137,9 +139,13 @@ export const LAYER_OWNERS: ReadonlyMap<{ prototype: object }, Ownership> = new M
   [TerrainBelt, 'surfaces'],
   [WaterBelt, 'water'],
   [BridgeBelt, 'water'],
+  // #679: the gantries at the lines stand with the other built things.
+  [GantryBelt, 'structures'],
   [RiderBelt, 'riders'],
   [RealisticRiderBelt, 'riders'],
   [ContactShadowBelt, 'riders'],
+  // #626: the realistic riders' bike-shaped shadow, in place of the blob.
+  [RiderSilhouetteBelt, 'riders'],
   [GroundBlobBelt, 'grounding'],
   [WorldLamps, 'always'],
   // Its four inner belts are `ScatterBelt`s; this, the outer call, owns them.

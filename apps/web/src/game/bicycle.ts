@@ -1282,10 +1282,7 @@ export const MAXIMUM_CRANK_STEP_SECONDS = 0.25;
  * small however long a ride runs.
  */
 export function advanceCrank(angle: number, cadence: SensorReading, seconds: number): number {
-  const turning =
-    cadence.live && cadence.value !== undefined && Number.isFinite(cadence.value)
-      ? cadence.value
-      : undefined;
+  const turning = turningCadence(cadence);
   if (turning === undefined || !Number.isFinite(seconds) || seconds <= 0) {
     return wrapped(angle);
   }
@@ -1619,4 +1616,174 @@ export function drawnCrankAngle(
   // The shorter way round, so a crank half a turn from parked does not spin.
   const difference = wrapped(parked - turned + Math.PI) - Math.PI;
   return wrapped(turned + share * difference);
+}
+
+// ---------------------------------------------------------------------------
+// #625 — a rider who moves like a rider
+// ---------------------------------------------------------------------------
+
+/**
+ * How far the pelvis rolls toward the downstroke, each way: **2°** — #625.
+ *
+ * Sauer, Potter, Weisshaar, Ploeg and Thelen, *"Influence of gender, power, and
+ * hand position on pelvic motion during seated cycling"*, Medicine & Science in
+ * Sports & Exercise 39(12), 2007: the largest pelvic excursions in a seated
+ * pedal stroke are out of the sagittal plane, an internal rotation of about 3°
+ * and a lateral ROLL of about 2° **toward the downstroke**. The roll is taken
+ * here at that figure; the rotation is not drawn.
+ */
+export const PELVIS_ROLL_RADIANS = (2 * Math.PI) / 180;
+
+/**
+ * How far the trunk rocks from side to side, each way: **3°** — #625.
+ *
+ * Bourdon, Mavor and Hay, *"Assessment of three-dimensional trunk kinematics
+ * and muscle activation during cycling with independent cranks"*, Journal of
+ * Sports Science and Medicine 16, 2017, table 3: on normal cranks the trunk's
+ * largest lateral flexion against the pelvis was 3.4° to 7.2° to either side,
+ * over thirty-second windows of a graded test to exhaustion. 3° is the SMALL
+ * end of that, because a mean stroke is smaller than the largest one in thirty
+ * seconds, and because this is the rock of a rider on the hoods rather than of
+ * a rider giving up. ⚠️ **The phase is chosen**: the shoulders rock toward the
+ * downstroke with the pelvis. The study gives the size, not when in the stroke.
+ */
+export const TRUNK_ROCK_RADIANS = (3 * Math.PI) / 180;
+
+/**
+ * How far the ankle turns through a pedal stroke, each way about where the
+ * body's rest pose holds it: **12°** — #625, "ankling".
+ *
+ * Ericson, Nisell and Németh, *"Joint motions of the lower limb during
+ * ergometer cycling"*, Journal of Orthopaedic & Sports Physical Therapy 9(8),
+ * 1988: the ankle's range of motion through a stroke was 24°, from 2° of
+ * plantar flexion to 22° of dorsiflexion. Half of it either way. ⚠️ **The
+ * phase is chosen, and is the usual description rather than a reading of that
+ * paper's curve**: the heel drops (dorsiflexion) through the downstroke, the
+ * toe points (plantar flexion) through the upstroke.
+ */
+export const ANKLE_SWING_RADIANS = (12 * Math.PI) / 180;
+
+/**
+ * How far the trunk pitches with each breath, each way: **0.6°** — #625.
+ *
+ * ⚠️ **Chosen, not measured**, and stated as a choice: no source here gives the
+ * chest's rise as a trunk angle. It is a fifth of {@link TRUNK_ROCK_RADIANS},
+ * so a breath is visible on a still rider and never competes with the stroke.
+ */
+export const BREATH_PITCH_RADIANS = (0.6 * Math.PI) / 180;
+
+/**
+ * How long one breath takes: **2 s**, thirty a minute — #625.
+ *
+ * ⚠️ **Chosen**: an adult at rest breathes twelve to twenty times a minute and
+ * exercise raises it; thirty is a steady ride. It does not follow effort,
+ * because what the HUD shows is not what a breath is paced by, and the owner
+ * has not ruled that anything here may follow the power reading (#625's
+ * question 1).
+ */
+export const BREATH_SECONDS = 2;
+
+/**
+ * How one rider moves on top of where `riderJoints` puts them — #625. Every
+ * angle is in radians, in the bicycle's own frame. Written into by
+ * {@link riderMotion}; @see emptyRiderMotion.
+ */
+export interface RiderMotion {
+  /**
+   * The pelvis's roll about the bicycle's `+Z`, `+θ` taking `+Y` toward `−X`
+   * — `RiderMarker.bodyLean`'s sign.
+   */
+  pelvisRoll: number;
+  /**
+   * The trunk's roll about the bicycle's `+Z` through the hips, relative to
+   * the bicycle, in the same sign — ADDED to `RiderMarker.bodyLean`.
+   */
+  trunkRoll: number;
+  /** The trunk's pitch about the bicycle's `+X`, `+θ` taking `+Y` toward `+Z`: forward. */
+  trunkPitch: number;
+  /**
+   * Each foot's dorsiflexion from its rest pose: positive lifts the toe.
+   * Index 0 is the rider's `+X` side, as in {@link RiderJoints}.
+   */
+  readonly ankle: [number, number];
+}
+
+/** A motion to write into, made once. @see riderMotion */
+export function emptyRiderMotion(): RiderMotion {
+  return { pelvisRoll: 0, trunkRoll: 0, trunkPitch: 0, ankle: [0, 0] };
+}
+
+/**
+ * How a rider moves at a crank angle and a moment of their ride — #625,
+ * written into `into`.
+ *
+ * ⚠️ **A pure function of four things and nothing else**: the crank angle,
+ * how much of the stroke's motion is drawn (`pedalling`, 0 to 1 —
+ * `RiderMarker.pedalling`), the RIDE's own clock (`rideSeconds` —
+ * `RiderMarker.rideSeconds`, never `performance.now()` or `Date`), and nothing
+ * random. So a held ride holds every motion, and a paused one does too.
+ *
+ * - The pelvis roll, the trunk's rock and the ankles all come from the crank
+ *   angle, scaled by `pedalling`: **nought with no cadence reading** (#349's
+ *   rule — the body does not rock while the HUD says nothing is happening),
+ *   and nought with the cranks parked in a tight bend (#546,
+ *   {@link pedallingShare}).
+ * - The breath comes from the ride clock and is NOT scaled: a coasting rider
+ *   still breathes, and a held ride is still.
+ *
+ * `+X`'s pedal is at `crankAngle` and is in its downstroke while
+ * `sin(crankAngle) > 0` (@see riderJoints), so the pelvis and trunk roll
+ * toward `+X` then, which is a NEGATIVE roll in this sign. Allocates nothing.
+ */
+export function riderMotion(
+  crankAngle: number,
+  pedalling: number,
+  rideSeconds: number,
+  into: RiderMotion,
+): RiderMotion {
+  const drawn = Number.isFinite(pedalling) ? clamp(pedalling, 0, 1) : 0;
+  const stroke = Number.isFinite(crankAngle) ? Math.sin(crankAngle) : 0;
+  into.pelvisRoll = -drawn * PELVIS_ROLL_RADIANS * stroke;
+  into.trunkRoll = -drawn * TRUNK_ROCK_RADIANS * stroke;
+  into.trunkPitch = Number.isFinite(rideSeconds)
+    ? BREATH_PITCH_RADIANS * Math.sin((TAU * rideSeconds) / BREATH_SECONDS)
+    : 0;
+  into.ankle[0] = drawn * ANKLE_SWING_RADIANS * stroke;
+  into.ankle[1] = -drawn * ANKLE_SWING_RADIANS * stroke;
+  return into;
+}
+
+/**
+ * How much of the pedal stroke's motion a rider leaning this far is drawn
+ * with — #625: all of it upright, none of it with the cranks parked (#546),
+ * and eased across {@link drawnCrankAngle}'s own band so the rock fades as the
+ * cranks swing to parked rather than stopping at a line.
+ */
+export function pedallingShare(bicycleLean: number): number {
+  const lean = Math.abs(bicycleLean);
+  const from = CRANK_PARKING_LEAN_RADIANS - CRANK_PARKING_BAND_RADIANS;
+  if (!(lean > from)) {
+    return 1;
+  }
+  if (lean >= CRANK_PARKING_LEAN_RADIANS) {
+    return 0;
+  }
+  const t = (lean - from) / CRANK_PARKING_BAND_RADIANS;
+  return 1 - t * t * (3 - 2 * t);
+}
+
+/**
+ * Whether a cadence reading turns the cranks — #625: exactly
+ * {@link advanceCrank}'s condition, which is `hud/fields.ts`'s for drawing a
+ * number, so the body rocks exactly when the HUD shows a cadence.
+ */
+export function cadenceTurns(cadence: SensorReading): boolean {
+  return turningCadence(cadence) !== undefined;
+}
+
+/** The cadence the cranks turn at, or `undefined` when the HUD shows none. */
+function turningCadence(cadence: SensorReading): number | undefined {
+  return cadence.live && cadence.value !== undefined && Number.isFinite(cadence.value)
+    ? cadence.value
+    : undefined;
 }

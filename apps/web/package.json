@@ -16,7 +16,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "test": "vitest run",
-    "test:browser": "vite build && vite build --config vite.browser.config.ts && playwright test"
+    "test:browser": "vite build && vite build --config vite.browser.config.ts && playwright test --project chromium --project game",
+    "test:browser:nightly": "vite build && vite build --config vite.browser.config.ts && playwright test --project nightly --workers 1"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "1.0.1",

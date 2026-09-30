@@ -4,12 +4,17 @@
 # check-instance-image.sh — the instance's Docker image builds, and /health
 # answers INSIDE the container (#767).
 #
-# Builds `apps/instance/Dockerfile` with the commit the tree is at, runs it,
-# and waits for the image's own HEALTHCHECK — which fetches /health from inside
-# the container — to report `healthy`. Then it asks /source from outside,
-# through the published port, and requires the answer to carry the commit the
-# image was built with (AGPL-3.0 §13, ADR 0036 D-6). The container and the
-# image are removed whatever happens.
+# Builds `apps/instance/Dockerfile` with the commit the tree is at — from the
+# REPOSITORY ROOT since #780, which the Dockerfile's own allowlist
+# (`Dockerfile.dockerignore`) cuts down to what the image is made of — runs
+# the deploy's migrate step in it against a fresh volume, starts it on that
+# volume, and waits for the image's own HEALTHCHECK — which fetches /health
+# from inside the container — to report `healthy`. Then it asks /source from
+# outside, through the published port, and requires the answer to carry the
+# commit the image was built with (AGPL-3.0 §13, ADR 0036 D-6); and /ready,
+# which is `ready` only when the store opened — so an image whose runtime
+# dependencies (Kysely) are missing fails here (#780). The container, the
+# volume and the image are removed whatever happens.
 #
 # Why the HEALTHCHECK and not only a request from outside: #767's criterion is
 # that /health answers inside the container, and a port that answers from the
@@ -35,6 +40,8 @@
 #   IMG003  /source does not name the commit the image was built from
 #   IMG004  the base image could not be pulled (Docker Hub, not this tree)
 #   IMG005  the Dockerfile's base image is not pinned by digest
+#   IMG006  the migrate step (`node src/operator/cli.ts migrate`) failed in the image
+#   IMG007  /ready is not `ready`: the store did not open, or a room worker is down
 #
 # Its own suite, with a fake `docker` on PATH and no Docker needed:
 #   bash scripts/check-instance-image.test.sh
@@ -46,6 +53,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TAG="onyourleft-instance:check-$$"
 NAME="onyourleft-instance-check-$$"
+VOLUME="onyourleft-instance-check-$$"
 # How long the container has to report healthy. The HEALTHCHECK's own interval
 # is 30 s with a 5 s start period; this asks every second instead of waiting on
 # it, by running the image's own probe with `docker exec`.
@@ -53,6 +61,7 @@ DEADLINE_SECONDS=30
 
 cleanup() {
   docker rm -f "${NAME}" >/dev/null 2>&1 || true
+  docker volume rm -f "${VOLUME}" >/dev/null 2>&1 || true
   docker image rm -f "${TAG}" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -79,11 +88,13 @@ commit="$(git -C "${ROOT}" rev-parse HEAD)" || fail 'could not read the commit w
 # names an EARLIER stage (`FROM build AS run`) or `scratch` pulls nothing and
 # is not a base image. Anything this cannot read -- a `FROM` split over a line
 # continuation, an image from an `ARG` -- has no digest to show and fails,
-# which is the direction a check should fail in.
+# which is the direction a check should fail in. A last line with no newline
+# after it is read too (#864): `read` returns non-zero on it while still
+# filling `line`, so a bare `while read` skipped an unpinned final `FROM`.
 bases=()
 stages=' '
 from_lines=0
-while IFS= read -r line; do
+while IFS= read -r line || [ -n "${line}" ]; do
   read -r -a words <<< "${line}"
   [ "${#words[@]}" -gt 0 ] || continue
   [ "$(printf '%s' "${words[0]}" | tr '[:upper:]' '[:lower:]')" = from ] || continue
@@ -121,11 +132,20 @@ for base in ${bases[@]+"${bases[@]}"}; do
 done
 
 if ! docker build --quiet --build-arg "OYL_INSTANCE_COMMIT=${commit}" \
-  -t "${TAG}" "${ROOT}/apps/instance" >/dev/null; then
+  -f "${ROOT}/apps/instance/Dockerfile" -t "${TAG}" "${ROOT}" >/dev/null; then
   fail 'IMG001 apps/instance/Dockerfile did not build.'
 fi
 
-docker run --detach --name "${NAME}" --publish 127.0.0.1::8787 "${TAG}" >/dev/null ||
+# The deploy's migrate step, in the image, on the volume the server will use:
+# the server never migrates, and refuses a database that is not (#791).
+docker volume create "${VOLUME}" >/dev/null ||
+  fail 'IMG006 could not create a volume for the migrate step.'
+docker run --rm --volume "${VOLUME}:/data" "${TAG}" node src/operator/cli.ts migrate >/dev/null ||
+  fail 'IMG006 the migrate step (node src/operator/cli.ts migrate) failed in the image.'
+
+docker run --detach --name "${NAME}" --volume "${VOLUME}:/data" \
+  --env OYL_INSTANCE_ORIGIN=http://127.0.0.1:8787 --env OYL_INSTANCE_ROOM_WORKERS=2 \
+  --publish 127.0.0.1::8787 "${TAG}" >/dev/null ||
   fail 'IMG002 the container did not start.'
 
 # The image's OWN HEALTHCHECK command, run now rather than on its 30 s
@@ -162,4 +182,10 @@ case "${source_body}" in
   *) fail "IMG003 /source does not name ${commit}: ${source_body}" ;;
 esac
 
-printf 'check-instance-image: the image builds, /health answers inside the container, and /source names %s.\n' "${commit}"
+ready_body="$(curl --silent --show-error --max-time 5 "http://127.0.0.1:${port}/ready")"
+case "${ready_body}" in
+  *'"status":"ready"'*) ;;
+  *) fail "IMG007 /ready is not ready: ${ready_body:-(no answer)}" ;;
+esac
+
+printf 'check-instance-image: the image builds, migrates, /health answers inside the container, /ready is ready, and /source names %s.\n' "${commit}"
