@@ -720,6 +720,8 @@ export interface SqlStore {
   isRoomMember(roomId: string, athleteId: string): Promise<boolean>;
   /** #784: the room is over. `true` the first time, `false` when it already was. */
   closePrivateRoom(roomId: string, at: number): Promise<boolean>;
+  /** #784: how many rooms this athlete made that are not over — a count of their own, never a row. */
+  countOpenPrivateRoomsMadeBy(athleteId: string): Promise<number>;
   /**
    * How many private rooms other than `exceptRoomId` that are not over ride a
    * route by this digest — its blob is shared by all of them (#784).
@@ -2209,6 +2211,19 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           .where('closed_at', 'is', null)
           .executeTakeFirst();
         return Number(updated.numUpdatedRows) > 0;
+      }),
+
+    countOpenPrivateRoomsMadeBy: (athleteId) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('room_member')
+          .innerJoin('private_room', 'private_room.room_id', 'room_member.room_id')
+          .select((eb) => eb.fn.countAll<number>().as('n'))
+          .where('room_member.athlete_id', '=', athleteId)
+          .where('room_member.role', '=', 'creator')
+          .where('private_room.closed_at', 'is', null)
+          .executeTakeFirstOrThrow();
+        return Number(row.n);
       }),
 
     countOpenPrivateRoomsWithRoute: (routeSha256, exceptRoomId) =>

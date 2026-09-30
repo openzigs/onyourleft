@@ -20,7 +20,7 @@ import { roomSettings } from '../room/core/settings.ts';
 import { helloText, reportText } from '../room/core/room-testing.ts';
 import { finalResults } from '../room/node/room-host.ts';
 import { sha256Hex } from '../blob/blob-store.ts';
-import { DEFAULT_ROOM_LIMITS } from './rooms.ts';
+import { DEFAULT_ROOM_LIMITS, MAXIMUM_OPEN_ROOMS_PER_ATHLETE } from './rooms.ts';
 import { madeRoom, riderIn, ROOM_GPX, roomBody } from './rooms-testing.ts';
 import { normaliseRoomCode } from './code.ts';
 
@@ -102,6 +102,28 @@ describe('making a room — #784', () => {
       expect((await store.getRoomCourse(ride.roomId))?.countdownMs).toBe(0);
       expect((await store.getRoom(ride.roomId))?.physicsVersion).toBe(PHYSICS_VERSION);
     });
+  });
+});
+
+describe('what one athlete may hold open — #784', () => {
+  it('refuses a sixth room that is not over, and makes one again once one is over', async () => {
+    const w = await open();
+    const anna = await rider(w);
+    const made = [];
+    for (let i = 0; i < MAXIMUM_OPEN_ROOMS_PER_ATHLETE; i += 1) {
+      made.push(await madeRoom(w, anna.token, { lengthMetres: 100 + i }));
+    }
+    const sixth = await w.call('POST', '/v1/rooms', { token: anna.token, body: roomBody() });
+    expect(sixth.status).toBe(429);
+    // Another athlete is not held to Anna's rooms.
+    const bea = await rider(w);
+    expect((await w.call('POST', '/v1/rooms', { token: bea.token, body: roomBody() })).status).toBe(
+      200,
+    );
+    await w.rooms.roomLetGo(made[0]?.roomId ?? '', 'finished');
+    expect(
+      (await w.call('POST', '/v1/rooms', { token: anna.token, body: roomBody() })).status,
+    ).toBe(200);
   });
 });
 

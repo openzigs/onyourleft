@@ -79,6 +79,16 @@ export const MAXIMUM_COURSE_METRES = 1_000_000;
 /** The steepest grade a course may carry, either way, in percent. */
 export const MAXIMUM_GRADE_PERCENT = 40;
 
+/**
+ * How many rooms one athlete may have made that are not over — #784. A room
+ * nobody ever rides is never over (the header says so), and each holds up to
+ * {@link MAXIMUM_ROUTE_BYTES} of route on the instance's disk, so this is what
+ * bounds that per athlete rather than the create rate alone. ⚠️ The author's
+ * number: enough for a rider to make a group ride and a race for two groups of
+ * friends at once.
+ */
+export const MAXIMUM_OPEN_ROOMS_PER_ATHLETE = 5;
+
 /** How often a rider may make a room, try a code, and from one address. */
 export interface RoomLimits {
   /** Rooms one athlete may make. */
@@ -238,6 +248,12 @@ export function createRooms(options: RoomsOptions): Rooms {
         return invalid('gpx', `must be at most ${String(MAXIMUM_ROUTE_BYTES)} bytes`);
       }
       if (!creates.allow(caller.athleteId)) return refuse('rate_limited');
+      if (
+        (await store.countOpenPrivateRoomsMadeBy(caller.athleteId)) >=
+        MAXIMUM_OPEN_ROOMS_PER_ATHLETE
+      ) {
+        return refuse('rate_limited');
+      }
 
       const routeSha256 = await routes.put(bytes);
       const roomId = randomHex(16);

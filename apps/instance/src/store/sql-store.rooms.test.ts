@@ -118,6 +118,23 @@ describe('a rider’s room — #784', () => {
     });
   });
 
+  it('counts the open rooms an athlete MADE, and nobody else’s or any they only joined', async () => {
+    const opened = await world();
+    await opened.write(async (store) => {
+      await store.createPrivateRoom(newRoom('b-one', 'f', ATHLETE_B));
+      await store.createPrivateRoom(newRoom('b-two', 'g', ATHLETE_B));
+      await store.createPrivateRoom(newRoom('c-one', 'h', ATHLETE_C));
+      await store.addRoomMember('c-one', ATHLETE_B, 1_790_001_500);
+      await store.closePrivateRoom('b-two', 1_790_001_600);
+    });
+    await opened.read(async (store) => {
+      expect(await store.countOpenPrivateRoomsMadeBy(ATHLETE_B)).toBe(1);
+      expect(await store.countOpenPrivateRoomsMadeBy(ATHLETE_C)).toBe(1);
+      // ATHLETE_A made the seeded room, which is open.
+      expect(await store.countOpenPrivateRoomsMadeBy(ATHLETE_A)).toBe(1);
+    });
+  });
+
   it('closes a room once, and counts only the open rooms that share its route', async () => {
     const opened = await world();
     await opened.write(async (store) => {
