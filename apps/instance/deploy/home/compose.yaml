@@ -46,6 +46,11 @@ services:
       OYL_INSTANCE_ROOM_WORKERS: ${OYL_INSTANCE_ROOM_WORKERS:-}
       OYL_INSTANCE_WS_COMPRESSION: ${OYL_INSTANCE_WS_COMPRESSION:-off}
       OYL_INSTANCE_METRICS: ${OYL_INSTANCE_METRICS:-off}
+      OYL_INSTANCE_METRICS_TOKEN: ${OYL_INSTANCE_METRICS_TOKEN:-}
+      # Every connection's peer is cloudflared, so the rate limits read the
+      # rider's own address from the header Cloudflare writes (#895, B3).
+      # Safe here because nothing reaches the instance but the tunnel.
+      OYL_INSTANCE_CLIENT_ADDRESS_HEADER: cf-connecting-ip
     volumes:
       - data:/data
     # Docker waits this long after SIGTERM before it kills the instance: the

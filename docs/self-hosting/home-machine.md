@@ -198,7 +198,8 @@ D-8.1) and the instance's ping (25 s) must both be shorter than the idle timeout
 
 ## What is not here
 
-- **Metrics through the tunnel.** `OYL_INSTANCE_METRICS` stays off, or on for the box alone.
+- **Metrics for the public.** `OYL_INSTANCE_METRICS` is off; turned on, `/metrics` answers only a
+  request carrying `OYL_INSTANCE_METRICS_TOKEN`, which stays in the box's `.env`.
 - **A second instance while one updates.** One box, one instance: an update closes rooms for the
   seconds it takes. A managed deploy with no gap is [#790](https://github.com/openzigs/onyourleft/issues/790).
 - **The Durable Object adapter.** Built and not deployed (the owner's Q3/Q6).

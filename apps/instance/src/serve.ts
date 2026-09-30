@@ -36,6 +36,8 @@ const server = readServerConfig(
     compression: process.env.OYL_INSTANCE_WS_COMPRESSION,
     metrics: process.env.OYL_INSTANCE_METRICS,
     pingIntervalMs: process.env.OYL_INSTANCE_PING_INTERVAL_MS,
+    clientAddressHeader: process.env.OYL_INSTANCE_CLIENT_ADDRESS_HEADER,
+    metricsToken: process.env.OYL_INSTANCE_METRICS_TOKEN,
   },
   availableParallelism(),
 );
@@ -72,9 +74,10 @@ logEvent(log, 'listening', {
   commit: http.config.commit,
 });
 
-// Docker stops a container with SIGTERM and waits ten seconds before it kills
-// it: rooms are told the server is stopping, results already final are
-// written, and the store is closed well inside that.
+// Docker stops a container with SIGTERM and waits before it kills it — 20 s in
+// `deploy/home/compose.yaml` (`stop_grace_period`), 10 s by Docker's default:
+// rooms are told the server is stopping, results already final are written,
+// and the store is closed well inside either.
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.once(signal, () => {
     logEvent(log, 'stopping', { signal });

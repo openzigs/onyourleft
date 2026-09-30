@@ -156,7 +156,8 @@ describe('the entry point opens the store — #780 (from #861: every identity ro
         '0',
       ).status,
     ).toBe(0);
-    const { instance } = await start(path, { metrics: true });
+    const token = 't'.repeat(40);
+    const { instance } = await start(path, { metrics: true, metricsToken: token });
     const riders = [
       await signIn(instance.url, 'Ann Rider'),
       await signIn(instance.url, 'Zed Quux'),
@@ -180,7 +181,18 @@ describe('the entry point opens the store — #780 (from #861: every identity ro
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ publicKey: 'x', latitude: 51.501364 }),
     });
-    const metrics = await (await fetch(`${instance.url}/metrics`)).text();
+    // Without the token, or with another, there is nothing there.
+    expect((await fetch(`${instance.url}/metrics`)).status).toBe(404);
+    expect(
+      (
+        await fetch(`${instance.url}/metrics`, {
+          headers: { authorization: `Bearer ${'u'.repeat(40)}` },
+        })
+      ).status,
+    ).toBe(404);
+    const metrics = await (
+      await fetch(`${instance.url}/metrics`, { headers: { authorization: `Bearer ${token}` } })
+    ).text();
     expect(metrics).toContain('oyl_room_connected_riders{worker="');
     expect(metrics).toMatch(/oyl_room_tick_lateness_ms\{worker="\d",quantile="0.99"\}/);
     expect(metrics).toContain(
@@ -434,4 +446,16 @@ describe('graceful shutdown drains rooms — #780 criterion 6', () => {
       await fresh.close();
     }
   }, 90_000);
+});
+
+describe('the metrics token — #895 review N3', () => {
+  it('matches only the whole token, as a bearer', async () => {
+    const { bearerMatches } = await import('./instance.ts');
+    const token = 'x'.repeat(40);
+    expect(bearerMatches(`Bearer ${token}`, token)).toBe(true);
+    for (const header of [null, token, `Bearer ${token}y`, `Bearer ${'x'.repeat(39)}`, 'Bearer ']) {
+      expect(bearerMatches(header, token), String(header)).toBe(false);
+    }
+    expect(bearerMatches(`Bearer ${token}`, undefined)).toBe(false);
+  });
 });

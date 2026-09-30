@@ -27,8 +27,11 @@ log as `room-worker-died`).
 
 ## Metrics
 
-`OYL_INSTANCE_METRICS=on` serves `GET /metrics`. **Do not route it through the tunnel**: it names no
-rider, but it is not for the public. Scrape it from the box.
+`OYL_INSTANCE_METRICS=on` serves `GET /metrics`, and **only to a request carrying
+`OYL_INSTANCE_METRICS_TOKEN`** as `Authorization: Bearer <token>` (32 characters or more —
+`openssl rand -hex 32`; the instance refuses to start with metrics on and no token). Any other
+request gets `404`, as if metrics were off. It names no rider, but it is not for the public: scrape
+it from the box with the token, and keep the token in the box's `.env` beside the tunnel's.
 
 | Metric | What to watch |
 |---|---|
@@ -177,6 +180,11 @@ device, whatever happens to the instance (ADR 0036 D-3).
 
 Running an instance for other people is a set of duties as well as a box:
 
+- **Rate limits behind a proxy.** Sign-in is rate-limited per client address. Behind the tunnel
+  every connection comes from `cloudflared`, so the home deployment sets
+  `OYL_INSTANCE_CLIENT_ADDRESS_HEADER=cf-connecting-ip` and the limits read the rider's own address
+  from the header Cloudflare writes. Set it only where nothing can reach the instance but that
+  proxy.
 - **Registration** is `closed` by default (`OYL_INSTANCE_REGISTRATION`): open it while the riders you
   expect sign up. Approval-required registration and the owner-plus-deputy moderation the owner ruled
   (Q13) are [#775](https://github.com/openzigs/onyourleft/issues/775).

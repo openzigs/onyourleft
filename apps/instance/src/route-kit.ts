@@ -39,8 +39,12 @@ export interface ClientInfo {
  */
 export interface InstanceProbes {
   ready(): Promise<Readiness>;
-  /** The metrics document, when the operator turned it on (`OYL_INSTANCE_METRICS`). */
-  readonly metrics?: () => Promise<string>;
+  /**
+   * The metrics document, when the operator turned it on
+   * (`OYL_INSTANCE_METRICS`) — for a request whose `Authorization` carries
+   * the operator's token; `undefined` for any other.
+   */
+  readonly metrics?: (authorization: string | null) => Promise<string | undefined>;
   /** Start a race's countdown, for an athlete seated in it. */
   readonly startRoom?: (roomId: string, athleteId: string) => Promise<'started' | 'not_found'>;
 }

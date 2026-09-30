@@ -19,6 +19,8 @@ export interface RawServerConfig {
   readonly compression?: string | undefined;
   readonly metrics?: string | undefined;
   readonly pingIntervalMs?: string | undefined;
+  readonly clientAddressHeader?: string | undefined;
+  readonly metricsToken?: string | undefined;
 }
 
 export interface ServerConfig {
@@ -39,6 +41,14 @@ export interface ServerConfig {
   readonly metrics: boolean;
   readonly maxBufferedBytes: number;
   readonly pingIntervalMs: number;
+  /**
+   * The header a proxy in front writes the client's address into, lower
+   * case — `cf-connecting-ip` behind Cloudflare's tunnel. Unset, the peer's
+   * address is used (`node-listener.ts` §`clientAddress`).
+   */
+  readonly clientAddressHeader: string | undefined;
+  /** The bearer token `/metrics` requires. Set whenever `metrics` is on. */
+  readonly metricsToken: string | undefined;
 }
 
 export type ServerConfigResult =
@@ -123,6 +133,32 @@ export function readServerConfig(raw: RawServerConfig, cores: number): ServerCon
     }
   }
 
+  let clientAddressHeader: string | undefined;
+  if (present(raw.clientAddressHeader)) {
+    const text = raw.clientAddressHeader.trim().toLowerCase();
+    if (/^[a-z0-9-]{1,64}$/.test(text)) clientAddressHeader = text;
+    else
+      problems.push(
+        'OYL_INSTANCE_CLIENT_ADDRESS_HEADER must be a header name, such as cf-connecting-ip.',
+      );
+  }
+
+  let metricsToken: string | undefined;
+  if (present(raw.metricsToken)) {
+    const text = raw.metricsToken.trim();
+    if (/^[A-Za-z0-9._~-]{32,256}$/.test(text)) metricsToken = text;
+    else {
+      problems.push(
+        'OYL_INSTANCE_METRICS_TOKEN must be at least 32 letters, digits, dots, dashes, underscores or tildes.',
+      );
+    }
+  }
+  if (metrics && metricsToken === undefined && !problems.some((p) => p.includes('METRICS_TOKEN'))) {
+    problems.push(
+      'OYL_INSTANCE_METRICS=on needs OYL_INSTANCE_METRICS_TOKEN: /metrics answers only a request that carries it.',
+    );
+  }
+
   if (problems.length > 0) return { ok: false, problems };
   return {
     ok: true,
@@ -136,6 +172,8 @@ export function readServerConfig(raw: RawServerConfig, cores: number): ServerCon
       metrics,
       maxBufferedBytes: DEFAULT_MAXIMUM_BUFFERED_BYTES,
       pingIntervalMs,
+      clientAddressHeader,
+      metricsToken,
     },
   };
 }

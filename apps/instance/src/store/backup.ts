@@ -40,7 +40,8 @@ export function rowCounts(databasePath: string): Record<string, number> {
       .all() as { name: string }[];
     const counts: Record<string, number> = {};
     for (const { name } of tables) {
-      const row = database.prepare(`SELECT count(*) AS n FROM "${name}"`).get() as { n: number };
+      const quoted = `"${name.replaceAll('"', '""')}"`;
+      const row = database.prepare(`SELECT count(*) AS n FROM ${quoted}`).get() as { n: number };
       counts[name] = row.n;
     }
     return counts;

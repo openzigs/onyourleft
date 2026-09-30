@@ -2,7 +2,7 @@
 
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { PHYSICS_VERSION, type RidingPosition } from '@onyourleft/physics';
@@ -87,6 +87,9 @@ export async function backup(
   options: { readonly keep?: number; readonly copyTo?: string; readonly now?: () => Date } = {},
 ) {
   if (!existsSync(paths.database)) throw new CommandError('There is no database to back up.');
+  if (options.keep !== undefined && (!Number.isInteger(options.keep) || options.keep < 1)) {
+    throw new CommandError('--keep is a whole number of snapshots, 1 or more.');
+  }
   const started = performance.now();
   const at = (options.now ?? (() => new Date()))();
   const snapshot = join(destination, `snapshot-${stamp(at)}`);
@@ -164,19 +167,26 @@ export async function restore(
       'There is a database in place already. Stop the instance, and pass --force to replace it.',
     );
   }
+  // Built and CHECKED beside the live data, and only then moved into place:
+  // a restore that does not match its snapshot leaves the data exactly as it
+  // was (#895's review, N1), which is what `deploy.sh` tells an operator.
   await mkdir(dirname(paths.database), { recursive: true });
+  const stagedDatabase = `${paths.database}.restoring`;
+  const stagedBlobs = `${paths.blobs}.restoring`;
   for (const suffix of ['', '-wal', '-shm'])
-    await rm(`${paths.database}${suffix}`, { force: true });
-  await cp(source, paths.database);
+    await rm(`${stagedDatabase}${suffix}`, { force: true });
+  await rm(stagedBlobs, { recursive: true, force: true });
+  await cp(source, stagedDatabase);
   const blobSource = join(snapshot, BLOBS_DIRECTORY, 'objects');
+  await mkdir(join(stagedBlobs, 'objects'), { recursive: true });
   if (existsSync(blobSource)) {
-    await cp(blobSource, join(paths.blobs, 'objects'), { recursive: true, force: true });
+    await cp(blobSource, join(stagedBlobs, 'objects'), { recursive: true });
   }
 
   // Judged, not assumed: SQLite's own check, every count, every blob's content.
-  const integrity = integrityOk(paths.database);
-  const rows = rowCounts(paths.database);
-  const blobs = await blobFiles(paths.blobs);
+  const integrity = integrityOk(stagedDatabase);
+  const rows = rowCounts(stagedDatabase);
+  const blobs = await blobFiles(stagedBlobs);
   const mismatched: string[] = [];
   for (const blob of blobs) {
     const name = blob.split(/[\\/]/).at(-1) ?? '';
@@ -185,10 +195,20 @@ export async function restore(
   const rowsMatch = JSON.stringify(rows) === JSON.stringify(manifest.rows);
   const blobsMatch = blobs.length === manifest.blobs && mismatched.length === 0;
   if (!integrity || !rowsMatch || !blobsMatch) {
+    for (const suffix of ['', '-wal', '-shm'])
+      await rm(`${stagedDatabase}${suffix}`, { force: true });
+    await rm(stagedBlobs, { recursive: true, force: true });
     throw new CommandError(
-      `The restore does not match its snapshot: integrity ${String(integrity)}, rows ${String(rowsMatch)}, blobs ${String(blobsMatch)}.`,
+      `The restore does not match its snapshot: integrity ${String(integrity)}, rows ${String(rowsMatch)}, blobs ${String(blobsMatch)}. Nothing in place was changed.`,
     );
   }
+  // Into place: the database by a rename, and the blob directory REPLACED —
+  // not merged, so a blob the snapshot does not hold is not left behind.
+  for (const suffix of ['', '-wal', '-shm'])
+    await rm(`${paths.database}${suffix}`, { force: true });
+  await rename(stagedDatabase, paths.database);
+  await rm(paths.blobs, { recursive: true, force: true });
+  await rename(stagedBlobs, paths.blobs);
   return {
     command: 'restore',
     takenAt: manifest.takenAt,

@@ -76,6 +76,21 @@ function refusalFor(state: MigrationState, databasePath: string): string | undef
   return undefined;
 }
 
+/**
+ * Whether `Authorization: Bearer <token>` carries `expected`, compared over
+ * every character whatever the first difference, so the time taken says
+ * nothing about how much of a guess was right.
+ */
+export function bearerMatches(authorization: string | null, expected: string | undefined): boolean {
+  if (expected === undefined || authorization === null) return false;
+  const given = /^Bearer (.+)$/.exec(authorization)?.[1] ?? '';
+  let difference = given.length ^ expected.length;
+  for (let i = 0; i < expected.length; i += 1) {
+    difference |= expected.charCodeAt(i) ^ given.charCodeAt(i % Math.max(1, given.length));
+  }
+  return difference === 0;
+}
+
 export async function startInstance(options: InstanceOptions): Promise<StartedInstance> {
   const { server, log } = options;
   const now = options.now ?? (() => Date.now());
@@ -136,9 +151,10 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         migrations: () => migrationState(path),
         rooms: () => router.healthy(),
       }),
-    ...(server.metrics
+    ...(server.metrics && server.metricsToken !== undefined
       ? {
-          metrics: async () => {
+          metrics: async (authorization: string | null) => {
+            if (!bearerMatches(authorization, server.metricsToken)) return undefined;
             const workers = await router.metrics();
             return renderMetrics(workers, counters);
           },
@@ -164,6 +180,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   const listening = await listen((request, client) => handler(request, client), {
     host: options.config.host,
     port: options.config.port,
+    clientAddressHeader: server.clientAddressHeader,
   });
   listening.server.on('upgrade', (request, socket, head) => {
     if (!router.upgrade(request, socket, head)) socket.destroy();

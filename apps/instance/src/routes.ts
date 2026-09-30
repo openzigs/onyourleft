@@ -149,12 +149,16 @@ export const ROUTES: readonly Route[] = [
     path: '/metrics',
     operationId: 'getMetrics',
     summary:
-      'Rooms, riders, tick lateness and refusals in the Prometheus text format — only when the operator turned it on (OYL_INSTANCE_METRICS); `not_found` otherwise. No label is an athlete, a name, a room or a coordinate.',
+      'Rooms, riders, tick lateness and refusals in the Prometheus text format — only when the operator turned it on (OYL_INSTANCE_METRICS), and only for a request carrying the operator’s token as `Authorization: Bearer`; `not_found` otherwise. No label is an athlete, a name, a room or a coordinate.',
     errors: ['not_found'],
     response: { contentType: 'text/plain' },
-    handle: async ({ probes }) => {
+    handle: async ({ probes, request }) => {
       if (probes?.metrics === undefined) return errorResponse('not_found');
-      return new Response(await probes.metrics(), {
+      // A request without the token is told nothing, not even that there is
+      // an endpoint: `not_found`, as when the operator has it switched off.
+      const document = await probes.metrics(request.headers.get('authorization'));
+      if (document === undefined) return errorResponse('not_found');
+      return new Response(document, {
         headers: { 'content-type': 'text/plain; charset=utf-8' },
       });
     },

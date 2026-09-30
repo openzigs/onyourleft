@@ -21,7 +21,10 @@ describe('readServerConfig (#780, #791)', () => {
   });
 
   it('turns compression and metrics on only for the word on', () => {
-    const on = readServerConfig({ compression: 'on', metrics: 'ON' }, 1);
+    const on = readServerConfig(
+      { compression: 'on', metrics: 'ON', metricsToken: 'k'.repeat(32) },
+      1,
+    );
     expect(on.ok && [on.config.compression, on.config.metrics]).toEqual([true, true]);
     expect(readServerConfig({ compression: 'yes' }, 1).ok).toBe(false);
   });
@@ -52,5 +55,20 @@ describe('readServerConfig (#780, #791)', () => {
       config: { pingIntervalMs: 10_000 },
     });
     expect(readServerConfig({ pingIntervalMs: '50' }, 1).ok).toBe(false);
+  });
+
+  it('reads the header a proxy writes the client address into, lower case, and refuses a header that is not one — #895 B3', () => {
+    expect(readServerConfig({}, 1)).toMatchObject({ config: { clientAddressHeader: undefined } });
+    expect(readServerConfig({ clientAddressHeader: 'CF-Connecting-IP' }, 1)).toMatchObject({
+      config: { clientAddressHeader: 'cf-connecting-ip' },
+    });
+    expect(readServerConfig({ clientAddressHeader: 'x: y' }, 1).ok).toBe(false);
+  });
+
+  it('refuses metrics on with no token, or with one too short to be one — #895 N3', () => {
+    expect(readServerConfig({ metrics: 'on' }, 1).ok).toBe(false);
+    expect(readServerConfig({ metrics: 'on', metricsToken: 'short' }, 1).ok).toBe(false);
+    const on = readServerConfig({ metrics: 'on', metricsToken: 'a'.repeat(32) }, 1);
+    expect(on.ok && on.config.metricsToken).toBe('a'.repeat(32));
   });
 });

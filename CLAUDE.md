@@ -1365,9 +1365,14 @@ apps/                 AGPL-3.0-or-later, without exception
                         naming it, and one being migrated waits with
                         `/ready` 503), the accounts on it when
                         `OYL_INSTANCE_ORIGIN` is set, and the room router.
-                        `/ready` and `/metrics` (operator-enabled) since
-                        #791, and every log line through `log.ts`
-                        §`redacted`. `src/operator/` is the operator's CLI
+                        `/ready` and `/metrics` (operator-enabled, and
+                        only for a request carrying
+                        `OYL_INSTANCE_METRICS_TOKEN`) since #791, and every
+                        log line through `log.ts` §`redacted`. Behind a
+                        proxy the sign-in rate limits read the client's
+                        address from `OYL_INSTANCE_CLIENT_ADDRESS_HEADER`
+                        (`cf-connecting-ip` behind the tunnel), and only
+                        when the operator sets it. `src/operator/` is the operator's CLI
                         (migrate, backup, restore, verify, room-open);
                         `deploy/home/` is #807's compose file and #52's
                         `deploy.sh`; `tools/tunnel-soak.ts` is #807's tunnel

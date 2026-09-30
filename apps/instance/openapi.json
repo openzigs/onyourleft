@@ -101,7 +101,7 @@
     "/metrics": {
       "get": {
         "operationId": "getMetrics",
-        "summary": "Rooms, riders, tick lateness and refusals in the Prometheus text format — only when the operator turned it on (OYL_INSTANCE_METRICS); `not_found` otherwise. No label is an athlete, a name, a room or a coordinate.",
+        "summary": "Rooms, riders, tick lateness and refusals in the Prometheus text format — only when the operator turned it on (OYL_INSTANCE_METRICS), and only for a request carrying the operator’s token as `Authorization: Bearer`; `not_found` otherwise. No label is an athlete, a name, a room or a coordinate.",
         "responses": {
           "200": {
             "description": "OK",

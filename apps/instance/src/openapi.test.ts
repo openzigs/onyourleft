@@ -223,7 +223,8 @@ describe('every route answers with the shape its entry declares', () => {
           migrations: () => Promise.resolve('at-head' as const),
           rooms: () => true,
         }),
-      metrics: () => Promise.resolve('oyl_rooms{worker="0"} 0\n'),
+      metrics: (authorization: string | null) =>
+        Promise.resolve(authorization === null ? 'oyl_rooms{worker="0"} 0\n' : undefined),
       startRoom: () => Promise.resolve('started' as const),
     };
     instance = await startTestInstance({ probes });

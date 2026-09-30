@@ -169,6 +169,50 @@ describe('backup and a performed restore — #791 criterion 4, #52, #807', () =>
   }, 30_000);
 });
 
+describe('a restore is checked before it replaces anything — #895 review N1, N2', () => {
+  it('leaves the live data exactly as it was when the snapshot does not check out', async () => {
+    const { directory: root, live, store } = await populated();
+    await store.close();
+    expect(run(live, 'backup', join(root, 'backups')).status).toBe(0);
+    const [snapshot] = await readdir(join(root, 'backups'));
+    const short = await withoutOneBlob(join(root, 'backups', snapshot ?? ''), join(root, 'short'));
+    // The live data moves on after the snapshot: a ride the snapshot lacks.
+    const writer = openServingStore(live.database);
+    await writer.putActivityRecord(activityRecordFixture(ATHLETE_A, 'after'));
+    await writer.close();
+    const before = run(live, 'verify').report;
+
+    const failed = run(live, 'restore', short, '--force');
+    expect(failed.status).toBe(1);
+    expect(failed.stderr).toContain('Nothing in place was changed');
+    expect(run(live, 'verify').report).toEqual(before);
+    expect(existsSync(`${live.database}.restoring`)).toBe(false);
+  }, 30_000);
+
+  it('replaces the blob directory rather than merging into it', async () => {
+    const { directory: root, live, store } = await populated();
+    await store.close();
+    expect(run(live, 'backup', join(root, 'backups')).status).toBe(0);
+    const [snapshot] = await readdir(join(root, 'backups'));
+    // A blob written after the snapshot, which the restore must not keep.
+    await createDiskBlobStore(live.blobs).put(new TextEncoder().encode('written after'));
+    expect(run(live, 'verify').report.blobs).toBe(3);
+    const restored = run(live, 'restore', join(root, 'backups', snapshot ?? ''), '--force');
+    expect(restored.status, restored.stderr).toBe(0);
+    expect(run(live, 'verify').report.blobs).toBe(2);
+  }, 30_000);
+
+  it('refuses --keep that is not a whole number of at least one', async () => {
+    const { directory: root, live, store } = await populated();
+    await store.close();
+    for (const keep of ['0', '-1', '1.5', 'many']) {
+      const taken = run(live, 'backup', join(root, 'backups'), '--keep', keep);
+      expect(taken.status, keep).toBe(1);
+      expect(taken.stderr).toContain('--keep');
+    }
+  }, 30_000);
+});
+
 describe('room-open — a room until #784 and #785 let a rider make one', () => {
   it('opens a room the instance can serve, and refuses nonsense', async () => {
     directory = await mkdtemp(join(tmpdir(), 'oyl-instance-operator-'));

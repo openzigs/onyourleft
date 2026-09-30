@@ -186,8 +186,19 @@ export class RoomRouter {
   readonly #slots: Slot[] = [];
   readonly #placement = new Map<string, Slot>();
   readonly #pendingWrites = new Set<Promise<void>>();
-  readonly #metricsWaiting = new Map<number, (m: WorkerMetrics) => void>();
-  readonly #startsWaiting = new Map<number, (ok: boolean) => void>();
+  /**
+   * Requests a worker has not answered yet, with the worker they went to, so
+   * a worker that dies settles them rather than leaving them waiting for
+   * ever (#895's review, N4): a start is `false`, metrics are left out.
+   */
+  readonly #metricsWaiting = new Map<
+    number,
+    { readonly slot: Slot; readonly resolve: (m: WorkerMetrics | undefined) => void }
+  >();
+  readonly #startsWaiting = new Map<
+    number,
+    { readonly slot: Slot; readonly resolve: (ok: boolean) => void }
+  >();
   /** Completes the handshake for a refusal the router gives itself. Never compresses. */
   readonly #refuser = new WebSocketServer({ noServer: true, perMessageDeflate: false });
   #nextSocket = 0;
@@ -239,7 +250,7 @@ export class RoomRouter {
     return new Promise((resolve) => {
       this.#nextRequest += 1;
       const id = this.#nextRequest;
-      this.#startsWaiting.set(id, resolve);
+      this.#startsWaiting.set(id, { slot, resolve });
       this.#post(slot, { type: 'start', id, roomId, athleteId });
     });
   }
@@ -247,17 +258,18 @@ export class RoomRouter {
   /** Each live worker's metrics. */
   async metrics(): Promise<readonly WorkerMetrics[]> {
     const live = this.#slots.filter((slot) => slot.alive);
-    return Promise.all(
+    const answers = await Promise.all(
       live.map(
         (slot) =>
-          new Promise<WorkerMetrics>((resolve) => {
+          new Promise<WorkerMetrics | undefined>((resolve) => {
             this.#nextRequest += 1;
             const id = this.#nextRequest;
-            this.#metricsWaiting.set(id, resolve);
+            this.#metricsWaiting.set(id, { slot, resolve });
             this.#post(slot, { type: 'metrics', id });
           }),
       ),
     );
+    return answers.filter((answer): answer is WorkerMetrics => answer !== undefined);
   }
 
   /**
@@ -409,15 +421,15 @@ export class RoomRouter {
         return;
       }
       case 'metrics': {
-        const resolve = this.#metricsWaiting.get(message.id);
+        const waiting = this.#metricsWaiting.get(message.id);
         this.#metricsWaiting.delete(message.id);
-        resolve?.({ ...message.metrics, index: slot.index, rssBytes: message.rssBytes });
+        waiting?.resolve({ ...message.metrics, index: slot.index, rssBytes: message.rssBytes });
         return;
       }
       case 'started': {
-        const resolve = this.#startsWaiting.get(message.id);
+        const waiting = this.#startsWaiting.get(message.id);
         this.#startsWaiting.delete(message.id);
-        resolve?.(message.ok);
+        waiting?.resolve(message.ok);
         return;
       }
       case 'stopped':
@@ -435,6 +447,16 @@ export class RoomRouter {
 
   #died(slot: Slot, code: number | null, signal: NodeJS.Signals | null): void {
     slot.alive = false;
+    for (const [id, waiting] of this.#startsWaiting) {
+      if (waiting.slot !== slot) continue;
+      this.#startsWaiting.delete(id);
+      waiting.resolve(false);
+    }
+    for (const [id, waiting] of this.#metricsWaiting) {
+      if (waiting.slot !== slot) continue;
+      this.#metricsWaiting.delete(id);
+      waiting.resolve(undefined);
+    }
     if (this.#stopping) {
       // Every socket was closed `1001 server-stopping` by the worker already.
       for (const socket of slot.sockets.values()) socket.destroy();

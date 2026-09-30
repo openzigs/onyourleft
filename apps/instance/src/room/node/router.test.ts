@@ -5,7 +5,10 @@
  * room workers forked by the router, real `ws` clients over loopback.
  */
 
+import { fileURLToPath } from 'node:url';
+
 import { afterEach, describe, expect, it } from 'vitest';
+import { WebSocket } from 'ws';
 
 import type { Frame } from '@onyourleft/protocol';
 
@@ -115,6 +118,24 @@ describe('a worker that dies — #780 criterion 3', () => {
       expect(harness.router.placementOf(roomId)).toBe(second?.pid);
     }
   }, 60_000);
+
+  it('settles every request a dying worker had not answered — #895 review N4', async () => {
+    harness = await startRouter({
+      workers: 1,
+      respawn: false,
+      workerModule: fileURLToPath(new URL('./silent-worker-testing.ts', import.meta.url)),
+    });
+    // Place a room on the silent worker, so a start has somewhere to go.
+    const socket = new WebSocket(`${harness.url}/v1/rooms/held/socket`);
+    socket.on('error', () => undefined);
+    await until(() => harness?.router.placementOf('held') !== undefined, 'the room placed');
+    const metrics = harness.router.metrics();
+    const start = harness.router.startRoom('held', 'ann');
+    process.kill(harness.router.workers()[0]?.pid as number, 'SIGKILL');
+    expect(await start).toBe(false);
+    expect(await metrics).toEqual([]);
+    socket.terminate();
+  }, 20_000);
 
   it('writes the close frame a client can read: unmasked, 1011, the reason', () => {
     expect([...closeFrameBytes({ code: 1011, reason: 'room-lost' })]).toEqual([
