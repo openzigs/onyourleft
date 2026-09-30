@@ -307,6 +307,51 @@ function sampledIntrusion(
   });
 }
 
+describe('the pyramid grown for a shape that moves — #630', () => {
+  it('meets a point within the growth of the pyramid, and not one well past it', () => {
+    const aspect = 16 / 10;
+    const plain = nearPyramid(LEVEL, aspect);
+    const grown = nearPyramid(LEVEL, aspect, NEAR_PLANE_METRES, 0.12);
+    const [eye, ...corners] = plain.points as [RigPoint, ...RigPoint[]];
+    const point = (at: RigPoint): [RigPoint, RigPoint, RigPoint] => [at, at, at];
+    // Each corner of the near plane, moved 0.11 m straight out from the
+    // pyramid's middle: outside the plain pyramid, inside the grown one.
+    const middle = {
+      x: corners.reduce((sum, each) => sum + each.x, 0) / 4,
+      y: corners.reduce((sum, each) => sum + each.y, 0) / 4,
+      z: corners.reduce((sum, each) => sum + each.z, 0) / 4,
+    };
+    for (const corner of corners) {
+      const out = { x: corner.x - middle.x, y: corner.y - middle.y, z: corner.z - middle.z };
+      const length = Math.hypot(out.x, out.y, out.z);
+      const moved = {
+        x: corner.x + (out.x / length) * 0.11,
+        y: corner.y + (out.y / length) * 0.11,
+        z: corner.z + (out.z / length) * 0.11,
+      };
+      expect(triangleMeets(...point(moved), plain)).toBe(false);
+      expect(triangleMeets(...point(moved), grown)).toBe(true);
+    }
+    // And behind the eye by the growth: the grown pyramid reaches it.
+    const forward = { x: middle.x - eye.x, y: middle.y - eye.y, z: middle.z - eye.z };
+    const f = Math.hypot(forward.x, forward.y, forward.z);
+    const behind = {
+      x: eye.x - (forward.x / f) * 0.1,
+      y: eye.y - (forward.y / f) * 0.1,
+      z: eye.z - (forward.z / f) * 0.1,
+    };
+    expect(triangleMeets(...point(behind), plain)).toBe(false);
+    expect(triangleMeets(...point(behind), grown)).toBe(true);
+    // A metre past the plane, neither.
+    const far = {
+      x: middle.x + forward.x / f,
+      y: middle.y + forward.y / f,
+      z: middle.z + forward.z / f,
+    };
+    expect(triangleMeets(...point(far), grown)).toBe(false);
+  });
+});
+
 describe('intrudes — whether an item’s box meets the near pyramid', () => {
   const pyramid = nearPyramid(LEVEL, 16 / 10);
 

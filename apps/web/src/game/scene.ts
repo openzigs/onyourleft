@@ -21,6 +21,9 @@
  * replacement.
  */
 
+import type { UnitSystem } from '@onyourleft/store';
+
+import { lineStands, linesNear } from './gantry';
 import { ghostDistanceAt, ghostHasFinished, seconds, type GhostTrack } from '@onyourleft/domain';
 
 import {
@@ -59,6 +62,13 @@ import type { RouteProfile } from '@onyourleft/domain';
 /** Everything a frame needs beyond the rider's own state. */
 export interface SceneInput {
   readonly profile: RouteProfile;
+  /**
+   * The rider's units, for the board before a line — #679. Absent is metric,
+   * for `riderDistance`'s reason (the harness and `atStartLine` build frames
+   * with no rider behind them); `GameView` supplies the rider's own, and
+   * `GameView.test.tsx` §"#679" reads that it does.
+   */
+  readonly units?: UnitSystem | undefined;
   readonly origin: CorridorOrigin;
   readonly state: GameState;
   /**
@@ -178,6 +188,13 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     // and the surfaces and bridges built for this stretch of it, from the same
     // corridor the ground and the road are built from.
     water: water(input, corridor, seed),
+    // #679: what stands at the lines, in the rider's units, near the rider.
+    lines: linesNear(
+      input.profile,
+      corridor,
+      riderDistance,
+      lineStands(input.profile, input.units ?? 'metric'),
+    ),
   };
 }
 
