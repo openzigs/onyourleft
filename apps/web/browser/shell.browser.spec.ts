@@ -752,6 +752,8 @@ const BEFORE_726 = `
 
 interface SkipReading {
   readonly linkTop: number;
+  /** Whether the focused link is the topmost thing at its own centre, insets applied. */
+  readonly linkTopmost: boolean;
   readonly headingTop: number;
   readonly ceiling: number;
   readonly scrollY: number;
@@ -774,9 +776,16 @@ async function readSkip(
   await page.keyboard.press('Tab');
   await expect(page.locator('.oyl-skip-link')).toBeFocused();
   await settled(page);
-  const linkTop = await page.evaluate(
-    () => document.querySelector('.oyl-skip-link')?.getBoundingClientRect().top ?? Number.NaN,
-  );
+  const { linkTop, linkTopmost } = await page.evaluate(() => {
+    const link = document.querySelector('.oyl-skip-link');
+    if (link === null) throw new Error('no skip link');
+    const box = link.getBoundingClientRect();
+    const centre = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+    return {
+      linkTop: box.top,
+      linkTopmost: box.height > 0 && centre !== null && link.contains(centre),
+    };
+  });
   await page.locator('.oyl-skip-link').press('Enter');
   await expect(page.locator('main')).toBeFocused();
   await settled(page);
@@ -795,6 +804,7 @@ async function readSkip(
   });
   return {
     linkTop,
+    linkTopmost,
     headingTop: landed.headingTop,
     ceiling: Math.max(viewport.insets.top, landed.headerBottom),
     scrollY: landed.scrollY,
@@ -816,6 +826,14 @@ for (const viewport of HEADER_VIEWPORTS) {
         read.linkTop,
         'the focused skip link starts under the status bar (theme.css §`.oyl-skip-link`)',
       ).toBeGreaterThanOrEqual(viewport.insets.top);
+      // Moved below the inset, and still drawn over whatever is there: a
+      // link pushed down under the header, or under #671's band, is as
+      // useless as one under the status bar. The no-inset case above is the
+      // hit test's own apparatus control.
+      expect(
+        read.linkTopmost,
+        'with the insets applied, the focused skip link is not the topmost thing at its own centre',
+      ).toBe(true);
       expect(
         read.headingTop - read.ceiling,
         'the h1 a rider skipped to is under the status bar or the header ' +
