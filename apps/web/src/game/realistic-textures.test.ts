@@ -276,13 +276,14 @@ describe('the realistic textures stay compressed on the GPU — #618', () => {
     const renderer = await loadedOn(TABLET);
     const report = renderer.realisticTextureReport();
     const worn = report.filter((texture) => texture.role !== 'sky');
-    // Non-vacuity: the whole set — four surface maps, fourteen structure maps,
+    // Non-vacuity: the whole set — eight surface maps (#627's verge and rock
+    // among them), fourteen structure maps,
     // the bicycle's four (#624), four impostors and every map inside a tree,
     // shrub and rock — ONCE PER IMAGE, read off the committed files: a fir's
     // live and dead branches are two textures over one image, which three
     // uploads once.
     const images =
-      4 +
+      8 +
       2 * PHOTOGRAPHIC_STRUCTURE_SURFACES.length +
       REALISTIC_BICYCLE_MAP_NAMES.length +
       REALISTIC_RIDER_MAP_NAMES.length +
@@ -290,13 +291,24 @@ describe('the realistic textures stay compressed on the GPU — #618', () => {
         (sum, model) =>
           sum +
           modelFacts(join(PUBLIC, 'realistic', model.file)).images.length +
-          (model.impostor === undefined ? 0 : 1),
+          (model.impostor === undefined ? 0 : 1) +
+          // #630: its normal strip.
+          (model.impostorNormals === undefined ? 0 : 1),
         0,
       );
     expect(worn.length).toBeGreaterThanOrEqual(40);
     expect(worn.length).toBe(images);
     expect(new Set(worn.map((texture) => texture.role))).toEqual(
-      new Set(['road', 'ground', 'structure', 'model', 'impostor', 'bicycle', 'rider']),
+      new Set([
+        'road',
+        'ground',
+        'structure',
+        'model',
+        'impostor',
+        'impostor-normals',
+        'bicycle',
+        'rider',
+      ]),
     );
     expect(everyTextureCompressed(report)).toBe(true);
     for (const texture of worn) {
@@ -385,6 +397,25 @@ describe('the realistic textures stay compressed on the GPU — #618', () => {
       }),
     ).resolves.toEqual({ loaded: true });
     expect(dispose).toHaveBeenCalledTimes(1);
+  }, 120_000);
+
+  it('loads the world with no banners when the glyph range cannot be read — #879', async () => {
+    vi.resetModules();
+    const renderer = await import('./three-renderer');
+    const inner = renderer.compressedRealisticLoaders(device(TABLET), `${ORIGIN}/basis/`);
+    const at = (url: string): string => `${ORIGIN}${url}`;
+    const glyphs = vi.fn((): Promise<Uint8Array> => Promise.reject(new Error('Failed to fetch')));
+    await expect(
+      renderer.loadRealisticWorld({
+        model: (url) => inner.model(at(url)),
+        texture: (url) => inner.texture(at(url)),
+        sky: (url) => inner.sky(at(url)),
+        glyphs,
+        dispose: inner.dispose,
+      }),
+    ).resolves.toEqual({ loaded: true });
+    expect(glyphs).toHaveBeenCalledTimes(1);
+    expect(renderer.realisticWorldLoaded()).toBe(true);
   }, 120_000);
 
   it('on a desktop that offers only the BC formats, is compressed but neither ASTC nor ETC2', async () => {

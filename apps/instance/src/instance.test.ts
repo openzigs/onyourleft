@@ -48,7 +48,7 @@ async function freshDirectory(): Promise<string> {
 
 function serverConfig(databasePath: string, overrides: Partial<ServerConfig> = {}): ServerConfig {
   const read = readServerConfig(
-    { database: databasePath, origin: TEST_ORIGIN, registration: 'open', roomWorkers: '2' },
+    { database: databasePath, origin: TEST_ORIGIN, roomWorkers: '2' },
     2,
   );
   if (!read.ok) throw new Error(read.problems.join(' '));
@@ -58,7 +58,7 @@ function serverConfig(databasePath: string, overrides: Partial<ServerConfig> = {
 async function start(databasePath: string, overrides: Partial<ServerConfig> = {}) {
   const lines: string[] = [];
   running = await startInstance({
-    config: testConfig({ bodyLimitBytes: 16_384 }),
+    config: testConfig({ bodyLimitBytes: 16_384, registration: 'open' }),
     server: serverConfig(databasePath, overrides),
     version: '9.8.7',
     notices: 'notices',

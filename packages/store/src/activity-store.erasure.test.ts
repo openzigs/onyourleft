@@ -66,6 +66,7 @@ import {
   framingReferenceFor,
   sideCameraReportFor,
   rideWriteUpFor,
+  syncBaseFor,
   createStoreHarness,
   effortFor,
   extractableDeviceKey,
@@ -197,6 +198,10 @@ async function seedEverything(harness: StoreHarness, owner: AthleteId): Promise<
     // #800. A model's words about this rider's ride — seeded so "empty
     // afterwards" is checked against a table something filled.
     await store.putRideWriteUp(rideWriteUpFor(owner, ride.id));
+    // #776 (#893's review). What this device last agreed with its instance
+    // about this rider's ride — seeded for the same reason.
+    await store.putSyncBase(syncBaseFor(owner, ride.id));
+    await store.putSyncBase(syncBaseFor(owner, ride.id, 'write-up'));
   });
 }
 
@@ -231,8 +236,9 @@ describe('the erasure enumeration comes from the schema', () => {
     // `cameraFrames` is the fifteenth. A derivation that returned nothing would
     // make every assertion below vacuous.
     // #528's `framingReferences` is the sixteenth, #388's `sideCameraReports`
-    // the seventeenth, #800's `rideWriteUps` the eighteenth.
-    expect(tablesInSchema().length).toBeGreaterThanOrEqual(18);
+    // the seventeenth, #800's `rideWriteUps` the eighteenth, #776's
+    // `syncBases` (#893's review) the nineteenth.
+    expect(tablesInSchema().length).toBeGreaterThanOrEqual(19);
   });
 
   it('claims no table is unscoped without that being checked', () => {

@@ -1268,7 +1268,9 @@ create a room ([#784](https://github.com/openzigs/onyourleft/issues/784)) or joi
 ([#782](https://github.com/openzigs/onyourleft/issues/782)); an operator opens rooms with
 `node src/operator/cli.ts room-open`. The first deployment and its runbook are
 [`self-hosting/home-machine.md`](self-hosting/home-machine.md) and
-[`operating-an-instance.md`](operating-an-instance.md).
+[`operating-an-instance.md`](operating-an-instance.md). Since #881 (#37, #38, #776, #35) the
+sync routes exist too, served only by a handler handed a sync service over a store and a blob store
+(see "Sync" below), which the entry point does not hand it yet.
 
 **The device is canonical and a rider with no instance loses nothing** (ADR 0036 D-3). Nothing in
 `apps/web` or `apps/mobile` imports the instance, and nothing may: a client reaches it over the
@@ -1374,16 +1376,71 @@ sequenceDiagram
 |---|---|---|
 | What is signed | `@onyourleft/domain`'s `deviceStatementBytes`: five members, RFC 8785, canonicalised once for the browser and the instance (ADR 0014 D-8). `purpose` is one of `oyl-auth-v1`, `oyl-link-v1` and `oyl-recover-v1`, so a sign-in cannot add a key and no activity record (which has no `purpose`) verifies as a statement; `instanceOrigin` binds it to one instance | `packages/domain/src/identity/device-statement.ts` |
 | Refusals, in order | `wrong_purpose`, `wrong_instance`, `challenge_unknown` / `challenge_used` / `challenge_expired` (the nonce is spent before the signature is checked, so a replay of a whole request is `challenge_used`), `bad_signature`, `key_revoked`. Each is its own code | `apps/instance/src/auth/identity.ts` |
-| Secrets at rest | The SHA-256 of every secret handed out — session tokens, recovery codes, link codes, email-recovery tokens — never the secret. A test searches the database file, its WAL and its index for each one | `src/auth/`, migration `0004-identity` |
-| Registration | The first key an instance sees registers an athlete, where registration is `open` (the default until #775 adds its modes); the answer carries ten one-time recovery codes, once | `identity.ts` §`register` |
+| Secrets at rest | The SHA-256 of every secret handed out — session tokens, recovery codes, link codes, email-recovery and address-confirmation tokens, invitation codes — never the secret. A test searches the database file, its WAL and its index for each one | `src/auth/`, migrations `0004-identity`, `0006-recovery-email-confirmation`, `0008-registration` |
+| Registration | The first key an instance sees registers an athlete as the mode allows (#775): `approval`, `invite`, `open` or `closed` — **`closed` when unset** — read by `config.ts`. The project's image sets `approval` (rulings Q5 and Q13); the home deployment's compose file sets `closed` unless its `.env` says otherwise. The answer carries ten one-time recovery codes, once | `identity.ts` §`register`, `config.ts` |
 | Rooms | A **ticket**, never the session token, in the hello: minted against a live session for one room, spent on admission, 30 s. Kept in memory by the process that runs the room; `TicketBook.admitterFor(roomId)` is the room core's `Admit` (#779). #781's Durable Object adapter plugs it in when it lands | `src/auth/tickets.ts` |
-| Other devices | A signed-in device mints a 5-minute, single-use **link code**; the new device signs `oyl-link-v1` with its OWN key. Revoking a key revokes its sessions and unspent link codes; the last key needs a recovery code the athlete holds (checked, not spent). A revoked key's records stay valid (ADR 0014 D-6) | `identity.ts` |
-| Every device lost | A recovery code, or — only where the operator hands the identity a mail transport — an emailed single-use link (30 minutes). With email recovery off, no address is accepted or stored | `identity.ts` §`recover`, §`requestEmailRecovery` |
+| Other devices | A signed-in device mints a 5-minute, single-use **link code**; the new device signs `oyl-link-v1` with its OWN key. Revoking a key revokes its sessions and unspent link codes; the last key needs a recovery code the athlete holds (checked, not spent). ⚠️ Since #867 the **store** refuses the last key (`last_device`) and a rename past the limit (`rate_limited`) in the transaction that writes, so two requests at once cannot both pass a check made in an earlier call. A revoked key's records stay valid (ADR 0014 D-6) | `identity.ts`, `sql-store.ts` §`revokeDeviceKey`, §`renameAthlete` |
+| Every device lost | A recovery code, or — only where the operator hands the identity a mail transport — an emailed single-use link (30 minutes). With email recovery off, no address is accepted or stored. ⚠️ Since #865 an address given — at registration or by `POST /v1/auth/recovery-email` — is **bound only once the athlete follows a single-use, 24-hour link mailed to it, from a device signed in as them** (`POST /v1/auth/recovery-email/confirm`); until then it recovers nothing, giving one answers the same whether or not it is held, and an address another account confirmed first is `address_in_use` to the mailbox's reader alone. ⚠️ Since #883 the confirmation mail is limited per athlete (`rate_limited`), per (athlete, address) so no athlete can spend another's share, and per address in all — except an athlete's first link of the hour, which always goes, so a stranger cannot starve an address's owner; an athlete has one unconfirmed link at a time | `identity.ts` §`recover`, §`requestEmailRecovery`, §`setRecoveryEmail`, §`confirmRecoveryEmail` |
 | What other riders see | ONE projection, `publicAthlete`: the id and the display name. Every `athlete` column is classified public or private and a test reads the migrated table's columns; a declared mass travels only in a ticket and reaches no other rider | `src/auth/public-athlete.ts` |
 | Display names | 1–32 scalar values after NFC; control, bidirectional and invisible characters refused, each by name. At most three changes a day; every earlier name is kept for moderation (#789) | `packages/domain/src/identity/display-name.ts`, `display_name_change` |
-| Rate limits | In memory, fixed windows: a challenge per key and per address (the address from the adapter, never logged). Behind a proxy the address is the proxy's — #775's to weigh | `src/auth/rate-limit.ts` |
+| Rate limits | In memory, fixed windows, per address (never logged) and per key. Since #775 the per-key limit counts only challenges spent by a valid signature, because a public key is not secret and anyone could otherwise lock its holder out. An unknown address shares no challenge bucket. An IPv6 client is counted by its /64. Behind a proxy, the address comes from a header the operator names, read only from loopback or a proxy the operator lists in `OYL_INSTANCE_TRUSTED_PROXIES` (#891's review: any private peer included Docker's bridge gateway). The registration and challenge limits reset on a restart; the report limit is counted from the database | `src/auth/rate-limit.ts`, `src/client-address.ts` |
 | The client half | `apps/web/src/instance/sign-in.ts`: the local athlete first, then the device key, then challenge → sign → session, and the instance's athlete id kept on the device. It takes its transport as a parameter and names no `fetch`: #777 supplies the one module allowed to call an instance, after #778's disclosures | `apps/web/src/instance/` |
 | Across platforms | `apps/web/browser/identity.browser.spec.ts`: the browser signs with the app's own non-extractable key in IndexedDB, and a real instance running in the spec's process verifies it, with a flipped signature byte and another instance's origin as controls | the browser gate |
+
+#### Moderation (#83) and registration (#775)
+
+Moderation is enforced at **one choke point**, which every route passes through. Blocking is not
+checked separately in each feature. The operator's side is [`docs/moderation.md`](moderation.md).
+
+| Concern | Decision | Where |
+|---|---|---|
+| The choke point | Every route declares whom it reaches (`Route.reaches`, required by the type): its caller's own data, another athlete named in its path, the moderators only, or an exemption with a reason. For a route that names another athlete, the handler asks `canSee(viewer, subject)` before the route runs. If the answer is no, it returns `not_found`, byte for byte what an athlete who does not exist gets. `canSee` is true only for an existing, active, unsuspended athlete where neither athlete blocks the other | `src/handler.ts` §`reachable`, `src/moderation/moderation.ts` §`canSee` |
+| Walked from the table | `choke-point.test.ts` sorts `ROUTES` by that declaration. It calls every athlete-reaching route as a blocked rider, as the blocker and about a suspended rider, and every moderators' route as an ordinary rider. It fails on an "own" route that names an athlete in its path or its body | `src/moderation/choke-point.test.ts` |
+| Not told | Block, unblock and report answer `204` whether or not the athlete named exists, so none of them reveals that a block is there. ⚠️ Nor does anything they leave behind (#891's review): a block is stored for any well-formed id, so `GET /v1/blocks` echoes the caller's own input, and a report about nobody is stored closed (`no_such_athlete`), so it spends the reporter's hourly allowance like any other. `canSee` is one query whatever the answer | `src/moderation/moderation.ts`, `choke-point.test.ts` (one caller per case) |
+| The log | `moderation_log`, append-only in the schema: two triggers abort any `UPDATE` or `DELETE`. An action and its entry are one transaction (`SqlStore.moderate`). The log has no foreign key to `athlete`, so erasing an account does not erase what a moderator did to it. The erasure test lists every column that names an athlete without a foreign key, and says what erasure does to each | migration `0007-moderation`, `sql-store.erasure.test.ts` |
+| Suspension | Revokes every session in the same transaction, and is checked again on every request. Sign-in is refused for every key the athlete holds (`account_suspended`, told only to them). Nothing is deleted | `sql-store.ts` §`applyToAthlete`, `identity.ts` |
+| Moderators | The owner and one deputy (ruling Q13), each named by a **device key** in configuration, so a moderator can be named before their account exists. Nobody moderates a moderator, and a moderator does not dismiss a report about themselves: each attempt is refused and logged as `refused_<action>`. A pending account signing in with a key the operator named later is activated and logged (`activate_moderator_key`) | `moderation.ts` §`roleOf`, `identity.ts` §`signIn` |
+| Registration modes (#775) | `OYL_INSTANCE_REGISTRATION`, any case, and **`closed` when unset**; the project's image sets `approval` (rulings Q5 and Q13). A pending athlete gets a session that reaches only routes declaring `admitsPending` (their own account); the owner or the deputy approve or refuse, and each decision is logged. The named moderators' keys register active in every mode. New accounts: 3 an hour per client address | `identity.ts` §`register`, `moderation/routes.ts` |
+| Public rooms (#775) | One pure predicate, `publicRoomEligibility`: approved, not suspended, 18+ confirmed (ruling Q5; a date of confirmation, never a date of birth), account age (counted from ACTIVATION, `athlete.activated_at`) and synced rides at operator-set thresholds (defaults 7 days, 3 rides). A ticket to a `public` room is refused `not_eligible` without it | `moderation/eligibility.ts`, `identity.ts` §`ticket` |
+
+#### Sync (#37, #38, #776, #35)
+
+Everything a device syncs is **the caller's own**: every route takes the athlete from the session
+and never from the request, declares `reaches: 'own'` to the choke point below, and another
+athlete's ride, file or item is `not_found`. An athlete awaiting approval (#775) reaches the export
+and the deletion only. Two riders who
+send identical bytes each hold their own record of them, keyed `(athlete, content)`.
+
+```mermaid
+sequenceDiagram
+    participant D as Device (apps/web/src/instance/sync.ts)
+    participant I as Instance (apps/instance/src/sync/)
+    D->>I: GET /v1/sync/manifest?cursor= (receivedAt, id)
+    I-->>D: [{kind, key, digest, receivedAt, deleted, activityId}], next
+    D->>D: read its sync base — what the two agreed on last time
+    D->>I: DELETE /v1/sync/items/{kind}/{key} — a synced ride deleted HERE, items first
+    D->>I: GET /v1/sync/records/{content}, GET /v1/sync/files/{content} — never synced here
+    D->>D: verify signature AND file hash (ADR 0014 D-6) BEFORE writing
+    D->>I: POST /v1/sync/records {record, file} — what the instance is missing
+    D->>I: POST /v1/sync/items/{kind}/{key} {body} — an item changed HERE
+    D->>I: GET /v1/sync/items/{kind}/{key} — an item unchanged here that moved THERE
+```
+
+| Concern | Decision | Where |
+|---|---|---|
+| Ingestion (#37) | Refused in order, each with its own code: the file's type **from its bytes** (`file_type_unsupported`), that it decodes to at least one sample (`file_undecodable`), then ADR 0014 D-6's answers (`record_malformed`, `record_unsupported`, `record_signature_mismatch`, `record_content_mismatch`), then `record_not_your_key`. Nothing is written until every check passes. The file goes to the blob store, then the record and its manifest row in ONE transaction; a failed transaction takes the file back unless another athlete's record holds it, under a per-file lock. A duplicate is decided by the primary key and answers the first record | `src/sync/sync.ts` §`ingest`, `src/sync/activity-file.ts` |
+| The manifest (#776) | `sync_item` (migration 0009): every activity and item, and a tombstone for each one deleted. Paged by `(receivedAt, seq)`, where `seq` is `AUTOINCREMENT` and `receivedAt` is written as `max(now, the newest)`, so no row is ever inserted behind a cursor a reader holds | `src/store/sql-store.ts` §`nextReceivedAt` |
+| Items (#776's 2026-09-29 addition) | `write-up`, `side-camera-report` (the pose summary inside it), `goal`, `note`, `document` — stored byte for byte as the device sent them; the device copy is canonical (ADR 0036). The client syncs the first two; goals, notes and documents wait for #836 on the device | `src/sync/sync.ts` §`putItem` |
+| Reads (#38) | The caller's own activities only — no read of another athlete's exists, because nothing records who may see whose ride. The list is ONE query a page; streams are served in full or at `?points=`, bucket means with a gap left `null`, and **never a position**; every response is `no-store` | `src/sync/sync.ts` §`owned`, §`streams` |
+| Export (#35) | `GET /v1/account/export`: the account as JSON, each activity's signed record and the address of its ORIGINAL file (the true track, unobfuscated), every item, public keys only, the blocks and reports the athlete made (#83; whom, why and when, and never how a report was decided, which would say whether an id is real), any recovery address given and its confirmation's state (never the token's hash), and a list of what is left out and why — the moderation log and reports ABOUT them among it | `src/sync/sync.ts` §`exportAccount` |
+| Deletion (#35) | `DELETE /v1/account`: files first — each one no other athlete also holds — then every row, in tables **derived from the schema's foreign keys at the time of the call**, and another athlete's block OF this one (`block.blocked_athlete_id` has no foreign key, #83; a report ABOUT them and the moderation log are kept, and `sql-store.erasure.test.ts` says why for every such column), then a sweep of files a concurrent upload added. A failure part way is retried safely. It reaches THIS instance only: not a copy already downloaded, and not another instance | `src/sync/sync.ts` §`eraseAccount`, `src/store/sql-store.ts` §`athleteTablesInErasureOrder` |
+| The client (#776) | `apps/web/src/instance/sync.ts`: **the device's change wins** (ADR 0036 D-3). Each copy is read against the device's **sync base** — what it and the instance agreed on at the last sync (`packages/store` §`SyncBaseRecord`, schema v14), a row that outlives its ride so the device remembers deleting it. A synced ride missing here is deleted on the instance, its items first, and never pulled back; a ride never synced here is pulled, verified before any write, through the rider's own import path; a ride the instance lacks is pushed, as a FIT signed with the device key; an item changed here is pushed, and only an item unchanged here whose instance copy moved is pulled. ⚠️ #893's first draft pulled whatever differed, before pushing — which pulled back a ride deleted here and overwrote a write-up replaced here, and its review found both. A pulled record is NOT kept on the device — `putActivityRecord` refuses another device's key, and that rule stands — so a pulled ride is never signed again. It names no `fetch`: #777 wires the transport | `apps/web/src/instance/sync.ts` |
+
+⚠️ **Not wired to a running box yet.** Since #780 `src/instance.ts` hands the handler the accounts,
+but no sync: wiring one over the blob directory it already configures (`OYL_INSTANCE_BLOBS`, #791)
+is left to a follow-up rather than done in #893's merge, and the shipped client calls none of this
+(#777), so every sync route answers `unavailable` on a running instance and a rider's device
+sends nothing.
 
 #### The API contract (#36)
 
@@ -1391,7 +1448,7 @@ sequenceDiagram
 |---|---|---|
 | The specification | OpenAPI 3.1, **generated** from the route table the handler dispatches on, committed as `apps/instance/openapi.json` and served at `GET /openapi.json`. `src/openapi.test.ts` fails when the committed file is not what the table generates, and calls every route through the real listener to check its body against the declared schema | `src/routes.ts`, `src/openapi.ts` |
 | Errors | One shape, `{ "error": { "code", "message", "fields"? } }`. `code` is stable and machine-readable; `message` is a fixed sentence per code and **never carries a value from the request** — ADR 0004 D widened to every field, because the instance cannot tell where a stranger's client put a coordinate. Another athlete's resource is `not_found`, never a 403 | `src/errors.ts` |
-| Codes | `validation_failed` 400 (with `fields`, each naming a field and a problem), `unauthenticated` 401, `not_found` 404, `method_not_allowed` 405 (with `Allow`), `payload_too_large` 413, `rate_limited` 429, `internal` 500 — and since #855 identity's: the seven sign-in refusals and `code_unknown` / `code_used` / `code_expired` (401), `registration_closed` 403, `key_in_use` and `last_device` 409, `unavailable` 503. Several codes share a status, and the specification names every code a status can carry. Adding a code is an addition; renaming one is breaking | `src/errors.ts` §`ERROR_STATUS` |
+| Codes | `validation_failed` 400 (with `fields`, each naming a field and a problem), `unauthenticated` 401, `not_found` 404, `method_not_allowed` 405 (with `Allow`), `payload_too_large` 413, `rate_limited` 429, `internal` 500 — and since #855 identity's: the seven sign-in refusals and `code_unknown` / `code_used` / `code_expired` (401), `registration_closed` 403, `key_in_use` and `last_device` 409, `unavailable` 503 — and since #83 and #775 `account_suspended`, `registration_pending`, `registration_refused` and `not_eligible` (403, each sent only to the athlete it is about) and `moderation_not_applicable` 409. A block is never a code: it is `not_found`. Several codes share a status, and the specification names every code a status can carry. Adding a code is an addition; renaming one is breaking | `src/errors.ts` §`ERROR_STATUS` |
 | An unhandled exception | `internal`, with no message, stack or path; the log gets the error's **name** alone | `src/handler.ts`, `src/log.ts` |
 | Request bodies | Bounded before routing: a declared length over the limit is refused unread, and an undeclared one is read only up to the limit | `src/handler.ts` §`boundedBody` |
 | Pagination | **Keyset, never offset**: a list is ordered by (sort key, id) and a page is the next `limit` rows after an opaque cursor. Every row present when a listing begins is returned exactly once however many are inserted between pages; an offset control in the test shows the failure it prevents. `limit` defaults to 50 and is at most 200 | `src/pagination.ts` |
@@ -1406,8 +1463,8 @@ breaking whether or not this repository's own client notices. `info.version` in 
 the API's version, not the package's.
 
 ⚠️ **What the contract does not have yet, and who owes it.** Since #855 the identity routes
-produce `unauthenticated`, `rate_limited` and `validation_failed` and take JSON bodies; the
-pagination parser still has no caller until #776's first list.
+produce `unauthenticated`, `rate_limited` and `validation_failed` and take JSON bodies; since #881
+the pagination parser has its first callers, the sync manifest and the activity list.
 
 ### The realistic world: what is built, and how a rider chooses it
 
@@ -1439,6 +1496,21 @@ world is whole and off by default: the buildings had no openings
 ([#500](https://github.com/openzigs/onyourleft/issues/500), which cut them — see below), and the water's banding, bank and bridge
 seam, plus a soak route with no lake and no wall
 ([#501](https://github.com/openzigs/onyourleft/issues/501)).
+
+**The world's surfaces since [#870](https://github.com/openzigs/onyourleft/issues/870)** (bundle R2
+of #615), and a reader who remembers the water reflecting only the HDRI's two bands is reading the
+old file. All of it is the realistic rungs' alone; the stylised world did not move.
+
+| What | Where | What holds it |
+|---|---|---|
+| The ground blended by verge, slope and tree line ([#627](https://github.com/openzigs/onyourleft/issues/627)) — two new CC0 surfaces, 512 px KTX2 | `game/ground-blend.ts`, `three-renderer.ts` §`photographicGroundMaterial` — from the `fields` attribute, the normal and the height the ground already had, sampled only where a share is above zero | `ground-blend.test.ts`; `game.browser.spec.ts` §"#627", with the rock blend off as the control |
+| The road worn: wheel tracks, patches by route distance, a dusty edge, worn paint ([#628](https://github.com/openzigs/onyourleft/issues/628)) — every colour term clamped to 0.04, solved from the 3.889 : 1 read with the wear off and a 0.01 allowance for the wheel track's specular term, to keep the gradient cue's 3.5 : 1 (worst case 3.519) | `game/road-wear.ts`, `three-renderer.ts` §`photographicRoadMaterial`; one float attribute, the across-position | `road-wear.test.ts`; `game.browser.spec.ts` §"#628", the wear off as the control |
+| The water reflecting the scene's own PMREM environment, by Schlick's Fresnel, with the sun's glint clamped to white ([#629](https://github.com/openzigs/onyourleft/issues/629)) | `three-renderer.ts` §`reflectingWaterFragment`, §`WaterBelt.setEnvironment` | `realistic-water.test.ts`; `game.browser.spec.ts` §"#629", Fresnel held as the control |
+| The far band relit by the world's sun from a baked normal strip and the crown's shape; every plant swaying on the ride's clock, a VISUAL breeze that does not read the rider's wind ([#630](https://github.com/openzigs/onyourleft/issues/630)) | `tools/realistic/blender/process_tree.py` step 2b; `game/foliage-light.ts`; `three-renderer.ts` §`impostorMaterial`, §`withFoliageSwayOf`; `near-field.ts` §`nearPyramid`'s `grow` | `foliage-light.test.ts`; `game.browser.spec.ts` §"#630", unlit and one-time controls |
+| Start and finish gantries, barriers and a "to go" board, lettered at load from the map's own glyph range in the rider's units ([#679](https://github.com/openzigs/onyourleft/issues/679)) | `game/gantry.ts`, `game/gantry-wording.ts` (every word), `game/banner-atlas.ts`, `three-renderer.ts` §`GantryBelt`; `SceneFrame.lines` | `gantry.test.ts` (every barrier corner against the drawn centreline on bending circuits and a hairpin, the tangent placement as the control), `banner-atlas.test.ts`, `GameView.test.tsx` §"#679"; `game.browser.spec.ts` §"#679", gantries off and mid-route as the controls |
+
+Every one of these ends with the owner's tablet measurement (validation 0002 Part AH), listed on
+[#733](https://github.com/openzigs/onyourleft/issues/733).
 
 **The buildings' shapes are `apps/web/src/game/buildings.ts` since
 [#500](https://github.com/openzigs/onyourleft/issues/500)**, and a reader who remembers a house as a

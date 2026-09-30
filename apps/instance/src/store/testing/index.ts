@@ -37,6 +37,7 @@ import type {
   Room,
   Session,
   SqlStore,
+  SyncItemWrite,
 } from '../sql-store.ts';
 
 /** Opens a store over a database file. The real one is {@link openSqlStore}. */
@@ -159,7 +160,16 @@ export async function assertAthleteRoundTrip(
     (store) => store.putAthlete(athlete),
     (store) => store.getAthlete(athlete.id),
   );
-  if (JSON.stringify(read) !== JSON.stringify(athlete)) {
+  const written =
+    read === undefined
+      ? undefined
+      : {
+          id: read.id,
+          displayName: read.displayName,
+          createdAt: read.createdAt,
+          registrationState: read.registrationState,
+        };
+  if (JSON.stringify(written) !== JSON.stringify(athlete)) {
     throw new RoundTripFailure('The athlete came back different.');
   }
 }
@@ -222,14 +232,60 @@ export function resultFixture(athleteId: string, roomId = SHARED_ROOM.id): Resul
   return { roomId, athleteId, finishMs: 3_600_000, flags: 0 };
 }
 
+/** A rename limit the fixtures never reach. */
+export const FIXTURE_RENAME_LIMIT = { count: 100, windowSeconds: 86_400 } as const;
+
+/**
+ * A file all three athletes sent — two riders can upload identical bytes
+ * (#776) — so a read keyed by content alone would find somebody else's record.
+ */
+export const SHARED_CONTENT_SHA256 = hexOf('the-same-file-for-everyone');
+
+/**
+ * One item of every kind #776's addition names but an activity — a write-up,
+ * a side-camera report with its pose summary, a goal, a note and a reference
+ * document — for `athleteId`. The bodies say whose they are, so a read that
+ * crossed athletes would be visible in the bytes as well as in `athleteId`.
+ */
+export function syncItemFixtures(athleteId: string): readonly SyncItemWrite[] {
+  const kinds = ['write-up', 'side-camera-report', 'goal', 'note', 'document'] as const;
+  return kinds.map((kind) => ({
+    athleteId,
+    kind,
+    key: `${kind}-of-${athleteId}`,
+    body: new TextEncoder().encode(JSON.stringify({ kind, of: athleteId })),
+    digest: hexOf(`${kind}-${athleteId}`),
+    now: 1_790_000_400,
+  }));
+}
+
 /** Every athlete-scoped row the schema has, for all three athletes. */
 export async function seedWorld(store: SqlStore): Promise<void> {
   await store.putRoom(SHARED_ROOM);
   for (const athlete of ATHLETES) {
     await store.registerAthlete(registrationFixture(athlete));
+    // Bound only by following the mailed link (#865).
+    await store.confirmRecoveryEmail(athlete, confirmationTokenFixture(athlete), 1_790_000_050);
     await store.putSession(sessionFixture(athlete));
     await store.putActivityRecord(activityRecordFixture(athlete));
     await store.putActivityRecord(activityRecordFixture(athlete, 'second-ride'));
+    // Migration 0009's manifest (#37, #776): an ingested ride, and every other kind.
+    const synced = activityRecordFixture(athlete, 'synced-ride');
+    await store.ingestActivity({
+      athleteId: athlete,
+      contentSha256: synced.contentSha256,
+      signedRecord: synced.signedRecord,
+      recordSha256: hexOf(`record-${athlete}`),
+      now: synced.receivedAt,
+    });
+    await store.ingestActivity({
+      athleteId: athlete,
+      contentSha256: SHARED_CONTENT_SHA256,
+      signedRecord: new TextEncoder().encode(`${athlete}'s record of the shared file`),
+      recordSha256: hexOf(`shared-record-${athlete}`),
+      now: 1_790_000_250,
+    });
+    for (const item of syncItemFixtures(athlete)) await store.putSyncItem(item);
     await store.putResult(resultFixture(athlete));
     // Migration 0004's athlete-scoped tables (#772, #773, #774), one row each.
     await store.putLinkCode({
@@ -238,22 +294,52 @@ export async function seedWorld(store: SqlStore): Promise<void> {
       mintedByKey: deviceKeyFixture(athlete).publicKey,
       expiresAt: 1_790_000_600,
     });
-    await store.renameAthlete(athlete, `Renamed ${athlete}`, 1_790_000_300);
+    await store.renameAthlete(athlete, `Renamed ${athlete}`, 1_790_000_300, FIXTURE_RENAME_LIMIT);
     await store.putEmailRecoveryToken({
       tokenSha256: hexOf(`email-${athlete}`),
       athleteId: athlete,
       expiresAt: 1_790_000_900,
     });
+    // Migration 0007's (#83): each blocks both others, and reports the one after
+    // them. Both, so erasing one athlete — which also removes the blocks OF
+    // them — still leaves every other athlete a block of their own.
+    const next = ATHLETES[(ATHLETES.indexOf(athlete) + 1) % ATHLETES.length] as string;
+    for (const other of ATHLETES) {
+      if (other !== athlete) await store.putBlock(athlete, other, 1_790_000_400);
+    }
+    // Migration 0008's (#775): an invitation each.
+    await store.mintInviteCode(
+      { codeSha256: hexOf(`invite-${athlete}`), athleteId: athlete, expiresAt: 1_790_600_000 },
+      { reason: 'Seeded', at: 1_790_000_450 },
+    );
+    await store.putReport({
+      athleteId: athlete,
+      targetAthleteId: next,
+      reason: `Report by ${athlete}`,
+      createdAt: 1_790_000_500,
+    });
   }
 }
 
-/** A fixture athlete's registration: their first key, a recovery code and an email address. */
+/** The SHA-256 of the token confirming a fixture athlete's address (#865). */
+export function confirmationTokenFixture(athleteId: string): string {
+  return hexOf(`confirm-${athleteId}`);
+}
+
+/**
+ * A fixture athlete's registration: their first key, a recovery code, and an
+ * email address waiting to be confirmed (#865) — `seedWorld` confirms it.
+ */
 export function registrationFixture(athleteId: string): Registration {
   return {
     athlete: athleteFixture(athleteId),
     key: deviceKeyFixture(athleteId),
     recoveryCodeSha256s: [hexOf(`recovery-${athleteId}`)],
-    recoveryEmail: `${athleteId}@example.org`,
+    recoveryEmailConfirmation: {
+      tokenSha256: confirmationTokenFixture(athleteId),
+      address: `${athleteId}@example.org`,
+      expiresAt: 1_790_086_400,
+    },
   };
 }
 

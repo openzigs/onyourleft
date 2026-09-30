@@ -4,7 +4,9 @@
  * What the running instance needs beyond the HTTP handler's own settings
  * (`config.ts`): where its data is, who it is, and how its rooms are served
  * (#780, #791). Read once at start-up and refused whole if any of it is wrong,
- * as `config.ts` is — and, like it, never from `process.env` itself: `serve.ts`
+ * as `config.ts` is. ⚠️ The registration mode, the moderators and the client
+ * address — header and trusted proxies — are `config.ts`'s, not this file's
+ * (#891): one reader for each variable — and, like it, never from `process.env` itself: `serve.ts`
  * reads every variable by name, so `scripts/check-env-example.sh` sees each.
  */
 
@@ -14,12 +16,10 @@ export interface RawServerConfig {
   readonly database?: string | undefined;
   readonly blobs?: string | undefined;
   readonly origin?: string | undefined;
-  readonly registration?: string | undefined;
   readonly roomWorkers?: string | undefined;
   readonly compression?: string | undefined;
   readonly metrics?: string | undefined;
   readonly pingIntervalMs?: string | undefined;
-  readonly clientAddressHeader?: string | undefined;
   readonly metricsToken?: string | undefined;
 }
 
@@ -33,7 +33,6 @@ export interface ServerConfig {
    * `null` serves no account at all: every identity route answers `unavailable`.
    */
   readonly origin: string | null;
-  readonly registration: 'open' | 'closed';
   readonly roomWorkers: number;
   /** `permessage-deflate` on room sockets: OFF unless the operator says so (ruling Q16). */
   readonly compression: boolean;
@@ -41,12 +40,6 @@ export interface ServerConfig {
   readonly metrics: boolean;
   readonly maxBufferedBytes: number;
   readonly pingIntervalMs: number;
-  /**
-   * The header a proxy in front writes the client's address into, lower
-   * case — `cf-connecting-ip` behind Cloudflare's tunnel. Unset, the peer's
-   * address is used (`node-listener.ts` §`clientAddress`).
-   */
-  readonly clientAddressHeader: string | undefined;
   /** The bearer token `/metrics` requires. Set whenever `metrics` is on. */
   readonly metricsToken: string | undefined;
 }
@@ -99,13 +92,6 @@ export function readServerConfig(raw: RawServerConfig, cores: number): ServerCon
     }
   }
 
-  let registration: 'open' | 'closed' = 'closed';
-  if (present(raw.registration)) {
-    const text = raw.registration.trim().toLowerCase();
-    if (text === 'open' || text === 'closed') registration = text;
-    else problems.push('OYL_INSTANCE_REGISTRATION must be open or closed.');
-  }
-
   let roomWorkers = Math.max(1, Math.floor(cores));
   if (present(raw.roomWorkers)) {
     const text = raw.roomWorkers.trim();
@@ -133,16 +119,6 @@ export function readServerConfig(raw: RawServerConfig, cores: number): ServerCon
     }
   }
 
-  let clientAddressHeader: string | undefined;
-  if (present(raw.clientAddressHeader)) {
-    const text = raw.clientAddressHeader.trim().toLowerCase();
-    if (/^[a-z0-9-]{1,64}$/.test(text)) clientAddressHeader = text;
-    else
-      problems.push(
-        'OYL_INSTANCE_CLIENT_ADDRESS_HEADER must be a header name, such as cf-connecting-ip.',
-      );
-  }
-
   let metricsToken: string | undefined;
   if (present(raw.metricsToken)) {
     const text = raw.metricsToken.trim();
@@ -166,13 +142,11 @@ export function readServerConfig(raw: RawServerConfig, cores: number): ServerCon
       databasePath: present(raw.database) ? raw.database.trim() : DEFAULT_DATABASE_PATH,
       blobsPath: present(raw.blobs) ? raw.blobs.trim() : DEFAULT_BLOBS_PATH,
       origin,
-      registration,
       roomWorkers,
       compression,
       metrics,
       maxBufferedBytes: DEFAULT_MAXIMUM_BUFFERED_BYTES,
       pingIntervalMs,
-      clientAddressHeader,
       metricsToken,
     },
   };

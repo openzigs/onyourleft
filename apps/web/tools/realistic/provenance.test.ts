@@ -181,6 +181,46 @@ describe('the realistic files and the pipeline that makes them', () => {
       );
     }
   });
+
+  it('holds every module a Blender script imports from beside it, and imports every scan through one — #885’s review', () => {
+    // ASSET007 checks the ONE `script` a row names, so a sibling module that
+    // script imports — `rider_kit.py`, `gltf_import.py` — is held here: it is
+    // in the tree and carries this directory's header. And a glTF is imported
+    // only through `gltf_import.py`, so a script that called the importer
+    // itself would skip #696's stable rule for a repeated triangle and the
+    // guard that stops a run `mesh.validate()` decided.
+    const directory = join(REPOSITORY, PIPELINE_DIRECTORY, 'blender');
+    const scripts = readdirSync(directory).filter((file) => file.endsWith('.py'));
+    const imported = new Set<string>();
+    for (const file of scripts) {
+      const source = readFileSync(join(directory, file), 'utf8');
+      for (const match of source.matchAll(/^(?:from|import) ([a-z_]+)/gm)) {
+        const name = match[1] ?? '';
+        if (!scripts.includes(`${name}.py`)) continue;
+        imported.add(`${name}.py`);
+        // A sibling import leaves a `__pycache__` beside it unless bytecode
+        // is off before it — a binary ASSET001 refuses, found by this review's
+        // own first `--check`.
+        const before = source.slice(0, match.index);
+        expect(before, `${file} imports ${name}`).toMatch(/^sys\.dont_write_bytecode = True$/m);
+      }
+      if (file !== 'gltf_import.py') {
+        expect(source, file).not.toMatch(/import_scene\.gltf\(/);
+      }
+    }
+    expect([...imported].sort()).toEqual(['gltf_import.py', 'rider_kit.py']);
+    for (const file of imported) {
+      const source = readFileSync(join(directory, file), 'utf8');
+      expect(source.split('\n').slice(0, 5).join('\n'), file).toContain(
+        'SPDX-License-Identifier: AGPL-3.0-or-later',
+      );
+    }
+    for (const script of ['process_tree.py', 'process_rock.py']) {
+      expect(readFileSync(join(directory, script), 'utf8'), script).toMatch(
+        /^from gltf_import import import_scan/m,
+      );
+    }
+  });
 });
 
 describe('the bicycle’s drawn maps — #624', () => {
